@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.bankV22DepositDispatchBackfill",
+  "chainId": 420420419,
+  "event": {
+    "id": "bank.v22_leg_dispatched-0xeaa4d5007c8154d390bbab0557a8c03d1c59c1a1b4faca8c761902241b087767-chain-backfill",
+    "topic": "bank.v22_leg_dispatched",
+    "correlationId": "0xeaa4d5007c8154d390bbab0557a8c03d1c59c1a1b4faca8c761902241b087767",
+    "timestamp": "2026-08-06T14:15:58.745Z",
+    "data": {
+      "version": "bank-xcm-v2.2-dispatch/v1-chain-backfill",
+      "liveState": true,
+      "capturedAt": "2026-08-06T14:15:58.745Z",
+      "requestId": "0xeaa4d5007c8154d390bbab0557a8c03d1c59c1a1b4faca8c761902241b087767",
+      "wrapper": "0xf20b35a3f85ec864127b551ce8a64446fc0ed2bc",
+      "leg": "deposit_sell",
+      "legIndex": 1,
+      "txHash": "0x43a1cff204eb087872bdc7f5fa55ef74261cafd90863caee4720961b00e7d1af",
+      "blockNumber": 19135461,
+      "remoteExecution": {
+        "chain": "hydration",
+        "blockNumber": 13488842,
+        "blockHash": "0xb9faf57d0a029ab1639cd05406e436117e12052ecf41dc7322f8e702205b87b3",
+        "eventIndex": 13,
+        "eventRaw": "0xcc0048df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3455448002ec4884088d84e5c2970a034732e5209b0acfa930000000000000000050004160000008096980000000000000000000000000004eb03000080969800000000000000000000000000000805eaa4d5007c8154d390bbab0557a8c03d1c59c1a1b4faca8c761902241b087767dc15a00000dd15a000",
+        "event": {
+          "section": "broadcast",
+          "method": "Swapped3",
+          "data": {
+            "fillerType": "AAVE",
+            "operation": "ExactIn",
+            "inputs": [
+              { "asset": "22", "amount": "10,000,000" }
+            ],
+            "outputs": [
+              { "asset": "1,003", "amount": "10,000,000" }
+            ],
+            "operationStack": [
+              {
+                "Xcm": [
+                  "0xeaa4d5007c8154d390bbab0557a8c03d1c59c1a1b4faca8c761902241b087767",
+                  "10,491,356"
+                ]
+              },
+              { "Router": "10,491,357" }
+            ],
+            "assetIn": 22,
+            "assetOut": 1003
+          }
+        },
+        "processedEventIndex": 22,
+        "processedEventRaw": "0x7201eaa4d5007c8154d390bbab0557a8c03d1c59c1a1b4faca8c761902241b08776702e803000007009a70ed03c2d8090001"
+      }
+    }
+  }
+}

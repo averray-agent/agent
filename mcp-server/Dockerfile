@@ -32,6 +32,13 @@ RUN npm install --omit=dev
 
 COPY mcp-server/src ./src
 
+# Transparency resolves the native multisig AccountId32 from the attested
+# custody records, then independently checks its keccak EVM lens. Keep these
+# runtime inputs explicit: copying only ./src made the native side silently
+# unreadable in production while the EVM balance lens still worked.
+COPY deployments/mainnet-multisig-owner.json /deployments/mainnet-multisig-owner.json
+COPY deployments/testnet-multisig-owner.json /deployments/testnet-multisig-owner.json
+
 ENV NODE_ENV=production
 ENV PORT=8787
 ENV DEPLOYED_SHA=${DEPLOYED_SHA}

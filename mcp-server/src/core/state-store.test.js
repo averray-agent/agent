@@ -266,6 +266,57 @@ test("MemoryStateStore event log survives buffer-sized reads and filters by sour
   assert.deepEqual(afterCursor.events.map((event) => event.id), ["event-2"]);
 });
 
+test("bank deposit dispatch evidence survives eviction from the 5,000-record generic timeline", async () => {
+  const store = new MemoryStateStore();
+  const wrapper = "0xf20b35a3f85ec864127b551ce8a64446fc0ed2bc";
+  const requestId = "0xeaa4d5007c8154d390bbab0557a8c03d1c59c1a1b4faca8c761902241b087767";
+  const event = {
+    id: `bank.v22_leg_dispatched-${requestId}-1786025758745`,
+    topic: "bank.v22_leg_dispatched",
+    correlationId: requestId,
+    timestamp: "2026-08-06T14:15:58.745Z",
+    data: {
+      requestId,
+      wrapper,
+      leg: "deposit_sell",
+      txHash: "0x43a1cff204eb087872bdc7f5fa55ef74261cafd90863caee4720961b00e7d1af",
+      blockNumber: 19_135_461,
+      dryRun: {
+        events: [{
+          section: "broadcast",
+          method: "Swapped",
+          data: {
+            fillerType: "AAVE",
+            assetIn: 22,
+            assetOut: 1003,
+            outputs: [{ asset: "1,003", amount: "10,000,000" }]
+          }
+        }]
+      }
+    }
+  };
+  await store.appendEventLog(event);
+  for (let index = 0; index < 5_001; index += 1) {
+    await store.appendEventLog({
+      id: `unrelated-${index}`,
+      topic: "session.updated",
+      timestamp: new Date(Date.parse("2026-08-06T15:00:00.000Z") + index).toISOString(),
+      data: {}
+    });
+  }
+
+  const timeline = await store.listEventLog({ topics: ["bank.v22_leg_dispatched"], limit: 500 });
+  assert.equal(timeline.events.length, 0, "the generic timeline should reproduce production eviction");
+  assert.deepEqual(
+    await store.getBankXcmLegDispatchEvidence(wrapper, requestId, "deposit_sell"),
+    event
+  );
+  assert.deepEqual(
+    await store.getLatestBankXcmLegDispatchEvidence(wrapper, "deposit_sell"),
+    event
+  );
+});
+
 test("MemoryStateStore persists external drafts, monotonic wallet nonces, and demand signals privately", async () => {
   const store = new MemoryStateStore();
   const wallet = "0x1111111111111111111111111111111111111111";

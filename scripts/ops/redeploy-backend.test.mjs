@@ -172,6 +172,19 @@ test("redeploy-backend bakes and verifies the exact serving SHA", async () => {
   assert.match(script, /wait_for_health "\$PREVIOUS_SHA"/u);
 });
 
+test("backend image includes the attested multisig owner records used by transparency", async () => {
+  const dockerfile = await readFile(BACKEND_DOCKERFILE, "utf8");
+
+  assert.match(
+    dockerfile,
+    /^COPY deployments\/mainnet-multisig-owner\.json \/deployments\/mainnet-multisig-owner\.json$/mu
+  );
+  assert.match(
+    dockerfile,
+    /^COPY deployments\/testnet-multisig-owner\.json \/deployments\/testnet-multisig-owner\.json$/mu
+  );
+});
+
 test("redeploy-backend rejects an invalid failed-container log tail", async () => {
   const script = await readFile(REDEPLOY_SCRIPT, "utf8");
   assert.match(script, /BACKEND_LOG_TAIL must be a positive integer/u);

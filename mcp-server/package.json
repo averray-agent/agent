@@ -12,6 +12,7 @@
     "demo:auto-verify:remote": "node src/demo/auto-verify-remote-smoke.js",
     "check:redis": "node src/demo/redis-persistence-check.js",
     "replay:content-recovery": "node src/demo/replay-content-recovery-log.js",
+    "backfill:bank-v22-deposit-evidence": "node src/demo/backfill-bank-v22-deposit-evidence.js",
     "ingest:github-issues": "node src/jobs/ingest-github-issues.js",
     "ingest:wikipedia": "node src/jobs/ingest-wikipedia-maintenance.js",
     "ingest:osv-advisories": "node src/jobs/ingest-osv-advisories.js",
