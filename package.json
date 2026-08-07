@@ -34,7 +34,7 @@
     "typecheck:app": "npm --workspace averray-app run typecheck",
     "dev:marketing": "npm --workspace marketing run dev",
     "build:marketing": "ASTRO_TELEMETRY_DISABLED=1 npm --workspace marketing run build",
-    "build:site": "npm run build:marketing && node scripts/sync-marketing-site.mjs",
+    "build:site": "npm run build:marketing && node scripts/sync-marketing-site.mjs && npm run sync:discovery-manifest",
     "dev:indexer": "npm --workspace indexer run dev",
     "start:indexer": "npm --workspace indexer run start",
     "typecheck:indexer": "npm --workspace indexer run typecheck",
