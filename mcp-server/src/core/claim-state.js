@@ -245,27 +245,30 @@ export function countClaimAttempts(sessions = undefined, session = undefined) {
   for (const candidate of candidates) {
     if (!candidate?.sessionId || seen.has(candidate.sessionId)) continue;
     seen.add(candidate.sessionId);
-    // A claim whose on-chain submit failed (infra revert / RPC outage) and that
-    // never reached a real submission must NOT burn the job's retry budget WHILE
-    // the claim is still live — the worker can re-submit on the same claim, so it
-    // gets a fair shot. submittedAt is the ground-truth that a real submission
-    // landed (set only on the → submitted transition). But once the claim reaches
-    // a TERMINAL state (it expired / timed out without a successful re-submit), it
-    // must count — otherwise a job whose submit always reverts could be claimed
-    // forever and never reach retry_limit_exhausted (anti-grief). Genuine no-shows
-    // and rejections still count regardless.
+    // retryLimit protects the catalogue from repeated delivered work and genuine
+    // submit-revert loops. A lease alone is not an attempt: agents can disconnect
+    // after claimJob, and a no-show expiry must return the job to inventory without
+    // consuming the budget. A live lease with submitFailedAt remains recoverable;
+    // charge it only if that lease later becomes terminal without a successful
+    // submission. Preserve compatibility with older persisted submitted sessions.
     if (
-      candidate.submitFailedAt &&
-      !candidate.submittedAt &&
-      !TERMINAL_SESSION_STATUSES.has(candidate.status)
+      sessionReachedSubmission(candidate)
+      || (candidate.submitFailedAt && TERMINAL_SESSION_STATUSES.has(candidate.status))
     ) {
-      continue;
-    }
-    if (candidate.claimedAt || candidate.status) {
       count += 1;
     }
   }
   return count;
+}
+
+function sessionReachedSubmission(session) {
+  if (session?.submittedAt || session?.submission !== undefined) {
+    return true;
+  }
+  if (Array.isArray(session?.statusHistory) && session.statusHistory.some((entry) => entry?.to === "submitted")) {
+    return true;
+  }
+  return ["submitted", "disputed", "resolved", "rejected"].includes(session?.status);
 }
 
 function submittedLikeState(status) {

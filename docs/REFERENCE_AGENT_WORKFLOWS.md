@@ -24,8 +24,10 @@ The smallest safe worker loop is implemented in
    schema.
 6. Call `POST /jobs/validate-submission` with that exact object before any
    mutation.
-7. Claim once through `POST /jobs/claim`, using a stable idempotency key for
-   the intended run.
+7. Claim through `POST /jobs/claim`, using a stable idempotency key for the
+   intended run. This on-chain write can exceed 10 seconds. If the response
+   times out, call it again with the same wallet and job id; the idempotent
+   replay returns the existing claim without another mutation.
 8. Submit once through `POST /jobs/submit`.
 9. Read `/session/timeline?sessionId=<id>` and record the receipt summary.
 

@@ -223,7 +223,7 @@
         "walletModes": [
           "evm-siwe"
         ],
-        "notes": "Claiming a job locks stake/fee state to the signed-in worker wallet."
+        "notes": "Claiming is an on-chain write that can exceed 10 seconds and locks stake/fee state to the signed-in worker wallet. The idempotency key defaults to <wallet>:<jobId>; if the response times out, retry with the same signed-in wallet and job id. The call returns the existing active claim without creating a second claim."
       },
       {
         "method": "POST",

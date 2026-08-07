@@ -28,6 +28,10 @@ const BANK_V22_LEGS = new Set([
   "withdraw_home"
 ]);
 
+function hasIndexableIdempotencyKey(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
 const RELEASE_CLAIM_LOCK_SCRIPT = `
 if redis.call("get", KEYS[1]) == ARGV[1] then
   return redis.call("del", KEYS[1])
@@ -162,7 +166,9 @@ export class MemoryStateStore {
     };
 
     this.sessions.set(persistedSession.sessionId, persistedSession);
-    this.idempotency.set(persistedSession.idempotencyKey, persistedSession.sessionId);
+    if (hasIndexableIdempotencyKey(persistedSession.idempotencyKey)) {
+      this.idempotency.set(persistedSession.idempotencyKey, persistedSession.sessionId);
+    }
     this.jobSessions.set(persistedSession.jobId, persistedSession.sessionId);
     if (persistedSession.chainJobId) {
       this.chainJobSessions.set(persistedSession.chainJobId, persistedSession.sessionId);
@@ -188,6 +194,7 @@ export class MemoryStateStore {
   }
 
   async findSessionByIdempotencyKey(idempotencyKey) {
+    if (!hasIndexableIdempotencyKey(idempotencyKey)) return undefined;
     const sessionId = this.idempotency.get(idempotencyKey);
     return sessionId ? this.sessions.get(sessionId) : undefined;
   }
@@ -773,7 +780,9 @@ export class RedisStateStore {
       updatedAt: new Date().toISOString()
     };
     await this.client.set(this.key("session", persistedSession.sessionId), JSON.stringify(persistedSession));
-    await this.client.set(this.key("idempotency", persistedSession.idempotencyKey), persistedSession.sessionId);
+    if (hasIndexableIdempotencyKey(persistedSession.idempotencyKey)) {
+      await this.client.set(this.key("idempotency", persistedSession.idempotencyKey), persistedSession.sessionId);
+    }
     await this.client.set(this.key("job", persistedSession.jobId), persistedSession.sessionId);
     if (persistedSession.chainJobId) {
       await this.client.set(this.key("chain-job", persistedSession.chainJobId), persistedSession.sessionId);
@@ -794,6 +803,7 @@ export class RedisStateStore {
   }
 
   async findSessionByIdempotencyKey(idempotencyKey) {
+    if (!hasIndexableIdempotencyKey(idempotencyKey)) return undefined;
     await this.connect();
     const sessionId = await this.client.get(this.key("idempotency", idempotencyKey));
     return sessionId ? this.getSession(sessionId) : undefined;
