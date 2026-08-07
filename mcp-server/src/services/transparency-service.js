@@ -16,6 +16,8 @@ export const TRANSPARENCY_FRESHNESS_WINDOWS_MS = Object.freeze({
 
 const USDC_DECIMALS = 6;
 const USDC_SCALE = 10n ** BigInt(USDC_DECIMALS);
+const BASIS_POINTS_SCALE = 10_000n;
+const MAX_REBASE_CORROBORATION_BPS = 2n;
 const PAGE_SIZE = 250;
 const MAX_RECORDS = 10_000;
 const SETTLED_SESSION_STATUSES = new Set(["resolved", "rejected", "closed"]);
@@ -496,9 +498,7 @@ export class TransparencyService {
       const calibrationRaw = calibrationMatches(calibration, positionExpected)
         ? parseUnsignedRaw(calibration.provenRaw)
         : null;
-      if (calibrationRaw === null || calibrationRaw !== deposit.raw) {
-        throw new Error("deposit Broadcast.Swapped output does not match the observed aUSDC calibration delta");
-      }
+      assertPlausibleRebaseCorroboration("aUSDC calibration", calibrationRaw, deposit.raw);
     } catch (error) {
       const proof = redactProviderError(error) || "deposit_event_read_failed";
       return {
@@ -512,9 +512,10 @@ export class TransparencyService {
       wrapperRequest = await this.gateway.getXcmRequest(deposit.requestId);
       const settledSharesRaw = parseUnsignedRaw(wrapperRequest?.settledSharesRaw);
       if (String(wrapperRequest?.statusLabel ?? "").toLowerCase() !== "succeeded"
-        || settledSharesRaw !== deposit.raw) {
-        throw new Error("deposit swap output does not match the finalized observed aUSDC delta");
+      ) {
+        throw new Error("deposit request is not finalized as succeeded");
       }
+      assertPlausibleRebaseCorroboration("finalized settledShares", settledSharesRaw, deposit.raw);
     } catch (error) {
       const proof = redactProviderError(error) || "deposit_finalization_read_failed";
       return {
@@ -794,6 +795,24 @@ function subtractRawReadings([first, ...rest], { source, proof }) {
 function parseUnsignedRaw(value) {
   const normalized = String(value ?? "").replaceAll(",", "");
   return /^(0|[1-9][0-9]*)$/u.test(normalized) ? BigInt(normalized) : null;
+}
+
+function assertPlausibleRebaseCorroboration(label, corroboratedRaw, depositedRaw) {
+  if (corroboratedRaw === null || corroboratedRaw < depositedRaw) {
+    throw new Error(`${label} is below the authoritative Broadcast.Swapped deposit`);
+  }
+  // Two basis points, rounded up to one raw unit, are deliberately generous
+  // relative to single-raw rounding and short-pipeline accrual, yet remain
+  // 250× smaller than the 5% protocol-fee scale. That separates plausible
+  // rebase drift from a different deposit. This is a corroboration tolerance,
+  // not a yield model: Broadcast.Swapped stays authoritative.
+  const maximumExcess = (
+    depositedRaw * MAX_REBASE_CORROBORATION_BPS + BASIS_POINTS_SCALE - 1n
+  ) / BASIS_POINTS_SCALE;
+  const excess = corroboratedRaw - depositedRaw;
+  if (excess > maximumExcess) {
+    throw new Error(`${label} exceeds the ${MAX_REBASE_CORROBORATION_BPS}-bps rebase corroboration bound`);
+  }
 }
 
 function unknownPositionReading(label, wrapper, readAtMs, proof) {
