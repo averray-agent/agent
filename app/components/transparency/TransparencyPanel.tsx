@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { ExplorerLink } from "@/components/common/ExplorerLink";
 import {
@@ -10,7 +10,7 @@ import {
 } from "@/components/shell/DataFreshnessPill";
 import { SectionHead } from "@/components/overview/SectionHead";
 import { TreasuryPanel } from "@/components/treasury/TreasuryPanel";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import type {
   TransparencyField,
   TransparencyPayload,
@@ -25,7 +25,10 @@ import {
   formatReadAt,
   formatWindowMs,
   presentTransparencyField,
+  transparencyCompositionSentence,
+  transparencyFreshnessSentence,
   transparencyPageFreshness,
+  transparencyReadChanged,
 } from "@/lib/api/transparency-view-model";
 import { cn } from "@/lib/utils/cn";
 
@@ -39,7 +42,6 @@ const WINDOW_KEY = {
 } as const;
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api").replace(/\/+$/u, "");
-const ProofVisibilityContext = createContext({ verifyAll: false, resetId: 0 });
 
 export function TransparencyPanel({ data }: { data: TransparencyPayload }) {
   const pageFreshness = transparencyPageFreshness(data);
@@ -68,7 +70,7 @@ export function TransparencyPanel({ data }: { data: TransparencyPayload }) {
             <b className="font-semibold text-[var(--avy-ink)]">
               {total.missing ? "Treasury total has no read" : `${total.display} USDC`}
             </b>
-            <FieldStatusPill field={data.treasury.totalUsdcEquivalent} />
+            <ExceptionStatusPill field={data.treasury.totalUsdcEquivalent} />
           </span>
           <span>
             Configured generation · <b className="font-semibold text-[var(--avy-ink)]">{fieldText(generation.version)}</b>
@@ -79,9 +81,9 @@ export function TransparencyPanel({ data }: { data: TransparencyPayload }) {
         </div>
       </section>
 
+      <TreasurySection data={data} />
       <FlowSection data={data} />
       <EscrowSection data={data} />
-      <TreasurySection data={data} />
       <ReadPolicy data={data} />
 
       <p className="flex flex-wrap gap-x-5 gap-y-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
@@ -211,9 +213,9 @@ export function TransparencyRequestState({ state }: { state: "loading" | "fallba
         </p>
       </section>
       {[
+        ["Treasury", "Asset Hub and Hydration positions"],
         ["Flow · settled work", "Jobs and paid USDC"],
         ["Escrow backing", "Poster obligations and contract balance"],
-        ["Treasury", "Asset Hub and Hydration positions"],
       ].map(([title, detail]) => (
         <section key={title}>
           <SectionHead title={title} meta={detail} />
@@ -257,39 +259,32 @@ function TransparencyTopbar({ freshness }: { freshness: FreshnessState }) {
   );
 }
 
-function ProofSection({ title, meta, children }: { title: string; meta: string; children: ReactNode }) {
-  const [verifyAll, setVerifyAll] = useState(false);
-  const [resetId, setResetId] = useState(0);
+type ProofEntry = { label: string; field: AnyField; window: number | null };
+
+function ProofSection({ title, summary, proofs, children }: { title: string; summary: string; proofs: ProofEntry[]; children: ReactNode }) {
+  const [showProofs, setShowProofs] = useState(false);
   return (
     <section>
       <SectionHead
         title={title}
         meta={(
           <span className="flex flex-wrap items-center justify-end gap-2">
-            <span>{meta}</span>
+            <span>{summary}</span>
             <Button
               type="button"
               variant="ghost"
               size="sm"
               className="h-7 px-2 font-[family-name:var(--font-mono)] text-[10px] uppercase text-[var(--avy-accent)]"
-              aria-pressed={verifyAll}
-              onClick={() => {
-                if (verifyAll) {
-                  setVerifyAll(false);
-                  setResetId((current) => current + 1);
-                } else {
-                  setVerifyAll(true);
-                }
-              }}
+              aria-expanded={showProofs}
+              onClick={() => setShowProofs((current) => !current)}
             >
-              {verifyAll ? "Hide proofs" : "Verify all"}
+              {showProofs ? "Hide verification" : "Verify"}
             </Button>
           </span>
         )}
       />
-      <ProofVisibilityContext.Provider value={{ verifyAll, resetId }}>
-        {children}
-      </ProofVisibilityContext.Provider>
+      {children}
+      {showProofs ? <SectionProofLedger proofs={proofs} /> : null}
     </section>
   );
 }
@@ -306,29 +301,41 @@ function FlowSection({ data }: { data: TransparencyPayload }) {
     ["External", data.flow.composition24h.external],
     ["Unclassified", data.flow.composition24h.unclassified],
   ] as const;
+  const flowFields = [
+    ...windows.flatMap(([, jobs, paid]) => [jobs, paid]),
+    ...composition.map(([, field]) => field),
+  ];
+  const allPaidUnread = windows.every(([, , paid]) => paid.status === "unknown" || paid.value === null);
+  const proofs = [
+    ...windows.flatMap(([label, jobs, paid]) => [
+      { label: `${label} jobs`, field: jobs, window: windowValue(data, WINDOW_KEY.flow) },
+      { label: `${label} USDC paid`, field: paid, window: windowValue(data, WINDOW_KEY.flow) },
+    ]),
+    ...composition.map(([label, field]) => ({ label: `Composition · ${label}`, field, window: windowValue(data, WINDOW_KEY.flow) })),
+  ];
 
   return (
-    <ProofSection title="Flow · settled work" meta="24h composition names platform-owned volume">
+    <ProofSection title="Flow · settled work" summary={transparencyFreshnessSentence(flowFields, "flow reads")} proofs={proofs}>
       <div className="grid overflow-hidden rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] shadow-[var(--shadow-card)] backdrop-blur-[10px] lg:grid-cols-3">
         {windows.map(([label, jobs, paid], index) => (
           <div key={label} className={cn("grid gap-4 p-[18px]", index > 0 && "border-t border-[var(--avy-line-soft)] lg:border-l lg:border-t-0")}>
             <span className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-muted)]" style={{ letterSpacing: "0.12em" }}>{label}</span>
-            <InlineMetric label="Jobs" field={jobs} window={windowValue(data, WINDOW_KEY.flow)} />
-            <InlineMetric label="USDC paid" field={paid} window={windowValue(data, WINDOW_KEY.flow)} />
+            <InlineMetric label="Jobs" field={jobs} />
+            {!allPaidUnread ? <InlineMetric label="USDC paid" field={paid} /> : null}
           </div>
         ))}
       </div>
+      {allPaidUnread ? (
+        <p className="m-0 border-x border-b border-[var(--avy-line-soft)] bg-[var(--avy-warn-soft)]/20 px-4 py-2.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-warn)]">
+          USDC paid is unread for all three windows — job counts above are unaffected.
+        </p>
+      ) : null}
       <div className="mt-2 overflow-hidden rounded-[var(--radius-sm)] border border-[var(--avy-line-soft)] bg-[var(--avy-paper-solid)]">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--avy-line-soft)] px-4 py-2.5">
-          <span className="font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]" style={{ letterSpacing: "0.12em" }}>Composition · 24h</span>
-          <FieldStatusPill field={data.flow.composition24h.total} />
-        </div>
-        <div className="grid sm:grid-cols-2 xl:grid-cols-4">
-          {composition.map(([label, field], index) => (
-            <div key={label} className={cn("min-w-0 px-3 py-2.5", index > 0 && "border-t border-[var(--avy-line-soft)] sm:border-l sm:border-t-0")}>
-              <CompactMetric label={label} field={field} window={windowValue(data, WINDOW_KEY.flow)} />
-            </div>
-          ))}
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <span className="font-[family-name:var(--font-mono)] text-[11px] leading-relaxed text-[var(--avy-ink)]">
+            {transparencyCompositionSentence(data.flow.composition24h)}
+          </span>
+          <ExceptionStatusPill field={data.flow.composition24h.total} />
         </div>
       </div>
     </ProofSection>
@@ -337,15 +344,24 @@ function FlowSection({ data }: { data: TransparencyPayload }) {
 
 function EscrowSection({ data }: { data: TransparencyPayload }) {
   const escrow = data.escrow;
+  const fields = [escrow.posterObligationsInFlight, escrow.balanceHeldByEscrowContract, escrow.contractAddress];
   return (
-    <ProofSection title="Escrow backing" meta="poster obligations vs contract balance">
+    <ProofSection
+      title="Escrow backing"
+      summary={transparencyFreshnessSentence(fields, "escrow reads")}
+      proofs={[
+        { label: "Poster obligations in flight", field: escrow.posterObligationsInFlight, window: windowValue(data, WINDOW_KEY.chain) },
+        { label: "Held by escrow contract", field: escrow.balanceHeldByEscrowContract, window: windowValue(data, WINDOW_KEY.chain) },
+        { label: "Escrow contract", field: escrow.contractAddress, window: windowValue(data, WINDOW_KEY.chain) },
+      ]}
+    >
       <TreasuryPanel eyebrow="Escrow backing" title="Owed in flight vs actually held" sub="reported separately; no inferred backing verdict">
         <div className="grid md:grid-cols-2">
-          <ValueBlock label="Poster obligations in flight" field={escrow.posterObligationsInFlight} window={windowValue(data, WINDOW_KEY.chain)} />
-          <ValueBlock label="Held by escrow contract" field={escrow.balanceHeldByEscrowContract} window={windowValue(data, WINDOW_KEY.chain)} className="border-t border-[var(--avy-line-soft)] md:border-l md:border-t-0" />
+          <ValueBlock label="Poster obligations in flight" field={escrow.posterObligationsInFlight} />
+          <ValueBlock label="Held by escrow contract" field={escrow.balanceHeldByEscrowContract} className="border-t border-[var(--avy-line-soft)] md:border-l md:border-t-0" />
         </div>
         <div className="border-t border-[var(--avy-line-soft)] bg-[var(--avy-paper-solid)] px-4 py-3">
-          <InlineMetric label="Escrow contract" field={escrow.contractAddress} window={windowValue(data, WINDOW_KEY.chain)} compact />
+          <InlineMetric label="Escrow contract" field={escrow.contractAddress} compact />
         </div>
       </TreasuryPanel>
     </ProofSection>
@@ -356,13 +372,34 @@ function TreasurySection({ data }: { data: TransparencyPayload }) {
   const treasury = data.treasury;
   const generation = treasury.generation;
   const aggregate = presentTransparencyField(treasury.totalUsdcEquivalent);
+  const position = positionBlock(data);
+  const baseLines = [
+    treasury.lines.assetHubMultisig.balance,
+    treasury.lines.hydrationPosition.total,
+    treasury.lines.operatingFloat.balance,
+  ];
+  const proofs: ProofEntry[] = [
+    { label: "Treasury total", field: treasury.totalUsdcEquivalent, window: windowValue(data, WINDOW_KEY.bank) },
+    { label: "Asset Hub multisig balance", field: treasury.lines.assetHubMultisig.balance, window: windowValue(data, WINDOW_KEY.chain) },
+    { label: "Native treasury account", field: treasury.lines.assetHubMultisig.nativeAccountId32, window: windowValue(data, WINDOW_KEY.chain) },
+    { label: "Treasury EVM lens", field: treasury.lines.assetHubMultisig.evmLens, window: windowValue(data, WINDOW_KEY.chain) },
+    { label: "Deployed to Hydration", field: treasury.lines.hydrationPosition.total, window: windowValue(data, WINDOW_KEY.bank) },
+    { label: "Hydration operating float", field: treasury.lines.operatingFloat.balance, window: windowValue(data, WINDOW_KEY.bank) },
+    { label: "Operating-float asset", field: treasury.lines.operatingFloat.asset, window: windowValue(data, WINDOW_KEY.bank) },
+    ...Object.entries(position).map(([label, field]) => ({ label: `Position · ${label}`, field, window: windowValue(data, WINDOW_KEY.bank) })),
+    { label: "Accounting note", field: treasury.lines.hydrationPosition.note, window: windowValue(data, WINDOW_KEY.bank) },
+    { label: "Configured generation", field: generation.version, window: windowValue(data, WINDOW_KEY.subject) },
+    { label: "Configured wrapper", field: generation.wrapperAddress, window: windowValue(data, WINDOW_KEY.subject) },
+    { label: "Generation state", field: generation.state, window: windowValue(data, WINDOW_KEY.subject) },
+    { label: "Generation reason", field: generation.reason, window: windowValue(data, WINDOW_KEY.subject) },
+  ];
   return (
-    <ProofSection title="Treasury" meta="three USDC-equivalent lines · configured generation only">
+    <ProofSection title="Treasury" summary={transparencyFreshnessSentence(baseLines)} proofs={proofs}>
       <TreasuryPanel eyebrow="Treasury" title="What the treasury holds" sub="each line carries its own lens and proof">
         <div className={cn("grid gap-3 border-b border-[var(--avy-line-soft)] p-[18px]", aggregate.freshness !== "live" && "bg-[repeating-linear-gradient(135deg,transparent_0_7px,rgba(167,97,34,.055)_7px_14px)]")}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-muted)]" style={{ letterSpacing: "0.12em" }}>Treasury total · USDC-equivalent</span>
-            <FieldStatusPill field={treasury.totalUsdcEquivalent} />
+            <ExceptionStatusPill field={treasury.totalUsdcEquivalent} />
           </div>
           {aggregate.missing ? (
             <MissingReadReason />
@@ -374,33 +411,119 @@ function TreasurySection({ data }: { data: TransparencyPayload }) {
           <p className={cn("m-0 border-l-2 pl-2.5 font-[family-name:var(--font-mono)] text-[11.5px] leading-relaxed", aggregate.freshness === "live" ? "border-[var(--avy-accent)] text-[var(--avy-muted)]" : "border-[var(--avy-warn)] text-[var(--avy-warn)]")}>
             {aggregateDisclosure(treasury.totalUsdcEquivalent)}
           </p>
-          <FieldEvidenceDisclosure field={treasury.totalUsdcEquivalent} window={windowValue(data, WINDOW_KEY.bank)} />
         </div>
 
         <div className="grid">
-          <TreasuryLine label="Asset Hub multisig balance" meta="USDC held by the native treasury account" field={treasury.lines.assetHubMultisig.balance} window={windowValue(data, WINDOW_KEY.chain)} extras={[
-            ["Native account", treasury.lines.assetHubMultisig.nativeAccountId32],
-            ["EVM lens", treasury.lines.assetHubMultisig.evmLens],
-          ]} />
-          <TreasuryLine label="Deployed to Hydration" meta="aUSDC position; redeemable at par, with growth in the balance" field={treasury.lines.hydrationPosition.total} window={windowValue(data, WINDOW_KEY.bank)} />
-          <TreasuryLine label="Hydration asset-22 operating float" meta="On-chain USDC available for venue operations; non-custodial" field={treasury.lines.operatingFloat.balance} window={windowValue(data, WINDOW_KEY.bank)} extras={[["Asset", treasury.lines.operatingFloat.asset]]} />
+          <TreasuryLine label="Asset Hub multisig balance" meta="USDC held by the native treasury account" field={treasury.lines.assetHubMultisig.balance} />
+          <TreasuryLine label="Deployed to Hydration" meta="aUSDC position; redeemable at par, with growth in the balance" field={treasury.lines.hydrationPosition.total} />
+          <TreasuryLine label="Hydration asset-22 operating float" meta="On-chain USDC available for venue operations; non-custodial" field={treasury.lines.operatingFloat.balance} />
         </div>
 
-        <div className="grid border-t border-[var(--avy-line)] md:grid-cols-2">
-          <ValueBlock label="Contributed principal" field={treasury.lines.hydrationPosition.principal} window={windowValue(data, WINDOW_KEY.bank)} compact />
-          <ValueBlock label="Accrued yield" field={treasury.lines.hydrationPosition.accruedYield} window={windowValue(data, WINDOW_KEY.bank)} compact className="border-t border-[var(--avy-line-soft)] md:border-l md:border-t-0" />
-        </div>
+        <PositionEconomics position={position} />
         <div className="border-t border-dashed border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-[18px] py-3">
-          <InlineMetric label="Accounting note" field={treasury.lines.hydrationPosition.note} window={windowValue(data, WINDOW_KEY.bank)} compact />
+          <InlineMetric label="Accounting note" field={treasury.lines.hydrationPosition.note} compact />
         </div>
 
-        <GenerationBand generation={generation} window={windowValue(data, WINDOW_KEY.subject)} />
+        <GenerationBand generation={generation} />
       </TreasuryPanel>
     </ProofSection>
   );
 }
 
-function TreasuryLine({ label, meta, field, window, extras = [] }: { label: string; meta: string; field: AnyField; window: number | null; extras?: Array<[string, AnyField]> }) {
+function PositionEconomics({ position }: { position: NonNullable<TransparencyPayload["treasury"]["position"]> }) {
+  const friction = presentTransparencyField(position.frictionPaid, { decimals: 6 });
+  const net = presentTransparencyField(position.netVsCommitted, { decimals: 6 });
+  return (
+    <div className="border-t border-[var(--avy-line)]">
+      <div className="border-b border-[var(--avy-line-soft)] bg-[var(--avy-paper-solid)] px-[18px] py-3">
+        <span className="block font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]" style={{ letterSpacing: "0.12em" }}>
+          Position economics · measured from the deposit event
+        </span>
+        <span className="font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]">
+          Observed balances and subtractions only. No rate, APY, annualisation, or projection.
+        </span>
+      </div>
+      <div className="grid">
+        <TreasuryLine label="Actually deposited" meta="AAVE swap output, cross-checked against the first observed aUSDC balance" field={position.deposited} />
+        <TreasuryLine label="Position now" meta="Current aUSDC ERC-20 balance, redeemable at par" field={position.positionNow} />
+      </div>
+      <div className="grid border-t border-[var(--avy-line-soft)] md:grid-cols-2">
+        <div className="grid gap-2.5 p-[18px]">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-muted)]">Observed growth</span>
+            <ExceptionStatusPill field={position.growth} />
+          </div>
+          <ChangingGrowthValue field={position.growth} />
+          <span className="font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]">Position now minus the proved deposit.</span>
+        </div>
+        <div className="grid gap-2.5 border-t border-[var(--avy-line-soft)] p-[18px] md:border-l md:border-t-0">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-muted)]">Friction paid</span>
+            <ExceptionStatusPill field={position.frictionPaid} />
+          </div>
+          {friction.missing ? <MissingReadReason /> : <FieldValue field={position.frictionPaid} decimals={6} className="text-[22px]" />}
+          <span className="font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]">Committed minus deposited minus remaining operating float.</span>
+        </div>
+      </div>
+      <div className="grid gap-2 border-t border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-[18px] py-3.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+        <div className="grid gap-1">
+          <span className="font-[family-name:var(--font-display)] text-[11px] font-extrabold uppercase text-[var(--avy-muted)]">Net vs committed</span>
+          <span className="font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]">
+            {friction.missing ? "Friction has no read, so net versus committed cannot be computed." : "Observed growth minus deployment friction."}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          {net.missing ? <MissingReadReason compact /> : <FieldValue field={position.netVsCommitted} decimals={6} className="text-lg" />}
+          <ExceptionStatusPill field={position.netVsCommitted} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChangingGrowthValue({ field }: { field: AnyField }) {
+  const previous = useRef<{ value: unknown; readAtMs: number | null; status: AnyField["status"] } | null>(null);
+  const [highlighted, setHighlighted] = useState(false);
+  useEffect(() => {
+    const prior = previous.current;
+    const changedRead = transparencyReadChanged(prior, field);
+    previous.current = { value: field.value, readAtMs: field.readAtMs, status: field.status };
+    if (!changedRead) return;
+    setHighlighted(true);
+    const timeout = window.setTimeout(() => setHighlighted(false), 1_200);
+    return () => window.clearTimeout(timeout);
+  }, [field.readAtMs, field.status, field.value]);
+  return (
+    <span
+      data-growth-read-value={field.value ?? "unknown"}
+      data-growth-highlighted={highlighted ? "true" : "false"}
+      className={cn("w-fit rounded px-1 py-0.5 transition-colors duration-300", highlighted && "bg-[var(--avy-accent-wash)] text-[var(--avy-accent)]")}
+    >
+      {presentTransparencyField(field).missing ? <MissingReadReason /> : <FieldValue field={field} decimals={6} className="text-[22px]" />}
+    </span>
+  );
+}
+
+function positionBlock(data: TransparencyPayload): NonNullable<TransparencyPayload["treasury"]["position"]> {
+  if (data.treasury.position) return data.treasury.position;
+  const missing = (label: string): TransparencyField<string> => ({
+    value: null,
+    unit: "USDC",
+    status: "unknown",
+    readAtMs: data.generatedAtMs,
+    source: `GET /transparency omitted treasury.position.${label}`,
+    proof: "backend position-economics fields are unavailable; no adapter-book fallback was used",
+  });
+  return {
+    deposited: missing("deposited"),
+    positionNow: missing("positionNow"),
+    growth: missing("growth"),
+    frictionPaid: missing("frictionPaid"),
+    netVsCommitted: missing("netVsCommitted"),
+  };
+}
+
+function TreasuryLine({ label, meta, field }: { label: string; meta: string; field: AnyField }) {
   const view = presentTransparencyField(field);
   return (
     <div className={cn("grid gap-3 border-b border-[var(--avy-line-soft)] px-[18px] py-3.5 last:border-b-0 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center", view.freshness === "partial" && "bg-[repeating-linear-gradient(135deg,transparent_0_7px,rgba(167,97,34,.05)_7px_14px)]")}>
@@ -410,16 +533,13 @@ function TreasuryLine({ label, meta, field, window, extras = [] }: { label: stri
       </div>
       <div className="flex flex-wrap items-center gap-2 xl:justify-end">
         {view.missing ? <MissingReadReason /> : <FieldValue field={field} className="text-lg" />}
-        <FieldStatusPill field={field} />
-      </div>
-      <div className="xl:col-span-2">
-        <FieldEvidenceDisclosure field={field} window={window} extras={extras} />
+        <ExceptionStatusPill field={field} />
       </div>
     </div>
   );
 }
 
-function GenerationBand({ generation, window }: { generation: TransparencyPayload["treasury"]["generation"]; window: number | null }) {
+function GenerationBand({ generation }: { generation: TransparencyPayload["treasury"]["generation"] }) {
   const state = fieldText(generation.state);
   const paused = state === "paused";
   return (
@@ -431,12 +551,12 @@ function GenerationBand({ generation, window }: { generation: TransparencyPayloa
             {generationStateLabel(generation)}
           </strong>
         </div>
-        <FieldStatusPill field={generation.state} />
+        <ExceptionStatusPill field={generation.state} />
       </div>
       <div className="grid gap-2 md:grid-cols-3">
-        <CompactMetric label="Version" field={generation.version} window={window} />
-        <CompactMetric label="Wrapper" field={generation.wrapperAddress} window={window} />
-        <CompactMetric label="Reason" field={generation.reason} window={window} />
+        <CompactMetric label="Version" field={generation.version} />
+        <CompactMetric label="Wrapper" field={generation.wrapperAddress} />
+        <CompactMetric label="Reason" field={generation.reason} />
       </div>
     </div>
   );
@@ -466,45 +586,42 @@ function ReadPolicy({ data }: { data: TransparencyPayload }) {
   );
 }
 
-function ValueBlock({ label, field, window, compact = false, className }: { label: string; field: AnyField; window: number | null; compact?: boolean; className?: string }) {
+function ValueBlock({ label, field, compact = false, className }: { label: string; field: AnyField; compact?: boolean; className?: string }) {
   const view = presentTransparencyField(field);
   return (
     <div className={cn("grid content-start gap-2.5 p-[18px]", view.freshness === "partial" && "bg-[repeating-linear-gradient(135deg,transparent_0_7px,rgba(167,97,34,.05)_7px_14px)]", view.freshness === "fallback" && "bg-[var(--avy-warn-soft)]/20", className)}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-muted)]" style={{ letterSpacing: "0.12em" }}>{label}</span>
-        <FieldStatusPill field={field} />
+        <ExceptionStatusPill field={field} />
       </div>
       {view.lastKnown ? <span className="font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[var(--avy-warn)]">Last known value</span> : null}
       {view.missing ? <MissingReadReason /> : <FieldValue field={field} className={compact ? "text-[22px]" : "text-[30px]"} />}
-      <FieldEvidenceDisclosure field={field} window={window} />
     </div>
   );
 }
 
-function InlineMetric({ label, field, window, compact = false }: { label: string; field: AnyField; window?: number | null; compact?: boolean }) {
+function InlineMetric({ label, field, compact = false }: { label: string; field: AnyField; compact?: boolean }) {
   const view = presentTransparencyField(field);
   return (
     <div className="grid min-w-0 gap-1.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]" style={{ letterSpacing: "0.1em" }}>{label}</span>
-        <FieldStatusPill field={field} />
+        <ExceptionStatusPill field={field} />
       </div>
       {view.missing ? <MissingReadReason compact /> : <FieldValue field={field} className={compact ? "text-sm" : "text-2xl"} />}
-      <FieldEvidenceDisclosure field={field} window={window ?? null} compact />
     </div>
   );
 }
 
-function CompactMetric({ label, field, window }: { label: string; field: AnyField; window: number | null }) {
+function CompactMetric({ label, field }: { label: string; field: AnyField }) {
   const view = presentTransparencyField(field);
   return (
     <div className="grid min-w-0 gap-1.5">
       <span className="truncate font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[var(--avy-muted)]" style={{ letterSpacing: "0.08em" }}>{label}</span>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         {view.missing ? <MissingReadReason compact /> : <FieldValue field={field} className="text-sm" />}
-        <FieldStatusPill field={field} />
+        <ExceptionStatusPill field={field} />
       </div>
-      <FieldEvidenceDisclosure field={field} window={window} compact />
     </div>
   );
 }
@@ -516,7 +633,7 @@ function PolicyMetric({ label, field, divided }: { label: string; field: AnyFiel
       <span className="font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[var(--avy-muted)]" style={{ letterSpacing: "0.08em" }}>{label}</span>
       <div className="flex flex-wrap items-center gap-2">
         {view.missing ? <MissingReadReason compact /> : <FieldValue field={field} className="text-sm" />}
-        <FieldStatusPill field={field} />
+        <ExceptionStatusPill field={field} />
       </div>
       <FieldEvidenceContent field={field} window={null} compact />
     </div>
@@ -531,8 +648,8 @@ function MissingReadReason({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function FieldValue({ field, className }: { field: AnyField; className?: string }) {
-  const view = presentTransparencyField(field);
+function FieldValue({ field, decimals, className }: { field: AnyField; decimals?: number; className?: string }) {
+  const view = presentTransparencyField(field, { decimals });
   if (view.missing) return null;
   const common = cn("font-[family-name:var(--font-mono)] font-semibold leading-tight tabular-nums", view.lastKnown ? "text-[var(--avy-muted)]" : "text-[var(--avy-ink)]", className);
   if (field.unit === "address" && typeof field.value === "string") {
@@ -541,52 +658,28 @@ function FieldValue({ field, className }: { field: AnyField; className?: string 
   return <span className={common}>{view.display}</span>;
 }
 
+function ExceptionStatusPill({ field }: { field: AnyField }) {
+  return field.status === "fresh" ? null : <FieldStatusPill field={field} />;
+}
+
 function FieldStatusPill({ field }: { field: AnyField }) {
   const view = presentTransparencyField(field);
   return <DataFreshnessPill state={view.freshness} label={view.statusLabel} meta={`${view.statusLabel}. Status supplied by /transparency.`} />;
 }
 
-function FieldEvidenceDisclosure({ field, window, compact = false, extras = [] }: { field: AnyField; window: number | null; compact?: boolean; extras?: Array<[string, AnyField]> }) {
-  const { verifyAll, resetId } = useContext(ProofVisibilityContext);
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    setOpen(false);
-  }, [resetId]);
+function SectionProofLedger({ proofs }: { proofs: ProofEntry[] }) {
   return (
-    <details
-      className="group/proof min-w-0"
-      open={verifyAll || open}
-      onToggle={(event) => {
-        if (!verifyAll) setOpen(event.currentTarget.open);
-      }}
-    >
-      <summary
-        className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "h-auto w-fit cursor-pointer list-none px-0 py-0.5 font-[family-name:var(--font-mono)] text-[10px] font-semibold text-[var(--avy-accent)] marker:content-none [&::-webkit-details-marker]:hidden")}
-        onClick={(event) => {
-          if (verifyAll) event.preventDefault();
-        }}
-      >
-        proof
-        <ChevronDown className="size-3 transition-transform group-open/proof:rotate-180" aria-hidden="true" />
-      </summary>
-      <div className="mt-2 rounded-[var(--radius-sm)] border border-dashed border-[var(--avy-line-soft)] bg-[var(--avy-paper-solid)] p-2.5">
-        <FieldEvidenceContent field={field} window={window} compact={compact} />
-        {extras.length > 0 ? (
-          <div className="mt-2 grid gap-2 border-t border-dashed border-[var(--avy-line-soft)] pt-2 sm:grid-cols-2">
-            {extras.map(([label, extra]) => (
-              <div key={label} className="grid min-w-0 gap-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[var(--avy-muted)]">{label}</span>
-                  <FieldStatusPill field={extra} />
-                </div>
-                {presentTransparencyField(extra).missing ? <MissingReadReason compact /> : <FieldValue field={extra} className="text-xs" />}
-                <FieldEvidenceContent field={extra} window={window} compact />
-              </div>
-            ))}
+    <div className="mt-2 grid gap-3 rounded-[var(--radius-sm)] border border-dashed border-[var(--avy-line-soft)] bg-[var(--avy-paper-solid)] p-3 sm:grid-cols-2">
+      {proofs.map(({ label, field, window }, index) => (
+        <div key={`${label}-${index}`} className="grid min-w-0 content-start gap-2 border-b border-dashed border-[var(--avy-line-soft)] pb-3 last:border-b-0 sm:border-b-0 sm:border-r sm:pr-3 sm:[&:nth-child(even)]:border-r-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[var(--avy-muted)]">{label}</span>
+            <ExceptionStatusPill field={field} />
           </div>
-        ) : null}
+          <FieldEvidenceContent field={field} window={window} compact />
+        </div>
+      ))}
       </div>
-    </details>
   );
 }
 
