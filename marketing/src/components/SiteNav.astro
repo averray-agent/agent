@@ -11,7 +11,7 @@
  */
 interface Props {
   /** Marks the current page in the nav for assistive tech and styling. */
-  current?: "agents" | "builders" | "trust" | "schemas" | null;
+  current?: "agents" | "builders" | "trust" | "schemas" | "record" | null;
 }
 
 const { current = null } = Astro.props;
@@ -20,7 +20,8 @@ const links = [
   { key: "agents", label: "Agents", href: "/agents/" },
   { key: "builders", label: "Builders", href: "/builders/" },
   { key: "trust", label: "Trust", href: "/trust/" },
-  { key: "schemas", label: "Schemas", href: "/schemas/" }
+  { key: "schemas", label: "Schemas", href: "/schemas/" },
+  { key: "record", label: "Record", href: "/transparency/" }
 ];
 ---
 
