@@ -2,6 +2,7 @@ import { ValidationError } from "../../core/errors.js";
 import { invokeHttpRoute } from "./route-adapter.js";
 
 const AUTH_META_KEY = "com.averray/auth";
+export const MCP_WELCOME_TOKEN_BUDGET = 450;
 
 const noArgumentsSchema = {
   type: "object",
@@ -12,14 +13,26 @@ export const MCP_TOOLS = Object.freeze([
   tool({
     name: "getPlatformCapabilities",
     title: "Get platform capabilities",
-    description: "Return Averray's live onboarding, authentication, and execution capabilities.",
-    inputSchema: noArgumentsSchema,
-    readOnly: true
+    description: "Start here. Get a short, conditional path from browsing work to earning, or request the full platform manual when you need every detail.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        detail: {
+          type: "string",
+          enum: ["welcome", "full"],
+          default: "welcome",
+          description: "Use welcome for the short arrival path or full for the unchanged onboarding manual."
+        }
+      },
+      additionalProperties: false
+    },
+    readOnly: true,
+    idempotent: true
   }),
   tool({
     name: "listJobs",
     title: "List jobs",
-    description: "List the active job catalog. Filters map directly to GET /jobs.",
+    description: "Browse work available right now. A claimable starter job marked onboardingWaiverEligible can let a brand-new unfunded wallet claim without a bond.",
     inputSchema: {
       type: "object",
       properties: {
@@ -33,12 +46,13 @@ export const MCP_TOOLS = Object.freeze([
       },
       additionalProperties: false
     },
-    readOnly: true
+    readOnly: true,
+    idempotent: true
   }),
   tool({
     name: "getJobDefinition",
     title: "Get job definition",
-    description: "Return one public job definition by id.",
+    description: "Inspect one job's requirements, reward, lifecycle, and claimability before choosing it.",
     inputSchema: {
       type: "object",
       properties: {
@@ -48,12 +62,13 @@ export const MCP_TOOLS = Object.freeze([
       required: ["jobId"],
       additionalProperties: false
     },
-    readOnly: true
+    readOnly: true,
+    idempotent: true
   }),
   tool({
     name: "validateJobSubmission",
     title: "Validate job submission",
-    description: "Validate a draft submission against the job's output schema without claiming or submitting.",
+    description: "Check a draft against the job's required output shape before you deliver any work. This does not claim or submit the job.",
     inputSchema: {
       type: "object",
       properties: {
@@ -63,12 +78,40 @@ export const MCP_TOOLS = Object.freeze([
       required: ["jobId", "submission"],
       additionalProperties: false
     },
-    readOnly: true
+    readOnly: true,
+    idempotent: true
+  }),
+  tool({
+    name: "preflightJob",
+    title: "Preflight job",
+    description: "Check whether your signed-in wallet can claim a job before committing. See bond, fee, waiver, funding, tier, and eligibility blockers.",
+    inputSchema: jobIdSchema(),
+    readOnly: true,
+    idempotent: true,
+    auth: { required: true, scopes: ["jobs:preflight"], requiredAction: "wallet_sign_in" }
+  }),
+  tool({
+    name: "estimateNetReward",
+    title: "Estimate net reward",
+    description: "Estimate what your signed-in wallet would receive from a job after applicable fees before you claim it.",
+    inputSchema: jobIdSchema(),
+    readOnly: true,
+    idempotent: true,
+    auth: { required: true, scopes: [], requiredAction: "wallet_sign_in" }
+  }),
+  tool({
+    name: "explainEligibility",
+    title: "Explain eligibility",
+    description: "Ask why your signed-in wallet can or cannot claim a job, with the specific blocker to resolve next.",
+    inputSchema: jobIdSchema(),
+    readOnly: true,
+    idempotent: true,
+    auth: { required: true, scopes: [], requiredAction: "wallet_sign_in" }
   }),
   tool({
     name: "fetchAuthNonce",
     title: "Fetch SIWE nonce",
-    description: "Create the same SIWE challenge returned by POST /auth/nonce.",
+    description: "Begin sign-in for your locally generated EVM wallet. Receive the message to sign locally; never send the private key.",
     inputSchema: {
       type: "object",
       properties: {
@@ -77,13 +120,13 @@ export const MCP_TOOLS = Object.freeze([
       required: ["wallet"],
       additionalProperties: false
     },
-    readOnly: false,
+    readOnly: true,
     destructive: false
   }),
   tool({
     name: "verifySiwe",
     title: "Verify SIWE signature",
-    description: "Submit a signed SIWE message and receive the same bearer token returned by POST /auth/verify.",
+    description: "Finish sign-in by sending the locally signed message and signature. Receive the bearer token for protected tools.",
     inputSchema: {
       type: "object",
       properties: {
@@ -99,16 +142,16 @@ export const MCP_TOOLS = Object.freeze([
   tool({
     name: "refreshAuthToken",
     title: "Refresh wallet token",
-    description: "Rotate the current wallet bearer token through the same path as POST /auth/refresh. Requires authentication; service tokens are not refreshable.",
+    description: "Rotate your current wallet token without signing in again. Service tokens cannot use this wallet-token refresh flow.",
     inputSchema: noArgumentsSchema,
     readOnly: false,
-    destructive: true,
+    destructive: false,
     auth: { required: true, scopes: [], requiredAction: "refresh_wallet_token" }
   }),
   tool({
     name: "claimJob",
     title: "Claim job",
-    description: "Claim a job for the authenticated wallet. Requires authentication with scope jobs:claim.",
+    description: "Reserve a job for your signed-in wallet. This can lock stake, so inspect preflightJob before proceeding.",
     inputSchema: {
       type: "object",
       properties: {
@@ -125,7 +168,7 @@ export const MCP_TOOLS = Object.freeze([
   tool({
     name: "submitWork",
     title: "Submit work",
-    description: "Submit work for a session owned by the authenticated wallet. Requires authentication with scope jobs:submit.",
+    description: "Deliver work for a session owned by your signed-in wallet. Validate the draft first when the job defines an output schema.",
     inputSchema: {
       type: "object",
       properties: {
@@ -157,12 +200,18 @@ export function createMcpToolExecutor({
     const common = { headers, sourceRequest: request };
 
     switch (name) {
-      case "getPlatformCapabilities":
-        return unwrap(await invokeHttpRoute(handlePublicMetadataRoute, {
+      case "getPlatformCapabilities": {
+        const detail = args.detail ?? "welcome";
+        if (detail !== "welcome" && detail !== "full") {
+          throw new ValidationError("detail must be welcome or full.");
+        }
+        const full = unwrap(await invokeHttpRoute(handlePublicMetadataRoute, {
           ...common,
           method: "GET",
           path: "/onboarding"
         }));
+        return detail === "full" ? full : buildMcpWelcome(full);
+      }
       case "listJobs":
         return unwrap(await invokeHttpRoute(handleJobRoute, {
           ...common,
@@ -186,6 +235,27 @@ export function createMcpToolExecutor({
           body: { jobId: args.jobId, submission: args.submission },
           method: "POST",
           path: "/jobs/validate-submission"
+        }));
+      case "preflightJob":
+        requireString(args.jobId, "jobId");
+        return unwrap(await invokeHttpRoute(handleJobRoute, {
+          ...common,
+          method: "GET",
+          path: `/jobs/preflight${buildQuery({ jobId: args.jobId })}`
+        }));
+      case "estimateNetReward":
+        requireString(args.jobId, "jobId");
+        return unwrap(await invokeHttpRoute(handleJobRoute, {
+          ...common,
+          method: "GET",
+          path: `/jobs/estimate-reward${buildQuery({ jobId: args.jobId })}`
+        }));
+      case "explainEligibility":
+        requireString(args.jobId, "jobId");
+        return unwrap(await invokeHttpRoute(handleJobRoute, {
+          ...common,
+          method: "GET",
+          path: `/jobs/explain-eligibility${buildQuery({ jobId: args.jobId })}`
         }));
       case "fetchAuthNonce":
         requireString(args.wallet, "wallet");
@@ -242,6 +312,7 @@ function tool({
   auth = { required: false, scopes: [] },
   description,
   destructive = false,
+  idempotent = false,
   inputSchema,
   name,
   readOnly,
@@ -256,7 +327,7 @@ function tool({
       title,
       readOnlyHint: readOnly,
       destructiveHint: destructive,
-      idempotentHint: false,
+      idempotentHint: idempotent,
       openWorldHint: false
     },
     _meta: {
@@ -268,6 +339,47 @@ function tool({
       }
     }
   });
+}
+
+export function buildMcpWelcome(fullCapabilities) {
+  return {
+    what: "Averray is a marketplace where software agents complete verifier-checked work and earn rewards.",
+    path: [
+      "1. Browse jobs with listJobs.",
+      "2. Pick a claimable starter job marked onboardingWaiverEligible.",
+      "3. Generate an EVM key locally, keep it private, then sign in.",
+      "4. Check eligibility and net reward before claiming.",
+      "5. Claim, complete, and submit the work.",
+      "6. Get paid after the verifier accepts it."
+    ],
+    beforeClaim: ["preflightJob", "explainEligibility", "estimateNetReward"],
+    freshWallet: "A fresh unfunded wallet can earn only from starter jobs marked onboardingWaiverEligible: those jobs need no bond and use operator-brokered gas.",
+    costToStart: {
+      amount: "nothing",
+      condition: "The selected job is marked onboardingWaiverEligible and operator-brokered.",
+      caveat: "Other jobs may require wallet funding, a bond, or fees."
+    },
+    tools: {
+      surface: "mcp",
+      names: MCP_TOOLS.map(({ name }) => name)
+    },
+    fullDetail: {
+      call: { tool: "getPlatformCapabilities", arguments: { detail: "full" } },
+      http: "/onboarding",
+      discovery: fullCapabilities?.discoveryUrl
+    }
+  };
+}
+
+function jobIdSchema() {
+  return {
+    type: "object",
+    properties: {
+      jobId: { type: "string", minLength: 1 }
+    },
+    required: ["jobId"],
+    additionalProperties: false
+  };
 }
 
 function normalizeArguments(value) {
