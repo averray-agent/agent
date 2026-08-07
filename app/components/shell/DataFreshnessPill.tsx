@@ -11,10 +11,11 @@ import { cn } from "@/lib/utils/cn";
  * the topbar, so an operator scanning the dashboard knows whether to
  * trust the numbers in front of them.
  *
- * Four states only — keep it tight:
+ * Five states only — keep it tight:
  *   - `live`     · everything resolved, no errors      → green
  *   - `loading`  · still waiting on the first response → blue, pulsing
  *   - `partial`  · signed-in but some surfaces 401/403 → amber "Partial view"
+ *   - `locked`   · the whole surface answered 401/403  → neutral "Not authorized"
  *   - `fallback` · request errored or returned nothing → amber
  *
  * "Error" is not a separate state because operators mainly need to
@@ -23,8 +24,15 @@ import { cn } from "@/lib/utils/cn";
  * admin surfaces while the public feeds stay live — the old behavior
  * rendered that as a green "Live API", which fabricated an all-quiet
  * room (the overview's zeros looked authoritative).
+ *
+ * `locked` is `partial` taken to its limit: not "some of this page is
+ * gated" but "all of it is". It carries the same word the app already
+ * uses per-request in lib/api/feed-presence.js ("locked" · API answered
+ * 401/403), and it is deliberately NOT amber — an authorization refusal
+ * is not a fault, and badging it "Unavailable" sends the reader hunting
+ * for an outage that isn't happening.
  */
-export type FreshnessState = "live" | "loading" | "partial" | "fallback";
+export type FreshnessState = "live" | "loading" | "partial" | "locked" | "fallback";
 
 const STATE_CLS: Record<
   FreshnessState,
@@ -45,6 +53,11 @@ const STATE_CLS: Record<
     bg: "bg-[var(--avy-warn-soft)]",
     text: "text-[var(--avy-warn)]",
   },
+  locked: {
+    dot: "bg-[var(--avy-muted)]",
+    bg: "bg-[var(--avy-line-soft)]",
+    text: "text-[var(--avy-muted)]",
+  },
   fallback: {
     dot: "bg-[var(--avy-warn)]",
     bg: "bg-[var(--avy-warn-soft)]",
@@ -56,6 +69,7 @@ const STATE_LABEL: Record<FreshnessState, string> = {
   live: "Live API",
   loading: "Loading",
   partial: "Partial view",
+  locked: "Not authorized",
   fallback: "Unavailable",
 };
 
@@ -64,6 +78,8 @@ const STATE_TITLE: Record<FreshnessState, string> = {
   loading: "Still waiting on the first API response.",
   partial:
     "Some surfaces on this page are locked for this session (missing role or capability). Everything else is live.",
+  locked:
+    "The API answered and refused this session (missing role or capability). Nothing here failed to read.",
   fallback:
     "API errored, is locked behind auth, or has not emitted this surface yet.",
 };
@@ -112,6 +128,11 @@ export function DataFreshnessPill({
  * inside the authed layout, whose sign-in guard bounces 401s, so a
  * persistent auth error here means "signed in, but this wallet lacks
  * the role/capability for some surfaces" — the pill says so.
+ *
+ * This helper never returns `locked`, on purpose: its callers are
+ * multi-request pages that still render something. A page whose ONE
+ * request is refused passes `locked` directly (see the transparency
+ * page), because there "Partial view" would overstate what is rendered.
  */
 export function freshnessFromRequests(
   ...requests: { data?: unknown; error?: unknown; isLoading?: boolean }[]

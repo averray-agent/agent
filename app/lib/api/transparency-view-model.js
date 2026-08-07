@@ -14,12 +14,21 @@ export const TRANSPARENCY_STATUS_LABEL = Object.freeze({
   unknown: "No read",
 });
 
+// Ordered best → worst. Must cover every FreshnessState: an unranked
+// state falls back to the WORST rank, never the best, so a state added
+// to the shared vocabulary can never quietly make the page read fresher
+// than it is.
 const FRESHNESS_RANK = Object.freeze({
   live: 0,
   loading: 1,
   partial: 2,
-  fallback: 3,
+  locked: 3,
+  fallback: 4,
 });
+
+function freshnessRank(state) {
+  return FRESHNESS_RANK[state] ?? FRESHNESS_RANK.fallback;
+}
 
 const READ_AT_FORMATTER = new Intl.DateTimeFormat("en-GB", {
   timeZone: "UTC",
@@ -58,7 +67,7 @@ export function worstTransparencyFreshness(fields) {
   return fields
     .map((field) => mapTransparencyStatus(field.status))
     .reduce((worst, current) =>
-      FRESHNESS_RANK[current] > FRESHNESS_RANK[worst] ? current : worst, "live");
+      freshnessRank(current) > freshnessRank(worst) ? current : worst, "live");
 }
 
 export function aggregateDisclosure(field) {

@@ -14,6 +14,10 @@ import type {
   TransparencyPayload,
 } from "@/lib/api/transparency-types";
 import {
+  transparencyAuthorizationNotice,
+  type TransparencyUnauthorizedState,
+} from "@/lib/api/transparency-access";
+import {
   aggregateDisclosure,
   extractProofAnchors,
   formatReadAt,
@@ -81,6 +85,107 @@ export function TransparencyPanel({ data }: { data: TransparencyPayload }) {
         <span><b className="font-semibold text-[var(--avy-ink)]">Read-only</b> · this page cannot move capital</span>
         <span>Schema · <b className="font-semibold text-[var(--avy-ink)]">{data.schemaVersion}</b></span>
         <span>Generated · <b className="font-semibold text-[var(--avy-ink)]">{formatReadAt(data.generatedAtMs)}</b></span>
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Authorization state — the API answered 401/403 for this session.
+ *
+ * Deliberately does NOT reuse the `no read` tiles below: those mean "we
+ * tried to read this and could not", which is false when the refusal
+ * happens at the auth boundary and no read is attempted at all. The
+ * sections are named as gated instead, so the reader learns what the
+ * capability would unlock without being told a read failed.
+ */
+export function TransparencyAuthorizationState({
+  access,
+}: {
+  access: TransparencyUnauthorizedState;
+}) {
+  const notice = transparencyAuthorizationNotice(access);
+
+  return (
+    <div className="flex w-full max-w-[1100px] flex-col gap-5" data-transparency-state="unauthorized">
+      <TransparencyTopbar freshness="locked" />
+
+      <section className="grid gap-2.5">
+        <span
+          className="font-[family-name:var(--font-display)] text-[11px] font-extrabold uppercase text-[var(--avy-accent)]"
+          style={{ letterSpacing: "0.14em" }}
+        >
+          Capital
+        </span>
+        <h1 className="m-0 max-w-none font-[family-name:var(--font-display)] text-[clamp(2.1rem,4vw,2.5rem)] font-bold leading-[1.06] text-[var(--avy-ink)]">
+          What the treasury holds, and how you check it.
+        </h1>
+        <p className="m-0 max-w-[68ch] text-base leading-relaxed text-[var(--avy-muted)]">
+          {notice.headline}
+        </p>
+      </section>
+
+      <TreasuryPanel
+        eyebrow="Not authorized"
+        title="This view is gated on a capability"
+        sub="the API answered; it refused this session"
+      >
+        <div className="grid gap-3 p-[18px]">
+          <p className="m-0 font-[family-name:var(--font-mono)] text-sm leading-relaxed text-[var(--avy-ink)]">
+            {notice.capabilitySentence}
+          </p>
+          <p className="m-0 font-[family-name:var(--font-mono)] text-sm leading-relaxed text-[var(--avy-ink)]">
+            {notice.identitySentence}
+          </p>
+          <p className="m-0 border-l-2 border-[var(--avy-line)] pl-2.5 font-[family-name:var(--font-mono)] text-[11.5px] leading-relaxed text-[var(--avy-muted)]">
+            {notice.boundarySentence}
+          </p>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pt-0.5">
+            <Link
+              href="/sign-in"
+              className="inline-flex h-[34px] items-center rounded-[var(--radius)] bg-[var(--avy-accent)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-white transition hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"
+            >
+              Sign in with an operator account
+            </Link>
+            <span className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
+              {notice.nextStep}
+            </span>
+          </div>
+        </div>
+
+        <div className="border-t border-[var(--avy-line)] bg-[var(--avy-paper-solid)]">
+          <div className="border-b border-[var(--avy-line-soft)] px-4 py-2.5">
+            <span
+              className="font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]"
+              style={{ letterSpacing: "0.12em" }}
+            >
+              Gated by this capability
+            </span>
+          </div>
+          {notice.gatedSections.map((section) => (
+            <div
+              key={section.title}
+              className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--avy-line-soft)] px-4 py-3 last:border-b-0"
+            >
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="font-[family-name:var(--font-display)] text-[13px] font-bold text-[var(--avy-ink)]">
+                  {section.title}
+                </span>
+                <span className="font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]">
+                  {section.meta}
+                </span>
+              </span>
+              <DataFreshnessPill state="locked" />
+            </div>
+          ))}
+        </div>
+      </TreasuryPanel>
+
+      <p className="flex flex-wrap gap-x-5 gap-y-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
+        <span><b className="font-semibold text-[var(--avy-ink)]">Read-only</b> · this page cannot move capital</span>
+        {access.status ? (
+          <span>Refused with · <b className="font-semibold text-[var(--avy-ink)]">HTTP {access.status}{access.code ? ` ${access.code}` : ""}</b></span>
+        ) : null}
       </p>
     </div>
   );
