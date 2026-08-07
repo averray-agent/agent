@@ -59,6 +59,8 @@ import { createTransparencyRoutes } from "./transparency-routes.js";
 import { createUsdcLiquidityRoutes } from "./usdc-liquidity-routes.js";
 import { createVerifierRoutes } from "./verifier-routes.js";
 import { createXcmRequestRoutes } from "./xcm-request-routes.js";
+import { createMcpRoute } from "../mcp/handler.js";
+import { createMcpToolExecutor } from "../mcp/tools.js";
 import { makePolicy } from "../../core/builtin-policies.js";
 import { createPosterOnboardingService } from "../../core/poster-onboarding.js";
 import { createConfiguredIndexerHealthProbe } from "../../services/indexer-health-probe.js";
@@ -502,6 +504,19 @@ const handleJobRoute = createJobRoutes({
   posterOnboardingService,
 });
 
+const handleMcpJobRoute = createJobRoutes({
+  authMiddleware,
+  enforceLimit,
+  ensureSessionOwnership,
+  rateLimitConfig,
+  readJsonBody,
+  respond,
+  service,
+  externalPostingService,
+  posterOnboardingService,
+  protocol: "mcp",
+});
+
 const handleExternalJobRoute = createExternalJobRoutes({
   authMiddleware,
   enforceLimit,
@@ -647,6 +662,22 @@ const handleAuthRoute = createAuthRoutes({
   stateStore,
 });
 
+const executeMcpTool = createMcpToolExecutor({
+  handleAuthRoute,
+  handleJobRoute: handleMcpJobRoute,
+  handlePublicMetadataRoute
+});
+
+const handleMcpRoute = createMcpRoute({
+  authMiddleware,
+  clientIp,
+  enforceLimit,
+  executeTool: executeMcpTool,
+  rateLimitConfig,
+  readJsonBody,
+  respond
+});
+
 const handleAccountRoute = createAccountRoutes({
   authMiddleware,
   buildIdempotentMutationContext,
@@ -737,6 +768,10 @@ const server = createServer(async (request, response) => {
 
   try {
     // ---------- public routes ----------
+
+    if (await handleMcpRoute({ request, response, pathname })) {
+      return;
+    }
 
     if (await handlePublicMetadataRoute({ request, response, pathname })) {
       return;

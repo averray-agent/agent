@@ -13,15 +13,16 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "../..");
 const checkOnly = process.argv.includes("--check");
 
-const targets = [
+const committedTargets = [
   "discovery/agent-tools.json",
-  "discovery/.well-known/agent-tools.json",
-  "site/.well-known/agent-tools.json"
+  "discovery/.well-known/agent-tools.json"
 ];
+const generatedTargets = ["site/.well-known/agent-tools.json"];
+const targets = checkOnly ? committedTargets : [...committedTargets, ...generatedTargets];
 
-// The committed copies are the production canonical: averray.com serves
-// mainnet since the cutover, so they pin the mainnet chain block. Live API
-// stacks derive theirs from AUTH_CHAIN_ID instead of these files.
+// The discovery/ copies are the committed production canonical. The site/
+// mirror is deploy output: regenerate it on sync, but do not require it to be
+// committed. All copies pin mainnet; live API stacks derive from AUTH_CHAIN_ID.
 const content = `${JSON.stringify(buildDiscoveryManifest({ chainId: POLKADOT_HUB_MAINNET_CHAIN_ID }), null, 2)}\n`;
 let drifted = false;
 

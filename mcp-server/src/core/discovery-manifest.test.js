@@ -25,7 +25,8 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.equal(manifest.discoveryUrl, "https://example.com/.well-known/agent-tools.json");
   assert.equal(manifest.profile, "https://app.example.com/agents/<wallet>");
   assert.deepEqual(manifest.protocolEndpoints, {
-    http: "https://api.example.com"
+    http: "https://api.example.com",
+    mcp: "https://api.example.com/mcp"
   });
   assert.equal(manifest.onboarding.entrypoint, "https://api.example.com/onboarding");
   assert.equal(manifest.onboarding.posterEntrypoint, "https://api.example.com/poster/onboarding");
@@ -135,7 +136,7 @@ test("A1 manifest payload: walletless arrival states the perk, proof, and limits
   );
 });
 
-test("A4 manifest honesty: discovery is HTTP-only and mainnet pins the live 500 bps fee", () => {
+test("A4 manifest honesty: discovery advertises the served MCP endpoint and mainnet pins the live 500 bps fee", () => {
   const manifest = buildDiscoveryManifest({ chainId: POLKADOT_HUB_MAINNET_CHAIN_ID });
   const deployment = JSON.parse(readFileSync(
     new URL("../../../deployments/mainnet.json", import.meta.url),
@@ -143,9 +144,11 @@ test("A4 manifest honesty: discovery is HTTP-only and mainnet pins the live 500 
   ));
 
   assert.equal(manifest.version, "0.4.0");
-  assert.deepEqual(manifest.protocols, ["http"]);
-  assert.deepEqual(manifest.protocolEndpoints, { http: "https://api.averray.com" });
-  assert.equal("mcp" in manifest.protocolEndpoints, false);
+  assert.deepEqual(manifest.protocols, ["http", "mcp"]);
+  assert.deepEqual(manifest.protocolEndpoints, {
+    http: "https://api.averray.com",
+    mcp: "https://api.averray.com/mcp"
+  });
   assert.equal(
     deployment.contracts.escrowCore,
     "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC"

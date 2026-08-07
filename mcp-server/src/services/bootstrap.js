@@ -738,6 +738,10 @@ function loadRateLimitConfig(env = process.env) {
     // spending tokens to retry. 6/min is enough headroom for a tab that
     // wakes up after sleep and a couple of background re-syncs.
     authRefresh: buildLimit(env, "RATE_LIMIT_AUTH_REFRESH", { limit: 6, windowSeconds: 60 }),
+    // MCP has independent public and authenticated budgets. Invalid bearer
+    // tokens are charged to the anonymous/IP bucket so they cannot bypass it.
+    mcpAnonymous: buildLimit(env, "RATE_LIMIT_MCP_ANONYMOUS", { limit: 60, windowSeconds: 60 }),
+    mcpAuthenticated: buildLimit(env, "RATE_LIMIT_MCP_AUTHENTICATED", { limit: 300, windowSeconds: 60 }),
     adminJobs: buildLimit(env, "RATE_LIMIT_ADMIN_JOBS", { limit: 60, windowSeconds: 60 }),
     // Draft validation does schema + policy work per request; the open-draft
     // cap and reward floor only bound stored state, so create + status-poll
@@ -764,8 +768,8 @@ export function loadHttpConfig(env = process.env) {
     allowedOrigins: new Set(allowedOrigins),
     allowAllOrigins,
     allowedMethods: "GET, POST, OPTIONS",
-    allowedHeaders: "authorization, content-type, last-event-id, x-request-id",
-    exposedHeaders: "x-request-id, retry-after",
+    allowedHeaders: "authorization, content-type, last-event-id, mcp-method, mcp-name, mcp-protocol-version, mcp-session-id, x-request-id",
+    exposedHeaders: "mcp-protocol-version, mcp-session-id, x-request-id, retry-after",
     maxAgeSeconds: parsePositiveInt(env.CORS_MAX_AGE_SECONDS, 600)
   };
 }
