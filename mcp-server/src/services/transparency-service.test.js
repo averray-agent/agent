@@ -5,6 +5,7 @@ import {
   TransparencyService,
   aggregateRawReadings,
   assertCacheFreshnessInvariant,
+  derivePositionEconomics,
   deriveFieldStatus,
   remainingEscrowObligation,
   toField,
@@ -19,6 +20,8 @@ const TREASURY_ID = "0x93511e8deef3e7ec69cc1f18a573176da9870a0fb474ab2e0c18d88a5
 const CONVERTED = "0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3";
 const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const NOW = Date.parse("2026-08-06T12:00:00.000Z");
+const DEPOSIT_REQUEST = `0x${"ab".repeat(32)}`;
+const DEPOSIT_TX = `0x${"cd".repeat(32)}`;
 
 function settlementReceipt(seed, workerAmountRaw) {
   return {
@@ -114,7 +117,39 @@ function harness(overrides = {}) {
             ? "external"
             : id === "ingested"
               ? "github_issue"
-              : "manual"
+          : "manual"
+        };
+      },
+      async listEventLog() {
+        if (overrides.missingDepositEvent) return { events: [], gap: false };
+        return {
+          events: [{
+            id: "bank-deposit-sell",
+            topic: "bank.v22_leg_dispatched",
+            correlationId: DEPOSIT_REQUEST,
+            timestamp: "2026-08-06T10:30:00.000Z",
+            data: {
+              requestId: DEPOSIT_REQUEST,
+              wrapper: WRAPPER,
+              leg: "deposit_sell",
+              txHash: DEPOSIT_TX,
+              blockNumber: 19_100_000,
+              dryRun: {
+                events: [{
+                  section: "Broadcast",
+                  method: "Swapped",
+                  data: {
+                    fillerType: "AAVE",
+                    assetIn: 22,
+                    assetOut: 1003,
+                    inputs: [{ asset: "22", amount: "10,000,000" }],
+                    outputs: [{ asset: "1,003", amount: "10,000,000" }]
+                  }
+                }]
+              }
+            }
+          }],
+          gap: false
         };
       }
     },
@@ -141,6 +176,19 @@ function harness(overrides = {}) {
       async getJob(id) {
         if (overrides.failJob === id) throw new Error("job rpc failed");
         return chainJobs.get(id) ?? job({ state: 0 });
+      },
+      async getXcmRequest(id) {
+        if (id !== DEPOSIT_REQUEST) throw new Error("unexpected request");
+        return {
+          requestId: id,
+          queuedBy: "0x631A09913B2403b18b2b659a1397916621b29b4c",
+          statusLabel: "succeeded",
+          settledSharesRaw: "10000000"
+        };
+      },
+      async getHydrationAdapterRequest(id) {
+        if (overrides.failCommitted) throw new Error("adapter request rpc failed");
+        return { requestId: id, kind: 0, requestedAssetsRaw: "10050000" };
       }
     },
     venueBalanceReader: {
@@ -183,6 +231,11 @@ function harness(overrides = {}) {
             readAtMs: NOW,
             lastError: null,
             candidates: [{ version: "2.2.1", wrapper: WRAPPER, dispatchPaused: false, lastError: null }]
+          },
+          calibration: overrides.calibration ?? {
+            provenRaw: "10000000",
+            provenAtMs: NOW - 60_000,
+            provenSource: "erc20:0x2ec4884088d84e5c2970a034732e5209b0acfa93.balanceOf(0x48df881b65e682f05ac24dc8f668a8938225e973)"
           }
         };
       }
@@ -245,12 +298,51 @@ test("transparency payload composes flow, escrow, and generation-bound treasury 
   assert.equal(payload.treasury.lines.assetHubMultisig.balance.value, "0.878804");
   assert.equal(payload.treasury.lines.hydrationPosition.total.value, "10");
   assert.equal(payload.treasury.lines.operatingFloat.balance.value, "0.03");
+  assert.equal(payload.treasury.position.deposited.value, "10");
+  assert.equal(payload.treasury.position.positionNow.value, "10");
+  assert.equal(payload.treasury.position.growth.value, "0");
+  assert.equal(payload.treasury.position.frictionPaid.value, "0.02");
+  assert.equal(payload.treasury.position.netVsCommitted.value, "-0.02");
+  assert.match(payload.treasury.position.deposited.source, /Broadcast\.Swapped/u);
+  assert.match(payload.treasury.position.deposited.proof, new RegExp(DEPOSIT_TX, "u"));
   assert.equal(payload.treasury.lines.hydrationPosition.principal.status, "unknown");
   assert.match(payload.treasury.lines.hydrationPosition.note.value, /cannot cleanly split/u);
   assert.equal(payload.treasury.generation.version.value, "2.2.1");
   assert.equal(payload.treasury.generation.state.value, "ok");
   assert.match(payload.treasury.lines.hydrationPosition.total.source, new RegExp(WRAPPER, "iu"));
   assert.match(payload.treasury.lines.assetHubMultisig.balance.proof, new RegExp(TREASURY_ID, "iu"));
+});
+
+test("position economics are real-read subtractions and preserve signed growth/net", () => {
+  const reading = (raw, readAtMs = NOW) => ({ raw: BigInt(raw), readAtMs, source: "chain", proof: "chain" });
+  const result = derivePositionEconomics({
+    deposited: reading(10_000_000),
+    positionNow: reading(10_000_596),
+    committed: reading(10_050_000),
+    floatRemaining: reading(29_776),
+    configuredWrapper: WRAPPER
+  });
+  assert.equal(result.growth.raw, 596n);
+  assert.equal(result.frictionPaid.raw, 20_224n);
+  assert.equal(result.netVsCommitted.raw, -19_628n);
+  assert.match(result.growth.source, /Broadcast\.Swapped/u);
+  assert.doesNotMatch(result.growth.source, /adapter.*book/iu);
+});
+
+test("missing deposited evidence makes growth and net unknown without adapter-book fallback", async () => {
+  const payload = await harness({ missingDepositEvent: true }).getSnapshot();
+  assert.equal(payload.treasury.position.deposited.status, "unknown");
+  assert.equal(payload.treasury.position.growth.status, "unknown");
+  assert.equal(payload.treasury.position.netVsCommitted.status, "unknown");
+  assert.equal(payload.treasury.position.positionNow.value, "10");
+  assert.doesNotMatch(payload.treasury.position.growth.source, /adapter.*book/iu);
+});
+
+test("adapter commitment failure keeps observed growth readable but friction and net unknown", async () => {
+  const payload = await harness({ failCommitted: true }).getSnapshot();
+  assert.equal(payload.treasury.position.growth.value, "0");
+  assert.equal(payload.treasury.position.frictionPaid.status, "unknown");
+  assert.equal(payload.treasury.position.netVsCommitted.status, "unknown");
 });
 
 test("a failed field becomes unknown without taking down the endpoint or poisoning totals", async () => {

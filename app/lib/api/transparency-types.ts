@@ -53,6 +53,13 @@ export interface TransparencyPayload {
       reason: TransparencyField<string>;
     };
     totalUsdcEquivalent: TransparencyField<string>;
+    position?: {
+      deposited: TransparencyField<string>;
+      positionNow: TransparencyField<string>;
+      growth: TransparencyField<string>;
+      frictionPaid: TransparencyField<string>;
+      netVsCommitted: TransparencyField<string>;
+    };
     lines: {
       assetHubMultisig: {
         balance: TransparencyField<string>;

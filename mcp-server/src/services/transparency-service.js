@@ -72,6 +72,13 @@ export class TransparencyService {
     const treasuryLine = this.usdcField(treasuryBalance, "chain", generatedAtMs);
     const hydrationTotal = this.usdcField(bank.position, "bank", generatedAtMs);
     const operatingFloat = this.usdcField(bank.float, "bank", generatedAtMs);
+    const positionEconomics = derivePositionEconomics({
+      deposited: bank.deposited,
+      positionNow: bank.position,
+      committed: bank.committed,
+      floatRemaining: bank.float,
+      configuredWrapper: bank.configuredWrapper
+    });
     const total = aggregateRawReadings(
       [treasuryBalance, bank.position, bank.float],
       {
@@ -96,6 +103,10 @@ export class TransparencyService {
       treasury: {
         generation,
         totalUsdcEquivalent: this.usdcField(total, "bank", generatedAtMs),
+        position: Object.fromEntries(Object.entries(positionEconomics).map(([name, reading]) => [
+          name,
+          this.usdcField(reading, "bank", generatedAtMs)
+        ])),
         lines: {
           assetHubMultisig: {
             balance: treasuryLine,
@@ -426,26 +437,34 @@ export class TransparencyService {
       const floatExpected = isCorrectFloatTarget(floatTarget)
         ? describeBalanceTarget(floatTarget)
         : null;
+      const position = bankReading(feed?.position, positionExpected, {
+        source: positionExpected
+          ? `eth_call balanceOf ${shortAddress(positionTarget.contract)} @ hydration | wrapper ${configuredWrapper}`
+          : `invalid aUSDC lens | wrapper ${configuredWrapper ?? "unknown"}`,
+        proof: positionExpected
+          ? `${safeEndpoint(positionTarget.endpoint)} contract ${positionTarget.contract} account ${positionTarget.account} truncate20 ${positionTarget.evmAccount}`
+          : "aUSDC must use ERC20 balanceOf(truncate20(converted AccountId32)); ORML asset 1003 is forbidden",
+        fallbackReadAtMs: readAtMs
+      });
+      const float = bankReading(feed?.float, floatExpected, {
+        source: floatExpected
+          ? `tokens.accounts(${floatTarget.account}, ${floatTarget.assetId}) @ hydration | wrapper ${configuredWrapper}`
+          : `invalid asset-22 lens | wrapper ${configuredWrapper ?? "unknown"}`,
+        proof: floatExpected
+          ? `${safeEndpoint(floatTarget.endpoint)} Tokens.accounts(${floatTarget.account}, ${floatTarget.assetId})`
+          : "operating float must use ORML Tokens.accounts asset 22",
+        fallbackReadAtMs: readAtMs
+      });
+      const economics = await this.readPositionEconomicsEvidence({
+        configuredWrapper,
+        calibration: feed?.calibration,
+        positionExpected
+      });
       return {
         configuredWrapper,
-        position: bankReading(feed?.position, positionExpected, {
-          source: positionExpected
-            ? `eth_call balanceOf ${shortAddress(positionTarget.contract)} @ hydration | wrapper ${configuredWrapper}`
-            : `invalid aUSDC lens | wrapper ${configuredWrapper ?? "unknown"}`,
-          proof: positionExpected
-            ? `${safeEndpoint(positionTarget.endpoint)} contract ${positionTarget.contract} account ${positionTarget.account} truncate20 ${positionTarget.evmAccount}`
-            : "aUSDC must use ERC20 balanceOf(truncate20(converted AccountId32)); ORML asset 1003 is forbidden",
-          fallbackReadAtMs: readAtMs
-        }),
-        float: bankReading(feed?.float, floatExpected, {
-          source: floatExpected
-            ? `tokens.accounts(${floatTarget.account}, ${floatTarget.assetId}) @ hydration | wrapper ${configuredWrapper}`
-            : `invalid asset-22 lens | wrapper ${configuredWrapper ?? "unknown"}`,
-          proof: floatExpected
-            ? `${safeEndpoint(floatTarget.endpoint)} Tokens.accounts(${floatTarget.account}, ${floatTarget.assetId})`
-            : "operating float must use ORML Tokens.accounts asset 22",
-          fallbackReadAtMs: readAtMs
-        }),
+        position,
+        float,
+        ...economics,
         subject: {
           value: feed?.subject ?? null,
           unit: "subject",
@@ -460,7 +479,75 @@ export class TransparencyService {
         configuredWrapper: wrapper,
         position: { raw: null, readAtMs, source: `bank_lane_feed position | wrapper ${wrapper ?? "unknown"}`, proof },
         float: { raw: null, readAtMs, source: `bank_lane_feed float | wrapper ${wrapper ?? "unknown"}`, proof },
+        deposited: unknownPositionReading("deposit evidence unavailable because bank feed failed", wrapper, readAtMs, proof),
+        committed: unknownPositionReading("committed capital unavailable because bank feed failed", wrapper, readAtMs, proof),
         subject: { value: null, unit: "subject", readAtMs, source: "bank_lane_feed subject", proof }
+      };
+    }
+  }
+
+  async readPositionEconomicsEvidence({ configuredWrapper, calibration, positionExpected }) {
+    const unavailable = (label, proof) => unknownPositionReading(label, configuredWrapper, this.now(), proof);
+    let deposit;
+    try {
+      const result = await this.stateStore.listEventLog({ topics: ["bank.v22_leg_dispatched"], limit: 500 });
+      deposit = findLatestDepositSwap(result?.events, configuredWrapper);
+      if (!deposit) throw new Error("no current-generation deposit_sell Broadcast.Swapped event in durable event log");
+      const calibrationRaw = calibrationMatches(calibration, positionExpected)
+        ? parseUnsignedRaw(calibration.provenRaw)
+        : null;
+      if (calibrationRaw === null || calibrationRaw !== deposit.raw) {
+        throw new Error("deposit Broadcast.Swapped output does not match the observed aUSDC calibration delta");
+      }
+    } catch (error) {
+      const proof = redactProviderError(error) || "deposit_event_read_failed";
+      return {
+        deposited: unavailable("deposit event evidence", proof),
+        committed: unavailable("staged adapter commitment", "deposit request identity unavailable")
+      };
+    }
+
+    let wrapperRequest;
+    try {
+      wrapperRequest = await this.gateway.getXcmRequest(deposit.requestId);
+      const settledSharesRaw = parseUnsignedRaw(wrapperRequest?.settledSharesRaw);
+      if (String(wrapperRequest?.statusLabel ?? "").toLowerCase() !== "succeeded"
+        || settledSharesRaw !== deposit.raw) {
+        throw new Error("deposit swap output does not match the finalized observed aUSDC delta");
+      }
+    } catch (error) {
+      const proof = redactProviderError(error) || "deposit_finalization_read_failed";
+      return {
+        deposited: unavailable("finalized deposit evidence", proof),
+        committed: unavailable("staged adapter commitment", "deposit finalization is unproved")
+      };
+    }
+
+    const deposited = {
+      raw: deposit.raw,
+      readAtMs: this.now(),
+      source: `Broadcast.Swapped{AAVE, asset 22 -> aUSDC 1003} + finalized observed ERC20 delta | wrapper ${configuredWrapper}`,
+      proof: `tx ${deposit.txHash} block ${deposit.blockNumber} event ${deposit.timestamp} request ${deposit.requestId}; finalized settledShares ${wrapperRequest.settledSharesRaw}; aUSDC calibration ${calibration.provenRaw} @ ${calibration.provenAtMs}`
+    };
+    try {
+      const adapterRequest = await this.gateway.getHydrationAdapterRequest(deposit.requestId, wrapperRequest);
+      const committedRaw = parseUnsignedRaw(adapterRequest?.requestedAssetsRaw);
+      if (committedRaw === null || Number(adapterRequest?.kind) !== 0) {
+        throw new Error("deposit adapter request has no committed asset amount");
+      }
+      return {
+        deposited,
+        committed: {
+          raw: committedRaw,
+          readAtMs: this.now(),
+          source: `HydrationUsdcAdapter.getAdapterRequest(${deposit.requestId}).requestedAssets | wrapper ${configuredWrapper}`,
+          proof: `${this.gateway?.config?.hydrationUsdcAdapterAddress ?? "configured adapter"} request ${deposit.requestId}`
+        }
+      };
+    } catch (error) {
+      return {
+        deposited,
+        committed: unavailable("staged adapter commitment", redactProviderError(error) || "adapter_request_read_failed")
       };
     }
   }
@@ -517,6 +604,29 @@ export function aggregateRawReadings(readings, { source, proof }) {
     source,
     proof: valid ? proof : `${proof}; incomplete because one or more component reads are unknown`
   };
+}
+
+export function derivePositionEconomics({
+  deposited,
+  positionNow,
+  committed,
+  floatRemaining,
+  configuredWrapper
+}) {
+  const wrapper = configuredWrapper ?? "unknown";
+  const growth = subtractRawReadings([positionNow, deposited], {
+    source: `aUSDC ERC20 positionNow - proved Broadcast.Swapped deposit | wrapper ${wrapper}`,
+    proof: "real-read subtraction; no adapter-book principal or rate model"
+  });
+  const frictionPaid = subtractRawReadings([committed, deposited, floatRemaining], {
+    source: `staged committed - proved deposit - live asset-22 float | wrapper ${wrapper}`,
+    proof: "real-read subtraction; no projected fee model"
+  });
+  const netVsCommitted = subtractRawReadings([growth, frictionPaid], {
+    source: `observed aUSDC growth - observed deployment friction | wrapper ${wrapper}`,
+    proof: "real-read subtraction; no APY, annualisation, or break-even projection"
+  });
+  return { deposited, positionNow, growth, frictionPaid, netVsCommitted };
 }
 
 export function assertCacheFreshnessInvariant(cacheTtlMs, freshnessWindowsMs) {
@@ -629,6 +739,72 @@ function bankReading(reading, expectedSource, { source, proof, fallbackReadAtMs 
   };
 }
 
+function findLatestDepositSwap(events, configuredWrapper) {
+  for (const event of [...(events ?? [])].reverse()) {
+    const evidence = event?.data ?? {};
+    if (evidence.leg !== "deposit_sell" || !sameAddress(evidence.wrapper, configuredWrapper)) continue;
+    const swap = (evidence.dryRun?.events ?? []).find((candidate) =>
+      String(candidate?.section ?? "").toLowerCase() === "broadcast"
+      && String(candidate?.method ?? "").toLowerCase() === "swapped"
+      && String(candidate?.data?.fillerType ?? "").toUpperCase() === "AAVE"
+      && Number(candidate?.data?.assetIn) === 22
+      && Number(candidate?.data?.assetOut) === 1003
+    );
+    const output = swap?.data?.outputs?.find((entry) => parseUnsignedRaw(entry?.asset) === 1003n);
+    const raw = parseUnsignedRaw(output?.amount);
+    const requestId = String(evidence.requestId ?? event.correlationId ?? "").toLowerCase();
+    const txHash = String(evidence.txHash ?? event.txHash ?? "");
+    const blockNumber = Number(evidence.blockNumber ?? event.blockNumber);
+    if (
+      raw === null
+      || raw <= 0n
+      || !/^0x[a-fA-F0-9]{64}$/u.test(requestId)
+      || !/^0x[a-fA-F0-9]{64}$/u.test(txHash)
+      || !Number.isSafeInteger(blockNumber)
+      || blockNumber <= 0
+    ) continue;
+    return { raw, requestId, txHash, blockNumber, timestamp: event.timestamp ?? evidence.capturedAt ?? "unknown" };
+  }
+  return null;
+}
+
+function calibrationMatches(calibration, expectedSource) {
+  return Boolean(
+    expectedSource
+    && calibration?.provenSource === expectedSource
+    && parseUnsignedRaw(calibration?.provenRaw) !== null
+    && Number.isFinite(calibration?.provenAtMs)
+  );
+}
+
+function subtractRawReadings([first, ...rest], { source, proof }) {
+  const readings = [first, ...rest];
+  const valid = readings.every((reading) => reading?.raw !== null && reading?.raw !== undefined);
+  const readAtValues = readings.map((reading) => reading?.readAtMs).filter(Number.isFinite);
+  return {
+    raw: valid
+      ? rest.reduce((value, reading) => value - BigInt(reading.raw), BigInt(first.raw))
+      : null,
+    readAtMs: readAtValues.length === readings.length ? Math.min(...readAtValues) : null,
+    source,
+    proof: valid ? proof : `${proof}; unknown because one or more required real reads are unavailable`
+  };
+}
+
+function parseUnsignedRaw(value) {
+  const normalized = String(value ?? "").replaceAll(",", "");
+  return /^(0|[1-9][0-9]*)$/u.test(normalized) ? BigInt(normalized) : null;
+}
+
+function unknownPositionReading(label, wrapper, readAtMs, proof) {
+  return {
+    raw: null,
+    readAtMs,
+    source: `${label} | wrapper ${wrapper ?? "unknown"}`,
+    proof
+  };
+}
+
 function isCorrectAusdcTarget(target) {
   return target?.ledger === "erc20"
     && target?.accountTransform === "hydration_truncate20"
@@ -665,9 +841,11 @@ function usdcAsset(gateway) {
 
 function formatUsdcRaw(raw) {
   const value = BigInt(raw);
-  const whole = value / USDC_SCALE;
-  const fractional = (value % USDC_SCALE).toString().padStart(USDC_DECIMALS, "0").replace(/0+$/u, "");
-  return fractional ? `${whole}.${fractional}` : whole.toString();
+  const sign = value < 0n ? "-" : "";
+  const absolute = value < 0n ? -value : value;
+  const whole = absolute / USDC_SCALE;
+  const fractional = (absolute % USDC_SCALE).toString().padStart(USDC_DECIMALS, "0").replace(/0+$/u, "");
+  return fractional ? `${sign}${whole}.${fractional}` : `${sign}${whole}`;
 }
 
 function sameAddress(left, right) {

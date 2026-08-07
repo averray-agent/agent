@@ -70,6 +70,48 @@ export function worstTransparencyFreshness(fields) {
       freshnessRank(current) > freshnessRank(worst) ? current : worst, "live");
 }
 
+export function transparencyFreshnessSentence(fields, label = "chain-read lines") {
+  const normalized = Array.isArray(fields) ? fields : [];
+  const total = normalized.length;
+  const counts = normalized.reduce((result, field) => {
+    const status = field?.status === "fresh" || field?.status === "stale" ? field.status : "unknown";
+    result[status] += 1;
+    return result;
+  }, { fresh: 0, stale: 0, unknown: 0 });
+  if (total === 0) return `No ${label} are available.`;
+  if (counts.fresh === total) {
+    return `${numberWord(total)} ${label}, all read within their freshness window.`;
+  }
+  const clauses = [];
+  if (counts.fresh) clauses.push(`${counts.fresh} fresh`);
+  if (counts.stale) clauses.push(`${counts.stale} stale`);
+  if (counts.unknown) clauses.push(`${counts.unknown} with no read`);
+  return `${numberWord(total)} ${label}: ${clauses.join(" · ")}.`;
+}
+
+export function transparencyCompositionSentence(composition) {
+  const entries = [
+    ["platform verification runs", composition?.platformVerificationRuns],
+    ["ingested", composition?.ingested],
+    ["external", composition?.external],
+    ["unclassified", composition?.unclassified],
+  ];
+  if (entries.some(([, field]) => field?.status === "unknown" || field?.value === null || field?.value === undefined)) {
+    return "24h composition has no complete read.";
+  }
+  const text = entries.map(([label, field]) => `${formatInteger(field.value)} ${label}`).join(" · ");
+  const ownLoop = Number(composition.platformVerificationRuns.value) > 0
+    && Number(composition.ingested.value) === 0
+    && Number(composition.external.value) === 0
+    && Number(composition.unclassified.value) === 0;
+  return `${text}${ownLoop ? " — all volume is our own loop." : "."}`;
+}
+
+export function transparencyReadChanged(previous, current) {
+  if (!previous || !current || current.status === "unknown") return false;
+  return previous.readAtMs !== current.readAtMs && previous.value !== current.value;
+}
+
 export function aggregateDisclosure(field) {
   if (field?.status === "unknown" || field?.value === null || field?.value === undefined) {
     return "Incomplete total. The readable lines are a lower bound; the complete total has no read.";
@@ -137,4 +179,9 @@ function formatInteger(value) {
 
 function unique(values) {
   return [...new Set(values)];
+}
+
+function numberWord(value) {
+  const words = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
+  return words[value] ?? String(value);
 }

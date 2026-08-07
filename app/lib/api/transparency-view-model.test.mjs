@@ -9,7 +9,10 @@ import {
   extractProofAnchors,
   mapTransparencyStatus,
   presentTransparencyField,
+  transparencyCompositionSentence,
+  transparencyFreshnessSentence,
   transparencyPageFreshness,
+  transparencyReadChanged,
 } from "./transparency-view-model.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -87,23 +90,28 @@ test("proof renderer finds checkable endpoint and address anchors", () => {
   assert.deepEqual(anchors.addresses, ["0x2ec4884088d84e5c2970a034732e5209b0acfa93"]);
 });
 
-test("production component applies the three truth corrections from the design adjudication", () => {
+test("production component applies the truth corrections and event-measured position economics", () => {
   assert.match(panel, /Hydration asset-22 operating float/u);
   assert.match(panel, /On-chain USDC available for venue operations; non-custodial/u);
   assert.match(panel, /aUSDC position; redeemable at par, with growth in the balance/u);
-  assert.match(panel, /Contributed principal/u);
-  assert.match(panel, /Accrued yield/u);
+  assert.match(panel, /Position economics · measured from the deposit event/u);
+  assert.match(panel, /Observed balances and subtractions only\. No rate, APY, annualisation, or projection\./u);
+  assert.match(panel, /Observed growth/u);
+  assert.match(panel, /Friction paid/u);
+  assert.match(panel, /Net vs committed/u);
   assert.doesNotMatch(panel, /signed venue attestation|signature 0x|USDC\/aUSDC|× rate/iu);
 });
 
-test("status badges remain outside collapsed proof disclosures", () => {
-  assert.match(panel, /<FieldStatusPill field=\{field\} \/>[\s\S]*<FieldEvidenceDisclosure field=\{field\}/u);
-  assert.match(panel, /Verify all/u);
-  assert.match(panel, /Hide proofs/u);
+test("freshness is summarized per section and only exception lines retain badges", () => {
+  assert.match(panel, /transparencyFreshnessSentence\(baseLines\)/u);
+  assert.match(panel, /function ExceptionStatusPill/u);
+  assert.match(panel, /field\.status === "fresh" \? null/u);
+  assert.match(panel, /Hide verification/u);
 });
 
-test("provenance stays in the DOM behind native disclosure controls", () => {
-  assert.match(panel, /<details[\s\S]*<summary[\s\S]*proof[\s\S]*<FieldEvidenceContent/u);
+test("one section disclosure retains every field's provenance and proof affordances", () => {
+  assert.match(panel, /showProofs \? <SectionProofLedger proofs=\{proofs\} \/> : null/u);
+  assert.match(panel, /function SectionProofLedger/u);
   assert.match(panel, /<b className="font-semibold text-\[var\(--avy-ink\)\]">Read<\/b>/u);
   assert.match(panel, /field\.source/u);
   assert.match(panel, /field\.proof/u);
@@ -114,6 +122,56 @@ test("NO READ tiles render a reason and never hand an unknown field to the value
   assert.match(panel, /view\.missing \? <MissingReadReason[^>]*\/> : <FieldValue field=\{field\}/u);
   assert.match(panel, /if \(view\.missing\) return null;/u);
   assert.match(panel, /Backend could not read this value\./u);
+});
+
+test("derived freshness sentence changes when one line becomes stale", () => {
+  const fields = [field("fresh", "1"), field("fresh", "2"), field("fresh", "3")];
+  assert.equal(
+    transparencyFreshnessSentence(fields),
+    "Three chain-read lines, all read within their freshness window."
+  );
+  assert.equal(
+    transparencyFreshnessSentence([fields[0], { ...fields[1], status: "stale" }, fields[2]]),
+    "Three chain-read lines: 2 fresh · 1 stale."
+  );
+});
+
+test("composition is one honest line and names platform-owned volume", () => {
+  const composition = {
+    platformVerificationRuns: field("fresh", 7, "jobs"),
+    ingested: field("fresh", 0, "jobs"),
+    external: field("fresh", 0, "jobs"),
+    unclassified: field("fresh", 0, "jobs"),
+  };
+  assert.equal(
+    transparencyCompositionSentence(composition),
+    "7 platform verification runs · 0 ingested · 0 external · 0 unclassified — all volume is our own loop."
+  );
+});
+
+test("growth is six-decimal read data and highlight eligibility requires a changed read", () => {
+  const initial = field("fresh", "0.000596");
+  assert.equal(presentTransparencyField(initial, { decimals: 6 }).display, "0.000596");
+  assert.equal(transparencyReadChanged(initial, initial), false);
+  assert.equal(transparencyReadChanged(initial, { ...initial, readAtMs: initial.readAtMs + 1 }), false);
+  assert.equal(transparencyReadChanged(initial, { ...initial, value: "0.000597", readAtMs: initial.readAtMs + 1 }), true);
+  assert.match(panel, /data-growth-read-value=\{field\.value \?\? "unknown"\}/u);
+  assert.doesNotMatch(panel, /setInterval\([^)]*growth|requestAnimationFrame|interpolat/iu);
+});
+
+test("growth is always rendered beside friction with an explicit unknown net path", () => {
+  const growthIndex = panel.indexOf("Observed growth");
+  const frictionIndex = panel.indexOf("Friction paid");
+  const netIndex = panel.indexOf("Net vs committed");
+  assert.ok(growthIndex > -1 && frictionIndex > growthIndex && netIndex > frictionIndex);
+  assert.match(panel, /Friction has no read, so net versus committed cannot be computed\./u);
+});
+
+test("treasury renders before flow and escrow", () => {
+  const treasury = panel.indexOf("<TreasurySection data={data} />");
+  const flow = panel.indexOf("<FlowSection data={data} />");
+  const escrow = panel.indexOf("<EscrowSection data={data} />");
+  assert.ok(treasury > -1 && treasury < flow && flow < escrow);
 });
 
 test("page uses one authenticated /transparency read and the shared status/proof components", () => {
