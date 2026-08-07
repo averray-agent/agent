@@ -104,7 +104,38 @@ export function transparencyCompositionSentence(composition) {
     && Number(composition.ingested.value) === 0
     && Number(composition.external.value) === 0
     && Number(composition.unclassified.value) === 0;
-  return `${text}${ownLoop ? " — all volume is our own loop." : "."}`;
+  return `${text}${ownLoop ? " — all of it is our own verification loop." : "."}`;
+}
+
+export function transparencyFlowUnreadSentence(usdcPaid) {
+  const windows = [
+    ["24 h", usdcPaid?.last24h],
+    ["7 d", usdcPaid?.last7d],
+    ["all-time", usdcPaid?.allTime],
+  ];
+  const unread = windows
+    .filter(([, field]) => field?.status === "unknown" || field?.value === null || field?.value === undefined)
+    .map(([label]) => label);
+  if (unread.length === 0) return null;
+  const scope = unread.length === windows.length
+    ? "all three windows"
+    : `the ${unread.length === 1
+      ? `${unread[0]} window`
+      : `${unread.slice(0, -1).join(", ")} and ${unread.at(-1)} windows`}`;
+  return `USDC paid is unread for ${scope} — job counts are unaffected.`;
+}
+
+export function transparencyGenerationSummary(generation) {
+  const rawVersion = generation?.version?.status === "unknown" || generation?.version?.value == null
+    ? "unknown"
+    : String(generation.version.value).replace(/^v(?=\d)/u, "");
+  const state = generation?.state?.status === "unknown" || generation?.state?.value == null
+    ? "unknown"
+    : String(generation.state.value);
+  if (state === "ok") return `generation ${rawVersion}`;
+  if (state === "paused") return `lane administratively paused · generation ${rawVersion}`;
+  if (state === "unknown") return `lane state has no read · generation ${rawVersion}`;
+  return `lane ${state} · generation ${rawVersion}`;
 }
 
 export function transparencyReadChanged(previous, current) {

@@ -10,7 +10,9 @@ import {
   mapTransparencyStatus,
   presentTransparencyField,
   transparencyCompositionSentence,
+  transparencyFlowUnreadSentence,
   transparencyFreshnessSentence,
+  transparencyGenerationSummary,
   transparencyPageFreshness,
   transparencyReadChanged,
 } from "./transparency-view-model.js";
@@ -94,11 +96,11 @@ test("production component applies the truth corrections and event-measured posi
   assert.match(panel, /Hydration asset-22 operating float/u);
   assert.match(panel, /On-chain USDC available for venue operations; non-custodial/u);
   assert.match(panel, /aUSDC position; redeemable at par, with growth in the balance/u);
-  assert.match(panel, /Position economics · measured from the deposit event/u);
+  assert.match(panel, /data-position-economics="compact"/u);
   assert.match(panel, /Observed balances and subtractions only\. No rate, APY, annualisation, or projection\./u);
-  assert.match(panel, /Observed growth/u);
-  assert.match(panel, /Friction paid/u);
-  assert.match(panel, /Net vs committed/u);
+  assert.match(panel, /Yield since deposit/u);
+  assert.match(panel, /cost \$\{friction\.display\} to deploy/u);
+  assert.match(panel, /net \$\{net\.display\}/u);
   assert.doesNotMatch(panel, /signed venue attestation|signature 0x|USDC\/aUSDC|× rate/iu);
 });
 
@@ -145,7 +147,7 @@ test("composition is one honest line and names platform-owned volume", () => {
   };
   assert.equal(
     transparencyCompositionSentence(composition),
-    "7 platform verification runs · 0 ingested · 0 external · 0 unclassified — all volume is our own loop."
+    "7 platform verification runs · 0 ingested · 0 external · 0 unclassified — all of it is our own verification loop."
   );
 });
 
@@ -156,15 +158,68 @@ test("growth is six-decimal read data and highlight eligibility requires a chang
   assert.equal(transparencyReadChanged(initial, { ...initial, readAtMs: initial.readAtMs + 1 }), false);
   assert.equal(transparencyReadChanged(initial, { ...initial, value: "0.000597", readAtMs: initial.readAtMs + 1 }), true);
   assert.match(panel, /data-growth-read-value=\{field\.value \?\? "unknown"\}/u);
+  assert.match(panel, /numeric > 0 \? `\+\$\{view\.display\}` : view\.display/u);
   assert.doesNotMatch(panel, /setInterval\([^)]*growth|requestAnimationFrame|interpolat/iu);
 });
 
-test("growth is always rendered beside friction with an explicit unknown net path", () => {
-  const growthIndex = panel.indexOf("Observed growth");
-  const frictionIndex = panel.indexOf("Friction paid");
-  const netIndex = panel.indexOf("Net vs committed");
-  assert.ok(growthIndex > -1 && frictionIndex > growthIndex && netIndex > frictionIndex);
-  assert.match(panel, /Friction has no read, so net versus committed cannot be computed\./u);
+test("growth renders with deposited, friction, and net in the same compact block", () => {
+  const blockStart = panel.indexOf('data-position-economics="compact"');
+  const blockEnd = panel.indexOf("function ChangingGrowthValue", blockStart);
+  const block = panel.slice(blockStart, blockEnd);
+  assert.match(block, /Yield since deposit/u);
+  assert.match(block, /on \$\{deposited\.display\} deposited/u);
+  assert.match(block, /cost \$\{friction\.display\} to deploy/u);
+  assert.match(block, /net \$\{net\.display\}/u);
+});
+
+test("an unknown position input is named in words beside the known values", () => {
+  assert.match(panel, /deposited amount has no read/u);
+  assert.match(panel, /deployment cost has no read/u);
+  assert.match(panel, /net versus committed has no read/u);
+});
+
+test("configured generation is compact when active and switches to words when not active", () => {
+  const generation = {
+    version: field("fresh", "v2.2.1", "text"),
+    state: field("fresh", "ok", "text"),
+  };
+  assert.equal(transparencyGenerationSummary(generation), "generation 2.2.1");
+  assert.equal(
+    transparencyGenerationSummary({ ...generation, state: field("fresh", "paused", "text") }),
+    "lane administratively paused · generation 2.2.1"
+  );
+  assert.equal(
+    transparencyGenerationSummary({ ...generation, state: field("fresh", "error", "text") }),
+    "lane error · generation 2.2.1"
+  );
+  assert.doesNotMatch(transparencyGenerationSummary(generation), /active/u);
+});
+
+test("flow and escrow use single-line summaries with every value and the honesty sentence", () => {
+  assert.match(panel, /data-flow-summary="single-line"/u);
+  assert.match(panel, /SentenceField field=\{jobs\}/u);
+  assert.match(panel, /SentenceField field=\{paid\} suffix="USDC"/u);
+  assert.match(panel, /transparencyCompositionSentence\(data\.flow\.composition24h\)/u);
+  assert.match(panel, /data-escrow-summary="single-line"/u);
+  assert.match(panel, /posterObligationsInFlight/u);
+  assert.match(panel, /balanceHeldByEscrowContract/u);
+  assert.match(panel, /reported separately, no inferred verdict/u);
+});
+
+test("unread flow payments name their windows while preserving job-count trust", () => {
+  const paid = {
+    last24h: field("fresh", "0.6"),
+    last7d: field("unknown", null),
+    allTime: field("unknown", null),
+  };
+  assert.equal(
+    transparencyFlowUnreadSentence(paid),
+    "USDC paid is unread for the 7 d and all-time windows — job counts are unaffected."
+  );
+  assert.equal(
+    transparencyFlowUnreadSentence({ last24h: field("unknown", null), last7d: field("unknown", null), allTime: field("unknown", null) }),
+    "USDC paid is unread for all three windows — job counts are unaffected."
+  );
 });
 
 test("treasury renders before flow and escrow", () => {
