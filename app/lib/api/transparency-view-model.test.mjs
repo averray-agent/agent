@@ -89,11 +89,31 @@ test("proof renderer finds checkable endpoint and address anchors", () => {
 
 test("production component applies the three truth corrections from the design adjudication", () => {
   assert.match(panel, /Hydration asset-22 operating float/u);
-  assert.match(panel, /On-chain Tokens\.accounts read; not custodial and not attested/u);
-  assert.match(panel, /aUSDC ERC-20 balanceOf\(truncate20\); par redemption, no rate oracle/u);
+  assert.match(panel, /On-chain USDC available for venue operations; non-custodial/u);
+  assert.match(panel, /aUSDC position; redeemable at par, with growth in the balance/u);
   assert.match(panel, /Contributed principal/u);
   assert.match(panel, /Accrued yield/u);
   assert.doesNotMatch(panel, /signed venue attestation|signature 0x|USDC\/aUSDC|× rate/iu);
+});
+
+test("status badges remain outside collapsed proof disclosures", () => {
+  assert.match(panel, /<FieldStatusPill field=\{field\} \/>[\s\S]*<FieldEvidenceDisclosure field=\{field\}/u);
+  assert.match(panel, /Verify all/u);
+  assert.match(panel, /Hide proofs/u);
+});
+
+test("provenance stays in the DOM behind native disclosure controls", () => {
+  assert.match(panel, /<details[\s\S]*<summary[\s\S]*proof[\s\S]*<FieldEvidenceContent/u);
+  assert.match(panel, /<b className="font-semibold text-\[var\(--avy-ink\)\]">Read<\/b>/u);
+  assert.match(panel, /field\.source/u);
+  assert.match(panel, /field\.proof/u);
+  assert.doesNotMatch(panel, /Dialog/u);
+});
+
+test("NO READ tiles render a reason and never hand an unknown field to the value renderer", () => {
+  assert.match(panel, /view\.missing \? <MissingReadReason[^>]*\/> : <FieldValue field=\{field\}/u);
+  assert.match(panel, /if \(view\.missing\) return null;/u);
+  assert.match(panel, /Backend could not read this value\./u);
 });
 
 test("page uses one authenticated /transparency read and the shared status/proof components", () => {
