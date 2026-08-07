@@ -388,7 +388,6 @@ const handleBankLaneFeedRoute = createBankLaneFeedRoutes({
 });
 
 const handleTransparencyRoute = createTransparencyRoutes({
-  authMiddleware,
   respond,
   transparencyService,
 });
