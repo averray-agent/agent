@@ -60,7 +60,7 @@ import { createUsdcLiquidityRoutes } from "./usdc-liquidity-routes.js";
 import { createVerifierRoutes } from "./verifier-routes.js";
 import { createXcmRequestRoutes } from "./xcm-request-routes.js";
 import { createMcpRoute } from "../mcp/handler.js";
-import { createMcpToolExecutor } from "../mcp/tools.js";
+import { createMcpToolExecutor, createMcpTools } from "../mcp/tools.js";
 import { makePolicy } from "../../core/builtin-policies.js";
 import { createPosterOnboardingService } from "../../core/poster-onboarding.js";
 import { createConfiguredIndexerHealthProbe } from "../../services/indexer-health-probe.js";
@@ -116,6 +116,7 @@ const indexerHealthProbe = createConfiguredIndexerHealthProbe(process.env);
 const port = Number(process.env.PORT ?? 8787);
 const readJsonBody = createJsonBodyReader({ maxBytes: httpConfig.maxBodyBytes });
 const resolveCorsHeaders = createCorsHeaderResolver(httpConfig);
+const mcpTools = createMcpTools({ maxRequestBodyBytes: httpConfig.maxBodyBytes });
 
 function walletsMatch(a, b) {
   if (!a || !b) {
@@ -665,7 +666,9 @@ const handleAuthRoute = createAuthRoutes({
 const executeMcpTool = createMcpToolExecutor({
   handleAuthRoute,
   handleJobRoute: handleMcpJobRoute,
-  handlePublicMetadataRoute
+  handlePublicMetadataRoute,
+  maxRequestBodyBytes: httpConfig.maxBodyBytes,
+  tools: mcpTools
 });
 
 const handleMcpRoute = createMcpRoute({
@@ -675,7 +678,8 @@ const handleMcpRoute = createMcpRoute({
   executeTool: executeMcpTool,
   rateLimitConfig,
   readJsonBody,
-  respond
+  respond,
+  tools: mcpTools
 });
 
 const handleAccountRoute = createAccountRoutes({

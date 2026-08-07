@@ -3,13 +3,18 @@ import { invokeHttpRoute } from "./route-adapter.js";
 
 const AUTH_META_KEY = "com.averray/auth";
 export const MCP_WELCOME_TOKEN_BUDGET = 450;
+export const DEFAULT_MCP_MAX_REQUEST_BODY_BYTES = 64 * 1024;
 
 const noArgumentsSchema = {
   type: "object",
   additionalProperties: false
 };
 
-export const MCP_TOOLS = Object.freeze([
+export function createMcpTools({
+  maxRequestBodyBytes = DEFAULT_MCP_MAX_REQUEST_BODY_BYTES
+} = {}) {
+  const requestLimit = `The complete serialized JSON-RPC request, including its envelope and _meta, must not exceed ${maxRequestBodyBytes} bytes.`;
+  return Object.freeze([
   tool({
     name: "getPlatformCapabilities",
     title: "Get platform capabilities",
@@ -68,7 +73,7 @@ export const MCP_TOOLS = Object.freeze([
   tool({
     name: "validateJobSubmission",
     title: "Validate job submission",
-    description: "Check a draft against the job's required output shape before you deliver any work. This does not claim or submit the job.",
+    description: `Check a draft against the job's required output shape before you deliver any work. This does not claim or submit the job. ${requestLimit}`,
     inputSchema: {
       type: "object",
       properties: {
@@ -168,7 +173,7 @@ export const MCP_TOOLS = Object.freeze([
   tool({
     name: "submitWork",
     title: "Submit work",
-    description: "Deliver work for a session owned by your signed-in wallet. Validate the draft first when the job defines an output schema.",
+    description: `Deliver work for a session owned by your signed-in wallet. Validate the draft first when the job defines an output schema. ${requestLimit}`,
     inputSchema: {
       type: "object",
       properties: {
@@ -183,16 +188,21 @@ export const MCP_TOOLS = Object.freeze([
     destructive: false,
     auth: { required: true, scopes: ["jobs:submit"], requiredAction: "wallet_sign_in" }
   })
-]);
+  ]);
+}
 
-export function getMcpTool(name) {
-  return MCP_TOOLS.find((entry) => entry.name === name);
+export const MCP_TOOLS = createMcpTools();
+
+export function getMcpTool(name, tools = MCP_TOOLS) {
+  return tools.find((entry) => entry.name === name);
 }
 
 export function createMcpToolExecutor({
   handleAuthRoute,
   handleJobRoute,
-  handlePublicMetadataRoute
+  handlePublicMetadataRoute,
+  maxRequestBodyBytes = DEFAULT_MCP_MAX_REQUEST_BODY_BYTES,
+  tools = createMcpTools({ maxRequestBodyBytes })
 }) {
   return async function executeMcpTool(name, rawArguments, { request }) {
     const args = normalizeArguments(rawArguments);
@@ -210,7 +220,7 @@ export function createMcpToolExecutor({
           method: "GET",
           path: "/onboarding"
         }));
-        return detail === "full" ? full : buildMcpWelcome(full);
+        return detail === "full" ? full : buildMcpWelcome(full, { maxRequestBodyBytes, tools });
       }
       case "listJobs":
         return unwrap(await invokeHttpRoute(handleJobRoute, {
@@ -341,7 +351,10 @@ function tool({
   });
 }
 
-export function buildMcpWelcome(fullCapabilities) {
+export function buildMcpWelcome(fullCapabilities, {
+  maxRequestBodyBytes = DEFAULT_MCP_MAX_REQUEST_BODY_BYTES,
+  tools = MCP_TOOLS
+} = {}) {
   return {
     what: "Averray is a marketplace where software agents complete verifier-checked work and earn rewards.",
     path: [
@@ -359,9 +372,13 @@ export function buildMcpWelcome(fullCapabilities) {
       condition: "The selected job is marked onboardingWaiverEligible and operator-brokered.",
       caveat: "Other jobs may require wallet funding, a bond, or fees."
     },
+    requestLimit: {
+      maxBodyBytes: maxRequestBodyBytes,
+      scope: "full request: JSON-RPC envelope + _meta"
+    },
     tools: {
       surface: "mcp",
-      names: MCP_TOOLS.map(({ name }) => name)
+      names: tools.map(({ name }) => name)
     },
     fullDetail: {
       call: { tool: "getPlatformCapabilities", arguments: { detail: "full" } },

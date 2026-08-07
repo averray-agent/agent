@@ -32,7 +32,8 @@ function createHarness(overrides = {}) {
       mcpAuthenticated: { limit: 20, windowSeconds: 60 }
     },
     readJsonBody: async (request) => request.body,
-    respond
+    respond,
+    ...(overrides.tools ? { tools: overrides.tools } : {})
   });
   return { handler, limitCalls };
 }
@@ -117,6 +118,26 @@ test("modern server/discover returns versions, capabilities, and identity withou
   assert.equal(result.body.result.ttlMs, 300_000);
   assert.equal(result.body.result.cacheScope, "public");
   assert.equal("mcp-session-id" in result.headers, false);
+});
+
+test("tools/list and tools/call use the same injected configured tool surface", async () => {
+  const tools = [{
+    name: "configuredTool",
+    description: "Configured limit: 32768 bytes.",
+    inputSchema: { type: "object", additionalProperties: false }
+  }];
+  const { handler } = createHarness({ tools });
+
+  const listed = await call(handler, modernRequest("tools/list"), modernHeaders("tools/list"));
+  assert.deepEqual(listed.body.result.tools, tools);
+
+  const called = await call(
+    handler,
+    modernRequest("tools/call", { name: "configuredTool", arguments: {} }),
+    modernHeaders("tools/call", "configuredTool")
+  );
+  assert.equal(called.body.result.isError, false);
+  assert.equal(called.body.result.structuredContent.name, "configuredTool");
 });
 
 test("modern requests require matching Streamable HTTP headers", async () => {
