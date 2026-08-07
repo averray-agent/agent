@@ -177,6 +177,11 @@ function harness(overrides = {}) {
       async getProtocolFeeConfig() {
         return { treasuryAccount: TREASURY };
       },
+      async healthCheck() {
+        if (overrides.failChainHead) throw new Error("rpc unreachable");
+        if (overrides.chainHeadDisabled) return { ok: true, enabled: false, mode: "disabled" };
+        return { ok: true, enabled: true, blockNumber: overrides.blockNumber ?? 9_218_453 };
+      },
       async getJob(id) {
         if (overrides.failJob === id) throw new Error("job rpc failed");
         return chainJobs.get(id) ?? job({ state: 0 });
@@ -505,4 +510,25 @@ test("escrow obligation includes all still-reserved poster balances", () => {
     opsReserveRaw: "20000",
     contingencyReserveRaw: "30000"
   }), 840000n);
+});
+
+test("chain head is published so a reading can name the block it came from", async () => {
+  const payload = await harness().getSnapshot();
+  assert.equal(payload.chain.head.value, 9_218_453);
+  assert.equal(payload.chain.head.unit, "block");
+  assert.equal(payload.chain.head.status, "fresh");
+  assert.match(payload.chain.head.proof, /eth_blockNumber/u);
+});
+
+// A head that cannot be read must read as unknown. The public record page
+// prints this number under every figure, so a remembered or invented head
+// would attach false provenance to values that are themselves fine.
+test("chain head is unknown rather than invented when the gateway cannot answer", async () => {
+  const failed = await harness({ failChainHead: true }).getSnapshot();
+  assert.equal(failed.chain.head.value, null);
+  assert.equal(failed.chain.head.status, "unknown");
+
+  const disabled = await harness({ chainHeadDisabled: true }).getSnapshot();
+  assert.equal(disabled.chain.head.value, null);
+  assert.equal(disabled.chain.head.status, "unknown");
 });

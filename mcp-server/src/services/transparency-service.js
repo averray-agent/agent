@@ -62,11 +62,12 @@ export class TransparencyService {
 
   async getSnapshot() {
     const generatedAtMs = this.now();
-    const [flow, escrow, bank, treasuryBalance] = await Promise.all([
+    const [flow, escrow, bank, treasuryBalance, chainHead] = await Promise.all([
       this.readCached("flow", () => this.readFlow()),
       this.readCached("escrow", () => this.readEscrow()),
       this.readCached("bank", () => this.readBank()),
-      this.readCached("treasury-balance", () => this.readTreasuryBalance())
+      this.readCached("treasury-balance", () => this.readTreasuryBalance()),
+      this.readCached("chain-head", () => this.readChainHead())
     ]);
 
     const subject = bank.subject;
@@ -93,6 +94,16 @@ export class TransparencyService {
       schemaVersion: TRANSPARENCY_SCHEMA_VERSION,
       generatedAtMs,
       readPolicy: this.buildReadPolicy(generatedAtMs),
+      // The head the reader was looking at. Published so a consumer can say
+      // which block a figure came from instead of inferring one from a wall
+      // clock — and so it degrades to `unknown` rather than to a plausible
+      // number when the gateway cannot answer.
+      chain: {
+        head: toField(
+          { ...chainHead, unit: "block" },
+          { nowMs: generatedAtMs, freshnessWindowMs: this.freshnessWindowsMs.chain }
+        )
+      },
       flow: this.buildFlow(flow, generatedAtMs),
       escrow: {
         contractAddress: toField(escrow.contractAddress, {
@@ -559,6 +570,24 @@ export class TransparencyService {
         committed: unavailable("staged adapter commitment", redactProviderError(error) || "adapter_request_read_failed")
       };
     }
+  }
+
+  async readChainHead() {
+    return await this.safeValueRead({
+      source: "blockchain gateway head",
+      proof: `${safeEndpoint(this.gateway?.config?.rpcUrl)} eth_blockNumber`,
+      loader: async () => {
+        const health = await this.gateway?.healthCheck();
+        const blockNumber = Number(health?.blockNumber);
+        // A disabled or unreachable gateway answers without a block number.
+        // Throwing here routes it to the `unknown` field state, which is the
+        // only honest answer — never fall back to a remembered head.
+        if (!health?.ok || !Number.isFinite(blockNumber)) {
+          throw new Error("gateway reported no block number");
+        }
+        return { value: blockNumber, readAtMs: this.now() };
+      }
+    });
   }
 
   async safeRawRead({ source, proof, loader }) {
