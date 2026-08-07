@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { ExplorerLink } from "@/components/common/ExplorerLink";
 import {
   DataFreshnessPill,
@@ -9,6 +10,7 @@ import {
 } from "@/components/shell/DataFreshnessPill";
 import { SectionHead } from "@/components/overview/SectionHead";
 import { TreasuryPanel } from "@/components/treasury/TreasuryPanel";
+import { Button, buttonVariants } from "@/components/ui/button";
 import type {
   TransparencyField,
   TransparencyPayload,
@@ -37,6 +39,7 @@ const WINDOW_KEY = {
 } as const;
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api").replace(/\/+$/u, "");
+const ProofVisibilityContext = createContext({ verifyAll: false, resetId: 0 });
 
 export function TransparencyPanel({ data }: { data: TransparencyPayload }) {
   const pageFreshness = transparencyPageFreshness(data);
@@ -63,7 +66,7 @@ export function TransparencyPanel({ data }: { data: TransparencyPayload }) {
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-1 font-[family-name:var(--font-mono)] text-xs text-[var(--avy-muted)]">
           <span className="inline-flex items-center gap-2">
             <b className="font-semibold text-[var(--avy-ink)]">
-              {total.display}{total.missing ? "" : " USDC"}
+              {total.missing ? "Treasury total has no read" : `${total.display} USDC`}
             </b>
             <FieldStatusPill field={data.treasury.totalUsdcEquivalent} />
           </span>
@@ -254,6 +257,43 @@ function TransparencyTopbar({ freshness }: { freshness: FreshnessState }) {
   );
 }
 
+function ProofSection({ title, meta, children }: { title: string; meta: string; children: ReactNode }) {
+  const [verifyAll, setVerifyAll] = useState(false);
+  const [resetId, setResetId] = useState(0);
+  return (
+    <section>
+      <SectionHead
+        title={title}
+        meta={(
+          <span className="flex flex-wrap items-center justify-end gap-2">
+            <span>{meta}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 font-[family-name:var(--font-mono)] text-[10px] uppercase text-[var(--avy-accent)]"
+              aria-pressed={verifyAll}
+              onClick={() => {
+                if (verifyAll) {
+                  setVerifyAll(false);
+                  setResetId((current) => current + 1);
+                } else {
+                  setVerifyAll(true);
+                }
+              }}
+            >
+              {verifyAll ? "Hide proofs" : "Verify all"}
+            </Button>
+          </span>
+        )}
+      />
+      <ProofVisibilityContext.Provider value={{ verifyAll, resetId }}>
+        {children}
+      </ProofVisibilityContext.Provider>
+    </section>
+  );
+}
+
 function FlowSection({ data }: { data: TransparencyPayload }) {
   const windows = [
     ["Settled · 24h", data.flow.jobsSettled.last24h, data.flow.usdcPaid.last24h],
@@ -268,8 +308,7 @@ function FlowSection({ data }: { data: TransparencyPayload }) {
   ] as const;
 
   return (
-    <section>
-      <SectionHead title="Flow · settled work" meta="24h composition names platform-owned volume" />
+    <ProofSection title="Flow · settled work" meta="24h composition names platform-owned volume">
       <div className="grid overflow-hidden rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] shadow-[var(--shadow-card)] backdrop-blur-[10px] lg:grid-cols-3">
         {windows.map(([label, jobs, paid], index) => (
           <div key={label} className={cn("grid gap-4 p-[18px]", index > 0 && "border-t border-[var(--avy-line-soft)] lg:border-l lg:border-t-0")}>
@@ -286,21 +325,20 @@ function FlowSection({ data }: { data: TransparencyPayload }) {
         </div>
         <div className="grid sm:grid-cols-2 xl:grid-cols-4">
           {composition.map(([label, field], index) => (
-            <div key={label} className={cn("grid gap-2 px-4 py-3", index > 0 && "border-t border-[var(--avy-line-soft)] sm:border-l sm:border-t-0")}>
-              <InlineMetric label={label} field={field} window={windowValue(data, WINDOW_KEY.flow)} compact />
+            <div key={label} className={cn("min-w-0 px-3 py-2.5", index > 0 && "border-t border-[var(--avy-line-soft)] sm:border-l sm:border-t-0")}>
+              <CompactMetric label={label} field={field} window={windowValue(data, WINDOW_KEY.flow)} />
             </div>
           ))}
         </div>
       </div>
-    </section>
+    </ProofSection>
   );
 }
 
 function EscrowSection({ data }: { data: TransparencyPayload }) {
   const escrow = data.escrow;
   return (
-    <section>
-      <SectionHead title="Escrow backing" meta="poster obligations vs contract balance" />
+    <ProofSection title="Escrow backing" meta="poster obligations vs contract balance">
       <TreasuryPanel eyebrow="Escrow backing" title="Owed in flight vs actually held" sub="reported separately; no inferred backing verdict">
         <div className="grid md:grid-cols-2">
           <ValueBlock label="Poster obligations in flight" field={escrow.posterObligationsInFlight} window={windowValue(data, WINDOW_KEY.chain)} />
@@ -310,7 +348,7 @@ function EscrowSection({ data }: { data: TransparencyPayload }) {
           <InlineMetric label="Escrow contract" field={escrow.contractAddress} window={windowValue(data, WINDOW_KEY.chain)} compact />
         </div>
       </TreasuryPanel>
-    </section>
+    </ProofSection>
   );
 }
 
@@ -319,30 +357,33 @@ function TreasurySection({ data }: { data: TransparencyPayload }) {
   const generation = treasury.generation;
   const aggregate = presentTransparencyField(treasury.totalUsdcEquivalent);
   return (
-    <section>
-      <SectionHead title="Treasury" meta="three USDC-equivalent lines · configured generation only" />
+    <ProofSection title="Treasury" meta="three USDC-equivalent lines · configured generation only">
       <TreasuryPanel eyebrow="Treasury" title="What the treasury holds" sub="each line carries its own lens and proof">
         <div className={cn("grid gap-3 border-b border-[var(--avy-line-soft)] p-[18px]", aggregate.freshness !== "live" && "bg-[repeating-linear-gradient(135deg,transparent_0_7px,rgba(167,97,34,.055)_7px_14px)]")}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-muted)]" style={{ letterSpacing: "0.12em" }}>Treasury total · USDC-equivalent</span>
             <FieldStatusPill field={treasury.totalUsdcEquivalent} />
           </div>
-          <span className="font-[family-name:var(--font-mono)] text-[clamp(1.9rem,5vw,2.4rem)] font-semibold leading-none text-[var(--avy-ink)]">
-            {aggregate.display}{aggregate.missing ? "" : " USDC"}
-          </span>
+          {aggregate.missing ? (
+            <MissingReadReason />
+          ) : (
+            <span className="font-[family-name:var(--font-mono)] text-[clamp(1.9rem,5vw,2.4rem)] font-semibold leading-none text-[var(--avy-ink)]">
+              {aggregate.display} USDC
+            </span>
+          )}
           <p className={cn("m-0 border-l-2 pl-2.5 font-[family-name:var(--font-mono)] text-[11.5px] leading-relaxed", aggregate.freshness === "live" ? "border-[var(--avy-accent)] text-[var(--avy-muted)]" : "border-[var(--avy-warn)] text-[var(--avy-warn)]")}>
             {aggregateDisclosure(treasury.totalUsdcEquivalent)}
           </p>
-          <FieldEvidence field={treasury.totalUsdcEquivalent} window={windowValue(data, WINDOW_KEY.bank)} />
+          <FieldEvidenceDisclosure field={treasury.totalUsdcEquivalent} window={windowValue(data, WINDOW_KEY.bank)} />
         </div>
 
         <div className="grid">
-          <TreasuryLine label="Asset Hub multisig balance" meta="Native AccountId32, read through its verified EVM lens" field={treasury.lines.assetHubMultisig.balance} window={windowValue(data, WINDOW_KEY.chain)} extras={[
+          <TreasuryLine label="Asset Hub multisig balance" meta="USDC held by the native treasury account" field={treasury.lines.assetHubMultisig.balance} window={windowValue(data, WINDOW_KEY.chain)} extras={[
             ["Native account", treasury.lines.assetHubMultisig.nativeAccountId32],
             ["EVM lens", treasury.lines.assetHubMultisig.evmLens],
           ]} />
-          <TreasuryLine label="Deployed to Hydration" meta="aUSDC ERC-20 balanceOf(truncate20); par redemption, no rate oracle" field={treasury.lines.hydrationPosition.total} window={windowValue(data, WINDOW_KEY.bank)} />
-          <TreasuryLine label="Hydration asset-22 operating float" meta="On-chain Tokens.accounts read; not custodial and not attested" field={treasury.lines.operatingFloat.balance} window={windowValue(data, WINDOW_KEY.bank)} extras={[["Asset", treasury.lines.operatingFloat.asset]]} />
+          <TreasuryLine label="Deployed to Hydration" meta="aUSDC position; redeemable at par, with growth in the balance" field={treasury.lines.hydrationPosition.total} window={windowValue(data, WINDOW_KEY.bank)} />
+          <TreasuryLine label="Hydration asset-22 operating float" meta="On-chain USDC available for venue operations; non-custodial" field={treasury.lines.operatingFloat.balance} window={windowValue(data, WINDOW_KEY.bank)} extras={[["Asset", treasury.lines.operatingFloat.asset]]} />
         </div>
 
         <div className="grid border-t border-[var(--avy-line)] md:grid-cols-2">
@@ -355,25 +396,24 @@ function TreasurySection({ data }: { data: TransparencyPayload }) {
 
         <GenerationBand generation={generation} window={windowValue(data, WINDOW_KEY.subject)} />
       </TreasuryPanel>
-    </section>
+    </ProofSection>
   );
 }
 
 function TreasuryLine({ label, meta, field, window, extras = [] }: { label: string; meta: string; field: AnyField; window: number | null; extras?: Array<[string, AnyField]> }) {
   const view = presentTransparencyField(field);
   return (
-    <div className={cn("grid gap-3 border-b border-[var(--avy-line-soft)] px-[18px] py-3.5 last:border-b-0 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,.85fr)_minmax(0,1.6fr)] xl:items-center", view.freshness === "partial" && "bg-[repeating-linear-gradient(135deg,transparent_0_7px,rgba(167,97,34,.05)_7px_14px)]")}>
+    <div className={cn("grid gap-3 border-b border-[var(--avy-line-soft)] px-[18px] py-3.5 last:border-b-0 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center", view.freshness === "partial" && "bg-[repeating-linear-gradient(135deg,transparent_0_7px,rgba(167,97,34,.05)_7px_14px)]")}>
       <div className="grid gap-1">
         <span className="font-[family-name:var(--font-display)] text-[13px] font-bold text-[var(--avy-ink)]">{label}</span>
         <span className="font-[family-name:var(--font-mono)] text-[10.5px] leading-relaxed text-[var(--avy-muted)]">{meta}</span>
       </div>
       <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-        <FieldValue field={field} className="text-lg" />
+        {view.missing ? <MissingReadReason /> : <FieldValue field={field} className="text-lg" />}
         <FieldStatusPill field={field} />
       </div>
-      <div className="grid gap-2">
-        <FieldEvidence field={field} window={window} />
-        {extras.map(([extraLabel, extra]) => <InlineMetric key={extraLabel} label={extraLabel} field={extra} window={window} compact />)}
+      <div className="xl:col-span-2">
+        <FieldEvidenceDisclosure field={field} window={window} extras={extras} />
       </div>
     </div>
   );
@@ -394,9 +434,9 @@ function GenerationBand({ generation, window }: { generation: TransparencyPayloa
         <FieldStatusPill field={generation.state} />
       </div>
       <div className="grid gap-2 md:grid-cols-3">
-        <InlineMetric label="Version" field={generation.version} window={window} compact />
-        <InlineMetric label="Wrapper" field={generation.wrapperAddress} window={window} compact />
-        <InlineMetric label="Reason" field={generation.reason} window={window} compact />
+        <CompactMetric label="Version" field={generation.version} window={window} />
+        <CompactMetric label="Wrapper" field={generation.wrapperAddress} window={window} />
+        <CompactMetric label="Reason" field={generation.reason} window={window} />
       </div>
     </div>
   );
@@ -404,53 +444,97 @@ function GenerationBand({ generation, window }: { generation: TransparencyPayloa
 
 function ReadPolicy({ data }: { data: TransparencyPayload }) {
   const policy = data.readPolicy;
+  const fields = [
+    ["Cache TTL", policy.cacheTtl],
+    ...Object.entries(policy.freshnessWindows).map(([label, field]) => [`${label} freshness`, field] as const),
+  ] as const;
   return (
-    <section>
-      <SectionHead title="Read policy" meta="cache always expires before evidence freshness" />
-      <div className="grid overflow-hidden rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] shadow-[var(--shadow-card)] sm:grid-cols-2 xl:grid-cols-5">
-        <InlineMetric label="Cache TTL" field={policy.cacheTtl} compact />
-        {Object.entries(policy.freshnessWindows).map(([label, field]) => (
-          <InlineMetric key={label} label={`${label} freshness`} field={field} compact />
+    <details className="group overflow-hidden rounded-[var(--radius-sm)] border border-[var(--avy-line-soft)] bg-[var(--avy-paper-solid)]">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-[var(--avy-muted)] marker:content-none [&::-webkit-details-marker]:hidden">
+        <span className="grid gap-0.5">
+          <span className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase" style={{ letterSpacing: "0.12em" }}>Read policy</span>
+          <span className="font-[family-name:var(--font-mono)] text-[10.5px]">Service configuration · cache expires before evidence freshness</span>
+        </span>
+        <ChevronDown className="size-4 shrink-0 transition-transform group-open:rotate-180" aria-hidden="true" />
+      </summary>
+      <div className="grid border-t border-[var(--avy-line-soft)] sm:grid-cols-2 xl:grid-cols-5">
+        {fields.map(([label, field], index) => (
+          <PolicyMetric key={label} label={label} field={field} divided={index > 0} />
         ))}
       </div>
-    </section>
+    </details>
   );
 }
 
 function ValueBlock({ label, field, window, compact = false, className }: { label: string; field: AnyField; window: number | null; compact?: boolean; className?: string }) {
   const view = presentTransparencyField(field);
   return (
-    <div className={cn("grid content-start gap-3 p-[18px]", view.freshness === "partial" && "bg-[repeating-linear-gradient(135deg,transparent_0_7px,rgba(167,97,34,.05)_7px_14px)]", view.freshness === "fallback" && "bg-[var(--avy-warn-soft)]/20", className)}>
+    <div className={cn("grid content-start gap-2.5 p-[18px]", view.freshness === "partial" && "bg-[repeating-linear-gradient(135deg,transparent_0_7px,rgba(167,97,34,.05)_7px_14px)]", view.freshness === "fallback" && "bg-[var(--avy-warn-soft)]/20", className)}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-muted)]" style={{ letterSpacing: "0.12em" }}>{label}</span>
         <FieldStatusPill field={field} />
       </div>
       {view.lastKnown ? <span className="font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[var(--avy-warn)]">Last known value</span> : null}
-      <FieldValue field={field} className={compact ? "text-[22px]" : "text-[30px]"} />
-      <FieldEvidence field={field} window={window} />
+      {view.missing ? <MissingReadReason /> : <FieldValue field={field} className={compact ? "text-[22px]" : "text-[30px]"} />}
+      <FieldEvidenceDisclosure field={field} window={window} />
     </div>
   );
 }
 
 function InlineMetric({ label, field, window, compact = false }: { label: string; field: AnyField; window?: number | null; compact?: boolean }) {
+  const view = presentTransparencyField(field);
   return (
     <div className="grid min-w-0 gap-1.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]" style={{ letterSpacing: "0.1em" }}>{label}</span>
         <FieldStatusPill field={field} />
       </div>
-      <FieldValue field={field} className={compact ? "text-sm" : "text-2xl"} />
-      <FieldEvidence field={field} window={window ?? null} compact />
+      {view.missing ? <MissingReadReason compact /> : <FieldValue field={field} className={compact ? "text-sm" : "text-2xl"} />}
+      <FieldEvidenceDisclosure field={field} window={window ?? null} compact />
     </div>
+  );
+}
+
+function CompactMetric({ label, field, window }: { label: string; field: AnyField; window: number | null }) {
+  const view = presentTransparencyField(field);
+  return (
+    <div className="grid min-w-0 gap-1.5">
+      <span className="truncate font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[var(--avy-muted)]" style={{ letterSpacing: "0.08em" }}>{label}</span>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        {view.missing ? <MissingReadReason compact /> : <FieldValue field={field} className="text-sm" />}
+        <FieldStatusPill field={field} />
+      </div>
+      <FieldEvidenceDisclosure field={field} window={window} compact />
+    </div>
+  );
+}
+
+function PolicyMetric({ label, field, divided }: { label: string; field: AnyField; divided: boolean }) {
+  const view = presentTransparencyField(field);
+  return (
+    <div className={cn("grid min-w-0 gap-2 px-4 py-3", divided && "border-t border-[var(--avy-line-soft)] sm:border-l sm:border-t-0")}>
+      <span className="font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[var(--avy-muted)]" style={{ letterSpacing: "0.08em" }}>{label}</span>
+      <div className="flex flex-wrap items-center gap-2">
+        {view.missing ? <MissingReadReason compact /> : <FieldValue field={field} className="text-sm" />}
+        <FieldStatusPill field={field} />
+      </div>
+      <FieldEvidenceContent field={field} window={null} compact />
+    </div>
+  );
+}
+
+function MissingReadReason({ compact = false }: { compact?: boolean }) {
+  return (
+    <span className={cn("font-[family-name:var(--font-mono)] leading-relaxed text-[var(--avy-warn)]", compact ? "text-[10.5px]" : "text-xs")}>
+      Backend could not read this value.
+    </span>
   );
 }
 
 function FieldValue({ field, className }: { field: AnyField; className?: string }) {
   const view = presentTransparencyField(field);
-  const common = cn("font-[family-name:var(--font-mono)] font-semibold leading-tight tabular-nums", view.missing ? "text-[var(--avy-warn)]" : view.lastKnown ? "text-[var(--avy-muted)]" : "text-[var(--avy-ink)]", className);
-  if (view.missing) {
-    return <span className={cn(common, "rounded-[var(--radius-sm)] border border-dashed border-[color:rgba(167,97,34,.42)] px-2.5 py-2 text-sm font-medium")}>no read</span>;
-  }
+  if (view.missing) return null;
+  const common = cn("font-[family-name:var(--font-mono)] font-semibold leading-tight tabular-nums", view.lastKnown ? "text-[var(--avy-muted)]" : "text-[var(--avy-ink)]", className);
   if (field.unit === "address" && typeof field.value === "string") {
     return <ExplorerLink kind="address" value={field.value} label={shortAnchor(field.value)} className={cn(common, "text-[var(--avy-accent)] hover:underline")} />;
   }
@@ -459,13 +543,57 @@ function FieldValue({ field, className }: { field: AnyField; className?: string 
 
 function FieldStatusPill({ field }: { field: AnyField }) {
   const view = presentTransparencyField(field);
-  return <DataFreshnessPill state={view.freshness} label={view.statusLabel} meta={`${view.statusLabel}. Status supplied by /transparency; read at ${formatReadAt(field.readAtMs)}.`} />;
+  return <DataFreshnessPill state={view.freshness} label={view.statusLabel} meta={`${view.statusLabel}. Status supplied by /transparency.`} />;
 }
 
-function FieldEvidence({ field, window, compact = false }: { field: AnyField; window: number | null; compact?: boolean }) {
+function FieldEvidenceDisclosure({ field, window, compact = false, extras = [] }: { field: AnyField; window: number | null; compact?: boolean; extras?: Array<[string, AnyField]> }) {
+  const { verifyAll, resetId } = useContext(ProofVisibilityContext);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    setOpen(false);
+  }, [resetId]);
+  return (
+    <details
+      className="group/proof min-w-0"
+      open={verifyAll || open}
+      onToggle={(event) => {
+        if (!verifyAll) setOpen(event.currentTarget.open);
+      }}
+    >
+      <summary
+        className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "h-auto w-fit cursor-pointer list-none px-0 py-0.5 font-[family-name:var(--font-mono)] text-[10px] font-semibold text-[var(--avy-accent)] marker:content-none [&::-webkit-details-marker]:hidden")}
+        onClick={(event) => {
+          if (verifyAll) event.preventDefault();
+        }}
+      >
+        proof
+        <ChevronDown className="size-3 transition-transform group-open/proof:rotate-180" aria-hidden="true" />
+      </summary>
+      <div className="mt-2 rounded-[var(--radius-sm)] border border-dashed border-[var(--avy-line-soft)] bg-[var(--avy-paper-solid)] p-2.5">
+        <FieldEvidenceContent field={field} window={window} compact={compact} />
+        {extras.length > 0 ? (
+          <div className="mt-2 grid gap-2 border-t border-dashed border-[var(--avy-line-soft)] pt-2 sm:grid-cols-2">
+            {extras.map(([label, extra]) => (
+              <div key={label} className="grid min-w-0 gap-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[var(--avy-muted)]">{label}</span>
+                  <FieldStatusPill field={extra} />
+                </div>
+                {presentTransparencyField(extra).missing ? <MissingReadReason compact /> : <FieldValue field={extra} className="text-xs" />}
+                <FieldEvidenceContent field={extra} window={window} compact />
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+function FieldEvidenceContent({ field, window, compact = false }: { field: AnyField; window: number | null; compact?: boolean }) {
   const anchors = extractProofAnchors(`${field.source} ${field.proof}`);
   return (
-    <div className={cn("grid gap-1.5 font-[family-name:var(--font-mono)] text-[10.5px] leading-relaxed text-[var(--avy-muted)]", !compact && "border-t border-dashed border-[var(--avy-line-soft)] pt-2")}>
+    <div className={cn("grid gap-1.5 font-[family-name:var(--font-mono)] text-[10.5px] leading-relaxed text-[var(--avy-muted)]", !compact && "text-[11px]")}>
       <span><b className="font-semibold text-[var(--avy-ink)]">Read</b> · {formatReadAt(field.readAtMs)}{window !== null ? ` · ${formatWindowMs(window)}` : ""}</span>
       <span className="break-words"><b className="font-semibold text-[var(--avy-ink)]">Source</b> · {field.source}</span>
       <span className="break-words"><b className="font-semibold text-[var(--avy-ink)]">Proof</b> · {field.proof}</span>
