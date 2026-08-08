@@ -26,7 +26,6 @@ function makeService({
         allowlist: new Set([POSTER.toLowerCase()]),
         minRewardUsdc: "1.25",
         draftTtlHours: 19,
-        maxOpenDrafts: 7,
         escrowCoreAddress: ESCROW,
         usdcAsset: { symbol: "USDC", address: TOKEN, decimals: 6 }
       }
@@ -91,7 +90,8 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
       "reward + opsReserve + contingencyReserve + floor(reward * protocolFeeBps / 10000)",
     minRewardUsdc: "1.25",
     draftTtlHours: 19,
-    maxOpenDrafts: 7,
+    quotePersistence: "demand_signal_only_until_funded",
+    quoteIdentity: "poster_and_content_hash",
     availability: {
       protocolFeeBps: { status: "available" },
       feeRecipient: { status: "available" }
@@ -105,6 +105,15 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
     minFeeRaw: "12345",
     semantics:
       "Stake plus claim fee is locked from the worker's AgentAccountCore liquid balance at claim, returned in full on successful resolution, and forfeitable on slash."
+  });
+  assert.deepEqual(payload.workerFacts.gasPolicy, {
+    operatorBrokeredGas: false,
+    appliesTo: "all externally posted jobs",
+    workerPays: ["claimJob", "submitWork"],
+    apiBehavior:
+      "The claim and submit endpoints validate first, then return an exact direct-wallet transaction recipe. After the worker broadcasts it, retry the same request to converge the durable session.",
+    curatedException:
+      "Operator-brokered gas remains available only to explicitly sponsored curated starter inventory; poster volume never spends that subsidy."
   });
   assert.equal(payload.workerFacts.disputeWindow.seconds, 123_456);
   assert.deepEqual(payload.workerFacts.disputeWindow.remedy, {
@@ -139,6 +148,11 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
     "schema-discovery"
   ]);
   const funding = payload.flow.find((step) => step.id === "fund");
+  const quote = payload.flow.find((step) => step.id === "draft");
+  assert.match(quote.action, /No draft or claimable job persists before finalized funding/u);
+  assert.ok(quote.returns.includes("fundingRequirement.posterReservedRaw"));
+  assert.ok(quote.returns.includes("persisted=false"));
+  assert.equal(funding.exactPosterReservedRaw, "the quote response fundingRequirement.posterReservedRaw");
   assert.equal(
     funding.posterReservedRawFormula,
     "rewardRaw + opsReserveRaw + contingencyReserveRaw + floor(rewardRaw * economics.protocolFeeBps / 10000)"

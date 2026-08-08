@@ -288,6 +288,36 @@ export class JobExecutionService {
           }
           throw new ConflictError(`Job ${jobId} is not claimable in its current on-chain state.`, "job_not_claimable");
         }
+        if (isExternalJob(job)) {
+          if (typeof this.blockchainGateway.previewClaimEconomics === "function") {
+            const predictedClaimEconomics = claimEconomics;
+            const authoritativeClaimEconomics = await this.blockchainGateway.previewClaimEconomics(wallet, jobId);
+            this.logClaimEconomicsPredictionMismatch({
+              wallet,
+              jobId,
+              prediction: predictedClaimEconomics,
+              authoritative: authoritativeClaimEconomics
+            });
+            claimEconomics = authoritativeClaimEconomics;
+          }
+          await this.blockchainGateway.ensureClaimStakeLiquidity?.(
+            wallet,
+            job.rewardAsset,
+            claimEconomics.totalClaimLock
+          );
+          const transaction = await this.blockchainGateway.prepareDirectClaimJob?.(jobId);
+          throw new ConflictError(
+            "External jobs do not use operator-brokered gas. Sign and broadcast claimJob from the worker wallet, then retry this claim request to converge the session.",
+            "external_self_paid_claim_required",
+            {
+              jobId,
+              worker: wallet,
+              requiresSponsoredGas: false,
+              transaction,
+              retryAfter: "the direct claimJob transaction is confirmed"
+            }
+          );
+        }
         if (this.blockchainGateway.ensureJob) {
           await this.blockchainGateway.ensureJob(job, jobId, claimEconomics.totalClaimLock);
         }
@@ -463,29 +493,79 @@ export class JobExecutionService {
     await this.enforceMaintainerOpenPrCap(job, submission);
     const guardedSubmission = this.applyMaintainerSubmissionGuards(job, refreshed, submission);
     await validateJobSubmissionAgainstSchema(job, guardedSubmission);
+    const evidenceHash = hashSubmission(guardedSubmission);
     if (this.blockchainGateway?.isEnabled()) {
-      try {
-        await this.blockchainGateway.submitWork(
-          session.chainJobId ?? session.jobId,
-          hashSubmission(guardedSubmission),
-          session.wallet
-        );
-      } catch (error) {
-        // Reconcile against on-chain state before treating this as a failed
-        // attempt: a mined-but-receipt-lost submit (a flaky RPC dropping the
-        // connection before tx.wait() returns) still advanced the job to
-        // Submitted on-chain. If so, the submit really landed — fall through to
-        // the normal 'submitted' transition so the (auto-)verifier can settle it,
-        // instead of stranding the job and its escrowed reward with submitFailedAt.
-        // Only a genuine failure (true revert, or the chain unreachable so we
-        // cannot confirm) stamps submitFailedAt and rethrows.
-        const landed = await this.onChainSubmitLanded(session.chainJobId ?? session.jobId);
-        if (!landed) {
-          await this.stateStore.upsertSession({
-            ...refreshed,
-            submitFailedAt: new Date().toISOString()
-          });
-          throw error;
+      const chainJobId = session.chainJobId ?? session.jobId;
+      if (isExternalJob(job)) {
+        const live = await this.blockchainGateway.getJob(chainJobId);
+        const liveWorker = String(live?.worker ?? "").toLowerCase();
+        const expectedWorker = String(session.wallet).toLowerCase();
+        if (Number(live?.state) === ESCROW_JOB_STATE_CLAIMED && liveWorker === expectedWorker) {
+          const transaction = await this.blockchainGateway.prepareDirectSubmitWork?.(
+            chainJobId,
+            evidenceHash
+          );
+          throw new ConflictError(
+            "External jobs do not use operator-brokered gas. Sign and broadcast submitWork from the worker wallet, then retry this submission to converge the session.",
+            "external_self_paid_submit_required",
+            {
+              jobId: session.jobId,
+              worker: session.wallet,
+              evidenceHash,
+              requiresSponsoredGas: false,
+              transaction,
+              retryAfter: "the direct submitWork transaction is confirmed"
+            }
+          );
+        }
+        if (Number(live?.state) !== ESCROW_JOB_STATE_SUBMITTED || liveWorker !== expectedWorker) {
+          throw new ConflictError(
+            `Job ${session.jobId} is not awaiting this worker's direct submission.`,
+            "external_direct_submit_state_mismatch",
+            {
+              jobId: session.jobId,
+              worker: session.wallet,
+              liveWorker: live?.worker,
+              liveState: live?.state
+            }
+          );
+        }
+        const liveEvidence = await this.blockchainGateway.getLatestEvidence?.(chainJobId);
+        if (String(liveEvidence ?? "").toLowerCase() !== evidenceHash.toLowerCase()) {
+          throw new ConflictError(
+            "The confirmed direct submission evidence does not match this validated payload.",
+            "external_direct_submit_evidence_mismatch",
+            {
+              jobId: session.jobId,
+              expectedEvidenceHash: evidenceHash,
+              liveEvidenceHash: liveEvidence ?? null
+            }
+          );
+        }
+      } else {
+        try {
+          await this.blockchainGateway.submitWork(
+            chainJobId,
+            evidenceHash,
+            session.wallet
+          );
+        } catch (error) {
+          // Reconcile against on-chain state before treating this as a failed
+          // attempt: a mined-but-receipt-lost submit (a flaky RPC dropping the
+          // connection before tx.wait() returns) still advanced the job to
+          // Submitted on-chain. If so, the submit really landed — fall through to
+          // the normal 'submitted' transition so the (auto-)verifier can settle it,
+          // instead of stranding the job and its escrowed reward with submitFailedAt.
+          // Only a genuine failure (true revert, or the chain unreachable so we
+          // cannot confirm) stamps submitFailedAt and rethrows.
+          const landed = await this.onChainSubmitLanded(chainJobId);
+          if (!landed) {
+            await this.stateStore.upsertSession({
+              ...refreshed,
+              submitFailedAt: new Date().toISOString()
+            });
+            throw error;
+          }
         }
       }
     }

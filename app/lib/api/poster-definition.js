@@ -73,6 +73,8 @@ export function buildPosterDefinition(input) {
       : {}),
     claimTtlSeconds: 86_400,
     retryLimit: 1,
-    requiresSponsoredGas: true
+    // Curated starter inventory retains operator-brokered gas. External
+    // bounties are paid work and the worker signs/pays their chain actions.
+    requiresSponsoredGas: false
   };
 }

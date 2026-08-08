@@ -191,7 +191,8 @@ async function buildSnapshot({
         "reward + opsReserve + contingencyReserve + floor(reward * protocolFeeBps / 10000)",
       minRewardUsdc: config.minRewardUsdc,
       draftTtlHours: config.draftTtlHours,
-      maxOpenDrafts: config.maxOpenDrafts,
+      quotePersistence: "demand_signal_only_until_funded",
+      quoteIdentity: "poster_and_content_hash",
       availability: {
         protocolFeeBps: liveReads.protocolFeeBps,
         feeRecipient: liveReads.feeRecipient
@@ -235,7 +236,7 @@ function buildPostingFlow({ publicBaseUrl, token, agentAccountCore, escrowCore }
     },
     {
       id: "draft",
-      action: "Create a deterministic external-job draft with the SIWE bearer token.",
+      action: "Request a deterministic escrow funding quote with the SIWE bearer token. No draft or claimable job persists before finalized funding; only the demand attempt is recorded.",
       method: "POST",
       path: "/jobs/draft",
       authorization: "Bearer <token>",
@@ -261,12 +262,25 @@ function buildPostingFlow({ publicBaseUrl, token, agentAccountCore, escrowCore }
           }
         }
       },
-      returns: ["draftId", "jobId", "specHash", "calldata", "expiresAt", "status"]
+      returns: [
+        "draftId",
+        "jobId",
+        "specHash",
+        "calldata",
+        "escrowAddress",
+        "fundingRequirement.posterReservedRaw",
+        "fundingRequirement.workerReceivesRaw",
+        "fundingRequirement.protocolFeeRaw",
+        "expiresAt",
+        "status=quoted",
+        "persisted=false"
+      ]
     },
     {
       id: "fund",
       action:
         "Fund from the poster wallet: approve the token to AgentAccountCore, deposit enough AAC liquid, then submit the returned non-waived createSinglePayoutJob calldata unchanged.",
+      exactPosterReservedRaw: "the quote response fundingRequirement.posterReservedRaw",
       posterReservedRawFormula:
         "rewardRaw + opsReserveRaw + contingencyReserveRaw + floor(rewardRaw * economics.protocolFeeBps / 10000)",
       depositAmountFormula:
@@ -312,7 +326,7 @@ function buildPostingFlow({ publicBaseUrl, token, agentAccountCore, escrowCore }
     },
     {
       id: "watch",
-      action: "Poll the authenticated draft until the finalized-event watcher matches jobId, poster, funding terms, and specHash.",
+      action: "Poll the quote until the finalized-event watcher matches jobId, poster, funding terms, and specHash, then materializes both the draft record and live catalog job.",
       method: "GET",
       path: "/jobs/draft/:id",
       authorization: "Bearer <token>",
@@ -462,6 +476,15 @@ function buildWorkerFacts({
 
   return {
     claimBond,
+    gasPolicy: {
+      operatorBrokeredGas: false,
+      appliesTo: "all externally posted jobs",
+      workerPays: ["claimJob", "submitWork"],
+      apiBehavior:
+        "The claim and submit endpoints validate first, then return an exact direct-wallet transaction recipe. After the worker broadcasts it, retry the same request to converge the durable session.",
+      curatedException:
+        "Operator-brokered gas remains available only to explicitly sponsored curated starter inventory; poster volume never spends that subsidy."
+    },
     catalogEstimate:
       "External catalog claimBond is a live policy estimate; wallet-specific eligibility and shortfall come only from preflight.",
     preflight: {
@@ -576,6 +599,7 @@ function externalBountiesFromSnapshot(snapshot) {
       ?? "Live claim-bond inputs are unavailable; do not assume a zero bond.",
     catalogEstimate: snapshot.workerFacts.catalogEstimate,
     preflight: snapshot.workerFacts.preflight,
+    gasPolicy: snapshot.workerFacts.gasPolicy,
     selfDeposit: snapshot.workerFacts.selfDeposit,
     disputeWindow: snapshot.workerFacts.disputeWindow,
     cancellation: snapshot.cancellation,

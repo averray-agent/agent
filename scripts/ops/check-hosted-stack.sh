@@ -219,13 +219,14 @@ poster_onboarding_json="$(fetch "$API_POSTER_ONBOARDING_URL")"
 jq -e '
   . as $poster |
   ([.flow[] | select(.id == "fund")][0]) as $fund |
-  (.mode == "closed" or .mode == "allowlist" or .mode == "open") and
+  (.mode == "open") and
   (.economics.feeSemantics == "poster_additive") and
   (.economics.protocolFeeBps | type) == "number" and
   ((.economics.feeRecipient | ascii_downcase) | test("^0x[0-9a-f]{40}$")) and
   (.economics.minRewardUsdc | tonumber) > 0 and
   (.economics.draftTtlHours | type) == "number" and
-  (.economics.maxOpenDrafts | type) == "number" and
+  (.economics.quotePersistence == "demand_signal_only_until_funded") and
+  (.economics.quoteIdentity == "poster_and_content_hash") and
   (.cancellation.selfServeCancel == false) and
   (.cancellation.rescue == "operator-mediated on request, ~7 days, refunds only ever to the recorded poster") and
   (.cancellation.plannedSelfServeCancel == "cancelOpenJob, next EscrowCore deployment window") and
@@ -233,6 +234,8 @@ jq -e '
   (.workerFacts.claimBond.stakeBps | type) == "number" and
   (.workerFacts.claimBond.feeBps | type) == "number" and
   (.workerFacts.claimBond.minFeeRaw | test("^[0-9]+$")) and
+  (.workerFacts.gasPolicy.operatorBrokeredGas == false) and
+  (.workerFacts.gasPolicy.appliesTo == "all externally posted jobs") and
   (.workerFacts.disputeWindow.available == true) and
   (.workerFacts.disputeWindow.seconds | type) == "number" and
   (.workerFacts.disputeWindow.remedy.onChain.available == true) and

@@ -403,6 +403,54 @@ test("claimJob stores on-chain claim expiry when blockchain is enabled", async (
   assert.equal(claimExpiresAt(claimed, job), "2026-05-01T10:01:00.000Z");
 });
 
+test("external claims return a direct worker transaction and never call the operator broker", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({
+    source: { type: "external", poster: { wallet: WALLET_2 } },
+    requiresSponsoredGas: false
+  });
+  let brokerCalls = 0;
+  const transaction = { to: "0x1111111111111111111111111111111111111111", value: "0", data: "0x1234" };
+  const gateway = {
+    isEnabled: () => true,
+    toJobId: (value) => value,
+    async getWorkerClaimCount() { return 0; },
+    async getClaimEconomicsDecisionState() {
+      return { state: 1, exists: true, contractLayout: "current", onboardingWaiverEligible: false };
+    },
+    async previewClaimEconomics() {
+      return {
+        claimStake: 0,
+        claimStakeBps: 0,
+        claimFee: 0,
+        claimFeeBps: 0,
+        claimEconomicsWaived: false,
+        claimNumber: 1,
+        totalClaimLock: 0
+      };
+    },
+    async getJob() { return { state: 1 }; },
+    async prepareDirectClaimJob(jobId) {
+      assert.equal(jobId, job.id);
+      return transaction;
+    },
+    async claimJob() { brokerCalls += 1; }
+  };
+  const service = new JobExecutionService(stateStore, gateway, () => job);
+
+  await assert.rejects(
+    service.claimJob(WALLET, job.id, "mcp", "external-direct-claim"),
+    (error) => {
+      assert.equal(error.code, "external_self_paid_claim_required");
+      assert.equal(error.details.requiresSponsoredGas, false);
+      assert.deepEqual(error.details.transaction, transaction);
+      return true;
+    }
+  );
+  assert.equal(brokerCalls, 0);
+  assert.equal(await stateStore.findSessionByJobId(job.id), undefined);
+});
+
 test("claimJob converges a stranded claim: chain claim mined but local session write failed (MAIN-002)", async () => {
   const stateStore = new MemoryStateStore();
   const job = makeJob({ claimTtlSeconds: 60 });
@@ -1009,6 +1057,58 @@ test("submitWork self-heals a mined-but-receipt-lost submit (on-chain already Su
   assert.equal(submitted.submitFailedAt, undefined, "not marked as an infra failure");
   const stored = await stateStore.getSession(claimed.sessionId);
   assert.equal(stored.status, "submitted");
+});
+
+test("external submits require the worker transaction then converge its exact evidence without broker gas", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({
+    source: { type: "external", poster: { wallet: WALLET_2 } },
+    requiresSponsoredGas: false
+  });
+  let liveState = 2;
+  let evidenceHash;
+  let brokerCalls = 0;
+  const gateway = {
+    isEnabled: () => true,
+    async getJob() { return { state: liveState, worker: WALLET }; },
+    async prepareDirectSubmitWork(jobId, evidence) {
+      assert.equal(jobId, job.id);
+      evidenceHash = evidence;
+      return { to: "0x1111111111111111111111111111111111111111", value: "0", data: "0x5678" };
+    },
+    async getLatestEvidence() { return evidenceHash; },
+    async submitWork() { brokerCalls += 1; }
+  };
+  const service = new JobExecutionService(stateStore, gateway, () => job);
+  const claimed = transitionSession(
+    { sessionId: `${job.id}:external`, wallet: WALLET, jobId: job.id, chainJobId: job.id, protocolHistory: [] },
+    "claimed",
+    { reason: "job_claimed" }
+  );
+  await stateStore.upsertSession(claimed);
+  const submission = {
+    summary: "Auth flow has one blocker.",
+    findings: [{ severity: "high", file: "frontend/auth.js", issue: "x", recommendation: "y" }],
+    risk_level: "high",
+    files_touched: ["frontend/auth.js"],
+    recommended_next_step: "request_changes"
+  };
+
+  await assert.rejects(
+    service.submitWork(claimed.sessionId, "mcp", submission),
+    (error) => {
+      assert.equal(error.code, "external_self_paid_submit_required");
+      assert.equal(error.details.evidenceHash, evidenceHash);
+      assert.equal(error.details.requiresSponsoredGas, false);
+      return true;
+    }
+  );
+  liveState = 3;
+  const converged = await service.submitWork(claimed.sessionId, "mcp", submission);
+
+  assert.equal(converged.status, "submitted");
+  assert.equal(brokerCalls, 0);
+  assert.equal((await stateStore.getSession(claimed.sessionId)).status, "submitted");
 });
 
 test("submitWork still stamps submitFailedAt + rethrows on a true revert (on-chain not Submitted)", async () => {

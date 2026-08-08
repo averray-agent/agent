@@ -14,6 +14,7 @@ import {
   AuthorizationError,
   ConfigError,
   ConflictError,
+  ExternalServiceError,
   NotFoundError,
   ValidationError
 } from "./errors.js";
@@ -25,14 +26,14 @@ import {
 } from "./external-job-lifecycle.js";
 
 export const EXTERNAL_DRAFT_FUNDING_NOTE =
-  "Awaiting a matching finalized escrow creation from the platform indexer.";
+  "No draft or claimable job exists yet; the watcher materializes both only after a matching finalized escrow creation.";
 export const EXTERNAL_POSTING_MODES = new Set(["closed", "allowlist", "open"]);
 export const CREATE_SINGLE_PAYOUT_SIGNATURE =
   "createSinglePayoutJob(bytes32,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32)";
+export const EXTERNAL_QUOTE_IDENTITY_VERSION = "poster_content_v2";
 
 const DEFAULT_MIN_REWARD_USDC = "1";
 const DEFAULT_DRAFT_TTL_HOURS = 72;
-const DEFAULT_MAX_OPEN_DRAFTS = 10;
 export const DEFAULT_POSTER_REVIEW_WINDOW_HOURS = 7 * 24;
 export const MIN_EXTERNAL_CLAIM_TTL_SECONDS = 60;
 const USDC_DECIMALS = 6;
@@ -76,11 +77,6 @@ export function resolveExternalPostingConfig(env = process.env) {
     DEFAULT_DRAFT_TTL_HOURS,
     "EXTERNAL_POSTING_DRAFT_TTL_HOURS"
   );
-  const maxOpenDrafts = parsePositiveInteger(
-    env.EXTERNAL_POSTING_MAX_OPEN_DRAFTS,
-    DEFAULT_MAX_OPEN_DRAFTS,
-    "EXTERNAL_POSTING_MAX_OPEN_DRAFTS"
-  );
   const reviewWindowHours = parsePositiveInteger(
     env.EXTERNAL_POSTING_REVIEW_WINDOW_HOURS,
     DEFAULT_POSTER_REVIEW_WINDOW_HOURS,
@@ -107,7 +103,6 @@ export function resolveExternalPostingConfig(env = process.env) {
     minRewardUsdc,
     minRewardRaw,
     draftTtlHours,
-    maxOpenDrafts,
     reviewWindowHours,
     escrowCoreAddress,
     usdcAsset
@@ -122,12 +117,30 @@ export function buildExternalJobIdCanonicalString(wallet, nonce) {
   });
 }
 
+export function buildExternalContentJobIdCanonicalString(wallet, contentHash) {
+  return canonicalizeContent({
+    contentHash: normalizeBytes32(contentHash, "contentHash"),
+    domain: "averray.external-job.v2",
+    poster: normalizeWallet(wallet)
+  });
+}
+
+export function buildExternalQuoteIdCanonicalString(wallet, contentHash) {
+  return canonicalizeContent({
+    contentHash: normalizeBytes32(contentHash, "contentHash"),
+    domain: "averray.external-quote.v2",
+    poster: normalizeWallet(wallet)
+  });
+}
+
 export function rebuildExternalDraftArtifacts(draft, config) {
   const wallet = normalizeWallet(draft?.wallet);
-  const nonce = requireNonce(draft?.nonce);
   const definition = requirePlainObject(draft?.definition, "definition");
-  const jobId = id(buildExternalJobIdCanonicalString(wallet, nonce));
   const specHash = hashCanonicalContent(definition);
+  const identityVersion = String(draft?.identityVersion ?? "legacy_nonce_v1");
+  const jobId = identityVersion === EXTERNAL_QUOTE_IDENTITY_VERSION
+    ? id(buildExternalContentJobIdCanonicalString(wallet, specHash))
+    : id(buildExternalJobIdCanonicalString(wallet, requireNonce(draft?.nonce)));
   const terms = resolveOnChainTerms(definition, config);
   return {
     jobId,
@@ -157,6 +170,7 @@ export class ExternalPostingService {
   constructor({
     stateStore,
     platformService = undefined,
+    gateway = undefined,
     config = resolveExternalPostingConfig(),
     now = () => new Date(),
     logger = console,
@@ -167,6 +181,7 @@ export class ExternalPostingService {
     }
     this.stateStore = stateStore;
     this.platformService = platformService;
+    this.gateway = gateway;
     this.config = config;
     this.now = now;
     this.logger = logger;
@@ -221,68 +236,88 @@ export class ExternalPostingService {
       throw error;
     }
 
-    const nonce = await this.stateStore.nextExternalDraftNonce(wallet);
-    const draftId = id(canonicalizeContent({
-      domain: "averray.external-draft.v1",
-      nonce,
-      poster: wallet
-    }));
+    const specHash = hashCanonicalContent(definition);
+    const draftId = id(buildExternalQuoteIdCanonicalString(wallet, specHash));
     const createdAt = now.toISOString();
     const expiresAt = new Date(
       now.getTime() + (this.config.draftTtlHours * 60 * 60 * 1000)
     ).toISOString();
     const artifacts = rebuildExternalDraftArtifacts(
-      { wallet, nonce, definition },
+      {
+        wallet,
+        identityVersion: EXTERNAL_QUOTE_IDENTITY_VERSION,
+        definition
+      },
       this.config
     );
-    const draft = {
-      draftId,
-      wallet,
-      nonce,
-      definition,
-      ...artifacts,
-      createdAt,
-      expiresAt,
-      status: "awaiting_funding"
-    };
-    const stored = await this.stateStore.createExternalJobDraft(draft, {
-      maxOpenDrafts: this.config.maxOpenDrafts,
-      activeAfter: createdAt
-    });
-    if (!stored) {
+    const materialized = await this.stateStore.getExternalJobDraftByJobId?.(artifacts.jobId);
+    if (materialized) {
       await this.recordDemandSignal({
         wallet,
         ...demand,
-        decision: "cap_rejected",
+        decision: "already_funded",
         attemptedAt: createdAt
       });
-      throw new ConflictError(
-        `Wallet already has ${this.config.maxOpenDrafts} open external drafts.`,
-        "external_draft_cap_reached",
-        { maxOpenDrafts: this.config.maxOpenDrafts }
-      );
+      const delisting = await this.stateStore.getExternalJobDelisting?.(materialized.jobId);
+      return presentDraft(materialized, now, delisting);
     }
-
-    await this.recordDemandSignal({
+    let fundingRequirement;
+    try {
+      fundingRequirement = await this.buildFundingRequirement(definition);
+    } catch (error) {
+      await this.recordDemandSignal({
+        wallet,
+        ...demand,
+        decision: "quote_failed",
+        attemptedAt: createdAt,
+        reason: error?.code ?? error?.message ?? "live_fee_quote_failed"
+      });
+      throw error;
+    }
+    const quote = {
+      draftId,
+      wallet,
+      identityVersion: EXTERNAL_QUOTE_IDENTITY_VERSION,
+      definition,
+      ...artifacts,
+      escrowAddress: artifacts.calldata.to,
+      fundingRequirement,
+      createdAt,
+      expiresAt,
+      status: "quoted",
+      persisted: false
+    };
+    const storedSignal = await this.recordQuoteDemandSignal({
       wallet,
       ...demand,
-      decision: "accepted",
-      attemptedAt: createdAt
+      decision: "quoted",
+      attemptedAt: createdAt,
+      quote
     });
-    return presentDraft(draft, now);
+    return presentQuote(storedSignal.quote, now, storedSignal);
   }
 
   async getDraft(walletInput, draftId) {
     const wallet = normalizeWallet(walletInput);
-    const draft = await this.stateStore.getExternalJobDraft(String(draftId ?? ""));
-    if (!draft) {
+    const key = String(draftId ?? "");
+    const draft = await this.stateStore.getExternalJobDraft(key);
+    const signal = draft
+      ? undefined
+      : await this.stateStore.getExternalPostingDemandSignal?.(key);
+    const quote = signal?.decision === "quoted" ? signal.quote : undefined;
+    if (!draft && !quote) {
       throw new NotFoundError("External job draft not found.", "external_draft_not_found");
     }
-    if (normalizeWallet(draft.wallet) !== wallet) {
+    const owner = draft?.wallet ?? quote?.wallet;
+    if (normalizeWallet(owner) !== wallet) {
       throw new AuthorizationError(
         "External job draft does not belong to the authenticated wallet.",
         "external_draft_not_owned"
       );
+    }
+    if (!draft) {
+      assertStoredDraftDeterminism(quote, this.config);
+      return presentQuote(quote, this.currentTime(), signal);
     }
     assertStoredDraftDeterminism(draft, this.config);
     const delisting = await this.stateStore.getExternalJobDelisting?.(draft.jobId);
@@ -332,8 +367,12 @@ export class ExternalPostingService {
 
   async reconcileFinalizedCreation(observationInput) {
     const observation = normalizeFinalizedCreation(observationInput);
-    const draft = await this.stateStore.getExternalJobDraftByJobId?.(observation.jobId);
-    if (!draft) {
+    let draft = await this.stateStore.getExternalJobDraftByJobId?.(observation.jobId);
+    const quoteSignal = draft
+      ? undefined
+      : await this.stateStore.getExternalPostingQuoteByJobId?.(observation.jobId);
+    const quote = quoteSignal?.decision === "quoted" ? quoteSignal.quote : undefined;
+    if (!draft && !quote) {
       this.logger.warn?.(
         {
           event: "external_posting_unknown_job_observed",
@@ -348,7 +387,7 @@ export class ExternalPostingService {
       return { outcome: "unknown", jobId: observation.jobId, projected: false };
     }
 
-    if (draft.status === "mismatch") {
+    if (draft?.status === "mismatch") {
       return {
         outcome: "mismatch",
         jobId: draft.jobId,
@@ -357,7 +396,7 @@ export class ExternalPostingService {
         permanent: true
       };
     }
-    if (draft.status === "expired") {
+    if (draft?.status === "expired") {
       return {
         outcome: "expired",
         jobId: draft.jobId,
@@ -365,23 +404,21 @@ export class ExternalPostingService {
         permanent: true
       };
     }
-    if (draft.status === "live") {
+    if (draft?.status === "live") {
       return this.projectConfirmedDraft(draft);
     }
 
-    const mismatchField = firstCreationMismatch(draft, observation);
+    const candidate = draft ?? quote;
+    assertStoredDraftDeterminism(candidate, this.config);
+    const mismatchField = firstCreationMismatch(candidate, observation);
     if (mismatchField) {
-      const updated = await this.stateStore.updateExternalJobDraft?.(draft.draftId, {
+      const updated = await this.materializeOrUpdateDraft(candidate, {
         status: "mismatch",
         mismatchField,
         mismatchObservedAt: this.currentTime().toISOString(),
         mismatchObservation: observation
-      }) ?? {
-        ...draft,
-        status: "mismatch",
-        mismatchField,
-        mismatchObservation: observation
-      };
+      });
+      await this.markQuoteFundingStatus(quoteSignal, "mismatch", observation);
       this.publishReconciliationEvent("mismatch", observation, { field: mismatchField });
       return {
         outcome: "mismatch",
@@ -392,17 +429,18 @@ export class ExternalPostingService {
       };
     }
 
-    if (Date.parse(observation.fundedAt) > Date.parse(draft.expiresAt)) {
-      await this.stateStore.updateExternalJobDraft?.(draft.draftId, {
+    if (Date.parse(observation.fundedAt) > Date.parse(candidate.expiresAt)) {
+      await this.materializeOrUpdateDraft(candidate, {
         status: "expired",
         fundedAfterExpiry: observation
       });
+      await this.markQuoteFundingStatus(quoteSignal, "funded_after_expiry", observation);
       this.publishReconciliationEvent("expired", observation, {
         reason: "funded_after_expiry"
       });
       return {
         outcome: "expired",
-        jobId: draft.jobId,
+        jobId: candidate.jobId,
         projected: false,
         permanent: true,
         reason: "funded_after_expiry"
@@ -414,22 +452,55 @@ export class ExternalPostingService {
       txHash: observation.txHash,
       blockNumber: observation.blockNumber
     };
-    const updated = await this.stateStore.updateExternalJobDraft?.(draft.draftId, {
+    const updated = await this.materializeOrUpdateDraft(candidate, {
       status: "live",
       fundedAt: confirmation.fundedAt,
       fundingTxHash: confirmation.txHash,
       fundingBlockNumber: confirmation.blockNumber,
       confirmation
-    }) ?? {
-      ...draft,
-      status: "live",
-      fundedAt: confirmation.fundedAt,
-      fundingTxHash: confirmation.txHash,
-      fundingBlockNumber: confirmation.blockNumber,
-      confirmation
-    };
+    });
+    await this.markQuoteFundingStatus(quoteSignal, "funded", observation);
     this.publishReconciliationEvent("live", observation);
     return this.projectConfirmedDraft(updated);
+  }
+
+  async materializeOrUpdateDraft(candidate, patch) {
+    const existing = await this.stateStore.getExternalJobDraft(candidate.draftId);
+    if (existing) {
+      return await this.stateStore.updateExternalJobDraft?.(candidate.draftId, patch)
+        ?? { ...existing, ...patch };
+    }
+    const materialized = {
+      ...candidate,
+      persisted: true,
+      materializedAt: this.currentTime().toISOString(),
+      ...patch
+    };
+    const created = await this.stateStore.materializeExternalJobDraft?.(materialized);
+    if (created === false) {
+      const raced = await this.stateStore.getExternalJobDraftByJobId?.(candidate.jobId);
+      if (!raced || raced.draftId !== candidate.draftId) {
+        throw new ConflictError(
+          "External funding matched a conflicting materialized job.",
+          "external_draft_materialization_conflict",
+          { draftId: candidate.draftId, jobId: candidate.jobId }
+        );
+      }
+      return raced;
+    }
+    return materialized;
+  }
+
+  async markQuoteFundingStatus(signal, fundingStatus, observation) {
+    if (!signal?.id || typeof this.stateStore.updateExternalPostingDemandSignal !== "function") {
+      return;
+    }
+    await this.stateStore.updateExternalPostingDemandSignal(signal.id, {
+      fundingStatus,
+      fundingObservedAt: this.currentTime().toISOString(),
+      fundingTxHash: observation.txHash,
+      fundingBlockNumber: observation.blockNumber
+    });
   }
 
   async hydrateConfirmedProjections() {
@@ -483,6 +554,91 @@ export class ExternalPostingService {
     return jobs.filter((_job, index) => visibility[index]);
   }
 
+  async buildFundingRequirement(definition) {
+    if (typeof this.gateway?.previewProtocolFeeForAsset !== "function") {
+      throw new ExternalServiceError(
+        "External posting requires a live EscrowCore protocol-fee quote before funding.",
+        "external_fee_quote_unavailable"
+      );
+    }
+    const terms = resolveOnChainTerms(definition, this.config);
+    const preview = await this.gateway.previewProtocolFeeForAsset(
+      this.config.usdcAsset.symbol,
+      definition.rewardAmount
+    );
+    const quotedRewardRaw = parseQuoteRaw(preview?.rewardAmountRaw, "rewardAmountRaw");
+    const protocolFeeRaw = parseQuoteRaw(preview?.protocolFeeAmountRaw, "protocolFeeAmountRaw");
+    const protocolFeeBps = Number(preview?.protocolFeeBps);
+    if (quotedRewardRaw !== terms.rewardRaw) {
+      throw new ExternalServiceError(
+        "Live protocol-fee quote reward does not match the validated external reward.",
+        "external_fee_quote_reward_mismatch"
+      );
+    }
+    if (!Number.isInteger(protocolFeeBps) || protocolFeeBps < 0 || protocolFeeBps > 10_000) {
+      throw new ExternalServiceError(
+        "Live protocol-fee quote returned an invalid basis-point value.",
+        "external_fee_quote_invalid"
+      );
+    }
+    const calculatedFeeRaw = terms.rewardRaw * BigInt(protocolFeeBps) / 10_000n;
+    if (protocolFeeRaw !== calculatedFeeRaw) {
+      throw new ExternalServiceError(
+        "Live protocol-fee quote does not reconcile to reward times protocolFeeBps.",
+        "external_fee_quote_mismatch"
+      );
+    }
+    const posterReservedRaw = terms.rewardRaw
+      + terms.opsReserveRaw
+      + terms.contingencyReserveRaw
+      + protocolFeeRaw;
+    return {
+      asset: this.config.usdcAsset.symbol,
+      assetAddress: this.config.usdcAsset.address,
+      decimals: this.config.usdcAsset.decimals,
+      rewardRaw: terms.rewardRaw.toString(),
+      workerReceivesRaw: terms.rewardRaw.toString(),
+      opsReserveRaw: terms.opsReserveRaw.toString(),
+      contingencyReserveRaw: terms.contingencyReserveRaw.toString(),
+      protocolFeeRaw: protocolFeeRaw.toString(),
+      protocolFeeBps,
+      posterReservedRaw: posterReservedRaw.toString(),
+      feeSemantics: "poster_additive",
+      source: "live EscrowCore.previewProtocolFee at quote time",
+      expiresWithQuote: true
+    };
+  }
+
+  async recordQuoteDemandSignal({ wallet, requestedReward, schema, decision, attemptedAt, quote }) {
+    const existing = await this.stateStore.getExternalPostingDemandSignal?.(quote.draftId);
+    if (existing?.quote) {
+      const sameIdentity = existing.quote.jobId === quote.jobId
+        && existing.quote.specHash === quote.specHash
+        && normalizeWallet(existing.quote.wallet) === wallet;
+      if (!sameIdentity) {
+        throw new ConflictError(
+          "Deterministic external quote identity already belongs to different content.",
+          "external_quote_identity_conflict",
+          { draftId: quote.draftId }
+        );
+      }
+    }
+    const signal = {
+      id: quote.draftId,
+      wallet,
+      requestedReward,
+      schema,
+      decision,
+      attemptedAt,
+      firstAttemptedAt: existing?.firstAttemptedAt ?? attemptedAt,
+      lastAttemptedAt: attemptedAt,
+      attemptCount: Number(existing?.attemptCount ?? 0) + 1,
+      fundingStatus: existing?.fundingStatus === "funded" ? "funded" : "unfunded",
+      quote
+    };
+    return this.stateStore.appendExternalPostingDemandSignal(signal);
+  }
+
   currentTime() {
     const value = this.now();
     const date = value instanceof Date ? value : new Date(value);
@@ -499,7 +655,8 @@ export class ExternalPostingService {
       requestedReward: signal.requestedReward,
       schema: signal.schema,
       decision: signal.decision,
-      attemptedAt: signal.attemptedAt
+      attemptedAt: signal.attemptedAt,
+      ...(signal.reason ? { reason: String(signal.reason) } : {})
     });
   }
 
@@ -539,6 +696,21 @@ function validateExternalJobDefinition(candidate, config) {
       "external_schema_not_supported"
     );
   }
+
+  if (definition.requiresSponsoredGas === true) {
+    throw externalValidationError(
+      "External jobs are worker-funded on-chain and cannot request operator-brokered gas.",
+      "external_sponsored_gas_forbidden"
+    );
+  }
+  if (definition.onboardingWaiverEligible === true) {
+    throw externalValidationError(
+      "External jobs cannot request the curated starter onboarding waiver.",
+      "external_onboarding_waiver_forbidden"
+    );
+  }
+  definition.requiresSponsoredGas = false;
+  definition.onboardingWaiverEligible = false;
   if (
     definition.recurring === true
     || definition.recurringPolicy !== undefined
@@ -722,6 +894,26 @@ function presentDraft(draft, now, delisting = undefined) {
   };
 }
 
+function presentQuote(quote, now, signal = undefined) {
+  const expired = now.getTime() >= Date.parse(quote.expiresAt);
+  return {
+    draftId: quote.draftId,
+    jobId: quote.jobId,
+    specHash: quote.specHash,
+    definition: cloneJsonObject(quote.definition),
+    calldata: cloneJsonObject(quote.calldata),
+    escrowAddress: quote.escrowAddress,
+    fundingRequirement: cloneJsonObject(quote.fundingRequirement),
+    createdAt: quote.createdAt,
+    expiresAt: quote.expiresAt,
+    status: expired ? "expired" : "quoted",
+    persisted: false,
+    attemptCount: Number(signal?.attemptCount ?? 1),
+    fundingStatus: signal?.fundingStatus ?? "unfunded",
+    ...(!expired ? { note: EXTERNAL_DRAFT_FUNDING_NOTE } : {})
+  };
+}
+
 function resolveExternalClaimTtlSeconds(definition) {
   // External work uses the poster's explicit claim window rather than deriving
   // duration from tier/category: those labels describe access and task shape,
@@ -814,6 +1006,17 @@ function normalizeUint(raw, label) {
     throw new ValidationError(`${label} must be an exact unsigned integer.`);
   }
   return BigInt(value).toString();
+}
+
+function parseQuoteRaw(raw, label) {
+  const value = String(raw ?? "").trim();
+  if (!/^\d+$/u.test(value)) {
+    throw new ExternalServiceError(
+      `Live protocol-fee quote ${label} is not an exact unsigned integer.`,
+      "external_fee_quote_invalid"
+    );
+  }
+  return BigInt(value);
 }
 
 function normalizeIso(raw, label) {

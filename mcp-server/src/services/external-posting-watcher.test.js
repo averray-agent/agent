@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Interface, Transaction, Wallet } from "ethers";
+import { Interface, Transaction, Wallet, parseUnits } from "ethers";
 
 import {
   CREATE_SINGLE_PAYOUT_SIGNATURE,
@@ -52,7 +52,6 @@ function postingConfig(mode = "open") {
     EXTERNAL_POSTING_MODE: mode,
     EXTERNAL_POSTING_MIN_REWARD_USDC: "1",
     EXTERNAL_POSTING_DRAFT_TTL_HOURS: "72",
-    EXTERNAL_POSTING_MAX_OPEN_DRAFTS: "10",
     ESCROW_CORE_ADDRESS: ESCROW,
     SUPPORTED_ASSETS_JSON: JSON.stringify([
       { symbol: "USDC", address: USDC, decimals: 6 }
@@ -95,6 +94,16 @@ async function createHarness({
   const service = new ExternalPostingService({
     stateStore: store,
     platformService,
+    gateway: {
+      async previewProtocolFeeForAsset(_asset, rewardAmount) {
+        const rewardRaw = parseUnits(String(rewardAmount), 6);
+        return {
+          rewardAmountRaw: rewardRaw.toString(),
+          protocolFeeAmountRaw: (rewardRaw * 500n / 10_000n).toString(),
+          protocolFeeBps: 500
+        };
+      }
+    },
     config: postingConfig(mode),
     now: () => new Date(now),
     logger
@@ -207,6 +216,7 @@ test("funded at hour 71 and first observed at hour 73 still becomes live", async
   const creator = new ExternalPostingService({
     stateStore: service.stateStore,
     platformService,
+    gateway: service.gateway,
     config: postingConfig("open"),
     now: () => new Date(CREATED_AT)
   });
@@ -257,7 +267,7 @@ test("mode closed after funding does not stop reconciliation or projection", asy
   assert.equal(platformService.jobs.has(draft.jobId), true);
 });
 
-test("a stalled indexer keeps drafts awaiting_funding and exposes staged capability lag", async () => {
+test("a stalled indexer keeps quotes unfunded and exposes staged capability lag", async () => {
   const { service } = await createHarness({ now: "2026-07-20T02:00:00.000Z" });
   const draft = await service.createDraft(POSTER, { definition: definition() });
   const watcher = new ExternalPostingWatcherService(service, service.stateStore, undefined, {
@@ -286,7 +296,7 @@ test("a stalled indexer keeps drafts awaiting_funding and exposes staged capabil
 
   assert.equal(status.current, false);
   assert.equal(status.lagSeconds, 3600);
-  assert.equal((await service.getDraft(POSTER, draft.draftId)).status, "awaiting_funding");
+  assert.equal((await service.getDraft(POSTER, draft.draftId)).status, "quoted");
 });
 
 test("a fresh finalized head remains staged while watcher event pages are backlogged", async () => {
@@ -368,6 +378,16 @@ test("local external-posting e2e signs issued calldata, watches funding, and rea
   const externalPosting = new ExternalPostingService({
     stateStore,
     platformService,
+    gateway: {
+      async previewProtocolFeeForAsset(_asset, rewardAmount) {
+        const rewardRaw = parseUnits(String(rewardAmount), 6);
+        return {
+          rewardAmountRaw: rewardRaw.toString(),
+          protocolFeeAmountRaw: (rewardRaw * 500n / 10_000n).toString(),
+          protocolFeeBps: 500
+        };
+      }
+    },
     config: postingConfig("open"),
     now: () => new Date(createdAt)
   });

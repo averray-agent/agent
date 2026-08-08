@@ -581,6 +581,25 @@ test("claimJob uses direct claim when the signer is the authenticated wallet", a
   assert.deepEqual(calls, [[gateway.toJobId("wiki-job")]]);
 });
 
+test("prepareDirectClaimJob returns exact unsigned worker calldata without requiring a signer", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const escrowAddress = "0x1111111111111111111111111111111111111111";
+  const contractInterface = new Interface(["function claimJob(bytes32 jobId)"]);
+  gateway.readEscrowJob = async () => ({ escrowAddress });
+  gateway.escrowContract = { interface: contractInterface };
+
+  const prepared = await gateway.prepareDirectClaimJob("wiki-job");
+  const chainJobId = gateway.toJobId("wiki-job");
+
+  assert.deepEqual(prepared, {
+    to: escrowAddress,
+    value: "0",
+    function: "claimJob(bytes32)",
+    args: [chainJobId],
+    data: contractInterface.encodeFunctionData("claimJob", [chainJobId])
+  });
+});
+
 test("submitWork relays the worker via submitWorkFor when the signer is an operator", async () => {
   const gateway = new BlockchainGateway({ enabled: false });
   const worker = "0x3333333333333333333333333333333333333333";
@@ -632,6 +651,33 @@ test("submitWork uses direct submitWork when no relayed worker is supplied", asy
   await gateway.submitWork("wiki-job", evidence);
 
   assert.deepEqual(calls, [[gateway.toJobId("wiki-job"), evidence]]);
+});
+
+test("prepareDirectSubmitWork and getLatestEvidence bind convergence to exact worker evidence", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const escrowAddress = "0x1111111111111111111111111111111111111111";
+  const evidence = `0x${"c".repeat(64)}`;
+  const contractInterface = new Interface([
+    "function submitWork(bytes32 jobId, bytes32 evidence)",
+    "function latestEvidence(bytes32 jobId) view returns (bytes32)"
+  ]);
+  gateway.readEscrowJob = async () => ({ escrowAddress });
+  gateway.escrowContract = {
+    interface: contractInterface,
+    async latestEvidence() { return evidence.toUpperCase(); }
+  };
+
+  const prepared = await gateway.prepareDirectSubmitWork("wiki-job", evidence);
+  const chainJobId = gateway.toJobId("wiki-job");
+
+  assert.deepEqual(prepared, {
+    to: escrowAddress,
+    value: "0",
+    function: "submitWork(bytes32,bytes32)",
+    args: [chainJobId, evidence],
+    data: contractInterface.encodeFunctionData("submitWork", [chainJobId, evidence])
+  });
+  assert.equal(await gateway.getLatestEvidence("wiki-job"), evidence);
 });
 
 test("openDispute relays the participant via openDisputeFor when the signer is not the participant", async () => {
