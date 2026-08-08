@@ -390,3 +390,38 @@ test("admin async XCM smoke has an optional freshness gate on xcmObservationRela
     "freshness gate must surface a clear operator-facing error when the cadence has stalled."
   );
 });
+
+// The four liveReads clauses assert a third-party RPC answered, not that
+// anything of ours is correct. They failed two production deploys on
+// 2026-08-08 while the code had already installed successfully, so they are
+// retried and then advisory.
+//
+// The test above matches those clause strings and would pass whether they are
+// hard-gated or advisory, so it never protected this. Pin the semantics.
+test("live chain reads are retried and advisory, never a hard deploy gate", async () => {
+  const script = await readFile(CHECK_SCRIPT, "utf8");
+
+  assert.match(script, /LIVE_READ_ATTEMPTS="\$\{LIVE_READ_ATTEMPTS:-\d+\}"/u);
+  assert.match(script, /live_reads_available\(\)/u);
+  assert.match(script, /advisory only/u);
+
+  // The retry must re-fetch. A payload already in hand cannot recover, so a
+  // loop that only re-tests the same JSON would sleep and fail regardless.
+  const loop = script.slice(script.indexOf("live_read_attempt=1"));
+  assert.match(loop, /poster_onboarding_json="\$\(fetch "\$API_POSTER_ONBOARDING_URL"\)"/u);
+
+  // The clauses must NOT sit inside the hard structural assertion any more.
+  const structural = script.slice(
+    script.indexOf("Checking poster onboarding live facts"),
+    script.indexOf("live_reads_available()")
+  );
+  assert.doesNotMatch(structural, /\.liveReads\./u);
+});
+
+// `.liveReads` carries a scalar `asOf` beside the read objects. Without the
+// type guard the failure dump prints a jq error instead of naming the read
+// that failed — hidden behind `|| true`, so nothing would catch it.
+test("the advisory dump names the failing read rather than erroring", async () => {
+  const script = await readFile(CHECK_SCRIPT, "utf8");
+  assert.match(script, /select\(\.value \| type == "object"\)/u);
+});
