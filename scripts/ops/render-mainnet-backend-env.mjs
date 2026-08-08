@@ -90,7 +90,7 @@ export const LITERAL_OVERRIDES = {
 
   // ── BANK LANE OBSERVER FEED ─────────────────────────────────────────────
   //
-  // These seven arrived by HAND-EDITING deploy/backend.mainnet.env.template,
+  // These settings arrived by HAND-EDITING deploy/backend.mainnet.env.template,
   // which its own header forbids, and `--check` has been failing ever since.
   // Nothing caught it: no CI job runs the check the header promises, and
   // check-generated-output-clean.mjs only guards frontend/ and site/.
@@ -111,6 +111,7 @@ export const LITERAL_OVERRIDES = {
   // observer silently point at different generations.
   BANK_LANE_FEED_ENABLED: "true",
   BANK_LANE_FEED_HYDRATION_EVM_RPC_URL: "https://rpc.hydradx.cloud",
+  BANK_LANE_FEED_HYDRATION_EVM_RPC_BACKUP_URLS: "https://hydration-rpc.n.dwellir.com",
   // aUSDC on Hydration's EVM ledger. The position is balanceOf() here, NOT
   // Tokens.accounts(…, 1003): AssetRegistry reports 1003 as assetType "Erc20",
   // so the Substrate read is zero by design and would render as an empty

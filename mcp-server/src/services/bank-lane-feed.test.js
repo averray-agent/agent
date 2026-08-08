@@ -25,6 +25,7 @@ const WRAPPER_V21_STALE = "0x22E90B74ca73E86F13325Af6FdeA00Cd1da90943";
 const WRAPPER_V21 = "0x2AF394fA95f75D3ca1C786128f4dfA1eB0c9675D";
 const WRAPPER_V22 = "0xEceE778e11B238D2fc096E56460e7B98DC7B26b8";
 const BASE = Date.parse("2026-08-03T14:00:00.000Z");
+const DEPOSIT_BLOCK = 13_488_842;
 
 function subject(configuredWrapper = WRAPPER_V22) {
   return {
@@ -91,6 +92,50 @@ function service(store, reader, options = {}) {
   });
 }
 
+async function recordDepositEvidence(
+  store,
+  { requestId = `0x${"aa".repeat(32)}`, raw = "100000", remoteBlockNumber = DEPOSIT_BLOCK } = {}
+) {
+  await store.upsertXcmBalanceWatch({
+    requestId,
+    wrapperAddress: WRAPPER_V22,
+    target: targets().position,
+    direction: "increase",
+    status: "succeeded",
+    startedAt: new Date(BASE - 10_000).toISOString(),
+    deadlineAt: new Date(BASE - 1_000).toISOString()
+  });
+  await store.recordBankXcmLegDispatchEvidence({
+    id: `bank.v22_leg_dispatched-${requestId}`,
+    topic: "bank.v22_leg_dispatched",
+    correlationId: requestId,
+    timestamp: new Date(BASE - 5_000).toISOString(),
+    data: {
+      requestId,
+      wrapper: WRAPPER_V22,
+      leg: "deposit_sell",
+      txHash: `0x${requestId.slice(2, 64)}00`,
+      blockNumber: 19_135_461 + remoteBlockNumber - DEPOSIT_BLOCK,
+      remoteExecution: {
+        chain: "hydration",
+        blockNumber: remoteBlockNumber,
+        blockHash: `0x${"bb".repeat(32)}`,
+        eventIndex: 13,
+        event: {
+          section: "broadcast",
+          method: "Swapped3",
+          data: {
+            fillerType: "AAVE",
+            assetIn: 22,
+            assetOut: 1003,
+            outputs: [{ asset: "1,003", amount: raw }]
+          }
+        }
+      }
+    }
+  });
+}
+
 test("Bank feed preserves raw decimal strings, source clocks, and the request deadline", async () => {
   const store = new MemoryStateStore();
   await store.upsertXcmBalanceWatch({
@@ -133,11 +178,7 @@ test("Bank feed preserves raw decimal strings, source clocks, and the request de
   }]);
   assert.equal(feed.requests.readAtMs, BASE);
   assert.equal(feed.requests.lastError, null);
-  assert.deepEqual(feed.calibration, {
-    provenAtMs: BASE - 3_000,
-    provenRaw: "900719925474099312345678",
-    provenSource: feed.position.source
-  });
+  assert.equal(feed.calibration, null);
   assert.match(feed.position.source, /^erc20:0x2ec4884088d84e5c2970a034732e5209b0acfa93\.balanceOf\(0x42e55ecf123da7d3eba1c55998b3cbf8238c4463\)$/u);
 });
 
@@ -298,7 +339,7 @@ test("observed balance stays pending-finalize on the board until chain settlemen
   });
   const observed = await bankFeed.pollOnce();
   assert.equal(observed.position.raw, "100000");
-  assert.equal(observed.calibration.provenRaw, "100000");
+  assert.equal(observed.calibration, null);
   assert.deepEqual(observed.requests.items[0], {
     id: requestId,
     wrapperAddress: WRAPPER_V22.toLowerCase(),
@@ -341,7 +382,7 @@ test("observed balance stays pending-finalize on the board until chain settlemen
   );
   const pending = await bankFeed.pollOnce();
   assert.equal(pending.position.raw, "100000");
-  assert.equal(pending.calibration.provenRaw, "100000");
+  assert.equal(pending.calibration, null);
   assert.equal(pending.requests.items[0].phase, "finalize-error");
   assert.equal(pending.requests.items[0].status, "error");
   assert.equal(pending.requests.items[0].finalization.attemptCount, 1);
@@ -523,40 +564,98 @@ test("request snapshot renders the active-generation withdraw target and rejects
   }]);
 });
 
-test("position calibration requires non-zero, survives restart, and invalidates on retarget", async () => {
+test("position calibration is pinned to the deposit request and Hydration execution block", async () => {
   const store = new MemoryStateStore();
-  let positionRaw = "0";
-  let positionAsOf = BASE;
+  const firstRequestId = `0x${"61".repeat(32)}`;
+  const secondRequestId = `0x${"62".repeat(32)}`;
+  await recordDepositEvidence(store, { requestId: firstRequestId, raw: "100000" });
+  const positionSource = describeBalanceTarget(targets().position);
+  await store.upsertServiceState(BANK_LANE_FEED_STATE_SCOPE, {
+    calibration: {
+      provenAtMs: BASE - 86_400_000,
+      provenRaw: "100000",
+      provenSource: positionSource
+    }
+  });
+  let positionRaw = "100844";
+  const historical = new Map([[DEPOSIT_BLOCK, "100001"]]);
+  const historicalCalls = [];
   const reader = {
-    async read(target) {
+    async read(target, options = {}) {
+      if (options.blockTag !== undefined) {
+        historicalCalls.push({ target, blockTag: options.blockTag });
+        return { raw: historical.get(options.blockTag), asOf: BASE, target };
+      }
       const raw = target.ledger === "erc20" ? positionRaw : "0";
-      return { raw, asOf: positionAsOf, target };
+      return { raw, asOf: BASE, target };
     }
   };
   const firstProcess = service(store, reader);
-  assert.equal((await firstProcess.pollOnce()).calibration, null);
-
-  positionRaw = "100000";
-  positionAsOf = BASE + 1_000;
+  assert.equal(
+    (await firstProcess.getFeed()).calibration,
+    null,
+    "the legacy dust latch must not survive merely because provenSource still matches"
+  );
   const proven = await firstProcess.pollOnce();
   assert.deepEqual(proven.calibration, {
-    provenAtMs: BASE + 1_000,
-    provenRaw: "100000",
-    provenSource: proven.position.source
+    provenAtMs: BASE,
+    provenRaw: "100001",
+    provenSource: proven.position.source,
+    provenRequestId: firstRequestId,
+    provenWrapperAddress: WRAPPER_V22.toLowerCase(),
+    provenBlockNumber: DEPOSIT_BLOCK
   });
+  assert.equal(historicalCalls.length, 1);
+  assert.equal(historicalCalls[0].blockTag, 13_488_842);
+  assert.equal(describeBalanceTarget(historicalCalls[0].target), proven.position.source);
 
   positionRaw = "200000";
-  positionAsOf = BASE + 2_000;
   await firstProcess.pollOnce();
   const restarted = service(store, reader);
   assert.deepEqual((await restarted.getFeed()).calibration, proven.calibration);
+  assert.equal(historicalCalls.length, 1, "a durable request-keyed proof must not be re-read live");
 
-  positionRaw = "0";
+  const secondBlock = DEPOSIT_BLOCK + 100;
+  historical.set(secondBlock, "10000001");
+  await recordDepositEvidence(store, {
+    requestId: secondRequestId,
+    raw: "10000000",
+    remoteBlockNumber: secondBlock
+  });
+  assert.equal(
+    (await restarted.getFeed()).calibration,
+    null,
+    "a newer deposit through the same source must invalidate the prior epoch"
+  );
+  const relatched = await restarted.pollOnce();
+  assert.deepEqual(relatched.calibration, {
+    provenAtMs: BASE,
+    provenRaw: "10000001",
+    provenSource: proven.position.source,
+    provenRequestId: secondRequestId,
+    provenWrapperAddress: WRAPPER_V22.toLowerCase(),
+    provenBlockNumber: secondBlock
+  });
+  assert.deepEqual(historicalCalls.map(({ blockTag }) => blockTag), [DEPOSIT_BLOCK, secondBlock]);
+
   const retargeted = service(store, reader, { targets: targets(OTHER_AUSDC) });
   const beforeRetargetRead = await retargeted.getFeed();
   assert.equal(beforeRetargetRead.position.raw, null);
   assert.equal(beforeRetargetRead.calibration, null);
   assert.equal((await retargeted.pollOnce()).calibration, null);
+});
+
+test("a non-zero live position cannot calibrate without remote deposit-block evidence", async () => {
+  const store = new MemoryStateStore();
+  const feed = await service(store, {
+    async read(target, options = {}) {
+      assert.equal(options.blockTag, undefined);
+      return { raw: target.ledger === "erc20" ? "10000000" : "0", asOf: BASE, target };
+    }
+  }).pollOnce();
+
+  assert.equal(feed.position.raw, "10000000");
+  assert.equal(feed.calibration, null);
 });
 
 test("Bank feed config binds the three exact ledgers and stays inert when disabled", () => {
@@ -569,6 +668,10 @@ test("Bank feed config binds the three exact ledgers and stays inert when disabl
     BANK_LANE_FEED_WRAPPER_CANDIDATES_JSON: JSON.stringify(subject().candidates),
     BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32: ACCOUNT,
     BANK_LANE_FEED_HYDRATION_EVM_RPC_URL: "https://rpc.hydradx.cloud",
+    BANK_LANE_FEED_HYDRATION_EVM_RPC_BACKUP_URLS: [
+      "https://hydration-rpc.n.dwellir.com",
+      "https://rpc.hydradx.cloud"
+    ].join(","),
     BANK_LANE_FEED_HYDRATION_EVM_CHAIN_ID: "222222",
     BANK_LANE_FEED_AUSDC_CONTRACT: AUSDC,
     BANK_LANE_FEED_HYDRATION_SUBSTRATE_RPC_URL: "wss://hydration-rpc.n.dwellir.com",
@@ -579,6 +682,10 @@ test("Bank feed config binds the three exact ledgers and stays inert when disabl
 
   assert.equal(config.targets.position.ledger, "erc20");
   assert.equal(config.targets.position.accountTransform, "hydration_truncate20");
+  assert.deepEqual(
+    normalizeVenueBalanceTarget(config.targets.position).rpcUrls,
+    ["https://rpc.hydradx.cloud/", "https://hydration-rpc.n.dwellir.com/"]
+  );
   assert.equal(config.targets.float.ledger, "substrate_tokens");
   assert.equal(config.targets.float.assetId, "22");
   assert.equal(config.targets.postage.ledger, "substrate_system");

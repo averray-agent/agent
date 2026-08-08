@@ -28,6 +28,18 @@ const LIVE_DEPOSIT_BACKFILL = JSON.parse(readFileSync(
   "utf8"
 ));
 
+function depositCalibration(provenRaw = "10000000", overrides = {}) {
+  return {
+    provenRaw,
+    provenAtMs: NOW - 60_000,
+    provenSource: `erc20:${AUSDC}.balanceOf(${CONVERTED.slice(0, 42)})`,
+    provenRequestId: DEPOSIT_REQUEST,
+    provenWrapperAddress: WRAPPER.toLowerCase(),
+    provenBlockNumber: 13_488_842,
+    ...overrides
+  };
+}
+
 function settlementReceipt(seed, workerAmountRaw) {
   return {
     txHash: `0x${seed.charCodeAt(0).toString(16).padStart(2, "0").repeat(32)}`,
@@ -129,32 +141,7 @@ function harness(overrides = {}) {
         assert.equal(wrapper, WRAPPER);
         assert.equal(leg, "deposit_sell");
         if (overrides.missingDepositEvent) return undefined;
-        return overrides.depositEvent ?? {
-            id: "bank-deposit-sell",
-            topic: "bank.v22_leg_dispatched",
-            correlationId: DEPOSIT_REQUEST,
-            timestamp: "2026-08-06T14:15:58.745Z",
-            data: {
-              requestId: DEPOSIT_REQUEST,
-              wrapper: WRAPPER,
-              leg: "deposit_sell",
-              txHash: DEPOSIT_TX,
-              blockNumber: 19_135_461,
-              dryRun: {
-                events: [{
-                  section: "Broadcast",
-                  method: "Swapped",
-                  data: {
-                    fillerType: "AAVE",
-                    assetIn: 22,
-                    assetOut: 1003,
-                    inputs: [{ asset: "22", amount: "10,000,000" }],
-                    outputs: [{ asset: "1,003", amount: "10,000,000" }]
-                  }
-                }]
-              }
-            }
-        };
+        return overrides.depositEvent ?? LIVE_DEPOSIT_BACKFILL.event;
       }
     },
     platformService: {
@@ -241,11 +228,9 @@ function harness(overrides = {}) {
             lastError: null,
             candidates: [{ version: "2.2.1", wrapper: WRAPPER, dispatchPaused: false, lastError: null }]
           },
-          calibration: overrides.calibration ?? {
-            provenRaw: "10000000",
-            provenAtMs: NOW - 60_000,
-            provenSource: "erc20:0x2ec4884088d84e5c2970a034732e5209b0acfa93.balanceOf(0x48df881b65e682f05ac24dc8f668a8938225e973)"
-          }
+          calibration: overrides.calibration === undefined
+            ? depositCalibration()
+            : overrides.calibration
         };
       }
     }
@@ -343,11 +328,7 @@ test("live v2.2.1 deposit backfill resolves from the chain-observed Swapped3 eve
       readAtMs: NOW,
       lastError: null
     },
-    calibration: {
-      provenRaw: "10000001",
-      provenAtMs: NOW - 60_000,
-      provenSource: "erc20:0x2ec4884088d84e5c2970a034732e5209b0acfa93.balanceOf(0x48df881b65e682f05ac24dc8f668a8938225e973)"
-    }
+    calibration: depositCalibration("10000001")
   }).getSnapshot();
 
   assert.equal(payload.treasury.position.deposited.value, "10");
@@ -376,11 +357,7 @@ test("position economics are real-read subtractions and preserve signed growth/n
 test("rebasing deposit corroboration accepts live +1 accrual without restoring equality", async () => {
   const payload = await harness({
     settledSharesRaw: "10000001",
-    calibration: {
-      provenRaw: "10000001",
-      provenAtMs: NOW - 60_000,
-      provenSource: `erc20:${AUSDC}.balanceOf(${CONVERTED.slice(0, 42)})`
-    },
+    calibration: depositCalibration("10000001"),
     positionReading: {
       raw: "10000844",
       source: `erc20:${AUSDC}.balanceOf(${CONVERTED.slice(0, 42)})`,
@@ -409,20 +386,37 @@ test("rebasing deposit corroboration refuses excess beyond the explicit two-bps 
 });
 
 test("rebasing deposit corroboration applies the same monotonic bound to calibration", async (t) => {
-  const calibration = (provenRaw) => ({
-    provenRaw,
-    provenAtMs: NOW - 60_000,
-    provenSource: `erc20:${AUSDC}.balanceOf(${CONVERTED.slice(0, 42)})`
-  });
   await t.test("refuses a calibration below the swap output", async () => {
-    const payload = await harness({ calibration: calibration("9999999") }).getSnapshot();
+    const payload = await harness({ calibration: depositCalibration("9999999") }).getSnapshot();
     assert.equal(payload.treasury.position.deposited.status, "unknown");
     assert.match(payload.treasury.position.deposited.proof, /below the authoritative Broadcast\.Swapped deposit/u);
   });
   await t.test("refuses calibration excess beyond two bps", async () => {
-    const payload = await harness({ calibration: calibration("10002001") }).getSnapshot();
+    const payload = await harness({ calibration: depositCalibration("10002001") }).getSnapshot();
     assert.equal(payload.treasury.position.deposited.status, "unknown");
     assert.match(payload.treasury.position.deposited.proof, /exceeds the 2-bps rebase corroboration bound/u);
+  });
+});
+
+test("missing or mismatched calibration is distinct from a genuinely low corroboration", async (t) => {
+  await t.test("missing calibration names the missing-or-mismatched fault", async () => {
+    const payload = await harness({ calibration: null }).getSnapshot();
+    assert.equal(payload.treasury.position.deposited.status, "unknown");
+    assert.match(payload.treasury.position.deposited.proof, /missing or mismatched/u);
+    assert.doesNotMatch(payload.treasury.position.deposited.proof, /is below/u);
+  });
+  await t.test("a different deposit request names the missing-or-mismatched fault", async () => {
+    const payload = await harness({
+      calibration: depositCalibration("10000000", { provenRequestId: `0x${"ff".repeat(32)}` })
+    }).getSnapshot();
+    assert.equal(payload.treasury.position.deposited.status, "unknown");
+    assert.match(payload.treasury.position.deposited.proof, /missing or mismatched/u);
+    assert.doesNotMatch(payload.treasury.position.deposited.proof, /is below/u);
+  });
+  await t.test("a lower value still names the quantitative fault", async () => {
+    const payload = await harness({ calibration: depositCalibration("9999999") }).getSnapshot();
+    assert.match(payload.treasury.position.deposited.proof, /is below/u);
+    assert.doesNotMatch(payload.treasury.position.deposited.proof, /missing or mismatched/u);
   });
 });
 

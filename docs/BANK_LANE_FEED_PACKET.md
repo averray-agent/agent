@@ -1,7 +1,8 @@
 # Bank lane feed endpoint — implementation packet
 
 **Owner:** Codex (backend / observer lane)
-**Sequence:** after the dust cycle. Leg 2 produces the first calibration event — capture it.
+**Sequence:** after the dust cycle. Leg 2's Hydration execution block produces
+the first calibration evidence — capture it at that block.
 **Status of the lane:** the wrapper is armed on mainnet. This is a
 definition-of-done item of the active activation, not a later phase.
 
@@ -64,11 +65,11 @@ One reader of the chain; Hermes renders.
 
 | field | contents |
 | --- | --- |
-| `position` | `{ raw, source, readAtMs, lastError }` — aToken, `balanceOf(truncate20(convertedAccount))` |
+| `position` | `{ raw, source, readAtMs, lastError }` — aToken, `balanceOf(truncate20(convertedAccount))` through ordered Hydration EVM RPC failover |
 | `float` | `{ raw, source, readAtMs, lastError }` — asset 22, `Tokens.accounts(convertedAccount)` |
 | `postage` | `{ raw, source, readAtMs, lastError }` — wrapper postage account |
 | `requests` | `{ items[], readAtMs, lastError }` |
-| `calibration?` | `{ provenAtMs, provenRaw, provenSource }` |
+| `calibration?` | `{ provenAtMs, provenRaw, provenSource, provenRequestId, provenWrapperAddress, provenBlockNumber }` |
 
 `items[]` entries: `{ id, kind, phase, ageSeconds, overdue }`.
 
@@ -119,22 +120,26 @@ coerce one into the other.
 
 ## Calibration — backend-owned, durable
 
-The record answers one question: **has this read path ever observed a non-zero
-value?**
+The record answers one question: **did this read path corroborate this specific
+deposit at its Hydration execution block?**
 
 It belongs to the service that performs the read, because an entity that has
 never executed the read cannot attest that it works — the same reason the payout
 panel corroborates the funnel from chain rather than from the ledger's own
 claim. Proof has to come from outside the thing being proven.
 
-- Set it the first time the position read returns non-zero. **Leg 2 of the dust
-  cycle is that event.**
+- Set it only from a historical `balanceOf(convertedAccount)` at the deposit's
+  Hydration execution block. A later live balance is not corroboration: yield
+  makes it drift away from the deposit it is supposed to prove.
 - `provenRaw` = what was seen. `provenSource` = the exact address **and** ledger
   that proved it.
+- `provenRequestId`, `provenWrapperAddress`, and `provenBlockNumber` bind the
+  proof to one deposit epoch. A later request through the same wrapper and
+  account invalidates the old proof rather than inheriting it.
 - **Durable across restarts.** A flag in process memory would un-calibrate the
   tile on every deploy.
-- **Invalidated on any retarget.** A proof taken against one address says
-  nothing about another.
+- **Invalidated on any retarget or newer deposit request.** A proof taken
+  against one address or epoch says nothing about another.
 - **A zero can never calibrate anything.**
 
 ### Why the rule exists
@@ -162,7 +167,8 @@ render after the path has proven, at least once, that it can see funds.
 - An induced read failure on any section produces `lastError` — never a zero,
   never an empty array.
 - After leg 2, the `calibration` record is present, **survives a restart**, and
-  names the aToken address it proved.
+  names the aToken address, request, wrapper generation, and Hydration block it
+  proved.
 
 Once this lands, the Hermes rendering slice is mechanical: the view models and
 their tests already exist behind this seam, in
