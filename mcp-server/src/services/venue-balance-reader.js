@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 
 import { base58 } from "@scure/base";
-import { Contract, JsonRpcProvider } from "ethers";
+import { Contract } from "ethers";
 
+import { createRpcProvider } from "../blockchain/rpc-provider.js";
 import { ValidationError } from "../core/errors.js";
 
 const ACCOUNT_ID32_RE = /^0x[a-fA-F0-9]{64}$/u;
@@ -31,8 +32,15 @@ export class VenueBalanceReader {
     this.evmProviders = new Map();
   }
 
-  async read(target) {
+  async read(target, { blockTag = undefined } = {}) {
     const normalized = normalizeVenueBalanceTarget(target);
+    if (blockTag !== undefined && (
+      normalized.ledger !== "erc20"
+      || !Number.isSafeInteger(blockTag)
+      || blockTag <= 0
+    )) {
+      throw new ValidationError("Historical balance reads require an ERC-20 target and a positive blockTag.");
+    }
     if (normalized.ledger === "substrate_tokens") {
       const api = await this.getSubstrateApi(normalized.endpoint);
       const record = await api.query.tokens.accounts(normalized.account, normalized.assetId);
@@ -55,10 +63,17 @@ export class VenueBalanceReader {
       };
     }
 
-    const provider = this.getEvmProvider(normalized.endpoint, normalized.chainId);
+    const provider = this.getEvmProvider(
+      normalized.endpoint,
+      normalized.chainId,
+      normalized.rpcUrls
+    );
     const contract = new Contract(normalized.contract, ERC20_BALANCE_ABI, provider);
     return {
-      raw: BigInt(await contract.balanceOf(normalized.evmAccount)),
+      raw: BigInt(await contract.balanceOf(
+        normalized.evmAccount,
+        ...(blockTag === undefined ? [] : [{ blockTag }])
+      )),
       asOf: new Date().toISOString(),
       target: normalized
     };
@@ -90,11 +105,12 @@ export class VenueBalanceReader {
     return true;
   }
 
-  getEvmProvider(endpoint, chainId) {
-    const key = `${endpoint}|${chainId ?? "auto"}`;
+  getEvmProvider(endpoint, chainId, rpcUrls = [endpoint]) {
+    const normalizedRpcUrls = normalizeRpcUrls(rpcUrls, endpoint);
+    const key = `${normalizedRpcUrls.join(",")}|${chainId ?? "auto"}`;
     let provider = this.evmProviders.get(key);
     if (!provider) {
-      provider = this.evmProviderFactory(endpoint, chainId);
+      provider = this.evmProviderFactory(endpoint, chainId, normalizedRpcUrls);
       this.evmProviders.set(key, provider);
     }
     return provider;
@@ -145,6 +161,7 @@ export function normalizeVenueBalanceTarget(target = {}) {
     if (!ADDRESS_RE.test(String(target.contract ?? target.asset ?? ""))) {
       throw new ValidationError("erc20 target.contract must be a 20-byte address.");
     }
+    const rpcUrls = normalizeRpcUrls(target.rpcUrls, endpoint);
     const account = String(target.account ?? "");
     const accountTransform = String(target.accountTransform ?? "none").trim().toLowerCase();
     let normalizedAccount = account;
@@ -164,7 +181,8 @@ export function normalizeVenueBalanceTarget(target = {}) {
     }
     return {
       ledger,
-      endpoint,
+      endpoint: rpcUrls[0],
+      rpcUrls,
       account: normalizedAccount.toLowerCase(),
       accountTransform,
       evmAccount,
@@ -224,12 +242,8 @@ function createSubstrateApi(endpoint, { ApiPromise, HttpProvider, WsProvider }) 
   return ApiPromise.create({ provider, noInitWarn: true });
 }
 
-function createEvmProvider(endpoint, chainId) {
-  return new JsonRpcProvider(
-    endpoint,
-    chainId === undefined ? undefined : chainId,
-    chainId === undefined ? undefined : { staticNetwork: true }
-  );
+function createEvmProvider(_endpoint, _chainId, rpcUrls) {
+  return createRpcProvider({ rpcUrls });
 }
 
 function requireEndpoint(raw) {
@@ -243,6 +257,25 @@ function requireEndpoint(raw) {
     throw new ValidationError("balance target endpoint must be an http(s) or ws(s) URL.");
   }
   return parsed.toString();
+}
+
+function normalizeRpcUrls(rawRpcUrls, fallbackEndpoint) {
+  const candidates = [
+    fallbackEndpoint,
+    ...(Array.isArray(rawRpcUrls) ? rawRpcUrls : [])
+  ];
+  const seen = new Set();
+  const rpcUrls = candidates
+    .map((value) => requireEndpoint(value))
+    .filter((value) => {
+      if (seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    });
+  if (rpcUrls.length === 0) {
+    throw new ValidationError("erc20 target.rpcUrls must contain at least one RPC endpoint.");
+  }
+  return rpcUrls;
 }
 
 function normalizeAssetId(raw) {

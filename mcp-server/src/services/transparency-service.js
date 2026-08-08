@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { getAddress, keccak256 } from "ethers";
 
+import { findLatestDepositSwap } from "./bank-deposit-evidence.js";
 import { describeBalanceTarget } from "./bank-lane-feed.js";
 import { redactProviderError } from "../core/redact-provider-error.js";
 
@@ -514,7 +515,12 @@ export class TransparencyService {
       if (!deposit) {
         throw new Error("no current-generation deposit_sell Broadcast.Swapped evidence in generation-keyed store");
       }
-      const calibrationRaw = calibrationMatches(calibration, positionExpected)
+      const calibrationRaw = calibrationMatches(
+        calibration,
+        positionExpected,
+        configuredWrapper,
+        deposit
+      )
         ? parseUnsignedRaw(calibration.provenRaw)
         : null;
       assertPlausibleRebaseCorroboration("aUSDC calibration", calibrationRaw, deposit.raw);
@@ -547,7 +553,7 @@ export class TransparencyService {
       raw: deposit.raw,
       readAtMs: this.now(),
       source: `${deposit.eventSource} + finalized observed ERC20 delta | wrapper ${configuredWrapper}`,
-      proof: `${deposit.eventProof}; tx ${deposit.txHash} block ${deposit.blockNumber} event ${deposit.timestamp} request ${deposit.requestId}; finalized settledShares ${wrapperRequest.settledSharesRaw}; aUSDC calibration ${calibration.provenRaw} @ ${calibration.provenAtMs}`
+      proof: `${deposit.eventProof}; tx ${deposit.txHash} block ${deposit.blockNumber} event ${deposit.timestamp} request ${deposit.requestId}; finalized settledShares ${wrapperRequest.settledSharesRaw}; aUSDC calibration ${calibration.provenRaw} at Hydration block ${calibration.provenBlockNumber} @ ${calibration.provenAtMs}`
     };
     try {
       const adapterRequest = await this.gateway.getHydrationAdapterRequest(deposit.requestId, wrapperRequest);
@@ -777,57 +783,13 @@ function bankReading(reading, expectedSource, { source, proof, fallbackReadAtMs 
   };
 }
 
-function findLatestDepositSwap(events, configuredWrapper) {
-  for (const event of [...(events ?? [])].reverse()) {
-    const evidence = event?.data ?? {};
-    if (evidence.leg !== "deposit_sell" || !sameAddress(evidence.wrapper, configuredWrapper)) continue;
-    const remoteSwap = evidence.remoteExecution?.event;
-    const candidates = [
-      ...(remoteSwap ? [{ ...remoteSwap, evidenceKind: "remote_execution" }] : []),
-      ...(evidence.dryRun?.events ?? []).map((candidate) => ({ ...candidate, evidenceKind: "dry_run" }))
-    ];
-    const swap = candidates.find((candidate) =>
-      String(candidate?.section ?? "").toLowerCase() === "broadcast"
-      && ["swapped", "swapped3"].includes(String(candidate?.method ?? "").toLowerCase())
-      && String(candidate?.data?.fillerType ?? "").toUpperCase() === "AAVE"
-      && Number(candidate?.data?.assetIn) === 22
-      && Number(candidate?.data?.assetOut) === 1003
-    );
-    const output = swap?.data?.outputs?.find((entry) => parseUnsignedRaw(entry?.asset) === 1003n);
-    const raw = parseUnsignedRaw(output?.amount);
-    const requestId = String(evidence.requestId ?? event.correlationId ?? "").toLowerCase();
-    const txHash = String(evidence.txHash ?? event.txHash ?? "");
-    const blockNumber = Number(evidence.blockNumber ?? event.blockNumber);
-    if (
-      raw === null
-      || raw <= 0n
-      || !/^0x[a-fA-F0-9]{64}$/u.test(requestId)
-      || !/^0x[a-fA-F0-9]{64}$/u.test(txHash)
-      || !Number.isSafeInteger(blockNumber)
-      || blockNumber <= 0
-    ) continue;
-    const remote = swap.evidenceKind === "remote_execution" ? evidence.remoteExecution : undefined;
-    return {
-      raw,
-      requestId,
-      txHash,
-      blockNumber,
-      timestamp: event.timestamp ?? evidence.capturedAt ?? "unknown",
-      eventSource: remote
-        ? "Hydration system.events Broadcast.Swapped3{AAVE, asset 22 -> aUSDC 1003}"
-        : "exact-message dry-run Broadcast.Swapped{AAVE, asset 22 -> aUSDC 1003}",
-      eventProof: remote
-        ? `hydration block ${remote.blockNumber} ${remote.blockHash} event ${remote.eventIndex}`
-        : "dispatch evidence exact-message dry-run"
-    };
-  }
-  return null;
-}
-
-function calibrationMatches(calibration, expectedSource) {
+function calibrationMatches(calibration, expectedSource, configuredWrapper, deposit) {
   return Boolean(
     expectedSource
     && calibration?.provenSource === expectedSource
+    && calibration?.provenRequestId === deposit?.requestId
+    && sameAddress(calibration?.provenWrapperAddress, configuredWrapper)
+    && calibration?.provenBlockNumber === deposit?.remoteBlockNumber
     && parseUnsignedRaw(calibration?.provenRaw) !== null
     && Number.isFinite(calibration?.provenAtMs)
   );
@@ -853,7 +815,10 @@ function parseUnsignedRaw(value) {
 }
 
 function assertPlausibleRebaseCorroboration(label, corroboratedRaw, depositedRaw) {
-  if (corroboratedRaw === null || corroboratedRaw < depositedRaw) {
+  if (corroboratedRaw === null) {
+    throw new Error(`${label} is missing or mismatched for the authoritative Broadcast.Swapped deposit`);
+  }
+  if (corroboratedRaw < depositedRaw) {
     throw new Error(`${label} is below the authoritative Broadcast.Swapped deposit`);
   }
   // Two basis points, rounded up to one raw unit, are deliberately generous

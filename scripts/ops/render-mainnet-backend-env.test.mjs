@@ -111,6 +111,10 @@ test("transformLine: identity literals flip to mainnet", () => {
   );
   assert.equal(transformLine("USDC_LIQUIDITY_CHAIN=testnet"), "USDC_LIQUIDITY_CHAIN=mainnet");
   assert.equal(transformLine("INGESTION_PREFUND_ENABLED=true"), "INGESTION_PREFUND_ENABLED=false");
+  assert.equal(
+    transformLine("BANK_LANE_FEED_HYDRATION_EVM_RPC_BACKUP_URLS="),
+    "BANK_LANE_FEED_HYDRATION_EVM_RPC_BACKUP_URLS=https://hydration-rpc.n.dwellir.com"
+  );
   assert.equal(transformLine("REDIS_URL=redis://redis:6379"), "REDIS_URL=redis://mainnet-redis:6379");
   assert.equal(transformLine("REDIS_NAMESPACE=agent-platform"), "REDIS_NAMESPACE=agent-platform-mainnet");
   assert.equal(

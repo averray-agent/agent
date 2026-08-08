@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+import { AbstractProvider, Network, toBeHex, zeroPadValue } from "ethers";
+
 import { MemoryStateStore } from "../core/state-store.js";
 import { EventBus } from "../core/event-bus.js";
 import { XcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
@@ -13,6 +15,7 @@ const ACCOUNT = "0xaf39ad769a03cb535d9799e49459b033c1fab84ee23ffe5d0852f8d82f02a
 const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const HYD_SUBSTRATE = "wss://hydration-rpc.n.dwellir.com";
 const HYD_EVM = "https://rpc.hydradx.cloud";
+const HYD_EVM_BACKUP = "https://hydration-rpc.n.dwellir.com";
 const POSTAGE = "16Mf98wAbYTVWaeHkD1SUdRPc5nmoLj9LyNtPtP1xvkF7Sxb";
 const MAINNET_ACCOUNT = "0x42e55ecf123da7d3eba1c55998b3cbf8238c446367c981f1388acbc0626cf354";
 const MAINNET_ACCOUNT_SS58 = "12WiJGBSjqTBNqD7a7TN6mt47ZJd7f8SqyhTc2bYLFzcHYD9";
@@ -42,6 +45,45 @@ test("VenueBalanceReader target binds Hydration aUSDC to truncate20(AccountId32)
   const normalized = normalizeVenueBalanceTarget(targetFor("aUsdc"));
   assert.equal(normalized.evmAccount, fixture.convertedH160);
   assert.equal(normalized.contract, fixture.aUsdcContract);
+});
+
+test("VenueBalanceReader pins historical aUSDC to the block and preserves ordered RPC failover", async () => {
+  const calls = [];
+  let providerConfig;
+  class HistoricalProvider extends AbstractProvider {
+    async _detectNetwork() {
+      return Network.from(222222);
+    }
+
+    async _perform(request) {
+      if (request.method !== "call") throw new Error(`unexpected provider method ${request.method}`);
+      calls.push(request);
+      return zeroPadValue(toBeHex(10_000_001), 32);
+    }
+  }
+  const provider = new HistoricalProvider();
+  const reader = new VenueBalanceReader({
+    evmProviderFactory(endpoint, chainId, rpcUrls) {
+      providerConfig = { endpoint, chainId, rpcUrls };
+      return provider;
+    }
+  });
+
+  const reading = await reader.read({
+    ...targetFor("aUsdc"),
+    rpcUrls: [HYD_EVM, HYD_EVM_BACKUP]
+  }, { blockTag: 13_488_842 });
+
+  assert.equal(reading.raw, 10_000_001n);
+  assert.deepEqual(providerConfig, {
+    endpoint: "https://rpc.hydradx.cloud/",
+    chainId: 222222,
+    rpcUrls: ["https://rpc.hydradx.cloud/", "https://hydration-rpc.n.dwellir.com/"]
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].blockTag, "0xcdd2ca");
+  assert.equal(calls[0].transaction.blockTag, "0xcdd2ca");
+  await reader.close();
 });
 
 test("SS58 Hydration account normalizes to the proven AccountId32 and truncate20 address", () => {

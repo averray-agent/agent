@@ -803,7 +803,11 @@ export class BankXcmV22Runtime {
   async readStampedBalance(target) {
     const normalized = normalizeVenueBalanceTarget(target);
     if (normalized.ledger === "erc20") {
-      const provider = this.balanceReader.getEvmProvider(normalized.endpoint, normalized.chainId);
+      const provider = this.balanceReader.getEvmProvider(
+        normalized.endpoint,
+        normalized.chainId,
+        normalized.rpcUrls
+      );
       const blockNumber = await provider.getBlockNumber();
       const [block, raw] = await Promise.all([
         provider.getBlock(blockNumber),

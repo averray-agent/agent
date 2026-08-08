@@ -2,6 +2,7 @@ import { Contract } from "ethers";
 
 import { ValidationError } from "../core/errors.js";
 import { redactProviderError } from "../core/redact-provider-error.js";
+import { findLatestDepositSwap } from "./bank-deposit-evidence.js";
 import { normalizeVenueBalanceTarget } from "./venue-balance-reader.js";
 
 const DEFAULT_STATE_SCOPE = "bank-lane-feed";
@@ -65,7 +66,9 @@ export class BankLaneFeedService {
     // cycles from losing sibling sections in Redis.
     await Promise.all([
       this.readBalance(this.targets.position)
-        .then((position) => this.persistPosition(position)),
+        .then((position) => this.persistSection("position", position)),
+      this.readCalibration()
+        .then((calibration) => this.persistSection("calibration", calibration)),
       this.readBalance(this.targets.float)
         .then((float) => this.persistSection("float", float)),
       this.readBalance(this.targets.postage)
@@ -92,7 +95,8 @@ export class BankLaneFeedService {
       stored.postage,
       describeBalanceTarget(this.targets.postage)
     );
-    const calibration = validCalibration(stored.calibration, positionSource);
+    const calibrationTarget = await this.currentCalibrationTarget(positionSource);
+    const calibration = validCalibration(stored.calibration, calibrationTarget);
     return {
       subject: subjectForCurrentConfig(stored.subject, this.subject),
       position,
@@ -183,12 +187,52 @@ export class BankLaneFeedService {
     });
   }
 
-  async persistPosition(position) {
-    return this.enqueuePersistence(async () => {
-      const previous = await this.stateStore.getServiceState?.(this.stateScope) ?? {};
-      const calibration = nextCalibration({ previous: previous.calibration, position });
-      await this.stateStore.upsertServiceState?.(this.stateScope, { position, calibration });
-    });
+  async readCalibration() {
+    const source = describeBalanceTarget(this.targets.position);
+    const target = await this.currentCalibrationTarget(source);
+    if (!target) return null;
+    const stored = await this.stateStore.getServiceState?.(this.stateScope) ?? {};
+    const current = validCalibration(stored.calibration, target);
+    if (current) return current;
+    try {
+      const reading = await this.balanceReader.read(this.targets.position, {
+        blockTag: target.provenBlockNumber
+      });
+      const raw = normalizeSuccessfulRaw(reading.raw);
+      if (raw <= 0n) return null;
+      return {
+        ...target,
+        provenAtMs: this.now(),
+        provenRaw: raw.toString()
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async currentCalibrationTarget(source = describeBalanceTarget(this.targets.position)) {
+    try {
+      if (typeof this.stateStore.getLatestBankXcmLegDispatchEvidence !== "function") return null;
+      const event = await this.stateStore.getLatestBankXcmLegDispatchEvidence(
+        this.subject.configuredWrapper,
+        "deposit_sell"
+      );
+      const deposit = findLatestDepositSwap(event ? [event] : [], this.subject.configuredWrapper);
+      if (!deposit?.remoteBlockNumber) return null;
+      const watch = await this.stateStore.getXcmBalanceWatch?.(
+        deposit.wrapperAddress,
+        deposit.requestId
+      );
+      if (classifyPositionWatch(watch, this.targets.position) !== "current") return null;
+      return {
+        provenSource: source,
+        provenRequestId: deposit.requestId,
+        provenWrapperAddress: deposit.wrapperAddress,
+        provenBlockNumber: deposit.remoteBlockNumber
+      };
+    } catch {
+      return null;
+    }
   }
 
   classifyRequestWatch(watch) {
@@ -218,6 +262,10 @@ export function loadBankLaneFeedConfig(env = process.env) {
     env.BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32,
     "BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32"
   );
+  const hydrationEvmRpcUrl = requireValue(
+    env.BANK_LANE_FEED_HYDRATION_EVM_RPC_URL,
+    "BANK_LANE_FEED_HYDRATION_EVM_RPC_URL"
+  );
   return {
     enabled: true,
     subject: {
@@ -233,10 +281,11 @@ export function loadBankLaneFeedConfig(env = process.env) {
     targets: {
       position: {
         ledger: "erc20",
-        endpoint: requireValue(
-          env.BANK_LANE_FEED_HYDRATION_EVM_RPC_URL,
-          "BANK_LANE_FEED_HYDRATION_EVM_RPC_URL"
-        ),
+        endpoint: hydrationEvmRpcUrl,
+        rpcUrls: [
+          hydrationEvmRpcUrl,
+          ...parseCommaSeparatedValues(env.BANK_LANE_FEED_HYDRATION_EVM_RPC_BACKUP_URLS)
+        ],
         chainId: requireValue(
           env.BANK_LANE_FEED_HYDRATION_EVM_CHAIN_ID,
           "BANK_LANE_FEED_HYDRATION_EVM_CHAIN_ID"
@@ -562,24 +611,12 @@ function inferRequestKind(direction) {
   return "unknown";
 }
 
-function nextCalibration({ previous, position }) {
-  const current = validCalibration(previous, position.source);
-  if (current) return current;
-  if (position.raw === null) return null;
-  try {
-    if (BigInt(position.raw) <= 0n) return null;
-  } catch {
-    return null;
-  }
-  return {
-    provenAtMs: position.readAtMs,
-    provenRaw: position.raw,
-    provenSource: position.source
-  };
-}
-
-function validCalibration(raw, source) {
-  if (!raw || raw.provenSource !== source) return null;
+function validCalibration(raw, target) {
+  if (!raw || !target) return null;
+  if (raw.provenSource !== target.provenSource
+    || raw.provenRequestId !== target.provenRequestId
+    || !sameAddress(raw.provenWrapperAddress, target.provenWrapperAddress)
+    || raw.provenBlockNumber !== target.provenBlockNumber) return null;
   if (!Number.isFinite(raw.provenAtMs)) return null;
   try {
     if (BigInt(raw.provenRaw) <= 0n) return null;
@@ -589,7 +626,7 @@ function validCalibration(raw, source) {
   return {
     provenAtMs: raw.provenAtMs,
     provenRaw: BigInt(raw.provenRaw).toString(),
-    provenSource: raw.provenSource
+    ...target
   };
 }
 
@@ -748,6 +785,13 @@ function requireAddressValue(raw, name) {
 
 function parseBoolean(raw) {
   return ["1", "true", "yes", "on"].includes(String(raw ?? "").trim().toLowerCase());
+}
+
+function parseCommaSeparatedValues(raw) {
+  return String(raw ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 export { DEFAULT_STATE_SCOPE as BANK_LANE_FEED_STATE_SCOPE };
