@@ -109,9 +109,11 @@ test("A1 manifest payload: walletless arrival states the perk, proof, and limits
   assert.match(arrival.headline, /earn from zero/u);
   assert.match(arrival.start, /Generate an EOA/u);
   assert.match(arrival.start, /free and offline/u);
-  assert.match(arrival.start, /No funding is required to start/u);
-  assert.match(arrival.start, /waiver-eligible starter jobs need no bond/u);
-  assert.match(arrival.start, /gas is operator-brokered/u);
+  assert.match(arrival.start, /Curated starter jobs use operator-brokered claim and submit gas/u);
+  assert.match(arrival.start, /onboardingWaiverEligible/u);
+  assert.match(arrival.start, /no funding is required because it needs no bond/u);
+  assert.match(arrival.start, /Externally posted jobs are worker-paid/u);
+  assert.match(arrival.start, /external_self_paid_claim_required/u);
   assert.match(arrival.managedWalletInterop, /Cloudflare Wallets, Coinbase, or similar/u);
   assert.match(arrival.managedWalletInterop, /payment rails and can't sign on this chain/u);
   assert.match(arrival.managedWalletInterop, /same key works on any EVM chain/u);
@@ -173,13 +175,18 @@ test("mainnet chainId renders the mainnet chain block on every network-dependent
   const walletFunded = manifest.onboarding.readinessChecks.find((check) => check.id === "wallet-funded");
   assert.equal(
     walletFunded.description,
-    "For non-brokered or non-waived jobs, acquire DOT on Polkadot Hub; starter jobs advertised as operator-brokered and stake-waived need no wallet funding."
+    "For externally posted jobs or non-waived curated jobs, acquire DOT on Polkadot Hub. Curated starter jobs use operator-brokered gas; only those also marked stake-waived need no wallet funding. For external jobs, handle external_self_paid_claim_required by signing and broadcasting the returned claimJob transaction."
   );
   assert.ok(!("faucetUrl" in walletFunded), "mainnet has no faucet — wallet-funded must not carry faucetUrl");
 
   assert.ok(manifest.onboarding.selfServeChecklist.includes(
-    "For non-brokered or non-waived jobs, acquire DOT on Polkadot Hub; operator-brokered, stake-waived starter jobs require no wallet funding."
+    "For externally posted jobs or non-waived curated jobs, acquire DOT on Polkadot Hub. Curated starter jobs use operator-brokered gas; only those also marked stake-waived require no wallet funding. Handle external_self_paid_claim_required by signing and broadcasting the returned claimJob transaction."
   ));
+  const autonomousMode = manifest.onboarding.walletModes.find((entry) => entry.id === "agent-self-custody");
+  assert.ok(autonomousMode.bootstrap.some((entry) => (
+    entry.includes("external_self_paid_claim_required")
+    && entry.includes("external_self_paid_submit_required")
+  )));
 
   // Anti-desync guard: nothing in the mainnet manifest may still reference the
   // testnet chain, its currency, or a faucet — however the wording evolves.
@@ -204,7 +211,7 @@ test("testnet chainId and unknown/unset chainIds keep the historical testnet blo
     assert.deepEqual(mode.chain, testnetChain, `${id} must advertise the testnet chain`);
   }
   assert.ok(testnetManifest.onboarding.selfServeChecklist.includes(
-    "For non-brokered or non-waived jobs, fund PAS on Polkadot Hub TestNet from https://faucet.polkadot.io/; operator-brokered, stake-waived starter jobs require no wallet funding."
+    "For externally posted jobs or non-waived curated jobs, fund PAS on Polkadot Hub TestNet from https://faucet.polkadot.io/. Curated starter jobs use operator-brokered gas; only those also marked stake-waived require no wallet funding. Handle external_self_paid_claim_required by signing and broadcasting the returned claimJob transaction."
   ));
   assert.ok(!JSON.stringify(testnetManifest).includes(String(POLKADOT_HUB_MAINNET_CHAIN_ID)));
 
