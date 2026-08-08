@@ -643,3 +643,34 @@ test("reward-bank provider uses fresh last-known-good evidence, then fails close
   assert.equal(stale.lastKnownGoodAsOf, "2026-07-27T12:00:00.000Z");
   assert.equal(reads, 3);
 });
+
+// Regression: /health served TESTNET contract addresses on mainnet.
+//
+// The manifest was a single hardcoded deployments/testnet.json. That read as
+// harmless while the file was absent from the backend image — the load failed
+// to null and env won. Copying the file in (#991) made the read succeed, and
+// because manifest contracts beat env, mainnet /health began reporting the
+// testnet AgentAccountCore and EscrowCore. The ops board then showed "AGENT
+// CORE BELOW FLOOR" (a retired account's balance) and "0 payouts confirmed
+// on-chain" (a retired contract's events) while money was entirely fine.
+test("health addresses follow the running chain, never a hardcoded network", () => {
+  const env = {
+    AGENT_ACCOUNT_ADDRESS: "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57",
+    ESCROW_CORE_ADDRESS: "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC"
+  };
+
+  const mainnet = resolveHealthAddresses({ env: { ...env, AUTH_CHAIN_ID: "420420419" } });
+  assert.equal(mainnet.agentAccountCore, "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57");
+  assert.equal(mainnet.escrowCore, "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC");
+
+  const testnet = resolveHealthAddresses({ env: { ...env, AUTH_CHAIN_ID: "420420417" } });
+  assert.notEqual(testnet.agentAccountCore, mainnet.agentAccountCore);
+
+  // Unknown or absent chain id must fall back to env — the running truth.
+  // No manifest is far better than the wrong network's.
+  for (const chain of [{ AUTH_CHAIN_ID: "999" }, {}]) {
+    const resolved = resolveHealthAddresses({ env: { ...env, ...chain } });
+    assert.equal(resolved.agentAccountCore, env.AGENT_ACCOUNT_ADDRESS);
+    assert.equal(resolved.escrowCore, env.ESCROW_CORE_ADDRESS);
+  }
+});

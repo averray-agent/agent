@@ -89,9 +89,25 @@ const EXECUTION_FAILURE_CODES = new Set([
   "transaction_reverted",
   "settlement_failed"
 ]);
-const TESTNET_DEPLOYMENT_MANIFEST_URL = new URL("../../../deployments/testnet.json", import.meta.url);
+// Deployment manifests, keyed by chain id — the same shape transparency-service
+// uses for its owner records.
+//
+// This was a single hardcoded `deployments/testnet.json`. It read as harmless
+// because the file was not copied into the backend image, so the load failed to
+// null and `resolveHealthAddresses` fell through to env. Adding the file (#991)
+// made the read SUCCEED, and because manifest contracts win over env, mainnet
+// /health began serving TESTNET contract addresses. The ops board then reported
+// AgentAccountCore below floor (reading a retired account) and zero payouts
+// confirmed on-chain (scanning a retired contract), while money was fine.
+//
+// An unknown or absent chain id therefore returns null on purpose: env is the
+// running truth, and no manifest is far better than the wrong network's.
+const DEPLOYMENT_MANIFEST_URLS = Object.freeze({
+  "420420419": new URL("../../../deployments/mainnet.json", import.meta.url),
+  "420420417": new URL("../../../deployments/testnet.json", import.meta.url)
+});
 
-let deploymentManifestCache;
+const deploymentManifestCache = new Map();
 
 /**
  * Compute `serviceHealth` from process-local liveness signals.
@@ -594,7 +610,7 @@ export async function buildProductHealthSnapshot({
   settlementSessionLimit = DEFAULT_SETTLEMENT_SESSION_LIMIT,
   settlementStuckAfterMs = DEFAULT_SETTLEMENT_STUCK_AFTER_MS
 } = {}) {
-  const manifest = deploymentManifest ?? loadTestnetDeploymentManifest();
+  const manifest = deploymentManifest ?? loadDeploymentManifest(env);
   const addresses = resolveHealthAddresses({ deploymentManifest: manifest, env });
   const [rewardBank, settlement] = await Promise.all([
     getRewardBankHealth
@@ -637,7 +653,7 @@ export function createRewardBankHealthProvider({
   refreshMs = DEFAULT_REWARD_BANK_REFRESH_MS,
   maxAgeMs = DEFAULT_REWARD_BANK_MAX_AGE_MS
 } = {}) {
-  const manifest = deploymentManifest ?? loadTestnetDeploymentManifest();
+  const manifest = deploymentManifest ?? loadDeploymentManifest(env);
   const addresses = resolveHealthAddresses({ deploymentManifest: manifest, env });
   let cached;
   let lastKnownGood;
@@ -701,15 +717,18 @@ export function createRewardBankHealthProvider({
 }
 
 export function resolveHealthAddresses({
-  deploymentManifest = loadTestnetDeploymentManifest(),
+  deploymentManifest = undefined,
   env = process.env
 } = {}) {
-  const contracts = deploymentManifest?.contracts ?? {};
+  // Resolved in the body, not as a default parameter: defaults evaluate left to
+  // right, so a default here could not see `env`.
+  const manifest = deploymentManifest ?? loadDeploymentManifest(env);
+  const contracts = manifest?.contracts ?? {};
   const token = firstPresent(contracts.token, firstSupportedAssetAddress(env));
   const treasuryReserve = firstPresent(
-    deploymentManifest?.treasuryReserve,
-    deploymentManifest?.opsReserve,
-    deploymentManifest?.opsReserveAddress,
+    manifest?.treasuryReserve,
+    manifest?.opsReserve,
+    manifest?.opsReserveAddress,
     env.USDC_LIQUIDITY_TREASURY_RESERVE_ACCOUNT
   );
 
@@ -723,7 +742,7 @@ export function resolveHealthAddresses({
       env.HYDRATION_USDC_ADAPTER_ADDRESS
     ),
     settlementSigner: firstPresent(
-      deploymentManifest?.verifier,
+      manifest?.verifier,
       env.SIGNER_ADDRESS,
       env.SIGNER_ADDRESS_OVERRIDE
     ),
@@ -890,13 +909,14 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
   }
 }
 
-function loadTestnetDeploymentManifest() {
-  if (deploymentManifestCache !== undefined) {
-    return deploymentManifestCache;
+export function loadDeploymentManifest(env = process.env) {
+  const chainId = String(env?.AUTH_CHAIN_ID ?? "").trim();
+  const url = DEPLOYMENT_MANIFEST_URLS[chainId];
+  if (!url) return null;
+  if (!deploymentManifestCache.has(chainId)) {
+    deploymentManifestCache.set(chainId, loadDeploymentManifestFromUrl(url));
   }
-
-  deploymentManifestCache = loadDeploymentManifestFromUrl(TESTNET_DEPLOYMENT_MANIFEST_URL);
-  return deploymentManifestCache;
+  return deploymentManifestCache.get(chainId);
 }
 
 export function loadDeploymentManifestFromUrl(url) {
