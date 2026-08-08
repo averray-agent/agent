@@ -32,12 +32,25 @@ RUN npm install --omit=dev
 
 COPY mcp-server/src ./src
 
-# Transparency resolves the native multisig AccountId32 from the attested
-# custody records, then independently checks its keccak EVM lens. Keep these
-# runtime inputs explicit: copying only ./src made the native side silently
-# unreadable in production while the EVM balance lens still worked.
+# Runtime data read from /deployments by code under ./src.
+#
+# The image layout differs from a repo checkout: ./src sits at the image root,
+# so the `../../../deployments/...` that resolves to the repo root locally
+# resolves to /deployments here. Everything src reads must be copied EXPLICITLY,
+# and this list has now been short twice.
+#
+#   1. Copying only ./src left transparency's native multisig AccountId32
+#      silently unreadable in production while the EVM balance lens still worked.
+#   2. The payout-receipt backfill reads deployments/<profile>.json for the
+#      legacy escrow address and the deployment blocks that bound its historical
+#      log scan. It died on ENOENT the first time it was run in production.
+#
+# scripts/ops/check-dockerfile-deployments.test.mjs now fails when src reads a
+# manifest this list does not carry, so a third time should not happen.
 COPY deployments/mainnet-multisig-owner.json /deployments/mainnet-multisig-owner.json
 COPY deployments/testnet-multisig-owner.json /deployments/testnet-multisig-owner.json
+COPY deployments/mainnet.json /deployments/mainnet.json
+COPY deployments/testnet.json /deployments/testnet.json
 
 ENV NODE_ENV=production
 ENV PORT=8787
