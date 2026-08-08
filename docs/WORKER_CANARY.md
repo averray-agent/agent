@@ -40,7 +40,10 @@ short-lived refresh-token flow land (a short-lived operator token skips the fres
 scheduled and post-deploy runs use `WORKER_CANARY_VERIFY_MODE=auto` and poll the
 public verifier result instead of racing an operator-triggered write against the
 in-process auto-verifier). An approved result is not enough: stage 5 also requires
-the persisted successful `payoutTx.settlement` receipt before it can pass.
+the persisted successful `payoutTx.settlement` receipt before it can pass. The
+backend includes that receipt in the first terminal session write; if an earlier
+attempt moved the chain but lost the local write, the retry reconstructs the
+job-bound chain receipt before it is allowed to transition the session.
 
 ## Disposable job + cleanup
 

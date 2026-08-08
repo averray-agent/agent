@@ -30,7 +30,7 @@ export class VerificationIngestionService {
     this.policyService = policyService;
   }
 
-  async ingest(sessionId, verdict) {
+  async ingest(sessionId, verdict, { payoutTx = verdict?.payoutTx } = {}) {
     const session = sessionId
       ? await this.stateStore.getSession(sessionId)
       : await this.stateStore.findSessionByJobId(verdict.jobId);
@@ -57,6 +57,11 @@ export class VerificationIngestionService {
     const badgeSnapshot = session.badgeSnapshot ?? buildBadgeJobSnapshot(job);
     const transitioned = transitionSession({
       ...session,
+      // Money-path invariant: the first write that makes a session terminal
+      // must carry the chain receipt. Persisting `resolved` first and adding
+      // payoutTx in a later upsert made resolved-without-receipt reachable when
+      // the second write failed.
+      ...(payoutTx ? { payoutTx } : {}),
       ...(badgeSnapshot ? { badgeSnapshot } : {}),
       verificationSummary: {
         outcome: verdict.outcome,
@@ -81,6 +86,7 @@ export class VerificationIngestionService {
     });
     const verificationRecord = {
       ...verdict,
+      ...(payoutTx ? { payoutTx } : {}),
       ...auditFields,
       ...(badgeSnapshot ? { badgeSnapshot } : {})
     };

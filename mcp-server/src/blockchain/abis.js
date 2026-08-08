@@ -34,6 +34,10 @@ export const AGENT_ACCOUNT_ABI = [
   "event JobStakeReleased(address indexed account, address indexed asset, uint256 amount)",
   "event JobStakeSlashed(address indexed account, address indexed asset, uint256 amount, uint256 posterAmount, uint256 treasuryAmount)",
   "event ClaimFeeSlashed(address indexed account, address indexed asset, uint256 amount, address indexed verifierRecipient, uint256 verifierAmount, uint256 treasuryAmount)",
+  // Deployed AgentAccountCore event recovered from mainnet logs. The leading
+  // indexed field is settlementId; the historical four-field source ABI is not
+  // compatible with the deployed topic0.
+  "event ReservationSettled(bytes32 indexed settlementId, address indexed account, address indexed recipient, address asset, uint256 amount)",
   "event AgentTransfer(address indexed from, address indexed to, address indexed asset, uint256 amount)"
 ];
 

@@ -59,6 +59,14 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 const UINT64_MAX = (1n << 64n) - 1n;
 const UINT256_MAX = (1n << 256n) - 1n;
+const ESCROW_JOB_STATE_REJECTED = 4;
+const ESCROW_JOB_STATE_CLOSED = 6;
+const RECOVERY_LOG_CHUNK_SIZE = 50_000;
+const RECOVERY_FROM_BLOCK_SAFETY_MARGIN = 1_000;
+const JOB_CLOSED_TOPIC0 = id("JobClosed(bytes32,address,uint256)").toLowerCase();
+const JOB_REJECTED_TOPIC0 = id("JobRejected(bytes32,bytes32)").toLowerCase();
+const RESERVATION_SETTLED_TOPIC0 =
+  "0x3cdc0be5ec7141f2342208f6404c1b1852936343f0edf1fda179e6c9f46573ee";
 const EMPTY_EXTERNAL_SCHEMA = {
   schemaHash: ZERO_BYTES32,
   schemaUrl: "",
@@ -1341,6 +1349,218 @@ export class BlockchainGateway {
     });
   }
 
+  /**
+   * Recover the successful resolveSinglePayout receipt after chain state moved
+   * but the local terminal write did not. The exact job-bound terminal event
+   * locates the transaction; approved payouts are then corroborated against
+   * both SettlementSplit and the deployed five-field AAC ReservationSettled
+   * logs. Any ambiguity or unavailable proof fails closed.
+   */
+  async recoverSinglePayoutReceipt(jobId, { outcome, worker, submittedAt } = {}) {
+    return this.withGatewayError("recoverSinglePayoutReceipt", async () => {
+      if (!this.provider) {
+        throw new ExternalServiceError("Payout receipt recovery requires a readable chain provider.");
+      }
+      if (outcome !== "approved" && outcome !== "rejected") {
+        throw new ValidationError(`Cannot recover terminal payout evidence for outcome ${JSON.stringify(outcome)}.`);
+      }
+      const chainJobId = this.toJobId(jobId).toLowerCase();
+      const job = await this.readEscrowJob(jobId);
+      const expectedState = outcome === "approved"
+        ? ESCROW_JOB_STATE_CLOSED
+        : ESCROW_JOB_STATE_REJECTED;
+      if (Number(job.state) !== expectedState) {
+        throw new ExternalServiceError(
+          `Escrow job ${chainJobId} is state ${job.state}, expected terminal state ${expectedState}.`
+        );
+      }
+      if (worker && !sameAddress(worker, job.worker)) {
+        throw new ExternalServiceError(
+          `Escrow worker ${job.worker} does not match session worker ${worker}.`
+        );
+      }
+
+      const latestBlock = await this.provider.getBlockNumber();
+      const submittedBlock = await this.findBlockAtOrAfterTimestamp(submittedAt, latestBlock);
+      const fromBlock = Math.max(0, submittedBlock - RECOVERY_FROM_BLOCK_SAFETY_MARGIN);
+      const escrowAddress = normalizedAddress(job.escrowAddress, "escrow recovery address");
+      const terminalTopic0 = outcome === "approved" ? JOB_CLOSED_TOPIC0 : JOB_REJECTED_TOPIC0;
+      const matches = await this.getLogsChunked({
+        address: escrowAddress,
+        topics: [terminalTopic0, chainJobId],
+        fromBlock,
+        toBlock: latestBlock
+      });
+      const txHashes = [...new Set(matches
+        .map((log) => String(log.transactionHash ?? "").toLowerCase())
+        .filter((value) => /^0x[a-f0-9]{64}$/u.test(value)))];
+      if (txHashes.length !== 1) {
+        throw new ExternalServiceError(
+          `Terminal event lookup for ${chainJobId} found ${txHashes.length} transactions; expected exactly one.`
+        );
+      }
+
+      const txHash = txHashes[0];
+      const receipt = await this.provider.getTransactionReceipt(txHash);
+      if (!receipt || Number(receipt.status) !== 1) {
+        throw new ExternalServiceError(`Recovered transaction ${txHash} has no successful receipt.`);
+      }
+      if (receipt.to && !sameAddress(receipt.to, escrowAddress)) {
+        throw new ExternalServiceError(
+          `Recovered transaction ${txHash} targets ${receipt.to}, expected ${escrowAddress}.`
+        );
+      }
+      const escrowContract = this.escrowContractForLiveJob(job);
+      this.assertRecoveredTerminalEvent({
+        receipt,
+        escrowContract,
+        escrowAddress,
+        chainJobId,
+        job,
+        outcome
+      });
+      const settlement = outcome === "approved"
+        ? this.extractRecoveredSettlement(receipt, escrowContract, job)
+        : undefined;
+
+      return {
+        txHash,
+        blockNumber: Number(receipt.blockNumber),
+        status: Number(receipt.status),
+        ...(settlement ? { settlement } : {})
+      };
+    });
+  }
+
+  async findBlockAtOrAfterTimestamp(timestamp, latestBlock) {
+    const timestampMs = Date.parse(timestamp);
+    if (!Number.isFinite(timestampMs)) {
+      throw new ValidationError("Payout receipt recovery requires the session submittedAt timestamp.");
+    }
+    let low = 0;
+    let high = Number(latestBlock);
+    if (!Number.isInteger(high) || high < 0) {
+      throw new ExternalServiceError(`Chain returned invalid latest block ${latestBlock}.`);
+    }
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      const block = await this.provider.getBlock(middle);
+      const blockTimestampMs = Number(block?.timestamp) * 1_000;
+      if (!Number.isFinite(blockTimestampMs)) {
+        throw new ExternalServiceError(`Chain block ${middle} has no readable timestamp.`);
+      }
+      if (blockTimestampMs < timestampMs) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  }
+
+  async getLogsChunked({ address, topics, fromBlock, toBlock }) {
+    const logs = [];
+    for (let start = fromBlock; start <= toBlock; start += RECOVERY_LOG_CHUNK_SIZE) {
+      const end = Math.min(toBlock, start + RECOVERY_LOG_CHUNK_SIZE - 1);
+      logs.push(...await this.provider.getLogs({ address, topics, fromBlock: start, toBlock: end }));
+    }
+    return logs;
+  }
+
+  assertRecoveredTerminalEvent({ receipt, escrowContract, escrowAddress, chainJobId, job, outcome }) {
+    const expectedName = outcome === "approved" ? "JobClosed" : "JobRejected";
+    const matches = [];
+    for (const log of receipt.logs ?? []) {
+      if (!sameAddress(log.address, escrowAddress)) continue;
+      let parsed;
+      try {
+        parsed = escrowContract?.interface?.parseLog?.(log);
+      } catch {
+        continue;
+      }
+      if (parsed?.name === expectedName && String(parsed.args.jobId).toLowerCase() === chainJobId) {
+        matches.push(parsed);
+      }
+    }
+    if (matches.length !== 1) {
+      throw new ExternalServiceError(
+        `Recovered receipt has ${matches.length} job-bound ${expectedName} events; expected exactly one.`
+      );
+    }
+    if (outcome === "approved") {
+      const closed = matches[0];
+      if (!sameAddress(closed.args.worker, job.worker)) {
+        throw new ExternalServiceError("Recovered JobClosed worker does not match the live escrow job.");
+      }
+      if (closed.args.releasedAmount.toString() !== String(job.releasedRaw)) {
+        throw new ExternalServiceError("Recovered JobClosed amount does not match the live escrow job.");
+      }
+    }
+  }
+
+  extractRecoveredSettlement(receipt, escrowContract, job) {
+    const settlement = this.extractSettlementSplit(receipt, escrowContract);
+    if (!settlement) {
+      throw new ExternalServiceError("Recovered approved receipt has no deployed SettlementSplit evidence.");
+    }
+    if (
+      !sameAddress(settlement.worker, job.worker)
+      || !sameAddress(settlement.asset, job.asset)
+      || settlement.workerAmountRaw !== String(job.releasedRaw)
+      || settlement.protocolFeeAmountRaw !== String(job.protocolFeeReleasedRaw ?? "0")
+    ) {
+      throw new ExternalServiceError("Recovered SettlementSplit does not match the live escrow job.");
+    }
+
+    const reservations = [];
+    const accountAddress = normalizedAddress(this.config.agentAccountAddress, "AgentAccountCore address");
+    for (const log of receipt.logs ?? []) {
+      if (
+        !sameAddress(log.address, accountAddress)
+        || String(log?.topics?.[0] ?? "").toLowerCase() !== RESERVATION_SETTLED_TOPIC0
+      ) continue;
+      let parsed;
+      try {
+        parsed = this.accountContract?.interface?.parseLog?.(log);
+      } catch (error) {
+        throw new ExternalServiceError(
+          `Recovered ReservationSettled log does not match the deployed five-field ABI: ${error?.message ?? error}`
+        );
+      }
+      if (parsed?.name !== "ReservationSettled") continue;
+      reservations.push({
+        account: parsed.args.account,
+        recipient: parsed.args.recipient,
+        asset: parsed.args.asset,
+        amountRaw: parsed.args.amount.toString()
+      });
+    }
+    const expectedCount = settlement.protocolFeeAmountRaw === "0" ? 1 : 2;
+    if (reservations.length !== expectedCount) {
+      throw new ExternalServiceError(
+        `Recovered payout has ${reservations.length} AAC reservations; expected ${expectedCount}.`
+      );
+    }
+    const workerMatches = reservations.filter((entry) =>
+      sameAddress(entry.account, job.poster)
+      && sameAddress(entry.recipient, settlement.worker)
+      && sameAddress(entry.asset, settlement.asset)
+      && entry.amountRaw === settlement.workerAmountRaw
+    );
+    if (workerMatches.length !== 1) {
+      throw new ExternalServiceError("AAC worker reservation does not corroborate SettlementSplit.");
+    }
+    if (settlement.protocolFeeAmountRaw !== "0") {
+      const feeMatches = reservations.filter((entry) =>
+        sameAddress(entry.account, job.poster)
+        && sameAddress(entry.recipient, settlement.treasuryAccount)
+        && sameAddress(entry.asset, settlement.asset)
+        && entry.amountRaw === settlement.protocolFeeAmountRaw
+      );
+      if (feeMatches.length !== 1) {
+        throw new ExternalServiceError("AAC fee reservation does not corroborate SettlementSplit.");
+      }
+    }
+    return settlement;
+  }
+
   async openDispute(jobId, participant) {
     return this.withGatewayError("openDispute", async () => {
       this.requireSigner("openDispute");
@@ -2621,6 +2841,18 @@ export class BlockchainGateway {
         "unknown_error"
     );
   }
+}
+
+function normalizedAddress(value, label) {
+  const normalized = String(value ?? "").toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/u.test(normalized)) {
+    throw new ValidationError(`${label} is not a 20-byte EVM address.`);
+  }
+  return normalized;
+}
+
+function sameAddress(left, right) {
+  return String(left ?? "").toLowerCase() === String(right ?? "").toLowerCase();
 }
 
 /**

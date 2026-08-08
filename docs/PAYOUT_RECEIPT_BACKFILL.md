@@ -26,9 +26,12 @@ npm --workspace mcp-server run backfill:payout-receipts
 ```
 
 The command prints `mode: "dry-run"`, one `chainVerified: true` per repair, and
-an aggregate `chainVerified: true`. An RPC, manifest, transaction, log, job,
-worker, asset, or amount mismatch exits non-zero before the first state write.
-Optionally constrain both passes with repeated `--session-id <id>` arguments.
+an aggregate `chainVerified: true`. `candidateCount` is the number selected for
+repair and `repairedCount` is the number chain-verified; `storedCount: 0` on a
+dry run only confirms that no writes occurred. An RPC, manifest, transaction,
+log, job, worker, asset, or amount mismatch exits non-zero before the first
+state write. Optionally constrain both passes with repeated `--session-id <id>`
+arguments.
 
 Only after reviewing that output, persist the same chain-verified repairs:
 
