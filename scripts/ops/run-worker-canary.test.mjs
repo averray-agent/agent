@@ -23,6 +23,22 @@ const CHAIN_JOB_ID = "0xa4b8e4ab000000000000000000000000000000000000000000000000
 const JOB_ID = "worker-canary-test-1";
 const FIXED_MS = 1_900_000_000_000;
 const REWARD_RAW = 100_000n; // 0.1 USDC, 6 decimals
+const PAYOUT_TX_HASH = `0x${"ab".repeat(32)}`;
+
+function approvedPayoutResult(overrides = {}) {
+  return {
+    outcome: "approved",
+    reasonCode: "benchmark_pass",
+    sessionId: "sess-1",
+    payoutTx: {
+      txHash: PAYOUT_TX_HASH,
+      blockNumber: 123,
+      status: 1,
+      settlement: { workerAmountRaw: REWARD_RAW.toString() }
+    },
+    ...overrides
+  };
+}
 
 class FakeApiError extends Error {
   constructor(status, payload) {
@@ -87,7 +103,7 @@ function okOperatorClient(overrides = {}) {
     },
     async runVerifier(sessionId) {
       calls.push(["runVerifier", sessionId]);
-      return { outcome: "approved", reasonCode: "benchmark_pass" };
+      return approvedPayoutResult({ sessionId });
     },
     async request(path, opts) {
       calls.push(["request", path, opts?.body]);
@@ -184,6 +200,7 @@ test("full canary loop walks SIWE→claim→submit→verify→settle and asserts
   assert.equal(evidence.stages.claim.mechanism, "onboarding_waiver");
   assert.equal(evidence.stages.submit.status, "submitted");
   assert.equal(evidence.stages.verify.outcome, "approved");
+  assert.equal(evidence.txHashes.verify, PAYOUT_TX_HASH);
   assert.equal(evidence.stages.settle.jobState, "Closed");
   assert.equal(evidence.stages.settle.released, "0.1");
   assert.equal(evidence.stages.settle.creditedRaw, REWARD_RAW.toString());
@@ -603,11 +620,37 @@ test("stage 5 verify: a non-approved operator verdict fails loud", async () => {
   );
 });
 
-test("stage 5 verify: auto mode passes when the public result is approved (no-op once auto-verify lands)", async () => {
-  const authedWorker = { async getVerifierResult() { return { outcome: "approved" }; } };
-  const out = await runVerifyStage({ operatorPlatform: {}, authedWorker, sessionId: "s", mode: "auto" });
+test("stage 5 verify: auto mode polls until an approved result carries its payout receipt", async () => {
+  let reads = 0;
+  let clock = 0;
+  const authedWorker = {
+    async getVerifierResult() {
+      reads += 1;
+      return reads === 1 ? { status: "verifying" } : approvedPayoutResult({ sessionId: "s" });
+    }
+  };
+  const out = await runVerifyStage({
+    operatorPlatform: {},
+    authedWorker,
+    sessionId: "s",
+    mode: "auto",
+    timeoutMs: 100,
+    pollMs: 10,
+    now: () => clock,
+    sleepImpl: async (ms) => { clock += ms; }
+  });
   assert.equal(out.summary.mode, "auto");
   assert.equal(out.summary.outcome, "approved");
+  assert.equal(out.summary.pollCount, 2);
+  assert.equal(out.summary.payoutTxHash, PAYOUT_TX_HASH);
+});
+
+test("stage 5 verify: an approved result without payout persistence fails loud", async () => {
+  const authedWorker = { async getVerifierResult() { return { outcome: "approved", sessionId: "s" }; } };
+  await assert.rejects(
+    () => runVerifyStage({ operatorPlatform: {}, authedWorker, sessionId: "s", mode: "auto" }),
+    /without a persisted successful payoutTx\.settlement receipt/u
+  );
 });
 
 test("stage 5 verify: reconciles an exact operator-vs-auto-verifier resolved-session race", async () => {
@@ -622,7 +665,7 @@ test("stage 5 verify: reconciles an exact operator-vs-auto-verifier resolved-ses
   };
   const authedWorker = {
     async getVerifierResult() {
-      return { outcome: "approved", reasonCode: "benchmark_pass" };
+      return approvedPayoutResult({ sessionId: "s" });
     }
   };
 
@@ -631,6 +674,7 @@ test("stage 5 verify: reconciles an exact operator-vs-auto-verifier resolved-ses
   assert.equal(out.summary.mode, "operator_race_reconciled");
   assert.equal(out.summary.outcome, "approved");
   assert.equal(out.summary.reasonCode, "benchmark_pass");
+  assert.equal(out.summary.payoutTxHash, PAYOUT_TX_HASH);
 });
 
 test("stage 5 verify: resolved-session race still fails closed without an approved public result", async () => {

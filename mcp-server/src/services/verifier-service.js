@@ -52,13 +52,24 @@ export class VerifierService {
     // failed to persist (e.g. a Redis blip), the session is left 'submitted'
     // while the reward was already paid, and a naive retry would call
     // resolveSinglePayout again and revert InvalidState (the contract only
-    // settles from Submitted) — wedging the session forever. So skip the settle
-    // when the on-chain job has already been resolved, and let ingestVerification
-    // (re-run with the same deterministic verdict) converge submitted →
-    // resolved/rejected. Only a genuinely-unsettled job is settled here.
+    // settles from Submitted) — wedging the session forever. A retry therefore
+    // reconstructs the exact chain receipt before any terminal local write. If
+    // that proof is unavailable, the session remains submitted; it must never
+    // converge to resolved/rejected without the evidence.
     let payoutTx;
     const alreadySettled = await this.onChainAlreadySettled(chainJobId);
-    if (!alreadySettled && this.blockchainGateway?.isEnabled() && this.blockchainGateway.resolveSinglePayout) {
+    if (alreadySettled && this.blockchainGateway?.isEnabled()) {
+      if (typeof this.blockchainGateway.recoverSinglePayoutReceipt !== "function") {
+        throw new Error(
+          `Job ${chainJobId} is already settled on-chain, but the gateway cannot reconstruct its receipt.`
+        );
+      }
+      payoutTx = await this.blockchainGateway.recoverSinglePayoutReceipt(chainJobId, {
+        outcome: verdict.outcome,
+        worker: session.wallet,
+        submittedAt: session.submittedAt
+      });
+    } else if (!alreadySettled && this.blockchainGateway?.isEnabled() && this.blockchainGateway.resolveSinglePayout) {
       payoutTx = await this.blockchainGateway.resolveSinglePayout(
         chainJobId,
         verdict.outcome === "approved",
@@ -67,6 +78,7 @@ export class VerifierService {
         reasoningHash
       );
     }
+    this.assertTerminalChainEvidence({ chainJobId, verdict, payoutTx });
 
     return this.persistBrokeredDecision({
       session,
@@ -129,28 +141,50 @@ export class VerifierService {
     payoutTx
   }) {
     const sessionId = session.sessionId;
-    const persistedVerdict = payoutTx?.settlement
-      ? { ...verdict, settlement: payoutTx.settlement }
-      : verdict;
-    const updatedSession = await this.platformService.ingestVerification(sessionId, persistedVerdict);
-    // Surface the on-chain settle/payout tx (when settled here) so the worker can
-    // see the actual payout — both via /session (stamped on the session record)
-    // and /verifier/result (on the verification result) — instead of it being
-    // discarded. Guarded on a real txHash so disabled-chain flows are unchanged.
-    let settledSession = updatedSession ?? session;
-    if (payoutTx?.txHash && typeof this.stateStore.upsertSession === "function") {
-      settledSession = await this.stateStore.upsertSession({ ...settledSession, payoutTx });
+    const auditFields = buildVerificationAuditFields(job, { verdict, verificationInput });
+    const persistedVerdict = {
+      ...verdict,
+      sessionId,
+      metadataURI,
+      ...(payoutTx ? { payoutTx } : {}),
+      ...(payoutTx?.settlement ? { settlement: payoutTx.settlement } : {}),
+      ...auditFields
+    };
+    const settledSession = await this.platformService.ingestVerification(
+      sessionId,
+      persistedVerdict,
+      { payoutTx }
+    );
+    if (payoutTx && settledSession?.payoutTx?.txHash !== payoutTx.txHash) {
+      throw new Error(
+        `Terminal session ${sessionId} was persisted without its payout receipt in the first write.`
+      );
     }
     const result = {
       ...persistedVerdict,
       sessionId,
       metadataURI,
       ...(payoutTx ? { payoutTx } : {}),
-      ...buildVerificationAuditFields(job, { verdict: persistedVerdict, verificationInput }),
+      ...auditFields,
       session: settledSession
     };
 
-    return this.stateStore.upsertVerificationResult(sessionId, result);
+    return result;
+  }
+
+  assertTerminalChainEvidence({ chainJobId, verdict, payoutTx }) {
+    if (!this.blockchainGateway?.isEnabled?.()) return;
+    if (verdict.outcome !== "approved" && verdict.outcome !== "rejected") return;
+    if (!payoutTx?.txHash || Number(payoutTx.status) !== 1) {
+      throw new Error(
+        `Refusing terminal ${verdict.outcome} transition for ${chainJobId} without a successful chain receipt.`
+      );
+    }
+    if (verdict.outcome === "approved" && !payoutTx.settlement) {
+      throw new Error(
+        `Refusing approved transition for ${chainJobId} without chain-verified payout settlement evidence.`
+      );
+    }
   }
 
   // True if the on-chain job has already been resolved by a prior settle

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { encodeBytes32String, Interface } from "ethers";
+import { encodeBytes32String, id, Interface } from "ethers";
 
 import { BlockchainGateway } from "./gateway.js";
 import { ConfigError, InsufficientLiquidityError, ValidationError } from "../core/errors.js";
@@ -322,6 +322,117 @@ test("resolveSinglePayout returns the settle/payout tx receipt", async () => {
   assert.ok(events[1].fields.durationMs >= 0);
   assert.equal(JSON.stringify(events).includes("private-key"), false);
   assert.equal(JSON.stringify(events).includes("secret"), false);
+});
+
+test("recoverSinglePayoutReceipt binds JobClosed, SettlementSplit, and deployed AAC reservations", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  const escrow = "0x1111111111111111111111111111111111111111";
+  const account = "0x2222222222222222222222222222222222222222";
+  const poster = "0x3333333333333333333333333333333333333333";
+  const worker = "0x4444444444444444444444444444444444444444";
+  const treasury = "0x5555555555555555555555555555555555555555";
+  const chainJobId = `0x${"66".repeat(32)}`;
+  const txHash = `0x${"77".repeat(32)}`;
+  const escrowInterface = new Interface([
+    "event SettlementSplit(bytes32 indexed jobId,address indexed worker,address indexed treasuryAccount,address asset,uint256 workerAmount,uint256 protocolFeeAmount,uint16 protocolFeeBps)",
+    "event JobClosed(bytes32 indexed jobId,address indexed worker,uint256 releasedAmount)",
+    "event JobRejected(bytes32 indexed jobId,bytes32 reasonCode)"
+  ]);
+  const accountInterface = new Interface([
+    "event ReservationSettled(bytes32 indexed settlementId,address indexed account,address indexed recipient,address asset,uint256 amount)"
+  ]);
+  const withAddress = (address, encoded) => ({ address, transactionHash: txHash, ...encoded });
+  const workerReservation = withAddress(account, accountInterface.encodeEventLog(
+    accountInterface.getEvent("ReservationSettled"),
+    [`0x${"88".repeat(32)}`, poster, worker, USDC_TRUST_ASSET.address, 1_000_000n]
+  ));
+  const feeReservation = withAddress(account, accountInterface.encodeEventLog(
+    accountInterface.getEvent("ReservationSettled"),
+    [`0x${"99".repeat(32)}`, poster, treasury, USDC_TRUST_ASSET.address, 50_000n]
+  ));
+  const split = withAddress(escrow, escrowInterface.encodeEventLog(
+    escrowInterface.getEvent("SettlementSplit"),
+    [chainJobId, worker, treasury, USDC_TRUST_ASSET.address, 1_000_000n, 50_000n, 500]
+  ));
+  const closed = withAddress(escrow, escrowInterface.encodeEventLog(
+    escrowInterface.getEvent("JobClosed"),
+    [chainJobId, worker, 1_000_000n]
+  ));
+  const receipt = {
+    to: escrow,
+    transactionHash: txHash,
+    blockNumber: 150,
+    status: 1,
+    logs: [workerReservation, feeReservation, split, closed]
+  };
+  const filters = [];
+  gateway.config = {
+    ...gateway.config,
+    agentAccountAddress: account,
+    escrowCoreAddress: escrow,
+    legacyEscrowCoreAddress: "",
+    supportedAssets: [USDC_TRUST_ASSET]
+  };
+  gateway.provider = {
+    async getBlockNumber() { return 200; },
+    async getBlock(blockNumber) { return { number: blockNumber, timestamp: blockNumber }; },
+    async getLogs(filter) {
+      filters.push(filter);
+      assert.deepEqual(filter.topics, [id("JobClosed(bytes32,address,uint256)"), chainJobId]);
+      return [closed];
+    },
+    async getTransactionReceipt(hash) {
+      assert.equal(hash, txHash);
+      return receipt;
+    }
+  };
+  gateway.escrowContract = { target: escrow, interface: escrowInterface };
+  gateway.accountContract = { target: account, interface: accountInterface };
+  gateway.readEscrowJob = async () => ({
+    contractLayout: "rc1",
+    escrowAddress: escrow,
+    poster,
+    worker,
+    asset: USDC_TRUST_ASSET.address,
+    releasedRaw: "1000000",
+    protocolFeeReleasedRaw: "50000",
+    state: 6
+  });
+
+  const recovered = await gateway.recoverSinglePayoutReceipt(chainJobId, {
+    outcome: "approved",
+    worker,
+    submittedAt: new Date(100_000).toISOString()
+  });
+
+  assert.equal(filters.length, 1);
+  assert.deepEqual(recovered, {
+    txHash,
+    blockNumber: 150,
+    status: 1,
+    settlement: {
+      worker,
+      treasuryAccount: treasury,
+      asset: USDC_TRUST_ASSET.address,
+      assetSymbol: "USDC",
+      workerAmount: 1,
+      workerAmountRaw: "1000000",
+      protocolFeeAmount: 0.05,
+      protocolFeeAmountRaw: "50000",
+      protocolFeeBps: 500
+    }
+  });
+
+  receipt.logs = [split, closed];
+  await assert.rejects(
+    () => gateway.recoverSinglePayoutReceipt(chainJobId, {
+      outcome: "approved",
+      worker,
+      submittedAt: new Date(100_000).toISOString()
+    }),
+    /has 0 AAC reservations; expected 2/u,
+    "an approved retry must not transition from SettlementSplit alone when AAC value proof is absent"
+  );
 });
 
 test("extractSettlementSplit preserves the exact worker reward and protocol fee", () => {

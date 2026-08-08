@@ -50,6 +50,16 @@ test("canary workflow fails closed on missing evidence and summarizes timed sett
   assert.match(workflow, /if-no-files-found: error/u);
 });
 
+test("scheduled and post-deploy canaries leave settlement ownership to the auto-verifier", async () => {
+  const workflow = await readFile(workflowPath, "utf8");
+
+  assert.match(
+    workflow,
+    /WORKER_CANARY_VERIFY_MODE: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.verify_mode \|\| 'auto' \}\}/u,
+    "non-dispatch canaries must not race /verifier/run against the in-process auto-verifier"
+  );
+});
+
 test("post-deploy canary requires a real deploy result and reports every skip reason", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 

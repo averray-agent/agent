@@ -1600,8 +1600,8 @@ export class PlatformService {
     return this.bankXcmDispatcher.dispatch({ requestId, leg });
   }
 
-  async ingestVerification(sessionId, verdict) {
-    return this.verificationIngestionService.ingest(sessionId, verdict);
+  async ingestVerification(sessionId, verdict, options = undefined) {
+    return this.verificationIngestionService.ingest(sessionId, verdict, options);
   }
 
   /**

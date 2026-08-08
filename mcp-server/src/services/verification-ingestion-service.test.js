@@ -6,6 +6,53 @@ import { transitionSession } from "../core/session-state-machine.js";
 import { BADGE_RECEIPT_COSIGN_POLICY_TAG } from "../core/builtin-policies.js";
 import { VerificationIngestionService } from "./verification-ingestion-service.js";
 
+test("approved verification carries payout evidence in its first terminal session write", async () => {
+  const stateStore = new MemoryStateStore();
+  const submitted = transitionSession(transitionSession({
+    sessionId: "session-atomic-payout",
+    wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    jobId: "job-atomic-payout",
+    submission: "verified evidence"
+  }, "claimed", { reason: "job_claimed" }), "submitted", { reason: "work_submitted" });
+  await stateStore.upsertSession(submitted);
+  const terminalWrites = [];
+  const originalUpsert = stateStore.upsertSession.bind(stateStore);
+  stateStore.upsertSession = async (session) => {
+    if (session.status === "resolved" || session.status === "rejected") terminalWrites.push(session);
+    return originalUpsert(session);
+  };
+  const payoutTx = {
+    txHash: `0x${"ab".repeat(32)}`,
+    blockNumber: 123,
+    status: 1,
+    settlement: {
+      worker: submitted.wallet,
+      workerAmountRaw: "100000",
+      protocolFeeAmountRaw: "0"
+    }
+  };
+  const service = new VerificationIngestionService(
+    stateStore,
+    undefined,
+    () => ({ id: submitted.jobId, verifierMode: "deterministic", verifierConfig: { handler: "deterministic" } }),
+    { info() {}, warn() {} }
+  );
+
+  await service.ingest(submitted.sessionId, {
+    handler: "deterministic",
+    handlerVersion: 1,
+    outcome: "approved",
+    reasonCode: "OK",
+    payoutTx,
+    settlement: payoutTx.settlement
+  }, { payoutTx });
+
+  assert.equal(terminalWrites.length, 1);
+  assert.deepEqual(terminalWrites[0].payoutTx, payoutTx);
+  assert.deepEqual((await stateStore.getSession(submitted.sessionId)).payoutTx, payoutTx);
+  assert.deepEqual((await stateStore.getVerificationResult(submitted.sessionId)).payoutTx, payoutTx);
+});
+
 test("github_pr human fallback preserves escalation provenance on the disputed session and event", async () => {
   const stateStore = new MemoryStateStore();
   const events = [];

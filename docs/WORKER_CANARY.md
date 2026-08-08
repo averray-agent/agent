@@ -37,8 +37,13 @@ The worker stages (1–4) run on the roleless token; the operator stages
 (create/fund/verify/cleanup) run on the profile-selected operator credential.
 Stages 5 and 7 are structured to become **no-ops** once auto-verify and the
 short-lived refresh-token flow land (a short-lived operator token skips the freshness gate;
-`WORKER_CANARY_VERIFY_MODE=auto` polls the public verifier result instead of
-operator-triggering).
+scheduled and post-deploy runs use `WORKER_CANARY_VERIFY_MODE=auto` and poll the
+public verifier result instead of racing an operator-triggered write against the
+in-process auto-verifier). An approved result is not enough: stage 5 also requires
+the persisted successful `payoutTx.settlement` receipt before it can pass. The
+backend includes that receipt in the first terminal session write; if an earlier
+attempt moved the chain but lost the local write, the retry reconstructs the
+job-bound chain receipt before it is allowed to transition the session.
 
 ## Disposable job + cleanup
 
@@ -155,7 +160,7 @@ ADMIN_REFRESH_TOKEN_OP='op://mainnet-smoke/admin-refresh-token-worker-canary/pas
 | Env / dispatch input | Default | Purpose |
 | --- | --- | --- |
 | `WORKER_CANARY_REWARD_AMOUNT` | `0.1` | Disposable-job reward (USDC). |
-| `WORKER_CANARY_VERIFY_MODE` | `operator` | `operator` triggers `/verifier/run`; `auto` polls the public result (no-op once auto-verify lands). |
+| `WORKER_CANARY_VERIFY_MODE` | `auto` for scheduled/post-deploy; manual dispatch choice defaults to `operator` | `operator` triggers `/verifier/run`; `auto` polls the public result and requires its persisted payout receipt. |
 | `WORKER_CANARY_TOKEN_MIN_DAYS` | `7` | Fail if the operator `ADMIN_JWT` is within this many days of expiry. |
 | `WORKER_CANARY_ALLOW_EPHEMERAL` | off | Use a throwaway random worker wallet instead of the 1Password key. |
 | `WORKER_CANARY_KEEP_JOB` | off | Leave the disposable job live instead of archiving (debug). |

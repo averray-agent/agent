@@ -81,12 +81,16 @@ test("verifySubmission persists verification input and supports replay", async (
   const platformService = {
     resumeSession: (sessionId) => stateStore.getSession(sessionId),
     getJobDefinition: () => job,
-    ingestVerification: async (sessionId, verdict) => {
+    ingestVerification: async (sessionId, verdict, { payoutTx } = {}) => {
       const current = await stateStore.getSession(sessionId);
-      const updated = transitionSession(current, verdict.outcome === "approved" ? "resolved" : "rejected", {
+      const updated = transitionSession({
+        ...current,
+        ...(payoutTx ? { payoutTx } : {})
+      }, verdict.outcome === "approved" ? "resolved" : "rejected", {
         reason: "verification_resolved"
       });
       await stateStore.upsertSession(updated);
+      await stateStore.upsertVerificationResult(sessionId, { ...verdict, session: updated });
       return updated;
     }
   };
@@ -1149,15 +1153,21 @@ test("verifySubmission surfaces the on-chain payout tx on the result and the ses
     }
   };
 
+  const terminalWrites = [];
   const platformService = {
     resumeSession: (sessionId) => stateStore.getSession(sessionId),
     getJobDefinition: () => job,
-    ingestVerification: async (sessionId, verdict) => {
+    ingestVerification: async (sessionId, verdict, { payoutTx } = {}) => {
       const current = await stateStore.getSession(sessionId);
-      const updated = transitionSession(current, verdict.outcome === "approved" ? "resolved" : "rejected", {
+      const updated = transitionSession({
+        ...current,
+        ...(payoutTx ? { payoutTx } : {})
+      }, verdict.outcome === "approved" ? "resolved" : "rejected", {
         reason: "verification_resolved"
       });
+      terminalWrites.push(updated);
       await stateStore.upsertSession(updated);
+      await stateStore.upsertVerificationResult(sessionId, { ...verdict, session: updated });
       return updated;
     }
   };
@@ -1189,8 +1199,11 @@ test("verifySubmission surfaces the on-chain payout tx on the result and the ses
   // ...and persisted on the session record (so /session shows it too).
   const stored = await stateStore.getSession(submitted.sessionId);
   assert.deepEqual(stored.payoutTx, payoutReceipt);
+  assert.equal(terminalWrites.length, 1);
+  assert.deepEqual(terminalWrites[0].payoutTx, payoutReceipt, "the first terminal write carries payoutTx");
   const verification = await stateStore.getVerificationResult(submitted.sessionId);
   assert.deepEqual(verification.settlement, settlement);
+  assert.deepEqual(verification.payoutTx, payoutReceipt);
 });
 
 function makeIdempotencyHarness(onChainState) {
@@ -1221,25 +1234,45 @@ function makeIdempotencyHarness(onChainState) {
   const platformService = {
     resumeSession: (id) => stateStore.getSession(id),
     getJobDefinition: () => job,
-    ingestVerification: async (id, verdict) => {
+    ingestVerification: async (id, verdict, { payoutTx } = {}) => {
       const current = await stateStore.getSession(id);
-      const updated = transitionSession(current, verdict.outcome === "approved" ? "resolved" : "rejected", {
+      const updated = transitionSession({
+        ...current,
+        ...(payoutTx ? { payoutTx } : {})
+      }, verdict.outcome === "approved" ? "resolved" : "rejected", {
         reason: "verification_resolved"
       });
       await stateStore.upsertSession(updated);
+      await stateStore.upsertVerificationResult(id, { ...verdict, session: updated });
       return updated;
     }
   };
-  const calls = { settle: 0 };
+  const settlement = {
+    worker: claimed.wallet,
+    treasuryAccount: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    asset: "0xcccccccccccccccccccccccccccccccccccccccc",
+    assetSymbol: "USDC",
+    workerAmount: 1,
+    workerAmountRaw: "1000000",
+    protocolFeeAmount: 0,
+    protocolFeeAmountRaw: "0",
+    protocolFeeBps: 0
+  };
+  const payoutReceipt = { txHash: "0xpayout", blockNumber: 1, status: 1, settlement };
+  const calls = { settle: 0, recover: 0 };
   const blockchainGateway = {
     isEnabled: () => true,
     getJob: async () => ({ state: onChainState }),
     resolveSinglePayout: async () => {
       calls.settle += 1;
-      return { txHash: "0xpayout", blockNumber: 1, status: 1 };
+      return payoutReceipt;
+    },
+    recoverSinglePayoutReceipt: async () => {
+      calls.recover += 1;
+      return payoutReceipt;
     }
   };
-  return { stateStore, claimed, platformService, blockchainGateway, calls };
+  return { stateStore, claimed, platformService, blockchainGateway, calls, payoutReceipt };
 }
 
 test("verifySubmission is idempotent: skips re-settling an already-resolved (Closed) on-chain job and still converges the session", async () => {
@@ -1251,9 +1284,64 @@ test("verifySubmission is idempotent: skips re-settling an already-resolved (Clo
   const result = await service.verifySubmission({ sessionId: submitted.sessionId });
 
   assert.equal(h.calls.settle, 0, "must NOT re-settle a job the chain already resolved (would revert InvalidState)");
+  assert.equal(h.calls.recover, 1, "must reconstruct the mined receipt before the terminal write");
   assert.equal(result.outcome, "approved");
   const stored = await h.stateStore.getSession(submitted.sessionId);
   assert.equal(stored.status, "resolved", "session converges to resolved despite the earlier persistence failure");
+  assert.deepEqual(stored.payoutTx, h.payoutReceipt);
+});
+
+test("verifySubmission refuses an already-settled retry when chain evidence cannot be reconstructed", async () => {
+  const h = makeIdempotencyHarness(6);
+  const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
+  await h.stateStore.upsertSession(submitted);
+  h.blockchainGateway.recoverSinglePayoutReceipt = async () => {
+    throw new Error("terminal receipt unavailable");
+  };
+  const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway);
+
+  await assert.rejects(
+    () => service.verifySubmission({ sessionId: submitted.sessionId }),
+    /terminal receipt unavailable/u
+  );
+  assert.equal((await h.stateStore.getSession(submitted.sessionId)).status, "submitted");
+  assert.equal(await h.stateStore.getVerificationResult(submitted.sessionId), undefined);
+});
+
+test("verifySubmission reconstructs after chain settlement outlives a failed first terminal write", async () => {
+  const h = makeIdempotencyHarness(3);
+  const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
+  await h.stateStore.upsertSession(submitted);
+  let chainState = 3;
+  h.blockchainGateway.getJob = async () => ({ state: chainState });
+  h.blockchainGateway.resolveSinglePayout = async () => {
+    h.calls.settle += 1;
+    chainState = 6;
+    return h.payoutReceipt;
+  };
+  const originalUpsert = h.stateStore.upsertSession.bind(h.stateStore);
+  let failFirstTerminalWrite = true;
+  h.stateStore.upsertSession = async (session) => {
+    if (session.status === "resolved" && failFirstTerminalWrite) {
+      failFirstTerminalWrite = false;
+      throw new Error("simulated terminal session write failure");
+    }
+    return originalUpsert(session);
+  };
+  const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway);
+
+  await assert.rejects(
+    () => service.verifySubmission({ sessionId: submitted.sessionId }),
+    /simulated terminal session write failure/u
+  );
+  assert.equal((await h.stateStore.getSession(submitted.sessionId)).status, "submitted");
+  assert.equal(await h.stateStore.getVerificationResult(submitted.sessionId), undefined);
+
+  const recovered = await service.verifySubmission({ sessionId: submitted.sessionId });
+  assert.equal(h.calls.settle, 1, "the retry must not submit a second settlement transaction");
+  assert.equal(h.calls.recover, 1, "the retry reconstructs the first transaction's receipt");
+  assert.equal(recovered.outcome, "approved");
+  assert.deepEqual((await h.stateStore.getSession(submitted.sessionId)).payoutTx, h.payoutReceipt);
 });
 
 test("verifySubmission still settles when the on-chain job is genuinely unsettled (Submitted)", async () => {
@@ -1265,8 +1353,9 @@ test("verifySubmission still settles when the on-chain job is genuinely unsettle
   const result = await service.verifySubmission({ sessionId: submitted.sessionId });
 
   assert.equal(h.calls.settle, 1, "an unsettled job must still be settled exactly once");
+  assert.equal(h.calls.recover, 0);
   assert.equal(result.outcome, "approved");
-  assert.deepEqual(result.payoutTx, { txHash: "0xpayout", blockNumber: 1, status: 1 });
+  assert.deepEqual(result.payoutTx, h.payoutReceipt);
 });
 
 test("ingestBrokeredDecision sends poster approval through canonical verification persistence", async () => {

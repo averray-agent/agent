@@ -89,7 +89,11 @@ jobs:
       WORKER_CANARY_PROFILE: ${{ vars.WORKER_CANARY_PROFILE || 'testnet' }}
       WORKER_CANARY_EVIDENCE_FILE: artifacts/worker-canary-hosted-${{ github.run_id }}.json
       WORKER_CANARY_REWARD_AMOUNT: ${{ inputs.reward_amount }}
-      WORKER_CANARY_VERIFY_MODE: ${{ inputs.verify_mode }}
+      # Scheduled and post-deploy runs let the in-process auto-verifier own the
+      # one settlement write. Triggering /verifier/run concurrently created a
+      # loser that could persist `resolved` without owning the payout receipt.
+      # Manual dispatch keeps its explicit operator/auto diagnostic choice.
+      WORKER_CANARY_VERIFY_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.verify_mode || 'auto' }}
       WORKER_CANARY_TOKEN_MIN_DAYS: ${{ inputs.token_min_days }}
       # Scheduled + post-deploy runs use a throwaway wallet (always within the
       # onboarding waiver — no stake funding needed); manual dispatch opts in via input.
