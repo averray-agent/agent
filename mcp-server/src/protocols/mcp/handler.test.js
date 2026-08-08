@@ -18,6 +18,7 @@ const META_CLIENT = "io.modelcontextprotocol/clientInfo";
 function createHarness(overrides = {}) {
   const limitCalls = [];
   const handler = createMcpRoute({
+    arrivals: overrides.arrivals,
     authMiddleware: overrides.authMiddleware ?? (async () => ({ wallet: "0xauthed" })),
     clientIp: () => "198.51.100.8",
     enforceLimit: async (bucket, key, config) => {
@@ -323,4 +324,57 @@ test("anonymous and authenticated tool calls consume separate rate-limit buckets
     { bucket: "mcp_tools_anonymous", key: "198.51.100.8" },
     { bucket: "mcp_tools_authenticated", key: "0xabc" }
   ]);
+});
+
+test("the front door records who arrived and how far they got", async () => {
+  const recorded = [];
+  const arrivals = {
+    async recordReach(entry) { recorded.push({ kind: "reach", ...entry }); },
+    async recordTool(entry) { recorded.push({ kind: "tool", ...entry }); }
+  };
+  const { handler } = createHarness({ arrivals });
+
+  await call(handler, modernRequest("tools/call", { name: "fetchAuthNonce", arguments: {} }),
+    modernHeaders("tools/call", "fetchAuthNonce"));
+
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].kind, "tool");
+  assert.equal(recorded[0].tool, "fetchAuthNonce");
+  assert.equal(recorded[0].era, "modern");
+  assert.deepEqual(recorded[0].clientInfo, { name: "modern-test", version: "1.0.0" });
+});
+
+test("a legacy handshake is recorded even though it never reaches dispatch", async () => {
+  const recorded = [];
+  const arrivals = {
+    async recordReach(entry) { recorded.push(entry); },
+    async recordTool(entry) { recorded.push(entry); }
+  };
+  const { handler } = createHarness({ arrivals });
+
+  await call(handler, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: LEGACY_MCP_VERSION,
+      capabilities: {},
+      clientInfo: { name: "legacy-test", version: "0.1.0" }
+    }
+  });
+
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].era, "legacy");
+  assert.deepEqual(recorded[0].clientInfo, { name: "legacy-test", version: "0.1.0" });
+});
+
+// Observability must never be able to refuse a request.
+test("a throwing arrivals recorder does not break the door", async () => {
+  const arrivals = {
+    async recordReach() { throw new Error("observatory exploded"); },
+    async recordTool() { throw new Error("observatory exploded"); }
+  };
+  const { handler } = createHarness({ arrivals });
+  const result = await call(handler, modernRequest("tools/list"), modernHeaders("tools/list"));
+  assert.equal(result.statusCode, 200);
 });

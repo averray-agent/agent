@@ -41,7 +41,21 @@ export class UnsupportedProtocolVersionError extends Error {
   }
 }
 
+/**
+ * Observability must never be able to refuse a request. The observatory guards
+ * itself, but the door does not rely on that — any recorder injected here is
+ * treated as untrusted, so a broken one costs a data point, not an arrival.
+ */
+async function recordArrival(arrivals, method, entry) {
+  try {
+    await arrivals?.[method]?.(entry);
+  } catch {
+    // Deliberately swallowed.
+  }
+}
+
 export function createMcpRoute({
+  arrivals,
   authMiddleware,
   clientIp,
   enforceLimit,
@@ -93,12 +107,21 @@ export function createMcpRoute({
         response,
         serverInfo
       });
+      // A legacy handshake never reaches dispatchRequest, so it is recorded
+      // here. A REJECTED handshake counts too: a client that cannot open a
+      // session is exactly the arrival we most want to know about.
+      await recordArrival(arrivals, "recordReach", {
+        era: "legacy",
+        clientInfo: message.params?.clientInfo,
+        ip: clientIp?.(request)
+      });
       return true;
     }
 
     const meta = requestMeta(message);
     if (meta && Object.hasOwn(meta, PROTOCOL_VERSION_META_KEY)) {
       await handleModernRequest({
+        arrivals,
         authMiddleware,
         clientIp,
         enforceLimit,
@@ -117,6 +140,7 @@ export function createMcpRoute({
 
     if (request.headers?.["mcp-session-id"]) {
       await handleLegacyRequest({
+        arrivals,
         authMiddleware,
         clientIp,
         enforceLimit,
@@ -213,6 +237,7 @@ function handleLegacyInitialize({
 }
 
 async function handleLegacyRequest({
+  arrivals,
   authMiddleware,
   clientIp,
   enforceLimit,
@@ -267,7 +292,9 @@ async function handleLegacyRequest({
   }
 
   await dispatchRequest({
+    arrivals,
     authMiddleware,
+    clientInfo: session.clientInfo,
     clientIp,
     enforceLimit,
     era: "legacy",
@@ -283,6 +310,7 @@ async function handleLegacyRequest({
 }
 
 async function handleModernRequest({
+  arrivals,
   authMiddleware,
   clientIp,
   enforceLimit,
@@ -359,7 +387,9 @@ async function handleModernRequest({
   }
 
   await dispatchRequest({
+    arrivals,
     authMiddleware,
+    clientInfo: meta[CLIENT_INFO_META_KEY],
     clientIp,
     enforceLimit,
     era: "modern",
@@ -375,7 +405,9 @@ async function handleModernRequest({
 }
 
 async function dispatchRequest({
+  arrivals,
   authMiddleware,
+  clientInfo,
   clientIp,
   enforceLimit,
   era,
@@ -388,6 +420,16 @@ async function dispatchRequest({
   serverInfo,
   tools
 }) {
+  // Both eras funnel through here, so this is the single place that sees
+  // every dispatched method. Recorded BEFORE any validation or rate limit, so
+  // a caller that is refused still counts as having arrived.
+  await recordArrival(arrivals, message.method === "tools/call" ? "recordTool" : "recordReach", {
+    tool: message.params?.name,
+    era,
+    clientInfo,
+    ip: clientIp?.(request)
+  });
+
   if (!Object.hasOwn(message, "id")) {
     sendError(response, respond, 400, null, -32600, "This MCP method requires a JSON-RPC id.");
     return;
