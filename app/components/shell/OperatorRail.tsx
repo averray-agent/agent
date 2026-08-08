@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import {
   AlertTriangle,
   Coins,
-  Eye,
   FileCheck2,
   Gauge,
   History,
@@ -59,7 +58,6 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Capital",
     items: [
       { href: "/treasury", label: "Treasury", icon: Coins },
-      { href: "/transparency", label: "Transparency", icon: Eye },
       { href: "/poster", label: "Posting", icon: Megaphone },
       { href: "/sessions", label: "Sessions", icon: History },
     ],

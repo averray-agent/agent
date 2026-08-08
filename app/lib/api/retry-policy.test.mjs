@@ -7,6 +7,11 @@
  * has no retry cap — and each attempt incremented the backend's
  * `auth_failures_total`. Eight gated hooks per role-less tab.
  *
+ * `/transparency` is named above because it was part of that original
+ * regression. It has since been opened to the public and its operator page
+ * retired, so it no longer appears in the assertion below. The guard it
+ * motivated still stands for every feed that is still gated.
+ *
  * The hooks module is TypeScript and is not importable from node --test, so
  * the wiring is asserted at the source level, matching the *-truth tests in
  * this folder. The policy itself is plain JS and is exercised directly.
@@ -29,7 +34,7 @@ test("auth-locked failures are terminal — 403 no longer retries", () => {
 });
 
 test("a real missing_capability error shape is not retried", () => {
-  // What swrFetcher throws for GET /transparency without `ops:view`.
+  // What swrFetcher throws for GET /alerts without `ops:view`.
   const err = {
     name: "ApiError",
     message: "403 Forbidden",
@@ -89,7 +94,6 @@ test("every capability-gated feed routes through useApi", () => {
   // These 403 for a session without the operator capabilities; a raw useSWR
   // here would carry SWR's retry-everything default and reopen the hole.
   const gated = [
-    "useTransparency",
     "useAlerts",
     "usePolicies",
     "useAudit",
