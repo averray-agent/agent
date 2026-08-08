@@ -208,9 +208,18 @@ export async function runWorkerCanary({
     // chainJobId comes from the worker's own session record
     chainJobId = await resolveChainJobId({ authedWorker, sessionId, claim, submit });
 
-    // ── STAGE 5: verify (operator path until auto-verify lands) ───────────
+    // ── STAGE 5: verify + require the persisted payout receipt ────────────
     const verify = await stage("verify", () =>
-      runVerifyStage({ operatorPlatform, authedWorker, sessionId, mode: config.verifyMode })
+      runVerifyStage({
+        operatorPlatform,
+        authedWorker,
+        sessionId,
+        mode: config.verifyMode,
+        timeoutMs: config.settleTimeoutMs,
+        pollMs: config.settlePollMs,
+        now,
+        log
+      })
     );
     stages.verify = verify.summary;
     captureTxHash(txHashes, "verify", verify.raw);
@@ -509,20 +518,56 @@ export async function runSubmitStage({ authedWorker, sessionId, jobId, timestamp
 }
 
 // ── STAGE 5: verify ─────────────────────────────────────────────────────────
-export async function runVerifyStage({ operatorPlatform, authedWorker, sessionId, mode }) {
+export async function runVerifyStage({
+  operatorPlatform,
+  authedWorker,
+  sessionId,
+  mode,
+  timeoutMs = DEFAULT_SETTLE_TIMEOUT_MS,
+  pollMs = DEFAULT_SETTLE_POLL_MS,
+  now = Date.now,
+  log = () => {},
+  sleepImpl = sleep
+}) {
   // mode "auto" lets the canary become a no-op verifier once a scheduler
   // auto-verifies submitted benchmark jobs: it polls the public result instead
   // of operator-triggering. Default "operator" triggers the verify itself.
   if (mode === "auto") {
-    const result = await authedWorker.getVerifierResult(sessionId);
-    const outcome = result?.outcome ?? result?.verification?.status;
-    if (outcome !== "approved" && outcome !== "passed") {
-      throw new Error(
-        `Verify stage (auto): expected an "approved" auto-verification, got "${outcome ?? "missing"}". ` +
-          "Auto-verify has not approved this submission."
-      );
+    const startedAt = now();
+    const deadline = startedAt + timeoutMs;
+    let pollCount = 0;
+    while (true) {
+      pollCount += 1;
+      const result = await authedWorker.getVerifierResult(sessionId);
+      const outcome = result?.outcome ?? result?.verification?.status;
+      if (outcome === "approved" || outcome === "passed") {
+        const payoutTx = assertPersistedCanaryPayout(result, "auto-verifier result");
+        return {
+          raw: result,
+          summary: {
+            mode: "auto",
+            outcome: "approved",
+            reasonCode: result?.reasonCode ?? null,
+            payoutTxHash: payoutTx.txHash,
+            pollCount,
+            elapsedMs: Math.max(0, now() - startedAt)
+          }
+        };
+      }
+      if (outcome === "rejected" || outcome === "failed") {
+        throw new Error(
+          `Verify stage (auto): auto-verifier returned terminal outcome "${outcome}"; expected "approved".`
+        );
+      }
+      if (now() >= deadline) {
+        throw new Error(
+          `Verify stage (auto): no approved result after ${Math.max(0, now() - startedAt)}ms; ` +
+            `last outcome was "${outcome ?? "missing"}".`
+        );
+      }
+      log(`Waiting for auto-verifier… poll=${pollCount} outcome=${outcome ?? "missing"}`);
+      await sleepImpl(Math.min(pollMs, deadline - now()));
     }
-    return { raw: result, summary: { mode: "auto", outcome: "approved", reasonCode: result?.reasonCode ?? null } };
   }
 
   let verification;
@@ -545,12 +590,14 @@ export async function runVerifyStage({ operatorPlatform, authedWorker, sessionId
           `"${outcome ?? "missing"}", not approved.`
       );
     }
+    const payoutTx = assertPersistedCanaryPayout(result, "resolved-race verifier result");
     return {
       raw: result,
       summary: {
         mode: "operator_race_reconciled",
         outcome: "approved",
-        reasonCode: result?.reasonCode ?? null
+        reasonCode: result?.reasonCode ?? null,
+        payoutTxHash: payoutTx.txHash
       }
     };
   }
@@ -561,10 +608,37 @@ export async function runVerifyStage({ operatorPlatform, authedWorker, sessionId
         `reasonCode=${verification?.reasonCode ?? "none"}.`
     );
   }
+  const payoutTx = assertPersistedCanaryPayout(verification, "operator verifier result");
   return {
     raw: verification,
-    summary: { mode: "operator", outcome, reasonCode: verification?.reasonCode ?? null }
+    summary: {
+      mode: "operator",
+      outcome,
+      reasonCode: verification?.reasonCode ?? null,
+      payoutTxHash: payoutTx.txHash
+    }
   };
+}
+
+function assertPersistedCanaryPayout(result, source) {
+  const payoutTx = result?.payoutTx ?? result?.verification?.payoutTx;
+  if (
+    typeof payoutTx?.txHash !== "string"
+    || !/^0x[a-fA-F0-9]{64}$/u.test(payoutTx.txHash)
+    || Number(payoutTx.status) !== 1
+    || typeof payoutTx?.settlement?.workerAmountRaw !== "string"
+    || !/^(0|[1-9][0-9]*)$/u.test(payoutTx.settlement.workerAmountRaw)
+  ) {
+    throw new Error(
+      `Verify stage FAILED: ${source} approved session ${sessionLabel(result)} without a persisted ` +
+        "successful payoutTx.settlement receipt. A resolved canary must never outrun its payout evidence."
+    );
+  }
+  return payoutTx;
+}
+
+function sessionLabel(result) {
+  return result?.sessionId ?? result?.session?.sessionId ?? "unknown";
 }
 
 function isResolvedVerificationRace(error) {
@@ -1122,7 +1196,11 @@ async function safeGetSession(authedWorker, sessionId) {
 }
 
 function captureTxHash(txHashes, stage, raw) {
-  const candidate = raw?.txHash ?? raw?.transactionHash ?? raw?.verification?.txHash;
+  const candidate = raw?.txHash
+    ?? raw?.transactionHash
+    ?? raw?.payoutTx?.txHash
+    ?? raw?.verification?.payoutTx?.txHash
+    ?? raw?.verification?.txHash;
   if (typeof candidate === "string" && /^0x[a-fA-F0-9]{64}$/u.test(candidate)) {
     txHashes[stage] = candidate;
   }
