@@ -131,8 +131,8 @@ export function DataFreshnessPill({
  *
  * This helper never returns `locked`, on purpose: its callers are
  * multi-request pages that still render something. A page whose ONE
- * request is refused passes `locked` directly (see the transparency
- * page), because there "Partial view" would overstate what is rendered.
+ * request is refused should pass `locked` directly, because there
+ * "Partial view" would overstate what is actually rendered.
  */
 export function freshnessFromRequests(
   ...requests: { data?: unknown; error?: unknown; isLoading?: boolean }[]

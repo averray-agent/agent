@@ -3,7 +3,6 @@
 import useSWR, { type SWRConfiguration } from "swr";
 import { swrFetcher, ApiError } from "./client";
 import { shouldRetryApiError } from "./retry-policy.js";
-import type { TransparencyPayload } from "./transparency-types";
 
 /**
  * Generic hook for public or authed GET endpoints.
@@ -84,8 +83,6 @@ export const useVerifierResult = (sessionId: string | null) =>
   useApi(sessionId ? `/verifier/result?sessionId=${encodeURIComponent(sessionId)}` : null);
 export const useStrategies = () => useApi("/strategies");
 export const useHealth = () => useApi("/health");
-export const useTransparency = () =>
-  useApi<TransparencyPayload>("/transparency", { refreshInterval: 15_000 });
 /**
  * Operator-app provider operations status. Authed via `/admin/status`,
  * which carries the full `lastRun.errors[]` / `lastRun.skipped[]` arrays.
