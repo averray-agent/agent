@@ -250,12 +250,54 @@ jq -e '
   (any($fund.writes[];
     (.abiFragment == "function deposit(address asset, uint256 amount)") and
     ((.address | ascii_downcase) == ($poster.agentAccountCore | ascii_downcase)) and
-    ((.args[0] | ascii_downcase) == ($poster.token.address | ascii_downcase)))) and
-  (.liveReads.protocolFeeBps.status == "available") and
-  (.liveReads.feeRecipient.status == "available") and
-  (.liveReads.claimBond.status == "available") and
-  (.liveReads.disputeWindow.status == "available")
+    ((.args[0] | ascii_downcase) == ($poster.token.address | ascii_downcase))))
 ' >/dev/null <<<"$poster_onboarding_json"
+
+# Live chain reads are RETRIED, then advisory.
+#
+# These four assert that a third-party RPC answered — not that anything of ours
+# is correct. Every structural claim above stays hard-gated.
+#
+# On 2026-08-08 they failed two production deploys (17:24 and 18:45 UTC) on a
+# day when an upstream RPC returned 521 for hours. Both times the code had
+# already installed successfully and the same assertion passed when re-run
+# minutes later. A deploy that goes red because someone else's node blinked
+# teaches everyone to ignore red deploys, which costs more than this check is
+# worth. Same reasoning as #657, which made the Hermes gate advisory.
+LIVE_READ_ATTEMPTS="${LIVE_READ_ATTEMPTS:-3}"
+LIVE_READ_RETRY_SLEEP_SEC="${LIVE_READ_RETRY_SLEEP_SEC:-5}"
+
+live_reads_available() {
+  jq -e '
+    (.liveReads.protocolFeeBps.status == "available") and
+    (.liveReads.feeRecipient.status == "available") and
+    (.liveReads.claimBond.status == "available") and
+    (.liveReads.disputeWindow.status == "available")
+  ' >/dev/null <<<"$1"
+}
+
+live_read_attempt=1
+while true; do
+  if live_reads_available "$poster_onboarding_json"; then
+    echo "  poster onboarding live reads available (attempt ${live_read_attempt}/${LIVE_READ_ATTEMPTS})"
+    break
+  fi
+  if (( live_read_attempt >= LIVE_READ_ATTEMPTS )); then
+    echo "  WARNING: poster onboarding live chain reads unavailable after ${LIVE_READ_ATTEMPTS} attempts."
+    echo "  WARNING: advisory only — every contract assertion above passed, so the deploy continues."
+    # `.liveReads` carries a scalar `asOf` beside the read objects, so select
+    # objects only — otherwise this dumps a jq type error instead of naming the
+    # read that failed, which is the one thing the operator needs from it.
+    jq -r '.liveReads // {} | to_entries[] | select(.value | type == "object")
+           | "    " + .key + ": " + ((.value.status // "missing") | tostring)' \
+      <<<"$poster_onboarding_json" || true
+    break
+  fi
+  sleep "$LIVE_READ_RETRY_SLEEP_SEC"
+  live_read_attempt=$(( live_read_attempt + 1 ))
+  # Re-fetch: a payload already in hand cannot recover on its own.
+  poster_onboarding_json="$(fetch "$API_POSTER_ONBOARDING_URL")"
+done
 # Feed both documents via stdin (-s slurps them into an array): --argjson puts
 # the whole JSON into execve argv, and a large /health payload can blow past
 # ARG_MAX ("jq: Argument list too long", exit 126 — hit live 2026-08-01).
