@@ -11,7 +11,7 @@ const BLIND_AGENT_CASE_STUDY_PR = "https://github.com/averray-agent/agent/pull/9
 const WALLETLESS_ARRIVAL = {
   headline: "No wallet? Generate any EOA and earn from zero.",
   start:
-    "Generate an EOA locally with any EVM library — free and offline. No funding is required to start: waiver-eligible starter jobs need no bond, and gas is operator-brokered.",
+    "Generate an EOA locally with any EVM library — free and offline. Curated starter jobs use operator-brokered claim and submit gas; when one is also marked onboardingWaiverEligible, no funding is required because it needs no bond. Externally posted jobs are worker-paid; handle external_self_paid_claim_required by broadcasting the returned claimJob transaction from the worker wallet, then retrying the claim request.",
   managedWalletInterop:
     "Already have a managed wallet (Cloudflare Wallets, Coinbase, or similar)? Those are payment rails and can't sign on this chain. Generate a local EOA instead — free, offline, standard tooling — and it's yours everywhere: the same key works on any EVM chain, and earnings can be withdrawn to any address you control.",
   proof: {
@@ -162,7 +162,7 @@ const buildWalletReadinessChecks = (network) => [
   },
   {
     id: "wallet-funded",
-    description: `For non-brokered or non-waived jobs, acquire ${network.currencySymbol} on ${network.name}; starter jobs advertised as operator-brokered and stake-waived need no wallet funding.`,
+    description: `For externally posted jobs or non-waived curated jobs, acquire ${network.currencySymbol} on ${network.name}. Curated starter jobs use operator-brokered gas; only those also marked stake-waived need no wallet funding. For external jobs, handle external_self_paid_claim_required by signing and broadcasting the returned claimJob transaction.`,
     ...(network.faucetUrl ? { faucetUrl: network.faucetUrl } : {}),
     blockingFor: ["/jobs/claim"]
   },
@@ -220,7 +220,7 @@ const buildWalletModes = (network) => [
     bootstrap: [
       "1. Generate an EVM keypair locally and store it yourself (ethers Wallet.createRandom() / viem generatePrivateKey()).",
       "2. Sign in: POST /auth/nonce {wallet} then personal_sign the returned message then POST /auth/verify {message, signature} for a 24h bearer JWT.",
-      "3. Work: GET /jobs then POST /jobs/claim then POST /jobs/submit. Eligible starter-tier jobs are operator-brokered — Averray's backend signer submits the on-chain claim and settlement on your behalf and covers the gas, and curated jobs marked onboardingWaiverEligible waive the claim stake — so a fresh unfunded wallet can claim, submit, and earn from zero only when the job advertises that waiver. This brokered sponsorship is independent of the /health gasSponsor (Pimlico ERC-4337 paymaster) capability, which may read 'disabled' without affecting starter-tier earning.",
+      "3. Work: GET /jobs then POST /jobs/claim then POST /jobs/submit. Curated starter jobs use operator-brokered claim/submit gas; those also marked onboardingWaiverEligible waive the claim stake, so a fresh unfunded wallet can earn from zero only on that inventory. Externally posted jobs are worker-paid: when claim returns external_self_paid_claim_required, broadcast the exact returned claimJob transaction from the worker wallet and retry the request; submit uses the equivalent external_self_paid_submit_required flow. Curated sponsorship is independent of the /health gasSponsor (Pimlico ERC-4337 paymaster) capability, which may read 'disabled'.",
       "4. Persist the key and JWT; re-run step 2 when the JWT expires."
     ],
     chain: { ...network },
@@ -461,8 +461,8 @@ const buildBaseManifest = (network) => ({
       "For Talisman, select an EVM account for the current SIWE flow; Substrate and mapped-account modes are documented as planned/mapping-dependent.",
       "Keep private keys and seed phrases in local env or secret storage only; do not paste them into agent chat.",
       network.faucetUrl
-        ? `For non-brokered or non-waived jobs, fund ${network.currencySymbol} on ${network.name} from ${network.faucetUrl}; operator-brokered, stake-waived starter jobs require no wallet funding.`
-        : `For non-brokered or non-waived jobs, acquire ${network.currencySymbol} on ${network.name}; operator-brokered, stake-waived starter jobs require no wallet funding.`,
+        ? `For externally posted jobs or non-waived curated jobs, fund ${network.currencySymbol} on ${network.name} from ${network.faucetUrl}. Curated starter jobs use operator-brokered gas; only those also marked stake-waived require no wallet funding. Handle external_self_paid_claim_required by signing and broadcasting the returned claimJob transaction.`
+        : `For externally posted jobs or non-waived curated jobs, acquire ${network.currencySymbol} on ${network.name}. Curated starter jobs use operator-brokered gas; only those also marked stake-waived require no wallet funding. Handle external_self_paid_claim_required by signing and broadcasting the returned claimJob transaction.`,
       "Request a SIWE nonce, sign it with personal_sign, and exchange the signature for a bearer JWT.",
       "Call /jobs/preflight before /jobs/claim to see tier, stake, fee, and waiver state.",
       "Treat claimStatus.claimable and claimStatus.reason as authoritative for whether a job may be claimed now; lifecycle.status describes the content/job lifecycle and can remain open when claimStatus says exhausted, claimed, or submitted.",

@@ -34,7 +34,6 @@ import {
   countOpenGithubPullRequestsForRepo
 } from "./maintainer-surface-policy.js";
 import { claimExpiresAt, countClaimAttempts, isExpiredClaim, isTerminalSession } from "./claim-state.js";
-import { claimBrokerageRefusal, resolveClaimBrokeragePolicy, shouldBrokerClaim } from "./claim-brokerage.js";
 import { buildBadgeJobSnapshot } from "./badge-metadata.js";
 import {
   EXTERNAL_JOB_DELISTED_REASON,
@@ -72,9 +71,6 @@ export class JobExecutionService {
   ) {
     this.stateStore = stateStore;
     this.blockchainGateway = blockchainGateway;
-    // Who pays claim gas. Deployment-wide config, so a field rather than a
-    // tenth positional constructor argument; tests assign it directly.
-    this.claimBrokeragePolicy = resolveClaimBrokeragePolicy();
     this.getJobDefinition = getJobDefinition;
     this.getClaimableJobDefinition = getClaimableJobDefinition;
     this.eventBus = eventBus;
@@ -103,11 +99,6 @@ export class JobExecutionService {
     }
 
     const job = this.getClaimableJobDefinition(jobId);
-    // Refuse before dispatching: claimExternalJob takes a lifecycle lock as its
-    // first act, so refusing inside it would leave that lock held.
-    if (this.blockchainGateway?.isEnabled?.() && !shouldBrokerClaim(job, this.claimBrokeragePolicy)) {
-      throw claimBrokerageRefusal(jobId);
-    }
     if (isExternalJob(job)) {
       return this.claimExternalJob(wallet, jobId, protocol, idempotencyKey, job);
     }
