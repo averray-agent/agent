@@ -337,6 +337,7 @@ export async function createPlatformRuntime() {
     new ExternalPostingService({
       stateStore,
       platformService,
+      gateway,
       config: externalPostingConfig,
       logger,
       eventBus

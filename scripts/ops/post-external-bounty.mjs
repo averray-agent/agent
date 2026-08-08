@@ -200,7 +200,7 @@ export async function loadDefinition(args, { cwd = process.cwd() } = {}) {
     acceptanceCriteria: args.acceptanceCriteria,
     claimTtlSeconds: 86_400,
     retryLimit: 1,
-    requiresSponsoredGas: true
+    requiresSponsoredGas: false
   };
   return { definition, definitionPath: "inline flags" };
 }

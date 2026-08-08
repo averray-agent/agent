@@ -41,7 +41,7 @@ function makeDraft(overrides = {}) {
     draftId: DRAFT_ID,
     jobId: JOB_ID,
     specHash: SPEC_HASH,
-    status: "awaiting_funding",
+    status: "quoted",
     calldata: {
       to: ESCROW,
       function: CREATE_SINGLE_PAYOUT_SIGNATURE,
@@ -236,7 +236,7 @@ test("catalog match requires the external source and exact poster", () => {
   );
 });
 
-test("committed dogfood definition is accepted by the live external-draft validator", async () => {
+test("historical sponsored-gas dogfood definition is refused for new external quotes", async () => {
   const definition = JSON.parse(await readFile(
     new URL("./external-bounties/lingdojo-kana-dojo-26665.json", import.meta.url),
     "utf8"
@@ -257,15 +257,10 @@ test("committed dogfood definition is accepted by the live external-draft valida
     now: () => new Date("2026-07-31T10:00:00.000Z")
   });
 
-  const draft = await service.createDraft(POSTER, { definition });
-  assert.equal(draft.status, "awaiting_funding");
-  assert.equal(draft.definition.verifierMode, "human_fallback");
-  assert.equal(draft.definition.rewardAmount, "1");
-  assert.equal(draft.calldata.function, CREATE_SINGLE_PAYOUT_SIGNATURE);
-  assert.equal(draft.calldata.args[2], "1000000");
-  assert.equal(draft.calldata.args[3], "0");
-  assert.equal(draft.calldata.args[4], "0");
-  assert.equal(assertDefinitionMatchesDraft(definition, draft), draft.specHash);
+  await assert.rejects(
+    service.createDraft(POSTER, { definition }),
+    (error) => error.code === "external_sponsored_gas_forbidden"
+  );
 });
 
 test("default dry-run performs SIWE and draft creation but never enters write execution", async () => {
@@ -358,7 +353,7 @@ test("execute reloads the reviewed draft id and never creates a second draft", a
     acceptanceCriteria: ["Return an implementation report."],
     claimTtlSeconds: 86_400,
     retryLimit: 1,
-    requiresSponsoredGas: true
+    requiresSponsoredGas: false
   };
   const draft = makeDraftForDefinition(definition);
   const plan = {

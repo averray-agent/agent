@@ -1,7 +1,7 @@
 # External job posting — design packet (v2's revenue door)
 
-**Status:** design for review · **Owner:** Pascal (product decisions) + Codex
-(backend implementation) · **Created:** 2026-07-26, pre-flip.
+**Status:** open-door implementation · **Owner:** Pascal (product decisions) + Codex
+(backend implementation) · **Created:** 2026-07-26 · **Updated:** 2026-08-08.
 
 v1 proves the rail with operator-curated ingested jobs. v2's core business
 question is the demand side: **letting an external customer bring a funded
@@ -60,38 +60,49 @@ also no draft/validation flow that helps a poster produce a well-formed job.
  1. SIWE sign-in (roles [] ok)
  2. POST /jobs/draft  ── definition ──►   validate against schema
                                           registry + policy gates;
-                                          returns draftId, jobId
-                                          (deterministic hash),
-                                          specHash, calldata template
+                                          records demand only;
+                                          returns deterministic quote,
+                                          jobId (poster + content),
+                                          exact additive fee + calldata
  3. deposit USDC to own AAC position ──────────────────────────────►  deposit()
  4. createSinglePayoutJob(...)  ───────────────────────────────────►  escrow funded, job Open
  5.                                       watcher confirms on-chain
-                                          job ↔ draft (specHash,
+                                          job ↔ quote (specHash,
                                           reward, asset, poster);
+                                          materializes draft + job;
                                           catalog entry goes LIVE
                                           (source: "external",
                                           poster: 0x…)
- 6. workers discover /jobs → claim → work → submit → verify → settle
+ 6. workers discover /jobs → direct worker-paid claim → work →
+    direct worker-paid submit → verify → settle
  7. poster reads receipts, evidence, and (on rejection/timeout)
     recovers escrow through the existing timeout/refund machinery
 ```
 
-Draft entries expire unfunded after a TTL (decision 5.3). Step 5 requires no
-poster trust: if the on-chain job doesn't match the draft, the entry never
-goes live and the draft page says exactly why.
+Quotes expire unfunded after a TTL. No draft or claimable job exists before
+funding; the only durable pre-funding record is the demand signal, including
+quoted-but-never-funded attempts. Step 5 requires no poster trust: if the
+on-chain job doesn't match the quote, the entry never goes live and the quote
+status says exactly why. Identical poster+content attempts are idempotent.
 
 ## 4. API additions (the whole backend build)
 
 | Route | Auth | Purpose |
 |---|---|---|
-| `POST /jobs/draft` | SIWE (any wallet) | Validate + store a job definition; return `draftId`, deterministic `jobId`, `specHash`, and a ready-to-sign calldata template |
-| `GET /jobs/draft/:id` | poster wallet | Draft status: `awaiting_funding` / `live` / `mismatch(reason)` / `expired` |
+| `POST /jobs/draft` | SIWE (any wallet) | Validate + record demand; return a non-persisted deterministic quote with exact poster-additive funding, `jobId`, `specHash`, expiry, and ready-to-sign calldata |
+| `GET /jobs/draft/:id` | poster wallet | Quote/draft status: `quoted` / `live` / `mismatch(reason)` / `expired` |
 | `GET /jobs?source=external` | public | Discovery, with poster provenance |
 | `GET /poster/onboarding` | public | Machine-readable posting guide (mirror of `/onboarding` for the poster role) |
 
-Plus one internal piece: the **on-chain watcher** that reconciles drafts with
-observed `createSinglePayoutJob` events (the indexer already tracks escrow
-events — reuse it).
+Plus one internal piece: the **on-chain watcher** that reconciles quotes with
+observed `createSinglePayoutJob` events and only then materializes the draft
+and catalog projection.
+
+External work never consumes the curated operator gas subsidy. Claim and
+submit endpoints return exact direct-wallet transaction recipes; workers pay
+those transaction fees and retry the API operation after confirmation to
+converge the durable session. The worker still receives the full advertised
+reward; the 5% protocol fee is additional poster-side funding.
 
 ## 5. Decisions needed (operator)
 

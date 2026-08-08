@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { id } from "ethers";
+import { id, parseUnits } from "ethers";
 
 import { buildDiscoveryManifest } from "./discovery-manifest.js";
 import {
@@ -46,7 +46,6 @@ function config(overrides = {}) {
     EXTERNAL_POSTING_MODE: "open",
     EXTERNAL_POSTING_MIN_REWARD_USDC: "1",
     EXTERNAL_POSTING_DRAFT_TTL_HOURS: "72",
-    EXTERNAL_POSTING_MAX_OPEN_DRAFTS: "10",
     ESCROW_CORE_ADDRESS: ESCROW,
     SUPPORTED_ASSETS_JSON: JSON.stringify([
       { symbol: "USDC", address: USDC, decimals: 6 }
@@ -58,15 +57,31 @@ function config(overrides = {}) {
 function makeService({
   env = {},
   now = () => new Date("2026-07-28T12:00:00.000Z"),
-  store = new MemoryStateStore()
+  store = new MemoryStateStore(),
+  gateway = feeQuoteGateway()
 } = {}) {
   return {
     store,
     service: new ExternalPostingService({
       stateStore: store,
+      gateway,
       config: config(env),
       now
     })
+  };
+}
+
+function feeQuoteGateway(overrides = {}) {
+  return {
+    async previewProtocolFeeForAsset(_asset, rewardAmount) {
+      const rewardRaw = parseUnits(String(rewardAmount), 6);
+      return {
+        rewardAmountRaw: rewardRaw.toString(),
+        protocolFeeAmountRaw: (rewardRaw * 500n / 10_000n).toString(),
+        protocolFeeBps: 500,
+        ...overrides
+      };
+    }
   };
 }
 
@@ -74,6 +89,7 @@ test("external posting mode defaults closed and open mode admits every SIWE wall
   const closedStore = new MemoryStateStore();
   const closed = new ExternalPostingService({
     stateStore: closedStore,
+    gateway: feeQuoteGateway(),
     config: resolveExternalPostingConfig({
       ESCROW_CORE_ADDRESS: ESCROW,
       SUPPORTED_ASSETS_JSON: JSON.stringify([{ symbol: "USDC", address: USDC, decimals: 6 }])
@@ -93,8 +109,69 @@ test("external posting mode defaults closed and open mode admits every SIWE wall
   assert.deepEqual(closedSignals.map((entry) => entry.decision), ["mode_closed", "mode_closed"]);
 
   const { service } = makeService();
-  assert.equal((await service.createDraft(POSTER, { definition: definition() })).status, "awaiting_funding");
-  assert.equal((await service.createDraft(OTHER_POSTER, { definition: definition() })).status, "awaiting_funding");
+  assert.equal((await service.createDraft(POSTER, { definition: definition() })).status, "quoted");
+  assert.equal((await service.createDraft(OTHER_POSTER, { definition: definition() })).status, "quoted");
+});
+
+test("escrow-first quote persists only demand, prices the additive fee, and preserves the full worker reward", async () => {
+  const { service, store } = makeService();
+  const quote = await service.createDraft(POSTER, { definition: definition() });
+
+  assert.equal(quote.status, "quoted");
+  assert.equal(quote.persisted, false);
+  assert.equal(await store.getExternalJobDraft(quote.draftId), undefined);
+  assert.deepEqual(quote.fundingRequirement, {
+    asset: "USDC",
+    assetAddress: USDC,
+    decimals: 6,
+    rewardRaw: "1000000",
+    workerReceivesRaw: "1000000",
+    opsReserveRaw: "0",
+    contingencyReserveRaw: "0",
+    protocolFeeRaw: "50000",
+    protocolFeeBps: 500,
+    posterReservedRaw: "1050000",
+    feeSemantics: "poster_additive",
+    source: "live EscrowCore.previewProtocolFee at quote time",
+    expiresWithQuote: true
+  });
+  const signal = await store.getExternalPostingDemandSignal(quote.draftId);
+  assert.equal(signal.decision, "quoted");
+  assert.equal(signal.fundingStatus, "unfunded");
+  assert.equal(signal.quote.jobId, quote.jobId);
+});
+
+test("external definitions cannot opt into the curated operator gas subsidy or onboarding waiver", async () => {
+  const { service, store } = makeService();
+
+  await assert.rejects(
+    service.createDraft(POSTER, { definition: definition({ requiresSponsoredGas: true }) }),
+    (error) => error.code === "external_sponsored_gas_forbidden"
+  );
+  await assert.rejects(
+    service.createDraft(POSTER, { definition: definition({ onboardingWaiverEligible: true }) }),
+    (error) => error.code === "external_onboarding_waiver_forbidden"
+  );
+  assert.deepEqual(
+    (await store.listExternalPostingDemandSignals()).map((entry) => entry.decision),
+    ["validation_rejected", "validation_rejected"]
+  );
+});
+
+test("an unreconciled live fee quote fails closed but still records the demand attempt", async () => {
+  const store = new MemoryStateStore();
+  const { service } = makeService({
+    store,
+    gateway: feeQuoteGateway({ protocolFeeAmountRaw: "1" })
+  });
+
+  await assert.rejects(
+    service.createDraft(POSTER, { definition: definition() }),
+    (error) => error.code === "external_fee_quote_mismatch"
+  );
+  const [signal] = await store.listExternalPostingDemandSignals();
+  assert.equal(signal.decision, "quote_failed");
+  assert.equal(signal.reason, "external_fee_quote_mismatch");
 });
 
 test("external posting config exposes a live poster-review window with a seven-day default", () => {
@@ -106,20 +183,21 @@ test("optional allowlist mode admits only configured wallets without changing th
   const store = new MemoryStateStore();
   const service = new ExternalPostingService({
     stateStore: store,
+    gateway: feeQuoteGateway(),
     config: config({
       EXTERNAL_POSTING_MODE: "allowlist",
       EXTERNAL_POSTING_ALLOWLIST: POSTER
     })
   });
 
-  assert.equal((await service.createDraft(POSTER, { definition: definition() })).status, "awaiting_funding");
+  assert.equal((await service.createDraft(POSTER, { definition: definition() })).status, "quoted");
   await assert.rejects(
     service.createDraft(OTHER_POSTER, { definition: definition() }),
     (error) => error instanceof AuthorizationError && error.code === "external_poster_not_allowed"
   );
   assert.deepEqual(
     (await store.listExternalPostingDemandSignals()).map((entry) => entry.decision),
-    ["accepted", "allowlist_rejected"]
+    ["quoted", "allowlist_rejected"]
   );
 });
 
@@ -131,17 +209,17 @@ test("stored definition deterministically rebuilds jobId, specHash, and calldata
       source: { z: 1e30, a: 0.000001 }
     })
   });
-  const stored = await store.getExternalJobDraft(created.draftId);
+  const stored = (await store.getExternalPostingDemandSignal(created.draftId)).quote;
   const rebuilt = rebuildExternalDraftArtifacts(stored, config());
 
   assert.equal(
     created.jobId,
-    "0xef162a2581b2c288d39230945c5a32ee1d1da49ef73f9d0451347e3ab4b36065",
-    "the wallet + nonce canonical string is a versioned compatibility contract"
+    "0x2252ac6a094fb1885bf61f1d83dc269e871a0ed87b93ca03b4e59fbd4bab8932",
+    "the wallet + content hash canonical string is a versioned compatibility contract"
   );
   assert.equal(
     created.specHash,
-    "0x50d1eec9719d1fd1cb474121d6d2dfad1aee53167f2980c950b8d5cb5a5835d3",
+    "0xde4abc02a2612f6daebff34858cc81710601036d63a8bac09d25c926fe179a7b",
     "RFC 8785 canonicalization drift must fail this compatibility vector"
   );
   assert.equal(rebuilt.jobId, created.jobId);
@@ -174,7 +252,7 @@ test("reward floor rejects 0.99, accepts 1.0, and persists both demand signals",
     definition: definition({ rewardAmount: "1.0" })
   });
 
-  assert.equal(accepted.status, "awaiting_funding");
+  assert.equal(accepted.status, "quoted");
   assert.deepEqual(
     (await store.listExternalPostingDemandSignals()).map((entry) => ({
       decision: entry.decision,
@@ -188,7 +266,7 @@ test("reward floor rejects 0.99, accepts 1.0, and persists both demand signals",
         schema: "schema://jobs/coding-output"
       },
       {
-        decision: "accepted",
+        decision: "quoted",
         requestedReward: "1.0",
         schema: "schema://jobs/coding-output"
       }
@@ -233,6 +311,7 @@ test("a 73-hour-old draft stays expired even if a later reader has a longer conf
   const store = new MemoryStateStore();
   const creator = new ExternalPostingService({
     stateStore: store,
+    gateway: feeQuoteGateway(),
     config: config(),
     now: () => current
   });
@@ -241,6 +320,7 @@ test("a 73-hour-old draft stays expired even if a later reader has a longer conf
   current = new Date("2026-07-23T01:00:00.000Z");
   const reader = new ExternalPostingService({
     stateStore: store,
+    gateway: feeQuoteGateway(),
     config: config({ EXTERNAL_POSTING_DRAFT_TTL_HOURS: "720" }),
     now: () => current
   });
@@ -281,22 +361,26 @@ test("poster draft status reports a live job as delisted after the catalog backs
   assert.equal(draft.txHash, `0x${"f".repeat(64)}`);
 });
 
-test("open drafts are capped per wallet while expired drafts no longer count", async () => {
-  let current = new Date("2026-07-20T00:00:00.000Z");
-  const { service } = makeService({
-    env: { EXTERNAL_POSTING_MAX_OPEN_DRAFTS: "2" },
-    now: () => current
+test("poster-content quotes are idempotent and persist no pre-funding draft", async () => {
+  const { service, store } = makeService({
+    now: () => new Date("2026-07-20T00:00:00.000Z")
   });
 
-  await service.createDraft(POSTER, { definition: definition() });
-  await service.createDraft(POSTER, { definition: definition() });
-  await assert.rejects(
-    service.createDraft(POSTER, { definition: definition() }),
-    (error) => error.code === "external_draft_cap_reached"
-  );
+  const first = await service.createDraft(POSTER, { definition: definition() });
+  const replay = await service.createDraft(POSTER, { definition: definition() });
+  const distinct = await service.createDraft(POSTER, {
+    definition: definition({ input: { task: "A distinct funded task.", acceptanceCriteria: ["It passes."] } })
+  });
 
-  current = new Date("2026-07-24T00:00:00.000Z");
-  assert.equal((await service.createDraft(POSTER, { definition: definition() })).status, "awaiting_funding");
+  assert.equal(replay.draftId, first.draftId);
+  assert.equal(replay.jobId, first.jobId);
+  assert.notEqual(distinct.jobId, first.jobId);
+  assert.equal(await store.getExternalJobDraft(first.draftId), undefined);
+  assert.equal(await store.getExternalJobDraft(distinct.draftId), undefined);
+  const signals = await store.listExternalPostingDemandSignals();
+  assert.equal(signals.length, 2);
+  assert.equal(signals.find((entry) => entry.id === first.draftId).attemptCount, 2);
+  assert.equal(signals.find((entry) => entry.id === first.draftId).fundingStatus, "unfunded");
 });
 
 test("draft persistence cannot change GET /jobs or the discovery manifest", async () => {
@@ -371,7 +455,7 @@ test("admin delist only removes future catalog projection and leaves on-chain st
   assert.equal((await store.getExternalJobDelisting(onChainJob.jobId)).reason, "operator safety backstop");
 });
 
-test("delist cannot slip through while an external claim holds the shared lifecycle lane", async () => {
+test("delist cannot slip through while an external direct-claim recipe holds the shared lifecycle lane", async () => {
   const store = new MemoryStateStore();
   const externalPosting = new ExternalPostingService({ stateStore: store, config: config() });
   const job = {
@@ -408,10 +492,10 @@ test("delist cannot slip through while an external claim holds the shared lifecy
       totalClaimLock: 0
     }),
     ensureClaimStakeLiquidity: async () => {},
-    claimJob: async () => {
+    prepareDirectClaimJob: async () => {
       enterClaim();
       await claimGate;
-      liveState = 2;
+      return { to: ESCROW, data: "0x1234", value: "0" };
     }
   };
   const execution = new JobExecutionService(store, gateway, () => job);
@@ -426,12 +510,16 @@ test("delist cannot slip through while an external claim holds the shared lifecy
     (error) => ({ error })
   );
   releaseClaim();
-  const claimed = await claimPromise;
+  const claimResult = await claimPromise.then(
+    (value) => ({ value }),
+    (error) => ({ error })
+  );
 
   assert.equal(delistAttempt.value, undefined);
   assert.equal(delistAttempt.error?.code, "external_job_transition_in_progress");
   assert.equal(await store.isExternalJobDelisted(job.id), false);
-  assert.equal(claimed.status, "claimed");
+  assert.equal(claimResult.value, undefined);
+  assert.equal(claimResult.error?.code, "external_self_paid_claim_required");
 });
 
 test("claim cannot slip through while delist holds the shared lifecycle lane", async () => {

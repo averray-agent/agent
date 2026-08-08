@@ -340,6 +340,7 @@ test("generateAll: the real transform yields the mainnet essentials", () => {
   assert.match(backend, /^INDEXER_STATUS_URL=http:\/\/mainnet-indexer:42069\/status$/mu);
   assert.match(backend, /^ALERT_ENVIRONMENT=mainnet$/mu);
   assert.match(backend, /^FIRST_EXTERNAL_AGENT_ALERT_ENABLED=true$/mu);
+  assert.match(backend, /^EXTERNAL_POSTING_MODE=open$/mu);
   assert.match(backend, /^TREASURY_POLICY_ADDRESS=0x226F14252A98BD2eA140271647De20132F09AF20$/mu);
   assert.match(backend, /^AGENT_ACCOUNT_ADDRESS=0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57$/mu);
   assert.match(backend, /^XCM_WRAPPER_ADDRESS=0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc$/mu);

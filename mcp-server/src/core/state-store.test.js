@@ -317,50 +317,31 @@ test("bank deposit dispatch evidence survives eviction from the 5,000-record gen
   );
 });
 
-test("MemoryStateStore persists external drafts, monotonic wallet nonces, and demand signals privately", async () => {
+test("MemoryStateStore persists only watcher-materialized external drafts and demand signals privately", async () => {
   const store = new MemoryStateStore();
   const wallet = "0x1111111111111111111111111111111111111111";
-  const firstNonce = await store.nextExternalDraftNonce(wallet);
-  const secondNonce = await store.nextExternalDraftNonce(wallet);
   const draft = {
     draftId: "draft-1",
     wallet,
-    nonce: firstNonce,
     jobId: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     definition: { rewardAmount: "1.0" },
     createdAt: "2026-07-28T00:00:00.000Z",
     expiresAt: "2026-07-31T00:00:00.000Z",
-    status: "awaiting_funding"
+    status: "live",
+    materializedAt: "2026-07-28T01:00:00.000Z"
   };
 
-  assert.equal(firstNonce, "1");
-  assert.equal(secondNonce, "2");
-  assert.equal(await store.createExternalJobDraft(draft, {
-    maxOpenDrafts: 1,
-    activeAfter: "2026-07-25T00:00:00.000Z"
-  }), true);
+  assert.equal(await store.materializeExternalJobDraft(draft), true);
+  assert.equal(await store.materializeExternalJobDraft(draft), false);
   assert.deepEqual(await store.getExternalJobDraft("draft-1"), draft);
   assert.deepEqual(await store.getExternalJobDraftByJobId(draft.jobId), draft);
-  assert.deepEqual(await store.listExternalJobDrafts({ status: "awaiting_funding" }), [draft]);
-  assert.equal(await store.createExternalJobDraft({ ...draft, draftId: "draft-2" }, {
-    maxOpenDrafts: 1,
-    activeAfter: "2026-07-25T00:00:00.000Z"
-  }), false);
+  assert.deepEqual(await store.listExternalJobDrafts({ status: "live" }), [draft]);
 
-  const live = await store.updateExternalJobDraft("draft-1", {
-    status: "live",
-    fundedAt: "2026-07-28T01:00:00.000Z"
+  const delisted = await store.updateExternalJobDraft("draft-1", {
+    status: "delisted"
   });
-  assert.equal(live.status, "live");
-  assert.deepEqual(await store.listExternalJobDrafts({ status: "live" }), [live]);
-  assert.equal(await store.createExternalJobDraft({
-    ...draft,
-    draftId: "draft-2",
-    jobId: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-  }, {
-    maxOpenDrafts: 1,
-    activeAfter: "2026-07-25T00:00:00.000Z"
-  }), true, "live drafts no longer consume the awaiting-funding cap");
+  assert.equal(delisted.status, "delisted");
+  assert.deepEqual(await store.listExternalJobDrafts({ status: "delisted" }), [delisted]);
 
   await store.appendExternalPostingDemandSignal({
     id: "signal-1",
@@ -390,6 +371,30 @@ test("MemoryStateStore external delisting is idempotent projection state", async
   assert.deepEqual(await store.getExternalJobDelisting(jobId), record);
   assert.equal(await store.isExternalJobDelisted(jobId), true);
   assert.equal(await store.isExternalJobDelisted("curated-1"), false);
+});
+
+test("MemoryStateStore indexes escrow-first quote demand and materializes a funded draft atomically", async () => {
+  const store = new MemoryStateStore();
+  const jobId = "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+  const signal = {
+    id: "quote-1",
+    decision: "quoted",
+    attemptCount: 1,
+    fundingStatus: "unfunded",
+    quote: { draftId: "quote-1", jobId, wallet: "0x1111111111111111111111111111111111111111" }
+  };
+
+  await store.appendExternalPostingDemandSignal(signal);
+  assert.deepEqual(await store.getExternalPostingDemandSignal("quote-1"), signal);
+  assert.deepEqual(await store.getExternalPostingQuoteByJobId(jobId), signal);
+  await store.updateExternalPostingDemandSignal("quote-1", { attemptCount: 2 });
+  assert.equal((await store.getExternalPostingDemandSignal("quote-1")).attemptCount, 2);
+  assert.equal((await store.listExternalPostingDemandSignals()).length, 1);
+
+  const materialized = { ...signal.quote, status: "live", persisted: true };
+  assert.equal(await store.materializeExternalJobDraft(materialized), true);
+  assert.equal(await store.materializeExternalJobDraft(materialized), false);
+  assert.deepEqual(await store.getExternalJobDraftByJobId(jobId), materialized);
 });
 
 test("MemoryStateStore service state round-trips and merges", async () => {

@@ -25,7 +25,7 @@ export function createExternalJobRoutes({
       const payload = await readJsonBody(request);
       respond(
         response,
-        201,
+        200,
         await externalPostingService.createDraft(auth.wallet, payload)
       );
       return true;

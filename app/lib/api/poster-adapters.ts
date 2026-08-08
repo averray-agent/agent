@@ -133,6 +133,7 @@ export interface DraftView {
 }
 
 const DRAFT_STATUS_TONE: Record<string, StateTone> = {
+  quoted: "warn",
   awaiting_funding: "warn",
   live: "ok",
   expired: "muted",

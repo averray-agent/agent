@@ -2007,3 +2007,34 @@ test("createIngestedJob propagates creation errors and does not attempt prefund"
   await assert.rejects(() => service.createIngestedJob(INGEST_JOB_INPUT));
   assert.equal(gateway.calls.length, 1);
 });
+
+test("external projections strip sponsored-gas and waiver flags even from legacy material", () => {
+  const service = makePlatformService();
+  const created = service.createExternalJobProjection({
+    jobId: "external-open-door-projection",
+    wallet: WALLET,
+    definition: {
+      category: "coding",
+      tier: "starter",
+      rewardAsset: "DOT",
+      rewardAmount: 5,
+      verifierMode: "benchmark",
+      verifierTerms: ["complete"],
+      verifierMinimumMatches: 1,
+      inputSchemaRef: "schema://jobs/coding-input",
+      outputSchemaRef: "schema://jobs/coding-output",
+      claimTtlSeconds: 3600,
+      retryLimit: 1,
+      requiresSponsoredGas: true,
+      onboardingWaiverEligible: true
+    }
+  }, {
+    fundedAt: "2026-08-08T10:00:00.000Z",
+    txHash: `0x${"ab".repeat(32)}`,
+    blockNumber: "19150000"
+  });
+
+  assert.equal(created.source.type, "external");
+  assert.equal(created.requiresSponsoredGas, false);
+  assert.notEqual(created.onboardingWaiverEligible, true);
+});

@@ -248,6 +248,11 @@ export class PlatformService {
     const declaredSource = draft.definition?.source;
     const created = this.createJob({
       ...draft.definition,
+      // External volume is poster-funded business, not curated onboarding
+      // inventory. Keep this enforcement at projection time as a second gate
+      // even when a legacy or hand-built quote carries unsafe flags.
+      requiresSponsoredGas: false,
+      onboardingWaiverEligible: false,
       id: draft.jobId,
       source: {
         type: "external",

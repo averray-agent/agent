@@ -38,7 +38,8 @@ function makeHarness(overrides = {}) {
           draftId: DRAFT_ID,
           jobId: JOB_ID,
           specHash: JOB_ID,
-          status: "awaiting_funding"
+          status: "quoted",
+          persisted: false
         };
       },
       getDraft: async (wallet, draftId) => {
@@ -49,8 +50,9 @@ function makeHarness(overrides = {}) {
         return {
           draftId,
           jobId: JOB_ID,
-          status: "awaiting_funding",
-          note: "funding detection ships with the watcher"
+          status: "quoted",
+          persisted: false,
+          note: "funding detection runs in the watcher"
         };
       },
       delistExternalJob: async (jobId, payload) => {
@@ -83,12 +85,14 @@ async function invoke(route, { method = "GET", path, response = {} }) {
   });
 }
 
-test("POST /jobs/draft authenticates any SIWE wallet and returns the signing template", async () => {
+test("POST /jobs/draft authenticates any SIWE wallet and returns a non-persisted quote", async () => {
   const { calls, response, route } = makeHarness();
 
   assert.equal(await invoke(route, { method: "POST", path: "/jobs/draft", response }), true);
-  assert.equal(response.statusCode, 201);
+  assert.equal(response.statusCode, 200);
   assert.equal(response.body.draftId, DRAFT_ID);
+  assert.equal(response.body.status, "quoted");
+  assert.equal(response.body.persisted, false);
   assert.deepEqual(calls.filter(([name]) => name !== "respond"), [
     ["authMiddleware", undefined],
     ["enforceLimit", {
@@ -101,13 +105,14 @@ test("POST /jobs/draft authenticates any SIWE wallet and returns the signing tem
   ]);
 });
 
-test("GET /jobs/draft/:id is poster-owned and stays honest before the watcher ships", async () => {
+test("GET /jobs/draft/:id is poster-owned and reports the unfunded quote honestly", async () => {
   const { calls, response, route } = makeHarness();
 
   assert.equal(await invoke(route, { path: `/jobs/draft/${DRAFT_ID}`, response }), true);
   assert.equal(response.statusCode, 200);
-  assert.equal(response.body.status, "awaiting_funding");
-  assert.equal(response.body.note, "funding detection ships with the watcher");
+  assert.equal(response.body.status, "quoted");
+  assert.equal(response.body.persisted, false);
+  assert.equal(response.body.note, "funding detection runs in the watcher");
   assert.deepEqual(calls.filter(([name]) => name !== "respond"), [
     ["authMiddleware", undefined],
     ["enforceLimit", {

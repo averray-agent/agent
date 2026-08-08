@@ -1125,6 +1125,20 @@ export class BlockchainGateway {
     });
   }
 
+  async prepareDirectClaimJob(jobId) {
+    return this.withGatewayError("prepareDirectClaimJob", async () => {
+      const live = await this.readEscrowJob(jobId);
+      const escrowContract = this.escrowContractForLiveJob(live);
+      return {
+        to: live.escrowAddress,
+        value: "0",
+        function: "claimJob(bytes32)",
+        args: [this.toJobId(jobId)],
+        data: escrowContract.interface.encodeFunctionData("claimJob", [this.toJobId(jobId)])
+      };
+    });
+  }
+
   async handleClaimTimeout(jobId) {
     return this.withGatewayError("handleClaimTimeout", async () => {
       this.requireSigner("handleClaimTimeout");
@@ -1295,6 +1309,34 @@ export class BlockchainGateway {
         ? await escrowContract.submitWorkFor(chainJobId, worker, evidenceHash)
         : await escrowContract.submitWork(chainJobId, evidenceHash);
       await tx.wait();
+    });
+  }
+
+  async prepareDirectSubmitWork(jobId, evidence) {
+    return this.withGatewayError("prepareDirectSubmitWork", async () => {
+      const live = await this.readEscrowJob(jobId);
+      const escrowContract = this.escrowContractForLiveJob(live);
+      const evidenceHash = typeof evidence === "string" && /^0x[a-fA-F0-9]{64}$/u.test(evidence)
+        ? evidence
+        : hashCanonicalContent(evidence);
+      return {
+        to: live.escrowAddress,
+        value: "0",
+        function: "submitWork(bytes32,bytes32)",
+        args: [this.toJobId(jobId), evidenceHash],
+        data: escrowContract.interface.encodeFunctionData(
+          "submitWork",
+          [this.toJobId(jobId), evidenceHash]
+        )
+      };
+    });
+  }
+
+  async getLatestEvidence(jobId) {
+    return this.withGatewayError("getLatestEvidence", async () => {
+      const live = await this.readEscrowJob(jobId);
+      const escrowContract = this.escrowContractForLiveJob(live);
+      return String(await escrowContract.latestEvidence(this.toJobId(jobId))).toLowerCase();
     });
   }
 
