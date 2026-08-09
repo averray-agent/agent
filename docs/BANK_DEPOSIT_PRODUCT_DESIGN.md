@@ -150,15 +150,68 @@ so the ramp can read it and refuse new x402 postings when exhausted.
 Until law 6 is enforced on chain, Track 1 takes a configured cap and degrades to "no new
 x402 posts" with a stated reason. That degradation is correct behaviour, not a stopgap.
 
-## Open, and genuinely undecided
+## DECIDED 2026-08-09 — withdrawal terms and the launch reserve
 
-1. **The reserve ratio itself** — what fraction must be backed by clocks we control. A
-   number nobody has proposed yet, and it should be argued from the withdrawal profile we
-   observe, not picked.
-2. **The contract mechanism for opting in.** New position field, separate pool contract, or
+**Withdrawal: the agent chooses a tier.** Instant access with little or no yield, or
+locked/notice with better yield. The agent prices its own liquidity preference. This makes
+the reserve a *consequence* of what agents choose rather than a number we guessed.
+
+**Reserve at launch: 100%, lowered only against evidence.** No lending against deposits
+until a real withdrawal profile exists. It costs nothing at current size — treasury ~10.9
+USDC, zero deposits — and every later relaxation is argued from data instead of optimism.
+
+### Why the classic banking answer does not transfer
+
+A human bank run is slow: people notice, panic, queue. **An agent run is fast and
+correlated.** Fifty agents running similar monitoring logic withdraw on the same signal
+within the same second — not from panic but because they are programmed to. The usual
+"depositors never all withdraw at once" assumption is *weaker* here, not stronger, and we
+should not assume there is time to react.
+
+### 100% reserve does not mean idle
+
+This is the implication most likely to be lost. **Aave deployment is a clock we control**,
+so deployed funds still count toward the reserve. Only *credit* is excluded, because only
+credit hands the clock to a counterparty (law 6).
+
+So at launch:
+
+| tier | backing | where the yield comes from |
+|---|---|---|
+| instant | liquid or very-short-clock deployment | little to none |
+| locked / notice | Aave-deployed, still **100% backed** | the notice period permits longer deployment |
+| credit (rungs 3–4) | **operator capital only** | not funded from deposits until relaxation |
+
+The locked tier therefore exists from day one *without leverage*. That is not pointless:
+it establishes the mechanism and it starts generating the withdrawal profile the
+relaxation depends on. Advances and borrowing stay funded from operator capital, which
+caps their size to our own treasury — honest, and small.
+
+### The relaxation trigger, defined in advance
+
+"Lower with evidence" degrades into "lower when someone feels like it" unless the exit
+condition is written before it is wanted. Per the standing rule: **an upgrade needs an exit
+condition, not a vibe.**
+
+Before any reduction below 100%, all of these must hold:
+
+1. A stated minimum observation window with a stated minimum number of distinct depositors
+   — both fixed *before* the window opens, not after.
+2. A measured **peak 24-hour withdrawal as a share of total deposits**, taken from real
+   behaviour rather than survey or assumption.
+3. The first step set at `100% − (observed peak × safety factor)`, never below a stated
+   floor, and **one step at a time** with a fresh window between steps.
+4. The reduction enforced in contract, not policy, before it takes effect.
+
+If the observation window produces no withdrawals at all, that is not evidence of safety —
+it is absence of data, and the ratio stays where it is.
+
+## Still open
+
+1. **The contract mechanism for opting in.** New position field, separate pool contract, or
    something else. AAC-successor window.
-3. **Whether advances are priced per-agent or flat.** Per-agent is better economics and
+2. **Whether advances are priced per-agent or flat.** Per-agent is better economics and
    needs reputation to be trustworthy first.
-4. **Withdrawal terms for opted-in balances** — instant, notice period, or gated by the
-   reserve. This is the run-risk lever and it should be chosen deliberately, before the pot
-   is large enough for the choice to matter.
+3. **The specific numbers in the relaxation trigger** — window length, depositor count,
+   safety factor, floor. Deliberately unset here: they should be chosen when the tier
+   mechanism ships, by someone looking at the actual deposit book.
