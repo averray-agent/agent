@@ -98,6 +98,11 @@ import {
   ExternalPostingService,
   resolveExternalPostingConfig
 } from "../core/external-posting-service.js";
+import { createConfiguredSettlementAdapter } from "../payments/adapters/index.js";
+import {
+  resolveX402PosterRampConfig,
+  X402PosterRampService
+} from "../payments/x402-poster-ramp.js";
 import { PosterReviewService } from "../core/poster-review-service.js";
 import {
   ExternalPostingWatcherService,
@@ -343,6 +348,20 @@ export async function createPlatformRuntime() {
       eventBus
     })
   );
+  const x402PosterRampConfig = initStep(
+    "load-x402-poster-ramp-config",
+    logger,
+    () => resolveX402PosterRampConfig(process.env)
+  );
+  const x402PosterRamp = x402PosterRampConfig.enabled
+    ? initStep("init-x402-poster-ramp", logger, () => new X402PosterRampService({
+        config: x402PosterRampConfig,
+        settlementAdapter: createConfiguredSettlementAdapter(process.env),
+        externalPostingService,
+        stateStore,
+        gateway
+      }))
+    : undefined;
   const posterReviewService = initStep("init-poster-review-service", logger, () =>
     new PosterReviewService({
       platformService,
@@ -622,6 +641,7 @@ export async function createPlatformRuntime() {
     policyService,
     verifierService,
     externalPostingService,
+    x402PosterRamp,
     externalPostingWatcher,
     posterReviewService,
     externalPosterReviewEscalator,
@@ -769,8 +789,8 @@ export function loadHttpConfig(env = process.env) {
     allowedOrigins: new Set(allowedOrigins),
     allowAllOrigins,
     allowedMethods: "GET, POST, OPTIONS",
-    allowedHeaders: "authorization, content-type, last-event-id, mcp-method, mcp-name, mcp-protocol-version, mcp-session-id, x-request-id",
-    exposedHeaders: "mcp-protocol-version, mcp-session-id, x-request-id, retry-after",
+    allowedHeaders: "authorization, content-type, last-event-id, mcp-method, mcp-name, mcp-protocol-version, mcp-session-id, payment-signature, sign-in-with-x, x-payment, x-request-id",
+    exposedHeaders: "mcp-protocol-version, mcp-session-id, payment-required, payment-response, retry-after, x-payment-required, x-payment-response, x-request-id",
     maxAgeSeconds: parsePositiveInt(env.CORS_MAX_AGE_SECONDS, 600)
   };
 }

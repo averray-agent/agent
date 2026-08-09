@@ -101,6 +101,7 @@ export class MemoryStateStore {
     this.externalPostingDemandSignals = [];
     this.externalPostingQuoteJobIndex = new Map();
     this.externalJobDelistings = new Map();
+    this.externalPaymentFundings = new Map();
   }
 
   // ── policy proposals (Package G) ──────────────────────────────────
@@ -462,6 +463,26 @@ export class MemoryStateStore {
 
   async listExternalPostingDemandSignals({ limit = 10_000, offset = 0 } = {}) {
     return this.externalPostingDemandSignals
+      .slice(offset, offset + limit)
+      .map((entry) => cloneJsonRecord(entry));
+  }
+
+  async upsertExternalPaymentFunding(record) {
+    const id = normalizeExternalPaymentFundingId(record?.id);
+    const stored = cloneJsonRecord({ ...record, id });
+    this.externalPaymentFundings.set(id, stored);
+    return cloneJsonRecord(stored);
+  }
+
+  async getExternalPaymentFunding(id) {
+    return cloneJsonRecord(
+      this.externalPaymentFundings.get(normalizeExternalPaymentFundingId(id))
+    );
+  }
+
+  async listExternalPaymentFundings({ limit = 10_000, offset = 0 } = {}) {
+    return [...this.externalPaymentFundings.values()]
+      .sort((left, right) => String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? "")))
       .slice(offset, offset + limit)
       .map((entry) => cloneJsonRecord(entry));
   }
@@ -1194,6 +1215,43 @@ export class RedisStateStore {
     return records.filter(Boolean);
   }
 
+  async upsertExternalPaymentFunding(record) {
+    await this.connect();
+    const id = normalizeExternalPaymentFundingId(record?.id);
+    const stored = { ...record, id };
+    await this.client.multi()
+      .set(this.key("external-payment-funding", id), JSON.stringify(stored))
+      .zAdd(this.key("external-payment-funding", "all"), {
+        // Creation order is stable across status updates, so paginated float
+        // accounting cannot skip or double-count a record while it settles.
+        score: timestampScore(stored.createdAt ?? ""),
+        value: id
+      })
+      .exec();
+    return stored;
+  }
+
+  async getExternalPaymentFunding(id) {
+    await this.connect();
+    const raw = await this.client.get(this.key(
+      "external-payment-funding",
+      normalizeExternalPaymentFundingId(id)
+    ));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async listExternalPaymentFundings({ limit = 10_000, offset = 0 } = {}) {
+    await this.connect();
+    const { start, stop } = redisRangeFromLimitOffset(limit, offset);
+    const ids = await this.client.zRange(
+      this.key("external-payment-funding", "all"),
+      start,
+      stop
+    );
+    const records = await Promise.all(ids.map((id) => this.getExternalPaymentFunding(id)));
+    return records.filter(Boolean);
+  }
+
   async upsertExternalJobDelisting(record) {
     await this.connect();
     const jobId = normalizeExternalJobId(record?.jobId);
@@ -1622,6 +1680,16 @@ function cloneAccountOverlay(overlay) {
 
 function normalizeExternalJobId(jobId) {
   return String(jobId ?? "").trim().toLowerCase();
+}
+
+function normalizeExternalPaymentFundingId(value) {
+  const id = String(value ?? "").trim().toLowerCase();
+  if (!/^0x[a-f0-9]{64}$/u.test(id)) {
+    throw new ExternalServiceError(
+      "External payment funding id must be a 32-byte value."
+    );
+  }
+  return id;
 }
 
 const SIWE_AUTH_EVENTS = new Set(["nonce_issued", "verify_succeeded"]);

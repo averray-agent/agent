@@ -287,6 +287,148 @@
         }
       }
     },
+    "/jobs/x402": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "operationId": "postJobWithX402",
+        "summary": "Fund and publish a job through x402 on Base",
+        "description": "Send the desired external job definition. The first request returns a portable Bazaar-enabled 402 challenge with exact payment requirements and SIGN-IN-WITH-X data. Retry the same body with PAYMENT-SIGNATURE (or X-PAYMENT) and SIGN-IN-WITH-X. Averray verifies without moving money, fronts Hub escrow from its configured pooled account, then settles on Base. No per-job bridge is used.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "PAYMENT-SIGNATURE",
+            "in": "header",
+            "required": false,
+            "description": "Base64-encoded x402 v2 payment payload. X-PAYMENT is accepted as a compatibility alias.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "SIGN-IN-WITH-X",
+            "in": "header",
+            "required": false,
+            "description": "Base64-encoded signed EIP-4361 challenge from the preceding 402 response. Required when a payment header is supplied.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "definition"
+                ],
+                "properties": {
+                  "definition": {
+                    "type": "object",
+                    "description": "Single-payout external job definition accepted by the existing posting policy.",
+                    "additionalProperties": true
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Base payment settled and the Hub escrow-funded job is live.",
+            "headers": {
+              "PAYMENT-RESPONSE": {
+                "description": "Base64-encoded normalized settlement receipt.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment and SIGN-IN-WITH-X challenge, or an actionable payment-verification rejection. Verification moves no money.",
+            "headers": {
+              "PAYMENT-REQUIRED": {
+                "description": "Base64-encoded x402 v2 challenge; X-PAYMENT-REQUIRED is also emitted.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid job, payment, or SIGN-IN-WITH-X shape. The response states how to correct it and whether funds moved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The job or payment authorization conflicts with durable state. The response names the safe next action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit reached. Retry-After says when to request a fresh challenge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Hub creation, settlement, or publication failed. Details state the payment outcome, job visibility, owner of any loss, and next action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "x402 is disabled or configured pooled float is exhausted. Exhaustion includes Retry-After and the exact retry time.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/jobs": {
       "get": {
         "tags": [

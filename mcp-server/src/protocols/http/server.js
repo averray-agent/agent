@@ -74,6 +74,7 @@ const {
   policyService,
   verifierService,
   externalPostingService,
+  x402PosterRamp,
   externalPostingWatcher,
   posterReviewService,
   bankLaneFeed,
@@ -523,9 +524,11 @@ const handleExternalJobRoute = createExternalJobRoutes({
   authMiddleware,
   enforceLimit,
   externalPostingService,
+  x402PosterRamp,
   rateLimitConfig,
   readJsonBody,
   respond,
+  trustProxy,
 });
 
 const handlePosterReviewRoute = createPosterReviewRoutes({
@@ -923,7 +926,7 @@ const server = createServer(async (request, response) => {
     const normalized = normalizeError(error);
     const extraHeaders = { "x-request-id": requestId };
     const retryAfter = normalized.details?.retryAfterSeconds;
-    if (normalized.statusCode === 429 && Number.isFinite(retryAfter)) {
+    if (Number.isFinite(retryAfter)) {
       extraHeaders["retry-after"] = String(Math.max(1, Math.ceil(retryAfter)));
     }
     const logLevel = (normalized.statusCode ?? 500) >= 500 ? "error" : "warn";

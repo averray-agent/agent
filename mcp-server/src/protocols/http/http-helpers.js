@@ -142,6 +142,7 @@ export function metricPathLabel(pathname) {
     "/onboarding",
     "/monitor/bank-feed",
     "/jobs",
+    "/jobs/x402",
     "/jobs/definition",
     "/jobs/recommendations",
     "/jobs/preflight",

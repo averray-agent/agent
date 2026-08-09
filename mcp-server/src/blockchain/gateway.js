@@ -46,6 +46,7 @@ import { redactProviderError } from "../core/redact-provider-error.js";
 import {
   BlockchainRevertError,
   ConfigError,
+  ConflictError,
   ExternalServiceError,
   InsufficientLiquidityError,
   NotFoundError,
@@ -122,6 +123,14 @@ function summarizeAssetPosition(position, asset, toDisplayUnits, toRawString) {
 
 function canAutoMintAsset(asset) {
   return (asset?.assetClass ?? "custom") === "custom";
+}
+
+function exactUint(value, label) {
+  const normalized = String(value ?? "").trim();
+  if (!/^\d+$/u.test(normalized)) {
+    throw new ValidationError(`${label} must be an exact unsigned integer.`);
+  }
+  return BigInt(normalized);
 }
 
 export class BlockchainGateway {
@@ -1249,6 +1258,120 @@ export class BlockchainGateway {
         live.escrowAddress
       );
       return this.getJob(instanceJobId);
+    });
+  }
+
+  async getPooledFundingAccount() {
+    return this.withGatewayError("getPooledFundingAccount", async () => {
+      this.requireSigner("getPooledFundingAccount");
+      return String(await this.signer.getAddress()).toLowerCase();
+    });
+  }
+
+  async createEscrowFundedExternalJob(draft) {
+    return this.withGatewayError("createEscrowFundedExternalJob", async () => {
+      this.requireSigner("createEscrowFundedExternalJob");
+      const args = Array.isArray(draft?.calldata?.args) ? draft.calldata.args : [];
+      if (args.length !== 9 || String(args[0]).toLowerCase() !== String(draft?.jobId).toLowerCase()) {
+        throw new ValidationError(
+          "Escrow-funded external job requires the deterministic nine-field creation recipe."
+        );
+      }
+      const asset = this.requireAsset(draft?.definition?.rewardAsset ?? "USDC");
+      if (String(args[1]).toLowerCase() !== asset.address.toLowerCase()) {
+        throw new ValidationError("Escrow-funded external job asset does not match the configured Hub asset.");
+      }
+      const live = await this.readEscrowJob(draft.jobId);
+      if (Number(live.state) !== 0) {
+        throw new ConflictError(
+          "The deterministic Hub escrow job already exists. No payment was settled; request a fresh posting definition.",
+          "external_escrow_job_exists",
+          { jobId: draft.jobId, action: "change_definition_and_retry", posterFunds: "unchanged" }
+        );
+      }
+
+      const rewardRaw = exactUint(args[2], "external reward");
+      const opsReserveRaw = exactUint(args[3], "external ops reserve");
+      const contingencyReserveRaw = exactUint(args[4], "external contingency reserve");
+      const escrowContract = this.escrowContractForLiveJob(live);
+      if (typeof escrowContract?.previewProtocolFee !== "function") {
+        throw new ExternalServiceError(
+          "Hub escrow cannot quote the current protocol fee. No payment was settled; wait for the Hub service to recover and retry.",
+          "external_escrow_fee_unavailable",
+          { action: "retry_when_hub_healthy", posterFunds: "unchanged" }
+        );
+      }
+      const protocolFeeRaw = BigInt(await escrowContract.previewProtocolFee(rewardRaw));
+      const requiredRaw = rewardRaw + opsReserveRaw + contingencyReserveRaw + protocolFeeRaw;
+      const quotedRequiredRaw = exactUint(
+        draft?.fundingRequirement?.posterReservedRaw,
+        "quoted external reserve"
+      );
+      if (requiredRaw !== quotedRequiredRaw) {
+        throw new ConflictError(
+          "The live Hub protocol fee changed after the 402 quote. No payment was settled; request a fresh 402 response before retrying.",
+          "external_escrow_quote_expired",
+          {
+            action: "retry_for_fresh_quote",
+            posterFunds: "unchanged",
+            quotedRaw: quotedRequiredRaw.toString(),
+            currentRaw: requiredRaw.toString()
+          }
+        );
+      }
+
+      const pooledAccount = String(await this.signer.getAddress()).toLowerCase();
+      const position = await this.accountContract.positions(pooledAccount, asset.address);
+      const availableRaw = BigInt(position.liquid ?? 0);
+      if (availableRaw < requiredRaw) {
+        throw new InsufficientLiquidityError(asset.symbol, {
+          reason: "x402_pooled_float_shortfall",
+          requiredRaw: requiredRaw.toString(),
+          availableRaw: availableRaw.toString(),
+          shortfallRaw: (requiredRaw - availableRaw).toString(),
+          account: pooledAccount,
+          action: "retry_after_float_rebalance",
+          posterFunds: "unchanged"
+        });
+      }
+
+      const tx = await this.createSinglePayoutJobForJob(
+        { ...draft.definition, id: draft.jobId },
+        live.contractLayout,
+        String(args[0]),
+        asset.address,
+        rewardRaw,
+        opsReserveRaw,
+        contingencyReserveRaw,
+        Number(args[5]),
+        String(args[6]),
+        String(args[7]),
+        String(args[8])
+      );
+      const receipt = await tx.wait();
+      let fundedAt = new Date().toISOString();
+      try {
+        const block = await this.provider.getBlock(receipt.blockNumber);
+        if (Number.isSafeInteger(Number(block?.timestamp))) {
+          fundedAt = new Date(Number(block.timestamp) * 1000).toISOString();
+        }
+      } catch {
+        // The receipt still proves finalized creation; wall time is an honest
+        // fallback if the follow-up block timestamp read is unavailable.
+      }
+      return {
+        jobId: String(args[0]).toLowerCase(),
+        specHash: String(args[8]).toLowerCase(),
+        poster: pooledAccount,
+        asset: asset.address.toLowerCase(),
+        reward: rewardRaw.toString(),
+        opsReserve: opsReserveRaw.toString(),
+        contingencyReserve: contingencyReserveRaw.toString(),
+        fundedAt,
+        txHash: String(tx.hash).toLowerCase(),
+        blockNumber: String(receipt.blockNumber),
+        finalized: true
+      };
     });
   }
 
