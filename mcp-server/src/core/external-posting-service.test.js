@@ -45,6 +45,7 @@ function config(overrides = {}) {
   return resolveExternalPostingConfig({
     EXTERNAL_POSTING_MODE: "open",
     EXTERNAL_POSTING_MIN_REWARD_USDC: "1",
+    EXTERNAL_POSTING_MAX_REWARD_USDC: "10000",
     EXTERNAL_POSTING_DRAFT_TTL_HOURS: "72",
     ESCROW_CORE_ADDRESS: ESCROW,
     SUPPORTED_ASSETS_JSON: JSON.stringify([
@@ -179,6 +180,22 @@ test("external posting config exposes a live poster-review window with a seven-d
   assert.equal(config({ EXTERNAL_POSTING_REVIEW_WINDOW_HOURS: "48" }).reviewWindowHours, 48);
 });
 
+test("external posting config exposes and validates its explicit reward ceiling", () => {
+  assert.equal(config().maxRewardUsdc, "10000");
+  assert.equal(config().maxRewardRaw, 10_000_000_000n);
+  assert.equal(
+    config({ EXTERNAL_POSTING_MAX_REWARD_USDC: "25000" }).maxRewardUsdc,
+    "25000"
+  );
+  assert.throws(
+    () => config({
+      EXTERNAL_POSTING_MIN_REWARD_USDC: "2",
+      EXTERNAL_POSTING_MAX_REWARD_USDC: "1"
+    }),
+    /must be greater than or equal to EXTERNAL_POSTING_MIN_REWARD_USDC/u
+  );
+});
+
 test("optional allowlist mode admits only configured wallets without changing the closed default", async () => {
   const store = new MemoryStateStore();
   const service = new ExternalPostingService({
@@ -272,6 +289,42 @@ test("reward floor rejects 0.99, accepts 1.0, and persists both demand signals",
       }
     ]
   );
+});
+
+test("reward ceiling rejects the adversarial impossible quote with the named rule and value", async () => {
+  const { service, store } = makeService();
+
+  await assert.rejects(
+    service.createDraft(POSTER, {
+      definition: definition({ rewardAmount: "1000000000" })
+    }),
+    (error) => error instanceof ValidationError
+      && error.code === "external_reward_above_ceiling"
+      && error.details?.maximumRewardUsdc === "10000"
+      && error.details?.requestedReward === "1000000000"
+  );
+  const [signal] = await store.listExternalPostingDemandSignals();
+  assert.equal(signal.decision, "ceiling_rejected");
+  assert.equal(signal.requestedReward, "1000000000");
+});
+
+test("invalid reward shape names the rule and echoes the rejected value", async () => {
+  const { service, store } = makeService();
+
+  await assert.rejects(
+    service.createDraft(POSTER, {
+      definition: definition({ rewardAmount: "-1" })
+    }),
+    (error) => error instanceof ValidationError
+      && error.code === "external_reward_invalid_shape"
+      && error.details?.rule === "unsigned_decimal_with_asset_precision"
+      && error.details?.asset === "USDC"
+      && error.details?.maximumDecimalPlaces === 6
+      && error.details?.requestedReward === "-1"
+  );
+  const [signal] = await store.listExternalPostingDemandSignals();
+  assert.equal(signal.decision, "validation_rejected");
+  assert.equal(signal.requestedReward, "-1");
 });
 
 test("draft creation rejects a zero claim TTL with a named external-door error", async () => {

@@ -33,6 +33,7 @@ export const CREATE_SINGLE_PAYOUT_SIGNATURE =
 export const EXTERNAL_QUOTE_IDENTITY_VERSION = "poster_content_v2";
 
 const DEFAULT_MIN_REWARD_USDC = "1";
+const DEFAULT_MAX_REWARD_USDC = "10000";
 const DEFAULT_DRAFT_TTL_HOURS = 72;
 export const DEFAULT_POSTER_REVIEW_WINDOW_HOURS = 7 * 24;
 export const MIN_EXTERNAL_CLAIM_TTL_SECONDS = 60;
@@ -71,6 +72,24 @@ export function resolveExternalPostingConfig(env = process.env) {
   if (minRewardRaw <= 0n) {
     throw new ConfigError("EXTERNAL_POSTING_MIN_REWARD_USDC must be greater than zero.");
   }
+  const maxRewardUsdc = String(
+    env.EXTERNAL_POSTING_MAX_REWARD_USDC ?? DEFAULT_MAX_REWARD_USDC
+  ).trim();
+  let maxRewardRaw;
+  try {
+    maxRewardRaw = decimalToBaseUnits(
+      maxRewardUsdc,
+      USDC_DECIMALS,
+      "EXTERNAL_POSTING_MAX_REWARD_USDC"
+    );
+  } catch (error) {
+    throw new ConfigError(error.message);
+  }
+  if (maxRewardRaw < minRewardRaw) {
+    throw new ConfigError(
+      "EXTERNAL_POSTING_MAX_REWARD_USDC must be greater than or equal to EXTERNAL_POSTING_MIN_REWARD_USDC."
+    );
+  }
 
   const draftTtlHours = parsePositiveInteger(
     env.EXTERNAL_POSTING_DRAFT_TTL_HOURS,
@@ -102,6 +121,8 @@ export function resolveExternalPostingConfig(env = process.env) {
     allowlist,
     minRewardUsdc,
     minRewardRaw,
+    maxRewardUsdc,
+    maxRewardRaw,
     draftTtlHours,
     reviewWindowHours,
     escrowCoreAddress,
@@ -228,9 +249,11 @@ export class ExternalPostingService {
         ...demand,
         decision: error?.code === "external_reward_below_floor"
           ? "floor_rejected"
-          : error?.code === "external_schema_not_supported"
-            ? "schema_rejected"
-            : "validation_rejected",
+          : error?.code === "external_reward_above_ceiling"
+            ? "ceiling_rejected"
+            : error?.code === "external_schema_not_supported"
+              ? "schema_rejected"
+              : "validation_rejected",
         attemptedAt: now.toISOString()
       });
       throw error;
@@ -741,7 +764,16 @@ function validateExternalJobDefinition(candidate, config) {
       "rewardAmount"
     );
   } catch (error) {
-    throw new ValidationError(error.message);
+    throw externalValidationError(
+      `External job reward must be an unsigned decimal USDC amount with no more than ${config.usdcAsset.decimals} decimal places.`,
+      "external_reward_invalid_shape",
+      {
+        rule: "unsigned_decimal_with_asset_precision",
+        asset: config.usdcAsset.symbol,
+        maximumDecimalPlaces: config.usdcAsset.decimals,
+        requestedReward: String(definition.rewardAmount ?? "")
+      }
+    );
   }
   if (rewardRaw < config.minRewardRaw) {
     throw externalValidationError(
@@ -749,6 +781,16 @@ function validateExternalJobDefinition(candidate, config) {
       "external_reward_below_floor",
       {
         minimumRewardUsdc: config.minRewardUsdc,
+        requestedReward: String(definition.rewardAmount ?? "")
+      }
+    );
+  }
+  if (rewardRaw > config.maxRewardRaw) {
+    throw externalValidationError(
+      `External job reward must be no more than ${config.maxRewardUsdc} USDC.`,
+      "external_reward_above_ceiling",
+      {
+        maximumRewardUsdc: config.maxRewardUsdc,
         requestedReward: String(definition.rewardAmount ?? "")
       }
     );
