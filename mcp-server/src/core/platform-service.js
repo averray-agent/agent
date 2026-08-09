@@ -257,6 +257,7 @@ export class PlatformService {
       source: {
         type: "external",
         poster,
+        fundingRail: draft.fundingRail ?? "direct_hub",
         ...(declaredSource ? { declared: declaredSource } : {})
       },
       lifecycle: {
@@ -268,7 +269,8 @@ export class PlatformService {
 
     created.poster = poster;
     created.funding = {
-      source: "external_escrow",
+      source: draft.fundingRail === "x402" ? "external_x402" : "external_escrow",
+      rail: draft.fundingRail ?? "direct_hub",
       state: "funded",
       asset: created.rewardAsset,
       amount: created.rewardAmount,

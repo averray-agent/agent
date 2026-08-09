@@ -120,6 +120,7 @@ test("escrow-first quote persists only demand, prices the additive fee, and pres
 
   assert.equal(quote.status, "quoted");
   assert.equal(quote.persisted, false);
+  assert.equal(quote.fundingRail, "direct_hub");
   assert.equal(await store.getExternalJobDraft(quote.draftId), undefined);
   assert.deepEqual(quote.fundingRequirement, {
     asset: "USDC",
@@ -138,6 +139,7 @@ test("escrow-first quote persists only demand, prices the additive fee, and pres
   });
   const signal = await store.getExternalPostingDemandSignal(quote.draftId);
   assert.equal(signal.decision, "quoted");
+  assert.equal(signal.fundingRail, "direct_hub");
   assert.equal(signal.fundingStatus, "unfunded");
   assert.equal(signal.quote.jobId, quote.jobId);
 });

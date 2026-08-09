@@ -31,6 +31,10 @@ export const EXTERNAL_POSTING_MODES = new Set(["closed", "allowlist", "open"]);
 export const CREATE_SINGLE_PAYOUT_SIGNATURE =
   "createSinglePayoutJob(bytes32,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32)";
 export const EXTERNAL_QUOTE_IDENTITY_VERSION = "poster_content_v2";
+export const EXTERNAL_FUNDING_RAILS = Object.freeze({
+  DIRECT_HUB: "direct_hub",
+  X402: "x402"
+});
 
 const DEFAULT_MIN_REWARD_USDC = "1";
 const DEFAULT_MAX_REWARD_USDC = "10000";
@@ -209,8 +213,27 @@ export class ExternalPostingService {
     this.eventBus = eventBus;
   }
 
-  async createDraft(walletInput, payload) {
+  async previewFundingRequirement(payload) {
+    if (this.config.mode === "closed") {
+      throw new AuthorizationError(
+        "External posting is closed. No payment was requested; check platform status before retrying.",
+        "external_posting_closed",
+        { action: "check_platform_status", posterFunds: "unchanged" }
+      );
+    }
+    const candidate = extractDefinitionCandidate(payload);
+    const definition = validateExternalJobDefinition(candidate, this.config);
+    return {
+      definition,
+      specHash: hashCanonicalContent(definition),
+      fundingRequirement: await this.buildFundingRequirement(definition)
+    };
+  }
+
+  async createDraft(walletInput, payload, options = {}) {
     const wallet = normalizeWallet(walletInput);
+    const fundingRail = normalizeFundingRail(options.fundingRail);
+    const escrowPoster = normalizeWallet(options.escrowPoster ?? wallet);
     const candidate = extractDefinitionCandidate(payload);
     const demand = extractDemandSignalFields(candidate);
     const now = this.currentTime();
@@ -219,6 +242,7 @@ export class ExternalPostingService {
       await this.recordDemandSignal({
         wallet,
         ...demand,
+        fundingRail,
         decision: "mode_closed",
         attemptedAt: now.toISOString()
       });
@@ -231,6 +255,7 @@ export class ExternalPostingService {
       await this.recordDemandSignal({
         wallet,
         ...demand,
+        fundingRail,
         decision: "allowlist_rejected",
         attemptedAt: now.toISOString()
       });
@@ -247,6 +272,7 @@ export class ExternalPostingService {
       await this.recordDemandSignal({
         wallet,
         ...demand,
+        fundingRail,
         decision: error?.code === "external_reward_below_floor"
           ? "floor_rejected"
           : error?.code === "external_reward_above_ceiling"
@@ -278,6 +304,7 @@ export class ExternalPostingService {
       await this.recordDemandSignal({
         wallet,
         ...demand,
+        fundingRail,
         decision: "already_funded",
         attemptedAt: createdAt
       });
@@ -291,6 +318,7 @@ export class ExternalPostingService {
       await this.recordDemandSignal({
         wallet,
         ...demand,
+        fundingRail,
         decision: "quote_failed",
         attemptedAt: createdAt,
         reason: error?.code ?? error?.message ?? "live_fee_quote_failed"
@@ -300,6 +328,8 @@ export class ExternalPostingService {
     const quote = {
       draftId,
       wallet,
+      escrowPoster,
+      fundingRail,
       identityVersion: EXTERNAL_QUOTE_IDENTITY_VERSION,
       definition,
       ...artifacts,
@@ -313,6 +343,7 @@ export class ExternalPostingService {
     const storedSignal = await this.recordQuoteDemandSignal({
       wallet,
       ...demand,
+      fundingRail,
       decision: "quoted",
       attemptedAt: createdAt,
       quote
@@ -430,6 +461,15 @@ export class ExternalPostingService {
     if (draft?.status === "live") {
       return this.projectConfirmedDraft(draft);
     }
+    if (draft?.status === "settlement_failed") {
+      return {
+        outcome: "settlement_failed",
+        jobId: draft.jobId,
+        projected: false,
+        permanent: true,
+        platformLoss: true
+      };
+    }
 
     const candidate = draft ?? quote;
     assertStoredDraftDeterminism(candidate, this.config);
@@ -475,6 +515,31 @@ export class ExternalPostingService {
       txHash: observation.txHash,
       blockNumber: observation.blockNumber
     };
+    if (candidate.fundingRail === EXTERNAL_FUNDING_RAILS.X402) {
+      const updated = await this.materializeOrUpdateDraft(candidate, {
+        status: "settlement_pending",
+        fundedAt: confirmation.fundedAt,
+        fundingTxHash: confirmation.txHash,
+        fundingBlockNumber: confirmation.blockNumber,
+        confirmation
+      });
+      await this.markQuoteFundingStatus(
+        quoteSignal,
+        "escrow_created_unsettled",
+        observation
+      );
+      this.publishReconciliationEvent("settlement_pending", observation, {
+        fundingRail: EXTERNAL_FUNDING_RAILS.X402
+      });
+      return {
+        outcome: "settlement_pending",
+        jobId: updated.jobId,
+        projected: false,
+        fundedAt: confirmation.fundedAt,
+        txHash: confirmation.txHash,
+        blockNumber: confirmation.blockNumber
+      };
+    }
     const updated = await this.materializeOrUpdateDraft(candidate, {
       status: "live",
       fundedAt: confirmation.fundedAt,
@@ -485,6 +550,67 @@ export class ExternalPostingService {
     await this.markQuoteFundingStatus(quoteSignal, "funded", observation);
     this.publishReconciliationEvent("live", observation);
     return this.projectConfirmedDraft(updated);
+  }
+
+  async confirmExternalPaymentSettlement(draftId, settlement) {
+    const draft = await this.stateStore.getExternalJobDraft(String(draftId ?? ""));
+    if (!draft) {
+      throw new NotFoundError(
+        "Escrow-funded external job was not found after settlement.",
+        "external_payment_draft_not_found"
+      );
+    }
+    if (draft.fundingRail !== EXTERNAL_FUNDING_RAILS.X402) {
+      throw new ConflictError(
+        "Only x402-funded drafts can be confirmed by a settlement adapter.",
+        "external_payment_rail_mismatch"
+      );
+    }
+    if (draft.status !== "settlement_pending" && draft.status !== "live") {
+      throw new ConflictError(
+        `External payment cannot be confirmed from status ${draft.status}.`,
+        "external_payment_status_conflict",
+        { draftId: draft.draftId, status: draft.status }
+      );
+    }
+    const updated = draft.status === "live"
+      ? draft
+      : await this.stateStore.updateExternalJobDraft(draft.draftId, {
+          status: "live",
+          settlement: normalizeExternalSettlement(settlement),
+          settledAt: normalizeIso(settlement?.settledAt, "settledAt")
+        });
+    await this.stateStore.updateExternalPostingDemandSignal?.(draft.draftId, {
+      fundingRail: EXTERNAL_FUNDING_RAILS.X402,
+      fundingStatus: "funded",
+      settlementStatus: "settled",
+      settledAt: updated.settledAt
+    });
+    return this.projectConfirmedDraft(updated);
+  }
+
+  async recordExternalPaymentSettlementFailure(draftId, error) {
+    const draft = await this.stateStore.getExternalJobDraft(String(draftId ?? ""));
+    if (!draft) return undefined;
+    const failedAt = this.currentTime().toISOString();
+    const failure = {
+      code: String(error?.code ?? "payment_settlement_failed"),
+      message: String(error?.message ?? "Payment settlement failed."),
+      failedAt,
+      lossOwner: "platform"
+    };
+    const updated = await this.stateStore.updateExternalJobDraft(draft.draftId, {
+      status: "settlement_failed",
+      settlementFailure: failure
+    });
+    await this.stateStore.updateExternalPostingDemandSignal?.(draft.draftId, {
+      fundingRail: EXTERNAL_FUNDING_RAILS.X402,
+      fundingStatus: "settlement_failed",
+      settlementStatus: "failed",
+      platformLoss: true,
+      settlementFailure: failure
+    });
+    return updated;
   }
 
   async materializeOrUpdateDraft(candidate, patch) {
@@ -632,7 +758,15 @@ export class ExternalPostingService {
     };
   }
 
-  async recordQuoteDemandSignal({ wallet, requestedReward, schema, decision, attemptedAt, quote }) {
+  async recordQuoteDemandSignal({
+    wallet,
+    requestedReward,
+    schema,
+    fundingRail,
+    decision,
+    attemptedAt,
+    quote
+  }) {
     const existing = await this.stateStore.getExternalPostingDemandSignal?.(quote.draftId);
     if (existing?.quote) {
       const sameIdentity = existing.quote.jobId === quote.jobId
@@ -651,6 +785,7 @@ export class ExternalPostingService {
       wallet,
       requestedReward,
       schema,
+      fundingRail,
       decision,
       attemptedAt,
       firstAttemptedAt: existing?.firstAttemptedAt ?? attemptedAt,
@@ -677,6 +812,7 @@ export class ExternalPostingService {
       wallet: signal.wallet,
       requestedReward: signal.requestedReward,
       schema: signal.schema,
+      fundingRail: normalizeFundingRail(signal.fundingRail),
       decision: signal.decision,
       attemptedAt: signal.attemptedAt,
       ...(signal.reason ? { reason: String(signal.reason) } : {})
@@ -904,7 +1040,34 @@ function presentDraft(draft, now, delisting = undefined) {
       status: "live",
       fundedAt: draft.fundedAt,
       txHash: draft.fundingTxHash,
-      blockNumber: draft.fundingBlockNumber
+      blockNumber: draft.fundingBlockNumber,
+      fundingRail: normalizeFundingRail(draft.fundingRail),
+      ...(draft.settlement ? { settlement: cloneJsonObject(draft.settlement) } : {})
+    };
+  }
+  if (draft.status === "settlement_pending") {
+    return {
+      draftId: draft.draftId,
+      jobId: draft.jobId,
+      specHash: draft.specHash,
+      createdAt: draft.createdAt,
+      status: "settlement_pending",
+      fundingRail: EXTERNAL_FUNDING_RAILS.X402,
+      visibleInCatalog: false,
+      note: "Hub escrow exists, but the Base payment has not settled. The job remains hidden until settlement succeeds."
+    };
+  }
+  if (draft.status === "settlement_failed") {
+    return {
+      draftId: draft.draftId,
+      jobId: draft.jobId,
+      specHash: draft.specHash,
+      createdAt: draft.createdAt,
+      status: "settlement_failed",
+      fundingRail: EXTERNAL_FUNDING_RAILS.X402,
+      visibleInCatalog: false,
+      platformLoss: true,
+      note: "Base settlement failed after Hub escrow creation. The job was delisted and Averray owns the exposure."
     };
   }
   if (draft.status === "mismatch") {
@@ -932,6 +1095,7 @@ function presentDraft(draft, now, delisting = undefined) {
     createdAt: draft.createdAt,
     expiresAt: draft.expiresAt,
     status: expired ? "expired" : "awaiting_funding",
+    fundingRail: normalizeFundingRail(draft.fundingRail),
     ...(!expired ? { note: EXTERNAL_DRAFT_FUNDING_NOTE } : {})
   };
 }
@@ -952,6 +1116,7 @@ function presentQuote(quote, now, signal = undefined) {
     persisted: false,
     attemptCount: Number(signal?.attemptCount ?? 1),
     fundingStatus: signal?.fundingStatus ?? "unfunded",
+    fundingRail: normalizeFundingRail(quote.fundingRail),
     ...(!expired ? { note: EXTERNAL_DRAFT_FUNDING_NOTE } : {})
   };
 }
@@ -1006,7 +1171,7 @@ function firstCreationMismatch(draft, observation) {
   const args = Array.isArray(draft?.calldata?.args) ? draft.calldata.args : [];
   const expected = {
     specHash: String(args[8] ?? draft?.specHash ?? "").toLowerCase(),
-    poster: String(draft?.wallet ?? "").toLowerCase(),
+    poster: String(draft?.escrowPoster ?? draft?.wallet ?? "").toLowerCase(),
     asset: String(args[1] ?? "").toLowerCase(),
     reward: String(args[2] ?? ""),
     opsReserve: String(args[3] ?? ""),
@@ -1194,6 +1359,39 @@ function normalizeWallet(raw) {
     throw new ValidationError("Authenticated wallet must be an EVM address.");
   }
   return getAddress(String(raw)).toLowerCase();
+}
+
+function normalizeFundingRail(value) {
+  const normalized = String(value ?? EXTERNAL_FUNDING_RAILS.DIRECT_HUB)
+    .trim()
+    .toLowerCase();
+  if (!Object.values(EXTERNAL_FUNDING_RAILS).includes(normalized)) {
+    throw new ValidationError("External funding rail is not supported.");
+  }
+  return normalized;
+}
+
+function normalizeExternalSettlement(value) {
+  const source = requirePlainObject(value, "settlement");
+  const receiptId = normalizeBytes32(source.receiptId, "settlement.receiptId");
+  const payer = normalizeWallet(source.payer);
+  const amount = normalizeUint(source.amount, "settlement.amount");
+  const network = String(source.network ?? "").trim();
+  if (!network) {
+    throw new ValidationError("settlement.network is required.");
+  }
+  return {
+    receiptId,
+    payer,
+    amount,
+    network,
+    settledAt: normalizeIso(source.settledAt, "settlement.settledAt"),
+    discovery: {
+      discoverable: source.discovery?.discoverable === true,
+      portable: source.discovery?.portable === true,
+      status: String(source.discovery?.status ?? "not_reported")
+    }
+  };
 }
 
 function normalizeBytes32(raw, label) {

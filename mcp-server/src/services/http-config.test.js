@@ -12,7 +12,14 @@ test("loadHttpConfig uses safe defaults when env is empty", () => {
   assert.match(config.allowedHeaders, /mcp-protocol-version/u);
   assert.match(config.allowedHeaders, /mcp-method/u);
   assert.match(config.allowedHeaders, /mcp-name/u);
+  assert.match(config.allowedHeaders, /payment-signature/u);
+  assert.match(config.allowedHeaders, /sign-in-with-x/u);
+  assert.match(config.allowedHeaders, /x-payment/u);
   assert.match(config.exposedHeaders, /mcp-session-id/u);
+  assert.match(config.exposedHeaders, /payment-required/u);
+  assert.match(config.exposedHeaders, /payment-response/u);
+  assert.match(config.exposedHeaders, /x-payment-required/u);
+  assert.match(config.exposedHeaders, /x-payment-response/u);
   assert.equal(config.maxAgeSeconds, 600);
 });
 

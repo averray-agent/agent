@@ -373,6 +373,28 @@ test("MemoryStateStore external delisting is idempotent projection state", async
   assert.equal(await store.isExternalJobDelisted("curated-1"), false);
 });
 
+test("MemoryStateStore persists normalized x402 funding state independently of demand", async () => {
+  const store = new MemoryStateStore();
+  const record = {
+    id: `0x${"f".repeat(64)}`,
+    fundingRail: "x402",
+    status: "escrow_created",
+    draftId: `0x${"d".repeat(64)}`,
+    jobId: `0x${"a".repeat(64)}`,
+    posterWallet: "0x1111111111111111111111111111111111111111",
+    pooledAccount: "0x2222222222222222222222222222222222222222",
+    reservedRaw: "1050000",
+    createdAt: "2026-08-09T12:00:00.000Z",
+    updatedAt: "2026-08-09T12:01:00.000Z"
+  };
+
+  const stored = await store.upsertExternalPaymentFunding(record);
+  stored.status = "mutated-copy";
+
+  assert.deepEqual(await store.getExternalPaymentFunding(record.id), record);
+  assert.deepEqual(await store.listExternalPaymentFundings(), [record]);
+});
+
 test("MemoryStateStore indexes escrow-first quote demand and materializes a funded draft atomically", async () => {
   const store = new MemoryStateStore();
   const jobId = "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";

@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AuthenticationError, AuthorizationError, RateLimitError } from "../../core/errors.js";
+import {
+  AppError,
+  AuthenticationError,
+  AuthorizationError,
+  RateLimitError,
+  ValidationError
+} from "../../core/errors.js";
 import { createExternalJobRoutes } from "./external-job-routes.js";
 
 const POSTER = "0x1111111111111111111111111111111111111111";
@@ -60,6 +66,34 @@ function makeHarness(overrides = {}) {
         return { jobId, delisted: true };
       }
     },
+    x402PosterRamp: overrides.x402Disabled ? undefined : {
+      paymentRequired: async (payload) => {
+        calls.push(["paymentRequired", { payload }]);
+        if (overrides.x402Failure) {
+          throw new ValidationError("rewardAmount has too many decimal places.");
+        }
+        return {
+          statusCode: 402,
+          body: { x402Version: 2, accepts: [{ network: "eip155:8453" }] },
+          headers: {
+            "payment-required": "current-challenge",
+            "x-payment-required": "legacy-challenge"
+          }
+        };
+      },
+      post: async (input) => {
+        calls.push(["postX402", input]);
+        return {
+          draftId: DRAFT_ID,
+          status: "live",
+          fundingRail: "x402",
+          headers: {
+            "payment-response": "current-receipt",
+            "x-payment-response": "legacy-receipt"
+          }
+        };
+      }
+    },
     rateLimitConfig: {
       adminJobs: { limit: 60, windowSeconds: 60 },
       externalDrafts: { limit: 30, windowSeconds: 60 }
@@ -68,22 +102,85 @@ function makeHarness(overrides = {}) {
       calls.push(["readJsonBody"]);
       return overrides.payload ?? { definition: { rewardAmount: "1.0" } };
     },
-    respond: (target, statusCode, body) => {
-      calls.push(["respond", { statusCode, body }]);
-      Object.assign(target, { statusCode, body });
+    respond: (target, statusCode, body, headers = {}) => {
+      calls.push(["respond", { statusCode, body, headers }]);
+      Object.assign(target, { statusCode, body, headers });
     }
   });
   return { calls, response, route };
 }
 
-async function invoke(route, { method = "GET", path, response = {} }) {
+async function invoke(route, { method = "GET", path, response = {}, headers = {} }) {
   return route({
-    request: { method },
+    request: { method, headers, socket: { remoteAddress: "192.0.2.10" } },
     response,
     url: new URL(`http://localhost${path}`),
     pathname: path
   });
 }
+
+test("POST /jobs/x402 returns one portable Bazaar and SIWX payment challenge", async () => {
+  const payload = { definition: { rewardAmount: "1.0" } };
+  const { calls, response, route } = makeHarness({ payload });
+
+  assert.equal(await invoke(route, { method: "POST", path: "/jobs/x402", response }), true);
+  assert.equal(response.statusCode, 402);
+  assert.equal(response.body.x402Version, 2);
+  assert.equal(response.headers["payment-required"], "current-challenge");
+  assert.equal(response.headers["x-payment-required"], "legacy-challenge");
+  assert.deepEqual(calls.filter(([name]) => name !== "respond"), [
+    ["enforceLimit", {
+      bucket: "external_x402",
+      key: "192.0.2.10",
+      limits: { limit: 30, windowSeconds: 60 }
+    }],
+    ["readJsonBody"],
+    ["paymentRequired", { payload }]
+  ]);
+});
+
+test("POST /jobs/x402 accepts legacy payment and SIWX headers in one funded request", async () => {
+  const payload = { definition: { rewardAmount: "1.0" } };
+  const { calls, response, route } = makeHarness({ payload });
+
+  assert.equal(await invoke(route, {
+    method: "POST",
+    path: "/jobs/x402",
+    response,
+    headers: { "x-payment": "proof", "sign-in-with-x": "identity" }
+  }), true);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.fundingRail, "x402");
+  assert.equal(response.body.headers, undefined);
+  assert.equal(response.headers["payment-response"], "current-receipt");
+  assert.equal(response.headers["x-payment-response"], "legacy-receipt");
+  assert.deepEqual(calls.find(([name]) => name === "postX402"), [
+    "postX402",
+    { payload, paymentProof: "proof", signInProof: "identity" }
+  ]);
+});
+
+test("POST /jobs/x402 disabled response says what happened and what to do", async () => {
+  const { route } = makeHarness({ x402Disabled: true });
+  await assert.rejects(
+    invoke(route, { method: "POST", path: "/jobs/x402" }),
+    (error) => error instanceof AppError
+      && error.code === "x402_posting_disabled"
+      && error.details?.action === "use_siwe_draft_or_retry_after_enablement"
+      && error.details?.posterFunds === "unchanged"
+  );
+});
+
+test("POST /jobs/x402 decorates every otherwise-bare rejection with next action and fund state", async () => {
+  const { route } = makeHarness({ x402Failure: true });
+  await assert.rejects(
+    invoke(route, { method: "POST", path: "/jobs/x402" }),
+    (error) => error.code === "invalid_request"
+      && error.details?.action === "correct_request_and_retry_for_fresh_challenge"
+      && error.details?.posterFunds === "unchanged"
+      && /request a fresh 402 response/u.test(error.message)
+  );
+});
 
 test("POST /jobs/draft authenticates any SIWE wallet and returns a non-persisted quote", async () => {
   const { calls, response, route } = makeHarness();

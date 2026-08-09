@@ -97,3 +97,15 @@ test("OpenAPI documents the direct-schema job submission envelope", async () => 
     true
   );
 });
+
+test("OpenAPI documents the public x402 retry and SIGN-IN-WITH-X headers", async () => {
+  const openapi = await readOpenApi();
+  const operation = openapi.paths["/jobs/x402"].post;
+  const headerNames = new Set(operation.parameters.map((parameter) => parameter.name));
+
+  assert.deepEqual(operation.security, []);
+  assert.ok(headerNames.has("PAYMENT-SIGNATURE"));
+  assert.ok(headerNames.has("SIGN-IN-WITH-X"));
+  assert.ok(operation.responses["402"].headers["PAYMENT-REQUIRED"]);
+  assert.ok(operation.responses["200"].headers["PAYMENT-RESPONSE"]);
+});

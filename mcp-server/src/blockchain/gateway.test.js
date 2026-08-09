@@ -511,6 +511,112 @@ test("previewProtocolFeeForAsset quotes the exact reserve increment in asset uni
   });
 });
 
+test("createEscrowFundedExternalJob fronts exact escrow from the pooled signer without minting", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  const pooledAccount = "0x1111111111111111111111111111111111111111";
+  const jobId = `0x${"a".repeat(64)}`;
+  const specHash = `0x${"b".repeat(64)}`;
+  const verifierMode = id("benchmark");
+  const category = id("coding");
+  const calls = [];
+  gateway.signer = { async getAddress() { return pooledAccount; } };
+  gateway.readEscrowJob = async () => ({ state: 0, contractLayout: "rc1" });
+  gateway.escrowContract = { async previewProtocolFee() { return 50_000n; } };
+  gateway.accountContract = {
+    async positions(account, asset) {
+      assert.equal(account, pooledAccount);
+      assert.equal(asset, USDC_TRUST_ASSET.address);
+      return emptyPosition({ liquid: 1_050_000n });
+    }
+  };
+  gateway.createSinglePayoutJobForJob = async (...args) => {
+    calls.push(args);
+    return {
+      hash: `0x${"c".repeat(64)}`,
+      async wait() { return { blockNumber: 123 }; }
+    };
+  };
+  gateway.provider = { async getBlock() { return { timestamp: 1_786_276_800 }; } };
+  const draft = {
+    jobId,
+    specHash,
+    definition: { rewardAsset: "USDC", category: "coding" },
+    fundingRequirement: { posterReservedRaw: "1050000" },
+    calldata: {
+      args: [
+        jobId,
+        USDC_TRUST_ASSET.address,
+        "1000000",
+        "0",
+        "0",
+        "3600",
+        verifierMode,
+        category,
+        specHash
+      ]
+    }
+  };
+
+  const result = await gateway.createEscrowFundedExternalJob(draft);
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].slice(2), [
+    jobId,
+    USDC_TRUST_ASSET.address,
+    1_000_000n,
+    0n,
+    0n,
+    3600,
+    verifierMode,
+    category,
+    specHash
+  ]);
+  assert.equal(result.poster, pooledAccount);
+  assert.equal(result.reward, "1000000");
+  assert.equal(result.finalized, true);
+});
+
+test("createEscrowFundedExternalJob refuses pooled shortfall without auto-minting", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  const pooledAccount = "0x1111111111111111111111111111111111111111";
+  const jobId = `0x${"d".repeat(64)}`;
+  const specHash = `0x${"e".repeat(64)}`;
+  let createCalls = 0;
+  gateway.signer = { async getAddress() { return pooledAccount; } };
+  gateway.readEscrowJob = async () => ({ state: 0, contractLayout: "rc1" });
+  gateway.escrowContract = { async previewProtocolFee() { return 50_000n; } };
+  gateway.accountContract = {
+    async positions() { return emptyPosition({ liquid: 1_049_999n }); }
+  };
+  gateway.createSinglePayoutJobForJob = async () => { createCalls += 1; };
+
+  await assert.rejects(
+    gateway.createEscrowFundedExternalJob({
+      jobId,
+      specHash,
+      definition: { rewardAsset: "USDC" },
+      fundingRequirement: { posterReservedRaw: "1050000" },
+      calldata: {
+        args: [
+          jobId,
+          USDC_TRUST_ASSET.address,
+          "1000000",
+          "0",
+          "0",
+          "3600",
+          id("benchmark"),
+          id("coding"),
+          specHash
+        ]
+      }
+    }),
+    (error) => error instanceof InsufficientLiquidityError
+      && error.details?.reason === "x402_pooled_float_shortfall"
+      && error.details?.posterFunds === "unchanged"
+  );
+  assert.equal(createCalls, 0);
+});
+
 test("handleClaimTimeout reopens the canonical chain job id", async () => {
   const gateway = new BlockchainGateway({ enabled: false });
   const calls = [];
