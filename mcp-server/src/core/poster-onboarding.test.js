@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { id } from "ethers";
+
 import { createPosterOnboardingService } from "./poster-onboarding.js";
 
 const ESCROW = "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC";
@@ -233,6 +235,97 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
     claimBond: { status: "available" },
     disputeWindow: { status: "available" }
   });
+});
+
+test("poster onboarding derives observed funding error selectors from contract signatures", async () => {
+  const [agentAccountSource, escrowSource, payload] = await Promise.all([
+    readFile(new URL("../../../contracts/AgentAccountCore.sol", import.meta.url), "utf8"),
+    readFile(new URL("../../../contracts/EscrowCore.sol", import.meta.url), "utf8"),
+    makeService().getPosterOnboarding()
+  ]);
+  assert.match(agentAccountSource, /error InsufficientLiquidity\(\);/u);
+  assert.match(escrowSource, /error InvalidState\(\);/u);
+  assert.deepEqual(payload.failureModes, [
+    {
+      selector: id("InsufficientLiquidity()").slice(0, 10),
+      signature: "InsufficientLiquidity()",
+      meaning: "AgentAccountCore liquid is below fundingRequirement.posterReservedRaw.",
+      response:
+        "Deposit the difference between fundingRequirement.posterReservedRaw and positions(poster, token).liquid, then retry the unchanged funding calldata."
+    },
+    {
+      selector: id("InvalidState()").slice(0, 10),
+      signature: "InvalidState()",
+      meaning: "This jobId already exists on chain.",
+      response:
+        "Do not deposit again—the escrow for this jobId is already funded. Read GET /jobs/draft/:id: status 'live' means the watcher has materialized it and there is nothing to do; status 'mismatch' means the existing on-chain job was funded with different terms and will never materialize, so the operator-mediated ~7-day cancellation rescue is the only recovery."
+    }
+  ]);
+  assert.equal(payload.failureModes[0].selector, "0xbb55fd27");
+  assert.equal(payload.failureModes[1].selector, "0xbaf3f0f7");
+  assert.match(payload.failureModes[1].response, /status 'live'.*nothing to do/iu);
+  assert.match(payload.failureModes[1].response, /status 'mismatch'.*never materialize.*~7-day cancellation rescue/iu);
+});
+
+test("poster withdrawal guidance distinguishes failed liquid funding from succeeded reserved funding", async () => {
+  const payload = await makeService().getPosterOnboarding();
+
+  assert.deepEqual(payload.posterFacts.withdrawal, {
+    httpRouteAvailable: false,
+    explanation:
+      "Recovery depends on funding state. After funding fails, the deposit remains in AgentAccountCore liquid and the poster can withdraw it immediately on chain without an operator. After funding succeeds, the amount is reserved and AgentAccountCore.withdraw cannot release it; the operator-mediated cancellation rescue is the only recovery path.",
+    whenFundingFailed: {
+      positionState: "liquid",
+      withdrawalAvailable: true,
+      operatorRequired: false,
+      action: "Withdraw the liquid amount directly from the poster wallet on chain."
+    },
+    whenFundingSucceeded: {
+      positionState: "reserved",
+      withdrawalAvailable: false,
+      operatorRequired: true,
+      action:
+        "Do not call withdraw for reserved job funding; request the operator-mediated ~7-day cancellation rescue, which refunds only the recorded poster."
+    },
+    onChain: {
+      available: true,
+      contract: "AgentAccountCore",
+      address: ACCOUNTS,
+      abiFragment: "function withdraw(address asset, uint256 amount)",
+      args: [TOKEN, "<amountRaw>"],
+      value: "0",
+      recipient: "msg.sender (the poster wallet)",
+      requiresPosterGas: true
+    }
+  });
+  assert.match(payload.posterFacts.withdrawal.explanation, /fails.*liquid.*immediately.*without an operator/iu);
+  assert.match(payload.posterFacts.withdrawal.explanation, /succeeds.*reserved.*cannot release/iu);
+});
+
+test("poster funding instructions bind both directions of every watcher term", async () => {
+  const payload = await makeService().getPosterOnboarding();
+  const funding = payload.flow.find((step) => step.id === "fund");
+
+  assert.match(funding.action, /byte-for-byte unchanged/u);
+  assert.deepEqual(funding.exactTerms, {
+    required: true,
+    fields: [
+      "specHash",
+      "poster",
+      "asset",
+      "reward",
+      "opsReserve",
+      "contingencyReserve"
+    ],
+    mismatchResult: {
+      status: "mismatch",
+      permanent: true,
+      recovery: "operator-mediated on request, ~7 days, refunds only ever to the recorded poster"
+    },
+    warning:
+      "Any deviation in either direction permanently mismatches the quote. Raising the reward is not generosity: it strands the reserved funding identically to a deliberate mutation and requires the same operator-mediated ~7-day rescue."
+  });
+  assert.match(funding.exactTerms.warning, /Raising the reward is not generosity/iu);
 });
 
 test("worker onboarding documents self-deposit, mock fund limits, direct withdrawal, validation, and TTL truth", async () => {
