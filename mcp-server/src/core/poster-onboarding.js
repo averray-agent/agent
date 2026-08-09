@@ -1,4 +1,4 @@
-import { getAddress, isAddress } from "ethers";
+import { getAddress, id, isAddress } from "ethers";
 
 import { decimalToBaseUnits } from "./platform-service-helpers.js";
 
@@ -13,6 +13,8 @@ const AGENT_ACCOUNT_POSITIONS_ABI =
   "function positions(address account, address asset) view returns (uint256 liquid, uint256 reserved, uint256 strategyAllocated, uint256 collateralLocked, uint256 jobStakeLocked, uint256 debtOutstanding)";
 const OPEN_DISPUTE_ABI = "function openDispute(bytes32 jobId)";
 const OPEN_DISPUTE_SIGNATURE = "openDispute(bytes32 jobId)";
+const INSUFFICIENT_LIQUIDITY_ERROR_SIGNATURE = "InsufficientLiquidity()";
+const INVALID_STATE_ERROR_SIGNATURE = "InvalidState()";
 
 export function createPosterOnboardingService({
   authConfig,
@@ -168,6 +170,10 @@ async function buildSnapshot({
     agentAccountCore: gateway?.config?.agentAccountAddress,
     publicBaseUrl
   });
+  const posterFacts = buildPosterFacts({
+    token,
+    agentAccountCore: gateway?.config?.agentAccountAddress
+  });
 
   return {
     version: "poster-onboarding-v1",
@@ -205,6 +211,8 @@ async function buildSnapshot({
       escrowCore: config.escrowCoreAddress
     }),
     verification: buildVerification(verificationModes),
+    failureModes: buildFailureModes(),
+    posterFacts,
     workerFacts,
     cancellation: buildCancellation(),
     docs: {
@@ -279,7 +287,25 @@ function buildPostingFlow({ publicBaseUrl, token, agentAccountCore, escrowCore }
     {
       id: "fund",
       action:
-        "Fund from the poster wallet: approve the token to AgentAccountCore, deposit enough AAC liquid, then submit the returned non-waived createSinglePayoutJob calldata unchanged.",
+        "Fund from the poster wallet: approve the token to AgentAccountCore, deposit enough AAC liquid, then submit the returned non-waived createSinglePayoutJob calldata byte-for-byte unchanged.",
+      exactTerms: {
+        required: true,
+        fields: [
+          "specHash",
+          "poster",
+          "asset",
+          "reward",
+          "opsReserve",
+          "contingencyReserve"
+        ],
+        mismatchResult: {
+          status: "mismatch",
+          permanent: true,
+          recovery: "operator-mediated on request, ~7 days, refunds only ever to the recorded poster"
+        },
+        warning:
+          "Any deviation in either direction permanently mismatches the quote. Raising the reward is not generosity: it strands the reserved funding identically to a deliberate mutation and requires the same operator-mediated ~7-day rescue."
+      },
       exactPosterReservedRaw: "the quote response fundingRequirement.posterReservedRaw",
       posterReservedRawFormula:
         "rewardRaw + opsReserveRaw + contingencyReserveRaw + floor(rewardRaw * economics.protocolFeeBps / 10000)",
@@ -427,6 +453,59 @@ function buildVerification(modes) {
   };
 }
 
+function buildFailureModes() {
+  return [
+    {
+      selector: errorSelector(INSUFFICIENT_LIQUIDITY_ERROR_SIGNATURE),
+      signature: INSUFFICIENT_LIQUIDITY_ERROR_SIGNATURE,
+      meaning: "AgentAccountCore liquid is below fundingRequirement.posterReservedRaw.",
+      response:
+        "Deposit the difference between fundingRequirement.posterReservedRaw and positions(poster, token).liquid, then retry the unchanged funding calldata."
+    },
+    {
+      selector: errorSelector(INVALID_STATE_ERROR_SIGNATURE),
+      signature: INVALID_STATE_ERROR_SIGNATURE,
+      meaning: "This jobId already exists on chain.",
+      response:
+        "Do not deposit again; the job is already funded. Wait for the finalized-event watcher to materialize the live job."
+    }
+  ];
+}
+
+function buildPosterFacts({ token, agentAccountCore }) {
+  const tokenAddress = token?.address ?? "<token address>";
+  return {
+    withdrawal: {
+      httpRouteAvailable: false,
+      explanation:
+        "Recovery depends on funding state. After funding fails, the deposit remains in AgentAccountCore liquid and the poster can withdraw it immediately on chain without an operator. After funding succeeds, the amount is reserved and AgentAccountCore.withdraw cannot release it; the operator-mediated cancellation rescue is the only recovery path.",
+      whenFundingFailed: {
+        positionState: "liquid",
+        withdrawalAvailable: true,
+        operatorRequired: false,
+        action: "Withdraw the liquid amount directly from the poster wallet on chain."
+      },
+      whenFundingSucceeded: {
+        positionState: "reserved",
+        withdrawalAvailable: false,
+        operatorRequired: true,
+        action:
+          "Do not call withdraw for reserved job funding; request the operator-mediated ~7-day cancellation rescue, which refunds only the recorded poster."
+      },
+      onChain: {
+        available: Boolean(agentAccountCore && token?.address),
+        contract: "AgentAccountCore",
+        ...(agentAccountCore ? { address: agentAccountCore } : {}),
+        abiFragment: AGENT_ACCOUNT_WITHDRAW_ABI,
+        args: [tokenAddress, "<amountRaw>"],
+        value: "0",
+        recipient: "msg.sender (the poster wallet)",
+        requiresPosterGas: true
+      }
+    }
+  };
+}
+
 function buildWorkerFacts({
   claimBondRead,
   disputeWindowRead,
@@ -561,6 +640,10 @@ function buildWorkerFacts({
     },
     disputeWindow
   };
+}
+
+function errorSelector(signature) {
+  return id(signature).slice(0, 10);
 }
 
 function buildWorkerDisputeRemedy(escrowCore) {
