@@ -7,6 +7,11 @@ Attacker wallet `0xA287a52bb9624a4c2fE97E60D59B0de584A37bf6` — a cold wallet w
 balance, no history, no allowlist entry, funded only for this run. Driver:
 `scripts/ops/run-adversarial-poster.mjs`.
 
+**Status: closed the same day.** Every finding below is either fixed and verified against
+the live endpoint, or explicitly recorded as informational. Fixes shipped in #1003 and
+#1004 and were confirmed by re-running the original probes against production — not by
+trusting CI. Where a finding was *not* fixed, that is stated rather than implied.
+
 **Cost of the whole run: 0.049 DOT of gas. Zero USDC lost.**
 Closing position: 3.00 wallet + 1.05 AAC liquid + 1.05 reserved in a live job = 5.10 of 5.10.
 
@@ -49,7 +54,16 @@ The correct response is **opposite** in each case: deposit more, versus withdraw
 away. Acting on the wrong reading means depositing again into a job that already exists.
 `InvalidState()` does not even name the problem.
 
-**Fix:** map expected revert selectors to poster-facing meanings in the onboarding contract.
+**FIXED — #1003, live.** `/poster/onboarding` now serves a `failureModes` array mapping both
+selectors to a meaning and the correct poster response, with the selectors derived from the
+Solidity error signatures and a test reading the contract sources so they cannot rot.
+
+Gating caught one over-claim before merge: the `InvalidState()` response originally ended
+"wait for the finalized-event watcher to materialize the live job", which is false when the
+existing on-chain job was funded with mutated terms — the draft is permanently `mismatch`
+and the poster would wait forever. It now branches on `GET /jobs/draft/:id` status.
+`InvalidState()` is used 15 times in EscrowCore, but only one site is reachable from
+`_createSinglePayoutJob` (`state != JobState.None`), so the stated meaning is accurate here.
 
 ### F2 — The recovery path is misfiled, and the poster-facing answer is wrong (medium)
 
@@ -67,7 +81,11 @@ withdraw successfully right now.
 So someone who mistypes an amount by one cent reads that they face a seven-day operator
 process, when their money is immediately recoverable.
 
-**Fix:** a `posterFacts.withdrawal` block mirroring the worker one.
+**FIXED — #1003, live.** `posterFacts.withdrawal` now states the recovery *conditionally*,
+which was the part most likely to be got wrong: `whenFundingFailed` (position `liquid`,
+withdrawal available, no operator) versus `whenFundingSucceeded` (position `reserved`,
+withdrawal unavailable, operator required). A blanket "posters can withdraw" would have
+been false and worse than the original omission.
 
 ### F3 — Strict term matching punishes generosity like an attack (medium)
 
@@ -85,7 +103,11 @@ The security property is right. The product consequence is that *raising* the re
 ordinary, well-meant poster instinct — permanently strands the funds behind the ~7-day
 rescue, with no pre-flight warning anywhere.
 
-**Fix:** warn at quote time that terms must match exactly, in both directions.
+**FIXED — #1003, live.** The `fund` step now carries an `exactTerms` block naming all six
+watcher fields, `mismatchResult` (`permanent: true`, ~7-day rescue), and an explicit
+warning that raising the reward strands the funding identically to a deliberate mutation.
+
+The watcher's strictness itself was deliberately left alone. It is correct.
 
 ### F4 — No reward ceiling (low)
 
@@ -93,16 +115,31 @@ rescue, with no pre-flight warning anywhere.
 construction, so it is a dead end rather than a risk. **Not** a truth-boundary problem:
 `listExternalPostingDemandSignals` has no consumer, so no aggregate can be inflated by it.
 
+**FIXED — #1004, live.** `EXTERNAL_POSTING_MAX_REWARD_USDC=10000` (a new, deliberately
+reviewable policy value, validated at boot and rejected if below the floor). The same quote
+now returns `400 external_reward_above_ceiling {maximumRewardUsdc, requestedReward}`.
+Verified that the generated mainnet template matches the generator, so the value actually
+ships rather than sitting in an unread file. A 1 USDC quote still returns 200 with an
+unchanged 1,050,000 reserve — the ceiling does not touch legitimate posting.
+
 ### F5 — Inconsistent error quality (low)
 
 The floor refusal names the rule and the offending value. `rewardAmount: "-1"` returns a
 bare `invalid_request` with no detail.
+
+**FIXED — #1004, live.** Now `400 external_reward_invalid_shape` with `rule`, `asset`,
+`maximumDecimalPlaces` and `requestedReward`.
 
 ### F6 — Quote expiry is advisory only (informational)
 
 Re-quoting identical content slid `expiresAt` forward while `specHash` stayed identical, so
 the 72-hour TTL is bound into neither the spec hash nor the calldata and cannot be enforced
 on-chain.
+
+**NOT FIXED, deliberately.** It is not yet established that this is a problem, and inventing
+a fix for a behaviour we have not shown to be harmful would be worse than leaving it
+visible. Answering it needs a funded quote left to age past 72 hours and then funded —
+a scheduled test, not an afternoon one.
 
 ## Not exercised
 
@@ -117,5 +154,11 @@ on-chain.
 
 - Four demand-signal records exist from `0xA287a52b…7bf6`. They are ours. They must not be
   read as external demand.
-- Catalogue job `0xc75efd7b…05a9` is **live and genuinely claimable** — its title says "do
-  not claim", but nothing enforces that and a worker who claims it earns the 1 USDC.
+- Catalogue job `0xc75efd7b…05a9` was **live and genuinely claimable** — its title said "do
+  not claim", but nothing enforces that and a worker who claimed it would have earned the
+  1 USDC honestly. Delisted with `scripts/ops/delist-external-job.mjs`.
+
+  **Delisting removes the listing, not the money.** The 1.05 USDC stays reserved in
+  EscrowCore exactly as before; only the catalogue projection is withdrawn. Recovering the
+  reserve is the separate operator-mediated ~7-day rescue. This is the same distinction
+  F2 is about, and it applies to us too.
