@@ -258,11 +258,13 @@ test("poster onboarding derives observed funding error selectors from contract s
       signature: "InvalidState()",
       meaning: "This jobId already exists on chain.",
       response:
-        "Do not deposit again; the job is already funded. Wait for the finalized-event watcher to materialize the live job."
+        "Do not deposit again—the escrow for this jobId is already funded. Read GET /jobs/draft/:id: status 'live' means the watcher has materialized it and there is nothing to do; status 'mismatch' means the existing on-chain job was funded with different terms and will never materialize, so the operator-mediated ~7-day cancellation rescue is the only recovery."
     }
   ]);
   assert.equal(payload.failureModes[0].selector, "0xbb55fd27");
   assert.equal(payload.failureModes[1].selector, "0xbaf3f0f7");
+  assert.match(payload.failureModes[1].response, /status 'live'.*nothing to do/iu);
+  assert.match(payload.failureModes[1].response, /status 'mismatch'.*never materialize.*~7-day cancellation rescue/iu);
 });
 
 test("poster withdrawal guidance distinguishes failed liquid funding from succeeded reserved funding", async () => {

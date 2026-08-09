@@ -467,7 +467,7 @@ function buildFailureModes() {
       signature: INVALID_STATE_ERROR_SIGNATURE,
       meaning: "This jobId already exists on chain.",
       response:
-        "Do not deposit again; the job is already funded. Wait for the finalized-event watcher to materialize the live job."
+        "Do not deposit again—the escrow for this jobId is already funded. Read GET /jobs/draft/:id: status 'live' means the watcher has materialized it and there is nothing to do; status 'mismatch' means the existing on-chain job was funded with different terms and will never materialize, so the operator-mediated ~7-day cancellation rescue is the only recovery."
     }
   ];
 }
