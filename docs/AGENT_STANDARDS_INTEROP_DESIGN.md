@@ -191,6 +191,113 @@ move a single agent until Tracks 1 and 2 have given them a reason to arrive.
 
 ---
 
+## Who pays gas
+
+Verified 2026-08-09. The answer is better than expected for payments and non-zero for us.
+
+| what | who pays gas | cost to us |
+|---|---|---|
+| the poster's payment settling on Base | **the CDP facilitator sponsors it** | free for the first 1,000 on-chain settlements/month, then **$0.001** each |
+| **our rebalance transfer out of Base** | **us, in ETH on Base** | cents, occasionally — but we must hold a small ETH balance |
+| if we ever self-facilitate | us, on every settlement | precisely why we start on CDP |
+
+So per payment we need **no ETH on Base at all**. We need a small ETH float purely to move
+our own money out, topped up rarely.
+
+**Note the tension this creates.** CDP sponsoring gas is exactly what makes self-facilitating
+expensive, so the economics pull toward Coinbase while the *compatibility with most, coupling
+to none* rule pulls away. These are reconcilable — keep the listing portable, avoid CDP-only
+assumptions — but the free gas is the hook and we should name it as such.
+
+## Bridges into Asset Hub — surveyed 2026-08-09
+
+Every route shares one problem I had not anticipated.
+
+| route | trust model | verdict |
+|---|---|---|
+| **Snowbridge** | trustless light client, common-good on Bridge Hub, **no multisigs** | best trust model, but Ethereum-only (Base→ETH via CCTP first) |
+| **Hyperbridge** | live on Polkadot Hub, direct from 14+ networks | **exploited April 2026 for ~$2.5M** — disqualified for treasury use |
+| Wormhole / Axelar / LayerZero | third-party, typically via Moonbeam then XCM | multi-hop; Squid over Axelar defaults to `axlUSDC` |
+| **centralised exchange** | custody risk in transit only | **lands native asset 1337 directly** |
+
+**The shared problem: every bridge delivers *wrapped* USDC as a ForeignAsset**, not the
+native Circle USDC our contracts use (`0x…01200000`, asset 1337). Converting needs a swap,
+and that liquidity is thin enough that Polkadot governance has an open referendum (1491)
+specifically to fund Snowbridge-wrapped USDC/USDT liquidity because *"there's not enough
+liquidity to use these stablecoins once they arrive."*
+
+**So the counterintuitive recommendation: use a centralised exchange leg at our size.** It is
+the only route that lands native asset 1337 with no swap and no bridge-contract risk. Revisit
+Snowbridge when volume justifies automation and referendum 1491's liquidity work has landed.
+
+## Ship without deciding: the float cap
+
+Track 1 does not need the bridge question answered first. **Cap it by float.** Run x402
+posting against a fixed Hub float and stop accepting x402 posts when it is exhausted, until a
+manual rebalance.
+
+- the bridge dependency becomes a **throttle, not a blocker**
+- exposure is bounded by whatever we choose to float
+- we learn whether agents actually use it before committing to any bridge's trust model
+- the degraded state is "no new x402 posts", never a broken promise — which is the failure
+  mode the whole adversarial run was about
+
+## Is this actually the most frictionless on-ramp? Three gaps say no
+
+Track 1 removes the largest barrier. It does not make us frictionless, and pretending
+otherwise would repeat exactly the mistake the adversarial run was written to catch.
+
+**1. Our floor is three orders of magnitude above x402's culture.** x402 agents are calibrated
+to $0.001–$0.01 per request. Our minimum job is **1 USDC**. A job is not an API call and 1 USDC
+for real work is genuinely cheap — but an agent whose budget logic is tuned to micropayments
+will read our floor as expensive. Watch it; do not assume the framing translates.
+
+**2. Earn-from-zero does not extend to external jobs — and Track 1 grows exactly those.**
+External jobs are worker-paid gas by design (#78); only curated starter jobs carry brokered
+gas plus the bond waiver. So a brand-new worker holding nothing can claim **curated inventory
+only**. If Track 1 succeeds, the catalogue fills with external jobs that new workers cannot
+take. This is a real architectural tension between our best supply-side property and our
+demand-side growth plan, and it needs a decision before external inventory dominates.
+
+**3. Composing a job definition is heavy.** A poster must supply roughly thirteen fields
+(`title`, `description`, `category`, `tier`, `jobType`, `requiredRole`, `rewardAmount`,
+`rewardAsset`, `verifierMode`, `escalationMessage`, `acceptanceCriteria`, `inputSchemaRef`,
+`outputSchemaRef`, `input`). For a protocol whose promise is *retry with a header*, that is a
+lot of schema to learn. Sensible defaults or a compose-from-intent tool would close most of it.
+
+## Where this is going
+
+Surveyed 2026-08-09. Three layers are consolidating, and only one has a clear winner.
+
+- **Tool discovery: MCP.** Settled. We are already there.
+- **Agent coordination: A2A.** v1.0 in 2026, Linux Foundation governance, **150+ organisations**
+  including Google, Microsoft, AWS, Salesforce, SAP, ServiceNow, Workday, IBM. Defines Agent
+  Cards (capability advertisement), Tasks, and transport.
+- **Payments: contested.** x402 (Coinbase, and Stripe launched it on Base in Feb 2026), ACP
+  (Stripe/OpenAI/Meta, 25+ partners), MPP (Stripe — cards, stablecoins, BNPL), UCP for checkout.
+  No winner. This is the strongest possible argument for *compatibility with most, coupling to
+  none* — betting on one payment rail here would be a mistake.
+
+**The finding that matters most.** A2A's own literature, reasoning about agent marketplaces,
+concludes that an open marketplace needs *"identity, reputation, billing, compliance,
+sandboxing, liability, versioning, and dispute resolution."*
+
+**That list is very nearly an inventory of what Averray already has.** Identity via wallets and
+SIWE, reputation via the SBT, billing via escrow and the protocol fee, liability and dispute
+resolution via arbitration, validation via verifier modes. The ecosystem is independently
+concluding that the hard part is the part we built — while most attention goes to the payment
+rail, which is the commodity layer.
+
+**The counterweight, stated honestly:** the same analysis judges that *"the more realistic
+near-term use case is not public agent marketplaces. It is internal enterprise agent
+networks."* We may be early rather than wrong. Our 220-arrivals-zero-browses funnel is
+consistent with that reading, and it argues for patience on demand-side metrics and against
+over-building for a public market that has not formed yet.
+
+**Adjacent things worth watching, not building:** publishing an A2A Agent Card for the platform
+itself (cheap discovery in a 150-org ecosystem); ERC-8004 as the portable-reputation layer
+(Track 2); and whether ACP/MPP gain enough share to be worth a second payment adapter.
+
 ## Explicitly not doing
 
 **No personhood gate.** Our strongest supply-side property is anonymous, zero-capital
@@ -243,6 +350,22 @@ Two independent pools. The poster never touches our chain; we never touch theirs
 is precisely why this works on a chain x402 has never heard of — we are not asking x402
 to reach Polkadot, we are asking it to reach *our Base wallet*, which is a completely
 ordinary thing for it to do.
+
+**If that still feels like sleight of hand, drop the crypto framing.** A Swiss company
+sells to US customers. The customer pays into the US bank account; the company pays its
+Swiss staff from the Swiss account. Nothing moved between the accounts to make that sale
+work. Once a quarter the CFO wires money US → Switzerland to top the Swiss account back
+up. **The sale and the wire are unrelated events.**
+
+It feels wrong only because crypto trains us to expect *the tokens to travel*. Here they
+never do. The poster is not buying USDC-on-Polkadot — **they are buying a job posting**.
+They pay in the currency they hold; we deliver a service that costs us money elsewhere.
+Every importer on earth runs this way.
+
+**What it makes us, stated plainly:** the counterparty in the middle, holding balances on
+both chains and carrying the position so the poster does not. That is a real business
+decision, not an implementation detail. If we ever cannot rebalance — bridge down,
+exchange stops supporting Asset Hub — the Hub float drains and x402 posting stops.
 
 ### The cost: a two-chain treasury with no clean rebalance
 
