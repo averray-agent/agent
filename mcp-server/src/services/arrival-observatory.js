@@ -6,6 +6,22 @@ const DEFAULT_MAX_CLIENTS = 200;
 const DEFAULT_FLUSH_INTERVAL_MS = 10_000;
 
 /**
+ * Our own traffic, so the funnel can say what OUTSIDERS did.
+ *
+ * The settlement composition split already does this for jobs — platform
+ * verification runs are counted apart from external work, because a settlement
+ * count alone flatters us. Arrivals had no equivalent, so every canary, smoke
+ * test and adversarial probe landed in the funnel indistinguishable from a real
+ * agent, corrupting the one signal built to read demand.
+ *
+ * Marking is EXPLICIT and unmarked traffic counts as external. That direction is
+ * deliberate: the failure we must never have is overstating outside interest.
+ * Someone falsely declaring one of our names only removes themselves from the
+ * external count, which costs them and tells us nothing we would believe anyway.
+ */
+const SELF_CLIENT_PREFIX = "averray-";
+
+/**
  * Ordered funnel an arriving agent walks. "Furthest reached" is the max index
  * a client ever attained, so a client that browses again after claiming does
  * not appear to regress.
@@ -68,6 +84,7 @@ export class ArrivalObservatory {
     metrics,
     now = () => Date.now(),
     hashSalt = "averray-arrivals",
+    selfClients = resolveSelfClients(),
     maxClients = DEFAULT_MAX_CLIENTS,
     flushIntervalMs = DEFAULT_FLUSH_INTERVAL_MS
   } = {}) {
@@ -75,6 +92,7 @@ export class ArrivalObservatory {
     this.metrics = metrics;
     this.now = now;
     this.hashSalt = String(hashSalt);
+    this.selfClients = selfClients instanceof Set ? selfClients : new Set(selfClients ?? []);
     this.maxClients = Number(maxClients) > 0 ? Number(maxClients) : DEFAULT_MAX_CLIENTS;
     this.flushIntervalMs = Number(flushIntervalMs) >= 0 ? Number(flushIntervalMs) : DEFAULT_FLUSH_INTERVAL_MS;
     this.clients = new Map();
@@ -101,6 +119,7 @@ export class ArrivalObservatory {
       await this.ensureLoaded();
 
       const identity = normalizeClientInfo(clientInfo);
+      const actor = this.classifyActor(identity);
       const key = identity
         ? `client:${identity.name}@${identity.version}`
         : `anon:${this.hashIp(ip)}`;
@@ -113,6 +132,7 @@ export class ArrivalObservatory {
           name: identity?.name ?? null,
           version: identity?.version ?? null,
           era: era ?? null,
+          self: actor === "self",
           firstSeenMs: nowMs,
           lastSeenMs: nowMs,
           furthestStage: stage,
@@ -138,7 +158,7 @@ export class ArrivalObservatory {
         "mcp_arrival_stage_total",
         "MCP front-door funnel stages by declared-client presence",
         ["stage", "actor"]
-      )?.inc({ stage, actor: identity ? "client" : "anonymous" });
+      )?.inc({ stage, actor });
 
       this.evictOverflow();
       this.dirty = true;
@@ -162,10 +182,11 @@ export class ArrivalObservatory {
         distinct: {
           declared: clients.filter((entry) => entry.name).length,
           anonymous: clients.filter((entry) => !entry.name).length,
-          furthest: clients.reduce(
-            (best, entry) => (stageRank(entry.furthestStage) > stageRank(best) ? entry.furthestStage : best),
-            ARRIVAL_STAGES[0]
-          )
+          self: clients.filter((entry) => entry.self).length,
+          furthest: furthestStageAcross(clients),
+          // The number that answers "has an OUTSIDER looked?" — our own probes
+          // must never be able to move it.
+          furthestExternal: furthestStageAcross(clients.filter((entry) => !entry.self))
         },
         clients
       };
@@ -175,7 +196,7 @@ export class ArrivalObservatory {
         generatedAtMs: this.now(),
         observingSinceMs: this.startedAtMs,
         funnel: Object.fromEntries(ARRIVAL_STAGES.map((stage) => [stage, null])),
-        distinct: { declared: null, anonymous: null, furthest: null },
+        distinct: { declared: null, anonymous: null, self: null, furthest: null, furthestExternal: null },
         clients: [],
         unavailable: "arrival state could not be read"
       };
@@ -219,10 +240,32 @@ export class ArrivalObservatory {
     }
   }
 
+  classifyActor(identity) {
+    if (!identity) return "anonymous";
+    const name = identity.name.toLowerCase();
+    return name.startsWith(SELF_CLIENT_PREFIX) || this.selfClients.has(name) ? "self" : "client";
+  }
+
   hashIp(ip) {
     const value = typeof ip === "string" && ip.trim() ? ip.trim() : "unknown";
     return createHash("sha256").update(`${this.hashSalt}:${value}`).digest("hex").slice(0, 12);
   }
+}
+
+export function resolveSelfClients(env = process.env) {
+  return new Set(
+    String(env?.ARRIVAL_SELF_CLIENTS ?? "")
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+function furthestStageAcross(clients) {
+  return clients.reduce(
+    (best, entry) => (stageRank(entry.furthestStage) > stageRank(best) ? entry.furthestStage : best),
+    ARRIVAL_STAGES[0]
+  );
 }
 
 export function stageRank(stage) {
