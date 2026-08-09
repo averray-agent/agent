@@ -2,6 +2,7 @@ import { cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { buildProductionA2aAgentCardContent } from "./ops/a2a-agent-card-file.mjs";
 import { buildProductionDiscoveryManifestContent } from "./ops/discovery-manifest-file.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -30,6 +31,7 @@ const generatedNestedFiles = [
   "imprint/index.html",
   "transparency/index.html",
   ".well-known/agent-tools.json",
+  ".well-known/agent-card.json",
 ];
 
 async function ensureDistExists() {
@@ -84,6 +86,8 @@ await ensureDistExists();
 const distDiscoveryManifest = path.join(distDir, ".well-known", "agent-tools.json");
 await mkdir(path.dirname(distDiscoveryManifest), { recursive: true });
 await writeFile(distDiscoveryManifest, buildProductionDiscoveryManifestContent());
+const distA2aAgentCard = path.join(distDir, ".well-known", "agent-card.json");
+await writeFile(distA2aAgentCard, buildProductionA2aAgentCardContent());
 await mkdir(siteDir, { recursive: true });
 
 for (const entry of generatedEntries) {

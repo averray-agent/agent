@@ -530,6 +530,10 @@ test("deploy rebuilds and verifies the public site even when no site paths chang
   assert.match(await readFile(deployLog, "utf8"), /run build:site/u);
   assert.match(run.stdout, /Served .*\/ matches built site\/index\.html/u);
   assert.match(run.stdout, /Served .*\/console-stream\.js matches built site\/console-stream\.js/u);
+  assert.match(
+    run.stdout,
+    /Served .*\/\.well-known\/agent-card\.json matches built site\/\.well-known\/agent-card\.json/u,
+  );
   assert.deepEqual(parseDeployResult(run.stdout), {
     schemaVersion: 1,
     changed: false,
@@ -546,8 +550,10 @@ test("post-deploy site serve check fails closed when served bytes differ from th
 
   const staleDir = join(root, "stale-served");
   await mkdir(staleDir, { recursive: true });
+  await mkdir(join(staleDir, ".well-known"), { recursive: true });
   await writeFile(join(staleDir, "index.html"), "<title>Averray</title> stale pre-#409 copy\n");
   await writeFile(join(staleDir, "console-stream.js"), "// stale console stream\n");
+  await writeFile(join(staleDir, ".well-known/agent-card.json"), '{"name":"stale"}\n');
 
   const run = runDeploy(appRoot, {
     PATH: `${fakeBin}:${process.env.PATH}`,
@@ -604,6 +610,10 @@ test("site source detection includes the discovery manifest generator", async ()
   assert.match(
     deployScript,
     /SITE_SOURCE_PATTERN=.*mcp-server\/src\/core\/discovery-manifest\\\.js/u
+  );
+  assert.match(
+    deployScript,
+    /SITE_SOURCE_PATTERN=.*a2a-agent-card-file/u,
   );
 });
 
@@ -1744,7 +1754,7 @@ async function makeSiteFixture() {
   const deployLog = join(root, "deploy.log");
 
   await mkdir(join(appRoot, "scripts/ops"), { recursive: true });
-  await mkdir(join(appRoot, "site"), { recursive: true });
+  await mkdir(join(appRoot, "site/.well-known"), { recursive: true });
   await mkdir(stackRoot, { recursive: true });
   await mkdir(fakeBin, { recursive: true });
   await writeFile(join(stackRoot, "docker-compose.yml"), "services: {}\n");
@@ -1773,7 +1783,10 @@ async function makeSiteFixture() {
     "  esac",
     "done",
     "name=index.html",
-    "case \"$url\" in */console-stream.js) name=console-stream.js ;; esac",
+    "case \"$url\" in",
+    "  */console-stream.js) name=console-stream.js ;;",
+    "  */.well-known/agent-card.json) name=.well-known/agent-card.json ;;",
+    "esac",
     "if [[ -n \"$out\" && -n \"${FAKE_SERVED_DIR:-}\" ]]; then",
     "  cp \"$FAKE_SERVED_DIR/$name\" \"$out\"",
     "else",
@@ -1788,6 +1801,10 @@ async function makeSiteFixture() {
   await writeFile(join(appRoot, "README.md"), "base\n");
   await writeFile(join(appRoot, "site/index.html"), "<title>Averray</title> fresh build\n");
   await writeFile(join(appRoot, "site/console-stream.js"), "// fresh console stream\n");
+  await writeFile(
+    join(appRoot, "site/.well-known/agent-card.json"),
+    '{"name":"Averray Agent Platform"}\n',
+  );
   git(appRoot, "add", ".");
   git(appRoot, "commit", "-m", "base");
   const baseSha = revParse(appRoot, "HEAD");

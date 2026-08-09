@@ -47,7 +47,7 @@ RUN_INDEXER=${RUN_INDEXER:-auto}
 RUN_SITE=${RUN_SITE:-auto}
 RUN_CADDY=${RUN_CADDY:-auto}
 RUN_SMOKE=${RUN_SMOKE:-1}
-SITE_SOURCE_PATTERN='^(marketing/|site/|mcp-server/src/core/discovery-manifest\.js|scripts/sync-marketing-site\.mjs|scripts/ops/discovery-manifest-file\.mjs|package(-lock)?\.json)'
+SITE_SOURCE_PATTERN='^(marketing/|site/|mcp-server/src/core/discovery-manifest\.js|scripts/sync-marketing-site\.mjs|scripts/ops/(a2a-agent-card-file|discovery-manifest-file)\.mjs|package(-lock)?\.json)'
 # Runtime outcome, not intent: apply_caddy sets this only after a changed
 # configuration is installed and the Caddy restart succeeds.
 CADDY_RESTARTED=0
@@ -977,7 +977,10 @@ site_content_hash() {
 verify_site_served() {
   local base_url="${PUBLIC_SITE_URL%/}"
   local entry
-  for entry in "index.html /" "console-stream.js /console-stream.js"; do
+  for entry in \
+    "index.html /" \
+    "console-stream.js /console-stream.js" \
+    ".well-known/agent-card.json /.well-known/agent-card.json"; do
     local file="${entry%% *}"
     local url_path="${entry#* }"
     local local_file="$APP_ROOT/site/$file"
