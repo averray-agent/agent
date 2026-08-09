@@ -85,10 +85,17 @@ and they are the reason this platform gets to be trusted with a payment rail at 
 - The adapter boundary is demonstrated by a second, stub implementation in tests.
 - No CDP identifier appears outside the adapter package.
 
-## Companion, separate PR
+## Companion — WITHDRAWN
 
-**Publish an A2A Agent Card** for the platform. A2A reached v1.0 in 2026 under Linux
-Foundation governance with 150+ organisations behind it, and Agent Cards are its
-capability-advertisement mechanism. Small, independent of every open treasury question,
-and it puts us in a discovery ecosystem that MCP directories demonstrably did not reach —
-220 arrivals, zero browses.
+This packet previously carried an A2A Agent Card as a small companion. **It was
+withdrawn on 2026-08-09 because the card cannot be published honestly without an actual
+A2A endpoint.**
+
+`AgentInterface.protocolVersion` is the version of A2A exposed at that interface, and spec
+§12.1 requires a custom binding to implement all A2A core operations with functional
+equivalence. So declaring our MCP or REST endpoints would assert A2A support we do not
+have. `capabilities: {}` disables optional features; it does not waive core operations.
+
+`agent-tools.json` remains the honest MCP/REST discovery document. A real A2A endpoint is
+a project to scope on its own merits, not a companion task — see the correction section in
+[`AGENT_STANDARDS_INTEROP_DESIGN.md`](AGENT_STANDARDS_INTEROP_DESIGN.md).

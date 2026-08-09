@@ -294,9 +294,36 @@ networks."* We may be early rather than wrong. Our 220-arrivals-zero-browses fun
 consistent with that reading, and it argues for patience on demand-side metrics and against
 over-building for a public market that has not formed yet.
 
-**Adjacent things worth watching, not building:** publishing an A2A Agent Card for the platform
-itself (cheap discovery in a 150-org ecosystem); ERC-8004 as the portable-reputation layer
-(Track 2); and whether ACP/MPP gain enough share to be worth a second payment adapter.
+**Adjacent things worth watching, not building:** ERC-8004 as the portable-reputation layer
+(Track 2), and whether ACP/MPP gain enough share to be worth a second payment adapter.
+
+### An A2A Agent Card is NOT a cheap win — corrected 2026-08-09
+
+An earlier draft of this document recommended publishing an A2A Agent Card as a small
+discovery win that advertises only our MCP and REST interfaces. **That is not possible
+honestly, and the correction matters more than the idea did.**
+
+- `AgentInterface.protocolVersion` means **the version of the A2A protocol exposed at that
+  interface** — not the version of the bound transport. So `1.0` beside an MCP binding
+  claims A2A v1.0 semantics over MCP.
+- The custom-binding allowance is **not** permission to advertise arbitrary protocols.
+  Spec §12.1 requires a custom binding to implement **all A2A core operations with
+  functional equivalence**, map the canonical data model, provide error mappings, and
+  support A2A auth patterns.
+- `capabilities: {}` disables *optional* features. It does not waive core operations.
+
+So both plausible entries are false claims: MCP + `1.0` asserts A2A over MCP, and
+`HTTP+JSON` + `1.0` asserts the standard A2A REST task interface. A card cannot be
+published until an actual A2A endpoint exists — which is a real implementation project,
+not a companion task. `agent-tools.json` remains the honest MCP/REST discovery document.
+
+**The process lesson is the durable part.** The original recommendation rested on a
+summarised fetch that said custom bindings allow "declaring MCP, REST, OpenAPI, or any
+custom protocol", which missed §12.1 completely. It was then used to argue around
+`AGENT_BANKING.md`'s existing rule — *do not advertise A2A as a supported public protocol
+until the endpoint, auth posture, and docs exist* — which was right all along. **A clever
+reading that gets past a documented constraint deserves more suspicion, not less**, and a
+paraphrase is not a normative source.
 
 ## Explicitly not doing
 
