@@ -229,13 +229,65 @@ our chain cannot receive there, whatever it can sign.
 - The positioning line from 2026-08-04 still holds exactly: *"Cloudflare gives agents a
   way to spend. Averray is where they earn it first."*
 
-## Open questions before Track 1 ships
+## Nothing is swapped — and that is the whole trick
 
-1. Do we accept SIWX (`SIGN-IN-WITH-X` header) alongside our SIWE, so x402 agents
-   authenticate in one request instead of three? Cheap, and it is the frictionless move.
-2. Bazaar listing appears to require the CDP facilitator specifically. Does that couple
-   us to Coinbase in a way the "coupling to none" rule forbids, and is there a federated
-   path? The registry is stated to be evolving toward federation — worth confirming
-   before we depend on it.
-3. How much working float does Track 1 need? We fund escrow on Hub before settling on
-   Base, so this is a treasury sizing question, not an engineering one.
+The natural question is "how does the money get to Polkadot if x402 does not support
+Polkadot?" **It does not. Nothing bridges in the payment path.**
+
+```
+poster's USDC  ──x402 settle──▶  OUR wallet on Base      (stays there)
+OUR Hub float  ──escrow────────▶  the job on 420420419   (funded by us)
+```
+
+Two independent pools. The poster never touches our chain; we never touch theirs. That
+is precisely why this works on a chain x402 has never heard of — we are not asking x402
+to reach Polkadot, we are asking it to reach *our Base wallet*, which is a completely
+ordinary thing for it to do.
+
+### The cost: a two-chain treasury with no clean rebalance
+
+Over time the Base balance grows and the Hub float drains, so value must periodically
+move Base → Hub. **There is no clean native path for that today, and this is the real
+cost of Track 1.**
+
+Verified 2026-08-09:
+
+- **Polkadot Asset Hub has native Circle-issued USDC** ✓
+- **Asset Hub is NOT on Circle's CCTP supported-chain list.** CCTP V2 covers Ethereum,
+  Arbitrum, Base, Optimism, Polygon PoS, Avalanche, Solana, Sui, Linea, Unichain, with
+  Aptos and Noble integrating. **No burn/mint route Base → Asset Hub.**
+- Inside Polkadot, USDC moves by XCM — but that only helps once value is already there.
+
+So rebalancing needs a third-party bridge (Wormhole/Axelar/LayerZero/Hyperlane, typically
+via Moonbeam then XCM) or a centralised exchange leg. Both are multi-hop, and a bridge
+adds counterparty risk to a treasury that currently has none.
+
+**This is a permanent operating cost, not a launch-only one.** Track 3 does not remove
+it: even with x402 native on Hub, agents keep their money on Base and will not move it.
+
+**Why it is still worth doing.** At current volume the rebalance is one manual transfer
+occasionally, not a pipeline — the float needed is roughly *concurrent unsettled jobs ×
+1.05 USDC*, which at any plausible near-term volume is tens of dollars. The mechanics
+matter, the magnitude does not. But the design must state the bridge dependency up front
+rather than discover it at volume, and the rebalance route should be chosen deliberately
+(and its counterparty risk sized) before Track 1 ships, not after.
+
+## Open questions — RESOLVED
+
+**Bazaar coupling: not a lock-in.** The Bazaar spec is **open and part of the x402
+scheme**; any facilitator may implement its own `/discovery/resources`. Coinbase hosts
+the initial implementation and it is explicitly designed to evolve into a federated
+model where anyone can run or mirror a registry. The documented path is to start managed
+and move to a self-hosted facilitator as requirements evolve. So using CDP for reach at
+launch satisfies *compatibility with most, coupling to none* — provided we treat the
+listing as portable from day one and do not build on CDP-only assumptions.
+
+**SIWX: accept it.** It is the EIP-4361 message we already verify, carried in a
+`SIGN-IN-WITH-X` header, and it collapses our three-request nonce/sign/verify dance into
+one. Standard SIWE libraries cannot verify it alone — it adds origin binding and nonce
+tracking — so this is an adapter, not a swap. It is the single cheapest friction removal
+available and should ship with Track 1.
+
+**Float: not a sizing problem, a routing problem.** See above. The amount is trivial at
+our volume; the open decision is which rebalance route to use and what counterparty risk
+it carries.
