@@ -105,9 +105,49 @@ listed in the Bazaar** with `discoverable: true`, plus reachable from `x402-list
 `x402scan`, Onyx Bazaar and gold-402. That is a distribution channel populated by agents
 that hold money — categorically different from MCP directories, which gave us crawlers.
 
-**We carry the cross-chain risk.** That is the honest cost and it must be designed, not
-waved at: what happens when payment settles on Base and job creation on Hub fails? The
-answer must be a stated refund path, not silence — the lesson from finding F2.
+### The cross-chain failure path — RESOLVED
+
+The obvious fear was "payment settles on Base, job creation fails on Hub, poster's money
+is gone." **x402's structure makes that case impossible, if we order the steps correctly.**
+
+The exact scheme signs an **EIP-3009 `transferWithAuthorization`** over EIP-712, carrying
+`from`, `to`, `value`, `validAfter`, `validBefore`, `nonce`. Two properties matter:
+
+- **Funds stay in the payer's wallet until settlement.** The signature is an
+  authorization, not a transfer.
+- **The facilitator cannot modify the amount or destination** — it only broadcasts.
+
+And the protocol's own flow is verify → *perform the work* → settle. So:
+
+```
+1. /verify   signature, funds, within validAfter…validBefore   → NO money moves
+2. create the escrow-funded job on 420420419                    → we front it from float
+3. /settle   on Base                                            → pulls the poster's USDC
+```
+
+Failure modes, in order:
+
+| Failure | Consequence |
+|---|---|
+| verify fails | nothing happened; the agent is told why |
+| **job creation fails after verify** | **still nothing moved — we never settled.** The poster's funds are untouched. This is the stranding case, and it is structurally impossible. |
+| settle fails after job created | **we are out of pocket, not the poster.** Delist the job; our loss, bounded. |
+
+**The poster's money is never at risk, because we settle last.** The residual risk is
+ours, bounded by the validity window and by requiring job creation to succeed first.
+That is the correct direction for a platform — never strand the customer, absorb the
+tail yourself.
+
+`nonce` prevents replay; `validAfter`/`validBefore` bound the window, so a verified-but-
+unsettled authorization simply expires harmlessly.
+
+**Consequence for treasury:** we front the escrow on Hub before settling on Base, so
+Track 1 requires working float. That ties directly to the bank/yield lane and must be
+sized before launch, not after.
+
+**Also note:** EIP-3009 is required *of the token being paid* — USDC on Base has it.
+Ours does not, which is fine precisely because settlement never happens on our chain.
+It is further confirmation that Track 1 is the right design and Track 3 is not.
 
 **Design rule (Pascal, 2026-08-04, unchanged):** accept payment proofs generically.
 *Compatibility with most, coupling to none.*
@@ -165,14 +205,37 @@ not as a demand fix.
 **No further MCP directory listings.** That channel has been measured: 220 arrivals,
 zero browses. It produces directories, not agents. Stop buying more.
 
+## Cloudflare-walleted agents — RESOLVED, and the signing question turned out to be moot
+
+The original question was whether Cloudflare Wallets can `personal_sign`. It cannot be
+answered from public documentation: Web Bot Auth identity is **Ed25519**, Virtual Wallets
+"operate via API keys", and the only capability stated anywhere is *purchasing APIs and
+content via x402*. No source mentions `personal_sign`, EIP-191, SIWE, or arbitrary
+message signing. That is a strong indication, not proof — and Wallets is still rolling
+out, so it could change.
+
+**But the question does not need answering, because a harder constraint binds first.**
+Cloudflare's x402 documentation lists supported chains as Base, Ethereum, Polygon,
+Optimism, Arbitrum, Avalanche, Solana, Aptos, Stellar and Sui. **Polkadot Hub is not on
+that list.** A worker must *receive* USDC on `420420419`. A wallet that does not exist on
+our chain cannot receive there, whatever it can sign.
+
+**Decision, and it is stable regardless of how the signing question later resolves:**
+
+- **Cloudflare-walleted agents are posters, never workers.** Reach them through Track 1.
+- **Do not design worker onboarding around managed wallets.** Our earn-from-zero path —
+  a free local EOA, self-custodied, bond-waived, gas-brokered — is not a fallback for
+  them. It is strictly better, and it is the only thing that works.
+- The positioning line from 2026-08-04 still holds exactly: *"Cloudflare gives agents a
+  way to spend. Averray is where they earn it first."*
+
 ## Open questions before Track 1 ships
 
-1. Does Cloudflare Wallets expose secp256k1 signing separate from the Ed25519 identity
-   key? Decides whether their agents can ever be workers here.
-2. What is the cross-chain failure design — payment settles on Base, job creation fails
-   on Hub? Needs a stated, poster-visible refund path.
-3. Do we accept SIWX (`SIGN-IN-WITH-X` header) alongside our SIWE, so x402 agents
-   authenticate in one request instead of three?
-4. Bazaar listing appears to require the CDP facilitator specifically. Does that
-   couple us to Coinbase in a way the "coupling to none" rule forbids, and is there a
-   federated path?
+1. Do we accept SIWX (`SIGN-IN-WITH-X` header) alongside our SIWE, so x402 agents
+   authenticate in one request instead of three? Cheap, and it is the frictionless move.
+2. Bazaar listing appears to require the CDP facilitator specifically. Does that couple
+   us to Coinbase in a way the "coupling to none" rule forbids, and is there a federated
+   path? The registry is stated to be evolving toward federation — worth confirming
+   before we depend on it.
+3. How much working float does Track 1 need? We fund escrow on Hub before settling on
+   Base, so this is a treasury sizing question, not an engineering one.
