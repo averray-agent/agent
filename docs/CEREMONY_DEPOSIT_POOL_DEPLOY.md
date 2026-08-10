@@ -107,33 +107,131 @@ From `deployments/mainnet.json` at c48a22e:
 | `asset_` / USDC | `0x0000053900000000000000000000000001200000` | precompile; emits no logs |
 | `policy_` | `0x226F14252A98BD2eA140271647De20132F09AF20` | TreasuryPolicy |
 | `wrapper_` | `0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc` | live xcmWrapper (v2.2.1) |
-| `strategyId_` | **DECIDE** — must NOT be `HYDRATION_USDC_V1` | see below |
-| `agentAccountCore_` | `A_adapter` (predicted) | immutable |
-| `operator_` (pool) | **DECIDE** | see below |
+| `strategyId_` | `HYDRATION_USDC_POOL_V1` (proposed) | must NOT reuse `HYDRATION_USDC_V1` |
+| `agentAccountCore_` | `A_adapter` (predicted, §2) | immutable |
+| `operator_` (pool) | a dedicated service key | see below |
 
-### `strategyId_` must be new
+### `operator_` — a bounded role, so it does not need the multisig
 
-`HYDRATION_USDC_V1` is already bound to the operating adapter 0x96091d44 in the manifest's
-`strategies` block. The pool's lane is a *separate* deployment with its own book; reusing
-the id would conflate two positions in every downstream read — exactly the kind of thing
-that makes a money view lie. Propose `HYDRATION_USDC_POOL_V1`, and check whether anything
-keys off the id before committing to the string.
+The operator's entire power surface is three functions, and the contract bounds all of them:
 
-### `operator_` — open, and it is a real decision
+| function | effect |
+|---|---|
+| `contributeOperatorPrincipal` | puts operator money **in** |
+| `deployToVenue` | buffer → venue |
+| `recallVenueDeployment` | venue → buffer |
 
-The pool's `operator` governs venue deployment and recall. It should not be a key that also
-does routine ops. Candidates: the multisig owner `0x01e6eed8…874c`, or a dedicated
-service operator. **Not decided here** — it is a durable authority assignment and belongs to
-Pascal.
+- **No privileged withdrawal exists.** `DepositPool.sol:270` — *"Matching shares are
+  permanently held by the pool contract. There is no privileged operator withdrawal path."*
+  `redeem` / `requestRedeem` are not operator-gated.
+- `returnBy <= block.timestamp + NOTICE_7_DAYS`, enforced (`:344`).
+- One active deployment at a time (`:346`), one per `DEPLOYMENT_EPOCH` = 1 day (`:347`).
+- `bufferFloor()` is protected (`:353`) — the instant tier's backing cannot be drained.
 
-### Authorisation the lane needs
+So a compromised operator key **cannot take depositor money**. The worst case is a liveness
+annoyance: deploying the available buffer once a day, for at most seven days out.
 
-`HydrationUsdcAdapterV22.onlyOperator` resolves to `policy.strategySettler(msg.sender)`
-(`:101`), and owner-only paths check `policy.owner()` (`:111`). So after deployment the new
-lane needs its settler registered on TreasuryPolicy, the same shape as the
-`setServiceOperator` ceremony that unblocked the worker loop previously. **Verify which
-address must be the settler for the pool lane before the ceremony**, because discovering it
-afterwards means another multisig round trip.
+Therefore use a **dedicated service key**, not the multisig. `deployToVenue` and
+`recallVenueDeployment` are routine, and a multisig ceremony per deployment would make the
+lane unusable in practice. The key should do only this.
+
+### `strategyId_` — a label, not a control-flow key
+
+Every consumer of `HYDRATION_USDC_V1` in the tree: `deployments/mainnet.json`,
+`scripts/ops/bank-xcm-v2-ceremony-lib.mjs` (a module constant at `:14-15`), two test files,
+and three historical ceremony docs. No production backend code branches on it.
+
+So choosing a new string is safe; the hazard is **reuse**. The manifest `strategies` block
+maps id → adapter, and two positions sharing one id would make the ops board conflate the
+operating bank position with the pool's — a money view that lies rather than crashes.
+
+### Settlement authority — already satisfied, no ceremony needed
+
+The lane has two independent authority planes, and they are easy to confuse:
+
+| plane | gate | who |
+|---|---|---|
+| capital movement — `requestDeposit` (`:128`), `requestWithdraw` (`:212`) | `onlyAgentAccountCore` | the **immutable** bound contract |
+| settlement, `recordRemoteOperatingFloat`, `recordRemotePosition` | `onlyOperator` → `policy.strategySettler(msg.sender)` | an off-chain service |
+
+The pool adapter draws its authority from *being* `agentAccountCore` — that is what the
+immutable binding in §2 is for. **It does not need to be a settler.**
+
+`strategySettler` is a global `mapping(address => bool)` on TreasuryPolicy, not per-adapter.
+Read from mainnet 2026-08-10:
+
+```
+strategySettler(0x5a6836c6D4d293F6E5377E6c28054F4171915813) = true    # manifest `verifier`
+strategySettler(0x9Ab8531FBb0948C542a31298FD61335f30064239) = false
+strategySettler(0x08406B2bCE5592A534141767ffe4e5B9DC6c22D1) = false   # deployer
+strategySettler(0x01e6eed856e989201f4ff6346e18eab7e46c874c) = false   # multisig owner
+```
+
+Positive control on the same call path: `owner()` returns `0x01E6eed8…874C`, matching the
+manifest — so those `false` results are answers, not a broken call.
+
+**Consequence: the new lane accepts the existing settler automatically. No
+`setStrategySettler`, no multisig round trip for this part.**
+
+Two observations worth carrying forward rather than acting on now:
+
+- The settler is the address the manifest labels `verifier`. Bank settlement authority and
+  job-verification authority are the same key — role overloading, so one compromise touches
+  both subsystems.
+- The live operating lane's `agentAccountCore` reads `0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57`
+  — the AgentAccountCore contract. The pool adapter is structurally an AAC-substitute for
+  the pool's lane, which is the same seam as the O4 AAC-successor question.
+
+### Predicted addresses
+
+Computed against the live deployer nonce on 2026-08-10:
+
+```
+deployer   0x08406B2bCE5592A534141767ffe4e5B9DC6c22D1   nonce = 33
+
+nonce 33 → 0xAcC2CAc2E814F243dbFEAE1B99BcfE1A1A7846Ed   tx1  lane
+nonce 34 → 0xf0f3b4a65AD54f1838A581b594CA77A54002c5f1   tx2  A_adapter
+nonce 35 → 0xAa9661e983FF3a41c8FE992331E8f1e375d3eE94   tx3  A_pool
+```
+
+**These are valid only while the nonce is still 33.** Recompute immediately before tx 1
+(`cast nonce <D>` then `cast compute-address <D> --nonce <n>`) and abort if it has moved.
+They are recorded here as a worked example of the shape, not as values to paste blindly.
+
+---
+
+## 3b. The fourth transaction: registering the lane on the shared wrapper
+
+Deploying the three contracts is not enough. The lane dispatches through `xcmWrapper`, which
+routes by strategy id:
+
+```
+strategyAdapter(HYDRATION_USDC_V1) = 0x96091d44…3159    # read from mainnet, the operating lane
+```
+
+The pool's lane needs its own entry, via `XcmWrapperV22.setStrategyAdapter`:
+
+```solidity
+// XcmWrapperV22.sol:122
+function setStrategyAdapter(bytes32 strategyId, address adapter) external onlyOwner {
+    if (!dispatchPaused || strategyId == bytes32(0)) revert InvalidConfiguration();
+```
+
+Two consequences, and the second is the one to plan around:
+
+1. `onlyOwner` → this is a **multisig** transaction. (Unlike the settler, which needs
+   nothing — see §3.)
+2. **It requires `dispatchPaused == true`.** The wrapper is *shared* with the live operating
+   bank lane, so registering the pool's lane means pausing dispatch on the position that
+   currently holds the 10 USDC.
+
+So the ceremony needs a pause window: pause dispatch → `setStrategyAdapter` → unpause.
+Schedule it when no operating deployment or recall is in flight — pausing mid-flight is a
+different and much less pleasant question. `paused()` on TreasuryPolicy read `false` and
+the wrapper's `dispatchPaused` should be read immediately before, not assumed.
+
+This step is what makes the pool's lane *usable*; without it the contracts exist and cannot
+dispatch. It is easy to miss because nothing in the three constructors references it.
 
 ---
 
@@ -202,11 +300,17 @@ deliberately does not.
 
 ## 6. Before anything is signed
 
-- [ ] `operator_` decided (§3)
-- [ ] `strategyId_` string decided and checked against downstream readers (§3)
-- [ ] settler address for the new lane identified (§3)
-- [ ] deployer `D` confirmed quiescent; nonce read immediately before tx 1 (§2)
-- [ ] both predicted addresses computed and recorded, to be re-checked after each tx (§2)
+- [x] ~~settler address identified~~ — **already satisfied**, `0x5a6836c6…5813` is a
+      `strategySettler` and the mapping is global (§3). No multisig needed for this.
+- [x] ~~`operator_` shape decided~~ — a dedicated service key, not the multisig; justified by
+      the contract's own bounds (§3). The specific key is still Pascal's to name.
+- [x] ~~`strategyId_` checked against downstream readers~~ — one non-test consumer,
+      a module constant; the hazard was reuse, not choice (§3).
+- [ ] the actual service-key address for `operator_` named
+- [ ] deployer `D` confirmed quiescent; nonce re-read immediately before tx 1 (§2)
+- [ ] predicted addresses **recomputed** at ceremony time — the ones in §3 assume nonce 33
+- [ ] pause window agreed for `setStrategyAdapter`, with no operating deployment or recall
+      in flight (§3b) — this pauses dispatch for the live 10 USDC position too
 - [ ] dry-run each deployment against current state before broadcasting
 - [ ] caps confirmed as intended: `totalAssets() <= 1_000e6`, `assetsOf(agent) <= 100e6`
 - [ ] a decision recorded for §5, even if the decision is "leave it and document"
