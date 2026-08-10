@@ -1,3 +1,4 @@
+import { buildSettlementExpectation } from "../../core/settlement-expectation.js";
 import { schemaRefToJobSchemaPath } from "../../core/job-schema-registry.js";
 
 const DEFAULT_AGENT_LIMIT = 25;
@@ -95,6 +96,7 @@ function toCompactJobRow(job) {
   const { state } = effectiveJobState(job);
   const claimable = job.claimable ?? state === "open";
   const sourceDetails = compactSourceDetails(job);
+  const settlement = buildSettlementExpectation(job.verifierMode);
   return {
     id: job.id,
     title: job.title,
@@ -124,6 +126,9 @@ function toCompactJobRow(job) {
       asset: job.rewardAsset ?? null,
       amount: job.rewardAmount ?? null
     },
+    // Beside the reward on purpose: an agent comparing two jobs is already looking
+    // here, and how fast it gets paid is the other half of the price.
+    ...(settlement ? { settlement } : {}),
     createdAt: lifecycle.createdAt ?? null,
     summary: summarizeJob(job),
     definitionUrl: `/jobs/definition?jobId=${encodeURIComponent(job.id)}`,

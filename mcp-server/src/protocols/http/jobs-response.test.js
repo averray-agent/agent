@@ -263,3 +263,39 @@ test("public jobs response allows explicit full format with query params", () =>
 
   assert.equal(response, JOBS);
 });
+
+// End to end through the REAL normalizer, because the wiring is only worth anything
+// if verifierMode actually survives from the stored job document to the listing row.
+// Asserting the derivation in isolation would pass happily while the field was being
+// dropped somewhere upstream and the block silently never appeared.
+test("a normalized job carries its settlement expectation into the public listing", async () => {
+  const { normalizeJobInput } = await import("../../core/job-catalog-normalization.js");
+
+  const normalized = normalizeJobInput({
+    id: `0x${"cd".repeat(32)}`,
+    title: "Audit and report on Wikipedia citations",
+    description: "Review the article and return an editor-ready proposal.",
+    category: "wikipedia",
+    jobType: "review",
+    tier: "starter",
+    rewardAsset: "USDC",
+    rewardAmount: 0.4,
+    verifierMode: "human_fallback",
+    escalationMessage: "Maintainer review.",
+    acceptanceCriteria: ["Every citation is checked."],
+    inputSchemaRef: "schema://jobs/coding-input",
+    outputSchemaRef: "schema://jobs/coding-output",
+    input: { task: "Review it.", acceptanceCriteria: ["Every citation is checked."] }
+  });
+
+  assert.equal(normalized.verifierMode, "human_fallback", "the normalizer must keep the mode");
+
+  const body = buildPublicJobsResponse([normalized], new URLSearchParams({ format: "compact" }));
+  const row = body.jobs[0];
+
+  assert.ok(row.settlement, "the listing must carry a settlement block");
+  assert.equal(row.settlement.path, "human_review");
+  assert.equal(row.settlement.humanReviewWorstCaseSeconds, 604800);
+  // Beside the reward, which is the whole point — an agent comparing jobs sees both.
+  assert.ok("reward" in row);
+});
