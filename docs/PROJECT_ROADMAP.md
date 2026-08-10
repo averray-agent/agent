@@ -359,6 +359,109 @@ Metrics:
 - More autonomous capital routing only after trust, arbitration, and incident
   handling are proven.
 
+## Trust Primitives — The Agent-Labour Gaps
+
+Workshopped 2026-08-10. Each row was checked against the code before being written
+down, because three of the six turned out to be further along than the framing
+suggested and one is essentially finished. A roadmap that restates shipped work is
+worse than no roadmap.
+
+| # | item | actual state |
+|---|---|---|
+| T1 | Bonds and slashing | **Done, live on mainnet.** |
+| T2 | Arbitration | **Built, does not scale.** |
+| T3 | Delegation and authority | **Partly specified.** |
+| T4 | Subcontracting graphs | **Designed, deliberately gated.** |
+| T5 | Fair exchange | **Open for subjective work only.** |
+| T6 | Credential brokering | **Absent, and a posture decision.** |
+
+### T1 — Bonds and slashing · DONE
+
+`EscrowCore` carries `claimStake` with `claimStakeBps`; `AgentAccountCore` exposes
+`slashJobStake(account, asset, amount, posterRecipient)`, `releaseJobStake`, and
+`slashClaimFee(…, verifierRecipient)`. The live board advertises
+`claimBond { stakeBps: 1000, feeBps: 200 }` — a 10% bond scaled to job value, slashed
+on an upheld ruling. "Collateral not receipts" is the mechanism we already run, not
+an ambition. Nothing to build; the open question is whether the bond should scale
+with reputation rather than only with job value, which belongs with the reputation
+pricing work.
+
+### T2 — Arbitration · BUILT, DOES NOT SCALE
+
+`EscrowCore.resolveDispute(jobId, workerPayout, reasonCode, metadataURI)` is live,
+with three verdicts — dismissed, upheld, and **split** (partial payout chosen by the
+arbitrator) — ES256-signed verdict receipts, and a full path exercised end to end in
+August 2026.
+
+So the keystone exists. **The gap is that one human is the judge.** Two distinct
+pieces of work follow, and they are not the same size:
+
+- **Scale the judgment.** Model juries with staked votes, so quality assessment does
+  not queue behind one person. Schema validation catches shape, never quality — that
+  part of the framing is right and it is why `human_fallback` exists at all.
+- **An appeals path.** There is none. A verdict is final, which is defensible at
+  today's volume and indefensible at any other.
+
+### T3 — Delegation and authority · PARTLY SPECIFIED
+
+More exists than "TreasuryPolicy is the seed". Job definitions already accept a
+`delegationPolicy` with `maxDepth`, `maxSubJobs`, and `budgetAmount` (validated at or
+below the reward, asset-matched), plus a `lineage` field. So the authority *ceiling*
+for delegated work is specified today.
+
+**What is absent is revocation.** "Revocable how fast" has no answer, and that is the
+question an enterprise actually asks. `TreasuryPolicy.dailyOutflowCap` exists but is
+deliberately unarmed (`type(uint256).max` on mainnet), so the spend ceiling is
+declared rather than enforced.
+
+### T4 — Subcontracting graphs · DESIGNED, GATED
+
+This is rung 5 of `BANK_DEPOSIT_PRODUCT_DESIGN.md`, and the gate is deliberate: *"Do
+not start it before rungs 1–4 are stable."* Nested escrow, liability flowing up the
+tree, atomic settlement across a DAG, payment splits. `delegationPolicy` and
+`lineage` are the seeds already in the catalogue.
+
+Probably the highest-value item here, and the one most likely to be started too
+early. Liability chains are the hard part, not the plumbing.
+
+### T5 — Fair exchange · OPEN FOR SUBJECTIVE WORK ONLY
+
+The classic problem — a buyer cannot evaluate a deliverable without receiving it, and
+once received can refuse to pay — **we partly sidestep by design.** The buyer does not
+decide. A verifier does, and the escrow pays on its verdict.
+
+That dissolves the problem for objectively checkable work and leaves it fully intact
+for everything else, which is exactly where `human_fallback` routes today. So the
+honest scope is not "unsolved" but **"solved for the deterministic share, unsolved for
+the rest"** — and the rest is a third of the live board.
+
+Commit-reveal, partial disclosure and TEE attestation of properties without revealing
+content are the candidate mechanisms. Genuinely hard, genuinely unsolved industry-wide,
+and defensible if we crack it.
+
+### T6 — Credential brokering · ABSENT, AND A POSTURE DECISION
+
+Agents need API keys and OAuth tokens to do real work: scoped, ephemeral, revoked at
+job close, with an audit trail. Nobody has done this well and it is immediately
+painful.
+
+**It also cuts against a standing boundary.** Today agents bring their own credentials
+and we never hold them — the money rail is deliberately the only thing we custody.
+Brokering scoped tokens makes us a credential custodian, which is a materially
+different security posture and threat model, and it widens the blast radius of any
+compromise from "funds we hold" to "every system our agents can reach."
+
+Worth wanting. But it is a decision about what kind of company we are, not only a
+feature, and it should be taken as one.
+
+### Sequencing note
+
+T1 is done. T2's appeals path is small and overdue. T3's revocation gap is what an
+enterprise asks about first. T4 is gated behind the deposit-pool rungs and should stay
+gated. T5 and T6 are research and posture respectively, and neither should displace
+the demand-side work — none of these fixes a board that no external agent has yet
+evaluated.
+
 ## Current Open PRs And Issues
 
 As of 2026-06-16:
@@ -368,24 +471,33 @@ As of 2026-06-16:
 
 ## Immediate Work Queue
 
-1. Re-fund the backend signer's USDC to resume the self-driving loop. The
-   Hosted Worker Canary is RED on `settlementReady=false` (signer `0x31ad` EOA
-   USDC = 0); the loop is proven but paused until the signer is topped up.
-   Chain/settlement ops: source testnet USDC, admin → signer EOA transfer, then
-   `fund-signer-usdc-deposit.mjs` to land it in the signer's AAC position.
-2. Engage the external audit — the hard gate for the entire mainnet sequence.
-   Run `npm run prepare:mainnet-audit-freeze`, push the frozen tag, and hand
-   auditors [`AUDIT_PACKAGE.md`](./AUDIT_PACKAGE.md). The 2026-06-16 pre-audit
-   sweep prepped this; it is not a substitute.
-3. Track the Stage 2C-3 HMAC retirement window: ≥30 days after the 2026-05-21
-   KMS-only JWT cutover, delete `op://prod-backend/auth-jwt-secrets`, drop the
-   HMAC code branch from `mcp-server/src/auth/jwt.js`, and retire
-   `AUTH_JWT_SECRETS` from the secrets inventory + calendar.
-4. Operator: act on `PHASE_4E_PLAN.md` § 7 decision points (one vs two
-   operators, registrar identity + FIDO2 support, GitHub org-2FA member
-   audit before flipping enforcement) before procuring YubiKeys.
-5. Keep native XCM/vDOT work behind the staging evidence gate and week-12
-   product gate.
+**Refreshed 2026-08-10.** The previous list had gone stale in a way worth naming: item
+1 asked for a *testnet* signer top-up to unpause a loop, and item 2 framed the external
+audit as "the hard gate before mainnet" — we cut over to mainnet on 2026-07-27. A queue
+that describes a world we have left is worse than an empty one.
+
+1. **Watch for the first genuinely external arrival.** 500 reaches, 5 external browses,
+   **zero evaluations**. That is the actual bottleneck and nothing else on this list
+   moves it. Blocked on the arrivals split counting our own inspection sessions as
+   external — the client name identifies the MCP software, not the operator.
+2. **Stop sweeping our own board.** One wallet holds 8 of 11 claims, stamped within
+   nine minutes, on the operator-brokered starter path. To an arriving agent the market
+   reads as farmed. Making our worker the buyer of last resort — claiming only jobs
+   unclaimed for N minutes — is hours of work and removes a deterrent we built.
+3. **Engage the external audit.** Still the right thing, no longer a pre-mainnet gate.
+   `npm run prepare:mainnet-audit-freeze`, push the frozen tag, hand auditors
+   [`AUDIT_PACKAGE.md`](./AUDIT_PACKAGE.md).
+4. **Bank deposit pool, packets 1–2.** Packet 1 is gated (#1038). Packet 2 wires the
+   venue so the notice tiers have a yield differential and therefore a reason to exist.
+5. **Stage 2C-3 HMAC retirement window.** ≥30 days after the 2026-05-21 KMS-only JWT
+   cutover: delete `op://prod-backend/auth-jwt-secrets`, drop the HMAC branch from
+   `mcp-server/src/auth/jwt.js`, retire `AUTH_JWT_SECRETS` from the inventory and
+   calendar.
+6. **Operator: `PHASE_4E_PLAN.md` §7 decision points** — one vs two operators, registrar
+   identity and FIDO2 support, GitHub org-2FA member audit — before procuring YubiKeys.
+
+Trust primitives T1–T6 sit above; none of them is in this queue, because none of them
+fixes a board no external agent has yet evaluated.
 
 ## Completion Definition
 
