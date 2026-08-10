@@ -49,6 +49,8 @@ function rampConfig(overrides = {}) {
     X402_PAYMENT_NETWORK: "eip155:8453",
     X402_PAYMENT_ASSET_ADDRESS: BASE_USDC,
     X402_PAYMENT_PAY_TO: PAY_TO,
+    X402_PAYMENT_ASSET_EIP712_NAME: "USD Coin",
+    X402_PAYMENT_ASSET_EIP712_VERSION: "2",
     X402_POSTING_FLOAT_CAP_USDC: "5",
     X402_POSTING_FLOAT_RETRY_AFTER_SECONDS: "900",
     ...overrides
@@ -340,10 +342,70 @@ test("float cap has no default and must be supplied by the bank lane", () => {
       X402_PAYMENT_NETWORK: "eip155:8453",
       X402_PAYMENT_ASSET_ADDRESS: BASE_USDC,
       X402_PAYMENT_PAY_TO: PAY_TO,
+      X402_PAYMENT_ASSET_EIP712_NAME: "USD Coin",
+      X402_PAYMENT_ASSET_EIP712_VERSION: "2",
       X402_POSTING_FLOAT_RETRY_AFTER_SECONDS: "900"
     }),
     /FLOAT_CAP_USDC is required/u
   );
+});
+
+// The advertised `extra` IS the payer's EIP-712 domain. We shipped a hardcoded
+// { name: "USDC", version: "2" }; Base USDC has symbol() "USDC" but name()
+// "USD Coin", so every payer signed a digest the token does not recognise, the
+// signature recovered to a different address, and the facilitator returned a flat
+// payment_verification_failed. The ramp could not take a payment from anyone.
+test("the advertised EIP-712 domain comes from config, not a hardcoded guess", () => {
+  const service = new X402PosterRampService({
+    config: rampConfig({
+      X402_PAYMENT_ASSET_EIP712_NAME: "USD Coin",
+      X402_PAYMENT_ASSET_EIP712_VERSION: "2"
+    }),
+    settlementAdapter: new StubSettlementAdapter({ events: [] }),
+    externalPostingService: {},
+    stateStore: new MemoryStateStore(),
+    gateway: {}
+  });
+  assert.deepEqual(service.paymentRequirements(1_050_000n).extra, {
+    name: "USD Coin",
+    version: "2"
+  });
+});
+
+test("a different asset advertises its own domain rather than USDC's", () => {
+  const service = new X402PosterRampService({
+    config: rampConfig({
+      X402_PAYMENT_ASSET_EIP712_NAME: "Some Other Token",
+      X402_PAYMENT_ASSET_EIP712_VERSION: "1"
+    }),
+    settlementAdapter: new StubSettlementAdapter({ events: [] }),
+    externalPostingService: {},
+    stateStore: new MemoryStateStore(),
+    gateway: {}
+  });
+  assert.deepEqual(service.paymentRequirements(1n).extra, {
+    name: "Some Other Token",
+    version: "1"
+  });
+});
+
+// No default, because the default was the bug. Silence must be impossible.
+test("the EIP-712 domain has no default and must be supplied", () => {
+  assert.throws(
+    () => rampConfig({ X402_PAYMENT_ASSET_EIP712_NAME: undefined }),
+    /X402_PAYMENT_ASSET_EIP712_NAME is required.*DOMAIN_SEPARATOR/su
+  );
+  assert.throws(
+    () => rampConfig({ X402_PAYMENT_ASSET_EIP712_VERSION: "  " }),
+    /X402_PAYMENT_ASSET_EIP712_VERSION is required.*DOMAIN_SEPARATOR/su
+  );
+});
+
+// EIP-712 hashes the domain strings byte for byte, so a trim is a different
+// domain, not a tidier one.
+test("domain strings are carried verbatim, including surrounding whitespace", () => {
+  const config = rampConfig({ X402_PAYMENT_ASSET_EIP712_NAME: " USD Coin " });
+  assert.equal(config.assetEip712Name, " USD Coin ");
 });
 
 test("poster ramp settlement is pinned to Base and never bridges per job", () => {
@@ -354,6 +416,8 @@ test("poster ramp settlement is pinned to Base and never bridges per job", () =>
       X402_PAYMENT_NETWORK: "eip155:420420419",
       X402_PAYMENT_ASSET_ADDRESS: BASE_USDC,
       X402_PAYMENT_PAY_TO: PAY_TO,
+      X402_PAYMENT_ASSET_EIP712_NAME: "USD Coin",
+      X402_PAYMENT_ASSET_EIP712_VERSION: "2",
       X402_POSTING_FLOAT_CAP_USDC: "5",
       X402_POSTING_FLOAT_RETRY_AFTER_SECONDS: "900"
     }),

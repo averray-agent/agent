@@ -116,6 +116,8 @@ X402_PUBLIC_ORIGIN=https://api.averray.com
 X402_PAYMENT_NETWORK=eip155:8453
 X402_PAYMENT_ASSET_ADDRESS=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
 X402_PAYMENT_PAY_TO=<the step-2 address>
+X402_PAYMENT_ASSET_EIP712_NAME=USD Coin
+X402_PAYMENT_ASSET_EIP712_VERSION=2
 X402_POSTING_FLOAT_CAP_USDC=1
 X402_POSTING_FLOAT_RETRY_AFTER_SECONDS=900
 X402_SETTLEMENT_API_KEY_ID=op://mainnet-backend/x402-cdp-facilitator/username
@@ -124,6 +126,17 @@ X402_SETTLEMENT_API_KEY_SECRET=op://mainnet-backend/x402-cdp-facilitator/credent
 
 `X402_PAYMENT_ASSET_ADDRESS` was **verified** on 2026-08-09 to report symbol `USDC` on
 chainId 8453 — confirmed by reading the contract, not recalled.
+
+**`X402_PAYMENT_ASSET_EIP712_NAME` is not the symbol.** It is the token's EIP-712 domain
+name, and payers use it to sign `transferWithAuthorization`. Base USDC reports `symbol()`
+`USDC` but `name()` `USD Coin`. We shipped `USDC` here on 2026-08-10 and the ramp could not
+accept a payment from anyone: every payer signed a digest the token does not recognise, the
+signature recovered to a different address, and the facilitator returned a flat
+`payment_verification_failed`. Verifying the symbol had not been the same test.
+
+Do not copy these two values for a new asset. Read `name()` and `version()` off that
+contract, and let the pre-flight below reproduce its `DOMAIN_SEPARATOR` before you trust
+them.
 
 **Configure and arm are separate steps**, matching the two-step ceremony pattern the bank
 lane already uses. Everything lands while the mode is still `disabled`, so a mistake in this
@@ -140,8 +153,14 @@ node scripts/ops/check-x402-ramp-readiness.mjs
 ```
 
 It must pass every check — config resolves, Base reachable, `payTo` real, asset is USDC,
-the pool's liquid balance covers the cap, and **the CDP credential authenticates against a
+**the advertised EIP-712 domain reproduces the asset's on-chain `DOMAIN_SEPARATOR`**, the
+pool's liquid balance covers the cap, and **the CDP credential authenticates against a
 live call** rather than merely existing.
+
+The `DOMAIN_SEPARATOR` check is the one that pays for itself. A wrong domain is invisible
+from our side — the payer signs, the facilitator rejects, and nothing in our logs says the
+advertisement was at fault. Reproducing the separator is proof rather than inference,
+because it is the value the token itself hashes against.
 
 Only then flip `X402_POSTING_MODE=enabled` as its own change.
 
@@ -151,21 +170,31 @@ posting attempt should return `402` rather than `401`.
 
 ---
 
-## Step 6 — the first paid post · *both, and it needs one thing we do not have*
+## Step 6 — the first paid post · *both*
 
-**We cannot test our own ramp without being an x402 payer.** That means two things we lack:
+**We cannot test our own ramp without being an x402 payer.** Both halves now exist:
 
-1. **USDC on Base** in a test wallet — a few dollars. The adversarial poster holds none.
-2. **An x402 client** that can read a `402`, sign the EIP-3009 authorization, and retry with
-   the `X-PAYMENT` header. The adversarial driver speaks our REST API, not x402.
+1. **USDC on Base** in the payer wallet.
+2. **`scripts/ops/x402-poster-client.mjs`** — reads the `402`, signs the SIWX challenge and
+   the EIP-3009 authorization, and retries with the `SIGN-IN-WITH-X` and `X-PAYMENT`
+   headers. It is dry-run by default; `--commit` signs and pays, and is an operator action.
 
-Both are small, but neither exists today and the ramp cannot be honestly declared working
-until a payment has actually settled. Treat this as its own piece of work rather than an
-afterthought to step 5.
+```bash
+X402_CLIENT_KEY_OP="op://<vault>/<item>/<field>" \
+  node scripts/ops/x402-poster-client.mjs --definition-file def.json
+```
 
 **Order it deliberately:** arm the ramp only when there is a way to exercise it. An enabled
 payment surface nobody has ever successfully paid is a worse state than a disabled one —
 the first person to try would be a stranger, and their money would be the test.
+
+That was not a hypothetical. The ramp was armed on 2026-08-10 and the first `--commit`
+returned `payment_verification_failed`, because the advertised EIP-712 domain was wrong for
+every payer. Paying ourselves first is what found it.
+
+**The job you post is real.** It goes live on an open public board with a real reward, and a
+real worker can claim it. Do not use a "do not claim" probe definition as a payment test —
+post something you actually want done, or you have set a trap and stranded the escrow.
 
 ---
 
@@ -176,5 +205,6 @@ the first person to try would be a stranger, and their money would be the test.
 | Ramp will not start | float cap unset or zero | it is required by design; the bank lane chooses it |
 | Config rejects `eip155:420420419` | you pointed it at our own chain | correct — settlement is Base-only, bridging per job is not supported |
 | Pre-flight says credential "present but NOT authorised" | key wrong, revoked, or from the wrong CDP project | do not enable; fix the key |
+| `payment_verification_failed` on every attempt, `posterFunds` unchanged | the advertised `extra` is not the token's real EIP-712 domain, so signatures recover to the wrong address | run the pre-flight; the `EIP-712 domain` check names the mismatch. This happened on 2026-08-10 with `USDC` instead of `USD Coin` |
 | Payments settle but no job appears | job creation failing after verify | the poster is unharmed by design; check the platform-loss records |
 | `402` never appears after enabling | deployed but not armed, or armed but not deployed | check `deployedSha` against `main` before anything else |

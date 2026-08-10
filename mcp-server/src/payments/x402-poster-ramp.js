@@ -67,6 +67,20 @@ export function resolveX402PosterRampConfig(env = process.env) {
   }
   const asset = requireAddress(env.X402_PAYMENT_ASSET_ADDRESS, "X402_PAYMENT_ASSET_ADDRESS");
   const payTo = requireAddress(env.X402_PAYMENT_PAY_TO, "X402_PAYMENT_PAY_TO");
+  // The token's EIP-712 domain, which payers use to sign transferWithAuthorization.
+  // It is a property of the asset, not of this service, and it is NOT the symbol:
+  // Base USDC has symbol() "USDC" and name() "USD Coin". Required with no default —
+  // a hardcoded "USDC" once made the ramp unable to accept a payment from anyone.
+  const assetEip712Name = requireNonEmpty(
+    env.X402_PAYMENT_ASSET_EIP712_NAME,
+    "X402_PAYMENT_ASSET_EIP712_NAME",
+    "read name() from the payment asset and confirm the pair reproduces its DOMAIN_SEPARATOR"
+  );
+  const assetEip712Version = requireNonEmpty(
+    env.X402_PAYMENT_ASSET_EIP712_VERSION,
+    "X402_PAYMENT_ASSET_EIP712_VERSION",
+    "read version() from the payment asset and confirm the pair reproduces its DOMAIN_SEPARATOR"
+  );
   const floatCapUsdc = String(env.X402_POSTING_FLOAT_CAP_USDC ?? "").trim();
   if (!floatCapUsdc) {
     throw new ConfigError(
@@ -103,6 +117,8 @@ export function resolveX402PosterRampConfig(env = process.env) {
     network,
     asset,
     payTo,
+    assetEip712Name,
+    assetEip712Version,
     floatCapUsdc,
     floatCapRaw,
     retryAfterSeconds,
@@ -357,7 +373,14 @@ export class X402PosterRampService {
       amount: amountRaw.toString(),
       payTo: this.config.payTo,
       maxTimeoutSeconds: this.config.maxTimeoutSeconds,
-      extra: { name: "USDC", version: "2" }
+      // `extra` IS the payer's EIP-712 domain for transferWithAuthorization.
+      // Anything wrong here is unrecoverable at the payer's end: they sign a
+      // different digest, it recovers to a different address, and the facilitator
+      // rejects it with no way to tell that our advertisement was at fault.
+      extra: {
+        name: this.config.assetEip712Name,
+        version: this.config.assetEip712Version
+      }
     };
   }
 
@@ -706,6 +729,19 @@ function requireAddress(value, label) {
     throw new ConfigError(`${label} must be an EVM address.`);
   }
   return getAddress(String(value)).toLowerCase();
+}
+
+// Deliberately preserves the value verbatim — no trimming. An EIP-712 domain
+// string is hashed byte for byte, so "helpfully" normalising one would produce a
+// domain separator the token does not recognise.
+function requireNonEmpty(value, label, howToFind) {
+  const raw = String(value ?? "");
+  if (raw.trim() === "") {
+    throw new ConfigError(
+      `${label} is required when x402 posting is enabled — ${howToFind}.`
+    );
+  }
+  return raw;
 }
 
 function requiredPositiveInteger(value, label) {
