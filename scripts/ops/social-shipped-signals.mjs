@@ -33,6 +33,33 @@
 export const DEFAULT_SHIPPED_LABEL = "social";
 const GITHUB_API = "https://api.github.com";
 const MAX_PULLS = 20;
+const MAX_CONTEXT_CHARS = 1200;
+
+/**
+ * The author's own summary, trimmed to something readable in an issue.
+ *
+ * Markdown headings, HTML comments and the Claude Code trailer are dropped —
+ * they are the PR's furniture, not its content. Everything kept is the author's
+ * words, never paraphrased: a paraphrase here would be an unreviewed claim
+ * entering the pipeline through the back door.
+ */
+export function summariseBody(body = "") {
+  // `?? ""` rather than relying on the default: a default parameter does not
+  // apply to an explicit null, and String(null) is the word "null" — which would
+  // have been rendered into an issue as if the author had written it.
+  const cleaned = String(body ?? "")
+    .replace(/<!--[\s\S]*?-->/gu, "")
+    .replace(/^🤖 Generated with .*$/gmu, "")
+    .replace(/^Co-Authored-By: .*$/gmu, "")
+    .split(/\n{2,}/u)
+    .map((block) => block.trim())
+    .filter((block) => block && !/^#{1,6}\s/u.test(block) && !/^-{3,}$/u.test(block))
+    .join("\n\n")
+    .trim();
+
+  if (cleaned.length <= MAX_CONTEXT_CHARS) return cleaned;
+  return `${cleaned.slice(0, MAX_CONTEXT_CHARS).trimEnd()}…`;
+}
 
 /**
  * Is this source configured at all?
@@ -86,7 +113,10 @@ export async function fetchShippedPullRequests({
     url: item.html_url,
     // `closed_at` on a merged PR is the merge time; the search API does not
     // expose `merged_at` on issue results.
-    mergedAt: item.closed_at ?? null
+    mergedAt: item.closed_at ?? null,
+    // The author's own account of what they did. Carried so the queue issue
+    // holds the material to write from, instead of a link to go read.
+    body: String(item.body ?? "")
   }));
 }
 
@@ -123,6 +153,7 @@ export function buildShippedCandidates({ pulls = [], state = {}, nowIso }) {
     claimsExternalActivity: false,
     restsOn: [],
     receipt: { kind: "pull-request", url: pull.url, mergedAt: pull.mergedAt },
+    context: summariseBody(pull.body),
     // Recorded so a drafter cannot silently promote "merged" to "live".
     deployVerified: false,
     seedOnly: seeding

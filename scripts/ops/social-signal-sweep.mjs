@@ -213,6 +213,7 @@ export function evaluateSignals({
       claim: candidate.claim,
       receipt: candidate.receipt,
       source: candidate.source ?? "transparency",
+      ...(candidate.context ? { context: candidate.context } : {}),
       ...(candidate.deployVerified === false ? { deployVerified: false } : {}),
       checkedAgainst:
         (candidate.source ?? "transparency") === "transparency"
@@ -377,7 +378,14 @@ export async function socialSignalSweep({
   // a healthy run actually stands behind. Idempotency lives in the queue, which
   // matters because CI never persists state — the same signal re-fires daily
   // until a human commits the bump.
-  const queue = await queueFiredSignals({ fetchImpl, env, signals: fired, sweptAt: nowIso, log });
+  const queue = await queueFiredSignals({
+    fetchImpl,
+    env,
+    signals: fired,
+    sweptAt: nowIso,
+    observed: evidence.observed,
+    log
+  });
   evidence.queue = queue.state;
   evidence.queued = queue.queued;
   evidence.queueSkipped = queue.skipped;

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   QUEUE_LABEL,
+  guardrailsFor,
   fetchQueuedIssues,
   issueBodyFor,
   issueTitleFor,
@@ -208,4 +209,54 @@ test("an overlong claim is truncated for the title, not dropped", () => {
 
   assert.ok(title.length <= 120);
   assert.ok(title.endsWith("…"));
+});
+
+const FRESH_OBSERVED = {
+  "flow.jobsSettled.allTime": { value: 164, status: "fresh" },
+  "flow.composition24h.external": { value: 0, status: "fresh" }
+};
+
+test("the do-not-claim rail names the external-agents trap explicitly", () => {
+  const rails = guardrailsFor(FRESH_OBSERVED);
+
+  assert.ok(rails.some((r) => /external/u.test(r) && /\*\*0\*\*/u.test(r)));
+  assert.ok(rails.some((r) => /164/u.test(r)));
+});
+
+test("a stale reading licenses no rail — we do not lecture from a number we distrust", () => {
+  const rails = guardrailsFor({
+    "flow.composition24h.external": { value: 0, status: "stale" },
+    "flow.jobsSettled.allTime": { value: 164, status: "stale" }
+  });
+
+  assert.deepEqual(rails, []);
+});
+
+test("a non-zero external count drops the do-not-say-external rail", () => {
+  const rails = guardrailsFor({
+    ...FRESH_OBSERVED,
+    "flow.composition24h.external": { value: 2, status: "fresh" }
+  });
+
+  assert.ok(!rails.some((r) => /outside agents are active/u.test(r)));
+});
+
+test("the issue carries the material and the rails together", () => {
+  const body = issueBodyFor(
+    { ...signal(), context: "We measured 0.202% friction moving 10 USDC." },
+    { sweptAt: SWEPT_AT, observed: FRESH_OBSERVED }
+  );
+
+  assert.match(body, /What the author said it does/u);
+  assert.match(body, /0\.202% friction/u);
+  assert.match(body, /Do not claim/u);
+  assert.match(body, /composition24h\.external/u);
+});
+
+test("no material and no reading still produces a usable issue", () => {
+  const body = issueBodyFor(signal(), { sweptAt: SWEPT_AT });
+
+  assert.doesNotMatch(body, /What the author said it does/u);
+  assert.doesNotMatch(body, /Do not claim/u);
+  assert.match(body, /closing means handled/u);
 });

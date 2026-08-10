@@ -6,7 +6,8 @@ import {
   DEFAULT_SHIPPED_LABEL,
   assessGitHub,
   buildShippedCandidates,
-  fetchShippedPullRequests
+  fetchShippedPullRequests,
+  summariseBody
 } from "./social-shipped-signals.mjs";
 
 const NOW_ISO = "2026-08-10T12:00:00.000Z";
@@ -201,4 +202,52 @@ test("an empty result produces nothing and changes nothing", () => {
 
   assert.deepEqual(candidates, []);
   assert.equal(nextShippedSeededAt, "2026-08-05T00:00:00Z");
+});
+
+test("the author's summary is carried, never paraphrased", () => {
+  const body = "We measured the leg cost at $2.\n\nThat sets the minimum move.";
+
+  assert.equal(summariseBody(body), "We measured the leg cost at $2.\n\nThat sets the minimum move.");
+});
+
+test("PR furniture is dropped — headings, HTML comments, the tooling trailer", () => {
+  const body = [
+    "<!-- a hidden marker -->",
+    "",
+    "## What this does",
+    "",
+    "The real content.",
+    "",
+    "---",
+    "",
+    "🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+  ].join("\n");
+
+  const summary = summariseBody(body);
+
+  assert.equal(summary, "The real content.");
+  assert.doesNotMatch(summary, /hidden marker/u);
+  assert.doesNotMatch(summary, /Claude Code/u);
+});
+
+test("an overlong body is truncated rather than dropped", () => {
+  const summary = summariseBody("x".repeat(4000));
+
+  assert.ok(summary.length <= 1201, "kept within the issue-readable budget");
+  assert.ok(summary.endsWith("…"));
+});
+
+test("an empty body yields an empty summary, not a crash", () => {
+  assert.equal(summariseBody(), "");
+  assert.equal(summariseBody(null), "");
+});
+
+test("a candidate carries the material to write from", () => {
+  const { candidates } = buildShippedCandidates({
+    pulls: [{ ...pull(12, "2026-08-09T00:00:00Z"), body: "We measured 0.202% friction." }],
+    state: { shippedSeededAt: "2026-08-05T00:00:00Z" },
+    nowIso: NOW_ISO
+  });
+
+  assert.equal(candidates[0].context, "We measured 0.202% friction.");
 });
