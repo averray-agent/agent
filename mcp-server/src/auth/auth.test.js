@@ -18,13 +18,13 @@ function silentLogger() {
 
 test("loadAuthConfig strict mode requires secrets", () => {
   assert.throws(
-    () => loadAuthConfig({ NODE_ENV: "production" }),
+    () => loadAuthConfig({ JWT_BACKEND: "hmac", NODE_ENV: "production" }),
     ConfigError
   );
 });
 
 test("loadAuthConfig permissive mode tolerates missing secrets", () => {
-  const config = loadAuthConfig({ NODE_ENV: "development", AUTH_MODE: "permissive" });
+  const config = loadAuthConfig({ JWT_BACKEND: "hmac", NODE_ENV: "development", AUTH_MODE: "permissive" });
   assert.equal(config.mode, "permissive");
   assert.equal(config.permissive, true);
   assert.deepEqual(config.secrets, []);
@@ -32,13 +32,14 @@ test("loadAuthConfig permissive mode tolerates missing secrets", () => {
 
 test("loadAuthConfig rejects short secrets", () => {
   assert.throws(
-    () => loadAuthConfig({ AUTH_MODE: "strict", AUTH_JWT_SECRETS: "short" }),
+    () => loadAuthConfig({ JWT_BACKEND: "hmac", AUTH_MODE: "strict", AUTH_JWT_SECRETS: "short" }),
     ConfigError
   );
 });
 
 test("loadAuthConfig parses rotation secrets", () => {
   const config = loadAuthConfig({
+    JWT_BACKEND: "hmac",
     AUTH_MODE: "strict",
     AUTH_JWT_SECRETS: `${LONG_SECRET},${OTHER_SECRET}`,
     AUTH_DOMAIN: "example.com",
@@ -194,6 +195,7 @@ test("MemoryStateStore nonce expires after TTL", async () => {
 
 test("requireAuth accepts valid bearer token", async () => {
   const authConfig = {
+    jwtBackend: "hmac",
     secrets: [LONG_SECRET],
     signingSecret: LONG_SECRET,
     permissive: false,
@@ -214,6 +216,7 @@ test("requireAuth accepts valid bearer token", async () => {
 
 test("requireAuth rejects missing token in strict mode", async () => {
   const authConfig = {
+    jwtBackend: "hmac",
     secrets: [LONG_SECRET],
     signingSecret: LONG_SECRET,
     permissive: false,
@@ -238,6 +241,7 @@ test("requireAuth rejects missing token in strict mode", async () => {
 
 test("requireAuth permissive mode falls back to ?wallet=", async () => {
   const authConfig = {
+    jwtBackend: "hmac",
     secrets: [],
     signingSecret: undefined,
     permissive: true,
@@ -253,6 +257,7 @@ test("requireAuth permissive mode falls back to ?wallet=", async () => {
 
 test("requireAuth accepts ?token= when allowQueryToken is true", async () => {
   const authConfig = {
+    jwtBackend: "hmac",
     secrets: [LONG_SECRET],
     signingSecret: LONG_SECRET,
     permissive: false,
@@ -271,7 +276,7 @@ test("requireAuth accepts ?token= when allowQueryToken is true", async () => {
 });
 
 test("loadAuthConfig parses admin and verifier wallet lists", () => {
-  const config = loadAuthConfig({
+  const config = loadAuthConfig({ JWT_BACKEND: "hmac",
     AUTH_MODE: "strict",
     AUTH_JWT_SECRETS: LONG_SECRET,
     AUTH_DOMAIN: "example.com",
@@ -289,7 +294,7 @@ test("loadAuthConfig parses admin and verifier wallet lists", () => {
 test("loadAuthConfig rejects malformed admin wallet entries", () => {
   assert.throws(
     () =>
-      loadAuthConfig({
+      loadAuthConfig({ JWT_BACKEND: "hmac",
         AUTH_MODE: "strict",
         AUTH_JWT_SECRETS: LONG_SECRET,
         AUTH_ADMIN_WALLETS: "not-an-address"
@@ -315,6 +320,7 @@ test("hasRole returns false for invalid role names", () => {
 
 test("requireAuth accepts token with required role", async () => {
   const authConfig = {
+    jwtBackend: "hmac",
     secrets: [LONG_SECRET],
     signingSecret: LONG_SECRET,
     permissive: false,
@@ -335,6 +341,7 @@ test("requireAuth accepts token with required role", async () => {
 
 test("requireAuth rejects token missing required role", async () => {
   const authConfig = {
+    jwtBackend: "hmac",
     secrets: [LONG_SECRET],
     signingSecret: LONG_SECRET,
     permissive: false,
@@ -364,6 +371,7 @@ test("requireAuth rejects token missing required role", async () => {
 
 test("requireAuth rejects token missing route capability", async () => {
   const authConfig = {
+    jwtBackend: "hmac",
     secrets: [LONG_SECRET],
     signingSecret: LONG_SECRET,
     permissive: false,
@@ -392,6 +400,7 @@ test("requireAuth rejects token missing route capability", async () => {
 
 test("requireAuth accepts explicit capability scopes without a role", async () => {
   const authConfig = {
+    jwtBackend: "hmac",
     secrets: [LONG_SECRET],
     signingSecret: LONG_SECRET,
     permissive: false,
@@ -418,6 +427,7 @@ test("requireAuth accepts explicit capability scopes without a role", async () =
 test("requireAuth in permissive mode resolves roles from env wallet lists", async () => {
   const adminWallet = "0xdddddddddddddddddddddddddddddddddddddddd";
   const authConfig = {
+    jwtBackend: "hmac",
     secrets: [],
     signingSecret: undefined,
     permissive: true,
@@ -435,6 +445,7 @@ test("requireAuth in permissive mode resolves roles from env wallet lists", asyn
 
 test("requireAuth in permissive mode rejects unauthorized wallets for role-gated routes", async () => {
   const authConfig = {
+    jwtBackend: "hmac",
     secrets: [],
     signingSecret: undefined,
     permissive: true,
@@ -453,6 +464,7 @@ test("requireAuth in permissive mode rejects unauthorized wallets for role-gated
 
 test("requireAuth rejects a token whose jti has been revoked", async () => {
   const authConfig = {
+    jwtBackend: "hmac",
     secrets: [LONG_SECRET],
     signingSecret: LONG_SECRET,
     permissive: false,
@@ -523,6 +535,7 @@ test("requireAuth merges active capability grants for the subject", async () => 
     issuedBy: "0x1111111111111111111111111111111111111111"
   });
   const authConfig = {
+    jwtBackend: "hmac",
     secrets: [LONG_SECRET],
     signingSecret: LONG_SECRET,
     permissive: false,
@@ -555,6 +568,7 @@ test("requireAuth ignores revoked grants when expanding capabilities", async () 
     issuedBy: "0x1111111111111111111111111111111111111111"
   });
   const authConfig = {
+    jwtBackend: "hmac",
     secrets: [LONG_SECRET],
     signingSecret: LONG_SECRET,
     permissive: false,
@@ -586,6 +600,7 @@ test("requireAuth exposes grant-cache invalidation for immediate operator revoke
     issuedBy
   });
   const authConfig = {
+    jwtBackend: "hmac",
     secrets: [LONG_SECRET],
     signingSecret: LONG_SECRET,
     permissive: false,
@@ -639,6 +654,7 @@ test("requireAuth binds service tokens to exactly one active grant without base 
     issuedBy: "0x1111111111111111111111111111111111111111"
   });
   const authConfig = {
+    jwtBackend: "hmac",
     secrets: [LONG_SECRET],
     signingSecret: LONG_SECRET,
     permissive: false,
@@ -712,7 +728,7 @@ test("B-03: a mutation re-checks the grant within ~2s even without explicit cach
     issuedAt: new Date().toISOString(),
     issuedBy
   });
-  const authConfig = { secrets: [LONG_SECRET], signingSecret: LONG_SECRET, permissive: false, strict: true };
+  const authConfig = { jwtBackend: "hmac", secrets: [LONG_SECRET], signingSecret: LONG_SECRET, permissive: false, strict: true };
   let clockMs = 1_000_000;
   const middleware = createAuthMiddleware({
     authConfig,
@@ -762,7 +778,7 @@ test("B-03: reads keep the 15s cache — a GET still serves the grant in that sa
     issuedAt: new Date().toISOString(),
     issuedBy
   });
-  const authConfig = { secrets: [LONG_SECRET], signingSecret: LONG_SECRET, permissive: false, strict: true };
+  const authConfig = { jwtBackend: "hmac", secrets: [LONG_SECRET], signingSecret: LONG_SECRET, permissive: false, strict: true };
   let clockMs = 1_000_000;
   const middleware = createAuthMiddleware({
     authConfig,

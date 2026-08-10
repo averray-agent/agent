@@ -37,8 +37,10 @@ const DEFAULT_JWT_CLOCK_SKEW_SECONDS = 60;
  * - AUTH_VERIFIER_WALLETS: comma-separated EVM addresses granted the "verifier" role claim at sign-in.
  *
  * Phase 4b — KMS-signed JWTs (see docs/PHASE_4B_KMS_JWT_PLAN.md):
- * - JWT_BACKEND: "hmac" (default) | "kms" | "both". Controls which JWT
- *   algorithm(s) the dispatcher will sign and verify.
+ * - JWT_BACKEND: "kms" (default) | "hmac" | "both". Controls which JWT
+ *   algorithm(s) the dispatcher will sign and verify. The default is the
+ *   strongest backend on purpose: an env that loses this variable must fail
+ *   to boot rather than quietly resume accepting HS256.
  * - JWT_PRIMARY_ALG: "hmac" (default) | "kms". Only meaningful when
  *   JWT_BACKEND=both — selects which algorithm is used for new signatures.
  * - AWS_JWT_REGION, AWS_JWT_KEY_ID, AWS_JWT_ACCESS_KEY_ID,
@@ -78,7 +80,7 @@ export function loadAuthConfig(env = process.env) {
   // the mainnet posture renders none, and requiring one would leave a symmetric
   // admin-token-minting secret in the environment (MAIN-001). parseKmsJwtConfig
   // (below) enforces the KMS signer config for the kms/both backends.
-  const jwtBackend = parseJwtBackend(env.JWT_BACKEND);
+  const jwtBackend = parseJwtBackend(env.JWT_BACKEND, rawMode);
   const jwtBackendUsesHmac = jwtBackend === "hmac" || jwtBackend === "both";
 
   if (rawMode === "strict" && jwtBackendUsesHmac && secrets.length === 0) {
@@ -138,9 +140,27 @@ export function loadAuthConfig(env = process.env) {
   };
 }
 
-function parseJwtBackend(raw) {
+function parseJwtBackend(raw, mode) {
   if (raw === undefined || raw === null || raw === "") {
-    return "hmac";
+    // In strict mode, absence defaults to the STRONGER backend, not the weaker one.
+    //
+    // This used to return "hmac" unconditionally, described in the code as the
+    // safe default. It was, when HMAC was what we ran. Both environments have
+    // set JWT_BACKEND=kms since the KMS cutover, so the meaning inverted: the
+    // only way to reach the old default in production was for a rendered env to
+    // LOSE the variable, and the reward for that accident was a node quietly
+    // resuming HS256 verification — no error, no log line, a leaked symmetric
+    // secret suddenly sufficient to mint admin tokens again.
+    //
+    // Defaulting to kms fails closed instead: a strict deployment missing its
+    // KMS configuration errors at boot rather than downgrading in silence.
+    //
+    // Permissive mode keeps the HMAC default because it is the dev posture — it
+    // is what NODE_ENV!=production selects, it already tolerates missing secrets,
+    // and it already accepts `?wallet=` without any token at all. Demanding AWS
+    // KMS config to boot a laptop would buy nothing there, and the strict-mode
+    // rule above is what production actually runs under.
+    return mode === "permissive" ? "hmac" : "kms";
   }
   const value = String(raw).trim().toLowerCase();
   if (!VALID_JWT_BACKENDS.has(value)) {

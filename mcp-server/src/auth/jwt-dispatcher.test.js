@@ -720,15 +720,24 @@ test("config: JWT_BACKEND=both with multiple missing KMS vars lists them all", (
   );
 });
 
-test("config: JWT_BACKEND=hmac (default) with KMS vars present does not throw", () => {
-  const config = loadAuthConfig({
-    AUTH_MODE: "strict",
-    AUTH_JWT_SECRETS: LONG_HMAC_SECRET,
-    // No JWT_BACKEND → default "hmac"
-    // KMS-required vars intentionally absent.
-  });
-  assert.equal(config.jwtBackend, "hmac");
-  assert.equal(config.kmsJwt, null);
+// This test used to assert the opposite: that an absent JWT_BACKEND fell back to
+// "hmac" and booted happily on HMAC secrets alone. That fallback was the hazard —
+// both env templates set JWT_BACKEND=kms, so the only way to reach the old default
+// in production was for a rendered env to LOSE the variable, and the reward for
+// that accident was a node silently accepting HS256 again. Absence now resolves to
+// the stronger backend and the missing KMS config stops the boot out loud.
+test("config: an absent JWT_BACKEND refuses to boot on HMAC secrets alone", () => {
+  assert.throws(
+    () => loadAuthConfig({
+      AUTH_MODE: "strict",
+      AUTH_JWT_SECRETS: LONG_HMAC_SECRET,
+      // No JWT_BACKEND → "kms"; KMS-required vars intentionally absent.
+    }),
+    (err) => {
+      assert.match(err.message, /JWT_BACKEND=kms requires/u);
+      return true;
+    },
+  );
 });
 
 test("config: JWT_BACKEND=hmac with KMS vars present is ignored (no throw, kmsJwt null)", () => {

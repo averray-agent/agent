@@ -14,7 +14,8 @@ const CLOCK_SKEW_SECONDS = 60;
  * `signTokenFromConfig` / `verifyTokenFromConfig` below the legacy
  * `signToken` / `verifyToken` functions. The legacy API is preserved
  * byte-for-byte so existing tests and the `scripts/ops/mint-admin-jwt.mjs`
- * caller keep working under `JWT_BACKEND=hmac` (default).
+ * caller keep working under an explicit `JWT_BACKEND=hmac`. That is now
+ * something a deployment has to ask for: absence resolves to `kms`.
  */
 
 export function signToken(payload, { secret, expiresInSeconds }) {
@@ -316,7 +317,9 @@ export async function verifyTokenFromConfig(token, authConfig) {
     );
   }
 
-  const backend = authConfig.jwtBackend ?? "hmac";
+  // Fails closed if an authConfig ever reaches here without a backend —
+  // parseJwtBackend already defaults to kms, and this must not disagree.
+  const backend = authConfig.jwtBackend ?? "kms";
 
   if (alg === "HS256") {
     if (backend === "kms") {
