@@ -1,5 +1,7 @@
 {
   "_comment": "Which social signals have already been announced. Committed rather than cached so a lost runner cannot resurrect old news. Updated by a human as part of approving a post — see docs/PACKET_SOCIAL_SIGNAL_AGENT.md. Calibrated 2026-08-10 against api.averray.com/transparency reading 142 settled, external 0.",
+  "_shippedSeededAtNote": "Seeded 2026-08-10 while ZERO pull requests carried the `social` label, so this marker swallowed nothing. It must stay committed: the runner's state write is ephemeral, so without it every run reads an absent marker, treats itself as the first encounter, and records a labelled PR as seeded — silently — instead of firing it.",
+  "shippedSeededAt": "2026-08-10T12:05:00.000Z",
   "firedSignals": {
     "jobs-settled-10": {
       "firedAt": "2026-08-10T10:25:00.481Z",
