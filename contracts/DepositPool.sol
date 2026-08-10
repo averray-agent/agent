@@ -24,6 +24,7 @@ contract DepositPool is ReentrancyGuard {
     uint256 public constant PLATFORM_FEE_BPS = 0;
     uint256 public constant NOTICE_7_DAYS = 7 days;
     uint256 public constant NOTICE_30_DAYS = 30 days;
+    uint256 public constant DEPLOYMENT_EPOCH = 1 days;
 
     address public immutable asset;
     address public immutable operator;
@@ -61,13 +62,29 @@ contract DepositPool is ReentrancyGuard {
         uint256 principalAssets;
         uint256 recalledPrincipalAssets;
         uint64 returnBy;
+        bytes32 adapterRequestId;
+        IDepositPoolVenueAdapter.RequestStatus status;
+    }
+
+    struct VenueRecall {
+        uint256 deploymentId;
+        uint256 requestedAssets;
+        uint256 returnedAssets;
+        bytes32 adapterRequestId;
+        IDepositPoolVenueAdapter.RequestStatus status;
     }
 
     uint256 public nextRedeemRequestId = 1;
     uint256 public nextVenueDeploymentId = 1;
+    uint256 public nextVenueRecallId = 1;
+    uint256 public maxIssuedAgentShares;
+    uint256 public activeVenueDeploymentId;
+    uint256 public activeVenueRecallId;
+    uint64 public lastDeploymentEpochAt;
     mapping(address => uint256) public lockedShares;
     mapping(uint256 => RedeemRequest) public redeemRequests;
     mapping(uint256 => VenueDeployment) public venueDeployments;
+    mapping(uint256 => VenueRecall) public venueRecalls;
 
     event Transfer(address indexed from, address indexed to, uint256 amount);
     event Approval(address indexed owner, address indexed spender, uint256 amount);
@@ -85,8 +102,24 @@ contract DepositPool is ReentrancyGuard {
     );
     event RedeemFulfilled(uint256 indexed requestId, uint256 shares, uint256 assets);
     event OperatorPrincipalContributed(uint256 assets, uint256 shares, uint256 totalPrincipal);
-    event VenueDeploymentCreated(uint256 indexed deploymentId, uint256 assets, uint64 returnBy);
-    event VenueDeploymentRecalled(uint256 indexed deploymentId, uint256 principalAssets, uint256 returnedAssets);
+    event VenueDeploymentCreated(
+        uint256 indexed deploymentId, bytes32 indexed adapterRequestId, uint256 assets, uint64 returnBy
+    );
+    event VenueDeploymentSettled(
+        uint256 indexed deploymentId, IDepositPoolVenueAdapter.RequestStatus status, uint256 settledAssets
+    );
+    event VenueRecallRequested(
+        uint256 indexed recallId,
+        uint256 indexed deploymentId,
+        bytes32 indexed adapterRequestId,
+        uint256 requestedAssets
+    );
+    event VenueRecallSettled(
+        uint256 indexed recallId,
+        uint256 indexed deploymentId,
+        IDepositPoolVenueAdapter.RequestStatus status,
+        uint256 returnedAssets
+    );
 
     error Unauthorized();
     error ZeroAddress();
@@ -104,8 +137,16 @@ contract DepositPool is ReentrancyGuard {
     error RedeemRequestAlreadyFulfilled();
     error VenueNotConfigured();
     error InvalidReturnDeadline();
+    error VenueDeadlineExceedsNoticeTier(uint64 attempted, uint64 maximum);
+    error BufferFloorBreached(uint256 available, uint256 floor, uint256 attemptedDeployment);
+    error DeploymentEpochNotElapsed(uint64 nextEpochAt);
+    error VenueDeploymentAlreadyActive();
     error VenueDeploymentNotFound();
-    error VenueRecallExceedsPrincipal();
+    error VenueRecallAlreadyActive();
+    error VenueRecallNotFound();
+    error VenueRecallExceedsManaged(uint256 available, uint256 requested);
+    error VenueRequestPending();
+    error VenueRequestMismatch();
     error VenueRecallShortfall(uint256 returnedAssets, uint256 requiredAssets);
     error AssetTransferAmountMismatch();
 
@@ -137,6 +178,22 @@ contract DepositPool is ReentrancyGuard {
 
     function bufferAssets() public view returns (uint256) {
         return IERC20PoolAsset(asset).balanceOf(address(this));
+    }
+
+    /// @notice Conservative instant-liquidity floor for one whole agent position.
+    /// @dev Non-transferable shares make the largest position ever issued an upper
+    ///      bound for every current agent position. Keeping the high-water mark is
+    ///      deliberately conservative after that agent exits.
+    function bufferFloor() public view returns (uint256 floor) {
+        floor = convertToAssets(maxIssuedAgentShares);
+        uint256 managed = totalAssets();
+        if (floor > managed) return managed;
+    }
+
+    function maxDeployableAssets() public view returns (uint256) {
+        uint256 available = bufferAssets();
+        uint256 floor = bufferFloor();
+        return available > floor ? available - floor : 0;
     }
 
     function assetsOf(address account) public view returns (uint256) {
@@ -187,6 +244,7 @@ contract DepositPool is ReentrancyGuard {
         _checkAgentCap(receiver, shares, managedBefore + assets, supplyBefore + shares);
 
         _mint(receiver, shares);
+        _recordAgentShareHighWater(receiver);
         _collectAssets(msg.sender, assets);
         emit Deposit(msg.sender, receiver, assets, shares);
     }
@@ -203,6 +261,7 @@ contract DepositPool is ReentrancyGuard {
         _checkAgentCap(receiver, shares, managedBefore + assets, supplyBefore + shares);
 
         _mint(receiver, shares);
+        _recordAgentShareHighWater(receiver);
         _collectAssets(msg.sender, assets);
         emit Deposit(msg.sender, receiver, assets, shares);
     }
@@ -270,8 +329,9 @@ contract DepositPool is ReentrancyGuard {
         emit RedeemFulfilled(requestId, request.shares, assets);
     }
 
-    /// @notice Deploy existing pool assets only to the immutable venue adapter.
-    /// @param returnBy Pool-selected deadline for this exact principal commitment.
+    /// @notice Begin one asynchronous, epoch-batched deployment.
+    /// @dev The shortest notice tier derives the maximum venue clock. The
+    ///      caller names the exact earlier-or-equal deadline for the adapter.
     function deployToVenue(uint256 assets, uint64 returnBy)
         external
         onlyOperator
@@ -281,41 +341,125 @@ contract DepositPool is ReentrancyGuard {
         if (address(venueAdapter) == address(0)) revert VenueNotConfigured();
         if (assets == 0) revert ZeroAmount();
         if (returnBy <= block.timestamp) revert InvalidReturnDeadline();
+        uint64 maximumReturnBy = uint64(block.timestamp + NOTICE_7_DAYS);
+        if (returnBy > maximumReturnBy) revert VenueDeadlineExceedsNoticeTier(returnBy, maximumReturnBy);
+        if (activeVenueDeploymentId != 0) revert VenueDeploymentAlreadyActive();
+        if (lastDeploymentEpochAt != 0 && block.timestamp < uint256(lastDeploymentEpochAt) + DEPLOYMENT_EPOCH) {
+            revert DeploymentEpochNotElapsed(uint64(uint256(lastDeploymentEpochAt) + DEPLOYMENT_EPOCH));
+        }
+
         uint256 available = bufferAssets();
-        if (available < assets) revert InsufficientBuffer(available, assets);
+        uint256 floor = bufferFloor();
+        if (available < floor || assets > available - floor) revert BufferFloorBreached(available, floor, assets);
 
         deploymentId = nextVenueDeploymentId++;
-        venueDeployments[deploymentId] =
-            VenueDeployment({principalAssets: assets, recalledPrincipalAssets: 0, returnBy: returnBy});
+        activeVenueDeploymentId = deploymentId;
+        lastDeploymentEpochAt = uint64(block.timestamp);
         SafeTransfer.safeTransfer(asset, address(venueAdapter), assets);
-        venueAdapter.deploy(assets, returnBy);
-        emit VenueDeploymentCreated(deploymentId, assets, returnBy);
+        bytes32 adapterRequestId = venueAdapter.requestDeploy(assets, returnBy);
+        venueDeployments[deploymentId] = VenueDeployment({
+            principalAssets: assets,
+            recalledPrincipalAssets: 0,
+            returnBy: returnBy,
+            adapterRequestId: adapterRequestId,
+            status: IDepositPoolVenueAdapter.RequestStatus.Pending
+        });
+        emit VenueDeploymentCreated(deploymentId, adapterRequestId, assets, returnBy);
     }
 
-    /// @notice Recall principal from a venue deployment into the pool buffer.
-    function recallVenueDeployment(uint256 deploymentId, uint256 principalAssets)
+    /// @notice Latch a terminal async deployment result into the epoch ledger.
+    function settleVenueDeployment(uint256 deploymentId)
+        external
+        nonReentrant
+        returns (IDepositPoolVenueAdapter.RequestStatus status, uint256 settledAssets)
+    {
+        VenueDeployment storage deployment = venueDeployments[deploymentId];
+        if (deployment.principalAssets == 0) revert VenueDeploymentNotFound();
+        if (deployment.status != IDepositPoolVenueAdapter.RequestStatus.Pending) revert VenueRequestMismatch();
+        IDepositPoolVenueAdapter.Request memory request = venueAdapter.getRequest(deployment.adapterRequestId);
+        _requireTerminalAdapterRequest(
+            request, IDepositPoolVenueAdapter.RequestKind.Deploy, deployment.principalAssets, deployment.returnBy
+        );
+
+        settledAssets = venueAdapter.claimSettled(deployment.adapterRequestId);
+        status = request.status;
+        deployment.status = status;
+        if (status == IDepositPoolVenueAdapter.RequestStatus.Failed && venueAdapter.managedAssets(address(this)) == 0) {
+            activeVenueDeploymentId = 0;
+        }
+        emit VenueDeploymentSettled(deploymentId, status, settledAssets);
+    }
+
+    /// @notice Begin an asynchronous recall from the one active venue epoch.
+    /// @dev Yield is not attributed to individual deployments, so a recall may
+    ///      include principal plus observed yield up to all managed venue assets.
+    function recallVenueDeployment(uint256 deploymentId, uint256 requestedAssets)
         external
         onlyOperator
         nonReentrant
-        returns (uint256 returnedAssets)
+        returns (uint256 recallId)
     {
         if (address(venueAdapter) == address(0)) revert VenueNotConfigured();
-        if (principalAssets == 0) revert ZeroAmount();
+        if (requestedAssets == 0) revert ZeroAmount();
+        if (activeVenueRecallId != 0) revert VenueRecallAlreadyActive();
         VenueDeployment storage deployment = venueDeployments[deploymentId];
-        if (deployment.principalAssets == 0) revert VenueDeploymentNotFound();
-        if (deployment.recalledPrincipalAssets + principalAssets > deployment.principalAssets) {
-            revert VenueRecallExceedsPrincipal();
+        if (deployment.principalAssets == 0 || activeVenueDeploymentId != deploymentId) {
+            revert VenueDeploymentNotFound();
         }
+        uint256 managed = venueAdapter.managedAssets(address(this));
+        if (requestedAssets > managed) revert VenueRecallExceedsManaged(managed, requestedAssets);
+
+        recallId = nextVenueRecallId++;
+        activeVenueRecallId = recallId;
+        bytes32 adapterRequestId = venueAdapter.requestRecall(requestedAssets, deployment.returnBy);
+        venueRecalls[recallId] = VenueRecall({
+            deploymentId: deploymentId,
+            requestedAssets: requestedAssets,
+            returnedAssets: 0,
+            adapterRequestId: adapterRequestId,
+            status: IDepositPoolVenueAdapter.RequestStatus.Pending
+        });
+        emit VenueRecallRequested(recallId, deploymentId, adapterRequestId, requestedAssets);
+    }
+
+    /// @notice Claim locally-settled recall assets into the buffer.
+    function settleVenueRecall(uint256 recallId)
+        external
+        nonReentrant
+        returns (IDepositPoolVenueAdapter.RequestStatus status, uint256 returnedAssets)
+    {
+        VenueRecall storage recall = venueRecalls[recallId];
+        if (recall.deploymentId == 0) revert VenueRecallNotFound();
+        if (recall.status != IDepositPoolVenueAdapter.RequestStatus.Pending) revert VenueRequestMismatch();
+        VenueDeployment storage deployment = venueDeployments[recall.deploymentId];
+        IDepositPoolVenueAdapter.Request memory request = venueAdapter.getRequest(recall.adapterRequestId);
+        _requireTerminalAdapterRequest(
+            request, IDepositPoolVenueAdapter.RequestKind.Recall, recall.requestedAssets, deployment.returnBy
+        );
 
         uint256 beforeBalance = bufferAssets();
-        returnedAssets = venueAdapter.recall(principalAssets);
+        returnedAssets = venueAdapter.claimSettled(recall.adapterRequestId);
         uint256 received = bufferAssets() - beforeBalance;
-        if (returnedAssets < principalAssets || received < principalAssets) {
-            revert VenueRecallShortfall(received, principalAssets);
+        status = request.status;
+        if (status == IDepositPoolVenueAdapter.RequestStatus.Succeeded && received != returnedAssets) {
+            revert VenueRecallShortfall(received, returnedAssets);
         }
-        deployment.recalledPrincipalAssets += principalAssets;
-        emit VenueDeploymentRecalled(deploymentId, principalAssets, received);
-        return received;
+
+        recall.returnedAssets = returnedAssets;
+        recall.status = status;
+        activeVenueRecallId = 0;
+        if (returnedAssets != 0) {
+            uint256 outstandingPrincipal = deployment.principalAssets - deployment.recalledPrincipalAssets;
+            uint256 principalRecalled = returnedAssets < outstandingPrincipal ? returnedAssets : outstandingPrincipal;
+            deployment.recalledPrincipalAssets += principalRecalled;
+        }
+        if (venueAdapter.managedAssets(address(this)) == 0) {
+            if (status == IDepositPoolVenueAdapter.RequestStatus.Succeeded) {
+                deployment.recalledPrincipalAssets = deployment.principalAssets;
+            }
+            activeVenueDeploymentId = 0;
+        }
+        emit VenueRecallSettled(recallId, recall.deploymentId, status, returnedAssets);
     }
 
     function _redeemFromBuffer(address caller, address receiver, address owner, uint256 shares, uint256 assets)
@@ -332,6 +476,26 @@ contract DepositPool is ReentrancyGuard {
         uint256 beforeBalance = bufferAssets();
         SafeTransfer.safeTransferFrom(asset, from, address(this), assets);
         if (bufferAssets() - beforeBalance != assets) revert AssetTransferAmountMismatch();
+    }
+
+    function _recordAgentShareHighWater(address account) private {
+        uint256 position = balanceOf[account];
+        if (position > maxIssuedAgentShares) maxIssuedAgentShares = position;
+    }
+
+    function _requireTerminalAdapterRequest(
+        IDepositPoolVenueAdapter.Request memory request,
+        IDepositPoolVenueAdapter.RequestKind expectedKind,
+        uint256 expectedAssets,
+        uint64 expectedReturnBy
+    ) private pure {
+        if (request.status == IDepositPoolVenueAdapter.RequestStatus.Pending) {
+            revert VenueRequestPending();
+        }
+        if (
+            request.status == IDepositPoolVenueAdapter.RequestStatus.None || request.kind != expectedKind
+                || request.requestedAssets != expectedAssets || request.returnBy != expectedReturnBy || request.claimed
+        ) revert VenueRequestMismatch();
     }
 
     function _checkTotalCap(uint256 managedBefore, uint256 addedAssets) private pure {
