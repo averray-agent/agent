@@ -1,0 +1,18 @@
+{
+  "_comment": "Which social signals have already been announced. Committed rather than cached so a lost runner cannot resurrect old news. Updated by a human as part of approving a post — see docs/PACKET_SOCIAL_SIGNAL_AGENT.md. Calibrated 2026-08-10 against api.averray.com/transparency reading 142 settled, external 0.",
+  "firedSignals": {
+    "jobs-settled-10": {
+      "firedAt": "2026-08-10T10:25:00.481Z",
+      "seeded": true
+    },
+    "jobs-settled-50": {
+      "firedAt": "2026-08-10T10:25:00.481Z",
+      "seeded": true
+    },
+    "jobs-settled-100": {
+      "firedAt": "2026-08-10T10:25:00.481Z",
+      "seeded": true
+    }
+  },
+  "highestSettlementMilestone": 100
+}

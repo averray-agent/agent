@@ -1,0 +1,144 @@
+name: Social Signal Sweep
+
+# Step 1 of the social signal agent: decide whether anything happened that is
+# worth saying out loud on the Averray X account. Read-only. This workflow
+# drafts nothing and publishes nothing — see docs/PACKET_SOCIAL_SIGNAL_AGENT.md.
+#
+# It does not touch the VPS or Hermes: /transparency is public, so the runner
+# reads it directly. Drafting (step 2) and the Buzz approval card (step 3) are
+# what move onto the Hermes lane, because those need the agent and the control
+# plane; threshold arithmetic and the truth-boundary veto do not.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Sits after the daily operator report at 07:17 UTC so a sweep never races
+    # the reports it might otherwise want to quote.
+    - cron: "43 7 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: social-signal-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: Sweep transparency for post-worthy signals
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TRANSPARENCY_URL: https://api.averray.com/transparency
+      SOCIAL_SWEEP_EVIDENCE_FILE: artifacts/social-signal-sweep.json
+      # Read from the checkout. State is committed, not cached: a lost cache
+      # would look exactly like a first run, and the sweep would re-announce
+      # milestones that were already old news.
+      SOCIAL_SWEEP_STATE_FILE: scripts/ops/social-signal-state.json
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+
+      - name: Sweep
+        id: sweep
+        run: |
+          set -uo pipefail
+
+          # Deliberately not `set -e`: the summary has to be written even when
+          # the sweep failed, otherwise a broken read is reported as silence.
+          set +e
+          node scripts/ops/social-signal-sweep.mjs 2>&1 | tee artifacts-sweep.log
+          status=${PIPESTATUS[0]}
+          set -e
+
+          EV="$SOCIAL_SWEEP_EVIDENCE_FILE"
+
+          # No evidence file at all means the sweep died before it could read
+          # anything — network, DNS, a crash. That is a different failure from a
+          # payload we read and rejected, and it must not look like a quiet day.
+          if [ ! -f "$EV" ]; then
+            {
+              echo "## Social signal sweep — UNREADABLE"
+              echo
+              echo "The sweep produced no evidence file, so nothing was assessed."
+              echo "**This is not a quiet day — it is a failed run.**"
+              echo
+              echo '```text'
+              tail -n 40 artifacts-sweep.log 2>/dev/null || echo "(no log)"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "${status:-1}"
+          fi
+
+          payload=$(jq -r '.payload' "$EV")
+          fired=$(jq '.fired | length' "$EV")
+          vetoed=$(jq '.vetoed | length' "$EV")
+          seeded=$(jq '.seeded | length' "$EV")
+          quiet=$(jq -r '.quiet' "$EV")
+
+          echo "payload=${payload}" >> "$GITHUB_OUTPUT"
+          echo "fired=${fired}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Social signal sweep"
+            echo
+            echo "- Swept: \`$(jq -r '.sweptAt' "$EV")\`"
+            echo "- Payload: \`${payload}\` · Fired: \`${fired}\` · Vetoed: \`${vetoed}\` · Seeded: \`${seeded}\`"
+            echo "- Settled (all time): \`$(jq -r '.observed["flow.jobsSettled.allTime"] | "\(.value) (\(.status))"' "$EV")\`"
+            echo "- External agents (24h): \`$(jq -r '.observed["flow.composition24h.external"] | "\(.value) (\(.status))"' "$EV")\`"
+            echo
+
+            if [ "$payload" != "live" ]; then
+              echo "### Payload degraded — nothing was assessed"
+              echo
+              echo "> $(jq -r '.payloadReason' "$EV")"
+              echo
+              echo "No signals were evaluated and stored state was left untouched."
+              echo "**This is not a quiet day.**"
+            elif [ "$fired" != "0" ]; then
+              echo "### Worth saying"
+              jq -r '.fired[] | "- **\(.claim)**  \n  receipt: \(.receipt.url) · signal: `\(.signalId)`"' "$EV"
+              echo
+              echo "To stop these repeating, commit the advanced state to"
+              echo "\`scripts/ops/social-signal-state.json\`:"
+              echo
+              echo '```json'
+              cat "$SOCIAL_SWEEP_STATE_FILE"
+              echo '```'
+            elif [ "$seeded" != "0" ]; then
+              echo "### Calibrated, announced nothing"
+              echo
+              echo "No stored state was found, so already-crossed thresholds were seeded"
+              echo "rather than announced as news. Commit the seeded state below."
+              jq -r '.seeded[] | "- `\(.signalId)` — \(.claim)"' "$EV"
+            elif [ "$vetoed" != "0" ]; then
+              echo "### Nothing publishable"
+              echo
+              echo "Signals fired but every one was vetoed. This is **not** the same as a"
+              echo "quiet day — something happened that we could not stand behind."
+            else
+              echo "Nothing to say today. This is the common and correct outcome."
+            fi
+
+            if [ "$vetoed" != "0" ]; then
+              echo
+              echo "### Vetoed by the truth boundary"
+              jq -r '.vetoed[] | "- `\(.signalId)` — \(.vetoReason): \(.vetoDetail)"' "$EV"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$status"
+
+      - name: Upload sweep evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: social-signal-sweep-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/social-signal-sweep.json
+            artifacts-sweep.log
+          if-no-files-found: error
+          retention-days: 90
