@@ -32,8 +32,17 @@ contract HydrationDepositPoolAdapterTest is Test {
         policy = new TreasuryPolicy();
         policy.setStrategySettler(operator, true);
         asset = new MockHydrationPoolUsdc();
-        MockHydrationPoolAdapterFactory factory = new MockHydrationPoolAdapterFactory();
-        (lane, adapter, depositPool) = factory.deploy(policy, asset, operator);
+        MockHydrationPoolLaneFactory laneFactory = new MockHydrationPoolLaneFactory();
+        MockHydrationPoolBridgeFactory adapterFactory = new MockHydrationPoolBridgeFactory();
+        MockDepositPoolFactory poolFactory = new MockDepositPoolFactory();
+
+        // Each factory has its own CREATE sequence, so each prediction is
+        // derived from that factory's address and first child nonce.
+        address predictedAdapter = adapterFactory.predictFirstChild();
+        address predictedPool = poolFactory.predictFirstChild();
+        lane = laneFactory.deploy(policy, asset, predictedAdapter);
+        adapter = adapterFactory.deploy(predictedPool, lane);
+        depositPool = poolFactory.deploy(asset, operator, adapter);
         pool = address(depositPool);
         asset.mint(pool, 20 * USDC);
     }
@@ -164,23 +173,46 @@ contract HydrationDepositPoolAdapterTest is Test {
     }
 }
 
-contract MockHydrationPoolAdapterFactory {
-    function deploy(TreasuryPolicy policy, MockHydrationPoolUsdc asset, address operator)
+abstract contract MockFirstChildFactory {
+    /// @dev Each split deployer creates exactly one child. CREATE address
+    ///      derivation therefore uses this deployer's address and nonce one;
+    ///      the old single-deployer nonce-two/nonce-three literals do not move.
+    function predictFirstChild() external view returns (address) {
+        return _predictFirstChild();
+    }
+
+    function _predictFirstChild() internal view returns (address) {
+        return address(uint160(uint256(keccak256(abi.encodePacked(hex"d694", address(this), hex"01")))));
+    }
+}
+
+contract MockHydrationPoolLaneFactory is MockFirstChildFactory {
+    function deploy(TreasuryPolicy policy, MockHydrationPoolUsdc asset, address predictedAdapter)
         external
-        returns (MockExclusiveHydrationLane lane, HydrationDepositPoolAdapter adapter, DepositPool pool)
+        returns (MockExclusiveHydrationLane lane)
     {
-        // A fresh contract starts child CREATE nonces at one. The dedicated
-        // lane is nonce one, the bridge adapter nonce two, and the pool nonce
-        // three. Prediction resolves all three immutable links without an
-        // upgradeable or operator-repointable venue slot.
-        address predictedAdapter =
-            address(uint160(uint256(keccak256(abi.encodePacked(hex"d694", address(this), hex"02")))));
-        address predictedPool =
-            address(uint160(uint256(keccak256(abi.encodePacked(hex"d694", address(this), hex"03")))));
         lane = new MockExclusiveHydrationLane(policy, asset, predictedAdapter);
+    }
+}
+
+contract MockHydrationPoolBridgeFactory is MockFirstChildFactory {
+    function deploy(address predictedPool, MockExclusiveHydrationLane lane)
+        external
+        returns (HydrationDepositPoolAdapter adapter)
+    {
+        address predictedAdapter = _predictFirstChild();
         adapter = new HydrationDepositPoolAdapter(predictedPool, lane);
-        pool = new DepositPool(address(asset), operator, adapter);
         require(address(adapter) == predictedAdapter, "PREDICTION");
+    }
+}
+
+contract MockDepositPoolFactory is MockFirstChildFactory {
+    function deploy(MockHydrationPoolUsdc asset, address operator, HydrationDepositPoolAdapter adapter)
+        external
+        returns (DepositPool pool)
+    {
+        address predictedPool = _predictFirstChild();
+        pool = new DepositPool(address(asset), operator, adapter);
         require(address(pool) == predictedPool, "POOL_PREDICTION");
     }
 }
