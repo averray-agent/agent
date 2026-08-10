@@ -424,6 +424,28 @@ tree, atomic settlement across a DAG, payment splits. `delegationPolicy` and
 Probably the highest-value item here, and the one most likely to be started too
 early. Liability chains are the hard part, not the plumbing.
 
+**A2A is the protocol T4 implements**, and it appeared nowhere in this roadmap until
+now — it was tracked only in `AGENT_BANKING.md`'s "What's missing". A2A's own
+literature names the hard part of agent marketplaces as *"identity, reputation,
+billing, compliance, sandboxing, liability, versioning, and dispute resolution"*,
+which is very nearly an inventory of what already exists here. That is the version
+worth building: **A2A with real money under it**, not an A2A badge on a manifest.
+
+> **Standing rule — do not re-add `a2a` to public discovery until the endpoint, auth
+> posture and docs all exist.** Live discovery advertises `["http", "mcp"]` and that is
+> correct.
+>
+> The tempting shortcut is a "truthful partial" Agent Card. **There is no such thing.**
+> `protocolVersion` declares the A2A version supported *at that interface*, not the
+> version of the spec you read, and §12.1 requires a custom binding to implement **all**
+> A2A core operations — so any card published claims full core support. PR #1008 tried
+> exactly this and was closed. The recommendation behind it rested on a *summarised*
+> fetch of the spec rather than the normative text, and was used to argue past the rule
+> in `AGENT_BANKING.md` that turned out to be right.
+>
+> The general shape, worth remembering beyond A2A: **the cheap version of a standard is
+> a claim, the valuable version is a mechanism.** Only the second earns anything.
+
 ### T5 — Fair exchange · OPEN FOR SUBJECTIVE WORK ONLY
 
 The classic problem — a buyer cannot evaluate a deliverable without receiving it, and
