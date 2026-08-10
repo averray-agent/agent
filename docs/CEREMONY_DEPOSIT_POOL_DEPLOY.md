@@ -352,6 +352,59 @@ deliberately does not.
 
 ---
 
+## 5b. Fork simulation — the ordering is proven, not reasoned
+
+Run 2026-08-10 against an `anvil` fork of mainnet at block 19,306,992, deployer nonce 33
+(matching mainnet). All four transactions executed:
+
+| tx | contract | address | vs prediction |
+|---|---|---|---|
+| 1 | `HydrationUsdcAdapterV22` (lane) | `0xAcC2CAc2E814F243dbFEAE1B99BcfE1A1A7846Ed` | **match** |
+| 2 | `HydrationDepositPoolAdapter` | `0xf0f3b4a65AD54f1838A581b594CA77A54002c5f1` | **match** |
+| 3 | `DepositPool` | `0xAa9661e983FF3a41c8FE992331E8f1e375d3eE94` | **match** |
+| 4 | pause → `setStrategyAdapter` → unpause | (multisig owner impersonated) | all `status 0x1` |
+
+Both load-bearing constructor assertions passed for real rather than in argument:
+tx2's `lane.agentAccountCore() == address(this)`, and tx3's
+`venueAdapter.code.length != 0 && venueAdapter.asset() == asset_`.
+
+Wiring read back afterwards — the cycle closes and the live lane is untouched:
+
+```
+wrapper.strategyAdapter(HYDRATION_USDC_POOL_V1) = 0xAcC2CAc2…  (new lane)
+wrapper.strategyAdapter(HYDRATION_USDC_V1)      = 0x96091d44…  (operating lane, unchanged)
+pool.operator()          = 0x5a6836c6…5813
+pool.venueAdapter()      = 0xf0f3b4a6…
+venueAdapter.pool()      = 0xAa9661e9…
+venueAdapter.lane()      = 0xAcC2CAc2…
+lane.agentAccountCore()  = 0xf0f3b4a6…
+lane.strategyId()        = HYDRATION_USDC_POOL_V1
+```
+
+### What the fork could NOT simulate, and why it does not weaken the result
+
+tx3 first reverted with empty revert data. The cause is not a defect: **USDC at
+`0x0000…01200000` is a runtime precompile, not EVM bytecode**, and anvil's EVM does not
+implement it. Verified by direct comparison — `decimals()` returns `6` on mainnet and
+reverts on the fork, with both reporting essentially no code.
+
+The blocked line is `DepositPool.sol:160`:
+`if (IERC20PoolAsset(asset_).decimals() != decimals) revert InvalidAssetDecimals();`
+Checked against the real chain instead: mainnet USDC `decimals()` = 6, and the contract's
+constant is `uint8 public constant decimals = 6`. It matches, so this passes on mainnet.
+
+To exercise the remaining constructor logic the fork ran with a stub at the USDC address
+returning `6` for every call. That stub is why `pool.totalAssets()` reads **12** on the fork
+(`balanceOf` also returns 6, twice — buffer plus managed). On mainnet an empty pool reads 0.
+The figure is an artifact; do not carry it forward as a real value.
+
+**Consequence for future simulations:** an anvil fork cannot model Hub's asset precompile,
+so anything touching USDC must be dry-run against a node that implements it — polkadot-js
+`dryRunCall` against mainnet state (the technique that caught FIND #19), or chopsticks.
+Reach for anvil for pure-EVM wiring, not for anything that moves the asset.
+
+---
+
 ## 6. Before anything is signed
 
 - [x] ~~settler address identified~~ — **already satisfied**, `0x5a6836c6…5813` is a
@@ -370,8 +423,12 @@ deliberately does not.
       ready. Re-read all three immediately before pausing.
 - [x] ~~§5 decision~~ — document, do not chase. "It comes home at recall" was checked and is
       false; recovery needs its own packet and is not worth it at this size.
-- [ ] dry-run each deployment against current state before broadcasting
+- [x] ~~dry-run each deployment~~ — full four-transaction fork simulation passed, all three
+      addresses matching prediction (§5b). The USDC precompile is the one step anvil cannot
+      model; its check was verified directly against mainnet instead.
 - [ ] caps confirmed as intended: `totalAssets() <= 1_000e6`, `assetsOf(agent) <= 100e6`
+- [ ] **on the day**: re-read the deployer nonce and recompute both predicted addresses —
+      §5b assumed 33, and the whole ordering depends on it
 
 Nothing here moves depositor money — the pool starts empty. The ceremony's risk is
 mis-wiring immutable references, not loss of funds, and every mitigation above targets that.
