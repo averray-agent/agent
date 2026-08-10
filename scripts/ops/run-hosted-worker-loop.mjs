@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Synthetic money-rail proof only: this script creates its own benchmark job
+// and proves auth -> claim -> submit -> settle. It deliberately does not run
+// worker/. Real bounty work is joined to this rail by run-bounty-worker.mjs.
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
