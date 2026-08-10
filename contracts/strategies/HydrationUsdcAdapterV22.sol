@@ -26,6 +26,8 @@ contract HydrationUsdcAdapterV22 is IXcmV22CustodyAdapter, ReentrancyGuard {
     uint256 public remoteOperatingFloat;
     uint64 public remoteOperatingFloatAsOf;
     bytes32 public remoteOperatingFloatRef;
+    uint64 public remotePositionAsOf;
+    bytes32 public remotePositionRef;
 
     mapping(bytes32 => AdapterRequest) internal requests;
     mapping(bytes32 => bool) public fundingReleased;
@@ -66,6 +68,7 @@ contract HydrationUsdcAdapterV22 is IXcmV22CustodyAdapter, ReentrancyGuard {
         uint256 amount
     );
     event RemoteOperatingFloatObserved(uint256 assets, uint64 asOf, bytes32 indexed remoteRef);
+    event RemotePositionObserved(uint256 assets, uint256 shares, uint64 asOf, bytes32 indexed remoteRef);
 
     error Unauthorized();
     error ProtocolPaused();
@@ -394,6 +397,22 @@ contract HydrationUsdcAdapterV22 is IXcmV22CustodyAdapter, ReentrancyGuard {
         remoteOperatingFloatAsOf = asOf;
         remoteOperatingFloatRef = remoteRef;
         emit RemoteOperatingFloatObserved(assets, asOf, remoteRef);
+    }
+
+    /// @notice Reconcile a settled, exclusive adapter deployment to the observed
+    ///         rebasing aUSDC position. Packet-2 pool adapters use a dedicated
+    ///         HydrationUsdcAdapterV22 instance, so the observation is the full book.
+    function recordRemotePosition(uint256 assets, uint64 asOf, bytes32 remoteRef) external onlyOperator {
+        if (
+            asOf == 0 || asOf <= remotePositionAsOf || remoteRef == bytes32(0) || pendingDepositAssets != 0
+                || pendingWithdrawalShares != 0
+        ) revert InvalidRequest();
+        totalAssets = assets;
+        // aUSDC is rebasing and remains 1:1 with USDC-denominated assets.
+        totalShares = assets;
+        remotePositionAsOf = asOf;
+        remotePositionRef = remoteRef;
+        emit RemotePositionObserved(assets, assets, asOf, remoteRef);
     }
 
     function getAdapterRequest(bytes32 requestId) external view override returns (AdapterRequest memory) {

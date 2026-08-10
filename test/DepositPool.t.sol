@@ -86,6 +86,43 @@ contract DepositPoolTest is Test {
         assertEq(pool.fulfilRedeem(requestId), 10 * USDC);
     }
 
+    function testThirtyDayNoticeRemainsHonourableAcrossSevenDayVenueRollovers() public {
+        vm.prank(agent);
+        uint256 shares = pool.deposit(10 * USDC, agent);
+        vm.prank(agentTwo);
+        pool.deposit(10 * USDC, agentTwo);
+
+        vm.prank(agent);
+        uint256 noticeRequestId = pool.requestRedeem(shares, agent, DepositPool.NoticeTier.Notice30Days);
+        (,,, uint64 noticeUnlockAt,,) = pool.redeemRequests(noticeRequestId);
+
+        vm.prank(operator);
+        uint256 deploymentId = pool.deployToVenue(10 * USDC, uint64(block.timestamp + 7 days));
+        _settleDeployment(deploymentId);
+
+        for (uint256 epoch = 1; epoch <= 4; epoch++) {
+            (,, uint64 returnBy,,) = pool.venueDeployments(deploymentId);
+            vm.warp(returnBy);
+            uint256 managed = adapter.managedAssets(address(pool));
+            vm.prank(operator);
+            uint256 recallId = pool.recallVenueDeployment(deploymentId, managed);
+            _settleRecall(recallId);
+            assertEq(adapter.managedAssets(address(pool)), 0);
+
+            if (epoch < 4) {
+                vm.prank(operator);
+                deploymentId = pool.deployToVenue(10 * USDC, uint64(block.timestamp + 7 days));
+                _settleDeployment(deploymentId);
+            }
+        }
+
+        require(block.timestamp == uint256(noticeUnlockAt) - 2 days, "ROLLOVER_CLOCK_DRIFT");
+        assertEq(pool.bufferAssets(), 20 * USDC);
+        vm.warp(noticeUnlockAt);
+        assertEq(pool.fulfilRedeem(noticeRequestId), 10 * USDC);
+        assertEq(pool.activeVenueDeploymentId(), 0);
+    }
+
     function testRequestedSharesCannotAlsoRedeemInstantly() public {
         vm.prank(agent);
         uint256 shares = pool.deposit(10 * USDC, agent);
@@ -100,31 +137,60 @@ contract DepositPoolTest is Test {
     function testVenueYieldRaisesShareValueOnlyOnDeployedFraction() public {
         vm.prank(agent);
         uint256 shares = pool.deposit(10 * USDC, agent);
+        vm.prank(agentTwo);
+        pool.deposit(10 * USDC, agentTwo);
         assertEq(shares, 10 * USDC);
 
         vm.prank(operator);
-        pool.deployToVenue(5 * USDC, uint64(block.timestamp + 1 days));
-        assertEq(pool.bufferAssets(), 5 * USDC);
-        assertEq(adapter.managedAssets(address(pool)), 5 * USDC);
+        uint256 deploymentId = pool.deployToVenue(10 * USDC, uint64(block.timestamp + 7 days));
+        _settleDeployment(deploymentId);
+        assertEq(pool.bufferAssets(), 10 * USDC);
+        assertEq(adapter.managedAssets(address(pool)), 10 * USDC);
 
         adapter.simulateYield(address(pool), 1_000);
 
         assertEq(pool.balanceOf(agent), 10 * USDC);
-        assertEq(pool.totalAssets(), 10_500_000);
+        assertEq(pool.totalAssets(), 21 * USDC);
         assertEq(pool.convertToAssets(shares), 10_500_000);
         assertEq(pool.earnedProtocolFees(), 0);
         assertEq(pool.PLATFORM_FEE_BPS(), 0);
     }
 
-    function testInstantRedeemUsesBufferRatherThanVenueAccounting() public {
+    function testInstantRedeemSucceedsWhileMaximumDeploymentIsInFlight() public {
         vm.prank(agent);
-        pool.deposit(10 * USDC, agent);
+        uint256 shares = pool.deposit(10 * USDC, agent);
+        vm.prank(agentTwo);
+        pool.deposit(10 * USDC, agentTwo);
+
+        assertEq(pool.bufferFloor(), 10 * USDC);
+        assertEq(pool.maxDeployableAssets(), 10 * USDC);
+        uint256 maximumDeployment = pool.maxDeployableAssets();
         vm.prank(operator);
-        pool.deployToVenue(8 * USDC, uint64(block.timestamp + 1 days));
+        pool.deployToVenue(maximumDeployment, uint64(block.timestamp + 7 days));
 
         vm.prank(agent);
-        (bool ok, bytes memory data) = address(pool).call(abi.encodeCall(pool.redeem, (3 * USDC, agent, agent)));
-        _assertRevertedWith(ok, data, DepositPool.InsufficientBuffer.selector);
+        assertEq(pool.redeem(shares, agent, agent), 10 * USDC);
+        assertEq(pool.bufferAssets(), 0);
+        assertEq(adapter.managedAssets(address(pool)), 10 * USDC);
+    }
+
+    function testBufferFloorCannotBeDeployedThroughForAnyOperatorAmount() public {
+        vm.prank(agent);
+        pool.deposit(10 * USDC, agent);
+        vm.prank(agentTwo);
+        pool.deposit(10 * USDC, agentTwo);
+
+        vm.startPrank(operator);
+        (bool oneOverOk, bytes memory oneOverData) =
+            address(pool).call(abi.encodeCall(pool.deployToVenue, (10 * USDC + 1, uint64(block.timestamp + 7 days))));
+        _assertRevertedWith(oneOverOk, oneOverData, DepositPool.BufferFloorBreached.selector);
+        (bool maximumOk, bytes memory maximumData) = address(pool)
+            .call(abi.encodeCall(pool.deployToVenue, (type(uint256).max, uint64(block.timestamp + 7 days))));
+        _assertRevertedWith(maximumOk, maximumData, DepositPool.BufferFloorBreached.selector);
+        vm.stopPrank();
+
+        assertEq(pool.bufferAssets(), 20 * USDC);
+        assertEq(adapter.managedAssets(address(pool)), 0);
     }
 
     function testOperatorPrincipalAndEarnedFeesRemainSeparateLedgerLines() public {
@@ -147,8 +213,11 @@ contract DepositPoolTest is Test {
     function testOperatorPrincipalUsesDepositRoundingAndCannotDiluteAgents() public {
         vm.prank(agent);
         uint256 agentShares = pool.deposit(10 * USDC, agent);
+        vm.prank(agentTwo);
+        pool.deposit(10 * USDC, agentTwo);
         vm.prank(operator);
-        pool.deployToVenue(5 * USDC, uint64(block.timestamp + 1 days));
+        uint256 deploymentId = pool.deployToVenue(10 * USDC, uint64(block.timestamp + 7 days));
+        _settleDeployment(deploymentId);
         adapter.simulateYield(address(pool), 1_000);
         uint256 agentAssetsBefore = pool.convertToAssets(agentShares);
 
@@ -164,14 +233,17 @@ contract DepositPoolTest is Test {
     function testMintSuppliesExactRequestedSharesWithStandardRounding() public {
         vm.prank(agent);
         pool.deposit(10 * USDC, agent);
+        vm.prank(agentTwo);
+        pool.deposit(10 * USDC, agentTwo);
         vm.prank(operator);
-        pool.deployToVenue(5 * USDC, uint64(block.timestamp + 1 days));
+        uint256 deploymentId = pool.deployToVenue(10 * USDC, uint64(block.timestamp + 7 days));
+        _settleDeployment(deploymentId);
         adapter.simulateYield(address(pool), 1_000);
 
         vm.prank(agentTwo);
         uint256 assetsPaid = pool.mint(1 * USDC, agentTwo);
         assertEq(assetsPaid, 1_050_000);
-        assertEq(pool.balanceOf(agentTwo), 1 * USDC);
+        assertEq(pool.balanceOf(agentTwo), 11 * USDC);
     }
 
     function testPerAgentCapRejectsTheOneHundredAndFirstUsdc() public {
@@ -217,23 +289,36 @@ contract DepositPoolTest is Test {
     function testAdapterDeploymentIsPinnedClockedAndOperatorRecallable() public {
         vm.prank(agent);
         pool.deposit(10 * USDC, agent);
+        vm.prank(agentTwo);
+        pool.deposit(10 * USDC, agentTwo);
 
         uint64 returnBy = uint64(block.timestamp + 2 days);
         vm.prank(operator);
         uint256 deploymentId = pool.deployToVenue(6 * USDC, returnBy);
-        (uint256 principal, uint256 recalled, uint64 recordedReturnBy) = pool.venueDeployments(deploymentId);
+        (
+            uint256 principal,
+            uint256 recalled,
+            uint64 recordedReturnBy,
+            bytes32 deployRequestId,
+            IDepositPoolVenueAdapter.RequestStatus deployStatus
+        ) = pool.venueDeployments(deploymentId);
         assertEq(principal, 6 * USDC);
         assertEq(recalled, 0);
         assertEq(recordedReturnBy, returnBy);
+        require(deployRequestId != bytes32(0), "MISSING_ADAPTER_REQUEST");
+        assertEq(uint256(deployStatus), uint256(IDepositPoolVenueAdapter.RequestStatus.Pending));
+        _settleDeployment(deploymentId);
 
         vm.prank(agentTwo);
         vmx.expectRevert(DepositPool.Unauthorized.selector);
         pool.recallVenueDeployment(deploymentId, 6 * USDC);
 
         vm.prank(operator);
-        assertEq(pool.recallVenueDeployment(deploymentId, 6 * USDC), 6 * USDC);
-        assertEq(pool.bufferAssets(), 10 * USDC);
+        uint256 recallId = pool.recallVenueDeployment(deploymentId, 6 * USDC);
+        _settleRecall(recallId);
+        assertEq(pool.bufferAssets(), 20 * USDC);
         assertEq(adapter.managedAssets(address(pool)), 0);
+        assertEq(pool.activeVenueDeploymentId(), 0);
     }
 
     function testOnlyOperatorCanCreateVenueDeployment() public {
@@ -248,10 +333,30 @@ contract DepositPoolTest is Test {
     function testVenueDeploymentRequiresAPoolSelectedFutureDeadline() public {
         vm.prank(agent);
         pool.deposit(10 * USDC, agent);
+        vm.prank(agentTwo);
+        pool.deposit(10 * USDC, agentTwo);
 
         vm.prank(operator);
         vmx.expectRevert(DepositPool.InvalidReturnDeadline.selector);
         pool.deployToVenue(1 * USDC, uint64(block.timestamp));
+    }
+
+    function testVenueDeadlineCannotExceedDerivedShortestNoticeTier() public {
+        vm.prank(agent);
+        pool.deposit(10 * USDC, agent);
+        vm.prank(agentTwo);
+        pool.deposit(10 * USDC, agentTwo);
+
+        uint256 shortestNotice = pool.NOTICE_7_DAYS();
+        vm.prank(operator);
+        (bool ok, bytes memory data) = address(pool)
+            .call(abi.encodeCall(pool.deployToVenue, (1 * USDC, uint64(block.timestamp + shortestNotice + 1))));
+        _assertRevertedWith(ok, data, DepositPool.VenueDeadlineExceedsNoticeTier.selector);
+
+        vm.prank(operator);
+        uint256 deploymentId = pool.deployToVenue(1 * USDC, uint64(block.timestamp + shortestNotice));
+        (,, uint64 returnBy,,) = pool.venueDeployments(deploymentId);
+        assertEq(uint256(returnBy), block.timestamp + shortestNotice);
     }
 
     function testDepositPullsOnlyFromSignerAndCannotUseAnAgentsApproval() public {
@@ -287,32 +392,99 @@ contract DepositPoolTest is Test {
         freshPool.deployToVenue(1 * USDC, uint64(block.timestamp + 1 days));
     }
 
-    function testStructuralLaw6RuntimeHasNoCreditOrDiscretionaryEgressSurface() public view {
-        bytes memory runtime = address(pool).code;
-        bytes4[16] memory forbidden = [
-            bytes4(keccak256("borrow(uint256)")),
-            bytes4(keccak256("borrow(address,uint256)")),
-            bytes4(keccak256("borrow(address,address,uint256)")),
-            bytes4(keccak256("lend(uint256)")),
-            bytes4(keccak256("lend(address,uint256)")),
-            bytes4(keccak256("lend(address,address,uint256)")),
-            bytes4(keccak256("loan(uint256)")),
-            bytes4(keccak256("loan(address,uint256)")),
-            bytes4(keccak256("sendToAgentFor(address,address,uint256)")),
-            bytes4(keccak256("sweep(address,address,uint256)")),
-            bytes4(keccak256("rescueTokens(address,address,uint256)")),
-            bytes4(keccak256("withdrawOperatorPrincipal(uint256,address)")),
-            bytes4(keccak256("setVenueAdapter(address)")),
-            bytes4(keccak256("setReserveRatio(uint256)")),
-            bytes4(keccak256("depositFor(address,uint256)")),
-            bytes4(keccak256("depositFrom(address,uint256,address)"))
-        ];
-        for (uint256 i = 0; i < forbidden.length; i++) {
-            require(!_containsBytes(runtime, abi.encodePacked(forbidden[i])), "FORBIDDEN_SELECTOR_FOUND");
-        }
+    function testStructuralLaw6ExternalAbiMatchesExactAllowlist() public view {
+        _assertExactPoolAbi(address(pool));
         assertEq(pool.asset(), address(asset));
         assertEq(pool.operator(), operator);
         assertEq(address(pool.venueAdapter()), address(adapter));
+    }
+
+    function assertExactPoolAbi(address target) external view {
+        _assertExactPoolAbi(target);
+    }
+
+    function _assertExactPoolAbi(address target) internal view {
+        bytes4[] memory allowed = new bytes4[](50);
+        allowed[0] = bytes4(keccak256("DEPLOYMENT_EPOCH()"));
+        allowed[1] = bytes4(keccak256("NOTICE_30_DAYS()"));
+        allowed[2] = bytes4(keccak256("NOTICE_7_DAYS()"));
+        allowed[3] = bytes4(keccak256("PER_AGENT_ASSET_CAP()"));
+        allowed[4] = bytes4(keccak256("PLATFORM_FEE_BPS()"));
+        allowed[5] = bytes4(keccak256("TOTAL_ASSET_CAP()"));
+        allowed[6] = bytes4(keccak256("activeVenueDeploymentId()"));
+        allowed[7] = bytes4(keccak256("activeVenueRecallId()"));
+        allowed[8] = bytes4(keccak256("allowance(address,address)"));
+        allowed[9] = bytes4(keccak256("approve(address,uint256)"));
+        allowed[10] = bytes4(keccak256("asset()"));
+        allowed[11] = bytes4(keccak256("assetsOf(address)"));
+        allowed[12] = bytes4(keccak256("availableShares(address)"));
+        allowed[13] = bytes4(keccak256("balanceOf(address)"));
+        allowed[14] = bytes4(keccak256("bufferAssets()"));
+        allowed[15] = bytes4(keccak256("bufferFloor()"));
+        allowed[16] = bytes4(keccak256("contributeOperatorPrincipal(uint256)"));
+        allowed[17] = bytes4(keccak256("convertToAssets(uint256)"));
+        allowed[18] = bytes4(keccak256("convertToShares(uint256)"));
+        allowed[19] = bytes4(keccak256("decimals()"));
+        allowed[20] = bytes4(keccak256("deployToVenue(uint256,uint64)"));
+        allowed[21] = bytes4(keccak256("deposit(uint256,address)"));
+        allowed[22] = bytes4(keccak256("earnedProtocolFees()"));
+        allowed[23] = bytes4(keccak256("fulfilRedeem(uint256)"));
+        allowed[24] = bytes4(keccak256("lastDeploymentEpochAt()"));
+        allowed[25] = bytes4(keccak256("lockedShares(address)"));
+        allowed[26] = bytes4(keccak256("maxDeployableAssets()"));
+        allowed[27] = bytes4(keccak256("maxIssuedAgentShares()"));
+        allowed[28] = bytes4(keccak256("mint(uint256,address)"));
+        allowed[29] = bytes4(keccak256("name()"));
+        allowed[30] = bytes4(keccak256("nextRedeemRequestId()"));
+        allowed[31] = bytes4(keccak256("nextVenueDeploymentId()"));
+        allowed[32] = bytes4(keccak256("nextVenueRecallId()"));
+        allowed[33] = bytes4(keccak256("operator()"));
+        allowed[34] = bytes4(keccak256("operatorContributedPrincipal()"));
+        allowed[35] = bytes4(keccak256("operatorPrincipalShares()"));
+        allowed[36] = bytes4(keccak256("recallVenueDeployment(uint256,uint256)"));
+        allowed[37] = bytes4(keccak256("redeem(uint256,address,address)"));
+        allowed[38] = bytes4(keccak256("redeemRequests(uint256)"));
+        allowed[39] = bytes4(keccak256("requestRedeem(uint256,address,uint8)"));
+        allowed[40] = bytes4(keccak256("settleVenueDeployment(uint256)"));
+        allowed[41] = bytes4(keccak256("settleVenueRecall(uint256)"));
+        allowed[42] = bytes4(keccak256("symbol()"));
+        allowed[43] = bytes4(keccak256("totalAssets()"));
+        allowed[44] = bytes4(keccak256("totalSupply()"));
+        allowed[45] = bytes4(keccak256("transfer(address,uint256)"));
+        allowed[46] = bytes4(keccak256("transferFrom(address,address,uint256)"));
+        allowed[47] = bytes4(keccak256("venueAdapter()"));
+        allowed[48] = bytes4(keccak256("venueDeployments(uint256)"));
+        allowed[49] = bytes4(keccak256("venueRecalls(uint256)"));
+
+        bytes4[] memory actual = _dispatcherSelectors(target.code);
+        require(actual.length == allowed.length, "EXTERNAL_ABI_CHANGED");
+        for (uint256 i = 0; i < actual.length; i++) {
+            require(_containsSelector(allowed, actual[i]), "UNALLOWLISTED_EXTERNAL_SELECTOR");
+        }
+    }
+
+    function testExactAbiAllowlistDetectsAnAddedFunction() public {
+        DepositPoolAbiMutation mutated = new DepositPoolAbiMutation(address(asset), operator, adapter);
+        bytes4[] memory actual = _dispatcherSelectors(address(mutated).code);
+        require(actual.length == 51, "MUTATION_NOT_IN_DISPATCHER");
+        require(_containsSelector(actual, bytes4(keccak256("advance(uint256)"))), "MUTATION_SELECTOR_MISSING");
+        (bool ok, bytes memory data) =
+            address(this).staticcall(abi.encodeCall(this.assertExactPoolAbi, (address(mutated))));
+        _assertRevertedWith(ok, data, bytes4(keccak256("Error(string)")));
+    }
+
+    function _settleDeployment(uint256 deploymentId) internal {
+        (,,, bytes32 adapterRequestId,) = pool.venueDeployments(deploymentId);
+        adapter.settle(adapterRequestId, true);
+        (IDepositPoolVenueAdapter.RequestStatus status,) = pool.settleVenueDeployment(deploymentId);
+        assertEq(uint256(status), uint256(IDepositPoolVenueAdapter.RequestStatus.Succeeded));
+    }
+
+    function _settleRecall(uint256 recallId) internal {
+        (,,, bytes32 adapterRequestId,) = pool.venueRecalls(recallId);
+        adapter.settle(adapterRequestId, true);
+        (IDepositPoolVenueAdapter.RequestStatus status,) = pool.settleVenueRecall(recallId);
+        assertEq(uint256(status), uint256(IDepositPoolVenueAdapter.RequestStatus.Succeeded));
     }
 
     function _fundAndApprove(address account, uint256 amount) internal {
@@ -331,20 +503,57 @@ contract DepositPoolTest is Test {
         require(actual == expected, "WRONG_REVERT_SELECTOR");
     }
 
-    function _containsBytes(bytes memory source, bytes memory target) internal pure returns (bool) {
-        if (target.length == 0 || target.length > source.length) return false;
-        for (uint256 i = 0; i <= source.length - target.length; i++) {
-            bool equal = true;
-            for (uint256 j = 0; j < target.length; j++) {
-                if (source[i + j] != target[j]) {
-                    equal = false;
-                    break;
-                }
+    function _dispatcherSelectors(bytes memory runtime) internal pure returns (bytes4[] memory selectors) {
+        bytes4[] memory scratch = new bytes4[](128);
+        uint256 count;
+        bool dispatcherStarted;
+        for (uint256 i = 0; i < runtime.length;) {
+            uint8 opcode = uint8(runtime[i]);
+            if (!dispatcherStarted) {
+                if (opcode == 0x5b) dispatcherStarted = true;
+                i++;
+                continue;
             }
-            if (equal) return true;
+            if (
+                opcode == 0x5f && i + 2 < runtime.length && runtime[i + 1] == bytes1(0x80)
+                    && runtime[i + 2] == bytes1(0xfd)
+            ) break;
+            if (opcode == 0x63) {
+                bytes4 selector;
+                assembly {
+                    selector := mload(add(add(runtime, 32), add(i, 1)))
+                }
+                scratch[count++] = selector;
+                i += 5;
+                continue;
+            }
+            if (opcode >= 0x60 && opcode <= 0x7f) {
+                i += 1 + (opcode - 0x5f);
+                continue;
+            }
+            i++;
+        }
+        require(count != 0, "DISPATCHER_NOT_FOUND");
+        selectors = new bytes4[](count);
+        for (uint256 i = 0; i < count; i++) {
+            selectors[i] = scratch[i];
+        }
+    }
+
+    function _containsSelector(bytes4[] memory selectors, bytes4 target) internal pure returns (bool) {
+        for (uint256 i = 0; i < selectors.length; i++) {
+            if (selectors[i] == target) return true;
         }
         return false;
     }
+}
+
+contract DepositPoolAbiMutation is DepositPool {
+    constructor(address asset_, address operator_, IDepositPoolVenueAdapter venueAdapter_)
+        DepositPool(asset_, operator_, venueAdapter_)
+    {}
+
+    function advance(uint256) external pure {}
 }
 
 contract MockPoolUsdc {
@@ -393,32 +602,92 @@ contract MockPoolUsdc {
 }
 
 contract MockPoolVenueAdapter is IDepositPoolVenueAdapter {
+    struct StoredRequest {
+        Request request;
+        address pool;
+    }
+
     MockPoolUsdc public immutable token;
     address public immutable override asset;
     mapping(address => uint256) public override managedAssets;
     mapping(address => uint64) public returnDeadline;
+    mapping(bytes32 => StoredRequest) internal requests;
+    uint256 public nextNonce = 1;
 
     constructor(MockPoolUsdc token_) {
         token = token_;
         asset = address(token_);
     }
 
-    function deploy(uint256 assets, uint64 returnBy) external override {
+    function requestDeploy(uint256 assets, uint64 returnBy) external override returns (bytes32 requestId) {
         require(returnBy > block.timestamp, "DEADLINE");
         managedAssets[msg.sender] += assets;
         returnDeadline[msg.sender] = returnBy;
+        requestId = _createRequest(msg.sender, RequestKind.Deploy, assets, returnBy);
     }
 
-    function recall(uint256 assets) external override returns (uint256 returnedAssets) {
+    function requestRecall(uint256 assets, uint64 returnBy) external override returns (bytes32 requestId) {
         require(managedAssets[msg.sender] >= assets, "MANAGED");
-        managedAssets[msg.sender] -= assets;
-        require(token.transfer(msg.sender, assets), "TRANSFER");
-        return assets;
+        requestId = _createRequest(msg.sender, RequestKind.Recall, assets, returnBy);
+    }
+
+    function getRequest(bytes32 requestId) external view override returns (Request memory) {
+        return requests[requestId].request;
+    }
+
+    function settle(bytes32 requestId, bool succeeded) external {
+        StoredRequest storage stored = requests[requestId];
+        require(stored.request.requestedAssets != 0, "REQUEST");
+        require(stored.request.status == RequestStatus.Pending, "STATUS");
+        stored.request.status = succeeded ? RequestStatus.Succeeded : RequestStatus.Failed;
+        if (succeeded) {
+            stored.request.settledAssets = stored.request.requestedAssets;
+            if (stored.request.kind == RequestKind.Recall) {
+                managedAssets[stored.pool] -= stored.request.requestedAssets;
+            }
+        } else if (stored.request.kind == RequestKind.Deploy) {
+            managedAssets[stored.pool] -= stored.request.requestedAssets;
+        }
+    }
+
+    function claimSettled(bytes32 requestId) external override returns (uint256 settledAssets) {
+        StoredRequest storage stored = requests[requestId];
+        require(msg.sender == stored.pool, "POOL");
+        require(
+            stored.request.status == RequestStatus.Succeeded || stored.request.status == RequestStatus.Failed, "PENDING"
+        );
+        require(!stored.request.claimed, "CLAIMED");
+        stored.request.claimed = true;
+        settledAssets = stored.request.settledAssets;
+        if (stored.request.kind == RequestKind.Recall && stored.request.status == RequestStatus.Succeeded) {
+            require(token.transfer(stored.pool, settledAssets), "TRANSFER");
+        } else if (stored.request.kind == RequestKind.Deploy && stored.request.status == RequestStatus.Failed) {
+            settledAssets = stored.request.requestedAssets;
+            require(token.transfer(stored.pool, settledAssets), "TRANSFER");
+        }
     }
 
     function simulateYield(address pool, uint256 bps) external returns (uint256 accrued) {
         accrued = (managedAssets[pool] * bps) / 10_000;
         managedAssets[pool] += accrued;
         token.mint(address(this), accrued);
+    }
+
+    function _createRequest(address pool, RequestKind kind, uint256 assets, uint64 returnBy)
+        private
+        returns (bytes32 requestId)
+    {
+        requestId = keccak256(abi.encode(address(this), pool, nextNonce++, kind, assets, returnBy));
+        requests[requestId] = StoredRequest({
+            request: Request({
+                kind: kind,
+                status: RequestStatus.Pending,
+                requestedAssets: assets,
+                settledAssets: 0,
+                returnBy: returnBy,
+                claimed: false
+            }),
+            pool: pool
+        });
     }
 }

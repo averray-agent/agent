@@ -287,6 +287,22 @@ abstract contract XcmWrapperV22Fixture is Test {
 }
 
 contract XcmWrapperV22Test is XcmWrapperV22Fixture {
+    function testSettledExclusiveLaneReconcilesObservedRebasingPosition() public {
+        _seedShares(70);
+
+        vm.prank(OPERATOR);
+        adapter.recordRemotePosition(101_000, 1, bytes32("POSITION_101K"));
+        assertEq(adapter.totalAssets(), 101_000);
+        assertEq(adapter.totalShares(), 101_000);
+        assertEq(adapter.remotePositionAsOf(), 1);
+        assertEq(adapter.remotePositionRef(), bytes32("POSITION_101K"));
+
+        _stageDeposit(71, 150_000, 100_000, 95_000, 30_000, 0);
+        vm.prank(OPERATOR);
+        vmx.expectRevert(HydrationUsdcAdapterV22.InvalidRequest.selector);
+        adapter.recordRemotePosition(102_000, 2, bytes32("IN_FLIGHT"));
+    }
+
     function testGoldenVectorsMatchKnownGoodV21FamiliesWithDocumentedSlots() public {
         bytes32 depositId = _stageDeposit(1, 150_000, 100_000, 95_000, 30_000, 0);
 
