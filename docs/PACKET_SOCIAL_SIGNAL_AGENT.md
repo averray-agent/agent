@@ -298,7 +298,56 @@ oversold:
 So minting a social agent is cheap and useful, but it is **a credential with no expiry and
 no revocation**. Treat the key like the other production secrets, not like a config value.
 
-### The approval primitive — promising, and NOT yet verified at our pin
+### ✅ Pre-flight result (2026-08-10) — the primitive is half wired, and the half we need is missing
+
+Resolved from source by fetching the `relay-v0.2.0` tag (`0d9be2f`, 2026-07-10) — the exact
+commit behind `ghcr.io/block/buzz:0.2.0` running in production. **No credentials, no events
+published, nothing touched.**
+
+**The grant/deny half is real and fully wired at our pin:**
+
+| Evidence at `relay-v0.2.0` | |
+|---|---|
+| `crates/buzz-core/src/kind.rs:436` | `KIND_APPROVAL_GRANT: u32 = 46030` |
+| `crates/buzz-relay/src/handlers/command_executor.rs:60` | dispatched to `handle_approval_grant` |
+| `crates/buzz-relay/src/handlers/ingest.rs:255` | requires `Scope::MessagesWrite` |
+
+Better than expected: the relay is a **state machine, not a message bus**. `handle_approval_grant`
+looks the approval up in its own database, and rejects unless the record is `Pending` and
+unexpired. That gives replay protection and a real lifecycle for free.
+
+> **Two expiries, opposite enforcement — do not confuse them.** The NIP-OA *auth tag*
+> expiry is **not enforced** (the agent controls the field it constrains). The *approval
+> record* expiry **is** enforced, server-side, by this handler. Same system, same word,
+> opposite guarantees.
+
+**But nothing creates an approval record.** `create_approval` exists only in the `buzz-db`
+layer and is called from **no ingest path at all**. Upstream's own conformance test says so
+in as many words — *"`create_approval` is only reached from unit tests"* — and that is true
+both at `relay-v0.2.0` **and at current HEAD** (`mobile-v0.8.0-rc.3`). It is not a version
+gap we can upgrade past.
+
+So today a `KIND_APPROVAL_GRANT` event is rejected with **"approval not found"**, because
+there is no record to grant. The approval flow is half a primitive: the answer exists, the
+question does not.
+
+**Note on method.** The live pre-flight originally proposed here — publish a 46030 event and
+see if it is accepted — would have been *actively misleading*. It would have been rejected,
+and "invalid: approval not found" reads like "this relay does not support kind 46030" when
+the kind is in fact fully supported. Reading the source answered the real question; the
+event would have answered a different one and looked authoritative doing it.
+
+**Consequence for the design:** keep approval state in **our** store, and use Buzz as the
+transport for the card and the operator's reply. The reply is an ordinary signed stream
+message; the publish tool checks our record, not the relay's. This is the same rule the
+deployment plan already applies to alert dedup — *"stays in our code, never in the relay"* —
+and it means the Buzz half is unblocked today rather than waiting on upstream.
+
+Revisit if upstream ever wires approval creation into an ingest path. Do **not** write
+records into Buzz's Postgres directly to fake it: that is reaching into another product's
+schema, and the next relay migration silently breaks the approval gate on a publishing path.
+
+### The approval primitive — original assessment (superseded by the pre-flight above)
 
 `KIND_APPROVAL_GRANT` (46030) and `KIND_APPROVAL_DENY` (46031) are real: defined in
 `crates/buzz-core/src/kind.rs` upstream, with builders in `buzz-sdk`. An authorize-this-
@@ -378,13 +427,14 @@ becomes optional.
 
 ### Revised build order for the Buzz half
 
-1. **Pre-flight the approval kinds** against the running relay. One event, loud result.
-2. **Add the `social:` block to `policy.yaml`** — fail-closed, proposes-only. Before any
-   publish tool exists, not after.
-3. **Mint the social agent's own NIP-OA credential.** Own keypair, own identity, stored
-   with production secrets.
-4. ~~**Digest line**~~ — **done**, see below.
-5. **Approval card**, using the protocol primitive if step 1 cleared it.
+1. ~~**Pre-flight the approval kinds**~~ — **done.** Grant/deny is wired at our pin;
+   approval *creation* is not wired anywhere upstream. Approval state stays in our store.
+2. ~~**Digest line**~~ — **done**, see below.
+3. **Add the `social:` block to `policy.yaml`** — fail-closed, proposes-only. Before any
+   publish tool exists, not after. **This is the next thing.**
+4. **Mint the social agent's own NIP-OA credential.** Own keypair, own identity, stored
+   with production secrets. Needs `Scope::MessagesWrite`.
+5. **Approval card** — Buzz carries the card and the reply; our store holds the record.
 6. **Publish tool**, gated on a recorded approval it verifies itself.
 
 ### The digest line, as built
