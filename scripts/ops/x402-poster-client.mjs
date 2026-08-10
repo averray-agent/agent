@@ -37,7 +37,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomBytes } from "node:crypto";
 
-import { Wallet } from "ethers";
+import { Contract, JsonRpcProvider, TypedDataEncoder, Wallet } from "ethers";
 
 import { buildSiwxEip4361Message } from "../../mcp-server/src/auth/siwx.js";
 
@@ -66,6 +66,48 @@ function parseArgs(argv) {
     flags[key] = next && !next.startsWith("--") ? (index += 1, next) : true;
   }
   return flags;
+}
+
+/**
+ * Refuse to sign a domain the token would not recognise.
+ *
+ * The server's advertised `extra` is a claim, and this client exists partly to
+ * probe our own ramp adversarially. Reproducing the token's DOMAIN_SEPARATOR is
+ * the only way to check that claim before spending: a match cannot be
+ * coincidental, because it is the value the token itself hashes against.
+ *
+ * Advisory, not authoritative — the readiness check owns the real gate. Without
+ * an RPC for the advertised chain this warns and proceeds rather than blocking
+ * every future chain on a missing endpoint.
+ */
+async function assertDomainMatchesToken(domain) {
+  const rpc = String(
+    process.env.X402_CLIENT_RPC_URL ?? (domain.chainId === 8453 ? "https://mainnet.base.org" : "")
+  ).trim();
+  if (!rpc) {
+    console.error(
+      `\n! No RPC for chainId ${domain.chainId} — cannot check the advertised EIP-712 domain.`
+      + " Set X402_CLIENT_RPC_URL to verify it before signing.\n"
+    );
+    return;
+  }
+  const provider = new JsonRpcProvider(rpc, domain.chainId);
+  const token = new Contract(
+    domain.verifyingContract,
+    ["function DOMAIN_SEPARATOR() view returns (bytes32)"],
+    provider
+  );
+  const onchain = await token.DOMAIN_SEPARATOR();
+  const advertised = TypedDataEncoder.hashDomain(domain);
+  if (advertised !== onchain) {
+    throw new Error(
+      `The server advertised name=${JSON.stringify(domain.name)} `
+      + `version=${JSON.stringify(domain.version)}, which hashes to ${advertised}, `
+      + `but ${domain.verifyingContract} reports ${onchain}. Signing this would be `
+      + "rejected by the facilitator. The server's `extra` is wrong, not your wallet."
+    );
+  }
+  console.error(`domain verified against ${domain.verifyingContract} on chain ${domain.chainId}`);
 }
 
 async function loadWallet() {
@@ -164,12 +206,24 @@ const siwxProof = {
 };
 
 const chainId = Number(String(accepted.network).split(":")[1]);
+// No fallbacks. `extra` IS the token's EIP-712 domain; guessing it produces a
+// signature that recovers to a different address, which the facilitator rejects
+// as payment_verification_failed with no hint that the domain was at fault. The
+// old `?? "USDC"` default did exactly that against Base, whose name() is
+// "USD Coin".
+if (!accepted.extra?.name || !accepted.extra?.version) {
+  throw new Error(
+    "The 402 advertised no EIP-712 domain in `accepts[0].extra`. Refusing to guess one — "
+    + "a wrong domain is rejected by the facilitator with no way to tell why."
+  );
+}
 const domain = {
-  name: accepted.extra?.name ?? "USDC",
-  version: accepted.extra?.version ?? "2",
+  name: accepted.extra.name,
+  version: accepted.extra.version,
   chainId,
   verifyingContract: accepted.asset
 };
+await assertDomainMatchesToken(domain);
 const signature = await wallet.signTypedData(domain, EIP3009_TYPES, authorization);
 
 const paymentPayload = {

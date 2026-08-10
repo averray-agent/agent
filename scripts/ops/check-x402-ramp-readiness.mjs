@@ -20,7 +20,7 @@
  * Exit 0 = every check passed and the ramp may be enabled.
  * Exit 1 = at least one check failed; the reason is printed.
  */
-import { Contract, JsonRpcProvider, formatUnits, getAddress } from "ethers";
+import { Contract, JsonRpcProvider, TypedDataEncoder, formatUnits, getAddress } from "ethers";
 
 import { resolveX402PosterRampConfig } from "../../mcp-server/src/payments/x402-poster-ramp.js";
 import {
@@ -35,7 +35,8 @@ const AGENT_ACCOUNT_CORE = "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57";
 const ERC20 = [
   "function balanceOf(address) view returns (uint256)",
   "function decimals() view returns (uint8)",
-  "function symbol() view returns (string)"
+  "function symbol() view returns (string)",
+  "function DOMAIN_SEPARATOR() view returns (bytes32)"
 ];
 const AAC = [
   "function positions(address,address) view returns (uint256,uint256,uint256,uint256,uint256,uint256)"
@@ -96,6 +97,43 @@ if (ramp?.enabled) {
         symbol.toUpperCase().includes("USDC"),
         `${ramp.asset} reports symbol ${symbol} — confirm this is Circle-native USDC on Base, not a bridged variant`
       );
+
+      // The check that was missing. `extra` IS the payer's EIP-712 domain, and a
+      // wrong one is invisible from this side: the payer signs a different digest,
+      // it recovers to a different address, and the facilitator returns a flat
+      // payment_verification_failed. Confirming symbol() is not the same test —
+      // Base USDC has symbol() "USDC" but name() "USD Coin", and we advertised the
+      // symbol, so the ramp could not accept a payment from anyone.
+      //
+      // Reproducing DOMAIN_SEPARATOR is the only proof: it is what the token itself
+      // hashes against, so a match cannot be coincidental.
+      try {
+        const onchain = await token.DOMAIN_SEPARATOR();
+        const configured = TypedDataEncoder.hashDomain({
+          name: ramp.assetEip712Name,
+          version: ramp.assetEip712Version,
+          chainId: Number(net.chainId),
+          verifyingContract: getAddress(ramp.asset)
+        });
+        const advertised = `name=${JSON.stringify(ramp.assetEip712Name)} version=${JSON.stringify(ramp.assetEip712Version)}`;
+        record(
+          "EIP-712 domain",
+          configured === onchain,
+          configured === onchain
+            ? `${advertised} reproduces the asset's DOMAIN_SEPARATOR ${onchain}`
+            : `${advertised} hashes to ${configured} but the asset reports ${onchain}`
+            + ` — payers signing our advertised extra would be rejected.`
+            + ` Read name() and version() off ${ramp.asset}.`
+        );
+      } catch (error) {
+        // An asset without DOMAIN_SEPARATOR() cannot support EIP-3009 at all, so
+        // this is a hard failure rather than an unverifiable check.
+        record(
+          "EIP-712 domain",
+          false,
+          `could not read DOMAIN_SEPARATOR() from ${ramp.asset}: ${error.message}`
+        );
+      }
     }
   } catch (error) {
     record("Base reachability", false, error.message);
