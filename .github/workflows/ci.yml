@@ -3,8 +3,33 @@ name: CI
 on:
   push:
     branches: [main]
+
+  # No `branches:` filter here, on purpose. It used to say `branches: [main]`,
+  # which meant a STACKED pull request — one opened with `--base` pointing at
+  # another feature branch — matched no trigger at all and got zero checks.
+  # `gh pr checks` then reports "no checks reported on the branch", which reads
+  # like a tooling glitch rather than "nothing about this has been verified".
+  # PR #1016 (2026-08-10) sat in exactly that state.
+  #
+  # `edited` is in the type list because GitHub retargets a stacked PR's base to
+  # main automatically when the parent merges, and that arrives as
+  # `pull_request` / `edited` — NOT `synchronize`, and `edited` is not in the
+  # default type set. Without it the retarget starts no run, so the head SHA
+  # keeps check results that were computed against the OLD base while the PR
+  # claims to target main. On #1016 the only thing that re-ran CI was the
+  # rebase forced by `mergeStateStatus: BEHIND`; that is luck, not a gate.
+  #
+  # `edited` also fires on title and body edits, so a cosmetic edit re-runs the
+  # full suite. That waste is deliberate. The obvious guard — an `if:` on each
+  # job so cosmetic edits skip the work — would be worse than the waste: branch
+  # protection counts a `skipped` required check as a PASS, and a second run on
+  # the same head SHA supersedes the first run's check runs. A guarded run would
+  # therefore convert a genuinely-tested PR into a green-but-untested one, which
+  # is the exact failure class this trigger block exists to close. This repo is
+  # public, so GitHub-hosted runner minutes are free; the trade is one-sided.
   pull_request:
-    branches: [main]
+    types: [opened, synchronize, reopened, edited]
+
   merge_group:
 
 # Cancel in-progress runs for the same ref when a new push lands — avoids
@@ -398,3 +423,60 @@ jobs:
             --redact \
             --no-banner \
             --verbose
+
+  # The single roll-up gate. Fans in every job above and is the one context
+  # branch protection should require on main. It does two things the seven
+  # individually-required contexts could not:
+  #
+  #   1. It closes the "required contexts drift from the job list" gap. Before
+  #      this job existed, `main` required 7 contexts while this workflow
+  #      defined 9 jobs — "Generated output guard" and the AI-instruction
+  #      integrity lint could fail without blocking a merge, because nobody
+  #      added them to the protection rule when they landed. Anything added to
+  #      `needs:` below is covered from its first run, with no settings change.
+  #
+  #   2. It makes "no checks ran" impossible to read as "checks passed". If the
+  #      workflow does not trigger at all, this context never reports, and the
+  #      PR sits at "Expected — waiting for status to be reported" with merge
+  #      blocked, instead of quietly showing an empty check list.
+  #
+  # `skipped` is treated as a failure, not a pass. That is the opposite of
+  # GitHub's own default for required checks, and it is the point: a required
+  # job that did not run has not verified anything. None of the jobs below have
+  # an `if:`, so a skip here means something upstream went wrong and should be
+  # looked at rather than merged past.
+  ci-complete:
+    name: CI — all checks complete
+    if: always()
+    needs:
+      - generated-output-guard
+      - solidity
+      - backend
+      - frontend
+      - public-site
+      - indexer
+      - env-template-structure
+      - ai-instruction-integrity
+      - secrets-scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require every CI job to have succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+
+          echo "Result of every job this gate fans in:"
+          printf '%s' "$NEEDS" | jq -r 'to_entries[] | "  \(.value.result)\t\(.key)"' | sort
+
+          not_passed=$(printf '%s' "$NEEDS" \
+            | jq -r '[to_entries[] | select(.value.result != "success") | "\(.key) (\(.value.result))"] | join(", ")')
+
+          if [ -n "$not_passed" ]; then
+            echo "::error::CI did not fully pass. Not in a success state: ${not_passed}"
+            exit 1
+          fi
+
+          echo "All CI jobs succeeded."
