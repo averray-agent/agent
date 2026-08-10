@@ -28,7 +28,16 @@ import {
 test("resolveServiceHealth — ok when state-store reachable and auth config loaded (strict)", () => {
   const result = resolveServiceHealth({
     stateStoreHealth: { ok: true, backend: "RedisStateStore", mode: "durable" },
-    authConfig: { mode: "strict", domain: "api.averray.com", chainId: 420420417, secrets: ["x".repeat(40)] }
+    // The fixture describes an HMAC deployment, so it names the backend rather than
+    // relying on a default — the default is kms, and a config that never said which
+    // backend it runs is exactly the one health should report as unhealthy.
+    authConfig: {
+      mode: "strict",
+      jwtBackend: "hmac",
+      domain: "api.averray.com",
+      chainId: 420420417,
+      secrets: ["x".repeat(40)]
+    }
   });
   assert.equal(result.ok, true);
   assert.equal(result.components.api.ok, true);

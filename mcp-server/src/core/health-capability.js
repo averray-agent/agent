@@ -122,7 +122,7 @@ const deploymentManifestCache = new Map();
  */
 export function resolveServiceHealth({ stateStoreHealth, authConfig }) {
   const stateStoreOk = Boolean(stateStoreHealth?.ok);
-  const jwtBackend = authConfig?.jwtBackend ?? "hmac";
+  const jwtBackend = authConfig?.jwtBackend ?? "kms";
   const hmacConfigured = Array.isArray(authConfig?.secrets) && authConfig.secrets.length > 0;
   const kmsConfigured = Boolean(authConfig?.kmsJwt);
   const strictAuthOk = jwtBackend === "hmac"

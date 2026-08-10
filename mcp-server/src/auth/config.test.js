@@ -37,6 +37,47 @@ test("loadAuthConfig: strict + JWT_BACKEND=kms boots with NO AUTH_JWT_SECRETS (M
   assert.equal(config.signingSecret, undefined, "no HMAC signing secret is rendered");
 });
 
+// The failure this prevents: JWT_BACKEND is set to kms in both env templates, but a
+// rendered env that lost the variable used to fall back to hmac — quietly re-enabling
+// HS256 verification on a production node with no error and no log line. Absence must
+// resolve to the stronger backend, so a dropped variable fails loudly at boot (missing
+// KMS config) instead of silently downgrading the signature algorithm.
+for (const absent of [undefined, null, ""]) {
+  test(`loadAuthConfig: an absent JWT_BACKEND (${JSON.stringify(absent)}) defaults to kms, never hmac`, () => {
+    const { JWT_BACKEND, ...envWithoutBackend } = KMS_ENV;
+    const env = absent === undefined ? envWithoutBackend : { ...envWithoutBackend, JWT_BACKEND: absent };
+    const config = loadAuthConfig(env);
+    assert.equal(config.jwtBackend, "kms");
+    assert.equal(config.signingSecret, undefined, "no HMAC signing secret is rendered");
+  });
+}
+
+// The other half of the rule, and the regression this nearly shipped with: making
+// absence mean kms EVERYWHERE stopped a plain `npm run dev` from booting, because
+// permissive mode suddenly demanded AWS KMS config. Permissive is the dev posture —
+// it is what NODE_ENV!=production selects and it already accepts `?wallet=` with no
+// token at all — so the strong default is scoped to strict mode, where production runs.
+test("loadAuthConfig: permissive mode still boots with no JWT_BACKEND and no KMS config", () => {
+  for (const env of [{ NODE_ENV: "development" }, { AUTH_MODE: "permissive" }]) {
+    const config = loadAuthConfig(env);
+    assert.equal(config.permissive, true);
+    assert.equal(config.jwtBackend, "hmac", "the dev posture keeps the HMAC default");
+    assert.equal(config.kmsJwt, null);
+  }
+});
+
+test("loadAuthConfig: an absent JWT_BACKEND without KMS config throws rather than falling back to hmac", () => {
+  assert.throws(
+    () => loadAuthConfig({
+      AUTH_MODE: "strict",
+      AUTH_DOMAIN: "api.averray.com",
+      AUTH_JWT_SECRETS: "x".repeat(40)
+    }),
+    (error) => error instanceof ConfigError && /JWT_BACKEND=kms requires/u.test(error.message),
+    "usable HMAC secrets must not rescue a config that never named a backend"
+  );
+});
+
 test("loadAuthConfig: strict + JWT_BACKEND=hmac still requires AUTH_JWT_SECRETS", () => {
   assert.throws(
     () => loadAuthConfig({ AUTH_MODE: "strict", AUTH_DOMAIN: "api.averray.com", JWT_BACKEND: "hmac" }),
