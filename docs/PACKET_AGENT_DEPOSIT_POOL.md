@@ -35,6 +35,9 @@ not re-read it. Restating so nobody re-opens settled ground:
 - **P3 — advance pricing is flat at launch**, with a written exit condition to per-agent.
 - **P4 — the relaxation evidence must come from *independent* depositors**, not merely
   distinct ones.
+- **P5 — rung 1 is gated behind opting in.** It is the day-one reason to deposit.
+- **P6 — two notice tiers, 7 and 30 days**, alongside instant.
+- **P7 — build now.** Not gated on a demand signal.
 
 **Also corrected:** the ceremony this was said to ride is now two items, not three.
 MAIN-006 closed in #688; both bank docs still say "bundled with MAIN-006 and
@@ -95,14 +98,28 @@ exactly what D1 asked for ("never promise the venue rate on undeployed capital")
 
 ### Tiers
 
+Three redemption modes (P6):
+
 | tier | redemption | backing |
 |---|---|---|
 | instant | `redeem` synchronously against the buffer | liquid or very-short-clock deployment |
-| notice | `requestRedeem` → fulfilled after the notice period | Aave-deployed, still 100% backed |
+| notice 7d | `requestRedeem` → fulfilled after 7 days | Aave-deployed, still 100% backed |
+| notice 30d | `requestRedeem` → fulfilled after 30 days | Aave-deployed, still 100% backed |
 
-The notice tier ships **from day one**. It carries no leverage at launch and its only job is
-to start generating the withdrawal profile §5 depends on. A plain per-share time-lock is
-sufficient; full ERC-7540 machinery is not required and should not be built speculatively.
+Both notice tiers ship **from day one**. They carry no leverage at launch and their only job
+is to start generating the withdrawal profile §5 depends on — two tiers because the point of
+letting an agent price its own liquidity preference is to learn what it prefers, and one
+tier measures nothing but itself.
+
+7 days is deliberately the `DISPUTE_WINDOW` we already exercise end to end, so the number is
+familiar inside our own system rather than invented for this.
+
+A plain per-share time-lock is sufficient; full ERC-7540 machinery is not required and
+should not be built speculatively.
+
+**Watch the split.** Two tiers across a tiny depositor population weakens both samples. If
+one tier attracts nobody, that is itself a finding — record it rather than quietly merging
+the buckets to make the evidence look thicker.
 
 ### Caps (D3), enforced in contract
 
@@ -184,15 +201,51 @@ not an omission.
 
 ---
 
+## 5b. Why gating rung 1 does not choke the funnel (P5)
+
+At launch the pool pays ~0% on balances capped at 100 USDC and offers no credit. Yield is
+not a reason to deposit. **Rung 1 is the reason**, so it is gated: pay gas in USDC, never
+hold DOT, only with an account.
+
+The obvious objection is that we would be withholding the fix to our own worst friction —
+the DOT requirement — at the exact moment we have zero external agents. It does not hold,
+because the DOT requirement was never the arrival blocker:
+
+| | gas | needs DOT? |
+|---|---|---|
+| curated jobs | operator-brokered (`requiresSponsoredGas`) | **no** — earn-from-zero |
+| external jobs | worker-funded on chain | **yes** |
+
+`external-posting-service.js` rejects `requiresSponsoredGas: true` outright — *"External
+jobs are worker-funded on-chain and cannot request operator-brokered gas."* So a brand new
+agent already arrives, claims curated work and earns, with no DOT and no deposit.
+
+Gating rung 1 therefore does not gate **arrival**. It gates **graduation**:
+
+```
+arrive free  →  earn on curated work  →  opt in  →  claim external jobs too
+```
+
+Each step is paid for by the one before it, and the agent never needs outside capital to
+start. That is a better funnel than giving the capability away, because it makes the
+deposit the moment an agent commits rather than a favour we ask for nothing in return.
+
+**What would falsify this:** agents earning on curated work and then stopping rather than
+opting in. If graduation stalls, the gate is the suspect — not the pool.
+
 ## 6. Build order
 
 1. **Pool contract + tests.** Deposit, instant redeem, notice request/fulfil, caps,
    non-transferable shares, adapter deployment path. No lending path.
 2. **Opt-in flow** — the three-transaction sequence, surfaced so an agent can perform it
    without reading Solidity.
-3. **Rung 1, pay fees in USDC.** No credit risk, highest friction removed per line, and it
-   is the reason to opt in before any yield has accrued.
+3. **Rung 1, pay fees in USDC — gated on holding shares (P5).** No credit risk, highest
+   friction removed per line, and the only reason to deposit before yield means anything.
+   It ships after the pool precisely because it depends on it.
 4. **Rung 2, yield on idle balance.** The adapter lane already proven at 0.202% friction.
+
+Not gated on a demand signal (P7). The pool is the reason to arrive, so waiting for arrivals
+before building it is circular — accepting that it may sit empty for a while.
 
 Rungs 3–5 are out of scope for this packet and gated on §4 and §5.
 
@@ -222,7 +275,7 @@ Rungs 3–5 are out of scope for this packet and gated on §4 and §5.
 
 | # | question | owner |
 |---|---|---|
-| O1 | Does `policy.recordOutflow` rate-limit an agent's `withdraw` on the way into the pool? A daily outflow cap would throttle opt-in and must not be the limiter. | Codex, before build |
-| O2 | Notice period length, and whether more than one is offered | Pascal, at ship |
-| O3 | The §5 window numbers | Pascal, before the window opens |
+| ~~O1~~ | ~~Does `policy.recordOutflow` throttle opt-in?~~ **Answered 2026-08-10: no.** `TreasuryPolicy.dailyOutflowCap` reads `type(uint256).max` on mainnet — deliberately unarmed. **Coupling to remember: arming that cap would throttle deposits into the pool**, since opt-in routes through `withdraw`. | closed |
+| ~~O2~~ | ~~Notice period length and tier count~~ **Decided: two tiers, 7 and 30 days.** | closed |
+| O3 | The §5 window numbers | Pascal, before the window opens — not now, and correctly so: they are chosen with a deposit book in view, and there is no deposit book |
 | O4 | Whether the AAC successor still needs its own ceremony now that the pool does not depend on it | Claude, separate |
