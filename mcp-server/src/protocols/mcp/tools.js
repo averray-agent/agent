@@ -37,7 +37,7 @@ export function createMcpTools({
   tool({
     name: "listJobs",
     title: "List jobs",
-    description: "Browse work available right now. A claimable starter job marked onboardingWaiverEligible can let a brand-new unfunded wallet claim without a bond.",
+    description: "Browse work available right now. A claimable starter job marked onboardingWaiverEligible can let a brand-new unfunded wallet claim without a bond. Each row carries a settlement block beside its reward: `path` automatic means a verifier decides and no human is involved, while human_review means a person does and a contested outcome can take up to the dispute window. Read it before choosing on reward alone.",
     inputSchema: {
       type: "object",
       properties: {
