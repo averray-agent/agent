@@ -40,8 +40,10 @@ jobs:
       # (step below) before the validate step runs.
       HERMES_HANDOFF_TIMEOUT: 12m
     steps:
-      - name: Extract PR context
+      - name: Extract PR context and skip if this head SHA was already handed off
         id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           pr_number=$(jq -r '.workflow_run.pull_requests[0].number // empty' "$GITHUB_EVENT_PATH")
           repo=$(jq -r '.workflow_run.repository.full_name' "$GITHUB_EVENT_PATH")
@@ -54,11 +56,94 @@ jobs:
             exit 0
           fi
 
-          echo "skip=false" >> "$GITHUB_OUTPUT"
+          done_artifact="hermes-handoff-done-github-pr-${pr_number}-${head_sha}"
+
           echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
           echo "repo=$repo" >> "$GITHUB_OUTPUT"
           echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
+          echo "done_artifact=$done_artifact" >> "$GITHUB_OUTPUT"
           echo "correlation_id=github-pr-${pr_number}-${head_sha}-${run_id}" >> "$GITHUB_OUTPUT"
+
+          # Marker uploaded by "Record a successful handoff" below, and looked
+          # for by the dedupe check right here on the next run. Written now so
+          # the artifact name lives in exactly one place (`done_artifact`).
+          printf 'pr=%s\nhead_sha=%s\ncorrelation_id=%s\n' \
+            "$pr_number" "$head_sha" "github-pr-${pr_number}-${head_sha}-${run_id}" \
+            > hermes-handoff-done.txt
+
+          # ---- head-SHA dedupe --------------------------------------------
+          # CI fans into this workflow on every successful run, and since
+          # PR #1022 that includes `pull_request` / `edited` — which fires on
+          # a title or body edit, and on the automatic base retarget when a
+          # stacked parent merges. None of those change the code. Without this
+          # gate each one costs a fresh SSH into the production VPS, an LLM
+          # code review, and a TBE2E-004 testbed run to re-derive a verdict we
+          # already have.
+          #
+          # The head SHA is the right axis. `workflow_run` exposes the
+          # triggering `event` but NOT its `action`, so "was this a cosmetic
+          # edit?" cannot be asked directly — but every cosmetic path leaves
+          # the head SHA untouched, and every real push changes it and earns a
+          # new handoff. Note this also dedupes the base retarget, which is
+          # deliberate: the parent's commits move into the merge base, so the
+          # diff under review is unchanged. A *manual* retarget can change the
+          # reviewed diff on an unchanged head SHA; that is a known gap, and
+          # the escape hatch is to delete this artifact and re-run.
+          #
+          # A job-level guard is safe HERE and would NOT be safe in ci.yml.
+          # Branch protection counts a `skipped` required check as a PASS, so
+          # skipping a required job manufactures a false green. This workflow
+          # is required by nothing: `main`'s protection lists seven CI
+          # contexts and none of them are Hermes, and `ci-complete` does not
+          # fan it in. Skipping it can only withhold a recommendation.
+          #
+          # The marker is an artifact, not a PR comment, because this
+          # workflow's comment step has never once succeeded — PRs #1000-#1023
+          # carry 24 successful handoff artifacts and zero bot comments. A
+          # comment-keyed marker would never match and this gate would be a
+          # silent no-op. `?name=` is an exact match (a prefix returns 0), and
+          # reading artifacts needs only the `actions: read` already granted.
+          #
+          # Keyed on SUCCESS, not mere presence: a failed or timed-out handoff
+          # uploads a log artifact but no marker, so re-running the workflow
+          # redoes the work. 3 of the 440 runs since 2026-08-01 failed, and
+          # those are exactly the ones worth retrying.
+          #
+          # Fails open by design — any trouble reading the API runs the
+          # handoff rather than silently swallowing it.
+          set +e
+          existing=$(gh api \
+            "repos/${repo}/actions/artifacts?name=${done_artifact}&per_page=100" \
+            --jq '[.artifacts[] | select(.expired == false)] | length' \
+            2>dedupe-api.err)
+          lookup_status=$?
+          set -e
+
+          case "$existing" in
+            '' | *[!0-9]*) existing=0 ;;
+          esac
+
+          if [ "$lookup_status" -ne 0 ]; then
+            echo "::warning::Could not read prior handoff artifacts; running the handoff anyway."
+            cat dedupe-api.err
+            existing=0
+          fi
+
+          if [ "$existing" -gt 0 ]; then
+            echo "Head SHA ${head_sha} already has a successful Hermes handoff."
+            echo "Marker artifact: ${done_artifact}"
+            echo "Nothing about the code changed, so this run skips the VPS SSH, the code review, and TBE2E-004."
+            {
+              echo "## Hermes PR Handoff skipped"
+              echo
+              echo "PR \`#${pr_number}\` head \`${head_sha}\` was already handed off successfully."
+              echo "Marker artifact: \`${done_artifact}\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
       # Phase 2 PR 2.7a (catch-up for this workflow): load VPS_SSH_KEY
       # from 1Password instead of the legacy GH-secret. Mirrors the
@@ -214,6 +299,23 @@ jobs:
         with:
           name: hermes-handoff-${{ steps.pr.outputs.correlation_id }}
           path: hermes-handoff.log
+          if-no-files-found: error
+          retention-days: 90
+
+      # The dedupe gate in "Extract PR context" looks for exactly this
+      # artifact, under the same `done_artifact` name computed there — one
+      # definition, so the two cannot drift apart.
+      #
+      # Deliberately NOT `if: always()`: the marker records that a handoff
+      # SUCCEEDED for this head SHA. A failure or timeout leaves no marker so
+      # the next run retries. Retention matches the log artifact; if the
+      # marker ages out, the gate fails open and re-runs the handoff.
+      - name: Record a successful handoff for this head SHA
+        if: steps.pr.outputs.skip != 'true' && steps.hermes.outputs.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ steps.pr.outputs.done_artifact }}
+          path: hermes-handoff-done.txt
           if-no-files-found: error
           retention-days: 90
 
