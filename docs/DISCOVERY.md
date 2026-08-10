@@ -166,8 +166,15 @@ repo.
 
     Repository (primary):  https://github.com/averray-agent/agent
     MCP server source:     mcp-server/src
+    Reviewer note:         docs/MCP_SERVER_REVIEW.md
     Manifest (supporting): https://averray.com/.well-known/agent-tools.json
     Remote endpoint:       https://api.averray.com/mcp
+
+Send reviewers to [`MCP_SERVER_REVIEW.md`](MCP_SERVER_REVIEW.md). It answers what a
+remote server cannot answer by being run — where the source is, the twelve tools with
+their declared scopes, what the JWT can and cannot authorise, and the dependency
+footprint — and it concedes the two findings that survive a correct submission instead
+of arguing with them.
 
 ### What that audit got right, and we should not wave away
 
