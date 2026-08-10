@@ -73,19 +73,67 @@ The MCP server's direct dependencies, in full:
 ```
 
 **On `npm audit` findings.** This monorepo has four workspaces — `mcp-server`, `indexer`,
-`marketing`, `app`. A root-level audit reports 5 high and 3 moderate advisories, and
-**every one of them traces to `ponder`, a dependency of `indexer` only.** `ponder` does
-not appear in the MCP server's tree; the indexer reads chain state and is not reachable
-from any MCP tool. Verify with `npm ls ponder`.
+`marketing`, `app`. A root-level audit reports 10 advisories — 5 high, 3 moderate and 2
+low, the last two being `eslint`/`@eslint/plugin-kit` in the root devDependencies. **Not
+one of them is in the MCP server's dependency closure** — not `ponder`, and not any
+individual advisory package. The indexer reads chain state and is not reachable from any
+MCP tool.
 
-Those advisories are real for the indexer and are tracked separately. They are not fixed
-here because the available remedy is `ponder` 0.16.6 → 0.17.6, a `0.x` minor that may
-break, on a service with a history of schema-ownership failures on redeploy. It gets its
-own change with a rollback plan rather than riding a documentation fix.
+Check that with the contrast rather than a bare absence. `npm ls` prints `(empty)` when
+`node_modules` is merely uninstalled, which is indistinguishable from a clean result — so
+run the negative and the positive together and require both:
+
+```sh
+npm ci
+npm ls ponder --workspace mcp-server   # (empty)
+npm ls ponder --workspace indexer      # ponder@0.16.x
+```
+
+**Two corrections to the previous version of this section.** Both were found by checking
+it rather than re-reading it, and both were wrong in our own favour, which is the
+direction that deserves the least benefit of the doubt.
+
+- It claimed every advisory traces to `ponder`. Four do: `kysely`, `drizzle-orm`,
+  `@hono/node-server`, and the `ponder` entry itself — which is only the aggregate of
+  those three, not a defect in ponder's own code. The other four do not. `vite` is shared
+  with `astro` (`marketing`), `nanoid` arrives via `postcss`, and `tar` and `typeorm` come
+  from `@acala-network/chopsticks-db`, a **root devDependency** that never ships.
+- It claimed the remedy is `ponder` 0.16.6 → 0.17.6. **That upgrade fixes nothing.** Every
+  0.17.x pins the same vulnerable versions as 0.16.6 — `kysely@^0.26.3`,
+  `drizzle-orm@0.41.0`, `@hono/node-server@1.19.5` — and resolving each tree in isolation
+  produces byte-identical advisory sets. `kysely@^0.26.3` cannot reach the patched 0.28.17
+  from inside its own range, which is why `npm audit` nominates `ponder@0.0.1` as the
+  "fix". The bump would have bought a forced schema re-sync on the one service with a
+  history of schema-ownership failures, in exchange for zero advisories closed.
+
+**Reachability in the indexer.** All eight high and moderate advisories are unreachable as
+deployed — as are the two low `eslint` ones, which are lint tooling that never runs in any
+image. Each reason can be checked against the source:
+
+| advisory | why it does not reach us |
+|---|---|
+| `kysely` (×3) | Ponder drives kysely through `PostgresDialect` only, so the MySQL `sql.lit` advisory cannot apply. The two JSON-path advisories require `.key()`/`.at()` on a JSON path builder; neither ponder nor `indexer/src` calls one. |
+| `drizzle-orm` | Affects dynamic **identifier/alias** construction (`sql.identifier()`, `.as()`). Every identifier in `indexer/src` is a literal and every interpolation is a bound value. |
+| `@hono/node-server` | `serve-static` path traversal on **Windows**. We deploy Linux, and the indexer serves no static files. |
+| `vite`, `vite-node`, `esbuild` | Dev-server issues, two of them additionally Windows-only. Production runs `ponder start`, which starts no vite dev server. |
+| `nanoid` | Reached through `postcss`, a build-time dependency of the marketing site. Not present in the indexer image. |
+| `tar`, `typeorm` | `@acala-network/chopsticks-db`, a root **devDependency**. `typeorm`'s defect is in `migration:generate`, a command this repository never runs. |
+
+**What that analysis surfaced, stated plainly because it cuts against us.** A root-level
+audit does not describe what the indexer actually runs. [`indexer/Dockerfile`](../indexer/Dockerfile)
+copies `indexer/package.json` and runs `npm install --omit=dev`, so the image resolves its
+own tree — without the root lockfile, and without the root `overrides` that patch `vite`,
+`ws`, `tar` and `esbuild` in a developer's checkout. Reproducing that install yields **9
+advisories rather than 8**, including `viem`/`ws` findings the root audit masks, and
+`ponder` floats on `^0.16.6` (today 0.16.10). Every one remains unreachable for the reasons
+above, so this is a reproducibility gap and not an exposure. It is tracked as its own
+indexer change because pinning the tree edits `indexer/`, whose tree hash is what
+[`INDEXER_SCHEMA_RECOVERY.md`](INDEXER_SCHEMA_RECOVERY.md) keys schema ownership on — so
+the fix itself forces a fresh schema and a historical re-sync.
 
 **A correction, offered because conceding a wrong finding would be as dishonest as
 denying a right one.** The 2026-08-10 review listed "Known vulnerability in js-yaml".
-We ship **js-yaml 4.3.0**, and `npm audit` reports **zero** js-yaml advisories. The
+We ship **js-yaml 4.3.1**, and `npm audit` reports **zero** js-yaml advisories. The
 direction was right and the package was wrong.
 
 ## What a remote review genuinely cannot verify
