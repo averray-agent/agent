@@ -27,6 +27,7 @@ import {
   buildShippedCandidates,
   fetchShippedPullRequests
 } from "./social-shipped-signals.mjs";
+import { queueFiredSignals } from "./social-signal-queue.mjs";
 
 const DEFAULT_TRANSPARENCY_URL = "https://api.averray.com/transparency";
 const DEFAULT_EVIDENCE_FILE = "artifacts/social-signal-sweep.json";
@@ -368,6 +369,19 @@ export async function socialSignalSweep({
   }
 
   await writeJson(stateFile, nextState);
+
+  // A fired signal that exists only in an artifact has reached nobody. The queue
+  // turns it into an issue slack-operator can read and put in front of a human.
+  //
+  // Deliberately after the state write and the degraded throw: we queue only what
+  // a healthy run actually stands behind. Idempotency lives in the queue, which
+  // matters because CI never persists state — the same signal re-fires daily
+  // until a human commits the bump.
+  const queue = await queueFiredSignals({ fetchImpl, env, signals: fired, sweptAt: nowIso, log });
+  evidence.queue = queue.state;
+  evidence.queued = queue.queued;
+  evidence.queueSkipped = queue.skipped;
+  await writeJson(evidenceFile, evidence);
 
   if (github.state !== "live") log(`social-signal-sweep: shipped signals ${github.state} — ${github.reason}`);
   if (firstRun || shipped.seeding) {

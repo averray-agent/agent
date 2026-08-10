@@ -208,7 +208,10 @@ test("socialSignalSweep seeds on a missing state file, then announces on the nex
   const env = {
     TRANSPARENCY_URL: "https://api.example.test/transparency",
     SOCIAL_SWEEP_EVIDENCE_FILE: evidenceFile,
-    SOCIAL_SWEEP_STATE_FILE: stateFile
+    SOCIAL_SWEEP_STATE_FILE: stateFile,
+    // This test is about seeding, not queueing; opt out explicitly rather than
+    // relying on an absent token, which is now an error by design.
+    SOCIAL_SWEEP_QUEUE: "off"
   };
   const respondWith = (settled) => async () => ({
     ok: true,
@@ -422,8 +425,19 @@ test("a merged labelled PR fires end to end through the sweep", async () => {
     "utf8"
   );
 
-  const fetchImpl = async (url) => {
-    if (String(url).includes("api.github.com")) {
+  const created = [];
+  const fetchImpl = async (url, init = {}) => {
+    const target = String(url);
+    if (target.includes("/issues") && (init.method ?? "GET") === "POST") {
+      created.push(JSON.parse(init.body));
+      return { ok: true, status: 201, json: async () => ({ number: 77, html_url: "https://example.test/issues/77" }) };
+    }
+    // NOTE: the PR search lives at /search/issues?… so it must be matched before
+    // the queue's /repos/{repo}/issues?… listing, or the stub swallows it.
+    if (target.includes("/repos/") && target.includes("/issues?")) {
+      return { ok: true, status: 200, json: async () => [] };
+    }
+    if (target.includes("api.github.com")) {
       return {
         ok: true,
         status: 200,
@@ -459,6 +473,9 @@ test("a merged labelled PR fires end to end through the sweep", async () => {
   assert.equal(evidence.quiet, false);
   assert.equal(evidence.fired.length, 1);
   assert.equal(evidence.fired[0].claim, "Merged: Arm the x402 poster ramp");
+  assert.equal(evidence.queue, "live");
+  assert.equal(evidence.queued[0].number, 77, "a fired signal reaches the queue");
+  assert.equal(created.length, 1, "exactly one issue opened");
 
   const persisted = JSON.parse(await readFile(stateFile, "utf8"));
   assert.equal(persisted.shippedSeededAt, "2026-08-01T00:00:00Z", "the marker is set once, not moved");
