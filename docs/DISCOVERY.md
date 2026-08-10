@@ -140,13 +140,77 @@ that tries the flow and hits a wall.
 
 ---
 
+## Always lead with the repository, never the manifest
+
+**Learned the hard way on 2026-08-10.** `mcp-marketplace.io` audited our listing and
+returned **B−, "Use Caution", 1.5 Critical Risk, 0 installs**, on findings including *"No
+MCP server source code provided"* (Critical/Malicious), *"Minified frontend JavaScript
+without context"*, *"Missing critical MCP server files"*, and the conclusion that the
+submission *"is not an MCP server"* but a monorepo for a blockchain agent platform.
+
+Every one of those is wrong, and every one of them is our fault.
+
+`averray-agent/agent` is **public** and carries **344 tracked files under
+`mcp-server/src`**. But the instructions below used to lead with
+
+    Manifest URL: https://averray.com/.well-known/agent-tools.json
+
+which is served from the **built marketing site**. A scanner that follows it lands in
+static HTML beside a minified React bundle, finds no server implementation, no auth
+handlers and no tool definitions, and correctly reports that it cannot audit one. The
+"missing files" findings follow mechanically from that single choice of URL.
+
+**So: the primary artifact in every submission is the public repository.** The manifest is
+a supporting link, never the headline. If a directory only accepts one URL, it gets the
+repo.
+
+    Repository (primary):  https://github.com/averray-agent/agent
+    MCP server source:     mcp-server/src
+    Reviewer note:         docs/MCP_SERVER_REVIEW.md
+    Manifest (supporting): https://averray.com/.well-known/agent-tools.json
+    Remote endpoint:       https://api.averray.com/mcp
+
+Send reviewers to [`MCP_SERVER_REVIEW.md`](MCP_SERVER_REVIEW.md). It answers what a
+remote server cannot answer by being run — where the source is, the twelve tools with
+their declared scopes, what the JWT can and cannot authorise, and the dependency
+footprint — and it concedes the two findings that survive a correct submission instead
+of arguing with them.
+
+### What that audit got right, and we should not wave away
+
+Two findings survive even a correct submission, because they are true of any
+remote-transport server:
+
+- **"Environment-based secrets referenced but not auditable."** A reviewer cannot verify
+  from outside what a remote server does with a JWT. Real limitation, honestly stated.
+- **"Extremely broad permission set required (not auditable)."** Same shape. The answer is
+  to make the tool surface and its authority legible in the listing copy, not to argue.
+
+One finding is simply wrong and worth correcting in any re-review request: **"Known
+vulnerability in js-yaml."** We ship js-yaml **4.3.0** and `npm audit` reports **zero**
+js-yaml advisories. It does report other highs and moderates — they had the direction
+right and the package wrong, and conceding the wrong one would be as dishonest as denying
+the right ones.
+
+### Re-review checklist
+
+1. Resubmit every existing listing with the repository as the primary URL.
+2. State the transport plainly: remote at `https://api.averray.com/mcp`, SIWE + JWT auth.
+3. Link `mcp-server/src` directly, so a scanner does not have to guess where the server is.
+4. Correct the js-yaml claim with the version and the audit result.
+5. Do not contest the two auditability findings. They are fair.
+
+---
+
 ## Submitting to mcpservers.org
 
 1. Go to <https://mcpservers.org/submit>.
 2. Fields:
    - Name: Averray
+   - **Repository: https://github.com/averray-agent/agent** — the primary artifact.
+     Give this first; a scanner that only reads one URL must read this one.
    - Website: https://averray.com
-   - Manifest URL: https://averray.com/.well-known/agent-tools.json
+   - Manifest URL (supporting): https://averray.com/.well-known/agent-tools.json
    - Short description: "Trusted agent work and public identity on
      Polkadot. Discover jobs, verify execution, and inspect wallet-linked
      reputation."
@@ -158,8 +222,9 @@ that tries the flow and hits a wall.
 ## Submitting to Smithery
 
 1. Go to <https://smithery.ai/new>.
-2. Provide the manifest URL. Smithery auto-parses it to populate the
-   tools list.
+2. Provide the **repository URL first** — https://github.com/averray-agent/agent —
+   then the manifest URL, which Smithery auto-parses to populate the tools list.
+   Manifest-only submissions get audited as a static site; see the section above.
 3. Provide a 90-second demo video link showing:
    discovery → onboarding → sign-in → preflight → claim → submit →
    badge/profile.
