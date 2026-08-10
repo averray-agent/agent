@@ -328,6 +328,143 @@ test("a corrupt state file fails loudly instead of resetting announcement histor
   assert.equal(await readFile(stateFile, "utf8"), "{ this is not json", "the corrupt file is left intact");
 });
 
+// --- two sources, independent health ---
+
+test("a shipped-PR candidate is not judged by the transparency payload's health", () => {
+  const shipped = {
+    signalId: "shipped-pr-42",
+    source: "github",
+    claim: "Merged: something real",
+    claimsExternalActivity: false,
+    restsOn: [],
+    receipt: { kind: "pull-request", url: "https://example.test/pull/42" }
+  };
+
+  // Schema drift would veto every transparency candidate. It must not touch a
+  // signal that never read that payload.
+  assert.equal(vetoFor(shipped, snapshot({ schemaVersion: "wrong" })), null);
+});
+
+test("a transparency outage does not suppress a merged pull request", () => {
+  const shipped = {
+    signalId: "shipped-pr-42",
+    source: "github",
+    claim: "Merged: something real",
+    claimsExternalActivity: false,
+    restsOn: [],
+    receipt: { kind: "pull-request", url: "https://example.test/pull/42" }
+  };
+
+  const result = evaluateSignals({
+    snapshot: null,
+    state: { shippedSeededAt: "2026-08-01T00:00:00Z" },
+    nowIso: NOW_ISO,
+    extraCandidates: [shipped]
+  });
+
+  assert.equal(result.fired.length, 1, "the PR merged whether or not transparency answered");
+  assert.equal(result.fired[0].signalId, "shipped-pr-42");
+  assert.equal(result.fired[0].source, "github");
+});
+
+test("a github candidate records its receipt rather than a transparency snapshot", () => {
+  const result = evaluateSignals({
+    snapshot: snapshot(),
+    state: {},
+    nowIso: NOW_ISO,
+    extraCandidates: [
+      {
+        signalId: "shipped-pr-42",
+        source: "github",
+        claim: "Merged: x",
+        restsOn: [],
+        receipt: { kind: "pull-request", url: "https://example.test/pull/42" },
+        deployVerified: false
+      }
+    ]
+  });
+
+  const record = result.fired.find((s) => s.signalId === "shipped-pr-42");
+  assert.equal(record.checkedAgainst.source, "github");
+  assert.equal(record.deployVerified, false, "merged is not deployed, and the record says so");
+});
+
+test("an unconfigured github source is recorded as skipped and still allows quiet", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "social-signal-sweep-nogh-"));
+  const stateFile = join(tmp, "state.json");
+  await writeFile(stateFile, JSON.stringify({ firedSignals: {}, highestSettlementMilestone: 1000 }), "utf8");
+
+  const evidence = await socialSignalSweep({
+    env: {
+      TRANSPARENCY_URL: "https://api.example.test/transparency",
+      SOCIAL_SWEEP_EVIDENCE_FILE: join(tmp, "evidence.json"),
+      SOCIAL_SWEEP_STATE_FILE: stateFile
+    },
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => snapshot({ settled: 4 }) }),
+    log: () => {},
+    now: () => new Date(NOW_ISO)
+  });
+
+  assert.equal(evidence.github, "skipped");
+  assert.equal(evidence.quiet, true, "a source switched off was never going to be looked at");
+});
+
+test("a merged labelled PR fires end to end through the sweep", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "social-signal-sweep-gh-"));
+  const stateFile = join(tmp, "state.json");
+  await writeFile(
+    stateFile,
+    JSON.stringify({
+      firedSignals: {},
+      highestSettlementMilestone: 1000,
+      shippedSeededAt: "2026-08-01T00:00:00Z"
+    }),
+    "utf8"
+  );
+
+  const fetchImpl = async (url) => {
+    if (String(url).includes("api.github.com")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          items: [
+            {
+              number: 42,
+              title: "Arm the x402 poster ramp",
+              html_url: "https://github.com/o/r/pull/42",
+              closed_at: "2026-08-09T00:00:00Z"
+            }
+          ]
+        })
+      };
+    }
+    return { ok: true, status: 200, json: async () => snapshot({ settled: 4 }) };
+  };
+
+  const evidence = await socialSignalSweep({
+    env: {
+      TRANSPARENCY_URL: "https://api.example.test/transparency",
+      SOCIAL_SWEEP_EVIDENCE_FILE: join(tmp, "evidence.json"),
+      SOCIAL_SWEEP_STATE_FILE: stateFile,
+      GITHUB_TOKEN: "t",
+      GITHUB_REPOSITORY: "o/r"
+    },
+    fetchImpl,
+    log: () => {},
+    now: () => new Date(NOW_ISO)
+  });
+
+  assert.equal(evidence.github, "live");
+  assert.equal(evidence.quiet, false);
+  assert.equal(evidence.fired.length, 1);
+  assert.equal(evidence.fired[0].claim, "Merged: Arm the x402 poster ramp");
+
+  const persisted = JSON.parse(await readFile(stateFile, "utf8"));
+  assert.equal(persisted.shippedSeededAt, "2026-08-01T00:00:00Z", "the marker is set once, not moved");
+  assert.ok(persisted.firedSignals["shipped-pr-42"], "a fired PR is remembered");
+});
+
 test("a non-200 transparency read fails loudly instead of reporting quiet", async () => {
   const fetchImpl = async () => ({ ok: false, status: 503, json: async () => ({}) });
 

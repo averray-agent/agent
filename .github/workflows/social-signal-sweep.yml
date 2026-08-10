@@ -18,6 +18,10 @@ on:
 
 permissions:
   contents: read
+  # Read-only, and only for the labelled-PR search. The sweep never comments,
+  # labels, or edits anything on GitHub.
+  pull-requests: read
+  issues: read
 
 concurrency:
   group: social-signal-sweep
@@ -35,6 +39,11 @@ jobs:
       # would look exactly like a first run, and the sweep would re-announce
       # milestones that were already old news.
       SOCIAL_SWEEP_STATE_FILE: scripts/ops/social-signal-state.json
+      # The second source: merged pull requests carrying the label. Absent these,
+      # the sweep records the source as `skipped` rather than reporting that
+      # nothing shipped.
+      GITHUB_TOKEN: ${{ github.token }}
+      SOCIAL_SWEEP_LABEL: social
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
@@ -86,7 +95,8 @@ jobs:
             echo "## Social signal sweep"
             echo
             echo "- Swept: \`$(jq -r '.sweptAt' "$EV")\`"
-            echo "- Payload: \`${payload}\` · Fired: \`${fired}\` · Vetoed: \`${vetoed}\` · Seeded: \`${seeded}\`"
+            echo "- Transparency: \`${payload}\` · Shipped-PR source: \`$(jq -r '.github' "$EV")\`"
+            echo "- Fired: \`${fired}\` · Vetoed: \`${vetoed}\` · Seeded: \`${seeded}\`"
             echo "- Settled (all time): \`$(jq -r '.observed["flow.jobsSettled.allTime"] | "\(.value) (\(.status))"' "$EV")\`"
             echo "- External agents (24h): \`$(jq -r '.observed["flow.composition24h.external"] | "\(.value) (\(.status))"' "$EV")\`"
             echo
