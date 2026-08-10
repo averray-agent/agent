@@ -289,6 +289,27 @@ digest and a signal would have waited nearly a full day to reach Buzz.
 **Permission change:** `issues: write`, used only to open queue issues. The sweep still
 never comments on pull requests, never labels them, and never touches code.
 
+### The queue issue carries the material and the rails
+
+A claim and a link is not enough to write from — you still have to open the PR, read it,
+and decide what is interesting. So the issue carries the author's **own** summary of the
+pull request (never a paraphrase: a paraphrase here is an unreviewed claim entering through
+the back door) alongside a **do not claim** section derived from the live payload.
+
+That second part matters more than it looks. The veto stops a false *claim* from firing,
+but prose written around a true claim reaches straight past it. `external = 0` is the
+specific trap: a merged payments PR is real, and "agents are earning on Averray" is not, and
+the second sentence is an easy one to write next to the first. The rail states it where the
+post actually gets written.
+
+Rails are only emitted from **fresh** readings — we do not lecture from a number the
+transparency service will not vouch for.
+
+**Deliberately create-only.** The queue never rewrites an issue body. Improving the format
+must not clobber a human's edits, and the rails are a snapshot of what was true when the
+signal fired, which is what `First seen` records. Issues opened before this change keep
+their simpler body.
+
 ### The seeding marker must stay committed
 
 Found after #1027 merged, by tracing state through an actual CI run rather than a local one.

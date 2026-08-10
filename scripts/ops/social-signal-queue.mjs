@@ -80,7 +80,37 @@ export function issueTitleFor(signal) {
   return claim.length > MAX_TITLE ? `${claim.slice(0, MAX_TITLE - 1)}…` : claim;
 }
 
-export function issueBodyFor(signal, { sweptAt } = {}) {
+/**
+ * What this signal does NOT license anyone to say.
+ *
+ * Derived from the live payload, stated where the post actually gets written.
+ * The veto stops a false CLAIM from firing, but a human — or later a drafter —
+ * writing prose around a true claim can still reach past it. `external = 0` is
+ * the specific trap: a merged payments PR is real, and "agents are earning on
+ * Averray" is not, and the second sentence is an easy one to write next to the
+ * first.
+ */
+export function guardrailsFor(observed = {}) {
+  const rails = [];
+  const external = observed["flow.composition24h.external"];
+  if (external && external.status === "fresh" && Number(external.value) === 0) {
+    rails.push(
+      "`composition24h.external` was **0** at sweep time. Nothing here supports saying " +
+        "outside agents are active, earning, or picking up work — and any reader can check " +
+        "the same endpoint."
+    );
+  }
+  const settled = observed["flow.jobsSettled.allTime"];
+  if (settled && settled.status === "fresh") {
+    rails.push(
+      `Settled jobs stood at **${settled.value}**. Do not round up, and do not imply a rate ` +
+        "or a trend from a single reading."
+    );
+  }
+  return rails;
+}
+
+export function issueBodyFor(signal, { sweptAt, observed = {} } = {}) {
   const receipt = signal.receipt ?? {};
   const checked = signal.checkedAgainst ?? {};
   const lines = [
@@ -93,6 +123,15 @@ export function issueBodyFor(signal, { sweptAt } = {}) {
     receipt.url ? `- Receipt: ${receipt.url}` : "- Receipt: none recorded",
     sweptAt ? `- First seen: ${sweptAt}` : null
   ].filter(Boolean);
+
+  if (signal.context) {
+    lines.push(
+      "",
+      "### What the author said it does",
+      "",
+      "> " + signal.context.split("\n").join("\n> ")
+    );
+  }
 
   if (signal.deployVerified === false) {
     lines.push(
@@ -107,6 +146,12 @@ export function issueBodyFor(signal, { sweptAt } = {}) {
     lines.push("", "<details><summary>What this was true against</summary>", "", "```json", JSON.stringify(checked, null, 2), "```", "", "</details>");
   }
 
+  const rails = guardrailsFor(observed);
+  if (rails.length > 0) {
+    lines.push("", "### Do not claim", "");
+    for (const rail of rails) lines.push(`- ${rail}`);
+  }
+
   lines.push(
     "",
     "---",
@@ -119,13 +164,13 @@ export function issueBodyFor(signal, { sweptAt } = {}) {
   return lines.join("\n");
 }
 
-async function createIssue({ fetchImpl, token, repo, signal, sweptAt }) {
+async function createIssue({ fetchImpl, token, repo, signal, sweptAt, observed }) {
   const response = await fetchImpl(`${GITHUB_API}/repos/${repo}/issues`, {
     method: "POST",
     headers: headers(token),
     body: JSON.stringify({
       title: issueTitleFor(signal),
-      body: issueBodyFor(signal, { sweptAt }),
+      body: issueBodyFor(signal, { sweptAt, observed }),
       labels: [QUEUE_LABEL]
     })
   });
@@ -150,6 +195,7 @@ export async function queueFiredSignals({
   env = process.env,
   signals = [],
   sweptAt,
+  observed = {},
   log = () => {}
 } = {}) {
   if (signals.length === 0) return { queued: [], skipped: [], state: "idle" };
@@ -194,7 +240,7 @@ export async function queueFiredSignals({
       continue;
     }
 
-    const created = await createIssue({ fetchImpl, token, repo, signal, sweptAt });
+    const created = await createIssue({ fetchImpl, token, repo, signal, sweptAt, observed });
     queued.push(created);
     log(`  queue: ${signal.signalId} → #${created.number}`);
   }
