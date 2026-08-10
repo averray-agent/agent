@@ -208,10 +208,27 @@ it is absence of data, and the ratio stays where it is.
 
 ## Still open
 
-1. **The contract mechanism for opting in.** New position field, separate pool contract, or
-   something else. AAC-successor window.
-2. **Whether advances are priced per-agent or flat.** Per-agent is better economics and
-   needs reputation to be trustworthy first.
+**Resolved 2026-08-10 in [`PACKET_AGENT_DEPOSIT_POOL.md`](PACKET_AGENT_DEPOSIT_POOL.md).**
+Items 1 and 2 are closed there; item 3 stays open by design. Two corrections this document
+needs, recorded here so it stops misleading:
+
+- It listed the opt-in mechanism as fully open, but `BANK_PHASE2_PROGRAM.md` **D1 had
+  already closed the share model on 2026-08-02** ("shares from minute one"). Only the
+  *location* of those shares was open, and that is now a separate pool contract.
+- The mechanism does **not** need the AAC-successor window. `AgentAccountCore.withdraw` is
+  already `external` and pays `msg.sender`, so opting in is three transactions the agent
+  signs itself — no AAC change, and `sendToAgentFor` is never involved.
+
+1. ~~**The contract mechanism for opting in.**~~ **Decided:** separate pool contract, ERC-4626
+   shape, non-transferable shares. Not a position field, and not in the AAC-successor window.
+2. ~~**Whether advances are priced per-agent or flat.**~~ **Decided:** flat at launch, off the
+   measured rejection rate, with a written two-part exit condition to per-agent. Reputation
+   is not yet Sybil-resistant — we manufactured worker D's badges ourselves — and credit
+   priced on a manufacturable signal invites farming.
 3. **The specific numbers in the relaxation trigger** — window length, depositor count,
    safety factor, floor. Deliberately unset here: they should be chosen when the tier
-   mechanism ships, by someone looking at the actual deposit book.
+   mechanism ships, by someone looking at the actual deposit book. **Still open, correctly
+   so** — but condition 1 above now requires depositors to be *independently funded*, not
+   merely distinct. Fifty depositors that are all ours is one depositor with fifty
+   addresses, and it is maximally correlated, which is the exact property the window
+   measures. A set dominated by parties we control produces no evidence.

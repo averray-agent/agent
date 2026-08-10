@@ -23,7 +23,11 @@ bar below is met.
 **W1 — AAC successor (the ledger evolution).** Seed = the preserved branch
 `codex/aac-successor-recovery-phase2` (commit `048eedf`): per-agent recovery buckets,
 withdraw-share retirement, no-fake-liquid guarantees. Ships in **one deploy window bundled
-with `MAIN-006` (payments dedup) and `cancelOpenJob` v3** — one ceremony, not three.
+with `cancelOpenJob` v3** — MAIN-006 (payments dedup) CLOSED in #688 on the money
+path, so this window is two items, not three.
+**Note (2026-08-10):** the agent deposit pool does NOT ride this window. See
+`PACKET_AGENT_DEPOSIT_POOL.md` — a separate pool contract needs no AAC change,
+because `AgentAccountCore.withdraw` already lets an agent move its own balance out.
 **Open, commissioned to Codex: the migration design** — how live balances move (parallel-run
 with opt-in migration vs snapshot-credit), the hardest open question in the program.
 Claude gates; Pascal signs the ceremony.
