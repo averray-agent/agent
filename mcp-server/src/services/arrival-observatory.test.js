@@ -100,6 +100,18 @@ test("a broken state store never propagates to the caller", async () => {
   assert.equal(snapshot.schemaVersion, "averray.arrivals.v1");
 });
 
+// Zero outsiders is a finding; no reading is an instrument failure. The split
+// has to keep them apart the way the total already does, or a board that
+// cannot reach the state store renders "0 external" as if we had measured it.
+test("a split that could not be read is null, never zero", async () => {
+  const { observatory } = harness({ failStore: true });
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.unavailable, "arrival state could not be read");
+  assert.equal(snapshot.funnel.browsed, null);
+  assert.equal(snapshot.funnelExternal.browsed, null);
+  assert.equal(snapshot.funnelSelf.browsed, null);
+});
+
 test("client table is capped and evicts the least recently seen", async () => {
   const { observatory } = harness({ now: (() => { let t = 0; return () => (t += 10); })() });
   observatory.maxClients = 3;
@@ -179,6 +191,88 @@ test("our own traffic can never move the external furthest stage", async () => {
   assert.equal(snapshot.distinct.furthest, "submitted");
   // An outsider has only ever reached the door.
   assert.equal(snapshot.distinct.furthestExternal, "reached");
+});
+
+// The funnel is what a headline renders, so the mark has to reach it and not
+// stop at the client list. Live on 2026-08-10 `browsed` was 2 with one of the
+// two being our own roadmap probe, and the ops board said two agents browsed.
+test("our own traffic never inflates the external funnel", async () => {
+  const { observatory } = harness();
+  observatory.selfClients = resolveSelfClients({ ARRIVAL_SELF_CLIENTS: "worker-canary" });
+
+  await observatory.recordTool({ tool: "listJobs", clientInfo: { name: "averray-roadmap-probe", version: "1" } });
+  await observatory.recordTool({ tool: "listJobs", clientInfo: { name: "worker-canary", version: "1" } });
+  await observatory.recordTool({ tool: "listJobs", clientInfo: { name: "sasame-audit", version: "0.2" } });
+  await observatory.recordTool({ tool: "claimJob", clientInfo: { name: "averray-roadmap-probe", version: "1" } });
+
+  const snapshot = await observatory.getSnapshot();
+  // Every call including ours — the meaning averray.arrivals.v1 always had.
+  assert.equal(snapshot.funnel.browsed, 3);
+  // The only count that answers "did an OUTSIDER browse?".
+  assert.equal(snapshot.funnelExternal.browsed, 1);
+  assert.equal(snapshot.funnelSelf.browsed, 2);
+  // Our probe claimed a job. No outsider ever has, and this must say so.
+  assert.equal(snapshot.funnel.claimed, 1);
+  assert.equal(snapshot.funnelExternal.claimed, 0);
+  assert.equal(snapshot.funnelSelf.claimed, 1);
+});
+
+// Same fail-safe direction as the client marking, now in the funnel: unknown
+// is not ours. Undercounting our own probes is harmless; counting a probe as
+// an outsider manufactures demand evidence.
+test("unmarked and anonymous callers land in the external funnel", async () => {
+  const { observatory } = harness();
+  observatory.selfClients = resolveSelfClients({});
+
+  await observatory.recordTool({ tool: "listJobs", clientInfo: { name: "glama", version: "1" } });
+  await observatory.recordTool({ tool: "listJobs", ip: "9.9.9.9" });
+
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.funnelExternal.browsed, 2);
+  assert.equal(snapshot.funnelSelf.browsed, 0);
+  assert.equal(snapshot.funnel.browsed, snapshot.funnelExternal.browsed);
+});
+
+test("a restart preserves the split, not just the total", async () => {
+  const { observatory, state } = harness();
+  observatory.selfClients = resolveSelfClients({ ARRIVAL_SELF_CLIENTS: "worker-canary" });
+  await observatory.recordTool({ tool: "listJobs", clientInfo: { name: "worker-canary", version: "1" } });
+  await observatory.recordTool({ tool: "listJobs", clientInfo: { name: "sasame-audit", version: "0.2" } });
+  await observatory.maybeFlush(true);
+
+  const restarted = new ArrivalObservatory({
+    stateStore: { async getServiceState(scope) { return state.get(scope); }, async upsertServiceState() {} },
+    metrics: { counter: () => ({ inc() {} }) },
+    now: () => 2_000
+  });
+
+  const snapshot = await restarted.getSnapshot();
+  assert.equal(snapshot.funnel.browsed, 2);
+  assert.equal(snapshot.funnelExternal.browsed, 1);
+  assert.equal(snapshot.funnelSelf.browsed, 1);
+});
+
+// State written before the split carries no actor attribution. Restoring it
+// into the external count would hand every past canary call to the demand
+// signal in a single deploy, which is the overstatement the split prevents.
+test("pre-split persisted state restores as a total, never as outside interest", async () => {
+  const { observatory, state } = harness();
+  state.set("arrival-observatory", {
+    observingSinceMs: 500,
+    totals: { reached: 9, browsed: 2, evaluated: 0, identified: 0, authenticated: 0, claimed: 0, submitted: 0 },
+    clients: []
+  });
+
+  const restored = await observatory.getSnapshot();
+  assert.equal(restored.funnel.browsed, 2);
+  assert.equal(restored.funnelExternal.browsed, 0);
+  assert.equal(restored.funnelSelf.browsed, 0);
+
+  // New traffic still splits normally on top of the unattributed history.
+  await observatory.recordTool({ tool: "listJobs", clientInfo: { name: "sasame-audit", version: "0.2" } });
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.funnel.browsed, 3);
+  assert.equal(snapshot.funnelExternal.browsed, 1);
 });
 
 // Fail-safe direction: the failure we must never have is OVERSTATING outside

@@ -18,6 +18,11 @@ const DEFAULT_FLUSH_INTERVAL_MS = 10_000;
  * deliberate: the failure we must never have is overstating outside interest.
  * Someone falsely declaring one of our names only removes themselves from the
  * external count, which costs them and tells us nothing we would believe anyway.
+ *
+ * The mark is spent in three places: the per-client `self` flag, the `actor`
+ * metric label, and the funnel split. It has to reach the funnel too — a mark
+ * that only decorates the client list still lets a headline count our probes
+ * as arrivals, which is the exact evidence-manufacturing this exists to stop.
  */
 const SELF_CLIENT_PREFIX = "averray-";
 
@@ -96,7 +101,13 @@ export class ArrivalObservatory {
     this.maxClients = Number(maxClients) > 0 ? Number(maxClients) : DEFAULT_MAX_CLIENTS;
     this.flushIntervalMs = Number(flushIntervalMs) >= 0 ? Number(flushIntervalMs) : DEFAULT_FLUSH_INTERVAL_MS;
     this.clients = new Map();
-    this.totals = Object.fromEntries(ARRIVAL_STAGES.map((stage) => [stage, 0]));
+    // Three counters rather than one. `totals` is every call that ever landed;
+    // the other two say which of those were outsiders and which were ours.
+    // Kept apart at write time because the actor of a past call cannot be
+    // recovered later — the client table is capped and evicts.
+    this.totals = emptyTotals();
+    this.totalsExternal = emptyTotals();
+    this.totalsSelf = emptyTotals();
     this.loaded = false;
     this.dirty = false;
     this.lastFlushMs = 0;
@@ -151,6 +162,10 @@ export class ArrivalObservatory {
       }
 
       this.totals[stage] += 1;
+      // Same fail-safe direction as the client marking above: "anonymous" is
+      // not "ours", so it lands in the external bucket. Only an explicit
+      // self-declaration keeps a call out of the number we read as demand.
+      (actor === "self" ? this.totalsSelf : this.totalsExternal)[stage] += 1;
       // Label set is deliberately tiny: a self-declared client name is
       // attacker-controlled and unbounded, so it never becomes a label. The
       // names live in the snapshot instead, where cardinality costs nothing.
@@ -178,7 +193,16 @@ export class ArrivalObservatory {
         schemaVersion: ARRIVALS_SCHEMA_VERSION,
         generatedAtMs: this.now(),
         observingSinceMs: this.startedAtMs,
+        // `funnel` is EVERY call, ours included. It keeps that meaning so
+        // averray.arrivals.v1 readers parse the same number they always did,
+        // which is also why this stays v1 — the split is added, not swapped.
+        // `funnelExternal` is the only one that answers "did an OUTSIDER do
+        // this?", so it is the number a headline may render. `funnelSelf` is
+        // kept because confirming our own probes actually ran is worth
+        // something; it just is not evidence of demand.
         funnel: { ...this.totals },
+        funnelExternal: { ...this.totalsExternal },
+        funnelSelf: { ...this.totalsSelf },
         distinct: {
           declared: clients.filter((entry) => entry.name).length,
           anonymous: clients.filter((entry) => !entry.name).length,
@@ -195,7 +219,9 @@ export class ArrivalObservatory {
         schemaVersion: ARRIVALS_SCHEMA_VERSION,
         generatedAtMs: this.now(),
         observingSinceMs: this.startedAtMs,
-        funnel: Object.fromEntries(ARRIVAL_STAGES.map((stage) => [stage, null])),
+        funnel: nullTotals(),
+        funnelExternal: nullTotals(),
+        funnelSelf: nullTotals(),
         distinct: { declared: null, anonymous: null, self: null, furthest: null, furthestExternal: null },
         clients: [],
         unavailable: "arrival state could not be read"
@@ -208,11 +234,17 @@ export class ArrivalObservatory {
     this.loaded = true;
     const stored = await this.stateStore?.getServiceState?.(STATE_SCOPE);
     if (!stored) return;
-    for (const [stage, value] of Object.entries(stored.totals ?? {})) {
-      if (stage in this.totals && Number.isFinite(Number(value))) {
-        this.totals[stage] = Number(value);
-      }
-    }
+    restoreTotals(this.totals, stored.totals);
+    // State written before the split carries `totals` alone. The actor of
+    // those calls is genuinely unknown, and unknown must not be spent as
+    // external — that is the one direction this module may not fail in. So
+    // the total is restored in full and both halves of the split start at
+    // zero, leaving `funnel` larger than external + self until the pre-split
+    // history ages out of the picture. An outsider who arrived before the
+    // upgrade is still visible in distinct.furthestExternal, which is derived
+    // from the client table rather than from these counters.
+    restoreTotals(this.totalsExternal, stored.totalsExternal);
+    restoreTotals(this.totalsSelf, stored.totalsSelf);
     for (const entry of Array.isArray(stored.clients) ? stored.clients : []) {
       if (typeof entry?.key === "string") this.clients.set(entry.key, entry);
     }
@@ -228,6 +260,8 @@ export class ArrivalObservatory {
     await this.stateStore?.upsertServiceState?.(STATE_SCOPE, {
       observingSinceMs: this.startedAtMs,
       totals: { ...this.totals },
+      totalsExternal: { ...this.totalsExternal },
+      totalsSelf: { ...this.totalsSelf },
       clients: [...this.clients.values()]
     });
   }
@@ -259,6 +293,22 @@ export function resolveSelfClients(env = process.env) {
       .map((value) => value.trim().toLowerCase())
       .filter(Boolean)
   );
+}
+
+function emptyTotals() {
+  return Object.fromEntries(ARRIVAL_STAGES.map((stage) => [stage, 0]));
+}
+
+function nullTotals() {
+  return Object.fromEntries(ARRIVAL_STAGES.map((stage) => [stage, null]));
+}
+
+function restoreTotals(target, stored) {
+  for (const [stage, value] of Object.entries(stored ?? {})) {
+    if (stage in target && Number.isFinite(Number(value))) {
+      target[stage] = Number(value);
+    }
+  }
 }
 
 function furthestStageAcross(clients) {
