@@ -124,6 +124,13 @@
         "maskedRuntimeCodeHash": "sha256:64ec86a04369cbbd49a30e0dcf04cf785707a78fcd42f87c0c692f77a7372788",
         "reason": "The source-controlled EscrowCore now targets active v2 at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC; legacy v1 at 0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035 remains deployed only for draining, so this exact v2 candidate runtime is intentionally unshipped to the legacy address."
       }
+    ],
+    "hydrationUsdcAdapter": [
+      {
+        "sourceCommit": "3d883912450e4805a1cd47cabc62a4237884c4fe",
+        "maskedRuntimeCodeHash": "sha256:0faec68edf65d6adf5a56677904f4ac8e467b9ec0a59e5247f4184e2fcc18bad",
+        "reason": "PR #1043 added recordRemotePosition (with remotePositionAsOf, remotePositionRef and RemotePositionObserved) to HydrationUsdcAdapterV22 for the packet-2 agent deposit pool, which uses its own dedicated adapter instance so that observation is the full book. The live bank adapter at 0x96091d4477Fe37E79557276d63883bBbbdE73159 custodies the operating bank position and is not the pool's adapter, so it is deliberately left on its pre-#1043 runtime. Verified against mainnet that the live runtime is byte-identical to HydrationUsdcAdapterV22 compiled at 3d88391^, so this entry permits exactly the one new compiled runtime and nothing else."
+      }
     ]
   },
   "parameters": {
