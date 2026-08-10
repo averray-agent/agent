@@ -55,6 +55,10 @@ async function startServer(port, envOverrides = {}) {
       PORT: String(port),
       NODE_ENV: "test",
       AUTH_MODE: "strict",
+      // The harness signs its own HS256 tokens from AUTH_JWT_SECRETS, so it names
+      // the HMAC backend rather than inheriting a default. Strict mode defaults to
+      // kms, which would (correctly) refuse to boot without any KMS configuration.
+      JWT_BACKEND: "hmac",
       AUTH_JWT_SECRETS: LONG_SECRET,
       AUTH_DOMAIN: "smoke.test",
       AUTH_CHAIN_ID: "1",
@@ -66,8 +70,19 @@ async function startServer(port, envOverrides = {}) {
       RATE_LIMIT_AUTH_NONCE_WINDOW_SECONDS: "60",
       ...envOverrides
     },
-    stdio: "ignore",
+    // stderr is piped purely so a boot failure can say WHY. A bad env used to
+    // surface as 51 identical "server exited before listening" lines with the
+    // actual ConfigError discarded, which is a long way to walk to find a typo.
+    // stdout stays ignored — the health poll below is the readiness signal.
+    stdio: ["ignore", "ignore", "pipe"],
     detached: false
+  });
+
+  let stderr = "";
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk) => {
+    // Bounded: a crash loop must not accumulate output without limit.
+    if (stderr.length < 4000) stderr += chunk;
   });
 
   // Poll the health endpoint until it responds or we time out. More robust
@@ -80,7 +95,10 @@ async function startServer(port, envOverrides = {}) {
   });
   while (Date.now() < deadline) {
     if (exited) {
-      throw new Error("server exited before listening");
+      const detail = stderr.trim();
+      throw new Error(
+        detail ? `server exited before listening: ${detail}` : "server exited before listening"
+      );
     }
     try {
       const response = await fetch(`http://127.0.0.1:${port}/health`, {
