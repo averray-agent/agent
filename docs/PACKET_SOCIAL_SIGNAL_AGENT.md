@@ -255,6 +255,40 @@ repeats, so a PR fires exactly once, whenever it acquires the label, however old
 The first encounter still seeds: every already-labelled PR is recorded without announcing,
 so switching the source on cannot open with a backlog presented as today's news.
 
+### The fired-signal queue — how a signal reaches Buzz
+
+[`scripts/ops/social-signal-queue.mjs`](../scripts/ops/social-signal-queue.mjs). One GitHub
+issue per fired signal, labelled `social-draft`.
+
+A fired signal that exists only in a workflow artifact has reached nobody. The queue makes
+it durable, visible, and readable by `slack-operator`, which is what puts a card in Buzz.
+
+**Why not publish to Buzz straight from Actions.** That would mean a Nostr signing key in
+Actions secrets and a **second Buzz publisher** outside `slack-operator` — which owns the
+client, the schedule, and the mute/rate discipline. The deployment plan is explicit that two
+paths with different gates is how the strict one becomes optional. One publisher; this is
+the queue it reads.
+
+**Idempotency is load-bearing, not a nicety.** CI writes state to an ephemeral checkout, so
+a fired signal **re-fires every single day** until a human commits the state bump. Without
+deduplication that is one new issue per day, forever, for the same fact. Each issue carries
+a hidden marker (the same pattern the PR-handoff workflow uses) and is matched on it across
+**every state including closed** — closing means handled, and the queue must never argue
+with a deliberate close by reopening the question tomorrow.
+
+**Failures are loud, and "off" is explicit.** A failed list or create throws: a signal that
+fired and then silently failed to queue has reached nobody while the run still reports
+success — the looks-wired-does-nothing shape this pipeline has now produced twice. Running
+without queueing is possible but must be typed (`SOCIAL_SWEEP_QUEUE=off`), and it is
+recorded as `off`, which is a different evidence state from `idle` (nothing fired).
+
+**Timing.** The sweep moved from `07:43` to **`05:12 UTC`**. The digest defaults to 08:00
+Europe/Zurich — 06:00 UTC in summer, 07:00 in winter — so the old slot fired *after* the
+digest and a signal would have waited nearly a full day to reach Buzz.
+
+**Permission change:** `issues: write`, used only to open queue issues. The sweep still
+never comments on pull requests, never labels them, and never touches code.
+
 ### The seeding marker must stay committed
 
 Found after #1027 merged, by tracing state through an actual CI run rather than a local one.

@@ -1,8 +1,11 @@
 name: Social Signal Sweep
 
-# Step 1 of the social signal agent: decide whether anything happened that is
-# worth saying out loud on the Averray X account. Read-only. This workflow
-# drafts nothing and publishes nothing — see docs/PACKET_SOCIAL_SIGNAL_AGENT.md.
+# The social signal agent's sweep: decide whether anything happened that is worth
+# saying out loud on the Averray X account, and queue it for a human.
+#
+# It drafts no posts and publishes nothing to X. Its only write anywhere is one
+# GitHub issue per fired signal — the queue slack-operator reads to put a card in
+# Buzz. See docs/PACKET_SOCIAL_SIGNAL_AGENT.md.
 #
 # It does not touch the VPS or Hermes: /transparency is public, so the runner
 # reads it directly. Drafting (step 2) and the Buzz approval card (step 3) are
@@ -12,16 +15,18 @@ name: Social Signal Sweep
 on:
   workflow_dispatch:
   schedule:
-    # Sits after the daily operator report at 07:17 UTC so a sweep never races
-    # the reports it might otherwise want to quote.
-    - cron: "43 7 * * *"
+    # Must land BEFORE the morning digest, or a fired signal waits nearly a full
+    # day to reach Buzz. The digest defaults to 08:00 Europe/Zurich — 06:00 UTC
+    # in summer, 07:00 in winter — so 05:12 UTC clears it year round.
+    - cron: "12 5 * * *"
 
 permissions:
   contents: read
-  # Read-only, and only for the labelled-PR search. The sweep never comments,
-  # labels, or edits anything on GitHub.
+  # Read-only, and only for the labelled-PR search.
   pull-requests: read
-  issues: read
+  # Write, and only to open one queue issue per fired signal. The sweep never
+  # comments on pull requests, never labels them, and never edits code.
+  issues: write
 
 concurrency:
   group: social-signal-sweep
@@ -111,6 +116,18 @@ jobs:
             elif [ "$fired" != "0" ]; then
               echo "### Worth saying"
               jq -r '.fired[] | "- **\(.claim)**  \n  receipt: \(.receipt.url) · signal: `\(.signalId)`"' "$EV"
+
+              if [ "$(jq '.queued | length' "$EV")" != "0" ]; then
+                echo
+                echo "Queued for approval:"
+                jq -r '.queued[] | "- #\(.number) \(.url)"' "$EV"
+              fi
+              if [ "$(jq '.queueSkipped | length' "$EV")" != "0" ]; then
+                echo
+                echo "Already queued (no duplicate opened):"
+                jq -r '.queueSkipped[] | "- #\(.number) (\(.state)) \(.url)"' "$EV"
+              fi
+
               echo
               echo "To stop these repeating, commit the advanced state to"
               echo "\`scripts/ops/social-signal-state.json\`:"
