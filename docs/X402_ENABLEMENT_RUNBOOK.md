@@ -198,6 +198,59 @@ post something you actually want done, or you have set a trap and stranded the e
 
 ---
 
+## Step 7 — keeping the two sides stocked · *ongoing, Pascal operates*
+
+The rail takes money in on Base and spends it on Hub. Nothing moves it back per
+job, deliberately — the packet rules out bridging in the payment path, and
+rebalancing is a periodic treasury operation over an exchange leg.
+
+That is the right design, and it has a consequence worth stating plainly, because
+it is a **working-capital** requirement rather than a plumbing one.
+
+```bash
+node scripts/ops/check-x402-inventory.mjs
+```
+
+**A rebalance costs about the same however much it moves** — Base withdrawal,
+exchange in and out, Hub deposit. The bank lane measured that same shape on its
+own route: 0.202% moving 10 USDC, ~21% on dust, the *same absolute cost*. So the
+fee sets the minimum move, and the minimum move sets the inventory:
+
+```
+minimum sensible move  =  leg cost / tolerated friction
+required Hub inventory =  that move, expressed in postings
+```
+
+At a $2 leg and 2% tolerated friction that is **$100 a time — about 95 postings**
+at the cheapest posting size. The Hub pool therefore has to carry roughly $100 so
+it can serve every posting between two rebalances.
+
+Measured on 2026-08-10, the day the ramp went live: Hub pool **3.345 USDC**, which
+is **3 postings** of runway, against a target of ~95. Base held 1.05, far below the
+$100 that makes a move worth doing. Moving that 1.05 would cost more than the
+5% fee earned on it — the entire margin on the rail.
+
+So the operating rule is:
+
+- **Fund the Hub pool up front**, to cover a full rebalance interval. Do not wait
+  for the Base side to fund it; it cannot, economically.
+- **Let the Base side accumulate** to the minimum move before repatriating.
+- **Watch the Hub side, not the Base side.** Base accumulating is revenue working
+  as intended. Hub draining is the ramp about to refuse paying customers, and it
+  is the only one of the two that is urgent.
+
+The check exits `2` when Hub runway falls below the threshold and `1` when it
+cannot read a chain — a distinction worth keeping, since "the inventory is low"
+and "we could not see the inventory" call for different responses.
+
+**The pool is also the reward bank.** `getPooledFundingAccount()` returns the
+backend signer, whose `AAC.liquid` pays curated job rewards. So poster escrow and
+worker rewards draw on one balance, and a busy posting hour spends the same
+money that pays workers. That conflation is tolerable at one posting a day and is
+the first thing to revisit if volume arrives.
+
+---
+
 ## What can go wrong, and what it looks like
 
 | symptom | cause | what to do |
@@ -206,5 +259,8 @@ post something you actually want done, or you have set a trap and stranded the e
 | Config rejects `eip155:420420419` | you pointed it at our own chain | correct — settlement is Base-only, bridging per job is not supported |
 | Pre-flight says credential "present but NOT authorised" | key wrong, revoked, or from the wrong CDP project | do not enable; fix the key |
 | `payment_verification_failed` on every attempt, `posterFunds` unchanged | the advertised `extra` is not the token's real EIP-712 domain, so signatures recover to the wrong address | run the pre-flight; the `EIP-712 domain` check names the mismatch. This happened on 2026-08-10 with `USDC` instead of `USD Coin` |
+| `x402_float_exhausted` with `limitedBy: configured_cap` | too much is in flight at once, or the cap is set below one posting | a posting costs reward + 5%, so the cap must exceed 1.05. This is ours to raise |
+| `x402_float_exhausted` with `limitedBy: pooled_account_liquidity` | the Hub pool genuinely cannot front the escrow; `capRaw` reports the real balance | fund the pooled account. Step 7 sizes how much |
+| The ramp refuses every posting and `committed` never falls | pre-2026-08-10 defect: settled postings were counted against the cap forever, so it only ever rose | fixed by reading the pool's live balance instead of summing the ledger. If you see this again, the live read is failing open and the cap alone is refusing |
 | Payments settle but no job appears | job creation failing after verify | the poster is unharmed by design; check the platform-loss records |
 | `402` never appears after enabling | deployed but not armed, or armed but not deployed | check `deployedSha` against `main` before anything else |
