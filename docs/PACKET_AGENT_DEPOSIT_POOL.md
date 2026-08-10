@@ -278,4 +278,43 @@ Rungs 3–5 are out of scope for this packet and gated on §4 and §5.
 | ~~O1~~ | ~~Does `policy.recordOutflow` throttle opt-in?~~ **Answered 2026-08-10: no.** `TreasuryPolicy.dailyOutflowCap` reads `type(uint256).max` on mainnet — deliberately unarmed. **Coupling to remember: arming that cap would throttle deposits into the pool**, since opt-in routes through `withdraw`. | closed |
 | ~~O2~~ | ~~Notice period length and tier count~~ **Decided: two tiers, 7 and 30 days.** | closed |
 | O3 | The §5 window numbers | Pascal, before the window opens — not now, and correctly so: they are chosen with a deposit book in view, and there is no deposit book |
-| O4 | Whether the AAC successor still needs its own ceremony now that the pool does not depend on it | Claude, separate |
+| ~~O4~~ | ~~Is the AAC-successor ceremony still the right shape?~~ **Answered 2026-08-10 — see §10.** It is not a scheduled window; it is a parking lot, and the pool must not park in it. | closed |
+
+---
+
+## 10. The AAC-successor window is a parking lot, not a schedule (O4)
+
+Both bank docs describe *"one deploy window bundled with MAIN-006 and `cancelOpenJob` v3 —
+one ceremony, not three."* That framing has quietly stopped being true, and the risk is that
+new work keeps getting parked in a window nobody has scheduled.
+
+**What is actually in it now:**
+
+| item | contract | state |
+|---|---|---|
+| ~~MAIN-006~~ | AAC | **closed** in #688 |
+| AAC-successor recovery accounting | `AgentAccountCore` | blocked on the migration design — *"the hardest open question in the program"*, commissioned to Codex, not started |
+| `cancelOpenJob` v3 | `EscrowCore` | **banked** by decision 2026-08-01; the operator tombstone rescue is the live path and we exercised it end to end |
+
+So the window holds one item that is deliberately deferred and one blocked on unstarted
+design work. Neither is urgent, and nothing forces it open.
+
+**The bundling rationale survives for those two.** Ceremony cost is per-window, not per
+contract — one multisig session, one manifest update, one deployment gate — and AAC and
+EscrowCore are wired to each other, so redeploying one usually means re-wiring the other.
+Keeping them together is still right.
+
+**The pool must not join them**, for three reasons that all point the same way:
+
+1. **No technical dependency exists.** Bundling would invent a schedule coupling where there
+   is none — the pool needs no AAC change at all (§2).
+2. **It would inherit an unbounded wait.** The window's blocker is a migration design that
+   has not started. Anything parked behind it waits on that, indefinitely.
+3. **It would inherit the wrong risk.** The pool is a fresh deployment with no state to
+   migrate. The successor is a state migration on live balances. Mixing them means one
+   ceremony carries both risks, and an abort for the migration takes the pool down with it.
+
+**So: name it a parking lot.** Two banked items sharing an eventual ceremony, opened when
+one of them becomes urgent — not a window on a calendar. Nothing else should be added to it
+by default, and "it can ride the next window" should stop being a reason to defer a
+decision.

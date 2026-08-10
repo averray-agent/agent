@@ -25,9 +25,16 @@ bar below is met.
 withdraw-share retirement, no-fake-liquid guarantees. Ships in **one deploy window bundled
 with `cancelOpenJob` v3** — MAIN-006 (payments dedup) CLOSED in #688 on the money
 path, so this window is two items, not three.
-**Note (2026-08-10):** the agent deposit pool does NOT ride this window. See
-`PACKET_AGENT_DEPOSIT_POOL.md` — a separate pool contract needs no AAC change,
-because `AgentAccountCore.withdraw` already lets an agent move its own balance out.
+**Note (2026-08-10): this is a parking lot, not a schedule.** One item is banked by
+decision (`cancelOpenJob` v3 — the operator rescue is the live path) and the other is
+blocked on a migration design that has not started. Neither is urgent and nothing forces
+the window open. Keeping those two together is still right — ceremony cost is per-window
+and the two contracts are wired to each other — but **nothing else should be parked here
+by default**, and "it can ride the next window" should stop being a reason to defer a
+decision. The agent deposit pool specifically does NOT ride it: it needs no AAC change
+(`AgentAccountCore.withdraw` already lets an agent move its own balance out), so bundling
+would invent a schedule coupling, inherit an unbounded wait, and put a fresh deployment
+behind a live-state migration's risk. See `PACKET_AGENT_DEPOSIT_POOL.md` §10.
 **Open, commissioned to Codex: the migration design** — how live balances move (parallel-run
 with opt-in migration vs snapshot-credit), the hardest open question in the program.
 Claude gates; Pascal signs the ceremony.
