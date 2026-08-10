@@ -96,11 +96,17 @@ class StubSettlementAdapter {
   }
 }
 
-function makeHarness({ failSettlement = false, afterVerify = undefined, config = rampConfig() } = {}) {
+function makeHarness({
+  failSettlement = false,
+  afterVerify = undefined,
+  config = rampConfig(),
+  poolLiquidRaw = 10_000_000n,
+  unreadableChain = false
+} = {}) {
   const events = [];
   const jobs = new Map();
   const catalog = [];
-  const hubBalances = new Map([[POSTER, 0n], [POOL, 10_000_000n]]);
+  const hubBalances = new Map([[POSTER, 0n], [POOL, poolLiquidRaw]]);
   const store = new MemoryStateStore();
   const gateway = {
     async previewProtocolFeeForAsset(_asset, rewardAmount) {
@@ -113,6 +119,14 @@ function makeHarness({ failSettlement = false, afterVerify = undefined, config =
     },
     async getPooledFundingAccount() {
       return POOL;
+    },
+    // Reads the same map escrow creation debits, so the live-balance check in
+    // assertFloatCapacity sees real spend rather than a constant. `unreadableChain`
+    // models the RPC being down, which must not refuse a paying customer.
+    async getAccountPosition(wallet, symbol) {
+      if (unreadableChain) throw new Error("hub rpc unreachable");
+      assert.equal(symbol, "USDC");
+      return { position: { liquidRaw: String(hubBalances.get(wallet) ?? 0n) } };
     },
     async createEscrowFundedExternalJob(draft) {
       events.push("create");
@@ -285,9 +299,11 @@ test("configured float cap refuses a new 402 with a reason and exact retry time"
   const { ramp, store } = makeHarness({
     config: rampConfig({ X402_POSTING_FLOAT_CAP_USDC: "1.05" })
   });
+  // `reserved`, not `settled`: float promised and not yet spent on chain is the
+  // only kind the cap should still be holding against a new posting.
   await store.upsertExternalPaymentFunding({
     id: id("existing-funding"),
-    status: "settled",
+    status: "reserved",
     reservedRaw: "1050000",
     createdAt: NOW.toISOString()
   });
@@ -297,6 +313,7 @@ test("configured float cap refuses a new 402 with a reason and exact retry time"
     (error) => {
       assert.equal(error.code, "x402_float_exhausted");
       assert.equal(error.details.reason, "configured_pooled_float_cap_exhausted");
+      assert.equal(error.details.limitedBy, "configured_cap");
       assert.equal(error.details.retryAt, "2026-08-09T12:15:00.000Z");
       assert.equal(error.details.posterFunds, "unchanged");
       return true;
@@ -309,13 +326,96 @@ test("float accounting scans every durable page instead of silently stopping at 
   for (let index = 0; index < 1_005; index += 1) {
     await store.upsertExternalPaymentFunding({
       id: `0x${index.toString(16).padStart(64, "0")}`,
-      status: "settled",
+      status: "reserved",
       reservedRaw: "1",
       createdAt: new Date(NOW.getTime() + index).toISOString()
     });
   }
 
-  assert.equal(await ramp.committedFloatRaw(), 1_005n);
+  assert.equal(await ramp.inFlightFloatRaw(), 1_005n);
+});
+
+// THE regression. A settled posting has already left the pooled account, so the
+// live balance has accounted for it; counting the ledger record too charged it
+// twice and made the cap monotonic. In production that closed the ramp after a
+// single 1.05 USDC posting against a 2 USDC cap — permanently, while the 503
+// told posters to retry in fifteen minutes.
+test("a settled posting stops consuming the cap once the chain has moved", async () => {
+  const { ramp, store } = makeHarness({
+    config: rampConfig({ X402_POSTING_FLOAT_CAP_USDC: "2" })
+  });
+  await store.upsertExternalPaymentFunding({
+    id: id("yesterdays-funding"),
+    status: "settled",
+    reservedRaw: "1050000",
+    createdAt: NOW.toISOString()
+  });
+
+  const challenge = await ramp.paymentRequired({ definition: definition() });
+  assert.equal(challenge.statusCode, 402, "a completed posting must not block the next one");
+  assert.equal(await ramp.inFlightFloatRaw(), 0n);
+});
+
+// Every terminal status, for the same reason: the pool balance already reflects
+// them. `platform_loss` especially — the escrow was created and the money left,
+// so holding cap against it would charge us twice for the same loss.
+test("escrow_created, settled and platform_loss are all past the chain and stop counting", async () => {
+  const { ramp, store } = makeHarness();
+  for (const status of ["escrow_created", "settled", "platform_loss"]) {
+    await store.upsertExternalPaymentFunding({
+      id: id(`funding-${status}`),
+      status,
+      reservedRaw: "1050000",
+      createdAt: NOW.toISOString()
+    });
+  }
+  assert.equal(await ramp.inFlightFloatRaw(), 0n);
+});
+
+// The other half of the fix: the cap alone would let us promise float the pool
+// does not hold. The pooled account is also the reward bank, so this is what
+// stops a run of postings quietly draining the pot that pays workers.
+test("the live pooled balance refuses a posting the pool cannot actually front", async () => {
+  const { ramp } = makeHarness({
+    config: rampConfig({ X402_POSTING_FLOAT_CAP_USDC: "100" }),
+    poolLiquidRaw: 500_000n
+  });
+
+  await assert.rejects(
+    ramp.paymentRequired({ definition: definition() }),
+    (error) => {
+      assert.equal(error.code, "x402_float_exhausted");
+      assert.equal(error.details.limitedBy, "pooled_account_liquidity");
+      assert.equal(error.details.reason, "pooled_account_liquidity_insufficient");
+      assert.equal(error.details.capRaw, "500000", "reports the real ceiling, not the config");
+      assert.equal(error.details.posterFunds, "unchanged");
+      return true;
+    }
+  );
+});
+
+// Self-correcting, which is the whole point of reading the chain: spend the pool
+// down and the door closes, put USDC back and it reopens, with no status to set.
+test("the door reopens by itself when the pool is topped up", async () => {
+  const harness = makeHarness({
+    config: rampConfig({ X402_POSTING_FLOAT_CAP_USDC: "100" }),
+    poolLiquidRaw: 500_000n
+  });
+  await assert.rejects(harness.ramp.paymentRequired({ definition: definition() }));
+
+  harness.hubBalances.set(POOL, 5_000_000n);
+
+  const challenge = await harness.ramp.paymentRequired({ definition: definition() });
+  assert.equal(challenge.statusCode, 402);
+});
+
+// A blind RPC must not cost us a paying customer. The configured cap has already
+// bounded the exposure, and if the read mattered the create would fail moments
+// later with the poster's funds still untouched.
+test("an unreadable chain does not refuse a posting the cap allows", async () => {
+  const { ramp } = makeHarness({ unreadableChain: true });
+  const challenge = await ramp.paymentRequired({ definition: definition() });
+  assert.equal(challenge.statusCode, 402);
 });
 
 test("Bazaar advertises a portable route without publishing poster-specific job content", async () => {

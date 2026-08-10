@@ -19,25 +19,53 @@ import { assertSettlementAdapter } from "./settlement-adapter.js";
 const POSTING_PATH = "/jobs/x402";
 const FLOAT_LOCK_ID = "external-payment-float";
 const FLOAT_LOCK_TTL_SECONDS = 30;
-const COMMITTED_FLOAT_STATUSES = new Set([
+/**
+ * Commitments the pooled account's own balance does NOT yet reflect.
+ *
+ * The distinction is when the Hub moved, not whether the posting worked out:
+ *
+ *   reserved                        float promised, escrow not created — the
+ *                                   balance still shows this money
+ *   escrow_reconciliation_pending   we cannot prove whether the chain moved, so
+ *                                   we assume it has not and count it
+ *
+ * Everything else — `escrow_created`, `settled`, `platform_loss` — has already
+ * left the pool, so the live balance read in assertFloatCapacity accounts for
+ * it. `settled` used to be in this set, which double-charged every completed
+ * posting against a cap that could then only rise. Adding a status here means
+ * "the chain has not moved yet", never "this posting was unsuccessful".
+ */
+const IN_FLIGHT_FLOAT_STATUSES = new Set([
   "reserved",
-  "escrow_created",
-  "settled",
-  "platform_loss",
   "escrow_reconciliation_pending"
 ]);
 
 export class X402FloatUnavailableError extends AppError {
-  constructor({ capRaw, committedRaw, requestedRaw, retryAfterSeconds, now }) {
+  // `limitedBy` says which of the two ceilings refused, because they are fixed
+  // by different people. The configured cap is ours to raise; the pooled
+  // account's liquidity needs USDC moved from Base to Hub. Telling a poster to
+  // "retry after rebalance" when the answer is a config value we control was
+  // one of the ways this endpoint used to mislead.
+  constructor({
+    capRaw,
+    committedRaw,
+    requestedRaw,
+    retryAfterSeconds,
+    now,
+    limitedBy = "configured_cap"
+  }) {
     const retryAt = new Date(now.getTime() + (retryAfterSeconds * 1000)).toISOString();
     super(
-      `Averray's configured x402 Hub float is exhausted. No payment was verified or settled. Retry after ${retryAt}, when the pooled account may have been rebalanced.`,
+      `Averray's x402 Hub float cannot cover this posting right now. No payment was verified or settled. Retry after ${retryAt}.`,
       {
         name: "X402FloatUnavailableError",
         code: "x402_float_exhausted",
         statusCode: 503,
         details: {
-          reason: "configured_pooled_float_cap_exhausted",
+          reason: limitedBy === "pooled_account_liquidity"
+            ? "pooled_account_liquidity_insufficient"
+            : "configured_pooled_float_cap_exhausted",
+          limitedBy,
           capRaw: capRaw.toString(),
           committedRaw: committedRaw.toString(),
           requestedRaw: requestedRaw.toString(),
@@ -417,16 +445,75 @@ export class X402PosterRampService {
     };
   }
 
+  /**
+   * Two questions, and they are not the same question.
+   *
+   *   1. Does the pooled account ACTUALLY still hold what we are about to front?
+   *   2. Are we willing to have this much of it tied up in x402 at once?
+   *
+   * (1) is answered by reading the chain, never by a ledger. A settled posting
+   * has already left the pool, so the live balance has already accounted for it;
+   * the previous code summed those records too and charged us a second time. The
+   * cap was therefore monotonic — it only ever went up — and after one 1.05 USDC
+   * posting against a 2 USDC cap no job could ever be posted again, while the
+   * 503 told posters to retry in fifteen minutes. Reading the balance is also
+   * self-correcting: move USDC from Base to Hub and the door reopens by itself,
+   * with no status to set and no bookkeeping to forget.
+   *
+   * (2) is the cap, and it still matters. The pooled account is also the reward
+   * bank, so without a ceiling a busy hour of posting would quietly drain the
+   * pot that pays workers.
+   *
+   * Only genuinely in-flight commitments are added on top: `reserved` (we have
+   * promised float but not yet created escrow) and `escrow_reconciliation_pending`
+   * (we cannot yet prove whether the chain moved). Everything past that point has
+   * already moved the balance we just read.
+   */
   async assertFloatCapacity(requestedRaw) {
-    const committedRaw = await this.committedFloatRaw();
-    if (committedRaw + requestedRaw > this.config.floatCapRaw) {
+    const inFlightRaw = await this.inFlightFloatRaw();
+    if (inFlightRaw + requestedRaw > this.config.floatCapRaw) {
       throw new X402FloatUnavailableError({
         capRaw: this.config.floatCapRaw,
-        committedRaw,
+        committedRaw: inFlightRaw,
         requestedRaw,
         retryAfterSeconds: this.config.retryAfterSeconds,
         now: this.currentTime()
       });
+    }
+
+    const availableRaw = await this.pooledLiquidRaw();
+    if (availableRaw === undefined) return;
+    if (inFlightRaw + requestedRaw > availableRaw) {
+      throw new X402FloatUnavailableError({
+        capRaw: availableRaw,
+        committedRaw: inFlightRaw,
+        requestedRaw,
+        retryAfterSeconds: this.config.retryAfterSeconds,
+        now: this.currentTime(),
+        limitedBy: "pooled_account_liquidity"
+      });
+    }
+  }
+
+  /**
+   * The pooled account's live liquid position, or undefined when the chain
+   * cannot be read.
+   *
+   * Undefined deliberately does NOT block. The configured cap above has already
+   * bounded the exposure, and refusing a paying customer because our own RPC
+   * blinked would be the worse failure — the poster's money is untouched either
+   * way, but a needless 503 sends them somewhere else. A read failure that
+   * mattered would show up as a create failure moments later, with the poster's
+   * funds still unspent.
+   */
+  async pooledLiquidRaw() {
+    try {
+      const pooledAccount = await this.gateway.getPooledFundingAccount();
+      const view = await this.gateway.getAccountPosition(pooledAccount, "USDC");
+      const liquidRaw = view?.position?.liquidRaw;
+      return liquidRaw === undefined ? undefined : exactUint(liquidRaw, "pooled account liquid");
+    } catch {
+      return undefined;
     }
   }
 
@@ -538,7 +625,7 @@ export class X402PosterRampService {
     }
   }
 
-  async committedFloatRaw() {
+  async inFlightFloatRaw() {
     const now = this.currentTime().getTime();
     const pageSize = 1_000;
     let offset = 0;
@@ -549,7 +636,7 @@ export class X402PosterRampService {
         offset
       });
       for (const record of records) {
-        if (!COMMITTED_FLOAT_STATUSES.has(record?.status)) continue;
+        if (!IN_FLIGHT_FLOAT_STATUSES.has(record?.status)) continue;
         if (
           record.status === "reserved"
           && record.authorizationExpiresAt
