@@ -109,7 +109,7 @@ From `deployments/mainnet.json` at c48a22e:
 | `wrapper_` | `0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc` | live xcmWrapper (v2.2.1) |
 | `strategyId_` | `HYDRATION_USDC_POOL_V1` (proposed) | must NOT reuse `HYDRATION_USDC_V1` |
 | `agentAccountCore_` | `A_adapter` (predicted, §2) | immutable |
-| `operator_` (pool) | a dedicated service key | see below |
+| `operator_` (pool) | `0x5a6836c6D4d293F6E5377E6c28054F4171915813` | the backend signing key — see below |
 
 ### `operator_` — a bounded role, so it does not need the multisig
 
@@ -131,9 +131,31 @@ The operator's entire power surface is three functions, and the contract bounds 
 So a compromised operator key **cannot take depositor money**. The worst case is a liveness
 annoyance: deploying the available buffer once a day, for at most seven days out.
 
-Therefore use a **dedicated service key**, not the multisig. `deployToVenue` and
-`recallVenueDeployment` are routine, and a multisig ceremony per deployment would make the
-lane unusable in practice. The key should do only this.
+Therefore not the multisig: `deployToVenue` and `recallVenueDeployment` are routine, and a
+multisig ceremony per deployment would make the lane unusable in practice.
+
+**Chosen: `0x5a6836c6D4d293F6E5377E6c28054F4171915813`** — the backend's KMS-backed signing
+key. Identified from chain rather than the vault: it signs live EscrowCore settlements
+(three observed in blocks 19,287,277–19,287,348), nonce 898, ~13.8 DOT, EOA.
+
+Service-held is the deciding property. `operator` is immutable, and a key only a human holds
+can never be driven by automation, whereas a service key can still be triggered by a human.
+Choosing the automatable option keeps both paths open; choosing the hand-held one closes a
+door that can only be reopened by redeploying the pool.
+
+**Recorded concentration risk.** This address already holds three roles — manifest
+`verifier`, TreasuryPolicy `strategySettler`, and backend transaction signer — so this makes
+four. That is worth unwinding, but it is *not* an argument against using it here: the
+verifier role can already settle job payouts and move real money, while the pool operator
+provably cannot withdraw anything (see the bounds above). Adding the strictly weaker role to
+a key that already holds the stronger one barely moves the blast radius.
+
+The cleaner end state is a dedicated service-held key — a fresh unused EOA
+`0x51818D396B598083589a67B6426bae86fedF0034` (nonce 0, unfunded) exists as a candidate. It
+was not chosen now because it is not yet service-provisioned, and because migrating later is
+cheap **while the pool is empty**: redeploying an empty pool costs gas and nothing else.
+Revisit at the next key rotation, or before the pool holds meaningful depositor money —
+whichever comes first.
 
 ### `strategyId_` — a label, not a control-flow key
 
@@ -306,7 +328,8 @@ deliberately does not.
       the contract's own bounds (§3). The specific key is still Pascal's to name.
 - [x] ~~`strategyId_` checked against downstream readers~~ — one non-test consumer,
       a module constant; the hazard was reuse, not choice (§3).
-- [ ] the actual service-key address for `operator_` named
+- [x] ~~`operator_` address named~~ — `0x5a6836c6…5813`, the backend signing key (§3),
+      with the four-role concentration recorded for the next rotation
 - [ ] deployer `D` confirmed quiescent; nonce re-read immediately before tx 1 (§2)
 - [ ] predicted addresses **recomputed** at ceremony time — the ones in §3 assume nonce 33
 - [ ] pause window agreed for `setStrategyAdapter`, with no operating deployment or recall
