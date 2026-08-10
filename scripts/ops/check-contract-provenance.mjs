@@ -57,8 +57,16 @@ export const CONTRACT_ARTIFACTS = Object.freeze({
   discoveryRegistry: ["DiscoveryRegistry.sol", "DiscoveryRegistry"],
   escrowCore: ["EscrowCore.sol", "EscrowCore"],
   legacyEscrowCore: ["EscrowCore.sol", "EscrowCore"],
-  xcmWrapper: ["XcmWrapperV2.sol", "XcmWrapperV2"],
-  hydrationUsdcAdapter: ["HydrationUsdcAdapter.sol", "HydrationUsdcAdapter"],
+  // The bank pair is v2.2.1, deployed 2026-08-05: these must name the V22
+  // sources. They pointed at the pre-2.2 contracts, so every provenance check
+  // compared live V22 runtime against a compiled V2 artifact — a comparison of
+  // two different contracts, which can only ever report drift. Proven both
+  // ways against mainnet: live 0xF20b35A3 is byte-identical to compiled
+  // XcmWrapperV22, live 0x96091d44 to HydrationUsdcAdapterV22 as of the commit
+  // before #1043, and the manifest's own abiHashes recorded on deploy day match
+  // the V22 ABIs, not the V2 ones.
+  xcmWrapper: ["XcmWrapperV22.sol", "XcmWrapperV22"],
+  hydrationUsdcAdapter: ["HydrationUsdcAdapterV22.sol", "HydrationUsdcAdapterV22"],
 });
 
 function sha256(bytes) {
