@@ -9,7 +9,18 @@ permissions:
   contents: read
   actions: read
   issues: write
-  pull-requests: read
+  # `write`, not `read`, and `issues: write` does not cover it. The last step
+  # posts via POST /repos/{owner}/{repo}/issues/{n}/comments, and when {n} is a
+  # pull request GitHub gates that endpoint on the pull-requests scope rather
+  # than the issues one. With `pull-requests: read` the read succeeds and the
+  # POST 403s, which is why this workflow reached Hermes ~785 times and landed
+  # zero comments.
+  #
+  # This repo ran the control by accident: external-uptime-watchdog.yml
+  # declares `issues: write` and no pull-requests scope at all, and its three
+  # comments on issue #992 posted fine. Same endpoint, same scope, different
+  # target type. Do not narrow this back to `read` in a least-privilege sweep.
+  pull-requests: write
 
 concurrency:
   group: hermes-pr-handoff-${{ github.event.workflow_run.id }}
@@ -244,50 +255,72 @@ jobs:
             echo "</details>"
           } > hermes-comment.md
 
+          # Both paths below used to end in `exit 0`, writing the reason only
+          # to the step summary. The job therefore reported success whether or
+          # not the comment landed — and it never landed once in ~785 runs
+          # before anyone noticed, because a green check is the only thing
+          # anyone reads. An LLM code review nobody can see is worth nothing,
+          # so a verdict that fails to post now reds the job, prints the API
+          # error to the log, and raises an ::error:: annotation.
+          fail() {
+            echo "::error::$1 See the step log for the GitHub API response."
+            echo "$1"
+            echo "GitHub API error:"
+            sed 's/^/  /' hermes-comment-api.err
+            {
+              echo "### Hermes PR comment FAILED"
+              echo
+              echo "$1"
+              echo
+              echo '```text'
+              cat hermes-comment-api.err
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+
+          # `--paginate` so the marker is still found past the first 30
+          # comments — otherwise a re-run of a chatty PR appends a duplicate
+          # instead of updating in place. `.body // ""` because a null body
+          # would abort jq, and now that this step is fatal that would red the
+          # job for no reason. `pipefail` so the status is gh's, not tail's.
           set +e
+          set -o pipefail
           comment_id=$(
-            gh api "repos/${HANDOFF_REPO}/issues/${HANDOFF_PR_NUMBER}/comments" \
-              --jq "map(select(.body | contains(\"hermes-pr-handoff:${HANDOFF_CORRELATION_ID}\")) | .id) | last // \"\"" \
-              2>hermes-comment-api.err
+            gh api --paginate "repos/${HANDOFF_REPO}/issues/${HANDOFF_PR_NUMBER}/comments" \
+              --jq ".[] | select((.body // \"\") | contains(\"hermes-pr-handoff:${HANDOFF_CORRELATION_ID}\")) | .id" \
+              2>hermes-comment-api.err | tail -n 1
           )
           lookup_status=$?
 
           if [ "$lookup_status" -ne 0 ]; then
-            {
-              echo "### Hermes PR comment skipped"
-              echo
-              echo "Hermes completed, but GitHub did not allow this workflow to read PR comments."
-              echo
-              echo '```text'
-              cat hermes-comment-api.err
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+            # gh puts its one-line summary ("gh: ... (HTTP 403)") on stderr but
+            # the JSON body on stdout, which landed in $comment_id. Fold it in
+            # so the log carries the whole response, not half of it.
+            printf '%s\n' "$comment_id" >> hermes-comment-api.err
+            fail "Could not read comments on ${HANDOFF_REPO}#${HANDOFF_PR_NUMBER}; the Hermes verdict was not posted."
           fi
 
+          # Both streams into one file for the same reason as above: on a 403
+          # the actionable text is split across stdout and stderr.
           body=$(cat hermes-comment.md)
           if [ -n "$comment_id" ]; then
             gh api -X PATCH "repos/${HANDOFF_REPO}/issues/comments/${comment_id}" \
-              -f body="$body" >/dev/null 2>hermes-comment-api.err
+              -f body="$body" >hermes-comment-api.err 2>&1
             comment_status=$?
+            action="updated comment ${comment_id} on"
           else
             gh api -X POST "repos/${HANDOFF_REPO}/issues/${HANDOFF_PR_NUMBER}/comments" \
-              -f body="$body" >/dev/null 2>hermes-comment-api.err
+              -f body="$body" >hermes-comment-api.err 2>&1
             comment_status=$?
+            action="posted a new comment to"
           fi
 
           if [ "$comment_status" -ne 0 ]; then
-            {
-              echo "### Hermes PR comment skipped"
-              echo
-              echo "Hermes completed, but GitHub did not allow this workflow to write a PR comment."
-              echo
-              echo '```text'
-              cat hermes-comment-api.err
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+            fail "Could not write the Hermes verdict comment to ${HANDOFF_REPO}#${HANDOFF_PR_NUMBER}."
           fi
+
+          echo "Hermes verdict ${action} ${HANDOFF_REPO}#${HANDOFF_PR_NUMBER} (outcome: ${HERMES_OUTCOME})."
 
       - name: Fail if Hermes handoff failed
         if: always() && steps.pr.outputs.skip != 'true' && steps.hermes.outputs.exit_status != '0'
