@@ -43,7 +43,7 @@ import { buildSiwxEip4361Message } from "../../mcp-server/src/auth/siwx.js";
 
 const execFileAsync = promisify(execFile);
 const API = (process.env.API_URL ?? "https://api.averray.com").replace(/\/+$/, "");
-const POSTING_PATH = "/jobs/draft";
+const POSTING_PATH = "/jobs/x402";
 const EIP3009_TYPES = {
   TransferWithAuthorization: [
     { name: "from", type: "address" },
