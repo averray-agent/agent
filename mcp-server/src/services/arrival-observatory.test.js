@@ -3,16 +3,19 @@ import test from "node:test";
 
 import { ArrivalObservatory, normalizeClientInfo, resolveSelfClients, stageRank } from "./arrival-observatory.js";
 
-function harness({ failStore = false, now = () => 1_000 } = {}) {
+function harness({ failStore = false, now = () => 1_000, loadRetryIntervalMs } = {}) {
   const state = new Map();
   const counters = [];
+  const reads = [];
+  let failing = failStore;
   const stateStore = {
     async getServiceState(scope) {
-      if (failStore) throw new Error("redis down");
+      reads.push(scope);
+      if (failing) throw new Error("redis down");
       return state.get(scope);
     },
     async upsertServiceState(scope, value) {
-      if (failStore) throw new Error("redis down");
+      if (failing) throw new Error("redis down");
       state.set(scope, value);
       return value;
     }
@@ -25,9 +28,15 @@ function harness({ failStore = false, now = () => 1_000 } = {}) {
   return {
     state,
     counters,
-    observatory: new ArrivalObservatory({ stateStore, metrics, now, flushIntervalMs: 0 })
+    reads,
+    recover() { failing = false; },
+    observatory: new ArrivalObservatory({ stateStore, metrics, now, flushIntervalMs: 0, loadRetryIntervalMs })
   };
 }
+
+// Scope the observatory persists under. Hardcoded so that renaming it without
+// updating the tests fails loudly instead of quietly loading nothing.
+const STATE_SCOPE = "arrival-observatory";
 
 const CLAUDE = { name: "claude-ai", version: "1.2.0" };
 
@@ -110,6 +119,65 @@ test("a split that could not be read is null, never zero", async () => {
   assert.equal(snapshot.funnel.browsed, null);
   assert.equal(snapshot.funnelExternal.browsed, null);
   assert.equal(snapshot.funnelSelf.browsed, null);
+});
+
+// An unreachable feed must be a NAMED instrument failure, never a funnel of
+// zeros that reads as "nobody arrived". The load flag used to be set before the
+// read, so a store that was down at startup left the observatory looking
+// loaded: the first record() ate the throw and every snapshot after it served
+// in-memory counts as measured truth, with no marker at all.
+test("a snapshot after a failed load still says the state could not be read", async () => {
+  const { observatory } = harness({ failStore: true });
+  await observatory.recordReach({ clientInfo: CLAUDE });
+  await observatory.recordTool({ tool: "listJobs", clientInfo: CLAUDE });
+
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.unavailable, "arrival state could not be read");
+  // Not zero — unknown. Every figure withheld, including the ones a post-failure
+  // call had already accumulated in memory.
+  assert.equal(snapshot.funnel.reached, null);
+  assert.equal(snapshot.funnel.browsed, null);
+  assert.equal(snapshot.distinct.furthestExternal, null);
+  assert.deepEqual(snapshot.clients, []);
+});
+
+// Retrying is right; retrying on every call is not. A store that is down must
+// not cost the front door a round trip per request.
+test("a failed load is not retried on every single call", async () => {
+  const { observatory, reads } = harness({ failStore: true });
+  await observatory.recordReach({ clientInfo: CLAUDE });
+  await observatory.recordTool({ tool: "listJobs", clientInfo: CLAUDE });
+  await observatory.getSnapshot();
+  assert.equal(reads.length, 1);
+});
+
+test("a failed load is retried once the interval passes, not latched forever", async () => {
+  const { observatory, state, recover } = harness({ failStore: true, loadRetryIntervalMs: 0 });
+  state.set(STATE_SCOPE, { totals: { reached: 4 }, clients: [] });
+  await observatory.recordReach({ clientInfo: CLAUDE });
+  assert.equal((await observatory.getSnapshot()).unavailable, "arrival state could not be read");
+
+  recover();
+  await observatory.recordReach({ clientInfo: CLAUDE });
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.unavailable, undefined);
+  // Resumes from the persisted baseline rather than restarting the count at the
+  // outage — 4 arrivals before it, 1 after.
+  assert.equal(snapshot.funnel.reached, 5);
+});
+
+// The pre-set flag also served as concurrency control: it stopped a second
+// caller starting its own read and overwriting counts the first had already
+// applied. The in-flight promise has to keep doing that job.
+test("concurrent first callers read persisted state once", async () => {
+  const { observatory, reads } = harness();
+  await Promise.all([
+    observatory.recordReach({ clientInfo: CLAUDE }),
+    observatory.recordTool({ tool: "listJobs", clientInfo: CLAUDE }),
+    observatory.getSnapshot()
+  ]);
+  assert.equal(reads.length, 1);
+  assert.equal((await observatory.getSnapshot()).funnel.reached, 1);
 });
 
 test("client table is capped and evicts the least recently seen", async () => {
