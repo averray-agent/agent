@@ -21,6 +21,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
+import {
+  DEFAULT_SHIPPED_LABEL,
+  assessGitHub,
+  buildShippedCandidates,
+  fetchShippedPullRequests
+} from "./social-shipped-signals.mjs";
+
 const DEFAULT_TRANSPARENCY_URL = "https://api.averray.com/transparency";
 const DEFAULT_EVIDENCE_FILE = "artifacts/social-signal-sweep.json";
 const DEFAULT_STATE_FILE = "artifacts/social-signal-state.json";
@@ -103,6 +110,7 @@ export function buildCandidates({ snapshot, state }) {
   if (!state.firedSignals?.["external-agents-first"] && numeric(external.value) >= 1) {
     candidates.push({
       signalId: "external-agents-first",
+      source: "transparency",
       claim: `An agent outside Averray completed work in the last 24h (${numeric(external.value)} in the window)`,
       claimsExternalActivity: true,
       restsOn: [external],
@@ -118,6 +126,7 @@ export function buildCandidates({ snapshot, state }) {
   if (milestone !== null) {
     candidates.push({
       signalId: `jobs-settled-${milestone}`,
+      source: "transparency",
       // "passed N", never "N have settled" — the live count is almost always
       // above the milestone by the time a sweep sees it, and a claim of exactly
       // N would be false against the very field it rests on.
@@ -136,6 +145,12 @@ export function buildCandidates({ snapshot, state }) {
  * The truth boundary, mechanized. Returns the veto reason, or `null` to pass.
  */
 export function vetoFor(candidate, snapshot) {
+  // A signal that does not rest on the transparency payload is not judged by
+  // the transparency payload's health. Vetoing a merged pull request because
+  // an unrelated endpoint went stale would be a false negative dressed up as
+  // caution.
+  if (candidate.source && candidate.source !== "transparency") return null;
+
   if (snapshot?.schemaVersion !== EXPECTED_SCHEMA_VERSION) {
     return {
       reason: VETO_REASONS.SCHEMA_DRIFT,
@@ -175,8 +190,17 @@ export function vetoFor(candidate, snapshot) {
  * Evaluate the payload against stored state. Pure — no clock, no network, no
  * filesystem — so the whole decision surface is testable.
  */
-export function evaluateSignals({ snapshot, state = {}, nowIso, firstRun = false }) {
-  const candidates = buildCandidates({ snapshot, state });
+export function evaluateSignals({
+  snapshot,
+  state = {},
+  nowIso,
+  firstRun = false,
+  extraCandidates = []
+}) {
+  // Transparency candidates are only built when the payload is readable; the
+  // caller decides that. Extra candidates come from other sources and are
+  // judged on their own terms — see vetoFor.
+  const candidates = [...buildCandidates({ snapshot, state }), ...extraCandidates];
   const fired = [];
   const vetoed = [];
   const seeded = [];
@@ -187,14 +211,22 @@ export function evaluateSignals({ snapshot, state = {}, nowIso, firstRun = false
       signalId: candidate.signalId,
       claim: candidate.claim,
       receipt: candidate.receipt,
-      checkedAgainst: {
-        endpoint: "/transparency",
-        schemaVersion: snapshot?.schemaVersion ?? null,
-        generatedAtMs: snapshot?.generatedAtMs ?? null,
-        fields: Object.fromEntries(
-          candidate.restsOn.map((field) => [field.path, { value: field.value, status: field.status }])
-        )
-      }
+      source: candidate.source ?? "transparency",
+      ...(candidate.deployVerified === false ? { deployVerified: false } : {}),
+      checkedAgainst:
+        (candidate.source ?? "transparency") === "transparency"
+          ? {
+              endpoint: "/transparency",
+              schemaVersion: snapshot?.schemaVersion ?? null,
+              generatedAtMs: snapshot?.generatedAtMs ?? null,
+              fields: Object.fromEntries(
+                candidate.restsOn.map((field) => [
+                  field.path,
+                  { value: field.value, status: field.status }
+                ])
+              )
+            }
+          : { source: candidate.source, receipt: candidate.receipt }
     };
 
     if (veto) {
@@ -207,7 +239,10 @@ export function evaluateSignals({ snapshot, state = {}, nowIso, firstRun = false
     // fresh. The first sweep calibrates instead: state advances, nothing is
     // announced, and the seeded list stays visible so a human can decide whether
     // any of it is still worth saying by hand.
-    (firstRun ? seeded : fired).push(record);
+    // `seedOnly` lets a source seed independently of the transparency-side
+    // firstRun: the shipped-PR watermark can be absent long after the sweep
+    // itself has been running.
+    (firstRun || candidate.seedOnly ? seeded : fired).push(record);
   }
 
   // State advances for anything that passed the veto, whether it was announced
@@ -253,12 +288,41 @@ export async function socialSignalSweep({
   const { state, firstRun } = await readState(stateFile);
   const payload = assessPayload(snapshot);
 
-  // A degraded payload evaluates nothing. Reading signals out of a body we have
-  // already decided we cannot parse would be inventing findings.
-  const { fired, vetoed, seeded, nextState, quiet } =
-    payload.state === "live"
-      ? evaluateSignals({ snapshot, state, nowIso, firstRun })
-      : { fired: [], vetoed: [], seeded: [], nextState: state, quiet: false };
+  // The two sources are independent, and their health must be too. A stale
+  // transparency payload says nothing about whether a pull request merged, so
+  // it must not suppress a shipped signal — that would be a false negative
+  // wearing caution as a disguise.
+  const github = assessGitHub({ env });
+  let shipped = { candidates: [], nextShippedSeededAt: state.shippedSeededAt ?? null, seeding: false };
+  if (github.state === "live") {
+    const pulls = await fetchShippedPullRequests({
+      fetchImpl,
+      token: env.GITHUB_TOKEN,
+      repo: env.GITHUB_REPOSITORY,
+      label: env.SOCIAL_SWEEP_LABEL || DEFAULT_SHIPPED_LABEL
+    });
+    shipped = buildShippedCandidates({ pulls, state, nowIso });
+  }
+
+  // A degraded payload evaluates no TRANSPARENCY signals. Reading figures out of
+  // a body we have already decided we cannot parse would be inventing findings —
+  // but the shipped candidates do not come from that body.
+  const { fired, vetoed, seeded, nextState } = evaluateSignals({
+    snapshot: payload.state === "live" ? snapshot : null,
+    state,
+    nowIso,
+    firstRun,
+    extraCandidates: shipped.candidates
+  });
+  if (shipped.nextShippedSeededAt) nextState.shippedSeededAt = shipped.nextShippedSeededAt;
+
+  // `quiet` means "we looked everywhere we were meant to and there is nothing to
+  // say". An empty result from a source we could not read is not that, so a
+  // degraded source disqualifies quiet outright — otherwise a broken reader
+  // reports the same word as a calm day, which is the whole failure this sweep
+  // was built to avoid. `skipped` is fine: a source that is switched off was
+  // never going to be looked at.
+  const quiet = fired.length === 0 && payload.state === "live" && github.state !== "degraded";
 
   const evidence = {
     sweptAt: nowIso,
@@ -267,6 +331,11 @@ export async function socialSignalSweep({
     // "live" or "degraded" — never inferred from an empty result set.
     payload: payload.state,
     payloadReason: payload.reason,
+    // Same rule for the second source: "skipped" (not configured) and
+    // "degraded" (configured, unreadable) are different states, and neither is
+    // "nothing shipped today".
+    github: github.state,
+    githubReason: github.reason,
     firstRun,
     quiet,
     fired,
@@ -289,13 +358,20 @@ export async function socialSignalSweep({
     log(`social-signal-sweep: DEGRADED — ${payload.reason}`);
     // State is deliberately not advanced: a payload we could not read must not
     // be allowed to rewrite what we believe we have already announced.
+    //
+    // Accepted consequence: a shipped-PR signal that fired during a transparency
+    // outage will fire again on the next healthy sweep, because its watermark was
+    // not saved either. A visible repeat is the cheaper mistake — nothing
+    // publishes on its own, and the alternative is partial state writes whose
+    // correctness depends on which source failed.
     throw new Error(`transparency payload is degraded — ${payload.reason}`);
   }
 
   await writeJson(stateFile, nextState);
 
-  if (firstRun) {
-    log(`social-signal-sweep: first run — calibrated, announced nothing (${seeded.length} seeded)`);
+  if (github.state !== "live") log(`social-signal-sweep: shipped signals ${github.state} — ${github.reason}`);
+  if (firstRun || shipped.seeding) {
+    log(`social-signal-sweep: calibrating — announced nothing (${seeded.length} seeded)`);
   } else if (quiet) {
     log(`social-signal-sweep: quiet — nothing to say (${vetoed.length} vetoed)`);
   } else {

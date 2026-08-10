@@ -2,7 +2,8 @@
 
 **Strategy:** [`DISTRIBUTION_STRATEGY.md`](DISTRIBUTION_STRATEGY.md) — Priority 3, "recent content / sustaining flow"
 **Owner:** Codex implements · Claude gates · Pascal operates and approves every post
-**Status:** v0.2 — **step 1 built and verified against production.** Steps 2–6 open.
+**Status:** v0.3 — **step 1, the digest line and signal 6 (shipped PRs) built and verified
+against production.** Drafting, approval and publishing open.
 **Account:** `@averray` (brand account, X Premium — individual tier, blue check)
 
 ## Goal
@@ -88,10 +89,14 @@ The threshold matters more than the source. A signal that fires every day is not
 |---|---|---|---|---|
 | 1 | First external poster | `/transparency` → `composition24h.external` | transition `0 → ≥1`, **once** | tx hash + `averray.com/transparency` |
 | 2 | Settlement milestone | `/transparency` → `jobsSettled` | crosses 10/50/100/500/1000 — crossing only, never "we're at 43" | transparency link |
-| 3 | New measured number | a `docs/` measurement lands | PR carries the `social:` label | the doc + the figure |
+| 3 | New measured number | a `docs/` measurement lands | PR carries the `social` label | the doc + the figure |
 | 4 | First fee of a new kind | chain event | first occurrence only | tx hash |
 | 5 | Adversarial run | new `docs/ADVERSARIAL_RUN_*.md` | file added | the doc, findings included |
-| 6 | Shipped capability | merged PR | PR carries the `social:` label | PR link |
+| 6 | Shipped capability | merged PR | PR carries the `social` label — **built** | PR link |
+
+**The label is `social`, not `social:`** — the repo's existing labels are plain lowercase
+words (`bug`, `enhancement`), and a colon would have been the odd one out. Created
+2026-08-10.
 
 **Signals 3 and 6 are human-triggered by design.** The agent is bad at judging which code
 change is interesting, and confidently wrong in a way that produces filler. A label on the
@@ -225,6 +230,54 @@ reports **UNREADABLE** rather than rendering as silence.
 
 The general shape, worth keeping in mind for steps 2–4: **an empty result set is never
 self-evidently good news.** Every "nothing happened" needs a proof that the reader worked.
+
+### Signal 6, as built — the shipped-PR source
+
+[`scripts/ops/social-shipped-signals.mjs`](../scripts/ops/social-shipped-signals.mjs).
+The only signal class that will fire regularly for months: transparency sits at 500 settled
+and the first external agent, both distant, while pull requests merge every day.
+
+**`merged ≠ deployed`, and the claim says so.** The emitted claim is `Merged: <PR title>`,
+never "shipped", "live", "launched" or "released" — there is a test asserting the wording
+never drifts. A claim of "we shipped X" about something merged but not yet on production is
+exactly the more-live-than-it-is failure this codebase exists to prevent.
+
+> **Rule for step 2 (drafting):** promoting "merged" to "live" requires verifying the merge
+> commit is actually deployed. Every candidate carries `deployVerified: false`, and nothing
+> in this step may pre-authorise removing it.
+
+**The label is the decision, not the merge date.** An earlier draft of this watermarked on
+the newest merge time, which meant labelling a pull request from last week did **nothing at
+all** — silently. That is worse than firing late: the operator makes a deliberate choice and
+the system ignores it. Merge time is therefore not a filter. `firedSignals` alone prevents
+repeats, so a PR fires exactly once, whenever it acquires the label, however old it is.
+
+The first encounter still seeds: every already-labelled PR is recorded without announcing,
+so switching the source on cannot open with a backlog presented as today's news.
+
+### Two sources, two independent healths
+
+The sweep now reads transparency **and** GitHub, and their health is deliberately not
+shared:
+
+- A degraded transparency payload no longer suppresses a merged pull request. Vetoing a PR
+  because an unrelated endpoint went stale is a false negative wearing caution as a
+  disguise. `vetoFor` returns early for any candidate that does not rest on the payload.
+- `skipped` (no token — the source is switched off) and `degraded` (configured, unreadable)
+  are distinct states, and **neither is "nothing shipped today"**. A GitHub search that
+  fails throws; a `200` without an items array throws rather than reading as an empty list.
+- `quiet` now requires that *every* source was actually readable. A degraded source
+  disqualifies quiet outright — otherwise a broken reader reports the same word as a calm
+  day, which is the failure this whole sweep exists to avoid.
+
+**Accepted consequence:** if transparency is degraded, state is not written at all, so a
+shipped signal that fired in that run fires again on the next healthy sweep. A visible
+repeat is the cheaper mistake — nothing publishes on its own, and the alternative is partial
+state writes whose correctness depends on which source failed.
+
+**Known bound:** the search returns at most 20 PRs, sorted by most recently updated. Label
+more than 20 at once and the remainder are not picked up. Not worth paginating for a daily
+sweep by one person; worth knowing before a bulk-labelling session.
 
 ### Claim wording rule
 
@@ -512,12 +565,15 @@ found by Pascal using X normally, which costs nothing.
 ## Build order
 
 1. ~~**Signal reader + veto**~~ — **done.** Reads `/transparency`, evaluates signals 1 and
-   2, applies the veto, emits evidence. No drafting, no posting. Now run it for a week and
-   read the output before building anything else.
-2. **Drafting** — variants, voice, link-free preference.
+   2, applies the veto, emits evidence. No drafting, no posting.
+1b. ~~**Signal 6 — shipped PRs**~~ — **done.** The `social` label on a merged PR fires once.
+   This is what gives the account something to say before the distant transparency
+   thresholds arrive.
+2. **Drafting** — variants, voice, link-free preference. Must not promote "merged" to
+   "live" without verifying deployment.
 3. **Buzz approval card** — approve/edit/kill, recorded approval.
 4. **Publishing tool** — re-validate, post, record the post id back onto the draft.
-5. Signals 3–6.
+5. Signals 3–5 (measurement docs, first fee of a new kind, adversarial runs).
 6. v2: reply research.
 
 Step 1 alone answers the question that decides whether the rest is worth building: **over
