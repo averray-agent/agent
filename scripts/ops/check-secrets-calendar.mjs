@@ -139,36 +139,81 @@ function parseArgs(argv) {
   return args;
 }
 
-function classify(entry, now, defaults) {
+/**
+ * Two kinds of date, deliberately kept apart.
+ *
+ *   expires_at  A HARD deadline imposed by something outside this repo. Past it
+ *               the credential STOPS WORKING, so blocking CI is proportionate —
+ *               the alternative is an outage.
+ *
+ *   rotate_by   A hygiene cadence WE chose. Past it nothing breaks; we are simply
+ *               overdue. It warns, and never blocks.
+ *
+ * They used to share one field, and the comments carried the distinction the
+ * schema did not — "Rotate-by target (~90d)" and "Pimlico keys don't auto-expire;
+ * treat as 90d rotation policy" both sat under `expires_at`. On 2026-08-10 three
+ * such cadences came due on the same day and blocked every merge in the repo, for
+ * credentials that had not expired and cannot expire: an HMAC string, a password
+ * hash, and a vendor key that is only ever revoked by hand. Rotating a live JWT
+ * secret to satisfy a date that meant nothing would have been the worse outcome.
+ *
+ * An entry carries one or the other, never both.
+ */
+export function classify(entry, now, defaults) {
   const warnDays = Number.isFinite(entry.warn_days) ? entry.warn_days : defaults.default_warn_days;
   const failWithinDays = defaults.fail_within_days;
-  const expiresAtRaw = entry.expires_at;
+  const hasExpiry = entry.expires_at !== undefined;
+  const hasRotateBy = entry.rotate_by !== undefined;
 
-  if (expiresAtRaw === "never") {
-    return { status: "skip", reason: "expires_at=never (intentional, no expiry tracking)" };
+  if (hasExpiry && hasRotateBy) {
+    return {
+      status: "error",
+      reason: "set expires_at (a hard external deadline) or rotate_by (our own cadence), not both"
+    };
   }
-  if (expiresAtRaw === "TBD") {
-    return { status: "warn", reason: "expires_at=TBD — set this after the next rotation" };
+  if (!hasExpiry && !hasRotateBy) {
+    return { status: "error", reason: "entry needs either expires_at or rotate_by" };
   }
-  if (typeof expiresAtRaw !== "string") {
-    return { status: "error", reason: `expires_at must be a YYYY-MM-DD string, "TBD", or "never"; got ${JSON.stringify(expiresAtRaw)}` };
+
+  const field = hasExpiry ? "expires_at" : "rotate_by";
+  const raw = hasExpiry ? entry.expires_at : entry.rotate_by;
+
+  if (raw === "never") {
+    return { status: "skip", reason: `${field}=never (intentional, no tracking)` };
   }
-  const expiresAt = new Date(expiresAtRaw);
-  if (Number.isNaN(expiresAt.getTime())) {
-    return { status: "error", reason: `expires_at "${expiresAtRaw}" is not a valid date` };
+  if (raw === "TBD") {
+    return { status: "warn", reason: `${field}=TBD — set this after the next rotation` };
+  }
+  if (typeof raw !== "string") {
+    return { status: "error", reason: `${field} must be a YYYY-MM-DD string, "TBD", or "never"; got ${JSON.stringify(raw)}` };
+  }
+  const due = new Date(raw);
+  if (Number.isNaN(due.getTime())) {
+    return { status: "error", reason: `${field} "${raw}" is not a valid date` };
   }
   const msPerDay = 24 * 60 * 60 * 1000;
-  const daysUntilExpiry = Math.ceil((expiresAt.getTime() - now.getTime()) / msPerDay);
+  const daysUntilExpiry = Math.ceil((due.getTime() - now.getTime()) / msPerDay);
+  const verb = hasExpiry ? "expires" : "due for rotation";
+
   if (daysUntilExpiry <= 0) {
-    return { status: "fail", reason: `expired ${Math.abs(daysUntilExpiry)} day${Math.abs(daysUntilExpiry) === 1 ? "" : "s"} ago`, daysUntilExpiry };
+    const late = Math.abs(daysUntilExpiry);
+    const plural = late === 1 ? "" : "s";
+    // A missed cadence is never an outage, so it never blocks the build.
+    return hasExpiry
+      ? { status: "fail", reason: `EXPIRED ${late} day${plural} ago`, daysUntilExpiry }
+      : {
+        status: "warn",
+        reason: `overdue for rotation by ${late} day${plural} — nothing is broken, this is our own cadence`,
+        daysUntilExpiry
+      };
   }
-  if (daysUntilExpiry <= failWithinDays) {
+  if (hasExpiry && daysUntilExpiry <= failWithinDays) {
     return { status: "fail", reason: `expires in ${daysUntilExpiry} day${daysUntilExpiry === 1 ? "" : "s"} (within fail_within_days=${failWithinDays})`, daysUntilExpiry };
   }
   if (daysUntilExpiry <= warnDays) {
-    return { status: "warn", reason: `expires in ${daysUntilExpiry} day${daysUntilExpiry === 1 ? "" : "s"}`, daysUntilExpiry };
+    return { status: "warn", reason: `${verb} in ${daysUntilExpiry} day${daysUntilExpiry === 1 ? "" : "s"}`, daysUntilExpiry };
   }
-  return { status: "ok", reason: `expires in ${daysUntilExpiry} days`, daysUntilExpiry };
+  return { status: "ok", reason: `${verb} in ${daysUntilExpiry} days`, daysUntilExpiry };
 }
 
 async function main() {
@@ -221,7 +266,8 @@ async function main() {
     name: String(entry.name ?? "(unnamed)"),
     description: String(entry.description ?? ""),
     owner: String(entry.owner ?? "unknown"),
-    expiresAt: String(entry.expires_at ?? ""),
+    kind: entry.expires_at !== undefined ? "expires" : "rotate",
+    dueAt: String(entry.expires_at ?? entry.rotate_by ?? ""),
     ...classify(entry, now, defaults)
   }));
 
@@ -234,7 +280,7 @@ async function main() {
     console.log("");
     for (const r of results) {
       const icon = { ok: "✅", warn: "⚠️", fail: "❌", skip: "—", error: "💥" }[r.status] ?? "?";
-      console.log(`${icon}  ${r.name.padEnd(36, " ")} owner=${r.owner.padEnd(12, " ")} expires=${r.expiresAt.padEnd(12, " ")} ${r.reason}`);
+      console.log(`${icon}  ${r.name.padEnd(36, " ")} owner=${r.owner.padEnd(12, " ")} ${r.kind}=${r.dueAt.padEnd(12, " ")} ${r.reason}`);
     }
   }
 
