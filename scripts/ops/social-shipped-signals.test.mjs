@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import {
   DEFAULT_SHIPPED_LABEL,
@@ -161,6 +162,34 @@ test("candidates are ordered oldest merge first", () => {
     candidates.map((c) => c.signalId),
     ["shipped-pr-13", "shipped-pr-14"]
   );
+});
+
+test("the COMMITTED state carries the seeded marker — without it the source is silently inert", async () => {
+  // Not a unit test of logic; a guard on an operational precondition that has
+  // already bitten once.
+  //
+  // The runner writes state to its ephemeral checkout, so nothing it seeds
+  // survives the job. If the committed marker is missing, every run reads it as
+  // absent, treats itself as the first encounter, and records a labelled pull
+  // request as SEEDED — announced to nobody — forever. The feature would look
+  // wired and do nothing.
+  const committed = JSON.parse(
+    await readFile(new URL("./social-signal-state.json", import.meta.url), "utf8")
+  );
+
+  assert.ok(
+    committed.shippedSeededAt,
+    "scripts/ops/social-signal-state.json must carry shippedSeededAt, or labelled PRs are seeded instead of fired"
+  );
+
+  // And prove the consequence: with that marker, a labelled PR actually fires.
+  const { candidates } = buildShippedCandidates({
+    pulls: [pull(99, "2026-08-09T00:00:00Z", "something worth saying")],
+    state: committed,
+    nowIso: NOW_ISO
+  });
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].seedOnly, false, "a labelled PR must fire, not seed");
 });
 
 test("an empty result produces nothing and changes nothing", () => {

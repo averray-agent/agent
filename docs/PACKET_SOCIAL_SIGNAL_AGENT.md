@@ -255,6 +255,23 @@ repeats, so a PR fires exactly once, whenever it acquires the label, however old
 The first encounter still seeds: every already-labelled PR is recorded without announcing,
 so switching the source on cannot open with a backlog presented as today's news.
 
+### The seeding marker must stay committed
+
+Found after #1027 merged, by tracing state through an actual CI run rather than a local one.
+
+The runner writes state into its ephemeral checkout, which is discarded. So an absent
+`shippedSeededAt` is read as "first encounter" on **every** run — and a first encounter
+records labelled PRs as *seeded*, meaning announced to nobody. The feature would have looked
+fully wired and done nothing, permanently.
+
+This is the same failure as the merge-time watermark — *a deliberate operator decision that
+silently does nothing* — arriving through the persistence path instead of the filter path.
+Worth noting how it hid: every local test passed, because locally the state file persists.
+
+Seeded 2026-08-10 while **zero** PRs carried the label, so the marker swallowed nothing.
+A test now reads the committed state file and fails if the marker is missing — an
+operational precondition turned into a red build rather than a silent no-op.
+
 ### Two sources, two independent healths
 
 The sweep now reads transparency **and** GitHub, and their health is deliberately not
