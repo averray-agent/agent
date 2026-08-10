@@ -41,6 +41,8 @@ import { Wallet } from "ethers";
 
 import { buildSiwxEip4361Message } from "../../mcp-server/src/auth/siwx.js";
 
+import { buildSiwxProofFields, readSignInChallenge } from "./x402-siwx-proof.mjs";
+
 const execFileAsync = promisify(execFile);
 const API = (process.env.API_URL ?? "https://api.averray.com").replace(/\/+$/, "");
 const POSTING_PATH = "/jobs/x402";
@@ -108,17 +110,18 @@ if (challengeResponse.status !== 402) {
 }
 
 const accepted = envelope?.accepts?.[0];
-const signIn = envelope?.signIn ?? envelope?.extensions?.signIn;
+const signIn = readSignInChallenge(envelope);
 if (!accepted || !signIn?.info) {
-  throw new Error("The 402 response carried no payment requirements or no sign-in challenge.");
+  // Name what arrived. A wrong extension key and a switched-off ramp produce the
+  // same bare "missing challenge", and telling them apart cost a round trip.
+  throw new Error(
+    "The 402 carried no payment requirements or no sign-in challenge. " +
+    `accepts=${envelope?.accepts?.length ?? 0}, ` +
+    `extensions=[${Object.keys(envelope?.extensions ?? {}).join(", ")}]`
+  );
 }
 
-const chain = signIn.supportedChains?.[0] ?? {};
-const proofFields = {
-  ...signIn.info,
-  chainId: String(chain.chainId ?? ""),
-  type: String(chain.type ?? "eip191")
-};
+const proofFields = buildSiwxProofFields(signIn, wallet.address);
 const message = buildSiwxEip4361Message(proofFields);
 
 // EIP-3009 window: start now, expire inside the server's own advertised timeout so
