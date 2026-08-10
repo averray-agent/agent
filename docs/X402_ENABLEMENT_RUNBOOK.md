@@ -211,33 +211,32 @@ it is a **working-capital** requirement rather than a plumbing one.
 node scripts/ops/check-x402-inventory.mjs
 ```
 
-**A rebalance costs about the same however much it moves** — Base withdrawal,
-exchange in and out, Hub deposit. The bank lane measured that same shape on its
-own route: 0.202% moving 10 USDC, ~21% on dust, the *same absolute cost*. So the
-fee sets the minimum move, and the minimum move sets the inventory:
+**MEASURED 2026-08-10: the return leg is free.** Coinbase quoted `incl. $0.00 network
+fee` for USDC to Polkadot, ~3 minutes, proven with a real $1 transfer that landed on our
+precompile. Its help page states USDC withdrawals are free on supported networks.
 
-```
-minimum sensible move  =  leg cost / tolerated friction
-required Hub inventory =  that move, expressed in postings
-```
+That kills an argument this runbook used to make. It previously reasoned that a leg costs
+about the same however much it moves, so the fee sets a minimum sensible move
+(`leg / tolerated friction`), and that minimum sets the inventory — landing on ~$100 of Hub
+float at an assumed $2 leg. **The $2 was never measured, and the real figure is zero.**
 
-At a $2 leg and 2% tolerated friction that is **$100 a time — about 95 postings**
-at the cheapest posting size. The Hub pool therefore has to carry roughly $100 so
-it can serve every posting between two rebalances.
+With a free leg there is no amount too small to repatriate, so **the inventory has no
+economic floor**. How much Hub float to hold is purely operational: how often do you want to
+touch it. At 1.05 USDC a posting, ~$20 is 19 postings and ~$50 is 47.
 
-Measured on 2026-08-10, the day the ramp went live: Hub pool **3.345 USDC**, which
-is **3 postings** of runway, against a target of ~95. Base held 1.05, far below the
-$100 that makes a move worth doing. Moving that 1.05 would cost more than the
-5% fee earned on it — the entire margin on the rail.
+The check still takes `--leg-cost-usd`, defaulting to 0. If a route with a real fee is ever
+used, pass it and the economic floor reappears by itself rather than being rediscovered.
 
 So the operating rule is:
 
-- **Fund the Hub pool up front**, to cover a full rebalance interval. Do not wait
-  for the Base side to fund it; it cannot, economically.
-- **Let the Base side accumulate** to the minimum move before repatriating.
-- **Watch the Hub side, not the Base side.** Base accumulating is revenue working
-  as intended. Hub draining is the ramp about to refuse paying customers, and it
-  is the only one of the two that is urgent.
+- **Watch the Hub side, not the Base side.** Base accumulating is revenue working as
+  intended. Hub draining is the ramp about to refuse paying customers, and only one of those
+  is urgent.
+- **Repatriate when Hub actually needs it**, not on a schedule. Moving while Hub has runway
+  is churn now that it is free — there is no fee to amortise by batching.
+- **The withdrawal lands in the signer's EOA, not the spending pot.** `AAC.liquid` is what
+  the ramp and rewards spend from, so `fund-signer-usdc-deposit.mjs --profile mainnet
+  --use-kms` is a required second step.
 
 The check exits `2` when Hub runway falls below the threshold and `1` when it
 cannot read a chain — a distinction worth keeping, since "the inventory is low"

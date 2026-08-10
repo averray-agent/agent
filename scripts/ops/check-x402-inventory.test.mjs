@@ -49,16 +49,50 @@ test("an unreachable chain exits 1, not 2", async () => {
   assert.match(result.stderr, /could not read both sides/u);
 });
 
-// The arithmetic the whole policy rests on: a rebalance costs about the same
-// whatever it moves, so the fee sets the minimum move, and the minimum move
-// sets how much Hub inventory has to cover. Recomputed here so a change to the
-// formula has to be deliberate.
+// A costed leg sets a minimum sensible move, and that minimum is the inventory
+// the Hub side must carry between two of them. Recomputed here so a change to
+// the formula has to be deliberate.
 test("the minimum sensible move is the leg cost over the tolerated friction", () => {
   const minMove = (legCostUsd, frictionPct) => legCostUsd / (frictionPct / 100);
   assert.equal(minMove(2, 2), 100);
   assert.equal(minMove(1, 1), 100);
   assert.equal(minMove(5, 1), 500);
   assert.equal(minMove(2, 5), 40);
+});
+
+// The measured case, and the reason the default changed. Coinbase quoted $0.00
+// for USDC to Polkadot on 2026-08-10, proven with a real $1 transfer. A free leg
+// has NO minimum sensible move, so the inventory has no economic floor and the
+// warn threshold is an operational choice rather than an economic one. This was
+// worth a test because the script shipped asserting the opposite.
+test("a free leg imposes no minimum move and no inventory floor", () => {
+  const hasLegCost = (legCostUsd) => legCostUsd > 0;
+  const minMove = (legCostUsd, frictionPct) =>
+    hasLegCost(legCostUsd) ? legCostUsd / (frictionPct / 100) : 0;
+
+  assert.equal(hasLegCost(0), false);
+  assert.equal(minMove(0, 2), 0, "no amount is too small to move when moving is free");
+  assert.equal(minMove(0, 99), 0, "and the friction budget cannot resurrect a floor");
+});
+
+// Two different questions, so two different triggers. With a costed leg you wait
+// until the move clears the economic floor. With a free one there is nothing to
+// clear, so the only reason to move is that Hub actually needs it — moving while
+// Hub has runway is churn, not prudence.
+test("the rebalance trigger follows whether the leg costs anything", () => {
+  const due = ({ legCostUsd, baseHeld, healthy, postingUsd = 1.05, frictionPct = 2 }) =>
+    legCostUsd > 0
+      ? baseHeld >= legCostUsd / (frictionPct / 100)
+      : !healthy && baseHeld >= postingUsd;
+
+  // Costed: Base must reach the floor, and Hub's state is irrelevant.
+  assert.equal(due({ legCostUsd: 2, baseHeld: 99, healthy: false }), false);
+  assert.equal(due({ legCostUsd: 2, baseHeld: 100, healthy: true }), true);
+
+  // Free: Hub must be short AND Base must cover at least one posting.
+  assert.equal(due({ legCostUsd: 0, baseHeld: 50, healthy: true }), false, "runway is fine, do not churn");
+  assert.equal(due({ legCostUsd: 0, baseHeld: 1.04, healthy: false }), false, "cannot even fund one posting");
+  assert.equal(due({ legCostUsd: 0, baseHeld: 1.05, healthy: false }), true);
 });
 
 test("required runway is the minimum move expressed in postings", () => {

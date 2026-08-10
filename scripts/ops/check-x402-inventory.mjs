@@ -9,23 +9,26 @@
  * that nothing bridges per job and that rebalancing is a periodic treasury
  * operation over an exchange leg.
  *
- * That design is right, and it has a consequence nobody had costed: since the
- * platform cannot economically move small amounts, it must instead HOLD enough
- * Hub inventory to serve every posting between rebalances. Get that wrong and
- * the ramp does not fail loudly — it just starts refusing paying customers.
+ * That design is right, and what it costs depends entirely on the price of the
+ * return leg. Get the inventory wrong and the ramp does not fail loudly — it just
+ * starts refusing paying customers.
  *
- * THE ARITHMETIC THIS EXISTS TO KEEP HONEST
- * An exchange leg costs roughly a fixed amount however much you move (Base
- * withdrawal, exchange in and out, Hub deposit). The bank lane measured the same
- * shape on its own route: 0.202% moving 10 USDC, ~21% on dust — the SAME
- * absolute cost. So the minimum sensible move is set by the fee, not the need:
+ * THE ARITHMETIC, AND WHY IT CURRENTLY DOES NOT BITE
+ * A leg with a fixed cost sets a minimum sensible move — `leg / tolerated_friction`
+ * — and that minimum is then the inventory the Hub side must carry between two
+ * moves. This file was written assuming ~$2 a leg, which implied ~$100 of Hub
+ * float, and that assumption was wrong.
  *
- *     move at least   leg_cost / tolerated_friction
+ * MEASURED 2026-08-10: the leg is $0.00. Coinbase quoted "incl. $0.00 network
+ * fee" for USDC to Polkadot, ~3 minutes, proven with a real $1 transfer that
+ * landed on our precompile. Its help page states USDC withdrawals are free on
+ * supported networks.
  *
- * At a $2 leg and 2% tolerated friction that is $100 a time, which at 1.05 USDC
- * a posting is ~95 postings. Hub inventory must therefore cover ~95 postings, or
- * you are forced into moves whose friction eats the 5% fee that is the entire
- * margin on this rail.
+ * With a free leg there is no amount too small to move, so **the inventory has no
+ * economic floor at all** and the warn threshold is purely operational: how often
+ * do you want to touch this. The `--leg-cost-usd` arithmetic is kept, defaulting
+ * to 0, so that if a route with a real fee is ever used the economic floor
+ * reappears by itself instead of being rediscovered the hard way.
  *
  * Read-only. Touches no key, moves nothing, enables nothing.
  *
@@ -58,7 +61,9 @@ function parseArgs(argv) {
     // 5% poster-side fee. Runway measured in the SMALLEST unit is the honest
     // direction — a bigger job simply consumes more than one unit of runway.
     postingUsd: 1.05,
-    legCostUsd: 2,
+    // Measured $0.00 via Coinbase on 2026-08-10. Set non-zero to restore the
+    // economic floor if a route with a real fee is ever used.
+    legCostUsd: 0,
     frictionPct: 2,
     // Refuse-a-customer is the failure. Warn while there is still time to act.
     warnPostings: 10
@@ -83,7 +88,7 @@ if (args.help) {
       "",
       "  --json                 machine-readable report",
       "  --posting-usd <n>      cost of one posting (default 1.05 = 1 reward + 5% fee)",
-      "  --leg-cost-usd <n>     what one exchange rebalance costs (default 2)",
+      "  --leg-cost-usd <n>     what one rebalance costs (default 0 — measured free)",
       "  --friction-pct <n>     friction tolerated on a rebalance (default 2)",
       "  --warn-postings <n>    warn below this many postings of runway (default 10)",
       "",
@@ -128,13 +133,26 @@ const hubLiquid = usd(hubLiquidRaw);
 const baseHeld = usd(baseHeldRaw);
 const runway = Math.floor(hubLiquid / args.postingUsd);
 
-// The minimum move that makes economic sense, and therefore the inventory the
-// Hub side has to carry to survive between two of them.
-const minMoveUsd = args.legCostUsd / (args.frictionPct / 100);
-const requiredInventoryUsd = minMoveUsd;
+// A fixed-cost leg forces a minimum move, and that minimum sets the inventory the
+// Hub side must carry between two of them. With a FREE leg none of that applies:
+// there is no amount too small to move, so inventory stops being an economic
+// constraint and becomes a question of how often you want to touch it.
+//
+// Measured 2026-08-10: $0.00. Coinbase quoted "incl. $0.00 network fee" for USDC
+// to Polkadot on the retail account, and its help page says USDC withdrawals are
+// free on supported networks. Hence legCostUsd defaults to 0 — but the arithmetic
+// stays, because the fee is a vendor policy that can change, and if it does the
+// economic floor should reappear on its own rather than be rediscovered.
+const hasLegCost = args.legCostUsd > 0;
+const minMoveUsd = hasLegCost ? args.legCostUsd / (args.frictionPct / 100) : 0;
 const requiredPostings = Math.floor(minMoveUsd / args.postingUsd);
-const rebalanceDue = baseHeld >= minMoveUsd;
 const healthy = runway >= args.warnPostings;
+
+// Free leg: move whenever Hub is short and Base holds enough to help at all.
+// Costed leg: also wait until the move clears the economic floor.
+const rebalanceDue = hasLegCost
+  ? baseHeld >= minMoveUsd
+  : !healthy && baseHeld >= args.postingUsd;
 
 const report = {
   hub: { liquidUsd: hubLiquid, reservedUsd: usd(hubReservedRaw), account: getAddress(pool) },
@@ -144,8 +162,9 @@ const report = {
     postingUsd: args.postingUsd,
     legCostUsd: args.legCostUsd,
     frictionPct: args.frictionPct,
+    legIsFree: !hasLegCost,
     minSensibleMoveUsd: minMoveUsd,
-    requiredHubInventoryUsd: requiredInventoryUsd,
+    requiredHubInventoryUsd: minMoveUsd,
     requiredRunwayPostings: requiredPostings,
     warnPostings: args.warnPostings
   },
@@ -163,15 +182,26 @@ if (args.json) {
   console.log("");
   console.log(`  RUNWAY        ${runway} posting${runway === 1 ? "" : "s"} at ${args.postingUsd} USDC each`);
   console.log("");
-  console.log(`  A rebalance costs ~$${args.legCostUsd} however much it moves, so at ${args.frictionPct}%`);
-  console.log(`  tolerated friction the smallest sensible move is $${minMoveUsd.toFixed(0)} —`);
-  console.log(`  which is ${requiredPostings} postings. Hub inventory has to cover that many`);
-  console.log(`  between rebalances, so the target is ~$${requiredInventoryUsd.toFixed(0)} of Hub float.`);
+  if (hasLegCost) {
+    console.log(`  A rebalance costs ~$${args.legCostUsd} however much it moves, so at ${args.frictionPct}%`);
+    console.log(`  tolerated friction the smallest sensible move is $${minMoveUsd.toFixed(0)} —`);
+    console.log(`  which is ${requiredPostings} postings. Hub inventory has to cover that many`);
+    console.log(`  between rebalances, so the target is ~$${minMoveUsd.toFixed(0)} of Hub float.`);
+  } else {
+    console.log("  Repatriating Base → Hub is free (measured 2026-08-10: Coinbase quoted");
+    console.log("  $0.00, ~3 minutes). So there is no amount too small to move, and no");
+    console.log(`  economic floor under the inventory — the ${args.warnPostings}-posting threshold below is`);
+    console.log("  an operational choice about how often you want to touch it, nothing more.");
+  }
   console.log("");
   console.log(
     rebalanceDue
-      ? `  REBALANCE DUE — Base holds ${baseHeld.toFixed(2)}, at or past the $${minMoveUsd.toFixed(0)} move size.`
-      : `  No rebalance yet — Base holds ${baseHeld.toFixed(2)} of the $${minMoveUsd.toFixed(0)} needed to move economically.`
+      ? hasLegCost
+        ? `  REBALANCE DUE — Base holds ${baseHeld.toFixed(2)}, at or past the $${minMoveUsd.toFixed(0)} move size.`
+        : `  REBALANCE DUE — Hub is short and Base holds ${baseHeld.toFixed(2)}, enough to help.`
+      : hasLegCost
+        ? `  No rebalance yet — Base holds ${baseHeld.toFixed(2)} of the $${minMoveUsd.toFixed(0)} needed to move economically.`
+        : `  No rebalance needed — Hub has runway; Base is holding ${baseHeld.toFixed(2)} until it does not.`
   );
   console.log(
     healthy
