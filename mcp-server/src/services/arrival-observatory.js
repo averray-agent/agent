@@ -4,6 +4,8 @@ export const ARRIVALS_SCHEMA_VERSION = "averray.arrivals.v1";
 const STATE_SCOPE = "arrival-observatory";
 const DEFAULT_MAX_CLIENTS = 200;
 const DEFAULT_FLUSH_INTERVAL_MS = 10_000;
+const DEFAULT_LOAD_RETRY_INTERVAL_MS = 10_000;
+const UNREADABLE = "arrival state could not be read";
 
 /**
  * Our own traffic, so the funnel can say what OUTSIDERS did.
@@ -91,7 +93,8 @@ export class ArrivalObservatory {
     hashSalt = "averray-arrivals",
     selfClients = resolveSelfClients(),
     maxClients = DEFAULT_MAX_CLIENTS,
-    flushIntervalMs = DEFAULT_FLUSH_INTERVAL_MS
+    flushIntervalMs = DEFAULT_FLUSH_INTERVAL_MS,
+    loadRetryIntervalMs = DEFAULT_LOAD_RETRY_INTERVAL_MS
   } = {}) {
     this.stateStore = stateStore;
     this.metrics = metrics;
@@ -100,6 +103,8 @@ export class ArrivalObservatory {
     this.selfClients = selfClients instanceof Set ? selfClients : new Set(selfClients ?? []);
     this.maxClients = Number(maxClients) > 0 ? Number(maxClients) : DEFAULT_MAX_CLIENTS;
     this.flushIntervalMs = Number(flushIntervalMs) >= 0 ? Number(flushIntervalMs) : DEFAULT_FLUSH_INTERVAL_MS;
+    this.loadRetryIntervalMs =
+      Number(loadRetryIntervalMs) >= 0 ? Number(loadRetryIntervalMs) : DEFAULT_LOAD_RETRY_INTERVAL_MS;
     this.clients = new Map();
     // Three counters rather than one. `totals` is every call that ever landed;
     // the other two say which of those were outsiders and which were ours.
@@ -109,6 +114,11 @@ export class ArrivalObservatory {
     this.totalsExternal = emptyTotals();
     this.totalsSelf = emptyTotals();
     this.loaded = false;
+    // Load OUTCOME, tracked apart from `loaded` so a failed read can never
+    // masquerade as a completed one. See ensureLoaded.
+    this.loadFailed = null;
+    this.loadPromise = null;
+    this.nextLoadAttemptMs = 0;
     this.dirty = false;
     this.lastFlushMs = 0;
     this.startedAtMs = this.now();
@@ -127,7 +137,9 @@ export class ArrivalObservatory {
   async record({ stage, era, clientInfo, ip, tool } = {}) {
     try {
       if (!ARRIVAL_STAGES.includes(stage)) return;
-      await this.ensureLoaded();
+      // Counting onto a baseline we failed to read would invent a total that
+      // was never measured. Drop the observation instead; the snapshot says so.
+      if (!(await this.ensureLoaded())) return;
 
       const identity = normalizeClientInfo(clientInfo);
       const actor = this.classifyActor(identity);
@@ -185,7 +197,10 @@ export class ArrivalObservatory {
 
   async getSnapshot() {
     try {
-      await this.ensureLoaded();
+      // A funnel of zeros reads as "nobody arrived". When the state behind it
+      // is unreadable that is a claim we have not earned, so the snapshot names
+      // the instrument failure instead of quietly serving in-memory counts.
+      if (!(await this.ensureLoaded())) return this.unavailableSnapshot();
       const clients = [...this.clients.values()]
         .sort((left, right) => right.lastSeenMs - left.lastSeenMs)
         .map((entry) => ({ ...entry, tools: { ...entry.tools } }));
@@ -215,40 +230,86 @@ export class ArrivalObservatory {
         clients
       };
     } catch {
-      return {
-        schemaVersion: ARRIVALS_SCHEMA_VERSION,
-        generatedAtMs: this.now(),
-        observingSinceMs: this.startedAtMs,
-        funnel: nullTotals(),
-        funnelExternal: nullTotals(),
-        funnelSelf: nullTotals(),
-        distinct: { declared: null, anonymous: null, self: null, furthest: null, furthestExternal: null },
-        clients: [],
-        unavailable: "arrival state could not be read"
-      };
+      return this.unavailableSnapshot();
     }
   }
 
+  /**
+   * Every number nulled and the failure named. The ops board renders this as a
+   * broken instrument; a seven-zero funnel it would render as measured silence.
+   *
+   * All THREE funnels are nulled. The external one especially: a zero there
+   * reads as "no outsider arrived", which is the single most misleading thing
+   * this service could say about itself.
+   */
+  unavailableSnapshot() {
+    return {
+      schemaVersion: ARRIVALS_SCHEMA_VERSION,
+      generatedAtMs: this.now(),
+      observingSinceMs: this.startedAtMs,
+      funnel: nullTotals(),
+      funnelExternal: nullTotals(),
+      funnelSelf: nullTotals(),
+      distinct: { declared: null, anonymous: null, self: null, furthest: null, furthestExternal: null },
+      clients: [],
+      unavailable: this.loadFailed ?? UNREADABLE
+    };
+  }
+
+  /**
+   * Reads persisted state once, and — the part that matters — remembers when
+   * that read FAILED rather than recording it as done.
+   *
+   * `loaded` used to be set before the await purely to stop a concurrent second
+   * read, so a store that was down at startup left the observatory looking
+   * loaded with nothing in it: the first caller absorbed the throw and every
+   * snapshot afterwards served in-memory counts as though they were measured.
+   * The in-flight promise now does the de-duplication, which it can do without
+   * lying about the outcome.
+   *
+   * @returns {Promise<boolean>} whether state is loaded and the counts are real.
+   */
   async ensureLoaded() {
-    if (this.loaded) return;
-    this.loaded = true;
-    const stored = await this.stateStore?.getServiceState?.(STATE_SCOPE);
-    if (!stored) return;
-    restoreTotals(this.totals, stored.totals);
-    // State written before the split carries `totals` alone. The actor of
-    // those calls is genuinely unknown, and unknown must not be spent as
-    // external — that is the one direction this module may not fail in. So
-    // the total is restored in full and both halves of the split start at
-    // zero, leaving `funnel` larger than external + self until the pre-split
-    // history ages out of the picture. An outsider who arrived before the
-    // upgrade is still visible in distinct.furthestExternal, which is derived
-    // from the client table rather than from these counters.
-    restoreTotals(this.totalsExternal, stored.totalsExternal);
-    restoreTotals(this.totalsSelf, stored.totalsSelf);
-    for (const entry of Array.isArray(stored.clients) ? stored.clients : []) {
-      if (typeof entry?.key === "string") this.clients.set(entry.key, entry);
+    if (this.loaded) return true;
+    // Retry a failed load later, but no more than once an interval: an outage
+    // must not turn every front-door request into a round trip to the store.
+    if (this.loadFailed && this.now() < this.nextLoadAttemptMs) return false;
+    this.loadPromise ??= this.loadState();
+    try {
+      await this.loadPromise;
+      return true;
+    } catch {
+      return false;
+    } finally {
+      this.loadPromise = null;
     }
-    if (Number.isFinite(stored.observingSinceMs)) this.startedAtMs = stored.observingSinceMs;
+  }
+
+  async loadState() {
+    try {
+      const stored = await this.stateStore?.getServiceState?.(STATE_SCOPE);
+      restoreTotals(this.totals, stored?.totals);
+      // State written before the split carries `totals` alone. The actor of
+      // those calls is genuinely unknown, and unknown must not be spent as
+      // external — that is the one direction this module may not fail in. So
+      // the total is restored in full and both halves of the split start at
+      // zero, leaving `funnel` larger than external + self until the pre-split
+      // history ages out of the picture. An outsider who arrived before the
+      // upgrade is still visible in distinct.furthestExternal, which is derived
+      // from the client table rather than from these counters.
+      restoreTotals(this.totalsExternal, stored?.totalsExternal);
+      restoreTotals(this.totalsSelf, stored?.totalsSelf);
+      for (const entry of Array.isArray(stored?.clients) ? stored.clients : []) {
+        if (typeof entry?.key === "string") this.clients.set(entry.key, entry);
+      }
+      if (Number.isFinite(stored?.observingSinceMs)) this.startedAtMs = stored.observingSinceMs;
+      this.loaded = true;
+      this.loadFailed = null;
+    } catch (error) {
+      this.loadFailed = UNREADABLE;
+      this.nextLoadAttemptMs = this.now() + this.loadRetryIntervalMs;
+      throw error;
+    }
   }
 
   async maybeFlush(force = false) {
