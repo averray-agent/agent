@@ -299,21 +299,53 @@ was added in #1043 and **the live adapter does not have it**. Proven, not assume
 runtime at 0x96091d44 is byte-identical to `HydrationUsdcAdapterV22` compiled at `3d88391^`,
 the commit before #1043.
 
-So the yield is accruing off-book on an adapter that has no way to book it. Options, none
-chosen here:
+### "It will come home at recall" is false — verified, not assumed
 
-- **Leave it, book at recall.** The aUSDC is genuinely held by our converted account; a
-  recall observes the actual balance, so the surplus should come home at settlement and the
-  books catch up then. This makes it an accounting lag rather than a loss — **but the recall
-  path returning the full rebased balance has not been verified end to end at this scale,
-  and it should be before it is relied on.**
-- **Redeploy the operating adapter** with the #1043 runtime. Correct long-term, but it moves
-  a live position holding real money and is a much larger ceremony than the pool deployment.
-- **Accept and document** the seam until the next epoch, deploying epoch 2 onto a lane that
-  has `recordRemotePosition` from birth.
+This was the appealing option, and it does not work. Three facts from the adapter:
 
-The pool's own lane will be deployed *with* `recordRemotePosition`, so this problem does not
-propagate forward. It is specifically an epoch-1 artifact.
+```solidity
+// _stageWithdraw — a withdraw cannot ask for more than the book holds
+if (totalShares < pendingWithdrawalShares + shares) revert InsufficientLiquidity();
+
+// settlement, withdraw branch — the book moves by the REQUESTED amount
+totalShares -= request.requestedShares;
+totalAssets -= redeemedAssets;
+
+// _recordTerminalAccounting — and observation only ever caps, never raises
+uint256 outstanding = observed < requested ? observed : requested;
+```
+
+The book only ever moves by what was requested, capped by what was observed. Nothing in the
+deposit or withdraw path raises `totalAssets`/`totalShares` toward a larger observed
+position. And since a withdraw is bounded by `totalShares` — currently 10,000,001 — the
+adapter **cannot request the accrued surplus at all**.
+
+So epoch-1 yield is not merely unbooked. On the live adapter it is **unreachable**: there is
+no code path that brings it home. It is not lost — the aUSDC sits with our converted account
+and keeps compounding — but it cannot be withdrawn through this adapter.
+
+`recordRemotePosition` is exactly the missing path (`totalAssets = assets; totalShares =
+assets;`), and it is the function the live adapter does not have.
+
+### Recommendation: document it, do not chase it
+
+Recovering epoch-1 yield needs the operating lane upgraded to the #1043 runtime, and that is
+a real design question rather than a redeploy — the aUSDC is held by a converted account
+whose derivation is tied to the current deployment, so a new adapter does not automatically
+inherit custody of the residue. That deserves its own packet.
+
+It is not worth doing now:
+
+- At 10 USDC the accrual observed on 2026-08-06 was single-digit raw units per few minutes.
+  Four days of that is a fraction of a cent, against a ceremony that would touch a live
+  position holding real money.
+- The pool's own lane is deployed **with** `recordRemotePosition` from birth, so new money
+  does not inherit the problem. This is strictly an epoch-1 artifact.
+- The seam matters at scale, not at this size — and the scaling thesis (0.202% friction)
+  is what makes larger epochs worth having in the first place.
+
+**What must not happen is someone later assuming the residue comes home on its own.** It
+does not. That is the reason this section exists.
 
 Do not quote a current aUSDC figure without measuring the Hydration side. This document
 deliberately does not.
@@ -332,11 +364,14 @@ deliberately does not.
       with the four-role concentration recorded for the next rotation
 - [ ] deployer `D` confirmed quiescent; nonce re-read immediately before tx 1 (§2)
 - [ ] predicted addresses **recomputed** at ceremony time — the ones in §3 assume nonce 33
-- [ ] pause window agreed for `setStrategyAdapter`, with no operating deployment or recall
-      in flight (§3b) — this pauses dispatch for the live 10 USDC position too
+- [x] ~~pause window~~ — the chain is quiet: `pendingDepositAssets = 0`,
+      `pendingWithdrawalShares = 0`, `dispatchPaused = false` (read 2026-08-10). Nothing is
+      in flight, so the `setStrategyAdapter` pause can be taken whenever the multisig is
+      ready. Re-read all three immediately before pausing.
+- [x] ~~§5 decision~~ — document, do not chase. "It comes home at recall" was checked and is
+      false; recovery needs its own packet and is not worth it at this size.
 - [ ] dry-run each deployment against current state before broadcasting
 - [ ] caps confirmed as intended: `totalAssets() <= 1_000e6`, `assetsOf(agent) <= 100e6`
-- [ ] a decision recorded for §5, even if the decision is "leave it and document"
 
 Nothing here moves depositor money — the pool starts empty. The ceremony's risk is
 mis-wiring immutable references, not loss of funds, and every mitigation above targets that.
