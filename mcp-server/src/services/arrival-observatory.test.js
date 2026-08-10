@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ArrivalObservatory, normalizeClientInfo, resolveSelfClients, stageRank } from "./arrival-observatory.js";
+import {
+  ARRIVAL_STAGES,
+  ArrivalObservatory,
+  normalizeClientInfo,
+  resolveAmbiguousClients,
+  resolveSelfClients,
+  stageRank
+} from "./arrival-observatory.js";
 
 function harness({ failStore = false, now = () => 1_000, loadRetryIntervalMs } = {}) {
   const state = new Map();
@@ -349,15 +356,265 @@ test("unmarked traffic counts as external, never as ours", async () => {
   const { observatory } = harness();
   observatory.selfClients = resolveSelfClients({});
 
-  await observatory.recordReach({ clientInfo: { name: "Anthropic/ClaudeAI", version: "1" } });
+  await observatory.recordReach({ clientInfo: { name: "sasame-audit", version: "1" } });
   await observatory.recordReach({ ip: "9.9.9.9" });
 
   const snapshot = await observatory.getSnapshot();
   assert.equal(snapshot.distinct.self, 0);
   assert.equal(snapshot.clients.every((entry) => entry.self === false), true);
+  assert.equal(snapshot.funnelExternal.reached, 2);
 });
 
 test("self-client matching is case-insensitive and prefix-aware", () => {
   assert.deepEqual([...resolveSelfClients({ ARRIVAL_SELF_CLIENTS: " A , b ,, C " })], ["a", "b", "c"]);
   assert.deepEqual([...resolveSelfClients({})], []);
+});
+
+// ---------------------------------------------------------------------------
+// AMBIGUOUS CLIENTS
+//
+// A declared name identifies the client SOFTWARE, not the operator. Our own
+// Claude session and a stranger's both announce `Anthropic/ClaudeAI`, so the
+// funnel structurally cannot separate them. Observed live on 2026-08-10:
+// funnelExternal.browsed read 5 while some of the advancing traffic was the
+// operator inspecting the front door through Claude minutes earlier.
+// ---------------------------------------------------------------------------
+
+const AMBIGUOUS = { name: "Anthropic/ClaudeAI", version: "1" };
+
+/**
+ * The invariant, checked as an INEQUALITY on purpose. Pre-split persisted
+ * history restores into `funnel` alone with both halves at zero, so the parts
+ * legitimately fall short of the whole; they may never exceed it.
+ */
+function assertBucketsWithinTotal(snapshot) {
+  for (const stage of ARRIVAL_STAGES) {
+    const parts =
+      snapshot.funnelExternal[stage] + snapshot.funnelSelf[stage] + snapshot.funnelAmbiguous[stage];
+    assert.ok(
+      parts <= snapshot.funnel[stage],
+      `${stage}: external+self+ambiguous ${parts} exceeds total ${snapshot.funnel[stage]}`
+    );
+  }
+}
+
+// The whole point of the third bucket: it claims neither side. Counted external
+// it manufactures demand evidence every time we inspect our own front door;
+// counted self it erases the real users who arrive through the same client.
+test("an ambiguous client counts as neither external nor self", async () => {
+  const { observatory } = harness();
+
+  await observatory.recordTool({ tool: "listJobs", clientInfo: AMBIGUOUS });
+  await observatory.recordTool({ tool: "getJobDefinition", clientInfo: AMBIGUOUS });
+
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.funnel.browsed, 2);
+  assert.equal(snapshot.funnelAmbiguous.browsed, 2);
+  assert.equal(snapshot.funnelExternal.browsed, 0);
+  assert.equal(snapshot.funnelSelf.browsed, 0);
+
+  assert.equal(snapshot.distinct.ambiguous, 1);
+  assert.equal(snapshot.distinct.self, 0);
+  assert.equal(snapshot.clients[0].ambiguous, true);
+  assert.equal(snapshot.clients[0].self, false);
+  assertBucketsWithinTotal(snapshot);
+});
+
+// Ships in the code, not only in config. The failure mode is a silently
+// inflated number, and a fix waiting on an environment edit in every
+// deployment is a fix that quietly does not happen.
+test("the observed shared client is ambiguous with no configuration at all", async () => {
+  const { observatory } = harness();
+  observatory.ambiguousClients = resolveAmbiguousClients({});
+
+  await observatory.recordTool({ tool: "listJobs", clientInfo: AMBIGUOUS });
+
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.funnelAmbiguous.browsed, 1);
+  assert.equal(snapshot.funnelExternal.browsed, 0);
+});
+
+// The number that answers "has an OUTSIDER looked?". A name we also present
+// cannot move it — but the reading is reported rather than discarded, because
+// it may well have been an outsider and we cannot say.
+test("an ambiguous client cannot move the external furthest stage", async () => {
+  const { observatory } = harness();
+
+  await observatory.recordTool({ tool: "claimJob", clientInfo: AMBIGUOUS });
+  await observatory.recordReach({ clientInfo: { name: "sasame-audit", version: "0.2" } });
+
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.distinct.furthest, "claimed");
+  // An unambiguous outsider has only ever reached the door.
+  assert.equal(snapshot.distinct.furthestExternal, "reached");
+  // Narrowing the claim must not throw the signal away.
+  assert.equal(snapshot.distinct.furthestAmbiguous, "claimed");
+});
+
+// The live shape on 2026-08-10, with the operator's own Claude session and a
+// genuine outsider advancing in the same window.
+test("the external headline drops the traffic it never could attribute", async () => {
+  const { observatory } = harness();
+  observatory.selfClients = resolveSelfClients({ ARRIVAL_SELF_CLIENTS: "worker-canary" });
+
+  await observatory.recordTool({ tool: "listJobs", clientInfo: AMBIGUOUS });
+  await observatory.recordTool({ tool: "getJobDefinition", clientInfo: AMBIGUOUS });
+  await observatory.recordTool({ tool: "getPlatformCapabilities", clientInfo: AMBIGUOUS });
+  await observatory.recordTool({ tool: "listJobs", clientInfo: { name: "sasame-audit", version: "0.2" } });
+  await observatory.recordTool({ tool: "listJobs", clientInfo: { name: "worker-canary", version: "1" } });
+
+  const snapshot = await observatory.getSnapshot();
+  // Unchanged meaning for averray.arrivals.v1 readers: every call we saw.
+  assert.equal(snapshot.funnel.browsed, 5);
+  // The only number a headline may render — one outsider, not four.
+  assert.equal(snapshot.funnelExternal.browsed, 1);
+  assert.equal(snapshot.funnelSelf.browsed, 1);
+  assert.equal(snapshot.funnelAmbiguous.browsed, 3);
+  assertBucketsWithinTotal(snapshot);
+});
+
+// The entries that motivate an ambiguous name always predate the decision to
+// call it ambiguous — the live `Anthropic/ClaudeAI` entry did. An entry frozen
+// at its first classification would keep inflating the external counts derived
+// from the client table until it was evicted.
+test("a client already recorded as external is re-marked once its name becomes ambiguous", async () => {
+  const { observatory } = harness();
+  observatory.ambiguousClients = new Set();
+
+  await observatory.recordTool({ tool: "listJobs", clientInfo: AMBIGUOUS });
+  const before = await observatory.getSnapshot();
+  assert.equal(before.funnelExternal.browsed, 1);
+  assert.equal(before.distinct.furthestExternal, "browsed");
+
+  observatory.ambiguousClients = resolveAmbiguousClients({});
+  await observatory.recordTool({ tool: "listJobs", clientInfo: AMBIGUOUS });
+
+  const after = await observatory.getSnapshot();
+  assert.equal(after.clients[0].ambiguous, true);
+  // Derived from the client table, so it corrects immediately.
+  assert.equal(after.distinct.furthestExternal, "reached");
+  assert.equal(after.distinct.furthestAmbiguous, "browsed");
+  // The counter does NOT rewrite history: the actor of a past call cannot be
+  // recovered, so the earlier call stays where it was committed and the
+  // external count converges downward instead of dropping on deploy.
+  assert.equal(after.funnelExternal.browsed, 1);
+  assert.equal(after.funnelAmbiguous.browsed, 1);
+  assertBucketsWithinTotal(after);
+});
+
+// A dormant entry persisted before this shipped never calls again, so a
+// write-time-only fix would leave it counted as an outsider indefinitely.
+test("persisted entries are re-marked on read, without waiting for another call", async () => {
+  const { observatory, state } = harness();
+  state.set(STATE_SCOPE, {
+    observingSinceMs: 500,
+    totals: { reached: 1, browsed: 4 },
+    clients: [
+      {
+        key: "client:Anthropic/ClaudeAI@1",
+        name: "Anthropic/ClaudeAI",
+        version: "1",
+        era: "modern",
+        // Written before the bucket existed: marked not-ours, no ambiguous flag.
+        self: false,
+        firstSeenMs: 100,
+        lastSeenMs: 400,
+        furthestStage: "browsed",
+        calls: 18,
+        tools: { listJobs: 2 }
+      }
+    ]
+  });
+
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.clients[0].ambiguous, true);
+  assert.equal(snapshot.clients[0].self, false);
+  assert.equal(snapshot.distinct.ambiguous, 1);
+  assert.equal(snapshot.distinct.furthestExternal, "reached");
+  assert.equal(snapshot.distinct.furthestAmbiguous, "browsed");
+});
+
+test("the ambiguous split survives a restart", async () => {
+  const { observatory, state } = harness();
+  await observatory.recordTool({ tool: "listJobs", clientInfo: AMBIGUOUS });
+  await observatory.recordTool({ tool: "listJobs", clientInfo: { name: "sasame-audit", version: "0.2" } });
+  await observatory.maybeFlush(true);
+
+  const restarted = new ArrivalObservatory({
+    stateStore: { async getServiceState(scope) { return state.get(scope); }, async upsertServiceState() {} },
+    metrics: { counter: () => ({ inc() {} }) },
+    now: () => 2_000
+  });
+
+  const snapshot = await restarted.getSnapshot();
+  assert.equal(snapshot.funnel.browsed, 2);
+  assert.equal(snapshot.funnelExternal.browsed, 1);
+  assert.equal(snapshot.funnelAmbiguous.browsed, 1);
+  assertBucketsWithinTotal(snapshot);
+});
+
+// Pre-split history restores into the total alone, so the three buckets fall
+// short of it. That is exactly why the invariant is an inequality: asserting
+// equality here would fail on real production state.
+test("pre-split history leaves the buckets short of the total, never over it", async () => {
+  const { observatory, state } = harness();
+  state.set(STATE_SCOPE, {
+    observingSinceMs: 500,
+    totals: { reached: 220, browsed: 9 },
+    clients: []
+  });
+
+  await observatory.recordTool({ tool: "listJobs", clientInfo: AMBIGUOUS });
+  const snapshot = await observatory.getSnapshot();
+
+  assert.equal(snapshot.funnel.browsed, 10);
+  assert.ok(
+    snapshot.funnelExternal.browsed + snapshot.funnelSelf.browsed + snapshot.funnelAmbiguous.browsed <
+      snapshot.funnel.browsed
+  );
+  assertBucketsWithinTotal(snapshot);
+});
+
+// A funnel of zeros reads as "nobody arrived". Ambiguous is no different: zero
+// there would claim we had measured that nothing unattributable arrived.
+test("an unreadable ambiguous split is null, never zero", async () => {
+  const { observatory } = harness({ failStore: true });
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.funnelAmbiguous.browsed, null);
+  assert.equal(snapshot.distinct.ambiguous, null);
+  assert.equal(snapshot.distinct.furthestAmbiguous, null);
+});
+
+test("the actor label carries the third bucket without widening the label set", async () => {
+  const { observatory, counters } = harness();
+  await observatory.recordTool({ tool: "listJobs", clientInfo: AMBIGUOUS });
+  assert.deepEqual(counters[0].labelNames, ["stage", "actor"]);
+  assert.deepEqual(counters[0].labels, { stage: "browsed", actor: "ambiguous" });
+});
+
+// Config ADDS to the built-in list rather than replacing it, so an operator
+// cannot accidentally un-know the name we already learned the hard way.
+test("configured ambiguous names extend the defaults instead of replacing them", () => {
+  const configured = resolveAmbiguousClients({ ARRIVAL_AMBIGUOUS_CLIENTS: " Some-Shared-Client , b " });
+  assert.equal(configured.has("anthropic/claudeai"), true);
+  assert.equal(configured.has("some-shared-client"), true);
+  assert.equal(configured.has("b"), true);
+  assert.equal(resolveAmbiguousClients({}).has("anthropic/claudeai"), true);
+});
+
+// Both buckets keep a call out of the external count, so precedence changes no
+// headline — but "this is ours" is the stronger claim than "we cannot rule it
+// out", and the marks must not contradict each other.
+test("an explicit self mark wins over an ambiguous one", async () => {
+  const { observatory } = harness();
+  observatory.selfClients = resolveSelfClients({ ARRIVAL_SELF_CLIENTS: "Anthropic/ClaudeAI" });
+
+  await observatory.recordTool({ tool: "listJobs", clientInfo: AMBIGUOUS });
+
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.funnelSelf.browsed, 1);
+  assert.equal(snapshot.funnelAmbiguous.browsed, 0);
+  assert.equal(snapshot.funnelExternal.browsed, 0);
+  assert.equal(snapshot.clients[0].self, true);
+  assert.equal(snapshot.clients[0].ambiguous, false);
 });
