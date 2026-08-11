@@ -18,6 +18,8 @@
 // never auto-verified here — the allowlist below is enforced even against
 // operator misconfiguration.
 
+import { isJobSnapshotIntegrityError, requireJobSnapshot } from "../core/job-snapshot.js";
+
 const DEFAULT_INTERVAL_MS = 60 * 1000;
 const DEFAULT_SCAN_LIMIT = 200;
 const DEFAULT_MAX_PER_RUN = 25;
@@ -62,6 +64,7 @@ export class SubmittedJobAutoVerifierService {
     this.lastSuccessfulRunAt = undefined;
     this.lastSchedulerError = undefined;
     this.consecutiveSchedulerFailures = 0;
+    this.submittedFailureStreaks = new Map();
   }
 
   start() {
@@ -92,6 +95,7 @@ export class SubmittedJobAutoVerifierService {
       candidateTimeoutMs: this.candidateTimeoutMs,
       inFlightCount: this.inFlight.size,
       pendingTimeoutCount: this.countPendingTimeouts(),
+      persistentSubmittedFailures: this.listPersistentSubmittedFailures(),
       autoModes: [...this.autoModes],
       requireSettlementReady: this.requireSettlementReady,
       nextRunAt: this.nextRunAt,
@@ -114,7 +118,8 @@ export class SubmittedJobAutoVerifierService {
       nextRunAt: this.nextRunAt,
       lastRunFinishedAt: this.lastRun?.finishedAt,
       consecutiveSchedulerFailures: this.consecutiveSchedulerFailures,
-      pendingTimeoutCount: this.countPendingTimeouts()
+      pendingTimeoutCount: this.countPendingTimeouts(),
+      persistentSubmittedFailures: this.listPersistentSubmittedFailures()
     };
   }
 
@@ -143,6 +148,16 @@ export class SubmittedJobAutoVerifierService {
         staleAfterMs
       };
     }
+    const persistentSubmittedFailures = this.listPersistentSubmittedFailures();
+    if (persistentSubmittedFailures.length > 0) {
+      return {
+        ok: false,
+        state: "submitted_session_persistently_skipped",
+        staleAfterMs,
+        persistentSubmittedFailureCount: persistentSubmittedFailures.length,
+        persistentSubmittedFailures
+      };
+    }
 
     const reference = this.lastRun?.finishedAt ?? this.startedAt;
     const referenceMs = Date.parse(reference ?? "");
@@ -167,6 +182,12 @@ export class SubmittedJobAutoVerifierService {
       if (entry.timedOut) count += 1;
     }
     return count;
+  }
+
+  listPersistentSubmittedFailures() {
+    return [...this.submittedFailureStreaks.values()]
+      .filter((entry) => entry.consecutiveRuns >= 2)
+      .sort((left, right) => left.sessionId.localeCompare(right.sessionId));
   }
 
   async runOnce(now = new Date()) {
@@ -228,12 +249,12 @@ export class SubmittedJobAutoVerifierService {
       }
       let job;
       try {
-        job = this.platformService.getJobDefinition(session.jobId);
+        ({ job } = requireJobSnapshot(session));
       } catch (error) {
         summary.skipped.push({
           sessionId,
           jobId: session.jobId,
-          reason: "job_not_found",
+          reason: error?.code ?? "job_snapshot_invalid",
           message: error?.message ?? String(error)
         });
         continue;
@@ -393,7 +414,13 @@ export class SubmittedJobAutoVerifierService {
     // lands here. Both are safe to retry next tick: a verdict is committed
     // only after settlement succeeds, so a failed run leaves the session in
     // `submitted`.
-    summary?.errors.push({ sessionId, jobId, message: error?.message ?? String(error) });
+    summary?.errors.push({
+      sessionId,
+      jobId,
+      ...(error?.code ? { code: error.code } : {}),
+      ...(isJobSnapshotIntegrityError(error) ? { integrityFailure: true } : {}),
+      message: error?.message ?? String(error)
+    });
     this.logger.warn?.({ sessionId, jobId, mode, late, err: error }, "auto_verify.verify_failed");
   }
 
@@ -457,8 +484,34 @@ export class SubmittedJobAutoVerifierService {
 
   finishRun(summary) {
     summary.finishedAt = new Date().toISOString();
+    this.updateSubmittedFailureStreaks(summary);
     this.lastRun = summary;
     return summary;
+  }
+
+  updateSubmittedFailureStreaks(summary) {
+    const failures = [
+      ...(summary.skipped ?? []),
+      ...(summary.errors ?? [])
+    ].filter((entry) => {
+      if (!entry?.sessionId) return false;
+      const reason = entry.reason ?? entry.code;
+      return typeof reason === "string" && reason.startsWith("job_snapshot_");
+    });
+    const next = new Map();
+    for (const failure of failures) {
+      const reason = failure.reason ?? failure.code;
+      const key = `${failure.sessionId}:${reason}`;
+      const previous = this.submittedFailureStreaks.get(key);
+      next.set(key, {
+        sessionId: failure.sessionId,
+        jobId: failure.jobId,
+        reason,
+        consecutiveRuns: Number(previous?.consecutiveRuns ?? 0) + 1,
+        lastSeenAt: summary.finishedAt
+      });
+    }
+    this.submittedFailureStreaks = next;
   }
 }
 

@@ -10,6 +10,10 @@ import {
   normalizeDisputeVerdictRequestPayload,
 } from "../../core/dispute-resolution.js";
 import { transitionSession } from "../../core/session-state-machine.js";
+import {
+  assertJobSnapshotIntegrity,
+  requireJobSnapshot
+} from "../../core/job-snapshot.js";
 
 function compactObject(value) {
   return Object.fromEntries(
@@ -61,7 +65,7 @@ export function createDisputeRoutes({
       return Math.max(Number(live.reward ?? 0) - Number(live.released ?? 0), 0);
     }
     try {
-      const job = service.getJobDefinition(session.jobId);
+      const { job } = requireJobSnapshot(session);
       return Math.max(Number(job.rewardAmount ?? 0), 0);
     } catch {
       return 0;
@@ -162,7 +166,7 @@ export function createDisputeRoutes({
 
     let job;
     try {
-      job = service.getJobDefinition(session.jobId);
+      ({ job } = requireJobSnapshot(session));
     } catch {
       job = undefined;
     }
@@ -297,6 +301,7 @@ export function createDisputeRoutes({
         return true;
       }
       const session = await service.resumeSession(dispute.sessionId);
+      await assertJobSnapshotIntegrity(session, gateway);
       const decidedAt = new Date().toISOString();
       const remainingPayout = await resolveRemainingPayout(session);
       const resolution = buildDisputeResolution({

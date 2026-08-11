@@ -42,6 +42,7 @@ import {
   externalJobLifecycleLockId,
   isExternalJob
 } from "./external-job-lifecycle.js";
+import { buildJobSnapshot, requireJobSnapshot } from "./job-snapshot.js";
 
 // EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
 // Disputed=5, Closed=6. Used to reconcile a mined-but-receipt-lost submit.
@@ -350,6 +351,7 @@ export class JobExecutionService {
   // claim events from an on-chain claim. Shared by the normal claim path and the
   // MAIN-002 convergence path so both produce an identical session.
   async finalizeClaim({ sessionId, wallet, jobId, chainJobId, claimEconomics, chainClaimTiming = {}, job, protocol, idempotencyKey }) {
+    const jobSnapshot = await this.captureJobSnapshot(job, claimEconomics);
     const baseSession = {
       sessionId,
       wallet,
@@ -364,6 +366,7 @@ export class JobExecutionService {
       claimEconomicsWaiverScope: "claim_time",
       claimNumber: claimEconomics.claimNumber,
       totalClaimLock: claimEconomics.totalClaimLock,
+      jobSnapshot,
       badgeSnapshot: buildBadgeJobSnapshot(job),
       ...chainClaimTiming,
       idempotencyKey,
@@ -432,7 +435,12 @@ export class JobExecutionService {
 
   async submitWork(sessionId, protocol, submissionInput = "submitted-via-service") {
     const session = await this.requireSession(sessionId);
-    const job = this.getJobDefinition(session.jobId);
+    // New claims always carry a pin. Preserve the pre-cut-over submission path
+    // for already-claimed sessions; they still fail closed at verification and
+    // settlement, where proving the agreed terms is mandatory.
+    const job = session.jobSnapshot
+      ? requireJobSnapshot(session).job
+      : this.getJobDefinition(session.jobId);
     // Serialize on the session so concurrent/retried submits for the same claim
     // cannot broker duplicate on-chain submitWork txs (pre-audit #6). Reuses the
     // per-session claim lock, so a claim and a submit for one session also cannot
@@ -459,6 +467,21 @@ export class JobExecutionService {
     }
   }
 
+  async captureJobSnapshot(job, claimEconomics) {
+    if (!isExternalJob(job)) {
+      return buildJobSnapshot(job, { claimEconomics });
+    }
+    const draft = await this.stateStore.getExternalJobDraftByJobId?.(job.id);
+    if (!draft?.definition) {
+      throw new ConflictError(
+        `External job ${job.id} is missing the original definition needed to pin its on-chain terms.`,
+        "job_snapshot_capture_failed",
+        { jobId: job.id, integrityFailure: true }
+      );
+    }
+    return buildJobSnapshot(job, { specDefinition: draft.definition, claimEconomics });
+  }
+
   async submitWorkLocked(session, job, protocol, submissionInput) {
     const sessionId = session.sessionId;
     const refreshed = await this.materializeExpiredClaim(session, job);
@@ -480,10 +503,14 @@ export class JobExecutionService {
     const submission = normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, submissionInput, {
       registrations: job.schemaRegistrations
     }));
-    await validateJobSubmissionAgainstSchema(job, submission);
+    await validateJobSubmissionAgainstSchema(job, submission, {
+      pinnedSchema: refreshed.jobSnapshot?.outputSchema?.schema
+    });
     await this.enforceMaintainerOpenPrCap(job, submission);
     const guardedSubmission = this.applyMaintainerSubmissionGuards(job, refreshed, submission);
-    await validateJobSubmissionAgainstSchema(job, guardedSubmission);
+    await validateJobSubmissionAgainstSchema(job, guardedSubmission, {
+      pinnedSchema: refreshed.jobSnapshot?.outputSchema?.schema
+    });
     const evidenceHash = hashSubmission(guardedSubmission);
     if (this.blockchainGateway?.isEnabled()) {
       const chainJobId = session.chainJobId ?? session.jobId;
@@ -949,13 +976,29 @@ export function validateSubmissionContract(schemaRef, submission, { path = "subm
   return submission;
 }
 
-async function validateJobSubmissionAgainstSchema(job, submission) {
+async function validateJobSubmissionAgainstSchema(job, submission, { pinnedSchema = undefined } = {}) {
   const registration = getRegisteredJobSchemaRegistration(job?.outputSchemaRef, job?.schemaRegistrations);
   if (registration?.registrationVersion === EXTERNAL_SCHEMA_EIP712_VERSION) {
     await validateSubmissionAgainstRegisteredSchema(submission, job.id, {
       schemaRef: job.outputSchemaRef,
       registrations: job.schemaRegistrations
     });
+    return;
+  }
+  if (pinnedSchema) {
+    if (submission.kind !== "structured") {
+      throw new ValidationError(
+        `Schema-native jobs require payload.submission to be an object matching ${job.outputSchemaRef}; plain evidence strings are not valid for this job.`,
+        {
+          schemaRef: job.outputSchemaRef,
+          schemaValidates: "payload.submission",
+          received: "payload.evidence",
+          expected: firstRequiredSubmissionPath(pinnedSchema),
+          hint: "Submit the direct JSON object shown in /jobs/definition.submissionContract.submitPayloadExample.submission."
+        }
+      );
+    }
+    validateAgainstSchema(submission.structured, pinnedSchema, "submission");
     return;
   }
   validateSubmissionContract(job.outputSchemaRef, submission, { registrations: job.schemaRegistrations });
