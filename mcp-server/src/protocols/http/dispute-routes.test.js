@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { AuthorizationError, ConfigError, ValidationError } from "../../core/errors.js";
 import { disputeIdForSession } from "../../core/dispute-resolution.js";
+import { buildJobSnapshot } from "../../core/job-snapshot.js";
 import { createDisputeRoutes } from "./dispute-routes.js";
 
 const ADMIN = "0x1111111111111111111111111111111111111111";
@@ -35,10 +36,30 @@ function makeHarness(overrides = {}) {
   const response = {};
   const receipts = new Map(Object.entries(overrides.receipts ?? {}));
   const auth = overrides.auth ?? { wallet: ADMIN, claims: { roles: ["admin"] } };
-  const sessions = overrides.sessions ?? [SESSION];
   const jobs = overrides.jobs ?? new Map([[JOB.id, JOB]]);
+  const sessions = (overrides.sessions ?? [SESSION]).map((session) => {
+    const job = jobs.get(session.jobId);
+    return session.jobSnapshot || !job
+      ? session
+      : { ...session, jobSnapshot: buildJobSnapshot(job) };
+  });
   const payload = overrides.payload ?? {};
-  const gateway = overrides.gateway ?? { isEnabled: () => false };
+  const suppliedGateway = overrides.gateway ?? { isEnabled: () => false };
+  const gateway = suppliedGateway?.isEnabled?.() && typeof suppliedGateway.getJob === "function"
+    ? {
+        ...suppliedGateway,
+        async getJob(jobId) {
+          const live = await suppliedGateway.getJob(jobId);
+          const session = sessions.find((candidate) => (
+            (candidate.chainJobId ?? candidate.jobId) === jobId
+          ));
+          return {
+            ...live,
+            specHash: live?.specHash ?? session?.jobSnapshot?.specHash
+          };
+        }
+      }
+    : suppliedGateway;
 
   const routes = createDisputeRoutes({
     authMiddleware: async (request, url, options = {}) => {
@@ -378,12 +399,11 @@ test("POST /disputes/:id/verdict opens the chain dispute before arbitrator resol
   assert.equal(response.body.chainDisputeBlockNumber, 41);
   assert.equal(response.body.txHash, "0xresolve");
   assert.equal(response.body.blockNumber, 42);
-  // The extra getJob before resolveDispute is the MAIN-003 idempotency guard
-  // (disputeAlreadyResolvedOnChain) — here the job is not yet Closed, so the
-  // settle proceeds normally.
+  // The integrity gate and MAIN-003 idempotency guard both re-read the chain
+  // before any arbitrator settlement can proceed.
   assert.deepEqual(
     gatewayCalls.map(([name]) => name),
-    ["getJob", "getJob", "requireArbitratorSigner", "getJob", "openDispute", "resolveDispute"]
+    ["getJob", "getJob", "getJob", "requireArbitratorSigner", "getJob", "openDispute", "resolveDispute"]
   );
   // The chain dispute is brokered on behalf of the worker (the claimant) so the
   // operator signer can open it even when it is not a participant on chain.

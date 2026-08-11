@@ -10,6 +10,7 @@ import {
   NotFoundError,
   ValidationError
 } from "./errors.js";
+import { assertJobSnapshotIntegrity, requireJobSnapshot } from "./job-snapshot.js";
 
 export const POSTER_REVIEW_REJECT_REASON_MIN_LENGTH = 10;
 export const POSTER_REVIEW_REASON_CODES = Object.freeze({
@@ -382,12 +383,25 @@ export class PosterReviewService {
   } = {}) {
     const jobId = String(jobIdInput ?? "").trim();
     if (!jobId) throw new ValidationError("job id path segment is required.");
-    let job;
-    try {
-      job = this.platformService.getJobDefinition(jobId);
-    } catch {
-      throw this.notFound(jobId);
+    if (!this.gateway?.isEnabled?.() || typeof this.gateway.getJob !== "function") {
+      throw new ChainBackendRequiredError("poster_review_requires_live_escrow");
     }
+
+    const sessions = await this.stateStore.listSessionsByJob?.(jobId, 100) ?? [];
+    const current = await this.stateStore.findSessionByJobId?.(jobId);
+    if (current && !sessions.some((session) => session.sessionId === current.sessionId)) {
+      sessions.unshift(current);
+    }
+    const submissions = sessions.filter((session) => session?.submission !== undefined);
+    if (submissions.length !== 1) {
+      throw new ConflictError(
+        `External job ${jobId} must have exactly one recorded submission before review.`,
+        "poster_review_submission_cardinality",
+        { jobId, submissionCount: submissions.length }
+      );
+    }
+    const session = submissions[0];
+    const { job } = requireJobSnapshot(session);
     if (!isExternalJob(job)) {
       if (concealUnauthorized) throw this.notFound(jobId);
       throw new AuthorizationError(
@@ -395,26 +409,9 @@ export class PosterReviewService {
         "poster_review_external_job_required"
       );
     }
-    if (!this.gateway?.isEnabled?.() || typeof this.gateway.getJob !== "function") {
-      throw new ChainBackendRequiredError("poster_review_requires_live_escrow");
-    }
-
-    const sessions = await this.stateStore.listSessionsByJob?.(job.id, 100) ?? [];
-    const current = await this.stateStore.findSessionByJobId?.(job.id);
-    if (current && !sessions.some((session) => session.sessionId === current.sessionId)) {
-      sessions.unshift(current);
-    }
-    const submissions = sessions.filter((session) => session?.submission !== undefined);
-    if (submissions.length !== 1) {
-      throw new ConflictError(
-        `External job ${job.id} must have exactly one recorded submission before review.`,
-        "poster_review_submission_cardinality",
-        { jobId: job.id, submissionCount: submissions.length }
-      );
-    }
-    const session = submissions[0];
     const chainJobId = session.chainJobId ?? job.id;
     const liveJob = await this.requireLiveJob(chainJobId);
+    await assertJobSnapshotIntegrity(session, this.gateway, { liveJob });
     const catalogPoster = normalizeOptionalWallet(job.poster?.wallet ?? job.source?.poster?.wallet);
     const chainPoster = normalizeOptionalWallet(liveJob.poster);
     if (!catalogPoster || !chainPoster || catalogPoster !== chainPoster) {

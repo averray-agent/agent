@@ -6,8 +6,12 @@ import {
 } from "../core/verifier-contract.js";
 import { assertSessionCanReceiveVerification } from "../core/session-state-machine.js";
 import { normalizeSubmission } from "../core/submission.js";
-import { getJobSchema } from "../core/job-schema-registry.js";
+import { getJobSchema, validateAgainstSchema } from "../core/job-schema-registry.js";
 import { normalizeSubmitPayloadShape, validateSubmissionContract } from "../core/job-execution-service.js";
+import {
+  assertJobSnapshotIntegrity,
+  requireJobSnapshot
+} from "../core/job-snapshot.js";
 
 // EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
 // Disputed=5, Closed=6. resolveSinglePayout only runs from Submitted and reverts
@@ -30,10 +34,12 @@ export class VerifierService {
   async verifySubmission({ sessionId, evidence = undefined, metadataURI = "ipfs://pending-badge" }) {
     const session = await this.platformService.resumeSession(sessionId);
     assertSessionCanReceiveVerification(session);
-    const job = this.platformService.getJobDefinition(session.jobId);
+    const { job, snapshot } = await assertJobSnapshotIntegrity(session, this.blockchainGateway);
     const chainJobId = session.chainJobId ?? session.jobId;
     const verificationInput = this.resolveVerificationInput(session, evidence);
-    const validatedVerificationInput = this.validateVerificationInput(job, verificationInput);
+    const validatedVerificationInput = this.validateVerificationInput(job, verificationInput, {
+      pinnedSchema: snapshot.outputSchema?.schema
+    });
     const verdict = await this.registry.evaluate(
       job,
       validatedVerificationInput,
@@ -110,7 +116,7 @@ export class VerifierService {
   }) {
     const session = await this.platformService.resumeSession(sessionId);
     assertSessionCanReceiveVerification(session, { reason: "brokered_review_decision" });
-    const job = this.platformService.getJobDefinition(session.jobId);
+    const { job, snapshot } = await assertJobSnapshotIntegrity(session, this.blockchainGateway);
     const verificationInput = this.resolveVerificationInput(session);
     const verdict = {
       handler,
@@ -206,11 +212,13 @@ export class VerifierService {
 
   async replayVerification(sessionId) {
     const session = await this.platformService.resumeSession(sessionId);
-    const job = this.platformService.getJobDefinition(session.jobId);
+    const { job, snapshot } = await assertJobSnapshotIntegrity(session, this.blockchainGateway);
     const existing = await this.stateStore.getVerificationResult(sessionId);
     const verificationInput = existing?.verificationInput ?? this.resolveVerificationInput(session);
     const replayJob = jobWithVerifierConfigSnapshot(job, existing?.verifierConfigSnapshot);
-    const validatedVerificationInput = this.validateVerificationInput(replayJob, verificationInput);
+    const validatedVerificationInput = this.validateVerificationInput(replayJob, verificationInput, {
+      pinnedSchema: snapshot.outputSchema?.schema
+    });
     const verdict = await this.registry.evaluate(
       replayJob,
       validatedVerificationInput,
@@ -269,17 +277,23 @@ export class VerifierService {
     for (const session of sessions) {
       if (session?.status !== "submitted" || session.verification) continue;
       let verifierMode = null;
+      let integrityFailure = null;
       try {
-        const job = this.platformService.getJobDefinition(session.jobId);
+        const { job } = requireJobSnapshot(session);
         verifierMode = job?.verifierConfig?.handler ?? job?.verifierMode ?? null;
-      } catch {
+      } catch (error) {
         verifierMode = null;
+        integrityFailure = {
+          code: error?.code ?? "job_snapshot_invalid",
+          message: error?.message ?? String(error)
+        };
       }
       pending.push({
         sessionId: session.sessionId,
         jobId: session.jobId,
         wallet: session.wallet,
         verifierMode,
+        ...(integrityFailure ? { integrityFailure } : {}),
         submittedAt: session.submittedAt ?? null,
         awaitingSince: session.submittedAt ?? null
       });
@@ -308,8 +322,9 @@ export class VerifierService {
     return "";
   }
 
-  validateVerificationInput(job, verificationInput) {
-    if (!getJobSchema(job?.outputSchemaRef, { registrations: job?.schemaRegistrations })) {
+  validateVerificationInput(job, verificationInput, { pinnedSchema = undefined } = {}) {
+    const schema = pinnedSchema ?? getJobSchema(job?.outputSchemaRef, { registrations: job?.schemaRegistrations });
+    if (!schema) {
       return verificationInput;
     }
 
@@ -318,10 +333,14 @@ export class VerifierService {
       : normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, verificationInput, {
         registrations: job.schemaRegistrations
       }));
-    validateSubmissionContract(job.outputSchemaRef, normalized, {
-      path: "verificationInput",
-      registrations: job.schemaRegistrations
-    });
+    if (normalized.kind !== "structured") {
+      validateSubmissionContract(job.outputSchemaRef, normalized, {
+        path: "verificationInput",
+        registrations: job.schemaRegistrations
+      });
+    } else {
+      validateAgainstSchema(normalized.structured, schema, "verificationInput");
+    }
     return normalized;
   }
 }
