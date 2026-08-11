@@ -52,3 +52,13 @@ test("parseArgs: dry-run is the default; --commit flips it", () => {
   assert.equal(parseArgs(["--target", "5"]).target, "5");
   assert.throws(() => parseArgs(["--bogus"]));
 });
+
+// This script wraps fund-signer-usdc-deposit.mjs with --commit, so it moves real
+// funds. Its profile default was "testnet" — correct until the 2026-07-27 mainnet
+// cutover, silently wrong afterwards. A money-moving script must refuse rather
+// than guess a network.
+test("parseArgs: there is NO default profile", () => {
+  assert.equal(parseArgs([]).profile, undefined);
+  assert.equal(parseArgs(["--commit", "--use-kms"]).profile, undefined);
+  assert.equal(parseArgs(["--profile", "mainnet"]).profile, "mainnet");
+});
