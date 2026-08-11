@@ -5,6 +5,7 @@ import { createOperationalRoutes, resolveMetricsAuthConfig } from "./operational
 
 const AUTH_CONFIG = {
   mode: "strict",
+  jwtBackend: "hmac",
   domain: "averray.test",
   chainId: "1",
   secrets: ["test-secret"]
@@ -44,6 +45,20 @@ async function withTimeout(promise, timeoutMs) {
 function makeHarness(overrides = {}) {
   const calls = [];
   const response = makeResponse();
+  const defaultService = {
+    submittedJobAutoVerifier: {
+      getHealth: async () => {
+        calls.push(["submittedJobAutoVerifierHealth"]);
+        return { ok: true, enabled: true, running: true, state: "running" };
+      }
+    },
+    xcmSettlementWatcher: {
+      getStatus: async () => {
+        calls.push(["xcmStatus"]);
+        return { enabled: true, running: true, pendingCount: 0 };
+      }
+    }
+  };
   const route = createOperationalRoutes({
     authConfig: overrides.authConfig ?? AUTH_CONFIG,
     deployedSha: overrides.deployedSha,
@@ -87,14 +102,7 @@ function makeHarness(overrides = {}) {
       res.body = body;
       res.headers = headers;
     },
-    service: overrides.service ?? {
-      xcmSettlementWatcher: {
-        getStatus: async () => {
-          calls.push(["xcmStatus"]);
-          return { enabled: true, running: true, pendingCount: 0 };
-        }
-      }
-    },
+    service: { ...defaultService, ...(overrides.service ?? {}) },
     stateStore: overrides.stateStore ?? {
       constructor: { name: "MemoryStateStore" },
       healthCheck: async () => {
@@ -170,6 +178,12 @@ test("GET /health reports service liveness separately from disabled capabilities
   );
   assert.deepEqual(response.body.components.stateStore, { ok: true, backend: "memory", mode: "memory" });
   assert.deepEqual(response.body.components.indexer, { ok: false, reason: "indexer_status_unconfigured" });
+  assert.deepEqual(response.body.components.submittedJobAutoVerifier, {
+    ok: true,
+    enabled: true,
+    running: true,
+    state: "running"
+  });
   assert.ok(response.body.warnings.some((warning) => warning.code === "treasury_mutations_unavailable"));
   assert.deepEqual(calls.map(([name]) => name).sort(), [
     "chainHealth",
@@ -177,6 +191,7 @@ test("GET /health reports service liveness separately from disabled capabilities
     "indexerHealth",
     "respond",
     "storeHealth",
+    "submittedJobAutoVerifierHealth",
     "xcmStatus",
   ].sort());
 });
@@ -366,6 +381,41 @@ test("GET /health degrades when service liveness is not ok", async () => {
   assert.equal(response.statusCode, 503);
   assert.equal(response.body.status, "degraded");
   assert.equal(response.body.serviceHealth.ok, false);
+});
+
+test("GET /health degrades directly when the submitted-job verifier is stale", async () => {
+  const { response, route } = makeHarness({
+    service: {
+      submittedJobAutoVerifier: {
+        getHealth: async () => ({
+          ok: false,
+          enabled: true,
+          running: true,
+          state: "last_run_stale",
+          intervalMs: 60_000,
+          staleAfterMs: 240_000,
+          lastRunFinishedAt: "2026-08-11T12:00:00.000Z"
+        })
+      },
+      xcmSettlementWatcher: {
+        getStatus: async () => ({ enabled: true, running: true, pendingCount: 0 })
+      }
+    }
+  });
+
+  await route({
+    request: { method: "GET", headers: {} },
+    response,
+    pathname: "/health"
+  });
+
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.body.status, "degraded");
+  assert.equal(response.body.serviceHealth.ok, false);
+  assert.equal(
+    response.body.serviceHealth.components.submittedJobAutoVerifier.state,
+    "last_run_stale"
+  );
 });
 
 test("GET /metrics emits Prometheus text with CORS and request id headers", async () => {

@@ -112,6 +112,22 @@ test("resolveServiceHealth — degraded when strict KMS auth has no KMS config",
   assert.equal(result.components.auth.ok, false);
 });
 
+test("resolveServiceHealth — degraded when the submitted-job auto-verifier is stale", () => {
+  const result = resolveServiceHealth({
+    stateStoreHealth: { ok: true, backend: "RedisStateStore", mode: "durable" },
+    authConfig: { mode: "permissive", domain: "localhost", chainId: 0, secrets: [] },
+    submittedJobAutoVerifierHealth: {
+      ok: false,
+      enabled: true,
+      running: true,
+      state: "last_run_stale"
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.components.submittedJobAutoVerifier.state, "last_run_stale");
+});
+
 // ─── resolveCapabilityHealth ─────────────────────────────────────────
 
 test("resolveCapabilityHealth — config A: full chain enabled + healthy", () => {

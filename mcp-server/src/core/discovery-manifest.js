@@ -59,7 +59,7 @@ export function resolveHubNetwork(chainId) {
 }
 
 const DISCOVERY_PUBLIC_ENDPOINTS = [
-  { path: "/health", description: "Liveness plus serviceHealth/capabilityHealth for state store, blockchain, treasury mutations, XCM observer, indexer, and gas sponsor." },
+  { path: "/health", description: "Liveness plus serviceHealth/capabilityHealth for state store, submitted-job settlement scheduler, blockchain, treasury mutations, XCM observer, indexer, and gas sponsor." },
   { path: "/metrics", description: "Prometheus text-format metrics. Bearer-gated in production via METRICS_BEARER_TOKEN." },
   { path: "/llms.txt", description: "Agent-adjusted orientation mirror served on the API host." },
   { path: "/onboarding", description: "Canonical platform capabilities + tool list." },

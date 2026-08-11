@@ -73,7 +73,8 @@ export function createOperationalRoutes({
     if (request.method === "GET" && pathname === "/health") {
       // Package B (P1.1b) — health truth split. `serviceHealth` is the
       // API-process liveness contract: state-store reachable + auth config
-      // loaded. HTTP status follows `serviceHealth.ok` alone, so a
+      // loaded + the submitted-job settlement scheduler ticking. HTTP status
+      // follows `serviceHealth.ok` alone, so a
       // trust-core-only launch still returns 200/"ok" at the liveness layer
       // and surfaces chain/treasury posture via `capabilityHealth`.
       const [
@@ -82,7 +83,8 @@ export function createOperationalRoutes({
         gasHealth,
         xcmWatcherStatus,
         indexerProbe,
-        externalPostingWatcherStatus
+        externalPostingWatcherStatus,
+        submittedJobAutoVerifierHealth
       ] = await Promise.all([
         stateStore.healthCheck?.() ?? { ok: true, backend: stateStore.constructor.name },
         getCachedBlockchainHealth(),
@@ -90,7 +92,11 @@ export function createOperationalRoutes({
         service?.xcmSettlementWatcher?.getStatus?.()?.catch?.(() => undefined) ?? undefined,
         indexerHealthProbe?.().catch(() => ({ ok: false, reason: "indexer_status_unavailable" }))
           ?? { ok: false, reason: "indexer_status_url_unconfigured" },
-        externalPostingWatcher?.getStatus?.()?.catch?.(() => undefined) ?? undefined
+        externalPostingWatcher?.getStatus?.()?.catch?.(() => undefined) ?? undefined,
+        service?.submittedJobAutoVerifier?.getHealth?.()?.catch?.(() => ({
+          ok: false,
+          state: "status_unavailable"
+        })) ?? { ok: false, state: "status_unavailable" }
       ]);
       const mutationBackendStatus = await getMutationBackendStatus({
         gateway,
@@ -99,7 +105,11 @@ export function createOperationalRoutes({
         gatewayStatus: chainHealth
       }).catch(() => ({ ok: false, route: "/health" }));
 
-      const serviceHealth = resolveServiceHealth({ stateStoreHealth: storeHealth, authConfig });
+      const serviceHealth = resolveServiceHealth({
+        stateStoreHealth: storeHealth,
+        authConfig,
+        submittedJobAutoVerifierHealth
+      });
       const capabilityHealth = resolveCapabilityHealth({
         blockchainHealth: chainHealth,
         mutationBackendStatus,
@@ -128,7 +138,8 @@ export function createOperationalRoutes({
           blockchain: chainHealth,
           gasSponsor: gasHealth,
           indexer: indexerProbe,
-          externalPostingWatcher: externalPostingWatcherStatus
+          externalPostingWatcher: externalPostingWatcherStatus,
+          submittedJobAutoVerifier: submittedJobAutoVerifierHealth
         }
       });
       return true;

@@ -21,6 +21,7 @@
 const DEFAULT_INTERVAL_MS = 60 * 1000;
 const DEFAULT_SCAN_LIMIT = 200;
 const DEFAULT_MAX_PER_RUN = 25;
+const DEFAULT_CANDIDATE_TIMEOUT_MS = 3 * 60 * 1000;
 
 // Hard allowlist of machine-decidable verifier handlers. human_fallback and
 // github_pr are intentionally excluded and cannot be re-enabled via config.
@@ -33,6 +34,7 @@ export class SubmittedJobAutoVerifierService {
     intervalMs = DEFAULT_INTERVAL_MS,
     scanLimit = DEFAULT_SCAN_LIMIT,
     maxPerRun = DEFAULT_MAX_PER_RUN,
+    candidateTimeoutMs = DEFAULT_CANDIDATE_TIMEOUT_MS,
     autoModes = AUTO_DECIDABLE_MODES,
     requireSettlementReady = true,
     logger = console
@@ -46,18 +48,26 @@ export class SubmittedJobAutoVerifierService {
     this.intervalMs = intervalMs;
     this.scanLimit = scanLimit;
     this.maxPerRun = maxPerRun;
+    this.candidateTimeoutMs = candidateTimeoutMs;
     this.autoModes = normalizeAutoModes(autoModes);
     this.requireSettlementReady = requireSettlementReady;
     this.logger = logger;
     this.running = false;
+    this.startedAt = undefined;
     this.timer = undefined;
+    this.nextRunAt = undefined;
     this.inFlight = new Set();
+    this.pendingVerifications = new Map();
     this.lastRun = undefined;
+    this.lastSuccessfulRunAt = undefined;
+    this.lastSchedulerError = undefined;
+    this.consecutiveSchedulerFailures = 0;
   }
 
   start() {
     if (!this.enabled || this.running) return;
     this.running = true;
+    this.startedAt = new Date().toISOString();
     void this.runOnceAndSchedule();
   }
 
@@ -67,9 +77,10 @@ export class SubmittedJobAutoVerifierService {
       clearTimeout(this.timer);
       this.timer = undefined;
     }
+    this.nextRunAt = undefined;
   }
 
-  async getStatus() {
+  async getStatus(now = new Date()) {
     return {
       enabled: this.enabled,
       running: this.running,
@@ -78,10 +89,84 @@ export class SubmittedJobAutoVerifierService {
       intervalMs: this.intervalMs,
       scanLimit: this.scanLimit,
       maxPerRun: this.maxPerRun,
+      candidateTimeoutMs: this.candidateTimeoutMs,
+      inFlightCount: this.inFlight.size,
+      pendingTimeoutCount: this.countPendingTimeouts(),
       autoModes: [...this.autoModes],
       requireSettlementReady: this.requireSettlementReady,
-      lastRun: this.lastRun
+      nextRunAt: this.nextRunAt,
+      lastSuccessfulRunAt: this.lastSuccessfulRunAt,
+      lastSchedulerError: this.lastSchedulerError,
+      consecutiveSchedulerFailures: this.consecutiveSchedulerFailures,
+      lastRun: this.lastRun,
+      liveness: this.resolveLiveness(now)
     };
+  }
+
+  async getHealth(now = new Date()) {
+    const liveness = this.resolveLiveness(now);
+    return {
+      ...liveness,
+      enabled: this.enabled,
+      running: this.running,
+      mode: this.dryRun ? "dry_run" : "live",
+      intervalMs: this.intervalMs,
+      nextRunAt: this.nextRunAt,
+      lastRunFinishedAt: this.lastRun?.finishedAt,
+      consecutiveSchedulerFailures: this.consecutiveSchedulerFailures,
+      pendingTimeoutCount: this.countPendingTimeouts()
+    };
+  }
+
+  resolveLiveness(now = new Date()) {
+    const staleAfterMs = Math.max(
+      this.intervalMs * 3,
+      this.candidateTimeoutMs + this.intervalMs
+    );
+    if (!this.enabled) {
+      return { ok: true, state: "disabled", staleAfterMs };
+    }
+    if (!this.running) {
+      return { ok: false, state: "stopped", staleAfterMs };
+    }
+    if (this.countPendingTimeouts() > 0) {
+      return {
+        ok: false,
+        state: "verification_timeout_pending",
+        staleAfterMs
+      };
+    }
+    if (this.consecutiveSchedulerFailures > 0) {
+      return {
+        ok: false,
+        state: "run_failed",
+        staleAfterMs
+      };
+    }
+
+    const reference = this.lastRun?.finishedAt ?? this.startedAt;
+    const referenceMs = Date.parse(reference ?? "");
+    const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
+    const lastRunAgeMs = Number.isFinite(referenceMs) && Number.isFinite(nowMs)
+      ? Math.max(0, nowMs - referenceMs)
+      : null;
+    if (lastRunAgeMs === null || lastRunAgeMs > staleAfterMs) {
+      return {
+        ok: false,
+        state: this.lastRun?.finishedAt ? "last_run_stale" : "never_completed",
+        staleAfterMs,
+        lastRunAgeMs
+      };
+    }
+    return { ok: true, state: "running", staleAfterMs, lastRunAgeMs };
+  }
+
+  countPendingTimeouts() {
+    let count = 0;
+    for (const entry of this.pendingVerifications.values()) {
+      if (entry.timedOut) count += 1;
+    }
+    return count;
   }
 
   async runOnce(now = new Date()) {
@@ -125,6 +210,14 @@ export class SubmittedJobAutoVerifierService {
       const sessionId = session.sessionId;
       if (this.inFlight.has(sessionId)) {
         summary.skipped.push({ sessionId, reason: "in_flight" });
+        continue;
+      }
+      // A timed-out operation cannot be cancelled safely after it may have
+      // submitted a payout transaction. Quarantine it until the original
+      // promise settles; unlike the old inFlight leak this state is explicit,
+      // health-degrading, and cannot launch a duplicate settlement.
+      if (this.pendingVerifications.has(sessionId)) {
+        summary.skipped.push({ sessionId, reason: "verification_timeout_pending" });
         continue;
       }
       // A submitted session should never already carry a verification result,
@@ -176,45 +269,132 @@ export class SubmittedJobAutoVerifierService {
   async verifyCandidate(candidate, summary) {
     const { sessionId, jobId, mode } = candidate;
     this.inFlight.add(sessionId);
-    try {
-      // Autonomous settlement entry point. Runs in-process with NO JWT principal —
-      // the manual /verifier/run route reaches the same verifySubmission (which
-      // brokers resolveSinglePayout on-chain). Logged under a synthetic principal so
-      // every autonomous settlement is attributable in the audit trail (audit B-01).
-      // Trust boundary: a process compromise is the threat; damage is bounded by
-      // requireChainBackedMutation + the hard {benchmark, deterministic} mode
-      // allowlist + HALT-awareness. See docs/MAINNET_AUDIT_REMEDIATION.md.
-      this.logger.info?.(
-        { principal: "system:auto-verifier", sessionId, jobId, mode },
-        "auto_verify.settlement_triggered"
+    // Autonomous settlement entry point. Runs in-process with NO JWT principal —
+    // the manual /verifier/run route reaches the same verifySubmission (which
+    // brokers resolveSinglePayout on-chain). Logged under a synthetic principal so
+    // every autonomous settlement is attributable in the audit trail (audit B-01).
+    // Trust boundary: a process compromise is the threat; damage is bounded by
+    // requireChainBackedMutation + the hard {benchmark, deterministic} mode
+    // allowlist + HALT-awareness. See docs/MAINNET_AUDIT_REMEDIATION.md.
+    this.logger.info?.(
+      { principal: "system:auto-verifier", sessionId, jobId, mode },
+      "auto_verify.settlement_triggered"
+    );
+
+    // Convert both resolution and rejection into data before racing the timeout.
+    // That suppresses an unhandled rejection if the original operation finishes
+    // after this run has already moved on.
+    const entry = { candidate, timedOut: false, promise: undefined };
+    const verification = Promise.resolve()
+      .then(() => this.verifierService.verifySubmission({ sessionId }))
+      .then(
+        (result) => ({ status: "fulfilled", result }),
+        (error) => ({ status: "rejected", error })
       );
-      const result = await this.verifierService.verifySubmission({ sessionId });
-      const outcome = result?.outcome;
+    entry.promise = verification;
+    this.pendingVerifications.set(sessionId, entry);
+
+    // One completion hook owns quarantine cleanup and late-result reporting.
+    // It is installed once, so later scheduler ticks can never publish a
+    // second resolution or start another payout for this session.
+    void verification
+      .then((late) => {
+        if (this.pendingVerifications.get(sessionId) === entry) {
+          this.pendingVerifications.delete(sessionId);
+        }
+        this.inFlight.delete(sessionId);
+        if (!entry.timedOut) return;
+        if (late.status === "fulfilled") {
+          this.recordVerificationSuccess(candidate, late.result, undefined, { late: true });
+          return;
+        }
+        this.recordVerificationFailure(candidate, late.error, undefined, { late: true });
+      })
+      .catch((error) => {
+        // Observability hooks must never turn a safely-contained late result
+        // into an unhandled process rejection.
+        this.logger.warn?.({ sessionId, jobId, mode, err: error }, "auto_verify.late_result_hook_failed");
+      });
+    let timeout;
+    const timed = new Promise((resolve) => {
+      timeout = setTimeout(
+        () => resolve({ status: "timed_out" }),
+        this.candidateTimeoutMs
+      );
+    });
+    const settled = await Promise.race([verification, timed]);
+    clearTimeout(timeout);
+
+    if (settled.status === "timed_out") {
+      entry.timedOut = true;
+      this.inFlight.delete(sessionId);
+      summary.errors.push({
+        sessionId,
+        jobId,
+        code: "verification_timeout",
+        message: `Verification did not finish within ${this.candidateTimeoutMs}ms.`
+      });
+      this.logger.warn?.(
+        { sessionId, jobId, mode, timeoutMs: this.candidateTimeoutMs },
+        "auto_verify.verify_timeout"
+      );
+
+      // The active inFlight ownership is released immediately so later jobs
+      // and scheduler ticks are not wedged. The pendingVerifications quarantine
+      // remains until the uncancellable call settles, preventing a duplicate
+      // payout and making a permanent hang visible through /health.
+      return;
+    }
+
+    if (this.pendingVerifications.get(sessionId) === entry) {
+      this.pendingVerifications.delete(sessionId);
+    }
+    this.inFlight.delete(sessionId);
+    if (settled.status === "rejected") {
+      this.recordVerificationFailure(candidate, settled.error, summary);
+      return;
+    }
+    this.recordVerificationSuccess(candidate, settled.result, summary);
+  }
+
+  recordVerificationSuccess(candidate, result, summary = undefined, { late = false } = {}) {
+    const { sessionId, jobId, mode } = candidate;
+    const outcome = result?.outcome;
+    if (summary) {
       summary.verifiedCount += 1;
       if (outcome === "approved") summary.approvedCount += 1;
       else if (outcome === "rejected") summary.rejectedCount += 1;
-      this.logger.info?.(
-        { principal: "system:auto-verifier", sessionId, jobId, mode, outcome, reasonCode: result?.reasonCode },
-        "auto_verify.verified"
-      );
-      this.eventBus?.publish?.({
-        id: `auto-verify-${sessionId}-${Date.now()}`,
-        topic: "verifier.auto.resolved",
-        jobId,
-        timestamp: new Date().toISOString(),
-        data: { sessionId, jobId, mode, outcome, reasonCode: result?.reasonCode }
-      });
-    } catch (error) {
-      // A session that flipped out of `submitted` between scan and verify (e.g.
-      // a manual /verifier/run ran first), or a settlement tx that reverted,
-      // lands here. Both are safe to retry next tick: a verdict is committed
-      // only after settlement succeeds, so a failed run leaves the session in
-      // `submitted`.
-      summary.errors.push({ sessionId, jobId, message: error?.message ?? String(error) });
-      this.logger.warn?.({ sessionId, jobId, mode, err: error }, "auto_verify.verify_failed");
-    } finally {
-      this.inFlight.delete(sessionId);
     }
+    this.logger.info?.(
+      {
+        principal: "system:auto-verifier",
+        sessionId,
+        jobId,
+        mode,
+        outcome,
+        reasonCode: result?.reasonCode,
+        late
+      },
+      "auto_verify.verified"
+    );
+    this.eventBus?.publish?.({
+      id: `auto-verify-${sessionId}-${Date.now()}`,
+      topic: "verifier.auto.resolved",
+      jobId,
+      timestamp: new Date().toISOString(),
+      data: { sessionId, jobId, mode, outcome, reasonCode: result?.reasonCode, late }
+    });
+  }
+
+  recordVerificationFailure(candidate, error, summary = undefined, { late = false } = {}) {
+    const { sessionId, jobId, mode } = candidate;
+    // A session that flipped out of `submitted` between scan and verify (e.g.
+    // a manual /verifier/run ran first), or a settlement tx that reverted,
+    // lands here. Both are safe to retry next tick: a verdict is committed
+    // only after settlement succeeds, so a failed run leaves the session in
+    // `submitted`.
+    summary?.errors.push({ sessionId, jobId, message: error?.message ?? String(error) });
+    this.logger.warn?.({ sessionId, jobId, mode, late, err: error }, "auto_verify.verify_failed");
   }
 
   // Returns { ok: true } when it is safe to settle, otherwise { ok: false,
@@ -242,10 +422,35 @@ export class SubmittedJobAutoVerifierService {
   }
 
   async runOnceAndSchedule() {
-    await this.runOnce(new Date());
-    if (!this.running) return;
+    try {
+      const summary = await this.runOnce(new Date());
+      this.consecutiveSchedulerFailures = 0;
+      this.lastSuccessfulRunAt = summary.finishedAt;
+    } catch (error) {
+      this.consecutiveSchedulerFailures += 1;
+      this.lastSchedulerError = {
+        at: new Date().toISOString(),
+        message: error?.message ?? String(error)
+      };
+      this.logger.warn?.(
+        { err: error, consecutiveFailures: this.consecutiveSchedulerFailures },
+        "auto_verify.scheduler_run_failed"
+      );
+    } finally {
+      this.scheduleNextRun();
+    }
+  }
+
+  scheduleNextRun() {
+    if (!this.running) {
+      this.nextRunAt = undefined;
+      return;
+    }
     if (this.timer) clearTimeout(this.timer);
+    this.nextRunAt = new Date(Date.now() + this.intervalMs).toISOString();
     this.timer = setTimeout(() => {
+      this.timer = undefined;
+      this.nextRunAt = undefined;
       void this.runOnceAndSchedule();
     }, this.intervalMs);
   }
@@ -264,6 +469,10 @@ export function loadSubmittedJobAutoVerifierConfig(env = process.env) {
     intervalMs: parsePositiveInt(env.AUTO_VERIFY_INTERVAL_MS, DEFAULT_INTERVAL_MS),
     scanLimit: parsePositiveInt(env.AUTO_VERIFY_SCAN_LIMIT, DEFAULT_SCAN_LIMIT),
     maxPerRun: parsePositiveInt(env.AUTO_VERIFY_MAX_PER_RUN, DEFAULT_MAX_PER_RUN),
+    candidateTimeoutMs: parsePositiveInt(
+      env.AUTO_VERIFY_CANDIDATE_TIMEOUT_MS,
+      DEFAULT_CANDIDATE_TIMEOUT_MS
+    ),
     autoModes: parseAutoModesEnv(env.AUTO_VERIFY_MODES),
     requireSettlementReady: env.AUTO_VERIFY_REQUIRE_SETTLEMENT_READY === undefined
       ? true
