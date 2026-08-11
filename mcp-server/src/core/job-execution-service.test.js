@@ -39,6 +39,60 @@ function makeJob(overrides = {}) {
   };
 }
 
+test("claim persists immutable claimant attribution only for the hosted-canary evidence shape", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({ id: "worker-canary-1786453506586" });
+  const service = new JobExecutionService(stateStore, undefined, () => job);
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "canary-claim", {
+    claimantAttribution: {
+      kind: "hosted_worker_canary",
+      evidence: "wallet_bound_marker_v1"
+    },
+    marker: "must-not-be-persisted"
+  });
+
+  assert.deepEqual(claimed.claimantAttribution, {
+    kind: "hosted_worker_canary",
+    evidence: "wallet_bound_marker_v1"
+  });
+  assert.equal(Object.hasOwn(claimed, "marker"), false);
+  assert.deepEqual((await stateStore.getSession(claimed.sessionId)).claimantAttribution, claimed.claimantAttribution);
+});
+
+test("claim fails closed when claimant attribution does not carry wallet-bound marker evidence", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({ id: "worker-canary-1786453506586" });
+  const service = new JobExecutionService(stateStore, undefined, () => job);
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "untrusted-canary-claim", {
+    claimantAttribution: {
+      kind: "hosted_worker_canary",
+      evidence: "job_id_prefix"
+    }
+  });
+
+  assert.equal(Object.hasOwn(claimed, "claimantAttribution"), false);
+});
+
+test("a later canary request cannot retrofit claimant attribution onto an existing external claim", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({ id: "worker-canary-1786453506586" });
+  const service = new JobExecutionService(stateStore, undefined, () => job);
+
+  const externalClaim = await service.claimJob(WALLET, job.id, "http", "external-won-race");
+  const canaryRetry = await service.claimJob(WALLET, job.id, "http", "canary-retried-late", {
+    claimantAttribution: {
+      kind: "hosted_worker_canary",
+      evidence: "wallet_bound_marker_v1"
+    }
+  });
+
+  assert.equal(canaryRetry.sessionId, externalClaim.sessionId);
+  assert.equal(Object.hasOwn(canaryRetry, "claimantAttribution"), false);
+  assert.equal(Object.hasOwn(await stateStore.getSession(externalClaim.sessionId), "claimantAttribution"), false);
+});
+
 function makeTestOnboardingSubsidyBudget({
   dailyBudgetUsdc = 1,
   estimatedClaimSubsidyUsdc = 1,

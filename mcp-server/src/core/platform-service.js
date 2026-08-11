@@ -962,8 +962,8 @@ export class PlatformService {
     return this.jobCatalogService.estimateNetReward(wallet, jobId);
   }
 
-  async claimJob(wallet, jobId, protocol, idempotencyKey) {
-    return this.jobExecutionService.claimJob(wallet, jobId, protocol, idempotencyKey);
+  async claimJob(wallet, jobId, protocol, idempotencyKey, claimContext = undefined) {
+    return this.jobExecutionService.claimJob(wallet, jobId, protocol, idempotencyKey, claimContext);
   }
 
   async submitWork(sessionId, protocol, evidence = "submitted-via-service") {

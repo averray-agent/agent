@@ -242,7 +242,11 @@ test("persistent worker-canary snapshot skips do not degrade payout-queue health
     sessions: [{
       sessionId: "worker-canary-1786453506586:0xcanary",
       jobId: "worker-canary-1786453506586",
-      status: "submitted"
+      status: "submitted",
+      claimantAttribution: {
+        kind: "hosted_worker_canary",
+        evidence: "wallet_bound_marker_v1"
+      }
     }]
   });
   const service = makeService(harness);
@@ -267,7 +271,11 @@ test("worker-canary exclusion applies to non-snapshot skip reasons", async () =>
     sessions: [{
       sessionId: "worker-canary-1786453506586:0xcanary",
       jobId: "worker-canary-1786453506586",
-      status: "submitted"
+      status: "submitted",
+      claimantAttribution: {
+        kind: "hosted_worker_canary",
+        evidence: "wallet_bound_marker_v1"
+      }
     }]
   });
   const service = makeService(harness);
@@ -285,16 +293,13 @@ test("worker-canary exclusion applies to non-snapshot skip reasons", async () =>
   assert.deepEqual(health.persistentSubmittedFailures, []);
 });
 
-test("canary exclusion does not hide a persistent external-worker skip", async () => {
+test("a canary-prefixed job claimed without claimant proof remains health-degrading", async () => {
   const harness = makeHarness({
-    sessions: [
-      {
-        sessionId: "worker-canary-1786453506586:0xcanary",
-        jobId: "worker-canary-1786453506586",
-        status: "submitted"
-      },
-      { sessionId: "external-unpaid:0xworker", jobId: "missing-external-job", status: "submitted" }
-    ]
+    sessions: [{
+      sessionId: "worker-canary-1786453506586:0xexternalworker",
+      jobId: "worker-canary-1786453506586",
+      status: "submitted"
+    }]
   });
   const service = makeService(harness);
   service.running = true;
@@ -307,7 +312,10 @@ test("canary exclusion does not hide a persistent external-worker skip", async (
   assert.equal(health.ok, false);
   assert.equal(health.state, "submitted_session_persistently_skipped");
   assert.equal(health.persistentSubmittedFailureCount, 1);
-  assert.equal(health.persistentSubmittedFailures[0].sessionId, "external-unpaid:0xworker");
+  assert.equal(
+    health.persistentSubmittedFailures[0].sessionId,
+    "worker-canary-1786453506586:0xexternalworker"
+  );
 });
 
 test("does nothing when disabled", async () => {
