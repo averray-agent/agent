@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -9,8 +10,14 @@ import {
   resolveSelfClients,
   stageRank
 } from "./arrival-observatory.js";
+import * as arrivalModule from "./arrival-observatory.js";
 
-function harness({ failStore = false, now = () => 1_000, loadRetryIntervalMs } = {}) {
+function harness({
+  failStore = false,
+  now = () => 1_000,
+  loadRetryIntervalMs,
+  verifyCanaryMarker
+} = {}) {
   const state = new Map();
   const counters = [];
   const reads = [];
@@ -37,7 +44,14 @@ function harness({ failStore = false, now = () => 1_000, loadRetryIntervalMs } =
     counters,
     reads,
     recover() { failing = false; },
-    observatory: new ArrivalObservatory({ stateStore, metrics, now, flushIntervalMs: 0, loadRetryIntervalMs })
+    observatory: new ArrivalObservatory({
+      stateStore,
+      metrics,
+      now,
+      flushIntervalMs: 0,
+      loadRetryIntervalMs,
+      verifyCanaryMarker
+    })
   };
 }
 
@@ -221,6 +235,178 @@ test("unknown tools count as reach rather than being dropped or guessed", async 
   const snapshot = await observatory.getSnapshot();
   assert.equal(snapshot.funnel.reached, 1);
   assert.equal(snapshot.funnel.browsed, 0);
+});
+
+test("an HTTP-only worker advances claimed and submitted without changing the MCP-only series", async () => {
+  const { observatory } = harness();
+  const wallet = "0x1111111111111111111111111111111111111111";
+
+  await observatory.recordHttp({ method: "POST", pathname: "/jobs/claim", wallet, ip: "1.2.3.4" });
+  await observatory.recordHttp({ method: "POST", pathname: "/jobs/submit", wallet, ip: "1.2.3.4" });
+
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.funnel.claimed, 0, "legacy funnel remains MCP-only");
+  assert.equal(snapshot.funnel.submitted, 0, "HTTP calls do not rewrite the MCP trend");
+  assert.equal(snapshot.funnelHttp.claimed, 1);
+  assert.equal(snapshot.funnelHttp.submitted, 1);
+  assert.equal(snapshot.attributionSourceTotals.http.siwe_wallet, 2);
+  assert.equal(snapshot.distinctAgents.total, 1);
+  assert.equal(snapshot.distinctAgents.measured, 1);
+  assert.equal(snapshot.agents[0].furthestStage, "submitted");
+  assert.equal(snapshot.agents[0].wallet, wallet);
+  assert.equal(snapshot.httpCutover.backfilled, false);
+  assert.match(snapshot.httpCutover.note, /not backfilled/u);
+});
+
+test("HTTP wallet attribution uses the explicit self allowlist and leaves unmarked callers external", async () => {
+  const { observatory } = harness();
+  const selfWallet = "0x1111111111111111111111111111111111111111";
+  const externalWallet = "0x2222222222222222222222222222222222222222";
+  observatory.selfWallets = arrivalModule.resolveSelfWallets({ ARRIVAL_SELF_WALLETS: selfWallet.toUpperCase() });
+
+  await observatory.recordHttp({ method: "POST", pathname: "/jobs/claim", wallet: selfWallet });
+  await observatory.recordHttp({ method: "POST", pathname: "/jobs/claim", wallet: externalWallet });
+  await observatory.recordHttp({ method: "GET", pathname: "/jobs", ip: "203.0.113.8" });
+
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.funnelHttpSelf.claimed, 1);
+  assert.equal(snapshot.funnelHttpExternal.claimed, 1);
+  assert.equal(snapshot.funnelHttpExternal.browsed, 1);
+  assert.equal(snapshot.attributionSourceTotals.http.siwe_wallet, 2);
+  assert.equal(snapshot.attributionSourceTotals.http.ip_only, 1);
+  assert.equal(snapshot.httpClients.find((entry) => entry.wallet === selfWallet).self, true);
+  assert.equal(snapshot.httpClients.find((entry) => entry.wallet === externalWallet).self, false);
+});
+
+test("mainnet smoke attribution commits the operator wallet instead of relying on an empty runtime knob", async () => {
+  const template = await readFile(
+    new URL("../../../deploy/backend.mainnet.env.template", import.meta.url),
+    "utf8"
+  );
+  assert.match(
+    template,
+    /^ARRIVAL_SELF_WALLETS=0x9Ab8531FBb0948C542a31298FD61335f30064239$/mu
+  );
+});
+
+test("ephemeral canary markers are short-lived, wallet-bound, and fail toward external", async () => {
+  const wallet = "0x4444444444444444444444444444444444444444";
+  let issuedClaims;
+  const markerService = arrivalModule.createArrivalCanaryMarkerService({
+    authConfig: { marker: "test" },
+    signTokenFromConfigImpl: async (payload, options) => {
+      issuedClaims = {
+        ...payload,
+        iat: 1_000,
+        exp: 1_000 + options.expiresInSeconds
+      };
+      return { token: "signed-canary-marker", claims: issuedClaims };
+    },
+    verifyTokenFromConfigImpl: async (token) => {
+      if (token !== "signed-canary-marker") throw new Error("bad signature");
+      return issuedClaims;
+    }
+  });
+
+  const issued = await markerService.issue(wallet);
+  assert.equal(issued.wallet, wallet);
+  assert.ok(issued.ttlSeconds > 0 && issued.ttlSeconds <= 15 * 60);
+  assert.equal(await markerService.verify({ marker: issued.marker, wallet }), true);
+  assert.equal(await markerService.verify({
+    marker: issued.marker,
+    wallet: "0x5555555555555555555555555555555555555555"
+  }), false, "a marker cannot mark a different wallet as self");
+  assert.equal(await markerService.verify({ marker: "unrecognised", wallet }), false);
+
+  const { observatory } = harness({ verifyCanaryMarker: markerService.verify });
+  await observatory.recordHttp({
+    method: "POST",
+    pathname: "/jobs/claim",
+    wallet,
+    canaryMarker: issued.marker
+  });
+  await observatory.recordHttp({
+    method: "POST",
+    pathname: "/jobs/submit",
+    wallet: "0x5555555555555555555555555555555555555555",
+    canaryMarker: issued.marker
+  });
+  await observatory.recordHttp({
+    method: "GET",
+    pathname: "/account",
+    wallet,
+    canaryMarker: "unrecognised"
+  });
+
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.funnelHttpSelf.claimed, 1);
+  assert.equal(snapshot.funnelHttpExternal.submitted, 1);
+  assert.equal(snapshot.funnelHttpExternal.reached, 1);
+  assert.equal(
+    snapshot.httpClients.some((entry) => Object.hasOwn(entry, "markerAttribution")),
+    false,
+    "marker verification bookkeeping stays internal"
+  );
+});
+
+test("MCP browsing and HTTP claiming join into one wallet-canonical agent", async () => {
+  const { observatory } = harness();
+  const wallet = "0x3333333333333333333333333333333333333333";
+  const clientInfo = { name: "cross-door-worker", version: "1" };
+
+  await observatory.recordTool({ tool: "listJobs", clientInfo });
+  await observatory.linkWallet({ wallet, clientInfo });
+  await observatory.recordHttp({
+    method: "POST",
+    pathname: "/jobs/claim",
+    wallet,
+    clientInfo
+  });
+
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.clients.length, 1);
+  assert.equal(snapshot.httpClients.length, 1);
+  assert.equal(snapshot.agents.length, 1);
+  assert.equal(snapshot.agents[0].key, `wallet:${wallet}`);
+  assert.deepEqual(snapshot.agents[0].doors, ["http", "mcp"]);
+  assert.equal(snapshot.agents[0].furthestStage, "claimed");
+  assert.equal(snapshot.agents[0].name, null, "the canonical join deduplicates without enriching the wallet identity");
+  assert.equal(snapshot.agents[0].version, null);
+});
+
+test("health and discovery polling never count as HTTP arrivals", async () => {
+  const { observatory } = harness();
+  for (const pathname of [
+    "/health",
+    "/metrics",
+    "/",
+    "/llms.txt",
+    "/onboarding",
+    "/poster/onboarding",
+    "/status/providers",
+    "/strategies",
+    "/transparency",
+    "/monitor/arrivals",
+    "/gas/health"
+  ]) {
+    await observatory.recordHttp({ method: "GET", pathname, ip: "192.0.2.5" });
+  }
+  await observatory.recordHttp({ method: "OPTIONS", pathname: "/jobs", ip: "192.0.2.5" });
+  await observatory.recordHttp({ method: "HEAD", pathname: "/jobs", ip: "192.0.2.5" });
+  const snapshot = await observatory.getSnapshot();
+  assert.deepEqual(snapshot.funnelHttp, Object.fromEntries(ARRIVAL_STAGES.map((stage) => [stage, 0])));
+  assert.equal(snapshot.httpClients.length, 0);
+});
+
+test("HTTP client hints prefer explicit headers and otherwise use a bounded User-Agent product", () => {
+  assert.deepEqual(arrivalModule.extractHttpClientInfo({ headers: {
+    "x-averray-client-name": "worker-sdk",
+    "x-averray-client-version": "2.1"
+  } }), { name: "worker-sdk", version: "2.1" });
+  assert.deepEqual(arrivalModule.extractHttpClientInfo({ headers: { "user-agent": "curl/8.7.1 extra" } }), {
+    name: "curl",
+    version: "8.7.1"
+  });
 });
 
 test("client info is normalized and bounded", () => {

@@ -100,6 +100,7 @@ const ROUTE_CAPABILITY_RULES = [
   { method: "GET", path: "/admin/jobs/timeline", capabilities: ["jobs:timeline"] },
   { method: "GET", path: "/admin/sessions", capabilities: ["ops:view"] },
   { method: "GET", path: "/admin/status", capabilities: ["admin:status", "ops:view"] },
+  { method: "POST", path: "/admin/arrivals/canary-marker", capabilities: ["ops:view"] },
   { method: "POST", path: "/admin/bootstrap-self-report/send", capabilities: ["admin:self-report:send"] },
   { method: "GET", path: "/admin/capability-grants", capabilities: ["admin:capabilities:read"] },
   { method: "POST", path: "/admin/capability-grants", capabilities: ["admin:capabilities:grant"] },

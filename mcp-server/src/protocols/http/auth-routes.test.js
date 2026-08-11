@@ -158,8 +158,10 @@ function makeHarness(overrides = {}) {
 }
 
 async function callRoute(route, response, method, path, request = {}) {
+  request.method = method;
+  request.headers ??= {};
   return await route({
-    request: { method, headers: {}, ...request },
+    request,
     response,
     url: new URL(`http://localhost${path}`),
     pathname: path.split("?")[0],
@@ -231,8 +233,10 @@ test("SIWE telemetry failure is logged without breaking authentication", async (
     }
   });
 
-  assert.equal(await callRoute(route, response, "POST", "/auth/nonce"), true);
+  const request = {};
+  assert.equal(await callRoute(route, response, "POST", "/auth/nonce", request), true);
   assert.equal(response.statusCode, 200);
+  assert.equal(request._arrivalWallet, WALLET);
   assert.equal(calls.find(([name]) => name === "logger.warn")?.[1][1], "auth_siwe.telemetry_write_failed");
 });
 
@@ -248,9 +252,11 @@ test("POST /auth/verify issues a token under KMS-only auth with no HMAC signingS
 
   // Must NOT 401 auth_not_configured just because there is no HMAC secret —
   // signTokenFromConfig signs ES256 via the KMS JWT signer.
-  assert.equal(await callRoute(route, response, "POST", "/auth/verify"), true);
+  const request = {};
+  assert.equal(await callRoute(route, response, "POST", "/auth/verify", request), true);
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.token, "signed-token");
+  assert.equal(request._arrivalWallet, WALLET);
 });
 
 test("POST /auth/verify consumes nonce, signs token, and issues refresh cookie when supported", async () => {
@@ -265,7 +271,8 @@ test("POST /auth/verify consumes nonce, signs token, and issues refresh cookie w
     }
   });
 
-  assert.equal(await callRoute(route, response, "POST", "/auth/verify"), true);
+  const request = {};
+  assert.equal(await callRoute(route, response, "POST", "/auth/verify", request), true);
 
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.token, "signed-token");
@@ -283,6 +290,7 @@ test("POST /auth/verify consumes nonce, signs token, and issues refresh cookie w
     "makeRefreshStoreAdapter",
   ]);
   assert.equal(calls.find(([name]) => name === "signToken")?.[1].claims.sub, WALLET);
+  assert.equal(request._arrivalWallet, WALLET);
   const verifyEvent = calls.find(([name]) => name === "recordSiweAuthEvent")?.[1];
   assert.equal(verifyEvent.wallet, WALLET);
   assert.equal(verifyEvent.event, "verify_succeeded");
@@ -352,12 +360,14 @@ test("POST /auth/refresh lowercases a legacy checksummed refresh-record wallet b
     },
   });
 
-  assert.equal(await callRoute(route, response, "POST", "/auth/refresh"), true);
+  const request = {};
+  assert.equal(await callRoute(route, response, "POST", "/auth/refresh", request), true);
   assert.equal(response.statusCode, 200);
 
   const mintedSub = calls.find(([name]) => name === "signToken")?.[1].claims.sub;
   assert.equal(mintedSub, CHECKSUMMED_WALLET.toLowerCase());
   assert.equal(mintedSub, mintedSub.toLowerCase());
+  assert.equal(request._arrivalWallet, CHECKSUMMED_WALLET.toLowerCase());
 });
 
 test("POST /auth/refresh (bearer path) lowercases a checksummed auth wallet before minting", async () => {

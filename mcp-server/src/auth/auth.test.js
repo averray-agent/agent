@@ -211,7 +211,35 @@ test("requireAuth accepts valid bearer token", async () => {
   const url = new URL("http://localhost/api/account");
   const result = await middleware(request, url);
   assert.equal(result.wallet.toLowerCase(), "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  assert.equal(request._arrivalWallet, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   assert.equal(result.via, "header");
+});
+
+test("arrival canary markers cannot be replayed as bearer access tokens", async () => {
+  const authConfig = {
+    jwtBackend: "hmac",
+    secrets: [LONG_SECRET],
+    signingSecret: LONG_SECRET,
+    permissive: false,
+    strict: true
+  };
+  const middleware = createAuthMiddleware({ authConfig, logger: silentLogger() });
+  const { token } = signToken({
+    sub: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    tokenKind: "arrival_canary_marker",
+    markerVersion: 1
+  }, {
+    secret: LONG_SECRET,
+    expiresInSeconds: 60
+  });
+
+  await assert.rejects(
+    () => middleware(
+      { method: "GET", headers: { authorization: `Bearer ${token}` } },
+      new URL("http://localhost/account")
+    ),
+    (error) => error instanceof AuthenticationError && error.code === "invalid_token_kind"
+  );
 });
 
 test("requireAuth rejects missing token in strict mode", async () => {

@@ -1,6 +1,6 @@
 # Instrument the second door — HTTP arrivals
 
-Status: **design, not built.** Implementation packet for #1053.
+Status: **implemented on this branch.** Implementation packet for #1053.
 
 ---
 
@@ -59,6 +59,14 @@ anon:<hashed-ip>      neither — unchanged
 
 Self on the HTTP path is an explicit allowlist of operator-owned wallets (canary worker,
 smoke wallets, our own worker). Same direction as today: **unmarked is external.**
+
+The stable mainnet smoke wallet is committed in the generated deployment template. A fresh
+ephemeral canary cannot be pre-listed, so its generator mints an admin-authorized marker
+after creating the wallet. The marker uses the existing server signing infrastructure, is
+bound to that address, expires after at most 15 minutes, and cannot authenticate requests.
+The server verifies it independently on each marked request; an absent, expired, malformed,
+or differently bound marker classifies externally. Marker failure therefore cannot inflate
+self traffic.
 
 ## 4. Record the signal, do not flatten it
 

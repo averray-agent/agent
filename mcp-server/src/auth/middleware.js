@@ -1,6 +1,7 @@
 import { getAddress } from "ethers";
 import { AuthenticationError, AuthorizationError } from "../core/errors.js";
 import { verifyTokenFromConfig } from "./jwt.js";
+import { ARRIVAL_CANARY_MARKER_TOKEN_KIND } from "./token-kinds.js";
 import { hasRole, resolveRoles } from "./config.js";
 import {
   getRouteCapabilityRequirements,
@@ -188,6 +189,12 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
     // a Promise — Promise.resolve(claims) for the HMAC path keeps the
     // shape uniform.
     const claims = await verifyTokenFromConfig(token, authConfig);
+    if (claims?.tokenKind === ARRIVAL_CANARY_MARKER_TOKEN_KIND) {
+      throw new AuthenticationError(
+        "Arrival canary markers identify synthetic traffic; they cannot authenticate API requests.",
+        "invalid_token_kind"
+      );
+    }
     if (!claims?.sub) {
       throw new AuthenticationError("Token missing subject claim.", "missing_subject");
     }
@@ -204,8 +211,13 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
     enforceRole(claims, requireRole, authDetails);
     enforceCapabilities(capabilities, requiredCapabilities, authDetails);
 
+    const wallet = normalizeWallet(claims.sub);
+    const arrivalWallet = String(wallet ?? "").toLowerCase();
+    if (/^0x[0-9a-f]{40}$/u.test(arrivalWallet)) {
+      request._arrivalWallet = arrivalWallet;
+    }
     return {
-      wallet: normalizeWallet(claims.sub),
+      wallet,
       claims,
       capabilities,
       capabilityRequirements: requiredCapabilities,
