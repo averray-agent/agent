@@ -1,6 +1,6 @@
 # Instrument the second door — HTTP arrivals
 
-Status: **design, not built.** Implementation packet for #1053.
+Status: **implemented on this branch.** Implementation packet for #1053.
 
 ---
 

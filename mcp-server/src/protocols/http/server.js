@@ -65,7 +65,10 @@ import { makePolicy } from "../../core/builtin-policies.js";
 import { createPosterOnboardingService } from "../../core/poster-onboarding.js";
 import { createConfiguredIndexerHealthProbe } from "../../services/indexer-health-probe.js";
 import { createUsdcLiquidityStatusService } from "../../services/usdc-liquidity-status.js";
-import { ArrivalObservatory } from "../../services/arrival-observatory.js";
+import {
+  ArrivalObservatory,
+  extractHttpClientInfo
+} from "../../services/arrival-observatory.js";
 import { createArrivalRoutes } from "./arrival-routes.js";
 
 const {
@@ -775,6 +778,13 @@ const server = createServer(async (request, response) => {
       },
       "http.response"
     );
+    void arrivalObservatory.recordHttp({
+      method: request.method,
+      pathname,
+      clientInfo: extractHttpClientInfo(request),
+      ip: clientIp(request),
+      wallet: request._arrivalWallet
+    });
   });
 
   if (request.method === "OPTIONS") {

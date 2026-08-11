@@ -211,6 +211,7 @@ test("requireAuth accepts valid bearer token", async () => {
   const url = new URL("http://localhost/api/account");
   const result = await middleware(request, url);
   assert.equal(result.wallet.toLowerCase(), "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  assert.equal(request._arrivalWallet, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   assert.equal(result.via, "header");
 });
 

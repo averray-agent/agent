@@ -378,3 +378,59 @@ test("a throwing arrivals recorder does not break the door", async () => {
   const result = await call(handler, modernRequest("tools/list"), modernHeaders("tools/list"));
   assert.equal(result.statusCode, 200);
 });
+
+test("successful MCP SIWE links the declared client hint to the measured wallet", async () => {
+  const links = [];
+  const arrivals = {
+    async recordTool() {},
+    async linkWallet(entry) { links.push(entry); }
+  };
+  const wallet = "0x1111111111111111111111111111111111111111";
+  const { handler } = createHarness({
+    arrivals,
+    executeTool: async () => ({ wallet, token: "redacted" })
+  });
+
+  const result = await call(
+    handler,
+    modernRequest("tools/call", {
+      name: "verifySiwe",
+      arguments: { message: "signed challenge", signature: `0x${"11".repeat(65)}` }
+    }),
+    modernHeaders("tools/call", "verifySiwe")
+  );
+
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(links, [{
+    wallet,
+    clientInfo: { name: "modern-test", version: "1.0.0" }
+  }]);
+});
+
+test("authenticated MCP calls link the wallet stamped by auth middleware before dispatch", async () => {
+  const links = [];
+  const arrivals = {
+    async recordTool() {},
+    async linkWallet(entry) { links.push(entry); }
+  };
+  const wallet = "0x2222222222222222222222222222222222222222";
+  const { handler } = createHarness({
+    arrivals,
+    authMiddleware: async (request) => {
+      request._arrivalWallet = wallet;
+      return { wallet };
+    }
+  });
+
+  const result = await call(
+    handler,
+    modernRequest("tools/call", { name: "claimJob", arguments: { jobId: "job-1" } }),
+    { ...modernHeaders("tools/call", "claimJob"), authorization: "Bearer valid-token" }
+  );
+
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(links, [{
+    wallet,
+    clientInfo: { name: "modern-test", version: "1.0.0" }
+  }]);
+});

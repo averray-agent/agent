@@ -486,7 +486,19 @@ async function dispatchRequest({
         rateLimitConfig,
         request
       });
+      if (request._arrivalWallet) {
+        await recordArrival(arrivals, "linkWallet", {
+          wallet: request._arrivalWallet,
+          clientInfo
+        });
+      }
       const payload = await executeTool(toolName, message.params?.arguments, { request });
+      if (toolName === "verifySiwe" && payload?.wallet) {
+        await recordArrival(arrivals, "linkWallet", {
+          wallet: payload.wallet,
+          clientInfo
+        });
+      }
       sendResult(
         response,
         respond,

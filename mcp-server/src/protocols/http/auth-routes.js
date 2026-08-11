@@ -193,6 +193,7 @@ export function createAuthRoutes({
       // wallet all use the canonical lowercase form. Without this, /auth/verify
       // returns 200 yet every authed call with the minted token self-rejects.
       const wallet = verified.recoveredAddress.toLowerCase();
+      request._arrivalWallet = wallet;
 
       const roles = authConfig.resolveRoles?.(wallet) ?? [];
       const { token, claims } = await signTokenFromConfigImpl(
@@ -325,6 +326,7 @@ export function createAuthRoutes({
         }
 
         const roles = authConfig.resolveRoles?.(consumed.record.wallet) ?? [];
+        request._arrivalWallet = consumed.record.wallet.toLowerCase();
         if (roles.length === 0) {
           await revokeChainImpl({
             hash: consumed.hash,

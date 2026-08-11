@@ -204,8 +204,13 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
     enforceRole(claims, requireRole, authDetails);
     enforceCapabilities(capabilities, requiredCapabilities, authDetails);
 
+    const wallet = normalizeWallet(claims.sub);
+    const arrivalWallet = String(wallet ?? "").toLowerCase();
+    if (/^0x[0-9a-f]{40}$/u.test(arrivalWallet)) {
+      request._arrivalWallet = arrivalWallet;
+    }
     return {
-      wallet: normalizeWallet(claims.sub),
+      wallet,
       claims,
       capabilities,
       capabilityRequirements: requiredCapabilities,
