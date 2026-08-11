@@ -509,8 +509,19 @@ that describes a world we have left is worse than an empty one.
 3. **Engage the external audit.** Still the right thing, no longer a pre-mainnet gate.
    `npm run prepare:mainnet-audit-freeze`, push the frozen tag, hand auditors
    [`AUDIT_PACKAGE.md`](./AUDIT_PACKAGE.md).
-4. **Bank deposit pool, packets 1–2.** Packet 1 is gated (#1038). Packet 2 wires the
-   venue so the notice tiers have a yield differential and therefore a reason to exist.
+4. **Bank deposit pool — BLOCKED on a contract change (#1066).** Packets 1 and 2 merged
+   (#1038, #1043), but the pool **must not be deployed**. An independent review (#1051)
+   found that `DepositPool` derives its share price from `lane.totalAssets()`, which any
+   TreasuryPolicy `strategySettler` can set arbitrarily via `recordRemotePosition` — so a
+   settler can deposit small, inflate the book and drain the buffer. The capability is in
+   `strategySettler`, a *global* mapping, so no choice of pool operator and nothing in the
+   deployment ceremony fixes it. `deploy-deposit-pool.mjs --commit` refuses.
+   The unblock is #1066: split pricing NAV from remote execution inventory and price on a
+   cost basis. It is the only contract change in the current set and therefore the longest
+   lead time. Ceremony, addresses and fork simulation are ready and wait on it
+   (`CEREMONY_DEPOSIT_POOL_DEPLOY.md`, §0 carries the DO-NOT-DEPLOY banner).
+   Downstream: tier 3 of the worker ladder (#1055) and, with it, the only Sybil-resistance
+   mechanism that does not compromise earn-from-zero (`WORKER_PROGRESSION_DESIGN.md`).
 5. **Stage 2C-3 HMAC retirement window.** ≥30 days after the 2026-05-21 KMS-only JWT
    cutover: delete `op://prod-backend/auth-jwt-secrets`, drop the HMAC branch from
    `mcp-server/src/auth/jwt.js`, retire `AUTH_JWT_SECRETS` from the inventory and
