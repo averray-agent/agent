@@ -74,8 +74,8 @@
           "description": "approvedCount / (approvedCount + rejectedCount). null when the agent has no terminal outcomes yet."
         },
         "totalEarned": {
-          "$ref": "#/definitions/amount",
-          "description": "Sum of reward amounts across all approved completions, in base units. Decimals matches the reward asset."
+          "$ref": "#/definitions/earnedAmount",
+          "description": "Sum of authoritative pinned reward amounts across approved completions, in base units. Completeness fields disclose legacy approvals omitted because they have no claim-time snapshot."
         },
         "activeSince": {
           "type": ["string", "null"],
@@ -180,6 +180,34 @@
         "asset": { "type": "string" },
         "amount": { "type": "string", "pattern": "^[0-9]+$" },
         "decimals": { "type": "integer", "minimum": 0, "maximum": 30 }
+      }
+    },
+    "earnedAmount": {
+      "type": "object",
+      "required": [
+        "asset",
+        "amount",
+        "decimals",
+        "incomplete",
+        "includedApprovedCount",
+        "omittedApprovedCount"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "asset": { "type": "string" },
+        "amount": { "type": "string", "pattern": "^[0-9]+$" },
+        "decimals": { "type": "integer", "minimum": 0, "maximum": 30 },
+        "incomplete": {
+          "type": "boolean",
+          "description": "True when one or more approved completions lack authoritative claim-time terms and were omitted from amount."
+        },
+        "includedApprovedCount": { "type": "integer", "minimum": 0 },
+        "omittedApprovedCount": { "type": "integer", "minimum": 0 },
+        "omissionReason": {
+          "type": "string",
+          "enum": ["missing_claim_time_job_snapshot"],
+          "description": "Present when snapshot-less legacy approvals were excluded from amount."
+        }
       }
     }
   }

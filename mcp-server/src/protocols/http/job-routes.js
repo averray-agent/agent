@@ -1,5 +1,7 @@
 import { ValidationError } from "../../core/errors.js";
 import { TIER_REQUIREMENTS } from "../../core/job-catalog-service.js";
+import { createHostedCanaryClaimantAttribution } from "../../core/claimant-attribution.js";
+import { ARRIVAL_CANARY_MARKER_HEADER } from "../../services/arrival-observatory.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
 
 export function createJobRoutes({
@@ -13,6 +15,7 @@ export function createJobRoutes({
   readJsonBody,
   respond,
   service,
+  verifyCanaryMarker,
 }) {
   return async function handleJobRoute({ request, response, url, pathname }) {
     if (request.method === "GET" && pathname === "/jobs") {
@@ -142,7 +145,18 @@ export function createJobRoutes({
       const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
         ? payload.idempotencyKey.trim()
         : (url.searchParams.get("idempotencyKey") ?? `${auth.wallet}:${jobId}`);
-      respond(response, 200, await service.claimJob(auth.wallet, jobId, protocol, idempotencyKey));
+      const claimantAttribution = await resolveClaimantAttribution({
+        marker: request.headers?.[ARRIVAL_CANARY_MARKER_HEADER],
+        verifyCanaryMarker,
+        wallet: auth.wallet
+      });
+      respond(response, 200, await service.claimJob(
+        auth.wallet,
+        jobId,
+        protocol,
+        idempotencyKey,
+        claimantAttribution ? { claimantAttribution } : undefined
+      ));
       return true;
     }
 
@@ -192,6 +206,21 @@ export function createJobRoutes({
 
     return false;
   };
+}
+
+async function resolveClaimantAttribution({ marker, verifyCanaryMarker, wallet }) {
+  if (typeof marker !== "string" || !marker.trim() || typeof verifyCanaryMarker !== "function") {
+    return undefined;
+  }
+  try {
+    return await verifyCanaryMarker({ marker: marker.trim(), wallet })
+      ? createHostedCanaryClaimantAttribution()
+      : undefined;
+  } catch {
+    // Attribution is an exemption, so verification failure must fail toward
+    // an external claimant and keep any later stuck session health-visible.
+    return undefined;
+  }
 }
 
 function isTruthyFlag(value) {

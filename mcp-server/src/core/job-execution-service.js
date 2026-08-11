@@ -47,6 +47,7 @@ import {
   isExternalJob
 } from "./external-job-lifecycle.js";
 import { buildJobSnapshot, requireJobSnapshot } from "./job-snapshot.js";
+import { normalizeClaimantAttribution } from "./claimant-attribution.js";
 
 // EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
 // Disputed=5, Closed=6. Used to reconcile a mined-but-receipt-lost submit.
@@ -90,7 +91,7 @@ export class JobExecutionService {
       : DEFAULT_OPEN_PR_CAP_PER_REPO;
   }
 
-  async claimJob(wallet, jobId, protocol, idempotencyKey) {
+  async claimJob(wallet, jobId, protocol, idempotencyKey, claimContext = undefined) {
     const existing = await this.stateStore.findSessionByIdempotencyKey(idempotencyKey);
     if (existing) {
       const existingJob = this.getJobDefinition(existing.jobId);
@@ -105,12 +106,20 @@ export class JobExecutionService {
       );
     }
 
+    const claimantAttribution = normalizeClaimantAttribution(claimContext?.claimantAttribution);
     const job = this.getClaimableJobDefinition(jobId);
     if (isExternalJob(job)) {
-      return this.claimExternalJob(wallet, jobId, protocol, idempotencyKey, job);
+      return this.claimExternalJob(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
     }
     if (!this.workerExposurePolicy) {
-      return this.claimJobAfterLifecycleGate(wallet, jobId, protocol, idempotencyKey, job);
+      return this.claimJobAfterLifecycleGate(
+        wallet,
+        jobId,
+        protocol,
+        idempotencyKey,
+        job,
+        claimantAttribution
+      );
     }
     const exposureLockId = `worker-exposure:${String(wallet).toLowerCase()}`;
     const exposureLockOwner = randomUUID();
@@ -127,13 +136,20 @@ export class JobExecutionService {
       );
     }
     try {
-      return await this.claimJobAfterLifecycleGate(wallet, jobId, protocol, idempotencyKey, job);
+      return await this.claimJobAfterLifecycleGate(
+        wallet,
+        jobId,
+        protocol,
+        idempotencyKey,
+        job,
+        claimantAttribution
+      );
     } finally {
       await this.stateStore.releaseClaimLock?.(exposureLockId, exposureLockOwner);
     }
   }
 
-  async claimExternalJob(wallet, jobId, protocol, idempotencyKey, job) {
+  async claimExternalJob(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution = undefined) {
     const lockId = externalJobLifecycleLockId(jobId);
     const lockOwner = randomUUID();
     const lockAcquired = await this.stateStore.acquireClaimLock?.(
@@ -167,14 +183,22 @@ export class JobExecutionService {
         jobId,
         protocol,
         idempotencyKey,
-        job
+        job,
+        claimantAttribution
       );
     } finally {
       await this.stateStore.releaseClaimLock?.(lockId, lockOwner);
     }
   }
 
-  async claimJobAfterLifecycleGate(wallet, jobId, protocol, idempotencyKey, job) {
+  async claimJobAfterLifecycleGate(
+    wallet,
+    jobId,
+    protocol,
+    idempotencyKey,
+    job,
+    claimantAttribution = undefined
+  ) {
     const activeJobSession = await this.stateStore.findSessionByJobId(jobId);
     const refreshedActiveJobSession = activeJobSession
       ? await this.materializeExpiredClaim(activeJobSession, job)
@@ -302,7 +326,16 @@ export class JobExecutionService {
           // job_not_claimable (MAIN-002). Any other non-open state is genuinely
           // not claimable.
           const converged = await this.convergeStrandedClaim({
-            sessionId, wallet, jobId, chainJobId, claimEconomics, job, protocol, idempotencyKey, live
+            sessionId,
+            wallet,
+            jobId,
+            chainJobId,
+            claimEconomics,
+            job,
+            protocol,
+            idempotencyKey,
+            claimantAttribution,
+            live
           });
           if (converged) {
             return converged;
@@ -389,7 +422,17 @@ export class JobExecutionService {
       }
 
       return await this.finalizeClaim({
-        sessionId, wallet, jobId, chainJobId, claimEconomics, workerExposure, chainClaimTiming, job, protocol, idempotencyKey
+        sessionId,
+        wallet,
+        jobId,
+        chainJobId,
+        claimEconomics,
+        workerExposure,
+        chainClaimTiming,
+        job,
+        protocol,
+        idempotencyKey,
+        claimantAttribution
       });
     } finally {
       await this.stateStore.releaseClaimLock?.(sessionLockId, lockOwner);
@@ -399,7 +442,19 @@ export class JobExecutionService {
   // Build + persist the local 'claimed' session, the funded-job record, and the
   // claim events from an on-chain claim. Shared by the normal claim path and the
   // MAIN-002 convergence path so both produce an identical session.
-  async finalizeClaim({ sessionId, wallet, jobId, chainJobId, claimEconomics, workerExposure, chainClaimTiming = {}, job, protocol, idempotencyKey }) {
+  async finalizeClaim({
+    sessionId,
+    wallet,
+    jobId,
+    chainJobId,
+    claimEconomics,
+    workerExposure = undefined,
+    chainClaimTiming = {},
+    job,
+    protocol,
+    idempotencyKey,
+    claimantAttribution = undefined
+  }) {
     const jobSnapshot = await this.captureJobSnapshot(job, claimEconomics);
     const baseSession = {
       sessionId,
@@ -422,6 +477,7 @@ export class JobExecutionService {
         : {}),
       jobSnapshot,
       badgeSnapshot: buildBadgeJobSnapshot(job),
+      ...(claimantAttribution ? { claimantAttribution } : {}),
       ...chainClaimTiming,
       idempotencyKey,
       protocolHistory: [protocol]
@@ -474,7 +530,18 @@ export class JobExecutionService {
   // no local session exists, rebuild + persist the expected session (idempotent
   // recovery, no second claimJob). Returns null for any other non-open state
   // (claimed by another worker, submitted, closed) so the caller fails closed.
-  async convergeStrandedClaim({ sessionId, wallet, jobId, chainJobId, claimEconomics, job, protocol, idempotencyKey, live }) {
+  async convergeStrandedClaim({
+    sessionId,
+    wallet,
+    jobId,
+    chainJobId,
+    claimEconomics,
+    job,
+    protocol,
+    idempotencyKey,
+    claimantAttribution = undefined,
+    live
+  }) {
     if (Number(live?.state) !== ESCROW_JOB_STATE_CLAIMED) {
       return null;
     }
@@ -494,7 +561,8 @@ export class JobExecutionService {
       chainClaimTiming: this.buildChainClaimTiming(live),
       job,
       protocol,
-      idempotencyKey
+      idempotencyKey,
+      claimantAttribution
     });
   }
 

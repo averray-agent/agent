@@ -185,6 +185,139 @@ test("persistent submitted-session integrity skips degrade verifier health", asy
   assert.equal(health.persistentSubmittedFailures[0].reason, "job_snapshot_missing");
 });
 
+test("persistent submitted-session skips degrade health regardless of reason", async () => {
+  const harness = makeHarness({
+    sessions: [
+      { sessionId: "s-human", jobId: "human-001", status: "submitted" },
+      { sessionId: "s-in-flight", jobId: "bench-001", status: "submitted" }
+    ]
+  });
+  const service = makeService(harness);
+  service.running = true;
+  service.startedAt = new Date().toISOString();
+  service.inFlight.add("s-in-flight");
+
+  await service.runOnce();
+  await service.runOnce();
+  const health = await service.getHealth();
+
+  assert.equal(health.ok, false);
+  assert.equal(health.state, "submitted_session_persistently_skipped");
+  assert.deepEqual(
+    health.persistentSubmittedFailures.map(({ sessionId, reason }) => ({ sessionId, reason })),
+    [
+      { sessionId: "s-human", reason: "non_auto_mode" },
+      { sessionId: "s-in-flight", reason: "in_flight" }
+    ]
+  );
+});
+
+test("a submitted-session failure remains persistent when its reason changes", () => {
+  const service = makeService(makeHarness());
+  service.running = true;
+  service.startedAt = new Date().toISOString();
+
+  service.updateSubmittedFailureStreaks({
+    finishedAt: "2026-08-11T20:00:00.000Z",
+    skipped: [{ sessionId: "s-legacy", jobId: "legacy-job", reason: "job_not_found" }],
+    errors: []
+  });
+  service.updateSubmittedFailureStreaks({
+    finishedAt: "2026-08-11T20:01:00.000Z",
+    skipped: [{ sessionId: "s-legacy", jobId: "legacy-job", reason: "future_skip_reason" }],
+    errors: []
+  });
+
+  assert.deepEqual(service.listPersistentSubmittedFailures(), [{
+    sessionId: "s-legacy",
+    jobId: "legacy-job",
+    reason: "future_skip_reason",
+    consecutiveRuns: 2,
+    lastSeenAt: "2026-08-11T20:01:00.000Z"
+  }]);
+});
+
+test("persistent worker-canary snapshot skips do not degrade payout-queue health", async () => {
+  const harness = makeHarness({
+    sessions: [{
+      sessionId: "worker-canary-1786453506586:0xcanary",
+      jobId: "worker-canary-1786453506586",
+      status: "submitted",
+      claimantAttribution: {
+        kind: "hosted_worker_canary",
+        evidence: "wallet_bound_marker_v1"
+      }
+    }]
+  });
+  const service = makeService(harness);
+  service.running = true;
+  service.startedAt = new Date().toISOString();
+
+  const first = await service.runOnce();
+  const second = await service.runOnce();
+  const health = await service.getHealth();
+
+  // The integrity skip remains visible in each run; only the health-degrading
+  // streak excludes an operator-owned canary that is not an unpaid user.
+  assert.equal(first.skipped[0].reason, "job_snapshot_missing");
+  assert.equal(second.skipped[0].reason, "job_snapshot_missing");
+  assert.equal(health.ok, true);
+  assert.equal(health.state, "running");
+  assert.deepEqual(health.persistentSubmittedFailures, []);
+});
+
+test("worker-canary exclusion applies to non-snapshot skip reasons", async () => {
+  const harness = makeHarness({
+    sessions: [{
+      sessionId: "worker-canary-1786453506586:0xcanary",
+      jobId: "worker-canary-1786453506586",
+      status: "submitted",
+      claimantAttribution: {
+        kind: "hosted_worker_canary",
+        evidence: "wallet_bound_marker_v1"
+      }
+    }]
+  });
+  const service = makeService(harness);
+  service.running = true;
+  service.startedAt = new Date().toISOString();
+  service.inFlight.add("worker-canary-1786453506586:0xcanary");
+
+  const first = await service.runOnce();
+  await service.runOnce();
+  const health = await service.getHealth();
+
+  assert.equal(first.skipped[0].reason, "in_flight");
+  assert.equal(first.skipped[0].jobId, "worker-canary-1786453506586");
+  assert.equal(health.ok, true);
+  assert.deepEqual(health.persistentSubmittedFailures, []);
+});
+
+test("a canary-prefixed job claimed without claimant proof remains health-degrading", async () => {
+  const harness = makeHarness({
+    sessions: [{
+      sessionId: "worker-canary-1786453506586:0xexternalworker",
+      jobId: "worker-canary-1786453506586",
+      status: "submitted"
+    }]
+  });
+  const service = makeService(harness);
+  service.running = true;
+  service.startedAt = new Date().toISOString();
+
+  await service.runOnce();
+  await service.runOnce();
+  const health = await service.getHealth();
+
+  assert.equal(health.ok, false);
+  assert.equal(health.state, "submitted_session_persistently_skipped");
+  assert.equal(health.persistentSubmittedFailureCount, 1);
+  assert.equal(
+    health.persistentSubmittedFailures[0].sessionId,
+    "worker-canary-1786453506586:0xexternalworker"
+  );
+});
+
 test("does nothing when disabled", async () => {
   const harness = makeHarness({
     sessions: [{ sessionId: "s-bench", jobId: "bench-001", status: "submitted" }]

@@ -44,8 +44,14 @@ function makeHarness(overrides = {}) {
       calls.push(["createSubJob", { parentSessionId, wallet, payload: requestPayload }]);
       return overrides.createdSubJob ?? { id: "sub-1", parentSessionId, wallet };
     },
-    claimJob: async (wallet, jobId, protocol, idempotencyKey) => {
-      calls.push(["claimJob", { wallet, jobId, protocol, idempotencyKey }]);
+    claimJob: async (wallet, jobId, protocol, idempotencyKey, claimContext) => {
+      calls.push(["claimJob", {
+        wallet,
+        jobId,
+        protocol,
+        idempotencyKey,
+        ...(claimContext === undefined ? {} : { claimContext })
+      }]);
       return overrides.claim ?? { sessionId: "session-1", wallet, jobId, protocol, idempotencyKey };
     },
     validateJobSubmission: (jobId, submission) => {
@@ -84,14 +90,15 @@ function makeHarness(overrides = {}) {
       res.headers = headers;
     },
     service,
+    verifyCanaryMarker: overrides.verifyCanaryMarker,
   });
 
   return { calls, response, route };
 }
 
-function invoke(route, { method = "GET", path, response = {} }) {
+function invoke(route, { method = "GET", path, response = {}, headers = {} }) {
   return route({
-    request: { method },
+    request: { method, headers },
     response,
     url: new URL(`http://localhost${path}`),
     pathname: path.split("?")[0],
@@ -327,6 +334,64 @@ test("POST /jobs/claim preserves http protocol and idempotency fallback", async 
     ["authMiddleware"],
     ["readJsonBody"],
     ["claimJob", { wallet: WALLET, jobId: "job-1", protocol: "http", idempotencyKey: `${WALLET}:job-1` }],
+  ]);
+});
+
+test("POST /jobs/claim attributes a hosted canary only from a wallet-bound marker", async () => {
+  const markerChecks = [];
+  const { calls, response, route } = makeHarness({
+    payload: { jobId: "worker-canary-1786453506586" },
+    verifyCanaryMarker: async (candidate) => {
+      markerChecks.push(candidate);
+      return candidate.marker === "signed-wallet-bound-marker" && candidate.wallet === WALLET;
+    }
+  });
+
+  assert.equal(await invoke(route, {
+    method: "POST",
+    path: "/jobs/claim",
+    response,
+    headers: { "x-averray-canary-marker": "signed-wallet-bound-marker" }
+  }), true);
+
+  assert.deepEqual(markerChecks, [{ marker: "signed-wallet-bound-marker", wallet: WALLET }]);
+  assert.deepEqual(calls.find(([name]) => name === "claimJob"), [
+    "claimJob",
+    {
+      wallet: WALLET,
+      jobId: "worker-canary-1786453506586",
+      protocol: "http",
+      idempotencyKey: `${WALLET}:worker-canary-1786453506586`,
+      claimContext: {
+        claimantAttribution: {
+          kind: "hosted_worker_canary",
+          evidence: "wallet_bound_marker_v1"
+        }
+      }
+    }
+  ]);
+});
+
+test("POST /jobs/claim fails a mismatched canary marker toward an external claimant", async () => {
+  const { calls, route } = makeHarness({
+    payload: { jobId: "worker-canary-1786453506586" },
+    verifyCanaryMarker: async () => false
+  });
+
+  assert.equal(await invoke(route, {
+    method: "POST",
+    path: "/jobs/claim",
+    headers: { "x-averray-canary-marker": "marker-for-a-different-wallet" }
+  }), true);
+
+  assert.deepEqual(calls.find(([name]) => name === "claimJob"), [
+    "claimJob",
+    {
+      wallet: WALLET,
+      jobId: "worker-canary-1786453506586",
+      protocol: "http",
+      idempotencyKey: `${WALLET}:worker-canary-1786453506586`
+    }
   ]);
 });
 

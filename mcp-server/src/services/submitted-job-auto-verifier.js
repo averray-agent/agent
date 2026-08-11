@@ -21,6 +21,7 @@ import { GuardedSchedulerLoop, summaryErrorsOutcome } from "./guarded-scheduler-
 // operator misconfiguration.
 
 import { isJobSnapshotIntegrityError, requireJobSnapshot } from "../core/job-snapshot.js";
+import { isHostedCanaryClaimant } from "../core/claimant-attribution.js";
 
 const DEFAULT_INTERVAL_MS = 60 * 1000;
 const DEFAULT_SCAN_LIMIT = 200;
@@ -207,8 +208,9 @@ export class SubmittedJobAutoVerifierService {
     for (const session of sessions) {
       if (session?.status !== "submitted") continue;
       const sessionId = session.sessionId;
+      const diagnostic = sessionDiagnostic(session);
       if (this.inFlight.has(sessionId)) {
-        summary.skipped.push({ sessionId, reason: "in_flight" });
+        summary.skipped.push({ ...diagnostic, reason: "in_flight" });
         continue;
       }
       // A timed-out operation cannot be cancelled safely after it may have
@@ -216,13 +218,13 @@ export class SubmittedJobAutoVerifierService {
       // promise settles; unlike the old inFlight leak this state is explicit,
       // health-degrading, and cannot launch a duplicate settlement.
       if (this.pendingVerifications.has(sessionId)) {
-        summary.skipped.push({ sessionId, reason: "verification_timeout_pending" });
+        summary.skipped.push({ ...diagnostic, reason: "verification_timeout_pending" });
         continue;
       }
       // A submitted session should never already carry a verification result,
       // but if one is present treat it as resolved-in-flight and leave it alone.
       if (session.verification) {
-        summary.skipped.push({ sessionId, reason: "already_verified" });
+        summary.skipped.push({ ...diagnostic, reason: "already_verified" });
         continue;
       }
       let job;
@@ -230,8 +232,7 @@ export class SubmittedJobAutoVerifierService {
         ({ job } = requireJobSnapshot(session));
       } catch (error) {
         summary.skipped.push({
-          sessionId,
-          jobId: session.jobId,
+          ...diagnostic,
           reason: error?.code ?? "job_snapshot_invalid",
           message: error?.message ?? String(error)
         });
@@ -239,10 +240,10 @@ export class SubmittedJobAutoVerifierService {
       }
       const mode = job?.verifierConfig?.handler ?? job?.verifierMode;
       if (!this.autoModes.has(mode)) {
-        summary.skipped.push({ sessionId, jobId: session.jobId, reason: "non_auto_mode", mode: mode ?? null });
+        summary.skipped.push({ ...diagnostic, reason: "non_auto_mode", mode: mode ?? null });
         continue;
       }
-      candidates.push({ sessionId, jobId: session.jobId, mode });
+      candidates.push({ ...diagnostic, mode });
     }
     summary.candidateCount = candidates.length;
 
@@ -256,7 +257,7 @@ export class SubmittedJobAutoVerifierService {
 
     for (const candidate of actionable) {
       if (this.dryRun) {
-        summary.skipped.push({ sessionId: candidate.sessionId, jobId: candidate.jobId, reason: "dry_run", mode: candidate.mode });
+        summary.skipped.push({ ...candidate, reason: "dry_run" });
         continue;
       }
       await this.verifyCandidate(candidate, summary);
@@ -328,8 +329,7 @@ export class SubmittedJobAutoVerifierService {
       entry.timedOut = true;
       this.inFlight.delete(sessionId);
       summary.errors.push({
-        sessionId,
-        jobId,
+        ...candidate,
         code: "verification_timeout",
         message: `Verification did not finish within ${this.candidateTimeoutMs}ms.`
       });
@@ -393,8 +393,7 @@ export class SubmittedJobAutoVerifierService {
     // only after settlement succeeds, so a failed run leaves the session in
     // `submitted`.
     summary?.errors.push({
-      sessionId,
-      jobId,
+      ...candidate,
       ...(error?.code ? { code: error.code } : {}),
       ...(isJobSnapshotIntegrityError(error) ? { integrityFailure: true } : {}),
       message: error?.message ?? String(error)
@@ -447,13 +446,20 @@ export class SubmittedJobAutoVerifierService {
       ...(summary.errors ?? [])
     ].filter((entry) => {
       if (!entry?.sessionId) return false;
-      const reason = entry.reason ?? entry.code;
-      return typeof reason === "string" && reason.startsWith("job_snapshot_");
+      // The exemption follows positive claimant proof captured at claim time,
+      // never the job id. A public worker who wins a race for a canary-posted
+      // job has no wallet-bound marker attribution and remains alarmable.
+      if (isHostedCanaryClaimant(entry)) return false;
+      return true;
     });
     const next = new Map();
     for (const failure of failures) {
-      const reason = failure.reason ?? failure.code;
-      const key = `${failure.sessionId}:${reason}`;
+      // The health invariant is session-scoped: a submitted session that is
+      // skipped or errors on consecutive runs still represents an unpaid
+      // worker even if the reported cause changes between runs. Unknown future
+      // reasons must fail visible instead of disappearing from health.
+      const reason = failure.reason ?? failure.code ?? "unknown";
+      const key = failure.sessionId;
       const previous = this.submittedFailureStreaks.get(key);
       next.set(key, {
         sessionId: failure.sessionId,
@@ -465,6 +471,16 @@ export class SubmittedJobAutoVerifierService {
     }
     this.submittedFailureStreaks = next;
   }
+}
+
+function sessionDiagnostic(session) {
+  return {
+    sessionId: session.sessionId,
+    jobId: session.jobId,
+    ...(isHostedCanaryClaimant(session)
+      ? { claimantAttribution: session.claimantAttribution }
+      : {})
+  };
 }
 
 export function loadSubmittedJobAutoVerifierConfig(env = process.env) {

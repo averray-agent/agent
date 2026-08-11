@@ -119,6 +119,12 @@ const posterOnboardingService = createPosterOnboardingService({
   publicBaseUrl: process.env.PUBLIC_BASE_URL
 });
 
+const arrivalCanaryMarkers = createArrivalCanaryMarkerService({
+  authConfig,
+  signTokenFromConfigImpl: signTokenFromConfig,
+  verifyTokenFromConfigImpl: verifyTokenFromConfig
+});
+
 const { metricsBearerToken, metricsAuthRequired } = resolveMetricsAuthConfig(process.env);
 const { paymentsSendEnabled } = resolvePaymentRouteConfig(process.env);
 const indexerHealthProbe = createConfiguredIndexerHealthProbe(process.env);
@@ -511,6 +517,7 @@ const handleJobRoute = createJobRoutes({
   service,
   externalPostingService,
   posterOnboardingService,
+  verifyCanaryMarker: (candidate) => arrivalCanaryMarkers.verify(candidate),
 });
 
 const handleMcpJobRoute = createJobRoutes({
@@ -683,12 +690,6 @@ const executeMcpTool = createMcpToolExecutor({
 
 // Records who reaches the front door. Injected rather than reached for, so
 // the MCP handler stays testable without a state store.
-const arrivalCanaryMarkers = createArrivalCanaryMarkerService({
-  authConfig,
-  signTokenFromConfigImpl: signTokenFromConfig,
-  verifyTokenFromConfigImpl: verifyTokenFromConfig
-});
-
 const arrivalObservatory = new ArrivalObservatory({
   stateStore,
   metrics,
