@@ -1,3 +1,5 @@
+import { GuardedSchedulerLoop, schedulerRunTimeoutMs, summaryErrorsOutcome } from "./guarded-scheduler-loop.js";
+
 const DEFAULT_INTERVAL_MS = 60 * 1000;
 const DEFAULT_MAX_PER_RUN = 25;
 
@@ -19,6 +21,15 @@ export class ExternalPosterReviewEscalatorService {
     this.running = false;
     this.timer = undefined;
     this.lastRun = undefined;
+    this.schedulerLoop = new GuardedSchedulerLoop({
+      host: this,
+      name: "external-poster-review-escalator",
+      intervalMs: this.intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs(this.intervalMs),
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: (summary) => summaryErrorsOutcome(summary, "poster_review_escalation_errors"),
+      logger: this.logger
+    });
   }
 
   start() {
@@ -29,8 +40,7 @@ export class ExternalPosterReviewEscalatorService {
 
   stop() {
     this.running = false;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = undefined;
+    this.schedulerLoop.stop();
   }
 
   async getStatus() {
@@ -40,7 +50,8 @@ export class ExternalPosterReviewEscalatorService {
       intervalMs: this.intervalMs,
       maxPerRun: this.maxPerRun,
       reviewWindowSeconds: this.posterReviewService.reviewWindowSeconds,
-      lastRun: this.lastRun
+      lastRun: this.lastRun,
+      ...this.schedulerLoop.getStatus()
     };
   }
 
@@ -112,11 +123,7 @@ export class ExternalPosterReviewEscalatorService {
   }
 
   async runOnceAndSchedule() {
-    await this.runOnce(new Date());
-    if (!this.running) return;
-    this.timer = setTimeout(() => {
-      void this.runOnceAndSchedule();
-    }, this.intervalMs);
+    return this.schedulerLoop.runOnceAndSchedule();
   }
 
   finishRun(summary) {

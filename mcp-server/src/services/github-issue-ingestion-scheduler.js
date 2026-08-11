@@ -4,6 +4,7 @@ import {
   DEFAULT_SECURITY_STANDARDS_DENYLIST,
   parseRepoList
 } from "../core/maintainer-surface-policy.js";
+import { GuardedSchedulerLoop, ingestionSchedulerOutcome, schedulerRunTimeoutMs } from "./guarded-scheduler-loop.js";
 
 export class GithubIssueIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -41,6 +42,19 @@ export class GithubIssueIngestionScheduler {
     this.timer = undefined;
     this.running = false;
     this.lastRun = undefined;
+    this.schedulerLoop = new GuardedSchedulerLoop({
+      host: this,
+      name: "github-issue-ingestion-scheduler",
+      intervalMs: this.intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs(this.intervalMs),
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: (summary) => ingestionSchedulerOutcome(summary, {
+        noInputReasons: ["no_queries_configured"],
+        emptySourceState: "github_issue_queries_empty_repeated",
+        emptySourceMessage: "Configured GitHub searches produced no eligible issues for three consecutive runs."
+      }),
+      logger: this.logger
+    });
   }
 
   start() {
@@ -53,10 +67,7 @@ export class GithubIssueIngestionScheduler {
 
   stop() {
     this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
+    this.schedulerLoop.stop();
   }
 
   async getStatus() {
@@ -74,7 +85,8 @@ export class GithubIssueIngestionScheduler {
       denylistRepoCount: this.denylistRepos.length,
       scanRepoPolicies: this.scanRepoPolicies,
       currentOpenJobs: this.countOpenGithubJobs(),
-      lastRun: this.lastRun
+      lastRun: this.lastRun,
+      ...this.schedulerLoop.getStatus()
     };
   }
 
@@ -180,16 +192,7 @@ export class GithubIssueIngestionScheduler {
   }
 
   async runOnceAndSchedule() {
-    await this.runOnce(new Date());
-    if (!this.running) {
-      return;
-    }
-    if (this.timer) {
-      clearTimeout(this.timer);
-    }
-    this.timer = setTimeout(() => {
-      void this.runOnceAndSchedule();
-    }, this.intervalMs);
+    return this.schedulerLoop.runOnceAndSchedule();
   }
 
   finishRun(summary) {

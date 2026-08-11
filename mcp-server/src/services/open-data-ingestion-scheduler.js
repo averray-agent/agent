@@ -5,6 +5,7 @@ import {
   openDataResourceKey,
   parseDatasets
 } from "../jobs/ingest-open-data-datasets.js";
+import { GuardedSchedulerLoop, ingestionSchedulerOutcome, schedulerRunTimeoutMs } from "./guarded-scheduler-loop.js";
 
 export class OpenDataIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -37,6 +38,19 @@ export class OpenDataIngestionScheduler {
     this.running = false;
     this.lastRun = undefined;
     this.nextQueryIndex = 0;
+    this.schedulerLoop = new GuardedSchedulerLoop({
+      host: this,
+      name: "open-data-ingestion-scheduler",
+      intervalMs: this.intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs(this.intervalMs),
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: (summary) => ingestionSchedulerOutcome(summary, {
+        noInputReasons: ["no_queries_configured"],
+        emptySourceState: "open_data_queries_empty_repeated",
+        emptySourceMessage: "Configured open-data queries produced no eligible dataset resources for three consecutive runs."
+      }),
+      logger: this.logger
+    });
   }
 
   start() {
@@ -49,10 +63,7 @@ export class OpenDataIngestionScheduler {
 
   stop() {
     this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
+    this.schedulerLoop.stop();
   }
 
   async getStatus() {
@@ -71,7 +82,8 @@ export class OpenDataIngestionScheduler {
       maxJobsPerRun: this.maxJobsPerRun,
       maxOpenJobs: this.maxOpenJobs,
       currentOpenJobs: this.countOpenDataJobs(),
-      lastRun: this.lastRun
+      lastRun: this.lastRun,
+      ...this.schedulerLoop.getStatus()
     };
   }
 
@@ -186,16 +198,7 @@ export class OpenDataIngestionScheduler {
   }
 
   async runOnceAndSchedule() {
-    await this.runOnce(new Date());
-    if (!this.running) {
-      return;
-    }
-    if (this.timer) {
-      clearTimeout(this.timer);
-    }
-    this.timer = setTimeout(() => {
-      void this.runOnceAndSchedule();
-    }, this.intervalMs);
+    return this.schedulerLoop.runOnceAndSchedule();
   }
 
   finishRun(summary) {

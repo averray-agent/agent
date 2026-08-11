@@ -1,3 +1,5 @@
+import { GuardedSchedulerLoop, schedulerRunTimeoutMs, summaryErrorsOutcome } from "./guarded-scheduler-loop.js";
+
 const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_MAX_JOBS_PER_RUN = 25;
 const VALID_SWEEP_ACTIONS = new Set(["mark_stale", "pause", "archive"]);
@@ -26,6 +28,15 @@ export class JobStaleSweeperService {
     this.running = false;
     this.timer = undefined;
     this.lastRun = undefined;
+    this.schedulerLoop = new GuardedSchedulerLoop({
+      host: this,
+      name: "job-stale-sweeper",
+      intervalMs: this.intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs(this.intervalMs),
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: (summary) => summaryErrorsOutcome(summary, "stale_sweep_errors"),
+      logger: this.logger
+    });
   }
 
   start() {
@@ -36,10 +47,7 @@ export class JobStaleSweeperService {
 
   stop() {
     this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
+    this.schedulerLoop.stop();
   }
 
   async getStatus() {
@@ -51,7 +59,8 @@ export class JobStaleSweeperService {
       intervalMs: this.intervalMs,
       action: this.action,
       maxJobsPerRun: this.maxJobsPerRun,
-      lastRun: this.lastRun
+      lastRun: this.lastRun,
+      ...this.schedulerLoop.getStatus()
     };
   }
 
@@ -133,12 +142,7 @@ export class JobStaleSweeperService {
   }
 
   async runOnceAndSchedule() {
-    await this.runOnce(new Date());
-    if (!this.running) return;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => {
-      void this.runOnceAndSchedule();
-    }, this.intervalMs);
+    return this.schedulerLoop.runOnceAndSchedule();
   }
 
   finishRun(summary) {
