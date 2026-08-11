@@ -290,6 +290,13 @@ contract EscrowCore is ReentrancyGuard {
         return _computeClaimEconomics(worker, jobId, job);
     }
 
+    /// @notice Capability probe for clients that must distinguish the
+    ///         successor's retained-fee policy from older EscrowCore runtimes
+    ///         that refunded the fee on successful work.
+    function retainsClaimFeeOnSuccess() external pure returns (bool) {
+        return true;
+    }
+
     function setOnboardingWaiverEligible(bytes32 jobId, bool eligible) external whenNotPaused onlyOperator {
         if (_jobs[jobId].state == JobState.None) revert UnknownJob();
         onboardingWaiverEligibleJobs[jobId] = eligible;
@@ -696,7 +703,7 @@ contract EscrowCore is ReentrancyGuard {
         job.released = job.reward;
         job.state = JobState.Closed;
 
-        _releaseClaimEconomics(job);
+        _settleSuccessfulClaimEconomics(job, msg.sender);
         _settlePayout(jobId, job, settlementKey, job.reward, job.reward);
         _refundPosterBalances(job);
 
@@ -747,7 +754,7 @@ contract EscrowCore is ReentrancyGuard {
 
         if (allReleased) {
             job.state = JobState.Closed;
-            _releaseClaimEconomics(job);
+            _settleSuccessfulClaimEconomics(job, msg.sender);
             _refundPosterBalances(job);
             reputation.mintBadge(job.worker, job.category, 2, metadataURI);
             reputation.updateReputation(job.worker, 200, 150, job.reward);
@@ -835,7 +842,10 @@ contract EscrowCore is ReentrancyGuard {
             bytes32 settlementKey = keccak256(abi.encode(jobId, bytes32("DISPUTE"), job.released, workerPayout));
             _settlePayout(jobId, job, settlementKey, workerPayout, job.released + workerPayout);
             job.released += workerPayout;
-            _releaseClaimEconomics(job);
+            // A worker-favour dispute dismisses the rejection. Retain the
+            // post-tier fee to treasury, but do not reward the verifier whose
+            // rejection was overturned.
+            _settleSuccessfulClaimEconomics(job, address(0));
         } else {
             _slashDisputedWorker(job);
             emit JobRejected(jobId, reasonCode);
@@ -1023,10 +1033,17 @@ contract EscrowCore is ReentrancyGuard {
         return (reward / 10_000) * uint256(feeBps) + ((reward % 10_000) * uint256(feeBps)) / 10_000;
     }
 
-    function _releaseClaimEconomics(JobEscrow storage job) internal {
-        uint256 totalLocked = job.claimStake + job.claimFee;
-        if (totalLocked > 0 && job.worker != address(0)) {
-            accounts.releaseJobStake(job.worker, job.asset, totalLocked);
+    function _settleSuccessfulClaimEconomics(JobEscrow storage job, address verifierRecipient) internal {
+        if (job.worker != address(0)) {
+            if (job.claimStake > 0) {
+                accounts.releaseJobStake(job.worker, job.asset, job.claimStake);
+            }
+            // Tier-0 claims have a zero fee. Once the waiver is exhausted, the
+            // fee is retained on success so operator-brokered execution is paid
+            // in USDC from the worker's earnings rather than requiring DOT.
+            if (job.claimFee > 0) {
+                accounts.slashClaimFee(job.worker, job.asset, job.claimFee, verifierRecipient);
+            }
         }
         _clearClaimEconomics(job);
     }
