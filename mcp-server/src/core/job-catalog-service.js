@@ -30,6 +30,10 @@ import {
 import { buildVerificationContract } from "./verifier-contract.js";
 import { decimalsForAssetSymbol, isNativeGasAsset } from "./assets.js";
 import { decimalToBaseUnits, formatBaseUnits } from "./platform-service-helpers.js";
+import {
+  ONBOARDING_SUBSIDY_EXHAUSTED_MESSAGE,
+  ONBOARDING_SUBSIDY_EXHAUSTED_REASON
+} from "./claim-economics.js";
 
 export {
   ROLE_REQUIREMENTS,
@@ -371,7 +375,10 @@ export class JobCatalogService {
       available: liquid,
       required: claimEconomics.totalClaimLock
     });
-    const eligible = catalogEligible && claimFunding.sufficient;
+    const onboardingSubsidy = claimEconomics.onboardingSubsidy;
+    const subsidyBlocked = onboardingSubsidy?.applies === true
+      && onboardingSubsidy.available === false;
+    const eligible = catalogEligible && claimFunding.sufficient && !subsidyBlocked;
     const tierGate = summarizeTierGate(job.tier, reputation);
     const jobType = effectiveJobType(job);
     const requiredRole = effectiveRequiredRole(job);
@@ -390,12 +397,16 @@ export class JobCatalogService {
       claimFeeBps: claimEconomics.claimFeeBps,
       claimEconomicsWaived: claimEconomics.claimEconomicsWaived,
       claimEconomicsWaiverScope: "next_claim_projection",
+      ...(onboardingSubsidy ? { onboardingSubsidy } : {}),
       claimNumber: claimEconomics.claimNumber,
       totalClaimLock: claimEconomics.totalClaimLock,
       claimFundingAsset: job.rewardAsset,
       claimFundingSufficient: claimFunding.sufficient,
       claimFundingShortfall: claimFunding.shortfall,
-      reason: claimFunding.sufficient ? undefined : "insufficient_liquidity",
+      reason: subsidyBlocked
+        ? ONBOARDING_SUBSIDY_EXHAUSTED_REASON
+        : claimFunding.sufficient ? undefined : "insufficient_liquidity",
+      ...(subsidyBlocked ? { reasonMessage: ONBOARDING_SUBSIDY_EXHAUSTED_MESSAGE } : {}),
       strategyUnwindNeeded: !claimFunding.sufficient,
       requiredOutputSchema: job.outputSchemaRef,
       submissionContract: buildSubmissionContract(job),
@@ -417,6 +428,7 @@ export class JobCatalogService {
         "submission_rejected",
         "dispute_opened",
         "insufficient_liquidity",
+        ONBOARDING_SUBSIDY_EXHAUSTED_REASON,
         "paused_system"
       ]
     };
@@ -707,7 +719,9 @@ export function explainEligibilityFromPreflight(preflight) {
     totalClaimLock: preflight.totalClaimLock,
     claimFundingSufficient: preflight.claimFundingSufficient,
     claimFundingShortfall: preflight.claimFundingShortfall,
-    claimEconomicsWaived: preflight.claimEconomicsWaived
+    claimEconomicsWaived: preflight.claimEconomicsWaived,
+    onboardingSubsidy: preflight.onboardingSubsidy,
+    reasonMessage: preflight.reasonMessage
   };
 }
 

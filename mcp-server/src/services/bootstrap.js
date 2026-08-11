@@ -1,5 +1,6 @@
 import { PlatformService } from "../core/platform-service.js";
 import { createStateStore } from "../core/state-store.js";
+import { createOnboardingSubsidyBudget } from "../core/claim-economics.js";
 import { migrateLegacyBankXcmGenerationState } from "./bank-xcm-watch-migration.js";
 import { AccountOverlayStore } from "../core/account-overlay-store.js";
 import { PolicyService } from "../core/policy-service.js";
@@ -158,13 +159,24 @@ const reputations = new Map([
 export function createPlatformService() {
   const gateway = new BlockchainGateway();
   const stateStore = createStateStore();
+  const onboardingSubsidyBudget = createOnboardingSubsidyBudget({ stateStore });
   const eventBus = new EventBus({ eventStore: stateStore });
   const accounts = new AccountOverlayStore({ stateStore });
   accounts.seed(...SEED_DEV_OVERLAY);
   // No hydrate here — test factory uses a fresh in-memory state-store
   // every construction; nothing to hydrate from. createPlatformRuntime
   // below hydrates against the production durable store.
-  return new PlatformService(jobs, profiles, accounts, reputations, gateway, stateStore, eventBus);
+  return new PlatformService(
+    jobs,
+    profiles,
+    accounts,
+    reputations,
+    gateway,
+    stateStore,
+    eventBus,
+    undefined,
+    onboardingSubsidyBudget
+  );
 }
 
 export async function createPlatformRuntime() {
@@ -269,6 +281,11 @@ export async function createPlatformRuntime() {
   }
   const pimlicoClient = initStep("init-pimlico-client", logger, () => new PimlicoClient());
   const stateStore = initStep("init-state-store", logger, () => createStateStore(process.env, { logger }));
+  const onboardingSubsidyBudget = initStep(
+    "init-onboarding-subsidy-budget",
+    logger,
+    () => createOnboardingSubsidyBudget({ stateStore, env: process.env })
+  );
   try {
     await migrateLegacyBankXcmGenerationState(stateStore, { logger });
   } catch (error) {
@@ -304,7 +321,17 @@ export async function createPlatformRuntime() {
   const platformService = initStep(
     "init-platform-service",
     logger,
-    () => new PlatformService(jobs, profiles, accounts, reputations, gateway, stateStore, eventBus)
+    () => new PlatformService(
+      jobs,
+      profiles,
+      accounts,
+      reputations,
+      gateway,
+      stateStore,
+      eventBus,
+      undefined,
+      onboardingSubsidyBudget
+    )
   );
   const rewardBankHealthProvider = initStep(
     "init-reward-bank-health-provider",

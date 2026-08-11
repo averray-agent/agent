@@ -77,7 +77,8 @@ export class PlatformService {
     blockchainGateway = undefined,
     stateStore = createStateStore(),
     eventBus = undefined,
-    recurringScheduler = undefined
+    recurringScheduler = undefined,
+    onboardingSubsidyBudget = undefined
   ) {
     this.jobs = jobs;
     this.profiles = profiles;
@@ -87,6 +88,7 @@ export class PlatformService {
     this.stateStore = stateStore;
     this.eventBus = eventBus;
     this.recurringScheduler = recurringScheduler;
+    this.onboardingSubsidyBudget = onboardingSubsidyBudget;
     this.githubIssueIngestionScheduler = undefined;
     this.wikipediaMaintenanceIngestionScheduler = undefined;
     this.osvAdvisoryIngestionScheduler = undefined;
@@ -130,7 +132,8 @@ export class PlatformService {
       this.accountMutationService,
       this.getDefaultClaimStakeBps.bind(this),
       this.getClaimableJobDefinition.bind(this),
-      this.getClaimEconomicsConfig.bind(this)
+      this.getClaimEconomicsConfig.bind(this),
+      { onboardingSubsidyBudget: this.onboardingSubsidyBudget }
     );
     this.verificationIngestionService = new VerificationIngestionService(
       this.stateStore,
@@ -910,6 +913,7 @@ export class PlatformService {
     ]);
     const claimStateEligible = job.claimable === true && job.currentWalletCanClaim !== false;
     const fundingBlocked = claimStateEligible && preflight.claimFundingSufficient === false;
+    const subsidyBlocked = preflight.reason === "onboarding_subsidy_exhausted";
     const result = {
       ...preflight,
       catalogEligible: preflight.catalogEligible ?? preflight.eligible,
@@ -918,7 +922,7 @@ export class PlatformService {
       claimState: job.claimState,
       claimable: job.claimable,
       currentWalletCanClaim: job.currentWalletCanClaim,
-      reason: fundingBlocked ? preflight.reason : job.reason,
+      reason: fundingBlocked || subsidyBlocked ? preflight.reason : job.reason,
       claimedBy: job.claimedBy,
       claimedAt: job.claimedAt,
       claimExpiresAt: job.claimExpiresAt,
@@ -1424,9 +1428,14 @@ export class PlatformService {
       getClaimEconomicsConfig: this.getClaimEconomicsConfig.bind(this),
       getLocalPriorClaimCount: async () => countClaimedSessions(
         await this.jobExecutionService.collectSessionHistory(wallet)
-      )
+      ),
+      onboardingSubsidyBudget: this.onboardingSubsidyBudget
     });
     return decision.economics;
+  }
+
+  async getOnboardingSubsidyStatus() {
+    return this.onboardingSubsidyBudget?.getStatus?.();
   }
 
   async getReputation(wallet) {

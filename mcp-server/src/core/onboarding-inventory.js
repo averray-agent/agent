@@ -56,6 +56,7 @@ export async function resolveOnboardingInventoryHealth({
       : waiverEligibleClaimableJobs < minimum
         ? "onboarding_waiver_inventory_below_minimum"
         : "onboarding_waiver_inventory_ready";
+    const subsidy = await service.getOnboardingSubsidyStatus?.();
 
     return {
       status,
@@ -64,7 +65,8 @@ export async function resolveOnboardingInventoryHealth({
       minimumWaiverEligibleClaimableJobs: minimum,
       asOf: now.toISOString(),
       source: "job_catalog",
-      readable: true
+      readable: true,
+      ...(subsidy ? { subsidy } : {})
     };
   } catch (error) {
     return {
@@ -81,16 +83,27 @@ export async function resolveOnboardingInventoryHealth({
 }
 
 export function buildOnboardingInventoryWarnings(onboarding) {
-  if (!onboarding || onboarding.status === "ready") {
+  if (!onboarding) {
     return [];
   }
+  const warnings = [];
   const count = onboarding.waiverEligibleClaimableJobs;
   const minimum = onboarding.minimumWaiverEligibleClaimableJobs;
-  return [{
-    code: onboarding.reason,
-    severity: "warning",
-    message: count === null
-      ? "Waiver-eligible onboarding inventory could not be verified."
-      : `Only ${count} waiver-eligible claimable onboarding job(s) are available; minimum is ${minimum}.`
-  }];
+  if (onboarding.status !== "ready") {
+    warnings.push({
+      code: onboarding.reason,
+      severity: "warning",
+      message: count === null
+        ? "Waiver-eligible onboarding inventory could not be verified."
+        : `Only ${count} waiver-eligible claimable onboarding job(s) are available; minimum is ${minimum}.`
+    });
+  }
+  if (onboarding.subsidy?.headroomUsdc === 0) {
+    warnings.push({
+      code: "onboarding_subsidy_exhausted",
+      severity: "warning",
+      message: "The free onboarding tier is fully allocated for today; the self-funded claim path remains available."
+    });
+  }
+  return warnings;
 }

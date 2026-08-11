@@ -59,6 +59,26 @@ local ttl = redis.call("pttl", KEYS[1])
 return {current, ttl}
 `;
 
+// Atomically reserve capacity from a named daily aggregate. Reservation ids
+// make claim retries idempotent, while the day in the Redis key makes a wallet
+// change irrelevant and gives the budget an unambiguous UTC reset boundary.
+const RESERVE_DAILY_BUDGET_SCRIPT = `
+local existing = redis.call("hget", KEYS[1], ARGV[1])
+local used = tonumber(redis.call("hget", KEYS[1], "used") or "0")
+if existing then
+  return {1, used, 1}
+end
+local amount = tonumber(ARGV[2])
+local budget = tonumber(ARGV[3])
+if used + amount > budget then
+  return {0, used, 0}
+end
+local nextUsed = used + amount
+redis.call("hset", KEYS[1], "used", tostring(nextUsed), ARGV[1], ARGV[2])
+redis.call("expire", KEYS[1], ARGV[4])
+return {1, nextUsed, 0}
+`;
+
 const MATERIALIZE_EXTERNAL_DRAFT_SCRIPT = `
 if redis.call("exists", KEYS[1]) == 1 or redis.call("exists", KEYS[3]) == 1 then
   return 0
@@ -84,6 +104,7 @@ export class MemoryStateStore {
     this.claimLocks = new Map();
     this.nonces = new Map();
     this.rateLimits = new Map();
+    this.dailyBudgets = new Map();
     this.mutationReceipts = new Map();
     this.xcmObservations = new Map();
     this.xcmBalanceWatches = new Map();
@@ -284,6 +305,52 @@ export class MemoryStateStore {
     if (existing?.owner === owner) {
       this.claimLocks.delete(lockId);
     }
+  }
+
+  async getDailyBudgetUsage(scope, day) {
+    const entry = this.dailyBudgets.get(`${scope}:${day}`);
+    return {
+      usedUnits: entry?.usedUnits ?? 0,
+      reservationCount: entry?.reservations.size ?? 0
+    };
+  }
+
+  async reserveDailyBudget(scope, day, {
+    reservationId,
+    amountUnits,
+    limitUnits
+  } = {}) {
+    const key = `${scope}:${day}`;
+    const entry = this.dailyBudgets.get(key) ?? {
+      usedUnits: 0,
+      reservations: new Map()
+    };
+    const existing = entry.reservations.get(reservationId);
+    if (existing !== undefined) {
+      return dailyBudgetReservationResult({
+        accepted: true,
+        usedUnits: entry.usedUnits,
+        limitUnits,
+        alreadyReserved: true
+      });
+    }
+    if (entry.usedUnits + amountUnits > limitUnits) {
+      return dailyBudgetReservationResult({
+        accepted: false,
+        usedUnits: entry.usedUnits,
+        limitUnits,
+        alreadyReserved: false
+      });
+    }
+    entry.usedUnits += amountUnits;
+    entry.reservations.set(reservationId, amountUnits);
+    this.dailyBudgets.set(key, entry);
+    return dailyBudgetReservationResult({
+      accepted: true,
+      usedUnits: entry.usedUnits,
+      limitUnits,
+      alreadyReserved: false
+    });
   }
 
   async storeNonce(nonce, wallet, ttlSeconds = 300) {
@@ -945,6 +1012,47 @@ export class RedisStateStore {
     await this.client.eval(RELEASE_CLAIM_LOCK_SCRIPT, {
       keys: [key],
       arguments: [owner]
+    });
+  }
+
+  async getDailyBudgetUsage(scope, day) {
+    await this.connect();
+    const key = this.key("daily-budget", `${scope}:${day}`);
+    const [usedRaw, fieldCount] = await Promise.all([
+      this.client.hGet(key, "used"),
+      this.client.hLen(key)
+    ]);
+    return {
+      usedUnits: Number(usedRaw ?? 0),
+      reservationCount: Math.max(Number(fieldCount ?? 0) - (usedRaw === null ? 0 : 1), 0)
+    };
+  }
+
+  async reserveDailyBudget(scope, day, {
+    reservationId,
+    amountUnits,
+    limitUnits,
+    ttlSeconds = 86_400
+  } = {}) {
+    await this.connect();
+    const key = this.key("daily-budget", `${scope}:${day}`);
+    const reply = await this.client.eval(RESERVE_DAILY_BUDGET_SCRIPT, {
+      keys: [key],
+      arguments: [
+        String(reservationId),
+        String(amountUnits),
+        String(limitUnits),
+        String(Math.max(1, Math.ceil(ttlSeconds)))
+      ]
+    });
+    const [acceptedRaw, usedRaw, alreadyReservedRaw] = Array.isArray(reply)
+      ? reply
+      : [0, 0, 0];
+    return dailyBudgetReservationResult({
+      accepted: Number(acceptedRaw) === 1,
+      usedUnits: Number(usedRaw),
+      limitUnits,
+      alreadyReserved: Number(alreadyReservedRaw) === 1
     });
   }
 
@@ -1676,6 +1784,16 @@ export function createStateStore(env = process.env, { logger = console } = {}) {
 // JSON round-trip is the simplest correct clone for that shape.
 function cloneAccountOverlay(overlay) {
   return cloneJsonRecord(overlay);
+}
+
+function dailyBudgetReservationResult({ accepted, usedUnits, limitUnits, alreadyReserved }) {
+  return {
+    accepted,
+    usedUnits,
+    limitUnits,
+    remainingUnits: Math.max(limitUnits - usedUnits, 0),
+    alreadyReserved
+  };
 }
 
 function normalizeExternalJobId(jobId) {
