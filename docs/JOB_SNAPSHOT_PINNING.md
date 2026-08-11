@@ -2,14 +2,14 @@
 
 Status: **design, not built.** Written after the 2026-08-11 incident.
 
-Related: #1052 (the dead scheduler), #1058 (recovering the 33 orphaned submissions),
+Related: #1052 (the dead scheduler), #1058 (recovering the 32 orphaned submissions),
 #1057 (the scheduler fix).
 
 ---
 
 ## The failure this prevents
 
-On 2026-08-11 an external worker claimed and submitted 33 jobs. The auto-verifier died
+On 2026-08-11 an external worker claimed and submitted 32 jobs. The auto-verifier died
 before settling them. While it was dead, ingestion rotated the job catalogue and those job
 definitions aged out. When the verifier was fixed and restarted, it found the sessions, could
 not resolve their jobs, and skipped every one:
@@ -108,7 +108,7 @@ all along. Recovery needed the discipline that the happy path lacked.
 ## Observability that should ship with it
 
 A persistent `job_not_found` skip on a **submitted** session should degrade health. Today
-the verifier reports `ok: true` while permanently refusing to pay 33 people — technically
+the verifier reports `ok: true` while permanently refusing to settle 32 submissions — technically
 accurate about the scheduler, useless about the outcome.
 
 The rule worth generalising: **a component is not healthy merely because its loop is
@@ -119,7 +119,7 @@ admin-only, which is why this took hours to locate instead of minutes.
 ## Migration
 
 Existing sessions have no snapshot. Backfilling is best-effort and may be impossible for the
-33 already orphaned — that is #1058's problem, not this one. New claims get snapshots from
+32 already orphaned — that is #1058's problem, not this one. New claims get snapshots from
 the day it ships; old sessions keep the current behaviour and are drained or settled
 manually.
 
