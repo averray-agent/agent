@@ -185,6 +185,56 @@ test("persistent submitted-session integrity skips degrade verifier health", asy
   assert.equal(health.persistentSubmittedFailures[0].reason, "job_snapshot_missing");
 });
 
+test("persistent worker-canary snapshot skips do not degrade payout-queue health", async () => {
+  const harness = makeHarness({
+    sessions: [{
+      sessionId: "worker-canary-1786453506586:0xcanary",
+      jobId: "worker-canary-1786453506586",
+      status: "submitted"
+    }]
+  });
+  const service = makeService(harness);
+  service.running = true;
+  service.startedAt = new Date().toISOString();
+
+  const first = await service.runOnce();
+  const second = await service.runOnce();
+  const health = await service.getHealth();
+
+  // The integrity skip remains visible in each run; only the health-degrading
+  // streak excludes an operator-owned canary that is not an unpaid user.
+  assert.equal(first.skipped[0].reason, "job_snapshot_missing");
+  assert.equal(second.skipped[0].reason, "job_snapshot_missing");
+  assert.equal(health.ok, true);
+  assert.equal(health.state, "running");
+  assert.deepEqual(health.persistentSubmittedFailures, []);
+});
+
+test("canary exclusion does not hide a persistent external-worker skip", async () => {
+  const harness = makeHarness({
+    sessions: [
+      {
+        sessionId: "worker-canary-1786453506586:0xcanary",
+        jobId: "worker-canary-1786453506586",
+        status: "submitted"
+      },
+      { sessionId: "external-unpaid:0xworker", jobId: "missing-external-job", status: "submitted" }
+    ]
+  });
+  const service = makeService(harness);
+  service.running = true;
+  service.startedAt = new Date().toISOString();
+
+  await service.runOnce();
+  await service.runOnce();
+  const health = await service.getHealth();
+
+  assert.equal(health.ok, false);
+  assert.equal(health.state, "submitted_session_persistently_skipped");
+  assert.equal(health.persistentSubmittedFailureCount, 1);
+  assert.equal(health.persistentSubmittedFailures[0].sessionId, "external-unpaid:0xworker");
+});
+
 test("does nothing when disabled", async () => {
   const harness = makeHarness({
     sessions: [{ sessionId: "s-bench", jobId: "bench-001", status: "submitted" }]

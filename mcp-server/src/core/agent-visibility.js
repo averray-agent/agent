@@ -1,8 +1,12 @@
 export const SYNTHETIC_CANARY_JOB_PREFIX = "worker-canary-";
 
+export function isSyntheticCanaryJobId(jobId) {
+  return normalizeJobId(jobId).startsWith(SYNTHETIC_CANARY_JOB_PREFIX);
+}
+
 export function isExternalAgentJobId(jobId) {
   const normalized = normalizeJobId(jobId);
-  return Boolean(normalized) && !normalized.startsWith(SYNTHETIC_CANARY_JOB_PREFIX);
+  return Boolean(normalized) && !isSyntheticCanaryJobId(normalized);
 }
 
 /**
@@ -15,9 +19,7 @@ export function isSyntheticAgentSessions(sessions) {
     ? sessions.filter((session) => normalizeJobId(session?.jobId))
     : [];
   return safeSessions.length > 0
-    && safeSessions.every((session) => (
-      normalizeJobId(session.jobId).startsWith(SYNTHETIC_CANARY_JOB_PREFIX)
-    ));
+    && safeSessions.every((session) => isSyntheticCanaryJobId(session.jobId));
 }
 
 function normalizeJobId(value) {

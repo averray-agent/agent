@@ -41,10 +41,20 @@ function rejectedSession({ jobId, sessionId, updatedAt }) {
 }
 
 test("buildAgentProfile returns a schema-shaped document for a known wallet", () => {
+  const catalogue = jobCatalog();
   const sessions = [
-    approvedSession({ jobId: "starter-coding-001", sessionId: "s1", updatedAt: "2026-04-10T10:00:00Z" }),
-    approvedSession({ jobId: "starter-coding-001", sessionId: "s2", updatedAt: "2026-04-12T10:00:00Z" }),
-    approvedSession({ jobId: "governance-pro-001", sessionId: "s3", updatedAt: "2026-04-15T10:00:00Z" }),
+    {
+      ...approvedSession({ jobId: "starter-coding-001", sessionId: "s1", updatedAt: "2026-04-10T10:00:00Z" }),
+      jobSnapshot: buildJobSnapshot(catalogue.get("starter-coding-001"))
+    },
+    {
+      ...approvedSession({ jobId: "starter-coding-001", sessionId: "s2", updatedAt: "2026-04-12T10:00:00Z" }),
+      jobSnapshot: buildJobSnapshot(catalogue.get("starter-coding-001"))
+    },
+    {
+      ...approvedSession({ jobId: "governance-pro-001", sessionId: "s3", updatedAt: "2026-04-15T10:00:00Z" }),
+      jobSnapshot: buildJobSnapshot(catalogue.get("governance-pro-001"))
+    },
     rejectedSession({ jobId: "starter-coding-001", sessionId: "s4", updatedAt: "2026-04-14T10:00:00Z" })
   ];
 
@@ -52,7 +62,7 @@ test("buildAgentProfile returns a schema-shaped document for a known wallet", ()
     wallet: WALLET,
     reputation: { skill: 150, reliability: 170, economic: 80, tier: "pro" },
     sessions,
-    getJobDefinition: makeGetJob(),
+    getJobDefinition: makeGetJob(catalogue),
     publicBaseUrl: "https://api.averray.com",
     fetchedAt: "2026-04-16T00:00:00Z"
   });
@@ -116,10 +126,75 @@ test("earnings use the immutable claim-time snapshot after the catalogue rotates
   assert.deepEqual(profile.stats.totalEarned, {
     asset: "USDC",
     amount: "250000",
-    decimals: 6
+    decimals: 6,
+    incomplete: false,
+    includedApprovedCount: 1,
+    omittedApprovedCount: 0
   });
   assert.equal(profile.badges[0].reward.amount, "250000");
   assert.equal(profile.badges[0].category, "coding");
+});
+
+test("snapshot-less approvals are omitted from earnings and disclosed instead of counted as zero", () => {
+  const pinnedJob = {
+    id: "pinned-paid-job",
+    category: "coding",
+    rewardAsset: "USDC",
+    rewardDecimals: 6,
+    rewardAmount: "0.8",
+    claimTtlSeconds: 3600
+  };
+  const sessions = [
+    {
+      ...approvedSession({
+        jobId: pinnedJob.id,
+        sessionId: "pinned-earned",
+        updatedAt: "2026-08-11T10:00:00Z"
+      }),
+      jobSnapshot: buildJobSnapshot(pinnedJob)
+    },
+    approvedSession({
+      jobId: "legacy-still-in-catalogue",
+      sessionId: "legacy-live",
+      updatedAt: "2026-08-11T11:00:00Z"
+    }),
+    approvedSession({
+      jobId: "legacy-rotated-away",
+      sessionId: "legacy-missing",
+      updatedAt: "2026-08-11T12:00:00Z"
+    })
+  ];
+
+  const profile = buildAgentProfile({
+    wallet: WALLET,
+    reputation: { skill: 100, reliability: 100, economic: 100 },
+    sessions,
+    // Even a currently resolvable legacy definition is mutable and therefore
+    // not authoritative enough to contribute to lifetime earnings.
+    getJobDefinition: (jobId) => jobId === "legacy-still-in-catalogue"
+      ? {
+          id: jobId,
+          category: "coding",
+          rewardAsset: "USDC",
+          rewardDecimals: 6,
+          rewardAmount: "99"
+        }
+      : undefined
+  });
+
+  assert.equal(profile.stats.approvedCount, 3);
+  assert.deepEqual(profile.stats.totalEarned, {
+    asset: "USDC",
+    amount: "800000",
+    decimals: 6,
+    incomplete: true,
+    includedApprovedCount: 1,
+    omittedApprovedCount: 2,
+    omissionReason: "missing_claim_time_job_snapshot"
+  });
+  assert.equal(profile.badges.find((badge) => badge.sessionId === "pinned-earned").reward.amount, "800000");
+  assert.equal("reward" in profile.badges.find((badge) => badge.sessionId === "legacy-live"), false);
+  assert.equal("reward" in profile.badges.find((badge) => badge.sessionId === "legacy-missing"), false);
 });
 
 test("buildAgentProfile returns null completionRate when no terminal sessions exist", () => {

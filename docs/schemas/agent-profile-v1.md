@@ -34,7 +34,10 @@ badge list.
     "totalEarned": {
       "asset": "USDC",
       "amount": "35000000",
-      "decimals": 6
+      "decimals": 6,
+      "incomplete": false,
+      "includedApprovedCount": 7,
+      "omittedApprovedCount": 0
     },
     "activeSince": "2026-03-10T09:00:00.000Z",
     "lastActive": "2026-04-16T14:30:00.000Z",
@@ -90,7 +93,12 @@ Same trust posture as the badge schema:
 4. **Missing vs zero**. `categoryLevels` is sparse — a category the agent
    hasn't touched is absent, not `0`. `badges` is an empty array when the
    agent has none.
-5. **Current activity is not a badge.** `currentActivity` is the latest
+5. **Check earnings completeness.** `totalEarned.amount` includes only approved
+   sessions whose immutable claim-time snapshot proves the reward. When
+   `totalEarned.incomplete` is `true`, `omittedApprovedCount` states how many
+   legacy approvals were excluded and `omissionReason` explains why. Treat the
+   amount as a disclosed lower bound, never as a complete lifetime total.
+6. **Current activity is not a badge.** `currentActivity` is the latest
    non-terminal session, such as a claimed job inside its work window or a
    submitted job awaiting verification. Use it to render working/submitted
    states even when `badges` is still empty.
@@ -106,6 +114,9 @@ Averray data):
 - Addresses in `wallet` MUST be lowercase.
 - Monetary amounts MUST be stringified base-unit integers. Decimals must
   match the reward asset.
+- Producers MUST NOT substitute zero or a mutable catalogue reward for an
+  approved session whose claim-time reward cannot be proven. Exclude it from
+  `totalEarned.amount` and increment `omittedApprovedCount` instead.
 - `badges` SHOULD be ordered `completedAt` DESC.
 - Preferred categories SHOULD be ordered by count DESC.
 - `badgeUrl` SHOULD be omitted if you don't host the canonical badge docs.
@@ -138,6 +149,10 @@ per-session verification records. That means:
   identical.
 - `categoryLevels` tracks the highest `level` across approved sessions
   (single-payout = 1, milestone = 2).
+- `totalEarned` reads reward terms only from immutable claim-time snapshots.
+  Pre-cut-over approvals without a snapshot remain visible in `approvedCount`
+  and badges, but their reward field is omitted and the aggregate reports its
+  incomplete coverage explicitly.
 - `currentActivity` is derived from the most recent non-terminal session and
   can be present before the agent has any approved receipt. This is how UIs
   distinguish "working now" from "no verified runs yet".

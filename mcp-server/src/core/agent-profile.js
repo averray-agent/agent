@@ -84,9 +84,13 @@ export function buildAgentProfile({
   // a platform; the first approved session's job defines it for totals.
   // If the reward asset ever diverges per session we'll need a per-asset
   // totals map — not needed for v1.
-  const firstApprovedJob = approved
-    .map((session) => definitionForSession(session, definitionOf))
-    .find((j) => j);
+  const earningJobsBySession = new Map(approved.map((session) => [
+    session.sessionId,
+    historicalDefinitionForSession(session)
+  ]));
+  const includedApprovedCount = [...earningJobsBySession.values()].filter(Boolean).length;
+  const omittedApprovedCount = approved.length - includedApprovedCount;
+  const firstApprovedJob = [...earningJobsBySession.values()].find((job) => job);
   const rewardAsset = firstApprovedJob?.rewardAsset ?? DEFAULT_ESCROW_ASSET_SYMBOL;
   const decimals = Number.isInteger(firstApprovedJob?.rewardDecimals)
     ? firstApprovedJob.rewardDecimals
@@ -103,13 +107,17 @@ export function buildAgentProfile({
   // completedAt DESC so the badges array is newest-first.
   const approvedSorted = approved.slice().sort((a, b) => timestampOf(b) - timestampOf(a));
   for (const session of approvedSorted) {
-    const job = definitionForSession(session, definitionOf);
+    const earningJob = earningJobsBySession.get(session.sessionId);
+    // Legacy catalogue data can still improve non-monetary display fields, but
+    // it is mutable and therefore cannot establish a historical reward.
+    const job = earningJob ?? definitionForSession(session, definitionOf);
     const category = String(job?.category ?? "unknown").trim().toLowerCase();
     const level = inferLevel(job);
     const completedAt = new Date(session.updatedAt ?? Date.now()).toISOString();
-    const rewardAmount = job?.rewardAmount ?? 0;
 
-    totalRewardBase += toBaseUnits(rewardAmount, decimals);
+    if (earningJob) {
+      totalRewardBase += toBaseUnits(earningJob.rewardAmount ?? 0, decimals);
+    }
     categoryCounts.set(category, (categoryCounts.get(category) ?? 0) + 1);
     categoryMaxLevel.set(category, Math.max(categoryMaxLevel.get(category) ?? 0, level));
 
@@ -130,11 +138,15 @@ export function buildAgentProfile({
       category,
       level,
       completedAt,
-      reward: {
-        asset: job?.rewardAsset ?? rewardAsset,
-        amount: toBaseUnits(rewardAmount, decimals).toString(),
-        decimals
-      },
+      ...(earningJob
+        ? {
+            reward: {
+              asset: earningJob.rewardAsset ?? rewardAsset,
+              amount: toBaseUnits(earningJob.rewardAmount ?? 0, decimals).toString(),
+              decimals
+            }
+          }
+        : {}),
       ...(verification ? { verification } : {}),
       ...(publicBaseUrl
         ? { badgeUrl: `${stripTrailingSlash(publicBaseUrl)}/badges/${encodeURIComponent(session.sessionId)}` }
@@ -211,7 +223,13 @@ export function buildAgentProfile({
       totalEarned: {
         asset: rewardAsset,
         amount: totalRewardBase.toString(),
-        decimals
+        decimals,
+        incomplete: omittedApprovedCount > 0,
+        includedApprovedCount,
+        omittedApprovedCount,
+        ...(omittedApprovedCount > 0
+          ? { omissionReason: "missing_claim_time_job_snapshot" }
+          : {})
       },
       githubSignals,
       activeSince: activeSinceMs ? new Date(activeSinceMs).toISOString() : null,
@@ -618,16 +636,24 @@ function buildProfileDispute(session, definitionOf, verdictReceipt, releaseRecei
 }
 
 /**
- * A session that carries a claim-time pin must never fall back to the mutable
- * catalogue. In particular, earnings are historical facts: reading a rotated
- * catalogue here was the #1063 failure that made already-earned rewards appear
- * as zero or as the terms of a different job. Legacy pre-cut-over sessions have
- * no pin and retain the old lookup until they drain; this change does not
- * backfill or invent snapshots for them.
+ * General display fields can use the mutable catalogue only for a legacy
+ * session that predates claim-time pins. Monetary history uses the stricter
+ * helper below and never reaches this fallback.
  */
 function definitionForSession(session, definitionOf) {
   if (session?.jobSnapshot !== undefined) {
     return requireJobSnapshot(session).job;
   }
   return definitionOf(session?.jobId);
+}
+
+/**
+ * Earnings are historical facts. Only a valid claim-time snapshot can establish
+ * the reward an approved session contributes. Snapshot-less legacy approvals
+ * are omitted and counted in totalEarned's completeness metadata; consulting a
+ * live definition here would recreate #1063's silently shrinking total.
+ */
+function historicalDefinitionForSession(session) {
+  if (session?.jobSnapshot === undefined) return undefined;
+  return requireJobSnapshot(session).job;
 }

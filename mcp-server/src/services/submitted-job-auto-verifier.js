@@ -21,6 +21,7 @@ import { GuardedSchedulerLoop, summaryErrorsOutcome } from "./guarded-scheduler-
 // operator misconfiguration.
 
 import { isJobSnapshotIntegrityError, requireJobSnapshot } from "../core/job-snapshot.js";
+import { isSyntheticCanaryJobId } from "../core/agent-visibility.js";
 
 const DEFAULT_INTERVAL_MS = 60 * 1000;
 const DEFAULT_SCAN_LIMIT = 200;
@@ -447,6 +448,11 @@ export class SubmittedJobAutoVerifierService {
       ...(summary.errors ?? [])
     ].filter((entry) => {
       if (!entry?.sessionId) return false;
+      // Hosted worker canaries deliberately exercise the settlement path and
+      // are operator-owned, not unpaid users. Keep their integrity skip in the
+      // per-run diagnostics, but never let a persistent canary become the
+      // payout-queue health alarm that operators learn to ignore.
+      if (isSyntheticCanaryJobId(entry.jobId)) return false;
       const reason = entry.reason ?? entry.code;
       return typeof reason === "string" && reason.startsWith("job_snapshot_");
     });
