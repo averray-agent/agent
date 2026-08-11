@@ -344,6 +344,34 @@ test("the front door records who arrived and how far they got", async () => {
   assert.deepEqual(recorded[0].clientInfo, { name: "modern-test", version: "1.0.0" });
 });
 
+test("successful MCP SIWE passes the verified wallet to cross-door attribution", async () => {
+  const wallet = "0x1111111111111111111111111111111111111111";
+  const recorded = [];
+  const arrivals = {
+    async recordTool() {},
+    async recordAgentTool(entry) { recorded.push(entry); }
+  };
+  const { handler } = createHarness({
+    arrivals,
+    executeTool: async () => ({ wallet, token: "signed" })
+  });
+
+  const result = await call(
+    handler,
+    modernRequest("tools/call", {
+      name: "verifySiwe",
+      arguments: { message: "message", signature: `0x${"1".repeat(130)}` }
+    }),
+    modernHeaders("tools/call", "verifySiwe")
+  );
+
+  assert.equal(result.body.result.isError, false);
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].wallet, wallet);
+  assert.equal(recorded[0].tool, "verifySiwe");
+  assert.deepEqual(recorded[0].clientInfo, { name: "modern-test", version: "1.0.0" });
+});
+
 test("a legacy handshake is recorded even though it never reaches dispatch", async () => {
   const recorded = [];
   const arrivals = {

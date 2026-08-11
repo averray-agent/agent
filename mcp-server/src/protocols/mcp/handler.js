@@ -427,7 +427,11 @@ async function dispatchRequest({
     tool: message.params?.name,
     era,
     clientInfo,
-    ip: clientIp?.(request)
+    ip: clientIp?.(request),
+    // Tool auth is resolved below. Defer only the cross-door attribution so a
+    // bearer-backed call is measured by wallet while the legacy MCP-only
+    // series still records the call at exactly this original site.
+    includeAgent: message.method !== "tools/call"
   });
 
   if (!Object.hasOwn(message, "id")) {
@@ -470,23 +474,56 @@ async function dispatchRequest({
     const toolName = message.params?.name;
     const toolDefinition = typeof toolName === "string" ? getMcpTool(toolName, tools) : undefined;
     if (!toolDefinition) {
+      await recordArrival(arrivals, "recordAgentTool", {
+        tool: toolName,
+        era,
+        clientInfo,
+        ip: clientIp?.(request)
+      });
       sendError(response, respond, 400, message.id, -32602, `Unknown tool: ${String(toolName ?? "")}`);
       return;
     }
     const argumentError = validateToolArguments(toolDefinition, message.params?.arguments);
     if (argumentError) {
+      await recordArrival(arrivals, "recordAgentTool", {
+        tool: toolName,
+        era,
+        clientInfo,
+        ip: clientIp?.(request)
+      });
       sendError(response, respond, 400, message.id, -32602, `Invalid arguments for tool ${toolName}: ${argumentError}`);
       return;
     }
+    let agentRecorded = false;
     try {
-      await enforceToolRateLimit({
+      const auth = await enforceToolRateLimit({
         authMiddleware,
         clientIp,
         enforceLimit,
         rateLimitConfig,
         request
       });
+      if (toolName !== "verifySiwe") {
+        await recordArrival(arrivals, "recordAgentTool", {
+          tool: toolName,
+          era,
+          clientInfo,
+          ip: clientIp?.(request),
+          wallet: auth?.wallet
+        });
+        agentRecorded = true;
+      }
       const payload = await executeTool(toolName, message.params?.arguments, { request });
+      if (!agentRecorded) {
+        await recordArrival(arrivals, "recordAgentTool", {
+          tool: toolName,
+          era,
+          clientInfo,
+          ip: clientIp?.(request),
+          wallet: payload?.wallet
+        });
+        agentRecorded = true;
+      }
       sendResult(
         response,
         respond,
@@ -496,6 +533,14 @@ async function dispatchRequest({
         resultHeaders
       );
     } catch (error) {
+      if (!agentRecorded) {
+        await recordArrival(arrivals, "recordAgentTool", {
+          tool: toolName,
+          era,
+          clientInfo,
+          ip: clientIp?.(request)
+        });
+      }
       const normalized = normalizeError(error);
       sendResult(
         response,
@@ -538,6 +583,7 @@ async function enforceToolRateLimit({
     await enforceLimit("mcp_tools_anonymous", clientIp(request), rateLimitConfig.mcpAnonymous);
   }
   if (authError) throw authError;
+  return auth;
 }
 
 function toolResult(payload, { era, serverInfo }) {

@@ -59,10 +59,12 @@ function makeHarness(overrides = {}) {
     ...overrides.service,
   };
   const route = createJobRoutes({
+    arrivalObservatory: overrides.arrivalObservatory,
     authMiddleware: async (_request, _url, options) => {
       calls.push(options === undefined ? ["authMiddleware"] : ["authMiddleware", options]);
       return auth;
     },
+    clientIp: (request) => request.ip ?? "test-ip",
     enforceLimit: async (bucket, key, limits) => {
       calls.push(["enforceLimit", { bucket, key, limits }]);
     },
@@ -328,6 +330,48 @@ test("POST /jobs/claim preserves http protocol and idempotency fallback", async 
     ["readJsonBody"],
     ["claimJob", { wallet: WALLET, jobId: "job-1", protocol: "http", idempotencyKey: `${WALLET}:job-1` }],
   ]);
+});
+
+test("HTTP-only claim and submit are recorded with the authenticated wallet", async () => {
+  const arrivals = [];
+  const arrivalObservatory = {
+    async recordHttp(entry) {
+      arrivals.push(entry);
+    }
+  };
+  const claimHarness = makeHarness({
+    arrivalObservatory,
+    payload: { jobId: "job-1" }
+  });
+  assert.equal(await invoke(claimHarness.route, {
+    method: "POST",
+    path: "/jobs/claim",
+    response: claimHarness.response
+  }), true);
+
+  const submitHarness = makeHarness({
+    arrivalObservatory,
+    payload: { sessionId: "session-1", evidence: "done" }
+  });
+  assert.equal(await invoke(submitHarness.route, {
+    method: "POST",
+    path: "/jobs/submit",
+    response: submitHarness.response
+  }), true);
+
+  assert.deepEqual(arrivals.map(({ method, pathname, wallet }) => ({ method, pathname, wallet })), [
+    { method: "POST", pathname: "/jobs/claim", wallet: WALLET },
+    { method: "POST", pathname: "/jobs/submit", wallet: WALLET }
+  ]);
+});
+
+test("health polling is outside the HTTP arrival route surface", async () => {
+  const arrivals = [];
+  const { route } = makeHarness({
+    arrivalObservatory: { async recordHttp(entry) { arrivals.push(entry); } }
+  });
+  assert.equal(await invoke(route, { path: "/health" }), false);
+  assert.deepEqual(arrivals, []);
 });
 
 test("POST /jobs/validate-submission accepts submission/output/evidence aliases", async () => {

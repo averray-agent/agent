@@ -7,6 +7,7 @@ import {
   normalizeClientInfo,
   resolveAmbiguousClients,
   resolveSelfClients,
+  resolveSelfWallets,
   stageRank
 } from "./arrival-observatory.js";
 
@@ -101,10 +102,92 @@ test("raw IP addresses are never retained", async () => {
 test("client identity never becomes a metric label", async () => {
   const { observatory, counters } = harness();
   await observatory.recordTool({ tool: "listJobs", clientInfo: { name: "evil-\u0000-agent", version: "9" } });
-  assert.equal(counters.length, 1);
-  assert.deepEqual(counters[0].labelNames, ["stage", "actor"]);
-  assert.deepEqual(counters[0].labels, { stage: "browsed", actor: "client" });
-  assert.doesNotMatch(JSON.stringify(counters[0].labels), /evil/u);
+  const mcpCounter = counters.find((entry) => entry.name === "mcp_arrival_stage_total");
+  const crossDoorCounter = counters.find((entry) => entry.name === "agent_arrival_stage_total");
+  assert.deepEqual(mcpCounter.labelNames, ["stage", "actor"]);
+  assert.deepEqual(mcpCounter.labels, { stage: "browsed", actor: "client" });
+  assert.deepEqual(crossDoorCounter.labelNames, ["stage", "actor", "source", "door"]);
+  assert.doesNotMatch(JSON.stringify(counters), /evil/u);
+});
+
+test("HTTP-only claim and submit advance the measured-wallet funnel", async () => {
+  const { observatory } = harness();
+  const wallet = "0x1111111111111111111111111111111111111111";
+
+  await observatory.recordHttp({ method: "POST", pathname: "/jobs/claim", wallet, ip: "1.2.3.4" });
+  await observatory.recordHttp({ method: "POST", pathname: "/jobs/submit", wallet, ip: "1.2.3.4" });
+
+  const snapshot = await observatory.getSnapshot();
+  const measured = snapshot.crossDoor.funnelByAttributionSource.siwe_wallet;
+  assert.equal(measured.all.claimed, 1);
+  assert.equal(measured.all.submitted, 1);
+  assert.equal(measured.external.submitted, 1);
+  assert.equal(snapshot.crossDoor.agents.length, 1);
+  assert.equal(snapshot.crossDoor.agents[0].furthestStage, "submitted");
+  assert.equal(snapshot.crossDoor.agents[0].attributionSource, "siwe_wallet");
+});
+
+test("a self wallet is self in the measured funnel and never external", async () => {
+  const wallet = `0x${"a".repeat(40)}`;
+  const { observatory } = harness();
+  observatory.selfWallets = resolveSelfWallets({ ARRIVAL_SELF_WALLETS: `0x${"A".repeat(40)}` });
+
+  await observatory.recordHttp({ method: "POST", pathname: "/jobs/claim", wallet });
+
+  const measured = (await observatory.getSnapshot()).crossDoor.funnelByAttributionSource.siwe_wallet;
+  assert.equal(measured.self.claimed, 1);
+  assert.equal(measured.external.claimed, 0);
+});
+
+test("unauthenticated HTTP attribution stays inferred and never trusts a wallet hint", async () => {
+  const { observatory } = harness();
+  await observatory.recordHttp({
+    method: "GET",
+    pathname: "/jobs",
+    ip: "198.51.100.8"
+  });
+
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.crossDoor.funnelByAttributionSource.ip_only.all.browsed, 1);
+  assert.equal(snapshot.crossDoor.funnelByAttributionSource.siwe_wallet.all.browsed, 0);
+  assert.equal(snapshot.crossDoor.agents[0].attributionSource, "ip_only");
+});
+
+test("MCP SIWE joins a declared client to its HTTP wallet without rewriting attribution history", async () => {
+  const { observatory } = harness();
+  const wallet = "0x3333333333333333333333333333333333333333";
+
+  await observatory.recordTool({ tool: "listJobs", clientInfo: CLAUDE, ip: "1.2.3.4" });
+  await observatory.recordAgentTool({ tool: "verifySiwe", clientInfo: CLAUDE, wallet, ip: "1.2.3.4" });
+  await observatory.recordHttp({ method: "POST", pathname: "/jobs/claim", wallet, ip: "9.9.9.9" });
+
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.crossDoor.agents.length, 1);
+  assert.equal(snapshot.crossDoor.agents[0].key, `wallet:${wallet}`);
+  assert.equal(snapshot.crossDoor.agents[0].furthestStage, "claimed");
+  assert.ok(snapshot.crossDoor.agents[0].attributionSources.client_name > 0);
+  assert.ok(snapshot.crossDoor.agents[0].attributionSources.siwe_wallet > 0);
+  assert.equal(snapshot.crossDoor.funnelByAttributionSource.client_name.all.browsed, 1);
+  assert.equal(snapshot.crossDoor.funnelByAttributionSource.siwe_wallet.all.claimed, 1);
+});
+
+test("HTTP arrivals cannot alter the preserved MCP-only series", async () => {
+  const { observatory } = harness();
+  await observatory.recordTool({ tool: "listJobs", clientInfo: CLAUDE });
+  const before = await observatory.getSnapshot();
+
+  await observatory.recordHttp({
+    method: "POST",
+    pathname: "/jobs/claim",
+    wallet: "0x4444444444444444444444444444444444444444"
+  });
+  const after = await observatory.getSnapshot();
+
+  for (const key of ["funnel", "funnelExternal", "funnelSelf", "funnelAmbiguous", "distinct", "clients"]) {
+    assert.deepEqual(after[key], before[key]);
+  }
+  assert.equal(after.crossDoor.cutoverAt, "2026-08-11T00:00:00.000Z");
+  assert.match(after.crossDoor.note, /no backfill/u);
 });
 
 // Observability that can take the front door down is worse than none.
@@ -213,6 +296,27 @@ test("counts survive a restart by reloading persisted state", async () => {
   const snapshot = await restarted.getSnapshot();
   assert.equal(snapshot.funnel.authenticated, 1);
   assert.equal(snapshot.clients[0].name, "claude-ai");
+});
+
+test("cross-door agents and the SIWE client hint survive a restart", async () => {
+  const { observatory, state } = harness();
+  const wallet = "0x5555555555555555555555555555555555555555";
+  await observatory.recordTool({ tool: "listJobs", clientInfo: CLAUDE });
+  await observatory.recordAgentTool({ tool: "verifySiwe", clientInfo: CLAUDE, wallet });
+  await observatory.maybeFlush(true);
+
+  const restarted = new ArrivalObservatory({
+    stateStore: { async getServiceState(scope) { return state.get(scope); }, async upsertServiceState() {} },
+    metrics: { counter: () => ({ inc() {} }) },
+    now: () => 2_000
+  });
+  await restarted.recordAgentTool({ tool: "claimJob", clientInfo: CLAUDE });
+
+  const snapshot = await restarted.getSnapshot();
+  assert.equal(snapshot.crossDoor.agents.length, 1);
+  assert.equal(snapshot.crossDoor.agents[0].key, `wallet:${wallet}`);
+  assert.equal(snapshot.crossDoor.agents[0].name, null);
+  assert.equal(snapshot.crossDoor.agents[0].furthestStage, "claimed");
 });
 
 test("unknown tools count as reach rather than being dropped or guessed", async () => {

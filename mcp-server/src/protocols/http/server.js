@@ -244,6 +244,14 @@ function clientIp(request) {
   return extractClientKey(request, { trustProxy });
 }
 
+// One observatory receives both doors. Route handlers are injected explicitly,
+// which keeps health/discovery probes outside the funnel by construction.
+const arrivalObservatory = new ArrivalObservatory({
+  stateStore,
+  metrics,
+  hashSalt: process.env.ARRIVAL_HASH_SALT || process.env.AUTH_JWT_SECRETS || "averray-arrivals"
+});
+
 function deriveBadgeLineage(session, job) {
   if (!session || !job) return undefined;
   const lineage = {};
@@ -496,7 +504,9 @@ const handleSessionRoute = createSessionRoutes({
 });
 
 const handleJobRoute = createJobRoutes({
+  arrivalObservatory,
   authMiddleware,
+  clientIp,
   enforceLimit,
   ensureSessionOwnership,
   rateLimitConfig,
@@ -655,6 +665,22 @@ const handleContentRoute = createContentRoutes({
 });
 
 const handleAuthRoute = createAuthRoutes({
+  arrivalObservatory,
+  authCapabilities,
+  authConfig,
+  authMiddleware,
+  clientIp,
+  enforceLimit,
+  logger,
+  rateLimitConfig,
+  readJsonBody,
+  respond,
+  stateStore,
+});
+
+// MCP already records its own door in the protocol handler. Reusing the HTTP
+// business logic must not make one MCP tool look like a second HTTP arrival.
+const handleMcpAuthRoute = createAuthRoutes({
   authCapabilities,
   authConfig,
   authMiddleware,
@@ -668,19 +694,11 @@ const handleAuthRoute = createAuthRoutes({
 });
 
 const executeMcpTool = createMcpToolExecutor({
-  handleAuthRoute,
+  handleAuthRoute: handleMcpAuthRoute,
   handleJobRoute: handleMcpJobRoute,
   handlePublicMetadataRoute,
   maxRequestBodyBytes: httpConfig.maxBodyBytes,
   tools: mcpTools
-});
-
-// Records who reaches the front door. Injected rather than reached for, so
-// the MCP handler stays testable without a state store.
-const arrivalObservatory = new ArrivalObservatory({
-  stateStore,
-  metrics,
-  hashSalt: process.env.ARRIVAL_HASH_SALT || process.env.AUTH_JWT_SECRETS || "averray-arrivals"
 });
 
 const handleArrivalRoute = createArrivalRoutes({ respond, arrivalObservatory });

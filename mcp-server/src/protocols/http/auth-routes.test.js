@@ -55,6 +55,7 @@ function makeHarness(overrides = {}) {
   };
 
   const route = createAuthRoutes({
+    arrivalObservatory: overrides.arrivalObservatory,
     authCapabilities: {
       capabilityMatrix: () => ({ jobs: { list: ["jobs:list"] } }),
       resolveCapabilities: ({ roles }) => roles.includes("admin") ? ["*"] : ["jobs:list"],
@@ -287,6 +288,43 @@ test("POST /auth/verify consumes nonce, signs token, and issues refresh cookie w
   assert.equal(verifyEvent.wallet, WALLET);
   assert.equal(verifyEvent.event, "verify_succeeded");
   assert.ok(Number.isFinite(Date.parse(verifyEvent.at)));
+});
+
+test("HTTP SIWE records the unverified nonce by IP and successful verify by wallet", async () => {
+  const arrivals = [];
+  const arrivalObservatory = {
+    async recordHttp(entry) {
+      arrivals.push(entry);
+    }
+  };
+  const nonceHarness = makeHarness({
+    arrivalObservatory,
+    payload: { wallet: WALLET }
+  });
+  assert.equal(await callRoute(
+    nonceHarness.route,
+    nonceHarness.response,
+    "POST",
+    "/auth/nonce",
+    { ip: "198.51.100.7" }
+  ), true);
+
+  const verifyHarness = makeHarness({
+    arrivalObservatory,
+    payload: { message: "siwe", signature: VALID_SIGNATURE }
+  });
+  assert.equal(await callRoute(
+    verifyHarness.route,
+    verifyHarness.response,
+    "POST",
+    "/auth/verify",
+    { ip: "198.51.100.7" }
+  ), true);
+
+  assert.equal(arrivals[0].wallet, undefined);
+  assert.equal(arrivals[0].ip, "198.51.100.7");
+  assert.equal(arrivals[1].wallet, WALLET);
+  assert.equal(arrivals[1].pathname, "/auth/verify");
 });
 
 test("POST /auth/verify rejects nonce wallet mismatch", async () => {

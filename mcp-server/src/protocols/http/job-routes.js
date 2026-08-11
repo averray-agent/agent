@@ -3,7 +3,9 @@ import { TIER_REQUIREMENTS } from "../../core/job-catalog-service.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
 
 export function createJobRoutes({
+  arrivalObservatory,
   authMiddleware,
+  clientIp,
   enforceLimit,
   ensureSessionOwnership,
   externalPostingService,
@@ -14,8 +16,22 @@ export function createJobRoutes({
   respond,
   service,
 }) {
+  async function recordHttp(request, pathname, wallet) {
+    try {
+      await arrivalObservatory?.recordHttp?.({
+        method: request.method,
+        pathname,
+        wallet,
+        ip: clientIp?.(request)
+      });
+    } catch {
+      // Arrival telemetry must never refuse a job request.
+    }
+  }
+
   return async function handleJobRoute({ request, response, url, pathname }) {
     if (request.method === "GET" && pathname === "/jobs") {
+      await recordHttp(request, pathname);
       const jobs = await service.listJobsWithSessions({
         wallet: url.searchParams.get("wallet") ?? undefined
       });
@@ -30,6 +46,7 @@ export function createJobRoutes({
     }
 
     if (request.method === "GET" && pathname === "/jobs/tiers") {
+      await recordHttp(request, pathname);
       respond(
         response,
         200,
@@ -46,6 +63,7 @@ export function createJobRoutes({
       const auth = includeArchived
         ? await authMiddleware(request, url, { requireRole: "admin" })
         : undefined;
+      await recordHttp(request, pathname, auth?.wallet);
       respond(response, 200, await service.getPublicJobDefinition(url.searchParams.get("jobId") ?? "", {
         wallet: url.searchParams.get("wallet") ?? undefined,
         ...(includeArchived ? { includeArchived: true, currentWallet: auth.wallet } : {})
@@ -55,11 +73,13 @@ export function createJobRoutes({
 
     if (request.method === "GET" && pathname === "/jobs/recommendations") {
       const auth = await authMiddleware(request, url);
+      await recordHttp(request, pathname, auth.wallet);
       respond(response, 200, await service.recommendJobs(auth.wallet));
       return true;
     }
 
     if (request.method !== "GET" && pathname === "/jobs/preflight") {
+      await recordHttp(request, pathname);
       respond(
         response,
         405,
@@ -74,6 +94,7 @@ export function createJobRoutes({
 
     if (request.method === "GET" && pathname === "/jobs/preflight") {
       const auth = await authMiddleware(request, url);
+      await recordHttp(request, pathname, auth.wallet);
       respond(
         response,
         200,
@@ -84,6 +105,7 @@ export function createJobRoutes({
 
     if (request.method === "GET" && pathname === "/jobs/explain-eligibility") {
       const auth = await authMiddleware(request, url);
+      await recordHttp(request, pathname, auth.wallet);
       const jobId = url.searchParams.get("jobId") ?? "";
       if (!jobId) {
         throw new ValidationError("jobId query parameter is required.");
@@ -98,6 +120,7 @@ export function createJobRoutes({
 
     if (request.method === "GET" && pathname === "/jobs/estimate-reward") {
       const auth = await authMiddleware(request, url);
+      await recordHttp(request, pathname, auth.wallet);
       const jobId = url.searchParams.get("jobId") ?? "";
       if (!jobId) {
         throw new ValidationError("jobId query parameter is required.");
@@ -112,6 +135,7 @@ export function createJobRoutes({
 
     if (request.method === "GET" && pathname === "/jobs/sub") {
       const auth = await authMiddleware(request, url);
+      await recordHttp(request, pathname, auth.wallet);
       const parentSessionId = url.searchParams.get("parentSessionId") ?? "";
       await ensureSessionOwnership(parentSessionId, auth.wallet);
       respond(response, 200, await service.listSubJobs(parentSessionId));
@@ -120,6 +144,7 @@ export function createJobRoutes({
 
     if (request.method === "POST" && pathname === "/jobs/sub") {
       const auth = await authMiddleware(request, url);
+      await recordHttp(request, pathname, auth.wallet);
       await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
       const payload = await readJsonBody(request);
       const parentSessionId = typeof payload?.parentSessionId === "string" && payload.parentSessionId.trim()
@@ -142,6 +167,7 @@ export function createJobRoutes({
       const idempotencyKey = typeof payload?.idempotencyKey === "string" && payload.idempotencyKey.trim()
         ? payload.idempotencyKey.trim()
         : (url.searchParams.get("idempotencyKey") ?? `${auth.wallet}:${jobId}`);
+      await recordHttp(request, pathname, auth.wallet);
       respond(response, 200, await service.claimJob(auth.wallet, jobId, protocol, idempotencyKey));
       return true;
     }
@@ -164,6 +190,7 @@ export function createJobRoutes({
       if (submission === undefined) {
         throw new ValidationError("submission is required.");
       }
+      await recordHttp(request, pathname);
       respond(response, 200, await service.validateJobSubmission(jobId, submission));
       return true;
     }
@@ -186,6 +213,7 @@ export function createJobRoutes({
         throw new ValidationError("evidence exceeds 16 KiB. Submit long payloads via evidenceURI once supported.");
       }
       await ensureSessionOwnership(sessionId, auth.wallet);
+      await recordHttp(request, pathname, auth.wallet);
       respond(response, 200, await service.submitWork(sessionId, protocol, submission));
       return true;
     }

@@ -66,6 +66,7 @@ function buildTokenResponse({ token, claims, wallet, roles, authCapabilities, ex
 }
 
 export function createAuthRoutes({
+  arrivalObservatory,
   authCapabilities,
   authConfig,
   authMiddleware,
@@ -109,6 +110,19 @@ export function createAuthRoutes({
     }
   }
 
+  async function recordHttp(request, pathname, wallet) {
+    try {
+      await arrivalObservatory?.recordHttp?.({
+        method: request.method,
+        pathname,
+        wallet,
+        ip: clientIp?.(request)
+      });
+    } catch {
+      // Arrival telemetry must never refuse an authentication request.
+    }
+  }
+
   return async function handleAuthRoute({ request, response, url, pathname }) {
     if (request.method === "POST" && pathname === "/auth/nonce") {
       await enforceLimit("auth_nonce", clientIp(request), rateLimitConfig.authNonce);
@@ -129,6 +143,9 @@ export function createAuthRoutes({
         event: "nonce_issued",
         at: issuedAt
       });
+      // The requested address is still unverified here. Keep this arrival
+      // inferred rather than granting it measured-wallet attribution.
+      await recordHttp(request, pathname);
       return respondHandled(response, 200, {
         wallet,
         nonce,
@@ -224,6 +241,7 @@ export function createAuthRoutes({
         event: "verify_succeeded",
         at: new Date().toISOString()
       });
+      await recordHttp(request, pathname, wallet);
 
       return respondHandled(
         response,
@@ -241,6 +259,7 @@ export function createAuthRoutes({
 
     if (request.method === "GET" && pathname === "/auth/session") {
       const auth = await authMiddleware(request, url);
+      await recordHttp(request, pathname, auth.wallet);
       return respondHandled(response, 200, {
         wallet: auth.wallet,
         roles: auth.claims?.roles ?? [],
@@ -254,6 +273,7 @@ export function createAuthRoutes({
 
     if (request.method === "POST" && pathname === "/auth/logout") {
       const auth = await authMiddleware(request, url);
+      await recordHttp(request, pathname, auth.wallet);
       const jti = auth.claims?.jti;
       const exp = auth.claims?.exp;
       if (jti && Number.isFinite(exp)) {
@@ -359,6 +379,8 @@ export function createAuthRoutes({
           authConfig,
         );
 
+        await recordHttp(request, pathname, consumed.record.wallet);
+
         return respondHandled(
           response,
           200,
@@ -404,6 +426,8 @@ export function createAuthRoutes({
         { expiresInSeconds: authConfig.tokenTtlSeconds },
         authConfig,
       );
+
+      await recordHttp(request, pathname, auth.wallet);
 
       return respondHandled(response, 200, buildTokenResponse({
         token,
