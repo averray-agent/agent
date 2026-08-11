@@ -75,6 +75,7 @@ export const ESCROW_CORE_ABI = [
   "function openDisputeFor(bytes32 jobId, address participant)",
   "function resolveDispute(bytes32 jobId, uint256 workerPayout, bytes32 reasonCode, string metadataURI)",
   "function previewClaimEconomics(address worker, bytes32 jobId) view returns (uint256 claimStake, uint16 claimStakeBps, uint256 claimFee, uint16 claimFeeBps, bool waived, uint256 claimNumber)",
+  "function retainsClaimFeeOnSuccess() view returns (bool)",
   "function workerClaimCount(address worker) view returns (uint256)",
   "function jobs(bytes32 jobId) view returns ((address poster, address worker, address asset, bytes32 verifierMode, bytes32 category, bytes32 specHash, uint256 reward, uint256 opsReserve, uint256 contingencyReserve, uint256 released, uint256 claimExpiry, uint256 claimStake, uint16 claimStakeBps, uint256 claimFee, uint16 claimFeeBps, bool claimEconomicsWaived, address rejectingVerifier, uint256 rejectedAt, uint256 disputedAt, uint8 payoutMode, uint8 state, uint256 protocolFee, uint256 protocolFeeReleased, uint16 protocolFeeBps, bool protocolFeeWaived))",
   "event JobFunded(bytes32 indexed jobId, address indexed poster, address indexed asset, uint256 totalReserved, uint8 payoutMode)",

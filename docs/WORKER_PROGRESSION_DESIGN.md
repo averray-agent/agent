@@ -1,6 +1,6 @@
 # Worker progression — what a wallet may consume, and why the pool is the answer
 
-Status: **steps 1–2 implemented in source; step 2 requires an EscrowCore successor ceremony.** Written after the 2026-08-11 incident, in which one wallet
+Status: **steps 1 and 3 implemented in the backend; step 2 implemented in source and requires an EscrowCore successor ceremony.** Written after the 2026-08-11 incident, in which one wallet
 claimed 33 jobs in minutes, reserved the reward bank's entire liquid balance into escrow, and
 kept going on operator-paid gas while holding no DOT of its own.
 
@@ -194,6 +194,29 @@ backend cutover, or existing-job migration is implied by merging the implementat
 
 Steps 1 and 2 together would have prevented the 08-11 exposure. Step 3 would have prevented
 the board going dark for other agents. Step 4 is the durable answer.
+
+### Step-3 implementation boundary
+
+The backend enforces `WORKER_OPEN_EXPOSURE_CAP_USDC` at both `preflightJob` and the serialized
+claim mutation. The reviewed default is **2.5 USDC**: one quarter of the current roughly
+10-USDC reward bank, generous enough for ordinary sequential work while preventing one wallet
+from reserving the whole rail. It is a committed, non-secret deployment setting and changes
+to it are therefore reviewable rather than hidden in runtime state.
+
+Exposure is derived from immutable claim snapshots and live EscrowCore state:
+
+- open curated work contributes its reserved reward;
+- waived or predecessor-runtime claims also contribute the measured brokered-gas estimate;
+- after the Step-2 successor advertises `retainsClaimFeeOnSuccess()`, non-waived claims stop
+  contributing brokered gas because the retained USDC fee pays that execution cost;
+- external poster-funded, worker-signed claims contribute neither operator reward nor gas;
+- an unreadable chain job, unsupported FX asset, or active legacy session without a snapshot
+  makes exposure unknown and refuses the claim rather than counting it as zero.
+
+The claim path takes a durable wallet-scoped lock around the final exposure read and chain
+write. That serialization is load-bearing: two different jobs cannot both pass against the
+same stale headroom. The specific refusal codes are `worker_open_exposure_cap_reached`,
+`worker_open_exposure_unavailable`, and `worker_exposure_check_in_progress`.
 
 ---
 

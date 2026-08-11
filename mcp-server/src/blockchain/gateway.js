@@ -583,12 +583,15 @@ export class BlockchainGateway {
       const contractLayout = live.contractLayout === "legacy" ? "legacy" : "current";
       const escrowContract = this.escrowContractForLiveJob(live);
       const exists = Number(live.state) !== 0;
+      const claimFeeRetainedOnSuccess = contractLayout === "current"
+        && await this.readRetainedClaimFeeCapability(escrowContract);
       if (contractLayout === "legacy" || !exists) {
         return {
           state: Number(live.state),
           exists,
           contractLayout,
-          onboardingWaiverEligible: false
+          onboardingWaiverEligible: false,
+          claimFeeRetainedOnSuccess
         };
       }
       if (typeof escrowContract?.onboardingWaiverEligibleJobs !== "function") {
@@ -598,11 +601,23 @@ export class BlockchainGateway {
         state: Number(live.state),
         exists,
         contractLayout,
+        claimFeeRetainedOnSuccess,
         onboardingWaiverEligible: Boolean(
           await escrowContract.onboardingWaiverEligibleJobs(this.toJobId(jobId))
         )
       };
     });
+  }
+
+  async readRetainedClaimFeeCapability(escrowContract) {
+    if (typeof escrowContract?.retainsClaimFeeOnSuccess !== "function") return false;
+    try {
+      return Boolean(await escrowContract.retainsClaimFeeOnSuccess());
+    } catch {
+      // A predecessor runtime or a temporarily unreadable optional capability
+      // fails conservatively: brokered gas remains operator exposure.
+      return false;
+    }
   }
 
   async getTreasuryPolicyStatus() {

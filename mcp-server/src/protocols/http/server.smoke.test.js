@@ -68,6 +68,10 @@ async function startServer(port, envOverrides = {}) {
       LOG_LEVEL: "silent",
       RATE_LIMIT_AUTH_NONCE_LIMIT: "3",
       RATE_LIMIT_AUTH_NONCE_WINDOW_SECONDS: "60",
+      // Route smoke fixtures intentionally use synthetic 3–8 USDC jobs. Keep
+      // this suite focused on HTTP/auth behavior; worker-exposure tests pin the
+      // production 2.5-USDC default and its refusal/serialization boundaries.
+      WORKER_OPEN_EXPOSURE_CAP_USDC: "100",
       ...envOverrides
     },
     // stderr is piped purely so a boot failure can say WHY. A bad env used to

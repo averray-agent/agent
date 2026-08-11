@@ -230,6 +230,58 @@ test("claimJob pins an immutable complete job snapshot to the session", async ()
   );
 });
 
+test("wallet exposure lock serializes simultaneous claims for different jobs", async () => {
+  const stateStore = new MemoryStateStore();
+  const jobs = new Map([
+    ["exposure-race-1", makeJob({ id: "exposure-race-1" })],
+    ["exposure-race-2", makeJob({ id: "exposure-race-2" })]
+  ]);
+  let releaseEvaluation;
+  let signalEvaluationStarted;
+  const evaluationStarted = new Promise((resolve) => {
+    signalEvaluationStarted = resolve;
+  });
+  const holdEvaluation = new Promise((resolve) => {
+    releaseEvaluation = resolve;
+  });
+  const workerExposurePolicy = {
+    async evaluate() {
+      signalEvaluationStarted();
+      await holdEvaluation;
+      return {
+        eligible: true,
+        status: "within_cap",
+        candidate: { reservedRewardUsdc: 0.5, brokeredGasUsdc: 0.059, totalUsdc: 0.559 }
+      };
+    }
+  };
+  const service = new JobExecutionService(
+    stateStore,
+    undefined,
+    (jobId) => jobs.get(jobId),
+    undefined,
+    undefined,
+    undefined,
+    (jobId) => jobs.get(jobId),
+    undefined,
+    { workerExposurePolicy }
+  );
+
+  const first = service.claimJob(WALLET, "exposure-race-1", "http", "exposure-race-1");
+  await evaluationStarted;
+  await assert.rejects(
+    () => service.claimJob(WALLET, "exposure-race-2", "http", "exposure-race-2"),
+    (error) => {
+      assert.equal(error.code, "worker_exposure_check_in_progress");
+      return true;
+    }
+  );
+  releaseEvaluation();
+  const claimed = await first;
+  assert.equal(claimed.jobId, "exposure-race-1");
+  assert.equal(await stateStore.findSessionByJobId("exposure-race-2"), undefined);
+});
+
 test("submitWork rejects plain evidence for schema-native built-in jobs", async () => {
   const stateStore = new MemoryStateStore();
   const job = makeJob();

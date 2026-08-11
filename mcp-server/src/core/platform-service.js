@@ -78,7 +78,8 @@ export class PlatformService {
     stateStore = createStateStore(),
     eventBus = undefined,
     recurringScheduler = undefined,
-    onboardingSubsidyBudget = undefined
+    onboardingSubsidyBudget = undefined,
+    workerExposurePolicy = undefined
   ) {
     this.jobs = jobs;
     this.profiles = profiles;
@@ -89,6 +90,7 @@ export class PlatformService {
     this.eventBus = eventBus;
     this.recurringScheduler = recurringScheduler;
     this.onboardingSubsidyBudget = onboardingSubsidyBudget;
+    this.workerExposurePolicy = workerExposurePolicy;
     this.githubIssueIngestionScheduler = undefined;
     this.wikipediaMaintenanceIngestionScheduler = undefined;
     this.osvAdvisoryIngestionScheduler = undefined;
@@ -133,7 +135,10 @@ export class PlatformService {
       this.getDefaultClaimStakeBps.bind(this),
       this.getClaimableJobDefinition.bind(this),
       this.getClaimEconomicsConfig.bind(this),
-      { onboardingSubsidyBudget: this.onboardingSubsidyBudget }
+      {
+        onboardingSubsidyBudget: this.onboardingSubsidyBudget,
+        workerExposurePolicy: this.workerExposurePolicy
+      }
     );
     this.verificationIngestionService = new VerificationIngestionService(
       this.stateStore,
@@ -933,7 +938,34 @@ export class PlatformService {
       ? await this.stateStore.getExternalJobDelisting?.(jobId)
       : undefined;
     if (!delisting) {
-      return result;
+      if (!this.workerExposurePolicy || result.eligible !== true) {
+        return result;
+      }
+      const workerExposure = await this.workerExposurePolicy.evaluate({
+        wallet,
+        job,
+        claimEconomics: {
+          claimEconomicsWaived: preflight.claimEconomicsWaived,
+          claimFeeRetainedOnSuccess: preflight.claimFeeRetainedOnSuccess
+        }
+      });
+      return {
+        ...result,
+        eligible: workerExposure.eligible === true,
+        reason: workerExposure.eligible === true ? result.reason : workerExposure.reason,
+        reasonMessage: workerExposure.eligible === true
+          ? result.reasonMessage
+          : workerExposure.message,
+        workerExposure,
+        failureStates: workerExposure.eligible === true
+          ? result.failureStates
+          : [
+              ...new Set([
+                ...(Array.isArray(result.failureStates) ? result.failureStates : []),
+                workerExposure.reason
+              ])
+            ]
+      };
     }
     return {
       ...result,
