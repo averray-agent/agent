@@ -26,7 +26,8 @@
  *     --low-water-mark <baseUnits>   refill when liquid drops below this (default 20 USDC)
  *     --target <baseUnits>           refill liquid back up to this (default 100 USDC)
  *     --max-per-topup <baseUnits>    hard cap per run (default = target)
- *     --profile <name>               deployments/<profile>.json for addresses (default testnet)
+ *     --profile <name>               Required. deployments/<profile>.json for addresses.
+ *                                    No default: a money-moving script must not guess a network.
  *     --signer 0x… / SIGNER_ADDRESS  reward-bank holder (default: deployments verifier)
  *     --rpc <url> / RPC_URL          EVM RPC (default Polkadot Hub TestNet)
  *     --commit                       actually deposit (default: dry-run)
@@ -84,7 +85,11 @@ export function planRewardBankTopup({ liquidNow, lowWaterMark, targetLevel, maxP
 }
 
 export function parseArgs(argv) {
-  const args = { dryRun: true, useKms: false, profile: "testnet" };
+  // No default profile. This script wraps fund-signer-usdc-deposit.mjs with
+  // --commit, so it moves money and must not guess a network. The old "testnet"
+  // default was correct until the 2026-07-27 mainnet cutover and silently wrong
+  // afterwards — see the note in fund-signer-usdc-deposit.mjs.
+  const args = { dryRun: true, useKms: false, profile: undefined };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--commit") args.dryRun = false;
@@ -111,6 +116,12 @@ async function main() {
   if (args.help) {
     console.log("See the header of scripts/ops/auto-topup-reward-bank.mjs for usage.");
     return;
+  }
+  if (!args.profile) {
+    throw new Error(
+      "--profile is required (e.g. --profile mainnet). This script tops up a reward bank "
+      + "with real funds and will not guess a network."
+    );
   }
 
   const { readFile } = await import("node:fs/promises");
