@@ -134,7 +134,7 @@ contract DepositPoolTest is Test {
         pool.redeem(1, agent, agent);
     }
 
-    function testVenueYieldRaisesShareValueOnlyOnDeployedFraction() public {
+    function testVenueYieldRaisesShareValueOnlyWhenUsdcReturnsToTheBuffer() public {
         vm.prank(agent);
         uint256 shares = pool.deposit(10 * USDC, agent);
         vm.prank(agentTwo);
@@ -150,10 +150,36 @@ contract DepositPoolTest is Test {
         adapter.simulateYield(address(pool), 1_000);
 
         assertEq(pool.balanceOf(agent), 10 * USDC);
+        assertEq(pool.totalAssets(), 20 * USDC);
+        assertEq(pool.convertToAssets(shares), 10 * USDC);
+
+        vm.prank(operator);
+        uint256 recallId = pool.recallVenueDeployment(deploymentId, 11 * USDC);
+        _settleRecall(recallId);
         assertEq(pool.totalAssets(), 21 * USDC);
         assertEq(pool.convertToAssets(shares), 10_500_000);
         assertEq(pool.earnedProtocolFees(), 0);
         assertEq(pool.PLATFORM_FEE_BPS(), 0);
+    }
+
+    function testRemoteObservationCannotRepriceSharesOrDrainTheBuffer() public {
+        vm.prank(agent);
+        pool.deposit(10 * USDC, agent);
+        vm.prank(agentTwo);
+        uint256 attackerShares = pool.deposit(1 * USDC, agentTwo);
+
+        vm.prank(operator);
+        pool.deployToVenue(1 * USDC, uint64(block.timestamp + 7 days));
+        assertEq(pool.convertToAssets(attackerShares), 1 * USDC);
+
+        // Models a compromised strategySettler overwriting lane.totalAssets.
+        // This assertion is intentionally red against the old pool, whose NAV
+        // reads the adapter's remotely observed inventory.
+        adapter.recordRemotePosition(address(pool), 100 * USDC);
+
+        assertEq(pool.convertToAssets(attackerShares), 1 * USDC);
+        assertEq(pool.totalAssets(), 11 * USDC);
+        assertEq(pool.bufferAssets(), 10 * USDC);
     }
 
     function testInstantRedeemSucceedsWhileMaximumDeploymentIsInFlight() public {
@@ -224,7 +250,7 @@ contract DepositPoolTest is Test {
         vm.prank(operator);
         uint256 principalShares = pool.contributeOperatorPrincipal(1 * USDC);
 
-        assertEq(principalShares, 952_380);
+        assertEq(principalShares, 1 * USDC);
         assertEq(pool.operatorContributedPrincipal(), 1 * USDC);
         assertEq(pool.earnedProtocolFees(), 0);
         assertEq(pool.convertToAssets(agentShares), agentAssetsBefore);
@@ -242,8 +268,46 @@ contract DepositPoolTest is Test {
 
         vm.prank(agentTwo);
         uint256 assetsPaid = pool.mint(1 * USDC, agentTwo);
-        assertEq(assetsPaid, 1_050_000);
+        assertEq(assetsPaid, 1 * USDC);
         assertEq(pool.balanceOf(agentTwo), 11 * USDC);
+    }
+
+    function testOnlyTreasuryPolicyOwnerCanWriteOffVenueLoss() public {
+        vm.prank(agent);
+        pool.deposit(10 * USDC, agent);
+        vm.prank(agentTwo);
+        pool.deposit(10 * USDC, agentTwo);
+        vm.prank(operator);
+        uint256 deploymentId = pool.deployToVenue(10 * USDC, uint64(block.timestamp + 7 days));
+
+        assertEq(pool.venuePrincipalCostBasis(), 10 * USDC);
+        vm.prank(operator);
+        vmx.expectRevert(DepositPool.Unauthorized.selector);
+        pool.writeOffVenueLoss(deploymentId, 1 * USDC);
+
+        pool.writeOffVenueLoss(deploymentId, 1 * USDC);
+        assertEq(pool.venueWrittenOffPrincipalAssets(deploymentId), 1 * USDC);
+        assertEq(pool.venuePrincipalCostBasis(), 9 * USDC);
+        assertEq(pool.totalAssets(), 19 * USDC);
+    }
+
+    function testAdapterRecoveryCallbackReducesCostOnlyAfterCashReturns() public {
+        vm.prank(agent);
+        pool.deposit(10 * USDC, agent);
+        vm.prank(agentTwo);
+        pool.deposit(10 * USDC, agentTwo);
+        vm.prank(operator);
+        uint256 deploymentId = pool.deployToVenue(10 * USDC, uint64(block.timestamp + 7 days));
+
+        assertEq(pool.bufferAssets(), 10 * USDC);
+        assertEq(pool.venuePrincipalCostBasis(), 10 * USDC);
+        (,,, bytes32 adapterRequestId,) = pool.venueDeployments(deploymentId);
+        adapter.returnRecovery(address(pool), adapterRequestId, 10 * USDC);
+        assertEq(pool.bufferAssets(), 20 * USDC);
+        assertEq(pool.venuePrincipalCostBasis(), 0);
+        assertEq(pool.totalAssets(), 20 * USDC);
+        assertEq(pool.activeVenueDeploymentId(), 0);
+        assertEq(pool.venueWrittenOffPrincipalAssets(deploymentId), 0);
     }
 
     function testPerAgentCapRejectsTheOneHundredAndFirstUsdc() public {
@@ -404,7 +468,7 @@ contract DepositPoolTest is Test {
     }
 
     function _assertExactPoolAbi(address target) internal view {
-        bytes4[] memory allowed = new bytes4[](50);
+        bytes4[] memory allowed = new bytes4[](54);
         allowed[0] = bytes4(keccak256("DEPLOYMENT_EPOCH()"));
         allowed[1] = bytes4(keccak256("NOTICE_30_DAYS()"));
         allowed[2] = bytes4(keccak256("NOTICE_7_DAYS()"));
@@ -455,6 +519,10 @@ contract DepositPoolTest is Test {
         allowed[47] = bytes4(keccak256("venueAdapter()"));
         allowed[48] = bytes4(keccak256("venueDeployments(uint256)"));
         allowed[49] = bytes4(keccak256("venueRecalls(uint256)"));
+        allowed[50] = bytes4(keccak256("venuePrincipalCostBasis()"));
+        allowed[51] = bytes4(keccak256("venueWrittenOffPrincipalAssets(uint256)"));
+        allowed[52] = bytes4(keccak256("recordVenueReturn(bytes32,uint256)"));
+        allowed[53] = bytes4(keccak256("writeOffVenueLoss(uint256,uint256)"));
 
         bytes4[] memory actual = _dispatcherSelectors(target.code);
         require(actual.length == allowed.length, "EXTERNAL_ABI_CHANGED");
@@ -466,7 +534,7 @@ contract DepositPoolTest is Test {
     function testExactAbiAllowlistDetectsAnAddedFunction() public {
         DepositPoolAbiMutation mutated = new DepositPoolAbiMutation(address(asset), operator, adapter);
         bytes4[] memory actual = _dispatcherSelectors(address(mutated).code);
-        require(actual.length == 51, "MUTATION_NOT_IN_DISPATCHER");
+        require(actual.length == 55, "MUTATION_NOT_IN_DISPATCHER");
         require(_containsSelector(actual, bytes4(keccak256("advance(uint256)"))), "MUTATION_SELECTOR_MISSING");
         (bool ok, bytes memory data) =
             address(this).staticcall(abi.encodeCall(this.assertExactPoolAbi, (address(mutated))));
@@ -609,6 +677,7 @@ contract MockPoolVenueAdapter is IDepositPoolVenueAdapter {
 
     MockPoolUsdc public immutable token;
     address public immutable override asset;
+    address public immutable override lossReporter;
     mapping(address => uint256) public override managedAssets;
     mapping(address => uint64) public returnDeadline;
     mapping(bytes32 => StoredRequest) internal requests;
@@ -617,6 +686,7 @@ contract MockPoolVenueAdapter is IDepositPoolVenueAdapter {
     constructor(MockPoolUsdc token_) {
         token = token_;
         asset = address(token_);
+        lossReporter = msg.sender;
     }
 
     function requestDeploy(uint256 assets, uint64 returnBy) external override returns (bytes32 requestId) {
@@ -671,6 +741,16 @@ contract MockPoolVenueAdapter is IDepositPoolVenueAdapter {
         accrued = (managedAssets[pool] * bps) / 10_000;
         managedAssets[pool] += accrued;
         token.mint(address(this), accrued);
+    }
+
+    function recordRemotePosition(address pool, uint256 assets) external {
+        managedAssets[pool] = assets;
+    }
+
+    function returnRecovery(address pool, bytes32 requestId, uint256 assets) external {
+        managedAssets[pool] -= assets;
+        require(token.transfer(pool, assets), "TRANSFER");
+        DepositPool(pool).recordVenueReturn(requestId, assets);
     }
 
     function _createRequest(address pool, RequestKind kind, uint256 assets, uint64 returnBy)

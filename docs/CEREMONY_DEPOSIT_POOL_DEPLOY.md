@@ -1,14 +1,18 @@
 # Ceremony — bringing the agent deposit pool live on mainnet
 
-Status: **DO NOT DEPLOY.** Nothing in this document has been run, and it must not be until
-the contract change in §0 lands. `scripts/ops/deploy-deposit-pool.mjs --commit` refuses.
+Status: **contract safety block removed; mainnet ceremony not yet run.** #1066 separates
+pricing NAV from remote execution inventory, and the new bytecode passed the fork rerun in
+§5b. `scripts/ops/deploy-deposit-pool.mjs --commit` is enabled again, subject to every
+preflight and multisig step below.
 
 ---
 
-## 0. Why this ceremony is blocked
+## 0. The pricing capability is removed
 
 An independent review (Codex, 2026-08-10, [#1050](https://github.com/averray-agent/agent/pull/1050))
-falsified the safety argument in §3. **Any `strategySettler` can drain the pool's buffer.**
+falsified the original safety argument: a `strategySettler` could set the lane's reported
+assets, reprice pool shares, and drain the buffer. #1066 removes that capability rather
+than putting a sanity band around the observation.
 
 ```solidity
 // HydrationUsdcAdapterV22 — gated on policy.strategySettler(msg.sender)
@@ -17,14 +21,14 @@ function recordRemotePosition(uint256 assets, ...) external onlyOperator {
     totalShares = assets;
 }
 
-// DepositPool.sol:215 — share price derives from that book
+// Old DepositPool — share price derived from that book
 function convertToAssets(uint256 shares) public view returns (uint256) {
     return (shares * totalAssets()) / supply;   // totalAssets() -> venueAdapter.managedAssets()
 }                                               //                -> lane.totalAssets()
 ```
 
-`deposit()` is not operator-gated, and `redeem()` pays from the buffer. So: deposit small,
-inflate the book as settler, redeem the buffer.
+`deposit()` is not operator-gated, and `redeem()` pays from the buffer. The old composition
+therefore allowed: deposit small, inflate the book as settler, redeem the buffer.
 
 **This is not fixable by choosing a different `operator_`.** The capability lives in
 `strategySettler`, which is a *global* mapping on TreasuryPolicy — so it is available to
@@ -33,28 +37,32 @@ operator-gated functions correctly and then failed to compose them with the *lan
 settler-writable book feeding the pool's price. The four-role concentration §3 files as
 "worth unwinding at the next rotation" is not hygiene; it is the vulnerability.
 
-### The fix, as recommended by the review
+### Landed design
 
-Split **pricing NAV** from **remote execution inventory**. `DepositPool.totalAssets()` must
-stop consuming `lane.totalAssets()` and recovery observations through `managedAssets()`, and
-use a cost-basis ledger instead:
+`DepositPool.totalAssets()` is now exactly local buffer cash plus
+`venuePrincipalCostBasis`. It never calls `managedAssets()`:
 
-- increase priced assets only when the pool transfers principal out;
-- decrease them when actual USDC returns, or when the multisig explicitly writes off a loss;
+- increase cost basis only when the pool transfers principal out;
+- decrease it when actual USDC returns, or when the TreasuryPolicy owner explicitly writes
+  off a loss;
 - recognise yield only when returned USDC reaches the local buffer — anything above remaining
   cost basis is realised yield.
 
-Remote-position observations stay useful for *sizing recalls* and must never feed
+Remote-position observations remain useful only for *sizing recalls* and never feed
 `totalAssets`, caps, share conversion, the buffer floor, deposits, or redemptions. While
-remote yield is unpriced, close the pricing epoch: block new deposits and queue final
-redemptions until a recall settles.
+normal recall claims are balance-delta measured by the pool, the recovery path calls back
+only after the immutable adapter has transferred USDC into the buffer. A settler cannot
+write off principal: that path resolves `TreasuryPolicy.owner()` through the adapter.
 
-That converts a compromised settler from "can create claims on the buffer" to, at worst,
-"can propose a bad recall that fails" — removing the capability rather than bounding it.
+Deposits and redemptions remain open while capital is deployed. Cost-basis NAV understates
+unrealised venue value, so it cannot be used to extract more than the pool holds. It does,
+however, create a known timing seam: yield lands as a step when USDC returns, so a depositor
+can enter just before a profitable recall settles and exit after it, capturing yield they
+did not earn. This is negligible at the 10 USDC launch size and real at scale; redesign the
+yield allocation before increasing the pool materially.
 
-Everything below is retained because the ordering, addresses, and simulation remain correct
-and will be needed once the contract is fixed. **§3's safety argument is superseded by this
-section.**
+The exact exploit regression, owner-only write-off, and cash-before-callback ordering are
+covered in `test/DepositPool.t.sol` and `test/HydrationDepositPoolAdapter.t.sol`.
 
 ---
 
@@ -95,6 +103,7 @@ Three constructors, read from source at c48a22e:
 constructor(address asset_, address operator_, IDepositPoolVenueAdapter venueAdapter_)
     // :162  if venueAdapter_ != 0 → REQUIRES venueAdapter_.code.length != 0
     //                            → REQUIRES venueAdapter_.asset() == asset_
+    //                            → REQUIRES venueAdapter_.lossReporter() != address(0)
     // :31   venueAdapter is IMMUTABLE — there is no setter, on purpose
 
 // HydrationDepositPoolAdapter.sol:78
@@ -410,8 +419,8 @@ deliberately does not.
 
 ## 5b. Fork simulation — the ordering is proven, not reasoned
 
-Run 2026-08-10 against an `anvil` fork of mainnet at block 19,306,992, deployer nonce 33
-(matching mainnet). All four transactions executed:
+Rerun 2026-08-11 against an `anvil` fork of mainnet at block 19,345,507, deployer nonce 33
+(matching mainnet) after the #1066 bytecode change. All four transactions executed:
 
 | tx | contract | address | vs prediction |
 |---|---|---|---|
@@ -422,7 +431,19 @@ Run 2026-08-10 against an `anvil` fork of mainnet at block 19,306,992, deployer 
 
 Both load-bearing constructor assertions passed for real rather than in argument:
 tx2's `lane.agentAccountCore() == address(this)`, and tx3's
-`venueAdapter.code.length != 0 && venueAdapter.asset() == asset_`.
+`venueAdapter.code.length != 0 && venueAdapter.asset() == asset_ &&
+venueAdapter.lossReporter() != address(0)`.
+
+The addresses were recomputed from current state. They are unchanged from the 2026-08-10
+run because the deployer nonce is still 33. This is expected: plain CREATE addresses depend
+on deployer plus nonce, not creation bytecode. The creation bytecode hashes used in this
+rerun were:
+
+```
+lane          0x997ddcced2590a77dda1a555e07916e9e55231f28e130b5b26d6bc9fc10e1efe
+venueAdapter  0xe862dde09519a056c22c17d3bc8071a9b9f1f8df3eeecca4636de7a04ae49a44
+pool          0xa8f2758ec34ad18defec81b7ea454bf00aa7617981d39575200fa75243628550
+```
 
 Wiring read back afterwards — the cycle closes and the live lane is untouched:
 
@@ -433,8 +454,10 @@ pool.operator()          = 0x5a6836c6…5813
 pool.venueAdapter()      = 0xf0f3b4a6…
 venueAdapter.pool()      = 0xAa9661e9…
 venueAdapter.lane()      = 0xAcC2CAc2…
+venueAdapter.lossReporter() = 0x01E6eed8…874C  (TreasuryPolicy owner)
 lane.agentAccountCore()  = 0xf0f3b4a6…
 lane.strategyId()        = HYDRATION_USDC_POOL_V1
+pool.venuePrincipalCostBasis() = 0
 ```
 
 ### What the fork could NOT simulate, and why it does not weaken the result
@@ -450,9 +473,10 @@ Checked against the real chain instead: mainnet USDC `decimals()` = 6, and the c
 constant is `uint8 public constant decimals = 6`. It matches, so this passes on mainnet.
 
 To exercise the remaining constructor logic the fork ran with a stub at the USDC address
-returning `6` for every call. That stub is why `pool.totalAssets()` reads **12** on the fork
-(`balanceOf` also returns 6, twice — buffer plus managed). On mainnet an empty pool reads 0.
-The figure is an artifact; do not carry it forward as a real value.
+returning `6` for every call. That stub is why `pool.totalAssets()` reads **6** on the fork:
+`balanceOf(pool)` returns 6 while the new cost basis correctly reads 0. The old simulation
+read 12 because it also consumed remote managed inventory. On mainnet an empty pool reads 0;
+the stub figure is an artifact and must not be carried forward.
 
 **Consequence for future simulations:** an anvil fork cannot model Hub's asset precompile,
 so anything touching USDC must be dry-run against a node that implements it — polkadot-js
@@ -479,9 +503,10 @@ Reach for anvil for pure-EVM wiring, not for anything that moves the asset.
       ready. Re-read all three immediately before pausing.
 - [x] ~~§5 decision~~ — document, do not chase. "It comes home at recall" was checked and is
       false; recovery needs its own packet and is not worth it at this size.
-- [x] ~~dry-run each deployment~~ — full four-transaction fork simulation passed, all three
-      addresses matching prediction (§5b). The USDC precompile is the one step anvil cannot
-      model; its check was verified directly against mainnet instead.
+- [x] ~~dry-run each deployment after #1066~~ — full four-transaction fork simulation reran
+      at block 19,345,507 with the new bytecode; all three addresses matched freshly
+      recomputed predictions (§5b). The USDC precompile is the one step anvil cannot model;
+      its check was verified directly against mainnet instead.
 - [ ] caps confirmed as intended: `totalAssets() <= 1_000e6`, `assetsOf(agent) <= 100e6`
 - [ ] **on the day**: re-read the deployer nonce and recompute both predicted addresses —
       §5b assumed 33, and the whole ordering depends on it

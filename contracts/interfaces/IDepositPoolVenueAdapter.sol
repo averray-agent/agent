@@ -29,6 +29,9 @@ interface IDepositPoolVenueAdapter {
 
     function asset() external view returns (address);
 
+    /// @notice Highest-authority account permitted to write off pool principal.
+    function lossReporter() external view returns (address);
+
     /// @notice Pool assets in local custody, in flight, or observed at venue.
     function managedAssets(address pool) external view returns (uint256);
 

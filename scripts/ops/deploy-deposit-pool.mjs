@@ -49,30 +49,6 @@ import { join } from "node:path";
 
 import { ethers } from "ethers";
 
-/**
- * BROADCAST IS BLOCKED. The ceremony is not deployable as designed.
- *
- * An independent review (Codex, 2026-08-10, PR #1050) falsified the safety
- * argument this script was built on. `recordRemotePosition` writes the lane's
- * `totalAssets` to an arbitrary caller-supplied value under
- * `policy.strategySettler`; `DepositPool.totalAssets()` consumes that through
- * `venueAdapter.managedAssets()`; and `convertToAssets` derives the share price
- * from it. Since `deposit()` is not operator-gated and `redeem()` pays from the
- * buffer, any settler can deposit small, inflate the book, and drain the buffer.
- *
- * The capability lives in `strategySettler`, not `operator` — so choosing a
- * different operator key does NOT fix it, and neither does anything this script
- * can do. It needs a contract change: stop deriving the share price from a
- * settler-writable book.
- *
- * Dry run stays available; it is useful for reading the plan. Broadcast refuses.
- * Delete this block only together with the contract fix.
- */
-const BROADCAST_BLOCKED_REASON =
-  "DepositPool derives its share price from lane.totalAssets, which any TreasuryPolicy "
-  + "strategySettler can set arbitrarily via recordRemotePosition. Deploying this pool would "
-  + "let a settler mint claims on the buffer. See docs/CEREMONY_DEPOSIT_POOL_DEPLOY.md §0.";
-
 const DEFAULT_STRATEGY_LABEL = "HYDRATION_USDC_POOL_V1";
 const RESERVED_STRATEGY_LABEL = "HYDRATION_USDC_V1";
 const EXPECTED_ASSET_DECIMALS = 6;
@@ -188,12 +164,6 @@ async function main() {
     return;
   }
 
-  // Fails fast and unconditionally: a missing artifact or an unset key must never
-  // be the reason --commit stops, because fixing those would look like progress.
-  if (args.commit) {
-    throw new Error(`refusing to broadcast — ${BROADCAST_BLOCKED_REASON}`);
-  }
-
   const manifest = JSON.parse(readFileSync(`deployments/${args.profile}.json`, "utf8"));
   const rpc = args.rpc || process.env.RPC_URL || manifest.rpcUrl;
   const provider = new ethers.JsonRpcProvider(rpc);
@@ -274,9 +244,6 @@ async function main() {
     return;
   }
 
-  throw new Error(`refusing to broadcast — ${BROADCAST_BLOCKED_REASON}`);
-
-  /* eslint-disable no-unreachable -- retained so the fix is a deletion, not a rewrite */
   const key = process.env.DEPLOYER_PRIVATE_KEY;
   if (!key) throw new Error("DEPLOYER_PRIVATE_KEY is not set; refusing to broadcast.");
   const wallet = new ethers.Wallet(key, provider);

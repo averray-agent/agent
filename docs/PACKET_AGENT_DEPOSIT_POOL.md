@@ -91,10 +91,17 @@ evidence in §5 depends on. Relaxing this later is additive; unwinding it is not
 ### D1 falls out rather than being computed
 
 The pool holds a liquid buffer and deploys the rest through the existing Aave-via-Hydration
-adapter. Yield accrues to `totalAssets`, so the share price rises. **The "true blended
-rate" is emergent** — deployed capital earns the venue rate, the buffer earns zero, and the
-share price is the blend by construction. Nothing computes or promises a rate, which is
-exactly what D1 asked for ("never promise the venue rate on undeployed capital").
+adapter. Pricing NAV is local buffer cash plus the pool's own deployed-principal cost basis;
+remote venue observations never reprice shares. Yield enters `totalAssets` only when USDC
+returns to the buffer, so the share price rises on realised cash rather than a settler's
+assertion. **The "true blended rate" is emergent** — deployed capital earns the venue rate,
+the buffer earns zero, and realised returns become the blend without promising a rate.
+
+This conservative accounting intentionally leaves deposits and redemptions open while
+capital is deployed: unobserved yield understates value and cannot create claims on cash the
+pool does not hold. Known seam: realised yield lands as a step, so depositing immediately
+before a profitable recall and redeeming after can capture yield the depositor did not earn.
+It is negligible at the 10 USDC launch size and must be redesigned before material scale.
 
 ### Tiers
 

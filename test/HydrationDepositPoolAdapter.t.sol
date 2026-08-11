@@ -137,10 +137,9 @@ contract HydrationDepositPoolAdapterTest is Test {
 
     function testRemoteDepositFailureRemainsInNavUntilRecoveryReturnsToPool() public {
         uint64 returnBy = uint64(block.timestamp + 7 days);
-        vm.prank(pool);
-        asset.transfer(address(adapter), 10 * USDC);
-        vm.prank(pool);
-        bytes32 deployRequest = adapter.requestDeploy(10 * USDC, returnBy);
+        vm.prank(operator);
+        uint256 deploymentId = depositPool.deployToVenue(10 * USDC, returnBy);
+        (,,, bytes32 deployRequest,) = depositPool.venueDeployments(deploymentId);
 
         HydrationDepositPoolAdapter.LaneParameters memory parameters = HydrationDepositPoolAdapter.LaneParameters({
             sellAmount: 9 * USDC,
@@ -164,12 +163,20 @@ contract HydrationDepositPoolAdapterTest is Test {
         adapter.releaseRecoveredToPool(deployRequest, 10 * USDC);
         assertEq(asset.balanceOf(pool), 20 * USDC);
         assertEq(adapter.managedAssets(pool), 0);
+        assertEq(depositPool.venuePrincipalCostBasis(), 0);
 
         IDepositPoolVenueAdapter.Request memory failed = adapter.getRequest(deployRequest);
         assertEq(uint256(failed.status), uint256(IDepositPoolVenueAdapter.RequestStatus.Failed));
         assertEq(failed.settledAssets, 10 * USDC);
-        vm.prank(pool);
-        assertEq(adapter.claimSettled(deployRequest), 10 * USDC);
+        (IDepositPoolVenueAdapter.RequestStatus status, uint256 settledAssets) =
+            depositPool.settleVenueDeployment(deploymentId);
+        assertEq(uint256(status), uint256(IDepositPoolVenueAdapter.RequestStatus.Failed));
+        assertEq(settledAssets, 10 * USDC);
+    }
+
+    function testLossReporterIsTreasuryPolicyOwnerNotStrategySettler() public view {
+        assertEq(adapter.lossReporter(), policy.owner());
+        require(adapter.lossReporter() != operator, "SETTLER_IS_LOSS_REPORTER");
     }
 }
 
