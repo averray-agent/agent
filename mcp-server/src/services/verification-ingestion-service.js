@@ -7,12 +7,12 @@ import { buildVerificationAuditFields } from "../core/verifier-contract.js";
 import { disputeIdForSession } from "../core/dispute-resolution.js";
 import { buildBadgeFromSession, buildBadgeJobSnapshot } from "../core/badge-metadata.js";
 import { buildRunReceipt } from "../core/run-receipt.js";
+import { requireJobSnapshot } from "../core/job-snapshot.js";
 
 export class VerificationIngestionService {
-  constructor(stateStore, eventBus = undefined, getJobDefinition = undefined, logger = undefined, options = {}) {
+  constructor(stateStore, eventBus = undefined, _legacyDefinitionResolver = undefined, logger = undefined, options = {}) {
     this.stateStore = stateStore;
     this.eventBus = eventBus;
-    this.getJobDefinition = getJobDefinition;
     // Reached by the autonomous (no-JWT) settlement path as well as the manual
     // route. Log under a synthetic principal so autonomous verdict ingestion is
     // auditable (audit B-11). Default to console so it logs even unwired.
@@ -224,15 +224,7 @@ export class VerificationIngestionService {
   }
 
   resolveJob(session, verdict) {
-    const jobId = session?.jobId ?? verdict?.jobId;
-    if (!jobId || typeof this.getJobDefinition !== "function") {
-      return undefined;
-    }
-    try {
-      return this.getJobDefinition(jobId);
-    } catch {
-      return undefined;
-    }
+    return requireJobSnapshot(session).job;
   }
 
   publishWorkflowOutcomeEvent(session, verdict, auditFields, status, timestamp) {

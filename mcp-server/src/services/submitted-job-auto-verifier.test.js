@@ -5,6 +5,7 @@ import {
   SubmittedJobAutoVerifierService,
   loadSubmittedJobAutoVerifierConfig
 } from "./submitted-job-auto-verifier.js";
+import { buildJobSnapshot } from "../core/job-snapshot.js";
 
 const JOBS = {
   "bench-001": { id: "bench-001", verifierMode: "benchmark", verifierConfig: { handler: "benchmark" } },
@@ -17,7 +18,12 @@ const JOBS = {
 // session.status the way the real one does (submitted -> resolved/rejected via
 // ingestVerification), so re-listing on the next tick proves idempotency.
 function makeHarness({ sessions = [], jobs = JOBS, outcomeFor = () => "approved", gateway } = {}) {
-  const store = sessions.map((session) => ({ ...session }));
+  const store = sessions.map((session) => ({
+    ...session,
+    ...(session.jobSnapshot || !jobs[session.jobId]
+      ? {}
+      : { jobSnapshot: buildJobSnapshot(jobs[session.jobId]) })
+  }));
   const verifyCalls = [];
   const platformService = {
     async listRecentSessions() {
@@ -147,7 +153,7 @@ test("skips a submitted session that already carries a verification result", asy
   assert.equal(run.skipped[0].reason, "already_verified");
 });
 
-test("skips a submitted session whose job has been removed", async () => {
+test("fails closed when a submitted session has no pinned snapshot", async () => {
   const harness = makeHarness({
     sessions: [{ sessionId: "s-ghost", jobId: "missing-001", status: "submitted" }]
   });
@@ -157,7 +163,26 @@ test("skips a submitted session whose job has been removed", async () => {
 
   assert.equal(run.candidateCount, 0);
   assert.equal(harness.verifyCalls.length, 0);
-  assert.equal(run.skipped[0].reason, "job_not_found");
+  assert.equal(run.skipped[0].reason, "job_snapshot_missing");
+});
+
+test("persistent submitted-session integrity skips degrade verifier health", async () => {
+  const harness = makeHarness({
+    sessions: [{ sessionId: "s-legacy", jobId: "missing-001", status: "submitted" }]
+  });
+  const service = makeService(harness);
+  service.running = true;
+  service.startedAt = new Date().toISOString();
+
+  await service.runOnce();
+  assert.equal((await service.getHealth()).ok, true);
+
+  await service.runOnce();
+  const health = await service.getHealth();
+  assert.equal(health.ok, false);
+  assert.equal(health.state, "submitted_session_persistently_skipped");
+  assert.equal(health.persistentSubmittedFailureCount, 1);
+  assert.equal(health.persistentSubmittedFailures[0].reason, "job_snapshot_missing");
 });
 
 test("does nothing when disabled", async () => {

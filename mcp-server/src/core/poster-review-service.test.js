@@ -8,6 +8,7 @@ import {
   PosterReviewService,
   POSTER_REVIEW_REASON_CODES
 } from "./poster-review-service.js";
+import { buildJobSnapshot } from "./job-snapshot.js";
 
 const JOB_ID = `0x${"a".repeat(64)}`;
 const POSTER = "0x1111111111111111111111111111111111111111";
@@ -45,7 +46,6 @@ async function makeHarness({
     protocolHistory: ["http"],
     statusHistory: []
   };
-  await stateStore.upsertSession(session);
   const job = {
     id: JOB_ID,
     title: "External job",
@@ -57,6 +57,8 @@ async function makeHarness({
     source: { type: "external", poster: { wallet: POSTER } },
     poster: { wallet: POSTER }
   };
+  session.jobSnapshot = buildJobSnapshot(job);
+  await stateStore.upsertSession(session);
   let liveJob = {
     escrowAddress: ESCROW,
     poster: POSTER,
@@ -69,6 +71,7 @@ async function makeHarness({
     protocolFeeReleasedRaw: "0",
     protocolFeeBps: 500,
     protocolFeeWaived: false,
+    specHash: session.jobSnapshot.specHash,
     rejectedAt: 0
   };
   const platformService = {

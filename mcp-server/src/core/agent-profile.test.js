@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { AGENT_PROFILE_SCHEMA_VERSION, buildAgentProfile } from "./agent-profile.js";
 import { ValidationError } from "./errors.js";
+import { buildJobSnapshot } from "./job-snapshot.js";
 
 const WALLET = "0x1234567890123456789012345678901234567890";
 
@@ -79,6 +80,46 @@ test("buildAgentProfile returns a schema-shaped document for a known wallet", ()
   assert.equal(profile.badges[0].level, 2); // milestone job
   assert.equal(profile.badges[0].badgeUrl, "https://api.averray.com/badges/s3");
   assert.equal(profile.badges.length, 3);
+});
+
+test("earnings use the immutable claim-time snapshot after the catalogue rotates (#1063)", () => {
+  const claimedJob = {
+    id: "rotated-paid-job",
+    category: "coding",
+    rewardAsset: "USDC",
+    rewardDecimals: 6,
+    rewardAmount: "0.25",
+    claimTtlSeconds: 3600
+  };
+  const session = {
+    ...approvedSession({
+      jobId: claimedJob.id,
+      sessionId: "snapshot-earned-1",
+      updatedAt: "2026-08-11T10:00:00Z"
+    }),
+    jobSnapshot: buildJobSnapshot(claimedJob)
+  };
+
+  const profile = buildAgentProfile({
+    wallet: WALLET,
+    reputation: { skill: 100, reliability: 100, economic: 100 },
+    sessions: [session],
+    // The live catalogue has reused the id with different terms. It must not
+    // alter the historical earnings or badge attached to the claimed session.
+    getJobDefinition: () => ({
+      ...claimedJob,
+      category: "governance",
+      rewardAmount: "999"
+    })
+  });
+
+  assert.deepEqual(profile.stats.totalEarned, {
+    asset: "USDC",
+    amount: "250000",
+    decimals: 6
+  });
+  assert.equal(profile.badges[0].reward.amount, "250000");
+  assert.equal(profile.badges[0].category, "coding");
 });
 
 test("buildAgentProfile returns null completionRate when no terminal sessions exist", () => {

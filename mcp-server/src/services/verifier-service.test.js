@@ -11,6 +11,7 @@ import { transitionSession } from "../core/session-state-machine.js";
 import { normalizeSubmission } from "../core/submission.js";
 import { buildAverrayDisclosureFooter } from "../core/maintainer-surface-policy.js";
 import { buildVerificationContract } from "../core/verifier-contract.js";
+import { buildJobSnapshot } from "../core/job-snapshot.js";
 
 const FIXTURE_ROOT = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -48,6 +49,10 @@ function fixtureVersionsForHandler(handlerId) {
 
 const SESSION_ID = "release-readiness-check-001:0xabc";
 
+function withJobSnapshot(session, job, options = undefined) {
+  return { ...session, jobSnapshot: buildJobSnapshot(job, options) };
+}
+
 test("verifySubmission persists verification input and supports replay", async () => {
   const stateStore = new MemoryStateStore();
   const session = transitionSession({
@@ -63,9 +68,6 @@ test("verifySubmission persists verification input and supports replay", async (
     })
   }, "claimed", { reason: "job_claimed" });
 
-  const submitted = transitionSession(session, "submitted", { reason: "work_submitted" });
-  await stateStore.upsertSession(submitted);
-
   const job = {
     id: "release-readiness-check-001",
     outputSchemaRef: "schema://jobs/release-readiness-output",
@@ -77,6 +79,12 @@ test("verifySubmission persists verification input and supports replay", async (
       matchMode: "contains_all"
     }
   };
+  const submitted = transitionSession(
+    withJobSnapshot(session, job),
+    "submitted",
+    { reason: "work_submitted" }
+  );
+  await stateStore.upsertSession(submitted);
 
   const platformService = {
     resumeSession: (sessionId) => stateStore.getSession(sessionId),
@@ -127,7 +135,12 @@ test("verifySubmission persists verification input and supports replay", async (
 test("verifySubmission passes the actual claimant wallet and claim session to the verifier", async () => {
   const stateStore = new MemoryStateStore();
   const claimantWallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-  const submitted = transitionSession({
+  const job = {
+    id: "external-pr-job-1",
+    verifierMode: "github_pr",
+    verifierConfig: { version: 1, handler: "github_pr", requireClaimantBinding: true }
+  };
+  const submitted = transitionSession(withJobSnapshot({
     sessionId: "external-pr-session-1",
     wallet: claimantWallet,
     jobId: "external-pr-job-1",
@@ -136,17 +149,13 @@ test("verifySubmission passes the actual claimant wallet and claim session to th
       summary: "Fixes #42.",
       tests: "npm test passed"
     })
-  }, "claimed", { reason: "job_claimed" });
+  }, job), "claimed", { reason: "job_claimed" });
   await stateStore.upsertSession(transitionSession(submitted, "submitted", { reason: "work_submitted" }));
 
   let receivedContext;
   const platformService = {
     resumeSession: (sessionId) => stateStore.getSession(sessionId),
-    getJobDefinition: () => ({
-      id: "external-pr-job-1",
-      verifierMode: "github_pr",
-      verifierConfig: { version: 1, handler: "github_pr", requireClaimantBinding: true }
-    }),
+    getJobDefinition: () => job,
     ingestVerification: async (sessionId) => stateStore.getSession(sessionId)
   };
   const service = new VerifierService(platformService, stateStore, undefined, {
@@ -220,14 +229,114 @@ test("verifySubmission rejects non-verifiable sessions before handler or chain s
   assert.equal(resolvedOnChain, false);
 });
 
+test("verifySubmission fails closed when the claim-time snapshot is absent", async () => {
+  const stateStore = new MemoryStateStore();
+  const submitted = transitionSession(transitionSession({
+    sessionId: "legacy-without-snapshot",
+    wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    jobId: "legacy-job",
+    submission: "complete"
+  }, "claimed", { reason: "job_claimed" }), "submitted", { reason: "work_submitted" });
+  await stateStore.upsertSession(submitted);
+  let evaluated = false;
+  let settled = false;
+  const service = new VerifierService(
+    { resumeSession: (id) => stateStore.getSession(id) },
+    stateStore,
+    {
+      isEnabled: () => true,
+      getJob: async () => { throw new Error("chain must not be read before the local pin is proven"); },
+      resolveSinglePayout: async () => { settled = true; }
+    },
+    {
+      evaluate: async () => { evaluated = true; },
+      listHandlers: () => []
+    }
+  );
+
+  await assert.rejects(
+    () => service.verifySubmission({ sessionId: submitted.sessionId }),
+    (error) => error?.code === "job_snapshot_missing"
+      && error?.details?.integrityFailure === true
+      && error?.details?.operatorHandlingRequired === true
+  );
+  assert.equal(evaluated, false);
+  assert.equal(settled, false);
+  assert.equal((await stateStore.getSession(submitted.sessionId)).status, "submitted");
+});
+
+test("verifySubmission treats snapshot tampering and on-chain specHash drift as integrity failures", async () => {
+  const job = {
+    id: "integrity-job",
+    verifierMode: "benchmark",
+    verifierConfig: { handler: "benchmark", requiredKeywords: ["complete"] }
+  };
+  const base = transitionSession(transitionSession(withJobSnapshot({
+    sessionId: "integrity-job:0xabc",
+    wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    jobId: job.id,
+    submission: "complete"
+  }, job), "claimed", { reason: "job_claimed" }), "submitted", { reason: "work_submitted" });
+
+  for (const scenario of ["tampered_local_snapshot", "on_chain_spec_hash_mismatch"]) {
+    const stateStore = new MemoryStateStore();
+    const submitted = structuredClone(base);
+    if (scenario === "tampered_local_snapshot") {
+      submitted.jobSnapshot.definition.verifierConfig.requiredKeywords = ["different"];
+    }
+    await stateStore.upsertSession(submitted);
+    let evaluated = false;
+    let settled = false;
+    const service = new VerifierService(
+      { resumeSession: (id) => stateStore.getSession(id) },
+      stateStore,
+      {
+        isEnabled: () => true,
+        getJob: async () => ({
+          state: 3,
+          specHash: scenario === "on_chain_spec_hash_mismatch"
+            ? `0x${"f".repeat(64)}`
+            : base.jobSnapshot.specHash
+        }),
+        resolveSinglePayout: async () => { settled = true; }
+      },
+      {
+        evaluate: async () => { evaluated = true; },
+        listHandlers: () => []
+      }
+    );
+
+    await assert.rejects(
+      () => service.verifySubmission({ sessionId: submitted.sessionId }),
+      (error) => error?.details?.integrityFailure === true
+        && error?.code === (scenario === "tampered_local_snapshot"
+          ? "job_snapshot_definition_hash_mismatch"
+          : "job_snapshot_on_chain_spec_hash_mismatch")
+    );
+    assert.equal(evaluated, false, scenario);
+    assert.equal(settled, false, scenario);
+    assert.equal((await stateStore.getSession(submitted.sessionId)).status, "submitted");
+  }
+});
+
 test("verifySubmission validates built-in schema-native input before handler or chain side effects", async () => {
   const stateStore = new MemoryStateStore();
-  const session = transitionSession({
+  const job = {
+    id: "release-readiness-check-001",
+    outputSchemaRef: "schema://jobs/release-readiness-output",
+    verifierConfig: {
+      version: 1,
+      handler: "deterministic",
+      expectedOutputs: ["release_id"],
+      matchMode: "contains_all"
+    }
+  };
+  const session = transitionSession(withJobSnapshot({
     sessionId: SESSION_ID,
     wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     jobId: "release-readiness-check-001",
     submission: normalizeSubmission("complete")
-  }, "claimed", { reason: "job_claimed" });
+  }, job), "claimed", { reason: "job_claimed" });
   await stateStore.upsertSession(transitionSession(session, "submitted", { reason: "work_submitted" }));
 
   let evaluated = false;
@@ -235,16 +344,7 @@ test("verifySubmission validates built-in schema-native input before handler or 
   const service = new VerifierService(
     {
       resumeSession: (sessionId) => stateStore.getSession(sessionId),
-      getJobDefinition: () => ({
-        id: "release-readiness-check-001",
-        outputSchemaRef: "schema://jobs/release-readiness-output",
-        verifierConfig: {
-          version: 1,
-          handler: "deterministic",
-          expectedOutputs: ["release_id"],
-          matchMode: "contains_all"
-        }
-      }),
+      getJobDefinition: () => job,
       ingestVerification: () => {
         throw new Error("verification should not ingest before schema validation passes");
       }
@@ -252,6 +352,7 @@ test("verifySubmission validates built-in schema-native input before handler or 
     stateStore,
     {
       isEnabled: () => true,
+      getJob: async () => ({ state: 3, specHash: buildJobSnapshot(job).specHash }),
       resolveSinglePayout: async () => {
         resolvedOnChain = true;
       }
@@ -875,7 +976,11 @@ test("replayVerification reads stored verifier config snapshot when live job con
     "claimed",
     { reason: "job_claimed" }
   );
-  await stateStore.upsertSession(transitionSession(claimed, "submitted", { reason: "work_submitted" }));
+  await stateStore.upsertSession(transitionSession(
+    withJobSnapshot(claimed, fixture.job),
+    "submitted",
+    { reason: "work_submitted" }
+  ));
 
   const liveJob = {
     ...fixture.job,
@@ -899,9 +1004,10 @@ test("replayVerification reads stored verifier config snapshot when live job con
   };
 
   const service = new VerifierService(platformService, stateStore);
-  // Persist the original verification under the fixture's snapshot so replay has a snapshot to read.
+  // The mutable catalogue has drifted, but verification uses the claim-time
+  // snapshot and therefore still applies the terms the worker accepted.
   const original = await service.verifySubmission({ sessionId });
-  assert.equal(original.outcome, "rejected"); // live config rejects; snapshot will approve.
+  assert.equal(original.outcome, fixture.expected.outcome);
 
   // Now seed the persisted result with the fixture snapshot, simulating an earlier
   // verification captured before the live config drift.
@@ -937,6 +1043,7 @@ test("replayVerification surfaces handler version drift instead of silently re-r
 
   await stateStore.upsertSession(
     transitionSession(
+      withJobSnapshot(
       transitionSession(
         {
           sessionId,
@@ -946,6 +1053,8 @@ test("replayVerification surfaces handler version drift instead of silently re-r
         },
         "claimed",
         { reason: "job_claimed" }
+      ),
+      fixture.job
       ),
       "submitted",
       { reason: "work_submitted" }
@@ -1002,7 +1111,7 @@ test("replayVerification does not flag drift when captured handler version match
     "submitted",
     { reason: "work_submitted" }
   );
-  await stateStore.upsertSession(submitted);
+  await stateStore.upsertSession(withJobSnapshot(submitted, fixture.job));
 
   const platformService = {
     resumeSession: (id) => stateStore.getSession(id),
@@ -1079,8 +1188,12 @@ test("getResult does not report 'verifying' for a merely claimed (not-yet-submit
 });
 
 test("listPendingVerifications returns only submitted, unverified sessions tagged with verifier mode", async () => {
+  const benchmarkJob = { id: "job-a", verifierConfig: { handler: "benchmark" } };
   const sessions = [
-    { sessionId: "s-sub", jobId: "job-a", wallet: "0xworker1", status: "submitted", submittedAt: "2026-06-13T10:00:00.000Z" },
+    withJobSnapshot(
+      { sessionId: "s-sub", jobId: "job-a", wallet: "0xworker1", status: "submitted", submittedAt: "2026-06-13T10:00:00.000Z" },
+      benchmarkJob
+    ),
     { sessionId: "s-claim", jobId: "job-b", wallet: "0xworker2", status: "claimed" },
     { sessionId: "s-done", jobId: "job-c", wallet: "0xworker3", status: "submitted", submittedAt: "t", verification: { status: "approved" } },
     { sessionId: "s-resolved", jobId: "job-d", wallet: "0xworker4", status: "resolved" }
@@ -1101,7 +1214,7 @@ test("listPendingVerifications returns only submitted, unverified sessions tagge
   assert.equal(result.pending[0].awaitingSince, "2026-06-13T10:00:00.000Z");
 });
 
-test("listPendingVerifications respects the limit and tolerates a missing job definition", async () => {
+test("listPendingVerifications respects the limit and surfaces missing snapshots", async () => {
   const sessions = Array.from({ length: 5 }, (_, i) => ({
     sessionId: `s${i}`,
     jobId: "job",
@@ -1122,6 +1235,7 @@ test("listPendingVerifications respects the limit and tolerates a missing job de
   assert.equal(result.count, 2);
   assert.equal(result.pending.length, 2);
   assert.equal(result.pending[0].verifierMode, null);
+  assert.equal(result.pending[0].integrityFailure.code, "job_snapshot_missing");
 });
 
 test("verifySubmission surfaces the on-chain payout tx on the result and the session", async () => {
@@ -1138,9 +1252,6 @@ test("verifySubmission surfaces the on-chain payout tx on the result and the ses
       go_no_go: "go"
     })
   }, "claimed", { reason: "job_claimed" });
-  const submitted = transitionSession(session, "submitted", { reason: "work_submitted" });
-  await stateStore.upsertSession(submitted);
-
   const job = {
     id: "payout-check-001",
     outputSchemaRef: "schema://jobs/release-readiness-output",
@@ -1152,6 +1263,12 @@ test("verifySubmission surfaces the on-chain payout tx on the result and the ses
       matchMode: "contains_all"
     }
   };
+  const submitted = transitionSession(
+    withJobSnapshot(session, job),
+    "submitted",
+    { reason: "work_submitted" }
+  );
+  await stateStore.upsertSession(submitted);
 
   const terminalWrites = [];
   const platformService = {
@@ -1186,6 +1303,7 @@ test("verifySubmission surfaces the on-chain payout tx on the result and the ses
   const payoutReceipt = { txHash: "0xpayouttx", blockNumber: 4242, status: 1, settlement };
   const blockchainGateway = {
     isEnabled: () => true,
+    getJob: async () => ({ state: 3, specHash: submitted.jobSnapshot.specHash }),
     resolveSinglePayout: async () => payoutReceipt
   };
 
@@ -1219,7 +1337,7 @@ function makeIdempotencyHarness(onChainState) {
       matchMode: "contains_all"
     }
   };
-  const claimed = transitionSession({
+  const claimed = transitionSession(withJobSnapshot({
     sessionId: "idem-001:0xabc",
     wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     jobId: "idem-001",
@@ -1230,7 +1348,7 @@ function makeIdempotencyHarness(onChainState) {
       blockers: [],
       go_no_go: "go"
     })
-  }, "claimed", { reason: "job_claimed" });
+  }, job), "claimed", { reason: "job_claimed" });
   const platformService = {
     resumeSession: (id) => stateStore.getSession(id),
     getJobDefinition: () => job,
@@ -1262,7 +1380,7 @@ function makeIdempotencyHarness(onChainState) {
   const calls = { settle: 0, recover: 0 };
   const blockchainGateway = {
     isEnabled: () => true,
-    getJob: async () => ({ state: onChainState }),
+    getJob: async () => ({ state: onChainState, specHash: claimed.jobSnapshot.specHash }),
     resolveSinglePayout: async () => {
       calls.settle += 1;
       return payoutReceipt;
@@ -1313,7 +1431,10 @@ test("verifySubmission reconstructs after chain settlement outlives a failed fir
   const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
   await h.stateStore.upsertSession(submitted);
   let chainState = 3;
-  h.blockchainGateway.getJob = async () => ({ state: chainState });
+  h.blockchainGateway.getJob = async () => ({
+    state: chainState,
+    specHash: h.claimed.jobSnapshot.specHash
+  });
   h.blockchainGateway.resolveSinglePayout = async () => {
     h.calls.settle += 1;
     chainState = 6;

@@ -4,17 +4,27 @@ import test from "node:test";
 import { MemoryStateStore } from "../core/state-store.js";
 import { transitionSession } from "../core/session-state-machine.js";
 import { BADGE_RECEIPT_COSIGN_POLICY_TAG } from "../core/builtin-policies.js";
+import { buildJobSnapshot } from "../core/job-snapshot.js";
 import { VerificationIngestionService } from "./verification-ingestion-service.js";
+
+function withJobSnapshot(session, job) {
+  return { ...session, jobSnapshot: buildJobSnapshot(job) };
+}
 
 test("approved verification carries payout evidence in its first terminal session write", async () => {
   const stateStore = new MemoryStateStore();
+  const job = {
+    id: "job-atomic-payout",
+    verifierMode: "deterministic",
+    verifierConfig: { handler: "deterministic" }
+  };
   const submitted = transitionSession(transitionSession({
     sessionId: "session-atomic-payout",
     wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     jobId: "job-atomic-payout",
     submission: "verified evidence"
   }, "claimed", { reason: "job_claimed" }), "submitted", { reason: "work_submitted" });
-  await stateStore.upsertSession(submitted);
+  await stateStore.upsertSession(withJobSnapshot(submitted, job));
   const terminalWrites = [];
   const originalUpsert = stateStore.upsertSession.bind(stateStore);
   stateStore.upsertSession = async (session) => {
@@ -34,7 +44,7 @@ test("approved verification carries payout evidence in its first terminal sessio
   const service = new VerificationIngestionService(
     stateStore,
     undefined,
-    () => ({ id: submitted.jobId, verifierMode: "deterministic", verifierConfig: { handler: "deterministic" } }),
+    () => job,
     { info() {}, warn() {} }
   );
 
@@ -56,6 +66,11 @@ test("approved verification carries payout evidence in its first terminal sessio
 test("github_pr human fallback preserves escalation provenance on the disputed session and event", async () => {
   const stateStore = new MemoryStateStore();
   const events = [];
+  const job = {
+    id: "external-github-pr-job",
+    verifierMode: "github_pr",
+    verifierConfig: { handler: "github_pr", version: 1 }
+  };
   const claimed = transitionSession({
     sessionId: "session-github-pr-escalation",
     wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -63,15 +78,11 @@ test("github_pr human fallback preserves escalation provenance on the disputed s
     submission: { prUrl: "https://github.com/example/project/pull/77" }
   }, "claimed", { reason: "job_claimed" });
   const submitted = transitionSession(claimed, "submitted", { reason: "work_submitted" });
-  await stateStore.upsertSession(submitted);
+  await stateStore.upsertSession(withJobSnapshot(submitted, job));
   const service = new VerificationIngestionService(
     stateStore,
     { publish: (event) => events.push(event) },
-    () => ({
-      id: "external-github-pr-job",
-      verifierMode: "github_pr",
-      verifierConfig: { handler: "github_pr", version: 1 }
-    }),
+    () => job,
     { info() {}, warn() {} }
   );
 
@@ -117,8 +128,6 @@ test("approved verification persists an immutable badge document at resolution",
     reason: "work_submitted",
     timestamp: "2026-07-09T10:05:00.000Z"
   });
-  await stateStore.upsertSession(submitted);
-
   const job = {
     id: "job-durable-badge",
     category: "security",
@@ -128,6 +137,7 @@ test("approved verification persists an immutable badge document at resolution",
     verifierMode: "deterministic",
     verifierConfig: { handler: "deterministic" }
   };
+  await stateStore.upsertSession(withJobSnapshot(submitted, job));
   const service = new VerificationIngestionService(
     stateStore,
     undefined,
@@ -185,8 +195,6 @@ test("co-sign policy records only live role-backed operator and verifier identit
     reason: "work_submitted",
     timestamp: "2026-07-12T01:05:00.000Z"
   });
-  await stateStore.upsertSession(submitted);
-
   const job = {
     id: "receipt-cosign-live-proof",
     category: "coding",
@@ -197,6 +205,7 @@ test("co-sign policy records only live role-backed operator and verifier identit
     verifierConfig: { handler: "benchmark" },
     verification: { receiptPolicyTag: BADGE_RECEIPT_COSIGN_POLICY_TAG }
   };
+  await stateStore.upsertSession(withJobSnapshot(submitted, job));
   const service = new VerificationIngestionService(
     stateStore,
     undefined,
@@ -265,12 +274,12 @@ test("rejected verification persists a signed run receipt and never a badge", as
     reason: "work_submitted",
     timestamp: "2026-07-12T02:05:00.000Z"
   });
-  await stateStore.upsertSession(submitted);
   const job = {
     id: submitted.jobId,
     verifierMode: "benchmark",
     verifierConfig: { handler: "benchmark" }
   };
+  await stateStore.upsertSession(withJobSnapshot(submitted, job));
   const service = new VerificationIngestionService(
     stateStore,
     undefined,
@@ -342,11 +351,12 @@ test("run receipt signing failure refuses the terminal verification transition",
     reason: "work_submitted",
     timestamp: "2026-07-12T04:05:00.000Z"
   });
-  await stateStore.upsertSession(submitted);
+  const job = { id: submitted.jobId, verifierMode: "benchmark" };
+  await stateStore.upsertSession(withJobSnapshot(submitted, job));
   const service = new VerificationIngestionService(
     stateStore,
     undefined,
-    () => ({ id: submitted.jobId, verifierMode: "benchmark" }),
+    () => job,
     { info() {}, warn() {} },
     { badgeReceiptSigner: { async signDocument() { throw new Error("kms unavailable"); } } }
   );

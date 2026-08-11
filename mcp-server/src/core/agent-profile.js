@@ -10,6 +10,7 @@ import {
   disputeIdForSession,
 } from "./dispute-resolution.js";
 import { isSyntheticAgentSessions } from "./agent-visibility.js";
+import { requireJobSnapshot } from "./job-snapshot.js";
 
 /**
  * Build a v1 agent profile document from in-memory platform state.
@@ -84,7 +85,7 @@ export function buildAgentProfile({
   // If the reward asset ever diverges per session we'll need a per-asset
   // totals map — not needed for v1.
   const firstApprovedJob = approved
-    .map((s) => definitionOf(s.jobId))
+    .map((session) => definitionForSession(session, definitionOf))
     .find((j) => j);
   const rewardAsset = firstApprovedJob?.rewardAsset ?? DEFAULT_ESCROW_ASSET_SYMBOL;
   const decimals = Number.isInteger(firstApprovedJob?.rewardDecimals)
@@ -102,7 +103,7 @@ export function buildAgentProfile({
   // completedAt DESC so the badges array is newest-first.
   const approvedSorted = approved.slice().sort((a, b) => timestampOf(b) - timestampOf(a));
   for (const session of approvedSorted) {
-    const job = definitionOf(session.jobId);
+    const job = definitionForSession(session, definitionOf);
     const category = String(job?.category ?? "unknown").trim().toLowerCase();
     const level = inferLevel(job);
     const completedAt = new Date(session.updatedAt ?? Date.now()).toISOString();
@@ -237,7 +238,7 @@ function buildCurrentActivity(sessions, definitionOf) {
   if (!active) return null;
 
   const status = describeSessionStatus(active.status);
-  const job = definitionOf(active.jobId);
+  const job = definitionForSession(active, definitionOf);
   const deadlineAt = computeDeadlineAt(active, job);
   return compact({
     sessionId: active.sessionId,
@@ -495,7 +496,7 @@ function buildLineageHistory(sessions, normalizedWallet, definitionOf, getLineag
 
     const job = (() => {
       try {
-        return definitionOf(session.jobId);
+        return definitionForSession(session, definitionOf);
       } catch {
         return undefined;
       }
@@ -586,7 +587,7 @@ function buildProfileDispute(session, definitionOf, verdictReceipt, releaseRecei
   const status = verdictReceipt || releaseReceipt ? "resolved" : "open";
   const job = (() => {
     try {
-      return definitionOf(session.jobId);
+      return definitionForSession(session, definitionOf);
     } catch {
       return undefined;
     }
@@ -614,4 +615,19 @@ function buildProfileDispute(session, definitionOf, verdictReceipt, releaseRecei
       ? { releasedAt: releaseReceipt.releasedAt }
       : {}),
   };
+}
+
+/**
+ * A session that carries a claim-time pin must never fall back to the mutable
+ * catalogue. In particular, earnings are historical facts: reading a rotated
+ * catalogue here was the #1063 failure that made already-earned rewards appear
+ * as zero or as the terms of a different job. Legacy pre-cut-over sessions have
+ * no pin and retain the old lookup until they drain; this change does not
+ * backfill or invent snapshots for them.
+ */
+function definitionForSession(session, definitionOf) {
+  if (session?.jobSnapshot !== undefined) {
+    return requireJobSnapshot(session).job;
+  }
+  return definitionOf(session?.jobId);
 }

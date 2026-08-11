@@ -9,6 +9,7 @@ import { computeClaimEconomics } from "./claim-economics.js";
 import { claimExpiresAt, countClaimAttempts } from "./claim-state.js";
 import { transitionSession } from "./session-state-machine.js";
 import { buildAverrayDisclosureFooter } from "./maintainer-surface-policy.js";
+import { hashCanonicalContent } from "./canonical-content.js";
 import {
   buildExternalSchemaRegistrationMessage,
   normalizeExternalSchemaRegistrations
@@ -149,6 +150,30 @@ test("submitWork accepts structured output for built-in schemas", async () => {
   assert.equal(submitted.submission.kind, "structured");
   assert.equal(submitted.statusHistory.length, 2);
   assert.equal(submitted.statusHistory[1].metadata.schemaRef, "schema://jobs/pr-review-findings-output");
+});
+
+test("claimJob pins an immutable complete job snapshot to the session", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob();
+  const service = new JobExecutionService(stateStore, undefined, () => job);
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "idemp-snapshot");
+
+  assert.equal(claimed.jobSnapshot.version, "job-snapshot-v1");
+  assert.equal(claimed.jobSnapshot.jobId, job.id);
+  assert.equal(claimed.jobSnapshot.definition.id, job.id);
+  assert.equal(claimed.jobSnapshot.definitionHash, claimed.jobSnapshot.specHash);
+  assert.match(claimed.jobSnapshot.specHash, /^0x[0-9a-f]{64}$/u);
+  assert.equal(claimed.jobSnapshot.outputSchema.ref, job.outputSchemaRef);
+  assert.equal(claimed.jobSnapshot.outputSchema.schema.$id, job.outputSchemaRef);
+  assert.match(claimed.jobSnapshot.outputSchema.schemaHash, /^0x[0-9a-f]{64}$/u);
+  assert.equal(claimed.jobSnapshot.claimEconomics.totalClaimLock, claimed.totalClaimLock);
+
+  job.verifierConfig.requiredKeywords = ["mutated-live-catalogue"];
+  assert.deepEqual(
+    claimed.jobSnapshot.definition.verifierConfig.requiredKeywords,
+    ["summary", "findings", "risk_level"]
+  );
 });
 
 test("submitWork rejects plain evidence for schema-native built-in jobs", async () => {
@@ -507,6 +532,73 @@ test("external claims return a direct worker transaction and never call the oper
   );
   assert.equal(brokerCalls, 0);
   assert.equal(await stateStore.findSessionByJobId(job.id), undefined);
+});
+
+test("external claim convergence pins the poster definition that reproduces the chain specHash", async () => {
+  const stateStore = new MemoryStateStore();
+  const posterDefinition = {
+    category: "coding",
+    rewardAsset: "USDC",
+    rewardAmount: "1",
+    verifierMode: "human_fallback",
+    outputSchemaRef: "schema://jobs/coding-output",
+    claimTtlSeconds: 86_400
+  };
+  const job = makeJob({
+    ...posterDefinition,
+    id: `0x${"a".repeat(64)}`,
+    source: { type: "external", poster: { wallet: WALLET_2 } },
+    poster: { wallet: WALLET_2 },
+    funding: { status: "funded" },
+    requiresSponsoredGas: false
+  });
+  await stateStore.materializeExternalJobDraft({
+    draftId: "external-snapshot-draft",
+    jobId: job.id,
+    wallet: WALLET_2,
+    definition: posterDefinition,
+    status: "live",
+    createdAt: "2026-08-11T10:00:00.000Z",
+    expiresAt: "2026-08-14T10:00:00.000Z"
+  });
+  const gateway = {
+    isEnabled: () => true,
+    toJobId: (value) => value,
+    async getWorkerClaimCount() { return 0; },
+    async getClaimEconomicsDecisionState() {
+      return { state: 2, exists: true, contractLayout: "current", onboardingWaiverEligible: false };
+    },
+    async previewClaimEconomics() {
+      return {
+        claimStake: 0.05,
+        claimStakeBps: 500,
+        claimFee: 0.01,
+        claimFeeBps: 100,
+        claimEconomicsWaived: false,
+        claimNumber: 1,
+        totalClaimLock: 0.06
+      };
+    },
+    async getJob() {
+      return {
+        state: 2,
+        worker: WALLET,
+        claimExpiry: Date.parse("2026-08-12T10:00:00.000Z") / 1000
+      };
+    }
+  };
+  const service = new JobExecutionService(stateStore, gateway, () => job);
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "external-snapshot-converge");
+
+  assert.equal(claimed.jobSnapshot.jobId, job.id);
+  assert.deepEqual(claimed.jobSnapshot.specDefinition, posterDefinition);
+  assert.equal(claimed.jobSnapshot.specHash, hashCanonicalContent(posterDefinition));
+  assert.notEqual(
+    claimed.jobSnapshot.definitionHash,
+    claimed.jobSnapshot.specHash,
+    "the enriched catalogue projection is deliberately distinct from the poster's committed terms"
+  );
 });
 
 test("claimJob converges a stranded claim: chain claim mined but local session write failed (MAIN-002)", async () => {
@@ -1077,6 +1169,24 @@ test("non-waived curated claims still consume the unconditional brokered gas bud
 test("exhausting tier-0 subsidy does not gate a non-subsidised claim", async () => {
   const stateStore = new MemoryStateStore();
   const budget = makeTestOnboardingSubsidyBudget();
+  const selfFundedJob = makeJob({
+    id: "self-funded",
+    rewardAsset: "USDC",
+    rewardAmount: 1,
+    requiresSponsoredGas: false,
+    onboardingWaiverEligible: false,
+    source: "external"
+  });
+  const { id: _jobId, source: _source, ...selfFundedDefinition } = selfFundedJob;
+  await stateStore.materializeExternalJobDraft({
+    draftId: "self-funded-draft",
+    jobId: selfFundedJob.id,
+    wallet: WALLET,
+    definition: selfFundedDefinition,
+    status: "live",
+    createdAt: "2026-08-11T10:00:00.000Z",
+    expiresAt: "2026-08-14T10:00:00.000Z"
+  });
   const jobs = new Map([
     makeJob({
       id: "subsidised",
@@ -1085,14 +1195,7 @@ test("exhausting tier-0 subsidy does not gate a non-subsidised claim", async () 
       requiresSponsoredGas: true,
       onboardingWaiverEligible: true
     }),
-    makeJob({
-      id: "self-funded",
-      rewardAsset: "USDC",
-      rewardAmount: 1,
-      requiresSponsoredGas: false,
-      onboardingWaiverEligible: false,
-      source: "external"
-    })
+    selfFundedJob
   ].map((job) => [job.id, job]));
   const service = new JobExecutionService(
     stateStore,
