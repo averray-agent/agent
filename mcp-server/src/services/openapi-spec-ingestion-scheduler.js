@@ -1,4 +1,7 @@
 import { ingestOpenApiSpecs, openApiSpecKey, parseOpenApiSpecs } from "../jobs/ingest-openapi-specs.js";
+import { GuardedSchedulerLoop } from "./guarded-scheduler.js";
+
+const NO_PRODUCTION_FAILURE_THRESHOLD = 3;
 
 export class OpenApiSpecIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -10,7 +13,8 @@ export class OpenApiSpecIngestionScheduler {
     maxJobsPerRun = 2,
     maxOpenJobs = 20,
     fetchImpl = fetch,
-    logger = console
+    logger = console,
+    schedulerRunTimeoutMs = undefined
   } = {}) {
     this.platformService = platformService;
     this.eventBus = eventBus;
@@ -23,31 +27,31 @@ export class OpenApiSpecIngestionScheduler {
     this.maxOpenJobs = maxOpenJobs;
     this.fetchImpl = fetchImpl;
     this.logger = logger;
-    this.timer = undefined;
-    this.running = false;
     this.lastRun = undefined;
+    this.consecutiveNoJobRuns = 0;
+    this.scheduler = new GuardedSchedulerLoop({
+      name: "openapi_ingest",
+      enabled,
+      intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs,
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: (summary) => this.evaluateSchedulerOutcome(summary),
+      logger
+    });
   }
 
   start() {
-    if (!this.enabled || this.running) {
-      return;
-    }
-    this.running = true;
-    void this.runOnceAndSchedule();
+    this.scheduler.start();
   }
 
   stop() {
-    this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
+    this.scheduler.stop();
   }
 
   async getStatus() {
     return {
       enabled: this.enabled,
-      running: this.running,
+      running: this.scheduler.running,
       dryRun: this.dryRun,
       intervalMs: this.intervalMs,
       specCount: this.specs.length,
@@ -55,7 +59,9 @@ export class OpenApiSpecIngestionScheduler {
       maxJobsPerRun: this.maxJobsPerRun,
       maxOpenJobs: this.maxOpenJobs,
       currentOpenJobs: this.countOpenApiJobs(),
-      lastRun: this.lastRun
+      lastRun: this.lastRun,
+      consecutiveNoJobRuns: this.consecutiveNoJobRuns,
+      ...this.scheduler.getStatus()
     };
   }
 
@@ -139,16 +145,34 @@ export class OpenApiSpecIngestionScheduler {
   }
 
   async runOnceAndSchedule() {
-    await this.runOnce(new Date());
-    if (!this.running) {
-      return;
+    return this.scheduler.runOnceAndSchedule();
+  }
+
+  async getHealth(now = new Date()) {
+    return { ...this.scheduler.getHealth(now), component: "openapi_spec_ingestion" };
+  }
+
+  evaluateSchedulerOutcome(summary) {
+    if (summary.errors.length > 0) {
+      this.consecutiveNoJobRuns = 0;
+      return { ok: false, state: "ingestion_run_errors", message: `${summary.errors.length} OpenAPI ingestion error(s)` };
     }
-    if (this.timer) {
-      clearTimeout(this.timer);
+    if (this.dryRun || summary.createdCount > 0 || summary.openApiJobs >= this.maxOpenJobs) {
+      this.consecutiveNoJobRuns = 0;
+      return { ok: true };
     }
-    this.timer = setTimeout(() => {
-      void this.runOnceAndSchedule();
-    }, this.intervalMs);
+    if (!this.specs.length) {
+      return { ok: false, state: "ingestion_misconfigured", message: "OpenAPI ingestion has no specs" };
+    }
+    this.consecutiveNoJobRuns += 1;
+    if (this.consecutiveNoJobRuns >= NO_PRODUCTION_FAILURE_THRESHOLD) {
+      return {
+        ok: false,
+        state: "repeated_no_production",
+        message: `OpenAPI ingestion produced no jobs for ${this.consecutiveNoJobRuns} eligible runs`
+      };
+    }
+    return { ok: true };
   }
 
   finishRun(summary) {

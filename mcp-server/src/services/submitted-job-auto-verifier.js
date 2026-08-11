@@ -1,3 +1,5 @@
+import { GuardedSchedulerLoop } from "./guarded-scheduler.js";
+
 // Auto-verify submitted jobs whose verifier mode is machine-decidable, so an
 // external worker's submission settles on its own instead of sitting in
 // `submitted` forever waiting for an operator to call POST /verifier/run.
@@ -37,7 +39,8 @@ export class SubmittedJobAutoVerifierService {
     candidateTimeoutMs = DEFAULT_CANDIDATE_TIMEOUT_MS,
     autoModes = AUTO_DECIDABLE_MODES,
     requireSettlementReady = true,
-    logger = console
+    logger = console,
+    schedulerRunTimeoutMs = undefined
   } = {}) {
     this.platformService = platformService;
     this.verifierService = verifierService;
@@ -52,38 +55,33 @@ export class SubmittedJobAutoVerifierService {
     this.autoModes = normalizeAutoModes(autoModes);
     this.requireSettlementReady = requireSettlementReady;
     this.logger = logger;
-    this.running = false;
-    this.startedAt = undefined;
-    this.timer = undefined;
-    this.nextRunAt = undefined;
     this.inFlight = new Set();
     this.pendingVerifications = new Map();
     this.lastRun = undefined;
-    this.lastSuccessfulRunAt = undefined;
-    this.lastSchedulerError = undefined;
-    this.consecutiveSchedulerFailures = 0;
+    this.consecutiveMissingJobRuns = 0;
+    this.scheduler = new GuardedSchedulerLoop({
+      name: "auto_verify",
+      enabled,
+      intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs ?? (candidateTimeoutMs + intervalMs),
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: (summary) => this.evaluateSchedulerOutcome(summary),
+      logger
+    });
   }
 
   start() {
-    if (!this.enabled || this.running) return;
-    this.running = true;
-    this.startedAt = new Date().toISOString();
-    void this.runOnceAndSchedule();
+    this.scheduler.start();
   }
 
   stop() {
-    this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
-    this.nextRunAt = undefined;
+    this.scheduler.stop();
   }
 
   async getStatus(now = new Date()) {
     return {
       enabled: this.enabled,
-      running: this.running,
+      running: this.scheduler.running,
       dryRun: this.dryRun,
       mode: this.dryRun ? "dry_run" : "live",
       intervalMs: this.intervalMs,
@@ -94,41 +92,36 @@ export class SubmittedJobAutoVerifierService {
       pendingTimeoutCount: this.countPendingTimeouts(),
       autoModes: [...this.autoModes],
       requireSettlementReady: this.requireSettlementReady,
-      nextRunAt: this.nextRunAt,
-      lastSuccessfulRunAt: this.lastSuccessfulRunAt,
-      lastSchedulerError: this.lastSchedulerError,
-      consecutiveSchedulerFailures: this.consecutiveSchedulerFailures,
+      consecutiveMissingJobRuns: this.consecutiveMissingJobRuns,
       lastRun: this.lastRun,
+      ...this.scheduler.getStatus(now),
       liveness: this.resolveLiveness(now)
     };
   }
 
   async getHealth(now = new Date()) {
     const liveness = this.resolveLiveness(now);
+    const scheduler = this.scheduler.getStatus(now);
     return {
       ...liveness,
       enabled: this.enabled,
-      running: this.running,
+      running: this.scheduler.running,
       mode: this.dryRun ? "dry_run" : "live",
       intervalMs: this.intervalMs,
-      nextRunAt: this.nextRunAt,
+      nextRunAt: scheduler.nextRunAt,
       lastRunFinishedAt: this.lastRun?.finishedAt,
-      consecutiveSchedulerFailures: this.consecutiveSchedulerFailures,
+      consecutiveSchedulerFailures: scheduler.consecutiveSchedulerFailures,
+      lastSchedulerError: scheduler.lastSchedulerError,
       pendingTimeoutCount: this.countPendingTimeouts()
     };
   }
 
   resolveLiveness(now = new Date()) {
-    const staleAfterMs = Math.max(
-      this.intervalMs * 3,
-      this.candidateTimeoutMs + this.intervalMs
-    );
-    if (!this.enabled) {
-      return { ok: true, state: "disabled", staleAfterMs };
+    if (!this.scheduler.lastRunFinishedAt && this.lastRun?.finishedAt) {
+      this.scheduler.lastRunFinishedAt = this.lastRun.finishedAt;
     }
-    if (!this.running) {
-      return { ok: false, state: "stopped", staleAfterMs };
-    }
+    const base = this.scheduler.resolveLiveness(now);
+    const staleAfterMs = base.staleAfterMs;
     if (this.countPendingTimeouts() > 0) {
       return {
         ok: false,
@@ -136,29 +129,7 @@ export class SubmittedJobAutoVerifierService {
         staleAfterMs
       };
     }
-    if (this.consecutiveSchedulerFailures > 0) {
-      return {
-        ok: false,
-        state: "run_failed",
-        staleAfterMs
-      };
-    }
-
-    const reference = this.lastRun?.finishedAt ?? this.startedAt;
-    const referenceMs = Date.parse(reference ?? "");
-    const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
-    const lastRunAgeMs = Number.isFinite(referenceMs) && Number.isFinite(nowMs)
-      ? Math.max(0, nowMs - referenceMs)
-      : null;
-    if (lastRunAgeMs === null || lastRunAgeMs > staleAfterMs) {
-      return {
-        ok: false,
-        state: this.lastRun?.finishedAt ? "last_run_stale" : "never_completed",
-        staleAfterMs,
-        lastRunAgeMs
-      };
-    }
-    return { ok: true, state: "running", staleAfterMs, lastRunAgeMs };
+    return base;
   }
 
   countPendingTimeouts() {
@@ -422,38 +393,46 @@ export class SubmittedJobAutoVerifierService {
   }
 
   async runOnceAndSchedule() {
-    try {
-      const summary = await this.runOnce(new Date());
-      this.consecutiveSchedulerFailures = 0;
-      this.lastSuccessfulRunAt = summary.finishedAt;
-    } catch (error) {
-      this.consecutiveSchedulerFailures += 1;
-      this.lastSchedulerError = {
-        at: new Date().toISOString(),
-        message: error?.message ?? String(error)
-      };
-      this.logger.warn?.(
-        { err: error, consecutiveFailures: this.consecutiveSchedulerFailures },
-        "auto_verify.scheduler_run_failed"
-      );
-    } finally {
-      this.scheduleNextRun();
-    }
+    return this.scheduler.runOnceAndSchedule();
   }
 
   scheduleNextRun() {
-    if (!this.running) {
-      this.nextRunAt = undefined;
-      return;
-    }
-    if (this.timer) clearTimeout(this.timer);
-    this.nextRunAt = new Date(Date.now() + this.intervalMs).toISOString();
-    this.timer = setTimeout(() => {
-      this.timer = undefined;
-      this.nextRunAt = undefined;
-      void this.runOnceAndSchedule();
-    }, this.intervalMs);
+    this.scheduler.scheduleNextRun();
   }
+
+  evaluateSchedulerOutcome(summary) {
+    if (summary.errors.length > 0) {
+      this.consecutiveMissingJobRuns = 0;
+      return {
+        ok: false,
+        state: "verification_run_errors",
+        message: `${summary.errors.length} automatic verification error(s)`
+      };
+    }
+    const missingJobs = summary.skipped.filter((entry) => entry.reason === "job_not_found");
+    if (missingJobs.length === 0) {
+      this.consecutiveMissingJobRuns = 0;
+      return { ok: true };
+    }
+    this.consecutiveMissingJobRuns += 1;
+    if (this.consecutiveMissingJobRuns >= 2) {
+      return {
+        ok: false,
+        state: "submitted_job_definition_missing",
+        message: `${missingJobs.length} submitted session(s) repeatedly reference missing job definitions`
+      };
+    }
+    return { ok: true };
+  }
+
+  get running() { return this.scheduler?.running ?? false; }
+  set running(value) { if (this.scheduler) this.scheduler.running = Boolean(value); }
+  get startedAt() { return this.scheduler?.startedAt; }
+  set startedAt(value) { if (this.scheduler) this.scheduler.startedAt = value; }
+  get nextRunAt() { return this.scheduler?.nextRunAt; }
+  get lastSuccessfulRunAt() { return this.scheduler?.lastSuccessfulRunAt; }
+  get lastSchedulerError() { return this.scheduler?.lastSchedulerError; }
+  get consecutiveSchedulerFailures() { return this.scheduler?.consecutiveSchedulerFailures ?? 0; }
 
   finishRun(summary) {
     summary.finishedAt = new Date().toISOString();

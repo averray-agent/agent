@@ -1,3 +1,5 @@
+import { GuardedSchedulerLoop } from "./guarded-scheduler.js";
+
 const DEFAULT_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_RESEND_API_BASE_URL = "https://api.resend.com";
 const DEFAULT_STATE_SCOPE = "bootstrap-self-report";
@@ -31,7 +33,8 @@ export class BootstrapSelfReportSchedulerService {
     emailSender = undefined,
     logger = console,
     stateStore = undefined,
-    stateScope = DEFAULT_STATE_SCOPE
+    stateScope = DEFAULT_STATE_SCOPE,
+    schedulerRunTimeoutMs = undefined
   } = {}) {
     this.upstreamStatusPoller = upstreamStatusPoller;
     this.eventBus = eventBus;
@@ -48,9 +51,6 @@ export class BootstrapSelfReportSchedulerService {
     this.logger = logger;
     this.stateStore = stateStore;
     this.stateScope = stateScope;
-    this.running = false;
-    this.timer = undefined;
-    this.nextRunAt = undefined;
     this.lastRun = undefined;
     // In-process mirror of the persisted evidence. Used when stateStore is
     // absent so getStatus still returns the recent attempt; when stateStore
@@ -60,21 +60,23 @@ export class BootstrapSelfReportSchedulerService {
       lastSuccessfulAt: undefined,
       lastFailureReason: undefined
     };
+    this.scheduler = new GuardedSchedulerLoop({
+      name: "bootstrap_self_report",
+      enabled,
+      intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs,
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: (summary) => this.evaluateSchedulerOutcome(summary),
+      logger
+    });
   }
 
   start() {
-    if (!this.enabled || this.running) return;
-    this.running = true;
-    this.scheduleNext(this.sendOnStart ? 0 : this.intervalMs);
+    this.scheduler.start({ initialDelayMs: this.sendOnStart ? 0 : this.intervalMs });
   }
 
   stop() {
-    this.running = false;
-    this.nextRunAt = undefined;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
+    this.scheduler.stop();
   }
 
   async getStatus() {
@@ -82,18 +84,19 @@ export class BootstrapSelfReportSchedulerService {
     const evidence = persisted ?? this.evidence;
     const status = {
       enabled: this.enabled,
-      running: this.running,
+      running: this.scheduler.running,
       intervalMs: this.intervalMs,
       sendOnStart: this.sendOnStart,
       from: this.from || undefined,
       to: [...this.to],
       recipientCount: this.to.length,
       providerConfigured: Boolean(this.emailSender || (this.resendApiKey && this.from && this.to.length)),
-      nextRunAt: this.nextRunAt,
+      nextRunAt: this.scheduler.nextRunAt,
       lastRun: this.lastRun,
       lastAttemptedAt: evidence.lastAttemptedAt,
       lastSuccessfulAt: evidence.lastSuccessfulAt,
-      lastFailureReason: evidence.lastFailureReason ?? undefined
+      lastFailureReason: evidence.lastFailureReason ?? undefined,
+      ...this.scheduler.getStatus()
     };
     if (!this.stateStore) {
       // Operators reading this need to know that a fresh process boot zeroes
@@ -208,9 +211,7 @@ export class BootstrapSelfReportSchedulerService {
   }
 
   async runOnceAndSchedule() {
-    await this.runOnce(new Date());
-    if (!this.running) return;
-    this.scheduleNext(this.intervalMs);
+    return this.scheduler.runOnceAndSchedule();
   }
 
   hasEmailConfig() {
@@ -256,14 +257,21 @@ export class BootstrapSelfReportSchedulerService {
   }
 
   scheduleNext(delayMs) {
-    if (!this.running) return;
-    if (this.timer) clearTimeout(this.timer);
-    const delay = Math.max(0, Number(delayMs) || 0);
-    this.nextRunAt = new Date(Date.now() + delay).toISOString();
-    this.timer = setTimeout(() => {
-      void this.runOnceAndSchedule();
-    }, delay);
-    this.timer.unref?.();
+    this.scheduler.scheduleNextRun(delayMs);
+  }
+
+  evaluateSchedulerOutcome(summary) {
+    if (summary.status === "sent") return { ok: true };
+    const reason = summary.errors[0]?.message ?? summary.skipped[0]?.reason ?? summary.status;
+    return {
+      ok: false,
+      state: summary.status === "skipped" ? "self_report_skipped" : "self_report_failed",
+      message: `bootstrap self-report did not send: ${reason}`
+    };
+  }
+
+  async getHealth(now = new Date()) {
+    return { ...this.scheduler.getHealth(now), component: "bootstrap_self_report_scheduler" };
   }
 
   finishRun(summary) {

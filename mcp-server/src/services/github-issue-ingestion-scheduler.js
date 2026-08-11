@@ -4,6 +4,9 @@ import {
   DEFAULT_SECURITY_STANDARDS_DENYLIST,
   parseRepoList
 } from "../core/maintainer-surface-policy.js";
+import { GuardedSchedulerLoop } from "./guarded-scheduler.js";
+
+const NO_PRODUCTION_FAILURE_THRESHOLD = 3;
 
 export class GithubIssueIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -20,7 +23,8 @@ export class GithubIssueIngestionScheduler {
     scanRepoPolicies = false,
     githubToken = undefined,
     fetchImpl = fetch,
-    logger = console
+    logger = console,
+    schedulerRunTimeoutMs = undefined
   } = {}) {
     this.platformService = platformService;
     this.eventBus = eventBus;
@@ -38,31 +42,31 @@ export class GithubIssueIngestionScheduler {
     this.githubToken = githubToken;
     this.fetchImpl = fetchImpl;
     this.logger = logger;
-    this.timer = undefined;
-    this.running = false;
     this.lastRun = undefined;
+    this.consecutiveNoJobRuns = 0;
+    this.scheduler = new GuardedSchedulerLoop({
+      name: "github_ingest",
+      enabled,
+      intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs,
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: (summary) => this.evaluateSchedulerOutcome(summary),
+      logger
+    });
   }
 
   start() {
-    if (!this.enabled || this.running) {
-      return;
-    }
-    this.running = true;
-    void this.runOnceAndSchedule();
+    this.scheduler.start();
   }
 
   stop() {
-    this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
+    this.scheduler.stop();
   }
 
   async getStatus() {
     return {
       enabled: this.enabled,
-      running: this.running,
+      running: this.scheduler.running,
       dryRun: this.dryRun,
       intervalMs: this.intervalMs,
       queryCount: this.queries.length,
@@ -74,7 +78,9 @@ export class GithubIssueIngestionScheduler {
       denylistRepoCount: this.denylistRepos.length,
       scanRepoPolicies: this.scanRepoPolicies,
       currentOpenJobs: this.countOpenGithubJobs(),
-      lastRun: this.lastRun
+      lastRun: this.lastRun,
+      consecutiveNoJobRuns: this.consecutiveNoJobRuns,
+      ...this.scheduler.getStatus()
     };
   }
 
@@ -180,16 +186,34 @@ export class GithubIssueIngestionScheduler {
   }
 
   async runOnceAndSchedule() {
-    await this.runOnce(new Date());
-    if (!this.running) {
-      return;
+    return this.scheduler.runOnceAndSchedule();
+  }
+
+  async getHealth(now = new Date()) {
+    return { ...this.scheduler.getHealth(now), component: "github_issue_ingestion" };
+  }
+
+  evaluateSchedulerOutcome(summary) {
+    if (summary.errors.length > 0) {
+      this.consecutiveNoJobRuns = 0;
+      return { ok: false, state: "ingestion_run_errors", message: `${summary.errors.length} GitHub ingestion error(s)` };
     }
-    if (this.timer) {
-      clearTimeout(this.timer);
+    if (this.dryRun || summary.createdCount > 0 || summary.openGithubJobs >= this.maxOpenJobs) {
+      this.consecutiveNoJobRuns = 0;
+      return { ok: true };
     }
-    this.timer = setTimeout(() => {
-      void this.runOnceAndSchedule();
-    }, this.intervalMs);
+    if (!this.queries.length) {
+      return { ok: false, state: "ingestion_misconfigured", message: "GitHub ingestion has no queries" };
+    }
+    this.consecutiveNoJobRuns += 1;
+    if (this.consecutiveNoJobRuns >= NO_PRODUCTION_FAILURE_THRESHOLD) {
+      return {
+        ok: false,
+        state: "repeated_no_production",
+        message: `GitHub ingestion produced no jobs for ${this.consecutiveNoJobRuns} eligible runs`
+      };
+    }
+    return { ok: true };
   }
 
   finishRun(summary) {

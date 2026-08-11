@@ -1,3 +1,5 @@
+import { GuardedSchedulerLoop } from "./guarded-scheduler.js";
+
 const DEFAULT_INTERVAL_MS = 60 * 1000;
 const DEFAULT_MAX_PER_RUN = 25;
 
@@ -6,7 +8,8 @@ export class ExternalPosterReviewEscalatorService {
     enabled = false,
     intervalMs = DEFAULT_INTERVAL_MS,
     maxPerRun = DEFAULT_MAX_PER_RUN,
-    logger = console
+    logger = console,
+    schedulerRunTimeoutMs = undefined
   } = {}) {
     this.platformService = platformService;
     this.stateStore = stateStore;
@@ -16,31 +19,35 @@ export class ExternalPosterReviewEscalatorService {
     this.intervalMs = intervalMs;
     this.maxPerRun = maxPerRun;
     this.logger = logger;
-    this.running = false;
-    this.timer = undefined;
     this.lastRun = undefined;
+    this.scheduler = new GuardedSchedulerLoop({
+      name: "external_poster_review",
+      enabled,
+      intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs,
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: (summary) => this.evaluateSchedulerOutcome(summary),
+      logger
+    });
   }
 
   start() {
-    if (!this.enabled || this.running) return;
-    this.running = true;
-    void this.runOnceAndSchedule();
+    this.scheduler.start();
   }
 
   stop() {
-    this.running = false;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = undefined;
+    this.scheduler.stop();
   }
 
   async getStatus() {
     return {
       enabled: this.enabled,
-      running: this.running,
+      running: this.scheduler.running,
       intervalMs: this.intervalMs,
       maxPerRun: this.maxPerRun,
       reviewWindowSeconds: this.posterReviewService.reviewWindowSeconds,
-      lastRun: this.lastRun
+      lastRun: this.lastRun,
+      ...this.scheduler.getStatus()
     };
   }
 
@@ -112,11 +119,23 @@ export class ExternalPosterReviewEscalatorService {
   }
 
   async runOnceAndSchedule() {
-    await this.runOnce(new Date());
-    if (!this.running) return;
-    this.timer = setTimeout(() => {
-      void this.runOnceAndSchedule();
-    }, this.intervalMs);
+    return this.scheduler.runOnceAndSchedule();
+  }
+
+  evaluateSchedulerOutcome(summary) {
+    // No expired reviews is normal. Candidate-level failures are not.
+    if (summary.errors.length > 0) {
+      return {
+        ok: false,
+        state: "review_escalation_errors",
+        message: `${summary.errors.length} poster review escalation(s) failed`
+      };
+    }
+    return { ok: true };
+  }
+
+  async getHealth(now = new Date()) {
+    return { ...this.scheduler.getHealth(now), component: "external_poster_review_escalator" };
   }
 
   finishRun(summary) {

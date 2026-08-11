@@ -4,6 +4,7 @@ import {
   isFinalFundedJob,
   summarizeFundedJobs
 } from "../core/funded-jobs.js";
+import { GuardedSchedulerLoop } from "./guarded-scheduler.js";
 
 const DEFAULT_STATUS_RECORD_LIMIT = 10_000;
 const UPSTREAM_STATUS_STATE_SCOPE = "upstream-status-poller";
@@ -18,7 +19,8 @@ export class UpstreamStatusPollerService {
     githubToken = undefined,
     githubApiBaseUrl = "https://api.github.com",
     fetchImpl = fetch,
-    logger = console
+    logger = console,
+    schedulerRunTimeoutMs = undefined
   } = {}) {
     this.stateStore = stateStore;
     this.eventBus = eventBus;
@@ -31,23 +33,24 @@ export class UpstreamStatusPollerService {
     this.githubApiBaseUrl = githubApiBaseUrl;
     this.fetchImpl = fetchImpl;
     this.logger = logger;
-    this.running = false;
-    this.timer = undefined;
     this.lastRun = undefined;
+    this.scheduler = new GuardedSchedulerLoop({
+      name: "upstream_status",
+      enabled,
+      intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs,
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: (summary) => this.evaluateSchedulerOutcome(summary),
+      logger
+    });
   }
 
   start() {
-    if (!this.enabled || this.running) return;
-    this.running = true;
-    void this.runOnceAndSchedule();
+    this.scheduler.start();
   }
 
   stop() {
-    this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
+    this.scheduler.stop();
   }
 
   async getStatus() {
@@ -55,7 +58,7 @@ export class UpstreamStatusPollerService {
     const fundedJobs = await this.getFundedJobStatusSnapshot(new Date());
     return {
       enabled: this.enabled,
-      running: this.running,
+      running: this.scheduler.running,
       intervalMs: this.intervalMs,
       batchSize: this.batchSize,
       lastRun: this.lastRun ?? persisted.lastRun,
@@ -66,7 +69,8 @@ export class UpstreamStatusPollerService {
       evidencePersistenceNote: typeof this.stateStore.upsertServiceState === "function"
         ? "durable_service_state"
         : "in_process_only",
-      fundedJobs
+      fundedJobs,
+      ...this.scheduler.getStatus()
     };
   }
 
@@ -149,12 +153,23 @@ export class UpstreamStatusPollerService {
   }
 
   async runOnceAndSchedule() {
-    await this.runOnce(new Date());
-    if (!this.running) return;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => {
-      void this.runOnceAndSchedule();
-    }, this.intervalMs);
+    return this.scheduler.runOnceAndSchedule();
+  }
+
+  evaluateSchedulerOutcome(summary) {
+    // An empty/final-only funded-job set is normal. Poll failures are not.
+    if (summary.errors.length > 0) {
+      return {
+        ok: false,
+        state: "upstream_poll_errors",
+        message: `${summary.errors.length} upstream status poll(s) failed`
+      };
+    }
+    return { ok: true };
+  }
+
+  async getHealth(now = new Date()) {
+    return { ...this.scheduler.getHealth(now), component: "upstream_status_poller" };
   }
 
   async finishRun(summary) {

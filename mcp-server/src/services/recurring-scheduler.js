@@ -1,37 +1,47 @@
 import { ConflictError } from "../core/errors.js";
+import { GuardedSchedulerLoop } from "./guarded-scheduler.js";
 
 export class RecurringSchedulerService {
-  constructor(platformService, eventBus = undefined, { enabled = false, logger = console } = {}) {
+  constructor(platformService, eventBus = undefined, {
+    enabled = false,
+    intervalMs = 60_000,
+    logger = console,
+    schedulerRunTimeoutMs = undefined
+  } = {}) {
     this.platformService = platformService;
     this.eventBus = eventBus;
     this.enabled = enabled;
+    this.intervalMs = intervalMs;
     this.logger = logger;
     this.runtime = new Map();
-    this.timer = undefined;
-    this.running = false;
+    this.lastRun = undefined;
+    this.scheduler = new GuardedSchedulerLoop({
+      name: "recurring_scheduler",
+      enabled,
+      intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs,
+      runOnce: (now) => this.runSchedulerOnce(now),
+      evaluateOutcome: (summary) => this.evaluateSchedulerOutcome(summary),
+      logger
+    });
   }
 
   start() {
-    if (!this.enabled || this.running) {
-      return;
-    }
-    this.running = true;
-    void this.scheduleNextTick();
+    this.scheduler.start();
   }
 
   stop() {
-    this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
+    this.scheduler.stop();
   }
 
   async getStatus(now = new Date()) {
     const recurring = this.platformService.getRecurringTemplateStatus();
     return {
       enabled: this.enabled,
-      running: this.running,
+      running: this.scheduler.running,
+      intervalMs: this.intervalMs,
+      lastRun: this.lastRun,
+      ...this.scheduler.getStatus(now),
       templates: recurring.templates.map((template) => {
         const runtime = {
           paused: template.paused,
@@ -67,20 +77,22 @@ export class RecurringSchedulerService {
     const current = this.runtime.get(templateId) ?? {};
     this.runtime.set(templateId, { ...current, paused: false });
     this.platformService.resumeRecurringTemplate?.(templateId);
-    if (this.running) {
-      void this.scheduleNextTick();
+    if (this.scheduler.running) {
+      this.scheduler.scheduleNextRun(0);
     }
   }
 
-  async runDueTemplates(now = new Date()) {
+  async runDueTemplates(now = new Date(), schedulerSummary = undefined) {
     const recurring = this.platformService.getRecurringTemplateStatus();
     const fired = [];
     for (const template of recurring.templates) {
       const runtime = this.runtime.get(template.templateId) ?? {};
       if (runtime.paused) {
+        if (schedulerSummary) schedulerSummary.pausedCount += 1;
         continue;
       }
       if (runtime.exhausted || template.exhausted || template.reserve?.exhausted) {
+        if (schedulerSummary) schedulerSummary.exhaustedCount += 1;
         this.runtime.set(template.templateId, {
           ...runtime,
           exhausted: true,
@@ -97,6 +109,7 @@ export class RecurringSchedulerService {
         ? new Date(runtime.nextFireAt)
         : computeNextFireAt(template.schedule, now, runtime.lastFiredAt);
       if (!nextFireAt) {
+        if (schedulerSummary) schedulerSummary.invalidScheduleCount += 1;
         this.runtime.set(template.templateId, {
           ...runtime,
           lastResult: { status: "invalid_schedule", at: now.toISOString() }
@@ -104,6 +117,7 @@ export class RecurringSchedulerService {
         continue;
       }
       if (nextFireAt.getTime() > now.getTime()) {
+        if (schedulerSummary) schedulerSummary.notDueCount += 1;
         this.runtime.set(template.templateId, {
           ...runtime,
           nextFireAt: nextFireAt.toISOString()
@@ -159,6 +173,7 @@ export class RecurringSchedulerService {
           }
         });
         fired.push(derivative);
+        if (schedulerSummary) schedulerSummary.firedCount += 1;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const status = error?.code === "recurring_reserve_exhausted"
@@ -166,6 +181,13 @@ export class RecurringSchedulerService {
           : (error instanceof ConflictError ? "conflict" : "failed");
         const reserve = error?.details?.reserve;
         const exhausted = status === "reserve_exhausted";
+        if (schedulerSummary && !exhausted) {
+          schedulerSummary.errors.push({
+            templateId: template.templateId,
+            status,
+            message
+          });
+        }
         this.runtime.set(template.templateId, {
           ...runtime,
           exhausted,
@@ -200,19 +222,49 @@ export class RecurringSchedulerService {
   }
 
   async scheduleNextTick(now = new Date()) {
-    if (!this.enabled || !this.running) {
-      return;
+    return this.scheduler.runOnceAndSchedule(now);
+  }
+
+  async runSchedulerOnce(now = new Date()) {
+    const summary = {
+      startedAt: now.toISOString(),
+      finishedAt: undefined,
+      templateCount: 0,
+      firedCount: 0,
+      pausedCount: 0,
+      exhaustedCount: 0,
+      notDueCount: 0,
+      invalidScheduleCount: 0,
+      errors: []
+    };
+    summary.templateCount = this.platformService.getRecurringTemplateStatus().templates.length;
+    await this.runDueTemplates(now, summary);
+    summary.finishedAt = new Date().toISOString();
+    this.lastRun = summary;
+    return summary;
+  }
+
+  evaluateSchedulerOutcome(summary) {
+    // No due templates is normal; invalid schedules and failed fires are not.
+    if (summary.invalidScheduleCount > 0) {
+      return {
+        ok: false,
+        state: "invalid_recurring_schedule",
+        message: `${summary.invalidScheduleCount} recurring template(s) have invalid schedules`
+      };
     }
-    await this.runDueTemplates(now);
-    if (!this.running) {
-      return;
+    if (summary.errors.length > 0) {
+      return {
+        ok: false,
+        state: "recurring_fire_errors",
+        message: `${summary.errors.length} recurring template fire(s) failed`
+      };
     }
-    if (this.timer) {
-      clearTimeout(this.timer);
-    }
-    this.timer = setTimeout(() => {
-      void this.scheduleNextTick(new Date());
-    }, 60_000);
+    return { ok: true };
+  }
+
+  async getHealth(now = new Date()) {
+    return { ...this.scheduler.getHealth(now), component: "recurring_scheduler" };
   }
 }
 

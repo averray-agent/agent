@@ -1,3 +1,5 @@
+import { GuardedSchedulerLoop } from "./guarded-scheduler.js";
+
 const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_MAX_JOBS_PER_RUN = 25;
 const VALID_SWEEP_ACTIONS = new Set(["mark_stale", "pause", "archive"]);
@@ -11,7 +13,8 @@ export class JobStaleSweeperService {
     action = "archive",
     maxJobsPerRun = DEFAULT_MAX_JOBS_PER_RUN,
     reason = "automatic stale job cleanup",
-    logger = console
+    logger = console,
+    schedulerRunTimeoutMs = undefined
   } = {}) {
     this.platformService = platformService;
     this.stateStore = stateStore;
@@ -23,35 +26,37 @@ export class JobStaleSweeperService {
     this.maxJobsPerRun = maxJobsPerRun;
     this.reason = String(reason || "automatic stale job cleanup").trim();
     this.logger = logger;
-    this.running = false;
-    this.timer = undefined;
     this.lastRun = undefined;
+    this.scheduler = new GuardedSchedulerLoop({
+      name: "job_stale_sweeper",
+      enabled,
+      intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs,
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: (summary) => this.evaluateSchedulerOutcome(summary),
+      logger
+    });
   }
 
   start() {
-    if (!this.enabled || this.running) return;
-    this.running = true;
-    void this.runOnceAndSchedule();
+    this.scheduler.start();
   }
 
   stop() {
-    this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
+    this.scheduler.stop();
   }
 
   async getStatus() {
     return {
       enabled: this.enabled,
-      running: this.running,
+      running: this.scheduler.running,
       dryRun: this.dryRun,
       mode: this.dryRun ? "dry_run" : "live",
       intervalMs: this.intervalMs,
       action: this.action,
       maxJobsPerRun: this.maxJobsPerRun,
-      lastRun: this.lastRun
+      lastRun: this.lastRun,
+      ...this.scheduler.getStatus()
     };
   }
 
@@ -133,12 +138,20 @@ export class JobStaleSweeperService {
   }
 
   async runOnceAndSchedule() {
-    await this.runOnce(new Date());
-    if (!this.running) return;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => {
-      void this.runOnceAndSchedule();
-    }, this.intervalMs);
+    return this.scheduler.runOnceAndSchedule();
+  }
+
+  async getHealth(now = new Date()) {
+    return { ...this.scheduler.getHealth(now), component: "job_stale_sweeper" };
+  }
+
+  evaluateSchedulerOutcome(summary) {
+    // Finding nothing to sweep is the expected steady state. Only an actual
+    // read/update failure makes this component's no-op unhealthy.
+    if (summary.errors.length > 0) {
+      return { ok: false, state: "sweep_run_errors", message: `${summary.errors.length} stale-sweep error(s)` };
+    }
+    return { ok: true };
   }
 
   finishRun(summary) {
