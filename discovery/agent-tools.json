@@ -433,7 +433,7 @@
   "publicEndpoints": [
     {
       "path": "/health",
-      "description": "Liveness plus serviceHealth/capabilityHealth for state store, blockchain, treasury mutations, XCM observer, indexer, and gas sponsor."
+      "description": "Liveness plus serviceHealth/capabilityHealth for state store, submitted-job settlement scheduler, blockchain, treasury mutations, XCM observer, indexer, and gas sponsor."
     },
     {
       "path": "/metrics",
