@@ -16,6 +16,7 @@ import {
   assertOperatorReady,
   resolveWorkerWallet
 } from "./run-worker-canary.mjs";
+import * as workerCanaryModule from "./run-worker-canary.mjs";
 
 // ── fixtures ──────────────────────────────────────────────────────────────
 const WORKER = "0x30BC468dA4E95a8FA4b3f2043c86687a57CdeE05";
@@ -222,6 +223,47 @@ test("full canary loop walks SIWE→claim→submit→verify→settle and asserts
   assert.ok(archive, "expected an /admin/jobs/lifecycle archive call");
   assert.equal(archive[2].action, "archive");
   assert.equal(archive[2].jobId, JOB_ID);
+});
+
+test("ephemeral worker setup mints a bound marker and attaches it only to worker HTTP calls", async () => {
+  const calls = [];
+  const operatorPlatform = {
+    async request(path, options) {
+      calls.push([path, options]);
+      return {
+        marker: "signed-marker",
+        wallet: WORKER.toLowerCase(),
+        expiresAt: "2030-01-01T00:00:00.000Z"
+      };
+    }
+  };
+  const fetchImpl = async (_url, options) => {
+    calls.push(["fetch", options]);
+    return new Response("{}", { status: 200 });
+  };
+
+  const prepared = await workerCanaryModule.prepareEphemeralCanaryAttribution({
+    operatorPlatform,
+    wallet: WORKER,
+    workerEphemeral: true,
+    fetchImpl
+  });
+  await prepared.fetchImpl("https://api.example.test/account", {
+    headers: { authorization: "Bearer worker" }
+  });
+
+  assert.deepEqual(calls[0], ["/admin/arrivals/canary-marker", {
+    method: "POST",
+    body: { wallet: WORKER }
+  }]);
+  const headers = new Headers(calls[1][1].headers);
+  assert.equal(headers.get("authorization"), "Bearer worker");
+  assert.equal(headers.get("x-averray-canary-marker"), "signed-marker");
+  assert.deepEqual(prepared.summary, {
+    status: 201,
+    wallet: WORKER.toLowerCase(),
+    expiresAt: "2030-01-01T00:00:00.000Z"
+  });
 });
 
 test("canary refuses a created job whose persisted shape lost onboarding waiver eligibility", async () => {

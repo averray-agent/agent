@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { ARRIVAL_CANARY_MARKER_TOKEN_KIND } from "../auth/token-kinds.js";
+
 export const ARRIVALS_SCHEMA_VERSION = "averray.arrivals.v1";
 export const HTTP_ARRIVAL_CUTOVER_NOTE =
   "HTTP arrivals are measured from this cut-over only; earlier HTTP traffic was not backfilled.";
@@ -10,6 +12,8 @@ const DEFAULT_LOAD_RETRY_INTERVAL_MS = 10_000;
 const UNREADABLE = "arrival state could not be read";
 const WALLET_RE = /^0x[0-9a-f]{40}$/u;
 const ATTRIBUTION_SOURCES = Object.freeze(["siwe_wallet", "client_name", "ip_only"]);
+export const ARRIVAL_CANARY_MARKER_HEADER = "x-averray-canary-marker";
+export const ARRIVAL_CANARY_MARKER_TTL_SECONDS = 15 * 60;
 
 const HTTP_ROUTE_STAGE = Object.freeze({
   "GET /jobs": "browsed",
@@ -39,6 +43,7 @@ const HTTP_MACHINE_PATHS = new Set([
   "/status/providers",
   "/strategies",
   "/transparency",
+  "/admin/arrivals/canary-marker",
   "/monitor/arrivals",
   "/monitor/bank-feed",
   "/gas/health",
@@ -185,6 +190,7 @@ export class ArrivalObservatory {
     selfClients = resolveSelfClients(),
     selfWallets = resolveSelfWallets(),
     ambiguousClients = resolveAmbiguousClients(),
+    verifyCanaryMarker = async () => false,
     maxClients = DEFAULT_MAX_CLIENTS,
     flushIntervalMs = DEFAULT_FLUSH_INTERVAL_MS,
     loadRetryIntervalMs = DEFAULT_LOAD_RETRY_INTERVAL_MS
@@ -197,6 +203,9 @@ export class ArrivalObservatory {
     this.selfWallets = selfWallets instanceof Set ? selfWallets : new Set(selfWallets ?? []);
     this.ambiguousClients =
       ambiguousClients instanceof Set ? ambiguousClients : new Set(ambiguousClients ?? []);
+    this.verifyCanaryMarker = typeof verifyCanaryMarker === "function"
+      ? verifyCanaryMarker
+      : async () => false;
     this.maxClients = Number(maxClients) > 0 ? Number(maxClients) : DEFAULT_MAX_CLIENTS;
     this.flushIntervalMs = Number(flushIntervalMs) >= 0 ? Number(flushIntervalMs) : DEFAULT_FLUSH_INTERVAL_MS;
     this.loadRetryIntervalMs =
@@ -242,7 +251,7 @@ export class ArrivalObservatory {
   }
 
   /** A REST request. Machine/discovery polling is intentionally excluded. */
-  async recordHttp({ method, pathname, clientInfo, ip, wallet } = {}) {
+  async recordHttp({ method, pathname, clientInfo, ip, wallet, canaryMarker } = {}) {
     const normalizedMethod = String(method ?? "GET").toUpperCase();
     // CORS negotiation and link probing are transport activity, not an agent
     // entering the earn funnel. Counting them would turn browser preflights and
@@ -251,12 +260,28 @@ export class ArrivalObservatory {
     const normalizedPath = normalizeHttpPath(pathname);
     if (isHttpMachinePath(normalizedPath)) return;
     const route = `${normalizedMethod} ${normalizedPath}`;
+    const markerPresented = typeof canaryMarker === "string" && canaryMarker.trim().length > 0;
+    let canaryMarkerValid;
+    if (markerPresented) {
+      try {
+        canaryMarkerValid = await this.verifyCanaryMarker({
+          marker: canaryMarker.trim(),
+          wallet: normalizeWallet(wallet)
+        }) === true;
+      } catch {
+        // A marker is an optional positive proof. Any verification failure
+        // classifies externally; observability never inherits trust from an
+        // unrecognised credential and never drops the arrival.
+        canaryMarkerValid = false;
+      }
+    }
     await this.record({
       stage: HTTP_ROUTE_STAGE[route] ?? "reached",
       era: "http",
       clientInfo,
       ip,
       wallet,
+      canaryMarkerValid,
       tool: route,
       door: "http"
     });
@@ -281,7 +306,16 @@ export class ArrivalObservatory {
     }
   }
 
-  async record({ stage, era, clientInfo, ip, tool, wallet, door = "mcp" } = {}) {
+  async record({
+    stage,
+    era,
+    clientInfo,
+    ip,
+    tool,
+    wallet,
+    canaryMarkerValid,
+    door = "mcp"
+  } = {}) {
     try {
       if (!ARRIVAL_STAGES.includes(stage)) return;
       // Counting onto a baseline we failed to read would invent a total that
@@ -298,7 +332,7 @@ export class ArrivalObservatory {
         ? this.clientWalletLinks.get(declaredClientKey)
         : undefined;
       const canonicalWallet = normalizedWallet ?? walletFromKey(linkedWalletKey);
-      const actor = this.classifyActor(identity, canonicalWallet);
+      const actor = this.classifyActor(identity, canonicalWallet, canaryMarkerValid);
       const key = canonicalWallet
         ? walletKey(canonicalWallet)
         : declaredClientKey ?? `anon:${this.hashIp(ip)}`;
@@ -326,7 +360,8 @@ export class ArrivalObservatory {
           furthestStage: stage,
           calls: 0,
           tools: {},
-          attributionSources: emptyAttributionTotals()
+          attributionSources: emptyAttributionTotals(),
+          markerAttribution: markerAttribution(canaryMarkerValid)
         };
         entries.set(key, entry);
       }
@@ -340,6 +375,11 @@ export class ArrivalObservatory {
       }
       entry.attributionSources ??= emptyAttributionTotals();
       entry.attributionSources[attributionSource] += 1;
+      if (canaryMarkerValid !== undefined) {
+        entry.markerAttribution = markerAttribution(canaryMarkerValid);
+      } else if (canonicalWallet && !this.selfWallets.has(canonicalWallet)) {
+        entry.markerAttribution = null;
+      }
       // Re-marked on every call, not just at creation. A name that becomes
       // ambiguous only becomes so after entries under it already exist — the
       // live `Anthropic/ClaudeAI` entry is the reason this exists — and an
@@ -523,12 +563,14 @@ export class ArrivalObservatory {
    * client list would disagree with the `distinct` counts derived from them.
    */
   markEntry(entry) {
+    const { markerAttribution, ...publicEntry } = entry;
     const actor = this.classifyActor(
       entry.name ? { name: entry.name } : null,
-      entry.wallet ?? walletFromKey(this.clientWalletLinks.get(entry.key))
+      entry.wallet ?? walletFromKey(this.clientWalletLinks.get(entry.key)),
+      markerOverride(markerAttribution)
     );
     return {
-      ...entry,
+      ...publicEntry,
       tools: { ...entry.tools },
       attributionSources: {
         ...emptyAttributionTotals(),
@@ -556,10 +598,9 @@ export class ArrivalObservatory {
       const linkedKey = this.clientWalletLinks.get(entry.key);
       const key = linkedKey ?? entry.key;
       const wallet = entry.wallet ?? walletFromKey(linkedKey);
-      const actor = this.classifyActor(
-        entry.name ? { name: entry.name } : null,
-        wallet
-      );
+      // markEntry already applied the wallet/name/marker classifier. Preserve
+      // that decision without publishing the marker-verification bookkeeping.
+      const actor = entry.self ? "self" : entry.ambiguous ? "ambiguous" : "client";
       const current = merged.get(key);
       if (!current) {
         merged.set(key, {
@@ -728,7 +769,9 @@ export class ArrivalObservatory {
    * first because it is the stronger claim: we are asserting the traffic is
    * ours, not merely that we cannot rule it out.
    */
-  classifyActor(identity, wallet = undefined) {
+  classifyActor(identity, wallet = undefined, canaryMarkerValid = undefined) {
+    if (canaryMarkerValid === true) return "self";
+    if (canaryMarkerValid === false) return "client";
     if (wallet) return this.selfWallets.has(wallet) ? "self" : "client";
     if (!identity) return "anonymous";
     const name = identity.name.toLowerCase();
@@ -754,6 +797,57 @@ export function resolveSelfWallets(env = process.env) {
       .map((value) => normalizeWallet(value))
       .filter(Boolean)
   );
+}
+
+export function createArrivalCanaryMarkerService({
+  authConfig,
+  signTokenFromConfigImpl,
+  verifyTokenFromConfigImpl,
+  ttlSeconds = ARRIVAL_CANARY_MARKER_TTL_SECONDS
+} = {}) {
+  if (!authConfig || typeof signTokenFromConfigImpl !== "function" || typeof verifyTokenFromConfigImpl !== "function") {
+    throw new TypeError("arrival canary markers require auth config plus token sign and verify functions");
+  }
+  if (!Number.isInteger(ttlSeconds) || ttlSeconds <= 0 || ttlSeconds > ARRIVAL_CANARY_MARKER_TTL_SECONDS) {
+    throw new TypeError(`arrival canary marker ttl must be 1-${ARRIVAL_CANARY_MARKER_TTL_SECONDS} seconds`);
+  }
+
+  return {
+    async issue(walletInput) {
+      const wallet = normalizeWallet(walletInput);
+      if (!wallet) throw new TypeError("arrival canary marker wallet must be a 20-byte EVM address");
+      const { token, claims } = await signTokenFromConfigImpl(
+        {
+          sub: wallet,
+          roles: [],
+          tokenKind: ARRIVAL_CANARY_MARKER_TOKEN_KIND,
+          markerVersion: 1
+        },
+        { expiresInSeconds: ttlSeconds },
+        authConfig
+      );
+      return {
+        marker: token,
+        wallet,
+        ttlSeconds,
+        expiresAt: new Date(Number(claims.exp) * 1000).toISOString(),
+        header: ARRIVAL_CANARY_MARKER_HEADER
+      };
+    },
+
+    verify: async ({ marker, wallet: walletInput } = {}) => {
+      const wallet = normalizeWallet(walletInput);
+      if (!wallet || typeof marker !== "string" || !marker.trim()) return false;
+      try {
+        const claims = await verifyTokenFromConfigImpl(marker.trim(), authConfig);
+        return claims?.tokenKind === ARRIVAL_CANARY_MARKER_TOKEN_KIND
+          && claims?.markerVersion === 1
+          && normalizeWallet(claims?.sub) === wallet;
+      } catch {
+        return false;
+      }
+    }
+  };
 }
 
 /**
@@ -859,6 +953,14 @@ function isHttpMachinePath(pathname) {
 function normalizeWallet(value) {
   const wallet = String(value ?? "").trim().toLowerCase();
   return WALLET_RE.test(wallet) ? wallet : undefined;
+}
+
+function markerAttribution(value) {
+  return value === true ? "valid" : value === false ? "invalid" : null;
+}
+
+function markerOverride(value) {
+  return value === "valid" ? true : value === "invalid" ? false : undefined;
 }
 
 function clientKey(identity) {

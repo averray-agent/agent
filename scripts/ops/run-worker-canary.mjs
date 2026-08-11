@@ -71,6 +71,7 @@ const DEFAULT_SETTLE_TIMEOUT_MS = 180_000;
 const DEFAULT_SETTLE_POLL_MS = 5_000;
 const CANARY_RPC_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_WORKER_KEY_OP = "op://prod-backend/canary-worker-testnet/private key";
+const ARRIVAL_CANARY_MARKER_HEADER = "x-averray-canary-marker";
 const OUTPUT_SCHEMA_REF = "schema://jobs/product-proof-worker-loop";
 const VERIFIER_TERMS = ["complete", "verified", "output"];
 const ERC20_BALANCE_ABI = ["function balanceOf(address) view returns (uint256)"];
@@ -159,6 +160,22 @@ export async function runWorkerCanary({
     workerAddress = wallet.address;
     log(`Worker wallet: ${workerAddress} (roleless${config.workerEphemeral ? ", ephemeral" : ""})`);
 
+    // Ephemeral mainnet wallets cannot live in a static self allowlist. The
+    // operator-authenticated mint binds a short-lived marker to the address at
+    // creation time; only worker requests receive it. The backend verifies the
+    // marker independently and classifies every absent/invalid marker external.
+    const workerAttribution = await stage("arrivalAttribution", () =>
+      prepareEphemeralCanaryAttribution({
+        operatorPlatform,
+        wallet: workerAddress,
+        workerEphemeral: config.workerEphemeral,
+        fetchImpl,
+        now
+      })
+    );
+    stages.arrivalAttribution = workerAttribution.summary;
+    const workerFetchImpl = workerAttribution.fetchImpl;
+
     // ── create the disposable, UPFRONT-funded benchmark job ───────────────
     createdJobId = jobId;
     await stage("createJob", async () => {
@@ -182,9 +199,17 @@ export async function runWorkerCanary({
       stages.siwe = { mode: "injected", roleless: true };
       authedWorker = workerClient;
     } else {
-      const siwe = await stage("siwe", () => runSiweStage({ apiBaseUrl: config.apiBaseUrl, wallet, fetchImpl }));
+      const siwe = await stage("siwe", () => runSiweStage({
+        apiBaseUrl: config.apiBaseUrl,
+        wallet,
+        fetchImpl: workerFetchImpl
+      }));
       stages.siwe = siwe.summary;
-      authedWorker = new AgentPlatformClient({ baseUrl: config.apiBaseUrl, token: siwe.token, fetchImpl });
+      authedWorker = new AgentPlatformClient({
+        baseUrl: config.apiBaseUrl,
+        token: siwe.token,
+        fetchImpl: workerFetchImpl
+      });
     }
 
     // ── STAGE 2: authed read (guards #626 JWT sub-casing 401) ─────────────
@@ -1169,6 +1194,49 @@ export async function resolveWorkerWallet({ env, config, readSecretImpl, log }) 
     `No canary worker key available. Set WORKER_CANARY_WORKER_PRIVATE_KEY, provision ${opRef}, ` +
       "or set WORKER_CANARY_ALLOW_EPHEMERAL=1 for local dev."
   );
+}
+
+export async function prepareEphemeralCanaryAttribution({
+  operatorPlatform,
+  wallet,
+  workerEphemeral,
+  fetchImpl,
+  now = () => Date.now()
+}) {
+  if (!workerEphemeral) {
+    return {
+      fetchImpl,
+      summary: { status: "not_required", wallet: String(wallet).toLowerCase() }
+    };
+  }
+  const issued = await operatorPlatform.request("/admin/arrivals/canary-marker", {
+    method: "POST",
+    body: { wallet }
+  });
+  const expectedWallet = String(wallet ?? "").toLowerCase();
+  const markerWallet = String(issued?.wallet ?? "").toLowerCase();
+  const marker = typeof issued?.marker === "string" ? issued.marker.trim() : "";
+  const expiresAtMs = Date.parse(issued?.expiresAt ?? "");
+  if (!marker || markerWallet !== expectedWallet || !Number.isFinite(expiresAtMs) || expiresAtMs <= now()) {
+    throw new Error("Arrival attribution marker was missing, expired, or bound to a different canary wallet.");
+  }
+
+  return {
+    fetchImpl: withArrivalCanaryMarker(fetchImpl, marker),
+    summary: {
+      status: 201,
+      wallet: markerWallet,
+      expiresAt: new Date(expiresAtMs).toISOString()
+    }
+  };
+}
+
+function withArrivalCanaryMarker(fetchImpl, marker) {
+  return async (url, options = {}) => {
+    const headers = new Headers(options.headers);
+    headers.set(ARRIVAL_CANARY_MARKER_HEADER, marker);
+    return await fetchImpl(url, { ...options, headers });
+  };
 }
 
 async function resolveChainJobId({ authedWorker, sessionId, claim, submit }) {

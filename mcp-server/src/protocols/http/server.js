@@ -67,8 +67,11 @@ import { createConfiguredIndexerHealthProbe } from "../../services/indexer-healt
 import { createUsdcLiquidityStatusService } from "../../services/usdc-liquidity-status.js";
 import {
   ArrivalObservatory,
+  ARRIVAL_CANARY_MARKER_HEADER,
+  createArrivalCanaryMarkerService,
   extractHttpClientInfo
 } from "../../services/arrival-observatory.js";
+import { signTokenFromConfig, verifyTokenFromConfig } from "../../auth/jwt.js";
 import { createArrivalRoutes } from "./arrival-routes.js";
 
 const {
@@ -680,13 +683,28 @@ const executeMcpTool = createMcpToolExecutor({
 
 // Records who reaches the front door. Injected rather than reached for, so
 // the MCP handler stays testable without a state store.
+const arrivalCanaryMarkers = createArrivalCanaryMarkerService({
+  authConfig,
+  signTokenFromConfigImpl: signTokenFromConfig,
+  verifyTokenFromConfigImpl: verifyTokenFromConfig
+});
+
 const arrivalObservatory = new ArrivalObservatory({
   stateStore,
   metrics,
-  hashSalt: process.env.ARRIVAL_HASH_SALT || process.env.AUTH_JWT_SECRETS || "averray-arrivals"
+  hashSalt: process.env.ARRIVAL_HASH_SALT || process.env.AUTH_JWT_SECRETS || "averray-arrivals",
+  verifyCanaryMarker: arrivalCanaryMarkers.verify
 });
 
-const handleArrivalRoute = createArrivalRoutes({ respond, arrivalObservatory });
+const handleArrivalRoute = createArrivalRoutes({
+  respond,
+  arrivalObservatory,
+  arrivalCanaryMarkers,
+  authMiddleware,
+  enforceLimit,
+  rateLimitConfig,
+  readJsonBody
+});
 
 const handleMcpRoute = createMcpRoute({
   arrivals: arrivalObservatory,
@@ -783,7 +801,8 @@ const server = createServer(async (request, response) => {
       pathname,
       clientInfo: extractHttpClientInfo(request),
       ip: clientIp(request),
-      wallet: request._arrivalWallet
+      wallet: request._arrivalWallet,
+      canaryMarker: request.headers?.[ARRIVAL_CANARY_MARKER_HEADER]
     });
   });
 
@@ -810,7 +829,7 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (await handleArrivalRoute({ request, response, pathname })) {
+    if (await handleArrivalRoute({ request, response, url, pathname })) {
       return;
     }
     if (await handleBankLaneFeedRoute({ request, response, pathname })) {

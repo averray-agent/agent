@@ -233,8 +233,10 @@ test("SIWE telemetry failure is logged without breaking authentication", async (
     }
   });
 
-  assert.equal(await callRoute(route, response, "POST", "/auth/nonce"), true);
+  const request = {};
+  assert.equal(await callRoute(route, response, "POST", "/auth/nonce", request), true);
   assert.equal(response.statusCode, 200);
+  assert.equal(request._arrivalWallet, WALLET);
   assert.equal(calls.find(([name]) => name === "logger.warn")?.[1][1], "auth_siwe.telemetry_write_failed");
 });
 

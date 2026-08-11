@@ -84,6 +84,9 @@ export const LITERAL_OVERRIDES = {
   REDIS_URL: "redis://mainnet-redis:6379",
   REDIS_NAMESPACE: "agent-platform-mainnet",
   INDEXER_STATUS_URL: "http://mainnet-indexer:42069/status",
+  // Stable operator smoke identity. Fresh mainnet canary workers cannot be
+  // listed here and use the short-lived server-signed marker instead.
+  ARRIVAL_SELF_WALLETS: "0x9Ab8531FBb0948C542a31298FD61335f30064239",
 
   BANK_XCM_ASSET_HUB_SUBSTRATE_RPC_URL: "wss://asset-hub-polkadot-rpc.n.dwellir.com",
   BANK_XCM_HYDRATION_SUBSTRATE_RPC_URL: "wss://hydration-rpc.n.dwellir.com",

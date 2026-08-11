@@ -117,6 +117,7 @@ export function createAuthRoutes({
       if (!WALLET_RE.test(wallet)) {
         throw new ValidationError("wallet must be a 0x-prefixed 20-byte hex address.");
       }
+      request._arrivalWallet = wallet.toLowerCase();
       const nonce = generateNonce(randomBytesImpl);
       const stored = await stateStore.storeNonce?.(nonce, wallet.toLowerCase(), authConfig.nonceTtlSeconds);
       if (stored === false) {

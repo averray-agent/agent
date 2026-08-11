@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -11,7 +12,12 @@ import {
 } from "./arrival-observatory.js";
 import * as arrivalModule from "./arrival-observatory.js";
 
-function harness({ failStore = false, now = () => 1_000, loadRetryIntervalMs } = {}) {
+function harness({
+  failStore = false,
+  now = () => 1_000,
+  loadRetryIntervalMs,
+  verifyCanaryMarker
+} = {}) {
   const state = new Map();
   const counters = [];
   const reads = [];
@@ -38,7 +44,14 @@ function harness({ failStore = false, now = () => 1_000, loadRetryIntervalMs } =
     counters,
     reads,
     recover() { failing = false; },
-    observatory: new ArrivalObservatory({ stateStore, metrics, now, flushIntervalMs: 0, loadRetryIntervalMs })
+    observatory: new ArrivalObservatory({
+      stateStore,
+      metrics,
+      now,
+      flushIntervalMs: 0,
+      loadRetryIntervalMs,
+      verifyCanaryMarker
+    })
   };
 }
 
@@ -263,6 +276,77 @@ test("HTTP wallet attribution uses the explicit self allowlist and leaves unmark
   assert.equal(snapshot.attributionSourceTotals.http.ip_only, 1);
   assert.equal(snapshot.httpClients.find((entry) => entry.wallet === selfWallet).self, true);
   assert.equal(snapshot.httpClients.find((entry) => entry.wallet === externalWallet).self, false);
+});
+
+test("mainnet smoke attribution commits the operator wallet instead of relying on an empty runtime knob", async () => {
+  const template = await readFile(
+    new URL("../../../deploy/backend.mainnet.env.template", import.meta.url),
+    "utf8"
+  );
+  assert.match(
+    template,
+    /^ARRIVAL_SELF_WALLETS=0x9Ab8531FBb0948C542a31298FD61335f30064239$/mu
+  );
+});
+
+test("ephemeral canary markers are short-lived, wallet-bound, and fail toward external", async () => {
+  const wallet = "0x4444444444444444444444444444444444444444";
+  let issuedClaims;
+  const markerService = arrivalModule.createArrivalCanaryMarkerService({
+    authConfig: { marker: "test" },
+    signTokenFromConfigImpl: async (payload, options) => {
+      issuedClaims = {
+        ...payload,
+        iat: 1_000,
+        exp: 1_000 + options.expiresInSeconds
+      };
+      return { token: "signed-canary-marker", claims: issuedClaims };
+    },
+    verifyTokenFromConfigImpl: async (token) => {
+      if (token !== "signed-canary-marker") throw new Error("bad signature");
+      return issuedClaims;
+    }
+  });
+
+  const issued = await markerService.issue(wallet);
+  assert.equal(issued.wallet, wallet);
+  assert.ok(issued.ttlSeconds > 0 && issued.ttlSeconds <= 15 * 60);
+  assert.equal(await markerService.verify({ marker: issued.marker, wallet }), true);
+  assert.equal(await markerService.verify({
+    marker: issued.marker,
+    wallet: "0x5555555555555555555555555555555555555555"
+  }), false, "a marker cannot mark a different wallet as self");
+  assert.equal(await markerService.verify({ marker: "unrecognised", wallet }), false);
+
+  const { observatory } = harness({ verifyCanaryMarker: markerService.verify });
+  await observatory.recordHttp({
+    method: "POST",
+    pathname: "/jobs/claim",
+    wallet,
+    canaryMarker: issued.marker
+  });
+  await observatory.recordHttp({
+    method: "POST",
+    pathname: "/jobs/submit",
+    wallet: "0x5555555555555555555555555555555555555555",
+    canaryMarker: issued.marker
+  });
+  await observatory.recordHttp({
+    method: "GET",
+    pathname: "/account",
+    wallet,
+    canaryMarker: "unrecognised"
+  });
+
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.funnelHttpSelf.claimed, 1);
+  assert.equal(snapshot.funnelHttpExternal.submitted, 1);
+  assert.equal(snapshot.funnelHttpExternal.reached, 1);
+  assert.equal(
+    snapshot.httpClients.some((entry) => Object.hasOwn(entry, "markerAttribution")),
+    false,
+    "marker verification bookkeeping stays internal"
+  );
 });
 
 test("MCP browsing and HTTP claiming join into one wallet-canonical agent", async () => {
