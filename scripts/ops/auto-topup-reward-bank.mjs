@@ -152,7 +152,9 @@ async function main() {
 
   if (!plan.shouldTopup) return;
 
-  const depositCmd = ["scripts/ops/fund-signer-usdc-deposit.mjs", "--amount", String(plan.amount), ...(args.useKms ? ["--use-kms"] : []), "--commit"];
+  // --profile is forwarded explicitly: the deposit script no longer defaults,
+  // so omitting it here would make every commit exit 1.
+  const depositCmd = ["scripts/ops/fund-signer-usdc-deposit.mjs", "--profile", args.profile, "--amount", String(plan.amount), ...(args.useKms ? ["--use-kms"] : []), "--commit"];
   if (args.dryRun) {
     console.log(`dry-run — would top up ${usdc(plan.amount)} via:\n  node ${depositCmd.join(" ")}`);
     return;

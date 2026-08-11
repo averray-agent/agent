@@ -24,8 +24,16 @@ test("parseArgs: dry-run is the default and useKms is off", () => {
   const args = parseArgs([]);
   assert.equal(args.dryRun, true);
   assert.equal(args.useKms, false);
-  assert.equal(args.profile, "testnet");
   assert.equal(args.amount, undefined);
+});
+
+// The profile default was "testnet", correct until the 2026-07-27 mainnet cutover
+// and silently wrong afterwards — on 2026-08-11 it aimed a live deposit at the
+// testnet AgentAccountCore, and only a zero balance stopped it. A script that moves
+// money must refuse rather than guess a network.
+test("parseArgs: there is NO default profile — a money script must not guess a network", () => {
+  assert.equal(parseArgs([]).profile, undefined);
+  assert.equal(parseArgs(["--amount", "10000000", "--commit"]).profile, undefined);
 });
 
 test("parseArgs: --commit flips dryRun off", () => {
@@ -60,7 +68,7 @@ test("parseArgs: --help is captured even when other flags are present", () => {
 // --- CLI-level error paths (no AWS, no chain) -----------------------------
 
 test("CLI: --use-kms without KMS_KEY_ID exits 1 before any AWS call", () => {
-  const result = spawnSync("node", [scriptPath, "--amount", "1", "--use-kms"], {
+  const result = spawnSync("node", [scriptPath, "--profile", "mainnet", "--amount", "1", "--use-kms"], {
     env: {
       ...process.env,
       KMS_KEY_ID: "",
@@ -75,7 +83,7 @@ test("CLI: --use-kms without KMS_KEY_ID exits 1 before any AWS call", () => {
 });
 
 test("CLI: --use-kms without AWS_REGION exits 1 before any AWS call", () => {
-  const result = spawnSync("node", [scriptPath, "--amount", "1", "--use-kms"], {
+  const result = spawnSync("node", [scriptPath, "--profile", "mainnet", "--amount", "1", "--use-kms"], {
     env: {
       ...process.env,
       KMS_KEY_ID: "alias/dummy",
@@ -88,7 +96,7 @@ test("CLI: --use-kms without AWS_REGION exits 1 before any AWS call", () => {
 });
 
 test("CLI: --commit (no --use-kms) without PRIVATE_KEY exits 1 and hints at KMS path", () => {
-  const result = spawnSync("node", [scriptPath, "--amount", "1", "--commit"], {
+  const result = spawnSync("node", [scriptPath, "--profile", "mainnet", "--amount", "1", "--commit"], {
     env: {
       ...process.env,
       PRIVATE_KEY: "",
