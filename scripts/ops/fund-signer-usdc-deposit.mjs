@@ -97,7 +97,17 @@ const AGENT_ACCOUNT_DEPOSIT_ABI = [
 ];
 
 export function parseArgs(argv) {
-  const args = { dryRun: true, amount: undefined, profile: "testnet", useKms: false };
+  // NO default profile, deliberately.
+  //
+  // This used to default to "testnet", which was correct until the mainnet
+  // cutover on 2026-07-27 and silently wrong afterwards. On 2026-08-11 it sent a
+  // live deposit at the TESTNET AgentAccountCore (0x510918E2…) instead of
+  // mainnet (0xB1350932…); the only signal was one line of header output, and it
+  // failed safe purely because the testnet balance happened to be 0.
+  //
+  // A script that moves money must not guess which chain it is on. Callers state
+  // the network or the script refuses.
+  const args = { dryRun: true, amount: undefined, profile: undefined, useKms: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--commit") args.dryRun = false;
@@ -118,7 +128,8 @@ function printUsage() {
       "Options:",
       "  --amount <baseUnits>   Required. USDC amount in base units (6 decimals).",
       "                         e.g. --amount 10000000 for 10 USDC.",
-      "  --profile <name>       deployments/<profile>.json. Default: testnet.",
+      "  --profile <name>       Required. deployments/<profile>.json — e.g. mainnet.",
+      "                         No default: a money-moving script must not guess a network.",
       "  --dry-run              (default) Read-only; prints planned txs.",
       "  --commit               Sends approve + deposit txs.",
       "                         Requires PRIVATE_KEY env (unless --use-kms).",
@@ -149,6 +160,16 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     printUsage();
+    return;
+  }
+  if (!args.profile) {
+    console.error(
+      "--profile is required (e.g. --profile mainnet). This script moves money and "
+      + "will not guess a network: it previously defaulted to testnet, which was correct "
+      + "until the 2026-07-27 mainnet cutover and silently wrong afterwards."
+    );
+    printUsage();
+    process.exitCode = 1;
     return;
   }
   if (!args.amount) {

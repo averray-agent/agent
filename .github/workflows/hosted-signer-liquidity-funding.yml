@@ -102,7 +102,9 @@ jobs:
           set -euo pipefail
           cd /srv/agent-stack
 
-          mode_args=(--amount "$SIGNER_USDC_AMOUNT_RAW" --use-kms)
+          # --profile is explicit: the script no longer defaults, because its old
+          # testnet default became silently wrong at the 2026-07-27 mainnet cutover.
+          mode_args=(--profile mainnet --amount "$SIGNER_USDC_AMOUNT_RAW" --use-kms)
           if [ "$SIGNER_USDC_COMMIT" = "1" ]; then
             mode_args+=(--commit)
           fi

@@ -789,7 +789,7 @@ async function main() {
     fixes.push({
       label: `backend signer is under-funded for one claim: positions[signer][USDC].liquid = ${formatUsdc(signerLiquidUsdc)} USDC, required ${formatUsdc(requiredPerClaim)} USDC (short by ${formatUsdc(liquidityGap)} USDC)${hint}`,
       reasonCode: "signer_liquidity_short",
-      runbook: `node scripts/ops/fund-signer-usdc-deposit.mjs --amount ${liquidityGap.toString()} --use-kms --commit`
+      runbook: `node scripts/ops/fund-signer-usdc-deposit.mjs --profile ${args.profile} --amount ${liquidityGap.toString()} --use-kms --commit`
     });
   }
   if (usdcLiquidityRegistryConfigured) {
