@@ -1,4 +1,5 @@
 import { ingestOpenApiSpecs, openApiSpecKey, parseOpenApiSpecs } from "../jobs/ingest-openapi-specs.js";
+import { GuardedSchedulerLoop, ingestionSchedulerOutcome, schedulerRunTimeoutMs } from "./guarded-scheduler-loop.js";
 
 export class OpenApiSpecIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -26,6 +27,19 @@ export class OpenApiSpecIngestionScheduler {
     this.timer = undefined;
     this.running = false;
     this.lastRun = undefined;
+    this.schedulerLoop = new GuardedSchedulerLoop({
+      host: this,
+      name: "openapi-spec-ingestion-scheduler",
+      intervalMs: this.intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs(this.intervalMs),
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: (summary) => ingestionSchedulerOutcome(summary, {
+        noInputReasons: ["no_specs_configured"],
+        emptySourceState: "openapi_specs_empty_repeated",
+        emptySourceMessage: "Configured OpenAPI documents produced no eligible operations for three consecutive runs."
+      }),
+      logger: this.logger
+    });
   }
 
   start() {
@@ -38,10 +52,7 @@ export class OpenApiSpecIngestionScheduler {
 
   stop() {
     this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
+    this.schedulerLoop.stop();
   }
 
   async getStatus() {
@@ -55,7 +66,8 @@ export class OpenApiSpecIngestionScheduler {
       maxJobsPerRun: this.maxJobsPerRun,
       maxOpenJobs: this.maxOpenJobs,
       currentOpenJobs: this.countOpenApiJobs(),
-      lastRun: this.lastRun
+      lastRun: this.lastRun,
+      ...this.schedulerLoop.getStatus()
     };
   }
 
@@ -139,16 +151,7 @@ export class OpenApiSpecIngestionScheduler {
   }
 
   async runOnceAndSchedule() {
-    await this.runOnce(new Date());
-    if (!this.running) {
-      return;
-    }
-    if (this.timer) {
-      clearTimeout(this.timer);
-    }
-    this.timer = setTimeout(() => {
-      void this.runOnceAndSchedule();
-    }, this.intervalMs);
+    return this.schedulerLoop.runOnceAndSchedule();
   }
 
   finishRun(summary) {

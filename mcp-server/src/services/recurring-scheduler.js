@@ -1,4 +1,7 @@
 import { ConflictError } from "../core/errors.js";
+import { GuardedSchedulerLoop, schedulerRunTimeoutMs, summaryErrorsOutcome } from "./guarded-scheduler-loop.js";
+
+const SCHEDULER_INTERVAL_MS = 60_000;
 
 export class RecurringSchedulerService {
   constructor(platformService, eventBus = undefined, { enabled = false, logger = console } = {}) {
@@ -9,6 +12,17 @@ export class RecurringSchedulerService {
     this.runtime = new Map();
     this.timer = undefined;
     this.running = false;
+    this.intervalMs = SCHEDULER_INTERVAL_MS;
+    this.lastRun = undefined;
+    this.schedulerLoop = new GuardedSchedulerLoop({
+      host: this,
+      name: "recurring-scheduler",
+      intervalMs: this.intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs(this.intervalMs),
+      runOnce: (now) => this.runScheduledTick(now),
+      evaluateOutcome: (summary) => summaryErrorsOutcome(summary, "recurring_template_errors"),
+      logger: this.logger
+    });
   }
 
   start() {
@@ -21,10 +35,7 @@ export class RecurringSchedulerService {
 
   stop() {
     this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
+    this.schedulerLoop.stop();
   }
 
   async getStatus(now = new Date()) {
@@ -53,7 +64,9 @@ export class RecurringSchedulerService {
           nextFireAt,
           lastResult: runtime.lastResult
         };
-      })
+      }),
+      lastRun: this.lastRun,
+      ...this.schedulerLoop.getStatus(now)
     };
   }
 
@@ -200,19 +213,28 @@ export class RecurringSchedulerService {
   }
 
   async scheduleNextTick(now = new Date()) {
-    if (!this.enabled || !this.running) {
-      return;
-    }
-    await this.runDueTemplates(now);
-    if (!this.running) {
-      return;
-    }
-    if (this.timer) {
-      clearTimeout(this.timer);
-    }
-    this.timer = setTimeout(() => {
-      void this.scheduleNextTick(new Date());
-    }, 60_000);
+    if (!this.enabled || !this.running) return undefined;
+    return this.schedulerLoop.runOnceAndSchedule(now);
+  }
+
+  async runScheduledTick(now = new Date()) {
+    const fired = await this.runDueTemplates(now);
+    const errors = [...this.runtime.entries()]
+      .filter(([, runtime]) => runtime?.lastResult?.at === now.toISOString())
+      .filter(([, runtime]) => ["conflict", "failed", "invalid_schedule"].includes(runtime?.lastResult?.status))
+      .map(([templateId, runtime]) => ({
+        templateId,
+        status: runtime.lastResult.status,
+        message: runtime.lastResult.message
+      }));
+    const summary = {
+      startedAt: now.toISOString(),
+      finishedAt: new Date().toISOString(),
+      firedCount: fired.length,
+      errors
+    };
+    this.lastRun = summary;
+    return summary;
   }
 }
 

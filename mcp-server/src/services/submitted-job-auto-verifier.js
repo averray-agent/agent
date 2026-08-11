@@ -1,3 +1,5 @@
+import { GuardedSchedulerLoop, summaryErrorsOutcome } from "./guarded-scheduler-loop.js";
+
 // Auto-verify submitted jobs whose verifier mode is machine-decidable, so an
 // external worker's submission settles on its own instead of sitting in
 // `submitted` forever waiting for an operator to call POST /verifier/run.
@@ -65,22 +67,29 @@ export class SubmittedJobAutoVerifierService {
     this.lastSchedulerError = undefined;
     this.consecutiveSchedulerFailures = 0;
     this.submittedFailureStreaks = new Map();
+    this.schedulerLoop = new GuardedSchedulerLoop({
+      host: this,
+      name: "submitted-job-auto-verifier",
+      intervalMs: this.intervalMs,
+      runTimeoutMs: Math.max(this.candidateTimeoutMs, this.intervalMs),
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: (summary) => summaryErrorsOutcome(summary, "auto_verification_errors"),
+      logger: this.logger,
+      failureLogEvent: "auto_verify.scheduler_run_failed"
+    });
   }
 
   start() {
     if (!this.enabled || this.running) return;
     this.running = true;
     this.startedAt = new Date().toISOString();
+    this.schedulerLoop.startedAt = this.startedAt;
     void this.runOnceAndSchedule();
   }
 
   stop() {
     this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
-    this.nextRunAt = undefined;
+    this.schedulerLoop.stop();
   }
 
   async getStatus(now = new Date()) {
@@ -98,16 +107,14 @@ export class SubmittedJobAutoVerifierService {
       persistentSubmittedFailures: this.listPersistentSubmittedFailures(),
       autoModes: [...this.autoModes],
       requireSettlementReady: this.requireSettlementReady,
-      nextRunAt: this.nextRunAt,
-      lastSuccessfulRunAt: this.lastSuccessfulRunAt,
-      lastSchedulerError: this.lastSchedulerError,
-      consecutiveSchedulerFailures: this.consecutiveSchedulerFailures,
       lastRun: this.lastRun,
+      ...this.schedulerLoop.getStatus(now),
       liveness: this.resolveLiveness(now)
     };
   }
 
   async getHealth(now = new Date()) {
+    const schedulerStatus = this.schedulerLoop.getStatus(now);
     const liveness = this.resolveLiveness(now);
     return {
       ...liveness,
@@ -115,37 +122,23 @@ export class SubmittedJobAutoVerifierService {
       running: this.running,
       mode: this.dryRun ? "dry_run" : "live",
       intervalMs: this.intervalMs,
-      nextRunAt: this.nextRunAt,
-      lastRunFinishedAt: this.lastRun?.finishedAt,
-      consecutiveSchedulerFailures: this.consecutiveSchedulerFailures,
+      nextRunAt: schedulerStatus.nextRunAt,
+      lastRunFinishedAt: schedulerStatus.lastRunFinishedAt,
+      consecutiveSchedulerFailures: schedulerStatus.consecutiveSchedulerFailures,
       pendingTimeoutCount: this.countPendingTimeouts(),
       persistentSubmittedFailures: this.listPersistentSubmittedFailures()
     };
   }
 
   resolveLiveness(now = new Date()) {
-    const staleAfterMs = Math.max(
-      this.intervalMs * 3,
-      this.candidateTimeoutMs + this.intervalMs
-    );
-    if (!this.enabled) {
-      return { ok: true, state: "disabled", staleAfterMs };
-    }
-    if (!this.running) {
-      return { ok: false, state: "stopped", staleAfterMs };
-    }
+    this.schedulerLoop.startedAt ??= this.startedAt;
+    this.schedulerLoop.lastRunFinishedAt ??= this.lastRun?.finishedAt;
+    const base = this.schedulerLoop.resolveLiveness(now);
     if (this.countPendingTimeouts() > 0) {
       return {
         ok: false,
         state: "verification_timeout_pending",
-        staleAfterMs
-      };
-    }
-    if (this.consecutiveSchedulerFailures > 0) {
-      return {
-        ok: false,
-        state: "run_failed",
-        staleAfterMs
+        staleAfterMs: base.staleAfterMs
       };
     }
     const persistentSubmittedFailures = this.listPersistentSubmittedFailures();
@@ -153,27 +146,12 @@ export class SubmittedJobAutoVerifierService {
       return {
         ok: false,
         state: "submitted_session_persistently_skipped",
-        staleAfterMs,
+        staleAfterMs: base.staleAfterMs,
         persistentSubmittedFailureCount: persistentSubmittedFailures.length,
         persistentSubmittedFailures
       };
     }
-
-    const reference = this.lastRun?.finishedAt ?? this.startedAt;
-    const referenceMs = Date.parse(reference ?? "");
-    const nowMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
-    const lastRunAgeMs = Number.isFinite(referenceMs) && Number.isFinite(nowMs)
-      ? Math.max(0, nowMs - referenceMs)
-      : null;
-    if (lastRunAgeMs === null || lastRunAgeMs > staleAfterMs) {
-      return {
-        ok: false,
-        state: this.lastRun?.finishedAt ? "last_run_stale" : "never_completed",
-        staleAfterMs,
-        lastRunAgeMs
-      };
-    }
-    return { ok: true, state: "running", staleAfterMs, lastRunAgeMs };
+    return base;
   }
 
   countPendingTimeouts() {
@@ -449,37 +427,11 @@ export class SubmittedJobAutoVerifierService {
   }
 
   async runOnceAndSchedule() {
-    try {
-      const summary = await this.runOnce(new Date());
-      this.consecutiveSchedulerFailures = 0;
-      this.lastSuccessfulRunAt = summary.finishedAt;
-    } catch (error) {
-      this.consecutiveSchedulerFailures += 1;
-      this.lastSchedulerError = {
-        at: new Date().toISOString(),
-        message: error?.message ?? String(error)
-      };
-      this.logger.warn?.(
-        { err: error, consecutiveFailures: this.consecutiveSchedulerFailures },
-        "auto_verify.scheduler_run_failed"
-      );
-    } finally {
-      this.scheduleNextRun();
-    }
+    return this.schedulerLoop.runOnceAndSchedule();
   }
 
   scheduleNextRun() {
-    if (!this.running) {
-      this.nextRunAt = undefined;
-      return;
-    }
-    if (this.timer) clearTimeout(this.timer);
-    this.nextRunAt = new Date(Date.now() + this.intervalMs).toISOString();
-    this.timer = setTimeout(() => {
-      this.timer = undefined;
-      this.nextRunAt = undefined;
-      void this.runOnceAndSchedule();
-    }, this.intervalMs);
+    this.schedulerLoop.scheduleNextRun();
   }
 
   finishRun(summary) {

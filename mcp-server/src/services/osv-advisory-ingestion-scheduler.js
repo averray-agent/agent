@@ -1,4 +1,5 @@
 import { ingestOsvAdvisories, parseManifests, parsePackages } from "../jobs/ingest-osv-advisories.js";
+import { GuardedSchedulerLoop, ingestionSchedulerOutcome, schedulerRunTimeoutMs } from "./guarded-scheduler-loop.js";
 
 export class OsvAdvisoryIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -30,6 +31,19 @@ export class OsvAdvisoryIngestionScheduler {
     this.timer = undefined;
     this.running = false;
     this.lastRun = undefined;
+    this.schedulerLoop = new GuardedSchedulerLoop({
+      host: this,
+      name: "osv-advisory-ingestion-scheduler",
+      intervalMs: this.intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs(this.intervalMs),
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: (summary) => ingestionSchedulerOutcome(summary, {
+        noInputReasons: ["no_packages_or_manifests_configured"],
+        emptySourceState: "osv_targets_empty_repeated",
+        emptySourceMessage: "Configured OSV package targets produced no eligible advisories for three consecutive runs."
+      }),
+      logger: this.logger
+    });
   }
 
   start() {
@@ -42,10 +56,7 @@ export class OsvAdvisoryIngestionScheduler {
 
   stop() {
     this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
+    this.schedulerLoop.stop();
   }
 
   async getStatus() {
@@ -62,7 +73,8 @@ export class OsvAdvisoryIngestionScheduler {
       maxPackageTargets: this.maxPackageTargets,
       maxOpenJobs: this.maxOpenJobs,
       currentOpenJobs: this.countOpenOsvJobs(),
-      lastRun: this.lastRun
+      lastRun: this.lastRun,
+      ...this.schedulerLoop.getStatus()
     };
   }
 
@@ -148,16 +160,7 @@ export class OsvAdvisoryIngestionScheduler {
   }
 
   async runOnceAndSchedule() {
-    await this.runOnce(new Date());
-    if (!this.running) {
-      return;
-    }
-    if (this.timer) {
-      clearTimeout(this.timer);
-    }
-    this.timer = setTimeout(() => {
-      void this.runOnceAndSchedule();
-    }, this.intervalMs);
+    return this.schedulerLoop.runOnceAndSchedule();
   }
 
   finishRun(summary) {

@@ -4,6 +4,7 @@ import {
   isFinalFundedJob,
   summarizeFundedJobs
 } from "../core/funded-jobs.js";
+import { GuardedSchedulerLoop, schedulerRunTimeoutMs, summaryErrorsOutcome } from "./guarded-scheduler-loop.js";
 
 const DEFAULT_STATUS_RECORD_LIMIT = 10_000;
 const UPSTREAM_STATUS_STATE_SCOPE = "upstream-status-poller";
@@ -34,6 +35,15 @@ export class UpstreamStatusPollerService {
     this.running = false;
     this.timer = undefined;
     this.lastRun = undefined;
+    this.schedulerLoop = new GuardedSchedulerLoop({
+      host: this,
+      name: "upstream-status-poller",
+      intervalMs: this.intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs(this.intervalMs),
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: (summary) => summaryErrorsOutcome(summary, "upstream_poll_errors"),
+      logger: this.logger
+    });
   }
 
   start() {
@@ -44,10 +54,7 @@ export class UpstreamStatusPollerService {
 
   stop() {
     this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
+    this.schedulerLoop.stop();
   }
 
   async getStatus() {
@@ -66,7 +73,8 @@ export class UpstreamStatusPollerService {
       evidencePersistenceNote: typeof this.stateStore.upsertServiceState === "function"
         ? "durable_service_state"
         : "in_process_only",
-      fundedJobs
+      fundedJobs,
+      ...this.schedulerLoop.getStatus()
     };
   }
 
@@ -149,12 +157,7 @@ export class UpstreamStatusPollerService {
   }
 
   async runOnceAndSchedule() {
-    await this.runOnce(new Date());
-    if (!this.running) return;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => {
-      void this.runOnceAndSchedule();
-    }, this.intervalMs);
+    return this.schedulerLoop.runOnceAndSchedule();
   }
 
   async finishRun(summary) {

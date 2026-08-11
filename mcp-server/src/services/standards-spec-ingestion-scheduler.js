@@ -1,4 +1,5 @@
 import { ingestStandardsSpecs, parseSpecs, standardsSpecKey } from "../jobs/ingest-standards-specs.js";
+import { GuardedSchedulerLoop, ingestionSchedulerOutcome, schedulerRunTimeoutMs } from "./guarded-scheduler-loop.js";
 
 export class StandardsSpecIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -26,6 +27,19 @@ export class StandardsSpecIngestionScheduler {
     this.timer = undefined;
     this.running = false;
     this.lastRun = undefined;
+    this.schedulerLoop = new GuardedSchedulerLoop({
+      host: this,
+      name: "standards-spec-ingestion-scheduler",
+      intervalMs: this.intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs(this.intervalMs),
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: (summary) => ingestionSchedulerOutcome(summary, {
+        noInputReasons: ["no_specs_configured"],
+        emptySourceState: "standards_specs_empty_repeated",
+        emptySourceMessage: "Configured standards documents produced no eligible work for three consecutive runs."
+      }),
+      logger: this.logger
+    });
   }
 
   start() {
@@ -38,10 +52,7 @@ export class StandardsSpecIngestionScheduler {
 
   stop() {
     this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
+    this.schedulerLoop.stop();
   }
 
   async getStatus() {
@@ -55,7 +66,8 @@ export class StandardsSpecIngestionScheduler {
       maxJobsPerRun: this.maxJobsPerRun,
       maxOpenJobs: this.maxOpenJobs,
       currentOpenJobs: this.countOpenStandardsJobs(),
-      lastRun: this.lastRun
+      lastRun: this.lastRun,
+      ...this.schedulerLoop.getStatus()
     };
   }
 
@@ -139,16 +151,7 @@ export class StandardsSpecIngestionScheduler {
   }
 
   async runOnceAndSchedule() {
-    await this.runOnce(new Date());
-    if (!this.running) {
-      return;
-    }
-    if (this.timer) {
-      clearTimeout(this.timer);
-    }
-    this.timer = setTimeout(() => {
-      void this.runOnceAndSchedule();
-    }, this.intervalMs);
+    return this.schedulerLoop.runOnceAndSchedule();
   }
 
   finishRun(summary) {

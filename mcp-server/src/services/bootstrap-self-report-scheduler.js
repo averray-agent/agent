@@ -1,3 +1,5 @@
+import { GuardedSchedulerLoop, schedulerRunTimeoutMs } from "./guarded-scheduler-loop.js";
+
 const DEFAULT_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_RESEND_API_BASE_URL = "https://api.resend.com";
 const DEFAULT_STATE_SCOPE = "bootstrap-self-report";
@@ -60,21 +62,27 @@ export class BootstrapSelfReportSchedulerService {
       lastSuccessfulAt: undefined,
       lastFailureReason: undefined
     };
+    this.schedulerLoop = new GuardedSchedulerLoop({
+      host: this,
+      name: "bootstrap-self-report-scheduler",
+      intervalMs: this.intervalMs,
+      runTimeoutMs: schedulerRunTimeoutMs(this.intervalMs),
+      runOnce: (now) => this.runOnce(now),
+      evaluateOutcome: bootstrapSelfReportOutcome,
+      logger: this.logger
+    });
   }
 
   start() {
     if (!this.enabled || this.running) return;
     this.running = true;
-    this.scheduleNext(this.sendOnStart ? 0 : this.intervalMs);
+    this.schedulerLoop.markStarted();
+    this.schedulerLoop.scheduleNextRun(this.sendOnStart ? 0 : this.intervalMs);
   }
 
   stop() {
     this.running = false;
-    this.nextRunAt = undefined;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
+    this.schedulerLoop.stop();
   }
 
   async getStatus() {
@@ -93,7 +101,8 @@ export class BootstrapSelfReportSchedulerService {
       lastRun: this.lastRun,
       lastAttemptedAt: evidence.lastAttemptedAt,
       lastSuccessfulAt: evidence.lastSuccessfulAt,
-      lastFailureReason: evidence.lastFailureReason ?? undefined
+      lastFailureReason: evidence.lastFailureReason ?? undefined,
+      ...this.schedulerLoop.getStatus()
     };
     if (!this.stateStore) {
       // Operators reading this need to know that a fresh process boot zeroes
@@ -208,9 +217,7 @@ export class BootstrapSelfReportSchedulerService {
   }
 
   async runOnceAndSchedule() {
-    await this.runOnce(new Date());
-    if (!this.running) return;
-    this.scheduleNext(this.intervalMs);
+    return this.schedulerLoop.runOnceAndSchedule();
   }
 
   hasEmailConfig() {
@@ -256,14 +263,7 @@ export class BootstrapSelfReportSchedulerService {
   }
 
   scheduleNext(delayMs) {
-    if (!this.running) return;
-    if (this.timer) clearTimeout(this.timer);
-    const delay = Math.max(0, Number(delayMs) || 0);
-    this.nextRunAt = new Date(Date.now() + delay).toISOString();
-    this.timer = setTimeout(() => {
-      void this.runOnceAndSchedule();
-    }, delay);
-    this.timer.unref?.();
+    this.schedulerLoop.scheduleNextRun(delayMs);
   }
 
   finishRun(summary) {
@@ -344,6 +344,16 @@ export class BootstrapSelfReportSchedulerService {
       }
     }
   }
+}
+
+export function bootstrapSelfReportOutcome(summary) {
+  if (summary?.status === "sent") return { ok: true };
+  const reason = summary?.errors?.[0]?.message ?? summary?.skipped?.[0]?.reason ?? summary?.status ?? "unknown";
+  return {
+    ok: false,
+    state: `bootstrap_self_report_${summary?.status ?? "unknown"}`,
+    message: `Enabled bootstrap self-report did not send: ${reason}.`
+  };
 }
 
 export function buildBootstrapSelfReportEmail(report, {
