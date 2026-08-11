@@ -1,6 +1,62 @@
 # Ceremony — bringing the agent deposit pool live on mainnet
 
-Status: **written, not executed.** Nothing in this document has been run.
+Status: **DO NOT DEPLOY.** Nothing in this document has been run, and it must not be until
+the contract change in §0 lands. `scripts/ops/deploy-deposit-pool.mjs --commit` refuses.
+
+---
+
+## 0. Why this ceremony is blocked
+
+An independent review (Codex, 2026-08-10, [#1050](https://github.com/averray-agent/agent/pull/1050))
+falsified the safety argument in §3. **Any `strategySettler` can drain the pool's buffer.**
+
+```solidity
+// HydrationUsdcAdapterV22 — gated on policy.strategySettler(msg.sender)
+function recordRemotePosition(uint256 assets, ...) external onlyOperator {
+    totalAssets = assets;     // arbitrary, caller-supplied
+    totalShares = assets;
+}
+
+// DepositPool.sol:215 — share price derives from that book
+function convertToAssets(uint256 shares) public view returns (uint256) {
+    return (shares * totalAssets()) / supply;   // totalAssets() -> venueAdapter.managedAssets()
+}                                               //                -> lane.totalAssets()
+```
+
+`deposit()` is not operator-gated, and `redeem()` pays from the buffer. So: deposit small,
+inflate the book as settler, redeem the buffer.
+
+**This is not fixable by choosing a different `operator_`.** The capability lives in
+`strategySettler`, which is a *global* mapping on TreasuryPolicy — so it is available to
+every settler, whoever operates the pool. §3's analysis enumerated `DepositPool`'s
+operator-gated functions correctly and then failed to compose them with the *lane's*
+settler-writable book feeding the pool's price. The four-role concentration §3 files as
+"worth unwinding at the next rotation" is not hygiene; it is the vulnerability.
+
+### The fix, as recommended by the review
+
+Split **pricing NAV** from **remote execution inventory**. `DepositPool.totalAssets()` must
+stop consuming `lane.totalAssets()` and recovery observations through `managedAssets()`, and
+use a cost-basis ledger instead:
+
+- increase priced assets only when the pool transfers principal out;
+- decrease them when actual USDC returns, or when the multisig explicitly writes off a loss;
+- recognise yield only when returned USDC reaches the local buffer — anything above remaining
+  cost basis is realised yield.
+
+Remote-position observations stay useful for *sizing recalls* and must never feed
+`totalAssets`, caps, share conversion, the buffer floor, deposits, or redemptions. While
+remote yield is unpriced, close the pricing epoch: block new deposits and queue final
+redemptions until a recall settles.
+
+That converts a compromised settler from "can create claims on the buffer" to, at worst,
+"can propose a bad recall that fails" — removing the capability rather than bounding it.
+
+Everything below is retained because the ordering, addresses, and simulation remain correct
+and will be needed once the contract is fixed. **§3's safety argument is superseded by this
+section.**
+
+---
 
 Companion to `docs/PACKET_AGENT_DEPOSIT_POOL.md`, which decides *what* the pool is. This
 decides *how it gets deployed*, because the three contracts merged in #1038 and #1043 cannot
