@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { computeClaimEconomics } from "./claim-economics.js";
+import {
+  OnboardingSubsidyBudget,
+  computeClaimEconomics,
+  loadOnboardingSubsidyBudgetConfig
+} from "./claim-economics.js";
+import { MemoryStateStore } from "./state-store.js";
 
 test("nice values reproduce the historical Number math exactly", () => {
   const e = computeClaimEconomics({
@@ -74,4 +79,62 @@ test("an over-precise reward falls back to the legacy path instead of throwing",
   assert.ok(Number.isFinite(e.claimStake));
   assert.ok(Number.isFinite(e.claimFee));
   assert.equal(e.totalClaimLock, e.claimStake + e.claimFee);
+});
+
+test("onboarding subsidy allocation includes the waived claim stake and brokered gas estimate", async () => {
+  const budget = new OnboardingSubsidyBudget({
+    stateStore: new MemoryStateStore(),
+    dailyBudgetUsdc: 2,
+    gasEstimateUsdc: 0.059,
+    now: () => new Date("2026-08-11T12:00:00.000Z")
+  });
+
+  const before = await budget.inspect({ rewardAsset: "USDC", waivedClaimStake: 0.1 });
+  const reserved = await budget.reserve({
+    reservationId: "session-1",
+    estimatedClaimSubsidyUsdc: before.estimatedClaimSubsidyUsdc
+  });
+
+  assert.equal(before.waivedClaimStakeUsdc, 0.1);
+  assert.equal(before.brokeredGasEstimateUsdc, 0.059);
+  assert.equal(before.estimatedClaimSubsidyUsdc, 0.159);
+  assert.equal(reserved.accepted, true);
+  assert.equal(reserved.allocatedUsdc, 0.159);
+  assert.equal(reserved.headroomUsdc, 1.841);
+  assert.equal(reserved.clock, "UTC");
+  assert.equal(reserved.resetAt, "2026-08-12T00:00:00.000Z");
+});
+
+test("onboarding subsidy status resets at UTC midnight without a wallet-scoped allowance", async () => {
+  let current = new Date("2026-08-11T23:59:59.000Z");
+  const budget = new OnboardingSubsidyBudget({
+    stateStore: new MemoryStateStore(),
+    dailyBudgetUsdc: 0.159,
+    gasEstimateUsdc: 0.059,
+    now: () => current
+  });
+  const estimate = await budget.inspect({ rewardAsset: "USDC", waivedClaimStake: 0.1 });
+  await budget.reserve({
+    reservationId: "wallet-a:job-1",
+    estimatedClaimSubsidyUsdc: estimate.estimatedClaimSubsidyUsdc
+  });
+  assert.equal((await budget.getStatus()).headroomUsdc, 0);
+
+  current = new Date("2026-08-12T00:00:00.000Z");
+  const reset = await budget.getStatus();
+  assert.equal(reset.day, "2026-08-12");
+  assert.equal(reset.allocatedUsdc, 0);
+  assert.equal(reset.headroomUsdc, 0.159);
+  assert.equal(reset.resetAt, "2026-08-13T00:00:00.000Z");
+});
+
+test("onboarding subsidy config has a finite default and rejects malformed overrides", () => {
+  assert.deepEqual(loadOnboardingSubsidyBudgetConfig({}), {
+    dailyBudgetUsdc: 8,
+    gasEstimateUsdc: 0.059
+  });
+  assert.throws(
+    () => loadOnboardingSubsidyBudgetConfig({ ONBOARDING_SUBSIDY_DAILY_BUDGET_USDC: "unbounded" }),
+    /ONBOARDING_SUBSIDY_DAILY_BUDGET_USDC must be a non-negative number/u
+  );
 });

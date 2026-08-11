@@ -672,7 +672,7 @@
         ],
         "operationId": "claimJob",
         "summary": "Claim a job",
-        "description": "Claims a job for the authenticated wallet. This on-chain write can exceed 10 seconds. The job id and idempotency key may be supplied in the JSON body or query string. When `idempotencyKey` is omitted the backend uses `<wallet>:<jobId>` as the effective key. If the response times out, retry with the same wallet and job id; the idempotent call returns the existing active claim without creating another. See docs/IDEMPOTENCY.md.",
+        "description": "Claims a job for the authenticated wallet. This on-chain write can exceed 10 seconds. The job id and idempotency key may be supplied in the JSON body or query string. When `idempotencyKey` is omitted the backend uses `<wallet>:<jobId>` as the effective key. If the response times out, retry with the same wallet and job id; the idempotent call returns the existing active claim without creating another. Every operator-brokered claim consumes gas from the global UTC-day onboarding subsidy shown by preflight, and genuinely waived claims also consume waived stake; exhausted subsidy returns `onboarding_subsidy_exhausted` while self-funded claims remain available. See docs/IDEMPOTENCY.md.",
         "security": [
           {
             "bearerAuth": []
@@ -738,7 +738,7 @@
             }
           },
           "409": {
-            "description": "The idempotency key was already used with a different request payload.",
+            "description": "The claim conflicts with current state, including idempotency mismatch or exhausted global onboarding subsidy.",
             "content": {
               "application/json": {
                 "schema": {
@@ -754,6 +754,20 @@
                         "bucket": "jobs_claim",
                         "originalRequestHash": "sha256:...",
                         "requestHash": "sha256:..."
+                      }
+                    }
+                  },
+                  "onboardingSubsidyExhausted": {
+                    "value": {
+                      "status": "conflict",
+                      "code": "onboarding_subsidy_exhausted",
+                      "message": "The free onboarding tier is fully allocated for today. Use the self-funded claim path to continue by paying your own claim fee.",
+                      "details": {
+                        "clock": "UTC",
+                        "dailyBudgetUsdc": 8,
+                        "allocatedUsdc": 8,
+                        "headroomUsdc": 0,
+                        "resetAt": "2026-08-12T00:00:00.000Z"
                       }
                     }
                   }
@@ -774,7 +788,7 @@
         ],
         "operationId": "preflightJob",
         "summary": "Check whether the signed-in wallet can claim a job",
-        "description": "Returns the wallet-specific tier, role, liquidity, stake, fee-waiver, lifecycle, submission-schema, and verification readiness snapshot. Call this before `POST /jobs/claim`.",
+        "description": "Returns the wallet-specific tier, role, liquidity, stake, fee-waiver, global onboarding-subsidy headroom, lifecycle, submission-schema, and verification readiness snapshot. Call this before `POST /jobs/claim`.",
         "security": [
           {
             "bearerAuth": []
@@ -1815,6 +1829,50 @@
           "claimEconomicsWaiverScope": {
             "type": "string"
           },
+          "onboardingSubsidy": {
+            "type": "object",
+            "description": "Global UTC-day onboarding budget snapshot. `applies` is true for every operator-brokered claim: all consume estimated gas, while genuine tier-0 waivers also consume waived stake. The aggregate is intentionally not wallet-scoped.",
+            "properties": {
+              "scope": {
+                "type": "string"
+              },
+              "day": {
+                "type": "string",
+                "format": "date"
+              },
+              "clock": {
+                "type": "string",
+                "const": "UTC"
+              },
+              "resetAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "dailyBudgetUsdc": {
+                "type": "number",
+                "minimum": 0
+              },
+              "allocatedUsdc": {
+                "type": "number",
+                "minimum": 0
+              },
+              "headroomUsdc": {
+                "type": "number",
+                "minimum": 0
+              },
+              "applies": {
+                "type": "boolean"
+              },
+              "available": {
+                "type": "boolean"
+              },
+              "estimatedClaimSubsidyUsdc": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": true
+          },
           "claimNumber": {
             "type": "integer"
           },
@@ -1836,7 +1894,11 @@
           },
           "reason": {
             "type": "string",
-            "description": "Machine-readable claimability reason; insufficient_liquidity when the otherwise-claimable job exceeds this wallet's liquid balance."
+            "description": "Machine-readable claimability reason, including `insufficient_liquidity` or `onboarding_subsidy_exhausted`."
+          },
+          "reasonMessage": {
+            "type": "string",
+            "description": "Actionable human-readable detail for a claimability reason, including the self-funded path when the operator-brokered subsidy is exhausted."
           },
           "strategyUnwindNeeded": {
             "type": "boolean"

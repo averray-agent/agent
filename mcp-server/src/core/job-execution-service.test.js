@@ -39,6 +39,64 @@ function makeJob(overrides = {}) {
   };
 }
 
+function makeTestOnboardingSubsidyBudget({
+  dailyBudgetUsdc = 1,
+  estimatedClaimSubsidyUsdc = 1,
+  now = () => new Date("2026-08-11T12:00:00.000Z")
+} = {}) {
+  const reservationsByDay = new Map();
+  let reserveCalls = 0;
+
+  function snapshot() {
+    const current = now();
+    const day = current.toISOString().slice(0, 10);
+    const reservations = reservationsByDay.get(day) ?? new Set();
+    const allocatedUsdc = reservations.size * estimatedClaimSubsidyUsdc;
+    const headroomUsdc = Math.max(dailyBudgetUsdc - allocatedUsdc, 0);
+    const reset = new Date(current);
+    reset.setUTCHours(24, 0, 0, 0);
+    return {
+      applies: true,
+      available: headroomUsdc >= estimatedClaimSubsidyUsdc,
+      dailyBudgetUsdc,
+      allocatedUsdc,
+      headroomUsdc,
+      estimatedClaimSubsidyUsdc,
+      resetAt: reset.toISOString(),
+      clock: "UTC"
+    };
+  }
+
+  return {
+    get reserveCalls() {
+      return reserveCalls;
+    },
+    async inspect() {
+      return snapshot();
+    },
+    async reserve({ reservationId }) {
+      reserveCalls += 1;
+      const current = now();
+      const day = current.toISOString().slice(0, 10);
+      const reservations = reservationsByDay.get(day) ?? new Set();
+      if (reservations.has(reservationId)) {
+        return { ...snapshot(), accepted: true, alreadyReserved: true };
+      }
+      const currentSnapshot = snapshot();
+      if (!currentSnapshot.available) {
+        return { ...currentSnapshot, accepted: false, alreadyReserved: false };
+      }
+      reservations.add(reservationId);
+      reservationsByDay.set(day, reservations);
+      return { ...snapshot(), accepted: true, alreadyReserved: false };
+    },
+    async getStatus() {
+      const { estimatedClaimSubsidyUsdc: _estimate, applies: _applies, available: _available, ...status } = snapshot();
+      return status;
+    }
+  };
+}
+
 async function makeExternalSchemaRegistrations(schemaRef = "schema://jobs/external-review-output") {
   const base = {
     schemaRef,
@@ -709,6 +767,63 @@ test("claimJob uses chain worker claim count before ensuring a chain job", async
   assert.equal(claimed.totalClaimLock, 0.6);
 });
 
+test("claimJob keeps the reserved subsidy evidence after the authoritative chain preview", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({
+    rewardAsset: "USDC",
+    rewardAmount: 1,
+    requiresSponsoredGas: true,
+    onboardingWaiverEligible: true
+  });
+  const budget = makeTestOnboardingSubsidyBudget();
+  const blockchainGateway = {
+    isEnabled: () => true,
+    toJobId: (jobId) => `chain:${jobId}`,
+    async getClaimEconomicsDecisionState() {
+      return {
+        state: 1,
+        exists: true,
+        contractLayout: "current",
+        onboardingWaiverEligible: true
+      };
+    },
+    async previewClaimEconomics() {
+      return {
+        claimStake: 0,
+        claimStakeBps: 0,
+        claimFee: 0,
+        claimFeeBps: 0,
+        claimEconomicsWaived: true,
+        claimNumber: 1,
+        totalClaimLock: 0
+      };
+    },
+    async getJob() {
+      return { state: 1 };
+    },
+    async ensureJob() {},
+    async ensureClaimStakeLiquidity() {},
+    async claimJob() {}
+  };
+  const service = new JobExecutionService(
+    stateStore,
+    blockchainGateway,
+    () => job,
+    undefined,
+    undefined,
+    async () => 500,
+    () => job,
+    async () => ({ minClaimFeeByAsset: { USDC: 0.05 } }),
+    { onboardingSubsidyBudget: budget }
+  );
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "idemp-chain-subsidy");
+
+  assert.equal(budget.reserveCalls, 1);
+  assert.equal(claimed.onboardingSubsidy.reserved, true);
+  assert.equal(claimed.onboardingSubsidy.allocatedUsdc, 1);
+});
+
 test("claimJob logs an invariant error when the shared prediction differs from contract authority", async () => {
   const stateStore = new MemoryStateStore();
   const job = makeJob({ rewardAmount: 5 });
@@ -968,6 +1083,138 @@ test("claimJob records onboarding waiver and claim fee economics on sessions", a
   assert.equal(paid.claimStake, 0.5);
   assert.equal(paid.claimFee, 0.1);
   assert.equal(paid.totalClaimLock, 0.6);
+});
+
+test("tier-0 budget rejects a rotated fresh wallet globally with the self-funded path", async () => {
+  const stateStore = new MemoryStateStore();
+  const budget = makeTestOnboardingSubsidyBudget();
+  const jobs = new Map([1, 2].map((index) => {
+    const job = makeJob({
+      id: `global-subsidy-${index}`,
+      rewardAsset: "USDC",
+      rewardAmount: 1,
+      requiresSponsoredGas: true,
+      onboardingWaiverEligible: true
+    });
+    return [job.id, job];
+  }));
+  const service = new JobExecutionService(
+    stateStore,
+    undefined,
+    (jobId) => jobs.get(jobId),
+    undefined,
+    undefined,
+    async () => 500,
+    (jobId) => jobs.get(jobId),
+    async () => ({ minClaimFeeByAsset: { USDC: 0.05 } }),
+    { onboardingSubsidyBudget: budget }
+  );
+
+  const first = await service.claimJob(WALLET, "global-subsidy-1", "http", "global-first");
+  assert.equal(first.claimEconomicsWaived, true);
+
+  await assert.rejects(
+    () => service.claimJob(WALLET_2, "global-subsidy-2", "http", "global-rotated"),
+    (error) => {
+      assert.equal(error.code, "onboarding_subsidy_exhausted");
+      assert.match(error.message, /self-funded claim path/u);
+      assert.equal(error.details.headroomUsdc, 0);
+      assert.equal(error.details.clock, "UTC");
+      assert.equal(error.details.resetAt, "2026-08-12T00:00:00.000Z");
+      return true;
+    }
+  );
+  assert.equal(budget.reserveCalls, 2);
+});
+
+test("non-waived curated claims still consume the unconditional brokered gas budget", async () => {
+  const stateStore = new MemoryStateStore();
+  const budget = makeTestOnboardingSubsidyBudget();
+  const jobs = new Map([1, 2].map((index) => {
+    const job = makeJob({
+      id: `brokered-gas-${index}`,
+      rewardAsset: "USDC",
+      rewardAmount: 1,
+      // The current curated claim path is operator-brokered regardless of this
+      // advisory catalog flag. External lifecycle routing is the self-funded
+      // boundary that matters.
+      requiresSponsoredGas: false,
+      onboardingWaiverEligible: false
+    });
+    return [job.id, job];
+  }));
+  const service = new JobExecutionService(
+    stateStore,
+    undefined,
+    (jobId) => jobs.get(jobId),
+    undefined,
+    undefined,
+    async () => 500,
+    (jobId) => jobs.get(jobId),
+    async () => ({ minClaimFeeByAsset: { USDC: 0.05 } }),
+    { onboardingSubsidyBudget: budget }
+  );
+
+  const first = await service.claimJob(WALLET, "brokered-gas-1", "http", "brokered-first");
+  assert.equal(first.claimEconomicsWaived, false);
+  assert.equal(first.onboardingSubsidy.reserved, true);
+
+  await assert.rejects(
+    () => service.claimJob(WALLET_2, "brokered-gas-2", "http", "brokered-rotated"),
+    (error) => error.code === "onboarding_subsidy_exhausted"
+  );
+  assert.equal(budget.reserveCalls, 2);
+});
+
+test("exhausting tier-0 subsidy does not gate a non-subsidised claim", async () => {
+  const stateStore = new MemoryStateStore();
+  const budget = makeTestOnboardingSubsidyBudget();
+  const selfFundedJob = makeJob({
+    id: "self-funded",
+    rewardAsset: "USDC",
+    rewardAmount: 1,
+    requiresSponsoredGas: false,
+    onboardingWaiverEligible: false,
+    source: "external"
+  });
+  const { id: _jobId, source: _source, ...selfFundedDefinition } = selfFundedJob;
+  await stateStore.materializeExternalJobDraft({
+    draftId: "self-funded-draft",
+    jobId: selfFundedJob.id,
+    wallet: WALLET,
+    definition: selfFundedDefinition,
+    status: "live",
+    createdAt: "2026-08-11T10:00:00.000Z",
+    expiresAt: "2026-08-14T10:00:00.000Z"
+  });
+  const jobs = new Map([
+    makeJob({
+      id: "subsidised",
+      rewardAsset: "USDC",
+      rewardAmount: 1,
+      requiresSponsoredGas: true,
+      onboardingWaiverEligible: true
+    }),
+    selfFundedJob
+  ].map((job) => [job.id, job]));
+  const service = new JobExecutionService(
+    stateStore,
+    undefined,
+    (jobId) => jobs.get(jobId),
+    undefined,
+    undefined,
+    async () => 500,
+    (jobId) => jobs.get(jobId),
+    async () => ({ minClaimFeeByAsset: { USDC: 0.05 } }),
+    { onboardingSubsidyBudget: budget }
+  );
+
+  await service.claimJob(WALLET, "subsidised", "http", "consume-subsidy");
+  const paid = await service.claimJob(WALLET_2, "self-funded", "http", "paid-after-exhaustion");
+
+  assert.equal(paid.claimEconomicsWaived, false);
+  assert.equal(paid.totalClaimLock, 0.1);
+  assert.equal(budget.reserveCalls, 1);
 });
 
 test("submitWork enforces per-repo open PR cap for GitHub issue jobs", async () => {

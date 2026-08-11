@@ -27,7 +27,11 @@ import {
   parseGithubPullRequestUrl,
   updateFundedJobFromSession
 } from "./funded-jobs.js";
-import { countClaimedSessions, resolveClaimEconomicsDecision } from "./claim-economics.js";
+import {
+  countClaimedSessions,
+  reserveOnboardingSubsidyForClaim,
+  resolveClaimEconomicsDecision
+} from "./claim-economics.js";
 import {
   DEFAULT_OPEN_PR_CAP_PER_REPO,
   appendAverrayDisclosureFooter,
@@ -78,6 +82,7 @@ export class JobExecutionService {
     this.accountMutationService = accountMutationService;
     this.getDefaultClaimStakeBps = getDefaultClaimStakeBps;
     this.getClaimEconomicsConfig = getClaimEconomicsConfig;
+    this.onboardingSubsidyBudget = maintainerSurfaceConfig.onboardingSubsidyBudget;
     this.logger = maintainerSurfaceConfig.logger ?? console;
     this.openPrCap = Number.isInteger(maintainerSurfaceConfig.openPrCap) && maintainerSurfaceConfig.openPrCap > 0
       ? maintainerSurfaceConfig.openPrCap
@@ -261,7 +266,8 @@ export class JobExecutionService {
         getClaimEconomicsConfig: this.getClaimEconomicsConfig,
         getLocalPriorClaimCount: async () => countClaimedSessions(
           await this.collectSessionHistory(wallet)
-        )
+        ),
+        onboardingSubsidyBudget: this.onboardingSubsidyBudget
       });
       let claimEconomics = claimEconomicsDecision.economics;
       if (this.blockchainGateway?.isEnabled()) {
@@ -310,6 +316,11 @@ export class JobExecutionService {
             }
           );
         }
+        claimEconomics = await reserveOnboardingSubsidyForClaim({
+          economics: claimEconomics,
+          onboardingSubsidyBudget: this.onboardingSubsidyBudget,
+          reservationId: sessionId
+        });
         if (this.blockchainGateway.ensureJob) {
           await this.blockchainGateway.ensureJob(job, jobId, claimEconomics.totalClaimLock);
         }
@@ -328,15 +339,27 @@ export class JobExecutionService {
             prediction: predictedClaimEconomics,
             authoritative: authoritativeClaimEconomics
           });
-          claimEconomics = authoritativeClaimEconomics;
+          claimEconomics = {
+            ...authoritativeClaimEconomics,
+            ...(predictedClaimEconomics.onboardingSubsidy
+              ? { onboardingSubsidy: predictedClaimEconomics.onboardingSubsidy }
+              : {})
+          };
         }
         await this.blockchainGateway.ensureClaimStakeLiquidity?.(wallet, job.rewardAsset, claimEconomics.totalClaimLock);
         await this.blockchainGateway.claimJob(jobId, wallet);
         chainClaimTiming = this.buildChainClaimTiming(
           await this.blockchainGateway.getJob(jobId).catch(() => undefined)
         );
-      } else if (claimEconomics.totalClaimLock > 0) {
-        await this.accountMutationService?.lockJobStake?.(wallet, job.rewardAsset, claimEconomics.totalClaimLock, undefined);
+      } else {
+        claimEconomics = await reserveOnboardingSubsidyForClaim({
+          economics: claimEconomics,
+          onboardingSubsidyBudget: this.onboardingSubsidyBudget,
+          reservationId: sessionId
+        });
+        if (claimEconomics.totalClaimLock > 0) {
+          await this.accountMutationService?.lockJobStake?.(wallet, job.rewardAsset, claimEconomics.totalClaimLock, undefined);
+        }
       }
 
       return await this.finalizeClaim({
@@ -366,6 +389,9 @@ export class JobExecutionService {
       claimEconomicsWaiverScope: "claim_time",
       claimNumber: claimEconomics.claimNumber,
       totalClaimLock: claimEconomics.totalClaimLock,
+      ...(claimEconomics.onboardingSubsidy
+        ? { onboardingSubsidy: claimEconomics.onboardingSubsidy }
+        : {}),
       jobSnapshot,
       badgeSnapshot: buildBadgeJobSnapshot(job),
       ...chainClaimTiming,

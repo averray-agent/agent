@@ -54,6 +54,50 @@ test("MemoryStateStore rate limit returns allowed=false past the limit", async (
   assert.equal(third.remaining, 0);
 });
 
+test("daily aggregate budgets are global, idempotent, and reset on a new UTC day", async () => {
+  const store = new MemoryStateStore();
+  const scope = "onboarding-subsidy";
+
+  const first = await store.reserveDailyBudget(scope, "2026-08-11", {
+    reservationId: "session:wallet-a:job-1",
+    amountUnits: 1_000_000,
+    limitUnits: 1_000_000,
+    ttlSeconds: 86_400
+  });
+  const replay = await store.reserveDailyBudget(scope, "2026-08-11", {
+    reservationId: "session:wallet-a:job-1",
+    amountUnits: 1_000_000,
+    limitUnits: 1_000_000,
+    ttlSeconds: 86_400
+  });
+  const rotatedWallet = await store.reserveDailyBudget(scope, "2026-08-11", {
+    reservationId: "session:wallet-b:job-2",
+    amountUnits: 1_000_000,
+    limitUnits: 1_000_000,
+    ttlSeconds: 86_400
+  });
+  const nextUtcDay = await store.reserveDailyBudget(scope, "2026-08-12", {
+    reservationId: "session:wallet-b:job-3",
+    amountUnits: 1_000_000,
+    limitUnits: 1_000_000,
+    ttlSeconds: 86_400
+  });
+
+  assert.equal(first.accepted, true);
+  assert.equal(first.usedUnits, 1_000_000);
+  assert.equal(replay.accepted, true);
+  assert.equal(replay.alreadyReserved, true);
+  assert.equal(replay.usedUnits, 1_000_000);
+  assert.equal(rotatedWallet.accepted, false);
+  assert.equal(rotatedWallet.usedUnits, 1_000_000);
+  assert.equal(nextUtcDay.accepted, true);
+  assert.equal(nextUtcDay.usedUnits, 1_000_000);
+  assert.deepEqual(
+    await store.getDailyBudgetUsage(scope, "2026-08-11"),
+    { usedUnits: 1_000_000, reservationCount: 1 }
+  );
+});
+
 test("MemoryStateStore counts SIWE nonce and verify events per canonical wallet", async () => {
   const store = new MemoryStateStore();
   const wallet = "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";

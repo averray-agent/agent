@@ -1,14 +1,181 @@
 import { DEFAULT_ESCROW_ASSET_SYMBOL, decimalsForAssetSymbol, normalizeAssetSymbol } from "./assets.js";
-import { ExternalServiceError } from "./errors.js";
+import { ConfigError, ConflictError, ExternalServiceError } from "./errors.js";
+import { isExternalJob } from "./external-job-lifecycle.js";
 import { decimalToBaseUnits, formatBaseUnits } from "./platform-service-helpers.js";
 
 export const DEFAULT_ONBOARDING_WAIVER_CLAIM_COUNT = 3;
 export const DEFAULT_CLAIM_FEE_BPS = 200;
 export const DEFAULT_CLAIM_FEE_VERIFIER_BPS = 7000;
+// Production observed 60 brokered claims in 24h. At the conservative measured
+// $0.084 lifecycle exposure that is $5.04; $8 leaves ~59% normal-day headroom
+// while still putting a finite bound on a runaway.
+export const DEFAULT_ONBOARDING_SUBSIDY_DAILY_BUDGET_USDC = 8;
+export const DEFAULT_ONBOARDING_SUBSIDY_GAS_ESTIMATE_USDC = 0.059;
+export const ONBOARDING_SUBSIDY_EXHAUSTED_REASON = "onboarding_subsidy_exhausted";
+export const ONBOARDING_SUBSIDY_EXHAUSTED_MESSAGE =
+  "The free onboarding tier is fully allocated for today. Use the self-funded claim path to continue by paying your own claim fee.";
 export const DEFAULT_MIN_CLAIM_FEE_BY_ASSET = {
   USDC: 0.05,
   DOT: 0.05
 };
+
+const ONBOARDING_SUBSIDY_SCOPE = "tier-0-onboarding-subsidy";
+const USDC_DECIMALS = 6;
+const DEFAULT_ASSET_USDC_RATES = {
+  USDC: 1,
+  USDT: 1,
+  USDT0: 1
+};
+
+export function loadOnboardingSubsidyBudgetConfig(env = process.env) {
+  return {
+    dailyBudgetUsdc: nonNegativeConfigNumber(
+      env.ONBOARDING_SUBSIDY_DAILY_BUDGET_USDC,
+      DEFAULT_ONBOARDING_SUBSIDY_DAILY_BUDGET_USDC,
+      "ONBOARDING_SUBSIDY_DAILY_BUDGET_USDC"
+    ),
+    gasEstimateUsdc: nonNegativeConfigNumber(
+      env.ONBOARDING_SUBSIDY_GAS_ESTIMATE_USDC,
+      DEFAULT_ONBOARDING_SUBSIDY_GAS_ESTIMATE_USDC,
+      "ONBOARDING_SUBSIDY_GAS_ESTIMATE_USDC"
+    )
+  };
+}
+
+export function createOnboardingSubsidyBudget({
+  stateStore,
+  env = process.env,
+  now = () => new Date(),
+  config = loadOnboardingSubsidyBudgetConfig(env)
+} = {}) {
+  return new OnboardingSubsidyBudget({ stateStore, now, ...config });
+}
+
+export class OnboardingSubsidyBudget {
+  constructor({
+    stateStore,
+    dailyBudgetUsdc = DEFAULT_ONBOARDING_SUBSIDY_DAILY_BUDGET_USDC,
+    gasEstimateUsdc = DEFAULT_ONBOARDING_SUBSIDY_GAS_ESTIMATE_USDC,
+    assetUsdcRates = DEFAULT_ASSET_USDC_RATES,
+    now = () => new Date()
+  } = {}) {
+    if (
+      typeof stateStore?.getDailyBudgetUsage !== "function"
+      || typeof stateStore?.reserveDailyBudget !== "function"
+    ) {
+      throw new ConfigError("The onboarding subsidy budget requires an atomic daily-budget state store.");
+    }
+    this.stateStore = stateStore;
+    this.dailyBudgetUnits = usdcUnits(dailyBudgetUsdc, "onboarding subsidy daily budget");
+    this.gasEstimateUnits = usdcUnits(gasEstimateUsdc, "onboarding subsidy gas estimate");
+    this.assetUsdcRates = Object.fromEntries(
+      Object.entries(assetUsdcRates ?? {}).map(([asset, rate]) => [
+        normalizeAssetSymbol(asset),
+        nonNegativeConfigNumber(rate, undefined, `onboarding subsidy ${asset} USDC rate`)
+      ])
+    );
+    this.now = now;
+  }
+
+  async getStatus() {
+    const window = this.currentWindow();
+    const usage = await this.stateStore.getDailyBudgetUsage(ONBOARDING_SUBSIDY_SCOPE, window.day);
+    return this.formatStatus({ window, usedUnits: usage.usedUnits });
+  }
+
+  async inspect({ rewardAsset, waivedClaimStake } = {}) {
+    const status = await this.getStatus();
+    const estimate = this.estimateClaimSubsidy({ rewardAsset, waivedClaimStake });
+    return {
+      ...status,
+      applies: true,
+      available: estimate.totalUnits <= usdcUnits(status.headroomUsdc, "onboarding subsidy headroom"),
+      estimatedClaimSubsidyUsdc: usdcAmount(estimate.totalUnits),
+      waivedClaimStakeUsdc: usdcAmount(estimate.waivedClaimStakeUnits),
+      brokeredGasEstimateUsdc: usdcAmount(this.gasEstimateUnits)
+    };
+  }
+
+  async reserve({ reservationId, estimatedClaimSubsidyUsdc } = {}) {
+    const window = this.currentWindow();
+    const amountUnits = usdcUnits(
+      estimatedClaimSubsidyUsdc,
+      "estimated onboarding claim subsidy"
+    );
+    const reservation = await this.stateStore.reserveDailyBudget(
+      ONBOARDING_SUBSIDY_SCOPE,
+      window.day,
+      {
+        reservationId,
+        amountUnits,
+        limitUnits: this.dailyBudgetUnits,
+        // Keep the completed day's ledger for one extra day of operator
+        // evidence. The date-keyed aggregate still resets exactly at UTC 00:00.
+        ttlSeconds: window.secondsUntilReset + 86_400
+      }
+    );
+    const status = this.formatStatus({ window, usedUnits: reservation.usedUnits });
+    return {
+      ...status,
+      applies: true,
+      available: reservation.accepted,
+      accepted: reservation.accepted,
+      alreadyReserved: reservation.alreadyReserved,
+      estimatedClaimSubsidyUsdc: usdcAmount(amountUnits),
+      brokeredGasEstimateUsdc: usdcAmount(this.gasEstimateUnits)
+    };
+  }
+
+  estimateClaimSubsidy({ rewardAsset, waivedClaimStake } = {}) {
+    const asset = normalizeAssetSymbol(rewardAsset);
+    const rate = this.assetUsdcRates[asset];
+    if (!Number.isFinite(rate)) {
+      throw new ConfigError(
+        `No USDC conversion rate is configured for onboarding subsidy asset ${asset}.`,
+        { asset }
+      );
+    }
+    const waivedClaimStakeUnits = usdcUnits(
+      Math.max(Number(waivedClaimStake) || 0, 0) * rate,
+      "waived onboarding claim stake"
+    );
+    return {
+      waivedClaimStakeUnits,
+      totalUnits: waivedClaimStakeUnits + this.gasEstimateUnits
+    };
+  }
+
+  currentWindow() {
+    const current = new Date(this.now());
+    if (!Number.isFinite(current.getTime())) {
+      throw new ConfigError("The onboarding subsidy clock returned an invalid time.");
+    }
+    const resetAt = new Date(Date.UTC(
+      current.getUTCFullYear(),
+      current.getUTCMonth(),
+      current.getUTCDate() + 1
+    ));
+    return {
+      day: current.toISOString().slice(0, 10),
+      resetAt: resetAt.toISOString(),
+      secondsUntilReset: Math.max(1, Math.ceil((resetAt.getTime() - current.getTime()) / 1000))
+    };
+  }
+
+  formatStatus({ window, usedUnits }) {
+    const safeUsedUnits = Math.max(0, Number(usedUnits) || 0);
+    return {
+      scope: ONBOARDING_SUBSIDY_SCOPE,
+      day: window.day,
+      clock: "UTC",
+      resetAt: window.resetAt,
+      dailyBudgetUsdc: usdcAmount(this.dailyBudgetUnits),
+      allocatedUsdc: usdcAmount(safeUsedUnits),
+      headroomUsdc: usdcAmount(Math.max(this.dailyBudgetUnits - safeUsedUnits, 0)),
+      source: "state_store_daily_aggregate"
+    };
+  }
+}
 
 export function countClaimedSessions(sessions = []) {
   return sessions.filter((session) => session?.claimedAt || session?.status).length;
@@ -28,7 +195,8 @@ export async function resolveClaimEconomicsDecision({
   blockchainGateway = undefined,
   getDefaultClaimStakeBps = async () => 500,
   getClaimEconomicsConfig = async () => ({}),
-  getLocalPriorClaimCount = async () => 0
+  getLocalPriorClaimCount = async () => 0,
+  onboardingSubsidyBudget = undefined
 } = {}) {
   const chainMode = Boolean(blockchainGateway?.isEnabled?.());
   if (!chainMode) {
@@ -37,20 +205,27 @@ export async function resolveClaimEconomicsDecision({
       getDefaultClaimStakeBps(),
       getClaimEconomicsConfig()
     ]);
-    return {
+    const input = {
+      rewardAmount: job?.rewardAmount,
+      rewardAsset: job?.rewardAsset,
+      priorClaimCount,
+      claimStakeBps,
+      ...claimEconomicsConfig
+    };
+    return withOnboardingSubsidyStatus({
       chainMode: false,
       contractLayout: undefined,
       escrowExists: false,
       source: "local",
       economics: computeClaimEconomics({
-        rewardAmount: job?.rewardAmount,
-        rewardAsset: job?.rewardAsset,
-        priorClaimCount,
-        onboardingWaiverEligible: Boolean(job?.onboardingWaiverEligible),
-        claimStakeBps,
-        ...claimEconomicsConfig
+        ...input,
+        onboardingWaiverEligible: Boolean(job?.onboardingWaiverEligible)
       })
-    };
+    }, {
+      onboardingSubsidyBudget,
+      job,
+      paidEconomics: computeClaimEconomics({ ...input, onboardingWaiverEligible: false })
+    });
   }
 
   requireGatewayMethod(blockchainGateway, "getClaimEconomicsDecisionState");
@@ -70,7 +245,7 @@ export async function resolveClaimEconomicsDecision({
       getDefaultClaimStakeBps(),
       getClaimEconomicsConfig()
     ]);
-    return {
+    return withOnboardingSubsidyStatus({
       chainMode: true,
       contractLayout,
       escrowExists,
@@ -83,7 +258,7 @@ export async function resolveClaimEconomicsDecision({
         claimStakeBps,
         ...claimEconomicsConfig
       })
-    };
+    }, { onboardingSubsidyBudget, job });
   }
 
   if (escrowExists) {
@@ -97,31 +272,62 @@ export async function resolveClaimEconomicsDecision({
 
     const preview = await blockchainGateway.previewClaimEconomics(wallet, job?.id);
     if (job?.onboardingWaiverEligible === true && chainState.onboardingWaiverEligible === false) {
-      const config = await getClaimEconomicsConfig({ requireWaiverInputs: true });
+      const [claimStakeBps, config] = await Promise.all([
+        getDefaultClaimStakeBps(),
+        getClaimEconomicsConfig({ requireWaiverInputs: true })
+      ]);
       const onboardingWaiverClaimCount = requireNonNegativeInteger(
         config?.onboardingWaiverClaimCount,
         "onboardingWaiverClaimCount",
         job?.id
       );
       const claimNumber = requirePositiveInteger(preview?.claimNumber, "claimNumber", job?.id);
-      return {
+      const economics = claimNumber <= onboardingWaiverClaimCount
+        ? waiveContractPreview(preview)
+        : preview;
+      return withOnboardingSubsidyStatus({
         chainMode: true,
         contractLayout,
         escrowExists,
         source: "contract_preview_adjusted_for_sync",
-        economics: claimNumber <= onboardingWaiverClaimCount
-          ? waiveContractPreview(preview)
-          : preview
-      };
+        economics
+      }, {
+        onboardingSubsidyBudget,
+        job,
+        paidEconomics: computeClaimEconomics({
+          rewardAmount: job?.rewardAmount,
+          rewardAsset: job?.rewardAsset,
+          priorClaimCount: claimNumber - 1,
+          onboardingWaiverEligible: false,
+          claimStakeBps,
+          ...config
+        })
+      });
     }
 
-    return {
+    let paidEconomics;
+    if (preview?.claimEconomicsWaived === true && onboardingSubsidyBudget) {
+      const claimNumber = requirePositiveInteger(preview?.claimNumber, "claimNumber", job?.id);
+      const [claimStakeBps, config] = await Promise.all([
+        getDefaultClaimStakeBps(),
+        getClaimEconomicsConfig()
+      ]);
+      paidEconomics = computeClaimEconomics({
+        rewardAmount: job?.rewardAmount,
+        rewardAsset: job?.rewardAsset,
+        priorClaimCount: claimNumber - 1,
+        onboardingWaiverEligible: false,
+        claimStakeBps,
+        ...config
+      });
+    }
+    return withOnboardingSubsidyStatus({
       chainMode: true,
       contractLayout,
       escrowExists,
       source: "contract_preview",
       economics: preview
-    };
+    }, { onboardingSubsidyBudget, job, paidEconomics });
   }
 
   requireGatewayMethod(blockchainGateway, "getWorkerClaimCount");
@@ -140,19 +346,56 @@ export async function resolveClaimEconomicsDecision({
     );
   }
 
-  return {
+  const input = {
+    rewardAmount: job?.rewardAmount,
+    rewardAsset: job?.rewardAsset,
+    priorClaimCount,
+    claimStakeBps,
+    ...claimEconomicsConfig
+  };
+  return withOnboardingSubsidyStatus({
     chainMode: true,
     contractLayout,
     escrowExists,
     source: "current_local_before_ensure",
     economics: computeClaimEconomics({
-      rewardAmount: job?.rewardAmount,
-      rewardAsset: job?.rewardAsset,
-      priorClaimCount,
-      onboardingWaiverEligible: Boolean(job?.onboardingWaiverEligible),
-      claimStakeBps,
-      ...claimEconomicsConfig
+      ...input,
+      onboardingWaiverEligible: Boolean(job?.onboardingWaiverEligible)
     })
+  }, {
+    onboardingSubsidyBudget,
+    job,
+    paidEconomics: computeClaimEconomics({ ...input, onboardingWaiverEligible: false })
+  });
+}
+
+export async function reserveOnboardingSubsidyForClaim({
+  economics,
+  onboardingSubsidyBudget,
+  reservationId
+} = {}) {
+  if (!onboardingSubsidyBudget || economics?.onboardingSubsidy?.applies !== true) {
+    return economics;
+  }
+  const inspected = economics.onboardingSubsidy;
+  const reservation = await onboardingSubsidyBudget.reserve({
+    reservationId,
+    estimatedClaimSubsidyUsdc: inspected?.estimatedClaimSubsidyUsdc
+  });
+  if (reservation.accepted !== true) {
+    throw new ConflictError(
+      ONBOARDING_SUBSIDY_EXHAUSTED_MESSAGE,
+      ONBOARDING_SUBSIDY_EXHAUSTED_REASON,
+      reservation
+    );
+  }
+  return {
+    ...economics,
+    onboardingSubsidy: {
+      ...inspected,
+      ...reservation,
+      reserved: true
+    }
   };
 }
 
@@ -265,6 +508,72 @@ function waiveContractPreview(preview) {
     claimEconomicsWaived: true,
     totalClaimLock: 0
   };
+}
+
+async function withOnboardingSubsidyStatus(
+  decision,
+  { onboardingSubsidyBudget, job, paidEconomics } = {}
+) {
+  if (!onboardingSubsidyBudget) {
+    return decision;
+  }
+  const waived = decision?.economics?.claimEconomicsWaived === true;
+  // Internal/curated claims currently route through claimJobFor and consume
+  // operator gas regardless of the advisory requiresSponsoredGas catalog bit.
+  // The external lifecycle is the actual self-funded transaction boundary.
+  const operatorBrokered = !isExternalJob(job);
+  if (waived && !Number.isFinite(Number(paidEconomics?.claimStake))) {
+    throw claimEconomicsUnavailable(
+      "The waived claim-stake value is unavailable for onboarding subsidy accounting.",
+      { jobId: job?.id, field: "onboardingSubsidyWaivedClaimStake" }
+    );
+  }
+  const onboardingSubsidy = operatorBrokered
+    ? await onboardingSubsidyBudget.inspect({
+        rewardAsset: job?.rewardAsset,
+        waivedClaimStake: waived ? paidEconomics?.claimStake : 0
+      })
+    : {
+        ...await onboardingSubsidyBudget.getStatus(),
+        applies: false,
+        available: true
+      };
+  return {
+    ...decision,
+    economics: {
+      ...decision.economics,
+      onboardingSubsidy
+    }
+  };
+}
+
+function usdcUnits(value, field) {
+  try {
+    const units = decimalToBaseUnits(value, USDC_DECIMALS, field);
+    if (units < 0n || units > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error("outside safe integer range");
+    }
+    return Number(units);
+  } catch (error) {
+    throw new ConfigError(`${field} must be a non-negative USDC amount with at most 6 decimals.`, {
+      field,
+      value,
+      reason: error?.message
+    });
+  }
+}
+
+function usdcAmount(units) {
+  return Number(formatBaseUnits(BigInt(Math.max(0, Math.trunc(units))), USDC_DECIMALS));
+}
+
+function nonNegativeConfigNumber(value, fallback, field) {
+  const candidate = value === undefined || value === null || value === "" ? fallback : value;
+  const parsed = Number(candidate);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new ConfigError(`${field} must be a non-negative number.`, { field, value: candidate });
+  }
+  return parsed;
 }
 
 function requireGatewayMethod(gateway, method) {

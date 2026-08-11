@@ -1,4 +1,5 @@
 export const MIN_WAIVER_ELIGIBLE_CLAIMABLE_JOBS = 2;
+export const ONBOARDING_SUBSIDY_LOW_HEADROOM_RATIO = 0.2;
 
 export const ONBOARDING_WAIVER_INGESTION_SOURCES = new Set([
   "github_issue",
@@ -56,6 +57,7 @@ export async function resolveOnboardingInventoryHealth({
       : waiverEligibleClaimableJobs < minimum
         ? "onboarding_waiver_inventory_below_minimum"
         : "onboarding_waiver_inventory_ready";
+    const subsidy = await service.getOnboardingSubsidyStatus?.();
 
     return {
       status,
@@ -64,7 +66,8 @@ export async function resolveOnboardingInventoryHealth({
       minimumWaiverEligibleClaimableJobs: minimum,
       asOf: now.toISOString(),
       source: "job_catalog",
-      readable: true
+      readable: true,
+      ...(subsidy ? { subsidy } : {})
     };
   } catch (error) {
     return {
@@ -81,16 +84,40 @@ export async function resolveOnboardingInventoryHealth({
 }
 
 export function buildOnboardingInventoryWarnings(onboarding) {
-  if (!onboarding || onboarding.status === "ready") {
+  if (!onboarding) {
     return [];
   }
+  const warnings = [];
   const count = onboarding.waiverEligibleClaimableJobs;
   const minimum = onboarding.minimumWaiverEligibleClaimableJobs;
-  return [{
-    code: onboarding.reason,
-    severity: "warning",
-    message: count === null
-      ? "Waiver-eligible onboarding inventory could not be verified."
-      : `Only ${count} waiver-eligible claimable onboarding job(s) are available; minimum is ${minimum}.`
-  }];
+  if (onboarding.status !== "ready") {
+    warnings.push({
+      code: onboarding.reason,
+      severity: "warning",
+      message: count === null
+        ? "Waiver-eligible onboarding inventory could not be verified."
+        : `Only ${count} waiver-eligible claimable onboarding job(s) are available; minimum is ${minimum}.`
+    });
+  }
+  const subsidyHeadroomUsdc = onboarding.subsidy?.headroomUsdc;
+  const subsidyDailyBudgetUsdc = onboarding.subsidy?.dailyBudgetUsdc;
+  if (Number.isFinite(subsidyHeadroomUsdc) && subsidyHeadroomUsdc <= 0) {
+    warnings.push({
+      code: "onboarding_subsidy_exhausted",
+      severity: "warning",
+      message: "The free onboarding tier is fully allocated for today; the self-funded claim path remains available."
+    });
+  } else if (
+    Number.isFinite(subsidyHeadroomUsdc)
+    && Number.isFinite(subsidyDailyBudgetUsdc)
+    && subsidyDailyBudgetUsdc > 0
+    && subsidyHeadroomUsdc <= subsidyDailyBudgetUsdc * ONBOARDING_SUBSIDY_LOW_HEADROOM_RATIO
+  ) {
+    warnings.push({
+      code: "onboarding_subsidy_headroom_low",
+      severity: "warning",
+      message: `Only ${subsidyHeadroomUsdc} USDC of the ${subsidyDailyBudgetUsdc} USDC daily onboarding subsidy remains; consider raising the budget before tier-0 claims are blocked.`
+    });
+  }
+  return warnings;
 }

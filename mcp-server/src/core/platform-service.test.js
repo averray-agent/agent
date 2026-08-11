@@ -37,7 +37,12 @@ const EXTERNAL_SCHEMA = {
   }
 };
 
-function makePlatformService(blockchainGateway = undefined, eventBus = undefined, stateStore = undefined) {
+function makePlatformService(
+  blockchainGateway = undefined,
+  eventBus = undefined,
+  stateStore = undefined,
+  onboardingSubsidyBudget = undefined
+) {
   const jobs = [
     {
       id: "parent-job-001",
@@ -86,7 +91,17 @@ function makePlatformService(blockchainGateway = undefined, eventBus = undefined
   const reputations = new Map([
     [WALLET, { skill: 50, reliability: 50, economic: 50, tier: "starter" }]
   ]);
-  return new PlatformService(jobs, profiles, accounts, reputations, blockchainGateway, stateStore, eventBus);
+  return new PlatformService(
+    jobs,
+    profiles,
+    accounts,
+    reputations,
+    blockchainGateway,
+    stateStore,
+    eventBus,
+    undefined,
+    onboardingSubsidyBudget
+  );
 }
 
 function makeClaimEconomicsGateway({
@@ -858,6 +873,46 @@ test("preflight and claim both waive a fresh wallet after the guaranteed eligibi
   assert.equal(claimed.claimEconomicsWaived, preflight.claimEconomicsWaived);
   assert.equal(claimed.claimStake, preflight.claimStake);
   assert.equal(claimed.totalClaimLock, preflight.totalClaimLock);
+});
+
+test("preflight exposes global subsidy headroom and the actionable exhausted reason", async () => {
+  const subsidy = {
+    applies: true,
+    available: false,
+    dailyBudgetUsdc: 2,
+    allocatedUsdc: 2,
+    headroomUsdc: 0,
+    estimatedClaimSubsidyUsdc: 0.109,
+    resetAt: "2026-08-12T00:00:00.000Z",
+    clock: "UTC"
+  };
+  const onboardingSubsidyBudget = {
+    async inspect() {
+      return subsidy;
+    },
+    async getStatus() {
+      return subsidy;
+    }
+  };
+  const service = makePlatformService(
+    makeClaimEconomicsGateway({
+      onboardingWaiverEligible: true,
+      workerClaimCount: 0,
+      onboardingWaiverClaimCount: 3
+    }),
+    undefined,
+    undefined,
+    onboardingSubsidyBudget
+  );
+
+  const preflight = await service.preflightJob(WALLET, "parent-job-001");
+
+  assert.equal(preflight.eligible, false);
+  assert.equal(preflight.reason, "onboarding_subsidy_exhausted");
+  assert.match(preflight.reasonMessage, /self-funded claim path/u);
+  assert.deepEqual(preflight.onboardingSubsidy, subsidy);
+  assert.ok(preflight.failureStates.includes("onboarding_subsidy_exhausted"));
+  assert.deepEqual(await service.getOnboardingSubsidyStatus(), subsidy);
 });
 
 test("preflight trusts an existing on-chain waiver when the catalog flag is false", async () => {
