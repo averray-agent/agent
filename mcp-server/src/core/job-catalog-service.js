@@ -396,6 +396,7 @@ export class JobCatalogService {
       claimFee: claimEconomics.claimFee,
       claimFeeBps: claimEconomics.claimFeeBps,
       claimEconomicsWaived: claimEconomics.claimEconomicsWaived,
+      claimFeeRetainedOnSuccess: claimEconomics.claimFeeRetainedOnSuccess === true,
       claimEconomicsWaiverScope: "next_claim_projection",
       ...(onboardingSubsidy ? { onboardingSubsidy } : {}),
       claimNumber: claimEconomics.claimNumber,
@@ -721,7 +722,9 @@ export function explainEligibilityFromPreflight(preflight) {
     claimFundingShortfall: preflight.claimFundingShortfall,
     claimEconomicsWaived: preflight.claimEconomicsWaived,
     onboardingSubsidy: preflight.onboardingSubsidy,
-    reasonMessage: preflight.reasonMessage
+    workerExposure: preflight.workerExposure,
+    failureStates: preflight.failureStates,
+    reasonMessage: preflight.reasonMessage ?? preflight.workerExposure?.message
   };
 }
 

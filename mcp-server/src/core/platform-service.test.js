@@ -41,7 +41,8 @@ function makePlatformService(
   blockchainGateway = undefined,
   eventBus = undefined,
   stateStore = undefined,
-  onboardingSubsidyBudget = undefined
+  onboardingSubsidyBudget = undefined,
+  workerExposurePolicy = undefined
 ) {
   const jobs = [
     {
@@ -100,8 +101,28 @@ function makePlatformService(
     stateStore,
     eventBus,
     undefined,
-    onboardingSubsidyBudget
+    onboardingSubsidyBudget,
+    workerExposurePolicy
   );
+}
+
+function blockingWorkerExposurePolicy() {
+  return {
+    async evaluate({ wallet, job }) {
+      assert.equal(wallet, WALLET);
+      assert.equal(job.id, "parent-job-001");
+      return {
+        eligible: false,
+        status: "exceeded",
+        reason: "worker_open_exposure_cap_reached",
+        capUsdc: 1,
+        currentExposureUsdc: 0.8,
+        candidateExposureUsdc: 0.559,
+        projectedExposureUsdc: 1.359,
+        headroomUsdc: 0.2
+      };
+    }
+  };
 }
 
 function makeClaimEconomicsGateway({
@@ -110,7 +131,8 @@ function makeClaimEconomicsGateway({
   onboardingWaiverEligible = false,
   workerClaimCount = 0,
   onboardingWaiverClaimCount = 3,
-  failWaiverPolicyRead = false
+  failWaiverPolicyRead = false,
+  claimFeeRetainedOnSuccess = false
 } = {}) {
   let state = initialState;
   let mappedEligibility = onboardingWaiverEligible;
@@ -155,6 +177,7 @@ function makeClaimEconomicsGateway({
         state,
         exists: state !== 0,
         contractLayout,
+        claimFeeRetainedOnSuccess,
         onboardingWaiverEligible: contractLayout === "legacy" ? false : mappedEligibility
       };
     },
@@ -214,6 +237,55 @@ test("platform capabilities use the same explicitly selected chain as public hea
   assert.ok(advertisedChains.every((chain) => chain.chainId === 420420419));
   assert.ok(advertisedChains.every((chain) => chain.currencySymbol === "DOT"));
   assert.ok(advertisedChains.every((chain) => chain.faucetUrl === undefined));
+});
+
+test("preflight refuses a claim that would exceed the wallet USDC exposure cap", async () => {
+  const service = makePlatformService(
+    undefined,
+    undefined,
+    new MemoryStateStore(),
+    undefined,
+    blockingWorkerExposurePolicy()
+  );
+
+  const preflight = await service.preflightJob(WALLET, "parent-job-001");
+
+  assert.equal(preflight.eligible, false);
+  assert.equal(preflight.reason, "worker_open_exposure_cap_reached");
+  assert.deepEqual(preflight.workerExposure, {
+    eligible: false,
+    status: "exceeded",
+    reason: "worker_open_exposure_cap_reached",
+    capUsdc: 1,
+    currentExposureUsdc: 0.8,
+    candidateExposureUsdc: 0.559,
+    projectedExposureUsdc: 1.359,
+    headroomUsdc: 0.2
+  });
+  const explanation = await service.explainEligibility(WALLET, "parent-job-001");
+  assert.equal(explanation.reason, preflight.reason);
+  assert.deepEqual(explanation.workerExposure, preflight.workerExposure);
+});
+
+test("claim rechecks the wallet USDC exposure cap before any local claim write", async () => {
+  const stateStore = new MemoryStateStore();
+  const service = makePlatformService(
+    undefined,
+    undefined,
+    stateStore,
+    undefined,
+    blockingWorkerExposurePolicy()
+  );
+
+  await assert.rejects(
+    () => service.claimJob(WALLET, "parent-job-001", "http", "exposure-blocked"),
+    (error) => {
+      assert.equal(error.code, "worker_open_exposure_cap_reached");
+      assert.equal(error.details.projectedExposureUsdc, 1.359);
+      return true;
+    }
+  );
+  assert.equal(await stateStore.findSessionByJobId("parent-job-001"), undefined);
 });
 
 test("createSubJob links the child job to the active parent session", async () => {
@@ -913,6 +985,44 @@ test("preflight exposes global subsidy headroom and the actionable exhausted rea
   assert.deepEqual(preflight.onboardingSubsidy, subsidy);
   assert.ok(preflight.failureStates.includes("onboarding_subsidy_exhausted"));
   assert.deepEqual(await service.getOnboardingSubsidyStatus(), subsidy);
+});
+
+test("post-tier retained claim fee removes curated brokered gas from operator subsidy exposure", async () => {
+  const subsidyStatus = {
+    dailyBudgetUsdc: 8,
+    allocatedUsdc: 1,
+    headroomUsdc: 7,
+    resetAt: "2026-08-12T00:00:00.000Z",
+    clock: "UTC"
+  };
+  const onboardingSubsidyBudget = {
+    async inspect() {
+      throw new Error("retained-fee claims must not inspect operator subsidy exposure");
+    },
+    async getStatus() {
+      return subsidyStatus;
+    }
+  };
+  const service = makePlatformService(
+    makeClaimEconomicsGateway({
+      onboardingWaiverEligible: false,
+      workerClaimCount: 3,
+      claimFeeRetainedOnSuccess: true
+    }),
+    undefined,
+    undefined,
+    onboardingSubsidyBudget
+  );
+
+  const preflight = await service.preflightJob(WALLET, "parent-job-001");
+
+  assert.equal(preflight.claimEconomicsWaived, false);
+  assert.equal(preflight.claimFeeRetainedOnSuccess, true);
+  assert.deepEqual(preflight.onboardingSubsidy, {
+    ...subsidyStatus,
+    applies: false,
+    available: true
+  });
 });
 
 test("preflight trusts an existing on-chain waiver when the catalog flag is false", async () => {
