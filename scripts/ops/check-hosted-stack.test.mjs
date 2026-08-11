@@ -1,11 +1,208 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const CHECK_SCRIPT = join(REPO_ROOT, "scripts/ops/check-hosted-stack.sh");
+
+const ADDRESSES = {
+  escrowCore: `0x${"11".repeat(20)}`,
+  agentAccountCore: `0x${"22".repeat(20)}`,
+  token: `0x${"33".repeat(20)}`,
+  feeRecipient: `0x${"44".repeat(20)}`
+};
+
+async function runHostedStackFixture({ autoVerifierOk, warnings = [] }) {
+  const health = {
+    status: "ok",
+    warnings,
+    auth: { chainId: 1 },
+    addresses: {
+      escrowCore: ADDRESSES.escrowCore,
+      agentAccountCore: ADDRESSES.agentAccountCore,
+      token: ADDRESSES.token
+    },
+    components: {
+      stateStore: { ok: true },
+      submittedJobAutoVerifier: { ok: autoVerifierOk }
+    }
+  };
+  const onboarding = {
+    name: "Averray fixture",
+    protocols: ["http"],
+    externalBounties: {
+      posterOnboarding: "/poster/onboarding",
+      cancellation: {
+        selfServeCancel: false,
+        rescue: "operator-mediated on request, ~7 days, refunds only ever to the recorded poster",
+        plannedSelfServeCancel: "cancelOpenJob, next EscrowCore deployment window"
+      },
+      claimBond: { available: true },
+      disputeWindow: {
+        available: true,
+        remedy: {
+          onChain: {
+            available: true,
+            abiFragment: "function openDispute(bytes32 jobId)"
+          },
+          brokeredPath: { reason: "no_worker_reachable_brokered_open_dispute_route" }
+        }
+      }
+    }
+  };
+  const posterOnboarding = {
+    mode: "open",
+    chainId: 1,
+    escrowCore: ADDRESSES.escrowCore,
+    agentAccountCore: ADDRESSES.agentAccountCore,
+    token: { address: ADDRESSES.token },
+    economics: {
+      feeSemantics: "poster_additive",
+      protocolFeeBps: 100,
+      feeRecipient: ADDRESSES.feeRecipient,
+      minRewardUsdc: "1",
+      draftTtlHours: 24,
+      quotePersistence: "demand_signal_only_until_funded",
+      quoteIdentity: "poster_and_content_hash"
+    },
+    cancellation: {
+      selfServeCancel: false,
+      rescue: "operator-mediated on request, ~7 days, refunds only ever to the recorded poster",
+      plannedSelfServeCancel: "cancelOpenJob, next EscrowCore deployment window"
+    },
+    workerFacts: {
+      claimBond: { available: true, stakeBps: 100, feeBps: 50, minFeeRaw: "1" },
+      gasPolicy: { operatorBrokeredGas: false, appliesTo: "all externally posted jobs" },
+      disputeWindow: {
+        available: true,
+        seconds: 3600,
+        remedy: {
+          onChain: {
+            available: true,
+            abiFragment: "function openDispute(bytes32 jobId)",
+            address: ADDRESSES.escrowCore
+          },
+          brokeredPath: {
+            available: false,
+            reason: "no_worker_reachable_brokered_open_dispute_route"
+          }
+        }
+      }
+    },
+    flow: [{
+      id: "fund",
+      posterReservedRawFormula: "rewardRaw + opsReserveRaw + contingencyReserveRaw + floor(rewardRaw * economics.protocolFeeBps / 10000)",
+      depositAmountFormula: "max(posterReservedRaw - positions(poster, token).liquid, 0)",
+      positionRead: { address: ADDRESSES.agentAccountCore },
+      writes: [
+        {
+          abiFragment: "function approve(address spender, uint256 amount) returns (bool)",
+          address: ADDRESSES.token,
+          args: [ADDRESSES.agentAccountCore]
+        },
+        {
+          abiFragment: "function deposit(address asset, uint256 amount)",
+          address: ADDRESSES.agentAccountCore,
+          args: [ADDRESSES.token]
+        }
+      ]
+    }],
+    liveReads: {
+      protocolFeeBps: { status: "available" },
+      feeRecipient: { status: "available" },
+      claimBond: { status: "available" },
+      disputeWindow: { status: "available" }
+    }
+  };
+
+  const fixtures = new Map([
+    ["/", "<html><head><title>Averray fixture</title></head></html>"],
+    ["/app", "Opening the operator control room."],
+    ["/.well-known/agent-tools.json", {
+      discoveryUrl: "https://averray.com/.well-known/agent-tools.json",
+      baseUrl: "https://api.averray.com",
+      publicEndpoints: [{ path: "/poster/onboarding" }],
+      onboarding: { posterEntrypoint: "https://api.averray.com/poster/onboarding" }
+    }],
+    ["/health", health],
+    ["/onboarding", onboarding],
+    ["/poster/onboarding", posterOnboarding]
+  ]);
+  const server = createServer((request, response) => {
+    const value = fixtures.get(request.url);
+    if (value === undefined) {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    response.writeHead(200, {
+      "content-type": typeof value === "string" ? "text/html" : "application/json"
+    });
+    response.end(typeof value === "string" ? value : JSON.stringify(value));
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const env = {
+      ...process.env,
+      PUBLIC_SITE_URL: `${baseUrl}/`,
+      DISCOVERY_URL: `${baseUrl}/.well-known/agent-tools.json`,
+      APP_URL: `${baseUrl}/app`,
+      API_HEALTH_URL: `${baseUrl}/health`,
+      API_ONBOARDING_URL: `${baseUrl}/onboarding`,
+      API_POSTER_ONBOARDING_URL: `${baseUrl}/poster/onboarding`,
+      ADMIN_JWT: "",
+      AVERRAY_TOKEN: "",
+      CHECK_INDEXER: "0",
+      CHECK_BOOTSTRAP_INSTRUMENTATION: "0",
+      CHECK_BOOTSTRAP_SELF_REPORT_SENT: "0",
+      CHECK_PRODUCT_PROOF_GATE: "0",
+      CHECK_SERVICE_TOKEN_PROOF: "0",
+      CHECK_EXTERNAL_SCHEMA_PROOF: "0",
+      CHECK_DISPUTE_VERDICT_PROOF: "0",
+      CHECK_SIWE_FRESH_WALLET_PROOF: "0",
+      CHECK_WORKER_CANARY_PROOF: "0",
+      CHECK_METRICS_AUTH: "0",
+      PRODUCT_HEALTH_EXPECTED_WARNINGS: "submitted_session_persistently_skipped",
+      LIVE_READ_ATTEMPTS: "1",
+      TIMEOUT_SEC: "5"
+    };
+
+    return await new Promise((resolve, reject) => {
+      const child = spawn("bash", [CHECK_SCRIPT], { cwd: REPO_ROOT, env });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk) => { stdout += chunk; });
+      child.stderr.on("data", (chunk) => { stderr += chunk; });
+      child.on("error", reject);
+      child.on("close", (code, signal) => resolve({ code, signal, stdout, stderr }));
+    });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+test("hosted smoke rejects an unhealthy submitted-job verifier even with no warnings", async () => {
+  const result = await runHostedStackFixture({ autoVerifierOk: false, warnings: [] });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.equal(result.signal, null);
+});
+
+test("hosted smoke accepts a healthy submitted-job verifier", async () => {
+  const result = await runHostedStackFixture({ autoVerifierOk: true, warnings: [] });
+
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /Hosted stack smoke check passed\./u);
+});
 
 test("hosted smoke cross-checks poster onboarding against operational and chain-backed health", async () => {
   const script = await readFile(CHECK_SCRIPT, "utf8");

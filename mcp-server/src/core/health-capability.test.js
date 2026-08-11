@@ -112,20 +112,49 @@ test("resolveServiceHealth — degraded when strict KMS auth has no KMS config",
   assert.equal(result.components.auth.ok, false);
 });
 
-test("resolveServiceHealth — degraded when the submitted-job auto-verifier is stale", () => {
+test("resolveServiceHealth — keeps verifier faults visible without degrading API liveness", () => {
+  const submittedJobAutoVerifierHealth = {
+    ok: false,
+    state: "submitted_session_persistently_skipped",
+    persistentSubmittedFailureCount: 2
+  };
   const result = resolveServiceHealth({
     stateStoreHealth: { ok: true, backend: "RedisStateStore", mode: "durable" },
-    authConfig: { mode: "permissive", domain: "localhost", chainId: 0, secrets: [] },
+    authConfig: {
+      mode: "strict",
+      jwtBackend: "hmac",
+      domain: "api.averray.test",
+      chainId: 420420419,
+      secrets: ["health-contract-test-secret"]
+    },
+    submittedJobAutoVerifierHealth
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(
+    result.components.submittedJobAutoVerifier,
+    submittedJobAutoVerifierHealth
+  );
+});
+
+test("resolveServiceHealth — state-store failure still degrades API liveness", () => {
+  const result = resolveServiceHealth({
+    stateStoreHealth: { ok: false, backend: "RedisStateStore", mode: "durable" },
+    authConfig: {
+      mode: "strict",
+      jwtBackend: "hmac",
+      domain: "api.averray.test",
+      chainId: 420420419,
+      secrets: ["health-contract-test-secret"]
+    },
     submittedJobAutoVerifierHealth: {
       ok: false,
-      enabled: true,
-      running: true,
-      state: "last_run_stale"
+      state: "submitted_session_persistently_skipped",
+      persistentSubmittedFailureCount: 2
     }
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.components.submittedJobAutoVerifier.state, "last_run_stale");
 });
 
 // ─── resolveCapabilityHealth ─────────────────────────────────────────

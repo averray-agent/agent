@@ -115,12 +115,11 @@ const deploymentManifestCache = new Map();
  *   - `stateStoreHealth.ok === true` → state store reachable.
  *   - `authConfig` present + the active JWT backend configured (strict)
  *     OR permissive mode → auth dependencies loaded.
- *   - `submittedJobAutoVerifierHealth.ok === true` → autonomous settlement
- *     scheduler is disabled intentionally or is running within its lag budget.
  *
- * The `ok` field is the AND of every component; anything false flips
- * the overall HTTP status code to 503 because the API process itself
- * cannot serve a request reliably.
+ * The `ok` field covers only dependencies required for the API process to
+ * serve requests. Autonomous-settlement health remains visible as a component
+ * and is enforced by the hosted correctness gate, but does not make the API
+ * itself unavailable.
  */
 export function resolveServiceHealth({
   stateStoreHealth,
@@ -140,13 +139,8 @@ export function resolveServiceHealth({
         : false;
   const authOk = authConfig?.mode === "permissive"
     || (authConfig?.mode === "strict" && strictAuthOk);
-  // Older embedded callers may omit this component. The HTTP runtime always
-  // supplies it; omission remains neutral for backwards-compatible library use.
-  const autoVerifierOk = submittedJobAutoVerifierHealth === undefined
-    || submittedJobAutoVerifierHealth?.ok === true;
-
   return {
-    ok: stateStoreOk && authOk && autoVerifierOk,
+    ok: stateStoreOk && authOk,
     components: {
       api: { ok: true, mode: "running" },
       stateStore: {

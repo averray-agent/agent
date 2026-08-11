@@ -31,6 +31,11 @@ const DEFAULT_CANDIDATE_TIMEOUT_MS = 3 * 60 * 1000;
 // Hard allowlist of machine-decidable verifier handlers. human_fallback and
 // github_pr are intentionally excluded and cannot be re-enabled via config.
 const AUTO_DECIDABLE_MODES = Object.freeze(["benchmark", "deterministic"]);
+const BY_DESIGN_SUBMITTED_SKIP_REASONS = new Set([
+  "non_auto_mode",
+  "already_verified",
+  "dry_run"
+]);
 
 export class SubmittedJobAutoVerifierService {
   constructor(platformService, verifierService, gateway = undefined, eventBus = undefined, {
@@ -446,6 +451,8 @@ export class SubmittedJobAutoVerifierService {
       ...(summary.errors ?? [])
     ].filter((entry) => {
       if (!entry?.sessionId) return false;
+      const reason = entry.reason ?? entry.code;
+      if (BY_DESIGN_SUBMITTED_SKIP_REASONS.has(reason)) return false;
       // The exemption follows positive claimant proof captured at claim time,
       // never the job id. A public worker who wins a race for a canary-posted
       // job has no wallet-bound marker attribution and remains alarmable.

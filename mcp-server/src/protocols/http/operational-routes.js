@@ -26,6 +26,19 @@ function parseRequiredFlag(value, defaultValue) {
   return !["0", "false", "no", "off"].includes(normalized);
 }
 
+function buildSubmittedJobAutoVerifierWarnings(health) {
+  if (health?.ok !== false) return [];
+  const persistentSessionCount = Number.isFinite(health.persistentSubmittedFailureCount)
+    ? Number(health.persistentSubmittedFailureCount)
+    : 0;
+  const code = health.state ?? "submitted_job_auto_verifier_unhealthy";
+  return [{
+    code,
+    severity: "critical",
+    message: `Submitted-job auto-verifier is unhealthy (${code}); persistent submitted session count: ${persistentSessionCount}.`
+  }];
+}
+
 export function resolveMetricsAuthConfig(env = process.env) {
   return {
     metricsBearerToken: env.METRICS_BEARER_TOKEN?.trim() || undefined,
@@ -73,8 +86,7 @@ export function createOperationalRoutes({
     if (request.method === "GET" && pathname === "/health") {
       // Package B (P1.1b) — health truth split. `serviceHealth` is the
       // API-process liveness contract: state-store reachable + auth config
-      // loaded + the submitted-job settlement scheduler ticking. HTTP status
-      // follows `serviceHealth.ok` alone, so a
+      // loaded. HTTP status follows `serviceHealth.ok` alone, so a
       // trust-core-only launch still returns 200/"ok" at the liveness layer
       // and surfaces chain/treasury posture via `capabilityHealth`.
       const [
@@ -128,10 +140,12 @@ export function createOperationalRoutes({
         serviceHealth,
         capabilityHealth,
         ...productHealth,
-        // Structured, codeable warnings derived from capabilityHealth.
+        // Structured, codeable warnings derived from capability and
+        // correctness health without changing API-process liveness.
         warnings: [
           ...buildCapabilityWarnings(capabilityHealth),
-          ...buildOnboardingInventoryWarnings(productHealth.onboarding)
+          ...buildOnboardingInventoryWarnings(productHealth.onboarding),
+          ...buildSubmittedJobAutoVerifierWarnings(submittedJobAutoVerifierHealth)
         ],
         components: {
           stateStore: storeHealth,
