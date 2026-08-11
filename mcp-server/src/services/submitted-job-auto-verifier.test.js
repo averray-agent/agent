@@ -56,6 +56,15 @@ function makeService(harness, options = {}) {
   );
 }
 
+async function waitFor(predicate, { timeoutMs = 500, pollMs = 5 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  assert.fail(`Condition was not met within ${timeoutMs}ms.`);
+}
+
 test("verifies submitted benchmark and deterministic jobs and settles each", async () => {
   const harness = makeHarness({
     sessions: [
@@ -195,6 +204,119 @@ test("caps work per run and defers the remainder to the next tick", async () => 
   assert.ok(run.skipped.some((s) => s.reason === "max_per_run_reached" && s.deferred === 1));
 });
 
+test("reschedules after an unexpected scan failure instead of silently stopping", async () => {
+  const harness = makeHarness({
+    sessions: [{ sessionId: "s-bench", jobId: "bench-001", status: "submitted" }]
+  });
+  const originalList = harness.platformService.listRecentSessions;
+  let scans = 0;
+  harness.platformService.listRecentSessions = async (...args) => {
+    scans += 1;
+    if (scans === 1) throw new Error("temporary session-store failure");
+    return originalList(...args);
+  };
+  const warnings = [];
+  const service = makeService(harness, {
+    intervalMs: 5,
+    logger: {
+      info() {},
+      warn(fields, message) { warnings.push({ fields, message }); }
+    }
+  });
+
+  service.start();
+  try {
+    await waitFor(async () => {
+      const status = await service.getStatus();
+      return harness.verifyCalls.length === 1 && Boolean(status.lastSuccessfulRunAt);
+    });
+  } finally {
+    service.stop();
+  }
+
+  const status = await service.getStatus();
+  assert.ok(scans >= 2);
+  assert.deepEqual(harness.verifyCalls, ["s-bench"]);
+  assert.equal(status.running, false);
+  assert.equal(status.nextRunAt, undefined);
+  assert.equal(status.consecutiveSchedulerFailures, 0);
+  assert.match(status.lastSchedulerError.message, /temporary session-store failure/u);
+  assert.ok(warnings.some((entry) => entry.message === "auto_verify.scheduler_run_failed"));
+});
+
+test("times out without allowing duplicate settlement and does not block later jobs", async () => {
+  const harness = makeHarness({
+    sessions: [
+      { sessionId: "s-hung", jobId: "bench-001", status: "submitted" },
+      { sessionId: "s-next", jobId: "bench-001", status: "submitted" }
+    ]
+  });
+  const originalVerify = harness.verifierService.verifySubmission;
+  let releaseHung;
+  const hung = new Promise((resolve) => { releaseHung = resolve; });
+  let hungSettlements = 0;
+  harness.verifierService.verifySubmission = async ({ sessionId }) => {
+    if (sessionId !== "s-hung") return originalVerify({ sessionId });
+    harness.verifyCalls.push(sessionId);
+    await hung;
+    hungSettlements += 1;
+    const session = harness.store.find((entry) => entry.sessionId === sessionId);
+    session.status = "resolved";
+    session.verification = { outcome: "approved" };
+    return { outcome: "approved", reasonCode: "OK", sessionId };
+  };
+  const service = makeService(harness, { candidateTimeoutMs: 10 });
+
+  const first = await service.runOnce();
+
+  assert.equal(first.verifiedCount, 1);
+  assert.ok(first.errors.some((entry) => (
+    entry.sessionId === "s-hung" && entry.code === "verification_timeout"
+  )));
+  assert.deepEqual(harness.verifyCalls, ["s-hung", "s-next"]);
+  assert.equal(service.inFlight.has("s-hung"), false);
+  assert.equal((await service.getStatus()).inFlightCount, 0);
+  assert.equal((await service.getStatus()).pendingTimeoutCount, 1);
+  assert.equal((await service.getHealth()).ok, false);
+
+  const second = await service.runOnce();
+  assert.ok(second.skipped.some((entry) => (
+    entry.sessionId === "s-hung" && entry.reason === "verification_timeout_pending"
+  )));
+  assert.deepEqual(harness.verifyCalls, ["s-hung", "s-next"]);
+  assert.equal(hungSettlements, 0);
+
+  releaseHung();
+  await waitFor(() => !service.pendingVerifications.has("s-hung"));
+  assert.equal((await service.getStatus()).inFlightCount, 0);
+  assert.equal((await service.getStatus()).pendingTimeoutCount, 0);
+  assert.equal(harness.store.find((entry) => entry.sessionId === "s-hung").status, "resolved");
+  assert.equal(hungSettlements, 1);
+
+  await service.runOnce();
+  assert.deepEqual(harness.verifyCalls, ["s-hung", "s-next"]);
+  assert.equal(hungSettlements, 1);
+});
+
+test("reports stale scheduler liveness relative to its configured interval", async () => {
+  const harness = makeHarness();
+  const service = makeService(harness, {
+    intervalMs: 1_000,
+    candidateTimeoutMs: 1_000
+  });
+  service.running = true;
+  service.startedAt = "2026-08-11T12:00:00.000Z";
+  service.lastRun = { finishedAt: "2026-08-11T12:00:01.000Z" };
+
+  const healthy = await service.getHealth(new Date("2026-08-11T12:00:03.999Z"));
+  const stale = await service.getHealth(new Date("2026-08-11T12:00:04.001Z"));
+
+  assert.equal(healthy.ok, true);
+  assert.equal(healthy.staleAfterMs, 3_000);
+  assert.equal(stale.ok, false);
+  assert.equal(stale.state, "last_run_stale");
+});
+
 test("honors HALT — skips the whole run while the protocol is paused", async () => {
   const harness = makeHarness({
     sessions: [{ sessionId: "s-bench", jobId: "bench-001", status: "submitted" }],
@@ -293,6 +415,7 @@ test("loadSubmittedJobAutoVerifierConfig parses conservative defaults", () => {
     intervalMs: 60 * 1000,
     scanLimit: 200,
     maxPerRun: 25,
+    candidateTimeoutMs: 3 * 60 * 1000,
     autoModes: ["benchmark", "deterministic"],
     requireSettlementReady: true
   });
@@ -305,6 +428,7 @@ test("loadSubmittedJobAutoVerifierConfig honors env overrides", () => {
     AUTO_VERIFY_INTERVAL_MS: "30000",
     AUTO_VERIFY_SCAN_LIMIT: "500",
     AUTO_VERIFY_MAX_PER_RUN: "5",
+    AUTO_VERIFY_CANDIDATE_TIMEOUT_MS: "15000",
     AUTO_VERIFY_MODES: "benchmark, human_fallback",
     AUTO_VERIFY_REQUIRE_SETTLEMENT_READY: "false"
   }), {
@@ -313,6 +437,7 @@ test("loadSubmittedJobAutoVerifierConfig honors env overrides", () => {
     intervalMs: 30000,
     scanLimit: 500,
     maxPerRun: 5,
+    candidateTimeoutMs: 15000,
     autoModes: ["benchmark", "human_fallback"],
     requireSettlementReady: false
   });

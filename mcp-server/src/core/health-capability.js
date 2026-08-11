@@ -115,12 +115,18 @@ const deploymentManifestCache = new Map();
  *   - `stateStoreHealth.ok === true` → state store reachable.
  *   - `authConfig` present + the active JWT backend configured (strict)
  *     OR permissive mode → auth dependencies loaded.
+ *   - `submittedJobAutoVerifierHealth.ok === true` → autonomous settlement
+ *     scheduler is disabled intentionally or is running within its lag budget.
  *
  * The `ok` field is the AND of every component; anything false flips
  * the overall HTTP status code to 503 because the API process itself
  * cannot serve a request reliably.
  */
-export function resolveServiceHealth({ stateStoreHealth, authConfig }) {
+export function resolveServiceHealth({
+  stateStoreHealth,
+  authConfig,
+  submittedJobAutoVerifierHealth = undefined
+}) {
   const stateStoreOk = Boolean(stateStoreHealth?.ok);
   const jwtBackend = authConfig?.jwtBackend ?? "kms";
   const hmacConfigured = Array.isArray(authConfig?.secrets) && authConfig.secrets.length > 0;
@@ -134,9 +140,13 @@ export function resolveServiceHealth({ stateStoreHealth, authConfig }) {
         : false;
   const authOk = authConfig?.mode === "permissive"
     || (authConfig?.mode === "strict" && strictAuthOk);
+  // Older embedded callers may omit this component. The HTTP runtime always
+  // supplies it; omission remains neutral for backwards-compatible library use.
+  const autoVerifierOk = submittedJobAutoVerifierHealth === undefined
+    || submittedJobAutoVerifierHealth?.ok === true;
 
   return {
-    ok: stateStoreOk && authOk,
+    ok: stateStoreOk && authOk && autoVerifierOk,
     components: {
       api: { ok: true, mode: "running" },
       stateStore: {
@@ -149,7 +159,10 @@ export function resolveServiceHealth({ stateStoreHealth, authConfig }) {
         mode: authConfig?.mode ?? "unknown",
         domain: authConfig?.domain ?? "unknown",
         chainId: authConfig?.chainId
-      }
+      },
+      ...(submittedJobAutoVerifierHealth === undefined
+        ? {}
+        : { submittedJobAutoVerifier: submittedJobAutoVerifierHealth })
     }
   };
 }
