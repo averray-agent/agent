@@ -64,6 +64,7 @@ contract Rc1BackboneTest is Test {
         policy.setOutflowRecorder(address(accounts), true);
         policy.setSettlementBroker(address(this), true);
         policy.setDailyOutflowCap(type(uint256).max);
+        accounts.setTreasuryAccount(address(0x7EA5));
 
         dot.mint(poster, 1_000 ether);
         dot.mint(worker, 1_000 ether);

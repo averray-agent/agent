@@ -1,6 +1,6 @@
 # Worker progression — what a wallet may consume, and why the pool is the answer
 
-Status: **design, not built.** Written after the 2026-08-11 incident, in which one wallet
+Status: **steps 1–2 implemented in source; step 2 requires an EscrowCore successor ceremony.** Written after the 2026-08-11 incident, in which one wallet
 claimed 33 jobs in minutes, reserved the reward bank's entire liquid balance into escrow, and
 kept going on operator-paid gas while holding no DOT of its own.
 
@@ -173,6 +173,24 @@ Sequence: fix pool pricing (#1051) → deploy pool → then tier 3.
 3. **Per-wallet exposure cap `E`** (reserved reward + brokered gas). Bounds monopolisation in
    the unit that actually matters, and self-loosens as wallets self-fund.
 4. **Tier 3 — allowance proportional to pool shares.** After #1051.
+
+## 6.1 Step-2 deployment boundary
+
+The retained-fee policy changes `EscrowCore` runtime bytecode. Merging its source does **not**
+change the live mainnet contract and a normal production deploy must not pretend otherwise.
+Activation requires a separate, multisig-gated EscrowCore successor ceremony:
+
+1. deploy the successor against the existing `TreasuryPolicy`, `AgentAccountCore`,
+   `ReputationSBT`, and treasury account;
+2. byte-verify the runtime and record its provenance in `deployments/mainnet.json`;
+3. grant the successor `settlementBroker`, `reputationWriter`, and `escrowOperator` authority;
+4. point new-job creation and the backend at the successor only after those live reads pass;
+5. retain the prior EscrowCore's roles during its drain window so existing jobs can finish;
+6. prove on a non-waived claim that the stake returns, the claim fee is retained using
+   `claimFeeVerifierBps`, and no fee is charged to a waived tier-0 claim.
+
+That ceremony is deliberately outside the source PR. No contract deployment, role mutation,
+backend cutover, or existing-job migration is implied by merging the implementation.
 
 Steps 1 and 2 together would have prevented the 08-11 exposure. Step 3 would have prevented
 the board going dark for other agents. Step 4 is the durable answer.

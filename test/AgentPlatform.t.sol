@@ -609,6 +609,10 @@ contract AgentPlatformTest is Test {
         assertEq(workerJobStake, 3.5 ether);
     }
 
+    function testEscrowAdvertisesSuccessfulClaimFeeRetention() public view {
+        require(escrow.retainsClaimFeeOnSuccess(), "EXPECTED_RETAINED_FEE_CAPABILITY");
+    }
+
     function testOnboardingWaiverRequiresExplicitJobEligibility() public {
         policy.setOnboardingWaiverClaimCount(3);
         policy.setClaimFeeBps(200);
@@ -729,7 +733,7 @@ contract AgentPlatformTest is Test {
         require(escrow.onboardingWaiverEligibleJobs(jobId), "EXPECTED_WAIVER_ELIGIBLE");
     }
 
-    function testSuccessfulVerificationRefundsClaimStakeAndFee() public {
+    function testSuccessfulPostTierClaimReleasesStakeButRetainsClaimFee() public {
         policy.setClaimFeeBps(200);
         policy.setMinClaimFee(address(dot), 0.05 ether);
 
@@ -748,15 +752,19 @@ contract AgentPlatformTest is Test {
         vm.prank(worker);
         escrow.submitWork(jobId, keccak256("fee-success"));
 
+        uint256 verifierBalanceBefore = dot.balanceOf(verifier);
         vm.prank(verifier);
         escrow.resolveSinglePayout(jobId, true, bytes32("OK"), "ipfs://badge/fee-success", REASONING_HASH);
 
         EscrowCore.JobEscrow memory job = escrow.jobs(jobId);
         (uint256 workerLiquid,,,, uint256 workerJobStake,) = accounts.positions(worker, address(dot));
+        (uint256 treasuryLiquid,,,,,) = accounts.positions(treasury, address(dot));
         assertEq(job.claimStake, 0);
         assertEq(job.claimFee, 0);
-        assertEq(workerLiquid, WORKER_DEPOSIT + 50 ether);
+        assertEq(workerLiquid, WORKER_DEPOSIT + 49 ether);
         assertEq(workerJobStake, 0);
+        assertEq(dot.balanceOf(verifier), verifierBalanceBefore + 0.7 ether);
+        assertEq(treasuryLiquid, 0.3 ether);
     }
 
     function testRejectedJobSlashesClaimFeeToVerifierAndTreasurySplit() public {
@@ -792,6 +800,42 @@ contract AgentPlatformTest is Test {
         assertEq(workerJobStake, 0);
         assertEq(dot.balanceOf(poster), posterBalanceBefore + 1.25 ether);
         assertEq(dot.balanceOf(verifier), verifierBalanceBefore + 0.7 ether);
+    }
+
+    function testWorkerFavourDisputeRetainsClaimFeeWithoutRewardingOverturnedVerifier() public {
+        policy.setClaimFeeBps(200);
+        policy.setMinClaimFee(address(dot), 0.05 ether);
+
+        bytes32 jobId = keccak256("job/fee/dispute-dismissed");
+        vm.prank(poster);
+        escrow.createSinglePayoutJob(
+            jobId, address(dot), 50 ether, 0, 0, 1 days, bytes32("AUTO"), bytes32("DATA"), SPEC_HASH
+        );
+
+        vm.prank(worker);
+        escrow.claimJob(jobId);
+        vm.prank(worker);
+        escrow.submitWork(jobId, keccak256("fee-dispute-dismissed"));
+
+        uint256 verifierBalanceBefore = dot.balanceOf(verifier);
+        vm.prank(verifier);
+        escrow.resolveSinglePayout(jobId, false, bytes32("REJECTED"), "ipfs://badge/rejected", REASONING_HASH);
+        vm.prank(worker);
+        escrow.openDispute(jobId);
+        vm.prank(arbitrator);
+        escrow.resolveDispute(jobId, 50 ether, bytes32("DISMISSED"), "ipfs://badge/dispute-dismissed");
+
+        EscrowCore.JobEscrow memory job = escrow.jobs(jobId);
+        (uint256 workerLiquid,,,, uint256 workerJobStake,) = accounts.positions(worker, address(dot));
+        (uint256 treasuryLiquid,,,,,) = accounts.positions(treasury, address(dot));
+
+        assertEq(uint256(job.state), uint256(EscrowCore.JobState.Closed));
+        assertEq(job.claimStake, 0);
+        assertEq(job.claimFee, 0);
+        assertEq(workerLiquid, WORKER_DEPOSIT + 49 ether);
+        assertEq(workerJobStake, 0);
+        assertEq(dot.balanceOf(verifier), verifierBalanceBefore);
+        assertEq(treasuryLiquid, 1 ether);
     }
 
     function testBorrowCapacityAndRepayment() public {
