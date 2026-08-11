@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {TreasuryPolicy} from "../TreasuryPolicy.sol";
 import {IDepositPoolVenueAdapter} from "../interfaces/IDepositPoolVenueAdapter.sol";
+import {IDepositPoolAccounting} from "../interfaces/IDepositPoolAccounting.sol";
 import {IHydrationDepositPoolLane} from "../interfaces/IHydrationDepositPoolLane.sol";
 import {IXcmWrapper} from "../interfaces/IXcmWrapper.sol";
 import {IXcmV22CustodyAdapter} from "../interfaces/IXcmV22CustodyAdapter.sol";
@@ -86,6 +87,10 @@ contract HydrationDepositPoolAdapter is IDepositPoolVenueAdapter, ReentrancyGuar
         lane = lane_;
         asset = asset_;
         policy = policy_;
+    }
+
+    function lossReporter() external view override returns (address) {
+        return policy.owner();
     }
 
     function managedAssets(address account) public view override returns (uint256) {
@@ -251,6 +256,10 @@ contract HydrationDepositPoolAdapter is IDepositPoolVenueAdapter, ReentrancyGuar
         lane.releaseRecoveredAssets(request.laneRequestId, address(this), assets);
         request.settledAssets += assets;
         SafeTransfer.safeTransfer(asset, pool, assets);
+        // Load-bearing ordering: pool NAV changes only after the cash is in its
+        // buffer. A strategySettler can report remote inventory but cannot make
+        // that assertion enter pricing through this callback.
+        IDepositPoolAccounting(pool).recordVenueReturn(requestId, assets);
         emit RecoveryReturned(requestId, assets, outstanding - assets);
     }
 

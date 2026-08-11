@@ -44,6 +44,13 @@ contract DepositPool is ReentrancyGuard {
     /// @dev The launch fee is zero, so packet 1 intentionally has no write path here.
     uint256 public earnedProtocolFees;
 
+    /// @notice Historical-cost principal outside the buffer.
+    /// @dev This is the only remote-capital value admitted to NAV. It rises
+    ///      when the pool transfers principal to its adapter and falls only
+    ///      when USDC returns to the buffer or TreasuryPolicy's owner writes a
+    ///      loss off. Remote observations are recall inventory, never pricing.
+    uint256 public venuePrincipalCostBasis;
+
     enum NoticeTier {
         Notice7Days,
         Notice30Days
@@ -85,6 +92,8 @@ contract DepositPool is ReentrancyGuard {
     mapping(uint256 => RedeemRequest) public redeemRequests;
     mapping(uint256 => VenueDeployment) public venueDeployments;
     mapping(uint256 => VenueRecall) public venueRecalls;
+    mapping(uint256 => uint256) public venueWrittenOffPrincipalAssets;
+    mapping(bytes32 => uint256) internal venueDeploymentForAdapterRequest;
 
     event Transfer(address indexed from, address indexed to, uint256 amount);
     event Approval(address indexed owner, address indexed spender, uint256 amount);
@@ -120,6 +129,8 @@ contract DepositPool is ReentrancyGuard {
         IDepositPoolVenueAdapter.RequestStatus status,
         uint256 returnedAssets
     );
+    event VenuePrincipalReturned(uint256 indexed deploymentId, uint256 returnedAssets, uint256 principalReduction);
+    event VenueLossWrittenOff(uint256 indexed deploymentId, uint256 assets, uint256 remainingPrincipalCostBasis);
 
     error Unauthorized();
     error ZeroAddress();
@@ -149,9 +160,15 @@ contract DepositPool is ReentrancyGuard {
     error VenueRequestMismatch();
     error VenueRecallShortfall(uint256 returnedAssets, uint256 requiredAssets);
     error AssetTransferAmountMismatch();
+    error VenueLossExceedsOutstanding(uint256 outstanding, uint256 attempted);
 
     modifier onlyOperator() {
         if (msg.sender != operator) revert Unauthorized();
+        _;
+    }
+
+    modifier onlyVenueAdapter() {
+        if (msg.sender != address(venueAdapter)) revert Unauthorized();
         _;
     }
 
@@ -159,7 +176,10 @@ contract DepositPool is ReentrancyGuard {
         if (asset_ == address(0) || operator_ == address(0)) revert ZeroAddress();
         if (IERC20PoolAsset(asset_).decimals() != decimals) revert InvalidAssetDecimals();
         if (address(venueAdapter_) != address(0)) {
-            if (address(venueAdapter_).code.length == 0 || venueAdapter_.asset() != asset_) {
+            if (
+                address(venueAdapter_).code.length == 0 || venueAdapter_.asset() != asset_
+                    || venueAdapter_.lossReporter() == address(0)
+            ) {
                 revert InvalidVenueAdapter();
             }
         }
@@ -168,12 +188,14 @@ contract DepositPool is ReentrancyGuard {
         venueAdapter = venueAdapter_;
     }
 
-    /// @notice Total depositor and protocol-owned assets, including the pinned venue.
+    /// @notice Total depositor and protocol-owned assets at buffer cash plus venue cost.
+    /// @dev Yield is deliberately absent until USDC reaches the buffer. This
+    ///      conservative step recognition leaves a known timing seam: a deposit
+    ///      immediately before a profitable recall and redemption immediately
+    ///      after can capture yield it did not earn. It cannot extract more than
+    ///      the pool actually holds, but must be redesigned before scale.
     function totalAssets() public view returns (uint256 assets) {
-        assets = bufferAssets();
-        if (address(venueAdapter) != address(0)) {
-            assets += venueAdapter.managedAssets(address(this));
-        }
+        assets = bufferAssets() + venuePrincipalCostBasis;
     }
 
     function bufferAssets() public view returns (uint256) {
@@ -355,8 +377,10 @@ contract DepositPool is ReentrancyGuard {
         deploymentId = nextVenueDeploymentId++;
         activeVenueDeploymentId = deploymentId;
         lastDeploymentEpochAt = uint64(block.timestamp);
+        venuePrincipalCostBasis += assets;
         SafeTransfer.safeTransfer(asset, address(venueAdapter), assets);
         bytes32 adapterRequestId = venueAdapter.requestDeploy(assets, returnBy);
+        venueDeploymentForAdapterRequest[adapterRequestId] = deploymentId;
         venueDeployments[deploymentId] = VenueDeployment({
             principalAssets: assets,
             recalledPrincipalAssets: 0,
@@ -381,12 +405,13 @@ contract DepositPool is ReentrancyGuard {
             request, IDepositPoolVenueAdapter.RequestKind.Deploy, deployment.principalAssets, deployment.returnBy
         );
 
+        uint256 beforeBalance = bufferAssets();
         settledAssets = venueAdapter.claimSettled(deployment.adapterRequestId);
+        uint256 received = bufferAssets() - beforeBalance;
         status = request.status;
         deployment.status = status;
-        if (status == IDepositPoolVenueAdapter.RequestStatus.Failed && venueAdapter.managedAssets(address(this)) == 0) {
-            activeVenueDeploymentId = 0;
-        }
+        if (received != 0) _recordVenueReturn(deploymentId, received);
+        _maybeCloseVenueDeployment(deploymentId);
         emit VenueDeploymentSettled(deploymentId, status, settledAssets);
     }
 
@@ -448,18 +473,61 @@ contract DepositPool is ReentrancyGuard {
         recall.returnedAssets = returnedAssets;
         recall.status = status;
         activeVenueRecallId = 0;
-        if (returnedAssets != 0) {
-            uint256 outstandingPrincipal = deployment.principalAssets - deployment.recalledPrincipalAssets;
-            uint256 principalRecalled = returnedAssets < outstandingPrincipal ? returnedAssets : outstandingPrincipal;
-            deployment.recalledPrincipalAssets += principalRecalled;
-        }
-        if (venueAdapter.managedAssets(address(this)) == 0) {
-            if (status == IDepositPoolVenueAdapter.RequestStatus.Succeeded) {
-                deployment.recalledPrincipalAssets = deployment.principalAssets;
-            }
-            activeVenueDeploymentId = 0;
-        }
+        if (received != 0) _recordVenueReturn(recall.deploymentId, received);
+        _maybeCloseVenueDeployment(recall.deploymentId);
         emit VenueRecallSettled(recallId, recall.deploymentId, status, returnedAssets);
+    }
+
+    /// @notice Account for cash returned through the adapter's recovery path.
+    /// @dev The immutable adapter calls this after transferring USDC. Normal
+    ///      recall/deploy claims are balance-delta measured by the pool itself.
+    function recordVenueReturn(bytes32 adapterRequestId, uint256 assets) external onlyVenueAdapter nonReentrant {
+        if (assets == 0) revert ZeroAmount();
+        uint256 deploymentId = venueDeploymentForAdapterRequest[adapterRequestId];
+        if (deploymentId == 0) revert VenueDeploymentNotFound();
+        _recordVenueReturn(deploymentId, assets);
+        _maybeCloseVenueDeployment(deploymentId);
+    }
+
+    /// @notice Reduce depositor NAV for principal that cannot return.
+    /// @dev Only the TreasuryPolicy owner exposed by the immutable adapter may
+    ///      take this depositor-impacting action; operator and settler keys may not.
+    function writeOffVenueLoss(uint256 deploymentId, uint256 assets) external nonReentrant {
+        if (address(venueAdapter) == address(0)) revert VenueNotConfigured();
+        if (msg.sender != venueAdapter.lossReporter()) revert Unauthorized();
+        if (assets == 0) revert ZeroAmount();
+        VenueDeployment storage deployment = venueDeployments[deploymentId];
+        if (deployment.principalAssets == 0) revert VenueDeploymentNotFound();
+        uint256 outstanding = _outstandingVenuePrincipal(deploymentId);
+        if (assets > outstanding) revert VenueLossExceedsOutstanding(outstanding, assets);
+        venueWrittenOffPrincipalAssets[deploymentId] += assets;
+        venuePrincipalCostBasis -= assets;
+        _maybeCloseVenueDeployment(deploymentId);
+        emit VenueLossWrittenOff(deploymentId, assets, venuePrincipalCostBasis);
+    }
+
+    function _recordVenueReturn(uint256 deploymentId, uint256 returnedAssets) private {
+        uint256 outstanding = _outstandingVenuePrincipal(deploymentId);
+        uint256 principalReduction = returnedAssets < outstanding ? returnedAssets : outstanding;
+        if (principalReduction != 0) {
+            venueDeployments[deploymentId].recalledPrincipalAssets += principalReduction;
+            venuePrincipalCostBasis -= principalReduction;
+        }
+        emit VenuePrincipalReturned(deploymentId, returnedAssets, principalReduction);
+    }
+
+    function _outstandingVenuePrincipal(uint256 deploymentId) private view returns (uint256) {
+        VenueDeployment storage deployment = venueDeployments[deploymentId];
+        return
+            deployment.principalAssets - deployment.recalledPrincipalAssets
+                - venueWrittenOffPrincipalAssets[deploymentId];
+    }
+
+    function _maybeCloseVenueDeployment(uint256 deploymentId) private {
+        if (
+            activeVenueDeploymentId == deploymentId && activeVenueRecallId == 0
+                && _outstandingVenuePrincipal(deploymentId) == 0
+        ) activeVenueDeploymentId = 0;
     }
 
     function _redeemFromBuffer(address caller, address receiver, address owner, uint256 shares, uint256 assets)
