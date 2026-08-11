@@ -209,7 +209,7 @@ export class SubmittedJobAutoVerifierService {
       if (session?.status !== "submitted") continue;
       const sessionId = session.sessionId;
       if (this.inFlight.has(sessionId)) {
-        summary.skipped.push({ sessionId, reason: "in_flight" });
+        summary.skipped.push({ sessionId, jobId: session.jobId, reason: "in_flight" });
         continue;
       }
       // A timed-out operation cannot be cancelled safely after it may have
@@ -217,13 +217,13 @@ export class SubmittedJobAutoVerifierService {
       // promise settles; unlike the old inFlight leak this state is explicit,
       // health-degrading, and cannot launch a duplicate settlement.
       if (this.pendingVerifications.has(sessionId)) {
-        summary.skipped.push({ sessionId, reason: "verification_timeout_pending" });
+        summary.skipped.push({ sessionId, jobId: session.jobId, reason: "verification_timeout_pending" });
         continue;
       }
       // A submitted session should never already carry a verification result,
       // but if one is present treat it as resolved-in-flight and leave it alone.
       if (session.verification) {
-        summary.skipped.push({ sessionId, reason: "already_verified" });
+        summary.skipped.push({ sessionId, jobId: session.jobId, reason: "already_verified" });
         continue;
       }
       let job;
@@ -453,13 +453,16 @@ export class SubmittedJobAutoVerifierService {
       // per-run diagnostics, but never let a persistent canary become the
       // payout-queue health alarm that operators learn to ignore.
       if (isSyntheticCanaryJobId(entry.jobId)) return false;
-      const reason = entry.reason ?? entry.code;
-      return typeof reason === "string" && reason.startsWith("job_snapshot_");
+      return true;
     });
     const next = new Map();
     for (const failure of failures) {
-      const reason = failure.reason ?? failure.code;
-      const key = `${failure.sessionId}:${reason}`;
+      // The health invariant is session-scoped: a submitted session that is
+      // skipped or errors on consecutive runs still represents an unpaid
+      // worker even if the reported cause changes between runs. Unknown future
+      // reasons must fail visible instead of disappearing from health.
+      const reason = failure.reason ?? failure.code ?? "unknown";
+      const key = failure.sessionId;
       const previous = this.submittedFailureStreaks.get(key);
       next.set(key, {
         sessionId: failure.sessionId,
