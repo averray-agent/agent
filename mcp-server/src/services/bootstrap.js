@@ -1,6 +1,10 @@
 import { PlatformService } from "../core/platform-service.js";
 import { createStateStore } from "../core/state-store.js";
-import { createOnboardingSubsidyBudget } from "../core/claim-economics.js";
+import {
+  createOnboardingSubsidyBudget,
+  loadOnboardingSubsidyBudgetConfig
+} from "../core/claim-economics.js";
+import { createWorkerExposurePolicy } from "../core/worker-exposure.js";
 import { migrateLegacyBankXcmGenerationState } from "./bank-xcm-watch-migration.js";
 import { AccountOverlayStore } from "../core/account-overlay-store.js";
 import { PolicyService } from "../core/policy-service.js";
@@ -159,7 +163,13 @@ const reputations = new Map([
 export function createPlatformService() {
   const gateway = new BlockchainGateway();
   const stateStore = createStateStore();
-  const onboardingSubsidyBudget = createOnboardingSubsidyBudget({ stateStore });
+  const subsidyConfig = loadOnboardingSubsidyBudgetConfig();
+  const onboardingSubsidyBudget = createOnboardingSubsidyBudget({ stateStore, config: subsidyConfig });
+  const workerExposurePolicy = createWorkerExposurePolicy({
+    stateStore,
+    blockchainGateway: gateway,
+    gasEstimateUsdc: subsidyConfig.gasEstimateUsdc
+  });
   const eventBus = new EventBus({ eventStore: stateStore });
   const accounts = new AccountOverlayStore({ stateStore });
   accounts.seed(...SEED_DEV_OVERLAY);
@@ -175,7 +185,8 @@ export function createPlatformService() {
     stateStore,
     eventBus,
     undefined,
-    onboardingSubsidyBudget
+    onboardingSubsidyBudget,
+    workerExposurePolicy
   );
 }
 
@@ -286,6 +297,17 @@ export async function createPlatformRuntime() {
     logger,
     () => createOnboardingSubsidyBudget({ stateStore, env: process.env })
   );
+  const workerExposurePolicy = initStep(
+    "init-worker-exposure-policy",
+    logger,
+    () => createWorkerExposurePolicy({
+      stateStore,
+      blockchainGateway: gateway,
+      gasEstimateUsdc: loadOnboardingSubsidyBudgetConfig(process.env).gasEstimateUsdc,
+      env: process.env,
+      logger
+    })
+  );
   try {
     await migrateLegacyBankXcmGenerationState(stateStore, { logger });
   } catch (error) {
@@ -330,7 +352,8 @@ export async function createPlatformRuntime() {
       stateStore,
       eventBus,
       undefined,
-      onboardingSubsidyBudget
+      onboardingSubsidyBudget,
+      workerExposurePolicy
     )
   );
   const rewardBankHealthProvider = initStep(

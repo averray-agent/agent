@@ -214,6 +214,7 @@ export async function resolveClaimEconomicsDecision({
     };
     return withOnboardingSubsidyStatus({
       chainMode: false,
+      claimFeeRetainedOnSuccess: false,
       contractLayout: undefined,
       escrowExists: false,
       source: "local",
@@ -247,6 +248,7 @@ export async function resolveClaimEconomicsDecision({
     ]);
     return withOnboardingSubsidyStatus({
       chainMode: true,
+      claimFeeRetainedOnSuccess: Boolean(chainState.claimFeeRetainedOnSuccess),
       contractLayout,
       escrowExists,
       source: "legacy_local",
@@ -287,6 +289,7 @@ export async function resolveClaimEconomicsDecision({
         : preview;
       return withOnboardingSubsidyStatus({
         chainMode: true,
+        claimFeeRetainedOnSuccess: Boolean(chainState.claimFeeRetainedOnSuccess),
         contractLayout,
         escrowExists,
         source: "contract_preview_adjusted_for_sync",
@@ -323,6 +326,7 @@ export async function resolveClaimEconomicsDecision({
     }
     return withOnboardingSubsidyStatus({
       chainMode: true,
+      claimFeeRetainedOnSuccess: Boolean(chainState.claimFeeRetainedOnSuccess),
       contractLayout,
       escrowExists,
       source: "contract_preview",
@@ -355,6 +359,7 @@ export async function resolveClaimEconomicsDecision({
   };
   return withOnboardingSubsidyStatus({
     chainMode: true,
+    claimFeeRetainedOnSuccess: Boolean(chainState.claimFeeRetainedOnSuccess),
     contractLayout,
     escrowExists,
     source: "current_local_before_ensure",
@@ -514,14 +519,22 @@ async function withOnboardingSubsidyStatus(
   decision,
   { onboardingSubsidyBudget, job, paidEconomics } = {}
 ) {
+  const claimFeeRetainedOnSuccess = decision?.claimFeeRetainedOnSuccess === true;
+  const normalizedDecision = {
+    ...decision,
+    economics: {
+      ...decision.economics,
+      claimFeeRetainedOnSuccess
+    }
+  };
   if (!onboardingSubsidyBudget) {
-    return decision;
+    return normalizedDecision;
   }
-  const waived = decision?.economics?.claimEconomicsWaived === true;
+  const waived = normalizedDecision.economics?.claimEconomicsWaived === true;
   // Internal/curated claims currently route through claimJobFor and consume
   // operator gas regardless of the advisory requiresSponsoredGas catalog bit.
   // The external lifecycle is the actual self-funded transaction boundary.
-  const operatorBrokered = !isExternalJob(job);
+  const operatorBrokered = !isExternalJob(job) && (waived || !claimFeeRetainedOnSuccess);
   if (waived && !Number.isFinite(Number(paidEconomics?.claimStake))) {
     throw claimEconomicsUnavailable(
       "The waived claim-stake value is unavailable for onboarding subsidy accounting.",
@@ -539,9 +552,9 @@ async function withOnboardingSubsidyStatus(
         available: true
       };
   return {
-    ...decision,
+    ...normalizedDecision,
     economics: {
-      ...decision.economics,
+      ...normalizedDecision.economics,
       onboardingSubsidy
     }
   };

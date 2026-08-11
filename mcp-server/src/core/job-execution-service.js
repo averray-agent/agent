@@ -83,6 +83,7 @@ export class JobExecutionService {
     this.getDefaultClaimStakeBps = getDefaultClaimStakeBps;
     this.getClaimEconomicsConfig = getClaimEconomicsConfig;
     this.onboardingSubsidyBudget = maintainerSurfaceConfig.onboardingSubsidyBudget;
+    this.workerExposurePolicy = maintainerSurfaceConfig.workerExposurePolicy;
     this.logger = maintainerSurfaceConfig.logger ?? console;
     this.openPrCap = Number.isInteger(maintainerSurfaceConfig.openPrCap) && maintainerSurfaceConfig.openPrCap > 0
       ? maintainerSurfaceConfig.openPrCap
@@ -108,7 +109,28 @@ export class JobExecutionService {
     if (isExternalJob(job)) {
       return this.claimExternalJob(wallet, jobId, protocol, idempotencyKey, job);
     }
-    return this.claimJobAfterLifecycleGate(wallet, jobId, protocol, idempotencyKey, job);
+    if (!this.workerExposurePolicy) {
+      return this.claimJobAfterLifecycleGate(wallet, jobId, protocol, idempotencyKey, job);
+    }
+    const exposureLockId = `worker-exposure:${String(wallet).toLowerCase()}`;
+    const exposureLockOwner = randomUUID();
+    const exposureLockAcquired = await this.stateStore.acquireClaimLock?.(
+      exposureLockId,
+      exposureLockOwner,
+      15 * 60
+    );
+    if (exposureLockAcquired === false) {
+      throw new ConflictError(
+        "Another claim is updating this wallet's open exposure. Retry after it finishes.",
+        "worker_exposure_check_in_progress",
+        { wallet }
+      );
+    }
+    try {
+      return await this.claimJobAfterLifecycleGate(wallet, jobId, protocol, idempotencyKey, job);
+    } finally {
+      await this.stateStore.releaseClaimLock?.(exposureLockId, exposureLockOwner);
+    }
   }
 
   async claimExternalJob(wallet, jobId, protocol, idempotencyKey, job) {
@@ -270,6 +292,7 @@ export class JobExecutionService {
         onboardingSubsidyBudget: this.onboardingSubsidyBudget
       });
       let claimEconomics = claimEconomicsDecision.economics;
+      let workerExposure;
       if (this.blockchainGateway?.isEnabled()) {
         const live = await this.blockchainGateway.getJob(jobId);
         if (live.state !== 0 && live.state !== 1) {
@@ -316,6 +339,7 @@ export class JobExecutionService {
             }
           );
         }
+        workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
         claimEconomics = await reserveOnboardingSubsidyForClaim({
           economics: claimEconomics,
           onboardingSubsidyBudget: this.onboardingSubsidyBudget,
@@ -341,6 +365,7 @@ export class JobExecutionService {
           });
           claimEconomics = {
             ...authoritativeClaimEconomics,
+            claimFeeRetainedOnSuccess: predictedClaimEconomics.claimFeeRetainedOnSuccess === true,
             ...(predictedClaimEconomics.onboardingSubsidy
               ? { onboardingSubsidy: predictedClaimEconomics.onboardingSubsidy }
               : {})
@@ -352,6 +377,7 @@ export class JobExecutionService {
           await this.blockchainGateway.getJob(jobId).catch(() => undefined)
         );
       } else {
+        workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
         claimEconomics = await reserveOnboardingSubsidyForClaim({
           economics: claimEconomics,
           onboardingSubsidyBudget: this.onboardingSubsidyBudget,
@@ -363,7 +389,7 @@ export class JobExecutionService {
       }
 
       return await this.finalizeClaim({
-        sessionId, wallet, jobId, chainJobId, claimEconomics, chainClaimTiming, job, protocol, idempotencyKey
+        sessionId, wallet, jobId, chainJobId, claimEconomics, workerExposure, chainClaimTiming, job, protocol, idempotencyKey
       });
     } finally {
       await this.stateStore.releaseClaimLock?.(sessionLockId, lockOwner);
@@ -373,7 +399,7 @@ export class JobExecutionService {
   // Build + persist the local 'claimed' session, the funded-job record, and the
   // claim events from an on-chain claim. Shared by the normal claim path and the
   // MAIN-002 convergence path so both produce an identical session.
-  async finalizeClaim({ sessionId, wallet, jobId, chainJobId, claimEconomics, chainClaimTiming = {}, job, protocol, idempotencyKey }) {
+  async finalizeClaim({ sessionId, wallet, jobId, chainJobId, claimEconomics, workerExposure, chainClaimTiming = {}, job, protocol, idempotencyKey }) {
     const jobSnapshot = await this.captureJobSnapshot(job, claimEconomics);
     const baseSession = {
       sessionId,
@@ -386,9 +412,11 @@ export class JobExecutionService {
       claimFeeBps: claimEconomics.claimFeeBps,
       claimEconomicsWaived: claimEconomics.claimEconomicsWaived,
       claimEconomicsWaivedAtClaim: claimEconomics.claimEconomicsWaived,
+      claimFeeRetainedOnSuccess: claimEconomics.claimFeeRetainedOnSuccess === true,
       claimEconomicsWaiverScope: "claim_time",
       claimNumber: claimEconomics.claimNumber,
       totalClaimLock: claimEconomics.totalClaimLock,
+      ...(workerExposure ? { workerExposure } : {}),
       ...(claimEconomics.onboardingSubsidy
         ? { onboardingSubsidy: claimEconomics.onboardingSubsidy }
         : {}),
@@ -408,6 +436,17 @@ export class JobExecutionService {
     this.publishSessionEvent("session.claimed", persisted);
     this.publishClaimFundingEvent(persisted, job, claimEconomics);
     return persisted;
+  }
+
+  async requireWorkerExposureAllowance({ wallet, job, claimEconomics }) {
+    if (!this.workerExposurePolicy) return undefined;
+    const workerExposure = await this.workerExposurePolicy.evaluate({ wallet, job, claimEconomics });
+    if (workerExposure.eligible === true) return workerExposure;
+    throw new ConflictError(
+      workerExposure.message ?? "The wallet's open operator exposure could not accept this claim.",
+      workerExposure.reason ?? "worker_open_exposure_unavailable",
+      workerExposure
+    );
   }
 
   logClaimEconomicsPredictionMismatch({ wallet, jobId, prediction, authoritative }) {

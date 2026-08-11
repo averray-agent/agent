@@ -1049,6 +1049,9 @@ test("getClaimEconomicsDecisionState exposes current-layout mapping truth for an
     contractLayout: "rc1"
   });
   gateway.escrowContract = {
+    async retainsClaimFeeOnSuccess() {
+      return true;
+    },
     async onboardingWaiverEligibleJobs(jobId) {
       assert.equal(jobId, gateway.toJobId("eligible-job"));
       return true;
@@ -1059,6 +1062,7 @@ test("getClaimEconomicsDecisionState exposes current-layout mapping truth for an
     state: 1,
     exists: true,
     contractLayout: "current",
+    claimFeeRetainedOnSuccess: true,
     onboardingWaiverEligible: true
   });
 });
@@ -1080,8 +1084,25 @@ test("getClaimEconomicsDecisionState treats the live v1 layout as waiver-capable
     state: 1,
     exists: true,
     contractLayout: "current",
+    claimFeeRetainedOnSuccess: false,
     onboardingWaiverEligible: true
   });
+});
+
+test("getClaimEconomicsDecisionState treats an unreadable optional retention probe conservatively", async () => {
+  const gateway = gatewayWithDot();
+  gateway.readEscrowJob = async () => ({ state: 1, contractLayout: "rc1" });
+  gateway.escrowContract = {
+    async retainsClaimFeeOnSuccess() {
+      throw new Error("selector unavailable");
+    },
+    async onboardingWaiverEligibleJobs() {
+      return false;
+    }
+  };
+
+  const state = await gateway.getClaimEconomicsDecisionState("predecessor-job");
+  assert.equal(state.claimFeeRetainedOnSuccess, false);
 });
 
 test("readEscrowJob detects v1 before the pre-waiver legacy layout", async () => {
