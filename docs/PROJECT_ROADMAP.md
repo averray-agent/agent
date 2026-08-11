@@ -509,8 +509,37 @@ that describes a world we have left is worse than an empty one.
 3. **Engage the external audit.** Still the right thing, no longer a pre-mainnet gate.
    `npm run prepare:mainnet-audit-freeze`, push the frozen tag, hand auditors
    [`AUDIT_PACKAGE.md`](./AUDIT_PACKAGE.md).
-4. **Bank deposit pool, packets 1–2.** Packet 1 is gated (#1038). Packet 2 wires the
-   venue so the notice tiers have a yield differential and therefore a reason to exist.
+4. **Bank deposit pool — BLOCKED on a contract change (#1066).** Packets 1 and 2 merged
+   (#1038, #1043), but the pool **must not be deployed**. An independent review (#1051)
+   found that `DepositPool` derives its share price from `lane.totalAssets()`, which any
+   TreasuryPolicy `strategySettler` can set arbitrarily via `recordRemotePosition` — so a
+   settler can deposit small, inflate the book and drain the buffer. The capability is in
+   `strategySettler`, a *global* mapping, so no choice of pool operator and nothing in the
+   deployment ceremony fixes it. `deploy-deposit-pool.mjs --commit` refuses.
+   The unblock is #1066: split pricing NAV from remote execution inventory and price on a
+   cost basis. It is the only contract change in the current set and therefore the longest
+   lead time. Ceremony, addresses and fork simulation are ready and wait on it
+   (`CEREMONY_DEPOSIT_POOL_DEPLOY.md`, §0 carries the DO-NOT-DEPLOY banner).
+   Downstream: tier 3 of the worker ladder (#1055) and, with it, the only Sybil-resistance
+   mechanism that does not compromise earn-from-zero (`WORKER_PROGRESSION_DESIGN.md`).
+4b. **Agent economics — the worker ladder.** Designs are complete and carry no open
+   questions (`WORKER_PROGRESSION_DESIGN.md`, #1055, #1054). Four steps, and **only the
+   last is blocked**:
+
+   | # | step | state | why |
+   |---|---|---|---|
+   | 1 | Cap the aggregate tier-0 subsidy (`S`/day, global) | **startable now** | closes a LIVE leak — the bond waiver caps at 3 claims but gas is uncapped; one wallet burned ~$1.95 of DOT on 2026-08-11 |
+   | 2 | Retain the claim fee post-tier | startable now | "pay your own way" out of earnings, so no agent ever needs DOT — primitives exist (`EscrowCore.claimFee`, `slashClaimFee`) |
+   | 3 | Per-wallet exposure cap `E` | startable now | bounds monopolisation in USDC-at-risk, not job count; self-loosens as wallets self-fund |
+   | 4 | Tier 3 — allowance ∝ pool shares | **blocked on #1066** | needs the pool; it is the only unforgeable Sybil signal we have |
+
+   Sequence: start **#1066** (contract change, longest lead time) and **step 1** (live leak,
+   small) in parallel — they touch different code. Steps 2–3 follow step 1. Step 4 needs
+   both lines to land.
+
+   The two lanes are one plan: the ladder is why an agent would deposit, and the pool is
+   what makes the ladder's top rung Sybil-resistant. Neither is worth much alone.
+
 5. **Stage 2C-3 HMAC retirement window.** ≥30 days after the 2026-05-21 KMS-only JWT
    cutover: delete `op://prod-backend/auth-jwt-secrets`, drop the HMAC branch from
    `mcp-server/src/auth/jwt.js`, retire `AUTH_JWT_SECRETS` from the inventory and
