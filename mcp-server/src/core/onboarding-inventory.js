@@ -1,4 +1,5 @@
 export const MIN_WAIVER_ELIGIBLE_CLAIMABLE_JOBS = 2;
+export const ONBOARDING_SUBSIDY_LOW_HEADROOM_RATIO = 0.2;
 
 export const ONBOARDING_WAIVER_INGESTION_SOURCES = new Set([
   "github_issue",
@@ -98,11 +99,24 @@ export function buildOnboardingInventoryWarnings(onboarding) {
         : `Only ${count} waiver-eligible claimable onboarding job(s) are available; minimum is ${minimum}.`
     });
   }
-  if (onboarding.subsidy?.headroomUsdc === 0) {
+  const subsidyHeadroomUsdc = onboarding.subsidy?.headroomUsdc;
+  const subsidyDailyBudgetUsdc = onboarding.subsidy?.dailyBudgetUsdc;
+  if (Number.isFinite(subsidyHeadroomUsdc) && subsidyHeadroomUsdc <= 0) {
     warnings.push({
       code: "onboarding_subsidy_exhausted",
       severity: "warning",
       message: "The free onboarding tier is fully allocated for today; the self-funded claim path remains available."
+    });
+  } else if (
+    Number.isFinite(subsidyHeadroomUsdc)
+    && Number.isFinite(subsidyDailyBudgetUsdc)
+    && subsidyDailyBudgetUsdc > 0
+    && subsidyHeadroomUsdc <= subsidyDailyBudgetUsdc * ONBOARDING_SUBSIDY_LOW_HEADROOM_RATIO
+  ) {
+    warnings.push({
+      code: "onboarding_subsidy_headroom_low",
+      severity: "warning",
+      message: `Only ${subsidyHeadroomUsdc} USDC of the ${subsidyDailyBudgetUsdc} USDC daily onboarding subsidy remains; consider raising the budget before tier-0 claims are blocked.`
     });
   }
   return warnings;

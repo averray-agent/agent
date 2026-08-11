@@ -548,6 +548,50 @@ test("onboarding inventory health is ready only with two real eligible claimable
   assert.deepEqual(buildOnboardingInventoryWarnings(health), []);
 });
 
+test("onboarding health warns at 20% subsidy headroom before exhaustion", () => {
+  const onboarding = {
+    status: "ready",
+    reason: "onboarding_waiver_inventory_ready",
+    waiverEligibleClaimableJobs: 2,
+    minimumWaiverEligibleClaimableJobs: 2,
+    subsidy: {
+      dailyBudgetUsdc: 8,
+      allocatedUsdc: 6.4,
+      headroomUsdc: 1.6
+    }
+  };
+
+  assert.deepEqual(buildOnboardingInventoryWarnings(onboarding), [{
+    code: "onboarding_subsidy_headroom_low",
+    severity: "warning",
+    message: "Only 1.6 USDC of the 8 USDC daily onboarding subsidy remains; consider raising the budget before tier-0 claims are blocked."
+  }]);
+
+  onboarding.subsidy = {
+    dailyBudgetUsdc: 8,
+    allocatedUsdc: 6.39,
+    headroomUsdc: 1.61
+  };
+  assert.deepEqual(buildOnboardingInventoryWarnings(onboarding), []);
+});
+
+test("onboarding health reports exhaustion instead of duplicating the low-headroom warning", () => {
+  const warnings = buildOnboardingInventoryWarnings({
+    status: "ready",
+    reason: "onboarding_waiver_inventory_ready",
+    waiverEligibleClaimableJobs: 2,
+    minimumWaiverEligibleClaimableJobs: 2,
+    subsidy: {
+      dailyBudgetUsdc: 8,
+      allocatedUsdc: 8,
+      headroomUsdc: 0
+    }
+  });
+
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].code, "onboarding_subsidy_exhausted");
+});
+
 test("createProductHealthSnapshotProvider caches public health recompute", async () => {
   let current = new Date("2026-07-05T12:00:00.000Z");
   let scans = 0;
