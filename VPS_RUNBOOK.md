@@ -20,6 +20,17 @@ This runbook captures the production-like setup currently running on the OVH VPS
   - `agent-mainnet-indexer`
   - `agent-mainnet-redis`
 
+### Two stacks on this VPS — do not mix their commands
+
+- **Platform stack** (`/srv/agent-stack`): the API/backend/indexer — containers
+  `agent-mainnet-*`, compose at `/srv/agent-stack/docker-compose.yml`.
+- **Board stack** (`/srv/averray-reference-agent`): Hermes monitor / slack-operator.
+  Deploy ONLY via `ops/deploy-monitor.sh` from that checkout — it bakes `GIT_SHA`
+  (dockerignored `.git` means hand-built images report freshness "unknown"),
+  refuses a dirty tree, and picks the right project/env. A raw
+  `docker compose -p avg ... slack-operator` from the wrong directory fails with
+  "no such service" (seen 2026-08-12).
+
 ### Restarting the backend (hung-verification recovery)
 
 A `/health` `verification_timeout_pending` that persists past ~30 minutes will not
