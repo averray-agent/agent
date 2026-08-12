@@ -823,6 +823,8 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
     claimed24h: 0,
     submitted24h: 0,
     settled24h: 0,
+    paidSettled24h: 0,
+    zeroPaySettled24h: 0,
     claimedNotSubmitted: 0,
     submittedNotSettled: 0,
     stuck: 0,
@@ -843,6 +845,8 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
     let claimed24h = 0;
     let submitted24h = 0;
     let settled24h = 0;
+    let paidSettled24h = 0;
+    let zeroPaySettled24h = 0;
     let claimedNotSubmitted = 0;
     let submittedNotSettled = 0;
     let stuck = 0;
@@ -858,6 +862,14 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
       }
       if (isSettledWithinWindow(session, cutoffMs)) {
         settled24h += 1;
+        if (session?.status === "resolved") {
+          paidSettled24h += 1;
+        } else {
+          // The durable session record has no authoritative release amount for
+          // legacy `closed` sessions. Treat closed, like rejected, as zero-pay
+          // instead of guessing that a payout was expected.
+          zeroPaySettled24h += 1;
+        }
       }
       if (session?.status === "claimed" && !session?.submittedAt) {
         claimedNotSubmitted += 1;
@@ -900,6 +912,8 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
       claimed24h,
       submitted24h,
       settled24h,
+      paidSettled24h,
+      zeroPaySettled24h,
       claimedNotSubmitted,
       submittedNotSettled,
       stuck,

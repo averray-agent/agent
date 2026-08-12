@@ -521,6 +521,8 @@ test("buildProductHealthSnapshot reports reward bank and Redis settlement counte
     claimed24h: 5,
     submitted24h: 4,
     settled24h: 2,
+    paidSettled24h: 1,
+    zeroPaySettled24h: 1,
     claimedNotSubmitted: 2,
     submittedNotSettled: 2,
     stuck: 1,
@@ -529,6 +531,44 @@ test("buildProductHealthSnapshot reports reward bank and Redis settlement counte
     source: "backend_state_store",
     readable: true
   });
+});
+
+test("settlement health partitions resolved, rejected, and closed terminals by payout expectation", async () => {
+  const now = new Date("2026-07-05T12:00:00.000Z");
+  const snapshot = await buildProductHealthSnapshot({
+    gateway: { isEnabled: () => false },
+    stateStore: {
+      async listRecentSessions() {
+        return [
+          {
+            sessionId: "paid-resolved",
+            status: "resolved",
+            resolvedAt: "2026-07-05T11:00:00.000Z"
+          },
+          {
+            sessionId: "zero-pay-rejected",
+            status: "rejected",
+            rejectedAt: "2026-07-05T10:30:00.000Z"
+          },
+          {
+            sessionId: "legacy-closed-without-release",
+            status: "closed",
+            closedAt: "2026-07-05T10:00:00.000Z"
+          }
+        ];
+      }
+    },
+    deploymentManifest: TEST_DEPLOYMENT,
+    now
+  });
+
+  assert.equal(snapshot.settlement.settled24h, 3);
+  assert.equal(snapshot.settlement.paidSettled24h, 1);
+  assert.equal(snapshot.settlement.zeroPaySettled24h, 2);
+  assert.equal(
+    snapshot.settlement.paidSettled24h + snapshot.settlement.zeroPaySettled24h,
+    snapshot.settlement.settled24h
+  );
 });
 
 test("onboarding inventory health warns when no real waiver-eligible claimable jobs exist", async () => {
