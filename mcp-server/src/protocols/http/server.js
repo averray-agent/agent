@@ -28,6 +28,7 @@ import { createAccountRoutes } from "./account-routes.js";
 import { createAuthRoutes } from "./auth-routes.js";
 import { createBadgeRoutes, createListBadgeReceipts } from "./badge-routes.js";
 import { createBankLaneFeedRoutes } from "./bank-lane-feed-routes.js";
+import { createDepositPoolObservabilityRoutes } from "./deposit-pool-observability-routes.js";
 import { createContentRoutes } from "./content-routes.js";
 import { createDisputeRoutes } from "./dispute-routes.js";
 import { createEventRoutes } from "./event-routes.js";
@@ -84,6 +85,7 @@ const {
   externalPostingWatcher,
   posterReviewService,
   bankLaneFeed,
+  depositPoolObservability,
   transparencyService,
   stateStore,
   contentRecoveryLog,
@@ -400,6 +402,11 @@ const handleUsdcLiquidityRoute = createUsdcLiquidityRoutes({
 
 const handleBankLaneFeedRoute = createBankLaneFeedRoutes({
   bankLaneFeed,
+  respond,
+});
+
+const handleDepositPoolObservabilityRoute = createDepositPoolObservabilityRoutes({
+  depositPoolObservability,
   respond,
 });
 
@@ -834,6 +841,9 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (await handleBankLaneFeedRoute({ request, response, pathname })) {
+      return;
+    }
+    if (await handleDepositPoolObservabilityRoute({ request, response, pathname })) {
       return;
     }
 

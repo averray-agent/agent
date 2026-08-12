@@ -77,6 +77,7 @@ import {
   loadBankLaneFeedConfig
 } from "./bank-lane-feed.js";
 import { TransparencyService } from "./transparency-service.js";
+import { DepositPoolObservabilityService } from "./deposit-pool-observability.js";
 import {
   UpstreamStatusPollerService,
   loadUpstreamStatusPollerConfig
@@ -552,6 +553,12 @@ export async function createPlatformRuntime() {
       venueBalanceReader
     })
   );
+  const depositPoolObservability = initStep("init-deposit-pool-observability", logger, () =>
+    new DepositPoolObservabilityService({
+      poolAddress: gateway.config.depositPoolAddress,
+      provider: gateway.provider
+    })
+  );
   const xcmBalanceObserver = initStep("init-xcm-balance-observer", logger, () =>
     new XcmBalanceObserverService(
       stateStore,
@@ -746,6 +753,7 @@ export async function createPlatformRuntime() {
     bankXcmDispatcher: bankXcmV22Services.dispatcher,
     bankLaneFeed,
     transparencyService,
+    depositPoolObservability,
     venueBalanceReader,
     xcmObservationRelay,
     upstreamStatusPoller,

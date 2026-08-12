@@ -85,6 +85,10 @@ app.averray.com {
     respond 404
   }
 
+  handle /api/monitor/deposit-pool* {
+    respond 404
+  }
+
   handle /api/events* {
     uri strip_prefix /api
     reverse_proxy backend:8787 {
@@ -120,6 +124,10 @@ api.averray.com {
 
   # Internal observer snapshot; Hermes reaches backend:8787 directly.
   handle /monitor/bank-feed* {
+    respond 404
+  }
+
+  handle /monitor/deposit-pool* {
     respond 404
   }
 

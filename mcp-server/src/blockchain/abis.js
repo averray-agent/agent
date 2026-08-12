@@ -42,7 +42,19 @@ export const AGENT_ACCOUNT_ABI = [
 ];
 
 export const DEPOSIT_POOL_ABI = [
-  "function assetsOf(address account) view returns (uint256)"
+  "function asset() view returns (address)",
+  "function assetsOf(address account) view returns (uint256)",
+  "function totalAssets() view returns (uint256)",
+  "function totalSupply() view returns (uint256)",
+  "function venuePrincipalCostBasis() view returns (uint256)",
+  "function TOTAL_ASSET_CAP() view returns (uint256)",
+  "function PER_AGENT_ASSET_CAP() view returns (uint256)",
+  "event Deposit(address indexed caller, address indexed owner, uint256 assets, uint256 shares)",
+  "event Withdraw(address indexed caller, address indexed receiver, address indexed owner, uint256 assets, uint256 shares)",
+  "event RedeemRequested(uint256 indexed requestId, address indexed owner, address indexed receiver, uint256 shares, uint8 tier, uint64 unlockAt)",
+  "event RedeemFulfilled(uint256 indexed requestId, uint256 shares, uint256 assets)",
+  "event OperatorPrincipalContributed(uint256 assets, uint256 shares, uint256 totalPrincipal)",
+  "event VenueLossWrittenOff(uint256 indexed deploymentId, uint256 assets, uint256 remainingPrincipalCostBasis)"
 ];
 
 export const ESCROW_CORE_ABI = [
