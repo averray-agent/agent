@@ -130,6 +130,12 @@ without a redesign. Worth a comment in the source before someone "tightens" it.
 Let `D` be the deployer EOA and `n` its nonce at the start. CREATE addresses are
 `keccak256(rlp([D, nonce]))[12:]`, so both forward addresses are predictable.
 
+For this ceremony, `D` is the live admin EOA
+`0x9Ab8531FBb0948C542a31298FD61335f30064239`, loaded directly from
+`op://mainnet-critical/admin-eoa-mainnet/credential`. The top-level manifest `deployer`
+(`0x08406B2b…22D1`) is the burned v1 launch key and remains historical evidence only; it is
+never a signer fallback or an address-prediction input.
+
 ```
 predict  A_adapter = CREATE(D, n+1)      # HydrationDepositPoolAdapter
 predict  A_pool    = CREATE(D, n+2)      # DepositPool
@@ -175,6 +181,33 @@ From `deployments/mainnet.json` at c48a22e:
 | `strategyId_` | `HYDRATION_USDC_POOL_V1` (proposed) | must NOT reuse `HYDRATION_USDC_V1` |
 | `agentAccountCore_` | `A_adapter` (predicted, §2) | immutable |
 | `operator_` (pool) | `0x5a6836c6D4d293F6E5377E6c28054F4171915813` | the backend signing key — see below |
+
+### `D` — explicit live signer, with one acknowledged concentration increase
+
+The EscrowCore v2 redeploy established the working admin signer mechanism. This ceremony
+uses the same direct 1Password read and the same fail-closed identity binding:
+
+```sh
+node scripts/ops/deploy-deposit-pool.mjs \
+  --profile mainnet \
+  --expected-deployer 0x9Ab8531FBb0948C542a31298FD61335f30064239 \
+  --signer-secret-ref 'op://mainnet-critical/admin-eoa-mainnet/credential'
+```
+
+The script derives the EOA from the concealed key and refuses if it differs from
+`--expected-deployer`; `--commit` also refuses without the secret reference. Predictions use
+that EOA's live **pending** nonce. No private-key environment variable or manifest-deployer
+fallback is accepted.
+
+After the preview is gated, rerun that exact command with `--commit`; never hand-edit or
+carry forward its predicted addresses. The commit path re-derives the signer and re-reads the
+pending nonce before constructing or broadcasting anything.
+
+**Operator-acknowledged concentration:** the admin EOA's role concentration grows by one
+operational duty — deposit-pool deployer. Deployment does not leave it with a new mutable
+pool role, but the same credential is now used for another launch path. Record that duty for
+the next credential rotation and move future CREATE ceremonies to a dedicated deploy-only
+EOA rather than extending the admin key again.
 
 ### `operator_` — a bounded role, so it does not need the multisig
 
@@ -250,7 +283,7 @@ Read from mainnet 2026-08-10:
 ```
 strategySettler(0x5a6836c6D4d293F6E5377E6c28054F4171915813) = true    # manifest `verifier`
 strategySettler(0x9Ab8531FBb0948C542a31298FD61335f30064239) = false
-strategySettler(0x08406B2bCE5592A534141767ffe4e5B9DC6c22D1) = false   # deployer
+strategySettler(0x08406B2bCE5592A534141767ffe4e5B9DC6c22D1) = false   # burned v1 deployer
 strategySettler(0x01e6eed856e989201f4ff6346e18eab7e46c874c) = false   # multisig owner
 ```
 
@@ -271,19 +304,20 @@ Two observations worth carrying forward rather than acting on now:
 
 ### Predicted addresses
 
-Computed against the live deployer nonce on 2026-08-10:
+Captured through `https://services.polkadothub-rpc.com/mainnet/` at Asset Hub block
+19,377,482 on 2026-08-12:
 
 ```
-deployer   0x08406B2bCE5592A534141767ffe4e5B9DC6c22D1   nonce = 33
+deployer   0x9Ab8531FBb0948C542a31298FD61335f30064239   pending nonce = 11
 
-nonce 33 → 0xAcC2CAc2E814F243dbFEAE1B99BcfE1A1A7846Ed   tx1  lane
-nonce 34 → 0xf0f3b4a65AD54f1838A581b594CA77A54002c5f1   tx2  A_adapter
-nonce 35 → 0xAa9661e983FF3a41c8FE992331E8f1e375d3eE94   tx3  A_pool
+nonce 11 → 0xAbDca8AAca9308C7DA26c5B7E5E2380CDDD37f34   tx1  lane
+nonce 12 → 0x50d279818948fbfe10B03b74e6b8aB44428b51ab   tx2  A_adapter
+nonce 13 → 0xCCF5FDF3108AF8e693F28bb9326A573d9dA0F476   tx3  A_pool
 ```
 
-**These are valid only while the nonce is still 33.** Recompute immediately before tx 1
-(`cast nonce <D>` then `cast compute-address <D> --nonce <n>`) and abort if it has moved.
-They are recorded here as a worked example of the shape, not as values to paste blindly.
+**These are valid only while the pending nonce is still 11.** Regenerate with the script
+immediately before tx 1 and abort if it has moved. They are a gated preview, not values to
+paste blindly; the script re-reads the nonce before every CREATE and refuses any drift.
 
 ---
 
@@ -419,14 +453,15 @@ deliberately does not.
 
 ## 5b. Fork simulation — the ordering is proven, not reasoned
 
-Rerun 2026-08-11 against an `anvil` fork of mainnet at block 19,345,507, deployer nonce 33
-(matching mainnet) after the #1066 bytecode change. All four transactions executed:
+Rerun 2026-08-12 against an `anvil` fork of mainnet at block 19,377,482 using admin deployer
+`0x9Ab8531FBb0948C542a31298FD61335f30064239` at pending nonce 11 (matching mainnet).
+All four transaction stages executed after the #1066 bytecode change:
 
 | tx | contract | address | vs prediction |
 |---|---|---|---|
-| 1 | `HydrationUsdcAdapterV22` (lane) | `0xAcC2CAc2E814F243dbFEAE1B99BcfE1A1A7846Ed` | **match** |
-| 2 | `HydrationDepositPoolAdapter` | `0xf0f3b4a65AD54f1838A581b594CA77A54002c5f1` | **match** |
-| 3 | `DepositPool` | `0xAa9661e983FF3a41c8FE992331E8f1e375d3eE94` | **match** |
+| 1 | `HydrationUsdcAdapterV22` (lane) | `0xAbDca8AAca9308C7DA26c5B7E5E2380CDDD37f34` | **match** |
+| 2 | `HydrationDepositPoolAdapter` | `0x50d279818948fbfe10B03b74e6b8aB44428b51ab` | **match** |
+| 3 | `DepositPool` | `0xCCF5FDF3108AF8e693F28bb9326A573d9dA0F476` | **match** |
 | 4 | pause → `setStrategyAdapter` → unpause | (multisig owner impersonated) | all `status 0x1` |
 
 Both load-bearing constructor assertions passed for real rather than in argument:
@@ -434,10 +469,9 @@ tx2's `lane.agentAccountCore() == address(this)`, and tx3's
 `venueAdapter.code.length != 0 && venueAdapter.asset() == asset_ &&
 venueAdapter.lossReporter() != address(0)`.
 
-The addresses were recomputed from current state. They are unchanged from the 2026-08-10
-run because the deployer nonce is still 33. This is expected: plain CREATE addresses depend
-on deployer plus nonce, not creation bytecode. The creation bytecode hashes used in this
-rerun were:
+The addresses were recomputed from the admin EOA and its live pending nonce. They differ from
+the old packet because both the authorized sender and nonce changed. The creation bytecode
+hashes are unchanged, proving the rerun changed ceremony identity rather than contract code:
 
 ```
 lane          0x997ddcced2590a77dda1a555e07916e9e55231f28e130b5b26d6bc9fc10e1efe
@@ -448,14 +482,14 @@ pool          0xa8f2758ec34ad18defec81b7ea454bf00aa7617981d39575200fa75243628550
 Wiring read back afterwards — the cycle closes and the live lane is untouched:
 
 ```
-wrapper.strategyAdapter(HYDRATION_USDC_POOL_V1) = 0xAcC2CAc2…  (new lane)
+wrapper.strategyAdapter(HYDRATION_USDC_POOL_V1) = 0xAbDca8AA…  (new lane)
 wrapper.strategyAdapter(HYDRATION_USDC_V1)      = 0x96091d44…  (operating lane, unchanged)
 pool.operator()          = 0x5a6836c6…5813
-pool.venueAdapter()      = 0xf0f3b4a6…
-venueAdapter.pool()      = 0xAa9661e9…
-venueAdapter.lane()      = 0xAcC2CAc2…
+pool.venueAdapter()      = 0x50d27981…
+venueAdapter.pool()      = 0xCCF5FDF3…
+venueAdapter.lane()      = 0xAbDca8AA…
 venueAdapter.lossReporter() = 0x01E6eed8…874C  (TreasuryPolicy owner)
-lane.agentAccountCore()  = 0xf0f3b4a6…
+lane.agentAccountCore()  = 0x50d27981…
 lane.strategyId()        = HYDRATION_USDC_POOL_V1
 pool.venuePrincipalCostBasis() = 0
 ```
@@ -495,8 +529,11 @@ Reach for anvil for pure-EVM wiring, not for anything that moves the asset.
       a module constant; the hazard was reuse, not choice (§3).
 - [x] ~~`operator_` address named~~ — `0x5a6836c6…5813`, the backend signing key (§3),
       with the four-role concentration recorded for the next rotation
+- [x] ~~live deployer path named~~ — admin EOA `0x9Ab8531F…4239`, direct 1Password ref,
+      explicit expected-address refusal, and its added deployer duty recorded for rotation
 - [ ] deployer `D` confirmed quiescent; nonce re-read immediately before tx 1 (§2)
-- [ ] predicted addresses **recomputed** at ceremony time — the ones in §3 assume nonce 33
+- [x] ~~predicted addresses refreshed for gate~~ — §3 uses admin pending nonce 11 at block
+      19,377,482; regenerate again at ceremony time
 - [x] ~~pause window~~ — the chain is quiet: `pendingDepositAssets = 0`,
       `pendingWithdrawalShares = 0`, `dispatchPaused = false` (read 2026-08-10). Nothing is
       in flight, so the `setStrategyAdapter` pause can be taken whenever the multisig is
@@ -504,12 +541,12 @@ Reach for anvil for pure-EVM wiring, not for anything that moves the asset.
 - [x] ~~§5 decision~~ — document, do not chase. "It comes home at recall" was checked and is
       false; recovery needs its own packet and is not worth it at this size.
 - [x] ~~dry-run each deployment after #1066~~ — full four-transaction fork simulation reran
-      at block 19,345,507 with the new bytecode; all three addresses matched freshly
-      recomputed predictions (§5b). The USDC precompile is the one step anvil cannot model;
-      its check was verified directly against mainnet instead.
+      at block 19,377,482 with the admin deployer; all three addresses matched the refreshed
+      predictions (§5b). The USDC precompile is the one step anvil cannot model; its check
+      was verified directly against mainnet instead.
 - [ ] caps confirmed as intended: `totalAssets() <= 1_000e6`, `assetsOf(agent) <= 100e6`
 - [ ] **on the day**: re-read the deployer nonce and recompute both predicted addresses —
-      §5b assumed 33, and the whole ordering depends on it
+      §5b observed 11, and the whole ordering depends on it
 
 Nothing here moves depositor money — the pool starts empty. The ceremony's risk is
 mis-wiring immutable references, not loss of funds, and every mitigation above targets that.
