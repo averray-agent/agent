@@ -185,7 +185,7 @@ test("persistent submitted-session integrity skips degrade verifier health", asy
   assert.equal(health.persistentSubmittedFailures[0].reason, "job_snapshot_missing");
 });
 
-test("persistent submitted-session skips degrade health regardless of reason", async () => {
+test("persistent submitted-session skips still degrade health for alarmable reasons", async () => {
   const harness = makeHarness({
     sessions: [
       { sessionId: "s-human", jobId: "human-001", status: "submitted" },
@@ -206,10 +206,41 @@ test("persistent submitted-session skips degrade health regardless of reason", a
   assert.deepEqual(
     health.persistentSubmittedFailures.map(({ sessionId, reason }) => ({ sessionId, reason })),
     [
-      { sessionId: "s-human", reason: "non_auto_mode" },
       { sessionId: "s-in-flight", reason: "in_flight" }
     ]
   );
+});
+
+test("non-auto submitted sessions remain healthy across consecutive finished runs", () => {
+  const service = makeService(makeHarness());
+  service.running = true;
+  service.startedAt = new Date().toISOString();
+
+  for (let run = 0; run < 3; run += 1) {
+    service.finishRun({
+      skipped: [{ sessionId: "s-human", jobId: "human-001", reason: "non_auto_mode" }],
+      errors: []
+    });
+  }
+
+  assert.equal(service.resolveLiveness().ok, true);
+  assert.deepEqual(service.listPersistentSubmittedFailures(), []);
+});
+
+test("already-verified submitted sessions do not arm the failure streak", () => {
+  const service = makeService(makeHarness());
+  service.running = true;
+  service.startedAt = new Date().toISOString();
+
+  for (let run = 0; run < 3; run += 1) {
+    service.finishRun({
+      skipped: [{ sessionId: "s-settled", jobId: "bench-001", reason: "already_verified" }],
+      errors: []
+    });
+  }
+
+  assert.equal(service.resolveLiveness().ok, true);
+  assert.deepEqual(service.listPersistentSubmittedFailures(), []);
 });
 
 test("a submitted-session failure remains persistent when its reason changes", () => {
@@ -235,6 +266,13 @@ test("a submitted-session failure remains persistent when its reason changes", (
     consecutiveRuns: 2,
     lastSeenAt: "2026-08-11T20:01:00.000Z"
   }]);
+  assert.deepEqual(
+    {
+      ok: service.resolveLiveness(new Date("2026-08-11T20:01:00.000Z")).ok,
+      state: service.resolveLiveness(new Date("2026-08-11T20:01:00.000Z")).state
+    },
+    { ok: false, state: "submitted_session_persistently_skipped" }
+  );
 });
 
 test("persistent worker-canary snapshot skips do not degrade payout-queue health", async () => {
@@ -330,18 +368,25 @@ test("does nothing when disabled", async () => {
   assert.equal(harness.verifyCalls.length, 0);
 });
 
-test("dry-run reports candidates without verifying", async () => {
+test("dry-run reports candidates without verifying or arming the failure streak", async () => {
   const harness = makeHarness({
     sessions: [{ sessionId: "s-bench", jobId: "bench-001", status: "submitted" }]
   });
   const service = makeService(harness, { dryRun: true });
 
-  const run = await service.runOnce();
+  service.running = true;
+  service.startedAt = new Date().toISOString();
 
-  assert.equal(run.candidateCount, 1);
-  assert.equal(run.verifiedCount, 0);
+  const firstRun = await service.runOnce();
+  await service.runOnce();
+  await service.runOnce();
+
+  assert.equal(firstRun.candidateCount, 1);
+  assert.equal(firstRun.verifiedCount, 0);
   assert.equal(harness.verifyCalls.length, 0);
-  assert.ok(run.skipped.some((s) => s.reason === "dry_run"));
+  assert.ok(firstRun.skipped.some((s) => s.reason === "dry_run"));
+  assert.equal(service.resolveLiveness().ok, true);
+  assert.deepEqual(service.listPersistentSubmittedFailures(), []);
 });
 
 test("caps work per run and defers the remainder to the next tick", async () => {

@@ -383,19 +383,22 @@ test("GET /health degrades when service liveness is not ok", async () => {
   assert.equal(response.body.serviceHealth.ok, false);
 });
 
-test("GET /health degrades directly when the submitted-job verifier is stale", async () => {
+test("GET /health reports verifier degradation as a critical warning without returning 503", async () => {
+  const submittedJobAutoVerifierHealth = {
+    ok: false,
+    enabled: true,
+    running: true,
+    state: "submitted_session_persistently_skipped",
+    persistentSubmittedFailureCount: 2,
+    persistentSubmittedFailures: [
+      { sessionId: "session-1" },
+      { sessionId: "session-2" }
+    ]
+  };
   const { response, route } = makeHarness({
     service: {
       submittedJobAutoVerifier: {
-        getHealth: async () => ({
-          ok: false,
-          enabled: true,
-          running: true,
-          state: "last_run_stale",
-          intervalMs: 60_000,
-          staleAfterMs: 240_000,
-          lastRunFinishedAt: "2026-08-11T12:00:00.000Z"
-        })
+        getHealth: async () => submittedJobAutoVerifierHealth
       },
       xcmSettlementWatcher: {
         getStatus: async () => ({ enabled: true, running: true, pendingCount: 0 })
@@ -409,13 +412,18 @@ test("GET /health degrades directly when the submitted-job verifier is stale", a
     pathname: "/health"
   });
 
-  assert.equal(response.statusCode, 503);
-  assert.equal(response.body.status, "degraded");
-  assert.equal(response.body.serviceHealth.ok, false);
-  assert.equal(
-    response.body.serviceHealth.components.submittedJobAutoVerifier.state,
-    "last_run_stale"
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.status, "ok");
+  assert.equal(response.body.serviceHealth.ok, true);
+  assert.deepEqual(
+    response.body.components.submittedJobAutoVerifier,
+    submittedJobAutoVerifierHealth
   );
+  assert.ok(response.body.warnings.some((warning) => (
+    warning.code === "submitted_session_persistently_skipped"
+      && warning.severity === "critical"
+      && warning.message.includes("persistent submitted session count: 2")
+  )));
 });
 
 test("GET /metrics emits Prometheus text with CORS and request id headers", async () => {

@@ -208,6 +208,7 @@ echo "Checking API health"
 api_health_json="$(fetch "$API_HEALTH_URL")"
 jq -e '.status == "ok"' >/dev/null <<<"$api_health_json"
 jq -e '.components.stateStore.ok == true' >/dev/null <<<"$api_health_json"
+jq -e '.components.submittedJobAutoVerifier.ok == true' >/dev/null <<<"$api_health_json"
 
 echo "Checking onboarding contract"
 onboarding_json="$(fetch "$API_ONBOARDING_URL")"
