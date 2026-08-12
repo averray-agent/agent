@@ -723,8 +723,10 @@ export function explainEligibilityFromPreflight(preflight) {
     claimEconomicsWaived: preflight.claimEconomicsWaived,
     onboardingSubsidy: preflight.onboardingSubsidy,
     workerExposure: preflight.workerExposure,
+    dailyExposure: preflight.dailyExposure,
+    dailyExposureRemaining: preflight.dailyExposureRemaining,
     failureStates: preflight.failureStates,
-    reasonMessage: preflight.reasonMessage ?? preflight.workerExposure?.message
+    reasonMessage: preflight.reasonMessage ?? preflight.dailyExposure?.message ?? preflight.workerExposure?.message
   };
 }
 

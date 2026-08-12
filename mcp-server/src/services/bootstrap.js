@@ -5,6 +5,7 @@ import {
   loadOnboardingSubsidyBudgetConfig
 } from "../core/claim-economics.js";
 import { createWorkerExposurePolicy } from "../core/worker-exposure.js";
+import { createWorkerDailyExposurePolicy } from "../core/worker-daily-exposure.js";
 import { migrateLegacyBankXcmGenerationState } from "./bank-xcm-watch-migration.js";
 import { AccountOverlayStore } from "../core/account-overlay-store.js";
 import { PolicyService } from "../core/policy-service.js";
@@ -170,6 +171,10 @@ export function createPlatformService() {
     blockchainGateway: gateway,
     gasEstimateUsdc: subsidyConfig.gasEstimateUsdc
   });
+  const workerDailyExposurePolicy = createWorkerDailyExposurePolicy({
+    stateStore,
+    workerExposurePolicy
+  });
   const eventBus = new EventBus({ eventStore: stateStore });
   const accounts = new AccountOverlayStore({ stateStore });
   accounts.seed(...SEED_DEV_OVERLAY);
@@ -186,7 +191,8 @@ export function createPlatformService() {
     eventBus,
     undefined,
     onboardingSubsidyBudget,
-    workerExposurePolicy
+    workerExposurePolicy,
+    workerDailyExposurePolicy
   );
 }
 
@@ -308,6 +314,15 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const workerDailyExposurePolicy = initStep(
+    "init-worker-daily-exposure-policy",
+    logger,
+    () => createWorkerDailyExposurePolicy({
+      stateStore,
+      workerExposurePolicy,
+      env: process.env
+    })
+  );
   try {
     await migrateLegacyBankXcmGenerationState(stateStore, { logger });
   } catch (error) {
@@ -353,7 +368,8 @@ export async function createPlatformRuntime() {
       eventBus,
       undefined,
       onboardingSubsidyBudget,
-      workerExposurePolicy
+      workerExposurePolicy,
+      workerDailyExposurePolicy
     )
   );
   const rewardBankHealthProvider = initStep(

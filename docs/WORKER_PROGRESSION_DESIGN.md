@@ -225,6 +225,22 @@ write. That serialization is load-bearing: two different jobs cannot both pass a
 same stale headroom. The specific refusal codes are `worker_open_exposure_cap_reached`,
 `worker_open_exposure_unavailable`, and `worker_exposure_check_in_progress`.
 
+### Tier-2 daily allowance implementation boundary
+
+The steady-state daily allowance uses the same USDC exposure unit as the open cap, but over a
+rolling 24-hour claim window. `WORKER_DAILY_EXPOSURE_BUDGET_RAW` defaults to **1,500,000**
+(1.50 USDC). Each successful curated claim records reserved reward plus brokered-gas estimate
+on its durable session. That spend remains in the window after resolution, rejection, or
+expiry and ages out exactly 24 hours after claim time; settlement only releases the separate
+open-exposure cap. A configured zero refuses all curated claims.
+
+Both preflight and the serialized claim mutation call `resolveDailyExposureBudget(wallet)`.
+The resolver returns the flat tier-2 budget today and is the seam where pool-share-backed
+tier-3 allowance can later be added without changing the ledger. The refusal code is
+`daily_exposure_budget_reached`, with the remaining allowance and oldest entry's age-out in
+the response. Unreadable or inconsistent durable history refuses with
+`daily_exposure_budget_unavailable` rather than treating missing spend as zero.
+
 ---
 
 ## 7. What this design does not solve

@@ -42,7 +42,8 @@ function makePlatformService(
   eventBus = undefined,
   stateStore = undefined,
   onboardingSubsidyBudget = undefined,
-  workerExposurePolicy = undefined
+  workerExposurePolicy = undefined,
+  workerDailyExposurePolicy = undefined
 ) {
   const jobs = [
     {
@@ -102,7 +103,8 @@ function makePlatformService(
     eventBus,
     undefined,
     onboardingSubsidyBudget,
-    workerExposurePolicy
+    workerExposurePolicy,
+    workerDailyExposurePolicy
   );
 }
 
@@ -120,6 +122,34 @@ function blockingWorkerExposurePolicy() {
         candidateExposureUsdc: 0.559,
         projectedExposureUsdc: 1.359,
         headroomUsdc: 0.2
+      };
+    }
+  };
+}
+
+function dailyExposurePolicy({ eligible = false } = {}) {
+  return {
+    async evaluate({ wallet, job }) {
+      assert.equal(wallet, WALLET);
+      assert.equal(job.id, "parent-job-001");
+      return {
+        eligible,
+        applies: true,
+        status: eligible ? "within_budget" : "exceeded",
+        reason: eligible ? "daily_exposure_within_budget" : "daily_exposure_budget_reached",
+        dailyExposureBudgetRaw: "1500000",
+        dailyExposureUsedRaw: "1236000",
+        dailyExposureRemainingRaw: "264000",
+        dailyExposureRemaining: 0.264,
+        candidateExposureRaw: "309000",
+        projectedDailyExposureRaw: "1545000",
+        retryAfter: eligible ? undefined : "2026-08-13T06:00:00.000Z",
+        retryAfterSeconds: eligible ? undefined : 60,
+        entry: {
+          version: "worker-daily-exposure-v1",
+          candidate: { reservedRewardUsdc: 0.25, brokeredGasUsdc: 0.059, totalUsdc: 0.309 }
+        },
+        message: eligible ? "within budget" : "daily budget reached"
       };
     }
   };
@@ -286,6 +316,72 @@ test("claim rechecks the wallet USDC exposure cap before any local claim write",
     }
   );
   assert.equal(await stateStore.findSessionByJobId("parent-job-001"), undefined);
+});
+
+test("preflight and explainEligibility predict the rolling daily exposure refusal", async () => {
+  const service = makePlatformService(
+    undefined,
+    undefined,
+    new MemoryStateStore(),
+    undefined,
+    undefined,
+    dailyExposurePolicy()
+  );
+
+  const preflight = await service.preflightJob(WALLET, "parent-job-001");
+  const explanation = await service.explainEligibility(WALLET, "parent-job-001");
+
+  assert.equal(preflight.eligible, false);
+  assert.equal(preflight.reason, "daily_exposure_budget_reached");
+  assert.equal(preflight.dailyExposureRemaining, 0.264);
+  assert.equal(preflight.dailyExposure.retryAfter, "2026-08-13T06:00:00.000Z");
+  assert.equal(explanation.eligible, false);
+  assert.equal(explanation.reason, preflight.reason);
+  assert.equal(explanation.dailyExposureRemaining, preflight.dailyExposureRemaining);
+  assert.deepEqual(explanation.dailyExposure, preflight.dailyExposure);
+});
+
+test("claim refuses the same daily boundary before session creation or brokering", async () => {
+  const stateStore = new MemoryStateStore();
+  const service = makePlatformService(
+    undefined,
+    undefined,
+    stateStore,
+    undefined,
+    undefined,
+    dailyExposurePolicy()
+  );
+
+  await assert.rejects(
+    () => service.claimJob(WALLET, "parent-job-001", "http", "daily-exposure-blocked"),
+    (error) => {
+      assert.equal(error.code, "daily_exposure_budget_reached");
+      assert.equal(error.details.dailyExposureRemaining, 0.264);
+      assert.equal(error.details.retryAfter, "2026-08-13T06:00:00.000Z");
+      return true;
+    }
+  );
+  assert.equal(await stateStore.findSessionByJobId("parent-job-001"), undefined);
+});
+
+test("successful claim persists its durable daily exposure entry", async () => {
+  const stateStore = new MemoryStateStore();
+  const service = makePlatformService(
+    undefined,
+    undefined,
+    stateStore,
+    undefined,
+    undefined,
+    dailyExposurePolicy({ eligible: true })
+  );
+
+  const claimed = await service.claimJob(WALLET, "parent-job-001", "http", "daily-exposure-recorded");
+
+  assert.deepEqual(claimed.dailyExposure, {
+    version: "worker-daily-exposure-v1",
+    candidate: { reservedRewardUsdc: 0.25, brokeredGasUsdc: 0.059, totalUsdc: 0.309 }
+  });
+  assert.deepEqual((await stateStore.getSession(claimed.sessionId)).dailyExposure, claimed.dailyExposure);
 });
 
 test("createSubJob links the child job to the active parent session", async () => {
