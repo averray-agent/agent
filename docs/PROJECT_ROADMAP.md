@@ -514,14 +514,32 @@ that describes a world we have left is worse than an empty one.
    The #1051 finding (any TreasuryPolicy `strategySettler` could set `lane.totalAssets()`
    arbitrarily and drain the buffer) is closed by **#1075** — pricing NAV split from
    remote execution inventory, priced on principal cost basis: the change #1066 asked
-   for, merged 2026-08-11. Verified 2026-08-12: #1075 landed the fix, the refreshed §5b
-   fork simulation (block 19,345,507, all four txs, addresses matched), and the
-   `--commit` re-enable as one reviewed unit; the #1051 attack replay is pinned in
-   `test/DepositPool.t.sol::testRemoteObservationCannotRepriceSharesOrDrainTheBuffer`
-   on every CI run. **Remaining: only the ceremony itself** — a multisig event, done
-   with fresh heads, never same-day alongside incident work. Known accepted seam
-   (§0): yield lands step-wise on recall, negligible at 10 USDC scale, redesign
-   before growth.
+   for, merged 2026-08-11. **CEREMONY EXECUTED 2026-08-12 ~18:21** — DepositPool
+   `0xCCF5FDF3108AF8e693F28bb9326A573d9dA0F476`, venueAdapter `0x50d27981…51ab`,
+   dedicated lane `0xAbDca8AA…7f34` registered under `HYDRATION_USDC_POOL_V1`;
+   deployed by the admin EOA (original deployer key burned — #1093 repoint), all
+   postconditions verified on-chain, operating lane untouched, manifest catch-up
+   #1094. Pool is live, empty, caps 1,000/100.
+   **The bank-lane sequence from here, in order:**
+   1. Tier-3 wiring (`docs/PACKET_TIER3_POOL_ALLOWANCE.md`, with Codex) —
+      deposits raise the daily allowance 1:1, base 1.50 fail-closed.
+   2. The deposit door — guided MCP/HTTP approve+deposit flow; the refusal copy
+      already points here, so the path it names must be walkable.
+   3. Dogfood one deposit end-to-end (deposit → raised allowance → work past
+      5/day → withdraw) before any stranger tries it.
+   4. Pool observability on the ops-board Bank pillar (deposits, buffer,
+      deployed, share price) — before external deposits, never after.
+   5. Yield ceremony: deploy pool buffer to the venue via the pool's own lane
+      (epoch-1 mechanics); the spec must set the deployed-fraction cap and
+      re-state the two accepted seams (yield-step timing capture; buffer floor
+      for withdrawals). Fresh-heads multisig event.
+   6. Data-informed follow-ons: lock-up/withdrawal-decay economics (decide with
+      observed behaviour, not in advance); epoch-1 yield booking at first
+      recall; EscrowCore v3 ceremony as a parallel track (fee retention +
+      waiver retirement).
+   Sequencing rule: no promoting deposits before 3+4; no yield ceremony before
+   the buffer holds anything — every public claim stays one step behind
+   demonstrated reality.
    **Priority raised 2026-08-12:** once the tier-2 daily allowance `D` lands, deposits
    are the only path past ~5 jobs/day — every serious worker stalls at the allowance
    until the pool exists. Downstream unchanged: tier 3 (#1055), the only
