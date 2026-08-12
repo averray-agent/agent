@@ -253,7 +253,8 @@ test("buildPlatformCapabilities stays aligned with the discovery tool list", () 
     walletModes: manifest.onboarding.walletModes,
     actionRequirements: manifest.onboarding.actionRequirements,
     readinessChecks: manifest.onboarding.readinessChecks,
-    selfServeChecklist: manifest.onboarding.selfServeChecklist
+    selfServeChecklist: manifest.onboarding.selfServeChecklist,
+    raiseYourAllowance: manifest.onboarding.raiseYourAllowance
   });
   assert.deepEqual(capabilities.auth, {
     scheme: manifest.auth.scheme,

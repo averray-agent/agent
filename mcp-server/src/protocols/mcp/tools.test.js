@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createJobRoutes } from "../http/job-routes.js";
+import { createDepositPoolRoutes } from "../http/deposit-pool-routes.js";
 import { readJsonBody, respond } from "../http/http-helpers.js";
 import {
   createMcpToolExecutor,
@@ -37,6 +38,18 @@ function makePublicRoute(fullCapabilities) {
     respond(response, 200, fullCapabilities);
     return true;
   };
+}
+
+function makeDepositPoolRoute() {
+  return createDepositPoolRoutes({
+    authMiddleware: async () => ({ wallet: "0xworker" }),
+    depositPoolDoor: {
+      getInfo: async (wallet) => ({ available: true, ...(wallet ? { wallet } : {}) }),
+      buildTransactions: async (wallet, payload) => ({ wallet, ...payload, unsigned: true })
+    },
+    readJsonBody,
+    respond
+  });
 }
 
 test("getPlatformCapabilities defaults to a bounded welcome and preserves the full response byte-for-byte", async () => {
@@ -125,6 +138,7 @@ test("every tool advertised by the MCP welcome resolves through this surface", a
   };
   const execute = createMcpToolExecutor({
     handleAuthRoute,
+    handleDepositPoolRoute: makeDepositPoolRoute(),
     handleJobRoute: makeJobRoute(service, "mcp"),
     handlePublicMetadataRoute: makePublicRoute({ discoveryUrl: "https://example.test/agent-tools.json" })
   });
@@ -140,6 +154,8 @@ test("every tool advertised by the MCP welcome resolves through this surface", a
     preflightJob: { jobId: "job-1" },
     estimateNetReward: { jobId: "job-1" },
     explainEligibility: { jobId: "job-1" },
+    getDepositPoolInfo: {},
+    buildDepositPoolTransactions: { direction: "withdraw", shares: "1" },
     fetchAuthNonce: { wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
     verifySiwe: { message: "message", signature: `0x${"1".repeat(130)}` },
     refreshAuthToken: {},
@@ -163,7 +179,9 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
     "validateJobSubmission",
     "preflightJob",
     "estimateNetReward",
-    "explainEligibility"
+    "explainEligibility",
+    "getDepositPoolInfo",
+    "buildDepositPoolTransactions"
   ];
 
   for (const name of idempotentReads) {
@@ -178,8 +196,43 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
   assert.match(byName.claimJob.description, /exceed 10 seconds/u);
   assert.deepEqual(byName.claimJob._meta["com.averray/auth"].scopes, ["jobs:claim"]);
   assert.deepEqual(byName.submitWork._meta["com.averray/auth"].scopes, ["jobs:submit"]);
+  assert.equal(byName.getDepositPoolInfo._meta["com.averray/auth"].required, false);
+  assert.equal(byName.buildDepositPoolTransactions._meta["com.averray/auth"].required, true);
   assert.equal(byName.claimJob._meta["com.averray/auth"].required, true);
   assert.equal(byName.submitWork._meta["com.averray/auth"].required, true);
+});
+
+test("deposit pool MCP tools are payload-identical to the shared HTTP routes", async () => {
+  const handleDepositPoolRoute = makeDepositPoolRoute();
+  const execute = createMcpToolExecutor({
+    handleAuthRoute: async () => false,
+    handleDepositPoolRoute,
+    handleJobRoute: async () => false,
+    handlePublicMetadataRoute: async () => false
+  });
+  const request = {
+    headers: { authorization: "Bearer token" },
+    socket: { remoteAddress: "127.0.0.1" }
+  };
+  const httpInfo = await invokeHttpRoute(handleDepositPoolRoute, {
+    headers: request.headers,
+    method: "GET",
+    path: "/pool",
+    sourceRequest: request
+  });
+  const mcpInfo = await execute("getDepositPoolInfo", {}, { request });
+  assert.deepEqual(mcpInfo, httpInfo.body);
+
+  const input = { direction: "withdraw", shares: "1" };
+  const httpBuild = await invokeHttpRoute(handleDepositPoolRoute, {
+    body: input,
+    headers: request.headers,
+    method: "POST",
+    path: "/pool/transactions",
+    sourceRequest: request
+  });
+  const mcpBuild = await execute("buildDepositPoolTransactions", input, { request });
+  assert.deepEqual(mcpBuild, httpBuild.body);
 });
 
 test("listJobs returns the same value through MCP and its HTTP route", async () => {

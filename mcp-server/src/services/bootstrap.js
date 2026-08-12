@@ -5,7 +5,10 @@ import {
   loadOnboardingSubsidyBudgetConfig
 } from "../core/claim-economics.js";
 import { createWorkerExposurePolicy } from "../core/worker-exposure.js";
-import { createWorkerDailyExposurePolicy } from "../core/worker-daily-exposure.js";
+import {
+  createWorkerDailyExposurePolicy,
+  loadWorkerDailyExposureConfig
+} from "../core/worker-daily-exposure.js";
 import { migrateLegacyBankXcmGenerationState } from "./bank-xcm-watch-migration.js";
 import { AccountOverlayStore } from "../core/account-overlay-store.js";
 import { PolicyService } from "../core/policy-service.js";
@@ -78,6 +81,7 @@ import {
 } from "./bank-lane-feed.js";
 import { TransparencyService } from "./transparency-service.js";
 import { DepositPoolObservabilityService } from "./deposit-pool-observability.js";
+import { DepositPoolDoorService } from "./deposit-pool-door.js";
 import {
   UpstreamStatusPollerService,
   loadUpstreamStatusPollerConfig
@@ -103,6 +107,7 @@ import { BOOTSTRAP_JOBS } from "./bootstrap-jobs.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ConfigError } from "../core/errors.js";
+import { resolveHubNetwork } from "../core/discovery-manifest.js";
 import { assertMainnetSignerPosture, assertChainIdMatchesRpc } from "./startup-guards.js";
 import { createRewardBankHealthProvider } from "../core/health-capability.js";
 import {
@@ -559,6 +564,17 @@ export async function createPlatformRuntime() {
       provider: gateway.provider
     })
   );
+  const depositPoolDoor = initStep("init-deposit-pool-door", logger, () =>
+    new DepositPoolDoorService({
+      poolAddress: gateway.config.depositPoolAddress,
+      chainId: gateway.config.chainId,
+      // The door advertises the canonical public RPC from onboarding. Never
+      // echo configured backend providers: those may carry private API tokens.
+      rpcUrls: [resolveHubNetwork(gateway.config.chainId).rpcUrl],
+      provider: gateway.provider,
+      allowanceConfig: loadWorkerDailyExposureConfig(process.env)
+    })
+  );
   const xcmBalanceObserver = initStep("init-xcm-balance-observer", logger, () =>
     new XcmBalanceObserverService(
       stateStore,
@@ -754,6 +770,7 @@ export async function createPlatformRuntime() {
     bankLaneFeed,
     transparencyService,
     depositPoolObservability,
+    depositPoolDoor,
     venueBalanceReader,
     xcmObservationRelay,
     upstreamStatusPoller,

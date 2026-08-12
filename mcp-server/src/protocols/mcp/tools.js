@@ -114,6 +114,32 @@ export function createMcpTools({
     auth: { required: true, scopes: [], requiredAction: "wallet_sign_in" }
   }),
   tool({
+    name: "getDepositPoolInfo",
+    title: "Get deposit pool info",
+    description: "Read the live self-custodied deposit pool, caps, headroom, withdrawal truth, and yield status. With a wallet bearer token, also returns that wallet's assets, shares, USDC allowance, and daily-allowance decomposition.",
+    inputSchema: noArgumentsSchema,
+    readOnly: true,
+    idempotent: true
+  }),
+  tool({
+    name: "buildDepositPoolTransactions",
+    title: "Build deposit pool transactions",
+    description: "Build wallet-bound unsigned approve/deposit or redeem templates from live pool state. Amount inputs are exact base-unit integer strings with 6 decimals. Averray never signs, receives, brokers, or relays these transactions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        direction: { type: "string", enum: ["deposit", "withdraw"] },
+        assets: { type: "string", pattern: "^[1-9][0-9]*$", description: "Exact USDC raw units (6 decimals). Required for deposit; optional alternative to shares for withdraw." },
+        shares: { type: "string", pattern: "^[1-9][0-9]*$", description: "Exact DepositPool share raw units (6 decimals). Withdraw only." }
+      },
+      required: ["direction"],
+      additionalProperties: false
+    },
+    readOnly: true,
+    idempotent: true,
+    auth: { required: true, scopes: [], requiredAction: "wallet_sign_in" }
+  }),
+  tool({
     name: "fetchAuthNonce",
     title: "Fetch SIWE nonce",
     description: "Begin sign-in for your locally generated EVM wallet. Receive the message to sign locally; never send the private key.",
@@ -200,6 +226,7 @@ export function getMcpTool(name, tools = MCP_TOOLS) {
 
 export function createMcpToolExecutor({
   handleAuthRoute,
+  handleDepositPoolRoute,
   handleJobRoute,
   handlePublicMetadataRoute,
   maxRequestBodyBytes = DEFAULT_MCP_MAX_REQUEST_BODY_BYTES,
@@ -267,6 +294,20 @@ export function createMcpToolExecutor({
           ...common,
           method: "GET",
           path: `/jobs/explain-eligibility${buildQuery({ jobId: args.jobId })}`
+        }));
+      case "getDepositPoolInfo":
+        return unwrap(await invokeHttpRoute(handleDepositPoolRoute, {
+          ...common,
+          method: "GET",
+          path: "/pool"
+        }));
+      case "buildDepositPoolTransactions":
+        requireString(args.direction, "direction");
+        return unwrap(await invokeHttpRoute(handleDepositPoolRoute, {
+          ...common,
+          body: args,
+          method: "POST",
+          path: "/pool/transactions"
         }));
       case "fetchAuthNonce":
         requireString(args.wallet, "wallet");

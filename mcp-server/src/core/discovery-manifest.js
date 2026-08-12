@@ -64,6 +64,7 @@ const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/llms.txt", description: "Agent-adjusted orientation mirror served on the API host." },
   { path: "/onboarding", description: "Canonical platform capabilities + tool list." },
   { path: "/poster/onboarding", description: "Live machine-readable external-bounty posting rail, economics, verifier modes, and worker bond facts." },
+  { path: "/pool", description: "Public live DepositPool caps, headroom, yield and withdrawal truth; a wallet bearer token adds that wallet's position and allowance decomposition." },
   { path: "/jobs", description: "Public job catalog (no auth)." },
   { path: "/jobs/definition?jobId=X", description: "Canonical job definition by id." },
   { path: "/jobs/validate-submission", description: "Read-only draft validation against a job's output schema." },
@@ -100,6 +101,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
     path: "/account/strategies",
     description: "Signed-in lane positions plus treasury-share and adapter-backed yield/performance posture for each registered strategy adapter."
   },
+  { path: "/pool/transactions", description: "Build wallet-bound unsigned approve/deposit or redeem templates. The platform never signs, receives, brokers, or relays depositor funds." },
   { path: "/reputation", description: "Current reputation scores + tier." },
   { path: "/auth/refresh", description: "Rotate the caller's wallet JWT — revokes the old jti and mints a new one with the same sub + roles. Lets operators avoid re-SIWE every AUTH_TOKEN_TTL_SECONDS." },
   { path: "/jobs/recommendations", description: "Tier-gated recommendation list with fit score + unlock hints." },
@@ -293,6 +295,22 @@ const HTTP_ACTION_REQUIREMENTS = [
     requiredAction: "read_onboarding"
   },
   {
+    method: "GET",
+    path: "/pool",
+    requiresAuth: false,
+    requiredAction: "read_deposit_pool",
+    notes: "Public fields need no token. A valid wallet bearer token adds wallet-specific balances, shares, allowance, and allowance headroom."
+  },
+  {
+    method: "POST",
+    path: "/pool/transactions",
+    requiresAuth: true,
+    requiredAction: "build_unsigned_deposit_pool_transactions",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"],
+    notes: "Returns unsigned templates only; the wallet verifies, signs, and broadcasts independently."
+  },
+  {
     method: "POST",
     path: "/auth/nonce",
     requiresAuth: false,
@@ -412,6 +430,8 @@ const DISCOVERY_TOOLS = [
   { name: "recommendJobs", description: "Wallet-scoped ranked recommendations with tier-gate info." },
   { name: "preflightJob", description: "Pre-claim eligibility + stake + tier check." },
   { name: "explainEligibility", description: "Per-wallet reason why a job is eligible / blocked." },
+  { name: "getDepositPoolInfo", description: "Live pool and wallet-specific deposit/allowance truth." },
+  { name: "buildDepositPoolTransactions", description: "Wallet-bound unsigned approve/deposit or redeem templates; never a relay." },
   { name: "estimateNetReward", description: "Profile-aware reward estimate." },
   { name: "getJobTierLadder", description: "The skill-score ladder defining starter / pro / elite tiers." },
   { name: "getAccountSummary", description: "Balance sheet for a wallet." },
@@ -467,7 +487,19 @@ const buildBaseManifest = (network) => ({
       "Call /jobs/preflight before /jobs/claim to see tier, stake, fee, and waiver state.",
       "Treat claimStatus.claimable and claimStatus.reason as authoritative for whether a job may be claimed now; lifecycle.status describes the content/job lifecycle and can remain open when claimStatus says exhausted, claimed, or submitted.",
       "When claimStatus.reason is reward_funding_pending, retry after a platform refill or choose another job. When it is reward_funding_unverified, report a platform fault instead of attempting the claim."
-    ]
+    ],
+    raiseYourAllowance: {
+      title: "Raise your allowance",
+      steps: [
+        "Call getDepositPoolInfo (or GET /pool); sign in to include your wallet position and allowance decomposition.",
+        "Call buildDepositPoolTransactions (or POST /pool/transactions) with direction deposit and an exact USDC raw-unit amount.",
+        "Verify every returned decoded function and argument against the unsigned to/data/value fields.",
+        "Sign with your own wallet and broadcast through a returned RPC URL. If approval is required, confirm it and rebuild before signing deposit so its gas estimate uses approved state.",
+        "Re-read getDepositPoolInfo and explainEligibility; the fromDeposits allowance line must reflect the confirmed assetsOf balance.",
+        "To leave, build direction withdraw with shares or assets, verify redeem(shares, wallet, wallet), sign locally, and broadcast."
+      ],
+      boundary: "Averray never holds, moves, brokers, relays, or signs depositor funds and never sees a key. It provides live information and unsigned templates only."
+    }
   },
   auth: {
     scheme: "SIWE + JWT (ES256)",
@@ -559,7 +591,8 @@ export function buildPlatformCapabilities({ chainId = undefined } = {}) {
       walletModes: manifest.onboarding.walletModes,
       actionRequirements: manifest.onboarding.actionRequirements,
       readinessChecks: manifest.onboarding.readinessChecks,
-      selfServeChecklist: manifest.onboarding.selfServeChecklist
+      selfServeChecklist: manifest.onboarding.selfServeChecklist,
+      raiseYourAllowance: manifest.onboarding.raiseYourAllowance
     },
     auth: {
       scheme: manifest.auth.scheme,
