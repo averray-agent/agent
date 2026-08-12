@@ -22,7 +22,10 @@
     "xcmWrapper": "0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc",
     "token": "0x0000053900000000000000000000000001200000",
     "legacyEscrowCore": "0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035",
-    "hydrationUsdcAdapter": "0x96091d4477Fe37E79557276d63883bBbbdE73159"
+    "hydrationUsdcAdapter": "0x96091d4477Fe37E79557276d63883bBbbdE73159",
+    "depositPoolLane": "0xAbDca8AAca9308C7DA26c5B7E5E2380CDDD37f34",
+    "hydrationDepositPoolAdapter": "0x50d279818948fbfe10B03b74e6b8aB44428b51ab",
+    "depositPool": "0xCCF5FDF3108AF8e693F28bb9326A573d9dA0F476"
   },
   "contractProvenance": {
     "0x226F14252A98BD2eA140271647De20132F09AF20": {
@@ -115,6 +118,24 @@
       "abiHash": "sha256:938a8cf6e9ebeec2ec6c038ad610a0557a7e8179680f5acedc38c2c076156709",
       "runtimeCodeHash": "sha256:65ef3000814c9a7956d096881dd27d68ab27038072c8f05342035dd53e506a3a",
       "verifiedAt": "2026-08-05T18:29:36.257Z"
+    },
+    "0xAbDca8AAca9308C7DA26c5B7E5E2380CDDD37f34": {
+      "sourceCommit": "9e9cb15135837ce89042a99e455aa536ff68d9ba",
+      "abiHash": "sha256:53a7d2d069bb023a5c9b7eedae2dac463fb60f6512a67d3471656b817c9d217b",
+      "runtimeCodeHash": "sha256:feab1928e0cd9483d04ed446d921ed0c29001d57f0c511a633bd03ea3d3d4281",
+      "verifiedAt": "2026-08-12T16:30:58.000Z"
+    },
+    "0x50d279818948fbfe10B03b74e6b8aB44428b51ab": {
+      "sourceCommit": "9e9cb15135837ce89042a99e455aa536ff68d9ba",
+      "abiHash": "sha256:64e406be7c2d1a3045b6fadb92d390884924b888c1e5879eeac97c787d85d698",
+      "runtimeCodeHash": "sha256:8565ad9e0beef1ab77d6af88fff8c9aa569ea06b912889cac5f2874b4baf78da",
+      "verifiedAt": "2026-08-12T16:30:58.000Z"
+    },
+    "0xCCF5FDF3108AF8e693F28bb9326A573d9dA0F476": {
+      "sourceCommit": "9e9cb15135837ce89042a99e455aa536ff68d9ba",
+      "abiHash": "sha256:61a73fd104a0dcfa3163fe53dd46674d61782501415813ab7f22bcb93199496d",
+      "runtimeCodeHash": "sha256:bc98cddecc7a53d7b20d0d804d8028c1e29d3441d897b9b21b3d834e9e4c369d",
+      "verifiedAt": "2026-08-12T16:30:58.000Z"
     }
   },
   "knownUnshippedContractChanges": {
@@ -170,7 +191,10 @@
     "xcmWrapperV2_2": 19061012,
     "hydrationUsdcAdapterV2_2": 19061014,
     "xcmWrapperV2_2_1": 19101467,
-    "hydrationUsdcAdapterV2_2_1": 19101470
+    "hydrationUsdcAdapterV2_2_1": 19101470,
+    "depositPoolLane": 19380501,
+    "hydrationDepositPoolAdapter": 19380504,
+    "depositPool": 19380506
   },
   "runtime": {
     "auth": {
@@ -216,13 +240,21 @@
     "xcmWrapperV2_2": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     "hydrationUsdcAdapterV2_2": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     "xcmWrapperV2_2_1": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
-    "hydrationUsdcAdapterV2_2_1": "0x9Ab8531FBb0948C542a31298FD61335f30064239"
+    "hydrationUsdcAdapterV2_2_1": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+    "depositPoolLane": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+    "hydrationDepositPoolAdapter": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+    "depositPool": "0x9Ab8531FBb0948C542a31298FD61335f30064239"
   },
   "escrowRedeployedAt": "2026-07-30T10:01:56.005Z",
   "escrowRedeployTxHashes": {
     "deploy": "0xc4d6d442824bec61f8ca99646022b66776af88406a56f8c3da67e338610d132b",
     "multisigExec": "0xcc0a70c1031ae2540d79c61e7be9f463ecdb56b8d84af05e570ff9db41ac9b2c",
     "revokeOld": null
+  },
+  "depositPoolDeployTxHashes": {
+    "lane": "0xa5e33ea0b1e1a36ab994a8183e6ed684ad96f8ff1c90c99434c5070f5e0f292f",
+    "venueAdapter": "0xd979fb8a0d9f375ee2a8bd3bca57956c34007f01cd12c3966b71484a78913442",
+    "pool": "0x2e0f0a6bcf32ea6a6453a1db850acbf41b3a95b44b32b93e6e0f00206d15996e"
   },
   "bankXcmV2Deployment": {
     "version": "2.2.1",

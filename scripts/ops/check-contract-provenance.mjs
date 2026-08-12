@@ -67,6 +67,16 @@ export const CONTRACT_ARTIFACTS = Object.freeze({
   // the V22 ABIs, not the V2 ones.
   xcmWrapper: ["XcmWrapperV22.sol", "XcmWrapperV22"],
   hydrationUsdcAdapter: ["HydrationUsdcAdapterV22.sol", "HydrationUsdcAdapterV22"],
+  // The pool lane is a second deployment of HydrationUsdcAdapterV22, not an
+  // alias of the operating bank adapter above. Keep a distinct manifest key so
+  // source-drift findings and any exact known-unshipped waiver are reasoned
+  // about independently for each deployed address.
+  depositPoolLane: ["HydrationUsdcAdapterV22.sol", "HydrationUsdcAdapterV22"],
+  hydrationDepositPoolAdapter: [
+    "HydrationDepositPoolAdapter.sol",
+    "HydrationDepositPoolAdapter",
+  ],
+  depositPool: ["DepositPool.sol", "DepositPool"],
 });
 
 function sha256(bytes) {

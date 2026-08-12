@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  CONTRACT_ARTIFACTS,
   RESERVATION_SETTLED_INPUTS,
   RESERVATION_SETTLED_SIGNATURE,
   RESERVATION_SETTLED_TOPIC0,
@@ -205,6 +206,9 @@ test("mainnet manifest covers every deployed source-controlled contract address"
       "xcmWrapper",
       "legacyEscrowCore",
       "hydrationUsdcAdapter",
+      "depositPoolLane",
+      "hydrationDepositPoolAdapter",
+      "depositPool",
     ]
   );
   assert.equal(
@@ -221,4 +225,22 @@ test("mainnet manifest covers every deployed source-controlled contract address"
       "464fd8c018c5735a7f1e495c9a2eeb17c378bb0d"
     );
   }
+  for (const name of [
+    "depositPoolLane",
+    "hydrationDepositPoolAdapter",
+    "depositPool",
+  ]) {
+    assert.equal(
+      contracts.find((contract) => contract.name === name)?.provenance.sourceCommit,
+      "9e9cb15135837ce89042a99e455aa536ff68d9ba"
+    );
+  }
+  assert.deepEqual(CONTRACT_ARTIFACTS.depositPoolLane, [
+    "HydrationUsdcAdapterV22.sol",
+    "HydrationUsdcAdapterV22",
+  ]);
+  assert.deepEqual(CONTRACT_ARTIFACTS.hydrationUsdcAdapter, [
+    "HydrationUsdcAdapterV22.sol",
+    "HydrationUsdcAdapterV22",
+  ]);
 });
