@@ -105,6 +105,8 @@ jobs:
           # --profile is explicit: the script no longer defaults, because its old
           # testnet default became silently wrong at the 2026-07-27 mainnet cutover.
           mode_args=(--profile mainnet --amount "$SIGNER_USDC_AMOUNT_RAW" --use-kms)
+          expected_signer=$(jq -er '.verifier | select(type == "string" and test("^0x[0-9a-fA-F]{40}$"))' /srv/agent-stack/app/deployments/mainnet.json)
+          mode_args+=(--expected-signer "$expected_signer")
           if [ "$SIGNER_USDC_COMMIT" = "1" ]; then
             mode_args+=(--commit)
           fi
@@ -115,15 +117,15 @@ jobs:
           # read-only into /app, where the backend image keeps mcp-server code
           # and node_modules.
           sudo docker compose \
-            --project-directory /srv/agent-stack \
-            -f /srv/agent-stack/docker-compose.yml \
+            --project-directory /srv/agent-stack/app \
+            -f /srv/agent-stack/app/deploy/docker-compose.mainnet.yml \
             run --rm --no-deps -T \
             -e AWS_PROFILE=averray-signer \
             -e AWS_SDK_LOAD_CONFIG=1 \
             -v /srv/agent-stack/app/scripts:/app/scripts:ro \
             -v /srv/agent-stack/app/deployments:/app/deployments:ro \
             -v /srv/agent-stack/app/mcp-server:/app/mcp-server:ro \
-            backend \
+            mainnet-backend \
             sh -lc 'cd /app && node scripts/ops/fund-signer-usdc-deposit.mjs "$@"' \
             sh "${mode_args[@]}"
           REMOTE
