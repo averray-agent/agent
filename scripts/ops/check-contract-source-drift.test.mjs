@@ -126,6 +126,60 @@ test("exact known-unshipped masked runtime is allowed with its reason", () => {
   );
 });
 
+test("an operating-adapter waiver cannot cover the independently deployed pool lane", () => {
+  const operatingAddress = "0x1111111111111111111111111111111111111111";
+  const poolLaneAddress = "0x2222222222222222222222222222222222222222";
+  const deployedCode = "0x60010203";
+  const candidate = artifact("0x6001020304");
+  const candidateHash = maskedArtifactRuntimeHash(candidate).hash;
+  const provenance = {
+    sourceCommit: SOURCE_COMMIT,
+    abiHash: `sha256:${"b".repeat(64)}`,
+    runtimeCodeHash: runtimeCodeHash(deployedCode),
+    verifiedAt: VERIFIED_AT,
+  };
+  const result = checkCompiledArtifacts({
+    manifest: {
+      profile: "mainnet",
+      contracts: {
+        hydrationUsdcAdapter: operatingAddress,
+        depositPoolLane: poolLaneAddress,
+      },
+      contractProvenance: {
+        [operatingAddress]: provenance,
+        [poolLaneAddress]: provenance,
+      },
+      knownUnshippedContractChanges: {
+        hydrationUsdcAdapter: [
+          {
+            sourceCommit: SOURCE_COMMIT,
+            maskedRuntimeCodeHash: candidateHash,
+            reason: "Operating adapter change is deliberately not deployed.",
+          },
+        ],
+      },
+    },
+    artifactsByName: new Map([
+      ["hydrationUsdcAdapter", candidate],
+      ["depositPoolLane", candidate],
+    ]),
+    chainCode: new Map([
+      ["hydrationUsdcAdapter", deployedCode],
+      ["depositPoolLane", deployedCode],
+    ]),
+  });
+
+  assert.equal(
+    result.checks.find((check) => check.name === "hydrationUsdcAdapter")?.status,
+    "known-unshipped"
+  );
+  assert.equal(
+    result.checks.find((check) => check.name === "depositPoolLane")?.status,
+    "drift"
+  );
+  assert.equal(result.ok, false);
+});
+
 test("allowlist is exact and does not cover a later compiled runtime", () => {
   const allowed = artifact("0x6001020304");
   const later = artifact("0x6001020305");
@@ -182,7 +236,7 @@ test("mainnet pins the EscrowCore v3 successor runtime for live v2 and draining 
   const contracts = validateProvenanceManifest(manifest);
   const allowlist = validateKnownUnshippedContractChanges(manifest, contracts);
 
-  assert.equal(contracts.length, 9);
+  assert.equal(contracts.length, 12);
   assert.deepEqual([...allowlist.keys()].sort(), [
     "escrowCore",
     "hydrationUsdcAdapter",
