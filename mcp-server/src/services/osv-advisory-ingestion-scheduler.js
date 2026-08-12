@@ -1,5 +1,6 @@
 import { ingestOsvAdvisories, parseManifests, parsePackages } from "../jobs/ingest-osv-advisories.js";
 import { GuardedSchedulerLoop, ingestionSchedulerOutcome, schedulerRunTimeoutMs } from "./guarded-scheduler-loop.js";
+import { recordIngestSpecHashRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
 
 export class OsvAdvisoryIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -88,6 +89,7 @@ export class OsvAdvisoryIngestionScheduler {
       openOsvJobs,
       candidateCount: 0,
       createdCount: 0,
+      ingestRefusedSpecHashMismatchCount: 0,
       skipped: [],
       errors: []
     };
@@ -134,7 +136,12 @@ export class OsvAdvisoryIngestionScheduler {
           }
         }
         if (!this.dryRun) {
-          this.platformService.createJob(job);
+          try {
+            await upsertScheduledIngestedJob(this.platformService, job);
+          } catch (error) {
+            if (recordIngestSpecHashRefusal(summary, job, error)) continue;
+            throw error;
+          }
         }
         seenSources.add(sourceKey);
         summary.createdCount += 1;

@@ -6,6 +6,7 @@ import {
   parseDatasets
 } from "../jobs/ingest-open-data-datasets.js";
 import { GuardedSchedulerLoop, ingestionSchedulerOutcome, schedulerRunTimeoutMs } from "./guarded-scheduler-loop.js";
+import { recordIngestSpecHashRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
 
 export class OpenDataIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -97,6 +98,7 @@ export class OpenDataIngestionScheduler {
       openDataJobs,
       candidateCount: 0,
       createdCount: 0,
+      ingestRefusedSpecHashMismatchCount: 0,
       skipped: [],
       errors: [],
       queries: []
@@ -161,12 +163,11 @@ export class OpenDataIngestionScheduler {
             }
           }
           if (!this.dryRun) {
-            // Prefer the prefunding create path so the reward is escrowed at
-            // ingestion; fall back to createJob for callers/tests without it.
-            if (typeof this.platformService.createIngestedJob === "function") {
-              await this.platformService.createIngestedJob(job);
-            } else {
-              this.platformService.createJob(job);
+            try {
+              await upsertScheduledIngestedJob(this.platformService, job, { prefund: true });
+            } catch (error) {
+              if (recordIngestSpecHashRefusal(summary, job, error)) continue;
+              throw error;
             }
           }
           if (resourceKey) seenResources.add(resourceKey);

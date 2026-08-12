@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Wallet, id } from "ethers";
 
-import { PlatformService } from "./platform-service.js";
+import {
+  INGEST_REFUSED_SPEC_HASH_MISMATCH,
+  PlatformService
+} from "./platform-service.js";
+import { hashCanonicalContent } from "./canonical-content.js";
 import { EventBus } from "./event-bus.js";
 import { InsufficientLiquidityError } from "./errors.js";
 import { MemoryStateStore } from "./state-store.js";
@@ -2174,6 +2178,7 @@ function makePrefundGateway(ensureJob) {
   return {
     calls,
     isEnabled: () => true,
+    getJob: async () => ({ state: 0 }),
     ensureJob: async (job, instanceJobId, claimStake) => {
       calls.push({ jobId: instanceJobId, claimStake });
       return ensureJob(job, instanceJobId, claimStake);
@@ -2309,16 +2314,97 @@ test("createIngestedJob stamps pending on an unexpected gateway error and never 
   assert.equal(created.funding.reason, "prefund_failed");
 });
 
-test("createIngestedJob propagates creation errors and does not attempt prefund", async () => {
+test("createIngestedJob propagates validation errors and does not attempt prefund", async () => {
   const gateway = makePrefundGateway(async () => ({ state: 1 }));
   const service = makePlatformService(gateway);
   service.prefundIngestedJobs = true;
 
-  await service.createIngestedJob(INGEST_JOB_INPUT);
-  assert.equal(gateway.calls.length, 1);
-  // Duplicate id must reject from createJob before any second prefund attempt.
-  await assert.rejects(() => service.createIngestedJob(INGEST_JOB_INPUT));
-  assert.equal(gateway.calls.length, 1);
+  await assert.rejects(() => service.createIngestedJob({
+    ...INGEST_JOB_INPUT,
+    id: ""
+  }), /Job id is required/u);
+  assert.equal(gateway.calls.length, 0);
+});
+
+test("upsertIngestedJob writes an idempotent refresh that reproduces the commitment", async () => {
+  let live = { state: 0 };
+  const gateway = {
+    isEnabled: () => true,
+    getJob: async () => live
+  };
+  const service = makePlatformService(gateway);
+  const now = new Date("2026-08-12T12:00:00.000Z");
+  const original = await service.upsertIngestedJob(INGEST_JOB_INPUT, { now });
+  live = {
+    state: 1,
+    specHash: hashCanonicalContent(service.getJobDefinition(original.id))
+  };
+
+  const refreshed = await service.upsertIngestedJob({
+    ...INGEST_JOB_INPUT,
+    category: " CODING "
+  }, { now });
+
+  assert.notEqual(refreshed, original);
+  assert.equal(hashCanonicalContent(service.getJobDefinition(refreshed.id)), live.specHash);
+  assert.deepEqual(service.jobCatalogService.getSpecHashIntegrityStatus(), {
+    driftedCount: 0,
+    drifted: []
+  });
+});
+
+test("upsertIngestedJob refuses a mismatching refresh and retains the committed definition", async () => {
+  let live = { state: 0 };
+  const gateway = {
+    isEnabled: () => true,
+    getJob: async () => live
+  };
+  const service = makePlatformService(gateway);
+  const now = new Date("2026-08-12T12:00:00.000Z");
+  await service.upsertIngestedJob(INGEST_JOB_INPUT, { now });
+  const servedBefore = service.getJobDefinition(INGEST_JOB_INPUT.id);
+  live = { state: 1, specHash: hashCanonicalContent(servedBefore) };
+
+  await assert.rejects(
+    () => service.upsertIngestedJob({
+      ...INGEST_JOB_INPUT,
+      description: "Changed after the chain commitment."
+    }, { now }),
+    (error) => {
+      assert.equal(error.code, INGEST_REFUSED_SPEC_HASH_MISMATCH);
+      assert.equal(error.details.servedDefinitionRetained, true);
+      assert.equal(error.details.legacyDrift, false);
+      return true;
+    }
+  );
+
+  assert.deepEqual(service.getJobDefinition(INGEST_JOB_INPUT.id), servedBefore);
+  assert.equal(service.jobCatalogService.getSpecHashIntegrityStatus().driftedCount, 0);
+});
+
+test("upsertIngestedJob hides legacy drift and exposes it to operators", async () => {
+  const gateway = {
+    isEnabled: () => true,
+    getJob: async () => ({ state: 1, specHash: `0x${"ab".repeat(32)}` })
+  };
+  const service = makePlatformService(gateway);
+  const now = new Date("2026-08-12T12:00:00.000Z");
+
+  await assert.rejects(
+    () => service.upsertIngestedJob(INGEST_JOB_INPUT, { now }),
+    (error) => error.code === INGEST_REFUSED_SPEC_HASH_MISMATCH
+      && error.details.legacyDrift === true
+  );
+
+  assert.equal(service.listJobs().some((job) => job.id === INGEST_JOB_INPUT.id), false);
+  assert.throws(
+    () => service.jobCatalogService.getClaimableJobDefinition(INGEST_JOB_INPUT.id),
+    (error) => error.code === "job_definition_chain_mismatch"
+  );
+  const status = await service.getAdminStatus();
+  assert.equal(status.jobSpecHashIntegrity.driftedCount, 1);
+  assert.equal(status.jobSpecHashIntegrity.drifted[0].jobId, INGEST_JOB_INPUT.id);
+  assert.equal(status.jobSpecHashIntegrity.drifted[0].recovery, "operator_tombstone_rescue_after_review_window");
 });
 
 test("external projections strip sponsored-gas and waiver flags even from legacy material", () => {

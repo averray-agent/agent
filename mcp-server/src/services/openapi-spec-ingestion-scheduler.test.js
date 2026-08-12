@@ -84,6 +84,37 @@ test("OpenApiSpecIngestionScheduler creates jobs when dryRun is false", async ()
   assert.equal(platform.listJobs()[0].source.type, "openapi_spec");
 });
 
+test("OpenApiSpecIngestionScheduler counts specHash overwrite refusals without replacing the run error", async () => {
+  const platform = makePlatformService();
+  platform.upsertIngestedJob = async () => {
+    const error = new Error("refreshed definition does not match the commitment");
+    error.code = "ingest_refused_spec_hash_mismatch";
+    error.details = {
+      committedSpecHash: `0x${"ab".repeat(32)}`,
+      candidateSpecHash: `0x${"cd".repeat(32)}`
+    };
+    throw error;
+  };
+  const scheduler = new OpenApiSpecIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    specs: [SPEC],
+    fetchImpl: makeFetch()
+  });
+
+  const summary = await scheduler.runOnce(new Date("2026-04-27T08:00:00.000Z"));
+
+  assert.equal(summary.createdCount, 0);
+  assert.equal(summary.ingestRefusedSpecHashMismatchCount, 1);
+  assert.equal(summary.errors.length, 0);
+  assert.deepEqual(summary.skipped.at(-1), {
+    id: "openapi-averray-averray-http-api",
+    reason: "ingest_refused_spec_hash_mismatch",
+    committedSpecHash: `0x${"ab".repeat(32)}`,
+    candidateSpecHash: `0x${"cd".repeat(32)}`
+  });
+});
+
 test("OpenApiSpecIngestionScheduler dedupes by OpenAPI source", async () => {
   const platform = makePlatformService([
     {
