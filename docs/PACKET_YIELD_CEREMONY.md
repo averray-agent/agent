@@ -30,8 +30,17 @@ wrapper registration.
 - **Deployed fraction cap: ≤ 50% of `totalAssets`.** The buffer keeps ≥ 50% at all times
   at this scale — redemptions must be servable from buffer without a recall.
 - **`returnBy` discipline:** every deployment names a real deadline. Proof tranche:
-  **+48 hours**. Standing deployments: **+14 days**, re-deployed on settle rather than
-  left open-ended. An expired `returnBy` is an incident, not a shrug.
+  **+48 hours**. Standing deployments: **+7 days** — the deployed contract's own maximum
+  (`VenueDeadlineExceedsNoticeTier`: a deadline may never exceed the shortest redemption
+  notice tier, so capital is always recallable before any depositor's exit matures — a
+  stronger invariant than this packet's original 14-day figure, which the script rightly
+  refuses; corrected 2026-08-12 after Codex's gate finding). Re-deploy on settle, weekly
+  cadence. An expired `returnBy` is an incident, not a shrug.
+- **Inherited on-chain guards** the ceremony gets for free and the script must surface in
+  its evidence blocks: `BufferFloorBreached` (the contract enforces its own buffer floor)
+  and `DEPLOYMENT_EPOCH = 1 day` (`DeploymentEpochNotElapsed` — at most one deployment per
+  day-epoch, so leg D cannot follow leg A same-day; plan the ceremony across two days or
+  accept the epoch wait).
 - **At this scale the yield is cents and the point is the loop.** The ceremony's product
   is a *proven* deposit→earn→recall→recognize cycle on the pool's rails, with every book
   entry matching chain — the same thesis epoch-1 proved for the operating position
