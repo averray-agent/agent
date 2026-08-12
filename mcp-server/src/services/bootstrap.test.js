@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { loadAuthConfig } from "../auth/config.js";
+import { loadBlockchainConfig } from "../blockchain/config.js";
 import { BOOTSTRAP_JOBS } from "./bootstrap-jobs.js";
+import { createDepositPoolDoor } from "./bootstrap.js";
+
+const POOL_ASSET = "0x0000053900000000000000000000000001200000";
 
 test("bootstrap retains closed starter ids only as archived history", () => {
   const publicJobs = BOOTSTRAP_JOBS.filter((job) => job.lifecycle?.status !== "archived");
@@ -14,4 +19,42 @@ test("bootstrap retains closed starter ids only as archived history", () => {
     assert.equal(retired.lifecycle?.status, "archived");
     assert.match(retired.lifecycle?.reason ?? "", /job ids are never reused/iu);
   }
+});
+
+test("bootstrap wires the rendered mainnet AUTH_CHAIN_ID into the configured DepositPool door", async () => {
+  const renderedEnv = {
+    AUTH_MODE: "permissive",
+    AUTH_CHAIN_ID: "420420419"
+  };
+  const authConfig = loadAuthConfig(renderedEnv);
+  const blockchainConfig = loadBlockchainConfig(renderedEnv);
+  const door = createDepositPoolDoor({
+    authConfig,
+    env: renderedEnv,
+    gateway: { config: blockchainConfig, provider: undefined },
+    chainReader: {
+      async readSnapshot() {
+        return {
+          asset: POOL_ASSET,
+          blockNumber: 1,
+          blockHash: `0x${"11".repeat(32)}`,
+          blockTimestamp: 1_700_000_000,
+          totalAssets: 0n,
+          totalSupply: 0n,
+          bufferAssets: 0n,
+          deployedPrincipal: 0n,
+          totalAssetCap: 100_000_000n,
+          perAgentAssetCap: 10_000_000n
+        };
+      }
+    }
+  });
+
+  assert.equal(typeof renderedEnv.AUTH_CHAIN_ID, "string");
+  assert.equal(authConfig.chainId, 420420419);
+  assert.equal(blockchainConfig.chainId, undefined);
+  const info = await door.getInfo();
+  assert.equal(info.available, true);
+  assert.equal(info.chainId, 420420419);
+  assert.deepEqual(info.broadcast.rpcUrls, ["https://eth-rpc.polkadot.io"]);
 });

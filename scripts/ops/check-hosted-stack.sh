@@ -6,6 +6,7 @@ PUBLIC_SITE_URL=${PUBLIC_SITE_URL:-https://averray.com/}
 DISCOVERY_URL=${DISCOVERY_URL:-https://averray.com/.well-known/agent-tools.json}
 APP_URL=${APP_URL:-https://app.averray.com/}
 API_HEALTH_URL=${API_HEALTH_URL:-https://api.averray.com/health}
+API_POOL_URL=${API_POOL_URL:-https://api.averray.com/pool}
 API_ONBOARDING_URL=${API_ONBOARDING_URL:-https://api.averray.com/onboarding}
 API_POSTER_ONBOARDING_URL=${API_POSTER_ONBOARDING_URL:-https://api.averray.com/poster/onboarding}
 API_ADMIN_STATUS_URL=${API_ADMIN_STATUS_URL:-https://api.averray.com/admin/status}
@@ -209,6 +210,22 @@ api_health_json="$(fetch "$API_HEALTH_URL")"
 jq -e '.status == "ok"' >/dev/null <<<"$api_health_json"
 jq -e '.components.stateStore.ok == true' >/dev/null <<<"$api_health_json"
 jq -e '.components.submittedJobAutoVerifier.ok == true' >/dev/null <<<"$api_health_json"
+
+echo "Checking DepositPool door"
+pool_response="$(curl -sS --max-time "$TIMEOUT_SEC" --write-out $'\n%{http_code}' "$API_POOL_URL")"
+pool_status="${pool_response##*$'\n'}"
+pool_json="${pool_response%$'\n'*}"
+if [[ "$pool_status" != "200" ]]; then
+  echo "DepositPool door returned HTTP $pool_status; expected 200." >&2
+  exit 1
+fi
+jq -e '.available == true' >/dev/null <<<"$pool_json" || {
+  echo "DepositPool door did not report available: true." >&2
+  exit 1
+}
+printf '%s\n%s\n' "$pool_json" "$api_health_json" | jq -e -s '
+  .[0].chainId == .[1].auth.chainId
+' >/dev/null
 
 echo "Checking onboarding contract"
 onboarding_json="$(fetch "$API_ONBOARDING_URL")"
