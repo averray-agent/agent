@@ -1,0 +1,219 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { Interface } from "ethers";
+
+import { DEPOSIT_POOL_ABI, ERC20_MOCK_ABI } from "../blockchain/abis.js";
+import {
+  DepositPoolDoorService,
+  DEPOSIT_POOL_WITHDRAWAL_NOTE
+} from "./deposit-pool-door.js";
+
+const POOL = "0x1111111111111111111111111111111111111111";
+const ASSET = "0x0000053900000000000000000000000001200000";
+const WALLET = "0x2222222222222222222222222222222222222222";
+
+function state(overrides = {}) {
+  return {
+    blockNumber: 19_200_000,
+    blockHash: `0x${"ab".repeat(32)}`,
+    asset: ASSET,
+    totalAssets: 10_000_000n,
+    totalSupply: 10_000_000n,
+    bufferAssets: 10_000_000n,
+    deployedPrincipal: 0n,
+    totalAssetCap: 1_000_000_000n,
+    perAgentAssetCap: 100_000_000n,
+    wallet: {
+      assetBalance: 20_000_000n,
+      depositedAssets: 10_000_000n,
+      shares: 10_000_000n,
+      availableShares: 10_000_000n,
+      allowance: 0n
+    },
+    ...overrides
+  };
+}
+
+function service({ snapshot = state(), convertToShares, estimateGas } = {}) {
+  const estimates = [];
+  const reader = {
+    async readSnapshot({ wallet }) {
+      return {
+        ...snapshot,
+        ...(wallet ? {} : { wallet: undefined })
+      };
+    },
+    async convertToShares({ assets }) {
+      return convertToShares ? convertToShares(assets) : assets;
+    },
+    async convertToAssets({ shares }) {
+      return shares;
+    },
+    async estimateGas(transaction) {
+      estimates.push(transaction);
+      return estimateGas ? estimateGas(transaction) : 45_000n;
+    }
+  };
+  return {
+    estimates,
+    value: new DepositPoolDoorService({
+      poolAddress: POOL,
+      chainId: 420_420_419,
+      rpcUrls: ["https://polkadot-asset-hub-rpc.polkadot.io"],
+      chainReader: reader,
+      allowanceConfig: { budgetRaw: 1_500_000, allowancePerDepositedMilli: 1_000 }
+    })
+  };
+}
+
+test("public pool info omits wallet fields while authenticated info reuses Packet 3 allowance math", async () => {
+  const door = service().value;
+  const publicInfo = await door.getInfo();
+  const authed = await door.getInfo(WALLET);
+
+  assert.equal(publicInfo.available, true);
+  assert.equal(publicInfo.wallet, undefined);
+  assert.equal(publicInfo.yieldStatus, "not_yet_earning");
+  assert.equal(publicInfo.withdrawal.status, "open");
+  assert.equal(publicInfo.withdrawal.note, DEPOSIT_POOL_WITHDRAWAL_NOTE);
+  assert.deepEqual(authed.wallet.dailyAllowance, {
+    base: { raw: "1500000", decimals: 6 },
+    fromDeposits: { raw: "10000000", decimals: 6 },
+    depositedAssets: { raw: "10000000", decimals: 6 },
+    total: { raw: "11500000", decimals: 6 }
+  });
+  assert.deepEqual(authed.wallet.perAgentHeadroom, { raw: "90000000", decimals: 6 });
+});
+
+test("profile without a pool returns unavailable without fabricated zero fields", async () => {
+  const door = new DepositPoolDoorService({ poolAddress: "", chainId: 420_420_419 });
+  const info = await door.getInfo(WALLET);
+  const build = await door.buildTransactions(WALLET, { direction: "deposit", assets: "1" });
+  assert.deepEqual(info, {
+    schemaVersion: 1,
+    available: false,
+    reason: "deposit_pool_not_configured"
+  });
+  assert.deepEqual(build, info);
+  assert.equal(JSON.stringify(info).includes('"raw":"0"'), false);
+  assert.equal(JSON.stringify(build).includes('"raw":"0"'), false);
+});
+
+test("deposit templates byte-decode to approve and deposit with exact wallet-bound arguments", async () => {
+  const { value: door } = service();
+  const quote = await door.buildTransactions(WALLET, { direction: "deposit", assets: "5000000" });
+  const token = new Interface(ERC20_MOCK_ABI);
+  const pool = new Interface(DEPOSIT_POOL_ABI);
+
+  assert.equal(quote.templates.length, 2);
+  const approve = token.parseTransaction({ data: quote.templates[0].data });
+  assert.equal(approve.name, "approve");
+  assert.equal(approve.args.spender, POOL);
+  assert.equal(approve.args.amount, 5_000_000n);
+  const deposit = pool.parseTransaction({ data: quote.templates[1].data });
+  assert.equal(deposit.name, "deposit");
+  assert.equal(deposit.args.assets, 5_000_000n);
+  assert.equal(deposit.args.receiver, WALLET);
+  assert.deepEqual(quote.preview.expectedShares, { raw: "5000000", decimals: 6 });
+  assert.equal(quote.boundary.platformSigns, false);
+  assert.equal(quote.boundary.signedTransactionRelay, false);
+});
+
+test("deposit preview uses the pool convertToShares lens rather than a second local price model", async () => {
+  const { value: door } = service({ convertToShares: (assets) => assets / 2n });
+  const quote = await door.buildTransactions(WALLET, { direction: "deposit", assets: "5000000" });
+  assert.deepEqual(quote.preview.expectedShares, { raw: "2500000", decimals: 6 });
+});
+
+test("sufficient allowance omits approval and says why", async () => {
+  const { value: door } = service({
+    snapshot: state({ wallet: { ...state().wallet, allowance: 9_000_000n } })
+  });
+  const quote = await door.buildTransactions(WALLET, { direction: "deposit", assets: "5000000" });
+  assert.equal(quote.templates.length, 1);
+  assert.equal(quote.templates[0].decoded.function, "deposit(uint256,address)");
+  assert.deepEqual(quote.approval, {
+    required: false,
+    reason: "allowance_already_sufficient",
+    allowanceBefore: { raw: "9000000", decimals: 6 },
+    allowanceAfter: { raw: "9000000", decimals: 6 }
+  });
+});
+
+test("deposit quote refuses the same named cap and balance failures as the contract", async () => {
+  const totalCapDoor = service({
+    snapshot: state({ totalAssets: 999_000_000n, totalSupply: 999_000_000n })
+  }).value;
+  await assert.rejects(
+    () => totalCapDoor.buildTransactions(WALLET, { direction: "deposit", assets: "2000000" }),
+    (error) => error.details?.reason === "TotalAssetCapExceeded"
+  );
+
+  const agentCapDoor = service({
+    snapshot: state({
+      wallet: { ...state().wallet, depositedAssets: 99_000_000n, shares: 99_000_000n, availableShares: 99_000_000n }
+    })
+  }).value;
+  await assert.rejects(
+    () => agentCapDoor.buildTransactions(WALLET, { direction: "deposit", assets: "2000000" }),
+    (error) => error.details?.reason === "AgentAssetCapExceeded"
+  );
+
+  const poorDoor = service({
+    snapshot: state({ wallet: { ...state().wallet, assetBalance: 1n } })
+  }).value;
+  await assert.rejects(
+    () => poorDoor.buildTransactions(WALLET, { direction: "deposit", assets: "2" }),
+    (error) => error.details?.reason === "InsufficientBalance"
+  );
+});
+
+test("withdraw quote is symmetric and byte-decodes redeem to the authenticated wallet", async () => {
+  const { value: door } = service();
+  const quote = await door.buildTransactions(WALLET, { direction: "withdraw", shares: "4000000" });
+  const pool = new Interface(DEPOSIT_POOL_ABI);
+  const redeem = pool.parseTransaction({ data: quote.templates[0].data });
+  assert.equal(redeem.name, "redeem");
+  assert.equal(redeem.args.shares, 4_000_000n);
+  assert.equal(redeem.args.receiver, WALLET);
+  assert.equal(redeem.args.owner, WALLET);
+  assert.deepEqual(quote.preview.expectedAssets, { raw: "4000000", decimals: 6 });
+});
+
+test("withdraw-by-assets rounds shares up and refuses unlocked-share and buffer failures by name", async () => {
+  const { value: door } = service();
+  const quote = await door.buildTransactions(WALLET, { direction: "withdraw", assets: "3000001" });
+  assert.deepEqual(quote.preview.sharesToRedeem, { raw: "3000001", decimals: 6 });
+
+  const locked = service({
+    snapshot: state({ wallet: { ...state().wallet, availableShares: 1n } })
+  }).value;
+  await assert.rejects(
+    () => locked.buildTransactions(WALLET, { direction: "withdraw", shares: "2" }),
+    (error) => error.details?.reason === "InsufficientUnlockedShares"
+  );
+
+  const dry = service({ snapshot: state({ bufferAssets: 1n }) }).value;
+  await assert.rejects(
+    () => dry.buildTransactions(WALLET, { direction: "withdraw", shares: "2" }),
+    (error) => error.details?.reason === "InsufficientBuffer"
+  );
+});
+
+test("yield truth uses the Packet 5 flip source and stays off before venue deployment", async () => {
+  assert.equal((await service().value.getInfo()).yieldStatus, "not_yet_earning");
+  assert.equal((await service({ snapshot: state({ deployedPrincipal: 1n }) }).value.getInfo()).yieldStatus, "earning");
+});
+
+test("door inputs cannot accept keys, signatures, signed blobs, or relay instructions", async () => {
+  const door = service().value;
+  await assert.rejects(
+    () => door.buildTransactions(WALLET, {
+      direction: "deposit",
+      assets: "1",
+      privateKey: `0x${"11".repeat(32)}`
+    }),
+    /unsupported field/iu
+  );
+});

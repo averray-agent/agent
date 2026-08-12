@@ -44,11 +44,18 @@ export const AGENT_ACCOUNT_ABI = [
 export const DEPOSIT_POOL_ABI = [
   "function asset() view returns (address)",
   "function assetsOf(address account) view returns (uint256)",
+  "function balanceOf(address account) view returns (uint256)",
+  "function availableShares(address account) view returns (uint256)",
+  "function bufferAssets() view returns (uint256)",
+  "function convertToShares(uint256 assets) view returns (uint256)",
+  "function convertToAssets(uint256 shares) view returns (uint256)",
   "function totalAssets() view returns (uint256)",
   "function totalSupply() view returns (uint256)",
   "function venuePrincipalCostBasis() view returns (uint256)",
   "function TOTAL_ASSET_CAP() view returns (uint256)",
   "function PER_AGENT_ASSET_CAP() view returns (uint256)",
+  "function deposit(uint256 assets, address receiver) returns (uint256 shares)",
+  "function redeem(uint256 shares, address receiver, address owner) returns (uint256 assets)",
   "event Deposit(address indexed caller, address indexed owner, uint256 assets, uint256 shares)",
   "event Withdraw(address indexed caller, address indexed receiver, address indexed owner, uint256 assets, uint256 shares)",
   "event RedeemRequested(uint256 indexed requestId, address indexed owner, address indexed receiver, uint256 shares, uint8 tier, uint64 unlockAt)",
@@ -176,6 +183,7 @@ export const TREASURY_POLICY_ABI = [
 
 export const ERC20_MOCK_ABI = [
   "function balanceOf(address account) view returns (uint256)",
+  "function allowance(address owner, address spender) view returns (uint256)",
   "function approve(address spender, uint256 amount) returns (bool)",
   "function mint(address to, uint256 amount)"
 ];

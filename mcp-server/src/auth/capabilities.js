@@ -79,6 +79,7 @@ const ROUTE_CAPABILITY_RULES = [
   { method: "POST", path: "/disputes/:id/release", capabilities: ["disputes:release"] },
   { method: "GET", path: "/jobs/recommendations", capabilities: ["jobs:recommend"] },
   { method: "GET", path: "/jobs/preflight", capabilities: ["jobs:preflight"] },
+  { method: "POST", path: "/pool/transactions", capabilities: ["account:read"] },
   { method: "POST", path: "/jobs/claim", capabilities: ["jobs:claim"] },
   { method: "POST", path: "/jobs/submit", capabilities: ["jobs:submit"] },
   { method: "GET", path: "/jobs/sub", capabilities: ["subjobs:read"] },
