@@ -6,15 +6,37 @@ This runbook captures the production-like setup currently running on the OVH VPS
 
 - Stack root on server: `/srv/agent-stack`
 - Repo checkout: `/srv/agent-stack/app`
-- Compose file: `/srv/agent-stack/docker-compose.yml`
+- Compose file: `/srv/agent-stack/docker-compose.yml` — a **rendered copy**; the source of
+  truth is [deploy/docker-compose.mainnet.yml](/deploy/docker-compose.mainnet.yml) in the
+  repo. There is no `deploy/` directory on the VPS (three path guesses failed on
+  2026-08-12 before anyone looked).
 - Recommended repo-owned Caddy template: [deploy/Caddyfile.averray](/deploy/Caddyfile.averray)
 - Infra services:
   - `agent-postgres`
   - `agent-redis`
   - `agent-caddy`
-- App services:
-  - `agent-backend`
-  - `agent-indexer`
+- Mainnet app containers (verified via `docker ps`, 2026-08-12):
+  - `agent-mainnet-backend`
+  - `agent-mainnet-indexer`
+  - `agent-mainnet-redis`
+
+### Restarting the backend (hung-verification recovery)
+
+A `/health` `verification_timeout_pending` that persists past ~30 minutes will not
+self-clear: the pending entry lives in the backend's in-memory `pendingVerifications`
+map and is removed only by its own completion hook. **Manually settling the session does
+not clear it.** The procedure:
+
+```bash
+docker restart agent-mainnet-backend
+```
+
+- `/health` recovers within ~2 minutes (container healthcheck plus the first verifier tick).
+- If the same session re-hangs within minutes, the hang is deterministic (usually an
+  external fetch in that job's verifier): settle the session via the operator verdict
+  **first**, then restart once more to clear the map.
+- Restart is safe mid-verification: settlement is idempotent (`settlementKey`) and the
+  pending-map design exists precisely to prevent duplicate payouts.
 
 ## Public endpoints
 

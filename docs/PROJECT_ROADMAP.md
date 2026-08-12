@@ -509,33 +509,39 @@ that describes a world we have left is worse than an empty one.
 3. **Engage the external audit.** Still the right thing, no longer a pre-mainnet gate.
    `npm run prepare:mainnet-audit-freeze`, push the frozen tag, hand auditors
    [`AUDIT_PACKAGE.md`](./AUDIT_PACKAGE.md).
-4. **Bank deposit pool — BLOCKED on a contract change (#1066).** Packets 1 and 2 merged
-   (#1038, #1043), but the pool **must not be deployed**. An independent review (#1051)
-   found that `DepositPool` derives its share price from `lane.totalAssets()`, which any
-   TreasuryPolicy `strategySettler` can set arbitrarily via `recordRemotePosition` — so a
-   settler can deposit small, inflate the book and drain the buffer. The capability is in
-   `strategySettler`, a *global* mapping, so no choice of pool operator and nothing in the
-   deployment ceremony fixes it. `deploy-deposit-pool.mjs --commit` refuses.
-   The unblock is #1066: split pricing NAV from remote execution inventory and price on a
-   cost basis. It is the only contract change in the current set and therefore the longest
-   lead time. Ceremony, addresses and fork simulation are ready and wait on it
-   (`CEREMONY_DEPOSIT_POOL_DEPLOY.md`, §0 carries the DO-NOT-DEPLOY banner).
-   Downstream: tier 3 of the worker ladder (#1055) and, with it, the only Sybil-resistance
-   mechanism that does not compromise earn-from-zero (`WORKER_PROGRESSION_DESIGN.md`).
+4. **Bank deposit pool — contract unblocked (#1075); the ceremony is the remaining gate,
+   and it is now the worker-growth bottleneck.** Packets 1 and 2 merged (#1038, #1043).
+   The #1051 finding (any TreasuryPolicy `strategySettler` could set `lane.totalAssets()`
+   arbitrarily and drain the buffer) is closed by **#1075** — pricing NAV split from
+   remote execution inventory, priced on principal cost basis: the change #1066 asked
+   for, merged 2026-08-11. Remaining, in order: re-run the fork simulation against merged
+   main, lift §0's DO-NOT-DEPLOY banner in `CEREMONY_DEPOSIT_POOL_DEPLOY.md` only after
+   it passes, then run the ceremony — a multisig event, done with fresh heads, never
+   same-day alongside incident work.
+   **Priority raised 2026-08-12:** once the tier-2 daily allowance `D` lands, deposits
+   are the only path past ~5 jobs/day — every serious worker stalls at the allowance
+   until the pool exists. Downstream unchanged: tier 3 (#1055), the only
+   Sybil-resistance mechanism that does not compromise earn-from-zero
+   (`WORKER_PROGRESSION_DESIGN.md`).
 4b. **Agent economics — the worker ladder.** Designs are complete and carry no open
    questions (`WORKER_PROGRESSION_DESIGN.md`, #1055, #1054). Four steps, and **only the
    last is blocked**:
 
    | # | step | state | why |
    |---|---|---|---|
-   | 1 | Cap the aggregate tier-0 subsidy (`S`/day, global) | **startable now** | closes a LIVE leak — the bond waiver caps at 3 claims but gas is uncapped; one wallet burned ~$1.95 of DOT on 2026-08-11 |
-   | 2 | Retain the claim fee post-tier | startable now | "pay your own way" out of earnings, so no agent ever needs DOT — primitives exist (`EscrowCore.claimFee`, `slashClaimFee`) |
-   | 3 | Per-wallet exposure cap `E` | startable now | bounds monopolisation in USDC-at-risk, not job count; self-loosens as wallets self-fund |
-   | 4 | Tier 3 — allowance ∝ pool shares | **blocked on #1066** | needs the pool; it is the only unforgeable Sybil signal we have |
+   | 1 | Cap the aggregate tier-0 subsidy (`S`/day, global) | **live** (#1074) | closed the unbounded-gas leak; rotation now draws from one fixed pot |
+   | 2 | Retain the claim fee post-tier | merged, **inert until the EscrowCore v3 ceremony** (#1078) | live v2 still refunds; the backend probes `retainsClaimFeeOnSuccess()` on chain and fails closed, so no surface lies about it |
+   | 3 | Per-wallet exposure cap `E` | **live 2026-08-12** (#1079, deploy `ca1fad74`) | bounds USDC-at-risk; releases on settlement, so it does **not** bound rate |
+   | 3b | Tier-2 daily exposure allowance `D` (rolling 24h, ≈5 typical jobs) | **in build** (spec: `docs/PACKET_DAILY_CLAIM_CAP.md`, branch `claude/packets-2026-08-12`) | the rate bound `E` cannot be: one wallet took 42 jobs in 12h under `E` semantics on 2026-08-12 |
+   | 4 | Tier 3 — allowance ∝ pool shares | blocked on the **pool ceremony** (contract side unblocked by #1075) | needs the pool; it is the only unforgeable Sybil signal we have |
 
-   Sequence: start **#1066** (contract change, longest lead time) and **step 1** (live leak,
-   small) in parallel — they touch different code. Steps 2–3 follow step 1. Step 4 needs
-   both lines to land.
+   Standing obligation recorded 2026-08-12: the **EscrowCore v3 ceremony** activates step
+   2's fee retention and must delete both escrow `knownUnshippedContractChanges` entries
+   (per the #1080 waiver reasons and `WORKER_PROGRESSION_DESIGN.md` §6.1).
+
+   Sequence now: **`D` lands** (rate valve, in build) → **pool ceremony** (unlocks tier 3
+   and worker growth past the allowance) → **EscrowCore v3 ceremony** (activates fee
+   retention, retires the waivers). Steps 1 and 3 are done.
 
    The two lanes are one plan: the ladder is why an agent would deposit, and the pool is
    what makes the ladder's top rung Sybil-resistant. Neither is worth much alone.
