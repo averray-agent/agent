@@ -22,6 +22,11 @@ name: Hosted Worker Canary
 # op://mainnet-smoke/admin-refresh-token-worker-canary/password. That chain is
 # never shared with the internal smoke runner, which owns the separate
 # op://mainnet-smoke/admin-refresh-token/password chain.
+#
+# Mainnet's 0.1 USDC payout is intentional monitoring spend. Escrow pays the
+# claimed worker, so a fresh-wallet canary cannot redirect that release without
+# ceasing to test the real external-worker path. The evidence + summary label
+# each ephemeral payout as accepted_cost before its process-only key disappears.
 
 on:
   # Manual run, with knobs for one-off debugging.
@@ -343,6 +348,8 @@ jobs:
           job_state="$(jq -r '.stages.settle.jobState // "—"' "$evidence_file")"
           released="$(jq -r '.stages.settle.released // "—"' "$evidence_file")"
           credited_to="$(jq -r '.stages.settle.creditedTo // "—"' "$evidence_file")"
+          payout_disposition="$(jq -r '.payoutDisposition.status // "unknown"' "$evidence_file")"
+          payout_disposition_detail="$(jq -r '.payoutDisposition.detail // "—"' "$evidence_file")"
           settle_polls="$(jq -r '.stages.settle.pollCount // "—"' "$evidence_file")"
           settle_ms="$(jq -r '.stages.settle.elapsedMs // "—"' "$evidence_file")"
           token_days="$(jq -r '.stages.tokenFreshness.daysToExpiry // "n/a"' "$evidence_file")"
@@ -356,6 +363,7 @@ jobs:
             echo "- Job: \`${job_id}\` (chainJobId \`${chain_job_id}\`)"
             echo "- Claim: \`${claim_mechanism}\` · Submit: \`${submit_status}\` · Verify: \`${verify_outcome}\`"
             echo "- Settle: job \`${job_state}\`, released \`${released}\` USDC → \`${credited_to}\` · \`${settle_polls}\` poll(s), \`${settle_ms} ms\`"
+            echo "- Payout disposition: \`${payout_disposition}\` — ${payout_disposition_detail}"
             echo "- Operator token: \`${token_days}\` day(s) to expiry"
             echo "- Total: \`${total_ms} ms\`"
             echo "- Evidence artifact: \`hosted-worker-canary-${GITHUB_RUN_ID}\`"
