@@ -514,10 +514,14 @@ that describes a world we have left is worse than an empty one.
    The #1051 finding (any TreasuryPolicy `strategySettler` could set `lane.totalAssets()`
    arbitrarily and drain the buffer) is closed by **#1075** — pricing NAV split from
    remote execution inventory, priced on principal cost basis: the change #1066 asked
-   for, merged 2026-08-11. Remaining, in order: re-run the fork simulation against merged
-   main, lift §0's DO-NOT-DEPLOY banner in `CEREMONY_DEPOSIT_POOL_DEPLOY.md` only after
-   it passes, then run the ceremony — a multisig event, done with fresh heads, never
-   same-day alongside incident work.
+   for, merged 2026-08-11. Verified 2026-08-12: #1075 landed the fix, the refreshed §5b
+   fork simulation (block 19,345,507, all four txs, addresses matched), and the
+   `--commit` re-enable as one reviewed unit; the #1051 attack replay is pinned in
+   `test/DepositPool.t.sol::testRemoteObservationCannotRepriceSharesOrDrainTheBuffer`
+   on every CI run. **Remaining: only the ceremony itself** — a multisig event, done
+   with fresh heads, never same-day alongside incident work. Known accepted seam
+   (§0): yield lands step-wise on recall, negligible at 10 USDC scale, redesign
+   before growth.
    **Priority raised 2026-08-12:** once the tier-2 daily allowance `D` lands, deposits
    are the only path past ~5 jobs/day — every serious worker stalls at the allowance
    until the pool exists. Downstream unchanged: tier 3 (#1055), the only
