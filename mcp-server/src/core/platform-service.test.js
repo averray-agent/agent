@@ -6,6 +6,7 @@ import { PlatformService } from "./platform-service.js";
 import { EventBus } from "./event-bus.js";
 import { InsufficientLiquidityError } from "./errors.js";
 import { MemoryStateStore } from "./state-store.js";
+import { buildJobSnapshot } from "./job-snapshot.js";
 import { BOOTSTRAP_JOBS } from "../services/bootstrap-jobs.js";
 import {
   buildExternalSchemaRegistrationTypedData,
@@ -37,6 +38,30 @@ const EXTERNAL_SCHEMA = {
   }
 };
 
+function makeParentJob(overrides = {}) {
+  return {
+    id: "parent-job-001",
+    category: "coding",
+    tier: "starter",
+    rewardAsset: "DOT",
+    rewardAmount: 5,
+    verifierMode: "benchmark",
+    verifierConfig: {
+      version: 1,
+      handler: "benchmark",
+      requiredKeywords: ["complete"],
+      minimumMatches: 1
+    },
+    inputSchemaRef: "schema://jobs/coding-input",
+    outputSchemaRef: "schema://jobs/coding-output",
+    claimTtlSeconds: 3600,
+    retryLimit: 1,
+    requiresSponsoredGas: true,
+    onboardingWaiverEligible: true,
+    ...overrides
+  };
+}
+
 function makePlatformService(
   blockchainGateway = undefined,
   eventBus = undefined,
@@ -45,28 +70,7 @@ function makePlatformService(
   workerExposurePolicy = undefined,
   workerDailyExposurePolicy = undefined
 ) {
-  const jobs = [
-    {
-      id: "parent-job-001",
-      category: "coding",
-      tier: "starter",
-      rewardAsset: "DOT",
-      rewardAmount: 5,
-      verifierMode: "benchmark",
-      verifierConfig: {
-        version: 1,
-        handler: "benchmark",
-        requiredKeywords: ["complete"],
-        minimumMatches: 1
-      },
-      inputSchemaRef: "schema://jobs/coding-input",
-      outputSchemaRef: "schema://jobs/coding-output",
-      claimTtlSeconds: 3600,
-      retryLimit: 1,
-      requiresSponsoredGas: true,
-      onboardingWaiverEligible: true
-    }
-  ];
+  const jobs = [makeParentJob()];
   const profiles = new Map([
     [WALLET, {
       wallet: WALLET,
@@ -93,7 +97,7 @@ function makePlatformService(
   const reputations = new Map([
     [WALLET, { skill: 50, reliability: 50, economic: 50, tier: "starter" }]
   ]);
-  return new PlatformService(
+  const service = new PlatformService(
     jobs,
     profiles,
     accounts,
@@ -106,6 +110,8 @@ function makePlatformService(
     workerExposurePolicy,
     workerDailyExposurePolicy
   );
+  blockchainGateway?.setServedDefinition?.(service.getClaimableJobDefinition(jobs[0].id));
+  return service;
 }
 
 function blockingWorkerExposurePolicy() {
@@ -166,6 +172,7 @@ function makeClaimEconomicsGateway({
 } = {}) {
   let state = initialState;
   let mappedEligibility = onboardingWaiverEligible;
+  let committedSpecHash;
   const gateway = {
     previewCalls: 0,
     isEnabled: () => true,
@@ -212,7 +219,10 @@ function makeClaimEconomicsGateway({
       };
     },
     async getJob() {
-      return { state };
+      return { state, specHash: committedSpecHash };
+    },
+    setServedDefinition(job) {
+      committedSpecHash = buildJobSnapshot(job).specHash;
     },
     async previewClaimEconomics() {
       gateway.previewCalls += 1;
@@ -382,6 +392,46 @@ test("successful claim persists its durable daily exposure entry", async () => {
     candidate: { reservedRewardUsdc: 0.25, brokeredGasUsdc: 0.059, totalUsdc: 0.309 }
   });
   assert.deepEqual((await stateStore.getSession(claimed.sessionId)).dailyExposure, claimed.dailyExposure);
+});
+
+test("preflight, explain, and claim share the claim-scope definition mismatch refusal", async () => {
+  const stateStore = new MemoryStateStore();
+  const gateway = makeClaimEconomicsGateway({ initialState: 1 });
+  let brokerCalls = 0;
+  let exposureCalls = 0;
+  gateway.getJob = async () => ({ state: 1, specHash: `0x${"f".repeat(64)}` });
+  gateway.claimJob = async () => { brokerCalls += 1; };
+  const mustNotEvaluateExposure = {
+    async evaluate() {
+      exposureCalls += 1;
+      return { eligible: true };
+    }
+  };
+  const service = makePlatformService(
+    gateway,
+    undefined,
+    stateStore,
+    undefined,
+    mustNotEvaluateExposure,
+    mustNotEvaluateExposure
+  );
+
+  const preflight = await service.preflightJob(WALLET, "parent-job-001");
+  const explanation = await service.explainEligibility(WALLET, "parent-job-001");
+
+  assert.equal(preflight.eligible, false);
+  assert.equal(preflight.reason, "job_definition_chain_mismatch");
+  assert.equal(preflight.jobDefinitionIntegrity.status, "mismatch");
+  assert.equal(explanation.eligible, false);
+  assert.equal(explanation.reason, preflight.reason);
+  assert.deepEqual(explanation.jobDefinitionIntegrity, preflight.jobDefinitionIntegrity);
+  await assert.rejects(
+    () => service.claimJob(WALLET, "parent-job-001", "http", "preflight-definition-mismatch"),
+    (error) => error?.code === preflight.reason
+  );
+  assert.equal(brokerCalls, 0);
+  assert.equal(exposureCalls, 0);
+  assert.equal(await stateStore.findSessionByJobId("parent-job-001"), undefined);
 });
 
 test("createSubJob links the child job to the active parent session", async () => {
@@ -1122,12 +1172,14 @@ test("post-tier retained claim fee removes curated brokered gas from operator su
 });
 
 test("preflight trusts an existing on-chain waiver when the catalog flag is false", async () => {
-  const service = makePlatformService(makeClaimEconomicsGateway({
+  const gateway = makeClaimEconomicsGateway({
     onboardingWaiverEligible: true,
     workerClaimCount: 0,
     onboardingWaiverClaimCount: 3
-  }));
+  });
+  const service = makePlatformService(gateway);
   service.jobs[0].onboardingWaiverEligible = false;
+  gateway.setServedDefinition(service.getClaimableJobDefinition("parent-job-001"));
 
   const preflight = await service.preflightJob(WALLET, "parent-job-001");
   const claimed = await service.claimJob(WALLET, "parent-job-001", "http", "waiver-parity-split-brain");

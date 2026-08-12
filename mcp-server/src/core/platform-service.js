@@ -58,6 +58,7 @@ import {
   EXTERNAL_JOB_DELISTED_REASON,
   isExternalJob
 } from "./external-job-lifecycle.js";
+import { inspectClaimJobDefinitionIntegrity } from "./claim-job-integrity.js";
 
 const TIMELINE_VERSION = "v2";
 
@@ -941,13 +942,38 @@ export class PlatformService {
       ? await this.stateStore.getExternalJobDelisting?.(jobId)
       : undefined;
     if (!delisting) {
-      if ((!this.workerExposurePolicy && !this.workerDailyExposurePolicy) || result.eligible !== true) {
+      if (result.eligible !== true) {
         return result;
       }
       const claimEconomics = {
         claimEconomicsWaived: preflight.claimEconomicsWaived,
         claimFeeRetainedOnSuccess: preflight.claimFeeRetainedOnSuccess
       };
+      const claimableJob = this.getClaimableJobDefinition(jobId);
+      const jobDefinitionIntegrity = await inspectClaimJobDefinitionIntegrity({
+        job: claimableJob,
+        claimEconomics,
+        stateStore: this.stateStore,
+        blockchainGateway: this.blockchainGateway
+      });
+      if (jobDefinitionIntegrity.decision.eligible !== true) {
+        return {
+          ...result,
+          eligible: false,
+          reason: jobDefinitionIntegrity.decision.reason,
+          reasonMessage: jobDefinitionIntegrity.decision.message,
+          jobDefinitionIntegrity: jobDefinitionIntegrity.decision,
+          failureStates: [
+            ...new Set([
+              ...(Array.isArray(result.failureStates) ? result.failureStates : []),
+              jobDefinitionIntegrity.decision.reason
+            ])
+          ]
+        };
+      }
+      if (!this.workerExposurePolicy && !this.workerDailyExposurePolicy) {
+        return { ...result, jobDefinitionIntegrity: jobDefinitionIntegrity.decision };
+      }
       const workerExposure = this.workerExposurePolicy
         ? await this.workerExposurePolicy.evaluate({ wallet, job, claimEconomics })
         : undefined;
@@ -962,6 +988,7 @@ export class PlatformService {
         reasonMessage: exposureDecision?.eligible === true
           ? result.reasonMessage
           : exposureDecision?.message,
+        jobDefinitionIntegrity: jobDefinitionIntegrity.decision,
         ...(workerExposure ? { workerExposure } : {}),
         ...(dailyExposure ? { dailyExposure, dailyExposureRemaining: dailyExposure.dailyExposureRemaining } : {}),
         failureStates: exposureDecision?.eligible === true
