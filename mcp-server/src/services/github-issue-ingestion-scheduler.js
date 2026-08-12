@@ -1,4 +1,5 @@
 import { ingestGithubIssues } from "../jobs/ingest-github-issues.js";
+import { recordIngestSpecHashRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
 import {
   DEFAULT_OPEN_PR_CAP_PER_REPO,
   DEFAULT_SECURITY_STANDARDS_DENYLIST,
@@ -100,6 +101,7 @@ export class GithubIssueIngestionScheduler {
       openGithubJobs,
       candidateCount: 0,
       createdCount: 0,
+      ingestRefusedSpecHashMismatchCount: 0,
       skipped: [],
       errors: [],
       queries: []
@@ -162,7 +164,12 @@ export class GithubIssueIngestionScheduler {
             }
           }
           if (!this.dryRun) {
-            this.platformService.createJob(job);
+            try {
+              await upsertScheduledIngestedJob(this.platformService, job);
+            } catch (error) {
+              if (recordIngestSpecHashRefusal(summary, job, error)) continue;
+              throw error;
+            }
           }
           seenSources.add(sourceKey);
           querySummary.created += 1;

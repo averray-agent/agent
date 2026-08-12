@@ -71,6 +71,7 @@ export class JobCatalogService {
     this.getDefaultClaimStakeBps = getDefaultClaimStakeBps;
     this.getClaimEconomics = getClaimEconomics;
     this.parentSessionIndex = new Map();
+    this.specHashDriftedJobs = new Map();
     for (const job of this.jobs) {
       assertActiveCatalogTitleTruthBoundary(job?.title, job?.lifecycle);
       this.indexJob(job);
@@ -110,6 +111,37 @@ export class JobCatalogService {
     return job;
   }
 
+  upsertJob(input) {
+    const job = this.normalizeJobInput(input);
+    const index = this.jobs.findIndex((candidate) => candidate.id === job.id);
+    if (index === -1) {
+      this.jobs.unshift(job);
+    } else {
+      const previous = this.jobs[index];
+      if (previous?.parentSessionId) {
+        this.parentSessionIndex.get(String(previous.parentSessionId))?.delete(previous.id);
+      }
+      this.jobs[index] = job;
+    }
+    this.indexJob(job);
+    this.specHashDriftedJobs.delete(job.id);
+    return job;
+  }
+
+  markSpecHashDrift(jobId, details) {
+    const normalizedJobId = normalizeJobId(jobId);
+    const record = JSON.parse(JSON.stringify({ jobId: normalizedJobId, ...details }));
+    this.specHashDriftedJobs.set(normalizedJobId, record);
+    return JSON.parse(JSON.stringify(record));
+  }
+
+  getSpecHashIntegrityStatus() {
+    const drifted = [...this.specHashDriftedJobs.values()]
+      .sort((left, right) => String(left.jobId).localeCompare(String(right.jobId)))
+      .map((record) => JSON.parse(JSON.stringify(record)));
+    return { driftedCount: drifted.length, drifted };
+  }
+
   removeJob(jobId) {
     const idx = this.jobs.findIndex((job) => job.id === jobId);
     if (idx === -1) {
@@ -120,6 +152,7 @@ export class JobCatalogService {
       const indexed = this.parentSessionIndex.get(String(removed.parentSessionId));
       indexed?.delete(removed.id);
     }
+    this.specHashDriftedJobs.delete(removed.id);
     return true;
   }
 
@@ -349,6 +382,14 @@ export class JobCatalogService {
 
   getClaimableJobDefinition(jobId) {
     const job = this.requireJob(jobId);
+    const specHashDrift = this.specHashDriftedJobs.get(job.id);
+    if (specHashDrift) {
+      throw new ConflictError(
+        `Job ${jobId} is not claimable because its served definition does not reproduce the on-chain commitment.`,
+        "job_definition_chain_mismatch",
+        specHashDrift
+      );
+    }
     if (!this.isClaimableJob(job)) {
       const lifecycle = this.buildLifecycle(job);
       throw new ConflictError(
@@ -501,6 +542,7 @@ export class JobCatalogService {
   }
 
   isVisibleJob(job, { includePaused = false, includeArchived = false, includeStale = false, now = new Date() } = {}) {
+    if (this.specHashDriftedJobs.has(job.id)) return false;
     const lifecycle = this.buildLifecycle(job, now);
     if (lifecycle.status === "paused") return includePaused;
     if (lifecycle.status === "archived") return includeArchived;
@@ -509,6 +551,7 @@ export class JobCatalogService {
   }
 
   isClaimableJob(job, now = new Date()) {
+    if (this.specHashDriftedJobs.has(job.id)) return false;
     const lifecycle = this.buildLifecycle(job, now);
     return lifecycle.status === "open" && lifecycle.state === "open";
   }

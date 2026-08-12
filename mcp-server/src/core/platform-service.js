@@ -59,8 +59,10 @@ import {
   isExternalJob
 } from "./external-job-lifecycle.js";
 import { inspectClaimJobDefinitionIntegrity } from "./claim-job-integrity.js";
+import { hashCanonicalContent } from "./canonical-content.js";
 
 const TIMELINE_VERSION = "v2";
+export const INGEST_REFUSED_SPEC_HASH_MISMATCH = "ingest_refused_spec_hash_mismatch";
 
 const STARTER_REPUTATION = {
   skill: 0,
@@ -321,7 +323,7 @@ export class PlatformService {
    * gate (summarizeJobClaimState) then keeps it out of the claimable set.
    */
   async createIngestedJob(input, { now = new Date() } = {}) {
-    const created = this.createJob(applyIngestionOnboardingWaiverPolicy(input));
+    const created = await this.upsertIngestedJob(input, { now });
     if (!this.shouldPrefundIngestedJobs()) {
       return created;
     }
@@ -349,6 +351,64 @@ export class PlatformService {
       this.publishIngestionPrefundEvent(created, "pending", error);
     }
     return created;
+  }
+
+  async upsertIngestedJob(input, { now = new Date() } = {}) {
+    const targetJobId = this.jobCatalogService.normalizeId(input?.id);
+    const existing = this.jobs.find((job) => job.id === targetJobId);
+    const prepared = applyIngestionOnboardingWaiverPolicy({
+      ...input,
+      ...(existing?.lifecycle && input?.lifecycle === undefined
+        ? { lifecycle: existing.lifecycle }
+        : {})
+    });
+    const candidate = this.jobCatalogService.normalizeJobInput(prepared);
+    this.validateJobRewardMinBalance(candidate);
+
+    if (!this.blockchainGateway?.isEnabled?.()) {
+      return this.jobCatalogService.upsertJob(prepared);
+    }
+
+    const live = await this.blockchainGateway.getJob(candidate.id);
+    if (Number(live?.state ?? 0) === 0) {
+      return this.jobCatalogService.upsertJob(prepared);
+    }
+
+    const committedSpecHash = normalizeSpecHash(live?.specHash);
+    const candidateSpecHash = hashCanonicalContent(
+      this.jobCatalogService.withLifecycle(candidate, now)
+    );
+    if (committedSpecHash && candidateSpecHash === committedSpecHash) {
+      return this.jobCatalogService.upsertJob(prepared);
+    }
+
+    const servedSpecHash = existing
+      ? hashCanonicalContent(this.jobCatalogService.withLifecycle(existing, now))
+      : undefined;
+    const detectedAt = now.toISOString();
+    const details = {
+      jobId: candidate.id,
+      committedSpecHash: committedSpecHash ?? null,
+      candidateSpecHash,
+      servedSpecHash: servedSpecHash ?? null,
+      servedDefinitionRetained: Boolean(existing),
+      legacyDrift: !existing || servedSpecHash !== committedSpecHash,
+      detectedAt,
+      recovery: "operator_tombstone_rescue_after_review_window"
+    };
+
+    if (details.legacyDrift) {
+      if (!existing) {
+        this.jobCatalogService.upsertJob(prepared);
+      }
+      this.jobCatalogService.markSpecHashDrift(candidate.id, details);
+    }
+
+    throw new ConflictError(
+      `Ingestion refused to overwrite ${candidate.id}: the refreshed definition does not reproduce its on-chain specHash.`,
+      INGEST_REFUSED_SPEC_HASH_MISMATCH,
+      details
+    );
   }
 
   shouldPrefundIngestedJobs() {
@@ -804,6 +864,7 @@ export class PlatformService {
       },
       recurring: recurring,
       jobLifecycle: this.jobCatalogService.getJobLifecycleSummary(),
+      jobSpecHashIntegrity: this.jobCatalogService.getSpecHashIntegrityStatus(),
       jobStaleSweeper,
       submittedJobAutoVerifier,
       scheduler,
@@ -1741,6 +1802,11 @@ async function getBankXcmRuntimeStatusSafely(runtime) {
   } catch (error) {
     return { enabled: true, readyForStaging: false, error: error?.message ?? "status_failed" };
   }
+}
+
+function normalizeSpecHash(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return /^0x[0-9a-f]{64}$/u.test(normalized) ? normalized : undefined;
 }
 
 async function resolveSiweAuthTelemetry(stateStore, { limit = 1000 } = {}) {
