@@ -1,0 +1,169 @@
+name: Social Draft Writer
+
+# Turns a queued signal into sentences you can copy and post.
+#
+# The sweep opens one `social-draft` issue per fired signal. This asks Hermes to
+# write 2–3 variants from the material already in that issue, screens them, and
+# comments the survivors. Nothing is published to X — the last step is a human
+# copying one out.
+#
+# Reaches Hermes over the same SSH lane as hermes-operator-report.yml: no LLM
+# key lives in Actions, and Hermes stays the one place a model is invoked.
+#
+# One issue per run, deliberately. A batch prompt invites the model to blur two
+# signals into one post, and the point is that every post has exactly one
+# receipt.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # After the 05:12 sweep, before the 08:00 Europe/Zurich digest — so a signal
+    # that fires overnight is already drafted by the time it is announced.
+    - cron: "40 5 * * *"
+
+permissions:
+  contents: read
+  # Only to comment a draft on a queue issue. Never opens, closes, or labels.
+  issues: write
+
+concurrency:
+  group: social-draft-writer
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    name: Draft a queued signal
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      GITHUB_TOKEN: ${{ github.token }}
+      HERMES_DRAFT_TIMEOUT: 10m
+      SOCIAL_DRAFT_ISSUE_FILE: artifacts/social-draft-issue.json
+      SOCIAL_DRAFT_RAW_FILE: artifacts/social-draft-raw.txt
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+
+      - name: Pick an issue and build the prompt
+        id: prompt
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          node scripts/ops/social-draft-writer.mjs prompt > artifacts/prompt.json
+
+          if [ ! -s artifacts/prompt.json ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Social draft writer"
+              echo
+              echo "No queued signal is waiting for a draft. Nothing to do."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          jq -c '{number}' artifacts/prompt.json > "$SOCIAL_DRAFT_ISSUE_FILE"
+          jq -r '.prompt' artifacts/prompt.json > artifacts/prompt.txt
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "issue=$(jq -r '.number' artifacts/prompt.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Load prod-ci secrets from 1Password (fail-closed)
+        if: steps.prompt.outputs.skip != 'true'
+        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_CI }}
+          VPS_SSH_KEY_OP: op://prod-ci/vps-ssh-key/private key
+
+      - name: Configure SSH
+        if: steps.prompt.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          if [ -z "${VPS_SSH_KEY_OP:-}" ]; then
+            echo "::error::VPS_SSH_KEY_OP is empty after the load step"
+            exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY_OP" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Ask Hermes for variants
+        id: hermes
+        if: steps.prompt.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          prompt=$(cat artifacts/prompt.txt)
+          remote_env=$(printf 'SOCIAL_DRAFT_PROMPT=%q ' "$prompt")
+
+          set +e
+          timeout "$HERMES_DRAFT_TIMEOUT" ssh -p "${VPS_PORT:-22}" \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=60 \
+            "$VPS_USER@$VPS_HOST" "${remote_env} bash -s" \
+            > "$SOCIAL_DRAFT_RAW_FILE" 2>&1 <<'REMOTE'
+          set -euo pipefail
+          cd /srv/averray-reference-agent
+          docker compose --env-file .env.prod \
+            -f ops/compose.yml -f ops/compose.prod.yml -p avg \
+            exec -T hermes /opt/hermes/.venv/bin/hermes chat \
+              --provider ollama-cloud -m deepseek-v4-pro:cloud \
+              -q "$SOCIAL_DRAFT_PROMPT"
+          REMOTE
+          status=$?
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            # A failed draft is not a reason to touch the issue. It stays open
+            # and undrafted, which is visible, rather than getting a comment
+            # that says nothing.
+            {
+              echo "## Social draft writer — Hermes did not answer"
+              echo
+              echo "Issue #${{ steps.prompt.outputs.issue }} is untouched and stays queued."
+              echo
+              echo '```text'
+              tail -n 30 "$SOCIAL_DRAFT_RAW_FILE" 2>/dev/null || echo "(no output)"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "$status"
+          fi
+
+      - name: Screen the variants and comment
+        if: steps.prompt.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          node scripts/ops/social-draft-writer.mjs publish 2>&1 | tee artifacts/publish.log
+
+          {
+            echo "## Social draft writer"
+            echo
+            echo "Drafted for issue #${{ steps.prompt.outputs.issue }}."
+            echo
+            echo '```text'
+            cat artifacts/publish.log
+            echo '```'
+            echo
+            echo "Nothing was published to X. The comment on the issue is the draft;"
+            echo "copy one out and post it by hand."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload draft evidence
+        if: always() && steps.prompt.outputs.skip != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: social-draft-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/prompt.txt
+            artifacts/social-draft-raw.txt
+            artifacts/publish.log
+          if-no-files-found: warn
+          retention-days: 90
