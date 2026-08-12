@@ -31,23 +31,31 @@
  * money. The script prints that calldata for the multisig instead.
  *
  * Usage:
- *   node scripts/ops/deploy-deposit-pool.mjs                 # dry run (default)
- *   node scripts/ops/deploy-deposit-pool.mjs --commit        # broadcast tx1-3
+ *   node scripts/ops/deploy-deposit-pool.mjs \
+ *     --expected-deployer 0xEXPECTED                         # dry run (default)
+ *   node scripts/ops/deploy-deposit-pool.mjs \
+ *     --expected-deployer 0xEXPECTED \
+ *     --signer-secret-ref 'op://vault/item/field' --commit   # broadcast tx1-3
  *
  *   --rpc <url>        EVM RPC (default: deployments/mainnet.json rpcUrl)
  *   --profile <name>   deployment profile (default: mainnet)
  *   --artifacts <dir>  forge output dir (default: out)
  *   --strategy-id <s>  strategy label (default: HYDRATION_USDC_POOL_V1)
- *   --commit           actually broadcast. Requires DEPLOYER_PRIVATE_KEY in env.
+ *   --expected-deployer <address>  explicit deployer identity; always required
+ *   --signer-secret-ref <op://...>  1Password key reference; required for --commit
+ *   --commit                      actually broadcast
  *
- * Claude never handles keys. The commit path reads DEPLOYER_PRIVATE_KEY from the
- * environment so the operator supplies it from their own vault at run time.
+ * The signer secret is read directly from 1Password over a child-process stdout
+ * pipe. It never enters shell state or logs. The derived address must equal the
+ * explicit --expected-deployer before the live nonce is read or any tx is sent.
+ * deployments/<profile>.json#deployer is historical evidence only.
  */
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { ethers } from "ethers";
+import { loadKeyFromOp } from "./redeploy-escrowcore.mjs";
 
 const DEFAULT_STRATEGY_LABEL = "HYDRATION_USDC_POOL_V1";
 const RESERVED_STRATEGY_LABEL = "HYDRATION_USDC_V1";
@@ -59,8 +67,15 @@ const CONTRACTS = {
   pool: ["DepositPool.sol", "DepositPool"],
 };
 
-function parseArgs(argv) {
-  const args = { commit: false, profile: "mainnet", artifacts: "out", strategyLabel: DEFAULT_STRATEGY_LABEL };
+export function parseArgs(argv) {
+  const args = {
+    commit: false,
+    profile: "mainnet",
+    artifacts: "out",
+    strategyLabel: DEFAULT_STRATEGY_LABEL,
+    expectedDeployer: undefined,
+    signerSecretRef: undefined,
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--commit") args.commit = true;
@@ -68,9 +83,79 @@ function parseArgs(argv) {
     else if (arg === "--profile") args.profile = argv[++i];
     else if (arg === "--artifacts") args.artifacts = argv[++i];
     else if (arg === "--strategy-id") args.strategyLabel = argv[++i];
+    else if (arg === "--expected-deployer") args.expectedDeployer = argv[++i];
+    else if (arg === "--signer-secret-ref") args.signerSecretRef = argv[++i];
     else if (arg === "--help" || arg === "-h") args.help = true;
   }
   return args;
+}
+
+function checkedAddress(label, value) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${label} is required.`);
+  }
+  try {
+    return ethers.getAddress(value);
+  } catch {
+    throw new Error(`${label} is not a valid EVM address: ${String(value)}`);
+  }
+}
+
+/**
+ * Resolve the only identity that may drive CREATE prediction and broadcast.
+ * The manifest deployer is deliberately not a fallback: on mainnet it is the
+ * burned v1 launch key and retaining it as one would turn historical evidence
+ * into ceremony authority.
+ */
+export function resolveCeremonyDeployer({
+  expectedDeployer,
+  signerSecretRef,
+  commit,
+  loadSecret = loadKeyFromOp,
+  walletFromSecret = (secret) => new ethers.Wallet(secret),
+}) {
+  const expected = checkedAddress("--expected-deployer", expectedDeployer);
+  if (!signerSecretRef) {
+    if (commit) {
+      throw new Error(
+        "--signer-secret-ref is required for --commit; "
+        + "private-key environment variables are not accepted."
+      );
+    }
+    return {
+      address: expected,
+      wallet: null,
+      signerVerified: false,
+      source: "--expected-deployer (unsigned preview)",
+    };
+  }
+
+  const wallet = walletFromSecret(loadSecret(signerSecretRef));
+  const derived = checkedAddress("derived signer", wallet?.address);
+  if (derived !== expected) {
+    throw new Error(
+      `derived signer ${derived} does not match --expected-deployer ${expected}; `
+      + "refusing before nonce prediction or broadcast."
+    );
+  }
+  return {
+    address: derived,
+    wallet,
+    signerVerified: true,
+    source: "derived from --signer-secret-ref",
+  };
+}
+
+export async function predictDeploymentAddresses({ provider, deployer }) {
+  // "pending", not "latest": an already-broadcast-but-unmined transaction from
+  // this EOA must shift every prediction before the ceremony can proceed.
+  const startNonce = await provider.getTransactionCount(deployer, "pending");
+  return {
+    startNonce,
+    lane: ethers.getCreateAddress({ from: deployer, nonce: startNonce }),
+    venueAdapter: ethers.getCreateAddress({ from: deployer, nonce: startNonce + 1 }),
+    pool: ethers.getCreateAddress({ from: deployer, nonce: startNonce + 2 }),
+  };
 }
 
 function strategyIdFromLabel(label) {
@@ -165,6 +250,11 @@ async function main() {
   }
 
   const manifest = JSON.parse(readFileSync(`deployments/${args.profile}.json`, "utf8"));
+  const deployerIdentity = resolveCeremonyDeployer({
+    expectedDeployer: args.expectedDeployer,
+    signerSecretRef: args.signerSecretRef,
+    commit: args.commit,
+  });
   const rpc = args.rpc || process.env.RPC_URL || manifest.rpcUrl;
   const provider = new ethers.JsonRpcProvider(rpc);
 
@@ -172,11 +262,13 @@ async function main() {
   const policy = manifest.contracts.treasuryPolicy;
   const wrapper = manifest.contracts.xcmWrapper;
   const operator = manifest.verifier;
-  const deployer = manifest.deployer;
+  const deployer = deployerIdentity.address;
   const strategyId = strategyIdFromLabel(args.strategyLabel);
 
   console.log(`deposit-pool ceremony — profile ${args.profile}, rpc ${rpc}`);
   console.log(`  ${args.commit ? "COMMIT — transactions will be broadcast" : "DRY RUN — nothing is sent"}`);
+  console.log(`  historical manifest deployer: ${manifest.deployer} (evidence only)`);
+  console.log(`  ceremony deployer: ${deployer} (${deployerIdentity.source})`);
   console.log("");
 
   const problems = await checkPreconditions({ provider, manifest, strategyLabel: args.strategyLabel, strategyId });
@@ -188,15 +280,7 @@ async function main() {
   }
   console.log("preconditions ok: asset decimals, strategy id free, manifest addresses present");
 
-  // "pending", not "latest": an already-broadcast-but-unmined transaction from the
-  // deployer is invisible to "latest", which is precisely the non-quiescent case this
-  // guard exists to catch. Reading pending also makes a same-nonce replacement visible.
-  const startNonce = await provider.getTransactionCount(deployer, "pending");
-  const predicted = {
-    lane: ethers.getCreateAddress({ from: deployer, nonce: startNonce }),
-    venueAdapter: ethers.getCreateAddress({ from: deployer, nonce: startNonce + 1 }),
-    pool: ethers.getCreateAddress({ from: deployer, nonce: startNonce + 2 }),
-  };
+  const { startNonce, ...predicted } = await predictDeploymentAddresses({ provider, deployer });
 
   console.log("");
   console.log(`deployer ${deployer} @ nonce ${startNonce}`);
@@ -239,19 +323,14 @@ async function main() {
 
   if (!args.commit) {
     console.log("");
-    console.log("dry run complete. Re-run with --commit (and DEPLOYER_PRIVATE_KEY set) to broadcast.");
+    console.log(
+      "dry run complete. Re-run with --commit and --signer-secret-ref to verify the vault signer and broadcast."
+    );
     printMultisigStep({ wrapper, strategyId, lane: predicted.lane, label: args.strategyLabel });
     return;
   }
 
-  const key = process.env.DEPLOYER_PRIVATE_KEY;
-  if (!key) throw new Error("DEPLOYER_PRIVATE_KEY is not set; refusing to broadcast.");
-  const wallet = new ethers.Wallet(key, provider);
-  if (ethers.getAddress(wallet.address) !== ethers.getAddress(deployer)) {
-    throw new Error(
-      `DEPLOYER_PRIVATE_KEY resolves to ${wallet.address}, but the manifest deployer is ${deployer}.`
-    );
-  }
+  const wallet = deployerIdentity.wallet.connect(provider);
 
   const deployed = {};
   for (const [index, { step, data }] of plan.entries()) {
@@ -311,7 +390,9 @@ function printMultisigStep({ wrapper, strategyId, lane, label }) {
   console.log("  production deploy will be refused by the D-03 gate.");
 }
 
-main().catch((error) => {
-  console.error(`deposit-pool ceremony failed: ${error.message}`);
-  process.exitCode = 1;
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error(`deposit-pool ceremony failed: ${error.message}`);
+    process.exitCode = 1;
+  });
+}
