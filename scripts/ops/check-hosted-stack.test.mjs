@@ -16,7 +16,12 @@ const ADDRESSES = {
   feeRecipient: `0x${"44".repeat(20)}`
 };
 
-async function runHostedStackFixture({ autoVerifierOk, warnings = [] }) {
+async function runHostedStackFixture({
+  autoVerifierOk,
+  warnings = [],
+  poolStatus = 200,
+  pool = { available: true, chainId: 1 }
+}) {
   const health = {
     status: "ok",
     warnings,
@@ -133,6 +138,11 @@ async function runHostedStackFixture({ autoVerifierOk, warnings = [] }) {
     ["/poster/onboarding", posterOnboarding]
   ]);
   const server = createServer((request, response) => {
+    if (request.url === "/pool") {
+      response.writeHead(poolStatus, { "content-type": "application/json" });
+      response.end(JSON.stringify(pool));
+      return;
+    }
     const value = fixtures.get(request.url);
     if (value === undefined) {
       response.writeHead(404);
@@ -157,6 +167,7 @@ async function runHostedStackFixture({ autoVerifierOk, warnings = [] }) {
       DISCOVERY_URL: `${baseUrl}/.well-known/agent-tools.json`,
       APP_URL: `${baseUrl}/app`,
       API_HEALTH_URL: `${baseUrl}/health`,
+      API_POOL_URL: `${baseUrl}/pool`,
       API_ONBOARDING_URL: `${baseUrl}/onboarding`,
       API_POSTER_ONBOARDING_URL: `${baseUrl}/poster/onboarding`,
       ADMIN_JWT: "",
@@ -201,7 +212,32 @@ test("hosted smoke accepts a healthy submitted-job verifier", async () => {
   const result = await runHostedStackFixture({ autoVerifierOk: true, warnings: [] });
 
   assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /Checking DepositPool door/u);
   assert.match(result.stdout, /Hosted stack smoke check passed\./u);
+});
+
+test("hosted smoke rejects a 500 from the DepositPool door", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    poolStatus: 500,
+    pool: {
+      error: "internal_error",
+      message: "DepositPool door requires a positive chainId."
+    }
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.match(result.stderr, /DepositPool door returned HTTP 500; expected 200\./u);
+});
+
+test("hosted smoke rejects a 200 response when the DepositPool door is unavailable", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    pool: { available: false, reason: "deposit_pool_not_configured", chainId: 1 }
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.match(result.stderr, /DepositPool door did not report available: true\./u);
 });
 
 test("hosted smoke cross-checks poster onboarding against operational and chain-backed health", async () => {

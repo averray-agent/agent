@@ -207,6 +207,19 @@ export function createPlatformService() {
   );
 }
 
+export function createDepositPoolDoor({ gateway, authConfig, env = process.env, chainReader } = {}) {
+  return new DepositPoolDoorService({
+    poolAddress: gateway.config.depositPoolAddress,
+    chainId: authConfig.chainId,
+    // The door advertises the canonical public RPC from onboarding. Never
+    // echo configured backend providers: those may carry private API tokens.
+    rpcUrls: [resolveHubNetwork(authConfig.chainId).rpcUrl],
+    provider: gateway.provider,
+    chainReader,
+    allowanceConfig: loadWorkerDailyExposureConfig(env)
+  });
+}
+
 export async function createPlatformRuntime() {
   const logger = createLogger({
     name: "agent-platform",
@@ -565,15 +578,7 @@ export async function createPlatformRuntime() {
     })
   );
   const depositPoolDoor = initStep("init-deposit-pool-door", logger, () =>
-    new DepositPoolDoorService({
-      poolAddress: gateway.config.depositPoolAddress,
-      chainId: gateway.config.chainId,
-      // The door advertises the canonical public RPC from onboarding. Never
-      // echo configured backend providers: those may carry private API tokens.
-      rpcUrls: [resolveHubNetwork(gateway.config.chainId).rpcUrl],
-      provider: gateway.provider,
-      allowanceConfig: loadWorkerDailyExposureConfig(process.env)
-    })
+    createDepositPoolDoor({ gateway, authConfig })
   );
   const xcmBalanceObserver = initStep("init-xcm-balance-observer", logger, () =>
     new XcmBalanceObserverService(
