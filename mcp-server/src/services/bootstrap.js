@@ -177,7 +177,8 @@ export function createPlatformService() {
   });
   const workerDailyExposurePolicy = createWorkerDailyExposurePolicy({
     stateStore,
-    workerExposurePolicy
+    workerExposurePolicy,
+    blockchainGateway: gateway
   });
   const eventBus = new EventBus({ eventStore: stateStore });
   const accounts = new AccountOverlayStore({ stateStore });
@@ -324,6 +325,7 @@ export async function createPlatformRuntime() {
     () => createWorkerDailyExposurePolicy({
       stateStore,
       workerExposurePolicy,
+      blockchainGateway: gateway,
       env: process.env
     })
   );

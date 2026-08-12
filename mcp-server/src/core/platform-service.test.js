@@ -11,6 +11,7 @@ import { EventBus } from "./event-bus.js";
 import { InsufficientLiquidityError } from "./errors.js";
 import { MemoryStateStore } from "./state-store.js";
 import { buildJobSnapshot } from "./job-snapshot.js";
+import { WorkerDailyExposurePolicy } from "./worker-daily-exposure.js";
 import { BOOTSTRAP_JOBS } from "../services/bootstrap-jobs.js";
 import {
   buildExternalSchemaRegistrationTypedData,
@@ -396,6 +397,46 @@ test("successful claim persists its durable daily exposure entry", async () => {
     candidate: { reservedRewardUsdc: 0.25, brokeredGasUsdc: 0.059, totalUsdc: 0.309 }
   });
   assert.deepEqual((await stateStore.getSession(claimed.sessionId)).dailyExposure, claimed.dailyExposure);
+});
+
+test("claim, preflight, and explainEligibility report one identical tier-3 allowance", async () => {
+  const stateStore = new MemoryStateStore();
+  const dailyPolicy = new WorkerDailyExposurePolicy({
+    stateStore,
+    workerExposurePolicy: {
+      exposureForDefinition() {
+        return { rewardUnits: 250_000n, gasUnits: 59_000n, totalUnits: 309_000n };
+      },
+      exposureForSession() {
+        return { rewardUnits: 250_000n, gasUnits: 59_000n, totalUnits: 309_000n };
+      }
+    },
+    resolveBudget: async () => ({
+      baseRaw: 1_500_000n,
+      depositedAssetsRaw: 10_000_000n,
+      fromDepositsRaw: 10_000_000n,
+      totalRaw: 11_500_000n,
+      poolAddress: "0x1111111111111111111111111111111111111111"
+    })
+  });
+  const service = makePlatformService(
+    undefined,
+    undefined,
+    stateStore,
+    undefined,
+    undefined,
+    dailyPolicy
+  );
+
+  const preflight = await service.preflightJob(WALLET, "parent-job-001");
+  const explanation = await service.explainEligibility(WALLET, "parent-job-001");
+  const claimed = await service.claimJob(WALLET, "parent-job-001", "http", "tier3-parity");
+
+  assert.equal(preflight.dailyAllowance.total, 11.5);
+  assert.equal(explanation.dailyAllowance.total, preflight.dailyAllowance.total);
+  assert.equal(claimed.dailyAllowance.total, preflight.dailyAllowance.total);
+  assert.deepEqual(explanation.dailyAllowance, preflight.dailyAllowance);
+  assert.deepEqual(claimed.dailyAllowance, preflight.dailyAllowance);
 });
 
 test("preflight, explain, and claim share the claim-scope definition mismatch refusal", async () => {

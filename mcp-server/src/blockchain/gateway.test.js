@@ -1105,6 +1105,44 @@ test("getClaimEconomicsDecisionState treats an unreadable optional retention pro
   assert.equal(state.claimFeeRetainedOnSuccess, false);
 });
 
+test("readDepositedAssets fails closed for missing selector and contract read errors", async () => {
+  const gateway = gatewayWithDot();
+  gateway.depositPoolContract = {};
+  assert.equal(await gateway.readDepositedAssets("0x3333333333333333333333333333333333333333"), 0n);
+
+  gateway.depositPoolReadCache.clear();
+  gateway.depositPoolContract = {
+    async assetsOf() {
+      throw new Error("pool RPC unavailable");
+    }
+  };
+  assert.equal(await gateway.readDepositedAssets("0x3333333333333333333333333333333333333333"), 0n);
+});
+
+test("readDepositedAssets caches each wallet for no more than sixty seconds", async () => {
+  let nowMs = 1_000;
+  let calls = 0;
+  const gateway = new BlockchainGateway(
+    { enabled: false },
+    { now: () => nowMs }
+  );
+  gateway.depositPoolContract = {
+    async assetsOf(wallet) {
+      calls += 1;
+      assert.equal(wallet, "0x3333333333333333333333333333333333333333");
+      return BigInt(calls * 10_000_000);
+    }
+  };
+
+  assert.equal(await gateway.readDepositedAssets("0x3333333333333333333333333333333333333333"), 10_000_000n);
+  assert.equal(await gateway.readDepositedAssets("0x3333333333333333333333333333333333333333"), 10_000_000n);
+  assert.equal(calls, 1);
+
+  nowMs += 60_001;
+  assert.equal(await gateway.readDepositedAssets("0x3333333333333333333333333333333333333333"), 20_000_000n);
+  assert.equal(calls, 2);
+});
+
 test("readEscrowJob detects v1 before the pre-waiver legacy layout", async () => {
   const gateway = gatewayWithDot();
   const decodeError = Object.assign(new Error("could not decode result data"), { code: "BAD_DATA" });

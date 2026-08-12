@@ -500,6 +500,7 @@ export class JobExecutionService {
       totalClaimLock: claimEconomics.totalClaimLock,
       ...(workerExposure ? { workerExposure } : {}),
       ...(dailyExposure?.entry ? { dailyExposure: dailyExposure.entry } : {}),
+      ...(dailyExposure?.dailyAllowance ? { dailyAllowance: dailyExposure.dailyAllowance } : {}),
       ...(claimEconomics.onboardingSubsidy
         ? { onboardingSubsidy: claimEconomics.onboardingSubsidy }
         : {}),

@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 import {
   DAILY_EXPOSURE_BUDGET_REACHED_REASON,
   DEFAULT_WORKER_DAILY_EXPOSURE_BUDGET_RAW,
+  DEFAULT_WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI,
   WorkerDailyExposurePolicy,
+  createWorkerDailyExposurePolicy,
   loadWorkerDailyExposureConfig,
   resolveDailyExposureBudget
 } from "./worker-daily-exposure.js";
@@ -82,11 +84,25 @@ async function putClaim(stateStore, {
 }
 
 test("daily exposure config has a finite raw-unit default, accepts zero, and respects overrides", () => {
-  assert.deepEqual(loadWorkerDailyExposureConfig({}), { budgetRaw: 1_500_000 });
-  assert.deepEqual(loadWorkerDailyExposureConfig({ WORKER_DAILY_EXPOSURE_BUDGET_RAW: "0" }), { budgetRaw: 0 });
+  assert.deepEqual(loadWorkerDailyExposureConfig({}), {
+    budgetRaw: 1_500_000,
+    allowancePerDepositedMilli: 1_000
+  });
+  assert.deepEqual(loadWorkerDailyExposureConfig({ WORKER_DAILY_EXPOSURE_BUDGET_RAW: "0" }), {
+    budgetRaw: 0,
+    allowancePerDepositedMilli: 1_000
+  });
   assert.deepEqual(
     loadWorkerDailyExposureConfig({ WORKER_DAILY_EXPOSURE_BUDGET_RAW: "2250000" }),
-    { budgetRaw: 2_250_000 }
+    { budgetRaw: 2_250_000, allowancePerDepositedMilli: 1_000 }
+  );
+  assert.deepEqual(
+    loadWorkerDailyExposureConfig({ WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI: "0" }),
+    { budgetRaw: 1_500_000, allowancePerDepositedMilli: 0 }
+  );
+  assert.deepEqual(
+    loadWorkerDailyExposureConfig({ WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI: "625" }),
+    { budgetRaw: 1_500_000, allowancePerDepositedMilli: 625 }
   );
   assert.throws(
     () => loadWorkerDailyExposureConfig({ WORKER_DAILY_EXPOSURE_BUDGET_RAW: "1.5" }),
@@ -94,9 +110,121 @@ test("daily exposure config has a finite raw-unit default, accepts zero, and res
   );
 });
 
-test("resolveDailyExposureBudget is a wallet-aware flat-budget tier-3 hook", () => {
+test("resolveDailyExposureBudget pins the tier-3 deposited-assets formula", () => {
+  assert.equal(DEFAULT_WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI, 1_000);
   assert.equal(resolveDailyExposureBudget(WALLET), 1_500_000n);
-  assert.equal(resolveDailyExposureBudget(WALLET, { budgetRaw: 2_000_000 }), 2_000_000n);
+  assert.equal(
+    resolveDailyExposureBudget(WALLET, { depositedAssetsRaw: 10_000_000 }),
+    11_500_000n
+  );
+  assert.equal(
+    resolveDailyExposureBudget(WALLET, { depositedAssetsRaw: 100_000_000 }),
+    101_500_000n
+  );
+  assert.equal(
+    resolveDailyExposureBudget(WALLET, {
+      budgetRaw: 2_000_000,
+      depositedAssetsRaw: 10_000_000,
+      allowancePerDepositedMilli: 625
+    }),
+    8_250_000n
+  );
+  assert.equal(
+    resolveDailyExposureBudget(WALLET, {
+      depositedAssetsRaw: 100_000_000,
+      allowancePerDepositedMilli: 0
+    }),
+    1_500_000n
+  );
+});
+
+test("failed deposited-assets reads never grant a raise or refuse below the base", async () => {
+  const stateStore = new MemoryStateStore();
+  const policy = createWorkerDailyExposurePolicy({
+    stateStore,
+    workerExposurePolicy: new WorkerExposurePolicy({
+      stateStore,
+      gasEstimateUsdc: 0.059,
+      capUsdc: 100
+    }),
+    blockchainGateway: {
+      config: { depositPoolAddress: "0x1111111111111111111111111111111111111111" },
+      async readDepositedAssets() {
+        throw new Error("pool RPC unavailable");
+      }
+    },
+    config: {
+      budgetRaw: 1_500_000,
+      allowancePerDepositedMilli: 1_000
+    }
+  });
+
+  const decision = await policy.evaluate({
+    wallet: WALLET,
+    job: job({ rewardAmount: 1.2 }),
+    claimEconomics: economics()
+  });
+
+  assert.equal(decision.eligible, true);
+  assert.equal(decision.dailyExposureBudgetRaw, "1500000");
+  assert.deepEqual(decision.dailyAllowance, {
+    base: 1.5,
+    fromDeposits: 0,
+    depositedAssets: 0,
+    total: 1.5
+  });
+});
+
+test("daily allowance decomposition sums exactly and refusal copy names the pool only when configured", async () => {
+  const poolAddress = "0x1111111111111111111111111111111111111111";
+  const stateStore = new MemoryStateStore();
+  const workerExposurePolicy = new WorkerExposurePolicy({
+    stateStore,
+    gasEstimateUsdc: 0.059,
+    capUsdc: 100
+  });
+  const withPool = createWorkerDailyExposurePolicy({
+    stateStore,
+    workerExposurePolicy,
+    blockchainGateway: {
+      config: { depositPoolAddress: poolAddress },
+      async readDepositedAssets() { return 10_000_000n; }
+    },
+    config: { budgetRaw: 1_500_000, allowancePerDepositedMilli: 1_000 }
+  });
+  const withoutPool = createWorkerDailyExposurePolicy({
+    stateStore,
+    workerExposurePolicy,
+    blockchainGateway: {
+      config: {},
+      async readDepositedAssets() { return 0n; }
+    },
+    config: { budgetRaw: 0, allowancePerDepositedMilli: 1_000 }
+  });
+
+  const raised = await withPool.evaluate({
+    wallet: WALLET,
+    job: job({ rewardAmount: 12 }),
+    claimEconomics: economics()
+  });
+  const flat = await withoutPool.evaluate({
+    wallet: WALLET,
+    job: job(),
+    claimEconomics: economics()
+  });
+
+  assert.equal(raised.dailyAllowance.base + raised.dailyAllowance.fromDeposits, raised.dailyAllowance.total);
+  assert.deepEqual(raised.dailyAllowance, {
+    base: 1.5,
+    fromDeposits: 10,
+    depositedAssets: 10,
+    total: 11.5
+  });
+  assert.equal(raised.eligible, false);
+  assert.match(raised.message, new RegExp(poolAddress, "u"));
+  assert.match(raised.message, /deposits into DepositPool .* raise your daily allowance 1:1/iu);
+  assert.equal(flat.eligible, false);
+  assert.doesNotMatch(flat.message, /deposit|pool|1:1/iu);
 });
 
 test("42-claim morning replay is refused on the fifth typical claim with the oldest age-out", async () => {

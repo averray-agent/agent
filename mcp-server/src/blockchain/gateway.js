@@ -12,6 +12,7 @@ import {
 } from "ethers";
 import {
   AGENT_ACCOUNT_ABI,
+  DEPOSIT_POOL_ABI,
   ERC20_MOCK_ABI,
   ESCROW_CORE_ABI,
   ESCROW_CORE_LEGACY_ABI,
@@ -64,6 +65,7 @@ const ESCROW_JOB_STATE_REJECTED = 4;
 const ESCROW_JOB_STATE_CLOSED = 6;
 const RECOVERY_LOG_CHUNK_SIZE = 50_000;
 const RECOVERY_FROM_BLOCK_SAFETY_MARGIN = 1_000;
+const DEPOSIT_POOL_READ_CACHE_TTL_MS = 60_000;
 const JOB_CLOSED_TOPIC0 = id("JobClosed(bytes32,address,uint256)").toLowerCase();
 const JOB_REJECTED_TOPIC0 = id("JobRejected(bytes32,bytes32)").toLowerCase();
 const RESERVATION_SETTLED_TOPIC0 =
@@ -134,9 +136,11 @@ function exactUint(value, label) {
 }
 
 export class BlockchainGateway {
-  constructor(config = loadBlockchainConfig(), { logger = undefined } = {}) {
+  constructor(config = loadBlockchainConfig(), { logger = undefined, now = () => Date.now() } = {}) {
     this.config = config;
     this.logger = logger;
+    this.now = now;
+    this.depositPoolReadCache = new Map();
     if (!config.enabled) {
       this.provider = undefined;
       this.writeBroadcaster = undefined;
@@ -152,6 +156,7 @@ export class BlockchainGateway {
       this.reputationContract = undefined;
       this.xcmWrapperContract = undefined;
       this.hydrationUsdcAdapterContract = undefined;
+      this.depositPoolContract = undefined;
       return;
     }
 
@@ -238,6 +243,13 @@ export class BlockchainGateway {
           config.hydrationUsdcAdapterAddress,
           HYDRATION_USDC_ADAPTER_V22_ABI,
           this.signer ?? this.provider
+        )
+      : undefined;
+    this.depositPoolContract = config.depositPoolAddress
+      ? new Contract(
+          config.depositPoolAddress,
+          DEPOSIT_POOL_ABI,
+          this.provider
         )
       : undefined;
   }
@@ -618,6 +630,34 @@ export class BlockchainGateway {
       // fails conservatively: brokered gas remains operator exposure.
       return false;
     }
+  }
+
+  async readDepositedAssets(wallet) {
+    const cacheKey = String(wallet ?? "").toLowerCase();
+    const nowMs = Number(this.now());
+    const cached = this.depositPoolReadCache.get(cacheKey);
+    // A just-deposited wallet may wait at most one minute for its raise, while
+    // a just-withdrawn wallet may retain it for the same bounded interval. That
+    // symmetric staleness is accepted at this scale and avoids claim-path RPC
+    // amplification without pretending to offer cache invalidation.
+    if (cached && nowMs - cached.readAtMs <= DEPOSIT_POOL_READ_CACHE_TTL_MS) {
+      return cached.value;
+    }
+
+    let value = 0n;
+    if (typeof this.depositPoolContract?.assetsOf === "function") {
+      try {
+        value = BigInt(await this.depositPoolContract.assetsOf(wallet));
+        if (value < 0n) value = 0n;
+      } catch {
+        // DepositPool is an optional tier-3 capability. Missing selectors,
+        // predecessor runtimes, and transient reads fail closed to zero so
+        // nobody receives more than the base allowance.
+        value = 0n;
+      }
+    }
+    this.depositPoolReadCache.set(cacheKey, { value, readAtMs: nowMs });
+    return value;
   }
 
   async getTreasuryPolicyStatus() {
