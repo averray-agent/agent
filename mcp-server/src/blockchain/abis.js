@@ -41,6 +41,10 @@ export const AGENT_ACCOUNT_ABI = [
   "event AgentTransfer(address indexed from, address indexed to, address indexed asset, uint256 amount)"
 ];
 
+export const DEPOSIT_POOL_ABI = [
+  "function assetsOf(address account) view returns (uint256)"
+];
+
 export const ESCROW_CORE_ABI = [
   "function accounts() view returns (address)",
   "function treasuryAccount() view returns (address)",

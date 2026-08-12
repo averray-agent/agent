@@ -769,6 +769,7 @@ export function explainEligibilityFromPreflight(preflight) {
     workerExposure: preflight.workerExposure,
     dailyExposure: preflight.dailyExposure,
     dailyExposureRemaining: preflight.dailyExposureRemaining,
+    dailyAllowance: preflight.dailyAllowance,
     failureStates: preflight.failureStates,
     reasonMessage: preflight.reasonMessage ?? preflight.dailyExposure?.message ?? preflight.workerExposure?.message
   };

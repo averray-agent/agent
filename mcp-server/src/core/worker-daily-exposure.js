@@ -3,6 +3,7 @@ import { isExternalJob } from "./external-job-lifecycle.js";
 import { decimalToBaseUnits, formatBaseUnits } from "./platform-service-helpers.js";
 
 export const DEFAULT_WORKER_DAILY_EXPOSURE_BUDGET_RAW = 1_500_000;
+export const DEFAULT_WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI = 1_000;
 export const DAILY_EXPOSURE_BUDGET_REACHED_REASON = "daily_exposure_budget_reached";
 export const DAILY_EXPOSURE_UNAVAILABLE_REASON = "daily_exposure_budget_unavailable";
 
@@ -15,25 +16,63 @@ export function loadWorkerDailyExposureConfig(env = process.env) {
       env.WORKER_DAILY_EXPOSURE_BUDGET_RAW,
       DEFAULT_WORKER_DAILY_EXPOSURE_BUDGET_RAW,
       "WORKER_DAILY_EXPOSURE_BUDGET_RAW"
+    ),
+    allowancePerDepositedMilli: nonNegativeIntegerConfig(
+      env.WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI,
+      DEFAULT_WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI,
+      "WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI"
     )
   };
 }
 
-// Deliberately a wallet-aware hook even though today's tier-2 allowance is
-// flat. Tier 3 can raise this result from pool shares without changing the
-// rolling-window ledger or either enforcement surface.
+// One deposited USDC raises the rolling allowance by K/1000 USDC. The
+// calculation stays in raw units and rounds down, so custom fractional K
+// values can never grant more than their configured ratio.
 export function resolveDailyExposureBudget(_wallet, {
-  budgetRaw = DEFAULT_WORKER_DAILY_EXPOSURE_BUDGET_RAW
+  budgetRaw = DEFAULT_WORKER_DAILY_EXPOSURE_BUDGET_RAW,
+  depositedAssetsRaw = 0,
+  allowancePerDepositedMilli = DEFAULT_WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI
 } = {}) {
-  return nonNegativeRawUnits(budgetRaw, "worker daily exposure budget");
+  const baseUnits = nonNegativeRawUnits(budgetRaw, "worker daily exposure budget");
+  const depositedUnits = nonNegativeRawUnits(depositedAssetsRaw, "deposited pool assets");
+  const multiplierMilli = nonNegativeRawUnits(
+    allowancePerDepositedMilli,
+    "worker tier-3 allowance per deposited milli"
+  );
+  return baseUnits + ((depositedUnits * multiplierMilli) / 1_000n);
 }
 
 export function createWorkerDailyExposurePolicy({
   stateStore,
   workerExposurePolicy,
+  blockchainGateway,
   env = process.env,
   config = loadWorkerDailyExposureConfig(env),
-  resolveBudget = (wallet) => resolveDailyExposureBudget(wallet, config),
+  resolveBudget = async (wallet) => {
+    let depositedAssetsRaw = 0n;
+    try {
+      depositedAssetsRaw = typeof blockchainGateway?.readDepositedAssets === "function"
+        ? await blockchainGateway.readDepositedAssets(wallet)
+        : 0n;
+    } catch {
+      // Belt-and-suspenders around the gateway's own optional-capability
+      // fail-closed behavior: a read failure can delay a raise, never grant it.
+      depositedAssetsRaw = 0n;
+    }
+    const baseRaw = nonNegativeRawUnits(config.budgetRaw, "worker daily exposure budget");
+    const depositedRaw = nonNegativeRawUnits(depositedAssetsRaw, "deposited pool assets");
+    const totalRaw = resolveDailyExposureBudget(wallet, {
+      ...config,
+      depositedAssetsRaw: depositedRaw
+    });
+    return {
+      baseRaw,
+      depositedAssetsRaw: depositedRaw,
+      fromDepositsRaw: totalRaw - baseRaw,
+      totalRaw,
+      poolAddress: blockchainGateway?.config?.depositPoolAddress
+    };
+  },
   now = () => new Date()
 } = {}) {
   return new WorkerDailyExposurePolicy({
@@ -74,7 +113,8 @@ export class WorkerDailyExposurePolicy {
 
     try {
       const evaluatedAt = asDate(this.now(), "daily exposure clock");
-      const budgetUnits = await this.resolveBudgetUnits(wallet);
+      const allowance = await this.resolveAllowance(wallet);
+      const budgetUnits = allowance.totalUnits;
       const candidate = workerExposure?.candidate
         ? exposureFromPublicComponents(workerExposure.candidate, "candidate exposure")
         : this.workerExposurePolicy.exposureForDefinition(job, claimEconomics);
@@ -104,6 +144,7 @@ export class WorkerDailyExposurePolicy {
         candidateExposureRaw: candidate.totalUnits.toString(),
         projectedDailyExposureRaw: projectedUnits.toString(),
         dailyExposureBudget: usdcAmount(budgetUnits),
+        dailyAllowance: publicDailyAllowance(allowance),
         dailyExposureUsed: usdcAmount(current.totalUnits),
         dailyExposureRemaining: usdcAmount(remainingUnits),
         candidateExposure: usdcAmount(candidate.totalUnits),
@@ -119,7 +160,7 @@ export class WorkerDailyExposurePolicy {
         },
         message: eligible
           ? "The claim fits within this wallet's rolling 24-hour operator exposure allowance."
-          : "This claim would exceed the wallet's rolling 24-hour operator exposure allowance. Retry after earlier claim spend ages out."
+          : dailyExposureRefusalMessage(allowance.poolAddress)
       });
     } catch (error) {
       return {
@@ -154,8 +195,40 @@ export class WorkerDailyExposurePolicy {
     return { totalUnits, sessionCount, oldestClaimedAt };
   }
 
-  async resolveBudgetUnits(wallet) {
-    return nonNegativeRawUnits(await this.resolveBudget(wallet), "resolved worker daily exposure budget");
+  async resolveAllowance(wallet) {
+    const resolved = await this.resolveBudget(wallet);
+    if (!resolved || typeof resolved !== "object") {
+      const totalUnits = nonNegativeRawUnits(resolved, "resolved worker daily exposure budget");
+      return {
+        baseUnits: totalUnits,
+        depositedUnits: 0n,
+        fromDepositsUnits: 0n,
+        totalUnits,
+        poolAddress: undefined
+      };
+    }
+    const baseUnits = nonNegativeRawUnits(resolved.baseRaw, "resolved base daily allowance");
+    const depositedUnits = nonNegativeRawUnits(
+      resolved.depositedAssetsRaw,
+      "resolved deposited pool assets"
+    );
+    const fromDepositsUnits = nonNegativeRawUnits(
+      resolved.fromDepositsRaw,
+      "resolved allowance from deposits"
+    );
+    const totalUnits = nonNegativeRawUnits(resolved.totalRaw, "resolved total daily allowance");
+    if (baseUnits + fromDepositsUnits !== totalUnits) {
+      throw new Error("Resolved daily allowance components do not sum to the total");
+    }
+    return {
+      baseUnits,
+      depositedUnits,
+      fromDepositsUnits,
+      totalUnits,
+      poolAddress: typeof resolved.poolAddress === "string" && resolved.poolAddress
+        ? resolved.poolAddress
+        : undefined
+    };
   }
 }
 
@@ -198,6 +271,22 @@ function publicComponents(exposure) {
     brokeredGasUsdc: usdcAmount(exposure.gasUnits),
     totalUsdc: usdcAmount(exposure.totalUnits)
   };
+}
+
+function publicDailyAllowance(allowance) {
+  return {
+    base: usdcAmount(allowance.baseUnits),
+    fromDeposits: usdcAmount(allowance.fromDepositsUnits),
+    depositedAssets: usdcAmount(allowance.depositedUnits),
+    total: usdcAmount(allowance.totalUnits)
+  };
+}
+
+function dailyExposureRefusalMessage(poolAddress) {
+  const base = "This claim would exceed the wallet's rolling 24-hour operator exposure allowance. Retry after earlier claim spend ages out.";
+  return poolAddress
+    ? `${base} Deposits into DepositPool ${poolAddress} raise your daily allowance 1:1.`
+    : base;
 }
 
 function usdcUnits(value, field) {

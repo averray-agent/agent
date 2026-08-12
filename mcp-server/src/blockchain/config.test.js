@@ -253,6 +253,22 @@ test("loadBlockchainConfig accepts the optional Hydration adapter settlement add
   assert.equal(config.hydrationUsdcAdapterAddress, "0x631a09913b2403b18b2b659a1397916621b29b4c");
 });
 
+test("loadBlockchainConfig resolves DepositPool from the network manifest only where deployed", () => {
+  const mainnet = loadBlockchainConfig({
+    ...baseEnv,
+    RPC_URL: "https://rpc.example",
+    AUTH_CHAIN_ID: "420420419"
+  });
+  const testnet = loadBlockchainConfig({
+    ...baseEnv,
+    RPC_URL: "https://rpc.example",
+    AUTH_CHAIN_ID: "420420417"
+  });
+
+  assert.equal(mainnet.depositPoolAddress, "0xccf5fdf3108af8e693f28bb9326a573d9da0f476");
+  assert.equal(testnet.depositPoolAddress, "");
+});
+
 test("loadBlockchainConfig rejects malformed optional XCM_WRAPPER_ADDRESS", () => {
   assert.throws(
     () =>

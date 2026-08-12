@@ -1,5 +1,6 @@
 import { ConfigError } from "../core/errors.js";
 import { knownAssetMinBalanceRaw } from "../core/assets.js";
+import { loadDeploymentManifest } from "../core/health-capability.js";
 import { derivePolkadotHubAssetAddress } from "../services/strategy-asset-config.js";
 
 const DEFAULT_GAS_FEE_BUFFER_BPS = 2000;
@@ -180,6 +181,7 @@ export function loadBlockchainConfig(env = process.env) {
   const rpcUrl = resolveRpcUrl(env);
   const rpcBackupUrls = resolveRpcBackupUrls(env, rpcUrl);
   const assetConfigPresent = Boolean(env.SUPPORTED_ASSETS_JSON || env.SUPPORTED_ASSETS);
+  const deploymentManifest = loadDeploymentManifest(env);
 
   // Phase 3 (per docs/SECRETS_MIGRATION.md §"Phase 3 — AWS KMS for the
   // backend signer"): SIGNER_BACKEND selects which signing path the
@@ -287,6 +289,10 @@ export function loadBlockchainConfig(env = process.env) {
     hydrationUsdcAdapterAddress: normalizeOptionalAddress(
       env.HYDRATION_USDC_ADAPTER_ADDRESS,
       "HYDRATION_USDC_ADAPTER_ADDRESS"
+    ),
+    depositPoolAddress: normalizeOptionalAddress(
+      deploymentManifest?.contracts?.depositPool,
+      "deployments/<profile>.json#contracts.depositPool"
     ),
     supportedAssets,
     gasFeeBufferBps: resolveGasFeeBufferBps(env)

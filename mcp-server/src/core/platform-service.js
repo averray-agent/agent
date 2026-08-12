@@ -1067,7 +1067,11 @@ export class PlatformService {
           : exposureDecision?.message,
         jobDefinitionIntegrity: jobDefinitionIntegrity.decision,
         ...(workerExposure ? { workerExposure } : {}),
-        ...(dailyExposure ? { dailyExposure, dailyExposureRemaining: dailyExposure.dailyExposureRemaining } : {}),
+        ...(dailyExposure ? {
+          dailyExposure,
+          dailyExposureRemaining: dailyExposure.dailyExposureRemaining,
+          dailyAllowance: dailyExposure.dailyAllowance
+        } : {}),
         failureStates: exposureDecision?.eligible === true
           ? result.failureStates
           : [
