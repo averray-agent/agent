@@ -14,6 +14,10 @@
     "jobs-settled-100": {
       "firedAt": "2026-08-10T10:25:00.481Z",
       "seeded": true
+    },
+    "shipped-pr-1029": {
+      "firedAt": "2026-08-12T06:23:23.710Z",
+      "seeded": false
     }
   },
   "highestSettlementMilestone": 100
