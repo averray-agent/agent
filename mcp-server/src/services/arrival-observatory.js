@@ -46,6 +46,7 @@ const HTTP_MACHINE_PATHS = new Set([
   "/admin/arrivals/canary-marker",
   "/monitor/arrivals",
   "/monitor/bank-feed",
+  "/monitor/deposit-pool",
   "/gas/health",
   "/gas/capabilities"
 ]);

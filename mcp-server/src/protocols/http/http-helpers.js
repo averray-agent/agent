@@ -141,6 +141,7 @@ export function metricPathLabel(pathname) {
     "/llms.txt",
     "/onboarding",
     "/monitor/bank-feed",
+    "/monitor/deposit-pool",
     "/jobs",
     "/jobs/x402",
     "/jobs/definition",
