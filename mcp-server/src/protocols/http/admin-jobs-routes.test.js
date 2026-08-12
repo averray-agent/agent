@@ -91,6 +91,12 @@ function makeHarness(overrides = {}) {
         calls.push(["getJobTimeline", { jobId, filters }]);
         return overrides.timeline ?? { jobId, events: [] };
       },
+      jobSpecHashSweeper: {
+        runOnDemand: async () => {
+          calls.push(["runJobSpecHashSweep"]);
+          return overrides.specHashSweep ?? { total: 3, matching: 2, drifted: 1 };
+        }
+      },
       listJobsWithSessions: async (options) => {
         calls.push(["listJobsWithSessions", options]);
         return overrides.jobs ?? [{ id: "job-1" }];
@@ -170,6 +176,29 @@ test("GET /admin/jobs/timeline validates jobId before reading timeline", async (
     ValidationError
   );
   assert.ok(!calls.some(([name]) => name === "getJobTimeline"));
+});
+
+test("POST /admin/jobs/spec-hash-sweep runs the guarded one-off sweep", async () => {
+  const { calls, response, route } = makeHarness({
+    specHashSweep: { total: 9, matching: 7, drifted: 2, guardTriggered: false }
+  });
+
+  const handled = await route({
+    request: { method: "POST" },
+    response,
+    url: new URL("http://localhost/admin/jobs/spec-hash-sweep"),
+    pathname: "/admin/jobs/spec-hash-sweep"
+  });
+
+  assert.equal(handled, true);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, {
+    total: 9,
+    matching: 7,
+    drifted: 2,
+    guardTriggered: false
+  });
+  assert.ok(calls.some(([name]) => name === "runJobSpecHashSweep"));
 });
 
 test("POST /admin/jobs creates an admin job and stores idempotent receipt", async () => {

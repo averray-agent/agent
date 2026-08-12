@@ -107,6 +107,15 @@ export function createAdminJobsRoutes({
       return true;
     }
 
+    if (request.method === "POST" && pathname === "/admin/jobs/spec-hash-sweep") {
+      await authenticateAndLimit(request, url);
+      if (!service.jobSpecHashSweeper?.runOnDemand) {
+        throw new ValidationError("Job specHash sweeper is not initialised.");
+      }
+      respond(response, 200, await service.jobSpecHashSweeper.runOnDemand(new Date()));
+      return true;
+    }
+
     if (request.method === "POST" && pathname === "/admin/jobs") {
       const auth = await authenticateAndLimit(request, url);
       const payload = await readJsonBody(request);

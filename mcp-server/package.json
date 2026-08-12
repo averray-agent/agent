@@ -20,6 +20,7 @@
     "ingest:open-data": "node src/jobs/ingest-open-data-datasets.js",
     "ingest:standards-specs": "node src/jobs/ingest-standards-specs.js",
     "ingest:openapi-specs": "node src/jobs/ingest-openapi-specs.js",
+    "sweep:job-spec-hashes": "node src/jobs/sweep-job-spec-hashes.js",
     "bootstrap:upstream-status": "node src/jobs/bootstrap-upstream-status.js"
   },
   "dependencies": {
