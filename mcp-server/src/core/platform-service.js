@@ -102,6 +102,7 @@ export class PlatformService {
     this.openDataIngestionScheduler = undefined;
     this.standardsSpecIngestionScheduler = undefined;
     this.openApiSpecIngestionScheduler = undefined;
+    this.jobSpecHashSweeper = undefined;
     this.jobStaleSweeper = undefined;
     this.xcmSettlementWatcher = undefined;
     this.xcmBalanceObserver = undefined;
@@ -411,6 +412,10 @@ export class PlatformService {
     );
   }
 
+  markJobSpecHashDrift(jobId, details) {
+    return this.jobCatalogService.markSpecHashDrift(jobId, details);
+  }
+
   shouldPrefundIngestedJobs() {
     return this.prefundIngestedJobs === true
       && Boolean(this.blockchainGateway?.isEnabled?.());
@@ -530,6 +535,7 @@ export class PlatformService {
       openApiIngestion,
       upstreamStatus,
       bootstrapSelfReport,
+      jobSpecHashSweeper,
       jobStaleSweeper,
       submittedJobAutoVerifier,
       recentSessions,
@@ -653,6 +659,15 @@ export class PlatformService {
         lastSuccessfulAt: undefined,
         lastFailureReason: undefined,
         evidencePersistenceNote: "scheduler not initialised"
+      },
+      this.jobSpecHashSweeper?.getStatus?.() ?? {
+        enabled: false,
+        running: false,
+        intervalMs: 0,
+        initialDelayMs: 0,
+        firstRunPending: true,
+        pausedForOperator: false,
+        lastRun: undefined
       },
       this.jobStaleSweeper?.getStatus?.() ?? {
         enabled: false,
@@ -865,6 +880,7 @@ export class PlatformService {
       recurring: recurring,
       jobLifecycle: this.jobCatalogService.getJobLifecycleSummary(),
       jobSpecHashIntegrity: this.jobCatalogService.getSpecHashIntegrityStatus(),
+      jobSpecHashSweeper,
       jobStaleSweeper,
       submittedJobAutoVerifier,
       scheduler,

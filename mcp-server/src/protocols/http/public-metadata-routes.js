@@ -68,6 +68,7 @@ const ROOT_ENDPOINTS = [
   "/verifier/replay",
   "/admin/jobs",
   "/admin/jobs/timeline",
+  "/admin/jobs/spec-hash-sweep",
   "/admin/sessions",
   "/admin/jobs/ingest/github",
   "/admin/jobs/ingest/openapi",

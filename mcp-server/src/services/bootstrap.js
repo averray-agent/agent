@@ -62,6 +62,10 @@ import {
   OpenApiSpecIngestionScheduler,
   loadOpenApiSpecIngestionConfig
 } from "./openapi-spec-ingestion-scheduler.js";
+import {
+  JobSpecHashSweeperService,
+  loadJobSpecHashSweeperConfig
+} from "./job-spec-hash-sweeper.js";
 import { XcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
 import { XcmObservationRelayService } from "./xcm-observation-relay.js";
 import { VenueBalanceReader } from "./venue-balance-reader.js";
@@ -495,6 +499,12 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const jobSpecHashSweeper = initStep("init-job-spec-hash-sweeper", logger, () =>
+    new JobSpecHashSweeperService(platformService, eventBus, {
+      ...loadJobSpecHashSweeperConfig(process.env, { gatewayEnabled: gateway.isEnabled() }),
+      logger
+    })
+  );
   const xcmSettlementWatcher = initStep("init-xcm-settlement-watcher", logger, () =>
     new XcmSettlementWatcherService(platformService, stateStore, eventBus, {
       enabled: process.env.XCM_SETTLEMENT_WATCHER_ENABLED === undefined
@@ -646,6 +656,7 @@ export async function createPlatformRuntime() {
   platformService.openDataIngestionScheduler = openDataIngestionScheduler;
   platformService.standardsSpecIngestionScheduler = standardsSpecIngestionScheduler;
   platformService.openApiSpecIngestionScheduler = openApiSpecIngestionScheduler;
+  platformService.jobSpecHashSweeper = jobSpecHashSweeper;
   platformService.xcmSettlementWatcher = xcmSettlementWatcher;
   platformService.xcmBalanceObserver = xcmBalanceObserver;
   platformService.bankXcmRuntime = bankXcmV22Services.runtime;
@@ -669,6 +680,7 @@ export async function createPlatformRuntime() {
   openDataIngestionScheduler.start();
   standardsSpecIngestionScheduler.start();
   openApiSpecIngestionScheduler.start();
+  jobSpecHashSweeper.start();
   xcmSettlementWatcher.start();
   // Watches subscribe before the chain listener starts. A RequestQueued event
   // can therefore never race ahead of its observer baseline during startup.
@@ -725,6 +737,7 @@ export async function createPlatformRuntime() {
     openDataIngestionScheduler,
     standardsSpecIngestionScheduler,
     openApiSpecIngestionScheduler,
+    jobSpecHashSweeper,
     xcmSettlementWatcher,
     xcmBalanceObserver,
     bankXcmRuntime: bankXcmV22Services.runtime,
