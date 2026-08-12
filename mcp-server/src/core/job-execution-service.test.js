@@ -12,6 +12,7 @@ import { buildAverrayDisclosureFooter } from "./maintainer-surface-policy.js";
 import { hashCanonicalContent } from "./canonical-content.js";
 import { WorkerExposurePolicy } from "./worker-exposure.js";
 import { WorkerDailyExposurePolicy } from "./worker-daily-exposure.js";
+import { buildJobSnapshot } from "./job-snapshot.js";
 import {
   buildExternalSchemaRegistrationMessage,
   normalizeExternalSchemaRegistrations
@@ -648,6 +649,13 @@ test("external claims return a direct worker transaction and never call the oper
     source: { type: "external", poster: { wallet: WALLET_2 } },
     requiresSponsoredGas: false
   });
+  await stateStore.materializeExternalJobDraft({
+    draftId: "external-direct-draft",
+    jobId: job.id,
+    wallet: WALLET_2,
+    definition: job,
+    status: "live"
+  });
   let brokerCalls = 0;
   const transaction = { to: "0x1111111111111111111111111111111111111111", value: "0", data: "0x1234" };
   const gateway = {
@@ -668,7 +676,9 @@ test("external claims return a direct worker transaction and never call the oper
         totalClaimLock: 0
       };
     },
-    async getJob() { return { state: 1 }; },
+    async getJob() {
+      return { state: 1, specHash: buildJobSnapshot(job).specHash };
+    },
     async prepareDirectClaimJob(jobId) {
       assert.equal(jobId, job.id);
       return transaction;
@@ -688,6 +698,110 @@ test("external claims return a direct worker transaction and never call the oper
   );
   assert.equal(brokerCalls, 0);
   assert.equal(await stateStore.findSessionByJobId(job.id), undefined);
+});
+
+test("claimJob refuses a served definition that mismatches the chain before any charge or session", async () => {
+  const stateStore = new MemoryStateStore();
+  const candidate = makeJob();
+  const onboardingSubsidyBudget = makeTestOnboardingSubsidyBudget();
+  let ensureCalls = 0;
+  let liquidityCalls = 0;
+  let brokerCalls = 0;
+  const gateway = {
+    isEnabled: () => true,
+    toJobId: (jobId) => `chain:${jobId}`,
+    async getWorkerClaimCount() { return 0; },
+    async getClaimEconomicsDecisionState() {
+      return { state: 1, exists: true, contractLayout: "current", onboardingWaiverEligible: false };
+    },
+    async getJob() { return { state: 1, specHash: `0x${"f".repeat(64)}` }; },
+    async previewClaimEconomics() {
+      return {
+        claimStake: 0.3,
+        claimStakeBps: 500,
+        claimFee: 0.12,
+        claimFeeBps: 200,
+        claimEconomicsWaived: false,
+        claimNumber: 1,
+        totalClaimLock: 0.42
+      };
+    },
+    async ensureJob() { ensureCalls += 1; },
+    async ensureClaimStakeLiquidity() { liquidityCalls += 1; },
+    async claimJob() { brokerCalls += 1; }
+  };
+  const service = new JobExecutionService(
+    stateStore,
+    gateway,
+    () => candidate,
+    undefined,
+    undefined,
+    undefined,
+    () => candidate,
+    undefined,
+    { onboardingSubsidyBudget }
+  );
+
+  await assert.rejects(
+    () => service.claimJob(WALLET, candidate.id, "http", "definition-mismatch"),
+    (error) => {
+      assert.equal(error.code, "job_definition_chain_mismatch");
+      assert.equal(error.details.sourceCode, "job_snapshot_on_chain_spec_hash_mismatch");
+      return true;
+    }
+  );
+  assert.equal(ensureCalls, 0);
+  assert.equal(liquidityCalls, 0);
+  assert.equal(brokerCalls, 0);
+  assert.equal(onboardingSubsidyBudget.reserveCalls, 0);
+  assert.equal(await stateStore.findSessionByJobId(candidate.id), undefined);
+});
+
+test("claimJob proceeds when only the claim-time integrity read has a transient outage", async () => {
+  const stateStore = new MemoryStateStore();
+  const candidate = makeJob();
+  const committed = buildJobSnapshot(candidate).specHash;
+  let getJobCalls = 0;
+  let brokerCalls = 0;
+  const gateway = {
+    isEnabled: () => true,
+    toJobId: (jobId) => `chain:${jobId}`,
+    async getWorkerClaimCount() { return 0; },
+    async getClaimEconomicsDecisionState() {
+      return { state: 1, exists: true, contractLayout: "current", onboardingWaiverEligible: false };
+    },
+    async getJob() {
+      getJobCalls += 1;
+      if (getJobCalls === 1) throw new Error("temporary specHash read outage");
+      return {
+        state: brokerCalls === 0 ? 1 : 2,
+        worker: brokerCalls === 0 ? undefined : WALLET,
+        specHash: committed
+      };
+    },
+    async previewClaimEconomics() {
+      return {
+        claimStake: 0.3,
+        claimStakeBps: 500,
+        claimFee: 0.12,
+        claimFeeBps: 200,
+        claimEconomicsWaived: false,
+        claimNumber: 1,
+        totalClaimLock: 0.42
+      };
+    },
+    async ensureJob() {},
+    async ensureClaimStakeLiquidity() {},
+    async claimJob() { brokerCalls += 1; }
+  };
+  const service = new JobExecutionService(stateStore, gateway, () => candidate);
+
+  const claimed = await service.claimJob(WALLET, candidate.id, "http", "integrity-read-outage");
+
+  assert.equal(claimed.status, "claimed");
+  assert.equal(claimed.jobSnapshot.specHash, committed);
+  assert.equal(brokerCalls, 1);
+  assert.deepEqual(await stateStore.getSession(claimed.sessionId), claimed);
 });
 
 test("external claim convergence pins the poster definition that reproduces the chain specHash", async () => {
@@ -739,7 +853,8 @@ test("external claim convergence pins the poster definition that reproduces the 
       return {
         state: 2,
         worker: WALLET,
-        claimExpiry: Date.parse("2026-08-12T10:00:00.000Z") / 1000
+        claimExpiry: Date.parse("2026-08-12T10:00:00.000Z") / 1000,
+        specHash: buildJobSnapshot(posterDefinition).specHash
       };
     }
   };
@@ -788,7 +903,12 @@ test("claimJob converges a stranded claim: chain claim mined but local session w
     async getJob() {
       // Open until the on-chain claim lands, then CLAIMED (state 2) by WALLET.
       return onChainClaimed
-        ? { state: 2, worker: WALLET, claimExpiry: Date.parse("2026-05-01T10:01:00.000Z") / 1000 }
+        ? {
+            state: 2,
+            worker: WALLET,
+            claimExpiry: Date.parse("2026-05-01T10:01:00.000Z") / 1000,
+            specHash: buildJobSnapshot(job).specHash
+          }
         : { state: 0 };
     },
     async ensureJob() {},
@@ -851,7 +971,7 @@ test("claimJob does NOT converge when the chain job is claimed by a different wo
     },
     async getJob() {
       // Already claimed on-chain by someone else.
-      return { state: 2, worker: WALLET_2 };
+      return { state: 2, worker: WALLET_2, specHash: buildJobSnapshot(job).specHash };
     },
     async ensureJob() {},
     async ensureClaimStakeLiquidity() {},
@@ -955,7 +1075,7 @@ test("claimJob keeps the reserved subsidy evidence after the authoritative chain
       };
     },
     async getJob() {
-      return { state: 1 };
+      return { state: 1, specHash: buildJobSnapshot(job).specHash };
     },
     async ensureJob() {},
     async ensureClaimStakeLiquidity() {},
@@ -1011,7 +1131,7 @@ test("claimJob logs an invariant error when the shared prediction differs from c
       };
     },
     async getJob() {
-      return { state };
+      return { state, specHash: buildJobSnapshot(job).specHash };
     },
     async ensureJob() {},
     async ensureClaimStakeLiquidity() {},
@@ -1114,7 +1234,8 @@ test("claimJob finalizes the chain timeout before reclaiming an unsubmitted sing
       return {
         state: chainState,
         worker: chainState === 2 ? WALLET_2 : undefined,
-        claimExpiry: Date.parse("2030-05-01T12:00:00.000Z") / 1000
+        claimExpiry: Date.parse("2030-05-01T12:00:00.000Z") / 1000,
+        specHash: buildJobSnapshot(job).specHash
       };
     },
     async handleClaimTimeout(jobId) {

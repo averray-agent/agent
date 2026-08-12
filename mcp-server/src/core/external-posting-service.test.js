@@ -11,6 +11,7 @@ import {
 } from "./external-posting-service.js";
 import { AuthorizationError, ValidationError } from "./errors.js";
 import { JobExecutionService } from "./job-execution-service.js";
+import { buildJobSnapshot } from "./job-snapshot.js";
 import { MemoryStateStore } from "./state-store.js";
 import { createJobRoutes } from "../protocols/http/job-routes.js";
 
@@ -519,6 +520,11 @@ test("delist cannot slip through while an external direct-claim recipe holds the
     source: { type: "external", poster: { wallet: POSTER } },
     onboardingWaiverEligible: false
   };
+  await store.materializeExternalJobDraft({
+    draftId: "direct-claim-race-fixture",
+    jobId: job.id,
+    definition: definition()
+  });
   let liveState = 1;
   let enterClaim;
   let releaseClaim;
@@ -527,7 +533,10 @@ test("delist cannot slip through while an external direct-claim recipe holds the
   const gateway = {
     isEnabled: () => true,
     toJobId: (value) => value,
-    getJob: async () => ({ state: liveState }),
+    getJob: async () => ({
+      state: liveState,
+      specHash: buildJobSnapshot(job, { specDefinition: definition() }).specHash
+    }),
     getDefaultClaimStakeBps: async () => 1_000,
     getClaimEconomicsConfig: async () => ({ onboardingWaiverClaimCount: 0 }),
     getWorkerClaimCount: async () => 0,

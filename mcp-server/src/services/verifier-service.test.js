@@ -265,6 +265,46 @@ test("verifySubmission fails closed when the claim-time snapshot is absent", asy
   assert.equal((await stateStore.getSession(submitted.sessionId)).status, "submitted");
 });
 
+test("verify-time integrity remains fail-closed when the chain commitment read is unavailable", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = {
+    id: "integrity-read-outage",
+    verifierMode: "benchmark",
+    verifierConfig: { handler: "benchmark", requiredKeywords: ["complete"] }
+  };
+  const submitted = transitionSession(transitionSession(withJobSnapshot({
+    sessionId: "integrity-read-outage:0xabc",
+    wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    jobId: job.id,
+    submission: "complete"
+  }, job), "claimed", { reason: "job_claimed" }), "submitted", { reason: "work_submitted" });
+  await stateStore.upsertSession(submitted);
+  let evaluated = false;
+  let settled = false;
+  const service = new VerifierService(
+    { resumeSession: (id) => stateStore.getSession(id) },
+    stateStore,
+    {
+      isEnabled: () => true,
+      getJob: async () => { throw new Error("temporary RPC outage"); },
+      resolveSinglePayout: async () => { settled = true; }
+    },
+    {
+      evaluate: async () => { evaluated = true; },
+      listHandlers: () => []
+    }
+  );
+
+  await assert.rejects(
+    () => service.verifySubmission({ sessionId: submitted.sessionId }),
+    (error) => error?.code === "job_snapshot_chain_read_failed"
+      && error?.details?.integrityFailure === true
+  );
+  assert.equal(evaluated, false);
+  assert.equal(settled, false);
+  assert.equal((await stateStore.getSession(submitted.sessionId)).status, "submitted");
+});
+
 test("verifySubmission treats snapshot tampering and on-chain specHash drift as integrity failures", async () => {
   const job = {
     id: "integrity-job",

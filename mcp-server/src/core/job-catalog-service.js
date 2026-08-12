@@ -722,6 +722,7 @@ export function explainEligibilityFromPreflight(preflight) {
     claimFundingShortfall: preflight.claimFundingShortfall,
     claimEconomicsWaived: preflight.claimEconomicsWaived,
     onboardingSubsidy: preflight.onboardingSubsidy,
+    jobDefinitionIntegrity: preflight.jobDefinitionIntegrity,
     workerExposure: preflight.workerExposure,
     dailyExposure: preflight.dailyExposure,
     dailyExposureRemaining: preflight.dailyExposureRemaining,

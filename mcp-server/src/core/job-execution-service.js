@@ -46,8 +46,14 @@ import {
   externalJobLifecycleLockId,
   isExternalJob
 } from "./external-job-lifecycle.js";
-import { buildJobSnapshot, requireJobSnapshot } from "./job-snapshot.js";
+import { requireJobSnapshot } from "./job-snapshot.js";
 import { normalizeClaimantAttribution } from "./claimant-attribution.js";
+import {
+  captureClaimJobSnapshot,
+  inspectClaimJobDefinitionIntegrity,
+  requireClaimJobDefinitionIntegrity
+} from "./claim-job-integrity.js";
+import { cloneJsonRecord } from "./state-store-records.js";
 
 // EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
 // Disputed=5, Closed=6. Used to reconcile a mined-but-receipt-lost submit.
@@ -319,8 +325,16 @@ export class JobExecutionService {
       let claimEconomics = claimEconomicsDecision.economics;
       let workerExposure;
       let dailyExposure;
+      const claimIntegrity = requireClaimJobDefinitionIntegrity(
+        await inspectClaimJobDefinitionIntegrity({
+          job,
+          claimEconomics,
+          stateStore: this.stateStore,
+          blockchainGateway: this.blockchainGateway
+        })
+      );
       if (this.blockchainGateway?.isEnabled()) {
-        const live = await this.blockchainGateway.getJob(jobId);
+        const live = claimIntegrity.liveJob ?? await this.blockchainGateway.getJob(chainJobId);
         if (live.state !== 0 && live.state !== 1) {
           // The job is no longer Open on-chain. If a prior claim already mined
           // for THIS wallet but the local session write was lost, converge and
@@ -333,6 +347,7 @@ export class JobExecutionService {
             jobId,
             chainJobId,
             claimEconomics,
+            jobSnapshot: claimIntegrity.snapshot,
             job,
             protocol,
             idempotencyKey,
@@ -431,6 +446,7 @@ export class JobExecutionService {
         jobId,
         chainJobId,
         claimEconomics,
+        jobSnapshot: claimIntegrity.snapshot,
         workerExposure,
         dailyExposure,
         chainClaimTiming,
@@ -453,6 +469,7 @@ export class JobExecutionService {
     jobId,
     chainJobId,
     claimEconomics,
+    jobSnapshot = undefined,
     workerExposure = undefined,
     dailyExposure = undefined,
     chainClaimTiming = {},
@@ -461,7 +478,11 @@ export class JobExecutionService {
     idempotencyKey,
     claimantAttribution = undefined
   }) {
-    const jobSnapshot = await this.captureJobSnapshot(job, claimEconomics);
+    const pinnedJobSnapshot = jobSnapshot ?? await this.captureJobSnapshot(job, claimEconomics);
+    const persistedJobSnapshot = {
+      ...pinnedJobSnapshot,
+      claimEconomics: cloneJsonRecord(claimEconomics)
+    };
     const baseSession = {
       sessionId,
       wallet,
@@ -482,7 +503,7 @@ export class JobExecutionService {
       ...(claimEconomics.onboardingSubsidy
         ? { onboardingSubsidy: claimEconomics.onboardingSubsidy }
         : {}),
-      jobSnapshot,
+      jobSnapshot: persistedJobSnapshot,
       badgeSnapshot: buildBadgeJobSnapshot(job),
       ...(claimantAttribution ? { claimantAttribution } : {}),
       ...chainClaimTiming,
@@ -559,6 +580,7 @@ export class JobExecutionService {
     jobId,
     chainJobId,
     claimEconomics,
+    jobSnapshot = undefined,
     job,
     protocol,
     idempotencyKey,
@@ -581,6 +603,7 @@ export class JobExecutionService {
       jobId,
       chainJobId,
       claimEconomics,
+      jobSnapshot,
       chainClaimTiming: this.buildChainClaimTiming(live),
       job,
       protocol,
@@ -624,18 +647,7 @@ export class JobExecutionService {
   }
 
   async captureJobSnapshot(job, claimEconomics) {
-    if (!isExternalJob(job)) {
-      return buildJobSnapshot(job, { claimEconomics });
-    }
-    const draft = await this.stateStore.getExternalJobDraftByJobId?.(job.id);
-    if (!draft?.definition) {
-      throw new ConflictError(
-        `External job ${job.id} is missing the original definition needed to pin its on-chain terms.`,
-        "job_snapshot_capture_failed",
-        { jobId: job.id, integrityFailure: true }
-      );
-    }
-    return buildJobSnapshot(job, { specDefinition: draft.definition, claimEconomics });
+    return captureClaimJobSnapshot({ job, claimEconomics, stateStore: this.stateStore });
   }
 
   async submitWorkLocked(session, job, protocol, submissionInput) {
