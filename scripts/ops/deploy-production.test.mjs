@@ -14,10 +14,39 @@ import {
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const DEPLOY_SCRIPT = join(REPO_ROOT, "scripts/ops/deploy-production.sh");
+const FRONTEND_DEPLOY_SCRIPT = join(REPO_ROOT, "scripts/ops/redeploy-frontend.sh");
+const APP_PACKAGE = join(REPO_ROOT, "app/package.json");
 // DERIVE_SETTLEMENT_ENV_SCRIPT was removed in PR 2.6: deploy-production.sh
 // no longer calls derive-settlement-env.mjs at runtime (the template carries
 // the settlement values directly, and CI enforces drift via
 // scripts/ops/check-template-matches-manifest.mjs).
+
+test("production static builders omit dev dependencies and classify their build toolchain as runtime", async () => {
+  const [deployScript, frontendScript, appPackageText] = await Promise.all([
+    readFile(DEPLOY_SCRIPT, "utf8"),
+    readFile(FRONTEND_DEPLOY_SCRIPT, "utf8"),
+    readFile(APP_PACKAGE, "utf8"),
+  ]);
+  const appPackage = JSON.parse(appPackageText);
+
+  assert.match(deployScript, /npm ci --omit=dev && npm run build:site/u);
+  assert.match(frontendScript, /npm ci --omit=dev && npm run build:frontend/u);
+  for (const dependency of [
+    "@tailwindcss/postcss",
+    "@types/node",
+    "@types/react",
+    "@types/react-dom",
+    "postcss",
+    "tailwindcss",
+    "typescript",
+  ]) {
+    assert.ok(
+      appPackage.dependencies?.[dependency],
+      `${dependency} is required by the production frontend build and must not be a devDependency`,
+    );
+    assert.equal(appPackage.devDependencies?.[dependency], undefined);
+  }
+});
 
 test("deploy wrapper retries frontend after an earlier failed indexer deploy", async () => {
   const root = await mkdtemp(join(tmpdir(), "deploy-production-"));

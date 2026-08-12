@@ -134,7 +134,7 @@ build_frontend() {
     -v "$APP_ROOT:/workspace" \
     -w /workspace \
     "$FRONTEND_NODE_IMAGE" \
-    sh -lc "npm ci && npm run build:frontend"
+    sh -lc "npm ci --omit=dev && npm run build:frontend"
 }
 
 restart_caddy_if_requested() {

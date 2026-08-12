@@ -942,7 +942,7 @@ build_site() {
     -v "$APP_ROOT:/workspace" \
     -w /workspace \
     "$SITE_NODE_IMAGE" \
-    sh -lc "npm ci && npm run build:site"
+    sh -lc "npm ci --omit=dev && npm run build:site"
 }
 
 # Hash the bytes Caddy can serve, not the fact that the site build command ran.
@@ -2067,7 +2067,7 @@ deploy() {
   fi
 
   # The frontend keeps its path gate — unlike the site (~45s astro build),
-  # build:frontend is a full Next.js workspace build (npm ci + next build,
+  # build:frontend is a full Next.js workspace build (production npm ci + next build,
   # minutes in the docker runner) plus the wait_for_app/rollback cycle, too
   # expensive to pay on every docs-only deploy. Instead, the auto path adds
   # the frontend_tree_drift_reason disk check (see its comment block for the
