@@ -447,6 +447,33 @@ test("reschedules after an unexpected scan failure instead of silently stopping"
   assert.ok(warnings.some((entry) => entry.message === "auto_verify.scheduler_run_failed"));
 });
 
+test("per-session integrity holds do not increment scheduler failures but a thrown run does", async () => {
+  const harness = makeHarness({
+    sessions: [{ sessionId: "s-integrity", jobId: "bench-001", status: "submitted" }]
+  });
+  harness.verifierService.verifySubmission = async () => {
+    const error = new Error("pinned terms do not reproduce the chain commitment");
+    error.code = "job_snapshot_on_chain_spec_hash_mismatch";
+    throw error;
+  };
+  const service = makeService(harness);
+
+  const heldRun = await service.runOnceAndSchedule();
+  let status = await service.getStatus();
+  assert.equal(heldRun.errors.length, 0);
+  assert.equal(heldRun.skipped[0].integrityHold, true);
+  assert.equal(heldRun.skipped[0].reason, "job_snapshot_on_chain_spec_hash_mismatch");
+  assert.equal(status.consecutiveSchedulerFailures, 0);
+
+  service.runOnce = async () => {
+    throw new Error("session scan unavailable");
+  };
+  await service.runOnceAndSchedule();
+  status = await service.getStatus();
+  assert.equal(status.consecutiveSchedulerFailures, 1);
+  assert.match(status.lastSchedulerError.message, /session scan unavailable/u);
+});
+
 test("times out without allowing duplicate settlement and does not block later jobs", async () => {
   const harness = makeHarness({
     sessions: [

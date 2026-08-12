@@ -397,12 +397,23 @@ export class SubmittedJobAutoVerifierService {
     // lands here. Both are safe to retry next tick: a verdict is committed
     // only after settlement succeeds, so a failed run leaves the session in
     // `submitted`.
-    summary?.errors.push({
+    const failure = {
       ...candidate,
       ...(error?.code ? { code: error.code } : {}),
       ...(isJobSnapshotIntegrityError(error) ? { integrityFailure: true } : {}),
       message: error?.message ?? String(error)
-    });
+    };
+    if (summary) {
+      if (failure.integrityFailure) {
+        summary.skipped.push({
+          ...failure,
+          reason: failure.code ?? "job_snapshot_integrity_hold",
+          integrityHold: true
+        });
+      } else {
+        summary.errors.push(failure);
+      }
+    }
     this.logger.warn?.({ sessionId, jobId, mode, late, err: error }, "auto_verify.verify_failed");
   }
 
