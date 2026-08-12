@@ -52,6 +52,29 @@ Each run posts its own **upfront-funded** benchmark job (small reward, default
 **archives it in a `finally` block** so canary jobs never accumulate or pollute
 the public board. It never consumes claim attempts on real board jobs.
 
+### Accepted mainnet payout cost
+
+Every successful mainnet run pays `0.1 USDC` to its fresh ephemeral worker, and
+that payout is intentionally unrecoverable after the process discards the key.
+This is accepted monitoring spend, not a treasury-recovery mechanism. The
+evidence artifact records `payoutDisposition.status: "accepted_cost"`, and the
+workflow summary states the amount and disposition on every run.
+
+The alternatives would stop testing the thing this canary exists to prove:
+
+- `0` reward cannot traverse the production path: the configured USDC minimum
+  is `0.07`, and settlement rejects a zero transfer. The `0.1` default is the
+  smallest simple amount above that boundary.
+- Escrow pays the worker that claimed the job; there is no separate payout
+  address to redirect to an operator wallet.
+- Reusing a retained worker would no longer test a fresh roleless wallet's SIWE
+  and onboarding path, and its onboarding waiver would be exhausted after three
+  claims.
+
+At the observed six successful ephemeral payouts on 2026-08-12, this policy
+cost `0.60 USDC` (six × the confirmed `0.1` default). Run frequency is not fixed:
+there is one daily run plus one post-deploy run for each production-changing SHA.
+
 ## Safety
 
 - **Exact profile/chain binding.** The script supports only the checked-in

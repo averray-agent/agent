@@ -106,3 +106,20 @@ test("post-deploy canary debounces on durable green SHA artifacts", async () => 
     "daily and manual runs must not be suppressed by the post-deploy debounce lookup",
   );
 });
+
+test("the workflow exposes the 0.1 USDC default and reports ephemeral payouts as an accepted cost", async () => {
+  const workflow = await readFile(workflowPath, "utf8");
+
+  assert.match(
+    workflow,
+    /reward_amount:\s+description: Reward in USDC for the disposable canary job \(blank = 0\.1\)\.[\s\S]{0,120}default: ""/u,
+    "the dispatch contract must name the script's 0.1 USDC default"
+  );
+  assert.match(workflow, /payout_disposition=.*\.payoutDisposition\.status/u);
+  assert.match(workflow, /Payout disposition:.*payout_disposition/u);
+  assert.match(
+    workflow,
+    /0\.1 USDC payout is intentional monitoring spend/u,
+    "the workflow must not hide the ephemeral payout strand"
+  );
+});

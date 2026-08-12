@@ -1022,12 +1022,55 @@ function buildCanaryEvidence({
       raw: config.rewardRaw.toString(),
       asset: DEFAULT_ESCROW_ASSET.symbol
     },
+    payoutDisposition: classifyCanaryPayoutDisposition({
+      workerEphemeral: config.workerEphemeral,
+      settleStage: stages.settle,
+      rewardAmount: config.rewardAmount,
+      rewardAsset: DEFAULT_ESCROW_ASSET.symbol
+    }),
     stages,
     txHashes,
     timings: { ...timings, totalMs: completedAt - startedAt },
     cleanup: { ...cleanup },
     checkedAt: new Date(startedAt).toISOString(),
     completedAt: new Date(completedAt).toISOString()
+  };
+}
+
+/**
+ * Make the canary payout's recoverability explicit in its durable evidence.
+ *
+ * A successful mainnet canary intentionally uses a fresh roleless worker. The
+ * escrow recipient is that claimed worker, and its process-only key disappears
+ * after the run. This is accepted monitoring spend, not unclassified leakage.
+ * A persistent testnet manual canary retains its key and remains recoverable.
+ */
+export function classifyCanaryPayoutDisposition({
+  workerEphemeral,
+  settleStage,
+  rewardAmount,
+  rewardAsset
+}) {
+  if (settleStage?.jobState !== "Closed") {
+    return {
+      status: "not_settled",
+      recoverable: null,
+      detail: "no successful canary payout was observed"
+    };
+  }
+  if (workerEphemeral) {
+    return {
+      status: "accepted_cost",
+      recoverable: false,
+      detail:
+        `${rewardAmount} ${rewardAsset} is intentionally unrecoverable monitoring spend; `
+        + "the ephemeral worker key is discarded after this run"
+    };
+  }
+  return {
+    status: "durable_worker_wallet",
+    recoverable: true,
+    detail: `${rewardAmount} ${rewardAsset} remains in the retained canary worker wallet`
   };
 }
 

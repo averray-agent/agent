@@ -14,7 +14,8 @@ import {
   runSettleStage,
   assertOperatorTokenFreshness,
   assertOperatorReady,
-  resolveWorkerWallet
+  resolveWorkerWallet,
+  classifyCanaryPayoutDisposition
 } from "./run-worker-canary.mjs";
 import * as workerCanaryModule from "./run-worker-canary.mjs";
 
@@ -206,6 +207,11 @@ test("full canary loop walks SIWE→claim→submit→verify→settle and asserts
   assert.equal(evidence.stages.settle.released, "0.1");
   assert.equal(evidence.stages.settle.creditedRaw, REWARD_RAW.toString());
   assert.equal(evidence.stages.settle.creditedTo, "worker_eoa");
+  assert.deepEqual(evidence.payoutDisposition, {
+    status: "durable_worker_wallet",
+    recoverable: true,
+    detail: "0.1 USDC remains in the retained canary worker wallet"
+  });
   assert.equal(evidence.stages.tokenFreshness.enforced, true);
   assert.ok(evidence.stages.tokenFreshness.daysToExpiry >= 29);
   assert.equal(evidence.cleanup.jobArchived, true);
@@ -223,6 +229,41 @@ test("full canary loop walks SIWE→claim→submit→verify→settle and asserts
   assert.ok(archive, "expected an /admin/jobs/lifecycle archive call");
   assert.equal(archive[2].action, "archive");
   assert.equal(archive[2].jobId, JOB_ID);
+});
+
+test("ephemeral settled payouts are recorded as accepted, unrecoverable monitoring cost", () => {
+  assert.deepEqual(classifyCanaryPayoutDisposition({
+    workerEphemeral: true,
+    settleStage: { jobState: "Closed" },
+    rewardAmount: "0.1",
+    rewardAsset: "USDC"
+  }), {
+    status: "accepted_cost",
+    recoverable: false,
+    detail: "0.1 USDC is intentionally unrecoverable monitoring spend; the ephemeral worker key is discarded after this run"
+  });
+});
+
+test("a blank workflow reward input resolves to the documented 0.1 USDC default", async () => {
+  const evidence = await runFull({ env: { WORKER_CANARY_REWARD_AMOUNT: "" } });
+  assert.deepEqual(evidence.reward, {
+    amount: "0.1",
+    raw: "100000",
+    asset: "USDC"
+  });
+});
+
+test("a failed pre-settlement canary never labels the configured reward as spent", () => {
+  assert.deepEqual(classifyCanaryPayoutDisposition({
+    workerEphemeral: true,
+    settleStage: undefined,
+    rewardAmount: "0.1",
+    rewardAsset: "USDC"
+  }), {
+    status: "not_settled",
+    recoverable: null,
+    detail: "no successful canary payout was observed"
+  });
 });
 
 test("ephemeral worker setup mints a bound marker and attaches it only to worker HTTP calls", async () => {
