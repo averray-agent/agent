@@ -107,7 +107,13 @@ export function parseArgs(argv) {
   //
   // A script that moves money must not guess which chain it is on. Callers state
   // the network or the script refuses.
-  const args = { dryRun: true, amount: undefined, profile: undefined, useKms: false };
+  const args = {
+    dryRun: true,
+    amount: undefined,
+    profile: undefined,
+    useKms: false,
+    expectedSigner: undefined
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--commit") args.dryRun = false;
@@ -115,6 +121,7 @@ export function parseArgs(argv) {
     else if (arg === "--use-kms") args.useKms = true;
     else if (arg === "--amount") args.amount = argv[++i];
     else if (arg === "--profile") args.profile = argv[++i];
+    else if (arg === "--expected-signer") args.expectedSigner = argv[++i];
     else if (arg === "--help" || arg === "-h") args.help = true;
   }
   return args;
@@ -137,6 +144,9 @@ function printUsage() {
       "                         Resolves the signer address from KMS_KEY_ID.",
       "                         Combine with --commit to actually send the txs;",
       "                         on its own, runs a KMS-aware dry-run.",
+      "  --expected-signer <address>",
+      "                         Fail before chain reads or writes unless the resolved",
+      "                         signer matches this address.",
       "",
       "Env:",
       "  PRIVATE_KEY                0x-prefixed signer key. Required for --commit",
@@ -252,6 +262,23 @@ async function main() {
     console.error("Could not resolve signer address. Set SIGNER_ADDRESS_OVERRIDE for dry-run, or pass --commit + PRIVATE_KEY, or --use-kms + KMS_KEY_ID/AWS_REGION.");
     process.exitCode = 1;
     return;
+  }
+
+  if (args.expectedSigner !== undefined) {
+    const expectedSigner = String(args.expectedSigner).trim();
+    if (!/^0x[a-fA-F0-9]{40}$/u.test(expectedSigner)) {
+      console.error(`--expected-signer must be a 20-byte EVM address. Got: ${expectedSigner}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (signerAddress.toLowerCase() !== expectedSigner.toLowerCase()) {
+      console.error(
+        `Resolved signer ${signerAddress} does not match --expected-signer ${expectedSigner}. `
+        + "Refusing before any chain read or transaction. Check the selected runtime env and KMS key."
+      );
+      process.exitCode = 1;
+      return;
+    }
   }
 
   const modeLabel = args.dryRun

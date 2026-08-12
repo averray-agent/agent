@@ -60,6 +60,14 @@ test("parseArgs: --profile picks a non-default deployments file", () => {
   assert.equal(args.profile, "mainnet");
 });
 
+test("parseArgs: --expected-signer is explicit and has no default", () => {
+  assert.equal(parseArgs([]).expectedSigner, undefined);
+  assert.equal(
+    parseArgs(["--expected-signer", "0x5a6836c6D4d293F6E5377E6c28054F4171915813"]).expectedSigner,
+    "0x5a6836c6D4d293F6E5377E6c28054F4171915813"
+  );
+});
+
 test("parseArgs: --help is captured even when other flags are present", () => {
   const args = parseArgs(["--commit", "--help", "--amount", "1"]);
   assert.equal(args.help, true);
@@ -108,6 +116,28 @@ test("CLI: --commit (no --use-kms) without PRIVATE_KEY exits 1 and hints at KMS 
   assert.match(result.stderr, /Use --use-kms for KMS-backed signers/u);
 });
 
+test("CLI: --expected-signer refuses a mismatched resolved identity before chain access", () => {
+  const result = spawnSync(
+    "node",
+    [
+      scriptPath,
+      "--profile", "mainnet",
+      "--amount", "1",
+      "--expected-signer", "0x5a6836c6D4d293F6E5377E6c28054F4171915813"
+    ],
+    {
+      env: {
+        ...process.env,
+        SIGNER_ADDRESS_OVERRIDE: "0x31ad432dFe08000000000000000000000000ab7F"
+      },
+      encoding: "utf8"
+    }
+  );
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /Resolved signer 0x31ad432d/u);
+  assert.match(result.stderr, /Refusing before any chain read or transaction/u);
+});
+
 test("CLI: --help prints both signer backends and SIGNER_ADDRESS_OVERRIDE", () => {
   const result = spawnSync("node", [scriptPath, "--help"], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
@@ -116,4 +146,5 @@ test("CLI: --help prints both signer backends and SIGNER_ADDRESS_OVERRIDE", () =
   assert.match(result.stdout, /KMS_KEY_ID/u);
   assert.match(result.stdout, /AWS_REGION/u);
   assert.match(result.stdout, /SIGNER_ADDRESS_OVERRIDE/u);
+  assert.match(result.stdout, /--expected-signer/u);
 });
