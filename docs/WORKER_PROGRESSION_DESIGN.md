@@ -187,7 +187,14 @@ Activation requires a separate, multisig-gated EscrowCore successor ceremony:
 4. point new-job creation and the backend at the successor only after those live reads pass;
 5. retain the prior EscrowCore's roles during its drain window so existing jobs can finish;
 6. prove on a non-waived claim that the stake returns, the claim fee is retained using
-   `claimFeeVerifierBps`, and no fee is charged to a waived tier-0 claim.
+   `claimFeeVerifierBps`, and no fee is charged to a waived tier-0 claim;
+7. delete `knownUnshippedContractChanges.escrowCore` and
+   `knownUnshippedContractChanges.legacyEscrowCore` from `deployments/mainnet.json`, then
+   revert the corresponding pin in `scripts/ops/check-contract-source-drift.test.mjs`.
+
+Until that ceremony, `scripts/ops/audit-launch-readiness.mjs --profile mainnet` correctly
+reports `bytecode_selector_missing` for EscrowCore because live v2 does not expose
+`retainsClaimFeeOnSuccess()`.
 
 That ceremony is deliberately outside the source PR. No contract deployment, role mutation,
 backend cutover, or existing-job migration is implied by merging the implementation.

@@ -172,7 +172,7 @@ test("known-unshipped entries require an explicit non-empty reason", () => {
   );
 });
 
-test("mainnet records deployed EscrowCore v2 and pins the legacy v1 source divergence exactly", () => {
+test("mainnet pins the EscrowCore v3 successor runtime for live v2 and draining v1 exactly", () => {
   const manifest = JSON.parse(
     readFileSync(
       new URL("../../deployments/mainnet.json", import.meta.url),
@@ -183,18 +183,32 @@ test("mainnet records deployed EscrowCore v2 and pins the legacy v1 source diver
   const allowlist = validateKnownUnshippedContractChanges(manifest, contracts);
 
   assert.equal(contracts.length, 9);
-  assert.equal(allowlist.has("escrowCore"), false);
+  assert.deepEqual([...allowlist.keys()].sort(), [
+    "escrowCore",
+    "hydrationUsdcAdapter",
+    "legacyEscrowCore",
+  ]);
   assert.equal(
     contracts.find((contract) => contract.name === "escrowCore")?.address,
     "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC"
   );
+  // The EscrowCore v3 ceremony in WORKER_PROGRESSION_DESIGN.md section 6.1 must delete both pins and revert these assertions.
+  assert.deepEqual(allowlist.get("escrowCore"), [
+    {
+      sourceCommit: "f24a8257ceaafb5d583a29006782daca3b1b9dcc",
+      maskedRuntimeCodeHash:
+        "sha256:6129a8c64d09a5ab46810ad0aef27a1d0a92aa196dd417fd3de235b780564519",
+      reason:
+        "The retained-claim-fee policy is not live on chain: deployed EscrowCore v2 at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC and legacy v1 at 0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035 both still refund claimStake + claimFee on success. Live v2 does not expose retainsClaimFeeOnSuccess(), so the backend live capability probe reads false and brokered gas remains operator exposure. In this source-controlled successor runtime, ordinary successful settlement sends 70% of the claim fee by ERC-20 transfer to verifier EOA 0x5a6836c6D4d293F6E5377E6c28054F4171915813, counted against recordProtocolOutflow, and credits 30% to treasury; 100% credits treasury only in the _resolveDispute workerPayout > 0 branch that passes address(0). This entry is a successor-in-waiting for the EscrowCore v3 ceremony in docs/WORKER_PROGRESSION_DESIGN.md section 6.1, and both the escrowCore and legacyEscrowCore entries must be deleted during that ceremony.",
+    },
+  ]);
   assert.deepEqual(allowlist.get("legacyEscrowCore"), [
     {
-      sourceCommit: "775a826b0a33d0ec04dd19f0455e69402dc9bbcd",
+      sourceCommit: "f24a8257ceaafb5d583a29006782daca3b1b9dcc",
       maskedRuntimeCodeHash:
-        "sha256:64ec86a04369cbbd49a30e0dcf04cf785707a78fcd42f87c0c692f77a7372788",
+        "sha256:6129a8c64d09a5ab46810ad0aef27a1d0a92aa196dd417fd3de235b780564519",
       reason:
-        "The source-controlled EscrowCore now targets active v2 at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC; legacy v1 at 0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035 remains deployed only for draining, so this exact v2 candidate runtime is intentionally unshipped to the legacy address.",
+        "The retained-claim-fee policy is not live on chain: deployed legacy EscrowCore v1 at 0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035 and active v2 at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC both still refund claimStake + claimFee on success. Live v2 does not expose retainsClaimFeeOnSuccess(), so the backend live capability probe reads false and brokered gas remains operator exposure. In this source-controlled successor runtime, ordinary successful settlement sends 70% of the claim fee by ERC-20 transfer to verifier EOA 0x5a6836c6D4d293F6E5377E6c28054F4171915813, counted against recordProtocolOutflow, and credits 30% to treasury; 100% credits treasury only in the _resolveDispute workerPayout > 0 branch that passes address(0). This entry is a successor-in-waiting for the EscrowCore v3 ceremony in docs/WORKER_PROGRESSION_DESIGN.md section 6.1, and both the escrowCore and legacyEscrowCore entries must be deleted during that ceremony.",
     },
   ]);
 });
