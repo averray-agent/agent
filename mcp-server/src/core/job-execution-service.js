@@ -85,6 +85,7 @@ export class JobExecutionService {
     this.getClaimEconomicsConfig = getClaimEconomicsConfig;
     this.onboardingSubsidyBudget = maintainerSurfaceConfig.onboardingSubsidyBudget;
     this.workerExposurePolicy = maintainerSurfaceConfig.workerExposurePolicy;
+    this.workerDailyExposurePolicy = maintainerSurfaceConfig.workerDailyExposurePolicy;
     this.logger = maintainerSurfaceConfig.logger ?? console;
     this.openPrCap = Number.isInteger(maintainerSurfaceConfig.openPrCap) && maintainerSurfaceConfig.openPrCap > 0
       ? maintainerSurfaceConfig.openPrCap
@@ -111,7 +112,7 @@ export class JobExecutionService {
     if (isExternalJob(job)) {
       return this.claimExternalJob(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
     }
-    if (!this.workerExposurePolicy) {
+    if (!this.workerExposurePolicy && !this.workerDailyExposurePolicy) {
       return this.claimJobAfterLifecycleGate(
         wallet,
         jobId,
@@ -317,6 +318,7 @@ export class JobExecutionService {
       });
       let claimEconomics = claimEconomicsDecision.economics;
       let workerExposure;
+      let dailyExposure;
       if (this.blockchainGateway?.isEnabled()) {
         const live = await this.blockchainGateway.getJob(jobId);
         if (live.state !== 0 && live.state !== 1) {
@@ -373,6 +375,7 @@ export class JobExecutionService {
           );
         }
         workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
+        dailyExposure = await this.requireDailyExposureAllowance({ wallet, job, claimEconomics, workerExposure });
         claimEconomics = await reserveOnboardingSubsidyForClaim({
           economics: claimEconomics,
           onboardingSubsidyBudget: this.onboardingSubsidyBudget,
@@ -411,6 +414,7 @@ export class JobExecutionService {
         );
       } else {
         workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
+        dailyExposure = await this.requireDailyExposureAllowance({ wallet, job, claimEconomics, workerExposure });
         claimEconomics = await reserveOnboardingSubsidyForClaim({
           economics: claimEconomics,
           onboardingSubsidyBudget: this.onboardingSubsidyBudget,
@@ -428,6 +432,7 @@ export class JobExecutionService {
         chainJobId,
         claimEconomics,
         workerExposure,
+        dailyExposure,
         chainClaimTiming,
         job,
         protocol,
@@ -449,6 +454,7 @@ export class JobExecutionService {
     chainJobId,
     claimEconomics,
     workerExposure = undefined,
+    dailyExposure = undefined,
     chainClaimTiming = {},
     job,
     protocol,
@@ -472,6 +478,7 @@ export class JobExecutionService {
       claimNumber: claimEconomics.claimNumber,
       totalClaimLock: claimEconomics.totalClaimLock,
       ...(workerExposure ? { workerExposure } : {}),
+      ...(dailyExposure?.entry ? { dailyExposure: dailyExposure.entry } : {}),
       ...(claimEconomics.onboardingSubsidy
         ? { onboardingSubsidy: claimEconomics.onboardingSubsidy }
         : {}),
@@ -502,6 +509,22 @@ export class JobExecutionService {
       workerExposure.message ?? "The wallet's open operator exposure could not accept this claim.",
       workerExposure.reason ?? "worker_open_exposure_unavailable",
       workerExposure
+    );
+  }
+
+  async requireDailyExposureAllowance({ wallet, job, claimEconomics, workerExposure }) {
+    if (!this.workerDailyExposurePolicy) return undefined;
+    const dailyExposure = await this.workerDailyExposurePolicy.evaluate({
+      wallet,
+      job,
+      claimEconomics,
+      workerExposure
+    });
+    if (dailyExposure.eligible === true) return dailyExposure;
+    throw new ConflictError(
+      dailyExposure.message ?? "The wallet's rolling daily operator exposure could not accept this claim.",
+      dailyExposure.reason ?? "daily_exposure_budget_unavailable",
+      dailyExposure
     );
   }
 

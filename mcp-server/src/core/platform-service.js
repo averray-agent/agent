@@ -79,7 +79,8 @@ export class PlatformService {
     eventBus = undefined,
     recurringScheduler = undefined,
     onboardingSubsidyBudget = undefined,
-    workerExposurePolicy = undefined
+    workerExposurePolicy = undefined,
+    workerDailyExposurePolicy = undefined
   ) {
     this.jobs = jobs;
     this.profiles = profiles;
@@ -91,6 +92,7 @@ export class PlatformService {
     this.recurringScheduler = recurringScheduler;
     this.onboardingSubsidyBudget = onboardingSubsidyBudget;
     this.workerExposurePolicy = workerExposurePolicy;
+    this.workerDailyExposurePolicy = workerDailyExposurePolicy;
     this.githubIssueIngestionScheduler = undefined;
     this.wikipediaMaintenanceIngestionScheduler = undefined;
     this.osvAdvisoryIngestionScheduler = undefined;
@@ -137,7 +139,8 @@ export class PlatformService {
       this.getClaimEconomicsConfig.bind(this),
       {
         onboardingSubsidyBudget: this.onboardingSubsidyBudget,
-        workerExposurePolicy: this.workerExposurePolicy
+        workerExposurePolicy: this.workerExposurePolicy,
+        workerDailyExposurePolicy: this.workerDailyExposurePolicy
       }
     );
     this.verificationIngestionService = new VerificationIngestionService(
@@ -938,31 +941,35 @@ export class PlatformService {
       ? await this.stateStore.getExternalJobDelisting?.(jobId)
       : undefined;
     if (!delisting) {
-      if (!this.workerExposurePolicy || result.eligible !== true) {
+      if ((!this.workerExposurePolicy && !this.workerDailyExposurePolicy) || result.eligible !== true) {
         return result;
       }
-      const workerExposure = await this.workerExposurePolicy.evaluate({
-        wallet,
-        job,
-        claimEconomics: {
-          claimEconomicsWaived: preflight.claimEconomicsWaived,
-          claimFeeRetainedOnSuccess: preflight.claimFeeRetainedOnSuccess
-        }
-      });
+      const claimEconomics = {
+        claimEconomicsWaived: preflight.claimEconomicsWaived,
+        claimFeeRetainedOnSuccess: preflight.claimFeeRetainedOnSuccess
+      };
+      const workerExposure = this.workerExposurePolicy
+        ? await this.workerExposurePolicy.evaluate({ wallet, job, claimEconomics })
+        : undefined;
+      const dailyExposure = this.workerDailyExposurePolicy && workerExposure?.eligible !== false
+        ? await this.workerDailyExposurePolicy.evaluate({ wallet, job, claimEconomics, workerExposure })
+        : undefined;
+      const exposureDecision = workerExposure?.eligible === false ? workerExposure : dailyExposure ?? workerExposure;
       return {
         ...result,
-        eligible: workerExposure.eligible === true,
-        reason: workerExposure.eligible === true ? result.reason : workerExposure.reason,
-        reasonMessage: workerExposure.eligible === true
+        eligible: exposureDecision?.eligible === true,
+        reason: exposureDecision?.eligible === true ? result.reason : exposureDecision?.reason,
+        reasonMessage: exposureDecision?.eligible === true
           ? result.reasonMessage
-          : workerExposure.message,
-        workerExposure,
-        failureStates: workerExposure.eligible === true
+          : exposureDecision?.message,
+        ...(workerExposure ? { workerExposure } : {}),
+        ...(dailyExposure ? { dailyExposure, dailyExposureRemaining: dailyExposure.dailyExposureRemaining } : {}),
+        failureStates: exposureDecision?.eligible === true
           ? result.failureStates
           : [
               ...new Set([
                 ...(Array.isArray(result.failureStates) ? result.failureStates : []),
-                workerExposure.reason
+                exposureDecision?.reason
               ])
             ]
       };

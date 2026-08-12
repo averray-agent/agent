@@ -10,6 +10,8 @@ import { claimExpiresAt, countClaimAttempts } from "./claim-state.js";
 import { transitionSession } from "./session-state-machine.js";
 import { buildAverrayDisclosureFooter } from "./maintainer-surface-policy.js";
 import { hashCanonicalContent } from "./canonical-content.js";
+import { WorkerExposurePolicy } from "./worker-exposure.js";
+import { WorkerDailyExposurePolicy } from "./worker-daily-exposure.js";
 import {
   buildExternalSchemaRegistrationMessage,
   normalizeExternalSchemaRegistrations
@@ -73,6 +75,54 @@ test("claim fails closed when claimant attribution does not carry wallet-bound m
   });
 
   assert.equal(Object.hasOwn(claimed, "claimantAttribution"), false);
+});
+
+test("hosted canary claim completes through the default daily allowance and records its spend", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({
+    id: "worker-canary-1786453506586",
+    rewardAsset: "USDC",
+    rewardAmount: 0.25
+  });
+  const workerExposurePolicy = new WorkerExposurePolicy({
+    stateStore,
+    gasEstimateUsdc: 0.059,
+    capUsdc: 2.5
+  });
+  const workerDailyExposurePolicy = new WorkerDailyExposurePolicy({
+    stateStore,
+    workerExposurePolicy,
+    resolveBudget: () => 1_500_000,
+    now: () => new Date("2026-08-12T12:00:00.000Z")
+  });
+  const service = new JobExecutionService(
+    stateStore,
+    undefined,
+    () => job,
+    undefined,
+    undefined,
+    undefined,
+    () => job,
+    undefined,
+    { workerExposurePolicy, workerDailyExposurePolicy }
+  );
+
+  const claimed = await service.claimJob(WALLET, job.id, "http", "canary-daily-allowance", {
+    claimantAttribution: {
+      kind: "hosted_worker_canary",
+      evidence: "wallet_bound_marker_v1"
+    }
+  });
+
+  assert.equal(claimed.status, "claimed");
+  assert.deepEqual(claimed.dailyExposure, {
+    version: "worker-daily-exposure-v1",
+    candidate: {
+      reservedRewardUsdc: 0.25,
+      brokeredGasUsdc: 0.059,
+      totalUsdc: 0.309
+    }
+  });
 });
 
 test("a later canary request cannot retrofit claimant attribution onto an existing external claim", async () => {
