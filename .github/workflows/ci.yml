@@ -354,6 +354,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      # Published in gitleaks_8.30.1_checksums.txt. This binds both a
+      # freshly downloaded archive and a restored cache entry to the release
+      # we reviewed; a cache hit is not trusted merely because it has our key.
+      GITLEAKS_TARBALL_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -367,25 +373,64 @@ jobs:
       # a paid GITLEAKS_LICENSE secret for org-owned repos (the wrapper
       # was monetized; the binary is still MIT). Pinning the release
       # version makes a compromised future release no worse than what's
-      # already in our supply chain. To refresh:
+      # already in our supply chain. The versioned archive is cached so an
+      # intermittent GitHub release-CDN failure cannot red main after the
+      # reviewed artifact has been fetched once. To refresh:
       #   tag=$(gh api repos/gitleaks/gitleaks/releases/latest --jq .tag_name)
-      # and update GITLEAKS_VERSION + the checksum below.
+      # and update GITLEAKS_VERSION + the checksum above.
+      - name: Restore pinned gitleaks release
+        id: gitleaks-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.tool_cache }}/gitleaks/v${{ env.GITLEAKS_VERSION }}/${{ runner.arch }}
+          key: gitleaks-${{ runner.os }}-${{ runner.arch }}-v${{ env.GITLEAKS_VERSION }}-${{ env.GITLEAKS_TARBALL_SHA256 }}
+
       - name: Install gitleaks
-        env:
-          GITLEAKS_VERSION: "8.30.1"
         run: |
           set -euo pipefail
+          if [ "$RUNNER_ARCH" != "X64" ]; then
+            echo "::error::Unsupported gitleaks runner architecture: $RUNNER_ARCH"
+            exit 1
+          fi
+
+          cache_dir="${RUNNER_TOOL_CACHE}/gitleaks/v${GITLEAKS_VERSION}/${RUNNER_ARCH}"
+          archive="${cache_dir}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          mkdir -p "$cache_dir"
+
           url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          curl -fsSL --max-time 60 "$url" -o /tmp/gitleaks.tar.gz
+          if [ "${{ steps.gitleaks-cache.outputs.cache-hit }}" != "true" ]; then
+            # The CDN is now a cache-fill dependency, not an every-run
+            # dependency. Retries make the one cold fetch tolerant of the
+            # transient 503/TLS failures observed on 2026-08-12.
+            curl -fsSL \
+              --retry 4 \
+              --retry-all-errors \
+              --retry-delay 2 \
+              --connect-timeout 20 \
+              --max-time 60 \
+              "$url" \
+              -o "$archive"
+          fi
+
           # Verify size sanity (~3-7 MB tarball; anything wildly off is a red flag).
-          size=$(wc -c </tmp/gitleaks.tar.gz)
+          size=$(wc -c <"$archive")
           if [ "$size" -lt 1000000 ] || [ "$size" -gt 20000000 ]; then
             echo "::error::gitleaks tarball size unexpected: $size bytes"
             exit 1
           fi
-          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
-          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
-          gitleaks version
+
+          # Check every run, including cache hits. Re-extract from that verified
+          # archive so the executable itself cannot silently outlive its proof.
+          printf '%s  %s\n' "$GITLEAKS_TARBALL_SHA256" "$archive" | sha256sum --check
+          rm -f "$cache_dir/gitleaks"
+          tar -xzf "$archive" -C "$cache_dir" gitleaks
+          chmod 0755 "$cache_dir/gitleaks"
+          actual_version=$("$cache_dir/gitleaks" version)
+          if [ "$actual_version" != "$GITLEAKS_VERSION" ]; then
+            echo "::error::gitleaks version mismatch: expected $GITLEAKS_VERSION, got $actual_version"
+            exit 1
+          fi
+          echo "$cache_dir" >> "$GITHUB_PATH"
 
       - name: Run gitleaks against new commits in this event
         env:
