@@ -770,8 +770,13 @@ export function explainEligibilityFromPreflight(preflight) {
     dailyExposure: preflight.dailyExposure,
     dailyExposureRemaining: preflight.dailyExposureRemaining,
     dailyAllowance: preflight.dailyAllowance,
+    catalogueAccess: preflight.catalogueAccess,
+    catalogueDailyBudget: preflight.catalogueDailyBudget,
     failureStates: preflight.failureStates,
-    reasonMessage: preflight.reasonMessage ?? preflight.dailyExposure?.message ?? preflight.workerExposure?.message
+    reasonMessage: preflight.reasonMessage
+      ?? preflight.catalogueDailyBudget?.message
+      ?? preflight.dailyExposure?.message
+      ?? preflight.workerExposure?.message
   };
 }
 

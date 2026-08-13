@@ -132,18 +132,26 @@ export class DepositPoolObservabilityService {
     poolAddress,
     provider,
     chainReader,
+    catalogueDailyBudget,
     eventWindowBlocks = DEFAULT_EVENT_WINDOW_BLOCKS,
     recentFlowLimit = DEFAULT_RECENT_FLOW_LIMIT
   } = {}) {
     this.poolAddress = poolAddress ? getAddress(poolAddress) : "";
     this.chainReader = chainReader ?? (provider ? new EvmDepositPoolChainReader(provider) : undefined);
+    this.catalogueDailyBudget = catalogueDailyBudget;
     this.eventWindowBlocks = eventWindowBlocks;
     this.recentFlowLimit = recentFlowLimit;
   }
 
   async getSnapshot() {
+    const catalogueDailyBudget = await this.#catalogueBudgetStatus();
     if (!this.poolAddress) {
-      return { schemaVersion: 1, available: false, reason: "deposit_pool_not_configured" };
+      return {
+        schemaVersion: 1,
+        available: false,
+        reason: "deposit_pool_not_configured",
+        catalogueDailyBudget
+      };
     }
     if (!this.chainReader) throw new Error("DepositPool observability requires a chain reader.");
 
@@ -187,6 +195,7 @@ export class DepositPoolObservabilityService {
     return {
       schemaVersion: 1,
       available: true,
+      catalogueDailyBudget,
       pool: this.poolAddress,
       asset: getAddress(state.asset),
       block: {
@@ -218,5 +227,20 @@ export class DepositPoolObservabilityService {
       bornEmpty: totalShares === 0n && flows.status === "ok" && flows.depositorCount === 0,
       flows
     };
+  }
+
+  async #catalogueBudgetStatus() {
+    if (typeof this.catalogueDailyBudget?.getStatus !== "function") {
+      return { status: "unavailable", reason: "catalogue_daily_budget_not_configured" };
+    }
+    try {
+      return await this.catalogueDailyBudget.getStatus();
+    } catch {
+      return {
+        status: "unavailable",
+        reason: "catalogue_daily_budget_read_failed",
+        lastError: "catalogue_daily_budget_read_failed"
+      };
+    }
   }
 }

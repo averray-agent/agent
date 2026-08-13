@@ -1105,42 +1105,64 @@ test("getClaimEconomicsDecisionState treats an unreadable optional retention pro
   assert.equal(state.claimFeeRetainedOnSuccess, false);
 });
 
-test("readDepositedAssets fails closed for missing selector and contract read errors", async () => {
-  const gateway = gatewayWithDot();
-  gateway.depositPoolContract = {};
-  assert.equal(await gateway.readDepositedAssets("0x3333333333333333333333333333333333333333"), 0n);
-
-  gateway.depositPoolReadCache.clear();
-  gateway.depositPoolContract = {
-    async assetsOf() {
-      throw new Error("pool RPC unavailable");
+test("readDepositVesting reconstructs pool principal events and caches them by head block", async () => {
+  const wallet = "0x3333333333333333333333333333333333333333";
+  const poolAddress = "0x4444444444444444444444444444444444444444";
+  const poolInterface = new Interface([
+    "event Deposit(address indexed caller, address indexed owner, uint256 assets, uint256 shares)",
+    "event Withdraw(address indexed caller, address indexed receiver, address indexed owner, uint256 assets, uint256 shares)",
+    "event VenueReturnRecorded(uint256 assets)"
+  ]);
+  const deposit = poolInterface.encodeEventLog(poolInterface.getEvent("Deposit"), [wallet, wallet, 10_000_000n, 10_000_000n]);
+  const venueReturn = poolInterface.encodeEventLog(poolInterface.getEvent("VenueReturnRecorded"), [50_000_000n]);
+  let logReads = 0;
+  const gateway = new BlockchainGateway({
+    enabled: false,
+    depositPoolAddress: poolAddress,
+    depositPoolDeploymentBlock: 100
+  });
+  gateway.provider = {
+    async getBlockNumber() { return 101; },
+    async getBlock(blockNumber) { return { number: blockNumber, timestamp: 1_000 + blockNumber }; },
+    async getLogs() {
+      logReads += 1;
+      return [
+        { ...deposit, blockNumber: 100, index: 1, transactionHash: `0x${"11".repeat(32)}` },
+        { ...venueReturn, blockNumber: 101, index: 1, transactionHash: `0x${"22".repeat(32)}` }
+      ];
     }
   };
-  assert.equal(await gateway.readDepositedAssets("0x3333333333333333333333333333333333333333"), 0n);
+  gateway.depositPoolContract = { interface: poolInterface };
+
+  const now = new Date((1_000 + 100 + (48 * 60 * 60)) * 1_000);
+  const first = await gateway.readDepositVesting(wallet, { now });
+  const replay = await gateway.readDepositVesting(wallet, { now });
+
+  assert.equal(first.vestedRaw, 10_000_000n);
+  assert.equal(first.tranches.length, 1);
+  assert.equal(replay.vestedRaw, first.vestedRaw);
+  assert.equal(logReads, 1);
 });
 
-test("readDepositedAssets caches each wallet for no more than sixty seconds", async () => {
-  let nowMs = 1_000;
-  let calls = 0;
-  const gateway = new BlockchainGateway(
-    { enabled: false },
-    { now: () => nowMs }
-  );
-  gateway.depositPoolContract = {
-    async assetsOf(wallet) {
-      calls += 1;
-      assert.equal(wallet, "0x3333333333333333333333333333333333333333");
-      return BigInt(calls * 10_000_000);
-    }
+test("readDepositVesting fails closed to zero when pool logs are unavailable", async () => {
+  const gateway = new BlockchainGateway({
+    enabled: false,
+    depositPoolAddress: "0x4444444444444444444444444444444444444444",
+    depositPoolDeploymentBlock: 100
+  });
+  gateway.provider = {
+    async getBlockNumber() { return 101; },
+    async getLogs() { throw new Error("RPC unavailable"); }
   };
+  gateway.depositPoolContract = { interface: new Interface([
+    "event Deposit(address indexed caller, address indexed owner, uint256 assets, uint256 shares)",
+    "event Withdraw(address indexed caller, address indexed receiver, address indexed owner, uint256 assets, uint256 shares)"
+  ]) };
 
-  assert.equal(await gateway.readDepositedAssets("0x3333333333333333333333333333333333333333"), 10_000_000n);
-  assert.equal(await gateway.readDepositedAssets("0x3333333333333333333333333333333333333333"), 10_000_000n);
-  assert.equal(calls, 1);
-
-  nowMs += 60_001;
-  assert.equal(await gateway.readDepositedAssets("0x3333333333333333333333333333333333333333"), 20_000_000n);
-  assert.equal(calls, 2);
+  const result = await gateway.readDepositVesting("0x3333333333333333333333333333333333333333");
+  assert.equal(result.available, false);
+  assert.equal(result.vestedRaw, 0n);
+  assert.deepEqual(result.tranches, []);
 });
 
 test("readEscrowJob detects v1 before the pre-waiver legacy layout", async () => {

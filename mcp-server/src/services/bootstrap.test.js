@@ -56,5 +56,6 @@ test("bootstrap wires the rendered mainnet AUTH_CHAIN_ID into the configured Dep
   const info = await door.getInfo();
   assert.equal(info.available, true);
   assert.equal(info.chainId, 420420419);
+  assert.equal(info.disclosure.statement, "Technical pilot. Principal at risk. No depositor protection.");
   assert.deepEqual(info.broadcast.rpcUrls, ["https://eth-rpc.polkadot.io"]);
 });

@@ -3,101 +3,94 @@ import { isExternalJob } from "./external-job-lifecycle.js";
 import { decimalToBaseUnits, formatBaseUnits } from "./platform-service-helpers.js";
 
 export const DEFAULT_WORKER_DAILY_EXPOSURE_BUDGET_RAW = 1_500_000;
-export const DEFAULT_WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI = 1_000;
+export const DEFAULT_WORKER_LIFETIME_CATALOGUE_CREDIT_RAW = 10_000_000;
+export const DEFAULT_WORKER_GRADUATION_SETTLED_JOBS = 10;
 export const DAILY_EXPOSURE_BUDGET_REACHED_REASON = "daily_exposure_budget_reached";
+export const LIFETIME_CATALOGUE_CREDIT_EXHAUSTED_REASON = "lifetime_catalogue_credit_exhausted";
 export const DAILY_EXPOSURE_UNAVAILABLE_REASON = "daily_exposure_budget_unavailable";
 
+const RETIRED_DEPOSIT_ALLOWANCE_ENV = "WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI";
 const USDC_DECIMALS = 6;
 const ROLLING_WINDOW_MS = 24 * 60 * 60 * 1_000;
+const D0_ENTRY_VERSION = "worker-catalogue-exposure-v2";
 
 export function loadWorkerDailyExposureConfig(env = process.env) {
+  if (env[RETIRED_DEPOSIT_ALLOWANCE_ENV] !== undefined) {
+    throw new ConfigError(
+      `${RETIRED_DEPOSIT_ALLOWANCE_ENV} was retired by Packet D0; remove it. Deposits never raise catalogue allowance.`,
+      { field: RETIRED_DEPOSIT_ALLOWANCE_ENV, packet: "PACKET_D0_VESTING.md" }
+    );
+  }
   return {
     budgetRaw: nonNegativeIntegerConfig(
       env.WORKER_DAILY_EXPOSURE_BUDGET_RAW,
       DEFAULT_WORKER_DAILY_EXPOSURE_BUDGET_RAW,
       "WORKER_DAILY_EXPOSURE_BUDGET_RAW"
     ),
-    allowancePerDepositedMilli: nonNegativeIntegerConfig(
-      env.WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI,
-      DEFAULT_WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI,
-      "WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI"
+    lifetimeCreditRaw: nonNegativeIntegerConfig(
+      env.WORKER_LIFETIME_CATALOGUE_CREDIT_RAW,
+      DEFAULT_WORKER_LIFETIME_CATALOGUE_CREDIT_RAW,
+      "WORKER_LIFETIME_CATALOGUE_CREDIT_RAW"
+    ),
+    graduationSettledJobs: positiveIntegerConfig(
+      env.WORKER_GRADUATION_SETTLED_JOBS,
+      DEFAULT_WORKER_GRADUATION_SETTLED_JOBS,
+      "WORKER_GRADUATION_SETTLED_JOBS"
     )
   };
 }
 
-// One deposited USDC raises the rolling allowance by K/1000 USDC. The
-// calculation stays in raw units and rounds down, so custom fractional K
-// values can never grant more than their configured ratio.
 export function resolveDailyExposureBudget(_wallet, {
-  budgetRaw = DEFAULT_WORKER_DAILY_EXPOSURE_BUDGET_RAW,
-  depositedAssetsRaw = 0,
-  allowancePerDepositedMilli = DEFAULT_WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI
+  budgetRaw = DEFAULT_WORKER_DAILY_EXPOSURE_BUDGET_RAW
 } = {}) {
-  const baseUnits = nonNegativeRawUnits(budgetRaw, "worker daily exposure budget");
-  const depositedUnits = nonNegativeRawUnits(depositedAssetsRaw, "deposited pool assets");
-  const multiplierMilli = nonNegativeRawUnits(
-    allowancePerDepositedMilli,
-    "worker tier-3 allowance per deposited milli"
-  );
-  return baseUnits + ((depositedUnits * multiplierMilli) / 1_000n);
+  return nonNegativeRawUnits(budgetRaw, "worker daily exposure budget");
 }
 
 export function createWorkerDailyExposurePolicy({
   stateStore,
   workerExposurePolicy,
-  blockchainGateway,
   env = process.env,
   config = loadWorkerDailyExposureConfig(env),
-  resolveBudget = async (wallet) => {
-    let depositedAssetsRaw = 0n;
-    try {
-      depositedAssetsRaw = typeof blockchainGateway?.readDepositedAssets === "function"
-        ? await blockchainGateway.readDepositedAssets(wallet)
-        : 0n;
-    } catch {
-      // Belt-and-suspenders around the gateway's own optional-capability
-      // fail-closed behavior: a read failure can delay a raise, never grant it.
-      depositedAssetsRaw = 0n;
-    }
-    const baseRaw = nonNegativeRawUnits(config.budgetRaw, "worker daily exposure budget");
-    const depositedRaw = nonNegativeRawUnits(depositedAssetsRaw, "deposited pool assets");
-    const totalRaw = resolveDailyExposureBudget(wallet, {
-      ...config,
-      depositedAssetsRaw: depositedRaw
-    });
-    return {
-      baseRaw,
-      depositedAssetsRaw: depositedRaw,
-      fromDepositsRaw: totalRaw - baseRaw,
-      totalRaw,
-      poolAddress: blockchainGateway?.config?.depositPoolAddress
-    };
-  },
   now = () => new Date()
 } = {}) {
   return new WorkerDailyExposurePolicy({
     stateStore,
     workerExposurePolicy,
-    resolveBudget,
+    budgetRaw: config.budgetRaw,
+    lifetimeCreditRaw: config.lifetimeCreditRaw,
+    graduationSettledJobs: config.graduationSettledJobs,
     now
   });
 }
 
 export class WorkerDailyExposurePolicy {
-  constructor({ stateStore, workerExposurePolicy, resolveBudget, now = () => new Date() } = {}) {
+  constructor({
+    stateStore,
+    workerExposurePolicy,
+    budgetRaw = DEFAULT_WORKER_DAILY_EXPOSURE_BUDGET_RAW,
+    lifetimeCreditRaw = DEFAULT_WORKER_LIFETIME_CATALOGUE_CREDIT_RAW,
+    graduationSettledJobs = DEFAULT_WORKER_GRADUATION_SETTLED_JOBS,
+    now = () => new Date()
+  } = {}) {
     if (typeof stateStore?.listSessionsByWallet !== "function") {
-      throw new ConfigError("Worker daily exposure requires wallet-session pagination.");
+      throw new ConfigError("Worker catalogue exposure requires wallet-session pagination.");
     }
     if (typeof workerExposurePolicy?.exposureForDefinition !== "function"
       || typeof workerExposurePolicy?.exposureForSession !== "function") {
-      throw new ConfigError("Worker daily exposure requires the worker exposure calculator.");
-    }
-    if (typeof resolveBudget !== "function") {
-      throw new ConfigError("Worker daily exposure requires a budget resolver.");
+      throw new ConfigError("Worker catalogue exposure requires the worker exposure calculator.");
     }
     this.stateStore = stateStore;
     this.workerExposurePolicy = workerExposurePolicy;
-    this.resolveBudget = resolveBudget;
+    this.budgetUnits = nonNegativeRawUnits(budgetRaw, "worker daily exposure budget");
+    this.lifetimeCreditUnits = nonNegativeRawUnits(
+      lifetimeCreditRaw,
+      "worker lifetime catalogue credit"
+    );
+    this.graduationSettledJobs = positiveIntegerConfig(
+      graduationSettledJobs,
+      DEFAULT_WORKER_GRADUATION_SETTLED_JOBS,
+      "worker graduation settled jobs"
+    );
     this.now = now;
   }
 
@@ -107,129 +100,183 @@ export class WorkerDailyExposurePolicy {
         eligible: true,
         applies: false,
         status: "not_applicable",
-        reason: "external_job_has_no_operator_exposure"
+        reason: "external_job_has_no_catalogue_allowance"
       };
     }
 
     try {
-      const evaluatedAt = asDate(this.now(), "daily exposure clock");
-      const allowance = await this.resolveAllowance(wallet);
-      const budgetUnits = allowance.totalUnits;
+      const evaluatedAt = asDate(this.now(), "catalogue exposure clock");
+      const sessions = await collectAllWalletSessions(this.stateStore, wallet);
       const candidate = workerExposure?.candidate
         ? exposureFromPublicComponents(workerExposure.candidate, "candidate exposure")
         : this.workerExposurePolicy.exposureForDefinition(job, claimEconomics);
-      const current = await this.currentExposure(wallet, evaluatedAt);
-      const projectedUnits = current.totalUnits + candidate.totalUnits;
-      // Zero is the operator kill-switch, including for a hypothetical
-      // zero-reward/zero-brokered-gas job.
-      const eligible = budgetUnits > 0n && projectedUnits <= budgetUnits;
-      const remainingUnits = budgetUnits > current.totalUnits ? budgetUnits - current.totalUnits : 0n;
-      const projectedRemainingUnits = budgetUnits > projectedUnits ? budgetUnits - projectedUnits : 0n;
-      const retryAfter = eligible || current.oldestClaimedAt === undefined
-        ? undefined
-        : new Date(current.oldestClaimedAt.getTime() + ROLLING_WINDOW_MS).toISOString();
-      const retryAfterSeconds = retryAfter
-        ? Math.max(0, Math.ceil((Date.parse(retryAfter) - evaluatedAt.getTime()) / 1_000))
-        : undefined;
-
-      return compact({
-        eligible,
-        applies: true,
-        status: eligible ? "within_budget" : "exceeded",
-        reason: eligible ? "daily_exposure_within_budget" : DAILY_EXPOSURE_BUDGET_REACHED_REASON,
-        windowSeconds: ROLLING_WINDOW_MS / 1_000,
-        dailyExposureBudgetRaw: budgetUnits.toString(),
-        dailyExposureUsedRaw: current.totalUnits.toString(),
-        dailyExposureRemainingRaw: remainingUnits.toString(),
-        candidateExposureRaw: candidate.totalUnits.toString(),
-        projectedDailyExposureRaw: projectedUnits.toString(),
-        dailyExposureBudget: usdcAmount(budgetUnits),
-        dailyAllowance: publicDailyAllowance(allowance),
-        dailyExposureUsed: usdcAmount(current.totalUnits),
-        dailyExposureRemaining: usdcAmount(remainingUnits),
-        candidateExposure: usdcAmount(candidate.totalUnits),
-        projectedDailyExposure: usdcAmount(projectedUnits),
-        projectedDailyExposureRemaining: usdcAmount(projectedRemainingUnits),
-        currentWindowClaimCount: current.sessionCount,
-        candidate: publicComponents(candidate),
-        retryAfter,
-        retryAfterSeconds,
-        entry: {
-          version: "worker-daily-exposure-v1",
-          candidate: publicComponents(candidate)
-        },
-        message: eligible
-          ? "The claim fits within this wallet's rolling 24-hour operator exposure allowance."
-          : dailyExposureRefusalMessage(allowance.poolAddress)
-      });
+      const settledApprovedCatalogueJobs = countSettledApprovedCatalogueJobs(sessions);
+      const established = settledApprovedCatalogueJobs >= this.graduationSettledJobs;
+      return established
+        ? this.evaluateEstablished({ sessions, candidate, evaluatedAt, settledApprovedCatalogueJobs })
+        : this.evaluateLifetime({ sessions, candidate, evaluatedAt, settledApprovedCatalogueJobs });
     } catch (error) {
       return {
         eligible: false,
         applies: true,
         status: "unknown",
         reason: DAILY_EXPOSURE_UNAVAILABLE_REASON,
-        message: "Rolling daily exposure could not be proven. Retry after durable session reads recover.",
+        message: "Catalogue exposure eligibility could not be proven. Retry after durable session reads recover.",
         error: error?.message ?? String(error)
       };
     }
   }
 
-  async currentExposure(wallet, now = asDate(this.now(), "daily exposure clock")) {
-    const cutoffMs = now.getTime() - ROLLING_WINDOW_MS;
-    const sessions = await collectAllWalletSessions(this.stateStore, wallet);
-    let totalUnits = 0n;
-    let oldestClaimedAt;
-    let sessionCount = 0;
-
-    for (const session of sessions) {
-      if (isExternalJob(session?.jobSnapshot?.definition)) continue;
-      const claimedAt = claimTimestamp(session);
-      if (!claimedAt || claimedAt.getTime() <= cutoffMs) continue;
-      const exposure = session?.dailyExposure?.candidate
-        ? exposureFromPublicComponents(session.dailyExposure.candidate, `session ${session.sessionId} daily exposure`)
-        : this.workerExposurePolicy.exposureForSession(session);
-      totalUnits += exposure.totalUnits;
-      sessionCount += 1;
-      if (!oldestClaimedAt || claimedAt < oldestClaimedAt) oldestClaimedAt = claimedAt;
-    }
-    return { totalUnits, sessionCount, oldestClaimedAt };
-  }
-
-  async resolveAllowance(wallet) {
-    const resolved = await this.resolveBudget(wallet);
-    if (!resolved || typeof resolved !== "object") {
-      const totalUnits = nonNegativeRawUnits(resolved, "resolved worker daily exposure budget");
-      return {
-        baseUnits: totalUnits,
-        depositedUnits: 0n,
-        fromDepositsUnits: 0n,
-        totalUnits,
-        poolAddress: undefined
-      };
-    }
-    const baseUnits = nonNegativeRawUnits(resolved.baseRaw, "resolved base daily allowance");
-    const depositedUnits = nonNegativeRawUnits(
-      resolved.depositedAssetsRaw,
-      "resolved deposited pool assets"
-    );
-    const fromDepositsUnits = nonNegativeRawUnits(
-      resolved.fromDepositsRaw,
-      "resolved allowance from deposits"
-    );
-    const totalUnits = nonNegativeRawUnits(resolved.totalRaw, "resolved total daily allowance");
-    if (baseUnits + fromDepositsUnits !== totalUnits) {
-      throw new Error("Resolved daily allowance components do not sum to the total");
-    }
+  evaluateLifetime({ sessions, candidate, evaluatedAt, settledApprovedCatalogueJobs }) {
+    const usedUnits = lifetimeExposure(sessions);
+    const projectedUnits = usedUnits + candidate.totalUnits;
+    const eligible = this.lifetimeCreditUnits > 0n && projectedUnits <= this.lifetimeCreditUnits;
+    const remainingUnits = this.lifetimeCreditUnits > usedUnits
+      ? this.lifetimeCreditUnits - usedUnits
+      : 0n;
+    const projectedRemainingUnits = this.lifetimeCreditUnits > projectedUnits
+      ? this.lifetimeCreditUnits - projectedUnits
+      : 0n;
+    const catalogueAccess = {
+      mode: "lifetime_credit",
+      established: false,
+      settledApprovedCatalogueJobs,
+      graduationSettledJobs: this.graduationSettledJobs,
+      lifetimeCreditRaw: this.lifetimeCreditUnits.toString(),
+      lifetimeUsedRaw: usedUnits.toString(),
+      lifetimeRemainingRaw: remainingUnits.toString(),
+      lifetimeCredit: usdcAmount(this.lifetimeCreditUnits),
+      lifetimeUsed: usdcAmount(usedUnits),
+      lifetimeRemaining: usdcAmount(remainingUnits),
+      externalWorkAffected: false,
+      graduationRule: `${this.graduationSettledJobs} settled and approved catalogue jobs unlock the rolling daily base.`
+    };
     return {
-      baseUnits,
-      depositedUnits,
-      fromDepositsUnits,
-      totalUnits,
-      poolAddress: typeof resolved.poolAddress === "string" && resolved.poolAddress
-        ? resolved.poolAddress
-        : undefined
+      eligible,
+      applies: true,
+      status: eligible ? "within_lifetime_credit" : "exceeded",
+      reason: eligible
+        ? "lifetime_catalogue_credit_available"
+        : LIFETIME_CATALOGUE_CREDIT_EXHAUSTED_REASON,
+      evaluatedAt: evaluatedAt.toISOString(),
+      candidateExposureRaw: candidate.totalUnits.toString(),
+      projectedLifetimeExposureRaw: projectedUnits.toString(),
+      candidateExposure: usdcAmount(candidate.totalUnits),
+      projectedLifetimeExposure: usdcAmount(projectedUnits),
+      projectedLifetimeRemaining: usdcAmount(projectedRemainingUnits),
+      candidate: publicComponents(candidate),
+      catalogueAccess,
+      entry: {
+        version: D0_ENTRY_VERSION,
+        accessMode: "lifetime_credit",
+        candidate: publicComponents(candidate)
+      },
+      message: eligible
+        ? "The claim fits within this wallet's finite lifetime catalogue credit before graduation."
+        : `This wallet's finite lifetime catalogue credit is exhausted. Graduation requires ${this.graduationSettledJobs} settled and approved catalogue jobs; ${settledApprovedCatalogueJobs} are recorded. External poster-funded work is not gated by this lifetime credit.`
     };
   }
+
+  evaluateEstablished({ sessions, candidate, evaluatedAt, settledApprovedCatalogueJobs }) {
+    const current = rollingExposure(sessions, evaluatedAt, this.workerExposurePolicy);
+    const projectedUnits = current.totalUnits + candidate.totalUnits;
+    const eligible = this.budgetUnits > 0n && projectedUnits <= this.budgetUnits;
+    const remainingUnits = this.budgetUnits > current.totalUnits
+      ? this.budgetUnits - current.totalUnits
+      : 0n;
+    const projectedRemainingUnits = this.budgetUnits > projectedUnits
+      ? this.budgetUnits - projectedUnits
+      : 0n;
+    const retryAfter = eligible || !current.oldestClaimedAt
+      ? undefined
+      : new Date(current.oldestClaimedAt.getTime() + ROLLING_WINDOW_MS).toISOString();
+    const retryAfterSeconds = retryAfter
+      ? Math.max(0, Math.ceil((Date.parse(retryAfter) - evaluatedAt.getTime()) / 1_000))
+      : undefined;
+    const dailyAllowance = {
+      base: usdcAmount(this.budgetUnits),
+      total: usdcAmount(this.budgetUnits)
+    };
+    return compact({
+      eligible,
+      applies: true,
+      status: eligible ? "within_budget" : "exceeded",
+      reason: eligible ? "daily_exposure_within_budget" : DAILY_EXPOSURE_BUDGET_REACHED_REASON,
+      windowSeconds: ROLLING_WINDOW_MS / 1_000,
+      dailyExposureBudgetRaw: this.budgetUnits.toString(),
+      dailyExposureUsedRaw: current.totalUnits.toString(),
+      dailyExposureRemainingRaw: remainingUnits.toString(),
+      candidateExposureRaw: candidate.totalUnits.toString(),
+      projectedDailyExposureRaw: projectedUnits.toString(),
+      dailyExposureBudget: usdcAmount(this.budgetUnits),
+      dailyAllowance,
+      dailyExposureUsed: usdcAmount(current.totalUnits),
+      dailyExposureRemaining: usdcAmount(remainingUnits),
+      candidateExposure: usdcAmount(candidate.totalUnits),
+      projectedDailyExposure: usdcAmount(projectedUnits),
+      projectedDailyExposureRemaining: usdcAmount(projectedRemainingUnits),
+      currentWindowClaimCount: current.sessionCount,
+      candidate: publicComponents(candidate),
+      catalogueAccess: {
+        mode: "rolling_daily",
+        established: true,
+        settledApprovedCatalogueJobs,
+        graduationSettledJobs: this.graduationSettledJobs,
+        externalWorkAffected: false
+      },
+      retryAfter,
+      retryAfterSeconds,
+      entry: {
+        version: D0_ENTRY_VERSION,
+        accessMode: "rolling_daily",
+        candidate: publicComponents(candidate)
+      },
+      message: eligible
+        ? "The claim fits within this established wallet's deposit-blind rolling 24-hour catalogue allowance."
+        : "This claim would exceed the established wallet's deposit-blind rolling 24-hour catalogue allowance. Retry after earlier claim spend ages out."
+    });
+  }
+}
+
+function countSettledApprovedCatalogueJobs(sessions) {
+  return sessions.filter((session) => (
+    !isExternalJob(session?.jobSnapshot?.definition)
+    && session?.status === "resolved"
+    && session?.verificationSummary?.outcome === "approved"
+  )).length;
+}
+
+function lifetimeExposure(sessions) {
+  let totalUnits = 0n;
+  for (const session of sessions) {
+    if (isExternalJob(session?.jobSnapshot?.definition)) continue;
+    if (session?.dailyExposure?.version !== D0_ENTRY_VERSION
+      || session?.dailyExposure?.accessMode !== "lifetime_credit") continue;
+    totalUnits += exposureFromPublicComponents(
+      session.dailyExposure.candidate,
+      `session ${session.sessionId} lifetime catalogue exposure`
+    ).totalUnits;
+  }
+  return totalUnits;
+}
+
+function rollingExposure(sessions, now, workerExposurePolicy) {
+  const cutoffMs = now.getTime() - ROLLING_WINDOW_MS;
+  let totalUnits = 0n;
+  let oldestClaimedAt;
+  let sessionCount = 0;
+  for (const session of sessions) {
+    if (isExternalJob(session?.jobSnapshot?.definition)) continue;
+    const claimedAt = claimTimestamp(session);
+    if (!claimedAt || claimedAt.getTime() <= cutoffMs) continue;
+    const exposure = session?.dailyExposure?.candidate
+      ? exposureFromPublicComponents(session.dailyExposure.candidate, `session ${session.sessionId} daily exposure`)
+      : workerExposurePolicy.exposureForSession(session);
+    totalUnits += exposure.totalUnits;
+    sessionCount += 1;
+    if (!oldestClaimedAt || claimedAt < oldestClaimedAt) oldestClaimedAt = claimedAt;
+  }
+  return { totalUnits, sessionCount, oldestClaimedAt };
 }
 
 async function collectAllWalletSessions(stateStore, wallet, { pageSize = 64, maxSessions = 10_000 } = {}) {
@@ -241,7 +288,7 @@ async function collectAllWalletSessions(stateStore, wallet, { pageSize = 64, max
     if (page.length < pageSize) break;
   }
   if (sessions.length >= maxSessions) {
-    throw new Error(`Wallet session history exceeded the ${maxSessions} daily-exposure read cap`);
+    throw new Error(`Wallet session history exceeded the ${maxSessions} catalogue-exposure read cap`);
   }
   return sessions;
 }
@@ -251,17 +298,14 @@ function claimTimestamp(session) {
     ? session.statusHistory.find((entry) => entry?.to === "claimed" && entry?.at)
     : undefined;
   const value = session?.claimedAt ?? claimedTransition?.at;
-  if (!value) return undefined;
-  return asDate(value, `session ${session?.sessionId ?? "unknown"} claimedAt`);
+  return value ? asDate(value, `session ${session?.sessionId ?? "unknown"} claimedAt`) : undefined;
 }
 
 function exposureFromPublicComponents(candidate, field) {
   const rewardUnits = usdcUnits(candidate?.reservedRewardUsdc, `${field} reserved reward`);
   const gasUnits = usdcUnits(candidate?.brokeredGasUsdc, `${field} brokered gas`);
   const totalUnits = usdcUnits(candidate?.totalUsdc, `${field} total`);
-  if (rewardUnits + gasUnits !== totalUnits) {
-    throw new Error(`${field} has inconsistent components`);
-  }
+  if (rewardUnits + gasUnits !== totalUnits) throw new Error(`${field} has inconsistent components`);
   return { rewardUnits, gasUnits, totalUnits };
 }
 
@@ -271,22 +315,6 @@ function publicComponents(exposure) {
     brokeredGasUsdc: usdcAmount(exposure.gasUnits),
     totalUsdc: usdcAmount(exposure.totalUnits)
   };
-}
-
-function publicDailyAllowance(allowance) {
-  return {
-    base: usdcAmount(allowance.baseUnits),
-    fromDeposits: usdcAmount(allowance.fromDepositsUnits),
-    depositedAssets: usdcAmount(allowance.depositedUnits),
-    total: usdcAmount(allowance.totalUnits)
-  };
-}
-
-function dailyExposureRefusalMessage(poolAddress) {
-  const base = "This claim would exceed the wallet's rolling 24-hour operator exposure allowance. Retry after earlier claim spend ages out.";
-  return poolAddress
-    ? `${base} Deposits into DepositPool ${poolAddress} raise your daily allowance 1:1.`
-    : base;
 }
 
 function usdcUnits(value, field) {
@@ -303,6 +331,15 @@ function usdcUnits(value, field) {
 
 function usdcAmount(units) {
   return Number(formatBaseUnits(units, USDC_DECIMALS));
+}
+
+function positiveIntegerConfig(value, fallback, field) {
+  const candidate = value === undefined || value === null || value === "" ? fallback : value;
+  const number = Number(candidate);
+  if (!Number.isSafeInteger(number) || number <= 0) {
+    throw new ConfigError(`${field} must be a positive integer.`, { field, value: candidate });
+  }
+  return number;
 }
 
 function nonNegativeIntegerConfig(value, fallback, field) {

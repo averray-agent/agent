@@ -4,7 +4,10 @@ import test from "node:test";
 import { Interface } from "ethers";
 
 import { DEPOSIT_POOL_ABI, ERC20_MOCK_ABI } from "../blockchain/abis.js";
-import { DEPOSIT_POOL_RISK_DISCLOSURE } from "../core/deposit-pool-disclosure.js";
+import {
+  DEPOSIT_POOL_CAPITAL_SIGNAL_STATEMENT,
+  DEPOSIT_POOL_RISK_DISCLOSURE
+} from "../core/deposit-pool-disclosure.js";
 import {
   DepositPoolDoorService,
   DEPOSIT_POOL_WITHDRAWAL_NOTE
@@ -63,12 +66,32 @@ function service({ snapshot = state(), convertToShares, estimateGas } = {}) {
       chainId: 420_420_419,
       rpcUrls: ["https://polkadot-asset-hub-rpc.polkadot.io"],
       chainReader: reader,
-      allowanceConfig: { budgetRaw: 1_500_000, allowancePerDepositedMilli: 1_000 }
+      workerExposurePolicy: {
+        async capacityForWallet() {
+          return {
+            vestedAssetsRaw: "10000000",
+            openExposureRaiseRaw: "1500000",
+            openExposureCapRaw: "4000000",
+            externalRewardCeilingRaw: "11000000",
+            vestingHours: 48,
+            vestingAvailable: true,
+            evaluatedAt: "2026-08-13T12:00:00.000Z",
+            tranches: [{
+              depositedRaw: "10000000",
+              remainingRaw: "10000000",
+              vestedRaw: "10000000",
+              depositedAt: "2026-08-11T12:00:00.000Z",
+              blockNumber: 19_380_506,
+              logIndex: 1
+            }]
+          };
+        }
+      }
     })
   };
 }
 
-test("public pool info omits wallet fields while authenticated info reuses Packet 3 allowance math", async () => {
+test("pool info discloses pilot risk and authenticated info reports vested capacity without catalogue allowance", async () => {
   const door = service().value;
   const publicInfo = await door.getInfo();
   const authed = await door.getInfo(WALLET);
@@ -80,12 +103,16 @@ test("public pool info omits wallet fields while authenticated info reuses Packe
   assert.equal(publicInfo.withdrawal.status, "open");
   assert.equal(publicInfo.withdrawal.note, DEPOSIT_POOL_WITHDRAWAL_NOTE);
   assert.deepEqual(authed.disclosure, { statement: DEPOSIT_POOL_RISK_DISCLOSURE });
-  assert.deepEqual(authed.wallet.dailyAllowance, {
-    base: { raw: "1500000", decimals: 6 },
-    fromDeposits: { raw: "10000000", decimals: 6 },
-    depositedAssets: { raw: "10000000", decimals: 6 },
-    total: { raw: "11500000", decimals: 6 }
-  });
+  assert.equal(publicInfo.capitalSignal.statement, DEPOSIT_POOL_CAPITAL_SIGNAL_STATEMENT);
+  assert.equal(publicInfo.capitalSignal.catalogueEffect, "none");
+  assert.deepEqual(authed.wallet.vestedAssets, { raw: "10000000", decimals: 6 });
+  assert.deepEqual(authed.wallet.openExposureRaise, { raw: "1500000", decimals: 6 });
+  assert.deepEqual(authed.wallet.openExposureCap, { raw: "4000000", decimals: 6 });
+  assert.deepEqual(authed.wallet.externalRewardCeiling, { raw: "11000000", decimals: 6 });
+  assert.equal(authed.wallet.vesting.durationHours, 48);
+  assert.equal(authed.wallet.vesting.withdrawalBurnOrder, "lifo");
+  assert.equal("dailyAllowance" in authed.wallet, false);
+  assert.equal(JSON.stringify(authed).includes("fromDeposits"), false);
   assert.deepEqual(authed.wallet.perAgentHeadroom, { raw: "90000000", decimals: 6 });
 });
 

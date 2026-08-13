@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  EXTERNAL_REWARD_EXCEEDS_CAPITAL_CEILING_REASON,
   WorkerExposurePolicy,
   loadWorkerExposureConfig,
   WORKER_EXPOSURE_CAP_REACHED_REASON,
@@ -34,7 +35,12 @@ function policy(options = {}) {
     stateStore: options.stateStore ?? new MemoryStateStore(),
     blockchainGateway: options.blockchainGateway,
     gasEstimateUsdc: options.gasEstimateUsdc ?? 0.059,
-    capUsdc: options.capUsdc ?? 1
+    capUsdc: options.capUsdc ?? 1,
+    vestedOpenExposureUnitRaw: options.vestedOpenExposureUnitRaw ?? 500_000,
+    externalRewardCeilingBaseRaw: options.externalRewardCeilingBaseRaw ?? 1_000_000,
+    externalCeilingPerVestedMilli: options.externalCeilingPerVestedMilli ?? 1_000,
+    resolveVesting: options.resolveVesting ?? (async () => ({ vestedRaw: 0n, tranches: [] })),
+    logger: options.logger ?? {}
   });
 }
 
@@ -49,8 +55,13 @@ test("worker exposure counts reserved reward plus brokered gas for waived claims
   });
 });
 
-test("worker exposure cap has a finite reviewed default and rejects non-positive overrides", () => {
-  assert.deepEqual(loadWorkerExposureConfig({}), { capUsdc: 2.5 });
+test("worker exposure and external ceiling config carry the reviewed defaults", () => {
+  assert.deepEqual(loadWorkerExposureConfig({}), {
+    capUsdc: 2.5,
+    vestedOpenExposureUnitRaw: 500_000,
+    externalRewardCeilingBaseRaw: 1_000_000,
+    externalCeilingPerVestedMilli: 1_000
+  });
   assert.throws(
     () => loadWorkerExposureConfig({ WORKER_OPEN_EXPOSURE_CAP_USDC: "0" }),
     /WORKER_OPEN_EXPOSURE_CAP_USDC must be greater than zero/u
@@ -149,16 +160,72 @@ test("an active session without a claim snapshot fails closed instead of countin
   assert.match(result.error, /no claim-time exposure inputs/u);
 });
 
-test("external poster-funded work does not consume operator exposure", async () => {
-  const result = await policy().evaluate({
+test("external jobs are capital-gated at the base ceiling without consuming operator exposure", async () => {
+  const atBase = await policy().evaluate({
     wallet: WALLET,
-    job: job({ source: "external", poster: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }),
+    job: job({ rewardAmount: 1, source: "external", poster: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }),
+    claimEconomics: economics()
+  });
+  const aboveBase = await policy().evaluate({
+    wallet: WALLET,
+    job: job({ rewardAmount: 1.000001, source: "external", poster: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }),
     claimEconomics: economics()
   });
 
-  assert.equal(result.eligible, true);
-  assert.equal(result.applies, false);
-  assert.equal(result.status, "not_applicable");
+  assert.equal(atBase.eligible, true);
+  assert.equal(atBase.applies, true);
+  assert.equal(atBase.consumesOperatorExposure, false);
+  assert.equal(aboveBase.eligible, false);
+  assert.equal(aboveBase.reason, EXTERNAL_REWARD_EXCEEDS_CAPITAL_CEILING_REASON);
+  assert.equal(aboveBase.externalRewardCeilingRaw, "1000000");
+});
+
+test("ten vested USDC raises open capacity concavely and the external ceiling linearly", async () => {
+  const resolveVesting = async () => ({ vestedRaw: 10_000_000n, tranches: [] });
+  const catalogue = await policy({ capUsdc: 2.5, resolveVesting }).evaluate({
+    wallet: WALLET,
+    job: job(),
+    claimEconomics: economics()
+  });
+  const external = await policy({ capUsdc: 2.5, resolveVesting }).evaluate({
+    wallet: WALLET,
+    job: job({ rewardAmount: 11, source: "external", poster: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }),
+    claimEconomics: economics()
+  });
+
+  assert.equal(catalogue.capUsdc, 4);
+  assert.equal(catalogue.openExposureRaiseUsdc, 1.5);
+  assert.equal(catalogue.vestedAssetsUsdc, 10);
+  assert.equal(external.eligible, true);
+  assert.equal(external.externalRewardCeilingUsdc, 11);
+});
+
+test("a withdrawal reflected by the vesting resolver drops every raise immediately", async () => {
+  let vestedRaw = 10_000_000n;
+  const exposure = policy({
+    capUsdc: 2.5,
+    resolveVesting: async () => ({ vestedRaw, tranches: [] })
+  });
+  const before = await exposure.capacityForWallet(WALLET);
+  vestedRaw = 0n;
+  const after = await exposure.capacityForWallet(WALLET);
+
+  assert.equal(before.openExposureCapUsdc, 4);
+  assert.equal(before.externalRewardCeilingUsdc, 11);
+  assert.equal(after.openExposureCapUsdc, 2.5);
+  assert.equal(after.externalRewardCeilingUsdc, 1);
+});
+
+test("vesting read failures fail closed to the unvested capacity", async () => {
+  const capacity = await policy({
+    capUsdc: 2.5,
+    resolveVesting: async () => { throw new Error("RPC unavailable"); }
+  }).capacityForWallet(WALLET);
+
+  assert.equal(capacity.vestedAssetsRaw, "0");
+  assert.equal(capacity.openExposureCapUsdc, 2.5);
+  assert.equal(capacity.externalRewardCeilingUsdc, 1);
+  assert.equal(capacity.vestingAvailable, false);
 });
 
 test("open external sessions do not consume operator exposure for a later curated claim", async () => {

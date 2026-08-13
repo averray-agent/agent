@@ -1,9 +1,11 @@
 import { Contract, Interface, getAddress } from "ethers";
 
 import { DEPOSIT_POOL_ABI, ERC20_MOCK_ABI } from "../blockchain/abis.js";
-import { DEPOSIT_POOL_RISK_DISCLOSURE } from "../core/deposit-pool-disclosure.js";
+import {
+  DEPOSIT_POOL_CAPITAL_SIGNAL_STATEMENT,
+  DEPOSIT_POOL_RISK_DISCLOSURE
+} from "../core/deposit-pool-disclosure.js";
 import { ValidationError } from "../core/errors.js";
-import { resolveDailyExposureBudget } from "../core/worker-daily-exposure.js";
 import { depositPoolYieldStatus } from "./deposit-pool-yield-status.js";
 
 const ASSET_DECIMALS = 6;
@@ -11,7 +13,7 @@ const SHARE_DECIMALS = 6;
 const SHARE_PRICE_SCALE = 1_000_000n;
 
 export const DEPOSIT_POOL_WITHDRAWAL_NOTE =
-  "Deposited assets are not locked. You may redeem available shares from the pool buffer at any time; deposits raise the rolling allowance only while assetsOf(wallet) remains deposited.";
+  "Deposited assets are not locked. You may redeem available shares from the pool buffer at any time; withdrawals burn the newest vesting tranches first and reduce the capital-backed capacity signal immediately.";
 
 const BOUNDARY = Object.freeze({
   custody: "depositor_wallet_only",
@@ -129,13 +131,15 @@ export class DepositPoolDoorService {
     rpcUrls = [],
     provider,
     chainReader,
-    allowanceConfig = {}
+    workerExposurePolicy,
+    vestingHours = 48
   } = {}) {
     this.poolAddress = poolAddress ? getAddress(poolAddress) : "";
     this.chainId = Number(chainId);
     this.rpcUrls = [...new Set((rpcUrls ?? []).filter(Boolean).map(String))];
     this.chainReader = chainReader ?? (provider ? new EvmDepositPoolDoorChainReader(provider) : undefined);
-    this.allowanceConfig = allowanceConfig;
+    this.workerExposurePolicy = workerExposurePolicy;
+    this.vestingHours = Number(vestingHours);
   }
 
   async getInfo(wallet = undefined) {
@@ -396,7 +400,7 @@ export class DepositPoolDoorService {
     };
   }
 
-  #infoFromSnapshot(snapshot, wallet) {
+  async #infoFromSnapshot(snapshot, wallet) {
     const yieldState = depositPoolYieldStatus(snapshot.deployedPrincipal);
     const response = {
       schemaVersion: 1,
@@ -419,16 +423,21 @@ export class DepositPoolDoorService {
       },
       ...yieldState,
       disclosure: { statement: DEPOSIT_POOL_RISK_DISCLOSURE },
+      capitalSignal: {
+        statement: DEPOSIT_POOL_CAPITAL_SIGNAL_STATEMENT,
+        vesting: {
+          model: "linear_per_deposit_tranche",
+          durationHours: this.vestingHours,
+          withdrawalBurnOrder: "lifo"
+        },
+        catalogueEffect: "none"
+      },
       withdrawal: { status: "open", note: DEPOSIT_POOL_WITHDRAWAL_NOTE },
       broadcast: broadcastInstructions(this.rpcUrls),
       boundary: BOUNDARY
     };
     if (wallet) {
-      const base = BigInt(this.allowanceConfig.budgetRaw ?? 1_500_000);
-      const total = resolveDailyExposureBudget(wallet, {
-        ...this.allowanceConfig,
-        depositedAssetsRaw: snapshot.wallet.depositedAssets
-      });
+      const capacity = await this.#capacityForWallet(wallet);
       response.wallet = {
         address: wallet,
         assetBalance: amount(snapshot.wallet.assetBalance),
@@ -437,15 +446,36 @@ export class DepositPoolDoorService {
         availableShares: amount(snapshot.wallet.availableShares, SHARE_DECIMALS),
         allowanceToPool: amount(snapshot.wallet.allowance),
         perAgentHeadroom: amount(clampAtZero(snapshot.perAgentAssetCap - snapshot.wallet.depositedAssets)),
-        dailyAllowance: {
-          base: amount(base),
-          fromDeposits: amount(total - base),
-          depositedAssets: amount(snapshot.wallet.depositedAssets),
-          total: amount(total)
-        }
+        vestedAssets: amount(capacity.vestedAssetsRaw),
+        vesting: {
+          model: "linear_per_deposit_tranche",
+          durationHours: capacity.vestingHours,
+          withdrawalBurnOrder: "lifo",
+          available: capacity.vestingAvailable,
+          ...(capacity.evaluatedAt ? { evaluatedAt: capacity.evaluatedAt } : {}),
+          tranches: capacity.tranches
+        },
+        openExposureRaise: amount(capacity.openExposureRaiseRaw),
+        openExposureCap: amount(capacity.openExposureCapRaw),
+        externalRewardCeiling: amount(capacity.externalRewardCeilingRaw)
       };
     }
     return response;
+  }
+
+  async #capacityForWallet(wallet) {
+    if (typeof this.workerExposurePolicy?.capacityForWallet === "function") {
+      return this.workerExposurePolicy.capacityForWallet(wallet);
+    }
+    return {
+      vestedAssetsRaw: "0",
+      openExposureRaiseRaw: "0",
+      openExposureCapRaw: "2500000",
+      externalRewardCeilingRaw: "1000000",
+      vestingHours: this.vestingHours,
+      vestingAvailable: false,
+      tranches: []
+    };
   }
 
   #assertReadable() {

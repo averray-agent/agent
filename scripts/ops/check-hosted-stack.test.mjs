@@ -244,14 +244,29 @@ test("hosted smoke rejects a 200 response when the DepositPool door is unavailab
   assert.match(result.stderr, /DepositPool door did not report available: true\./u);
 });
 
-test("hosted smoke rejects an available DepositPool door without the depositor disclosure", async () => {
+test("hosted smoke rejects a pool response without the exact depositor disclosure", async () => {
   const result = await runHostedStackFixture({
     autoVerifierOk: true,
     pool: { available: true, chainId: 1 }
   });
 
   assert.notEqual(result.code, 0, result.stdout);
-  assert.match(result.stderr, /required depositor risk disclosure/u);
+  assert.match(result.stderr, /did not carry the exact depositor-risk disclosure/u);
+});
+
+test("hosted smoke rejects any deposit-derived daily allowance field", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    pool: {
+      available: true,
+      chainId: 1,
+      disclosure: { statement: "Technical pilot. Principal at risk. No depositor protection." },
+      wallet: { dailyAllowance: { fromDeposits: { raw: "1", decimals: 6 } } }
+    }
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.match(result.stderr, /still exposes a deposit-derived daily allowance field/u);
 });
 
 test("hosted smoke cross-checks poster onboarding against operational and chain-backed health", async () => {

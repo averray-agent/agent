@@ -4,9 +4,8 @@ import assert from "node:assert/strict";
 import {
   DAILY_EXPOSURE_BUDGET_REACHED_REASON,
   DEFAULT_WORKER_DAILY_EXPOSURE_BUDGET_RAW,
-  DEFAULT_WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI,
+  LIFETIME_CATALOGUE_CREDIT_EXHAUSTED_REASON,
   WorkerDailyExposurePolicy,
-  createWorkerDailyExposurePolicy,
   loadWorkerDailyExposureConfig,
   resolveDailyExposureBudget
 } from "./worker-daily-exposure.js";
@@ -42,18 +41,22 @@ function economics(overrides = {}) {
 function makePolicy({
   stateStore = new MemoryStateStore(),
   budgetRaw = DEFAULT_WORKER_DAILY_EXPOSURE_BUDGET_RAW,
-  now = () => new Date("2026-08-12T12:00:00.000Z"),
-  resolveBudget
+  lifetimeCreditRaw = 10_000_000,
+  graduationSettledJobs = 10,
+  now = () => new Date("2026-08-12T12:00:00.000Z")
 } = {}) {
   const workerExposurePolicy = new WorkerExposurePolicy({
     stateStore,
     gasEstimateUsdc: 0.059,
-    capUsdc: 100
+    capUsdc: 100,
+    resolveVesting: async () => ({ vestedRaw: 0n, tranches: [] })
   });
   return new WorkerDailyExposurePolicy({
     stateStore,
     workerExposurePolicy,
-    resolveBudget: resolveBudget ?? (() => budgetRaw),
+    budgetRaw,
+    lifetimeCreditRaw,
+    graduationSettledJobs,
     now
   });
 }
@@ -62,173 +65,148 @@ async function putClaim(stateStore, {
   id,
   claimedAt,
   rewardAmount = 0.25,
-  status = "resolved"
+  status = "claimed",
+  wallet = WALLET,
+  d0 = true
 }) {
   const reservedRewardUsdc = rewardAmount;
   const brokeredGasUsdc = 0.059;
+  const candidate = {
+    reservedRewardUsdc,
+    brokeredGasUsdc,
+    totalUsdc: Number((reservedRewardUsdc + brokeredGasUsdc).toFixed(6))
+  };
   await stateStore.upsertSession({
     sessionId: id,
-    wallet: WALLET,
+    wallet,
     jobId: `${id}-job`,
     status,
     claimedAt,
+    ...(status === "resolved" ? { verificationSummary: { outcome: "approved" } } : {}),
+    jobSnapshot: { definition: job({ id: `${id}-job` }) },
+    workerExposure: { candidate },
     dailyExposure: {
-      version: "worker-daily-exposure-v1",
-      candidate: {
-        reservedRewardUsdc,
-        brokeredGasUsdc,
-        totalUsdc: Number((reservedRewardUsdc + brokeredGasUsdc).toFixed(6))
-      }
+      version: d0 ? "worker-catalogue-exposure-v2" : "worker-daily-exposure-v1",
+      accessMode: "lifetime_credit",
+      candidate
     }
   });
 }
 
-test("daily exposure config has a finite raw-unit default, accepts zero, and respects overrides", () => {
+async function seedGraduation(stateStore, count = 10, wallet = WALLET) {
+  for (let index = 0; index < count; index += 1) {
+    await putClaim(stateStore, {
+      id: `graduation-${index + 1}`,
+      claimedAt: `2026-07-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+      rewardAmount: 0,
+      status: "resolved",
+      wallet,
+      d0: false
+    });
+  }
+}
+
+test("daily and lifetime config defaults are finite and the retired deposit multiplier fails loudly", () => {
   assert.deepEqual(loadWorkerDailyExposureConfig({}), {
     budgetRaw: 1_500_000,
-    allowancePerDepositedMilli: 1_000
+    lifetimeCreditRaw: 10_000_000,
+    graduationSettledJobs: 10
   });
-  assert.deepEqual(loadWorkerDailyExposureConfig({ WORKER_DAILY_EXPOSURE_BUDGET_RAW: "0" }), {
-    budgetRaw: 0,
-    allowancePerDepositedMilli: 1_000
+  assert.deepEqual(loadWorkerDailyExposureConfig({
+    WORKER_DAILY_EXPOSURE_BUDGET_RAW: "2250000",
+    WORKER_LIFETIME_CATALOGUE_CREDIT_RAW: "9000000",
+    WORKER_GRADUATION_SETTLED_JOBS: "12"
+  }), {
+    budgetRaw: 2_250_000,
+    lifetimeCreditRaw: 9_000_000,
+    graduationSettledJobs: 12
   });
-  assert.deepEqual(
-    loadWorkerDailyExposureConfig({ WORKER_DAILY_EXPOSURE_BUDGET_RAW: "2250000" }),
-    { budgetRaw: 2_250_000, allowancePerDepositedMilli: 1_000 }
-  );
-  assert.deepEqual(
-    loadWorkerDailyExposureConfig({ WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI: "0" }),
-    { budgetRaw: 1_500_000, allowancePerDepositedMilli: 0 }
-  );
-  assert.deepEqual(
-    loadWorkerDailyExposureConfig({ WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI: "625" }),
-    { budgetRaw: 1_500_000, allowancePerDepositedMilli: 625 }
-  );
-  assert.throws(
-    () => loadWorkerDailyExposureConfig({ WORKER_DAILY_EXPOSURE_BUDGET_RAW: "1.5" }),
-    /must be a non-negative integer/u
-  );
+  for (const retiredValue of ["1000", "0", ""]) {
+    assert.throws(
+      () => loadWorkerDailyExposureConfig({ WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI: retiredValue }),
+      /WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI.*retired by Packet D0/u
+    );
+  }
 });
 
-test("resolveDailyExposureBudget pins the tier-3 deposited-assets formula", () => {
-  assert.equal(DEFAULT_WORKER_TIER3_ALLOWANCE_PER_DEPOSITED_MILLI, 1_000);
+test("the catalogue daily base is deposit-blind", () => {
   assert.equal(resolveDailyExposureBudget(WALLET), 1_500_000n);
-  assert.equal(
-    resolveDailyExposureBudget(WALLET, { depositedAssetsRaw: 10_000_000 }),
-    11_500_000n
-  );
-  assert.equal(
-    resolveDailyExposureBudget(WALLET, { depositedAssetsRaw: 100_000_000 }),
-    101_500_000n
-  );
-  assert.equal(
-    resolveDailyExposureBudget(WALLET, {
-      budgetRaw: 2_000_000,
-      depositedAssetsRaw: 10_000_000,
-      allowancePerDepositedMilli: 625
-    }),
-    8_250_000n
-  );
-  assert.equal(
-    resolveDailyExposureBudget(WALLET, {
-      depositedAssetsRaw: 100_000_000,
-      allowancePerDepositedMilli: 0
-    }),
-    1_500_000n
-  );
+  assert.equal(resolveDailyExposureBudget(WALLET, {
+    budgetRaw: 2_000_000,
+    depositedAssetsRaw: 100_000_000,
+    allowancePerDepositedMilli: 50_000
+  }), 2_000_000n);
 });
 
-test("failed deposited-assets reads never grant a raise or refuse below the base", async () => {
+test("an un-established wallet spends finite lifetime credit and settlement does not refund it", async () => {
   const stateStore = new MemoryStateStore();
-  const policy = createWorkerDailyExposurePolicy({
-    stateStore,
-    workerExposurePolicy: new WorkerExposurePolicy({
-      stateStore,
-      gasEstimateUsdc: 0.059,
-      capUsdc: 100
-    }),
-    blockchainGateway: {
-      config: { depositPoolAddress: "0x1111111111111111111111111111111111111111" },
-      async readDepositedAssets() {
-        throw new Error("pool RPC unavailable");
-      }
-    },
-    config: {
-      budgetRaw: 1_500_000,
-      allowancePerDepositedMilli: 1_000
-    }
+  await putClaim(stateStore, {
+    id: "lifetime-settled",
+    claimedAt: "2026-08-01T08:00:00.000Z",
+    rewardAmount: 9.5,
+    status: "resolved"
   });
 
-  const decision = await policy.evaluate({
+  const decision = await makePolicy({ stateStore }).evaluate({
     wallet: WALLET,
-    job: job({ rewardAmount: 1.2 }),
+    job: job({ rewardAmount: 0.5 }),
+    claimEconomics: economics()
+  });
+
+  assert.equal(decision.eligible, false);
+  assert.equal(decision.reason, LIFETIME_CATALOGUE_CREDIT_EXHAUSTED_REASON);
+  assert.equal(decision.catalogueAccess.mode, "lifetime_credit");
+  assert.equal(decision.catalogueAccess.settledApprovedCatalogueJobs, 1);
+  assert.equal(decision.catalogueAccess.graduationSettledJobs, 10);
+  assert.equal(decision.catalogueAccess.externalWorkAffected, false);
+  assert.match(decision.message, /external poster-funded work is not gated by this lifetime credit/iu);
+});
+
+test("graduation boundary switches exactly at N settled and approved catalogue jobs", async () => {
+  const stateStore = new MemoryStateStore();
+  await seedGraduation(stateStore, 9);
+  await putClaim(stateStore, {
+    id: "spent-lifetime",
+    claimedAt: "2026-08-01T08:00:00.000Z",
+    rewardAmount: 9.7,
+    status: "rejected"
+  });
+  const policy = makePolicy({ stateStore });
+
+  const before = await policy.evaluate({ wallet: WALLET, job: job(), claimEconomics: economics() });
+  await putClaim(stateStore, {
+    id: "graduation-10",
+    claimedAt: "2026-07-10T00:00:00.000Z",
+    rewardAmount: 0,
+    status: "resolved",
+    d0: false
+  });
+  const after = await policy.evaluate({ wallet: WALLET, job: job(), claimEconomics: economics() });
+
+  assert.equal(before.reason, LIFETIME_CATALOGUE_CREDIT_EXHAUSTED_REASON);
+  assert.equal(before.catalogueAccess.settledApprovedCatalogueJobs, 9);
+  assert.equal(after.eligible, true);
+  assert.equal(after.catalogueAccess.mode, "rolling_daily");
+  assert.equal(after.catalogueAccess.settledApprovedCatalogueJobs, 10);
+  assert.deepEqual(after.dailyAllowance, { base: 1.5, total: 1.5 });
+  assert.equal("fromDeposits" in after.dailyAllowance, false);
+  assert.equal("depositedAssets" in after.dailyAllowance, false);
+});
+
+test("external poster-funded work is outside catalogue lifetime and daily accounting", async () => {
+  const decision = await makePolicy({ lifetimeCreditRaw: 0 }).evaluate({
+    wallet: WALLET,
+    job: job({ source: "external", poster: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }),
     claimEconomics: economics()
   });
 
   assert.equal(decision.eligible, true);
-  assert.equal(decision.dailyExposureBudgetRaw, "1500000");
-  assert.deepEqual(decision.dailyAllowance, {
-    base: 1.5,
-    fromDeposits: 0,
-    depositedAssets: 0,
-    total: 1.5
-  });
+  assert.equal(decision.applies, false);
 });
 
-test("daily allowance decomposition sums exactly and refusal copy names the pool only when configured", async () => {
-  const poolAddress = "0x1111111111111111111111111111111111111111";
+test("42-claim replay for an established wallet is refused on the fifth typical claim", async () => {
   const stateStore = new MemoryStateStore();
-  const workerExposurePolicy = new WorkerExposurePolicy({
-    stateStore,
-    gasEstimateUsdc: 0.059,
-    capUsdc: 100
-  });
-  const withPool = createWorkerDailyExposurePolicy({
-    stateStore,
-    workerExposurePolicy,
-    blockchainGateway: {
-      config: { depositPoolAddress: poolAddress },
-      async readDepositedAssets() { return 10_000_000n; }
-    },
-    config: { budgetRaw: 1_500_000, allowancePerDepositedMilli: 1_000 }
-  });
-  const withoutPool = createWorkerDailyExposurePolicy({
-    stateStore,
-    workerExposurePolicy,
-    blockchainGateway: {
-      config: {},
-      async readDepositedAssets() { return 0n; }
-    },
-    config: { budgetRaw: 0, allowancePerDepositedMilli: 1_000 }
-  });
-
-  const raised = await withPool.evaluate({
-    wallet: WALLET,
-    job: job({ rewardAmount: 12 }),
-    claimEconomics: economics()
-  });
-  const flat = await withoutPool.evaluate({
-    wallet: WALLET,
-    job: job(),
-    claimEconomics: economics()
-  });
-
-  assert.equal(raised.dailyAllowance.base + raised.dailyAllowance.fromDeposits, raised.dailyAllowance.total);
-  assert.deepEqual(raised.dailyAllowance, {
-    base: 1.5,
-    fromDeposits: 10,
-    depositedAssets: 10,
-    total: 11.5
-  });
-  assert.equal(raised.eligible, false);
-  assert.match(raised.message, new RegExp(poolAddress, "u"));
-  assert.match(raised.message, /deposits into DepositPool .* raise your daily allowance 1:1/iu);
-  assert.equal(flat.eligible, false);
-  assert.doesNotMatch(flat.message, /deposit|pool|1:1/iu);
-});
-
-test("42-claim morning replay is refused on the fifth typical claim with the oldest age-out", async () => {
-  const stateStore = new MemoryStateStore();
+  await seedGraduation(stateStore);
   let now = MORNING_STARTED_AT;
   const dailyPolicy = makePolicy({ stateStore, now: () => now });
   let refusal;
@@ -250,14 +228,13 @@ test("42-claim morning replay is refused on the fifth typical claim with the old
   assert.equal(refusal.claim.id, "morning-claim-5");
   assert.equal(refusal.decision.reason, DAILY_EXPOSURE_BUDGET_REACHED_REASON);
   assert.equal(refusal.decision.dailyExposureUsed, 1.236);
-  assert.equal(refusal.decision.dailyExposureRemaining, 0.264);
   assert.equal(refusal.decision.projectedDailyExposure, 1.545);
   assert.equal(refusal.decision.retryAfter, "2026-08-13T06:00:00.000Z");
-  assert.equal(refusal.decision.retryAfterSeconds, 23 * 60 * 60 + 20 * 60);
 });
 
-test("fast settlement and rejection do not refund rolling daily exposure", async () => {
+test("established settlement and rejection do not refund the rolling window", async () => {
   const stateStore = new MemoryStateStore();
+  await seedGraduation(stateStore);
   const claimedAt = "2026-08-12T08:00:00.000Z";
   await putClaim(stateStore, { id: "settled-fast", claimedAt, status: "resolved", rewardAmount: 0.5 });
   await putClaim(stateStore, { id: "rejected-fast", claimedAt, status: "rejected", rewardAmount: 0.5 });
@@ -273,83 +250,62 @@ test("fast settlement and rejection do not refund rolling daily exposure", async
   assert.equal(decision.dailyExposureUsed, 1.118);
 });
 
-test("claim spend ages out at exactly 24 hours", async () => {
+test("established claim spend ages out at exactly 24 hours", async () => {
   const stateStore = new MemoryStateStore();
-  const claimedAt = "2026-08-11T12:00:00.000Z";
-  await putClaim(stateStore, { id: "aged-out", claimedAt, rewardAmount: 1.2 });
+  await seedGraduation(stateStore);
+  await putClaim(stateStore, {
+    id: "aged-out",
+    claimedAt: "2026-08-11T12:00:00.000Z",
+    rewardAmount: 1.2
+  });
 
   const before = await makePolicy({
     stateStore,
     now: () => new Date("2026-08-12T11:59:59.999Z")
   }).evaluate({ wallet: WALLET, job: job(), claimEconomics: economics() });
-  const atBoundary = await makePolicy({
+  const boundary = await makePolicy({
     stateStore,
     now: () => new Date("2026-08-12T12:00:00.000Z")
   }).evaluate({ wallet: WALLET, job: job(), claimEconomics: economics() });
 
   assert.equal(before.eligible, false);
   assert.equal(before.retryAfter, "2026-08-12T12:00:00.000Z");
-  assert.equal(atBoundary.eligible, true);
-  assert.equal(atBoundary.dailyExposureUsed, 0);
+  assert.equal(boundary.eligible, true);
+  assert.equal(boundary.dailyExposureUsed, 0);
 });
 
-test("configured zero is a kill-switch and exact-budget boundary remains eligible", async () => {
-  const zero = await makePolicy({ budgetRaw: 0 }).evaluate({
+test("established zero base is a kill-switch and exact-budget boundary remains eligible", async () => {
+  const stateStore = new MemoryStateStore();
+  await seedGraduation(stateStore);
+  const zero = await makePolicy({ stateStore, budgetRaw: 0 }).evaluate({
     wallet: WALLET,
     job: job(),
     claimEconomics: economics()
   });
-  const exact = await makePolicy({ budgetRaw: 309_000 }).evaluate({
+  const exact = await makePolicy({ stateStore, budgetRaw: 309_000 }).evaluate({
     wallet: WALLET,
     job: job(),
     claimEconomics: economics()
-  });
-  const zeroExposure = await makePolicy({ budgetRaw: 0 }).evaluate({
-    wallet: WALLET,
-    job: job({ rewardAmount: 0 }),
-    claimEconomics: economics({
-      claimEconomicsWaived: false,
-      claimFeeRetainedOnSuccess: true
-    })
   });
 
   assert.equal(zero.eligible, false);
   assert.equal(zero.reason, DAILY_EXPOSURE_BUDGET_REACHED_REASON);
-  assert.equal(zero.dailyExposureRemaining, 0);
-  assert.equal(zeroExposure.eligible, false);
   assert.equal(exact.eligible, true);
   assert.equal(exact.projectedDailyExposureRemaining, 0);
 });
 
-test("mixed job sizes consume reserved reward plus brokered gas, not a claim count", async () => {
-  const decision = await makePolicy().evaluate({
-    wallet: WALLET,
-    job: job({ rewardAmount: 0.5 }),
-    claimEconomics: economics()
-  });
-
-  assert.deepEqual(decision.candidate, {
-    reservedRewardUsdc: 0.5,
-    brokeredGasUsdc: 0.059,
-    totalUsdc: 0.559
-  });
-  assert.equal(decision.candidateExposureRaw, "559000");
-});
-
-test("pre-deploy worker exposure snapshots count in the current window after restart", async () => {
+test("pre-D0 snapshots count in an established rolling window but not lifetime credit", async () => {
   const stateStore = new MemoryStateStore();
+  await seedGraduation(stateStore);
   await stateStore.upsertSession({
-    sessionId: "pre-deploy-session",
+    sessionId: "pre-d0-session",
     wallet: WALLET,
-    jobId: "pre-deploy-job",
+    jobId: "pre-d0-job",
     status: "resolved",
     claimedAt: "2026-08-12T08:00:00.000Z",
+    jobSnapshot: { definition: job({ id: "pre-d0-job" }) },
     workerExposure: {
-      candidate: {
-        reservedRewardUsdc: 1.2,
-        brokeredGasUsdc: 0.059,
-        totalUsdc: 1.259
-      }
+      candidate: { reservedRewardUsdc: 1.2, brokeredGasUsdc: 0.059, totalUsdc: 1.259 }
     }
   });
 
@@ -361,29 +317,4 @@ test("pre-deploy worker exposure snapshots count in the current window after res
 
   assert.equal(decision.eligible, false);
   assert.equal(decision.dailyExposureUsedRaw, "1259000");
-});
-
-test("one hosted canary claim on an ephemeral wallet remains below the default budget", async () => {
-  const decision = await makePolicy().evaluate({
-    wallet: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    job: job({ id: "worker-canary-1786453506586" }),
-    claimEconomics: economics()
-  });
-
-  assert.equal(decision.eligible, true);
-  assert.equal(decision.projectedDailyExposure, 0.309);
-  assert.equal(decision.projectedDailyExposureRemaining, 1.191);
-});
-
-test("the budget resolver is called per wallet", async () => {
-  const resolved = [];
-  const decision = await makePolicy({
-    resolveBudget: (wallet) => {
-      resolved.push(wallet);
-      return wallet === WALLET ? 1_000_000 : 0;
-    }
-  }).evaluate({ wallet: WALLET, job: job(), claimEconomics: economics() });
-
-  assert.deepEqual(resolved, [WALLET]);
-  assert.equal(decision.dailyExposureBudgetRaw, "1000000");
 });

@@ -78,7 +78,7 @@ test("claim fails closed when claimant attribution does not carry wallet-bound m
   assert.equal(Object.hasOwn(claimed, "claimantAttribution"), false);
 });
 
-test("hosted canary claim completes through the default daily allowance and records its spend", async () => {
+test("hosted canary claim completes through the finite lifetime credit and records its spend", async () => {
   const stateStore = new MemoryStateStore();
   const job = makeJob({
     id: "worker-canary-1786453506586",
@@ -93,7 +93,6 @@ test("hosted canary claim completes through the default daily allowance and reco
   const workerDailyExposurePolicy = new WorkerDailyExposurePolicy({
     stateStore,
     workerExposurePolicy,
-    resolveBudget: () => 1_500_000,
     now: () => new Date("2026-08-12T12:00:00.000Z")
   });
   const service = new JobExecutionService(
@@ -108,7 +107,7 @@ test("hosted canary claim completes through the default daily allowance and reco
     { workerExposurePolicy, workerDailyExposurePolicy }
   );
 
-  const claimed = await service.claimJob(WALLET, job.id, "http", "canary-daily-allowance", {
+  const claimed = await service.claimJob(WALLET, job.id, "http", "canary-lifetime-credit", {
     claimantAttribution: {
       kind: "hosted_worker_canary",
       evidence: "wallet_bound_marker_v1"
@@ -117,7 +116,8 @@ test("hosted canary claim completes through the default daily allowance and reco
 
   assert.equal(claimed.status, "claimed");
   assert.deepEqual(claimed.dailyExposure, {
-    version: "worker-daily-exposure-v1",
+    version: "worker-catalogue-exposure-v2",
+    accessMode: "lifetime_credit",
     candidate: {
       reservedRewardUsdc: 0.25,
       brokeredGasUsdc: 0.059,
@@ -331,6 +331,59 @@ test("wallet exposure lock serializes simultaneous claims for different jobs", a
   const claimed = await first;
   assert.equal(claimed.jobId, "exposure-race-1");
   assert.equal(await stateStore.findSessionByJobId("exposure-race-2"), undefined);
+});
+
+test("global catalogue budget lock serializes claims across different wallets", async () => {
+  const stateStore = new MemoryStateStore();
+  const jobs = new Map([
+    ["catalogue-race-1", makeJob({ id: "catalogue-race-1" })],
+    ["catalogue-race-2", makeJob({ id: "catalogue-race-2" })]
+  ]);
+  let releaseEvaluation;
+  let signalEvaluationStarted;
+  const evaluationStarted = new Promise((resolve) => { signalEvaluationStarted = resolve; });
+  const holdEvaluation = new Promise((resolve) => { releaseEvaluation = resolve; });
+  const catalogueDailyBudget = {
+    async evaluate() {
+      signalEvaluationStarted();
+      await holdEvaluation;
+      return {
+        eligible: true,
+        status: "within_budget",
+        entry: {
+          version: "catalogue-daily-budget-v1",
+          candidate: { reservedRewardUsdc: 0.5, brokeredGasUsdc: 0.059, totalUsdc: 0.559 }
+        }
+      };
+    }
+  };
+  const service = new JobExecutionService(
+    stateStore,
+    undefined,
+    (jobId) => jobs.get(jobId),
+    undefined,
+    undefined,
+    undefined,
+    (jobId) => jobs.get(jobId),
+    undefined,
+    { catalogueDailyBudget }
+  );
+
+  const first = service.claimJob(WALLET, "catalogue-race-1", "http", "catalogue-race-1");
+  await evaluationStarted;
+  await assert.rejects(
+    () => service.claimJob(
+      "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "catalogue-race-2",
+      "http",
+      "catalogue-race-2"
+    ),
+    (error) => error.code === "catalogue_daily_budget_check_in_progress"
+  );
+  releaseEvaluation();
+  const claimed = await first;
+  assert.equal(claimed.catalogueDailyBudget.version, "catalogue-daily-budget-v1");
+  assert.equal(await stateStore.findSessionByJobId("catalogue-race-2"), undefined);
 });
 
 test("submitWork rejects plain evidence for schema-native built-in jobs", async () => {

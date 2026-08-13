@@ -83,7 +83,8 @@ export class PlatformService {
     recurringScheduler = undefined,
     onboardingSubsidyBudget = undefined,
     workerExposurePolicy = undefined,
-    workerDailyExposurePolicy = undefined
+    workerDailyExposurePolicy = undefined,
+    catalogueDailyBudget = undefined
   ) {
     this.jobs = jobs;
     this.profiles = profiles;
@@ -96,6 +97,7 @@ export class PlatformService {
     this.onboardingSubsidyBudget = onboardingSubsidyBudget;
     this.workerExposurePolicy = workerExposurePolicy;
     this.workerDailyExposurePolicy = workerDailyExposurePolicy;
+    this.catalogueDailyBudget = catalogueDailyBudget;
     this.githubIssueIngestionScheduler = undefined;
     this.wikipediaMaintenanceIngestionScheduler = undefined;
     this.osvAdvisoryIngestionScheduler = undefined;
@@ -144,7 +146,8 @@ export class PlatformService {
       {
         onboardingSubsidyBudget: this.onboardingSubsidyBudget,
         workerExposurePolicy: this.workerExposurePolicy,
-        workerDailyExposurePolicy: this.workerDailyExposurePolicy
+        workerDailyExposurePolicy: this.workerDailyExposurePolicy,
+        catalogueDailyBudget: this.catalogueDailyBudget
       }
     );
     this.verificationIngestionService = new VerificationIngestionService(
@@ -1048,7 +1051,7 @@ export class PlatformService {
           ]
         };
       }
-      if (!this.workerExposurePolicy && !this.workerDailyExposurePolicy) {
+      if (!this.workerExposurePolicy && !this.workerDailyExposurePolicy && !this.catalogueDailyBudget) {
         return { ...result, jobDefinitionIntegrity: jobDefinitionIntegrity.decision };
       }
       const workerExposure = this.workerExposurePolicy
@@ -1057,7 +1060,16 @@ export class PlatformService {
       const dailyExposure = this.workerDailyExposurePolicy && workerExposure?.eligible !== false
         ? await this.workerDailyExposurePolicy.evaluate({ wallet, job, claimEconomics, workerExposure })
         : undefined;
-      const exposureDecision = workerExposure?.eligible === false ? workerExposure : dailyExposure ?? workerExposure;
+      const catalogueDailyBudget = this.catalogueDailyBudget
+        && workerExposure?.eligible !== false
+        && dailyExposure?.eligible !== false
+        ? await this.catalogueDailyBudget.evaluate({ job, workerExposure })
+        : undefined;
+      const exposureDecision = workerExposure?.eligible === false
+        ? workerExposure
+        : dailyExposure?.eligible === false
+          ? dailyExposure
+          : catalogueDailyBudget ?? dailyExposure ?? workerExposure;
       return {
         ...result,
         eligible: exposureDecision?.eligible === true,
@@ -1070,8 +1082,10 @@ export class PlatformService {
         ...(dailyExposure ? {
           dailyExposure,
           dailyExposureRemaining: dailyExposure.dailyExposureRemaining,
-          dailyAllowance: dailyExposure.dailyAllowance
+          dailyAllowance: dailyExposure.dailyAllowance,
+          catalogueAccess: dailyExposure.catalogueAccess
         } : {}),
+        ...(catalogueDailyBudget ? { catalogueDailyBudget } : {}),
         failureStates: exposureDecision?.eligible === true
           ? result.failureStates
           : [

@@ -294,6 +294,10 @@ export function loadBlockchainConfig(env = process.env) {
       deploymentManifest?.contracts?.depositPool,
       "deployments/<profile>.json#contracts.depositPool"
     ),
+    depositPoolDeploymentBlock: normalizeOptionalU32(
+      deploymentManifest?.deploymentBlocks?.depositPool,
+      "deployments/<profile>.json#deploymentBlocks.depositPool"
+    ),
     supportedAssets,
     gasFeeBufferBps: resolveGasFeeBufferBps(env)
   };
