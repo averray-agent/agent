@@ -154,7 +154,7 @@ test("A4 manifest honesty: discovery advertises the served MCP endpoint and main
   });
   assert.equal(
     deployment.contracts.escrowCore,
-    "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC"
+    "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793"
   );
   assert.equal(deployment.parameters.protocolFeeBps, "500");
 });
