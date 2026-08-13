@@ -794,12 +794,12 @@ test("reward-bank provider uses fresh last-known-good evidence, then fails close
 test("health addresses follow the running chain, never a hardcoded network", () => {
   const env = {
     AGENT_ACCOUNT_ADDRESS: "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57",
-    ESCROW_CORE_ADDRESS: "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC"
+    ESCROW_CORE_ADDRESS: "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793"
   };
 
   const mainnet = resolveHealthAddresses({ env: { ...env, AUTH_CHAIN_ID: "420420419" } });
   assert.equal(mainnet.agentAccountCore, "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57");
-  assert.equal(mainnet.escrowCore, "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC");
+  assert.equal(mainnet.escrowCore, "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793");
 
   const testnet = resolveHealthAddresses({ env: { ...env, AUTH_CHAIN_ID: "420420417" } });
   assert.notEqual(testnet.agentAccountCore, mainnet.agentAccountCore);

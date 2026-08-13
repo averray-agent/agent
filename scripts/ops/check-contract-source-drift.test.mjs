@@ -226,7 +226,7 @@ test("known-unshipped entries require an explicit non-empty reason", () => {
   );
 });
 
-test("mainnet pins the EscrowCore v3 successor runtime for live v2 and draining v1 exactly", () => {
+test("mainnet carries no escrow pins post-v3-ceremony and points escrowCore at the deployed v3", () => {
   const manifest = JSON.parse(
     readFileSync(
       new URL("../../deployments/mainnet.json", import.meta.url),
@@ -237,36 +237,18 @@ test("mainnet pins the EscrowCore v3 successor runtime for live v2 and draining 
   const allowlist = validateKnownUnshippedContractChanges(manifest, contracts);
 
   assert.equal(contracts.length, 12);
-  assert.deepEqual([...allowlist.keys()].sort(), [
-    "escrowCore",
-    "hydrationUsdcAdapter",
-    "legacyEscrowCore",
-  ]);
+  // The v3 ceremony (2026-08-13) deleted both escrow pins per their own reason
+  // text; only the hydration adapter successor remains staged.
+  assert.deepEqual([...allowlist.keys()].sort(), ["hydrationUsdcAdapter"]);
   assert.equal(
     contracts.find((contract) => contract.name === "escrowCore")?.address,
+    "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793"
+  );
+  assert.equal(
+    contracts.find((contract) => contract.name === "legacyEscrowCore")?.address,
     "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC"
   );
-  // The EscrowCore v3 ceremony in WORKER_PROGRESSION_DESIGN.md section 6.1 must delete both pins and revert these assertions.
-  assert.deepEqual(allowlist.get("escrowCore"), [
-    {
-      sourceCommit: "052b3a7a791112001257226ecfbea7a919d9aca2",
-      maskedRuntimeCodeHash:
-        "sha256:f194f90545c90989f58fe3512ac189ef84882031f9322dfcc934b3e8ccf919a2",
-      reason:
-        "The EscrowCore v3 successor is intentionally not deployed: mainnet still routes new jobs through v2 at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC and drains v1 at 0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035. This candidate runtime adds claim-time brokered and schedule snapshots, approved-success-only gas retention, max(bps, floor) poster fees, one bounded atomic fee schedule, and poster-only cancelOpenJob after one hour; successful claims still release claim stake and claim fee. Backend activation is capability-gated on supportsGasRetention(), so merging this source cannot advertise v3 economics against live v2. Both the escrowCore and legacyEscrowCore pins must be deleted during the operator-run v3 ceremony.",
-    },
-  ]);
-  assert.deepEqual(allowlist.get("legacyEscrowCore"), [
-    {
-      sourceCommit: "052b3a7a791112001257226ecfbea7a919d9aca2",
-      maskedRuntimeCodeHash:
-        "sha256:f194f90545c90989f58fe3512ac189ef84882031f9322dfcc934b3e8ccf919a2",
-      reason:
-        "The EscrowCore v3 successor is intentionally not deployed: mainnet still drains this v1 address at 0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035 while v2 at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC serves new jobs. Both manifest entries compile the same candidate EscrowCore artifact, which adds claim-time brokered and schedule snapshots, approved-success-only gas retention, max(bps, floor) poster fees, one bounded atomic fee schedule, and poster-only cancelOpenJob after one hour; successful claims still release claim stake and claim fee. Backend activation is capability-gated on supportsGasRetention(), so merging this source cannot advertise v3 economics against either live predecessor. Both the escrowCore and legacyEscrowCore pins must be deleted during the operator-run v3 ceremony.",
-    },
-  ]);
 });
-
 test("testnet pins EscrowCore v2 to one masked runtime and an explicit reason", () => {
   const manifest = JSON.parse(
     readFileSync(
