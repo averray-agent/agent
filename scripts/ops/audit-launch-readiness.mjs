@@ -136,6 +136,7 @@ const WRITE_ABI = [
 
 const ESCROW_FEE_WRITE_ABI = [
   "function setProtocolFeeBps(uint16 protocolFeeBps)",
+  "function setFeeSchedule(uint256 retentionFlatRaw,uint16 retentionCapBps,uint16 posterFeeBps,uint256 posterFeeFloorRaw)",
   "function setTreasuryAccount(address treasuryAccount)"
 ];
 
@@ -424,6 +425,9 @@ async function main() {
   const agentAccount = new Contract(agentAccountAddress, AGENT_ACCOUNT_READ_ABI, provider);
   const escrow = new Contract(escrowAddress, ESCROW_CORE_ABI, provider);
   const usdc = new Contract(usdcAddress, ERC20_READ_ABI, provider);
+  const supportsGasRetention = await escrow.supportsGasRetention()
+    .then(Boolean)
+    .catch(() => false);
 
   // Resolve the per-target address up front so the bytecode fetches can
   // share the same parallel-read block as the policy view calls.
@@ -458,6 +462,12 @@ async function main() {
     onboardingWaiverClaimCount,
     protocolFeeBps,
     maxProtocolFeeBps,
+    retentionFlatRaw,
+    retentionCapBps,
+    posterFeeFloorRaw,
+    maxRetentionFlatRaw,
+    maxRetentionCapBps,
+    maxPosterFeeFloorRaw,
     escrowTreasuryAccount,
     signerPosition,
     signerUsdcBalance,
@@ -487,6 +497,12 @@ async function main() {
     policy.onboardingWaiverClaimCount(),
     escrow.protocolFeeBps(),
     escrow.MAX_PROTOCOL_FEE_BPS(),
+    supportsGasRetention ? escrow.retentionFlatRaw() : undefined,
+    supportsGasRetention ? escrow.retentionCapBps() : undefined,
+    supportsGasRetention ? escrow.posterFeeFloorRaw() : undefined,
+    supportsGasRetention ? escrow.MAX_RETENTION_FLAT_RAW() : undefined,
+    supportsGasRetention ? escrow.MAX_RETENTION_CAP_BPS() : undefined,
+    supportsGasRetention ? escrow.MAX_POSTER_FEE_FLOOR_RAW() : undefined,
     escrow.treasuryAccount(),
     agentAccount.positions(backendSigner, usdcAddress),
     usdc.balanceOf(backendSigner),
@@ -557,7 +573,10 @@ async function main() {
     { label: "claimFeeBps",                live: claimFeeBps,                  expected: expectedParameters.claimFeeBps },
     { label: "claimFeeVerifierBps",        live: claimFeeVerifierBps,          expected: expectedParameters.claimFeeVerifierBps },
     { label: "onboardingWaiverClaimCount", live: onboardingWaiverClaimCount,   expected: expectedParameters.onboardingWaiverClaimCount },
-    { label: "protocolFeeBps",             live: protocolFeeBps,               expected: expectedParameters.protocolFeeBps },
+    { label: "posterFeeBps",               live: protocolFeeBps,               expected: expectedParameters.posterFeeBps ?? expectedParameters.protocolFeeBps },
+    { label: "retentionFlatRaw",           live: retentionFlatRaw,             expected: supportsGasRetention ? expectedParameters.retentionFlatRaw : undefined },
+    { label: "retentionCapBps",            live: retentionCapBps,              expected: supportsGasRetention ? expectedParameters.retentionCapBps : undefined },
+    { label: "posterFeeFloorRaw",          live: posterFeeFloorRaw,            expected: supportsGasRetention ? expectedParameters.posterFeeFloorRaw : undefined },
     { label: "minClaimFeeByAsset(USDC)",   live: minClaimFeeUsdc,              expected: expectedParameters.minClaimFee }
   ].map((check) => ({
     ...check,
@@ -579,6 +598,12 @@ async function main() {
   console.log(`AgentAccountCore.treasuryAccount       ${ciEqual(treasuryAccount, expectedTreasuryAccount) ? "✅" : "❌"}  ${treasuryAccount}  (expected ${expectedTreasuryAccount})`);
   console.log(`EscrowCore.treasuryAccount             ${ciEqual(escrowTreasuryAccount, expectedTreasuryAccount) ? "✅" : "❌"}  ${escrowTreasuryAccount}  (expected ${expectedTreasuryAccount})`);
   console.log(`EscrowCore.protocolFeeBps              ${protocolFeeBps}  (cap ${maxProtocolFeeBps})`);
+  console.log(`EscrowCore.supportsGasRetention        ${supportsGasRetention}`);
+  if (supportsGasRetention) {
+    console.log(`EscrowCore.retentionFlatRaw             ${retentionFlatRaw}  (cap ${maxRetentionFlatRaw})`);
+    console.log(`EscrowCore.retentionCapBps              ${retentionCapBps}  (cap ${maxRetentionCapBps})`);
+    console.log(`EscrowCore.posterFeeFloorRaw            ${posterFeeFloorRaw}  (cap ${maxPosterFeeFloorRaw})`);
+  }
   console.log(`outflowRecorder(agentAccount)          ${agentAccountIsOutflowRecorder ? "✅" : "❌"}  ${agentAccountIsOutflowRecorder}  (required for TreasuryPolicy.recordOutflow accounting)`);
   console.log(`arbitrators(${short(expectedArbitrator)})  ${arbitratorIsApproved ? "✅" : "❌"}  ${arbitratorIsApproved}  (required for resolveDispute)`);
   console.log(`approvedAssets(USDC)             ${usdcIsApproved ? "✅" : "❌"}  ${usdcIsApproved}`);
@@ -726,7 +751,34 @@ async function main() {
       data: escrowFeeIface.encodeFunctionData("setTreasuryAccount", [expectedTreasuryAccount])
     });
   }
-  if (expectedParameters.protocolFeeBps !== undefined
+  const expectedPosterFeeBps = expectedParameters.posterFeeBps ?? expectedParameters.protocolFeeBps;
+  const v3ScheduleMismatch = supportsGasRetention && [
+    [retentionFlatRaw, expectedParameters.retentionFlatRaw],
+    [retentionCapBps, expectedParameters.retentionCapBps],
+    [protocolFeeBps, expectedPosterFeeBps],
+    [posterFeeFloorRaw, expectedParameters.posterFeeFloorRaw]
+  ].some(([live, expected]) => expected !== undefined && String(live) !== String(expected));
+  if (v3ScheduleMismatch) {
+    const required = [
+      expectedParameters.retentionFlatRaw,
+      expectedParameters.retentionCapBps,
+      expectedPosterFeeBps,
+      expectedParameters.posterFeeFloorRaw
+    ];
+    if (required.some((value) => value === undefined)) {
+      fixes.push({
+        label: "EscrowCore v3 fee schedule differs but deployments parameters are incomplete",
+        reasonCode: "fee_schedule_manifest_incomplete"
+      });
+    } else {
+      const escrowFeeIface = new Interface(ESCROW_FEE_WRITE_ABI);
+      fixes.push({
+        label: `EscrowCore.setFeeSchedule(${required.join(",")})`,
+        to: escrowAddress,
+        data: escrowFeeIface.encodeFunctionData("setFeeSchedule", required)
+      });
+    }
+  } else if (!supportsGasRetention && expectedParameters.protocolFeeBps !== undefined
     && String(protocolFeeBps) !== String(expectedParameters.protocolFeeBps)) {
     const escrowFeeIface = new Interface(ESCROW_FEE_WRITE_ABI);
     fixes.push({
@@ -739,6 +791,16 @@ async function main() {
     fixes.push({
       label: `EscrowCore.MAX_PROTOCOL_FEE_BPS=${maxProtocolFeeBps}; expected immutable cap 1000`,
       reasonCode: "protocol_fee_cap_mismatch"
+    });
+  }
+  if (supportsGasRetention && (
+    Number(maxRetentionFlatRaw) !== 500_000
+    || Number(maxRetentionCapBps) !== 2_500
+    || Number(maxPosterFeeFloorRaw) !== 500_000
+  )) {
+    fixes.push({
+      label: "EscrowCore v3 fee-schedule ceilings do not match D4 ratified bounds",
+      reasonCode: "fee_schedule_cap_mismatch"
     });
   }
   if (!agentAccountIsOutflowRecorder) {

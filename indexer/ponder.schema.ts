@@ -49,6 +49,8 @@ export const jobEvent = onchainTable("job_event", (p) => ({
   payloadHash: p.hex(),
   reasoningHash: p.hex(),
   approved: p.boolean(),
+  brokered: p.boolean(),
+  waived: p.boolean(),
   reasonCode: p.hex(),
   metadataUri: p.text(),
   disputedAt: p.bigint(),
@@ -77,6 +79,28 @@ export const settlementSplit = onchainTable("settlement_split", (p) => ({
   workerAmount: p.bigint().notNull(),
   protocolFeeAmount: p.bigint().notNull(),
   protocolFeeBps: p.integer().notNull(),
+  txHash: p.hex().notNull(),
+  blockNumber: p.bigint().notNull(),
+  timestamp: p.bigint().notNull()
+}));
+
+export const gasRetention = onchainTable("gas_retention", (p) => ({
+  id: p.text().primaryKey(),
+  jobId: p.text().notNull(),
+  worker: p.hex().notNull(),
+  retainedRaw: p.bigint().notNull(),
+  rewardRaw: p.bigint().notNull(),
+  txHash: p.hex().notNull(),
+  blockNumber: p.bigint().notNull(),
+  timestamp: p.bigint().notNull()
+}));
+
+export const feeScheduleChange = onchainTable("fee_schedule_change", (p) => ({
+  id: p.text().primaryKey(),
+  retentionFlatRaw: p.bigint().notNull(),
+  retentionCapBps: p.integer().notNull(),
+  posterFeeBps: p.integer().notNull(),
+  posterFeeFloorRaw: p.bigint().notNull(),
   txHash: p.hex().notNull(),
   blockNumber: p.bigint().notNull(),
   timestamp: p.bigint().notNull()

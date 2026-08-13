@@ -74,9 +74,10 @@ function makePlatformService(
   onboardingSubsidyBudget = undefined,
   workerExposurePolicy = undefined,
   workerDailyExposurePolicy = undefined,
-  catalogueDailyBudget = undefined
+  catalogueDailyBudget = undefined,
+  jobOverrides = {}
 ) {
-  const jobs = [makeParentJob()];
+  const jobs = [makeParentJob(jobOverrides)];
   const profiles = new Map([
     [WALLET, {
       wallet: WALLET,
@@ -176,7 +177,8 @@ function makeClaimEconomicsGateway({
   workerClaimCount = 0,
   onboardingWaiverClaimCount = 3,
   failWaiverPolicyRead = false,
-  claimFeeRetainedOnSuccess = false
+  claimFeeRetainedOnSuccess = false,
+  gasRetentionSupported = false
 } = {}) {
   let state = initialState;
   let mappedEligibility = onboardingWaiverEligible;
@@ -223,7 +225,28 @@ function makeClaimEconomicsGateway({
         exists: state !== 0,
         contractLayout,
         claimFeeRetainedOnSuccess,
+        gasRetentionSupported,
         onboardingWaiverEligible: contractLayout === "legacy" ? false : mappedEligibility
+      };
+    },
+    async previewGasRetentionForJob(jobId, asset, rewardAmount, { brokered, waived }) {
+      assert.equal(jobId, "parent-job-001");
+      const retained = gasRetentionSupported && brokered && !waived
+        ? Math.min(0.05, Number(rewardAmount) * 0.2)
+        : 0;
+      return {
+        supported: gasRetentionSupported,
+        brokered,
+        waived,
+        retentionFlatRaw: gasRetentionSupported ? "50000" : undefined,
+        retentionFlat: gasRetentionSupported ? 0.05 : undefined,
+        retentionCapBps: gasRetentionSupported ? 2000 : undefined,
+        rewardRaw: asset === "USDC" ? String(Math.round(Number(rewardAmount) * 1_000_000)) : undefined,
+        retainedRaw: asset === "USDC" ? String(Math.round(retained * 1_000_000)) : "0",
+        retained,
+        netRewardRaw: asset === "USDC" ? String(Math.round((Number(rewardAmount) - retained) * 1_000_000)) : undefined,
+        netReward: Number(rewardAmount) - retained,
+        ...(gasRetentionSupported ? { source: "escrow_v3_claim_schedule" } : {})
       };
     },
     async getJob() {
@@ -273,6 +296,74 @@ function makeClaimEconomicsGateway({
   };
   return gateway;
 }
+
+test("v3 retention quote is identical in preflight, explain, and brokered claim; self-paid is zero", async () => {
+  const gateway = makeClaimEconomicsGateway({
+    onboardingWaiverEligible: false,
+    workerClaimCount: 3,
+    gasRetentionSupported: true
+  });
+  const service = makePlatformService(
+    gateway,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { rewardAsset: "USDC", rewardAmount: 0.25, onboardingWaiverEligible: false }
+  );
+
+  const preflight = await service.preflightJob(WALLET, "parent-job-001");
+  const explain = await service.explainEligibility(WALLET, "parent-job-001");
+  const [listing] = await service.recommendJobs(WALLET);
+  const claimed = await service.claimJob(WALLET, "parent-job-001", "http", "v3-retention-parity");
+
+  assert.equal(preflight.gasRetentionSupported, true);
+  assert.deepEqual(preflight.gasRetention, {
+    supported: true,
+    brokered: true,
+    waived: false,
+    retentionFlatRaw: "50000",
+    retentionFlat: 0.05,
+    retentionCapBps: 2000,
+    rewardRaw: "250000",
+    retainedRaw: "50000",
+    retained: 0.05,
+    netRewardRaw: "200000",
+    netReward: 0.2,
+    source: "escrow_v3_claim_schedule"
+  });
+  assert.deepEqual(explain.gasRetention, preflight.gasRetention);
+  assert.equal(listing.netReward, 0.2);
+  assert.deepEqual(listing.gasRetention, preflight.gasRetention);
+  assert.deepEqual(claimed.gasRetention, preflight.gasRetention);
+
+  const selfPaid = makePlatformService(
+    makeClaimEconomicsGateway({
+      onboardingWaiverEligible: false,
+      workerClaimCount: 3,
+      gasRetentionSupported: true
+    }),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      rewardAsset: "USDC",
+      rewardAmount: 0.25,
+      onboardingWaiverEligible: false,
+      source: "external"
+    }
+  );
+  const selfPaidPreflight = await selfPaid.preflightJob(WALLET, "parent-job-001");
+  const selfPaidExplain = await selfPaid.explainEligibility(WALLET, "parent-job-001");
+  assert.equal(selfPaidPreflight.gasRetention.retainedRaw, "0");
+  assert.equal(selfPaidPreflight.gasRetention.brokered, false);
+  assert.deepEqual(selfPaidExplain.gasRetention, selfPaidPreflight.gasRetention);
+});
 
 test("platform capabilities use the same explicitly selected chain as public health", () => {
   const service = makePlatformService();

@@ -22,6 +22,10 @@ contract EscrowCore is ReentrancyGuard {
     // unbounded arrays.
     uint256 public constant MAX_MILESTONES = 32;
     uint16 public constant MAX_PROTOCOL_FEE_BPS = 1_000;
+    uint256 public constant MAX_RETENTION_FLAT_RAW = 500_000;
+    uint16 public constant MAX_RETENTION_CAP_BPS = 2_500;
+    uint256 public constant MAX_POSTER_FEE_FLOOR_RAW = 500_000;
+    uint256 public constant MIN_OPEN_FOR_CANCEL = 1 hours;
     bytes32 public constant REASON_REJECTED = bytes32("REJECTED");
     bytes32 public constant REASON_DISPUTE_LOST = bytes32("DISPUTE_LOST");
     bytes32 public constant REASON_ARBITRATOR_TIMEOUT = bytes32("ARB_TIMEOUT");
@@ -30,7 +34,10 @@ contract EscrowCore is ReentrancyGuard {
     AgentAccountCore public immutable accounts;
     ReputationSBT public immutable reputation;
     address public treasuryAccount;
-    uint16 public protocolFeeBps;
+    uint256 public retentionFlatRaw;
+    uint16 public retentionCapBps;
+    uint16 public posterFeeBps;
+    uint256 public posterFeeFloorRaw;
 
     enum PayoutMode {
         Single,
@@ -44,7 +51,8 @@ contract EscrowCore is ReentrancyGuard {
         Submitted,
         Rejected,
         Disputed,
-        Closed
+        Closed,
+        Cancelled
     }
 
     struct JobEscrow {
@@ -111,6 +119,10 @@ contract EscrowCore is ReentrancyGuard {
     mapping(bytes32 => uint256) public claimTtls;
     mapping(bytes32 => bool) public autoDisclosed;
     mapping(bytes32 => bool) public onboardingWaiverEligibleJobs;
+    mapping(bytes32 => uint256) public createdAt;
+    mapping(bytes32 => bool) public brokeredClaims;
+    mapping(bytes32 => uint256) public retentionFlatRawAtClaim;
+    mapping(bytes32 => uint16) public retentionCapBpsAtClaim;
 
     event JobFunded(
         bytes32 indexed jobId,
@@ -134,6 +146,14 @@ contract EscrowCore is ReentrancyGuard {
         bytes32 indexed jobId, bytes32 indexed templateId, address indexed poster, address asset, uint256 totalReserved
     );
     event JobClaimed(bytes32 indexed jobId, address indexed worker, uint256 claimExpiry, uint256 claimStake);
+    event ClaimRetentionSnapshot(
+        bytes32 indexed jobId,
+        address indexed worker,
+        bool brokered,
+        bool waived,
+        uint256 retentionFlatRaw,
+        uint16 retentionCapBps
+    );
     event ClaimEconomicsLocked(
         bytes32 indexed jobId,
         address indexed worker,
@@ -143,7 +163,16 @@ contract EscrowCore is ReentrancyGuard {
         uint256 claimNumber
     );
     event OnboardingWaiverEligibilityUpdated(bytes32 indexed jobId, bool eligible);
-    event ProtocolFeeBpsUpdated(uint16 previousProtocolFeeBps, uint16 newProtocolFeeBps);
+    event FeeScheduleChanged(
+        uint256 previousRetentionFlatRaw,
+        uint16 previousRetentionCapBps,
+        uint16 previousPosterFeeBps,
+        uint256 previousPosterFeeFloorRaw,
+        uint256 newRetentionFlatRaw,
+        uint16 newRetentionCapBps,
+        uint16 newPosterFeeBps,
+        uint256 newPosterFeeFloorRaw
+    );
     event TreasuryAccountUpdated(address indexed previousTreasuryAccount, address indexed newTreasuryAccount);
     event SettlementSplit(
         bytes32 indexed jobId,
@@ -154,6 +183,8 @@ contract EscrowCore is ReentrancyGuard {
         uint256 protocolFeeAmount,
         uint16 protocolFeeBps
     );
+    event GasRetentionApplied(bytes32 indexed jobId, address indexed worker, uint256 retainedRaw, uint256 rewardRaw);
+    event JobCancelled(bytes32 indexed jobId, address indexed poster, uint256 refundedRaw);
     event WorkSubmitted(bytes32 indexed jobId, address indexed worker, bytes32 evidenceHash);
     event Submitted(bytes32 indexed jobId, address indexed worker, bytes32 indexed payloadHash);
     event JobReopened(bytes32 indexed jobId);
@@ -182,6 +213,9 @@ contract EscrowCore is ReentrancyGuard {
     error InvalidSchemaSignature();
     error UnauthorizedSchemaIssuer(address issuer);
     error ProtocolFeeTooHigh();
+    error RetentionFlatTooHigh();
+    error RetentionCapTooHigh();
+    error PosterFeeFloorTooHigh();
     error InvalidTreasuryAccount();
 
     constructor(
@@ -290,10 +324,14 @@ contract EscrowCore is ReentrancyGuard {
         return _computeClaimEconomics(worker, jobId, job);
     }
 
-    /// @notice Capability probe for clients that must distinguish the
-    ///         successor's retained-fee policy from older EscrowCore runtimes
-    ///         that refunded the fee on successful work.
+    /// @notice The pre-v3 retained-claim-fee successor was superseded by D4's
+    ///         payout retention. Successful claims return the claim lock.
     function retainsClaimFeeOnSuccess() external pure returns (bool) {
+        return false;
+    }
+
+    /// @notice Capability probe for the v3 claim-snapshotted gas-retention rail.
+    function supportsGasRetention() external pure returns (bool) {
         return true;
     }
 
@@ -303,10 +341,30 @@ contract EscrowCore is ReentrancyGuard {
         emit OnboardingWaiverEligibilityUpdated(jobId, eligible);
     }
 
-    function setProtocolFeeBps(uint16 newProtocolFeeBps) external onlyPolicyOwner {
-        if (newProtocolFeeBps > MAX_PROTOCOL_FEE_BPS) revert ProtocolFeeTooHigh();
-        emit ProtocolFeeBpsUpdated(protocolFeeBps, newProtocolFeeBps);
-        protocolFeeBps = newProtocolFeeBps;
+    function setFeeSchedule(
+        uint256 newRetentionFlatRaw,
+        uint16 newRetentionCapBps,
+        uint16 newPosterFeeBps,
+        uint256 newPosterFeeFloorRaw
+    ) external onlyPolicyOwner {
+        if (newRetentionFlatRaw > MAX_RETENTION_FLAT_RAW) revert RetentionFlatTooHigh();
+        if (newRetentionCapBps > MAX_RETENTION_CAP_BPS) revert RetentionCapTooHigh();
+        if (newPosterFeeBps > MAX_PROTOCOL_FEE_BPS) revert ProtocolFeeTooHigh();
+        if (newPosterFeeFloorRaw > MAX_POSTER_FEE_FLOOR_RAW) revert PosterFeeFloorTooHigh();
+        emit FeeScheduleChanged(
+            retentionFlatRaw,
+            retentionCapBps,
+            posterFeeBps,
+            posterFeeFloorRaw,
+            newRetentionFlatRaw,
+            newRetentionCapBps,
+            newPosterFeeBps,
+            newPosterFeeFloorRaw
+        );
+        retentionFlatRaw = newRetentionFlatRaw;
+        retentionCapBps = newRetentionCapBps;
+        posterFeeBps = newPosterFeeBps;
+        posterFeeFloorRaw = newPosterFeeFloorRaw;
     }
 
     function setTreasuryAccount(address newTreasuryAccount) external onlyPolicyOwner {
@@ -315,8 +373,21 @@ contract EscrowCore is ReentrancyGuard {
         treasuryAccount = newTreasuryAccount;
     }
 
+    /// @notice Compatibility read for v2 clients during the dual-address drain.
+    function protocolFeeBps() external view returns (uint16) {
+        return posterFeeBps;
+    }
+
+    function previewPosterFee(uint256 reward) public view returns (uint256) {
+        return _calculatePosterFee(reward, posterFeeBps, posterFeeFloorRaw);
+    }
+
     function previewProtocolFee(uint256 reward) public view returns (uint256) {
-        return _calculateProtocolFee(reward, protocolFeeBps);
+        return previewPosterFee(reward);
+    }
+
+    function previewGasRetention(uint256 reward, bool brokered, bool waived) public view returns (uint256) {
+        return _calculateGasRetention(reward, brokered, waived, retentionFlatRaw, retentionCapBps);
     }
 
     function createSinglePayoutJob(
@@ -447,8 +518,8 @@ contract EscrowCore is ReentrancyGuard {
     ) internal {
         if (_jobs[jobId].state != JobState.None) revert InvalidState();
         _validateAndStoreExternalSchema(jobId, externalSchema);
-        uint16 jobProtocolFeeBps = protocolFeeWaived ? 0 : protocolFeeBps;
-        uint256 protocolFee = _calculateProtocolFee(reward, jobProtocolFeeBps);
+        uint16 jobProtocolFeeBps = protocolFeeWaived ? 0 : posterFeeBps;
+        uint256 protocolFee = protocolFeeWaived ? 0 : _calculatePosterFee(reward, posterFeeBps, posterFeeFloorRaw);
         _jobs[jobId] = JobEscrow({
             poster: msg.sender,
             worker: address(0),
@@ -477,6 +548,7 @@ contract EscrowCore is ReentrancyGuard {
             protocolFeeWaived: protocolFeeWaived
         });
         claimTtls[jobId] = claimTtl;
+        createdAt[jobId] = block.timestamp;
 
         uint256 total = reward + protocolFee + opsReserve + contingencyReserve;
         accounts.reserveForJob(msg.sender, asset, total);
@@ -506,9 +578,11 @@ contract EscrowCore is ReentrancyGuard {
         job.payoutMode = PayoutMode.Single;
         job.state = JobState.Open;
         job.protocolFeeWaived = params.protocolFeeWaived;
-        job.protocolFeeBps = params.protocolFeeWaived ? 0 : protocolFeeBps;
-        job.protocolFee = _calculateProtocolFee(params.reward, job.protocolFeeBps);
+        job.protocolFeeBps = params.protocolFeeWaived ? 0 : posterFeeBps;
+        job.protocolFee =
+            params.protocolFeeWaived ? 0 : _calculatePosterFee(params.reward, posterFeeBps, posterFeeFloorRaw);
         claimTtls[params.jobId] = params.claimTtl;
+        createdAt[params.jobId] = block.timestamp;
 
         uint256 total = params.reward + job.protocolFee + params.opsReserve + params.contingencyReserve;
         accounts.consumeRecurringTemplateReserve(params.poster, params.asset, params.templateId, total);
@@ -558,12 +632,13 @@ contract EscrowCore is ReentrancyGuard {
             disputedAt: 0,
             payoutMode: PayoutMode.Milestone,
             state: JobState.Open,
-            protocolFee: _calculateProtocolFee(reward, protocolFeeBps),
+            protocolFee: _calculatePosterFee(reward, posterFeeBps, posterFeeFloorRaw),
             protocolFeeReleased: 0,
-            protocolFeeBps: protocolFeeBps,
+            protocolFeeBps: posterFeeBps,
             protocolFeeWaived: false
         });
         claimTtls[jobId] = claimTtl;
+        createdAt[jobId] = block.timestamp;
         uint256 total = reward + _jobs[jobId].protocolFee + opsReserve + contingencyReserve;
         accounts.reserveForJob(msg.sender, asset, total);
         emit JobFunded(jobId, msg.sender, asset, total, PayoutMode.Milestone);
@@ -571,14 +646,14 @@ contract EscrowCore is ReentrancyGuard {
     }
 
     function claimJob(bytes32 jobId) external whenNotPaused nonReentrant {
-        _claimJob(jobId, msg.sender);
+        _claimJob(jobId, msg.sender, false);
     }
 
     function claimJobFor(bytes32 jobId, address worker) external whenNotPaused nonReentrant onlyOperator {
-        _claimJob(jobId, worker);
+        _claimJob(jobId, worker, true);
     }
 
-    function _claimJob(bytes32 jobId, address worker) internal {
+    function _claimJob(bytes32 jobId, address worker, bool brokered) internal {
         if (worker == address(0)) revert Unauthorized();
         JobEscrow storage job = _jobs[jobId];
         if (job.state == JobState.None) revert UnknownJob();
@@ -604,11 +679,17 @@ contract EscrowCore is ReentrancyGuard {
         job.claimFee = claimFee;
         job.claimFeeBps = claimFeeBps;
         job.claimEconomicsWaived = waived;
+        brokeredClaims[jobId] = brokered;
+        retentionFlatRawAtClaim[jobId] = retentionFlatRaw;
+        retentionCapBpsAtClaim[jobId] = retentionCapBps;
         job.rejectingVerifier = address(0);
         job.claimExpiry = block.timestamp + claimTtls[jobId];
         job.state = JobState.Claimed;
         workerClaimCount[worker] = claimNumber;
         emit JobClaimed(jobId, worker, job.claimExpiry, claimStake);
+        emit ClaimRetentionSnapshot(
+            jobId, worker, brokered, waived, retentionFlatRawAtClaim[jobId], retentionCapBpsAtClaim[jobId]
+        );
         emit ClaimEconomicsLocked(jobId, worker, claimStake, claimFee, waived, claimNumber);
     }
 
@@ -671,9 +752,24 @@ contract EscrowCore is ReentrancyGuard {
         job.claimFee = 0;
         job.claimFeeBps = 0;
         job.claimEconomicsWaived = false;
+        brokeredClaims[jobId] = false;
+        retentionFlatRawAtClaim[jobId] = 0;
+        retentionCapBpsAtClaim[jobId] = 0;
         job.rejectingVerifier = address(0);
         job.state = JobState.Open;
         emit JobReopened(jobId);
+    }
+
+    function cancelOpenJob(bytes32 jobId) external whenNotPaused nonReentrant {
+        JobEscrow storage job = _jobs[jobId];
+        if (job.state == JobState.None) revert UnknownJob();
+        if (job.state != JobState.Open) revert InvalidState();
+        if (msg.sender != job.poster) revert Unauthorized();
+        require(block.timestamp >= createdAt[jobId] + MIN_OPEN_FOR_CANCEL, "OPEN_FLOOR_ACTIVE");
+
+        job.state = JobState.Cancelled;
+        uint256 refundedRaw = _refundPosterBalances(job);
+        emit JobCancelled(jobId, job.poster, refundedRaw);
     }
 
     function resolveSinglePayout(
@@ -703,8 +799,10 @@ contract EscrowCore is ReentrancyGuard {
         job.released = job.reward;
         job.state = JobState.Closed;
 
-        _settleSuccessfulClaimEconomics(job, msg.sender);
-        _settlePayout(jobId, job, settlementKey, job.reward, job.reward);
+        uint256 retainedRaw = _gasRetentionForClaim(jobId, job);
+        _settleSuccessfulClaimEconomics(job);
+        _settlePayout(jobId, job, settlementKey, job.reward - retainedRaw, job.reward);
+        _settleGasRetention(jobId, job, settlementKey, retainedRaw);
         _refundPosterBalances(job);
 
         reputation.mintBadge(job.worker, job.category, 1, metadataURI);
@@ -754,7 +852,7 @@ contract EscrowCore is ReentrancyGuard {
 
         if (allReleased) {
             job.state = JobState.Closed;
-            _settleSuccessfulClaimEconomics(job, msg.sender);
+            _settleSuccessfulClaimEconomics(job);
             _refundPosterBalances(job);
             reputation.mintBadge(job.worker, job.category, 2, metadataURI);
             reputation.updateReputation(job.worker, 200, 150, job.reward);
@@ -845,7 +943,7 @@ contract EscrowCore is ReentrancyGuard {
             // A worker-favour dispute dismisses the rejection. Retain the
             // post-tier fee to treasury, but do not reward the verifier whose
             // rejection was overturned.
-            _settleSuccessfulClaimEconomics(job, address(0));
+            _settleSuccessfulClaimEconomics(job);
         } else {
             _slashDisputedWorker(job);
             emit JobRejected(jobId, reasonCode);
@@ -981,20 +1079,24 @@ contract EscrowCore is ReentrancyGuard {
         claimFee = percentageFee > minimumFee ? percentageFee : minimumFee;
     }
 
-    function _refundPosterBalances(JobEscrow storage job) internal {
+    function _refundPosterBalances(JobEscrow storage job) internal returns (uint256 refundedRaw) {
         uint256 rewardRefund = job.reward - job.released;
         if (rewardRefund > 0) {
             accounts.refundReserved(job.poster, job.asset, rewardRefund);
+            refundedRaw += rewardRefund;
         }
         uint256 protocolFeeRefund = job.protocolFee - job.protocolFeeReleased;
         if (protocolFeeRefund > 0) {
             accounts.refundReserved(job.poster, job.asset, protocolFeeRefund);
+            refundedRaw += protocolFeeRefund;
         }
         if (job.opsReserve > 0) {
             accounts.refundReserved(job.poster, job.asset, job.opsReserve);
+            refundedRaw += job.opsReserve;
         }
         if (job.contingencyReserve > 0) {
             accounts.refundReserved(job.poster, job.asset, job.contingencyReserve);
+            refundedRaw += job.contingencyReserve;
         }
     }
 
@@ -1010,7 +1112,12 @@ contract EscrowCore is ReentrancyGuard {
         // Settle to the cumulative fee target instead of independently
         // rounding every payout leg. This makes a fully successful milestone
         // job charge exactly floor(totalReward * bps / 10_000).
-        uint256 cumulativeFeeTarget = _calculateProtocolFee(cumulativeWorkerAmount, job.protocolFeeBps);
+        // `job.protocolFee` is the creation-time max(bps, floor) snapshot.
+        // Partial paths keep v2's proportional bps settlement and the terminal
+        // successful path consumes the full snapshot, including the floor.
+        uint256 cumulativeFeeTarget = cumulativeWorkerAmount == job.reward
+            ? job.protocolFee
+            : _calculateBps(cumulativeWorkerAmount, job.protocolFeeBps);
         uint256 feeAmount = cumulativeFeeTarget - job.protocolFeeReleased;
         uint256 feeRemaining = job.protocolFee - job.protocolFeeReleased;
         if (feeAmount > feeRemaining) {
@@ -1026,23 +1133,51 @@ contract EscrowCore is ReentrancyGuard {
         emit SettlementSplit(jobId, job.worker, feeRecipient, job.asset, workerAmount, feeAmount, job.protocolFeeBps);
     }
 
-    function _calculateProtocolFee(uint256 reward, uint16 feeBps) internal pure returns (uint256) {
-        // feeBps is capped at 1_000, so splitting quotient and remainder
-        // preserves floor(reward * bps / 10_000) without overflowing for a
-        // syntactically valid uint256 reward.
-        return (reward / 10_000) * uint256(feeBps) + ((reward % 10_000) * uint256(feeBps)) / 10_000;
+    function _calculatePosterFee(uint256 reward, uint16 feeBps, uint256 feeFloorRaw) internal pure returns (uint256) {
+        uint256 percentageFee = _calculateBps(reward, feeBps);
+        return percentageFee > feeFloorRaw ? percentageFee : feeFloorRaw;
     }
 
-    function _settleSuccessfulClaimEconomics(JobEscrow storage job, address verifierRecipient) internal {
+    function _calculateGasRetention(uint256 reward, bool brokered, bool waived, uint256 flatRaw, uint16 capBps)
+        internal
+        pure
+        returns (uint256)
+    {
+        if (!brokered || waived) return 0;
+        uint256 cappedRaw = _calculateBps(reward, capBps);
+        return flatRaw < cappedRaw ? flatRaw : cappedRaw;
+    }
+
+    function _calculateBps(uint256 amount, uint16 bps) internal pure returns (uint256) {
+        // Every bps knob is contract-capped, so splitting quotient and
+        // remainder preserves floor(amount * bps / 10_000) without overflow.
+        return (amount / 10_000) * uint256(bps) + ((amount % 10_000) * uint256(bps)) / 10_000;
+    }
+
+    function _gasRetentionForClaim(bytes32 jobId, JobEscrow storage job) internal view returns (uint256) {
+        return _calculateGasRetention(
+            job.reward,
+            brokeredClaims[jobId],
+            job.claimEconomicsWaived,
+            retentionFlatRawAtClaim[jobId],
+            retentionCapBpsAtClaim[jobId]
+        );
+    }
+
+    function _settleGasRetention(bytes32 jobId, JobEscrow storage job, bytes32 workerSettlementKey, uint256 retainedRaw)
+        internal
+    {
+        if (retainedRaw == 0) return;
+        bytes32 retentionSettlementKey = keccak256(abi.encode(workerSettlementKey, bytes32("GAS_RETENTION")));
+        accounts.settleReservedTo(retentionSettlementKey, job.poster, job.asset, treasuryAccount, retainedRaw);
+        emit GasRetentionApplied(jobId, job.worker, retainedRaw, job.reward);
+    }
+
+    function _settleSuccessfulClaimEconomics(JobEscrow storage job) internal {
         if (job.worker != address(0)) {
-            if (job.claimStake > 0) {
-                accounts.releaseJobStake(job.worker, job.asset, job.claimStake);
-            }
-            // Tier-0 claims have a zero fee. Once the waiver is exhausted, the
-            // fee is retained on success so operator-brokered execution is paid
-            // in USDC from the worker's earnings rather than requiring DOT.
-            if (job.claimFee > 0) {
-                accounts.slashClaimFee(job.worker, job.asset, job.claimFee, verifierRecipient);
+            uint256 successfulClaimRelease = job.claimStake + job.claimFee;
+            if (successfulClaimRelease > 0) {
+                accounts.releaseJobStake(job.worker, job.asset, successfulClaimRelease);
             }
         }
         _clearClaimEconomics(job);

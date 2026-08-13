@@ -315,3 +315,25 @@ test("EventListener register skips contracts missing interface or target", () =>
   listener.register({ interface: { getEvent: () => null } }, "JobFunded", async () => null);
   assert.equal(listener.registrations.length, before);
 });
+
+test("EventListener registers every v3 accounting and cancellation event", () => {
+  const v3Events = [
+    "ClaimRetentionSnapshot",
+    "GasRetentionApplied",
+    "FeeScheduleChanged",
+    "JobCancelled"
+  ];
+  const escrowContract = makeContract({
+    address: `0x${"cd".repeat(20)}`,
+    eventTopics: Object.fromEntries(
+      v3Events.map((name, index) => [name, `0x${String(index + 10).padStart(2, "0").repeat(32)}`])
+    )
+  });
+  const { listener } = makeListener({ gateway: { escrowContract } });
+
+  listener.attachEventHandlers();
+
+  for (const eventName of v3Events) {
+    assert.equal(listener.eventNameIndex.has(eventName), true, `${eventName} must be watched`);
+  }
+});

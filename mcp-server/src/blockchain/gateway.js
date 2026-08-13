@@ -541,14 +541,21 @@ export class BlockchainGateway {
           treasuryAccount: undefined
         };
       }
-      const [protocolFeeBps, maxProtocolFeeBps, treasuryAccount] = await Promise.all([
+      const gasRetentionSupported = await this.readGasRetentionCapability(this.escrowContract);
+      const [protocolFeeBps, maxProtocolFeeBps, treasuryAccount, posterFeeFloorRaw] = await Promise.all([
         this.escrowContract.protocolFeeBps(),
         this.escrowContract.MAX_PROTOCOL_FEE_BPS(),
-        this.escrowContract.treasuryAccount()
+        this.escrowContract.treasuryAccount(),
+        gasRetentionSupported
+          ? this.escrowContract.posterFeeFloorRaw()
+          : 0n
       ]);
       return {
         supported: true,
         protocolFeeBps: Number(protocolFeeBps),
+        posterFeeBps: Number(protocolFeeBps),
+        posterFeeFloorRaw: this.toRawString(posterFeeFloorRaw),
+        gasRetentionSupported,
         maxProtocolFeeBps: Number(maxProtocolFeeBps),
         treasuryAccount
       };
@@ -569,9 +576,13 @@ export class BlockchainGateway {
           protocolFeeBps: 0
         };
       }
-      const [protocolFeeAmountRaw, protocolFeeBps] = await Promise.all([
+      const gasRetentionSupported = await this.readGasRetentionCapability(this.escrowContract);
+      const [protocolFeeAmountRaw, protocolFeeBps, posterFeeFloorRaw] = await Promise.all([
         this.escrowContract.previewProtocolFee(rewardAmountRaw),
-        this.escrowContract.protocolFeeBps()
+        this.escrowContract.protocolFeeBps(),
+        gasRetentionSupported
+          ? this.escrowContract.posterFeeFloorRaw()
+          : 0n
       ]);
       return {
         asset: asset.symbol,
@@ -579,7 +590,8 @@ export class BlockchainGateway {
         rewardAmountRaw: rewardAmountRaw.toString(),
         protocolFeeAmount: this.toDisplayUnits(protocolFeeAmountRaw, asset),
         protocolFeeAmountRaw: protocolFeeAmountRaw.toString(),
-        protocolFeeBps: Number(protocolFeeBps)
+        protocolFeeBps: Number(protocolFeeBps),
+        posterFeeFloorRaw: posterFeeFloorRaw.toString()
       };
     });
   }
@@ -601,13 +613,16 @@ export class BlockchainGateway {
       const exists = Number(live.state) !== 0;
       const claimFeeRetainedOnSuccess = contractLayout === "current"
         && await this.readRetainedClaimFeeCapability(escrowContract);
+      const gasRetentionSupported = contractLayout === "current"
+        && await this.readGasRetentionCapability(escrowContract);
       if (contractLayout === "legacy" || !exists) {
         return {
           state: Number(live.state),
           exists,
           contractLayout,
           onboardingWaiverEligible: false,
-          claimFeeRetainedOnSuccess
+          claimFeeRetainedOnSuccess,
+          gasRetentionSupported
         };
       }
       if (typeof escrowContract?.onboardingWaiverEligibleJobs !== "function") {
@@ -618,6 +633,7 @@ export class BlockchainGateway {
         exists,
         contractLayout,
         claimFeeRetainedOnSuccess,
+        gasRetentionSupported,
         onboardingWaiverEligible: Boolean(
           await escrowContract.onboardingWaiverEligibleJobs(this.toJobId(jobId))
         )
@@ -634,6 +650,55 @@ export class BlockchainGateway {
       // fails conservatively: brokered gas remains operator exposure.
       return false;
     }
+  }
+
+  async readGasRetentionCapability(escrowContract) {
+    if (typeof escrowContract?.supportsGasRetention !== "function") return false;
+    try {
+      return Boolean(await escrowContract.supportsGasRetention());
+    } catch {
+      return false;
+    }
+  }
+
+  async previewGasRetentionForJob(jobId, assetSymbol, rewardAmount, { brokered, waived } = {}) {
+    return this.withGatewayError("previewGasRetentionForJob", async () => {
+      const live = await this.readEscrowJob(jobId);
+      const escrowContract = this.escrowContractForLiveJob(live);
+      const supported = await this.readGasRetentionCapability(escrowContract);
+      const asset = this.requireAsset(assetSymbol);
+      const rewardRaw = this.toBaseUnits(rewardAmount, asset, "job reward");
+      if (!supported) {
+        return {
+          supported: false,
+          brokered: Boolean(brokered),
+          waived: Boolean(waived),
+          retainedRaw: "0",
+          retained: 0,
+          netRewardRaw: rewardRaw.toString(),
+          netReward: this.toDisplayUnits(rewardRaw, asset)
+        };
+      }
+      const [flatRaw, capBps, retainedRaw] = await Promise.all([
+        escrowContract.retentionFlatRaw(),
+        escrowContract.retentionCapBps(),
+        escrowContract.previewGasRetention(rewardRaw, Boolean(brokered), Boolean(waived))
+      ]);
+      return {
+        supported: true,
+        brokered: Boolean(brokered),
+        waived: Boolean(waived),
+        retentionFlatRaw: this.toRawString(flatRaw),
+        retentionFlat: this.toDisplayUnits(flatRaw, asset),
+        retentionCapBps: Number(capBps),
+        rewardRaw: rewardRaw.toString(),
+        retainedRaw: retainedRaw.toString(),
+        retained: this.toDisplayUnits(retainedRaw, asset),
+        netRewardRaw: (rewardRaw - retainedRaw).toString(),
+        netReward: this.toDisplayUnits(rewardRaw - retainedRaw, asset),
+        source: "escrow_v3_claim_schedule"
+      };
+    });
   }
 
   async readDepositVesting(wallet, {
@@ -1628,6 +1693,7 @@ export class BlockchainGateway {
       // the worker instead of discarding it. Settlement behavior is unchanged.
       const receipt = await tx.wait();
       const settlement = this.extractSettlementSplit(receipt, escrowContract);
+      const gasRetention = this.extractGasRetention(receipt, escrowContract);
       const durationMs = Date.now() - startedAt;
       this.logger?.info?.(
         {
@@ -1643,7 +1709,7 @@ export class BlockchainGateway {
         txHash: tx.hash,
         blockNumber: receipt?.blockNumber,
         status: Number(receipt?.status ?? 0),
-        ...(settlement ? { settlement } : {})
+        ...(settlement ? { settlement: { ...settlement, ...(gasRetention ? { gasRetention } : {}) } } : {})
       };
     });
   }
@@ -1796,14 +1862,21 @@ export class BlockchainGateway {
 
   extractRecoveredSettlement(receipt, escrowContract, job) {
     const settlement = this.extractSettlementSplit(receipt, escrowContract);
+    const gasRetention = this.extractGasRetention(receipt, escrowContract);
     if (!settlement) {
       throw new ExternalServiceError("Recovered approved receipt has no deployed SettlementSplit evidence.");
     }
+    const retainedRaw = BigInt(gasRetention?.retainedRaw ?? "0");
+    const grossWorkerRewardRaw = BigInt(settlement.workerAmountRaw) + retainedRaw;
     if (
       !sameAddress(settlement.worker, job.worker)
       || !sameAddress(settlement.asset, job.asset)
-      || settlement.workerAmountRaw !== String(job.releasedRaw)
+      || grossWorkerRewardRaw !== BigInt(job.releasedRaw)
       || settlement.protocolFeeAmountRaw !== String(job.protocolFeeReleasedRaw ?? "0")
+      || (gasRetention && (
+        !sameAddress(gasRetention.worker, job.worker)
+        || gasRetention.rewardRaw !== String(job.releasedRaw)
+      ))
     ) {
       throw new ExternalServiceError("Recovered SettlementSplit does not match the live escrow job.");
     }
@@ -1831,7 +1904,9 @@ export class BlockchainGateway {
         amountRaw: parsed.args.amount.toString()
       });
     }
-    const expectedCount = settlement.protocolFeeAmountRaw === "0" ? 1 : 2;
+    const expectedCount = 1
+      + (settlement.protocolFeeAmountRaw === "0" ? 0 : 1)
+      + (retainedRaw === 0n ? 0 : 1);
     if (reservations.length !== expectedCount) {
       throw new ExternalServiceError(
         `Recovered payout has ${reservations.length} AAC reservations; expected ${expectedCount}.`
@@ -1846,18 +1921,25 @@ export class BlockchainGateway {
     if (workerMatches.length !== 1) {
       throw new ExternalServiceError("AAC worker reservation does not corroborate SettlementSplit.");
     }
-    if (settlement.protocolFeeAmountRaw !== "0") {
-      const feeMatches = reservations.filter((entry) =>
+    const treasuryAmounts = reservations
+      .filter((entry) =>
         sameAddress(entry.account, job.poster)
         && sameAddress(entry.recipient, settlement.treasuryAccount)
         && sameAddress(entry.asset, settlement.asset)
-        && entry.amountRaw === settlement.protocolFeeAmountRaw
-      );
-      if (feeMatches.length !== 1) {
-        throw new ExternalServiceError("AAC fee reservation does not corroborate SettlementSplit.");
-      }
+      )
+      .map((entry) => entry.amountRaw)
+      .sort();
+    const expectedTreasuryAmounts = [
+      ...(settlement.protocolFeeAmountRaw === "0" ? [] : [settlement.protocolFeeAmountRaw]),
+      ...(retainedRaw === 0n ? [] : [retainedRaw.toString()])
+    ].sort();
+    if (JSON.stringify(treasuryAmounts) !== JSON.stringify(expectedTreasuryAmounts)) {
+      throw new ExternalServiceError("AAC treasury reservations do not corroborate poster fee and gas retention.");
     }
-    return settlement;
+    return {
+      ...settlement,
+      ...(gasRetention ? { gasRetention } : {})
+    };
   }
 
   async openDispute(jobId, participant) {
@@ -2264,6 +2346,24 @@ export class BlockchainGateway {
         protocolFeeAmount: this.toDisplayUnits(parsed.args.protocolFeeAmount, asset),
         protocolFeeAmountRaw: parsed.args.protocolFeeAmount.toString(),
         protocolFeeBps: Number(parsed.args.protocolFeeBps)
+      };
+    }
+    return undefined;
+  }
+
+  extractGasRetention(receipt, contract = this.escrowContract) {
+    for (const log of receipt?.logs ?? []) {
+      let parsed;
+      try {
+        parsed = contract?.interface?.parseLog?.(log);
+      } catch {
+        continue;
+      }
+      if (parsed?.name !== "GasRetentionApplied") continue;
+      return {
+        worker: parsed.args.worker,
+        retainedRaw: parsed.args.retainedRaw.toString(),
+        rewardRaw: parsed.args.rewardRaw.toString()
       };
     }
     return undefined;

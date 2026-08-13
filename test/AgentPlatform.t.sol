@@ -609,8 +609,9 @@ contract AgentPlatformTest is Test {
         assertEq(workerJobStake, 3.5 ether);
     }
 
-    function testEscrowAdvertisesSuccessfulClaimFeeRetention() public view {
-        require(escrow.retainsClaimFeeOnSuccess(), "EXPECTED_RETAINED_FEE_CAPABILITY");
+    function testEscrowAdvertisesV3PayoutRetentionInsteadOfClaimFeeRetention() public view {
+        require(!escrow.retainsClaimFeeOnSuccess(), "CLAIM_FEE_RETENTION_MUST_BE_RETIRED");
+        require(escrow.supportsGasRetention(), "EXPECTED_V3_RETENTION_CAPABILITY");
     }
 
     function testOnboardingWaiverRequiresExplicitJobEligibility() public {
@@ -733,7 +734,7 @@ contract AgentPlatformTest is Test {
         require(escrow.onboardingWaiverEligibleJobs(jobId), "EXPECTED_WAIVER_ELIGIBLE");
     }
 
-    function testSuccessfulPostTierClaimReleasesStakeButRetainsClaimFee() public {
+    function testSuccessfulSelfPaidClaimReleasesStakeAndClaimFee() public {
         policy.setClaimFeeBps(200);
         policy.setMinClaimFee(address(dot), 0.05 ether);
 
@@ -761,10 +762,10 @@ contract AgentPlatformTest is Test {
         (uint256 treasuryLiquid,,,,,) = accounts.positions(treasury, address(dot));
         assertEq(job.claimStake, 0);
         assertEq(job.claimFee, 0);
-        assertEq(workerLiquid, WORKER_DEPOSIT + 49 ether);
+        assertEq(workerLiquid, WORKER_DEPOSIT + 50 ether);
         assertEq(workerJobStake, 0);
-        assertEq(dot.balanceOf(verifier), verifierBalanceBefore + 0.7 ether);
-        assertEq(treasuryLiquid, 0.3 ether);
+        assertEq(dot.balanceOf(verifier), verifierBalanceBefore);
+        assertEq(treasuryLiquid, 0);
     }
 
     function testRejectedJobSlashesClaimFeeToVerifierAndTreasurySplit() public {
@@ -802,7 +803,7 @@ contract AgentPlatformTest is Test {
         assertEq(dot.balanceOf(verifier), verifierBalanceBefore + 0.7 ether);
     }
 
-    function testWorkerFavourDisputeRetainsClaimFeeWithoutRewardingOverturnedVerifier() public {
+    function testWorkerFavourDisputeReleasesClaimFeeWithoutRewardingOverturnedVerifier() public {
         policy.setClaimFeeBps(200);
         policy.setMinClaimFee(address(dot), 0.05 ether);
 
@@ -832,10 +833,10 @@ contract AgentPlatformTest is Test {
         assertEq(uint256(job.state), uint256(EscrowCore.JobState.Closed));
         assertEq(job.claimStake, 0);
         assertEq(job.claimFee, 0);
-        assertEq(workerLiquid, WORKER_DEPOSIT + 49 ether);
+        assertEq(workerLiquid, WORKER_DEPOSIT + 50 ether);
         assertEq(workerJobStake, 0);
         assertEq(dot.balanceOf(verifier), verifierBalanceBefore);
-        assertEq(treasuryLiquid, 1 ether);
+        assertEq(treasuryLiquid, 0);
     }
 
     function testBorrowCapacityAndRepayment() public {

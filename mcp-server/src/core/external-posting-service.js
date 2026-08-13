@@ -717,6 +717,7 @@ export class ExternalPostingService {
     );
     const quotedRewardRaw = parseQuoteRaw(preview?.rewardAmountRaw, "rewardAmountRaw");
     const protocolFeeRaw = parseQuoteRaw(preview?.protocolFeeAmountRaw, "protocolFeeAmountRaw");
+    const posterFeeFloorRaw = parseQuoteRaw(preview?.posterFeeFloorRaw ?? "0", "posterFeeFloorRaw");
     const protocolFeeBps = Number(preview?.protocolFeeBps);
     if (quotedRewardRaw !== terms.rewardRaw) {
       throw new ExternalServiceError(
@@ -730,10 +731,13 @@ export class ExternalPostingService {
         "external_fee_quote_invalid"
       );
     }
-    const calculatedFeeRaw = terms.rewardRaw * BigInt(protocolFeeBps) / 10_000n;
+    const percentageFeeRaw = terms.rewardRaw * BigInt(protocolFeeBps) / 10_000n;
+    const calculatedFeeRaw = percentageFeeRaw > posterFeeFloorRaw
+      ? percentageFeeRaw
+      : posterFeeFloorRaw;
     if (protocolFeeRaw !== calculatedFeeRaw) {
       throw new ExternalServiceError(
-        "Live protocol-fee quote does not reconcile to reward times protocolFeeBps.",
+        "Live poster-fee quote does not reconcile to max(reward times posterFeeBps, posterFeeFloorRaw).",
         "external_fee_quote_mismatch"
       );
     }
@@ -751,9 +755,11 @@ export class ExternalPostingService {
       contingencyReserveRaw: terms.contingencyReserveRaw.toString(),
       protocolFeeRaw: protocolFeeRaw.toString(),
       protocolFeeBps,
+      posterFeeBps: protocolFeeBps,
+      posterFeeFloorRaw: posterFeeFloorRaw.toString(),
       posterReservedRaw: posterReservedRaw.toString(),
       feeSemantics: "poster_additive",
-      source: "live EscrowCore.previewProtocolFee at quote time",
+      source: "live EscrowCore.previewPosterFee schedule at quote time",
       expiresWithQuote: true
     };
   }

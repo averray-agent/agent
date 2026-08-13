@@ -248,14 +248,25 @@ jq -e '
   (.mode == "open") and
   (.economics.feeSemantics == "poster_additive") and
   (.economics.protocolFeeBps | type) == "number" and
+  (.economics.posterFeeBps == .economics.protocolFeeBps) and
+  (.economics.posterFeeFloorRaw | test("^[0-9]+$")) and
   ((.economics.feeRecipient | ascii_downcase) | test("^0x[0-9a-f]{40}$")) and
   (.economics.minRewardUsdc | tonumber) > 0 and
   (.economics.draftTtlHours | type) == "number" and
   (.economics.quotePersistence == "demand_signal_only_until_funded") and
   (.economics.quoteIdentity == "poster_and_content_hash") and
-  (.cancellation.selfServeCancel == false) and
-  (.cancellation.rescue == "operator-mediated on request, ~7 days, refunds only ever to the recorded poster") and
-  (.cancellation.plannedSelfServeCancel == "cancelOpenJob, next EscrowCore deployment window") and
+  ((if .cancellation.selfServeCancel == true then
+      (.cancellation.method == "cancelOpenJob(bytes32)") and
+      (.cancellation.onChain.abiFragment == "function cancelOpenJob(bytes32 jobId)") and
+      ((.cancellation.onChain.address | ascii_downcase) == (.escrowCore | ascii_downcase)) and
+      (.cancellation.onChain.args == ["<jobId>"]) and
+      (.cancellation.onChain.value == "0") and
+      (.cancellation.scope == "any Open job") and
+      (.cancellation.minimumOpenSeconds == 3600)
+    else
+      (.cancellation.rescue == "operator-mediated on request, ~7 days, refunds only ever to the recorded poster") and
+      (.cancellation.plannedSelfServeCancel == "cancelOpenJob, next EscrowCore deployment window")
+    end)) and
   (.workerFacts.claimBond.available == true) and
   (.workerFacts.claimBond.stakeBps | type) == "number" and
   (.workerFacts.claimBond.feeBps | type) == "number" and
@@ -269,7 +280,7 @@ jq -e '
   ((.workerFacts.disputeWindow.remedy.onChain.address | ascii_downcase) == (.escrowCore | ascii_downcase)) and
   (.workerFacts.disputeWindow.remedy.brokeredPath.available == false) and
   (.workerFacts.disputeWindow.remedy.brokeredPath.reason == "no_worker_reachable_brokered_open_dispute_route") and
-  ($fund.posterReservedRawFormula == "rewardRaw + opsReserveRaw + contingencyReserveRaw + floor(rewardRaw * economics.protocolFeeBps / 10000)") and
+  ($fund.posterReservedRawFormula == "rewardRaw + opsReserveRaw + contingencyReserveRaw + max(floor(rewardRaw * economics.posterFeeBps / 10000), economics.posterFeeFloorRaw)") and
   ($fund.depositAmountFormula == "max(posterReservedRaw - positions(poster, token).liquid, 0)") and
   (($fund.positionRead.address | ascii_downcase) == ($poster.agentAccountCore | ascii_downcase)) and
   (any($fund.writes[];
@@ -339,9 +350,13 @@ printf '%s\n%s\n' "$poster_onboarding_json" "$api_health_json" | jq -e -s '
   ' >/dev/null
 jq -e '
   .externalBounties.posterOnboarding == "/poster/onboarding" and
-  (.externalBounties.cancellation.selfServeCancel == false) and
-  (.externalBounties.cancellation.rescue == "operator-mediated on request, ~7 days, refunds only ever to the recorded poster") and
-  (.externalBounties.cancellation.plannedSelfServeCancel == "cancelOpenJob, next EscrowCore deployment window") and
+  ((if .externalBounties.cancellation.selfServeCancel == true then
+      (.externalBounties.cancellation.method == "cancelOpenJob(bytes32)") and
+      (.externalBounties.cancellation.minimumOpenSeconds == 3600)
+    else
+      (.externalBounties.cancellation.rescue == "operator-mediated on request, ~7 days, refunds only ever to the recorded poster") and
+      (.externalBounties.cancellation.plannedSelfServeCancel == "cancelOpenJob, next EscrowCore deployment window")
+    end)) and
   .externalBounties.claimBond.available == true and
   .externalBounties.disputeWindow.available == true and
   .externalBounties.disputeWindow.remedy.onChain.available == true and

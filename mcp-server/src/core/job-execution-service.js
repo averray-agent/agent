@@ -442,6 +442,8 @@ export class JobExecutionService {
           claimEconomics = {
             ...authoritativeClaimEconomics,
             claimFeeRetainedOnSuccess: predictedClaimEconomics.claimFeeRetainedOnSuccess === true,
+            gasRetentionSupported: predictedClaimEconomics.gasRetentionSupported === true,
+            gasRetention: predictedClaimEconomics.gasRetention,
             ...(predictedClaimEconomics.onboardingSubsidy
               ? { onboardingSubsidy: predictedClaimEconomics.onboardingSubsidy }
               : {})
@@ -523,6 +525,8 @@ export class JobExecutionService {
       claimEconomicsWaived: claimEconomics.claimEconomicsWaived,
       claimEconomicsWaivedAtClaim: claimEconomics.claimEconomicsWaived,
       claimFeeRetainedOnSuccess: claimEconomics.claimFeeRetainedOnSuccess === true,
+      gasRetentionSupported: claimEconomics.gasRetentionSupported === true,
+      gasRetention: cloneJsonRecord(claimEconomics.gasRetention),
       claimEconomicsWaiverScope: "claim_time",
       claimNumber: claimEconomics.claimNumber,
       totalClaimLock: claimEconomics.totalClaimLock,

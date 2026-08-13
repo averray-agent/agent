@@ -38,7 +38,7 @@ function abiWith(names) {
   };
 }
 
-test("assertArtifactHasBrokeredSelectors passes for the complete v2 fee surface", () => {
+test("assertArtifactHasBrokeredSelectors passes for the complete v3 fee surface", () => {
   assert.doesNotThrow(() =>
     assertArtifactHasBrokeredSelectors(
       abiWith([
@@ -46,7 +46,11 @@ test("assertArtifactHasBrokeredSelectors passes for the complete v2 fee surface"
         "submitWorkFor",
         "openDisputeFor",
         "previewProtocolFee",
-        "setProtocolFeeBps",
+        "previewPosterFee",
+        "previewGasRetention",
+        "setFeeSchedule",
+        "supportsGasRetention",
+        "cancelOpenJob",
         "setTreasuryAccount",
         "createSinglePayoutJobFeeWaived"
       ])
@@ -54,10 +58,10 @@ test("assertArtifactHasBrokeredSelectors passes for the complete v2 fee surface"
   );
 });
 
-test("assertArtifactHasBrokeredSelectors throws naming missing v2 selectors", () => {
+test("assertArtifactHasBrokeredSelectors throws naming missing v3 selectors", () => {
   assert.throws(
     () => assertArtifactHasBrokeredSelectors(abiWith(["claimJobFor"])),
-    /missing required EscrowCore-v2 selector\(s\): submitWorkFor, openDisputeFor/
+    /missing required EscrowCore-v3 selector\(s\): submitWorkFor, openDisputeFor/
   );
 });
 
@@ -319,9 +323,9 @@ test("matching expected deployer drives CREATE prediction and deployed-address v
   assert.equal(result.newAddress, expectedAddress);
 });
 
-test("v2 finalize metadata preserves historical v1 deployer and block", () => {
+test("v3 finalize metadata preserves historical v1 deployer and block", () => {
   const v1Deployer = "0x08406B2bCE5592A534141767ffe4e5B9DC6c22D1";
-  const v2Deployer = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
+  const v3Deployer = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
   const manifest = {
     deployer: v1Deployer,
     contracts: {
@@ -335,7 +339,7 @@ test("v2 finalize metadata preserves historical v1 deployer and block", () => {
     manifest,
     oldEscrow: manifest.contracts.escrowCore,
     newEscrow: "0xAcC2CAc2E814F243dbFEAE1B99BcfE1A1A7846Ed",
-    deployer: v2Deployer,
+    deployer: v3Deployer,
     deployBlock: 18_806_500,
     deployTx: "0x" + "11".repeat(32),
     multisigExecTx: "0x" + "22".repeat(32),
@@ -344,9 +348,9 @@ test("v2 finalize metadata preserves historical v1 deployer and block", () => {
   });
 
   assert.equal(manifest.deployer, v1Deployer);
-  assert.equal(manifest.deployers.escrowCoreV2, v2Deployer);
+  assert.equal(manifest.deployers.escrowCoreV3, v3Deployer);
   assert.equal(manifest.deploymentBlocks.escrowCore, 18_647_902);
-  assert.equal(manifest.deploymentBlocks.escrowCoreV2, 18_806_500);
+  assert.equal(manifest.deploymentBlocks.escrowCoreV3, 18_806_500);
 });
 
 test("parseArgs collects finalize-phase tx hashes", () => {

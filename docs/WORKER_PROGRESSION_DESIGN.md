@@ -168,15 +168,17 @@ Sequence: fix pool pricing (#1051) → deploy pool → then tier 3.
 
 1. **Cap aggregate tier-0 subsidy** (`S`/day, global). Smallest change, closes the
    unbounded-gas leak immediately, needs no identity work. Must fail visibly.
-2. **Retain the claim fee post-tier.** Primitives exist; this is policy. Turns tier 1 from
-   "acquire DOT" into "pay out of earnings" and preserves earn-from-zero.
+2. **Recover brokered gas from successful work post-tier.** EscrowCore v3 supersedes the
+   unshipped retained-claim-fee draft: approved, non-waived brokered work retains the lesser of
+   the claim-time flat amount and reward cap, while successful claims still release both claim
+   stake and claim fee. This preserves earn-from-zero without changing open-exposure accounting.
 3. **Per-wallet exposure cap `E`** (reserved reward + brokered gas). Bounds monopolisation in
    the unit that actually matters, and self-loosens as wallets self-fund.
 4. **Tier 3 — allowance proportional to pool shares.** After #1051.
 
-## 6.1 Step-2 deployment boundary
+## 6.1 Step-2 deployment boundary (superseded by EscrowCore v3)
 
-The retained-fee policy changes `EscrowCore` runtime bytecode. Merging its source does **not**
+The ratified gas-retention schedule changes `EscrowCore` runtime bytecode. Merging its source does **not**
 change the live mainnet contract and a normal production deploy must not pretend otherwise.
 Activation requires a separate, multisig-gated EscrowCore successor ceremony:
 
@@ -186,15 +188,14 @@ Activation requires a separate, multisig-gated EscrowCore successor ceremony:
 3. grant the successor `settlementBroker`, `reputationWriter`, and `escrowOperator` authority;
 4. point new-job creation and the backend at the successor only after those live reads pass;
 5. retain the prior EscrowCore's roles during its drain window so existing jobs can finish;
-6. prove on a non-waived claim that the stake returns, the claim fee is retained using
-   `claimFeeVerifierBps`, and no fee is charged to a waived tier-0 claim;
+6. prove on a non-waived brokered claim that the stake and claim fee return, the snapshotted gas
+   retention is credited to treasury, and waived tier-0 and self-paid claims retain zero;
 7. delete `knownUnshippedContractChanges.escrowCore` and
    `knownUnshippedContractChanges.legacyEscrowCore` from `deployments/mainnet.json`, then
    revert the corresponding pin in `scripts/ops/check-contract-source-drift.test.mjs`.
 
-Until that ceremony, `scripts/ops/audit-launch-readiness.mjs --profile mainnet` correctly
-reports `bytecode_selector_missing` for EscrowCore because live v2 does not expose
-`retainsClaimFeeOnSuccess()`.
+Until that ceremony, `scripts/ops/audit-launch-readiness.mjs --profile mainnet` correctly treats
+live v2 as gas-retention-inactive because it does not expose `supportsGasRetention()`.
 
 That ceremony is deliberately outside the source PR. No contract deployment, role mutation,
 backend cutover, or existing-job migration is implied by merging the implementation.
@@ -214,8 +215,8 @@ Exposure is derived from immutable claim snapshots and live EscrowCore state:
 
 - open curated work contributes its reserved reward;
 - waived or predecessor-runtime claims also contribute the measured brokered-gas estimate;
-- after the Step-2 successor advertises `retainsClaimFeeOnSuccess()`, non-waived claims stop
-  contributing brokered gas because the retained USDC fee pays that execution cost;
+- brokered gas remains part of open exposure after v3 activates because failed work retains
+  nothing; gas retention reduces realized cost only on successful non-waived brokered work;
 - external poster-funded, worker-signed claims contribute neither operator reward nor gas;
 - an unreadable chain job, unsupported FX asset, or active legacy session without a snapshot
   makes exposure unknown and refuses the claim rather than counting it as zero.

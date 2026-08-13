@@ -85,6 +85,24 @@ test("retained post-tier claim fee removes brokered gas from operator exposure",
   });
 });
 
+test("v3 payout retention does not refund open exposure before a successful settlement", async () => {
+  const result = await policy().evaluate({
+    wallet: WALLET,
+    job: job(),
+    claimEconomics: economics({
+      claimEconomicsWaived: false,
+      claimFeeRetainedOnSuccess: false,
+      gasRetentionSupported: true
+    })
+  });
+
+  assert.deepEqual(result.candidate, {
+    reservedRewardUsdc: 0.5,
+    brokeredGasUsdc: 0.059,
+    totalUsdc: 0.559
+  });
+});
+
 test("open session exposure and candidate exposure enforce the cap in USDC", async () => {
   const stateStore = new MemoryStateStore();
   await stateStore.upsertSession({

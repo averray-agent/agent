@@ -141,7 +141,8 @@ async function buildSnapshot({
       protocolFeeRead.available = false;
       protocolFeeRead.reason = "protocol_fee_read_not_supported";
       delete protocolFeeRead.value;
-    } else if (!isNonNegativeInteger(protocolFeeRead.value.protocolFeeBps)) {
+    } else if (!isNonNegativeInteger(protocolFeeRead.value.protocolFeeBps)
+      || !isRawAmount(protocolFeeRead.value.posterFeeFloorRaw)) {
       protocolFeeRead.available = false;
       protocolFeeRead.reason = "live_protocol_fee_invalid";
       delete protocolFeeRead.value;
@@ -162,6 +163,7 @@ async function buildSnapshot({
   };
   const verificationModes = verifierService?.listHandlers?.() ?? [];
   const mode = config.mode ?? "closed";
+  const v3Active = protocolFeeRead.value?.gasRetentionSupported === true;
   const workerFacts = buildWorkerFacts({
     claimBondRead,
     disputeWindowRead,
@@ -172,7 +174,8 @@ async function buildSnapshot({
   });
   const posterFacts = buildPosterFacts({
     token,
-    agentAccountCore: gateway?.config?.agentAccountAddress
+    agentAccountCore: gateway?.config?.agentAccountAddress,
+    v3Active
   });
 
   return {
@@ -185,16 +188,20 @@ async function buildSnapshot({
     ...(mode === "open" ? {} : { allowlistEnrollment: enrollmentText(mode) }),
     economics: {
       ...(protocolFeeRead.available
-        ? { protocolFeeBps: Number(protocolFeeRead.value.protocolFeeBps) }
+        ? {
+            protocolFeeBps: Number(protocolFeeRead.value.protocolFeeBps),
+            posterFeeBps: Number(protocolFeeRead.value.protocolFeeBps),
+            posterFeeFloorRaw: String(protocolFeeRead.value.posterFeeFloorRaw)
+          }
         : {}),
       ...(feeRecipientRead.available
         ? { feeRecipient: feeRecipientRead.value }
         : {}),
       feeSemantics: "poster_additive",
       feeExplanation:
-        "The poster reserves the full worker reward plus the protocol fee; the worker receives the full advertised reward.",
+        "The poster reserves the full worker reward plus max(posterFeeBps, posterFeeFloorRaw); worker gas retention is separate and applies only to brokered successful work.",
       posterReserveFormula:
-        "reward + opsReserve + contingencyReserve + floor(reward * protocolFeeBps / 10000)",
+        "reward + opsReserve + contingencyReserve + max(floor(reward * posterFeeBps / 10000), posterFeeFloorRaw)",
       minRewardUsdc: config.minRewardUsdc,
       draftTtlHours: config.draftTtlHours,
       quotePersistence: "demand_signal_only_until_funded",
@@ -208,13 +215,17 @@ async function buildSnapshot({
       publicBaseUrl,
       token,
       agentAccountCore: gateway?.config?.agentAccountAddress,
-      escrowCore: config.escrowCoreAddress
+      escrowCore: config.escrowCoreAddress,
+      v3Active
     }),
     verification: buildVerification(verificationModes),
-    failureModes: buildFailureModes(),
+    failureModes: buildFailureModes(v3Active),
     posterFacts,
     workerFacts,
-    cancellation: buildCancellation(),
+    cancellation: buildCancellation(
+      v3Active,
+      config.escrowCoreAddress
+    ),
     docs: {
       guide: GUIDE_URL,
       workedExample: DOGFOOD_EVIDENCE_URL
@@ -223,7 +234,7 @@ async function buildSnapshot({
   };
 }
 
-function buildPostingFlow({ publicBaseUrl, token, agentAccountCore, escrowCore }) {
+function buildPostingFlow({ publicBaseUrl, token, agentAccountCore, escrowCore, v3Active = false }) {
   return [
     {
       id: "siwe",
@@ -301,14 +312,17 @@ function buildPostingFlow({ publicBaseUrl, token, agentAccountCore, escrowCore }
         mismatchResult: {
           status: "mismatch",
           permanent: true,
-          recovery: "operator-mediated on request, ~7 days, refunds only ever to the recorded poster"
+          recovery: v3Active
+            ? "the recorded poster calls cancelOpenJob after the 1h floor for an instant refund"
+            : "operator-mediated on request, ~7 days, refunds only ever to the recorded poster"
         },
-        warning:
-          "Any deviation in either direction permanently mismatches the quote. Raising the reward is not generosity: it strands the reserved funding identically to a deliberate mutation and requires the same operator-mediated ~7-day rescue."
+        warning: v3Active
+          ? "Any deviation in either direction permanently mismatches the quote. Raising the reward is not generosity: it strands the reserved funding identically to a deliberate mutation; the recorded poster must cancel the Open job after the 1h floor."
+          : "Any deviation in either direction permanently mismatches the quote. Raising the reward is not generosity: it strands the reserved funding identically to a deliberate mutation and requires the same operator-mediated ~7-day rescue."
       },
       exactPosterReservedRaw: "the quote response fundingRequirement.posterReservedRaw",
       posterReservedRawFormula:
-        "rewardRaw + opsReserveRaw + contingencyReserveRaw + floor(rewardRaw * economics.protocolFeeBps / 10000)",
+        "rewardRaw + opsReserveRaw + contingencyReserveRaw + max(floor(rewardRaw * economics.posterFeeBps / 10000), economics.posterFeeFloorRaw)",
       depositAmountFormula:
         "max(posterReservedRaw - positions(poster, token).liquid, 0)",
       positionRead: {
@@ -453,7 +467,7 @@ function buildVerification(modes) {
   };
 }
 
-function buildFailureModes() {
+function buildFailureModes(v3Active = false) {
   return [
     {
       selector: errorSelector(INSUFFICIENT_LIQUIDITY_ERROR_SIGNATURE),
@@ -466,19 +480,21 @@ function buildFailureModes() {
       selector: errorSelector(INVALID_STATE_ERROR_SIGNATURE),
       signature: INVALID_STATE_ERROR_SIGNATURE,
       meaning: "This jobId already exists on chain.",
-      response:
-        "Do not deposit again—the escrow for this jobId is already funded. Read GET /jobs/draft/:id: status 'live' means the watcher has materialized it and there is nothing to do; status 'mismatch' means the existing on-chain job was funded with different terms and will never materialize, so the operator-mediated ~7-day cancellation rescue is the only recovery."
+      response: v3Active
+        ? "Do not deposit again—the escrow for this jobId is already funded. Read GET /jobs/draft/:id: status 'live' means the watcher has materialized it and there is nothing to do; status 'mismatch' means the existing on-chain job was funded with different terms and will never materialize, so the recorded poster must call cancelOpenJob after the 1h floor for an instant refund."
+        : "Do not deposit again—the escrow for this jobId is already funded. Read GET /jobs/draft/:id: status 'live' means the watcher has materialized it and there is nothing to do; status 'mismatch' means the existing on-chain job was funded with different terms and will never materialize, so the operator-mediated ~7-day cancellation rescue is the only recovery."
     }
   ];
 }
 
-function buildPosterFacts({ token, agentAccountCore }) {
+function buildPosterFacts({ token, agentAccountCore, v3Active = false }) {
   const tokenAddress = token?.address ?? "<token address>";
   return {
     withdrawal: {
       httpRouteAvailable: false,
-      explanation:
-        "Recovery depends on funding state. After funding fails, the deposit remains in AgentAccountCore liquid and the poster can withdraw it immediately on chain without an operator. After funding succeeds, the amount is reserved and AgentAccountCore.withdraw cannot release it; the operator-mediated cancellation rescue is the only recovery path.",
+      explanation: v3Active
+        ? "Recovery depends on funding state. After funding fails, the deposit remains in AgentAccountCore liquid and the poster can withdraw it immediately. After funding succeeds, AgentAccountCore.withdraw cannot release reserved funds; the recorded poster can cancel an Open job after 1h for an instant refund."
+        : "Recovery depends on funding state. After funding fails, the deposit remains in AgentAccountCore liquid and the poster can withdraw it immediately on chain without an operator. After funding succeeds, the amount is reserved and AgentAccountCore.withdraw cannot release it; the operator-mediated cancellation rescue is the only recovery path.",
       whenFundingFailed: {
         positionState: "liquid",
         withdrawalAvailable: true,
@@ -488,9 +504,11 @@ function buildPosterFacts({ token, agentAccountCore }) {
       whenFundingSucceeded: {
         positionState: "reserved",
         withdrawalAvailable: false,
-        operatorRequired: true,
-        action:
-          "Do not call withdraw for reserved job funding; request the operator-mediated ~7-day cancellation rescue, which refunds only the recorded poster."
+        operatorRequired: !v3Active,
+        ...(v3Active ? { cancellationAvailable: true } : {}),
+        action: v3Active
+          ? "Do not call withdraw for reserved job funding; the recorded poster calls cancelOpenJob after the 1h floor for an instant refund."
+          : "Do not call withdraw for reserved job funding; request the operator-mediated ~7-day cancellation rescue, which refunds only the recorded poster."
       },
       onChain: {
         available: Boolean(agentAccountCore && token?.address),
@@ -715,7 +733,24 @@ function workerDoorFromSnapshot(snapshot) {
   };
 }
 
-function buildCancellation() {
+function buildCancellation(v3Active = false, escrowCore = undefined) {
+  if (v3Active) {
+    return {
+      selfServeCancel: true,
+      method: "cancelOpenJob(bytes32)",
+      onChain: {
+        address: escrowCore,
+        abiFragment: "function cancelOpenJob(bytes32 jobId)",
+        args: ["<jobId>"],
+        value: "0"
+      },
+      scope: "any Open job",
+      minimumOpenSeconds: 3_600,
+      refund: "instant refund of unreleased reward, poster fee, ops reserve, and contingency reserve to the recorded poster",
+      race: "a claim that lands first blocks cancellation until the existing timeout lifecycle reopens the job",
+      fallback: "operator tombstone rescue remains available for non-Open strandings and legacy stock"
+    };
+  }
   return {
     selfServeCancel: false,
     rescue: "operator-mediated on request, ~7 days, refunds only ever to the recorded poster",
