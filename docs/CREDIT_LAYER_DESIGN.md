@@ -1,7 +1,7 @@
 # Credit layer — design workshop (agents-first lending and borrowing)
 
-**Date:** 2026-08-13 · **Status:** WORKSHOP — a plan to discuss, not a build packet. Decision
-points CL-1..CL-5 at the end; nothing dispatches until they're settled.
+**Date:** 2026-08-13 · **Status:** RATIFIED — Pascal, 2026-08-13, all five decisions
+(CL-1..CL-5) adopted as recommended. First build artifact: `PACKET_CREDITPOOL_L1_SPEC.md`.
 **Vision (Pascal, 2026-08-12):** the platform gives agents the same opportunities humans have on
 lending/borrowing platforms — built exclusively agents-first.
 **Constraints inherited:** D8 addendum (protocol-style from day one; peer-to-pool logic in
