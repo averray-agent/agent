@@ -289,43 +289,17 @@ jq -e '
   (.see.onboarding == "/onboarding#buildVestedCapacity")
 ' >/dev/null <<<"$strategies_json"
 
-if [[ -n "$OPERATOR_TOKEN" ]]; then
-  echo "Checking authenticated earnings account door"
-  account_json="$(fetch_admin_json "$API_ACCOUNT_POSITION_URL")"
-  jq -e '
-    (.available == true) and
-    (.account.owner | test("^0x[0-9A-Fa-f]{40}$")) and
-    (.account.available.raw | test("^[0-9]+$")) and
-    (.account.stakedOnOpenWork.raw | test("^[0-9]+$")) and
-    (.account.statement | type == "array") and
-    (.ownershipProof.contract == "AgentAccountCore") and
-    (.withdrawal.http.path == "/account/withdraw/transactions") and
-    (.withdrawal.mcp.tool == "buildWithdrawTransactions") and
-    (.whatYourBalanceCanDo.retentionNotGates.templatesRemainComplete == true) and
-    (.whatYourBalanceCanDo.retentionNotGates.conditionsWithdrawal == false) and
-    ((.whatYourBalanceCanDo | has("borrow")) | not)
-  ' >/dev/null <<<"$account_json"
-
-  if [[ "$(jq -r '.account.available.raw' <<<"$account_json")" != "0" ]]; then
-    withdrawal_json="$(curl -fsS --max-time "$TIMEOUT_SEC" \
-      -H "accept: application/json" \
-      -H "authorization: Bearer $OPERATOR_TOKEN" \
-      -H "content-type: application/json" \
-      --data '{"asset":"USDC","amount":"1"}' \
-      "$API_ACCOUNT_WITHDRAW_URL")"
-    jq -e '
-      (.available == true) and
-      (.templates | length == 1) and
-      (.templates[0].unsigned == true) and
-      (.templates[0].decoded.function == "withdraw(address,uint256)") and
-      (.templates[0].decoded.args.amount == "1") and
-      (.templates[0].gas.status == "measured") and
-      (.whatYourBalanceCanDo.retentionNotGates.templatesRemainComplete == true)
-    ' >/dev/null <<<"$withdrawal_json"
-  else
-    echo "  account available balance is zero; builder refusal is covered by acceptance tests and no false template is requested."
-  fi
+echo "Checking earnings account door is mounted and wallet-scoped (auth-first)"
+account_status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT_SEC" \
+  -H "accept: application/json" "$API_ACCOUNT_POSITION_URL")"
+if [[ "$account_status" != "401" ]]; then
+  echo "Earnings account door did not answer 401 to an unauthenticated probe (got $account_status)." >&2
+  echo "The door is wallet-scoped: it derives the account from the SIWE session, so an admin token has no wallet and must never be used here." >&2
+  exit 1
 fi
+# Follow-up (tracked): a wallet-scoped SIWE smoke walking the fresh-wallet
+# zero-account shape needs SIWE support in these fixtures. Until then the
+# authed door is covered by unit + parity tests and the operator walkthrough.
 
 echo "Checking poster onboarding live facts"
 poster_onboarding_json="$(fetch "$API_POSTER_ONBOARDING_URL")"

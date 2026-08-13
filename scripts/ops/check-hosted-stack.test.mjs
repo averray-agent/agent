@@ -21,6 +21,7 @@ async function runHostedStackFixture({
   warnings = [],
   poolStatus = 200,
   operatorToken = "",
+  accountUnauthenticatedOk = false,
   pool = {
     available: true,
     chainId: 1,
@@ -201,6 +202,11 @@ async function runHostedStackFixture({
       response.end(JSON.stringify(pool));
       return;
     }
+    if (request.url.startsWith("/account/") && !request.headers.authorization && !accountUnauthenticatedOk) {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "auth_required", reason: "wallet_session_required" }));
+      return;
+    }
     if (request.url === "/account/withdraw/transactions" && request.method === "POST") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({
@@ -298,11 +304,22 @@ test("hosted smoke accepts a healthy submitted-job verifier", async () => {
   assert.match(result.stdout, /Hosted stack smoke check passed\./u);
 });
 
-test("hosted smoke walks through the authenticated earnings account and complete withdrawal template", async () => {
-  const result = await runHostedStackFixture({ autoVerifierOk: true, warnings: [], operatorToken: "fixture-token" });
+test("hosted smoke asserts the earnings account door is mounted and answers auth-first", async () => {
+  const result = await runHostedStackFixture({ autoVerifierOk: true, warnings: [] });
 
   assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
-  assert.match(result.stdout, /Checking authenticated earnings account door/u);
+  assert.match(result.stdout, /earnings account door is mounted and wallet-scoped/u);
+});
+
+test("hosted smoke rejects an earnings door that serves account data without auth", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    warnings: [],
+    accountUnauthenticatedOk: true
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.match(result.stderr, /did not answer 401/u);
 });
 
 test("hosted smoke enforces CreditPool availability and the canonical disclosure after configuration", async () => {
