@@ -249,20 +249,20 @@ test("mainnet pins the EscrowCore v3 successor runtime for live v2 and draining 
   // The EscrowCore v3 ceremony in WORKER_PROGRESSION_DESIGN.md section 6.1 must delete both pins and revert these assertions.
   assert.deepEqual(allowlist.get("escrowCore"), [
     {
-      sourceCommit: "f24a8257ceaafb5d583a29006782daca3b1b9dcc",
+      sourceCommit: "8281fad4e964978e9b3db0dfe165145ec3b81cdb",
       maskedRuntimeCodeHash:
-        "sha256:6129a8c64d09a5ab46810ad0aef27a1d0a92aa196dd417fd3de235b780564519",
+        "sha256:1c85c2b7bf9047f47d3906be9c8b90acbee2564f5ff7b5f50aa3ca11d5214d40",
       reason:
-        "The retained-claim-fee policy is not live on chain: deployed EscrowCore v2 at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC and legacy v1 at 0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035 both still refund claimStake + claimFee on success. Live v2 does not expose retainsClaimFeeOnSuccess(), so the backend live capability probe reads false and brokered gas remains operator exposure. In this source-controlled successor runtime, ordinary successful settlement sends 70% of the claim fee by ERC-20 transfer to verifier EOA 0x5a6836c6D4d293F6E5377E6c28054F4171915813, counted against recordProtocolOutflow, and credits 30% to treasury; 100% credits treasury only in the _resolveDispute workerPayout > 0 branch that passes address(0). This entry is a successor-in-waiting for the EscrowCore v3 ceremony in docs/WORKER_PROGRESSION_DESIGN.md section 6.1, and both the escrowCore and legacyEscrowCore entries must be deleted during that ceremony.",
+        "The EscrowCore v3 successor is intentionally not deployed: mainnet still routes new jobs through v2 at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC and drains v1 at 0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035. This candidate runtime adds claim-time brokered and schedule snapshots, approved-success-only gas retention, max(bps, floor) poster fees, one bounded atomic fee schedule, and poster-only cancelOpenJob after one hour; successful claims still release claim stake and claim fee. Backend activation is capability-gated on supportsGasRetention(), so merging this source cannot advertise v3 economics against live v2. Both the escrowCore and legacyEscrowCore pins must be deleted during the operator-run v3 ceremony.",
     },
   ]);
   assert.deepEqual(allowlist.get("legacyEscrowCore"), [
     {
-      sourceCommit: "f24a8257ceaafb5d583a29006782daca3b1b9dcc",
+      sourceCommit: "8281fad4e964978e9b3db0dfe165145ec3b81cdb",
       maskedRuntimeCodeHash:
-        "sha256:6129a8c64d09a5ab46810ad0aef27a1d0a92aa196dd417fd3de235b780564519",
+        "sha256:1c85c2b7bf9047f47d3906be9c8b90acbee2564f5ff7b5f50aa3ca11d5214d40",
       reason:
-        "The retained-claim-fee policy is not live on chain: deployed legacy EscrowCore v1 at 0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035 and active v2 at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC both still refund claimStake + claimFee on success. Live v2 does not expose retainsClaimFeeOnSuccess(), so the backend live capability probe reads false and brokered gas remains operator exposure. In this source-controlled successor runtime, ordinary successful settlement sends 70% of the claim fee by ERC-20 transfer to verifier EOA 0x5a6836c6D4d293F6E5377E6c28054F4171915813, counted against recordProtocolOutflow, and credits 30% to treasury; 100% credits treasury only in the _resolveDispute workerPayout > 0 branch that passes address(0). This entry is a successor-in-waiting for the EscrowCore v3 ceremony in docs/WORKER_PROGRESSION_DESIGN.md section 6.1, and both the escrowCore and legacyEscrowCore entries must be deleted during that ceremony.",
+        "The EscrowCore v3 successor is intentionally not deployed: mainnet still drains this v1 address at 0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035 while v2 at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC serves new jobs. Both manifest entries compile the same candidate EscrowCore artifact, which adds claim-time brokered and schedule snapshots, approved-success-only gas retention, max(bps, floor) poster fees, one bounded atomic fee schedule, and poster-only cancelOpenJob after one hour; successful claims still release claim stake and claim fee. Backend activation is capability-gated on supportsGasRetention(), so merging this source cannot advertise v3 economics against either live predecessor. Both the escrowCore and legacyEscrowCore pins must be deleted during the operator-run v3 ceremony.",
     },
   ]);
 });
