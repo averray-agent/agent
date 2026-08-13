@@ -125,7 +125,7 @@ export class RecurringSchedulerService {
       }
 
       try {
-        const derivative = this.platformService.fireRecurringJob(template.templateId, { firedAt: now });
+        const derivative = await this.platformService.fireRecurringJob(template.templateId, { firedAt: now });
         const updatedTemplate = this.platformService
           .getRecurringTemplateStatus()
           .templates
@@ -174,9 +174,9 @@ export class RecurringSchedulerService {
         fired.push(derivative);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        const status = error?.code === "recurring_reserve_exhausted"
-          ? "reserve_exhausted"
-          : (error instanceof ConflictError ? "conflict" : "failed");
+        let status = error instanceof ConflictError ? "conflict" : "failed";
+        if (error?.code === "recurring_reserve_exhausted") status = "reserve_exhausted";
+        if (error?.code === "lane_budget_exhausted" || error?.code === "lane_paused") status = error.code;
         const reserve = error?.details?.reserve;
         const exhausted = status === "reserve_exhausted";
         this.runtime.set(template.templateId, {
@@ -221,7 +221,13 @@ export class RecurringSchedulerService {
     const fired = await this.runDueTemplates(now);
     const errors = [...this.runtime.entries()]
       .filter(([, runtime]) => runtime?.lastResult?.at === now.toISOString())
-      .filter(([, runtime]) => ["conflict", "failed", "invalid_schedule"].includes(runtime?.lastResult?.status))
+      .filter(([, runtime]) => [
+        "conflict",
+        "failed",
+        "invalid_schedule",
+        "lane_budget_exhausted",
+        "lane_paused"
+      ].includes(runtime?.lastResult?.status))
       .map(([templateId, runtime]) => ({
         templateId,
         status: runtime.lastResult.status,

@@ -55,7 +55,7 @@ test("normalizeSkippedWithNumericCount appends the legacy numeric skip counter",
   );
 });
 
-test("createJobsFromImportResult separates created, duplicate, and errored jobs", () => {
+test("createJobsFromImportResult separates created, duplicate, and errored jobs", async () => {
   const service = {
     createJob: (job) => {
       if (job.id === "duplicate") {
@@ -69,7 +69,7 @@ test("createJobsFromImportResult separates created, duplicate, and errored jobs"
   };
 
   assert.deepEqual(
-    createJobsFromImportResult(service, [
+    await createJobsFromImportResult(service, [
       { id: "created" },
       { id: "duplicate" },
       { id: "broken" }

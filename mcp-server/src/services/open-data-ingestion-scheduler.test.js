@@ -5,6 +5,10 @@ import {
   OpenDataIngestionScheduler,
   loadOpenDataIngestionConfig
 } from "./open-data-ingestion-scheduler.js";
+import {
+  CatalogueLaneDiscipline,
+  validateCatalogueLaneRegistry
+} from "../core/catalogue-lane-discipline.js";
 
 const TARGET = {
   portal: "data.gov",
@@ -103,6 +107,7 @@ test("OpenDataIngestionScheduler dedupes by dataset resource", async () => {
   const platform = makePlatformService([
     {
       id: "existing",
+      rewardAmount: 0.25,
       source: {
         type: "open_data_dataset",
         provider: "data.gov",
@@ -121,6 +126,7 @@ test("OpenDataIngestionScheduler dedupes by dataset resource", async () => {
   const summary = await scheduler.runOnce(new Date("2026-04-26T10:00:00.000Z"));
   assert.equal(summary.createdCount, 0);
   assert.equal(platform.listJobs().length, 1);
+  assert.equal(platform.listJobs()[0].rewardAmount, 0.25);
   assert.equal(summary.queries[0].skipped.at(-1).reason, "source_already_ingested");
 });
 
@@ -303,4 +309,66 @@ test("OpenDataIngestionScheduler run is not aborted if prefund stamps pending", 
   assert.equal(summary.createdCount, 1);
   assert.equal(summary.errors.length, 0);
   assert.equal(jobs[0].funding.state, "pending");
+});
+
+test("OpenDataIngestionScheduler skips creation with a resume time when its lane is at cap", async () => {
+  const platform = makePlatformService();
+  const states = new Map();
+  const logs = [];
+  platform.catalogueLaneDiscipline = new CatalogueLaneDiscipline({
+    stateStore: {
+      async getServiceState(scope) { return states.get(scope); },
+      async upsertServiceState(scope, value) {
+        const next = { ...(states.get(scope) ?? {}), ...structuredClone(value) };
+        states.set(scope, next);
+        return next;
+      },
+      async listRecentSessions() { return []; },
+      async acquireClaimLock() { return true; },
+      async releaseClaimLock() {}
+    },
+    registry: validateCatalogueLaneRegistry({
+      liveness: {
+        hypothesis: "test",
+        dailyCapRaw: "100000",
+        stopCondition: "test stop"
+      }
+    }),
+    gasEstimateUsdc: 0,
+    logger: { info(fields, message) { logs.push({ fields, message }); } }
+  });
+  const logger = { info(fields, message) { logs.push({ fields, message }); }, warn() {} };
+  const first = new OpenDataIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    datasets: [TARGET],
+    fetchImpl: makeFetch(),
+    logger
+  });
+  const secondTarget = {
+    ...TARGET,
+    datasetId: "dataset-789",
+    datasetTitle: "Second dataset",
+    datasetUrl: "https://catalog.data.gov/dataset/second",
+    resourceId: "resource-789",
+    resourceUrl: "https://example.gov/second.csv"
+  };
+  const second = new OpenDataIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    datasets: [secondTarget],
+    fetchImpl: makeFetch(),
+    logger
+  });
+
+  const at = new Date("2026-08-13T12:00:00.000Z");
+  assert.equal((await first.runOnce(at)).createdCount, 1);
+  const refused = await second.runOnce(new Date(at.getTime() + 1_000));
+
+  assert.equal(refused.createdCount, 0);
+  assert.equal(refused.skipped.at(-1).reason, "lane_budget_exhausted");
+  assert.equal(refused.skipped.at(-1).lane, "liveness");
+  assert.equal(refused.skipped.at(-1).resumeAt, "2026-08-14T12:00:00.000Z");
+  assert.equal(platform.listJobs().length, 1);
+  assert.ok(logs.some((entry) => entry.message === "lane_budget_exhausted"));
 });

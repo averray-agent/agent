@@ -322,6 +322,7 @@ test("http smoke: /admin/jobs accepts admin-scoped token", { skip: !RUN }, async
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
       body: JSON.stringify({
         id: "smoke-admin-1",
+        lane: "benchmark-showcase",
         category: "coding",
         tier: "starter",
         rewardAmount: 1,
@@ -344,6 +345,7 @@ test("http smoke: /jobs/validate-submission validates draft output before claim"
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
       body: JSON.stringify({
         id: jobId,
+        lane: "benchmark-showcase",
         category: "coding",
         tier: "starter",
         rewardAmount: 1,
@@ -396,6 +398,7 @@ test("http smoke: /admin/jobs/timeline exposes job lineage", { skip: !RUN }, asy
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
       body: JSON.stringify({
         id: jobId,
+        lane: "benchmark-showcase",
         category: "coding",
         tier: "starter",
         rewardAmount: 1,
@@ -429,6 +432,7 @@ test("http smoke: /admin/sessions exposes operator-wide session activity", { ski
       headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
       body: JSON.stringify({
         id: "operator-session-smoke-001",
+        lane: "benchmark-showcase",
         category: "coding",
         tier: "starter",
         rewardAmount: 1,
@@ -487,6 +491,7 @@ test("http smoke: /jobs/sub lets active workers create funded child jobs", { ski
       headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
       body: JSON.stringify({
         id: "subjob-parent-smoke-001",
+        lane: "oss-anchored",
         category: "coding",
         tier: "starter",
         rewardAmount: 5,
@@ -561,6 +566,7 @@ test("http smoke: /admin/status returns recurring + maintenance data for admin t
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
       body: JSON.stringify({
         id: "weekly-digest",
+        lane: "benchmark-showcase",
         category: "coding",
         tier: "starter",
         rewardAmount: 2,
@@ -828,6 +834,7 @@ test("http smoke: /badges/:sessionId returns schema-compliant JSON for approved 
       headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
       body: JSON.stringify({
         id: "badge-smoke-job-001",
+        lane: "benchmark-showcase",
         category: "coding",
         tier: "starter",
         rewardAmount: 3,
@@ -925,6 +932,7 @@ test("http smoke: /agents/:wallet aggregates approved sessions into badges", { s
       headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
       body: JSON.stringify({
         id: "profile-smoke-job-001",
+        lane: "benchmark-showcase",
         category: "coding",
         tier: "starter",
         rewardAmount: 4,
@@ -991,6 +999,7 @@ test("http smoke: /agents exposes a claimed session as current activity", { skip
       headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
       body: JSON.stringify({
         id: "profile-active-smoke-job-001",
+        lane: "benchmark-showcase",
         category: "coding",
         tier: "starter",
         rewardAmount: 4,
@@ -1051,6 +1060,7 @@ test("http smoke: /disputes exposes human-review sessions and records verdict/re
       headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
       body: JSON.stringify({
         id: "dispute-smoke-job-001",
+        lane: "benchmark-showcase",
         category: "coding",
         tier: "starter",
         rewardAmount: 3,
@@ -1362,6 +1372,7 @@ test("http smoke: /jobs/explain-eligibility surfaces the explainEligibility tool
       headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
       body: JSON.stringify({
         id: "tier-smoke-explain-001",
+        lane: "oss-anchored",
         category: "coding",
         tier: "pro",
         rewardAmount: 8,
@@ -1398,6 +1409,7 @@ test("http smoke: /jobs/estimate-reward surfaces the estimateNetReward tool", { 
       headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
       body: JSON.stringify({
         id: "tier-smoke-reward-001",
+        lane: "benchmark-showcase",
         category: "coding",
         tier: "starter",
         rewardAmount: 4,
@@ -1438,6 +1450,7 @@ test("http smoke: /jobs/recommendations includes per-job tierGate with missing-s
       headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
       body: JSON.stringify({
         id: "tier-smoke-pro-001",
+        lane: "oss-anchored",
         category: "coding",
         tier: "pro",
         rewardAmount: 8,
@@ -1473,6 +1486,7 @@ test("http smoke: /admin/jobs/fire produces a derivative from a recurring templa
       headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
       body: JSON.stringify({
         id: "recurring-smoke-digest",
+        lane: "benchmark-showcase",
         category: "coding",
         tier: "starter",
         rewardAmount: 2,
@@ -1508,6 +1522,7 @@ test("http smoke: admin job creation idempotency replays and rejects payload dri
     const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
     const payload = {
       id: "admin-idempotency-create-smoke",
+      lane: "benchmark-showcase",
       category: "coding",
       tier: "starter",
       rewardAmount: 2,
@@ -1837,6 +1852,7 @@ test("http smoke: admin recurring fire idempotency replays and rejects firedAt d
       headers,
       body: JSON.stringify({
         id: "recurring-fire-idempotency-smoke",
+        lane: "benchmark-showcase",
         category: "coding",
         tier: "starter",
         rewardAmount: 2,
@@ -1895,6 +1911,7 @@ test("http smoke: recurring pause/resume accept idempotency keys", { skip: !RUN 
       headers,
       body: JSON.stringify({
         id: "recurring-idempotency-smoke",
+        lane: "benchmark-showcase",
         category: "coding",
         tier: "starter",
         rewardAmount: 2,
@@ -1966,6 +1983,7 @@ test("http smoke: /admin/jobs rejects recurring template with missing schedule",
       headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
       body: JSON.stringify({
         id: "bad-recurring-job",
+        lane: "benchmark-showcase",
         category: "coding",
         tier: "starter",
         rewardAmount: 1,

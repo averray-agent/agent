@@ -5,6 +5,7 @@ import {
   parseNonNegativeInt,
   withReissueJobId
 } from "./inventory-replenishment.js";
+import { recordLanePostingRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
 
 export class WikipediaMaintenanceIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -148,12 +149,13 @@ export class WikipediaMaintenanceIngestionScheduler {
         }
         const replenishedJob = withReissueJobId(job, inventory.allJobIds, { now });
         if (!this.dryRun) {
-          // Prefer the prefunding create path so the reward is escrowed at
-          // ingestion; fall back to createJob for callers/tests without it.
-          if (typeof this.platformService.createIngestedJob === "function") {
-            await this.platformService.createIngestedJob(replenishedJob);
-          } else {
-            this.platformService.createJob(replenishedJob);
+          try {
+            // Prefer the prefunding create path so the reward is escrowed at
+            // ingestion; fall back to createJob for callers/tests without it.
+            await upsertScheduledIngestedJob(this.platformService, replenishedJob, { prefund: true, now });
+          } catch (error) {
+            if (recordLanePostingRefusal(summary, replenishedJob, error)) continue;
+            throw error;
           }
         }
         seenSources.add(sourceKey);

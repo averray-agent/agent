@@ -189,6 +189,8 @@ test("toPlatformJob creates a benchmark open-data audit job", () => {
   assert.equal(job.id, "open-data-datagov-dataset-123-resource-456");
   assert.equal(job.category, "data");
   assert.equal(job.tier, "starter");
+  assert.equal(job.lane, "liveness");
+  assert.equal(job.rewardAmount, 0.1);
   assert.equal(job.rewardAsset, "USDC");
   assert.equal(job.onboardingWaiverEligible, true);
   assert.equal(job.verifierMode, "benchmark");

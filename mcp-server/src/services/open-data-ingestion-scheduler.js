@@ -6,7 +6,7 @@ import {
   parseDatasets
 } from "../jobs/ingest-open-data-datasets.js";
 import { GuardedSchedulerLoop, ingestionSchedulerOutcome, schedulerRunTimeoutMs } from "./guarded-scheduler-loop.js";
-import { recordIngestSpecHashRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
+import { recordIngestSpecHashRefusal, recordLanePostingRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
 
 export class OpenDataIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -164,8 +164,9 @@ export class OpenDataIngestionScheduler {
           }
           if (!this.dryRun) {
             try {
-              await upsertScheduledIngestedJob(this.platformService, job, { prefund: true });
+              await upsertScheduledIngestedJob(this.platformService, job, { prefund: true, now });
             } catch (error) {
+              if (recordLanePostingRefusal(summary, job, error)) continue;
               if (recordIngestSpecHashRefusal(summary, job, error)) continue;
               throw error;
             }

@@ -1,6 +1,6 @@
 import { ingestOpenApiSpecs, openApiSpecKey, parseOpenApiSpecs } from "../jobs/ingest-openapi-specs.js";
 import { GuardedSchedulerLoop, ingestionSchedulerOutcome, schedulerRunTimeoutMs } from "./guarded-scheduler-loop.js";
-import { recordIngestSpecHashRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
+import { recordIngestSpecHashRefusal, recordLanePostingRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
 
 export class OpenApiSpecIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -128,8 +128,9 @@ export class OpenApiSpecIngestionScheduler {
         }
         if (!this.dryRun) {
           try {
-            await upsertScheduledIngestedJob(this.platformService, job);
+            await upsertScheduledIngestedJob(this.platformService, job, { now });
           } catch (error) {
+            if (recordLanePostingRefusal(summary, job, error)) continue;
             if (recordIngestSpecHashRefusal(summary, job, error)) continue;
             throw error;
           }

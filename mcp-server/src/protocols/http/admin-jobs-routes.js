@@ -61,7 +61,7 @@ export function createAdminJobsRoutes({
       return respondWithMutationReceipt(response, idempotency, 200, dryRunBody(result));
     }
 
-    const { created, skipped, errors } = createJobsFromImportResult(service, result.jobs);
+    const { created, skipped, errors } = await createJobsFromImportResult(service, result.jobs);
     const status = errors.length ? 207 : 201;
     return respondWithMutationReceipt(
       response,
@@ -186,7 +186,7 @@ export function createAdminJobsRoutes({
         respond(response, replay.statusCode, replay.body);
         return true;
       }
-      const derivative = service.fireRecurringJob(templateId, { firedAt });
+      const derivative = await service.fireRecurringJob(templateId, { firedAt });
       await storeIdempotentMutationReceipt({
         bucket: "admin_jobs_fire",
         key: mutationKey,

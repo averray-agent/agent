@@ -87,6 +87,8 @@ test("toPlatformJob creates standards freshness audit job", async () => {
   assert.equal(job.id, "standards-w3c-vc-data-model-2-0");
   assert.equal(job.category, "docs");
   assert.equal(job.tier, "starter");
+  assert.equal(job.lane, "liveness");
+  assert.equal(job.rewardAmount, 0.1);
   assert.equal(job.rewardAsset, "USDC");
   assert.equal(job.onboardingWaiverEligible, true);
   assert.equal(job.verifierMode, "benchmark");

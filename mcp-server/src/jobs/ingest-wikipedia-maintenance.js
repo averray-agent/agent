@@ -204,6 +204,7 @@ export function toPlatformJob(article, score = scoreArticle(article)) {
     requiredRole: "worker",
     category: "wikipedia",
     tier: "starter",
+    lane: "benchmark-showcase",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: task.rewardAmount,
     verifierMode: "benchmark",

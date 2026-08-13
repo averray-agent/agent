@@ -98,6 +98,7 @@ export class PlatformService {
     this.workerExposurePolicy = workerExposurePolicy;
     this.workerDailyExposurePolicy = workerDailyExposurePolicy;
     this.catalogueDailyBudget = catalogueDailyBudget;
+    this.catalogueLaneDiscipline = undefined;
     this.githubIssueIngestionScheduler = undefined;
     this.wikipediaMaintenanceIngestionScheduler = undefined;
     this.osvAdvisoryIngestionScheduler = undefined;
@@ -207,6 +208,10 @@ export class PlatformService {
     this.rewardBankHealthProvider = typeof provider === "function" ? provider : undefined;
   }
 
+  setCatalogueLaneDiscipline(discipline) {
+    this.catalogueLaneDiscipline = discipline;
+  }
+
   async resolveRewardBankHealthForClaimability(now = new Date()) {
     if (
       !this.blockchainGateway?.isEnabled?.()
@@ -306,14 +311,19 @@ export class PlatformService {
 
   async createAdminJob(input, { posterWallet = undefined } = {}) {
     const jobInput = await this.withRegisteredExternalSchema(input);
-    const created = this.createJob(jobInput);
-    try {
-      await this.reserveRecurringTemplateFunding(created, posterWallet);
-      return created;
-    } catch (error) {
-      this.jobCatalogService.removeJob(created.id);
-      throw error;
-    }
+    const action = async () => {
+      const created = this.createJob(jobInput);
+      try {
+        await this.reserveRecurringTemplateFunding(created, posterWallet);
+        return created;
+      } catch (error) {
+        this.jobCatalogService.removeJob(created.id);
+        throw error;
+      }
+    };
+    return this.catalogueLaneDiscipline?.post
+      ? this.catalogueLaneDiscipline.post(jobInput, action)
+      : action();
   }
 
   /**
@@ -326,8 +336,9 @@ export class PlatformService {
    * run, so the job is kept and stamped funding.state="pending"; the discovery
    * gate (summarizeJobClaimState) then keeps it out of the claimable set.
    */
-  async createIngestedJob(input, { now = new Date() } = {}) {
-    const created = await this.upsertIngestedJob(input, { now });
+  async createIngestedJob(input, options = {}) {
+    const now = options.now ?? new Date();
+    const created = await this.upsertIngestedJob(input, options);
     if (!this.shouldPrefundIngestedJobs()) {
       return created;
     }
@@ -357,7 +368,11 @@ export class PlatformService {
     return created;
   }
 
-  async upsertIngestedJob(input, { now = new Date() } = {}) {
+  async upsertIngestedJob(input, options = {}) {
+    const now = options.now ?? new Date();
+    const compatibleDefinitions = Array.isArray(options.compatibleDefinitions)
+      ? options.compatibleDefinitions
+      : [];
     const targetJobId = this.jobCatalogService.normalizeId(input?.id);
     const existing = this.jobs.find((job) => job.id === targetJobId);
     const prepared = applyIngestionOnboardingWaiverPolicy({
@@ -373,7 +388,9 @@ export class PlatformService {
       return this.jobCatalogService.upsertJob(prepared);
     }
 
-    const live = await this.blockchainGateway.getJob(candidate.id);
+    const live = Object.hasOwn(options, "liveJob")
+      ? options.liveJob
+      : await this.blockchainGateway.getJob(candidate.id);
     if (Number(live?.state ?? 0) === 0) {
       return this.jobCatalogService.upsertJob(prepared);
     }
@@ -384,6 +401,22 @@ export class PlatformService {
     );
     if (committedSpecHash && candidateSpecHash === committedSpecHash) {
       return this.jobCatalogService.upsertJob(prepared);
+    }
+
+    // Posting migrations may name exact historical definitions. They only
+    // hydrate when one independently reproduces the immutable chain hash;
+    // an approximate or unrelated fallback still takes the drift path below.
+    for (const compatibleInput of compatibleDefinitions) {
+      const compatiblePrepared = applyIngestionOnboardingWaiverPolicy(compatibleInput);
+      const compatible = this.jobCatalogService.normalizeJobInput(compatiblePrepared);
+      if (compatible.id !== candidate.id) continue;
+      this.validateJobRewardMinBalance(compatible);
+      const compatibleSpecHash = hashCanonicalContent(
+        this.jobCatalogService.withLifecycle(compatible, now)
+      );
+      if (committedSpecHash && compatibleSpecHash === committedSpecHash) {
+        return this.jobCatalogService.upsertJob(compatiblePrepared);
+      }
     }
 
     const servedSpecHash = existing
@@ -501,7 +534,11 @@ export class PlatformService {
   }
 
   fireRecurringJob(templateId, options = {}) {
-    return this.jobCatalogService.fireRecurringJob(templateId, options);
+    const action = () => this.jobCatalogService.fireRecurringJob(templateId, options);
+    if (!this.catalogueLaneDiscipline?.post) return action();
+    const firedAt = options.firedAt ?? new Date();
+    const candidate = this.jobCatalogService.getRecurringPostingCandidate(templateId, { firedAt });
+    return this.catalogueLaneDiscipline.post(candidate, action, { now: firedAt });
   }
 
   pauseRecurringTemplate(templateId) {
@@ -541,6 +578,7 @@ export class PlatformService {
       jobSpecHashSweeper,
       jobStaleSweeper,
       submittedJobAutoVerifier,
+      catalogueLanes,
       recentSessions,
       hostDiagnostics,
       siweAuthTelemetry
@@ -702,6 +740,7 @@ export class PlatformService {
         liveness: { ok: true, state: "disabled", staleAfterMs: 0 },
         lastRun: undefined
       },
+      getCatalogueLaneStatusSafely(this.catalogueLaneDiscipline),
       this.jobExecutionService.listRecentSessions(14),
       Promise.resolve().then(() => collectHostDiagnostics()),
       resolveSiweAuthTelemetry(this.stateStore)
@@ -889,6 +928,7 @@ export class PlatformService {
       scheduler,
       hostDiagnostics,
       providerOperations,
+      catalogueLanes,
       githubIngestion: githubIngestion,
       wikipediaIngestion: wikipediaIngestion,
       osvIngestion: osvIngestion,
@@ -1827,6 +1867,22 @@ export class PlatformService {
     });
     return {
       providerOperations: sanitizeProviderOperations(providerOperations)
+    };
+  }
+}
+
+async function getCatalogueLaneStatusSafely(discipline) {
+  if (typeof discipline?.getBoardSnapshot !== "function") {
+    return { status: "unavailable", reason: "catalogue_lane_discipline_not_initialised", lanes: [] };
+  }
+  try {
+    return await discipline.getBoardSnapshot();
+  } catch (error) {
+    return {
+      status: "unavailable",
+      reason: "catalogue_lane_status_read_failed",
+      error: error?.message ?? "status_failed",
+      lanes: []
     };
   }
 }

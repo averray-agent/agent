@@ -32,6 +32,7 @@ export function normalizeJobInput(input) {
   const claimTtlSeconds = Number(input?.claimTtlSeconds ?? 3600);
   const retryLimit = Number(input?.retryLimit ?? 1);
   const rewardAsset = normalizeAssetSymbol(input?.rewardAsset);
+  const lane = normaliseTextField(input?.lane)?.toLowerCase();
   const jobType = normalizeJobType(input?.jobType);
   const requiredRole = normalizeAgentRole(input?.requiredRole ?? DEFAULT_ROLE_BY_JOB_TYPE[jobType]);
 
@@ -103,6 +104,7 @@ export function normalizeJobInput(input) {
     requiredRole,
     rewardAsset,
     rewardAmount,
+    ...(lane ? { lane } : {}),
     verifierMode,
     verifierConfig: buildVerifierConfig(verifierMode, input),
     inputSchemaRef,

@@ -275,6 +275,7 @@ export function toPlatformJob({ target, advisory, advisories, fixedVersion, scor
     requiredRole: "worker",
     category: "security",
     tier: "starter",
+    lane: "oss-anchored",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 0.3,
     verifierMode: "benchmark",

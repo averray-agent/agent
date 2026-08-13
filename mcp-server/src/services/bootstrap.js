@@ -8,6 +8,11 @@ import { createWorkerExposurePolicy } from "../core/worker-exposure.js";
 import { loadDepositVestingConfig } from "../core/deposit-vesting.js";
 import { createWorkerDailyExposurePolicy } from "../core/worker-daily-exposure.js";
 import { createCatalogueDailyBudget } from "../core/catalogue-daily-budget.js";
+import {
+  assertCatalogueDefinitionsHaveLanes,
+  createCatalogueLaneDiscipline,
+  loadCatalogueLaneRegistry
+} from "../core/catalogue-lane-discipline.js";
 import { migrateLegacyBankXcmGenerationState } from "./bank-xcm-watch-migration.js";
 import { AccountOverlayStore } from "../core/account-overlay-store.js";
 import { PolicyService } from "../core/policy-service.js";
@@ -186,13 +191,15 @@ export function createPlatformService() {
     workerExposurePolicy
   });
   const catalogueDailyBudget = createCatalogueDailyBudget({ stateStore });
+  const catalogueLaneRegistry = loadCatalogueLaneRegistry();
+  assertCatalogueDefinitionsHaveLanes(jobs, catalogueLaneRegistry);
   const eventBus = new EventBus({ eventStore: stateStore });
   const accounts = new AccountOverlayStore({ stateStore });
   accounts.seed(...SEED_DEV_OVERLAY);
   // No hydrate here — test factory uses a fresh in-memory state-store
   // every construction; nothing to hydrate from. createPlatformRuntime
   // below hydrates against the production durable store.
-  return new PlatformService(
+  const platformService = new PlatformService(
     jobs,
     profiles,
     accounts,
@@ -206,6 +213,13 @@ export function createPlatformService() {
     workerDailyExposurePolicy,
     catalogueDailyBudget
   );
+  platformService.setCatalogueLaneDiscipline(createCatalogueLaneDiscipline({
+    stateStore,
+    registry: catalogueLaneRegistry,
+    gasEstimateUsdc: subsidyConfig.gasEstimateUsdc,
+    selfWallets: parseSelfWallets(process.env)
+  }));
+  return platformService;
 }
 
 export function createDepositPoolDoor({
@@ -381,6 +395,11 @@ export async function createPlatformRuntime() {
     logger,
     () => createCatalogueDailyBudget({ stateStore, env: process.env })
   );
+  const catalogueLaneRegistry = initStep("init-catalogue-lane-registry", logger, () => {
+    const registry = loadCatalogueLaneRegistry(process.env);
+    assertCatalogueDefinitionsHaveLanes(jobs, registry);
+    return registry;
+  });
   try {
     await migrateLegacyBankXcmGenerationState(stateStore, { logger });
   } catch (error) {
@@ -431,6 +450,16 @@ export async function createPlatformRuntime() {
       catalogueDailyBudget
     )
   );
+  const catalogueLaneDiscipline = initStep("init-catalogue-lane-discipline", logger, () =>
+    createCatalogueLaneDiscipline({
+      stateStore,
+      registry: catalogueLaneRegistry,
+      gasEstimateUsdc: loadOnboardingSubsidyBudgetConfig(process.env).gasEstimateUsdc,
+      selfWallets: parseSelfWallets(process.env),
+      logger
+    })
+  );
+  platformService.setCatalogueLaneDiscipline(catalogueLaneDiscipline);
   const rewardBankHealthProvider = initStep(
     "init-reward-bank-health-provider",
     logger,
@@ -783,6 +812,7 @@ export async function createPlatformRuntime() {
   }
   return {
     platformService,
+    catalogueLaneDiscipline,
     rewardBankHealthProvider,
     policyService,
     verifierService,
@@ -848,6 +878,15 @@ function createMetrics() {
   registry.gauge("sse_active_connections", "Currently open SSE connections.");
   registry.gauge("state_store_backend", "1 when state store backend matches the label.", ["backend"]);
   return registry;
+}
+
+function parseSelfWallets(env) {
+  return new Set(
+    String(env?.ARRIVAL_SELF_WALLETS ?? "")
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter((value) => /^0x[0-9a-f]{40}$/u.test(value))
+  );
 }
 
 function initStep(name, logger, factory) {

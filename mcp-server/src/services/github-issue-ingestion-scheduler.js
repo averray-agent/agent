@@ -1,5 +1,5 @@
 import { ingestGithubIssues } from "../jobs/ingest-github-issues.js";
-import { recordIngestSpecHashRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
+import { recordIngestSpecHashRefusal, recordLanePostingRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
 import {
   DEFAULT_OPEN_PR_CAP_PER_REPO,
   DEFAULT_SECURITY_STANDARDS_DENYLIST,
@@ -165,8 +165,9 @@ export class GithubIssueIngestionScheduler {
           }
           if (!this.dryRun) {
             try {
-              await upsertScheduledIngestedJob(this.platformService, job);
+              await upsertScheduledIngestedJob(this.platformService, job, { now });
             } catch (error) {
+              if (recordLanePostingRefusal(summary, job, error)) continue;
               if (recordIngestSpecHashRefusal(summary, job, error)) continue;
               throw error;
             }

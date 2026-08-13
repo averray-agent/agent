@@ -33,6 +33,7 @@ test("normalizeJobInput returns the canonical job record shape", () => {
     ...BASE_JOB,
     jobType: "review",
     requiredRole: "reviewer",
+    lane: "OSS-Anchored",
     rewardAsset: "usdc",
     source: { type: "github_issue", repo: "example/project" },
     acceptanceCriteria: [" Open a PR ", "", "Run tests"],
@@ -50,6 +51,7 @@ test("normalizeJobInput returns the canonical job record shape", () => {
   assert.equal(job.rewardAsset, "USDC");
   assert.equal(job.jobType, "review");
   assert.equal(job.requiredRole, "reviewer");
+  assert.equal(job.lane, "oss-anchored");
   assert.deepEqual(job.acceptanceCriteria, ["Open a PR", "Run tests"]);
   assert.deepEqual(job.source, { type: "github_issue", repo: "example/project" });
   assert.deepEqual(job.delegationPolicy, {

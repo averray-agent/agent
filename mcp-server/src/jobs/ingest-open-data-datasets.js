@@ -312,8 +312,9 @@ export function toPlatformJob(target, score = scoreDatasetTarget(target)) {
     requiredRole: "worker",
     category: "data",
     tier: "starter",
+    lane: "liveness",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
-    rewardAmount: 0.25,
+    rewardAmount: 0.1,
     verifierMode: "benchmark",
     verifierTerms: substantiveVerifierTerms(
       target.datasetTitle,
