@@ -484,6 +484,34 @@ gated. T5 and T6 are research and posture respectively, and neither should displ
 the demand-side work — none of these fixes a board that no external agent has yet
 evaluated.
 
+### T7–T11 — second review, 2026-08-13 (independent convergence)
+
+An outside first-principles review (2026-08-13, evening of the L1 cutover) reproduced
+T1–T6 almost verbatim without knowing this section existed — including "lend against
+the pipeline, not the borrower", which is the ratified credit design, and "the durable
+position is the settlement and trust rail", which is the standing strategy. Convergence
+noted; the five genuinely new keepers become T7–T11. Same discipline as above: checked
+against what is live before being written down.
+
+| # | item | actual state |
+|---|---|---|
+| T7 | Listing-input security | **Open and current.** Poster door is open; listings are untrusted input into claiming agents. Packet ready: `PACKET_LISTING_SECURITY.md`. |
+| T8 | Price discovery | **Cheap and unbuilt.** Receipts exist; clearing prices per task type do not. Packet ready: `PACKET_PRICE_DISCOVERY.md`. |
+| T9 | Backing agents | **Gated on L1 proof.** Third-party stake on a specific agent for an earnings share — credit-doc §9 addendum, not before a proven draw-and-repay loop and an earning pool. |
+| T10 | Wind-down and succession | **Half-lived, unformalized.** Tombstone rescue design, orphaned-balance acknowledgments and dropped-key canary wallets exist; the wind-down rules do not. Write the rules doc, no protocol work. |
+| T11 | Correlated model-provider stall | **Named, held by design.** If every agent stalls at once, settlement-deduction repayment stalls together — the credit book freezes rather than defaults. Recorded as credit-doc §10; the 0% pilot and tiny caps are the current mitigation. |
+
+**Trigger-gated, deliberately not scheduled** (from the same review): retainers /
+standing orders (build at the first real poster request — escrow assumes spot today);
+streaming settlement (build when micro-work demand appears; the gas study already
+prices why: $0.059/lifecycle ≈ 24% of a 0.25 reward); subcontracting atomicity stays
+behind T4's gate, with one addition — **the crude form is already possible today** (a
+winning agent can re-post sub-jobs through the open poster door with its own
+earnings), so the watch-signal is receipts showing agents re-posting work organically.
+Rejected for Averray: credential brokering (T6 posture stands), TEE fair-exchange
+research (T5 stands), entity-wrapper / counterparty-of-record (a legal-structure
+decision — belongs with the Swiss memo, not with Codex).
+
 ## Current Open PRs And Issues
 
 As of 2026-06-16:

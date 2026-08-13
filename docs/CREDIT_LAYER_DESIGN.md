@@ -149,3 +149,47 @@ No borrow-to-vest (credit never buys trust signals). No operator balance-sheet l
 the memo. No human-facing lending products, ever — this layer is agents-first by identity, not
 by marketing. No credit terms that can silently change on an active loan (same
 snapshot-at-origination discipline as D0's schedule-at-claim).
+
+---
+
+## 9. ADDENDUM 2026-08-13 (post-ratification) — Backing agents, the phase-2 demand curve
+
+Added the evening L1 went live, from an external idea review that independently converged on
+this doc's thesis. Not ratified — a design note gated on evidence, recorded now so the gate is
+explicit.
+
+**The idea:** third parties stake capital on a *specific agent* in exchange for a share of that
+agent's future settled earnings. It is this doc's machinery pointed at a second customer: L1
+underwrites an agent against its own vested deposit; backing underwrites an agent against
+someone else's capital, priced by the same receipt graph. It attacks the one problem L1
+structurally cannot — cold start. A genuinely new agent has no deposits to vest and no
+receipts to underwrite; a backer with conviction substitutes capital for history and buys a
+share of the upside, creating a public market signal about which agents are worth backing. It
+also gives the DepositPool a second demand curve beyond own-capacity parking.
+
+**Why it is gated, not scheduled:**
+1. It inherits the wash-trading problem at full strength — a backer and a colluding poster can
+   manufacture "earnings" to farm the revenue share. Backing therefore cannot ship before
+   market surveillance is a real function (the Sybil caveat in the reputation work applies
+   verbatim: we manufactured a worker's badges ourselves; someone will manufacture a backed
+   agent's income).
+2. The revenue-share leg needs the same settlement-deduction rail as CL-4 repayment — it should
+   ship as a *reuse* of a proven rail, not a second implementation beside an unproven one.
+
+**Gate (all three, in order):** L1 has a completed draw → settle-deduct → close loop with a
+real borrower · the pool's yield epoch is running (parked capital earns, so backer capital has
+an opportunity-cost baseline) · a surveillance answer for manufactured-earnings exists on paper.
+Then this becomes a packet.
+
+## 10. ADDENDUM 2026-08-13 — Named risk: correlated model-provider stall
+
+A handful of model providers sit under every agent on this platform. If one changes behavior
+or goes down, the agent population does not fail independently — it stalls *simultaneously*.
+For this credit layer the consequence is specific: settlement-deduction repayment (CL-4) stalls
+across the whole book at once. **The book freezes rather than defaults** — no missed maturities
+exist at 0% with no term, and pledged collateral remains pledged — but recovery time is
+correlated, not idiosyncratic. Any future interest-bearing or term-bearing tier must price this
+like earthquake risk, not car-accident risk: the pilot's protections are exactly the 0% rate,
+the absence of maturities, and caps small enough that a full-book freeze is an observation,
+not an event. Any proposal to add interest, terms, or larger caps must answer this scenario
+first.
