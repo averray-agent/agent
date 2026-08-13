@@ -286,6 +286,10 @@ export function loadBlockchainConfig(env = process.env) {
     reputationSbtAddress: env.REPUTATION_SBT_ADDRESS ?? "",
     discoveryRegistryAddress: normalizeOptionalAddress(env.DISCOVERY_REGISTRY_ADDRESS, "DISCOVERY_REGISTRY_ADDRESS"),
     xcmWrapperAddress: normalizeOptionalAddress(env.XCM_WRAPPER_ADDRESS, "XCM_WRAPPER_ADDRESS"),
+    xcmWrapperDeploymentBlock: normalizeOptionalU32(
+      deploymentManifest?.deploymentBlocks?.xcmWrapper,
+      "deployments/<profile>.json#deploymentBlocks.xcmWrapper"
+    ),
     hydrationUsdcAdapterAddress: normalizeOptionalAddress(
       env.HYDRATION_USDC_ADAPTER_ADDRESS,
       "HYDRATION_USDC_ADAPTER_ADDRESS"

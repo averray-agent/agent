@@ -22,6 +22,7 @@ import { createAdminGithubRoutes } from "./admin-github-routes.js";
 import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
 import { createAdminSessionsRoutes } from "./admin-sessions-routes.js";
 import { createAdminStatusRoutes } from "./admin-status-routes.js";
+import { createAdminTreasuryRoutes } from "./admin-treasury-routes.js";
 import { createAdminXcmRoutes } from "./admin-xcm-routes.js";
 import { createActivityRoutes } from "./activity-routes.js";
 import { createAccountRoutes } from "./account-routes.js";
@@ -78,6 +79,7 @@ import {
 } from "../../services/arrival-observatory.js";
 import { signTokenFromConfig, verifyTokenFromConfig } from "../../auth/jwt.js";
 import { createArrivalRoutes } from "./arrival-routes.js";
+import { TreasurySummaryService } from "../../services/treasury-summary.js";
 
 const {
   platformService: service,
@@ -399,6 +401,19 @@ const handleAdminStatusRoute = createAdminStatusRoutes({
   respond,
   respondWithMutationReceipt,
   service,
+});
+
+const treasurySummary = new TreasurySummaryService({
+  creditPoolDoor,
+  gateway,
+  platformService: service,
+  stateStore,
+  bankLaneFeed
+});
+const handleAdminTreasuryRoute = createAdminTreasuryRoutes({
+  authMiddleware,
+  respond,
+  treasurySummary
 });
 
 const usdcLiquidityStatusService = createUsdcLiquidityStatusService({ gateway });
@@ -918,6 +933,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleAdminSessionsRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleAdminTreasuryRoute({ request, response, url, pathname })) {
       return;
     }
 

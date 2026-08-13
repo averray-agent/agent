@@ -4,7 +4,9 @@ import type { AlertItem } from "@/components/overview/NeedsActionList";
 import type { BalanceCard } from "@/components/treasury/BalanceSheetStrip";
 import type { PositionCard } from "@/components/treasury/AccountPositionsGrid";
 import type { ActiveLoan } from "@/components/treasury/CreditLinePanel";
+import type { PolicyItem } from "@/components/treasury/PolicyGateFooter";
 import type { StrategyLane } from "@/components/treasury/StrategyRoutingTable";
+import type { XcmPhase } from "@/components/treasury/XcmObserverLane";
 import { countOpenJobs } from "@/lib/api/job-lifecycle";
 
 type RawRecord = Record<string, unknown>;
@@ -16,7 +18,7 @@ function asRecord(value: unknown): RawRecord {
 function asArray(value: unknown): RawRecord[] {
   if (Array.isArray(value)) return value.map(asRecord);
   const record = asRecord(value);
-  for (const key of ["items", "positions", "strategies", "sessions", "jobs"]) {
+  for (const key of ["items", "rows", "positions", "strategies", "sessions", "jobs"]) {
     if (Array.isArray(record[key])) return record[key].map(asRecord);
   }
   return [];
@@ -75,9 +77,12 @@ function assetAmount(bucket: unknown, fallbackValue: unknown, fallbackUnit: stri
 }
 
 function strategyAssetUnit(strategyPayload: unknown, fallbackUnit: string): string {
+  const payload = asRecord(strategyPayload);
+  const registryRows = asArray(asRecord(payload.strategyLanes).rows);
+  const positions = registryRows.length ? registryRows : asArray(payload.positions);
   const units = new Set(
-    asArray(asRecord(strategyPayload).positions)
-      .filter((position) => numberValue(position.routedAmount ?? position.shares) > 0)
+    positions
+      .filter((position) => numberValue(position.allocation ?? position.routedAmount ?? position.shares) > 0)
       .map((position) => text(position.assetSymbol, text(position.asset)))
       .filter(Boolean)
   );
@@ -155,10 +160,7 @@ export function buildBalanceCards(accountPayload: unknown, strategyPayload: unkn
   );
   const collateral = assetAmount(account.collateralLocked, undefined, accountUnit);
   const debt = assetAmount(account.debtOutstanding, summary.debt, accountUnit);
-  const capacity = numberValue(
-    summary.borrowCapacity,
-    collateral.unit === "DOT" && collateral.value ? collateral.value / 1.5 : 0
-  );
+  const capacity = numberValue(summary.borrowCapacity);
   const debtFill = debt.unit === "DOT" ? pct(debt.value, debt.value + capacity) : 0;
   const debtCap = debt.unit === "DOT"
     ? { label: `Capacity ${fmt(debt.value + capacity)} DOT · headroom ${fmt(capacity)}`, fill: debtFill }
@@ -200,23 +202,24 @@ export function buildBalanceCards(accountPayload: unknown, strategyPayload: unkn
 }
 
 export function buildStrategyLanes(strategyPayload: unknown): StrategyLane[] {
-  return asArray(asRecord(strategyPayload).positions).map((position, index) => {
-    const routed = numberValue(position.routedAmount ?? position.shares);
-    const attention = Boolean(position.attention);
-    const status = attention ? "warn" : routed > 0 ? "ok" : "blocked";
+  const payload = asRecord(strategyPayload);
+  const positions = asArray(asRecord(payload.strategyLanes).rows).length
+    ? asArray(asRecord(payload.strategyLanes).rows)
+    : asArray(payload.positions);
+  return positions.map((position, index) => {
+    const routed = numberValue(position.allocation ?? position.routedAmount ?? position.shares);
+    const verdict = deriveOpsVerdict(asRecord(position.verdict).reason, Boolean(position.attention));
     return {
       id: text(position.strategyId, `lane-${index + 1}`),
-      laneTitle: text(position.strategyId, `Strategy ${index + 1}`),
-      // Asset ticker only when the payload names one — an unknown asset
-      // must not silently render as DOT (settlement asset here is USDC).
-      laneMeta: `${text(position.assetSymbol, text(position.asset, "asset n/a"))} · ${text(position.executionMode, "sync")}`,
+      laneTitle: text(position.strategyLabel, text(position.strategyId, `Strategy ${index + 1}`)),
+      laneMeta: `${text(position.assetSymbol, text(position.asset, "asset n/a"))} · ${shortAddress(text(position.laneAddress, text(position.adapter, "lane n/a")))}`,
       strategyKind: text(position.riskLabel, text(position.yieldLabel, "strategy")),
       allocated: `${fmt(routed)}${text(position.assetSymbol) ? ` ${text(position.assetSymbol)}` : ""}`,
       coverage: numberValue(position.deploymentShareBps) ? Math.round(numberValue(position.deploymentShareBps) / 100) : routed > 0 ? 100 : 0,
-      status,
-      statusLabel: text(position.statusLabel, status === "ok" ? "Routed" : "Idle"),
-      allocatePrimary: !routed && !attention,
-      allocateDisabled: status === "blocked",
+      status: verdict.status,
+      statusLabel: text(position.statusLabel, verdict.label),
+      allocatePrimary: false,
+      allocateDisabled: true,
     };
   });
 }
@@ -276,14 +279,16 @@ export function buildCreditLine(accountPayload: unknown, borrowPayload: unknown)
   const account = asRecord(accountPayload);
   const borrow = asRecord(borrowPayload);
   const asset = text(borrow.asset);
-  const capacityValue = borrow.borrowCapacity;
+  const capacityValue = borrow.headroom ?? borrow.borrowCapacity;
   const capacityAvailable =
     (typeof capacityValue === "number" ||
       (typeof capacityValue === "string" && Boolean(capacityValue.trim()))) &&
     Number.isFinite(Number(capacityValue));
-  const debt = asset ? numberValue(asRecord(account.debtOutstanding)[asset]) : 0;
+  const debt = borrow.used === undefined
+    ? (asset ? numberValue(asRecord(account.debtOutstanding)[asset]) : 0)
+    : numberValue(borrow.used);
   const borrowCapacity = capacityAvailable ? numberValue(capacityValue) : 0;
-  const total = debt + borrowCapacity;
+  const total = borrow.total === undefined ? debt + borrowCapacity : numberValue(borrow.total);
   const usedPct = pct(debt, total);
   const unit = asset ? ` ${asset}` : "";
   return {
@@ -293,8 +298,106 @@ export function buildCreditLine(accountPayload: unknown, borrowPayload: unknown)
     usedPct,
     headerPct: total > 0 ? Math.max(0, 100 - usedPct) : 0,
     headroom: `${fmt(borrowCapacity)}${unit}`,
-    loans: buildLoans(accountPayload),
+    loans: Array.isArray(borrow.activeLoans)
+      ? borrow.activeLoans.map((loan, index) => {
+          const row = asRecord(loan);
+          const source = text(row.source, "live liability");
+          return {
+            id: text(row.id, `loan-${index + 1}`),
+            name: source.startsWith("AgentAccountCore") ? `${asset} account debt` : `CreditPool loan ${shortId(text(row.id))}`,
+            sub: source,
+            amount: fmt(row.amount),
+            amountUnit: text(row.asset, asset),
+          };
+        })
+      : buildLoans(accountPayload),
   };
+}
+
+export function buildXcmObserverPhases(treasuryPayload: unknown): XcmPhase[] {
+  const feed = asRecord(asRecord(treasuryPayload).xcmObserver);
+  if (feed.available !== true || feed.stale === true) return [];
+  const rows = asArray(feed.rows);
+  const latestByRequest = new Map<string, RawRecord>();
+  for (const row of rows) {
+    const requestId = text(row.requestId);
+    if (requestId) latestByRequest.set(requestId, row);
+  }
+  const definitions = [
+    { step: "01 · REQUEST", title: "Request", stage: "request" },
+    { step: "02 · OBSERVE", title: "Observe", stage: "observe" },
+    { step: "03 · SETTLE", title: "Settle", stage: "settle" },
+  ];
+  return definitions.flatMap((definition) => {
+    const matching = rows.filter((row) => text(row.stage) === definition.stage);
+    if (!matching.length) return [];
+    const latest = matching.at(-1) ?? {};
+    const requestId = text(latest.requestId);
+    const block = numberValue(latest.blockNumber, -1);
+    return [{
+      step: definition.step,
+      title: definition.title,
+      pending: [...latestByRequest.values()].filter((row) => (
+        text(row.stage) === definition.stage && xcmRowIsPending(row)
+      )).length,
+      lastEventMsg: `${shortId(requestId)} · ${text(latest.status, "unknown")}`,
+      lastEventMeta: block >= 0 ? `block ${block}` : text(latest.timestamp, "block not emitted by source"),
+      nextLabel: "Indexed rows",
+      nextValue: String(matching.length),
+    }];
+  });
+}
+
+function xcmRowIsPending(row: RawRecord): boolean {
+  const stage = text(row.stage);
+  const status = text(row.status).toLowerCase();
+  if (stage === "request" || stage === "observe") return true;
+  return !["succeeded", "failed", "cancelled", "rejected", "settled"].includes(status);
+}
+
+export function buildPolicyGateItems(treasuryPayload: unknown): PolicyItem[] {
+  const feed = asRecord(asRecord(treasuryPayload).policyGate);
+  if (feed.available !== true || feed.stale === true) return [];
+  return asArray(feed.rows).map((row) => {
+    const kind = text(row.kind);
+    const approved = row.approved === true;
+    const value = kind === "role"
+      ? shortAddress(text(row.address, "address unavailable"))
+      : `${text(row.valueRaw, "value unavailable")} ${text(row.unit)}`.trim();
+    return {
+      tag: text(row.tag, "POLICY"),
+      name: text(row.name, "Treasury policy"),
+      meta: value,
+      signerNote: kind === "role"
+        ? `${approved ? "authorized" : "not authorized"} · ${text(row.source)}`
+        : text(row.source),
+    };
+  });
+}
+
+export function treasuryFeedAvailable(treasuryPayload: unknown, key: string): boolean {
+  const feed = asRecord(asRecord(treasuryPayload)[key]);
+  return feed.available === true && feed.stale !== true;
+}
+
+export function treasuryHasWarnings(treasuryPayload: unknown): boolean {
+  return asArray(asRecord(treasuryPayload).warnings).length > 0;
+}
+
+export function deriveOpsVerdict(reason: unknown, attention = false): { status: "ok" | "warn" | "blocked"; label: string } {
+  const normalized = text(reason).toLowerCase();
+  if (normalized === "wrapper_registered_and_policy_approved") return { status: "ok", label: "Registered" };
+  if (normalized === "strategy_not_policy_approved") return { status: "blocked", label: "Policy blocked" };
+  if (attention) return { status: "warn", label: "Attention" };
+  return { status: "blocked", label: "Unavailable" };
+}
+
+function shortAddress(value: string): string {
+  return value.length > 14 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
+}
+
+function shortId(value: string): string {
+  return value.length > 16 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value || "unknown";
 }
 
 export function buildRoomVitals(

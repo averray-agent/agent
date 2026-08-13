@@ -88,6 +88,7 @@ const ROOT_ENDPOINTS = [
   "/admin/xcm/observe",
   "/admin/xcm/finalize",
   "/admin/status",
+  "/admin/treasury/summary",
   "/admin/github/status"
 ];
 

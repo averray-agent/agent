@@ -13,6 +13,7 @@ export interface ActiveLoan {
 }
 
 export interface CreditLinePanelProps {
+  sub?: string;
   presence: CreditFeedPresence;
   capacityAvailable: boolean;
   capacityUsed: string;
@@ -24,6 +25,7 @@ export interface CreditLinePanelProps {
 }
 
 export function CreditLinePanel({
+  sub = "cap not emitted by API yet",
   presence,
   capacityAvailable,
   capacityUsed,
@@ -37,7 +39,7 @@ export function CreditLinePanel({
     <TreasuryPanel
       eyebrow="Credit line"
       title="Borrowing against collateral"
-      sub="cap not emitted by API yet"
+      sub={sub}
     >
       {presence !== "live" ? (
         <CreditFeedNotice presence={presence} />
