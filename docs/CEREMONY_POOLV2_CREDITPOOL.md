@@ -23,11 +23,12 @@ Invariants that must survive the day:
 
 ## §0 Preconditions (all checked before starting)
 
-- [ ] #1113 merged (legacy drain pin) AND the re-dispatched verification deploy
-      is green (`verify_contract_source=1` clean). The cutover deploy must not
-      fight a sticky freeze. Status 2026-08-13 evening: #1113 in the merge
-      queue; first queue run failed on a corrupt foundryup download
-      (infrastructure, not the diff); retry in flight.
+- [x] #1113 merged (14:15Z) AND the verification deploy is green: run
+      31709778441 — D-03 Tier 2 all 12 contracts `[ok]`, Tier 3 candidate build
+      + immutable-masked comparison PASSED (both waivers hit their exact masked
+      hashes: legacyEscrowCore f194f905…, hydrationUsdcAdapter 0faec68e…),
+      indexer ready + smoke passed, health `ok` with only the two steady-state
+      warnings (xcm_observer_staged, gas_sponsor_disabled). No sticky freeze.
 - [ ] Admin EOA 0x9Ab8531F…4239 ≥ 2.0 DOT and nonce noted. Verified 2026-08-13:
       3.0203 DOT, nonce 15. If nonce ≠ 15 on the day, predictions shift — fine,
       the deploy script re-predicts; update `--expected-start-nonce`.
