@@ -115,17 +115,8 @@ jobs:
         # resolves both mcp-server and indexer. `npm ci` enforces the lock.
         run: npm ci
 
-      - name: Unit tests
+      - name: Backend local suite (unit + HTTP smoke)
         run: npm test --workspace mcp-server
-
-      - name: HTTP smoke tests
-        # Full integration tests that spin up the real HTTP server in a
-        # child process and make real fetch() calls. Kept opt-in for
-        # local dev to stay fast; always on for CI.
-        env:
-          RUN_HTTP_SMOKE: "1"
-        working-directory: mcp-server
-        run: node --test --test-timeout=60000 src/protocols/http/server.smoke.test.js
 
       - name: Ops script regression tests
         run: npm run test:ops

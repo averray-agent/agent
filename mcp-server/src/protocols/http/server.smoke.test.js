@@ -18,8 +18,8 @@ import {
 // complement the unit tests in src/auth/*.test.js which cover the underlying
 // primitives in isolation.
 //
-// Skipped by default because subprocess boot is slower than the pure-unit
-// tests. Run with `RUN_HTTP_SMOKE=1 npm test` when you want the full loop.
+// Skipped inside the pure-unit phase because subprocess boot is slower. The
+// package's standard `npm test` runs a second CI-parity phase with this flag on.
 
 const RUN = process.env.RUN_HTTP_SMOKE === "1";
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -165,7 +165,7 @@ async function runWithServerEnv(envOverrides, fn) {
   }
 }
 
-test("http smoke: production money-like routes require a chain backend", { skip: !RUN }, async () => {
+test("http smoke: production active money-like routes require a chain backend", { skip: !RUN }, async () => {
   await runWithServerEnv({
     NODE_ENV: "production",
     BADGE_RECEIPT_SIGNING: "disabled",
@@ -178,8 +178,6 @@ test("http smoke: production money-like routes require a chain backend", { skip:
     };
     const routes = [
       ["/account/fund", { asset: "DOT", amount: 1 }],
-      ["/account/allocate", { asset: "DOT", amount: 1, strategyId: "default-low-risk" }],
-      ["/account/deallocate", { asset: "DOT", amount: 1, strategyId: "default-low-risk" }],
       ["/account/borrow", { asset: "DOT", amount: 1 }],
       ["/account/repay", { asset: "DOT", amount: 1 }]
     ];
@@ -204,7 +202,10 @@ test("http smoke: production money-like routes require a chain backend", { skip:
       body: JSON.stringify({ recipient: VERIFIER_WALLET, asset: "DOT", amount: 1, transferAuthorization: TRANSFER_AUTHORIZATION })
     });
     assert.equal(paymentResponse.status, 503);
-    assert.deepEqual(await paymentResponse.json(), { reason: "payments_send_disabled" });
+    const payment = await paymentResponse.json();
+    assert.equal(payment.reason, "payments_send_disabled");
+    assert.equal(payment.see.withdrawal.http.path, "/account/withdraw/transactions");
+    assert.equal(payment.see.withdrawal.mcp.tool, "buildWithdrawTransactions");
   });
 });
 
@@ -237,7 +238,7 @@ test("http smoke: /health separates service liveness from treasury capability", 
   });
 });
 
-test("http smoke: sync money-like routes replay idempotent receipts", { skip: !RUN }, async () => {
+test("http smoke: active sync money-like routes replay idempotent receipts", { skip: !RUN }, async () => {
   await runWithServerEnv({ PAYMENTS_SEND_ENABLED: "1" }, async (base) => {
     const token = issueToken(ADMIN_WALLET);
     const headers = {
@@ -265,34 +266,6 @@ test("http smoke: sync money-like routes replay idempotent receipts", { skip: !R
     assert.equal(fundConflict.response.status, 409);
     assert.equal(fundConflict.payload.error, "idempotency_key_payload_mismatch");
 
-    const allocateBody = {
-      asset: "DOT",
-      amount: 4,
-      strategyId: "default-low-risk",
-      idempotencyKey: "money-allocate-1"
-    };
-    const firstAllocate = await postJson("/account/allocate", allocateBody);
-    assert.equal(firstAllocate.response.status, 200);
-    assert.equal(firstAllocate.payload.liquid.DOT, 6);
-    assert.equal(firstAllocate.payload.strategyAllocated.DOT, 4);
-    const replayAllocate = await postJson("/account/allocate", allocateBody);
-    assert.equal(replayAllocate.response.status, 200);
-    assert.deepEqual(replayAllocate.payload, firstAllocate.payload);
-
-    const deallocateBody = {
-      asset: "DOT",
-      amount: 1,
-      strategyId: "default-low-risk",
-      idempotencyKey: "money-deallocate-1"
-    };
-    const firstDeallocate = await postJson("/account/deallocate", deallocateBody);
-    assert.equal(firstDeallocate.response.status, 200);
-    assert.equal(firstDeallocate.payload.liquid.DOT, 7);
-    assert.equal(firstDeallocate.payload.strategyAllocated.DOT, 3);
-    const replayDeallocate = await postJson("/account/deallocate", deallocateBody);
-    assert.equal(replayDeallocate.response.status, 200);
-    assert.deepEqual(replayDeallocate.payload, firstDeallocate.payload);
-
     const transferBody = {
       recipient: VERIFIER_WALLET,
       asset: "DOT",
@@ -303,7 +276,7 @@ test("http smoke: sync money-like routes replay idempotent receipts", { skip: !R
     const firstTransfer = await postJson("/payments/send", transferBody);
     assert.equal(firstTransfer.response.status, 200);
     assert.equal(firstTransfer.payload.status, "sent");
-    assert.equal(firstTransfer.payload.balances.from.liquid.DOT, 5);
+    assert.equal(firstTransfer.payload.balances.from.liquid.DOT, 8);
     assert.equal(firstTransfer.payload.balances.to.liquid.DOT, 2);
     const replayTransfer = await postJson("/payments/send", transferBody);
     assert.equal(replayTransfer.response.status, 200);
@@ -312,8 +285,7 @@ test("http smoke: sync money-like routes replay idempotent receipts", { skip: !R
     const account = await fetch(`${base}/account`, { headers });
     assert.equal(account.status, 200);
     const finalAccount = await account.json();
-    assert.equal(finalAccount.liquid.DOT, 5);
-    assert.equal(finalAccount.strategyAllocated.DOT, 3);
+    assert.equal(finalAccount.liquid.DOT, 8);
   });
 });
 
@@ -611,10 +583,13 @@ test("http smoke: /admin/status returns recurring + maintenance data for admin t
   });
 });
 
-test("http smoke: async XCM allocation requires admin role until assembler ships", { skip: !RUN }, async () => {
+test("http smoke: static retired notice needs no auth, leaks nothing, and is outside money-like classification", { skip: !RUN }, async () => {
   const asyncStrategyId = "0x56444f545f56315f4d4f434b0000000000000000000000000000000000000000";
   await runWithServerEnv(
     {
+      NODE_ENV: "production",
+      BADGE_RECEIPT_SIGNING: "disabled",
+      MUTATION_BACKEND: "required",
       STRATEGIES_JSON: JSON.stringify([
         {
           strategyId: asyncStrategyId,
@@ -626,72 +601,27 @@ test("http smoke: async XCM allocation requires admin role until assembler ships
       ])
     },
     async (base) => {
-      const token = issueToken(STRANGER_WALLET, { roles: [] });
-      const response = await fetch(`${base}/account/allocate`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({ strategyId: asyncStrategyId, amount: 1 })
-      });
-      assert.equal(response.status, 403);
-      const payload = await response.json();
-      assert.equal(payload.error, "async_xcm_admin_required");
-    }
-  );
-});
-
-test("http smoke: async XCM deallocation requires admin role until assembler ships", { skip: !RUN }, async () => {
-  const asyncStrategyId = "0x56444f545f56315f4d4f434b0000000000000000000000000000000000000000";
-  await runWithServerEnv(
-    {
-      STRATEGIES_JSON: JSON.stringify([
-        {
-          strategyId: asyncStrategyId,
-          adapter: "0x1234567890123456789012345678901234567890",
-          kind: "polkadot_vdot",
-          executionMode: "async_xcm",
-          asset: "0xABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD"
-        }
-      ])
-    },
-    async (base) => {
-      const token = issueToken(STRANGER_WALLET, { roles: [] });
-      const response = await fetch(`${base}/account/deallocate`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({ strategyId: asyncStrategyId, amount: 1 })
-      });
-      assert.equal(response.status, 403);
-      const payload = await response.json();
-      assert.equal(payload.error, "async_xcm_admin_required");
-    }
-  );
-});
-
-test("http smoke: async XCM routes reject caller-supplied raw message bytes", { skip: !RUN }, async () => {
-  const asyncStrategyId = "0x56444f545f56315f4d4f434b0000000000000000000000000000000000000000";
-  await runWithServerEnv(
-    {
-      STRATEGIES_JSON: JSON.stringify([
-        {
-          strategyId: asyncStrategyId,
-          adapter: "0x1234567890123456789012345678901234567890",
-          kind: "polkadot_vdot",
-          executionMode: "async_xcm",
-          asset: "0xABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD"
-        }
-      ])
-    },
-    async (base) => {
-      const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
-      const response = await fetch(`${base}/account/allocate`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({ strategyId: asyncStrategyId, amount: 1, message: "0xdeadbeef" })
-      });
-      assert.equal(response.status, 400);
-      const payload = await response.json();
-      assert.equal(payload.error, "invalid_request");
-      assert.match(payload.message, /message is assembled by the server/u);
+      const retiredRoutes = [
+        { method: "POST", path: "/account/allocate" },
+        { method: "POST", path: "/account/deallocate" },
+        { method: "GET", path: "/account/strategies" }
+      ];
+      for (const { method, path } of retiredRoutes) {
+        const response = await fetch(`${base}${path}`, {
+          method,
+          headers: { "content-type": "application/json" },
+          ...(method === "POST"
+            ? { body: JSON.stringify({ strategyId: asyncStrategyId, amount: 1, message: "0xdeadbeef" }) }
+            : {})
+        });
+        assert.equal(response.status, 410, path);
+        const payload = await response.json();
+        assert.equal(payload.status, "retired", path);
+        assert.equal(payload.retired, true, path);
+        assert.deepEqual(payload.strategies, [], path);
+        assert.equal(payload.see.pool, "/pool", path);
+        assert.equal(payload.see.onboarding, "/onboarding#buildVestedCapacity", path);
+      }
     }
   );
 });
@@ -1396,13 +1326,16 @@ test("http smoke: /payments/send rejects self-transfer", { skip: !RUN }, async (
   });
 });
 
-test("http smoke: /strategies defaults to empty when STRATEGIES_JSON is unset", { skip: !RUN }, async () => {
+test("http smoke: /strategies is a static retirement notice when STRATEGIES_JSON is unset", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const response = await fetch(`${base}/strategies`);
     assert.equal(response.status, 200);
     const body = await response.json();
+    assert.equal(body.status, "retired");
+    assert.equal(body.retired, true);
     assert.deepEqual(body.strategies, []);
-    assert.ok(typeof body.docs === "string" && body.docs.includes("vdot"));
+    assert.equal(body.see.pool, "/pool");
+    assert.equal(body.see.onboarding, "/onboarding#buildVestedCapacity");
   });
 });
 

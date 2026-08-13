@@ -341,7 +341,7 @@ test("POST /account/fund keeps mutation idempotency and normalized payload", asy
   assert.deepEqual(response.body, { status: "funded", wallet: AUTH.wallet, asset: "USDC", amount: 7 });
 });
 
-test("POST /account/allocate is retired without calling a strategy mutation", async () => {
+test("static strategy retirement returns before auth because the notice leaks no account data", async () => {
   const { calls, response, route } = makeHarness({
     payload: { amount: 3, strategyId: "default-low-risk" }
   });
@@ -354,6 +354,9 @@ test("POST /account/allocate is retired without calling a strategy mutation", as
   });
 
   assert.equal(handled, true);
+  assert.equal(calls.some(([name]) => name === "auth"), false);
+  assert.equal(calls.some(([name]) => name === "body"), false);
+  assert.equal(calls.some(([name]) => name === "requireChainBackedMutation"), false);
   assert.equal(calls.some(([name]) => name === "allocateIdleFunds"), false);
   assert.equal(response.statusCode, 410);
   assert.equal(response.body.status, "retired");

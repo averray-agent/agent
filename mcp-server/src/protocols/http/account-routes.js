@@ -209,7 +209,9 @@ export function createAccountRoutes({
       (request.method === "POST" && (pathname === "/account/allocate" || pathname === "/account/deallocate"))
       || (request.method === "GET" && pathname === "/account/strategies")
     ) {
-      await authMiddleware(request, url);
+      // Retirement is static public metadata, not an account read or a
+      // money-moving operation. Returning it before auth leaks no wallet data
+      // and lets every old client find the replacement without credentials.
       respond(response, 410, RETIRED_STRATEGIES_RESPONSE);
       return true;
     }

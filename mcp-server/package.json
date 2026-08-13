@@ -6,7 +6,9 @@
   "description": "Shared service layer for HTTP and directory-safe MCP discovery for the agent-native treasury platform.",
   "scripts": {
     "start:http": "node src/protocols/http/server.js",
-    "test": "node --test src/**/*.test.js",
+    "test": "npm run test:unit && npm run test:http-smoke",
+    "test:unit": "node --test src/**/*.test.js",
+    "test:http-smoke": "RUN_HTTP_SMOKE=1 node --test --test-timeout=60000 src/protocols/http/server.smoke.test.js",
     "demo:e2e": "node src/demo/e2e-local.js",
     "demo:e2e:remote": "node src/demo/e2e-remote.js",
     "demo:auto-verify:remote": "node src/demo/auto-verify-remote-smoke.js",

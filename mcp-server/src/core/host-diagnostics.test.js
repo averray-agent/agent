@@ -13,6 +13,10 @@ test("collectHostDiagnostics reports process, disk, and clean recommendations", 
     const diagnostics = collectHostDiagnostics({
       rootDir: dir,
       paths: [dir],
+      // This case exercises the clean-host recommendation, independent of the
+      // developer or runner volume that happens to contain the temp folder.
+      diskWarnPercent: 101,
+      diskCriticalPercent: 102,
       now: new Date("2026-05-08T10:00:00.000Z")
     });
 
