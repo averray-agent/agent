@@ -47,10 +47,17 @@ Invariants:
    the fund-signer script shape). Source note: NOT the reward bank — bank
    funds are reward earmarks; operator principal is a distinct book
    (`operatorContributedPrincipal`, its own event).
-3. **Observability green**:
-   - Board feed repoint to pool v2 (task #214, monitor repo) — the tile must
-     render v2 before the ceremony so its transactions are the probe's first
-     qualifying events (packet 6 precondition 2).
+3. **Observability green** — RESOLVED 2026-08-13 evening: there is NOTHING to
+   repoint. The monitor repo has zero pool bindings; the Bank feed and the
+   pool observability snapshot are served by the PLATFORM BACKEND
+   (manifest-driven, already v2). The snapshot endpoint is INTERNAL-ONLY:
+   `GET backend:8787/monitor/deposit-pool` — Caddy deliberately 404s
+   `/monitor/*` publicly ("Hermes reaches backend:8787 directly").
+   Day-of: open an SSH tunnel and use the loopback URL:
+   `ssh -L 8787:localhost:8787 <vps>` →
+   `--observability-url http://127.0.0.1:8787/monitor/deposit-pool`.
+   Verify pre-leg-A: snapshot shows pool 0x6061f0aC…, `reconciled: true`,
+   `flows.status: "ok"`, fresh ≤10 min (the script re-enforces all of it).
    - Dispatcher/observer: keyed on the WRAPPER (unchanged address), so no
      repoint expected — leg A's dry-run evidence block is the verification.
    - Treasury-page tiles (credit line / lanes / XCM observer) light up only
@@ -89,7 +96,7 @@ The script never accepts a raw key.
 ```
 node scripts/ops/pool-venue-ceremony.mjs deploy --profile mainnet \
   --assets 2000000 --return-by <unix, use now+47h — the +48h boundary trips the strict check> \
-  --deployment-kind proof --observability-url <internal pool-observability URL> \
+  --deployment-kind proof --observability-url http://127.0.0.1:8787/monitor/deposit-pool \
   --expected-signer 0x5a6836c6D4d293F6E5377E6c28054F4171915813
 ```
 (Gate-run evidence 2026-08-13: the script walked five sequential fail-closed
