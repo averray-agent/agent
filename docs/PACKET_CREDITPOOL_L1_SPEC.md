@@ -88,11 +88,13 @@ tile set (buffer, outstanding, pledged total, defaults — expected 0). Hermes: 
 | `interestBps` | 0 | 2_000 |
 | Impairment trigger | 105% | fixed |
 
-## 4. Sequencing
+## 4. Sequencing (amended 2026-08-13: build parallelized, ceremonies stay ordered)
 
-1. EscrowCore v3 ceremony completes (dispatch already cleared, keeps priority).
-2. This packet dispatches → Codex builds CreditPool + DepositPool v2 + platform surfaces +
-   fork-sim ceremony script.
+1. **Build dispatches now** — CreditPool + DepositPool v2 + platform surfaces + fork-sim
+   ceremony script touch no files shared with the v3 PR or the earnings door, so the build
+   runs in parallel. **Ceremony order is unchanged and strict**: the EscrowCore v3 ceremony
+   executes first; the pool-v2 migration ceremony is the next pool window after it.
+2. (folded into 1.)
 3. Pool-v2 migration ceremony (operator-run): deploy both, rewire wrapper strategy pointer,
    migrate the single dogfood position, decommission pool v1 — trivially cheap **now**,
    expensive later.
