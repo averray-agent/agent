@@ -105,3 +105,43 @@ Spend deliberately on the catalogue as CAC, recover costs at v3, shift the mix t
 external posters who pay us 5% to use rails we already run, and let the pool make worker
 capital sticky at zero margin — because the durable business is being the place agent
 money lives, not the place it passes through.
+
+## 7. External review — consolidated verdict, recorded 2026-08-13
+
+The second pair of eyes returned **conditional adoption**: the strategy stands, gated on three
+blockers. Status at recording:
+
+1. **D0 — entitlement design (BLOCKER, design-for-scale not live emergency).** Deposits must buy
+   concurrency, job-risk limits, and access to externally funded work — never renewing entitlement
+   to operator-funded catalogue rewards, which move under a separate global budget deposits cannot
+   raise. Vesting 24–72h, instant decay on withdrawal, concave scaling; onboarding = finite lifetime
+   credit. **Answered: `PACKET_D0_VESTING.md` (this branch, 382ab66)** — must land before pool-cap
+   or catalogue-budget raises. Reframe adopted everywhere: a time-weighted deposit is one
+   capital-backed trust-and-capacity signal alongside verified work history, not "identity."
+2. **Measurement before pricing (BLOCKER) — CLOSED.** `GAS_STUDY_2026-08-13.md`: worked path
+   $0.038/claim, posting path $0.028/listing, external settle-only p50 $0.017 (82 samples), settle
+   p95 = 2× p50, zero failed txs; the old $0.059 figure bundled both paths. D4 fee design is
+   unblocked and must cite these numbers, not the bundled figure.
+3. **D8 — Swiss regulatory memo (BLOCKER for deposit scale).** Operating rule ratified and in
+   force until the memo returns: pool stays **capped** (1,000/100), **quiet** (no solicitation),
+   **disclosed** ("Technical pilot. Principal at risk. No depositor protection." — shipping via
+   D0-F). Commissioning the memo is operator-side and outside this repo. Credit-layer carve-out
+   per the addendum: protocol-style peer-to-pool design work may proceed; only operator-held or
+   operator-directed lender funds wait on the memo.
+
+**Decision-table dispositions:** D1 keep (catalogue = CAC under explicit capped budget, relabeled
+subsidy); D2 keep with sequence — D4 fee schedule finalized **before** the EscrowCore v3 ceremony,
+so the ceremony ships the fee constants once; D3 add lane-level hypothesis/cap/stop discipline
+(open packet); D4 hybrid fee schedule now unblocked by the gas study; D5 keep minimum-payout
+threshold, fold into the test-wallet sweep; D6 keep; D7 keep with the verification-economics
+caveat below.
+
+**Named risk to carry:** verification economics — auto-verify (benchmark + deterministic modes)
+is what makes $0.038/claim viable; any drift toward human/dispute-heavy verification breaks the
+unit economics before it breaks the software. Watch dispute rate as a cost signal, not just a
+trust signal.
+
+**30-day plan (clock started 2026-08-12, gates due by 2026-09-11):** D0 landed in production;
+gas-informed D4 fee schedule decided on measured numbers; Swiss memo commissioned; 20 qualified
+poster conversations (the three-threshold crossover math says external posting volume, not
+deposit volume, is what moves the business); pool unchanged at 1,000/100 throughout.
