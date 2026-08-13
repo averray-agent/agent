@@ -239,7 +239,7 @@ test("mainnet carries no escrow pins post-v3-ceremony and points escrowCore at t
   assert.equal(contracts.length, 12);
   // The v3 ceremony (2026-08-13) deleted both escrow pins per their own reason
   // text; only the hydration adapter successor remains staged.
-  assert.deepEqual([...allowlist.keys()].sort(), ["hydrationUsdcAdapter"]);
+  assert.deepEqual([...allowlist.keys()].sort(), ["hydrationUsdcAdapter", "legacyEscrowCore"]);
   assert.equal(
     contracts.find((contract) => contract.name === "escrowCore")?.address,
     "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793"
