@@ -49,8 +49,14 @@ plus an **optional second template** for an onward USDC transfer to any address 
 plainly when the wallet cannot pay it, with the acquisition pointer. It also names the roadmap
 truthfully: a **gasless brokered withdrawal** (worker-authorized, operator-broadcast, fee
 deducted from the amount — the D4 retention shape applied to exits) is a candidate fast-follow
-**decision, not scope here** (it needs a relayed/`For`-style authorization design and its own
-packet).
+**decision, not scope here**. Design note for that decision (verified 2026-08-13): the deployed
+AAC already contains the exact authorization pattern to copy — `sendToAgentFor` verifies an
+EIP-712 signature from the account over (from, recipient, asset, amount, nonce, deadline) and
+lets the agent-transfer broker pay gas, but it moves **internal** AAC liquid only (agent→agent),
+never out to an EOA. A gasless exit therefore needs a `withdrawFor` sibling on the AAC — a money-
+core contract change with D8 implications, its own packet, never a rider. Near-term, enabling a
+hardened `/payments/send` on the existing `sendToAgentFor` would give agents gasless **internal**
+payments without any contract change — a separate decision worth listing.
 
 **W4 — Retire the retired.** Strategy endpoints (`allocate`/`deallocate`/strategies list) return
 an explicit `retired` status pointing to `/pool` and the `buildVestedCapacity` onboarding section
