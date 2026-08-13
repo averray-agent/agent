@@ -342,7 +342,6 @@ export class JobCatalogService {
     const claimStakeBps = await this.getDefaultClaimStakeBps();
 
     return Promise.all(this.listJobs().map(async (job) => {
-      const netReward = await this.estimateNetReward(wallet, job.id);
       const tierGate = summarizeTierGate(job.tier, reputation);
       const jobType = effectiveJobType(job);
       const requiredRole = effectiveRequiredRole(job);
@@ -350,12 +349,15 @@ export class JobCatalogService {
       const eligible = this.isClaimableJob(job) && this.isEligible(job, profile, reputation);
       const liquid = account.liquid[job.rewardAsset] ?? 0;
       const claimEconomics = await this.resolveClaimEconomics(wallet, job, claimStakeBps);
+      const netReward = await this.estimateNetReward(wallet, job.id, claimEconomics);
       const fitScore = this.computeFitScore(job, profile, reputation, liquid, claimEconomics.totalClaimLock);
 
       return {
         jobId: job.id,
         fitScore,
         netReward,
+        gasRetentionSupported: claimEconomics.gasRetentionSupported === true,
+        gasRetention: claimEconomics.gasRetention,
         eligible,
         tier: job.tier,
         tierGate,
@@ -430,7 +432,7 @@ export class JobCatalogService {
       jobId,
       catalogEligible,
       eligible,
-      netReward: await this.estimateNetReward(wallet, jobId),
+      netReward: await this.estimateNetReward(wallet, jobId, claimEconomics),
       availableLiquidity: liquid,
       claimStake: claimEconomics.claimStake,
       claimStakeBps: claimEconomics.claimStakeBps,
@@ -438,6 +440,8 @@ export class JobCatalogService {
       claimFeeBps: claimEconomics.claimFeeBps,
       claimEconomicsWaived: claimEconomics.claimEconomicsWaived,
       claimFeeRetainedOnSuccess: claimEconomics.claimFeeRetainedOnSuccess === true,
+      gasRetentionSupported: claimEconomics.gasRetentionSupported === true,
+      gasRetention: claimEconomics.gasRetention,
       claimEconomicsWaiverScope: "next_claim_projection",
       ...(onboardingSubsidy ? { onboardingSubsidy } : {}),
       claimNumber: claimEconomics.claimNumber,
@@ -505,9 +509,15 @@ export class JobCatalogService {
     };
   }
 
-  async estimateNetReward(wallet, jobId) {
+  async estimateNetReward(wallet, jobId, resolvedClaimEconomics = undefined) {
     const job = this.requireJob(jobId);
     const profile = this.requireProfile(wallet);
+    const claimStakeBps = await this.getDefaultClaimStakeBps();
+    const claimEconomics = resolvedClaimEconomics
+      ?? await this.resolveClaimEconomics(wallet, job, claimStakeBps);
+    if (claimEconomics?.gasRetention?.supported === true) {
+      return Math.max(Number(claimEconomics.gasRetention.netReward) || 0, 0);
+    }
     // The gas and risk haircuts are heuristics calibrated in the chain's
     // native gas token (DOT/PAS). Subtracting them from a non-native reward
     // (e.g. a USDC bounty) mixes units and silently shrinks the payout — a
@@ -764,6 +774,8 @@ export function explainEligibilityFromPreflight(preflight) {
     claimFundingSufficient: preflight.claimFundingSufficient,
     claimFundingShortfall: preflight.claimFundingShortfall,
     claimEconomicsWaived: preflight.claimEconomicsWaived,
+    gasRetentionSupported: preflight.gasRetentionSupported,
+    gasRetention: preflight.gasRetention,
     onboardingSubsidy: preflight.onboardingSubsidy,
     jobDefinitionIntegrity: preflight.jobDefinitionIntegrity,
     workerExposure: preflight.workerExposure,

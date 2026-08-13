@@ -215,6 +215,7 @@ export async function resolveClaimEconomicsDecision({
     return withOnboardingSubsidyStatus({
       chainMode: false,
       claimFeeRetainedOnSuccess: false,
+      gasRetentionSupported: false,
       contractLayout: undefined,
       escrowExists: false,
       source: "local",
@@ -224,6 +225,7 @@ export async function resolveClaimEconomicsDecision({
       })
     }, {
       onboardingSubsidyBudget,
+      blockchainGateway,
       job,
       paidEconomics: computeClaimEconomics({ ...input, onboardingWaiverEligible: false })
     });
@@ -249,6 +251,7 @@ export async function resolveClaimEconomicsDecision({
     return withOnboardingSubsidyStatus({
       chainMode: true,
       claimFeeRetainedOnSuccess: Boolean(chainState.claimFeeRetainedOnSuccess),
+      gasRetentionSupported: Boolean(chainState.gasRetentionSupported),
       contractLayout,
       escrowExists,
       source: "legacy_local",
@@ -260,7 +263,7 @@ export async function resolveClaimEconomicsDecision({
         claimStakeBps,
         ...claimEconomicsConfig
       })
-    }, { onboardingSubsidyBudget, job });
+    }, { onboardingSubsidyBudget, blockchainGateway, job });
   }
 
   if (escrowExists) {
@@ -290,12 +293,14 @@ export async function resolveClaimEconomicsDecision({
       return withOnboardingSubsidyStatus({
         chainMode: true,
         claimFeeRetainedOnSuccess: Boolean(chainState.claimFeeRetainedOnSuccess),
+        gasRetentionSupported: Boolean(chainState.gasRetentionSupported),
         contractLayout,
         escrowExists,
         source: "contract_preview_adjusted_for_sync",
         economics
       }, {
         onboardingSubsidyBudget,
+        blockchainGateway,
         job,
         paidEconomics: computeClaimEconomics({
           rewardAmount: job?.rewardAmount,
@@ -327,11 +332,12 @@ export async function resolveClaimEconomicsDecision({
     return withOnboardingSubsidyStatus({
       chainMode: true,
       claimFeeRetainedOnSuccess: Boolean(chainState.claimFeeRetainedOnSuccess),
+      gasRetentionSupported: Boolean(chainState.gasRetentionSupported),
       contractLayout,
       escrowExists,
       source: "contract_preview",
       economics: preview
-    }, { onboardingSubsidyBudget, job, paidEconomics });
+    }, { onboardingSubsidyBudget, blockchainGateway, job, paidEconomics });
   }
 
   requireGatewayMethod(blockchainGateway, "getWorkerClaimCount");
@@ -360,6 +366,7 @@ export async function resolveClaimEconomicsDecision({
   return withOnboardingSubsidyStatus({
     chainMode: true,
     claimFeeRetainedOnSuccess: Boolean(chainState.claimFeeRetainedOnSuccess),
+    gasRetentionSupported: Boolean(chainState.gasRetentionSupported),
     contractLayout,
     escrowExists,
     source: "current_local_before_ensure",
@@ -369,6 +376,7 @@ export async function resolveClaimEconomicsDecision({
     })
   }, {
     onboardingSubsidyBudget,
+    blockchainGateway,
     job,
     paidEconomics: computeClaimEconomics({ ...input, onboardingWaiverEligible: false })
   });
@@ -517,25 +525,49 @@ function waiveContractPreview(preview) {
 
 async function withOnboardingSubsidyStatus(
   decision,
-  { onboardingSubsidyBudget, job, paidEconomics } = {}
+  { onboardingSubsidyBudget, blockchainGateway, job, paidEconomics } = {}
 ) {
   const claimFeeRetainedOnSuccess = decision?.claimFeeRetainedOnSuccess === true;
+  const gasRetentionSupported = decision?.gasRetentionSupported === true;
+  const brokered = !isExternalJob(job);
+  const waived = decision?.economics?.claimEconomicsWaived === true;
+  if (gasRetentionSupported) {
+    requireGatewayMethod(blockchainGateway, "previewGasRetentionForJob");
+  }
+  const gasRetention = gasRetentionSupported
+    ? await blockchainGateway.previewGasRetentionForJob(
+        job?.id,
+        job?.rewardAsset,
+        job?.rewardAmount,
+        { brokered, waived }
+      )
+    : {
+        supported: false,
+        brokered,
+        waived,
+        retainedRaw: "0",
+        retained: 0,
+        netReward: Number(job?.rewardAmount ?? 0)
+      };
   const normalizedDecision = {
     ...decision,
     economics: {
       ...decision.economics,
-      claimFeeRetainedOnSuccess
+      claimFeeRetainedOnSuccess,
+      gasRetentionSupported,
+      gasRetention
     }
   };
   if (!onboardingSubsidyBudget) {
     return normalizedDecision;
   }
-  const waived = normalizedDecision.economics?.claimEconomicsWaived === true;
+  const claimIsWaived = normalizedDecision.economics?.claimEconomicsWaived === true;
   // Internal/curated claims currently route through claimJobFor and consume
   // operator gas regardless of the advisory requiresSponsoredGas catalog bit.
   // The external lifecycle is the actual self-funded transaction boundary.
-  const operatorBrokered = !isExternalJob(job) && (waived || !claimFeeRetainedOnSuccess);
-  if (waived && !Number.isFinite(Number(paidEconomics?.claimStake))) {
+  const operatorBrokered = !isExternalJob(job)
+    && (claimIsWaived || (!claimFeeRetainedOnSuccess && !gasRetentionSupported));
+  if (claimIsWaived && !Number.isFinite(Number(paidEconomics?.claimStake))) {
     throw claimEconomicsUnavailable(
       "The waived claim-stake value is unavailable for onboarding subsidy accounting.",
       { jobId: job?.id, field: "onboardingSubsidyWaivedClaimStake" }
@@ -544,7 +576,7 @@ async function withOnboardingSubsidyStatus(
   const onboardingSubsidy = operatorBrokered
     ? await onboardingSubsidyBudget.inspect({
         rewardAsset: job?.rewardAsset,
-        waivedClaimStake: waived ? paidEconomics?.claimStake : 0
+        waivedClaimStake: claimIsWaived ? paidEconomics?.claimStake : 0
       })
     : {
         ...await onboardingSubsidyBudget.getStatus(),

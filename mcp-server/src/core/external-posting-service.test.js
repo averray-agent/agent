@@ -133,9 +133,11 @@ test("escrow-first quote persists only demand, prices the additive fee, and pres
     contingencyReserveRaw: "0",
     protocolFeeRaw: "50000",
     protocolFeeBps: 500,
+    posterFeeBps: 500,
+    posterFeeFloorRaw: "0",
     posterReservedRaw: "1050000",
     feeSemantics: "poster_additive",
-    source: "live EscrowCore.previewProtocolFee at quote time",
+    source: "live EscrowCore.previewPosterFee schedule at quote time",
     expiresWithQuote: true
   });
   const signal = await store.getExternalPostingDemandSignal(quote.draftId);

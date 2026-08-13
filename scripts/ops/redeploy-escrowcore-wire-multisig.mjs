@@ -118,6 +118,17 @@ const AGENT_ACCOUNT_ABI = [
   "function setEscrowOperator(address escrowOperator, bool approved)"
 ];
 
+const ESCROW_V3_ADMIN_ABI = [
+  "function setFeeSchedule(uint256 retentionFlatRaw,uint16 retentionCapBps,uint16 posterFeeBps,uint256 posterFeeFloorRaw)"
+];
+
+export const ESCROW_V3_INITIAL_FEE_SCHEDULE = Object.freeze({
+  retentionFlatRaw: 50_000n,
+  retentionCapBps: 2_000,
+  posterFeeBps: 500,
+  posterFeeFloorRaw: 50_000n
+});
+
 export function parseArgs(argv) {
   const args = { profile: "testnet", skipRevoke: false, noWs: false };
   for (let i = 0; i < argv.length; i += 1) {
@@ -466,6 +477,7 @@ export function buildInnerCalls({
 }) {
   const activeAgentAccount = newAgentAccount ?? agentAccount;
   const staleAgentAccount = oldAgentAccount ?? agentAccount;
+  const escrowV3Iface = new Interface(ESCROW_V3_ADMIN_ABI);
   const calls = [];
   if (newAgentAccount) {
     calls.push({
@@ -475,6 +487,16 @@ export function buildInnerCalls({
     });
   }
   calls.push(
+    {
+      label: `EscrowCore.setFeeSchedule(50000, 2000, 500, 50000)  // D4 ratified v3 initials`,
+      to: newEscrow,
+      data: escrowV3Iface.encodeFunctionData("setFeeSchedule", [
+        ESCROW_V3_INITIAL_FEE_SCHEDULE.retentionFlatRaw,
+        ESCROW_V3_INITIAL_FEE_SCHEDULE.retentionCapBps,
+        ESCROW_V3_INITIAL_FEE_SCHEDULE.posterFeeBps,
+        ESCROW_V3_INITIAL_FEE_SCHEDULE.posterFeeFloorRaw
+      ])
+    },
     {
       label: `AgentAccountCore.setEscrowOperator(${newEscrow}, true)  // approve new EscrowCore ledger authority`,
       to: activeAgentAccount,
@@ -546,6 +568,11 @@ async function main() {
     console.error("--signer LABEL is required.");
     process.exitCode = 1;
     return;
+  }
+  if (args.profile === "mainnet" && !args.skipRevoke) {
+    throw new Error(
+      "EscrowCore v3 mainnet wiring requires --skip-revoke: v2 roles remain live while legacy stock drains."
+    );
   }
   if ((args.tpHeight !== undefined) !== (args.tpIndex !== undefined)) {
     console.error("Both --timepoint-height and --timepoint-index must be given together (or both omitted for the first leg).");

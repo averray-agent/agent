@@ -38,6 +38,9 @@ function makeService({
       getProtocolFeeConfig: async () => ({
         supported: true,
         protocolFeeBps,
+        posterFeeBps: protocolFeeBps,
+        posterFeeFloorRaw: "50000",
+        gasRetentionSupported: true,
         maxProtocolFeeBps: 999,
         treasuryAccount: POSTER
       }),
@@ -84,12 +87,14 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
   assert.deepEqual(payload.token, { symbol: "USDC", address: TOKEN, decimals: 6 });
   assert.deepEqual(payload.economics, {
     protocolFeeBps: 321,
+    posterFeeBps: 321,
+    posterFeeFloorRaw: "50000",
     feeRecipient: POSTER,
     feeSemantics: "poster_additive",
     feeExplanation:
-      "The poster reserves the full worker reward plus the protocol fee; the worker receives the full advertised reward.",
+      "The poster reserves the full worker reward plus max(posterFeeBps, posterFeeFloorRaw); worker gas retention is separate and applies only to brokered successful work.",
     posterReserveFormula:
-      "reward + opsReserve + contingencyReserve + floor(reward * protocolFeeBps / 10000)",
+      "reward + opsReserve + contingencyReserve + max(floor(reward * posterFeeBps / 10000), posterFeeFloorRaw)",
     minRewardUsdc: "1.25",
     draftTtlHours: 19,
     quotePersistence: "demand_signal_only_until_funded",
@@ -137,9 +142,19 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
   assert.equal(payload.workerFacts.preflight.path, "/jobs/preflight?jobId=X");
   assert.equal(payload.workerFacts.selfDeposit.routeAvailable, false);
   assert.deepEqual(payload.cancellation, {
-    selfServeCancel: false,
-    rescue: "operator-mediated on request, ~7 days, refunds only ever to the recorded poster",
-    plannedSelfServeCancel: "cancelOpenJob, next EscrowCore deployment window"
+    selfServeCancel: true,
+    method: "cancelOpenJob(bytes32)",
+    onChain: {
+      address: ESCROW,
+      abiFragment: "function cancelOpenJob(bytes32 jobId)",
+      args: ["<jobId>"],
+      value: "0"
+    },
+    scope: "any Open job",
+    minimumOpenSeconds: 3600,
+    refund: "instant refund of unreleased reward, poster fee, ops reserve, and contingency reserve to the recorded poster",
+    race: "a claim that lands first blocks cancellation until the existing timeout lifecycle reopens the job",
+    fallback: "operator tombstone rescue remains available for non-Open strandings and legacy stock"
   });
   assert.deepEqual(payload.flow.map((step) => step.id), [
     "siwe",
@@ -157,7 +172,7 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
   assert.equal(funding.exactPosterReservedRaw, "the quote response fundingRequirement.posterReservedRaw");
   assert.equal(
     funding.posterReservedRawFormula,
-    "rewardRaw + opsReserveRaw + contingencyReserveRaw + floor(rewardRaw * economics.protocolFeeBps / 10000)"
+    "rewardRaw + opsReserveRaw + contingencyReserveRaw + max(floor(rewardRaw * economics.posterFeeBps / 10000), economics.posterFeeFloorRaw)"
   );
   assert.equal(
     funding.depositAmountFormula,
@@ -258,13 +273,13 @@ test("poster onboarding derives observed funding error selectors from contract s
       signature: "InvalidState()",
       meaning: "This jobId already exists on chain.",
       response:
-        "Do not deposit again—the escrow for this jobId is already funded. Read GET /jobs/draft/:id: status 'live' means the watcher has materialized it and there is nothing to do; status 'mismatch' means the existing on-chain job was funded with different terms and will never materialize, so the operator-mediated ~7-day cancellation rescue is the only recovery."
+        "Do not deposit again—the escrow for this jobId is already funded. Read GET /jobs/draft/:id: status 'live' means the watcher has materialized it and there is nothing to do; status 'mismatch' means the existing on-chain job was funded with different terms and will never materialize, so the recorded poster must call cancelOpenJob after the 1h floor for an instant refund."
     }
   ]);
   assert.equal(payload.failureModes[0].selector, "0xbb55fd27");
   assert.equal(payload.failureModes[1].selector, "0xbaf3f0f7");
   assert.match(payload.failureModes[1].response, /status 'live'.*nothing to do/iu);
-  assert.match(payload.failureModes[1].response, /status 'mismatch'.*never materialize.*~7-day cancellation rescue/iu);
+  assert.match(payload.failureModes[1].response, /status 'mismatch'.*never materialize.*cancelOpenJob.*1h.*instant refund/iu);
 });
 
 test("poster withdrawal guidance distinguishes failed liquid funding from succeeded reserved funding", async () => {
@@ -273,7 +288,7 @@ test("poster withdrawal guidance distinguishes failed liquid funding from succee
   assert.deepEqual(payload.posterFacts.withdrawal, {
     httpRouteAvailable: false,
     explanation:
-      "Recovery depends on funding state. After funding fails, the deposit remains in AgentAccountCore liquid and the poster can withdraw it immediately on chain without an operator. After funding succeeds, the amount is reserved and AgentAccountCore.withdraw cannot release it; the operator-mediated cancellation rescue is the only recovery path.",
+      "Recovery depends on funding state. After funding fails, the deposit remains in AgentAccountCore liquid and the poster can withdraw it immediately. After funding succeeds, AgentAccountCore.withdraw cannot release reserved funds; the recorded poster can cancel an Open job after 1h for an instant refund.",
     whenFundingFailed: {
       positionState: "liquid",
       withdrawalAvailable: true,
@@ -283,9 +298,10 @@ test("poster withdrawal guidance distinguishes failed liquid funding from succee
     whenFundingSucceeded: {
       positionState: "reserved",
       withdrawalAvailable: false,
-      operatorRequired: true,
+      operatorRequired: false,
+      cancellationAvailable: true,
       action:
-        "Do not call withdraw for reserved job funding; request the operator-mediated ~7-day cancellation rescue, which refunds only the recorded poster."
+        "Do not call withdraw for reserved job funding; the recorded poster calls cancelOpenJob after the 1h floor for an instant refund."
     },
     onChain: {
       available: true,
@@ -298,8 +314,8 @@ test("poster withdrawal guidance distinguishes failed liquid funding from succee
       requiresPosterGas: true
     }
   });
-  assert.match(payload.posterFacts.withdrawal.explanation, /fails.*liquid.*immediately.*without an operator/iu);
-  assert.match(payload.posterFacts.withdrawal.explanation, /succeeds.*reserved.*cannot release/iu);
+  assert.match(payload.posterFacts.withdrawal.explanation, /fails.*liquid.*immediately/iu);
+  assert.match(payload.posterFacts.withdrawal.explanation, /succeeds.*cannot release reserved/iu);
 });
 
 test("poster funding instructions bind both directions of every watcher term", async () => {
@@ -320,10 +336,10 @@ test("poster funding instructions bind both directions of every watcher term", a
     mismatchResult: {
       status: "mismatch",
       permanent: true,
-      recovery: "operator-mediated on request, ~7 days, refunds only ever to the recorded poster"
+      recovery: "the recorded poster calls cancelOpenJob after the 1h floor for an instant refund"
     },
     warning:
-      "Any deviation in either direction permanently mismatches the quote. Raising the reward is not generosity: it strands the reserved funding identically to a deliberate mutation and requires the same operator-mediated ~7-day rescue."
+      "Any deviation in either direction permanently mismatches the quote. Raising the reward is not generosity: it strands the reserved funding identically to a deliberate mutation; the recorded poster must cancel the Open job after the 1h floor."
   });
   assert.match(funding.exactTerms.warning, /Raising the reward is not generosity/iu);
 });
@@ -404,9 +420,19 @@ test("external onboarding and catalog claim bonds reuse live facts without stati
   assert.equal(externalBounties.disputeWindow.remedy.onChain.address, ESCROW);
   assert.equal(externalBounties.disputeWindow.remedy.brokeredPath.available, false);
   assert.deepEqual(externalBounties.cancellation, {
-    selfServeCancel: false,
-    rescue: "operator-mediated on request, ~7 days, refunds only ever to the recorded poster",
-    plannedSelfServeCancel: "cancelOpenJob, next EscrowCore deployment window"
+    selfServeCancel: true,
+    method: "cancelOpenJob(bytes32)",
+    onChain: {
+      address: ESCROW,
+      abiFragment: "function cancelOpenJob(bytes32 jobId)",
+      args: ["<jobId>"],
+      value: "0"
+    },
+    scope: "any Open job",
+    minimumOpenSeconds: 3600,
+    refund: "instant refund of unreleased reward, poster fee, ops reserve, and contingency reserve to the recorded poster",
+    race: "a claim that lands first blocks cancellation until the existing timeout lifecycle reopens the job",
+    fallback: "operator tombstone rescue remains available for non-Open strandings and legacy stock"
   });
 
   const [external, curated] = await service.enrichExternalCatalogRows([
@@ -477,6 +503,9 @@ test("invalid treasury reads omit only the fee recipient and keep independent fe
       getProtocolFeeConfig: async () => ({
         supported: true,
         protocolFeeBps: 321,
+        posterFeeBps: 321,
+        posterFeeFloorRaw: "50000",
+        gasRetentionSupported: false,
         maxProtocolFeeBps: 999,
         treasuryAccount: "not-an-address"
       })

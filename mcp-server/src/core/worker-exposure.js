@@ -301,9 +301,12 @@ export class WorkerExposurePolicy {
   exposureForDefinition(job, claimEconomics) {
     const rate = rewardUsdcRate(job);
     const rewardUnits = usdcUnits(Number(job?.rewardAmount) * rate, "reserved reward exposure");
-    const feeRetained = claimEconomics?.claimFeeRetainedOnSuccess === true
+    // D4 retention reduces realized cost only after successful settlement.
+    // Open exposure remains reserved reward + brokered gas because failed,
+    // rejected, and timeout paths produce no retention.
+    const gasCostRecovered = claimEconomics?.claimFeeRetainedOnSuccess === true
       && claimEconomics?.claimEconomicsWaived !== true;
-    const gasUnits = feeRetained ? 0n : this.gasEstimateUnits;
+    const gasUnits = gasCostRecovered ? 0n : this.gasEstimateUnits;
     return { rewardUnits, gasUnits, totalUnits: rewardUnits + gasUnits };
   }
 }

@@ -1027,7 +1027,9 @@ export class PlatformService {
       }
       const claimEconomics = {
         claimEconomicsWaived: preflight.claimEconomicsWaived,
-        claimFeeRetainedOnSuccess: preflight.claimFeeRetainedOnSuccess
+        claimFeeRetainedOnSuccess: preflight.claimFeeRetainedOnSuccess,
+        gasRetentionSupported: preflight.gasRetentionSupported,
+        gasRetention: preflight.gasRetention
       };
       const claimableJob = this.getClaimableJobDefinition(jobId);
       const jobDefinitionIntegrity = await inspectClaimJobDefinitionIntegrity({

@@ -335,6 +335,7 @@ test("recoverSinglePayoutReceipt binds JobClosed, SettlementSplit, and deployed 
   const txHash = `0x${"77".repeat(32)}`;
   const escrowInterface = new Interface([
     "event SettlementSplit(bytes32 indexed jobId,address indexed worker,address indexed treasuryAccount,address asset,uint256 workerAmount,uint256 protocolFeeAmount,uint16 protocolFeeBps)",
+    "event GasRetentionApplied(bytes32 indexed jobId,address indexed worker,uint256 retainedRaw,uint256 rewardRaw)",
     "event JobClosed(bytes32 indexed jobId,address indexed worker,uint256 releasedAmount)",
     "event JobRejected(bytes32 indexed jobId,bytes32 reasonCode)"
   ]);
@@ -344,15 +345,23 @@ test("recoverSinglePayoutReceipt binds JobClosed, SettlementSplit, and deployed 
   const withAddress = (address, encoded) => ({ address, transactionHash: txHash, ...encoded });
   const workerReservation = withAddress(account, accountInterface.encodeEventLog(
     accountInterface.getEvent("ReservationSettled"),
-    [`0x${"88".repeat(32)}`, poster, worker, USDC_TRUST_ASSET.address, 1_000_000n]
+    [`0x${"88".repeat(32)}`, poster, worker, USDC_TRUST_ASSET.address, 950_000n]
   ));
   const feeReservation = withAddress(account, accountInterface.encodeEventLog(
     accountInterface.getEvent("ReservationSettled"),
     [`0x${"99".repeat(32)}`, poster, treasury, USDC_TRUST_ASSET.address, 50_000n]
   ));
+  const retentionReservation = withAddress(account, accountInterface.encodeEventLog(
+    accountInterface.getEvent("ReservationSettled"),
+    [`0x${"aa".repeat(32)}`, poster, treasury, USDC_TRUST_ASSET.address, 50_000n]
+  ));
   const split = withAddress(escrow, escrowInterface.encodeEventLog(
     escrowInterface.getEvent("SettlementSplit"),
-    [chainJobId, worker, treasury, USDC_TRUST_ASSET.address, 1_000_000n, 50_000n, 500]
+    [chainJobId, worker, treasury, USDC_TRUST_ASSET.address, 950_000n, 50_000n, 500]
+  ));
+  const retention = withAddress(escrow, escrowInterface.encodeEventLog(
+    escrowInterface.getEvent("GasRetentionApplied"),
+    [chainJobId, worker, 50_000n, 1_000_000n]
   ));
   const closed = withAddress(escrow, escrowInterface.encodeEventLog(
     escrowInterface.getEvent("JobClosed"),
@@ -363,7 +372,7 @@ test("recoverSinglePayoutReceipt binds JobClosed, SettlementSplit, and deployed 
     transactionHash: txHash,
     blockNumber: 150,
     status: 1,
-    logs: [workerReservation, feeReservation, split, closed]
+    logs: [workerReservation, feeReservation, retentionReservation, split, retention, closed]
   };
   const filters = [];
   gateway.config = {
@@ -415,22 +424,27 @@ test("recoverSinglePayoutReceipt binds JobClosed, SettlementSplit, and deployed 
       treasuryAccount: treasury,
       asset: USDC_TRUST_ASSET.address,
       assetSymbol: "USDC",
-      workerAmount: 1,
-      workerAmountRaw: "1000000",
+      workerAmount: 0.95,
+      workerAmountRaw: "950000",
       protocolFeeAmount: 0.05,
       protocolFeeAmountRaw: "50000",
-      protocolFeeBps: 500
+      protocolFeeBps: 500,
+      gasRetention: {
+        worker,
+        retainedRaw: "50000",
+        rewardRaw: "1000000"
+      }
     }
   });
 
-  receipt.logs = [split, closed];
+  receipt.logs = [split, retention, closed];
   await assert.rejects(
     () => gateway.recoverSinglePayoutReceipt(chainJobId, {
       outcome: "approved",
       worker,
       submittedAt: new Date(100_000).toISOString()
     }),
-    /has 0 AAC reservations; expected 2/u,
+    /has 0 AAC reservations; expected 3/u,
     "an approved retry must not transition from SettlementSplit alone when AAC value proof is absent"
   );
 });
@@ -473,7 +487,7 @@ test("extractSettlementSplit preserves the exact worker reward and protocol fee"
   });
 });
 
-test("getProtocolFeeConfig reads the owner-controlled v2 fee state", async () => {
+test("getProtocolFeeConfig preserves v2 fee state with an explicit zero floor", async () => {
   const gateway = new BlockchainGateway({ enabled: false });
   gateway.escrowContract = {
     async protocolFeeBps() { return 250; },
@@ -484,6 +498,9 @@ test("getProtocolFeeConfig reads the owner-controlled v2 fee state", async () =>
   assert.deepEqual(await gateway.getProtocolFeeConfig(), {
     supported: true,
     protocolFeeBps: 250,
+    posterFeeBps: 250,
+    posterFeeFloorRaw: "0",
+    gasRetentionSupported: false,
     maxProtocolFeeBps: 1_000,
     treasuryAccount: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
   });
@@ -507,7 +524,8 @@ test("previewProtocolFeeForAsset quotes the exact reserve increment in asset uni
     rewardAmountRaw: "1000000",
     protocolFeeAmount: 0.025,
     protocolFeeAmountRaw: "25000",
-    protocolFeeBps: 250
+    protocolFeeBps: 250,
+    posterFeeFloorRaw: "0"
   });
 });
 
@@ -1063,6 +1081,7 @@ test("getClaimEconomicsDecisionState exposes current-layout mapping truth for an
     exists: true,
     contractLayout: "current",
     claimFeeRetainedOnSuccess: true,
+    gasRetentionSupported: false,
     onboardingWaiverEligible: true
   });
 });
@@ -1085,6 +1104,7 @@ test("getClaimEconomicsDecisionState treats the live v1 layout as waiver-capable
     exists: true,
     contractLayout: "current",
     claimFeeRetainedOnSuccess: false,
+    gasRetentionSupported: false,
     onboardingWaiverEligible: true
   });
 });

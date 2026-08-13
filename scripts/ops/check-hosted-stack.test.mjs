@@ -54,9 +54,10 @@ async function runHostedStackFixture({
     externalBounties: {
       posterOnboarding: "/poster/onboarding",
       cancellation: {
-        selfServeCancel: false,
-        rescue: "operator-mediated on request, ~7 days, refunds only ever to the recorded poster",
-        plannedSelfServeCancel: "cancelOpenJob, next EscrowCore deployment window"
+        selfServeCancel: true,
+        method: "cancelOpenJob(bytes32)",
+        scope: "any Open job",
+        minimumOpenSeconds: 3600
       },
       claimBond: { available: true },
       disputeWindow: {
@@ -80,6 +81,8 @@ async function runHostedStackFixture({
     economics: {
       feeSemantics: "poster_additive",
       protocolFeeBps: 100,
+      posterFeeBps: 100,
+      posterFeeFloorRaw: "50000",
       feeRecipient: ADDRESSES.feeRecipient,
       minRewardUsdc: "1",
       draftTtlHours: 24,
@@ -87,9 +90,16 @@ async function runHostedStackFixture({
       quoteIdentity: "poster_and_content_hash"
     },
     cancellation: {
-      selfServeCancel: false,
-      rescue: "operator-mediated on request, ~7 days, refunds only ever to the recorded poster",
-      plannedSelfServeCancel: "cancelOpenJob, next EscrowCore deployment window"
+      selfServeCancel: true,
+      method: "cancelOpenJob(bytes32)",
+      onChain: {
+        address: ADDRESSES.escrowCore,
+        abiFragment: "function cancelOpenJob(bytes32 jobId)",
+        args: ["<jobId>"],
+        value: "0"
+      },
+      scope: "any Open job",
+      minimumOpenSeconds: 3600
     },
     workerFacts: {
       claimBond: { available: true, stakeBps: 100, feeBps: 50, minFeeRaw: "1" },
@@ -112,7 +122,7 @@ async function runHostedStackFixture({
     },
     flow: [{
       id: "fund",
-      posterReservedRawFormula: "rewardRaw + opsReserveRaw + contingencyReserveRaw + floor(rewardRaw * economics.protocolFeeBps / 10000)",
+      posterReservedRawFormula: "rewardRaw + opsReserveRaw + contingencyReserveRaw + max(floor(rewardRaw * economics.posterFeeBps / 10000), economics.posterFeeFloorRaw)",
       depositAmountFormula: "max(posterReservedRaw - positions(poster, token).liquid, 0)",
       positionRead: { address: ADDRESSES.agentAccountCore },
       writes: [
@@ -338,7 +348,9 @@ test("hosted smoke cross-checks poster onboarding against operational and chain-
   assert.match(script, /\.liveReads\.feeRecipient\.status == "available"/u);
   assert.match(script, /\.liveReads\.claimBond\.status == "available"/u);
   assert.match(script, /\.liveReads\.disputeWindow\.status == "available"/u);
-  assert.match(script, /\.cancellation\.selfServeCancel == false/u);
+  assert.match(script, /\.cancellation\.selfServeCancel == true/u);
+  assert.match(script, /cancelOpenJob\(bytes32\)/u);
+  assert.match(script, /\.cancellation\.minimumOpenSeconds == 3600/u);
   assert.match(script, /operator-mediated on request, ~7 days, refunds only ever to the recorded poster/u);
   assert.match(script, /cancelOpenJob, next EscrowCore deployment window/u);
   assert.match(script, /\$poster\.chainId == \$health\.auth\.chainId/u);
@@ -349,6 +361,7 @@ test("hosted smoke cross-checks poster onboarding against operational and chain-
   assert.match(script, /function approve\(address spender, uint256 amount\) returns \(bool\)/u);
   assert.match(script, /function deposit\(address asset, uint256 amount\)/u);
   assert.match(script, /max\(posterReservedRaw - positions\(poster, token\)\.liquid, 0\)/u);
+  assert.match(script, /max\(floor\(rewardRaw \* economics\.posterFeeBps \/ 10000\), economics\.posterFeeFloorRaw\)/u);
   assert.match(script, /\$poster\.workerFacts\.claimBond\.stakeBps == \$operational\.maintenance\.policy\.risk\.defaultClaimStakeBps/u);
   assert.match(script, /\$poster\.workerFacts\.claimBond\.feeBps == \$operational\.maintenance\.policy\.risk\.claimFeeBps/u);
 });

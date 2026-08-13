@@ -80,6 +80,52 @@ export class EventListener {
       });
     });
 
+    this.registerEscrow("ClaimRetentionSnapshot", "escrow.claim_retention_snapshot", async ({ args, payload }) => {
+      const job = await this.readJob(args.jobId);
+      return this.buildChainEvent({
+        topic: "escrow.claim_retention_snapshot",
+        args,
+        payload,
+        wallet: args.worker,
+        wallets: [job.poster, args.worker],
+        sessionId: buildSessionId(args.jobId, args.worker),
+        job
+      });
+    });
+
+    this.registerEscrow("GasRetentionApplied", "escrow.gas_retention_applied", async ({ args, payload }) => {
+      const job = await this.readJob(args.jobId);
+      return this.buildChainEvent({
+        topic: "escrow.gas_retention_applied",
+        args,
+        payload,
+        wallet: args.worker,
+        wallets: [job.poster, args.worker],
+        sessionId: buildSessionId(args.jobId, args.worker),
+        job
+      });
+    });
+
+    this.registerEscrow("JobCancelled", "escrow.job_cancelled", async ({ args, payload }) => {
+      const job = await this.readJob(args.jobId);
+      return this.buildChainEvent({
+        topic: "escrow.job_cancelled",
+        args,
+        payload,
+        wallet: args.poster,
+        wallets: [args.poster],
+        job
+      });
+    });
+
+    this.registerEscrow("FeeScheduleChanged", "escrow.fee_schedule_changed", async ({ args, payload }) =>
+      this.buildChainEvent({
+        topic: "escrow.fee_schedule_changed",
+        args,
+        payload
+      })
+    );
+
     this.registerEscrow("ClaimEconomicsLocked", "escrow.claim_economics_locked", async ({ args, payload }) => {
       const job = await this.readJob(args.jobId);
       return this.buildChainEvent({

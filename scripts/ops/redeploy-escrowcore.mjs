@@ -121,11 +121,14 @@ export const ESCROW_TAIL_SCAN_ABI = [
   "event ExternalSchemaRegistered(bytes32 indexed jobId,bytes32 indexed schemaHash,address indexed schemaIssuer,string schemaUrl)",
   "event RecurringJobFundedFromTemplate(bytes32 indexed jobId,bytes32 indexed templateId,address indexed poster,address asset,uint256 totalReserved)",
   "event JobClaimed(bytes32 indexed jobId,address indexed worker,uint256 claimExpiry,uint256 claimStake)",
+  "event ClaimRetentionSnapshot(bytes32 indexed jobId,address indexed worker,bool brokered,bool waived,uint256 retentionFlatRaw,uint16 retentionCapBps)",
   "event ClaimEconomicsLocked(bytes32 indexed jobId,address indexed worker,uint256 claimStake,uint256 claimFee,bool waived,uint256 claimNumber)",
   "event OnboardingWaiverEligibilityUpdated(bytes32 indexed jobId,bool eligible)",
-  "event ProtocolFeeBpsUpdated(uint16 previousProtocolFeeBps,uint16 newProtocolFeeBps)",
+  "event FeeScheduleChanged(uint256 previousRetentionFlatRaw,uint16 previousRetentionCapBps,uint16 previousPosterFeeBps,uint256 previousPosterFeeFloorRaw,uint256 newRetentionFlatRaw,uint16 newRetentionCapBps,uint16 newPosterFeeBps,uint256 newPosterFeeFloorRaw)",
   "event TreasuryAccountUpdated(address indexed previousTreasuryAccount,address indexed newTreasuryAccount)",
   "event SettlementSplit(bytes32 indexed jobId,address indexed worker,address indexed treasuryAccount,address asset,uint256 workerAmount,uint256 protocolFeeAmount,uint16 protocolFeeBps)",
+  "event GasRetentionApplied(bytes32 indexed jobId,address indexed worker,uint256 retainedRaw,uint256 rewardRaw)",
+  "event JobCancelled(bytes32 indexed jobId,address indexed poster,uint256 refundedRaw)",
   "event WorkSubmitted(bytes32 indexed jobId,address indexed worker,bytes32 evidenceHash)",
   "event Submitted(bytes32 indexed jobId,address indexed worker,bytes32 indexed payloadHash)",
   "event JobReopened(bytes32 indexed jobId)",
@@ -139,19 +142,26 @@ export const ESCROW_TAIL_SCAN_ABI = [
   "event AutoDisclosed(bytes32 indexed hash,uint64 timestamp)"
 ];
 
-const ESCROW_V2_READ_ABI = [
+const ESCROW_V3_READ_ABI = [
   "function policy() view returns (address)",
   "function accounts() view returns (address)",
   "function reputation() view returns (address)",
   "function treasuryAccount() view returns (address)",
   "function protocolFeeBps() view returns (uint16)",
-  "function MAX_PROTOCOL_FEE_BPS() view returns (uint16)"
+  "function posterFeeFloorRaw() view returns (uint256)",
+  "function retentionFlatRaw() view returns (uint256)",
+  "function retentionCapBps() view returns (uint16)",
+  "function MAX_PROTOCOL_FEE_BPS() view returns (uint16)",
+  "function MAX_POSTER_FEE_FLOOR_RAW() view returns (uint256)",
+  "function MAX_RETENTION_FLAT_RAW() view returns (uint256)",
+  "function MAX_RETENTION_CAP_BPS() view returns (uint16)",
+  "function supportsGasRetention() view returns (bool)"
 ];
 
 const PHASES = new Set(["deploy", "finalize", "all"]);
 const PRIVATE_KEY_RE = /^0x[a-fA-F0-9]{64}$/u;
 const DEFAULT_ORPHAN_SCAN_CHUNK_SIZE = 25_000;
-const JOB_STATE_NAMES = ["None", "Open", "Claimed", "Submitted", "Rejected", "Disputed", "Closed"];
+const JOB_STATE_NAMES = ["None", "Open", "Claimed", "Submitted", "Rejected", "Disputed", "Closed", "Cancelled"];
 const PAYOUT_MODE_NAMES = ["Single", "Milestone"];
 
 /**
@@ -303,12 +313,16 @@ async function loadDeployments(profile) {
 // participant. Every redeploy MUST ship an artifact that defines all of them,
 // or the deployed-bytecode-selector audit fails and the worker loop reverts
 // Unauthorized (claimJobFor #357/#525, submitWorkFor/openDisputeFor this PR).
-const REQUIRED_ESCROW_V2_FNS = [
+const REQUIRED_ESCROW_V3_FNS = [
   "claimJobFor",
   "submitWorkFor",
   "openDisputeFor",
   "previewProtocolFee",
-  "setProtocolFeeBps",
+  "previewPosterFee",
+  "previewGasRetention",
+  "setFeeSchedule",
+  "supportsGasRetention",
+  "cancelOpenJob",
   "setTreasuryAccount",
   "createSinglePayoutJobFeeWaived"
 ];
@@ -329,24 +343,24 @@ async function loadEscrowArtifact() {
 }
 
 function summarizeBrokeredSelectors(artifact) {
-  return REQUIRED_ESCROW_V2_FNS
+  return REQUIRED_ESCROW_V3_FNS
     .map((name) => `${name}=${artifact.abi.some((f) => f.name === name)}`)
     .join(" ");
 }
 
 export function assertArtifactHasBrokeredSelectors(artifact) {
-  const missing = REQUIRED_ESCROW_V2_FNS.filter((name) => !artifact.abi.some((f) => f.name === name));
+  const missing = REQUIRED_ESCROW_V3_FNS.filter((name) => !artifact.abi.some((f) => f.name === name));
   if (missing.length) {
     throw new Error(
-      `Build artifact is missing required EscrowCore-v2 selector(s): ${missing.join(", ")}. ` +
-      "Run `forge build` on the protocol-fee source before redeploying."
+      `Build artifact is missing required EscrowCore-v3 selector(s): ${missing.join(", ")}. ` +
+      "Run `forge build` on the v3 source before redeploying."
     );
   }
   const constructor = artifact.abi.find((entry) => entry.type === "constructor");
   if (constructor?.inputs?.length !== 4) {
     throw new Error(
       `Build artifact has ${constructor?.inputs?.length ?? 0} EscrowCore constructor inputs; ` +
-      "v2 requires policy, accounts, reputation, treasuryAccount."
+      "v3 requires policy, accounts, reputation, treasuryAccount."
     );
   }
 }
@@ -1087,7 +1101,7 @@ export function applyEscrowRedeployManifest({
   skipRevoke,
   redeployedAt = new Date().toISOString()
 }) {
-  assertAddress("v2 deployer", deployer);
+  assertAddress("v3 deployer", deployer);
   manifest.contracts.escrowCore = newEscrow;
   if (skipRevoke) {
     manifest.contracts.legacyEscrowCore = oldEscrow;
@@ -1096,15 +1110,19 @@ export function applyEscrowRedeployManifest({
   }
   manifest.parameters = {
     ...(manifest.parameters ?? {}),
-    protocolFeeBps: "0"
+    protocolFeeBps: "500",
+    retentionFlatRaw: "50000",
+    retentionCapBps: "2000",
+    posterFeeBps: "500",
+    posterFeeFloorRaw: "50000"
   };
   manifest.deployers = {
     ...(manifest.deployers ?? {}),
-    escrowCoreV2: deployer
+    escrowCoreV3: deployer
   };
   manifest.deploymentBlocks = {
     ...(manifest.deploymentBlocks ?? {}),
-    escrowCoreV2: deployBlock
+    escrowCoreV3: deployBlock
   };
   manifest.escrowRedeployedAt = redeployedAt;
   manifest.escrowRedeployTxHashes = {
@@ -1112,6 +1130,8 @@ export function applyEscrowRedeployManifest({
     multisigExec: multisigExecTx,
     revokeOld: skipRevoke ? null : "batched-in-multisig-exec"
   };
+  delete manifest.knownUnshippedContractChanges?.escrowCore;
+  delete manifest.knownUnshippedContractChanges?.legacyEscrowCore;
   return manifest;
 }
 
@@ -1208,7 +1228,7 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
   // 1. Read-only verification.
   const treasury = new Contract(manifest.contracts.treasuryPolicy, TREASURY_POLICY_ABI, provider);
   const accounts = new Contract(manifest.contracts.agentAccountCore, AGENT_ACCOUNT_READ_ABI, provider);
-  const escrowV2 = new Contract(newEscrow, ESCROW_V2_READ_ABI, provider);
+  const escrowV3 = new Contract(newEscrow, ESCROW_V3_READ_ABI, provider);
   const [
     newIsSettlementBroker,
     oldIsSettlementBroker,
@@ -1221,7 +1241,14 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
     boundAccounts,
     boundReputation,
     protocolFeeBps,
+    posterFeeFloorRaw,
+    retentionFlatRaw,
+    retentionCapBps,
     maxProtocolFeeBps,
+    maxPosterFeeFloorRaw,
+    maxRetentionFlatRaw,
+    maxRetentionCapBps,
+    supportsGasRetention,
     treasuryAccount,
     deployReceipt
   ] = await Promise.all([
@@ -1232,12 +1259,19 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
     accounts.escrowOperators(newEscrow),
     accounts.escrowOperators(oldEscrow),
     provider.getCode(newEscrow),
-    escrowV2.policy(),
-    escrowV2.accounts(),
-    escrowV2.reputation(),
-    escrowV2.protocolFeeBps(),
-    escrowV2.MAX_PROTOCOL_FEE_BPS(),
-    escrowV2.treasuryAccount(),
+    escrowV3.policy(),
+    escrowV3.accounts(),
+    escrowV3.reputation(),
+    escrowV3.protocolFeeBps(),
+    escrowV3.posterFeeFloorRaw(),
+    escrowV3.retentionFlatRaw(),
+    escrowV3.retentionCapBps(),
+    escrowV3.MAX_PROTOCOL_FEE_BPS(),
+    escrowV3.MAX_POSTER_FEE_FLOOR_RAW(),
+    escrowV3.MAX_RETENTION_FLAT_RAW(),
+    escrowV3.MAX_RETENTION_CAP_BPS(),
+    escrowV3.supportsGasRetention(),
+    escrowV3.treasuryAccount(),
     provider.getTransactionReceipt(args.deployTx)
   ]);
   console.log("");
@@ -1247,7 +1281,10 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
   console.log(`  reputationWriter[oldEscrow]:             ${oldIsReputationWriter}  (expected: --skip-revoke)`);
   console.log(`  AgentAccountCore.escrowOperators[new]:   ${newIsEscrowOperator}  (expected: true)`);
   console.log(`  AgentAccountCore.escrowOperators[old]:   ${oldIsEscrowOperator}  (expected: --skip-revoke)`);
-  console.log(`  protocolFeeBps:                          ${protocolFeeBps}  (expected: 0)`);
+  console.log(`  posterFeeBps:                            ${protocolFeeBps}  (expected: 500)`);
+  console.log(`  posterFeeFloorRaw:                       ${posterFeeFloorRaw}  (expected: 50000)`);
+  console.log(`  retentionFlatRaw:                        ${retentionFlatRaw}  (expected: 50000)`);
+  console.log(`  retentionCapBps:                         ${retentionCapBps}  (expected: 2000)`);
   console.log(`  MAX_PROTOCOL_FEE_BPS:                    ${maxProtocolFeeBps}  (expected: 1000)`);
   console.log(`  treasuryAccount:                         ${treasuryAccount}`);
   console.log(`  newEscrow code size:                     ${newCode === "0x" ? 0 : (newCode.length - 2) / 2} bytes`);
@@ -1281,21 +1318,25 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
     throw new Error(`Deploy transaction ${args.deployTx} is missing or unsuccessful.`);
   }
   assertAddress("deploy transaction sender", deployReceipt.from);
-  const actualV2Deployer = deployReceipt.from;
+  const actualV3Deployer = deployReceipt.from;
   if (deployReceipt.contractAddress?.toLowerCase() !== newEscrow.toLowerCase()) {
     throw new Error(`Deploy transaction created ${deployReceipt.contractAddress}, not ${newEscrow}.`);
   }
   if (boundPolicy.toLowerCase() !== manifest.contracts.treasuryPolicy.toLowerCase()
     || boundAccounts.toLowerCase() !== manifest.contracts.agentAccountCore.toLowerCase()
     || boundReputation.toLowerCase() !== manifest.contracts.reputationSbt.toLowerCase()) {
-    throw new Error("EscrowCore-v2 immutable constructor bindings do not match the deployment manifest.");
+    throw new Error("EscrowCore-v3 immutable constructor bindings do not match the deployment manifest.");
   }
   const expectedTreasuryAccount = manifest.treasuryAccount ?? manifest.treasuryReserve;
   if (treasuryAccount.toLowerCase() !== expectedTreasuryAccount.toLowerCase()) {
     throw new Error(`EscrowCore.treasuryAccount()=${treasuryAccount}; expected ${expectedTreasuryAccount}.`);
   }
-  if (Number(protocolFeeBps) !== 0 || Number(maxProtocolFeeBps) !== 1_000) {
-    throw new Error("EscrowCore-v2 must finalize with protocolFeeBps=0 and MAX_PROTOCOL_FEE_BPS=1000.");
+  if (Number(protocolFeeBps) !== 500 || Number(posterFeeFloorRaw) !== 50_000
+    || Number(retentionFlatRaw) !== 50_000 || Number(retentionCapBps) !== 2_000
+    || Number(maxProtocolFeeBps) !== 1_000 || Number(maxPosterFeeFloorRaw) !== 500_000
+    || Number(maxRetentionFlatRaw) !== 500_000 || Number(maxRetentionCapBps) !== 2_500
+    || supportsGasRetention !== true) {
+    throw new Error("EscrowCore-v3 fee schedule or contract ceilings do not match the ratified D4 values.");
   }
   if (args.skipRevoke && (!oldIsSettlementBroker || !oldIsReputationWriter || !oldIsEscrowOperator)) {
     throw new Error("v1 drain requested, but the old EscrowCore no longer has every role needed to settle open jobs.");
@@ -1310,15 +1351,15 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
       manifest,
       oldEscrow,
       newEscrow,
-      deployer: actualV2Deployer,
+      deployer: actualV3Deployer,
       deployBlock: Number(deployReceipt.blockNumber),
       deployTx: args.deployTx,
       multisigExecTx: args.multisigExecTx,
       skipRevoke: args.skipRevoke
     });
     console.log(`\n  Wrote ${deploymentsPath}#contracts.escrowCore = ${newEscrow}`);
-    console.log(`  Recorded deployers.escrowCoreV2 = ${actualV2Deployer}`);
-    console.log(`  Recorded deploymentBlocks.escrowCoreV2 = ${Number(deployReceipt.blockNumber)}`);
+    console.log(`  Recorded deployers.escrowCoreV3 = ${actualV3Deployer}`);
+    console.log(`  Recorded deploymentBlocks.escrowCoreV3 = ${Number(deployReceipt.blockNumber)}`);
 
     // Phase 2 PR 2.6 made deploy/backend.env.template the single source of
     // truth at deploy time; check-template-matches-manifest.mjs is the CI
@@ -1362,7 +1403,7 @@ async function runFinalize({ args, deploymentsPath, manifest, provider, wiringSt
     profile: args.profile,
     newEscrow,
     oldEscrow,
-    deployer: actualV2Deployer,
+    deployer: actualV3Deployer,
     txHashes: {
       deploy: args.deployTx,
       multisigExec: args.multisigExecTx,
@@ -1392,6 +1433,11 @@ async function main() {
   if (args.help) {
     printUsage();
     return;
+  }
+  if (args.profile === "mainnet" && !args.dryRun && !args.skipRevoke) {
+    throw new Error(
+      "EscrowCore v3 mainnet ceremony requires --skip-revoke: v2 roles remain live while legacy stock drains."
+    );
   }
   if (!PHASES.has(args.phase)) {
     console.error(`--phase must be one of: ${[...PHASES].join(", ")}. Got: ${args.phase}`);

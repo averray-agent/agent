@@ -22,28 +22,29 @@ writing and say so where they can drift.
 | Item | Amount | Notes |
 |---|---|---|
 | Bounty reward | your choice, ≥ **1 USDC** floor | goes 100% to the worker |
-| Platform fee | **5%** of reward, **on top** | poster-side additive: a 1.00 bounty reserves **1.05**; the worker still gets the full 1.00 |
+| Platform fee | **max(5%, 0.05 USDC)**, **on top** | poster-side additive: a 1.00 bounty reserves **1.05**; the worker's advertised reward is not reduced by this poster fee |
 | Gas | well under 0.1 DOT for the three funding transactions | Polkadot Hub mainnet, chainId 420420419 |
 
-The fee percentage is set on-chain and snapshotted into your job at creation —
+The fee schedule is set on-chain and snapshotted into your job at creation —
 it cannot change under you after you fund.
 
 > **⚠ Commit only what you mean to pay.** Once your funding transaction
-> executes, the reward + fee stay escrowed until the job resolves (settled,
-> or rejected/disputed through their timeout paths). **There is currently no
-> poster-side cancel for a job nobody claims.** Unfunded drafts are safe —
-> they expire after 72h with no funds moved — but a funded job is a
-> commitment. Size your first bounty accordingly.
+> executes, the reward + fee stay escrowed until the job resolves or the
+> recorded poster cancels an Open job. Unfunded drafts are safe — they expire
+> after 72h with no funds moved.
 >
-> If a job of yours does get stuck unclaimed, ask the operator: escrowed
-> funds can be **rescued back to you on request** through an on-chain
-> procedure taking about 7 days — it can only ever refund you, the recorded
-> poster. A self-serve instant cancel is planned for the next contract
-> upgrade.
+> Read `GET /poster/onboarding.cancellation` before funding. When
+> `selfServeCancel` is true, the recorded poster may **cancel any time after
+> 1h, with an instant refund** of the unreleased reward, poster fee, and
+> reserves. A claim that lands first follows the existing lifecycle until the
+> job reopens. When that capability is false (legacy stock), ask the operator:
+> the labeled tombstone rescue takes about 7 days and can refund only the
+> recorded poster.
 
 ## 2. What you need
 
-- An **EVM wallet** (EOA) on Polkadot Hub mainnet holding your reward × 1.05
+- An **EVM wallet** (EOA) on Polkadot Hub mainnet holding your reward plus
+  `max(5%, 0.05 USDC)`
   in USDC plus a little DOT for gas.
 - **Enrollment**: in the allowlist phase, ask the operator (via
   [averray.com](https://www.averray.com)) to add your wallet. This is manual

@@ -11,7 +11,7 @@ import {
 } from "../abis/contractsAbi";
 
 const payoutModeLabels = ["single", "milestone"] as const;
-const jobStateLabels = ["none", "open", "claimed", "submitted", "rejected", "disputed", "closed"] as const;
+const jobStateLabels = ["none", "open", "claimed", "submitted", "rejected", "disputed", "closed", "cancelled"] as const;
 const requestKindLabels = ["deposit", "withdraw", "claim"] as const;
 const requestStatusLabels = ["unknown", "pending", "succeeded", "failed", "cancelled"] as const;
 const zeroHash = `0x${"0".repeat(64)}` as `0x${string}`;
@@ -435,6 +435,66 @@ ponder.on("EscrowCore:JobClaimed", async ({ event, context }) => {
     kind: "JobClaimed",
     actor: event.args.worker,
     amount: event.args.claimStake,
+    evidenceHash: null,
+    reasonCode: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("EscrowCore:ClaimRetentionSnapshot", async ({ event, context }) => {
+  await syncJob({ context, event, jobId: event.args.jobId });
+  await context.db.insert(schema.jobEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    jobId: event.args.jobId,
+    kind: "ClaimRetentionSnapshot",
+    actor: event.args.worker,
+    amount: event.args.retentionFlatRaw,
+    brokered: event.args.brokered,
+    waived: event.args.waived,
+    evidenceHash: null,
+    reasonCode: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("EscrowCore:GasRetentionApplied", async ({ event, context }) => {
+  await context.db.insert(schema.gasRetention).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    jobId: event.args.jobId,
+    worker: event.args.worker,
+    retainedRaw: event.args.retainedRaw,
+    rewardRaw: event.args.rewardRaw,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("EscrowCore:FeeScheduleChanged", async ({ event, context }) => {
+  await context.db.insert(schema.feeScheduleChange).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    retentionFlatRaw: event.args.newRetentionFlatRaw,
+    retentionCapBps: event.args.newRetentionCapBps,
+    posterFeeBps: event.args.newPosterFeeBps,
+    posterFeeFloorRaw: event.args.newPosterFeeFloorRaw,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("EscrowCore:JobCancelled", async ({ event, context }) => {
+  await syncJob({ context, event, jobId: event.args.jobId });
+  await context.db.insert(schema.jobEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    jobId: event.args.jobId,
+    kind: "JobCancelled",
+    actor: event.args.poster,
+    amount: event.args.refundedRaw,
     evidenceHash: null,
     reasonCode: null,
     txHash: event.transaction.hash,

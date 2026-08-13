@@ -25,8 +25,12 @@ const TREASURY_POLICY_ABI = [
 const AGENT_ACCOUNT_ABI = [
   "function setEscrowOperator(address escrowOperator, bool approved)"
 ];
+const ESCROW_V3_ADMIN_ABI = [
+  "function setFeeSchedule(uint256 retentionFlatRaw,uint16 retentionCapBps,uint16 posterFeeBps,uint256 posterFeeFloorRaw)"
+];
 const policyIface = new Interface(TREASURY_POLICY_ABI);
 const accountIface = new Interface(AGENT_ACCOUNT_ABI);
+const escrowV3Iface = new Interface(ESCROW_V3_ADMIN_ABI);
 
 const NEW = "0xb8fd8A932F69bD5E39700b7cf6D2920aF84d1B27";
 const OLD = "0x7BB8fea44bDeE9870cF27c1dB616E7017BC38b0a";
@@ -252,126 +256,141 @@ function buildFreshAgentAccountCalls({ skipRevoke = false } = {}) {
 
 test("buildInnerCalls produces least-privilege role calls by default", () => {
   const calls = buildFixtureCalls();
-  assert.equal(calls.length, 9);
-  assert.match(calls[0].label, /AgentAccountCore\.setEscrowOperator/u);
-  assert.match(calls[1].label, /TreasuryPolicy\.setSettlementBroker/u);
-  assert.match(calls[2].label, /TreasuryPolicy\.setReputationWriter/u);
-  assert.match(calls[3].label, /TreasuryPolicy\.setSettlementBroker/u);
-  assert.match(calls[4].label, /TreasuryPolicy\.setAgentTransferBroker/u);
-  assert.match(calls[5].label, /TreasuryPolicy\.setReputationWriter/u);
-  assert.match(calls[6].label, /AgentAccountCore\.setEscrowOperator/u);
-  assert.match(calls[7].label, /TreasuryPolicy\.setSettlementBroker/u);
-  assert.match(calls[8].label, /TreasuryPolicy\.setReputationWriter/u);
-  assert.equal(calls[0].to, AGENT_ACCOUNT);
-  assert.equal(calls[1].to, TREASURY_POLICY);
+  assert.equal(calls.length, 10);
+  assert.match(calls[0].label, /EscrowCore\.setFeeSchedule/u);
+  assert.match(calls[1].label, /AgentAccountCore\.setEscrowOperator/u);
+  assert.match(calls[2].label, /TreasuryPolicy\.setSettlementBroker/u);
+  assert.match(calls[3].label, /TreasuryPolicy\.setReputationWriter/u);
+  assert.match(calls[4].label, /TreasuryPolicy\.setSettlementBroker/u);
+  assert.match(calls[5].label, /TreasuryPolicy\.setAgentTransferBroker/u);
+  assert.match(calls[6].label, /TreasuryPolicy\.setReputationWriter/u);
+  assert.match(calls[7].label, /AgentAccountCore\.setEscrowOperator/u);
+  assert.match(calls[8].label, /TreasuryPolicy\.setSettlementBroker/u);
+  assert.match(calls[9].label, /TreasuryPolicy\.setReputationWriter/u);
+  assert.equal(calls[0].to, NEW);
+  assert.equal(calls[1].to, AGENT_ACCOUNT);
   assert.equal(calls[2].to, TREASURY_POLICY);
   assert.equal(calls[3].to, TREASURY_POLICY);
   assert.equal(calls[4].to, TREASURY_POLICY);
   assert.equal(calls[5].to, TREASURY_POLICY);
-  assert.equal(calls[6].to, AGENT_ACCOUNT);
-  assert.equal(calls[7].to, TREASURY_POLICY);
+  assert.equal(calls[6].to, TREASURY_POLICY);
+  assert.equal(calls[7].to, AGENT_ACCOUNT);
   assert.equal(calls[8].to, TREASURY_POLICY);
+  assert.equal(calls[9].to, TREASURY_POLICY);
   assert.equal(
     calls[0].data,
-    accountIface.encodeFunctionData("setEscrowOperator", [NEW, true])
+    escrowV3Iface.encodeFunctionData("setFeeSchedule", [50_000n, 2_000, 500, 50_000n])
   );
   assert.equal(
     calls[1].data,
-    policyIface.encodeFunctionData("setSettlementBroker", [NEW, true])
+    accountIface.encodeFunctionData("setEscrowOperator", [NEW, true])
   );
   assert.equal(
     calls[2].data,
-    policyIface.encodeFunctionData("setReputationWriter", [NEW, true])
+    policyIface.encodeFunctionData("setSettlementBroker", [NEW, true])
   );
   assert.equal(
     calls[3].data,
-    policyIface.encodeFunctionData("setSettlementBroker", [BACKEND_SIGNER, true])
+    policyIface.encodeFunctionData("setReputationWriter", [NEW, true])
   );
   assert.equal(
     calls[4].data,
-    policyIface.encodeFunctionData("setAgentTransferBroker", [BACKEND_SIGNER, true])
+    policyIface.encodeFunctionData("setSettlementBroker", [BACKEND_SIGNER, true])
   );
   assert.equal(
     calls[5].data,
-    policyIface.encodeFunctionData("setReputationWriter", [BACKEND_SIGNER, true])
+    policyIface.encodeFunctionData("setAgentTransferBroker", [BACKEND_SIGNER, true])
   );
   assert.equal(
     calls[6].data,
-    accountIface.encodeFunctionData("setEscrowOperator", [OLD, false])
+    policyIface.encodeFunctionData("setReputationWriter", [BACKEND_SIGNER, true])
   );
   assert.equal(
     calls[7].data,
-    policyIface.encodeFunctionData("setSettlementBroker", [OLD, false])
+    accountIface.encodeFunctionData("setEscrowOperator", [OLD, false])
   );
   assert.equal(
     calls[8].data,
+    policyIface.encodeFunctionData("setSettlementBroker", [OLD, false])
+  );
+  assert.equal(
+    calls[9].data,
     policyIface.encodeFunctionData("setReputationWriter", [OLD, false])
   );
 });
 
 test("buildInnerCalls produces approve-only role calls when --skip-revoke is set", () => {
   const calls = buildFixtureCalls({ skipRevoke: true });
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 7);
   assert.equal(
     calls[0].data,
-    accountIface.encodeFunctionData("setEscrowOperator", [NEW, true])
+    escrowV3Iface.encodeFunctionData("setFeeSchedule", [50_000n, 2_000, 500, 50_000n])
   );
   assert.equal(
     calls[1].data,
-    policyIface.encodeFunctionData("setSettlementBroker", [NEW, true])
+    accountIface.encodeFunctionData("setEscrowOperator", [NEW, true])
   );
   assert.equal(
     calls[2].data,
-    policyIface.encodeFunctionData("setReputationWriter", [NEW, true])
+    policyIface.encodeFunctionData("setSettlementBroker", [NEW, true])
   );
   assert.equal(
     calls[3].data,
-    policyIface.encodeFunctionData("setSettlementBroker", [BACKEND_SIGNER, true])
+    policyIface.encodeFunctionData("setReputationWriter", [NEW, true])
   );
   assert.equal(
     calls[4].data,
-    policyIface.encodeFunctionData("setAgentTransferBroker", [BACKEND_SIGNER, true])
+    policyIface.encodeFunctionData("setSettlementBroker", [BACKEND_SIGNER, true])
   );
   assert.equal(
     calls[5].data,
+    policyIface.encodeFunctionData("setAgentTransferBroker", [BACKEND_SIGNER, true])
+  );
+  assert.equal(
+    calls[6].data,
     policyIface.encodeFunctionData("setReputationWriter", [BACKEND_SIGNER, true])
   );
 });
 
 test("buildInnerCalls wires a freshly redeployed AgentAccountCore in the same batch", () => {
   const calls = buildFreshAgentAccountCalls();
-  assert.equal(calls.length, 10);
+  assert.equal(calls.length, 11);
   assert.match(calls[0].label, /approve new AgentAccountCore/u);
   assert.equal(calls[0].to, TREASURY_POLICY);
   assert.equal(
     calls[0].data,
     policyIface.encodeFunctionData("setOutflowRecorder", [NEW_AGENT_ACCOUNT, true])
   );
-  assert.equal(calls[1].to, NEW_AGENT_ACCOUNT);
+  assert.equal(calls[1].to, NEW);
   assert.equal(
     calls[1].data,
-    accountIface.encodeFunctionData("setEscrowOperator", [NEW, true])
+    escrowV3Iface.encodeFunctionData("setFeeSchedule", [50_000n, 2_000, 500, 50_000n])
   );
-  assert.equal(calls[2].to, TREASURY_POLICY);
+  assert.equal(calls[2].to, NEW_AGENT_ACCOUNT);
   assert.equal(
     calls[2].data,
-    policyIface.encodeFunctionData("setSettlementBroker", [NEW, true])
+    accountIface.encodeFunctionData("setEscrowOperator", [NEW, true])
   );
   assert.equal(calls[3].to, TREASURY_POLICY);
   assert.equal(
     calls[3].data,
-    policyIface.encodeFunctionData("setReputationWriter", [NEW, true])
+    policyIface.encodeFunctionData("setSettlementBroker", [NEW, true])
   );
   assert.equal(calls[4].to, TREASURY_POLICY);
+  assert.equal(
+    calls[4].data,
+    policyIface.encodeFunctionData("setReputationWriter", [NEW, true])
+  );
   assert.equal(calls[5].to, TREASURY_POLICY);
   assert.equal(calls[6].to, TREASURY_POLICY);
-  assert.equal(calls[7].to, AGENT_ACCOUNT);
+  assert.equal(calls[7].to, TREASURY_POLICY);
+  assert.equal(calls[8].to, AGENT_ACCOUNT);
   assert.equal(
-    calls[7].data,
+    calls[8].data,
     accountIface.encodeFunctionData("setEscrowOperator", [OLD, false])
   );
-  assert.equal(calls[8].to, TREASURY_POLICY);
   assert.equal(calls[9].to, TREASURY_POLICY);
+  assert.equal(calls[10].to, TREASURY_POLICY);
 });
 
 test("role-setter calldata uses distinct selectors for the multisig recipe", () => {

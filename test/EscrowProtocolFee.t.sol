@@ -100,7 +100,7 @@ contract EscrowProtocolFeeTest is Test {
     }
 
     function testSuccessfulSinglePayoutReservesFeeOnTopAndKeepsWorkerRewardWhole() public {
-        escrow.setProtocolFeeBps(1_000);
+        _setPosterFee(1_000);
         bytes32 jobId = keccak256("fee/success");
         _createSingle(jobId, 100 ether);
 
@@ -130,11 +130,11 @@ contract EscrowProtocolFeeTest is Test {
     }
 
     function testJobSnapshotsFeeBpsSoLaterGovernanceChangeCannotRepriceIt() public {
-        escrow.setProtocolFeeBps(500);
+        _setPosterFee(500);
         bytes32 jobId = keccak256("fee/snapshot");
         _createSingle(jobId, 100 ether);
 
-        escrow.setProtocolFeeBps(1_000);
+        _setPosterFee(1_000);
         _approveSingle(jobId);
 
         EscrowCore.JobEscrow memory settled = escrow.jobs(jobId);
@@ -146,7 +146,7 @@ contract EscrowProtocolFeeTest is Test {
     }
 
     function testRejectedJobRefundsEntireProtocolFeeToPoster() public {
-        escrow.setProtocolFeeBps(1_000);
+        _setPosterFee(1_000);
         bytes32 jobId = keccak256("fee/rejected");
         _createSingle(jobId, 100 ether);
         _submitSingle(jobId);
@@ -166,7 +166,7 @@ contract EscrowProtocolFeeTest is Test {
     }
 
     function testDisputePayoutChargesOnlyProportionalSuccessFeeAndRefundsRemainder() public {
-        escrow.setProtocolFeeBps(1_000);
+        _setPosterFee(1_000);
         bytes32 jobId = keccak256("fee/dispute-partial");
         _createSingle(jobId, 100 ether);
         _submitSingle(jobId);
@@ -190,7 +190,7 @@ contract EscrowProtocolFeeTest is Test {
     }
 
     function testExplicitCuratedWaiverDoesNotReserveOrSettleProtocolFee() public {
-        escrow.setProtocolFeeBps(1_000);
+        _setPosterFee(1_000);
         bytes32 jobId = keccak256("fee/curated-waiver");
 
         vm.prank(poster);
@@ -236,26 +236,26 @@ contract EscrowProtocolFeeTest is Test {
         assertEq(escrow.MAX_PROTOCOL_FEE_BPS(), 1_000);
 
         vm.prank(outsider);
-        (bool unauthorized, bytes memory unauthorizedData) =
-            address(escrow).call(abi.encodeCall(escrow.setProtocolFeeBps, (100)));
+        (bool unauthorized, bytes memory unauthorizedData) = address(escrow)
+            .call(abi.encodeCall(escrow.setFeeSchedule, (uint256(0), uint16(0), uint16(100), uint256(0))));
         _requireRevertSelector(unauthorized, unauthorizedData, EscrowCore.Unauthorized.selector);
 
-        (bool overCap, bytes memory overCapData) =
-            address(escrow).call(abi.encodeCall(escrow.setProtocolFeeBps, (1_001)));
+        (bool overCap, bytes memory overCapData) = address(escrow)
+            .call(abi.encodeCall(escrow.setFeeSchedule, (uint256(0), uint16(0), uint16(1_001), uint256(0))));
         _requireRevertSelector(overCap, overCapData, EscrowCore.ProtocolFeeTooHigh.selector);
 
         (bool zeroTreasury, bytes memory zeroTreasuryData) =
             address(escrow).call(abi.encodeCall(escrow.setTreasuryAccount, (address(0))));
         _requireRevertSelector(zeroTreasury, zeroTreasuryData, EscrowCore.InvalidTreasuryAccount.selector);
 
-        escrow.setProtocolFeeBps(1_000);
+        _setPosterFee(1_000);
         escrow.setTreasuryAccount(nextTreasury);
         assertEq(escrow.protocolFeeBps(), 1_000);
         assertEq(escrow.treasuryAccount(), nextTreasury);
     }
 
     function testTreasuryDestinationIsReadAtSettlementWhilePriceStaysSnapshotted() public {
-        escrow.setProtocolFeeBps(1_000);
+        _setPosterFee(1_000);
         bytes32 jobId = keccak256("fee/treasury-rotation");
         _createSingle(jobId, 100 ether);
         escrow.setTreasuryAccount(nextTreasury);
@@ -268,7 +268,7 @@ contract EscrowProtocolFeeTest is Test {
     }
 
     function testMilestonesChargeTheExactCumulativeFeeDespitePerLegRounding() public {
-        escrow.setProtocolFeeBps(1_000);
+        _setPosterFee(1_000);
         bytes32 jobId = keccak256("fee/milestone-rounding");
         uint256[] memory milestones = new uint256[](2);
         milestones[0] = 5;
@@ -304,7 +304,7 @@ contract EscrowProtocolFeeTest is Test {
     }
 
     function testRecurringDerivativeConsumesRewardPlusSnapshottedFeeFromTemplateReserve() public {
-        escrow.setProtocolFeeBps(1_000);
+        _setPosterFee(1_000);
         bytes32 templateId = keccak256("fee/recurring-template");
         bytes32 jobId = keccak256("fee/recurring-run");
 
@@ -350,6 +350,10 @@ contract EscrowProtocolFeeTest is Test {
         escrow.createSinglePayoutJob(
             jobId, address(token), reward, 0, 0, 1 days, bytes32("AUTO"), bytes32("CODING"), SPEC_HASH
         );
+    }
+
+    function _setPosterFee(uint16 feeBps) internal {
+        escrow.setFeeSchedule(0, 0, feeBps, 0);
     }
 
     function _submitSingle(bytes32 jobId) internal {
