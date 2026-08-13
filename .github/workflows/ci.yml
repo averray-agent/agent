@@ -90,7 +90,13 @@ jobs:
         # before updating.
         uses: foundry-rs/foundry-toolchain@c7450ba673e133f5ee30098b3b54f444d3a2ca2d # v1
         with:
-          version: stable
+          # Pinned (was "stable"): forge 1.7.1 is the toolchain that
+          # reproduces the D-03 pinned EscrowCore v3 masked runtime hash.
+          # Local green implies CI green only under toolchain parity — run
+          # the same version locally before trusting a local suite result.
+          version: v1.7.1
+      - name: Print toolchain (parity check against local)
+        run: forge --version
 
       - name: forge build
         run: forge build --sizes
