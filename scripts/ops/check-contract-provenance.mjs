@@ -77,6 +77,17 @@ export const CONTRACT_ARTIFACTS = Object.freeze({
     "HydrationDepositPoolAdapter",
   ],
   depositPool: ["DepositPool.sol", "DepositPool"],
+  // L1 activation, deployed 2026-08-13 (ceremony CEREMONY_POOLV2_CREDITPOOL):
+  // a THIRD HydrationUsdcAdapterV22 deployment as the v2 pool's lane (this one
+  // compiled at HEAD, so it carries #1043's recordRemotePosition — no waiver),
+  // plus the v2 pool pair. The drained v1 pool keys above stay live-checked.
+  depositPoolLaneV2: ["HydrationUsdcAdapterV22.sol", "HydrationUsdcAdapterV22"],
+  hydrationDepositPoolAdapterV2: [
+    "HydrationDepositPoolAdapter.sol",
+    "HydrationDepositPoolAdapter",
+  ],
+  depositPoolV2: ["DepositPoolV2.sol", "DepositPoolV2"],
+  creditPool: ["CreditPool.sol", "CreditPool"],
 });
 
 function sha256(bytes) {
