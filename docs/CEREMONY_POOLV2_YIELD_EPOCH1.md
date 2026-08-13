@@ -87,8 +87,17 @@ The script never accepts a raw key.
 
 **Leg A — proof tranche out** (day 1):
 ```
-node scripts/ops/pool-venue-ceremony.mjs deploy --assets 2000000 --profile mainnet
+node scripts/ops/pool-venue-ceremony.mjs deploy --profile mainnet \
+  --assets 2000000 --return-by <unix, use now+47h — the +48h boundary trips the strict check> \
+  --deployment-kind proof --observability-url <internal pool-observability URL> \
+  --expected-signer 0x5a6836c6D4d293F6E5377E6c28054F4171915813
 ```
+(Gate-run evidence 2026-08-13: the script walked five sequential fail-closed
+refusals — missing signer, missing returnBy, +48h boundary, policy, missing
+observability — and the identity asserts passed post-aliasing. The
+observability guard requires the feed to be `reconciled: true`, `flows.status
+ok`, fresh ≤10 min, matching pool + chain timestamp — precondition 3's
+repoint work is self-enforcing here.)
 Gates: `VenueDeploymentCreated(deploymentId, adapterRequestId, 2e6, returnBy)`;
 `venuePrincipalCostBasis` +2e6 exactly; `buffer + deployed == totalAssets`;
 far-side aUSDC position on Hydration carrying the adapterRequestId (epoch-1
@@ -97,14 +106,16 @@ evidence pattern) captured before proceeding; pool door `yieldStatus` →
 
 **Leg B — async settle** (same day, after the adapter reports terminal):
 ```
-node scripts/ops/pool-venue-ceremony.mjs settle --deployment-id <ID> --profile mainnet
+node scripts/ops/pool-venue-ceremony.mjs settle --profile mainnet \
+  --deployment-id <ID> --expected-signer 0x5a6836c6D4d293F6E5377E6c28054F4171915813
 ```
 Gates: `VenueDeploymentSettled(…, status, settledAssets)`; books == chain;
 share price still unchanged.
 
 **Leg C — partial recall + yield recognition**:
 ```
-node scripts/ops/pool-venue-ceremony.mjs recall --deployment-id <ID> --assets 500000 --profile mainnet
+node scripts/ops/pool-venue-ceremony.mjs recall --profile mainnet \
+  --deployment-id <ID> --assets 500000 --expected-signer 0x5a6836c6D4d293F6E5377E6c28054F4171915813
 ```
 Gates: buffer rises by the returned amount; **yield-recognition math verified
 by hand** — anything above remaining cost basis for the tranche is realised
