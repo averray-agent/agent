@@ -77,13 +77,17 @@ export function createAdminJobsRoutes({
       // Operator-side full job listing including paused, archived, and
       // stale rows so the operator app can show lifecycle controls.
       // The public `/jobs` route filters those out by default.
+      const jobs = await service.listJobsWithSessions({
+        wallet: auth.wallet,
+        includePaused: true,
+        includeArchived: true,
+        includeStale: true
+      });
+      const securedJobs = typeof service.addListingSecurityMetadata === "function"
+        ? await service.addListingSecurityMetadata(jobs)
+        : jobs;
       respond(response, 200, {
-        jobs: await service.listJobsWithSessions({
-          wallet: auth.wallet,
-          includePaused: true,
-          includeArchived: true,
-          includeStale: true
-        }),
+        jobs: securedJobs,
         jobLifecycle: service.getJobLifecycleSummary()
       });
       return true;

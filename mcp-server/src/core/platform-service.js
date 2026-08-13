@@ -204,6 +204,67 @@ export class PlatformService {
     );
   }
 
+  /**
+   * Add serving-only trust metadata. This projection is deliberately kept out
+   * of JobCatalogService so neither curated nor external specHash preimages
+   * acquire presentation fields.
+   */
+  async addListingSecurityMetadata(jobs) {
+    const rows = Array.isArray(jobs) ? jobs : [jobs];
+    const projected = await Promise.all(rows.map((job) => this.addJobListingSecurityMetadata(job)));
+    return Array.isArray(jobs) ? projected : projected[0];
+  }
+
+  async addJobListingSecurityMetadata(job) {
+    const external = isExternalJob(job);
+    let draft;
+    if (external && typeof this.stateStore.getExternalJobDraftByJobId === "function") {
+      draft = await this.stateStore.getExternalJobDraftByJobId(job.id).catch(() => undefined);
+    }
+    let liveJob;
+    if (
+      typeof this.blockchainGateway?.getJob === "function"
+      && this.blockchainGateway?.isEnabled?.()
+      && (!external || !draft?.specHash || !draft?.wallet)
+    ) {
+      liveJob = await this.blockchainGateway.getJob(job.id).catch(() => undefined);
+    }
+
+    const posterAddress = firstRecordedAddress(
+      draft?.wallet,
+      job?.source?.poster?.wallet,
+      job?.poster?.wallet,
+      job?.funding?.wallet,
+      liveJob?.poster
+    );
+    const committedSpecHash = firstRecordedSpecHash(draft?.specHash, liveJob?.specHash);
+    // Never label a locally recomputed candidate as the committed hash. The
+    // chain (or the hash-pinned external draft) is the provenance authority.
+    const specHash = committedSpecHash ?? null;
+    const firstSeenAt = draft?.createdAt
+      ?? job?.lifecycle?.createdAt
+      ?? job?.source?.poster?.fundedAt
+      ?? null;
+    const postingRoute = external
+      ? draft?.fundingRail === "x402" || job?.source?.fundingRail === "x402"
+        ? "external-x402"
+        : "external-direct-hub"
+      : "curated";
+
+    return {
+      ...job,
+      listingStatus: "listed",
+      contentTrust: external ? "external-unreviewed" : "operator-curated",
+      provenance: {
+        posterAddress,
+        posterTier: external ? "external-self-serve" : "operator-curated",
+        postingRoute,
+        firstSeenAt,
+        specHash
+      }
+    };
+  }
+
   setRewardBankHealthProvider(provider) {
     this.rewardBankHealthProvider = typeof provider === "function" ? provider : undefined;
   }
@@ -1899,6 +1960,27 @@ async function getBankXcmRuntimeStatusSafely(runtime) {
 function normalizeSpecHash(value) {
   const normalized = String(value ?? "").trim().toLowerCase();
   return /^0x[0-9a-f]{64}$/u.test(normalized) ? normalized : undefined;
+}
+
+function firstRecordedAddress(...values) {
+  for (const value of values) {
+    const normalized = String(value ?? "").trim().toLowerCase();
+    if (
+      /^0x[0-9a-f]{40}$/u.test(normalized)
+      && normalized !== "0x0000000000000000000000000000000000000000"
+    ) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
+function firstRecordedSpecHash(...values) {
+  for (const value of values) {
+    const normalized = normalizeSpecHash(value);
+    if (normalized && normalized !== `0x${"0".repeat(64)}`) return normalized;
+  }
+  return undefined;
 }
 
 async function resolveSiweAuthTelemetry(stateStore, { limit = 1000 } = {}) {

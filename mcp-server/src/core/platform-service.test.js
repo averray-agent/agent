@@ -42,6 +42,8 @@ const EXTERNAL_SCHEMA = {
     result: { type: "string", enum: ["pass", "fail"] }
   }
 };
+const EXTERNAL_LISTING_JOB_ID = `0x${"ab".repeat(32)}`;
+const EXTERNAL_POSTER = "0x1111111111111111111111111111111111111111";
 
 function makeParentJob(overrides = {}) {
   return {
@@ -2757,4 +2759,61 @@ test("external projections strip sponsored-gas and waiver flags even from legacy
   assert.equal(created.source.type, "external");
   assert.equal(created.requiresSponsoredGas, false);
   assert.notEqual(created.onboardingWaiverEligible, true);
+});
+
+test("serving metadata exposes curated provenance without changing the canonical definition", async () => {
+  const committedSpecHash = `0x${"cd".repeat(32)}`;
+  const service = makePlatformService({
+    isEnabled: () => true,
+    async getJob() {
+      return { poster: EXTERNAL_POSTER, specHash: committedSpecHash, state: 1 };
+    }
+  });
+  const definition = service.getJobDefinition("parent-job-001");
+  const canonicalBefore = hashCanonicalContent(definition);
+
+  const served = await service.addListingSecurityMetadata(definition);
+
+  assert.equal(served.listingStatus, "listed");
+  assert.equal(served.contentTrust, "operator-curated");
+  assert.deepEqual(served.provenance, {
+    posterAddress: EXTERNAL_POSTER,
+    posterTier: "operator-curated",
+    postingRoute: "curated",
+    firstSeenAt: null,
+    specHash: committedSpecHash
+  });
+  assert.equal(hashCanonicalContent(service.getJobDefinition("parent-job-001")), canonicalBefore);
+  assert.equal(service.getJobDefinition("parent-job-001").provenance, undefined);
+});
+
+test("external serving metadata uses the hash-pinned draft provenance", async () => {
+  const store = new MemoryStateStore();
+  const service = makePlatformService(undefined, undefined, store, undefined, undefined, undefined, undefined, {
+    id: EXTERNAL_LISTING_JOB_ID,
+    source: { type: "external", fundingRail: "x402", poster: { wallet: EXTERNAL_POSTER } }
+  });
+  const specHash = `0x${"ef".repeat(32)}`;
+  await store.materializeExternalJobDraft({
+    draftId: "draft-listing-security",
+    jobId: EXTERNAL_LISTING_JOB_ID,
+    wallet: EXTERNAL_POSTER,
+    fundingRail: "x402",
+    specHash,
+    createdAt: "2026-08-13T08:00:00.000Z",
+    status: "live"
+  });
+
+  const served = await service.addListingSecurityMetadata(
+    service.getJobDefinition(EXTERNAL_LISTING_JOB_ID)
+  );
+
+  assert.equal(served.contentTrust, "external-unreviewed");
+  assert.deepEqual(served.provenance, {
+    posterAddress: EXTERNAL_POSTER,
+    posterTier: "external-self-serve",
+    postingRoute: "external-x402",
+    firstSeenAt: "2026-08-13T08:00:00.000Z",
+    specHash
+  });
 });
