@@ -1,6 +1,7 @@
 import { keccak256, toUtf8Bytes } from "ethers";
 
 import { ValidationError } from "../../core/errors.js";
+import { RETIRED_STRATEGIES_RESPONSE } from "../../core/earnings-door-copy.js";
 import {
   buildAccountStrategiesView,
   buildLiveStrategyAllocationByAsset,
@@ -126,10 +127,7 @@ export function createAccountRoutes({
       respond(
         response,
         200,
-        {
-          strategies,
-          docs: "https://github.com/averray-agent/agent/blob/main/docs/strategies/vdot.md"
-        },
+        RETIRED_STRATEGIES_RESPONSE,
         { "cache-control": "public, max-age=300" }
       );
       return true;
@@ -143,11 +141,10 @@ export function createAccountRoutes({
         return true;
       }
 
-      // Surface the worker's EOA wallet balance alongside the AAC position. A
-      // settled job reward lands in the worker's EOA, not their AAC `liquid`
-      // position — so without this an agent that just got paid sees 0 earned.
-      // Kept as a SEPARATE field, never folded into `liquid`: EOA funds are
-      // paid-out, not yet stakeable in-platform until the worker deposits them.
+      // Surface the worker's EOA wallet balance alongside the AAC account.
+      // Settlement lands in AAC `liquid`; the separate EOA field proves what
+      // has already crossed the withdrawal door and must never be folded back
+      // into the account's spendable/stakeable balance.
       let withWallet = account;
       if (typeof gateway.getWalletTokenBalances === "function") {
         const wallet = await gateway.getWalletTokenBalances(auth.wallet).catch(() => null);
@@ -186,16 +183,6 @@ export function createAccountRoutes({
       return true;
     }
 
-    if (request.method === "GET" && pathname === "/account/position") {
-      const auth = await authMiddleware(request, url);
-      const asset = url.searchParams.get("asset")?.trim().toUpperCase();
-      if (!asset) {
-        throw new ValidationError("asset query parameter is required.");
-      }
-      respond(response, 200, await service.getAccountPosition(auth.wallet, asset));
-      return true;
-    }
-
     if (request.method === "GET" && pathname === "/account/borrow-capacity") {
       const auth = await authMiddleware(request, url);
       const asset = url.searchParams.get("asset")?.trim() || "DOT";
@@ -216,6 +203,17 @@ export function createAccountRoutes({
         bucket: "account_fund",
         operation: ({ wallet, asset, amount }) => service.fundAccount(wallet, asset, amount)
       });
+    }
+
+    if (
+      (request.method === "POST" && (pathname === "/account/allocate" || pathname === "/account/deallocate"))
+      || (request.method === "GET" && pathname === "/account/strategies")
+    ) {
+      // Retirement is static public metadata, not an account read or a
+      // money-moving operation. Returning it before auth leaks no wallet data
+      // and lets every old client find the replacement without credentials.
+      respond(response, 410, RETIRED_STRATEGIES_RESPONSE);
+      return true;
     }
 
     if (request.method === "POST" && pathname === "/account/allocate") {

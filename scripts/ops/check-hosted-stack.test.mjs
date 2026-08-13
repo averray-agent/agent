@@ -20,6 +20,7 @@ async function runHostedStackFixture({
   autoVerifierOk,
   warnings = [],
   poolStatus = 200,
+  operatorToken = "",
   pool = {
     available: true,
     chainId: 1,
@@ -43,6 +44,13 @@ async function runHostedStackFixture({
   const onboarding = {
     name: "Averray fixture",
     protocols: ["http"],
+    tools: ["getAccountPosition", "buildWithdrawTransactions"],
+    onboarding: {
+      withdrawEarnings: {
+        statement: "Withdraw via buildWithdrawTransactions — your signature, your gas, any destination.",
+        retentionNotGates: "whatYourBalanceCanDo is informational only. It never delays, conditions, prices, or adds steps to withdrawal, and complete templates remain present."
+      }
+    },
     externalBounties: {
       posterOnboarding: "/poster/onboarding",
       cancellation: {
@@ -139,12 +147,53 @@ async function runHostedStackFixture({
     }],
     ["/health", health],
     ["/onboarding", onboarding],
-    ["/poster/onboarding", posterOnboarding]
+    ["/poster/onboarding", posterOnboarding],
+    ["/admin/status", {
+      maintenance: { policy: { enabled: true, risk: { defaultClaimStakeBps: 100, claimFeeBps: 50 } } },
+      xcmSettlementWatcher: { enabled: true, pendingCount: 0, running: true },
+      xcmObservationRelay: { enabled: false, running: false, lastError: null, lastSyncedAt: null }
+    }],
+    ["/strategies", {
+      status: "retired",
+      retired: true,
+      strategies: [],
+      see: { pool: "/pool", onboarding: "/onboarding#buildVestedCapacity" }
+    }],
+    ["/account/position?asset=USDC", {
+      available: true,
+      account: {
+        owner: ADDRESSES.feeRecipient,
+        available: { raw: "10" },
+        stakedOnOpenWork: { raw: "0" },
+        statement: []
+      },
+      ownershipProof: { contract: "AgentAccountCore" },
+      withdrawal: {
+        http: { path: "/account/withdraw/transactions" },
+        mcp: { tool: "buildWithdrawTransactions" }
+      },
+      whatYourBalanceCanDo: {
+        retentionNotGates: { templatesRemainComplete: true, conditionsWithdrawal: false }
+      }
+    }]
   ]);
   const server = createServer((request, response) => {
     if (request.url === "/pool") {
       response.writeHead(poolStatus, { "content-type": "application/json" });
       response.end(JSON.stringify(pool));
+      return;
+    }
+    if (request.url === "/account/withdraw/transactions" && request.method === "POST") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        available: true,
+        templates: [{
+          unsigned: true,
+          decoded: { function: "withdraw(address,uint256)", args: { amount: "1" } },
+          gas: { status: "measured" }
+        }],
+        whatYourBalanceCanDo: { retentionNotGates: { templatesRemainComplete: true } }
+      }));
       return;
     }
     const value = fixtures.get(request.url);
@@ -172,9 +221,13 @@ async function runHostedStackFixture({
       APP_URL: `${baseUrl}/app`,
       API_HEALTH_URL: `${baseUrl}/health`,
       API_POOL_URL: `${baseUrl}/pool`,
+      API_ACCOUNT_POSITION_URL: `${baseUrl}/account/position?asset=USDC`,
+      API_ACCOUNT_WITHDRAW_URL: `${baseUrl}/account/withdraw/transactions`,
+      API_STRATEGIES_URL: `${baseUrl}/strategies`,
       API_ONBOARDING_URL: `${baseUrl}/onboarding`,
       API_POSTER_ONBOARDING_URL: `${baseUrl}/poster/onboarding`,
-      ADMIN_JWT: "",
+      API_ADMIN_STATUS_URL: `${baseUrl}/admin/status`,
+      ADMIN_JWT: operatorToken,
       AVERRAY_TOKEN: "",
       CHECK_INDEXER: "0",
       CHECK_BOOTSTRAP_INSTRUMENTATION: "0",
@@ -218,6 +271,13 @@ test("hosted smoke accepts a healthy submitted-job verifier", async () => {
   assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /Checking DepositPool door/u);
   assert.match(result.stdout, /Hosted stack smoke check passed\./u);
+});
+
+test("hosted smoke walks through the authenticated earnings account and complete withdrawal template", async () => {
+  const result = await runHostedStackFixture({ autoVerifierOk: true, warnings: [], operatorToken: "fixture-token" });
+
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /Checking authenticated earnings account door/u);
 });
 
 test("hosted smoke rejects a 500 from the DepositPool door", async () => {

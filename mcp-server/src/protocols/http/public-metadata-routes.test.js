@@ -236,7 +236,7 @@ test("A3 arrival payload: GET /llms.txt serves the agent-adjusted API-host mirro
   assert.match(response.body, /Already have a managed wallet \(Cloudflare Wallets, Coinbase, or similar\)/u);
   assert.match(response.body, /payment rails and can't sign on this chain/u);
   assert.match(response.body, /same key works on any EVM chain/u);
-  assert.match(response.body, /withdrawn to any address you control/u);
+  assert.match(response.body, /Withdraw via buildWithdrawTransactions — your signature, your gas, any destination\./u);
   assert.match(response.body, /waiver is capped at 3 claims per wallet/u);
   assert.match(response.body, /Withdrawal is an on-chain act/u);
   assert.match(response.body, /docs\/BLIND_AGENT_CASE_STUDY\.md/u);
@@ -309,7 +309,7 @@ test("GET discovery manifest mirrors trim the public base URL and cache the resp
   }
 });
 
-test("GET /strategies returns configured strategy metadata with public cache headers", async () => {
+test("GET /strategies returns the retired surface and DepositPool pointers", async () => {
   const { calls, response, route } = makeHarness();
 
   const handled = await route({
@@ -320,9 +320,12 @@ test("GET /strategies returns configured strategy metadata with public cache hea
 
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.body, {
-    strategies: STRATEGIES,
-    docs: "https://github.com/averray-agent/agent/blob/main/docs/strategies/vdot.md"
+  assert.equal(response.body.status, "retired");
+  assert.equal(response.body.retired, true);
+  assert.deepEqual(response.body.strategies, []);
+  assert.deepEqual(response.body.see, {
+    pool: "/pool",
+    onboarding: "/onboarding#buildVestedCapacity"
   });
   assert.deepEqual(response.headers, { "cache-control": "public, max-age=300" });
   assert.deepEqual(calls, [

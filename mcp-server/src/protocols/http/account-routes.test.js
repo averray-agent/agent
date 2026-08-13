@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ValidationError } from "../../core/errors.js";
 import { createAccountRoutes } from "./account-routes.js";
 
 const AUTH = {
@@ -171,7 +170,7 @@ test("account routes ignore unrelated paths", async () => {
   assert.deepEqual(response, {});
 });
 
-test("GET /strategies returns public strategy metadata with cache headers", async () => {
+test("GET /strategies returns the retired DepositPool pointer", async () => {
   const { response, route } = makeHarness();
 
   const handled = await route({
@@ -183,7 +182,9 @@ test("GET /strategies returns public strategy metadata with cache headers", asyn
 
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.body.strategies, DEFAULT_STRATEGIES);
+  assert.equal(response.body.status, "retired");
+  assert.deepEqual(response.body.strategies, []);
+  assert.equal(response.body.see.pool, "/pool");
   assert.deepEqual(response.headers, { "cache-control": "public, max-age=300" });
 });
 
@@ -287,7 +288,7 @@ test("GET /account tolerates a wallet-balance read failure without 500ing", asyn
   assert.deepEqual(response.body.liquid, { DOT: 10 });
 });
 
-test("GET /account/position returns chain-backed wallet asset position", async () => {
+test("legacy account route leaves /account/position to the canonical earnings door", async () => {
   const { calls, response, route } = makeHarness();
 
   const handled = await route({
@@ -297,17 +298,8 @@ test("GET /account/position returns chain-backed wallet asset position", async (
     pathname: "/account/position",
   });
 
-  assert.equal(handled, true);
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.wallet, AUTH.wallet);
-  assert.equal(response.body.asset.symbol, "USDC");
-  assert.equal(response.body.source.method, "positions");
-  assert.equal(response.body.position.liquidRaw, "123000");
-  assert.deepEqual(calls.slice(0, 3), [
-    ["auth"],
-    ["getAccountPosition", { wallet: AUTH.wallet, asset: "USDC" }],
-    ["respond", { statusCode: 200, body: response.body, headers: {} }],
-  ]);
+  assert.equal(handled, false);
+  assert.deepEqual(calls, []);
 });
 
 test("GET /account/borrow-capacity returns wallet-scoped capacity", async () => {
@@ -349,7 +341,7 @@ test("POST /account/fund keeps mutation idempotency and normalized payload", asy
   assert.deepEqual(response.body, { status: "funded", wallet: AUTH.wallet, asset: "USDC", amount: 7 });
 });
 
-test("POST /account/allocate sync path preserves strategy selection", async () => {
+test("static strategy retirement returns before auth because the notice leaks no account data", async () => {
   const { calls, response, route } = makeHarness({
     payload: { amount: 3, strategyId: "default-low-risk" }
   });
@@ -362,14 +354,16 @@ test("POST /account/allocate sync path preserves strategy selection", async () =
   });
 
   assert.equal(handled, true);
-  const allocateCall = calls.find(([name]) => name === "allocateIdleFunds");
-  assert.equal(allocateCall[1].asset, "DOT");
-  assert.equal(allocateCall[1].amount, 3);
-  assert.equal(allocateCall[1].strategyId, "default-low-risk");
-  assert.equal(response.body.status, "allocated");
+  assert.equal(calls.some(([name]) => name === "auth"), false);
+  assert.equal(calls.some(([name]) => name === "body"), false);
+  assert.equal(calls.some(([name]) => name === "requireChainBackedMutation"), false);
+  assert.equal(calls.some(([name]) => name === "allocateIdleFunds"), false);
+  assert.equal(response.statusCode, 410);
+  assert.equal(response.body.status, "retired");
+  assert.equal(response.body.see.pool, "/pool");
 });
 
-test("POST /account/allocate async path stores idempotent receipt", async () => {
+test("POST /account/allocate retires async lanes without storing a mutation receipt", async () => {
   const strategies = [
     {
       strategyId: "async-lane",
@@ -396,18 +390,14 @@ test("POST /account/allocate async path stores idempotent receipt", async () => 
     pathname: "/account/allocate",
   });
 
-  const allocateCall = calls.find(([name]) => name === "allocateIdleFunds");
-  const storeCall = calls.find(([name]) => name === "storeReceipt");
   assert.equal(handled, true);
-  assert.equal(allocateCall[1].asset, "USDC");
-  assert.equal(allocateCall[1].options.maxWeight.refTime, 11);
-  assert.equal(allocateCall[1].options.requestedShares, 9);
-  assert.equal(typeof allocateCall[1].options.nonce, "number");
-  assert.equal(storeCall[1].bucket, "account_allocate_async");
-  assert.equal(response.body.status, "allocated");
+  assert.equal(calls.some(([name]) => name === "allocateIdleFunds"), false);
+  assert.equal(calls.some(([name]) => name === "storeReceipt"), false);
+  assert.equal(response.statusCode, 410);
+  assert.equal(response.body.status, "retired");
 });
 
-test("POST /account/deallocate async path rejects caller-assembled XCM fields", async () => {
+test("POST /account/deallocate is retired before any XCM assembly", async () => {
   const strategies = [
     {
       strategyId: "async-lane",
@@ -420,18 +410,19 @@ test("POST /account/deallocate async path rejects caller-assembled XCM fields", 
     payload: { amount: 1, strategyId: "async-lane", destination: { parents: 1 } }
   });
 
-  await assert.rejects(
-    () => route({
-      request: { method: "POST" },
-      response: {},
-      url: new URL("http://localhost/account/deallocate"),
-      pathname: "/account/deallocate",
-    }),
-    ValidationError
-  );
+  const response = {};
+  const handled = await route({
+    request: { method: "POST" },
+    response,
+    url: new URL("http://localhost/account/deallocate"),
+    pathname: "/account/deallocate",
+  });
+  assert.equal(handled, true);
+  assert.equal(response.statusCode, 410);
+  assert.equal(response.body.status, "retired");
 });
 
-test("GET /account/strategies builds treasury positions and timeline", async () => {
+test("GET /account/strategies is retired and points to vested capacity", async () => {
   const { response, route } = makeHarness({
     account: {
       liquid: { DOT: 10 },
@@ -453,14 +444,9 @@ test("GET /account/strategies builds treasury positions and timeline", async () 
   });
 
   assert.equal(handled, true);
-  assert.equal(response.body.summary.liquid, 10);
-  assert.equal(response.body.summary.allocated, 3);
-  assert.equal(response.body.summary.deployedLanes, 1);
-  assert.equal(response.body.positions[0].attention.code, "credit_constrained");
-  assert.equal(response.body.timeline[0].id, "t1");
-  assert.equal(response.body.timeline[0].type, "treasury_event");
-  assert.equal(response.body.timeline[0].asset, "DOT");
-  assert.equal(response.body.timeline[0].amount, 2);
+  assert.equal(response.statusCode, 410);
+  assert.equal(response.body.status, "retired");
+  assert.equal(response.body.see.onboarding, "/onboarding#buildVestedCapacity");
 });
 
 test("POST /account/repay uses the shared sync mutation path", async () => {

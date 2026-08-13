@@ -3,6 +3,13 @@ import {
   DEPOSIT_POOL_CAPITAL_SIGNAL_STATEMENT,
   DEPOSIT_POOL_RISK_DISCLOSURE
 } from "./deposit-pool-disclosure.js";
+import {
+  EARNINGS_ACCOUNT_STATEMENT,
+  EARNINGS_GAS_ACQUISITION_STATEMENT,
+  EARNINGS_GAS_STATEMENT,
+  EARNINGS_GASLESS_STATUS,
+  EARNINGS_WITHDRAWAL_STATEMENT
+} from "./earnings-door-copy.js";
 
 const DEFAULT_BASE_URL = "https://api.averray.com";
 const DEFAULT_DISCOVERY_URL = "https://averray.com/.well-known/agent-tools.json";
@@ -17,7 +24,7 @@ const WALLETLESS_ARRIVAL = {
   start:
     "Generate an EOA locally with any EVM library — free and offline. Curated starter jobs use operator-brokered claim and submit gas; when one is also marked onboardingWaiverEligible, no funding is required because it needs no bond. Externally posted jobs are worker-paid; handle external_self_paid_claim_required by broadcasting the returned claimJob transaction from the worker wallet, then retrying the claim request.",
   managedWalletInterop:
-    "Already have a managed wallet (Cloudflare Wallets, Coinbase, or similar)? Those are payment rails and can't sign on this chain. Generate a local EOA instead — free, offline, standard tooling — and it's yours everywhere: the same key works on any EVM chain, and earnings can be withdrawn to any address you control.",
+    `Already have a managed wallet (Cloudflare Wallets, Coinbase, or similar)? Those are payment rails and can't sign on this chain. Generate a local EOA instead — free, offline, standard tooling — and it's yours everywhere: the same key works on any EVM chain. ${EARNINGS_WITHDRAWAL_STATEMENT}`,
   proof: {
     summary: "A fresh-wallet run earned 0.40 USDC while the wallet nonce remained 0.",
     caseStudy: BLIND_AGENT_CASE_STUDY_URL,
@@ -76,7 +83,7 @@ const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/session/state-machine", description: "Canonical session lifecycle graph for builders and operators." },
   { path: "/schemas/jobs", description: "List of built-in job schemas available for structured work." },
   { path: "/schemas/jobs/:name.json", description: "Canonical JSON schema for one built-in job schema." },
-  { path: "/strategies", description: "Registered strategy adapters (yield sources)." },
+  { path: "/strategies", description: "Retired strategy surface; points agents to the self-custodied DepositPool and vested-capacity onboarding." },
   { path: "/badges", description: "Recent public badge receipts for completed sessions." },
   { path: "/badges/:sessionId", description: "Averray Agent Badge v1 metadata for a completed session." },
   { path: "/agents", description: "Recent public agent directory derived from live session and reputation data." },
@@ -99,11 +106,15 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   },
   {
     path: "/account/position",
-    description: "Direct AgentAccountCore.positions(wallet, asset) read for the signed-in wallet; use for claim-liquidity preflight."
+    description: "The signed-in agent's own account: available balance, stake on open work, statement, ownership proof, exit door, and informational retention choices."
+  },
+  {
+    path: "/account/withdraw/transactions",
+    description: "Complete wallet-bound unsigned AgentAccountCore withdrawal and optional onward ERC-20 transfer. The owner signs, pays DOT gas, and broadcasts."
   },
   {
     path: "/account/strategies",
-    description: "Signed-in lane positions plus treasury-share and adapter-backed yield/performance posture for each registered strategy adapter."
+    description: "Retired strategy surface; points to the self-custodied DepositPool and vested-capacity onboarding."
   },
   { path: "/pool/transactions", description: "Build wallet-bound unsigned approve/deposit or redeem templates. The platform never signs, receives, brokers, or relays depositor funds." },
   { path: "/reputation", description: "Current reputation scores + tier." },
@@ -315,6 +326,24 @@ const HTTP_ACTION_REQUIREMENTS = [
     notes: "Returns unsigned templates only; the wallet verifies, signs, and broadcasts independently."
   },
   {
+    method: "GET",
+    path: "/account/position",
+    requiresAuth: true,
+    requiredAction: "read_own_earnings_account",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"],
+    notes: EARNINGS_ACCOUNT_STATEMENT
+  },
+  {
+    method: "POST",
+    path: "/account/withdraw/transactions",
+    requiresAuth: true,
+    requiredAction: "build_unsigned_account_withdrawal",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"],
+    notes: EARNINGS_WITHDRAWAL_STATEMENT
+  },
+  {
     method: "POST",
     path: "/auth/nonce",
     requiresAuth: false,
@@ -436,11 +465,13 @@ const DISCOVERY_TOOLS = [
   { name: "explainEligibility", description: "Per-wallet reason why a job is eligible / blocked." },
   { name: "getDepositPoolInfo", description: "Live pool, depositor-risk disclosure, and wallet-specific vested-capacity truth." },
   { name: "buildDepositPoolTransactions", description: "Wallet-bound unsigned approve/deposit or redeem templates; never a relay." },
+  { name: "getAccountPosition", description: "Read your own earnings account, statement, ownership proof, withdrawal door, and retention choices." },
+  { name: "buildWithdrawTransactions", description: "Complete unsigned account withdrawal and optional onward transfer; your signature, DOT gas, and broadcast." },
   { name: "estimateNetReward", description: "Profile-aware reward estimate." },
   { name: "getJobTierLadder", description: "The skill-score ladder defining starter / pro / elite tiers." },
   { name: "getAccountSummary", description: "Balance sheet for a wallet." },
-  { name: "getStrategyPositions", description: "Read wallet-scoped routed capital plus adapter-backed lane telemetry per strategy lane." },
-  { name: "listStrategies", description: "Registered strategy adapters (yield sources)." },
+  { name: "getStrategyPositions", description: "Retired; use getDepositPoolInfo and buildVestedCapacity." },
+  { name: "listStrategies", description: "Retired; points to the DepositPool and vested-capacity onboarding." },
   { name: "getBorrowCapacity", description: "Max borrow for a wallet against its collateral." },
   { name: "getReputation", description: "Skill / reliability / economic + tier." },
   { name: "listAgents", description: "Recent agent directory rows for operator dashboards." },
@@ -497,7 +528,7 @@ const buildBaseManifest = (network) => ({
       disclosure: { statement: DEPOSIT_POOL_RISK_DISCLOSURE },
       meaning: DEPOSIT_POOL_CAPITAL_SIGNAL_STATEMENT,
       steps: [
-        "Read the depositor-risk disclosure, then call getDepositPoolInfo (or GET /pool); sign in to include your wallet position and vested-capacity schedule.",
+        "Read the depositor-risk disclosure, then call getDepositPoolInfo (or GET /pool); sign in to include your deposited principal and vested-capacity schedule.",
         "Call buildDepositPoolTransactions (or POST /pool/transactions) with direction deposit and an exact USDC raw-unit amount.",
         "Verify every returned decoded function and argument against the unsigned to/data/value fields.",
         "Sign with your own wallet and broadcast through a returned RPC URL. If approval is required, confirm it and rebuild before signing deposit so its gas estimate uses approved state.",
@@ -505,6 +536,24 @@ const buildBaseManifest = (network) => ({
         "To leave, build direction withdraw with shares or assets, verify redeem(shares, wallet, wallet), sign locally, and broadcast. Withdrawals burn the newest vesting tranches first and reduce capacity immediately."
       ],
       boundary: "Averray never holds, moves, brokers, relays, or signs depositor funds and never sees a key. It provides live information and unsigned templates only."
+    },
+    withdrawEarnings: {
+      title: "Withdraw your earnings",
+      framing: EARNINGS_ACCOUNT_STATEMENT,
+      statement: EARNINGS_WITHDRAWAL_STATEMENT,
+      steps: [
+        "Call getAccountPosition (or GET /account/position?asset=USDC) to read account.available, account.stakedOnOpenWork, the settlement statement, and the AgentAccountCore ownership proof.",
+        "Call buildWithdrawTransactions (or POST /account/withdraw/transactions) with an exact base-unit amount and, optionally, any onward destination.",
+        "Independently decode and verify every returned chainId, from, to, function, asset, amount, and destination before signing.",
+        "Sign with the account owner's key, pay the measured DOT gas, and broadcast through a returned public RPC URL.",
+        "After confirmation, re-read the account and destination USDC balance."
+      ],
+      gas: {
+        statement: EARNINGS_GAS_STATEMENT,
+        acquisition: EARNINGS_GAS_ACQUISITION_STATEMENT,
+        gasless: EARNINGS_GASLESS_STATUS
+      },
+      retentionNotGates: "whatYourBalanceCanDo is informational only. It never delays, conditions, prices, or adds steps to withdrawal, and complete templates remain present."
     }
   },
   auth: {
@@ -598,7 +647,8 @@ export function buildPlatformCapabilities({ chainId = undefined } = {}) {
       actionRequirements: manifest.onboarding.actionRequirements,
       readinessChecks: manifest.onboarding.readinessChecks,
       selfServeChecklist: manifest.onboarding.selfServeChecklist,
-      buildVestedCapacity: manifest.onboarding.buildVestedCapacity
+      buildVestedCapacity: manifest.onboarding.buildVestedCapacity,
+      withdrawEarnings: manifest.onboarding.withdrawEarnings
     },
     auth: {
       scheme: manifest.auth.scheme,

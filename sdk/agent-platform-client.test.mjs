@@ -133,6 +133,32 @@ test("getAccountPosition reads the direct chain position endpoint", async () => 
   assert.equal(calls[0].options.headers.get("authorization"), "Bearer test-token");
 });
 
+test("buildWithdrawTransactions sends exact raw amount and optional destination to the earnings door", async () => {
+  const calls = [];
+  const client = new AgentPlatformClient({
+    baseUrl: "https://api.example.test",
+    token: "test-token",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({ available: true });
+    }
+  });
+
+  await client.buildWithdrawTransactions({
+    asset: "USDC",
+    amount: "250000",
+    destination: "0x2222222222222222222222222222222222222222"
+  });
+
+  assert.equal(calls[0].url, "https://api.example.test/account/withdraw/transactions");
+  assert.equal(calls[0].options.method, "POST");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    asset: "USDC",
+    amount: "250000",
+    destination: "0x2222222222222222222222222222222222222222"
+  });
+});
+
 test("submitDisputeVerdict forwards safety and arbitration payload fields", async () => {
   const calls = [];
   const client = new AgentPlatformClient({

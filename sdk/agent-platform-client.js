@@ -194,6 +194,13 @@ export class AgentPlatformClient {
     return this.request(`/account/position?asset=${encodeURIComponent(asset)}`);
   }
 
+  async buildWithdrawTransactions({ asset = DEFAULT_ESCROW_ASSET_SYMBOL, amount, destination = undefined } = {}) {
+    return this.request("/account/withdraw/transactions", {
+      method: "POST",
+      body: compact({ asset, amount, destination })
+    });
+  }
+
   async getBorrowCapacity(asset = DEFAULT_ESCROW_ASSET_SYMBOL) {
     return this.request(`/account/borrow-capacity?asset=${encodeURIComponent(asset)}`);
   }

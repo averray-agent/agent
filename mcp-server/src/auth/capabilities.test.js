@@ -81,6 +81,7 @@ test("getRouteCapabilityRequirements resolves method-specific route policies", (
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/admin/bootstrap-self-report/send"), ["admin:self-report:send"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/admin/jobs/ingest/wikipedia"), ["jobs:ingest"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/disputes/dispute-123/verdict"), ["disputes:verdict"]);
+  assert.deepEqual(getRouteCapabilityRequirements("POST", "/account/withdraw/transactions"), ["account:read"]);
   assert.deepEqual(getRouteCapabilityRequirements("GET", "/unknown"), []);
 });
 

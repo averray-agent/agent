@@ -216,6 +216,25 @@ test("a withdrawal reflected by the vesting resolver drops every raise immediate
   assert.equal(after.externalRewardCeilingUsdc, 1);
 });
 
+test("capacity projection applies a prospective pool deposit through the real vested-capacity math", async () => {
+  const exposure = policy({
+    capUsdc: 2.5,
+    resolveVesting: async () => ({ vestedRaw: 1_000_000n, tranches: [], vestingHours: 48 })
+  });
+
+  const current = await exposure.capacityForWallet(WALLET);
+  const projected = await exposure.capacityForWallet(WALLET, { additionalVestedRaw: "9000000" });
+
+  assert.equal(current.currentlyVestedAssetsRaw, "1000000");
+  assert.equal(current.additionalVestedAssetsRaw, "0");
+  assert.equal(current.openExposureCapUsdc, 3);
+  assert.equal(current.externalRewardCeilingUsdc, 2);
+  assert.equal(projected.currentlyVestedAssetsRaw, "1000000");
+  assert.equal(projected.additionalVestedAssetsRaw, "9000000");
+  assert.equal(projected.openExposureCapUsdc, 4);
+  assert.equal(projected.externalRewardCeilingUsdc, 11);
+});
+
 test("vesting read failures fail closed to the unvested capacity", async () => {
   const capacity = await policy({
     capUsdc: 2.5,

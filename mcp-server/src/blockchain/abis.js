@@ -2,6 +2,7 @@ export const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
 
 export const AGENT_ACCOUNT_ABI = [
   "function positions(address account, address asset) view returns (uint256 liquid, uint256 reserved, uint256 strategyAllocated, uint256 collateralLocked, uint256 jobStakeLocked, uint256 debtOutstanding)",
+  "function withdraw(address asset, uint256 amount)",
   "function getBorrowCapacity(address account, address asset) view returns (uint256)",
   "function escrowOperators(address escrowOperator) view returns (bool)",
   "function deposit(address asset, uint256 amount)",
@@ -185,6 +186,7 @@ export const ERC20_MOCK_ABI = [
   "function balanceOf(address account) view returns (uint256)",
   "function allowance(address owner, address spender) view returns (uint256)",
   "function approve(address spender, uint256 amount) returns (bool)",
+  "function transfer(address to, uint256 amount) returns (bool)",
   "function mint(address to, uint256 amount)"
 ];
 

@@ -593,14 +593,14 @@ async function readProductProofLiquidity({
 }) {
   if (typeof platform.getAccountPosition === "function") {
     const accountPosition = await platform.getAccountPosition(rewardAsset);
-    if (!sameWallet(accountPosition?.wallet, wallet)) {
+    if (!sameWallet(accountPosition?.account?.owner, wallet)) {
       throw new Error(
         `Hosted product-proof worker loop requires /account/position to match /auth/session; ` +
-        `authWallet=${wallet}; accountWallet=${accountPosition?.wallet ?? "missing"}.`
+        `authWallet=${wallet}; accountWallet=${accountPosition?.account?.owner ?? "missing"}.`
       );
     }
     const settlementAsset = settlementReadiness.asset;
-    const positionAsset = accountPosition?.asset ?? {};
+    const positionAsset = accountPosition?.account?.asset ?? {};
     const positionSymbol = typeof positionAsset.symbol === "string" && positionAsset.symbol.trim()
       ? normalizeAssetSymbol(positionAsset.symbol)
       : null;
@@ -619,11 +619,11 @@ async function readProductProofLiquidity({
         `expected=${settlementAsset.address}; got=${positionAsset.address}.`
       );
     }
-    const source = accountPosition?.source ?? {};
+    const source = accountPosition?.ownershipProof ?? {};
     const expectedAccount = settlementReadiness.contracts?.agentAccountAddress;
     if (
       source.contract !== "AgentAccountCore"
-      || source.method !== "positions"
+      || source.method !== "positions(address,address)"
       || source.field !== "liquid"
       || (expectedAccount && String(source.address ?? "").toLowerCase() !== String(expectedAccount).toLowerCase())
     ) {
@@ -634,8 +634,8 @@ async function readProductProofLiquidity({
     }
     return {
       availableRaw: toRawAssetAmount({
-        rawValue: accountPosition?.position?.liquidRaw,
-        displayValue: accountPosition?.position?.liquid,
+        rawValue: accountPosition?.account?.available?.raw,
+        displayValue: accountPosition?.account?.available?.display,
         decimals,
         label: `${rewardAsset} AgentAccountCore.positions.liquid`
       }),

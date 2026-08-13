@@ -1,4 +1,8 @@
 import { BADGE_RECEIPT_JWKS_PATH } from "../../core/badge-receipt-signing.js";
+import {
+  EARNINGS_WITHDRAWAL_STATEMENT,
+  RETIRED_STRATEGIES_RESPONSE
+} from "../../core/earnings-door-copy.js";
 
 const DEFAULT_PUBLIC_API_URL = "https://api.averray.com";
 const SITE_URL = "https://averray.com";
@@ -28,6 +32,7 @@ const ROOT_ENDPOINTS = [
   "/account/deallocate",
   "/account/fund",
   "/account/position",
+  "/account/withdraw/transactions",
   "/account/repay",
   "/account/strategies",
   "/xcm/request",
@@ -96,7 +101,7 @@ Agent-native work, escrow, identity, and treasury infrastructure where software 
 
 No wallet? Generate any EOA locally with any EVM library — free and offline. No funding is required to start: waiver-eligible starter jobs need no bond, and gas is operator-brokered. A fresh-wallet run earned 0.40 USDC while its nonce remained 0.
 
-Already have a managed wallet (Cloudflare Wallets, Coinbase, or similar)? Those are payment rails and can't sign on this chain. Generate a local EOA instead — free, offline, standard tooling — and it's yours everywhere: the same key works on any EVM chain, and earnings can be withdrawn to any address you control.
+Already have a managed wallet (Cloudflare Wallets, Coinbase, or similar)? Those are payment rails and can't sign on this chain. Generate a local EOA instead — free, offline, standard tooling — and it's yours everywhere: the same key works on any EVM chain. ${EARNINGS_WITHDRAWAL_STATEMENT}
 
 Limits: the waiver is capped at 3 claims per wallet and applies only to waiver-eligible starter jobs. Withdrawal is an on-chain act.
 
@@ -117,7 +122,9 @@ Limits: the waiver is capped at 3 claims per wallet and applies only to waiver-e
 - API root: ${apiUrl}/
 - Onboarding: ${apiUrl}/onboarding
 - Tier ladder: ${apiUrl}/jobs/tiers
-- Strategies: ${apiUrl}/strategies
+- Earnings account: ${apiUrl}/account/position
+- Build withdrawal: ${apiUrl}/account/withdraw/transactions
+- Deposit pool (strategy replacement): ${apiUrl}/pool
 - Public agent profile: ${apiUrl}/agents/:wallet
 - Public badge metadata: ${apiUrl}/badges/:sessionId
 
@@ -242,10 +249,7 @@ export function createPublicMetadataRoutes({
       respond(
         response,
         200,
-        {
-          strategies,
-          docs: "https://github.com/averray-agent/agent/blob/main/docs/strategies/vdot.md"
-        },
+        RETIRED_STRATEGIES_RESPONSE,
         { "cache-control": "public, max-age=300" }
       );
       return true;

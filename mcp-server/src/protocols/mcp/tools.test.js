@@ -57,6 +57,20 @@ function makeDepositPoolRoute() {
   });
 }
 
+function makeEarningsDoorRoute() {
+  return async ({ request, response, pathname, url }) => {
+    if (request.method === "GET" && pathname === "/account/position") {
+      respond(response, 200, { available: true, asset: url.searchParams.get("asset"), account: { available: { raw: "7" } } });
+      return true;
+    }
+    if (request.method === "POST" && pathname === "/account/withdraw/transactions") {
+      respond(response, 200, { available: true, templates: [{ unsigned: true }] });
+      return true;
+    }
+    return false;
+  };
+}
+
 test("getPlatformCapabilities defaults to a bounded welcome and preserves the full response byte-for-byte", async () => {
   const fullCapabilities = {
     name: "Averray — trusted agent work + identity runtime",
@@ -144,6 +158,7 @@ test("every tool advertised by the MCP welcome resolves through this surface", a
   const execute = createMcpToolExecutor({
     handleAuthRoute,
     handleDepositPoolRoute: makeDepositPoolRoute(),
+    handleEarningsDoorRoute: makeEarningsDoorRoute(),
     handleJobRoute: makeJobRoute(service, "mcp"),
     handlePublicMetadataRoute: makePublicRoute({ discoveryUrl: "https://example.test/agent-tools.json" })
   });
@@ -160,6 +175,8 @@ test("every tool advertised by the MCP welcome resolves through this surface", a
     estimateNetReward: { jobId: "job-1" },
     explainEligibility: { jobId: "job-1" },
     getDepositPoolInfo: {},
+    getAccountPosition: { asset: "USDC" },
+    buildWithdrawTransactions: { asset: "USDC", amount: "1" },
     buildDepositPoolTransactions: { direction: "withdraw", shares: "1" },
     fetchAuthNonce: { wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
     verifySiwe: { message: "message", signature: `0x${"1".repeat(130)}` },
@@ -186,6 +203,8 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
     "estimateNetReward",
     "explainEligibility",
     "getDepositPoolInfo",
+    "getAccountPosition",
+    "buildWithdrawTransactions",
     "buildDepositPoolTransactions"
   ];
 
@@ -202,6 +221,8 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
   assert.deepEqual(byName.claimJob._meta["com.averray/auth"].scopes, ["jobs:claim"]);
   assert.deepEqual(byName.submitWork._meta["com.averray/auth"].scopes, ["jobs:submit"]);
   assert.equal(byName.getDepositPoolInfo._meta["com.averray/auth"].required, false);
+  assert.equal(byName.getAccountPosition._meta["com.averray/auth"].required, true);
+  assert.equal(byName.buildWithdrawTransactions._meta["com.averray/auth"].required, true);
   assert.equal(byName.buildDepositPoolTransactions._meta["com.averray/auth"].required, true);
   assert.equal(byName.claimJob._meta["com.averray/auth"].required, true);
   assert.equal(byName.submitWork._meta["com.averray/auth"].required, true);

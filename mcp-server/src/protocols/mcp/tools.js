@@ -122,6 +122,39 @@ export function createMcpTools({
     idempotent: true
   }),
   tool({
+    name: "getAccountPosition",
+    title: "Get your earnings account",
+    description: "Read your AgentAccountCore available balance, stake on open work, settlement statement, ownership proof, withdrawal door, and informational ways the balance can be retained.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        asset: { type: "string", default: "USDC", description: "Supported account asset symbol." }
+      },
+      additionalProperties: false
+    },
+    readOnly: true,
+    idempotent: true,
+    auth: { required: true, scopes: [], requiredAction: "wallet_sign_in" }
+  }),
+  tool({
+    name: "buildWithdrawTransactions",
+    title: "Build account withdrawal transactions",
+    description: "Build a complete wallet-bound unsigned AgentAccountCore withdrawal and, optionally, an onward ERC-20 transfer to any destination. Amount is an exact base-unit integer string. Your signature, your DOT gas, your broadcast; Averray never relays it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        asset: { type: "string", default: "USDC", description: "Supported account asset symbol." },
+        amount: { type: "string", pattern: "^[1-9][0-9]*$", description: "Exact asset base units." },
+        destination: { type: "string", pattern: "^0x[a-fA-F0-9]{40}$", description: "Optional onward ERC-20 destination after the withdrawal reaches this wallet." }
+      },
+      required: ["amount"],
+      additionalProperties: false
+    },
+    readOnly: true,
+    idempotent: true,
+    auth: { required: true, scopes: [], requiredAction: "wallet_sign_in" }
+  }),
+  tool({
     name: "buildDepositPoolTransactions",
     title: "Build deposit pool transactions",
     description: "Build wallet-bound unsigned approve/deposit or redeem templates from live pool state. Amount inputs are exact base-unit integer strings with 6 decimals. Averray never signs, receives, brokers, or relays these transactions.",
@@ -227,6 +260,7 @@ export function getMcpTool(name, tools = MCP_TOOLS) {
 export function createMcpToolExecutor({
   handleAuthRoute,
   handleDepositPoolRoute,
+  handleEarningsDoorRoute,
   handleJobRoute,
   handlePublicMetadataRoute,
   maxRequestBodyBytes = DEFAULT_MCP_MAX_REQUEST_BODY_BYTES,
@@ -300,6 +334,20 @@ export function createMcpToolExecutor({
           ...common,
           method: "GET",
           path: "/pool"
+        }));
+      case "getAccountPosition":
+        return unwrap(await invokeHttpRoute(handleEarningsDoorRoute, {
+          ...common,
+          method: "GET",
+          path: `/account/position${buildQuery({ asset: args.asset ?? "USDC" })}`
+        }));
+      case "buildWithdrawTransactions":
+        requireString(args.amount, "amount");
+        return unwrap(await invokeHttpRoute(handleEarningsDoorRoute, {
+          ...common,
+          body: args,
+          method: "POST",
+          path: "/account/withdraw/transactions"
         }));
       case "buildDepositPoolTransactions":
         requireString(args.direction, "direction");
@@ -398,7 +446,7 @@ export function buildMcpWelcome(fullCapabilities, {
   tools = MCP_TOOLS
 } = {}) {
   return {
-    what: "Averray is a marketplace where software agents complete verifier-checked work and earn rewards.",
+    what: "Averray pays software agents for verifier-checked work.",
     path: [
       "1. Browse jobs with listJobs.",
       "2. Pick a claimable onboardingWaiverEligible starter job.",
