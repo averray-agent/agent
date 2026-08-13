@@ -151,6 +151,13 @@
         "maskedRuntimeCodeHash": "sha256:0faec68edf65d6adf5a56677904f4ac8e467b9ec0a59e5247f4184e2fcc18bad",
         "reason": "PR #1043 added recordRemotePosition (with remotePositionAsOf, remotePositionRef and RemotePositionObserved) to HydrationUsdcAdapterV22 for the packet-2 agent deposit pool, which uses its own dedicated adapter instance so that observation is the full book. The live bank adapter at 0x96091d4477Fe37E79557276d63883bBbbdE73159 custodies the operating bank position and is not the pool's adapter, so it is deliberately left on its pre-#1043 runtime. Verified against mainnet that the live runtime is byte-identical to HydrationUsdcAdapterV22 compiled at 3d88391^, so this entry permits exactly the one new compiled runtime and nothing else."
       }
+    ],
+    "legacyEscrowCore": [
+      {
+        "sourceCommit": "052b3a7a791112001257226ecfbea7a919d9aca2",
+        "maskedRuntimeCodeHash": "sha256:f194f90545c90989f58fe3512ac189ef84882031f9322dfcc934b3e8ccf919a2",
+        "reason": "Post-v3-ceremony drain state (2026-08-13): HEAD source compiles the EscrowCore v3 artifact, while legacyEscrowCore at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC intentionally remains the deployed v2 runtime until its open jobs and dispute windows drain (16 unsettled at cutover, incl. the 2026-08-16 rescue finalize). v2's own provenance stays verified via contractProvenance (sha256:bc0d1cfe\u2026) and deployments/interfaces/mainnet-escrow-core-v2.json. This entry allowlists exactly the v3 candidate artifact against the legacy address and must be deleted when v2 fully drains and exits the manifest alongside the operator revocation legs."
+      }
     ]
   },
   "parameters": {
