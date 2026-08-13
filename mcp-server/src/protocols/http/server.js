@@ -29,8 +29,10 @@ import { createAuthRoutes } from "./auth-routes.js";
 import { createBadgeRoutes, createListBadgeReceipts } from "./badge-routes.js";
 import { createBankLaneFeedRoutes } from "./bank-lane-feed-routes.js";
 import { createDepositPoolObservabilityRoutes } from "./deposit-pool-observability-routes.js";
+import { createCreditPoolObservabilityRoutes } from "./credit-pool-observability-routes.js";
 import { createDepositPoolRoutes } from "./deposit-pool-routes.js";
 import { createEarningsDoorRoutes } from "./earnings-door-routes.js";
+import { createCreditPoolRoutes } from "./credit-pool-routes.js";
 import { createContentRoutes } from "./content-routes.js";
 import { createDisputeRoutes } from "./dispute-routes.js";
 import { createEventRoutes } from "./event-routes.js";
@@ -88,8 +90,10 @@ const {
   posterReviewService,
   bankLaneFeed,
   depositPoolObservability,
+  creditPoolObservability,
   depositPoolDoor,
   earningsDoor,
+  creditPoolDoor,
   transparencyService,
   stateStore,
   contentRecoveryLog,
@@ -414,6 +418,11 @@ const handleDepositPoolObservabilityRoute = createDepositPoolObservabilityRoutes
   respond,
 });
 
+const handleCreditPoolObservabilityRoute = createCreditPoolObservabilityRoutes({
+  creditPoolObservability,
+  respond,
+});
+
 const handleDepositPoolRoute = createDepositPoolRoutes({
   authMiddleware,
   depositPoolDoor,
@@ -424,6 +433,13 @@ const handleDepositPoolRoute = createDepositPoolRoutes({
 const handleEarningsDoorRoute = createEarningsDoorRoutes({
   authMiddleware,
   earningsDoor,
+  readJsonBody,
+  respond,
+});
+
+const handleCreditPoolRoute = createCreditPoolRoutes({
+  authMiddleware,
+  creditPoolDoor,
   readJsonBody,
   respond,
 });
@@ -707,6 +723,7 @@ const handleAuthRoute = createAuthRoutes({
 
 const executeMcpTool = createMcpToolExecutor({
   handleAuthRoute,
+  handleCreditPoolRoute,
   handleDepositPoolRoute,
   handleEarningsDoorRoute,
   handleJobRoute: handleMcpJobRoute,
@@ -866,7 +883,13 @@ const server = createServer(async (request, response) => {
     if (await handleDepositPoolObservabilityRoute({ request, response, pathname })) {
       return;
     }
+    if (await handleCreditPoolObservabilityRoute({ request, response, pathname })) {
+      return;
+    }
     if (await handleDepositPoolRoute({ request, response, url, pathname })) {
+      return;
+    }
+    if (await handleCreditPoolRoute({ request, response, url, pathname })) {
       return;
     }
 

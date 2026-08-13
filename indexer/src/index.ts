@@ -21,6 +21,9 @@ const hasXcmWrapper = Boolean(
 const hasDiscoveryRegistry = Boolean(
   process.env.PONDER_DISCOVERY_REGISTRY_ADDRESS?.trim() || process.env.DISCOVERY_REGISTRY_ADDRESS?.trim()
 );
+const hasCreditPool = Boolean(
+  process.env.PONDER_CREDIT_POOL_ADDRESS?.trim() || process.env.CREDIT_POOL_ADDRESS?.trim()
+);
 
 const decodeBytes32 = (value: string) => {
   try {
@@ -1153,6 +1156,72 @@ ponder.on("XcmWrapper:RequestStatusUpdated" as any, async ({ event, context }: a
     settledShares: event.args.settledShares,
     remoteRef: nullIfZeroHash(event.args.remoteRef),
     failureCode: nullIfZeroHash(event.args.failureCode),
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+}
+
+if (hasCreditPool) {
+ponder.on("CreditPool:LoanOriginated" as any, async ({ event, context }: any) => {
+  await context.db.insert(schema.creditLoanEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    loanId: event.args.loanId,
+    kind: "originated",
+    borrower: event.args.borrower,
+    amount: event.args.amount,
+    outstanding: event.args.amount,
+    pledgedShares: event.args.pledgedShares,
+    seizedValue: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("CreditPool:LoanRepaid" as any, async ({ event, context }: any) => {
+  await context.db.insert(schema.creditLoanEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    loanId: event.args.loanId,
+    kind: "repaid",
+    borrower: null,
+    amount: event.args.amount,
+    outstanding: event.args.outstanding,
+    pledgedShares: null,
+    seizedValue: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("CreditPool:PledgeSeized" as any, async ({ event, context }: any) => {
+  await context.db.insert(schema.creditLoanEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    loanId: event.args.loanId,
+    kind: "seized",
+    borrower: null,
+    amount: null,
+    outstanding: null,
+    pledgedShares: null,
+    seizedValue: event.args.value,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("CreditPool:LoanClosed" as any, async ({ event, context }: any) => {
+  await context.db.insert(schema.creditLoanEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    loanId: event.args.loanId,
+    kind: "closed",
+    borrower: null,
+    amount: null,
+    outstanding: 0n,
+    pledgedShares: null,
+    seizedValue: null,
     txHash: event.transaction.hash,
     blockNumber: event.block.number,
     timestamp: event.block.timestamp

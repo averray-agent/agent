@@ -10,6 +10,7 @@ API_POOL_URL=${API_POOL_URL:-https://api.averray.com/pool}
 API_ACCOUNT_POSITION_URL=${API_ACCOUNT_POSITION_URL:-https://api.averray.com/account/position?asset=USDC}
 API_ACCOUNT_WITHDRAW_URL=${API_ACCOUNT_WITHDRAW_URL:-https://api.averray.com/account/withdraw/transactions}
 API_STRATEGIES_URL=${API_STRATEGIES_URL:-https://api.averray.com/strategies}
+API_CREDIT_URL=${API_CREDIT_URL:-https://api.averray.com/credit}
 API_ONBOARDING_URL=${API_ONBOARDING_URL:-https://api.averray.com/onboarding}
 API_POSTER_ONBOARDING_URL=${API_POSTER_ONBOARDING_URL:-https://api.averray.com/poster/onboarding}
 API_ADMIN_STATUS_URL=${API_ADMIN_STATUS_URL:-https://api.averray.com/admin/status}
@@ -74,6 +75,7 @@ APP_PROTECTED_STATUS_CODES=${APP_PROTECTED_STATUS_CODES:-401}
 ADMIN_JWT=${ADMIN_JWT:-}
 AVERRAY_TOKEN=${AVERRAY_TOKEN:-}
 OPERATOR_TOKEN=${AVERRAY_TOKEN:-$ADMIN_JWT}
+CREDIT_DOOR_TOKEN=${CREDIT_DOOR_TOKEN:-$OPERATOR_TOKEN}
 admin_status_json=""
 
 require_command() {
@@ -237,6 +239,33 @@ jq -e '[.. | objects | select(has("fromDeposits"))] | length == 0' >/dev/null <<
 printf '%s\n%s\n' "$pool_json" "$api_health_json" | jq -e -s '
   .[0].chainId == .[1].auth.chainId
 ' >/dev/null
+
+# CreditPool is deliberately absent until its later ceremony. Once the
+# deployed address appears in /health, the same hosted gate as the DepositPool
+# enforces both availability and the canonical risk sentence on every deploy.
+if jq -e '.addresses.creditPool | strings | test("^0x[0-9a-fA-F]{40}$")' >/dev/null <<<"$api_health_json"; then
+  if [[ -z "$CREDIT_DOOR_TOKEN" ]]; then
+    echo "CreditPool is configured but hosted smoke has no operator token for its wallet-bound door." >&2
+    exit 1
+  fi
+  echo "Checking CreditPool door"
+  credit_json="$(curl -fsS --max-time "$TIMEOUT_SEC" \
+    -H "accept: application/json" \
+    -H "authorization: Bearer $CREDIT_DOOR_TOKEN" \
+    "$API_CREDIT_URL")"
+  jq -e '.available == true' >/dev/null <<<"$credit_json" || {
+    echo "CreditPool door did not report available: true." >&2
+    exit 1
+  }
+  jq -e '.disclosure.statement == "Technical pilot. Principal at risk. No depositor protection."' >/dev/null <<<"$credit_json" || {
+    echo "CreditPool door did not carry the exact depositor-risk disclosure." >&2
+    exit 1
+  }
+  printf '%s\n%s\n' "$credit_json" "$api_health_json" | jq -e -s '
+    (.[0].chainId == .[1].auth.chainId) and
+    ((.[0].creditPool | ascii_downcase) == (.[1].addresses.creditPool | ascii_downcase))
+  ' >/dev/null
+fi
 
 echo "Checking onboarding contract"
 onboarding_json="$(fetch "$API_ONBOARDING_URL")"

@@ -65,6 +65,13 @@ export const XcmWrapperAbi = parseAbi([
   "event RequestStatusUpdated(bytes32 indexed requestId, uint8 indexed status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode)"
 ]);
 
+export const CreditPoolAbi = parseAbi([
+  "event LoanOriginated(bytes32 indexed loanId, address indexed borrower, uint256 amount, uint256 pledgedShares)",
+  "event LoanRepaid(bytes32 indexed loanId, uint256 amount, uint256 outstanding)",
+  "event LoanClosed(bytes32 indexed loanId)",
+  "event PledgeSeized(bytes32 indexed loanId, uint256 value)"
+]);
+
 export const DiscoveryRegistryAbi = parseAbi([
   "event ManifestPublished(uint64 indexed version, bytes32 indexed hash, uint64 timestamp, address publisher)"
 ]);

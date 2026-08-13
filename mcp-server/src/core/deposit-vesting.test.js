@@ -27,11 +27,16 @@ function poolEvent(type, {
   };
 }
 
-function vested(events) {
+function creditEvent(type, { loanId = "0xloan", borrower = WALLET, ageSeconds, blockNumber, logIndex = 0 }) {
+  return { type, loanId, borrower, blockNumber, logIndex, blockTimestamp: NOW_SECONDS - ageSeconds };
+}
+
+function vested(events, creditEvents = []) {
   return calculateDepositVesting(events, {
     wallet: WALLET,
     now: new Date(NOW_SECONDS * 1_000),
-    vestingHours: 48
+    vestingHours: 48,
+    creditEvents
   });
 }
 
@@ -95,4 +100,68 @@ test("venue yield events never create vested principal", () => {
 
   assert.equal(result.vestedRaw, 10_000_000n);
   assert.equal(result.tranches.length, 1);
+});
+
+test("borrow-to-vest ban starts a mid-loan deposit ramp only when debt clears", () => {
+  const result = vested(
+    [poolEvent("Deposit", { assetsRaw: 48_000_000n, ageSeconds: 30 * 60 * 60, blockNumber: 102 })],
+    [
+      creditEvent("LoanOriginated", { ageSeconds: 36 * 60 * 60, blockNumber: 100 }),
+      creditEvent("LoanClosed", { ageSeconds: 24 * 60 * 60, blockNumber: 103 })
+    ]
+  );
+
+  assert.equal(result.vestedRaw, 24_000_000n);
+  assert.equal(result.tranches[0].debtDelayed, true);
+  assert.equal(result.tranches[0].vestingStartedAt, "2026-08-12T12:00:00.000Z");
+});
+
+test("borrow-to-vest ban leaves a tranche at zero while its loan remains open", () => {
+  const result = vested(
+    [poolEvent("Deposit", { assetsRaw: 48_000_000n, ageSeconds: 30 * 60 * 60, blockNumber: 102 })],
+    [creditEvent("LoanOriginated", { ageSeconds: 36 * 60 * 60, blockNumber: 100 })]
+  );
+
+  assert.equal(result.vestedRaw, 0n);
+  assert.equal(result.tranches[0].vestingStartedAt, null);
+  assert.equal(result.tranches[0].debtDelayed, true);
+});
+
+test("a loan opened after a deposit never rewrites that tranche's clock", () => {
+  const result = vested(
+    [poolEvent("Deposit", { assetsRaw: 48_000_000n, ageSeconds: 48 * 60 * 60, blockNumber: 100 })],
+    [creditEvent("LoanOriginated", { ageSeconds: 24 * 60 * 60, blockNumber: 101 })]
+  );
+  assert.equal(result.vestedRaw, 48_000_000n);
+  assert.equal(result.tranches[0].debtDelayed, false);
+});
+
+test("pool-v2 migration preserves byte-exact tranche principal and vesting age while ignoring transfer mechanics", () => {
+  const value = calculateDepositVesting([], {
+    wallet: WALLET,
+    now: "2026-08-13T12:00:00.000Z",
+    vestingHours: 48,
+    initialTranches: [{
+      depositedRaw: "10000000",
+      remainingRaw: "7500000",
+      depositedAt: "2026-08-11T12:00:00.000Z",
+      vestingStartedAt: "2026-08-11T12:00:00.000Z",
+      blockNumber: 100,
+      logIndex: 2,
+      txHash: `0x${"11".repeat(32)}`
+    }]
+  });
+  assert.equal(value.principalRaw, 7_500_000n);
+  assert.equal(value.vestedRaw, 7_500_000n);
+  assert.deepEqual(value.tranches[0], {
+    depositedRaw: 10_000_000n,
+    remainingRaw: 7_500_000n,
+    vestedRaw: 7_500_000n,
+    depositedAt: "2026-08-11T12:00:00.000Z",
+    vestingStartedAt: "2026-08-11T12:00:00.000Z",
+    debtDelayed: false,
+    blockNumber: 100,
+    logIndex: 2,
+    txHash: `0x${"11".repeat(32)}`
+  });
 });

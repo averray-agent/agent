@@ -89,6 +89,10 @@ app.averray.com {
     respond 404
   }
 
+  handle /api/monitor/credit-pool* {
+    respond 404
+  }
+
   handle /api/events* {
     uri strip_prefix /api
     reverse_proxy backend:8787 {
@@ -128,6 +132,10 @@ api.averray.com {
   }
 
   handle /monitor/deposit-pool* {
+    respond 404
+  }
+
+  handle /monitor/credit-pool* {
     respond 404
   }
 

@@ -17,7 +17,9 @@ export function loadDepositVestingConfig(env = process.env) {
 export function calculateDepositVesting(events = [], {
   wallet = undefined,
   now = new Date(),
-  vestingHours = DEFAULT_WORKER_DEPOSIT_VESTING_HOURS
+  vestingHours = DEFAULT_WORKER_DEPOSIT_VESTING_HOURS,
+  creditEvents = [],
+  initialTranches = []
 } = {}) {
   const evaluatedAt = asDate(now, "deposit vesting clock");
   const durationMs = BigInt(positiveIntegerConfig(
@@ -26,7 +28,26 @@ export function calculateDepositVesting(events = [], {
     "deposit vesting hours"
   )) * BigInt(HOUR_MS);
   const normalizedWallet = wallet ? String(wallet).toLowerCase() : undefined;
-  const tranches = [];
+  const debtPeriods = creditDebtPeriods(creditEvents, normalizedWallet);
+  const tranches = initialTranches.map((tranche, index) => {
+    const depositedRaw = nonNegativeRaw(tranche.depositedRaw, `initial tranche ${index} deposited assets`);
+    const remainingRaw = nonNegativeRaw(tranche.remainingRaw, `initial tranche ${index} remaining assets`);
+    if (remainingRaw > depositedRaw) throw new ConfigError(`initial tranche ${index} remaining assets exceed deposited assets.`);
+    const depositedAtMs = asDate(tranche.depositedAt, `initial tranche ${index} depositedAt`).getTime();
+    const vestingStartedAtMs = tranche.vestingStartedAt === null
+      ? null
+      : asDate(tranche.vestingStartedAt ?? tranche.depositedAt, `initial tranche ${index} vestingStartedAt`).getTime();
+    return {
+      depositedRaw,
+      remainingRaw,
+      depositedAtMs,
+      vestingStartedAtMs,
+      debtDelayed: Boolean(tranche.debtDelayed),
+      blockNumber: safeInteger(tranche.blockNumber, `initial tranche ${index} block number`),
+      logIndex: safeInteger(tranche.logIndex, `initial tranche ${index} log index`),
+      ...(tranche.txHash ? { txHash: String(tranche.txHash) } : {})
+    };
+  });
 
   for (const event of [...events].sort(compareEvents)) {
     if (!event || (event.type !== "Deposit" && event.type !== "Withdraw")) continue;
@@ -35,10 +56,14 @@ export function calculateDepositVesting(events = [], {
     if (assetsRaw === 0n) continue;
 
     if (event.type === "Deposit") {
+      const depositedAtMs = eventTimestampMs(event);
+      const delayedUntilMs = debtClearanceForDeposit(debtPeriods, depositedAtMs);
       tranches.push({
         depositedRaw: assetsRaw,
         remainingRaw: assetsRaw,
-        depositedAtMs: eventTimestampMs(event),
+        depositedAtMs,
+        vestingStartedAtMs: delayedUntilMs === undefined ? depositedAtMs : delayedUntilMs,
+        debtDelayed: delayedUntilMs !== undefined,
         blockNumber: safeInteger(event.blockNumber, "deposit block number"),
         logIndex: safeInteger(event.logIndex, "deposit log index"),
         ...(event.txHash ? { txHash: String(event.txHash) } : {})
@@ -59,7 +84,9 @@ export function calculateDepositVesting(events = [], {
   let vestedRaw = 0n;
   let principalRaw = 0n;
   for (const tranche of liveTranches) {
-    const ageMs = BigInt(Math.max(0, evaluatedAt.getTime() - tranche.depositedAtMs));
+    const ageMs = tranche.vestingStartedAtMs === null
+      ? 0n
+      : BigInt(Math.max(0, evaluatedAt.getTime() - tranche.vestingStartedAtMs));
     const vestedForTranche = ageMs >= durationMs
       ? tranche.remainingRaw
       : tranche.remainingRaw * ageMs / durationMs;
@@ -78,11 +105,42 @@ export function calculateDepositVesting(events = [], {
       remainingRaw: tranche.remainingRaw,
       vestedRaw: tranche.vestedRaw,
       depositedAt: new Date(tranche.depositedAtMs).toISOString(),
+      vestingStartedAt: tranche.vestingStartedAtMs === null
+        ? null
+        : new Date(tranche.vestingStartedAtMs).toISOString(),
+      debtDelayed: tranche.debtDelayed,
       blockNumber: tranche.blockNumber,
       logIndex: tranche.logIndex,
       ...(tranche.txHash ? { txHash: tranche.txHash } : {})
     }))
   };
+}
+
+function creditDebtPeriods(events, wallet) {
+  if (!wallet) return [];
+  const byLoan = new Map();
+  for (const event of [...events].sort(compareEvents)) {
+    if (!event) continue;
+    const loanId = String(event.loanId ?? "").toLowerCase();
+    if (!loanId) continue;
+    if (event.type === "LoanOriginated") {
+      if (String(event.borrower ?? "").toLowerCase() !== wallet) continue;
+      byLoan.set(loanId, { openedAtMs: eventTimestampMs(event), closedAtMs: null });
+    } else if (event.type === "LoanClosed" && byLoan.has(loanId)) {
+      byLoan.get(loanId).closedAtMs = eventTimestampMs(event);
+    }
+  }
+  return [...byLoan.values()];
+}
+
+function debtClearanceForDeposit(periods, depositedAtMs) {
+  const active = periods.filter((period) => (
+    period.openedAtMs <= depositedAtMs
+      && (period.closedAtMs === null || period.closedAtMs >= depositedAtMs)
+  ));
+  if (active.length === 0) return undefined;
+  if (active.some((period) => period.closedAtMs === null)) return null;
+  return Math.max(...active.map((period) => period.closedAtMs));
 }
 
 function compareEvents(left, right) {

@@ -252,3 +252,20 @@ export const xcmRequestEvent = onchainTable("xcm_request_event", (p) => ({
   blockNumber: p.bigint().notNull(),
   timestamp: p.bigint().notNull()
 }));
+
+// Append-only lifecycle facts. A consumer can reconstruct every L1 state
+// transition without trusting a mutable API snapshot: originated, partial/full
+// repayments, impairment seizure, and terminal close are all classified here.
+export const creditLoanEvent = onchainTable("credit_loan_event", (p) => ({
+  id: p.text().primaryKey(),
+  loanId: p.text().notNull(),
+  kind: p.text().notNull(),
+  borrower: p.hex(),
+  amount: p.bigint(),
+  outstanding: p.bigint(),
+  pledgedShares: p.bigint(),
+  seizedValue: p.bigint(),
+  txHash: p.hex().notNull(),
+  blockNumber: p.bigint().notNull(),
+  timestamp: p.bigint().notNull()
+}));

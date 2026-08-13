@@ -173,6 +173,36 @@ export function createMcpTools({
     auth: { required: true, scopes: [], requiredAction: "wallet_sign_in" }
   }),
   tool({
+    name: "getCreditInfo",
+    title: "Get CreditPool information",
+    description: "Read the live L1 CreditPool supply, zero-interest pilot schedule, pledged-vs-vested loan capacity, outstanding debt, and repayment truth for your signed-in wallet.",
+    inputSchema: noArgumentsSchema,
+    readOnly: true,
+    idempotent: true,
+    auth: { required: true, scopes: [], requiredAction: "wallet_sign_in" }
+  }),
+  tool({
+    name: "buildCreditTransactions",
+    title: "Build CreditPool transactions",
+    description: "Build unsigned, wallet-bound CreditPool deposit, withdraw, borrow, or repay templates from live state. Averray never signs a transaction or relays signed bytes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        direction: { type: "string", enum: ["deposit", "withdraw", "borrow", "repay"] },
+        assets: { type: "string", pattern: "^[1-9][0-9]*$" },
+        shares: { type: "string", pattern: "^[1-9][0-9]*$" },
+        pledgeShares: { type: "string", pattern: "^[1-9][0-9]*$" },
+        amount: { type: "string", pattern: "^[1-9][0-9]*$" },
+        loanId: { type: "string", pattern: "^0x[0-9a-fA-F]{64}$" }
+      },
+      required: ["direction"],
+      additionalProperties: false
+    },
+    readOnly: true,
+    idempotent: true,
+    auth: { required: true, scopes: [], requiredAction: "wallet_sign_in" }
+  }),
+  tool({
     name: "fetchAuthNonce",
     title: "Fetch SIWE nonce",
     description: "Begin sign-in for your locally generated EVM wallet. Receive the message to sign locally; never send the private key.",
@@ -259,6 +289,7 @@ export function getMcpTool(name, tools = MCP_TOOLS) {
 
 export function createMcpToolExecutor({
   handleAuthRoute,
+  handleCreditPoolRoute,
   handleDepositPoolRoute,
   handleEarningsDoorRoute,
   handleJobRoute,
@@ -356,6 +387,20 @@ export function createMcpToolExecutor({
           body: args,
           method: "POST",
           path: "/pool/transactions"
+        }));
+      case "getCreditInfo":
+        return unwrap(await invokeHttpRoute(handleCreditPoolRoute, {
+          ...common,
+          method: "GET",
+          path: "/credit"
+        }));
+      case "buildCreditTransactions":
+        requireString(args.direction, "direction");
+        return unwrap(await invokeHttpRoute(handleCreditPoolRoute, {
+          ...common,
+          body: args,
+          method: "POST",
+          path: "/credit/transactions"
         }));
       case "fetchAuthNonce":
         requireString(args.wallet, "wallet");
@@ -459,14 +504,14 @@ export function buildMcpWelcome(fullCapabilities, {
     freshWallet: "A fresh unfunded wallet can earn only from starter jobs marked onboardingWaiverEligible: no bond; gas is operator-brokered.",
     costToStart: {
       amount: "nothing",
-      condition: "Only for an onboardingWaiverEligible, operator-brokered job.",
+      condition: "For onboardingWaiverEligible operator-brokered jobs only.",
       caveat: "Other jobs may require funds, a bond, or fees."
     },
     requestLimit: {
       maxBodyBytes: maxRequestBodyBytes,
       scope: "full request: JSON-RPC envelope + _meta"
     },
-    claimRecovery: "claimJob writes on-chain and can exceed 10 seconds. On timeout, retry with the same wallet and jobId; the idempotent call returns the existing claim.",
+    claimRecovery: "claimJob can exceed 10 seconds. On timeout, retry the same wallet + jobId; idempotency returns the existing claim.",
     tools: {
       surface: "mcp",
       names: tools.map(({ name }) => name)

@@ -80,7 +80,9 @@ import {
 } from "./bank-lane-feed.js";
 import { TransparencyService } from "./transparency-service.js";
 import { DepositPoolObservabilityService } from "./deposit-pool-observability.js";
+import { CreditPoolObservabilityService } from "./credit-pool-observability.js";
 import { DepositPoolDoorService } from "./deposit-pool-door.js";
+import { CreditPoolDoorService } from "./credit-pool-door.js";
 import {
   UpstreamStatusPollerService,
   loadUpstreamStatusPollerConfig
@@ -246,6 +248,19 @@ export function createEarningsDoor({
     workerExposurePolicy,
     provider: gateway.provider,
     chainReader
+  });
+}
+
+export function createCreditPoolDoor({ gateway, authConfig, chainReader, workerExposurePolicy } = {}) {
+  return new CreditPoolDoorService({
+    creditPoolAddress: gateway.config.creditPoolAddress,
+    depositPoolAddress: gateway.config.depositPoolV2Address,
+    chainId: authConfig.chainId,
+    rpcUrls: [resolveHubNetwork(authConfig.chainId).rpcUrl],
+    provider: gateway.provider,
+    chainReader,
+    capacityReader: (wallet) => workerExposurePolicy.capacityForWallet(wallet),
+    vestingAttestor: (input) => gateway.signCreditVestingAttestation(input)
   });
 }
 
@@ -612,11 +627,20 @@ export async function createPlatformRuntime() {
       catalogueDailyBudget
     })
   );
+  const creditPoolObservability = initStep("init-credit-pool-observability", logger, () =>
+    new CreditPoolObservabilityService({
+      poolAddress: gateway.config.creditPoolAddress,
+      provider: gateway.provider
+    })
+  );
   const depositPoolDoor = initStep("init-deposit-pool-door", logger, () =>
     createDepositPoolDoor({ gateway, authConfig, workerExposurePolicy })
   );
   const earningsDoor = initStep("init-earnings-door", logger, () =>
     createEarningsDoor({ gateway, authConfig, stateStore, eventBus, workerExposurePolicy })
+  );
+  const creditPoolDoor = initStep("init-credit-pool-door", logger, () =>
+    createCreditPoolDoor({ gateway, authConfig, workerExposurePolicy })
   );
   const xcmBalanceObserver = initStep("init-xcm-balance-observer", logger, () =>
     new XcmBalanceObserverService(
@@ -813,8 +837,10 @@ export async function createPlatformRuntime() {
     bankLaneFeed,
     transparencyService,
     depositPoolObservability,
+    creditPoolObservability,
     depositPoolDoor,
     earningsDoor,
+    creditPoolDoor,
     venueBalanceReader,
     xcmObservationRelay,
     upstreamStatusPoller,

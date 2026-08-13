@@ -149,6 +149,7 @@ export class WorkerExposurePolicy {
         externalRewardCeilingUsdc: capacity.externalRewardCeilingUsdc,
         vestingHours: capacity.vestingHours,
         vestingAvailable: capacity.vestingAvailable,
+        credit: capacity.credit,
         message: eligible
           ? "The external poster-funded reward fits within this wallet's capital-backed per-job ceiling."
           : `This external reward exceeds the wallet's ${capacity.externalRewardCeilingUsdc} USDC capital-backed ceiling. Depositing principal and letting it vest for ${capacity.vestingHours} hours raises the ceiling.`
@@ -195,6 +196,7 @@ export class WorkerExposurePolicy {
       externalRewardCeilingUsdc: capacity.externalRewardCeilingUsdc,
       vestingHours: capacity.vestingHours,
       vestingAvailable: capacity.vestingAvailable,
+      credit: capacity.credit,
       currentExposureUsdc: usdcAmount(current.totalUnits),
       candidateExposureUsdc: usdcAmount(candidate.totalUnits),
       projectedExposureUsdc: usdcAmount(projectedUnits),
@@ -224,6 +226,15 @@ export class WorkerExposurePolicy {
     const openCapUnits = this.capUnits + openRaiseUnits;
     const externalRaiseUnits = vestedUnits * this.externalCeilingPerVestedMilli / 1_000n;
     const externalCeilingUnits = this.externalRewardCeilingBase + externalRaiseUnits;
+    let credit = { available: false, reason: "credit_pool_not_configured" };
+    if (typeof this.blockchainGateway?.readCreditPosition === "function") {
+      try {
+        credit = await this.blockchainGateway.readCreditPosition(wallet);
+      } catch (error) {
+        this.logger.warn?.({ wallet, err: error }, "credit_pool_position.read_failed");
+        credit = { available: false, reason: "credit_pool_read_failed" };
+      }
+    }
     return {
       vestedAssetsRaw: vestedUnits.toString(),
       vestedAssetsUsdc: usdcAmount(vestedUnits),
@@ -244,7 +255,8 @@ export class WorkerExposurePolicy {
       vestingHours: Number(vesting?.vestingHours ?? 48),
       vestingAvailable: vesting?.available !== false,
       evaluatedAt: vesting?.evaluatedAt,
-      tranches: publicVestingTranches(vesting?.tranches)
+      tranches: publicVestingTranches(vesting?.tranches),
+      credit
     };
   }
 
