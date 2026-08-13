@@ -53,9 +53,12 @@ Invariants:
    (manifest-driven, already v2). The snapshot endpoint is INTERNAL-ONLY:
    `GET backend:8787/monitor/deposit-pool` — Caddy deliberately 404s
    `/monitor/*` publicly ("Hermes reaches backend:8787 directly").
-   Day-of: open an SSH tunnel and use the loopback URL:
-   `ssh -L 8787:localhost:8787 <vps>` →
-   `--observability-url http://127.0.0.1:8787/monitor/deposit-pool`.
+   Day-of: the VPS publishes the backend on host loopback **18787**
+   (`127.0.0.1:18787->8787/tcp`, read from docker ps 2026-08-13). Tunnel:
+   `ssh -L 18787:127.0.0.1:18787 ubuntu@141.94.121.188` →
+   `--observability-url http://127.0.0.1:18787/monitor/deposit-pool`.
+   Verified live 2026-08-13 18:20Z: snapshot serves pool v2, totalAssets
+   20.0 = shares, block seconds-fresh, principal-cost-basis.
    Verify pre-leg-A: snapshot shows pool 0x6061f0aC…, `reconciled: true`,
    `flows.status: "ok"`, fresh ≤10 min (the script re-enforces all of it).
    - Dispatcher/observer: keyed on the WRAPPER (unchanged address), so no
@@ -96,7 +99,7 @@ The script never accepts a raw key.
 ```
 node scripts/ops/pool-venue-ceremony.mjs deploy --profile mainnet \
   --assets 2000000 --return-by <unix, use now+47h — the +48h boundary trips the strict check> \
-  --deployment-kind proof --observability-url http://127.0.0.1:8787/monitor/deposit-pool \
+  --deployment-kind proof --observability-url http://127.0.0.1:18787/monitor/deposit-pool \
   --expected-signer 0x5a6836c6D4d293F6E5377E6c28054F4171915813
 ```
 (Gate-run evidence 2026-08-13: the script walked five sequential fail-closed
