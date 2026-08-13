@@ -419,6 +419,9 @@
     ],
     "raiseYourAllowance": {
       "title": "Raise your allowance",
+      "disclosure": {
+        "statement": "Technical pilot. Principal at risk. No depositor protection."
+      },
       "steps": [
         "Call getDepositPoolInfo (or GET /pool); sign in to include your wallet position and allowance decomposition.",
         "Call buildDepositPoolTransactions (or POST /pool/transactions) with direction deposit and an exact USDC raw-unit amount.",

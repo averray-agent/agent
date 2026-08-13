@@ -1,4 +1,5 @@
 import { getRouteCapabilityRequirements } from "../auth/capabilities.js";
+import { DEPOSIT_POOL_RISK_DISCLOSURE } from "./deposit-pool-disclosure.js";
 
 const DEFAULT_BASE_URL = "https://api.averray.com";
 const DEFAULT_DISCOVERY_URL = "https://averray.com/.well-known/agent-tools.json";
@@ -490,6 +491,7 @@ const buildBaseManifest = (network) => ({
     ],
     raiseYourAllowance: {
       title: "Raise your allowance",
+      disclosure: { statement: DEPOSIT_POOL_RISK_DISCLOSURE },
       steps: [
         "Call getDepositPoolInfo (or GET /pool); sign in to include your wallet position and allowance decomposition.",
         "Call buildDepositPoolTransactions (or POST /pool/transactions) with direction deposit and an exact USDC raw-unit amount.",

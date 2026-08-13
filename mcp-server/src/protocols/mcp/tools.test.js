@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { createJobRoutes } from "../http/job-routes.js";
 import { createDepositPoolRoutes } from "../http/deposit-pool-routes.js";
+import { DEPOSIT_POOL_RISK_DISCLOSURE } from "../../core/deposit-pool-disclosure.js";
 import { readJsonBody, respond } from "../http/http-helpers.js";
 import {
   createMcpToolExecutor,
@@ -44,7 +45,11 @@ function makeDepositPoolRoute() {
   return createDepositPoolRoutes({
     authMiddleware: async () => ({ wallet: "0xworker" }),
     depositPoolDoor: {
-      getInfo: async (wallet) => ({ available: true, ...(wallet ? { wallet } : {}) }),
+      getInfo: async (wallet) => ({
+        available: true,
+        disclosure: { statement: DEPOSIT_POOL_RISK_DISCLOSURE },
+        ...(wallet ? { wallet } : {})
+      }),
       buildTransactions: async (wallet, payload) => ({ wallet, ...payload, unsigned: true })
     },
     readJsonBody,
@@ -222,6 +227,8 @@ test("deposit pool MCP tools are payload-identical to the shared HTTP routes", a
   });
   const mcpInfo = await execute("getDepositPoolInfo", {}, { request });
   assert.deepEqual(mcpInfo, httpInfo.body);
+  assert.deepEqual(httpInfo.body.disclosure, { statement: DEPOSIT_POOL_RISK_DISCLOSURE });
+  assert.deepEqual(mcpInfo.disclosure, { statement: DEPOSIT_POOL_RISK_DISCLOSURE });
 
   const input = { direction: "withdraw", shares: "1" };
   const httpBuild = await invokeHttpRoute(handleDepositPoolRoute, {

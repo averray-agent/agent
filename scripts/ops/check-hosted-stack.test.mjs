@@ -20,7 +20,11 @@ async function runHostedStackFixture({
   autoVerifierOk,
   warnings = [],
   poolStatus = 200,
-  pool = { available: true, chainId: 1 }
+  pool = {
+    available: true,
+    chainId: 1,
+    disclosure: { statement: "Technical pilot. Principal at risk. No depositor protection." }
+  }
 }) {
   const health = {
     status: "ok",
@@ -238,6 +242,16 @@ test("hosted smoke rejects a 200 response when the DepositPool door is unavailab
 
   assert.notEqual(result.code, 0, result.stdout);
   assert.match(result.stderr, /DepositPool door did not report available: true\./u);
+});
+
+test("hosted smoke rejects an available DepositPool door without the depositor disclosure", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    pool: { available: true, chainId: 1 }
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.match(result.stderr, /required depositor risk disclosure/u);
 });
 
 test("hosted smoke cross-checks poster onboarding against operational and chain-backed health", async () => {
