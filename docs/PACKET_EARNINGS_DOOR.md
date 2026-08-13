@@ -32,10 +32,15 @@ reach**.
 
 ## 2. Workstreams (platform-side only; no contract change)
 
-**W1 — Custody truth on the account view.** Wherever the authed account/position renders (REST +
-MCP), add a `custody` block: held by on-chain `AgentAccountCore` at the named address, moved only
-by the wallet's own signature, exit = `withdraw(asset, amount)`, link to the door (W2). One
-canonical string module, mirrored, smoke-asserted — the disclosure-line pattern (#1102) reused.
+**W1 — The agent account (ratified framing, Pascal 2026-08-13).** The balance presents as **the
+agent's own account**, bank-statement shaped — never as platform-held funds: `account.available`
+(liquid), `account.stakedOnOpenWork` (jobStakeLocked), `account.statement` (the wallet's
+settlement receipts with tx hashes — earnings in, stakes locked/released), plus the **ownership
+proof** ("only your key moves this — verify: `positions(you, USDC)` on `AgentAccountCore` at the
+named address") and the **exit, visible from the balance** (link to W2 — a known exit is what
+makes a balance feel owned). One canonical strings module, HTTP == MCP payload-identical,
+mirrored, smoke-asserted — the disclosure-line pattern (#1102) reused. The word "position" never
+appears on the agent-facing surface; it is an account.
 
 **W2 — The withdrawal door.** Mirror the deposit door exactly (`deposit-pool-door.js` is the
 proven template): `getAccountPosition` + `buildWithdrawTransactions` (HTTP + MCP,
@@ -44,6 +49,15 @@ plus an **optional second template** for an onward USDC transfer to any address 
 "any address you control" promise literally true in one flow). Self-signed, self-broadcast,
 `broadcastInstructions` with RPC list, the no-relay boundary stated. Walkthrough script in the
 `scratch-dogfood-deposit.mjs` style: independent arg verification before any signature.
+**Retention-not-gates addendum (ratified, Pascal 2026-08-13):** the door's response carries a
+`whatYourBalanceCanDo` block **alongside** the withdraw templates — (a) roll-to-pool, quoting the
+REAL capacity it would buy this wallet (vested-capacity math from `capacityForWallet`: the
+open-exposure raise and external ceiling at current + projected vesting), (b) borrow-instead once
+L1 ships (placeholder key, absent until then — no vaporware), (c) stake-for-jobs where stake
+tiers exist. Hard rules: the block is information only — it must never delay, condition, price,
+or add steps to the exit; templates are always present and complete in the same response; smoke
+asserts both (block present AND templates complete). Informed choice at the exit, zero friction
+in it.
 
 **W3 — Honest gas note.** The door quotes the measured cost (~0.02–0.03 DOT self-paid) and says
 plainly when the wallet cannot pay it, with the acquisition pointer. It also names the roadmap
