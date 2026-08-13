@@ -106,6 +106,14 @@ export class EvmDepositPoolChainReader {
       } catch {
         continue;
       }
+      // ethers v6 parseLog RETURNS NULL for unknown topics instead of throwing
+      // (v5 threw), so the catch above guards nothing. The pool emits events
+      // this interface deliberately does not model — its ERC-20 share Transfer
+      // mints (first hit live 2026-08-13: the operator-principal contribution's
+      // two Transfer logs nulled the whole flows block). Unmodeled events are
+      // neither depositor flows nor price-qualifying, so skipping them is the
+      // correct classification, not a blind eye.
+      if (!decoded) continue;
       if (!FLOW_EVENTS.has(decoded.name) && !PRICE_QUALIFYING_EVENTS.has(decoded.name)) continue;
       const base = {
         type: decoded.name,

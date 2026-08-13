@@ -214,6 +214,38 @@ test("EVM reader decodes the deployed DepositPool event signatures without expos
   assert.equal(snapshot.flows.recent.some((event) => "owner" in event), false);
 });
 
+test("chain reader skips pool logs its interface does not model (ethers v6 parseLog returns null)", async () => {
+  const abi = new EvmDepositPoolChainReader({}).poolInterface;
+  const deposit = abi.encodeEventLog(abi.getEvent("Deposit"), [
+    "0x1111111111111111111111111111111111111111",
+    "0x2222222222222222222222222222222222222222",
+    1_000_000n,
+    1_000_000n
+  ]);
+  // The pool's ERC-20 share Transfer (mint) — deliberately absent from
+  // DEPOSIT_POOL_ABI. The first live operator-principal contribution
+  // (2026-08-13) put two of these in the scan window and nulled flows.
+  const transferTopic0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+  const chainReader = new EvmDepositPoolChainReader({
+    async getLogs() {
+      return [
+        { address: POOL, topics: deposit.topics, data: deposit.data, blockNumber: HEAD - 1, index: 1, transactionHash: `0x${"56".repeat(32)}` },
+        {
+          address: POOL,
+          topics: [transferTopic0, `0x${"00".repeat(31)}00`, `0x${"00".repeat(12)}${"22".repeat(20)}`],
+          data: `0x${"00".repeat(31)}64`,
+          blockNumber: HEAD,
+          index: 2,
+          transactionHash: `0x${"78".repeat(32)}`
+        }
+      ];
+    }
+  });
+
+  const events = await chainReader.readEvents({ poolAddress: POOL, fromBlock: HEAD - 10, toBlock: HEAD });
+  assert.deepEqual(events.map((event) => event.type), ["Deposit"]);
+});
+
 function eventProofHasIdentity(event) {
   return Object.hasOwn(event, "owner");
 }
