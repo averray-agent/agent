@@ -2639,7 +2639,15 @@ test("upsertIngestedJob writes an idempotent refresh that reproduces the commitm
 
 test("upsertIngestedJob hydrates an exact pre-D3 definition without manufacturing spec drift", async () => {
   const now = new Date("2026-08-13T12:00:00.000Z");
-  const preD3 = { ...INGEST_JOB_INPUT, rewardAmount: 0.25 };
+  const preD3 = {
+    ...INGEST_JOB_INPUT,
+    rewardAmount: 0.25,
+    lifecycle: {
+      status: "open",
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    }
+  };
   let live = { state: 0 };
   const gateway = {
     isEnabled: () => true,

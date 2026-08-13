@@ -11,7 +11,7 @@ test("both backend env templates carry the same complete 23-USDC D3 lane registr
   let expected;
   for (const templateUrl of TEMPLATES) {
     const source = await readFile(templateUrl, "utf8");
-    const match = source.match(/^CATALOGUE_LANE_REGISTRY_JSON='(.+)'$/mu);
+    const match = source.match(/^CATALOGUE_LANE_REGISTRY_JSON=(\{.+\})$/mu);
     assert.ok(match, templateUrl.pathname);
     const registry = JSON.parse(match[1]);
     assert.deepEqual(Object.keys(registry), ["liveness", "oss-anchored", "benchmark-showcase"]);
