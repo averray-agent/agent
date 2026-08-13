@@ -4,6 +4,7 @@ import test from "node:test";
 import { Interface } from "ethers";
 
 import { DEPOSIT_POOL_ABI, ERC20_MOCK_ABI } from "../blockchain/abis.js";
+import { DEPOSIT_POOL_RISK_DISCLOSURE } from "../core/deposit-pool-disclosure.js";
 import {
   DepositPoolDoorService,
   DEPOSIT_POOL_WITHDRAWAL_NOTE
@@ -75,8 +76,10 @@ test("public pool info omits wallet fields while authenticated info reuses Packe
   assert.equal(publicInfo.available, true);
   assert.equal(publicInfo.wallet, undefined);
   assert.equal(publicInfo.yieldStatus, "not_yet_earning");
+  assert.deepEqual(publicInfo.disclosure, { statement: DEPOSIT_POOL_RISK_DISCLOSURE });
   assert.equal(publicInfo.withdrawal.status, "open");
   assert.equal(publicInfo.withdrawal.note, DEPOSIT_POOL_WITHDRAWAL_NOTE);
+  assert.deepEqual(authed.disclosure, { statement: DEPOSIT_POOL_RISK_DISCLOSURE });
   assert.deepEqual(authed.wallet.dailyAllowance, {
     base: { raw: "1500000", decimals: 6 },
     fromDeposits: { raw: "10000000", decimals: 6 },

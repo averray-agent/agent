@@ -1,6 +1,7 @@
 import { Contract, Interface, getAddress } from "ethers";
 
 import { DEPOSIT_POOL_ABI, ERC20_MOCK_ABI } from "../blockchain/abis.js";
+import { DEPOSIT_POOL_RISK_DISCLOSURE } from "../core/deposit-pool-disclosure.js";
 import { ValidationError } from "../core/errors.js";
 import { resolveDailyExposureBudget } from "../core/worker-daily-exposure.js";
 import { depositPoolYieldStatus } from "./deposit-pool-yield-status.js";
@@ -417,6 +418,7 @@ export class DepositPoolDoorService {
         poolHeadroom: amount(clampAtZero(snapshot.totalAssetCap - snapshot.totalAssets))
       },
       ...yieldState,
+      disclosure: { statement: DEPOSIT_POOL_RISK_DISCLOSURE },
       withdrawal: { status: "open", note: DEPOSIT_POOL_WITHDRAWAL_NOTE },
       broadcast: broadcastInstructions(this.rpcUrls),
       boundary: BOUNDARY

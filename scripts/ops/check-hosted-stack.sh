@@ -223,6 +223,10 @@ jq -e '.available == true' >/dev/null <<<"$pool_json" || {
   echo "DepositPool door did not report available: true." >&2
   exit 1
 }
+jq -e '.disclosure.statement == "Technical pilot. Principal at risk. No depositor protection."' >/dev/null <<<"$pool_json" || {
+  echo "DepositPool door did not report the required depositor risk disclosure." >&2
+  exit 1
+}
 printf '%s\n%s\n' "$pool_json" "$api_health_json" | jq -e -s '
   .[0].chainId == .[1].auth.chainId
 ' >/dev/null

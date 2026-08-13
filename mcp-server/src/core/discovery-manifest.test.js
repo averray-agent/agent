@@ -8,6 +8,7 @@ import {
   POLKADOT_HUB_MAINNET_CHAIN_ID,
   POLKADOT_HUB_TESTNET_CHAIN_ID
 } from "./discovery-manifest.js";
+import { DEPOSIT_POOL_RISK_DISCLOSURE } from "./deposit-pool-disclosure.js";
 
 test("buildDiscoveryManifest returns the full public discovery shape", () => {
   const manifest = buildDiscoveryManifest({
@@ -178,6 +179,9 @@ test("mainnet chainId renders the mainnet chain block on every network-dependent
     "For externally posted jobs or non-waived curated jobs, acquire DOT on Polkadot Hub. Curated starter jobs use operator-brokered gas; only those also marked stake-waived need no wallet funding. For external jobs, handle external_self_paid_claim_required by signing and broadcasting the returned claimJob transaction."
   );
   assert.ok(!("faucetUrl" in walletFunded), "mainnet has no faucet — wallet-funded must not carry faucetUrl");
+  assert.deepEqual(manifest.onboarding.raiseYourAllowance.disclosure, {
+    statement: DEPOSIT_POOL_RISK_DISCLOSURE
+  });
 
   assert.ok(manifest.onboarding.selfServeChecklist.includes(
     "For externally posted jobs or non-waived curated jobs, acquire DOT on Polkadot Hub. Curated starter jobs use operator-brokered gas; only those also marked stake-waived require no wallet funding. Handle external_self_paid_claim_required by signing and broadcasting the returned claimJob transaction."
