@@ -265,8 +265,9 @@ test("loadBlockchainConfig resolves DepositPool from the network manifest only w
     AUTH_CHAIN_ID: "420420417"
   });
 
-  assert.equal(mainnet.depositPoolAddress, "0xccf5fdf3108af8e693f28bb9326a573d9da0f476");
-  assert.equal(mainnet.depositPoolDeploymentBlock, 19_380_506);
+  // Post-L1-cutover (2026-08-13) the deposit door serves the v2 pool.
+  assert.equal(mainnet.depositPoolAddress, "0x6061f0accc3aa66add9508708dd2285bffac5f30");
+  assert.equal(mainnet.depositPoolDeploymentBlock, 19_421_397);
   assert.equal(testnet.depositPoolAddress, "");
   assert.equal(testnet.depositPoolDeploymentBlock, undefined);
 });

@@ -229,14 +229,24 @@ test("mainnet manifest covers every deployed source-controlled contract address"
       "464fd8c018c5735a7f1e495c9a2eeb17c378bb0d"
     );
   }
-  for (const name of [
-    "depositPoolLane",
-    "hydrationDepositPoolAdapter",
-    "depositPool",
-  ]) {
+  for (const name of ["depositPoolLane", "hydrationDepositPoolAdapter"]) {
     assert.equal(
       contracts.find((contract) => contract.name === name)?.provenance.sourceCommit,
       "9e9cb15135837ce89042a99e455aa536ff68d9ba"
+    );
+  }
+  // Post-L1-cutover, depositPool aliases the v2 address; the L1 quartet all
+  // compile from the same main tree.
+  for (const name of [
+    "depositPool",
+    "depositPoolLaneV2",
+    "hydrationDepositPoolAdapterV2",
+    "depositPoolV2",
+    "creditPool",
+  ]) {
+    assert.equal(
+      contracts.find((contract) => contract.name === name)?.provenance.sourceCommit,
+      "9a6f3dffa6010ddbdc6b50617454e1632afe0b99"
     );
   }
   assert.deepEqual(CONTRACT_ARTIFACTS.depositPoolLane, [
