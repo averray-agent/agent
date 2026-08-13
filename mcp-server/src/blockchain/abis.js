@@ -44,6 +44,7 @@ export const AGENT_ACCOUNT_ABI = [
 
 export const DEPOSIT_POOL_ABI = [
   "function asset() view returns (address)",
+  "function venueAdapter() view returns (address)",
   "function assetsOf(address account) view returns (uint256)",
   "function balanceOf(address account) view returns (uint256)",
   "function availableShares(address account) view returns (uint256)",
@@ -256,6 +257,8 @@ export const ERC20_MOCK_ABI = [
 ];
 
 export const STRATEGY_ADAPTER_ABI = [
+  "function strategyId() view returns (bytes32)",
+  "function asset() view returns (address)",
   "function totalAssets() view returns (uint256)",
   "function totalShares() view returns (uint256)",
   "function riskLabel() view returns (string)"
@@ -268,6 +271,7 @@ export const HYDRATION_USDC_ADAPTER_V22_ABI = [
 ];
 
 export const XCM_WRAPPER_ABI = [
+  "function strategyAdapter(bytes32 strategyId) view returns (address)",
   "function weighMessage(bytes message) view returns ((uint64 refTime, uint64 proofSize))",
   "function getRequest(bytes32 requestId) view returns (((bytes32 strategyId, uint8 kind, address account, address asset, address recipient, uint256 assets, uint256 shares, uint64 nonce) context, address queuedBy, uint8 status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode, uint64 createdAt, uint64 updatedAt))",
   "function getRequestParameters(bytes32 requestId) view returns ((uint256 sellAmount, uint256 minimumOutput, uint256 maxFeePerLeg, uint64 dispatchDeadline))",
@@ -277,6 +281,7 @@ export const XCM_WRAPPER_ABI = [
   "function previewLegMessage(bytes32 requestId, uint8 leg, uint256 feeAmount) view returns (bytes destination, bytes message, (uint64 refTime, uint64 proofSize) maxWeight)",
   "function dispatchLeg(bytes32 requestId, uint8 leg, uint256 feeAmount)",
   "function finalizeRequest(bytes32 requestId, uint8 status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode)",
+  "event StrategyAdapterUpdated(bytes32 indexed strategyId, address indexed previousAdapter, address indexed newAdapter)",
   "event RequestQueued(bytes32 indexed requestId, bytes32 indexed strategyId, uint8 indexed kind, address account, address asset, address recipient, uint256 assets, uint256 shares, uint64 nonce)",
   "event RequestParametersStored(bytes32 indexed requestId, uint256 sellAmount, uint256 minimumOutput, uint256 maxFeePerLeg, uint64 dispatchDeadline)",
   "event RequestLegDispatched(bytes32 indexed requestId, uint8 indexed leg, address indexed caller, bytes32 destinationHash, bytes32 messageHash, uint256 feeAmount)",

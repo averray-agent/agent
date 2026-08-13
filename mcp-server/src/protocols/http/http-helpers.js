@@ -157,6 +157,7 @@ export function metricPathLabel(pathname) {
     "/admin/jobs/timeline",
     "/admin/jobs/spec-hash-sweep",
     "/admin/sessions",
+    "/admin/treasury/summary",
     "/admin/jobs/ingest/github",
     "/admin/jobs/ingest/openapi",
     "/admin/jobs/ingest/open-data",

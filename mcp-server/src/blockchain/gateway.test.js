@@ -3192,3 +3192,136 @@ test("createSinglePayoutJobForLayout uses the legacy signature for legacy escrow
     encodeBytes32String("WIKI")
   ]);
 });
+
+test("getTreasuryStrategyLanes indexes wrapper updates then trusts only current strategyAdapter reads", async () => {
+  const wrapper = "0x1111111111111111111111111111111111111111";
+  const laneA = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const laneB = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const strategyA = encodeBytes32String("HYDRATION_USDC_V1").toLowerCase();
+  const strategyB = encodeBytes32String("HYDRATION_USDC_POOL_V1").toLowerCase();
+  const iface = new Interface([
+    "event StrategyAdapterUpdated(bytes32 indexed strategyId,address indexed previousAdapter,address indexed newAdapter)"
+  ]);
+  const eventLog = (strategyId, lane, blockNumber, index) => ({
+    address: wrapper,
+    blockNumber,
+    index,
+    ...iface.encodeEventLog(iface.getEvent("StrategyAdapterUpdated"), [
+      strategyId,
+      "0x0000000000000000000000000000000000000000",
+      lane
+    ])
+  });
+  const gateway = new BlockchainGateway({
+    enabled: false,
+    xcmWrapperAddress: wrapper,
+    xcmWrapperDeploymentBlock: 100,
+    supportedAssets: [USDC_TRUST_ASSET]
+  });
+  gateway.provider = {
+    async getBlockNumber() { return 110; },
+    async getLogs() { return [eventLog(strategyA, laneA, 101, 0), eventLog(strategyB, laneB, 102, 0)]; },
+    async getBlock() { return { hash: `0x${"12".repeat(32)}`, timestamp: 1_786_648_400 }; }
+  };
+  const mappingReads = [];
+  gateway.xcmWrapperContract = {
+    interface: iface,
+    async strategyAdapter(strategyId, at) {
+      mappingReads.push([strategyId, at]);
+      return strategyId === strategyA ? laneA : laneB;
+    }
+  };
+  gateway.readTreasuryStrategyLane = async ({ strategyId, adapter, blockTag }) => ({
+    strategyId,
+    laneAddress: adapter,
+    allocationRaw: strategyId === strategyA ? "1000000" : "2000000",
+    blockTag
+  });
+
+  const result = await gateway.getTreasuryStrategyLanes();
+
+  assert.equal(result.rows.length, 2);
+  assert.deepEqual(result.rows.map((row) => row.laneAddress.toLowerCase()), [laneA, laneB]);
+  assert.deepEqual(result.rows.map((row) => row.blockTag), [110, 110]);
+  assert.deepEqual(mappingReads, [[strategyA, { blockTag: 110 }], [strategyB, { blockTag: 110 }]]);
+  assert.equal(result.block.number, 110);
+});
+
+test("getActiveCreditPoolLoans enumerates wallet origins, excludes closed ids, and re-reads active debt", async () => {
+  const wallet = "0x4444444444444444444444444444444444444444";
+  const openLoan = `0x${"31".repeat(32)}`;
+  const closedLoan = `0x${"32".repeat(32)}`;
+  const otherLoan = `0x${"33".repeat(32)}`;
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  gateway.provider = { async getBlockNumber() { return 222; } };
+  gateway.readCreditPoolLoanEvents = async () => [
+    { type: "LoanOriginated", loanId: openLoan, borrower: wallet },
+    { type: "LoanOriginated", loanId: closedLoan, borrower: wallet },
+    { type: "LoanClosed", loanId: closedLoan },
+    { type: "LoanOriginated", loanId: otherLoan, borrower: "0x5555555555555555555555555555555555555555" }
+  ];
+  const reads = [];
+  gateway.creditPoolContract = {
+    async loans(loanId, at) {
+      reads.push([loanId, at]);
+      return {
+        borrower: wallet,
+        outstandingPrincipal: 750_000n,
+        outstandingInterest: 0n,
+        pledgeShares: 2_000_000n,
+        status: 1
+      };
+    }
+  };
+
+  const result = await gateway.getActiveCreditPoolLoans(wallet);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].loanId, openLoan);
+  assert.equal(result[0].outstandingRaw, "750000");
+  assert.equal(result[0].blockNumber, 222);
+  assert.deepEqual(reads, [[openLoan, { blockTag: 222 }]]);
+});
+
+test("readTreasuryStrategyLane uses DepositPool cost basis for the pool-backing strategy", async () => {
+  const strategyId = encodeBytes32String("HYDRATION_USDC_POOL_V1").toLowerCase();
+  const adapter = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const adapterInterface = new Interface([
+    "function strategyId() view returns (bytes32)",
+    "function asset() view returns (address)",
+    "function riskLabel() view returns (string)",
+    "function totalAssets() view returns (uint256)"
+  ]);
+  const adapterCalls = [];
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  gateway.provider = {
+    async call(transaction) {
+      const selector = String(transaction.data).slice(0, 10);
+      const fragment = adapterInterface.getFunction(selector);
+      adapterCalls.push(fragment.name);
+      const values = {
+        strategyId: [strategyId],
+        asset: [USDC_TRUST_ASSET.address],
+        riskLabel: ["conservative"],
+        totalAssets: [99_000_000n]
+      };
+      return adapterInterface.encodeFunctionResult(fragment, values[fragment.name]);
+    }
+  };
+  gateway.policyContract = { async approvedStrategies() { return true; } };
+  const costBasisReads = [];
+  gateway.depositPoolContract = {
+    async venuePrincipalCostBasis(at) {
+      costBasisReads.push(at);
+      return 7_500_000n;
+    }
+  };
+
+  const row = await gateway.readTreasuryStrategyLane({ strategyId, adapter, blockTag: 333 });
+
+  assert.equal(row.allocationRaw, "7500000");
+  assert.equal(row.allocation, 7.5);
+  assert.equal(row.allocationSource, "DepositPool.venuePrincipalCostBasis");
+  assert.equal(adapterCalls.includes("totalAssets"), false);
+  assert.deepEqual(costBasisReads, [{ blockTag: 333 }]);
+});

@@ -589,6 +589,25 @@ test("http smoke: /admin/status returns recurring + maintenance data for admin t
   });
 });
 
+test("http smoke: /admin/treasury/summary stays available when live feeds warn", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const response = await fetch(`${base}/admin/treasury/summary`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.wallet, ADMIN_WALLET.toLowerCase());
+    assert.equal(typeof payload.asOf, "string");
+    assert.equal(Array.isArray(payload.warnings), true);
+    assert.equal(typeof payload.creditLine.available, "boolean");
+    assert.equal(typeof payload.strategyLanes.available, "boolean");
+    assert.equal(typeof payload.xcmObserver.available, "boolean");
+    assert.equal(typeof payload.policyGate.available, "boolean");
+  });
+});
+
 test("http smoke: static retired notice needs no auth, leaks nothing, and is outside money-like classification", { skip: !RUN }, async () => {
   const asyncStrategyId = "0x56444f545f56315f4d4f434b0000000000000000000000000000000000000000";
   await runWithServerEnv(

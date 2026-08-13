@@ -10,40 +10,48 @@ import { AccountPositionsGrid } from "@/components/treasury/AccountPositionsGrid
 import { PolicyGateFooter } from "@/components/treasury/PolicyGateFooter";
 import {
   useAccount,
-  useBorrowCapacity,
-  useStrategyPositions,
+  useTreasurySummary,
 } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { feedPresence } from "@/lib/api/feed-presence";
 import {
   buildBalanceCards,
   buildCreditLine,
+  buildPolicyGateItems,
   buildPositionCards,
   buildStrategyLanes,
+  buildXcmObserverPhases,
+  treasuryFeedAvailable,
+  treasuryHasWarnings,
 } from "@/lib/api/treasury-adapters";
 
 export default function TreasuryPage() {
   const account = useAccount();
-  const strategyPositions = useStrategyPositions();
-  const borrowCapacity = useBorrowCapacity("USDC");
-  const creditPresence = feedPresence(borrowCapacity);
+  const treasurySummary = useTreasurySummary();
+  const treasuryPresence = feedPresence(treasurySummary);
+  const creditAvailable = treasuryFeedAvailable(treasurySummary.data, "creditLine");
+  const creditPresence = treasuryPresence === "live" && !creditAvailable ? "down" : treasuryPresence;
 
   const liveBalanceCards = useMemo(
-    () => buildBalanceCards(account.data, strategyPositions.data),
-    [account.data, strategyPositions.data]
+    () => buildBalanceCards(account.data, treasurySummary.data),
+    [account.data, treasurySummary.data]
   );
   const liveLanes = useMemo(
-    () => buildStrategyLanes(strategyPositions.data),
-    [strategyPositions.data]
+    () => treasuryFeedAvailable(treasurySummary.data, "strategyLanes")
+      ? buildStrategyLanes(treasurySummary.data)
+      : [],
+    [treasurySummary.data]
   );
   const livePositions = useMemo(
-    () => buildPositionCards(account.data, strategyPositions.data),
-    [account.data, strategyPositions.data]
+    () => buildPositionCards(account.data, treasurySummary.data),
+    [account.data, treasurySummary.data]
   );
   const liveCredit = useMemo(
-    () => buildCreditLine(account.data, borrowCapacity.data),
-    [account.data, borrowCapacity.data]
+    () => buildCreditLine(account.data, asFeed(treasurySummary.data, "creditLine")),
+    [account.data, treasurySummary.data]
   );
+  const xcmPhases = useMemo(() => buildXcmObserverPhases(treasurySummary.data), [treasurySummary.data]);
+  const policyItems = useMemo(() => buildPolicyGateItems(treasurySummary.data), [treasurySummary.data]);
   const accountScope = useMemo(() => accountScopeLabel(account.data), [account.data]);
   const signerLabel = useMemo(() => accountSignerLabel(account.data), [account.data]);
   const balanceCards = liveBalanceCards;
@@ -51,7 +59,10 @@ export default function TreasuryPage() {
   const positions = livePositions;
   const loans = liveCredit.loans;
 
-  const freshness = freshnessFromRequests(account, strategyPositions, borrowCapacity);
+  const requestFreshness = freshnessFromRequests(account, treasurySummary);
+  const freshness = requestFreshness === "live" && treasuryHasWarnings(treasurySummary.data)
+    ? "fallback"
+    : requestFreshness;
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
@@ -62,12 +73,15 @@ export default function TreasuryPage() {
       />
       <StrategyRoutingTable
         lanes={lanes}
-        sub={`${lanes.length} lanes · ${strategyPositions.error ? "unavailable" : "live API"} · strategy positions`}
+        sub={treasuryFeedAvailable(treasurySummary.data, "strategyLanes")
+          ? `${lanes.length} lanes · live wrapper registry`
+          : "strategy lanes not emitted by API yet"}
       />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <CreditLinePanel
           presence={creditPresence}
+          sub={creditAvailable ? "CreditPool + AgentAccountCore · live reads" : "cap not emitted by API yet"}
           capacityAvailable={liveCredit.capacityAvailable}
           capacityUsed={liveCredit.capacityUsed}
           capacityTotal={liveCredit.capacityTotal}
@@ -76,7 +90,10 @@ export default function TreasuryPage() {
           headroom={liveCredit.headroom}
           loans={loans}
         />
-        <XcmObserverLane phases={[]} sub="XCM observer not emitted by API yet" />
+        <XcmObserverLane
+          phases={xcmPhases}
+          sub={xcmPhases.length ? "dispatcher + observer · indexed evidence" : "XCM observer not emitted by API yet"}
+        />
       </div>
 
       <AccountPositionsGrid
@@ -85,8 +102,8 @@ export default function TreasuryPage() {
       />
 
       <PolicyGateFooter
-        items={[]}
-        sub="policy gate feed not emitted by API yet"
+        items={policyItems}
+        sub={policyItems.length ? "TreasuryPolicy · live reads" : "policy gate feed not emitted by API yet"}
       />
 
       <p className="flex flex-wrap gap-x-5 gap-y-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
@@ -108,6 +125,11 @@ export default function TreasuryPage() {
       </p>
     </div>
   );
+}
+
+function asFeed(payload: unknown, key: string): unknown {
+  if (!payload || typeof payload !== "object") return undefined;
+  return (payload as Record<string, unknown>)[key];
 }
 
 function accountScopeLabel(payload: unknown): string {

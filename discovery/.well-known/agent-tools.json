@@ -737,6 +737,10 @@
       "description": "Admin/operator-wide recent sessions across worker wallets."
     },
     {
+      "path": "/admin/treasury/summary",
+      "description": "Admin-gated live credit, strategy lane, XCM observer, and TreasuryPolicy summary."
+    },
+    {
       "path": "/session?sessionId=X",
       "description": "Fetch a single session by its canonical sessionId query parameter (owner-scoped; id is accepted as a compatibility alias)."
     },

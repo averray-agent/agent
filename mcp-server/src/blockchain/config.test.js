@@ -268,8 +268,10 @@ test("loadBlockchainConfig resolves DepositPool from the network manifest only w
   // Post-L1-cutover (2026-08-13) the deposit door serves the v2 pool.
   assert.equal(mainnet.depositPoolAddress, "0x6061f0accc3aa66add9508708dd2285bffac5f30");
   assert.equal(mainnet.depositPoolDeploymentBlock, 19_421_397);
+  assert.equal(mainnet.xcmWrapperDeploymentBlock, 19_101_467);
   assert.equal(testnet.depositPoolAddress, "");
   assert.equal(testnet.depositPoolDeploymentBlock, undefined);
+  assert.equal(testnet.xcmWrapperDeploymentBlock, undefined);
 });
 
 test("loadBlockchainConfig rejects malformed optional XCM_WRAPPER_ADDRESS", () => {

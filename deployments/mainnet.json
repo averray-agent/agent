@@ -210,6 +210,7 @@
     "reputationSbt": 18647544,
     "discoveryRegistry": 18647552,
     "escrowCore": 18647902,
+    "xcmWrapper": 19101467,
     "escrowCoreV2": 18809168,
     "xcmWrapperV2": 19009586,
     "hydrationUsdcAdapter": 19009588,

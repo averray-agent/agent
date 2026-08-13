@@ -16,10 +16,10 @@ const creditBuilder = adapter.slice(
   adapter.indexOf("export function buildRoomVitals")
 );
 
-test("treasury requests USDC and includes borrow capacity in page freshness", () => {
-  assert.match(page, /useBorrowCapacity\("USDC"\)/u);
-  assert.match(page, /creditPresence\s*=\s*feedPresence\(borrowCapacity\)/u);
-  assert.match(page, /freshnessFromRequests\(account, strategyPositions, borrowCapacity\)/u);
+test("treasury reads one authenticated summary and includes it in page freshness", () => {
+  assert.match(page, /useTreasurySummary\(\)/u);
+  assert.match(page, /creditAvailable\s*=\s*treasuryFeedAvailable/u);
+  assert.match(page, /freshnessFromRequests\(account, treasurySummary\)/u);
   assert.match(page, /presence=\{creditPresence\}/u);
 });
 
@@ -27,8 +27,15 @@ test("credit line has no fabricated policy cap, live mark, or DOT fallback", () 
   assert.doesNotMatch(creditBuilder, /["'`]DOT["'`]/u);
   assert.doesNotMatch(creditBuilder, /nextMark|85%/u);
   assert.match(creditBuilder, /const asset = text\(borrow\.asset\)/u);
-  assert.match(panel, /cap not emitted by API yet/u);
+  assert.match(panel, /sub = "cap not emitted by API yet"/u);
   assert.doesNotMatch(panel, /Next mark-to-market|85%/u);
+});
+
+test("all four treasury feeds retain honest unavailable fallbacks", () => {
+  assert.match(page, /strategy lanes not emitted by API yet/u);
+  assert.match(page, /XCM observer not emitted by API yet/u);
+  assert.match(page, /policy gate feed not emitted by API yet/u);
+  assert.match(page, /treasuryHasWarnings\(treasurySummary\.data\)/u);
 });
 
 test("credit line renders explicit non-live and genuinely absent states", () => {

@@ -75,6 +75,8 @@ const RECOVERY_LOG_CHUNK_SIZE = 50_000;
 const RECOVERY_FROM_BLOCK_SAFETY_MARGIN = 1_000;
 const DEPOSIT_POOL_EVENT_LOG_CHUNK_SIZE = 2_000;
 const CREDIT_POOL_EVENT_LOG_CHUNK_SIZE = 2_000;
+const XCM_STRATEGY_EVENT_LOG_CHUNK_SIZE = 50_000;
+const POOL_STRATEGY_ID = encodeBytes32String("HYDRATION_USDC_POOL_V1").toLowerCase();
 const VESTING_ATTESTATION_TYPEHASH = id(
   "VestingAttestation(address borrower,bytes32 loanId,uint256 pledgeShares,uint256 amount,uint256 vestedRaw,uint64 validUntil,uint256 nonce,uint256 chainId,address creditPool)"
 );
@@ -110,6 +112,20 @@ function summarizeSupportedAsset(asset) {
     summary.minBalanceRaw = asset.minBalanceRaw;
   }
   return summary;
+}
+
+function decodeStrategyLabel(strategyId) {
+  try {
+    return decodeBytes32String(strategyId);
+  } catch {
+    return strategyId;
+  }
+}
+
+function deriveStrategyLaneVerdict({ approved }) {
+  return approved
+    ? { status: "ok", reason: "wrapper_registered_and_policy_approved" }
+    : { status: "blocked", reason: "strategy_not_policy_approved" };
 }
 
 function summarizeAssetPosition(position, asset, toDisplayUnits, toRawString) {
@@ -154,6 +170,7 @@ export class BlockchainGateway {
     this.now = now;
     this.depositPoolVestingEventCache = undefined;
     this.creditPoolVestingEventCache = undefined;
+    this.xcmStrategyRegistryEventCache = undefined;
     if (!config.enabled) {
       this.provider = undefined;
       this.writeBroadcaster = undefined;
@@ -496,6 +513,158 @@ export class BlockchainGateway {
         }
       })
     );
+  }
+
+  /**
+   * Enumerate the wrapper's current strategy registry from its append-only
+   * StrategyAdapterUpdated log, then re-read each mapping at one head block.
+   * The log supplies only candidate ids; no adapter or allocation is trusted
+   * until the corresponding live contract read succeeds.
+   */
+  async getTreasuryStrategyLanes() {
+    return this.withGatewayError("getTreasuryStrategyLanes", async () => {
+      if (!this.provider || !this.xcmWrapperContract) {
+        throw new Error("XCM wrapper reads are not configured");
+      }
+      const deploymentBlock = Number(this.config?.xcmWrapperDeploymentBlock);
+      if (!Number.isSafeInteger(deploymentBlock) || deploymentBlock < 0) {
+        throw new Error("XCM wrapper deployment block is not configured");
+      }
+      const headBlock = Number(await this.provider.getBlockNumber());
+      if (!Number.isSafeInteger(headBlock) || headBlock < deploymentBlock) {
+        throw new Error(`XCM wrapper head ${headBlock} predates deployment block ${deploymentBlock}`);
+      }
+      const events = await this.#readXcmStrategyRegistryEvents(deploymentBlock, headBlock);
+      const strategyIds = [...new Set(events.map((event) => event.strategyId))];
+      const at = { blockTag: headBlock };
+      const rows = [];
+      for (const strategyId of strategyIds) {
+        const adapter = getAddress(await this.xcmWrapperContract.strategyAdapter(strategyId, at));
+        if (adapter === ZERO_ADDRESS) continue;
+        rows.push(await this.readTreasuryStrategyLane({ strategyId, adapter, blockTag: headBlock }));
+      }
+      const block = await this.provider.getBlock(headBlock);
+      return {
+        available: true,
+        wrapper: getAddress(this.config.xcmWrapperAddress),
+        block: {
+          number: headBlock,
+          hash: block?.hash ?? null,
+          timestamp: block?.timestamp === undefined ? undefined : Number(block.timestamp),
+          timestampIso: block?.timestamp === undefined
+            ? undefined
+            : new Date(Number(block.timestamp) * 1_000).toISOString()
+        },
+        rows
+      };
+    });
+  }
+
+  async readTreasuryStrategyLane({ strategyId, adapter, blockTag }) {
+    const at = { blockTag };
+    const adapterContract = new Contract(adapter, STRATEGY_ADAPTER_ABI, this.provider);
+    const [adapterStrategyId, asset, riskLabel, approved] = await Promise.all([
+      adapterContract.strategyId(at),
+      adapterContract.asset(at),
+      adapterContract.riskLabel(at),
+      this.policyContract.approvedStrategies(adapter, at)
+    ]);
+    if (String(adapterStrategyId).toLowerCase() !== strategyId) {
+      throw new Error(`Wrapper strategy ${strategyId} points to an adapter with a different strategyId`);
+    }
+    const isPoolLane = strategyId === POOL_STRATEGY_ID;
+    if (isPoolLane && !this.depositPoolContract) {
+      throw new Error("Pool strategy is registered but DepositPool reads are not configured");
+    }
+    const allocationRaw = isPoolLane
+      ? await this.depositPoolContract.venuePrincipalCostBasis(at)
+      : await adapterContract.totalAssets(at);
+    const assetConfig = (this.config.supportedAssets ?? []).find(
+      (candidate) => String(candidate.address).toLowerCase() === String(asset).toLowerCase()
+    );
+    if (!assetConfig) {
+      throw new Error(`Registered strategy ${strategyId} uses an unsupported asset`);
+    }
+    return {
+      strategyId,
+      strategyLabel: decodeStrategyLabel(strategyId),
+      laneAddress: adapter,
+      asset: getAddress(asset),
+      assetSymbol: assetConfig.symbol,
+      riskLabel: String(riskLabel),
+      allocation: this.toDisplayUnits(allocationRaw, assetConfig),
+      allocationRaw: this.toRawString(allocationRaw),
+      allocationSource: isPoolLane
+        ? "DepositPool.venuePrincipalCostBasis"
+        : "strategyAdapter.totalAssets",
+      policyApproved: Boolean(approved),
+      verdict: deriveStrategyLaneVerdict({ approved: Boolean(approved) })
+    };
+  }
+
+  async #readXcmStrategyRegistryEvents(deploymentBlock, headBlock) {
+    if (this.xcmStrategyRegistryEventCache?.headBlock === headBlock) {
+      return this.xcmStrategyRegistryEventCache.events;
+    }
+    const canExtend = this.xcmStrategyRegistryEventCache
+      && this.xcmStrategyRegistryEventCache.headBlock >= deploymentBlock
+      && this.xcmStrategyRegistryEventCache.headBlock < headBlock;
+    const fromBlock = canExtend ? this.xcmStrategyRegistryEventCache.headBlock + 1 : deploymentBlock;
+    const events = canExtend ? [...this.xcmStrategyRegistryEventCache.events] : [];
+    const topic0 = this.xcmWrapperContract.interface.getEvent("StrategyAdapterUpdated").topicHash;
+    for (let start = fromBlock; start <= headBlock; start += XCM_STRATEGY_EVENT_LOG_CHUNK_SIZE) {
+      const end = Math.min(headBlock, start + XCM_STRATEGY_EVENT_LOG_CHUNK_SIZE - 1);
+      const logs = await this.provider.getLogs({
+        address: this.config.xcmWrapperAddress,
+        topics: [topic0],
+        fromBlock: start,
+        toBlock: end
+      });
+      for (const log of logs) {
+        const decoded = this.xcmWrapperContract.interface.parseLog(log);
+        events.push({
+          strategyId: String(decoded.args.strategyId).toLowerCase(),
+          blockNumber: Number(log.blockNumber),
+          logIndex: Number(log.index ?? log.logIndex ?? 0)
+        });
+      }
+    }
+    events.sort((left, right) => left.blockNumber - right.blockNumber || left.logIndex - right.logIndex);
+    this.xcmStrategyRegistryEventCache = { headBlock, events };
+    return events;
+  }
+
+  async getActiveCreditPoolLoans(wallet) {
+    return this.withGatewayError("getActiveCreditPoolLoans", async () => {
+      if (!this.creditPoolContract) throw new Error("CreditPool reads are not configured");
+      const normalizedWallet = getAddress(wallet);
+      const events = await this.readCreditPoolLoanEvents();
+      const closed = new Set(events
+        .filter((event) => event.type === "LoanClosed")
+        .map((event) => event.loanId));
+      const loanIds = [...new Set(events
+        .filter((event) => event.type === "LoanOriginated"
+          && String(event.borrower).toLowerCase() === normalizedWallet.toLowerCase()
+          && !closed.has(event.loanId))
+        .map((event) => event.loanId))];
+      const headBlock = Number(await this.provider.getBlockNumber());
+      const loans = await Promise.all(loanIds.map(async (loanId) => {
+        const value = await this.creditPoolContract.loans(loanId, { blockTag: headBlock });
+        return {
+          loanId,
+          borrower: getAddress(value.borrower),
+          blockNumber: headBlock,
+          outstandingPrincipalRaw: this.toRawString(value.outstandingPrincipal),
+          outstandingInterestRaw: this.toRawString(value.outstandingInterest),
+          outstandingRaw: this.toRawString(
+            BigInt(value.outstandingPrincipal) + BigInt(value.outstandingInterest)
+          ),
+          pledgedSharesRaw: this.toRawString(value.pledgeShares),
+          status: Number(value.status)
+        };
+      }));
+      return loans.filter((loan) => loan.status === 1 && loan.borrower === normalizedWallet);
+    });
   }
 
   async getDefaultClaimStakeBps() {
@@ -999,6 +1168,7 @@ export class BlockchainGateway {
             signerIsVerifier: false,
             arbitratorSignerIsArbitrator: false,
             signerIsSettlementBroker: false,
+            signerIsStrategySettler: false,
             escrowIsAgentAccountEscrowOperator: false,
             escrowAgentAccountMatchesConfig: false,
             agentAccountIsOutflowRecorder: false
@@ -1034,6 +1204,7 @@ export class BlockchainGateway {
         signerIsVerifier,
         arbitratorSignerIsArbitrator,
         signerIsSettlementBroker,
+        signerIsStrategySettler,
         escrowIsAgentAccountEscrowOperator,
         agentAccountIsOutflowRecorder,
         escrowCoreAgentAccountAddress,
@@ -1058,6 +1229,9 @@ export class BlockchainGateway {
           : false,
         signerAddress
           ? optionalBool("settlementBroker(signer)", this.policyContract.settlementBroker(signerAddress))
+          : false,
+        signerAddress && typeof this.policyContract.strategySettler === "function"
+          ? optionalBool("strategySettler(signer)", this.policyContract.strategySettler(signerAddress))
           : false,
         this.config.escrowCoreAddress && typeof this.accountContract.escrowOperators === "function"
           ? optionalBool(
@@ -1159,6 +1333,7 @@ export class BlockchainGateway {
           signerIsVerifier,
           arbitratorSignerIsArbitrator,
           signerIsSettlementBroker,
+          signerIsStrategySettler,
           escrowIsAgentAccountEscrowOperator: agentAccountEscrowAuthorized,
           agentAccountEscrowAuthorizationMode,
           agentAccountEscrowOperatorsGetterReady: escrowIsAgentAccountEscrowOperator,

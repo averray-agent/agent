@@ -44,6 +44,8 @@ export const useAuthSession = () => useApi("/auth/session");
 export const useBorrowCapacity = (asset?: string) =>
   useApi(asset ? `/account/borrow-capacity?asset=${encodeURIComponent(asset)}` : "/account/borrow-capacity");
 export const useStrategyPositions = () => useApi("/account/strategies");
+export const useTreasurySummary = () =>
+  useApi("/admin/treasury/summary", { refreshInterval: 30_000 });
 export const useJobs = () => useApi("/jobs");
 export const useRecommendations = () => useApi("/jobs/recommendations");
 export const useJobDefinition = (id: string | null) =>
