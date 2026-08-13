@@ -1,6 +1,8 @@
 # Ceremony runsheet — DepositPool v2 + CreditPool (L1 activation)
 
-Status: READY — kit built + fork-rehearsed 2026-08-13 evening; execute 2026-08-14.
+Status: EXECUTED 2026-08-13 evening (same day — Pascal had time). Chain side
+complete and verified; cutover PR #1114 through the merge queue. Errata from
+the live run are folded in below, marked ERRATUM.
 Operator: Pascal runs every money-moving command. Claude gates each step and
 verifies on-chain. Codex owns the contracts (shipped via #1108/#1111-era merges);
 the ceremony scripts live on branch `ceremony-pool-v2` (commit b702cbd4, pushed).
@@ -29,9 +31,15 @@ Invariants that must survive the day:
       hashes: legacyEscrowCore f194f905…, hydrationUsdcAdapter 0faec68e…),
       indexer ready + smoke passed, health `ok` with only the two steady-state
       warnings (xcm_observer_staged, gas_sponsor_disabled). No sticky freeze.
-- [ ] Admin EOA 0x9Ab8531F…4239 ≥ 2.0 DOT and nonce noted. Verified 2026-08-13:
-      3.0203 DOT, nonce 15. If nonce ≠ 15 on the day, predictions shift — fine,
-      the deploy script re-predicts; update `--expected-start-nonce`.
+- [x] Admin EOA 0x9Ab8531F…4239 funded. ERRATUM (measured live): each CREATE
+      costs ~0.9 DOT actual (storage deposit folds into gas on the Hub) and the
+      tx pool holds gasLimit x maxFee ≈ 1.84 DOT upfront — a FOUR-create
+      ceremony needs ≥ 4.5 DOT, not 2.0. The script's ≥2.0 floor is per-single-
+      deploy calibrated; at 3.02 DOT the fourth CREATE was refused with
+      code 1010 (Invalid Transaction) after three succeeded. Recovery: +3 DOT
+      Coinbase top-up, then `resume-creditpool-deploy.mjs` minted creditPool at
+      the reserved nonce 18 — poolV2's baked creditPool() pointer made the
+      surgical resume exact. Nothing else may touch the admin nonce meanwhile.
 - [ ] v1 pool par + single-depositor (script preflights re-verify): dogfood
       0xdc1Ed106…EDeC holds shares == totalSupply == assets == 10_000_000,
       buffer == assets, no active venue deployment/recall.
@@ -100,8 +108,12 @@ Script guarantees: imports `buildDeploymentPlan` from the sim (mainnet executes
 the rehearsed bytes — no drift possible); per-step pending-nonce re-read +
 CREATE-address assert; refuses off-par or multi-depositor v1; refuses < 2 DOT.
 
-Postcondition (script prints): RISK_DISCLOSURE on both v2 and creditPool —
-the D8 disclosure lives in the contracts themselves.
+Postcondition — ERRATUM: DepositPoolV2 has NO disclosure getter; only
+CreditPool carries RISK_DISCLOSURE() on-chain (verified: returns "Technical
+pilot. Principal at risk. No depositor protection."). The pool's D8 disclosure
+lives on the door surfaces. EXECUTED: lane blk 19421392 tx 0xb342a83d…,
+venueAdapter blk 19421395 tx 0x22848f3e…, depositPoolV2 blk 19421397
+tx 0x122c38ef…, creditPool blk 19421558 tx 0x5c0ec494… (resume path).
 
 ## §4 Multisig repoint — Nova Spektr + Vault (one batchAll, 3 legs)
 
@@ -127,6 +139,8 @@ cast call 0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc "strategyAdapter(bytes32)(a
 ```
 
 Gate: returns the new lane; `dispatchPaused()` returns false.
+EXECUTED first attempt: timepoint 19421635-2, call hash 0x0666c98b…4297,
+Main + Nova signed; both gates verified on-chain. The 25e9/600k envelope held.
 
 ## §5 Migrate — dogfood position, byte-exact (no seed)
 
@@ -149,6 +163,8 @@ POOL_V2_ADDRESS=<V2_FROM_§3> node scripts/ops/deploy-creditpool-l1-mainnet.mjs 
 ```
 
 Gate: `byte-exact migration: OK`, v1 residual supply 0.
+EXECUTED: redeem 0x8fe7553a…, deposit 0xd9e7c3db…, shares exact 10_000_000;
+independent reads: v2 totalSupply = totalAssets = USDC balance = 10_000_000.
 
 ## §6 Cutover PR — env, manifest, D-03 pins (one PR, one deploy)
 
