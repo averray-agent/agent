@@ -26,6 +26,7 @@ const repoRoot = resolve(here, "..", "..");
 
 export const MAINNET_ADMIN_DEPLOYER = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
 export const EIP170_RUNTIME_CODE_LIMIT_BYTES = 24_576;
+export const EIP3860_INITCODE_LIMIT_BYTES = 49_152;
 export const RATIFIED_V3_SCHEDULE = Object.freeze({
   retentionFlatRaw: 50_000n,
   retentionCapBps: 2_000,
@@ -88,6 +89,11 @@ export function assertCeremonyPostconditions(state) {
     || state.runtimeCodeBytes <= 0
     || state.runtimeCodeBytes > EIP170_RUNTIME_CODE_LIMIT_BYTES) {
     failures.push(`runtime code exceeds the EIP-170 ${EIP170_RUNTIME_CODE_LIMIT_BYTES}-byte ceiling`);
+  }
+  if (!Number.isSafeInteger(state.initCodeBytes)
+    || state.initCodeBytes <= 0
+    || state.initCodeBytes > EIP3860_INITCODE_LIMIT_BYTES) {
+    failures.push(`initcode exceeds the EIP-3860 ${EIP3860_INITCODE_LIMIT_BYTES}-byte ceiling`);
   }
   for (const [field, expected] of Object.entries({
     boundPolicy: state.manifestPolicy,
@@ -183,7 +189,8 @@ async function run(args) {
       manifest.contracts.reputationSbt,
       manifest.treasuryAccount
     );
-    const deployReceipt = await deployed.deploymentTransaction().wait();
+    const deploymentTransaction = deployed.deploymentTransaction();
+    const deployReceipt = await deploymentTransaction.wait();
     const deployedAddress = await deployed.getAddress();
 
     const policy = new Contract(manifest.contracts.treasuryPolicy, POLICY_ABI, provider);
@@ -221,6 +228,7 @@ async function run(args) {
       deployedAddress,
       deployTxHash: deployReceipt.hash,
       deployBlockNumber: deployReceipt.blockNumber,
+      initCodeBytes: (deploymentTransaction.data.length - 2) / 2,
       runtimeCodeBytes: (artifact.deployedBytecode.object.length - 2) / 2,
       policyOwner: owner,
       manifestPolicy: manifest.contracts.treasuryPolicy,

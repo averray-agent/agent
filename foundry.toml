@@ -6,6 +6,5 @@ optimizer = true
 optimizer_runs = 200
 via_ir = true
 sizes = true
-code_size_limit = 24576
 additional_compiler_profiles = [{ name = "escrow-size", optimizer_runs = 1 }]
 compilation_restrictions = [{ paths = "contracts/EscrowCore.sol", optimizer_runs = 1 }]
