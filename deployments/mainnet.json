@@ -18,10 +18,10 @@
     "agentAccountCore": "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57",
     "reputationSbt": "0xA85AF867b5f573176f49F0D6A827F61A5Cee4e37",
     "discoveryRegistry": "0x47876D138e3a26c485A5f8acbAC7AEcA3c7e6C62",
-    "escrowCore": "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC",
+    "escrowCore": "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793",
     "xcmWrapper": "0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc",
     "token": "0x0000053900000000000000000000000001200000",
-    "legacyEscrowCore": "0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035",
+    "legacyEscrowCore": "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC",
     "hydrationUsdcAdapter": "0x96091d4477Fe37E79557276d63883bBbbdE73159",
     "depositPoolLane": "0xAbDca8AAca9308C7DA26c5B7E5E2380CDDD37f34",
     "hydrationDepositPoolAdapter": "0x50d279818948fbfe10B03b74e6b8aB44428b51ab",
@@ -136,23 +136,15 @@
       "abiHash": "sha256:61a73fd104a0dcfa3163fe53dd46674d61782501415813ab7f22bcb93199496d",
       "runtimeCodeHash": "sha256:bc98cddecc7a53d7b20d0d804d8028c1e29d3441d897b9b21b3d834e9e4c369d",
       "verifiedAt": "2026-08-12T16:30:58.000Z"
+    },
+    "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793": {
+      "sourceCommit": "052b3a7a791112001257226ecfbea7a919d9aca2",
+      "abiHash": "sha256:ee13f7491686340e989a6fca152e662750fb69b20c78b2f20cd6266eda358389",
+      "runtimeCodeHash": "sha256:5e8ed203a5ed21f544a8a075a25dce281dfbdc0862e66cb3c6c9a7fc7e5ae60d",
+      "verifiedAt": "2026-08-13T13:05:00.000Z"
     }
   },
   "knownUnshippedContractChanges": {
-    "escrowCore": [
-      {
-        "sourceCommit": "052b3a7a791112001257226ecfbea7a919d9aca2",
-        "maskedRuntimeCodeHash": "sha256:f194f90545c90989f58fe3512ac189ef84882031f9322dfcc934b3e8ccf919a2",
-        "reason": "The EscrowCore v3 successor is intentionally not deployed: mainnet still routes new jobs through v2 at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC and drains v1 at 0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035. This candidate runtime adds claim-time brokered and schedule snapshots, approved-success-only gas retention, max(bps, floor) poster fees, one bounded atomic fee schedule, and poster-only cancelOpenJob after one hour; successful claims still release claim stake and claim fee. Backend activation is capability-gated on supportsGasRetention(), so merging this source cannot advertise v3 economics against live v2. Both the escrowCore and legacyEscrowCore pins must be deleted during the operator-run v3 ceremony."
-      }
-    ],
-    "legacyEscrowCore": [
-      {
-        "sourceCommit": "052b3a7a791112001257226ecfbea7a919d9aca2",
-        "maskedRuntimeCodeHash": "sha256:f194f90545c90989f58fe3512ac189ef84882031f9322dfcc934b3e8ccf919a2",
-        "reason": "The EscrowCore v3 successor is intentionally not deployed: mainnet still drains this v1 address at 0x9cCd1DbBB5C354CC6218e55D3cE924A4d631C035 while v2 at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC serves new jobs. Both manifest entries compile the same candidate EscrowCore artifact, which adds claim-time brokered and schedule snapshots, approved-success-only gas retention, max(bps, floor) poster fees, one bounded atomic fee schedule, and poster-only cancelOpenJob after one hour; successful claims still release claim stake and claim fee. Backend activation is capability-gated on supportsGasRetention(), so merging this source cannot advertise v3 economics against either live predecessor. Both the escrowCore and legacyEscrowCore pins must be deleted during the operator-run v3 ceremony."
-      }
-    ],
     "hydrationUsdcAdapter": [
       {
         "sourceCommit": "3d883912450e4805a1cd47cabc62a4237884c4fe",
@@ -194,7 +186,8 @@
     "hydrationUsdcAdapterV2_2_1": 19101470,
     "depositPoolLane": 19380501,
     "hydrationDepositPoolAdapter": 19380504,
-    "depositPool": 19380506
+    "depositPool": 19380506,
+    "escrowCoreV3": 19414957
   },
   "runtime": {
     "auth": {

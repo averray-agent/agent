@@ -649,11 +649,14 @@ async function main() {
   const isBatch = innerCalls.length > 1;
 
   // Weight knobs — mirror rotate-admin-multisig-payload.mjs.
-  const reviveRefTime = 4_000_000_000;
-  const reviveProofSize = 100_000;
+  // Ceremony 2026-08-13: raised from 4e9/100k after revive.OutOfGas at block
+  // 19415173 — v3 compiles with optimizer_runs=1 (size fix), trading gas for
+  // size, and setFeeSchedule's four cold SSTOREs blew the historical envelope.
+  const reviveRefTime = 25_000_000_000;
+  const reviveProofSize = 600_000;
   const storageDepositLimit = 1_000_000_000;
-  const maxWeightRefTime = 4_500_000_000 * innerCalls.length;
-  const maxWeightProofSize = 150_000 * innerCalls.length;
+  const maxWeightRefTime = 27_000_000_000 * innerCalls.length;
+  const maxWeightProofSize = 650_000 * innerCalls.length;
 
   // The Apps link and SCALE encoder share one profile-bound endpoint. Unless
   // --no-ws was explicitly requested, validate the connected chain, runtime
