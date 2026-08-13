@@ -1,19 +1,23 @@
 import type { Metadata } from "next";
-import { Manrope, Space_Grotesk } from "next/font/google";
+import localFont from "next/font/local";
 import "@/styles/globals.css";
 import { Toaster } from "@/components/ui/toast";
 
-const manrope = Manrope({
-  subsets: ["latin"],
+// Vendored latin variable fonts (next/font/local): next/font/google fetches
+// from fonts.googleapis.com at BUILD time, and 2026-08-13 that dependency
+// failed three builds in one evening (CI export + two production deploys).
+// A build must never depend on a third-party CDN being up.
+const manrope = localFont({
+  src: "../fonts/manrope-latin-var.woff2",
   variable: "--font-body",
-  weight: ["400", "500", "600", "700", "800"],
+  weight: "200 800",
   display: "swap",
 });
 
-const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
+const spaceGrotesk = localFont({
+  src: "../fonts/space-grotesk-latin-var.woff2",
   variable: "--font-display",
-  weight: ["500", "600", "700"],
+  weight: "300 700",
   display: "swap",
 });
 
