@@ -103,9 +103,9 @@ source-derived).
   escrow, the poster guide + `/poster/onboarding` `cancellation` object flip to `cancelOpenJob`,
   Hermes-only revenue lines (retained gas vs poster fees, distinct series), board trailing-7d
   worked-cost tile with the 80%-of-flat alert (D4-R5).
-- **Companion backend fix (rides the platform PR):** the claim path finally consults
-  `isExternalJobDelisted` (today delisted jobs remain claimable and brokered — the two-chokepoint
-  gap from the cancel design review).
+- ~~Companion backend fix: claim consults delisting~~ — **already done on main** (verified
+  2026-08-13: `getExternalJobDelisting` gates `claimExternalJob` with a per-job lifecycle lock;
+  landed in an earlier PR). Nothing for v3 here.
 
 ## 5. Acceptance
 
