@@ -1,6 +1,7 @@
 import { getAddress } from "ethers";
 
 import { ValidationError } from "../../core/errors.js";
+import { EARNINGS_WITHDRAWAL_STATEMENT } from "../../core/earnings-door-copy.js";
 
 const SIGNATURE_RE = /^0x[a-fA-F0-9]{130}$/u;
 
@@ -78,7 +79,16 @@ export function createPaymentRoutes({
       return false;
     }
     if (!paymentsSendEnabled) {
-      respond(response, 503, { reason: "payments_send_disabled" });
+      respond(response, 503, {
+        reason: "payments_send_disabled",
+        see: {
+          withdrawal: {
+            statement: EARNINGS_WITHDRAWAL_STATEMENT,
+            http: { method: "POST", path: "/account/withdraw/transactions" },
+            mcp: { tool: "buildWithdrawTransactions" }
+          }
+        }
+      });
       return true;
     }
 

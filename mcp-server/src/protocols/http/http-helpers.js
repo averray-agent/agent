@@ -175,6 +175,7 @@ export function metricPathLabel(pathname) {
     "/account/deallocate",
     "/account/fund",
     "/account/position",
+    "/account/withdraw/transactions",
     "/account/repay",
     "/account/strategies",
     "/auth/session",

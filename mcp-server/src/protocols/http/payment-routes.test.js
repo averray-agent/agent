@@ -96,7 +96,7 @@ test("payment routes ignore unrelated paths", async () => {
   assert.deepEqual(response, {});
 });
 
-test("POST /payments/send returns 503 when payments send is disabled", async () => {
+test("POST /payments/send returns 503 with the live withdrawal-door pointer when disabled", async () => {
   const { calls, response, route } = makeHarness({ paymentsSendEnabled: false });
 
   const handled = await route({
@@ -108,10 +108,11 @@ test("POST /payments/send returns 503 when payments send is disabled", async () 
 
   assert.equal(handled, true);
   assert.equal(response.statusCode, 503);
-  assert.deepEqual(response.body, { reason: "payments_send_disabled" });
-  assert.deepEqual(calls, [
-    ["respond", { statusCode: 503, body: { reason: "payments_send_disabled" } }]
-  ]);
+  assert.equal(response.body.reason, "payments_send_disabled");
+  assert.equal(response.body.see.withdrawal.http.path, "/account/withdraw/transactions");
+  assert.equal(response.body.see.withdrawal.mcp.tool, "buildWithdrawTransactions");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], "respond");
 });
 
 test("POST /payments/send relays idempotent chain-backed agent payment", async () => {

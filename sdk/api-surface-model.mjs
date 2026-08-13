@@ -157,36 +157,93 @@ export interface AccountSummary extends ApiEnvelope {
   debtOutstanding?: AssetBalances;
 }
 
+export interface ExactAssetAmount {
+  raw: string;
+  decimals: number;
+  display: string;
+}
+
+export interface EarningsAsset extends ApiEnvelope {
+  symbol: AssetSymbol;
+  address: WalletAddress;
+  decimals: number;
+}
+
+export interface EarningsStatementEntry extends ApiEnvelope {
+  type: "earnings_in" | "stake_locked" | "stake_released" | string;
+  direction: "in" | "locked" | "released" | string;
+  amount: ExactAssetAmount;
+  sessionId?: SessionId | null;
+  jobId?: JobId | null;
+  txHash?: string;
+  blockNumber?: number;
+  occurredAt?: ISODateTime | null;
+}
+
+export interface EarningsAccount extends ApiEnvelope {
+  owner: WalletAddress;
+  asset: EarningsAsset;
+  available: ExactAssetAmount;
+  availableAfter?: ExactAssetAmount;
+  stakedOnOpenWork: ExactAssetAmount;
+  statement: EarningsStatementEntry[];
+}
+
 export interface AccountPositionResponse extends ApiEnvelope {
+  schemaVersion: number;
+  available: true;
+  framing: string;
+  account: EarningsAccount;
+  ownershipProof: {
+    statement: string;
+    chainId: number;
+    contract: "AgentAccountCore";
+    address: WalletAddress;
+    method: "positions(address,address)";
+    args: { account: WalletAddress; asset: WalletAddress };
+    field: "liquid";
+  };
+  withdrawal: ApiEnvelope;
+  whatYourBalanceCanDo: ApiEnvelope;
+  boundary: ApiEnvelope;
+}
+
+export interface BuildWithdrawTransactionsInput {
+  asset?: AssetSymbol;
+  amount: string;
+  destination?: WalletAddress;
+}
+
+export interface UnsignedWithdrawalTemplate extends ApiEnvelope {
+  step: "withdraw" | "transfer_to_destination";
+  unsigned: true;
+  from: WalletAddress;
+  to: WalletAddress;
+  data: string;
+  value: "0";
+  chainId: number;
+  prerequisite?: "withdraw_confirmed_on_chain";
+  gas: ApiEnvelope;
+  decoded: ApiEnvelope;
+}
+
+export interface BuildWithdrawTransactionsResponse extends ApiEnvelope {
+  schemaVersion: number;
+  available: true;
   wallet: WalletAddress;
-  asset?: {
-    symbol?: AssetSymbol;
-    address?: WalletAddress;
-    assetClass?: string;
-    assetId?: number;
-    decimals?: number;
-    minBalanceRaw?: string;
+  chainId: number;
+  asset: EarningsAsset;
+  account: EarningsAccount;
+  withdrawal: {
+    amount: ExactAssetAmount;
+    destination: WalletAddress;
+    firstLandingAddress: WalletAddress;
   };
-  source?: {
-    contract?: "AgentAccountCore" | string;
-    address?: WalletAddress;
-    method?: "positions" | string;
-    field?: "liquid" | string;
-  };
-  position?: {
-    liquid?: number;
-    liquidRaw?: string;
-    reserved?: number;
-    reservedRaw?: string;
-    strategyAllocated?: number;
-    strategyAllocatedRaw?: string;
-    collateralLocked?: number;
-    collateralLockedRaw?: string;
-    jobStakeLocked?: number;
-    jobStakeLockedRaw?: string;
-    debtOutstanding?: number;
-    debtOutstandingRaw?: string;
-  };
+  templates: UnsignedWithdrawalTemplate[];
+  instructions: string[];
+  broadcast: ApiEnvelope;
+  whatYourBalanceCanDo: ApiEnvelope;
+  boundary: ApiEnvelope;
 }
 
 export interface BorrowCapacityResponse extends ApiEnvelope {
@@ -865,6 +922,7 @@ export class AgentPlatformClient {
 
   getAccountSummary(): Promise<AccountSummary>;
   getAccountPosition(asset?: AssetSymbol): Promise<AccountPositionResponse>;
+  buildWithdrawTransactions(input: BuildWithdrawTransactionsInput): Promise<BuildWithdrawTransactionsResponse>;
   getBorrowCapacity(asset?: AssetSymbol): Promise<BorrowCapacityResponse>;
   getStrategyPositions(): Promise<StrategyPositionsResponse>;
   fundAccount(input: FundAccountInput): Promise<AccountSummary>;

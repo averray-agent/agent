@@ -107,6 +107,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ConfigError } from "../core/errors.js";
 import { resolveHubNetwork } from "../core/discovery-manifest.js";
+import { EarningsDoorService } from "./earnings-door.js";
 import { assertMainnetSignerPosture, assertChainIdMatchesRpc } from "./startup-guards.js";
 import { createRewardBankHealthProvider } from "../core/health-capability.js";
 import {
@@ -224,6 +225,27 @@ export function createDepositPoolDoor({
     chainReader,
     workerExposurePolicy,
     vestingHours: loadDepositVestingConfig(env).vestingHours
+  });
+}
+
+export function createEarningsDoor({
+  gateway,
+  authConfig,
+  stateStore,
+  eventBus,
+  workerExposurePolicy,
+  chainReader
+} = {}) {
+  return new EarningsDoorService({
+    agentAccountAddress: gateway.config.agentAccountAddress,
+    chainId: authConfig.chainId,
+    rpcUrls: [resolveHubNetwork(authConfig.chainId).rpcUrl],
+    gateway,
+    stateStore,
+    eventBus,
+    workerExposurePolicy,
+    provider: gateway.provider,
+    chainReader
   });
 }
 
@@ -593,6 +615,9 @@ export async function createPlatformRuntime() {
   const depositPoolDoor = initStep("init-deposit-pool-door", logger, () =>
     createDepositPoolDoor({ gateway, authConfig, workerExposurePolicy })
   );
+  const earningsDoor = initStep("init-earnings-door", logger, () =>
+    createEarningsDoor({ gateway, authConfig, stateStore, eventBus, workerExposurePolicy })
+  );
   const xcmBalanceObserver = initStep("init-xcm-balance-observer", logger, () =>
     new XcmBalanceObserverService(
       stateStore,
@@ -789,6 +814,7 @@ export async function createPlatformRuntime() {
     transparencyService,
     depositPoolObservability,
     depositPoolDoor,
+    earningsDoor,
     venueBalanceReader,
     xcmObservationRelay,
     upstreamStatusPoller,

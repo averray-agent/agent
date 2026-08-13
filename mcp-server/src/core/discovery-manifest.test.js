@@ -118,7 +118,7 @@ test("A1 manifest payload: walletless arrival states the perk, proof, and limits
   assert.match(arrival.managedWalletInterop, /Cloudflare Wallets, Coinbase, or similar/u);
   assert.match(arrival.managedWalletInterop, /payment rails and can't sign on this chain/u);
   assert.match(arrival.managedWalletInterop, /same key works on any EVM chain/u);
-  assert.match(arrival.managedWalletInterop, /withdrawn to any address you control/u);
+  assert.match(arrival.managedWalletInterop, /Withdraw via buildWithdrawTransactions — your signature, your gas, any destination\./u);
   assert.match(arrival.proof.summary, /0\.40 USDC/u);
   assert.match(arrival.proof.summary, /nonce remained 0/u);
   assert.equal(
@@ -258,7 +258,8 @@ test("buildPlatformCapabilities stays aligned with the discovery tool list", () 
     actionRequirements: manifest.onboarding.actionRequirements,
     readinessChecks: manifest.onboarding.readinessChecks,
     selfServeChecklist: manifest.onboarding.selfServeChecklist,
-    buildVestedCapacity: manifest.onboarding.buildVestedCapacity
+    buildVestedCapacity: manifest.onboarding.buildVestedCapacity,
+    withdrawEarnings: manifest.onboarding.withdrawEarnings
   });
   assert.deepEqual(capabilities.auth, {
     scheme: manifest.auth.scheme,

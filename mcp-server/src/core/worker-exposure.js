@@ -208,7 +208,7 @@ export class WorkerExposurePolicy {
     };
   }
 
-  async capacityForWallet(wallet) {
+  async capacityForWallet(wallet, { additionalVestedRaw = 0 } = {}) {
     let vesting;
     try {
       vesting = await this.resolveVesting(wallet);
@@ -216,7 +216,9 @@ export class WorkerExposurePolicy {
       this.logger.warn?.({ wallet, err: error }, "deposit_vesting.read_failed");
       vesting = { vestedRaw: 0n, tranches: [], available: false };
     }
-    const vestedUnits = nonNegativeRawUnits(vesting?.vestedRaw ?? 0, "vested deposit assets");
+    const currentlyVestedUnits = nonNegativeRawUnits(vesting?.vestedRaw ?? 0, "vested deposit assets");
+    const additionalVestedUnits = nonNegativeRawUnits(additionalVestedRaw, "projected additional vested assets");
+    const vestedUnits = currentlyVestedUnits + additionalVestedUnits;
     const vestedWholeUsdc = vestedUnits / 1_000_000n;
     const openRaiseUnits = integerSquareRoot(vestedWholeUsdc) * this.vestedOpenExposureUnit;
     const openCapUnits = this.capUnits + openRaiseUnits;
@@ -225,6 +227,8 @@ export class WorkerExposurePolicy {
     return {
       vestedAssetsRaw: vestedUnits.toString(),
       vestedAssetsUsdc: usdcAmount(vestedUnits),
+      currentlyVestedAssetsRaw: currentlyVestedUnits.toString(),
+      additionalVestedAssetsRaw: additionalVestedUnits.toString(),
       baseOpenExposureCapRaw: this.capUnits.toString(),
       baseOpenExposureCapUsdc: usdcAmount(this.capUnits),
       openExposureRaiseRaw: openRaiseUnits.toString(),

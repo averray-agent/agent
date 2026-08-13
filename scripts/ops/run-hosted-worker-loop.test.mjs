@@ -1204,29 +1204,26 @@ function accountPosition({
   source = {}
 }) {
   return {
-    wallet,
-    asset: {
-      symbol: "USDC",
-      address: "0x0000053900000000000000000000000001200000",
-      assetClass: "trust_backed",
-      assetId: 1337,
-      decimals: 6,
-      minBalanceRaw: "70000"
+    account: {
+      owner: wallet,
+      asset: {
+        symbol: "USDC",
+        address: "0x0000053900000000000000000000000001200000",
+        assetClass: "trust_backed",
+        assetId: 1337,
+        decimals: 6,
+        minBalanceRaw: "70000"
+      },
+      available: { raw: String(liquidUsdcRaw), decimals: 6, display: liquidUsdc },
+      stakedOnOpenWork: { raw: "0", decimals: 6 },
+      statement: []
     },
-    source: {
+    ownershipProof: {
       contract: "AgentAccountCore",
       address: "0x3333333333333333333333333333333333333333",
-      method: "positions",
+      method: "positions(address,address)",
       field: "liquid",
       ...source
-    },
-    position: {
-      liquid: liquidUsdc,
-      liquidRaw: String(liquidUsdcRaw),
-      reserved: 0,
-      reservedRaw: "0",
-      jobStakeLocked: 0,
-      jobStakeLockedRaw: "0"
     }
   };
 }

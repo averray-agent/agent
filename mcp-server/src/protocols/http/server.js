@@ -30,6 +30,7 @@ import { createBadgeRoutes, createListBadgeReceipts } from "./badge-routes.js";
 import { createBankLaneFeedRoutes } from "./bank-lane-feed-routes.js";
 import { createDepositPoolObservabilityRoutes } from "./deposit-pool-observability-routes.js";
 import { createDepositPoolRoutes } from "./deposit-pool-routes.js";
+import { createEarningsDoorRoutes } from "./earnings-door-routes.js";
 import { createContentRoutes } from "./content-routes.js";
 import { createDisputeRoutes } from "./dispute-routes.js";
 import { createEventRoutes } from "./event-routes.js";
@@ -88,6 +89,7 @@ const {
   bankLaneFeed,
   depositPoolObservability,
   depositPoolDoor,
+  earningsDoor,
   transparencyService,
   stateStore,
   contentRecoveryLog,
@@ -419,6 +421,13 @@ const handleDepositPoolRoute = createDepositPoolRoutes({
   respond,
 });
 
+const handleEarningsDoorRoute = createEarningsDoorRoutes({
+  authMiddleware,
+  earningsDoor,
+  readJsonBody,
+  respond,
+});
+
 const handleTransparencyRoute = createTransparencyRoutes({
   respond,
   transparencyService,
@@ -699,6 +708,7 @@ const handleAuthRoute = createAuthRoutes({
 const executeMcpTool = createMcpToolExecutor({
   handleAuthRoute,
   handleDepositPoolRoute,
+  handleEarningsDoorRoute,
   handleJobRoute: handleMcpJobRoute,
   handlePublicMetadataRoute,
   maxRequestBodyBytes: httpConfig.maxBodyBytes,
@@ -857,6 +867,10 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (await handleDepositPoolRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleEarningsDoorRoute({ request, response, url, pathname })) {
       return;
     }
 

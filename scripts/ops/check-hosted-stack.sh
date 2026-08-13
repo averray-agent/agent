@@ -7,6 +7,9 @@ DISCOVERY_URL=${DISCOVERY_URL:-https://averray.com/.well-known/agent-tools.json}
 APP_URL=${APP_URL:-https://app.averray.com/}
 API_HEALTH_URL=${API_HEALTH_URL:-https://api.averray.com/health}
 API_POOL_URL=${API_POOL_URL:-https://api.averray.com/pool}
+API_ACCOUNT_POSITION_URL=${API_ACCOUNT_POSITION_URL:-https://api.averray.com/account/position?asset=USDC}
+API_ACCOUNT_WITHDRAW_URL=${API_ACCOUNT_WITHDRAW_URL:-https://api.averray.com/account/withdraw/transactions}
+API_STRATEGIES_URL=${API_STRATEGIES_URL:-https://api.averray.com/strategies}
 API_ONBOARDING_URL=${API_ONBOARDING_URL:-https://api.averray.com/onboarding}
 API_POSTER_ONBOARDING_URL=${API_POSTER_ONBOARDING_URL:-https://api.averray.com/poster/onboarding}
 API_ADMIN_STATUS_URL=${API_ADMIN_STATUS_URL:-https://api.averray.com/admin/status}
@@ -239,6 +242,61 @@ echo "Checking onboarding contract"
 onboarding_json="$(fetch "$API_ONBOARDING_URL")"
 jq -e '.name | length > 0' >/dev/null <<<"$onboarding_json"
 jq -e '.protocols | index("http") != null' >/dev/null <<<"$onboarding_json"
+jq -e '
+  (.tools | index("getAccountPosition") != null) and
+  (.tools | index("buildWithdrawTransactions") != null) and
+  (.onboarding.withdrawEarnings.statement == "Withdraw via buildWithdrawTransactions — your signature, your gas, any destination.") and
+  (.onboarding.withdrawEarnings.retentionNotGates | contains("never delays, conditions, prices, or adds steps"))
+' >/dev/null <<<"$onboarding_json" || {
+  echo "Onboarding promises withdrawal without carrying the canonical earnings door and retention-not-gates contract." >&2
+  exit 1
+}
+
+echo "Checking retired strategy surfaces point to the DepositPool"
+strategies_json="$(fetch "$API_STRATEGIES_URL")"
+jq -e '
+  (.status == "retired") and (.retired == true) and
+  (.strategies == []) and (.see.pool == "/pool") and
+  (.see.onboarding == "/onboarding#buildVestedCapacity")
+' >/dev/null <<<"$strategies_json"
+
+if [[ -n "$OPERATOR_TOKEN" ]]; then
+  echo "Checking authenticated earnings account door"
+  account_json="$(fetch_admin_json "$API_ACCOUNT_POSITION_URL")"
+  jq -e '
+    (.available == true) and
+    (.account.owner | test("^0x[0-9A-Fa-f]{40}$")) and
+    (.account.available.raw | test("^[0-9]+$")) and
+    (.account.stakedOnOpenWork.raw | test("^[0-9]+$")) and
+    (.account.statement | type == "array") and
+    (.ownershipProof.contract == "AgentAccountCore") and
+    (.withdrawal.http.path == "/account/withdraw/transactions") and
+    (.withdrawal.mcp.tool == "buildWithdrawTransactions") and
+    (.whatYourBalanceCanDo.retentionNotGates.templatesRemainComplete == true) and
+    (.whatYourBalanceCanDo.retentionNotGates.conditionsWithdrawal == false) and
+    ((.whatYourBalanceCanDo | has("borrow")) | not)
+  ' >/dev/null <<<"$account_json"
+
+  if [[ "$(jq -r '.account.available.raw' <<<"$account_json")" != "0" ]]; then
+    withdrawal_json="$(curl -fsS --max-time "$TIMEOUT_SEC" \
+      -H "accept: application/json" \
+      -H "authorization: Bearer $OPERATOR_TOKEN" \
+      -H "content-type: application/json" \
+      --data '{"asset":"USDC","amount":"1"}' \
+      "$API_ACCOUNT_WITHDRAW_URL")"
+    jq -e '
+      (.available == true) and
+      (.templates | length == 1) and
+      (.templates[0].unsigned == true) and
+      (.templates[0].decoded.function == "withdraw(address,uint256)") and
+      (.templates[0].decoded.args.amount == "1") and
+      (.templates[0].gas.status == "measured") and
+      (.whatYourBalanceCanDo.retentionNotGates.templatesRemainComplete == true)
+    ' >/dev/null <<<"$withdrawal_json"
+  else
+    echo "  account available balance is zero; builder refusal is covered by acceptance tests and no false template is requested."
+  fi
+fi
 
 echo "Checking poster onboarding live facts"
 poster_onboarding_json="$(fetch "$API_POSTER_ONBOARDING_URL")"

@@ -3,7 +3,9 @@ import {
   AgentPlatformClient,
   AgentPlatformValidationError,
   createIdempotencyKey,
+  type AccountPositionResponse,
   type AccountSummary,
+  type BuildWithdrawTransactionsResponse,
   type BuiltinJobSchemaValue,
   type ClaimResponse,
   type IdempotencyKey,
@@ -70,6 +72,14 @@ if (firstJobId) {
 const generatedKey: IdempotencyKey = createIdempotencyKey("borrow");
 await client.fundAccount({ amount: "1", idempotencyKey: createIdempotencyKey("fund") });
 const account: AccountSummary = await client.borrowFunds({ amount: "1", idempotencyKey: generatedKey });
+const earningsAccount: AccountPositionResponse = await client.getAccountPosition("USDC");
+const withdrawal: BuildWithdrawTransactionsResponse = await client.buildWithdrawTransactions({
+  asset: "USDC",
+  amount: "1",
+  destination: "0x1111111111111111111111111111111111111111"
+});
+void earningsAccount.account.available.raw;
+void withdrawal.templates[0]?.data;
 await client.repayFunds({ amount: "1" });
 await client.sendToAgent({
   recipient: "0x1111111111111111111111111111111111111111",

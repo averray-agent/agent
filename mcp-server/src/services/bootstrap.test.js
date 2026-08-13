@@ -4,7 +4,7 @@ import test from "node:test";
 import { loadAuthConfig } from "../auth/config.js";
 import { loadBlockchainConfig } from "../blockchain/config.js";
 import { BOOTSTRAP_JOBS } from "./bootstrap-jobs.js";
-import { createDepositPoolDoor } from "./bootstrap.js";
+import { createDepositPoolDoor, createEarningsDoor } from "./bootstrap.js";
 
 const POOL_ASSET = "0x0000053900000000000000000000000001200000";
 
@@ -19,6 +19,43 @@ test("bootstrap retains closed starter ids only as archived history", () => {
     assert.equal(retired.lifecycle?.status, "archived");
     assert.match(retired.lifecycle?.reason ?? "", /job ids are never reused/iu);
   }
+});
+
+test("bootstrap wires string AUTH_CHAIN_ID and public mainnet RPC into the earnings door", async () => {
+  const authConfig = loadAuthConfig({ AUTH_MODE: "permissive", AUTH_CHAIN_ID: "420420419" });
+  const gateway = {
+    config: {
+      agentAccountAddress: "0x2222222222222222222222222222222222222222"
+    },
+    provider: undefined,
+    isEnabled: () => true,
+    async getAccountPosition(wallet) {
+      return {
+        wallet,
+        asset: { symbol: "USDC", address: POOL_ASSET, decimals: 6 },
+        position: { liquidRaw: "1", jobStakeLockedRaw: "0" }
+      };
+    }
+  };
+  const door = createEarningsDoor({
+    authConfig,
+    gateway,
+    stateStore: { async listSessionsByWallet() { return []; } },
+    eventBus: { async replayDurable() { return { events: [] }; } },
+    workerExposurePolicy: { async capacityForWallet() { return { vestingHours: 48 }; } },
+    chainReader: {
+      async gasQuote() {
+        return { gas: 10n, unitPrice: 2n, nativeBalance: 100n, blockNumber: 1 };
+      }
+    }
+  });
+
+  const built = await door.buildWithdrawTransactions(
+    "0x1111111111111111111111111111111111111111",
+    { asset: "USDC", amount: "1" }
+  );
+  assert.equal(built.chainId, 420420419);
+  assert.deepEqual(built.broadcast.rpcUrls, ["https://eth-rpc.polkadot.io"]);
 });
 
 test("bootstrap wires the rendered mainnet AUTH_CHAIN_ID into the configured DepositPool door", async () => {
