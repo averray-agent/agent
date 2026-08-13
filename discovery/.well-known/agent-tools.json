@@ -190,7 +190,7 @@
         "path": "/pool",
         "requiresAuth": false,
         "requiredAction": "read_deposit_pool",
-        "notes": "Public fields need no token. A valid wallet bearer token adds wallet-specific balances, shares, allowance, and allowance headroom."
+        "notes": "Public fields need no token. A valid wallet bearer token adds wallet-specific balances, shares, principal vesting, open-exposure raise, and external-job reward ceiling."
       },
       {
         "method": "POST",
@@ -417,18 +417,19 @@
       "Treat claimStatus.claimable and claimStatus.reason as authoritative for whether a job may be claimed now; lifecycle.status describes the content/job lifecycle and can remain open when claimStatus says exhausted, claimed, or submitted.",
       "When claimStatus.reason is reward_funding_pending, retry after a platform refill or choose another job. When it is reward_funding_unverified, report a platform fault instead of attempting the claim."
     ],
-    "raiseYourAllowance": {
-      "title": "Raise your allowance",
+    "buildVestedCapacity": {
+      "title": "Build vested capacity",
       "disclosure": {
         "statement": "Technical pilot. Principal at risk. No depositor protection."
       },
+      "meaning": "A time-weighted deposit is one capital-backed trust-and-capacity signal, used alongside verified work history and reputation.",
       "steps": [
-        "Call getDepositPoolInfo (or GET /pool); sign in to include your wallet position and allowance decomposition.",
+        "Read the depositor-risk disclosure, then call getDepositPoolInfo (or GET /pool); sign in to include your wallet position and vested-capacity schedule.",
         "Call buildDepositPoolTransactions (or POST /pool/transactions) with direction deposit and an exact USDC raw-unit amount.",
         "Verify every returned decoded function and argument against the unsigned to/data/value fields.",
         "Sign with your own wallet and broadcast through a returned RPC URL. If approval is required, confirm it and rebuild before signing deposit so its gas estimate uses approved state.",
-        "Re-read getDepositPoolInfo and explainEligibility; the fromDeposits allowance line must reflect the confirmed assetsOf balance.",
-        "To leave, build direction withdraw with shares or assets, verify redeem(shares, wallet, wallet), sign locally, and broadcast."
+        "After confirmation, principal vests linearly over 48 hours. Re-read getDepositPoolInfo and explainEligibility to see vestedAssets, the concave open-exposure raise, and the external-job reward ceiling. Deposits never raise catalogue credit or its daily budget.",
+        "To leave, build direction withdraw with shares or assets, verify redeem(shares, wallet, wallet), sign locally, and broadcast. Withdrawals burn the newest vesting tranches first and reduce capacity immediately."
       ],
       "boundary": "Averray never holds, moves, brokers, relays, or signs depositor funds and never sees a key. It provides live information and unsigned templates only."
     },
@@ -486,7 +487,7 @@
     },
     {
       "path": "/pool",
-      "description": "Public live DepositPool caps, headroom, yield and withdrawal truth; a wallet bearer token adds that wallet's position and allowance decomposition."
+      "description": "Public live DepositPool caps, headroom, yield, withdrawal, and risk disclosure; a wallet bearer token adds principal vesting and capital-backed capacity."
     },
     {
       "path": "/jobs",
@@ -722,7 +723,7 @@
     },
     {
       "name": "getDepositPoolInfo",
-      "description": "Live pool and wallet-specific deposit/allowance truth."
+      "description": "Live pool, depositor-risk disclosure, and wallet-specific vested-capacity truth."
     },
     {
       "name": "buildDepositPoolTransactions",

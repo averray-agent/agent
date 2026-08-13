@@ -73,7 +73,8 @@ function makePlatformService(
   stateStore = undefined,
   onboardingSubsidyBudget = undefined,
   workerExposurePolicy = undefined,
-  workerDailyExposurePolicy = undefined
+  workerDailyExposurePolicy = undefined,
+  catalogueDailyBudget = undefined
 ) {
   const jobs = [makeParentJob()];
   const profiles = new Map([
@@ -113,7 +114,8 @@ function makePlatformService(
     undefined,
     onboardingSubsidyBudget,
     workerExposurePolicy,
-    workerDailyExposurePolicy
+    workerDailyExposurePolicy,
+    catalogueDailyBudget
   );
   blockchainGateway?.setServedDefinition?.(service.getClaimableJobDefinition(jobs[0].id));
   return service;
@@ -157,7 +159,8 @@ function dailyExposurePolicy({ eligible = false } = {}) {
         retryAfter: eligible ? undefined : "2026-08-13T06:00:00.000Z",
         retryAfterSeconds: eligible ? undefined : 60,
         entry: {
-          version: "worker-daily-exposure-v1",
+          version: "worker-catalogue-exposure-v2",
+          accessMode: "rolling_daily",
           candidate: { reservedRewardUsdc: 0.25, brokeredGasUsdc: 0.059, totalUsdc: 0.309 }
         },
         message: eligible ? "within budget" : "daily budget reached"
@@ -393,13 +396,14 @@ test("successful claim persists its durable daily exposure entry", async () => {
   const claimed = await service.claimJob(WALLET, "parent-job-001", "http", "daily-exposure-recorded");
 
   assert.deepEqual(claimed.dailyExposure, {
-    version: "worker-daily-exposure-v1",
+    version: "worker-catalogue-exposure-v2",
+    accessMode: "rolling_daily",
     candidate: { reservedRewardUsdc: 0.25, brokeredGasUsdc: 0.059, totalUsdc: 0.309 }
   });
   assert.deepEqual((await stateStore.getSession(claimed.sessionId)).dailyExposure, claimed.dailyExposure);
 });
 
-test("claim, preflight, and explainEligibility report one identical tier-3 allowance", async () => {
+test("claim, preflight, and explainEligibility report one identical lifetime catalogue credit", async () => {
   const stateStore = new MemoryStateStore();
   const dailyPolicy = new WorkerDailyExposurePolicy({
     stateStore,
@@ -410,14 +414,7 @@ test("claim, preflight, and explainEligibility report one identical tier-3 allow
       exposureForSession() {
         return { rewardUnits: 250_000n, gasUnits: 59_000n, totalUnits: 309_000n };
       }
-    },
-    resolveBudget: async () => ({
-      baseRaw: 1_500_000n,
-      depositedAssetsRaw: 10_000_000n,
-      fromDepositsRaw: 10_000_000n,
-      totalRaw: 11_500_000n,
-      poolAddress: "0x1111111111111111111111111111111111111111"
-    })
+    }
   });
   const service = makePlatformService(
     undefined,
@@ -432,11 +429,118 @@ test("claim, preflight, and explainEligibility report one identical tier-3 allow
   const explanation = await service.explainEligibility(WALLET, "parent-job-001");
   const claimed = await service.claimJob(WALLET, "parent-job-001", "http", "tier3-parity");
 
-  assert.equal(preflight.dailyAllowance.total, 11.5);
-  assert.equal(explanation.dailyAllowance.total, preflight.dailyAllowance.total);
-  assert.equal(claimed.dailyAllowance.total, preflight.dailyAllowance.total);
-  assert.deepEqual(explanation.dailyAllowance, preflight.dailyAllowance);
-  assert.deepEqual(claimed.dailyAllowance, preflight.dailyAllowance);
+  assert.equal(preflight.dailyAllowance, undefined);
+  assert.equal(preflight.catalogueAccess.mode, "lifetime_credit");
+  assert.equal(preflight.catalogueAccess.lifetimeCredit, 10);
+  assert.deepEqual(explanation.catalogueAccess, preflight.catalogueAccess);
+  assert.deepEqual(claimed.catalogueAccess, preflight.catalogueAccess);
+  assert.equal("fromDeposits" in claimed.catalogueAccess, false);
+});
+
+test("lifetime-credit refusal is identical in preflight, explainEligibility, and claim", async () => {
+  const stateStore = new MemoryStateStore();
+  const refusal = {
+    eligible: false,
+    applies: true,
+    status: "exceeded",
+    reason: "lifetime_catalogue_credit_exhausted",
+    catalogueAccess: {
+      mode: "lifetime_credit",
+      settledApprovedCatalogueJobs: 2,
+      graduationSettledJobs: 10,
+      externalWorkAffected: false
+    },
+    message: "Lifetime catalogue credit exhausted; external work remains available."
+  };
+  const service = makePlatformService(
+    undefined,
+    undefined,
+    stateStore,
+    undefined,
+    undefined,
+    { async evaluate() { return refusal; } }
+  );
+
+  const preflight = await service.preflightJob(WALLET, "parent-job-001");
+  const explanation = await service.explainEligibility(WALLET, "parent-job-001");
+  await assert.rejects(
+    () => service.claimJob(WALLET, "parent-job-001", "http", "lifetime-refusal-parity"),
+    (error) => error.code === preflight.reason && error.details.reason === explanation.reason
+  );
+  assert.deepEqual(explanation.catalogueAccess, preflight.catalogueAccess);
+});
+
+test("global catalogue-budget refusal is identical in preflight, explainEligibility, and claim", async () => {
+  const stateStore = new MemoryStateStore();
+  const workerExposurePolicy = {
+    async evaluate() {
+      return {
+        eligible: true,
+        candidate: { reservedRewardUsdc: 0.25, brokeredGasUsdc: 0.059, totalUsdc: 0.309 }
+      };
+    }
+  };
+  const catalogueDailyBudget = {
+    async evaluate() {
+      return {
+        eligible: false,
+        applies: true,
+        reason: "catalogue_daily_budget_exhausted",
+        retryAfter: "2026-08-14T12:00:00.000Z",
+        message: "Global catalogue budget exhausted."
+      };
+    }
+  };
+  const service = makePlatformService(
+    undefined,
+    undefined,
+    stateStore,
+    undefined,
+    workerExposurePolicy,
+    undefined,
+    catalogueDailyBudget
+  );
+
+  const preflight = await service.preflightJob(WALLET, "parent-job-001");
+  const explanation = await service.explainEligibility(WALLET, "parent-job-001");
+  await assert.rejects(
+    () => service.claimJob(WALLET, "parent-job-001", "http", "global-refusal-parity"),
+    (error) => error.code === preflight.reason && error.details.retryAfter === explanation.catalogueDailyBudget.retryAfter
+  );
+  assert.deepEqual(explanation.catalogueDailyBudget, preflight.catalogueDailyBudget);
+});
+
+test("external capital-ceiling refusal is identical in preflight, explainEligibility, and claim", async () => {
+  const stateStore = new MemoryStateStore();
+  const workerExposurePolicy = {
+    async evaluate() {
+      return {
+        eligible: false,
+        applies: true,
+        reason: "external_reward_exceeds_capital_ceiling",
+        vestedAssetsRaw: "0",
+        externalRewardCeilingRaw: "1000000",
+        message: "External reward exceeds the capital-backed ceiling."
+      };
+    }
+  };
+  const service = makePlatformService(undefined, undefined, stateStore, undefined, workerExposurePolicy);
+  service.jobs[0] = { ...service.jobs[0], source: "external", poster: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" };
+  await stateStore.materializeExternalJobDraft({
+    draftId: "external-capital-ceiling-draft",
+    jobId: service.jobs[0].id,
+    wallet: service.jobs[0].poster,
+    definition: service.jobs[0],
+    status: "live"
+  });
+
+  const preflight = await service.preflightJob(WALLET, "parent-job-001");
+  const explanation = await service.explainEligibility(WALLET, "parent-job-001");
+  await assert.rejects(
+    () => service.claimJob(WALLET, "parent-job-001", "http", "external-ceiling-parity"),
+    (error) => error.code === preflight.reason && error.details.externalRewardCeilingRaw === explanation.workerExposure.externalRewardCeilingRaw
+  );
+  assert.deepEqual(explanation.workerExposure, preflight.workerExposure);
 });
 
 test("preflight, explain, and claim share the claim-scope definition mismatch refusal", async () => {

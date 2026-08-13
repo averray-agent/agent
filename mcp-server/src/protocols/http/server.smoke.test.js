@@ -74,6 +74,8 @@ async function startServer(port, envOverrides = {}) {
       // and serialization boundaries.
       WORKER_OPEN_EXPOSURE_CAP_USDC: "100",
       WORKER_DAILY_EXPOSURE_BUDGET_RAW: "1000000000",
+      WORKER_LIFETIME_CATALOGUE_CREDIT_RAW: "1000000000",
+      WORKER_CATALOGUE_GLOBAL_DAILY_BUDGET_RAW: "1000000000",
       ...envOverrides
     },
     // stderr is piped purely so a boot failure can say WHY. A bad env used to

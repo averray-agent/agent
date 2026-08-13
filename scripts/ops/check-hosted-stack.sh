@@ -224,7 +224,11 @@ jq -e '.available == true' >/dev/null <<<"$pool_json" || {
   exit 1
 }
 jq -e '.disclosure.statement == "Technical pilot. Principal at risk. No depositor protection."' >/dev/null <<<"$pool_json" || {
-  echo "DepositPool door did not report the required depositor risk disclosure." >&2
+  echo "DepositPool door did not carry the exact depositor-risk disclosure." >&2
+  exit 1
+}
+jq -e '[.. | objects | select(has("fromDeposits"))] | length == 0' >/dev/null <<<"$pool_json" || {
+  echo "DepositPool door still exposes a deposit-derived daily allowance field." >&2
   exit 1
 }
 printf '%s\n%s\n' "$pool_json" "$api_health_json" | jq -e -s '

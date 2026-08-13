@@ -266,7 +266,9 @@ test("loadBlockchainConfig resolves DepositPool from the network manifest only w
   });
 
   assert.equal(mainnet.depositPoolAddress, "0xccf5fdf3108af8e693f28bb9326a573d9da0f476");
+  assert.equal(mainnet.depositPoolDeploymentBlock, 19_380_506);
   assert.equal(testnet.depositPoolAddress, "");
+  assert.equal(testnet.depositPoolDeploymentBlock, undefined);
 });
 
 test("loadBlockchainConfig rejects malformed optional XCM_WRAPPER_ADDRESS", () => {

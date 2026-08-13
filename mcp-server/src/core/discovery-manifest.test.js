@@ -179,7 +179,7 @@ test("mainnet chainId renders the mainnet chain block on every network-dependent
     "For externally posted jobs or non-waived curated jobs, acquire DOT on Polkadot Hub. Curated starter jobs use operator-brokered gas; only those also marked stake-waived need no wallet funding. For external jobs, handle external_self_paid_claim_required by signing and broadcasting the returned claimJob transaction."
   );
   assert.ok(!("faucetUrl" in walletFunded), "mainnet has no faucet — wallet-funded must not carry faucetUrl");
-  assert.deepEqual(manifest.onboarding.raiseYourAllowance.disclosure, {
+  assert.deepEqual(manifest.onboarding.buildVestedCapacity.disclosure, {
     statement: DEPOSIT_POOL_RISK_DISCLOSURE
   });
 
@@ -258,7 +258,7 @@ test("buildPlatformCapabilities stays aligned with the discovery tool list", () 
     actionRequirements: manifest.onboarding.actionRequirements,
     readinessChecks: manifest.onboarding.readinessChecks,
     selfServeChecklist: manifest.onboarding.selfServeChecklist,
-    raiseYourAllowance: manifest.onboarding.raiseYourAllowance
+    buildVestedCapacity: manifest.onboarding.buildVestedCapacity
   });
   assert.deepEqual(capabilities.auth, {
     scheme: manifest.auth.scheme,
@@ -272,4 +272,22 @@ test("buildPlatformCapabilities stays aligned with the discovery tool list", () 
     capabilities.tools,
     manifest.tools.map((tool) => tool.name)
   );
+});
+
+test("deposit walkthrough carries the D0 capacity reframe and exact risk disclosure", () => {
+  const walkthrough = buildDiscoveryManifest({
+    chainId: POLKADOT_HUB_MAINNET_CHAIN_ID
+  }).onboarding.buildVestedCapacity;
+
+  assert.deepEqual(
+    walkthrough.disclosure,
+    { statement: "Technical pilot. Principal at risk. No depositor protection." }
+  );
+  assert.equal(
+    walkthrough.meaning,
+    "A time-weighted deposit is one capital-backed trust-and-capacity signal, used alongside verified work history and reputation."
+  );
+  assert.match(walkthrough.steps.join(" "), /vests linearly over 48 hours/u);
+  assert.match(walkthrough.steps.join(" "), /never raise catalogue credit/u);
+  assert.doesNotMatch(JSON.stringify(walkthrough), /fromDeposits|daily allowance/iu);
 });

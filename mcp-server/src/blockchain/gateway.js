@@ -45,6 +45,10 @@ import {
 } from "../core/job-schema-registry.js";
 import { redactProviderError } from "../core/redact-provider-error.js";
 import {
+  DEFAULT_WORKER_DEPOSIT_VESTING_HOURS,
+  calculateDepositVesting
+} from "../core/deposit-vesting.js";
+import {
   BlockchainRevertError,
   ConfigError,
   ConflictError,
@@ -65,7 +69,7 @@ const ESCROW_JOB_STATE_REJECTED = 4;
 const ESCROW_JOB_STATE_CLOSED = 6;
 const RECOVERY_LOG_CHUNK_SIZE = 50_000;
 const RECOVERY_FROM_BLOCK_SAFETY_MARGIN = 1_000;
-const DEPOSIT_POOL_READ_CACHE_TTL_MS = 60_000;
+const DEPOSIT_POOL_EVENT_LOG_CHUNK_SIZE = 2_000;
 const JOB_CLOSED_TOPIC0 = id("JobClosed(bytes32,address,uint256)").toLowerCase();
 const JOB_REJECTED_TOPIC0 = id("JobRejected(bytes32,bytes32)").toLowerCase();
 const RESERVATION_SETTLED_TOPIC0 =
@@ -140,7 +144,7 @@ export class BlockchainGateway {
     this.config = config;
     this.logger = logger;
     this.now = now;
-    this.depositPoolReadCache = new Map();
+    this.depositPoolVestingEventCache = undefined;
     if (!config.enabled) {
       this.provider = undefined;
       this.writeBroadcaster = undefined;
@@ -632,32 +636,107 @@ export class BlockchainGateway {
     }
   }
 
-  async readDepositedAssets(wallet) {
-    const cacheKey = String(wallet ?? "").toLowerCase();
-    const nowMs = Number(this.now());
-    const cached = this.depositPoolReadCache.get(cacheKey);
-    // A just-deposited wallet may wait at most one minute for its raise, while
-    // a just-withdrawn wallet may retain it for the same bounded interval. That
-    // symmetric staleness is accepted at this scale and avoids claim-path RPC
-    // amplification without pretending to offer cache invalidation.
-    if (cached && nowMs - cached.readAtMs <= DEPOSIT_POOL_READ_CACHE_TTL_MS) {
-      return cached.value;
+  async readDepositVesting(wallet, {
+    now = new Date(this.now()),
+    vestingHours = DEFAULT_WORKER_DEPOSIT_VESTING_HOURS
+  } = {}) {
+    try {
+      const events = await this.readDepositPoolPrincipalEvents();
+      return {
+        ...calculateDepositVesting(events, { wallet, now, vestingHours }),
+        available: true,
+        source: "deposit_pool_events",
+        headBlock: this.depositPoolVestingEventCache?.headBlock
+      };
+    } catch (error) {
+      this.logger?.warn?.(
+        { wallet, error: redactProviderError(error) || "deposit_pool_vesting_read_failed" },
+        "deposit_pool_vesting.read_failed"
+      );
+      return {
+        vestedRaw: 0n,
+        principalRaw: 0n,
+        vestingHours,
+        evaluatedAt: new Date(now).toISOString(),
+        tranches: [],
+        available: false,
+        source: "deposit_pool_events",
+        error: "deposit_pool_vesting_read_failed"
+      };
+    }
+  }
+
+  async readDepositPoolPrincipalEvents() {
+    const poolAddress = this.config?.depositPoolAddress;
+    const deploymentBlock = Number(this.config?.depositPoolDeploymentBlock);
+    if (!this.provider || !poolAddress || !Number.isSafeInteger(deploymentBlock) || deploymentBlock < 0) {
+      throw new Error("DepositPool event history is not configured");
+    }
+    const poolInterface = this.depositPoolContract?.interface;
+    if (typeof poolInterface?.parseLog !== "function") {
+      throw new Error("DepositPool event interface is unavailable");
     }
 
-    let value = 0n;
-    if (typeof this.depositPoolContract?.assetsOf === "function") {
-      try {
-        value = BigInt(await this.depositPoolContract.assetsOf(wallet));
-        if (value < 0n) value = 0n;
-      } catch {
-        // DepositPool is an optional tier-3 capability. Missing selectors,
-        // predecessor runtimes, and transient reads fail closed to zero so
-        // nobody receives more than the base allowance.
-        value = 0n;
-      }
+    const headBlock = Number(await this.provider.getBlockNumber());
+    if (!Number.isSafeInteger(headBlock) || headBlock < deploymentBlock) {
+      throw new Error(`DepositPool event head ${headBlock} predates deployment block ${deploymentBlock}`);
     }
-    this.depositPoolReadCache.set(cacheKey, { value, readAtMs: nowMs });
-    return value;
+    if (this.depositPoolVestingEventCache?.headBlock === headBlock) {
+      return this.depositPoolVestingEventCache.events;
+    }
+
+    const canExtend = this.depositPoolVestingEventCache
+      && this.depositPoolVestingEventCache.headBlock >= deploymentBlock
+      && this.depositPoolVestingEventCache.headBlock < headBlock;
+    const fromBlock = canExtend
+      ? this.depositPoolVestingEventCache.headBlock + 1
+      : deploymentBlock;
+    const decodedEvents = canExtend
+      ? [...this.depositPoolVestingEventCache.events]
+      : [];
+    const logs = [];
+    for (let start = fromBlock; start <= headBlock; start += DEPOSIT_POOL_EVENT_LOG_CHUNK_SIZE) {
+      const end = Math.min(headBlock, start + DEPOSIT_POOL_EVENT_LOG_CHUNK_SIZE - 1);
+      logs.push(...await this.provider.getLogs({ address: poolAddress, fromBlock: start, toBlock: end }));
+    }
+
+    const principalLogs = [];
+    for (const log of logs) {
+      let decoded;
+      try {
+        decoded = poolInterface.parseLog(log);
+      } catch {
+        continue;
+      }
+      if (decoded?.name !== "Deposit" && decoded?.name !== "Withdraw") continue;
+      principalLogs.push({
+        type: decoded.name,
+        owner: String(decoded.args.owner),
+        assetsRaw: BigInt(decoded.args.assets).toString(),
+        blockNumber: Number(log.blockNumber),
+        logIndex: Number(log.index ?? log.logIndex ?? 0),
+        txHash: log.transactionHash
+      });
+    }
+
+    const timestamps = new Map();
+    await Promise.all([...new Set(principalLogs.map((event) => event.blockNumber))].map(async (blockNumber) => {
+      const block = await this.provider.getBlock(blockNumber);
+      const timestamp = Number(block?.timestamp);
+      if (!Number.isFinite(timestamp) || timestamp < 0) {
+        throw new Error(`DepositPool event block ${blockNumber} has no readable timestamp`);
+      }
+      timestamps.set(blockNumber, timestamp);
+    }));
+    decodedEvents.push(...principalLogs.map((event) => ({
+      ...event,
+      blockTimestamp: timestamps.get(event.blockNumber)
+    })));
+    decodedEvents.sort((left, right) => (
+      left.blockNumber - right.blockNumber || left.logIndex - right.logIndex
+    ));
+    this.depositPoolVestingEventCache = { headBlock, events: decodedEvents };
+    return decodedEvents;
   }
 
   async getTreasuryPolicyStatus() {

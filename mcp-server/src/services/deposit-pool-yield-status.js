@@ -1,5 +1,5 @@
 export const DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT =
-  "Deposits do not currently earn yield; pool capital deployment is a pending operator ceremony. Deposits raise your daily allowance 1:1 — that is the live benefit today.";
+  "Deposits do not currently earn yield; pool capital deployment is a pending operator ceremony. A vested deposit is a capital-backed trust-and-capacity signal, never catalogue reward entitlement.";
 
 export const DEPOSIT_POOL_YIELD_EARNING_TEXT =
   "Pool capital is deployed to the configured venue; yield is recognized only when returned to pool accounting.";

@@ -92,6 +92,7 @@ export class JobExecutionService {
     this.onboardingSubsidyBudget = maintainerSurfaceConfig.onboardingSubsidyBudget;
     this.workerExposurePolicy = maintainerSurfaceConfig.workerExposurePolicy;
     this.workerDailyExposurePolicy = maintainerSurfaceConfig.workerDailyExposurePolicy;
+    this.catalogueDailyBudget = maintainerSurfaceConfig.catalogueDailyBudget;
     this.logger = maintainerSurfaceConfig.logger ?? console;
     this.openPrCap = Number.isInteger(maintainerSurfaceConfig.openPrCap) && maintainerSurfaceConfig.openPrCap > 0
       ? maintainerSurfaceConfig.openPrCap
@@ -118,7 +119,7 @@ export class JobExecutionService {
     if (isExternalJob(job)) {
       return this.claimExternalJob(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
     }
-    if (!this.workerExposurePolicy && !this.workerDailyExposurePolicy) {
+    if (!this.workerExposurePolicy && !this.workerDailyExposurePolicy && !this.catalogueDailyBudget) {
       return this.claimJobAfterLifecycleGate(
         wallet,
         jobId,
@@ -142,7 +143,23 @@ export class JobExecutionService {
         { wallet }
       );
     }
+    const catalogueLockId = "catalogue-daily-budget:global";
+    const catalogueLockOwner = randomUUID();
+    let catalogueLockAcquired;
     try {
+      if (this.catalogueDailyBudget) {
+        catalogueLockAcquired = await this.stateStore.acquireClaimLock?.(
+          catalogueLockId,
+          catalogueLockOwner,
+          15 * 60
+        );
+        if (catalogueLockAcquired === false) {
+          throw new ConflictError(
+            "Another catalogue claim is updating the operator-wide daily budget. Retry after it finishes.",
+            "catalogue_daily_budget_check_in_progress"
+          );
+        }
+      }
       return await this.claimJobAfterLifecycleGate(
         wallet,
         jobId,
@@ -152,6 +169,9 @@ export class JobExecutionService {
         claimantAttribution
       );
     } finally {
+      if (this.catalogueDailyBudget && catalogueLockAcquired !== false) {
+        await this.stateStore.releaseClaimLock?.(catalogueLockId, catalogueLockOwner);
+      }
       await this.stateStore.releaseClaimLock?.(exposureLockId, exposureLockOwner);
     }
   }
@@ -325,6 +345,7 @@ export class JobExecutionService {
       let claimEconomics = claimEconomicsDecision.economics;
       let workerExposure;
       let dailyExposure;
+      let catalogueDailyBudget;
       const claimIntegrity = requireClaimJobDefinitionIntegrity(
         await inspectClaimJobDefinitionIntegrity({
           job,
@@ -360,6 +381,9 @@ export class JobExecutionService {
           throw new ConflictError(`Job ${jobId} is not claimable in its current on-chain state.`, "job_not_claimable");
         }
         if (isExternalJob(job)) {
+          workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
+          dailyExposure = await this.requireDailyExposureAllowance({ wallet, job, claimEconomics, workerExposure });
+          catalogueDailyBudget = await this.requireCatalogueDailyBudget({ job, workerExposure });
           if (typeof this.blockchainGateway.previewClaimEconomics === "function") {
             const predictedClaimEconomics = claimEconomics;
             const authoritativeClaimEconomics = await this.blockchainGateway.previewClaimEconomics(wallet, jobId);
@@ -391,6 +415,7 @@ export class JobExecutionService {
         }
         workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
         dailyExposure = await this.requireDailyExposureAllowance({ wallet, job, claimEconomics, workerExposure });
+        catalogueDailyBudget = await this.requireCatalogueDailyBudget({ job, workerExposure });
         claimEconomics = await reserveOnboardingSubsidyForClaim({
           economics: claimEconomics,
           onboardingSubsidyBudget: this.onboardingSubsidyBudget,
@@ -430,6 +455,7 @@ export class JobExecutionService {
       } else {
         workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
         dailyExposure = await this.requireDailyExposureAllowance({ wallet, job, claimEconomics, workerExposure });
+        catalogueDailyBudget = await this.requireCatalogueDailyBudget({ job, workerExposure });
         claimEconomics = await reserveOnboardingSubsidyForClaim({
           economics: claimEconomics,
           onboardingSubsidyBudget: this.onboardingSubsidyBudget,
@@ -449,6 +475,7 @@ export class JobExecutionService {
         jobSnapshot: claimIntegrity.snapshot,
         workerExposure,
         dailyExposure,
+        catalogueDailyBudget,
         chainClaimTiming,
         job,
         protocol,
@@ -472,6 +499,7 @@ export class JobExecutionService {
     jobSnapshot = undefined,
     workerExposure = undefined,
     dailyExposure = undefined,
+    catalogueDailyBudget = undefined,
     chainClaimTiming = {},
     job,
     protocol,
@@ -501,6 +529,8 @@ export class JobExecutionService {
       ...(workerExposure ? { workerExposure } : {}),
       ...(dailyExposure?.entry ? { dailyExposure: dailyExposure.entry } : {}),
       ...(dailyExposure?.dailyAllowance ? { dailyAllowance: dailyExposure.dailyAllowance } : {}),
+      ...(dailyExposure?.catalogueAccess ? { catalogueAccess: dailyExposure.catalogueAccess } : {}),
+      ...(catalogueDailyBudget?.entry ? { catalogueDailyBudget: catalogueDailyBudget.entry } : {}),
       ...(claimEconomics.onboardingSubsidy
         ? { onboardingSubsidy: claimEconomics.onboardingSubsidy }
         : {}),
@@ -547,6 +577,17 @@ export class JobExecutionService {
       dailyExposure.message ?? "The wallet's rolling daily operator exposure could not accept this claim.",
       dailyExposure.reason ?? "daily_exposure_budget_unavailable",
       dailyExposure
+    );
+  }
+
+  async requireCatalogueDailyBudget({ job, workerExposure }) {
+    if (!this.catalogueDailyBudget) return undefined;
+    const decision = await this.catalogueDailyBudget.evaluate({ job, workerExposure });
+    if (decision.eligible === true) return decision;
+    throw new ConflictError(
+      decision.message ?? "The operator-wide catalogue exposure budget could not accept this claim.",
+      decision.reason ?? "catalogue_daily_budget_unavailable",
+      decision
     );
   }
 

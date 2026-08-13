@@ -1,5 +1,8 @@
 import { getRouteCapabilityRequirements } from "../auth/capabilities.js";
-import { DEPOSIT_POOL_RISK_DISCLOSURE } from "./deposit-pool-disclosure.js";
+import {
+  DEPOSIT_POOL_CAPITAL_SIGNAL_STATEMENT,
+  DEPOSIT_POOL_RISK_DISCLOSURE
+} from "./deposit-pool-disclosure.js";
 
 const DEFAULT_BASE_URL = "https://api.averray.com";
 const DEFAULT_DISCOVERY_URL = "https://averray.com/.well-known/agent-tools.json";
@@ -65,7 +68,7 @@ const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/llms.txt", description: "Agent-adjusted orientation mirror served on the API host." },
   { path: "/onboarding", description: "Canonical platform capabilities + tool list." },
   { path: "/poster/onboarding", description: "Live machine-readable external-bounty posting rail, economics, verifier modes, and worker bond facts." },
-  { path: "/pool", description: "Public live DepositPool caps, headroom, yield and withdrawal truth; a wallet bearer token adds that wallet's position and allowance decomposition." },
+  { path: "/pool", description: "Public live DepositPool caps, headroom, yield, withdrawal, and risk disclosure; a wallet bearer token adds principal vesting and capital-backed capacity." },
   { path: "/jobs", description: "Public job catalog (no auth)." },
   { path: "/jobs/definition?jobId=X", description: "Canonical job definition by id." },
   { path: "/jobs/validate-submission", description: "Read-only draft validation against a job's output schema." },
@@ -300,7 +303,7 @@ const HTTP_ACTION_REQUIREMENTS = [
     path: "/pool",
     requiresAuth: false,
     requiredAction: "read_deposit_pool",
-    notes: "Public fields need no token. A valid wallet bearer token adds wallet-specific balances, shares, allowance, and allowance headroom."
+    notes: "Public fields need no token. A valid wallet bearer token adds wallet-specific balances, shares, principal vesting, open-exposure raise, and external-job reward ceiling."
   },
   {
     method: "POST",
@@ -431,7 +434,7 @@ const DISCOVERY_TOOLS = [
   { name: "recommendJobs", description: "Wallet-scoped ranked recommendations with tier-gate info." },
   { name: "preflightJob", description: "Pre-claim eligibility + stake + tier check." },
   { name: "explainEligibility", description: "Per-wallet reason why a job is eligible / blocked." },
-  { name: "getDepositPoolInfo", description: "Live pool and wallet-specific deposit/allowance truth." },
+  { name: "getDepositPoolInfo", description: "Live pool, depositor-risk disclosure, and wallet-specific vested-capacity truth." },
   { name: "buildDepositPoolTransactions", description: "Wallet-bound unsigned approve/deposit or redeem templates; never a relay." },
   { name: "estimateNetReward", description: "Profile-aware reward estimate." },
   { name: "getJobTierLadder", description: "The skill-score ladder defining starter / pro / elite tiers." },
@@ -489,16 +492,17 @@ const buildBaseManifest = (network) => ({
       "Treat claimStatus.claimable and claimStatus.reason as authoritative for whether a job may be claimed now; lifecycle.status describes the content/job lifecycle and can remain open when claimStatus says exhausted, claimed, or submitted.",
       "When claimStatus.reason is reward_funding_pending, retry after a platform refill or choose another job. When it is reward_funding_unverified, report a platform fault instead of attempting the claim."
     ],
-    raiseYourAllowance: {
-      title: "Raise your allowance",
+    buildVestedCapacity: {
+      title: "Build vested capacity",
       disclosure: { statement: DEPOSIT_POOL_RISK_DISCLOSURE },
+      meaning: DEPOSIT_POOL_CAPITAL_SIGNAL_STATEMENT,
       steps: [
-        "Call getDepositPoolInfo (or GET /pool); sign in to include your wallet position and allowance decomposition.",
+        "Read the depositor-risk disclosure, then call getDepositPoolInfo (or GET /pool); sign in to include your wallet position and vested-capacity schedule.",
         "Call buildDepositPoolTransactions (or POST /pool/transactions) with direction deposit and an exact USDC raw-unit amount.",
         "Verify every returned decoded function and argument against the unsigned to/data/value fields.",
         "Sign with your own wallet and broadcast through a returned RPC URL. If approval is required, confirm it and rebuild before signing deposit so its gas estimate uses approved state.",
-        "Re-read getDepositPoolInfo and explainEligibility; the fromDeposits allowance line must reflect the confirmed assetsOf balance.",
-        "To leave, build direction withdraw with shares or assets, verify redeem(shares, wallet, wallet), sign locally, and broadcast."
+        "After confirmation, principal vests linearly over 48 hours. Re-read getDepositPoolInfo and explainEligibility to see vestedAssets, the concave open-exposure raise, and the external-job reward ceiling. Deposits never raise catalogue credit or its daily budget.",
+        "To leave, build direction withdraw with shares or assets, verify redeem(shares, wallet, wallet), sign locally, and broadcast. Withdrawals burn the newest vesting tranches first and reduce capacity immediately."
       ],
       boundary: "Averray never holds, moves, brokers, relays, or signs depositor funds and never sees a key. It provides live information and unsigned templates only."
     }
@@ -594,7 +598,7 @@ export function buildPlatformCapabilities({ chainId = undefined } = {}) {
       actionRequirements: manifest.onboarding.actionRequirements,
       readinessChecks: manifest.onboarding.readinessChecks,
       selfServeChecklist: manifest.onboarding.selfServeChecklist,
-      raiseYourAllowance: manifest.onboarding.raiseYourAllowance
+      buildVestedCapacity: manifest.onboarding.buildVestedCapacity
     },
     auth: {
       scheme: manifest.auth.scheme,

@@ -46,6 +46,17 @@ function service(chainReader, options = {}) {
     chainReader,
     eventWindowBlocks: 2_000,
     recentFlowLimit: 4,
+    catalogueDailyBudget: {
+      async getStatus() {
+        return {
+          status: "ok",
+          windowSeconds: 86_400,
+          totalRaw: "25000000",
+          usedRaw: "7000000",
+          remainingRaw: "18000000"
+        };
+      }
+    },
     ...options
   });
 }
@@ -62,11 +73,35 @@ test("deposit-pool snapshot distinguishes a chain-read born-empty pool from unav
   assert.equal(available.bornEmpty, true);
   assert.equal(available.reconciled, true);
   assert.equal(available.flows.depositorCount, 0);
+  assert.deepEqual(available.catalogueDailyBudget, {
+    status: "ok",
+    windowSeconds: 86_400,
+    totalRaw: "25000000",
+    usedRaw: "7000000",
+    remainingRaw: "18000000"
+  });
   assert.deepEqual(unavailable, {
     schemaVersion: 1,
     available: false,
-    reason: "deposit_pool_not_configured"
+    reason: "deposit_pool_not_configured",
+    catalogueDailyBudget: {
+      status: "unavailable",
+      reason: "catalogue_daily_budget_not_configured"
+    }
   });
+});
+
+test("catalogue budget read failure degrades only its board tile", async () => {
+  const snapshot = await service(reader(), {
+    catalogueDailyBudget: {
+      async getStatus() { throw new Error("redis://secret.invalid/password"); }
+    }
+  }).getSnapshot();
+
+  assert.equal(snapshot.available, true);
+  assert.equal(snapshot.catalogueDailyBudget.status, "unavailable");
+  assert.equal(snapshot.catalogueDailyBudget.reason, "catalogue_daily_budget_read_failed");
+  assert.doesNotMatch(snapshot.catalogueDailyBudget.lastError, /password/u);
 });
 
 test("deposit-pool reconciliation reports a mismatch without adjusting the live values", async () => {

@@ -5,10 +5,9 @@ import {
   loadOnboardingSubsidyBudgetConfig
 } from "../core/claim-economics.js";
 import { createWorkerExposurePolicy } from "../core/worker-exposure.js";
-import {
-  createWorkerDailyExposurePolicy,
-  loadWorkerDailyExposureConfig
-} from "../core/worker-daily-exposure.js";
+import { loadDepositVestingConfig } from "../core/deposit-vesting.js";
+import { createWorkerDailyExposurePolicy } from "../core/worker-daily-exposure.js";
+import { createCatalogueDailyBudget } from "../core/catalogue-daily-budget.js";
 import { migrateLegacyBankXcmGenerationState } from "./bank-xcm-watch-migration.js";
 import { AccountOverlayStore } from "../core/account-overlay-store.js";
 import { PolicyService } from "../core/policy-service.js";
@@ -183,9 +182,9 @@ export function createPlatformService() {
   });
   const workerDailyExposurePolicy = createWorkerDailyExposurePolicy({
     stateStore,
-    workerExposurePolicy,
-    blockchainGateway: gateway
+    workerExposurePolicy
   });
+  const catalogueDailyBudget = createCatalogueDailyBudget({ stateStore });
   const eventBus = new EventBus({ eventStore: stateStore });
   const accounts = new AccountOverlayStore({ stateStore });
   accounts.seed(...SEED_DEV_OVERLAY);
@@ -203,11 +202,18 @@ export function createPlatformService() {
     undefined,
     onboardingSubsidyBudget,
     workerExposurePolicy,
-    workerDailyExposurePolicy
+    workerDailyExposurePolicy,
+    catalogueDailyBudget
   );
 }
 
-export function createDepositPoolDoor({ gateway, authConfig, env = process.env, chainReader } = {}) {
+export function createDepositPoolDoor({
+  gateway,
+  authConfig,
+  chainReader,
+  workerExposurePolicy,
+  env = process.env
+} = {}) {
   return new DepositPoolDoorService({
     poolAddress: gateway.config.depositPoolAddress,
     chainId: authConfig.chainId,
@@ -216,7 +222,8 @@ export function createDepositPoolDoor({ gateway, authConfig, env = process.env, 
     rpcUrls: [resolveHubNetwork(authConfig.chainId).rpcUrl],
     provider: gateway.provider,
     chainReader,
-    allowanceConfig: loadWorkerDailyExposureConfig(env)
+    workerExposurePolicy,
+    vestingHours: loadDepositVestingConfig(env).vestingHours
   });
 }
 
@@ -344,9 +351,13 @@ export async function createPlatformRuntime() {
     () => createWorkerDailyExposurePolicy({
       stateStore,
       workerExposurePolicy,
-      blockchainGateway: gateway,
       env: process.env
     })
+  );
+  const catalogueDailyBudget = initStep(
+    "init-catalogue-daily-budget",
+    logger,
+    () => createCatalogueDailyBudget({ stateStore, env: process.env })
   );
   try {
     await migrateLegacyBankXcmGenerationState(stateStore, { logger });
@@ -394,7 +405,8 @@ export async function createPlatformRuntime() {
       undefined,
       onboardingSubsidyBudget,
       workerExposurePolicy,
-      workerDailyExposurePolicy
+      workerDailyExposurePolicy,
+      catalogueDailyBudget
     )
   );
   const rewardBankHealthProvider = initStep(
@@ -574,11 +586,12 @@ export async function createPlatformRuntime() {
   const depositPoolObservability = initStep("init-deposit-pool-observability", logger, () =>
     new DepositPoolObservabilityService({
       poolAddress: gateway.config.depositPoolAddress,
-      provider: gateway.provider
+      provider: gateway.provider,
+      catalogueDailyBudget
     })
   );
   const depositPoolDoor = initStep("init-deposit-pool-door", logger, () =>
-    createDepositPoolDoor({ gateway, authConfig })
+    createDepositPoolDoor({ gateway, authConfig, workerExposurePolicy })
   );
   const xcmBalanceObserver = initStep("init-xcm-balance-observer", logger, () =>
     new XcmBalanceObserverService(
