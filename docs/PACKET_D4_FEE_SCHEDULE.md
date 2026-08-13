@@ -1,8 +1,8 @@
 # Packet D4 — Hybrid fee schedule on measured gas (pre-v3 decision packet)
 
 **Date:** 2026-08-13 · **Author:** Claude (architect) · **Ratifier:** Pascal · **Implementer:** Codex (at v3)
-**Status:** DECISION PACKET — nothing here ships until ratified; the constants then travel into the
-EscrowCore v3 spec so the ceremony ships them once (D2 sequencing, consolidated review 2026-08-13).
+**Status:** RATIFIED — Pascal, 2026-08-13, all five items (D4-R1..R5). Constants now travel into
+`PACKET_ESCROWCORE_V3_SPEC.md` as acceptance criteria (D2 sequencing, consolidated review 2026-08-13).
 **Inputs:** `GAS_STUDY_2026-08-13.md` (all costs below are its measured numbers; study FX $0.79/DOT),
 `ECONOMIC_STRATEGY.md` §4 D4 row, `PACKET_D0_VESTING.md` (lane semantics assumed landed first).
 
@@ -68,7 +68,8 @@ $0.79/DOT; at $0.99/DOT the mean worked path hits $0.050 = break-even on the fla
 
 - **v3 contract shape (Codex-owned):** the schedule `{retentionFlatRaw, retentionCapBps,
   posterFeeBps, posterFeeFloorRaw}` is **admin-settable behind the multisig** with an event per
-  change — not baked immutable like v2's 500 bps. Cheap abort per the operating rule: reverting a
+  change — extending v2's existing settable-with-ceiling idiom (`protocolFeeBps` ≤ `MAX_PROTOCOL_FEE_BPS`
+  1_000) to the new knobs, each behind its own contract-enforced ceiling. Cheap abort per the operating rule: reverting a
   bad constant is one admin op, no redeploy, no ceremony.
 - **Guard:** board/Hermes tile for trailing-7d mean worked-path cost in USDC; alert when it exceeds
   **80% of `retentionFlatRaw`** (0.04 at current constants) → operator reprices. Monthly review
