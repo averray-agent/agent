@@ -25,7 +25,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
 
 export const MAINNET_ADMIN_DEPLOYER = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
-export const POLKADOT_HUB_CODE_BLOB_LIMIT_BYTES = 100 * 1_024;
+export const EIP170_RUNTIME_CODE_LIMIT_BYTES = 24_576;
 export const RATIFIED_V3_SCHEDULE = Object.freeze({
   retentionFlatRaw: 50_000n,
   retentionCapBps: 2_000,
@@ -86,8 +86,8 @@ export function assertCeremonyPostconditions(state) {
   }
   if (!Number.isSafeInteger(state.runtimeCodeBytes)
     || state.runtimeCodeBytes <= 0
-    || state.runtimeCodeBytes > POLKADOT_HUB_CODE_BLOB_LIMIT_BYTES) {
-    failures.push("runtime code exceeds Polkadot Hub's 100 KiB contract blob ceiling");
+    || state.runtimeCodeBytes > EIP170_RUNTIME_CODE_LIMIT_BYTES) {
+    failures.push(`runtime code exceeds the EIP-170 ${EIP170_RUNTIME_CODE_LIMIT_BYTES}-byte ceiling`);
   }
   for (const [field, expected] of Object.entries({
     boundPolicy: state.manifestPolicy,
@@ -126,12 +126,8 @@ export function assertCeremonyPostconditions(state) {
 }
 
 async function startAnvil({ forkUrl, forkBlockNumber, port }) {
-  // Polkadot Hub permits contract blobs up to ~100 KiB. Anvil defaults to
-  // Ethereum's EIP-170 24 KiB ceiling, so disable that local-only mismatch;
-  // assertCeremonyPostconditions enforces the Hub ceiling on the artifact.
   const argv = [
     "--silent",
-    "--disable-code-size-limit",
     "--port",
     String(port),
     "--fork-url",

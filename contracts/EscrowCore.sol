@@ -520,35 +520,15 @@ contract EscrowCore is ReentrancyGuard {
         _validateAndStoreExternalSchema(jobId, externalSchema);
         uint16 jobProtocolFeeBps = protocolFeeWaived ? 0 : posterFeeBps;
         uint256 protocolFee = protocolFeeWaived ? 0 : _calculatePosterFee(reward, posterFeeBps, posterFeeFloorRaw);
-        _jobs[jobId] = JobEscrow({
-            poster: msg.sender,
-            worker: address(0),
-            asset: asset,
-            verifierMode: verifierMode,
-            category: category,
-            specHash: specHash,
-            reward: reward,
-            opsReserve: opsReserve,
-            contingencyReserve: contingencyReserve,
-            released: 0,
-            claimExpiry: 0,
-            claimStake: 0,
-            claimStakeBps: 0,
-            claimFee: 0,
-            claimFeeBps: 0,
-            claimEconomicsWaived: false,
-            rejectingVerifier: address(0),
-            rejectedAt: 0,
-            disputedAt: 0,
-            payoutMode: PayoutMode.Single,
-            state: JobState.Open,
-            protocolFee: protocolFee,
-            protocolFeeReleased: 0,
-            protocolFeeBps: jobProtocolFeeBps,
-            protocolFeeWaived: protocolFeeWaived
-        });
-        claimTtls[jobId] = claimTtl;
-        createdAt[jobId] = block.timestamp;
+        JobEscrow storage job = _initializeOpenJob(
+            jobId, msg.sender, asset, verifierMode, category, specHash, reward, opsReserve, contingencyReserve
+        );
+        job.payoutMode = PayoutMode.Single;
+        job.state = JobState.Open;
+        job.protocolFee = protocolFee;
+        job.protocolFeeBps = jobProtocolFeeBps;
+        job.protocolFeeWaived = protocolFeeWaived;
+        _recordOpenJob(jobId, claimTtl);
 
         uint256 total = reward + protocolFee + opsReserve + contingencyReserve;
         accounts.reserveForJob(msg.sender, asset, total);
@@ -565,24 +545,24 @@ contract EscrowCore is ReentrancyGuard {
         if (_jobs[params.jobId].state != JobState.None) revert InvalidState();
         if (params.poster == address(0)) revert Unauthorized();
         _validateAndStoreExternalSchema(params.jobId, _externalSchemaFromRecurring(params));
-        JobEscrow storage job = _jobs[params.jobId];
-        job.poster = params.poster;
-        job.worker = address(0);
-        job.asset = params.asset;
-        job.verifierMode = params.verifierMode;
-        job.category = params.category;
-        job.specHash = params.specHash;
-        job.reward = params.reward;
-        job.opsReserve = params.opsReserve;
-        job.contingencyReserve = params.contingencyReserve;
+        JobEscrow storage job = _initializeOpenJob(
+            params.jobId,
+            params.poster,
+            params.asset,
+            params.verifierMode,
+            params.category,
+            params.specHash,
+            params.reward,
+            params.opsReserve,
+            params.contingencyReserve
+        );
         job.payoutMode = PayoutMode.Single;
         job.state = JobState.Open;
         job.protocolFeeWaived = params.protocolFeeWaived;
         job.protocolFeeBps = params.protocolFeeWaived ? 0 : posterFeeBps;
         job.protocolFee =
             params.protocolFeeWaived ? 0 : _calculatePosterFee(params.reward, posterFeeBps, posterFeeFloorRaw);
-        claimTtls[params.jobId] = params.claimTtl;
-        createdAt[params.jobId] = block.timestamp;
+        _recordOpenJob(params.jobId, params.claimTtl);
 
         uint256 total = params.reward + job.protocolFee + params.opsReserve + params.contingencyReserve;
         accounts.consumeRecurringTemplateReserve(params.poster, params.asset, params.templateId, total);
@@ -610,36 +590,15 @@ contract EscrowCore is ReentrancyGuard {
             milestoneAmounts[jobId].push(milestones[i]);
             reward += milestones[i];
         }
-        _jobs[jobId] = JobEscrow({
-            poster: msg.sender,
-            worker: address(0),
-            asset: asset,
-            verifierMode: verifierMode,
-            category: category,
-            specHash: specHash,
-            reward: reward,
-            opsReserve: opsReserve,
-            contingencyReserve: contingencyReserve,
-            released: 0,
-            claimExpiry: 0,
-            claimStake: 0,
-            claimStakeBps: 0,
-            claimFee: 0,
-            claimFeeBps: 0,
-            claimEconomicsWaived: false,
-            rejectingVerifier: address(0),
-            rejectedAt: 0,
-            disputedAt: 0,
-            payoutMode: PayoutMode.Milestone,
-            state: JobState.Open,
-            protocolFee: _calculatePosterFee(reward, posterFeeBps, posterFeeFloorRaw),
-            protocolFeeReleased: 0,
-            protocolFeeBps: posterFeeBps,
-            protocolFeeWaived: false
-        });
-        claimTtls[jobId] = claimTtl;
-        createdAt[jobId] = block.timestamp;
-        uint256 total = reward + _jobs[jobId].protocolFee + opsReserve + contingencyReserve;
+        JobEscrow storage job = _initializeOpenJob(
+            jobId, msg.sender, asset, verifierMode, category, specHash, reward, opsReserve, contingencyReserve
+        );
+        job.payoutMode = PayoutMode.Milestone;
+        job.state = JobState.Open;
+        job.protocolFee = _calculatePosterFee(reward, posterFeeBps, posterFeeFloorRaw);
+        job.protocolFeeBps = posterFeeBps;
+        _recordOpenJob(jobId, claimTtl);
+        uint256 total = reward + job.protocolFee + opsReserve + contingencyReserve;
         accounts.reserveForJob(msg.sender, asset, total);
         emit JobFunded(jobId, msg.sender, asset, total, PayoutMode.Milestone);
         emit JobCreated(jobId, msg.sender, specHash, asset, total, PayoutMode.Milestone);
@@ -659,38 +618,47 @@ contract EscrowCore is ReentrancyGuard {
         if (job.state == JobState.None) revert UnknownJob();
         if (job.state != JobState.Open) revert InvalidState();
 
-        (
-            uint256 claimStake,
-            uint16 claimStakeBps,
-            uint256 claimFee,
-            uint16 claimFeeBps,
-            bool waived,
-            uint256 claimNumber
-        ) = _computeClaimEconomics(worker, jobId, job);
+        {
+            (
+                uint256 claimStake,
+                uint16 claimStakeBps,
+                uint256 claimFee,
+                uint16 claimFeeBps,
+                bool waived,
+                uint256 claimNumber
+            ) = _computeClaimEconomics(worker, jobId, job);
 
-        uint256 totalLocked = claimStake + claimFee;
-        if (totalLocked > 0) {
-            accounts.lockJobStake(worker, job.asset, totalLocked);
+            uint256 totalLocked = claimStake + claimFee;
+            if (totalLocked > 0) {
+                accounts.lockJobStake(worker, job.asset, totalLocked);
+            }
+
+            job.worker = worker;
+            job.claimStake = claimStake;
+            job.claimStakeBps = claimStakeBps;
+            job.claimFee = claimFee;
+            job.claimFeeBps = claimFeeBps;
+            job.claimEconomicsWaived = waived;
+            workerClaimCount[worker] = claimNumber;
         }
-
-        job.worker = worker;
-        job.claimStake = claimStake;
-        job.claimStakeBps = claimStakeBps;
-        job.claimFee = claimFee;
-        job.claimFeeBps = claimFeeBps;
-        job.claimEconomicsWaived = waived;
         brokeredClaims[jobId] = brokered;
         retentionFlatRawAtClaim[jobId] = retentionFlatRaw;
         retentionCapBpsAtClaim[jobId] = retentionCapBps;
         job.rejectingVerifier = address(0);
         job.claimExpiry = block.timestamp + claimTtls[jobId];
         job.state = JobState.Claimed;
-        workerClaimCount[worker] = claimNumber;
-        emit JobClaimed(jobId, worker, job.claimExpiry, claimStake);
+        emit JobClaimed(jobId, worker, job.claimExpiry, job.claimStake);
         emit ClaimRetentionSnapshot(
-            jobId, worker, brokered, waived, retentionFlatRawAtClaim[jobId], retentionCapBpsAtClaim[jobId]
+            jobId,
+            worker,
+            brokered,
+            job.claimEconomicsWaived,
+            retentionFlatRawAtClaim[jobId],
+            retentionCapBpsAtClaim[jobId]
         );
-        emit ClaimEconomicsLocked(jobId, worker, claimStake, claimFee, waived, claimNumber);
+        emit ClaimEconomicsLocked(
+            jobId, worker, job.claimStake, job.claimFee, job.claimEconomicsWaived, workerClaimCount[worker]
+        );
     }
 
     function submitWork(bytes32 jobId, bytes32 evidenceHash) external whenNotPaused {
@@ -737,25 +705,14 @@ contract EscrowCore is ReentrancyGuard {
         require(block.timestamp > job.claimExpiry, "NOT_EXPIRED");
         address timedOutWorker = job.worker;
 
-        if (job.claimStake > 0) {
-            accounts.slashJobStake(timedOutWorker, job.asset, job.claimStake, job.poster);
-        }
-        if (job.claimFee > 0) {
-            accounts.slashClaimFee(timedOutWorker, job.asset, job.claimFee, address(0));
-        }
+        _slashClaimEconomics(job, address(0));
         _restoreTimedOutClaimSlot(timedOutWorker);
 
         job.worker = address(0);
         job.claimExpiry = 0;
-        job.claimStake = 0;
-        job.claimStakeBps = 0;
-        job.claimFee = 0;
-        job.claimFeeBps = 0;
-        job.claimEconomicsWaived = false;
         brokeredClaims[jobId] = false;
         retentionFlatRawAtClaim[jobId] = 0;
         retentionCapBpsAtClaim[jobId] = 0;
-        job.rejectingVerifier = address(0);
         job.state = JobState.Open;
         emit JobReopened(jobId);
     }
@@ -768,7 +725,8 @@ contract EscrowCore is ReentrancyGuard {
         require(block.timestamp >= createdAt[jobId] + MIN_OPEN_FOR_CANCEL, "OPEN_FLOOR_ACTIVE");
 
         job.state = JobState.Cancelled;
-        uint256 refundedRaw = _refundPosterBalances(job);
+        uint256 refundedRaw = job.reward + job.protocolFee + job.opsReserve + job.contingencyReserve;
+        _refundPosterBalances(job);
         emit JobCancelled(jobId, job.poster, refundedRaw);
     }
 
@@ -784,21 +742,17 @@ contract EscrowCore is ReentrancyGuard {
         emit Verified(jobId, msg.sender, approved, reasonCode, reasoningHash);
 
         if (!approved) {
-            job.state = JobState.Rejected;
-            job.rejectedAt = block.timestamp;
-            job.disputedAt = 0;
-            job.rejectingVerifier = msg.sender;
-            emit JobRejected(jobId, reasonCode);
+            _rejectJob(jobId, job, reasonCode);
             return;
         }
 
-        bytes32 settlementKey = keccak256(abi.encode(jobId, uint256(0), job.reward));
-        require(!settlementExecuted[jobId][settlementKey], "SETTLED");
-        settlementExecuted[jobId][settlementKey] = true;
+        bytes32 settlementKey = _hash3(jobId, 0, job.reward);
+        _markSettlementExecuted(jobId, settlementKey);
 
         job.released = job.reward;
         job.state = JobState.Closed;
 
+        // Gas retention is intentionally confined to approved single-payout settlement.
         uint256 retainedRaw = _gasRetentionForClaim(jobId, job);
         _settleSuccessfulClaimEconomics(job);
         _settlePayout(jobId, job, settlementKey, job.reward - retainedRaw, job.reward);
@@ -825,18 +779,13 @@ contract EscrowCore is ReentrancyGuard {
         emit Verified(jobId, msg.sender, approved, reasonCode, reasoningHash);
 
         if (!approved) {
-            job.state = JobState.Rejected;
-            job.rejectedAt = block.timestamp;
-            job.disputedAt = 0;
-            job.rejectingVerifier = msg.sender;
-            emit JobRejected(jobId, reasonCode);
+            _rejectJob(jobId, job, reasonCode);
             return;
         }
 
         uint256 amount = milestoneAmounts[jobId][milestoneIndex];
-        bytes32 settlementKey = keccak256(abi.encode(jobId, milestoneIndex, amount));
-        require(!settlementExecuted[jobId][settlementKey], "SETTLED");
-        settlementExecuted[jobId][settlementKey] = true;
+        bytes32 settlementKey = _hash3(jobId, milestoneIndex, amount);
+        _markSettlementExecuted(jobId, settlementKey);
         milestoneReleased[jobId][milestoneIndex] = true;
         job.released += amount;
 
@@ -889,6 +838,46 @@ contract EscrowCore is ReentrancyGuard {
         emit DisputeOpened(jobId, opener, job.disputedAt);
     }
 
+    function _rejectJob(bytes32 jobId, JobEscrow storage job, bytes32 reasonCode) internal {
+        job.state = JobState.Rejected;
+        job.rejectedAt = block.timestamp;
+        job.disputedAt = 0;
+        job.rejectingVerifier = msg.sender;
+        emit JobRejected(jobId, reasonCode);
+    }
+
+    function _recordOpenJob(bytes32 jobId, uint256 claimTtl) internal {
+        claimTtls[jobId] = claimTtl;
+        createdAt[jobId] = block.timestamp;
+    }
+
+    function _initializeOpenJob(
+        bytes32 jobId,
+        address poster,
+        address asset,
+        bytes32 verifierMode,
+        bytes32 category,
+        bytes32 specHash,
+        uint256 reward,
+        uint256 opsReserve,
+        uint256 contingencyReserve
+    ) internal returns (JobEscrow storage job) {
+        job = _jobs[jobId];
+        job.poster = poster;
+        job.asset = asset;
+        job.verifierMode = verifierMode;
+        job.category = category;
+        job.specHash = specHash;
+        job.reward = reward;
+        job.opsReserve = opsReserve;
+        job.contingencyReserve = contingencyReserve;
+    }
+
+    function _markSettlementExecuted(bytes32 jobId, bytes32 settlementKey) internal {
+        require(!settlementExecuted[jobId][settlementKey], "SETTLED");
+        settlementExecuted[jobId][settlementKey] = true;
+    }
+
     function finalizeRejectedJob(bytes32 jobId) external whenNotPaused nonReentrant {
         JobEscrow storage job = _jobs[jobId];
         if (job.state != JobState.Rejected) revert InvalidState();
@@ -937,7 +926,7 @@ contract EscrowCore is ReentrancyGuard {
         string memory metadataURI
     ) internal {
         if (workerPayout > 0) {
-            bytes32 settlementKey = keccak256(abi.encode(jobId, bytes32("DISPUTE"), job.released, workerPayout));
+            bytes32 settlementKey = _hash4(jobId, bytes32("DISPUTE"), job.released, workerPayout);
             _settlePayout(jobId, job, settlementKey, workerPayout, job.released + workerPayout);
             job.released += workerPayout;
             // A worker-favour dispute dismisses the rejection. Retain the
@@ -959,7 +948,7 @@ contract EscrowCore is ReentrancyGuard {
 
     function _resolveArbitratorTimeout(bytes32 jobId, JobEscrow storage job, uint256 workerPayout) internal {
         if (workerPayout > 0) {
-            bytes32 settlementKey = keccak256(abi.encode(jobId, REASON_ARBITRATOR_TIMEOUT, job.released, workerPayout));
+            bytes32 settlementKey = _hash4(jobId, REASON_ARBITRATOR_TIMEOUT, job.released, workerPayout);
             _settlePayout(jobId, job, settlementKey, workerPayout, job.released + workerPayout);
             job.released += workerPayout;
         }
@@ -1079,24 +1068,20 @@ contract EscrowCore is ReentrancyGuard {
         claimFee = percentageFee > minimumFee ? percentageFee : minimumFee;
     }
 
-    function _refundPosterBalances(JobEscrow storage job) internal returns (uint256 refundedRaw) {
+    function _refundPosterBalances(JobEscrow storage job) internal {
         uint256 rewardRefund = job.reward - job.released;
         if (rewardRefund > 0) {
             accounts.refundReserved(job.poster, job.asset, rewardRefund);
-            refundedRaw += rewardRefund;
         }
         uint256 protocolFeeRefund = job.protocolFee - job.protocolFeeReleased;
         if (protocolFeeRefund > 0) {
             accounts.refundReserved(job.poster, job.asset, protocolFeeRefund);
-            refundedRaw += protocolFeeRefund;
         }
         if (job.opsReserve > 0) {
             accounts.refundReserved(job.poster, job.asset, job.opsReserve);
-            refundedRaw += job.opsReserve;
         }
         if (job.contingencyReserve > 0) {
             accounts.refundReserved(job.poster, job.asset, job.contingencyReserve);
-            refundedRaw += job.contingencyReserve;
         }
     }
 
@@ -1125,7 +1110,7 @@ contract EscrowCore is ReentrancyGuard {
         }
         address feeRecipient = treasuryAccount;
         if (feeAmount > 0) {
-            bytes32 feeSettlementKey = keccak256(abi.encode(workerSettlementKey, bytes32("PROTOCOL_FEE")));
+            bytes32 feeSettlementKey = _hash2(workerSettlementKey, bytes32("PROTOCOL_FEE"));
             accounts.settleReservedTo(feeSettlementKey, job.poster, job.asset, feeRecipient, feeAmount);
             job.protocolFeeReleased += feeAmount;
         }
@@ -1168,7 +1153,7 @@ contract EscrowCore is ReentrancyGuard {
         internal
     {
         if (retainedRaw == 0) return;
-        bytes32 retentionSettlementKey = keccak256(abi.encode(workerSettlementKey, bytes32("GAS_RETENTION")));
+        bytes32 retentionSettlementKey = _hash2(workerSettlementKey, bytes32("GAS_RETENTION"));
         accounts.settleReservedTo(retentionSettlementKey, job.poster, job.asset, treasuryAccount, retainedRaw);
         emit GasRetentionApplied(jobId, job.worker, retainedRaw, job.reward);
     }
@@ -1181,6 +1166,40 @@ contract EscrowCore is ReentrancyGuard {
             }
         }
         _clearClaimEconomics(job);
+    }
+
+    function _hash2(bytes32 first, bytes32 second) internal pure returns (bytes32 digest) {
+        assembly ("memory-safe") {
+            let ptr := mload(0x40)
+            mstore(ptr, first)
+            mstore(add(ptr, 32), second)
+            digest := keccak256(ptr, 64)
+        }
+    }
+
+    function _hash3(bytes32 first, uint256 second, uint256 third) internal pure returns (bytes32 digest) {
+        assembly ("memory-safe") {
+            let ptr := mload(0x40)
+            mstore(ptr, first)
+            mstore(add(ptr, 32), second)
+            mstore(add(ptr, 64), third)
+            digest := keccak256(ptr, 96)
+        }
+    }
+
+    function _hash4(bytes32 first, bytes32 second, uint256 third, uint256 fourth)
+        internal
+        pure
+        returns (bytes32 digest)
+    {
+        assembly ("memory-safe") {
+            let ptr := mload(0x40)
+            mstore(ptr, first)
+            mstore(add(ptr, 32), second)
+            mstore(add(ptr, 64), third)
+            mstore(add(ptr, 96), fourth)
+            digest := keccak256(ptr, 128)
+        }
     }
 
     function _rescopeClaimStakeToRemainingReward(JobEscrow storage job) internal {
@@ -1214,39 +1233,34 @@ contract EscrowCore is ReentrancyGuard {
     }
 
     function _slashRejectedWorker(JobEscrow storage job) internal {
-        if (job.worker == address(0)) {
-            return;
-        }
-
-        _slashClaimEconomics(job, job.rejectingVerifier);
-        reputation.slashReputation(
-            job.worker, policy.rejectionSkillPenalty(), policy.rejectionReliabilityPenalty(), 0, REASON_REJECTED
-        );
+        _slashWorker(job, false);
     }
 
     function _slashDisputedWorker(JobEscrow storage job) internal {
+        _slashWorker(job, true);
+    }
+
+    function _slashWorker(JobEscrow storage job, bool disputeLost) internal {
         if (job.worker == address(0)) {
             return;
         }
 
         _slashClaimEconomics(job, job.rejectingVerifier);
+        uint256 skillPenalty = disputeLost ? policy.disputeLossSkillPenalty() : policy.rejectionSkillPenalty();
+        uint256 reliabilityPenalty =
+            disputeLost ? policy.disputeLossReliabilityPenalty() : policy.rejectionReliabilityPenalty();
         reputation.slashReputation(
-            job.worker, policy.disputeLossSkillPenalty(), policy.disputeLossReliabilityPenalty(), 0, REASON_DISPUTE_LOST
+            job.worker, skillPenalty, reliabilityPenalty, 0, disputeLost ? REASON_DISPUTE_LOST : REASON_REJECTED
         );
     }
 
     function _slashClaimEconomics(JobEscrow storage job, address claimFeeRecipient) internal {
         if (job.claimStake > 0) {
             accounts.slashJobStake(job.worker, job.asset, job.claimStake, job.poster);
-            job.claimStake = 0;
-            job.claimStakeBps = 0;
         }
         if (job.claimFee > 0) {
             accounts.slashClaimFee(job.worker, job.asset, job.claimFee, claimFeeRecipient);
-            job.claimFee = 0;
-            job.claimFeeBps = 0;
         }
-        job.claimEconomicsWaived = false;
-        job.rejectingVerifier = address(0);
+        _clearClaimEconomics(job);
     }
 }

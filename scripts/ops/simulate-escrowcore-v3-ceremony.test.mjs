@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  EIP170_RUNTIME_CODE_LIMIT_BYTES,
   MAINNET_ADMIN_DEPLOYER,
   RATIFIED_V3_SCHEDULE,
   assertCeremonyPostconditions,
@@ -42,7 +43,7 @@ function validState() {
   return {
     predictedAddress: ADDRESS.predicted,
     deployedAddress: ADDRESS.predicted,
-    runtimeCodeBytes: 26_580,
+    runtimeCodeBytes: 24_000,
     manifestPolicy: ADDRESS.policy,
     manifestAccounts: ADDRESS.accounts,
     manifestReputation: ADDRESS.reputation,
@@ -73,6 +74,9 @@ function validState() {
 
 test("postcondition gate accepts only the predicted address, exact wiring, drain roles, and decoded D4 schedule", () => {
   assert.equal(assertCeremonyPostconditions(validState()).deployedAddress, ADDRESS.predicted);
+  const atRuntimeLimit = validState();
+  atRuntimeLimit.runtimeCodeBytes = EIP170_RUNTIME_CODE_LIMIT_BYTES;
+  assert.equal(assertCeremonyPostconditions(atRuntimeLimit).runtimeCodeBytes, EIP170_RUNTIME_CODE_LIMIT_BYTES);
 
   for (const mutation of [
     (state) => { state.deployedAddress = "0x6666666666666666666666666666666666666666"; },
@@ -80,7 +84,7 @@ test("postcondition gate accepts only the predicted address, exact wiring, drain
     (state) => { state.oldSettlementBroker = false; },
     (state) => { state.kmsVerifier = false; },
     (state) => { state.adminSettlementBroker = true; },
-    (state) => { state.runtimeCodeBytes = 100 * 1_024 + 1; },
+    (state) => { state.runtimeCodeBytes = EIP170_RUNTIME_CODE_LIMIT_BYTES + 1; },
     (state) => { state.schedule.retentionFlatRaw = 49_999n; },
     (state) => { state.feeScheduleEvent.newPosterFeeFloorRaw = 49_999n; }
   ]) {
