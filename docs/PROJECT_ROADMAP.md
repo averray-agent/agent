@@ -509,36 +509,39 @@ that describes a world we have left is worse than an empty one.
 3. **Engage the external audit.** Still the right thing, no longer a pre-mainnet gate.
    `npm run prepare:mainnet-audit-freeze`, push the frozen tag, hand auditors
    [`AUDIT_PACKAGE.md`](./AUDIT_PACKAGE.md).
-4. **Bank deposit pool — BLOCKED on a contract change (#1066).** Packets 1 and 2 merged
-   (#1038, #1043), but the pool **must not be deployed**. An independent review (#1051)
-   found that `DepositPool` derives its share price from `lane.totalAssets()`, which any
-   TreasuryPolicy `strategySettler` can set arbitrarily via `recordRemotePosition` — so a
-   settler can deposit small, inflate the book and drain the buffer. The capability is in
-   `strategySettler`, a *global* mapping, so no choice of pool operator and nothing in the
-   deployment ceremony fixes it. `deploy-deposit-pool.mjs --commit` refuses.
-   The unblock is #1066: split pricing NAV from remote execution inventory and price on a
-   cost basis. It is the only contract change in the current set and therefore the longest
-   lead time. Ceremony, addresses and fork simulation are ready and wait on it
-   (`CEREMONY_DEPOSIT_POOL_DEPLOY.md`, §0 carries the DO-NOT-DEPLOY banner).
-   Downstream: tier 3 of the worker ladder (#1055) and, with it, the only Sybil-resistance
-   mechanism that does not compromise earn-from-zero (`WORKER_PROGRESSION_DESIGN.md`).
-4b. **Agent economics — the worker ladder.** Designs are complete and carry no open
-   questions (`WORKER_PROGRESSION_DESIGN.md`, #1055, #1054). Four steps, and **only the
-   last is blocked**:
-
-   | # | step | state | why |
-   |---|---|---|---|
-   | 1 | Cap the aggregate tier-0 subsidy (`S`/day, global) | **startable now** | closes a LIVE leak — the bond waiver caps at 3 claims but gas is uncapped; one wallet burned ~$1.95 of DOT on 2026-08-11 |
-   | 2 | Retain the claim fee post-tier | startable now | "pay your own way" out of earnings, so no agent ever needs DOT — primitives exist (`EscrowCore.claimFee`, `slashClaimFee`) |
-   | 3 | Per-wallet exposure cap `E` | startable now | bounds monopolisation in USDC-at-risk, not job count; self-loosens as wallets self-fund |
-   | 4 | Tier 3 — allowance ∝ pool shares | **blocked on #1066** | needs the pool; it is the only unforgeable Sybil signal we have |
-
-   Sequence: start **#1066** (contract change, longest lead time) and **step 1** (live leak,
-   small) in parallel — they touch different code. Steps 2–3 follow step 1. Step 4 needs
-   both lines to land.
-
-   The two lanes are one plan: the ladder is why an agent would deposit, and the pool is
-   what makes the ladder's top rung Sybil-resistant. Neither is worth much alone.
+4. **Bank lane — pool LIVE, ladder COMPLETE, fee schedule RATIFIED (refreshed 2026-08-13).**
+   The 2026-08-10 text below this point described a blocked world that no longer exists;
+   full paper trail on branch `claude/packets-2026-08-12`.
+   - **DepositPool deployed 2026-08-12** (`0xCCF5FDF3…F476`, cost-basis pricing — the #1066
+     fix — caps 1,000/100) with the wired lane, door (#1099/#1101), observability (#1098),
+     and the first deposit (10 USDC, dogfood wallet). Operating rule until the Swiss memo:
+     **capped, quiet, disclosed** — the disclosure line ships on every `/pool` response and
+     the hosted smoke fails without it (#1102).
+   - **Worker ladder: all four valves live.** S global tier-0 subsidy (#1074), E per-wallet
+     open exposure (#1079), D rolling daily exposure (#1086), and tier-3 — first wired 1:1
+     (#1095), then **superseded by the D0 vested-capacity model (#1103, live 2026-08-13)**
+     after external economic review: catalogue access is deposit-blind (lifetime credit
+     until 10-settled-job graduation, then a deposit-blind daily base, all under a global
+     rolling catalogue budget); vested deposits (48h linear, LIFO burn on withdrawal) buy
+     open-exposure raises and external-job reward ceilings instead
+     (`PACKET_D0_VESTING.md`).
+   - **Fee schedule ratified 2026-08-13** on measured gas (`GAS_STUDY_2026-08-13.md`,
+     `PACKET_D4_FEE_SCHEDULE.md`): worker-side gas retention `min(0.05, 20%)` iff brokered,
+     external poster fee `max(5%, 0.05)`, schedule admin-settable behind contract ceilings.
+     **EscrowCore v3 is in build** (`PACKET_ESCROWCORE_V3_SPEC.md`, dispatched 2026-08-13);
+     the ceremony also ships the banked `cancelOpenJob` (2026-08-01 decisions) and starts
+     the v1/v2 decommission.
+   - **Credit layer ratified 2026-08-13** (`CREDIT_LAYER_DESIGN.md`, CL-1..CL-5): in-payroll
+     lending — receipt-graph underwriting, settlement-deduction repayment. First build:
+     CreditPool + L1 secured lines against vested deposits, which **requires a DepositPool
+     v2 pledge surface** — scheduled as the next pool window after the v3 ceremony, while
+     migration still costs nothing (single depositor, ours)
+     (`PACKET_CREDITPOOL_L1_SPEC.md`). L2 waits for the v4 payout-router window; the
+     pool→credit venue rail stays memo-gated.
+   - Still open in this lane: epoch-2 yield ceremony on the pool lane (legs A–C ready via
+     `pool-venue-ceremony.mjs`; if the DepositPool v2 window is near, fold epoch-2 into
+     post-migration rather than deploying venue capital that the migration must first
+     recall), 30-day review gates due 2026-09-11 (`ECONOMIC_STRATEGY.md` §7).
 
 5. **Stage 2C-3 HMAC retirement window.** ≥30 days after the 2026-05-21 KMS-only JWT
    cutover: delete `op://prod-backend/auth-jwt-secrets`, drop the HMAC branch from
