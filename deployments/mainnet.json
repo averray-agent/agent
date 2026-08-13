@@ -25,7 +25,7 @@
     "hydrationUsdcAdapter": "0x96091d4477Fe37E79557276d63883bBbbdE73159",
     "depositPoolLane": "0xAbDca8AAca9308C7DA26c5B7E5E2380CDDD37f34",
     "hydrationDepositPoolAdapter": "0x50d279818948fbfe10B03b74e6b8aB44428b51ab",
-    "depositPool": "0xCCF5FDF3108AF8e693F28bb9326A573d9dA0F476",
+    "depositPool": "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30",
     "depositPoolLaneV2": "0x88eE70277E486136676c0b50Ed9b7D7A1a31371f",
     "hydrationDepositPoolAdapterV2": "0xE2801E6C640e0180798912649fD567E1Ea459a35",
     "depositPoolV2": "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30",
@@ -221,12 +221,13 @@
     "hydrationUsdcAdapterV2_2_1": 19101470,
     "depositPoolLane": 19380501,
     "hydrationDepositPoolAdapter": 19380504,
-    "depositPool": 19380506,
+    "depositPool": 19421397,
     "escrowCoreV3": 19414957,
     "depositPoolLaneV2": 19421392,
     "hydrationDepositPoolAdapterV2": 19421395,
     "depositPoolV2": 19421397,
-    "creditPool": 19421558
+    "creditPool": 19421558,
+    "depositPoolV1": 19380506
   },
   "runtime": {
     "auth": {

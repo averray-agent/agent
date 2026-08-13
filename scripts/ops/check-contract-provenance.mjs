@@ -76,7 +76,10 @@ export const CONTRACT_ARTIFACTS = Object.freeze({
     "HydrationDepositPoolAdapter.sol",
     "HydrationDepositPoolAdapter",
   ],
-  depositPool: ["DepositPool.sol", "DepositPool"],
+  // Post-L1-cutover, contracts.depositPool aliases the v2 address (the deposit
+  // door binds this key), so it must name the V2 source. The drained v1 pool
+  // at 0xCCF5FDF3… keeps an orphaned provenance entry as historical record.
+  depositPool: ["DepositPoolV2.sol", "DepositPoolV2"],
   // L1 activation, deployed 2026-08-13 (ceremony CEREMONY_POOLV2_CREDITPOOL):
   // a THIRD HydrationUsdcAdapterV22 deployment as the v2 pool's lane (this one
   // compiled at HEAD, so it carries #1043's recordRemotePosition — no waiver),
