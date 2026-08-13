@@ -2,6 +2,7 @@ import { createConfig } from "ponder";
 
 import {
   AgentAccountCoreAbi,
+  CreditPoolAbi,
   DiscoveryRegistryAbi,
   EscrowCoreAbi,
   ReputationSbtAbi,
@@ -51,6 +52,10 @@ const xcmWrapperAddress = optionalAddress(
   process.env.PONDER_XCM_WRAPPER_ADDRESS ?? process.env.XCM_WRAPPER_ADDRESS,
   "XCM_WRAPPER_ADDRESS"
 );
+const creditPoolAddress = optionalAddress(
+  process.env.PONDER_CREDIT_POOL_ADDRESS ?? process.env.CREDIT_POOL_ADDRESS,
+  "CREDIT_POOL_ADDRESS"
+);
 
 const treasuryStartBlock = parseStartBlock(
   process.env.PONDER_START_BLOCK_TREASURY,
@@ -70,6 +75,10 @@ const registryStartBlock = parseStartBlock(
 );
 const xcmStartBlock = parseStartBlock(
   process.env.PONDER_START_BLOCK_XCM,
+  lowMemoryMode ? "latest" : 0
+);
+const creditPoolStartBlock = parseStartBlock(
+  process.env.PONDER_START_BLOCK_CREDIT_POOL,
   lowMemoryMode ? "latest" : 0
 );
 
@@ -117,6 +126,16 @@ const contracts = {
           abi: XcmWrapperAbi,
           address: xcmWrapperAddress,
           startBlock: xcmStartBlock
+        }
+      }
+    : {}),
+  ...(creditPoolAddress
+    ? {
+        CreditPool: {
+          chain: chainName,
+          abi: CreditPoolAbi,
+          address: creditPoolAddress,
+          startBlock: creditPoolStartBlock
         }
       }
     : {})

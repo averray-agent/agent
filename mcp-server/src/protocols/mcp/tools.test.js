@@ -3,7 +3,9 @@ import test from "node:test";
 
 import { createJobRoutes } from "../http/job-routes.js";
 import { createDepositPoolRoutes } from "../http/deposit-pool-routes.js";
+import { createCreditPoolRoutes } from "../http/credit-pool-routes.js";
 import { DEPOSIT_POOL_RISK_DISCLOSURE } from "../../core/deposit-pool-disclosure.js";
+import { CREDIT_POOL_RISK_DISCLOSURE } from "../../core/credit-pool-disclosure.js";
 import { readJsonBody, respond } from "../http/http-helpers.js";
 import {
   createMcpToolExecutor,
@@ -69,6 +71,18 @@ function makeEarningsDoorRoute() {
     }
     return false;
   };
+}
+
+function makeCreditPoolRoute() {
+  return createCreditPoolRoutes({
+    authMiddleware: async () => ({ wallet: "0xworker" }),
+    creditPoolDoor: {
+      getInfo: async (wallet) => ({ available: true, wallet, disclosure: { statement: CREDIT_POOL_RISK_DISCLOSURE } }),
+      buildTransactions: async (wallet, input) => ({ available: true, wallet, input, unsigned: true })
+    },
+    readJsonBody,
+    respond
+  });
 }
 
 test("getPlatformCapabilities defaults to a bounded welcome and preserves the full response byte-for-byte", async () => {
@@ -157,6 +171,7 @@ test("every tool advertised by the MCP welcome resolves through this surface", a
   };
   const execute = createMcpToolExecutor({
     handleAuthRoute,
+    handleCreditPoolRoute: makeCreditPoolRoute(),
     handleDepositPoolRoute: makeDepositPoolRoute(),
     handleEarningsDoorRoute: makeEarningsDoorRoute(),
     handleJobRoute: makeJobRoute(service, "mcp"),
@@ -178,6 +193,8 @@ test("every tool advertised by the MCP welcome resolves through this surface", a
     getAccountPosition: { asset: "USDC" },
     buildWithdrawTransactions: { asset: "USDC", amount: "1" },
     buildDepositPoolTransactions: { direction: "withdraw", shares: "1" },
+    getCreditInfo: {},
+    buildCreditTransactions: { direction: "withdraw", shares: "1" },
     fetchAuthNonce: { wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
     verifySiwe: { message: "message", signature: `0x${"1".repeat(130)}` },
     refreshAuthToken: {},
@@ -205,7 +222,9 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
     "getDepositPoolInfo",
     "getAccountPosition",
     "buildWithdrawTransactions",
-    "buildDepositPoolTransactions"
+    "buildDepositPoolTransactions",
+    "getCreditInfo",
+    "buildCreditTransactions"
   ];
 
   for (const name of idempotentReads) {
@@ -261,6 +280,24 @@ test("deposit pool MCP tools are payload-identical to the shared HTTP routes", a
   });
   const mcpBuild = await execute("buildDepositPoolTransactions", input, { request });
   assert.deepEqual(mcpBuild, httpBuild.body);
+});
+
+test("credit pool MCP tools are payload-identical to the shared SIWE HTTP routes", async () => {
+  const handleCreditPoolRoute = makeCreditPoolRoute();
+  const execute = createMcpToolExecutor({
+    handleAuthRoute: async () => false,
+    handleCreditPoolRoute,
+    handleJobRoute: async () => false,
+    handlePublicMetadataRoute: async () => false
+  });
+  const request = { headers: { authorization: "Bearer token" }, socket: { remoteAddress: "127.0.0.1" } };
+  const httpInfo = await invokeHttpRoute(handleCreditPoolRoute, { headers: request.headers, method: "GET", path: "/credit", sourceRequest: request });
+  const mcpInfo = await execute("getCreditInfo", {}, { request });
+  assert.deepEqual(mcpInfo, httpInfo.body);
+  assert.deepEqual(mcpInfo.disclosure, { statement: CREDIT_POOL_RISK_DISCLOSURE });
+  const input = { direction: "borrow", pledgeShares: "10", amount: "8" };
+  const httpBuild = await invokeHttpRoute(handleCreditPoolRoute, { body: input, headers: request.headers, method: "POST", path: "/credit/transactions", sourceRequest: request });
+  assert.deepEqual(await execute("buildCreditTransactions", input, { request }), httpBuild.body);
 });
 
 test("listJobs returns the same value through MCP and its HTTP route", async () => {

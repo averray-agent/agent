@@ -298,6 +298,25 @@ export function loadBlockchainConfig(env = process.env) {
       deploymentManifest?.deploymentBlocks?.depositPool,
       "deployments/<profile>.json#deploymentBlocks.depositPool"
     ),
+    depositPoolV2Address: normalizeOptionalAddress(
+      deploymentManifest?.contracts?.depositPoolV2,
+      "deployments/<profile>.json#contracts.depositPoolV2"
+    ),
+    depositPoolV2DeploymentBlock: normalizeOptionalU32(
+      deploymentManifest?.deploymentBlocks?.depositPoolV2,
+      "deployments/<profile>.json#deploymentBlocks.depositPoolV2"
+    ),
+    creditPoolAddress: normalizeOptionalAddress(
+      deploymentManifest?.contracts?.creditPool,
+      "deployments/<profile>.json#contracts.creditPool"
+    ),
+    creditPoolDeploymentBlock: normalizeOptionalU32(
+      deploymentManifest?.deploymentBlocks?.creditPool,
+      "deployments/<profile>.json#deploymentBlocks.creditPool"
+    ),
+    depositPoolVestingMigration: normalizeDepositPoolVestingMigration(
+      deploymentManifest?.depositPoolVestingMigration
+    ),
     supportedAssets,
     gasFeeBufferBps: resolveGasFeeBufferBps(env)
   };
@@ -349,4 +368,40 @@ function normalizeOptionalAddress(raw, label) {
     return "";
   }
   return normalizeAddress(raw, label);
+}
+
+function normalizeDepositPoolVestingMigration(raw) {
+  if (raw === undefined || raw === null) return undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new ConfigError("depositPoolVestingMigration must be an object.");
+  }
+  const oldWithdrawTx = String(raw?.ignoredTransferEvents?.oldWithdrawTx ?? "").toLowerCase();
+  const newDepositTx = String(raw?.ignoredTransferEvents?.newDepositTx ?? "").toLowerCase();
+  for (const [label, value] of [["oldWithdrawTx", oldWithdrawTx], ["newDepositTx", newDepositTx]]) {
+    if (!/^0x[0-9a-f]{64}$/u.test(value)) {
+      throw new ConfigError(`depositPoolVestingMigration.${label} must be a transaction hash.`);
+    }
+  }
+  if (!Array.isArray(raw.preservedTranches)) {
+    throw new ConfigError("depositPoolVestingMigration.preservedTranches must be an array.");
+  }
+  return {
+    schemaVersion: 1,
+    fromPool: normalizeAddress(raw.fromPool, "depositPoolVestingMigration.fromPool"),
+    toPool: normalizeAddress(raw.toPool, "depositPoolVestingMigration.toPool"),
+    wallet: normalizeAddress(raw.wallet, "depositPoolVestingMigration.wallet"),
+    ignoredTransferEvents: { oldWithdrawTx, newDepositTx },
+    preservedTranches: raw.preservedTranches.map((entry, index) => {
+      const depositedRaw = String(entry?.depositedRaw ?? "");
+      const remainingRaw = String(entry?.remainingRaw ?? "");
+      if (!/^\d+$/u.test(depositedRaw) || !/^\d+$/u.test(remainingRaw)) {
+        throw new ConfigError(`depositPoolVestingMigration.preservedTranches[${index}] has invalid raw amounts.`);
+      }
+      const depositedAt = new Date(entry.depositedAt);
+      if (!Number.isFinite(depositedAt.getTime())) {
+        throw new ConfigError(`depositPoolVestingMigration.preservedTranches[${index}].depositedAt is invalid.`);
+      }
+      return { ...entry, depositedRaw, remainingRaw, depositedAt: depositedAt.toISOString() };
+    })
+  };
 }

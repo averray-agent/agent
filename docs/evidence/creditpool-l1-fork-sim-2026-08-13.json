@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.creditPoolL1MigrationForkEvidence",
+  "capturedAt": "2026-08-13T10:27:01.000Z",
+  "execution": "isolated_anvil_fork_only",
+  "fork": {
+    "chainId": 31337,
+    "sourceForkBlockNumber": 19411335,
+    "sourceSnapshotBlockNumber": 19411335,
+    "sourceRpc": "https://services.polkadothub-rpc.com/mainnet/"
+  },
+  "sourcePosition": {
+    "pool": "0xCCF5FDF3108AF8e693F28bb9326A573d9dA0F476",
+    "wallet": "0xdc1Ed1061e4a6E35aafb8f4E59B8893113d2EDeC",
+    "sharesRaw": "10000000",
+    "assetsRaw": "10000000",
+    "principalRaw": "10000000",
+    "bufferRaw": "10000000",
+    "activeVenueDeploymentId": "0",
+    "activeVenueRecallId": "0",
+    "tranches": [
+      {
+        "depositedRaw": "10000000",
+        "remainingRaw": "10000000",
+        "depositedAt": "2026-08-12T20:32:00.000Z",
+        "blockNumber": 19387820,
+        "logIndex": 8,
+        "txHash": "0x9bbebd48e2eef818da4912b2bedd4a2535d8afbb7a258aa43bc8c43592d73e7b"
+      }
+    ]
+  },
+  "predictedAndDeployed": {
+    "lane": "0xAcC2CAc2E814F243dbFEAE1B99BcfE1A1A7846Ed",
+    "venueAdapter": "0xf0f3b4a65AD54f1838A581b594CA77A54002c5f1",
+    "depositPoolV2": "0xAa9661e983FF3a41c8FE992331E8f1e375d3eE94",
+    "creditPool": "0xaCD53416Da5918DEE20350691A27cc9F8C7a951d"
+  },
+  "migration": {
+    "oldWithdrawTx": "0xf8bb934333070716fdcde272012cecb6de97f0980b6291676cb4eb4dbd6a8267",
+    "newDepositTx": "0x5879d6e81be49ecc007eadf7d6ce49df81ad37e8f2e33cd931813469b77724bc",
+    "positionAfter": {
+      "sharesRaw": "10000000",
+      "assetsRaw": "10000000",
+      "principalRaw": "10000000"
+    },
+    "byteExact": true,
+    "vestingAgesPreserved": true
+  },
+  "postconditions": {
+    "oldPoolSharesRaw": "0",
+    "oldPoolAssetsRaw": "0",
+    "wrapperStrategyAdapter": "0xAcC2CAc2E814F243dbFEAE1B99BcfE1A1A7846Ed",
+    "wrapperDispatchPaused": false,
+    "noMainnetTransactionSignedOrBroadcast": true
+  },
+  "warning": "Predicted addresses and transaction hashes belong only to this isolated rehearsal and must be regenerated for the later ceremony."
+}

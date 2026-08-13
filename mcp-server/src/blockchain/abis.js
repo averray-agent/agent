@@ -65,6 +65,57 @@ export const DEPOSIT_POOL_ABI = [
   "event VenueLossWrittenOff(uint256 indexed deploymentId, uint256 assets, uint256 remainingPrincipalCostBasis)"
 ];
 
+export const DEPOSIT_POOL_V2_ABI = [
+  ...DEPOSIT_POOL_ABI,
+  "function creditPool() view returns (address)",
+  "function pledgedShares(address account) view returns (uint256)",
+  "function pledges(bytes32 loanId) view returns (address owner, uint256 shares, bool active)",
+  "function pledge(uint256 shares, bytes32 loanId)",
+  "event SharesPledged(address indexed owner, uint256 shares, bytes32 indexed loanId)",
+  "event SharesReleased(address indexed owner, uint256 shares, bytes32 indexed loanId)",
+  "event SharesSeized(address indexed owner, address indexed receiver, uint256 shares, uint256 assets, bytes32 loanId)"
+];
+
+export const CREDIT_POOL_ABI = [
+  "function asset() view returns (address)",
+  "function depositPool() view returns (address)",
+  "function operator() view returns (address)",
+  "function totalAssets() view returns (uint256)",
+  "function totalSupply() view returns (uint256)",
+  "function bufferAssets() view returns (uint256)",
+  "function principalOutstanding() view returns (uint256)",
+  "function totalPledgedShares() view returns (uint256)",
+  "function defaults() view returns (uint256)",
+  "function ltvBps() view returns (uint256)",
+  "function interestBps() view returns (uint256)",
+  "function TOTAL_ASSET_CAP() view returns (uint256)",
+  "function PER_LENDER_CAP() view returns (uint256)",
+  "function MAX_LTV_BPS() view returns (uint256)",
+  "function MAX_INTEREST_BPS() view returns (uint256)",
+  "function PLATFORM_FEE_BPS() view returns (uint256)",
+  "function RISK_DISCLOSURE() view returns (string)",
+  "function balanceOf(address account) view returns (uint256)",
+  "function assetsOf(address account) view returns (uint256)",
+  "function availableShares(address account) view returns (uint256)",
+  "function outstandingDebt(address account) view returns (uint256)",
+  "function nextLoanNonce(address account) view returns (uint256)",
+  "function vestingAttestationNonces(address account) view returns (uint256)",
+  "function previewLoanId(address borrower) view returns (bytes32)",
+  "function vestingAttestationDigest(address borrower, bytes32 loanId, uint256 pledgeShares, uint256 amount, uint256 vestedRaw, uint64 validUntil, uint256 nonce) view returns (bytes32)",
+  "function loans(bytes32 loanId) view returns (address borrower, uint256 principal, uint256 outstandingPrincipal, uint256 outstandingInterest, uint256 pledgeShares, uint256 vestedRawAtOrigination, uint16 interestBpsAtOrigination, uint8 status)",
+  "function originate(uint256 pledgeShares, uint256 amount, uint256 vestedRaw, uint64 validUntil, bytes vestingSignature) returns (bytes32 loanId)",
+  "function cancelUnusedPledge(bytes32 loanId)",
+  "function repay(bytes32 loanId, uint256 amount)",
+  "function deposit(uint256 assets, address receiver) returns (uint256 shares)",
+  "function redeem(uint256 shares, address receiver, address owner) returns (uint256 assets)",
+  "event LoanOriginated(bytes32 indexed loanId, address indexed borrower, uint256 amount, uint256 pledgedShares)",
+  "event LoanRepaid(bytes32 indexed loanId, uint256 amount, uint256 outstanding)",
+  "event LoanClosed(bytes32 indexed loanId)",
+  "event PledgeSeized(bytes32 indexed loanId, uint256 value)",
+  "event LtvBpsChanged(uint256 previousBps, uint256 newBps)",
+  "event InterestBpsChanged(uint256 previousBps, uint256 newBps)"
+];
+
 export const ESCROW_CORE_ABI = [
   "function accounts() view returns (address)",
   "function treasuryAccount() view returns (address)",

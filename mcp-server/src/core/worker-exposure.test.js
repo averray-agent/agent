@@ -55,6 +55,24 @@ test("worker exposure counts reserved reward plus brokered gas for waived claims
   });
 });
 
+test("explain-eligibility carries the live pledged-vs-remaining-loanable credit view", async () => {
+  const credit = {
+    available: true,
+    outstandingDebtRaw: "3000000",
+    pledgedSharesRaw: "10000000",
+    pledgedAssetsRaw: "10000000",
+    vestedRaw: "10000000",
+    grossWalletLimitRaw: "8000000",
+    loanableRaw: "5000000",
+    ltvBps: 8000
+  };
+  const result = await policy({
+    blockchainGateway: { readCreditPosition: async () => credit }
+  }).evaluate({ wallet: WALLET, job: job(), claimEconomics: economics() });
+
+  assert.deepEqual(result.credit, credit);
+});
+
 test("worker exposure and external ceiling config carry the reviewed defaults", () => {
   assert.deepEqual(loadWorkerExposureConfig({}), {
     capUsdc: 2.5,

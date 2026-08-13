@@ -5,6 +5,8 @@ import {
   decodeBytes32String,
   encodeBytes32String,
   formatUnits,
+  getAddress,
+  getBytes,
   id,
   keccak256,
   parseUnits,
@@ -12,7 +14,9 @@ import {
 } from "ethers";
 import {
   AGENT_ACCOUNT_ABI,
+  CREDIT_POOL_ABI,
   DEPOSIT_POOL_ABI,
+  DEPOSIT_POOL_V2_ABI,
   ERC20_MOCK_ABI,
   ESCROW_CORE_ABI,
   ESCROW_CORE_LEGACY_ABI,
@@ -70,6 +74,10 @@ const ESCROW_JOB_STATE_CLOSED = 6;
 const RECOVERY_LOG_CHUNK_SIZE = 50_000;
 const RECOVERY_FROM_BLOCK_SAFETY_MARGIN = 1_000;
 const DEPOSIT_POOL_EVENT_LOG_CHUNK_SIZE = 2_000;
+const CREDIT_POOL_EVENT_LOG_CHUNK_SIZE = 2_000;
+const VESTING_ATTESTATION_TYPEHASH = id(
+  "VestingAttestation(address borrower,bytes32 loanId,uint256 pledgeShares,uint256 amount,uint256 vestedRaw,uint64 validUntil,uint256 nonce,uint256 chainId,address creditPool)"
+);
 const JOB_CLOSED_TOPIC0 = id("JobClosed(bytes32,address,uint256)").toLowerCase();
 const JOB_REJECTED_TOPIC0 = id("JobRejected(bytes32,bytes32)").toLowerCase();
 const RESERVATION_SETTLED_TOPIC0 =
@@ -145,6 +153,7 @@ export class BlockchainGateway {
     this.logger = logger;
     this.now = now;
     this.depositPoolVestingEventCache = undefined;
+    this.creditPoolVestingEventCache = undefined;
     if (!config.enabled) {
       this.provider = undefined;
       this.writeBroadcaster = undefined;
@@ -161,6 +170,8 @@ export class BlockchainGateway {
       this.xcmWrapperContract = undefined;
       this.hydrationUsdcAdapterContract = undefined;
       this.depositPoolContract = undefined;
+      this.depositPoolV2Contract = undefined;
+      this.creditPoolContract = undefined;
       return;
     }
 
@@ -255,6 +266,12 @@ export class BlockchainGateway {
           DEPOSIT_POOL_ABI,
           this.provider
         )
+      : undefined;
+    this.depositPoolV2Contract = config.depositPoolV2Address
+      ? new Contract(config.depositPoolV2Address, DEPOSIT_POOL_V2_ABI, this.provider)
+      : undefined;
+    this.creditPoolContract = config.creditPoolAddress
+      ? new Contract(config.creditPoolAddress, CREDIT_POOL_ABI, this.signer ?? this.provider)
       : undefined;
   }
 
@@ -706,9 +723,20 @@ export class BlockchainGateway {
     vestingHours = DEFAULT_WORKER_DEPOSIT_VESTING_HOURS
   } = {}) {
     try {
-      const events = await this.readDepositPoolPrincipalEvents();
+      const [events, creditEvents] = await Promise.all([
+        this.readDepositPoolPrincipalEvents(),
+        this.config?.creditPoolAddress ? this.readCreditPoolLoanEvents() : []
+      ]);
+      const migration = this.config?.depositPoolVestingMigration;
+      const migratedWallet = migration?.wallet?.toLowerCase() === String(wallet).toLowerCase();
       return {
-        ...calculateDepositVesting(events, { wallet, now, vestingHours }),
+        ...calculateDepositVesting(events, {
+          wallet,
+          now,
+          vestingHours,
+          creditEvents,
+          initialTranches: migratedWallet ? migration.preservedTranches : []
+        }),
         available: true,
         source: "deposit_pool_events",
         headBlock: this.depositPoolVestingEventCache?.headBlock
@@ -732,12 +760,16 @@ export class BlockchainGateway {
   }
 
   async readDepositPoolPrincipalEvents() {
-    const poolAddress = this.config?.depositPoolAddress;
-    const deploymentBlock = Number(this.config?.depositPoolDeploymentBlock);
+    const poolAddress = this.config?.depositPoolV2Address ?? this.config?.depositPoolAddress;
+    const deploymentBlock = Number(
+      this.config?.depositPoolV2Address
+        ? this.config?.depositPoolV2DeploymentBlock
+        : this.config?.depositPoolDeploymentBlock
+    );
     if (!this.provider || !poolAddress || !Number.isSafeInteger(deploymentBlock) || deploymentBlock < 0) {
       throw new Error("DepositPool event history is not configured");
     }
-    const poolInterface = this.depositPoolContract?.interface;
+    const poolInterface = (this.depositPoolV2Contract ?? this.depositPoolContract)?.interface;
     if (typeof poolInterface?.parseLog !== "function") {
       throw new Error("DepositPool event interface is unavailable");
     }
@@ -774,6 +806,8 @@ export class BlockchainGateway {
         continue;
       }
       if (decoded?.name !== "Deposit" && decoded?.name !== "Withdraw") continue;
+      const ignoredMigrationDeposit = this.config?.depositPoolVestingMigration?.ignoredTransferEvents?.newDepositTx;
+      if (ignoredMigrationDeposit && String(log.transactionHash).toLowerCase() === ignoredMigrationDeposit) continue;
       principalLogs.push({
         type: decoded.name,
         owner: String(decoded.args.owner),
@@ -802,6 +836,145 @@ export class BlockchainGateway {
     ));
     this.depositPoolVestingEventCache = { headBlock, events: decodedEvents };
     return decodedEvents;
+  }
+
+  async readCreditPoolLoanEvents() {
+    const poolAddress = this.config?.creditPoolAddress;
+    const deploymentBlock = Number(this.config?.creditPoolDeploymentBlock);
+    if (!this.provider || !poolAddress || !Number.isSafeInteger(deploymentBlock) || deploymentBlock < 0) {
+      throw new Error("CreditPool event history is not configured");
+    }
+    const poolInterface = this.creditPoolContract?.interface;
+    if (typeof poolInterface?.parseLog !== "function") {
+      throw new Error("CreditPool event interface is unavailable");
+    }
+    const headBlock = Number(await this.provider.getBlockNumber());
+    if (!Number.isSafeInteger(headBlock) || headBlock < deploymentBlock) {
+      throw new Error(`CreditPool event head ${headBlock} predates deployment block ${deploymentBlock}`);
+    }
+    if (this.creditPoolVestingEventCache?.headBlock === headBlock) {
+      return this.creditPoolVestingEventCache.events;
+    }
+    const canExtend = this.creditPoolVestingEventCache
+      && this.creditPoolVestingEventCache.headBlock >= deploymentBlock
+      && this.creditPoolVestingEventCache.headBlock < headBlock;
+    const fromBlock = canExtend ? this.creditPoolVestingEventCache.headBlock + 1 : deploymentBlock;
+    const decodedEvents = canExtend ? [...this.creditPoolVestingEventCache.events] : [];
+    const logs = [];
+    for (let start = fromBlock; start <= headBlock; start += CREDIT_POOL_EVENT_LOG_CHUNK_SIZE) {
+      const end = Math.min(headBlock, start + CREDIT_POOL_EVENT_LOG_CHUNK_SIZE - 1);
+      logs.push(...await this.provider.getLogs({ address: poolAddress, fromBlock: start, toBlock: end }));
+    }
+    const loanBorrowers = new Map(
+      decodedEvents
+        .filter((event) => event.type === "LoanOriginated")
+        .map((event) => [event.loanId, event.borrower])
+    );
+    const relevant = [];
+    for (const log of logs) {
+      let decoded;
+      try {
+        decoded = poolInterface.parseLog(log);
+      } catch {
+        continue;
+      }
+      if (decoded?.name !== "LoanOriginated" && decoded?.name !== "LoanClosed") continue;
+      const loanId = String(decoded.args.loanId).toLowerCase();
+      if (decoded.name === "LoanOriginated") loanBorrowers.set(loanId, String(decoded.args.borrower));
+      relevant.push({
+        type: decoded.name,
+        loanId,
+        borrower: decoded.name === "LoanOriginated"
+          ? String(decoded.args.borrower)
+          : loanBorrowers.get(loanId),
+        blockNumber: Number(log.blockNumber),
+        logIndex: Number(log.index ?? log.logIndex ?? 0),
+        txHash: log.transactionHash
+      });
+    }
+    const timestamps = new Map();
+    await Promise.all([...new Set(relevant.map((event) => event.blockNumber))].map(async (blockNumber) => {
+      const block = await this.provider.getBlock(blockNumber);
+      const timestamp = Number(block?.timestamp);
+      if (!Number.isFinite(timestamp) || timestamp < 0) {
+        throw new Error(`CreditPool event block ${blockNumber} has no readable timestamp`);
+      }
+      timestamps.set(blockNumber, timestamp);
+    }));
+    decodedEvents.push(...relevant.map((event) => ({
+      ...event,
+      blockTimestamp: timestamps.get(event.blockNumber)
+    })));
+    decodedEvents.sort((left, right) => left.blockNumber - right.blockNumber || left.logIndex - right.logIndex);
+    this.creditPoolVestingEventCache = { headBlock, events: decodedEvents };
+    return decodedEvents;
+  }
+
+  async readCreditPosition(wallet) {
+    if (!this.creditPoolContract || !this.depositPoolV2Contract) {
+      return { available: false, reason: "credit_pool_not_configured" };
+    }
+    return this.withGatewayError("readCreditPosition", async () => {
+      const normalizedWallet = getAddress(wallet);
+      const [outstandingDebt, pledgedShares, depositedShares, vested] = await Promise.all([
+        this.creditPoolContract.outstandingDebt(normalizedWallet),
+        this.depositPoolV2Contract.pledgedShares(normalizedWallet),
+        this.depositPoolV2Contract.balanceOf(normalizedWallet),
+        this.readDepositVesting(normalizedWallet)
+      ]);
+      const pledgedAssets = await this.depositPoolV2Contract.convertToAssets(pledgedShares);
+      const ltvBps = await this.creditPoolContract.ltvBps();
+      const collateralBase = BigInt(pledgedAssets) < BigInt(vested.vestedRaw)
+        ? BigInt(pledgedAssets)
+        : BigInt(vested.vestedRaw);
+      const grossWalletLimit = collateralBase * BigInt(ltvBps) / 10_000n;
+      const loanable = grossWalletLimit > BigInt(outstandingDebt)
+        ? grossWalletLimit - BigInt(outstandingDebt)
+        : 0n;
+      return {
+        available: Boolean(vested.available),
+        outstandingDebtRaw: this.toRawString(outstandingDebt),
+        depositedSharesRaw: this.toRawString(depositedShares),
+        pledgedSharesRaw: this.toRawString(pledgedShares),
+        pledgedAssetsRaw: this.toRawString(pledgedAssets),
+        vestedRaw: this.toRawString(vested.vestedRaw),
+        grossWalletLimitRaw: this.toRawString(grossWalletLimit),
+        loanableRaw: this.toRawString(loanable),
+        ltvBps: Number(ltvBps),
+        source: "credit_pool_and_deposit_pool_v2_live_reads"
+      };
+    });
+  }
+
+  async signCreditVestingAttestation({ borrower, loanId, pledgeShares, amount, vestedRaw, validUntil, nonce }) {
+    this.requireSigner("signCreditVestingAttestation");
+    if (!this.creditPoolContract || !this.config?.creditPoolAddress) {
+      throw new ConfigError("CreditPool is not configured.");
+    }
+    const [network, operator, signerAddress] = await Promise.all([
+      this.provider.getNetwork(),
+      this.creditPoolContract.operator(),
+      this.signer.getAddress()
+    ]);
+    if (String(operator).toLowerCase() !== String(signerAddress).toLowerCase()) {
+      throw new ConfigError("Configured signer is not the CreditPool vesting attestor.");
+    }
+    const payloadHash = keccak256(abiCoder.encode(
+      ["bytes32", "address", "bytes32", "uint256", "uint256", "uint256", "uint64", "uint256", "uint256", "address"],
+      [
+        VESTING_ATTESTATION_TYPEHASH,
+        getAddress(borrower),
+        this.toBytes32Value(loanId, "loanId"),
+        this.normalizeUint256(pledgeShares, "pledgeShares"),
+        this.normalizeUint256(amount, "amount"),
+        this.normalizeUint256(vestedRaw, "vestedRaw"),
+        this.normalizeUint256(validUntil, "validUntil"),
+        this.normalizeUint256(nonce, "nonce"),
+        network.chainId,
+        this.config.creditPoolAddress
+      ]
+    ));
+    return this.signer.signMessage(getBytes(payloadHash));
   }
 
   async getTreasuryPolicyStatus() {

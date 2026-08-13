@@ -117,6 +117,8 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
     description: "Retired strategy surface; points to the self-custodied DepositPool and vested-capacity onboarding."
   },
   { path: "/pool/transactions", description: "Build wallet-bound unsigned approve/deposit or redeem templates. The platform never signs, receives, brokers, or relays depositor funds." },
+  { path: "/credit", description: "Live CreditPool supply and the signed-in wallet's pledged-vs-vested L1 capacity, debt, and repayment truth." },
+  { path: "/credit/transactions", description: "Build wallet-bound unsigned CreditPool deposit, withdraw, borrow, or repay templates; never a signed-byte relay." },
   { path: "/reputation", description: "Current reputation scores + tier." },
   { path: "/auth/refresh", description: "Rotate the caller's wallet JWT — revokes the old jti and mints a new one with the same sub + roles. Lets operators avoid re-SIWE every AUTH_TOKEN_TTL_SECONDS." },
   { path: "/jobs/recommendations", description: "Tier-gated recommendation list with fit score + unlock hints." },
@@ -344,6 +346,23 @@ const HTTP_ACTION_REQUIREMENTS = [
     notes: EARNINGS_WITHDRAWAL_STATEMENT
   },
   {
+    method: "GET",
+    path: "/credit",
+    requiresAuth: true,
+    requiredAction: "read_credit_pool",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "POST",
+    path: "/credit/transactions",
+    requiresAuth: true,
+    requiredAction: "build_unsigned_credit_pool_transactions",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"],
+    notes: "Returns eligibility attestation plus unsigned templates only; the wallet verifies, signs, and broadcasts independently."
+  },
+  {
     method: "POST",
     path: "/auth/nonce",
     requiresAuth: false,
@@ -467,6 +486,8 @@ const DISCOVERY_TOOLS = [
   { name: "buildDepositPoolTransactions", description: "Wallet-bound unsigned approve/deposit or redeem templates; never a relay." },
   { name: "getAccountPosition", description: "Read your own earnings account, statement, ownership proof, withdrawal door, and retention choices." },
   { name: "buildWithdrawTransactions", description: "Complete unsigned account withdrawal and optional onward transfer; your signature, DOT gas, and broadcast." },
+  { name: "getCreditInfo", description: "Live L1 CreditPool supply, disclosure, and wallet pledged-vs-vested loan capacity." },
+  { name: "buildCreditTransactions", description: "Wallet-bound unsigned lend, redeem, pledge/originate, or repay templates; never a relay." },
   { name: "estimateNetReward", description: "Profile-aware reward estimate." },
   { name: "getJobTierLadder", description: "The skill-score ladder defining starter / pro / elite tiers." },
   { name: "getAccountSummary", description: "Balance sheet for a wallet." },

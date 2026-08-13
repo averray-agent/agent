@@ -25,6 +25,13 @@ async function runHostedStackFixture({
     available: true,
     chainId: 1,
     disclosure: { statement: "Technical pilot. Principal at risk. No depositor protection." }
+  },
+  creditConfigured = false,
+  credit = {
+    available: true,
+    chainId: 1,
+    creditPool: `0x${"55".repeat(20)}`,
+    disclosure: { statement: "Technical pilot. Principal at risk. No depositor protection." }
   }
 }) {
   const health = {
@@ -41,6 +48,7 @@ async function runHostedStackFixture({
       submittedJobAutoVerifier: { ok: autoVerifierOk }
     }
   };
+  if (creditConfigured) health.addresses.creditPool = credit.creditPool;
   const onboarding = {
     name: "Averray fixture",
     protocols: ["http"],
@@ -206,6 +214,11 @@ async function runHostedStackFixture({
       }));
       return;
     }
+    if (request.url === "/credit") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(credit));
+      return;
+    }
     const value = fixtures.get(request.url);
     if (value === undefined) {
       response.writeHead(404);
@@ -234,11 +247,13 @@ async function runHostedStackFixture({
       API_ACCOUNT_POSITION_URL: `${baseUrl}/account/position?asset=USDC`,
       API_ACCOUNT_WITHDRAW_URL: `${baseUrl}/account/withdraw/transactions`,
       API_STRATEGIES_URL: `${baseUrl}/strategies`,
+      API_CREDIT_URL: `${baseUrl}/credit`,
       API_ONBOARDING_URL: `${baseUrl}/onboarding`,
       API_POSTER_ONBOARDING_URL: `${baseUrl}/poster/onboarding`,
       API_ADMIN_STATUS_URL: `${baseUrl}/admin/status`,
       ADMIN_JWT: operatorToken,
       AVERRAY_TOKEN: "",
+      CREDIT_DOOR_TOKEN: creditConfigured ? "fixture-operator-token" : "",
       CHECK_INDEXER: "0",
       CHECK_BOOTSTRAP_INSTRUMENTATION: "0",
       CHECK_BOOTSTRAP_SELF_REPORT_SENT: "0",
@@ -288,6 +303,28 @@ test("hosted smoke walks through the authenticated earnings account and complete
 
   assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /Checking authenticated earnings account door/u);
+});
+
+test("hosted smoke enforces CreditPool availability and the canonical disclosure after configuration", async () => {
+  const result = await runHostedStackFixture({ autoVerifierOk: true, warnings: [], creditConfigured: true });
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /Checking CreditPool door/u);
+});
+
+test("hosted smoke rejects a configured CreditPool with drifted disclosure", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    warnings: [],
+    creditConfigured: true,
+    credit: {
+      available: true,
+      chainId: 1,
+      creditPool: `0x${"55".repeat(20)}`,
+      disclosure: { statement: "Principal probably safe." }
+    }
+  });
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /exact depositor-risk disclosure/u);
 });
 
 test("hosted smoke rejects a 500 from the DepositPool door", async () => {

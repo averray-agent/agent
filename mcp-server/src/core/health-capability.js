@@ -748,6 +748,8 @@ export function resolveHealthAddresses({
       contracts.hydrationUsdcAdapter,
       env.HYDRATION_USDC_ADAPTER_ADDRESS
     ),
+    depositPoolV2: firstPresent(contracts.depositPoolV2, env.DEPOSIT_POOL_V2_ADDRESS),
+    creditPool: firstPresent(contracts.creditPool, env.CREDIT_POOL_ADDRESS),
     settlementSigner: firstPresent(
       manifest?.verifier,
       env.SIGNER_ADDRESS,
