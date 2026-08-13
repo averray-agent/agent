@@ -738,6 +738,40 @@ test("createAdminJob reserves finite recurring template funding from the poster 
   assert.equal(derivative.funding.amount, 5);
 });
 
+test("recurring catalogue derivatives pass the posting lane before creation", async () => {
+  const service = makePlatformService();
+  await service.createAdminJob({
+    id: "lane-recurring-001",
+    category: "coding",
+    tier: "starter",
+    lane: "oss-anchored",
+    rewardAmount: 1,
+    rewardAsset: "DOT",
+    verifierMode: "benchmark",
+    verifierTerms: ["complete"],
+    verifierMinimumMatches: 1,
+    recurring: true,
+    schedule: { cron: "0 9 * * 1" },
+    recurringPolicy: { reserveAmount: 2, reserveAsset: "DOT" }
+  }, { posterWallet: WALLET });
+  const observed = [];
+  service.setCatalogueLaneDiscipline({
+    async post(candidate, action, { now }) {
+      observed.push({ candidate, now });
+      return action();
+    }
+  });
+  const firedAt = new Date("2026-05-04T09:00:00.000Z");
+
+  const derivative = await service.fireRecurringJob("lane-recurring-001", { firedAt });
+
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0].candidate.id, derivative.id);
+  assert.equal(observed[0].candidate.lane, "oss-anchored");
+  assert.equal(observed[0].candidate.rewardAmount, 1);
+  assert.equal(observed[0].now, firedAt);
+});
+
 test("createAdminJob reserves the snapshotted success fees for every unwaived recurring run", async () => {
   const reserveCalls = [];
   const gateway = {
@@ -2278,6 +2312,20 @@ test("getAdminStatus surfaces XCM observation relay status", async () => {
   assert.equal(status.xcmObservationRelay.cursor, "cursor-1");
 });
 
+test("getAdminStatus exposes D3 catalogue lane board payload", async () => {
+  const service = makePlatformService();
+  const catalogueLanes = {
+    version: "catalogue-lanes-v1",
+    lanes: [{ id: "liveness", hypothesis: "test", stopCondition: "stop" }]
+  };
+  service.setCatalogueLaneDiscipline({
+    async getBoardSnapshot() { return catalogueLanes; }
+  });
+
+  const status = await service.getAdminStatus();
+  assert.deepEqual(status.catalogueLanes, catalogueLanes);
+});
+
 test("getAdminStatus alarms when a venue balance read is unknown/stale", async () => {
   const service = makePlatformService();
   service.xcmBalanceObserver = {
@@ -2587,6 +2635,43 @@ test("upsertIngestedJob writes an idempotent refresh that reproduces the commitm
     driftedCount: 0,
     drifted: []
   });
+});
+
+test("upsertIngestedJob hydrates an exact pre-D3 definition without manufacturing spec drift", async () => {
+  const now = new Date("2026-08-13T12:00:00.000Z");
+  const preD3 = {
+    ...INGEST_JOB_INPUT,
+    rewardAmount: 0.25,
+    lifecycle: {
+      status: "open",
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    }
+  };
+  let live = { state: 0 };
+  const gateway = {
+    isEnabled: () => true,
+    getJob: async () => live
+  };
+  const originalService = makePlatformService(gateway);
+  const original = await originalService.upsertIngestedJob(preD3, { now });
+  const committedSpecHash = hashCanonicalContent(originalService.getJobDefinition(original.id));
+  live = { state: 1, specHash: committedSpecHash };
+  const service = makePlatformService(gateway);
+
+  const hydrated = await service.upsertIngestedJob({
+    ...INGEST_JOB_INPUT,
+    lane: "liveness",
+    rewardAmount: 0.1
+  }, {
+    now,
+    compatibleDefinitions: [preD3]
+  });
+
+  assert.equal(hydrated.rewardAmount, 0.25);
+  assert.equal(hydrated.lane, undefined);
+  assert.equal(service.jobCatalogService.getSpecHashIntegrityStatus().driftedCount, 0);
+  assert.equal(hashCanonicalContent(service.getJobDefinition(hydrated.id)), committedSpecHash);
 });
 
 test("upsertIngestedJob refuses a mismatching refresh and retains the committed definition", async () => {

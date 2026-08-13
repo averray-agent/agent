@@ -694,8 +694,7 @@ export class JobCatalogService {
         { templateId, reserve }
       );
     }
-    const stamp = firedAt.toISOString().replace(/[:.]/g, "-").replace("Z", "").slice(0, 19);
-    const derivativeId = this.normalizeId(`${templateId}-run-${stamp}`);
+    const derivativeId = this.recurringDerivativeId(templateId, firedAt);
     if (this.jobs.some((candidate) => candidate.id === derivativeId)) {
       throw new ConflictError(`Derivative already exists: ${derivativeId}`, "recurring_job_collision");
     }
@@ -743,6 +742,22 @@ export class JobCatalogService {
       }
     });
     return derivative;
+  }
+
+  getRecurringPostingCandidate(templateId, { firedAt = new Date() } = {}) {
+    const template = this.getRecurringTemplate(templateId);
+    return {
+      id: this.recurringDerivativeId(templateId, firedAt),
+      lane: template.lane,
+      rewardAsset: template.rewardAsset,
+      rewardAmount: template.rewardAmount,
+      source: template.source
+    };
+  }
+
+  recurringDerivativeId(templateId, firedAt) {
+    const stamp = firedAt.toISOString().replace(/[:.]/g, "-").replace("Z", "").slice(0, 19);
+    return this.normalizeId(`${templateId}-run-${stamp}`);
   }
 
   normalizeId(value) {

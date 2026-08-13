@@ -29,18 +29,31 @@ export function normalizeSkippedWithNumericCount(result, skipped = []) {
   ];
 }
 
-export function createJobsFromImportResult(service, jobs) {
+export async function createJobsFromImportResult(service, jobs, { now = new Date() } = {}) {
   const created = [];
   const skipped = [];
   const errors = [];
 
   for (const job of jobs) {
     try {
-      created.push(service.createJob(job));
+      const action = () => service.createJob(job);
+      created.push(await (service.catalogueLaneDiscipline?.post
+        ? service.catalogueLaneDiscipline.post(job, action, { now })
+        : action()));
     } catch (error) {
       const normalized = normalizeError(error);
       if (normalized.code === "job_exists") {
         skipped.push({ id: job.id, reason: "already_exists" });
+        continue;
+      }
+      if (normalized.code === "lane_budget_exhausted" || normalized.code === "lane_paused") {
+        skipped.push({
+          id: job.id,
+          reason: normalized.code,
+          lane: normalized.details?.lane ?? job.lane,
+          resumeAt: normalized.details?.resumeAt ?? null,
+          retryWhen: normalized.details?.retryWhen ?? null
+        });
         continue;
       }
       errors.push({

@@ -184,6 +184,7 @@ export function toPlatformJob(issue, score = scoreIssue(issue), {
     requiredRole: "worker",
     category,
     tier: "starter",
+    lane: "oss-anchored",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 0.2,
     verifierMode: "benchmark",

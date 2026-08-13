@@ -15,6 +15,7 @@ import {
 import {
   LaneStatusGrid,
 } from "@/components/overview/LaneStatusGrid";
+import { CatalogueLaneGrid } from "@/components/overview/CatalogueLaneGrid";
 import { PlatformPulse, type PulseEvent } from "@/components/overview/PlatformPulse";
 import { ProviderOperationsCard } from "@/components/overview/ProviderOperationsCard";
 import { RecurringRuntimeCard } from "@/components/overview/RecurringRuntimeCard";
@@ -37,6 +38,7 @@ import { extractDisputeList } from "@/lib/api/dispute-adapters";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { extractRunJobs } from "@/lib/api/run-adapters";
 import { buildProviderOperations } from "@/lib/api/provider-operations";
+import { buildCatalogueLaneCards } from "@/lib/api/catalogue-lanes";
 import { buildRecurringRuntimeSummary } from "@/lib/api/recurring-jobs";
 import {
   buildJobLifecycleSummary,
@@ -223,6 +225,10 @@ export default function OverviewPage() {
     () => buildRecurringRuntimeSummary(providerOps.data, feedPresence(providerOps)),
     [providerOps]
   );
+  const catalogueLanes = useMemo(
+    () => buildCatalogueLaneCards(providerOps.data),
+    [providerOps.data]
+  );
   const providerRows = liveProviderOps;
   const hasLiveOverview = Boolean(jobs.data || sessions.data || account.data || strategyPositions.data);
   const vitals = vitalsWithLoadingHints;
@@ -317,6 +323,10 @@ export default function OverviewPage() {
       />
       <NeedsActionList alerts={alerts} meta={alertsMeta} notice={alertsNotice} />
       <LaneStatusGrid lanes={lanes} meta={hasLiveOverview ? "live API snapshot" : undefined} />
+      <CatalogueLaneGrid
+        lanes={catalogueLanes}
+        meta={providerOps.isLoading ? "waiting for /admin/status" : "rolling spend and receipt graph"}
+      />
       <ProviderOperationsCard
         providers={providerRows}
         meta={
