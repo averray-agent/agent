@@ -17,6 +17,10 @@ import { fileURLToPath } from "node:url";
 
 import { AgentPlatformClient } from "../../sdk/agent-platform-client.js";
 import {
+  appendAverrayDisclosureFooter,
+  inspectAverrayClaimantBinding,
+} from "../../mcp-server/src/core/maintainer-surface-policy.js";
+import {
   HarnessDriver,
   assembleGithubPrSubmission,
   fetchJobDefinition,
@@ -182,6 +186,14 @@ async function prepareBounty(options, env, stdout, dependencies) {
       "claim response did not include a session id",
     );
   }
+  const claimantAddress = text(claim?.wallet);
+  if (!/^0x[a-f0-9]{40}$/iu.test(claimantAddress)) {
+    fail(
+      "BOUNTY_CLAIM_REFUSED",
+      BOUNTY_WORKER_EXIT.claimRefused,
+      "claim response did not include the claimant EVM address",
+    );
+  }
 
   const driver = dependencies.driver ?? new HarnessDriver({
     databaseUrl: env.HARNESS_DATABASE_URL,
@@ -255,6 +267,8 @@ async function prepareBounty(options, env, stdout, dependencies) {
     kind: "averray_bounty_worker_handoff",
     job,
     sessionId,
+    claimantAddress,
+    jobSpecUrl: jobDefinitionUrl(apiBaseUrl, job.id),
     runId,
     status,
     mappingWarnings: warnings,
@@ -331,6 +345,18 @@ async function sendBounty(options, env, stdout, dependencies) {
       "BOUNTY_GITHUB_TOKEN_UNAVAILABLE",
       BOUNTY_WORKER_EXIT.githubTokenUnavailable,
       "GITHUB_INSTALLATION_TOKEN is absent or empty",
+    );
+  }
+  const intendedPullRequest = pullRequestPayload(packet, deriveHeadBranch(packet));
+  const claimantBinding = inspectAverrayClaimantBinding(intendedPullRequest.body, {
+    claimantWallet: packet.claimantAddress,
+    claimSessionId: packet.sessionId,
+  });
+  if (claimantBinding.status !== "matched" || claimantBinding.sessionMatches !== true) {
+    fail(
+      "BOUNTY_DISCLOSURE_REFUSED",
+      BOUNTY_WORKER_EXIT.prOpenRefused,
+      `pull-request disclosure does not bind to the claim session: ${claimantBinding.status}`,
     );
   }
 
@@ -625,6 +651,8 @@ function assertPacket(packet) {
     || !SAFE_REF.test(text(repository.baseRef))
     || !/^[a-f0-9]{40}$/u.test(text(repository.baseRevision))
     || !text(packet.sessionId)
+    || !/^0x[a-f0-9]{40}$/iu.test(text(packet.claimantAddress))
+    || !isHttpUrl(packet.jobSpecUrl)
     || !text(packet.runId)
     || !Array.isArray(packet.mappingWarnings)
     || !isRecord(deliverables)
@@ -906,18 +934,39 @@ function pullRequestPayload(packet, headBranch) {
     : undefined;
   const title = text(packet.job.title) || `Resolve ${packet.job.id}`;
   const summary = text(packet.deliverables.changeSummary);
+  const body = [
+    summary || `Resolve ${packet.job.id}.`,
+    "",
+    `Harness run: ${packet.runId}`,
+    `Verification: passed`,
+    ...(issueNumber ? ["", `Closes #${issueNumber}`] : []),
+  ].join("\n");
   return {
     base: packet.repository.baseRef,
     head: headBranch,
     title: issueNumber ? `Resolve #${issueNumber}: ${title}` : title,
-    body: [
-      summary || `Resolve ${packet.job.id}.`,
-      "",
-      `Harness run: ${packet.runId}`,
-      `Verification: passed`,
-      ...(issueNumber ? ["", `Closes #${issueNumber}`] : []),
-    ].join("\n"),
+    body: appendAverrayDisclosureFooter(body, {
+      agentWallet: packet.claimantAddress,
+      claimSessionId: packet.sessionId,
+      jobSpecUrl: packet.jobSpecUrl,
+      submissionHash: packet.deliverables.patchSha256,
+    }),
   };
+}
+
+function jobDefinitionUrl(baseUrl, jobId) {
+  const url = new URL(`${String(baseUrl).replace(/\/+$/u, "")}/jobs/definition`);
+  url.searchParams.set("jobId", jobId);
+  return url.toString();
+}
+
+function isHttpUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
 }
 
 async function writeNewFile(target, contents, codeName) {

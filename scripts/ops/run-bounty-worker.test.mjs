@@ -6,6 +6,11 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  appendAverrayDisclosureFooter,
+  hasAverrayDisclosureFooter,
+  inspectAverrayClaimantBinding,
+} from "../../mcp-server/src/core/maintainer-surface-policy.js";
+import {
   BOUNTY_WORKER_EXIT,
   createGitHubPublisher,
   runBountyWorker,
@@ -14,6 +19,7 @@ import {
 const TOKEN_SENTINEL = "github-installation-token-sentinel";
 const RUN_ID = "11111111-2222-4333-8444-555555555555";
 const SESSION_ID = "session-bounty-1";
+const CLAIMANT_ADDRESS = "0x3742de8800000000000000000000000000009620";
 const BASE_REVISION = "a".repeat(40);
 const HEAD_REVISION = "b".repeat(40);
 const JOB_URL = new URL("../../worker/examples/github-issue-job.json", import.meta.url);
@@ -170,6 +176,83 @@ test("drill: failed verification has a named refusal and never submits", async (
   console.log("BOUNTY_DRILL_GREEN verification_failed github_calls=0 submit_calls=0 exit=72");
 });
 
+test("drill: missing disclosure binding refuses before every GitHub call", async () => {
+  const bodyWithoutFooter = "Preserve verification evidence across retries.";
+  assert.equal(
+    inspectAverrayClaimantBinding(bodyWithoutFooter, { claimSessionId: SESSION_ID }).status,
+    "missing",
+  );
+
+  const prepared = await prepareCase();
+  const packet = JSON.parse(await readFile(prepared.handoffPath, "utf8"));
+  packet.deliverables.changeSummary = [
+    bodyWithoutFooter,
+    "",
+    "This contribution was prepared by an autonomous agent operating on the",
+    "Averray platform.",
+  ].join("\n");
+  packet.deliverables.changeSummarySha256 = sha256(packet.deliverables.changeSummary);
+  packet.contentSha256 = packetSha256(packet);
+  await writeFile(prepared.handoffPath, `${JSON.stringify(packet, null, 2)}\n`);
+  let githubCalls = 0;
+  const platform = submitPlatform();
+  const output = await invokeSend(prepared, {
+    confirm: packet.repository.nameWithOwner,
+    platform,
+    githubPublisher: {
+      async publish() {
+        githubCalls += 1;
+        throw new Error("must not reach GitHub");
+      },
+    },
+  });
+
+  assert.equal(output.code, BOUNTY_WORKER_EXIT.prOpenRefused);
+  assert.match(output.stderr.text, /BOUNTY_DISCLOSURE_REFUSED/u);
+  assert.equal(githubCalls, 0);
+  assert.equal(platform.calls.length, 0);
+});
+
+test("drill: disclosure bound to the wrong claim session refuses before every GitHub call", async () => {
+  const prepared = await prepareCase();
+  const packet = JSON.parse(await readFile(prepared.handoffPath, "utf8"));
+  packet.deliverables.changeSummary = appendAverrayDisclosureFooter(
+    packet.deliverables.changeSummary,
+    {
+      agentWallet: CLAIMANT_ADDRESS,
+      claimSessionId: "wrong-claim-session",
+      jobSpecUrl: "https://api.averray.com/jobs/definition?jobId=github%3Aaverray-agent%2Fagent%23741",
+      submissionHash: packet.deliverables.patchSha256,
+    },
+  );
+  assert.equal(
+    inspectAverrayClaimantBinding(packet.deliverables.changeSummary, {
+      claimSessionId: SESSION_ID,
+    }).status,
+    "mismatched",
+  );
+  packet.deliverables.changeSummarySha256 = sha256(packet.deliverables.changeSummary);
+  packet.contentSha256 = packetSha256(packet);
+  await writeFile(prepared.handoffPath, `${JSON.stringify(packet, null, 2)}\n`);
+  let githubCalls = 0;
+  const platform = submitPlatform();
+  const output = await invokeSend(prepared, {
+    confirm: packet.repository.nameWithOwner,
+    platform,
+    githubPublisher: {
+      async publish() {
+        githubCalls += 1;
+        throw new Error("must not reach GitHub");
+      },
+    },
+  });
+
+  assert.equal(output.code, BOUNTY_WORKER_EXIT.prOpenRefused);
+  assert.match(output.stderr.text, /BOUNTY_DISCLOSURE_REFUSED/u);
+  assert.equal(githubCalls, 0);
+  assert.equal(platform.calls.length, 0);
+});
+
 test("drill: container NetworkMode other than none refuses the prepared run", async () => {
   const output = await prepareCase({ networkMode: "bridge", expectSuccess: false });
   assert.equal(output.code, BOUNTY_WORKER_EXIT.networkRefused);
@@ -324,6 +407,20 @@ test("GitHub publisher rechecks base, pushes once, opens once, then adopts exact
   assert.equal(opened.adopted, false);
   assert.equal(adopted.adopted, true);
   assert.equal(pushed, 1);
+  const createRequest = requests.find((entry) => entry.method === "POST");
+  assert.ok(createRequest);
+  const payload = JSON.parse(createRequest.body);
+  assert.equal(hasAverrayDisclosureFooter(payload.body), true);
+  assert.equal(
+    inspectAverrayClaimantBinding(payload.body, { claimSessionId: SESSION_ID }).status,
+    "matched",
+  );
+  assert.match(payload.body, new RegExp(`^Agent identity: ${CLAIMANT_ADDRESS}$`, "mu"));
+  assert.match(
+    payload.body,
+    /^Job spec:\s+https:\/\/api\.averray\.com\/jobs\/definition\?jobId=github%3Aaverray-agent%2Fagent%23741$/mu,
+  );
+  assert.match(payload.body, new RegExp(`^Submission:\\s+${packet.deliverables.patchSha256}$`, "mu"));
   assert.equal(requests.filter((entry) => entry.method === "POST").length, 1);
   for (const request of requests) {
     assert.doesNotMatch(`${request.path}${request.body ?? ""}`, new RegExp(TOKEN_SENTINEL, "u"));
@@ -372,7 +469,7 @@ function preparePlatform({ chainId = 420420417 } = {}) {
     },
     async claimJob() {
       this.claimCalls += 1;
-      return { status: "claimed", sessionId: SESSION_ID };
+      return { status: "claimed", sessionId: SESSION_ID, wallet: CLAIMANT_ADDRESS };
     },
   };
 }
