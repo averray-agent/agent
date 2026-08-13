@@ -25,7 +25,11 @@
     "hydrationUsdcAdapter": "0x96091d4477Fe37E79557276d63883bBbbdE73159",
     "depositPoolLane": "0xAbDca8AAca9308C7DA26c5B7E5E2380CDDD37f34",
     "hydrationDepositPoolAdapter": "0x50d279818948fbfe10B03b74e6b8aB44428b51ab",
-    "depositPool": "0xCCF5FDF3108AF8e693F28bb9326A573d9dA0F476"
+    "depositPool": "0xCCF5FDF3108AF8e693F28bb9326A573d9dA0F476",
+    "depositPoolLaneV2": "0x88eE70277E486136676c0b50Ed9b7D7A1a31371f",
+    "hydrationDepositPoolAdapterV2": "0xE2801E6C640e0180798912649fD567E1Ea459a35",
+    "depositPoolV2": "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30",
+    "creditPool": "0x903B318586A3772c99185000676f4AC356DD6E4B"
   },
   "contractProvenance": {
     "0x226F14252A98BD2eA140271647De20132F09AF20": {
@@ -142,6 +146,30 @@
       "abiHash": "sha256:ee13f7491686340e989a6fca152e662750fb69b20c78b2f20cd6266eda358389",
       "runtimeCodeHash": "sha256:5e8ed203a5ed21f544a8a075a25dce281dfbdc0862e66cb3c6c9a7fc7e5ae60d",
       "verifiedAt": "2026-08-13T13:05:00.000Z"
+    },
+    "0x88eE70277E486136676c0b50Ed9b7D7A1a31371f": {
+      "sourceCommit": "9a6f3dffa6010ddbdc6b50617454e1632afe0b99",
+      "abiHash": "sha256:53a7d2d069bb023a5c9b7eedae2dac463fb60f6512a67d3471656b817c9d217b",
+      "runtimeCodeHash": "sha256:9adfe5b316bef8d9172e5191e9fcf02fca190fb2216d50fd14f74807ba487c30",
+      "verifiedAt": "2026-08-13T18:45:00.000Z"
+    },
+    "0xE2801E6C640e0180798912649fD567E1Ea459a35": {
+      "sourceCommit": "9a6f3dffa6010ddbdc6b50617454e1632afe0b99",
+      "abiHash": "sha256:64e406be7c2d1a3045b6fadb92d390884924b888c1e5879eeac97c787d85d698",
+      "runtimeCodeHash": "sha256:f04e3366d25c6540107bfa8a3a55a64bb7dcd9e98c4844d77be02a010821f21b",
+      "verifiedAt": "2026-08-13T18:45:00.000Z"
+    },
+    "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30": {
+      "sourceCommit": "9a6f3dffa6010ddbdc6b50617454e1632afe0b99",
+      "abiHash": "sha256:42cba6a1ba6caeb299df14205869a349ecc7bb9ca4c5a8055be078675e280e69",
+      "runtimeCodeHash": "sha256:eeb91521091ccee382e25848c3cde3ae4a04db2b95138a21f2c59d2a35c39935",
+      "verifiedAt": "2026-08-13T18:45:00.000Z"
+    },
+    "0x903B318586A3772c99185000676f4AC356DD6E4B": {
+      "sourceCommit": "9a6f3dffa6010ddbdc6b50617454e1632afe0b99",
+      "abiHash": "sha256:c4e83bbe0610a473725287666bc247c4889186c8d3287c1ced79cc1af63555f2",
+      "runtimeCodeHash": "sha256:f87dc0371c4f288f9a634bcc243b78b922b44addc0dd5e00a3c80b8d2ee8bad9",
+      "verifiedAt": "2026-08-13T18:45:00.000Z"
     }
   },
   "knownUnshippedContractChanges": {
@@ -156,7 +184,7 @@
       {
         "sourceCommit": "052b3a7a791112001257226ecfbea7a919d9aca2",
         "maskedRuntimeCodeHash": "sha256:f194f90545c90989f58fe3512ac189ef84882031f9322dfcc934b3e8ccf919a2",
-        "reason": "Post-v3-ceremony drain state (2026-08-13): HEAD source compiles the EscrowCore v3 artifact, while legacyEscrowCore at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC intentionally remains the deployed v2 runtime until its open jobs and dispute windows drain (16 unsettled at cutover, incl. the 2026-08-16 rescue finalize). v2's own provenance stays verified via contractProvenance (sha256:bc0d1cfe\u2026) and deployments/interfaces/mainnet-escrow-core-v2.json. This entry allowlists exactly the v3 candidate artifact against the legacy address and must be deleted when v2 fully drains and exits the manifest alongside the operator revocation legs."
+        "reason": "Post-v3-ceremony drain state (2026-08-13): HEAD source compiles the EscrowCore v3 artifact, while legacyEscrowCore at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC intentionally remains the deployed v2 runtime until its open jobs and dispute windows drain (16 unsettled at cutover, incl. the 2026-08-16 rescue finalize). v2's own provenance stays verified via contractProvenance (sha256:bc0d1cfe…) and deployments/interfaces/mainnet-escrow-core-v2.json. This entry allowlists exactly the v3 candidate artifact against the legacy address and must be deleted when v2 fully drains and exits the manifest alongside the operator revocation legs."
       }
     ]
   },
@@ -194,7 +222,11 @@
     "depositPoolLane": 19380501,
     "hydrationDepositPoolAdapter": 19380504,
     "depositPool": 19380506,
-    "escrowCoreV3": 19414957
+    "escrowCoreV3": 19414957,
+    "depositPoolLaneV2": 19421392,
+    "hydrationDepositPoolAdapterV2": 19421395,
+    "depositPoolV2": 19421397,
+    "creditPool": 19421558
   },
   "runtime": {
     "auth": {
@@ -397,5 +429,25 @@
       "convertedAccountId32": "0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3",
       "replacementReason": "v2.2.1: dispatch-time nested home fee bound to every priced hop"
     }
-  ]
+  ],
+  "depositPoolVestingMigration": {
+    "schemaVersion": 1,
+    "fromPool": "0xCCF5FDF3108AF8e693F28bb9326A573d9dA0F476",
+    "toPool": "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30",
+    "wallet": "0xdc1Ed1061e4a6E35aafb8f4E59B8893113d2EDeC",
+    "ignoredTransferEvents": {
+      "oldWithdrawTx": "0x8fe7553a3b5c1febac027a946d0d0de4f8ba721da3c90dd93b396bc463dcca04",
+      "newDepositTx": "0xd9e7c3dbe830952409ae586aea300b586a370db111e4281ede312bab667d6dc2"
+    },
+    "preservedTranches": [
+      {
+        "depositedRaw": "10000000",
+        "remainingRaw": "10000000",
+        "depositedAt": "2026-08-12T20:32:00.000Z",
+        "blockNumber": 19387820,
+        "logIndex": 8,
+        "txHash": "0x9bbebd48e2eef818da4912b2bedd4a2535d8afbb7a258aa43bc8c43592d73e7b"
+      }
+    ]
+  }
 }

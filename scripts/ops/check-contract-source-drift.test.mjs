@@ -236,7 +236,10 @@ test("mainnet carries no escrow pins post-v3-ceremony and points escrowCore at t
   const contracts = validateProvenanceManifest(manifest);
   const allowlist = validateKnownUnshippedContractChanges(manifest, contracts);
 
-  assert.equal(contracts.length, 12);
+  // 16 = the 12 pre-L1 contracts + the pool-v2/CreditPool quartet (2026-08-13
+  // L1 ceremony: depositPoolLaneV2, hydrationDepositPoolAdapterV2,
+  // depositPoolV2, creditPool).
+  assert.equal(contracts.length, 16);
   // The v3 ceremony (2026-08-13) deleted both escrow pins per their own reason
   // text; only the hydration adapter successor remains staged.
   assert.deepEqual([...allowlist.keys()].sort(), ["hydrationUsdcAdapter", "legacyEscrowCore"]);
