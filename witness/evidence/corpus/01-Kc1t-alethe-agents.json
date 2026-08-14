@@ -1,0 +1,154 @@
+{
+  "schemaVersion": "averray.witness.materialization-preflight.v1",
+  "generatedAt": "2026-08-14T06:30:57.283Z",
+  "repo": "Kc1t/alethe-agents",
+  "commit": "ea27ae527d4fad57484a8dc77008f308bf8868d9",
+  "toolchain": {
+    "kind": "node",
+    "detail": "node",
+    "packageManager": "npm",
+    "detectedBy": [
+      "package.json"
+    ],
+    "additional": []
+  },
+  "classification": "FROZEN_DEPENDENCIES",
+  "classificationReason": null,
+  "observedFailureReason": null,
+  "checkCommand": "npm test",
+  "checkCommandExists": true,
+  "baseExitStatus": 0,
+  "basePassed": true,
+  "candidateModifiable": true,
+  "dependencyCacheSizeBytes": 82297396,
+  "dependencyPreparationSeconds": 17.695,
+  "totalSeconds": 45.698,
+  "materialization": {
+    "source": "https://github.com/Kc1t/alethe-agents.git",
+    "sourceType": "github",
+    "seconds": 2.514
+  },
+  "check": {
+    "command": "npm test",
+    "timeoutSeconds": 180,
+    "definitionFile": "package.json",
+    "definitionKind": "package-script",
+    "declared": true,
+    "candidateModifiable": true,
+    "protectedBy": null,
+    "baseExitStatus": 0,
+    "baseOutcome": "pass"
+  },
+  "candidatePolicy": {
+    "allowedPaths": [
+      "**"
+    ],
+    "protectedPaths": []
+  },
+  "frozenInputs": [],
+  "dependencyPreparation": {
+    "attempted": true,
+    "kind": "npm-cache",
+    "plan": {
+      "supported": true,
+      "kind": "npm-cache",
+      "evidence": "package-lock.json",
+      "populateCommand": "npm ci --ignore-scripts --cache /dependency-cache --no-audit --no-fund",
+      "offlineInstallCommand": "npm ci --offline --cache /dependency-cache --no-audit --no-fund"
+    },
+    "cacheSizeBytes": 82297396,
+    "seconds": 9.721,
+    "cachePopulationSeconds": 9.721,
+    "offlineInstallSeconds": 7.974,
+    "totalSeconds": 17.695,
+    "succeeded": true
+  },
+  "sandbox": {
+    "image": "averray-witness-preflight:phase1",
+    "imageId": "sha256:13846375c8a2a2432cf9ea17b2350b79515f54608c0cf736c52c91df89cc5027",
+    "imagePreparation": {
+      "image": "averray-witness-preflight:phase1",
+      "imageId": "sha256:13846375c8a2a2432cf9ea17b2350b79515f54608c0cf736c52c91df89cc5027",
+      "built": false,
+      "seconds": 0.092
+    },
+    "requestedNetworkMode": "none",
+    "observedNetworkMode": "none",
+    "observedInterfaces": [
+      "lo"
+    ],
+    "networkAssertion": "passed"
+  },
+  "attempts": [
+    {
+      "phase": "unprepared-check",
+      "checkAttempt": true,
+      "networkMode": "none",
+      "networkInterfaces": [
+        "lo"
+      ],
+      "networkAssertionPassed": true,
+      "exitCode": 127,
+      "signal": null,
+      "timedOut": false,
+      "outputTruncated": false,
+      "seconds": 0.164,
+      "stdout": "\n> alethe@1.5.0 test\n> vitest run\n\n",
+      "stderr": "AVERRAY_NETWORK_INTERFACES=lo\nsh: 1: vitest: not found\n",
+      "spawnError": null
+    },
+    {
+      "phase": "cache-population",
+      "checkAttempt": false,
+      "networkMode": "bridge",
+      "networkInterfaces": [],
+      "networkAssertionPassed": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "outputTruncated": false,
+      "seconds": 9.721,
+      "stdout": "\nadded 522 packages in 10s\n",
+      "stderr": "npm warn deprecated whatwg-encoding@3.1.1: Use @exodus/bytes instead for a more spec-conformant and faster implementation\n",
+      "spawnError": null
+    },
+    {
+      "phase": "offline-dependency-install",
+      "checkAttempt": false,
+      "networkMode": "none",
+      "networkInterfaces": [
+        "lo"
+      ],
+      "networkAssertionPassed": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "outputTruncated": false,
+      "seconds": 7.974,
+      "stdout": "\nadded 522 packages in 8s\n",
+      "stderr": "AVERRAY_NETWORK_INTERFACES=lo\nnpm warn deprecated whatwg-encoding@3.1.1: Use @exodus/bytes instead for a more spec-conformant and faster implementation\n",
+      "spawnError": null
+    },
+    {
+      "phase": "prepared-check",
+      "checkAttempt": true,
+      "networkMode": "none",
+      "networkInterfaces": [
+        "lo"
+      ],
+      "networkAssertionPassed": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "outputTruncated": false,
+      "seconds": 23.486,
+      "stdout": "\n> alethe@1.5.0 test\n> vitest run\n\n\n\u001b[1m\u001b[30m\u001b[46m RUN \u001b[49m\u001b[39m\u001b[22m \u001b[36mv4.1.10 \u001b[39m\u001b[90m/workspace\u001b[39m\n\n \u001b[32m✓\u001b[39m src/lib/spawnQueue.test.ts \u001b[2m(\u001b[22m\u001b[2m8 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 4\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/gridLayout.test.ts \u001b[2m(\u001b[22m\u001b[2m10 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 4\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/closeCoordinator.test.ts \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 3\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/workspaceNavigation.test.ts \u001b[2m(\u001b[22m\u001b[2m4 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 3\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/mountQueue.test.ts \u001b[2m(\u001b[22m\u001b[2m6 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 8\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/components/XTermView/terminalLinks.test.ts \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 4\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/platform.test.ts \u001b[2m(\u001b[22m\u001b[2m13 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 4\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/ttlCache.test.ts \u001b[2m(\u001b[22m\u001b[2m8 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 6\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/components/XTermView/terminalInput.test.ts \u001b[2m(\u001b[22m\u001b[2m12 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 4\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/sessionLaunch.test.ts \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 3\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/cliOpen.test.ts \u001b[2m(\u001b[22m\u001b[2m8 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 3\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/greeting.test.ts \u001b[2m(\u001b[22m\u001b[2m10 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 13\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/paths.test.ts \u001b[2m(\u001b[22m\u001b[2m13 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 4\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/sessionDiscovery.test.ts \u001b[2m(\u001b[22m\u001b[2m4 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 2\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/costFormat.test.ts \u001b[2m(\u001b[22m\u001b[2m9 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 4\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/agentLibrary.test.ts \u001b[2m(\u001b[22m\u001b[2m6 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 4\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/sessionResume.test.ts \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 2\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/features.test.ts \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 3\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/agentRuntimeAdapter.test.ts \u001b[2m(\u001b[22m\u001b[2m4 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 2\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/ghosttyCommand.test.ts \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 2\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/webRect.test.ts \u001b[2m(\u001b[22m\u001b[2m3 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 2\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/todos.test.ts \u001b[2m(\u001b[22m\u001b[2m3 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 2\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/lib/browserUrl.test.ts \u001b[2m(\u001b[22m\u001b[2m3 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[32m 2\u001b[2mms\u001b[22m\u001b[39m\n\n\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m23 passed\u001b[39m\u001b[22m\u001b[90m (23)\u001b[39m\n\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m154 passed\u001b[39m\u001b[22m\u001b[90m (154)\u001b[39m\n\u001b[2m   Start at \u001b[22m 06:31:19\n\u001b[2m   Duration \u001b[22m 23.04s\u001b[2m (transform 413ms, setup 2.75s, import 515ms, tests 88ms, environment 16.82s)\u001b[22m\n\n",
+      "stderr": "AVERRAY_NETWORK_INTERFACES=lo\n",
+      "spawnError": null
+    }
+  ],
+  "corpus": {
+    "why": "Repository referenced by a live Averray platform job.",
+    "source": "live-platform-job"
+  }
+}

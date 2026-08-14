@@ -1,0 +1,102 @@
+{
+  "schemaVersion": "averray.witness.materialization-preflight.v1",
+  "generatedAt": "2026-08-14T06:38:24.220Z",
+  "repo": "expressjs/express",
+  "commit": "a3714473feb3d2908add734d340e7755fd85e0a3",
+  "toolchain": {
+    "kind": "node",
+    "detail": "node",
+    "packageManager": "npm",
+    "detectedBy": [
+      "package.json"
+    ],
+    "additional": []
+  },
+  "classification": "REQUIRES_NETWORK",
+  "classificationReason": "Node dependencies are not frozen by an npm lockfile; observed sh: 1: mocha: not found | > express@5.2.1 test | > mocha --require test/support/env --reporter spec --check-leaks test/ test/acceptance/",
+  "observedFailureReason": "Node dependencies are not frozen by an npm lockfile; observed sh: 1: mocha: not found | > express@5.2.1 test | > mocha --require test/support/env --reporter spec --check-leaks test/ test/acceptance/",
+  "checkCommand": "npm test",
+  "checkCommandExists": true,
+  "baseExitStatus": 127,
+  "basePassed": false,
+  "candidateModifiable": true,
+  "dependencyCacheSizeBytes": 0,
+  "dependencyPreparationSeconds": 0,
+  "totalSeconds": 1.303,
+  "materialization": {
+    "source": "https://github.com/expressjs/express.git",
+    "sourceType": "github",
+    "seconds": 0.92
+  },
+  "check": {
+    "command": "npm test",
+    "timeoutSeconds": 180,
+    "definitionFile": "package.json",
+    "definitionKind": "package-script",
+    "declared": true,
+    "candidateModifiable": true,
+    "protectedBy": null,
+    "baseExitStatus": 127,
+    "baseOutcome": "fail"
+  },
+  "candidatePolicy": {
+    "allowedPaths": [
+      "**"
+    ],
+    "protectedPaths": []
+  },
+  "frozenInputs": [],
+  "dependencyPreparation": {
+    "attempted": false,
+    "kind": "none",
+    "plan": {
+      "supported": false,
+      "reason": "Node dependencies are not frozen by an npm lockfile"
+    },
+    "cacheSizeBytes": 0,
+    "seconds": 0,
+    "cachePopulationSeconds": 0,
+    "offlineInstallSeconds": 0,
+    "totalSeconds": 0,
+    "succeeded": false
+  },
+  "sandbox": {
+    "image": "averray-witness-preflight:phase1",
+    "imageId": "sha256:13846375c8a2a2432cf9ea17b2350b79515f54608c0cf736c52c91df89cc5027",
+    "imagePreparation": {
+      "image": "averray-witness-preflight:phase1",
+      "imageId": "sha256:13846375c8a2a2432cf9ea17b2350b79515f54608c0cf736c52c91df89cc5027",
+      "built": false,
+      "seconds": 0.043
+    },
+    "requestedNetworkMode": "none",
+    "observedNetworkMode": "none",
+    "observedInterfaces": [
+      "lo"
+    ],
+    "networkAssertion": "passed"
+  },
+  "attempts": [
+    {
+      "phase": "unprepared-check",
+      "checkAttempt": true,
+      "networkMode": "none",
+      "networkInterfaces": [
+        "lo"
+      ],
+      "networkAssertionPassed": true,
+      "exitCode": 127,
+      "signal": null,
+      "timedOut": false,
+      "outputTruncated": false,
+      "seconds": 0.171,
+      "stdout": "\n> express@5.2.1 test\n> mocha --require test/support/env --reporter spec --check-leaks test/ test/acceptance/\n\n",
+      "stderr": "AVERRAY_NETWORK_INTERFACES=lo\nsh: 1: mocha: not found\n",
+      "spawnError": null
+    }
+  ],
+  "corpus": {
+    "why": "Mature Node project with a genuine, long-lived test suite and an npm lockfile.",
+    "source": "selected-oss"
+  }
+}

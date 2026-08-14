@@ -1,0 +1,99 @@
+{
+  "schemaVersion": "averray.witness.materialization-preflight.v1",
+  "generatedAt": "2026-08-14T06:34:09.489Z",
+  "repo": "depre-dev/averray-send-test",
+  "commit": "42571061ca9b6da8c6aca908f1ee1df1dab4e10a",
+  "toolchain": {
+    "kind": "node",
+    "detail": "node",
+    "packageManager": "npm",
+    "detectedBy": [
+      "package.json"
+    ],
+    "additional": []
+  },
+  "classification": "HERMETIC",
+  "classificationReason": null,
+  "observedFailureReason": null,
+  "checkCommand": "npm test",
+  "checkCommandExists": true,
+  "baseExitStatus": 0,
+  "basePassed": true,
+  "candidateModifiable": true,
+  "dependencyCacheSizeBytes": 0,
+  "dependencyPreparationSeconds": 0,
+  "totalSeconds": 1.225,
+  "materialization": {
+    "source": "https://github.com/depre-dev/averray-send-test.git",
+    "sourceType": "github",
+    "seconds": 0.857
+  },
+  "check": {
+    "command": "npm test",
+    "timeoutSeconds": 180,
+    "definitionFile": "package.json",
+    "definitionKind": "package-script",
+    "declared": true,
+    "candidateModifiable": true,
+    "protectedBy": null,
+    "baseExitStatus": 0,
+    "baseOutcome": "pass"
+  },
+  "candidatePolicy": {
+    "allowedPaths": [
+      "**"
+    ],
+    "protectedPaths": []
+  },
+  "frozenInputs": [],
+  "dependencyPreparation": {
+    "attempted": false,
+    "kind": "none",
+    "plan": null,
+    "cacheSizeBytes": 0,
+    "seconds": 0,
+    "cachePopulationSeconds": 0,
+    "offlineInstallSeconds": 0,
+    "totalSeconds": 0,
+    "succeeded": false
+  },
+  "sandbox": {
+    "image": "averray-witness-preflight:phase1",
+    "imageId": "sha256:13846375c8a2a2432cf9ea17b2350b79515f54608c0cf736c52c91df89cc5027",
+    "imagePreparation": {
+      "image": "averray-witness-preflight:phase1",
+      "imageId": "sha256:13846375c8a2a2432cf9ea17b2350b79515f54608c0cf736c52c91df89cc5027",
+      "built": false,
+      "seconds": 0.042
+    },
+    "requestedNetworkMode": "none",
+    "observedNetworkMode": "none",
+    "observedInterfaces": [
+      "lo"
+    ],
+    "networkAssertion": "passed"
+  },
+  "attempts": [
+    {
+      "phase": "unprepared-check",
+      "checkAttempt": true,
+      "networkMode": "none",
+      "networkInterfaces": [
+        "lo"
+      ],
+      "networkAssertionPassed": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "outputTruncated": false,
+      "seconds": 0.227,
+      "stdout": "\n> averray-send-test@1.0.0 test\n> node --test\n\nTAP version 13\n# Subtest: parses a single unit\nok 1 - parses a single unit\n  ---\n  duration_ms: 0.46475\n  type: 'test'\n  ...\n# Subtest: parses combined units\nok 2 - parses combined units\n  ---\n  duration_ms: 0.067791\n  type: 'test'\n  ...\n# Subtest: formats milliseconds back to a compact string\nok 3 - formats milliseconds back to a compact string\n  ---\n  duration_ms: 0.067667\n  type: 'test'\n  ...\n# Subtest: round-trips a combined duration\nok 4 - round-trips a combined duration\n  ---\n  duration_ms: 0.063291\n  type: 'test'\n  ...\n1..4\n# tests 4\n# suites 0\n# pass 4\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 46.673909\n",
+      "stderr": "AVERRAY_NETWORK_INTERFACES=lo\n",
+      "spawnError": null
+    }
+  ],
+  "corpus": {
+    "why": "Repository referenced by a live Averray platform job.",
+    "source": "live-platform-job"
+  }
+}

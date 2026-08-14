@@ -1,0 +1,154 @@
+{
+  "schemaVersion": "averray.witness.materialization-preflight.v1",
+  "generatedAt": "2026-08-14T06:34:10.718Z",
+  "repo": "averray-agent/agent",
+  "commit": "4be77fb73f5fade83164dbc8878d43a02107d1e4",
+  "toolchain": {
+    "kind": "node",
+    "detail": "node",
+    "packageManager": "npm",
+    "detectedBy": [
+      "package.json"
+    ],
+    "additional": []
+  },
+  "classification": "FROZEN_DEPENDENCIES",
+  "classificationReason": null,
+  "observedFailureReason": null,
+  "checkCommand": "npm test",
+  "checkCommandExists": true,
+  "baseExitStatus": 1,
+  "basePassed": false,
+  "candidateModifiable": true,
+  "dependencyCacheSizeBytes": 263378946,
+  "dependencyPreparationSeconds": 129.896,
+  "totalSeconds": 248.24,
+  "materialization": {
+    "source": "https://github.com/averray-agent/agent.git",
+    "sourceType": "github",
+    "seconds": 2.507
+  },
+  "check": {
+    "command": "npm test",
+    "timeoutSeconds": 180,
+    "definitionFile": "package.json",
+    "definitionKind": "package-script",
+    "declared": true,
+    "candidateModifiable": true,
+    "protectedBy": null,
+    "baseExitStatus": 1,
+    "baseOutcome": "fail"
+  },
+  "candidatePolicy": {
+    "allowedPaths": [
+      "**"
+    ],
+    "protectedPaths": []
+  },
+  "frozenInputs": [],
+  "dependencyPreparation": {
+    "attempted": true,
+    "kind": "npm-cache",
+    "plan": {
+      "supported": true,
+      "kind": "npm-cache",
+      "evidence": "package-lock.json",
+      "populateCommand": "npm ci --ignore-scripts --cache /dependency-cache --no-audit --no-fund",
+      "offlineInstallCommand": "npm ci --offline --cache /dependency-cache --no-audit --no-fund"
+    },
+    "cacheSizeBytes": 263378946,
+    "seconds": 35.574,
+    "cachePopulationSeconds": 35.574,
+    "offlineInstallSeconds": 94.322,
+    "totalSeconds": 129.896,
+    "succeeded": true
+  },
+  "sandbox": {
+    "image": "averray-witness-preflight:phase1",
+    "imageId": "sha256:13846375c8a2a2432cf9ea17b2350b79515f54608c0cf736c52c91df89cc5027",
+    "imagePreparation": {
+      "image": "averray-witness-preflight:phase1",
+      "imageId": "sha256:13846375c8a2a2432cf9ea17b2350b79515f54608c0cf736c52c91df89cc5027",
+      "built": false,
+      "seconds": 0.044
+    },
+    "requestedNetworkMode": "none",
+    "observedNetworkMode": "none",
+    "observedInterfaces": [
+      "lo"
+    ],
+    "networkAssertion": "passed"
+  },
+  "attempts": [
+    {
+      "phase": "unprepared-check",
+      "checkAttempt": true,
+      "networkMode": "none",
+      "networkInterfaces": [
+        "lo"
+      ],
+      "networkAssertionPassed": true,
+      "exitCode": 1,
+      "signal": null,
+      "timedOut": false,
+      "outputTruncated": false,
+      "seconds": 5.236,
+      "stdout": "[truncated to final 8000 characters]\ns.test.js\n  ---\n  duration_ms: 22.119413\n  type: 'test'\n  location: '/workspace/mcp-server/src/services/usdc-liquidity-status.test.js:1:1'\n  failureType: 'testCodeFailure'\n  exitCode: 1\n  signal: ~\n  error: 'test failed'\n  code: 'ERR_TEST_FAILURE'\n  ...\n# node:internal/modules/package_json_reader:314\n#   throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);\n#         ^\n# Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'redis' imported from /workspace/mcp-server/src/core/state-store.js\n#     at Object.getPackageJSONURL (node:internal/modules/package_json_reader:314:9)\n#     at packageResolve (node:internal/modules/esm/resolve:768:81)\n#     at moduleResolve (node:internal/modules/esm/resolve:855:18)\n#     at defaultResolve (node:internal/modules/esm/resolve:985:11)\n#     at \\#cachedDefaultResolve (node:internal/modules/esm/loader:747:20)\n#     at ModuleLoader.resolve (node:internal/modules/esm/loader:724:38)\n#     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:320:38)\n#     at ModuleJob._link (node:internal/modules/esm/module_job:182:49) {\n#   code: 'ERR_MODULE_NOT_FOUND'\n# }\n# Node.js v22.23.2\n# Subtest: src/services/verification-ingestion-service.test.js\nnot ok 130 - src/services/verification-ingestion-service.test.js\n  ---\n  duration_ms: 39.517036\n  type: 'test'\n  location: '/workspace/mcp-server/src/services/verification-ingestion-service.test.js:1:1'\n  failureType: 'testCodeFailure'\n  exitCode: 1\n  signal: ~\n  error: 'test failed'\n  code: 'ERR_TEST_FAILURE'\n  ...\n# node:internal/modules/package_json_reader:314\n#   throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);\n#         ^\n# Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'redis' imported from /workspace/mcp-server/src/core/state-store.js\n#     at Object.getPackageJSONURL (node:internal/modules/package_json_reader:314:9)\n#     at packageResolve (node:internal/modules/esm/resolve:768:81)\n#     at moduleResolve (node:internal/modules/esm/resolve:855:18)\n#     at defaultResolve (node:internal/modules/esm/resolve:985:11)\n#     at \\#cachedDefaultResolve (node:internal/modules/esm/loader:747:20)\n#     at ModuleLoader.resolve (node:internal/modules/esm/loader:724:38)\n#     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:320:38)\n#     at ModuleJob._link (node:internal/modules/esm/module_job:182:49) {\n#   code: 'ERR_MODULE_NOT_FOUND'\n# }\n# Node.js v22.23.2\n# Subtest: src/services/verifier-service.test.js\nnot ok 131 - src/services/verifier-service.test.js\n  ---\n  duration_ms: 48.600492\n  type: 'test'\n  location: '/workspace/mcp-server/src/services/verifier-service.test.js:1:1'\n  failureType: 'testCodeFailure'\n  exitCode: 1\n  signal: ~\n  error: 'test failed'\n  code: 'ERR_TEST_FAILURE'\n  ...\n# node:internal/modules/package_json_reader:314\n#   throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);\n#         ^\n# Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'ethers' imported from /workspace/mcp-server/src/core/job-schema-registration.js\n#     at Object.getPackageJSONURL (node:internal/modules/package_json_reader:314:9)\n#     at packageResolve (node:internal/modules/esm/resolve:768:81)\n#     at moduleResolve (node:internal/modules/esm/resolve:855:18)\n#     at defaultResolve (node:internal/modules/esm/resolve:985:11)\n#     at \\#cachedDefaultResolve (node:internal/modules/esm/loader:747:20)\n#     at ModuleLoader.resolve (node:internal/modules/esm/loader:724:38)\n#     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:320:38)\n#     at ModuleJob._link (node:internal/modules/esm/module_job:182:49) {\n#   code: 'ERR_MODULE_NOT_FOUND'\n# }\n# Node.js v22.23.2\n# Subtest: src/services/wikipedia-maintenance-ingestion-scheduler.test.js\nnot ok 132 - src/services/wikipedia-maintenance-ingestion-scheduler.test.js\n  ---\n  duration_ms: 37.987036\n  type: 'test'\n  location: '/workspace/mcp-server/src/services/wikipedia-maintenance-ingestion-scheduler.test.js:1:1'\n  failureType: 'testCodeFailure'\n  exitCode: 1\n  signal: ~\n  error: 'test failed'\n  code: 'ERR_TEST_FAILURE'\n  ...\n# node:internal/modules/package_json_reader:314\n#   throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);\n#         ^\n# Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'ethers' imported from /workspace/mcp-server/src/services/xcm-balance-observer.test.js\n#     at Object.getPackageJSONURL (node:internal/modules/package_json_reader:314:9)\n#     at packageResolve (node:internal/modules/esm/resolve:768:81)\n#     at moduleResolve (node:internal/modules/esm/resolve:855:18)\n#     at defaultResolve (node:internal/modules/esm/resolve:985:11)\n#     at \\#cachedDefaultResolve (node:internal/modules/esm/loader:747:20)\n#     at ModuleLoader.resolve (node:internal/modules/esm/loader:724:38)\n#     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:320:38)\n#     at ModuleJob._link (node:internal/modules/esm/module_job:182:49) {\n#   code: 'ERR_MODULE_NOT_FOUND'\n# }\n# Node.js v22.23.2\n# Subtest: src/services/xcm-balance-observer.test.js\nnot ok 133 - src/services/xcm-balance-observer.test.js\n  ---\n  duration_ms: 32.235287\n  type: 'test'\n  location: '/workspace/mcp-server/src/services/xcm-balance-observer.test.js:1:1'\n  failureType: 'testCodeFailure'\n  exitCode: 1\n  signal: ~\n  error: 'test failed'\n  code: 'ERR_TEST_FAILURE'\n  ...\n# node:internal/modules/package_json_reader:314\n#   throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);\n#         ^\n# Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'redis' imported from /workspace/mcp-server/src/core/state-store.js\n#     at Object.getPackageJSONURL (node:internal/modules/package_json_reader:314:9)\n#     at packageResolve (node:internal/modules/esm/resolve:768:81)\n#     at moduleResolve (node:internal/modules/esm/resolve:855:18)\n#     at defaultResolve (node:internal/modules/esm/resolve:985:11)\n#     at \\#cachedDefaultResolve (node:internal/modules/esm/loader:747:20)\n#     at ModuleLoader.resolve (node:internal/modules/esm/loader:724:38)\n#     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:320:38)\n#     at ModuleJob._link (node:internal/modules/esm/module_job:182:49) {\n#   code: 'ERR_MODULE_NOT_FOUND'\n# }\n# Node.js v22.23.2\n# Subtest: src/services/xcm-observation-relay.test.js\nnot ok 134 - src/services/xcm-observation-relay.test.js\n  ---\n  duration_ms: 25.663913\n  type: 'test'\n  location: '/workspace/mcp-server/src/services/xcm-observation-relay.test.js:1:1'\n  failureType: 'testCodeFailure'\n  exitCode: 1\n  signal: ~\n  error: 'test failed'\n  code: 'ERR_TEST_FAILURE'\n  ...\n# node:internal/modules/package_json_reader:314\n#   throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);\n#         ^\n# Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'redis' imported from /workspace/mcp-server/src/core/state-store.js\n#     at Object.getPackageJSONURL (node:internal/modules/package_json_reader:314:9)\n#     at packageResolve (node:internal/modules/esm/resolve:768:81)\n#     at moduleResolve (node:internal/modules/esm/resolve:855:18)\n#     at defaultResolve (node:internal/modules/esm/resolve:985:11)\n#     at \\#cachedDefaultResolve (node:internal/modules/esm/loader:747:20)\n#     at ModuleLoader.resolve (node:internal/modules/esm/loader:724:38)\n#     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:320:38)\n#     at ModuleJob._link (node:internal/modules/esm/module_job:182:49) {\n#   code: 'ERR_MODULE_NOT_FOUND'\n# }\n# Node.js v22.23.2\n# Subtest: src/services/xcm-settlement-watcher.test.js\nnot ok 135 - src/services/xcm-settlement-watcher.test.js\n  ---\n  duration_ms: 24.477121\n  type: 'test'\n  location: '/workspace/mcp-server/src/services/xcm-settlement-watcher.test.js:1:1'\n  failureType: 'testCodeFailure'\n  exitCode: 1\n  signal: ~\n  error: 'test failed'\n  code: 'ERR_TEST_FAILURE'\n  ...\n1..504\n# tests 504\n# suites 0\n# pass 411\n# fail 93\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 4801.244382\n",
+      "stderr": "AVERRAY_NETWORK_INTERFACES=lo\nnpm error Lifecycle script `test:unit` failed with error:\nnpm error code 1\nnpm error path /workspace/mcp-server\nnpm error workspace @polkadot/agent-platform-server@0.1.0\nnpm error location /workspace/mcp-server\nnpm error command failed\nnpm error command sh -c node --test src/**/*.test.js\nnpm error Lifecycle script `test` failed with error:\nnpm error code 1\nnpm error path /workspace/mcp-server\nnpm error workspace @polkadot/agent-platform-server@0.1.0\nnpm error location /workspace/mcp-server\nnpm error command failed\nnpm error command sh -c npm run test:unit && npm run test:http-smoke\n",
+      "spawnError": null
+    },
+    {
+      "phase": "cache-population",
+      "checkAttempt": false,
+      "networkMode": "bridge",
+      "networkInterfaces": [],
+      "networkAssertionPassed": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "outputTruncated": false,
+      "seconds": 35.574,
+      "stdout": "\nadded 1220 packages in 35s\n",
+      "stderr": "npm warn reify Removing non-directory /workspace/node_modules\nnpm warn deprecated prebuild-install@7.1.3: No longer maintained. Please contact the author of the relevant native addon; alternatives are available.\nnpm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.\nnpm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead\nnpm warn deprecated @substrate/connect@0.8.11: versions below 1.x are no longer maintained\nnpm warn deprecated glob@10.5.0: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me\n",
+      "spawnError": null
+    },
+    {
+      "phase": "offline-dependency-install",
+      "checkAttempt": false,
+      "networkMode": "none",
+      "networkInterfaces": [
+        "lo"
+      ],
+      "networkAssertionPassed": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "outputTruncated": false,
+      "seconds": 94.322,
+      "stdout": "\nadded 1220 packages in 2m\n",
+      "stderr": "AVERRAY_NETWORK_INTERFACES=lo\nnpm warn deprecated prebuild-install@7.1.3: No longer maintained. Please contact the author of the relevant native addon; alternatives are available.\nnpm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.\nnpm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead\nnpm warn deprecated @substrate/connect@0.8.11: versions below 1.x are no longer maintained\nnpm warn deprecated glob@10.5.0: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me\n",
+      "spawnError": null
+    },
+    {
+      "phase": "prepared-check",
+      "checkAttempt": true,
+      "networkMode": "none",
+      "networkInterfaces": [
+        "lo"
+      ],
+      "networkAssertionPassed": true,
+      "exitCode": 1,
+      "signal": null,
+      "timedOut": false,
+      "outputTruncated": false,
+      "seconds": 104.987,
+      "stdout": "[truncated to final 8000 characters]\ning replay\n  ---\n  duration_ms: 0.255995\n  type: 'test'\n  ...\n# Subtest: same request id from a foreign wrapper cannot suppress the current observation\nok 1655 - same request id from a foreign wrapper cannot suppress the current observation\n  ---\n  duration_ms: 0.118081\n  type: 'test'\n  ...\n1..1655\n# tests 1660\n# suites 0\n# pass 1660\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 44343.210814\n\n> @polkadot/agent-platform-server@0.1.0 test:http-smoke\n> RUN_HTTP_SMOKE=1 node --test --test-timeout=60000 src/protocols/http/server.smoke.test.js\n\nTAP version 13\n# Subtest: http smoke: production active money-like routes require a chain backend\nok 1 - http smoke: production active money-like routes require a chain backend\n  ---\n  duration_ms: 1766.225222\n  type: 'test'\n  ...\n# Subtest: http smoke: /health separates service liveness from treasury capability\nok 2 - http smoke: /health separates service liveness from treasury capability\n  ---\n  duration_ms: 1741.333016\n  type: 'test'\n  ...\n# Subtest: http smoke: active sync money-like routes replay idempotent receipts\nok 3 - http smoke: active sync money-like routes replay idempotent receipts\n  ---\n  duration_ms: 1766.589828\n  type: 'test'\n  ...\n# Subtest: http smoke: /admin/jobs rejects unauthenticated requests\nok 4 - http smoke: /admin/jobs rejects unauthenticated requests\n  ---\n  duration_ms: 1733.273533\n  type: 'test'\n  ...\n# Subtest: http smoke: /admin/jobs rejects non-admin token\nok 5 - http smoke: /admin/jobs rejects non-admin token\n  ---\n  duration_ms: 1739.720053\n  type: 'test'\n  ...\n# Subtest: http smoke: /admin/jobs accepts admin-scoped token\nok 6 - http smoke: /admin/jobs accepts admin-scoped token\n  ---\n  duration_ms: 1738.503005\n  type: 'test'\n  ...\n# Subtest: http smoke: /jobs/validate-submission validates draft output before claim\nok 7 - http smoke: /jobs/validate-submission validates draft output before claim\n  ---\n  duration_ms: 1745.838166\n  type: 'test'\n  ...\n# Subtest: http smoke: /admin/jobs/timeline exposes job lineage\nok 8 - http smoke: /admin/jobs/timeline exposes job lineage\n  ---\n  duration_ms: 1443.558245\n  type: 'test'\n  ...\n# Subtest: http smoke: /admin/sessions exposes operator-wide session activity\nok 9 - http smoke: /admin/sessions exposes operator-wide session activity\n  ---\n  duration_ms: 1750.28751\n  type: 'test'\n  ...\n# Subtest: http smoke: /jobs/sub lets active workers create funded child jobs\nok 10 - http smoke: /jobs/sub lets active workers create funded child jobs\n  ---\n  duration_ms: 1754.599814\n  type: 'test'\n  ...\n# Subtest: http smoke: /admin/status returns recurring + maintenance data for admin tokens\nok 11 - http smoke: /admin/status returns recurring + maintenance data for admin tokens\n  ---\n  duration_ms: 1768.270275\n  type: 'test'\n  ...\n# Subtest: http smoke: /admin/treasury/summary stays available when live feeds warn\nok 12 - http smoke: /admin/treasury/summary stays available when live feeds warn\n  ---\n  duration_ms: 1733.965989\n  type: 'test'\n  ...\n# Subtest: http smoke: static retired notice needs no auth, leaks nothing, and is outside money-like classification\nok 13 - http smoke: static retired notice needs no auth, leaks nothing, and is outside money-like classification\n  ---\n  duration_ms: 1743.343903\n  type: 'test'\n  ...\n# Subtest: http smoke: admin XCM observation idempotency guards payload drift\nok 14 - http smoke: admin XCM observation idempotency guards payload drift\n  ---\n  duration_ms: 1847.604567\n  type: 'test'\n  ...\n# Subtest: http smoke: /auth/nonce returns 429 once the window limit is crossed\nok 15 - http smoke: /auth/nonce returns 429 once the window limit is crossed\n  ---\n  duration_ms: 1889.363011\n  type: 'test'\n  ...\n# Subtest: http smoke: OPTIONS preflight returns CORS headers only for allowed origins\nok 16 - http smoke: OPTIONS preflight returns CORS headers only for allowed origins\n  ---\n  duration_ms: 1834.674565\n  type: 'test'\n  ...\n# Subtest: http smoke: /auth/logout revokes the current token\nok 17 - http smoke: /auth/logout revokes the current token\n  ---\n  duration_ms: 1848.486915\n  type: 'test'\n  ...\n# Subtest: http smoke: /auth/refresh rotates the wallet token and revokes the old jti\nok 18 - http smoke: /auth/refresh rotates the wallet token and revokes the old jti\n  ---\n  duration_ms: 1746.499048\n  type: 'test'\n  ...\n# Subtest: http smoke: /auth/refresh rejects service tokens with service_token_refresh_unsupported\nok 19 - http smoke: /auth/refresh rejects service tokens with service_token_refresh_unsupported\n  ---\n  duration_ms: 1940.61336\n  type: 'test'\n  ...\n# Subtest: http smoke: /auth/refresh rejects an unauthenticated caller\nok 20 - http smoke: /auth/refresh rejects an unauthenticated caller\n  ---\n  duration_ms: 1734.536673\n  type: 'test'\n  ...\n# Subtest: http smoke: /account/borrow-capacity returns the signed-in wallet headroom\nok 21 - http smoke: /account/borrow-capacity returns the signed-in wallet headroom\n  ---\n  duration_ms: 1841.692365\n  type: 'test'\n  ...\n# Subtest: http smoke: /badges/:sessionId returns 404 for unknown sessions\nok 22 - http smoke: /badges/:sessionId returns 404 for unknown sessions\n  ---\n  duration_ms: 1837.809832\n  type: 'test'\n  ...\n# Subtest: http smoke: /badges/:sessionId returns schema-compliant JSON for approved sessions\nok 23 - http smoke: /badges/:sessionId returns schema-compliant JSON for approved sessions\n  ---\n  duration_ms: 1876.760969\n  type: 'test'\n  ...\n# Subtest: http smoke: /agents/:wallet returns a v1 profile for a fresh wallet\nok 24 - http smoke: /agents/:wallet returns a v1 profile for a fresh wallet\n  ---\n  duration_ms: 1844.597998\n  type: 'test'\n  ...\n# Subtest: http smoke: /agents/:wallet aggregates approved sessions into badges\nok 25 - http smoke: /agents/:wallet aggregates approved sessions into badges\n  ---\n  duration_ms: 1861.90595\n  type: 'test'\n  ...\n# Subtest: http smoke: /agents exposes a claimed session as current activity\nok 26 - http smoke: /agents exposes a claimed session as current activity\n  ---\n  duration_ms: 1848.55488\n  type: 'test'\n  ...\n# Subtest: http smoke: /disputes exposes human-review sessions and records verdict/release receipts\nok 27 - http smoke: /disputes exposes human-review sessions and records verdict/release receipts\n  ---\n  duration_ms: 1897.764295\n  type: 'test'\n  ...\n# Subtest: http smoke: operator policy, alert, and audit endpoints are available\nok 28 - http smoke: operator policy, alert, and audit endpoints are available\n  ---\n  duration_ms: 1849.083451\n  type: 'test'\n  ...\n# Subtest: http smoke: /agents/:wallet rejects non-address path segments\nok 29 - http smoke: /agents/:wallet rejects non-address path segments\n  ---\n  duration_ms: 1734.066839\n  type: 'test'\n  ...\n# Subtest: http smoke: /payments/send moves liquid balance between agent accounts\nok 30 - http smoke: /payments/send moves liquid balance between agent accounts\n  ---\n  duration_ms: 1737.557658\n  type: 'test'\n  ...\n# Subtest: http smoke: /payments/send rejects self-transfer\nok 31 - http smoke: /payments/send rejects self-transfer\n  ---\n  duration_ms: 1637.03005\n  type: 'test'\n  ...\n# Subtest: http smoke: /strategies is a static retirement notice when STRATEGIES_JSON is unset\nok 32 - http smoke: /strategies is a static retirement notice when STRATEGIES_JSON is unset\n  ---\n  duration_ms: 2153.264634\n  type: 'test'\n  ...\n# Subtest: http smoke: /jobs/tiers returns the public tier ladder without auth\nok 33 - http smoke: /jobs/tiers returns the public tier ladder without auth\n  ---\n  duration_ms: 1632.353645\n  type: 'test'\n  ...\n# Subtest: src/protocols/http/server.smoke.test.js\nnot ok 1 - src/protocols/http/server.smoke.test.js\n  ---\n  duration_ms: 60002.551138\n  type: 'test'\n  location: '/workspace/mcp-server/src/protocols/http/server.smoke.test.js:1:1'\n  failureType: 'testTimeoutFailure'\n  error: 'test timed out after 60000ms'\n  code: 'ERR_TEST_FAILURE'\n  ...\n1..34\n# tests 34\n# suites 0\n# pass 33\n# fail 0\n# cancelled 1\n# skipped 0\n# todo 0\n# duration_ms 60008.439107\n",
+      "stderr": "AVERRAY_NETWORK_INTERFACES=lo\nnpm error Lifecycle script `test:http-smoke` failed with error:\nnpm error code 1\nnpm error path /workspace/mcp-server\nnpm error workspace @polkadot/agent-platform-server@0.1.0\nnpm error location /workspace/mcp-server\nnpm error command failed\nnpm error command sh -c RUN_HTTP_SMOKE=1 node --test --test-timeout=60000 src/protocols/http/server.smoke.test.js\nnpm error Lifecycle script `test` failed with error:\nnpm error code 1\nnpm error path /workspace/mcp-server\nnpm error workspace @polkadot/agent-platform-server@0.1.0\nnpm error location /workspace/mcp-server\nnpm error command failed\nnpm error command sh -c npm run test:unit && npm run test:http-smoke\n",
+      "spawnError": null
+    }
+  ],
+  "corpus": {
+    "why": "The platform repository itself is the required control.",
+    "source": "platform"
+  }
+}

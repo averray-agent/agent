@@ -1,0 +1,154 @@
+{
+  "schemaVersion": "averray.witness.materialization-preflight.v1",
+  "generatedAt": "2026-08-14T06:32:04.366Z",
+  "repo": "depre-dev/averray-reference-agent",
+  "commit": "de984e310f9c8dedfe775e2474b1411716675ebb",
+  "toolchain": {
+    "kind": "node",
+    "detail": "node",
+    "packageManager": "npm",
+    "detectedBy": [
+      "package.json"
+    ],
+    "additional": []
+  },
+  "classification": "FROZEN_DEPENDENCIES",
+  "classificationReason": null,
+  "observedFailureReason": null,
+  "checkCommand": "npm test",
+  "checkCommandExists": true,
+  "baseExitStatus": 1,
+  "basePassed": false,
+  "candidateModifiable": true,
+  "dependencyCacheSizeBytes": 37055307,
+  "dependencyPreparationSeconds": 17.233,
+  "totalSeconds": 124.028,
+  "materialization": {
+    "source": "https://github.com/depre-dev/averray-reference-agent.git",
+    "sourceType": "github",
+    "seconds": 1.395
+  },
+  "check": {
+    "command": "npm test",
+    "timeoutSeconds": 180,
+    "definitionFile": "package.json",
+    "definitionKind": "package-script",
+    "declared": true,
+    "candidateModifiable": true,
+    "protectedBy": null,
+    "baseExitStatus": 1,
+    "baseOutcome": "fail"
+  },
+  "candidatePolicy": {
+    "allowedPaths": [
+      "**"
+    ],
+    "protectedPaths": []
+  },
+  "frozenInputs": [],
+  "dependencyPreparation": {
+    "attempted": true,
+    "kind": "npm-cache",
+    "plan": {
+      "supported": true,
+      "kind": "npm-cache",
+      "evidence": "package-lock.json",
+      "populateCommand": "npm ci --ignore-scripts --cache /dependency-cache --no-audit --no-fund",
+      "offlineInstallCommand": "npm ci --offline --cache /dependency-cache --no-audit --no-fund"
+    },
+    "cacheSizeBytes": 37055307,
+    "seconds": 8.986,
+    "cachePopulationSeconds": 8.986,
+    "offlineInstallSeconds": 8.247,
+    "totalSeconds": 17.233,
+    "succeeded": true
+  },
+  "sandbox": {
+    "image": "averray-witness-preflight:phase1",
+    "imageId": "sha256:13846375c8a2a2432cf9ea17b2350b79515f54608c0cf736c52c91df89cc5027",
+    "imagePreparation": {
+      "image": "averray-witness-preflight:phase1",
+      "imageId": "sha256:13846375c8a2a2432cf9ea17b2350b79515f54608c0cf736c52c91df89cc5027",
+      "built": false,
+      "seconds": 0.04
+    },
+    "requestedNetworkMode": "none",
+    "observedNetworkMode": "none",
+    "observedInterfaces": [
+      "lo"
+    ],
+    "networkAssertion": "passed"
+  },
+  "attempts": [
+    {
+      "phase": "unprepared-check",
+      "checkAttempt": true,
+      "networkMode": "none",
+      "networkInterfaces": [
+        "lo"
+      ],
+      "networkAssertionPassed": true,
+      "exitCode": 127,
+      "signal": null,
+      "timedOut": false,
+      "outputTruncated": false,
+      "seconds": 0.158,
+      "stdout": "\n> averray-reference-agent@0.1.0 test\n> vitest run\n\n",
+      "stderr": "AVERRAY_NETWORK_INTERFACES=lo\nsh: 1: vitest: not found\n",
+      "spawnError": null
+    },
+    {
+      "phase": "cache-population",
+      "checkAttempt": false,
+      "networkMode": "bridge",
+      "networkInterfaces": [],
+      "networkAssertionPassed": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "outputTruncated": false,
+      "seconds": 8.986,
+      "stdout": "\nadded 313 packages in 9s\n",
+      "stderr": "npm warn deprecated whatwg-encoding@3.1.1: Use @exodus/bytes instead for a more spec-conformant and faster implementation\n",
+      "spawnError": null
+    },
+    {
+      "phase": "offline-dependency-install",
+      "checkAttempt": false,
+      "networkMode": "none",
+      "networkInterfaces": [
+        "lo"
+      ],
+      "networkAssertionPassed": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "outputTruncated": false,
+      "seconds": 8.247,
+      "stdout": "\nadded 313 packages in 8s\n",
+      "stderr": "AVERRAY_NETWORK_INTERFACES=lo\nnpm warn deprecated whatwg-encoding@3.1.1: Use @exodus/bytes instead for a more spec-conformant and faster implementation\n",
+      "spawnError": null
+    },
+    {
+      "phase": "prepared-check",
+      "checkAttempt": true,
+      "networkMode": "none",
+      "networkInterfaces": [
+        "lo"
+      ],
+      "networkAssertionPassed": true,
+      "exitCode": 1,
+      "signal": null,
+      "timedOut": false,
+      "outputTruncated": false,
+      "seconds": 103.413,
+      "stdout": "[truncated to final 8000 characters]\n \u001b[2m(\u001b[22m\u001b[2m3 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 3\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m test/unit/int4d-matrix-runner.test.ts \u001b[2m(\u001b[22m\u001b[2m6 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 157\u001b[2mms\u001b[22m\u001b[39m\n \u001b[31m❯\u001b[39m test/unit/int4-runner-execution-drill.test.ts \u001b[2m(\u001b[22m\u001b[2m2 tests\u001b[22m\u001b[2m | \u001b[22m\u001b[31m2 failed\u001b[39m\u001b[2m)\u001b[22m\u001b[90m 262\u001b[2mms\u001b[22m\u001b[39m\n\u001b[31m   \u001b[31m×\u001b[31m INT-4 runner execution drill\u001b[2m > \u001b[22mmakes broken environment coupling red and intact coupling green\u001b[90m 170\u001b[2mms\u001b[22m\u001b[31m\u001b[39m\n\u001b[31m     → INT4_RUNNER_EXECUTION_COUPLING_CHECK_FAILED suite=INT4B exit=1 expected_reason=INT4B_DRILLS_SKIPPED passed=0 skipped=5 total=5 detail=file:///tmp/int4-runner-drill-raH1BA/scripts/ceremony/run-int4b-drills.mjs:83 throw new Error(`INT4B_DATABASE_START_FAILED boundary=${database}`); ^ Error: INT4B_DATABASE_START_FAILED boundary=reference_int4b at startDatabase (file:///tmp/int4-runner-drill-raH1BA/scripts/ceremony/run-int4b-drills.mjs:83:11) at file:///tmp/int4-runner-drill-raH1BA/scripts/ceremony/run-int4b-drills.mjs:26:3 at ModuleJob.run (node:internal/modules/esm/module_job:343:25) at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26) at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) Node.js v22.23.2\nINT4_RUNNER_EXECUTION_INTACT_CHECK_FAILED suite=INT4B exit=1 expected=INT4B_DRILLS_EXECUTED passed=5 skipped=0 failed=0 total=5 detail=file:///tmp/int4-runner-drill-RKkwag/scripts/ceremony/run-int4b-drills.mjs:83 throw new Error(`INT4B_DATABASE_START_FAILED boundary=${database}`); ^ Error: INT4B_DATABASE_START_FAILED boundary=reference_int4b at startDatabase (file:///tmp/int4-runner-drill-RKkwag/scripts/ceremony/run-int4b-drills.mjs:83:11) at file:///tmp/int4-runner-drill-RKkwag/scripts/ceremony/run-int4b-drills.mjs:26:3 at ModuleJob.run (node:internal/modules/esm/module_job:343:25) at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26) at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) Node.js v22.23.2\nINT4_RUNNER_EXECUTION_COUPLING_CHECK_FAILED suite=INT4C exit=1 expected_reason=INT4C_DRILLS_SKIPPED passed=0 skipped=6 total=6 detail=file:///tmp/int4-runner-drill-00fCGk/scripts/ceremony/run-int4c-drills.mjs:84 throw new Error(`INT4C_DATABASE_START_FAILED boundary=${database}`); ^ Error: INT4C_DATABASE_START_FAILED boundary=reference_int4c at startDatabase (file:///tmp/int4-runner-drill-00fCGk/scripts/ceremony/run-int4c-drills.mjs:84:11) at file:///tmp/int4-runner-drill-00fCGk/scripts/ceremony/run-int4c-drills.mjs:26:3 at ModuleJob.run (node:internal/modules/esm/module_job:343:25) at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26) at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) Node.js v22.23.2\nINT4_RUNNER_EXECUTION_INTACT_CHECK_FAILED suite=INT4C exit=1 expected=INT4C_DRILLS_EXECUTED passed=6 skipped=0 failed=0 total=6 detail=file:///tmp/int4-runner-drill-HAHVYn/scripts/ceremony/run-int4c-drills.mjs:84 throw new Error(`INT4C_DATABASE_START_FAILED boundary=${database}`); ^ Error: INT4C_DATABASE_START_FAILED boundary=reference_int4c at startDatabase (file:///tmp/int4-runner-drill-HAHVYn/scripts/ceremony/run-int4c-drills.mjs:84:11) at file:///tmp/int4-runner-drill-HAHVYn/scripts/ceremony/run-int4c-drills.mjs:26:3 at ModuleJob.run (node:internal/modules/esm/module_job:343:25) at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26) at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) Node.js v22.23.2\nINT4_RUNNER_EXECUTION_COUPLING_CHECK_FAILED suite=INT4D exit=1 expected_reason=INT4D_DRILLS_SKIPPED passed=0 skipped=6 total=6 detail=file:///tmp/int4-runner-drill-uFSjOw/scripts/ceremony/run-int4d-drills.mjs:106 throw new Error(\"INT4D_HARNESS_CHECKOUT_DIRTY\"); ^ Error: INT4D_HARNESS_CHECKOUT_DIRTY at prepareHarnessCheckout (file:///tmp/int4-runner-drill-uFSjOw/scripts/ceremony/run-int4d-drills.mjs:106:11) at file:///tmp/int4-runner-drill-uFSjOw/scripts/ceremony/run-int4d-drills.mjs:36:3 at ModuleJob.run (node:internal/modules/esm/module_job:343:25) at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26) at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) Node.js v22.23.2\nINT4_RUNNER_EXECUTION_INTACT_CHECK_FAILED suite=INT4D exit=1 expected=INT4D_DRILLS_EXECUTED passed=6 skipped=0 failed=0 total=6 detail=file:///tmp/int4-runner-drill-76kDoJ/scripts/ceremony/run-int4d-drills.mjs:106 throw new Error(\"INT4D_HARNESS_CHECKOUT_DIRTY\"); ^ Error: INT4D_HARNESS_CHECKOUT_DIRTY at prepareHarnessCheckout (file:///tmp/int4-runner-drill-76kDoJ/scripts/ceremony/run-int4d-drills.mjs:106:11) at file:///tmp/int4-runner-drill-76kDoJ/scripts/ceremony/run-int4d-drills.mjs:36:3 at ModuleJob.run (node:internal/modules/esm/module_job:343:25) at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26) at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) Node.js v22.23.2\n: expected 1 to be +0 // Object.is equality\u001b[39m\n\u001b[31m   \u001b[31m×\u001b[31m INT-4 runner execution drill\u001b[2m > \u001b[22mfails for every runner when the execution guard is removed\u001b[90m 92\u001b[2mms\u001b[22m\u001b[31m\u001b[39m\n\u001b[31m     → expected +0 not to be +0 // Object.is equality\u001b[39m\n \u001b[32m✓\u001b[39m test/unit/wikipedia-schemas.test.ts \u001b[2m(\u001b[22m\u001b[2m2 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 3\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m test/unit/workspace-path.test.ts \u001b[2m(\u001b[22m\u001b[2m7 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 3\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m test/unit/trace-ingest-errors.test.ts \u001b[2m(\u001b[22m\u001b[2m3 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 1\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m test/unit/logger.test.ts \u001b[2m(\u001b[22m\u001b[2m1 test\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 194\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m test/unit/idempotency.test.ts \u001b[2m(\u001b[22m\u001b[2m2 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 2\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m test/unit/canonical-json.test.ts \u001b[2m(\u001b[22m\u001b[2m1 test\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 7\u001b[2mms\u001b[22m\u001b[39m\n \u001b[31m❯\u001b[39m packages/monitor-ui/src/components/mobile/MobileBoard.test.tsx \u001b[2m(\u001b[22m\u001b[2m0 test\u001b[22m\u001b[2m)\u001b[22m\n \u001b[31m❯\u001b[39m packages/monitor-ui/src/components/ops/OpsBoard.test.tsx \u001b[2m(\u001b[22m\u001b[2m0 test\u001b[22m\u001b[2m)\u001b[22m\n \u001b[32m✓\u001b[39m packages/monitor-ui/src/components/ops/ArrivalsPanel.test.tsx \u001b[2m(\u001b[22m\u001b[2m19 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 96\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m packages/monitor-ui/src/components/ops/BankLane.test.tsx \u001b[2m(\u001b[22m\u001b[2m11 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 33\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m packages/monitor-ui/src/hooks/useMonitorBoard.test.tsx \u001b[2m(\u001b[22m\u001b[2m6 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 270\u001b[2mms\u001b[22m\u001b[39m\n \u001b[31m❯\u001b[39m packages/monitor-ui/src/components/BoardView.ops.test.tsx \u001b[2m(\u001b[22m\u001b[2m0 test\u001b[22m\u001b[2m)\u001b[22m\n \u001b[32m✓\u001b[39m packages/monitor-ui/src/lib/monitor/color-profile.test.ts \u001b[2m(\u001b[22m\u001b[2m8 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 8\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m packages/monitor-ui/src/components/BoardNowBanner.test.tsx \u001b[2m(\u001b[22m\u001b[2m8 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 34\u001b[2mms\u001b[22m\u001b[39m\n \u001b[31m❯\u001b[39m packages/monitor-ui/src/components/ops/DepositPoolTile.test.tsx \u001b[2m(\u001b[22m\u001b[2m0 test\u001b[22m\u001b[2m)\u001b[22m\n \u001b[31m❯\u001b[39m packages/monitor-ui/src/MonitorPage.test.tsx \u001b[2m(\u001b[22m\u001b[2m0 test\u001b[22m\u001b[2m)\u001b[22m\n \u001b[32m✓\u001b[39m packages/monitor-ui/src/components/ui.test.tsx \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 50\u001b[2mms\u001b[22m\u001b[39m\n \u001b[31m❯\u001b[39m packages/monitor-ui/src/components/ChainTicker.test.tsx \u001b[2m(\u001b[22m\u001b[2m0 test\u001b[22m\u001b[2m)\u001b[22m\n \u001b[32m✓\u001b[39m packages/monitor-ui/src/components/ErrorBoundary.test.tsx \u001b[2m(\u001b[22m\u001b[2m2 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 58\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m packages/monitor-ui/src/components/UtilCard.test.tsx \u001b[2m(\u001b[22m\u001b[2m3 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 42\u001b[2mms\u001b[22m\u001b[39m\n\n\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[31m88 failed\u001b[39m\u001b[22m\u001b[2m | \u001b[22m\u001b[1m\u001b[32m122 passed\u001b[39m\u001b[22m\u001b[90m (210)\u001b[39m\n\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[31m10 failed\u001b[39m\u001b[22m\u001b[2m | \u001b[22m\u001b[1m\u001b[32m1558 passed\u001b[39m\u001b[22m\u001b[90m (1568)\u001b[39m\n\u001b[2m   Start at \u001b[22m 06:32:25\n\u001b[2m   Duration \u001b[22m 102.90s\u001b[2m (transform 2.21s, setup 0ms, collect 4.24s, tests 50.84s, environment 11.25s, prepare 14.68s)\u001b[22m\n\n",
+      "stderr": "[truncated to final 8000 characters]\nemony-scripts.test.ts\u001b[2m > \u001b[22mINT-2 suite reaping\u001b[2m > \u001b[22mremoves only the run containers that appeared during the run\n\u001b[31m\u001b[1mAssertionError\u001b[22m: expected [ '' ] to deeply equal [ …(2) ]\u001b[39m\n\n\u001b[32m- Expected\u001b[39m\n\u001b[31m+ Received\u001b[39m\n\n\u001b[2m  Array [\u001b[22m\n\u001b[32m-   \"harness-run-63882cbb-0aa3-5b3b-8459-f11fdb09717b\",\u001b[39m\n\u001b[32m-   \"harness-run-11111111-2222-3333-4444-555555555555-check-1\",\u001b[39m\n\u001b[31m+   \"\",\u001b[39m\n\u001b[2m  ]\u001b[22m\n\n\u001b[36m \u001b[2m❯\u001b[22m test/unit/int2-ceremony-scripts.test.ts:\u001b[2m817:67\u001b[22m\u001b[39m\n    \u001b[90m815| \u001b[39m    \u001b[90m// ids read out of the runs table: verification runs derive ids th\u001b[39m…\n    \u001b[90m816| \u001b[39m    \u001b[90m// table holds, so a query-driven reaper would leak exactly that c\u001b[39m…\n    \u001b[90m817| \u001b[39m    \u001b[34mexpect\u001b[39m((\u001b[35mawait\u001b[39m \u001b[34mreadFile\u001b[39m(removals\u001b[33m,\u001b[39m \u001b[32m\"utf8\"\u001b[39m))\u001b[33m.\u001b[39m\u001b[34mtrim\u001b[39m()\u001b[33m.\u001b[39m\u001b[34msplit\u001b[39m(\u001b[32m\"\\n\"\u001b[39m))\u001b[33m.\u001b[39m\u001b[34mtoEq\u001b[39m…\n    \u001b[90m   | \u001b[39m                                                                  \u001b[31m^\u001b[39m\n    \u001b[90m818| \u001b[39m      \u001b[32m\"harness-run-63882cbb-0aa3-5b3b-8459-f11fdb09717b\"\u001b[39m\u001b[33m,\u001b[39m\n    \u001b[90m819| \u001b[39m      \u001b[32m\"harness-run-11111111-2222-3333-4444-555555555555-check-1\"\u001b[39m\u001b[33m,\u001b[39m\n\n\u001b[31m\u001b[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[34/96]⎯\u001b[22m\u001b[39m\n\n\u001b[31m\u001b[1m\u001b[7m FAIL \u001b[27m\u001b[22m\u001b[39m test/unit/int4-runner-execution-drill.test.ts\u001b[2m > \u001b[22mINT-4 runner execution drill\u001b[2m > \u001b[22mmakes broken environment coupling red and intact coupling green\n\u001b[31m\u001b[1mAssertionError\u001b[22m: INT4_RUNNER_EXECUTION_COUPLING_CHECK_FAILED suite=INT4B exit=1 expected_reason=INT4B_DRILLS_SKIPPED passed=0 skipped=5 total=5 detail=file:///tmp/int4-runner-drill-raH1BA/scripts/ceremony/run-int4b-drills.mjs:83 throw new Error(`INT4B_DATABASE_START_FAILED boundary=${database}`); ^ Error: INT4B_DATABASE_START_FAILED boundary=reference_int4b at startDatabase (file:///tmp/int4-runner-drill-raH1BA/scripts/ceremony/run-int4b-drills.mjs:83:11) at file:///tmp/int4-runner-drill-raH1BA/scripts/ceremony/run-int4b-drills.mjs:26:3 at ModuleJob.run (node:internal/modules/esm/module_job:343:25) at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26) at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) Node.js v22.23.2\nINT4_RUNNER_EXECUTION_INTACT_CHECK_FAILED suite=INT4B exit=1 expected=INT4B_DRILLS_EXECUTED passed=5 skipped=0 failed=0 total=5 detail=file:///tmp/int4-runner-drill-RKkwag/scripts/ceremony/run-int4b-drills.mjs:83 throw new Error(`INT4B_DATABASE_START_FAILED boundary=${database}`); ^ Error: INT4B_DATABASE_START_FAILED boundary=reference_int4b at startDatabase (file:///tmp/int4-runner-drill-RKkwag/scripts/ceremony/run-int4b-drills.mjs:83:11) at file:///tmp/int4-runner-drill-RKkwag/scripts/ceremony/run-int4b-drills.mjs:26:3 at ModuleJob.run (node:internal/modules/esm/module_job:343:25) at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26) at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) Node.js v22.23.2\nINT4_RUNNER_EXECUTION_COUPLING_CHECK_FAILED suite=INT4C exit=1 expected_reason=INT4C_DRILLS_SKIPPED passed=0 skipped=6 total=6 detail=file:///tmp/int4-runner-drill-00fCGk/scripts/ceremony/run-int4c-drills.mjs:84 throw new Error(`INT4C_DATABASE_START_FAILED boundary=${database}`); ^ Error: INT4C_DATABASE_START_FAILED boundary=reference_int4c at startDatabase (file:///tmp/int4-runner-drill-00fCGk/scripts/ceremony/run-int4c-drills.mjs:84:11) at file:///tmp/int4-runner-drill-00fCGk/scripts/ceremony/run-int4c-drills.mjs:26:3 at ModuleJob.run (node:internal/modules/esm/module_job:343:25) at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26) at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) Node.js v22.23.2\nINT4_RUNNER_EXECUTION_INTACT_CHECK_FAILED suite=INT4C exit=1 expected=INT4C_DRILLS_EXECUTED passed=6 skipped=0 failed=0 total=6 detail=file:///tmp/int4-runner-drill-HAHVYn/scripts/ceremony/run-int4c-drills.mjs:84 throw new Error(`INT4C_DATABASE_START_FAILED boundary=${database}`); ^ Error: INT4C_DATABASE_START_FAILED boundary=reference_int4c at startDatabase (file:///tmp/int4-runner-drill-HAHVYn/scripts/ceremony/run-int4c-drills.mjs:84:11) at file:///tmp/int4-runner-drill-HAHVYn/scripts/ceremony/run-int4c-drills.mjs:26:3 at ModuleJob.run (node:internal/modules/esm/module_job:343:25) at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26) at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) Node.js v22.23.2\nINT4_RUNNER_EXECUTION_COUPLING_CHECK_FAILED suite=INT4D exit=1 expected_reason=INT4D_DRILLS_SKIPPED passed=0 skipped=6 total=6 detail=file:///tmp/int4-runner-drill-uFSjOw/scripts/ceremony/run-int4d-drills.mjs:106 throw new Error(\"INT4D_HARNESS_CHECKOUT_DIRTY\"); ^ Error: INT4D_HARNESS_CHECKOUT_DIRTY at prepareHarnessCheckout (file:///tmp/int4-runner-drill-uFSjOw/scripts/ceremony/run-int4d-drills.mjs:106:11) at file:///tmp/int4-runner-drill-uFSjOw/scripts/ceremony/run-int4d-drills.mjs:36:3 at ModuleJob.run (node:internal/modules/esm/module_job:343:25) at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26) at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) Node.js v22.23.2\nINT4_RUNNER_EXECUTION_INTACT_CHECK_FAILED suite=INT4D exit=1 expected=INT4D_DRILLS_EXECUTED passed=6 skipped=0 failed=0 total=6 detail=file:///tmp/int4-runner-drill-76kDoJ/scripts/ceremony/run-int4d-drills.mjs:106 throw new Error(\"INT4D_HARNESS_CHECKOUT_DIRTY\"); ^ Error: INT4D_HARNESS_CHECKOUT_DIRTY at prepareHarnessCheckout (file:///tmp/int4-runner-drill-76kDoJ/scripts/ceremony/run-int4d-drills.mjs:106:11) at file:///tmp/int4-runner-drill-76kDoJ/scripts/ceremony/run-int4d-drills.mjs:36:3 at ModuleJob.run (node:internal/modules/esm/module_job:343:25) at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26) at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) Node.js v22.23.2\n: expected 1 to be +0 // Object.is equality\u001b[39m\n\n\u001b[32m- Expected\u001b[39m\n\u001b[31m+ Received\u001b[39m\n\n\u001b[32m- 0\u001b[39m\n\u001b[31m+ 1\u001b[39m\n\n\u001b[36m \u001b[2m❯\u001b[22m test/unit/int4-runner-execution-drill.test.ts:\u001b[2m15:42\u001b[22m\u001b[39m\n    \u001b[90m 13| \u001b[39m  \u001b[34mit\u001b[39m(\u001b[32m\"makes broken environment coupling red and intact coupling green\"\u001b[39m…\n    \u001b[90m 14| \u001b[39m    \u001b[35mconst\u001b[39m result \u001b[33m=\u001b[39m \u001b[34mrun\u001b[39m([])\u001b[33m;\u001b[39m\n    \u001b[90m 15| \u001b[39m    \u001b[34mexpect\u001b[39m(result\u001b[33m.\u001b[39mstatus\u001b[33m,\u001b[39m result\u001b[33m.\u001b[39mstderr)\u001b[33m.\u001b[39m\u001b[34mtoBe\u001b[39m(\u001b[34m0\u001b[39m)\u001b[33m;\u001b[39m\n    \u001b[90m   | \u001b[39m                                         \u001b[31m^\u001b[39m\n    \u001b[90m 16| \u001b[39m    \u001b[35mfor\u001b[39m (\u001b[35mconst\u001b[39m [suite\u001b[33m,\u001b[39m expected] \u001b[35mof\u001b[39m \u001b[33mSUITES\u001b[39m) {\n    \u001b[90m 17| \u001b[39m      \u001b[34mexpect\u001b[39m(result\u001b[33m.\u001b[39mstdout)\u001b[33m.\u001b[39m\u001b[34mtoContain\u001b[39m(\n\n\u001b[31m\u001b[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[35/96]⎯\u001b[22m\u001b[39m\n\n\u001b[31m\u001b[1m\u001b[7m FAIL \u001b[27m\u001b[22m\u001b[39m test/unit/int4-runner-execution-drill.test.ts\u001b[2m > \u001b[22mINT-4 runner execution drill\u001b[2m > \u001b[22mfails for every runner when the execution guard is removed\n\u001b[31m\u001b[1mAssertionError\u001b[22m: expected +0 not to be +0 // Object.is equality\u001b[39m\n\u001b[36m \u001b[2m❯\u001b[22m test/unit/int4-runner-execution-drill.test.ts:\u001b[2m28:31\u001b[22m\u001b[39m\n    \u001b[90m 26| \u001b[39m  \u001b[34mit\u001b[39m(\u001b[32m\"fails for every runner when the execution guard is removed\"\u001b[39m\u001b[33m,\u001b[39m () …\n    \u001b[90m 27| \u001b[39m    \u001b[35mconst\u001b[39m result \u001b[33m=\u001b[39m \u001b[34mrun\u001b[39m([\u001b[32m\"--mutation\"\u001b[39m\u001b[33m,\u001b[39m \u001b[32m\"remove-guard\"\u001b[39m])\u001b[33m;\u001b[39m\n    \u001b[90m 28| \u001b[39m    \u001b[34mexpect\u001b[39m(result\u001b[33m.\u001b[39mstatus)\u001b[33m.\u001b[39mnot\u001b[33m.\u001b[39m\u001b[34mtoBe\u001b[39m(\u001b[34m0\u001b[39m)\u001b[33m;\u001b[39m\n    \u001b[90m   | \u001b[39m                              \u001b[31m^\u001b[39m\n    \u001b[90m 29| \u001b[39m    \u001b[35mfor\u001b[39m (\u001b[35mconst\u001b[39m [suite] \u001b[35mof\u001b[39m \u001b[33mSUITES\u001b[39m) {\n    \u001b[90m 30| \u001b[39m      \u001b[34mexpect\u001b[39m(result\u001b[33m.\u001b[39mstdout)\u001b[33m.\u001b[39m\u001b[34mtoContain\u001b[39m(\n\n\u001b[31m\u001b[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[36/96]⎯\u001b[22m\u001b[39m\n\n",
+      "spawnError": null
+    }
+  ],
+  "corpus": {
+    "why": "Repository referenced by a live Averray platform job.",
+    "source": "live-platform-job"
+  }
+}
