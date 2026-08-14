@@ -448,6 +448,11 @@ test("pool-lane fee law is wired through the created dispatcher, not a dead runt
   assert.match(source, /resumedHistoricalLeg/u);
   assert.match(source, /settle-only resume is not implemented/u);
   assert.match(source, /floatBefore: ledgerFloatBefore/u);
+  // The evidence block must name real variables: the object-shorthand form of
+  // these two fields was a latent ReferenceError first reached by the live
+  // bitmap-4 resume (all money steps had already completed and verified).
+  assert.match(source, /floatAfterSell: afterSellFloat/u);
+  assert.match(source, /floatAfterHome: afterHomeFloat/u);
 });
 
 test("stage-recall source pins JIT unwind/home proofs and defers pool settlement", () => {
