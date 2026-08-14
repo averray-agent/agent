@@ -1,5 +1,23 @@
 # Ceremony runsheet — Pool v2 yield epoch 1 (deposits start earning)
 
+Status: **LEGS A + CROSSING + B EXECUTED 2026-08-14 morning; LEG C ON HOLD for
+the recall driver (PACKET_POOL_VENUE_RECALL).** The dispatch driver (#1126) ran
+the full deploy lane end-to-end ~07:52Z (stage 0xd9f5d8b7 → funding 0x9e358a85
+→ sell 0x9622e316 → observer settlement 0xcea36bdb; Hydration Swapped3 blk
+13608128, AAVE 22→1003 par 1,950,000). Ledger EXACT: 2,000,000 = 1,950,000
+minted + 25,436 float + 707 transfer fee + 23,857 sell fee (reconciled:true;
+friction 1.23% — fixed fees on a 5×-smaller tranche than the 0.202% epoch).
+Leg B booked `VenueDeploymentSettled(1, 2, 1_950_001)` tx 0xadda1b5e blk
+19447131 — share price UNCHANGED (20,000,000/20,000,000), cost basis intact.
+SEAM FOUND BEFORE COMMITTING (leg-A lesson applied): `stageRecall` has zero
+callers — #1126 only drives deploys. Leg C's pool-side request is NOT created
+until the recall driver lands and its status reads green (sequencing law in the
+packet). HARD BOUNDARY: recalls of deployment 1 unstageable after returnBy
+2026-08-16T04:43:13Z (the request inherits it, DepositPoolV2.sol:517); last
+stage per the 6h margin law 2026-08-15T22:43Z. Unblock: VA postage 0.51 DOT
+substrate-side (EVM top-up impossible — VA non-payable; Coinbase → SS58
+167yt7KX…). Prior status lines follow.
+
 Status: LEG A EXECUTED 2026-08-14 05:43Z, then **HOLD at the dispatch seam**.
 ERRATUM (mine): §0 verified the pool-side script and the observability feed but
 not that the MIDDLE of the lane had a driver — the VA's `stageDeploy` has no
