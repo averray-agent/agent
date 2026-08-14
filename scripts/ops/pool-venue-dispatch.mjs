@@ -863,20 +863,46 @@ async function dryRunStageAndRecallSell({ args, signerAddress, venueAddress, wra
 }
 
 class PoolLaneRecallRuntime extends BankXcmV22Runtime {
-  async resolveFee(input) {
-    if (Number(input.legIndex) !== 2) return super.resolveFee(input);
-    const maximum = positiveBigInt(input.live.parameters.maxFeePerLeg, "maxFeePerLeg");
-    const quote = await this.quoteRemoteFee({ requestId: input.requestId, leg: input.legIndex });
-    if (quote?.liveState !== true) throw new Error("Recall withdraw-sell fee quote is not marked liveState:true.");
-    const available = await this.readRemoteOperatingFloat({ requestId: input.requestId });
-    if (available?.liveState !== true) throw new Error("Remote asset-22 balance is not marked liveState:true.");
-    const selected = selectRecallDispatchFee({ quote: quote.amount, maximum, available: available.assets });
-    return {
-      ...selected,
-      remoteAsOf: quote.asOf,
-      remoteRef: quote.remoteRef,
+  // The base dispatcher's withdraw-sell fee law is operating-lane semantics:
+  // it sweeps the ENTIRE remote float as the leg's fee budget (there, the
+  // float is deposit-leg dust bounded by the ceiling). The pool lane's
+  // converted-account float is COMMINGLED capital — operating float plus pool
+  // float — never a fee kitty; sweeping it both over-pays fees and trips the
+  // float<=ceiling assert. Price the leg like deposit_sell instead: fresh
+  // remote quote ×2, capped by the staged ceiling, 1.5× floor, affordability
+  // against the live float. dispatch() consults the DISPATCHER's resolveFee,
+  // so the override must wrap the created dispatcher — a method on this class
+  // is never reached (the #1128 dead-override lesson).
+  createDispatcher() {
+    const dispatcher = super.createDispatcher();
+    const base = dispatcher.resolveFee.bind(dispatcher);
+    const runtime = this;
+    dispatcher.resolveFee = async (input) => {
+      if (Number(input.legIndex) !== 2) return base(input);
+      const maximum = positiveBigInt(input.live.parameters.maxFeePerLeg, "maxFeePerLeg");
+      const quote = await runtime.quoteRemoteFee({ requestId: input.requestId, leg: input.legIndex });
+      if (quote?.liveState !== true) throw new Error("Recall withdraw-sell fee quote is not marked liveState:true.");
+      const available = await runtime.readRemoteOperatingFloat({ requestId: input.requestId });
+      if (available?.liveState !== true) throw new Error("Remote asset-22 balance is not marked liveState:true.");
+      const selected = selectRecallDispatchFee({ quote: quote.amount, maximum, available: available.assets });
+      return {
+        ...selected,
+        remoteAsOf: quote.asOf,
+        remoteRef: quote.remoteRef,
+      };
     };
+    return dispatcher;
   }
+}
+
+// Withdraw legs occupy bitmap bits 2 (withdraw_sell) and 3 (withdraw_home).
+// Maps an already-staged request's dispatch bitmap to the legs still owed.
+export function pendingWithdrawLegs(bitmap) {
+  const value = BigInt(bitmap);
+  if (value === 0n) return ["withdraw_sell", "withdraw_home"];
+  if (value === 4n) return ["withdraw_home"];
+  if (value === 12n) return [];
+  throw new Error(`Staged recall carries unexpected dispatch bitmap ${value}; refusing to guess the pending legs.`);
 }
 
 function makeRuntime({ provider, signer, wrapperAddress, laneAddress, convertedAccountId32, args, recall = false }) {
@@ -1031,7 +1057,10 @@ export async function main(argv = process.argv.slice(2)) {
       return common;
     }
 
-    assertUnstaged({ laneRequestId: state.venue.laneRequestId });
+    // stage-recall performs its own staged-state handling: an already-staged
+    // recall (a prior commit that failed between staging and leg dispatch) is
+    // RESUMED there, not refused here. cancel keeps the unstaged requirement.
+    if (args.command !== "stage-recall") assertUnstaged({ laneRequestId: state.venue.laneRequestId });
     if (args.command === "cancel") {
       const transactions = buildCancelPlan({ venueAddress, poolAddress, requestId, deploymentId, recallId, kind: isRecall ? "recall" : "deploy" });
       await venue.getFunction("cancelUnstaged").staticCall(requestId, { from: identity.address });
@@ -1093,6 +1122,32 @@ export async function main(argv = process.argv.slice(2)) {
       const maximum = assertFeeCeiling(args.maxFeePerLeg);
       const nonce = args.laneNonce ? positiveBigInt(args.laneNonce, "--lane-nonce") : 1n;
 
+      // A prior commit may have staged the recall and then failed before any
+      // leg dispatched (cancelUnstaged is gone once a laneRequestId exists, so
+      // the only honest path is forward). Detect that state and resume: verify
+      // the staged record is exactly ours, then drive the legs still owed.
+      const stagedLaneRequestId = normalizeBytes32(state.venue.laneRequestId ?? ZERO32, "staged laneRequestId");
+      const isResume = stagedLaneRequestId !== ZERO32;
+      let resumeRecord = null;
+      if (isResume) {
+        resumeRecord = await wrapper.getRequest(stagedLaneRequestId);
+        if (
+          String(resumeRecord.context.strategyId).toLowerCase() !== EXPECTED_STRATEGY_ID
+          || Number(resumeRecord.context.kind) !== 1
+          || getAddress(resumeRecord.queuedBy) !== laneAddress
+          || getAddress(resumeRecord.context.account) !== venueAddress
+          || BigInt(resumeRecord.context.shares) <= 0n
+        ) throw new Error("Staged recall lane request is not bound to the dedicated pool lane and venue adapter.");
+        if (Number(resumeRecord.status) !== 1) throw new Error("Staged recall lane request is not Pending; run status and read the wrapper record before resuming.");
+        const reverse = normalizeBytes32(await venue.poolRequestForLaneRequest(stagedLaneRequestId), "reverse lane mapping");
+        if (reverse !== requestId) throw new Error("Staged lane request does not map back to this recall adapter request.");
+        const resumeBitmap = BigInt(await wrapper.requestDispatchBitmap(stagedLaneRequestId));
+        const owed = pendingWithdrawLegs(resumeBitmap);
+        if (resumeBitmap !== 0n) {
+          throw new Error(`Staged recall bitmap is ${resumeBitmap} (legs owed: ${owed.join(", ") || "none"}); this driver resumes only from bitmap 0 — partially dispatched recalls need their remaining legs assessed by hand.`);
+        }
+      }
+
       const buildRecallPlan = async (liveState, phase) => {
         const derived = deriveRecallParameters({
           requestedAssets: liveState.venue.request.requestedAssets,
@@ -1135,12 +1190,34 @@ export async function main(argv = process.argv.slice(2)) {
         return { phase, capturedAt: new Date().toISOString(), derived, quote, stageData, stageDecoded: stageCall.decoded, predictedLaneRequestId, dryRun };
       };
 
-      let prepared = await buildRecallPlan(state, "dry-run");
+      let prepared = null;
+      if (isResume) {
+        // The stage is already on-chain; the stateful stage+dispatch preview
+        // cannot re-run (staging would revert). The unwind par quote against
+        // the STAGED share count remains a live preflight; each leg's JIT
+        // dry-run still runs inside the dispatcher before its signature.
+        const quote = await captureParQuote(args.hydrationWs, BigInt(resumeRecord.context.shares), {
+          assetIn: 1003,
+          assetOut: 22,
+          quoteAccount: convertedAccountId32,
+          quoteAccountBalance: state.farSide.aUsdc.raw,
+        });
+        prepared = { phase: "resume", capturedAt: new Date().toISOString(), quote };
+      } else {
+        prepared = await buildRecallPlan(state, "dry-run");
+      }
       const plan = {
         ...common,
+        resumed: isResume,
         timing: { returnBy: state.venue.request.returnBy, marginSeconds: initialMargin, minimumMarginSeconds: MIN_DISPATCH_MARGIN_SECONDS },
         postage: { raw: postageRaw, minimumRaw: MIN_VENUE_POSTAGE_PLANCK, liveState: true },
-        staging: {
+        staging: isResume ? {
+          resumedLaneRequestId: stagedLaneRequestId,
+          stagedShares: BigInt(resumeRecord.context.shares),
+          wrapperStatus: Number(resumeRecord.status),
+          dispatchBitmap: "0",
+          pendingLegs: pendingWithdrawLegs(0n),
+        } : {
           precomputedShares: prepared.derived.shares,
           parameters: prepared.derived.lane,
           predictedLaneRequestId: prepared.predictedLaneRequestId,
@@ -1148,21 +1225,24 @@ export async function main(argv = process.argv.slice(2)) {
           decoded: prepared.stageDecoded,
         },
         freshParUnwindQuote: prepared.quote,
-        stagedWithdrawDryRun: prepared.dryRun,
+        ...(isResume ? {} : { stagedWithdrawDryRun: prepared.dryRun }),
         guards: {
           dedicatedLaneOnly: true,
           operatingLaneUntouched: operatingLane,
-          requestUnstaged: true,
-          wrapperRequestUnknown: true,
+          requestUnstaged: !isResume,
+          wrapperRequestUnknown: !isResume,
+          resumedFromStagedRequest: isResume,
           exactMinimumOutput: true,
           freshExactAmountAaveParUnwindQuote: true,
-          statefulTwoChainDryRun: true,
-          commitTimeShareRecomputeRequired: true,
+          statefulTwoChainDryRun: !isResume,
+          commitTimeShareRecomputeRequired: !isResume,
         },
       };
       if (!args.commit) {
         await persistEvidence(args, plan);
-        console.log("\nDRY RUN ONLY — recall stage bytes emitted; no signature requested. Commit recomputes live shares and repeats the two-chain proof.");
+        console.log(isResume
+          ? "\nDRY RUN ONLY — recall already staged; commit drives the pending withdraw legs and settlement."
+          : "\nDRY RUN ONLY — recall stage bytes emitted; no signature requested. Commit recomputes live shares and repeats the two-chain proof.");
         return plan;
       }
 
@@ -1179,24 +1259,34 @@ export async function main(argv = process.argv.slice(2)) {
       });
       const commitMargin = assertDispatchMargin({ nowSeconds: commitState.block.timestamp, returnBy: commitState.venue.request.returnBy });
       assertVenuePostage(commitState.venue.postage);
-      prepared = await buildRecallPlan(commitState, "commit-recomputed");
 
       const token = new Contract(manifest.contracts.token, ERC20_ABI, rpc.provider);
       const wrapperUsdcBefore = BigInt(await token.balanceOf(wrapperAddress));
       const venueUsdcBefore = BigInt(await token.balanceOf(venueAddress));
       const aUsdcBefore = BigInt(commitState.farSide.aUsdc.raw);
       const floatBefore = BigInt(commitState.farSide.floatAsset22.raw);
-      const stageTx = await identity.signer.sendTransaction({ to: venueAddress, data: prepared.stageData, value: 0n });
-      const stageReceipt = await stageTx.wait();
-      if (!stageReceipt || stageReceipt.status !== 1) throw new Error("stageRecall transaction failed.");
-      const stagedEvent = stageReceipt.logs
-        .map((log) => { try { return venueInterface.parseLog(log); } catch { return null; } })
-        .find((event) => event?.name === "LaneRequestStaged" && String(event.args.requestId).toLowerCase() === requestId);
-      if (!stagedEvent) throw new Error("stageRecall receipt omitted LaneRequestStaged.");
-      const liveLaneRequestId = normalizeBytes32(stagedEvent.args.laneRequestId, "LaneRequestStaged laneRequestId");
-      const stagedShares = BigInt(stagedEvent.args.laneShares);
-      if (liveLaneRequestId !== prepared.predictedLaneRequestId || stagedShares !== prepared.derived.shares) {
-        throw new Error("stageRecall postcondition differs from the commit-time requestId/share derivation.");
+      let liveLaneRequestId;
+      let stagedShares;
+      let stageReceiptEvidence;
+      if (isResume) {
+        liveLaneRequestId = stagedLaneRequestId;
+        stagedShares = BigInt(resumeRecord.context.shares);
+        stageReceiptEvidence = { resumed: true, laneRequestId: liveLaneRequestId };
+      } else {
+        prepared = await buildRecallPlan(commitState, "commit-recomputed");
+        const stageTx = await identity.signer.sendTransaction({ to: venueAddress, data: prepared.stageData, value: 0n });
+        const stageReceipt = await stageTx.wait();
+        if (!stageReceipt || stageReceipt.status !== 1) throw new Error("stageRecall transaction failed.");
+        const stagedEvent = stageReceipt.logs
+          .map((log) => { try { return venueInterface.parseLog(log); } catch { return null; } })
+          .find((event) => event?.name === "LaneRequestStaged" && String(event.args.requestId).toLowerCase() === requestId);
+        if (!stagedEvent) throw new Error("stageRecall receipt omitted LaneRequestStaged.");
+        liveLaneRequestId = normalizeBytes32(stagedEvent.args.laneRequestId, "LaneRequestStaged laneRequestId");
+        stagedShares = BigInt(stagedEvent.args.laneShares);
+        if (liveLaneRequestId !== prepared.predictedLaneRequestId || stagedShares !== prepared.derived.shares) {
+          throw new Error("stageRecall postcondition differs from the commit-time requestId/share derivation.");
+        }
+        stageReceiptEvidence = { hash: stageTx.hash, blockNumber: stageReceipt.blockNumber, gasUsed: stageReceipt.gasUsed };
       }
       const stagedWrapperRecord = await wrapper.getRequest(liveLaneRequestId);
       if (
@@ -1281,7 +1371,12 @@ export async function main(argv = process.argv.slice(2)) {
           ...plan,
           mode: "commit",
           timing: { ...plan.timing, commitMarginSeconds: commitMargin },
-          commitRecompute: {
+          commitRecompute: isResume ? {
+            resumed: true,
+            laneRequestId: liveLaneRequestId,
+            stagedShares,
+            freshParUnwindQuote: prepared.quote,
+          } : {
             dryRunShares: plan.staging.precomputedShares,
             actualShares: stagedShares,
             parameters: prepared.derived.lane,
@@ -1291,7 +1386,7 @@ export async function main(argv = process.argv.slice(2)) {
             stagedWithdrawDryRun: prepared.dryRun,
           },
           receipts: {
-            stage: { hash: stageTx.hash, blockNumber: stageReceipt.blockNumber, gasUsed: stageReceipt.gasUsed },
+            stage: stageReceiptEvidence,
             withdrawSell: sell.evidence,
             withdrawHome: home.evidence,
             settlement: { hash: settleTx.hash, blockNumber: settleReceipt.blockNumber, gasUsed: settleReceipt.gasUsed },

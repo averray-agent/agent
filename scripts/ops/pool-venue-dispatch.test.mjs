@@ -27,6 +27,7 @@ import {
   deriveStagingParameters,
   deriveLaneRequestId,
   parseArgs,
+  pendingWithdrawLegs,
   reconcilePoolRecall,
   reconcilePoolTranche,
   selectRecallDispatchFee,
@@ -423,6 +424,26 @@ test("recall wire must terminate with SetTopic(laneRequestId)", () => {
   assert.equal(assertWireCarriesTopic(`0x051c0bdeadbeef2c${topic.slice(2)}`, topic), true);
   assert.throws(() => assertWireCarriesTopic(`0x051c0bdeadbeef2c${OTHER.slice(2)}`, topic), /SetTopic/u);
   assert.throws(() => assertWireCarriesTopic(`0x051c0bdeadbeef${topic.slice(2)}`, topic), /SetTopic/u);
+});
+
+test("staged-recall resume maps dispatch bitmaps to the legs still owed", () => {
+  assert.deepEqual(pendingWithdrawLegs(0n), ["withdraw_sell", "withdraw_home"]);
+  assert.deepEqual(pendingWithdrawLegs(4n), ["withdraw_home"]);
+  assert.deepEqual(pendingWithdrawLegs(12n), []);
+  assert.throws(() => pendingWithdrawLegs(3n), /unexpected dispatch bitmap/u);
+  assert.throws(() => pendingWithdrawLegs(8n), /unexpected dispatch bitmap/u);
+});
+
+test("pool-lane fee law is wired through the created dispatcher, not a dead runtime method", () => {
+  const source = readFileSync(scriptPath, "utf8");
+  // The dispatcher's own resolveFee is what dispatch() consults; the override
+  // must wrap the created dispatcher instance (the #1128 dead-override lesson).
+  assert.match(source, /createDispatcher\(\) \{\n    const dispatcher = super\.createDispatcher\(\);/u);
+  assert.match(source, /dispatcher\.resolveFee = /u);
+  assert.match(source, /selectRecallDispatchFee\(\{ quote: quote\.amount, maximum, available: available\.assets \}\)/u);
+  assert.doesNotMatch(source, /async resolveFee\(input\) \{\n    if \(Number\(input\.legIndex\)/u);
+  assert.match(source, /resumedFromStagedRequest/u);
+  assert.match(source, /resumes only from bitmap 0/u);
 });
 
 test("stage-recall source pins JIT unwind/home proofs and defers pool settlement", () => {
