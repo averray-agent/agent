@@ -124,13 +124,28 @@ test("proof returnBy beyond 48 hours refuses", () => {
   );
 });
 
-test("standing 14-day policy refuses honestly against the deployed 7-day contract cap", () => {
+test("standing policy admits the contract's 7-day ceiling exactly", () => {
+  assert.doesNotThrow(() => assertDeployAdmission(healthyAdmission({
+    deploymentKind: "standing",
+    returnBy: 1_800_000_000n + BigInt(STANDING_RETURN_WINDOW_SECONDS),
+  })));
   assert.throws(
     () => assertDeployAdmission(healthyAdmission({
       deploymentKind: "standing",
+      returnBy: 1_800_000_000n + BigInt(STANDING_RETURN_WINDOW_SECONDS) + 1n,
+    })),
+    /7-day standing policy/u,
+  );
+});
+
+test("standing policy still refuses honestly if the contract ever tightens below it", () => {
+  assert.throws(
+    () => assertDeployAdmission(healthyAdmission({
+      deploymentKind: "standing",
+      contractMaxReturnSeconds: 3 * 24 * 60 * 60,
       returnBy: 1_800_000_000n + BigInt(STANDING_RETURN_WINDOW_SECONDS),
     })),
-    /standing policy requires 14 days.*live contract permits only 7 days/u,
+    /refusing rather than silently changing policy/u,
   );
 });
 

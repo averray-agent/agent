@@ -27,7 +27,13 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
 
 export const PROOF_RETURN_WINDOW_SECONDS = 48 * 60 * 60;
-export const STANDING_RETURN_WINDOW_SECONDS = 14 * 24 * 60 * 60;
+// Packet 6 originally said 14 days; Codex's gate finding (recorded in the
+// packet 2026-08-12) corrected it to the contract's own ceiling — a deadline
+// may never exceed the shortest redemption notice tier (NOTICE_7_DAYS), so
+// capital is always recallable before any depositor's exit matures. The
+// refusal guard below stays: if the contract ever tightens further, refuse
+// rather than silently changing policy.
+export const STANDING_RETURN_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 const OBSERVABILITY_MAX_AGE_SECONDS = 10 * 60;
 const ASSET_DECIMALS = 6n;
 const ASSET_SCALE = 10n ** ASSET_DECIMALS;
@@ -172,11 +178,11 @@ export function assertDeployAdmission(input) {
   } else if (deploymentKind === "standing") {
     if (contractMaxReturnSeconds < STANDING_RETURN_WINDOW_SECONDS) {
       throw new Error(
-        "Packet 6 standing policy requires 14 days, but the live contract permits only 7 days; refusing rather than silently changing policy.",
+        `Standing policy requires ${STANDING_RETURN_WINDOW_SECONDS} seconds, but the live contract permits only ${contractMaxReturnSeconds}; refusing rather than silently changing policy.`,
       );
     }
     if (delay > BigInt(STANDING_RETURN_WINDOW_SECONDS)) {
-      throw new Error("returnBy exceeds the 14-day standing policy.");
+      throw new Error("returnBy exceeds the 7-day standing policy.");
     }
   } else {
     throw new Error(`Unknown --deployment-kind ${deploymentKind}; expected proof or standing.`);
