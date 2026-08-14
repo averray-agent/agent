@@ -1,0 +1,102 @@
+{
+  "schemaVersion": "averray.witness.materialization-preflight.v1",
+  "generatedAt": "2026-08-14T06:38:25.547Z",
+  "repo": "pytest-dev/pluggy",
+  "commit": "d23f110b240d67ee503eba0082f30cae73f3e1e3",
+  "toolchain": {
+    "kind": "python",
+    "detail": "python",
+    "packageManager": null,
+    "detectedBy": [
+      "pyproject.toml"
+    ],
+    "additional": []
+  },
+  "classification": "REQUIRES_NETWORK",
+  "classificationReason": "Python test dependencies are not frozen in a requirements file; observed ERROR: /workspace/tox.ini: 'minversion' requires pytest-8.0, actual pytest-7.2.1'",
+  "observedFailureReason": "Python test dependencies are not frozen in a requirements file; observed ERROR: /workspace/tox.ini: 'minversion' requires pytest-8.0, actual pytest-7.2.1'",
+  "checkCommand": "python3 -m pytest",
+  "checkCommandExists": true,
+  "baseExitStatus": 4,
+  "basePassed": false,
+  "candidateModifiable": false,
+  "dependencyCacheSizeBytes": 0,
+  "dependencyPreparationSeconds": 0,
+  "totalSeconds": 1.237,
+  "materialization": {
+    "source": "https://github.com/pytest-dev/pluggy.git",
+    "sourceType": "github",
+    "seconds": 0.878
+  },
+  "check": {
+    "command": "python3 -m pytest",
+    "timeoutSeconds": 180,
+    "definitionFile": null,
+    "definitionKind": "external-command",
+    "declared": null,
+    "candidateModifiable": false,
+    "protectedBy": null,
+    "baseExitStatus": 4,
+    "baseOutcome": "fail"
+  },
+  "candidatePolicy": {
+    "allowedPaths": [
+      "**"
+    ],
+    "protectedPaths": []
+  },
+  "frozenInputs": [],
+  "dependencyPreparation": {
+    "attempted": false,
+    "kind": "none",
+    "plan": {
+      "supported": false,
+      "reason": "Python test dependencies are not frozen in a requirements file"
+    },
+    "cacheSizeBytes": 0,
+    "seconds": 0,
+    "cachePopulationSeconds": 0,
+    "offlineInstallSeconds": 0,
+    "totalSeconds": 0,
+    "succeeded": false
+  },
+  "sandbox": {
+    "image": "averray-witness-preflight:phase1",
+    "imageId": "sha256:13846375c8a2a2432cf9ea17b2350b79515f54608c0cf736c52c91df89cc5027",
+    "imagePreparation": {
+      "image": "averray-witness-preflight:phase1",
+      "imageId": "sha256:13846375c8a2a2432cf9ea17b2350b79515f54608c0cf736c52c91df89cc5027",
+      "built": false,
+      "seconds": 0.043
+    },
+    "requestedNetworkMode": "none",
+    "observedNetworkMode": "none",
+    "observedInterfaces": [
+      "lo"
+    ],
+    "networkAssertion": "passed"
+  },
+  "attempts": [
+    {
+      "phase": "unprepared-check",
+      "checkAttempt": true,
+      "networkMode": "none",
+      "networkInterfaces": [
+        "lo"
+      ],
+      "networkAssertionPassed": true,
+      "exitCode": 4,
+      "signal": null,
+      "timedOut": false,
+      "outputTruncated": false,
+      "seconds": 0.198,
+      "stdout": "",
+      "stderr": "AVERRAY_NETWORK_INTERFACES=lo\nERROR: /workspace/tox.ini: 'minversion' requires pytest-8.0, actual pytest-7.2.1'\n\n",
+      "spawnError": null
+    }
+  ],
+  "corpus": {
+    "why": "Small foundational Python plugin project with a genuine pytest suite.",
+    "source": "selected-oss"
+  }
+}

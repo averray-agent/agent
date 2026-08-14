@@ -1,0 +1,68 @@
+{
+  "generatedAt": "2026-08-14T06:45:06.113Z",
+  "drills": {
+    "genuinelyNeedsNetwork": {
+      "expected": "REQUIRES_NETWORK",
+      "withoutExecutionGuard": {
+        "status": "RED",
+        "output": "HERMETIC"
+      },
+      "withExecutionGuard": {
+        "status": "GREEN",
+        "output": "REQUIRES_NETWORK"
+      },
+      "guardedExitStatus": 1,
+      "guardedFailureReason": "NETWORK_REQUIRED: fetch failed | > test | > node check.mjs"
+    },
+    "missingToolchain": {
+      "expected": "UNMATERIALIZABLE",
+      "withoutExecutionGuard": {
+        "status": "RED",
+        "output": "UNTYPED_ERROR: unsupported toolchain"
+      },
+      "withExecutionGuard": {
+        "status": "GREEN",
+        "output": "UNMATERIALIZABLE"
+      },
+      "guardedFailureReason": "check command is absent: /bin/sh: 1: ruby: not found"
+    },
+    "looksHermeticButIsNot": {
+      "expected": "REQUIRES_NETWORK",
+      "withoutExecutionGuard": {
+        "status": "RED",
+        "output": "HERMETIC"
+      },
+      "withExecutionGuard": {
+        "status": "GREEN",
+        "output": "REQUIRES_NETWORK"
+      },
+      "misleadingEvidence": [
+        "package.json#scripts.test",
+        "package-lock.json"
+      ],
+      "guardedExitStatus": 1,
+      "guardedFailureReason": "LOOKED_HERMETIC_BUT_FETCH_FAILED: fetch failed | > looks-hermetic-drill@1.0.0 test | > node check.mjs"
+    },
+    "networkModeNone": {
+      "expected": "only loopback visible from inside container",
+      "withoutExecutionGuard": {
+        "status": "RED",
+        "output": {
+          "requestedMode": "bridge",
+          "exitStatus": 1,
+          "stderr": ""
+        }
+      },
+      "withExecutionGuard": {
+        "status": "GREEN",
+        "output": {
+          "observedMode": "none",
+          "observedInterfaces": [
+            "lo"
+          ],
+          "assertion": "passed"
+        }
+      }
+    }
+  }
+}

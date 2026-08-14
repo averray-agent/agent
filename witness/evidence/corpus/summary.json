@@ -1,0 +1,129 @@
+{
+  "total": 10,
+  "distribution": {
+    "HERMETIC": 1,
+    "FROZEN_DEPENDENCIES": 4,
+    "MOCKED_EXTERNAL_SYSTEM": 0,
+    "REQUIRES_NETWORK": 4,
+    "UNMATERIALIZABLE": 1
+  },
+  "preparationCost": {
+    "medianSeconds": 0,
+    "medianPreparedReposSeconds": 17.464,
+    "preparedRepoCount": 4,
+    "worstCaseSeconds": 129.896,
+    "worstCaseRepo": "averray-agent/agent"
+  },
+  "repos": [
+    {
+      "repo": "averray-agent/agent",
+      "commit": "4be77fb73f5fade83164dbc8878d43a02107d1e4",
+      "classification": "FROZEN_DEPENDENCIES",
+      "baseExitStatus": 1,
+      "preparationAttempted": true,
+      "preparationSeconds": 129.896,
+      "cacheSizeBytes": 263378946,
+      "totalSeconds": 248.24,
+      "error": null
+    },
+    {
+      "repo": "BurntSushi/ripgrep",
+      "commit": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+      "classification": "UNMATERIALIZABLE",
+      "baseExitStatus": 127,
+      "preparationAttempted": false,
+      "preparationSeconds": 0,
+      "cacheSizeBytes": 0,
+      "totalSeconds": 1.32,
+      "error": "check command is absent: /bin/sh: 1: cargo: not found"
+    },
+    {
+      "repo": "ConvoBrains/zero-cost-crm",
+      "commit": "51744f42f866301b8952e9643858ab9e0658a54b",
+      "classification": "FROZEN_DEPENDENCIES",
+      "baseExitStatus": 1,
+      "preparationAttempted": true,
+      "preparationSeconds": 11.138,
+      "cacheSizeBytes": 66923946,
+      "totalSeconds": 15.342,
+      "error": null
+    },
+    {
+      "repo": "depre-dev/averray-reference-agent",
+      "commit": "de984e310f9c8dedfe775e2474b1411716675ebb",
+      "classification": "FROZEN_DEPENDENCIES",
+      "baseExitStatus": 1,
+      "preparationAttempted": true,
+      "preparationSeconds": 17.233,
+      "cacheSizeBytes": 37055307,
+      "totalSeconds": 124.028,
+      "error": null
+    },
+    {
+      "repo": "depre-dev/averray-send-test",
+      "commit": "42571061ca9b6da8c6aca908f1ee1df1dab4e10a",
+      "classification": "HERMETIC",
+      "baseExitStatus": 0,
+      "preparationAttempted": false,
+      "preparationSeconds": 0,
+      "cacheSizeBytes": 0,
+      "totalSeconds": 1.225,
+      "error": null
+    },
+    {
+      "repo": "expressjs/express",
+      "commit": "a3714473feb3d2908add734d340e7755fd85e0a3",
+      "classification": "REQUIRES_NETWORK",
+      "baseExitStatus": 127,
+      "preparationAttempted": false,
+      "preparationSeconds": 0,
+      "cacheSizeBytes": 0,
+      "totalSeconds": 1.303,
+      "error": "Node dependencies are not frozen by an npm lockfile; observed sh: 1: mocha: not found | > express@5.2.1 test | > mocha --require test/support/env --reporter spec --check-leaks test/ test/acceptance/"
+    },
+    {
+      "repo": "Kc1t/alethe-agents",
+      "commit": "ea27ae527d4fad57484a8dc77008f308bf8868d9",
+      "classification": "FROZEN_DEPENDENCIES",
+      "baseExitStatus": 0,
+      "preparationAttempted": true,
+      "preparationSeconds": 17.695,
+      "cacheSizeBytes": 82297396,
+      "totalSeconds": 45.698,
+      "error": null
+    },
+    {
+      "repo": "pallets/click",
+      "commit": "9c4dfdaebe0e6b2aabc566eb81f6f10eb5cd6ea1",
+      "classification": "REQUIRES_NETWORK",
+      "baseExitStatus": 4,
+      "preparationAttempted": false,
+      "preparationSeconds": 0,
+      "cacheSizeBytes": 0,
+      "totalSeconds": 1.327,
+      "error": "ImportError while loading conftest '/workspace/tests/conftest.py'. | tests/conftest.py:3: in <module> | from click.testing import CliRunner | E   ModuleNotFoundError: No module named 'click'"
+    },
+    {
+      "repo": "pytest-dev/pluggy",
+      "commit": "d23f110b240d67ee503eba0082f30cae73f3e1e3",
+      "classification": "REQUIRES_NETWORK",
+      "baseExitStatus": 4,
+      "preparationAttempted": false,
+      "preparationSeconds": 0,
+      "cacheSizeBytes": 0,
+      "totalSeconds": 1.237,
+      "error": "Python test dependencies are not frozen in a requirements file; observed ERROR: /workspace/tox.ini: 'minversion' requires pytest-8.0, actual pytest-7.2.1'"
+    },
+    {
+      "repo": "reticlehq/reticle",
+      "commit": "c91d3ca77ec43752205a43fc3b2136a0230b29d6",
+      "classification": "REQUIRES_NETWORK",
+      "baseExitStatus": 127,
+      "preparationAttempted": false,
+      "preparationSeconds": 0,
+      "cacheSizeBytes": 0,
+      "totalSeconds": 4.176,
+      "error": "phase-1 image does not pin pnpm cache preparation; observed sh: 1: turbo: not found | > reticle-monorepo@2.7.0 test | > turbo run test:unit"
+    }
+  ]
+}

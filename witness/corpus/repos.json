@@ -1,0 +1,62 @@
+[
+  {
+    "repo": "Kc1t/alethe-agents",
+    "check": "npm test",
+    "source": "live-platform-job",
+    "why": "Repository referenced by a live Averray platform job."
+  },
+  {
+    "repo": "reticlehq/reticle",
+    "check": "npm test",
+    "source": "live-platform-job",
+    "why": "Repository referenced by a live Averray platform job."
+  },
+  {
+    "repo": "ConvoBrains/zero-cost-crm",
+    "check": "npm test",
+    "source": "live-platform-job",
+    "why": "Repository referenced by a live Averray platform job."
+  },
+  {
+    "repo": "depre-dev/averray-reference-agent",
+    "check": "npm test",
+    "source": "live-platform-job",
+    "why": "Repository referenced by a live Averray platform job."
+  },
+  {
+    "repo": "depre-dev/averray-send-test",
+    "check": "npm test",
+    "source": "live-platform-job",
+    "why": "Repository referenced by a live Averray platform job."
+  },
+  {
+    "repo": "averray-agent/agent",
+    "check": "npm test",
+    "source": "platform",
+    "why": "The platform repository itself is the required control."
+  },
+  {
+    "repo": "expressjs/express",
+    "check": "npm test",
+    "source": "selected-oss",
+    "why": "Mature Node project with a genuine, long-lived test suite and an npm lockfile."
+  },
+  {
+    "repo": "pytest-dev/pluggy",
+    "check": "python3 -m pytest",
+    "source": "selected-oss",
+    "why": "Small foundational Python plugin project with a genuine pytest suite."
+  },
+  {
+    "repo": "pallets/click",
+    "check": "python3 -m pytest",
+    "source": "selected-oss",
+    "why": "Widely used Python project that tests the no-lockfile Python path."
+  },
+  {
+    "repo": "BurntSushi/ripgrep",
+    "check": "cargo test --workspace",
+    "source": "selected-oss",
+    "why": "Mature Rust project that exercises typed missing-toolchain handling."
+  }
+]

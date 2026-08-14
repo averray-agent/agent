@@ -18,6 +18,7 @@
     "test:examples": "node --test examples/**/*.test.mjs",
     "test:indexer:api": "npm --workspace indexer run test:api",
     "test:ops": "node --test scripts/ops/*.test.mjs",
+    "test:witness": "npm --prefix witness test",
     "test:contracts": "forge test",
     "publish:discovery-manifest": "node scripts/ops/publish-discovery-manifest.mjs",
     "sync:discovery-manifest": "node scripts/ops/sync-discovery-manifest.mjs",
