@@ -443,7 +443,11 @@ test("pool-lane fee law is wired through the created dispatcher, not a dead runt
   assert.match(source, /selectRecallDispatchFee\(\{ quote: quote\.amount, maximum, available: available\.assets \}\)/u);
   assert.doesNotMatch(source, /async resolveFee\(input\) \{\n    if \(Number\(input\.legIndex\)/u);
   assert.match(source, /resumedFromStagedRequest/u);
-  assert.match(source, /resumes only from bitmap 0/u);
+  // bitmap 0 resumes both legs; bitmap 4 rebuilds the historical sell from
+  // chain state and drives the home leg; bitmap 12 stays fail-closed.
+  assert.match(source, /resumedHistoricalLeg/u);
+  assert.match(source, /settle-only resume is not implemented/u);
+  assert.match(source, /floatBefore: ledgerFloatBefore/u);
 });
 
 test("stage-recall source pins JIT unwind/home proofs and defers pool settlement", () => {
