@@ -323,13 +323,29 @@ export function assertParAaveQuote(quote, expectedAmount) {
   return true;
 }
 
+// Exit-direction law, measured live 2026-08-14 (Hydration blk 13609967):
+// selling N aUSDC debits the seller exactly N units, but the AAVE filler
+// grosses the redemption up by interest accrued since the last index touch —
+// router.Executed{amountIn: N, amountOut: N+a} with Broadcast.Swapped carrying
+// N+a on BOTH sides. Par therefore holds at the filler level (in === out)
+// while both amounts may exceed the requested input by a small accrual `a`
+// (realized yield, landing in the remote float). The entry direction (22→1003)
+// stays exact-input. Real accrual at our sizes is tens of raw units; anything
+// near this ceiling is a pricing fault, not yield.
+export function unwindAccrualCeiling(expectedInput) {
+  return positiveBigInt(expectedInput, "unwind expected input") / 1000n + 16n;
+}
+
 export function assertParAaveUnwindQuote(quote, expectedAmount) {
   const amount = positiveBigInt(expectedAmount, "exact unwind quote amount");
   if (quote?.fillerType !== "AAVE" || BigInt(quote?.assetIn ?? -1) !== 1003n || BigInt(quote?.assetOut ?? -1) !== 22n) {
     throw new Error("Fresh recall quote did not use the AAVE 1003→22 route.");
   }
-  if (BigInt(quote.amountInRaw) !== amount || BigInt(quote.amountOutRaw) !== amount) {
-    throw new Error("Fresh exact-amount AAVE unwind quote was not exactly 1:1.");
+  const input = BigInt(quote.amountInRaw);
+  const output = BigInt(quote.amountOutRaw);
+  if (input !== output) throw new Error("Fresh AAVE unwind quote broke filler-level par (amountIn !== amountOut).");
+  if (input < amount || input - amount > unwindAccrualCeiling(amount)) {
+    throw new Error(`Fresh AAVE unwind quote amount ${input} is outside the accrual-bounded window above expected ${amount}.`);
   }
   return true;
 }
@@ -395,7 +411,10 @@ export function reconcilePoolRecall({ requestedAssets, sharesSold, swapOutput, f
   const remoteHomeDebitRaw = afterSell - afterHome;
   const homeExecutionAndDeliveryFeeRaw = remoteHomeDebitRaw - arrival;
   const rebaseResidueRaw = output - requested;
-  if (sold !== output) throw new Error("Recall Aave unwind was not exactly 1:1.");
+  const exitAccrualRaw = output - sold;
+  if (exitAccrualRaw < 0n || exitAccrualRaw > unwindAccrualCeiling(sold)) {
+    throw new Error("Recall Aave unwind output is outside the filler-par accrual bounds above the shares sold.");
+  }
   if (sellExecutionFeeRaw < 0n || homeExecutionAndDeliveryFeeRaw < 0n) throw new Error("Recall fee ledger contains a negative component.");
   if (remoteHomeDebitRaw !== requested) throw new Error("Recall home leg did not debit exactly requestedAssets on Hydration.");
   if (arrival + homeExecutionAndDeliveryFeeRaw !== requested) throw new Error("Recall home arrival and fees do not reconcile requestedAssets.");
@@ -407,6 +426,7 @@ export function reconcilePoolRecall({ requestedAssets, sharesSold, swapOutput, f
     sharesSoldRaw: sold,
     aUsdcBurnedRaw: sold,
     asset22SwapOutputRaw: output,
+    exitAccrualRaw,
     rebaseResidueRaw,
     sellExecutionFeeRaw,
     remoteHomeDebitRaw,
@@ -430,16 +450,22 @@ function extractAaveUnwindQuote(human, expectedInput) {
   );
   const input = event?.data?.inputs?.find((entry) => rawAmount(entry.asset) === 1003n);
   const output = event?.data?.outputs?.find((entry) => rawAmount(entry.asset) === 22n);
-  if (!event || rawAmount(input?.amount) !== BigInt(expectedInput) || rawAmount(output?.amount) <= 0n) {
-    throw new Error("Hydration quote omitted the expected Broadcast.Swapped{AAVE,1003→22} event.");
+  const inputRaw = rawAmount(input?.amount ?? -1);
+  const outputRaw = rawAmount(output?.amount ?? -1);
+  if (
+    !event || inputRaw !== outputRaw || inputRaw < BigInt(expectedInput)
+    || inputRaw - BigInt(expectedInput) > unwindAccrualCeiling(expectedInput)
+  ) {
+    throw new Error("Hydration quote omitted a filler-par, accrual-bounded Broadcast.Swapped{AAVE,1003→22} event.");
   }
   return {
     runtimeEvent: event.method,
     fillerType: "AAVE",
     assetIn: 1003,
     assetOut: 22,
-    amountInRaw: rawAmount(input.amount).toString(),
-    amountOutRaw: rawAmount(output.amount).toString(),
+    amountInRaw: inputRaw.toString(),
+    amountOutRaw: outputRaw.toString(),
+    exitAccrualRaw: (inputRaw - BigInt(expectedInput)).toString(),
   };
 }
 
@@ -458,8 +484,17 @@ async function waitForAaveSwap(api, { requestId, fromBlock, expectedInput, asset
         if (String(xcm?.[0] ?? "").toLowerCase() !== requestId.toLowerCase()) continue;
         const input = event.data?.inputs?.find((entry) => rawAmount(entry.asset) === BigInt(assetIn));
         const output = event.data?.outputs?.find((entry) => rawAmount(entry.asset) === BigInt(assetOut));
-        if (event.data?.fillerType !== "AAVE" || rawAmount(input?.amount) !== BigInt(expectedInput) || rawAmount(output?.amount) <= 0n) {
-          throw new Error(`Request-bound Broadcast.Swapped did not match AAVE ${assetIn}→${assetOut} exact-input semantics.`);
+        const inputRaw = rawAmount(input?.amount ?? -1);
+        const outputRaw = rawAmount(output?.amount ?? -1);
+        // Entry (22→1003) is exact-input; exit (1003→22) is filler-par with a
+        // bounded accrual gross-up above the staged input — see the measured
+        // law at unwindAccrualCeiling.
+        const unwind = BigInt(assetIn) === 1003n;
+        const inputAcceptable = unwind
+          ? inputRaw === outputRaw && inputRaw >= BigInt(expectedInput) && inputRaw - BigInt(expectedInput) <= unwindAccrualCeiling(expectedInput)
+          : inputRaw === BigInt(expectedInput);
+        if (event.data?.fillerType !== "AAVE" || !inputAcceptable || outputRaw <= 0n) {
+          throw new Error(`Request-bound Broadcast.Swapped did not match AAVE ${assetIn}→${assetOut} ${unwind ? "filler-par accrual-bounded" : "exact-input"} semantics.`);
         }
         const timestamp = await at.query.timestamp.now();
         return {
@@ -712,18 +747,22 @@ export function assertAaveSwapEvent(events, { assetIn, assetOut, expectedInput }
     if (event.section.toLowerCase() !== "broadcast" || !/^Swapped/u.test(event.method)) continue;
     const input = event.data?.inputs?.find((entry) => rawAmount(entry.asset) === BigInt(assetIn));
     const output = event.data?.outputs?.find((entry) => rawAmount(entry.asset) === BigInt(assetOut));
+    const inputRaw = rawAmount(input?.amount ?? -1);
+    const outputRaw = rawAmount(output?.amount ?? -1);
     if (
       event.data?.fillerType !== "AAVE"
-      || rawAmount(input?.amount) !== BigInt(expectedInput)
-      || rawAmount(output?.amount) <= 0n
+      || inputRaw !== outputRaw
+      || inputRaw < BigInt(expectedInput)
+      || inputRaw - BigInt(expectedInput) > unwindAccrualCeiling(expectedInput)
     ) throw new Error(`Stateful recall dry-run emitted a malformed AAVE ${assetIn}→${assetOut} swap.`);
     matches.push({
       event: event.method,
       fillerType: "AAVE",
       assetIn,
       assetOut,
-      amountInRaw: rawAmount(input.amount),
-      amountOutRaw: rawAmount(output.amount),
+      amountInRaw: inputRaw,
+      amountOutRaw: outputRaw,
+      exitAccrualRaw: inputRaw - BigInt(expectedInput),
     });
   }
   if (matches.length !== 1) {
@@ -1180,7 +1219,9 @@ export async function main(argv = process.argv.slice(2)) {
           assetIn: 1003,
           assetOut: 22,
         });
-        if (BigInt(swap.amountOutRaw) !== stagedShares) throw new Error("Recall unwind Broadcast.Swapped was not exactly 1:1.");
+        // waitForAaveSwap already enforced the unwind law (filler-level par,
+        // accrual-bounded above the staged shares); record the realized accrual.
+        const liveExitAccrualRaw = BigInt(swap.amountOutRaw) - stagedShares;
         const afterSellPosition = await services.balanceReader.read(services.targets.position);
         const afterSellFloat = await services.balanceReader.read(services.targets.float);
         if (aUsdcBefore - BigInt(afterSellPosition.raw) > stagedShares) {
@@ -1276,6 +1317,7 @@ export async function main(argv = process.argv.slice(2)) {
             assetHubBlockHash: settlementBlock.hash,
             sharesStagedRaw: stagedShares,
             aUsdcBurnedEventRaw: swap.amountInRaw,
+            exitAccrualRaw: liveExitAccrualRaw,
             homeSideUsdcArrivalRaw: homeArrival,
             poolSettleVenueRecallRunnable: true,
           },

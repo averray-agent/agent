@@ -30,6 +30,7 @@ import {
   reconcilePoolRecall,
   reconcilePoolTranche,
   selectRecallDispatchFee,
+  unwindAccrualCeiling,
 } from "./pool-venue-dispatch.mjs";
 import { assertObservability } from "./pool-venue-ceremony.mjs";
 
@@ -271,12 +272,26 @@ test("recall lane request identity is withdraw-kind and nonce-bound", () => {
   assert.notEqual(one, two);
 });
 
-test("fresh recall quote must be exact AAVE 1003 to 22 at par", () => {
+test("fresh recall quote holds filler-level par within the accrual ceiling", () => {
   const amount = 500_000n;
   const base = { fillerType: "AAVE", assetIn: 1003, assetOut: 22, amountInRaw: amount.toString(), amountOutRaw: amount.toString() };
   assert.equal(assertParAaveUnwindQuote(base, amount), true);
+  // Measured live 2026-08-14: the filler grosses the redemption up by accrued
+  // interest — 500,032/500,032 against a requested 500,000 is a healthy quote.
+  const accrued = { ...base, amountInRaw: "500032", amountOutRaw: "500032" };
+  assert.equal(assertParAaveUnwindQuote(accrued, amount), true);
   assert.throws(() => assertParAaveUnwindQuote({ ...base, assetIn: 22, assetOut: 1003 }, amount), /1003→22/u);
-  assert.throws(() => assertParAaveUnwindQuote({ ...base, amountOutRaw: (amount - 1n).toString() }, amount), /not exactly 1:1/u);
+  assert.throws(() => assertParAaveUnwindQuote({ ...base, amountOutRaw: (amount - 1n).toString() }, amount), /filler-level par/u);
+  assert.throws(() => assertParAaveUnwindQuote({ ...base, amountInRaw: "499999", amountOutRaw: "499999" }, amount), /accrual-bounded window/u);
+  const ceiling = unwindAccrualCeiling(amount);
+  const over = (amount + ceiling + 1n).toString();
+  assert.throws(() => assertParAaveUnwindQuote({ ...base, amountInRaw: over, amountOutRaw: over }, amount), /accrual-bounded window/u);
+});
+
+test("unwind accrual ceiling scales with size and floors for small trades", () => {
+  assert.equal(unwindAccrualCeiling(500_000n), 516n);
+  assert.equal(unwindAccrualCeiling(1_000n), 17n);
+  assert.throws(() => unwindAccrualCeiling(0n), /unwind expected input/u);
 });
 
 test("venue postage must stay above the ceremony liveness threshold", () => {
@@ -318,6 +333,7 @@ test("recall fee ledger closes requested assets and shared remote-float deltas e
     sharesSoldRaw: 500_000n,
     aUsdcBurnedRaw: 500_000n,
     asset22SwapOutputRaw: 500_000n,
+    exitAccrualRaw: 0n,
     rebaseResidueRaw: 0n,
     sellExecutionFeeRaw: 20_000n,
     remoteHomeDebitRaw: 500_000n,
@@ -335,6 +351,30 @@ test("recall fee ledger closes requested assets and shared remote-float deltas e
     floatAfterHome: 38_001n,
     homeArrival: 498_600n,
   }), /did not debit exactly requestedAssets/u);
+  // Exit accrual (measured live 2026-08-14): the filler pays out 500,032 for
+  // 500,000 shares sold — the extra 32 raw is realized yield landing in float.
+  const accrued = reconcilePoolRecall({
+    requestedAssets: 500_000n,
+    sharesSold: 500_000n,
+    swapOutput: 500_032n,
+    floatBefore: 58_000n,
+    floatAfterSell: 538_032n,
+    floatAfterHome: 38_032n,
+    homeArrival: 498_600n,
+  });
+  assert.equal(accrued.exitAccrualRaw, 32n);
+  assert.equal(accrued.rebaseResidueRaw, 32n);
+  assert.equal(accrued.requestedAssetsReconciled, true);
+  assert.equal(accrued.remoteFloatReconciled, true);
+  assert.throws(() => reconcilePoolRecall({
+    requestedAssets: 500_000n,
+    sharesSold: 500_000n,
+    swapOutput: 499_999n,
+    floatBefore: 58_000n,
+    floatAfterSell: 537_999n,
+    floatAfterHome: 37_999n,
+    homeArrival: 498_600n,
+  }), /filler-par accrual bounds/u);
 });
 
 test("dry-run swap assert accepts the measured dryRunXcm event shape (no Xcm operationStack entry)", () => {
@@ -357,6 +397,12 @@ test("dry-run swap assert accepts the measured dryRunXcm event shape (no Xcm ope
   const swap = assertAaveSwapEvent([measured], { assetIn: 1003, assetOut: 22, expectedInput: 500_000n });
   assert.equal(swap.amountInRaw, 500_000n);
   assert.equal(swap.amountOutRaw, 500_000n);
+  assert.equal(swap.exitAccrualRaw, 0n);
+  const accrued = { ...measured, data: { ...measured.data, inputs: [{ asset: "1,003", amount: "500,032" }], outputs: [{ asset: "22", amount: "500,032" }] } };
+  const accruedSwap = assertAaveSwapEvent([accrued], { assetIn: 1003, assetOut: 22, expectedInput: 500_000n });
+  assert.equal(accruedSwap.exitAccrualRaw, 32n);
+  const parBreak = { ...measured, data: { ...measured.data, inputs: [{ asset: "1,003", amount: "500,032" }], outputs: [{ asset: "22", amount: "500,031" }] } };
+  assert.throws(() => assertAaveSwapEvent([parBreak], { assetIn: 1003, assetOut: 22, expectedInput: 500_000n }), /malformed AAVE/u);
   assert.throws(
     () => assertAaveSwapEvent([], { assetIn: 1003, assetOut: 22, expectedInput: 500_000n }),
     /carried 0 .*expected exactly one/u,
@@ -365,7 +411,7 @@ test("dry-run swap assert accepts the measured dryRunXcm event shape (no Xcm ope
     () => assertAaveSwapEvent([measured, measured], { assetIn: 1003, assetOut: 22, expectedInput: 500_000n }),
     /carried 2 .*expected exactly one/u,
   );
-  const short = { ...measured, data: { ...measured.data, inputs: [{ asset: "1,003", amount: "499,999" }] } };
+  const short = { ...measured, data: { ...measured.data, inputs: [{ asset: "1,003", amount: "499,999" }], outputs: [{ asset: "22", amount: "499,999" }] } };
   assert.throws(
     () => assertAaveSwapEvent([short], { assetIn: 1003, assetOut: 22, expectedInput: 500_000n }),
     /malformed AAVE/u,
