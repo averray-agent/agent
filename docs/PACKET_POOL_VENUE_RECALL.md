@@ -1,5 +1,19 @@
 # PACKET — Pool venue RECALL driver (`stage-recall`) — URGENT, deadline-bound
 
+Status: DELIVERED #1128 (gated GO) + two live-found fixes #1129/#1130.
+ERRATUM (Claude, 2026-08-14): §"Preflights" item 4 below specified the unwind
+par quote as "must be exactly 1:1" — WRONG at raw-unit precision. Measured law
+(Hydration blk 13609967): selling N aUSDC debits the seller exactly N units but
+the AAVE filler grosses the redemption up by accrued interest —
+router.Executed{in: N, out: N+a}, Broadcast.Swapped carrying N+a on BOTH sides.
+Par holds at the FILLER level (in === out); both amounts exceed the requested
+input by a small accrual `a` (realized yield, lands in the remote float; a=32
+raw on 500k after ~5h). #1130 encodes: in === out, expected ≤ in ≤ expected +
+ceiling (expected/1000 + 16), accrual recorded as exitAccrualRaw everywhere.
+Second finding (#1129): DryRunApi.dryRunXcm omits the Xcm(topic) entry from
+Broadcast.Swapped operationStack — dry-run request binding = execution scope +
+wire SetTopic suffix; live binding keeps the topic. Original packet follows.
+
 Status: DISPATCHED to Codex 2026-08-14. Architect/gate: Claude. Operator: Pascal.
 Implements the recall direction of the pool lane; mirror of PACKET_POOL_VENUE_DISPATCH
 (delivered as #1126). One narrow PR extending `scripts/ops/pool-venue-dispatch.mjs`.
