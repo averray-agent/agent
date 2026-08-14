@@ -1,5 +1,15 @@
 # Ceremony runsheet — Pool v2 yield epoch 1 (deposits start earning)
 
+Status: LEG A EXECUTED 2026-08-14 05:43Z, then **HOLD at the dispatch seam**.
+ERRATUM (mine): §0 verified the pool-side script and the observability feed but
+not that the MIDDLE of the lane had a driver — the VA's `stageDeploy` has no
+caller in the repo, so deployment 1 (2.0 USDC, adapterRequestId 0x7321be34…,
+tx 0x18175772…) is parked on our venue adapter, custody-safe, abort available
+(`cancelUnstaged`). Hard deadline returnBy 2026-08-16T04:43:13Z. Driver packet
+dispatched to Codex: PACKET_POOL_VENUE_DISPATCH.md (cancel+status first,
+stage-dispatch second; ≥6h margin rule, else operator runs cancel). Legs B–D
+resume when the driver lands. Original status line follows.
+
 Status: PREPARED 2026-08-13 late evening. Execute on a FRESH session — packet 6
 rule 4 (never same-day alongside incident work) applies to today twice over.
 Operator: Pascal (KMS creds). Claude gates the script, then gates every leg.
