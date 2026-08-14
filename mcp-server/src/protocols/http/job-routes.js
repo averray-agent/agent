@@ -28,7 +28,10 @@ export function createJobRoutes({
       const enriched = posterOnboardingService?.enrichExternalCatalogRows
         ? await posterOnboardingService.enrichExternalCatalogRows(projected)
         : projected;
-      respond(response, 200, buildPublicJobsResponse(enriched, url.searchParams));
+      const secured = typeof service.addListingSecurityMetadata === "function"
+        ? await service.addListingSecurityMetadata(enriched)
+        : enriched;
+      respond(response, 200, buildPublicJobsResponse(secured, url.searchParams));
       return true;
     }
 
@@ -49,10 +52,14 @@ export function createJobRoutes({
       const auth = includeArchived
         ? await authMiddleware(request, url, { requireRole: "admin" })
         : undefined;
-      respond(response, 200, await service.getPublicJobDefinition(url.searchParams.get("jobId") ?? "", {
+      const definition = await service.getPublicJobDefinition(url.searchParams.get("jobId") ?? "", {
         wallet: url.searchParams.get("wallet") ?? undefined,
         ...(includeArchived ? { includeArchived: true, currentWallet: auth.wallet } : {})
-      }));
+      });
+      const secured = typeof service.addListingSecurityMetadata === "function"
+        ? await service.addListingSecurityMetadata(definition)
+        : definition;
+      respond(response, 200, secured);
       return true;
     }
 

@@ -103,6 +103,32 @@ test("listAuditEvents tolerates capability store failures", async () => {
   assert.deepEqual(events, []);
 });
 
+test("listAuditEvents exposes durable external-listing quarantines with the rule id", async () => {
+  const events = await listAuditEvents({
+    limit: 20,
+    listPolicies: () => [],
+    now: () => NOW,
+    service: { listRecentSessions: async () => [] },
+    stateStore: {
+      async listExternalPostingDemandSignals() {
+        return [{
+          id: "quarantine-1",
+          wallet: "0x1111111111111111111111111111111111111111",
+          decision: "quarantined",
+          attemptedAt: "2026-06-06T11:30:00.000Z",
+          reason: "Quarantined by LISTING_LEXICAL_INSTRUCTION_OVERRIDE_V1: instruction override.",
+          listingSecurity: { ruleId: "LISTING_LEXICAL_INSTRUCTION_OVERRIDE_V1" }
+        }];
+      }
+    }
+  });
+
+  assert.equal(events[0].action, "job.listing_quarantined");
+  assert.match(events[0].summary, /LISTING_LEXICAL_INSTRUCTION_OVERRIDE_V1/u);
+  assert.equal(events[0].target, "quarantine-1");
+  assert.equal(events[0].tone, "warn");
+});
+
 test("listAlerts keeps dispute and pending-policy alerts before session alerts", async () => {
   const alerts = await listAlerts({
     limit: 3,

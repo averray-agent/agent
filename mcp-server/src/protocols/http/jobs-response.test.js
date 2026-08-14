@@ -101,6 +101,29 @@ test("source=external exposes only external rows with poster funding provenance"
   });
 });
 
+test("compact rows preserve explicit provenance and untrusted-content framing", () => {
+  const provenance = {
+    posterAddress: JOBS[0].source.poster.wallet,
+    posterTier: "external-self-serve",
+    postingRoute: "external-x402",
+    firstSeenAt: JOBS[0].lifecycle.createdAt,
+    specHash: `0x${"ef".repeat(32)}`
+  };
+  const response = buildPublicJobsResponse(
+    [{
+      ...JOBS[0],
+      listingStatus: "listed",
+      contentTrust: "external-unreviewed",
+      provenance
+    }],
+    new URLSearchParams("limit=1")
+  );
+
+  assert.equal(response.jobs[0].listingStatus, "listed");
+  assert.equal(response.jobs[0].contentTrust, "external-unreviewed");
+  assert.deepEqual(response.jobs[0].provenance, provenance);
+});
+
 test("public jobs response filters and compacts agent-friendly queries", () => {
   const response = buildPublicJobsResponse(
     JOBS,

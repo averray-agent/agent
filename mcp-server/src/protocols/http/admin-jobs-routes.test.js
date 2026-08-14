@@ -111,6 +111,7 @@ function makeHarness(overrides = {}) {
         calls.push(["updateJobLifecycle", { jobId, update }]);
         return overrides.updatedJob ?? { id: jobId, ...update };
       },
+      ...overrides.service,
     },
     storeIdempotentMutationReceipt: async (receipt) => {
       calls.push(["storeReceipt", receipt]);
@@ -161,6 +162,34 @@ test("GET /admin/jobs lists operator-visible jobs with lifecycle summary", async
     }],
     ["getJobLifecycleSummary"],
   ]);
+});
+
+test("GET /admin/jobs carries listing provenance onto the operator board", async () => {
+  const provenance = {
+    posterAddress: "0x1111111111111111111111111111111111111111",
+    posterTier: "external-self-serve",
+    postingRoute: "external-x402",
+    firstSeenAt: "2026-08-13T08:00:00.000Z",
+    specHash: `0x${"ab".repeat(32)}`
+  };
+  const { response, route } = makeHarness({
+    service: {
+      addListingSecurityMetadata: async (jobs) => jobs.map((job) => ({
+        ...job,
+        contentTrust: "external-unreviewed",
+        provenance
+      }))
+    }
+  });
+
+  assert.equal(await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/admin/jobs"),
+    pathname: "/admin/jobs",
+  }), true);
+  assert.equal(response.body.jobs[0].contentTrust, "external-unreviewed");
+  assert.deepEqual(response.body.jobs[0].provenance, provenance);
 });
 
 test("GET /admin/jobs/timeline validates jobId before reading timeline", async () => {

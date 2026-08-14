@@ -138,6 +138,33 @@ export async function listAuditEvents({
       }
     }
   }
+  if (typeof stateStore?.listExternalPostingDemandSignals === "function") {
+    const signals = await stateStore.listExternalPostingDemandSignals({
+      // The store's index is oldest-first. Read the bounded retained window so
+      // a recent quarantine cannot disappear behind older demand telemetry.
+      limit: 10_000
+    }).catch(() => []);
+    for (const signal of signals.filter((entry) => entry?.decision === "quarantined")) {
+      const ruleId = signal?.listingSecurity?.ruleId ?? "unknown_listing_rule";
+      events.push(auditEvent({
+        id: `audit-listing-quarantine-${signal.id}`,
+        at: signal.attemptedAt,
+        source: "external",
+        category: "catalog",
+        action: "job.listing_quarantined",
+        actor: auditActor(
+          signal.wallet ? `poster-${compactWallet(signal.wallet)}` : "anonymous-poster",
+          compactWallet(signal.wallet),
+          "warn"
+        ),
+        summary: `Quarantined an external listing under ${ruleId}: ${signal.reason}`,
+        target: signal.id,
+        tone: "warn",
+        link: { label: "Open jobs ->", href: "/jobs" },
+        now,
+      }));
+    }
+  }
   return events
     .sort((left, right) => String(right.day + right.at).localeCompare(String(left.day + left.at)))
     .slice(0, limit);

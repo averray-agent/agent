@@ -11,6 +11,7 @@ import {
   validateAgainstSchema
 } from "./job-schema-registry.js";
 import {
+  AppError,
   AuthorizationError,
   ConfigError,
   ConflictError,
@@ -18,6 +19,10 @@ import {
   NotFoundError,
   ValidationError
 } from "./errors.js";
+import {
+  screenExternalListing,
+  unavailableListingScreenVerdict
+} from "./listing-security.js";
 import { decimalToBaseUnits } from "./platform-service-helpers.js";
 import {
   EXTERNAL_JOB_LIFECYCLE_LOCK_TTL_SECONDS,
@@ -199,7 +204,8 @@ export class ExternalPostingService {
     config = resolveExternalPostingConfig(),
     now = () => new Date(),
     logger = console,
-    eventBus = undefined
+    eventBus = undefined,
+    contentScreen = screenExternalListing
   } = {}) {
     if (!stateStore) {
       throw new ConfigError("ExternalPostingService requires a state store.");
@@ -211,9 +217,12 @@ export class ExternalPostingService {
     this.now = now;
     this.logger = logger;
     this.eventBus = eventBus;
+    this.contentScreen = contentScreen;
   }
 
-  async previewFundingRequirement(payload) {
+  async previewFundingRequirement(payload, {
+    fundingRail = EXTERNAL_FUNDING_RAILS.X402
+  } = {}) {
     if (this.config.mode === "closed") {
       throw new AuthorizationError(
         "External posting is closed. No payment was requested; check platform status before retrying.",
@@ -222,10 +231,13 @@ export class ExternalPostingService {
       );
     }
     const candidate = extractDefinitionCandidate(payload);
+    const listingSecurity = await this.screenExternalCandidate(candidate, { fundingRail });
     const definition = validateExternalJobDefinition(candidate, this.config);
     return {
       definition,
       specHash: hashCanonicalContent(definition),
+      listingStatus: listingSecurity.status,
+      listingSecurity,
       fundingRequirement: await this.buildFundingRequirement(definition)
     };
   }
@@ -265,6 +277,10 @@ export class ExternalPostingService {
       );
     }
 
+    const listingSecurity = await this.screenExternalCandidate(candidate, {
+      wallet,
+      fundingRail
+    });
     let definition;
     try {
       definition = validateExternalJobDefinition(candidate, this.config);
@@ -335,6 +351,8 @@ export class ExternalPostingService {
       ...artifacts,
       escrowAddress: artifacts.calldata.to,
       fundingRequirement,
+      listingStatus: listingSecurity.status,
+      listingSecurity,
       createdAt,
       expiresAt,
       status: "quoted",
@@ -821,7 +839,84 @@ export class ExternalPostingService {
       fundingRail: normalizeFundingRail(signal.fundingRail),
       decision: signal.decision,
       attemptedAt: signal.attemptedAt,
-      ...(signal.reason ? { reason: String(signal.reason) } : {})
+      ...(signal.reason ? { reason: String(signal.reason) } : {}),
+      ...(signal.listingStatus ? { listingStatus: signal.listingStatus } : {}),
+      ...(signal.listingSecurity ? { listingSecurity: cloneJsonObject(signal.listingSecurity) } : {})
+    });
+  }
+
+  async screenExternalCandidate(candidate, { wallet = undefined, fundingRail } = {}) {
+    let verdict;
+    try {
+      verdict = await this.contentScreen?.(candidate);
+      const listed = verdict?.status === "listed" && Boolean(verdict?.screenVersion);
+      const quarantined = verdict?.status === "quarantined"
+        && Boolean(verdict?.screenVersion)
+        && Boolean(verdict?.ruleId)
+        && Boolean(verdict?.reason);
+      if (!listed && !quarantined) {
+        verdict = unavailableListingScreenVerdict();
+      }
+    } catch (error) {
+      this.logger.warn?.(
+        { error: error?.message ?? String(error) },
+        "external_listing.screen_unavailable"
+      );
+      verdict = unavailableListingScreenVerdict();
+    }
+    if (verdict.status === "listed") return cloneJsonObject(verdict);
+
+    const attemptedAt = this.currentTime().toISOString();
+    const demand = extractDemandSignalFields(candidate);
+    const signal = await this.recordDemandSignal({
+      wallet,
+      ...demand,
+      fundingRail,
+      decision: "quarantined",
+      attemptedAt,
+      reason: verdict.reason,
+      listingStatus: "quarantined",
+      listingSecurity: verdict
+    });
+    this.publishListingQuarantine(signal, verdict);
+    throw new AppError(verdict.reason, {
+      name: "ExternalListingQuarantinedError",
+      code: "external_listing_quarantined",
+      statusCode: 422,
+      details: {
+        status: "quarantined",
+        screenVersion: verdict.screenVersion,
+        ruleId: verdict.ruleId,
+        fieldPath: verdict.fieldPath,
+        reason: verdict.reason,
+        quarantineId: signal?.id,
+        action: "edit_and_resubmit",
+        posterFunds: "unchanged"
+      }
+    });
+  }
+
+  publishListingQuarantine(signal, verdict) {
+    const quarantineId = String(signal?.id ?? randomUUID());
+    this.eventBus?.publish?.({
+      id: `external-listing-quarantined-${quarantineId}`,
+      topic: "job.listing_quarantined",
+      source: "catalog",
+      phase: "listing",
+      severity: "warn",
+      wallet: signal?.wallet,
+      wallets: signal?.wallet ? [signal.wallet] : [],
+      correlationId: quarantineId,
+      timestamp: signal?.attemptedAt ?? this.currentTime().toISOString(),
+      data: {
+        quarantineId,
+        status: "quarantined",
+        fundingRail: signal?.fundingRail,
+        screenVersion: verdict.screenVersion,
+        ruleId: verdict.ruleId,
+        fieldPath: verdict.fieldPath,
+        reason: verdict.reason
+      }
     });
   }
 
@@ -1048,6 +1143,7 @@ function presentDraft(draft, now, delisting = undefined) {
       txHash: draft.fundingTxHash,
       blockNumber: draft.fundingBlockNumber,
       fundingRail: normalizeFundingRail(draft.fundingRail),
+      ...presentListingSecurity(draft),
       ...(draft.settlement ? { settlement: cloneJsonObject(draft.settlement) } : {})
     };
   }
@@ -1060,6 +1156,7 @@ function presentDraft(draft, now, delisting = undefined) {
       status: "settlement_pending",
       fundingRail: EXTERNAL_FUNDING_RAILS.X402,
       visibleInCatalog: false,
+      ...presentListingSecurity(draft),
       note: "Hub escrow exists, but the Base payment has not settled. The job remains hidden until settlement succeeds."
     };
   }
@@ -1073,6 +1170,7 @@ function presentDraft(draft, now, delisting = undefined) {
       fundingRail: EXTERNAL_FUNDING_RAILS.X402,
       visibleInCatalog: false,
       platformLoss: true,
+      ...presentListingSecurity(draft),
       note: "Base settlement failed after Hub escrow creation. The job was delisted and Averray owns the exposure."
     };
   }
@@ -1087,6 +1185,7 @@ function presentDraft(draft, now, delisting = undefined) {
       expiresAt: draft.expiresAt,
       status: `mismatch(${draft.mismatchField})`,
       mismatchField: draft.mismatchField,
+      ...presentListingSecurity(draft),
       permanent: true
     };
   }
@@ -1102,6 +1201,7 @@ function presentDraft(draft, now, delisting = undefined) {
     expiresAt: draft.expiresAt,
     status: expired ? "expired" : "awaiting_funding",
     fundingRail: normalizeFundingRail(draft.fundingRail),
+    ...presentListingSecurity(draft),
     ...(!expired ? { note: EXTERNAL_DRAFT_FUNDING_NOTE } : {})
   };
 }
@@ -1123,7 +1223,16 @@ function presentQuote(quote, now, signal = undefined) {
     attemptCount: Number(signal?.attemptCount ?? 1),
     fundingStatus: signal?.fundingStatus ?? "unfunded",
     fundingRail: normalizeFundingRail(quote.fundingRail),
+    ...presentListingSecurity(quote),
     ...(!expired ? { note: EXTERNAL_DRAFT_FUNDING_NOTE } : {})
+  };
+}
+
+function presentListingSecurity(record) {
+  if (!record?.listingSecurity) return {};
+  return {
+    listingStatus: record.listingStatus ?? record.listingSecurity.status,
+    listingSecurity: cloneJsonObject(record.listingSecurity)
   };
 }
 

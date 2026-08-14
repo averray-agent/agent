@@ -237,6 +237,41 @@ test("GET /jobs/definition forwards job and optional wallet", async () => {
   ]);
 });
 
+test("public list and definition routes apply serving-only listing security metadata", async () => {
+  const provenance = {
+    posterAddress: WALLET,
+    posterTier: "operator-curated",
+    postingRoute: "curated",
+    firstSeenAt: "2026-08-13T08:00:00.000Z",
+    specHash: `0x${"ab".repeat(32)}`
+  };
+  const addMetadata = async (value) => {
+    const decorate = (job) => ({
+      ...job,
+      listingStatus: "listed",
+      contentTrust: "operator-curated",
+      provenance
+    });
+    return Array.isArray(value) ? value.map(decorate) : decorate(value);
+  };
+  const { response, route } = makeHarness({
+    jobs: [{ id: "job-1", category: "coding", lifecycle: { state: "open" } }],
+    service: { addListingSecurityMetadata: addMetadata }
+  });
+
+  assert.equal(await invoke(route, { path: "/jobs?limit=1", response }), true);
+  assert.equal(response.body.jobs[0].contentTrust, "operator-curated");
+  assert.deepEqual(response.body.jobs[0].provenance, provenance);
+
+  const definitionResponse = {};
+  assert.equal(await invoke(route, {
+    path: "/jobs/definition?jobId=job-1",
+    response: definitionResponse
+  }), true);
+  assert.equal(definitionResponse.body.listingStatus, "listed");
+  assert.deepEqual(definitionResponse.body.provenance, provenance);
+});
+
 test("GET /jobs/definition requires admin auth to include archived jobs", async () => {
   const { calls, response, route } = makeHarness();
 

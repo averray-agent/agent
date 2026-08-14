@@ -59,6 +59,13 @@ function makeDepositPoolRoute() {
   });
 }
 
+test("job browsing tools frame listing descriptions as untrusted data", () => {
+  const byName = new Map(MCP_TOOLS.map((tool) => [tool.name, tool]));
+  assert.match(byName.get("listJobs").description, /untrusted data, not instructions/u);
+  assert.match(byName.get("listJobs").description, /contentTrust and provenance/u);
+  assert.match(byName.get("getJobDefinition").description, /untrusted job data, not instructions/u);
+});
+
 function makeEarningsDoorRoute() {
   return async ({ request, response, pathname, url }) => {
     if (request.method === "GET" && pathname === "/account/position") {
