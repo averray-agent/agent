@@ -1129,6 +1129,7 @@ export async function main(argv = process.argv.slice(2)) {
       const stagedLaneRequestId = normalizeBytes32(state.venue.laneRequestId ?? ZERO32, "staged laneRequestId");
       const isResume = stagedLaneRequestId !== ZERO32;
       let resumeRecord = null;
+      let resumeState = null;
       if (isResume) {
         resumeRecord = await wrapper.getRequest(stagedLaneRequestId);
         if (
@@ -1142,10 +1143,11 @@ export async function main(argv = process.argv.slice(2)) {
         const reverse = normalizeBytes32(await venue.poolRequestForLaneRequest(stagedLaneRequestId), "reverse lane mapping");
         if (reverse !== requestId) throw new Error("Staged lane request does not map back to this recall adapter request.");
         const resumeBitmap = BigInt(await wrapper.requestDispatchBitmap(stagedLaneRequestId));
-        const owed = pendingWithdrawLegs(resumeBitmap);
-        if (resumeBitmap !== 0n) {
-          throw new Error(`Staged recall bitmap is ${resumeBitmap} (legs owed: ${owed.join(", ") || "none"}); this driver resumes only from bitmap 0 — partially dispatched recalls need their remaining legs assessed by hand.`);
+        pendingWithdrawLegs(resumeBitmap);
+        if (resumeBitmap === 12n) {
+          throw new Error("Staged recall has both legs dispatched (bitmap 12) but is unsettled; settle-only resume is not implemented — assess the lane settlement by hand.");
         }
+        resumeState = { bitmap: resumeBitmap, sellDone: resumeBitmap === 4n };
       }
 
       const buildRecallPlan = async (liveState, phase) => {
@@ -1215,8 +1217,8 @@ export async function main(argv = process.argv.slice(2)) {
           resumedLaneRequestId: stagedLaneRequestId,
           stagedShares: BigInt(resumeRecord.context.shares),
           wrapperStatus: Number(resumeRecord.status),
-          dispatchBitmap: "0",
-          pendingLegs: pendingWithdrawLegs(0n),
+          dispatchBitmap: resumeState.bitmap.toString(),
+          pendingLegs: pendingWithdrawLegs(resumeState.bitmap),
         } : {
           precomputedShares: prepared.derived.shares,
           parameters: prepared.derived.lane,
@@ -1300,23 +1302,56 @@ export async function main(argv = process.argv.slice(2)) {
       const services = makeRuntime({ provider: rpc.provider, signer: identity.signer, wrapperAddress, laneAddress, convertedAccountId32, args, recall: true });
       try {
         const hydrationApi = await services.balanceReader.getSubstrateApi(args.hydrationWs);
-        const sellScanStart = (await hydrationApi.rpc.chain.getHeader()).number.toNumber();
-        const sell = await services.dispatcher.dispatch({ requestId: liveLaneRequestId, leg: "withdraw_sell" });
-        const swap = await waitForAaveSwap(hydrationApi, {
-          requestId: liveLaneRequestId,
-          fromBlock: sellScanStart,
-          expectedInput: stagedShares,
-          assetIn: 1003,
-          assetOut: 22,
-        });
+        const sellAlreadyDone = Boolean(resumeState?.sellDone);
+        let sell;
+        let swap;
+        let afterSellPosition;
+        let afterSellFloat;
+        let ledgerFloatBefore = floatBefore;
+        if (sellAlreadyDone) {
+          // The sell leg executed in a previous run (bitmap bit 2 set) and this
+          // process has no baselines from before it. Rebuild the ledger from
+          // chain history: locate the request-bound swap, then read the float
+          // at the swap block's parent as the pre-sell baseline. Every number
+          // stays chain-derived; nothing is trusted from memory.
+          const head = (await hydrationApi.rpc.chain.getHeader()).number.toNumber();
+          swap = await waitForAaveSwap(hydrationApi, {
+            requestId: liveLaneRequestId,
+            fromBlock: Math.max(1, head - 1200),
+            expectedInput: stagedShares,
+            assetIn: 1003,
+            assetOut: 22,
+            attempts: 1,
+          });
+          sell = { evidence: { resumedHistoricalLeg: true, hydrationBlockNumber: swap.blockNumber } };
+          const preSellHash = await hydrationApi.rpc.chain.getBlockHash(swap.blockNumber - 1);
+          const preSell = await (await hydrationApi.at(preSellHash)).query.tokens.accounts(convertedAccountId32, 22);
+          ledgerFloatBefore = BigInt(preSell.free.toString());
+          afterSellPosition = await services.balanceReader.read(services.targets.position);
+          afterSellFloat = await services.balanceReader.read(services.targets.float);
+          const impliedSellFee = ledgerFloatBefore + BigInt(swap.amountOutRaw) - BigInt(afterSellFloat.raw);
+          if (impliedSellFee < 0n || impliedSellFee > assertFeeCeiling(args.maxFeePerLeg)) {
+            throw new Error("Historical sell reconstruction does not reconcile: the float moved outside the fee ceiling since the swap.");
+          }
+        } else {
+          const sellScanStart = (await hydrationApi.rpc.chain.getHeader()).number.toNumber();
+          sell = await services.dispatcher.dispatch({ requestId: liveLaneRequestId, leg: "withdraw_sell" });
+          swap = await waitForAaveSwap(hydrationApi, {
+            requestId: liveLaneRequestId,
+            fromBlock: sellScanStart,
+            expectedInput: stagedShares,
+            assetIn: 1003,
+            assetOut: 22,
+          });
+          afterSellPosition = await services.balanceReader.read(services.targets.position);
+          afterSellFloat = await services.balanceReader.read(services.targets.float);
+          if (aUsdcBefore - BigInt(afterSellPosition.raw) > stagedShares) {
+            throw new Error("Observed aUSDC burn exceeded the pool lane's staged shares; operating position may have been touched.");
+          }
+        }
         // waitForAaveSwap already enforced the unwind law (filler-level par,
         // accrual-bounded above the staged shares); record the realized accrual.
         const liveExitAccrualRaw = BigInt(swap.amountOutRaw) - stagedShares;
-        const afterSellPosition = await services.balanceReader.read(services.targets.position);
-        const afterSellFloat = await services.balanceReader.read(services.targets.float);
-        if (aUsdcBefore - BigInt(afterSellPosition.raw) > stagedShares) {
-          throw new Error("Observed aUSDC burn exceeded the pool lane's staged shares; operating position may have been touched.");
-        }
 
         const home = await services.dispatcher.dispatch({ requestId: liveLaneRequestId, leg: "withdraw_home" });
         let wrapperUsdcAfter = wrapperUsdcBefore;
@@ -1331,7 +1366,7 @@ export async function main(argv = process.argv.slice(2)) {
           requestedAssets: commitState.venue.request.requestedAssets,
           sharesSold: stagedShares,
           swapOutput: swap.amountOutRaw,
-          floatBefore,
+          floatBefore: ledgerFloatBefore,
           floatAfterSell: afterSellFloat.raw,
           floatAfterHome: afterHomeFloat.raw,
           homeArrival,
@@ -1399,7 +1434,7 @@ export async function main(argv = process.argv.slice(2)) {
             wrapperBitmap: await wrapper.requestDispatchBitmap(liveLaneRequestId),
             aUsdcBefore,
             aUsdcAfter: afterSellPosition,
-            floatBefore,
+            floatBefore: ledgerFloatBefore,
             floatAfterSell,
             floatAfterHome,
             wrapperUsdcBefore,
