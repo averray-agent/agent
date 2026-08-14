@@ -939,6 +939,10 @@ export function buildCanaryJob({ jobId, rewardAmount }) {
     tier: "starter",
     rewardAsset: DEFAULT_ESCROW_ASSET.symbol,
     rewardAmount: Number(rewardAmount),
+    // D3 lane discipline: every operator catalogue definition names its lane.
+    // The canary is the liveness lane's charter member ("proof-of-life for the
+    // board; 0.10 USDC buys it as well as 0.25").
+    lane: "liveness",
     verifierMode: "benchmark",
     verifierTerms: VERIFIER_TERMS,
     verifierMinimumMatches: 2,
