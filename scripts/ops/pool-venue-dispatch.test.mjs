@@ -12,7 +12,9 @@ import {
   assertFeeCeiling,
   assertParAaveQuote,
   assertParAaveUnwindQuote,
+  assertAaveSwapEvent,
   assertRecallParameters,
+  assertWireCarriesTopic,
   assertRecallRequestBinding,
   assertRequestBinding,
   assertUnstaged,
@@ -333,6 +335,48 @@ test("recall fee ledger closes requested assets and shared remote-float deltas e
     floatAfterHome: 38_001n,
     homeArrival: 498_600n,
   }), /did not debit exactly requestedAssets/u);
+});
+
+test("dry-run swap assert accepts the measured dryRunXcm event shape (no Xcm operationStack entry)", () => {
+  // Shape measured live 2026-08-14: DryRunApi.dryRunXcm records Broadcast.Swapped3
+  // with operationStack [{Router}] only — the Xcm(topic) entry exists solely in
+  // real block execution. Request binding in dry-run comes from execution scope
+  // plus the wire's SetTopic suffix (assertWireCarriesTopic below).
+  const measured = {
+    section: "broadcast",
+    method: "Swapped3",
+    data: {
+      fillerType: "AAVE",
+      operation: "ExactIn",
+      inputs: [{ asset: "1,003", amount: "500,000" }],
+      outputs: [{ asset: "22", amount: "500,000" }],
+      fees: [],
+      operationStack: [{ Router: "10,576,956" }],
+    },
+  };
+  const swap = assertAaveSwapEvent([measured], { assetIn: 1003, assetOut: 22, expectedInput: 500_000n });
+  assert.equal(swap.amountInRaw, 500_000n);
+  assert.equal(swap.amountOutRaw, 500_000n);
+  assert.throws(
+    () => assertAaveSwapEvent([], { assetIn: 1003, assetOut: 22, expectedInput: 500_000n }),
+    /carried 0 .*expected exactly one/u,
+  );
+  assert.throws(
+    () => assertAaveSwapEvent([measured, measured], { assetIn: 1003, assetOut: 22, expectedInput: 500_000n }),
+    /carried 2 .*expected exactly one/u,
+  );
+  const short = { ...measured, data: { ...measured.data, inputs: [{ asset: "1,003", amount: "499,999" }] } };
+  assert.throws(
+    () => assertAaveSwapEvent([short], { assetIn: 1003, assetOut: 22, expectedInput: 500_000n }),
+    /malformed AAVE/u,
+  );
+});
+
+test("recall wire must terminate with SetTopic(laneRequestId)", () => {
+  const topic = "0x14672fbc224ef19fd91548763d2cbf7b88b4e00e74f77d48698a49dbe241dd85";
+  assert.equal(assertWireCarriesTopic(`0x051c0bdeadbeef2c${topic.slice(2)}`, topic), true);
+  assert.throws(() => assertWireCarriesTopic(`0x051c0bdeadbeef2c${OTHER.slice(2)}`, topic), /SetTopic/u);
+  assert.throws(() => assertWireCarriesTopic(`0x051c0bdeadbeef${topic.slice(2)}`, topic), /SetTopic/u);
 });
 
 test("stage-recall source pins JIT unwind/home proofs and defers pool settlement", () => {

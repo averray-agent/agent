@@ -691,11 +691,25 @@ function normalizeRuntimeEvents(human = {}) {
   }));
 }
 
-function assertAaveSwapEvent(events, { requestId, assetIn, assetOut, expectedInput }) {
+// DryRunApi.dryRunXcm records Broadcast.Swapped with operationStack [{Router}]
+// only — the Xcm(topic) entry that live execution carries is absent in dry-run
+// context (measured live 2026-08-14 against the leg-C wire). Request binding in
+// the dry-run therefore comes from execution scope (the API executes exactly
+// one wire, ours) plus assertWireCarriesTopic on those wire bytes; the live
+// waitForAaveSwap scan keeps the operationStack topic binding, where it exists
+// and other traffic makes it necessary.
+export function assertWireCarriesTopic(wire, requestId) {
+  const normalized = normalizeBytes32(requestId, "wire topic requestId");
+  if (!String(wire).toLowerCase().endsWith(`2c${normalized.slice(2)}`)) {
+    throw new Error("Recall wire does not terminate with SetTopic(laneRequestId); refusing unbound dry-run proof.");
+  }
+  return true;
+}
+
+export function assertAaveSwapEvent(events, { assetIn, assetOut, expectedInput }) {
+  const matches = [];
   for (const event of events) {
     if (event.section.toLowerCase() !== "broadcast" || !/^Swapped/u.test(event.method)) continue;
-    const xcm = (event.data?.operationStack ?? []).find((entry) => Array.isArray(entry?.Xcm))?.Xcm;
-    if (String(xcm?.[0] ?? "").toLowerCase() !== requestId.toLowerCase()) continue;
     const input = event.data?.inputs?.find((entry) => rawAmount(entry.asset) === BigInt(assetIn));
     const output = event.data?.outputs?.find((entry) => rawAmount(entry.asset) === BigInt(assetOut));
     if (
@@ -703,16 +717,19 @@ function assertAaveSwapEvent(events, { requestId, assetIn, assetOut, expectedInp
       || rawAmount(input?.amount) !== BigInt(expectedInput)
       || rawAmount(output?.amount) <= 0n
     ) throw new Error(`Stateful recall dry-run emitted a malformed AAVE ${assetIn}→${assetOut} swap.`);
-    return {
+    matches.push({
       event: event.method,
       fillerType: "AAVE",
       assetIn,
       assetOut,
       amountInRaw: rawAmount(input.amount),
       amountOutRaw: rawAmount(output.amount),
-    };
+    });
   }
-  throw new Error(`Stateful recall dry-run omitted request-bound Broadcast.Swapped AAVE ${assetIn}→${assetOut}.`);
+  if (matches.length !== 1) {
+    throw new Error(`Stateful recall dry-run scope carried ${matches.length} request-bound Broadcast.Swapped AAVE ${assetIn}→${assetOut} swaps; expected exactly one.`);
+  }
+  return matches[0];
 }
 
 async function dryRunStageAndFunding({ args, signerAddress, venueAddress, wrapperAddress, stageData, laneRequestId, convertedAccountId32 }) {
@@ -787,8 +804,8 @@ async function dryRunStageAndRecallSell({ args, signerAddress, venueAddress, wra
       exactWire,
     );
     assertDryRunXcmComplete(hydrationResult.toJSON(), "Stateful recall withdraw-sell wire");
+    assertWireCarriesTopic(exactWire, laneRequestId);
     const swap = assertAaveSwapEvent(normalizeRuntimeEvents(hydrationResult.toHuman()), {
-      requestId: laneRequestId,
       assetIn: 1003,
       assetOut: 22,
       expectedInput: shares,
