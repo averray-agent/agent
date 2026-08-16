@@ -1,6 +1,6 @@
 # Averray Witness — architecture
 
-Status: **agreed, unbuilt.** Written 2026-08-13. Supersedes the assumption that the
+Status: **agreed, unbuilt.** Written 2026-08-16. Supersedes the assumption that the
 Agent-Harness worker would compete for bounties.
 
 ## 1. What it is
@@ -219,7 +219,7 @@ must never affect automatic settlement.
 
 ## 10. Self-improvement governance
 
-Verified against the kernel on 2026-08-13:
+Verified against the kernel on 2026-08-16:
 
 - `skill promote` and `proposal approve` both require `--affirm OPERATOR`, enforced
   with a raise on empty.
@@ -342,7 +342,7 @@ trusted verifier.
 | Claim | Status |
 |---|---|
 | Agent repairs a real defect offline and proves it with the repo's own suite | measured — 6/6, regression tests self-authored |
-| Promotion cannot happen without a named operator and a green, hash-bound report | measured — kernel source, 2026-08-13 |
+| Promotion cannot happen without a named operator and a green, hash-bound report | measured — kernel source, 2026-08-16 |
 | Fraction of real repos materializable offline | **unmeasured** — Phase 1 |
 | Whether differential checking flips verdicts versus today's handlers | **unmeasured** — Phase 2 |
 | False-pass and false-fail rates against an adversarial corpus | **unmeasured** — Phase 2 |
