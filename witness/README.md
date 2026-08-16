@@ -60,6 +60,37 @@ usable acceptance criterion as-is.
 No worker identity, wallet, claim, submission, PR, or settlement code is present in
 this package.
 
+## VerificationContract v1 freeze validation
+
+[`schema/verification-contract-v1.schema.json`](schema/verification-contract-v1.schema.json)
+describes `averray.verification-contract/v1`. The loader and validator live in
+[`src/verification-contract.mjs`](src/verification-contract.mjs):
+
+- `loadVerificationContract(path)` reads, normalizes, and validates a JSON file.
+- `parseVerificationContractJson(json)` does the same for JSON text or bytes.
+- `validateVerificationContract(value)` returns the normalized contract and named
+  validation issues without throwing.
+- `assertValidVerificationContract(value)` returns the normalized contract or throws
+  `VerificationContractValidationError`.
+
+Freeze validation is side-effect free. It does not execute checks, calculate a contract
+digest, write receipts, store contracts, or implement replay.
+
+Rule 5 resolves npm, pnpm, and Yarn package scripts to `package.json` and explicit
+Node/Python/shell repository scripts to their path.
+Direct Node runner commands such as `node --test` have no repository definition file.
+Package-manager workspace/relocation forms, Make (which can select or include multiple
+definition files), shell command strings, and other command families are rejected when
+their defining file cannot be proved.
+
+The eight policy drills show the shape-only baseline accepting each invalid fixture
+(`RED`), freeze validation rejecting it with the named rule (`GREEN`), and the same
+contract with one field corrected being accepted (`GREEN`):
+
+```sh
+npm --prefix witness run contract:drills
+```
+
 ## Phase-1 dependency paths
 
 - Node/npm: `package-lock.json` or `npm-shrinkwrap.json` populates an npm cache;

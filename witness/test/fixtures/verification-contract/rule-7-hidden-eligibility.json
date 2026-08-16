@@ -1,0 +1,20 @@
+{
+  "schema_version": "averray.verification-contract/v1",
+  "job": {"id": "rule-7", "type": "code_change", "required_verification_level": "AV-2"},
+  "subject": {
+    "acquisition": {"repository": "github.com/acme/widgets", "base_commit": "base", "bundle_sha256": "bundle"},
+    "materialization": {"status": "HERMETIC", "dependency_cache": null, "frozen_inputs": []}
+  },
+  "candidate": {
+    "format": "git_patch",
+    "allowed_paths": ["src/**"],
+    "protected_paths": [],
+    "maximum_changed_files": 5
+  },
+  "checks": {
+    "targeted": [{"id": "targeted", "command": ["node", "--test"], "expected_on_base": "fail", "expected_on_candidate": "pass", "required": true}],
+    "regression": [],
+    "hidden": {"bundle_sha256": "hidden", "required": true}
+  },
+  "settlement": {"minimum_assurance_level": "AV-2", "pass_required": true}
+}

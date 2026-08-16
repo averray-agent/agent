@@ -9,6 +9,7 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "drills": "node bin/run-drills.mjs",
+    "contract:drills": "node bin/run-contract-drills.mjs",
     "corpus": "node bin/run-corpus.mjs"
   }
 }
