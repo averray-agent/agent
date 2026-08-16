@@ -18,10 +18,10 @@
     "agentAccountCore": "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57",
     "reputationSbt": "0xA85AF867b5f573176f49F0D6A827F61A5Cee4e37",
     "discoveryRegistry": "0x47876D138e3a26c485A5f8acbAC7AEcA3c7e6C62",
-    "escrowCore": "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793",
+    "escrowCore": "0xa03d7f0F24dbaeBdF2a7D984eC231cE1420e799F",
     "xcmWrapper": "0xF20b35A3f85EC864127B551ce8A64446fC0ed2Bc",
     "token": "0x0000053900000000000000000000000001200000",
-    "legacyEscrowCore": "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC",
+    "legacyEscrowCore": "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793",
     "hydrationUsdcAdapter": "0x96091d4477Fe37E79557276d63883bBbbdE73159",
     "depositPoolLane": "0x88eE70277E486136676c0b50Ed9b7D7A1a31371f",
     "hydrationDepositPoolAdapter": "0xE2801E6C640e0180798912649fD567E1Ea459a35",
@@ -179,13 +179,6 @@
         "maskedRuntimeCodeHash": "sha256:0faec68edf65d6adf5a56677904f4ac8e467b9ec0a59e5247f4184e2fcc18bad",
         "reason": "PR #1043 added recordRemotePosition (with remotePositionAsOf, remotePositionRef and RemotePositionObserved) to HydrationUsdcAdapterV22 for the packet-2 agent deposit pool, which uses its own dedicated adapter instance so that observation is the full book. The live bank adapter at 0x96091d4477Fe37E79557276d63883bBbbdE73159 custodies the operating bank position and is not the pool's adapter, so it is deliberately left on its pre-#1043 runtime. Verified against mainnet that the live runtime is byte-identical to HydrationUsdcAdapterV22 compiled at 3d88391^, so this entry permits exactly the one new compiled runtime and nothing else."
       }
-    ],
-    "legacyEscrowCore": [
-      {
-        "sourceCommit": "052b3a7a791112001257226ecfbea7a919d9aca2",
-        "maskedRuntimeCodeHash": "sha256:f194f90545c90989f58fe3512ac189ef84882031f9322dfcc934b3e8ccf919a2",
-        "reason": "Post-v3-ceremony drain state (2026-08-13): HEAD source compiles the EscrowCore v3 artifact, while legacyEscrowCore at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC intentionally remains the deployed v2 runtime until its open jobs and dispute windows drain (16 unsettled at cutover, incl. the 2026-08-16 rescue finalize). v2's own provenance stays verified via contractProvenance (sha256:bc0d1cfe…) and deployments/interfaces/mainnet-escrow-core-v2.json. This entry allowlists exactly the v3 candidate artifact against the legacy address and must be deleted when v2 fully drains and exits the manifest alongside the operator revocation legs."
-      }
     ]
   },
   "parameters": {
@@ -201,7 +194,11 @@
     "rejectionReliabilityPenalty": "25",
     "disputeLossSkillPenalty": "35",
     "disputeLossReliabilityPenalty": "60",
-    "protocolFeeBps": "500"
+    "protocolFeeBps": "500",
+    "retentionFlatRaw": "50000",
+    "retentionCapBps": "2000",
+    "posterFeeBps": "500",
+    "posterFeeFloorRaw": "50000"
   },
   "deploymentBlocks": {
     "treasuryPolicy": 18647521,
@@ -223,7 +220,7 @@
     "depositPoolLane": 19421392,
     "hydrationDepositPoolAdapter": 19421395,
     "depositPool": 19421397,
-    "escrowCoreV3": 19414957,
+    "escrowCoreV3": 19531505,
     "depositPoolLaneV2": 19421392,
     "hydrationDepositPoolAdapterV2": 19421395,
     "depositPoolV2": 19421397,
@@ -279,12 +276,13 @@
     "hydrationUsdcAdapterV2_2_1": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     "depositPoolLane": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     "hydrationDepositPoolAdapter": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
-    "depositPool": "0x9Ab8531FBb0948C542a31298FD61335f30064239"
+    "depositPool": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+    "escrowCoreV3": "0x9Ab8531FBb0948C542a31298FD61335f30064239"
   },
-  "escrowRedeployedAt": "2026-07-30T10:01:56.005Z",
+  "escrowRedeployedAt": "2026-08-16T12:03:08.049Z",
   "escrowRedeployTxHashes": {
-    "deploy": "0xc4d6d442824bec61f8ca99646022b66776af88406a56f8c3da67e338610d132b",
-    "multisigExec": "0xcc0a70c1031ae2540d79c61e7be9f463ecdb56b8d84af05e570ff9db41ac9b2c",
+    "deploy": "0x5978c950f3f84f5860a859f305dd0b48b7ff1dacaeceda4c7193759d178e4a07",
+    "multisigExec": "0x0cc65009dd3640b25be8c1f814daa18985b621a8681a88520f8e054d49628946",
     "revokeOld": null
   },
   "depositPoolDeployTxHashes": {
