@@ -118,11 +118,18 @@ test("pool lane request identity is deterministic and nonce-bound", () => {
   assert.notEqual(one, two);
 });
 
-test("fresh par quote must be the AAVE 22 to 1003 route and exactly one-to-one", () => {
+test("fresh par quote holds filler-level par within the accrual ceiling (entry direction)", () => {
   const amount = 1_950_000n;
   const base = { fillerType: "AAVE", assetIn: 22, assetOut: 1003, amountInRaw: amount.toString(), amountOutRaw: amount.toString() };
   assert.equal(assertParAaveQuote(base, amount), true);
-  assert.throws(() => assertParAaveQuote({ ...base, amountOutRaw: (amount - 1n).toString() }, amount), /not exactly 1:1/u);
+  // Measured live 2026-08-16: staging 4,910,000 produced a 4,910,004/4,910,004
+  // event — the entry direction grosses up by index accrual exactly like exit.
+  const accrued = { ...base, amountInRaw: (amount + 4n).toString(), amountOutRaw: (amount + 4n).toString() };
+  assert.equal(assertParAaveQuote(accrued, amount), true);
+  assert.throws(() => assertParAaveQuote({ ...base, amountOutRaw: (amount - 1n).toString() }, amount), /filler-level par/u);
+  assert.throws(() => assertParAaveQuote({ ...base, amountInRaw: (amount - 1n).toString(), amountOutRaw: (amount - 1n).toString() }, amount), /accrual-bounded window/u);
+  const over = (amount + unwindAccrualCeiling(amount) + 1n).toString();
+  assert.throws(() => assertParAaveQuote({ ...base, amountInRaw: over, amountOutRaw: over }, amount), /accrual-bounded window/u);
 });
 
 test("cancel fallback contains only cancelUnstaged then pool settlement", () => {
