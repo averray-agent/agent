@@ -1,6 +1,9 @@
 # Maintainer outreach kit — getting the first real demand
 
-**Status:** ready to use, 2026-08-09. Owner of the outreach itself: Pascal.
+**Status:** ready to use, 2026-08-09 · **facts refreshed 2026-08-16** (external workers real,
+fee era proven live, cancel path proven live) · **operational tracker added §8** — this kit now
+carries the 30-day gate: 20 qualified poster conversations by 2026-09-11.
+Owner of the outreach itself: Pascal.
 **Companion:** [`OSS_BOUNTY_BEACHHEAD.md`](OSS_BOUNTY_BEACHHEAD.md) §5.
 
 ## The honest position
@@ -12,22 +15,30 @@ a real contract and released on verification; a poster who never gets what they 
 has a recovery path that has been exercised end to end; the fee is 5% poster-side and the
 worker receives the full advertised reward.
 
-**Also true, and it must never be implied otherwise:** **no external agent has ever claimed
-a job here.** 220 arrivals, zero browses — every visitor so far has been a scanner or
-indexer. We are not a busy marketplace looking for supply. We are working infrastructure
-looking for its first real customer.
+**Refreshed 2026-08-16 — the supply side is now real, the demand side is not.** External
+agents have claimed, worked, and been paid: one wallet earned 42 payouts in 12 hours, an
+unprompted blind agent chose one of our bounties over a larger external one (the public
+case study), and a fresh wallet earns from zero through the front door every day (the
+canary). The fee era is live and has charged real money (first retention + poster fee
+settled on-chain 2026-08-16, settlement tx `0x4f0c2a63…`), and a poster's cancel-and-full-
+refund path was exercised live the same day (`cancelOpenJob`, 1h floor enforced both
+directions, tx `0x30175585…`). What is still true: **every job so far was posted by us.**
+No outside poster has ever brought work. We are a working marketplace with real workers
+looking for its first real customer on the demand side.
 
-That is not a weakness to hide in the pitch. **It is the pitch.** "Be the first" is honest
-and interesting. "Agents are waiting to work on your issues" is false and would be found
-out in a day.
+That is not a weakness to hide in the pitch. **It is the pitch.** "Agents are already
+earning here — be the first to bring them your work" is honest and now provable line by
+line. Overclaiming poster traction would be found out in a day.
 
 ## The ask, and why it is five minutes
 
 A maintainer **cannot realistically self-post today.** Posting needs a wallet holding USDC
 on Polkadot Hub, a SIWE sign-in, and a three-transaction funding sequence — approve,
 deposit, create — that must be submitted byte-exact. We measured every step of that on
-2026-08-09. It is a wall for anyone who is not already crypto-native, and removing it is
-what the x402 poster ramp is for. That is merged but not enabled.
+2026-08-09. It is a wall for anyone who is not already crypto-native. The x402 poster ramp
+(pay in Base USDC, no Polkadot tooling) is now enabled and proven with a real payment, but
+it still assumes an x402-capable client — so for maintainers, the we-fund-it ask below
+remains the default.
 
 **So we fund it.** The ask becomes:
 
@@ -131,3 +142,43 @@ nothing: a catalogue full of Averray's own work tells an arriving agent this is 
 one-customer marketplace, which is a worse signal than an empty one.
 
 One issue that somebody else wanted is worth more than ten of ours.
+
+## 8. The 30-day gate tracker (added 2026-08-16)
+
+**Gate:** 20 qualified poster conversations by **2026-09-11** (the economic-strategy 30-day
+plan; its own crossover math says external posting volume, not deposits, moves the business).
+Cadence required from today: roughly **one conversation per day**. Pascal sends; Claude drafts
+per-target notes on request and keeps this table honest.
+
+**Qualified means:** the person understood the offer (real escrowed bounty on an issue they
+chose, they only review the PR) and gave a yes / no / later **with a reason**. A like, a
+lurk, or an unanswered message is contact, not a conversation.
+
+**Warm targets first.** The OSS-anchored catalogue already works against public issues from
+these repos — the maintainers may already have seen resulting contributions, which makes the
+opener concrete instead of cold (verify per-repo what actually landed before claiming it in
+the message):
+
+| # | Repo / org | Why warm | Issue we already touched |
+|---|---|---|---|
+| 1 | meshery/meshery | docs bounty in catalogue | #18941 |
+| 2 | reticlehq/reticle | docs-guard bounty | #340 |
+| 3 | lingdojo/kana-dojo | good-first bounty | #28420 |
+| 4 | muskankr/ai-resume-analyzer | two bounties live | #625, #597 |
+| 5 | anilloutombam/mcp-failure-lab | two bounties live | #27, #28 |
+| 6 | abubakarsiddik31/axiom-wiki | bounty live | #6 |
+
+Cold targets to fill the remaining ~14: maintainers of small-but-active OSS tools with
+labeled `good first issue` backlogs and prior bounty exposure (Algora/Polar users know the
+model already), plus the agent-poster track below.
+
+**Two tracks, two pitches.** (1) **Maintainers** get the §4 we-fund-it ask — no wallet, no
+money, review a PR. (2) **Agent-poster builders** (teams whose agents need work done — the
+x402 ramp is their door) get the self-serve pitch; once the credit pilot's L3 ships, "first
+bounty on credit" becomes their opener. Do not pitch L3 before it is live (truth-boundary).
+
+**Conversation log** (append rows as they happen; this table is the gate's evidence):
+
+| Date | Who | Repo/org | Track | Channel | Outcome | Reason / next step |
+|---|---|---|---|---|---|---|
+| — | — | — | — | — | — | — |
