@@ -4,6 +4,7 @@ import { ConfigError, AppError } from "./errors.js";
 import { isExternalJob } from "./external-job-lifecycle.js";
 import { decimalToBaseUnits, formatBaseUnits } from "./platform-service-helpers.js";
 import { isHostedCanaryClaimant } from "./claimant-attribution.js";
+import { SelfIdentityRegistry } from "./self-identity-registry.js";
 
 export const CATALOGUE_LANE_PACKET = "PACKET_D3_LANE_DISCIPLINE.md";
 export const CATALOGUE_LANE_STATE_SCOPE = "catalogue-lane-discipline-v1";
@@ -116,6 +117,7 @@ export function createCatalogueLaneDiscipline({
   registry = loadCatalogueLaneRegistry(),
   gasEstimateUsdc,
   selfWallets = new Set(),
+  selfIdentityRegistry,
   now = () => new Date(),
   logger = console
 } = {}) {
@@ -124,13 +126,14 @@ export function createCatalogueLaneDiscipline({
     registry,
     gasEstimateUsdc,
     selfWallets,
+    selfIdentityRegistry,
     now,
     logger
   });
 }
 
 export class CatalogueLaneDiscipline {
-  constructor({ stateStore, registry, gasEstimateUsdc = 0.059, selfWallets, now, logger } = {}) {
+  constructor({ stateStore, registry, gasEstimateUsdc = 0.059, selfWallets, selfIdentityRegistry, now, logger } = {}) {
     if (typeof stateStore?.getServiceState !== "function" || typeof stateStore?.upsertServiceState !== "function") {
       throw packetConfigError("lane posting budgets require durable service-state reads and writes");
     }
@@ -143,7 +146,9 @@ export class CatalogueLaneDiscipline {
     this.stateStore = stateStore;
     this.registry = registry instanceof Map ? registry : validateCatalogueLaneRegistry(registry);
     this.expectedBrokeredGasRaw = decimalToBaseUnits(gasEstimateUsdc, USDC_DECIMALS, "expected brokered gas");
-    this.selfWallets = new Set([...(selfWallets ?? [])].map(normalizeWallet).filter(Boolean));
+    this.selfIdentityRegistry = selfIdentityRegistry instanceof SelfIdentityRegistry
+      ? selfIdentityRegistry
+      : new SelfIdentityRegistry({ operatorWallets: selfWallets });
     this.now = now ?? (() => new Date());
     this.logger = logger ?? console;
     this.queue = Promise.resolve();
@@ -246,7 +251,12 @@ export class CatalogueLaneDiscipline {
     const state = await this.#readState();
     const records = pruneRecords(state.records, evaluatedAt);
     const sessions = await collectSessions(this.stateStore);
-    const claimantMetrics = buildClaimantMetrics(sessions, this.registry, this.selfWallets, evaluatedAt);
+    const claimantMetrics = buildClaimantMetrics(
+      sessions,
+      this.registry,
+      this.selfIdentityRegistry,
+      evaluatedAt
+    );
 
     return {
       version: "catalogue-lanes-v1",
@@ -311,7 +321,7 @@ function candidateRecord(job, lane, postedAt, expectedBrokeredGasRaw) {
   };
 }
 
-function buildClaimantMetrics(sessions, registry, selfWallets, now) {
+function buildClaimantMetrics(sessions, registry, selfIdentityRegistry, now) {
   const byLane = new Map([...registry.keys()].map((lane) => [lane, {
     recentWallets: new Map(),
     paid30Raw: 0n,
@@ -325,7 +335,7 @@ function buildClaimantMetrics(sessions, registry, selfWallets, now) {
     const lane = normalizeLaneId(session?.jobSnapshot?.definition?.lane);
     const wallet = normalizeWallet(session?.wallet);
     if (!lane || !registry.has(lane) || !wallet || isHostedCanaryClaimant(session)) continue;
-    const external = !selfWallets.has(wallet);
+    const external = !selfIdentityRegistry.isSelf({ wallet, session });
     if (external && !firstLaneByWallet.has(wallet)) firstLaneByWallet.set(wallet, lane);
     const claimedAt = sessionTimestamp(session);
     if (claimedAt > now.getTime() - DAY_MS) byLane.get(lane).recentWallets.set(wallet, external);

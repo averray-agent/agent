@@ -5,6 +5,7 @@ import { getAddress, keccak256 } from "ethers";
 import { findLatestDepositSwap } from "./bank-deposit-evidence.js";
 import { describeBalanceTarget } from "./bank-lane-feed.js";
 import { redactProviderError } from "../core/redact-provider-error.js";
+import { SelfIdentityRegistry } from "../core/self-identity-registry.js";
 
 export const TRANSPARENCY_SCHEMA_VERSION = "averray.transparency.v1";
 export const TRANSPARENCY_CACHE_TTL_MS = 15_000;
@@ -43,6 +44,7 @@ export class TransparencyService {
     platformService,
     stateStore,
     venueBalanceReader,
+    selfIdentityRegistry,
     cacheTtlMs = TRANSPARENCY_CACHE_TTL_MS,
     freshnessWindowsMs = TRANSPARENCY_FRESHNESS_WINDOWS_MS,
     now = () => Date.now(),
@@ -53,6 +55,9 @@ export class TransparencyService {
     this.platformService = platformService;
     this.stateStore = stateStore;
     this.venueBalanceReader = venueBalanceReader;
+    this.selfIdentityRegistry = selfIdentityRegistry instanceof SelfIdentityRegistry
+      ? selfIdentityRegistry
+      : new SelfIdentityRegistry();
     this.cacheTtlMs = Number(cacheTtlMs);
     this.freshnessWindowsMs = normalizeFreshnessWindows(freshnessWindowsMs);
     this.now = now;
@@ -244,6 +249,12 @@ export class TransparencyService {
         external: countField(flow.composition.external),
         unclassified: countField(flow.composition.unclassified),
         total: countField(flow.windows.last24h.jobs)
+      },
+      workers24h: {
+        outsiders: countField(flow.workers.outsiders),
+        ours: countField(flow.workers.ours),
+        unknown: countField(flow.workers.unknown),
+        total: countField(flow.windows.last24h.jobs)
       }
     };
   }
@@ -322,7 +333,29 @@ export class TransparencyService {
             : "stateStore.listRecentSessions + stateStore.getFundedJob(sourceType)"
         }
       ]));
-      return { windows, composition };
+      const workerCounts = { outsiders: 0, ours: 0, unknown: 0 };
+      for (const session of last24h) {
+        const wallet = String(session?.wallet ?? "").trim();
+        if (!wallet) {
+          workerCounts.unknown += 1;
+          continue;
+        }
+        const identity = this.selfIdentityRegistry.classify({ wallet, session });
+        if (identity.actor === "self") workerCounts.ours += 1;
+        else if (identity.actor === "external") workerCounts.outsiders += 1;
+        else workerCounts.unknown += 1;
+      }
+      const workers = Object.fromEntries(Object.entries(workerCounts).map(([name, value]) => [
+        name,
+        {
+          value,
+          unit: "jobs",
+          readAtMs,
+          source: "backend_state_store sessions classified by the shared self-identity registry",
+          proof: "session.wallet + durable claimantAttribution + configured operator identity registry"
+        }
+      ]));
+      return { windows, composition, workers };
     } catch (error) {
       const unknown = { value: null, raw: null, readAtMs, source, proof: redactProviderError(error) || "flow_read_failed" };
       return {
@@ -333,6 +366,9 @@ export class TransparencyService {
         },
         composition: Object.fromEntries(
           ["platformVerificationRuns", "ingested", "external", "unclassified"].map((name) => [name, { ...unknown, unit: "jobs" }])
+        ),
+        workers: Object.fromEntries(
+          ["outsiders", "ours", "unknown"].map((name) => [name, { ...unknown, unit: "jobs" }])
         )
       };
     }

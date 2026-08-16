@@ -1,6 +1,22 @@
 import { createHash } from "node:crypto";
 
 import { ARRIVAL_CANARY_MARKER_TOKEN_KIND } from "../auth/token-kinds.js";
+import {
+  SelfIdentityRegistry,
+  createSelfIdentityRegistry,
+  resolveAmbiguousClients,
+  resolveSelfClients,
+  resolveSelfWallets
+} from "../core/self-identity-registry.js";
+import {
+  ARRIVAL_STAGES,
+  HTTP_ROUTE_STAGE,
+  TOOL_STAGE,
+  stageRank
+} from "./arrival-stage-map.js";
+import { buildArrivalOperatorView } from "./arrival-operator-view.js";
+
+export { ARRIVAL_STAGES, stageRank } from "./arrival-stage-map.js";
 
 export const ARRIVALS_SCHEMA_VERSION = "averray.arrivals.v1";
 export const HTTP_ARRIVAL_CUTOVER_NOTE =
@@ -14,20 +30,6 @@ const WALLET_RE = /^0x[0-9a-f]{40}$/u;
 const ATTRIBUTION_SOURCES = Object.freeze(["siwe_wallet", "client_name", "ip_only"]);
 export const ARRIVAL_CANARY_MARKER_HEADER = "x-averray-canary-marker";
 export const ARRIVAL_CANARY_MARKER_TTL_SECONDS = 15 * 60;
-
-const HTTP_ROUTE_STAGE = Object.freeze({
-  "GET /jobs": "browsed",
-  "GET /jobs/definition": "evaluated",
-  "GET /jobs/preflight": "evaluated",
-  "GET /jobs/estimate-reward": "evaluated",
-  "GET /jobs/explain-eligibility": "evaluated",
-  "POST /jobs/validate-submission": "evaluated",
-  "POST /auth/nonce": "identified",
-  "POST /auth/verify": "authenticated",
-  "POST /auth/refresh": "authenticated",
-  "POST /jobs/claim": "claimed",
-  "POST /jobs/submit": "submitted"
-});
 
 const HTTP_MACHINE_PATHS = new Set([
   "/",
@@ -70,7 +72,6 @@ const HTTP_MACHINE_PATHS = new Set([
  * that only decorates the client list still lets a headline count our probes
  * as arrivals, which is the exact evidence-manufacturing this exists to stop.
  */
-const SELF_CLIENT_PREFIX = "averray-";
 
 /**
  * Names we present ourselves AND an outsider could present too, so the funnel
@@ -98,8 +99,6 @@ const SELF_CLIENT_PREFIX = "averray-";
  * The bar for adding a name is that WE routinely present it. A shared client
  * name we never use is still just an outsider, and belongs in external.
  */
-const AMBIGUOUS_CLIENT_DEFAULTS = Object.freeze(["anthropic/claudeai"]);
-
 /**
  * Why this is a name list and not the IP hash the observatory already computes.
  *
@@ -130,37 +129,6 @@ const AMBIGUOUS_CLIENT_DEFAULTS = Object.freeze(["anthropic/claudeai"]);
  * a client ever attained, so a client that browses again after claiming does
  * not appear to regress.
  */
-export const ARRIVAL_STAGES = Object.freeze([
-  "reached",
-  "browsed",
-  "evaluated",
-  "identified",
-  "authenticated",
-  "claimed",
-  "submitted"
-]);
-
-/**
- * Which stage each tool demonstrates. Deliberately maps intent, not mechanics:
- * fetchAuthNonce is "identified" because the caller has revealed a wallet it
- * intends to use, which is the first step past anonymous browsing and the one
- * nothing had ever taken when this was built.
- */
-const TOOL_STAGE = Object.freeze({
-  getPlatformCapabilities: "browsed",
-  listJobs: "browsed",
-  getJobDefinition: "browsed",
-  preflightJob: "evaluated",
-  estimateNetReward: "evaluated",
-  explainEligibility: "evaluated",
-  validateJobSubmission: "evaluated",
-  fetchAuthNonce: "identified",
-  verifySiwe: "authenticated",
-  refreshAuthToken: "authenticated",
-  claimJob: "claimed",
-  submitWork: "submitted"
-});
-
 /**
  * Records what happens at the MCP front door.
  *
@@ -185,9 +153,11 @@ const TOOL_STAGE = Object.freeze({
 export class ArrivalObservatory {
   constructor({
     stateStore,
+    platformService,
     metrics,
     now = () => Date.now(),
     hashSalt = "averray-arrivals",
+    identityRegistry,
     selfClients = resolveSelfClients(),
     selfWallets = resolveSelfWallets(),
     ambiguousClients = resolveAmbiguousClients(),
@@ -197,13 +167,13 @@ export class ArrivalObservatory {
     loadRetryIntervalMs = DEFAULT_LOAD_RETRY_INTERVAL_MS
   } = {}) {
     this.stateStore = stateStore;
+    this.platformService = platformService;
     this.metrics = metrics;
     this.now = now;
     this.hashSalt = String(hashSalt);
-    this.selfClients = selfClients instanceof Set ? selfClients : new Set(selfClients ?? []);
-    this.selfWallets = selfWallets instanceof Set ? selfWallets : new Set(selfWallets ?? []);
-    this.ambiguousClients =
-      ambiguousClients instanceof Set ? ambiguousClients : new Set(ambiguousClients ?? []);
+    this.identityRegistry = identityRegistry instanceof SelfIdentityRegistry
+      ? identityRegistry
+      : new SelfIdentityRegistry({ selfClients, operatorWallets: selfWallets, ambiguousClients });
     this.verifyCanaryMarker = typeof verifyCanaryMarker === "function"
       ? verifyCanaryMarker
       : async () => false;
@@ -240,6 +210,15 @@ export class ArrivalObservatory {
     this.startedAtMs = this.now();
     this.httpObservingSinceMs = this.now();
   }
+
+  // Backward-compatible handles for focused tests and callers that supplied
+  // the old three sets directly. The sets now live in the shared registry.
+  get selfClients() { return this.identityRegistry.selfClients; }
+  set selfClients(values) { this.identityRegistry.replaceSelfClients(values); }
+  get selfWallets() { return this.identityRegistry.operatorWallets; }
+  set selfWallets(values) { this.identityRegistry.replaceOperatorWallets(values); }
+  get ambiguousClients() { return this.identityRegistry.ambiguousClients; }
+  set ambiguousClients(values) { this.identityRegistry.replaceAmbiguousClients(values); }
 
   /** First contact: a handshake, or any request that reaches the door. */
   async recordReach({ era, clientInfo, ip } = {}) {
@@ -443,6 +422,35 @@ export class ArrivalObservatory {
         .sort((left, right) => right.lastSeenMs - left.lastSeenMs)
         .map((entry) => this.markEntry(entry));
       const agents = this.mergeAgents([...clients, ...httpClients]);
+      let operatorView;
+      try {
+        operatorView = await buildArrivalOperatorView({
+          nowMs: this.now(),
+          identityRegistry: this.identityRegistry,
+          clients,
+          httpClients,
+          totals: this.totals,
+          actorTotals: {
+            outsider: this.totalsExternal,
+            ours: this.totalsSelf,
+            unknown: this.totalsAmbiguous
+          },
+          httpTotals: this.httpTotals,
+          httpActorTotals: {
+            outsider: this.httpTotalsExternal,
+            ours: this.httpTotalsSelf,
+            unknown: this.httpTotalsAmbiguous
+          },
+          observingSinceMs: this.startedAtMs,
+          httpObservingSinceMs: this.httpObservingSinceMs,
+          stateStore: this.stateStore,
+          platformService: this.platformService
+        });
+      } catch {
+        // The verdict layer joins more evidence than the durable legacy
+        // counters. A failed join must not erase the measurements we did read.
+        operatorView = { unavailable: "arrival operator view could not be derived" };
+      }
       return {
         schemaVersion: ARRIVALS_SCHEMA_VERSION,
         generatedAtMs: this.now(),
@@ -497,7 +505,8 @@ export class ArrivalObservatory {
         clients,
         httpClients,
         distinctAgents: buildDistinct(agents),
-        agents
+        agents,
+        operatorView
       };
     } catch {
       return this.unavailableSnapshot();
@@ -548,6 +557,7 @@ export class ArrivalObservatory {
       httpClients: [],
       distinctAgents: unavailableDistinct(),
       agents: [],
+      operatorView: { unavailable: "arrival operator view could not be derived" },
       unavailable: this.loadFailed ?? UNREADABLE
     };
   }
@@ -565,13 +575,15 @@ export class ArrivalObservatory {
    */
   markEntry(entry) {
     const { markerAttribution, ...publicEntry } = entry;
+    const wallet = entry.wallet ?? walletFromKey(this.clientWalletLinks.get(entry.key));
     const actor = this.classifyActor(
       entry.name ? { name: entry.name } : null,
-      entry.wallet ?? walletFromKey(this.clientWalletLinks.get(entry.key)),
+      wallet,
       markerOverride(markerAttribution)
     );
     return {
       ...publicEntry,
+      wallet: wallet ?? null,
       tools: { ...entry.tools },
       attributionSources: {
         ...emptyAttributionTotals(),
@@ -771,14 +783,14 @@ export class ArrivalObservatory {
    * ours, not merely that we cannot rule it out.
    */
   classifyActor(identity, wallet = undefined, canaryMarkerValid = undefined) {
-    if (canaryMarkerValid === true) return "self";
-    if (canaryMarkerValid === false) return "client";
-    if (wallet) return this.selfWallets.has(wallet) ? "self" : "client";
-    if (!identity) return "anonymous";
-    const name = identity.name.toLowerCase();
-    if (name.startsWith(SELF_CLIENT_PREFIX) || this.selfClients.has(name)) return "self";
-    if (this.ambiguousClients.has(name)) return "ambiguous";
-    return "client";
+    const classified = this.identityRegistry.classify({
+      wallet,
+      clientInfo: identity,
+      canaryMarkerValid
+    });
+    if (classified.actor === "self") return "self";
+    if (classified.actor === "ambiguous") return "ambiguous";
+    return identity || wallet ? "client" : "anonymous";
   }
 
   hashIp(ip) {
@@ -787,18 +799,7 @@ export class ArrivalObservatory {
   }
 }
 
-export function resolveSelfClients(env = process.env) {
-  return new Set(parseClientNames(env?.ARRIVAL_SELF_CLIENTS));
-}
-
-export function resolveSelfWallets(env = process.env) {
-  return new Set(
-    String(env?.ARRIVAL_SELF_WALLETS ?? "")
-      .split(",")
-      .map((value) => normalizeWallet(value))
-      .filter(Boolean)
-  );
-}
+export { createSelfIdentityRegistry, resolveAmbiguousClients, resolveSelfClients, resolveSelfWallets };
 
 export function createArrivalCanaryMarkerService({
   authConfig,
@@ -856,17 +857,6 @@ export function createArrivalCanaryMarkerService({
  * that turn out to be shared, but cannot accidentally un-know the one we
  * already learned the hard way.
  */
-export function resolveAmbiguousClients(env = process.env) {
-  return new Set([...AMBIGUOUS_CLIENT_DEFAULTS, ...parseClientNames(env?.ARRIVAL_AMBIGUOUS_CLIENTS)]);
-}
-
-function parseClientNames(raw) {
-  return String(raw ?? "")
-    .split(",")
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean);
-}
-
 function emptyTotals() {
   return Object.fromEntries(ARRIVAL_STAGES.map((stage) => [stage, 0]));
 }
@@ -976,11 +966,6 @@ function walletFromKey(key) {
   return typeof key === "string" && key.startsWith("wallet:")
     ? normalizeWallet(key.slice("wallet:".length))
     : undefined;
-}
-
-export function stageRank(stage) {
-  const index = ARRIVAL_STAGES.indexOf(stage);
-  return index === -1 ? -1 : index;
 }
 
 export function normalizeClientInfo(clientInfo) {
