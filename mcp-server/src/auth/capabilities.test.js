@@ -24,6 +24,7 @@ test("resolveCapabilities expands admin and verifier capabilities", () => {
   assert.ok(capabilities.includes("jobs:pause-recurring"));
   assert.ok(capabilities.includes("jobs:timeline"));
   assert.ok(capabilities.includes("ops:view"));
+  assert.ok(capabilities.includes("agent-transfers:submit"));
   assert.ok(capabilities.includes("verifier:run"));
   assert.ok(capabilities.includes("subjobs:create"));
   assert.ok(capabilities.includes("xcm:observe"));
@@ -66,6 +67,7 @@ test("capabilityMatrix exposes base and role capability groups", () => {
   assert.deepEqual(matrix.routes["/admin/jobs/timeline"], ["jobs:timeline"]);
   assert.deepEqual(matrix.routes["/admin/xcm/observe"], ["xcm:observe"]);
   assert.deepEqual(matrix.routes["/admin/xcm/finalize"], ["xcm:finalize"]);
+  assert.deepEqual(matrix.routes["/admin/agent-transfers"], ["agent-transfers:submit"]);
   assert.deepEqual(matrix.routes["/transparency"], ["ops:view"]);
   assert.deepEqual(matrix.uiControls["capital.transparency.view"], ["ops:view"]);
   assert.deepEqual(matrix.uiControls["admin.status.view"], ["admin:status", "ops:view"]);
@@ -79,6 +81,7 @@ test("getRouteCapabilityRequirements resolves method-specific route policies", (
   assert.deepEqual(getRouteCapabilityRequirements("GET", "/transparency"), ["ops:view"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/admin/jobs"), ["jobs:create"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/admin/bootstrap-self-report/send"), ["admin:self-report:send"]);
+  assert.deepEqual(getRouteCapabilityRequirements("POST", "/admin/agent-transfers"), ["agent-transfers:submit"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/admin/jobs/ingest/wikipedia"), ["jobs:ingest"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/disputes/dispute-123/verdict"), ["disputes:verdict"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/account/withdraw/transactions"), ["account:read"]);

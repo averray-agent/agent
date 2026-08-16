@@ -23,10 +23,10 @@ name: Hosted Worker Canary
 # never shared with the internal smoke runner, which owns the separate
 # op://mainnet-smoke/admin-refresh-token/password chain.
 #
-# Mainnet's 0.1 USDC payout is intentional monitoring spend. Escrow pays the
-# claimed worker, so a fresh-wallet canary cannot redirect that release without
-# ceasing to test the real external-worker path. The evidence + summary label
-# each ephemeral payout as accepted_cost before its process-only key disappears.
+# Mainnet's 0.1 USDC payout still reaches the real claimed worker. Before the
+# fresh key disappears, the worker signs the deployed AgentAccountCore EIP-712
+# transfer and the KMS broker returns that proof-cost to the reward bank. A
+# failed payout recovery is loud evidence but never turns a green lifecycle red.
 
 on:
   # Manual run, with knobs for one-off debugging.
@@ -106,6 +106,8 @@ jobs:
       WORKER_CANARY_KEEP_JOB: ${{ inputs.keep_job && '1' || '' }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
 
       - name: Resolve deployed SHA and production-change result
         id: canary_target
@@ -120,6 +122,8 @@ jobs:
 
           deploy_changed=true
           deployed_sha=""
+          old_sha=""
+          changed_files_json='[]'
           if [ "$TRIGGER_EVENT_NAME" = "workflow_run" ]; then
             deployed_sha="$TRIGGER_HEAD_SHA"
             deploy_changed=false
@@ -142,11 +146,14 @@ jobs:
               jq -e '
                 .schemaVersion == 1 and
                 (.changed | type == "boolean") and
+                (.oldSha | test("^[0-9a-f]{40}$")) and
                 (.newSha | test("^[0-9a-f]{40}$")) and
                 (.components | type == "array")
               ' "$result_file" >/dev/null
               deploy_changed="$(jq -r '.changed' "$result_file")"
+              old_sha="$(jq -r '.oldSha' "$result_file")"
               deployed_sha="$(jq -r '.newSha' "$result_file")"
+              changed_files_json="$(git diff --name-only "$old_sha" "$deployed_sha" | jq -Rsc 'split("\n") | map(select(length > 0))')"
             fi
           else
             deployed_sha="$(curl -fsS --retry 4 --retry-delay 1 --max-time 10 https://api.averray.com/health | jq -er '.deployedSha')"
@@ -159,19 +166,20 @@ jobs:
 
           echo "deploy_changed=$deploy_changed" >> "$GITHUB_OUTPUT"
           echo "deployed_sha=$deployed_sha" >> "$GITHUB_OUTPUT"
+          echo "changed_files_json=$changed_files_json" >> "$GITHUB_OUTPUT"
 
-      - name: Check for a prior green canary on this SHA
+      - name: Check green canary markers
         id: green_marker
         if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && steps.canary_target.outputs.deploy_changed == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           DEPLOYED_SHA: ${{ steps.canary_target.outputs.deployed_sha }}
+          WORKER_CANARY_PROFILE: ${{ vars.WORKER_CANARY_PROFILE || 'testnet' }}
         run: |
           set -euo pipefail
 
-          artifact_name="hosted-worker-canary-green-${DEPLOYED_SHA}"
+          artifact_name="hosted-worker-canary-green-${WORKER_CANARY_PROFILE}-${DEPLOYED_SHA}"
           artifacts_json="$(gh api --method GET "/repos/${GITHUB_REPOSITORY}/actions/artifacts" \
-            -f name="$artifact_name" \
             -f per_page=100)"
           count="$(printf '%s' "$artifacts_json" \
             | jq --arg name "$artifact_name" '[.artifacts[] | select(.expired == false and .name == $name)] | length')"
@@ -181,6 +189,19 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+          recent_mainnet=false
+          if [ "$WORKER_CANARY_PROFILE" = "mainnet" ]; then
+            cutoff_epoch="$(date -u -d '6 hours ago' +%s)"
+            recent_mainnet="$(printf '%s' "$artifacts_json" | jq -r --argjson cutoff "$cutoff_epoch" '
+              any(.artifacts[];
+                (.expired == false) and
+                (.name | startswith("hosted-worker-canary-green-mainnet-")) and
+                ((.created_at | fromdateiso8601) > $cutoff)
+              )
+            ')"
+          fi
+          echo "recent_mainnet=$recent_mainnet" >> "$GITHUB_OUTPUT"
+
       - name: Decide whether to spend lifecycle gas
         id: trigger_decision
         env:
@@ -189,6 +210,9 @@ jobs:
           WORKER_CANARY_DEPLOY_CHANGED: ${{ steps.canary_target.outputs.deploy_changed }}
           WORKER_CANARY_DEPLOYED_SHA: ${{ steps.canary_target.outputs.deployed_sha }}
           WORKER_CANARY_GREEN_EXISTS: ${{ steps.green_marker.outputs.exists || 'false' }}
+          WORKER_CANARY_RECENT_GREEN_MAINNET_EXISTS: ${{ steps.green_marker.outputs.recent_mainnet || 'false' }}
+          WORKER_CANARY_CHANGED_FILES_JSON: ${{ steps.canary_target.outputs.changed_files_json || '[]' }}
+          WORKER_CANARY_PROFILE: ${{ vars.WORKER_CANARY_PROFILE || 'testnet' }}
         run: node scripts/ops/decide-worker-canary-trigger.mjs
 
       - name: Summarize skipped canary
@@ -350,6 +374,7 @@ jobs:
           credited_to="$(jq -r '.stages.settle.creditedTo // "—"' "$evidence_file")"
           payout_disposition="$(jq -r '.payoutDisposition.status // "unknown"' "$evidence_file")"
           payout_disposition_detail="$(jq -r '.payoutDisposition.detail // "—"' "$evidence_file")"
+          payout_recovery_tx="$(jq -r '.payoutDisposition.txHash // "—"' "$evidence_file")"
           settle_polls="$(jq -r '.stages.settle.pollCount // "—"' "$evidence_file")"
           settle_ms="$(jq -r '.stages.settle.elapsedMs // "—"' "$evidence_file")"
           token_days="$(jq -r '.stages.tokenFreshness.daysToExpiry // "n/a"' "$evidence_file")"
@@ -364,6 +389,7 @@ jobs:
             echo "- Claim: \`${claim_mechanism}\` · Submit: \`${submit_status}\` · Verify: \`${verify_outcome}\`"
             echo "- Settle: job \`${job_state}\`, released \`${released}\` USDC → \`${credited_to}\` · \`${settle_polls}\` poll(s), \`${settle_ms} ms\`"
             echo "- Payout disposition: \`${payout_disposition}\` — ${payout_disposition_detail}"
+            echo "- Payout recovery tx: \`${payout_recovery_tx}\`"
             echo "- Operator token: \`${token_days}\` day(s) to expiry"
             echo "- Total: \`${total_ms} ms\`"
             echo "- Evidence artifact: \`hosted-worker-canary-${GITHUB_RUN_ID}\`"
@@ -389,19 +415,21 @@ jobs:
         if: ${{ success() && steps.trigger_decision.outputs.should_run == 'true' }}
         env:
           DEPLOYED_SHA: ${{ steps.trigger_decision.outputs.deployed_sha }}
+          WORKER_CANARY_PROFILE: ${{ vars.WORKER_CANARY_PROFILE || 'testnet' }}
         run: |
           jq -n \
             --arg deployedSha "$DEPLOYED_SHA" \
             --arg runId "$GITHUB_RUN_ID" \
             --arg verifiedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{schemaVersion: 1, status: "passed", deployedSha: $deployedSha, runId: $runId, verifiedAt: $verifiedAt}' \
+            --arg profile "$WORKER_CANARY_PROFILE" \
+            '{schemaVersion: 1, status: "passed", profile: $profile, deployedSha: $deployedSha, runId: $runId, verifiedAt: $verifiedAt}' \
             > artifacts/worker-canary-green.json
 
       - name: Upload green SHA debounce marker
         if: ${{ success() && steps.trigger_decision.outputs.should_run == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: hosted-worker-canary-green-${{ steps.trigger_decision.outputs.deployed_sha }}
+          name: hosted-worker-canary-green-${{ vars.WORKER_CANARY_PROFILE || 'testnet' }}-${{ steps.trigger_decision.outputs.deployed_sha }}
           path: artifacts/worker-canary-green.json
           if-no-files-found: error
           retention-days: 2

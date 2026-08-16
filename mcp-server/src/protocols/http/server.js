@@ -24,6 +24,10 @@ import { createAdminSessionsRoutes } from "./admin-sessions-routes.js";
 import { createAdminStatusRoutes } from "./admin-status-routes.js";
 import { createAdminTreasuryRoutes } from "./admin-treasury-routes.js";
 import { createAdminXcmRoutes } from "./admin-xcm-routes.js";
+import {
+  createAdminAgentTransferRoutes,
+  resolveAgentTransferRecipientAllowlist,
+} from "./admin-agent-transfer-routes.js";
 import { createActivityRoutes } from "./activity-routes.js";
 import { createAccountRoutes } from "./account-routes.js";
 import { createAuthRoutes } from "./auth-routes.js";
@@ -524,6 +528,26 @@ const handleAdminXcmRoute = createAdminXcmRoutes({
   storeIdempotentMutationReceipt,
 });
 
+// The platform signer is also the configured reward-bank AAC account. Keep
+// canary/CW-1 recovery consented AND destination-bound: even a valid user
+// signature cannot make this admin transport route a third party's balance to
+// an arbitrary recipient. Disabled/local profiles expose no recipient.
+const agentTransferRecipients = gateway?.isEnabled?.() && gateway?.isSignerConfigured?.()
+  ? resolveAgentTransferRecipientAllowlist({ rewardBankAddress: await gateway.getPooledFundingAccount() })
+  : new Set();
+const handleAdminAgentTransferRoute = createAdminAgentTransferRoutes({
+  allowedRecipients: agentTransferRecipients,
+  authMiddleware,
+  buildMutationRequestHash,
+  enforceLimit,
+  gateway,
+  rateLimitConfig,
+  readJsonBody,
+  requireChainBackedMutation,
+  respond,
+  runIdempotentMutation,
+});
+
 const handleXcmRequestRoute = createXcmRequestRoutes({
   authMiddleware,
   ensureXcmRequestOwnership,
@@ -1019,6 +1043,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleAdminXcmRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleAdminAgentTransferRoute({ request, response, url, pathname })) {
       return;
     }
 

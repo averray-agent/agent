@@ -31,11 +31,12 @@ agent. See `docs/GO_LIVE_PUNCHLIST.md` (P0).
 | 4 | Submit | structured output → `submitted`, no on-chain revert | #627 `submitWorkFor` |
 | 5 | Verify | operator `/verifier/run` → `approved` (until auto-verify lands) | verification stall |
 | 6 | Settle | EscrowCore job `Closed` + `released == reward`, and worker balance rose by reward in **`usdc.balanceOf(workerEOA)` AND `AAC.positions(worker).liquid`** | settlement / payout reconciliation |
-| 7 | Freshness | the long-lived operator `ADMIN_JWT` isn't within N days (default 7) of expiry | #628 `ADMIN_JWT` expiry |
+| 7 | Payout recovery | while the ephemeral key is still resident, sign the exact AAC `SendToAgent` authorization and confirm `AgentTransfer` returned the payout to the KMS signer's reward bank | dropped-key monitoring cost |
+| 8 | Freshness | the long-lived operator `ADMIN_JWT` isn't within N days (default 7) of expiry | #628 `ADMIN_JWT` expiry |
 
 The worker stages (1–4) run on the roleless token; the operator stages
 (create/fund/verify/cleanup) run on the profile-selected operator credential.
-Stages 5 and 7 are structured to become **no-ops** once auto-verify and the
+Stages 5 and 8 are structured to become **no-ops** once auto-verify and the
 short-lived refresh-token flow land (a short-lived operator token skips the freshness gate;
 scheduled and post-deploy runs use `WORKER_CANARY_VERIFY_MODE=auto` and poll the
 public verifier result instead of racing an operator-triggered write against the
@@ -52,28 +53,37 @@ Each run posts its own **upfront-funded** benchmark job (small reward, default
 **archives it in a `finally` block** so canary jobs never accumulate or pollute
 the public board. It never consumes claim attempts on real board jobs.
 
-### Accepted mainnet payout cost
+### Mainnet payout recovery
 
-Every successful mainnet run pays `0.1 USDC` to its fresh ephemeral worker, and
-that payout is intentionally unrecoverable after the process discards the key.
-This is accepted monitoring spend, not a treasury-recovery mechanism. The
-evidence artifact records `payoutDisposition.status: "accepted_cost"`, and the
-workflow summary states the amount and disposition on every run.
+Every successful mainnet run pays `0.1 USDC` to its fresh ephemeral worker. Before
+discarding that key, the canary signs AgentAccountCore's exact EIP-712
+`SendToAgent` authorization and returns the settled amount to the KMS signer's AAC
+account (the reward bank). Recovered proof cost is recycled operating liquidity,
+not revenue, so it never routes to the treasury. Evidence records
+`payoutDisposition.status: "recovered"` and the confirmed `AgentTransfer` tx hash.
+
+Recovery is fail-open with respect to lifecycle health: a transfer failure cannot
+turn a successfully claimed, submitted, verified and settled job red. It emits a
+loud warning and records `accepted_cost` instead. This preserves the distinction
+between a broken earn path and failed cost recycling while never claiming an
+unconfirmed recovery.
 
 The alternatives would stop testing the thing this canary exists to prove:
 
 - `0` reward cannot traverse the production path: the configured USDC minimum
   is `0.07`, and settlement rejects a zero transfer. The `0.1` default is the
   smallest simple amount above that boundary.
-- Escrow pays the worker that claimed the job; there is no separate payout
-  address to redirect to an operator wallet.
+- Escrow still pays the worker that claimed the job. Recovery is a separate,
+  worker-consented AAC transfer signed after settlement; the backend cannot
+  redirect the escrow payout.
 - Reusing a retained worker would no longer test a fresh roleless wallet's SIWE
   and onboarding path, and its onboarding waiver would be exhausted after three
   claims.
 
-At the observed six successful ephemeral payouts on 2026-08-12, this policy
-cost `0.60 USDC` (six × the confirmed `0.1` default). Run frequency is not fixed:
-there is one daily run plus one post-deploy run for each production-changing SHA.
+Historical payouts whose ephemeral keys are already gone remain written off.
+Future runs are capped economically as well: the daily scheduled proof always
+runs, while deploy-triggered proofs skip docs-only deploys and any deploy within
+six hours of another green mainnet canary.
 
 ## Safety
 
@@ -192,6 +202,7 @@ ADMIN_REFRESH_TOKEN_OP='op://mainnet-smoke/admin-refresh-token-worker-canary/pas
 ## Evidence artifact
 
 The run writes a sanitized JSON doc (no tokens or keys) — stage timings, tx
-hashes, claim mechanism, verifier outcome, on-chain release amount, and where
-the payout landed (EOA vs AAC) — uploaded as `hosted-worker-canary-<run_id>`
-and summarized in the job step summary.
+hashes, claim mechanism, verifier outcome, on-chain release amount, where the
+payout landed (EOA vs AAC), and the confirmed payout-recovery disposition —
+uploaded as `hosted-worker-canary-<run_id>` and summarized in the job step
+summary.

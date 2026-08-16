@@ -92,12 +92,12 @@ test("post-deploy canary debounces on durable green SHA artifacts", async () => 
 
   assert.match(
     workflow,
-    /artifact_name="hosted-worker-canary-green-\$\{DEPLOYED_SHA\}"[\s\S]{0,420}expired == false and \.name == \$name/u,
+    /artifact_name="hosted-worker-canary-green-\$\{WORKER_CANARY_PROFILE\}-\$\{DEPLOYED_SHA\}"[\s\S]{0,520}expired == false and \.name == \$name/u,
     "debounce must look up a non-expired green marker for the exact deployed SHA",
   );
   assert.match(
     workflow,
-    /name: Upload green SHA debounce marker[\s\S]{0,320}name: hosted-worker-canary-green-\$\{\{ steps\.trigger_decision\.outputs\.deployed_sha \}\}/u,
+    /name: Upload green SHA debounce marker[\s\S]{0,360}name: hosted-worker-canary-green-\$\{\{ vars\.WORKER_CANARY_PROFILE \|\| 'testnet' \}\}-\$\{\{ steps\.trigger_decision\.outputs\.deployed_sha \}\}/u,
     "a successful lifecycle walk must persist its exact SHA marker",
   );
   assert.match(
@@ -107,7 +107,16 @@ test("post-deploy canary debounces on durable green SHA artifacts", async () => 
   );
 });
 
-test("the workflow exposes the 0.1 USDC default and reports ephemeral payouts as an accepted cost", async () => {
+test("post-deploy trigger skips docs-only diffs and recent green mainnet canaries", async () => {
+  const workflow = await readFile(workflowPath, "utf8");
+  assert.match(workflow, /git diff --name-only "\$old_sha" "\$deployed_sha"/u);
+  assert.match(workflow, /WORKER_CANARY_CHANGED_FILES_JSON:/u);
+  assert.match(workflow, /hosted-worker-canary-green-mainnet-/u);
+  assert.match(workflow, /WORKER_CANARY_RECENT_GREEN_MAINNET_EXISTS:/u);
+  assert.match(workflow, /6 hours/u);
+});
+
+test("the workflow exposes the 0.1 USDC default and reports payout recovery disposition", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 
   assert.match(
@@ -119,7 +128,7 @@ test("the workflow exposes the 0.1 USDC default and reports ephemeral payouts as
   assert.match(workflow, /Payout disposition:.*payout_disposition/u);
   assert.match(
     workflow,
-    /0\.1 USDC payout is intentional monitoring spend/u,
-    "the workflow must not hide the ephemeral payout strand"
+    /payout recovery|recovered proof-costs|reward bank/iu,
+    "the workflow must explain that ephemeral payouts are recovered into the reward bank"
   );
 });

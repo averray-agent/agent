@@ -3,6 +3,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { Wallet, verifyTypedData } from "ethers";
 
 import {
   runWorkerCanary,
@@ -15,7 +16,9 @@ import {
   assertOperatorTokenFreshness,
   assertOperatorReady,
   resolveWorkerWallet,
-  classifyCanaryPayoutDisposition
+  classifyCanaryPayoutDisposition,
+  buildCanaryTransferAuthorization,
+  runPayoutRecoveryStage,
 } from "./run-worker-canary.mjs";
 import * as workerCanaryModule from "./run-worker-canary.mjs";
 
@@ -26,6 +29,8 @@ const JOB_ID = "worker-canary-test-1";
 const FIXED_MS = 1_900_000_000_000;
 const REWARD_RAW = 100_000n; // 0.1 USDC, 6 decimals
 const PAYOUT_TX_HASH = `0x${"ab".repeat(32)}`;
+const TRANSFER_TX_HASH = `0x${"cd".repeat(32)}`;
+const REWARD_BANK = "0x5a6836c6D4d293F6E5377E6c28054F4171915813";
 
 function approvedPayoutResult(overrides = {}) {
   return {
@@ -67,7 +72,7 @@ function okOperatorClient(overrides = {}) {
     calls,
     async getAuthSession() {
       calls.push(["getAuthSession"]);
-      return { roles: ["admin", "verifier"], capabilities: ["jobs:create", "jobs:lifecycle", "verifier:run", "admin:status"] };
+      return { roles: ["admin", "verifier"], capabilities: ["jobs:create", "jobs:lifecycle", "verifier:run", "admin:status", "agent-transfers:submit"] };
     },
     async getAdminStatus() {
       calls.push(["getAdminStatus"]);
@@ -78,6 +83,7 @@ function okOperatorClient(overrides = {}) {
             settlementReady: true,
             roles: {
               signerIsSettlementBroker: true,
+              signerIsAgentTransferBroker: true,
               escrowIsAgentAccountEscrowOperator: true,
               escrowAgentAccountMatchesConfig: true
             },
@@ -87,6 +93,7 @@ function okOperatorClient(overrides = {}) {
               escrowCoreAgentAccountAddress: "0x3333333333333333333333333333333333333333"
             },
             signerFunding: {
+              account: REWARD_BANK,
               agentAccountAddress: "0x3333333333333333333333333333333333333333",
               assets: [{
                 symbol: "USDC",
@@ -176,13 +183,15 @@ function okEnv(overrides = {}) {
 function runFull(overrides = {}) {
   return runWorkerCanary({
     env: okEnv(overrides.env),
-    wallet: { address: WORKER },
+    wallet: overrides.wallet ?? { address: WORKER },
+    workerEphemeral: overrides.workerEphemeral,
     operatorClient: overrides.operatorClient ?? okOperatorClient(),
     operatorAuth: overrides.operatorAuth ?? farFutureOperatorAuth(),
     workerClient: overrides.workerClient ?? okWorkerClient(),
     chainReader: overrides.chainReader ?? okChainReader(),
-    now: () => FIXED_MS,
-    log: () => {}
+    now: overrides.now ?? (() => FIXED_MS),
+    nonceGenerator: overrides.nonceGenerator,
+    log: overrides.log ?? (() => {})
   });
 }
 
@@ -231,17 +240,189 @@ test("full canary loop walks SIWE→claim→submit→verify→settle and asserts
   assert.equal(archive[2].jobId, JOB_ID);
 });
 
-test("ephemeral settled payouts are recorded as accepted, unrecoverable monitoring cost", () => {
+test("ephemeral recovery failure is recorded as accepted monitoring cost", () => {
   assert.deepEqual(classifyCanaryPayoutDisposition({
     workerEphemeral: true,
     settleStage: { jobState: "Closed" },
+    recoveryStage: { status: "failed", warning: "relay offline" },
     rewardAmount: "0.1",
     rewardAsset: "USDC"
   }), {
     status: "accepted_cost",
     recoverable: false,
-    detail: "0.1 USDC is intentionally unrecoverable monitoring spend; the ephemeral worker key is discarded after this run"
+    detail: "0.1 USDC remains accepted monitoring cost because payout recovery failed: relay offline"
   });
+});
+
+test("canary recovery signs the exact AgentAccountCore EIP-712 domain and confirms AgentTransfer", async () => {
+  const wallet = new Wallet(`0x${"12".repeat(32)}`);
+  const authorization = await buildCanaryTransferAuthorization({
+    wallet,
+    chainId: 420420419n,
+    agentAccountAddress: "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57",
+    recipient: REWARD_BANK,
+    asset: "0x0000053900000000000000000000000001200000",
+    amountRaw: REWARD_RAW,
+    nonce: 77n,
+    deadline: 2_000_086_400n,
+  });
+
+  assert.deepEqual(authorization.domain, {
+    name: "Averray AgentAccountCore",
+    version: "1",
+    chainId: 420420419n,
+    verifyingContract: "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57",
+  });
+  assert.equal(
+    verifyTypedData(authorization.domain, authorization.types, authorization.message, authorization.signature),
+    wallet.address,
+  );
+
+  const calls = [];
+  let rewardBankReads = 0;
+  const result = await runPayoutRecoveryStage({
+    wallet,
+    operatorPlatform: {
+      async request(path, options) {
+        calls.push([path, options.body]);
+        return { status: "confirmed", txHash: TRANSFER_TX_HASH, blockNumber: 456 };
+      },
+    },
+    reader: {
+      async isAgentTransferAuthorizationUsed(from, nonce) {
+        calls.push(["nonce", from, nonce]);
+        return false;
+      },
+      async snapshotWorker(account) {
+        calls.push(["balance", account]);
+        rewardBankReads += 1;
+        return {
+          usdcRaw: 0n,
+          aacLiquidRaw: rewardBankReads === 1 ? 1_000_000n : 1_000_000n + REWARD_RAW
+        };
+      },
+      async waitForAgentTransfer(expected) {
+        calls.push(["event", expected]);
+        return { txHash: TRANSFER_TX_HASH, blockNumber: 456, amountRaw: REWARD_RAW.toString() };
+      },
+    },
+    chainId: 420420419n,
+    agentAccountAddress: "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57",
+    rewardBankAddress: REWARD_BANK,
+    assetAddress: "0x0000053900000000000000000000000001200000",
+    amountRaw: REWARD_RAW,
+    nonceGenerator: () => 77n,
+    now: () => 2_000_000_000_000,
+  });
+
+  assert.equal(result.status, "recovered");
+  assert.equal(result.txHash, TRANSFER_TX_HASH);
+  assert.equal(result.rewardBankLiquidDeltaRaw, REWARD_RAW.toString());
+  const relay = calls.find(([name]) => name === "/admin/agent-transfers");
+  assert.equal(relay[1].recipient, REWARD_BANK);
+  assert.equal(relay[1].amount, REWARD_RAW.toString());
+  assert.ok(calls.some(([name]) => name === "event"));
+});
+
+test("a green ephemeral canary records recovered disposition and transfer proof", async () => {
+  const operatorClient = okOperatorClient({
+    async request(path, options) {
+      operatorClient.calls.push(["request", path, options?.body]);
+      if (path === "/admin/arrivals/canary-marker") {
+        return {
+          marker: "signed-marker",
+          wallet: WORKER.toLowerCase(),
+          expiresAt: "2031-01-01T00:00:00.000Z"
+        };
+      }
+      if (path === "/admin/agent-transfers") {
+        return { status: "confirmed", txHash: TRANSFER_TX_HASH, blockNumber: 456 };
+      }
+      return { ok: true };
+    }
+  });
+  let workerSnapshots = 0;
+  let rewardBankSnapshots = 0;
+  const evidence = await runFull({
+    workerEphemeral: true,
+    wallet: { address: WORKER, async signTypedData() { return `0x${"11".repeat(65)}`; } },
+    operatorClient,
+    nonceGenerator: () => 77n,
+    chainReader: okChainReader({
+      async snapshotWorker(account) {
+        if (String(account).toLowerCase() === REWARD_BANK.toLowerCase()) {
+          rewardBankSnapshots += 1;
+          return {
+            usdcRaw: 0n,
+            aacLiquidRaw: rewardBankSnapshots === 1 ? 1_000_000n : 1_000_000n + REWARD_RAW
+          };
+        }
+        workerSnapshots += 1;
+        return workerSnapshots === 1 ? { usdcRaw: 0n, aacLiquidRaw: 0n } : { usdcRaw: 0n, aacLiquidRaw: REWARD_RAW };
+      },
+      async isAgentTransferAuthorizationUsed() { return false; },
+      async waitForAgentTransfer() {
+        return { txHash: TRANSFER_TX_HASH, blockNumber: 456, amountRaw: REWARD_RAW.toString() };
+      }
+    })
+  });
+
+  assert.equal(evidence.status, "passed");
+  assert.equal(evidence.stages.payoutRecovery.status, "recovered");
+  assert.deepEqual(evidence.payoutDisposition, {
+    status: "recovered",
+    recoverable: true,
+    txHash: TRANSFER_TX_HASH,
+    blockNumber: 456,
+    recipient: REWARD_BANK,
+    amountRaw: REWARD_RAW.toString(),
+    rewardBankLiquidBeforeRaw: "1000000",
+    rewardBankLiquidAfterRaw: "1100000",
+    rewardBankLiquidDeltaRaw: REWARD_RAW.toString(),
+    detail: "0.1 USDC returned to the operator reward bank before ephemeral key disposal"
+  });
+  assert.equal(evidence.txHashes.payoutRecovery, TRANSFER_TX_HASH);
+});
+
+test("recovery failure remains a green canary with accepted_cost disposition and a warning", async () => {
+  const warnings = [];
+  const operatorClient = okOperatorClient({
+    async request(path, options) {
+      operatorClient.calls.push(["request", path, options?.body]);
+      if (path === "/admin/agent-transfers") {
+        throw new Error("transfer relay unavailable");
+      }
+      if (path === "/admin/arrivals/canary-marker") {
+        return {
+          marker: "signed-marker",
+          wallet: WORKER.toLowerCase(),
+          expiresAt: "2031-01-01T00:00:00.000Z"
+        };
+      }
+      return { ok: true };
+    },
+  });
+  let snapshots = 0;
+  const evidence = await runFull({
+    workerEphemeral: true,
+    wallet: { address: WORKER, async signTypedData() { return `0x${"11".repeat(65)}`; } },
+    operatorClient,
+    nonceGenerator: () => 88n,
+    chainReader: okChainReader({
+      async snapshotWorker() {
+        snapshots += 1;
+        return snapshots === 1 ? { usdcRaw: 0n, aacLiquidRaw: 0n } : { usdcRaw: 0n, aacLiquidRaw: REWARD_RAW };
+      },
+      async isAgentTransferAuthorizationUsed() { return false; },
+    }),
+    log: (line) => warnings.push(line),
+  });
+
+  assert.equal(evidence.status, "passed");
+  assert.equal(evidence.stages.payoutRecovery.status, "failed");
+  assert.equal(evidence.payoutDisposition.status, "accepted_cost");
+  assert.match(evidence.payoutDisposition.detail, /recovery failed/u);
+  assert.ok(warnings.some((line) => /WARNING.*payout recovery failed/u.test(line)));
 });
 
 test("a blank workflow reward input resolves to the documented 0.1 USDC default", async () => {
@@ -483,6 +664,7 @@ test("operator readiness fails before job creation when EscrowCore points at a d
             settlementReady: false,
             roles: {
               signerIsSettlementBroker: true,
+              signerIsAgentTransferBroker: true,
               escrowIsAgentAccountEscrowOperator: true,
               escrowAgentAccountMatchesConfig: false
             },
@@ -502,7 +684,7 @@ test("operator readiness fails before job creation when EscrowCore points at a d
 test("operator readiness fails before job creation when signer reward bank is short", async () => {
   const operatorPlatform = {
     async getAuthSession() {
-      return { roles: ["admin", "verifier"], capabilities: ["jobs:create", "jobs:lifecycle", "verifier:run", "admin:status"] };
+      return { roles: ["admin", "verifier"], capabilities: ["jobs:create", "jobs:lifecycle", "verifier:run", "admin:status", "agent-transfers:submit"] };
     },
     async getAdminStatus() {
       return {
@@ -512,10 +694,12 @@ test("operator readiness fails before job creation when signer reward bank is sh
             settlementReady: true,
             roles: {
               signerIsSettlementBroker: true,
+              signerIsAgentTransferBroker: true,
               escrowIsAgentAccountEscrowOperator: true,
               escrowAgentAccountMatchesConfig: true
             },
             signerFunding: {
+              account: REWARD_BANK,
               agentAccountAddress: "0x3333333333333333333333333333333333333333",
               assets: [{ symbol: "USDC", readable: true, liquid: 0, liquidRaw: "0" }]
             }
@@ -911,8 +1095,8 @@ test("stage 6 settle: payout credited into the AAC liquid position passes", asyn
   assert.equal(out.summary.creditedTo, "aac_liquid");
 });
 
-// ── STAGE 7: operator token freshness (guards #628) ──────────────────────────
-test("stage 7 freshness: a legacy ADMIN_JWT within N days of expiry fails loud (#628)", () => {
+// ── STAGE 8: operator token freshness (guards #628) ──────────────────────────
+test("stage 8 freshness: a legacy ADMIN_JWT within N days of expiry fails loud (#628)", () => {
   const expSoon = Math.floor(FIXED_MS / 1000) + 3 * 86_400; // 3 days
   assert.throws(
     () => assertOperatorTokenFreshness({ operatorAuth: { mode: "legacy_admin_jwt", token: makeJwt(expSoon) }, minDays: 7, now: () => FIXED_MS }),
@@ -920,7 +1104,7 @@ test("stage 7 freshness: a legacy ADMIN_JWT within N days of expiry fails loud (
   );
 });
 
-test("stage 7 freshness: a legacy ADMIN_JWT with no exp claim fails loud", () => {
+test("stage 8 freshness: a legacy ADMIN_JWT with no exp claim fails loud", () => {
   const noExp = `${Buffer.from(JSON.stringify({ alg: "ES256" })).toString("base64url")}.${Buffer.from(JSON.stringify({ sub: WORKER })).toString("base64url")}.sig`;
   assert.throws(
     () => assertOperatorTokenFreshness({ operatorAuth: { mode: "legacy_admin_jwt", token: noExp }, minDays: 7, now: () => FIXED_MS }),
@@ -928,13 +1112,13 @@ test("stage 7 freshness: a legacy ADMIN_JWT with no exp claim fails loud", () =>
   );
 });
 
-test("stage 7 freshness: a far-future legacy ADMIN_JWT is enforced and passes", () => {
+test("stage 8 freshness: a far-future legacy ADMIN_JWT is enforced and passes", () => {
   const out = assertOperatorTokenFreshness({ operatorAuth: farFutureOperatorAuth(), minDays: 7, now: () => FIXED_MS });
   assert.equal(out.enforced, true);
   assert.ok(out.daysToExpiry >= 29);
 });
 
-test("stage 7 freshness: a short-lived refresh-minted operator token is a no-op (self-rotating)", () => {
+test("stage 8 freshness: a short-lived refresh-minted operator token is a no-op (self-rotating)", () => {
   const shortExp = Math.floor(FIXED_MS / 1000) + 600; // 10 minutes
   const out = assertOperatorTokenFreshness({ operatorAuth: { mode: "admin_refresh", token: makeJwt(shortExp) }, minDays: 7, now: () => FIXED_MS });
   assert.equal(out.enforced, false);

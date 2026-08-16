@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { decideWorkerCanaryTrigger } from "./decide-worker-canary-trigger.mjs";
+import {
+  decideWorkerCanaryTrigger,
+  isDocsOnlyDeploy,
+} from "./decide-worker-canary-trigger.mjs";
 
 const SHA = "1".repeat(40);
 
@@ -71,4 +74,47 @@ test("failed deploy produces an explicit skip reason", () => {
   assert.equal(result.shouldRun, false);
   assert.equal(result.reason, "deploy_not_successful");
   assert.match(result.summary, /concluded failure/u);
+});
+
+test("deploy-triggered mainnet canary skips when another green mainnet run completed within six hours", () => {
+  const result = decideWorkerCanaryTrigger({
+    eventName: "workflow_run",
+    workflowConclusion: "success",
+    deployChanged: true,
+    deployedSha: SHA,
+    greenCanaryExists: false,
+    recentGreenMainnetCanaryExists: true,
+    profile: "mainnet",
+  });
+
+  assert.equal(result.shouldRun, false);
+  assert.equal(result.reason, "recent_green_mainnet_canary");
+  assert.match(result.summary, /within the last 6 hours/u);
+});
+
+test("daily scheduled run is never suppressed by the six-hour trigger economy", () => {
+  const result = decideWorkerCanaryTrigger({
+    eventName: "schedule",
+    deployedSha: SHA,
+    recentGreenMainnetCanaryExists: true,
+    profile: "mainnet",
+  });
+  assert.equal(result.shouldRun, true);
+  assert.equal(result.reason, "daily_heartbeat");
+});
+
+test("docs-only deploys skip the paid canary with an explicit reason", () => {
+  assert.equal(isDocsOnlyDeploy(["README.md", "docs/OPERATIONS.md", "app/notes.md"]), true);
+  assert.equal(isDocsOnlyDeploy(["docs/OPERATIONS.md", "mcp-server/src/server.js"]), false);
+  assert.equal(isDocsOnlyDeploy([]), false);
+
+  const result = decideWorkerCanaryTrigger({
+    eventName: "workflow_run",
+    workflowConclusion: "success",
+    deployChanged: true,
+    deployedSha: SHA,
+    changedFiles: ["README.md", "docs/OPERATIONS.md"],
+  });
+  assert.equal(result.shouldRun, false);
+  assert.equal(result.reason, "docs_only_deploy");
 });
