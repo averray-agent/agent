@@ -312,13 +312,19 @@ export function deriveLaneRecallRequestId({ venueAddress, asset, shares, nonce }
   ));
 }
 
+// The par law is symmetric across directions — filler-level par with a bounded
+// index-accrual gross-up above the requested input (see parAccrualCeiling in
+// the staging-quote module and unwindAccrualCeiling below; same formula).
 export function assertParAaveQuote(quote, expectedAmount) {
   const amount = positiveBigInt(expectedAmount, "exact quote amount");
   if (quote?.fillerType !== "AAVE" || BigInt(quote?.assetIn ?? -1) !== 22n || BigInt(quote?.assetOut ?? -1) !== 1003n) {
     throw new Error("Fresh staging quote did not use the AAVE 22→1003 route.");
   }
-  if (BigInt(quote.amountInRaw) !== amount || BigInt(quote.amountOutRaw) !== amount) {
-    throw new Error("Fresh exact-amount AAVE route quote was not exactly 1:1.");
+  const input = BigInt(quote.amountInRaw);
+  const output = BigInt(quote.amountOutRaw);
+  if (input !== output) throw new Error("Fresh AAVE route quote broke filler-level par (amountIn !== amountOut).");
+  if (input < amount || input - amount > unwindAccrualCeiling(amount)) {
+    throw new Error(`Fresh AAVE route quote amount ${input} is outside the accrual-bounded window above expected ${amount}.`);
   }
   return true;
 }
@@ -489,12 +495,15 @@ async function waitForAaveSwap(api, { requestId, fromBlock, expectedInput, asset
         // Entry (22→1003) is exact-input; exit (1003→22) is filler-par with a
         // bounded accrual gross-up above the staged input — see the measured
         // law at unwindAccrualCeiling.
-        const unwind = BigInt(assetIn) === 1003n;
-        const inputAcceptable = unwind
-          ? inputRaw === outputRaw && inputRaw >= BigInt(expectedInput) && inputRaw - BigInt(expectedInput) <= unwindAccrualCeiling(expectedInput)
-          : inputRaw === BigInt(expectedInput);
+        // The filler-par accrual law is symmetric: both directions carry
+        // input === output grossed up by a bounded index accrual above the
+        // requested amount (entry measured live 2026-08-16: 4,910,000 staged →
+        // 4,910,004/4,910,004 event).
+        const inputAcceptable = inputRaw === outputRaw
+          && inputRaw >= BigInt(expectedInput)
+          && inputRaw - BigInt(expectedInput) <= unwindAccrualCeiling(expectedInput);
         if (event.data?.fillerType !== "AAVE" || !inputAcceptable || outputRaw <= 0n) {
-          throw new Error(`Request-bound Broadcast.Swapped did not match AAVE ${assetIn}→${assetOut} ${unwind ? "filler-par accrual-bounded" : "exact-input"} semantics.`);
+          throw new Error(`Request-bound Broadcast.Swapped did not match AAVE ${assetIn}→${assetOut} filler-par accrual-bounded semantics.`);
         }
         const timestamp = await at.query.timestamp.now();
         return {

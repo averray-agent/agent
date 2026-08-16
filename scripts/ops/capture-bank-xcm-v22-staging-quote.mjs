@@ -31,6 +31,20 @@ function raw(value) {
   return BigInt(String(value ?? "-1").replaceAll(",", ""));
 }
 
+// The AAVE filler's par law is SYMMETRIC and index-relative (measured live
+// 2026-08-14 exit / 2026-08-16 entry): router.Executed carries the exact
+// requested input while Broadcast.Swapped carries input === output grossed up
+// by interest accrued since the last index touch (entry 4,910,000 → event
+// 4,910,004/4,910,004). Par therefore holds at the filler level; both event
+// amounts may exceed the requested input by a small bounded accrual. Real
+// accrual at our sizes is single-digit-to-tens of raw units; anything near
+// this ceiling is a pricing fault, not yield.
+export function parAccrualCeiling(expectedInput) {
+  const expected = BigInt(expectedInput);
+  if (expected <= 0n) throw new Error("par accrual ceiling requires a positive expected input");
+  return expected / 1000n + 16n;
+}
+
 export function extractAaveQuote(human, expectedInput) {
   if (!human?.Ok?.executionResult?.Ok) throw new Error("Hydration Router.sell dry-run did not execute successfully.");
   const event = (human.Ok.emittedEvents ?? []).find((entry) =>
@@ -40,16 +54,22 @@ export function extractAaveQuote(human, expectedInput) {
   );
   const input = event?.data?.inputs?.find((entry) => raw(entry.asset) === 22n);
   const output = event?.data?.outputs?.find((entry) => raw(entry.asset) === 1003n);
-  if (!event || raw(input?.amount) !== BigInt(expectedInput) || raw(output?.amount) <= 0n) {
-    throw new Error("Hydration quote omitted the expected Broadcast.Swapped{AAVE,22→1003} event.");
+  const inputRaw = raw(input?.amount ?? -1);
+  const outputRaw = raw(output?.amount ?? -1);
+  if (
+    !event || inputRaw !== outputRaw || inputRaw < BigInt(expectedInput)
+    || inputRaw - BigInt(expectedInput) > parAccrualCeiling(expectedInput)
+  ) {
+    throw new Error("Hydration quote omitted a filler-par, accrual-bounded Broadcast.Swapped{AAVE,22→1003} event.");
   }
   return {
     runtimeEvent: event.method,
     fillerType: "AAVE",
     assetIn: 22,
     assetOut: 1003,
-    amountInRaw: raw(input.amount).toString(),
-    amountOutRaw: raw(output.amount).toString()
+    amountInRaw: inputRaw.toString(),
+    amountOutRaw: outputRaw.toString(),
+    entryAccrualRaw: (inputRaw - BigInt(expectedInput)).toString()
   };
 }
 

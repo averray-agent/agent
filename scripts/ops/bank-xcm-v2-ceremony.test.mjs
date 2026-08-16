@@ -696,6 +696,14 @@ test("v2.2 staging quote parser binds the substantive Broadcast.Swapped Aave eve
     }
   }] } };
   assert.equal(extractAaveQuote(human, 100000n).amountOutRaw, "100000");
+  assert.equal(extractAaveQuote(human, 100000n).entryAccrualRaw, "0");
+  // Filler-par accrual law (measured live 2026-08-16): both event amounts may
+  // exceed the requested input by a bounded index accrual.
+  const accruedEvent = { section: "broadcast", method: "Swapped3", data: { fillerType: "AAVE", inputs: [{ asset: "22", amount: "100,004" }], outputs: [{ asset: "1,003", amount: "100,004" }] } };
+  const accrued = { ...human, Ok: { ...human.Ok, emittedEvents: [accruedEvent] } };
+  assert.equal(extractAaveQuote(accrued, 100000n).entryAccrualRaw, "4");
+  const parBreak = { ...human, Ok: { ...human.Ok, emittedEvents: [{ ...accruedEvent, data: { ...accruedEvent.data, outputs: [{ asset: "1,003", amount: "100,003" }] } }] } };
+  assert.throws(() => extractAaveQuote(parBreak, 100000n), /filler-par/u);
   assert.throws(() => extractAaveQuote({ ...human, Ok: { ...human.Ok, emittedEvents: [] } }, 100000n), /Swapped/u);
 });
 
