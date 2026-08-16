@@ -642,11 +642,15 @@
     },
     {
       "path": "/credit",
-      "description": "Live CreditPool supply and the signed-in wallet's pledged-vs-vested L1 capacity, debt, and repayment truth."
+      "description": "Live L1 CreditPool state plus receipt-graph L2 cash and L3 posting limits, debt, and sweep truth."
     },
     {
       "path": "/credit/transactions",
-      "description": "Build wallet-bound unsigned CreditPool deposit, withdraw, borrow, or repay templates; never a signed-byte relay."
+      "description": "Build wallet-bound L1 templates, L2/L3 consent payloads, exact AAC sweep authorizations, or direct CreditBook repayment templates."
+    },
+    {
+      "path": "/credit/consent",
+      "description": "Store a borrower-signed CreditBook terms blob and its exact, rolling repayment authorizations."
     },
     {
       "path": "/reputation",
@@ -816,11 +820,11 @@
     },
     {
       "name": "getCreditInfo",
-      "description": "Live L1 CreditPool supply, disclosure, and wallet pledged-vs-vested loan capacity."
+      "description": "Live L1 plus receipt-graph L2/L3 limits, outstanding loans, disclosure, and sweep truth."
     },
     {
       "name": "buildCreditTransactions",
-      "description": "Wallet-bound unsigned lend, redeem, pledge/originate, or repay templates; never a relay."
+      "description": "Wallet-bound L1 templates, L2/L3 consent payloads, exact AAC sweep authorizations, and CreditBook repay templates."
     },
     {
       "name": "estimateNetReward",
