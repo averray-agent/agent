@@ -33,7 +33,7 @@ import {
   buildReceiptManifestPayload,
   verifyManifestEnvelope,
 } from "@/lib/ui/evidence-verification";
-import { useBadges, useReceiptDetail } from "@/lib/api/hooks";
+import { useBadges, usePolicies, useReceiptDetail } from "@/lib/api/hooks";
 import { feedPresence } from "@/lib/api/feed-presence";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 
@@ -140,12 +140,20 @@ const SHAPES: ShapeEntry[] = [
 
 export default function ReceiptsPage() {
   const badgesRequest = useBadges();
+  // The co-sign KPI reads the active-policy set: with no co-sign mandate in
+  // force it must render neutral "not required", never a below-target alarm.
+  // Undefined data (loading / locked / down) renders as "requirement unknown".
+  const policiesRequest = usePolicies();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [manifestStatus, setManifestStatus] = useState<string | null>(null);
   const liveRows = useMemo(() => extractReceiptRows(badgesRequest.data), [badgesRequest.data]);
   const rows = liveRows;
-  const kpis = useMemo(() => receiptKpis(rows), [rows]);
+  const policiesPresence = feedPresence(policiesRequest);
+  const kpis = useMemo(
+    () => receiptKpis(rows, policiesRequest.data, policiesPresence),
+    [rows, policiesRequest.data, policiesPresence]
+  );
   const selected = selectedId ? rows.find((r) => r.id === selectedId) ?? null : null;
   const detailRequest = useReceiptDetail(
     drawerOpen && selected?.kind === "badge" ? selected.sessionId : null,
@@ -278,13 +286,17 @@ export default function ReceiptsPage() {
   );
 }
 
-function receiptKpis(rows: ReceiptRowWithMeta[]): ReceiptsKpi[] {
+function receiptKpis(
+  rows: ReceiptRowWithMeta[],
+  policiesData: unknown,
+  policiesPresence: "live" | "loading" | "locked" | "down"
+): ReceiptsKpi[] {
   const now = Date.now();
   const signed24h = rows.filter((row) => {
     const parsed = Date.parse(row.issuedAtIso);
     return Number.isFinite(parsed) && now - parsed <= 24 * 60 * 60 * 1000;
   }).length;
-  const coSign = coSignKpiState(rows);
+  const coSign = coSignKpiState(rows, policiesData, policiesPresence);
 
   return [
     {
@@ -303,9 +315,11 @@ function receiptKpis(rows: ReceiptRowWithMeta[]): ReceiptsKpi[] {
       value: coSign.value,
       unit: coSign.unit || undefined,
       pillRight:
-        coSign.status === "unknown" ? undefined : (
+        // The target chip frames a measured rate against COSIGN_TARGET_PCT;
+        // "unknown" and "not-required" states carry no target to frame.
+        coSign.status === "within" || coSign.status === "below" ? (
           <CoSignTargetChip status={coSign.status} />
-        ),
+        ) : undefined,
       meta: coSign.meta,
       metaTone: coSign.metaTone,
     },
