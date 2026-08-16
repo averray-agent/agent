@@ -1,5 +1,22 @@
 # Ceremony runsheet — EscrowCore v3 (retention + fee schedule + poster cancel)
 
+> **STATUS: EXECUTED IN FULL.** §§0–5 executed **2026-08-13** by Codex (PR #1111) — v3 live at
+> `0xC2Eb191FB75246667226a5D5Db9d821f95a5f793`, deploy blk 19414957, schedule `50000/2000/500/50000`
+> live at blk 19415583. §6 + §7 executed **2026-08-16** (Claude architect-gated, Pascal operating):
+> **retention proof** — non-waived brokered 0.25 claim by acceptance worker `0x60385dD6…c936`,
+> settlement tx `0x4f0c2a63…7038` blk 19535884 carrying `GasRetentionApplied(50000, 250000)` +
+> `SettlementSplit(workerAmount 200000, protocolFeeAmount 50000)`: treasury +0.10, the first
+> protocol revenue ever charged (poster fee is operator-self-paid — `ensureJob` couples fee waiver
+> to the onboarding flag; do not read self-paid fees as external revenue). **Cancel proof** — job
+> force-materialized on-chain by the KMS poster (tx `0xae4e95f5…`, floor from 14:26:48Z); early
+> attempt REVERTED at 54s inside the floor; `cancelOpenJob` succeeded at 3,623s: tx
+> `0x30175585…3b3f` blk 19537354, `JobCancelled(refundedRaw=150000)`, exact reserved→liquid
+> release, state Cancelled. §6 findings: listing surface quotes no economics; SDK lacks an
+> `estimateNetReward` wrapper. **Erratum:** this runsheet was accidentally re-executed 2026-08-16
+> producing a byte-identical twin at `0xa03d7f0F…799F` (wired + scheduled, holds no funds) —
+> revocation queued with the §8 legs. New preflight law: check the origin/main manifest + merged-PR
+> history before executing any runsheet.
+
 **Prepared:** 2026-08-13 · **Operator:** Pascal · **Architect gate:** Claude (calldata + postconditions) ·
 **Source of truth:** merged main (`e0e9404e`+), `PACKET_ESCROWCORE_V3_SPEC.md`, sim script
 `simulate-escrowcore-v3-ceremony.mjs`. The pool ceremony's discipline applies throughout: dry-run

@@ -145,3 +145,13 @@ trust signal.
 gas-informed D4 fee schedule decided on measured numbers; Swiss memo commissioned; 20 qualified
 poster conversations (the three-threshold crossover math says external posting volume, not
 deposit volume, is what moves the business); pool unchanged at 1,000/100 throughout.
+
+**Status 2026-08-16 — D2/D4 LIVE AND PROVEN.** The v3 fee era (live since #1111, 2026-08-13)
+produced its first real charges in settlement tx `0x4f0c2a63…7038` (blk 19535884): gas retention
+0.05 + poster fee 0.05 → treasury on a non-waived brokered 0.25 claim (worker net 0.20, claim
+lock returned exactly), and `cancelOpenJob` proved both floor directions same day (revert at 54s
+inside the 1h floor; success at 3,623s with the exact 0.150 refund, tx `0x30175585…`). Caveat for
+every revenue read: operator-curated non-waived jobs pay the poster fee from the operator's own
+bank (`ensureJob` couples fee waiver to the onboarding flag), so self-paid fees must never be
+presented as external revenue. 30-day gates: D0 ✓, D4 ✓ proven; Swiss memo and the 20 poster
+conversations remain the open gates.
