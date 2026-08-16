@@ -14,6 +14,7 @@ import {
 } from "ethers";
 import {
   AGENT_ACCOUNT_ABI,
+  CREDIT_BOOK_ABI,
   CREDIT_POOL_ABI,
   DEPOSIT_POOL_ABI,
   DEPOSIT_POOL_V2_ABI,
@@ -189,6 +190,7 @@ export class BlockchainGateway {
       this.depositPoolContract = undefined;
       this.depositPoolV2Contract = undefined;
       this.creditPoolContract = undefined;
+      this.creditBookContract = undefined;
       return;
     }
 
@@ -289,6 +291,9 @@ export class BlockchainGateway {
       : undefined;
     this.creditPoolContract = config.creditPoolAddress
       ? new Contract(config.creditPoolAddress, CREDIT_POOL_ABI, this.signer ?? this.provider)
+      : undefined;
+    this.creditBookContract = config.creditBookAddress
+      ? new Contract(config.creditBookAddress, CREDIT_BOOK_ABI, this.signer ?? this.provider)
       : undefined;
   }
 
@@ -1674,6 +1679,64 @@ export class BlockchainGateway {
         signature
       );
       await tx.wait();
+    });
+  }
+
+  async isSendToAgentAuthorizationUsed(from, nonce) {
+    return this.withGatewayError("isSendToAgentAuthorizationUsed", async () => {
+      if (!this.accountContract) throw new ConfigError("AgentAccountCore is not configured.");
+      return Boolean(await this.accountContract.sendToAgentAuthorizationUsed(
+        getAddress(from),
+        this.normalizeUint256(nonce, "nonce")
+      ));
+    });
+  }
+
+  async originateCreditBookLoan({ borrower, amountRaw, mode, termsHash }) {
+    return this.withGatewayError("originateCreditBookLoan", async () => {
+      this.requireSigner("originateCreditBookLoan");
+      if (!this.creditBookContract) throw new ConfigError("CreditBook is not configured.");
+      const tx = await this.creditBookContract.originate(
+        getAddress(borrower),
+        this.normalizeUint256(amountRaw, "amountRaw"),
+        Number(mode),
+        String(termsHash)
+      );
+      const receipt = await tx.wait();
+      let loanId;
+      for (const log of receipt?.logs ?? []) {
+        try {
+          const parsed = this.creditBookContract.interface.parseLog(log);
+          if (parsed?.name === "LoanOriginated") loanId = String(parsed.args.loanId).toLowerCase();
+        } catch {
+          // Ignore unrelated receipt logs.
+        }
+      }
+      if (!loanId) throw new ExternalServiceError("CreditBook origination receipt omitted LoanOriginated.");
+      return { loanId, txHash: tx.hash, blockNumber: receipt?.blockNumber, status: Number(receipt?.status ?? 0) };
+    });
+  }
+
+  async recordCreditBookSweep(loanId, amountRaw) {
+    return this.withGatewayError("recordCreditBookSweep", async () => {
+      this.requireSigner("recordCreditBookSweep");
+      if (!this.creditBookContract) throw new ConfigError("CreditBook is not configured.");
+      const tx = await this.creditBookContract.recordSweepRepayment(
+        String(loanId),
+        this.normalizeUint256(amountRaw, "amountRaw")
+      );
+      const receipt = await tx.wait();
+      return { txHash: tx.hash, blockNumber: receipt?.blockNumber, status: Number(receipt?.status ?? 0) };
+    });
+  }
+
+  async recordCreditBookRefund(loanId) {
+    return this.withGatewayError("recordCreditBookRefund", async () => {
+      this.requireSigner("recordCreditBookRefund");
+      if (!this.creditBookContract) throw new ConfigError("CreditBook is not configured.");
+      const tx = await this.creditBookContract.repayFromRefund(String(loanId));
+      const receipt = await tx.wait();
+      return { txHash: tx.hash, blockNumber: receipt?.blockNumber, status: Number(receipt?.status ?? 0) };
     });
   }
 

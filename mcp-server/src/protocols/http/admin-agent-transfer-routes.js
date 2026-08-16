@@ -15,6 +15,7 @@ function normalizeAddress(value, label) {
     throw new ValidationError(`${label} must be a 0x-prefixed 20-byte EVM address.`);
   }
 }
+
 function normalizeUint256(value, label, { positive = false } = {}) {
   const raw = typeof value === "bigint" ? value.toString() : String(value ?? "").trim();
   if (!/^\d+$/u.test(raw)) {
@@ -35,14 +36,26 @@ function normalizeSignature(value) {
   return signature;
 }
 
-export function resolveAgentTransferRecipientAllowlist({ rewardBankAddress } = {}) {
+export function resolveAgentTransferRecipientAllowlist({
+  rewardBankAddress,
+  additionalRecipients = [],
+} = {}) {
   let rewardBank;
   try {
     rewardBank = getAddress(String(rewardBankAddress ?? "").trim());
   } catch {
     throw new ValidationError("Configured reward bank address is missing or invalid.");
   }
-  return new Set([rewardBank.toLowerCase()]);
+  const allowed = new Set([rewardBank.toLowerCase()]);
+  for (const candidate of additionalRecipients) {
+    if (!candidate) continue;
+    try {
+      allowed.add(getAddress(String(candidate).trim()).toLowerCase());
+    } catch {
+      throw new ValidationError("Configured agent-transfer recipient is invalid.");
+    }
+  }
+  return allowed;
 }
 
 function normalizeTransferPayload(payload, allowedRecipients) {

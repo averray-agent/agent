@@ -29,6 +29,11 @@ export class VerifierService {
     this.stateStore = stateStore;
     this.blockchainGateway = blockchainGateway;
     this.registry = registry;
+    this.creditBookKeeper = undefined;
+  }
+
+  setCreditBookKeeper(creditBookKeeper) {
+    this.creditBookKeeper = creditBookKeeper;
   }
 
   async verifySubmission({ sessionId, evidence = undefined, metadataURI = "ipfs://pending-badge" }) {
@@ -174,6 +179,16 @@ export class VerifierService {
       ...auditFields,
       session: settledSession
     };
+
+    // Collection is deliberately downstream of the terminal session write.
+    // An expired/missing borrower authorization can pause amortization, but it
+    // can never make a proven worker payout fail or revert its local receipt.
+    if (verdict.outcome === "approved" && payoutTx?.settlement && this.creditBookKeeper) {
+      result.creditSweep = await this.creditBookKeeper.afterSettlement({
+        session: settledSession,
+        payoutTx
+      });
+    }
 
     return result;
   }

@@ -1519,6 +1519,35 @@ test("verifySubmission still settles when the on-chain job is genuinely unsettle
   assert.deepEqual(result.payoutTx, h.payoutReceipt);
 });
 
+test("an expired credit authorization pauses collection after settlement is persisted", async () => {
+  const h = makeIdempotencyHarness(3);
+  const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
+  await h.stateStore.upsertSession(submitted);
+
+  const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway);
+  service.setCreditBookKeeper({
+    async afterSettlement({ session, payoutTx }) {
+      assert.equal(session.status, "resolved", "collection runs only after the terminal write");
+      assert.deepEqual(session.payoutTx, payoutTx, "the persisted payout receipt precedes collection");
+      return {
+        status: "paused",
+        reason: "authorization_expired",
+        settlementUnaffected: true
+      };
+    }
+  });
+
+  const result = await service.verifySubmission({ sessionId: submitted.sessionId });
+
+  assert.equal(result.outcome, "approved");
+  assert.equal((await h.stateStore.getSession(submitted.sessionId)).status, "resolved");
+  assert.deepEqual(result.creditSweep, {
+    status: "paused",
+    reason: "authorization_expired",
+    settlementUnaffected: true
+  });
+});
+
 test("ingestBrokeredDecision sends poster approval through canonical verification persistence", async () => {
   const h = makeIdempotencyHarness(6);
   const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });

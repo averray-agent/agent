@@ -1,4 +1,4 @@
-export function createCreditPoolRoutes({ authMiddleware, creditPoolDoor, readJsonBody, respond }) {
+export function createCreditPoolRoutes({ authMiddleware, creditPoolDoor, creditBookDoor, readJsonBody, respond }) {
   return async function handleCreditPoolRoute({ request, response, url, pathname }) {
     if (request.method === "GET" && pathname === "/credit") {
       const auth = await authMiddleware(request, url);
@@ -9,6 +9,12 @@ export function createCreditPoolRoutes({ authMiddleware, creditPoolDoor, readJso
       const auth = await authMiddleware(request, url);
       const payload = await readJsonBody(request);
       respond(response, 200, await creditPoolDoor.buildTransactions(auth.wallet, payload));
+      return true;
+    }
+    if (request.method === "POST" && pathname === "/credit/consent") {
+      const auth = await authMiddleware(request, url);
+      const payload = await readJsonBody(request);
+      respond(response, 200, await creditBookDoor.storeConsent(auth.wallet, payload));
       return true;
     }
     return false;
