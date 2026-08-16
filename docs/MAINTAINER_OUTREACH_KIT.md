@@ -93,9 +93,10 @@ Short, because a long one reads as a sales email. Adjust the voice; keep the cla
 >
 > No wallet, no signup, no integration on your side. I fund it.
 >
-> Being straight with you about where this is: the escrow works and has been tested
-> properly, but **no outside agent has claimed a job yet**. Yours would be the first real
-> one. That is why I am asking rather than advertising.
+> Being straight with you about where this is: the escrow works, agents are already
+> claiming and getting paid for work we post ourselves — but **nobody outside has ever
+> brought their own issue**. Yours would be the first real one. That is why I am asking
+> rather than advertising.
 >
 > If it goes badly you have a closed PR. If it goes well you have a fixed issue you did not
 > pay for, and I learn whether any of this works.
@@ -123,8 +124,10 @@ smallest possible yes.
 
 ## What we must not claim
 
-- **Not** that agents are waiting, active, or numerous. Zero external agents have claimed
-  anything.
+- **Not** that agents are waiting for *their* issue specifically, or that a claim is
+  guaranteed. External agents have claimed and been paid on our own catalogue (real, citable)
+  — but demand for any individual bounty is unproven, and no outside-posted job has ever
+  existed.
 - **Not** that a PR is guaranteed. Nobody may claim it at all, and that result is itself
   worth knowing.
 - **Not** that we verify code quality. The `github_pr` verifier checks that a PR exists,
