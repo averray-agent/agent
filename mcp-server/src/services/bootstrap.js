@@ -130,6 +130,7 @@ import {
   X402PosterRampService
 } from "../payments/x402-poster-ramp.js";
 import { PosterReviewService } from "../core/poster-review-service.js";
+import { createSelfIdentityRegistry } from "../core/self-identity-registry.js";
 import {
   ExternalPostingWatcherService,
   resolveExternalPostingWatcherConfig
@@ -197,6 +198,7 @@ export function createPlatformService() {
   });
   const catalogueDailyBudget = createCatalogueDailyBudget({ stateStore });
   const catalogueLaneRegistry = loadCatalogueLaneRegistry();
+  const selfIdentityRegistry = createSelfIdentityRegistry();
   assertCatalogueDefinitionsHaveLanes(jobs, catalogueLaneRegistry);
   const eventBus = new EventBus({ eventStore: stateStore });
   const accounts = new AccountOverlayStore({ stateStore });
@@ -222,7 +224,7 @@ export function createPlatformService() {
     stateStore,
     registry: catalogueLaneRegistry,
     gasEstimateUsdc: subsidyConfig.gasEstimateUsdc,
-    selfWallets: parseSelfWallets(process.env)
+    selfIdentityRegistry
   }));
   return platformService;
 }
@@ -294,6 +296,9 @@ export async function createPlatformRuntime() {
   // the step name before the process exits. Without this, a cryptic stack
   // trace is the only signal that a required env var was missing.
   const authConfig = initStep("load-auth-config", logger, () => loadAuthConfig());
+  const selfIdentityRegistry = initStep("load-self-identity-registry", logger, () =>
+    createSelfIdentityRegistry({ env: process.env, authConfig })
+  );
   if (authConfig.kmsJwt) {
     authConfig.kmsJwt.logger = logger;
   }
@@ -474,7 +479,7 @@ export async function createPlatformRuntime() {
       stateStore,
       registry: catalogueLaneRegistry,
       gasEstimateUsdc: loadOnboardingSubsidyBudgetConfig(process.env).gasEstimateUsdc,
-      selfWallets: parseSelfWallets(process.env),
+      selfIdentityRegistry,
       logger
     })
   );
@@ -681,7 +686,8 @@ export async function createPlatformRuntime() {
       gateway,
       platformService,
       stateStore,
-      venueBalanceReader
+      venueBalanceReader,
+      selfIdentityRegistry
     })
   );
   const depositPoolObservability = initStep("init-deposit-pool-observability", logger, () =>
@@ -915,6 +921,7 @@ export async function createPlatformRuntime() {
     submittedJobAutoVerifier,
     firstExternalAgentAlert,
     authConfig,
+    selfIdentityRegistry,
     authMiddleware,
     authCapabilities: {
       resolveCapabilities,
@@ -941,15 +948,6 @@ function createMetrics() {
   registry.gauge("sse_active_connections", "Currently open SSE connections.");
   registry.gauge("state_store_backend", "1 when state store backend matches the label.", ["backend"]);
   return registry;
-}
-
-function parseSelfWallets(env) {
-  return new Set(
-    String(env?.ARRIVAL_SELF_WALLETS ?? "")
-      .split(",")
-      .map((value) => value.trim().toLowerCase())
-      .filter((value) => /^0x[0-9a-f]{40}$/u.test(value))
-  );
 }
 
 function initStep(name, logger, factory) {

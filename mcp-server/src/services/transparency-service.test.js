@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { createHostedCanaryClaimantAttribution } from "../core/claimant-attribution.js";
+import { SelfIdentityRegistry } from "../core/self-identity-registry.js";
 import {
   TransparencyService,
   aggregateRawReadings,
@@ -93,6 +95,14 @@ function harness(overrides = {}) {
       payoutTx: settlementReceipt("platform", "100000")
     }
   ];
+  if (overrides.sessionWallets) {
+    for (const [index, wallet] of overrides.sessionWallets.entries()) {
+      sessions[index].wallet = wallet;
+    }
+  }
+  if (overrides.canarySessionIndex !== undefined) {
+    sessions[overrides.canarySessionIndex].claimantAttribution = createHostedCanaryClaimantAttribution();
+  }
   if (overrides.missingPayout) delete sessions[0].payoutTx;
   const chainJobs = new Map([
     ["external", job()],
@@ -233,7 +243,8 @@ function harness(overrides = {}) {
             : overrides.calibration
         };
       }
-    }
+    },
+    selfIdentityRegistry: overrides.selfIdentityRegistry
   };
   if (!overrides.usePackagedTreasuryIdentity) {
     options.treasuryIdentity = { nativeAccountId32: TREASURY_ID, evmLens: TREASURY };
@@ -308,6 +319,23 @@ test("transparency payload composes flow, escrow, and generation-bound treasury 
   assert.equal(payload.treasury.generation.state.value, "ok");
   assert.match(payload.treasury.lines.hydrationPosition.total.source, new RegExp(WRAPPER, "iu"));
   assert.match(payload.treasury.lines.assetHubMultisig.balance.proof, new RegExp(TREASURY_ID, "iu"));
+});
+
+test("transparency settlement flow uses the shared registry for ours, outsiders, and unknown", async () => {
+  const external = "0x1111111111111111111111111111111111111111";
+  const acceptance = "0x2222222222222222222222222222222222222222";
+  const ephemeralCanary = "0x3333333333333333333333333333333333333333";
+  const payload = await harness({
+    sessionWallets: [external, acceptance, ephemeralCanary],
+    canarySessionIndex: 2,
+    selfIdentityRegistry: new SelfIdentityRegistry({ acceptanceWallets: [acceptance] })
+  }).getSnapshot();
+
+  assert.equal(payload.flow.workers24h.outsiders.value, 1);
+  assert.equal(payload.flow.workers24h.ours.value, 2);
+  assert.equal(payload.flow.workers24h.unknown.value, 0);
+  assert.equal(payload.flow.workers24h.total.value, 3);
+  assert.match(payload.flow.workers24h.ours.source, /shared self-identity registry/u);
 });
 
 test("mainnet treasury native AccountId32 resolves from the packaged custody record", async () => {

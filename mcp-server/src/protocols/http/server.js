@@ -110,6 +110,7 @@ const {
   pimlicoClient,
   eventBus,
   authConfig,
+  selfIdentityRegistry,
   authMiddleware,
   authCapabilities,
   rateLimiter,
@@ -787,7 +788,9 @@ const executeMcpTool = createMcpToolExecutor({
 // the MCP handler stays testable without a state store.
 const arrivalObservatory = new ArrivalObservatory({
   stateStore,
+  platformService: service,
   metrics,
+  identityRegistry: selfIdentityRegistry,
   hashSalt: process.env.ARRIVAL_HASH_SALT || process.env.AUTH_JWT_SECRETS || "averray-arrivals",
   verifyCanaryMarker: arrivalCanaryMarkers.verify
 });
