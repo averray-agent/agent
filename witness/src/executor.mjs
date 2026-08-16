@@ -7,6 +7,7 @@ import {
   evaluateCandidatePolicy,
   inspectCandidatePatch
 } from "./candidate-patch.mjs";
+import { ArtifactAcquisitionError } from "./artifacts.mjs";
 import { DEFAULT_IMAGE, DEFAULT_TIMEOUT_SECONDS } from "./constants.mjs";
 import {
   dockerReadOnlyMounts,
@@ -15,6 +16,7 @@ import {
   prepareWorkspaceMountTargets
 } from "./contract-runtime.mjs";
 import { ensureWitnessImage, runInWitnessContainer } from "./docker.mjs";
+import { SourceCommitBindingError } from "./git-bundle-source.mjs";
 import {
   INTEGRITY_DETECTION_SUPPORT,
   detectIntegrityViolations,
@@ -31,6 +33,7 @@ export const VERDICTS = Object.freeze({
   INCONCLUSIVE: "INCONCLUSIVE",
   POLICY_VIOLATION: "POLICY_VIOLATION"
 });
+const BASELINE_MISMATCH_ATTRIBUTION = "contract";
 
 function quoteShell(value) {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
@@ -183,7 +186,7 @@ async function runEnvironment({
     const untrusted = untrustedResult(preparation, phase);
     if (untrusted || preparation.exitCode !== 0) {
       inconclusives.push(untrusted || {
-        attribution: phase === "candidate" ? "candidate" : "infrastructure",
+        attribution: phase === "candidate" ? "candidate" : "contract",
         reason: "dependency_cache_unavailable",
         detail: `offline dependency materialization exited ${preparation.exitCode}`,
         checkId: "dependency-materialization"
@@ -276,7 +279,7 @@ function baselineProblem(baselines) {
     .find((check) => !check.expectationMet);
   if (mismatch) {
     return {
-      attribution: "infrastructure",
+      attribution: BASELINE_MISMATCH_ATTRIBUTION,
       reason: "baseline_mismatch",
       detail: `baseline check ${JSON.stringify(mismatch.id)} expected ${mismatch.expected} but observed ${mismatch.outcome}`
     };
@@ -284,7 +287,7 @@ function baselineProblem(baselines) {
   const signatures = baselines.map(environmentSignature);
   if (!signatures.every((signature) => signature === signatures[0])) {
     return {
-      attribution: "infrastructure",
+      attribution: BASELINE_MISMATCH_ATTRIBUTION,
       reason: "baseline_mismatch",
       detail: "baseline outcomes disagreed across clean repetitions"
     };
@@ -334,6 +337,7 @@ function newReport(contract, candidatePatch, mode) {
     attribution: null,
     reason: null,
     details: null,
+    workerConsequence: null,
     materialization: null,
     sandbox: {
       image: null,
@@ -362,9 +366,10 @@ function conclude(report, started, verdict, { attribution = null, reason = null,
   report.attribution = attribution;
   report.reason = reason;
   report.details = details;
+  report.workerConsequence = verdict === VERDICTS.INCONCLUSIVE ? "none" : null;
   report.seconds = Number(((performance.now() - started) / 1_000).toFixed(3));
-  if (verdict === VERDICTS.INCONCLUSIVE && !["infrastructure", "candidate"].includes(attribution)) {
-    throw new Error("INCONCLUSIVE verdict is missing infrastructure/candidate attribution");
+  if (verdict === VERDICTS.INCONCLUSIVE && !["infrastructure", "contract", "candidate"].includes(attribution)) {
+    throw new Error("INCONCLUSIVE verdict is missing infrastructure/contract/candidate attribution");
   }
   return report;
 }
@@ -399,9 +404,11 @@ export async function executeVerificationContract(options, dependencies = {}) {
         materialize
       });
     } catch (error) {
+      const contractFailure = error instanceof SourceCommitBindingError ||
+        (error instanceof ArtifactAcquisitionError && error.locatorKind === "path");
       return conclude(report, started, VERDICTS.INCONCLUSIVE, {
-        attribution: "infrastructure",
-        reason: "host_failure",
+        attribution: contractFailure ? "contract" : "infrastructure",
+        reason: contractFailure ? "source_commit_binding_failed" : "host_failure",
         details: `source materialization failed: ${error.message}`
       });
     }
@@ -412,14 +419,17 @@ export async function executeVerificationContract(options, dependencies = {}) {
       sha256: materialized.sha256 || null,
       bytes: materialized.bytes ?? null,
       format: materialized.format || null,
+      tree: materialized.tree || null,
+      bindingVerified: materialized.bindingVerified ?? null,
       seconds: materialized.seconds
     };
 
-    if (materialized.commit !== contract.subject.acquisition.base_commit) {
+    if (materialized.commit !== contract.subject.acquisition.base_commit ||
+        (contract.schema_version === "averray.verification-contract/v1.1" && materialized.bindingVerified !== true)) {
       return conclude(report, started, VERDICTS.INCONCLUSIVE, {
-        attribution: "infrastructure",
-        reason: "baseline_mismatch",
-        details: `materialized ${materialized.commit || "no commit"}; expected ${contract.subject.acquisition.base_commit}`
+        attribution: "contract",
+        reason: "source_commit_binding_failed",
+        details: `materialized ${materialized.commit || "no commit"} without verified binding; expected ${contract.subject.acquisition.base_commit}`
       });
     }
 
@@ -520,9 +530,10 @@ export async function executeVerificationContract(options, dependencies = {}) {
         frozenInputs: artifacts.frozenInputs
       };
     } catch (error) {
+      const contractFailure = !(error instanceof ArtifactAcquisitionError) || error.locatorKind === "path";
       return conclude(report, started, VERDICTS.INCONCLUSIVE, {
-        attribution: "infrastructure",
-        reason: "artifact_unavailable",
+        attribution: contractFailure ? "contract" : "infrastructure",
+        reason: contractFailure ? "contract_precondition_untrue" : "artifact_unavailable",
         details: error.message
       });
     }

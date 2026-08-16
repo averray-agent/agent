@@ -25,14 +25,14 @@ const MUTATIONS = Object.freeze([
     anchor: "    requireRepositoryPath(issues, artifact.locator.path, `${path}.locator.path`, { allowDot: false });",
     replacement: "    // MUTANT: artifact locator path guard disabled",
     mutate(contract) {
-      contract.subject.acquisition.bundle.locator = { kind: "path", path: "../outside.tar.gz" };
+      contract.subject.acquisition.git_bundle.locator = { kind: "path", path: "../outside.bundle" };
     }
   },
   {
     id: "artifact_format",
     anchor: "  requireEnum(issues, artifact.format, `${path}.format`, formats);",
     replacement: "  // MUTANT: artifact format guard disabled",
-    mutate(contract) { contract.subject.acquisition.bundle.format = "file"; }
+    mutate(contract) { contract.subject.acquisition.git_bundle.format = "file"; }
   },
   {
     id: "artifact_sha256",
@@ -60,6 +60,16 @@ const MUTATIONS = Object.freeze([
       contract.resources.writable_storage_mb = contract.resources.temporary_storage_mb;
       delete contract.resources.temporary_storage_mb;
     }
+  },
+  {
+    id: "contract_attribution",
+    anchor: `      requireStringArray(
+        issues,
+        contract.inconclusive_policy.contract_attributable,
+        "inconclusive_policy.contract_attributable"
+      );`,
+    replacement: "      // MUTANT: contract-attributable reason manifest guard disabled",
+    mutate(contract) { delete contract.inconclusive_policy.contract_attributable; }
   }
 ]);
 
@@ -106,6 +116,7 @@ async function materializeFixture({ destination }) {
     commit: workedJson.subject.acquisition.base_commit,
     source: "mutation-fixture",
     sourceType: "fixture",
+    bindingVerified: true,
     seconds: 0
   };
 }
@@ -120,6 +131,7 @@ async function loadFreezeMutant(temporaryRoot) {
     "docker.mjs",
     "materialize.mjs",
     "process.mjs",
+    "git-bundle-source.mjs",
     "verification-contract.mjs"
   ]) {
     await cp(resolve(SOURCE_ROOT, file), resolve(root, file));

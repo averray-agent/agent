@@ -87,10 +87,13 @@ proved.
 
 ## Remaining v1.1 limitations
 
-1. The exact source archive is digest-pinned, but a generic tar has no embedded Git
+> PKT-WITNESS-005 supersedes the source-provenance limitation below with an offline
+> Git-bundle binding. See `PKT_WITNESS_005_HANDOFF.md` for its tested boundary.
+
+1. ~~The exact source archive is digest-pinned, but a generic tar has no embedded Git
    identity tying its bytes cryptographically to the human-readable `base_commit`.
    The worked HTTPS locator embeds the commit; a future source format should add a
-   verifiable commit/tree manifest.
+   verifiable commit/tree manifest.~~ Superseded by PKT-WITNESS-005.
 2. `eligibility_reference_sha256` is still evidence supplied by the author. v1.1
    proves the supplied test fails on base and the worked drill proves it against a
    known-good patch, but the contract does not carry a locator/format for automatically

@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { DEFAULT_IMAGE, DEFAULT_TIMEOUT_SECONDS } from "./constants.mjs";
+import { ArtifactAcquisitionError, ArtifactIntegrityError } from "./artifacts.mjs";
 import {
   dockerReadOnlyMounts,
   materializeContractSource,
@@ -10,6 +11,7 @@ import {
   prepareWorkspaceMountTargets
 } from "./contract-runtime.mjs";
 import { ensureWitnessImage, runInWitnessContainer } from "./docker.mjs";
+import { SourceCommitBindingError } from "./git-bundle-source.mjs";
 import { createAttemptCopy, materializeRepository } from "./materialize.mjs";
 import { REJECTION_RULES, VERIFICATION_CONTRACT_SCHEMA_VERSION } from "./verification-contract.mjs";
 
@@ -61,20 +63,29 @@ export async function confirmVerificationContractBase(contract, options = {}, de
         cwd: options.cwd || process.cwd(),
         materialize
       });
-      if (evidence.source.commit !== contract.subject.acquisition.base_commit) {
-        throw new Error(
-          `materialized ${evidence.source.commit || "no commit"}; expected ${contract.subject.acquisition.base_commit}`
+      if (evidence.source.commit !== contract.subject.acquisition.base_commit ||
+          (contract.schema_version === VERIFICATION_CONTRACT_SCHEMA_VERSION &&
+            evidence.source.bindingVerified !== true)) {
+        throw new SourceCommitBindingError(
+          `materialized ${evidence.source.commit || "no commit"} without verified binding; ` +
+          `expected ${contract.subject.acquisition.base_commit}`
         );
       }
       evidence.artifacts = await prepareContractArtifacts(contract, temporaryRoot, {
         cwd: options.cwd || process.cwd()
       });
     } catch (error) {
+      const sourceBinding = error instanceof SourceCommitBindingError;
+      const contractPrecondition = sourceBinding || error instanceof ArtifactIntegrityError ||
+        (error instanceof ArtifactAcquisitionError && error.locatorKind === "path");
       issues.push(runtimeIssue(
-        "VCV11_FREEZE_ARTIFACT_EVIDENCE",
-        "freeze evidence: source and supplied artifacts must be retrievable and match their digests",
-        "subject",
-        error.message
+        sourceBinding ? "VCV11_FREEZE_SOURCE_COMMIT_BINDING" : "VCV11_FREEZE_ARTIFACT_EVIDENCE",
+        sourceBinding
+          ? "contract precondition: source Git bundle must bind to subject.acquisition.base_commit"
+          : "freeze evidence: source and supplied artifacts must be retrievable and match their digests",
+        sourceBinding ? "subject.acquisition.git_bundle" : "subject",
+        error.message,
+        { attribution: contractPrecondition ? "contract" : "infrastructure" }
       ));
       return { valid: false, contract, issues, evidence };
     }
@@ -144,7 +155,7 @@ export async function confirmVerificationContractBase(contract, options = {}, de
           rule.name,
           check.kind === "hidden" ? "checks.hidden.expected_on_base" : `checks.targeted[${index - 1}].expected_on_base`,
           `${check.kind} check ${JSON.stringify(check.id)} claimed fail on base but the Witness observed pass`,
-          { observedOutcome: outcome, checkId: check.id }
+          { observedOutcome: outcome, checkId: check.id, attribution: "contract" }
         ));
       }
     }

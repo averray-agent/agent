@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { materializeArtifact } from "./artifacts.mjs";
+import { materializeGitBundleSource, SourceCommitBindingError } from "./git-bundle-source.mjs";
 import { materializeRepository } from "./materialize.mjs";
 import {
   CONTRACT_SOURCE_DIRECTORY,
@@ -19,12 +20,16 @@ export async function materializeContractSource({
   materialize = materializeRepository
 }) {
   if (materialize !== materializeRepository) {
-    return materialize({
+    const result = await materialize({
       repo: contract.subject.acquisition.repository,
       commit: contract.subject.acquisition.base_commit,
       destination,
       cwd
     });
+    if (contract.schema_version === VERIFICATION_CONTRACT_SCHEMA_VERSION && result.bindingVerified !== true) {
+      throw new SourceCommitBindingError("source materializer did not provide verified Git commit binding");
+    }
+    return result;
   }
   if (contract.schema_version !== VERIFICATION_CONTRACT_SCHEMA_VERSION) {
     return materialize({
@@ -34,20 +39,12 @@ export async function materializeContractSource({
       cwd
     });
   }
-  const started = performance.now();
-  const artifact = await materializeArtifact(contract.subject.acquisition.bundle, destination, {
+  return materializeGitBundleSource({
+    artifact: contract.subject.acquisition.git_bundle,
+    declaredCommit: contract.subject.acquisition.base_commit,
+    destination,
     baseDirectory: contractBaseDirectory(contract, cwd)
   });
-  return {
-    path: destination,
-    commit: contract.subject.acquisition.base_commit,
-    source: contract.subject.acquisition.bundle.locator,
-    sourceType: "verified-artifact",
-    sha256: artifact.sha256,
-    bytes: artifact.size,
-    format: contract.subject.acquisition.bundle.format,
-    seconds: Number(((performance.now() - started) / 1_000).toFixed(3))
-  };
 }
 
 async function artifactMount({ artifact, mountPath, root, label, baseDirectory }) {
