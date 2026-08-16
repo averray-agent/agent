@@ -13,7 +13,9 @@
 //   6. Settle — on-chain job Closed + released == reward, and the
 //               worker's balance rose by the reward — checked in BOTH
 //               usdc.balanceOf(workerEOA) AND AAC.positions(worker).liquid
-//   7. Freshness — the long-lived OPERATOR token isn't within N days
+//   7. Recover — the ephemeral worker signs an AAC transfer that returns the
+//               payout to the KMS signer's reward bank before key disposal
+//   8. Freshness — the long-lived OPERATOR token isn't within N days
 //               of expiry                                          (guards #628 ADMIN_JWT expiry)
 //
 // WHY THIS EXISTS: the 2026-06-13 first-settled-job round-trip surfaced five
@@ -44,7 +46,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Contract, FetchRequest, JsonRpcProvider, Wallet } from "ethers";
+import { Contract, FetchRequest, JsonRpcProvider, Wallet, getAddress, hexlify, randomBytes } from "ethers";
 
 import { AgentPlatformClient } from "../../sdk/agent-platform-client.js";
 import { DEFAULT_ESCROW_ASSET } from "../../mcp-server/src/core/assets.js";
@@ -75,10 +77,19 @@ const ARRIVAL_CANARY_MARKER_HEADER = "x-averray-canary-marker";
 const OUTPUT_SCHEMA_REF = "schema://jobs/product-proof-worker-loop";
 const VERIFIER_TERMS = ["complete", "verified", "output"];
 const ERC20_BALANCE_ABI = ["function balanceOf(address) view returns (uint256)"];
+const SEND_TO_AGENT_DOMAIN_NAME = "Averray AgentAccountCore";
+const SEND_TO_AGENT_DOMAIN_VERSION = "1";
+const CANARY_RECOVERY_DEADLINE_SECONDS = 24n * 60n * 60n;
+const UINT256_MAX = (1n << 256n) - 1n;
 
 // Operator capabilities the canary depends on. If the ADMIN_JWT loses any of
 // these (mis-minted, wrong roles), fail loud BEFORE creating a stranded job.
-const REQUIRED_OPERATOR_CAPABILITIES = ["jobs:create", "jobs:lifecycle", "verifier:run", "admin:status"];
+const REQUIRED_OPERATOR_CAPABILITIES = [
+  "jobs:create",
+  "jobs:lifecycle",
+  "verifier:run",
+  "admin:status"
+];
 
 export async function runWorkerCanary({
   env = process.env,
@@ -88,6 +99,8 @@ export async function runWorkerCanary({
   chainReader = undefined, // injected (tests): { getChainId, snapshotWorker, readEscrowJob }
   fetchImpl = globalThis.fetch,
   wallet: injectedWallet = undefined,
+  workerEphemeral: injectedWorkerEphemeral = undefined,
+  nonceGenerator = generateCanaryTransferNonce,
   resolveOperatorAuth = resolveHostedWorkerLoopAuth,
   readSecretImpl = readOpSecret,
   now = () => Date.now(),
@@ -103,6 +116,8 @@ export async function runWorkerCanary({
   let createdJobId = null;
   let archived = false;
   let operatorPlatform = operatorClient ?? null;
+  let operatorReadiness = null;
+  let workerWallet = null;
   let operatorAuth = null;
   let chainId = null;
   let workerAddress = null;
@@ -150,13 +165,18 @@ export async function runWorkerCanary({
     assertChainEnvironment({ chainId, profile: config.profile });
 
     // ── operator readiness: capabilities + settlement, BEFORE creating a job
-    await stage("operatorReadiness", () => assertOperatorReady(operatorPlatform, {
+    operatorReadiness = await stage("operatorReadiness", () => assertOperatorReady(operatorPlatform, {
       rewardRaw: config.rewardRaw,
       rewardAssetSymbol: DEFAULT_ESCROW_ASSET.symbol
     }));
+    stages.operatorReadiness = operatorReadiness;
 
     // ── worker identity: a fresh, roleless wallet — NOT the admin JWT ─────
     const wallet = injectedWallet ?? (await resolveWorkerWallet({ env, config, readSecretImpl, log }));
+    if (typeof injectedWorkerEphemeral === "boolean") {
+      config.workerEphemeral = injectedWorkerEphemeral;
+    }
+    workerWallet = wallet;
     workerAddress = wallet.address;
     log(`Worker wallet: ${workerAddress} (roleless${config.workerEphemeral ? ", ephemeral" : ""})`);
 
@@ -267,7 +287,44 @@ export async function runWorkerCanary({
     );
     stages.settle = settle.summary;
 
-    // ── STAGE 7: operator token freshness (guards #628 ADMIN_JWT expiry) ──
+    // ── STAGE 7: recover an ephemeral worker's earned payout ─────────────
+    // The authorization is signed while the process-only worker key is still
+    // resident. Recovery is deliberately fail-open: the paid canary remains a
+    // valid green lifecycle proof even when returning its monitoring spend to
+    // the operator reward bank fails. The evidence must then say accepted_cost
+    // and retain the warning instead of rewriting the payout as recovered.
+    const recoveryStartedAt = now();
+    if (config.workerEphemeral) {
+      try {
+        const payoutRecovery = await runPayoutRecoveryStage({
+          wallet: workerWallet,
+          operatorPlatform,
+          reader,
+          chainId,
+          agentAccountAddress: config.agentAccountAddress,
+          rewardBankAddress: operatorReadiness.rewardBankAddress,
+          assetAddress: config.assetAddress,
+          amountRaw: BigInt(settle.summary.releasedRaw),
+          availableLiquidRaw: BigInt(settle.summary.aacLiquidDeltaRaw),
+          nonceGenerator,
+          now
+        });
+        stages.payoutRecovery = payoutRecovery;
+        txHashes.payoutRecovery = payoutRecovery.txHash;
+      } catch (error) {
+        const warning = sanitizeEvidenceError(error);
+        stages.payoutRecovery = { status: "failed", warning };
+        log(
+          `WARNING: payout recovery failed before ephemeral key disposal: ${warning}. `
+          + "Canary lifecycle remains green; payout disposition is accepted_cost."
+        );
+      }
+    } else {
+      stages.payoutRecovery = { status: "not_required", reason: "worker wallet is retained" };
+    }
+    timings.payoutRecovery = now() - recoveryStartedAt;
+
+    // ── STAGE 8: operator token freshness (guards #628 ADMIN_JWT expiry) ──
     // Run last: let the loop prove itself, then flag an about-to-expire
     // long-lived operator credential before it silently 401s every smoke.
     stages.tokenFreshness = assertOperatorTokenFreshness({ operatorAuth, minDays: config.tokenMinDays, now });
@@ -800,7 +857,155 @@ export async function runSettleStage({
   };
 }
 
-// ── STAGE 7: operator token freshness ────────────────────────────────────────
+/**
+ * Build the exact AgentAccountCore SendToAgent EIP-712 authorization.
+ *
+ * Keep this domain local and explicit: a generic SIWE or ERC-20 permit domain
+ * would still produce a valid-looking signature while being unusable by AAC.
+ */
+export async function buildCanaryTransferAuthorization({
+  wallet,
+  chainId,
+  agentAccountAddress,
+  recipient,
+  asset,
+  amountRaw,
+  nonce,
+  deadline
+}) {
+  const domain = {
+    name: SEND_TO_AGENT_DOMAIN_NAME,
+    version: SEND_TO_AGENT_DOMAIN_VERSION,
+    chainId: normalizeUint256(chainId, "chainId", { positive: true }),
+    verifyingContract: getAddress(agentAccountAddress)
+  };
+  const types = {
+    SendToAgent: [
+      { name: "from", type: "address" },
+      { name: "recipient", type: "address" },
+      { name: "asset", type: "address" },
+      { name: "amount", type: "uint256" },
+      { name: "nonce", type: "uint256" },
+      { name: "deadline", type: "uint256" }
+    ]
+  };
+  const message = {
+    from: getAddress(wallet.address),
+    recipient: getAddress(recipient),
+    asset: getAddress(asset),
+    amount: normalizeUint256(amountRaw, "amountRaw", { positive: true }),
+    nonce: normalizeUint256(nonce, "nonce"),
+    deadline: normalizeUint256(deadline, "deadline", { positive: true })
+  };
+  return {
+    domain,
+    types,
+    message,
+    signature: await wallet.signTypedData(domain, types, message)
+  };
+}
+
+/**
+ * Return a settled ephemeral payout from the worker's AAC liquid position to
+ * the KMS signer's reward-bank position. The backend only relays the signed
+ * authorization and cannot redirect it: recipient, asset and amount are all
+ * covered by EIP-712 and the admin route separately allowlists the recipient.
+ */
+export async function runPayoutRecoveryStage({
+  wallet,
+  operatorPlatform,
+  reader,
+  chainId,
+  agentAccountAddress,
+  rewardBankAddress,
+  assetAddress,
+  amountRaw,
+  availableLiquidRaw = undefined,
+  nonceGenerator = generateCanaryTransferNonce,
+  now = () => Date.now()
+}) {
+  const amount = normalizeUint256(amountRaw, "amountRaw", { positive: true });
+  if (availableLiquidRaw !== undefined && normalizeUint256(availableLiquidRaw, "availableLiquidRaw") < amount) {
+    throw new Error(
+      `Ephemeral payout recovery requires ${amount} raw AAC liquid, but settlement credited `
+      + `${normalizeUint256(availableLiquidRaw, "availableLiquidRaw")} raw. Direct EOA payouts cannot be `
+      + "recovered by AgentAccountCore.sendToAgentFor."
+    );
+  }
+
+  let nonce;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const candidate = normalizeUint256(nonceGenerator(), "nonce");
+    if (!(await reader.isAgentTransferAuthorizationUsed(wallet.address, candidate))) {
+      nonce = candidate;
+      break;
+    }
+  }
+  if (nonce === undefined) {
+    throw new Error("Could not generate an unused AgentAccountCore transfer nonce after 3 attempts.");
+  }
+
+  const deadline = BigInt(Math.floor(now() / 1000)) + CANARY_RECOVERY_DEADLINE_SECONDS;
+  const authorization = await buildCanaryTransferAuthorization({
+    wallet,
+    chainId,
+    agentAccountAddress,
+    recipient: rewardBankAddress,
+    asset: assetAddress,
+    amountRaw: amount,
+    nonce,
+    deadline
+  });
+  const rewardBankBefore = await reader.snapshotWorker(authorization.message.recipient);
+  const submitted = await operatorPlatform.request("/admin/agent-transfers", {
+    method: "POST",
+    body: {
+      from: authorization.message.from,
+      recipient: authorization.message.recipient,
+      asset: authorization.message.asset,
+      amount: amount.toString(),
+      nonce: nonce.toString(),
+      deadline: deadline.toString(),
+      signature: authorization.signature
+    }
+  });
+  if (submitted?.status !== "confirmed" || !/^0x[a-fA-F0-9]{64}$/u.test(submitted?.txHash ?? "")) {
+    throw new Error("Agent transfer recovery route did not return a confirmed transaction hash.");
+  }
+  const observed = await reader.waitForAgentTransfer({
+    txHash: submitted.txHash,
+    from: authorization.message.from,
+    recipient: authorization.message.recipient,
+    asset: authorization.message.asset,
+    amountRaw: amount
+  });
+  if (BigInt(observed.amountRaw) !== amount) {
+    throw new Error(`AgentTransfer amount ${observed.amountRaw} did not match authorized amount ${amount}.`);
+  }
+  const rewardBankAfter = await reader.snapshotWorker(authorization.message.recipient);
+  const rewardBankLiquidDelta = rewardBankAfter.aacLiquidRaw - rewardBankBefore.aacLiquidRaw;
+  if (rewardBankLiquidDelta !== amount) {
+    throw new Error(
+      `Reward-bank AAC liquid delta ${rewardBankLiquidDelta} did not match recovered payout ${amount}; `
+      + "refusing to label the transfer recovered."
+    );
+  }
+  return {
+    status: "recovered",
+    txHash: observed.txHash,
+    blockNumber: observed.blockNumber,
+    recipient: authorization.message.recipient,
+    asset: authorization.message.asset,
+    amountRaw: amount.toString(),
+    rewardBankLiquidBeforeRaw: rewardBankBefore.aacLiquidRaw.toString(),
+    rewardBankLiquidAfterRaw: rewardBankAfter.aacLiquidRaw.toString(),
+    rewardBankLiquidDeltaRaw: rewardBankLiquidDelta.toString(),
+    nonce: nonce.toString(),
+    deadline: deadline.toString()
+  };
+}
+
+// ── STAGE 8: operator token freshness ────────────────────────────────────────
 export function assertOperatorTokenFreshness({ operatorAuth, minDays, now }) {
   const mode = operatorAuth?.mode ?? "unknown";
   const token = operatorAuth?.token;
@@ -894,6 +1099,15 @@ export async function assertOperatorReady(operatorPlatform, { rewardRaw = undefi
   const fundingAsset = Array.isArray(policy.signerFunding?.assets)
     ? policy.signerFunding.assets.find((asset) => asset?.symbol === rewardAssetSymbol)
     : undefined;
+  let rewardBankAddress;
+  try {
+    rewardBankAddress = getAddress(policy.signerFunding?.account);
+  } catch {
+    // Recovery is fail-open. A missing reward-bank identity is carried into
+    // stage 7, where it becomes accepted_cost evidence without masking a green
+    // claim→settle lifecycle.
+    rewardBankAddress = undefined;
+  }
   if (fundingAsset) {
     if (fundingAsset.readable !== true) {
       throw new Error(
@@ -923,10 +1137,12 @@ export async function assertOperatorReady(operatorPlatform, { rewardRaw = undefi
     capabilities: REQUIRED_OPERATOR_CAPABILITIES,
     settlementReady: true,
     signerIsSettlementBroker: true,
+    signerIsAgentTransferBroker: policy.roles?.signerIsAgentTransferBroker === true,
     escrowIsServiceOperator: true,
     escrowIsAgentAccountEscrowOperator: true,
     escrowAgentAccountMatchesConfig: policy.roles?.escrowAgentAccountMatchesConfig,
-    signerFundingChecked: Boolean(fundingAsset)
+    signerFundingChecked: Boolean(fundingAsset),
+    rewardBankAddress
   };
 }
 
@@ -1029,6 +1245,7 @@ function buildCanaryEvidence({
     payoutDisposition: classifyCanaryPayoutDisposition({
       workerEphemeral: config.workerEphemeral,
       settleStage: stages.settle,
+      recoveryStage: stages.payoutRecovery,
       rewardAmount: config.rewardAmount,
       rewardAsset: DEFAULT_ESCROW_ASSET.symbol
     }),
@@ -1052,6 +1269,7 @@ function buildCanaryEvidence({
 export function classifyCanaryPayoutDisposition({
   workerEphemeral,
   settleStage,
+  recoveryStage,
   rewardAmount,
   rewardAsset
 }) {
@@ -1063,12 +1281,28 @@ export function classifyCanaryPayoutDisposition({
     };
   }
   if (workerEphemeral) {
+    if (recoveryStage?.status === "recovered") {
+      return {
+        status: "recovered",
+        recoverable: true,
+        txHash: recoveryStage.txHash,
+        blockNumber: recoveryStage.blockNumber,
+        recipient: recoveryStage.recipient,
+        amountRaw: recoveryStage.amountRaw,
+        rewardBankLiquidBeforeRaw: recoveryStage.rewardBankLiquidBeforeRaw,
+        rewardBankLiquidAfterRaw: recoveryStage.rewardBankLiquidAfterRaw,
+        rewardBankLiquidDeltaRaw: recoveryStage.rewardBankLiquidDeltaRaw,
+        detail: `${rewardAmount} ${rewardAsset} returned to the operator reward bank before ephemeral key disposal`
+      };
+    }
+    const reason = recoveryStage?.warning
+      ? `: ${recoveryStage.warning}`
+      : " before the ephemeral key was discarded";
     return {
       status: "accepted_cost",
       recoverable: false,
       detail:
-        `${rewardAmount} ${rewardAsset} is intentionally unrecoverable monitoring spend; `
-        + "the ephemeral worker key is discarded after this run"
+        `${rewardAmount} ${rewardAsset} remains accepted monitoring cost because payout recovery failed${reason}`
     };
   }
   return {
@@ -1117,6 +1351,37 @@ function buildChainReader(config) {
         releasedRaw: BigInt(job.released),
         rewardRaw: BigInt(job.reward),
         worker: job.worker
+      };
+    },
+    async isAgentTransferAuthorizationUsed(from, nonce) {
+      return Boolean(await aac.sendToAgentAuthorizationUsed(from, nonce));
+    },
+    async waitForAgentTransfer(expected) {
+      const receipt = await provider.getTransactionReceipt(expected.txHash);
+      if (!receipt || Number(receipt.status) !== 1) {
+        throw new Error(`Agent transfer transaction ${expected.txHash} is missing or failed on chain.`);
+      }
+      const parsed = receipt.logs
+        .filter((entry) => entry.address.toLowerCase() === config.agentAccountAddress.toLowerCase())
+        .map((entry) => {
+          try {
+            return aac.interface.parseLog(entry);
+          } catch {
+            return null;
+          }
+        })
+        .find((entry) => entry?.name === "AgentTransfer"
+          && sameAddress(entry.args.from, expected.from)
+          && sameAddress(entry.args.to, expected.recipient)
+          && sameAddress(entry.args.asset, expected.asset)
+          && BigInt(entry.args.amount) === BigInt(expected.amountRaw));
+      if (!parsed) {
+        throw new Error(`Agent transfer transaction ${expected.txHash} lacks the exact AgentTransfer event.`);
+      }
+      return {
+        txHash: receipt.hash,
+        blockNumber: Number(receipt.blockNumber),
+        amountRaw: BigInt(parsed.args.amount).toString()
       };
     }
   };
@@ -1319,6 +1584,27 @@ function captureTxHash(txHashes, stage, raw) {
   if (typeof candidate === "string" && /^0x[a-fA-F0-9]{64}$/u.test(candidate)) {
     txHashes[stage] = candidate;
   }
+}
+
+function normalizeUint256(value, label, { positive = false } = {}) {
+  const raw = typeof value === "bigint" ? value.toString() : String(value ?? "").trim();
+  if (!/^\d+$/u.test(raw)) {
+    throw new Error(`${label} must be an exact unsigned uint256.`);
+  }
+  const parsed = BigInt(raw);
+  if (parsed > UINT256_MAX || (positive && parsed === 0n)) {
+    throw new Error(`${label} must be ${positive ? "a positive" : "an"} uint256.`);
+  }
+  return parsed;
+}
+
+function generateCanaryTransferNonce() {
+  const nonce = BigInt(hexlify(randomBytes(32)));
+  return nonce === 0n ? 1n : nonce;
+}
+
+function sameAddress(left, right) {
+  return String(left ?? "").toLowerCase() === String(right ?? "").toLowerCase();
 }
 
 function isBlockchainRevert(error) {

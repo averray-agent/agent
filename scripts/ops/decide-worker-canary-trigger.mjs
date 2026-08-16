@@ -7,11 +7,14 @@ import { fileURLToPath } from "node:url";
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
 
 export function decideWorkerCanaryTrigger({
+  changedFiles = [],
   eventName,
   workflowConclusion = "",
   deployChanged = false,
   deployedSha,
   greenCanaryExists = false,
+  profile = "testnet",
+  recentGreenMainnetCanaryExists = false,
 }) {
   assertSha(deployedSha);
 
@@ -45,6 +48,15 @@ export function decideWorkerCanaryTrigger({
     );
   }
 
+  if (isDocsOnlyDeploy(changedFiles)) {
+    return decision(
+      false,
+      "docs_only_deploy",
+      deployedSha,
+      "Deploy diff contains only docs/ or Markdown files; skipping the paid lifecycle walk.",
+    );
+  }
+
   if (greenCanaryExists === true) {
     return decision(
       false,
@@ -54,12 +66,30 @@ export function decideWorkerCanaryTrigger({
     );
   }
 
+  if (profile === "mainnet" && recentGreenMainnetCanaryExists === true) {
+    return decision(
+      false,
+      "recent_green_mainnet_canary",
+      deployedSha,
+      "A green mainnet canary completed within the last 6 hours; deploy-triggered proof spend is debounced.",
+    );
+  }
+
   return decision(
     true,
     "new_deployed_sha",
     deployedSha,
     `Deploy Production changed the running system and SHA ${deployedSha} has no green canary marker.`,
   );
+}
+
+export function isDocsOnlyDeploy(changedFiles = []) {
+  return Array.isArray(changedFiles)
+    && changedFiles.length > 0
+    && changedFiles.every((candidate) => {
+      const path = String(candidate ?? "").trim();
+      return path.startsWith("docs/") || path.toLowerCase().endsWith(".md");
+    });
 }
 
 function decision(shouldRun, reason, deployedSha, summary) {
@@ -80,13 +110,30 @@ function parseBoolean(name, fallback = false) {
   throw new Error(`${name} must be exactly true or false, got ${value}.`);
 }
 
+function parseChangedFiles(raw) {
+  if (!raw) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("WORKER_CANARY_CHANGED_FILES_JSON must be valid JSON.");
+  }
+  if (!Array.isArray(parsed) || parsed.some((entry) => typeof entry !== "string" || !entry.trim())) {
+    throw new Error("WORKER_CANARY_CHANGED_FILES_JSON must be an array of non-empty path strings.");
+  }
+  return parsed;
+}
+
 function runCli() {
   const result = decideWorkerCanaryTrigger({
+    changedFiles: parseChangedFiles(process.env.WORKER_CANARY_CHANGED_FILES_JSON),
     eventName: process.env.WORKER_CANARY_EVENT_NAME,
     workflowConclusion: process.env.WORKER_CANARY_WORKFLOW_CONCLUSION ?? "",
     deployChanged: parseBoolean("WORKER_CANARY_DEPLOY_CHANGED"),
     deployedSha: process.env.WORKER_CANARY_DEPLOYED_SHA,
     greenCanaryExists: parseBoolean("WORKER_CANARY_GREEN_EXISTS"),
+    profile: process.env.WORKER_CANARY_PROFILE || "testnet",
+    recentGreenMainnetCanaryExists: parseBoolean("WORKER_CANARY_RECENT_GREEN_MAINNET_EXISTS"),
   });
 
   process.stdout.write(`${JSON.stringify(result)}\n`);

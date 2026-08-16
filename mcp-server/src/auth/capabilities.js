@@ -31,6 +31,7 @@ const BASE_CAPABILITIES = [
 
 const ROLE_CAPABILITIES = {
   admin: [
+    "agent-transfers:submit",
     "admin:capabilities:read",
     "admin:capabilities:grant",
     "admin:capabilities:revoke",
@@ -102,6 +103,7 @@ const ROUTE_CAPABILITY_RULES = [
   { method: "GET", path: "/admin/jobs/timeline", capabilities: ["jobs:timeline"] },
   { method: "GET", path: "/admin/sessions", capabilities: ["ops:view"] },
   { method: "GET", path: "/admin/status", capabilities: ["admin:status", "ops:view"] },
+  { method: "POST", path: "/admin/agent-transfers", capabilities: ["agent-transfers:submit"] },
   { method: "GET", path: "/admin/treasury/summary", capabilities: ["admin:status", "ops:view"] },
   { method: "POST", path: "/admin/arrivals/canary-marker", capabilities: ["ops:view"] },
   { method: "POST", path: "/admin/bootstrap-self-report/send", capabilities: ["admin:self-report:send"] },
@@ -143,6 +145,7 @@ const UI_CONTROLS = {
 };
 
 const AUTOMATION_ACTIONS = {
+  "agentTransfer.submit": ["agent-transfers:submit"],
   "job.create": ["jobs:create"],
   "job.ingest": ["jobs:ingest"],
   "job.fireRecurring": ["jobs:fire-recurring"],

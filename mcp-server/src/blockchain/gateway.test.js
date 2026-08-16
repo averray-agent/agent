@@ -2143,6 +2143,69 @@ test("account mutations convert display amounts before contract calls", async ()
   ]);
 });
 
+test("submitAuthorizedAgentTransfer preserves exact raw units and returns the confirmed AgentTransfer", async () => {
+  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  const from = "0x3333333333333333333333333333333333333333";
+  const recipient = "0x4444444444444444444444444444444444444444";
+  const signature = `0x${"11".repeat(65)}`;
+  const txHash = `0x${"ab".repeat(32)}`;
+  const calls = [];
+  gateway.signer = { async getAddress() { return "0x5555555555555555555555555555555555555555"; } };
+  gateway.accountContract = {
+    async sendToAgentFor(...args) {
+      calls.push(args);
+      return {
+        hash: txHash,
+        async wait() {
+          return {
+            hash: txHash,
+            blockNumber: 123,
+            status: 1,
+            logs: [{ marker: "agent-transfer" }],
+          };
+        },
+      };
+    },
+    interface: {
+      parseLog(log) {
+        if (log.marker !== "agent-transfer") return null;
+        return {
+          name: "AgentTransfer",
+          args: { from, to: recipient, asset: USDC_TRUST_ASSET.address, amount: 100_000n },
+        };
+      },
+    },
+  };
+
+  const receipt = await gateway.submitAuthorizedAgentTransfer({
+    from,
+    recipient,
+    asset: USDC_TRUST_ASSET.address,
+    amountRaw: "100000",
+    nonce: "42",
+    deadline: "2000000000",
+    signature,
+  });
+
+  assert.deepEqual(calls, [[
+    from,
+    recipient,
+    USDC_TRUST_ASSET.address,
+    100_000n,
+    42n,
+    2_000_000_000n,
+    signature,
+  ]]);
+  assert.deepEqual(receipt, {
+    txHash,
+    blockNumber: 123,
+    from,
+    recipient,
+    asset: USDC_TRUST_ASSET.address,
+    amountRaw: "100000",
+  });
+});
+
 test("borrow refuses to relay for a wallet that is not the configured signer", async () => {
   const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
   gateway.signer = {

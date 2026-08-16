@@ -296,6 +296,10 @@ export class BlockchainGateway {
     return this.config.enabled;
   }
 
+  isSignerConfigured() {
+    return Boolean(this.signer);
+  }
+
   async getExternalSchemaSigningDomain() {
     if (!this.isEnabled()) {
       return undefined;
@@ -1204,6 +1208,7 @@ export class BlockchainGateway {
         signerIsVerifier,
         arbitratorSignerIsArbitrator,
         signerIsSettlementBroker,
+        signerIsAgentTransferBroker,
         signerIsStrategySettler,
         escrowIsAgentAccountEscrowOperator,
         agentAccountIsOutflowRecorder,
@@ -1229,6 +1234,9 @@ export class BlockchainGateway {
           : false,
         signerAddress
           ? optionalBool("settlementBroker(signer)", this.policyContract.settlementBroker(signerAddress))
+          : false,
+        signerAddress && typeof this.policyContract.agentTransferBroker === "function"
+          ? optionalBool("agentTransferBroker(signer)", this.policyContract.agentTransferBroker(signerAddress))
           : false,
         signerAddress && typeof this.policyContract.strategySettler === "function"
           ? optionalBool("strategySettler(signer)", this.policyContract.strategySettler(signerAddress))
@@ -1333,6 +1341,7 @@ export class BlockchainGateway {
           signerIsVerifier,
           arbitratorSignerIsArbitrator,
           signerIsSettlementBroker,
+          signerIsAgentTransferBroker,
           signerIsStrategySettler,
           escrowIsAgentAccountEscrowOperator: agentAccountEscrowAuthorized,
           agentAccountEscrowAuthorizationMode,
@@ -1665,6 +1674,71 @@ export class BlockchainGateway {
         signature
       );
       await tx.wait();
+    });
+  }
+
+  /**
+   * Relay an already-signed AgentAccountCore transfer without converting the
+   * amount through display units. Recovery callers sign the contract's exact
+   * raw uint256 amount, so a decimal round-trip here would invalidate both the
+   * EIP-712 authorization and the accounting proof.
+   */
+  async submitAuthorizedAgentTransfer({ from, recipient, asset, amountRaw, nonce, deadline, signature }) {
+    return this.withGatewayError("submitAuthorizedAgentTransfer", async () => {
+      this.requireSigner("submitAuthorizedAgentTransfer");
+      const normalizedFrom = getAddress(from);
+      const normalizedRecipient = getAddress(recipient);
+      const normalizedAsset = getAddress(asset);
+      const supported = (this.config.supportedAssets ?? []).find(
+        (candidate) => candidate.address?.toLowerCase() === normalizedAsset.toLowerCase()
+      );
+      if (!supported) {
+        throw new ValidationError(`Unsupported asset address: ${normalizedAsset}`);
+      }
+      const amount = this.normalizeUint256(amountRaw, "amount");
+      if (amount === 0n) {
+        throw new ValidationError("amount must be positive.");
+      }
+      const normalizedNonce = this.normalizeUint256(nonce, "nonce");
+      const normalizedDeadline = this.normalizeUint256(deadline, "deadline");
+      const normalizedSignature = this.normalizeSignature(signature, "signature");
+
+      const tx = await this.accountContract.sendToAgentFor(
+        normalizedFrom,
+        normalizedRecipient,
+        normalizedAsset,
+        amount,
+        normalizedNonce,
+        normalizedDeadline,
+        normalizedSignature
+      );
+      const receipt = await tx.wait();
+      const transfer = (receipt?.logs ?? []).map((log) => {
+        try {
+          return this.accountContract.interface.parseLog(log);
+        } catch {
+          return null;
+        }
+      }).find((parsed) => parsed?.name === "AgentTransfer"
+        && String(parsed.args.from).toLowerCase() === normalizedFrom.toLowerCase()
+        && String(parsed.args.to).toLowerCase() === normalizedRecipient.toLowerCase()
+        && String(parsed.args.asset).toLowerCase() === normalizedAsset.toLowerCase()
+        && BigInt(parsed.args.amount) === amount);
+      if (!transfer) {
+        throw new ExternalServiceError(
+          "Agent transfer transaction confirmed without the exact AgentTransfer event.",
+          "agent_transfer_event_missing",
+          { operation: "submitAuthorizedAgentTransfer", txHash: receipt?.hash ?? tx.hash }
+        );
+      }
+      return {
+        txHash: receipt?.hash ?? tx.hash,
+        blockNumber: Number(receipt.blockNumber),
+        from: normalizedFrom,
+        recipient: normalizedRecipient,
+        asset: normalizedAsset,
+        amountRaw: amount.toString()
+      };
     });
   }
 
