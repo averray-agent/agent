@@ -194,8 +194,11 @@ Activation requires a separate, multisig-gated EscrowCore successor ceremony:
    `knownUnshippedContractChanges.legacyEscrowCore` from `deployments/mainnet.json`, then
    revert the corresponding pin in `scripts/ops/check-contract-source-drift.test.mjs`.
 
-Until that ceremony, `scripts/ops/audit-launch-readiness.mjs --profile mainnet` correctly treats
-live v2 as gas-retention-inactive because it does not expose `supportsGasRetention()`.
+That ceremony executed 2026-08-13 (PR #1111): live `escrowCore` is v3 at `0xC2Eb…f793` and
+exposes `supportsGasRetention()`. Step 6's proof executed live on 2026-08-16 — a non-waived
+brokered 0.25 claim settled with `GasRetentionApplied(50000, 250000)` (tx `0x4f0c2a63…`, blk
+19535884): stake and claim fee returned in full, retention credited to treasury, and the twelve
+prior waived tier-0 settlements verifiably retained zero. The F-tier retention rows are ACTIVE.
 
 That ceremony is deliberately outside the source PR. No contract deployment, role mutation,
 backend cutover, or existing-job migration is implied by merging the implementation.
