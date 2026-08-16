@@ -9,14 +9,14 @@
     "acquisition": {
       "repository": "github.com/depre-dev/averray-send-test",
       "base_commit": "42571061ca9b6da8c6aca908f1ee1df1dab4e10a",
-      "bundle": {
-        "sha256": "c9128c609c312f9a486dacfc13885d1ef171bb9113d2c755770585cd673b9eb8",
-        "bytes": 1229,
+      "git_bundle": {
+        "sha256": "66b7cbfb41adebaed4709dab65f4dc9ac45134a962adcb99fc6c2ea2ee62708a",
+        "bytes": 2863,
         "locator": {
-          "kind": "https",
-          "url": "https://codeload.github.com/depre-dev/averray-send-test/tar.gz/42571061ca9b6da8c6aca908f1ee1df1dab4e10a"
+          "kind": "path",
+          "path": "source.bundle"
         },
-        "format": "tar+gzip"
+        "format": "git-bundle"
       }
     },
     "materialization": {
@@ -71,6 +71,28 @@
       "coverage_or_lint_exclusion_of_changed_files",
       "error_swallowing_to_force_zero_exit"
     ]
+  },
+  "inconclusive_policy": {
+    "infrastructure_attributable": [
+      "host_failure",
+      "image_unavailable",
+      "platform_timeout",
+      "artifact_unavailable"
+    ],
+    "contract_attributable": [
+      "source_commit_binding_failed",
+      "baseline_mismatch",
+      "contract_precondition_untrue"
+    ],
+    "candidate_attributable": [
+      "candidate_exceeded_resource_limit",
+      "candidate_caused_nondeterminism_across_repetitions"
+    ],
+    "repeated_candidate_attributable": {
+      "window": 10,
+      "threshold": 3,
+      "action": "escalate_to_human"
+    }
   },
   "reproducibility": {
     "repetitions": 2,

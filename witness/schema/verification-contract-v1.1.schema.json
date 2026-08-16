@@ -25,11 +25,11 @@
         "acquisition": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["repository", "base_commit", "bundle"],
+          "required": ["repository", "base_commit", "git_bundle"],
           "properties": {
             "repository": { "$ref": "#/$defs/nonEmptyString" },
             "base_commit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
-            "bundle": { "$ref": "#/$defs/archiveArtifact" }
+            "git_bundle": { "$ref": "#/$defs/gitBundleArtifact" }
           }
         },
         "materialization": {
@@ -128,9 +128,13 @@
     "inconclusive_policy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["infrastructure_attributable", "candidate_attributable", "repeated_candidate_attributable"],
+      "required": [
+        "infrastructure_attributable", "contract_attributable", "candidate_attributable",
+        "repeated_candidate_attributable"
+      ],
       "properties": {
         "infrastructure_attributable": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
+        "contract_attributable": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
         "candidate_attributable": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
         "repeated_candidate_attributable": {
           "type": "object",
@@ -229,11 +233,16 @@
         "format": { "enum": ["file", "tar", "tar+gzip"] }
       }
     },
-    "archiveArtifact": {
-      "allOf": [
-        { "$ref": "#/$defs/artifact" },
-        { "properties": { "format": { "enum": ["tar", "tar+gzip"] } } }
-      ]
+    "gitBundleArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "bytes", "locator", "format"],
+      "properties": {
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "bytes": { "type": "integer", "minimum": 1 },
+        "locator": { "$ref": "#/$defs/locator" },
+        "format": { "const": "git-bundle" }
+      }
     },
     "targetedCheck": {
       "type": "object",

@@ -33,9 +33,17 @@ repository. v1.1 makes a contract-supplied differential check first class throug
 The v1 worked commit was also invented valid-shaped hex. The real, verified revision is
 `42571061ca9b6da8c6aca908f1ee1df1dab4e10a`.
 
+Phase 2 also exposed a provenance hole in the first v1.1 draft: the source archive's
+SHA-256 fixed its bytes, but nothing proved those bytes were the tree named by
+`base_commit`. v1.1 now requires a full Git bundle. Before any sandbox is selected or
+container is created, the Witness verifies the bundle offline, requires exactly one
+advertised ref at `base_commit`, clones it under isolated Git configuration, runs a
+full strict object check, and checks out that commit. A byte digest is still used for
+artifact transport integrity; Git's commit and tree object IDs establish provenance.
+
 ## Artifact references
 
-Every digest-bearing artifact has one shape:
+Caches, frozen inputs, and supplied checks use this artifact shape:
 
 ```yaml
 sha256: c9128c609c312f9a486dacfc13885d1ef171bb9113d2c755770585cd673b9eb8
@@ -51,10 +59,16 @@ upward. An `https` locator must be an absolute HTTPS URL. The Witness fetches th
 then verifies both `bytes` and the lowercase 64-hex SHA-256 before using them. Redirects
 do not relax the HTTPS requirement.
 
-`file`, `tar`, and `tar+gzip` are the only declared formats because they are the formats
-the executor implements. Archive extraction accepts regular files, directories, and
-global PAX metadata. Links, devices, per-entry PAX path overrides, absolute paths, and
-upward traversal are rejected.
+`file`, `tar`, and `tar+gzip` are the generic artifact formats the executor implements.
+Archive extraction accepts regular files, directories, and global PAX metadata. Links,
+devices, per-entry PAX path overrides, absolute paths, and upward traversal are
+rejected.
+
+Source acquisition is deliberately narrower. `subject.acquisition.git_bundle` has the
+same digest, length, and locator fields but its format is exactly `git-bundle`. A full
+bundle must have no missing prerequisites and exactly one advertised ref whose object
+ID equals `base_commit`. Reachable commit history may be present; extra advertised refs
+are rejected. Generic source tarballs are no longer valid v1.1 source artifacts.
 
 Artifact references replace every v1 bare digest:
 
@@ -63,11 +77,11 @@ subject:
   acquisition:
     repository: github.com/acme/widgets
     base_commit: 4a91c0e8d2f1b3c7a5e9d0f2b4c6a8e1d3f5b7c9
-    bundle:
+    git_bundle:
       sha256: "..."
       bytes: 1234
-      locator: { kind: https, url: "https://example.test/source.tar.gz" }
-      format: tar+gzip
+      locator: { kind: https, url: "https://example.test/source.bundle" }
+      format: git-bundle
   materialization:
     status: FROZEN_DEPENDENCIES
     dependency_cache:
@@ -187,7 +201,31 @@ A contract is rejected with the named rule when:
 
 Static validation is necessary but not freeze-complete. Call
 `validateVerificationContractAtFreeze` (or `witness/bin/freeze-contract.mjs`) to acquire
-the pinned artifacts and obtain the base-failure evidence required by rule 4.
+the pinned artifacts, establish Git provenance, and obtain the base-failure evidence
+required by rule 4. A binding failure is a contract rejection and occurs before image
+resolution or baseline container creation.
+
+## Inconclusive attribution
+
+`contract` is a third `INCONCLUSIVE` attribution alongside `infrastructure` and
+`candidate`. Source/commit binding failures, baseline expectation mismatches, and other
+contract-declared preconditions found untrue route to `contract`. Host, image, and
+transport failures remain infrastructure-attributable; candidate time/resource and
+nondeterminism failures remain candidate-attributable. Every inconclusive result
+records `workerConsequence: none`, including contract-attributable failures.
+
+The optional policy manifest names the three buckets independently:
+
+```yaml
+inconclusive_policy:
+  infrastructure_attributable: [host_failure, image_unavailable, artifact_unavailable]
+  contract_attributable: [source_commit_binding_failed, baseline_mismatch, contract_precondition_untrue]
+  candidate_attributable: [candidate_exceeded_resource_limit]
+  repeated_candidate_attributable:
+    window: 10
+    threshold: 3
+    action: escalate_to_human
+```
 
 ## Corrected worked instance
 
@@ -201,13 +239,13 @@ subject:
   acquisition:
     repository: github.com/depre-dev/averray-send-test
     base_commit: "42571061ca9b6da8c6aca908f1ee1df1dab4e10a"
-    bundle:
-      sha256: "c9128c609c312f9a486dacfc13885d1ef171bb9113d2c755770585cd673b9eb8"
-      bytes: 1229
+    git_bundle:
+      sha256: "66b7cbfb41adebaed4709dab65f4dc9ac45134a962adcb99fc6c2ea2ee62708a"
+      bytes: 2863
       locator:
-        kind: https
-        url: https://codeload.github.com/depre-dev/averray-send-test/tar.gz/42571061ca9b6da8c6aca908f1ee1df1dab4e10a
-      format: tar+gzip
+        kind: path
+        path: source.bundle
+      format: git-bundle
 checks:
   targeted: []
   hidden:
@@ -225,7 +263,9 @@ checks:
     required: true
 ```
 
-Observed against the exact archive: the supplied test exits 1 on base; the unchanged
+The bundle advertises only the declared commit and checks out tree
+`2af1b724638102808ed25948d24ebe8649a84bb8`. Observed against that tree: the supplied
+test exits 1 on base; the unchanged
 suite exits 0. Against the known-good patch, the supplied test and full suite exit 0 in
 both candidate repetitions and the contract verdict is `PASS`.
 
@@ -241,9 +281,14 @@ detectable classes**, not an unqualified zero-false-pass claim.
 
 - The digest algorithm over the contract object itself remains open. v1.1 does not
   select `hashCanonicalContent` or any alternative.
-- A generic tar artifact proves exact source bytes, but it does not cryptographically
-  prove that the human-readable `base_commit` label is the commit that produced those
-  bytes. The worked codeload URL embeds the commit and the archive digest pins the
-  result; a future source format should carry a verifiable commit/tree manifest.
+- A Git bundle binds the superproject object graph but cannot carry the contents of
+  separate submodule repositories. v1.1 rejects Git trees containing gitlinks until the
+  schema can bind an offline bundle for each submodule.
+- Git commit/tree binding includes blob contents, executable modes, symlink entries,
+  and the `.gitattributes` file itself. Checkout still applies Git's working-tree
+  attribute semantics. Global and system Git configuration are isolated, so custom
+  clean/smudge drivers and Git LFS content are not imported from the host or transported
+  by the bundle. Such repositories retain correct object identity but may materialize
+  pointer/unfiltered working-tree content and fail freeze-time preconditions.
 - Static integrity detection remains scoped. Six known semantic or framework-specific
   attack classes are deliberately outside the current corpus and are reported as such.

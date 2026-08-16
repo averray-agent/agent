@@ -73,7 +73,8 @@ node witness/bin/verify.mjs \
 
 Exit codes are `0` for `PASS`, `1` for `FAIL`, `2` for `POLICY_VIOLATION`, and
 `3` for `INCONCLUSIVE`. The JSON result names every policy/integrity detection and
-attributes every inconclusive verdict to `infrastructure` or `candidate`.
+attributes every inconclusive verdict to `infrastructure`, `contract`, or `candidate`.
+Every inconclusive result records `workerConsequence: "none"`.
 
 The executor materializes the exact base commit, validates and applies the patch with
 Git isolated from any parent worktree, and uses separate source copies and container
@@ -83,11 +84,13 @@ then runs targeted checks before regressions on the candidate. Verdict precedenc
 
 Legacy v1 execution remains limited to `HERMETIC` materializations because its bare
 digests have no acquisition data. v1.1 artifacts carry SHA-256, byte length, locator,
-and format; source bundles, caches, frozen inputs, and supplied hidden tests are
-verified before use. Supplied tests and other frozen artifacts are nested read-only
-mounts in every baseline and candidate workspace. `temporary_storage_mb` limits the
-`/tmp` tmpfs. v1.1 deliberately declares no workspace quota because Docker cannot
-quota the read-write bind mount used for the candidate workspace.
+and format. Source uses a full `git-bundle`: before any baseline container, Git verifies
+its object graph, its only advertised ref must equal `base_commit`, and that commit is
+checked out offline. Caches, frozen inputs, and supplied hidden tests are verified
+before use. Supplied tests and other frozen artifacts are nested read-only mounts in
+every baseline and candidate workspace. `temporary_storage_mb` limits the `/tmp` tmpfs.
+v1.1 deliberately declares no workspace quota because Docker cannot quota the
+read-write bind mount used for the candidate workspace.
 
 All seven declared integrity names execute. Structural cases are covered for removed
 JavaScript tests, added JavaScript/pytest skip markers, changed resolved runner files,
@@ -130,6 +133,7 @@ contract with one field corrected being accepted (`GREEN`):
 ```sh
 npm --prefix witness run contract:drills
 npm --prefix witness run v1.1:drills
+npm --prefix witness run binding:drills
 ```
 
 ## Phase-1 dependency paths

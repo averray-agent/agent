@@ -144,7 +144,7 @@ export function normalizeVerificationContract(input) {
 
   if (contract.schema_version === VERIFICATION_CONTRACT_SCHEMA_VERSION &&
       isRecord(contract.subject?.acquisition)) {
-    contract.subject.acquisition.bundle = normalizeArtifact(contract.subject.acquisition.bundle);
+    contract.subject.acquisition.git_bundle = normalizeArtifact(contract.subject.acquisition.git_bundle);
   }
 
   if (isRecord(contract.subject?.materialization)) {
@@ -388,8 +388,16 @@ function validateOptionalSections(issues, contract, version) {
       requireRecord(issues, contract.inconclusive_policy, "inconclusive_policy")) {
     if (version === VERIFICATION_CONTRACT_SCHEMA_VERSION) {
       requireOnlyKeys(issues, contract.inconclusive_policy, "inconclusive_policy", [
-        "infrastructure_attributable", "candidate_attributable", "repeated_candidate_attributable"
+        "infrastructure_attributable", "contract_attributable", "candidate_attributable",
+        "repeated_candidate_attributable"
       ]);
+    }
+    if (version === VERIFICATION_CONTRACT_SCHEMA_VERSION) {
+      requireStringArray(
+        issues,
+        contract.inconclusive_policy.contract_attributable,
+        "inconclusive_policy.contract_attributable"
+      );
     }
     requireStringArray(
       issues,
@@ -483,12 +491,12 @@ export function validateVerificationContractShape(input) {
     if (requireRecord(issues, contract.subject.acquisition, "subject.acquisition")) {
       const acquisition = contract.subject.acquisition;
       if (v11) {
-        requireOnlyKeys(issues, acquisition, "subject.acquisition", ["repository", "base_commit", "bundle"]);
+        requireOnlyKeys(issues, acquisition, "subject.acquisition", ["repository", "base_commit", "git_bundle"]);
         requireString(issues, acquisition.repository, "subject.acquisition.repository");
         requirePattern(issues, acquisition.base_commit, "subject.acquisition.base_commit", GIT_COMMIT,
           "VCV11_SCHEMA_GIT_COMMIT", "40 lowercase hex characters");
-        validateArtifactShape(issues, acquisition.bundle, "subject.acquisition.bundle", {
-          formats: ["tar", "tar+gzip"]
+        validateArtifactShape(issues, acquisition.git_bundle, "subject.acquisition.git_bundle", {
+          formats: ["git-bundle"]
         });
       } else {
         requireString(issues, acquisition.repository, "subject.acquisition.repository");

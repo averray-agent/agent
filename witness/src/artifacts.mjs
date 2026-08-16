@@ -10,6 +10,21 @@ import { gunzipSync } from "node:zlib";
 
 const TAR_BLOCK_BYTES = 512;
 
+export class ArtifactAcquisitionError extends Error {
+  constructor(message, { locatorKind = null, cause } = {}) {
+    super(message, { cause });
+    this.name = "ArtifactAcquisitionError";
+    this.locatorKind = locatorKind;
+  }
+}
+
+export class ArtifactIntegrityError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ArtifactIntegrityError";
+  }
+}
+
 function within(root, candidate) {
   const prefix = root.endsWith(sep) ? root : `${root}${sep}`;
   return candidate === root || candidate.startsWith(prefix);
@@ -25,15 +40,36 @@ function localArtifactPath(locator, baseDirectory) {
 
 async function acquireBytes(artifact, baseDirectory) {
   if (artifact.locator.kind === "path") {
-    return readFile(localArtifactPath(artifact.locator, baseDirectory));
+    try {
+      return await readFile(localArtifactPath(artifact.locator, baseDirectory));
+    } catch (error) {
+      throw new ArtifactAcquisitionError(`artifact path could not be read: ${error.message}`, {
+        locatorKind: "path",
+        cause: error
+      });
+    }
   }
   if (artifact.locator.kind !== "https") {
     throw new Error(`unsupported artifact locator kind: ${artifact.locator.kind}`);
   }
-  const response = await fetch(artifact.locator.url, { redirect: "follow" });
-  if (!response.ok) throw new Error(`artifact fetch returned HTTP ${response.status}`);
+  let response;
+  try {
+    response = await fetch(artifact.locator.url, { redirect: "follow" });
+  } catch (error) {
+    throw new ArtifactAcquisitionError(`artifact fetch failed: ${error.message}`, {
+      locatorKind: "https",
+      cause: error
+    });
+  }
+  if (!response.ok) {
+    throw new ArtifactAcquisitionError(`artifact fetch returned HTTP ${response.status}`, {
+      locatorKind: "https"
+    });
+  }
   if (new URL(response.url).protocol !== "https:") {
-    throw new Error("artifact fetch redirected outside HTTPS");
+    throw new ArtifactAcquisitionError("artifact fetch redirected outside HTTPS", {
+      locatorKind: "https"
+    });
   }
   return Buffer.from(await response.arrayBuffer());
 }
@@ -42,10 +78,10 @@ export async function verifyArtifact(artifact, { baseDirectory = process.cwd() }
   const bytes = await acquireBytes(artifact, baseDirectory);
   const digest = createHash("sha256").update(bytes).digest("hex");
   if (bytes.length !== artifact.bytes) {
-    throw new Error(`artifact byte length ${bytes.length} does not match declared ${artifact.bytes}`);
+    throw new ArtifactIntegrityError(`artifact byte length ${bytes.length} does not match declared ${artifact.bytes}`);
   }
   if (digest !== artifact.sha256) {
-    throw new Error(`artifact SHA-256 ${digest} does not match declared ${artifact.sha256}`);
+    throw new ArtifactIntegrityError(`artifact SHA-256 ${digest} does not match declared ${artifact.sha256}`);
   }
   return { bytes, sha256: digest, size: bytes.length, locator: artifact.locator };
 }

@@ -41,6 +41,7 @@ async function materializeFixture({ destination }) {
     commit: BASE_COMMIT,
     source: "pinned-test-fixture",
     sourceType: "fixture",
+    bindingVerified: true,
     seconds: 0
   };
 }
@@ -87,13 +88,13 @@ test("v1.1 normalization canonicalizes artifact and working paths without mutati
 const MALFORMED_ADDITIONS = [
   {
     name: "source artifact locator",
-    mutate(contract) { delete contract.subject.acquisition.bundle.locator; },
-    path: "subject.acquisition.bundle.locator"
+    mutate(contract) { delete contract.subject.acquisition.git_bundle.locator; },
+    path: "subject.acquisition.git_bundle.locator"
   },
   {
     name: "source artifact format",
-    mutate(contract) { contract.subject.acquisition.bundle.format = "file"; },
-    path: "subject.acquisition.bundle.format"
+    mutate(contract) { contract.subject.acquisition.git_bundle.format = "file"; },
+    path: "subject.acquisition.git_bundle.format"
   },
   {
     name: "dependency-cache artifact locator and format",
@@ -144,6 +145,11 @@ const MALFORMED_ADDITIONS = [
     name: "strict artifact digest",
     mutate(contract) { contract.checks.hidden.artifact.sha256 = "not-a-digest"; },
     path: "checks.hidden.artifact.sha256"
+  },
+  {
+    name: "contract-attributable inconclusive reasons",
+    mutate(contract) { delete contract.inconclusive_policy.contract_attributable; },
+    path: "inconclusive_policy.contract_attributable"
   }
 ];
 
