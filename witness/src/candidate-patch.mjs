@@ -152,6 +152,15 @@ export async function inspectCandidatePatch({ patchPath, baseRoot }) {
 export function evaluateCandidatePolicy(contract, patch) {
   const violations = [];
   const candidate = contract.candidate;
+  const suppliedTestPath = contract.schema_version === "averray.verification-contract/v1.1"
+    ? contract.checks.hidden?.mount_path
+    : null;
+  const artifactPaths = contract.schema_version === "averray.verification-contract/v1.1"
+    ? [
+        contract.subject.materialization.dependency_cache?.mount_path,
+        ...contract.subject.materialization.frozen_inputs.map((input) => input.path)
+      ].filter(Boolean)
+    : [];
   if (patch.changedPaths.length > candidate.maximum_changed_files) {
     violations.push({
       detection: "maximum_changed_files_exceeded",
@@ -172,6 +181,20 @@ export function evaluateCandidatePolicy(contract, patch) {
       violations.push({
         detection: "protected_path_modified",
         message: `${path} is protected from candidate modification`,
+        paths: [path]
+      });
+    }
+    if (suppliedTestPath && isProtectedPath(path, [suppliedTestPath])) {
+      violations.push({
+        detection: "supplied_test_modified",
+        message: `${path} attempts to modify a contract-supplied test mounted read-only by the Witness`,
+        paths: [path]
+      });
+    }
+    if (artifactPaths.some((artifactPath) => isProtectedPath(path, [artifactPath]))) {
+      violations.push({
+        detection: "contract_artifact_modified",
+        message: `${path} attempts to modify a contract artifact mounted read-only by the Witness`,
         paths: [path]
       });
     }

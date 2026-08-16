@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { confusionMatrix } from "../src/confusion-matrix.mjs";
 import { runInWitnessContainer, ensureWitnessImage } from "../src/docker.mjs";
 import { executeVerificationContract } from "../src/executor.mjs";
+import { INTEGRITY_DETECTION_SUPPORT } from "../src/integrity.mjs";
 import { makeTreeWritable } from "../src/materialize.mjs";
 import { loadVerificationContract } from "../src/verification-contract.mjs";
 
@@ -14,6 +15,7 @@ const CORPUS_ROOT = resolve(WITNESS_ROOT, "corpus", "adversarial");
 const manifest = JSON.parse(await readFile(resolve(CORPUS_ROOT, "manifest.json"), "utf8"));
 const contract = await loadVerificationContract(resolve(CORPUS_ROOT, manifest.contract));
 const seedRoot = resolve(CORPUS_ROOT, manifest.seed);
+const overlayRoot = manifest.overlay ? resolve(CORPUS_ROOT, manifest.overlay) : null;
 const image = await ensureWitnessImage();
 const outputIndex = process.argv.indexOf("--out");
 const outputPath = outputIndex >= 0 ? resolve(process.argv[outputIndex + 1]) : null;
@@ -21,9 +23,15 @@ const quiet = process.argv.includes("--quiet");
 const diagnostic = process.argv.includes("--diagnostic");
 const caseIndex = process.argv.indexOf("--case");
 const caseId = caseIndex >= 0 ? process.argv[caseIndex + 1] : null;
+const knownUndetectableNotRepresented = Object.entries(INTEGRITY_DETECTION_SUPPORT)
+  .filter(([, support]) => Array.isArray(support.unimplemented) && support.unimplemented.length > 0)
+  .map(([detection, support]) => ({ detection, class: support.unimplemented[0] }));
 
 async function materializeSeed({ destination }) {
   await cp(seedRoot, destination, { recursive: true, errorOnExist: true, verbatimSymlinks: true });
+  if (overlayRoot) {
+    await cp(overlayRoot, destination, { recursive: true, force: true, verbatimSymlinks: true });
+  }
   await makeTreeWritable(destination);
   return {
     path: destination,
@@ -124,11 +132,11 @@ const evidence = {
   baseCommit: manifest.baseCommit,
   real: {
     results: real,
-    confusion: confusionMatrix(real)
+    confusion: confusionMatrix(real, { knownUndetectableNotRepresented })
   },
   naive: {
     results: naive,
-    confusion: confusionMatrix(naive)
+    confusion: confusionMatrix(naive, { knownUndetectableNotRepresented })
   },
   isolationDrill: (() => {
     const correct = real.find((result) => result.id === "pass-correct-fix");

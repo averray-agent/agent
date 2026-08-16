@@ -7,7 +7,7 @@ const LABELS = Object.freeze([
   VERDICTS.POLICY_VIOLATION
 ]);
 
-export function confusionMatrix(results) {
+export function confusionMatrix(results, { knownUndetectableNotRepresented = [] } = {}) {
   const matrix = Object.fromEntries(LABELS.map((expected) => [
     expected,
     Object.fromEntries(LABELS.map((actual) => [actual, 0]))
@@ -49,6 +49,13 @@ export function confusionMatrix(results) {
       expected: expectedInconclusive.length,
       rate: expectedInconclusive.length === 0 ? 1 : attributionCorrect.length / expectedInconclusive.length
     },
-    exactVerdicts: results.filter((result) => result.expectedVerdict === result.actualVerdict).length
+    exactVerdicts: results.filter((result) => result.expectedVerdict === result.actualVerdict).length,
+    scopeQualification: {
+      claim: "false-pass counts cover represented detectable classes only",
+      knownUndetectableNotRepresented: {
+        count: knownUndetectableNotRepresented.length,
+        classes: knownUndetectableNotRepresented
+      }
+    }
   };
 }

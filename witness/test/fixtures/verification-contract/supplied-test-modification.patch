@@ -1,0 +1,6 @@
+diff --git a/.averray/supplied-tests/unitless.test.mjs b/.averray/supplied-tests/unitless.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/.averray/supplied-tests/unitless.test.mjs
+@@ -0,0 +1 @@
++// candidate replacement that always passes

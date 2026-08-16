@@ -8,6 +8,12 @@ import {
   inspectCandidatePatch
 } from "./candidate-patch.mjs";
 import { DEFAULT_IMAGE, DEFAULT_TIMEOUT_SECONDS } from "./constants.mjs";
+import {
+  dockerReadOnlyMounts,
+  materializeContractSource,
+  prepareContractArtifacts,
+  prepareWorkspaceMountTargets
+} from "./contract-runtime.mjs";
 import { ensureWitnessImage, runInWitnessContainer } from "./docker.mjs";
 import {
   INTEGRITY_DETECTION_SUPPORT,
@@ -36,18 +42,20 @@ export function commandToShell(command) {
 
 function expectedOutcome(check, phase) {
   if (phase === "baseline") {
-    return check.kind === "targeted"
-      ? check.expected_on_base
-      : check.base_state === "green" ? "pass" : "fail";
+    return check.kind === "regression"
+      ? check.base_state === "green" ? "pass" : "fail"
+      : check.expected_on_base;
   }
-  return check.kind === "targeted" ? check.expected_on_candidate : check.expected;
+  return check.kind === "regression" ? check.expected : check.expected_on_candidate;
 }
 
 function allChecks(contract) {
-  return [
-    ...contract.checks.targeted.map((check) => ({ ...check, kind: "targeted" })),
-    ...contract.checks.regression.map((check) => ({ ...check, kind: "regression" }))
-  ];
+  const checks = contract.checks.targeted.map((check) => ({ ...check, kind: "targeted" }));
+  if (contract.schema_version === "averray.verification-contract/v1.1" && contract.checks.hidden) {
+    checks.push({ ...contract.checks.hidden, kind: "hidden" });
+  }
+  checks.push(...contract.checks.regression.map((check) => ({ ...check, kind: "regression" })));
+  return checks;
 }
 
 function resourcesFor(contract) {
@@ -56,7 +64,8 @@ function resourcesFor(contract) {
     cpuLimit: contract.resources?.cpu_limit ?? 2,
     memoryMb: contract.resources?.memory_mb ?? 4096,
     processLimit: contract.resources?.process_limit ?? 512,
-    temporaryStorageMb: contract.resources?.writable_storage_mb ?? 1024,
+    temporaryStorageMb: contract.resources?.temporary_storage_mb ??
+      contract.resources?.writable_storage_mb ?? 1024,
     outputLimitBytes: contract.resources?.max_output_bytes ?? 10 * 1024 * 1024
   };
 }
@@ -125,11 +134,69 @@ async function runEnvironment({
   phase,
   repetition,
   image,
-  runContainer
+  runContainer,
+  artifacts
 }) {
   const checks = [];
   const inconclusives = [];
   const resources = resourcesFor(contract);
+  await prepareWorkspaceMountTargets(workspace, artifacts.mounts);
+  const readOnlyMounts = dockerReadOnlyMounts(artifacts.mounts);
+  let preparation = null;
+  const dependencyCache = contract.schema_version === "averray.verification-contract/v1.1"
+    ? contract.subject.materialization.dependency_cache
+    : null;
+  if (dependencyCache) {
+    try {
+      preparation = await runContainer({
+        image,
+        workspace,
+        command: commandToShell(dependencyCache.populate_command),
+        environment: {
+          AVERRAY_WITNESS_PHASE: `${phase}-materialization`,
+          AVERRAY_WITNESS_REPETITION: String(repetition)
+        },
+        networkMode: "none",
+        readOnlyMounts,
+        workingDirectory: dependencyCache.working_directory,
+        phase,
+        repetition,
+        checkId: "dependency-materialization",
+        ...resources
+      });
+    } catch (error) {
+      preparation = {
+        exitCode: null,
+        signal: null,
+        stdout: "",
+        stderr: "",
+        spawnError: error.message,
+        timedOut: false,
+        outputTruncated: false,
+        seconds: 0,
+        containerId: null,
+        networkMode: "none",
+        networkInterfaces: [],
+        networkAssertionPassed: false
+      };
+    }
+    const untrusted = untrustedResult(preparation, phase);
+    if (untrusted || preparation.exitCode !== 0) {
+      inconclusives.push(untrusted || {
+        attribution: phase === "candidate" ? "candidate" : "infrastructure",
+        reason: "dependency_cache_unavailable",
+        detail: `offline dependency materialization exited ${preparation.exitCode}`,
+        checkId: "dependency-materialization"
+      });
+      return {
+        workspaceId: `${phase}-${repetition}`,
+        containerIds: [preparation.containerId].filter(Boolean),
+        preparation,
+        checks,
+        inconclusives
+      };
+    }
+  }
   for (const check of allChecks(contract)) {
     const expected = expectedOutcome(check, phase);
     let result;
@@ -144,6 +211,8 @@ async function runEnvironment({
           AVERRAY_WITNESS_RANDOM_SEED: String(contract.reproducibility?.random_seed ?? 0)
         },
         networkMode: "none",
+        readOnlyMounts,
+        workingDirectory: check.working_directory || ".",
         phase,
         repetition,
         checkId: check.id,
@@ -192,7 +261,8 @@ async function runEnvironment({
   }
   return {
     workspaceId: `${phase}-${repetition}`,
-    containerIds: checks.map((check) => check.containerId).filter(Boolean),
+    containerIds: [preparation?.containerId, ...checks.map((check) => check.containerId)].filter(Boolean),
+    preparation,
     checks,
     inconclusives
   };
@@ -274,7 +344,7 @@ function newReport(contract, candidatePatch, mode) {
         memoryMb: "enforced",
         processLimit: "enforced",
         maxOutputBytes: "enforced",
-        writableStorageMb: "tmp-only; bind-mounted workspace quota unimplemented"
+        temporaryStorageMb: "enforced for /tmp; no workspace quota is declared"
       }
     },
     patch: null,
@@ -322,11 +392,11 @@ export async function executeVerificationContract(options, dependencies = {}) {
     const sourcePath = join(temporaryRoot, "source");
     let materialized;
     try {
-      materialized = await materialize({
-        repo: contract.subject.acquisition.repository,
-        commit: contract.subject.acquisition.base_commit,
+      materialized = await materializeContractSource({
+        contract,
         destination: sourcePath,
-        cwd: options.cwd || process.cwd()
+        cwd: options.cwd || process.cwd(),
+        materialize
       });
     } catch (error) {
       return conclude(report, started, VERDICTS.INCONCLUSIVE, {
@@ -339,6 +409,9 @@ export async function executeVerificationContract(options, dependencies = {}) {
       source: materialized.source,
       sourceType: materialized.sourceType,
       commit: materialized.commit,
+      sha256: materialized.sha256 || null,
+      bytes: materialized.bytes ?? null,
+      format: materialized.format || null,
       seconds: materialized.seconds
     };
 
@@ -419,18 +492,38 @@ export async function executeVerificationContract(options, dependencies = {}) {
         details: integrityFailure
       });
     }
-    if (contract.subject.materialization.status !== "HERMETIC") {
+    if (contract.schema_version === "averray.verification-contract/v1" &&
+        contract.subject.materialization.status !== "HERMETIC") {
       return conclude(report, started, VERDICTS.INCONCLUSIVE, {
         attribution: "infrastructure",
         reason: "dependency_cache_unavailable",
         details: "v1 names cache/input hashes but supplies no artifact locator; only HERMETIC execution is materializable"
       });
     }
-    if (contract.checks.hidden?.required === true) {
+    if (contract.schema_version === "averray.verification-contract/v1" &&
+        contract.checks.hidden?.required === true) {
       return conclude(report, started, VERDICTS.INCONCLUSIVE, {
         attribution: "infrastructure",
         reason: "hidden_bundle_unavailable",
         details: "v1 names the hidden bundle digest but supplies no artifact locator or command manifest"
+      });
+    }
+
+    let artifacts;
+    try {
+      artifacts = await prepareContractArtifacts(contract, temporaryRoot, {
+        cwd: options.cwd || process.cwd()
+      });
+      report.materialization.artifacts = {
+        hidden: artifacts.hidden,
+        dependencyCache: artifacts.dependencyCache,
+        frozenInputs: artifacts.frozenInputs
+      };
+    } catch (error) {
+      return conclude(report, started, VERDICTS.INCONCLUSIVE, {
+        attribution: "infrastructure",
+        reason: "artifact_unavailable",
+        details: error.message
       });
     }
 
@@ -458,7 +551,8 @@ export async function executeVerificationContract(options, dependencies = {}) {
         phase: "baseline",
         repetition,
         image: executionImage,
-        runContainer
+        runContainer,
+        artifacts
       }));
     }
     const baselineIssue = baselineProblem(report.baseline);
@@ -492,7 +586,8 @@ export async function executeVerificationContract(options, dependencies = {}) {
         phase: "candidate",
         repetition,
         image: executionImage,
-        runContainer
+        runContainer,
+        artifacts
       }));
     }
 

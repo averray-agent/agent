@@ -81,13 +81,13 @@ IDs for baseline and candidate repetitions. It confirms targeted checks fail on 
 then runs targeted checks before regressions on the candidate. Verdict precedence is
 `POLICY_VIOLATION > INCONCLUSIVE > FAIL > PASS`.
 
-Execution currently supports `HERMETIC` materializations. The v1 object records hashes
-for dependency caches, frozen inputs, source bundles, and hidden bundles, but provides
-no artifact locator or hidden command manifest. Required artifacts that cannot be
-acquired therefore fail closed as infrastructure-attributable `INCONCLUSIVE`; their
-digests are not silently treated as locators. `writable_storage_mb` limits `/tmp`, but
-Docker cannot apply that quota to the read-write bind-mounted candidate workspace; the
-result reports this limitation explicitly.
+Legacy v1 execution remains limited to `HERMETIC` materializations because its bare
+digests have no acquisition data. v1.1 artifacts carry SHA-256, byte length, locator,
+and format; source bundles, caches, frozen inputs, and supplied hidden tests are
+verified before use. Supplied tests and other frozen artifacts are nested read-only
+mounts in every baseline and candidate workspace. `temporary_storage_mb` limits the
+`/tmp` tmpfs. v1.1 deliberately declares no workspace quota because Docker cannot
+quota the read-write bind mount used for the candidate workspace.
 
 All seven declared integrity names execute. Structural cases are covered for removed
 JavaScript tests, added JavaScript/pytest skip markers, changed resolved runner files,
@@ -96,10 +96,11 @@ swallowing use named syntactic signatures; semantic variants hidden in arbitrary
 code remain explicitly listed as unimplemented in each result's `integritySupport`
 metadata rather than being presented as universal static analysis.
 
-## VerificationContract v1 freeze validation
+## VerificationContract v1/v1.1 freeze validation
 
-[`schema/verification-contract-v1.schema.json`](schema/verification-contract-v1.schema.json)
-describes `averray.verification-contract/v1`. The loader and validator live in
+The schema directory contains the immutable v1 schema and
+[`verification-contract-v1.1.schema.json`](schema/verification-contract-v1.1.schema.json).
+The loader and validator live in
 [`src/verification-contract.mjs`](src/verification-contract.mjs):
 
 - `loadVerificationContract(path)` reads, normalizes, and validates a JSON file.
@@ -108,9 +109,12 @@ describes `averray.verification-contract/v1`. The loader and validator live in
   validation issues without throwing.
 - `assertValidVerificationContract(value)` returns the normalized contract or throws
   `VerificationContractValidationError`.
+- `validateVerificationContractAtFreeze(value)` additionally retrieves artifacts and
+  executes every targeted/supplied differential on base.
 
-Freeze validation is side-effect free. It does not execute checks, calculate a contract
-digest, write receipts, store contracts, or implement replay.
+Static validation is side-effect free. Complete v1.1 freeze validation executes the
+base differential in the Docker sandbox. Neither path calculates a contract digest,
+writes receipts, stores contracts, or implements replay.
 
 Rule 5 resolves npm, pnpm, and Yarn package scripts to `package.json` and explicit
 Node/Python/shell repository scripts to their path.
@@ -125,6 +129,7 @@ contract with one field corrected being accepted (`GREEN`):
 
 ```sh
 npm --prefix witness run contract:drills
+npm --prefix witness run v1.1:drills
 ```
 
 ## Phase-1 dependency paths
@@ -159,11 +164,13 @@ requires the mutation anchor to occur exactly once, confirms the replacement was
 applied, records the expected `RED`, then checks the attack and its corrected patch
 against the real detector.
 
-The adversarial corpus is pinned to
+The 15-case adversarial corpus is pinned to
 `depre-dev/averray-send-test@42571061ca9b6da8c6aca908f1ee1df1dab4e10a`.
 It runs both the real executor and a deliberately naive checks-only mode and emits an
 expected-versus-actual confusion matrix, false passes, false fails, inconclusive rate,
 attribution accuracy, and the distinct baseline/candidate container IDs.
+The matrix also names six known-undetectable classes that are not represented; its
+zero-false-pass claim is explicitly limited to represented detectable classes.
 
 The drills compare a deliberately static inference with actual sandbox execution.
 They cover a genuine network dependency, a missing toolchain, a lockfile-plus-test
