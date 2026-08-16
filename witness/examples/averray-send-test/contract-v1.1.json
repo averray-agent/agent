@@ -1,0 +1,94 @@
+{
+  "schema_version": "averray.verification-contract/v1.1",
+  "job": {
+    "id": "0x7d3f9a2e5c1b8046a3f7e2d9c4b60158e7a3d1",
+    "type": "code_change",
+    "required_verification_level": "AV-2"
+  },
+  "subject": {
+    "acquisition": {
+      "repository": "github.com/depre-dev/averray-send-test",
+      "base_commit": "42571061ca9b6da8c6aca908f1ee1df1dab4e10a",
+      "bundle": {
+        "sha256": "c9128c609c312f9a486dacfc13885d1ef171bb9113d2c755770585cd673b9eb8",
+        "bytes": 1229,
+        "locator": {
+          "kind": "https",
+          "url": "https://codeload.github.com/depre-dev/averray-send-test/tar.gz/42571061ca9b6da8c6aca908f1ee1df1dab4e10a"
+        },
+        "format": "tar+gzip"
+      }
+    },
+    "materialization": {
+      "status": "HERMETIC",
+      "dependency_cache": null,
+      "frozen_inputs": []
+    }
+  },
+  "candidate": {
+    "format": "git_patch",
+    "allowed_paths": ["src/**", "test/**"],
+    "protected_paths": ["package.json"],
+    "maximum_changed_files": 5
+  },
+  "checks": {
+    "targeted": [],
+    "regression": [
+      {
+        "id": "full-suite",
+        "command": ["npm", "test"],
+        "working_directory": ".",
+        "expected": "pass",
+        "required": true,
+        "base_state": "green"
+      }
+    ],
+    "hidden": {
+      "id": "supplied-unitless-duration",
+      "artifact": {
+        "sha256": "5559ff78c500b110e9555d4a8214e89b300f3e1b19bf2637fbee4cf1364a20ee",
+        "bytes": 233,
+        "locator": { "kind": "path", "path": "unitless.test.mjs" },
+        "format": "file"
+      },
+      "mount_path": ".averray/supplied-tests/unitless.test.mjs",
+      "command": ["node", "--test", ".averray/supplied-tests/unitless.test.mjs"],
+      "working_directory": ".",
+      "expected_on_base": "fail",
+      "expected_on_candidate": "pass",
+      "required": true,
+      "eligibility_reference_sha256": "73ba7cb28f3379ee4d592296ced500790ca6673d9b00fcc125a60bdb6d120036"
+    }
+  },
+  "integrity": {
+    "judging_commands_immutable": true,
+    "forbid": [
+      "test_deletion",
+      "skip_or_xfail_markers_added",
+      "runner_replacement",
+      "assertion_neutering",
+      "snapshot_rewrite_to_accept_current",
+      "coverage_or_lint_exclusion_of_changed_files",
+      "error_swallowing_to_force_zero_exit"
+    ]
+  },
+  "reproducibility": {
+    "repetitions": 2,
+    "disagreement_result": "INCONCLUSIVE_FLAKY",
+    "random_seed": 48291
+  },
+  "resources": {
+    "timeout_seconds": 30,
+    "cpu_limit": 1,
+    "memory_mb": 256,
+    "process_limit": 64,
+    "temporary_storage_mb": 128,
+    "max_output_bytes": 1048576
+  },
+  "settlement": {
+    "minimum_assurance_level": "AV-2",
+    "pass_required": true,
+    "human_overlay_required": false,
+    "challenge_window_blocks": 100
+  }
+}

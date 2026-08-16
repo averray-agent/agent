@@ -1,294 +1,249 @@
-# VerificationContract v1
+# VerificationContract v1.1
 
-Status: **draft.** Written 2026-08-13, after Phase 1 (#1125) measured the corpus.
-Companion to `AVERRAY_WITNESS_ARCHITECTURE.md`.
+Status: **draft.** v1.1 supersedes the v1 draft without changing already-frozen v1
+objects. The Witness loader continues to accept both discriminators; new contracts use
+`averray.verification-contract/v1.1` and the checked-in
+`witness/schema/verification-contract-v1.1.schema.json`.
 
-The contract is the object the Averray Witness executes. It is frozen before a job
-becomes claimable, identified by digest, bound into every receipt, and versioned
-rather than edited in place.
+The contract is frozen before a job becomes claimable. It defines the exact source,
+inputs, commands, sandbox limits, and acceptance differential that the Witness can
+prove. Contract digesting, receipts, signing, replay, storage, reputation, settlement
+execution, `worker/`, and the money rail remain out of scope.
 
-## Why this shape — the measurement that drove it
+## Why v1.1 exists
 
-Phase 1 ran the materialization preflight over ten real repositories:
+Phase 2 executed the v1 worked example and found that its targeted command exited zero
+on the unchanged base. The pinned repository contains no test for the unitless-duration
+bug, so `--test-name-pattern unitless` selects nothing and Node reports success. This is
+not an unusual edge case: bugs commonly survive because no existing test catches them.
 
-| Result | Count |
-|---|---|
-| `HERMETIC` | 1 |
-| `FROZEN_DEPENDENCIES` | 4 |
-| `REQUIRES_NETWORK` | 4 |
-| `UNMATERIALIZABLE` | 1 |
+A useful bug-fix contract therefore cannot be limited to tests already in the source
+repository. v1.1 makes a contract-supplied differential check first class through
+`checks.hidden`:
 
-Five are materializable. **Three of those five already fail on their base revision.**
-So of ten real repositories, two are both materializable and base-green — and one of
-those is a fixture seeded for the purpose.
+- its bytes, length, locator, and format are frozen;
+- the Witness verifies the bytes before execution;
+- it is mounted read-only at the same path in every baseline and candidate workspace;
+- its command and working directory are part of the contract;
+- it must fail on base and is expected to pass on the candidate;
+- a patch touching its mount path is a named `POLICY_VIOLATION`; and
+- freeze validation executes it on the base. `expected_on_base: fail` is a claim until
+  that observation exists.
 
-Two consequences, and they are the reason v1 does not look like the obvious design:
+The v1 worked commit was also invented valid-shaped hex. The real, verified revision is
+`42571061ca9b6da8c6aca908f1ee1df1dab4e10a`.
 
-**A green full suite cannot be the primary acceptance criterion.** Most real suites are
-already red. A contract asserting "the suite passes" returns `FAIL` for reasons the
-candidate never touched.
+## Artifact references
 
-**The targeted differential check is the default, not the upgrade.** A check that fails
-on base and passes on candidate is meaningful *even when the surrounding suite is red* —
-which is the normal state of real repositories. AV-2 is therefore the floor for any
-contract that gates settlement, not a premium tier.
+Every digest-bearing artifact has one shape:
 
-## Structure
+```yaml
+sha256: c9128c609c312f9a486dacfc13885d1ef171bb9113d2c755770585cd673b9eb8
+bytes: 1229
+locator:
+  kind: https                    # https | path
+  url: https://example.test/source.tar.gz
+format: tar+gzip                 # file | tar | tar+gzip
+```
 
-### `subject` — acquisition and materialization are separate
+A `path` locator is relative to the contract file and may not be absolute or traverse
+upward. An `https` locator must be an absolute HTTPS URL. The Witness fetches the bytes,
+then verifies both `bytes` and the lowercase 64-hex SHA-256 before using them. Redirects
+do not relax the HTTPS requirement.
 
-Phase 1 found the architecture conflated these. Fetching source needs network and
-happens on the host; materializing a runnable offline environment is a different step
-with a different failure mode, and a job can succeed at the first and fail the second.
+`file`, `tar`, and `tar+gzip` are the only declared formats because they are the formats
+the executor implements. Archive extraction accepts regular files, directories, and
+global PAX metadata. Links, devices, per-entry PAX path overrides, absolute paths, and
+upward traversal are rejected.
+
+Artifact references replace every v1 bare digest:
 
 ```yaml
 subject:
   acquisition:
     repository: github.com/acme/widgets
     base_commit: 4a91c0e8d2f1b3c7a5e9d0f2b4c6a8e1d3f5b7c9
-    bundle_sha256: "b7e41c92a6d038f5…"   # 64-hex, the fetched source
-  materialization:
-    status: FROZEN_DEPENDENCIES   # HERMETIC | FROZEN_DEPENDENCIES | MOCKED_EXTERNAL_SYSTEM
-    dependency_cache:
+    bundle:
       sha256: "..."
-      bytes: 263378946
-      populate_command: ["npm", "ci", "--offline"]
-    frozen_inputs: []             # REQUIRED and non-empty when status is MOCKED_EXTERNAL_SYSTEM
+      bytes: 1234
+      locator: { kind: https, url: "https://example.test/source.tar.gz" }
+      format: tar+gzip
+  materialization:
+    status: FROZEN_DEPENDENCIES
+    dependency_cache:
+      artifact:
+        sha256: "..."
+        bytes: 263378946
+        locator: { kind: https, url: "https://example.test/npm-cache.tar" }
+        format: tar
+      mount_path: .averray/dependency-cache
+      populate_command: ["npm", "ci", "--offline", "--cache", ".averray/dependency-cache"]
+      working_directory: .
+    frozen_inputs:
+      - path: fixtures/api.json
+        artifact:
+          sha256: "..."
+          bytes: 719
+          locator: { kind: path, path: "artifacts/api.json" }
+          format: file
 ```
 
-`REQUIRES_NETWORK` and `UNMATERIALIZABLE` are not valid contract states. A job in either
-condition cannot be verified by the Witness and must route to another verifier class or
-be rejected at preflight.
+The dependency cache and frozen inputs are mounted read-only into every clean attempt.
+The dependency `populate_command` executes offline before checks. `REQUIRES_NETWORK`
+and `UNMATERIALIZABLE` remain invalid contract states.
 
-`MOCKED_EXTERNAL_SYSTEM` requires `frozen_inputs` to be declared and hashed. Without
-that, "mocked" is an unfalsifiable claim — the second Phase-1 correction.
+## Checks and working directories
 
-### `candidate` — protected paths are load-bearing
-
-```yaml
-candidate:
-  format: git_patch
-  allowed_paths: ["src/**", "test/**"]
-  protected_paths:
-    - "package.json"          # the file defining the judging command
-    - ".github/**"
-    - "averray/**"
-    - "Dockerfile"
-  maximum_changed_files: 20
-```
-
-`protected_paths` is what makes "can the candidate modify the command that judges it"
-answerable. Preflight reports candidate-modifiability; this field is the policy that
-acts on it. A contract whose judging command lives in an unprotected path is invalid.
-
-### `checks` — targeted first, suite optional
+Every command has an explicit repository-relative `working_directory`; `.` means the
+repository root. This removes the v1 monorepo ambiguity and makes command provenance
+relative to the directory that actually runs it.
 
 ```yaml
 checks:
-  targeted:                     # PRIMARY. At least one required.
-    - id: empty-input-regression
-      command: ["npm", "test", "--", "--test-name-pattern", "unitless"]
-      expected_on_base: fail    # must genuinely fail before the change
-      expected_on_candidate: pass
-      required: true
-
-  regression:                   # OPTIONAL. Default required: false.
-    - id: full-suite
+  targeted: []
+  regression:
+    - id: package-suite
       command: ["npm", "test"]
+      working_directory: packages/widget
       expected: pass
-      required: false           # true only where the base suite is green
-      base_state: red           # recorded at preflight, not assumed
-
+      required: true
+      base_state: green
   hidden:
-    bundle_sha256: "3f1a…"                # 64-hex
-    required: false                       # DEFAULTS false; rule 7 tests this field
-    eligibility_reference_sha256: "9c72…" # required only when required: true
+    id: supplied-unitless-duration
+    artifact:
+      sha256: "5559ff78c500b110e9555d4a8214e89b300f3e1b19bf2637fbee4cf1364a20ee"
+      bytes: 233
+      locator: { kind: path, path: "unitless.test.mjs" }
+      format: file
+    mount_path: .averray/supplied-tests/unitless.test.mjs
+    command: ["node", "--test", ".averray/supplied-tests/unitless.test.mjs"]
+    working_directory: .
+    expected_on_base: fail
+    expected_on_candidate: pass
+    required: true
+    eligibility_reference_sha256: "73ba7cb28f3379ee4d592296ced500790ca6673d9b00fcc125a60bdb6d120036"
 ```
 
-`expected_on_base: fail` is enforced. If the targeted check already passes on base, the
-contract is invalid — there is nothing for the candidate to demonstrate, and a `PASS`
-would prove nothing.
+The hidden command manifest must name its mount path or a descendant. A required hidden
+check still needs a known-good eligibility reference. In the worked instance that
+reference is the SHA-256 of the exact known-good patch bytes; it is evidence that the
+supplied check passes against a solution, while freeze evidence separately proves the
+check fails on base.
 
-`base_state` is recorded from preflight rather than assumed, so a contract cannot
-silently require a green suite against a repository whose suite is red.
+At least one required differential is mandatory. It can be an ordinary `targeted`
+check or the contract-supplied `hidden` check. Regressions do not satisfy this rule.
 
-**Hidden-check eligibility.** A hidden check is an authored artifact and can simply be
-wrong, producing a confident false `FAIL` — the most expensive failure mode. A hidden
-bundle is only eligible once it has passed against a known-good reference solution,
-whose digest is recorded as `eligibility_reference_sha256`. An unvalidated hidden bundle
-may be carried but must not be `required`.
+## Candidate protection and command provenance
 
-### Command provenance — rule 5 fails closed
+`candidate.protected_paths` remains load-bearing. Package commands resolve relative to
+their working directory: `npm test` in `packages/widget` is defined by
+`packages/widget/package.json`, not the root manifest.
 
-Rule 5 requires the file defining a judging command to be listed in
-`protected_paths`. That presumes the defining file can be *determined*, and for many
-commands it cannot. The implementation resolves:
+The resolver proves these families:
 
-| Resolves | Does not resolve |
+| Resolves | Fails closed |
 |---|---|
-| `npm` / `pnpm` / Yarn scripts | `make` targets — may select GNUmakefile, makefile, Makefile, or includes |
-| explicit repository scripts | `cargo`, `go`, Ruby, pytest/module runners |
-| direct `node` commands | `sh -c` shell strings, `npx`, `bun`, workspace/relocation forms |
+| npm, pnpm, and simple Yarn scripts | npm/pnpm exec, x, dlx and Yarn workspace/relocation forms |
+| explicit Node, Python, and shell script paths | Cargo, Go, Ruby, pytest/module runners without an explicit script path |
+| direct Node `--test` and eval commands | Make targets, shell command strings, npx, bun, and unknown command families |
 
-**Unresolvable means rejected, not permitted.** A contract whose judging command cannot
-be traced to a protectable file is invalid at freeze time. An unprovable protection is
-not a protection — the contract would otherwise claim a guarantee it cannot enforce.
+When the defining file cannot be proven, the contract is rejected. A direct command
+has no repository definition file, but any contract-supplied test file it executes is
+separately protected by the read-only nested mount and candidate-path policy.
 
-This is a real constraint on which repositories can be verified, not a temporary gap.
-Extending the resolver widens coverage; it never changes the fail-closed default.
-
-### `integrity` — the anti-gaming surface
+## Resources
 
 ```yaml
-integrity:
-  judging_commands_immutable: true
-  forbid:
-    - test_deletion
-    - skip_or_xfail_markers_added
-    - runner_replacement
-    - assertion_neutering
-    - snapshot_rewrite_to_accept_current
-    - coverage_or_lint_exclusion_of_changed_files
-    - error_swallowing_to_force_zero_exit
-```
-
-Each entry is a detection the Witness must perform and report, not advice. A violation
-yields `POLICY_VIOLATION`, which is a distinct verdict from `FAIL` — the candidate did
-not merely fail to satisfy the contract, it attacked the mechanism deciding.
-
-### `inconclusive_policy` — attribution, not just tolerance
-
-`INCONCLUSIVE` must not penalise a worker. That is correct and it creates an exploit: a
-worker facing `FAIL` is better off inducing an inconclusive result. The contract
-therefore requires attribution.
-
-```yaml
-inconclusive_policy:
-  infrastructure_attributable:   # never counted against the worker, ever
-    - host_failure
-    - image_unavailable
-    - platform_timeout
-    - dependency_cache_unavailable
-  candidate_attributable:        # no penalty, but a counted signal
-    - candidate_introduced_flakiness
-    - candidate_exceeded_resource_limit
-    - candidate_caused_nondeterminism_across_repetitions
-  repeated_candidate_attributable:
-    window: 10
-    threshold: 3
-    action: escalate_to_human    # never automatic slashing
-```
-
-Repeated candidate-attributable inconclusives from one worker are evidence in
-themselves. The action is escalation, never automatic punishment — a false accusation
-here costs more than a missed one.
-
-### `reproducibility`, `resources`, `settlement`
-
-```yaml
-reproducibility:
-  repetitions: 2
-  disagreement_result: INCONCLUSIVE_FLAKY
-  random_seed: 48291
-
 resources:
   timeout_seconds: 900
   cpu_limit: 2
   memory_mb: 4096
   process_limit: 256
-  writable_storage_mb: 2048
+  temporary_storage_mb: 2048
   max_output_bytes: 10485760
-
-settlement:
-  minimum_assurance_level: AV-2
-  pass_required: true
-  human_overlay_required: false
-  challenge_window_blocks: 100
 ```
 
-## Worked instance
+v1's `writable_storage_mb` is removed. The executor uses a read-write host bind mount
+for the candidate workspace, and Docker cannot apply that quota to the bind mount.
+v1.1 declares only `temporary_storage_mb`, which is enforced on the container's `/tmp`
+tmpfs. The workspace has no contract-level storage quota; host capacity is operational
+infrastructure, not a contract guarantee.
 
-Against `depre-dev/averray-send-test` — the one corpus repo that is both `HERMETIC` and
-base-green, and therefore the only one where a full-suite requirement is honest:
+## The eight freeze rejection rules
+
+A contract is rejected with the named rule when:
+
+1. `materialization.status` is `REQUIRES_NETWORK` or `UNMATERIALIZABLE`.
+2. `MOCKED_EXTERNAL_SYSTEM` has no `frozen_inputs`.
+3. neither `checks.targeted` nor the contract-supplied hidden check has a required
+   differential.
+4. a targeted or supplied check declares base pass, or the Witness executes it at
+   freeze and observes base pass.
+5. a judging command definition cannot be resolved or its defining file is not in
+   `protected_paths`.
+6. a required regression declares `base_state: red`.
+7. a required hidden check lacks `eligibility_reference_sha256`.
+8. `settlement.pass_required` is true below `AV-2`.
+
+Static validation is necessary but not freeze-complete. Call
+`validateVerificationContractAtFreeze` (or `witness/bin/freeze-contract.mjs`) to acquire
+the pinned artifacts and obtain the base-failure evidence required by rule 4.
+
+## Corrected worked instance
+
+The complete executable instance is checked in at
+`witness/examples/averray-send-test/contract-v1.1.json`; its supplied test is adjacent.
+The material facts are:
 
 ```yaml
-schema_version: averray.verification-contract/v1
-job:
-  id: "0x7d3f9a2e5c1b8046a3f7e2d9c4b60158e7a3d1"
-  type: code_change
-  required_verification_level: AV-2
+schema_version: averray.verification-contract/v1.1
 subject:
   acquisition:
     repository: github.com/depre-dev/averray-send-test
-    base_commit: "4257106b9e3f2a8d15c74e0b6a93df82c105e7d4"
-    bundle_sha256: "b7e41c92a6d038f5142c9e7b30a586df41e2c9037bd85a1f6e04c2793adb85f1"
-  materialization:
-    status: HERMETIC
-    dependency_cache: null
-    frozen_inputs: []
-candidate:
-  format: git_patch
-  allowed_paths: ["src/**", "test/**"]
-  protected_paths: ["package.json"]
-  maximum_changed_files: 5
+    base_commit: "42571061ca9b6da8c6aca908f1ee1df1dab4e10a"
+    bundle:
+      sha256: "c9128c609c312f9a486dacfc13885d1ef171bb9113d2c755770585cd673b9eb8"
+      bytes: 1229
+      locator:
+        kind: https
+        url: https://codeload.github.com/depre-dev/averray-send-test/tar.gz/42571061ca9b6da8c6aca908f1ee1df1dab4e10a
+      format: tar+gzip
 checks:
-  targeted:
-    - id: unitless-duration
-      command: ["node", "--test", "--test-name-pattern", "unitless"]
-      expected_on_base: fail
-      expected_on_candidate: pass
-      required: true
-  regression:
-    - id: full-suite
-      command: ["npm", "test"]
-      expected: pass
-      required: true            # honest here: this repo's base suite IS green
-      base_state: green
-settlement:
-  minimum_assurance_level: AV-2
-  pass_required: true
+  targeted: []
+  hidden:
+    id: supplied-unitless-duration
+    artifact:
+      sha256: "5559ff78c500b110e9555d4a8214e89b300f3e1b19bf2637fbee4cf1364a20ee"
+      bytes: 233
+      locator: { kind: path, path: "unitless.test.mjs" }
+      format: file
+    mount_path: .averray/supplied-tests/unitless.test.mjs
+    command: ["node", "--test", ".averray/supplied-tests/unitless.test.mjs"]
+    working_directory: .
+    expected_on_base: fail
+    expected_on_candidate: pass
+    required: true
 ```
 
-Note `package.json` is protected: it defines `npm test`, so leaving it writable would
-let the candidate rewrite the command judging it.
+Observed against the exact archive: the supplied test exits 1 on base; the unchanged
+suite exits 0. Against the known-good patch, the supplied test and full suite exit 0 in
+both candidate repetitions and the contract verdict is `PASS`.
 
-## Invalid contracts
+## Confusion-matrix qualification
 
-A contract is rejected at freeze time if any of these hold. These are validation rules,
-not guidance:
+The adversarial corpus now includes 15 cases, including the previously unit-only
+`snapshot_rewrite_to_accept_current` detector. Its matrix carries
+`knownUndetectableNotRepresented` explicitly. There are six such semantic/framework
+classes. Therefore the supported claim is **zero false passes across represented,
+detectable classes**, not an unqualified zero-false-pass claim.
 
-- `materialization.status` is `REQUIRES_NETWORK` or `UNMATERIALIZABLE`
-- `status` is `MOCKED_EXTERNAL_SYSTEM` with empty `frozen_inputs`
-- no `targeted` check is `required: true`
-- a targeted check declares `expected_on_base: pass`
-- a judging command is defined in a file that is not in `protected_paths`
-- a `regression` check is `required: true` while its `base_state` is `red`
-- a hidden bundle is `required: true` without `eligibility_reference_sha256`
-- `settlement.minimum_assurance_level` is below `AV-2` while `pass_required: true`
+## Still open
 
-## Implementation status
-
-Freeze validation is implemented in `witness/src/verification-contract.mjs` and all
-eight rejection rules are enforced with named codes (`VCV1_RULE_n_*`). What is **not**
-implemented, and is therefore not yet a guarantee:
-
-- **Strict digest validation.** Digest fields are validated as strings, not as 64-hex.
-  A malformed digest passes freeze today.
-- **Contract execution.** Nothing runs a contract yet; this object is validated, not
-  applied.
-- **The `integrity` detections.** Every entry in that list is a requirement on the
-  Witness, and none is built. A contract may declare them; nothing enforces them yet.
-
-Contracts frozen before those land carry weaker guarantees than they appear to. Do not
-cite the `integrity` list as a capability until Phase 2 makes it one.
-
-## Open
-
-- **Digest algorithm over the contract.** Must be canonical and stable across
-  serialisation; the platform already has `hashCanonicalContent`, which is the obvious
-  candidate but has not been evaluated for this purpose.
-- **Contract versioning on dispute.** A replay must execute the contract version the
-  original receipt names, not the current one. Storage and lookup are unspecified.
-- **Who authors targeted checks.** The verifier-planner proposes; the creator freezes.
-  Whether a poster can be *required* to supply a targeted check, or whether the planner
-  may author one unaided, is a product decision and is not settled here.
+- The digest algorithm over the contract object itself remains open. v1.1 does not
+  select `hashCanonicalContent` or any alternative.
+- A generic tar artifact proves exact source bytes, but it does not cryptographically
+  prove that the human-readable `base_commit` label is the commit that produced those
+  bytes. The worked codeload URL embeds the commit and the archive digest pins the
+  result; a future source format should carry a verifiable commit/tree manifest.
+- Static integrity detection remains scoped. Six known semantic or framework-specific
+  attack classes are deliberately outside the current corpus and are reported as such.

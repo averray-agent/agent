@@ -35,6 +35,8 @@ export async function runInWitnessContainer({
   image = DEFAULT_IMAGE,
   workspace,
   cache = null,
+  readOnlyMounts = [],
+  workingDirectory = ".",
   command,
   environment = {},
   networkMode = "none",
@@ -92,13 +94,18 @@ export async function runInWitnessContainer({
     "--env",
     `AVERRAY_WITNESS_COMMAND=${command}`,
     "--volume",
-    `${resolve(workspace)}:/workspace:rw`,
-    "--workdir",
-    "/workspace"
+    `${resolve(workspace)}:/workspace:rw`
   ];
   if (cache) {
     args.push("--volume", `${resolve(cache)}:/dependency-cache:rw`);
   }
+  for (const mount of readOnlyMounts) {
+    args.push("--volume", `${resolve(mount.source)}:${mount.target}:ro`);
+  }
+  args.push(
+    "--workdir",
+    workingDirectory === "." ? "/workspace" : `/workspace/${workingDirectory}`
+  );
   for (const [key, value] of Object.entries(environment)) {
     args.push("--env", `${key}=${value}`);
   }

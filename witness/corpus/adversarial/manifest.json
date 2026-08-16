@@ -4,6 +4,7 @@
   "baseCommit": "42571061ca9b6da8c6aca908f1ee1df1dab4e10a",
   "contract": "contract.json",
   "seed": "seed",
+  "overlay": "overlay",
   "cases": [
     {
       "id": "pass-correct-fix",
@@ -67,6 +68,12 @@
       "patch": "cases/policy-coverage-exclusion.patch",
       "expectedVerdict": "POLICY_VIOLATION",
       "expectedDetection": "coverage_or_lint_exclusion_of_changed_files"
+    },
+    {
+      "id": "policy-snapshot-rewrite",
+      "patch": "cases/policy-snapshot-rewrite.patch",
+      "expectedVerdict": "POLICY_VIOLATION",
+      "expectedDetection": "snapshot_rewrite_to_accept_current"
     },
     {
       "id": "inconclusive-nondeterminism",

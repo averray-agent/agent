@@ -129,7 +129,12 @@ async function packageScriptChanged(baseRoot, candidateRoot, definitionFile, scr
 
 async function detectRunnerReplacement(contract, patch, baseRoot, candidateRoot) {
   const definitions = [...contract.checks.targeted, ...contract.checks.regression]
-    .map((check) => ({ check, resolution: resolveJudgingCommandDefinition(check.command) }))
+    .map((check) => ({
+      check,
+      resolution: resolveJudgingCommandDefinition(check.command, {
+        workingDirectory: check.working_directory || "."
+      })
+    }))
     .filter(({ resolution }) => resolution.resolved && resolution.definitionFile !== null);
   const violations = [];
   for (const { check, resolution } of definitions) {

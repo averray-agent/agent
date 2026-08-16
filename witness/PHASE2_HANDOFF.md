@@ -9,7 +9,7 @@
 - Baseline and candidate use clean copied workspaces and distinct container IDs for
   every repetition. CPU, memory, process, time, output, read-only-root, non-root,
   capability, privilege, and network controls are recorded.
-- The deterministic adversarial corpus contains 14 cases against the exact tracked
+- The deterministic adversarial corpus now contains 15 cases against the exact tracked
   snapshot of `depre-dev/averray-send-test` commit
   `42571061ca9b6da8c6aca908f1ee1df1dab4e10a`.
 
@@ -26,16 +26,19 @@ POLICY_VIOLATION` order.
 | Real / PASS | 1 | 0 | 0 | 0 |
 | Real / FAIL | 0 | 2 | 0 | 0 |
 | Real / INCONCLUSIVE | 0 | 0 | 3 | 0 |
-| Real / POLICY_VIOLATION | 0 | 0 | 0 | 8 |
+| Real / POLICY_VIOLATION | 0 | 0 | 0 | 9 |
 | Naive / PASS | 1 | 0 | 0 | 0 |
 | Naive / FAIL | 0 | 2 | 0 | 0 |
 | Naive / INCONCLUSIVE | 0 | 0 | 3 | 0 |
-| Naive / POLICY_VIOLATION | 7 | 1 | 0 | 0 |
+| Naive / POLICY_VIOLATION | 7 | 2 | 0 | 0 |
 
-- Real: 0 false passes, 0 false fails, 3/14 inconclusive (21.43%), attribution
-  accuracy 3/3 (100%), exact verdicts 14/14.
-- Naive: 7 false passes, 0 false fails, 3/14 inconclusive (21.43%), attribution
-  accuracy 3/3 (100%), exact verdicts 6/14.
+- Real: 0 false passes, 0 false fails, 3/15 inconclusive (20%), attribution
+  accuracy 3/3 (100%), exact verdicts 15/15.
+- Naive: 7 false passes, 0 false fails, 3/15 inconclusive (20%), attribution
+  accuracy 3/3 (100%), exact verdicts 6/15.
+- Qualification: those false-pass counts cover represented detectable classes only.
+  The emitted matrix names six known-undetectable semantic/framework classes that are
+  deliberately not represented.
 - Isolation drill: four unique baseline and four unique candidate container IDs for
   the correct-fix case, with no overlap.
 - Precedence drill: the test-deletion patch that still fails the targeted check is

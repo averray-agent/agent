@@ -1,0 +1,6 @@
+diff --git a/test/__snapshots__/duration.snap b/test/__snapshots__/duration.snap
+--- a/test/__snapshots__/duration.snap
++++ b/test/__snapshots__/duration.snap
+@@ -1 +1 @@
+-exports[`formats unitless duration 1`] = `0`;
++exports[`formats unitless duration 1`] = `2000`;

@@ -1,9 +1,15 @@
 import { readFile } from "node:fs/promises";
-import { normalize as normalizePath } from "node:path";
+import { dirname, normalize as normalizePath, resolve } from "node:path";
 
 import { CLASSIFICATIONS } from "./constants.mjs";
 
-export const VERIFICATION_CONTRACT_SCHEMA_VERSION = "averray.verification-contract/v1";
+export const VERIFICATION_CONTRACT_V1_SCHEMA_VERSION = "averray.verification-contract/v1";
+export const VERIFICATION_CONTRACT_SCHEMA_VERSION = "averray.verification-contract/v1.1";
+export const SUPPORTED_VERIFICATION_CONTRACT_SCHEMA_VERSIONS = Object.freeze([
+  VERIFICATION_CONTRACT_V1_SCHEMA_VERSION,
+  VERIFICATION_CONTRACT_SCHEMA_VERSION
+]);
+export const CONTRACT_SOURCE_DIRECTORY = Symbol("verificationContractSourceDirectory");
 
 export const REJECTION_RULES = Object.freeze({
   MATERIALIZATION_STATUS: Object.freeze({
@@ -16,11 +22,11 @@ export const REJECTION_RULES = Object.freeze({
   }),
   REQUIRED_TARGETED_CHECK: Object.freeze({
     code: "VCV1_RULE_3_REQUIRED_TARGETED_CHECK",
-    name: "rule 3: at least one targeted check must be required"
+    name: "rule 3: at least one differential check must be required"
   }),
   TARGETED_BASE_MUST_FAIL: Object.freeze({
     code: "VCV1_RULE_4_TARGETED_BASE_MUST_FAIL",
-    name: "rule 4: targeted checks must fail on base"
+    name: "rule 4: targeted and supplied checks must fail on base"
   }),
   JUDGING_COMMAND_PROTECTED: Object.freeze({
     code: "VCV1_RULE_5_JUDGING_COMMAND_PROTECTED",
@@ -44,6 +50,9 @@ const MATERIALIZATION_STATUSES = new Set(Object.values(CLASSIFICATIONS));
 const ASSURANCE_LEVEL = /^AV-(\d+)$/u;
 const COMMAND_INTERPRETERS = new Set(["node", "python", "python3", "sh", "bash"]);
 const SCRIPT_EXTENSION = /\.(?:c?js|mjs|py|sh)$/u;
+const SHA256 = /^[a-f0-9]{64}$/u;
+const GIT_COMMIT = /^[a-f0-9]{40}$/u;
+const ARTIFACT_FORMATS = ["file", "tar", "tar+gzip"];
 
 export class VerificationContractValidationError extends Error {
   constructor(issues, source = "verification contract") {
@@ -72,16 +81,24 @@ function isNonEmptyString(value) {
 
 function cloneJson(value) {
   if (value === undefined) return value;
-  return JSON.parse(JSON.stringify(value));
+  const clone = JSON.parse(JSON.stringify(value));
+  if (isRecord(clone) && isRecord(value) && value[CONTRACT_SOURCE_DIRECTORY]) {
+    Object.defineProperty(clone, CONTRACT_SOURCE_DIRECTORY, {
+      value: value[CONTRACT_SOURCE_DIRECTORY],
+      enumerable: false
+    });
+  }
+  return clone;
 }
 
 function normalizeRepositoryPath(value) {
   if (typeof value !== "string") return value;
   const trimmed = value.trim().replaceAll("\\", "/");
   if (trimmed.length === 0) return trimmed;
-  return normalizePath(trimmed)
+  const normalized = normalizePath(trimmed)
     .replaceAll("\\", "/")
     .replace(/^\.\//u, "");
+  return normalized === "" ? "." : normalized;
 }
 
 function normalizeCommand(value) {
@@ -89,11 +106,30 @@ function normalizeCommand(value) {
   return value.map((part) => typeof part === "string" ? part.trim() : part);
 }
 
+function normalizeArtifact(artifact) {
+  if (!isRecord(artifact)) return artifact;
+  const normalized = { ...artifact };
+  if (typeof normalized.sha256 === "string") normalized.sha256 = normalized.sha256.trim();
+  if (typeof normalized.format === "string") normalized.format = normalized.format.trim();
+  if (isRecord(normalized.locator)) {
+    normalized.locator = { ...normalized.locator };
+    if (normalized.locator.kind === "path") {
+      normalized.locator.path = normalizeRepositoryPath(normalized.locator.path);
+    } else if (typeof normalized.locator.url === "string") {
+      normalized.locator.url = normalized.locator.url.trim();
+    }
+  }
+  return normalized;
+}
+
 function normalizeCheck(check, defaultRequired) {
   if (!isRecord(check)) return check;
   return {
     ...check,
     command: normalizeCommand(check.command),
+    ...(check.working_directory === undefined
+      ? {}
+      : { working_directory: normalizeRepositoryPath(check.working_directory) }),
     required: check.required ?? defaultRequired
   };
 }
@@ -106,11 +142,36 @@ export function normalizeVerificationContract(input) {
   const contract = cloneJson(input);
   if (!isRecord(contract)) return contract;
 
+  if (contract.schema_version === VERIFICATION_CONTRACT_SCHEMA_VERSION &&
+      isRecord(contract.subject?.acquisition)) {
+    contract.subject.acquisition.bundle = normalizeArtifact(contract.subject.acquisition.bundle);
+  }
+
   if (isRecord(contract.subject?.materialization)) {
     contract.subject.materialization.frozen_inputs ??= [];
     if (Array.isArray(contract.subject.materialization.dependency_cache?.populate_command)) {
       contract.subject.materialization.dependency_cache.populate_command = normalizeCommand(
         contract.subject.materialization.dependency_cache.populate_command
+      );
+    }
+    if (contract.schema_version === VERIFICATION_CONTRACT_SCHEMA_VERSION &&
+        isRecord(contract.subject.materialization.dependency_cache)) {
+      contract.subject.materialization.dependency_cache.artifact = normalizeArtifact(
+        contract.subject.materialization.dependency_cache.artifact
+      );
+      contract.subject.materialization.dependency_cache.mount_path = normalizeRepositoryPath(
+        contract.subject.materialization.dependency_cache.mount_path
+      );
+      contract.subject.materialization.dependency_cache.working_directory = normalizeRepositoryPath(
+        contract.subject.materialization.dependency_cache.working_directory
+      );
+    }
+    if (contract.schema_version === VERIFICATION_CONTRACT_SCHEMA_VERSION &&
+        Array.isArray(contract.subject.materialization.frozen_inputs)) {
+      contract.subject.materialization.frozen_inputs = contract.subject.materialization.frozen_inputs.map((input) =>
+        isRecord(input)
+          ? { ...input, path: normalizeRepositoryPath(input.path), artifact: normalizeArtifact(input.artifact) }
+          : input
       );
     }
   }
@@ -129,6 +190,9 @@ export function normalizeVerificationContract(input) {
   if (isRecord(contract.checks)) {
     contract.checks.targeted ??= [];
     contract.checks.regression ??= [];
+    if (contract.schema_version === VERIFICATION_CONTRACT_SCHEMA_VERSION) {
+      contract.checks.hidden ??= null;
+    }
     if (Array.isArray(contract.checks.targeted)) {
       contract.checks.targeted = contract.checks.targeted.map((check) => normalizeCheck(check, false));
     }
@@ -136,7 +200,13 @@ export function normalizeVerificationContract(input) {
       contract.checks.regression = contract.checks.regression.map((check) => normalizeCheck(check, false));
     }
     if (isRecord(contract.checks.hidden)) {
-      contract.checks.hidden.required ??= false;
+      if (contract.schema_version === VERIFICATION_CONTRACT_SCHEMA_VERSION) {
+        contract.checks.hidden = normalizeCheck(contract.checks.hidden, false);
+        contract.checks.hidden.artifact = normalizeArtifact(contract.checks.hidden.artifact);
+        contract.checks.hidden.mount_path = normalizeRepositoryPath(contract.checks.hidden.mount_path);
+      } else {
+        contract.checks.hidden.required ??= false;
+      }
     }
   }
 
@@ -154,6 +224,15 @@ function requireRecord(issues, value, path) {
 function requireString(issues, value, path) {
   if (!isNonEmptyString(value)) {
     issues.push(issue("VCV1_SCHEMA_STRING", "schema", path, "must be a non-empty string"));
+    return false;
+  }
+  return true;
+}
+
+function requirePattern(issues, value, path, pattern, code, description) {
+  if (!requireString(issues, value, path)) return false;
+  if (!pattern.test(value)) {
+    issues.push(issue(code, "schema", path, `must be ${description}`));
     return false;
   }
   return true;
@@ -217,14 +296,75 @@ function requireRepositoryPathArray(issues, value, path) {
   return true;
 }
 
+function requireRepositoryPath(issues, value, path, { allowDot = true } = {}) {
+  if (!requireString(issues, value, path)) return false;
+  if ((!allowDot && value === ".") || value.startsWith("/") || /^[A-Za-z]:\//u.test(value) ||
+      value === ".." || value.startsWith("../")) {
+    issues.push(issue(
+      "VCV11_SCHEMA_REPOSITORY_PATH",
+      "schema",
+      path,
+      "must be relative to the repository root and must not traverse upward"
+    ));
+    return false;
+  }
+  return true;
+}
+
+function requireOnlyKeys(issues, value, path, allowed) {
+  if (!isRecord(value)) return;
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) {
+      issues.push(issue("VCV11_SCHEMA_ADDITIONAL_PROPERTY", "schema", `${path}.${key}`, "is not allowed in v1.1"));
+    }
+  }
+}
+
+function validateArtifactShape(issues, artifact, path, { formats = ARTIFACT_FORMATS } = {}) {
+  if (!requireRecord(issues, artifact, path)) return;
+  requireOnlyKeys(issues, artifact, path, ["sha256", "bytes", "locator", "format"]);
+  requirePattern(issues, artifact.sha256, `${path}.sha256`, SHA256, "VCV11_SCHEMA_SHA256", "64 lowercase hex characters");
+  requireInteger(issues, artifact.bytes, `${path}.bytes`, 1);
+  requireEnum(issues, artifact.format, `${path}.format`, formats);
+  if (!requireRecord(issues, artifact.locator, `${path}.locator`)) return;
+  if (artifact.locator.kind === "path") {
+    requireOnlyKeys(issues, artifact.locator, `${path}.locator`, ["kind", "path"]);
+    requireRepositoryPath(issues, artifact.locator.path, `${path}.locator.path`, { allowDot: false });
+  } else if (artifact.locator.kind === "https") {
+    requireOnlyKeys(issues, artifact.locator, `${path}.locator`, ["kind", "url"]);
+    if (requireString(issues, artifact.locator.url, `${path}.locator.url`)) {
+      try {
+        if (new URL(artifact.locator.url).protocol !== "https:") throw new Error("not HTTPS");
+      } catch {
+        issues.push(issue("VCV11_SCHEMA_HTTPS_LOCATOR", "schema", `${path}.locator.url`, "must be an absolute HTTPS URL"));
+      }
+    }
+  } else {
+    requireEnum(issues, artifact.locator.kind, `${path}.locator.kind`, ["path", "https"]);
+  }
+}
+
 function validateCommandShape(issues, command, path) {
   requireStringArray(issues, command, path, { nonEmpty: true });
 }
 
-function validateCheckShape(issues, check, path, kind) {
+function validateCheckShape(issues, check, path, kind, version = VERIFICATION_CONTRACT_V1_SCHEMA_VERSION) {
   if (!requireRecord(issues, check, path)) return;
+  if (version === VERIFICATION_CONTRACT_SCHEMA_VERSION) {
+    requireOnlyKeys(
+      issues,
+      check,
+      path,
+      kind === "targeted"
+        ? ["id", "command", "working_directory", "expected_on_base", "expected_on_candidate", "required"]
+        : ["id", "command", "working_directory", "expected", "required", "base_state"]
+    );
+  }
   requireString(issues, check.id, `${path}.id`);
   validateCommandShape(issues, check.command, `${path}.command`);
+  if (version === VERIFICATION_CONTRACT_SCHEMA_VERSION) {
+    requireRepositoryPath(issues, check.working_directory, `${path}.working_directory`);
+  }
   requireBoolean(issues, check.required, `${path}.required`);
   if (kind === "targeted") {
     requireEnum(issues, check.expected_on_base, `${path}.expected_on_base`, ["fail", "pass"]);
@@ -235,14 +375,22 @@ function validateCheckShape(issues, check, path, kind) {
   }
 }
 
-function validateOptionalSections(issues, contract) {
+function validateOptionalSections(issues, contract, version) {
   if (contract.integrity !== undefined && requireRecord(issues, contract.integrity, "integrity")) {
+    if (version === VERIFICATION_CONTRACT_SCHEMA_VERSION) {
+      requireOnlyKeys(issues, contract.integrity, "integrity", ["judging_commands_immutable", "forbid"]);
+    }
     requireBoolean(issues, contract.integrity.judging_commands_immutable, "integrity.judging_commands_immutable");
     requireStringArray(issues, contract.integrity.forbid, "integrity.forbid");
   }
 
   if (contract.inconclusive_policy !== undefined &&
       requireRecord(issues, contract.inconclusive_policy, "inconclusive_policy")) {
+    if (version === VERIFICATION_CONTRACT_SCHEMA_VERSION) {
+      requireOnlyKeys(issues, contract.inconclusive_policy, "inconclusive_policy", [
+        "infrastructure_attributable", "candidate_attributable", "repeated_candidate_attributable"
+      ]);
+    }
     requireStringArray(
       issues,
       contract.inconclusive_policy.infrastructure_attributable,
@@ -259,6 +407,11 @@ function validateOptionalSections(issues, contract) {
       "inconclusive_policy.repeated_candidate_attributable"
     )) {
       const repeated = contract.inconclusive_policy.repeated_candidate_attributable;
+      if (version === VERIFICATION_CONTRACT_SCHEMA_VERSION) {
+        requireOnlyKeys(issues, repeated, "inconclusive_policy.repeated_candidate_attributable", [
+          "window", "threshold", "action"
+        ]);
+      }
       requireInteger(issues, repeated.window, "inconclusive_policy.repeated_candidate_attributable.window", 1);
       requireInteger(issues, repeated.threshold, "inconclusive_policy.repeated_candidate_attributable.threshold", 1);
       requireString(issues, repeated.action, "inconclusive_policy.repeated_candidate_attributable.action");
@@ -267,73 +420,104 @@ function validateOptionalSections(issues, contract) {
 
   if (contract.reproducibility !== undefined &&
       requireRecord(issues, contract.reproducibility, "reproducibility")) {
+    if (version === VERIFICATION_CONTRACT_SCHEMA_VERSION) {
+      requireOnlyKeys(issues, contract.reproducibility, "reproducibility", [
+        "repetitions", "disagreement_result", "random_seed"
+      ]);
+    }
     requireInteger(issues, contract.reproducibility.repetitions, "reproducibility.repetitions", 1);
     requireString(issues, contract.reproducibility.disagreement_result, "reproducibility.disagreement_result");
     requireInteger(issues, contract.reproducibility.random_seed, "reproducibility.random_seed");
   }
 
   if (contract.resources !== undefined && requireRecord(issues, contract.resources, "resources")) {
-    for (const field of [
+    const fields = [
       "timeout_seconds",
       "cpu_limit",
       "memory_mb",
       "process_limit",
-      "writable_storage_mb",
+      version === VERIFICATION_CONTRACT_SCHEMA_VERSION ? "temporary_storage_mb" : "writable_storage_mb",
       "max_output_bytes"
-    ]) {
+    ];
+    if (version === VERIFICATION_CONTRACT_SCHEMA_VERSION) {
+      requireOnlyKeys(issues, contract.resources, "resources", fields);
+    }
+    for (const field of fields) {
       requireInteger(issues, contract.resources[field], `resources.${field}`, 1);
     }
   }
 }
 
-/**
- * Validate the v1 JSON shape without applying the eight freeze-time rules.
- * Exposed so the drill runner can prove the policy rules, not shape validation,
- * are what reject each fixture.
- */
+/** Validate the selected version's JSON shape without applying freeze rules. */
 export function validateVerificationContractShape(input) {
   const contract = normalizeVerificationContract(input);
   const issues = [];
   if (!requireRecord(issues, contract, "$")) return { valid: false, contract, issues };
+  const version = contract.schema_version;
+  const v11 = version === VERIFICATION_CONTRACT_SCHEMA_VERSION;
 
-  if (contract.schema_version !== VERIFICATION_CONTRACT_SCHEMA_VERSION) {
+  if (!SUPPORTED_VERIFICATION_CONTRACT_SCHEMA_VERSIONS.includes(version)) {
     issues.push(issue(
       "VCV1_SCHEMA_VERSION",
       "schema",
       "schema_version",
-      `must equal ${VERIFICATION_CONTRACT_SCHEMA_VERSION}`
+      `must be one of: ${SUPPORTED_VERIFICATION_CONTRACT_SCHEMA_VERSIONS.join(", ")}`
     ));
+  }
+  if (v11) {
+    requireOnlyKeys(issues, contract, "$", [
+      "schema_version", "job", "subject", "candidate", "checks", "integrity",
+      "inconclusive_policy", "reproducibility", "resources", "settlement"
+    ]);
   }
 
   if (requireRecord(issues, contract.job, "job")) {
+    if (v11) requireOnlyKeys(issues, contract.job, "job", ["id", "type", "required_verification_level"]);
     requireString(issues, contract.job.id, "job.id");
     requireString(issues, contract.job.type, "job.type");
     requireAssuranceLevel(issues, contract.job.required_verification_level, "job.required_verification_level");
   }
 
   if (requireRecord(issues, contract.subject, "subject")) {
+    if (v11) requireOnlyKeys(issues, contract.subject, "subject", ["acquisition", "materialization"]);
     if (requireRecord(issues, contract.subject.acquisition, "subject.acquisition")) {
-      requireString(issues, contract.subject.acquisition.repository, "subject.acquisition.repository");
-      requireString(issues, contract.subject.acquisition.base_commit, "subject.acquisition.base_commit");
-      requireString(issues, contract.subject.acquisition.bundle_sha256, "subject.acquisition.bundle_sha256");
+      const acquisition = contract.subject.acquisition;
+      if (v11) {
+        requireOnlyKeys(issues, acquisition, "subject.acquisition", ["repository", "base_commit", "bundle"]);
+        requireString(issues, acquisition.repository, "subject.acquisition.repository");
+        requirePattern(issues, acquisition.base_commit, "subject.acquisition.base_commit", GIT_COMMIT,
+          "VCV11_SCHEMA_GIT_COMMIT", "40 lowercase hex characters");
+        validateArtifactShape(issues, acquisition.bundle, "subject.acquisition.bundle", {
+          formats: ["tar", "tar+gzip"]
+        });
+      } else {
+        requireString(issues, acquisition.repository, "subject.acquisition.repository");
+        requireString(issues, acquisition.base_commit, "subject.acquisition.base_commit");
+        requireString(issues, acquisition.bundle_sha256, "subject.acquisition.bundle_sha256");
+      }
     }
     if (requireRecord(issues, contract.subject.materialization, "subject.materialization")) {
       const materialization = contract.subject.materialization;
-      requireEnum(
-        issues,
-        materialization.status,
-        "subject.materialization.status",
-        [...MATERIALIZATION_STATUSES]
-      );
+      if (v11) requireOnlyKeys(issues, materialization, "subject.materialization", [
+        "status", "dependency_cache", "frozen_inputs"
+      ]);
+      requireEnum(issues, materialization.status, "subject.materialization.status", [...MATERIALIZATION_STATUSES]);
       if (materialization.dependency_cache !== null &&
           requireRecord(issues, materialization.dependency_cache, "subject.materialization.dependency_cache")) {
-        requireString(issues, materialization.dependency_cache.sha256, "subject.materialization.dependency_cache.sha256");
-        requireInteger(issues, materialization.dependency_cache.bytes, "subject.materialization.dependency_cache.bytes");
-        validateCommandShape(
-          issues,
-          materialization.dependency_cache.populate_command,
-          "subject.materialization.dependency_cache.populate_command"
-        );
+        const cache = materialization.dependency_cache;
+        if (v11) {
+          requireOnlyKeys(issues, cache, "subject.materialization.dependency_cache", [
+            "artifact", "mount_path", "populate_command", "working_directory"
+          ]);
+          validateArtifactShape(issues, cache.artifact, "subject.materialization.dependency_cache.artifact");
+          requireRepositoryPath(issues, cache.mount_path, "subject.materialization.dependency_cache.mount_path", { allowDot: false });
+          validateCommandShape(issues, cache.populate_command, "subject.materialization.dependency_cache.populate_command");
+          requireRepositoryPath(issues, cache.working_directory, "subject.materialization.dependency_cache.working_directory");
+        } else {
+          requireString(issues, cache.sha256, "subject.materialization.dependency_cache.sha256");
+          requireInteger(issues, cache.bytes, "subject.materialization.dependency_cache.bytes");
+          validateCommandShape(issues, cache.populate_command, "subject.materialization.dependency_cache.populate_command");
+        }
       }
       if (!Array.isArray(materialization.frozen_inputs)) {
         issues.push(issue("VCV1_SCHEMA_ARRAY", "schema", "subject.materialization.frozen_inputs", "must be an array"));
@@ -341,14 +525,23 @@ export function validateVerificationContractShape(input) {
         materialization.frozen_inputs.forEach((input, index) => {
           const path = `subject.materialization.frozen_inputs[${index}]`;
           if (!requireRecord(issues, input, path)) return;
-          requireString(issues, input.path, `${path}.path`);
-          requireString(issues, input.sha256, `${path}.sha256`);
+          if (v11) {
+            requireOnlyKeys(issues, input, path, ["path", "artifact"]);
+            requireRepositoryPath(issues, input.path, `${path}.path`, { allowDot: false });
+            validateArtifactShape(issues, input.artifact, `${path}.artifact`);
+          } else {
+            requireString(issues, input.path, `${path}.path`);
+            requireString(issues, input.sha256, `${path}.sha256`);
+          }
         });
       }
     }
   }
 
   if (requireRecord(issues, contract.candidate, "candidate")) {
+    if (v11) requireOnlyKeys(issues, contract.candidate, "candidate", [
+      "format", "allowed_paths", "protected_paths", "maximum_changed_files"
+    ]);
     requireEnum(issues, contract.candidate.format, "candidate.format", ["git_patch"]);
     requireRepositoryPathArray(issues, contract.candidate.allowed_paths, "candidate.allowed_paths");
     requireRepositoryPathArray(issues, contract.candidate.protected_paths, "candidate.protected_paths");
@@ -356,35 +549,62 @@ export function validateVerificationContractShape(input) {
   }
 
   if (requireRecord(issues, contract.checks, "checks")) {
+    if (v11) requireOnlyKeys(issues, contract.checks, "checks", ["targeted", "regression", "hidden"]);
     if (!Array.isArray(contract.checks.targeted)) {
       issues.push(issue("VCV1_SCHEMA_ARRAY", "schema", "checks.targeted", "must be an array"));
     } else {
-      contract.checks.targeted.forEach((check, index) => {
-        validateCheckShape(issues, check, `checks.targeted[${index}]`, "targeted");
-      });
+      contract.checks.targeted.forEach((check, index) =>
+        validateCheckShape(issues, check, `checks.targeted[${index}]`, "targeted", version));
     }
     if (!Array.isArray(contract.checks.regression)) {
       issues.push(issue("VCV1_SCHEMA_ARRAY", "schema", "checks.regression", "must be an array"));
     } else {
-      contract.checks.regression.forEach((check, index) => {
-        validateCheckShape(issues, check, `checks.regression[${index}]`, "regression");
-      });
+      contract.checks.regression.forEach((check, index) =>
+        validateCheckShape(issues, check, `checks.regression[${index}]`, "regression", version));
     }
     if (contract.checks.hidden !== undefined && contract.checks.hidden !== null &&
         requireRecord(issues, contract.checks.hidden, "checks.hidden")) {
-      requireString(issues, contract.checks.hidden.bundle_sha256, "checks.hidden.bundle_sha256");
-      requireBoolean(issues, contract.checks.hidden.required, "checks.hidden.required");
-      if (contract.checks.hidden.eligibility_reference_sha256 !== undefined) {
-        requireString(
-          issues,
-          contract.checks.hidden.eligibility_reference_sha256,
-          "checks.hidden.eligibility_reference_sha256"
-        );
+      const hidden = contract.checks.hidden;
+      if (v11) {
+        requireOnlyKeys(issues, hidden, "checks.hidden", [
+          "id", "artifact", "mount_path", "command", "working_directory", "expected_on_base",
+          "expected_on_candidate", "required", "eligibility_reference_sha256"
+        ]);
+        requireString(issues, hidden.id, "checks.hidden.id");
+        validateArtifactShape(issues, hidden.artifact, "checks.hidden.artifact");
+        requireRepositoryPath(issues, hidden.mount_path, "checks.hidden.mount_path", { allowDot: false });
+        validateCommandShape(issues, hidden.command, "checks.hidden.command");
+        requireRepositoryPath(issues, hidden.working_directory, "checks.hidden.working_directory");
+        requireEnum(issues, hidden.expected_on_base, "checks.hidden.expected_on_base", ["fail", "pass"]);
+        requireEnum(issues, hidden.expected_on_candidate, "checks.hidden.expected_on_candidate", ["fail", "pass"]);
+        requireBoolean(issues, hidden.required, "checks.hidden.required");
+        if (hidden.eligibility_reference_sha256 !== undefined) {
+          requirePattern(issues, hidden.eligibility_reference_sha256, "checks.hidden.eligibility_reference_sha256",
+            SHA256, "VCV11_SCHEMA_SHA256", "64 lowercase hex characters");
+        }
+        if (Array.isArray(hidden.command) && isNonEmptyString(hidden.mount_path) &&
+            !hidden.command.some((part) => part === hidden.mount_path || part.startsWith(`${hidden.mount_path}/`))) {
+          issues.push(issue(
+            "VCV11_SCHEMA_HIDDEN_COMMAND_MANIFEST",
+            "schema",
+            "checks.hidden.command",
+            "must name the supplied artifact mount_path or a path below it"
+          ));
+        }
+      } else {
+        requireString(issues, hidden.bundle_sha256, "checks.hidden.bundle_sha256");
+        requireBoolean(issues, hidden.required, "checks.hidden.required");
+        if (hidden.eligibility_reference_sha256 !== undefined) {
+          requireString(issues, hidden.eligibility_reference_sha256, "checks.hidden.eligibility_reference_sha256");
+        }
       }
     }
   }
 
   if (requireRecord(issues, contract.settlement, "settlement")) {
+    if (v11) requireOnlyKeys(issues, contract.settlement, "settlement", [
+      "minimum_assurance_level", "pass_required", "human_overlay_required", "challenge_window_blocks"
+    ]);
     requireAssuranceLevel(issues, contract.settlement.minimum_assurance_level, "settlement.minimum_assurance_level");
     requireBoolean(issues, contract.settlement.pass_required, "settlement.pass_required");
     if (contract.settlement.human_overlay_required !== undefined) {
@@ -395,7 +615,7 @@ export function validateVerificationContractShape(input) {
     }
   }
 
-  validateOptionalSections(issues, contract);
+  validateOptionalSections(issues, contract, version);
   return { valid: issues.length === 0, contract, issues };
 }
 
@@ -437,7 +657,7 @@ function repositoryScriptFrom(command) {
  * `definitionFile: null` means the command is wholly contract/direct-runner
  * defined. `resolved: false` means validation must fail closed.
  */
-export function resolveJudgingCommandDefinition(command) {
+export function resolveJudgingCommandDefinition(command, { workingDirectory = "." } = {}) {
   if (!Array.isArray(command) || command.length === 0 || command.some((part) => !isNonEmptyString(part))) {
     return { resolved: false, definitionFile: null, kind: "invalid-command", reason: "command argv is invalid" };
   }
@@ -447,7 +667,12 @@ export function resolveJudgingCommandDefinition(command) {
     const first = args[0];
     const script = first === "run" || first === "run-script" ? args[1] : first;
     if (script && !script.startsWith("-") && !["exec", "x", "dlx"].includes(script)) {
-      return { resolved: true, definitionFile: "package.json", kind: "package-script", script };
+      return {
+        resolved: true,
+        definitionFile: normalizeRepositoryPath(`${workingDirectory}/package.json`),
+        kind: "package-script",
+        script
+      };
     }
     return {
       resolved: false,
@@ -461,7 +686,12 @@ export function resolveJudgingCommandDefinition(command) {
     const script = args[0] === "run" ? args[1] : args[0];
     if (script && !script.startsWith("-") &&
         !["dlx", "exec", "workspace", "workspaces"].includes(script)) {
-      return { resolved: true, definitionFile: "package.json", kind: "package-script", script };
+      return {
+        resolved: true,
+        definitionFile: normalizeRepositoryPath(`${workingDirectory}/package.json`),
+        kind: "package-script",
+        script
+      };
     }
     return {
       resolved: false,
@@ -488,7 +718,7 @@ export function resolveJudgingCommandDefinition(command) {
       return { resolved: true, definitionFile: null, kind: "direct-node" };
     }
     if (args[0] && !args[0].startsWith("-")) {
-      const definitionFile = normalizeRepositoryPath(args[0]);
+      const definitionFile = normalizeRepositoryPath(`${workingDirectory}/${args[0]}`);
       if (definitionFile !== ".." && !definitionFile.startsWith("../") && !definitionFile.startsWith("/")) {
         return { resolved: true, definitionFile, kind: "repository-script" };
       }
@@ -497,7 +727,7 @@ export function resolveJudgingCommandDefinition(command) {
 
   const script = repositoryScriptFrom(command);
   if (script) {
-    const definitionFile = normalizeRepositoryPath(script);
+    const definitionFile = normalizeRepositoryPath(`${workingDirectory}/${script}`);
     if (definitionFile === ".." || definitionFile.startsWith("../") || definitionFile.startsWith("/")) {
       return {
         resolved: false,
@@ -542,9 +772,16 @@ function collectFreezeRuleIssues(contract) {
     ));
   }
 
-  if (!contract.checks.targeted.some((check) => check.required === true)) {
+  const hiddenIsDifferential = contract.schema_version === VERIFICATION_CONTRACT_SCHEMA_VERSION &&
+    contract.checks.hidden?.required === true;
+  if (!contract.checks.targeted.some((check) => check.required === true) && !hiddenIsDifferential) {
     const rule = rules.REQUIRED_TARGETED_CHECK;
-    issues.push(issue(rule.code, rule.name, "checks.targeted", "no targeted check has required: true"));
+    issues.push(issue(
+      rule.code,
+      rule.name,
+      "checks.targeted",
+      "no targeted or contract-supplied hidden check has required: true"
+    ));
   }
 
   contract.checks.targeted.forEach((check, index) => {
@@ -559,13 +796,30 @@ function collectFreezeRuleIssues(contract) {
     }
   });
 
-  for (const [kind, checks] of [
+  if (contract.schema_version === VERIFICATION_CONTRACT_SCHEMA_VERSION &&
+      contract.checks.hidden?.expected_on_base === "pass") {
+    const rule = rules.TARGETED_BASE_MUST_FAIL;
+    issues.push(issue(
+      rule.code,
+      rule.name,
+      "checks.hidden.expected_on_base",
+      `contract-supplied check ${JSON.stringify(contract.checks.hidden.id)} already passes on base`
+    ));
+  }
+
+  const judgingGroups = [
     ["targeted", contract.checks.targeted],
     ["regression", contract.checks.regression]
-  ]) {
+  ];
+  if (contract.schema_version === VERIFICATION_CONTRACT_SCHEMA_VERSION && contract.checks.hidden) {
+    judgingGroups.push(["hidden", [contract.checks.hidden]]);
+  }
+  for (const [kind, checks] of judgingGroups) {
     checks.forEach((check, index) => {
-      const resolution = resolveJudgingCommandDefinition(check.command);
-      const path = `checks.${kind}[${index}].command`;
+      const resolution = resolveJudgingCommandDefinition(check.command, {
+        workingDirectory: check.working_directory || "."
+      });
+      const path = kind === "hidden" ? "checks.hidden.command" : `checks.${kind}[${index}].command`;
       if (!resolution.resolved) {
         const rule = rules.JUDGING_COMMAND_PROTECTED;
         issues.push(issue(
@@ -656,6 +910,19 @@ export function parseVerificationContractJson(json, { source = "JSON input" } = 
 }
 
 export async function loadVerificationContract(path) {
-  const json = await readFile(path, "utf8");
-  return parseVerificationContractJson(json, { source: path });
+  const absolutePath = resolve(path);
+  const json = await readFile(absolutePath, "utf8");
+  const contract = parseVerificationContractJson(json, { source: absolutePath });
+  Object.defineProperty(contract, CONTRACT_SOURCE_DIRECTORY, {
+    value: dirname(absolutePath),
+    enumerable: false
+  });
+  return contract;
+}
+
+export async function validateVerificationContractAtFreeze(input, options = {}, dependencies = {}) {
+  const staticResult = validateVerificationContract(input);
+  if (!staticResult.valid) return staticResult;
+  const { confirmVerificationContractBase } = await import("./freeze-validation.mjs");
+  return confirmVerificationContractBase(staticResult.contract, options, dependencies);
 }

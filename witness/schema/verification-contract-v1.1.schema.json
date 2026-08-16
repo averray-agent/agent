@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://averray.example/schema/verification-contract-v1.1.schema.json",
+  "title": "Averray VerificationContract v1.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "job", "subject", "candidate", "checks", "settlement"],
+  "properties": {
+    "schema_version": { "const": "averray.verification-contract/v1.1" },
+    "job": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "required_verification_level"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "type": { "$ref": "#/$defs/nonEmptyString" },
+        "required_verification_level": { "$ref": "#/$defs/assuranceLevel" }
+      }
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["acquisition", "materialization"],
+      "properties": {
+        "acquisition": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository", "base_commit", "bundle"],
+          "properties": {
+            "repository": { "$ref": "#/$defs/nonEmptyString" },
+            "base_commit": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+            "bundle": { "$ref": "#/$defs/archiveArtifact" }
+          }
+        },
+        "materialization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "dependency_cache", "frozen_inputs"],
+          "properties": {
+            "status": {
+              "enum": ["HERMETIC", "FROZEN_DEPENDENCIES", "MOCKED_EXTERNAL_SYSTEM", "REQUIRES_NETWORK", "UNMATERIALIZABLE"]
+            },
+            "dependency_cache": {
+              "oneOf": [
+                { "type": "null" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["artifact", "mount_path", "populate_command", "working_directory"],
+                  "properties": {
+                    "artifact": { "$ref": "#/$defs/artifact" },
+                    "mount_path": { "$ref": "#/$defs/repositoryPath" },
+                    "populate_command": { "$ref": "#/$defs/command" },
+                    "working_directory": { "$ref": "#/$defs/repositoryPath" }
+                  }
+                }
+              ]
+            },
+            "frozen_inputs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "artifact"],
+                "properties": {
+                  "path": { "$ref": "#/$defs/repositoryPath" },
+                  "artifact": { "$ref": "#/$defs/artifact" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "allowed_paths", "protected_paths", "maximum_changed_files"],
+      "properties": {
+        "format": { "const": "git_patch" },
+        "allowed_paths": { "type": "array", "items": { "$ref": "#/$defs/repositoryPath" } },
+        "protected_paths": { "type": "array", "items": { "$ref": "#/$defs/repositoryPath" } },
+        "maximum_changed_files": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targeted", "regression", "hidden"],
+      "properties": {
+        "targeted": { "type": "array", "items": { "$ref": "#/$defs/targetedCheck" } },
+        "regression": { "type": "array", "items": { "$ref": "#/$defs/regressionCheck" } },
+        "hidden": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id", "artifact", "mount_path", "command", "working_directory",
+                "expected_on_base", "expected_on_candidate", "required"
+              ],
+              "properties": {
+                "id": { "$ref": "#/$defs/nonEmptyString" },
+                "artifact": { "$ref": "#/$defs/artifact" },
+                "mount_path": { "$ref": "#/$defs/repositoryPath" },
+                "command": { "$ref": "#/$defs/command" },
+                "working_directory": { "$ref": "#/$defs/repositoryPath" },
+                "expected_on_base": { "enum": ["fail", "pass"] },
+                "expected_on_candidate": { "enum": ["fail", "pass"] },
+                "required": { "type": "boolean" },
+                "eligibility_reference_sha256": { "$ref": "#/$defs/sha256" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["judging_commands_immutable", "forbid"],
+      "properties": {
+        "judging_commands_immutable": { "type": "boolean" },
+        "forbid": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } }
+      }
+    },
+    "inconclusive_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["infrastructure_attributable", "candidate_attributable", "repeated_candidate_attributable"],
+      "properties": {
+        "infrastructure_attributable": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
+        "candidate_attributable": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
+        "repeated_candidate_attributable": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["window", "threshold", "action"],
+          "properties": {
+            "window": { "type": "integer", "minimum": 1 },
+            "threshold": { "type": "integer", "minimum": 1 },
+            "action": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        }
+      }
+    },
+    "reproducibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repetitions", "disagreement_result", "random_seed"],
+      "properties": {
+        "repetitions": { "type": "integer", "minimum": 1 },
+        "disagreement_result": { "$ref": "#/$defs/nonEmptyString" },
+        "random_seed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timeout_seconds", "cpu_limit", "memory_mb", "process_limit",
+        "temporary_storage_mb", "max_output_bytes"
+      ],
+      "properties": {
+        "timeout_seconds": { "type": "integer", "minimum": 1 },
+        "cpu_limit": { "type": "integer", "minimum": 1 },
+        "memory_mb": { "type": "integer", "minimum": 1 },
+        "process_limit": { "type": "integer", "minimum": 1 },
+        "temporary_storage_mb": { "type": "integer", "minimum": 1 },
+        "max_output_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "settlement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum_assurance_level", "pass_required"],
+      "properties": {
+        "minimum_assurance_level": { "$ref": "#/$defs/assuranceLevel" },
+        "pass_required": { "type": "boolean" },
+        "human_overlay_required": { "type": "boolean" },
+        "challenge_window_blocks": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "assuranceLevel": { "type": "string", "pattern": "^AV-[0-9]+$" },
+    "repositoryPath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:/)(?!\\.\\.(?:/|$)).+$"
+    },
+    "command": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/nonEmptyString" }
+    },
+    "locator": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "const": "path" },
+            "path": { "$ref": "#/$defs/repositoryPath" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "url"],
+          "properties": {
+            "kind": { "const": "https" },
+            "url": { "type": "string", "format": "uri", "pattern": "^https://" }
+          }
+        }
+      ]
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "bytes", "locator", "format"],
+      "properties": {
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "bytes": { "type": "integer", "minimum": 1 },
+        "locator": { "$ref": "#/$defs/locator" },
+        "format": { "enum": ["file", "tar", "tar+gzip"] }
+      }
+    },
+    "archiveArtifact": {
+      "allOf": [
+        { "$ref": "#/$defs/artifact" },
+        { "properties": { "format": { "enum": ["tar", "tar+gzip"] } } }
+      ]
+    },
+    "targetedCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "command", "working_directory", "expected_on_base", "expected_on_candidate", "required"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "command": { "$ref": "#/$defs/command" },
+        "working_directory": { "$ref": "#/$defs/repositoryPath" },
+        "expected_on_base": { "enum": ["fail", "pass"] },
+        "expected_on_candidate": { "enum": ["fail", "pass"] },
+        "required": { "type": "boolean" }
+      }
+    },
+    "regressionCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "command", "working_directory", "expected", "required", "base_state"],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "command": { "$ref": "#/$defs/command" },
+        "working_directory": { "$ref": "#/$defs/repositoryPath" },
+        "expected": { "enum": ["fail", "pass"] },
+        "required": { "type": "boolean" },
+        "base_state": { "enum": ["green", "red"] }
+      }
+    }
+  }
+}
