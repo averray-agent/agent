@@ -46,7 +46,7 @@ subject:
   acquisition:
     repository: github.com/acme/widgets
     base_commit: 4a91c0e8d2f1b3c7a5e9d0f2b4c6a8e1d3f5b7c9
-    bundle_sha256: "..."          # the fetched source, hashed
+    bundle_sha256: "b7e41c92a6d038f5…"   # 64-hex, the fetched source
   materialization:
     status: FROZEN_DEPENDENCIES   # HERMETIC | FROZEN_DEPENDENCIES | MOCKED_EXTERNAL_SYSTEM
     dependency_cache:
@@ -100,8 +100,9 @@ checks:
       base_state: red           # recorded at preflight, not assumed
 
   hidden:
-    bundle_sha256: "..."
-    eligibility_reference_sha256: "..."   # see below
+    bundle_sha256: "3f1a…"                # 64-hex
+    required: false                       # DEFAULTS false; rule 7 tests this field
+    eligibility_reference_sha256: "9c72…" # required only when required: true
 ```
 
 `expected_on_base: fail` is enforced. If the targeted check already passes on base, the
@@ -116,6 +117,25 @@ wrong, producing a confident false `FAIL` — the most expensive failure mode. A
 bundle is only eligible once it has passed against a known-good reference solution,
 whose digest is recorded as `eligibility_reference_sha256`. An unvalidated hidden bundle
 may be carried but must not be `required`.
+
+### Command provenance — rule 5 fails closed
+
+Rule 5 requires the file defining a judging command to be listed in
+`protected_paths`. That presumes the defining file can be *determined*, and for many
+commands it cannot. The implementation resolves:
+
+| Resolves | Does not resolve |
+|---|---|
+| `npm` / `pnpm` / Yarn scripts | `make` targets — may select GNUmakefile, makefile, Makefile, or includes |
+| explicit repository scripts | `cargo`, `go`, Ruby, pytest/module runners |
+| direct `node` commands | `sh -c` shell strings, `npx`, `bun`, workspace/relocation forms |
+
+**Unresolvable means rejected, not permitted.** A contract whose judging command cannot
+be traced to a protectable file is invalid at freeze time. An unprovable protection is
+not a protection — the contract would otherwise claim a guarantee it cannot enforce.
+
+This is a real constraint on which repositories can be verified, not a temporary gap.
+Extending the resolver widens coverage; it never changes the fail-closed default.
 
 ### `integrity` — the anti-gaming surface
 
@@ -194,14 +214,14 @@ base-green, and therefore the only one where a full-suite requirement is honest:
 ```yaml
 schema_version: averray.verification-contract/v1
 job:
-  id: "0x…"
+  id: "0x7d3f9a2e5c1b8046a3f7e2d9c4b60158e7a3d1"
   type: code_change
   required_verification_level: AV-2
 subject:
   acquisition:
     repository: github.com/depre-dev/averray-send-test
-    base_commit: "4257106…"
-    bundle_sha256: "…"
+    base_commit: "4257106b9e3f2a8d15c74e0b6a93df82c105e7d4"
+    bundle_sha256: "b7e41c92a6d038f5142c9e7b30a586df41e2c9037bd85a1f6e04c2793adb85f1"
   materialization:
     status: HERMETIC
     dependency_cache: null
@@ -245,6 +265,22 @@ not guidance:
 - a `regression` check is `required: true` while its `base_state` is `red`
 - a hidden bundle is `required: true` without `eligibility_reference_sha256`
 - `settlement.minimum_assurance_level` is below `AV-2` while `pass_required: true`
+
+## Implementation status
+
+Freeze validation is implemented in `witness/src/verification-contract.mjs` and all
+eight rejection rules are enforced with named codes (`VCV1_RULE_n_*`). What is **not**
+implemented, and is therefore not yet a guarantee:
+
+- **Strict digest validation.** Digest fields are validated as strings, not as 64-hex.
+  A malformed digest passes freeze today.
+- **Contract execution.** Nothing runs a contract yet; this object is validated, not
+  applied.
+- **The `integrity` detections.** Every entry in that list is a requirement on the
+  Witness, and none is built. A contract may declare them; nothing enforces them yet.
+
+Contracts frozen before those land carry weaker guarantees than they appear to. Do not
+cite the `integrity` list as a capability until Phase 2 makes it one.
 
 ## Open
 
