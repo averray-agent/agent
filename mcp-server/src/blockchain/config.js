@@ -318,6 +318,14 @@ export function loadBlockchainConfig(env = process.env) {
       deploymentManifest?.deploymentBlocks?.creditPool,
       "deployments/<profile>.json#deploymentBlocks.creditPool"
     ),
+    creditBookAddress: normalizeOptionalAddress(
+      env.CREDIT_BOOK_ADDRESS ?? deploymentManifest?.contracts?.creditBook,
+      "CREDIT_BOOK_ADDRESS (or deployments/<profile>.json#contracts.creditBook)"
+    ),
+    creditBookDeploymentBlock: normalizeOptionalU32(
+      deploymentManifest?.deploymentBlocks?.creditBook,
+      "deployments/<profile>.json#deploymentBlocks.creditBook"
+    ),
     depositPoolVestingMigration: normalizeDepositPoolVestingMigration(
       deploymentManifest?.depositPoolVestingMigration
     ),

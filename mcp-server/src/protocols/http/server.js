@@ -18,6 +18,7 @@ import {
   schemaRefToJobSchemaPath
 } from "../../core/job-schema-registry.js";
 import { createAdminCapabilityRoutes } from "./admin-capability-routes.js";
+import { createAdminCreditRoutes } from "./admin-credit-routes.js";
 import { createAdminGithubRoutes } from "./admin-github-routes.js";
 import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
 import { createAdminSessionsRoutes } from "./admin-sessions-routes.js";
@@ -100,6 +101,7 @@ const {
   depositPoolDoor,
   earningsDoor,
   creditPoolDoor,
+  creditBookDoor,
   transparencyService,
   stateStore,
   contentRecoveryLog,
@@ -459,8 +461,16 @@ const handleEarningsDoorRoute = createEarningsDoorRoutes({
 const handleCreditPoolRoute = createCreditPoolRoutes({
   authMiddleware,
   creditPoolDoor,
+  creditBookDoor,
   readJsonBody,
   respond,
+});
+
+const handleAdminCreditRoute = createAdminCreditRoutes({
+  authMiddleware,
+  creditBookDoor,
+  readJsonBody,
+  respond
 });
 
 const handleTransparencyRoute = createTransparencyRoutes({
@@ -528,12 +538,14 @@ const handleAdminXcmRoute = createAdminXcmRoutes({
   storeIdempotentMutationReceipt,
 });
 
-// The platform signer is also the configured reward-bank AAC account. Keep
-// canary/CW-1 recovery consented AND destination-bound: even a valid user
-// signature cannot make this admin transport route a third party's balance to
-// an arbitrary recipient. Disabled/local profiles expose no recipient.
+// Keep canary recovery and CW-1 sweeps consented AND destination-bound: even a
+// valid signature can route funds only to the platform reward bank or the
+// configured CreditBook. Disabled/local profiles expose no recipient.
 const agentTransferRecipients = gateway?.isEnabled?.() && gateway?.isSignerConfigured?.()
-  ? resolveAgentTransferRecipientAllowlist({ rewardBankAddress: await gateway.getPooledFundingAccount() })
+  ? resolveAgentTransferRecipientAllowlist({
+      rewardBankAddress: await gateway.getPooledFundingAccount(),
+      additionalRecipients: [gateway.config.creditBookAddress]
+    })
   : new Set();
 const handleAdminAgentTransferRoute = createAdminAgentTransferRoutes({
   allowedRecipients: agentTransferRecipients,
@@ -964,6 +976,14 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (await handleAdminAgentTransferRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleAdminCreditRoute({ request, response, url, pathname })) {
+      return;
+    }
+
     if (await handleAccountRoute({ request, response, url, pathname })) {
       return;
     }
@@ -1043,10 +1063,6 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleAdminXcmRoute({ request, response, url, pathname })) {
-      return;
-    }
-
-    if (await handleAdminAgentTransferRoute({ request, response, url, pathname })) {
       return;
     }
 

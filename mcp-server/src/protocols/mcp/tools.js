@@ -174,8 +174,8 @@ export function createMcpTools({
   }),
   tool({
     name: "getCreditInfo",
-    title: "Get CreditPool information",
-    description: "Read the live L1 CreditPool supply, zero-interest pilot schedule, pledged-vs-vested loan capacity, outstanding debt, and repayment truth for your signed-in wallet.",
+    title: "Get credit information",
+    description: "Read live L1 CreditPool state plus receipt-graph L2 cash and L3 posting limits, outstanding debt, and next-sweep truth for your signed-in wallet.",
     inputSchema: noArgumentsSchema,
     readOnly: true,
     idempotent: true,
@@ -183,17 +183,32 @@ export function createMcpTools({
   }),
   tool({
     name: "buildCreditTransactions",
-    title: "Build CreditPool transactions",
-    description: "Build unsigned, wallet-bound CreditPool deposit, withdraw, borrow, or repay templates from live state. Averray never signs a transaction or relays signed bytes.",
+    title: "Build credit transactions and consent",
+    description: "Build wallet-bound L1 transaction templates, L2/L3 consent payloads with exact AAC repayment authorizations, or direct CreditBook repay templates from live state.",
     inputSchema: {
       type: "object",
       properties: {
-        direction: { type: "string", enum: ["deposit", "withdraw", "borrow", "repay"] },
+        direction: { type: "string", enum: ["deposit", "withdraw", "borrow", "repay", "cash_consent", "posting_consent", "credit_book_repay"] },
         assets: { type: "string", pattern: "^[1-9][0-9]*$" },
         shares: { type: "string", pattern: "^[1-9][0-9]*$" },
         pledgeShares: { type: "string", pattern: "^[1-9][0-9]*$" },
         amount: { type: "string", pattern: "^[1-9][0-9]*$" },
-        loanId: { type: "string", pattern: "^0x[0-9a-fA-F]{64}$" }
+        loanId: { type: "string", pattern: "^0x[0-9a-fA-F]{64}$" },
+        consentNonce: { type: "string", minLength: 8, maxLength: 128 },
+        sweepPlan: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              amount: { type: "string", pattern: "^[1-9][0-9]*$" },
+              nonce: { type: "string", pattern: "^[0-9]+$" },
+              deadline: { type: "string", pattern: "^[0-9]+$" }
+            },
+            required: ["amount", "nonce", "deadline"],
+            additionalProperties: false
+          }
+        },
+        jobDefinition: { type: "object", additionalProperties: true }
       },
       required: ["direction"],
       additionalProperties: false

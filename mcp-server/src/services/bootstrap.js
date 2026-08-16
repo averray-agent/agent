@@ -88,6 +88,9 @@ import { DepositPoolObservabilityService } from "./deposit-pool-observability.js
 import { CreditPoolObservabilityService } from "./credit-pool-observability.js";
 import { DepositPoolDoorService } from "./deposit-pool-door.js";
 import { CreditPoolDoorService } from "./credit-pool-door.js";
+import { CreditBookDoorService } from "./credit-book-door.js";
+import { CreditBookKeeperService } from "./credit-book-keeper.js";
+import { EvmReceiptGraphReader, ReceiptGraphUnderwriter } from "./receipt-graph-underwriter.js";
 import {
   UpstreamStatusPollerService,
   loadUpstreamStatusPollerConfig
@@ -265,7 +268,7 @@ export function createEarningsDoor({
   });
 }
 
-export function createCreditPoolDoor({ gateway, authConfig, chainReader, workerExposurePolicy } = {}) {
+export function createCreditPoolDoor({ gateway, authConfig, chainReader, workerExposurePolicy, creditBookDoor } = {}) {
   return new CreditPoolDoorService({
     creditPoolAddress: gateway.config.creditPoolAddress,
     depositPoolAddress: gateway.config.depositPoolV2Address,
@@ -274,7 +277,8 @@ export function createCreditPoolDoor({ gateway, authConfig, chainReader, workerE
     provider: gateway.provider,
     chainReader,
     capacityReader: (wallet) => workerExposurePolicy.capacityForWallet(wallet),
-    vestingAttestor: (input) => gateway.signCreditVestingAttestation(input)
+    vestingAttestor: (input) => gateway.signCreditVestingAttestation(input),
+    creditBookDoor
   });
 }
 
@@ -517,6 +521,37 @@ export async function createPlatformRuntime() {
       eventBus
     })
   );
+  const receiptGraphUnderwriter = initStep("init-receipt-graph-underwriter", logger, () =>
+    new ReceiptGraphUnderwriter({
+      reader: new EvmReceiptGraphReader({
+        provider: gateway.provider,
+        escrowAddresses: [gateway.config.escrowCoreAddress, gateway.config.legacyEscrowCoreAddress],
+        accountAddress: gateway.config.agentAccountAddress
+      })
+    })
+  );
+  const creditBookDoor = initStep("init-credit-book-door", logger, () =>
+    new CreditBookDoorService({
+      creditBookAddress: gateway.config.creditBookAddress,
+      agentAccountAddress: gateway.config.agentAccountAddress,
+      chainId: authConfig.chainId,
+      provider: gateway.provider,
+      underwriter: receiptGraphUnderwriter,
+      stateStore,
+      gateway,
+      externalPostingService,
+      siweDomain: authConfig.domain,
+      publicBaseUrl: process.env.PUBLIC_BASE_URL ?? `https://${authConfig.domain}`
+    })
+  );
+  const creditBookKeeper = initStep("init-credit-book-keeper", logger, () =>
+    new CreditBookKeeperService({
+      creditBookDoor,
+      gateway,
+      logger
+    })
+  );
+  verifierService.setCreditBookKeeper(creditBookKeeper);
   const x402PosterRampConfig = initStep(
     "load-x402-poster-ramp-config",
     logger,
@@ -669,7 +704,7 @@ export async function createPlatformRuntime() {
     createEarningsDoor({ gateway, authConfig, stateStore, eventBus, workerExposurePolicy })
   );
   const creditPoolDoor = initStep("init-credit-pool-door", logger, () =>
-    createCreditPoolDoor({ gateway, authConfig, workerExposurePolicy })
+    createCreditPoolDoor({ gateway, authConfig, workerExposurePolicy, creditBookDoor })
   );
   const xcmBalanceObserver = initStep("init-xcm-balance-observer", logger, () =>
     new XcmBalanceObserverService(
@@ -871,6 +906,8 @@ export async function createPlatformRuntime() {
     depositPoolDoor,
     earningsDoor,
     creditPoolDoor,
+    creditBookDoor,
+    creditBookKeeper,
     venueBalanceReader,
     xcmObservationRelay,
     upstreamStatusPoller,

@@ -117,6 +117,38 @@ export const CREDIT_POOL_ABI = [
   "event InterestBpsChanged(uint256 previousBps, uint256 newBps)"
 ];
 
+export const CREDIT_BOOK_ABI = [
+  "function asset() view returns (address)",
+  "function operator() view returns (address)",
+  "function accounts() view returns (address)",
+  "function cashPerWalletCapRaw() view returns (uint256)",
+  "function postingPerWalletCapRaw() view returns (uint256)",
+  "function bookCapRaw() view returns (uint256)",
+  "function interestBps() view returns (uint256)",
+  "function repayBps() view returns (uint256)",
+  "function totalOutstandingRaw() view returns (uint256)",
+  "function accountedLiquidityRaw() view returns (uint256)",
+  "function bookLiquidRaw() view returns (uint256)",
+  "function l3Enabled() view returns (bool)",
+  "function l3PosterWallet() view returns (address)",
+  "function PER_WALLET_CAP_CEILING_RAW() view returns (uint256)",
+  "function BOOK_CAP_CEILING_RAW() view returns (uint256)",
+  "function INTEREST_BPS_CEILING() view returns (uint256)",
+  "function BPS() view returns (uint256)",
+  "function nextLoanNonce(address borrower) view returns (uint256)",
+  "function activeLoanByMode(address borrower, uint8 mode) view returns (bytes32)",
+  "function outstandingByModeRaw(address borrower, uint8 mode) view returns (uint256)",
+  "function previewLoanId(address borrower) view returns (bytes32)",
+  "function loans(bytes32 loanId) view returns (address borrower, uint8 mode, uint256 principalRaw, uint256 outstandingRaw, bytes32 termsHash, uint64 originatedAt, uint64 closedAt)",
+  "function originate(address borrower, uint256 amountRaw, uint8 mode, bytes32 termsHash) returns (bytes32 loanId)",
+  "function repay(bytes32 loanId, uint256 amountRaw)",
+  "function recordSweepRepayment(bytes32 loanId, uint256 amountRaw)",
+  "function repayFromRefund(bytes32 loanId)",
+  "event LoanOriginated(bytes32 indexed loanId,address indexed borrower,uint8 indexed mode,uint256 principalRaw,address recipient,bytes32 termsHash)",
+  "event LoanRepaid(bytes32 indexed loanId,address indexed payer,uint256 amountRaw,uint256 outstandingRaw)",
+  "event LoanClosed(bytes32 indexed loanId,address indexed borrower,uint8 indexed mode)"
+];
+
 export const ESCROW_CORE_ABI = [
   "function accounts() view returns (address)",
   "function treasuryAccount() view returns (address)",

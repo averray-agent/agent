@@ -91,6 +91,16 @@ test("admin agent transfer allowlist defaults to the configured reward bank", ()
   );
 });
 
+test("admin agent transfer allowlist also admits the configured CreditBook", () => {
+  assert.deepEqual(
+    [...resolveAgentTransferRecipientAllowlist({
+      rewardBankAddress: REWARD_BANK,
+      additionalRecipients: [OTHER],
+    })].sort(),
+    [REWARD_BANK, OTHER].map((value) => value.toLowerCase()).sort(),
+  );
+});
+
 test("POST /admin/agent-transfers accepts admin or service-token capability and relays exact raw units", async () => {
   const { calls, response, route } = makeHarness({ roles: ["service"] });
   assert.equal(await route({

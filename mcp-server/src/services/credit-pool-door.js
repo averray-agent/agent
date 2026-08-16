@@ -160,6 +160,7 @@ export class CreditPoolDoorService {
     chainReader,
     capacityReader,
     vestingAttestor,
+    creditBookDoor,
     now = () => Date.now()
   } = {}) {
     this.creditPoolAddress = creditPoolAddress ? getAddress(creditPoolAddress) : "";
@@ -169,25 +170,42 @@ export class CreditPoolDoorService {
     this.chainReader = chainReader ?? (provider ? new EvmCreditPoolDoorChainReader(provider) : undefined);
     this.capacityReader = capacityReader;
     this.vestingAttestor = vestingAttestor;
+    this.creditBookDoor = creditBookDoor;
     this.now = now;
   }
 
   async getInfo(wallet) {
-    if (!this.creditPoolAddress || !this.depositPoolAddress) return unavailable();
+    const receiptGraph = this.creditBookDoor
+      ? await this.creditBookDoor.getInfo(wallet)
+      : undefined;
+    if (!this.creditPoolAddress || !this.depositPoolAddress) {
+      if (!receiptGraph?.available) return unavailable();
+      return {
+        schemaVersion: 2,
+        available: true,
+        l1: unavailable(),
+        receiptGraph
+      };
+    }
     this.#assertReadReady();
     const normalizedWallet = getAddress(wallet);
     const [snapshot, capacity] = await Promise.all([
       this.#snapshot(normalizedWallet),
       this.#capacity(normalizedWallet)
     ]);
-    return this.#response(snapshot, normalizedWallet, capacity);
+    const response = this.#response(snapshot, normalizedWallet, capacity);
+    return receiptGraph ? { ...response, schemaVersion: 2, receiptGraph } : response;
   }
 
   async buildTransactions(wallet, input = {}) {
-    if (!this.creditPoolAddress || !this.depositPoolAddress) return unavailable();
-    this.#assertReadReady();
     const normalizedWallet = getAddress(wallet);
     const direction = String(input?.direction ?? "").trim();
+    if (["cash_consent", "posting_consent", "credit_book_repay"].includes(direction)) {
+      if (!this.creditBookDoor) return unavailableCreditBook();
+      return this.creditBookDoor.buildTransactions(normalizedWallet, input);
+    }
+    if (!this.creditPoolAddress || !this.depositPoolAddress) return unavailable();
+    this.#assertReadReady();
     if (direction === "deposit") {
       assertOnlyFields(input, new Set(["direction", "assets"]));
       return this.#buildDeposit(normalizedWallet, exactPositiveRaw(input.assets, "assets"));
@@ -590,4 +608,8 @@ function broadcast(rpcUrls) {
 
 function unavailable() {
   return { schemaVersion: 1, available: false, reason: "credit_pool_not_configured" };
+}
+
+function unavailableCreditBook() {
+  return { schemaVersion: 1, available: false, reason: "credit_book_not_configured" };
 }
