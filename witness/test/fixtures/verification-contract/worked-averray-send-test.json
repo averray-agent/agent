@@ -1,0 +1,50 @@
+{
+  "schema_version": "averray.verification-contract/v1",
+  "job": {
+    "id": "0x…",
+    "type": "code_change",
+    "required_verification_level": "AV-2"
+  },
+  "subject": {
+    "acquisition": {
+      "repository": "github.com/depre-dev/averray-send-test",
+      "base_commit": "4257106…",
+      "bundle_sha256": "…"
+    },
+    "materialization": {
+      "status": "HERMETIC",
+      "dependency_cache": null,
+      "frozen_inputs": []
+    }
+  },
+  "candidate": {
+    "format": "git_patch",
+    "allowed_paths": ["src/**", "test/**"],
+    "protected_paths": ["package.json"],
+    "maximum_changed_files": 5
+  },
+  "checks": {
+    "targeted": [
+      {
+        "id": "unitless-duration",
+        "command": ["node", "--test", "--test-name-pattern", "unitless"],
+        "expected_on_base": "fail",
+        "expected_on_candidate": "pass",
+        "required": true
+      }
+    ],
+    "regression": [
+      {
+        "id": "full-suite",
+        "command": ["npm", "test"],
+        "expected": "pass",
+        "required": true,
+        "base_state": "green"
+      }
+    ]
+  },
+  "settlement": {
+    "minimum_assurance_level": "AV-2",
+    "pass_required": true
+  }
+}

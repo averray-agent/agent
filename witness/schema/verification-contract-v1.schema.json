@@ -1,0 +1,470 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:averray:verification-contract:v1",
+  "title": "Averray VerificationContract v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "job",
+    "subject",
+    "candidate",
+    "checks",
+    "settlement"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "averray.verification-contract/v1"
+    },
+    "job": {
+      "$ref": "#/$defs/job"
+    },
+    "subject": {
+      "$ref": "#/$defs/subject"
+    },
+    "candidate": {
+      "$ref": "#/$defs/candidate"
+    },
+    "checks": {
+      "$ref": "#/$defs/checks"
+    },
+    "integrity": {
+      "$ref": "#/$defs/integrity"
+    },
+    "inconclusive_policy": {
+      "$ref": "#/$defs/inconclusivePolicy"
+    },
+    "reproducibility": {
+      "$ref": "#/$defs/reproducibility"
+    },
+    "resources": {
+      "$ref": "#/$defs/resources"
+    },
+    "settlement": {
+      "$ref": "#/$defs/settlement"
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "assuranceLevel": {
+      "type": "string",
+      "pattern": "^AV-[0-9]+$"
+    },
+    "repositoryPath": {
+      "type": "string",
+      "pattern": "^(?!/)(?![A-Za-z]:/)(?!\\.\\.(?:/|$)).+"
+    },
+    "command": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "job": {
+      "type": "object",
+      "required": [
+        "id",
+        "type",
+        "required_verification_level"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "type": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "required_verification_level": {
+          "$ref": "#/$defs/assuranceLevel"
+        }
+      }
+    },
+    "subject": {
+      "type": "object",
+      "required": [
+        "acquisition",
+        "materialization"
+      ],
+      "properties": {
+        "acquisition": {
+          "type": "object",
+          "required": [
+            "repository",
+            "base_commit",
+            "bundle_sha256"
+          ],
+          "properties": {
+            "repository": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "base_commit": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "bundle_sha256": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
+        "materialization": {
+          "type": "object",
+          "required": [
+            "status",
+            "dependency_cache",
+            "frozen_inputs"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "HERMETIC",
+                "FROZEN_DEPENDENCIES",
+                "MOCKED_EXTERNAL_SYSTEM",
+                "REQUIRES_NETWORK",
+                "UNMATERIALIZABLE"
+              ]
+            },
+            "dependency_cache": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/dependencyCache"
+                }
+              ]
+            },
+            "frozen_inputs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/frozenInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "dependencyCache": {
+      "type": "object",
+      "required": [
+        "sha256",
+        "bytes",
+        "populate_command"
+      ],
+      "properties": {
+        "sha256": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "populate_command": {
+          "$ref": "#/$defs/command"
+        }
+      }
+    },
+    "frozenInput": {
+      "type": "object",
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "sha256": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "required": [
+        "format",
+        "allowed_paths",
+        "protected_paths",
+        "maximum_changed_files"
+      ],
+      "properties": {
+        "format": {
+          "const": "git_patch"
+        },
+        "allowed_paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/repositoryPath"
+          }
+        },
+        "protected_paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/repositoryPath"
+          }
+        },
+        "maximum_changed_files": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "required": [
+        "targeted"
+      ],
+      "properties": {
+        "targeted": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/targetedCheck"
+          }
+        },
+        "regression": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/regressionCheck"
+          }
+        },
+        "hidden": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/hiddenBundle"
+            }
+          ]
+        }
+      }
+    },
+    "targetedCheck": {
+      "type": "object",
+      "required": [
+        "id",
+        "command",
+        "expected_on_base",
+        "expected_on_candidate"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "command": {
+          "$ref": "#/$defs/command"
+        },
+        "expected_on_base": {
+          "enum": [
+            "fail",
+            "pass"
+          ]
+        },
+        "expected_on_candidate": {
+          "enum": [
+            "fail",
+            "pass"
+          ]
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "regressionCheck": {
+      "type": "object",
+      "required": [
+        "id",
+        "command",
+        "expected",
+        "base_state"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "command": {
+          "$ref": "#/$defs/command"
+        },
+        "expected": {
+          "enum": [
+            "fail",
+            "pass"
+          ]
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "base_state": {
+          "enum": [
+            "green",
+            "red"
+          ]
+        }
+      }
+    },
+    "hiddenBundle": {
+      "type": "object",
+      "required": [
+        "bundle_sha256"
+      ],
+      "properties": {
+        "bundle_sha256": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "eligibility_reference_sha256": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "required": [
+        "judging_commands_immutable",
+        "forbid"
+      ],
+      "properties": {
+        "judging_commands_immutable": {
+          "type": "boolean"
+        },
+        "forbid": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      }
+    },
+    "inconclusivePolicy": {
+      "type": "object",
+      "required": [
+        "infrastructure_attributable",
+        "candidate_attributable",
+        "repeated_candidate_attributable"
+      ],
+      "properties": {
+        "infrastructure_attributable": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "candidate_attributable": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "repeated_candidate_attributable": {
+          "type": "object",
+          "required": [
+            "window",
+            "threshold",
+            "action"
+          ],
+          "properties": {
+            "window": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "threshold": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "action": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        }
+      }
+    },
+    "reproducibility": {
+      "type": "object",
+      "required": [
+        "repetitions",
+        "disagreement_result",
+        "random_seed"
+      ],
+      "properties": {
+        "repetitions": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "disagreement_result": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "random_seed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "required": [
+        "timeout_seconds",
+        "cpu_limit",
+        "memory_mb",
+        "process_limit",
+        "writable_storage_mb",
+        "max_output_bytes"
+      ],
+      "properties": {
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cpu_limit": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "memory_mb": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "process_limit": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "writable_storage_mb": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_output_bytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "settlement": {
+      "type": "object",
+      "required": [
+        "minimum_assurance_level",
+        "pass_required"
+      ],
+      "properties": {
+        "minimum_assurance_level": {
+          "$ref": "#/$defs/assuranceLevel"
+        },
+        "pass_required": {
+          "type": "boolean"
+        },
+        "human_overlay_required": {
+          "type": "boolean"
+        },
+        "challenge_window_blocks": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
