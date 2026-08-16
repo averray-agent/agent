@@ -193,3 +193,60 @@ like earthquake risk, not car-accident risk: the pilot's protections are exactly
 the absence of maturities, and caps small enough that a full-book freeze is an observation,
 not an event. Any proposal to add interest, terms, or larger caps must answer this scenario
 first.
+
+## 11. WORKSHOP 2026-08-16 — L2/L3 pilot ratified (CW-1..CW-9)
+
+Held the evening the fee era produced its first live charges (retention + poster fee, settlement
+tx `0x4f0c2a63…`, and the 1h-floor cancel both ways, tx `0x30175585…`). Three chain facts read
+that evening correct §4's premises:
+
+1. **Payouts do not settle to worker EOAs** — they credit AAC internal `liquid` (proven live:
+   worker +200,000 raw in `positions().liquid` at settlement). §4's "no post-settlement
+   interception point" is false.
+2. **AAC `withdraw` is already debt-gated on mainnet** (`liquid − debtOutstanding < amount`
+   reverts) — but only the collateral-path `borrow()` can write `debtOutstanding`, so the gate is
+   unreachable for receipt-graph debt on the current deployment.
+3. **AAC's native borrow surface is live** (`perAccountBorrowCap` = 25 USDC, collateral-path,
+   effective capacity 0 today, economics never workshopped).
+
+**Ratified decisions (Pascal, 2026-08-16):**
+
+- **CW-1 — Deduction transport:** pilot ships with ZERO contract changes — a keeper sweeps
+  `min(payout × repayBps, outstanding)` from borrower AAC liquid via the existing
+  `sendToAgentFor` broker authority under borrower-signed consent + disclosure (platform-trust,
+  protocol-verified book). **Banked for the next AAC/escrow window: a narrow `creditBroker`
+  debt-booking role on AAC-next**, which reaches the live withdraw-gate and retires platform-trust.
+  This AMENDS CL-2 on corrected facts: the long-term hook is AAC-side debt booking, not an escrow
+  payout-target override, because payouts land in AAC.
+- **CW-2 — Underwriting input:** trailing-30d settled net = Σ `SettlementSplit.workerAmount`
+  decoded from logs (payout-evidence discipline); curated + external count equally (G_cat is the
+  anti-farming bound); hard-zero on any slash or upheld dispute in-window; no decay otherwise.
+- **CW-3 — Pilot terms:** zero-interest (the §10 stall answer), no term, `repayBps` 5000,
+  L2 `pilotCap` 25, book funded by operator seed only (~50 USDC) until the first cohort
+  self-amortizes. All constants settable behind ceilings (the D4 pattern).
+- **CW-4 — Consent:** borrower SIWE-signs the loan terms; terms hash recorded in the originate
+  call; MCP door extends `getCreditInfo`/`buildCreditTransactions`; disclosure: "deduction-first —
+  up to half of each payout services your loan until cleared."
+- **CW-5 — Native AAC borrow surface:** queue `perAccountBorrowCap → 0` as a leg in the §8
+  multisig batch; document as superseded by the credit layer; the CW-1 banked upgrade absorbs its
+  machinery properly at AAC-next.
+- **CW-6 — L3 pulled INTO scope** (overriding the ladder's "last" position for design, not risk
+  ordering — see CW-8).
+- **CW-7 — L3 is a SEPARATE product** (not a mode of the L2 line): purpose-bound posting credit
+  where the pool's own poster identity escrows `reward + fee` through the existing external-poster
+  door — principal never touches the borrower; `cancelOpenJob` refunds the pool automatically
+  (the path proven that afternoon). Pilot constants (architect-set per the separate-product call):
+  `L3limit = min(25, 1.0 × trailing30dSettledNet)` — the fuller multiple is justified by
+  no-cash-extraction; poster fee is NOT waived on credit-funded posts (D2 stands). Combined
+  wallet exposure bounded by the shared ~50 USDC book.
+- **CW-8 — Sequencing:** L2 + L3 build together (one spec packet, one book, one keeper); L3
+  originations stay behind a book flag until one L2 cohort has cleanly self-amortized. The poster
+  outreach may offer "first bounty on credit" from day one of the gate opening.
+- **CW-9 — Anti-wash stance:** structural economics only. Every self-dealing cycle on a
+  credit-funded post loses ≥ 0.15 on a 0.25 job (poster fee 0.05 + retention 0.05 + worker-paid
+  gas ≈ 0.06) — recorded here as the enforcement mechanism, with pilot caps bounding worst-case
+  damage. No identity heuristics, consistent with the permissionless door.
+
+**Next artifact:** `PACKET_CREDIT_L2L3_SPEC` (Codex, chain + platform side): CreditPool-L2/L3
+book contract, keeper + consent flow, MCP surface, book flag, and the banked AAC-next
+`creditBroker` interface sketch.
