@@ -1,0 +1,101 @@
+{
+  "schema_version": "averray.verification-contract/v1",
+  "job": {
+    "id": "0x7d3f9a2e5c1b8046a3f7e2d9c4b60158e7a3d1",
+    "type": "code_change",
+    "required_verification_level": "AV-2"
+  },
+  "subject": {
+    "acquisition": {
+      "repository": "depre-dev/averray-send-test",
+      "base_commit": "42571061ca9b6da8c6aca908f1ee1df1dab4e10a",
+      "bundle_sha256": "b7e41c92a6d038f5142c9e7b30a586df41e2c9037bd85a1f6e04c2793adb85f1"
+    },
+    "materialization": {
+      "status": "HERMETIC",
+      "dependency_cache": null,
+      "frozen_inputs": []
+    }
+  },
+  "candidate": {
+    "format": "git_patch",
+    "allowed_paths": ["src/**", "test/**", "docs/**", "package.json"],
+    "protected_paths": ["package.json", "docs/NOTES.md"],
+    "maximum_changed_files": 5
+  },
+  "checks": {
+    "targeted": [
+      {
+        "id": "unitless-duration",
+        "command": [
+          "node",
+          "--eval",
+          "import('./src/duration.js').then(({ parseDuration }) => { if (parseDuration('2') !== 2000) process.exitCode = 1; })"
+        ],
+        "expected_on_base": "fail",
+        "expected_on_candidate": "pass",
+        "required": true
+      }
+    ],
+    "regression": [
+      {
+        "id": "full-suite",
+        "command": ["npm", "test"],
+        "expected": "pass",
+        "required": true,
+        "base_state": "green"
+      }
+    ]
+  },
+  "integrity": {
+    "judging_commands_immutable": true,
+    "forbid": [
+      "test_deletion",
+      "skip_or_xfail_markers_added",
+      "runner_replacement",
+      "assertion_neutering",
+      "snapshot_rewrite_to_accept_current",
+      "coverage_or_lint_exclusion_of_changed_files",
+      "error_swallowing_to_force_zero_exit"
+    ]
+  },
+  "inconclusive_policy": {
+    "infrastructure_attributable": [
+      "host_failure",
+      "image_unavailable",
+      "platform_timeout",
+      "dependency_cache_unavailable",
+      "baseline_mismatch",
+      "integrity_detection_unimplemented"
+    ],
+    "candidate_attributable": [
+      "candidate_introduced_flakiness",
+      "candidate_exceeded_resource_limit",
+      "candidate_caused_nondeterminism_across_repetitions"
+    ],
+    "repeated_candidate_attributable": {
+      "window": 10,
+      "threshold": 3,
+      "action": "escalate_to_human"
+    }
+  },
+  "reproducibility": {
+    "repetitions": 2,
+    "disagreement_result": "INCONCLUSIVE_FLAKY",
+    "random_seed": 48291
+  },
+  "resources": {
+    "timeout_seconds": 2,
+    "cpu_limit": 1,
+    "memory_mb": 256,
+    "process_limit": 64,
+    "writable_storage_mb": 128,
+    "max_output_bytes": 1048576
+  },
+  "settlement": {
+    "minimum_assurance_level": "AV-2",
+    "pass_required": true,
+    "human_overlay_required": false,
+    "challenge_window_blocks": 100
+  }
+}

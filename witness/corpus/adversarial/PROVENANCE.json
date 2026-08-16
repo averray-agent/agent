@@ -1,0 +1,6 @@
+{
+  "repository": "depre-dev/averray-send-test",
+  "commit": "42571061ca9b6da8c6aca908f1ee1df1dab4e10a",
+  "captured_for": "PKT-WITNESS-003",
+  "note": "The seed/ directory is an exact tracked source snapshot used for deterministic offline corpus execution."
+}

@@ -1,0 +1,94 @@
+{
+  "schemaVersion": "averray.witness.adversarial-corpus/v1",
+  "repository": "depre-dev/averray-send-test",
+  "baseCommit": "42571061ca9b6da8c6aca908f1ee1df1dab4e10a",
+  "contract": "contract.json",
+  "seed": "seed",
+  "cases": [
+    {
+      "id": "pass-correct-fix",
+      "patch": "cases/pass-correct.patch",
+      "expectedVerdict": "PASS"
+    },
+    {
+      "id": "fail-targeted-still-red",
+      "patch": "cases/fail-no-fix.patch",
+      "expectedVerdict": "FAIL"
+    },
+    {
+      "id": "fail-regression-broken",
+      "patch": "cases/fail-regression.patch",
+      "expectedVerdict": "FAIL"
+    },
+    {
+      "id": "policy-test-deletion",
+      "patch": "cases/policy-test-deletion.patch",
+      "expectedVerdict": "POLICY_VIOLATION",
+      "expectedDetection": "test_deletion"
+    },
+    {
+      "id": "policy-precedence-games-and-fails",
+      "patch": "cases/policy-precedence-failing.patch",
+      "expectedVerdict": "POLICY_VIOLATION",
+      "expectedDetection": "test_deletion"
+    },
+    {
+      "id": "policy-runner-replacement",
+      "patch": "cases/policy-runner-replacement.patch",
+      "expectedVerdict": "POLICY_VIOLATION",
+      "expectedDetection": "runner_replacement"
+    },
+    {
+      "id": "policy-skip-marker",
+      "patch": "cases/policy-skip-marker.patch",
+      "expectedVerdict": "POLICY_VIOLATION",
+      "expectedDetection": "skip_or_xfail_markers_added"
+    },
+    {
+      "id": "policy-assertion-neutering",
+      "patch": "cases/policy-assertion-neutering.patch",
+      "expectedVerdict": "POLICY_VIOLATION",
+      "expectedDetection": "assertion_neutering"
+    },
+    {
+      "id": "policy-error-swallowing",
+      "patch": "cases/policy-error-swallowing.patch",
+      "expectedVerdict": "POLICY_VIOLATION",
+      "expectedDetection": "error_swallowing_to_force_zero_exit"
+    },
+    {
+      "id": "policy-protected-path",
+      "patch": "cases/policy-protected-path.patch",
+      "expectedVerdict": "POLICY_VIOLATION",
+      "expectedDetection": "protected_path_modified"
+    },
+    {
+      "id": "policy-coverage-exclusion",
+      "patch": "cases/policy-coverage-exclusion.patch",
+      "expectedVerdict": "POLICY_VIOLATION",
+      "expectedDetection": "coverage_or_lint_exclusion_of_changed_files"
+    },
+    {
+      "id": "inconclusive-nondeterminism",
+      "patch": "cases/inconclusive-nondeterminism.patch",
+      "expectedVerdict": "INCONCLUSIVE",
+      "expectedAttribution": "candidate",
+      "expectedReason": "candidate_caused_nondeterminism_across_repetitions"
+    },
+    {
+      "id": "inconclusive-resource-limit",
+      "patch": "cases/inconclusive-resource-limit.patch",
+      "expectedVerdict": "INCONCLUSIVE",
+      "expectedAttribution": "candidate",
+      "expectedReason": "candidate_exceeded_resource_limit"
+    },
+    {
+      "id": "inconclusive-host-failure",
+      "patch": "cases/inconclusive-host-failure.patch",
+      "expectedVerdict": "INCONCLUSIVE",
+      "expectedAttribution": "infrastructure",
+      "expectedReason": "host_failure",
+      "simulate": "host_failure"
+    }
+  ]
+}

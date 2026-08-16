@@ -1,4 +1,4 @@
-# Averray Witness materialization preflight
+# Averray Witness
 
 Phase 1 of the [Averray Witness architecture](../docs/AVERRAY_WITNESS_ARCHITECTURE.md)
 answers one question before a job is published: can the base repository and its
@@ -60,6 +60,42 @@ usable acceptance criterion as-is.
 No worker identity, wallet, claim, submission, PR, or settlement code is present in
 this package.
 
+## VerificationContract execution
+
+Phase 2 executes a frozen contract and a Git patch to a typed verdict:
+
+```sh
+node witness/bin/verify.mjs \
+  --contract contract.json \
+  --candidate candidate.patch \
+  --out verification-result.json
+```
+
+Exit codes are `0` for `PASS`, `1` for `FAIL`, `2` for `POLICY_VIOLATION`, and
+`3` for `INCONCLUSIVE`. The JSON result names every policy/integrity detection and
+attributes every inconclusive verdict to `infrastructure` or `candidate`.
+
+The executor materializes the exact base commit, validates and applies the patch with
+Git isolated from any parent worktree, and uses separate source copies and container
+IDs for baseline and candidate repetitions. It confirms targeted checks fail on base,
+then runs targeted checks before regressions on the candidate. Verdict precedence is
+`POLICY_VIOLATION > INCONCLUSIVE > FAIL > PASS`.
+
+Execution currently supports `HERMETIC` materializations. The v1 object records hashes
+for dependency caches, frozen inputs, source bundles, and hidden bundles, but provides
+no artifact locator or hidden command manifest. Required artifacts that cannot be
+acquired therefore fail closed as infrastructure-attributable `INCONCLUSIVE`; their
+digests are not silently treated as locators. `writable_storage_mb` limits `/tmp`, but
+Docker cannot apply that quota to the read-write bind-mounted candidate workspace; the
+result reports this limitation explicitly.
+
+All seven declared integrity names execute. Structural cases are covered for removed
+JavaScript tests, added JavaScript/pytest skip markers, changed resolved runner files,
+and tracked snapshot files. Assertion neutering, coverage/lint exclusions, and error
+swallowing use named syntactic signatures; semantic variants hidden in arbitrary helper
+code remain explicitly listed as unimplemented in each result's `integritySupport`
+metadata rather than being presented as universal static analysis.
+
 ## VerificationContract v1 freeze validation
 
 [`schema/verification-contract-v1.schema.json`](schema/verification-contract-v1.schema.json)
@@ -114,7 +150,20 @@ the Phase-1 assumption that all repository paths are editable.
 npm run test:witness
 npm --prefix witness run drills -- --out evidence/drills.json
 npm --prefix witness run corpus -- --out-dir evidence/corpus
+npm --prefix witness run integrity:drills
+npm --prefix witness run adversarial:corpus -- --out evidence/adversarial-corpus.json
 ```
+
+The integrity drill mutates each detector registration in a temporary module. It
+requires the mutation anchor to occur exactly once, confirms the replacement was
+applied, records the expected `RED`, then checks the attack and its corrected patch
+against the real detector.
+
+The adversarial corpus is pinned to
+`depre-dev/averray-send-test@42571061ca9b6da8c6aca908f1ee1df1dab4e10a`.
+It runs both the real executor and a deliberately naive checks-only mode and emits an
+expected-versus-actual confusion matrix, false passes, false fails, inconclusive rate,
+attribution accuracy, and the distinct baseline/candidate container IDs.
 
 The drills compare a deliberately static inference with actual sandbox execution.
 They cover a genuine network dependency, a missing toolchain, a lockfile-plus-test

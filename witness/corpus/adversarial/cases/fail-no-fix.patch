@@ -1,0 +1,11 @@
+diff --git a/src/duration.js b/src/duration.js
+--- a/src/duration.js
++++ b/src/duration.js
+@@ -4,6 +4,7 @@
+ // Examples: "90s" -> 90000, "1h30m" -> 5400000
+ const UNIT_MS = { h: 3_600_000, m: 60_000, s: 1_000 };
+ 
++// Unitless inputs are intentionally left unchanged by this candidate.
+ export function parseDuration(input) {
+   const matches = input.matchAll(/(\d+)([hms])/g);
+   let total = 0;

@@ -7,6 +7,10 @@ function looksLikeGithubSlug(value) {
   return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(value);
 }
 
+function looksLikeGithubHostPath(value) {
+  return /^github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?$/u.test(value);
+}
+
 export async function resolveRepositorySource(repo, cwd = process.cwd()) {
   const candidate = isAbsolute(repo) ? repo : resolve(cwd, repo);
   try {
@@ -20,6 +24,10 @@ export async function resolveRepositorySource(repo, cwd = process.cwd()) {
 
   if (looksLikeGithubSlug(repo)) {
     return { source: `https://github.com/${repo}.git`, sourceType: "github" };
+  }
+  if (looksLikeGithubHostPath(repo)) {
+    const suffix = repo.endsWith(".git") ? "" : ".git";
+    return { source: `https://${repo}${suffix}`, sourceType: "github" };
   }
   if (/^[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+:[A-Za-z0-9_./-]+$/u.test(repo)) {
     return { source: repo, sourceType: "ssh" };
@@ -36,7 +44,7 @@ export async function resolveRepositorySource(repo, cwd = process.cwd()) {
   return { source: repo, sourceType: "url" };
 }
 
-export async function materializeRepository({ repo, destination, cwd }) {
+export async function materializeRepository({ repo, destination, cwd, commit = null }) {
   const resolved = await resolveRepositorySource(repo, cwd);
   const gitProbe = resolved.sourceType === "path" && await hasGitMetadata(resolved.source)
     ? await runProcess("git", ["-C", resolved.source, "rev-parse", "--is-inside-work-tree"])
@@ -94,9 +102,49 @@ export async function materializeRepository({ repo, destination, cwd }) {
     throw new Error((commitResult.stderr || "materialized repository has no HEAD commit").trim());
   }
 
+  let materializedCommit = commitResult.stdout.trim();
+  if (commit && materializedCommit !== commit) {
+    const fetch = await runProcess(
+      "git",
+      ["-C", destination, "fetch", "--depth", "1", "origin", commit],
+      {
+        timeoutSeconds: 300,
+        env: {
+          ...process.env,
+          GIT_ALLOW_PROTOCOL: resolved.sourceType === "path" ? "file:https:ssh" : "https:ssh"
+        }
+      }
+    );
+    if (fetch.exitCode !== 0) {
+      throw new Error((fetch.stderr || fetch.stdout || `base commit ${commit} is unavailable`).trim());
+    }
+    const checkout = await runProcess(
+      "git",
+      ["-C", destination, "-c", "core.hooksPath=/dev/null", "checkout", "--detach", commit]
+    );
+    if (checkout.exitCode !== 0) {
+      throw new Error((checkout.stderr || checkout.stdout || `base commit ${commit} cannot be checked out`).trim());
+    }
+    const submodules = await runProcess(
+      "git",
+      ["-C", destination, "-c", "core.hooksPath=/dev/null", "submodule", "update", "--init", "--recursive", "--depth", "1"],
+      {
+        timeoutSeconds: 300,
+        env: {
+          ...process.env,
+          GIT_ALLOW_PROTOCOL: resolved.sourceType === "path" ? "file:https:ssh" : "https:ssh"
+        }
+      }
+    );
+    if (submodules.exitCode !== 0) {
+      throw new Error((submodules.stderr || submodules.stdout || "submodule materialization failed").trim());
+    }
+    materializedCommit = commit;
+  }
+
   return {
     path: destination,
-    commit: commitResult.stdout.trim(),
+    commit: materializedCommit,
     source: resolved.source,
     sourceType: resolved.sourceType,
     seconds: Number(((performance.now() - started) / 1_000).toFixed(3))

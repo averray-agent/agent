@@ -1,0 +1,10 @@
+diff --git a/test/value.test.js b/test/value.test.js
+--- a/test/value.test.js
++++ b/test/value.test.js
+@@ -3,6 +3,2 @@ import test from "node:test";
+ 
+ import { value } from "../src/value.js";
+-
+-test("returns one", () => {
+-  assert.equal(value(), 1);
+-});

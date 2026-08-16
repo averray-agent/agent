@@ -10,6 +10,8 @@
     "test": "node --test test/*.test.mjs",
     "drills": "node bin/run-drills.mjs",
     "contract:drills": "node bin/run-contract-drills.mjs",
+    "integrity:drills": "node bin/run-integrity-drills.mjs",
+    "adversarial:corpus": "node bin/run-adversarial-corpus.mjs",
     "corpus": "node bin/run-corpus.mjs"
   }
 }

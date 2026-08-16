@@ -1,0 +1,12 @@
+diff --git a/src/duration.js b/src/duration.js
+--- a/src/duration.js
++++ b/src/duration.js
+@@ -5,5 +5,8 @@ const UNIT_MS = { h: 3_600_000, m: 60_000, s: 1_000 };
+ 
+ export function parseDuration(input) {
++  if (/^\d+$/.test(input)) {
++    return Number(input) * UNIT_MS.s;
++  }
+   const matches = input.matchAll(/(\d+)([hms])/g);
+   let total = 0;
+   for (const [, amount, unit] of matches) {
