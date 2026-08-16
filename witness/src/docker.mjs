@@ -38,7 +38,12 @@ export async function runInWitnessContainer({
   command,
   environment = {},
   networkMode = "none",
-  timeoutSeconds
+  timeoutSeconds,
+  cpuLimit = 2,
+  memoryMb = 4096,
+  processLimit = 512,
+  temporaryStorageMb = 1024,
+  outputLimitBytes
 }) {
   const name = `averray-witness-${randomUUID()}`;
   const assertNetwork = networkMode === "none";
@@ -63,13 +68,13 @@ export async function runInWitnessContainer({
     "--security-opt",
     "no-new-privileges",
     "--pids-limit",
-    "512",
+    String(processLimit),
     "--memory",
-    "4g",
+    `${memoryMb}m`,
     "--cpus",
-    "2",
+    String(cpuLimit),
     "--tmpfs",
-    "/tmp:rw,nosuid,nodev,size=1g",
+    `/tmp:rw,nosuid,nodev,size=${temporaryStorageMb}m`,
     "--user",
     "65532:65532",
     "--env",
@@ -110,6 +115,7 @@ export async function runInWitnessContainer({
       timedOut: false,
       outputTruncated: created.outputTruncated,
       seconds: created.seconds,
+      containerId: null,
       networkMode,
       networkInterfaces: [],
       networkAssertionPassed: false
@@ -117,7 +123,12 @@ export async function runInWitnessContainer({
   }
 
   try {
-    const started = await runProcess("docker", ["start", "--attach", name], { timeoutSeconds });
+    const containerId = created.stdout.trim() || null;
+    const started = await runProcess(
+      "docker",
+      ["start", "--attach", name],
+      { timeoutSeconds, outputLimitBytes }
+    );
     const inspected = await runProcess(
       "docker",
       ["inspect", "--format", "{{json .State}} {{json .HostConfig.NetworkMode}}", name]
@@ -137,6 +148,7 @@ export async function runInWitnessContainer({
 
     return {
       ...started,
+      containerId,
       networkMode: observedHostMode,
       networkInterfaces,
       networkAssertionPassed

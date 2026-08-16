@@ -1,0 +1,8 @@
+{
+  "name": "averray-send-test",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Disposable target for Averray worker end-to-end proofs.",
+  "scripts": { "test": "node --test" }
+}

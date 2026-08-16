@@ -51,6 +51,10 @@ test("repository source resolution rejects executable and local-file URL transpo
     await resolveRepositorySource("owner/repository"),
     { source: "https://github.com/owner/repository.git", sourceType: "github" }
   );
+  assert.deepEqual(
+    await resolveRepositorySource("github.com/depre-dev/averray-send-test"),
+    { source: "https://github.com/depre-dev/averray-send-test.git", sourceType: "github" }
+  );
 });
 
 test("Python wheelhouse preparation requires exact hash-pinned requirements", async () => {

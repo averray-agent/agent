@@ -1,0 +1,6 @@
+diff --git a/test/__snapshots__/value.snap b/test/__snapshots__/value.snap
+--- a/test/__snapshots__/value.snap
++++ b/test/__snapshots__/value.snap
+@@ -1 +1 @@
+-exports[`value 1`] = `1`;
++exports[`value 1`] = `candidate output`;
