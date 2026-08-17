@@ -193,8 +193,15 @@ maintainer segment.
 
 ## 6. Cross-cutting laws
 
-- **Swiss memo rescope:** Proof-to-Pay first, deposits second. Start counsel
-  this week — it is the long pole and the binding gate on flagship scale.
+- **Swiss memo — event-triggered (Pascal, 2026-08-17):** blocks nothing while
+  aggregate third-party funds held by the platform (open escrow + pool
+  deposits + externally-owed AAC balances; the board's solvency-floor inputs
+  already measure this) stay below five figures USD. Trigger: trending toward
+  ≥10,000 (start counsel near 5k for lead time) or an enterprise prospect
+  asking for posture in writing. Until then: scoping note (Claude) + named
+  counsel contact (Pascal). Caps stay law; scope is Proof-to-Pay-first when
+  commissioned; "memo unstarted" is not a failed Sep-11 gate absent the
+  trigger.
 - **Truth-boundary marketing gate:** no product page before a stranger can buy.
 - **Vocabulary law:** outcome verification / work receipt / proof-to-pay; never
   "certification"; never "AI agent verification" (ERC-8126's term).
@@ -208,7 +215,9 @@ maintainer segment.
 1. Verify pricing menu — arrives with Phase V cost measurement.
 2. Proof-to-Pay pilot caps + provider-bond default — arrives with Phase P
    packet.
-3. Swiss memo counsel engagement — this week; scope note drafted on request.
+3. Swiss memo — name the counsel contact only; the engagement itself is
+   event-triggered (≥5-figure held funds). Scoping note arrives from Claude
+   regardless, so the fuse is short when lit.
 4. Receipt page placement (`averray.com/receipts/:id` vs subdomain) — at Phase
    R gate; recommendation will accompany the spec.
 
@@ -216,7 +225,7 @@ maintainer segment.
 
 | Week | Load-bearing items |
 | --- | --- |
-| 2026-08-18 | Phase R spec + Codex build starts · L1 draw (Tue) · board deploy + arrivals env · outreach re-segmentation · memo counsel ping |
+| 2026-08-18 | Phase R spec + Codex build starts · L1 draw (Tue) · board deploy + arrivals env · outreach re-segmentation · memo scoping note (no engagement — event-triggered) |
 | 2026-08-25 | Phase V profiles 1–2 + pricing proposal · receipt page live · outreach cadence ~1/day |
 | 2026-09-01 | Profile 3 · Phase P build + pilot recruit from outreach |
 | 2026-09-11 | Experiment scoreboard vs criteria — decide scale / narrow / kill per lane |

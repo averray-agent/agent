@@ -164,6 +164,9 @@ maintainers · 6 agent-platform builders, with the ask changed to "what result a
 currently paying for where payment is disconnected from objective proof it worked?".
 Success criteria and kill conditions live in `docs/PROJECT_ROADMAP.md` (Product
 Positioning — Outcome Assurance) and `OUTCOME_PIVOT_BUILD_PLAN.md` (this branch). The
-Swiss memo gate stays, rescoped Proof-to-Pay-first. The crossover math above is
+Swiss memo is demoted to an event trigger (2026-08-17, Pascal): it blocks nothing
+while aggregate third-party funds held by the platform stay below five figures USD,
+and "memo unstarted" is not a failed Sep-11 gate absent that trigger; scope stays
+Proof-to-Pay-first when commissioned. The crossover math above is
 unchanged — external volume, not deposits, moves the business; the pivot changes what
 we sell externally (verified outcomes), not that law.
