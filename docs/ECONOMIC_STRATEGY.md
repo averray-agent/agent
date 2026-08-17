@@ -155,3 +155,15 @@ every revenue read: operator-curated non-waived jobs pay the poster fee from the
 bank (`ensureJob` couples fee waiver to the onboarding flag), so self-paid fees must never be
 presented as external revenue. 30-day gates: D0 ✓, D4 ✓ proven; Swiss memo and the 20 poster
 conversations remain the open gates.
+
+**Superseded 2026-08-17 evening (outcome-assurance pivot, ratified by Pascal):** the
+"20 qualified poster conversations" back half of the 30-day plan is replaced by the
+outcome-assurance experiment — same due date (2026-09-11), same conversation budget
+(19 of 20 remaining), re-segmented 8 MCP/agent-tool operators · 6 devtool/OSS
+maintainers · 6 agent-platform builders, with the ask changed to "what result are you
+currently paying for where payment is disconnected from objective proof it worked?".
+Success criteria and kill conditions live in `docs/PROJECT_ROADMAP.md` (Product
+Positioning — Outcome Assurance) and `OUTCOME_PIVOT_BUILD_PLAN.md` (this branch). The
+Swiss memo gate stays, rescoped Proof-to-Pay-first. The crossover math above is
+unchanged — external volume, not deposits, moves the business; the pivot changes what
+we sell externally (verified outcomes), not that law.
