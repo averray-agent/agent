@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "averray.witness.pr-shadow-comparison/v1",
+  "baseline": {
+    "report": "report.json",
+    "policyViolationPullRequests": 4,
+    "policyViolationRatePct": 20,
+    "adjudicatedFalsePositivePullRequests": 4,
+    "adjudicatedFalsePositiveRatePct": 20,
+    "testDeletionFalsePositivePullRequests": 3,
+    "testDeletionFalsePositiveRatePct": 15
+  },
+  "postAmbiguity": {
+    "report": "post-ambiguity-report.json",
+    "policyViolationPullRequests": 2,
+    "policyViolationRatePct": 10,
+    "adjudicatedFalsePositivePullRequests": 2,
+    "adjudicatedFalsePositiveRatePct": 10,
+    "testDeletionFalsePositivePullRequests": 0,
+    "testDeletionFalsePositiveRatePct": 0,
+    "integrityAmbiguityPullRequests": 3,
+    "integrityAmbiguityRatePct": 15,
+    "verifierAttributedInconclusivePullRequests": 2
+  },
+  "adversarialCorpus": {
+    "baselineExactVerdicts": 15,
+    "baselineTotal": 15,
+    "postAmbiguityExactVerdicts": 15,
+    "postAmbiguityTotal": 15,
+    "postAmbiguityFalsePasses": 0
+  }
+}

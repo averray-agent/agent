@@ -50,6 +50,8 @@ await writeFile(markdownPath(options.out), renderPrShadowMarkdown(report));
 process.stdout.write(`${JSON.stringify({
   falsePositiveRate: report.falsePositiveRate,
   verdictDistribution: report.verdictDistribution,
+  integrityAmbiguities: report.integrityAmbiguityRate,
+  integrityAmbiguityCases: report.integrityAmbiguityCases.map((entry) => entry.id),
   inconclusive: report.inconclusiveRate,
   output: options.out,
   markdown: markdownPath(options.out)

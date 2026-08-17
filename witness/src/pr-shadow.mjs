@@ -7,9 +7,10 @@ import {
   evaluateCandidatePolicy,
   inspectCandidatePatch
 } from "./candidate-patch.mjs";
+import { verifierReputationSignalFor, workerConsequenceFor } from "./attribution.mjs";
 import { CLASSIFICATIONS } from "./constants.mjs";
 import { VERDICTS } from "./executor.mjs";
-import { INTEGRITY_DETECTION_SUPPORT, detectIntegrityViolations } from "./integrity.mjs";
+import { INTEGRITY_DETECTION_SUPPORT, detectIntegrityFindings } from "./integrity.mjs";
 import { createAttemptCopy } from "./materialize.mjs";
 import { runPreflight } from "./preflight.mjs";
 import { isProtectedPath, resolveJudgingCommandDefinition } from "./verification-contract.mjs";
@@ -222,7 +223,8 @@ export async function evaluatePrShadowStatic({
       details: inspection.reason,
       patch: { valid: false, reason: inspection.reason },
       policyViolations: [],
-      integrityViolations: []
+      integrityViolations: [],
+      integrityAmbiguities: []
     };
   }
 
@@ -237,7 +239,8 @@ export async function evaluatePrShadowStatic({
       details: applied.reason,
       patch: { valid: false, reason: applied.reason },
       policyViolations: [],
-      integrityViolations: []
+      integrityViolations: [],
+      integrityAmbiguities: []
     };
   }
 
@@ -245,7 +248,7 @@ export async function evaluatePrShadowStatic({
   // SEEN-RED anchor: the drill removes this one policy evaluation and proves
   // that a real protected-path pull request would escape.
   const policyViolations = evaluateCandidatePolicy(executorContract, inspection);
-  const integrityViolations = await detectIntegrityViolations({
+  const integrityFindings = await detectIntegrityFindings({
     contract: executorContract,
     patch: inspection,
     baseRoot,
@@ -258,7 +261,8 @@ export async function evaluatePrShadowStatic({
     diffHunks: diffHunksForViolation(diffText, violation)
   });
   const decoratedPolicy = policyViolations.map(decorate("candidate-policy"));
-  const decoratedIntegrity = integrityViolations.map(decorate("integrity"));
+  const decoratedIntegrity = integrityFindings.violations.map(decorate("integrity"));
+  const decoratedAmbiguities = integrityFindings.ambiguities.map(decorate("integrity-ambiguity"));
   const violations = [...decoratedPolicy, ...decoratedIntegrity];
   if (violations.length > 0) {
     return {
@@ -270,11 +274,47 @@ export async function evaluatePrShadowStatic({
       patch: {
         valid: true,
         bytes: inspection.bytes,
+        changedFileCount: inspection.changedFileCount,
         changedPaths: inspection.changedPaths,
         stats: inspection.stats
       },
       policyViolations: decoratedPolicy,
-      integrityViolations: decoratedIntegrity
+      integrityViolations: decoratedIntegrity,
+      integrityAmbiguities: decoratedAmbiguities
+    };
+  }
+
+  if (decoratedAmbiguities.length > 0) {
+    const reason = "integrity_detection_ambiguous";
+    const details = decoratedAmbiguities.map((finding) => ({
+      detection: finding.detection,
+      message: finding.message,
+      paths: finding.paths,
+      evidence: finding.evidence
+    }));
+    return {
+      contract,
+      verdict: VERDICTS.INCONCLUSIVE,
+      attribution: "verifier",
+      reason,
+      details,
+      workerConsequence: workerConsequenceFor(VERDICTS.INCONCLUSIVE),
+      verifierReputationSignal: verifierReputationSignalFor({
+        verdict: VERDICTS.INCONCLUSIVE,
+        attribution: "verifier",
+        reason,
+        details
+      }),
+      patch: {
+        valid: true,
+        bytes: inspection.bytes,
+        changedFileCount: inspection.changedFileCount,
+        changedPaths: inspection.changedPaths,
+        stats: inspection.stats
+      },
+      policyViolations: [],
+      integrityViolations: [],
+      integrityAmbiguities: decoratedAmbiguities
     };
   }
 
@@ -288,7 +328,8 @@ export async function evaluatePrShadowStatic({
       details: resolution.reason,
       patch: { valid: true, bytes: inspection.bytes, changedPaths: inspection.changedPaths, stats: inspection.stats },
       policyViolations: [],
-      integrityViolations: []
+      integrityViolations: [],
+      integrityAmbiguities: []
     };
   }
   if (resolution.definitionFile !== null && !isProtectedPath(resolution.definitionFile, entry.protectedPaths)) {
@@ -300,7 +341,8 @@ export async function evaluatePrShadowStatic({
       details: `${resolution.definitionFile} is not protected by the derived contract`,
       patch: { valid: true, bytes: inspection.bytes, changedPaths: inspection.changedPaths, stats: inspection.stats },
       policyViolations: [],
-      integrityViolations: []
+      integrityViolations: [],
+      integrityAmbiguities: []
     };
   }
   return {
@@ -311,7 +353,8 @@ export async function evaluatePrShadowStatic({
     details: null,
     patch: { valid: true, bytes: inspection.bytes, changedPaths: inspection.changedPaths, stats: inspection.stats },
     policyViolations: [],
-    integrityViolations: []
+    integrityViolations: [],
+    integrityAmbiguities: []
   };
 }
 
@@ -493,6 +536,7 @@ export async function evaluateMergedPullRequest({
       patch: null,
       policyViolations: [],
       integrityViolations: [],
+      integrityAmbiguities: [],
       checks: null,
       seconds: Number(((performance.now() - started) / 1_000).toFixed(3))
     };
@@ -511,6 +555,10 @@ function percent(numerator, denominator) {
   return denominator === 0 ? 0 : Number(((numerator / denominator) * 100).toFixed(1));
 }
 
+function inlineDetails(details) {
+  return typeof details === "string" ? details : JSON.stringify(details);
+}
+
 export function buildPrShadowReport({ manifest, results, githubAudit, judgements = {} }) {
   const reviewedResults = results.map((result) => {
     const reviewViolations = (violations) => violations.map((violation) => ({
@@ -524,6 +572,7 @@ export function buildPrShadowReport({ manifest, results, githubAudit, judgements
       ...result,
       policyViolations: reviewViolations(result.policyViolations || []),
       integrityViolations: reviewViolations(result.integrityViolations || []),
+      integrityAmbiguities: result.integrityAmbiguities || [],
       inconclusiveAttributionJudgement: result.verdict === VERDICTS.INCONCLUSIVE
         ? judgements.inconclusiveAttribution?.[result.id] || {
             accuracy: "unreviewed",
@@ -540,6 +589,7 @@ export function buildPrShadowReport({ manifest, results, githubAudit, judgements
     .filter(({ violation }) => violation.judgement.classification === "false_positive")
     .map(({ result }) => result.id));
   const policyCases = reviewedResults.filter((result) => result.verdict === VERDICTS.POLICY_VIOLATION);
+  const ambiguityCases = reviewedResults.filter((result) => result.integrityAmbiguities.length > 0);
   const inconclusive = reviewedResults.filter((result) => result.verdict === VERDICTS.INCONCLUSIVE);
   const detectionNames = [...new Set([
     "protected_path_modified",
@@ -605,6 +655,19 @@ export function buildPrShadowReport({ manifest, results, githubAudit, judgements
       definition: "distinct legitimate merged PRs with at least one adjudicated false-positive violation / all shadowed PRs"
     },
     falsePositiveRatePerDetection: perDetection,
+    integrityAmbiguityRate: {
+      pullRequests: ambiguityCases.length,
+      total: reviewedResults.length,
+      ratePct: percent(ambiguityCases.length, reviewedResults.length)
+    },
+    integrityAmbiguityCases: ambiguityCases.map((result) => ({
+      id: result.id,
+      url: result.contract?.pullRequest.url || null,
+      title: result.contract?.pullRequest.title || null,
+      verdict: result.verdict,
+      attribution: result.attribution,
+      findings: result.integrityAmbiguities
+    })),
     unevaluableSummary: {
       total: inconclusive.length,
       byReason: countBy(inconclusive.map((result) => result.reason)),
@@ -678,6 +741,28 @@ export function renderPrShadowMarkdown(report) {
     }
   }
   lines.push(
+    "## Detector ambiguities",
+    "",
+    `Ambiguity findings: ${report.integrityAmbiguityRate.pullRequests}/${report.integrityAmbiguityRate.total} (${report.integrityAmbiguityRate.ratePct}%).`,
+    ""
+  );
+  if (report.integrityAmbiguityCases.length === 0) lines.push("None.", "");
+  for (const entry of report.integrityAmbiguityCases) {
+    lines.push(
+      `### ${entry.id} — ${entry.title || "title unavailable"}`,
+      "",
+      `- Result: ${entry.verdict}${entry.attribution ? ` (${entry.attribution})` : ""}`,
+      ""
+    );
+    for (const finding of entry.findings) {
+      lines.push(`- Detection: ${finding.detection}`, `- Message: ${finding.message}`, "");
+      for (const hunk of finding.diffHunks) {
+        const markdownHunk = hunk.hunk.split("\n").map((line) => line.trimEnd()).join("\n");
+        lines.push(`Path: ${hunk.path}`, "", "```diff", markdownHunk, "```", "");
+      }
+    }
+  }
+  lines.push(
     "## False-positive rate per detection",
     "",
     "| Detection | Fired PRs | False-positive PRs | False-positive rate | True findings |",
@@ -695,7 +780,7 @@ export function renderPrShadowMarkdown(report) {
   );
   for (const entry of report.unevaluable) {
     lines.push(
-      `- ${entry.id}: ${entry.reason} (${entry.attribution}) — ${entry.details}`,
+      `- ${entry.id}: ${entry.reason} (${entry.attribution}) — ${inlineDetails(entry.details)}`,
       `  - Attribution judgement: ${entry.attributionJudgement.accuracy} — ${entry.attributionJudgement.rationale}`
     );
   }

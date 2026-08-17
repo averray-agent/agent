@@ -180,8 +180,8 @@ applied, records the expected `RED`, then checks the attack and its corrected pa
 against the real detector.
 
 The ambiguity drill separately mutates the confident/ambiguous boundary, explicit Git
-rename parsing, the fourth attribution, and worker consequence. Its real declaration
-fixtures are the exact false-positive hunks from `agent#1109` and
+rename parsing, the fourth attribution, worker consequence, and verifier reputation
+signal. Its real declaration fixtures are the exact false-positive hunks from `agent#1109` and
 `reference-agent#813`; every anchor must occur exactly once and produce SEEN RED.
 
 The 15-case adversarial corpus is pinned to
@@ -213,8 +213,9 @@ The resulting assurance is **AV-1 plus integrity**, not AV-2; differential logic
 exercised because the shadow does not know what each historical PR was supposed to fix.
 
 The JSON and Markdown reports include the verdict distribution, every individual
-`POLICY_VIOLATION` with the causing diff hunk and human judgement, false-positive rates
-per detection, materialization/command failures, and reviewed INCONCLUSIVE attribution.
+`POLICY_VIOLATION` with the causing diff hunk and human judgement, every detector
+ambiguity with its hunk and attribution, false-positive rates per detection,
+materialization/command failures, and reviewed INCONCLUSIVE attribution.
 The committed judgement file is separate from detector configuration: findings are
 reported and adjudicated, never tuned away. A run exits 2 if any violation or
 INCONCLUSIVE attribution remains unreviewed; use `--allow-unreviewed` only for the first
