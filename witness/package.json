@@ -13,6 +13,9 @@
     "v1.1:drills": "node bin/run-v1.1-drills.mjs",
     "binding:drills": "node bin/run-binding-drills.mjs",
     "integrity:drills": "node bin/run-integrity-drills.mjs",
+    "pr:shadow": "node bin/run-pr-shadow.mjs",
+    "pr:shadow:report": "node bin/rejudge-pr-shadow.mjs",
+    "pr:shadow:drills": "node bin/run-pr-shadow-drills.mjs",
     "adversarial:corpus": "node bin/run-adversarial-corpus.mjs",
     "corpus": "node bin/run-corpus.mjs"
   }

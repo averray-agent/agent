@@ -1,0 +1,91 @@
+{
+  "schemaVersion": "averray.witness.pr-shadow-judgements/v1",
+  "policyViolations": {
+    "averray-agent/agent#1110:protected_path_modified:.github/workflows/ci.yml": {
+      "classification": "false_positive",
+      "rationale": "Reviewed CI maintenance intentionally pins and reports the Foundry toolchain. The path match is mechanically correct, but treating this authorized workflow change as hostile would reject legitimate work; no hygiene defect is present in the hunk."
+    },
+    "averray-agent/agent#1109:test_deletion:scripts/ops/check-hosted-stack.test.mjs": {
+      "classification": "false_positive",
+      "rationale": "The removed declaration was renamed and replaced while the earnings-door smoke coverage was expanded with an explicit unauthenticated case. This is test evolution, not suppression."
+    },
+    "depre-dev/averray-reference-agent#813:test_deletion:packages/monitor-ui/src/components/ops/ArrivalsPanel.test.tsx": {
+      "classification": "false_positive",
+      "rationale": "The arrivals panel contract was deliberately redesigned from raw funnel arithmetic to the producer's operator verdict view. Obsolete declarations were replaced by seven tests for the new contract, including historical data, self traffic, unknown traffic, cut-over copy, and missing-view behavior; this is not concealed coverage removal."
+    },
+    "depre-dev/averray-reference-agent#802:protected_path_modified:.github/workflows/ci.yml": {
+      "classification": "false_positive",
+      "rationale": "Reviewed CI maintenance intentionally adds the distinct INT-2e store suite and evidence output. The protected-path detector identifies the location but cannot represent authorization, so its rejection of this legitimate workflow change is false."
+    },
+    "depre-dev/averray-reference-agent#802:test_deletion:test/unit/int2-ceremony-scripts.test.ts": {
+      "classification": "false_positive",
+      "rationale": "The declaration was renamed while its fixture and assertions were expanded from three conflated suite counts to the two required distinct counts. The test remained and became more precise."
+    }
+  },
+  "inconclusiveAttribution": {
+    "averray-agent/agent#1149": {
+      "accuracy": "accurate",
+      "rationale": "Both the PR head and merge-base install 1,220 locked packages offline, then exit 1 because the HTTP smoke times out after 38 of 39 subtests. The derived green-check assumption is false, so contract attribution is accurate."
+    },
+    "averray-agent/agent#1148": {
+      "accuracy": "accurate",
+      "rationale": "Both the PR head and merge-base install the locked dependencies offline, then the same repository HTTP smoke fails to complete. This cannot be attributed to the candidate diff; the derived green-check assumption is unavailable."
+    },
+    "averray-agent/agent#1147": {
+      "accuracy": "accurate",
+      "rationale": "Both the PR head and merge-base install the locked dependencies offline, then the same repository HTTP smoke fails to complete. This cannot be attributed to the candidate diff; the derived green-check assumption is unavailable."
+    },
+    "averray-agent/agent#1146": {
+      "accuracy": "accurate",
+      "rationale": "Both the documentation head and its merge-base install the locked dependencies offline, then the same repository HTTP smoke fails to complete. A clean contract-attributable INCONCLUSIVE is accurate."
+    },
+    "averray-agent/agent#1145": {
+      "accuracy": "accurate",
+      "rationale": "Both the PR head and merge-base install the locked dependencies offline, then the same repository HTTP smoke fails to complete. This cannot be attributed to the candidate diff; the derived green-check assumption is unavailable."
+    },
+    "depre-dev/averray-reference-agent#816": {
+      "accuracy": "accurate",
+      "rationale": "The head and merge-base both install offline but the root suite exits 1 because it assumes prebuilt workspace package outputs and unavailable sandbox capabilities such as zsh/private checkout. Contract attribution is accurate."
+    },
+    "depre-dev/averray-reference-agent#815": {
+      "accuracy": "accurate",
+      "rationale": "The head and merge-base both install offline but the root suite exits 1 because it assumes prebuilt workspace package outputs and unavailable sandbox capabilities such as zsh/private checkout. Contract attribution is accurate."
+    },
+    "depre-dev/averray-reference-agent#814": {
+      "accuracy": "accurate",
+      "rationale": "The head and merge-base both install offline but the root suite exits 1 because it assumes prebuilt workspace package outputs and unavailable sandbox capabilities such as zsh/private checkout. Contract attribution is accurate."
+    },
+    "depre-dev/averray-reference-agent#812": {
+      "accuracy": "accurate",
+      "rationale": "The documentation/evidence head and merge-base both install offline but the root suite exits 1 on the same workspace-build and sandbox assumptions. A clean contract-attributable INCONCLUSIVE is accurate."
+    },
+    "depre-dev/averray-reference-agent#603": {
+      "accuracy": "accurate",
+      "rationale": "The test-only head and merge-base both install offline but the root suite exits 1 on the same workspace-build and sandbox assumptions. The failure cannot be isolated to the candidate, so contract attribution is accurate."
+    },
+    "averray-agent/agent-harness#36": {
+      "accuracy": "accurate",
+      "rationale": "Rule 5 cannot prove that make gate is defined by one immutable file because Make can select or include multiple definitions. Refusing before execution is an accurate contract-attributable hold."
+    },
+    "averray-agent/agent-harness#35": {
+      "accuracy": "accurate",
+      "rationale": "Rule 5 cannot prove that make gate is defined by one immutable file because Make can select or include multiple definitions. Refusing before execution is an accurate contract-attributable hold."
+    },
+    "averray-agent/agent-harness#32": {
+      "accuracy": "accurate",
+      "rationale": "Rule 5 cannot prove that make gate is defined by one immutable file because Make can select or include multiple definitions. Refusing before execution is an accurate contract-attributable hold."
+    },
+    "averray-agent/agent-harness#31": {
+      "accuracy": "accurate",
+      "rationale": "Rule 5 cannot prove that make gate is defined by one immutable file because Make can select or include multiple definitions. Refusing before execution is an accurate contract-attributable hold."
+    },
+    "averray-agent/agent-harness#30": {
+      "accuracy": "accurate",
+      "rationale": "Rule 5 cannot prove that make gate is defined by one immutable file because Make can select or include multiple definitions. The documentation diff remains a clean contract-attributable hold."
+    },
+    "averray-agent/agent-harness#29": {
+      "accuracy": "accurate",
+      "rationale": "Rule 5 cannot prove that make gate is defined by one immutable file because Make can select or include multiple definitions. The documentation diff remains a clean contract-attributable hold."
+    }
+  }
+}
