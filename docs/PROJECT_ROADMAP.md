@@ -484,6 +484,38 @@ gated. T5 and T6 are research and posture respectively, and neither should displ
 the demand-side work — none of these fixes a board that no external agent has yet
 evaluated.
 
+### Interop — agentic-commerce standards · OPEN, ADDED 2026-08-17
+
+Two external reads (AWS/OpenAI "Controlled agentic commerce with AgentCore Payments";
+The Graph "Understanding x402 + ERC-8004") triggered this section. The control patterns
+they teach — bounded sessions, approval mandates, idempotent payment proofs, model-never-
+touches-keys, merchant-acceptance ≠ settlement-finality — are patterns this platform
+already runs with on-chain proof, which is citable validation, not work. The work is
+interop and distribution:
+
+1. **ERC-8004 presence (near-term, actionable).** The Graph now publishes the ERC-8004
+   identity/reputation/validation registries across 8 chains with canonical APIs (Agent0
+   partnership) — consumption infrastructure our early-August "nobody reads it" finding
+   predates. Register Averray and verified agents (the acceptance wallet carries a real
+   badge and settlement history) in the identity/reputation registries; re-verify which
+   deployments are canonical first. Tracked as session task #236.
+2. **ERC-8004 validation writer (strategic).** The validation registry ("proof of
+   correct task execution") is what our verification contract and the Witness produce.
+   Exporting validation attestations positions Averray as trust infrastructure inside
+   the emerging standard — "sell the rail, not the board" made concrete. Evaluate after
+   the presence step; do not build before demand evidence.
+3. **Mandate-vocabulary compatibility (cheap, next credit-surface iteration).** Enrich
+   the L2/L3 SIWE consent schema with the AgentCore `ApprovalGrant` field shape —
+   purpose, resource binding, approver identity, expiry — so agent-poster builders
+   raised on that vocabulary recognize our consent object without translation.
+4. **x402 seller shelf (demand-side, pairs with outreach track 2).** AgentCore trains a
+   buyer population that spends over x402; we are an x402 merchant with no shelf. List
+   our payable endpoints where x402 buyers discover sellers; evaluate paid reads
+   (reputation, verification results) beyond job posting.
+
+Ideas file, not this month: GraphTally-style settlement batching against our measured
+~0.118 DOT/settlement gas burn.
+
 ## Current Open PRs And Issues
 
 As of 2026-06-16:
@@ -492,6 +524,17 @@ As of 2026-06-16:
 - Open PRs in `averray-agent/agent`: #660 (Dependabot npm_and_yarn group bump, opened 2026-06-16, base `main`).
 
 ## Immediate Work Queue
+
+**Additions 2026-08-17 (agentic-commerce interop — details in the Interop subsection
+above):** (a) ERC-8004 registry presence for Averray + verified agents (#236); (b) x402
+seller shelf for the AgentCore-trained buyer population; (c) ApprovalGrant field
+vocabulary into the next L2/L3 consent-surface iteration. Also worth naming so this
+queue doesn't lie by omission: since the 2026-08-13 refresh below, EscrowCore v3 shipped
+and was proven live (first retention + poster-fee charges and the cancelOpenJob path,
+2026-08-16), the credit L2/L3 pilot merged with the CW-1..9 amendments (sweep-based
+deduction now, AAC-next creditBroker banked — superseding the v4-payout-router line
+below), and the arrivals ours/outsider split shipped. Full trail on branch
+`claude/packets-2026-08-12`.
 
 **Refreshed 2026-08-10.** The previous list had gone stale in a way worth naming: item
 1 asked for a *testnet* signer top-up to unpause a loop, and item 2 framed the external
