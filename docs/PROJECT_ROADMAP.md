@@ -166,12 +166,19 @@ the L2 deploy ceremony when gated, the §8 multisig batch, the canary, the
 curated lanes (they are the receipt factory and the liveness proof), and
 external-audit engagement.
 
-New urgency: the **Swiss memo is now the binding gate for the flagship product**
-and should be scoped Proof-to-Pay-first, deposits second — releasing
-third-party money against a policy is the exact activity the memo must cover.
-No new custody class is created (external poster funds already flow through
-escrow since the poster door opened 2026-08-08; BYO only changes who the buyer
-names as recipient), but scaling it is memo-gated.
+Swiss memo — **event-triggered, not calendar-triggered** (recalibrated
+2026-08-17 evening, Pascal): the memo blocks nothing while aggregate
+third-party funds held by the platform (open job escrow + pool deposits +
+externally-owed AAC balances — the board's solvency-floor inputs already
+measure this) stay below **five figures USD**. Trigger: that aggregate trending
+toward ≥10,000 — start counsel near the halfway mark so the engagement lands
+before the line — or an enterprise prospect asking for legal posture in
+writing. Standing controls until then: the existing caps (already law) plus a
+one-page scoping note and a named counsel contact. When commissioned, scope is
+Proof-to-Pay-first, deposits second. No new custody class is created by BYO
+(external poster funds already flow through escrow since the poster door
+opened 2026-08-08), and "memo unstarted" is not a failed gate on the
+2026-09-11 scoreboard absent the trigger.
 
 Deferred with explicit gates (detail in the build plan): receipt-based routing
 API (≥50 external receipts); validator/verification-recipe marketplace (three
