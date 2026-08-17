@@ -516,6 +516,14 @@ interop and distribution:
 Ideas file, not this month: GraphTally-style settlement batching against our measured
 ~0.118 DOT/settlement gas burn.
 
+**Decisions 2026-08-17 (Pascal):** registration scope = Averray platform identity + the
+flagship verified agent, on Base, receipt-backed claims only; validator-role trigger =
+observed consumption, instrumented as registry-referred endpoint traffic + on-chain events
+touching our entries (reads emit nothing — this proxy is the instrument); consent schema
+takes the full ApprovalGrant vocabulary with approver as an optional, unenforced field;
+first x402 shelf product = paid verification runs (packet #237), coherent with free
+registry reputation and the on-ramp to the validator role.
+
 ## Current Open PRs And Issues
 
 As of 2026-06-16:
