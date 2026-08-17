@@ -73,8 +73,13 @@ node witness/bin/verify.mjs \
 
 Exit codes are `0` for `PASS`, `1` for `FAIL`, `2` for `POLICY_VIOLATION`, and
 `3` for `INCONCLUSIVE`. The JSON result names every policy/integrity detection and
-attributes every inconclusive verdict to `infrastructure`, `contract`, or `candidate`.
-Every inconclusive result records `workerConsequence: "none"`.
+attributes every inconclusive verdict to `infrastructure`, `contract`, `candidate`, or
+`verifier`. `verifier` means the Witness could not distinguish the relevant outcomes
+from its evidence; it is an evidence-completeness signal about the Witness, not an
+accusation against the candidate. Every inconclusive result records
+`workerConsequence: "none"`. Verifier-attributed results additionally emit
+`verifierReputationSignal.kind: "evidence_completeness_gap"` for downstream reputation
+accounting; the Witness itself does not score reputation.
 
 The executor materializes the exact base commit, validates and applies the patch with
 Git isolated from any parent worktree, and uses separate source copies and container
@@ -160,6 +165,7 @@ npm run test:witness
 npm --prefix witness run drills -- --out evidence/drills.json
 npm --prefix witness run corpus -- --out-dir evidence/corpus
 npm --prefix witness run integrity:drills
+npm --prefix witness run ambiguity:drills
 npm --prefix witness run adversarial:corpus -- --out evidence/adversarial-corpus.json
 npm --prefix witness run pr:shadow -- --allow-unreviewed --out evidence/pr-shadow/discovery.json
 npm --prefix witness run pr:shadow:report -- \
@@ -172,6 +178,11 @@ The integrity drill mutates each detector registration in a temporary module. It
 requires the mutation anchor to occur exactly once, confirms the replacement was
 applied, records the expected `RED`, then checks the attack and its corrected patch
 against the real detector.
+
+The ambiguity drill separately mutates the confident/ambiguous boundary, explicit Git
+rename parsing, the fourth attribution, and worker consequence. Its real declaration
+fixtures are the exact false-positive hunks from `agent#1109` and
+`reference-agent#813`; every anchor must occur exactly once and produce SEEN RED.
 
 The 15-case adversarial corpus is pinned to
 `depre-dev/averray-send-test@42571061ca9b6da8c6aca908f1ee1df1dab4e10a`.

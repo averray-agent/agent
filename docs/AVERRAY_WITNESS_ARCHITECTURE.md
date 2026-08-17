@@ -124,6 +124,12 @@ The contract must therefore distinguish:
 - **candidate-attributable** — the submitted change introduced the flakiness, the fork
   bomb, the timeout. No immediate penalty, but it is a *counted signal*; repeated
   candidate-attributable inconclusives from one worker are themselves evidence.
+- **contract-attributable** — a frozen premise was false, such as a mismatched source
+  binding or a baseline that did not have the declared state. No worker consequence.
+- **verifier-attributable** — the Witness lacks enough evidence to decide, such as a
+  detector that cannot distinguish a test refactor from a removal. No worker
+  consequence; emit an evidence-completeness signal for the Witness's own public
+  reputation trail.
 
 Without that split, the humane design becomes the exploit.
 

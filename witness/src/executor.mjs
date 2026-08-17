@@ -8,6 +8,11 @@ import {
   inspectCandidatePatch
 } from "./candidate-patch.mjs";
 import { ArtifactAcquisitionError } from "./artifacts.mjs";
+import {
+  assertInconclusiveAttribution,
+  verifierReputationSignalFor,
+  workerConsequenceFor
+} from "./attribution.mjs";
 import { DEFAULT_IMAGE, DEFAULT_TIMEOUT_SECONDS } from "./constants.mjs";
 import {
   dockerReadOnlyMounts,
@@ -19,7 +24,7 @@ import { ensureWitnessImage, runInWitnessContainer } from "./docker.mjs";
 import { SourceCommitBindingError } from "./git-bundle-source.mjs";
 import {
   INTEGRITY_DETECTION_SUPPORT,
-  detectIntegrityViolations,
+  detectIntegrityFindings,
   unsupportedIntegrityDetections
 } from "./integrity.mjs";
 import { createAttemptCopy, materializeRepository } from "./materialize.mjs";
@@ -338,6 +343,7 @@ function newReport(contract, candidatePatch, mode) {
     reason: null,
     details: null,
     workerConsequence: null,
+    verifierReputationSignal: null,
     materialization: null,
     sandbox: {
       image: null,
@@ -354,6 +360,7 @@ function newReport(contract, candidatePatch, mode) {
     patch: null,
     policyViolations: [],
     integrityViolations: [],
+    integrityAmbiguities: [],
     integritySupport: INTEGRITY_DETECTION_SUPPORT,
     baseline: [],
     candidate: [],
@@ -366,11 +373,15 @@ function conclude(report, started, verdict, { attribution = null, reason = null,
   report.attribution = attribution;
   report.reason = reason;
   report.details = details;
-  report.workerConsequence = verdict === VERDICTS.INCONCLUSIVE ? "none" : null;
+  report.workerConsequence = workerConsequenceFor(verdict);
+  report.verifierReputationSignal = verifierReputationSignalFor({
+    verdict,
+    attribution,
+    reason,
+    details
+  });
   report.seconds = Number(((performance.now() - started) / 1_000).toFixed(3));
-  if (verdict === VERDICTS.INCONCLUSIVE && !["infrastructure", "contract", "candidate"].includes(attribution)) {
-    throw new Error("INCONCLUSIVE verdict is missing infrastructure/contract/candidate attribution");
-  }
+  assertInconclusiveAttribution(verdict, attribution);
   return report;
 }
 
@@ -447,6 +458,7 @@ export async function executeVerificationContract(options, dependencies = {}) {
     report.patch = inspection.valid
       ? {
           bytes: inspection.bytes,
+          changedFileCount: inspection.changedFileCount,
           changedPaths: inspection.changedPaths,
           stats: inspection.stats
         }
@@ -454,6 +466,7 @@ export async function executeVerificationContract(options, dependencies = {}) {
     let candidateFailure = inspection.valid ? null : inspection.reason;
     const unsupported = mode === "real" ? unsupportedIntegrityDetections(contract) : [];
     let integrityFailure = null;
+    let integrityFailureAttribution = "verifier";
 
     if (inspection.valid) {
       if (mode === "real") {
@@ -466,18 +479,21 @@ export async function executeVerificationContract(options, dependencies = {}) {
         if (!applied.applied) candidateFailure = applied.reason;
         if (applied.applied && mode === "real") {
           try {
-            report.integrityViolations = await detectIntegrityViolations({
+            const integrityFindings = await detectIntegrityFindings({
               contract,
               patch: inspection,
               baseRoot: sourcePath,
               candidateRoot: analysisRoot
             });
+            report.integrityViolations = integrityFindings.violations;
+            report.integrityAmbiguities = integrityFindings.ambiguities;
           } catch (error) {
             integrityFailure = error.message;
           }
         }
       } catch (error) {
         integrityFailure = `candidate analysis workspace failed: ${error.message}`;
+        integrityFailureAttribution = "infrastructure";
       }
     }
 
@@ -488,16 +504,28 @@ export async function executeVerificationContract(options, dependencies = {}) {
         details: violations.map((entry) => entry.detection)
       });
     }
+    if (report.integrityAmbiguities.length > 0) {
+      return conclude(report, started, VERDICTS.INCONCLUSIVE, {
+        attribution: "verifier",
+        reason: "integrity_detection_ambiguous",
+        details: report.integrityAmbiguities.map((entry) => ({
+          detection: entry.detection,
+          message: entry.message,
+          paths: entry.paths,
+          evidence: entry.evidence
+        }))
+      });
+    }
     if (unsupported.length > 0) {
       return conclude(report, started, VERDICTS.INCONCLUSIVE, {
-        attribution: "infrastructure",
+        attribution: "verifier",
         reason: "integrity_detection_unimplemented",
         details: `contract declares unsupported detections: ${unsupported.join(", ")}`
       });
     }
     if (integrityFailure) {
       return conclude(report, started, VERDICTS.INCONCLUSIVE, {
-        attribution: "infrastructure",
+        attribution: integrityFailureAttribution,
         reason: "integrity_detection_failed",
         details: integrityFailure
       });

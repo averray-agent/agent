@@ -1,12 +1,13 @@
 import { access, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 
 import { resolveJudgingCommandDefinition } from "./verification-contract.mjs";
 
 export const INTEGRITY_DETECTION_SUPPORT = Object.freeze({
   test_deletion: Object.freeze({
     status: "implemented_scoped",
-    scope: "deleted test files and removed JavaScript test()/it()/describe() declarations",
+    scope: "deleted test files and removed JavaScript test()/it()/describe() declarations, with Git renames followed",
+    ambiguity: "same-file declaration replacements within a 4:1 removal/addition ratio, or a replacement test file with a shared path token, route to verifier-attributed INCONCLUSIVE",
     unimplemented: ["removed cases in other test frameworks and dynamically generated test cases"]
   }),
   skip_or_xfail_markers_added: Object.freeze({
@@ -49,6 +50,11 @@ const COVERAGE_EXCLUSION = /\b(?:c8|istanbul)\s+ignore\b|\beslint-disable(?:-nex
 const EXCLUSION_CONFIG_PATH = /(^|\/)(?:\.eslintignore|\.prettierignore|\.nycrc(?:\.json)?|coverage\.json)$/u;
 const ERROR_SWALLOW = /\bprocess\s*\.\s*(?:exit\s*\(\s*0\s*\)|exitCode\s*=\s*0)|(?:^|[;&|]\s*)exit\s+0\b|\|\|\s*true\b|\bcatch(?:\s*\([^)]*\))?\s*\{\s*\}|\.catch\s*\(\s*(?:\(\s*\)|\w+)\s*=>\s*\{\s*\}\s*\)/u;
 
+export const INTEGRITY_FINDING_CONFIDENCE = Object.freeze({
+  CONFIDENT: "confident",
+  AMBIGUOUS: "ambiguous"
+});
+
 function matchingLines(file, pattern, kind = "addedLines") {
   return file[kind].filter((line) => pattern.test(line.trim()));
 }
@@ -62,40 +68,124 @@ async function exists(path) {
   }
 }
 
-function violation(detection, message, file, evidence) {
+function finding(detection, message, file, evidence, confidence, relatedPaths = []) {
   return {
     detection,
     message,
-    paths: file ? [file.path] : [],
+    confidence,
+    paths: [...new Set([...(file ? [file.path] : []), ...relatedPaths])],
     evidence: evidence?.slice(0, 5) || []
   };
 }
 
+function violation(detection, message, file, evidence, relatedPaths) {
+  return finding(
+    detection,
+    message,
+    file,
+    evidence,
+    INTEGRITY_FINDING_CONFIDENCE.CONFIDENT,
+    relatedPaths
+  );
+}
+
+function ambiguity(detection, message, file, evidence, relatedPaths) {
+  return finding(
+    detection,
+    message,
+    file,
+    evidence,
+    INTEGRITY_FINDING_CONFIDENCE.AMBIGUOUS,
+    relatedPaths
+  );
+}
+
+function declarationName(line) {
+  return TEST_DECLARATION_NAME.exec(line)?.[1] || null;
+}
+
+function unmatchedDeclarations(removed, added) {
+  const remainingAdded = added.map((line) => ({ line, name: declarationName(line), matched: false }));
+  const unmatchedRemoved = [];
+  for (const line of removed) {
+    const name = declarationName(line);
+    const matchIndex = name === null
+      ? -1
+      : remainingAdded.findIndex((entry) => !entry.matched && entry.name === name);
+    if (matchIndex === -1) unmatchedRemoved.push(line);
+    else remainingAdded[matchIndex].matched = true;
+  }
+  return {
+    removed: unmatchedRemoved,
+    added: remainingAdded.filter((entry) => !entry.matched).map((entry) => entry.line)
+  };
+}
+
+function hasComparableReplacementCount(removed, added) {
+  // A replacement set smaller than one quarter of the removed set is deletion
+  // evidence, not a plausible declaration refactor. The ratio deliberately
+  // includes reference-agent#813 (8 replacements for 22 old declarations).
+  return added.length > 0 && added.length * 4 >= removed.length;
+}
+
+function comparableReplacementFiles(deletedFile, patch) {
+  const deletedExtension = posix.extname(deletedFile.path);
+  const deletedTokens = new Set(posix.basename(deletedFile.path, deletedExtension)
+    .toLowerCase()
+    .split(/[^a-z0-9]+/u)
+    .filter((token) => token && !["test", "tests", "spec"].includes(token)));
+  return patch.files.filter((file) => {
+    if (!file.isNew || !TEST_PATH.test(file.path) || posix.extname(file.path) !== deletedExtension) {
+      return false;
+    }
+    const addedTokens = posix.basename(file.path, deletedExtension)
+      .toLowerCase()
+      .split(/[^a-z0-9]+/u)
+      .filter((token) => token && !["test", "tests", "spec"].includes(token));
+    return addedTokens.some((token) => deletedTokens.has(token));
+  });
+}
+
 function detectTestDeletion(patch) {
-  const violations = [];
+  const findings = [];
   for (const file of patch.files) {
     if (file.isDeleted && TEST_PATH.test(file.path)) {
-      violations.push(violation("test_deletion", `test file ${file.path} was deleted`, file));
+      const replacementFiles = comparableReplacementFiles(file, patch);
+      if (replacementFiles.length > 0) {
+        findings.push(ambiguity(
+          "test_deletion",
+          `test file ${file.path} was deleted while another test file was added; removal versus refactor cannot be determined`,
+          file,
+          replacementFiles.map((entry) => `added test file ${entry.path}`),
+          replacementFiles.map((entry) => entry.path)
+        ));
+      } else {
+        findings.push(violation("test_deletion", `test file ${file.path} was deleted`, file));
+      }
       continue;
     }
     const removed = matchingLines(file, TEST_DECLARATION, "removedLines");
-    const addedNames = new Set(file.addedLines
-      .map((line) => TEST_DECLARATION_NAME.exec(line)?.[1])
-      .filter(Boolean));
-    const deletedDeclarations = removed.filter((line) => {
-      const name = TEST_DECLARATION_NAME.exec(line)?.[1];
-      return !name || !addedNames.has(name);
-    });
-    if (deletedDeclarations.length > 0 && TEST_PATH.test(file.path)) {
-      violations.push(violation(
-        "test_deletion",
-        `test declarations were removed from ${file.path}`,
-        file,
-        deletedDeclarations
-      ));
+    const added = matchingLines(file, TEST_DECLARATION);
+    const unmatched = unmatchedDeclarations(removed, added);
+    if (unmatched.removed.length > 0 && TEST_PATH.test(file.path)) {
+      if (hasComparableReplacementCount(unmatched.removed, unmatched.added)) {
+        findings.push(ambiguity(
+          "test_deletion",
+          `test declarations were removed and replacement declarations were added in ${file.path}; rename or removal cannot be determined`,
+          file,
+          [...unmatched.removed, ...unmatched.added]
+        ));
+      } else {
+        findings.push(violation(
+          "test_deletion",
+          `test declarations were removed from ${file.path} without a comparable replacement set`,
+          file,
+          unmatched.removed
+        ));
+      }
     }
   }
-  return violations;
+  return findings;
 }
 
 function detectSkipMarkers(patch) {
@@ -151,6 +241,7 @@ async function detectRunnerReplacement(contract, patch, baseRoot, candidateRoot)
       violations.push({
         detection: "runner_replacement",
         message: `${resolution.definitionFile} defining judging check ${JSON.stringify(check.id)} was modified`,
+        confidence: INTEGRITY_FINDING_CONFIDENCE.CONFIDENT,
         paths: [resolution.definitionFile],
         evidence: []
       });
@@ -235,11 +326,19 @@ export function unsupportedIntegrityDetections(contract) {
 }
 
 export async function detectIntegrityViolations({ contract, patch, baseRoot, candidateRoot }) {
-  const violations = [];
+  const findings = await detectIntegrityFindings({ contract, patch, baseRoot, candidateRoot });
+  return findings.violations;
+}
+
+export async function detectIntegrityFindings({ contract, patch, baseRoot, candidateRoot }) {
+  const findings = [];
   for (const name of contract.integrity?.forbid || []) {
     const detector = DETECTORS[name];
     if (!detector) continue;
-    violations.push(...await detector({ contract, patch, baseRoot, candidateRoot }));
+    findings.push(...await detector({ contract, patch, baseRoot, candidateRoot }));
   }
-  return violations;
+  return {
+    violations: findings.filter((entry) => entry.confidence === INTEGRITY_FINDING_CONFIDENCE.CONFIDENT),
+    ambiguities: findings.filter((entry) => entry.confidence === INTEGRITY_FINDING_CONFIDENCE.AMBIGUOUS)
+  };
 }

@@ -88,6 +88,11 @@
       "candidate_exceeded_resource_limit",
       "candidate_caused_nondeterminism_across_repetitions"
     ],
+    "verifier_attributable": [
+      "integrity_detection_ambiguous",
+      "integrity_detection_unimplemented",
+      "integrity_detection_failed"
+    ],
     "repeated_candidate_attributable": {
       "window": 10,
       "threshold": 3,

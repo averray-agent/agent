@@ -16,17 +16,29 @@ function isolatedGitEnvironment(root) {
 }
 
 function parseNumstat(stdout) {
-  return stdout
-    .split("\0")
-    .filter(Boolean)
-    .map((record) => {
-      const [added, deleted, ...pathParts] = record.split("\t");
-      return {
-        path: pathParts.join("\t"),
-        added: added === "-" ? null : Number(added),
-        deleted: deleted === "-" ? null : Number(deleted)
-      };
+  const records = stdout.split("\0");
+  const stats = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record) continue;
+    const [added, deleted, ...pathParts] = record.split("\t");
+    let path = pathParts.join("\t");
+    let previousPath = path;
+    // With -z, Git represents a rename as "added<TAB>deleted<TAB><NUL>old<NUL>new<NUL>".
+    // Consume the two raw paths instead of mistaking them for numstat records.
+    if (path === "") {
+      previousPath = records[index + 1] || "";
+      path = records[index + 2] || "";
+      index += 2;
+    }
+    stats.push({
+      path,
+      previousPath,
+      added: added === "-" ? null : Number(added),
+      deleted: deleted === "-" ? null : Number(deleted)
     });
+  }
+  return stats;
 }
 
 function unquoteDiffPath(value) {
@@ -51,6 +63,9 @@ function parseUnifiedDiff(text) {
           removedLines: [],
           isNew: false,
           isDeleted: false,
+          isRenamed: false,
+          renameFromSeen: false,
+          renameToSeen: false,
           mode: null,
           unsupportedHeader: null
         };
@@ -62,7 +77,18 @@ function parseUnifiedDiff(text) {
     if (line === "new file mode 120000" || line === "new mode 120000") current.mode = "symlink";
     else if (line.startsWith("new file mode ")) current.isNew = true;
     else if (line.startsWith("deleted file mode ")) current.isDeleted = true;
-    else if (line.startsWith("rename from ") || line.startsWith("rename to ") || line.startsWith("copy from ") || line.startsWith("copy to ")) {
+    else if (line.startsWith("rename from ")) {
+      current.previousPath = line.slice("rename from ".length);
+      current.renameFromSeen = true;
+      current.isRenamed = true;
+    } else if (line.startsWith("rename to ")) {
+      const previousMapPath = current.path;
+      current.path = line.slice("rename to ".length);
+      current.renameToSeen = true;
+      current.isRenamed = true;
+      if (previousMapPath !== current.path) files.delete(previousMapPath);
+      files.set(current.path, current);
+    } else if (line.startsWith("copy from ") || line.startsWith("copy to ")) {
       current.unsupportedHeader = line;
     } else if (line.startsWith("+") && !line.startsWith("+++")) {
       current.addedLines.push(line.slice(1));
@@ -70,7 +96,12 @@ function parseUnifiedDiff(text) {
       current.removedLines.push(line.slice(1));
     }
   }
-  return [...files.values()];
+  return [...files.values()].map((file) => {
+    if (file.isRenamed && (!file.renameFromSeen || !file.renameToSeen)) {
+      file.unsupportedHeader = "incomplete rename metadata";
+    }
+    return file;
+  });
 }
 
 export async function inspectCandidatePatch({ patchPath, baseRoot }) {
@@ -115,8 +146,29 @@ export async function inspectCandidatePatch({ patchPath, baseRoot }) {
   const text = content.toString("utf8");
   const files = parseUnifiedDiff(text);
   const stats = parseNumstat(numstat.stdout);
-  const changedPaths = [...new Set(stats.map((entry) => entry.path))];
-  const parsedPaths = new Set(files.map((entry) => entry.path));
+  // A 100%-similar file rename has no changed lines, so `git apply --numstat`
+  // may emit only the destination path. The validated unified diff carries the
+  // complete rename pair; merge that metadata into the stat instead of counting
+  // the source and destination as two files.
+  for (const file of files.filter((entry) => entry.isRenamed)) {
+    const recorded = stats.find((entry) => entry.path === file.path);
+    if (recorded) {
+      recorded.previousPath = file.previousPath;
+    } else {
+      stats.push({
+        path: file.path,
+        previousPath: file.previousPath,
+        added: file.addedLines.length,
+        deleted: file.removedLines.length
+      });
+    }
+  }
+  const changedPaths = [...new Set(stats.flatMap((entry) =>
+    entry.previousPath === entry.path ? [entry.path] : [entry.previousPath, entry.path]
+  ))];
+  const parsedPaths = new Set(files.flatMap((entry) =>
+    entry.previousPath === entry.path ? [entry.path] : [entry.previousPath, entry.path]
+  ));
   const unsupported = files.find((entry) => entry.unsupportedHeader) ||
     changedPaths.find((path) => !parsedPaths.has(path));
   if (unsupported) {
@@ -143,6 +195,7 @@ export async function inspectCandidatePatch({ patchPath, baseRoot }) {
     valid: true,
     patchPath: absolutePatch,
     bytes: content.length,
+    changedFileCount: stats.length,
     changedPaths,
     stats,
     files
@@ -161,10 +214,11 @@ export function evaluateCandidatePolicy(contract, patch) {
         ...contract.subject.materialization.frozen_inputs.map((input) => input.path)
       ].filter(Boolean)
     : [];
-  if (patch.changedPaths.length > candidate.maximum_changed_files) {
+  const changedFileCount = patch.changedFileCount ?? patch.changedPaths.length;
+  if (changedFileCount > candidate.maximum_changed_files) {
     violations.push({
       detection: "maximum_changed_files_exceeded",
-      message: `patch changes ${patch.changedPaths.length} files; maximum is ${candidate.maximum_changed_files}`,
+      message: `patch changes ${changedFileCount} files; maximum is ${candidate.maximum_changed_files}`,
       paths: patch.changedPaths
     });
   }

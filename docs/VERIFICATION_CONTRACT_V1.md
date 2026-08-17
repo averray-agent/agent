@@ -207,20 +207,28 @@ resolution or baseline container creation.
 
 ## Inconclusive attribution
 
-`contract` is a third `INCONCLUSIVE` attribution alongside `infrastructure` and
-`candidate`. Source/commit binding failures, baseline expectation mismatches, and other
-contract-declared preconditions found untrue route to `contract`. Host, image, and
-transport failures remain infrastructure-attributable; candidate time/resource and
-nondeterminism failures remain candidate-attributable. Every inconclusive result
-records `workerConsequence: none`, including contract-attributable failures.
+`contract` and `verifier` join `infrastructure` and `candidate` as distinct
+`INCONCLUSIVE` attributions. Source/commit binding failures, baseline expectation
+mismatches, and other contract-declared preconditions found untrue route to `contract`.
+Host, image, and transport failures remain infrastructure-attributable; candidate
+time/resource and nondeterminism failures remain candidate-attributable. `verifier`
+means the Witness itself lacks enough evidence to decide, including an integrity
+detection that cannot distinguish a test refactor from removal. Every inconclusive
+result records `workerConsequence: none`.
 
-The optional policy manifest names the three buckets independently:
+Verifier-attributed results also emit a structured
+`verifierReputationSignal.kind: evidence_completeness_gap`. This is the factual input
+for downstream verifier-reputation accounting; the Witness still does not calculate
+reputation or act on the result.
+
+The optional policy manifest names the four buckets independently:
 
 ```yaml
 inconclusive_policy:
   infrastructure_attributable: [host_failure, image_unavailable, artifact_unavailable]
   contract_attributable: [source_commit_binding_failed, baseline_mismatch, contract_precondition_untrue]
   candidate_attributable: [candidate_exceeded_resource_limit]
+  verifier_attributable: [integrity_detection_ambiguous, integrity_detection_unimplemented, integrity_detection_failed]
   repeated_candidate_attributable:
     window: 10
     threshold: 3
