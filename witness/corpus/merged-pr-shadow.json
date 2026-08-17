@@ -1,0 +1,88 @@
+{
+  "schemaVersion": "averray.witness.pr-shadow-corpus/v1",
+  "frozenAt": "2026-08-17T18:00:00Z",
+  "selectionMethod": [
+    "The set was frozen before any Witness detector output was inspected.",
+    "Take the five most recently merged PRs before the cutoff from averray-agent/agent and depre-dev/averray-reference-agent, plus the six most recent from the lower-volume private agent-harness repository.",
+    "Add two predeclared stress strata to each Node repository: a real CI/config change and a small or test-only change. This yields exactly 20 PRs across documentation, tests, refactors, features, configuration, and CI.",
+    "No selected PR was removed for looking likely to trigger a detector."
+  ],
+  "repositories": [
+    {
+      "repository": "averray-agent/agent",
+      "check": {
+        "id": "backend-suite",
+        "command": ["npm", "test"],
+        "workingDirectory": "mcp-server"
+      },
+      "protectedPaths": [
+        ".github/**",
+        "package.json",
+        "package-lock.json",
+        "mcp-server/package.json"
+      ],
+      "allowedPaths": ["**"],
+      "maximumChangedFiles": 1000,
+      "timeoutSeconds": 420,
+      "pullRequests": [
+        { "number": 1149, "category": "documentation", "selectionReason": "recent-window rank 1" },
+        { "number": 1148, "category": "feature-and-tests", "selectionReason": "recent-window rank 2" },
+        { "number": 1147, "category": "configuration-and-code", "selectionReason": "recent-window rank 3" },
+        { "number": 1146, "category": "documentation", "selectionReason": "recent-window rank 4" },
+        { "number": 1145, "category": "large-feature", "selectionReason": "recent-window rank 5" },
+        { "number": 1110, "category": "ci-config", "selectionReason": "predeclared real protected-path stress stratum" },
+        { "number": 1109, "category": "small-code-and-test", "selectionReason": "predeclared small-change stratum" }
+      ]
+    },
+    {
+      "repository": "depre-dev/averray-reference-agent",
+      "check": {
+        "id": "repository-suite",
+        "command": ["npm", "test"],
+        "workingDirectory": "."
+      },
+      "protectedPaths": [
+        ".github/**",
+        "package.json",
+        "package-lock.json"
+      ],
+      "allowedPaths": ["**"],
+      "maximumChangedFiles": 1000,
+      "timeoutSeconds": 420,
+      "pullRequests": [
+        { "number": 816, "category": "ui-refactor-and-tests", "selectionReason": "recent-window rank 1" },
+        { "number": 815, "category": "feature-and-tests", "selectionReason": "recent-window rank 2" },
+        { "number": 814, "category": "small-code-and-test", "selectionReason": "recent-window rank 3" },
+        { "number": 813, "category": "ui-feature-and-tests", "selectionReason": "recent-window rank 4" },
+        { "number": 812, "category": "documentation-and-evidence", "selectionReason": "recent-window rank 5" },
+        { "number": 802, "category": "ci-and-tests", "selectionReason": "predeclared real protected-path stress stratum" },
+        { "number": 603, "category": "test-only", "selectionReason": "predeclared pure test-only stratum" }
+      ]
+    },
+    {
+      "repository": "averray-agent/agent-harness",
+      "check": {
+        "id": "repository-gate",
+        "command": ["make", "gate"],
+        "workingDirectory": "."
+      },
+      "protectedPaths": [
+        ".github/**",
+        "Makefile",
+        "pyproject.toml",
+        "uv.lock"
+      ],
+      "allowedPaths": ["**"],
+      "maximumChangedFiles": 1000,
+      "timeoutSeconds": 420,
+      "pullRequests": [
+        { "number": 36, "category": "feature-and-tests", "selectionReason": "recent-window rank 1" },
+        { "number": 35, "category": "refactor-and-tests", "selectionReason": "recent-window rank 2" },
+        { "number": 32, "category": "small-code-and-test", "selectionReason": "recent-window rank 3" },
+        { "number": 31, "category": "refactor-docs-and-tests", "selectionReason": "recent-window rank 4" },
+        { "number": 30, "category": "documentation", "selectionReason": "recent-window rank 5" },
+        { "number": 29, "category": "documentation", "selectionReason": "recent-window rank 6" }
+      ]
+    }
+  ]
+}

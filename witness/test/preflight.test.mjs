@@ -135,6 +135,51 @@ test("a lockfile-backed cache that makes the offline check runnable is FROZEN_DE
   assert.equal(report.baseExitStatus, 1);
 });
 
+test("a monorepo check keeps root dependency preparation and nested rule-5 working directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "witness-monorepo-preflight-"));
+  const repository = join(root, "repository");
+  const cacheDirectory = join(root, "shared-cache");
+  await mkdir(join(repository, "mcp-server"), { recursive: true });
+  await writeFile(join(repository, "package.json"), '{"private":true,"workspaces":["mcp-server"]}\n');
+  await writeFile(join(repository, "package-lock.json"), '{"lockfileVersion":3,"packages":{}}\n');
+  await writeFile(
+    join(repository, "mcp-server", "package.json"),
+    '{"name":"mcp-server","scripts":{"test":"node --test"}}\n'
+  );
+  const attempts = [];
+  const sequence = [
+    result({ exitCode: 127, stderr: "sh: 1: tap: not found" }),
+    result({ exitCode: 0, networkMode: "bridge" }),
+    result({ exitCode: 0 }),
+    result({ exitCode: 0 })
+  ];
+  try {
+    const report = await runPreflight({
+      repo: repository,
+      check: "npm test",
+      workingDirectory: "mcp-server",
+      protectedPaths: ["mcp-server/package.json"]
+    }, {
+      ensureImage: async (image) => ({ image, built: false, seconds: 0 }),
+      runContainer: async (options) => {
+        attempts.push(options);
+        return sequence[attempts.length - 1];
+      },
+      cacheDirectory,
+      temporaryParent: root
+    });
+    assert.equal(report.classification, "FROZEN_DEPENDENCIES");
+    assert.equal(report.check.definitionFile, "mcp-server/package.json");
+    assert.equal(report.check.candidateModifiable, false);
+    assert.equal(attempts[0].workingDirectory, "mcp-server");
+    assert.equal(attempts[1].workingDirectory, undefined);
+    assert.equal(attempts[3].workingDirectory, "mcp-server");
+    assert.equal(attempts[3].cache, cacheDirectory);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("a missing root executable becomes typed UNMATERIALIZABLE", async () => {
   const report = await runPreflight({
     repo: resolve(FIXTURES, "missing-toolchain"),

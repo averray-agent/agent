@@ -161,6 +161,11 @@ npm --prefix witness run drills -- --out evidence/drills.json
 npm --prefix witness run corpus -- --out-dir evidence/corpus
 npm --prefix witness run integrity:drills
 npm --prefix witness run adversarial:corpus -- --out evidence/adversarial-corpus.json
+npm --prefix witness run pr:shadow -- --allow-unreviewed --out evidence/pr-shadow/discovery.json
+npm --prefix witness run pr:shadow:report -- \
+  --input evidence/pr-shadow/discovery.json \
+  --out evidence/pr-shadow/report.json
+npm --prefix witness run pr:shadow:drills
 ```
 
 The integrity drill mutates each detector registration in a temporary module. It
@@ -179,6 +184,30 @@ zero-false-pass claim is explicitly limited to represented detectable classes.
 The drills compare a deliberately static inference with actual sandbox execution.
 They cover a genuine network dependency, a missing toolchain, a lockfile-plus-test
 script that still needs network, and an in-container `NetworkMode none` assertion.
+
+## Merged-PR false-positive shadow
+
+The merged-PR shadow answers the question the adversarial corpus cannot: how often do
+the candidate-policy and integrity detectors flag legitimate work? Its frozen 20-PR
+manifest spans `averray-agent/agent`, `depre-dev/averray-reference-agent`, and the
+private `averray-agent/agent-harness`, including documentation, test-only, refactor,
+feature, config, and CI changes. GitHub access is structurally limited to authenticated
+GET requests and read-only clones. The runner has no comment, status, submission, or
+push operation.
+
+Each PR gets a derived contract containing its base commit, head commit, exact diff
+digest, protected paths, all seven integrity detections, and the repository's own
+regression check. It deliberately contains no contract author and no targeted check.
+The resulting assurance is **AV-1 plus integrity**, not AV-2; differential logic is not
+exercised because the shadow does not know what each historical PR was supposed to fix.
+
+The JSON and Markdown reports include the verdict distribution, every individual
+`POLICY_VIOLATION` with the causing diff hunk and human judgement, false-positive rates
+per detection, materialization/command failures, and reviewed INCONCLUSIVE attribution.
+The committed judgement file is separate from detector configuration: findings are
+reported and adjudicated, never tuned away. A run exits 2 if any violation or
+INCONCLUSIVE attribution remains unreviewed; use `--allow-unreviewed` only for the first
+evidence pass that discovers cases to adjudicate.
 
 The ten-repository manifest is [`corpus/repos.json`](corpus/repos.json). It includes
 the six packet-mandated repositories plus:

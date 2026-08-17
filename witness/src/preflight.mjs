@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, mkdir, mkdtemp, open, readdir, readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, normalize } from "node:path";
+import { dirname, isAbsolute, join, normalize, relative } from "node:path";
 
 import {
   CLASSIFICATIONS,
@@ -27,9 +27,11 @@ export async function runPreflight(options, dependencies = {}) {
     timeoutSeconds = DEFAULT_TIMEOUT_SECONDS,
     frozenInputs = [],
     protectedPaths = [],
+    workingDirectory = ".",
     cwd = process.cwd()
   } = options;
   if (!repo || !check) throw new Error("repo and check are required");
+  const checkWorkingDirectory = normalizeWorkingDirectory(workingDirectory);
 
   const runContainer = dependencies.runContainer || runInWitnessContainer;
   const ensureImage = dependencies.ensureImage || ensureWitnessImage;
@@ -38,7 +40,14 @@ export async function runPreflight(options, dependencies = {}) {
   const temporaryParent = dependencies.temporaryParent || process.env.WITNESS_TEMP_ROOT || join(homedir(), ".cache", "averray-witness");
   await mkdir(temporaryParent, { recursive: true, mode: 0o700 });
   const temporaryRoot = await mkdtemp(join(temporaryParent, "run-"));
-  const report = initialReport({ repo, check, image, timeoutSeconds, protectedPaths });
+  const report = initialReport({
+    repo,
+    check,
+    image,
+    timeoutSeconds,
+    protectedPaths,
+    workingDirectory: checkWorkingDirectory
+  });
 
   try {
     const sourcePath = join(temporaryRoot, "source");
@@ -59,10 +68,20 @@ export async function runPreflight(options, dependencies = {}) {
     }
 
     try {
+      const checkRoot = join(sourcePath, checkWorkingDirectory);
       report.toolchain = await detectToolchain(sourcePath, check);
+      const protectedFromCheckRoot = protectedPaths
+        .map((path) => relative(checkWorkingDirectory, path).replaceAll("\\", "/"))
+        .filter((path) => path === "" || (!path.startsWith("..") && !isAbsolute(path)));
+      const definition = await inferCheckDefinition(checkRoot, check, protectedFromCheckRoot);
       report.check = {
         ...report.check,
-        ...(await inferCheckDefinition(sourcePath, check, protectedPaths))
+        ...definition,
+        definitionFile: definition.definitionFile === null
+          ? null
+          : checkWorkingDirectory === "."
+            ? definition.definitionFile
+            : `${checkWorkingDirectory}/${definition.definitionFile}`
       };
       report.checkCommandExists = report.check.declared !== false;
       report.candidateModifiable = report.check.candidateModifiable;
@@ -99,6 +118,7 @@ export async function runPreflight(options, dependencies = {}) {
       image: executionImage,
       workspace: unpreparedPath,
       command: check,
+      workingDirectory: checkWorkingDirectory,
       networkMode: "none",
       timeoutSeconds
     });
@@ -160,7 +180,7 @@ export async function runPreflight(options, dependencies = {}) {
     }
 
     const preparedPath = join(temporaryRoot, "prepared");
-    const cachePath = join(temporaryRoot, "dependency-cache");
+    const cachePath = dependencies.cacheDirectory || join(temporaryRoot, "dependency-cache");
     await createAttemptCopy(sourcePath, preparedPath);
     await mkdir(cachePath, { recursive: true, mode: 0o777 });
     const populate = await runContainer({
@@ -223,6 +243,7 @@ export async function runPreflight(options, dependencies = {}) {
       workspace: preparedPath,
       cache: cachePath,
       command: check,
+      workingDirectory: checkWorkingDirectory,
       environment: plan.checkEnvironment || {},
       networkMode: "none",
       timeoutSeconds
@@ -275,7 +296,7 @@ export async function runPreflight(options, dependencies = {}) {
   }
 }
 
-function initialReport({ repo, check, image, timeoutSeconds, protectedPaths }) {
+function initialReport({ repo, check, image, timeoutSeconds, protectedPaths, workingDirectory }) {
   return {
     schemaVersion: REPORT_SCHEMA,
     generatedAt: new Date().toISOString(),
@@ -296,6 +317,7 @@ function initialReport({ repo, check, image, timeoutSeconds, protectedPaths }) {
     materialization: null,
     check: {
       command: check,
+      workingDirectory,
       timeoutSeconds,
       definitionFile: null,
       definitionKind: "external-command",
@@ -332,6 +354,17 @@ function initialReport({ repo, check, image, timeoutSeconds, protectedPaths }) {
     },
     attempts: []
   };
+}
+
+function normalizeWorkingDirectory(value) {
+  if (typeof value !== "string" || value.trim() === "" || isAbsolute(value)) {
+    throw new Error("workingDirectory must be a repository-relative directory");
+  }
+  const normalized = normalize(value.trim()).replaceAll("\\", "/").replace(/^\.\//u, "");
+  if (normalized === ".." || normalized.startsWith("../")) {
+    throw new Error("workingDirectory must not escape the repository");
+  }
+  return normalized === "" ? "." : normalized;
 }
 
 function recordAttempt(report, phase, result, checkAttempt) {
