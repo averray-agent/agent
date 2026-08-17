@@ -11,6 +11,7 @@ import {
   derivePositionEconomics,
   deriveFieldStatus,
   remainingEscrowObligation,
+  summarizePosterFees,
   toField,
   worstStatus
 } from "./transparency-service.js";
@@ -23,6 +24,8 @@ const TREASURY_ID = "0x93511e8deef3e7ec69cc1f18a573176da9870a0fb474ab2e0c18d88a5
 const CONVERTED = "0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3";
 const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const NOW = Date.parse("2026-08-06T12:00:00.000Z");
+const OPERATOR_POSTER = "0x1111111111111111111111111111111111111111";
+const EXTERNAL_POSTER = "0x2222222222222222222222222222222222222222";
 const DEPOSIT_REQUEST = "0xeaa4d5007c8154d390bbab0557a8c03d1c59c1a1b4faca8c761902241b087767";
 const DEPOSIT_TX = "0x43a1cff204eb087872bdc7f5fa55ef74261cafd90863caee4720961b00e7d1af";
 const LIVE_DEPOSIT_BACKFILL = JSON.parse(readFileSync(
@@ -56,6 +59,7 @@ function settlementReceipt(seed, workerAmountRaw) {
 
 function job(overrides = {}) {
   return {
+    poster: EXTERNAL_POSTER,
     state: 6,
     asset: TOKEN,
     rewardRaw: "1000000",
@@ -300,6 +304,9 @@ test("transparency payload composes flow, escrow, and generation-bound treasury 
   assert.equal(payload.flow.composition24h.platformVerificationRuns.value, 1);
   assert.equal(payload.flow.composition24h.ingested.value, 1);
   assert.equal(payload.flow.composition24h.external.value, 1);
+  assert.equal(payload.flow.posterFeesAllTime.external.value, "0.05");
+  assert.equal(payload.flow.posterFeesAllTime.operatorSelfPaid.value, "0");
+  assert.match(payload.flow.posterFeesAllTime.external.source, /shared self-identity registry/u);
   assert.equal(payload.escrow.posterObligationsInFlight.value, "1.63");
   assert.equal(payload.escrow.balanceHeldByEscrowContract.value, "0");
   assert.equal(payload.treasury.totalUsdcEquivalent.value, "10.908804");
@@ -336,6 +343,52 @@ test("transparency settlement flow uses the shared registry for ours, outsiders,
   assert.equal(payload.flow.workers24h.unknown.value, 0);
   assert.equal(payload.flow.workers24h.total.value, 3);
   assert.match(payload.flow.workers24h.ours.source, /shared self-identity registry/u);
+});
+
+test("poster-fee attribution uses the shared registry and external settlements change only the external line", () => {
+  const registry = new SelfIdentityRegistry({ operatorWallets: [OPERATOR_POSTER] });
+  const sessions = new Map([
+    ["self", { jobId: "self" }],
+    ["external", { jobId: "external" }]
+  ]);
+  const before = summarizePosterFees(
+    sessions,
+    new Map([
+      ["self", { poster: OPERATOR_POSTER, protocolFeeReleasedRaw: "100000" }],
+      ["external", { poster: EXTERNAL_POSTER, protocolFeeReleasedRaw: "0" }]
+    ]),
+    registry,
+    { readAtMs: NOW, proof: "settlement receipts" }
+  );
+  const after = summarizePosterFees(
+    sessions,
+    new Map([
+      ["self", { poster: OPERATOR_POSTER, protocolFeeReleasedRaw: "100000" }],
+      ["external", { poster: EXTERNAL_POSTER, protocolFeeReleasedRaw: "50000" }]
+    ]),
+    registry,
+    { readAtMs: NOW, proof: "settlement receipts" }
+  );
+
+  assert.equal(before.operatorSelfPaid.raw, 100000n);
+  assert.equal(after.operatorSelfPaid.raw, before.operatorSelfPaid.raw);
+  assert.equal(before.external.raw, 0n);
+  assert.equal(after.external.raw, 50000n);
+  assert.equal(after.total.raw, 150000n);
+  assert.match(after.operatorSelfPaid.source, /shared self-identity registry/u);
+});
+
+test("poster-fee attribution is unknown rather than a partial sum when one settled job is unreadable", () => {
+  const result = summarizePosterFees(
+    new Map([["missing", { jobId: "missing" }]]),
+    new Map([["missing", undefined]]),
+    new SelfIdentityRegistry(),
+    { readAtMs: NOW, proof: "settlement receipts" }
+  );
+
+  assert.equal(result.external.raw, null);
+  assert.equal(result.operatorSelfPaid.raw, null);
+  assert.match(result.total.proof, /1 settled job/u);
 });
 
 test("mainnet treasury native AccountId32 resolves from the packaged custody record", async () => {

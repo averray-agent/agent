@@ -292,15 +292,33 @@ function xcmRowFromEvent(event) {
     timestamp: event.timestamp,
     topic
   };
+  const failureReason = String(
+    event?.data?.failureCodeLabel
+      ?? event?.data?.failureCode
+      ?? event?.data?.message
+      ?? ""
+  ).trim();
   if (topic === "xcm.request_queued") return { ...common, stage: "request", status: "queued" };
   if (topic === "xcm.request_leg_dispatched") return { ...common, stage: "request", status: "dispatched" };
   if (topic === "xcm.outcome_observed" || topic.startsWith("xcm.balance_watch_")) {
-    return { ...common, stage: "observe", status: String(event?.data?.status ?? event?.phase ?? "observed") };
+    return {
+      ...common,
+      stage: "observe",
+      status: String(event?.data?.status ?? event?.phase ?? "observed"),
+      ...(failureReason ? { reason: failureReason } : {})
+    };
   }
   if (topic === "xcm.request_status_updated" || topic === "xcm.request_auto_finalized") {
-    return { ...common, stage: "settle", status: String(event?.data?.statusLabel ?? event?.data?.status ?? "settled") };
+    return {
+      ...common,
+      stage: "settle",
+      status: String(event?.data?.statusLabel ?? event?.data?.status ?? "settled"),
+      ...(failureReason ? { reason: failureReason } : {})
+    };
   }
-  if (topic === "xcm.request_finalize_failed") return { ...common, stage: "settle", status: "error" };
+  if (topic === "xcm.request_finalize_failed") {
+    return { ...common, stage: "settle", status: "error", reason: failureReason || "finalization failed" };
+  }
   return undefined;
 }
 

@@ -100,6 +100,26 @@ test("treasury summary composes four authoritative feeds for the signed-in walle
   assert.ok(summary.policyGate.rows.some((row) => row.source === "TreasuryPolicy.strategySettler"));
 });
 
+test("XCM observer rows preserve terminal failure reasons for the operator view", async () => {
+  const summary = await harness({
+    stateStore: {
+      listEventLog: async () => ({
+        events: [{
+          topic: "xcm.request_finalize_failed",
+          blockNumber: 0,
+          timestamp: new Date(NOW).toISOString(),
+          data: { requestId: REQUEST_ID, message: "FAILED: remote execution rejected" }
+        }]
+      })
+    }
+  }).getSummary(WALLET);
+
+  assert.equal(summary.xcmObserver.rows[0].stage, "settle");
+  assert.equal(summary.xcmObserver.rows[0].status, "error");
+  assert.equal(summary.xcmObserver.rows[0].blockNumber, 0);
+  assert.equal(summary.xcmObserver.rows[0].reason, "FAILED: remote execution rejected");
+});
+
 test("CreditPool loan enumeration mismatch fails closed with a 200-compatible warning payload", async () => {
   const service = harness({
     gateway: {

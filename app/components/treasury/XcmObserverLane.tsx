@@ -4,6 +4,8 @@ export interface XcmPhase {
   step: string;
   title: string;
   pending: number;
+  closed: number;
+  unrecognised: number;
   lastEventMsg: string;
   lastEventMeta: string;
   nextLabel: string;
@@ -50,12 +52,30 @@ function PhaseColumn({ phase, isLast }: { phase: XcmPhase; isLast: boolean }) {
         <span className="font-[family-name:var(--font-display)] text-[14px] font-bold text-[var(--avy-ink)]">
           {phase.title}
         </span>
-        <span
-          className="rounded-full bg-[var(--avy-accent-soft)] px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--avy-accent)]"
-          style={{ letterSpacing: 0 }}
-        >
-          {phase.pending} pending
-        </span>
+        {phase.pending > 0 ? (
+          <span
+            className="rounded-full bg-[var(--avy-accent-soft)] px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--avy-accent)]"
+            style={{ letterSpacing: 0 }}
+          >
+            {phase.pending} pending
+          </span>
+        ) : null}
+        {phase.closed > 0 ? (
+          <span
+            className="rounded-full bg-[var(--avy-paper-alt)] px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--avy-muted)]"
+            style={{ letterSpacing: 0 }}
+          >
+            {phase.closed} closed
+          </span>
+        ) : null}
+        {phase.unrecognised > 0 ? (
+          <span
+            className="rounded-full bg-[var(--avy-warn-soft)] px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[11px] font-semibold text-[var(--avy-warn)]"
+            style={{ letterSpacing: 0 }}
+          >
+            {phase.unrecognised} unrecognised — investigate
+          </span>
+        ) : null}
       </div>
 
       <div className="grid gap-0.5 rounded-r-[6px] border-l-2 border-[var(--avy-accent)] bg-[color:rgba(30,102,66,0.05)] px-2.5 py-2">
