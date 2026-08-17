@@ -66,7 +66,125 @@ rewriting the same tables and makes consolidation reviewable.
 - Avoid formatting-only changes, table reshuffles, or broad wording edits unless
   the task is explicitly a roadmap-steward consolidation.
 
+## Product Positioning — Outcome Assurance · RATIFIED 2026-08-17
+
+Adopted 2026-08-17 (Pascal) from an external strategy read, cross-checked against
+the platform's actual state before ratification. This section owns product
+framing; detailed sequencing lives in `OUTCOME_PIVOT_BUILD_PLAN.md` on branch
+`claude/packets-2026-08-12`.
+
+**The sentence:** Averray is the outcome-assurance layer for autonomous work —
+it verifies the result, releases the money, and leaves a portable receipt.
+Agents can promise; Averray proves and pays.
+
+This is a repackaging, not a rebuild. The 2026-08-13 Witness pivot already made
+verification the platform's internal center of gravity, and the paid-verification
+x402 shelf (#237) was independently ratified the same morning this proposal
+arrived. Zero new contracts are required; the marketplace, lanes, canary, and
+credit ladder keep operating unchanged underneath.
+
+### Four product surfaces (progression: Verify → Pay → Fulfill → Route → Finance)
+
+1. **Averray Verify** — independent outcome verification. The customer brings
+   the artifact or endpoint; Averray runs a named, versioned verifier profile
+   and issues a work receipt. First x402 shelf product (absorbs #237).
+2. **Averray Proof-to-Pay** — outcome-bound settlement, bring-your-own-
+   counterparty. The customer brings both sides; escrow releases on `PASS` only.
+   Removes the marketplace cold-start: a company can use Averray with no need
+   for Averray's worker supply.
+3. **Averray Fulfill** — the existing marketplace, presented as optional
+   sourcing behind the two front doors ("Do you already have a provider?").
+4. **Averray Trust Graph** — the receipt graph behind routing, exposure,
+   pricing, and credit underwriting. Credit, deposits, badges, valves, and bonds
+   become downstream capabilities, not competing front doors.
+
+### The atomic object: the work receipt
+
+Every surface emits the same receipt — four sections (intent / execution /
+verification / settlement), each mapped to evidence that already exists
+(specHash F1–F4, git-bundle source binding, verifier version, settlement tx,
+dispute status). The one missing atom is the canonical object itself plus its
+public page (`PACKET_WORK_RECEIPT`, the keystone build). Verdict vocabulary:
+`PASS` / `FAIL` / `INCONCLUSIVE` (new backend state; no settlement action,
+routes to human/dispute) / `PLATFORM_FAULT` (preserves
+`workerConsequence: none`).
+
+### North-star metric
+
+**External verified outcomes settled per week** — strictly excluding
+operator-funded work, canary, acceptance wallets, protocol demonstrations,
+self-paid revenue, and synthetic traffic. Computable today via the
+SelfIdentityRegistry + poster-side classification (#1147): a board query, not a
+project. Deposits, TVL, total jobs, badges minted, and gross receipts are
+secondary until external demand repeats.
+
+### Vocabulary law
+
+*Outcome verification / work verification / proof-to-pay / work receipt.* Never
+"certification", never "AI agent verification" (ERC-8126 owns that term for
+security-posture checks), never unbounded "safe" badges — a receipt states
+"endpoint X passed profile Y version Z against evidence root R on date D" and
+nothing broader. Truth-boundary applies to marketing: **"Averray Verify"
+appears on no public page until a stranger can actually buy a run.**
+
+### The 30-day experiment (supersedes the "20 qualified poster conversations" back half of `ECONOMIC_STRATEGY.md` §7; due date unchanged, 2026-09-11)
+
+Launch Verify with three profiles (`git-patch-tests-v1`,
+`mcp-failure-semantics-v1`, `structured-output-evidence-v1`), each producing the
+same receipt and a public receipt page; add one Proof-to-Pay pilot with a
+customer-supplied provider.
+
+Outreach re-segmented (19 of 20 conversations remaining): 8 MCP/agent-tool
+operators · 6 devtool/OSS maintainers · 6 agent-platform builders who already
+delegate work. The ask changes from "would you post on an agent marketplace" to
+**"what result are you currently paying an agent, API, or contractor to produce
+where payment is disconnected from objective proof that it worked?"**
+
+Success criteria by 2026-09-11 (the signal is repeat payment, not compliments):
+10 outsiders submit a real artifact or endpoint; 5 complete a paid verification
+run; 3 run a second paid run without manual persuasion; ≥1 uses Proof-to-Pay
+with its own provider; median setup < 15 minutes; every external run cleanly
+separated from operator/canary traffic; ≥1 customer embeds or shares the
+receipt in its own workflow.
+
+Kill-or-narrow conditions: fewer than 3 of 20 qualified prospects submit a real
+artifact; customers only value a free badge; most requested outcomes cannot be
+stated as a bounded verification policy; integration needs a custom project per
+customer; the receipt goes unused after the scan.
+
+### What freezes and what continues
+
+Frozen (all already gated — the freeze adds no new constraint): L3 stays
+flag-off until an L2 cohort self-amortizes; Rail-2 pool-venue credit stays
+Swiss-memo-gated; no general agent-directory ambition (enrich ERC-8004-class
+directories with outcome evidence instead); Hermes stays the ops-truth system,
+not a trace/eval platform; subjective-work scale-out waits on T5; chain-first
+marketing (sell verified outcomes, not "a Polkadot marketplace").
+
+Continues unchanged: the scheduled L1 credit lifecycle (first draw 2026-08-18),
+the L2 deploy ceremony when gated, the §8 multisig batch, the canary, the
+curated lanes (they are the receipt factory and the liveness proof), and
+external-audit engagement.
+
+New urgency: the **Swiss memo is now the binding gate for the flagship product**
+and should be scoped Proof-to-Pay-first, deposits second — releasing
+third-party money against a policy is the exact activity the memo must cover.
+No new custody class is created (external poster funds already flow through
+escrow since the poster door opened 2026-08-08; BYO only changes who the buyer
+names as recipient), but scaling it is memo-gated.
+
+Deferred with explicit gates (detail in the build plan): receipt-based routing
+API (≥50 external receipts); validator/verification-recipe marketplace (three
+Averray-operated profiles with repeat paying customers first); receipt warranty
+(measured invalid-receipt rate over a real corpus plus legal review —
+fee-refund scope only, never job-value indemnification).
+
 ## Current Product Posture
+
+> **Positioning note (2026-08-17):** product framing is now owned by the
+> Product Positioning — Outcome Assurance section above. The posture text below
+> is the June 2026 testnet-era snapshot, kept for history; the mainnet cutover
+> happened 2026-07-27 (see the Immediate Work Queue refresh notes).
 
 Averray is currently a **testnet product-proof platform**. The core backend,
 operator app, public discovery/trust surfaces, schema-native job path, USDC
@@ -522,7 +640,9 @@ observed consumption, instrumented as registry-referred endpoint traffic + on-ch
 touching our entries (reads emit nothing — this proxy is the instrument); consent schema
 takes the full ApprovalGrant vocabulary with approver as an optional, unenforced field;
 first x402 shelf product = paid verification runs (packet #237), coherent with free
-registry reputation and the on-ramp to the validator role.
+registry reputation and the on-ramp to the validator role. **2026-08-17 evening:**
+#237 is absorbed into the Averray Verify shelf — see Product Positioning — Outcome
+Assurance; Averray work receipts become the payload for the validation-writer step.
 
 ## Current Open PRs And Issues
 
@@ -543,6 +663,18 @@ and was proven live (first retention + poster-fee charges and the cancelOpenJob 
 deduction now, AAC-next creditBroker banked — superseding the v4-payout-router line
 below), and the arrivals ours/outsider split shipped. Full trail on branch
 `claude/packets-2026-08-12`.
+
+**Additions 2026-08-17, evening (outcome-assurance pivot — see Product
+Positioning above; sequencing in `OUTCOME_PIVOT_BUILD_PLAN.md` on
+`claude/packets-2026-08-12`):** (d) `PACKET_WORK_RECEIPT` — canonical work
+receipt schema + public receipt page (the keystone; first build); (e) the
+Averray Verify shelf — three verifier profiles, x402 fixed pricing,
+`INCONCLUSIVE` verdict state (absorbs item (b) above and #237); (f)
+`PACKET_PROOF_TO_PAY` — bring-your-own-counterparty agreements: designated-
+claimant gate, pilot caps, existing poster fee; (g) outreach re-segmentation
+8/6/6 with the outcome-assurance ask; (h) Swiss memo rescoped
+Proof-to-Pay-first; (i) GitHub issue-to-bounty product, gated behind the first
+external paid verification run.
 
 **Refreshed 2026-08-10.** The previous list had gone stale in a way worth naming: item
 1 asked for a *testnet* signer top-up to unpause a loop, and item 2 framed the external
