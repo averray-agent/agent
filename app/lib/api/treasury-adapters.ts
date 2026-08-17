@@ -334,25 +334,46 @@ export function buildXcmObserverPhases(treasuryPayload: unknown): XcmPhase[] {
     const latest = matching.at(-1) ?? {};
     const requestId = text(latest.requestId);
     const block = numberValue(latest.blockNumber, -1);
+    const reason = text(latest.reason);
+    const dispositions = [...latestByRequest.values()]
+      .filter((row) => text(row.stage) === definition.stage)
+      .map(xcmRowDisposition);
     return [{
       step: definition.step,
       title: definition.title,
-      pending: [...latestByRequest.values()].filter((row) => (
-        text(row.stage) === definition.stage && xcmRowIsPending(row)
-      )).length,
-      lastEventMsg: `${shortId(requestId)} · ${text(latest.status, "unknown")}`,
-      lastEventMeta: block >= 0 ? `block ${block}` : text(latest.timestamp, "block not emitted by source"),
+      pending: dispositions.filter((value) => value === "pending").length,
+      closed: dispositions.filter((value) => value === "terminal").length,
+      unrecognised: dispositions.filter((value) => value === "unrecognised").length,
+      lastEventMsg: `${shortId(requestId)} · ${text(latest.status, "unknown")}${reason && block > 0 ? ` · ${reason}` : ""}`,
+      lastEventMeta: block > 0
+        ? `block ${block}`
+        : reason || text(latest.timestamp, "block not emitted by source"),
       nextLabel: "Indexed rows",
       nextValue: String(matching.length),
     }];
   });
 }
 
-function xcmRowIsPending(row: RawRecord): boolean {
+function xcmRowDisposition(row: RawRecord): "pending" | "terminal" | "unrecognised" {
   const stage = text(row.stage);
   const status = text(row.status).toLowerCase();
-  if (stage === "request" || stage === "observe") return true;
-  return !["succeeded", "failed", "cancelled", "rejected", "settled"].includes(status);
+  if (["failed", "error", "cancelled", "rejected"].includes(status)) return "terminal";
+  if (stage === "settle") {
+    if (["succeeded", "settled", "finalized", "completed"].includes(status)) return "terminal";
+    if (["pending", "queued", "dispatched"].includes(status)) return "pending";
+    return "unrecognised";
+  }
+  if (stage === "request") {
+    return ["queued", "dispatched", "pending", "registered", "staged"].includes(status)
+      ? "pending"
+      : "unrecognised";
+  }
+  if (stage === "observe") {
+    return ["observed", "pending", "succeeded"].includes(status)
+      ? "pending"
+      : "unrecognised";
+  }
+  return "unrecognised";
 }
 
 export function buildPolicyGateItems(treasuryPayload: unknown): PolicyItem[] {

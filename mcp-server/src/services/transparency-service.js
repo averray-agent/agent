@@ -255,6 +255,11 @@ export class TransparencyService {
         ours: countField(flow.workers.ours),
         unknown: countField(flow.workers.unknown),
         total: countField(flow.windows.last24h.jobs)
+      },
+      posterFeesAllTime: {
+        external: moneyField(flow.posterFees.external),
+        operatorSelfPaid: moneyField(flow.posterFees.operatorSelfPaid),
+        total: moneyField(flow.posterFees.total)
       }
     };
   }
@@ -292,7 +297,18 @@ export class TransparencyService {
       const sessions = await collectPaged((limit, offset) => this.stateStore.listRecentSessions(limit, offset));
       const settledByJob = dedupeSettledSessions(sessions);
       const definitions = new Map();
+      const chainJobs = new Map();
       for (const session of settledByJob.values()) {
+        try {
+          chainJobs.set(
+            settlementJobKey(session),
+            await this.gateway.getJob(session.chainJobId ?? session.jobId)
+          );
+        } catch {
+          // Attribution becomes unknown below. A partial sum would understate
+          // operator-self-paid revenue and is less honest than no figure.
+          chainJobs.set(settlementJobKey(session), undefined);
+        }
         let fundedJob;
         try {
           fundedJob = await this.stateStore.getFundedJob?.(session.jobId);
@@ -355,7 +371,13 @@ export class TransparencyService {
           proof: "session.wallet + durable claimantAttribution + configured operator identity registry"
         }
       ]));
-      return { windows, composition, workers };
+      const posterFees = summarizePosterFees(
+        settledByJob,
+        chainJobs,
+        this.selfIdentityRegistry,
+        { readAtMs, source, proof }
+      );
+      return { windows, composition, workers, posterFees };
     } catch (error) {
       const unknown = { value: null, raw: null, readAtMs, source, proof: redactProviderError(error) || "flow_read_failed" };
       return {
@@ -369,6 +391,9 @@ export class TransparencyService {
         ),
         workers: Object.fromEntries(
           ["outsiders", "ours", "unknown"].map((name) => [name, { ...unknown, unit: "jobs" }])
+        ),
+        posterFees: Object.fromEntries(
+          ["external", "operatorSelfPaid", "total"].map((name) => [name, unknown])
         )
       };
     }
@@ -762,6 +787,50 @@ function summarizeSettledWindow(settledByJob, cutoffMs, context) {
         : `${context.proof}; txs ${txHashes.length ? txHashes.join(",") : "zero-pay rejections only"}`
     }
   };
+}
+
+export function summarizePosterFees(settledByJob, chainJobs, selfIdentityRegistry, context) {
+  let externalRaw = 0n;
+  let operatorSelfPaidRaw = 0n;
+  let totalRaw = 0n;
+  let unreadable = 0;
+
+  for (const session of settledByJob.values()) {
+    const job = chainJobs.get(settlementJobKey(session));
+    const raw = unsignedRaw(job?.protocolFeeReleasedRaw);
+    const poster = String(job?.poster ?? "").trim();
+    if (raw === null || !/^0x[0-9a-fA-F]{40}$/u.test(poster)) {
+      unreadable += 1;
+      continue;
+    }
+    totalRaw += raw;
+    const identity = selfIdentityRegistry.classify({ wallet: poster });
+    if (identity.actor === "self") operatorSelfPaidRaw += raw;
+    else externalRaw += raw;
+  }
+
+  const reading = (raw, label) => ({
+    raw: unreadable === 0 ? raw : null,
+    readAtMs: context.readAtMs,
+    source: "EscrowCore.jobs poster + protocolFeeReleasedRaw classified by the shared self-identity registry",
+    proof: unreadable
+      ? `${unreadable} settled job(s) lacked readable poster-fee attribution`
+      : `${context.proof}; ${label} from settled chain jobs`
+  });
+  return {
+    external: reading(externalRaw, "external poster fees"),
+    operatorSelfPaid: reading(operatorSelfPaidRaw, "operator-self-paid poster fees"),
+    total: reading(totalRaw, "total poster fees")
+  };
+}
+
+function unsignedRaw(value) {
+  const raw = String(value ?? "");
+  return /^(0|[1-9][0-9]*)$/u.test(raw) ? BigInt(raw) : null;
+}
+
+function settlementJobKey(session) {
+  return String(session?.chainJobId ?? session?.jobId ?? "").toLowerCase();
 }
 
 function settledSessionPayoutRaw(session, usdcAddress) {
