@@ -7,6 +7,7 @@ import { buildVerificationAuditFields } from "../core/verifier-contract.js";
 import { disputeIdForSession } from "../core/dispute-resolution.js";
 import { buildBadgeFromSession, buildBadgeJobSnapshot } from "../core/badge-metadata.js";
 import { buildRunReceipt } from "../core/run-receipt.js";
+import { buildWorkReceipt } from "../core/work-receipt.js";
 import { requireJobSnapshot } from "../core/job-snapshot.js";
 
 export class VerificationIngestionService {
@@ -20,6 +21,7 @@ export class VerificationIngestionService {
     this.badgeReceiptSigner = options.badgeReceiptSigner;
     this.blockchainGateway = options.blockchainGateway;
     this.policyService = options.policyService;
+    this.selfIdentityRegistry = options.selfIdentityRegistry;
   }
 
   setBadgeReceiptSigner(signer) {
@@ -28,6 +30,10 @@ export class VerificationIngestionService {
 
   setPolicyService(policyService) {
     this.policyService = policyService;
+  }
+
+  setSelfIdentityRegistry(selfIdentityRegistry) {
+    this.selfIdentityRegistry = selfIdentityRegistry;
   }
 
   async ingest(sessionId, verdict, { payoutTx = verdict?.payoutTx } = {}) {
@@ -50,7 +56,7 @@ export class VerificationIngestionService {
 
     const status = verdict.outcome === "approved"
       ? "resolved"
-      : verdict.outcome === "disputed"
+      : ["disputed", "inconclusive", "platform_fault"].includes(verdict.outcome)
         ? "disputed"
         : "rejected";
 
@@ -90,11 +96,12 @@ export class VerificationIngestionService {
       ...auditFields,
       ...(badgeSnapshot ? { badgeSnapshot } : {})
     };
-    if (status === "resolved" || status === "rejected") {
+    if (status === "resolved" || status === "rejected" || ["inconclusive", "platform_fault"].includes(verdict.outcome)) {
       // Persist the signed verdict document before committing the terminal
       // session transition. If signing or durable storage fails, verification
       // refuses instead of silently producing a receipt-less final verdict.
-      await this.persistRunReceiptDocument(transitioned, job, verificationRecord);
+      const workReceipt = await this.persistRunReceiptDocument(transitioned, job, verificationRecord);
+      if (workReceipt?.receiptId) transitioned.workReceiptId = workReceipt.receiptId;
     }
     const updatedSession = await this.stateStore.upsertSession(transitioned);
     const fundedJob = await this.stateStore.getFundedJob?.(updatedSession.jobId);
@@ -173,6 +180,21 @@ export class VerificationIngestionService {
         ? { ...receipt, signature: await this.badgeReceiptSigner.signDocument(receipt) }
         : receipt;
       await this.stateStore.putRunReceiptDocument(session.sessionId, document);
+      if (typeof this.stateStore.putWorkReceiptDocument !== "function") return undefined;
+      try {
+        const workReceipt = buildWorkReceipt({ session, job, verification, context });
+        const workDocument = this.badgeReceiptSigner
+          ? { ...workReceipt, signature: await this.badgeReceiptSigner.signDocument(workReceipt) }
+          : workReceipt;
+        return await this.stateStore.putWorkReceiptDocument(session.sessionId, workDocument);
+      } catch (error) {
+        this.logger.warn?.(
+          { sessionId: session.sessionId, jobId: session.jobId, error: error?.message },
+          "work_receipt_document.persist_failed"
+        );
+        if (process.env.NODE_ENV === "production") throw error;
+        return undefined;
+      }
     } catch (error) {
       this.logger.warn?.(
         { sessionId: session.sessionId, jobId: session.jobId, error: error?.message },
@@ -183,7 +205,23 @@ export class VerificationIngestionService {
   }
 
   async resolveReceiptSignerContext(job) {
-    const context = { publicBaseUrl: process.env.PUBLIC_BASE_URL };
+    const context = {
+      publicBaseUrl: process.env.PUBLIC_BASE_URL,
+      publicReceiptBaseUrl: process.env.PUBLIC_SITE_URL ?? "https://averray.com",
+      posterAddress: process.env.DEFAULT_POSTER_ADDRESS,
+      selfIdentityRegistry: this.selfIdentityRegistry
+    };
+    if (this.blockchainGateway?.isEnabled?.() && typeof this.blockchainGateway.getJob === "function") {
+      try {
+        const liveJob = await this.blockchainGateway.getJob(job?.id);
+        if (liveJob?.poster) context.posterAddress = liveJob.poster;
+      } catch (error) {
+        this.logger.warn?.(
+          { jobId: job?.id, error: error?.message },
+          "work_receipt.poster_chain_read_unavailable"
+        );
+      }
+    }
     const policyRef = job?.verification?.receiptPolicyTag;
     if (typeof policyRef !== "string" || !policyRef.trim()) return context;
 

@@ -354,6 +354,12 @@ export class JobExecutionService {
           blockchainGateway: this.blockchainGateway
         })
       );
+      const claimJobSnapshot = {
+        ...claimIntegrity.snapshot,
+        specSource: claimIntegrity.decision.status === "matching"
+          ? "chain_verified"
+          : "chain_unavailable_fail_open"
+      };
       if (this.blockchainGateway?.isEnabled()) {
         const live = claimIntegrity.liveJob ?? await this.blockchainGateway.getJob(chainJobId);
         if (live.state !== 0 && live.state !== 1) {
@@ -368,7 +374,7 @@ export class JobExecutionService {
             jobId,
             chainJobId,
             claimEconomics,
-            jobSnapshot: claimIntegrity.snapshot,
+            jobSnapshot: claimJobSnapshot,
             job,
             protocol,
             idempotencyKey,
@@ -474,7 +480,7 @@ export class JobExecutionService {
         jobId,
         chainJobId,
         claimEconomics,
-        jobSnapshot: claimIntegrity.snapshot,
+        jobSnapshot: claimJobSnapshot,
         workerExposure,
         dailyExposure,
         catalogueDailyBudget,

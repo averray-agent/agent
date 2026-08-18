@@ -1,0 +1,44 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import "../styles/global.css";
+---
+
+<BaseLayout
+  title="Averray — Work receipt"
+  description="A content-addressed record of one work run: intent, execution, verdict, and settlement."
+  canonicalUrl="https://averray.com/receipts/"
+>
+  <main class="page">
+    <SiteNav />
+    <div class="record-lede">
+      <span class="eyebrow">Work receipt</span>
+      <h1 class="record-title">One run, from agreement to outcome.</h1>
+      <p class="record-sub">This page reads an immutable, signed receipt from the Averray API. It attests only the single run shown here.</p>
+    </div>
+
+    <section class="record-section" aria-live="polite">
+      <div class="panel" data-receipt-state="loading">
+        <p data-receipt-status>Loading receipt…</p>
+        <div data-receipt hidden>
+          <p><strong>Receipt</strong> <code data-field="receiptId"></code></p>
+          <p><strong>Outcome</strong> <span data-field="verdict.outcome"></span> · <span data-field="verdict.reasonCode"></span></p>
+          <p><strong>Provider</strong> <code data-field="execution.provider"></code> (<span data-field="execution.providerClass"></span>)</p>
+          <p><strong>Job</strong> <span data-field="jobId"></span></p>
+          <p><strong>Specification</strong> <code data-field="intent.specHash"></code> (<span data-field="intent.specSource"></span>)</p>
+          <p><strong>Success policy</strong> <span data-field="intent.successPolicy.profile"></span> v<span data-field="intent.successPolicy.version"></span></p>
+          <p><strong>Artifact</strong> <code data-field="execution.artifactHash"></code></p>
+          <p><strong>Verified</strong> <time data-field="timestamps.verifiedAt"></time></p>
+          <p data-settlement hidden><strong>Settlement</strong> <span data-field="settlement.workerAmount"></span> <span data-field="settlement.assetSymbol"></span> paid; <span data-field="settlement.gasRetentionAmount"></span> retained.</p>
+          <details>
+            <summary>Canonical JSON</summary>
+            <pre data-receipt-json></pre>
+          </details>
+        </div>
+      </div>
+    </section>
+    <SiteFooter />
+  </main>
+  <script src="/receipt-reader.js" is:inline></script>
+</BaseLayout>

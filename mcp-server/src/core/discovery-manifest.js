@@ -86,6 +86,7 @@ const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/strategies", description: "Retired strategy surface; points agents to the self-custodied DepositPool and vested-capacity onboarding." },
   { path: "/badges", description: "Recent public badge receipts for completed sessions." },
   { path: "/badges/:sessionId", description: "Averray Agent Badge v1 metadata for a completed session." },
+  { path: "/receipts/:receiptId", description: "Immutable Averray Work Receipt v1 JSON addressed by its canonical content hash." },
   { path: "/agents", description: "Recent public agent directory derived from live session and reputation data." },
   { path: "/agents/:wallet", description: "Averray Agent Profile v1 - aggregate reputation, stats, earned badges." },
   { path: "/shares/:token", description: "Public signed read-only snapshot resolver for share URLs." },

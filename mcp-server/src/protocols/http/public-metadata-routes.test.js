@@ -151,6 +151,15 @@ test("A2 arrival payload: GET / identifies Averray and points to site, docs, and
       canonicalPath: "/badges/:sessionId/run",
       schema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/run-receipt-v1.json",
       canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/run-receipt-v1.md#signature-and-canonical-bytes"
+    },
+    workReceipts: {
+      alg: "ES256",
+      kid: "badge-1",
+      jwksUrl: "https://api.averray.com/.well-known/badge-receipt-jwks.json",
+      canonicalPath: "/receipts/:receiptId",
+      publicPage: "https://averray.com/receipts/:receiptId",
+      schema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/work-receipt-v1.json",
+      canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/work-receipt-v1.md#content-address-and-signature"
     }
   });
   assert.ok(response.body.endpoints.includes("/status/providers") === false);

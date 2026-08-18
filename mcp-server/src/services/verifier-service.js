@@ -68,8 +68,9 @@ export class VerifierService {
     // that proof is unavailable, the session remains submitted; it must never
     // converge to resolved/rejected without the evidence.
     let payoutTx;
-    const alreadySettled = await this.onChainAlreadySettled(chainJobId);
-    if (alreadySettled && this.blockchainGateway?.isEnabled()) {
+    const settlementOutcome = verdict.outcome === "approved" || verdict.outcome === "rejected";
+    const alreadySettled = settlementOutcome && await this.onChainAlreadySettled(chainJobId);
+    if (settlementOutcome && alreadySettled && this.blockchainGateway?.isEnabled()) {
       if (typeof this.blockchainGateway.recoverSinglePayoutReceipt !== "function") {
         throw new Error(
           `Job ${chainJobId} is already settled on-chain, but the gateway cannot reconstruct its receipt.`
@@ -80,7 +81,7 @@ export class VerifierService {
         worker: session.wallet,
         submittedAt: session.submittedAt
       });
-    } else if (!alreadySettled && this.blockchainGateway?.isEnabled() && this.blockchainGateway.resolveSinglePayout) {
+    } else if (settlementOutcome && !alreadySettled && this.blockchainGateway?.isEnabled() && this.blockchainGateway.resolveSinglePayout) {
       payoutTx = await this.blockchainGateway.resolveSinglePayout(
         chainJobId,
         verdict.outcome === "approved",
@@ -157,6 +158,11 @@ export class VerifierService {
       ...verdict,
       sessionId,
       metadataURI,
+      environment: verdict.environment ?? {
+        kind: "node",
+        runtime: process.release.name,
+        version: process.version
+      },
       ...(payoutTx ? { payoutTx } : {}),
       ...(payoutTx?.settlement ? { settlement: payoutTx.settlement } : {}),
       ...auditFields

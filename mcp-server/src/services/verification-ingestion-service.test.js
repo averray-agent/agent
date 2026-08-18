@@ -63,6 +63,67 @@ test("approved verification carries payout evidence in its first terminal sessio
   assert.deepEqual((await stateStore.getVerificationResult(submitted.sessionId)).payoutTx, payoutTx);
 });
 
+test("approved verification forward-emits the content-addressed work receipt and session alias", async () => {
+  const stateStore = new MemoryStateStore();
+  const poster = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const worker = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const job = {
+    id: "job-work-receipt",
+    rewardAsset: "USDC",
+    rewardAmount: 0.25,
+    claimTtlSeconds: 3600,
+    poster: { wallet: poster },
+    verifierMode: "deterministic",
+    verifierConfig: { handler: "deterministic" }
+  };
+  const claimed = transitionSession({
+    sessionId: "session-work-receipt",
+    wallet: worker,
+    jobId: job.id,
+    chainJobId: `0x${"1".repeat(64)}`,
+    submission: { artifactHash: `0x${"2".repeat(64)}` },
+    jobSnapshot: { ...buildJobSnapshot(job), specSource: "chain_verified" }
+  }, "claimed", { reason: "job_claimed", timestamp: "2026-08-18T10:00:00.000Z" });
+  const submitted = transitionSession(claimed, "submitted", {
+    reason: "work_submitted",
+    timestamp: "2026-08-18T10:10:00.000Z"
+  });
+  await stateStore.upsertSession(submitted);
+  const payoutTx = {
+    txHash: `0x${"3".repeat(64)}`,
+    status: 1,
+    settlement: {
+      worker,
+      treasuryAccount: poster,
+      asset: "0x0000053900000000000000000000000001200000",
+      assetSymbol: "USDC",
+      workerAmount: 0.2,
+      workerAmountRaw: "200000",
+      protocolFeeAmount: 0.05,
+      protocolFeeAmountRaw: "50000",
+      protocolFeeBps: 500,
+      gasRetention: { retainedRaw: "50000", rewardRaw: "250000" }
+    }
+  };
+  const service = new VerificationIngestionService(stateStore, undefined, undefined, { info() {}, warn() {} });
+
+  const resolved = await service.ingest(submitted.sessionId, {
+    handler: "deterministic",
+    handlerVersion: 1,
+    outcome: "approved",
+    reasonCode: "DETERMINISTIC_MATCH",
+    payoutTx,
+    settlement: payoutTx.settlement
+  }, { payoutTx });
+
+  assert.match(resolved.workReceiptId, /^0x[0-9a-f]{64}$/u);
+  const byId = await stateStore.getWorkReceiptDocument(resolved.workReceiptId);
+  const bySessionAlias = await stateStore.getRunReceiptDocument(submitted.sessionId);
+  assert.equal(byId.receiptId, resolved.workReceiptId);
+  assert.equal(bySessionAlias.schemaVersion, "averray.work-receipt.v1");
+  assert.equal(bySessionAlias.receiptId, byId.receiptId);
+});
+
 test("github_pr human fallback preserves escalation provenance on the disputed session and event", async () => {
   const stateStore = new MemoryStateStore();
   const events = [];

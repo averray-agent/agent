@@ -179,6 +179,55 @@ test("verifySubmission passes the actual claimant wallet and claim session to th
   });
 });
 
+test("inconclusive and platform_fault verifier outcomes never invoke settlement", async () => {
+  for (const outcome of ["inconclusive", "platform_fault"]) {
+    const stateStore = new MemoryStateStore();
+    const job = {
+      id: `non-terminal-${outcome}`,
+      verifierMode: "deterministic",
+      verifierConfig: { handler: "deterministic", version: 1 }
+    };
+    const claimed = transitionSession(withJobSnapshot({
+      sessionId: `session-${outcome}`,
+      wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      jobId: job.id,
+      submission: "evidence"
+    }, job), "claimed", { reason: "job_claimed" });
+    await stateStore.upsertSession(transitionSession(claimed, "submitted", { reason: "work_submitted" }));
+    let settlementCalls = 0;
+    let ingested;
+    const service = new VerifierService(
+      {
+        resumeSession: (id) => stateStore.getSession(id),
+        ingestVerification: async (_id, verdict, options) => {
+          ingested = { verdict, options };
+          return stateStore.getSession(claimed.sessionId);
+        }
+      },
+      stateStore,
+      {
+        isEnabled: () => true,
+        getJob: async () => ({ state: 3, specHash: claimed.jobSnapshot.specHash }),
+        resolveSinglePayout: async () => { settlementCalls += 1; }
+      },
+      {
+        evaluate: async () => ({
+          handler: "deterministic",
+          handlerVersion: 1,
+          outcome,
+          reasonCode: outcome === "platform_fault" ? "PLATFORM_RUNTIME_FAILED" : "EVIDENCE_AMBIGUOUS",
+          workerConsequence: "none"
+        })
+      }
+    );
+
+    const result = await service.verifySubmission({ sessionId: claimed.sessionId });
+    assert.equal(result.outcome, outcome);
+    assert.equal(settlementCalls, 0);
+    assert.equal(ingested.options.payoutTx, undefined);
+  }
+});
+
 test("verifySubmission rejects non-verifiable sessions before handler or chain side effects", async () => {
   const stateStore = new MemoryStateStore();
   const claimed = transitionSession({

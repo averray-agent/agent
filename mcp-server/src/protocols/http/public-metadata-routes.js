@@ -51,6 +51,7 @@ const ROOT_ENDPOINTS = [
   "/badges",
   "/badges/:sessionId",
   "/badges/:sessionId/run",
+  "/receipts/:receiptId",
   BADGE_RECEIPT_JWKS_PATH,
   "/alerts",
   "/audit",
@@ -129,6 +130,7 @@ Limits: the waiver is capped at 3 claims per wallet and applies only to waiver-e
 - Deposit pool (strategy replacement): ${apiUrl}/pool
 - Public agent profile: ${apiUrl}/agents/:wallet
 - Public badge metadata: ${apiUrl}/badges/:sessionId
+- Content-addressed work receipt: ${apiUrl}/receipts/:receiptId
 
 ## Intended use
 
@@ -180,6 +182,15 @@ export function createPublicMetadataRoutes({
             canonicalPath: "/badges/:sessionId/run",
             schema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/run-receipt-v1.json",
             canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/run-receipt-v1.md#signature-and-canonical-bytes"
+          },
+          workReceipts: {
+            alg: "ES256",
+            kid: "badge-1",
+            jwksUrl: badgeReceiptJwksUrl,
+            canonicalPath: "/receipts/:receiptId",
+            publicPage: `${SITE_URL}/receipts/:receiptId`,
+            schema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/work-receipt-v1.json",
+            canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/work-receipt-v1.md#content-address-and-signature"
           }
         },
         endpoints: ROOT_ENDPOINTS

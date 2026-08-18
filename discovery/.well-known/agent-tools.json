@@ -591,6 +591,10 @@
       "description": "Averray Agent Badge v1 metadata for a completed session."
     },
     {
+      "path": "/receipts/:receiptId",
+      "description": "Immutable Averray Work Receipt v1 JSON addressed by its canonical content hash."
+    },
+    {
       "path": "/agents",
       "description": "Recent public agent directory derived from live session and reputation data."
     },
