@@ -1,4 +1,5 @@
 import type { KpiData } from "@/components/overview/RoomVitals";
+import { buildCapitalAtWorkVital } from "@/lib/ui/capital-at-work";
 import type { LaneCardData } from "@/components/overview/LaneStatusGrid";
 import type { AlertItem } from "@/components/overview/NeedsActionList";
 import type { BalanceCard } from "@/components/treasury/BalanceSheetStrip";
@@ -479,7 +480,7 @@ export function buildRoomVitals(
           : "no claims observed yet · operator-wide",
       deltaTone: "neutral",
     },
-    { label: "Capital at work", value: fmt(capital.value), unit: capital.unit, delta: "strategy + stake", deltaTone: "good" },
+    buildCapitalAtWorkVital({ presence: strategyPresence, value: fmt(capital.value), unit: capital.unit }),
     // "Green" is a claim that the strategy feed was read and showed no
     // lane attention — an unreadable feed must render Unknown, never
     // default to the good state.
