@@ -1,0 +1,835 @@
+{
+  "schemaVersion": "averray.witness.adversarial-corpus/v1",
+  "generatedAt": "2026-08-18T13:27:51.169Z",
+  "repository": "depre-dev/averray-send-test",
+  "baseCommit": "42571061ca9b6da8c6aca908f1ee1df1dab4e10a",
+  "real": {
+    "results": [
+      {
+        "id": "pass-correct-fix",
+        "expectedVerdict": "PASS",
+        "actualVerdict": "PASS",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": null,
+        "expectedDetection": null,
+        "detections": [],
+        "matched": true,
+        "baselineContainerIds": [
+          "34d43aa83227cb062c47dda530e6e8c42fc24bc5c987b9d7a5aaf2abd8d62e5d",
+          "6e6fec9b6855bf5e45be25d22bb9261109c85686e821a73c4dad1b4351620f57",
+          "23724dfb74eec398482890b1d46e304629b690ce20de52bbccb0ca0b9322eb8f",
+          "4c7b8fee533251834115549d35177cbe91f3a9eecb6445c562f4711f8de4f4df"
+        ],
+        "candidateContainerIds": [
+          "eb17153e4846e9b360f5cfde246075594c9b1457e78a81ae85fb802adb49f9bb",
+          "1f6a23a886c92c743874cab148105d7b8aaff0b5577c7e3a6174052e0805f38e",
+          "8ca52d26a7fa0835464fb13bddd908f746b21c1e7629ba21ed912b8d3403cea7",
+          "97be84fdda517cea9802c2d527a5745f9f7e3f66957ddbead17e60754283ea47"
+        ]
+      },
+      {
+        "id": "fail-targeted-still-red",
+        "expectedVerdict": "FAIL",
+        "actualVerdict": "FAIL",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": "required_check_failed",
+        "expectedDetection": null,
+        "detections": [],
+        "matched": true,
+        "baselineContainerIds": [
+          "840a6314e9422e3d43d424c91a066caf523e452551933f6efad071705911118d",
+          "52ba3d63954780e8975adefdcd5eb013d1f190aaa417aa518aa63212f6bb765c",
+          "f931d1193e3232c97fc799832c01e7b0fa8908b0a251d69e7cc1e990a95797fc",
+          "e5cf9a03c76621e89475b9ad44dc95e5870313e7c093cae28927794f07f80a8a"
+        ],
+        "candidateContainerIds": [
+          "6d084cb997d05ab1e219df53caafb5c0df5570b0583ab8a41b7964982d1ca854",
+          "e1c6c59a8806b953cc51757ef9b65628f871c4f46ab56e1dfeb5bd4cfd5704ac",
+          "2cfb745184530fd0085d6049bf4851fb7d3ce3fc3ffa8378f2a1521a0d8b8527",
+          "51178d57526ed31d8fef27d00bf34b94caa6f84de417822c0132827b60ea25c4"
+        ]
+      },
+      {
+        "id": "fail-regression-broken",
+        "expectedVerdict": "FAIL",
+        "actualVerdict": "FAIL",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": "required_check_failed",
+        "expectedDetection": null,
+        "detections": [],
+        "matched": true,
+        "baselineContainerIds": [
+          "222dc1f599b7bb6cf99ccf065aca1796a2f10200f9fd2203a0c699db5d0a51fd",
+          "9ca2601cdbe078227e15b4ff7f258e16c32576f23a203ec8f5031e46c809d078",
+          "a1f0794597bb8390233c31ad1ff6784248b372107a0451476b5040a05539fa1d",
+          "671e60117d2000076007902a7ea9da31663568b93550cb40d2a35c3b232f9653"
+        ],
+        "candidateContainerIds": [
+          "3000650f057bfb68d59388f8bd7252a41a0bb11e4bb2061c80505bbb4e23ed7a",
+          "b721969ee1fa2130891dfcae3be1121cca3a3bb38b06f7eff141314d70577ccd",
+          "2bb644f5dbbda95063c66036effe5d59dfc9a87eb538258b0a7c2b3ad49bf34c",
+          "2bd454349ba99fb74310953d2b44fbe0772b70403150d2ae8e8904adc620c65f"
+        ]
+      },
+      {
+        "id": "policy-test-deletion",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "POLICY_VIOLATION",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": "candidate_policy_or_integrity_violation",
+        "expectedDetection": "test_deletion",
+        "detections": [
+          "test_deletion"
+        ],
+        "matched": true,
+        "baselineContainerIds": [],
+        "candidateContainerIds": []
+      },
+      {
+        "id": "policy-precedence-games-and-fails",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "POLICY_VIOLATION",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": "candidate_policy_or_integrity_violation",
+        "expectedDetection": "test_deletion",
+        "detections": [
+          "test_deletion"
+        ],
+        "matched": true,
+        "baselineContainerIds": [],
+        "candidateContainerIds": []
+      },
+      {
+        "id": "policy-runner-replacement",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "POLICY_VIOLATION",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": "candidate_policy_or_integrity_violation",
+        "expectedDetection": "runner_replacement",
+        "detections": [
+          "protected_path_modified",
+          "runner_replacement"
+        ],
+        "matched": true,
+        "baselineContainerIds": [],
+        "candidateContainerIds": []
+      },
+      {
+        "id": "policy-skip-marker",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "POLICY_VIOLATION",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": "candidate_policy_or_integrity_violation",
+        "expectedDetection": "skip_or_xfail_markers_added",
+        "detections": [
+          "skip_or_xfail_markers_added"
+        ],
+        "matched": true,
+        "baselineContainerIds": [],
+        "candidateContainerIds": []
+      },
+      {
+        "id": "policy-assertion-neutering",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "POLICY_VIOLATION",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": "candidate_policy_or_integrity_violation",
+        "expectedDetection": "assertion_neutering",
+        "detections": [
+          "assertion_neutering"
+        ],
+        "matched": true,
+        "baselineContainerIds": [],
+        "candidateContainerIds": []
+      },
+      {
+        "id": "policy-error-swallowing",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "POLICY_VIOLATION",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": "candidate_policy_or_integrity_violation",
+        "expectedDetection": "error_swallowing_to_force_zero_exit",
+        "detections": [
+          "error_swallowing_to_force_zero_exit"
+        ],
+        "matched": true,
+        "baselineContainerIds": [],
+        "candidateContainerIds": []
+      },
+      {
+        "id": "policy-protected-path",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "POLICY_VIOLATION",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": "candidate_policy_or_integrity_violation",
+        "expectedDetection": "protected_path_modified",
+        "detections": [
+          "protected_path_modified"
+        ],
+        "matched": true,
+        "baselineContainerIds": [],
+        "candidateContainerIds": []
+      },
+      {
+        "id": "policy-coverage-exclusion",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "POLICY_VIOLATION",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": "candidate_policy_or_integrity_violation",
+        "expectedDetection": "coverage_or_lint_exclusion_of_changed_files",
+        "detections": [
+          "coverage_or_lint_exclusion_of_changed_files"
+        ],
+        "matched": true,
+        "baselineContainerIds": [],
+        "candidateContainerIds": []
+      },
+      {
+        "id": "policy-snapshot-rewrite",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "POLICY_VIOLATION",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": "candidate_policy_or_integrity_violation",
+        "expectedDetection": "snapshot_rewrite_to_accept_current",
+        "detections": [
+          "snapshot_rewrite_to_accept_current"
+        ],
+        "matched": true,
+        "baselineContainerIds": [],
+        "candidateContainerIds": []
+      },
+      {
+        "id": "inconclusive-nondeterminism",
+        "expectedVerdict": "INCONCLUSIVE",
+        "actualVerdict": "INCONCLUSIVE",
+        "expectedAttribution": "candidate",
+        "actualAttribution": "candidate",
+        "expectedReason": "candidate_caused_nondeterminism_across_repetitions",
+        "actualReason": "candidate_caused_nondeterminism_across_repetitions",
+        "expectedDetection": null,
+        "detections": [],
+        "matched": true,
+        "baselineContainerIds": [
+          "17bd3170d30c2c59ea96fbac3900f982f7234d479de3b17959dab5f5807066f2",
+          "a6a74357ce008974ffd29d8ec8768a95a1bcf34d3d25339cbf313a8bcc72a500",
+          "f3c9578b53277d05d7257cf0c8a39cb9dc67d7aa769fdb5339041003edd21c54",
+          "cfaeb3fb32e97abf0bb048b87e8d8330c996362034e6f61f635531d12b82d1dc"
+        ],
+        "candidateContainerIds": [
+          "879fd08f429e7ff3f1c4d6c264493807a4f27d63bfd3e9c9bc34feeaac3269f2",
+          "4abf811b2bdc7bf4d69d6d76e701f68983eed47d976afeda0cef4401ec6bec63",
+          "47434042819e3c2c0c7e339122cf8015a57699082eb758059eaf3f48e43c5268",
+          "50363a44641b8f2e89a78a9bd64d9e6063530861cef0961994215e0dbf96e179"
+        ]
+      },
+      {
+        "id": "inconclusive-resource-limit",
+        "expectedVerdict": "INCONCLUSIVE",
+        "actualVerdict": "INCONCLUSIVE",
+        "expectedAttribution": "candidate",
+        "actualAttribution": "candidate",
+        "expectedReason": "candidate_exceeded_resource_limit",
+        "actualReason": "candidate_exceeded_resource_limit",
+        "expectedDetection": null,
+        "detections": [],
+        "matched": true,
+        "baselineContainerIds": [
+          "c027ea6bcce56a0c86aa776af9a6bab586c123be86bb109b0c85a63a6e2451ec",
+          "2e74c91a1ab91ae29cb70fcd17716b7d1f4c7367244d845e72e6b86c587b9d4f",
+          "3fb3e975184832c42837e37635111fd6b870452053abea17d6cd38f9c43b1db9",
+          "a4b71aed202e3d62637972e939da6987372301fdbffd1d38315bd3d6cf159248"
+        ],
+        "candidateContainerIds": [
+          "5a763bde4272f2f8e738c0c70e850d0b94882903dc3a736beecafbdb63f6c988",
+          "dbfe38339486599db21682c78e3983aa3ab48ca0a38289faf04e68edcbab4215",
+          "78abeec6a275a3e8c27db1a419708d3dce830646396482a718acc51f951f40e3",
+          "05d98249e812a805ad74a9879e9c00b861195d9fe6508134b3c103faedfe75f1"
+        ]
+      },
+      {
+        "id": "inconclusive-host-failure",
+        "expectedVerdict": "INCONCLUSIVE",
+        "actualVerdict": "INCONCLUSIVE",
+        "expectedAttribution": "infrastructure",
+        "actualAttribution": "infrastructure",
+        "expectedReason": "host_failure",
+        "actualReason": "host_failure",
+        "expectedDetection": null,
+        "detections": [],
+        "matched": true,
+        "baselineContainerIds": [
+          "756f5c6ac60350bf653c6a5ba7ebecaa36800dd3fd8fe459196de10315923573",
+          "414cd4e7ce0731f1b17e89a0f2ca7f56691bd4f6efed8f1cd31011741a0403d4",
+          "2e4a178755cc2ec0f50a0678068983e82da03e8145983400a6618c23a1266d3c",
+          "13f9fc1ef5f334c1e984566d136abac88d8d0d2db0cd81aa3b8b23f8de4797d1"
+        ],
+        "candidateContainerIds": []
+      }
+    ],
+    "confusion": {
+      "total": 15,
+      "matrix": {
+        "PASS": {
+          "PASS": 1,
+          "FAIL": 0,
+          "INCONCLUSIVE": 0,
+          "POLICY_VIOLATION": 0
+        },
+        "FAIL": {
+          "PASS": 0,
+          "FAIL": 2,
+          "INCONCLUSIVE": 0,
+          "POLICY_VIOLATION": 0
+        },
+        "INCONCLUSIVE": {
+          "PASS": 0,
+          "FAIL": 0,
+          "INCONCLUSIVE": 3,
+          "POLICY_VIOLATION": 0
+        },
+        "POLICY_VIOLATION": {
+          "PASS": 0,
+          "FAIL": 0,
+          "INCONCLUSIVE": 0,
+          "POLICY_VIOLATION": 9
+        }
+      },
+      "falsePass": {
+        "count": 0,
+        "cases": []
+      },
+      "falseFail": {
+        "count": 0,
+        "cases": []
+      },
+      "inconclusive": {
+        "count": 3,
+        "rate": 0.2
+      },
+      "attributionAccuracy": {
+        "correct": 3,
+        "expected": 3,
+        "rate": 1
+      },
+      "exactVerdicts": 15,
+      "scopeQualification": {
+        "claim": "false-pass counts cover represented detectable classes only",
+        "knownUndetectableNotRepresented": {
+          "count": 6,
+          "classes": [
+            {
+              "detection": "test_deletion",
+              "class": "removed cases in other test frameworks and dynamically generated test cases"
+            },
+            {
+              "detection": "skip_or_xfail_markers_added",
+              "class": "framework-specific skip semantics outside the published signatures"
+            },
+            {
+              "detection": "assertion_neutering",
+              "class": "semantic assertion weakening that does not use a known no-op signature"
+            },
+            {
+              "detection": "snapshot_rewrite_to_accept_current",
+              "class": "inline snapshots and framework-specific snapshot stores without a snapshot path"
+            },
+            {
+              "detection": "coverage_or_lint_exclusion_of_changed_files",
+              "class": "custom runner plugins that implement exclusion in arbitrary code"
+            },
+            {
+              "detection": "error_swallowing_to_force_zero_exit",
+              "class": "semantic error swallowing hidden behind arbitrary helper functions"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "naive": {
+    "results": [
+      {
+        "id": "pass-correct-fix",
+        "expectedVerdict": "PASS",
+        "actualVerdict": "PASS",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": null,
+        "expectedDetection": null,
+        "detections": [],
+        "matched": true,
+        "baselineContainerIds": [
+          "1243941c0099747d8cb437992f0dbfc11c139d59e9d4750ba60205f9809a16a5",
+          "7e02d606e646dcddb30f66d14d0559cdf77e526a5c5f37b48dcc807dfd52cb8e",
+          "eddd4cbf37fb6ec4f58f79f4a90b4aa0c3160a0359db037fd170ab5e9c30dbb4",
+          "07ce2f7f9ebe7d555e8fdb8a072654a0e15a8572880bb52930d647986533562a"
+        ],
+        "candidateContainerIds": [
+          "a50a1d62ac9b3b572471674c84dd914547cedf8f03ccf10f9d8849bf57f95409",
+          "f2c2d08dd3043871a769af9f3ccfec4a8278603d72d4f48e4b7352dc4bda20b1",
+          "95b16066b9b3a28a4ced107b10f0bb015df416de5ca1537fb612fe9cd17d1cd1",
+          "ff25988fb7f23eea69a9d2a4aa2bb0a05655d9918051884307ee99d30233fdf1"
+        ]
+      },
+      {
+        "id": "fail-targeted-still-red",
+        "expectedVerdict": "FAIL",
+        "actualVerdict": "FAIL",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": "required_check_failed",
+        "expectedDetection": null,
+        "detections": [],
+        "matched": true,
+        "baselineContainerIds": [
+          "ee14bbc5a69dfe5307dd8229fda5f5f1a0e296c48ab1dedfef315832bd0aff19",
+          "6b992294b03aa5531e97d5142c98ddf66eb9be5f329589e5aab68af0024c6ee8",
+          "d45cfaa162d3429018d371ec5d5ce236de20510fe98f39b566b35b28325701a3",
+          "1826bb6342e12d9c9e744874f3efcfa4337f20a90ed457618d86386477ff9451"
+        ],
+        "candidateContainerIds": [
+          "b83defd3ce160d9e609c9ee5b26465860a2bdaed0b24eb41b51936f1e1500da5",
+          "ed33ea911f67748102e99ca33b8574e53f2e4e31289993721a9fab6f8560ded9",
+          "099bcfeb7eff2f34a55a636d95fa650a8eed47443e0a2756325f4b3acb9a4172",
+          "c55b9845e4ddf622bc553ccf57aa15ad3b3acd055006335dd7197b3cfa6a90ab"
+        ]
+      },
+      {
+        "id": "fail-regression-broken",
+        "expectedVerdict": "FAIL",
+        "actualVerdict": "FAIL",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": "required_check_failed",
+        "expectedDetection": null,
+        "detections": [],
+        "matched": true,
+        "baselineContainerIds": [
+          "c38fb4b2243a70b913a550089d5d85be4496c9cdf512b0433b7705c8afbe7a52",
+          "868650fb97bd91b72f5f68a0682fa177a8bf85ed620a6c532df183d48e7e78ed",
+          "9bf0c048e0b7125e1f2d7ad2a12fdef4d3c53ffd2caa4e499b56ad1e83c81c5d",
+          "c0e82255e64ef8faacecd73f301551b2cdc8e3dd94db1cd9f06811ec29da14bd"
+        ],
+        "candidateContainerIds": [
+          "5db101d666547ccc3853dafb3ce4f0f7b00f09ca7f5774ce97d3025f2de624c8",
+          "15d5392bd64e88b181a1b127359e05b18fa31163417d9b708e5cc796d4af1137",
+          "855c75b57ed27d67abea09e90934e62b77d11e720ef2611c01b0b9d49a006f0f",
+          "89d780bf09c36563b916f7e16fffa5f1f7be8c98b23775c3f520f2b146fc910c"
+        ]
+      },
+      {
+        "id": "policy-test-deletion",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "PASS",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": null,
+        "expectedDetection": "test_deletion",
+        "detections": [],
+        "matched": false,
+        "baselineContainerIds": [
+          "aecb624c61e0cd11152d5329df07974142a2b139c9f4f7987f22577960ab3e83",
+          "729778b9b92bd4f061d4771e46acbfd48b922f8bc5f4470900d8a4b6194a1de9",
+          "626ddee9d2ea23b53e946f6246a31ce53256f186462f6543d09313bec50e6dff",
+          "97833a0fc2cff37f1a1f587b9e49bffda8f848c69415bd9880cb35c177afb8bf"
+        ],
+        "candidateContainerIds": [
+          "0a293fed986da85bcb2f8cee5ffc951a6e766b02ed74048419c9516a2e5fee4c",
+          "f2552a7762d9fc50b78700a5940fbe03d51ba6d2fc3d8c246b2ec96e5dabb696",
+          "1e50b430b77c389bb243496cac3aa7ffe8f042ec77a9923aedd8f61fe8a14867",
+          "fd7773306beb9c7f7d0e64c4adebd4c875dca199a4d2e594426d007a3fdab732"
+        ]
+      },
+      {
+        "id": "policy-precedence-games-and-fails",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "FAIL",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": "required_check_failed",
+        "expectedDetection": "test_deletion",
+        "detections": [],
+        "matched": false,
+        "baselineContainerIds": [
+          "008ef1e7edd9bdf4a866af9143a8ab9acd3cd17b9baa60c42354e261027c4958",
+          "22b9faa02577eec517f014efdef04e9f6f792aacc70d14f2d741663eff0cbdc7",
+          "9d3498de336b132a685d5c3495c21bfd60c17242522616c9fb72aaf7849b53e9",
+          "2638237ed363b1aad2b2df0ace714fdf25371a72de7410315ab7de1eb15a48c6"
+        ],
+        "candidateContainerIds": [
+          "b9cdcb4de28026f545ccdd297d5f0fe5c5b6de6847b2e01a692a6a05dfffd54a",
+          "e98c214b4afab90c6935b4ea6948adcfb3b56bfb55da500d8179549591424310",
+          "2dc44fe04fb51173561a821fe771b41b9a5018f31c9e36d83e7a2ef93daa7727",
+          "936cd499e609f8bc6abe369d94ee9eef817508739fbdf4f225d962b86970ef19"
+        ]
+      },
+      {
+        "id": "policy-runner-replacement",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "PASS",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": null,
+        "expectedDetection": "runner_replacement",
+        "detections": [],
+        "matched": false,
+        "baselineContainerIds": [
+          "a6416c48ffc44f626064e38c0353be369016c1d0732b59db3d86bf3f4483e6ea",
+          "60d8540979dc718386e3944593e40c40bad841f97343b9ef9b6c236a07565bcf",
+          "83b730b0cd608f96db0389c8bb4b9963e9dd5311bf93055fb57c7843c7f34358",
+          "79bb2da2027e377d23c7e7116785389b7d287405730f9ad4c1f881763ca4230c"
+        ],
+        "candidateContainerIds": [
+          "8a5c2e91e75950da7ed7fd300e51a1b60d5f6cf583ec4a9cbb859b359c0e3487",
+          "2f9df688856c65d6a778f27a8aa7fe7fdc11bab527cd8743a7d0476d50c37ae9",
+          "480eb6afc0974b08169e3574cd086773cb1fdaf4ce0a7f33fd6eee2ebfcd4d22",
+          "1f532bcf0e1250602a9bc392058d03a95959f71290db4bec91ce0af4b7278988"
+        ]
+      },
+      {
+        "id": "policy-skip-marker",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "PASS",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": null,
+        "expectedDetection": "skip_or_xfail_markers_added",
+        "detections": [],
+        "matched": false,
+        "baselineContainerIds": [
+          "f8f2d2bd687edbc84003b749f6eee2c9788edfeaac15b632f924bb2b49ea1fa9",
+          "f2d37af69aec246ad390608542185918f13b39fdcacc627fa034699e1899fb9a",
+          "9a9c34263c0469464ca90dc0413de3be38fd8cf77dfddd2e658946f07f7a6c9d",
+          "14b092e9cf5af89de0dad5a23c8e7018e883b3c5cfce075b0601f530ef5a93a2"
+        ],
+        "candidateContainerIds": [
+          "e38f3e2297d35de74073892e3343e2de4a8033a6d336fd0190f428aeaf7c6c22",
+          "038167ef579042e1a918c97742f844051d283a7e73d7b7f7c7fb1469349de648",
+          "2496ad759fa500fe6083060492235147208e731fa7d050ef7b5bedd250ce40da",
+          "a6290a7938fd36d26c7244c72384b2e754d230218111bc99a1e69745d93e044c"
+        ]
+      },
+      {
+        "id": "policy-assertion-neutering",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "PASS",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": null,
+        "expectedDetection": "assertion_neutering",
+        "detections": [],
+        "matched": false,
+        "baselineContainerIds": [
+          "ff1c89be3e9ef80c7c43575024a82db87d73b6a7898c736ff45ff03bc8dfa0a2",
+          "60ede75f12b073ec10d8ce9e98e8feb34c7b54107aa295b2b93233fa49934868",
+          "07202947edce5a22f5108b7cd8f395ecd4ec3e70d235dcd678dd4da08d2b675f",
+          "4a9327f918f581f13a947d181d6be75a786e06c709879676d671837474d709b9"
+        ],
+        "candidateContainerIds": [
+          "50b24ab94567cf6349f0e57b707d933033cbf12b283dc638d5ef5ef55583fde3",
+          "bffc5943f67d975a929c5756b515578625c163fe9ee65c409d3c1677f1bf7a2d",
+          "9eabb2a93f830f33a8dbefb444363ec43da882ee9682dabeacee968f209c267a",
+          "5a9b6bca80902625636ebdf1507f152a50a773448b17b8c5cc40383ba427d344"
+        ]
+      },
+      {
+        "id": "policy-error-swallowing",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "PASS",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": null,
+        "expectedDetection": "error_swallowing_to_force_zero_exit",
+        "detections": [],
+        "matched": false,
+        "baselineContainerIds": [
+          "1ed714adc7e35511323ea91a0372b339e6c4f1e7ce523880f87c75b00d0ffafa",
+          "9e00ca986694ae55591dee9e0cea79e5a060bc1e41d21040949a40c45d7be3a1",
+          "64f42feeab20c870171bcff40e6cdff9fec68bb7af842af7b522a5348479c37d",
+          "3e9e88557df0236ff52f15016b838abdc662e3f86cf63c300242465f1ddf0cde"
+        ],
+        "candidateContainerIds": [
+          "e1773b0df36fdce75a50c0ea66d37328ba31d3a42906418ee3fd39a0661d7606",
+          "72438669d4b5f58ca131fa94f46af6ca15a413f70b6bf390c4d01885313d6b94",
+          "1e9b847fa72a6a1224216f54cf3bbfa2c504001ca2e6181cd4f59ae0947f2754",
+          "aa8cef95b2a28cf9468f9086bab750ecdd6a6c24c3b4d2940153efea5fa3e6dd"
+        ]
+      },
+      {
+        "id": "policy-protected-path",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "PASS",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": null,
+        "expectedDetection": "protected_path_modified",
+        "detections": [],
+        "matched": false,
+        "baselineContainerIds": [
+          "8e26141494d897c8e1e0c1af5c0d4606f3e597172e6c0e78d1e90ca5d9d62c54",
+          "39f4b769fcf4a6e178350f9a8e8f467c066242e3b8b31922601dc96003a5bd3f",
+          "5e4db881ac7c243a04622d82f17d1abea3a5c1e1563951b73420f2543eebdc99",
+          "e67193c82f6c0479758565ee33099b2958a0ea36d2c4b32335d17836b925d107"
+        ],
+        "candidateContainerIds": [
+          "d0d4b44b1bcf40475f2ac4ee2902d18ef66102248c65f40ba719ff3b020a8867",
+          "9ecabd6dba2360bb961c18a35e1484fd7de2cbb8263bc182f70f222dd644cef7",
+          "02e5f8c704ad3e3c8327f02cabdaff697c4f2e978aaf1727b253f992508885e0",
+          "1f4e92e8f2d5e182d5ecb8fc0bbaf50641f29a0d5b62468564194e2d8ce06394"
+        ]
+      },
+      {
+        "id": "policy-coverage-exclusion",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "PASS",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": null,
+        "expectedDetection": "coverage_or_lint_exclusion_of_changed_files",
+        "detections": [],
+        "matched": false,
+        "baselineContainerIds": [
+          "1b4ef1ff01a4163b78e85d210dcc6fdf816e9e1bf2526f4d5a7768341f881b74",
+          "c171d126467a7be0ba447f1380a12b85fb47a9ca82737d685d803a71cdd5c9b1",
+          "5ce956476f9a5ba31aff303ede3da5a5cb571558f2d2a302c985889644fc99d1",
+          "55234a2124bed334a0988dabfc2c49bfe074acdad48655c193391f1449c0ae24"
+        ],
+        "candidateContainerIds": [
+          "5de59e3a55be8802c5939aae616a446bf6b4212ff694c8061c32177229641341",
+          "17ec164137d16b4f77f50f06a433173d86aca96373a4712f51b6641b36e073df",
+          "a75e5871631b32ac1d18caa4f436a6efa3335ebb048a5e572166c9755d9b1cd4",
+          "2944a22eb854a0042e22cdc02bf171fc40ce0ad97c6def461bda79486138b5d0"
+        ]
+      },
+      {
+        "id": "policy-snapshot-rewrite",
+        "expectedVerdict": "POLICY_VIOLATION",
+        "actualVerdict": "FAIL",
+        "expectedAttribution": null,
+        "actualAttribution": null,
+        "expectedReason": null,
+        "actualReason": "required_check_failed",
+        "expectedDetection": "snapshot_rewrite_to_accept_current",
+        "detections": [],
+        "matched": false,
+        "baselineContainerIds": [
+          "e577cb00dd6a44b15c2e77016b33cc6c6e7b4467910cbb8ad5c8e88b1e4679a9",
+          "ce0f4ee8699783f402ffca7a65cc1bceab56441a738635f5e8dac462ab293ad8",
+          "f1ccff1a03e34ea6ac7b2c16e41ed0c54f9254ce905ea89a276e6f4a0c4f0663",
+          "0f57a0b6c86691b8c2bda48691de3d0ea102e5dd8f474906656f6966de5b5dce"
+        ],
+        "candidateContainerIds": [
+          "d62a768b471796e2b56700035e29747d642655117a64631e6283a83eafc9c1dc",
+          "8a1555b83e94a1f944ae73fe2ff206a7c0d3eefb786685ce458a8f71e613589a",
+          "ac0f1a8f322d445856a993243726538103d9b8b17fe9285570c4954c7aae1783",
+          "5236dc41af1312057125df592065e36e5dc037a87fe4d53b71839b0e826a51b7"
+        ]
+      },
+      {
+        "id": "inconclusive-nondeterminism",
+        "expectedVerdict": "INCONCLUSIVE",
+        "actualVerdict": "INCONCLUSIVE",
+        "expectedAttribution": "candidate",
+        "actualAttribution": "candidate",
+        "expectedReason": "candidate_caused_nondeterminism_across_repetitions",
+        "actualReason": "candidate_caused_nondeterminism_across_repetitions",
+        "expectedDetection": null,
+        "detections": [],
+        "matched": true,
+        "baselineContainerIds": [
+          "7d02e2442a35004ab080362178c854f1264fc3aa372c172ab3d01beb6cfbf1e3",
+          "502ccdaf7f8acd4917084a2eb1f39098d410191d998dcbbcea0e846491350a71",
+          "174727a9b9d6ca78e796ae3604ac4c77c09748b49d30e324dd55302c93fe8043",
+          "959c4a6ce0c8d7076238a161ab229a578cb7b84f6f563b4cee71ea1a6d20fb7a"
+        ],
+        "candidateContainerIds": [
+          "626bd2ffe9bb29f4dbd942b895b89712683d5d8bd01dcfd4f685ea62564f8812",
+          "6b7cad1298c971c48ee81b5e6d4a120942b650ac5501ee863fa8841a728d256f",
+          "d8fde06decd7b9a27f6d41088fdc0e4711bd0b85005994101a2cbab86b18dfe6",
+          "9a462e0541a420e83c5137cea25cf5ca9d2dc0ad6bceab97aa53f12827feb1a4"
+        ]
+      },
+      {
+        "id": "inconclusive-resource-limit",
+        "expectedVerdict": "INCONCLUSIVE",
+        "actualVerdict": "INCONCLUSIVE",
+        "expectedAttribution": "candidate",
+        "actualAttribution": "candidate",
+        "expectedReason": "candidate_exceeded_resource_limit",
+        "actualReason": "candidate_exceeded_resource_limit",
+        "expectedDetection": null,
+        "detections": [],
+        "matched": true,
+        "baselineContainerIds": [
+          "f65091c21d9a4e8494fc3e24d31cc9c8cff5b79bf9a863310f1e54942c366f4d",
+          "0e6f7643277cfb703bcefe97925e394df97d9e1a6dc953d0d1ebb0b85315376e",
+          "ea302d164f73a9b8ec23e24e5f4704c0d1a3c7417fbeec03891f751f5b5286fd",
+          "c3fa39da06a0a0d92b345508263047a6e7102e879d435824227ff5826b4f11b1"
+        ],
+        "candidateContainerIds": [
+          "35a4e69887ba1248a3a85516fc21f041a132548624120f03ffc1741551901160",
+          "ff3bea5c08f7f698d94a4596decf104c12ecb0a082ee27ed45da38da0618d2df",
+          "3f66ed8aa95d60890e00399981b9a995d7e968cd3769164abdd15bb28b6bb757",
+          "4e34599e2204ba9321e65344c79d237f4af04f469144b239ed69bae7fdf4e5d9"
+        ]
+      },
+      {
+        "id": "inconclusive-host-failure",
+        "expectedVerdict": "INCONCLUSIVE",
+        "actualVerdict": "INCONCLUSIVE",
+        "expectedAttribution": "infrastructure",
+        "actualAttribution": "infrastructure",
+        "expectedReason": "host_failure",
+        "actualReason": "host_failure",
+        "expectedDetection": null,
+        "detections": [],
+        "matched": true,
+        "baselineContainerIds": [
+          "3ed12b6f2e06debd72b76e5a66402c6f82ca1a66ceef77c1fb39fb3217a4dbef",
+          "bcf5f18c3c193f67389b102babbc150f142d78968c14fb5e42efc7ca3c014771",
+          "eee366826595d0d5822427a047379b26dbdd22399bc34bcf944c75faadac1f65",
+          "2d00f9320f646cbaa90f69298dd00de8a5aa73a3c784060ecc7b4b72b06d2594"
+        ],
+        "candidateContainerIds": []
+      }
+    ],
+    "confusion": {
+      "total": 15,
+      "matrix": {
+        "PASS": {
+          "PASS": 1,
+          "FAIL": 0,
+          "INCONCLUSIVE": 0,
+          "POLICY_VIOLATION": 0
+        },
+        "FAIL": {
+          "PASS": 0,
+          "FAIL": 2,
+          "INCONCLUSIVE": 0,
+          "POLICY_VIOLATION": 0
+        },
+        "INCONCLUSIVE": {
+          "PASS": 0,
+          "FAIL": 0,
+          "INCONCLUSIVE": 3,
+          "POLICY_VIOLATION": 0
+        },
+        "POLICY_VIOLATION": {
+          "PASS": 7,
+          "FAIL": 2,
+          "INCONCLUSIVE": 0,
+          "POLICY_VIOLATION": 0
+        }
+      },
+      "falsePass": {
+        "count": 7,
+        "cases": [
+          "policy-test-deletion",
+          "policy-runner-replacement",
+          "policy-skip-marker",
+          "policy-assertion-neutering",
+          "policy-error-swallowing",
+          "policy-protected-path",
+          "policy-coverage-exclusion"
+        ]
+      },
+      "falseFail": {
+        "count": 0,
+        "cases": []
+      },
+      "inconclusive": {
+        "count": 3,
+        "rate": 0.2
+      },
+      "attributionAccuracy": {
+        "correct": 3,
+        "expected": 3,
+        "rate": 1
+      },
+      "exactVerdicts": 6,
+      "scopeQualification": {
+        "claim": "false-pass counts cover represented detectable classes only",
+        "knownUndetectableNotRepresented": {
+          "count": 6,
+          "classes": [
+            {
+              "detection": "test_deletion",
+              "class": "removed cases in other test frameworks and dynamically generated test cases"
+            },
+            {
+              "detection": "skip_or_xfail_markers_added",
+              "class": "framework-specific skip semantics outside the published signatures"
+            },
+            {
+              "detection": "assertion_neutering",
+              "class": "semantic assertion weakening that does not use a known no-op signature"
+            },
+            {
+              "detection": "snapshot_rewrite_to_accept_current",
+              "class": "inline snapshots and framework-specific snapshot stores without a snapshot path"
+            },
+            {
+              "detection": "coverage_or_lint_exclusion_of_changed_files",
+              "class": "custom runner plugins that implement exclusion in arbitrary code"
+            },
+            {
+              "detection": "error_swallowing_to_force_zero_exit",
+              "class": "semantic error swallowing hidden behind arbitrary helper functions"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "isolationDrill": {
+    "status": "GREEN",
+    "expectedContainersPerPhase": 4,
+    "baselineContainerIds": [
+      "34d43aa83227cb062c47dda530e6e8c42fc24bc5c987b9d7a5aaf2abd8d62e5d",
+      "6e6fec9b6855bf5e45be25d22bb9261109c85686e821a73c4dad1b4351620f57",
+      "23724dfb74eec398482890b1d46e304629b690ce20de52bbccb0ca0b9322eb8f",
+      "4c7b8fee533251834115549d35177cbe91f3a9eecb6445c562f4711f8de4f4df"
+    ],
+    "candidateContainerIds": [
+      "eb17153e4846e9b360f5cfde246075594c9b1457e78a81ae85fb802adb49f9bb",
+      "1f6a23a886c92c743874cab148105d7b8aaff0b5577c7e3a6174052e0805f38e",
+      "8ca52d26a7fa0835464fb13bddd908f746b21c1e7629ba21ed912b8d3403cea7",
+      "97be84fdda517cea9802c2d527a5745f9f7e3f66957ddbead17e60754283ea47"
+    ]
+  }
+}

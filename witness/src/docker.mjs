@@ -8,6 +8,14 @@ import { runProcess } from "./process.mjs";
 const WITNESS_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const NETWORK_MARKER = "AVERRAY_NETWORK_INTERFACES=";
 const NETWORK_ASSERTION_EXIT = 124;
+// Public GitHub-hosted Linux runners expose four vCPUs. Matching that bounded
+// budget prevents CI-parity smoke suites from tripping their own deadlines
+// while retaining an explicit resource ceiling for adversarial code.
+export const DEFAULT_CPU_LIMIT = 4;
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
+}
 
 export async function ensureWitnessImage(image = DEFAULT_IMAGE) {
   const inspect = await runProcess("docker", ["image", "inspect", "--format", "{{.Id}}", image]);
@@ -41,22 +49,31 @@ export async function runInWitnessContainer({
   environment = {},
   networkMode = "none",
   timeoutSeconds,
-  cpuLimit = 2,
+  cpuLimit = DEFAULT_CPU_LIMIT,
   memoryMb = 4096,
   processLimit = 512,
   temporaryStorageMb = 1024,
+  copyWorkspaceToTmpfs = false,
+  workspaceStorageMb = 3072,
   outputLimitBytes
 }) {
   const name = `averray-witness-${randomUUID()}`;
   const assertNetwork = networkMode === "none";
+  const workspacePreparation = copyWorkspaceToTmpfs
+    ? [
+        "cp -R /averray-source/. /workspace/ || exit $?",
+        `cd ${shellQuote(workingDirectory === "." ? "/workspace" : `/workspace/${workingDirectory}`)} || exit $?`
+      ]
+    : [];
   const wrapper = assertNetwork
     ? [
+        ...workspacePreparation,
         "interfaces=$(find /sys/class/net -mindepth 1 -maxdepth 1 -exec basename '{}' ';' | LC_ALL=C sort | paste -sd, -)",
         `printf '${NETWORK_MARKER}%s\\n' \"$interfaces\" >&2`,
         `[ \"$interfaces\" = lo ] || exit ${NETWORK_ASSERTION_EXIT}`,
         "exec /bin/sh -lc \"$AVERRAY_WITNESS_COMMAND\""
       ].join("; ")
-    : "exec /bin/sh -lc \"$AVERRAY_WITNESS_COMMAND\"";
+    : [...workspacePreparation, "exec /bin/sh -lc \"$AVERRAY_WITNESS_COMMAND\""].join("; ");
 
   const args = [
     "create",
@@ -93,9 +110,17 @@ export async function runInWitnessContainer({
     "PIP_DISABLE_PIP_VERSION_CHECK=1",
     "--env",
     `AVERRAY_WITNESS_COMMAND=${command}`,
-    "--volume",
-    `${resolve(workspace)}:/workspace:rw`
   ];
+  if (copyWorkspaceToTmpfs) {
+    args.push(
+      "--tmpfs",
+      `/workspace:rw,exec,nosuid,nodev,size=${workspaceStorageMb}m,mode=1777,uid=65532,gid=65532`,
+      "--volume",
+      `${resolve(workspace)}:/averray-source:ro`
+    );
+  } else {
+    args.push("--volume", `${resolve(workspace)}:/workspace:rw`);
+  }
   if (cache) {
     args.push("--volume", `${resolve(cache)}:/dependency-cache:rw`);
   }
@@ -104,7 +129,9 @@ export async function runInWitnessContainer({
   }
   args.push(
     "--workdir",
-    workingDirectory === "." ? "/workspace" : `/workspace/${workingDirectory}`
+    copyWorkspaceToTmpfs
+      ? "/workspace"
+      : workingDirectory === "." ? "/workspace" : `/workspace/${workingDirectory}`
   );
   for (const [key, value] of Object.entries(environment)) {
     args.push("--env", `${key}=${value}`);
@@ -158,7 +185,8 @@ export async function runInWitnessContainer({
       containerId,
       networkMode: observedHostMode,
       networkInterfaces,
-      networkAssertionPassed
+      networkAssertionPassed,
+      workspaceMode: copyWorkspaceToTmpfs ? "ephemeral-tmpfs" : "bind"
     };
   } finally {
     await runProcess("docker", ["rm", "--force", name]);

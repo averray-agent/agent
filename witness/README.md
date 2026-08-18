@@ -50,6 +50,9 @@ usable acceptance criterion as-is.
 3. Dependency installation and the check run in the distinct Witness image with
    `--network none`, a read-only container root, non-root UID, all capabilities
    dropped, `no-new-privileges`, and CPU/memory/process/time limits.
+   PR-shadow checks are copied from a read-only source mount into a size-limited
+   in-container tmpfs before execution; this removes host bind-mount latency without
+   changing the network boundary.
 4. Before every offline command, code inside the container enumerates
    `/sys/class/net`. The run is rejected unless only loopback is visible. Docker's
    observed host-side `NetworkMode` is recorded as an additional check, not trusted
@@ -149,7 +152,17 @@ npm --prefix witness run binding:drills
 - Python: exact, SHA-256-hash-pinned `requirements*.txt` inputs populate a Linux
   wheelhouse using binary wheels and pip's `--require-hashes`, followed by an
   offline virtual-environment install.
-- pnpm, Yarn, Rust, Go, Ruby, Poetry and uv are detected but have no pinned Phase-1
+- Python/uv: `pyproject.toml` plus `uv.lock` proactively populates uv's cache,
+  excluding all local projects and source builds from the network-capable phase.
+  The bridge phase's throwaway environment lives on the container's `/tmp`; the
+  repository environment is then created with `uv sync --locked` under offline mode,
+  where local project build code may run without egress. Python downloads are
+  disabled and the project virtual environment is first on `PATH`. The image contains
+  uv 0.12.5 and Python 3.12.12, each copied from its official image pinned by
+  multi-platform manifest digest. Its uv-build 0.9.27 backend wheel is embedded from
+  exact hash-pinned Linux artifacts and installed into the project environment only
+  during the offline phase; uv-managed interpreter downloads are disabled.
+- pnpm, Yarn, Rust, Go, Ruby and Poetry are detected but have no pinned Phase-1
   preparation path. Their observed failures become `REQUIRES_NETWORK` or
   `UNMATERIALIZABLE`, never an implicit host execution fallback.
 
@@ -174,6 +187,8 @@ npm --prefix witness run pr:shadow:report -- \
 npm --prefix witness run pr:shadow:drills
 npm --prefix witness run coverage:drills
 npm --prefix witness run pr:shadow:coverage
+npm --prefix witness run implementation:drills
+npm --prefix witness run pr:shadow:remediation
 ```
 
 The integrity drill mutates each detector registration in a temporary module. It
@@ -228,6 +243,12 @@ The committed judgement file is separate from detector configuration: findings a
 reported and adjudicated, never tuned away. A run exits 2 if any violation or
 INCONCLUSIVE attribution remains unreviewed; use `--allow-unreviewed` only for the first
 evidence pass that discovers cases to adjudicate.
+
+PKT-WITNESS-009 remeasures the same frozen cohort after adding the pinned uv path,
+canonical shadow preparation steps, and the tmpfs check workspace. Its comparison
+artifact preserves the full `4/20 -> 2/20 -> 13/20` history and separates
+five structural CI service/credential dependencies from two verifier-semantic
+ambiguities. See [`PKT_WITNESS_009_HANDOFF.md`](PKT_WITNESS_009_HANDOFF.md).
 
 The ten-repository manifest is [`corpus/repos.json`](corpus/repos.json). It includes
 the six packet-mandated repositories plus:

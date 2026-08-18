@@ -289,6 +289,38 @@ test("base-check diagnosis keeps a real red base separate from execution errors"
   assert.equal(diagnosis.structural, true);
 });
 
+test("base-check diagnosis makes network, CI service, and CI credential boundaries structural", () => {
+  const shared = {
+    checkCommandExists: true,
+    checkDefinition: { declared: true },
+    basePassed: false
+  };
+  const network = diagnoseBaseCheckUnavailability({
+    ...shared,
+    classification: "REQUIRES_NETWORK",
+    attempts: [{ checkAttempt: true, stdout: "", stderr: "TypeError: fetch failed ENETUNREACH" }]
+  });
+  const service = diagnoseBaseCheckUnavailability({
+    ...shared,
+    classification: "FROZEN_DEPENDENCIES",
+    attempts: [{ checkAttempt: true, stdout: "INT4B_DATABASE_START_FAILED", stderr: "" }]
+  });
+  const credential = diagnoseBaseCheckUnavailability({
+    ...shared,
+    classification: "FROZEN_DEPENDENCIES",
+    attempts: [{ checkAttempt: true, stdout: "", stderr: "authenticated SSH clone of the private pinned Harness failed" }]
+  });
+  assert.deepEqual(
+    [network.subcause, service.subcause, credential.subcause],
+    [
+      BASE_CHECK_ERROR_SUBCAUSES.CHECK_REQUIRES_NETWORK,
+      BASE_CHECK_ERROR_SUBCAUSES.REQUIRES_CI_SERVICE,
+      BASE_CHECK_ERROR_SUBCAUSES.REQUIRES_CI_CREDENTIAL
+    ]
+  );
+  assert.ok([network, service, credential].every((diagnosis) => diagnosis.structural));
+});
+
 test("shadow GitHub transport exposes only GET and clone and rejects mutation-shaped audit", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "witness-pr-shadow-github-test-"));
   context.after(() => rm(root, { recursive: true, force: true }));
@@ -485,4 +517,12 @@ test("the committed corpus is exactly 20 mixed PRs and includes protected and do
   assert.ok(cases.some((entry) => entry.category === "test-only"));
   assert.ok(cases.some((entry) => entry.category === "documentation"));
   assert.equal(new Set(cases.map((entry) => entry.repository)).size, 3);
+  const reference = cases.find((entry) => entry.repository === "depre-dev/averray-reference-agent");
+  const harness = cases.find((entry) => entry.repository === "averray-agent/agent-harness");
+  assert.deepEqual(reference.check.preparationCommands, [["npm", "run", "typecheck"]]);
+  assert.equal(reference.includeGitMetadata, true);
+  assert.equal(harness.includeGitMetadata, true);
+  const malformed = structuredClone(manifest);
+  malformed.repositories[0].check.preparationCommands = [["npm", 1]];
+  assert.throws(() => flattenPrShadowManifest(malformed), /preparationCommands/u);
 });

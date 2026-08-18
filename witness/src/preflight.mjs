@@ -27,10 +27,17 @@ export async function runPreflight(options, dependencies = {}) {
     timeoutSeconds = DEFAULT_TIMEOUT_SECONDS,
     frozenInputs = [],
     protectedPaths = [],
+    preparationCommands = [],
+    includeGitMetadata = false,
+    copyCheckWorkspaceToTmpfs = false,
     workingDirectory = ".",
     cwd = process.cwd()
   } = options;
   if (!repo || !check) throw new Error("repo and check are required");
+  if (!Array.isArray(preparationCommands) || preparationCommands.some((command) =>
+    typeof command !== "string" || command.trim() === "")) {
+    throw new Error("preparationCommands must be an array of non-empty shell commands");
+  }
   const checkWorkingDirectory = normalizeWorkingDirectory(workingDirectory);
 
   const runContainer = dependencies.runContainer || runInWitnessContainer;
@@ -46,6 +53,9 @@ export async function runPreflight(options, dependencies = {}) {
     image,
     timeoutSeconds,
     protectedPaths,
+    preparationCommands,
+    includeGitMetadata,
+    copyCheckWorkspaceToTmpfs,
     workingDirectory: checkWorkingDirectory
   });
 
@@ -111,63 +121,72 @@ export async function runPreflight(options, dependencies = {}) {
       });
     }
 
-    const unpreparedPath = join(temporaryRoot, "unprepared");
     const executionImage = report.sandbox.imageId || image;
-    await createAttemptCopy(sourcePath, unpreparedPath);
-    const unprepared = await runContainer({
-      image: executionImage,
-      workspace: unpreparedPath,
-      command: check,
-      workingDirectory: checkWorkingDirectory,
-      networkMode: "none",
-      timeoutSeconds
-    });
-    recordAttempt(report, "unprepared-check", unprepared, true);
-    updateSandboxObservation(report, unprepared);
-    updateBaseExit(report, unprepared);
-
-    if (!unprepared.networkAssertionPassed) {
-      return finishReport(report, started, {
-        classification: CLASSIFICATIONS.UNMATERIALIZABLE,
-        reason: networkAssertionFailure(unprepared)
-      });
-    }
-
-    const firstObservation = interpretExecution(unprepared, {
-      command: check,
-      definition: report.check
-    });
-    if (firstObservation.commandAbsent) {
-      report.checkCommandExists = false;
-      return finishReport(report, started, {
-        classification: CLASSIFICATIONS.UNMATERIALIZABLE,
-        reason: `check command is absent: ${extractFailureReason(unprepared, check)}`
-      });
-    }
-    report.checkCommandExists = true;
-    if (firstObservation.timedOut) {
-      return finishReport(report, started, {
-        classification: CLASSIFICATIONS.UNMATERIALIZABLE,
-        reason: extractFailureReason(unprepared, "offline check timed out")
-      });
-    }
-    if (firstObservation.networkFailure) {
-      return finishReport(report, started, {
-        classification: CLASSIFICATIONS.REQUIRES_NETWORK,
-        reason: extractFailureReason(unprepared, "offline check observed a network failure")
-      });
-    }
-    if (!firstObservation.dependencyFailure) {
-      return finishReport(report, started, {
-        classification: successfulOfflineClassification(report),
-        reason: null
-      });
-    }
-
     const plan = await dependencyPlan(sourcePath, report.toolchain);
     report.dependencyPreparation.plan = plan;
+    let firstObservation = null;
+    let unprepared = null;
+
+    // uv resolves and downloads from its lock automatically. Preparing that
+    // frozen closure before the first check keeps a missing cache distinct from
+    // a check that genuinely attempts egress; the check itself still only runs
+    // with NetworkMode none.
+    if (!(plan.supported && plan.proactive === true)) {
+      const unpreparedPath = join(temporaryRoot, "unprepared");
+      await createAttemptCopy(sourcePath, unpreparedPath, { includeGitMetadata });
+      unprepared = await runContainer({
+        image: executionImage,
+        workspace: unpreparedPath,
+        command: check,
+        workingDirectory: checkWorkingDirectory,
+        networkMode: "none",
+        timeoutSeconds
+      });
+      recordAttempt(report, "unprepared-check", unprepared, true);
+      updateSandboxObservation(report, unprepared);
+      updateBaseExit(report, unprepared);
+
+      if (!unprepared.networkAssertionPassed) {
+        return finishReport(report, started, {
+          classification: CLASSIFICATIONS.UNMATERIALIZABLE,
+          reason: networkAssertionFailure(unprepared)
+        });
+      }
+
+      firstObservation = interpretExecution(unprepared, {
+        command: check,
+        definition: report.check
+      });
+      if (firstObservation.commandAbsent) {
+        report.checkCommandExists = false;
+        return finishReport(report, started, {
+          classification: CLASSIFICATIONS.UNMATERIALIZABLE,
+          reason: `check command is absent: ${extractFailureReason(unprepared, check)}`
+        });
+      }
+      report.checkCommandExists = true;
+      if (firstObservation.timedOut) {
+        return finishReport(report, started, {
+          classification: CLASSIFICATIONS.UNMATERIALIZABLE,
+          reason: extractFailureReason(unprepared, "offline check timed out")
+        });
+      }
+      if (firstObservation.networkFailure) {
+        return finishReport(report, started, {
+          classification: CLASSIFICATIONS.REQUIRES_NETWORK,
+          reason: extractFailureReason(unprepared, "offline check observed a network failure")
+        });
+      }
+      if (!firstObservation.dependencyFailure && preparationCommands.length === 0) {
+        return finishReport(report, started, {
+          classification: successfulOfflineClassification(report),
+          reason: null
+        });
+      }
+    }
+
     if (!plan.supported) {
-      if (firstObservation.missingExecutable && firstObservation.missingExecutable === report.toolchain.detail) {
+      if (firstObservation?.missingExecutable && firstObservation.missingExecutable === report.toolchain.detail) {
         return finishReport(report, started, {
           classification: CLASSIFICATIONS.UNMATERIALIZABLE,
           reason: `toolchain executable is missing: ${firstObservation.missingExecutable}`
@@ -175,13 +194,13 @@ export async function runPreflight(options, dependencies = {}) {
       }
       return finishReport(report, started, {
         classification: CLASSIFICATIONS.REQUIRES_NETWORK,
-        reason: `${plan.reason}; observed ${extractFailureReason(unprepared, "dependency failure")}`
+        reason: `${plan.reason}; observed ${extractFailureReason(unprepared, "dependency or preparation requirement")}`
       });
     }
 
     const preparedPath = join(temporaryRoot, "prepared");
     const cachePath = dependencies.cacheDirectory || join(temporaryRoot, "dependency-cache");
-    await createAttemptCopy(sourcePath, preparedPath);
+    await createAttemptCopy(sourcePath, preparedPath, { includeGitMetadata });
     await mkdir(cachePath, { recursive: true, mode: 0o777 });
     const populate = await runContainer({
       image: executionImage,
@@ -238,6 +257,34 @@ export async function runPreflight(options, dependencies = {}) {
       });
     }
 
+    for (const preparationCommand of preparationCommands) {
+      const preparation = await runContainer({
+        image: executionImage,
+        workspace: preparedPath,
+        cache: cachePath,
+        command: preparationCommand,
+        environment: plan.checkEnvironment || {},
+        networkMode: "none",
+        timeoutSeconds
+      });
+      recordAttempt(report, "check-preparation", preparation, false);
+      updateSandboxObservation(report, preparation);
+      if (!preparation.networkAssertionPassed) {
+        return finishReport(report, started, {
+          classification: CLASSIFICATIONS.UNMATERIALIZABLE,
+          reason: networkAssertionFailure(preparation)
+        });
+      }
+      if (preparation.exitCode !== 0) {
+        return finishReport(report, started, {
+          classification: looksLikeNetworkFailure(preparation)
+            ? CLASSIFICATIONS.REQUIRES_NETWORK
+            : CLASSIFICATIONS.UNMATERIALIZABLE,
+          reason: `check preparation failed: ${extractFailureReason(preparation, preparationCommand)}`
+        });
+      }
+    }
+
     const preparedCheck = await runContainer({
       image: executionImage,
       workspace: preparedPath,
@@ -246,6 +293,7 @@ export async function runPreflight(options, dependencies = {}) {
       workingDirectory: checkWorkingDirectory,
       environment: plan.checkEnvironment || {},
       networkMode: "none",
+      copyWorkspaceToTmpfs: copyCheckWorkspaceToTmpfs,
       timeoutSeconds
     });
     recordAttempt(report, "prepared-check", preparedCheck, true);
@@ -296,7 +344,17 @@ export async function runPreflight(options, dependencies = {}) {
   }
 }
 
-function initialReport({ repo, check, image, timeoutSeconds, protectedPaths, workingDirectory }) {
+function initialReport({
+  repo,
+  check,
+  image,
+  timeoutSeconds,
+  protectedPaths,
+  preparationCommands,
+  includeGitMetadata,
+  copyCheckWorkspaceToTmpfs,
+  workingDirectory
+}) {
   return {
     schemaVersion: REPORT_SCHEMA,
     generatedAt: new Date().toISOString(),
@@ -317,6 +375,9 @@ function initialReport({ repo, check, image, timeoutSeconds, protectedPaths, wor
     materialization: null,
     check: {
       command: check,
+      preparationCommands,
+      includesGitMetadata: includeGitMetadata,
+      workspaceMode: copyCheckWorkspaceToTmpfs ? "ephemeral-tmpfs" : "bind",
       workingDirectory,
       timeoutSeconds,
       definitionFile: null,
@@ -371,6 +432,7 @@ function recordAttempt(report, phase, result, checkAttempt) {
   report.attempts.push({
     phase,
     checkAttempt,
+    workspaceMode: result.workspaceMode || "bind",
     networkMode: result.networkMode,
     networkInterfaces: result.networkInterfaces,
     networkAssertionPassed: result.networkAssertionPassed,
@@ -434,7 +496,7 @@ async function removePreparedDependencies(root) {
   const entries = await readdir(root, { withFileTypes: true });
   await Promise.all(entries.map(async (entry) => {
     const path = join(root, entry.name);
-    if (entry.name === "node_modules" || entry.name === ".witness-venv") {
+    if (["node_modules", ".venv", ".witness-venv"].includes(entry.name)) {
       await rm(path, { recursive: true, force: true });
     } else if (entry.isDirectory() && entry.name !== ".git") {
       await removePreparedDependencies(path);

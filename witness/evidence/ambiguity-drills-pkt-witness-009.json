@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "averray.witness.ambiguity-drills/v1",
+  "drills": {
+    "renamedAndExpandedDeclarations": {
+      "mutation": {
+        "anchor": "      if (hasComparableReplacementCount(unmatched.removed, unmatched.added)) {",
+        "anchorOccurrences": 1,
+        "applied": true
+      },
+      "detectorPresent": {
+        "status": "GREEN"
+      },
+      "seenRedWithAnchorMutated": {
+        "status": "RED"
+      },
+      "fixtures": [
+        "agent#1109",
+        "reference-agent#813"
+      ],
+      "expected": "INCONCLUSIVE/verifier",
+      "mutatedOutcome": "POLICY_VIOLATION"
+    },
+    "outrightTestDeletion": {
+      "mutation": {
+        "anchor": "        findings.push(violation(\n          \"test_deletion\",\n          `test declarations were removed from ${file.path} without a comparable replacement set`,",
+        "anchorOccurrences": 1,
+        "applied": true
+      },
+      "detectorPresent": {
+        "status": "GREEN"
+      },
+      "seenRedWithAnchorMutated": {
+        "status": "RED"
+      },
+      "expected": "POLICY_VIOLATION",
+      "mutatedOutcome": "INCONCLUSIVE/verifier"
+    },
+    "gitFileRename": {
+      "mutation": {
+        "anchor": "      current.renameFromSeen = true;",
+        "anchorOccurrences": 1,
+        "applied": true
+      },
+      "detectorPresent": {
+        "status": "GREEN"
+      },
+      "seenRedWithAnchorMutated": {
+        "status": "RED"
+      },
+      "expected": "valid explicit rename; no ambiguity",
+      "mutatedOutcome": "unsupported patch operation: incomplete rename metadata"
+    },
+    "verifierAttribution": {
+      "mutation": {
+        "anchor": "  \"candidate\",\n  \"verifier\"",
+        "anchorOccurrences": 1,
+        "applied": true
+      },
+      "detectorPresent": {
+        "status": "GREEN"
+      },
+      "seenRedWithAnchorMutated": {
+        "status": "RED"
+      },
+      "expected": "accepted fourth INCONCLUSIVE attribution"
+    },
+    "verifierWorkerConsequence": {
+      "mutation": {
+        "anchor": "  return verdict === \"INCONCLUSIVE\" ? \"none\" : null;",
+        "anchorOccurrences": 1,
+        "applied": true
+      },
+      "detectorPresent": {
+        "status": "GREEN"
+      },
+      "seenRedWithAnchorMutated": {
+        "status": "RED"
+      },
+      "expected": "workerConsequence: none"
+    },
+    "verifierReputationSignal": {
+      "mutation": {
+        "anchor": "    kind: \"evidence_completeness_gap\",",
+        "anchorOccurrences": 1,
+        "applied": true
+      },
+      "detectorPresent": {
+        "status": "GREEN"
+      },
+      "seenRedWithAnchorMutated": {
+        "status": "RED"
+      },
+      "expected": "verifier evidence-completeness reputation signal"
+    }
+  }
+}

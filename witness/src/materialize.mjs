@@ -160,14 +160,14 @@ async function hasGitMetadata(root) {
   }
 }
 
-export async function createAttemptCopy(source, destination) {
+export async function createAttemptCopy(source, destination, { includeGitMetadata = false } = {}) {
   await cp(source, destination, {
     recursive: true,
     errorOnExist: true,
     verbatimSymlinks: true,
     filter(path) {
       const rel = relative(source, path);
-      return rel === "" || !rel.split(/[\\/]/u).includes(".git");
+      return includeGitMetadata || rel === "" || !rel.split(/[\\/]/u).includes(".git");
     }
   });
   await makeTreeWritable(destination);
