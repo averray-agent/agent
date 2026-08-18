@@ -9,6 +9,7 @@ import { SelfIdentityRegistry } from "./self-identity-registry.js";
 export const CATALOGUE_LANE_PACKET = "PACKET_D3_LANE_DISCIPLINE.md";
 export const CATALOGUE_LANE_STATE_SCOPE = "catalogue-lane-discipline-v1";
 export const LANE_BUDGET_EXHAUSTED = "lane_budget_exhausted";
+export const LANE_BACKLOG_SATURATED = "lane_backlog_saturated";
 export const LANE_PAUSED = "lane_paused";
 
 const USDC_DECIMALS = 6;
@@ -17,23 +18,32 @@ const RETAINED_WINDOW_MS = 14 * DAY_MS;
 const COST_WINDOW_MS = 30 * DAY_MS;
 const MAX_SESSION_RECORDS = 10_000;
 const POSTING_LOCK_TTL_SECONDS = 300;
+// A lane stops posting once this many of its jobs sit open and unclaimed inside
+// the rolling window. The daily cap bounds SPEND; this bounds INVENTORY. Without
+// it a lane keeps posting into a queue nobody is claiming, which reads to an
+// arriving agent as a market no one wants — the mirror of the "farmed board"
+// problem we removed by retiring our own sweeping worker.
+const DEFAULT_MAX_UNCLAIMED_BACKLOG = 3;
 
 export const DEFAULT_CATALOGUE_LANE_REGISTRY = Object.freeze({
   liveness: Object.freeze({
     hypothesis: "Proof-of-life for the board; 0.10 USDC buys it as well as 0.25 USDC.",
     dailyCapRaw: "3000000",
+    maxUnclaimedBacklog: 2,
     stopCondition: "Zero external claimants for 14 consecutive days.",
     paused: false
   }),
   "oss-anchored": Object.freeze({
     hypothesis: "Public artifacts and maintainer relationships create an external-worker funnel.",
     dailyCapRaw: "15000000",
+    maxUnclaimedBacklog: 3,
     stopCondition: "Cost per retained external worker exceeds 25 USDC over a trailing 30-day window.",
     paused: false
   }),
   "benchmark-showcase": Object.freeze({
     hypothesis: "Verification coverage and demonstrable work provide a useful showcase.",
     dailyCapRaw: "5000000",
+    maxUnclaimedBacklog: 2,
     stopCondition: "Real external demand supersedes catalogue work in the same category.",
     paused: false
   })
@@ -82,6 +92,10 @@ export function validateCatalogueLaneRegistry(input) {
         throw packetConfigError(`lane ${id} is missing ${field}`);
       }
     }
+    const backlogRaw = rawEntry.maxUnclaimedBacklog ?? DEFAULT_MAX_UNCLAIMED_BACKLOG;
+    if (!Number.isInteger(backlogRaw) || backlogRaw < 1) {
+      throw packetConfigError(`lane ${id} maxUnclaimedBacklog must be a positive integer`);
+    }
     const hypothesis = requiredText(rawEntry.hypothesis, `lane ${id} hypothesis`);
     const stopCondition = requiredText(rawEntry.stopCondition, `lane ${id} stopCondition`);
     const dailyCapRaw = rawUnits(rawEntry.dailyCapRaw, `lane ${id} dailyCapRaw`);
@@ -89,6 +103,7 @@ export function validateCatalogueLaneRegistry(input) {
       id,
       hypothesis,
       dailyCapRaw,
+      maxUnclaimedBacklog: backlogRaw,
       stopCondition,
       paused: rawEntry.paused === true
     }));
@@ -222,6 +237,29 @@ export class CatalogueLaneDiscipline {
       );
     }
 
+    if (!existing) {
+      const backlog = await this.#unclaimedBacklog(records, lane.id, evaluatedAt);
+      if (backlog.count >= lane.maxUnclaimedBacklog) {
+        const details = {
+          lane: lane.id,
+          unclaimedCount: backlog.count,
+          maxUnclaimedBacklog: lane.maxUnclaimedBacklog,
+          oldestUnclaimedAt: backlog.oldestAt ?? null,
+          withheldJobId: String(job.id),
+          retryWhen: "a queued job in this lane is claimed or ages out of the window"
+        };
+        // Never a silent cap: an operator reading the log must see what was
+        // withheld and why, or a throttled lane is indistinguishable from a
+        // broken poster.
+        this.logger.info?.(details, LANE_BACKLOG_SATURATED);
+        throw new CatalogueLanePostingError(
+          LANE_BACKLOG_SATURATED,
+          `Catalogue lane ${lane.id} already has ${backlog.count} unclaimed job(s) open; posting is throttled until one is claimed or ages out.`,
+          details
+        );
+      }
+    }
+
     const reserved = existing ? records : [...records, { ...candidate, state: "reserved" }];
     if (!existing) await this.#writeRecords(reserved, evaluatedAt);
     try {
@@ -296,6 +334,18 @@ export class CatalogueLaneDiscipline {
     return stored && typeof stored === "object" ? stored : { records: [] };
   }
 
+  async #unclaimedBacklog(records, laneId, evaluatedAt) {
+    const since = evaluatedAt.getTime() - DAY_MS;
+    const posted = records.filter((record) =>
+      record.lane === laneId && withinWindow(record.postedAt, evaluatedAt, DAY_MS));
+    if (posted.length === 0) return { count: 0, oldestAt: null };
+    const claimed = await collectClaimedJobIdsSince(this.stateStore, since);
+    const open = posted
+      .filter((record) => !claimed.has(String(record.jobId)))
+      .sort((left, right) => Date.parse(left.postedAt) - Date.parse(right.postedAt));
+    return { count: open.length, oldestAt: open[0]?.postedAt ?? null };
+  }
+
   async #writeRecords(records, evaluatedAt) {
     await this.stateStore.upsertServiceState(CATALOGUE_LANE_STATE_SCOPE, {
       version: "catalogue-lane-ledger-v1",
@@ -303,6 +353,26 @@ export class CatalogueLaneDiscipline {
       evaluatedAt: evaluatedAt.toISOString()
     });
   }
+}
+
+async function collectClaimedJobIdsSince(stateStore, since) {
+  // Bounded on purpose: only sessions inside the backlog window can tell us
+  // whether a job posted in that window was claimed, so we stop paging as soon
+  // as a page predates it. The full-history pager stays for board metrics.
+  const claimed = new Set();
+  const pageSize = 100;
+  for (let offset = 0; offset < MAX_SESSION_RECORDS; offset += pageSize) {
+    const page = await stateStore.listRecentSessions?.(pageSize, offset) ?? [];
+    if (!Array.isArray(page)) throw new Error("catalogue lane backlog session source returned a non-array page");
+    let sawOlder = false;
+    for (const session of page) {
+      const jobId = session?.jobId ?? session?.jobSnapshot?.definition?.id;
+      if (jobId) claimed.add(String(jobId));
+      if (sessionTimestamp(session) < since) sawOlder = true;
+    }
+    if (page.length < pageSize || sawOlder) return claimed;
+  }
+  return claimed;
 }
 
 function candidateRecord(job, lane, postedAt, expectedBrokeredGasRaw) {
