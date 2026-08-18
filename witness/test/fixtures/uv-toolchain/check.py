@@ -1,0 +1,1 @@
+print("UV_TOOLCHAIN_CHECK_PASSED")

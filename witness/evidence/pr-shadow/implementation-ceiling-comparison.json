@@ -1,0 +1,451 @@
+{
+  "schemaVersion": "averray.witness.implementation-ceiling-comparison/v1",
+  "generatedAt": "2026-08-18T13:27:51.433Z",
+  "sameFrozenCohort": true,
+  "cohort": {
+    "total": 20,
+    "ids": [
+      "averray-agent/agent#1109",
+      "averray-agent/agent#1110",
+      "averray-agent/agent#1145",
+      "averray-agent/agent#1146",
+      "averray-agent/agent#1147",
+      "averray-agent/agent#1148",
+      "averray-agent/agent#1149",
+      "averray-agent/agent-harness#29",
+      "averray-agent/agent-harness#30",
+      "averray-agent/agent-harness#31",
+      "averray-agent/agent-harness#32",
+      "averray-agent/agent-harness#35",
+      "averray-agent/agent-harness#36",
+      "depre-dev/averray-reference-agent#603",
+      "depre-dev/averray-reference-agent#802",
+      "depre-dev/averray-reference-agent#812",
+      "depre-dev/averray-reference-agent#813",
+      "depre-dev/averray-reference-agent#814",
+      "depre-dev/averray-reference-agent#815",
+      "depre-dev/averray-reference-agent#816"
+    ]
+  },
+  "coverageHistory": [
+    {
+      "measurement": "#1152 baseline",
+      "decided": 4,
+      "total": 20
+    },
+    {
+      "measurement": "current main (#1155, including the #1154 regression)",
+      "decided": 2,
+      "total": 20
+    },
+    {
+      "measurement": "PKT-WITNESS-009",
+      "decided": 13,
+      "total": 20
+    }
+  ],
+  "originalSixteen": {
+    "total": 16,
+    "implementationArtifactsRemoved": 11,
+    "structurallyUndecidable": 5,
+    "unresolvedImplementationArtifacts": 0,
+    "artifactCases": [
+      "averray-agent/agent#1149",
+      "averray-agent/agent#1148",
+      "averray-agent/agent#1147",
+      "averray-agent/agent#1146",
+      "averray-agent/agent#1145",
+      "averray-agent/agent-harness#36",
+      "averray-agent/agent-harness#35",
+      "averray-agent/agent-harness#32",
+      "averray-agent/agent-harness#31",
+      "averray-agent/agent-harness#30",
+      "averray-agent/agent-harness#29"
+    ],
+    "structuralCases": [
+      "depre-dev/averray-reference-agent#816",
+      "depre-dev/averray-reference-agent#815",
+      "depre-dev/averray-reference-agent#814",
+      "depre-dev/averray-reference-agent#812",
+      "depre-dev/averray-reference-agent#603"
+    ]
+  },
+  "residualInconclusives": {
+    "total": 7,
+    "structurallyUndecidable": 5,
+    "verifierSemanticAmbiguities": 2,
+    "otherImplementationArtifacts": 0,
+    "byReason": {
+      "integrity_detection_ambiguous": 2,
+      "repository_check_unavailable": 5
+    },
+    "byExecutionSubcause": {
+      "requires_ci_service": 4,
+      "requires_ci_credential": 1
+    },
+    "cases": [
+      {
+        "id": "averray-agent/agent#1109",
+        "verdict": "INCONCLUSIVE",
+        "reason": "integrity_detection_ambiguous",
+        "baseCheckDiagnosis": null,
+        "headCheckNetworkModes": [],
+        "baseDiagnosticCheckNetworkModes": []
+      },
+      {
+        "id": "depre-dev/averray-reference-agent#816",
+        "verdict": "INCONCLUSIVE",
+        "reason": "repository_check_unavailable",
+        "baseCheckDiagnosis": {
+          "cause": "base_check_errored",
+          "subcause": "requires_ci_service",
+          "structural": true,
+          "basis": "the canonical check requires a Docker/database service that the unprivileged Witness sandbox cannot safely expose"
+        },
+        "headCheckNetworkModes": [
+          "none",
+          "none"
+        ],
+        "baseDiagnosticCheckNetworkModes": [
+          "none",
+          "none"
+        ]
+      },
+      {
+        "id": "depre-dev/averray-reference-agent#815",
+        "verdict": "INCONCLUSIVE",
+        "reason": "repository_check_unavailable",
+        "baseCheckDiagnosis": {
+          "cause": "base_check_errored",
+          "subcause": "requires_ci_service",
+          "structural": true,
+          "basis": "the canonical check requires a Docker/database service that the unprivileged Witness sandbox cannot safely expose"
+        },
+        "headCheckNetworkModes": [
+          "none",
+          "none"
+        ],
+        "baseDiagnosticCheckNetworkModes": [
+          "none",
+          "none"
+        ]
+      },
+      {
+        "id": "depre-dev/averray-reference-agent#814",
+        "verdict": "INCONCLUSIVE",
+        "reason": "repository_check_unavailable",
+        "baseCheckDiagnosis": {
+          "cause": "base_check_errored",
+          "subcause": "requires_ci_service",
+          "structural": true,
+          "basis": "the canonical check requires a Docker/database service that the unprivileged Witness sandbox cannot safely expose"
+        },
+        "headCheckNetworkModes": [
+          "none",
+          "none"
+        ],
+        "baseDiagnosticCheckNetworkModes": [
+          "none",
+          "none"
+        ]
+      },
+      {
+        "id": "depre-dev/averray-reference-agent#813",
+        "verdict": "INCONCLUSIVE",
+        "reason": "integrity_detection_ambiguous",
+        "baseCheckDiagnosis": null,
+        "headCheckNetworkModes": [],
+        "baseDiagnosticCheckNetworkModes": []
+      },
+      {
+        "id": "depre-dev/averray-reference-agent#812",
+        "verdict": "INCONCLUSIVE",
+        "reason": "repository_check_unavailable",
+        "baseCheckDiagnosis": {
+          "cause": "base_check_errored",
+          "subcause": "requires_ci_service",
+          "structural": true,
+          "basis": "the canonical check requires a Docker/database service that the unprivileged Witness sandbox cannot safely expose"
+        },
+        "headCheckNetworkModes": [
+          "none",
+          "none"
+        ],
+        "baseDiagnosticCheckNetworkModes": [
+          "none",
+          "none"
+        ]
+      },
+      {
+        "id": "depre-dev/averray-reference-agent#603",
+        "verdict": "INCONCLUSIVE",
+        "reason": "repository_check_unavailable",
+        "baseCheckDiagnosis": {
+          "cause": "base_check_errored",
+          "subcause": "requires_ci_credential",
+          "structural": true,
+          "basis": "the canonical check requires a private CI credential that the shadow harness must not fabricate or disclose"
+        },
+        "headCheckNetworkModes": [
+          "none",
+          "none"
+        ],
+        "baseDiagnosticCheckNetworkModes": [
+          "none",
+          "none"
+        ]
+      }
+    ]
+  },
+  "causeRemediation": {
+    "uv": {
+      "before": 6,
+      "decided": 6,
+      "cases": [
+        {
+          "id": "averray-agent/agent-harness#36",
+          "verdict": "PASS",
+          "reason": null,
+          "baseCheckDiagnosis": null,
+          "headCheckNetworkModes": [
+            "none"
+          ],
+          "baseDiagnosticCheckNetworkModes": []
+        },
+        {
+          "id": "averray-agent/agent-harness#35",
+          "verdict": "PASS",
+          "reason": null,
+          "baseCheckDiagnosis": null,
+          "headCheckNetworkModes": [
+            "none"
+          ],
+          "baseDiagnosticCheckNetworkModes": []
+        },
+        {
+          "id": "averray-agent/agent-harness#32",
+          "verdict": "PASS",
+          "reason": null,
+          "baseCheckDiagnosis": null,
+          "headCheckNetworkModes": [
+            "none"
+          ],
+          "baseDiagnosticCheckNetworkModes": []
+        },
+        {
+          "id": "averray-agent/agent-harness#31",
+          "verdict": "PASS",
+          "reason": null,
+          "baseCheckDiagnosis": null,
+          "headCheckNetworkModes": [
+            "none"
+          ],
+          "baseDiagnosticCheckNetworkModes": []
+        },
+        {
+          "id": "averray-agent/agent-harness#30",
+          "verdict": "PASS",
+          "reason": null,
+          "baseCheckDiagnosis": null,
+          "headCheckNetworkModes": [
+            "none"
+          ],
+          "baseDiagnosticCheckNetworkModes": []
+        },
+        {
+          "id": "averray-agent/agent-harness#29",
+          "verdict": "PASS",
+          "reason": null,
+          "baseCheckDiagnosis": null,
+          "headCheckNetworkModes": [
+            "none"
+          ],
+          "baseDiagnosticCheckNetworkModes": []
+        }
+      ]
+    },
+    "httpSmoke": {
+      "before": 5,
+      "finding": "all five checks use loopback HTTP; bind-mount filesystem latency caused their timeout, not egress denial",
+      "decided": 5,
+      "cases": [
+        {
+          "id": "averray-agent/agent#1149",
+          "verdict": "PASS",
+          "reason": null,
+          "baseCheckDiagnosis": null,
+          "headCheckNetworkModes": [
+            "none",
+            "none"
+          ],
+          "baseDiagnosticCheckNetworkModes": []
+        },
+        {
+          "id": "averray-agent/agent#1148",
+          "verdict": "PASS",
+          "reason": null,
+          "baseCheckDiagnosis": null,
+          "headCheckNetworkModes": [
+            "none",
+            "none"
+          ],
+          "baseDiagnosticCheckNetworkModes": []
+        },
+        {
+          "id": "averray-agent/agent#1147",
+          "verdict": "PASS",
+          "reason": null,
+          "baseCheckDiagnosis": null,
+          "headCheckNetworkModes": [
+            "none",
+            "none"
+          ],
+          "baseDiagnosticCheckNetworkModes": []
+        },
+        {
+          "id": "averray-agent/agent#1146",
+          "verdict": "PASS",
+          "reason": null,
+          "baseCheckDiagnosis": null,
+          "headCheckNetworkModes": [
+            "none",
+            "none"
+          ],
+          "baseDiagnosticCheckNetworkModes": []
+        },
+        {
+          "id": "averray-agent/agent#1145",
+          "verdict": "PASS",
+          "reason": null,
+          "baseCheckDiagnosis": null,
+          "headCheckNetworkModes": [
+            "none",
+            "none"
+          ],
+          "baseDiagnosticCheckNetworkModes": []
+        }
+      ]
+    },
+    "missingCiPrerequisites": {
+      "before": 5,
+      "finding": "the canonical gate requires privileged Docker/database services or private CI credentials; the Witness does not fake or expose either",
+      "decided": 0,
+      "structural": 5,
+      "cases": [
+        {
+          "id": "depre-dev/averray-reference-agent#816",
+          "verdict": "INCONCLUSIVE",
+          "reason": "repository_check_unavailable",
+          "baseCheckDiagnosis": {
+            "cause": "base_check_errored",
+            "subcause": "requires_ci_service",
+            "structural": true,
+            "basis": "the canonical check requires a Docker/database service that the unprivileged Witness sandbox cannot safely expose"
+          },
+          "headCheckNetworkModes": [
+            "none",
+            "none"
+          ],
+          "baseDiagnosticCheckNetworkModes": [
+            "none",
+            "none"
+          ]
+        },
+        {
+          "id": "depre-dev/averray-reference-agent#815",
+          "verdict": "INCONCLUSIVE",
+          "reason": "repository_check_unavailable",
+          "baseCheckDiagnosis": {
+            "cause": "base_check_errored",
+            "subcause": "requires_ci_service",
+            "structural": true,
+            "basis": "the canonical check requires a Docker/database service that the unprivileged Witness sandbox cannot safely expose"
+          },
+          "headCheckNetworkModes": [
+            "none",
+            "none"
+          ],
+          "baseDiagnosticCheckNetworkModes": [
+            "none",
+            "none"
+          ]
+        },
+        {
+          "id": "depre-dev/averray-reference-agent#814",
+          "verdict": "INCONCLUSIVE",
+          "reason": "repository_check_unavailable",
+          "baseCheckDiagnosis": {
+            "cause": "base_check_errored",
+            "subcause": "requires_ci_service",
+            "structural": true,
+            "basis": "the canonical check requires a Docker/database service that the unprivileged Witness sandbox cannot safely expose"
+          },
+          "headCheckNetworkModes": [
+            "none",
+            "none"
+          ],
+          "baseDiagnosticCheckNetworkModes": [
+            "none",
+            "none"
+          ]
+        },
+        {
+          "id": "depre-dev/averray-reference-agent#812",
+          "verdict": "INCONCLUSIVE",
+          "reason": "repository_check_unavailable",
+          "baseCheckDiagnosis": {
+            "cause": "base_check_errored",
+            "subcause": "requires_ci_service",
+            "structural": true,
+            "basis": "the canonical check requires a Docker/database service that the unprivileged Witness sandbox cannot safely expose"
+          },
+          "headCheckNetworkModes": [
+            "none",
+            "none"
+          ],
+          "baseDiagnosticCheckNetworkModes": [
+            "none",
+            "none"
+          ]
+        },
+        {
+          "id": "depre-dev/averray-reference-agent#603",
+          "verdict": "INCONCLUSIVE",
+          "reason": "repository_check_unavailable",
+          "baseCheckDiagnosis": {
+            "cause": "base_check_errored",
+            "subcause": "requires_ci_credential",
+            "structural": true,
+            "basis": "the canonical check requires a private CI credential that the shadow harness must not fabricate or disclose"
+          },
+          "headCheckNetworkModes": [
+            "none",
+            "none"
+          ],
+          "baseDiagnosticCheckNetworkModes": [
+            "none",
+            "none"
+          ]
+        }
+      ]
+    }
+  },
+  "regressionBar": {
+    "adversarialExactVerdicts": 15,
+    "adversarialTotal": 15,
+    "adversarialFalsePasses": 0,
+    "detectorFalsePositivePullRequests": 0,
+    "detectorFalsePositiveRatePct": 0,
+    "policyFalsePositivePullRequests": 2,
+    "policyFalsePositiveRatePct": 10,
+    "authoredMakeRule5": "GREEN",
+    "dockerNetworkMode": "none",
+    "interfacesInsideContainer": [
+      "lo"
+    ],
+    "observedShadowCheckNetworkModes": [
+      "none"
+    ],
+    "everyObservedShadowCheckUsedNetworkNone": true
+  }
+}

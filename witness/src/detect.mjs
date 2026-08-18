@@ -18,6 +18,24 @@ async function readJson(path) {
   }
 }
 
+function hasExactUvBuildBackend(pyproject) {
+  const lines = pyproject.split(/\r?\n/u);
+  const section = [];
+  let inside = false;
+  for (const line of lines) {
+    const header = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/u);
+    if (header) {
+      if (inside) break;
+      inside = header[1] === "build-system";
+      continue;
+    }
+    if (inside) section.push(line);
+  }
+  const buildSystem = section.join("\n");
+  return /^\s*build-backend\s*=\s*["']uv_build["']\s*(?:#.*)?$/mu.test(buildSystem) &&
+    /^\s*requires\s*=\s*\[\s*["']uv_build==0\.9\.27["']\s*,?\s*\]\s*(?:#.*)?$/mu.test(buildSystem);
+}
+
 function commandFamily(command) {
   const first = command.trim().split(/\s+/u)[0] || "";
   if (["node", "npm", "npx", "pnpm", "yarn"].includes(first)) return "node";
@@ -151,6 +169,36 @@ export async function dependencyPlan(root, toolchain) {
   }
 
   if (toolchain.kind === "python") {
+    if (await exists(root, "uv.lock") && await exists(root, "pyproject.toml")) {
+      const pyproject = await readFile(join(root, "pyproject.toml"), "utf8");
+      if (!hasExactUvBuildBackend(pyproject)) {
+        return {
+          supported: false,
+          reason: "uv projects require an exactly proven uv_build==0.9.27 build-system for this pinned Witness image"
+        };
+      }
+      return {
+        supported: true,
+        proactive: true,
+        kind: "uv-cache",
+        evidence: {
+          files: ["pyproject.toml", "uv.lock"],
+          lockValidation: "uv sync --locked --no-install-local --no-build",
+          buildBackend: "pyproject-proven and image-pinned uv-build==0.9.27"
+        },
+        populateCommand: "UV_CACHE_DIR=/dependency-cache/uv-cache UV_PROJECT_ENVIRONMENT=/tmp/witness-populate-venv UV_PYTHON_INSTALL_DIR=/dependency-cache/python UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy uv sync --locked --no-install-local --no-build",
+        offlineInstallCommand: "python3 -m venv /workspace/.venv && /workspace/.venv/bin/pip install --no-index --only-binary=:all: --require-hashes --find-links=/opt/witness-wheels -r /opt/witness-toolchain/uv-build-requirements.txt && UV_CACHE_DIR=/dependency-cache/uv-cache UV_PYTHON_INSTALL_DIR=/dependency-cache/python UV_OFFLINE=1 UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy uv sync --locked --no-build-isolation",
+        checkEnvironment: {
+          PATH: "/workspace/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          UV_CACHE_DIR: "/dependency-cache/uv-cache",
+          UV_LINK_MODE: "copy",
+          UV_NO_SYNC: "1",
+          UV_OFFLINE: "1",
+          UV_PYTHON_DOWNLOADS: "never",
+          UV_PYTHON_INSTALL_DIR: "/dependency-cache/python"
+        }
+      };
+    }
     const candidates = [
       "requirements-test.txt",
       "requirements-dev.txt",

@@ -28,6 +28,9 @@ export const BASE_CHECK_CAUSES = Object.freeze({
 });
 export const BASE_CHECK_ERROR_SUBCAUSES = Object.freeze({
   CHECK_TIMEOUT: "check_timeout",
+  CHECK_REQUIRES_NETWORK: "check_requires_network",
+  REQUIRES_CI_SERVICE: "requires_ci_service",
+  REQUIRES_CI_CREDENTIAL: "requires_ci_credential",
   MISSING_CI_PREREQUISITES: "missing_ci_prerequisites",
   UNCLASSIFIED: "unclassified_execution_error"
 });
@@ -58,6 +61,15 @@ function assertStringArray(value, label) {
   }
 }
 
+function assertOptionalCommandList(value, label) {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.some((command) =>
+    !Array.isArray(command) || command.length === 0 ||
+    command.some((entry) => typeof entry !== "string" || entry.trim() === ""))) {
+    throw new Error(`${label} must be an array of non-empty string arrays`);
+  }
+}
+
 export function flattenPrShadowManifest(manifest) {
   if (manifest?.schemaVersion !== "averray.witness.pr-shadow-corpus/v1") {
     throw new Error("unsupported PR shadow corpus schemaVersion");
@@ -72,6 +84,14 @@ export function flattenPrShadowManifest(manifest) {
     assertString(repositoryEntry.repository, "repository.repository");
     assertStringArray(repositoryEntry.check?.command, `${repositoryEntry.repository}.check.command`);
     assertString(repositoryEntry.check?.workingDirectory, `${repositoryEntry.repository}.check.workingDirectory`);
+    assertOptionalCommandList(
+      repositoryEntry.check?.preparationCommands,
+      `${repositoryEntry.repository}.check.preparationCommands`
+    );
+    if (repositoryEntry.includeGitMetadata !== undefined &&
+        typeof repositoryEntry.includeGitMetadata !== "boolean") {
+      throw new Error(`${repositoryEntry.repository}.includeGitMetadata must be boolean`);
+    }
     assertStringArray(repositoryEntry.protectedPaths, `${repositoryEntry.repository}.protectedPaths`);
     if (!Array.isArray(repositoryEntry.pullRequests) || repositoryEntry.pullRequests.length === 0) {
       throw new Error(`${repositoryEntry.repository}.pullRequests must be non-empty`);
@@ -92,8 +112,11 @@ export function flattenPrShadowManifest(manifest) {
         check: {
           id: repositoryEntry.check.id,
           command: [...repositoryEntry.check.command],
+          preparationCommands: (repositoryEntry.check.preparationCommands || [])
+            .map((command) => [...command]),
           workingDirectory: repositoryEntry.check.workingDirectory
         },
+        includeGitMetadata: repositoryEntry.includeGitMetadata === true,
         protectedPaths: [...repositoryEntry.protectedPaths],
         allowedPaths: [...(repositoryEntry.allowedPaths || ["**"])],
         maximumChangedFiles: repositoryEntry.maximumChangedFiles || 1_000,
@@ -168,6 +191,8 @@ export function derivePrShadowContract({ entry, metadata, diffBytes }) {
     check: {
       id: entry.check.id,
       command: entry.check.command,
+      preparationCommands: entry.check.preparationCommands || [],
+      includesGitMetadata: entry.includeGitMetadata === true,
       workingDirectory: entry.check.workingDirectory,
       commandResolution,
       judgingCommandProtected
@@ -460,6 +485,16 @@ export function diagnoseBaseCheckUnavailability(report) {
       basis: "the declared package test script did not exist at the base commit"
     };
   }
+  const text = checkAttemptText(report);
+  if (report.classification === CLASSIFICATIONS.REQUIRES_NETWORK &&
+      /ENETUNREACH|EAI_AGAIN|ENOTFOUND|network is unreachable|fetch failed|could not resolve host/iu.test(text)) {
+    return {
+      cause: BASE_CHECK_CAUSES.CHECK_ERRORED,
+      subcause: BASE_CHECK_ERROR_SUBCAUSES.CHECK_REQUIRES_NETWORK,
+      structural: true,
+      basis: "the check itself attempted egress under NetworkMode none; it was classified without an online retry"
+    };
+  }
   if (!SUCCESSFUL_MATERIALIZATIONS.has(report.classification)) {
     return {
       cause: BASE_CHECK_CAUSES.MATERIALIZATION_FAILED,
@@ -469,13 +504,28 @@ export function diagnoseBaseCheckUnavailability(report) {
     };
   }
 
-  const text = checkAttemptText(report);
   if (/test timed out after|testTimeoutFailure|timed out/iu.test(text)) {
     return {
       cause: BASE_CHECK_CAUSES.CHECK_ERRORED,
       subcause: BASE_CHECK_ERROR_SUBCAUSES.CHECK_TIMEOUT,
       structural: false,
       basis: "the base check errored at an internal or outer timeout"
+    };
+  }
+  if (/(?:DATABASE_START|DOCKER_START)_FAILED|cannot connect to (?:the )?docker daemon|docker\.sock|spawnSync\s+docker\s+ENOENT|docker:\s+(?:not found|command not found)/iu.test(text)) {
+    return {
+      cause: BASE_CHECK_CAUSES.CHECK_ERRORED,
+      subcause: BASE_CHECK_ERROR_SUBCAUSES.REQUIRES_CI_SERVICE,
+      structural: true,
+      basis: "the canonical check requires a Docker/database service that the unprivileged Witness sandbox cannot safely expose"
+    };
+  }
+  if (/HARNESS_(?:CHECKOUT|AUTH)_FAILED|authenticated SSH clone .* failed|deploy key|missing (?:CI )?credential/iu.test(text)) {
+    return {
+      cause: BASE_CHECK_CAUSES.CHECK_ERRORED,
+      subcause: BASE_CHECK_ERROR_SUBCAUSES.REQUIRES_CI_CREDENTIAL,
+      structural: true,
+      basis: "the canonical check requires a private CI credential that the shadow harness must not fabricate or disclose"
     };
   }
   if (/ERR_MODULE_NOT_FOUND|Failed to (?:resolve entry|load url)|spawnSync\s+\S+\s+ENOENT|make:\s+\S+:\s+No such file or directory|(?:DATABASE_START|HARNESS_CHECKOUT)_FAILED|authenticated SSH clone .* failed|git failed with exit/iu.test(text)) {
@@ -506,6 +556,9 @@ async function runCommitCheck({ entry, source, commit, cacheDirectory, dependenc
   const report = await (dependencies.runPreflight || runPreflight)({
     repo: entry.repository,
     check: commandForShell(entry.check.command),
+    preparationCommands: (entry.check.preparationCommands || []).map(commandForShell),
+    includeGitMetadata: entry.includeGitMetadata === true,
+    copyCheckWorkspaceToTmpfs: true,
     workingDirectory: entry.check.workingDirectory,
     protectedPaths: entry.protectedPaths,
     timeoutSeconds: entry.timeoutSeconds

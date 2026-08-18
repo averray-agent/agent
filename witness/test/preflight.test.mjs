@@ -81,6 +81,84 @@ test("Python wheelhouse preparation requires exact hash-pinned requirements", as
   }
 });
 
+test("uv lockfiles use proactive frozen cache preparation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "witness-uv-plan-"));
+  await writeFile(join(root, "pyproject.toml"), '[build-system]\nrequires=["uv_build==0.9.27"]\nbuild-backend="uv_build"\n\n[project]\nname="fixture"\nversion="0.0.1"\n');
+  await writeFile(join(root, "uv.lock"), "version = 1\nrevision = 3\nrequires-python = \">=3.11\"\n");
+  try {
+    const plan = await dependencyPlan(root, { kind: "python", detail: "python" });
+    assert.equal(plan.supported, true);
+    assert.equal(plan.proactive, true);
+    assert.equal(plan.kind, "uv-cache");
+    assert.match(plan.populateCommand, /uv sync --locked --no-install-local --no-build/u);
+    assert.match(plan.populateCommand, /UV_PYTHON_DOWNLOADS=never/u);
+    assert.match(plan.offlineInstallCommand, /UV_OFFLINE=1/u);
+    assert.doesNotMatch(plan.offlineInstallCommand, /--no-build(?:\s|$)/u);
+    assert.match(plan.offlineInstallCommand, /--no-build-isolation/u);
+    assert.match(plan.offlineInstallCommand, /--no-index/u);
+    assert.match(plan.offlineInstallCommand, /--require-hashes/u);
+    assert.equal(plan.evidence.buildBackend, "pyproject-proven and image-pinned uv-build==0.9.27");
+    assert.equal(plan.checkEnvironment.UV_PYTHON_DOWNLOADS, "never");
+    assert.equal(plan.checkEnvironment.UV_NO_SYNC, "1");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("uv preparation fails closed for an unproven build backend", async () => {
+  const root = await mkdtemp(join(tmpdir(), "witness-uv-backend-"));
+  await writeFile(join(root, "pyproject.toml"), '[build-system]\nrequires=["uv_build==0.9.28"]\nbuild-backend="uv_build"\n');
+  await writeFile(join(root, "uv.lock"), "version = 1\nrevision = 3\nrequires-python = \">=3.11\"\n");
+  try {
+    const plan = await dependencyPlan(root, { kind: "python", detail: "python" });
+    assert.equal(plan.supported, false);
+    assert.match(plan.reason, /exactly proven uv_build==0\.9\.27/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("uv preparation runs before the first Python check and the check stays offline", async () => {
+  const root = await mkdtemp(join(tmpdir(), "witness-uv-preflight-"));
+  const repository = join(root, "repository");
+  await mkdir(repository);
+  await writeFile(join(repository, "pyproject.toml"), '[build-system]\nrequires=["uv_build==0.9.27"]\nbuild-backend="uv_build"\n\n[project]\nname="fixture"\nversion="0.0.1"\n');
+  await writeFile(join(repository, "uv.lock"), "version = 1\nrevision = 3\nrequires-python = \">=3.11\"\n");
+  await writeFile(join(repository, "Makefile"), "gate:\n\tuv run python3 -c 'print(1)'\n");
+  const attempts = [];
+  const sequence = [
+    result({ exitCode: 0, networkMode: "bridge" }),
+    result({ exitCode: 0 }),
+    result({ exitCode: 0 })
+  ];
+  try {
+    const report = await runPreflight({
+      repo: repository,
+      check: "make gate",
+      copyCheckWorkspaceToTmpfs: true
+    }, {
+      ensureImage: async (image) => ({ image, built: false, seconds: 0 }),
+      runContainer: async (options) => {
+        attempts.push(options);
+        return sequence[attempts.length - 1];
+      },
+      temporaryParent: root
+    });
+    assert.equal(report.classification, "FROZEN_DEPENDENCIES");
+    assert.deepEqual(report.attempts.map((attempt) => attempt.phase), [
+      "cache-population",
+      "offline-dependency-install",
+      "prepared-check"
+    ]);
+    assert.equal(attempts[0].networkMode, "bridge");
+    assert.equal(attempts[1].networkMode, "none");
+    assert.equal(attempts[2].networkMode, "none");
+    assert.equal(attempts[2].copyWorkspaceToTmpfs, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("reports package-script candidate modifiability from the definition file", async () => {
   const root = resolve(FIXTURES, "looks-hermetic");
   const open = await inferCheckDefinition(root, "npm test", []);
@@ -102,12 +180,21 @@ test("a base test failure is HERMETIC when the command genuinely ran offline", a
 });
 
 test("observed offline fetch failure is REQUIRES_NETWORK", async () => {
+  let calls = 0;
   const report = await runPreflight({
     repo: resolve(FIXTURES, "network-required"),
     check: "npm test"
-  }, dependencies([result({ exitCode: 1, stderr: "TypeError: fetch failed ENETUNREACH" })]));
+  }, {
+    ...dependencies([result({ exitCode: 1, stderr: "TypeError: fetch failed ENETUNREACH" })]),
+    runContainer: async () => {
+      calls += 1;
+      return result({ exitCode: 1, stderr: "TypeError: fetch failed ENETUNREACH" });
+    }
+  });
   assert.equal(report.classification, "REQUIRES_NETWORK");
   assert.match(report.observedFailureReason, /fetch failed/iu);
+  assert.equal(calls, 1);
+  assert.deepEqual(report.attempts.map((attempt) => attempt.phase), ["unprepared-check"]);
 });
 
 test("an explicitly hashed frozen input plus an offline run is MOCKED_EXTERNAL_SYSTEM", async () => {
