@@ -191,6 +191,43 @@ worked?"* Tracker stays `MAINTAINER_OUTREACH_KIT.md` §8 (add a segment column);
 conversation #1 (reticle, email) already in flight and counts toward the
 maintainer segment.
 
+## 5b. Deliverable shape — PATCH, not PR · RATIFIED 2026-08-18 (Pascal)
+
+The agent's deliverable is a **verified patch plus a receipt**, never a pull
+request opened on a repository we do not own. Reticle's repo is never touched;
+the maintainer never hears about it unless someone chooses to tell them.
+
+Why, in the order the arguments actually carry weight:
+
+1. **The buyer already exists.** The poster funds the job because they want the
+   fix — often they are a dependant, not the maintainer. "Who buys a patch
+   nobody applies?" dissolves once you notice someone already paid for it.
+   Whether it ever reaches upstream is the poster's business.
+2. **Asymmetric failure.** A wrong patch costs the buyer a fee. A wrong PR costs
+   a stranger their afternoon and costs us standing we cannot buy back —
+   maintainers talk. `inconclusive` exists because verification is good and not
+   perfect; errors should land on people who opted in.
+3. **Infrastructure, not contributor.** PRs put us in a merge-rate contest
+   scored by other people's review queues. Verified patches make us the thing
+   that proves work is correct and leave the merge decision with whoever wants
+   it. "Sell the rail, not the board", applied to the deliverable.
+4. **The hard constraint: PR-shaped requires write credentials on third-party
+   repos.** That is T6 credential brokering — recorded as "a decision about what
+   kind of company we are, not only a feature". It would widen our blast radius
+   from *funds we hold* to *every repo our agents can push to*. A delivery
+   format must not smuggle that in as a side effect.
+
+**Costs nothing to adopt:** the Witness verifies a patch against a contract and
+never looks at a pull request, so `git-patch-tests-v1` already implements this.
+
+**PR-opening** is not a roadmap goal. It happens only on a specific maintainer's
+written request, on their repo, scoped — and is decided on its own terms then.
+
+**Consent-first "come and collect":** publish receipts and let maintainers find
+them, or raise it inside a conversation already underway. An unsolicited "here
+are eleven patches for your open issues" is still unsolicited outreach, PR or
+not.
+
 ## 6. Cross-cutting laws
 
 - **Swiss memo — event-triggered (Pascal, 2026-08-17):** blocks nothing while
