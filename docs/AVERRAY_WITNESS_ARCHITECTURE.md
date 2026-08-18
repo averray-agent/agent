@@ -363,9 +363,15 @@ inconclusive rate and replay agreement.
 The 14-day unattended burn-in does **not** substitute for this. Unattended execution
 and trustworthy verification are different qualification claims.
 
-**Phase 3 — `code_change` job type.** First-class, requiring bundle hash, base tree
-hash, contract, toolchain image, protected paths, settlement policy and verification
-level. Only these receive automatic Witness verification.
+**Phase 3 — `code_change` job type.** First-class and patch-shaped. Creation runs
+materialization preflight, freezes the v1.1 contract, then publishes the job with the
+Git bundle, declared base commit, supplied failing test, protected paths, AV-2-or-higher
+assurance requirement and digest-bound normalized contract. The worker output is
+`schema://jobs/patch-submission-output`: an unverified, content-addressed patch, its
+base commit and submitting wallet. It carries no verdict or receipt, and opening an
+upstream pull request is a separate consent-gated transaction. Only `code_change` jobs
+are eligible for the automatic Witness-verification path introduced in the next phase;
+Phase 3 does not execute worker submissions.
 
 **Phase 4 — Settlement gating.** Require AV-2 or better for automatic code-bounty
 payout. `PASS` → eligible; `FAIL` → reject or resubmit; `INCONCLUSIVE` → pause without

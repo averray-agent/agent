@@ -1,0 +1,68 @@
+{
+  "schemaVersion": "averray.witness.code-change-drills/v1",
+  "drills": {
+    "preflight_requires_network": {
+      "mutation": {
+        "anchorOccurrences": 1,
+        "applied": true
+      },
+      "green": {
+        "status": "GREEN",
+        "refusedReason": "CODE_CHANGE_PREFLIGHT_REQUIRES_NETWORK",
+        "correctedAccepted": true
+      },
+      "seenRed": {
+        "status": "RED",
+        "mutantReason": "CODE_CHANGE_PREFLIGHT_UNMATERIALIZABLE"
+      }
+    },
+    "frozen_contract_digest": {
+      "mutation": {
+        "anchorOccurrences": 1,
+        "applied": true
+      },
+      "green": {
+        "status": "GREEN",
+        "mutatedAccepted": false,
+        "unfrozenAccepted": false,
+        "correctedAccepted": true
+      },
+      "seenRed": {
+        "status": "RED",
+        "mutantAccepted": true
+      }
+    },
+    "unverified_submission_schema": {
+      "mutation": {
+        "anchorOccurrences": 1,
+        "applied": true
+      },
+      "green": {
+        "status": "GREEN",
+        "verdictReceiptAccepted": false,
+        "correctedAccepted": true
+      },
+      "seenRed": {
+        "status": "RED",
+        "mutantAccepted": true
+      }
+    },
+    "published_contract_digest": {
+      "mutation": {
+        "anchorOccurrences": 1,
+        "applied": true
+      },
+      "green": {
+        "status": "GREEN",
+        "mismatchedBoardAccepted": false,
+        "matchingBoardAccepted": true,
+        "contractDigest": "0x75e0ed1015f01f25f658e82f77d629d849ca2904c78503afaf0351f24b1c4f71"
+      },
+      "seenRed": {
+        "status": "RED",
+        "mutantAccepted": true
+      }
+    }
+  },
+  "passed": true
+}

@@ -50,7 +50,7 @@ const DEFAULT_AGENT_PROFILE = {
   supportedProtocols: ["mcp", "http"],
   preferredCategories: ["coding"],
   preferredRiskLevel: "low",
-  verifierCompatibility: ["benchmark", "deterministic", "human_fallback", "github_pr"],
+  verifierCompatibility: ["benchmark", "deterministic", "human_fallback", "github_pr", "witness"],
   minLiquidReserve: 0,
   autoUnwindStrategies: false
 };

@@ -50,6 +50,35 @@ const BUILTIN_JOB_SCHEMAS = new Map([
       filesChanged: arrayOfStrings()
     }
   })],
+  ["schema://jobs/patch-submission-output", objectSchema({
+    $id: "schema://jobs/patch-submission-output",
+    description: "An unverified, content-addressed Git patch submitted for later Witness verification. This object makes no verification claim.",
+    required: ["patch", "baseCommit", "submittingAgent"],
+    properties: {
+      patch: objectSchema({
+        required: ["sha256", "bytes", "locator", "format"],
+        properties: {
+          sha256: stringSchema({ pattern: "^[a-f0-9]{64}$" }),
+          bytes: integerSchema({ minimum: 1 }),
+          locator: objectSchema({
+            required: ["kind", "url"],
+            properties: {
+              kind: enumString(["https"]),
+              url: stringSchema({ pattern: "^https://" })
+            }
+          }),
+          format: enumString(["file"])
+        }
+      }),
+      baseCommit: stringSchema({ pattern: "^[a-f0-9]{40}$" }),
+      submittingAgent: objectSchema({
+        required: ["wallet"],
+        properties: {
+          wallet: stringSchema({ pattern: "^0x[a-fA-F0-9]{40}$" })
+        }
+      })
+    }
+  })],
   ["schema://jobs/github-pr-evidence-output", objectSchema({
     $id: "schema://jobs/github-pr-evidence-output",
     description: "GitHub pull request evidence for open-source issue jobs.",

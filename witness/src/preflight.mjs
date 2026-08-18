@@ -22,6 +22,7 @@ import { tail } from "./process.mjs";
 export async function runPreflight(options, dependencies = {}) {
   const {
     repo,
+    commit = null,
     check,
     image = process.env.WITNESS_IMAGE || DEFAULT_IMAGE,
     timeoutSeconds = DEFAULT_TIMEOUT_SECONDS,
@@ -49,6 +50,7 @@ export async function runPreflight(options, dependencies = {}) {
   const temporaryRoot = await mkdtemp(join(temporaryParent, "run-"));
   const report = initialReport({
     repo,
+    commit,
     check,
     image,
     timeoutSeconds,
@@ -63,7 +65,7 @@ export async function runPreflight(options, dependencies = {}) {
     const sourcePath = join(temporaryRoot, "source");
     let materialized;
     try {
-      materialized = await materialize({ repo, destination: sourcePath, cwd });
+      materialized = await materialize({ repo, commit, destination: sourcePath, cwd });
       report.commit = materialized.commit;
       report.materialization = {
         source: materialized.source,
@@ -346,6 +348,7 @@ export async function runPreflight(options, dependencies = {}) {
 
 function initialReport({
   repo,
+  commit,
   check,
   image,
   timeoutSeconds,
@@ -359,6 +362,7 @@ function initialReport({
     schemaVersion: REPORT_SCHEMA,
     generatedAt: new Date().toISOString(),
     repo,
+    requestedCommit: commit,
     commit: null,
     toolchain: { kind: "other", detail: "undetected", packageManager: null, detectedBy: [], additional: [] },
     classification: null,

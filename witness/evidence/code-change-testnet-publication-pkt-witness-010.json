@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "averray.witness.code-change-testnet-publication/v1",
+  "observedAt": "2026-08-18T20:31:06Z",
+  "requestedEndpoint": "https://testnet.api.averray.com",
+  "requestedEndpointResult": {
+    "reachable": false,
+    "error": "Could not resolve host: testnet.api.averray.com"
+  },
+  "onlyHostedBoard": {
+    "endpoint": "https://api.averray.com",
+    "chainId": 420420419,
+    "network": "polkadotHubMainnet"
+  },
+  "publicationAttempted": false,
+  "reason": "The repository records that the hosted testnet was retired. Publishing to the only hosted board would create a mainnet job, so the requested testnet-only mutation was refused.",
+  "preparedJobId": "witness-code-change-unitless-001",
+  "preparedContractDigest": "0x75e0ed1015f01f25f658e82f77d629d849ca2904c78503afaf0351f24b1c4f71",
+  "prepublicationEvidence": "code-change-prepublication-pkt-witness-010.json"
+}
