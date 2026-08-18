@@ -188,6 +188,25 @@ test("MemoryStateStore run receipt documents are write-once and cloned", async (
   assert.equal((await store.getRunReceiptDocument("session-run")).verdict.outcome, "approved");
 });
 
+test("MemoryStateStore reserves one verification run per payment proof", async () => {
+  const store = new MemoryStateStore();
+  const first = await store.reserveVerificationRun({ runId: "verify-1", status: "queued" }, {
+    paymentId: "payment-proof-hash"
+  });
+  const replay = await store.reserveVerificationRun({ runId: "verify-2", status: "queued" }, {
+    paymentId: "payment-proof-hash"
+  });
+
+  assert.equal(first.created, true);
+  assert.equal(replay.created, false);
+  assert.equal(replay.run.runId, "verify-1");
+  assert.equal(await store.getVerificationRun("verify-2"), undefined);
+  assert.equal((await store.getVerificationRunByPaymentId("payment-proof-hash")).runId, "verify-1");
+
+  await store.updateVerificationRun("verify-1", { runId: "verify-1", status: "complete" });
+  assert.equal((await store.getVerificationRun("verify-1")).status, "complete");
+});
+
 test("MemoryStateStore indexes immutable work receipts by content id and upgrades the session alias", async () => {
   const store = new MemoryStateStore();
   const receiptId = `0x${"9".repeat(64)}`;

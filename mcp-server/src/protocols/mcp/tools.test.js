@@ -182,7 +182,11 @@ test("every tool advertised by the MCP welcome resolves through this surface", a
     handleDepositPoolRoute: makeDepositPoolRoute(),
     handleEarningsDoorRoute: makeEarningsDoorRoute(),
     handleJobRoute: makeJobRoute(service, "mcp"),
-    handlePublicMetadataRoute: makePublicRoute({ discoveryUrl: "https://example.test/agent-tools.json" })
+    handlePublicMetadataRoute: makePublicRoute({ discoveryUrl: "https://example.test/agent-tools.json" }),
+    handleVerifyRoute: async ({ response, pathname }) => {
+      respond(response, 200, { pathname, profiles: [] });
+      return true;
+    }
   });
   const request = {
     headers: { authorization: "Bearer test-token" },
@@ -190,6 +194,7 @@ test("every tool advertised by the MCP welcome resolves through this surface", a
   };
   const args = {
     getPlatformCapabilities: {},
+    listVerificationProfiles: {},
     listJobs: {},
     getJobDefinition: { jobId: "job-1" },
     validateJobSubmission: { jobId: "job-1", submission: {} },
@@ -220,6 +225,7 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
   const byName = Object.fromEntries(MCP_TOOLS.map((entry) => [entry.name, entry]));
   const idempotentReads = [
     "getPlatformCapabilities",
+    "listVerificationProfiles",
     "listJobs",
     "getJobDefinition",
     "validateJobSubmission",
