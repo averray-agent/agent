@@ -595,6 +595,18 @@
       "description": "Immutable Averray Work Receipt v1 JSON addressed by its canonical content hash."
     },
     {
+      "path": "/verify/profiles",
+      "description": "Published immutable verification profiles, version pins, limits, flat price, and inconclusive billing rule."
+    },
+    {
+      "path": "/verify/runs",
+      "description": "x402-paid standalone verification intake; payment is the authorization and inconclusive runs are never billed."
+    },
+    {
+      "path": "/verify/runs/:runId",
+      "description": "Poll one standalone verification run and resolve its content-addressed work receipt."
+    },
+    {
       "path": "/agents",
       "description": "Recent public agent directory derived from live session and reputation data."
     },
@@ -769,6 +781,10 @@
     {
       "name": "getPlatformCapabilities",
       "description": "Capability + endpoint manifest for this deployment."
+    },
+    {
+      "name": "listVerificationProfiles",
+      "description": "Immutable standalone verification profiles with versions, input schemas, limits and prices."
     },
     {
       "name": "listJobs",

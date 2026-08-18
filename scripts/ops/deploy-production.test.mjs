@@ -16,10 +16,27 @@ const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const DEPLOY_SCRIPT = join(REPO_ROOT, "scripts/ops/deploy-production.sh");
 const FRONTEND_DEPLOY_SCRIPT = join(REPO_ROOT, "scripts/ops/redeploy-frontend.sh");
 const APP_PACKAGE = join(REPO_ROOT, "app/package.json");
+const VERIFY_WORKER_UNIT = join(REPO_ROOT, "deploy/averray-witness-verify@.service");
+const MAINNET_COMPOSE = join(REPO_ROOT, "deploy/docker-compose.mainnet.yml");
 // DERIVE_SETTLEMENT_ENV_SCRIPT was removed in PR 2.6: deploy-production.sh
 // no longer calls derive-settlement-env.mjs at runtime (the template carries
 // the settlement values directly, and CI enforces drift via
 // scripts/ops/check-template-matches-manifest.mjs).
+
+test("standalone Verify deploys an offline worker without granting Docker to the public backend", async () => {
+  const [deployScript, workerUnit, compose] = await Promise.all([
+    readFile(DEPLOY_SCRIPT, "utf8"),
+    readFile(VERIFY_WORKER_UNIT, "utf8"),
+    readFile(MAINNET_COMPOSE, "utf8")
+  ]);
+  assert.match(deployScript, /ensure_witness_verify_worker/u);
+  assert.match(deployScript, /witness\//u, "Witness changes must trigger a backend deployment");
+  assert.match(workerUnit, /^PrivateNetwork=true$/mu);
+  assert.match(workerUnit, /^NoNewPrivileges=true$/mu);
+  assert.doesNotMatch(workerUnit, /EnvironmentFile/u, "offline worker must not receive backend secrets");
+  assert.match(compose, /verify-queue/u);
+  assert.doesNotMatch(compose, /docker\.sock/u, "public backend must not receive Docker capability");
+});
 
 test("production static builders omit dev dependencies and classify their build toolchain as runtime", async () => {
   const [deployScript, frontendScript, appPackageText] = await Promise.all([

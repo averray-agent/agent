@@ -69,6 +69,7 @@ import { createShareRoutes } from "./share-routes.js";
 import { createTransparencyRoutes } from "./transparency-routes.js";
 import { createUsdcLiquidityRoutes } from "./usdc-liquidity-routes.js";
 import { createVerifierRoutes } from "./verifier-routes.js";
+import { createVerifyRoutes } from "./verify-routes.js";
 import { createXcmRequestRoutes } from "./xcm-request-routes.js";
 import { createMcpRoute } from "../mcp/handler.js";
 import { createMcpToolExecutor, createMcpTools } from "../mcp/tools.js";
@@ -91,6 +92,8 @@ const {
   rewardBankHealthProvider,
   policyService,
   verifierService,
+  verificationRunService,
+  x402VerifyIntake,
   externalPostingService,
   x402PosterRamp,
   externalPostingWatcher,
@@ -584,6 +587,16 @@ const handleVerifierRoute = createVerifierRoutes({
   verifierService,
 });
 
+const handleVerifyRoute = createVerifyRoutes({
+  enforceLimit,
+  rateLimitConfig,
+  readJsonBody,
+  respond,
+  verificationRunService,
+  x402VerifyIntake,
+  trustProxy
+});
+
 const handleProfileRoute = createProfileRoutes({
   authMiddleware,
   logger,
@@ -780,6 +793,7 @@ const executeMcpTool = createMcpToolExecutor({
   handleEarningsDoorRoute,
   handleJobRoute: handleMcpJobRoute,
   handlePublicMetadataRoute,
+  handleVerifyRoute,
   maxRequestBodyBytes: httpConfig.maxBodyBytes,
   tools: mcpTools
 });
@@ -921,6 +935,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handlePublicMetadataRoute({ request, response, pathname })) {
+      return;
+    }
+
+    if (await handleVerifyRoute({ request, response, url, pathname })) {
       return;
     }
 

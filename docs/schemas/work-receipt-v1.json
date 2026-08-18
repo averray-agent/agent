@@ -3,7 +3,11 @@
   "$id": "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/work-receipt-v1.json",
   "title": "Averray Work Receipt v1",
   "type": "object",
-  "required": ["schemaVersion", "kind", "receiptType", "receiptId", "sessionId", "jobId", "worker", "verifier", "intent", "execution", "verdict", "timestamps", "signers", "canonicalUrl"],
+  "required": ["schemaVersion", "kind", "receiptType", "receiptId", "verifier", "intent", "execution", "verdict", "timestamps", "signers", "canonicalUrl"],
+  "oneOf": [
+    { "required": ["sessionId", "jobId", "worker"] },
+    { "required": ["runId", "customer"] }
+  ],
   "properties": {
     "schemaVersion": { "const": "averray.work-receipt.v1" },
     "kind": { "const": "run" },
@@ -13,6 +17,8 @@
     "sessionId": { "type": "string", "minLength": 1 },
     "jobId": { "type": "string", "minLength": 1 },
     "worker": { "$ref": "#/$defs/address" },
+    "runId": { "type": "string", "pattern": "^verify_[0-9a-f]{64}$" },
+    "customer": { "$ref": "#/$defs/address" },
     "chainJobId": { "$ref": "#/$defs/bytes32" },
     "verifier": {
       "type": "object",
@@ -20,6 +26,7 @@
       "properties": {
         "mode": { "type": "string" },
         "profile": { "type": "string", "minLength": 1 },
+        "profileVersion": { "type": "integer", "minimum": 1 },
         "handler": { "type": "string", "minLength": 1 },
         "version": { "type": "integer", "minimum": 1 },
         "wallet": { "$ref": "#/$defs/address" }
@@ -31,7 +38,7 @@
       "required": ["specHash", "specSource", "successPolicy", "valueAtRisk", "deadline", "poster", "posterClass"],
       "properties": {
         "specHash": { "$ref": "#/$defs/bytes32" },
-        "specSource": { "enum": ["chain_verified", "chain_unavailable_fail_open"] },
+        "specSource": { "enum": ["chain_verified", "chain_unavailable_fail_open", "verify_request"] },
         "successPolicy": { "$ref": "#/$defs/policy" },
         "valueAtRisk": { "$ref": "#/$defs/amount" },
         "deadline": { "type": "string", "format": "date-time" },
@@ -105,7 +112,7 @@
     },
     "timestamps": {
       "type": "object",
-      "required": ["claimedAt", "submittedAt", "verifiedAt"],
+      "required": ["submittedAt", "verifiedAt"],
       "properties": {
         "claimedAt": { "type": "string", "format": "date-time" },
         "submittedAt": { "type": "string", "format": "date-time" },

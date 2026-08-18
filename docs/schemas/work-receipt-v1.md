@@ -47,3 +47,13 @@ invented. A historical snapshot without recorded claim-time chain-read
 provenance is conservatively marked `chain_unavailable_fail_open`.
 
 The normative JSON shape is [`work-receipt-v1.json`](work-receipt-v1.json).
+
+Two producers share this one receipt object and one content-address rule:
+
+- Job receipts identify `sessionId`, `jobId`, and `worker`, and may carry a
+  settlement section when an approved job paid out.
+- Standalone Verify receipts identify `runId` and `customer`. Their intent uses
+  `specSource: verify_request`, pins `profile@version`, and treats the Base fee
+  actually paid as `valueAtRisk`. They never carry a settlement section because
+  no worker escrow or payout exists. An inconclusive run is unbilled and records
+  zero value at risk.

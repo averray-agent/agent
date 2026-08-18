@@ -125,6 +125,9 @@ export class MemoryStateStore {
     this.externalPostingQuoteJobIndex = new Map();
     this.externalJobDelistings = new Map();
     this.externalPaymentFundings = new Map();
+    this.verificationRuns = new Map();
+    this.verificationRunRequests = new Map();
+    this.verificationPayments = new Map();
   }
 
   // ── policy proposals (Package G) ──────────────────────────────────
@@ -288,6 +291,36 @@ export class MemoryStateStore {
     if (!this.sessionWorkReceiptDocuments.has(sessionId)) {
       this.sessionWorkReceiptDocuments.set(sessionId, stored);
     }
+    return cloneJsonRecord(stored);
+  }
+
+  async getVerificationRun(runId) {
+    return cloneJsonRecord(this.verificationRuns.get(normalizeVerificationRunId(runId)));
+  }
+
+  async findVerificationRunByRequestHash(requestHash) {
+    const runId = this.verificationRunRequests.get(normalizeContentHash(requestHash));
+    return runId ? this.getVerificationRun(runId) : undefined;
+  }
+
+  async upsertVerificationRun(run) {
+    const runId = normalizeVerificationRunId(run?.runId);
+    const stored = cloneJsonRecord({ ...run, runId });
+    this.verificationRuns.set(runId, stored);
+    if (stored.requestHash) {
+      this.verificationRunRequests.set(normalizeContentHash(stored.requestHash), runId);
+    }
+    return cloneJsonRecord(stored);
+  }
+
+  async getVerificationPayment(id) {
+    return cloneJsonRecord(this.verificationPayments.get(normalizeExternalPaymentFundingId(id)));
+  }
+
+  async upsertVerificationPayment(record) {
+    const id = normalizeExternalPaymentFundingId(record?.id);
+    const stored = cloneJsonRecord({ ...record, id });
+    this.verificationPayments.set(id, stored);
     return cloneJsonRecord(stored);
   }
 
@@ -1001,6 +1034,55 @@ export class RedisStateStore {
     await this.client.set(this.key("work-receipt", receiptId), encoded, { NX: true });
     await this.client.set(this.key("work-receipt-session", sessionId), encoded, { NX: true });
     return this.getWorkReceiptDocument(receiptId);
+  }
+
+  async getVerificationRun(runId) {
+    await this.connect();
+    const raw = await this.client.get(this.key("verification-run", normalizeVerificationRunId(runId)));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async findVerificationRunByRequestHash(requestHash) {
+    await this.connect();
+    const runId = await this.client.get(this.key(
+      "verification-run-request",
+      normalizeContentHash(requestHash)
+    ));
+    return runId ? this.getVerificationRun(runId) : undefined;
+  }
+
+  async upsertVerificationRun(run) {
+    await this.connect();
+    const runId = normalizeVerificationRunId(run?.runId);
+    const stored = { ...run, runId };
+    const transaction = this.client.multi()
+      .set(this.key("verification-run", runId), JSON.stringify(stored));
+    if (stored.requestHash) {
+      transaction.set(
+        this.key("verification-run-request", normalizeContentHash(stored.requestHash)),
+        runId,
+        { NX: true }
+      );
+    }
+    await transaction.exec();
+    return stored;
+  }
+
+  async getVerificationPayment(id) {
+    await this.connect();
+    const raw = await this.client.get(this.key(
+      "verification-payment",
+      normalizeExternalPaymentFundingId(id)
+    ));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async upsertVerificationPayment(record) {
+    await this.connect();
+    const id = normalizeExternalPaymentFundingId(record?.id);
+    const stored = { ...record, id };
+    await this.client.set(this.key("verification-payment", id), JSON.stringify(stored));
+    return stored;
   }
 
   async listSessionsByWallet(wallet, limit = 10, offset = 0) {
@@ -1842,6 +1924,14 @@ function normalizeExternalPaymentFundingId(value) {
     throw new ExternalServiceError(
       "External payment funding id must be a 32-byte value."
     );
+  }
+  return id;
+}
+
+function normalizeVerificationRunId(value) {
+  const id = String(value ?? "").trim();
+  if (!/^verify_[a-f0-9]{64}$/u.test(id)) {
+    throw new ExternalServiceError("Verification run id must be verify_ plus a 32-byte value.");
   }
   return id;
 }

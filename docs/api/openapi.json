@@ -41,6 +41,10 @@
       "description": "Built-in job submission schemas."
     },
     {
+      "name": "Verification",
+      "description": "Published standalone verification profiles and x402-paid runs."
+    },
+    {
       "name": "Admin",
       "description": "Admin-only platform operations."
     }
@@ -426,6 +430,115 @@
               }
             }
           }
+        }
+      }
+    },
+    "/verify/profiles": {
+      "get": {
+        "tags": ["Verification"],
+        "operationId": "listVerificationProfiles",
+        "summary": "List immutable standalone verification profiles",
+        "description": "Returns published profile versions, input schemas, success criteria, resource limits, the flat 5 USDC Base price, replay fixture, and the rule that inconclusive runs are not billed.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Published profiles. The initial shelf contains only git-patch-tests-v1.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["profiles"],
+                  "properties": {
+                    "profiles": { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/verify/runs": {
+      "post": {
+        "tags": ["Verification"],
+        "operationId": "createVerificationRun",
+        "summary": "Pay for and run a pinned verification profile",
+        "description": "The first request returns an x402 402 challenge. Repeat the same body with PAYMENT-SIGNATURE (or X-PAYMENT). Payment is the authentication. The authorization is collected only for a conclusive result; target_unreachable, flaky, ambiguous_evidence, and runner_fault are never billed.",
+        "security": [],
+        "parameters": [{
+          "name": "PAYMENT-SIGNATURE",
+          "in": "header",
+          "required": false,
+          "description": "Base64-encoded x402 v2 Base payment payload. X-PAYMENT is accepted as an alias.",
+          "schema": { "type": "string" }
+        }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["profile", "profileVersion", "target", "inputs"],
+                "properties": {
+                  "profile": { "const": "git-patch-tests-v1" },
+                  "profileVersion": { "const": 1 },
+                  "target": {
+                    "type": "object",
+                    "required": ["repository", "commit"],
+                    "properties": {
+                      "repository": { "type": "string" },
+                      "commit": { "type": "string", "pattern": "^[a-f0-9]{40}$" }
+                    }
+                  },
+                  "inputs": { "type": "object", "description": "Hash-pinned HTTPS git bundle and patch plus an argv test command.", "additionalProperties": true }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete conclusive or unbilled inconclusive run, with its content-addressed receiptId.",
+            "headers": {
+              "PAYMENT-RESPONSE": {
+                "description": "Present only when the conclusive run collected the 5 USDC authorization.",
+                "schema": { "type": "string" }
+              }
+            },
+            "content": { "application/json": { "schema": { "type": "object", "additionalProperties": true } } }
+          },
+          "402": {
+            "description": "Portable x402 challenge for exactly 5 USDC on Base.",
+            "headers": {
+              "PAYMENT-REQUIRED": {
+                "description": "Base64-encoded x402 v2 challenge.",
+                "schema": { "type": "string" }
+              }
+            },
+            "content": { "application/json": { "schema": { "type": "object", "additionalProperties": true } } }
+          },
+          "409": { "description": "The payment authorization is already bound to another request or is in progress.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "429": { "description": "Verification-run rate limit reached.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } },
+          "503": { "description": "Standalone Verify is disabled. A dead Witness worker prevents startup rather than reaching this state.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
+    },
+    "/verify/runs/{runId}": {
+      "get": {
+        "tags": ["Verification"],
+        "operationId": "getVerificationRun",
+        "summary": "Poll a standalone verification run",
+        "security": [],
+        "parameters": [{
+          "name": "runId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "pattern": "^verify_[a-f0-9]{64}$" }
+        }],
+        "responses": {
+          "200": { "description": "Queued, running, or complete verification run.", "content": { "application/json": { "schema": { "type": "object", "additionalProperties": true } } } },
+          "404": { "description": "Run not found.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
         }
       }
     },

@@ -87,6 +87,9 @@ const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/badges", description: "Recent public badge receipts for completed sessions." },
   { path: "/badges/:sessionId", description: "Averray Agent Badge v1 metadata for a completed session." },
   { path: "/receipts/:receiptId", description: "Immutable Averray Work Receipt v1 JSON addressed by its canonical content hash." },
+  { path: "/verify/profiles", description: "Published immutable verification profiles, version pins, limits, flat price, and inconclusive billing rule." },
+  { path: "/verify/runs", description: "x402-paid standalone verification intake; payment is the authorization and inconclusive runs are never billed." },
+  { path: "/verify/runs/:runId", description: "Poll one standalone verification run and resolve its content-addressed work receipt." },
   { path: "/agents", description: "Recent public agent directory derived from live session and reputation data." },
   { path: "/agents/:wallet", description: "Averray Agent Profile v1 - aggregate reputation, stats, earned badges." },
   { path: "/shares/:token", description: "Public signed read-only snapshot resolver for share URLs." },
@@ -476,6 +479,7 @@ const HTTP_ACTION_REQUIREMENTS = [
 
 const DISCOVERY_TOOLS = [
   { name: "getPlatformCapabilities", description: "Capability + endpoint manifest for this deployment." },
+  { name: "listVerificationProfiles", description: "Immutable standalone verification profiles with versions, input schemas, limits and prices." },
   { name: "listJobs", description: "All active jobs." },
   { name: "getJobDefinition", description: "One job by id." },
   { name: "validateJobSubmission", description: "Check a draft payload against the job output schema before claiming or submitting." },

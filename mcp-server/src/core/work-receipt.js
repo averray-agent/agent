@@ -6,6 +6,10 @@ import { claimExpiresAt } from "./claim-state.js";
 import { decimalToBaseUnits, formatBaseUnits } from "./platform-service-helpers.js";
 import { buildRunReceipt } from "./run-receipt.js";
 import { hashSubmission } from "./submission.js";
+import {
+  assertReceiptContentAddress,
+  hashReceiptContent
+} from "./receipt-content-address.js";
 
 export const WORK_RECEIPT_SCHEMA_VERSION = "averray.work-receipt.v1";
 export const WORK_RECEIPT_SITE_ORIGIN = "https://averray.com";
@@ -61,28 +65,120 @@ export function buildWorkReceipt({ session, job, verification, context = {} }) {
   };
 }
 
+/**
+ * Build the same portable receipt for a paid, standalone verification run.
+ * There is deliberately no job/session/worker fiction and no settlement
+ * section: x402 payment authorizes computation, not escrow or worker payout.
+ */
+export function buildVerifyReceipt({ run, profile, execution = {}, payment = {}, context = {} }) {
+  if (!run?.runId) throw new ValidationError("Verify receipt requires a runId.");
+  const customer = address(run.customer);
+  if (!customer) throw new ValidationError("Verify receipt requires the paying customer address.");
+  const profileName = firstString(profile?.name, run.profile);
+  const profileVersion = positiveInteger(profile?.version ?? run.profileVersion, "profile version");
+  const handler = firstString(profile?.handler);
+  const handlerVersion = positiveInteger(profile?.handlerVersion, "handler version");
+  if (!profileName || !handler) {
+    throw new ValidationError("Verify receipt requires a pinned profile and handler.");
+  }
+  const outcome = firstString(run?.verdict?.outcome);
+  if (!["approved", "rejected", "inconclusive", "platform_fault"].includes(outcome)) {
+    throw new ValidationError("Verify receipt requires a final verification outcome.");
+  }
+  const submittedAt = requireIso(run.submittedAt, "run.submittedAt");
+  const verifiedAt = requireIso(run.completedAt, "run.completedAt");
+  const timeoutSeconds = positiveInteger(profile?.limits?.timeout, "profile timeout");
+  const deadline = new Date(Date.parse(submittedAt) + (timeoutSeconds * 1_000)).toISOString();
+  const profileRef = `${profileName}@${profileVersion}`;
+  const requestContent = {
+    profile: profileRef,
+    target: run.target,
+    inputs: run.inputs
+  };
+  const specHash = hashCanonicalContent(requestContent);
+  const evidenceHash = bytes32(run?.verdict?.evidenceHash)
+    ?? hashCanonicalContent(run?.verdict?.evidence ?? execution?.report ?? null);
+  const artifactHash = bytes32(execution?.artifactHash)
+    ?? artifactDigest(run?.inputs?.patch)
+    ?? hashCanonicalContent({ target: run.target, inputs: run.inputs });
+  const billed = payment?.status === "settled";
+  const paidRaw = billed ? unsignedIntegerString(payment.amountRaw) : "0";
+  if (billed && paidRaw !== unsignedIntegerString(profile?.price?.amountRaw)) {
+    throw new ValidationError("Verify receipt fee must equal the pinned profile price.");
+  }
+  const sourceBinding = compact({
+    method: firstString(execution?.sourceBinding?.method) ?? "offline_git_bundle",
+    verified: execution?.sourceBinding?.verified === true,
+    ref: firstString(execution?.sourceBinding?.ref, run?.target?.commit),
+    bundleHash: bytes32(execution?.sourceBinding?.bundleHash)
+      ?? artifactDigest(run?.inputs?.bundle)
+  });
+  const unsigned = {
+    schemaVersion: WORK_RECEIPT_SCHEMA_VERSION,
+    kind: "run",
+    receiptType: "work_outcome",
+    attestation: "A single standalone verification run: the requested intent, supplied artifact, bounded execution, and verification outcome. It makes no broader claim.",
+    runId: run.runId,
+    customer,
+    verifier: {
+      mode: "standalone",
+      profile: profileName,
+      profileVersion,
+      handler,
+      version: handlerVersion
+    },
+    intent: {
+      specHash,
+      specSource: "verify_request",
+      successPolicy: { profile: profileName, version: profileVersion },
+      valueAtRisk: {
+        asset: firstString(profile?.price?.asset) ?? "USDC",
+        amount: billed ? firstString(profile?.price?.amount) ?? "5" : "0",
+        amountRaw: paidRaw
+      },
+      deadline,
+      poster: customer,
+      posterClass: "external"
+    },
+    execution: {
+      provider: customer,
+      providerClass: "external",
+      artifactHash,
+      sourceBinding,
+      evidenceHash,
+      environment: execution?.environment ?? {
+        kind: "verification_profile",
+        profile: profileRef,
+        bounded: true
+      }
+    },
+    verdict: {
+      outcome,
+      reasonCode: firstString(run?.verdict?.reasonCode) ?? "VERIFY_RUN_COMPLETE",
+      evidenceHash,
+      policyTags: [],
+      workerConsequence: "none"
+    },
+    timestamps: { submittedAt, verifiedAt },
+    signers: Array.isArray(context.signers) ? context.signers : []
+  };
+  const receiptId = hashReceiptContent(unsigned);
+  const siteOrigin = firstString(context.publicReceiptBaseUrl, context.publicSiteUrl)
+    ?? WORK_RECEIPT_SITE_ORIGIN;
+  return {
+    ...unsigned,
+    receiptId,
+    canonicalUrl: `${siteOrigin.replace(/\/+$/u, "")}/receipts/${receiptId}`
+  };
+}
+
 /** Hash the portable payload, excluding identities/signatures and self-links. */
 export function hashWorkReceiptContent(document) {
-  if (!document || typeof document !== "object" || Array.isArray(document)) {
-    throw new ValidationError("Work receipt content must be a JSON object.");
-  }
-  const {
-    receiptId: _receiptId,
-    canonicalUrl: _canonicalUrl,
-    signers: _signers,
-    signature: _signature,
-    ...content
-  } = document;
-  return hashCanonicalContent(content);
+  return hashReceiptContent(document);
 }
 
 export function assertWorkReceiptContentAddress(document) {
-  const expected = bytes32(document?.receiptId);
-  const actual = hashWorkReceiptContent(document);
-  if (!expected || expected !== actual) {
-    throw new ValidationError(`Work receipt content address mismatch: expected ${expected ?? "missing"}, reproduced ${actual}.`);
-  }
-  return true;
+  return assertReceiptContentAddress(document);
 }
 
 function buildIntent({ session, job, profile, version, poster, context }) {
@@ -258,4 +354,27 @@ function firstString(...values) {
 
 function compact(value) {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined));
+}
+
+function positiveInteger(value, label) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new ValidationError(`Verify receipt requires a positive ${label}.`);
+  }
+  return parsed;
+}
+
+function requireIso(value, label) {
+  const normalized = firstString(value);
+  if (!normalized || Number.isNaN(Date.parse(normalized))) {
+    throw new ValidationError(`Verify receipt requires a valid ${label} timestamp.`);
+  }
+  return new Date(normalized).toISOString();
+}
+
+function artifactDigest(artifact) {
+  const digest = firstString(artifact?.sha256);
+  return digest && /^[a-fA-F0-9]{64}$/u.test(digest)
+    ? `0x${digest.toLowerCase()}`
+    : undefined;
 }

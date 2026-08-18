@@ -125,11 +125,20 @@ import {
   ExternalPostingService,
   resolveExternalPostingConfig
 } from "../core/external-posting-service.js";
-import { createConfiguredSettlementAdapter } from "../payments/adapters/index.js";
+import {
+  createConfiguredPaymentFacilitator,
+  createConfiguredSettlementAdapter
+} from "../payments/adapters/index.js";
 import {
   resolveX402PosterRampConfig,
   X402PosterRampService
 } from "../payments/x402-poster-ramp.js";
+import {
+  resolveX402VerifyConfig,
+  X402VerifyIntake
+} from "../payments/x402-verify-intake.js";
+import { VerificationProfileRegistry } from "./verification-profile-registry.js";
+import { VerificationRunService } from "./verification-run-service.js";
 import { PosterReviewService } from "../core/poster-review-service.js";
 import { createSelfIdentityRegistry } from "../core/self-identity-registry.js";
 import {
@@ -390,6 +399,46 @@ export async function createPlatformRuntime() {
   }
   const pimlicoClient = initStep("init-pimlico-client", logger, () => new PimlicoClient());
   const stateStore = initStep("init-state-store", logger, () => createStateStore(process.env, { logger }));
+  const verificationProfileRegistry = initStep(
+    "init-verification-profile-registry",
+    logger,
+    () => new VerificationProfileRegistry()
+  );
+  const verificationRunService = initStep(
+    "init-verification-run-service",
+    logger,
+    () => new VerificationRunService({
+      stateStore,
+      profileRegistry: verificationProfileRegistry,
+      receiptSigner: badgeReceiptSigner,
+      publicReceiptBaseUrl: process.env.PUBLIC_SITE_URL ?? "https://averray.com"
+    })
+  );
+  const x402VerifyConfig = initStep(
+    "load-x402-verify-config",
+    logger,
+    () => resolveX402VerifyConfig(process.env)
+  );
+  const x402VerifyIntake = x402VerifyConfig.enabled
+    ? initStep("init-x402-verify-intake", logger, () => new X402VerifyIntake({
+        config: x402VerifyConfig,
+        facilitator: createConfiguredPaymentFacilitator(process.env),
+        verificationRunService,
+        stateStore
+      }))
+    : undefined;
+  if (x402VerifyConfig.enabled) {
+    try {
+      const runtime = await verificationRunService.initialize();
+      logger.info?.(runtime, "verification_run.runtime_ready");
+    } catch (error) {
+      logger.error(
+        { step: "preflight-verification-runner", err: error instanceof Error ? error : new Error(String(error)) },
+        "bootstrap.init_failed"
+      );
+      throw error;
+    }
+  }
   const onboardingSubsidyBudget = initStep(
     "init-onboarding-subsidy-budget",
     logger,
@@ -897,6 +946,9 @@ export async function createPlatformRuntime() {
     rewardBankHealthProvider,
     policyService,
     verifierService,
+    verificationProfileRegistry,
+    verificationRunService,
+    x402VerifyIntake,
     externalPostingService,
     x402PosterRamp,
     externalPostingWatcher,
@@ -1038,6 +1090,7 @@ function loadRateLimitConfig(env = process.env) {
     // Submission reads and decisions share a separate per-wallet budget so a
     // noisy review UI cannot exhaust the poster's draft-creation allowance.
     externalReviews: buildLimit(env, "RATE_LIMIT_EXTERNAL_REVIEWS", { limit: 30, windowSeconds: 60 }),
+    verifyRuns: buildLimit(env, "RATE_LIMIT_VERIFY_RUNS", { limit: 10, windowSeconds: 60 }),
     verifierRun: buildLimit(env, "RATE_LIMIT_VERIFIER_RUN", { limit: 120, windowSeconds: 60 }),
     events: buildLimit(env, "RATE_LIMIT_EVENTS", { limit: 30, windowSeconds: 60 })
   };

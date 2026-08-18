@@ -35,7 +35,7 @@ export function resolveCdpSettlementConfig(env = process.env) {
   return Object.freeze({ baseUrl, apiKeyId, apiKeySecret, timeoutMs });
 }
 
-export class CdpSettlementAdapter {
+export class CdpPaymentFacilitator {
   constructor({
     config,
     fetchImpl = globalThis.fetch,
@@ -90,7 +90,7 @@ export class CdpSettlementAdapter {
     };
   }
 
-  async settle({ paymentProof, requirements, resource, extensions }) {
+  async collect({ paymentProof, requirements, resource, extensions }) {
     const paymentPayload = enrichPaymentPayload(
       decodePaymentProof(paymentProof),
       { resource, extensions }
@@ -195,6 +195,14 @@ export class CdpSettlementAdapter {
       throw new ConfigError("Settlement adapter clock returned an invalid date.");
     }
     return date;
+  }
+}
+
+// Compatibility adapter for the escrow-backed posting rail. Standalone Verify
+// uses CdpPaymentFacilitator directly and never receives a job-settlement port.
+export class CdpSettlementAdapter extends CdpPaymentFacilitator {
+  async settle(input) {
+    return this.collect(input);
   }
 }
 

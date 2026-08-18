@@ -42,6 +42,10 @@ services:
       - /etc/agent-stack-mainnet/aws-config:/root/.aws/config:ro
       - /usr/local/bin/aws_signing_helper:/usr/local/bin/aws_signing_helper:ro
       - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
+      # Narrow filesystem queue only: the public backend receives no Docker
+      # socket or process-execution capability. The offline host worker owns
+      # the Witness runtime and returns typed results through this directory.
+      - /srv/agent-stack-mainnet/verify-queue:/srv/agent-stack-mainnet/verify-queue
     networks:
       mainnet-internal: {}
       caddy-testnet:

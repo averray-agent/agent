@@ -143,6 +143,8 @@ export function metricPathLabel(pathname) {
     "/monitor/bank-feed",
     "/monitor/deposit-pool",
     "/jobs",
+    "/verify/profiles",
+    "/verify/runs",
     "/jobs/x402",
     "/jobs/definition",
     "/jobs/recommendations",

@@ -5,10 +5,12 @@ import test from "node:test";
 import { SelfIdentityRegistry } from "./self-identity-registry.js";
 import {
   assertWorkReceiptContentAddress,
+  buildVerifyReceipt,
   buildWorkReceipt,
   hashWorkReceiptContent,
   WORK_RECEIPT_SCHEMA_VERSION
 } from "./work-receipt.js";
+import { hashReceiptContent } from "./receipt-content-address.js";
 
 const live = JSON.parse(readFileSync(
   new URL("./fixtures/work-receipt-retention-2026-08-16.json", import.meta.url),
@@ -179,4 +181,55 @@ test("receipt id reproduces from served content and every content mutation chang
   mutated.verdict.reasonCode = "MUTATED";
   assert.notEqual(hashWorkReceiptContent(mutated), receipt.receiptId);
   assert.throws(() => assertWorkReceiptContentAddress(mutated), /content address mismatch/u);
+});
+
+test("job and verify receipt producers share one canonicalisation and content-address function", () => {
+  const jobReceipt = buildWorkReceipt(input());
+  const verifyReceipt = buildVerifyReceipt({
+    run: {
+      runId: `verify_${"5".repeat(64)}`,
+      profile: "git-patch-tests-v1",
+      profileVersion: 1,
+      customer: live.poster,
+      target: { repository: "github.com/example/project", commit: "6".repeat(40) },
+      inputs: {
+        bundle: { sha256: "7".repeat(64) },
+        patch: { sha256: "8".repeat(64) }
+      },
+      submittedAt: "2026-08-18T12:00:00.000Z",
+      completedAt: "2026-08-18T12:01:00.000Z",
+      verdict: {
+        outcome: "approved",
+        reasonCode: "TESTS_PASSED",
+        evidenceHash: `0x${"9".repeat(64)}`
+      }
+    },
+    profile: {
+      name: "git-patch-tests-v1",
+      version: 1,
+      handler: "deterministic",
+      handlerVersion: 1,
+      limits: { timeout: 300 },
+      price: { asset: "USDC", amount: "5", amountRaw: "5000000" }
+    },
+    execution: {
+      sourceBinding: { method: "offline_git_bundle", verified: true, ref: "6".repeat(40) }
+    },
+    payment: { status: "settled", amountRaw: "5000000" }
+  });
+  for (const receipt of [jobReceipt, verifyReceipt]) {
+    assert.equal(hashWorkReceiptContent(receipt), hashReceiptContent(receipt));
+    assert.equal(receipt.receiptId, hashReceiptContent(receipt));
+    const identityMutation = {
+      ...receipt,
+      canonicalUrl: "https://example.test/not-content",
+      signers: [{ ignored: true }],
+      signature: { ignored: true }
+    };
+    assert.equal(hashReceiptContent(identityMutation), receipt.receiptId);
+  }
+  assert.equal(verifyReceipt.intent.specSource, "verify_request");
+  assert.equal(verifyReceipt.intent.successPolicy.profile, "git-patch-tests-v1");
+  assert.equal(verifyReceipt.intent.successPolicy.version, 1);
+  assert.equal(verifyReceipt.settlement, undefined);
 });

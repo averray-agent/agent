@@ -1,0 +1,30 @@
+[Unit]
+Description=Averray offline Witness verification worker (%i)
+Documentation=https://github.com/averray-agent/agent/blob/main/docs/VERIFY_SHELF_OPERATIONS.md
+After=docker.service
+Requires=docker.service
+ConditionPathExists=/srv/agent-stack/app/witness/bin/run-verification-worker-profile.mjs
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+SupplementaryGroups=docker
+WorkingDirectory=/srv/agent-stack/app
+ExecStart=/usr/bin/node /srv/agent-stack/app/witness/bin/run-verification-worker-profile.mjs %i
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=30
+
+# This process receives no backend environment or application secrets. The
+# public backend can only exchange JSON/files through the queue directory; it
+# never receives the worker's Docker/process capability.
+NoNewPrivileges=true
+PrivateNetwork=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/srv/agent-stack/verify-queue /srv/agent-stack/witness-work /srv/agent-stack-mainnet/verify-queue /srv/agent-stack-mainnet/witness-work
+
+[Install]
+WantedBy=multi-user.target

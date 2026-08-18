@@ -1875,6 +1875,59 @@ commit_indexer_schema_ownership() {
   fi
 }
 
+ensure_witness_verify_worker() {
+  local runtime_env="$RUNTIME_ROOT/backend.env"
+  # Narrow deploy fixtures and component-only recovery runs may intentionally
+  # have no rendered backend env. In that case no Verify-enabled backend is
+  # being started, so there is no worker precondition to satisfy.
+  if [[ ! -f "$runtime_env" ]]; then
+    if [[ "${X402_VERIFY_MODE:-disabled}" == "enabled" ]]; then
+      echo "X402_VERIFY_MODE is enabled but $runtime_env is missing." >&2
+      return 1
+    fi
+    return 0
+  fi
+  local mode
+  mode=$(awk -F= '$1 == "X402_VERIFY_MODE" { value=$2 } END { print value }' "$runtime_env")
+  if [[ "$mode" != "enabled" ]]; then
+    return 0
+  fi
+
+  local unit_source="$APP_ROOT/deploy/averray-witness-verify@.service"
+  local unit_target="/etc/systemd/system/averray-witness-verify@.service"
+  local queue_root="/srv/agent-stack/verify-queue"
+  local work_root="/srv/agent-stack/witness-work"
+  if [[ "$LIVE_NETWORK" == "mainnet" ]]; then
+    queue_root="/srv/agent-stack-mainnet/verify-queue"
+    work_root="/srv/agent-stack-mainnet/witness-work"
+  fi
+
+  echo "Preparing offline Witness worker for $LIVE_NETWORK"
+  sudo install -d -o ubuntu -g ubuntu -m 0700 "$queue_root" "$work_root"
+  sudo install -m 0644 "$unit_source" "$unit_target"
+  sudo systemctl daemon-reload
+  if ! sudo docker image inspect averray-witness-preflight:phase1-uv-0.12.5-python-3.12.12-uv-build-0.9.27 >/dev/null 2>&1; then
+    sudo docker build --pull \
+      -t averray-witness-preflight:phase1-uv-0.12.5-python-3.12.12-uv-build-0.9.27 \
+      "$APP_ROOT/witness/sandbox"
+  fi
+  sudo systemctl enable "averray-witness-verify@$LIVE_NETWORK.service" >/dev/null
+  sudo systemctl restart "averray-witness-verify@$LIVE_NETWORK.service"
+
+  local heartbeat="$queue_root/worker-heartbeat.json"
+  local deadline=$(( $(date +%s) + 60 ))
+  while [[ $(date +%s) -lt $deadline ]]; do
+    if [[ -s "$heartbeat" ]] && jq -e '.worker == "averray-witness-git-patch-tests-v1" and (.at | type == "string")' "$heartbeat" >/dev/null 2>&1; then
+      echo "Offline Witness worker heartbeat is ready."
+      return 0
+    fi
+    sleep 1
+  done
+  echo "Offline Witness worker did not publish a valid heartbeat within 60 seconds." >&2
+  sudo systemctl status --no-pager "averray-witness-verify@$LIVE_NETWORK.service" >&2 || true
+  return 1
+}
+
 deploy() {
   echo "Production deploy lock acquired: $DEPLOY_LOCK_FILE"
   echo "Updating repo in $APP_ROOT"
@@ -1953,6 +2006,7 @@ deploy() {
   esac
 
   render_runtime_envs
+  ensure_witness_verify_worker
   if [[ "$indexer_schema_check_requested" == "1" \
     || -n "$INDEXER_DATABASE_SCHEMA" \
     || "$INDEXER_FRESH_SCHEMA" != "0" ]]; then
@@ -1976,7 +2030,7 @@ deploy() {
   # 1Password item → trigger workflow_dispatch → render produces new
   # /run env → hash differs → force-recreate. No SSH+rm dance needed.
   local backend_code_changed=0
-  if should_run backend "$RUN_BACKEND" '^(mcp-server/|sdk/|examples/|docs/schemas/|package(-lock)?\.json|scripts/ops/redeploy-backend\.sh|deploy/backend(\.mainnet)?\.env\.template|deployments/(testnet|mainnet)\.json)'; then
+  if should_run backend "$RUN_BACKEND" '^(mcp-server/|witness/|sdk/|examples/|docs/(api/openapi\.json|schemas/|VERIFY_SHELF_OPERATIONS\.md)|package(-lock)?\.json|scripts/ops/(deploy-production|redeploy-backend)\.sh|deploy/(averray-witness-verify@\.service|backend(\.mainnet)?\.env\.template|docker-compose\.mainnet\.yml)|deployments/(testnet|mainnet)\.json)'; then
     backend_code_changed=1
   fi
   if [[ "$backend_code_changed" == "1" || "${RUNTIME_ENV_CHANGED_BACKEND:-0}" == "1" ]]; then
