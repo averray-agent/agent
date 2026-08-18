@@ -76,7 +76,10 @@ const RECOVERY_LOG_CHUNK_SIZE = 50_000;
 const RECOVERY_FROM_BLOCK_SAFETY_MARGIN = 1_000;
 const DEPOSIT_POOL_EVENT_LOG_CHUNK_SIZE = 2_000;
 const CREDIT_POOL_EVENT_LOG_CHUNK_SIZE = 2_000;
-const XCM_STRATEGY_EVENT_LOG_CHUNK_SIZE = 50_000;
+const TREASURY_STRATEGY_IDS = Object.freeze([
+  encodeBytes32String("HYDRATION_USDC_V1").toLowerCase(),
+  encodeBytes32String("HYDRATION_USDC_POOL_V1").toLowerCase()
+]);
 const POOL_STRATEGY_ID = encodeBytes32String("HYDRATION_USDC_POOL_V1").toLowerCase();
 const VESTING_ATTESTATION_TYPEHASH = id(
   "VestingAttestation(address borrower,bytes32 loanId,uint256 pledgeShares,uint256 amount,uint256 vestedRaw,uint64 validUntil,uint256 nonce,uint256 chainId,address creditPool)"
@@ -171,7 +174,6 @@ export class BlockchainGateway {
     this.now = now;
     this.depositPoolVestingEventCache = undefined;
     this.creditPoolVestingEventCache = undefined;
-    this.xcmStrategyRegistryEventCache = undefined;
     if (!config.enabled) {
       this.provider = undefined;
       this.writeBroadcaster = undefined;
@@ -525,32 +527,40 @@ export class BlockchainGateway {
   }
 
   /**
-   * Enumerate the wrapper's current strategy registry from its append-only
-   * StrategyAdapterUpdated log, then re-read each mapping at one head block.
-   * The log supplies only candidate ids; no adapter or allocation is trusted
-   * until the corresponding live contract read succeeds.
+   * Read the wrapper's current mappings for the small, versioned strategy-id
+   * set. Wrapper writes are made through Substrate `revive.call` extrinsics on
+   * Polkadot Hub, so their Solidity events are not available to eth_getLogs.
+   * The mapping itself is the authoritative answer to "what is configured
+   * now" and keeps this operator feed independent of event visibility.
    */
   async getTreasuryStrategyLanes() {
     return this.withGatewayError("getTreasuryStrategyLanes", async () => {
       if (!this.provider || !this.xcmWrapperContract) {
         throw new Error("XCM wrapper reads are not configured");
       }
-      const deploymentBlock = Number(this.config?.xcmWrapperDeploymentBlock);
-      if (!Number.isSafeInteger(deploymentBlock) || deploymentBlock < 0) {
-        throw new Error("XCM wrapper deployment block is not configured");
-      }
       const headBlock = Number(await this.provider.getBlockNumber());
-      if (!Number.isSafeInteger(headBlock) || headBlock < deploymentBlock) {
-        throw new Error(`XCM wrapper head ${headBlock} predates deployment block ${deploymentBlock}`);
+      if (!Number.isSafeInteger(headBlock) || headBlock < 0) {
+        throw new Error(`Invalid XCM wrapper head block ${headBlock}`);
       }
-      const events = await this.#readXcmStrategyRegistryEvents(deploymentBlock, headBlock);
-      const strategyIds = [...new Set(events.map((event) => event.strategyId))];
+      const strategyIds = this.config?.treasuryStrategyIds?.length
+        ? [...new Set(this.config.treasuryStrategyIds.map((strategyId) => (
+            /^0x[a-fA-F0-9]{64}$/u.test(strategyId)
+              ? strategyId.toLowerCase()
+              : encodeBytes32String(strategyId).toLowerCase()
+          )))]
+        : TREASURY_STRATEGY_IDS;
       const at = { blockTag: headBlock };
+      const deployedCapital = await this.readDepositPoolDeployedCapital({ blockTag: headBlock });
       const rows = [];
       for (const strategyId of strategyIds) {
         const adapter = getAddress(await this.xcmWrapperContract.strategyAdapter(strategyId, at));
         if (adapter === ZERO_ADDRESS) continue;
-        rows.push(await this.readTreasuryStrategyLane({ strategyId, adapter, blockTag: headBlock }));
+        rows.push(await this.readTreasuryStrategyLane({
+          strategyId,
+          adapter,
+          blockTag: headBlock,
+          poolDeployment: strategyId === POOL_STRATEGY_ID ? deployedCapital : undefined
+        }));
       }
       const block = await this.provider.getBlock(headBlock);
       return {
@@ -564,12 +574,43 @@ export class BlockchainGateway {
             ? undefined
             : new Date(Number(block.timestamp) * 1_000).toISOString()
         },
+        deployedCapital,
         rows
       };
     });
   }
 
-  async readTreasuryStrategyLane({ strategyId, adapter, blockTag }) {
+  async readDepositPoolDeployedCapital({ blockTag }) {
+    if (!this.provider || !this.depositPoolContract || !this.config?.depositPoolAddress) {
+      throw new Error("DepositPool deployed-capital reads are not configured");
+    }
+    const at = { blockTag };
+    const [asset, totalAssets] = await Promise.all([
+      this.depositPoolContract.asset(at),
+      this.depositPoolContract.totalAssets(at)
+    ]);
+    const assetConfig = (this.config.supportedAssets ?? []).find(
+      (candidate) => String(candidate.address).toLowerCase() === String(asset).toLowerCase()
+    );
+    if (!assetConfig) throw new Error("DepositPool uses an unsupported asset");
+    const idleAssets = await new Contract(asset, ERC20_MOCK_ABI, this.provider)
+      .balanceOf(this.config.depositPoolAddress, at);
+    if (idleAssets > totalAssets) {
+      throw new Error("DepositPool idle balance exceeds totalAssets");
+    }
+    const deployedAssets = totalAssets - idleAssets;
+    return {
+      asset: getAddress(asset),
+      assetSymbol: assetConfig.symbol,
+      amount: this.toDisplayUnits(deployedAssets, assetConfig),
+      amountRaw: this.toRawString(deployedAssets),
+      totalAssetsRaw: this.toRawString(totalAssets),
+      idleAssetsRaw: this.toRawString(idleAssets),
+      source: "DepositPool.totalAssets - ERC20.balanceOf(pool)"
+    };
+  }
+
+  async readTreasuryStrategyLane({ strategyId, adapter, blockTag, poolDeployment = undefined }) {
     const at = { blockTag };
     const adapterContract = new Contract(adapter, STRATEGY_ADAPTER_ABI, this.provider);
     const [adapterStrategyId, asset, riskLabel, approved] = await Promise.all([
@@ -585,9 +626,22 @@ export class BlockchainGateway {
     if (isPoolLane && !this.depositPoolContract) {
       throw new Error("Pool strategy is registered but DepositPool reads are not configured");
     }
-    const allocationRaw = isPoolLane
-      ? await this.depositPoolContract.venuePrincipalCostBasis(at)
-      : await adapterContract.totalAssets(at);
+    let allocationRaw;
+    let poolAccounting;
+    if (isPoolLane) {
+      const deployedCapital = poolDeployment
+        ?? await this.readDepositPoolDeployedCapital({ blockTag });
+      if (getAddress(deployedCapital.asset) !== getAddress(asset)) {
+        throw new Error("Pool strategy adapter asset does not match DepositPool asset");
+      }
+      allocationRaw = BigInt(deployedCapital.amountRaw);
+      poolAccounting = {
+        totalAssetsRaw: deployedCapital.totalAssetsRaw,
+        idleAssetsRaw: deployedCapital.idleAssetsRaw
+      };
+    } else {
+      allocationRaw = await adapterContract.totalAssets(at);
+    }
     const assetConfig = (this.config.supportedAssets ?? []).find(
       (candidate) => String(candidate.address).toLowerCase() === String(asset).toLowerCase()
     );
@@ -604,43 +658,12 @@ export class BlockchainGateway {
       allocation: this.toDisplayUnits(allocationRaw, assetConfig),
       allocationRaw: this.toRawString(allocationRaw),
       allocationSource: isPoolLane
-        ? "DepositPool.venuePrincipalCostBasis"
+        ? poolDeployment?.source ?? "DepositPool.totalAssets - ERC20.balanceOf(pool)"
         : "strategyAdapter.totalAssets",
+      ...(poolAccounting ? { poolAccounting } : {}),
       policyApproved: Boolean(approved),
       verdict: deriveStrategyLaneVerdict({ approved: Boolean(approved) })
     };
-  }
-
-  async #readXcmStrategyRegistryEvents(deploymentBlock, headBlock) {
-    if (this.xcmStrategyRegistryEventCache?.headBlock === headBlock) {
-      return this.xcmStrategyRegistryEventCache.events;
-    }
-    const canExtend = this.xcmStrategyRegistryEventCache
-      && this.xcmStrategyRegistryEventCache.headBlock >= deploymentBlock
-      && this.xcmStrategyRegistryEventCache.headBlock < headBlock;
-    const fromBlock = canExtend ? this.xcmStrategyRegistryEventCache.headBlock + 1 : deploymentBlock;
-    const events = canExtend ? [...this.xcmStrategyRegistryEventCache.events] : [];
-    const topic0 = this.xcmWrapperContract.interface.getEvent("StrategyAdapterUpdated").topicHash;
-    for (let start = fromBlock; start <= headBlock; start += XCM_STRATEGY_EVENT_LOG_CHUNK_SIZE) {
-      const end = Math.min(headBlock, start + XCM_STRATEGY_EVENT_LOG_CHUNK_SIZE - 1);
-      const logs = await this.provider.getLogs({
-        address: this.config.xcmWrapperAddress,
-        topics: [topic0],
-        fromBlock: start,
-        toBlock: end
-      });
-      for (const log of logs) {
-        const decoded = this.xcmWrapperContract.interface.parseLog(log);
-        events.push({
-          strategyId: String(decoded.args.strategyId).toLowerCase(),
-          blockNumber: Number(log.blockNumber),
-          logIndex: Number(log.index ?? log.logIndex ?? 0)
-        });
-      }
-    }
-    events.sort((left, right) => left.blockNumber - right.blockNumber || left.logIndex - right.logIndex);
-    this.xcmStrategyRegistryEventCache = { headBlock, events };
-    return events;
   }
 
   async getActiveCreditPoolLoans(wallet) {

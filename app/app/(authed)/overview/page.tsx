@@ -32,7 +32,7 @@ import {
   usePolicies,
   useProviderOperations,
   usePublicProviderOperations,
-  useStrategyPositions,
+  useTreasurySummary,
 } from "@/lib/api/hooks";
 import { extractDisputeList } from "@/lib/api/dispute-adapters";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
@@ -50,6 +50,7 @@ import {
   buildLaneCards,
   buildOverviewAlerts,
   buildRoomVitals,
+  treasuryFeedAvailable,
 } from "@/lib/api/treasury-adapters";
 import { feedPresence, FEED_STATE_LABEL } from "@/lib/api/feed-presence";
 import {
@@ -63,7 +64,7 @@ export default function OverviewPage() {
   const jobs = useJobs();
   const sessions = useAdminSessions();
   const account = useAccount();
-  const strategyPositions = useStrategyPositions();
+  const treasurySummary = useTreasurySummary();
   const health = useHealth();
   const apiAlerts = useAlerts();
   const badges = useBadges();
@@ -77,14 +78,18 @@ export default function OverviewPage() {
   const sessionsBlocked = sessionsPresence === "locked" || sessionsPresence === "down";
   const policiesPresence = feedPresence(policies);
   const policiesBlocked = policiesPresence === "locked" || policiesPresence === "down";
-  const strategyPresence = feedPresence(strategyPositions);
+  const treasuryPresence = feedPresence(treasurySummary);
+  const strategyPresence = treasuryPresence === "live"
+    && !treasuryFeedAvailable(treasurySummary.data, "strategyLanes")
+    ? "down"
+    : treasuryPresence;
   const liveVitals = useMemo(
     () =>
       buildRoomVitals(
         jobs.data,
         sessions.data,
         account.data,
-        strategyPositions.data,
+        treasurySummary.data,
         sessionsPresence,
         strategyPresence
       ),
@@ -94,7 +99,7 @@ export default function OverviewPage() {
       sessions.data,
       sessionsPresence,
       strategyPresence,
-      strategyPositions.data,
+      treasurySummary.data,
     ]
   );
   // The Runs-in-motion + Agents-active cards both pull from
@@ -133,7 +138,7 @@ export default function OverviewPage() {
       buildLaneCards(
         jobs.data,
         sessions.data,
-        strategyPositions.data,
+        treasurySummary.data,
         {
           policies: { presence: policiesPresence, activeCount: activePolicyCount },
           audit: { presence: feedPresence(audit) },
@@ -152,7 +157,7 @@ export default function OverviewPage() {
       sessions.data,
       sessionsPresence,
       strategyPresence,
-      strategyPositions.data,
+      treasurySummary.data,
     ]
   );
   const policiesAppliedToday = useMemo(
@@ -230,7 +235,7 @@ export default function OverviewPage() {
     [providerOps.data]
   );
   const providerRows = liveProviderOps;
-  const hasLiveOverview = Boolean(jobs.data || sessions.data || account.data || strategyPositions.data);
+  const hasLiveOverview = Boolean(jobs.data || sessions.data || account.data || treasurySummary.data);
   const vitals = vitalsWithLoadingHints;
   const alerts = endpointAlerts.length ? endpointAlerts : liveAlerts;
   const lanes = liveLanes;
@@ -257,7 +262,7 @@ export default function OverviewPage() {
     jobs,
     sessions,
     account,
-    strategyPositions,
+    treasurySummary,
     health,
     apiAlerts,
     badges,

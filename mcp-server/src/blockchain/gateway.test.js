@@ -3256,44 +3256,39 @@ test("createSinglePayoutJobForLayout uses the legacy signature for legacy escrow
   ]);
 });
 
-test("getTreasuryStrategyLanes indexes wrapper updates then trusts only current strategyAdapter reads", async () => {
+test("getTreasuryStrategyLanes reads current wrapper mappings without consulting event logs", async () => {
   const wrapper = "0x1111111111111111111111111111111111111111";
   const laneA = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   const laneB = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
   const strategyA = encodeBytes32String("HYDRATION_USDC_V1").toLowerCase();
   const strategyB = encodeBytes32String("HYDRATION_USDC_POOL_V1").toLowerCase();
-  const iface = new Interface([
-    "event StrategyAdapterUpdated(bytes32 indexed strategyId,address indexed previousAdapter,address indexed newAdapter)"
-  ]);
-  const eventLog = (strategyId, lane, blockNumber, index) => ({
-    address: wrapper,
-    blockNumber,
-    index,
-    ...iface.encodeEventLog(iface.getEvent("StrategyAdapterUpdated"), [
-      strategyId,
-      "0x0000000000000000000000000000000000000000",
-      lane
-    ])
-  });
   const gateway = new BlockchainGateway({
     enabled: false,
     xcmWrapperAddress: wrapper,
-    xcmWrapperDeploymentBlock: 100,
     supportedAssets: [USDC_TRUST_ASSET]
   });
   gateway.provider = {
     async getBlockNumber() { return 110; },
-    async getLogs() { return [eventLog(strategyA, laneA, 101, 0), eventLog(strategyB, laneB, 102, 0)]; },
+    async getLogs() { throw new Error("event logs must not be read"); },
     async getBlock() { return { hash: `0x${"12".repeat(32)}`, timestamp: 1_786_648_400 }; }
   };
   const mappingReads = [];
   gateway.xcmWrapperContract = {
-    interface: iface,
     async strategyAdapter(strategyId, at) {
       mappingReads.push([strategyId, at]);
       return strategyId === strategyA ? laneA : laneB;
     }
   };
+  gateway.readDepositPoolDeployedCapital = async ({ blockTag }) => ({
+    asset: USDC_TRUST_ASSET.address,
+    assetSymbol: "USDC",
+    amount: 5,
+    amountRaw: "5000000",
+    totalAssetsRaw: "20446982",
+    idleAssetsRaw: "15446982",
+    source: "DepositPool.totalAssets - ERC20.balanceOf(pool)",
+    blockTag
+  });
   gateway.readTreasuryStrategyLane = async ({ strategyId, adapter, blockTag }) => ({
     strategyId,
     laneAddress: adapter,
@@ -3308,6 +3303,8 @@ test("getTreasuryStrategyLanes indexes wrapper updates then trusts only current 
   assert.deepEqual(result.rows.map((row) => row.blockTag), [110, 110]);
   assert.deepEqual(mappingReads, [[strategyA, { blockTag: 110 }], [strategyB, { blockTag: 110 }]]);
   assert.equal(result.block.number, 110);
+  assert.equal(result.deployedCapital.amountRaw, "5000000");
+  assert.equal(result.deployedCapital.blockTag, 110);
 });
 
 test("getActiveCreditPoolLoans enumerates wallet origins, excludes closed ids, and re-reads active debt", async () => {
@@ -3346,20 +3343,31 @@ test("getActiveCreditPoolLoans enumerates wallet origins, excludes closed ids, a
   assert.deepEqual(reads, [[openLoan, { blockTag: 222 }]]);
 });
 
-test("readTreasuryStrategyLane uses DepositPool cost basis for the pool-backing strategy", async () => {
+test("readTreasuryStrategyLane derives pool deployment from total assets minus the idle token balance", async () => {
   const strategyId = encodeBytes32String("HYDRATION_USDC_POOL_V1").toLowerCase();
   const adapter = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const pool = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
   const adapterInterface = new Interface([
     "function strategyId() view returns (bytes32)",
     "function asset() view returns (address)",
     "function riskLabel() view returns (string)",
     "function totalAssets() view returns (uint256)"
   ]);
+  const tokenInterface = new Interface(["function balanceOf(address) view returns (uint256)"]);
   const adapterCalls = [];
-  const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
+  const gateway = new BlockchainGateway({
+    enabled: false,
+    depositPoolAddress: pool,
+    supportedAssets: [USDC_TRUST_ASSET]
+  });
   gateway.provider = {
     async call(transaction) {
       const selector = String(transaction.data).slice(0, 10);
+      if (selector === tokenInterface.getFunction("balanceOf").selector) {
+        const [account] = tokenInterface.decodeFunctionData("balanceOf", transaction.data);
+        assert.equal(account.toLowerCase(), pool);
+        return tokenInterface.encodeFunctionResult("balanceOf", [15_446_982n]);
+      }
       const fragment = adapterInterface.getFunction(selector);
       adapterCalls.push(fragment.name);
       const values = {
@@ -3372,19 +3380,67 @@ test("readTreasuryStrategyLane uses DepositPool cost basis for the pool-backing 
     }
   };
   gateway.policyContract = { async approvedStrategies() { return true; } };
-  const costBasisReads = [];
+  const poolReads = [];
   gateway.depositPoolContract = {
-    async venuePrincipalCostBasis(at) {
-      costBasisReads.push(at);
-      return 7_500_000n;
-    }
+    async asset(at) { poolReads.push(["asset", at]); return USDC_TRUST_ASSET.address; },
+    async totalAssets(at) { poolReads.push(["totalAssets", at]); return 20_446_982n; },
+    async venuePrincipalCostBasis() { throw new Error("cost basis must not be read"); }
   };
 
   const row = await gateway.readTreasuryStrategyLane({ strategyId, adapter, blockTag: 333 });
 
-  assert.equal(row.allocationRaw, "7500000");
-  assert.equal(row.allocation, 7.5);
-  assert.equal(row.allocationSource, "DepositPool.venuePrincipalCostBasis");
+  assert.equal(row.allocationRaw, "5000000");
+  assert.equal(row.allocation, 5);
+  assert.equal(row.allocationSource, "DepositPool.totalAssets - ERC20.balanceOf(pool)");
+  assert.deepEqual(row.poolAccounting, {
+    totalAssetsRaw: "20446982",
+    idleAssetsRaw: "15446982"
+  });
   assert.equal(adapterCalls.includes("totalAssets"), false);
-  assert.deepEqual(costBasisReads, [{ blockTag: 333 }]);
+  assert.deepEqual(poolReads, [
+    ["asset", { blockTag: 333 }],
+    ["totalAssets", { blockTag: 333 }]
+  ]);
+});
+
+test("readTreasuryStrategyLane fails closed when idle assets exceed total assets", async () => {
+  const strategyId = encodeBytes32String("HYDRATION_USDC_POOL_V1").toLowerCase();
+  const adapter = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const pool = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const adapterInterface = new Interface([
+    "function strategyId() view returns (bytes32)",
+    "function asset() view returns (address)",
+    "function riskLabel() view returns (string)"
+  ]);
+  const tokenInterface = new Interface(["function balanceOf(address) view returns (uint256)"]);
+  const gateway = new BlockchainGateway({
+    enabled: false,
+    depositPoolAddress: pool,
+    supportedAssets: [USDC_TRUST_ASSET]
+  });
+  gateway.provider = {
+    async call(transaction) {
+      const selector = String(transaction.data).slice(0, 10);
+      if (selector === tokenInterface.getFunction("balanceOf").selector) {
+        return tokenInterface.encodeFunctionResult("balanceOf", [6_000_000n]);
+      }
+      const fragment = adapterInterface.getFunction(selector);
+      const values = {
+        strategyId: [strategyId],
+        asset: [USDC_TRUST_ASSET.address],
+        riskLabel: ["conservative"]
+      };
+      return adapterInterface.encodeFunctionResult(fragment, values[fragment.name]);
+    }
+  };
+  gateway.policyContract = { async approvedStrategies() { return true; } };
+  gateway.depositPoolContract = {
+    async asset() { return USDC_TRUST_ASSET.address; },
+    async totalAssets() { return 5_000_000n; }
+  };
+
+  await assert.rejects(
+    gateway.readTreasuryStrategyLane({ strategyId, adapter, blockTag: 333 }),
+    /idle balance exceeds totalAssets/u
+  );
 });

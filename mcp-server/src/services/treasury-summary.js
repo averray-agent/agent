@@ -58,11 +58,11 @@ export class TreasurySummaryService {
       summary.debt = creditLine.used;
     }
     if (strategyLanes.available) {
-      const knownAllocations = strategyLanes.rows.every((row) => Number.isFinite(row.allocation));
       summary.deployedLanes = strategyLanes.rows.length;
-      if (knownAllocations) {
-        summary.allocated = strategyLanes.rows.reduce((total, row) => total + row.allocation, 0);
-      }
+      summary.attentionCount = strategyLanes.rows.filter(
+        (row) => row?.verdict?.status !== "ok"
+      ).length;
+      summary.allocated = strategyLanes.deployedCapital.amount;
     }
     return {
       schemaVersion: 1,
@@ -198,6 +198,10 @@ export class TreasurySummaryService {
     if (assets.size > 1) {
       throw new Error("Strategy lane allocations use different assets and cannot be combined");
     }
+    const deployedCapitalAsset = String(lanes.deployedCapital?.asset ?? "").toLowerCase();
+    if (!deployedCapitalAsset || !assets.has(deployedCapitalAsset)) {
+      throw new Error("DepositPool deployed capital does not match the strategy lane asset");
+    }
     const totalRaw = lanes.rows.reduce(
       (total, row) => total + exactRaw(row.allocationRaw, `strategy ${row.strategyId} allocation`),
       0n
@@ -209,13 +213,22 @@ export class TreasurySummaryService {
         deploymentShareBps: totalRaw > 0n ? Number(allocationRaw * 10_000n / totalRaw) : 0
       };
     });
+    const deployedCapitalRaw = exactRaw(
+      lanes.deployedCapital?.amountRaw,
+      "DepositPool deployed capital"
+    );
     return {
       available: true,
       stale: false,
       reason: "wrapper_registry_live",
-      source: "XcmWrapper.StrategyAdapterUpdated index + strategyAdapter live reads",
+      source: "XcmWrapper.strategyAdapter live reads",
       wrapper: lanes.wrapper,
       block: lanes.block,
+      deployedCapital: {
+        ...lanes.deployedCapital,
+        amount: display(deployedCapitalRaw),
+        amountRaw: deployedCapitalRaw.toString()
+      },
       rows
     };
   }
