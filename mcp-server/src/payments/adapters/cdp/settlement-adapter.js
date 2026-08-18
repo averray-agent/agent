@@ -7,6 +7,10 @@ import {
   PaymentSettlementOutcomeUnknownError,
   PaymentVerificationError
 } from "../../settlement-adapter.js";
+import {
+  assertX402PaymentMatchesRequirements,
+  decodeX402PaymentProof
+} from "../../x402-payment-primitives.js";
 
 const CDP_DEFAULT_BASE_URL = "https://api.cdp.coinbase.com/platform/v2/x402";
 const CDP_REQUEST_HOST = "api.cdp.coinbase.com";
@@ -56,10 +60,10 @@ export class CdpSettlementAdapter {
 
   async verify({ paymentProof, requirements, resource, extensions }) {
     const paymentPayload = enrichPaymentPayload(
-      decodePaymentProof(paymentProof),
+      decodeX402PaymentProof(paymentProof),
       { resource, extensions }
     );
-    assertPaymentMatchesRequirements(paymentPayload, requirements);
+    assertX402PaymentMatchesRequirements(paymentPayload, requirements);
     const { body } = await this.request("verify", paymentPayload, requirements, {
       outcomeUnknown: false
     });
@@ -92,10 +96,10 @@ export class CdpSettlementAdapter {
 
   async settle({ paymentProof, requirements, resource, extensions }) {
     const paymentPayload = enrichPaymentPayload(
-      decodePaymentProof(paymentProof),
+      decodeX402PaymentProof(paymentProof),
       { resource, extensions }
     );
-    assertPaymentMatchesRequirements(paymentPayload, requirements);
+    assertX402PaymentMatchesRequirements(paymentPayload, requirements);
     const { body, headers } = await this.request("settle", paymentPayload, requirements, {
       outcomeUnknown: true
     });
@@ -229,28 +233,6 @@ export async function generateCdpAuthorization({
   return `${signingInput}.${signature.toString("base64url")}`;
 }
 
-function decodePaymentProof(value) {
-  const encoded = String(value ?? "").trim();
-  if (!encoded) {
-    throw new PaymentVerificationError(
-      "X-PAYMENT (or PAYMENT-SIGNATURE) is required. Sign the advertised payment requirements and retry.",
-      "payment_proof_required",
-      { action: "sign_payment_requirements", posterFunds: "unchanged" }
-    );
-  }
-  try {
-    const parsed = JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("shape");
-    return parsed;
-  } catch {
-    throw new PaymentVerificationError(
-      "The payment header is not valid base64-encoded x402 JSON. Rebuild it from the latest 402 response and retry.",
-      "payment_proof_malformed",
-      { action: "rebuild_payment_header", posterFunds: "unchanged" }
-    );
-  }
-}
-
 function enrichPaymentPayload(paymentPayload, { resource, extensions }) {
   return {
     ...paymentPayload,
@@ -265,27 +247,6 @@ function enrichPaymentPayload(paymentPayload, { resource, extensions }) {
 
 function cloneJson(value) {
   return JSON.parse(JSON.stringify(value));
-}
-
-function assertPaymentMatchesRequirements(payload, requirements) {
-  const accepted = payload?.accepted;
-  const comparable = ["scheme", "network", "asset", "amount", "payTo", "maxTimeoutSeconds"];
-  if (Number(payload?.x402Version) !== 2 || !accepted) {
-    throw new PaymentVerificationError(
-      "The payment payload is not x402 v2. Rebuild it from the latest 402 response.",
-      "payment_version_unsupported",
-      { action: "use_latest_402_response", posterFunds: "unchanged" }
-    );
-  }
-  for (const field of comparable) {
-    if (String(accepted[field] ?? "").toLowerCase() !== String(requirements?.[field] ?? "").toLowerCase()) {
-      throw new PaymentVerificationError(
-        `The payment payload changed the advertised ${field}. Rebuild it from the latest 402 response and do not edit payment terms.`,
-        "payment_requirements_mismatch",
-        { field, action: "use_unchanged_payment_requirements", posterFunds: "unchanged" }
-      );
-    }
-  }
 }
 
 function normalizeVerificationFailure(body) {

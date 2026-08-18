@@ -20,6 +20,7 @@ import { BUILTIN_POLICIES } from "../core/builtin-policies.js";
 import { BlockchainGateway } from "../blockchain/gateway.js";
 import { VerifierService } from "./verifier-service.js";
 import { createVerificationShelf } from "./verification-shelf.js";
+import { createConfiguredX402VerificationPaymentGate } from "../payments/x402-verification-payment-gate.js";
 import { loadLocalEnv } from "./env-loader.js";
 import { PimlicoClient } from "./pimlico-client.js";
 import { EventBus } from "../core/event-bus.js";
@@ -528,10 +529,15 @@ export async function createPlatformRuntime() {
     logger,
     () => new VerifierService(platformService, stateStore, gateway)
   );
+  const verificationPaymentGate = initStep(
+    "init-verification-payment-gate",
+    logger,
+    () => createConfiguredX402VerificationPaymentGate(process.env, { logger })
+  );
   const { verificationProfileRegistry, verificationRunService } = await initStepAsync(
     "init-verification-shelf",
     logger,
-    () => createVerificationShelf({ stateStore, logger })
+    () => createVerificationShelf({ stateStore, logger, paymentGate: verificationPaymentGate })
   );
   const externalPostingConfig = initStep(
     "load-external-posting-config",
