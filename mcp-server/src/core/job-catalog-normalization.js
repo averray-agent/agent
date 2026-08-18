@@ -4,10 +4,14 @@ import {
   isBuiltinJobSchemaRef,
   normalizeExternalSchemaRegistrations
 } from "./job-schema-registry.js";
+import {
+  PATCH_SUBMISSION_OUTPUT_SCHEMA_REF,
+  normalizeCodeChangeDefinition
+} from "./code-change-job.js";
 
 export const VALID_TIERS = new Set(["starter", "pro", "elite"]);
-export const VALID_VERIFIER_MODES = new Set(["benchmark", "deterministic", "human_fallback", "github_pr"]);
-export const VALID_JOB_TYPES = new Set(["work", "curation", "review", "publish", "verification"]);
+export const VALID_VERIFIER_MODES = new Set(["benchmark", "deterministic", "human_fallback", "github_pr", "witness"]);
+export const VALID_JOB_TYPES = new Set(["work", "curation", "review", "publish", "verification", "code_change"]);
 export const VALID_AGENT_ROLES = new Set(["worker", "curator", "reviewer", "publisher", "verifier", "arbitrator"]);
 export const VALID_JOB_LIFECYCLE_STATUSES = new Set(["open", "paused", "archived"]);
 export const DEFAULT_STALE_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
@@ -20,7 +24,8 @@ const DEFAULT_ROLE_BY_JOB_TYPE = {
   curation: "curator",
   review: "reviewer",
   publish: "publisher",
-  verification: "verifier"
+  verification: "verifier",
+  code_change: "worker"
 };
 
 export function normalizeJobInput(input) {
@@ -95,6 +100,20 @@ export function normalizeJobInput(input) {
     rewardAmount,
     rewardAsset
   });
+  const codeChange = jobType === "code_change"
+    ? normalizeCodeChangeDefinition(input?.codeChange, { expectedJobId: id })
+    : undefined;
+  if (jobType === "code_change" && outputSchemaRef !== PATCH_SUBMISSION_OUTPUT_SCHEMA_REF) {
+    throw new ValidationError(
+      `code_change jobs must use ${PATCH_SUBMISSION_OUTPUT_SCHEMA_REF}.`
+    );
+  }
+  if (jobType === "code_change" && verifierMode !== "witness") {
+    throw new ValidationError("code_change jobs must use the witness verifier mode.");
+  }
+  if (jobType !== "code_change" && input?.codeChange !== undefined) {
+    throw new ValidationError("codeChange is only valid for code_change jobs.");
+  }
 
   return {
     id,
@@ -125,6 +144,7 @@ export function normalizeJobInput(input) {
     ...(verification ? { verification } : {}),
     ...(delegationPolicy ? { delegationPolicy } : {}),
     ...(lineage ? { lineage } : {}),
+    ...(codeChange ? { codeChange } : {}),
     ...(parentSessionId ? { parentSessionId } : {}),
     ...(recurring ? { recurring: true } : {}),
     ...(schedule ? { schedule } : {}),
@@ -197,6 +217,16 @@ export function buildVerifierConfig(verifierMode, input) {
       requireTestEvidence: input?.requireTestEvidence !== false,
       acceptMergedAsApproved: input?.acceptMergedAsApproved !== false,
       ...(input?.requireClaimantBinding === true ? { requireClaimantBinding: true } : {})
+    };
+  }
+
+  if (verifierMode === "witness") {
+    return {
+      version: 1,
+      handler: "witness",
+      requiredAssuranceLevel: String(
+        input?.codeChange?.contract?.job?.required_verification_level ?? ""
+      ).trim()
     };
   }
 

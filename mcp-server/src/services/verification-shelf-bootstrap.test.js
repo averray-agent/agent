@@ -48,9 +48,12 @@ test("backend verification shelf boots and fails closed when Witness modules can
 });
 
 test("backend startup module graph has no static Witness import, including under mutation", () => {
-  const source = readFileSync(new URL("./git-patch-tests-runner.js", import.meta.url), "utf8");
-  assertNoStaticWitnessImport(source);
+  const sources = [
+    readFileSync(new URL("./git-patch-tests-runner.js", import.meta.url), "utf8"),
+    readFileSync(new URL("../core/code-change-job.js", import.meta.url), "utf8")
+  ];
+  for (const source of sources) assertNoStaticWitnessImport(source);
 
-  const deliberatelyMutated = `import { materializeArtifact } from "../../../witness/src/artifacts.mjs";\n${source}`;
+  const deliberatelyMutated = `import { materializeArtifact } from "../../../witness/src/artifacts.mjs";\n${sources[0]}`;
   assert.throws(() => assertNoStaticWitnessImport(deliberatelyMutated), /startup module graph/u);
 });

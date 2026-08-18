@@ -1,0 +1,39 @@
+{
+  "id": "witness-code-change-unitless-001",
+  "title": "Code change: unitless duration parsing",
+  "description": "Produce a content-addressed Git patch that makes unitless duration values parse as seconds. The deliverable is a patch, not an upstream pull request.",
+  "category": "coding",
+  "tier": "starter",
+  "lane": "benchmark-showcase",
+  "jobType": "code_change",
+  "requiredRole": "worker",
+  "rewardAsset": "USDC",
+  "rewardAmount": 1,
+  "verifierMode": "witness",
+  "inputSchemaRef": "schema://jobs/coding-input",
+  "outputSchemaRef": "schema://jobs/patch-submission-output",
+  "claimTtlSeconds": 7200,
+  "retryLimit": 1,
+  "requiresSponsoredGas": false,
+  "onboardingWaiverEligible": false,
+  "lifecycle": {
+    "status": "paused",
+    "reason": "awaiting_operator_funding"
+  },
+  "source": {
+    "type": "controlled_repository",
+    "repo": "depre-dev/averray-send-test",
+    "baseCommit": "42571061ca9b6da8c6aca908f1ee1df1dab4e10a"
+  },
+  "acceptanceCriteria": [
+    "Submit a hash-pinned Git patch that applies to the declared base commit.",
+    "The supplied unitless-duration test fails on base and must pass after the patch.",
+    "The existing regression suite must remain green.",
+    "Do not open or modify an upstream pull request."
+  ],
+  "agentInstructions": [
+    "Return schema://jobs/patch-submission-output directly.",
+    "The submittingAgent wallet must be your claiming wallet.",
+    "Do not include a verdict, receipt, or claim that the patch is verified."
+  ]
+}

@@ -1,0 +1,239 @@
+{
+  "jobId": "witness-code-change-unitless-001",
+  "contractDigest": "0x75e0ed1015f01f25f658e82f77d629d849ca2904c78503afaf0351f24b1c4f71",
+  "preflight": {
+    "result": "EXECUTABLE",
+    "materializationStatus": "HERMETIC",
+    "reports": [
+      {
+        "checkId": "full-suite",
+        "checkKind": "regression",
+        "classification": "HERMETIC",
+        "baseOutcome": "pass"
+      }
+    ]
+  },
+  "freeze": {
+    "validated": true,
+    "baselineDifferentials": [
+      {
+        "id": "supplied-unitless-duration",
+        "kind": "hidden",
+        "expected": "fail",
+        "outcome": "fail"
+      }
+    ]
+  },
+  "published": false,
+  "job": {
+    "id": "witness-code-change-unitless-001",
+    "category": "coding",
+    "tier": "starter",
+    "jobType": "code_change",
+    "requiredRole": "worker",
+    "rewardAsset": "USDC",
+    "rewardAmount": 1,
+    "lane": "benchmark-showcase",
+    "verifierMode": "witness",
+    "verifierConfig": {
+      "version": 1,
+      "handler": "witness",
+      "requiredAssuranceLevel": "AV-2"
+    },
+    "inputSchemaRef": "schema://jobs/coding-input",
+    "outputSchemaRef": "schema://jobs/patch-submission-output",
+    "claimTtlSeconds": 7200,
+    "retryLimit": 1,
+    "requiresSponsoredGas": false,
+    "lifecycle": {
+      "status": "paused",
+      "createdAt": "2026-08-18T20:36:15.941Z",
+      "updatedAt": "2026-08-18T20:36:15.941Z",
+      "staleAt": "2026-09-01T20:36:15.941Z",
+      "reason": "awaiting_operator_funding"
+    },
+    "title": "Code change: unitless duration parsing",
+    "description": "Produce a content-addressed Git patch that makes unitless duration values parse as seconds. The deliverable is a patch, not an upstream pull request.",
+    "source": {
+      "type": "controlled_repository",
+      "repo": "depre-dev/averray-send-test",
+      "baseCommit": "42571061ca9b6da8c6aca908f1ee1df1dab4e10a"
+    },
+    "acceptanceCriteria": [
+      "Submit a hash-pinned Git patch that applies to the declared base commit.",
+      "The supplied unitless-duration test fails on base and must pass after the patch.",
+      "The existing regression suite must remain green.",
+      "Do not open or modify an upstream pull request."
+    ],
+    "agentInstructions": [
+      "Return schema://jobs/patch-submission-output directly.",
+      "The submittingAgent wallet must be your claiming wallet.",
+      "Do not include a verdict, receipt, or claim that the patch is verified."
+    ],
+    "codeChange": {
+      "schemaVersion": "averray.code-change-job/v1",
+      "contractState": "frozen",
+      "contractDigest": "0x75e0ed1015f01f25f658e82f77d629d849ca2904c78503afaf0351f24b1c4f71",
+      "contractDigestAlgorithm": "sha256:averray-canonical-json-v1",
+      "contract": {
+        "schema_version": "averray.verification-contract/v1.1",
+        "job": {
+          "id": "witness-code-change-unitless-001",
+          "type": "code_change",
+          "required_verification_level": "AV-2"
+        },
+        "subject": {
+          "acquisition": {
+            "repository": "github.com/depre-dev/averray-send-test",
+            "base_commit": "42571061ca9b6da8c6aca908f1ee1df1dab4e10a",
+            "git_bundle": {
+              "sha256": "66b7cbfb41adebaed4709dab65f4dc9ac45134a962adcb99fc6c2ea2ee62708a",
+              "bytes": 2863,
+              "locator": {
+                "kind": "https",
+                "url": "https://raw.githubusercontent.com/averray-agent/agent/cada8fd79c19657ec764f00bf1fd1bcaf77a2ce3/witness/examples/averray-send-test/source.bundle"
+              },
+              "format": "git-bundle"
+            }
+          },
+          "materialization": {
+            "status": "HERMETIC",
+            "dependency_cache": null,
+            "frozen_inputs": []
+          }
+        },
+        "candidate": {
+          "format": "git_patch",
+          "allowed_paths": [
+            "src/**",
+            "test/**"
+          ],
+          "protected_paths": [
+            "package.json"
+          ],
+          "maximum_changed_files": 5
+        },
+        "checks": {
+          "targeted": [],
+          "regression": [
+            {
+              "id": "full-suite",
+              "command": [
+                "npm",
+                "test"
+              ],
+              "working_directory": ".",
+              "expected": "pass",
+              "required": true,
+              "base_state": "green"
+            }
+          ],
+          "hidden": {
+            "id": "supplied-unitless-duration",
+            "artifact": {
+              "sha256": "5559ff78c500b110e9555d4a8214e89b300f3e1b19bf2637fbee4cf1364a20ee",
+              "bytes": 233,
+              "locator": {
+                "kind": "https",
+                "url": "https://raw.githubusercontent.com/averray-agent/agent/cada8fd79c19657ec764f00bf1fd1bcaf77a2ce3/witness/examples/averray-send-test/unitless.test.mjs"
+              },
+              "format": "file"
+            },
+            "mount_path": ".averray/supplied-tests/unitless.test.mjs",
+            "command": [
+              "node",
+              "--test",
+              ".averray/supplied-tests/unitless.test.mjs"
+            ],
+            "working_directory": ".",
+            "expected_on_base": "fail",
+            "expected_on_candidate": "pass",
+            "required": true,
+            "eligibility_reference_sha256": "73ba7cb28f3379ee4d592296ced500790ca6673d9b00fcc125a60bdb6d120036"
+          }
+        },
+        "integrity": {
+          "judging_commands_immutable": true,
+          "forbid": [
+            "test_deletion",
+            "skip_or_xfail_markers_added",
+            "runner_replacement",
+            "assertion_neutering",
+            "snapshot_rewrite_to_accept_current",
+            "coverage_or_lint_exclusion_of_changed_files",
+            "error_swallowing_to_force_zero_exit"
+          ]
+        },
+        "inconclusive_policy": {
+          "infrastructure_attributable": [
+            "host_failure",
+            "image_unavailable",
+            "platform_timeout",
+            "artifact_unavailable"
+          ],
+          "contract_attributable": [
+            "source_commit_binding_failed",
+            "baseline_mismatch",
+            "contract_precondition_untrue"
+          ],
+          "candidate_attributable": [
+            "candidate_exceeded_resource_limit",
+            "candidate_caused_nondeterminism_across_repetitions"
+          ],
+          "verifier_attributable": [
+            "integrity_detection_ambiguous",
+            "integrity_detection_unimplemented",
+            "integrity_detection_failed"
+          ],
+          "repeated_candidate_attributable": {
+            "window": 10,
+            "threshold": 3,
+            "action": "escalate_to_human"
+          }
+        },
+        "reproducibility": {
+          "repetitions": 2,
+          "disagreement_result": "INCONCLUSIVE_FLAKY",
+          "random_seed": 48291
+        },
+        "resources": {
+          "timeout_seconds": 30,
+          "cpu_limit": 1,
+          "memory_mb": 256,
+          "process_limit": 64,
+          "temporary_storage_mb": 128,
+          "max_output_bytes": 1048576
+        },
+        "settlement": {
+          "minimum_assurance_level": "AV-2",
+          "pass_required": true,
+          "human_overlay_required": false,
+          "challenge_window_blocks": 100
+        }
+      },
+      "preflight": {
+        "result": "EXECUTABLE",
+        "materializationStatus": "HERMETIC",
+        "reports": [
+          {
+            "checkId": "full-suite",
+            "checkKind": "regression",
+            "classification": "HERMETIC",
+            "baseOutcome": "pass"
+          }
+        ]
+      },
+      "freeze": {
+        "validated": true,
+        "baselineDifferentials": [
+          {
+            "id": "supplied-unitless-duration",
+            "kind": "hidden",
+            "expected": "fail",
+            "outcome": "fail"
+          }
+        ]
+      }
+    }
+  }
+}

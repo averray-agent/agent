@@ -155,7 +155,7 @@ const profiles = new Map([
     supportedProtocols: ["mcp", "http"],
     preferredCategories: ["coding", "governance"],
     preferredRiskLevel: "low",
-    verifierCompatibility: ["benchmark", "deterministic", "human_fallback", "github_pr"],
+    verifierCompatibility: ["benchmark", "deterministic", "human_fallback", "github_pr", "witness"],
     minLiquidReserve: 10,
     autoUnwindStrategies: false
   }]

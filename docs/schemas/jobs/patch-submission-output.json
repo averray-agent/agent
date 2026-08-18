@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "schema://jobs/patch-submission-output",
+  "title": "Patch Submission Output",
+  "description": "An unverified, content-addressed Git patch submitted for later Witness verification. This object makes no verification claim.",
+  "type": "object",
+  "properties": {
+    "patch": {
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "locator": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "https"
+              ]
+            },
+            "url": {
+              "type": "string",
+              "pattern": "^https://"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "additionalProperties": false
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "file"
+          ]
+        }
+      },
+      "required": [
+        "sha256",
+        "bytes",
+        "locator",
+        "format"
+      ],
+      "additionalProperties": false
+    },
+    "baseCommit": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "submittingAgent": {
+      "type": "object",
+      "properties": {
+        "wallet": {
+          "type": "string",
+          "pattern": "^0x[a-fA-F0-9]{40}$"
+        }
+      },
+      "required": [
+        "wallet"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "patch",
+    "baseCommit",
+    "submittingAgent"
+  ],
+  "additionalProperties": false
+}

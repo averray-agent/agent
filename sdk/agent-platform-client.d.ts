@@ -360,6 +360,23 @@ export interface CodingOutput {
   filesChanged?: string[];
 }
 
+/** An unverified, content-addressed Git patch submitted for later Witness verification. This object makes no verification claim. */
+export interface PatchSubmissionOutput {
+  patch: {
+    sha256: string;
+    bytes: number;
+    locator: {
+      kind: "https";
+      url: string;
+    };
+    format: "file";
+  };
+  baseCommit: string;
+  submittingAgent: {
+    wallet: string;
+  };
+}
+
 /** GitHub pull request evidence for open-source issue jobs. */
 export interface GithubPrEvidenceOutput {
   prUrl: string;
@@ -663,6 +680,7 @@ export interface ProductProofWorkerLoop {
 export interface BuiltinJobSchemaMap {
   "schema://jobs/coding-input": CodingInput;
   "schema://jobs/coding-output": CodingOutput;
+  "schema://jobs/patch-submission-output": PatchSubmissionOutput;
   "schema://jobs/github-pr-evidence-output": GithubPrEvidenceOutput;
   "schema://jobs/governance-input": GovernanceInput;
   "schema://jobs/governance-output": GovernanceOutput;

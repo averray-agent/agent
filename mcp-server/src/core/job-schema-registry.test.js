@@ -66,6 +66,34 @@ test("getBuiltinJobSchema resolves built-in first-wave schemas", () => {
   assert.equal(schema?.$id, "schema://jobs/pr-review-findings-output");
 });
 
+test("patch submission is an unverified content-addressed artifact and rejects verdict-shaped fields", () => {
+  const schemaRef = "schema://jobs/patch-submission-output";
+  const submission = {
+    patch: {
+      sha256: "a".repeat(64),
+      bytes: 321,
+      locator: { kind: "https", url: "https://artifacts.example.test/candidate.patch" },
+      format: "file"
+    },
+    baseCommit: "b".repeat(40),
+    submittingAgent: { wallet: "0x1234567890123456789012345678901234567890" }
+  };
+
+  assert.doesNotThrow(() => validateStructuredSubmission(schemaRef, submission));
+  for (const forbidden of ["verdict", "receipt", "verified", "verification"]) {
+    assert.throws(
+      () => validateStructuredSubmission(schemaRef, { ...submission, [forbidden]: {} }),
+      (error) => error instanceof ValidationError &&
+        error.message === `submission.${forbidden} is not an allowed field`
+    );
+  }
+  assert.equal(schemaRefToJobSchemaPath(schemaRef), "/schemas/jobs/patch-submission-output.json");
+  assert.deepEqual(
+    getPublicBuiltinJobSchemaByName("patch-submission-output"),
+    JSON.parse(readFileSync(resolve(repoRoot, "docs/schemas/jobs/patch-submission-output.json"), "utf8"))
+  );
+});
+
 test("first-wave schema-native job refs are public built-ins", () => {
   for (const ref of FIRST_WAVE_SCHEMA_REFS) {
     const schema = getBuiltinJobSchema(ref);

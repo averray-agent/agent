@@ -7,8 +7,31 @@ objects. The Witness loader continues to accept both discriminators; new contrac
 
 The contract is frozen before a job becomes claimable. It defines the exact source,
 inputs, commands, sandbox limits, and acceptance differential that the Witness can
-prove. Contract digesting, receipts, signing, replay, storage, reputation, settlement
-execution, `worker/`, and the money rail remain out of scope.
+prove. Phase 3 defines the contract digest only far enough to bind a published
+`code_change` job to this frozen object. Receipts, signing, replay, contract storage,
+reputation, settlement execution, `worker/`, and the money rail remain out of scope.
+
+## Frozen contract digest
+
+A published `code_change` job carries the normalized contract and:
+
+```yaml
+contractState: frozen
+contractDigestAlgorithm: sha256:averray-canonical-json-v1
+contractDigest: 0x…
+```
+
+`averray-canonical-json-v1` is the platform's existing `hashCanonicalContent`
+preimage: recursively serialize JSON with object keys sorted lexicographically, array
+order preserved, JSON string escaping, and JSON number/boolean/null encoding; hash the
+UTF-8 bytes with SHA-256 and encode the result as lowercase `0x` plus 64 hex digits.
+The preimage is `normalizeVerificationContract(contract)`, so documented defaults and
+repository-path normalization happen before hashing. A publisher and the catalogue
+independently reproduce the digest; an unfrozen object or any post-freeze mutation is
+rejected before the job enters the board.
+
+This digest is acceptance-criteria identity only. It is not a Witness verdict, a
+receipt, a signature, or a contract-storage design.
 
 ## Why v1.1 exists
 
@@ -58,6 +81,11 @@ A `path` locator is relative to the contract file and may not be absolute or tra
 upward. An `https` locator must be an absolute HTTPS URL. The Witness fetches the bytes,
 then verifies both `bytes` and the lowercase 64-hex SHA-256 before using them. Redirects
 do not relax the HTTPS requirement.
+
+`path` is a local authoring and freeze-time convenience; it has no stable meaning once
+the contract is embedded in a board job. Phase 3 publication therefore requires every
+contract artifact locator to be `https`. The content digest and byte count remain the
+authority after transport.
 
 `file`, `tar`, and `tar+gzip` are the generic artifact formats the executor implements.
 Archive extraction accepts regular files, directories, and global PAX metadata. Links,
@@ -287,8 +315,6 @@ detectable classes**, not an unqualified zero-false-pass claim.
 
 ## Still open
 
-- The digest algorithm over the contract object itself remains open. v1.1 does not
-  select `hashCanonicalContent` or any alternative.
 - A Git bundle binds the superproject object graph but cannot carry the contents of
   separate submodule repositories. v1.1 rejects Git trees containing gitlinks until the
   schema can bind an offline bundle for each submodule.

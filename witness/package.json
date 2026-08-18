@@ -18,6 +18,8 @@
     "pr:shadow:coverage": "node bin/compare-pr-shadow-coverage.mjs",
     "coverage:drills": "node bin/run-coverage-diagnosis-drills.mjs",
     "implementation:drills": "node bin/run-implementation-ceiling-drills.mjs",
+    "code-change:publish": "node bin/publish-code-change-job.mjs",
+    "code-change:drills": "node bin/run-code-change-drills.mjs",
     "pr:shadow:remediation": "node bin/compare-pr-shadow-remediation.mjs",
     "pr:shadow:drills": "node bin/run-pr-shadow-drills.mjs",
     "ambiguity:drills": "node bin/run-ambiguity-drills.mjs",
