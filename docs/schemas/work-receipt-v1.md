@@ -28,12 +28,18 @@ The detached ES256 signature still covers the complete unsigned document
 
 ## Accounting
 
-`intent.valueAtRisk` is the reward pinned at claim. In settlement,
-`pinnedRewardAmountRaw == workerAmountRaw + gasRetentionAmountRaw`.
-Because the protocol fee is poster-side additive,
-`rewardAmountRaw == workerAmountRaw + gasRetentionAmountRaw +
-protocolFeeAmountRaw` records the total poster value settled. Keeping both
-fields avoids mislabelling the protocol fee as a worker deduction.
+`intent.valueAtRisk` and `settlement.rewardAmount` are the same worker-facing
+reward pinned at claim. Settlement enforces both accounting boundaries:
+
+```text
+rewardAmountRaw == workerAmountRaw + gasRetentionAmountRaw
+posterTotalAmountRaw == rewardAmountRaw + protocolFeeAmountRaw
+intent.valueAtRisk.amountRaw == rewardAmountRaw
+```
+
+`posterTotalAmount` is separately qualified because the protocol fee is
+poster-side additive. This keeps the conventional unqualified `reward` meaning
+and avoids presenting the poster fee as a worker deduction.
 
 Historical rows are backfilled only when the persisted claim snapshot and
 verification evidence are sufficient. Missing evidence is reported and never

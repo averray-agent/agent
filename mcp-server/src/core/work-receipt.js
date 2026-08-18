@@ -31,6 +31,11 @@ export function buildWorkReceipt({ session, job, verification, context = {} }) {
   if (verification?.outcome === "approved" && !settlement) {
     throw new ValidationError("Approved work receipt requires complete settlement evidence.");
   }
+  if (settlement && intent.valueAtRisk.amountRaw !== settlement.rewardAmountRaw) {
+    throw new ValidationError(
+      "Work receipt intent valueAtRisk.amountRaw must equal settlement rewardAmountRaw."
+    );
+  }
   const unsigned = compact({
     ...runReceipt,
     schemaVersion: WORK_RECEIPT_SCHEMA_VERSION,
@@ -178,29 +183,33 @@ function buildSettlement({ session, job, verification, legacy }) {
   if (waived && gasRetentionAmountRaw !== "0") {
     throw new ValidationError("Waived work receipt settlement cannot retain gas.");
   }
-  const pinnedRewardAmountRaw = unsignedIntegerString(
-    raw.pinnedRewardAmountRaw ?? raw.rewardAmountRaw ?? gas.rewardRaw
+  const rewardAmountRaw = unsignedIntegerString(
+    raw.rewardAmountRaw ?? gas.rewardRaw
   ) ?? (BigInt(workerAmountRaw) + BigInt(gasRetentionAmountRaw)).toString();
-  if (BigInt(pinnedRewardAmountRaw) !== BigInt(workerAmountRaw) + BigInt(gasRetentionAmountRaw)) {
-    throw new ValidationError("Work receipt gas-retention evidence does not reconcile to the pinned reward.");
+  if (BigInt(rewardAmountRaw) !== BigInt(workerAmountRaw) + BigInt(gasRetentionAmountRaw)) {
+    throw new ValidationError(
+      "Work receipt rewardAmountRaw must equal workerAmountRaw + gasRetentionAmountRaw."
+    );
   }
-  // Escrow's protocol fee is poster-side additive. rewardAmountRaw is the
-  // total value settled from the poster so the portable receipt obeys its
-  // explicit worker + retention + poster-fee reconciliation invariant.
-  const rewardAmountRaw = (
+  const posterTotalAmountRaw = unsignedIntegerString(raw.posterTotalAmountRaw) ?? (
     BigInt(workerAmountRaw) + BigInt(gasRetentionAmountRaw) + BigInt(protocolFeeAmountRaw)
   ).toString();
+  if (BigInt(posterTotalAmountRaw) !== BigInt(rewardAmountRaw) + BigInt(protocolFeeAmountRaw)) {
+    throw new ValidationError(
+      "Work receipt posterTotalAmountRaw must equal rewardAmountRaw + protocolFeeAmountRaw."
+    );
+  }
   const decimals = decimalsForAssetSymbol(legacy.assetSymbol);
   const gasRetentionBps = nonNegativeInteger(raw.gasRetentionBps ?? session?.gasRetention?.retentionCapBps)
-    ?? (BigInt(pinnedRewardAmountRaw) === 0n
+    ?? (BigInt(rewardAmountRaw) === 0n
       ? 0
-      : Number((BigInt(gasRetentionAmountRaw) * 10_000n) / BigInt(pinnedRewardAmountRaw)));
+      : Number((BigInt(gasRetentionAmountRaw) * 10_000n) / BigInt(rewardAmountRaw)));
   return compact({
     ...legacy,
     rewardAmount: formatBaseUnits(BigInt(rewardAmountRaw), decimals),
     rewardAmountRaw,
-    pinnedRewardAmount: formatBaseUnits(BigInt(pinnedRewardAmountRaw), decimals),
-    pinnedRewardAmountRaw,
+    posterTotalAmount: formatBaseUnits(BigInt(posterTotalAmountRaw), decimals),
+    posterTotalAmountRaw,
     gasRetentionAmount: formatBaseUnits(BigInt(gasRetentionAmountRaw), decimals),
     gasRetentionAmountRaw,
     gasRetentionBps,
