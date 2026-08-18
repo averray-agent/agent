@@ -446,7 +446,7 @@ test("unchanged Caddy content does not imply an indexer smoke check", async () =
   await writeExecutable(join(fakeBin, "docker"), [
     "#!/usr/bin/env bash",
     "echo docker \"$*\" >> \"$DEPLOY_LOG\"",
-    "if [[ \"${FAKE_DOCKER_FAIL_RELOAD:-0}\" == \"1\" && \"$*\" == *\"exec -T caddy caddy reload\"* ]]; then exit 1; fi",
+    "if [[ \"${FAKE_DOCKER_FAIL_RELOAD:-0}\" == \"1\" && \"$*\" == *\"exec agent-caddy caddy reload\"* ]]; then exit 1; fi",
     "exit 0"
   ].join("\n"));
   for (const command of ["npm", "flock"]) {
@@ -504,7 +504,20 @@ test("unchanged Caddy content does not imply an indexer smoke check", async () =
   const changedRun = runDeploy(appRoot, env(nextSha, thirdSha));
   assert.equal(changedRun.status, 0, changedRun.stderr);
   assert.match(changedRun.stdout, /Caddyfile content changed/u);
-  assert.match(await readFile(deployLog, "utf8"), /exec -T caddy caddy reload/u);
+  const changedLog = await readFile(deployLog, "utf8");
+  // Regression lock (2026-08-18): Caddy must be reached by container name, never
+  // through `docker compose -f <host-side legacy compose>`. That compose file
+  // still declares the pre-cutover backend with an env_file under
+  // /run/agent-stack/, which mainnet no longer renders, so any compose call
+  // against it dies while parsing — before Caddy runs. It stayed hidden until
+  // #1158 became the first Caddyfile content change since the cutover.
+  assert.match(changedLog, /exec agent-caddy caddy reload/u);
+  assert.doesNotMatch(
+    changedLog,
+    /compose[^\n]*caddy (reload|validate)/u,
+    "Caddy reload/validate must not go through docker compose"
+  );
+  assert.match(changedLog, /exec agent-caddy caddy validate/u);
   assert.match(await readFile(deployLog, "utf8"), /^check-indexer=1$/m);
   assert.equal(
     (await stat(join(stackRoot, "Caddyfile"))).ino,
