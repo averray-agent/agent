@@ -5,7 +5,7 @@ import { buildBadgeSigners } from "./badge-metadata.js";
 export const RUN_RECEIPT_SCHEMA_VERSION = "averray.run-receipt.v1";
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/u;
-const FINAL_OUTCOMES = new Set(["approved", "rejected"]);
+export const FINAL_OUTCOMES = new Set(["approved", "rejected", "inconclusive", "platform_fault"]);
 
 /**
  * Build the immutable document attesting a verification verdict.
@@ -24,13 +24,22 @@ export function buildRunReceipt({ session, job = undefined, verification, contex
   }
   const outcome = String(verification?.outcome ?? "").toLowerCase();
   if (!FINAL_OUTCOMES.has(outcome)) {
-    throw new ValidationError(`Run receipt requires an approved or rejected verdict; got ${outcome || "missing"}.`);
+    throw new ValidationError(`Run receipt requires an approved or rejected verdict (or a non-terminal Verify outcome); got ${outcome || "missing"}.`);
   }
   const claimedAt = requireIso(session.claimedAt, "session.claimedAt");
   const submittedAt = requireIso(session.submittedAt, "session.submittedAt");
+  const verifiedAtField = outcome === "approved"
+    ? "session.resolvedAt"
+    : outcome === "rejected"
+      ? "session.rejectedAt"
+      : "session.disputedAt";
   const verifiedAt = requireIso(
-    outcome === "approved" ? session.resolvedAt : session.rejectedAt,
-    outcome === "approved" ? "session.resolvedAt" : "session.rejectedAt"
+    outcome === "approved"
+      ? session.resolvedAt
+      : outcome === "rejected"
+        ? session.rejectedAt
+        : session.disputedAt,
+    verifiedAtField
   );
   const handler = firstString(
     verification?.handler,
@@ -86,13 +95,25 @@ export function buildRunReceipt({ session, job = undefined, verification, contex
       reasonCode,
       evidenceHash,
       policyTags,
-      rationaleHash
+      rationaleHash,
+      workerConsequence: normalizeWorkerConsequence(outcome, verification?.workerConsequence)
     }),
     settlement: normalizeSettlement(verification?.settlement),
     timestamps: { claimedAt, submittedAt, verifiedAt },
     signers: buildBadgeSigners({ session, verification: signerVerification, context }),
     canonicalUrl
   });
+}
+
+function normalizeWorkerConsequence(outcome, value) {
+  const normalized = firstString(value) ?? (outcome === "rejected" ? "no_payout" : "none");
+  if (!["none", "stake_slashed", "no_payout"].includes(normalized)) {
+    throw new ValidationError(`Run receipt has invalid workerConsequence ${JSON.stringify(normalized)}.`);
+  }
+  if (outcome === "platform_fault" && normalized !== "none") {
+    throw new ValidationError("A platform_fault receipt must carry workerConsequence none.");
+  }
+  return normalized;
 }
 
 function normalizeSettlement(value) {

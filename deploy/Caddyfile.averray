@@ -66,6 +66,9 @@ averray.com {
   @agentProfile path_regexp agentProfile ^/agents/(0x[a-fA-F0-9]{40})/?$
   rewrite @agentProfile /agent.html?wallet={re.agentProfile.1}
 
+  @workReceipt path_regexp workReceipt ^/receipts/(0x[a-fA-F0-9]{64})/?$
+  rewrite @workReceipt /receipts/index.html
+
   file_server
 }
 

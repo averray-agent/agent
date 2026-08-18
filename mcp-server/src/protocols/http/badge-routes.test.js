@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { NotFoundError, ValidationError } from "../../core/errors.js";
 import { createBadgeRoutes, createListBadgeReceipts } from "./badge-routes.js";
+import { hashWorkReceiptContent } from "../../core/work-receipt.js";
 
 const SESSION = { sessionId: "session-1", jobId: "job-1" };
 const JOB = { id: "job-1", title: "Demo job" };
@@ -374,6 +375,44 @@ test("GET /badges/:sessionId/run returns not_found when no verdict receipt exist
 
   assert.equal(response.statusCode, 404);
   assert.deepEqual(response.body, { status: "not_found", kind: "run", sessionId: "never-claimed" });
+});
+
+test("GET /receipts/:receiptId serves immutable content-addressed work JSON", async () => {
+  const content = { schemaVersion: "averray.work-receipt.v1" };
+  const receiptId = hashWorkReceiptContent(content);
+  const workReceipt = { ...content, receiptId };
+  const { calls, response, route } = makeHarness({
+    stateStore: { getWorkReceiptDocument: async (id) => {
+      calls.push(["getWorkReceiptDocument", id]);
+      return workReceipt;
+    } }
+  });
+
+  const handled = await route({
+    request: { method: "GET" },
+    response,
+    url: new URL(`http://localhost/receipts/${receiptId}`),
+    pathname: `/receipts/${receiptId}`
+  });
+
+  assert.equal(handled, true);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, workReceipt);
+  assert.equal(response.headers["cache-control"], "public, max-age=31536000, immutable");
+  assert.deepEqual(calls.map(([name]) => name), ["getWorkReceiptDocument", "respond"]);
+});
+
+test("GET /receipts/:receiptId rejects identifiers that are not content hashes", async () => {
+  const { response, route } = makeHarness({ stateStore: {} });
+  await assert.rejects(
+    route({
+      request: { method: "GET" },
+      response,
+      url: new URL("http://localhost/receipts/session-1"),
+      pathname: "/receipts/session-1"
+    }),
+    /receiptId must be a 32-byte content hash/u
+  );
 });
 
 test("listBadgeReceipts exposes a persisted signature on the row and nested document", async () => {

@@ -1,6 +1,7 @@
 import { ValidationError, normalizeError } from "../../core/errors.js";
 import { buildBadgeSigners } from "../../core/badge-metadata.js";
 import { BADGE_RECEIPT_JWKS_PATH } from "../../core/badge-receipt-signing.js";
+import { assertWorkReceiptContentAddress } from "../../core/work-receipt.js";
 
 export function createListBadgeReceipts({
   buildBadgeFromSession,
@@ -130,6 +131,23 @@ export function createBadgeRoutes({
     if (request.method === "GET" && pathname === "/badges") {
       respond(response, 200, await listBadgeReceipts(parseLimit(url, 100, 500)), {
         "cache-control": "public, max-age=30"
+      });
+      return true;
+    }
+
+    if (request.method === "GET" && pathname.startsWith("/receipts/")) {
+      const receiptId = decodeURIComponent(pathname.slice("/receipts/".length)).toLowerCase();
+      if (!/^0x[a-f0-9]{64}$/u.test(receiptId)) {
+        throw new ValidationError("receiptId must be a 32-byte content hash.");
+      }
+      const storedReceipt = await stateStore?.getWorkReceiptDocument?.(receiptId);
+      if (!storedReceipt) {
+        respond(response, 404, { status: "not_found", kind: "work", receiptId });
+        return true;
+      }
+      assertWorkReceiptContentAddress(storedReceipt);
+      respond(response, 200, storedReceipt, {
+        "cache-control": "public, max-age=31536000, immutable"
       });
       return true;
     }

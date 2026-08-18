@@ -853,6 +853,7 @@ test("claimJob proceeds when only the claim-time integrity read has a transient 
 
   assert.equal(claimed.status, "claimed");
   assert.equal(claimed.jobSnapshot.specHash, committed);
+  assert.equal(claimed.jobSnapshot.specSource, "chain_unavailable_fail_open");
   assert.equal(brokerCalls, 1);
   assert.deepEqual(await stateStore.getSession(claimed.sessionId), claimed);
 });
@@ -918,6 +919,7 @@ test("external claim convergence pins the poster definition that reproduces the 
   assert.equal(claimed.jobSnapshot.jobId, job.id);
   assert.deepEqual(claimed.jobSnapshot.specDefinition, posterDefinition);
   assert.equal(claimed.jobSnapshot.specHash, hashCanonicalContent(posterDefinition));
+  assert.equal(claimed.jobSnapshot.specSource, "chain_verified");
   assert.notEqual(
     claimed.jobSnapshot.definitionHash,
     claimed.jobSnapshot.specHash,

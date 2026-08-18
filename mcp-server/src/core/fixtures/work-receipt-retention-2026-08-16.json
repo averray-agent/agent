@@ -1,0 +1,24 @@
+{
+  "source": {
+    "network": "polkadot-hub-mainnet",
+    "blockNumber": 19535884,
+    "transactionHash": "0x4f0c2a63391dc6852874a7ab3bd2538a86b03846286aa3aa4b5ca13d6f547038"
+  },
+  "chainJobId": "0x3edfafadc7e075468bb0c6203afd57a0c5af84ad40ee0ef3c046e9961dee6c55",
+  "poster": "0x5a6836c6d4d293f6e5377e6c28054f4171915813",
+  "worker": "0x60385dd643f10934e8f384ac7a04c0d798dfc936",
+  "treasuryAccount": "0x01e6eed856e989201f4ff6346e18eab7e46c874c",
+  "asset": "0x0000053900000000000000000000000001200000",
+  "assetSymbol": "USDC",
+  "settlement": {
+    "workerAmount": 0.2,
+    "workerAmountRaw": "200000",
+    "protocolFeeAmount": 0.05,
+    "protocolFeeAmountRaw": "50000",
+    "protocolFeeBps": 500,
+    "gasRetention": {
+      "retainedRaw": "50000",
+      "rewardRaw": "250000"
+    }
+  }
+}

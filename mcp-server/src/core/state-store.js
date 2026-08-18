@@ -101,6 +101,8 @@ export class MemoryStateStore {
     this.verificationResults = new Map();
     this.badgeDocuments = new Map();
     this.runReceiptDocuments = new Map();
+    this.workReceiptDocuments = new Map();
+    this.sessionWorkReceiptDocuments = new Map();
     this.claimLocks = new Map();
     this.nonces = new Map();
     this.rateLimits = new Map();
@@ -260,7 +262,9 @@ export class MemoryStateStore {
   }
 
   async getRunReceiptDocument(sessionId) {
-    return cloneJsonRecord(this.runReceiptDocuments.get(sessionId));
+    return cloneJsonRecord(
+      this.sessionWorkReceiptDocuments.get(sessionId) ?? this.runReceiptDocuments.get(sessionId)
+    );
   }
 
   async putRunReceiptDocument(sessionId, document) {
@@ -268,6 +272,22 @@ export class MemoryStateStore {
     if (existing) return cloneJsonRecord(existing);
     const stored = cloneJsonRecord(document);
     this.runReceiptDocuments.set(sessionId, stored);
+    return cloneJsonRecord(stored);
+  }
+
+  async getWorkReceiptDocument(receiptId) {
+    return cloneJsonRecord(this.workReceiptDocuments.get(String(receiptId).toLowerCase()));
+  }
+
+  async putWorkReceiptDocument(sessionId, document) {
+    const receiptId = String(document?.receiptId ?? "").toLowerCase();
+    const existing = this.workReceiptDocuments.get(receiptId);
+    if (existing) return cloneJsonRecord(existing);
+    const stored = cloneJsonRecord(document);
+    this.workReceiptDocuments.set(receiptId, stored);
+    if (!this.sessionWorkReceiptDocuments.has(sessionId)) {
+      this.sessionWorkReceiptDocuments.set(sessionId, stored);
+    }
     return cloneJsonRecord(stored);
   }
 
@@ -956,7 +976,8 @@ export class RedisStateStore {
 
   async getRunReceiptDocument(sessionId) {
     await this.connect();
-    const raw = await this.client.get(this.key("run-receipt", sessionId));
+    const raw = await this.client.get(this.key("work-receipt-session", sessionId))
+      ?? await this.client.get(this.key("run-receipt", sessionId));
     return raw ? JSON.parse(raw) : undefined;
   }
 
@@ -965,6 +986,21 @@ export class RedisStateStore {
     const key = this.key("run-receipt", sessionId);
     await this.client.set(key, JSON.stringify(document), { NX: true });
     return this.getRunReceiptDocument(sessionId);
+  }
+
+  async getWorkReceiptDocument(receiptId) {
+    await this.connect();
+    const raw = await this.client.get(this.key("work-receipt", String(receiptId).toLowerCase()));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async putWorkReceiptDocument(sessionId, document) {
+    await this.connect();
+    const receiptId = String(document?.receiptId ?? "").toLowerCase();
+    const encoded = JSON.stringify(document);
+    await this.client.set(this.key("work-receipt", receiptId), encoded, { NX: true });
+    await this.client.set(this.key("work-receipt-session", sessionId), encoded, { NX: true });
+    return this.getWorkReceiptDocument(receiptId);
   }
 
   async listSessionsByWallet(wallet, limit = 10, offset = 0) {

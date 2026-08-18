@@ -36,6 +36,7 @@ import {
   loadBadgeReceiptSigningConfig,
 } from "../core/badge-receipt-signing.js";
 import { backfillBadgeReceiptSignatures } from "./badge-receipt-backfill.js";
+import { backfillWorkReceipts } from "./work-receipt-backfill.js";
 import { createAuthMiddleware } from "../auth/middleware.js";
 import { createRateLimiter } from "../auth/rate-limit.js";
 import { resolveCapabilities, capabilityMatrix } from "../auth/capabilities.js";
@@ -495,6 +496,21 @@ export async function createPlatformRuntime() {
   platformService.setRewardBankHealthProvider(rewardBankHealthProvider);
   platformService.verificationIngestionService.setBadgeReceiptSigner(badgeReceiptSigner);
   platformService.verificationIngestionService.setPolicyService(policyService);
+  platformService.verificationIngestionService.setSelfIdentityRegistry(selfIdentityRegistry);
+  try {
+    await backfillWorkReceipts({
+      stateStore,
+      verificationIngestionService: platformService.verificationIngestionService,
+      logger
+    });
+  } catch (error) {
+    // Historical coverage is explicitly best-effort. Forward receipt emission
+    // remains fail-closed in production inside verification ingestion.
+    logger.warn?.(
+      { step: "backfill-work-receipts", err: error instanceof Error ? error : new Error(String(error)) },
+      "bootstrap.backfill_incomplete"
+    );
+  }
   if (badgeReceiptSigner) {
     try {
       await backfillBadgeReceiptSignatures({ stateStore, signer: badgeReceiptSigner, logger });

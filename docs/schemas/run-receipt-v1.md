@@ -16,10 +16,13 @@ construct `/badges/:sessionId/run`) and verify that canonical document.
 
 ## Attestation boundary
 
-Receipts are created only after `verifySubmission` returns `approved` or
-`rejected`. Never-claimed, claimed-but-unsubmitted, expired, timed-out, and
-still-disputed jobs do not produce run receipts. A receipt is evidence of a
-verification verdict, not evidence that a job existed or expired.
+Receipts are created after `verifySubmission` returns `approved`, `rejected`,
+`inconclusive`, or `platform_fault`. The latter two retain the session for
+human resolution and carry no settlement. Never-claimed,
+claimed-but-unsubmitted, expired, timed-out, and ordinary human-review holds
+do not produce run receipts. A receipt is evidence of a verification outcome,
+not evidence that a job existed or expired. New callers should consume the
+content-addressed Work Receipt v1; this schema remains the compatibility base.
 
 `verdict.evidenceHash` is the canonical hash of the exact verification input
 (the submitted artifact/diff payload). `verdict.policyTags` contains only tags

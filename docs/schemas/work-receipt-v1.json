@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/work-receipt-v1.json",
+  "title": "Averray Work Receipt v1",
+  "type": "object",
+  "required": ["schemaVersion", "kind", "receiptType", "receiptId", "sessionId", "jobId", "worker", "verifier", "intent", "execution", "verdict", "timestamps", "signers", "canonicalUrl"],
+  "properties": {
+    "schemaVersion": { "const": "averray.work-receipt.v1" },
+    "kind": { "const": "run" },
+    "receiptType": { "const": "work_outcome" },
+    "receiptId": { "$ref": "#/$defs/bytes32" },
+    "attestation": { "type": "string", "minLength": 1 },
+    "sessionId": { "type": "string", "minLength": 1 },
+    "jobId": { "type": "string", "minLength": 1 },
+    "worker": { "$ref": "#/$defs/address" },
+    "chainJobId": { "$ref": "#/$defs/bytes32" },
+    "verifier": {
+      "type": "object",
+      "required": ["profile", "handler", "version"],
+      "properties": {
+        "mode": { "type": "string" },
+        "profile": { "type": "string", "minLength": 1 },
+        "handler": { "type": "string", "minLength": 1 },
+        "version": { "type": "integer", "minimum": 1 },
+        "wallet": { "$ref": "#/$defs/address" }
+      },
+      "additionalProperties": false
+    },
+    "intent": {
+      "type": "object",
+      "required": ["specHash", "specSource", "successPolicy", "valueAtRisk", "deadline", "poster", "posterClass"],
+      "properties": {
+        "specHash": { "$ref": "#/$defs/bytes32" },
+        "specSource": { "enum": ["chain_verified", "chain_unavailable_fail_open"] },
+        "successPolicy": { "$ref": "#/$defs/policy" },
+        "valueAtRisk": { "$ref": "#/$defs/amount" },
+        "deadline": { "type": "string", "format": "date-time" },
+        "poster": { "$ref": "#/$defs/address" },
+        "posterClass": { "enum": ["operator", "external"] },
+        "approvalGrantHash": { "$ref": "#/$defs/bytes32" }
+      },
+      "additionalProperties": false
+    },
+    "execution": {
+      "type": "object",
+      "required": ["provider", "providerClass", "artifactHash", "sourceBinding", "evidenceHash", "environment"],
+      "properties": {
+        "provider": { "$ref": "#/$defs/address" },
+        "providerClass": { "enum": ["ours", "external", "unknown"] },
+        "artifactHash": { "$ref": "#/$defs/bytes32" },
+        "evidenceHash": { "$ref": "#/$defs/bytes32" },
+        "sourceBinding": {
+          "type": "object",
+          "required": ["method", "verified"],
+          "properties": {
+            "method": { "type": "string", "minLength": 1 },
+            "verified": { "type": "boolean" },
+            "ref": { "type": "string" },
+            "bundleHash": { "$ref": "#/$defs/bytes32" }
+          },
+          "additionalProperties": false
+        },
+        "environment": {}
+      },
+      "additionalProperties": false
+    },
+    "verdict": {
+      "type": "object",
+      "required": ["outcome", "reasonCode", "evidenceHash", "policyTags", "workerConsequence"],
+      "properties": {
+        "outcome": { "enum": ["approved", "rejected", "inconclusive", "platform_fault"] },
+        "reasonCode": { "type": "string", "minLength": 1 },
+        "evidenceHash": { "$ref": "#/$defs/bytes32" },
+        "policyTags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "rationaleHash": { "$ref": "#/$defs/bytes32" },
+        "workerConsequence": { "enum": ["none", "stake_slashed", "no_payout"] }
+      },
+      "additionalProperties": false
+    },
+    "settlement": {
+      "type": "object",
+      "required": ["worker", "treasuryAccount", "asset", "assetSymbol", "workerAmount", "workerAmountRaw", "protocolFeeAmount", "protocolFeeAmountRaw", "protocolFeeBps", "rewardAmount", "rewardAmountRaw", "pinnedRewardAmount", "pinnedRewardAmountRaw", "gasRetentionAmount", "gasRetentionAmountRaw", "gasRetentionBps", "brokered", "waived"],
+      "properties": {
+        "worker": { "$ref": "#/$defs/address" },
+        "treasuryAccount": { "$ref": "#/$defs/address" },
+        "asset": { "$ref": "#/$defs/address" },
+        "assetSymbol": { "type": "string", "minLength": 1 },
+        "workerAmount": { "$ref": "#/$defs/displayAmount" },
+        "workerAmountRaw": { "$ref": "#/$defs/rawAmount" },
+        "protocolFeeAmount": { "$ref": "#/$defs/displayAmount" },
+        "protocolFeeAmountRaw": { "$ref": "#/$defs/rawAmount" },
+        "protocolFeeBps": { "type": "integer", "minimum": 0 },
+        "rewardAmount": { "$ref": "#/$defs/displayAmount" },
+        "rewardAmountRaw": { "$ref": "#/$defs/rawAmount" },
+        "pinnedRewardAmount": { "$ref": "#/$defs/displayAmount" },
+        "pinnedRewardAmountRaw": { "$ref": "#/$defs/rawAmount" },
+        "gasRetentionAmount": { "$ref": "#/$defs/displayAmount" },
+        "gasRetentionAmountRaw": { "$ref": "#/$defs/rawAmount" },
+        "gasRetentionBps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "brokered": { "type": "boolean" },
+        "waived": { "type": "boolean" },
+        "settlementTx": { "$ref": "#/$defs/bytes32" }
+      },
+      "additionalProperties": false
+    },
+    "timestamps": {
+      "type": "object",
+      "required": ["claimedAt", "submittedAt", "verifiedAt"],
+      "properties": {
+        "claimedAt": { "type": "string", "format": "date-time" },
+        "submittedAt": { "type": "string", "format": "date-time" },
+        "verifiedAt": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "signers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role", "wallet", "at"],
+        "properties": {
+          "role": { "enum": ["operator", "verifier", "worker"] },
+          "wallet": { "$ref": "#/$defs/address" },
+          "at": { "type": "string", "format": "date-time" },
+          "status": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "canonicalUrl": { "type": "string", "format": "uri" },
+    "signature": { "$ref": "agent-badge-v1.json#/properties/signature" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "address": { "type": "string", "pattern": "^0x(?!0{40}$)[0-9a-f]{40}$" },
+    "bytes32": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "displayAmount": { "type": "string", "pattern": "^[0-9]+(?:\\.[0-9]+)?$" },
+    "rawAmount": { "type": "string", "pattern": "^[0-9]+$" },
+    "policy": {
+      "type": "object",
+      "required": ["profile", "version"],
+      "properties": { "profile": { "type": "string", "minLength": 1 }, "version": { "type": "integer", "minimum": 1 } },
+      "additionalProperties": false
+    },
+    "amount": {
+      "type": "object",
+      "required": ["asset", "amount", "amountRaw"],
+      "properties": { "asset": { "type": "string", "minLength": 1 }, "amount": { "type": "string" }, "amountRaw": { "type": "string", "pattern": "^[0-9]+$" } },
+      "additionalProperties": false
+    }
+  }
+}

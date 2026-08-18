@@ -188,6 +188,17 @@ test("MemoryStateStore run receipt documents are write-once and cloned", async (
   assert.equal((await store.getRunReceiptDocument("session-run")).verdict.outcome, "approved");
 });
 
+test("MemoryStateStore indexes immutable work receipts by content id and upgrades the session alias", async () => {
+  const store = new MemoryStateStore();
+  const receiptId = `0x${"9".repeat(64)}`;
+  const document = { schemaVersion: "averray.work-receipt.v1", receiptId, verdict: { outcome: "approved" } };
+  await store.putWorkReceiptDocument("session-work", document);
+  document.verdict.outcome = "mutated";
+
+  assert.equal((await store.getWorkReceiptDocument(receiptId)).verdict.outcome, "approved");
+  assert.equal((await store.getRunReceiptDocument("session-work")).schemaVersion, "averray.work-receipt.v1");
+});
+
 test("MemoryStateStore upgrades an unsigned badge with one signature only", async () => {
   const store = new MemoryStateStore();
   await store.putBadgeDocument("session-sign", { averray: { sessionId: "session-sign", category: "security" } });
