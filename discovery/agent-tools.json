@@ -595,6 +595,18 @@
       "description": "Immutable Averray Work Receipt v1 JSON addressed by its canonical content hash."
     },
     {
+      "path": "/verify/profiles",
+      "description": "Published immutable verification profiles, pinned versions, limits, success criteria, and flat Base USDC pricing."
+    },
+    {
+      "path": "/verify/runs",
+      "description": "Payment-gated standalone verification-run creation; the separate payment-intake adapter must authorize the exact request before work starts."
+    },
+    {
+      "path": "/verify/runs/:runId",
+      "description": "Poll one standalone verification run by its opaque run id."
+    },
+    {
       "path": "/agents",
       "description": "Recent public agent directory derived from live session and reputation data."
     },
@@ -889,6 +901,10 @@
     {
       "name": "listVerifierHandlers",
       "description": "Supported verifier modes + configs."
+    },
+    {
+      "name": "listVerificationProfiles",
+      "description": "Published standalone verification profiles with pinned versions, limits, and pricing."
     },
     {
       "name": "resumeSession",
