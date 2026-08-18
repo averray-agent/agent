@@ -17,6 +17,8 @@ import {
 import { bindSignerToWriteBroadcaster } from "../../mcp-server/src/blockchain/rpc-provider.js";
 import { hashCanonicalContent } from "../../mcp-server/src/core/canonical-content.js";
 import {
+  POLKADOT_HUB_MAINNET_CHAIN_ID,
+  POLKADOT_HUB_TESTNET_CHAIN_ID,
   createCeremonyRpcContext,
   printCeremonyRpcPreflight
 } from "./ceremony-rpc.mjs";
@@ -27,7 +29,16 @@ export const CREATE_SINGLE_PAYOUT_SIGNATURE =
 export const EXPECTED_PROTOCOL_FEE_BPS = 500n;
 export const USDC_DECIMALS = 6;
 
-const DEFAULT_API_BASE_URL = "https://api.averray.com";
+const BOARD_PROFILES = Object.freeze({
+  mainnet: Object.freeze({
+    apiBaseUrl: "https://api.averray.com",
+    expectedChainId: POLKADOT_HUB_MAINNET_CHAIN_ID
+  }),
+  testnet: Object.freeze({
+    apiBaseUrl: undefined,
+    expectedChainId: POLKADOT_HUB_TESTNET_CHAIN_ID
+  })
+});
 const DEFAULT_WATCH_TIMEOUT_MS = 15 * 60 * 1_000;
 const DEFAULT_WATCH_INTERVAL_MS = 10_000;
 const BYTES32_RE = /^0x[0-9a-f]{64}$/iu;
@@ -56,7 +67,7 @@ const CREATE_INTERFACE = new Interface(ESCROW_ABI);
 export function parseArgs(argv) {
   const args = {
     profile: undefined,
-    apiBaseUrl: DEFAULT_API_BASE_URL,
+    apiBaseUrl: undefined,
     definitionFile: undefined,
     draftId: undefined,
     signerSecretRef: undefined,
@@ -168,10 +179,66 @@ export function validateArgs(args) {
   if (!args.definitionFile && args.acceptanceCriteria.length === 0) {
     throw new Error("Inline definitions require at least one --acceptance-criterion.");
   }
-  const url = new URL(args.apiBaseUrl);
-  if (url.protocol !== "https:" && url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
-    throw new Error("--api-base-url must use HTTPS except for localhost.");
+  if (args.apiBaseUrl !== undefined) {
+    let url;
+    try {
+      url = new URL(args.apiBaseUrl);
+    } catch {
+      throw new Error("--api-base-url must be an absolute URL.");
+    }
+    if (url.protocol !== "https:" && url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
+      throw new Error("--api-base-url must use HTTPS except for localhost.");
+    }
   }
+}
+
+export function resolveBoardProfile({ profile, apiBaseUrl }) {
+  const configured = BOARD_PROFILES[profile];
+  if (!configured) throw new Error(`No board configuration exists for profile ${profile}.`);
+  if (apiBaseUrl === undefined && configured.apiBaseUrl === undefined) {
+    throw new Error(
+      `No hosted board for profile ${profile} (expected chainId ${configured.expectedChainId}). ` +
+      "Pass --api-base-url only when an explicitly hosted board is available."
+    );
+  }
+  return Object.freeze({
+    profile,
+    apiBaseUrl: stripTrailingSlash(apiBaseUrl ?? configured.apiBaseUrl),
+    expectedChainId: configured.expectedChainId
+  });
+}
+
+export async function assertBoardProfileAgreement({
+  profile,
+  apiBaseUrl,
+  expectedChainId,
+  fetchImpl = fetch
+}) {
+  const healthUrl = `${stripTrailingSlash(apiBaseUrl)}/health`;
+  let health;
+  try {
+    health = await requestJson(fetchImpl, healthUrl);
+  } catch (error) {
+    throw new Error(
+      `Could not establish board identity for profile ${profile} at ${healthUrl}: ` +
+      `${error?.message ?? error}. Refusing SIWE or draft creation.`
+    );
+  }
+  const reportedChainId = Number(health?.auth?.chainId);
+  if (!Number.isSafeInteger(reportedChainId) || reportedChainId <= 0) {
+    throw new Error(
+      `Board/profile chain mismatch: profile ${profile} expects chainId ${expectedChainId}, ` +
+      `but ${healthUrl} reports chainId ${JSON.stringify(health?.auth?.chainId ?? null)}. ` +
+      "Refusing SIWE or draft creation."
+    );
+  }
+  if (reportedChainId !== expectedChainId) {
+    throw new Error(
+      `Board/profile chain mismatch: profile ${profile} expects chainId ${expectedChainId}, ` +
+      `but ${healthUrl} reports chainId ${reportedChainId}. Refusing SIWE or draft creation.`
+    );
+  }
+  return Object.freeze({ healthUrl, expectedChainId, reportedChainId });
 }
 
 export async function loadDefinition(args, { cwd = process.cwd() } = {}) {
@@ -555,9 +622,12 @@ export async function runPosterBounty(args, dependencies = {}) {
     inspect = inspectFundingState,
     execute = executeFunding,
     watch = waitForExternalJobLive,
+    assertBoard = assertBoardProfileAgreement,
     fetchImpl = fetch,
     log = console.log
   } = dependencies;
+  const board = resolveBoardProfile(args);
+  const boardIdentity = await assertBoard({ ...board, fetchImpl });
   const { definition, definitionPath } = await loadDefinition(args);
   const { path: manifestPath, manifest } = await loadManifest(args.profile);
   const rpc = await createRpc({
@@ -570,7 +640,8 @@ export async function runPosterBounty(args, dependencies = {}) {
     log("# post-external-bounty");
     log(`profile:                 ${args.profile}`);
     log(`mode:                    ${args.execute ? "execute" : "dry-run"}`);
-    log(`api:                     ${stripTrailingSlash(args.apiBaseUrl)}`);
+    log(`api:                     ${board.apiBaseUrl}`);
+    log(`board chain preflight:   ${boardIdentity.reportedChainId} ✓`);
     log(`manifest:                ${manifestPath}`);
     log(`definition:              ${definitionPath}`);
     printCeremonyRpcPreflight(rpc, log);
@@ -586,20 +657,20 @@ export async function runPosterBounty(args, dependencies = {}) {
     log(`poster:                  ${poster} ✓`);
 
     const session = await login({
-      apiBaseUrl: stripTrailingSlash(args.apiBaseUrl),
+      apiBaseUrl: board.apiBaseUrl,
       wallet,
       fetchImpl
     });
     log(`SIWE session:            authenticated (expires ${session.expiresAt ?? "not reported"})`);
     const draft = args.draftId
       ? await readDraft({
-          apiBaseUrl: stripTrailingSlash(args.apiBaseUrl),
+          apiBaseUrl: board.apiBaseUrl,
           token: session.token,
           draftId: args.draftId,
           fetchImpl
         })
       : await postDraft({
-          apiBaseUrl: stripTrailingSlash(args.apiBaseUrl),
+          apiBaseUrl: board.apiBaseUrl,
           token: session.token,
           definition,
           fetchImpl
@@ -622,7 +693,7 @@ export async function runPosterBounty(args, dependencies = {}) {
 
     const funding = await execute({ manifest, rpc, privateKey, poster, draft, plan, log });
     const live = await watch({
-      apiBaseUrl: stripTrailingSlash(args.apiBaseUrl),
+      apiBaseUrl: board.apiBaseUrl,
       token: session.token,
       draftId: draft.draftId,
       jobId: draft.jobId,
@@ -779,7 +850,11 @@ approve/deposit (if needed), job creation, and watcher wait. Execution requires
 the --draft-id emitted by the reviewed dry-run, so it cannot fund a new nonce.
 
 Inline definition flags: --task, --repo, --reward-usdc, --verifier-mode, and
-one or more --acceptance-criterion values.`);
+one or more --acceptance-criterion values.
+
+Board profiles: mainnet selects https://api.averray.com. No hosted testnet board
+exists; --profile testnet refuses unless an explicit --api-base-url is supplied,
+and every selected board must report the profile's expected chainId.`);
 }
 
 async function main() {

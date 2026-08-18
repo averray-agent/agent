@@ -1,5 +1,7 @@
 {
   "profile": "testnet",
+  "hostedBoard": null,
+  "scopeNote": "Chain-only deployment provenance; no hosted Averray board exists for this profile.",
   "rpcUrl": "https://services.polkadothub-rpc.com/testnet/",
   "deployedAt": "2026-07-07T09:55:54Z",
   "deployer": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
