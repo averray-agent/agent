@@ -171,3 +171,22 @@ test("a token replacement does not make a much larger declaration deletion ambig
   assert.equal(findings.violations.length, 1);
   assert.deepEqual(findings.ambiguities, []);
 });
+
+test("the frozen 4:1 declaration boundary is ambiguous at 4.0 and a violation at 4.1", async () => {
+  const findingsAt = async (removedCount) => detectIntegrityFindings({
+    contract: CONTRACT,
+    patch: declarationPatch(
+      "test/value.test.js",
+      Array.from({ length: removedCount }, (_, index) => `test("removed ${index}", () => {`),
+      Array.from({ length: 10 }, (_, index) => `test("replacement ${index}", () => {`)
+    ),
+    baseRoot: BASE_ROOT,
+    candidateRoot: BASE_ROOT
+  });
+  const atFour = await findingsAt(40);
+  const aboveFour = await findingsAt(41);
+  assert.deepEqual(atFour.violations, []);
+  assert.equal(atFour.ambiguities.length, 1);
+  assert.equal(aboveFour.violations.length, 1);
+  assert.deepEqual(aboveFour.ambiguities, []);
+});

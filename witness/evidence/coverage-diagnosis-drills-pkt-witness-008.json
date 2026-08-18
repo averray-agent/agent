@@ -1,0 +1,130 @@
+{
+  "schemaVersion": "averray.witness.coverage-diagnosis-drills/v1",
+  "authoredContractRule5": {
+    "mutation": {
+      "anchorOccurrences": 1,
+      "applied": true
+    },
+    "rulePresent": {
+      "status": "GREEN"
+    },
+    "ruleDisabled": {
+      "status": "RED",
+      "valid": true
+    }
+  },
+  "shadowUnprotectedCommand": {
+    "mutation": {
+      "anchorOccurrences": 1,
+      "applied": true
+    },
+    "relaxationPresent": {
+      "status": "GREEN",
+      "verdict": "STATIC_CLEAN",
+      "judgingCommandProtected": false
+    },
+    "relaxationDisabled": {
+      "status": "RED",
+      "verdict": "INCONCLUSIVE",
+      "reason": "unresolvable_command"
+    }
+  },
+  "baseCheckCauses": {
+    "checkTimeout": {
+      "mutation": {
+        "anchorOccurrences": 1,
+        "applied": true
+      },
+      "causePresent": {
+        "status": "GREEN",
+        "diagnosis": {
+          "cause": "base_check_errored",
+          "subcause": "check_timeout",
+          "structural": false,
+          "basis": "the base check errored at an internal or outer timeout"
+        }
+      },
+      "causeDisabled": {
+        "status": "RED",
+        "diagnosis": {
+          "cause": "base_check_errored",
+          "subcause": "unclassified_execution_error",
+          "structural": false,
+          "basis": "the base check errored at an internal or outer timeout"
+        }
+      }
+    },
+    "missingCiPrerequisites": {
+      "mutation": {
+        "anchorOccurrences": 1,
+        "applied": true
+      },
+      "causePresent": {
+        "status": "GREEN",
+        "diagnosis": {
+          "cause": "base_check_errored",
+          "subcause": "missing_ci_prerequisites",
+          "structural": false,
+          "basis": "the base check expected build outputs, tools, services, or credentials supplied by CI but absent from the Witness sandbox"
+        }
+      },
+      "causeDisabled": {
+        "status": "RED",
+        "diagnosis": {
+          "cause": "base_check_errored",
+          "subcause": "unclassified_execution_error",
+          "structural": false,
+          "basis": "the base check expected build outputs, tools, services, or credentials supplied by CI but absent from the Witness sandbox"
+        }
+      }
+    },
+    "checkFailed": {
+      "mutation": {
+        "anchorOccurrences": 1,
+        "applied": true
+      },
+      "causePresent": {
+        "status": "GREEN",
+        "diagnosis": {
+          "cause": "base_check_failed",
+          "subcause": null,
+          "structural": true,
+          "basis": "the base check ran to a non-zero test result without an identified execution error"
+        }
+      },
+      "causeDisabled": {
+        "status": "RED",
+        "diagnosis": {
+          "cause": "base_check_errored",
+          "subcause": null,
+          "structural": true,
+          "basis": "the base check ran to a non-zero test result without an identified execution error"
+        }
+      }
+    },
+    "materializationFailed": {
+      "mutation": {
+        "anchorOccurrences": 1,
+        "applied": true
+      },
+      "causePresent": {
+        "status": "GREEN",
+        "diagnosis": {
+          "cause": "base_materialization_failed",
+          "subcause": null,
+          "structural": false,
+          "basis": "dependency closure could not be prepared offline"
+        }
+      },
+      "causeDisabled": {
+        "status": "RED",
+        "diagnosis": {
+          "cause": "base_check_errored",
+          "subcause": null,
+          "structural": false,
+          "basis": "dependency closure could not be prepared offline"
+        }
+      }
+    }
+  }
+}

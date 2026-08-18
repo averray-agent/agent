@@ -172,6 +172,8 @@ npm --prefix witness run pr:shadow:report -- \
   --input evidence/pr-shadow/discovery.json \
   --out evidence/pr-shadow/report.json
 npm --prefix witness run pr:shadow:drills
+npm --prefix witness run coverage:drills
+npm --prefix witness run pr:shadow:coverage
 ```
 
 The integrity drill mutates each detector registration in a temporary module. It
@@ -211,6 +213,12 @@ digest, protected paths, all seven integrity detections, and the repository's ow
 regression check. It deliberately contains no contract author and no targeted check.
 The resulting assurance is **AV-1 plus integrity**, not AV-2; differential logic is not
 exercised because the shadow does not know what each historical PR was supposed to fix.
+
+An unresolved judging-command definition is runnable only in this non-adversarial
+shadow. The result records `judgingCommandProtected: false`; authored verification
+contracts still fail Rule 5 at freeze. Base-check unavailability is also split into
+typed causes and execution-error subcauses, so a missing test script is not merged
+with an unavailable commit, failed materialization, timeout, or missing CI prerequisite.
 
 The JSON and Markdown reports include the verdict distribution, every individual
 `POLICY_VIOLATION` with the causing diff hunk and human judgement, every detector
