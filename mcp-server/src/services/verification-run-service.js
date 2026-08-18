@@ -69,6 +69,7 @@ export class VerificationRunService {
       paymentProof,
       price: profile.price,
       profile: profile.ref,
+      profileLimits: profile.limits,
       requestHash
     });
     assertPaymentAuthorization(authorization, profile);

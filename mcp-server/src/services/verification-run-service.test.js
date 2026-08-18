@@ -5,6 +5,7 @@ import test from "node:test";
 import { MemoryStateStore } from "../core/state-store.js";
 import { VerificationProfileRegistry } from "./verification-profile-registry.js";
 import { GitPatchTestsRunner } from "./git-patch-tests-runner.js";
+import { VerifierRegistry } from "./verifier-handlers.js";
 import {
   UnavailableVerificationPaymentGate,
   VerificationRunService
@@ -56,7 +57,7 @@ function paymentGate() {
   };
 }
 
-function harness({ runnerResult, runnerError, runner: runnerOverride, gate = paymentGate(), ids = ["one", "two"], profileRegistry = new VerificationProfileRegistry() } = {}) {
+function harness({ runnerResult, runnerError, runner: runnerOverride, gate = paymentGate(), ids = ["one", "two"], profileRegistry = new VerificationProfileRegistry(), verifierRegistry } = {}) {
   const runnerCalls = [];
   const runner = runnerOverride ?? {
     validate() {},
@@ -85,6 +86,7 @@ function harness({ runnerResult, runnerError, runner: runnerOverride, gate = pay
     profileRegistry,
     runner,
     paymentGate: gate,
+    verifierRegistry,
     now: () => new Date("2026-08-18T12:00:00.000Z"),
     randomUUIDImpl: () => ids[idIndex++] ?? `id-${idIndex}`,
     publicReceiptBaseUrl: "https://averray.com"
@@ -214,4 +216,37 @@ test("payment gates work and a replayed proof cannot buy a second run", async ()
   assert.equal(runnerCalls.length, 1);
   assert.equal(gate.calls.authorize, 1);
   assert.equal(gate.calls.capture, 1);
+});
+
+test("capture failure degrades a decisive result to inconclusive, bills nothing, and releases", async () => {
+  const gate = paymentGate();
+  gate.capture = async () => {
+    gate.calls.capture += 1;
+    throw new Error("Base capture unavailable");
+  };
+  const { service } = harness({ gate });
+  const run = await service.createRun(request("capture-failure-proof"));
+
+  assert.equal(run.verdict.outcome, "inconclusive");
+  assert.equal(run.verdict.reason, "runner_fault");
+  assert.match(run.verdict.detail, /Base capture unavailable/u);
+  assert.equal(run.billing.status, "not_billed");
+  assert.equal(gate.calls.capture, 1);
+  assert.equal(gate.calls.release, 1);
+});
+
+test("standalone verification completes with a gateway double whose every method throws", async () => {
+  const throwingGateway = new Proxy({}, {
+    get(_target, property) {
+      return () => { throw new Error(`forbidden gateway method ${String(property)}`); };
+    }
+  });
+  assert.throws(() => throwingGateway.anyMethod(), /forbidden gateway method/u);
+
+  const verifierRegistry = new VerifierRegistry({ gateway: throwingGateway });
+  const { service } = harness({ verifierRegistry });
+  const run = await service.createRun(request("isolated-proof"));
+
+  assert.equal(run.verdict.outcome, "approved");
+  assert.equal(run.billing.status, "captured");
 });
