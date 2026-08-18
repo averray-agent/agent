@@ -31,9 +31,30 @@ function harness(overrides = {}) {
         available: true,
         wrapper: "0x1111111111111111111111111111111111111111",
         block: { number: 101, timestamp: NOW / 1_000, timestampIso: new Date(NOW).toISOString() },
+        deployedCapital: {
+          asset: "0xasset",
+          assetSymbol: "USDC",
+          amount: 5,
+          amountRaw: "5000000",
+          totalAssetsRaw: "20446982",
+          idleAssetsRaw: "15446982",
+          source: "DepositPool.totalAssets - ERC20.balanceOf(pool)"
+        },
         rows: [
-          { strategyId: "bank", asset: "0xasset", allocation: 2, allocationRaw: "2000000" },
-          { strategyId: "pool", asset: "0xasset", allocation: 3, allocationRaw: "3000000" }
+          {
+            strategyId: "bank",
+            asset: "0xasset",
+            allocation: 10.000001,
+            allocationRaw: "10000001",
+            verdict: { status: "blocked" }
+          },
+          {
+            strategyId: "pool",
+            asset: "0xasset",
+            allocation: 5,
+            allocationRaw: "5000000",
+            verdict: { status: "ok" }
+          }
         ]
       }),
       getTreasuryPolicyStatus: async () => ({
@@ -92,8 +113,11 @@ test("treasury summary composes four authoritative feeds for the signed-in walle
   assert.equal(summary.creditLine.activeLoans[1].source, "AgentAccountCore.positions.debtOutstanding");
   assert.equal(summary.summary.borrowCapacity, 1.25);
   assert.equal(summary.strategyLanes.rows.length, 2);
-  assert.deepEqual(summary.strategyLanes.rows.map((row) => row.deploymentShareBps), [4000, 6000]);
+  assert.deepEqual(summary.strategyLanes.rows.map((row) => row.deploymentShareBps), [6666, 3333]);
   assert.equal(summary.summary.allocated, 5);
+  assert.equal(summary.strategyLanes.deployedCapital.amountRaw, "5000000");
+  assert.equal(summary.summary.attentionCount, 1);
+  assert.equal(summary.strategyLanes.source, "XcmWrapper.strategyAdapter live reads");
   assert.deepEqual(summary.xcmObserver.rows.map((row) => row.stage), ["request", "request", "observe", "settle"]);
   assert.equal(summary.xcmObserver.rows[1].leg, 1);
   assert.equal(summary.xcmObserver.rows[3].blockNumber, 92);
@@ -147,6 +171,29 @@ test("missing AgentAccountCore debt does not become an invented zero", async () 
   assert.equal(summary.creditLine.available, false);
   assert.equal(Object.hasOwn(summary.summary, "borrowCapacity"), false);
   assert.ok(summary.warnings.some((warning) => warning.code === "creditLine_read_failed"));
+});
+
+test("a failed lane state read emits no deployed-capital or posture figures", async () => {
+  const service = harness({
+    gateway: {
+      getActiveCreditPoolLoans: async () => [{
+        loanId: `0x${"22".repeat(32)}`,
+        outstandingRaw: "250000"
+      }],
+      getTreasuryStrategyLanes: async () => {
+        throw new Error("pool totalAssets unavailable");
+      },
+      getTreasuryPolicyStatus: async () => ({ enabled: false })
+    }
+  });
+
+  const summary = await service.getSummary(WALLET);
+
+  assert.equal(summary.strategyLanes.available, false);
+  assert.equal(summary.strategyLanes.reason, "strategyLanes_read_failed");
+  assert.equal(Object.hasOwn(summary.summary, "allocated"), false);
+  assert.equal(Object.hasOwn(summary.summary, "deployedLanes"), false);
+  assert.equal(Object.hasOwn(summary.summary, "attentionCount"), false);
 });
 
 test("stale and quiet sources preserve placeholders instead of emitting zero-valued feeds", async () => {
