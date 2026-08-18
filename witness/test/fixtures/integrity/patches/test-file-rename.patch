@@ -1,0 +1,4 @@
+diff --git a/test/value.test.js b/test/renamed-value.test.js
+similarity index 100%
+rename from test/value.test.js
+rename to test/renamed-value.test.js

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { VERDICTS } from "../src/executor.mjs";
@@ -47,7 +47,7 @@ async function git(cwd, args) {
   return result.stdout.trim();
 }
 
-async function staticFixture(context, { path, content }) {
+async function staticFixture(context, { path, content, baseContent }) {
   const root = await mkdtemp(join(tmpdir(), "witness-pr-shadow-test-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const repository = join(root, "repository");
@@ -56,6 +56,10 @@ async function staticFixture(context, { path, content }) {
   await writeFile(join(repository, "package.json"), '{"scripts":{"test":"node --test"}}\n');
   await writeFile(join(repository, ".github", "workflows", "ci.yml"), "name: CI\n");
   await writeFile(join(repository, "docs", "README.md"), "before\n");
+  if (baseContent !== undefined) {
+    await mkdir(dirname(join(repository, path)), { recursive: true });
+    await writeFile(join(repository, path), baseContent);
+  }
   await git(repository, ["init"]);
   await git(repository, ["config", "user.name", "Witness shadow test"]);
   await git(repository, ["config", "user.email", "witness@example.invalid"]);
@@ -112,6 +116,35 @@ test("a pure documentation PR is statically clean and never POLICY_VIOLATION", a
   assert.equal(result.verdict, null);
   assert.deepEqual(result.policyViolations, []);
   assert.deepEqual(result.integrityViolations, []);
+  assert.deepEqual(result.integrityAmbiguities, []);
+});
+
+test("a renamed-and-expanded test is verifier INCONCLUSIVE in the PR shadow", async (context) => {
+  const fixture = await staticFixture(context, {
+    path: "test/value.test.js",
+    baseContent: [
+      'import test from "node:test";',
+      'test("returns one", () => {});',
+      ""
+    ].join("\n"),
+    content: [
+      'import test from "node:test";',
+      'test("returns the current value", () => {});',
+      'test("returns a number", () => {});',
+      ""
+    ].join("\n")
+  });
+  const result = await evaluatePrShadowStatic({ entry: BASE_ENTRY, ...fixture });
+  assert.equal(result.verdict, VERDICTS.INCONCLUSIVE);
+  assert.equal(result.attribution, "verifier");
+  assert.equal(result.reason, "integrity_detection_ambiguous");
+  assert.equal(result.workerConsequence, "none");
+  assert.equal(result.verifierReputationSignal.kind, "evidence_completeness_gap");
+  assert.deepEqual(result.policyViolations, []);
+  assert.deepEqual(result.integrityViolations, []);
+  assert.equal(result.integrityAmbiguities.length, 1);
+  assert.equal(result.integrityAmbiguities[0].detection, "test_deletion");
+  assert.match(result.integrityAmbiguities[0].diffHunks[0].hunk, /returns the current value/u);
 });
 
 test("rule 5 leaves an unresolvable real-style Make command cleanly INCONCLUSIVE", async (context) => {
@@ -272,6 +305,52 @@ test("batch report leads with adjudicated false positives and every violation ca
   assert.match(markdown, /False-positive rate: 1\/1 \(100%\)/u);
   assert.match(markdown, /\+on: push/u);
   assert.match(markdown, new RegExp(SHADOW_LIMITATION.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+});
+
+test("batch report keeps detector ambiguity separate from POLICY_VIOLATION", () => {
+  const finding = {
+    detection: "test_deletion",
+    message: "rename versus removal cannot be determined",
+    confidence: "ambiguous",
+    paths: ["test/value.test.js"],
+    evidence: ['test("old", () => {})'],
+    source: "integrity-ambiguity",
+    key: "example/widgets#7:test_deletion:test/value.test.js",
+    diffHunks: [{
+      path: "test/value.test.js",
+      hunk: '@@ -1 +1 @@\n-test("old", () => {})\n+test("new", () => {})'
+    }]
+  };
+  const report = buildPrShadowReport({
+    manifest: { frozenAt: "2026-08-17T00:00:00Z", selectionMethod: ["fixture"] },
+    githubAudit: [],
+    judgements: {
+      inconclusiveAttribution: {
+        "example/widgets#7": { accuracy: "accurate", rationale: "The diff is ambiguous." }
+      }
+    },
+    results: [{
+      id: "example/widgets#7",
+      contract: { pullRequest: { url: METADATA.url, title: METADATA.title } },
+      verdict: VERDICTS.INCONCLUSIVE,
+      attribution: "verifier",
+      reason: "integrity_detection_ambiguous",
+      policyViolations: [],
+      integrityViolations: [],
+      integrityAmbiguities: [finding]
+    }]
+  });
+  assert.deepEqual(report.policyViolationRate, { pullRequests: 0, total: 1, ratePct: 0 });
+  assert.deepEqual(report.falsePositiveRate, {
+    pullRequests: 0,
+    total: 1,
+    ratePct: 0,
+    definition: "distinct legitimate merged PRs with at least one adjudicated false-positive violation / all shadowed PRs"
+  });
+  assert.deepEqual(report.integrityAmbiguityRate, { pullRequests: 1, total: 1, ratePct: 100 });
+  assert.equal(report.integrityAmbiguityCases[0].findings[0].confidence, "ambiguous");
+  assert.equal(report.inconclusiveAttributionAccuracy.accurate, 1);
+  assert.match(renderPrShadowMarkdown(report), /Detector ambiguities[\s\S]*example\/widgets#7/u);
 });
 
 test("the committed corpus is exactly 20 mixed PRs and includes protected and docs drills", async () => {

@@ -6,7 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { executeVerificationContract, VERDICTS } from "../src/executor.mjs";
-import { detectIntegrityViolations } from "../src/integrity.mjs";
+import { detectIntegrityFindings, detectIntegrityViolations } from "../src/integrity.mjs";
 import { makeTreeWritable } from "../src/materialize.mjs";
 import { INTEGRITY_DRILLS } from "./fixtures/integrity/cases.mjs";
 
@@ -198,7 +198,7 @@ test("required hidden bundle fails closed when v1 supplies no locator", async (c
   assert.equal(report.reason, "hidden_bundle_unavailable");
 });
 
-test("an unknown declared integrity detection fails closed", async (context) => {
+test("an unknown declared integrity detection is a verifier evidence gap, not infrastructure", async (context) => {
   const temporaryParent = await mkdtemp(join(tmpdir(), "witness-unknown-integrity-test-"));
   context.after(() => rm(temporaryParent, { recursive: true, force: true }));
   const contract = await contractFor("not_implemented_by_witness", 1);
@@ -209,8 +209,29 @@ test("an unknown declared integrity detection fails closed", async (context) => 
     temporaryParent
   });
   assert.equal(report.verdict, VERDICTS.INCONCLUSIVE);
-  assert.equal(report.attribution, "infrastructure");
+  assert.equal(report.attribution, "verifier");
   assert.equal(report.reason, "integrity_detection_unimplemented");
+  assert.equal(report.workerConsequence, "none");
+  assert.equal(report.verifierReputationSignal.kind, "evidence_completeness_gap");
+});
+
+test("a renamed-and-expanded declaration is verifier-attributed INCONCLUSIVE with no worker consequence", async (context) => {
+  const temporaryParent = await mkdtemp(join(tmpdir(), "witness-ambiguous-integrity-test-"));
+  context.after(() => rm(temporaryParent, { recursive: true, force: true }));
+  const report = await executeFixture({
+    contract: await contractFor("test_deletion", 1),
+    patch: resolve(PATCH_ROOT, "test-declaration-rename.patch"),
+    stub: successfulContainerStub(),
+    temporaryParent
+  });
+  assert.equal(report.verdict, VERDICTS.INCONCLUSIVE);
+  assert.equal(report.attribution, "verifier");
+  assert.equal(report.reason, "integrity_detection_ambiguous");
+  assert.equal(report.workerConsequence, "none");
+  assert.equal(report.integrityViolations.length, 0);
+  assert.equal(report.integrityAmbiguities.length, 1);
+  assert.equal(report.verifierReputationSignal.kind, "evidence_completeness_gap");
+  assert.equal(report.verifierReputationSignal.reason, "integrity_detection_ambiguous");
 });
 
 test("runner replacement compares the frozen package script, not unrelated metadata", async (context) => {

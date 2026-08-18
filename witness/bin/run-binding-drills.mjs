@@ -324,7 +324,7 @@ try {
     )
   };
 
-  const consequenceAnchor = "  report.workerConsequence = verdict === VERDICTS.INCONCLUSIVE ? \"none\" : null;";
+  const consequenceAnchor = "  report.workerConsequence = workerConsequenceFor(verdict);";
   const consequenceReplacement = "  report.workerConsequence = null; // MUTANT: explicit no-consequence record disabled";
   const consequenceMutant = await mutateSourceTree(
     root,

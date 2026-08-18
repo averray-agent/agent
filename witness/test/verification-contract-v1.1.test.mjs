@@ -150,6 +150,11 @@ const MALFORMED_ADDITIONS = [
     name: "contract-attributable inconclusive reasons",
     mutate(contract) { delete contract.inconclusive_policy.contract_attributable; },
     path: "inconclusive_policy.contract_attributable"
+  },
+  {
+    name: "verifier-attributable inconclusive reasons",
+    mutate(contract) { delete contract.inconclusive_policy.verifier_attributable; },
+    path: "inconclusive_policy.verifier_attributable"
   }
 ];
 

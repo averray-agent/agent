@@ -16,6 +16,7 @@
     "pr:shadow": "node bin/run-pr-shadow.mjs",
     "pr:shadow:report": "node bin/rejudge-pr-shadow.mjs",
     "pr:shadow:drills": "node bin/run-pr-shadow-drills.mjs",
+    "ambiguity:drills": "node bin/run-ambiguity-drills.mjs",
     "adversarial:corpus": "node bin/run-adversarial-corpus.mjs",
     "corpus": "node bin/run-corpus.mjs"
   }

@@ -389,7 +389,7 @@ function validateOptionalSections(issues, contract, version) {
     if (version === VERIFICATION_CONTRACT_SCHEMA_VERSION) {
       requireOnlyKeys(issues, contract.inconclusive_policy, "inconclusive_policy", [
         "infrastructure_attributable", "contract_attributable", "candidate_attributable",
-        "repeated_candidate_attributable"
+        "verifier_attributable", "repeated_candidate_attributable"
       ]);
     }
     if (version === VERIFICATION_CONTRACT_SCHEMA_VERSION) {
@@ -409,6 +409,14 @@ function validateOptionalSections(issues, contract, version) {
       contract.inconclusive_policy.candidate_attributable,
       "inconclusive_policy.candidate_attributable"
     );
+    if (version === VERIFICATION_CONTRACT_SCHEMA_VERSION ||
+        contract.inconclusive_policy.verifier_attributable !== undefined) {
+      requireStringArray(
+        issues,
+        contract.inconclusive_policy.verifier_attributable,
+        "inconclusive_policy.verifier_attributable"
+      );
+    }
     if (requireRecord(
       issues,
       contract.inconclusive_policy.repeated_candidate_attributable,

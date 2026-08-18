@@ -70,6 +70,7 @@ function setupFailure(entry, error) {
     patch: null,
     policyViolations: [],
     integrityViolations: [],
+    integrityAmbiguities: [],
     checks: null,
     seconds: 0
   };
@@ -140,6 +141,8 @@ console.log(JSON.stringify({
   falsePositiveRate: report.falsePositiveRate,
   verdictDistribution: report.verdictDistribution,
   policyViolationCases: report.policyViolationCases.map((entry) => entry.id),
+  integrityAmbiguities: report.integrityAmbiguityRate,
+  integrityAmbiguityCases: report.integrityAmbiguityCases.map((entry) => entry.id),
   inconclusive: report.inconclusiveRate,
   output: options.out,
   markdown: markdownPath(options.out)

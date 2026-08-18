@@ -23,6 +23,14 @@
     }
   },
   "inconclusiveAttribution": {
+    "averray-agent/agent#1109": {
+      "accuracy": "accurate",
+      "rationale": "The exact-name detector cannot distinguish this declaration rename plus expanded replacement coverage from removal. The uncertainty belongs to the verifier, not the worker or derived contract."
+    },
+    "depre-dev/averray-reference-agent#813": {
+      "accuracy": "accurate",
+      "rationale": "The file replaces the old arrivals test contract with a smaller redesigned suite. The diff alone cannot prove semantic coverage retention, so verifier-attributed INCONCLUSIVE is accurate."
+    },
     "averray-agent/agent#1149": {
       "accuracy": "accurate",
       "rationale": "Both the PR head and merge-base install 1,220 locked packages offline, then exit 1 because the HTTP smoke times out after 38 of 39 subtests. The derived green-check assumption is false, so contract attribution is accurate."

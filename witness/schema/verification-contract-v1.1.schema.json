@@ -130,12 +130,13 @@
       "additionalProperties": false,
       "required": [
         "infrastructure_attributable", "contract_attributable", "candidate_attributable",
-        "repeated_candidate_attributable"
+        "verifier_attributable", "repeated_candidate_attributable"
       ],
       "properties": {
         "infrastructure_attributable": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
         "contract_attributable": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
         "candidate_attributable": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
+        "verifier_attributable": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
         "repeated_candidate_attributable": {
           "type": "object",
           "additionalProperties": false,
