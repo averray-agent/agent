@@ -125,6 +125,16 @@ test("rule 5 fails closed when a command-definition path cannot be proven", asyn
   assert.match(result.issues[0].message, /cannot prove.*cargo.*fails closed/iu);
 });
 
+test("rule 5 still rejects an authored Make command at freeze", async () => {
+  const contract = await readFixture("worked-averray-send-test.json");
+  contract.checks.targeted[0].command = ["make", "gate"];
+  contract.candidate.protected_paths.push("Makefile");
+  const result = validateVerificationContract(contract);
+  assert.equal(result.valid, false);
+  assert.deepEqual(result.issues.map((entry) => entry.code), [REJECTION_RULES.JUDGING_COMMAND_PROTECTED.code]);
+  assert.match(result.issues[0].message, /make may select.*fails closed/iu);
+});
+
 test("assertion errors name the exact freeze-time rule", async () => {
   const contract = await readFixture("rule-7-hidden-eligibility.json");
   assert.throws(

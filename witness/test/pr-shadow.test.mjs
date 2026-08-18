@@ -7,9 +7,13 @@ import test from "node:test";
 import { VERDICTS } from "../src/executor.mjs";
 import { materializeRepository } from "../src/materialize.mjs";
 import {
+  BASE_CHECK_CAUSES,
+  BASE_CHECK_ERROR_SUBCAUSES,
   SHADOW_LIMITATION,
   buildPrShadowReport,
+  diagnoseBaseCheckUnavailability,
   derivePrShadowContract,
+  evaluateMergedPullRequest,
   evaluatePrShadowStatic,
   flattenPrShadowManifest,
   renderPrShadowMarkdown
@@ -73,6 +77,8 @@ async function staticFixture(context, { path, content, baseContent }) {
   const baseRoot = join(root, "base");
   await materializeRepository({ repo: repository, commit: baseCommit, destination: baseRoot, cwd: root });
   return {
+    root,
+    repository,
     patchPath,
     baseRoot,
     candidateRoot: join(root, "candidate"),
@@ -147,7 +153,7 @@ test("a renamed-and-expanded test is verifier INCONCLUSIVE in the PR shadow", as
   assert.match(result.integrityAmbiguities[0].diffHunks[0].hunk, /returns the current value/u);
 });
 
-test("rule 5 leaves an unresolvable real-style Make command cleanly INCONCLUSIVE", async (context) => {
+test("shadow runs an unresolvable Make command and records that it is unprotected", async (context) => {
   const fixture = await staticFixture(context, {
     path: "docs/README.md",
     content: "after\n"
@@ -160,9 +166,127 @@ test("rule 5 leaves an unresolvable real-style Make command cleanly INCONCLUSIVE
     },
     ...fixture
   });
-  assert.equal(result.verdict, VERDICTS.INCONCLUSIVE);
-  assert.equal(result.reason, "unresolvable_command");
-  assert.equal(result.attribution, "contract");
+  assert.equal(result.verdict, null);
+  assert.equal(result.judgingCommandProtected, false);
+  assert.equal(result.contract.check.commandResolution.resolved, false);
+  assert.equal(result.contract.check.judgingCommandProtected, false);
+});
+
+test("an unresolvable shadow command reaches check execution", async (context) => {
+  const fixture = await staticFixture(context, {
+    path: "docs/README.md",
+    content: "after\n"
+  });
+  const entry = {
+    ...BASE_ENTRY,
+    check: { id: "gate", command: ["make", "gate"], workingDirectory: "." },
+    protectedPaths: ["Makefile"]
+  };
+  const calls = [];
+  const source = {
+    prepare: async (metadata) => metadata,
+    writeDiff: async ({ destination }) => {
+      await writeFile(destination, fixture.diffText);
+      return destination;
+    },
+    materialize: async (_commit, destination) => materializeRepository({
+      repo: fixture.repository,
+      commit: fixture.metadata.baseCommit,
+      destination,
+      cwd: fixture.root
+    })
+  };
+  const result = await evaluateMergedPullRequest({
+    entry,
+    metadata: fixture.metadata,
+    source,
+    temporaryParent: fixture.root,
+    cacheDirectory: join(fixture.root, "cache")
+  }, {
+    runPreflight: async (options) => {
+      calls.push(options);
+      return {
+        classification: "HERMETIC",
+        basePassed: true,
+        attempts: [],
+        check: {},
+        dependencyPreparation: {},
+        sandbox: {},
+        totalSeconds: 0
+      };
+    }
+  });
+  assert.equal(result.verdict, VERDICTS.PASS);
+  assert.equal(result.judgingCommandProtected, false);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].check, "'make' 'gate'");
+});
+
+test("base-check diagnosis separates a timeout from missing CI prerequisites", () => {
+  const shared = {
+    classification: "FROZEN_DEPENDENCIES",
+    checkCommandExists: true,
+    checkDefinition: { declared: true },
+    basePassed: false
+  };
+  const timeout = diagnoseBaseCheckUnavailability({
+    ...shared,
+    attempts: [{ checkAttempt: true, stdout: "error: test timed out after 60000ms", stderr: "" }]
+  });
+  const prerequisites = diagnoseBaseCheckUnavailability({
+    ...shared,
+    attempts: [{ checkAttempt: true, stdout: "make: uv: No such file or directory", stderr: "" }]
+  });
+  const missingBuild = diagnoseBaseCheckUnavailability({
+    ...shared,
+    attempts: [{ checkAttempt: true, stdout: "Error: Failed to resolve entry for package @avg/schemas", stderr: "" }]
+  });
+  assert.deepEqual(timeout, {
+    cause: BASE_CHECK_CAUSES.CHECK_ERRORED,
+    subcause: BASE_CHECK_ERROR_SUBCAUSES.CHECK_TIMEOUT,
+    structural: false,
+    basis: "the base check errored at an internal or outer timeout"
+  });
+  assert.deepEqual(prerequisites, {
+    cause: BASE_CHECK_CAUSES.CHECK_ERRORED,
+    subcause: BASE_CHECK_ERROR_SUBCAUSES.MISSING_CI_PREREQUISITES,
+    structural: false,
+    basis: "the base check expected build outputs, tools, services, or credentials supplied by CI but absent from the Witness sandbox"
+  });
+  assert.equal(missingBuild.subcause, BASE_CHECK_ERROR_SUBCAUSES.MISSING_CI_PREREQUISITES);
+});
+
+test("base-check diagnosis keeps structurally absent tests separate from materialization", () => {
+  const noScript = diagnoseBaseCheckUnavailability({
+    classification: "UNMATERIALIZABLE",
+    checkCommandExists: false,
+    checkDefinition: { declared: false },
+    attempts: []
+  });
+  const materialization = diagnoseBaseCheckUnavailability({
+    classification: "UNMATERIALIZABLE",
+    classificationReason: "dependency cache preparation failed",
+    checkCommandExists: true,
+    checkDefinition: { declared: true },
+    attempts: []
+  });
+  assert.equal(noScript.cause, BASE_CHECK_CAUSES.NO_TEST_SCRIPT);
+  assert.equal(noScript.structural, true);
+  assert.equal(materialization.cause, BASE_CHECK_CAUSES.MATERIALIZATION_FAILED);
+  assert.equal(materialization.structural, false);
+});
+
+test("base-check diagnosis keeps a real red base separate from execution errors", () => {
+  const diagnosis = diagnoseBaseCheckUnavailability({
+    classification: "HERMETIC",
+    checkCommandExists: true,
+    checkDefinition: { declared: true },
+    basePassed: false,
+    attempts: [{ checkAttempt: true, stdout: "not ok 1 - expected value\nAssertionError", stderr: "" }]
+  });
+  assert.equal(diagnosis.cause, BASE_CHECK_CAUSES.CHECK_FAILED);
+  assert.equal(diagnosis.subcause, null);
+  assert.equal(diagnosis.structural, true);
 });
 
 test("shadow GitHub transport exposes only GET and clone and rejects mutation-shaped audit", async (context) => {

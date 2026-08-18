@@ -18,6 +18,19 @@ import { isProtectedPath, resolveJudgingCommandDefinition } from "./verification
 export const PR_SHADOW_CONTRACT_SCHEMA = "averray.witness.pr-shadow-contract/v1";
 export const PR_SHADOW_REPORT_SCHEMA = "averray.witness.pr-shadow-report/v1";
 export const ALL_INTEGRITY_DETECTIONS = Object.freeze(Object.keys(INTEGRITY_DETECTION_SUPPORT));
+export const BASE_CHECK_CAUSES = Object.freeze({
+  NO_TEST_SCRIPT: "no_test_script_at_base",
+  COMMAND_UNDETERMINED: "check_command_undetermined",
+  MATERIALIZATION_FAILED: "base_materialization_failed",
+  CHECK_FAILED: "base_check_failed",
+  CHECK_ERRORED: "base_check_errored",
+  COMMIT_UNAVAILABLE: "base_commit_unavailable"
+});
+export const BASE_CHECK_ERROR_SUBCAUSES = Object.freeze({
+  CHECK_TIMEOUT: "check_timeout",
+  MISSING_CI_PREREQUISITES: "missing_ci_prerequisites",
+  UNCLASSIFIED: "unclassified_execution_error"
+});
 export const SHADOW_LIMITATION =
   "This shadow measures AV-1 plus integrity. It has no targeted check, does not know what each pull request was supposed to fix, and does not exercise AV-2 differential logic.";
 
@@ -121,6 +134,10 @@ export function derivePrShadowContract({ entry, metadata, diffBytes }) {
   const commandResolution = resolveJudgingCommandDefinition(entry.check.command, {
     workingDirectory: entry.check.workingDirectory
   });
+  const judgingCommandProtected = commandResolution.resolved && (
+    commandResolution.definitionFile === null ||
+    isProtectedPath(commandResolution.definitionFile, entry.protectedPaths)
+  );
   return {
     schemaVersion: PR_SHADOW_CONTRACT_SCHEMA,
     assurance: {
@@ -152,7 +169,8 @@ export function derivePrShadowContract({ entry, metadata, diffBytes }) {
       id: entry.check.id,
       command: entry.check.command,
       workingDirectory: entry.check.workingDirectory,
-      commandResolution
+      commandResolution,
+      judgingCommandProtected
     },
     integrity: {
       detections: ALL_INTEGRITY_DETECTIONS
@@ -213,10 +231,12 @@ export async function evaluatePrShadowStatic({
 }) {
   const diffBytes = Buffer.from(diffText, "utf8");
   const contract = derivePrShadowContract({ entry, metadata, diffBytes });
+  const judgingCommandProtected = contract.check.judgingCommandProtected;
   const inspection = await inspectCandidatePatch({ patchPath, baseRoot });
   if (!inspection.valid) {
     return {
       contract,
+      judgingCommandProtected,
       verdict: VERDICTS.INCONCLUSIVE,
       attribution: "contract",
       reason: "head_diff_unmaterializable",
@@ -233,6 +253,7 @@ export async function evaluatePrShadowStatic({
   if (!applied.applied) {
     return {
       contract,
+      judgingCommandProtected,
       verdict: VERDICTS.INCONCLUSIVE,
       attribution: "contract",
       reason: "head_diff_unmaterializable",
@@ -267,6 +288,7 @@ export async function evaluatePrShadowStatic({
   if (violations.length > 0) {
     return {
       contract,
+      judgingCommandProtected,
       verdict: VERDICTS.POLICY_VIOLATION,
       attribution: null,
       reason: "candidate_policy_or_integrity_violation",
@@ -294,6 +316,7 @@ export async function evaluatePrShadowStatic({
     }));
     return {
       contract,
+      judgingCommandProtected,
       verdict: VERDICTS.INCONCLUSIVE,
       attribution: "verifier",
       reason,
@@ -319,9 +342,15 @@ export async function evaluatePrShadowStatic({
   }
 
   const resolution = contract.check.commandResolution;
-  if (!resolution.resolved) {
+  // Shadow has no candidate or contract author. An unresolved definition is
+  // runnable evidence here, but it is explicitly not evidence of protection.
+  // Authored contract freeze validation remains fail-closed in
+  // verification-contract.mjs.
+  const shadowAllowsUnprotectedCommand = true;
+  if (!resolution.resolved && !shadowAllowsUnprotectedCommand) {
     return {
       contract,
+      judgingCommandProtected,
       verdict: VERDICTS.INCONCLUSIVE,
       attribution: "contract",
       reason: "unresolvable_command",
@@ -335,6 +364,7 @@ export async function evaluatePrShadowStatic({
   if (resolution.definitionFile !== null && !isProtectedPath(resolution.definitionFile, entry.protectedPaths)) {
     return {
       contract,
+      judgingCommandProtected,
       verdict: VERDICTS.INCONCLUSIVE,
       attribution: "contract",
       reason: "unprotected_judging_command",
@@ -347,6 +377,7 @@ export async function evaluatePrShadowStatic({
   }
   return {
     contract,
+    judgingCommandProtected,
     verdict: null,
     attribution: null,
     reason: null,
@@ -397,6 +428,77 @@ function compactPreflight(report) {
     sandbox: report.sandbox,
     attempts: report.attempts,
     totalSeconds: report.totalSeconds
+  };
+}
+
+function checkAttemptText(report) {
+  return (report?.attempts || [])
+    .filter((attempt) => attempt.checkAttempt)
+    .map((attempt) => `${attempt.stdout || ""}\n${attempt.stderr || ""}`)
+    .join("\n");
+}
+
+/**
+ * Explain why a declared base check could not establish a green baseline.
+ * This is deliberately diagnostic: it does not change a verdict and it does
+ * not turn an errored check into a failed one.
+ */
+export function diagnoseBaseCheckUnavailability(report) {
+  if (!report) {
+    return {
+      cause: BASE_CHECK_CAUSES.COMMAND_UNDETERMINED,
+      subcause: null,
+      structural: true,
+      basis: "no base-check report or runnable command was available"
+    };
+  }
+  if (report.checkCommandExists === false || report.checkDefinition?.declared === false) {
+    return {
+      cause: BASE_CHECK_CAUSES.NO_TEST_SCRIPT,
+      subcause: null,
+      structural: true,
+      basis: "the declared package test script did not exist at the base commit"
+    };
+  }
+  if (!SUCCESSFUL_MATERIALIZATIONS.has(report.classification)) {
+    return {
+      cause: BASE_CHECK_CAUSES.MATERIALIZATION_FAILED,
+      subcause: null,
+      structural: false,
+      basis: report.classificationReason || "base materialization did not produce a runnable check"
+    };
+  }
+
+  const text = checkAttemptText(report);
+  if (/test timed out after|testTimeoutFailure|timed out/iu.test(text)) {
+    return {
+      cause: BASE_CHECK_CAUSES.CHECK_ERRORED,
+      subcause: BASE_CHECK_ERROR_SUBCAUSES.CHECK_TIMEOUT,
+      structural: false,
+      basis: "the base check errored at an internal or outer timeout"
+    };
+  }
+  if (/ERR_MODULE_NOT_FOUND|Failed to (?:resolve entry|load url)|spawnSync\s+\S+\s+ENOENT|make:\s+\S+:\s+No such file or directory|(?:DATABASE_START|HARNESS_CHECKOUT)_FAILED|authenticated SSH clone .* failed|git failed with exit/iu.test(text)) {
+    return {
+      cause: BASE_CHECK_CAUSES.CHECK_ERRORED,
+      subcause: BASE_CHECK_ERROR_SUBCAUSES.MISSING_CI_PREREQUISITES,
+      structural: false,
+      basis: "the base check expected build outputs, tools, services, or credentials supplied by CI but absent from the Witness sandbox"
+    };
+  }
+  if (report.basePassed === false) {
+    return {
+      cause: BASE_CHECK_CAUSES.CHECK_FAILED,
+      subcause: null,
+      structural: true,
+      basis: "the base check ran to a non-zero test result without an identified execution error"
+    };
+  }
+  return {
+    cause: BASE_CHECK_CAUSES.CHECK_ERRORED,
+    subcause: BASE_CHECK_ERROR_SUBCAUSES.UNCLASSIFIED,
+    structural: false,
+    basis: "the base check did not produce a trusted pass or a classifiable test failure"
   };
 }
 
@@ -520,6 +622,7 @@ export async function evaluateMergedPullRequest({
       details: preflightPassed(base)
         ? "base materialized and passed, but the PR head could not produce a trusted check result"
         : "the derived assumption that the repository check is runnable and green could not be established",
+      baseCheckDiagnosis: preflightPassed(base) ? null : diagnoseBaseCheckUnavailability(compactPreflight(base)),
       seconds: Number(((performance.now() - started) / 1_000).toFixed(3)),
       checks: { head: compactPreflight(head), baseDiagnostic: compactPreflight(base) }
     };
@@ -570,6 +673,9 @@ export function buildPrShadowReport({ manifest, results, githubAudit, judgements
     }));
     return {
       ...result,
+      baseCheckDiagnosis: result.reason === "repository_check_unavailable"
+        ? diagnoseBaseCheckUnavailability(result.checks?.baseDiagnostic || null)
+        : result.baseCheckDiagnosis || null,
       policyViolations: reviewViolations(result.policyViolations || []),
       integrityViolations: reviewViolations(result.integrityViolations || []),
       integrityAmbiguities: result.integrityAmbiguities || [],
@@ -591,6 +697,7 @@ export function buildPrShadowReport({ manifest, results, githubAudit, judgements
   const policyCases = reviewedResults.filter((result) => result.verdict === VERDICTS.POLICY_VIOLATION);
   const ambiguityCases = reviewedResults.filter((result) => result.integrityAmbiguities.length > 0);
   const inconclusive = reviewedResults.filter((result) => result.verdict === VERDICTS.INCONCLUSIVE);
+  const unavailableBase = reviewedResults.filter((result) => result.reason === "repository_check_unavailable");
   const detectionNames = [...new Set([
     "protected_path_modified",
     ...ALL_INTEGRITY_DETECTIONS,
@@ -616,6 +723,12 @@ export function buildPrShadowReport({ manifest, results, githubAudit, judgements
     .map((result) => result.inconclusiveAttributionJudgement?.accuracy)
     .filter((accuracy) => accuracy && accuracy !== "unreviewed");
   const verdictCounts = countBy(reviewedResults.map((result) => result.verdict));
+  const causeCounts = Object.fromEntries(Object.values(BASE_CHECK_CAUSES).map((cause) => [cause, 0]));
+  const subcauseCounts = Object.fromEntries(Object.values(BASE_CHECK_ERROR_SUBCAUSES).map((cause) => [cause, 0]));
+  for (const result of unavailableBase) {
+    if (result.baseCheckDiagnosis?.cause) causeCounts[result.baseCheckDiagnosis.cause] += 1;
+    if (result.baseCheckDiagnosis?.subcause) subcauseCounts[result.baseCheckDiagnosis.subcause] += 1;
+  }
   return {
     schemaVersion: PR_SHADOW_REPORT_SCHEMA,
     generatedAt: new Date().toISOString(),
@@ -673,6 +786,25 @@ export function buildPrShadowReport({ manifest, results, githubAudit, judgements
       byReason: countBy(inconclusive.map((result) => result.reason)),
       byAttribution: countBy(inconclusive.map((result) => result.attribution))
     },
+    baseCheckAvailabilityDiagnosis: {
+      total: unavailableBase.length,
+      byCause: causeCounts,
+      executionErrorSubcauses: subcauseCounts,
+      structurallyUndecidable: unavailableBase.filter((result) => result.baseCheckDiagnosis?.structural === true).length,
+      implementationArtifacts: unavailableBase.filter((result) => result.baseCheckDiagnosis?.structural === false).length,
+      cases: unavailableBase.map((result) => ({
+        id: result.id,
+        ...result.baseCheckDiagnosis
+      }))
+    },
+    judgingCommandProtection: {
+      protected: reviewedResults.filter((result) => result.judgingCommandProtected === true).length,
+      runnableButUnprotected: reviewedResults.filter((result) => result.judgingCommandProtected === false).length,
+      unknown: reviewedResults.filter((result) => typeof result.judgingCommandProtected !== "boolean").length,
+      runnableButUnprotectedCases: reviewedResults
+        .filter((result) => result.judgingCommandProtected === false)
+        .map((result) => result.id)
+    },
     unevaluable: inconclusive.map((result) => ({
       id: result.id,
       reason: result.reason,
@@ -719,6 +851,28 @@ export function renderPrShadowMarkdown(report) {
     "## Verdict distribution",
     "",
     ...Object.entries(report.verdictDistribution).map(([verdict, count]) => `- ${verdict}: ${count}`),
+    "",
+    "## Judging-command protection",
+    "",
+    `Protected command definitions: ${report.judgingCommandProtection.protected}.`,
+    `Runnable but unprotected in shadow only: ${report.judgingCommandProtection.runnableButUnprotected}.`,
+    `Protection unknown: ${report.judgingCommandProtection.unknown}.`,
+    "",
+    "## Base-check availability diagnosis",
+    "",
+    `Unavailable base checks: ${report.baseCheckAvailabilityDiagnosis.total}.`,
+    `Structurally undecidable: ${report.baseCheckAvailabilityDiagnosis.structurallyUndecidable}.`,
+    `Implementation artifacts: ${report.baseCheckAvailabilityDiagnosis.implementationArtifacts}.`,
+    "",
+    "| Cause | Count |",
+    "| --- | ---: |",
+    ...Object.entries(report.baseCheckAvailabilityDiagnosis.byCause)
+      .map(([cause, count]) => `| ${cause} | ${count} |`),
+    "",
+    "Execution-error subcauses:",
+    "",
+    ...Object.entries(report.baseCheckAvailabilityDiagnosis.executionErrorSubcauses)
+      .map(([cause, count]) => `- ${cause}: ${count}`),
     "",
     "## Individual POLICY_VIOLATION cases",
     ""

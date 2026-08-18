@@ -15,6 +15,8 @@
     "integrity:drills": "node bin/run-integrity-drills.mjs",
     "pr:shadow": "node bin/run-pr-shadow.mjs",
     "pr:shadow:report": "node bin/rejudge-pr-shadow.mjs",
+    "pr:shadow:coverage": "node bin/compare-pr-shadow-coverage.mjs",
+    "coverage:drills": "node bin/run-coverage-diagnosis-drills.mjs",
     "pr:shadow:drills": "node bin/run-pr-shadow-drills.mjs",
     "ambiguity:drills": "node bin/run-ambiguity-drills.mjs",
     "adversarial:corpus": "node bin/run-adversarial-corpus.mjs",

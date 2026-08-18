@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "averray.witness.pr-shadow-drills/v1",
+  "protectedRealLayouts": [
+    {
+      "id": "averray-agent/agent#1110",
+      "status": "GREEN"
+    },
+    {
+      "id": "depre-dev/averray-reference-agent#802",
+      "status": "GREEN"
+    }
+  ],
+  "pureDocumentation": [
+    {
+      "id": "averray-agent/agent#1149",
+      "verdict": "INCONCLUSIVE",
+      "status": "GREEN"
+    },
+    {
+      "id": "averray-agent/agent#1146",
+      "verdict": "INCONCLUSIVE",
+      "status": "GREEN"
+    }
+  ],
+  "shadowActsOnNothing": {
+    "status": "GREEN",
+    "commentsPosted": 0,
+    "statusesPosted": 0,
+    "submissionsMade": 0,
+    "remotePushes": 0
+  },
+  "seenRed": {
+    "mutation": {
+      "anchorOccurrences": 1,
+      "applied": true
+    },
+    "detectorPresent": {
+      "status": "GREEN",
+      "verdict": "POLICY_VIOLATION"
+    },
+    "detectorDisabled": {
+      "status": "RED",
+      "verdict": "STATIC_CLEAN"
+    }
+  }
+}

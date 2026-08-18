@@ -1,0 +1,256 @@
+{
+  "schemaVersion": "averray.witness.pr-shadow-coverage-diagnosis/v1",
+  "generatedAt": "2026-08-18T08:51:32.912Z",
+  "sameFrozenCohort": true,
+  "cohort": {
+    "total": 20,
+    "ids": [
+      "averray-agent/agent#1109",
+      "averray-agent/agent#1110",
+      "averray-agent/agent#1145",
+      "averray-agent/agent#1146",
+      "averray-agent/agent#1147",
+      "averray-agent/agent#1148",
+      "averray-agent/agent#1149",
+      "averray-agent/agent-harness#29",
+      "averray-agent/agent-harness#30",
+      "averray-agent/agent-harness#31",
+      "averray-agent/agent-harness#32",
+      "averray-agent/agent-harness#35",
+      "averray-agent/agent-harness#36",
+      "depre-dev/averray-reference-agent#603",
+      "depre-dev/averray-reference-agent#802",
+      "depre-dev/averray-reference-agent#812",
+      "depre-dev/averray-reference-agent#813",
+      "depre-dev/averray-reference-agent#814",
+      "depre-dev/averray-reference-agent#815",
+      "depre-dev/averray-reference-agent#816"
+    ]
+  },
+  "coverage": {
+    "before": {
+      "decided": 4,
+      "total": 20,
+      "inconclusive": 16,
+      "source": "PKT-WITNESS-006 report preserved by #1152"
+    },
+    "normalizedBefore": {
+      "decided": 2,
+      "total": 20,
+      "inconclusive": 18,
+      "source": "current-main baseline after #1154 correctly moved two detector ambiguities to INCONCLUSIVE"
+    },
+    "after": {
+      "decided": 2,
+      "total": 20,
+      "inconclusive": 18,
+      "decisionGainFromShadowRelaxation": 0
+    }
+  },
+  "originalSixteen": {
+    "total": 16,
+    "structurallyUndecidable": 0,
+    "implementationArtifacts": 16,
+    "artifactBreakdown": {
+      "overStrictRule5Inheritance": 6,
+      "executionEnvironmentOrRecipe": 10
+    },
+    "note": "The artifact breakdown records the first observed blocker; Rule 5 cases may expose a second blocker once allowed to run."
+  },
+  "originalTenUnavailableBaseChecks": {
+    "total": 10,
+    "byCause": {
+      "no_test_script_at_base": 0,
+      "check_command_undetermined": 0,
+      "base_materialization_failed": 0,
+      "base_check_failed": 0,
+      "base_check_errored": 10,
+      "base_commit_unavailable": 0
+    },
+    "executionErrorSubcauses": {
+      "check_timeout": 5,
+      "missing_ci_prerequisites": 5,
+      "unclassified_execution_error": 0
+    },
+    "cases": [
+      {
+        "id": "averray-agent/agent#1149",
+        "cause": "base_check_errored",
+        "subcause": "check_timeout",
+        "structural": false,
+        "basis": "the base check errored at an internal or outer timeout"
+      },
+      {
+        "id": "averray-agent/agent#1148",
+        "cause": "base_check_errored",
+        "subcause": "check_timeout",
+        "structural": false,
+        "basis": "the base check errored at an internal or outer timeout"
+      },
+      {
+        "id": "averray-agent/agent#1147",
+        "cause": "base_check_errored",
+        "subcause": "check_timeout",
+        "structural": false,
+        "basis": "the base check errored at an internal or outer timeout"
+      },
+      {
+        "id": "averray-agent/agent#1146",
+        "cause": "base_check_errored",
+        "subcause": "check_timeout",
+        "structural": false,
+        "basis": "the base check errored at an internal or outer timeout"
+      },
+      {
+        "id": "averray-agent/agent#1145",
+        "cause": "base_check_errored",
+        "subcause": "check_timeout",
+        "structural": false,
+        "basis": "the base check errored at an internal or outer timeout"
+      },
+      {
+        "id": "depre-dev/averray-reference-agent#816",
+        "cause": "base_check_errored",
+        "subcause": "missing_ci_prerequisites",
+        "structural": false,
+        "basis": "the base check expected build outputs, tools, services, or credentials supplied by CI but absent from the Witness sandbox"
+      },
+      {
+        "id": "depre-dev/averray-reference-agent#815",
+        "cause": "base_check_errored",
+        "subcause": "missing_ci_prerequisites",
+        "structural": false,
+        "basis": "the base check expected build outputs, tools, services, or credentials supplied by CI but absent from the Witness sandbox"
+      },
+      {
+        "id": "depre-dev/averray-reference-agent#814",
+        "cause": "base_check_errored",
+        "subcause": "missing_ci_prerequisites",
+        "structural": false,
+        "basis": "the base check expected build outputs, tools, services, or credentials supplied by CI but absent from the Witness sandbox"
+      },
+      {
+        "id": "depre-dev/averray-reference-agent#812",
+        "cause": "base_check_errored",
+        "subcause": "missing_ci_prerequisites",
+        "structural": false,
+        "basis": "the base check expected build outputs, tools, services, or credentials supplied by CI but absent from the Witness sandbox"
+      },
+      {
+        "id": "depre-dev/averray-reference-agent#603",
+        "cause": "base_check_errored",
+        "subcause": "missing_ci_prerequisites",
+        "structural": false,
+        "basis": "the base check expected build outputs, tools, services, or credentials supplied by CI but absent from the Witness sandbox"
+      }
+    ]
+  },
+  "originalSixRule5CasesAfterRelaxation": [
+    {
+      "id": "averray-agent/agent-harness#36",
+      "beforeReason": "unresolvable_command",
+      "afterVerdict": "INCONCLUSIVE",
+      "afterReason": "repository_check_unavailable",
+      "judgingCommandProtected": false,
+      "baseCheckDiagnosis": {
+        "cause": "base_check_errored",
+        "subcause": "missing_ci_prerequisites",
+        "structural": false,
+        "basis": "the base check expected build outputs, tools, services, or credentials supplied by CI but absent from the Witness sandbox"
+      }
+    },
+    {
+      "id": "averray-agent/agent-harness#35",
+      "beforeReason": "unresolvable_command",
+      "afterVerdict": "INCONCLUSIVE",
+      "afterReason": "repository_check_unavailable",
+      "judgingCommandProtected": false,
+      "baseCheckDiagnosis": {
+        "cause": "base_check_errored",
+        "subcause": "missing_ci_prerequisites",
+        "structural": false,
+        "basis": "the base check expected build outputs, tools, services, or credentials supplied by CI but absent from the Witness sandbox"
+      }
+    },
+    {
+      "id": "averray-agent/agent-harness#32",
+      "beforeReason": "unresolvable_command",
+      "afterVerdict": "INCONCLUSIVE",
+      "afterReason": "repository_check_unavailable",
+      "judgingCommandProtected": false,
+      "baseCheckDiagnosis": {
+        "cause": "base_check_errored",
+        "subcause": "missing_ci_prerequisites",
+        "structural": false,
+        "basis": "the base check expected build outputs, tools, services, or credentials supplied by CI but absent from the Witness sandbox"
+      }
+    },
+    {
+      "id": "averray-agent/agent-harness#31",
+      "beforeReason": "unresolvable_command",
+      "afterVerdict": "INCONCLUSIVE",
+      "afterReason": "repository_check_unavailable",
+      "judgingCommandProtected": false,
+      "baseCheckDiagnosis": {
+        "cause": "base_check_errored",
+        "subcause": "missing_ci_prerequisites",
+        "structural": false,
+        "basis": "the base check expected build outputs, tools, services, or credentials supplied by CI but absent from the Witness sandbox"
+      }
+    },
+    {
+      "id": "averray-agent/agent-harness#30",
+      "beforeReason": "unresolvable_command",
+      "afterVerdict": "INCONCLUSIVE",
+      "afterReason": "repository_check_unavailable",
+      "judgingCommandProtected": false,
+      "baseCheckDiagnosis": {
+        "cause": "base_check_errored",
+        "subcause": "missing_ci_prerequisites",
+        "structural": false,
+        "basis": "the base check expected build outputs, tools, services, or credentials supplied by CI but absent from the Witness sandbox"
+      }
+    },
+    {
+      "id": "averray-agent/agent-harness#29",
+      "beforeReason": "unresolvable_command",
+      "afterVerdict": "INCONCLUSIVE",
+      "afterReason": "repository_check_unavailable",
+      "judgingCommandProtected": false,
+      "baseCheckDiagnosis": {
+        "cause": "base_check_errored",
+        "subcause": "missing_ci_prerequisites",
+        "structural": false,
+        "basis": "the base check expected build outputs, tools, services, or credentials supplied by CI but absent from the Witness sandbox"
+      }
+    }
+  ],
+  "rule5RelaxationOutcome": {
+    "decided": 0,
+    "structurallyUndecidable": 0,
+    "implementationArtifacts": 6,
+    "byCause": {
+      "no_test_script_at_base": 0,
+      "check_command_undetermined": 0,
+      "base_materialization_failed": 0,
+      "base_check_failed": 0,
+      "base_check_errored": 6,
+      "base_commit_unavailable": 0
+    },
+    "executionErrorSubcauses": {
+      "check_timeout": 0,
+      "missing_ci_prerequisites": 6,
+      "unclassified_execution_error": 0
+    }
+  },
+  "regressionBar": {
+    "adversarialExactVerdicts": 15,
+    "adversarialTotal": 15,
+    "adversarialFalsePasses": 0,
+    "detectorFalsePositivePullRequests": 0,
+    "detectorFalsePositiveRatePct": 0,
+    "policyFalsePositiveRateBeforePct": 10,
+    "policyFalsePositivePullRequests": 2,
+    "policyFalsePositiveRatePct": 10
+  }
+}
