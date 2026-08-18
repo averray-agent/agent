@@ -5,6 +5,7 @@ import {
   assertCatalogueDefinitionsHaveLanes,
   CatalogueLaneDiscipline,
   DEFAULT_CATALOGUE_LANE_REGISTRY,
+  LANE_BACKLOG_SATURATED,
   LANE_BUDGET_EXHAUSTED,
   LANE_PAUSED,
   validateCatalogueLaneRegistry
@@ -246,3 +247,107 @@ function settledSession(id, wallet, lane, workerAmountRaw, at) {
     }
   };
 }
+
+// A lane whose spend cap is deliberately far out of the way, so the BACKLOG gate
+// is the only thing that can refuse. Without this the daily cap fires first and
+// the throttle would look tested while never running.
+function roomyRegistry(maxUnclaimedBacklog = 2) {
+  return validateCatalogueLaneRegistry({
+    liveness: {
+      hypothesis: "liveness hypothesis",
+      dailyCapRaw: "100000000",
+      maxUnclaimedBacklog,
+      stopCondition: "liveness stop",
+      paused: false
+    },
+    "oss-anchored": {
+      hypothesis: "oss hypothesis",
+      dailyCapRaw: "100000000",
+      maxUnclaimedBacklog,
+      stopCondition: "oss stop",
+      paused: false
+    }
+  });
+}
+
+function claimSession(jobId, claimedAt = "2026-08-13T11:30:00.000Z") {
+  return { jobId, wallet: "0x1111111111111111111111111111111111111111", claimedAt };
+}
+
+test("lane stops posting once its unclaimed backlog is full, and says what it withheld", async () => {
+  const store = stateStore();
+  const logged = [];
+  const discipline = new CatalogueLaneDiscipline({
+    stateStore: store,
+    registry: roomyRegistry(2),
+    gasEstimateUsdc: 0,
+    now: () => NOW,
+    logger: { info(details, message) { logged.push({ details, message }); } }
+  });
+  const posted = [];
+
+  await discipline.post(job("live-1"), async () => posted.push("live-1"));
+  await discipline.post(job("live-2"), async () => posted.push("live-2"));
+
+  await assert.rejects(
+    discipline.post(job("live-3"), async () => posted.push("live-3")),
+    (error) => {
+      assert.equal(error.code, LANE_BACKLOG_SATURATED);
+      assert.equal(error.details.lane, "liveness");
+      assert.equal(error.details.unclaimedCount, 2);
+      assert.equal(error.details.maxUnclaimedBacklog, 2);
+      assert.equal(error.details.withheldJobId, "live-3");
+      assert.equal(error.details.oldestUnclaimedAt, NOW.toISOString());
+      return true;
+    }
+  );
+
+  // spend is NOT the reason — the cap is 100 USDC and three jobs cost 1.5.
+  assert.deepEqual(posted, ["live-1", "live-2"]);
+  // no silent caps: the refusal is on the record with its reason
+  assert.ok(logged.some((entry) => entry.message === LANE_BACKLOG_SATURATED
+    && entry.details.withheldJobId === "live-3"));
+  // a saturated lane must not block a different lane
+  await discipline.post(job("oss-1", "oss-anchored"), async () => posted.push("oss-1"));
+  assert.deepEqual(posted, ["live-1", "live-2", "oss-1"]);
+});
+
+test("posting resumes as soon as a queued job is claimed", async () => {
+  const claimed = [];
+  const store = stateStore(claimed);
+  const discipline = new CatalogueLaneDiscipline({
+    stateStore: store,
+    registry: roomyRegistry(2),
+    gasEstimateUsdc: 0,
+    now: () => NOW,
+    logger: { info() {} }
+  });
+  const posted = [];
+
+  await discipline.post(job("live-1"), async () => posted.push("live-1"));
+  await discipline.post(job("live-2"), async () => posted.push("live-2"));
+  await assert.rejects(
+    discipline.post(job("live-3"), async () => posted.push("live-3")),
+    (error) => error.code === LANE_BACKLOG_SATURATED
+  );
+
+  // demand arrives: one queued job gets claimed, so the lane may post again.
+  claimed.push(claimSession("live-1"));
+  await discipline.post(job("live-3"), async () => posted.push("live-3"));
+
+  assert.deepEqual(posted, ["live-1", "live-2", "live-3"]);
+});
+
+test("backlog cap is validated, not silently coerced", () => {
+  assert.throws(
+    () => validateCatalogueLaneRegistry({
+      liveness: {
+        hypothesis: "h",
+        dailyCapRaw: "1000000",
+        maxUnclaimedBacklog: 0,
+        stopCondition: "s"
+      }
+    }),
+    /maxUnclaimedBacklog must be a positive integer/u
+  );
+});
