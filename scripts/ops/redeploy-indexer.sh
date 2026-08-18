@@ -53,6 +53,10 @@ INDEXER_ENV_TARGET=${INDEXER_ENV_TARGET:-/run/agent-stack/indexer.env}
 INDEXER_ENV_TOKEN=${INDEXER_ENV_TOKEN:-/etc/agent-stack/op-indexer.env}
 CADDY_COMPOSE_FILE=${CADDY_COMPOSE_FILE:-"$STACK_ROOT/docker-compose.yml"}
 CADDY_PROJECT_DIRECTORY=${CADDY_PROJECT_DIRECTORY:-"$STACK_ROOT"}
+# Addressed by container name — see the CADDY_CONTAINER rationale in
+# deploy-production.sh. Compose cannot parse the host-side legacy file after the
+# mainnet cutover, which silently emptied these diagnostics.
+CADDY_CONTAINER=${CADDY_CONTAINER:-agent-caddy}
 BRANCH=${BRANCH:-main}
 HEALTH_URL=${HEALTH_URL:-https://index.averray.com/health}
 READY_URL=${READY_URL:-https://index.averray.com/ready}
@@ -193,10 +197,7 @@ dump_indexer_diagnostics() {
   printf '%s\n' "$indexer_log"
 
   echo "Indexer diagnostics: last ${INDEXER_LOG_TAIL} Caddy log lines"
-  docker compose \
-    --project-directory "$CADDY_PROJECT_DIRECTORY" \
-    -f "$CADDY_COMPOSE_FILE" \
-    logs --tail="$INDEXER_LOG_TAIL" caddy || true
+  docker logs --tail="$INDEXER_LOG_TAIL" "$CADDY_CONTAINER" 2>&1 || true
 
   # Skim the indexer log for known fatal-startup patterns and surface a one-line
   # summary. This is the user-visible answer to "why didn't /health bind?" so it

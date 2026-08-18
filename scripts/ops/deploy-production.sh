@@ -21,6 +21,25 @@ BACKEND_CONTAINER=""
 INDEXER_SERVICE=""
 CADDY_COMPOSE_FILE=${CADDY_COMPOSE_FILE:-"$STACK_ROOT/docker-compose.yml"}
 CADDY_PROJECT_DIRECTORY=${CADDY_PROJECT_DIRECTORY:-"$STACK_ROOT"}
+# Caddy is addressed by container name, NOT through docker compose.
+#
+# Caddy lives in the host-side legacy compose project, whose file still declares
+# the pre-cutover backend with `env_file: /run/agent-stack/backend.env`. Since
+# the 2026-07-27 mainnet cutover that path is no longer rendered (mainnet renders
+# to /run/agent-stack-mainnet/), so ANY `docker compose -f <that file> ...` call
+# now dies while parsing the file — before Caddy is even reached:
+#
+#   env file /run/agent-stack/backend.env not found
+#
+# The bug was latent because the Caddyfile is only reloaded when its content
+# changes, and nothing changed it between the cutover and 2026-08-18 (#1158,
+# which added the public /receipts/:id route). Caddy itself was fine throughout:
+# it printed "Valid configuration" and the compose layer failed around it.
+#
+# `docker exec` against the container needs no compose file and therefore cannot
+# be broken by an unrelated stale service definition. This mirrors what
+# flip-caddy-network.sh — the mainnet cutover tool — has always done.
+CADDY_CONTAINER=${CADDY_CONTAINER:-agent-caddy}
 BRANCH=${BRANCH:-main}
 DEPLOY_LOCK_FILE=${DEPLOY_LOCK_FILE:-/tmp/averray-production-deploy.lock}
 DEPLOY_AUTOSTASH=${DEPLOY_AUTOSTASH:-1}
@@ -1394,18 +1413,17 @@ apply_caddy() {
   # validate fails, caddy returns non-zero and `set -e` aborts the
   # deploy before we touch the live config.
   echo "Validating rendered Caddyfile via caddy validate (PR 2.2)..."
-  if ! docker compose \
-        --project-directory "$CADDY_PROJECT_DIRECTORY" \
-        -f "$CADDY_COMPOSE_FILE" \
-        run --rm \
-          -v "$rendered_tmp:/etc/caddy/Caddyfile:ro" \
-          --no-deps \
-          --entrypoint caddy \
-          caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile; then
+  local container_candidate
+  container_candidate="/tmp/averray-caddy-deploy-$$"
+  docker cp "$rendered_tmp" "$CADDY_CONTAINER:$container_candidate"
+  if ! docker exec "$CADDY_CONTAINER" \
+        caddy validate --config "$container_candidate" --adapter caddyfile; then
+    docker exec "$CADDY_CONTAINER" rm -f "$container_candidate" >/dev/null 2>&1 || true
     echo "ERROR: caddy validate rejected the rendered Caddyfile; aborting before reload." >&2
     rm -f "$rendered_tmp"
     return 1
   fi
+  docker exec "$CADDY_CONTAINER" rm -f "$container_candidate" >/dev/null 2>&1 || true
 
   # Phase 2 PR 2.7d.2: content-aware install + restart. Without this
   # check, the basic-auth-hash rotation that landed in PR 2.7d only
@@ -1451,16 +1469,10 @@ apply_caddy() {
   rm -f "$rendered_tmp"
   trap - RETURN
 
-  if ! docker compose \
-    --project-directory "$CADDY_PROJECT_DIRECTORY" \
-    -f "$CADDY_COMPOSE_FILE" \
-      exec -T caddy \
+  if ! docker exec "$CADDY_CONTAINER" \
       caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
     cp -p "$live_backup" "$STACK_ROOT/Caddyfile"
-    docker compose \
-      --project-directory "$CADDY_PROJECT_DIRECTORY" \
-      -f "$CADDY_COMPOSE_FILE" \
-      exec -T caddy \
+    docker exec "$CADDY_CONTAINER" \
       caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1 || true
     rm -f "$live_backup"
     echo "ERROR: Caddy reload rejected the installed file; original bytes restored in place." >&2
@@ -2048,6 +2060,7 @@ deploy() {
       INDEXER_ENV_TOKEN="$CREDENTIALS_ROOT/op-indexer.env" \
       CADDY_COMPOSE_FILE="$CADDY_COMPOSE_FILE" \
       CADDY_PROJECT_DIRECTORY="$CADDY_PROJECT_DIRECTORY" \
+      CADDY_CONTAINER="$CADDY_CONTAINER" \
       INDEXER_BUILD_IMAGE="$indexer_build_image" \
       INDEXER_SCHEMA_PREFLIGHTED=1 \
       INDEXER_SCHEMA_LOCK_HELD=1 \
