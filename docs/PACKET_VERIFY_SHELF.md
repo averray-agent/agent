@@ -1,6 +1,6 @@
 # PACKET — Averray Verify (the shelf)
 
-- **Status:** SPEC — ready for Codex once the two decisions in §8 are made.
+- **Status:** SPEC — RATIFIED 2026-08-18, ready for Codex. Both §5 decisions made.
 - **Phase:** V of [`OUTCOME_PIVOT_BUILD_PLAN.md`](./OUTCOME_PIVOT_BUILD_PLAN.md). Absorbs
   the x402 verification-runs product (session task #237).
 - **Author:** Claude, 2026-08-18, grounded by reading `origin/main`.
@@ -159,7 +159,20 @@ Routing, aggregation across receipts, the validator marketplace, the warranty,
 continuous monitoring, and the GitHub issue-to-bounty app. All gated in the build
 plan; do not let them creep in here.
 
-## 5. Decisions for Pascal
+## 5. Decisions — RATIFIED 2026-08-18 (Pascal)
+
+1. **Price: $5 flat per run**, the same across all three profiles. One number to
+   publish, cheap enough to be an easy first yes, expensive enough that a second
+   purchase is a real signal. **An `inconclusive` run is never billed** — the
+   honest default, and it stops our own runner flakiness from inflating revenue
+   or corrupting the north-star metric.
+2. **Revenue accumulates on Base and is swept to the Hub treasury** on a
+   schedule. The protocol-revenue line stays single-sourced. **The sweep must be
+   an explicit, evidenced transaction, never implied**, and until the first sweep
+   lands, verify revenue is reported as its own line and never folded into
+   protocol revenue.
+
+### Original framing (kept for rationale)
 
 1. **Pricing per profile**, and the `inconclusive` rule (not billed vs free
    rerun). Anchor: measured lifecycle gas is ~$0.059, and a verify run carries no
