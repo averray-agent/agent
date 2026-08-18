@@ -10,10 +10,12 @@ import { hashCanonicalContent } from "../../mcp-server/src/core/canonical-conten
 import { MemoryStateStore } from "../../mcp-server/src/core/state-store.js";
 import {
   CREATE_SINGLE_PAYOUT_SIGNATURE,
+  assertBoardProfileAgreement,
   assertDefinitionMatchesDraft,
   buildFundingMath,
   findMatchingExternalCatalogJob,
   parseArgs,
+  resolveBoardProfile,
   runPosterBounty,
   validateAndEncodeDraftCalldata,
   validateArgs
@@ -78,7 +80,7 @@ function makeDraftForDefinition(definition) {
 function inlineArgs(extra = {}) {
   return {
     profile: "mainnet",
-    apiBaseUrl: "https://api.averray.com",
+    apiBaseUrl: undefined,
     definitionFile: undefined,
     draftId: undefined,
     signerSecretRef: "op://mainnet-poster/private-key/credential",
@@ -96,6 +98,47 @@ function inlineArgs(extra = {}) {
   };
 }
 
+function boardHealthFetch(chainId) {
+  return async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => ({ status: "ok", auth: { chainId } })
+  });
+}
+
+function mismatchDrillDependencies({ profile, boardChainId }) {
+  const calls = { login: 0, draft: 0 };
+  const expectedChainId = profile === "mainnet" ? 420420419 : 420420417;
+  return {
+    calls,
+    dependencies: {
+      fetchImpl: boardHealthFetch(boardChainId),
+      loadManifest: async () => ({
+        path: `/repo/deployments/${profile}.json`,
+        manifest: { ...MANIFEST, profile }
+      }),
+      createRpc: async () => ({
+        provider: { destroy: async () => {} },
+        chainId: expectedChainId,
+        selectedUrl: `https://rpc.example/${profile}/`,
+        rpcUrls: [`https://rpc.example/${profile}/`]
+      }),
+      loadSecret: () => "concealed-key",
+      makeWallet: () => ({ address: POSTER }),
+      login: async () => {
+        calls.login += 1;
+        return { token: "concealed-token" };
+      },
+      postDraft: async () => {
+        calls.draft += 1;
+        throw new Error("DRAFT_CREATION_REACHED");
+      },
+      log: () => {}
+    }
+  };
+}
+
 test("CLI is dry-run by default and requires an explicit profile", () => {
   const parsed = parseArgs([
     "--profile", "mainnet",
@@ -105,6 +148,7 @@ test("CLI is dry-run by default and requires an explicit profile", () => {
   ]);
   assert.equal(parsed.execute, false);
   assert.equal(parsed.profile, "mainnet");
+  assert.equal(parsed.apiBaseUrl, undefined);
 
   const missingProfile = { ...parsed, profile: undefined };
   assert.throws(
@@ -116,6 +160,58 @@ test("CLI is dry-run by default and requires an explicit profile", () => {
     () => validateArgs({ ...inlineArgs(), execute: true }),
     /--execute requires --draft-id from a reviewed dry-run/u
   );
+});
+
+test("mainnet profile selects the hosted mainnet board and accepts its reported chain", async () => {
+  const board = resolveBoardProfile({ profile: "mainnet", apiBaseUrl: undefined });
+  assert.equal(board.apiBaseUrl, "https://api.averray.com");
+  assert.equal(board.expectedChainId, 420420419);
+  assert.deepEqual(
+    await assertBoardProfileAgreement({ ...board, fetchImpl: boardHealthFetch(420420419) }),
+    {
+      healthUrl: "https://api.averray.com/health",
+      expectedChainId: 420420419,
+      reportedChainId: 420420419
+    }
+  );
+});
+
+test("testnet profile without an explicit board refuses because no hosted board exists", () => {
+  assert.throws(
+    () => resolveBoardProfile({ profile: "testnet", apiBaseUrl: undefined }),
+    /No hosted board for profile testnet \(expected chainId 420420417\)/u
+  );
+});
+
+test("testnet profile against the mainnet board refuses before SIWE or draft creation", async () => {
+  const drill = mismatchDrillDependencies({ profile: "testnet", boardChainId: 420420419 });
+  await assert.rejects(
+    runPosterBounty(
+      inlineArgs({ profile: "testnet", apiBaseUrl: "https://api.averray.com" }),
+      drill.dependencies
+    ),
+    /Board\/profile chain mismatch: profile testnet expects chainId 420420417, but https:\/\/api\.averray\.com\/health reports chainId 420420419\. Refusing SIWE or draft creation\./u
+  );
+  assert.deepEqual(drill.calls, { login: 0, draft: 0 });
+});
+
+test("hand-passed API base URL cannot bypass the profile/board chain assertion", async () => {
+  const drill = mismatchDrillDependencies({ profile: "mainnet", boardChainId: 420420417 });
+  await assert.rejects(
+    runPosterBounty(
+      inlineArgs({ apiBaseUrl: "http://localhost:8787" }),
+      drill.dependencies
+    ),
+    /Board\/profile chain mismatch: profile mainnet expects chainId 420420419, but http:\/\/localhost:8787\/health reports chainId 420420417\. Refusing SIWE or draft creation\./u
+  );
+  assert.deepEqual(drill.calls, { login: 0, draft: 0 });
+});
+
+test("profile/board mismatch mutation anchor occurs exactly once", async () => {
+  const source = await readFile(new URL("./post-external-bounty.mjs", import.meta.url), "utf8");
+  const anchor = "if (reportedChainId !== expectedChainId) {";
+  const anchorOccurrences = source.split(anchor).length - 1;
+  assert.equal(anchorOccurrences, 1, `anchorOccurrences=${anchorOccurrences}`);
 });
 
 test("500 bps funding math is poster-side additive: 1.05 / 1.00 / 0.05", () => {
@@ -298,6 +394,7 @@ test("default dry-run performs SIWE and draft creation but never enters write ex
   let watchCalls = 0;
   let destroyed = false;
   const result = await runPosterBounty(inlineArgs(), {
+    fetchImpl: boardHealthFetch(420420419),
     loadManifest: async () => ({ path: "/repo/deployments/mainnet.json", manifest: MANIFEST }),
     createRpc: async () => ({
       provider: { destroy: async () => { destroyed = true; } },
@@ -387,6 +484,7 @@ test("execute reloads the reviewed draft id and never creates a second draft", a
   };
   const args = inlineArgs({ execute: true, draftId: DRAFT_ID });
   const result = await runPosterBounty(args, {
+    fetchImpl: boardHealthFetch(420420419),
     loadManifest: async () => ({ path: "/repo/deployments/mainnet.json", manifest: MANIFEST }),
     createRpc: async () => ({
       provider: { destroy: async () => {} },
