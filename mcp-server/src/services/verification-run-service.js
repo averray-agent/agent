@@ -53,9 +53,9 @@ export class VerificationRunService {
     inputs,
     paymentProof
   } = {}) {
-    const profile = this.profileRegistry.get(profileName, profileVersion);
+    const profile = this.profileRegistry.requireAvailable(profileName, profileVersion);
     validateAgainstSchema({ target, inputs }, profile.inputSchema, "verifyRequest");
-    this.runner.validate?.({ profile, target, inputs });
+    await this.runner.validate?.({ profile, target, inputs });
     const requestHash = hashCanonicalContent({ profile: profile.ref, target, inputs });
     const paymentKey = paymentProof === undefined || paymentProof === null || paymentProof === ""
       ? undefined

@@ -19,9 +19,7 @@ import { PolicyService } from "../core/policy-service.js";
 import { BUILTIN_POLICIES } from "../core/builtin-policies.js";
 import { BlockchainGateway } from "../blockchain/gateway.js";
 import { VerifierService } from "./verifier-service.js";
-import { GitPatchTestsRunner } from "./git-patch-tests-runner.js";
-import { VerificationProfileRegistry } from "./verification-profile-registry.js";
-import { VerificationRunService } from "./verification-run-service.js";
+import { createVerificationShelf } from "./verification-shelf.js";
 import { loadLocalEnv } from "./env-loader.js";
 import { PimlicoClient } from "./pimlico-client.js";
 import { EventBus } from "../core/event-bus.js";
@@ -530,20 +528,10 @@ export async function createPlatformRuntime() {
     logger,
     () => new VerifierService(platformService, stateStore, gateway)
   );
-  const verificationProfileRegistry = initStep(
-    "init-verification-profile-registry",
+  const { verificationProfileRegistry, verificationRunService } = await initStepAsync(
+    "init-verification-shelf",
     logger,
-    () => new VerificationProfileRegistry()
-  );
-  const verificationRunService = initStep(
-    "init-verification-run-service",
-    logger,
-    () => new VerificationRunService({
-      stateStore,
-      profileRegistry: verificationProfileRegistry,
-      runner: new GitPatchTestsRunner(),
-      publicReceiptBaseUrl: process.env.PUBLIC_BASE_URL
-    })
+    () => createVerificationShelf({ stateStore, logger })
   );
   const externalPostingConfig = initStep(
     "load-external-posting-config",
@@ -989,6 +977,18 @@ function createMetrics() {
 function initStep(name, logger, factory) {
   try {
     return factory();
+  } catch (error) {
+    logger.error(
+      { step: name, err: error instanceof Error ? error : new Error(String(error)) },
+      "bootstrap.init_failed"
+    );
+    throw error;
+  }
+}
+
+async function initStepAsync(name, logger, factory) {
+  try {
+    return await factory();
   } catch (error) {
     logger.error(
       { step: name, err: error instanceof Error ? error : new Error(String(error)) },
