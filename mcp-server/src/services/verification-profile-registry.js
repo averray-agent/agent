@@ -1,4 +1,4 @@
-import { ConflictError, NotFoundError, ValidationError } from "../core/errors.js";
+import { AppError, ConflictError, NotFoundError, ValidationError } from "../core/errors.js";
 import { AUTO_DECIDABLE_MODES } from "./submitted-job-auto-verifier.js";
 
 export const VERIFY_PROFILE_PRICE = Object.freeze({
@@ -16,6 +16,8 @@ export const VERIFY_INCONCLUSIVE_REASONS = Object.freeze([
   "ambiguous_evidence",
   "runner_fault"
 ]);
+
+export const GIT_PATCH_TESTS_PROFILE_REF = "git-patch-tests-v1@1";
 
 const GIT_ARTIFACT_SCHEMA = Object.freeze({
   type: "object",
@@ -102,10 +104,18 @@ const GIT_PATCH_TESTS_V1 = {
 };
 
 export class VerificationProfileRegistry {
-  constructor({ profiles = [GIT_PATCH_TESTS_V1], autoDecidableModes = AUTO_DECIDABLE_MODES } = {}) {
+  constructor({
+    profiles = [GIT_PATCH_TESTS_V1],
+    autoDecidableModes = AUTO_DECIDABLE_MODES,
+    availabilityByProfile = {}
+  } = {}) {
     this.autoDecidableModes = new Set(autoDecidableModes);
     this.profiles = new Map();
+    this.availabilityByProfile = new Map();
     for (const profile of profiles) this.publish(profile);
+    for (const [ref, availability] of Object.entries(availabilityByProfile)) {
+      if (this.profiles.has(ref)) this.availabilityByProfile.set(ref, normalizeAvailability(availability));
+    }
   }
 
   publish(candidate) {
@@ -136,10 +146,36 @@ export class VerificationProfileRegistry {
     return profile;
   }
 
+  requireAvailable(name, version) {
+    const profile = this.get(name, version);
+    const availability = this.availability(profile.ref);
+    if (availability.status !== "available") {
+      throw new AppError(
+        `Verification profile ${profile.ref} is temporarily unavailable: ${availability.reason}`,
+        {
+          name: "VerificationProfileUnavailableError",
+          code: "verification_profile_unavailable",
+          statusCode: 503,
+          details: { profile: profile.ref, ...availability }
+        }
+      );
+    }
+    return profile;
+  }
+
+  availability(ref) {
+    return this.availabilityByProfile.get(ref) ?? AVAILABLE;
+  }
+
   list() {
-    return [...this.profiles.values()];
+    return [...this.profiles.values()].map((profile) => deepFreeze(structuredClone({
+      ...profile,
+      availability: this.availability(profile.ref)
+    })));
   }
 }
+
+const AVAILABLE = deepFreeze({ status: "available" });
 
 export function profileRef(name, version) {
   const normalizedName = String(name ?? "").trim();
@@ -166,6 +202,13 @@ function normalizeProfile(profile) {
     throw new ValidationError("Only published verification profiles may enter the public registry.");
   }
   return { ...profile, name: profile.name.trim(), handler: profile.handler.trim(), version, handlerVersion };
+}
+
+function normalizeAvailability(value) {
+  if (value?.status === "available") return AVAILABLE;
+  const reasonCode = String(value?.reasonCode ?? "verification_profile_dependency_unavailable").trim();
+  const reason = String(value?.reason ?? "A required verification dependency is unavailable.").trim();
+  return deepFreeze({ status: "unavailable", reasonCode, reason });
 }
 
 function deepFreeze(value) {

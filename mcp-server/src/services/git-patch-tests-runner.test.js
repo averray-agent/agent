@@ -19,8 +19,8 @@ const inputs = {
   testCommand: ["npm", "test"]
 };
 
-test("git-patch-tests-v1 translates the public request into the strict offline Witness contract", () => {
-  const contract = buildGitPatchVerificationContract({ profile, runId: "verify-1", target, inputs });
+test("git-patch-tests-v1 translates the public request into the strict offline Witness contract", async () => {
+  const contract = await buildGitPatchVerificationContract({ profile, runId: "verify-1", target, inputs });
   assert.deepEqual(contract.subject.acquisition.git_bundle, inputs.gitBundle);
   assert.equal(contract.subject.acquisition.base_commit, target.commit);
   assert.equal(contract.checks.targeted[0].expected_on_base, "fail");

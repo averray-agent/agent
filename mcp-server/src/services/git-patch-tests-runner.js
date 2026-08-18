@@ -4,11 +4,18 @@ import { join, posix } from "node:path";
 
 import { hashCanonicalContent } from "../core/canonical-content.js";
 import { ValidationError } from "../core/errors.js";
-import { ArtifactAcquisitionError, materializeArtifact } from "../../../witness/src/artifacts.mjs";
-import { executeVerificationContract, VERDICTS } from "../../../witness/src/executor.mjs";
-import { resolveJudgingCommandDefinition } from "../../../witness/src/verification-contract.mjs";
 
 const PROFILE_NAME = "git-patch-tests-v1";
+const WITNESS_MODULE_URLS = Object.freeze({
+  artifacts: new URL("../../../witness/src/artifacts.mjs", import.meta.url).href,
+  executor: new URL("../../../witness/src/executor.mjs", import.meta.url).href,
+  verificationContract: new URL("../../../witness/src/verification-contract.mjs", import.meta.url).href
+});
+const VERDICTS = Object.freeze({
+  PASS: "PASS",
+  FAIL: "FAIL",
+  POLICY_VIOLATION: "POLICY_VIOLATION"
+});
 const INTEGRITY_FORBID = Object.freeze([
   "test_deletion",
   "skip_or_xfail_markers_added",
@@ -21,24 +28,43 @@ const INTEGRITY_FORBID = Object.freeze([
 
 export class GitPatchTestsRunner {
   constructor({
-    executeImpl = executeVerificationContract,
-    materializeArtifactImpl = materializeArtifact,
+    loadWitnessModulesImpl = loadWitnessModules,
+    executeImpl,
+    materializeArtifactImpl,
     makeTemporaryDirectory = () => mkdtemp(join(tmpdir(), "averray-verify-")),
     removeTemporaryDirectory = (path) => rm(path, { recursive: true, force: true })
   } = {}) {
+    this.loadWitnessModulesImpl = loadWitnessModulesImpl;
     this.executeImpl = executeImpl;
     this.materializeArtifactImpl = materializeArtifactImpl;
     this.makeTemporaryDirectory = makeTemporaryDirectory;
     this.removeTemporaryDirectory = removeTemporaryDirectory;
+    this.witnessModulesPromise = undefined;
   }
 
-  validate({ profile, target, inputs }) {
+  async inspectAvailability() {
     try {
-      buildGitPatchVerificationContract({
+      await this.loadWitnessModules();
+      return Object.freeze({ status: "available" });
+    } catch (error) {
+      return Object.freeze({
+        status: "unavailable",
+        reasonCode: "witness_modules_unavailable",
+        reason: "The Witness runtime modules are not installed or could not be loaded by this backend.",
+        error: error instanceof Error ? error : new Error(String(error))
+      });
+    }
+  }
+
+  async validate({ profile, target, inputs }) {
+    try {
+      const witnessModules = await this.loadWitnessModules();
+      await buildGitPatchVerificationContract({
         profile,
         runId: hashCanonicalContent({ profile: profile.ref, target, inputs }),
         target,
-        inputs
+        inputs,
+        witnessModules
       });
     } catch (error) {
       // A declared resource breach is a run outcome, not malformed JSON. Let
@@ -53,22 +79,29 @@ export class GitPatchTestsRunner {
     if (profile?.name !== PROFILE_NAME) {
       throw new ValidationError(`No standalone runner is registered for profile ${profile?.name ?? "missing"}.`);
     }
-    const contract = buildGitPatchVerificationContract({ profile, runId, target, inputs });
+    const witnessModules = await this.loadWitnessModules();
+    const contract = await buildGitPatchVerificationContract({
+      profile,
+      runId,
+      target,
+      inputs,
+      witnessModules
+    });
     const temporaryDirectory = await this.makeTemporaryDirectory();
     try {
-      const patch = await this.materializeArtifactImpl(
+      const patch = await (this.materializeArtifactImpl ?? witnessModules.materializeArtifact)(
         inputs.patch,
         join(temporaryDirectory, "candidate.patch"),
         { baseDirectory: temporaryDirectory }
       );
-      const report = await this.executeImpl({
+      const report = await (this.executeImpl ?? witnessModules.executeVerificationContract)({
         contract,
         candidatePatch: patch.path,
         cwd: temporaryDirectory
       });
       return mapWitnessReport({ report, target, inputs });
     } catch (error) {
-      if (error instanceof ArtifactAcquisitionError) {
+      if (error instanceof witnessModules.ArtifactAcquisitionError) {
         return {
           status: "inconclusive",
           reason: "target_unreachable",
@@ -87,12 +120,38 @@ export class GitPatchTestsRunner {
       await this.removeTemporaryDirectory(temporaryDirectory);
     }
   }
+
+  loadWitnessModules() {
+    this.witnessModulesPromise ??= Promise.resolve().then(() => this.loadWitnessModulesImpl());
+    return this.witnessModulesPromise;
+  }
 }
 
-export function buildGitPatchVerificationContract({ profile, target, inputs }) {
+export async function loadWitnessModules({ importModule = (specifier) => import(specifier) } = {}) {
+  const [artifacts, executor, verificationContract] = await Promise.all([
+    importModule(WITNESS_MODULE_URLS.artifacts),
+    importModule(WITNESS_MODULE_URLS.executor),
+    importModule(WITNESS_MODULE_URLS.verificationContract)
+  ]);
+  const dependencies = {
+    ArtifactAcquisitionError: artifacts.ArtifactAcquisitionError,
+    materializeArtifact: artifacts.materializeArtifact,
+    executeVerificationContract: executor.executeVerificationContract,
+    resolveJudgingCommandDefinition: verificationContract.resolveJudgingCommandDefinition
+  };
+  for (const [name, dependency] of Object.entries(dependencies)) {
+    if (typeof dependency !== "function") {
+      throw new Error(`Witness runtime module is missing the ${name} export.`);
+    }
+  }
+  return Object.freeze(dependencies);
+}
+
+export async function buildGitPatchVerificationContract({ profile, target, inputs, witnessModules }) {
   validateGitPatchInputs({ profile, target, inputs });
+  const dependencies = witnessModules ?? await loadWitnessModules();
   const workingDirectory = normalizeRepositoryPath(inputs.workingDirectory ?? ".", { allowDot: true });
-  const commandDefinition = resolveJudgingCommandDefinition(inputs.testCommand, { workingDirectory });
+  const commandDefinition = dependencies.resolveJudgingCommandDefinition(inputs.testCommand, { workingDirectory });
   if (!commandDefinition.resolved) {
     throw new ValidationError(
       `The test command cannot be pinned to a repository definition: ${commandDefinition.reason}.`
