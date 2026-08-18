@@ -16,6 +16,10 @@
     "protocolFeeAmount": 0.05,
     "protocolFeeAmountRaw": "50000",
     "protocolFeeBps": 500,
+    "rewardAmount": 0.25,
+    "rewardAmountRaw": "250000",
+    "posterTotalAmount": 0.3,
+    "posterTotalAmountRaw": "300000",
     "gasRetention": {
       "retainedRaw": "50000",
       "rewardRaw": "250000"

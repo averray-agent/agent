@@ -79,7 +79,7 @@
     },
     "settlement": {
       "type": "object",
-      "required": ["worker", "treasuryAccount", "asset", "assetSymbol", "workerAmount", "workerAmountRaw", "protocolFeeAmount", "protocolFeeAmountRaw", "protocolFeeBps", "rewardAmount", "rewardAmountRaw", "pinnedRewardAmount", "pinnedRewardAmountRaw", "gasRetentionAmount", "gasRetentionAmountRaw", "gasRetentionBps", "brokered", "waived"],
+      "required": ["worker", "treasuryAccount", "asset", "assetSymbol", "workerAmount", "workerAmountRaw", "protocolFeeAmount", "protocolFeeAmountRaw", "protocolFeeBps", "rewardAmount", "rewardAmountRaw", "posterTotalAmount", "posterTotalAmountRaw", "gasRetentionAmount", "gasRetentionAmountRaw", "gasRetentionBps", "brokered", "waived"],
       "properties": {
         "worker": { "$ref": "#/$defs/address" },
         "treasuryAccount": { "$ref": "#/$defs/address" },
@@ -92,8 +92,8 @@
         "protocolFeeBps": { "type": "integer", "minimum": 0 },
         "rewardAmount": { "$ref": "#/$defs/displayAmount" },
         "rewardAmountRaw": { "$ref": "#/$defs/rawAmount" },
-        "pinnedRewardAmount": { "$ref": "#/$defs/displayAmount" },
-        "pinnedRewardAmountRaw": { "$ref": "#/$defs/rawAmount" },
+        "posterTotalAmount": { "$ref": "#/$defs/displayAmount" },
+        "posterTotalAmountRaw": { "$ref": "#/$defs/rawAmount" },
         "gasRetentionAmount": { "$ref": "#/$defs/displayAmount" },
         "gasRetentionAmountRaw": { "$ref": "#/$defs/rawAmount" },
         "gasRetentionBps": { "type": "integer", "minimum": 0, "maximum": 10000 },

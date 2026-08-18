@@ -88,17 +88,51 @@ test("2026-08-16 live settlement reconciles payout, retention, and poster fee", 
   assert.equal(receipt.settlement.workerAmountRaw, "200000");
   assert.equal(receipt.settlement.gasRetentionAmountRaw, "50000");
   assert.equal(receipt.settlement.protocolFeeAmountRaw, "50000");
-  assert.equal(receipt.settlement.pinnedRewardAmountRaw, "250000");
-  assert.equal(receipt.settlement.rewardAmountRaw, "300000");
+  assert.equal(receipt.settlement.rewardAmountRaw, "250000");
+  assert.equal(receipt.settlement.rewardAmount, "0.25");
+  assert.equal(receipt.settlement.posterTotalAmountRaw, "300000");
+  assert.equal(receipt.settlement.posterTotalAmount, "0.3");
   assert.equal(
     BigInt(receipt.settlement.rewardAmountRaw),
     BigInt(receipt.settlement.workerAmountRaw)
       + BigInt(receipt.settlement.gasRetentionAmountRaw)
+  );
+  assert.equal(
+    BigInt(receipt.settlement.posterTotalAmountRaw),
+    BigInt(receipt.settlement.rewardAmountRaw)
       + BigInt(receipt.settlement.protocolFeeAmountRaw)
   );
+  assert.equal(receipt.intent.valueAtRisk.amountRaw, receipt.settlement.rewardAmountRaw);
   assert.equal(receipt.settlement.settlementTx, live.source.transactionHash);
   assert.equal(receipt.settlement.gasRetentionBps, 2000);
   assert.equal(receipt.execution.providerClass, "ours");
+});
+
+test("worker-facing reward must reconcile to payout plus gas retention", () => {
+  const fixture = input();
+  fixture.verification.settlement.rewardAmountRaw = "249999";
+  assert.throws(
+    () => buildWorkReceipt(fixture),
+    /rewardAmountRaw must equal workerAmountRaw \+ gasRetentionAmountRaw/u
+  );
+});
+
+test("poster total must reconcile to reward plus poster-side protocol fee", () => {
+  const fixture = input();
+  fixture.verification.settlement.posterTotalAmountRaw = "299999";
+  assert.throws(
+    () => buildWorkReceipt(fixture),
+    /posterTotalAmountRaw must equal rewardAmountRaw \+ protocolFeeAmountRaw/u
+  );
+});
+
+test("claim-time value at risk cannot drift from the settled worker reward", () => {
+  const fixture = input();
+  fixture.session.jobSnapshot.claimEconomics.gasRetention.rewardRaw = "260000";
+  assert.throws(
+    () => buildWorkReceipt(fixture),
+    /intent valueAtRisk\.amountRaw must equal settlement rewardAmountRaw/u
+  );
 });
 
 test("waived brokered settlement records zero retention and remains reconcilable", () => {
@@ -115,7 +149,8 @@ test("waived brokered settlement records zero retention and remains reconcilable
   const receipt = buildWorkReceipt(fixture);
   assert.equal(receipt.settlement.waived, true);
   assert.equal(receipt.settlement.gasRetentionAmountRaw, "0");
-  assert.equal(receipt.settlement.rewardAmountRaw, "300000");
+  assert.equal(receipt.settlement.rewardAmountRaw, "250000");
+  assert.equal(receipt.settlement.posterTotalAmountRaw, "300000");
 });
 
 test("claim-time chain read failure remains explicit in receipt intent", () => {

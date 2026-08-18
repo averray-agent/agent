@@ -30,7 +30,10 @@ import "../styles/global.css";
           <p><strong>Success policy</strong> <span data-field="intent.successPolicy.profile"></span> v<span data-field="intent.successPolicy.version"></span></p>
           <p><strong>Artifact</strong> <code data-field="execution.artifactHash"></code></p>
           <p><strong>Verified</strong> <time data-field="timestamps.verifiedAt"></time></p>
-          <p data-settlement hidden><strong>Settlement</strong> <span data-field="settlement.workerAmount"></span> <span data-field="settlement.assetSymbol"></span> paid; <span data-field="settlement.gasRetentionAmount"></span> retained.</p>
+          <div data-settlement hidden>
+            <p><strong>Worker reward</strong> <span data-field="settlement.rewardAmount"></span> <span data-field="settlement.assetSymbol"></span>: <span data-field="settlement.workerAmount"></span> paid; <span data-field="settlement.gasRetentionAmount"></span> retained.</p>
+            <p><strong>Poster total</strong> <span data-field="settlement.posterTotalAmount"></span> <span data-field="settlement.assetSymbol"></span>, including <span data-field="settlement.protocolFeeAmount"></span> protocol fee.</p>
+          </div>
           <details>
             <summary>Canonical JSON</summary>
             <pre data-receipt-json></pre>

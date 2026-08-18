@@ -120,6 +120,8 @@ test("approved verification forward-emits the content-addressed work receipt and
   const byId = await stateStore.getWorkReceiptDocument(resolved.workReceiptId);
   const bySessionAlias = await stateStore.getRunReceiptDocument(submitted.sessionId);
   assert.equal(byId.receiptId, resolved.workReceiptId);
+  assert.equal(byId.settlement.rewardAmountRaw, "250000");
+  assert.equal(byId.settlement.posterTotalAmountRaw, "300000");
   assert.equal(bySessionAlias.schemaVersion, "averray.work-receipt.v1");
   assert.equal(bySessionAlias.receiptId, byId.receiptId);
 });
