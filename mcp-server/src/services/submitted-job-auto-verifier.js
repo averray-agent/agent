@@ -30,7 +30,7 @@ const DEFAULT_CANDIDATE_TIMEOUT_MS = 3 * 60 * 1000;
 
 // Hard allowlist of machine-decidable verifier handlers. human_fallback and
 // github_pr are intentionally excluded and cannot be re-enabled via config.
-const AUTO_DECIDABLE_MODES = Object.freeze(["benchmark", "deterministic"]);
+export const AUTO_DECIDABLE_MODES = Object.freeze(["benchmark", "deterministic"]);
 const BY_DESIGN_SUBMITTED_SKIP_REASONS = new Set([
   "non_auto_mode",
   "already_verified",

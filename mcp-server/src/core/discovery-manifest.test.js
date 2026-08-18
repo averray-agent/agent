@@ -60,7 +60,11 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.equal(manifest.schemas.jobSchemaPathTemplate, "https://api.example.com/schemas/jobs/<name>.json");
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/schemas/jobs"));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/session/state-machine"));
+  assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/verify/profiles"));
+  assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/verify/runs"));
+  assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/verify/runs/:runId"));
   assert.ok(manifest.tools.some((tool) => tool.name === "listJobSchemas"));
+  assert.ok(manifest.tools.some((tool) => tool.name === "listVerificationProfiles"));
   assert.ok(manifest.tools.some((tool) => tool.name === "getSessionStateMachine"));
   assert.equal(manifest.auth.schemeId, "SIWE_JWT");
   assert.deepEqual(manifest.auth.supportedWalletModes, ["evm-siwe"]);

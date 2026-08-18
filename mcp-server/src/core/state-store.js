@@ -89,6 +89,16 @@ redis.call("set", KEYS[3], ARGV[3])
 return 1
 `;
 
+const RESERVE_VERIFICATION_RUN_SCRIPT = `
+local existing = redis.call("get", KEYS[1])
+if existing then
+  return {0, existing}
+end
+redis.call("set", KEYS[1], ARGV[1])
+redis.call("set", KEYS[2], ARGV[2])
+return {1, ARGV[1]}
+`;
+
 export class MemoryStateStore {
   constructor() {
     this.sessions = new Map();
@@ -103,6 +113,8 @@ export class MemoryStateStore {
     this.runReceiptDocuments = new Map();
     this.workReceiptDocuments = new Map();
     this.sessionWorkReceiptDocuments = new Map();
+    this.verificationRuns = new Map();
+    this.verificationPaymentRuns = new Map();
     this.claimLocks = new Map();
     this.nonces = new Map();
     this.rateLimits = new Map();
@@ -288,6 +300,33 @@ export class MemoryStateStore {
     if (!this.sessionWorkReceiptDocuments.has(sessionId)) {
       this.sessionWorkReceiptDocuments.set(sessionId, stored);
     }
+    return cloneJsonRecord(stored);
+  }
+
+  async getVerificationRun(runId) {
+    return cloneJsonRecord(this.verificationRuns.get(String(runId)));
+  }
+
+  async getVerificationRunByPaymentId(paymentId) {
+    const runId = this.verificationPaymentRuns.get(String(paymentId));
+    return runId ? this.getVerificationRun(runId) : undefined;
+  }
+
+  async reserveVerificationRun(run, { paymentId } = {}) {
+    const key = String(paymentId ?? "");
+    const existingRunId = this.verificationPaymentRuns.get(key);
+    if (existingRunId) {
+      return { created: false, run: await this.getVerificationRun(existingRunId) };
+    }
+    const stored = cloneJsonRecord(run);
+    this.verificationPaymentRuns.set(key, stored.runId);
+    this.verificationRuns.set(stored.runId, stored);
+    return { created: true, run: cloneJsonRecord(stored) };
+  }
+
+  async updateVerificationRun(runId, run) {
+    const stored = cloneJsonRecord(run);
+    this.verificationRuns.set(String(runId), stored);
     return cloneJsonRecord(stored);
   }
 
@@ -1001,6 +1040,40 @@ export class RedisStateStore {
     await this.client.set(this.key("work-receipt", receiptId), encoded, { NX: true });
     await this.client.set(this.key("work-receipt-session", sessionId), encoded, { NX: true });
     return this.getWorkReceiptDocument(receiptId);
+  }
+
+  async getVerificationRun(runId) {
+    await this.connect();
+    const raw = await this.client.get(this.key("verification-run", String(runId)));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async getVerificationRunByPaymentId(paymentId) {
+    await this.connect();
+    const runId = await this.client.get(this.key("verification-payment", String(paymentId)));
+    return runId ? this.getVerificationRun(runId) : undefined;
+  }
+
+  async reserveVerificationRun(run, { paymentId } = {}) {
+    await this.connect();
+    const reply = await this.client.eval(RESERVE_VERIFICATION_RUN_SCRIPT, {
+      keys: [
+        this.key("verification-payment", String(paymentId ?? "")),
+        this.key("verification-run", String(run.runId))
+      ],
+      arguments: [String(run.runId), JSON.stringify(run)]
+    });
+    const [createdRaw, runId] = Array.isArray(reply) ? reply : [0, undefined];
+    return {
+      created: Number(createdRaw) === 1,
+      run: await this.getVerificationRun(runId)
+    };
+  }
+
+  async updateVerificationRun(runId, run) {
+    await this.connect();
+    await this.client.set(this.key("verification-run", String(runId)), JSON.stringify(run));
+    return this.getVerificationRun(runId);
   }
 
   async listSessionsByWallet(wallet, limit = 10, offset = 0) {

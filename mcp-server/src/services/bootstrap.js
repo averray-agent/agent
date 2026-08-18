@@ -19,6 +19,9 @@ import { PolicyService } from "../core/policy-service.js";
 import { BUILTIN_POLICIES } from "../core/builtin-policies.js";
 import { BlockchainGateway } from "../blockchain/gateway.js";
 import { VerifierService } from "./verifier-service.js";
+import { GitPatchTestsRunner } from "./git-patch-tests-runner.js";
+import { VerificationProfileRegistry } from "./verification-profile-registry.js";
+import { VerificationRunService } from "./verification-run-service.js";
 import { loadLocalEnv } from "./env-loader.js";
 import { PimlicoClient } from "./pimlico-client.js";
 import { EventBus } from "../core/event-bus.js";
@@ -527,6 +530,21 @@ export async function createPlatformRuntime() {
     logger,
     () => new VerifierService(platformService, stateStore, gateway)
   );
+  const verificationProfileRegistry = initStep(
+    "init-verification-profile-registry",
+    logger,
+    () => new VerificationProfileRegistry()
+  );
+  const verificationRunService = initStep(
+    "init-verification-run-service",
+    logger,
+    () => new VerificationRunService({
+      stateStore,
+      profileRegistry: verificationProfileRegistry,
+      runner: new GitPatchTestsRunner(),
+      publicReceiptBaseUrl: process.env.PUBLIC_BASE_URL
+    })
+  );
   const externalPostingConfig = initStep(
     "load-external-posting-config",
     logger,
@@ -897,6 +915,8 @@ export async function createPlatformRuntime() {
     rewardBankHealthProvider,
     policyService,
     verifierService,
+    verificationProfileRegistry,
+    verificationRunService,
     externalPostingService,
     x402PosterRamp,
     externalPostingWatcher,

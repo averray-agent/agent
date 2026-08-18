@@ -87,6 +87,9 @@ const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/badges", description: "Recent public badge receipts for completed sessions." },
   { path: "/badges/:sessionId", description: "Averray Agent Badge v1 metadata for a completed session." },
   { path: "/receipts/:receiptId", description: "Immutable Averray Work Receipt v1 JSON addressed by its canonical content hash." },
+  { path: "/verify/profiles", description: "Published immutable verification profiles, pinned versions, limits, success criteria, and flat Base USDC pricing." },
+  { path: "/verify/runs", description: "Payment-gated standalone verification-run creation; the separate payment-intake adapter must authorize the exact request before work starts." },
+  { path: "/verify/runs/:runId", description: "Poll one standalone verification run by its opaque run id." },
   { path: "/agents", description: "Recent public agent directory derived from live session and reputation data." },
   { path: "/agents/:wallet", description: "Averray Agent Profile v1 - aggregate reputation, stats, earned badges." },
   { path: "/shares/:token", description: "Public signed read-only snapshot resolver for share URLs." },
@@ -506,6 +509,7 @@ const DISCOVERY_TOOLS = [
   { name: "getDispute", description: "Read one dispute evidence bundle and timeline." },
   { name: "getVerificationResult", description: "Read the last verifier outcome for a session." },
   { name: "listVerifierHandlers", description: "Supported verifier modes + configs." },
+  { name: "listVerificationProfiles", description: "Published standalone verification profiles with pinned versions, limits, and pricing." },
   { name: "resumeSession", description: "Load the latest state of a session." },
   { name: "listSessions", description: "Lifetime session history for a wallet." },
   { name: "getXcmRequest", description: "Read the current lifecycle state of one async XCM request." }

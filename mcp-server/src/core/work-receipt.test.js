@@ -5,6 +5,7 @@ import test from "node:test";
 import { SelfIdentityRegistry } from "./self-identity-registry.js";
 import {
   assertWorkReceiptContentAddress,
+  buildVerifyReceipt,
   buildWorkReceipt,
   hashWorkReceiptContent,
   WORK_RECEIPT_SCHEMA_VERSION
@@ -179,4 +180,49 @@ test("receipt id reproduces from served content and every content mutation chang
   mutated.verdict.reasonCode = "MUTATED";
   assert.notEqual(hashWorkReceiptContent(mutated), receipt.receiptId);
   assert.throws(() => assertWorkReceiptContentAddress(mutated), /content address mismatch/u);
+});
+
+test("verify and job receipts share the one canonical content-address function", () => {
+  const jobReceipt = buildWorkReceipt(input());
+  const profile = {
+    name: "git-patch-tests-v1",
+    version: 1,
+    ref: "git-patch-tests-v1@1",
+    handler: "deterministic",
+    handlerVersion: 1,
+    limits: { timeoutMs: 120_000 },
+    price: { asset: "USDC", amount: "5", amountRaw: "5000000" }
+  };
+  const verifyReceipt = buildVerifyReceipt({
+    run: {
+      customer: live.poster,
+      target: { repository: "github.com/example/project", commit: "1".repeat(40) },
+      inputs: { patch: { sha256: "2".repeat(64) }, testCommand: ["npm", "test"] },
+      billing: { status: "captured" }
+    },
+    profile,
+    execution: {
+      artifactHash: ARTIFACT_HASH,
+      sourceBinding: { method: "git-bundle", verified: true, ref: "1".repeat(40), bundleHash: BUNDLE_HASH },
+      environment: { kind: "averray_witness" }
+    },
+    verdict: {
+      outcome: "approved",
+      reasonCode: "DETERMINISTIC_MATCH",
+      evidenceHash: `0x${"4".repeat(64)}`
+    },
+    context: { publicReceiptBaseUrl: "https://averray.com" }
+  });
+
+  assert.equal(hashWorkReceiptContent(jobReceipt), jobReceipt.receiptId);
+  assert.equal(hashWorkReceiptContent(verifyReceipt), verifyReceipt.receiptId);
+  assertWorkReceiptContentAddress(jobReceipt);
+  assertWorkReceiptContentAddress(verifyReceipt);
+  assert.equal(verifyReceipt.intent.specSource, "verify_request");
+  assert.equal(verifyReceipt.intent.valueAtRisk.amountRaw, "5000000");
+  assert.equal(verifyReceipt.execution.providerClass, "external");
+  assert.equal(Object.hasOwn(verifyReceipt, "settlement"), false);
+
+  const source = readFileSync(new URL("./work-receipt.js", import.meta.url), "utf8");
+  assert.equal(source.match(/export function hashWorkReceiptContent/gu)?.length, 1);
 });

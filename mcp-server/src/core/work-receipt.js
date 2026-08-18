@@ -61,6 +61,87 @@ export function buildWorkReceipt({ session, job, verification, context = {} }) {
   };
 }
 
+/**
+ * Build the same portable, content-addressed receipt for a standalone Verify
+ * run. This producer deliberately has no job/session compatibility shim and no
+ * settlement section: the customer brought the artifact and paid only for the
+ * computation described by the pinned profile.
+ */
+export function buildVerifyReceipt({ run, profile, execution, verdict, context = {} }) {
+  const customer = address(run?.customer);
+  if (!customer) throw new ValidationError("Verify receipt requires the paying customer address.");
+  if (!profile?.ref || !profile?.name || !Number.isInteger(Number(profile?.version))) {
+    throw new ValidationError("Verify receipt requires a pinned profile@version.");
+  }
+  const outcome = firstString(verdict?.outcome)?.toLowerCase();
+  if (!["approved", "rejected", "inconclusive", "platform_fault"].includes(outcome)) {
+    throw new ValidationError(`Verify receipt has invalid outcome ${JSON.stringify(outcome)}.`);
+  }
+  const reasonCode = firstString(verdict?.reasonCode);
+  if (!reasonCode) throw new ValidationError("Verify receipt requires a reasonCode.");
+  const specHash = hashCanonicalContent({
+    profile: profile.ref,
+    target: run.target,
+    inputs: run.inputs
+  });
+  const billed = run?.billing?.status === "captured";
+  const price = profile.price ?? {};
+  const valueAtRisk = billed
+    ? { asset: price.asset, amount: String(price.amount), amountRaw: String(price.amountRaw) }
+    : { asset: price.asset, amount: "0", amountRaw: "0" };
+  const artifactHash = bytes32(execution?.artifactHash)
+    ?? hashCanonicalContent(run.inputs?.patch ?? run.inputs ?? null);
+  const sourceBinding = normalizeSourceBinding(execution?.sourceBinding);
+  const unsigned = compact({
+    schemaVersion: WORK_RECEIPT_SCHEMA_VERSION,
+    receiptType: "work_outcome",
+    attestation: "A single standalone verification run: the requested intent, bounded execution evidence, and resulting verdict. It makes no broader claim.",
+    verifier: {
+      mode: profile.handler,
+      profile: profile.name,
+      profileRef: profile.ref,
+      version: Number(profile.version),
+      handler: profile.handler,
+      handlerVersion: Number(profile.handlerVersion)
+    },
+    verdict: {
+      outcome,
+      reasonCode,
+      reason: firstString(verdict?.reason),
+      evidenceHash: bytes32(verdict?.evidenceHash)
+        ?? hashCanonicalContent(verdict?.evidence ?? execution?.report ?? null),
+      workerConsequence: "none"
+    },
+    intent: {
+      specHash,
+      specSource: "verify_request",
+      successPolicy: { profile: profile.name, version: Number(profile.version), ref: profile.ref },
+      valueAtRisk,
+      deadline: { timeoutMs: Number(profile.limits?.timeoutMs) },
+      poster: customer,
+      posterClass: "external"
+    },
+    execution: compact({
+      provider: customer,
+      providerClass: "external",
+      target: run.target,
+      artifactHash,
+      sourceBinding,
+      evidenceHash: bytes32(verdict?.evidenceHash)
+        ?? hashCanonicalContent(verdict?.evidence ?? execution?.report ?? null),
+      environment: execution?.environment
+    }),
+    signers: Array.isArray(context.signers) ? context.signers : undefined
+  });
+  const receiptId = hashWorkReceiptContent(unsigned);
+  const siteOrigin = firstString(context.publicReceiptBaseUrl, context.publicSiteUrl) ?? WORK_RECEIPT_SITE_ORIGIN;
+  return {
+    ...unsigned,
+    receiptId,
+    canonicalUrl: `${siteOrigin.replace(/\/+$/u, "")}/receipts/${receiptId}`
+  };
+}
+
 /** Hash the portable payload, excluding identities/signatures and self-links. */
 export function hashWorkReceiptContent(document) {
   if (!document || typeof document !== "object" || Array.isArray(document)) {
