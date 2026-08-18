@@ -310,6 +310,42 @@ security **invariants** are cheap and mechanical — no new dependencies, no `ev
 outbound calls, no writes outside allowed paths. Those belong in contracts, because
 they are exactly what a poster worries about when accepting a stranger's patch.
 
+## 13a. Declared scope — measured 2026-08-16
+
+The Witness is a **gate with a declared scope**, not a universal gate and not a
+sampling instrument. Measured against a frozen cohort of 20 of our own merged pull
+requests:
+
+| Outcome | Share | Meaning |
+|---|---|---|
+| decidable | 13/20 | the Witness returns a typed verdict |
+| structurally out of scope | 5/20 | cannot be decided by any sealed verifier |
+| verifier-ambiguous | 2/20 | declines rather than accuses |
+
+Coverage history on that same cohort: **4/20 → 2/20 → 13/20**. The dip is the
+ambiguity correction of #1154 moving two PRs from a false `POLICY_VIOLATION` to
+`verifier`-ambiguous — a correctness gain that cost coverage. The recovery came from
+closing implementation causes, not from relaxing any check.
+
+### What is permanently out of scope, and why that is correct
+
+Four of the five structural cases require **privileged Docker or database services**;
+one requires a **private CI credential**. These are not backlog items. A verifier able
+to start privileged services or hold CI credentials would be materially less
+trustworthy than one that cannot, and the whole value of this component is that it
+holds nothing an attacker would want.
+
+A change whose acceptance check needs privileged infrastructure must route to human
+review or a different verifier class. Say so in the job's preflight rather than
+returning a verdict the Witness cannot stand behind.
+
+### Measurement rule
+
+Coverage must be measured **fresh-cache**. A warm cache concealed real Python and
+build-backend requirements during this work; only a clean run exposed them. An
+environment that passes because of undeclared state is the same defect class as a
+check that cannot fail.
+
 ## 14. Staged rollout
 
 **Phase 1 — Materialization preflight.** Build duty 3.1's first component and answer
@@ -349,8 +385,8 @@ trusted verifier.
 |---|---|
 | Agent repairs a real defect offline and proves it with the repo's own suite | measured — 6/6, regression tests self-authored |
 | Promotion cannot happen without a named operator and a green, hash-bound report | measured — kernel source, 2026-08-16 |
-| Fraction of real repos materializable offline | **unmeasured** — Phase 1 |
-| Whether differential checking flips verdicts versus today's handlers | **unmeasured** — Phase 2 |
-| False-pass and false-fail rates against an adversarial corpus | **unmeasured** — Phase 2 |
+| Fraction of real repos materializable offline | measured — 5/10, Phase 1 (#1125) |
+| Whether differential checking flips verdicts versus today's handlers | **unmeasured** — no live submissions to compare against |
+| False-pass and false-fail rates against an adversarial corpus | measured — 15/15 corpus, 0% detector false positives on real PRs (#1139, #1152, #1154) |
 
 Nothing below the line gets claimed in product language until it is above it.
