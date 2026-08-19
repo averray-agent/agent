@@ -133,6 +133,28 @@ jobs:
       - name: Job schema docs sync check
         run: npm run check:job-schemas
 
+      - name: Verify real fixture inside backend, runner, and proxy images
+        run: |
+          set -euo pipefail
+          export WITNESS_RUNTIME_ROOT="$RUNNER_TEMP/averray-witness-runtime"
+          mkdir -p "$WITNESS_RUNTIME_ROOT"
+          chmod 0777 "$WITNESS_RUNTIME_ROOT"
+          cleanup() {
+            docker compose -f deploy/docker-compose.verify-smoke.yml down -v --remove-orphans
+          }
+          trap cleanup EXIT
+          docker build \
+            -t averray-witness-preflight:phase1-uv-0.12.5-python-3.12.12-uv-build-0.9.27 \
+            witness/sandbox
+          docker compose -f deploy/docker-compose.verify-smoke.yml \
+            up -d --build verify-smoke-redis verify-smoke-proxy
+          docker compose -f deploy/docker-compose.verify-smoke.yml \
+            run --rm verify-smoke-proxy-guard
+          docker compose -f deploy/docker-compose.verify-smoke.yml \
+            up --build --abort-on-container-exit \
+            --exit-code-from verify-smoke-backend \
+            verify-smoke-backend verify-smoke-runner
+
   frontend:
     name: Operator app — static export
     runs-on: ubuntu-latest

@@ -32,6 +32,10 @@ function hasIndexableIdempotencyKey(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function verificationRunLockId(runId) {
+  return `verification-run:${String(runId)}`;
+}
+
 const RELEASE_CLAIM_LOCK_SCRIPT = `
 if redis.call("get", KEYS[1]) == ARGV[1] then
   return redis.call("del", KEYS[1])
@@ -96,7 +100,64 @@ if existing then
 end
 redis.call("set", KEYS[1], ARGV[1])
 redis.call("set", KEYS[2], ARGV[2])
+if ARGV[3] ~= "" then
+  redis.call("set", KEYS[3], ARGV[3])
+end
+redis.call("zadd", KEYS[4], ARGV[4], ARGV[1])
+redis.call("zadd", KEYS[5], ARGV[4], ARGV[1])
 return {1, ARGV[1]}
+`;
+
+const CLAIM_VERIFICATION_RUN_SCRIPT = `
+local runIds = redis.call("zrange", KEYS[1], 0, 31)
+for _, runId in ipairs(runIds) do
+  local runKey = ARGV[1] .. runId
+  local raw = redis.call("get", runKey)
+  if not raw then
+    redis.call("zrem", KEYS[1], runId)
+    redis.call("zrem", KEYS[2], runId)
+  else
+    local run = cjson.decode(raw)
+    if run.status ~= "queued" then
+      redis.call("zrem", KEYS[1], runId)
+    else
+      local lockKey = ARGV[2] .. runId
+      local acquired = redis.call("set", lockKey, ARGV[3], "NX", "EX", ARGV[4])
+      if acquired then
+        run.status = "running"
+        run.startedAt = ARGV[5]
+        local encoded = cjson.encode(run)
+        redis.call("set", runKey, encoded)
+        redis.call("zrem", KEYS[1], runId)
+        return encoded
+      end
+    end
+  end
+end
+return false
+`;
+
+const STORE_VERIFICATION_EXECUTION_SCRIPT = `
+if redis.call("get", KEYS[2]) ~= ARGV[1] then
+  return false
+end
+local raw = redis.call("get", KEYS[1])
+if not raw then
+  redis.call("del", KEYS[2])
+  return false
+end
+local run = cjson.decode(raw)
+if run.status ~= "running" then
+  redis.call("del", KEYS[2])
+  return false
+end
+run.status = "executed"
+run.executedAt = ARGV[2]
+run.execution = cjson.decode(ARGV[3])
+local encoded = cjson.encode(run)
+redis.call("set", KEYS[1], encoded)
+redis.call("del", KEYS[2])
+return encoded
 `;
 
 export class MemoryStateStore {
@@ -115,6 +176,7 @@ export class MemoryStateStore {
     this.sessionWorkReceiptDocuments = new Map();
     this.verificationRuns = new Map();
     this.verificationPaymentRuns = new Map();
+    this.verificationRunAuthorizations = new Map();
     this.claimLocks = new Map();
     this.nonces = new Map();
     this.rateLimits = new Map();
@@ -312,7 +374,7 @@ export class MemoryStateStore {
     return runId ? this.getVerificationRun(runId) : undefined;
   }
 
-  async reserveVerificationRun(run, { paymentId } = {}) {
+  async reserveVerificationRun(run, { paymentId, authorization } = {}) {
     const key = String(paymentId ?? "");
     const existingRunId = this.verificationPaymentRuns.get(key);
     if (existingRunId) {
@@ -321,12 +383,64 @@ export class MemoryStateStore {
     const stored = cloneJsonRecord(run);
     this.verificationPaymentRuns.set(key, stored.runId);
     this.verificationRuns.set(stored.runId, stored);
+    if (authorization) {
+      this.verificationRunAuthorizations.set(stored.runId, cloneJsonRecord(authorization));
+    }
     return { created: true, run: cloneJsonRecord(stored) };
+  }
+
+  async getVerificationRunAuthorization(runId) {
+    return cloneJsonRecord(this.verificationRunAuthorizations.get(String(runId)));
+  }
+
+  async listActiveVerificationRuns(limit = 100) {
+    return [...this.verificationRuns.values()]
+      .filter((run) => run.status !== "complete")
+      .sort((left, right) => String(left.submittedAt ?? "").localeCompare(String(right.submittedAt ?? "")))
+      .slice(0, Math.max(0, Number(limit)))
+      .map((run) => cloneJsonRecord(run));
+  }
+
+  async claimNextVerificationRun({ owner, claimedAt, leaseSeconds = 180 } = {}) {
+    const candidates = await this.listActiveVerificationRuns();
+    for (const candidate of candidates) {
+      if (candidate.status !== "queued") continue;
+      const lockId = verificationRunLockId(candidate.runId);
+      if (!await this.acquireClaimLock(lockId, owner, leaseSeconds)) continue;
+      const current = this.verificationRuns.get(candidate.runId);
+      if (current?.status !== "queued") {
+        await this.releaseClaimLock(lockId, owner);
+        continue;
+      }
+      const claimed = cloneJsonRecord({ ...current, status: "running", startedAt: claimedAt });
+      this.verificationRuns.set(candidate.runId, claimed);
+      return cloneJsonRecord(claimed);
+    }
+    return undefined;
+  }
+
+  async storeVerificationRunExecution(runId, { owner, execution, executedAt } = {}) {
+    const normalizedRunId = String(runId);
+    const lockId = verificationRunLockId(normalizedRunId);
+    const lock = this.claimLocks.get(lockId);
+    if (!lock || lock.owner !== owner || lock.expiresAt <= Date.now()) return undefined;
+    const current = this.verificationRuns.get(normalizedRunId);
+    if (current?.status !== "running") {
+      await this.releaseClaimLock(lockId, owner);
+      return undefined;
+    }
+    const stored = cloneJsonRecord({ ...current, status: "executed", executedAt, execution });
+    this.verificationRuns.set(normalizedRunId, stored);
+    await this.releaseClaimLock(lockId, owner);
+    return cloneJsonRecord(stored);
   }
 
   async updateVerificationRun(runId, run) {
     const stored = cloneJsonRecord(run);
     this.verificationRuns.set(String(runId), stored);
+    if (stored.status === "complete") {
+      this.verificationRunAuthorizations.delete(String(runId));
+    }
     return cloneJsonRecord(stored);
   }
 
@@ -1054,14 +1168,22 @@ export class RedisStateStore {
     return runId ? this.getVerificationRun(runId) : undefined;
   }
 
-  async reserveVerificationRun(run, { paymentId } = {}) {
+  async reserveVerificationRun(run, { paymentId, authorization } = {}) {
     await this.connect();
     const reply = await this.client.eval(RESERVE_VERIFICATION_RUN_SCRIPT, {
       keys: [
         this.key("verification-payment", String(paymentId ?? "")),
-        this.key("verification-run", String(run.runId))
+        this.key("verification-run", String(run.runId)),
+        this.key("verification-run-authorization", String(run.runId)),
+        this.key("verification-runs", "queued"),
+        this.key("verification-runs", "active")
       ],
-      arguments: [String(run.runId), JSON.stringify(run)]
+      arguments: [
+        String(run.runId),
+        JSON.stringify(run),
+        authorization ? JSON.stringify(authorization) : "",
+        String(timestampScore(run.submittedAt))
+      ]
     });
     const [createdRaw, runId] = Array.isArray(reply) ? reply : [0, undefined];
     return {
@@ -1070,9 +1192,63 @@ export class RedisStateStore {
     };
   }
 
+  async getVerificationRunAuthorization(runId) {
+    await this.connect();
+    const raw = await this.client.get(this.key("verification-run-authorization", String(runId)));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async listActiveVerificationRuns(limit = 100) {
+    await this.connect();
+    const normalizedLimit = Math.max(0, Number(limit));
+    if (normalizedLimit === 0) return [];
+    const runIds = await this.client.zRange(this.key("verification-runs", "active"), 0, normalizedLimit - 1);
+    const runs = await Promise.all(runIds.map((runId) => this.getVerificationRun(runId)));
+    return runs.filter(Boolean);
+  }
+
+  async claimNextVerificationRun({ owner, claimedAt, leaseSeconds = 180 } = {}) {
+    await this.connect();
+    const raw = await this.client.eval(CLAIM_VERIFICATION_RUN_SCRIPT, {
+      keys: [
+        this.key("verification-runs", "queued"),
+        this.key("verification-runs", "active")
+      ],
+      arguments: [
+        this.key("verification-run", ""),
+        this.key("claim-lock", "verification-run:"),
+        String(owner),
+        String(Math.max(1, Math.ceil(leaseSeconds))),
+        String(claimedAt)
+      ]
+    });
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async storeVerificationRunExecution(runId, { owner, execution, executedAt } = {}) {
+    await this.connect();
+    const raw = await this.client.eval(STORE_VERIFICATION_EXECUTION_SCRIPT, {
+      keys: [
+        this.key("verification-run", String(runId)),
+        this.key("claim-lock", verificationRunLockId(runId))
+      ],
+      arguments: [String(owner), String(executedAt), JSON.stringify(execution)]
+    });
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
   async updateVerificationRun(runId, run) {
     await this.connect();
-    await this.client.set(this.key("verification-run", String(runId)), JSON.stringify(run));
+    const normalizedRunId = String(runId);
+    const transaction = this.client.multi()
+      .set(this.key("verification-run", normalizedRunId), JSON.stringify(run));
+    if (run?.status === "complete") {
+      transaction
+        .del(this.key("verification-run-authorization", normalizedRunId))
+        .zRem(this.key("verification-runs", "queued"), normalizedRunId)
+        .zRem(this.key("verification-runs", "active"), normalizedRunId);
+    }
+    await transaction.exec();
     return this.getVerificationRun(runId);
   }
 

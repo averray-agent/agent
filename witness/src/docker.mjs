@@ -23,6 +23,9 @@ export async function ensureWitnessImage(image = DEFAULT_IMAGE) {
     return { image, imageId: inspect.stdout.trim(), built: false, seconds: inspect.seconds };
   }
   if (inspect.spawnError) throw new Error(`Docker is unavailable: ${inspect.spawnError}`);
+  if (String(process.env.WITNESS_IMAGE_BUILD ?? "enabled").trim().toLowerCase() === "disabled") {
+    throw new Error(`Witness image ${image} is not prebuilt; runtime image builds are disabled.`);
+  }
 
   const built = await runProcess(
     "docker",

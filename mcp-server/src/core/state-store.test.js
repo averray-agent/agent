@@ -190,8 +190,13 @@ test("MemoryStateStore run receipt documents are write-once and cloned", async (
 
 test("MemoryStateStore reserves one verification run per payment proof", async () => {
   const store = new MemoryStateStore();
-  const first = await store.reserveVerificationRun({ runId: "verify-1", status: "queued" }, {
-    paymentId: "payment-proof-hash"
+  const first = await store.reserveVerificationRun({
+    runId: "verify-1",
+    status: "queued",
+    submittedAt: "2026-08-19T08:00:00.000Z"
+  }, {
+    paymentId: "payment-proof-hash",
+    authorization: { id: "private-authorization", signature: "private-signature" }
   });
   const replay = await store.reserveVerificationRun({ runId: "verify-2", status: "queued" }, {
     paymentId: "payment-proof-hash"
@@ -202,9 +207,32 @@ test("MemoryStateStore reserves one verification run per payment proof", async (
   assert.equal(replay.run.runId, "verify-1");
   assert.equal(await store.getVerificationRun("verify-2"), undefined);
   assert.equal((await store.getVerificationRunByPaymentId("payment-proof-hash")).runId, "verify-1");
+  assert.deepEqual(await store.getVerificationRunAuthorization("verify-1"), {
+    id: "private-authorization",
+    signature: "private-signature"
+  });
+
+  const [firstClaim, secondClaim] = await Promise.all([
+    store.claimNextVerificationRun({ owner: "runner-one", claimedAt: "2026-08-19T08:00:01.000Z" }),
+    store.claimNextVerificationRun({ owner: "runner-two", claimedAt: "2026-08-19T08:00:01.000Z" })
+  ]);
+  assert.equal([firstClaim, secondClaim].filter(Boolean).length, 1);
+  const owner = firstClaim ? "runner-one" : "runner-two";
+  const executed = await store.storeVerificationRunExecution("verify-1", {
+    owner,
+    executedAt: "2026-08-19T08:00:02.000Z",
+    execution: { status: "decidable", evidence: "source_binding_verified tests_passed" }
+  });
+  assert.equal(executed.status, "executed");
+  assert.equal((await store.storeVerificationRunExecution("verify-1", {
+    owner,
+    executedAt: "2026-08-19T08:00:03.000Z",
+    execution: { status: "decidable", evidence: "duplicate" }
+  })), undefined);
 
   await store.updateVerificationRun("verify-1", { runId: "verify-1", status: "complete" });
   assert.equal((await store.getVerificationRun("verify-1")).status, "complete");
+  assert.equal(await store.getVerificationRunAuthorization("verify-1"), undefined);
 });
 
 test("MemoryStateStore indexes immutable work receipts by content id and upgrades the session alias", async () => {

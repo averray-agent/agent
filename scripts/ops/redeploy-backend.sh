@@ -19,6 +19,10 @@
 #   HEALTH_TIMEOUT_SEC max seconds to wait for health (default: 120)
 #   HEALTH_INTERVAL_SEC seconds between health polls (default: 5)
 #   BACKEND_LOG_TAIL   failed-container log lines emitted before rollback (default: 200)
+#   WITNESS_RUNNER_SERVICE / WITNESS_PROXY_SERVICE
+#                       optional isolated Verify services (mainnet only)
+#   WITNESS_RUNTIME_ROOT host path shared with sandbox bind mounts
+#   WITNESS_SANDBOX_IMAGE exact prebuilt Witness execution image tag
 #   SKIP_GIT_UPDATE=1  skip fetch/checkout/pull because caller already pinned the repo
 #   PRE_DEPLOY_SHA     rollback target SHA when SKIP_GIT_UPDATE=1 — supplied by
 #                      deploy-production.sh from the wrapper's pre-pull HEAD so
@@ -50,6 +54,12 @@ HEALTH_URL=${HEALTH_URL:-https://api.averray.com/health}
 HEALTH_TIMEOUT_SEC=${HEALTH_TIMEOUT_SEC:-120}
 HEALTH_INTERVAL_SEC=${HEALTH_INTERVAL_SEC:-5}
 BACKEND_LOG_TAIL=${BACKEND_LOG_TAIL:-200}
+WITNESS_RUNNER_SERVICE=${WITNESS_RUNNER_SERVICE:-}
+WITNESS_PROXY_SERVICE=${WITNESS_PROXY_SERVICE:-}
+WITNESS_RUNNER_CONTAINER=${WITNESS_RUNNER_CONTAINER:-}
+WITNESS_PROXY_CONTAINER=${WITNESS_PROXY_CONTAINER:-}
+WITNESS_RUNTIME_ROOT=${WITNESS_RUNTIME_ROOT:-/srv/agent-stack-mainnet/witness-runtime}
+WITNESS_SANDBOX_IMAGE=${WITNESS_SANDBOX_IMAGE:-averray-witness-preflight:phase1-uv-0.12.5-python-3.12.12-uv-build-0.9.27}
 SKIP_GIT_UPDATE=${SKIP_GIT_UPDATE:-0}
 
 if ! [[ "$BACKEND_LOG_TAIL" =~ ^[1-9][0-9]*$ ]]; then
@@ -87,14 +97,52 @@ fi
 
 compose_up() {
   local deployed_sha="$1"
+  local services=("$BACKEND_SERVICE")
   docker compose \
     --project-directory "$COMPOSE_PROJECT_DIRECTORY" \
     -f "$COMPOSE_FILE" \
     build --build-arg "DEPLOYED_SHA=$deployed_sha" "$BACKEND_SERVICE"
+
+  if [[ -n "$WITNESS_RUNNER_SERVICE" && -n "$WITNESS_PROXY_SERVICE" ]] \
+    && compose_has_service "$WITNESS_RUNNER_SERVICE" \
+    && compose_has_service "$WITNESS_PROXY_SERVICE"; then
+    echo "Preparing isolated Witness runtime and pinned sandbox image"
+    sudo install -d -m 0700 -o 65532 -g 65532 "$WITNESS_RUNTIME_ROOT"
+    export WITNESS_RUNTIME_ROOT
+    docker build -t "$WITNESS_SANDBOX_IMAGE" "$APP_ROOT/witness/sandbox"
+    docker compose \
+      --project-directory "$COMPOSE_PROJECT_DIRECTORY" \
+      -f "$COMPOSE_FILE" \
+      build "$WITNESS_PROXY_SERVICE" "$WITNESS_RUNNER_SERVICE"
+    services+=("$WITNESS_PROXY_SERVICE" "$WITNESS_RUNNER_SERVICE")
+  elif [[ -n "$WITNESS_RUNNER_SERVICE" || -n "$WITNESS_PROXY_SERVICE" ]]; then
+    if [[ "$deployed_sha" != "$PREVIOUS_SHA" ]]; then
+      echo "Configured Witness services are missing from $COMPOSE_FILE at $deployed_sha." >&2
+      return 1
+    fi
+    echo "Rollback target predates isolated Witness services; removing only their known containers."
+    for container in "$WITNESS_RUNNER_CONTAINER" "$WITNESS_PROXY_CONTAINER"; do
+      if [[ -n "$container" ]]; then
+        docker container rm --force "$container" >/dev/null 2>&1 || true
+      fi
+    done
+  fi
   docker compose \
     --project-directory "$COMPOSE_PROJECT_DIRECTORY" \
     -f "$COMPOSE_FILE" \
-    up -d --no-build "$BACKEND_SERVICE"
+    up -d --no-build "${services[@]}"
+}
+
+compose_has_service() {
+  local target="$1"
+  local service
+  while IFS= read -r service; do
+    [[ "$service" == "$target" ]] && return 0
+  done < <(docker compose \
+    --project-directory "$COMPOSE_PROJECT_DIRECTORY" \
+    -f "$COMPOSE_FILE" \
+    config --services)
+  return 1
 }
 
 wait_for_health() {

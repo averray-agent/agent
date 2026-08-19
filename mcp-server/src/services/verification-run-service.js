@@ -14,24 +14,28 @@ export class VerificationRunService {
   constructor({
     stateStore,
     profileRegistry,
-    runner,
     paymentGate = new UnavailableVerificationPaymentGate(),
     verifierRegistry = new VerifierRegistry(),
     now = () => new Date(),
     randomUUIDImpl = randomUUID,
-    publicReceiptBaseUrl = undefined
+    publicReceiptBaseUrl = undefined,
+    runnerTimeoutMarginMs = 30_000,
+    finalizerLockSeconds = 30,
+    finalizerId = `verification-finalizer:${randomUUID()}`
   } = {}) {
-    if (!stateStore || !profileRegistry || !runner) {
-      throw new ValidationError("VerificationRunService requires state, profiles, and a runner.");
+    if (!stateStore || !profileRegistry) {
+      throw new ValidationError("VerificationRunService requires state and profiles.");
     }
     this.stateStore = stateStore;
     this.profileRegistry = profileRegistry;
-    this.runner = runner;
     this.paymentGate = paymentGate;
     this.verifierRegistry = verifierRegistry;
     this.now = now;
     this.randomUUIDImpl = randomUUIDImpl;
     this.publicReceiptBaseUrl = publicReceiptBaseUrl;
+    this.runnerTimeoutMarginMs = positiveInteger(runnerTimeoutMarginMs, "runnerTimeoutMarginMs");
+    this.finalizerLockSeconds = positiveInteger(finalizerLockSeconds, "finalizerLockSeconds");
+    this.finalizerId = String(finalizerId);
   }
 
   listProfiles() {
@@ -55,7 +59,6 @@ export class VerificationRunService {
   } = {}) {
     const profile = this.profileRegistry.requireAvailable(profileName, profileVersion);
     validateAgainstSchema({ target, inputs }, profile.inputSchema, "verifyRequest");
-    await this.runner.validate?.({ profile, target, inputs });
     const requestHash = hashCanonicalContent({ profile: profile.ref, target, inputs });
     const paymentKey = paymentProof === undefined || paymentProof === null || paymentProof === ""
       ? undefined
@@ -88,32 +91,62 @@ export class VerificationRunService {
       billing: { status: "authorized", amountRaw: profile.price.amountRaw, asset: profile.price.asset }
     };
     const reservation = await this.stateStore.reserveVerificationRun(queued, {
-      paymentId: paymentKey ?? hashCanonicalContent(authorization.id)
+      paymentId: paymentKey ?? hashCanonicalContent(authorization.id),
+      authorization: persistableAuthorization(authorization)
     });
-    if (!reservation.created) return reservation.run;
-
-    await this.stateStore.updateVerificationRun(runId, {
-      ...queued,
-      status: "running",
-      startedAt: this.now().toISOString()
-    });
-    return this.executeRun({ authorization, profile, run: queued });
+    return reservation.run;
   }
 
-  async executeRun({ authorization, profile, run }) {
-    let execution;
+  async finalizeAvailableRuns({ limit = 100 } = {}) {
+    const active = await this.stateStore.listActiveVerificationRuns(limit);
+    const finalized = [];
+    for (const candidate of active) {
+      if (!this.executionReadyForFinalization(candidate)) continue;
+      const lockId = verificationRunLockId(candidate.runId);
+      const acquired = await this.stateStore.acquireClaimLock(
+        lockId,
+        this.finalizerId,
+        this.finalizerLockSeconds
+      );
+      if (!acquired) continue;
+      try {
+        const current = await this.stateStore.getVerificationRun(candidate.runId);
+        if (!this.executionReadyForFinalization(current)) continue;
+        const profile = this.profileRegistry.get(current.profile, current.profileVersion);
+        const authorization = await this.stateStore.getVerificationRunAuthorization(current.runId);
+        const execution = current.status === "executed"
+          ? current.execution
+          : runnerTimeoutExecution(current.status);
+        finalized.push(await this.finalizeExecution({ authorization, profile, run: current, execution }));
+      } finally {
+        await this.stateStore.releaseClaimLock(lockId, this.finalizerId);
+      }
+    }
+    return finalized;
+  }
+
+  executionReadyForFinalization(run) {
+    if (!run || run.status === COMPLETE) return false;
+    if (run.status === "executed") return true;
+    if (!new Set(["queued", "running"]).has(run.status)) return false;
+    const profile = this.profileRegistry.get(run.profile, run.profileVersion);
+    const startedAt = run.status === "running" ? run.startedAt : run.submittedAt;
+    const startedMs = Date.parse(startedAt ?? "");
+    return Number.isFinite(startedMs)
+      && this.now().getTime() >= startedMs + profile.limits.timeoutMs + this.runnerTimeoutMarginMs;
+  }
+
+  async finalizeExecution({ authorization, profile, run, execution }) {
     let verdict;
     try {
-      execution = await runWithTimeout(
-        () => this.runner.run({
-          profile,
-          runId: run.runId,
-          target: run.target,
-          inputs: run.inputs
-        }),
-        profile.limits.timeoutMs
-      );
-      if (execution?.status === "inconclusive") {
+      if (!authorization) {
+        execution = {
+          status: "inconclusive",
+          reason: "runner_fault",
+          detail: "The backend could not recover the private payment authorization for this queued run. No payment was captured."
+        };
+        verdict = inconclusiveVerdict("runner_fault", execution.detail);
+      } else if (execution?.status === "inconclusive") {
         verdict = inconclusiveVerdict(execution.reason, execution.detail);
       } else {
         verdict = await this.evaluatePinnedProfile({ execution, profile, run });
@@ -279,17 +312,30 @@ async function safeRelease(paymentGate, input) {
   }
 }
 
-async function runWithTimeout(run, timeoutMs) {
-  let timer;
-  try {
-    return await Promise.race([
-      Promise.resolve().then(run),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`Verification runner exceeded ${timeoutMs}ms.`)), timeoutMs);
-        timer.unref?.();
-      })
-    ]);
-  } finally {
-    clearTimeout(timer);
+function persistableAuthorization(authorization) {
+  return JSON.parse(JSON.stringify(authorization, (_key, value) =>
+    typeof value === "bigint" ? value.toString() : value
+  ));
+}
+
+function verificationRunLockId(runId) {
+  return `verification-run-finalizer:${String(runId)}`;
+}
+
+function runnerTimeoutExecution(status) {
+  return {
+    status: "inconclusive",
+    reason: "runner_fault",
+    detail: status === "running"
+      ? "The isolated verification runner did not complete before its execution deadline."
+      : "No isolated verification runner claimed this request before its execution deadline."
+  };
+}
+
+function positiveInteger(value, label) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new ValidationError(`${label} must be a positive integer.`);
   }
+  return parsed;
 }

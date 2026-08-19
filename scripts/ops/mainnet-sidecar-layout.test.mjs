@@ -18,20 +18,31 @@ test("parallel compose isolates mainnet identities, ports, Redis, and AWS mounts
   }
   assert.equal(result.status, 0, result.stderr);
   const config = JSON.parse(result.stdout);
-  assert.deepEqual(Object.keys(config.services).sort(), ["mainnet-backend", "mainnet-indexer", "mainnet-redis"]);
+  assert.deepEqual(Object.keys(config.services).sort(), [
+    "mainnet-backend",
+    "mainnet-indexer",
+    "mainnet-redis",
+    "mainnet-witness-docker-proxy",
+    "mainnet-witness-runner",
+  ]);
 
   const backend = config.services["mainnet-backend"];
   const indexer = config.services["mainnet-indexer"];
   const redis = config.services["mainnet-redis"];
+  const proxy = config.services["mainnet-witness-docker-proxy"];
+  const runner = config.services["mainnet-witness-runner"];
   assert.equal(backend.container_name, "agent-mainnet-backend");
   assert.equal(indexer.container_name, "agent-mainnet-indexer");
   assert.equal(redis.container_name, "agent-mainnet-redis");
+  assert.equal(proxy.container_name, "agent-mainnet-witness-docker-proxy");
+  assert.equal(runner.container_name, "agent-mainnet-witness-runner");
   assert.equal(backend.ports[0].host_ip, "127.0.0.1");
   assert.equal(backend.ports[0].published, "18787");
   assert.equal(indexer.ports[0].host_ip, "127.0.0.1");
   assert.equal(indexer.ports[0].published, "52069");
   assert.deepEqual(Object.keys(redis.networks), ["mainnet-internal"]);
   assert.equal(config.networks["mainnet-internal"].internal, true);
+  assert.equal(config.networks["witness-docker-control"].internal, true);
   assert.equal(config.networks["caddy-testnet"].external, true);
   assert.equal(config.networks["caddy-testnet"].name, "agent-stack_default");
 
@@ -39,7 +50,29 @@ test("parallel compose isolates mainnet identities, ports, Redis, and AWS mounts
   assert.ok(backendMountSources.includes("/etc/agent-stack-mainnet/aws-config"));
   assert.ok(backendMountSources.includes("/etc/agent-stack-mainnet/roles-anywhere"));
   assert.ok(!backendMountSources.includes("/etc/agent-stack/aws-config"));
+  assert.ok(!backendMountSources.includes("/var/run/docker.sock"));
   assert.equal(backend.environment.AWS_USE_ROLES_ANYWHERE, "true");
+
+  const proxyMountSources = proxy.volumes.map((volume) => volume.source);
+  const runnerMountSources = runner.volumes.map((volume) => volume.source);
+  assert.deepEqual(proxyMountSources, ["/var/run/docker.sock"]);
+  assert.ok(!runnerMountSources.includes("/var/run/docker.sock"));
+  assert.equal(runner.ports, undefined);
+  assert.equal(runner.env_file, undefined);
+  assert.deepEqual(Object.keys(runner.environment).sort(), [
+    "DOCKER_HOST",
+    "NODE_ENV",
+    "REDIS_NAMESPACE",
+    "REDIS_URL",
+    "WITNESS_IMAGE",
+    "WITNESS_IMAGE_BUILD",
+    "WITNESS_RUNNER_CLAIM_LEASE_SECONDS",
+    "WITNESS_RUNNER_INTERVAL_MS",
+    "WITNESS_TEMP_ROOT",
+  ]);
+  assert.match(runner.environment.DOCKER_HOST, /^tcp:\/\/mainnet-witness-docker-proxy:/u);
+  assert.deepEqual(Object.keys(proxy.networks), ["witness-docker-control"]);
+  assert.ok(!Object.hasOwn(backend.networks, "witness-docker-control"));
 });
 
 test("mainnet AWS config has three isolated profiles and no testnet references", async () => {

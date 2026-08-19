@@ -77,6 +77,27 @@ test("a decisive Witness label without verified source binding is inconclusive",
   assert.equal(Object.hasOwn(result, "evidence"), false);
 });
 
+test("infrastructure host_failure is runner_fault with neutral customer-facing detail", () => {
+  const result = mapWitnessReport({
+    report: {
+      schemaVersion: "averray.witness.verification-result/v1",
+      verdict: "INCONCLUSIVE",
+      attribution: "infrastructure",
+      reason: "host_failure",
+      details: "The isolated runner host could not spawn git.",
+      materialization: { bindingVerified: false }
+    },
+    target,
+    inputs
+  });
+
+  assert.equal(result.status, "inconclusive");
+  assert.equal(result.reason, "runner_fault");
+  assert.match(result.detail, /isolated runner host/u);
+  assert.doesNotMatch(result.detail, /customer|evidence was|artifact failed/u);
+  assert.equal(classifyInconclusiveReason({ attribution: "infrastructure", reason: "host_failure" }), "runner_fault");
+});
+
 test("Witness non-decision reasons collapse into the ratified four-reason taxonomy", () => {
   assert.equal(classifyInconclusiveReason({ reason: "artifact_unavailable" }), "target_unreachable");
   assert.equal(classifyInconclusiveReason({ reason: "candidate_caused_nondeterminism_across_repetitions" }), "flaky");
