@@ -1164,6 +1164,11 @@ export function buildCanaryJob({ jobId, rewardAmount }) {
     verifierMinimumMatches: 2,
     requiresSponsoredGas: true,
     onboardingWaiverEligible: true,
+    // The canary claims its own job within seconds — it is never lane
+    // inventory, so the backlog throttle must not refuse it (2026-08-19
+    // incident: four canary reds against stale ordinary backlog). The daily
+    // lane budget still counts it; proof spend is real spend.
+    disposableProof: true,
     claimTtlSeconds: 3600,
     retryLimit: 1,
     outputSchemaRef: OUTPUT_SCHEMA_REF

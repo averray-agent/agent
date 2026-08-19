@@ -351,3 +351,67 @@ test("backlog cap is validated, not silently coerced", () => {
     /maxUnclaimedBacklog must be a positive integer/u
   );
 });
+
+test("a disposable proof job posts through a saturated lane, but still pays the budget", async () => {
+  const store = stateStore();
+  const discipline = new CatalogueLaneDiscipline({
+    stateStore: store,
+    registry: roomyRegistry(2),
+    gasEstimateUsdc: 0,
+    now: () => NOW,
+    logger: { info() {} }
+  });
+  const posted = [];
+
+  await discipline.post(job("live-1"), async () => posted.push("live-1"));
+  await discipline.post(job("live-2"), async () => posted.push("live-2"));
+  await assert.rejects(
+    discipline.post(job("live-3"), async () => posted.push("live-3")),
+    (error) => error.code === LANE_BACKLOG_SATURATED
+  );
+
+  // The canary's shape: same lane, saturated backlog, but it brings its own
+  // claimant — the backlog gate must not refuse it.
+  const canary = { ...job("worker-canary-1"), disposableProof: true };
+  await discipline.post(canary, async () => posted.push("worker-canary-1"));
+  assert.deepEqual(posted, ["live-1", "live-2", "worker-canary-1"]);
+
+  // Budget still counts proof spend: a tight-budget lane refuses the canary on
+  // BUDGET, proving the exemption is backlog-only.
+  const tight = new CatalogueLaneDiscipline({
+    stateStore: stateStore(),
+    registry: registry(),
+    gasEstimateUsdc: 0,
+    now: () => NOW,
+    logger: { info() {} }
+  });
+  await tight.post(job("a", "liveness", 1.0), async () => {});
+  await assert.rejects(
+    tight.post({ ...job("proof-b", "liveness", 0.5), disposableProof: true }, async () => {}),
+    (error) => error.code === LANE_BUDGET_EXHAUSTED
+  );
+});
+
+test("disposable proof jobs never count as backlog against ordinary posting", async () => {
+  const store = stateStore();
+  const discipline = new CatalogueLaneDiscipline({
+    stateStore: store,
+    registry: roomyRegistry(1),
+    gasEstimateUsdc: 0,
+    now: () => NOW,
+    logger: { info() {} }
+  });
+  const posted = [];
+
+  await discipline.post({ ...job("proof-1"), disposableProof: true }, async () => posted.push("proof-1"));
+  await discipline.post({ ...job("proof-2"), disposableProof: true }, async () => posted.push("proof-2"));
+  // Two unclaimed proof jobs sit in the window; the cap is 1. An ordinary job
+  // must still post — proofs are not inventory.
+  await discipline.post(job("live-1"), async () => posted.push("live-1"));
+  assert.deepEqual(posted, ["proof-1", "proof-2", "live-1"]);
+  // And the SECOND ordinary job is refused by the first one's backlog.
+  await assert.rejects(
+    discipline.post(job("live-2"), async () => posted.push("live-2")),
+    (error) => error.code === LANE_BACKLOG_SATURATED && error.details.unclaimedCount === 1
+  );
+});
