@@ -475,7 +475,7 @@ function extractAaveUnwindQuote(human, expectedInput) {
   };
 }
 
-async function waitForAaveSwap(api, { requestId, fromBlock, expectedInput, assetIn = 22, assetOut = 1003, attempts = 30 }) {
+export async function waitForAaveSwap(api, { requestId, fromBlock, expectedInput, assetIn = 22, assetOut = 1003, attempts = 30 }) {
   let nextBlock = Number(fromBlock);
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const head = (await api.rpc.chain.getHeader()).number.toNumber();
@@ -663,7 +663,7 @@ async function readState({ provider, pool, venue, venueAddress, venueFromBlock, 
   };
 }
 
-async function captureParQuote(endpoint, sellAmount, { assetIn = 22, assetOut = 1003, quoteAccount: suppliedAccount, quoteAccountBalance: suppliedBalance } = {}) {
+export async function captureParQuote(endpoint, sellAmount, { assetIn = 22, assetOut = 1003, quoteAccount: suppliedAccount, quoteAccountBalance: suppliedBalance } = {}) {
   const { ApiPromise, WsProvider } = await import("@polkadot/api");
   const api = await ApiPromise.create({ provider: new WsProvider(endpoint, 5_000), noInitWarn: true, throwOnConnect: true });
   try {
