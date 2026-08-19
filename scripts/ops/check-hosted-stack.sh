@@ -19,8 +19,6 @@ INDEXER_URL=${INDEXER_URL:-https://index.averray.com/}
 INDEXER_READY_URL=${INDEXER_READY_URL:-https://index.averray.com/ready}
 INDEXER_STATUS_URL=${INDEXER_STATUS_URL:-https://index.averray.com/status}
 INDEXER_MAX_STALENESS_SEC=${INDEXER_MAX_STALENESS_SEC:-1800}
-INDEXER_RETRY_ATTEMPTS=${INDEXER_RETRY_ATTEMPTS:-12}
-INDEXER_RETRY_SLEEP_SEC=${INDEXER_RETRY_SLEEP_SEC:-5}
 CHECK_INDEXER=${CHECK_INDEXER:-1}
 CHECK_BOOTSTRAP_INSTRUMENTATION=${CHECK_BOOTSTRAP_INSTRUMENTATION:-0}
 CHECK_BOOTSTRAP_SELF_REPORT_SENT=${CHECK_BOOTSTRAP_SELF_REPORT_SENT:-0}
@@ -67,6 +65,8 @@ WORKER_CANARY_KEEP_JOB=${WORKER_CANARY_KEEP_JOB:-}
 CHECK_METRICS_AUTH=${CHECK_METRICS_AUTH:-0}
 METRICS_BEARER_TOKEN=${METRICS_BEARER_TOKEN:-}
 TIMEOUT_SEC=${TIMEOUT_SEC:-20}
+HOSTED_CURL_RETRY_BACKOFF_1_SEC=${HOSTED_CURL_RETRY_BACKOFF_1_SEC:-5}
+HOSTED_CURL_RETRY_BACKOFF_2_SEC=${HOSTED_CURL_RETRY_BACKOFF_2_SEC:-15}
 APP_BASIC_AUTH_USER=${APP_BASIC_AUTH_USER:-}
 APP_BASIC_AUTH_PASSWORD=${APP_BASIC_AUTH_PASSWORD:-}
 APP_EXPECTED_MARKER=${APP_EXPECTED_MARKER:-Opening the operator control room.}
@@ -88,18 +88,71 @@ require_command() {
 require_command curl
 require_command jq
 
+for retry_delay in "$HOSTED_CURL_RETRY_BACKOFF_1_SEC" "$HOSTED_CURL_RETRY_BACKOFF_2_SEC"; do
+  if [[ ! "$retry_delay" =~ ^[0-9]+$ ]]; then
+    echo "Hosted curl retry backoffs must be non-negative integer seconds." >&2
+    exit 1
+  fi
+done
+
+# Retry only failures that occurred before the response could be asserted:
+# curl timeouts and upstream HTTP 5xx responses. JSON/status/content assertions
+# remain outside this function and therefore fail immediately.
+curl_with_transport_retries() {
+  local attempt=1
+  local max_attempts=3
+  local stdout_file stderr_file headers_file status rc retry_reason delay
+
+  while (( attempt <= max_attempts )); do
+    stdout_file="$(mktemp)"
+    stderr_file="$(mktemp)"
+    headers_file="$(mktemp)"
+
+    if command curl --dump-header "$headers_file" "$@" >"$stdout_file" 2>"$stderr_file"; then
+      rc=0
+    else
+      rc=$?
+    fi
+
+    status="$(awk '/^HTTP\/[0-9.]+ [0-9][0-9][0-9]/{code=$2} END{print code}' "$headers_file")"
+    retry_reason=""
+    if [[ "$rc" -eq 28 ]]; then
+      retry_reason="timeout"
+    elif [[ "$status" =~ ^5[0-9][0-9]$ ]]; then
+      retry_reason="HTTP $status"
+    fi
+
+    if [[ -z "$retry_reason" || "$attempt" -eq "$max_attempts" ]]; then
+      cat "$stdout_file"
+      cat "$stderr_file" >&2
+      rm -f "$stdout_file" "$stderr_file" "$headers_file"
+      return "$rc"
+    fi
+
+    if [[ "$attempt" -eq 1 ]]; then
+      delay="$HOSTED_CURL_RETRY_BACKOFF_1_SEC"
+    else
+      delay="$HOSTED_CURL_RETRY_BACKOFF_2_SEC"
+    fi
+    echo "Hosted curl transport $retry_reason failed on attempt $attempt/$max_attempts; retrying in ${delay}s." >&2
+    rm -f "$stdout_file" "$stderr_file" "$headers_file"
+    sleep "$delay"
+    attempt=$((attempt + 1))
+  done
+}
+
 fetch() {
   local url="$1"
   local curl_args=(-fsS --max-time "$TIMEOUT_SEC")
   if [[ "$url" == "$APP_URL"* && -n "$APP_BASIC_AUTH_USER" && -n "$APP_BASIC_AUTH_PASSWORD" ]]; then
     curl_args+=(-u "$APP_BASIC_AUTH_USER:$APP_BASIC_AUTH_PASSWORD")
   fi
-  curl "${curl_args[@]}" "$url"
+  curl_with_transport_retries "${curl_args[@]}" "$url"
 }
 
 fetch_admin_json() {
   local url="$1"
-  curl -fsS --max-time "$TIMEOUT_SEC" \
+  curl_with_transport_retries -fsS --max-time "$TIMEOUT_SEC" \
     -H "accept: application/json" \
     -H "authorization: Bearer $OPERATOR_TOKEN" \
     "$url"
@@ -110,29 +163,6 @@ fetch_admin_status_once() {
     admin_status_json="$(fetch_admin_json "$API_ADMIN_STATUS_URL")"
   fi
   printf '%s' "$admin_status_json"
-}
-
-fetch_indexer_with_retries() {
-  local label="$1"
-  local url="$2"
-  local attempt=1
-  local output=""
-
-  while (( attempt <= INDEXER_RETRY_ATTEMPTS )); do
-    if output="$(fetch "$url")"; then
-      printf '%s' "$output"
-      return 0
-    fi
-    if (( attempt == INDEXER_RETRY_ATTEMPTS )); then
-      break
-    fi
-    echo "$label check failed on attempt $attempt/$INDEXER_RETRY_ATTEMPTS; retrying in ${INDEXER_RETRY_SLEEP_SEC}s." >&2
-    sleep "$INDEXER_RETRY_SLEEP_SEC"
-    attempt=$((attempt + 1))
-  done
-
-  echo "$label check failed after $INDEXER_RETRY_ATTEMPTS attempt(s)." >&2
-  return 1
 }
 
 enabled() {
@@ -179,7 +209,7 @@ check_operator_app_shell() {
     curl_args+=(-u "$APP_BASIC_AUTH_USER:$APP_BASIC_AUTH_PASSWORD")
   fi
   local status
-  status="$(curl "${curl_args[@]}" "$APP_URL")"
+  status="$(curl_with_transport_retries "${curl_args[@]}" "$APP_URL")"
   if status_allowed "$status"; then
     if [[ -z "${APP_BASIC_AUTH_PASSWORD:-}" ]]; then
       echo "Operator app returned protected status $status as expected (no auth in CI; auth-200 verification deferred to Phase 2 PR 2.5)."
@@ -217,7 +247,7 @@ jq -e '.components.stateStore.ok == true' >/dev/null <<<"$api_health_json"
 jq -e '.components.submittedJobAutoVerifier.ok == true' >/dev/null <<<"$api_health_json"
 
 echo "Checking DepositPool door"
-pool_response="$(curl -sS --max-time "$TIMEOUT_SEC" --write-out $'\n%{http_code}' "$API_POOL_URL")"
+pool_response="$(curl_with_transport_retries -sS --max-time "$TIMEOUT_SEC" --write-out $'\n%{http_code}' "$API_POOL_URL")"
 pool_status="${pool_response##*$'\n'}"
 pool_json="${pool_response%$'\n'*}"
 if [[ "$pool_status" != "200" ]]; then
@@ -249,7 +279,7 @@ if jq -e '.addresses.creditPool | strings | test("^0x[0-9a-fA-F]{40}$")' >/dev/n
     exit 1
   fi
   echo "Checking CreditPool door"
-  credit_json="$(curl -fsS --max-time "$TIMEOUT_SEC" \
+  credit_json="$(curl_with_transport_retries -fsS --max-time "$TIMEOUT_SEC" \
     -H "accept: application/json" \
     -H "authorization: Bearer $CREDIT_DOOR_TOKEN" \
     "$API_CREDIT_URL")"
@@ -290,7 +320,7 @@ jq -e '
 ' >/dev/null <<<"$strategies_json"
 
 echo "Checking earnings account door is mounted and wallet-scoped (auth-first)"
-account_status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT_SEC" \
+account_status="$(curl_with_transport_retries -sS -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT_SEC" \
   -H "accept: application/json" "$API_ACCOUNT_POSITION_URL")"
 if [[ "$account_status" != "401" ]]; then
   echo "Earnings account door did not answer 401 to an unauthenticated probe (got $account_status)." >&2
@@ -442,13 +472,13 @@ if enabled "$CHECK_METRICS_AUTH"; then
   fi
 
   echo "Checking metrics bearer gate"
-  metrics_status_without_bearer="$(curl -sS --max-time "$TIMEOUT_SEC" -o /dev/null -w "%{http_code}" "$API_METRICS_URL")"
+  metrics_status_without_bearer="$(curl_with_transport_retries -sS --max-time "$TIMEOUT_SEC" -o /dev/null -w "%{http_code}" "$API_METRICS_URL")"
   if [[ "$metrics_status_without_bearer" != "401" ]]; then
     echo "Expected unauthenticated /metrics to return 401, got HTTP $metrics_status_without_bearer." >&2
     exit 1
   fi
 
-  metrics_status_with_bearer="$(curl -sS --max-time "$TIMEOUT_SEC" -o /dev/null -w "%{http_code}" \
+  metrics_status_with_bearer="$(curl_with_transport_retries -sS --max-time "$TIMEOUT_SEC" -o /dev/null -w "%{http_code}" \
     -H "authorization: Bearer $METRICS_BEARER_TOKEN" \
     "$API_METRICS_URL")"
   if [[ "$metrics_status_with_bearer" != "200" ]]; then
@@ -459,14 +489,14 @@ fi
 
 if enabled "$CHECK_INDEXER"; then
   echo "Checking indexer root"
-  indexer_json="$(fetch_indexer_with_retries "Indexer root" "$INDEXER_URL")"
+  indexer_json="$(fetch "$INDEXER_URL")"
   jq -e '.status == "ok"' >/dev/null <<<"$indexer_json"
 
   echo "Checking indexer readiness"
-  fetch_indexer_with_retries "Indexer readiness" "$INDEXER_READY_URL" >/dev/null
+  fetch "$INDEXER_READY_URL" >/dev/null
 
   echo "Checking indexer status freshness"
-  indexer_status_json="$(fetch_indexer_with_retries "Indexer status" "$INDEXER_STATUS_URL")"
+  indexer_status_json="$(fetch "$INDEXER_STATUS_URL")"
   jq -e 'type == "object" and (keys | length) > 0' >/dev/null <<<"$indexer_status_json"
   jq -e 'to_entries[0].value.block.number > 0' >/dev/null <<<"$indexer_status_json"
   jq -e --argjson maxAge "$INDEXER_MAX_STALENESS_SEC" '

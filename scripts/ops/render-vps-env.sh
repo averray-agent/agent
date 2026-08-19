@@ -159,8 +159,8 @@ op_stdout=$(mktemp)
 op_stderr=$(mktemp)
 trap 'rm -f "$tmp" "$op_stdout" "$op_stderr"; unset OP_SERVICE_ACCOUNT_TOKEN' EXIT
 
-if ! op inject --in-file "$template" --out-file "$tmp" --force --cache=false \
-    >"$op_stdout" 2>"$op_stderr"; then
+if ! "$(dirname "$0")/op-inject-with-retry.sh" \
+    "$template" "$tmp" "$op_stdout" "$op_stderr"; then
   echo "render-vps-env.sh: op inject failed:" >&2
   sed 's/^/    /' < "$op_stderr" >&2
   unset OP_SERVICE_ACCOUNT_TOKEN

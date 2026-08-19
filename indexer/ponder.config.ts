@@ -9,6 +9,7 @@ import {
   TreasuryPolicyAbi,
   XcmWrapperAbi
 } from "./abis/contractsAbi";
+import { createIndexerRpcTransport } from "./src/rpc-transport";
 
 type Address = `0x${string}`;
 
@@ -145,7 +146,7 @@ export default createConfig({
   chains: {
     [chainName]: {
       id: chainId,
-      rpc: rpcUrl,
+      rpc: createIndexerRpcTransport(rpcUrl),
       pollingInterval: lowMemoryMode ? 4_000 : 1_000,
       disableCache: lowMemoryMode,
       ethGetLogsBlockRange: lowMemoryMode ? 25 : undefined
