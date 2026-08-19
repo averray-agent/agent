@@ -91,14 +91,15 @@ export const LITERAL_OVERRIDES = {
   // proofs and the Verify paid-door smoke are classified as OURS by every
   // downstream count — the smoke buyer must never read as external demand.
   ARRIVAL_ACCEPTANCE_WALLETS: "0x60385dD643f10934E8F384aC7A04c0D798dFc936",
-  // Verify paid door DISARMED 2026-08-19 pending the dedicated Witness runner
-  // service. The first live paid run (verify-174ecced) proved the billing rule
-  // (not_billed on inconclusive, buyer untouched) and then died at
-  // materialization: the Witness executor needs Docker, and granting the
-  // internet-facing backend the Docker socket was refused as a security
-  // boundary (one backend RCE would be host root on the box that vends KMS
-  // credentials). Rearm rides the runner PR, gated on the paid smoke passing.
-  X402_VERIFY_MODE: "disabled",
+  // Verify paid door REARMED 2026-08-19 (second arming). The Witness runner
+  // service is live in production (#1171): execution happens in a no-listener
+  // runner behind a default-deny Docker admission proxy; the backend holds no
+  // Docker control and no Witness runtime. The first arming (verify-174ecced)
+  // proved the billing rule under a real runner failure — not_billed, buyer
+  // untouched. Exit condition for KEEPING this enabled: the paid smoke
+  // (RUNSHEET_VERIFY_PAID_DOOR_SMOKE §4-§6) passes end to end, capture on
+  // Base included. Testnet stays disabled.
+  X402_VERIFY_MODE: "enabled",
 
   BANK_XCM_ASSET_HUB_SUBSTRATE_RPC_URL: "wss://asset-hub-polkadot-rpc.n.dwellir.com",
   BANK_XCM_HYDRATION_SUBSTRATE_RPC_URL: "wss://hydration-rpc.n.dwellir.com",
