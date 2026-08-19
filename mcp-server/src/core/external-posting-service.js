@@ -29,6 +29,16 @@ import {
   EXTERNAL_JOB_TRANSITION_REASON,
   externalJobLifecycleLockId
 } from "./external-job-lifecycle.js";
+import {
+  DESIGNATED_AGREEMENT_CAP_CHECK_IN_PROGRESS_REASON,
+  DESIGNATED_AGREEMENT_CAP_UNAVAILABLE_REASON,
+  DESIGNATED_AGREEMENT_CONCURRENT_CAP_REASON,
+  DESIGNATED_AGREEMENT_MAX_CONCURRENT,
+  DESIGNATED_AGREEMENT_MAX_REWARD_USDC,
+  DESIGNATED_AGREEMENT_REWARD_CAP_REASON,
+  countConcurrentDesignatedAgreements,
+  isDesignatedJob
+} from "./designated-claimants.js";
 
 export const EXTERNAL_DRAFT_FUNDING_NOTE =
   "No draft or claimable job exists yet; the watcher materializes both only after a matching finalized escrow creation.";
@@ -47,6 +57,59 @@ const DEFAULT_DRAFT_TTL_HOURS = 72;
 export const DEFAULT_POSTER_REVIEW_WINDOW_HOURS = 7 * 24;
 export const MIN_EXTERNAL_CLAIM_TTL_SECONDS = 60;
 const USDC_DECIMALS = 6;
+const DESIGNATED_AGREEMENT_CAP_LOCK_ID = "designated-agreement-cap:global";
+const EXTERNAL_DEFINITION_FIELDS = new Set([
+  "acceptMergedAsApproved",
+  "acceptanceCriteria",
+  "agentInstructions",
+  "autoApprove",
+  "category",
+  "claimTtlSeconds",
+  "codeChange",
+  "contingencyReserve",
+  "delegationPolicy",
+  "description",
+  "designatedClaimants",
+  "escalationMessage",
+  "estimatedDifficulty",
+  "externalSchema",
+  "id",
+  "input",
+  "inputSchemaRef",
+  "jobType",
+  "lane",
+  "lifecycle",
+  "lineage",
+  "milestones",
+  "minimumScore",
+  "onboardingWaiverEligible",
+  "opsReserve",
+  "outputSchemaRef",
+  "parentSessionId",
+  "payoutMode",
+  "recurring",
+  "recurringPolicy",
+  "requireClaimantBinding",
+  "requireIssueReference",
+  "requireTestEvidence",
+  "requiredRole",
+  "requiresSponsoredGas",
+  "retryLimit",
+  "rewardAmount",
+  "rewardAsset",
+  "schedule",
+  "schemaRegistrations",
+  "schemaTrustPolicy",
+  "source",
+  "tier",
+  "title",
+  "verification",
+  "verifierMatchMode",
+  "verifierMinimumMatches",
+  "verifierMinimumScore",
+  "verifierMode",
+  "verifierTerms"
+]);
 
 class ExternalPostingValidationError extends ValidationError {
   constructor(message, code, details = undefined) {
@@ -232,7 +295,16 @@ export class ExternalPostingService {
     }
     const candidate = extractDefinitionCandidate(payload);
     const listingSecurity = await this.screenExternalCandidate(candidate, { fundingRail });
-    const definition = validateExternalJobDefinition(candidate, this.config);
+    let definition;
+    try {
+      definition = validateExternalJobDefinition(candidate, this.config);
+    } catch (error) {
+      if (error?.code === DESIGNATED_AGREEMENT_REWARD_CAP_REASON) {
+        this.logDesignatedAgreementRefusal(error.code, error.details);
+      }
+      throw error;
+    }
+    await this.assertDesignatedAgreementCapacity(definition, { stage: "draft" });
     return {
       definition,
       specHash: hashCanonicalContent(definition),
@@ -285,6 +357,9 @@ export class ExternalPostingService {
     try {
       definition = validateExternalJobDefinition(candidate, this.config);
     } catch (error) {
+      if (error?.code === DESIGNATED_AGREEMENT_REWARD_CAP_REASON) {
+        this.logDesignatedAgreementRefusal(error.code, error.details);
+      }
       await this.recordDemandSignal({
         wallet,
         ...demand,
@@ -327,6 +402,7 @@ export class ExternalPostingService {
       const delisting = await this.stateStore.getExternalJobDelisting?.(materialized.jobId);
       return presentDraft(materialized, now, delisting);
     }
+    await this.assertDesignatedAgreementCapacity(definition, { stage: "draft" });
     let fundingRequirement;
     try {
       fundingRequirement = await this.buildFundingRequirement(definition);
@@ -528,46 +604,181 @@ export class ExternalPostingService {
       };
     }
 
-    const confirmation = {
-      fundedAt: observation.fundedAt,
-      txHash: observation.txHash,
-      blockNumber: observation.blockNumber
-    };
-    if (candidate.fundingRail === EXTERNAL_FUNDING_RAILS.X402) {
+    return this.withDesignatedAgreementCapacity(candidate, async () => {
+      const confirmation = {
+        fundedAt: observation.fundedAt,
+        txHash: observation.txHash,
+        blockNumber: observation.blockNumber
+      };
+      if (candidate.fundingRail === EXTERNAL_FUNDING_RAILS.X402) {
+        const updated = await this.materializeOrUpdateDraft(candidate, {
+          status: "settlement_pending",
+          fundedAt: confirmation.fundedAt,
+          fundingTxHash: confirmation.txHash,
+          fundingBlockNumber: confirmation.blockNumber,
+          confirmation
+        });
+        await this.markQuoteFundingStatus(
+          quoteSignal,
+          "escrow_created_unsettled",
+          observation
+        );
+        this.publishReconciliationEvent("settlement_pending", observation, {
+          fundingRail: EXTERNAL_FUNDING_RAILS.X402
+        });
+        return {
+          outcome: "settlement_pending",
+          jobId: updated.jobId,
+          projected: false,
+          fundedAt: confirmation.fundedAt,
+          txHash: confirmation.txHash,
+          blockNumber: confirmation.blockNumber
+        };
+      }
       const updated = await this.materializeOrUpdateDraft(candidate, {
-        status: "settlement_pending",
+        status: "live",
         fundedAt: confirmation.fundedAt,
         fundingTxHash: confirmation.txHash,
         fundingBlockNumber: confirmation.blockNumber,
         confirmation
       });
-      await this.markQuoteFundingStatus(
-        quoteSignal,
-        "escrow_created_unsettled",
-        observation
-      );
-      this.publishReconciliationEvent("settlement_pending", observation, {
-        fundingRail: EXTERNAL_FUNDING_RAILS.X402
-      });
-      return {
-        outcome: "settlement_pending",
-        jobId: updated.jobId,
-        projected: false,
-        fundedAt: confirmation.fundedAt,
-        txHash: confirmation.txHash,
-        blockNumber: confirmation.blockNumber
-      };
-    }
-    const updated = await this.materializeOrUpdateDraft(candidate, {
-      status: "live",
-      fundedAt: confirmation.fundedAt,
-      fundingTxHash: confirmation.txHash,
-      fundingBlockNumber: confirmation.blockNumber,
-      confirmation
+      await this.markQuoteFundingStatus(quoteSignal, "funded", observation);
+      this.publishReconciliationEvent("live", observation);
+      return this.projectConfirmedDraft(updated);
     });
-    await this.markQuoteFundingStatus(quoteSignal, "funded", observation);
-    this.publishReconciliationEvent("live", observation);
-    return this.projectConfirmedDraft(updated);
+  }
+
+  async assertDesignatedAgreementCapacity(definition, {
+    stage,
+    excludeJobId = undefined
+  } = {}) {
+    if (!isDesignatedJob(definition)) return { applies: false };
+    const maximumRewardRaw = decimalToBaseUnits(
+      DESIGNATED_AGREEMENT_MAX_REWARD_USDC,
+      this.config.usdcAsset.decimals,
+      "designated agreement reward cap"
+    );
+    const requestedRewardRaw = decimalToBaseUnits(
+      definition.rewardAmount,
+      this.config.usdcAsset.decimals,
+      "rewardAmount"
+    );
+    if (requestedRewardRaw > maximumRewardRaw) {
+      const details = {
+        stage,
+        maximumRewardUsdc: String(DESIGNATED_AGREEMENT_MAX_REWARD_USDC),
+        requestedRewardUsdc: String(definition.rewardAmount)
+      };
+      this.logDesignatedAgreementRefusal(DESIGNATED_AGREEMENT_REWARD_CAP_REASON, details);
+      throw new ConflictError(
+        `Designated agreements are capped at ${DESIGNATED_AGREEMENT_MAX_REWARD_USDC} USDC.`,
+        DESIGNATED_AGREEMENT_REWARD_CAP_REASON,
+        details
+      );
+    }
+    let currentCount;
+    try {
+      currentCount = await countConcurrentDesignatedAgreements(this.stateStore, { excludeJobId });
+    } catch (error) {
+      const details = {
+        stage,
+        currentCount: null,
+        limit: DESIGNATED_AGREEMENT_MAX_CONCURRENT,
+        sourceCode: error?.details?.sourceCode ?? error?.code ?? "state_store_read_failed"
+      };
+      this.logDesignatedAgreementRefusal(DESIGNATED_AGREEMENT_CAP_UNAVAILABLE_REASON, details);
+      throw new ConflictError(
+        "Designated-agreement capacity cannot be proven from the state store.",
+        DESIGNATED_AGREEMENT_CAP_UNAVAILABLE_REASON,
+        details
+      );
+    }
+    if (currentCount >= DESIGNATED_AGREEMENT_MAX_CONCURRENT) {
+      const details = {
+        stage,
+        currentCount,
+        limit: DESIGNATED_AGREEMENT_MAX_CONCURRENT
+      };
+      this.logDesignatedAgreementRefusal(DESIGNATED_AGREEMENT_CONCURRENT_CAP_REASON, details);
+      throw new ConflictError(
+        `Designated-agreement capacity is full (${currentCount}/${DESIGNATED_AGREEMENT_MAX_CONCURRENT}).`,
+        DESIGNATED_AGREEMENT_CONCURRENT_CAP_REASON,
+        details
+      );
+    }
+    return { applies: true, currentCount, limit: DESIGNATED_AGREEMENT_MAX_CONCURRENT };
+  }
+
+  async withDesignatedAgreementCapacity(candidate, operation) {
+    if (!isDesignatedJob(candidate?.definition)) return operation();
+    if (
+      typeof this.stateStore?.acquireClaimLock !== "function"
+      || typeof this.stateStore?.releaseClaimLock !== "function"
+    ) {
+      const details = { stage: "funding", currentCount: null, limit: DESIGNATED_AGREEMENT_MAX_CONCURRENT };
+      this.logDesignatedAgreementRefusal(DESIGNATED_AGREEMENT_CAP_UNAVAILABLE_REASON, details);
+      throw new ConflictError(
+        "Designated-agreement funding cannot prove an atomic capacity check.",
+        DESIGNATED_AGREEMENT_CAP_UNAVAILABLE_REASON,
+        details
+      );
+    }
+    const lockOwner = randomUUID();
+    let acquired;
+    try {
+      acquired = await this.stateStore.acquireClaimLock(
+        DESIGNATED_AGREEMENT_CAP_LOCK_ID,
+        lockOwner,
+        EXTERNAL_JOB_LIFECYCLE_LOCK_TTL_SECONDS
+      );
+    } catch (error) {
+      const details = {
+        stage: "funding",
+        currentCount: null,
+        limit: DESIGNATED_AGREEMENT_MAX_CONCURRENT,
+        sourceCode: error?.code ?? "state_store_lock_failed"
+      };
+      this.logDesignatedAgreementRefusal(DESIGNATED_AGREEMENT_CAP_UNAVAILABLE_REASON, details);
+      throw new ConflictError(
+        "Designated-agreement funding cannot prove an atomic capacity check.",
+        DESIGNATED_AGREEMENT_CAP_UNAVAILABLE_REASON,
+        details
+      );
+    }
+    if (acquired === false) {
+      const details = { stage: "funding", currentCount: null, limit: DESIGNATED_AGREEMENT_MAX_CONCURRENT };
+      this.logDesignatedAgreementRefusal(DESIGNATED_AGREEMENT_CAP_CHECK_IN_PROGRESS_REASON, details);
+      throw new ConflictError(
+        "Another designated agreement is updating the platform capacity. Retry after it finishes.",
+        DESIGNATED_AGREEMENT_CAP_CHECK_IN_PROGRESS_REASON,
+        details
+      );
+    }
+    if (acquired !== true) {
+      const details = { stage: "funding", currentCount: null, limit: DESIGNATED_AGREEMENT_MAX_CONCURRENT };
+      this.logDesignatedAgreementRefusal(DESIGNATED_AGREEMENT_CAP_UNAVAILABLE_REASON, details);
+      throw new ConflictError(
+        "Designated-agreement funding cannot prove an atomic capacity check.",
+        DESIGNATED_AGREEMENT_CAP_UNAVAILABLE_REASON,
+        details
+      );
+    }
+    try {
+      await this.assertDesignatedAgreementCapacity(candidate.definition, {
+        stage: "funding",
+        excludeJobId: candidate.jobId
+      });
+      return await operation();
+    } finally {
+      await this.stateStore.releaseClaimLock(DESIGNATED_AGREEMENT_CAP_LOCK_ID, lockOwner);
+    }
+  }
+
+  logDesignatedAgreementRefusal(reason, details) {
+    this.logger.warn?.(
+      { event: "designated_agreement_refused", reason, ...details },
+      "designated_agreement.refused"
+    );
   }
 
   async confirmExternalPaymentSettlement(draftId, settlement) {
@@ -943,6 +1154,16 @@ export class ExternalPostingService {
 
 function validateExternalJobDefinition(candidate, config) {
   const definition = cloneJsonObject(requirePlainObject(candidate, "definition"));
+  const unknownFields = Object.keys(definition)
+    .filter((field) => !EXTERNAL_DEFINITION_FIELDS.has(field))
+    .sort();
+  if (unknownFields.length > 0) {
+    throw externalValidationError(
+      `External definition contains unsupported field ${unknownFields[0]}.`,
+      "external_definition_unknown_field",
+      { fields: unknownFields }
+    );
+  }
   if ("id" in definition) {
     throw new ValidationError("definition.id is derived by the platform and must be omitted.");
   }
@@ -1032,6 +1253,24 @@ function validateExternalJobDefinition(candidate, config) {
       }
     );
   }
+  if (
+    definition.designatedClaimants !== undefined
+    && rewardRaw > decimalToBaseUnits(
+      DESIGNATED_AGREEMENT_MAX_REWARD_USDC,
+      config.usdcAsset.decimals,
+      "designated agreement reward cap"
+    )
+  ) {
+    throw externalValidationError(
+      `Designated agreements are capped at ${DESIGNATED_AGREEMENT_MAX_REWARD_USDC} USDC.`,
+      DESIGNATED_AGREEMENT_REWARD_CAP_REASON,
+      {
+        stage: "draft",
+        maximumRewardUsdc: String(DESIGNATED_AGREEMENT_MAX_REWARD_USDC),
+        requestedRewardUsdc: String(definition.rewardAmount)
+      }
+    );
+  }
 
   const inputSchemaRef = String(
     definition.inputSchemaRef ?? `schema://jobs/${definition.category}-input`
@@ -1051,7 +1290,10 @@ function validateExternalJobDefinition(candidate, config) {
   resolveExternalClaimTtlSeconds(definition);
 
   try {
-    normalizeJobInput({ ...definition, id: "external-draft-validation" });
+    const normalized = normalizeJobInput({ ...definition, id: "external-draft-validation" });
+    if (normalized.designatedClaimants) {
+      definition.designatedClaimants = [...normalized.designatedClaimants];
+    }
     if (definition.input !== undefined) {
       validateAgainstSchema(
         definition.input,

@@ -35,15 +35,20 @@ function listFrom(data, keys) {
 }
 
 /**
- * Open/claimable jobs — the `/jobs` feed is already the live queue
- * (paused/archived rows are filtered server-side), so its length is the
- * count of work available to act on.
+ * Open/claimable jobs — restricted agreements may be visible on `/jobs` for
+ * board truth, but they are not open marketplace supply.
  * @param {unknown} jobsData
  * @returns {number | undefined}
  */
 export function openJobsCount(jobsData) {
   const list = listFrom(jobsData, ["jobs", "items", "data"]);
-  return list ? list.length : undefined;
+  if (!list) return undefined;
+  return list.filter((entry) => {
+    if (!entry || typeof entry !== "object") return true;
+    const record = /** @type {Record<string, unknown>} */ (entry);
+    const state = String(record.effectiveState ?? record.claimState ?? record.state ?? "open").toLowerCase();
+    return state !== "restricted";
+  }).length;
 }
 
 /**

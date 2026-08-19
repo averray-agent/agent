@@ -156,6 +156,7 @@ test("GET /admin/jobs lists operator-visible jobs with lifecycle summary", async
     ["limit", { bucket: "admin_jobs", key: AUTH.wallet, limits: { windowMs: 10_000, max: 5 } }],
     ["listJobsWithSessions", {
       wallet: AUTH.wallet,
+      includeDesignatedClaimants: true,
       includePaused: true,
       includeArchived: true,
       includeStale: true,

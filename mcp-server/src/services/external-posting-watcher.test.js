@@ -11,6 +11,7 @@ import {
 import { MemoryStateStore } from "../core/state-store.js";
 import { PlatformService } from "../core/platform-service.js";
 import { EventBus } from "../core/event-bus.js";
+import { SelfIdentityRegistry } from "../core/self-identity-registry.js";
 import { VerifierService } from "./verifier-service.js";
 import {
   ExternalPostingWatcherService,
@@ -391,9 +392,36 @@ test("local external-posting e2e signs issued calldata, watches funding, and rea
     config: postingConfig("open"),
     now: () => new Date(createdAt)
   });
-  const verifier = new VerifierService(platformService, stateStore);
+  platformService.verificationIngestionService.setSelfIdentityRegistry(new SelfIdentityRegistry());
+  const verifier = new VerifierService(platformService, stateStore, {
+    isEnabled: () => true,
+    async getJob(jobId) {
+      const session = await stateStore.findSessionByJobId(jobId);
+      return { state: 3, specHash: session?.jobSnapshot?.specHash };
+    },
+    async resolveSinglePayout() {
+      return {
+        txHash: `0x${"cd".repeat(32)}`,
+        status: 1,
+        settlement: {
+          worker: WORKER,
+          treasuryAccount: "0x4444444444444444444444444444444444444444",
+          asset: USDC,
+          assetSymbol: "USDC",
+          workerAmountRaw: "1000000",
+          protocolFeeAmountRaw: "50000",
+          protocolFeeBps: 500,
+          rewardAmountRaw: "1000000",
+          posterTotalAmountRaw: "1050000",
+          gasRetention: { retainedRaw: "0", rewardRaw: "1000000" }
+        }
+      };
+    }
+  });
 
-  const draft = await externalPosting.createDraft(POSTER, { definition: definition() });
+  const draft = await externalPosting.createDraft(POSTER, {
+    definition: definition({ designatedClaimants: [WORKER] })
+  });
   assert.equal(draft.calldata.to, ESCROW);
   const posterSigner = new Wallet(POSTER_PRIVATE_KEY);
   assert.equal(posterSigner.address.toLowerCase(), POSTER);
@@ -461,5 +489,12 @@ test("local external-posting e2e signs issued calldata, watches funding, and rea
   const settled = await verifier.verifySubmission({ sessionId: submitted.sessionId });
 
   assert.equal(settled.outcome, "approved");
-  assert.equal((await platformService.resumeSession(claimed.sessionId)).status, "resolved");
+  const resolved = await platformService.resumeSession(claimed.sessionId);
+  assert.equal(resolved.status, "resolved");
+  const receipt = await stateStore.getWorkReceiptDocument(resolved.workReceiptId);
+  assert.equal(receipt.intent.poster, POSTER);
+  assert.equal(receipt.execution.provider, WORKER);
+  assert.equal(receipt.execution.providerClass, "external");
+  assert.equal(receipt.settlement.gasRetentionAmountRaw, "0");
+  assert.equal(receipt.settlement.posterTotalAmountRaw, "1050000");
 });

@@ -142,11 +142,13 @@ export function classifyJobRow(job: Record<string, unknown>): JobRowClassificati
   // OPEN bucket past what agents can actually claim.
   const exhausted =
     status === "exhausted" || state === "exhausted" || effectiveState === "exhausted";
+  const restricted = state === "restricted" || effectiveState === "restricted";
 
   return {
     exhausted,
     open:
       !exhausted &&
+      !restricted &&
       (status === "open" ||
         state === "open" ||
         state === "ready" ||
@@ -155,6 +157,7 @@ export function classifyJobRow(job: Record<string, unknown>): JobRowClassificati
     // Note this is a SUBSET of `open`, not a sibling bucket.
     claimable:
       !exhausted &&
+      !restricted &&
       (job.claimable === true ||
         effectiveState === "claimable" ||
         (!effectiveState && state === "open")),

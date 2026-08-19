@@ -16,6 +16,13 @@ test("openJobsCount: array length, envelope shapes, and load state", () => {
   assert.equal(openJobsCount({ nope: 1 }), undefined); // unrecognized shape → no badge
 });
 
+test("openJobsCount excludes designated agreements rendered as restricted", () => {
+  assert.equal(openJobsCount([
+    { id: "ordinary", claimable: true, effectiveState: "claimable" },
+    { id: "designated", claimable: false, effectiveState: "restricted" }
+  ]), 1);
+});
+
 test("activeSessionsCount: only in-flight (active/submitted/disputed) sessions", () => {
   const sessions = [
     { status: "claimed" }, // → active (in flight)

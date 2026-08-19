@@ -70,6 +70,20 @@ test("normalizeJobInput returns the canonical job record shape", () => {
   assert.equal(job.lifecycle.staleAt, "2026-05-15T12:00:00.000Z");
 });
 
+test("admin normalization preserves one designated claimant and disables subsidized gas", () => {
+  const claimant = "0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa";
+  const job = normalizeJobInput({
+    ...BASE_JOB,
+    designatedClaimants: [claimant],
+    requiresSponsoredGas: true,
+    onboardingWaiverEligible: true
+  });
+
+  assert.deepEqual(job.designatedClaimants, [claimant]);
+  assert.equal(job.requiresSponsoredGas, false);
+  assert.equal(job.onboardingWaiverEligible, undefined);
+});
+
 test("active catalog titles cannot promise upstream side effects before delivery exists", () => {
   assert.equal(activeCatalogTitlePromisesUpstreamSideEffect("Fix status badge"), true);
   assert.equal(

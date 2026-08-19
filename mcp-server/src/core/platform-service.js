@@ -60,6 +60,11 @@ import {
 } from "./external-job-lifecycle.js";
 import { inspectClaimJobDefinitionIntegrity } from "./claim-job-integrity.js";
 import { hashCanonicalContent } from "./canonical-content.js";
+import {
+  evaluateDesignatedClaimant,
+  isDesignatedJob,
+  restrictDesignatedJobForPublic
+} from "./designated-claimants.js";
 
 const TIMELINE_VERSION = "v2";
 export const INGEST_REFUSED_SPEC_HASH_MISMATCH = "ingest_refused_spec_hash_mismatch";
@@ -190,18 +195,27 @@ export class PlatformService {
    * visibility calls this method instead of `listJobs`.
    */
   async listJobsWithSessions(options = {}) {
-    const { wallet, currentWallet, now = new Date(), ...catalogOptions } = options;
+    const {
+      wallet,
+      currentWallet,
+      now = new Date(),
+      includeDesignatedClaimants = false,
+      ...catalogOptions
+    } = options;
     const jobs = this.jobCatalogService.listJobs({ ...catalogOptions, now });
     const rewardBank = jobs.length > 0
       ? await this.resolveRewardBankHealthForClaimability(now)
       : undefined;
-    return Promise.all(
+    const attached = await Promise.all(
       jobs.map((job) => this.attachClaimState(job, {
         wallet: currentWallet ?? wallet,
         rewardBank,
         now
       }))
     );
+    return includeDesignatedClaimants
+      ? attached
+      : attached.map(restrictDesignatedJobForPublic);
   }
 
   /**
@@ -1032,7 +1046,7 @@ export class PlatformService {
       includePaused = false,
       includeStale = false
     } = options;
-    return this.attachClaimState(
+    return restrictDesignatedJobForPublic(await this.attachClaimState(
       this.jobCatalogService.getPublicJobDefinition(jobId, {
         includeArchived,
         includePaused,
@@ -1040,7 +1054,7 @@ export class PlatformService {
         now
       }),
       { wallet: currentWallet ?? wallet, now }
-    );
+    ));
   }
 
   async validateJobSubmission(jobId, submissionInput) {
@@ -1099,9 +1113,13 @@ export class PlatformService {
   async preflightJob(wallet, jobId) {
     const [preflight, job] = await Promise.all([
       this.jobCatalogService.preflightJob(wallet, jobId),
-      this.getPublicJobDefinition(jobId, { wallet })
+      this.attachClaimState(this.getJobDefinition(jobId), { wallet })
     ]);
-    const claimStateEligible = job.claimable === true && job.currentWalletCanClaim !== false;
+    const rawJob = this.getJobDefinition(jobId);
+    const designation = evaluateDesignatedClaimant(rawJob, wallet);
+    const claimStateEligible = designation.applies
+      ? job.currentWalletCanClaim === true
+      : job.claimable === true && job.currentWalletCanClaim !== false;
     const fundingBlocked = claimStateEligible && preflight.claimFundingSufficient === false;
     const subsidyBlocked = preflight.reason === "onboarding_subsidy_exhausted";
     const result = {
@@ -1119,6 +1137,10 @@ export class PlatformService {
       retryLimit: job.retryLimit,
       sessionId: job.sessionId
     };
+    if (designation.applies && designation.eligible) {
+      result.designatedClaimants = [...rawJob.designatedClaimants];
+      result.progressionValvesBypassed = true;
+    }
     const delisting = isExternalJob(job)
       ? await this.stateStore.getExternalJobDelisting?.(jobId)
       : undefined;
@@ -1153,6 +1175,9 @@ export class PlatformService {
             ])
           ]
         };
+      }
+      if (isDesignatedJob(rawJob)) {
+        return { ...result, jobDefinitionIntegrity: jobDefinitionIntegrity.decision };
       }
       if (!this.workerExposurePolicy && !this.workerDailyExposurePolicy && !this.catalogueDailyBudget) {
         return { ...result, jobDefinitionIntegrity: jobDefinitionIntegrity.decision };

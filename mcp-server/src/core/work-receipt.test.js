@@ -154,6 +154,45 @@ test("waived brokered settlement records zero retention and remains reconcilable
   assert.equal(receipt.settlement.posterTotalAmountRaw, "300000");
 });
 
+test("designated external settlement pays provider plus poster fee with zero retention", () => {
+  const fixture = input({
+    settlement: {
+      ...live.settlement,
+      workerAmount: 0.25,
+      workerAmountRaw: "250000",
+      gasRetention: { retainedRaw: "0", rewardRaw: "250000" }
+    }
+  });
+  fixture.job.source = {
+    type: "external",
+    poster: { wallet: live.poster }
+  };
+  fixture.job.designatedClaimants = [live.worker];
+  fixture.job.requiresSponsoredGas = false;
+  fixture.session.gasRetention = {
+    brokered: false,
+    waived: false,
+    retentionCapBps: 0,
+    rewardRaw: "250000"
+  };
+  fixture.context.selfIdentityRegistry = new SelfIdentityRegistry({
+    operatorWallets: [live.poster]
+  });
+
+  const receipt = buildWorkReceipt(fixture);
+  assert.equal(receipt.execution.providerClass, "external");
+  assert.equal(receipt.settlement.workerAmountRaw, "250000");
+  assert.equal(receipt.settlement.gasRetentionAmountRaw, "0");
+  assert.equal(receipt.settlement.brokered, false);
+  assert.equal(receipt.settlement.protocolFeeAmountRaw, "50000");
+  assert.equal(receipt.settlement.posterTotalAmountRaw, "300000");
+  assert.equal(
+    BigInt(receipt.settlement.posterTotalAmountRaw),
+    BigInt(receipt.settlement.rewardAmountRaw)
+      + BigInt(receipt.settlement.protocolFeeAmountRaw)
+  );
+});
+
 test("claim-time chain read failure remains explicit in receipt intent", () => {
   const receipt = buildWorkReceipt(input({ specSource: "chain_unavailable_fail_open" }));
   assert.equal(receipt.intent.specSource, "chain_unavailable_fail_open");

@@ -1,5 +1,6 @@
 import { normalizeAssetSymbol } from "./assets.js";
 import { decimalToBaseUnits } from "./platform-service-helpers.js";
+import { evaluateDesignatedClaimant } from "./designated-claimants.js";
 
 const TERMINAL_SESSION_STATUSES = new Set(["resolved", "rejected", "closed", "expired", "timed_out"]);
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -76,20 +77,30 @@ export function summarizeJobClaimState({
     : lazyFundingUnverified
       ? "reward_funding_unverified"
       : undefined;
+  const designation = evaluateDesignatedClaimant(job, wallet);
 
   if (!session) {
-    const claimable = lifecycleState === "open" && !retryExhausted && !fundingBlocked;
-    const claimState = retryExhausted ? "exhausted" : claimable ? "open" : lifecycleState;
+    const available = lifecycleState === "open" && !retryExhausted && !fundingBlocked;
+    const claimable = designation.applies ? false : available;
+    const claimState = designation.applies
+      ? "restricted"
+      : retryExhausted ? "exhausted" : claimable ? "open" : lifecycleState;
     return compact({
       claimState,
       state: claimState,
       effectiveState: claimable ? "claimable" : claimState,
       claimable,
-      currentWalletCanClaim: normalizedWallet ? claimable : null,
+      currentWalletCanClaim: normalizedWallet
+        ? designation.applies ? available && designation.eligible : claimable
+        : null,
       fundingState: effectiveFundingState,
-      reason: retryExhausted
-        ? "retry_limit_exhausted"
-        : fundingReason ?? (claimable ? "claimable" : `job_${lifecycleState}`),
+      reason: designation.applies && !designation.eligible
+        ? designation.reason
+        : retryExhausted
+          ? "retry_limit_exhausted"
+          : fundingReason ?? (designation.applies
+              ? "designated_claimant_authorized"
+              : claimable ? "claimable" : `job_${lifecycleState}`),
       retryLimit,
       claimAttemptCount,
       remainingClaimAttempts,
@@ -102,18 +113,25 @@ export function summarizeJobClaimState({
   }
 
   if (expired) {
-    const claimable = lifecycleState === "open" && !retryExhausted && !fundingBlocked;
-    const claimState = retryExhausted ? "exhausted" : "expired";
+    const available = lifecycleState === "open" && !retryExhausted && !fundingBlocked;
+    const claimable = designation.applies ? false : available;
+    const claimState = designation.applies ? "restricted" : retryExhausted ? "exhausted" : "expired";
     return compact({
       claimState,
       state: claimState,
       effectiveState: claimable ? "claimable" : claimState,
       claimable,
-      currentWalletCanClaim: normalizedWallet ? claimable : null,
+      currentWalletCanClaim: normalizedWallet
+        ? designation.applies ? available && designation.eligible : claimable
+        : null,
       fundingState: effectiveFundingState,
-      reason: retryExhausted
-        ? "retry_limit_exhausted"
-        : fundingReason ?? "claim_ttl_expired_reopen_available",
+      reason: designation.applies && !designation.eligible
+        ? designation.reason
+        : retryExhausted
+          ? "retry_limit_exhausted"
+          : fundingReason ?? (designation.applies
+              ? "designated_claimant_authorized"
+              : "claim_ttl_expired_reopen_available"),
       retryLimit,
       claimAttemptCount,
       remainingClaimAttempts,

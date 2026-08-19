@@ -79,6 +79,7 @@ export function createAdminJobsRoutes({
       // The public `/jobs` route filters those out by default.
       const jobs = await service.listJobsWithSessions({
         wallet: auth.wallet,
+        includeDesignatedClaimants: true,
         includePaused: true,
         includeArchived: true,
         includeStale: true

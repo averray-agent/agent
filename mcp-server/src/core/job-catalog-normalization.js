@@ -8,6 +8,7 @@ import {
   PATCH_SUBMISSION_OUTPUT_SCHEMA_REF,
   normalizeCodeChangeDefinition
 } from "./code-change-job.js";
+import { normalizeDesignatedClaimants } from "./designated-claimants.js";
 
 export const VALID_TIERS = new Set(["starter", "pro", "elite"]);
 export const VALID_VERIFIER_MODES = new Set(["benchmark", "deterministic", "human_fallback", "github_pr", "witness"]);
@@ -40,6 +41,7 @@ export function normalizeJobInput(input) {
   const lane = normaliseTextField(input?.lane)?.toLowerCase();
   const jobType = normalizeJobType(input?.jobType);
   const requiredRole = normalizeAgentRole(input?.requiredRole ?? DEFAULT_ROLE_BY_JOB_TYPE[jobType]);
+  const designatedClaimants = normalizeDesignatedClaimants(input?.designatedClaimants);
 
   if (!id) {
     throw new ValidationError("Job id is required.");
@@ -132,8 +134,11 @@ export function normalizeJobInput(input) {
     ...(schemaTrustPolicy ? { schemaTrustPolicy } : {}),
     claimTtlSeconds,
     retryLimit,
-    requiresSponsoredGas: Boolean(input?.requiresSponsoredGas),
-    ...(input?.onboardingWaiverEligible === true ? { onboardingWaiverEligible: true } : {}),
+    requiresSponsoredGas: designatedClaimants ? false : Boolean(input?.requiresSponsoredGas),
+    ...(!designatedClaimants && input?.onboardingWaiverEligible === true
+      ? { onboardingWaiverEligible: true }
+      : {}),
+    ...(designatedClaimants ? { designatedClaimants } : {}),
     lifecycle,
     ...(title ? { title } : {}),
     ...(description ? { description } : {}),
