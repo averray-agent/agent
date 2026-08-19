@@ -1,0 +1,107 @@
+name: averray-verify-runner-smoke
+
+services:
+  verify-smoke-redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", ""]
+    networks: [verify-smoke-internal]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  verify-smoke-proxy:
+    build:
+      context: ..
+      dockerfile: deploy/witness-docker-proxy/Dockerfile
+    environment:
+      WITNESS_RUNTIME_ROOT: ${WITNESS_RUNTIME_ROOT:?WITNESS_RUNTIME_ROOT is required}
+      WITNESS_SANDBOX_IMAGE: averray-witness-preflight:phase1-uv-0.12.5-python-3.12.12-uv-build-0.9.27
+      WITNESS_CONTAINER_PREFIX: averray-witness-
+      WITNESS_PROXY_LOG_ALLOWED: "1"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    networks: [verify-smoke-docker-control]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2375/_ping').then(async r=>{if(!r.ok||(await r.text()).trim()!=='OK')process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  verify-smoke-proxy-guard:
+    build:
+      context: ..
+      dockerfile: mcp-server/Dockerfile.witness-runner
+    command: ["node", "src/demo/verify-docker-proxy-smoke.js"]
+    environment:
+      DOCKER_HOST: tcp://verify-smoke-proxy:2375
+    depends_on:
+      verify-smoke-proxy:
+        condition: service_healthy
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    networks: [verify-smoke-docker-control]
+
+  verify-smoke-runner:
+    build:
+      context: ..
+      dockerfile: mcp-server/Dockerfile.witness-runner
+    environment:
+      NODE_ENV: production
+      REDIS_URL: redis://verify-smoke-redis:6379
+      REDIS_NAMESPACE: averray-verify-runner-smoke
+      DOCKER_HOST: tcp://verify-smoke-proxy:2375
+      WITNESS_TEMP_ROOT: ${WITNESS_RUNTIME_ROOT:?WITNESS_RUNTIME_ROOT is required}
+      WITNESS_IMAGE: averray-witness-preflight:phase1-uv-0.12.5-python-3.12.12-uv-build-0.9.27
+      WITNESS_IMAGE_BUILD: disabled
+      WITNESS_RUNNER_INTERVAL_MS: 100
+      WITNESS_RUNNER_CLAIM_LEASE_SECONDS: 180
+    depends_on:
+      verify-smoke-redis:
+        condition: service_healthy
+      verify-smoke-proxy:
+        condition: service_healthy
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - ${WITNESS_RUNTIME_ROOT:?WITNESS_RUNTIME_ROOT is required}:${WITNESS_RUNTIME_ROOT:?WITNESS_RUNTIME_ROOT is required}
+    tmpfs:
+      - /tmp:rw,exec,nosuid,nodev,size=256m,uid=65532,gid=65532
+    networks:
+      - verify-smoke-egress
+      - verify-smoke-internal
+      - verify-smoke-docker-control
+
+  verify-smoke-backend:
+    build:
+      context: ..
+      dockerfile: mcp-server/Dockerfile
+    command: ["node", "src/demo/verify-witness-compose-smoke.js"]
+    environment:
+      NODE_ENV: production
+      REDIS_URL: redis://verify-smoke-redis:6379
+      REDIS_NAMESPACE: averray-verify-runner-smoke
+    depends_on:
+      verify-smoke-redis:
+        condition: service_healthy
+      verify-smoke-runner:
+        condition: service_started
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    networks: [verify-smoke-internal]
+
+networks:
+  verify-smoke-internal:
+    internal: true
+  verify-smoke-docker-control:
+    internal: true
+  verify-smoke-egress: {}

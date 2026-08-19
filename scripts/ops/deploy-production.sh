@@ -1976,7 +1976,7 @@ deploy() {
   # 1Password item → trigger workflow_dispatch → render produces new
   # /run env → hash differs → force-recreate. No SSH+rm dance needed.
   local backend_code_changed=0
-  if should_run backend "$RUN_BACKEND" '^(mcp-server/|sdk/|examples/|docs/schemas/|package(-lock)?\.json|scripts/ops/redeploy-backend\.sh|deploy/backend(\.mainnet)?\.env\.template|deployments/(testnet|mainnet)\.json)'; then
+  if should_run backend "$RUN_BACKEND" '^(mcp-server/|witness/|sdk/|examples/|docs/schemas/|package(-lock)?\.json|scripts/ops/redeploy-backend\.sh|deploy/witness-docker-proxy/|deploy/docker-compose\.mainnet\.yml|deploy/backend(\.mainnet)?\.env\.template|deployments/(testnet|mainnet)\.json)'; then
     backend_code_changed=1
   fi
   if [[ "$backend_code_changed" == "1" || "${RUNTIME_ENV_CHANGED_BACKEND:-0}" == "1" ]]; then
@@ -1992,6 +1992,12 @@ deploy() {
       if [[ "$LIVE_NETWORK" == "mainnet" ]]; then
         badge_profile_declaration="$APP_ROOT/deploy/aws-config.badge-receipt-profile.mainnet"
       fi
+      local witness_runner_service=""
+      local witness_proxy_service=""
+      if [[ "$LIVE_NETWORK" == "mainnet" ]]; then
+        witness_runner_service="mainnet-witness-runner"
+        witness_proxy_service="mainnet-witness-docker-proxy"
+      fi
       COMPOSE_FILE="$COMPOSE_FILE" \
         COMPOSE_PROJECT_DIRECTORY="$COMPOSE_PROJECT_DIRECTORY" \
         BACKEND_SERVICE="$BACKEND_SERVICE" \
@@ -2003,6 +2009,11 @@ deploy() {
         BADGE_RECEIPT_CERT_PATH="$CREDENTIALS_ROOT/roles-anywhere/badge-receipt-signer-cert.pem" \
         BADGE_RECEIPT_KEY_PATH="$CREDENTIALS_ROOT/roles-anywhere/badge-receipt-signer-key.pem" \
         BADGE_RECEIPT_PROFILE_DECLARATION="$badge_profile_declaration" \
+        WITNESS_RUNNER_SERVICE="$witness_runner_service" \
+        WITNESS_PROXY_SERVICE="$witness_proxy_service" \
+        WITNESS_RUNNER_CONTAINER="agent-mainnet-witness-runner" \
+        WITNESS_PROXY_CONTAINER="agent-mainnet-witness-docker-proxy" \
+        WITNESS_RUNTIME_ROOT="/srv/agent-stack-mainnet/witness-runtime" \
         SKIP_GIT_UPDATE=1 \
         PRE_DEPLOY_SHA="$OLD_SHA" \
         "$APP_ROOT/scripts/ops/redeploy-backend.sh"

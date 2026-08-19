@@ -1,37 +1,31 @@
-import { GitPatchTestsRunner } from "./git-patch-tests-runner.js";
+import { VerificationProfileRegistry } from "./verification-profile-registry.js";
 import {
-  GIT_PATCH_TESTS_PROFILE_REF,
-  VerificationProfileRegistry
-} from "./verification-profile-registry.js";
+  loadVerificationRunFinalizerConfig,
+  VerificationRunFinalizerService
+} from "./verification-run-finalizer.js";
 import { VerificationRunService } from "./verification-run-service.js";
 
 export async function createVerificationShelf({
   stateStore,
-  runner = new GitPatchTestsRunner(),
   paymentGate,
   publicReceiptBaseUrl = process.env.PUBLIC_BASE_URL,
+  env = process.env,
   logger = console
 } = {}) {
-  const availability = await runner.inspectAvailability();
-  const verificationProfileRegistry = new VerificationProfileRegistry({
-    availabilityByProfile: { [GIT_PATCH_TESTS_PROFILE_REF]: availability }
-  });
-  if (availability.status !== "available") {
-    logger.warn?.(
-      {
-        profile: GIT_PATCH_TESTS_PROFILE_REF,
-        reasonCode: availability.reasonCode,
-        err: availability.error
-      },
-      "verification_profile.unavailable"
-    );
-  }
+  const config = loadVerificationRunFinalizerConfig(env);
+  const verificationProfileRegistry = new VerificationProfileRegistry();
   const verificationRunService = new VerificationRunService({
     stateStore,
     profileRegistry: verificationProfileRegistry,
-    runner,
     paymentGate,
-    publicReceiptBaseUrl
+    publicReceiptBaseUrl,
+    runnerTimeoutMarginMs: config.runnerTimeoutMarginMs
   });
-  return { verificationProfileRegistry, verificationRunService };
+  const verificationRunFinalizer = new VerificationRunFinalizerService({
+    verificationRunService,
+    intervalMs: config.intervalMs,
+    batchSize: config.batchSize,
+    logger
+  });
+  return { verificationProfileRegistry, verificationRunService, verificationRunFinalizer };
 }

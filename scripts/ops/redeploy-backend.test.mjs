@@ -190,3 +190,19 @@ test("redeploy-backend rejects an invalid failed-container log tail", async () =
   assert.match(script, /BACKEND_LOG_TAIL must be a positive integer/u);
   assert.match(script, /\^\[1-9\]\[0-9\]\*\$/u);
 });
+
+test("mainnet backend deploy builds the sandbox and starts only the isolated runner and proxy", async () => {
+  const script = await readFile(REDEPLOY_SCRIPT, "utf8");
+  assert.match(script, /sudo install -d -m 0700 -o 65532 -g 65532 "\$WITNESS_RUNTIME_ROOT"/u);
+  assert.match(script, /docker build -t "\$WITNESS_SANDBOX_IMAGE" "\$APP_ROOT\/witness\/sandbox"/u);
+  assert.match(script, /build "\$WITNESS_PROXY_SERVICE" "\$WITNESS_RUNNER_SERVICE"/u);
+  assert.match(script, /services\+=\("\$WITNESS_PROXY_SERVICE" "\$WITNESS_RUNNER_SERVICE"\)/u);
+  assert.doesNotMatch(script, /docker\.sock.*BACKEND_SERVICE|BACKEND_SERVICE.*docker\.sock/u);
+});
+
+test("rollback to a pre-runner commit removes only the two known isolated containers", async () => {
+  const script = await readFile(REDEPLOY_SCRIPT, "utf8");
+  assert.match(script, /"\$deployed_sha" != "\$PREVIOUS_SHA"/u);
+  assert.match(script, /for container in "\$WITNESS_RUNNER_CONTAINER" "\$WITNESS_PROXY_CONTAINER"/u);
+  assert.match(script, /docker container rm --force "\$container"/u);
+});

@@ -534,7 +534,7 @@ export async function createPlatformRuntime() {
     logger,
     () => createConfiguredX402VerificationPaymentGate(process.env, { logger })
   );
-  const { verificationProfileRegistry, verificationRunService } = await initStepAsync(
+  const { verificationProfileRegistry, verificationRunService, verificationRunFinalizer } = await initStepAsync(
     "init-verification-shelf",
     logger,
     () => createVerificationShelf({ stateStore, logger, paymentGate: verificationPaymentGate })
@@ -888,6 +888,7 @@ export async function createPlatformRuntime() {
   bootstrapSelfReportScheduler.start();
   jobStaleSweeper.start();
   submittedJobAutoVerifier.start();
+  verificationRunFinalizer.start();
   externalPosterReviewEscalator.start();
   firstExternalAgentAlert.start();
 
@@ -911,6 +912,7 @@ export async function createPlatformRuntime() {
     verifierService,
     verificationProfileRegistry,
     verificationRunService,
+    verificationRunFinalizer,
     externalPostingService,
     x402PosterRamp,
     externalPostingWatcher,

@@ -23,14 +23,9 @@ function harness({ createRun } = {}) {
         calls.push(["createRun", input]);
         return {
           runId: "verify-1",
-          status: "complete",
+          status: "queued",
           customer: "0x1111111111111111111111111111111111111111",
-          billing: {
-            status: "captured",
-            transactionHash: `0x${"a".repeat(64)}`,
-            network: "eip155:8453",
-            amountRaw: "5000000"
-          }
+          billing: { status: "authorized", amountRaw: "5000000", asset: "USDC" }
         };
       })
     }
@@ -46,7 +41,7 @@ test("GET /verify/profiles is public and cacheable", async () => {
   assert.equal(response.headers["cache-control"], "public, max-age=300");
 });
 
-test("POST /verify/runs accepts the standard x402 header and returns capture evidence", async () => {
+test("POST /verify/runs accepts the standard x402 header and returns the queued run", async () => {
   const { calls, response, route } = harness();
   const request = {
     method: "POST",
@@ -55,11 +50,10 @@ test("POST /verify/runs accepts the standard x402 header and returns capture evi
   };
   assert.equal(await route({ request, response, pathname: "/verify/runs" }), true);
   assert.equal(response.statusCode, 200);
+  assert.equal(response.body.status, "queued");
   assert.equal(calls.filter(([name]) => name === "createRun").length, 1);
   assert.equal(calls.find(([name]) => name === "createRun")[1].paymentProof, "proof");
-  const paymentResponse = JSON.parse(Buffer.from(response.headers["payment-response"], "base64").toString("utf8"));
-  assert.equal(paymentResponse.transaction, `0x${"a".repeat(64)}`);
-  assert.equal(paymentResponse.amount, "5000000");
+  assert.equal(response.headers, undefined);
 });
 
 test("POST /verify/runs returns the x402 challenge before work when unpaid", async () => {

@@ -4,7 +4,6 @@ import test from "node:test";
 
 import { MemoryStateStore } from "../core/state-store.js";
 import { VerificationProfileRegistry } from "./verification-profile-registry.js";
-import { GitPatchTestsRunner } from "./git-patch-tests-runner.js";
 import { VerifierRegistry } from "./verifier-handlers.js";
 import {
   UnavailableVerificationPaymentGate,
@@ -57,7 +56,7 @@ function paymentGate() {
   };
 }
 
-function harness({ runnerResult, runnerError, runner: runnerOverride, gate = paymentGate(), ids = ["one", "two"], profileRegistry = new VerificationProfileRegistry(), verifierRegistry } = {}) {
+function harness({ runnerResult, runnerError, runner: runnerOverride, gate = paymentGate(), ids = ["one", "two"], profileRegistry = new VerificationProfileRegistry(), verifierRegistry, clock = { now: new Date("2026-08-18T12:00:00.000Z") } } = {}) {
   const runnerCalls = [];
   const runner = runnerOverride ?? {
     validate() {},
@@ -84,14 +83,49 @@ function harness({ runnerResult, runnerError, runner: runnerOverride, gate = pay
   const service = new VerificationRunService({
     stateStore,
     profileRegistry,
-    runner,
     paymentGate: gate,
     verifierRegistry,
-    now: () => new Date("2026-08-18T12:00:00.000Z"),
+    now: () => new Date(clock.now),
     randomUUIDImpl: () => ids[idIndex++] ?? `id-${idIndex}`,
-    publicReceiptBaseUrl: "https://averray.com"
+    publicReceiptBaseUrl: "https://averray.com",
+    runnerTimeoutMarginMs: 10,
+    finalizerId: "test-finalizer"
   });
-  return { gate, runnerCalls, service, stateStore };
+  return { clock, gate, profileRegistry, runner, runnerCalls, service, stateStore };
+}
+
+async function executeAndFinalize(context) {
+  const run = await context.stateStore.claimNextVerificationRun({
+    owner: "test-runner",
+    claimedAt: context.clock.now.toISOString(),
+    leaseSeconds: 60
+  });
+  assert.ok(run, "a queued verification run should be available to the isolated runner");
+  const profile = context.profileRegistry.get(run.profile, run.profileVersion);
+  await context.runner.validate?.({ profile, target: run.target, inputs: run.inputs });
+  let execution;
+  try {
+    execution = await context.runner.run({
+      profile,
+      runId: run.runId,
+      target: run.target,
+      inputs: run.inputs
+    });
+  } catch (error) {
+    execution = {
+      status: "inconclusive",
+      reason: "runner_fault",
+      detail: error?.message ?? String(error)
+    };
+  }
+  await context.stateStore.storeVerificationRunExecution(run.runId, {
+    owner: "test-runner",
+    execution,
+    executedAt: context.clock.now.toISOString()
+  });
+  const finalized = await context.service.finalizeAvailableRuns();
+  assert.equal(finalized.length, 1);
+  return context.service.getRun(run.runId);
 }
 
 function assertNoSettlementPath(source) {
@@ -118,15 +152,18 @@ test("no-settlement isolation guard rejects a deliberately wired settlement impo
   );
 });
 
-test("published profile is immutable and pinned re-runs reproduce verdict and receipt id", async () => {
+test("published profile is immutable and queued re-runs reproduce verdict and receipt id", async () => {
   const profileRegistry = new VerificationProfileRegistry();
   const profile = profileRegistry.get("git-patch-tests-v1", 1);
   assert.throws(() => { profile.price.amount = "9"; }, TypeError);
   assert.throws(() => profileRegistry.publish(structuredClone(profile)), /already published.*cannot be changed/u);
 
-  const { service } = harness();
-  const first = await service.createRun(request("proof-a"));
-  const replay = await service.createRun(request("proof-b"));
+  const firstHarness = harness({ profileRegistry, ids: ["first"] });
+  await firstHarness.service.createRun(request("proof-a"));
+  const first = await executeAndFinalize(firstHarness);
+  const replayHarness = harness({ profileRegistry, ids: ["second"] });
+  await replayHarness.service.createRun(request("proof-b"));
+  const replay = await executeAndFinalize(replayHarness);
   assert.equal(first.verdict.outcome, "approved");
   assert.equal(replay.verdict.outcome, first.verdict.outcome);
   assert.equal(replay.receiptId, first.receiptId);
@@ -134,88 +171,108 @@ test("published profile is immutable and pinned re-runs reproduce verdict and re
 });
 
 test("inconclusive is never billed and never presents as an artifact failure", async () => {
-  const { gate, service, stateStore } = harness({
+  const context = harness({
     runnerResult: {
       status: "inconclusive",
       reason: "flaky",
       detail: "The two bounded repetitions disagreed."
     }
   });
-  const run = await service.createRun(request());
-  const receipt = await stateStore.getWorkReceiptDocument(run.receiptId);
+  const queued = await context.service.createRun(request());
+  assert.equal(queued.status, "queued");
+  const run = await executeAndFinalize(context);
+  const receipt = await context.stateStore.getWorkReceiptDocument(run.receiptId);
 
   assert.equal(run.status, "complete");
   assert.equal(run.verdict.outcome, "inconclusive");
   assert.equal(run.verdict.reason, "flaky");
   assert.notEqual(run.verdict.outcome, "rejected");
   assert.equal(run.billing.status, "not_billed");
-  assert.equal(gate.calls.capture, 0);
-  assert.equal(gate.calls.release, 1);
+  assert.equal(context.gate.calls.capture, 0);
+  assert.equal(context.gate.calls.release, 1);
   assert.equal(receipt.intent.valueAtRisk.amountRaw, "0");
   assert.equal(Object.hasOwn(receipt, "settlement"), false);
 });
 
 test("a broken runner is classified as inconclusive runner_fault, never fail", async () => {
-  const { gate, service } = harness({ runnerError: new Error("runner exploded") });
-  const run = await service.createRun(request());
+  const context = harness({ runnerError: new Error("runner exploded") });
+  await context.service.createRun(request());
+  const run = await executeAndFinalize(context);
 
   assert.equal(run.verdict.outcome, "inconclusive");
   assert.equal(run.verdict.reason, "runner_fault");
   assert.match(run.verdict.detail, /runner exploded/u);
   assert.equal(run.billing.status, "not_billed");
-  assert.equal(gate.calls.capture, 0);
+  assert.equal(context.gate.calls.capture, 0);
 });
 
-test("timeouts and declared resource-limit breaches are inconclusive and not billed", async () => {
+test("an absent runner ages a queued request to runner_fault without billing or harming backend reads", async () => {
   const baseProfile = new VerificationProfileRegistry().get("git-patch-tests-v1", 1);
   const shortProfile = structuredClone(baseProfile);
   shortProfile.limits.timeoutMs = 5;
   const shortRegistry = new VerificationProfileRegistry({ profiles: [shortProfile] });
-  const slowRunner = {
-    validate() {},
-    async run() {
-      return new Promise((resolve) => setTimeout(() => resolve({
-        status: "decidable",
-        evidence: "source_binding_verified tests_passed"
-      }), 30));
-    }
-  };
-  const timeout = harness({ runner: slowRunner, profileRegistry: shortRegistry });
-  const timedOut = await timeout.service.createRun(request("timeout-proof"));
+  const timeout = harness({ profileRegistry: shortRegistry });
+  const queued = await timeout.service.createRun(request("timeout-proof"));
+  timeout.clock.now = new Date(timeout.clock.now.getTime() + 16);
+  const finalized = await timeout.service.finalizeAvailableRuns();
+  assert.equal(finalized.length, 1);
+  const timedOut = await timeout.service.getRun(queued.runId);
   assert.equal(timedOut.verdict.outcome, "inconclusive");
   assert.equal(timedOut.verdict.reason, "runner_fault");
+  assert.match(timedOut.verdict.detail, /No isolated verification runner claimed/u);
+  assert.doesNotMatch(timedOut.verdict.detail, /evidence/u);
   assert.equal(timedOut.billing.status, "not_billed");
   assert.equal(timeout.gate.calls.capture, 0);
+  assert.equal((await timeout.service.getRun(queued.runId)).status, "complete");
+});
 
-  const resource = harness({ runner: new GitPatchTestsRunner() });
-  const oversized = structuredClone(request("oversized-proof"));
-  oversized.inputs.gitBundle.bytes = 30 * 1024 * 1024;
-  const limited = await resource.service.createRun(oversized);
-  assert.equal(limited.verdict.outcome, "inconclusive");
-  assert.equal(limited.verdict.reason, "runner_fault");
-  assert.equal(limited.billing.status, "not_billed");
-  assert.equal(resource.gate.calls.capture, 0);
+test("a wedged claimed run ages out independently of its runner lease and rejects a late result", async () => {
+  const baseProfile = new VerificationProfileRegistry().get("git-patch-tests-v1", 1);
+  const shortProfile = structuredClone(baseProfile);
+  shortProfile.limits.timeoutMs = 5;
+  const context = harness({ profileRegistry: new VerificationProfileRegistry({ profiles: [shortProfile] }) });
+  const queued = await context.service.createRun(request("wedged-proof"));
+  await context.stateStore.claimNextVerificationRun({
+    owner: "wedged-runner",
+    claimedAt: context.clock.now.toISOString(),
+    leaseSeconds: 180
+  });
+  context.clock.now = new Date(context.clock.now.getTime() + 16);
+
+  const finalized = await context.service.finalizeAvailableRuns();
+  assert.equal(finalized.length, 1);
+  const completed = await context.service.getRun(queued.runId);
+  assert.equal(completed.status, "complete");
+  assert.equal(completed.verdict.reason, "runner_fault");
+  assert.equal(completed.billing.status, "not_billed");
+  assert.equal(context.gate.calls.capture, 0);
+  assert.equal(await context.stateStore.storeVerificationRunExecution(queued.runId, {
+    owner: "wedged-runner",
+    executedAt: context.clock.now.toISOString(),
+    execution: { status: "decidable", evidence: "source_binding_verified tests_passed" }
+  }), undefined);
 });
 
 test("payment gates work and a replayed proof cannot buy a second run", async () => {
-  const unpaidRunner = { validate() {}, async run() { assert.fail("unpaid request performed work"); } };
   const unpaidService = new VerificationRunService({
     stateStore: new MemoryStateStore(),
-    profileRegistry: new VerificationProfileRegistry(),
-    runner: unpaidRunner
+    profileRegistry: new VerificationProfileRegistry()
   });
   await assert.rejects(
     () => unpaidService.createRun(request(undefined)),
     (error) => error.statusCode === 402 && error.code === "verification_payment_required"
   );
 
-  const { gate, runnerCalls, service } = harness();
-  const first = await service.createRun(request("same-proof"));
-  const replay = await service.createRun(request("same-proof"));
+  const context = harness();
+  const first = await context.service.createRun(request("same-proof"));
+  const replay = await context.service.createRun(request("same-proof"));
   assert.equal(replay.runId, first.runId);
-  assert.equal(runnerCalls.length, 1);
-  assert.equal(gate.calls.authorize, 1);
-  assert.equal(gate.calls.capture, 1);
+  assert.equal(context.runnerCalls.length, 0);
+  assert.equal(context.gate.calls.authorize, 1);
+  assert.equal(context.gate.calls.capture, 0);
+  await executeAndFinalize(context);
+  assert.equal(context.runnerCalls.length, 1);
+  assert.equal(context.gate.calls.capture, 1);
 });
 
 test("capture failure degrades a decisive result to inconclusive, bills nothing, and releases", async () => {
@@ -224,8 +281,9 @@ test("capture failure degrades a decisive result to inconclusive, bills nothing,
     gate.calls.capture += 1;
     throw new Error("Base capture unavailable");
   };
-  const { service } = harness({ gate });
-  const run = await service.createRun(request("capture-failure-proof"));
+  const context = harness({ gate });
+  await context.service.createRun(request("capture-failure-proof"));
+  const run = await executeAndFinalize(context);
 
   assert.equal(run.verdict.outcome, "inconclusive");
   assert.equal(run.verdict.reason, "runner_fault");
@@ -244,8 +302,9 @@ test("standalone verification completes with a gateway double whose every method
   assert.throws(() => throwingGateway.anyMethod(), /forbidden gateway method/u);
 
   const verifierRegistry = new VerifierRegistry({ gateway: throwingGateway });
-  const { service } = harness({ verifierRegistry });
-  const run = await service.createRun(request("isolated-proof"));
+  const context = harness({ verifierRegistry });
+  await context.service.createRun(request("isolated-proof"));
+  const run = await executeAndFinalize(context);
 
   assert.equal(run.verdict.outcome, "approved");
   assert.equal(run.billing.status, "captured");

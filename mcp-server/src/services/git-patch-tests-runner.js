@@ -251,6 +251,14 @@ export function mapWitnessReport({ report, target, inputs }) {
       image: report?.sandbox?.imageId ?? report?.sandbox?.image ?? null
     }
   };
+  if (report?.attribution === "infrastructure" && report?.reason === "host_failure") {
+    return {
+      ...common,
+      status: "inconclusive",
+      reason: "runner_fault",
+      detail: String(report?.details ?? "The isolated verification runner failed.")
+    };
+  }
   if (!sourceBindingVerified) {
     return {
       ...common,
@@ -333,6 +341,7 @@ export function canonicalWitnessEvidence(report) {
 export function classifyInconclusiveReason(report) {
   const reason = String(report?.reason ?? "").toLowerCase();
   const detail = String(report?.details ?? "").toLowerCase();
+  if (report?.attribution === "infrastructure" && reason === "host_failure") return "runner_fault";
   if (
     reason.includes("artifact_unavailable")
     || reason.includes("target_unreachable")

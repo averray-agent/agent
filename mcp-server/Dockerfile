@@ -32,11 +32,6 @@ RUN npm install --omit=dev
 
 COPY mcp-server/src ./src
 
-# Standalone Verify loads Witness lazily from /witness. Keep this COPY at the
-# production-resolved path so the optional profile is available in the backend
-# image without becoming a startup dependency of the core API.
-COPY witness /witness
-
 # Runtime data read from /deployments by code under ./src.
 #
 # The image layout differs from a repo checkout: ./src sits at the image root,

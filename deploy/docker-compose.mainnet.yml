@@ -19,6 +19,79 @@ services:
       timeout: 3s
       retries: 12
 
+  mainnet-witness-docker-proxy:
+    build:
+      context: ..
+      dockerfile: deploy/witness-docker-proxy/Dockerfile
+    image: agent-mainnet-witness-docker-proxy
+    container_name: agent-mainnet-witness-docker-proxy
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      WITNESS_RUNTIME_ROOT: ${WITNESS_RUNTIME_ROOT:-/srv/agent-stack-mainnet/witness-runtime}
+      WITNESS_SANDBOX_IMAGE: averray-witness-preflight:phase1-uv-0.12.5-python-3.12.12-uv-build-0.9.27
+      WITNESS_CONTAINER_PREFIX: averray-witness-
+    volumes:
+      # The raw socket terminates here. It is never mounted into the backend or
+      # runner; server.mjs admits only the Witness lifecycle endpoints and
+      # validates every container-create body before forwarding it.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    networks:
+      - witness-docker-control
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:2375/_ping').then(async r=>{if(!r.ok||(await r.text()).trim()!=='OK')process.exit(1)}).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  mainnet-witness-runner:
+    build:
+      context: ..
+      dockerfile: mcp-server/Dockerfile.witness-runner
+    image: agent-mainnet-witness-runner
+    container_name: agent-mainnet-witness-runner
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      NODE_ENV: production
+      REDIS_URL: redis://mainnet-redis:6379
+      REDIS_NAMESPACE: agent-platform-mainnet
+      DOCKER_HOST: tcp://mainnet-witness-docker-proxy:2375
+      WITNESS_TEMP_ROOT: ${WITNESS_RUNTIME_ROOT:-/srv/agent-stack-mainnet/witness-runtime}
+      WITNESS_IMAGE: averray-witness-preflight:phase1-uv-0.12.5-python-3.12.12-uv-build-0.9.27
+      WITNESS_IMAGE_BUILD: disabled
+      WITNESS_RUNNER_INTERVAL_MS: 500
+      WITNESS_RUNNER_CLAIM_LEASE_SECONDS: 180
+    depends_on:
+      mainnet-redis:
+        condition: service_healthy
+      mainnet-witness-docker-proxy:
+        condition: service_healthy
+    volumes:
+      # Same absolute host/container path is required because the host daemon
+      # receives these bind paths through the proxy.
+      - ${WITNESS_RUNTIME_ROOT:-/srv/agent-stack-mainnet/witness-runtime}:${WITNESS_RUNTIME_ROOT:-/srv/agent-stack-mainnet/witness-runtime}
+    tmpfs:
+      - /tmp:rw,exec,nosuid,nodev,size=256m,uid=65532,gid=65532
+    networks:
+      # HTTPS egress is only for content-addressed artifact acquisition. The
+      # execution containers created through the proxy remain NetworkMode none.
+      - witness-egress
+      - mainnet-internal
+      - witness-docker-control
+
   mainnet-backend:
     build:
       context: ..
@@ -95,3 +168,8 @@ networks:
   caddy-testnet:
     external: true
     name: agent-stack_default
+  witness-docker-control:
+    name: agent-mainnet-witness-docker-control
+    internal: true
+  witness-egress:
+    name: agent-mainnet-witness-egress
