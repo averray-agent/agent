@@ -95,6 +95,7 @@ export function parseArgs(argv) {
     else if (flag === "--hydration-ws") args.hydrationWs = next();
     else if (flag === "--hydration-evm-rpc") args.hydrationEvmRpc = next();
     else if (flag === "--hydration-from-block") args.hydrationFromBlock = next();
+    else if (flag === "--quote-account") args.quoteAccount = next();
     else if (flag === "--evidence-out") args.evidenceOut = next();
     else if (flag === "--commit") args.commit = true;
     else if (flag === "--dry-run") args.commit = false;
@@ -146,7 +147,18 @@ class V1RecallRuntime extends BankXcmV22Runtime {
   }
 }
 
-export async function main(argv = process.argv.slice(2)) {
+export async function readHydrationTokenBalance(endpoint, account, assetId) {
+  const { ApiPromise, WsProvider } = await import("@polkadot/api");
+  const api = await ApiPromise.create({ provider: new WsProvider(endpoint, 5_000), noInitWarn: true, throwOnConnect: true });
+  try {
+    const v = await api.query.tokens.accounts(account, assetId);
+    return BigInt(v.free.toString());
+  } finally {
+    await api.disconnect();
+  }
+}
+
+async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   if (args.help) return console.log(usage());
   if (args.profile !== "mainnet" || !args.requestId || !args.expectedSigner) {
@@ -283,7 +295,21 @@ export async function main(argv = process.argv.slice(2)) {
       if (BigInt(farPosition.raw) < V1_RECALL.allSharesRaw + BigInt(poolFingerprint.totalAssetsRaw)) {
         throw new Error("Opening Hydration aUSDC cannot cover both the v1 book and the untouched pool lane.");
       }
-      quote = await captureParQuote(args.hydrationWs, V1_RECALL.allSharesRaw, { assetIn: 1003, assetOut: 22 });
+      // The public-holder scan pages through Hydration's whole tokens.accounts
+      // storage and gives up after 10k entries; at this quote size (10.000001
+      // aUSDC) virtually the only qualifying holder is our own deployment
+      // account, which the pager never reaches. --quote-account names it
+      // explicitly; the quote stays read-only either way, and the balance is
+      // read live so captureParQuote's own sufficiency guard still applies.
+      let quoteAccountBalance;
+      if (args.quoteAccount) {
+        quoteAccountBalance = await readHydrationTokenBalance(args.hydrationWs, args.quoteAccount, 1003);
+      }
+      quote = await captureParQuote(args.hydrationWs, V1_RECALL.allSharesRaw, {
+        assetIn: 1003,
+        assetOut: 22,
+        ...(args.quoteAccount ? { quoteAccount: args.quoteAccount, quoteAccountBalance } : {})
+      });
       assertParAaveUnwindQuote(quote.quote, V1_RECALL.allSharesRaw);
       opening = currentSnapshot;
     } else {
