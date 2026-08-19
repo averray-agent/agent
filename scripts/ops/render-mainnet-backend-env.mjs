@@ -87,6 +87,14 @@ export const LITERAL_OVERRIDES = {
   // Stable operator smoke identity. Fresh mainnet canary workers cannot be
   // listed here and use the short-lived server-signed marker instead.
   ARRIVAL_SELF_WALLETS: "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+  // The standing acceptance wallet (§7 instrument). Registered so acceptance
+  // proofs and the Verify paid-door smoke are classified as OURS by every
+  // downstream count — the smoke buyer must never read as external demand.
+  ARRIVAL_ACCEPTANCE_WALLETS: "0x60385dD643f10934E8F384aC7A04c0D798dFc936",
+  // Verify paid door armed 2026-08-19 (RUNSHEET_VERIFY_PAID_DOOR_SMOKE §2)
+  // after every §1 precondition was verified: capture signer funded on Base,
+  // buyer funded, fixture hosted content-addressed. Testnet stays disabled.
+  X402_VERIFY_MODE: "enabled",
 
   BANK_XCM_ASSET_HUB_SUBSTRATE_RPC_URL: "wss://asset-hub-polkadot-rpc.n.dwellir.com",
   BANK_XCM_HYDRATION_SUBSTRATE_RPC_URL: "wss://hydration-rpc.n.dwellir.com",
