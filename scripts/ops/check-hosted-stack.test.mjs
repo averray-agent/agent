@@ -19,6 +19,8 @@ const ADDRESSES = {
 async function runHostedStackFixture({
   autoVerifierOk,
   warnings = [],
+  healthTransportFailure = null,
+  timeoutSec = "5",
   poolStatus = 200,
   operatorToken = "",
   accountUnauthenticatedOk = false,
@@ -196,7 +198,25 @@ async function runHostedStackFixture({
       }
     }]
   ]);
+  const requestCounts = new Map();
   const server = createServer((request, response) => {
+    const requestCount = (requestCounts.get(request.url) ?? 0) + 1;
+    requestCounts.set(request.url, requestCount);
+    if (request.url === "/health" && (
+      healthTransportFailure === "always_http_503"
+      || (requestCount === 1 && healthTransportFailure === "http_503")
+    )) {
+      response.writeHead(503, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "upstream_unavailable" }));
+      return;
+    }
+    if (request.url === "/health" && requestCount === 1 && healthTransportFailure === "timeout") {
+      setTimeout(() => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(health));
+      }, 75);
+      return;
+    }
     if (request.url === "/pool") {
       response.writeHead(poolStatus, { "content-type": "application/json" });
       response.end(JSON.stringify(pool));
@@ -271,11 +291,13 @@ async function runHostedStackFixture({
       CHECK_WORKER_CANARY_PROOF: "0",
       CHECK_METRICS_AUTH: "0",
       PRODUCT_HEALTH_EXPECTED_WARNINGS: "submitted_session_persistently_skipped",
+      HOSTED_CURL_RETRY_BACKOFF_1_SEC: "0",
+      HOSTED_CURL_RETRY_BACKOFF_2_SEC: "0",
       LIVE_READ_ATTEMPTS: "1",
-      TIMEOUT_SEC: "5"
+      TIMEOUT_SEC: timeoutSec
     };
 
-    return await new Promise((resolve, reject) => {
+    const result = await new Promise((resolve, reject) => {
       const child = spawn("bash", [CHECK_SCRIPT], { cwd: REPO_ROOT, env });
       let stdout = "";
       let stderr = "";
@@ -284,6 +306,7 @@ async function runHostedStackFixture({
       child.on("error", reject);
       child.on("close", (code, signal) => resolve({ code, signal, stdout, stderr }));
     });
+    return { ...result, requestCounts: Object.fromEntries(requestCounts) };
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -294,6 +317,40 @@ test("hosted smoke rejects an unhealthy submitted-job verifier even with no warn
 
   assert.notEqual(result.code, 0, result.stdout);
   assert.equal(result.signal, null);
+  assert.equal(result.requestCounts["/health"], 1, "a parsed assertion failure must never retry");
+});
+
+test("hosted smoke retries an HTTP 5xx transport response and then applies assertions", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    healthTransportFailure: "http_503"
+  });
+
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(result.requestCounts["/health"], 2);
+  assert.match(result.stderr, /HTTP 503.*attempt 1\/3/u);
+});
+
+test("hosted smoke retries a curl timeout and then applies assertions", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    healthTransportFailure: "timeout",
+    timeoutSec: "0.02"
+  });
+
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(result.requestCounts["/health"], 2);
+  assert.match(result.stderr, /timeout.*attempt 1\/3/u);
+});
+
+test("hosted smoke stays fail-closed after all transport retries fail", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    healthTransportFailure: "always_http_503"
+  });
+
+  assert.notEqual(result.code, 0);
+  assert.equal(result.requestCounts["/health"], 3);
 });
 
 test("hosted smoke accepts a healthy submitted-job verifier", async () => {
