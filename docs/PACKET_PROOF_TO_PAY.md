@@ -1,6 +1,6 @@
 # PACKET — Averray Proof-to-Pay (bring-your-own-counterparty)
 
-- **Status:** SPEC — pending two Pascal ratifications (§6), then ready for Codex.
+- **Status:** SPEC — RATIFIED 2026-08-19 (Pascal). Ready for Codex.
 - **Phase:** P of [`OUTCOME_PIVOT_BUILD_PLAN.md`](./OUTCOME_PIVOT_BUILD_PLAN.md).
   Unblocked 2026-08-19: the work receipt (Phase R) is proven live, and the
   Verify rail (Phase V profile 1) has captured its first payment end to end.
@@ -113,7 +113,16 @@ the buyer now also names the recipient; Swiss-memo event trigger unchanged).
 **Exit condition:** one agreement completes buyer → designated provider →
 verify → settle → public receipt, with the platform supplying neither side.
 
-## 6. Decisions for Pascal (ratify before dispatch)
+## 6. Decisions — RATIFIED 2026-08-19 (Pascal)
+
+1. **Pilot caps: 5 concurrent / 25 USDC each.** Worst-case 125 USDC designated
+   escrow — a real pilot, boring to a memo. Changing them is a one-line
+   ratified PR, never an env flip.
+2. **No bond option in the pilot.** The buyer chose their provider; the
+   standard claim stake already protects dispute integrity.
+   `requireProviderBond` ships later only if a real buyer asks.
+
+### Original framing (kept for rationale)
 
 1. **Pilot caps** — recommend 5 concurrent / 25 USDC each (mirrors the L2 cap
    scale; big enough for a real pilot, small enough to be boring to a memo).
