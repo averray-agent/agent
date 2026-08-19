@@ -95,6 +95,7 @@ export function parseArgs(argv) {
     else if (flag === "--hydration-ws") args.hydrationWs = next();
     else if (flag === "--hydration-evm-rpc") args.hydrationEvmRpc = next();
     else if (flag === "--hydration-from-block") args.hydrationFromBlock = next();
+    else if (flag === "--quote-account") args.quoteAccount = next();
     else if (flag === "--evidence-out") args.evidenceOut = next();
     else if (flag === "--commit") args.commit = true;
     else if (flag === "--dry-run") args.commit = false;
@@ -146,7 +147,24 @@ class V1RecallRuntime extends BankXcmV22Runtime {
   }
 }
 
-export async function main(argv = process.argv.slice(2)) {
+export // aUSDC-1003 is an ERC20-backed asset on Hydration: its balances live in the
+// EVM (the AAVE aToken at BANK_LANE_FEED_AUSDC_CONTRACT), not in
+// tokens.accounts — a tokens.accounts read returns 0 for every holder. The
+// runtime's own router maps AccountId32 -> H160 by truncation, so the honest
+// balance read is the same "aUSDC balanceOf lens" the bank-lane feed uses.
+const HYDRATION_AUSDC_ERC20 = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
+const HYDRATION_EVM_RPC = "https://rpc.hydradx.cloud";
+async function readHydrationTokenBalance(_endpoint, account) {
+  const { JsonRpcProvider, Contract } = await import("ethers");
+  const { decodeAddress } = await import("@polkadot/util-crypto");
+  const { u8aToHex } = await import("@polkadot/util");
+  const h160 = u8aToHex(decodeAddress(account).slice(0, 20));
+  const provider = new JsonRpcProvider(HYDRATION_EVM_RPC, 222222);
+  const erc20 = new Contract(HYDRATION_AUSDC_ERC20, ["function balanceOf(address) view returns (uint256)"], provider);
+  return BigInt((await erc20.balanceOf(h160)).toString());
+}
+
+async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   if (args.help) return console.log(usage());
   if (args.profile !== "mainnet" || !args.requestId || !args.expectedSigner) {
@@ -283,7 +301,21 @@ export async function main(argv = process.argv.slice(2)) {
       if (BigInt(farPosition.raw) < V1_RECALL.allSharesRaw + BigInt(poolFingerprint.totalAssetsRaw)) {
         throw new Error("Opening Hydration aUSDC cannot cover both the v1 book and the untouched pool lane.");
       }
-      quote = await captureParQuote(args.hydrationWs, V1_RECALL.allSharesRaw, { assetIn: 1003, assetOut: 22 });
+      // The public-holder scan pages through Hydration's whole tokens.accounts
+      // storage and gives up after 10k entries; at this quote size (10.000001
+      // aUSDC) virtually the only qualifying holder is our own deployment
+      // account, which the pager never reaches. --quote-account names it
+      // explicitly; the quote stays read-only either way, and the balance is
+      // read live so captureParQuote's own sufficiency guard still applies.
+      let quoteAccountBalance;
+      if (args.quoteAccount) {
+        quoteAccountBalance = await readHydrationTokenBalance(args.hydrationWs, args.quoteAccount, 1003);
+      }
+      quote = await captureParQuote(args.hydrationWs, V1_RECALL.allSharesRaw, {
+        assetIn: 1003,
+        assetOut: 22,
+        ...(args.quoteAccount ? { quoteAccount: args.quoteAccount, quoteAccountBalance } : {})
+      });
       assertParAaveUnwindQuote(quote.quote, V1_RECALL.allSharesRaw);
       opening = currentSnapshot;
     } else {

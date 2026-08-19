@@ -190,3 +190,11 @@ test("recall scripts expose no raw-key path", async () => {
   }
   assert.match(sources[0], /Commit requires --use-kms/u);
 });
+
+test("--quote-account is parsed and forwarded only when supplied", async () => {
+  const { parseArgs } = await import("./v1-lane-recall.mjs");
+  const withFlag = parseArgs(["--profile","mainnet","--request-id","0x"+"11".repeat(32),"--expected-signer","0x5a6836c6D4d293F6E5377E6c28054F4171915813","--quote-account","12eYrKzitqg8q8CiGCiAymMZeFH5wRnngxQ5uynmEp4WUYn4"]);
+  assert.equal(withFlag.quoteAccount, "12eYrKzitqg8q8CiGCiAymMZeFH5wRnngxQ5uynmEp4WUYn4");
+  const without = parseArgs(["--profile","mainnet","--request-id","0x"+"11".repeat(32),"--expected-signer","0x5a6836c6D4d293F6E5377E6c28054F4171915813"]);
+  assert.equal(without.quoteAccount, undefined);
+});
