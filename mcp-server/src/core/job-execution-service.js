@@ -54,6 +54,7 @@ import {
   requireClaimJobDefinitionIntegrity
 } from "./claim-job-integrity.js";
 import { cloneJsonRecord } from "./state-store-records.js";
+import { isDesignatedJob, requireDesignatedClaimant } from "./designated-claimants.js";
 
 // EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
 // Disputed=5, Closed=6. Used to reconcile a mined-but-receipt-lost submit.
@@ -103,6 +104,7 @@ export class JobExecutionService {
     const existing = await this.stateStore.findSessionByIdempotencyKey(idempotencyKey);
     if (existing) {
       const existingJob = this.getJobDefinition(existing.jobId);
+      requireDesignatedClaimant(existingJob, wallet);
       const refreshed = await this.materializeExpiredClaim(existing, existingJob);
       if (!this.isTerminalSession(refreshed)) {
         return refreshed;
@@ -116,6 +118,7 @@ export class JobExecutionService {
 
     const claimantAttribution = normalizeClaimantAttribution(claimContext?.claimantAttribution);
     const job = this.getClaimableJobDefinition(jobId);
+    requireDesignatedClaimant(job, wallet);
     if (isExternalJob(job)) {
       return this.claimExternalJob(wallet, jobId, protocol, idempotencyKey, job, claimantAttribution);
     }
@@ -387,9 +390,11 @@ export class JobExecutionService {
           throw new ConflictError(`Job ${jobId} is not claimable in its current on-chain state.`, "job_not_claimable");
         }
         if (isExternalJob(job)) {
-          workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
-          dailyExposure = await this.requireDailyExposureAllowance({ wallet, job, claimEconomics, workerExposure });
-          catalogueDailyBudget = await this.requireCatalogueDailyBudget({ job, workerExposure });
+          if (!isDesignatedJob(job)) {
+            workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
+            dailyExposure = await this.requireDailyExposureAllowance({ wallet, job, claimEconomics, workerExposure });
+            catalogueDailyBudget = await this.requireCatalogueDailyBudget({ job, workerExposure });
+          }
           if (typeof this.blockchainGateway.previewClaimEconomics === "function") {
             const predictedClaimEconomics = claimEconomics;
             const authoritativeClaimEconomics = await this.blockchainGateway.previewClaimEconomics(wallet, jobId);
@@ -419,9 +424,11 @@ export class JobExecutionService {
             }
           );
         }
-        workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
-        dailyExposure = await this.requireDailyExposureAllowance({ wallet, job, claimEconomics, workerExposure });
-        catalogueDailyBudget = await this.requireCatalogueDailyBudget({ job, workerExposure });
+        if (!isDesignatedJob(job)) {
+          workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
+          dailyExposure = await this.requireDailyExposureAllowance({ wallet, job, claimEconomics, workerExposure });
+          catalogueDailyBudget = await this.requireCatalogueDailyBudget({ job, workerExposure });
+        }
         claimEconomics = await reserveOnboardingSubsidyForClaim({
           economics: claimEconomics,
           onboardingSubsidyBudget: this.onboardingSubsidyBudget,
@@ -461,9 +468,11 @@ export class JobExecutionService {
           await this.blockchainGateway.getJob(jobId).catch(() => undefined)
         );
       } else {
-        workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
-        dailyExposure = await this.requireDailyExposureAllowance({ wallet, job, claimEconomics, workerExposure });
-        catalogueDailyBudget = await this.requireCatalogueDailyBudget({ job, workerExposure });
+        if (!isDesignatedJob(job)) {
+          workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
+          dailyExposure = await this.requireDailyExposureAllowance({ wallet, job, claimEconomics, workerExposure });
+          catalogueDailyBudget = await this.requireCatalogueDailyBudget({ job, workerExposure });
+        }
         claimEconomics = await reserveOnboardingSubsidyForClaim({
           economics: claimEconomics,
           onboardingSubsidyBudget: this.onboardingSubsidyBudget,

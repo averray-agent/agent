@@ -19,6 +19,8 @@ import {
 } from "./job-schema-registry.js";
 
 const WALLET = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const DESIGNATED_WALLET = "0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa";
+const OTHER_WALLET = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const CANONICAL_USDC_ASSET = {
   symbol: "USDC",
   assetClass: "trust_backed",
@@ -1261,6 +1263,184 @@ test("preflight uses chain worker claim count for claim economics in blockchain 
   assert.equal(preflight.claimStake, 0.25);
   assert.equal(preflight.claimFee, 0.1);
   assert.equal(preflight.totalClaimLock, 0.35);
+});
+
+test("designated-claimant parity mutation drill binds both preflight and claim to the same wallet", async () => {
+  const service = makePlatformService(
+    undefined,
+    undefined,
+    new MemoryStateStore(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      designatedClaimants: [DESIGNATED_WALLET],
+      requiresSponsoredGas: false,
+      onboardingWaiverEligible: false
+    }
+  );
+
+  const refusedPreflight = await service.preflightJob(OTHER_WALLET, "parent-job-001");
+  assert.equal(refusedPreflight.eligible, false);
+  assert.equal(refusedPreflight.currentWalletCanClaim, false);
+  assert.equal(refusedPreflight.reason, "designated_claimants_only");
+  await assert.rejects(
+    service.claimJob(OTHER_WALLET, "parent-job-001", "http", "wrong-designated-wallet"),
+    (error) => error.code === "designated_claimants_only"
+  );
+
+  const admittedPreflight = await service.preflightJob(WALLET, "parent-job-001");
+  assert.equal(admittedPreflight.eligible, true);
+  assert.equal(admittedPreflight.claimable, false, "restricted is not public supply");
+  assert.equal(admittedPreflight.currentWalletCanClaim, true);
+  assert.equal(admittedPreflight.progressionValvesBypassed, true);
+  assert.deepEqual(admittedPreflight.designatedClaimants, [DESIGNATED_WALLET]);
+  const claimed = await service.claimJob(
+    WALLET,
+    "parent-job-001",
+    "http",
+    "correct-designated-wallet"
+  );
+  assert.equal(claimed.status, "claimed");
+  assert.equal(claimed.wallet, WALLET);
+});
+
+test("designated agreements are restricted and excluded from every open inventory count", async () => {
+  const service = makePlatformService(
+    undefined,
+    undefined,
+    new MemoryStateStore(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      source: { type: "external" },
+      funding: { source: "external_escrow", state: "funded" },
+      designatedClaimants: [DESIGNATED_WALLET],
+      requiresSponsoredGas: false
+    }
+  );
+
+  const [publicRow] = await service.listJobsWithSessions({ wallet: WALLET });
+  assert.equal(publicRow.state, "restricted");
+  assert.equal(publicRow.effectiveState, "restricted");
+  assert.equal(publicRow.claimable, false);
+  assert.equal(publicRow.currentWalletCanClaim, null);
+  assert.equal(publicRow.designatedClaimants, undefined);
+  const publicDefinition = await service.getPublicJobDefinition("parent-job-001", { wallet: WALLET });
+  assert.equal(publicDefinition.state, "restricted");
+  assert.equal(publicDefinition.currentWalletCanClaim, null);
+  assert.equal(publicDefinition.designatedClaimants, undefined);
+  const [operatorRow] = await service.listJobsWithSessions({
+    wallet: WALLET,
+    includeDesignatedClaimants: true
+  });
+  assert.deepEqual(operatorRow.designatedClaimants, [DESIGNATED_WALLET]);
+  assert.deepEqual(service.getJobLifecycleSummary(), {
+    total: 1,
+    open: 0,
+    claimable: 0,
+    stale: 0,
+    paused: 0,
+    archived: 0
+  });
+  assert.deepEqual(await service.recommendJobs(WALLET), []);
+});
+
+test("progression valves run for routed external jobs, skip designated jobs, and both claims post stake", async () => {
+  const makePolicies = () => {
+    const calls = { worker: 0, daily: 0, catalogue: 0 };
+    return {
+      calls,
+      worker: {
+        async evaluate() {
+          calls.worker += 1;
+          return { eligible: true, status: "within_cap", entry: { candidate: "ordinary" } };
+        }
+      },
+      daily: {
+        async evaluate() {
+          calls.daily += 1;
+          return { eligible: true, status: "within_budget", entry: { candidate: "ordinary" } };
+        }
+      },
+      catalogue: {
+        async evaluate() {
+          calls.catalogue += 1;
+          return { eligible: true, status: "within_budget", entry: { candidate: "ordinary" } };
+        }
+      }
+    };
+  };
+  const ordinaryPolicies = makePolicies();
+  const ordinaryState = new MemoryStateStore();
+  const ordinary = makePlatformService(
+    undefined,
+    undefined,
+    ordinaryState,
+    undefined,
+    ordinaryPolicies.worker,
+    ordinaryPolicies.daily,
+    ordinaryPolicies.catalogue,
+    {
+      source: { type: "external" },
+      funding: { source: "external_escrow", state: "funded" },
+      requiresSponsoredGas: false,
+      onboardingWaiverEligible: false
+    }
+  );
+  await ordinaryState.materializeExternalJobDraft({
+    draftId: "ordinary-external-valves",
+    jobId: ordinary.jobs[0].id,
+    status: "live",
+    definition: ordinary.jobs[0]
+  });
+  const ordinaryClaim = await ordinary.claimJob(
+    WALLET,
+    "parent-job-001",
+    "http",
+    "ordinary-external-valves"
+  );
+  assert.deepEqual(ordinaryPolicies.calls, { worker: 1, daily: 1, catalogue: 1 });
+  assert.equal(ordinaryClaim.totalClaimLock, 0.35);
+  assert.equal(ordinary.accounts.get(WALLET).jobStakeLocked.DOT, 0.35);
+
+  const designatedPolicies = makePolicies();
+  const designatedState = new MemoryStateStore();
+  const designated = makePlatformService(
+    undefined,
+    undefined,
+    designatedState,
+    undefined,
+    designatedPolicies.worker,
+    designatedPolicies.daily,
+    designatedPolicies.catalogue,
+    {
+      source: { type: "external" },
+      funding: { source: "external_escrow", state: "funded" },
+      designatedClaimants: [DESIGNATED_WALLET],
+      requiresSponsoredGas: false,
+      onboardingWaiverEligible: false
+    }
+  );
+  await designatedState.materializeExternalJobDraft({
+    draftId: "designated-external-no-valves",
+    jobId: designated.jobs[0].id,
+    status: "live",
+    definition: designated.jobs[0]
+  });
+  const designatedClaim = await designated.claimJob(
+    WALLET,
+    "parent-job-001",
+    "http",
+    "designated-external-no-valves"
+  );
+  assert.deepEqual(designatedPolicies.calls, { worker: 0, daily: 0, catalogue: 0 });
+  assert.equal(designatedClaim.totalClaimLock, 0.35);
+  assert.equal(designated.accounts.get(WALLET).jobStakeLocked.DOT, 0.35);
+  assert.equal(designatedClaim.gasRetentionSupported, false);
 });
 
 test("preflight rejects a zero-balance wallet when a non-waived claim lock is required", async () => {

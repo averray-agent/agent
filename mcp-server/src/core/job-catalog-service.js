@@ -34,6 +34,7 @@ import {
   ONBOARDING_SUBSIDY_EXHAUSTED_MESSAGE,
   ONBOARDING_SUBSIDY_EXHAUSTED_REASON
 } from "./claim-economics.js";
+import { evaluateDesignatedClaimant, isDesignatedJob } from "./designated-claimants.js";
 
 export {
   ROLE_REQUIREMENTS,
@@ -177,11 +178,11 @@ export class JobCatalogService {
     };
     for (const job of this.jobs) {
       const lifecycle = this.buildLifecycle(job, now);
-      if (lifecycle.status === "open") summary.open += 1;
+      if (lifecycle.status === "open" && !isDesignatedJob(job)) summary.open += 1;
       if (lifecycle.status === "paused") summary.paused += 1;
       if (lifecycle.status === "archived") summary.archived += 1;
       if (lifecycle.state === "stale") summary.stale += 1;
-      if (this.isClaimableJob(job, now)) summary.claimable += 1;
+      if (this.isClaimableJob(job, now) && !isDesignatedJob(job)) summary.claimable += 1;
     }
     return summary;
   }
@@ -341,32 +342,34 @@ export class JobCatalogService {
     const reputation = await this.getReputation(wallet);
     const claimStakeBps = await this.getDefaultClaimStakeBps();
 
-    return Promise.all(this.listJobs().map(async (job) => {
-      const tierGate = summarizeTierGate(job.tier, reputation);
-      const jobType = effectiveJobType(job);
-      const requiredRole = effectiveRequiredRole(job);
-      const roleGate = summarizeRoleGate(requiredRole, reputation);
-      const eligible = this.isClaimableJob(job) && this.isEligible(job, profile, reputation);
-      const liquid = account.liquid[job.rewardAsset] ?? 0;
-      const claimEconomics = await this.resolveClaimEconomics(wallet, job, claimStakeBps);
-      const netReward = await this.estimateNetReward(wallet, job.id, claimEconomics);
-      const fitScore = this.computeFitScore(job, profile, reputation, liquid, claimEconomics.totalClaimLock);
+    return Promise.all(this.listJobs()
+      .filter((job) => !isDesignatedJob(job))
+      .map(async (job) => {
+        const tierGate = summarizeTierGate(job.tier, reputation);
+        const jobType = effectiveJobType(job);
+        const requiredRole = effectiveRequiredRole(job);
+        const roleGate = summarizeRoleGate(requiredRole, reputation);
+        const eligible = this.isClaimableJob(job) && this.isEligible(job, profile, reputation);
+        const liquid = account.liquid[job.rewardAsset] ?? 0;
+        const claimEconomics = await this.resolveClaimEconomics(wallet, job, claimStakeBps);
+        const netReward = await this.estimateNetReward(wallet, job.id, claimEconomics);
+        const fitScore = this.computeFitScore(job, profile, reputation, liquid, claimEconomics.totalClaimLock);
 
-      return {
-        jobId: job.id,
-        fitScore,
-        netReward,
-        gasRetentionSupported: claimEconomics.gasRetentionSupported === true,
-        gasRetention: claimEconomics.gasRetention,
-        eligible,
-        tier: job.tier,
-        tierGate,
-        jobType,
-        requiredRole,
-        roleGate,
-        explanation: buildRecommendationExplanation({ job, eligible, tierGate, roleGate, profile })
-      };
-    })).then((recommendations) => recommendations.sort((left, right) => right.fitScore - left.fitScore));
+        return {
+          jobId: job.id,
+          fitScore,
+          netReward,
+          gasRetentionSupported: claimEconomics.gasRetentionSupported === true,
+          gasRetention: claimEconomics.gasRetention,
+          eligible,
+          tier: job.tier,
+          tierGate,
+          jobType,
+          requiredRole,
+          roleGate,
+          explanation: buildRecommendationExplanation({ job, eligible, tierGate, roleGate, profile })
+        };
+      })).then((recommendations) => recommendations.sort((left, right) => right.fitScore - left.fitScore));
   }
 
   getJobDefinition(jobId) {
@@ -412,7 +415,10 @@ export class JobCatalogService {
     const claimStakeBps = await this.getDefaultClaimStakeBps();
     const claimEconomics = await this.resolveClaimEconomics(wallet, job, claimStakeBps);
     const lifecycle = this.buildLifecycle(job);
-    const catalogEligible = this.isClaimableJob(job) && this.isEligible(job, profile, reputation);
+    const designation = evaluateDesignatedClaimant(job, wallet);
+    const catalogEligible = this.isClaimableJob(job) && (
+      designation.applies ? designation.eligible : this.isEligible(job, profile, reputation)
+    );
     const claimFunding = summarizeClaimFunding({
       asset: job.rewardAsset,
       available: liquid,
@@ -465,6 +471,7 @@ export class JobCatalogService {
       jobType,
       requiredRole,
       roleGate,
+      progressionValvesBypassed: designation.applies && designation.eligible,
       preferredCategory: profile.preferredCategories.includes(job.category),
       supportsVerifier: profile.verifierCompatibility.includes(job.verifierMode),
       reputationTier: reputation.tier,

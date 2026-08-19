@@ -5,6 +5,7 @@ import { id, parseUnits } from "ethers";
 
 import { buildDiscoveryManifest } from "./discovery-manifest.js";
 import {
+  EXTERNAL_QUOTE_IDENTITY_VERSION,
   ExternalPostingService,
   rebuildExternalDraftArtifacts,
   resolveExternalPostingConfig
@@ -20,6 +21,7 @@ const OTHER_POSTER = "0x2222222222222222222222222222222222222222";
 const ESCROW = "0x3333333333333333333333333333333333333333";
 const USDC = "0x0000053900000000000000000000000001200000";
 const EXTERNAL_JOB_ID = `0x${"a".repeat(64)}`;
+const DESIGNATED_PROVIDER = "0x2222222222222222222222222222222222222222";
 
 function definition(overrides = {}) {
   return {
@@ -239,6 +241,196 @@ test("external definitions cannot opt into the curated operator gas subsidy or o
     (await store.listExternalPostingDemandSignals()).map((entry) => entry.decision),
     ["validation_rejected", "validation_rejected"]
   );
+});
+
+test("external designated-claimant field accepts one checksummed address and rejects riders", async () => {
+  const { service } = makeService();
+  const accepted = await service.createDraft(POSTER, {
+    definition: definition({ designatedClaimants: [DESIGNATED_PROVIDER] })
+  });
+  assert.deepEqual(accepted.definition.designatedClaimants, [DESIGNATED_PROVIDER]);
+  assert.equal(accepted.definition.requiresSponsoredGas, false);
+  assert.equal(accepted.definition.onboardingWaiverEligible, false);
+
+  await assert.rejects(
+    service.createDraft(POSTER, {
+      definition: definition({
+        designatedClaimants: [DESIGNATED_PROVIDER, OTHER_POSTER]
+      })
+    }),
+    (error) => error.code === "designated_claimants_cardinality_invalid"
+  );
+  await assert.rejects(
+    service.createDraft(POSTER, {
+      definition: definition({ designatedClaimants: ["0xnot-an-address"] })
+    }),
+    (error) => error.code === "designated_claimant_address_invalid"
+  );
+  await assert.rejects(
+    service.createDraft(POSTER, {
+      definition: definition({
+        designatedClaimants: ["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+      })
+    }),
+    (error) => error.code === "designated_claimant_checksum_required"
+      && error.details.expectedAddress === "0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa"
+  );
+  await assert.rejects(
+    service.createDraft(POSTER, {
+      definition: definition({
+        designatedClaimants: [DESIGNATED_PROVIDER],
+        requireProviderBond: true
+      })
+    }),
+    (error) => error.code === "external_definition_unknown_field"
+      && error.details.fields.includes("requireProviderBond")
+  );
+});
+
+test("designated agreement caps refuse 26 USDC at draft and again at finalized funding", async () => {
+  const { service, store } = makeService();
+  await assert.rejects(
+    service.createDraft(POSTER, {
+      definition: definition({
+        rewardAmount: "26",
+        designatedClaimants: [DESIGNATED_PROVIDER]
+      })
+    }),
+    (error) => error.code === "designated_agreement_reward_cap_exceeded"
+      && error.details.stage === "draft"
+      && error.details.maximumRewardUsdc === "25"
+  );
+
+  const legacyDefinition = definition({
+    rewardAmount: "26",
+    designatedClaimants: [DESIGNATED_PROVIDER],
+    requiresSponsoredGas: false,
+    onboardingWaiverEligible: false
+  });
+  const artifacts = rebuildExternalDraftArtifacts({
+    wallet: POSTER,
+    identityVersion: EXTERNAL_QUOTE_IDENTITY_VERSION,
+    definition: legacyDefinition
+  }, config());
+  const legacyQuote = {
+    draftId: `0x${"9".repeat(64)}`,
+    wallet: POSTER,
+    escrowPoster: POSTER,
+    fundingRail: "direct_hub",
+    identityVersion: EXTERNAL_QUOTE_IDENTITY_VERSION,
+    definition: legacyDefinition,
+    ...artifacts,
+    createdAt: "2026-07-28T11:00:00.000Z",
+    expiresAt: "2026-07-29T11:00:00.000Z",
+    status: "quoted",
+    persisted: false
+  };
+  await store.appendExternalPostingDemandSignal({
+    id: legacyQuote.draftId,
+    decision: "quoted",
+    quote: legacyQuote
+  });
+  await assert.rejects(
+    service.reconcileFinalizedCreation({
+      jobId: legacyQuote.jobId,
+      specHash: legacyQuote.specHash,
+      poster: POSTER,
+      asset: USDC,
+      reward: legacyQuote.calldata.args[2],
+      opsReserve: legacyQuote.calldata.args[3],
+      contingencyReserve: legacyQuote.calldata.args[4],
+      fundedAt: "2026-07-28T12:01:00.000Z",
+      txHash: `0x${"8".repeat(64)}`,
+      blockNumber: "123",
+      finalized: true
+    }),
+    (error) => error.code === "designated_agreement_reward_cap_exceeded"
+      && error.details.stage === "funding"
+  );
+  assert.equal(await store.getExternalJobDraft(legacyQuote.draftId), undefined);
+});
+
+test("the sixth concurrent designated agreement is refused at draft and atomically at funding", async () => {
+  const warnings = [];
+  const { service, store } = makeService({
+    logger: { warn(fields) { warnings.push(fields); } }
+  });
+  const quote = await service.createDraft(POSTER, {
+    definition: definition({ designatedClaimants: [DESIGNATED_PROVIDER] })
+  });
+  for (let index = 0; index < 5; index += 1) {
+    await store.materializeExternalJobDraft({
+      draftId: `active-designated-${index}`,
+      jobId: `0x${String(index + 1).padStart(64, "0")}`,
+      status: "live",
+      definition: { designatedClaimants: [DESIGNATED_PROVIDER] },
+      createdAt: `2026-07-28T10:0${index}:00.000Z`
+    });
+  }
+  await store.upsertSession({
+    sessionId: "timed-out-designated-still-funded",
+    jobId: `0x${"1".padStart(64, "0")}`,
+    wallet: DESIGNATED_PROVIDER,
+    status: "timed_out"
+  });
+
+  await assert.rejects(
+    service.createDraft(POSTER, {
+      definition: definition({ designatedClaimants: [DESIGNATED_PROVIDER] })
+    }),
+    (error) => error.code === "designated_agreement_concurrent_cap_reached"
+      && error.details.stage === "draft"
+      && error.details.currentCount === 5
+      && error.details.limit === 5
+  );
+  await assert.rejects(
+    service.reconcileFinalizedCreation({
+      jobId: quote.jobId,
+      specHash: quote.specHash,
+      poster: POSTER,
+      asset: USDC,
+      reward: quote.calldata.args[2],
+      opsReserve: quote.calldata.args[3],
+      contingencyReserve: quote.calldata.args[4],
+      fundedAt: "2026-07-28T12:01:00.000Z",
+      txHash: `0x${"7".repeat(64)}`,
+      blockNumber: "124",
+      finalized: true
+    }),
+    (error) => error.code === "designated_agreement_concurrent_cap_reached"
+      && error.details.stage === "funding"
+      && error.details.currentCount === 5
+  );
+  assert.equal(await store.getExternalJobDraft(quote.draftId), undefined);
+  assert.ok(warnings.some((entry) => entry.reason === "designated_agreement_concurrent_cap_reached"
+    && entry.currentCount === 5));
+});
+
+test("designated capacity reads fail closed with a named and logged refusal", async () => {
+  const warnings = [];
+  const store = new MemoryStateStore();
+  store.listExternalJobDrafts = async () => {
+    const error = new Error("redis unavailable");
+    error.code = "redis_unavailable";
+    throw error;
+  };
+  const { service } = makeService({
+    store,
+    logger: { warn(fields) { warnings.push(fields); } }
+  });
+
+  await assert.rejects(
+    service.createDraft(POSTER, {
+      definition: definition({ designatedClaimants: [DESIGNATED_PROVIDER] })
+    }),
+    (error) => error.code === "designated_agreement_cap_unavailable"
+      && error.details.stage === "draft"
+      && error.details.currentCount === null
+      && error.details.limit === 5
+      && error.details.sourceCode === "redis_unavailable"
+  );
+  assert.ok(warnings.some((entry) => entry.reason === "designated_agreement_cap_unavailable"
+    && entry.stage === "draft"));
 });
 
 test("an unreconciled live fee quote fails closed but still records the demand attempt", async () => {
