@@ -129,3 +129,41 @@ A paid door that cannot prove it declines to charge is not finished.
 
 Last row is the only one that is an incident. Everything else is the design
 working.
+
+
+---
+
+# EXECUTED — 2026-08-19 (two armings)
+
+**First arming (06:33Z–07:12Z):** §1–§3 green; §4 became the GOLDEN FAILURE —
+run `verify-174ecced` authorized a real 5 USDC EIP-3009 payment, the runner
+died at materialization (`spawn git ENOENT`), and the customer was charged
+nothing. Root cause was architectural: the Witness executor drives Docker, and
+the Docker socket into the internet-facing backend was REFUSED permanently.
+Door disarmed (#1170); the dedicated no-listener Witness runner service behind
+a default-deny admission proxy was built the same morning (#1171,
+PACKET_WITNESS_RUNNER).
+
+**Second arming (#1173, deployed 11:07Z):**
+
+§4 wet leg — run `verify-b22db3c7-c31d-4253-932d-f953362ef142`:
+baseline proven failing twice, patch applied, tests passed → **approved** →
+**capture on Base**: tx `0xaf8f617595f9d9f59845ff81646c6d33b085993b1c642c7427277c800df1fd86`
+(block 50175446, the signer's first-ever Base transaction).
+
+§5 chain verification, all independent: buyer 6.0→1.0 (−5 exact), payTo
+1.05→6.05 (+5 exact), signer nonce 0→1, auth nonce consumed, gas ~0.0000005
+ETH. Receipt `0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0`
+public HTTP 200 — `specSource: verify_request`, `valueAtRisk: 5 USDC`, NO
+settlement section, `providerClass: external`.
+
+§6 inconclusive rehearsal — run `verify-330eee92`: `target_unreachable`
+("artifact fetch returned HTTP 404"), `not_billed`, **and an inconclusive
+receipt issued**: `0xb39cf01627f24f604e1b2c0016d57e725c86ab8c305ccb5083b10ab2ba6e22d0`
+(public 200) — a portable record of NOT charging. Chain: buyer still 1.0,
+signer nonce still 1 (no capture attempted), §6 auth nonce unused.
+
+§7 close-out: door stays ARMED (ratified); the 5 USDC is a rehearsal, never
+revenue — buyer is registry-classified as ours; the honest external count
+remains **zero external paid runs**, and no public "Averray Verify" page ships
+until a stranger pays.
