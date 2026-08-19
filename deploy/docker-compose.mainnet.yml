@@ -82,7 +82,9 @@ services:
     volumes:
       # Same absolute host/container path is required because the host daemon
       # receives these bind paths through the proxy.
-      - ${WITNESS_RUNTIME_ROOT:-/srv/agent-stack-mainnet/witness-runtime}:${WITNESS_RUNTIME_ROOT:-/srv/agent-stack-mainnet/witness-runtime}
+      - type: bind
+        source: ${WITNESS_RUNTIME_ROOT:-/srv/agent-stack-mainnet/witness-runtime}
+        target: ${WITNESS_RUNTIME_ROOT:-/srv/agent-stack-mainnet/witness-runtime}
     tmpfs:
       - /tmp:rw,exec,nosuid,nodev,size=256m,uid=65532,gid=65532
     networks:
