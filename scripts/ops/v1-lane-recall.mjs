@@ -147,15 +147,21 @@ class V1RecallRuntime extends BankXcmV22Runtime {
   }
 }
 
-export async function readHydrationTokenBalance(endpoint, account, assetId) {
-  const { ApiPromise, WsProvider } = await import("@polkadot/api");
-  const api = await ApiPromise.create({ provider: new WsProvider(endpoint, 5_000), noInitWarn: true, throwOnConnect: true });
-  try {
-    const v = await api.query.tokens.accounts(account, assetId);
-    return BigInt(v.free.toString());
-  } finally {
-    await api.disconnect();
-  }
+export // aUSDC-1003 is an ERC20-backed asset on Hydration: its balances live in the
+// EVM (the AAVE aToken at BANK_LANE_FEED_AUSDC_CONTRACT), not in
+// tokens.accounts — a tokens.accounts read returns 0 for every holder. The
+// runtime's own router maps AccountId32 -> H160 by truncation, so the honest
+// balance read is the same "aUSDC balanceOf lens" the bank-lane feed uses.
+const HYDRATION_AUSDC_ERC20 = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
+const HYDRATION_EVM_RPC = "https://rpc.hydradx.cloud";
+async function readHydrationTokenBalance(_endpoint, account) {
+  const { JsonRpcProvider, Contract } = await import("ethers");
+  const { decodeAddress } = await import("@polkadot/util-crypto");
+  const { u8aToHex } = await import("@polkadot/util");
+  const h160 = u8aToHex(decodeAddress(account).slice(0, 20));
+  const provider = new JsonRpcProvider(HYDRATION_EVM_RPC, 222222);
+  const erc20 = new Contract(HYDRATION_AUSDC_ERC20, ["function balanceOf(address) view returns (uint256)"], provider);
+  return BigInt((await erc20.balanceOf(h160)).toString());
 }
 
 async function main(argv = process.argv.slice(2)) {
