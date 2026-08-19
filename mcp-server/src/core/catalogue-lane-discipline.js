@@ -237,7 +237,13 @@ export class CatalogueLaneDiscipline {
       );
     }
 
-    if (!existing) {
+    // A disposable proof job (the worker canary) brings its own claimant and is
+    // claimed within seconds of posting — it is never inventory, which is the
+    // only thing the backlog gate bounds. It still pays into the daily budget
+    // above: proof spend is real spend. Without this exemption the canary was
+    // refused by stale ordinary backlog on 2026-08-19 (runs #626-#629), breaking
+    // the earn-from-zero proof for 19 hours.
+    if (!existing && candidate.disposableProof !== true) {
       const backlog = await this.#unclaimedBacklog(records, lane.id, evaluatedAt);
       if (backlog.count >= lane.maxUnclaimedBacklog) {
         const details = {
@@ -337,7 +343,9 @@ export class CatalogueLaneDiscipline {
   async #unclaimedBacklog(records, laneId, evaluatedAt) {
     const since = evaluatedAt.getTime() - DAY_MS;
     const posted = records.filter((record) =>
-      record.lane === laneId && withinWindow(record.postedAt, evaluatedAt, DAY_MS));
+      record.lane === laneId
+      && record.disposableProof !== true
+      && withinWindow(record.postedAt, evaluatedAt, DAY_MS));
     if (posted.length === 0) return { count: 0, oldestAt: null };
     const claimed = await collectClaimedJobIdsSince(this.stateStore, since);
     const open = posted
@@ -387,7 +395,8 @@ function candidateRecord(job, lane, postedAt, expectedBrokeredGasRaw) {
     postedAt: postedAt.toISOString(),
     rewardRaw: rewardRaw.toString(),
     expectedBrokeredGasRaw: expectedBrokeredGasRaw.toString(),
-    totalRaw: (rewardRaw + expectedBrokeredGasRaw).toString()
+    totalRaw: (rewardRaw + expectedBrokeredGasRaw).toString(),
+    ...(job.disposableProof === true ? { disposableProof: true } : {})
   };
 }
 
