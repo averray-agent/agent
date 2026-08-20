@@ -1,8 +1,37 @@
 # Runsheet — CreditBook deploy ceremony (credit L2 live, L3 dormant)
 
-**Status:** READY TO SCHEDULE · **Author/Gate:** Claude · **Operator:** Pascal signs/runs
+**Status:** EXECUTED 2026-08-20 (see EXECUTED record at top) · **Author/Gate:** Claude · **Operator:** Pascal signs/runs
 **Spec:** `PACKET_CREDIT_L2L3_SPEC.md` (CW-1..9 ratified 2026-08-16) · Contract merged on main.
 **Law:** dry-run first; Claude gates every output before `--commit`; evidence over exit codes.
+
+
+## EXECUTED 2026-08-20 — full record
+
+**Book LIVE + SEEDED + L2 PROVEN at `0x70441c9131Bc47c96E8D839C5B30850924838099`.**
+
+First deploy attempt (approve-based seed) failed on USDC-precompile semantics —
+approve(0) returns false; contract approvals need DOT (memory: hub-pvm-gotchas).
+Fix #1188 (810e93a9): seed/repay became AAC-internal consumption; instance
+`0xdB7bF8ca…` abandoned inert (~0.88 DOT written off).
+
+| leg | tx | result |
+|---|---|---|
+| deploy (nonce 21) | `0xc3f8c733…72c1` blk 19686485 | 12/12 read-backs PASS, 0.854 DOT |
+| approve(AAC) | `0x37155a28…f18c` | 1 |
+| AAC.deposit 10.0 | `0x379c48f3…ccae` | 1 |
+| AAC.sendToAgent(book) 10.0 | `0x36c161dc…b027` | 1 |
+| seed(10.0) | `0xb280d173…b1b4` | accounted 0→10.0 exact |
+| originate 1.00 CASH | `0xe1e75ee4…9d5d` | loan `0x8abcf75c…ac1b`, borrower AAC +1.0 |
+| sweep back 1.00 | `0xe99e232e…89c8` | bookLiquid 9→10 |
+| recordSweepRepayment | `0xfa515fbb…bded` | loan CLOSED, book whole: 10.0/10.0/0 |
+
+Terms preimage (hash `0x2aceb987…8dbb`): "Averray CreditBook pilot terms v1 —
+zero-interest CASH line, repayable on demand via AAC sweep; spec
+docs/PACKET_CREDIT_L2L3_SPEC.md @ 810e93a9".
+Seed sizing amended by Pascal: 10.0 now (demand-following), top-ups to the 50 cap
+as originations require. Operator EOA residue 0.01 USDC. Deployer left at ~2.58
+− second CREATE ≈ 1.73 DOT. Wiring PR #1189. L3 fully dormant (flag, wallet,
+allowlist all multisig-gated). Ledger reconciles: every raw unit named.
 
 ## 0. Why this ceremony is LIGHT (verified against source 2026-08-20)
 
