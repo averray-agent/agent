@@ -572,6 +572,8 @@ test("deploy rebuilds and verifies the public site even when no site paths chang
   assert.match(await readFile(deployLog, "utf8"), /run build:site/u);
   assert.match(run.stdout, /Served .*\/ matches built site\/index\.html/u);
   assert.match(run.stdout, /Served .*\/console-stream\.js matches built site\/console-stream\.js/u);
+  assert.match(run.stdout, /Served .*\/verify\/ matches built site\/verify\/index\.html/u);
+  assert.match(run.stdout, /Served .*\/proof-to-pay\/ matches built site\/proof-to-pay\/index\.html/u);
   assert.deepEqual(parseDeployResult(run.stdout), {
     schemaVersion: 1,
     changed: false,
@@ -1787,6 +1789,8 @@ async function makeSiteFixture() {
 
   await mkdir(join(appRoot, "scripts/ops"), { recursive: true });
   await mkdir(join(appRoot, "site"), { recursive: true });
+  await mkdir(join(appRoot, "site/verify"), { recursive: true });
+  await mkdir(join(appRoot, "site/proof-to-pay"), { recursive: true });
   await mkdir(stackRoot, { recursive: true });
   await mkdir(fakeBin, { recursive: true });
   await writeFile(join(stackRoot, "docker-compose.yml"), "services: {}\n");
@@ -1815,7 +1819,11 @@ async function makeSiteFixture() {
     "  esac",
     "done",
     "name=index.html",
-    "case \"$url\" in */console-stream.js) name=console-stream.js ;; esac",
+    "case \"$url\" in",
+    "  */console-stream.js) name=console-stream.js ;;",
+    "  */verify/) name=verify/index.html ;;",
+    "  */proof-to-pay/) name=proof-to-pay/index.html ;;",
+    "esac",
     "if [[ -n \"$out\" && -n \"${FAKE_SERVED_DIR:-}\" ]]; then",
     "  cp \"$FAKE_SERVED_DIR/$name\" \"$out\"",
     "else",
@@ -1830,6 +1838,8 @@ async function makeSiteFixture() {
   await writeFile(join(appRoot, "README.md"), "base\n");
   await writeFile(join(appRoot, "site/index.html"), "<title>Averray</title> fresh build\n");
   await writeFile(join(appRoot, "site/console-stream.js"), "// fresh console stream\n");
+  await writeFile(join(appRoot, "site/verify/index.html"), "<title>Averray Verify</title> fresh build\n");
+  await writeFile(join(appRoot, "site/proof-to-pay/index.html"), "<title>Proof-to-Pay</title> fresh build\n");
   git(appRoot, "add", ".");
   git(appRoot, "commit", "-m", "base");
   const baseSha = revParse(appRoot, "HEAD");

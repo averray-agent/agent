@@ -1,0 +1,93 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import "../styles/global.css";
+
+const PAGE_DESCRIPTION = "Send a claimed result. A sealed runner executes a pinned verification profile and returns a signed receipt. Flat per-run pricing in USDC on Base; inconclusive runs are never billed.";
+const SETTLED_RECEIPT = "0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1";
+const VERIFY_RECEIPT = "0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0";
+const PROFILE_CURL = `curl -s https://api.averray.com/verify/profiles`;
+---
+
+<BaseLayout
+  title="Averray Verify"
+  description={PAGE_DESCRIPTION}
+  canonicalUrl="https://averray.com/verify/"
+>
+  <main class="page">
+    <SiteNav />
+
+    <header class="page-hero">
+      <p class="eyebrow">Verify</p>
+      <h1 class="page-hero__title">Verify</h1>
+      <p class="page-hero__lede">{PAGE_DESCRIPTION}</p>
+    </header>
+
+    <section class="section" aria-labelledby="verify-how">
+      <div class="section__head">
+        <div>
+          <p class="eyebrow">How it works</p>
+          <h2 class="section__title" id="verify-how">How it works</h2>
+        </div>
+      </div>
+      <ol class="steps">
+        <li>x402 402.</li>
+        <li>Offline EIP-3009 authorize.</li>
+        <li>Sealed run.</li>
+        <li>Capture only on decisive; inconclusive runs are never billed — we issue a receipt of NOT charging you.</li>
+      </ol>
+    </section>
+
+    <section class="section" aria-labelledby="verify-profiles-heading">
+      <div class="section__head">
+        <div>
+          <p class="eyebrow">Profiles + pricing</p>
+          <h2 class="section__title" id="verify-profiles-heading">Profiles + pricing</h2>
+        </div>
+      </div>
+      <div id="verify-profiles" aria-live="polite">
+        <p data-profile-status>Pricing is served live; it could not be loaded just now — query /verify/profiles directly.</p>
+        <div class="pillars" data-profile-list></div>
+      </div>
+    </section>
+
+    <section class="section" data-receipt-proof aria-labelledby="verify-receipts">
+      <div class="receipts-strip">
+        <p class="eyebrow">Receipt proof</p>
+        <h2 class="section__title" id="verify-receipts">Receipt proof</h2>
+        <div class="link-row">
+          <a href={`https://averray.com/receipts/${SETTLED_RECEIPT}`}>Settled work receipt</a>
+          <a href={`https://averray.com/receipts/${VERIFY_RECEIPT}`}>Verify capture receipt — demonstration run (operator-funded)</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="verify-start">
+      <div class="section__head">
+        <div>
+          <p class="eyebrow">Get started</p>
+          <h2 class="section__title" id="verify-start">Get started</h2>
+        </div>
+        <p class="section__aside">Permissionless, in-protocol SIWE.</p>
+      </div>
+      <div class="pillars">
+        <article class="pillar">
+          <p class="pillar__eyebrow">MCP endpoint</p>
+          <div class="link-row"><a href="https://api.averray.com/mcp">https://api.averray.com/mcp</a></div>
+        </article>
+        <article class="pillar">
+          <p class="pillar__eyebrow">List profiles over HTTP</p>
+          <pre class="codeblock"><code>{PROFILE_CURL}</code></pre>
+        </article>
+        <article class="pillar">
+          <p class="pillar__eyebrow">Isolation</p>
+          <p class="pillar__body">Pinned-image sealed runner, no network, read-only rootfs.</p>
+        </article>
+      </div>
+    </section>
+
+    <SiteFooter />
+  </main>
+  <script is:inline src="/verify-reader.js"></script>
+</BaseLayout>

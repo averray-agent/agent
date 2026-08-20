@@ -28,6 +28,7 @@
     "check:job-schemas": "node scripts/ops/sync-job-schemas.mjs --check",
     "check:generated-output": "node scripts/ops/check-generated-output-clean.mjs",
     "check:product-proof": "node scripts/ops/check-product-proof-gate.mjs",
+    "check:site-content": "node scripts/ops/check-marketing-content-discipline.mjs",
     "product-proof:worker-loop": "node scripts/ops/run-hosted-worker-loop.mjs",
     "dev:app": "npm --workspace averray-app run dev",
     "build:app": "npm --workspace averray-app run build",
