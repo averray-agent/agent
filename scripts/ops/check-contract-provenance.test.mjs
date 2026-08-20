@@ -213,6 +213,7 @@ test("mainnet manifest covers every deployed source-controlled contract address"
       "hydrationDepositPoolAdapterV2",
       "depositPoolV2",
       "creditPool",
+    "creditBook",
     ]
   );
   assert.equal(
