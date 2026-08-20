@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 
 import { ConfigError, ValidationError } from "../core/errors.js";
 import { GitPatchTestsRunner } from "./git-patch-tests-runner.js";
+import { StructuredOutputEvidenceRunner } from "./structured-output-evidence-runner.js";
 import {
   GIT_PATCH_TESTS_PROFILE_REF,
+  STRUCTURED_OUTPUT_EVIDENCE_PROFILE_REF,
   VerificationProfileRegistry
 } from "./verification-profile-registry.js";
 
@@ -13,22 +15,27 @@ const DEFAULT_CLAIM_LEASE_SECONDS = 180;
 export class WitnessRunnerService {
   constructor({
     stateStore,
-    runner = new GitPatchTestsRunner(),
+    runner,
+    runnersByProfileRef,
     profileRegistry = new VerificationProfileRegistry(),
     intervalMs = DEFAULT_INTERVAL_MS,
     claimLeaseSeconds = DEFAULT_CLAIM_LEASE_SECONDS,
-    acceptedProfileRefs = [GIT_PATCH_TESTS_PROFILE_REF],
+    acceptedProfileRefs = [GIT_PATCH_TESTS_PROFILE_REF, STRUCTURED_OUTPUT_EVIDENCE_PROFILE_REF],
     owner = `witness-runner:${randomUUID()}`,
     now = () => new Date(),
     logger = console
   } = {}) {
     if (!stateStore) throw new ValidationError("WitnessRunnerService requires the shared state store.");
     this.stateStore = stateStore;
-    this.runner = runner;
     this.profileRegistry = profileRegistry;
     this.intervalMs = positiveInteger(intervalMs, "Witness runner interval");
     this.claimLeaseSeconds = positiveInteger(claimLeaseSeconds, "Witness runner claim lease");
     this.acceptedProfileRefs = Object.freeze(acceptedProfileRefs.map(String));
+    this.runnersByProfileRef = buildRunnerMap({
+      acceptedProfileRefs: this.acceptedProfileRefs,
+      runner,
+      runnersByProfileRef
+    });
     this.owner = String(owner);
     this.now = now;
     this.logger = logger;
@@ -38,7 +45,10 @@ export class WitnessRunnerService {
   }
 
   async inspectAvailability() {
-    this.availability ??= await this.runner.inspectAvailability();
+    this.availability ??= await inspectRunnerMapAvailability(
+      this.runnersByProfileRef,
+      this.acceptedProfileRefs
+    );
     return this.availability;
   }
 
@@ -87,9 +97,11 @@ export class WitnessRunnerService {
     let execution;
     try {
       const profile = this.profileRegistry.get(run.profile, run.profileVersion);
-      await this.runner.validate?.({ profile, target: run.target, inputs: run.inputs });
+      const runner = this.runnersByProfileRef.get(profile.ref);
+      if (!runner) throw new Error(`No isolated runner is configured for ${profile.ref}.`);
+      await runner.validate?.({ profile, target: run.target, inputs: run.inputs });
       execution = await runWithTimeout(
-        () => this.runner.run({
+        () => runner.run({
           profile,
           runId: run.runId,
           target: run.target,
@@ -118,6 +130,37 @@ export class WitnessRunnerService {
     }
     return stored;
   }
+}
+
+function buildRunnerMap({ acceptedProfileRefs, runner, runnersByProfileRef }) {
+  if (runner) {
+    return new Map(acceptedProfileRefs.map((ref) => [ref, runner]));
+  }
+  if (runnersByProfileRef) {
+    return runnersByProfileRef instanceof Map
+      ? new Map(runnersByProfileRef)
+      : new Map(Object.entries(runnersByProfileRef));
+  }
+  return new Map([
+    [GIT_PATCH_TESTS_PROFILE_REF, new GitPatchTestsRunner()],
+    [STRUCTURED_OUTPUT_EVIDENCE_PROFILE_REF, new StructuredOutputEvidenceRunner()]
+  ]);
+}
+
+async function inspectRunnerMapAvailability(runnersByProfileRef, acceptedProfileRefs) {
+  for (const ref of acceptedProfileRefs) {
+    const runner = runnersByProfileRef.get(ref);
+    if (!runner) {
+      return Object.freeze({
+        status: "unavailable",
+        reasonCode: "verification_runner_missing",
+        reason: `No isolated runner is configured for ${ref}.`
+      });
+    }
+    const availability = await runner.inspectAvailability();
+    if (availability.status !== "available") return availability;
+  }
+  return Object.freeze({ status: "available" });
 }
 
 export function loadWitnessRunnerConfig(env = process.env) {

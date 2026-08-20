@@ -31,12 +31,14 @@ test("backend verification shelf boots, profiles, and queues without loading Wit
     env: {}
   });
 
-  const [profile, mcpProfile] = verificationRunService.listProfiles();
+  const [profile, mcpProfile, structuredProfile] = verificationRunService.listProfiles();
   assert.equal(profile.ref, "git-patch-tests-v1@1");
   assert.deepEqual(profile.availability, { status: "available" });
   assert.equal(mcpProfile.ref, "mcp-failure-semantics-v1@1");
   assert.equal(mcpProfile.availability.status, "unavailable");
   assert.equal(mcpProfile.availability.reason, "isolated_mcp_prober_not_configured");
+  assert.equal(structuredProfile.ref, "structured-output-evidence-v1@1");
+  assert.deepEqual(structuredProfile.availability, { status: "available" });
   assert.ok(verificationRunFinalizer);
   const queued = await verificationRunService.createRun({
     profile: "git-patch-tests-v1",
@@ -86,6 +88,7 @@ test("an unavailable MCP control socket degrades profile 2 without blocking back
   const profiles = shelf.verificationRunService.listProfiles();
   assert.equal(profiles.find(({ ref }) => ref === "git-patch-tests-v1@1").availability.status, "available");
   assert.equal(profiles.find(({ ref }) => ref === "mcp-failure-semantics-v1@1").availability.status, "unavailable");
+  assert.equal(profiles.find(({ ref }) => ref === "structured-output-evidence-v1@1").availability.status, "available");
   assert.equal(shelf.mcpEgressGrantVerifier, undefined);
   assert.equal(errors.length, 1);
 });

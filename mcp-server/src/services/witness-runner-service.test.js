@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { MemoryStateStore } from "../core/state-store.js";
-import { VerificationProfileRegistry } from "./verification-profile-registry.js";
+import {
+  GIT_PATCH_TESTS_PROFILE_REF,
+  STRUCTURED_OUTPUT_EVIDENCE_PROFILE_REF,
+  VerificationProfileRegistry
+} from "./verification-profile-registry.js";
 import {
   assertWitnessRunnerEnvironment,
   WitnessRunnerService
@@ -114,6 +118,35 @@ test("profile 2 cannot enter the profile-1 code sandbox", async () => {
   assert.deepEqual(seen, ["verify-git"]);
   assert.equal((await stateStore.getVerificationRun("verify-mcp")).status, "queued");
   assert.equal((await stateStore.getVerificationRun("verify-git")).status, "executed");
+});
+
+test("profile 3 is routed to its structured-output runner and never the profile-1 code runner", async () => {
+  const stateStore = new MemoryStateStore();
+  const structuredRun = await queueRun(stateStore, "verify-structured");
+  structuredRun.profile = "structured-output-evidence-v1";
+  structuredRun.profileRef = STRUCTURED_OUTPUT_EVIDENCE_PROFILE_REF;
+  structuredRun.target = { output: {}, schema: {}, sources: [{}] };
+  structuredRun.inputs = {};
+  await stateStore.updateVerificationRun(structuredRun.runId, structuredRun);
+  const seen = [];
+  const service = new WitnessRunnerService({
+    stateStore,
+    profileRegistry: PROFILE_REGISTRY,
+    runnersByProfileRef: new Map([
+      [GIT_PATCH_TESTS_PROFILE_REF, runnerDouble({ execute: async () => {
+        throw new Error("profile 3 entered the profile-1 runner");
+      } })],
+      [STRUCTURED_OUTPUT_EVIDENCE_PROFILE_REF, runnerDouble({ execute: async ({ runId }) => {
+        seen.push(runId);
+        return { status: "decidable", evidence: "structured_output_integrity_pass" };
+      } })]
+    ]),
+    owner: "profile-three-router"
+  });
+
+  await service.runOnce();
+  assert.deepEqual(seen, ["verify-structured"]);
+  assert.equal((await stateStore.getVerificationRun("verify-structured")).status, "executed");
 });
 
 test("runner accepts only minimal Redis and proxied Docker configuration", () => {

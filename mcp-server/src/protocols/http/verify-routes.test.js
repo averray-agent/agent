@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { VerificationProfileRegistry } from "../../services/verification-profile-registry.js";
 import { createVerifyRoutes } from "./verify-routes.js";
 
-function harness({ createRun, payload } = {}) {
+function harness({ createRun, payload, profiles = new VerificationProfileRegistry().list() } = {}) {
   const calls = [];
   const response = {};
   const route = createVerifyRoutes({
@@ -17,7 +18,7 @@ function harness({ createRun, payload } = {}) {
     }),
     respond: (target, statusCode, body, headers) => Object.assign(target, { statusCode, body, headers }),
     verificationRunService: {
-      listProfiles: () => [{ name: "git-patch-tests-v1", version: 1 }],
+      listProfiles: () => profiles,
       getRun: async (runId) => ({ runId, status: "complete" }),
       createRun: createRun ?? (async (input) => {
         calls.push(["createRun", input]);
@@ -37,7 +38,10 @@ test("GET /verify/profiles is public and cacheable", async () => {
   const { response, route } = harness();
   assert.equal(await route({ request: { method: "GET" }, response, pathname: "/verify/profiles" }), true);
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.body, { profiles: [{ name: "git-patch-tests-v1", version: 1 }] });
+  assert.deepEqual(
+    response.body.profiles.map(({ ref }) => ref),
+    ["git-patch-tests-v1@1", "mcp-failure-semantics-v1@1", "structured-output-evidence-v1@1"]
+  );
   assert.equal(response.headers["cache-control"], "public, max-age=300");
 });
 
