@@ -92,6 +92,13 @@ function makeCreditPoolRoute() {
   });
 }
 
+function assertTwoSidedWelcome(welcome) {
+  assert.match(welcome.what, /pays agents/u);
+  assert.match(welcome.what, /sells verified outcomes/u);
+  assert.ok(Array.isArray(welcome.buyerPath) && welcome.buyerPath.length > 0, "buyerPath must be non-empty");
+  assert.match(welcome.buyerPath.join(" "), /never billed/iu);
+}
+
 test("getPlatformCapabilities defaults to a bounded welcome and preserves the full response byte-for-byte", async () => {
   const fullCapabilities = {
     name: "Averray — trusted agent work + identity runtime",
@@ -123,6 +130,11 @@ test("getPlatformCapabilities defaults to a bounded welcome and preserves the fu
   assert.equal(full.tools.length, 28, "full detail must retain the existing HTTP tool vocabulary");
   assert.equal(welcome.tools.surface, "mcp");
   assert.deepEqual(welcome.tools.names, MCP_TOOLS.map(({ name }) => name));
+  assertTwoSidedWelcome(welcome);
+  assert.deepEqual(welcome.proofToPay, {
+    summary: "Escrow for work you commission from a counterparty you already chose; funds release on PASS only.",
+    page: "https://averray.com/proof-to-pay"
+  });
   assert.match(welcome.freshWallet, /only from starter jobs marked onboardingWaiverEligible/u);
   assert.deepEqual(welcome.requestLimit, {
     maxBodyBytes: DEFAULT_MCP_MAX_REQUEST_BODY_BYTES,
@@ -136,6 +148,26 @@ test("getPlatformCapabilities defaults to a bounded welcome and preserves the fu
   assert.ok(
     conservativeTokenEstimate <= MCP_WELCOME_TOKEN_BUDGET,
     `welcome estimated at ${conservativeTokenEstimate} tokens; budget is ${MCP_WELCOME_TOKEN_BUDGET}`
+  );
+});
+
+test("deleting buyerPath fails the two-sided welcome guard by name", async () => {
+  const execute = createMcpToolExecutor({
+    handleAuthRoute: async () => false,
+    handleJobRoute: async () => false,
+    handlePublicMetadataRoute: makePublicRoute({ discoveryUrl: "https://averray.com/.well-known/agent-tools.json" })
+  });
+  const welcome = await execute(
+    "getPlatformCapabilities",
+    {},
+    { request: { headers: {}, socket: { remoteAddress: "127.0.0.1" } } }
+  );
+  const mutated = structuredClone(welcome);
+  delete mutated.buyerPath;
+
+  assert.throws(
+    () => assertTwoSidedWelcome(mutated),
+    /buyerPath must be non-empty/u
   );
 });
 

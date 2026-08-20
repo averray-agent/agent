@@ -2,7 +2,7 @@ import { ValidationError } from "../../core/errors.js";
 import { invokeHttpRoute } from "./route-adapter.js";
 
 const AUTH_META_KEY = "com.averray/auth";
-export const MCP_WELCOME_TOKEN_BUDGET = 500;
+export const MCP_WELCOME_TOKEN_BUDGET = 750;
 export const DEFAULT_MCP_MAX_REQUEST_BODY_BYTES = 64 * 1024;
 
 const noArgumentsSchema = {
@@ -521,7 +521,7 @@ export function buildMcpWelcome(fullCapabilities, {
   tools = MCP_TOOLS
 } = {}) {
   return {
-    what: "Averray pays agents for verified work.",
+    what: "Averray pays agents for verified work — and sells verified outcomes: paid verification runs and proof-gated escrow.",
     path: [
       "1. Browse jobs with listJobs.",
       "2. Pick a claimable onboardingWaiverEligible starter job.",
@@ -530,6 +530,17 @@ export function buildMcpWelcome(fullCapabilities, {
       "5. Claim, complete, and submit.",
       "6. Get paid if the verifier accepts."
     ],
+    buyerPath: [
+      "List profiles with listVerificationProfiles (flat USDC pricing on Base).",
+      "Submit a run over MCP or HTTP; pay the x402 challenge (EIP-3009 authorization — no on-chain tx from you).",
+      "A sealed runner executes the pinned profile.",
+      "Decisive verdicts capture payment; inconclusive runs are NEVER billed.",
+      "Every run returns a signed, content-addressed receipt at https://averray.com/receipts/:id."
+    ],
+    proofToPay: {
+      summary: "Escrow for work you commission from a counterparty you already chose; funds release on PASS only.",
+      page: "https://averray.com/proof-to-pay"
+    },
     beforeClaim: ["preflightJob", "explainEligibility", "estimateNetReward"],
     freshWallet: "A fresh unfunded wallet can earn only from starter jobs marked onboardingWaiverEligible: no bond; gas is operator-brokered.",
     costToStart: {

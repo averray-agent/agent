@@ -20,8 +20,24 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
     rpcUrl: "https://eth-rpc-testnet.polkadot.io"
   });
 
-  assert.equal(manifest.version, "0.4.0");
+  assert.equal(manifest.version, "0.5.0");
   assert.equal(manifest.discoveryMode, "directory-safe");
+  assert.deepEqual(manifest.products, {
+    verify: {
+      summary: "Paid verification runs against pinned, immutable profiles. Inconclusive runs are never billed.",
+      profiles: "https://api.averray.com/verify/profiles",
+      payment: "x402 (EIP-3009) — flat per-run USDC on Base",
+      page: "https://averray.com/verify"
+    },
+    proofToPay: {
+      summary: "Proof-gated escrow with a counterparty you already chose; release on PASS only.",
+      page: "https://averray.com/proof-to-pay"
+    },
+    workReceipts: {
+      schema: "averray.work-receipt.v1",
+      pattern: "https://averray.com/receipts/:contentHash"
+    }
+  });
   assert.equal(manifest.baseUrl, "https://api.example.com");
   assert.equal(manifest.discoveryUrl, "https://example.com/.well-known/agent-tools.json");
   assert.equal(manifest.profile, "https://app.example.com/agents/<wallet>");
@@ -150,7 +166,7 @@ test("A4 manifest honesty: discovery advertises the served MCP endpoint and main
     "utf8"
   ));
 
-  assert.equal(manifest.version, "0.4.0");
+  assert.equal(manifest.version, "0.5.0");
   assert.deepEqual(manifest.protocols, ["http", "mcp"]);
   assert.deepEqual(manifest.protocolEndpoints, {
     http: "https://api.averray.com",
