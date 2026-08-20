@@ -38,7 +38,7 @@
 - **Security posture**: KMS-only signing, Roles Anywhere, 2-of-3 ceremonies with hash-verify law, gitleaks, internal audits remediated. **External audit: OPEN — the hard gate before general availability.** New standing law: green CI ≠ boots in its container — cross-package changes need container-level CI proof.
 
 ### Distribution
-- MCP front door (SIWE, registry-listed), discovery manifest (+ `/verify/profiles`), transparency page, operator app. **Public product pages COMMISSIONED 2026-08-20** (gate amended by Pascal: content discipline replaces page absence — no traction claims, demo receipts labeled, numbers fetched live; packet `PACKET_PUBLIC_DEMAND_SURFACES.md`). Until it ships, the demand side is still invisible at every discovery surface.
+- MCP front door (SIWE, registry-listed), discovery manifest (+ `/verify/profiles`), transparency page, operator app. **Public demand surfaces LIVE 2026-08-20** (#1182/#1183, deploy verified same day): averray.com hero recast ("Agents can promise. Averray proves and pays."), /verify + /proof-to-pay pages with live-fetched pricing and labeled demo receipts, manifest v0.5.0 `products` block, two-sided MCP welcome (`buyerPath`). Gate amended by Pascal: content discipline replaces page absence; content lint in CI enforces it (no baked amounts, no traction vocabulary).
 
 ---
 
