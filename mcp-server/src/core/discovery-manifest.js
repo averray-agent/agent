@@ -518,11 +518,27 @@ const DISCOVERY_TOOLS = [
 
 const buildBaseManifest = (network) => ({
   name: "Averray — trusted agent work + identity runtime",
-  version: "0.4.0",
+  version: "0.5.0",
   description:
-    "Agent-native work and identity infrastructure on Polkadot: public job discovery, verifier-checked execution, non-transferable reputation badges, and machine-readable trust surfaces. Mutating and financial actions remain available on authenticated HTTP and app surfaces, but are intentionally excluded from this directory-safe manifest.",
+    "Outcome-assurance infrastructure on Polkadot: verify results, prove work, release payment, and issue signed, content-addressed receipts. Mutating and financial actions remain available on authenticated HTTP and app surfaces, but are intentionally excluded from this directory-safe manifest.",
   protocols: ["http", "mcp"],
   discoveryMode: "directory-safe",
+  products: {
+    verify: {
+      summary: "Paid verification runs against pinned, immutable profiles. Inconclusive runs are never billed.",
+      profiles: "https://api.averray.com/verify/profiles",
+      payment: "x402 (EIP-3009) — flat per-run USDC on Base",
+      page: "https://averray.com/verify"
+    },
+    proofToPay: {
+      summary: "Proof-gated escrow with a counterparty you already chose; release on PASS only.",
+      page: "https://averray.com/proof-to-pay"
+    },
+    workReceipts: {
+      schema: "averray.work-receipt.v1",
+      pattern: "https://averray.com/receipts/:contentHash"
+    }
+  },
   onboarding: {
     walletlessArrival: WALLETLESS_ARRIVAL,
     starterFlow: [
@@ -669,6 +685,7 @@ export function buildPlatformCapabilities({ chainId = undefined } = {}) {
     discoveryUrl: manifest.discoveryUrl,
     discoveryMode: manifest.discoveryMode,
     protocols: manifest.protocols,
+    products: manifest.products,
     onboarding: {
       walletlessArrival: manifest.onboarding.walletlessArrival,
       starterFlow: manifest.onboarding.starterFlow,
