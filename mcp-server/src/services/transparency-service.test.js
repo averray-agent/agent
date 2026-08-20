@@ -57,6 +57,20 @@ function settlementReceipt(seed, workerAmountRaw) {
   };
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function nextTurn() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 function job(overrides = {}) {
   return {
     poster: EXTERNAL_POSTER,
@@ -137,7 +151,10 @@ function harness(overrides = {}) {
     assetId: 22
   };
   const options = {
-    now: () => NOW,
+    now: overrides.now ?? (() => NOW),
+    cacheTtlMs: overrides.cacheTtlMs,
+    freshnessWindowsMs: overrides.freshnessWindowsMs,
+    logger: overrides.logger ?? { warn() {} },
     stateStore: {
       async listRecentSessions(limit, offset) {
         return sessions.slice(offset, offset + limit);
@@ -295,10 +312,132 @@ test("cache TTL must be strictly shorter than every freshness window", () => {
   );
 });
 
+test("background refresh loop prewarms one held snapshot and can be stopped", async () => {
+  const service = harness();
+  const assembleHeldSnapshot = service.assembleHeldSnapshot.bind(service);
+  const initialAssemblyGate = deferred();
+  let assemblyCount = 0;
+  service.assembleHeldSnapshot = async () => {
+    assemblyCount += 1;
+    await initialAssemblyGate.promise;
+    return assembleHeldSnapshot();
+  };
+
+  service.start();
+  await nextTurn();
+  assert.equal(assemblyCount, 1);
+  assert.ok(service.refreshTimer);
+  service.stop();
+  assert.equal(service.refreshTimer, undefined);
+
+  initialAssemblyGate.resolve();
+  await service.refresh();
+  assert.ok(service.heldSnapshot);
+});
+
+test("a fake 5s-slow feed does not delay a request served from the held snapshot", async () => {
+  let nowMs = NOW;
+  const service = harness({
+    now: () => nowMs,
+    cacheTtlMs: 1_000,
+    freshnessWindowsMs: { flow: 10_000, chain: 10_000, bank: 10_000, subject: 10_000 }
+  });
+  const first = await service.getSnapshot();
+  const slowFiveSecondFeed = deferred();
+  const readFlow = service.readFlow.bind(service);
+  service.readFlow = async () => {
+    await slowFiveSecondFeed.promise;
+    return readFlow();
+  };
+
+  nowMs += 1_001;
+  const served = await Promise.race([
+    service.getSnapshot(),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("held snapshot request waited for the fake 5s feed")), 50))
+  ]);
+
+  assert.equal(served.flow.jobsSettled.allTime.value, first.flow.jobsSettled.allTime.value);
+  slowFiveSecondFeed.resolve();
+  await service.refresh();
+});
+
+test("N concurrent requests during expiry trigger exactly one assembly (single-flight mutation guard)", async () => {
+  let nowMs = NOW;
+  const service = harness({
+    now: () => nowMs,
+    cacheTtlMs: 1_000,
+    freshnessWindowsMs: { flow: 10_000, chain: 10_000, bank: 10_000, subject: 10_000 }
+  });
+  const assembleHeldSnapshot = service.assembleHeldSnapshot.bind(service);
+  const secondAssemblyGate = deferred();
+  let assemblyCount = 0;
+  service.assembleHeldSnapshot = async () => {
+    assemblyCount += 1;
+    if (assemblyCount === 2) await secondAssemblyGate.promise;
+    return assembleHeldSnapshot();
+  };
+  await service.getSnapshot();
+
+  nowMs += 1_001;
+  const requests = Array.from({ length: 8 }, () => service.getSnapshot());
+  await Promise.all(requests);
+  assert.equal(
+    assemblyCount,
+    2,
+    "removing the refreshInFlight join must make this named test fail"
+  );
+
+  secondAssemblyGate.resolve();
+  await service.refresh();
+  assert.equal(assemblyCount, 2);
+});
+
+test("a held snapshot older than the smallest freshness window forces inline assembly", async () => {
+  let nowMs = NOW;
+  const service = harness({
+    now: () => nowMs,
+    cacheTtlMs: 1_000,
+    freshnessWindowsMs: { flow: 4_000, chain: 3_000, bank: 5_000, subject: 6_000 }
+  });
+  await service.getSnapshot();
+
+  const assembleHeldSnapshot = service.assembleHeldSnapshot.bind(service);
+  const inlineAssemblyGate = deferred();
+  let assemblyCount = 1;
+  service.assembleHeldSnapshot = async () => {
+    assemblyCount += 1;
+    await inlineAssemblyGate.promise;
+    return assembleHeldSnapshot();
+  };
+  nowMs += 3_001;
+  let settled = false;
+  const request = service.getSnapshot().then((snapshot) => {
+    settled = true;
+    return snapshot;
+  });
+
+  await nextTurn();
+  assert.equal(settled, false, "out-of-bound held evidence must not take the immediate path");
+  assert.equal(assemblyCount, 2);
+  inlineAssemblyGate.resolve();
+  const refreshed = await request;
+  assert.equal(refreshed.generatedAtMs, nowMs);
+});
+
 test("transparency payload composes flow, escrow, and generation-bound treasury truth", async () => {
   const payload = await harness().getSnapshot();
 
   assert.equal(payload.schemaVersion, "averray.transparency.v1");
+  assert.deepEqual(Object.keys(payload.readPolicy.assemblyTimingsMs), [
+    "flow",
+    "escrow",
+    "bank",
+    "treasury-balance",
+    "chain-head"
+  ]);
+  for (const durationMs of Object.values(payload.readPolicy.assemblyTimingsMs)) {
+    assert.equal(Number.isFinite(durationMs) && durationMs >= 0, true);
+  }
   assert.deepEqual(payload.flow.jobsSettled.last24h.value, 3);
   assert.equal(payload.flow.usdcPaid.last24h.value, "1.3");
   assert.equal(payload.flow.composition24h.platformVerificationRuns.value, 1);

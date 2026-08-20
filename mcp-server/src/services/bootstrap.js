@@ -720,7 +720,8 @@ export async function createPlatformRuntime() {
       platformService,
       stateStore,
       venueBalanceReader,
-      selfIdentityRegistry
+      selfIdentityRegistry,
+      logger
     })
   );
   const depositPoolObservability = initStep("init-deposit-pool-observability", logger, () =>
@@ -894,6 +895,7 @@ export async function createPlatformRuntime() {
   jobStaleSweeper.start();
   submittedJobAutoVerifier.start();
   verificationRunFinalizer.start();
+  transparencyService.start();
   externalPosterReviewEscalator.start();
   firstExternalAgentAlert.start();
 

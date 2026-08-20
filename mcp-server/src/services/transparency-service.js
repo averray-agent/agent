@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { performance } from "node:perf_hooks";
 
 import { getAddress, keccak256 } from "ethers";
 
@@ -33,9 +34,9 @@ const OWNER_RECORDS = Object.freeze({
  * Read-only model behind the authenticated Capital / Transparency panel.
  *
  * Chain reads are deliberately independent: one failed RPC produces one
- * unknown field and never collapses the document. Cached readings retain their
- * original completion clock; status is re-derived for every response, so a
- * cache entry can never be presented as fresh after its evidence ages out.
+ * unknown field and never collapses the document. A background single-flight
+ * holds the latest feed readings; status is re-derived for every response, so
+ * a held reading can never be presented as fresh after its evidence ages out.
  */
 export class TransparencyService {
   constructor({
@@ -48,7 +49,8 @@ export class TransparencyService {
     cacheTtlMs = TRANSPARENCY_CACHE_TTL_MS,
     freshnessWindowsMs = TRANSPARENCY_FRESHNESS_WINDOWS_MS,
     now = () => Date.now(),
-    treasuryIdentity = undefined
+    treasuryIdentity = undefined,
+    logger = console
   } = {}) {
     this.bankLaneFeed = bankLaneFeed;
     this.gateway = gateway;
@@ -60,22 +62,104 @@ export class TransparencyService {
       : new SelfIdentityRegistry();
     this.cacheTtlMs = Number(cacheTtlMs);
     this.freshnessWindowsMs = normalizeFreshnessWindows(freshnessWindowsMs);
+    this.minimumFreshnessWindowMs = Math.min(...Object.values(this.freshnessWindowsMs));
     this.now = now;
-    this.cache = new Map();
+    this.logger = logger;
+    this.heldSnapshot = undefined;
+    this.refreshInFlight = undefined;
+    this.refreshTimer = undefined;
     this.treasuryIdentity = treasuryIdentity ?? loadTreasuryIdentity(gateway?.config?.chainId);
     assertCacheFreshnessInvariant(this.cacheTtlMs, this.freshnessWindowsMs);
   }
 
-  async getSnapshot() {
-    const generatedAtMs = this.now();
-    const [flow, escrow, bank, treasuryBalance, chainHead] = await Promise.all([
-      this.readCached("flow", () => this.readFlow()),
-      this.readCached("escrow", () => this.readEscrow()),
-      this.readCached("bank", () => this.readBank()),
-      this.readCached("treasury-balance", () => this.readTreasuryBalance()),
-      this.readCached("chain-head", () => this.readChainHead())
-    ]);
+  start() {
+    if (this.refreshTimer) return;
+    this.refreshInBackground();
+    this.refreshTimer = setInterval(() => this.refreshInBackground(), this.cacheTtlMs);
+    this.refreshTimer.unref?.();
+  }
 
+  stop() {
+    clearInterval(this.refreshTimer);
+    this.refreshTimer = undefined;
+  }
+
+  async getSnapshot() {
+    const held = this.heldSnapshot;
+    const nowMs = this.now();
+    const heldAgeMs = held ? Math.max(0, nowMs - held.assembledAtMs) : Number.POSITIVE_INFINITY;
+
+    if (held && heldAgeMs <= this.minimumFreshnessWindowMs) {
+      if (heldAgeMs >= this.cacheTtlMs) this.refreshInBackground();
+      return this.buildSnapshot(held, nowMs);
+    }
+
+    // No held reading, or one older than the smallest advertised freshness
+    // window, may not take the fast path. Join the one live assembly exactly as
+    // the pre-held service did instead of serving evidence beyond its bound.
+    return this.buildSnapshot(await this.refresh(), this.now());
+  }
+
+  refresh() {
+    if (this.refreshInFlight) return this.refreshInFlight;
+    const refresh = this.assembleHeldSnapshot()
+      .then((snapshot) => {
+        this.heldSnapshot = snapshot;
+        return snapshot;
+      })
+      .finally(() => {
+        if (this.refreshInFlight === refresh) this.refreshInFlight = undefined;
+      });
+    this.refreshInFlight = refresh;
+    return refresh;
+  }
+
+  refreshInBackground() {
+    void this.refresh().catch((error) => {
+      this.logger.warn?.(
+        { err: error instanceof Error ? error : new Error(String(error)) },
+        "transparency.refresh_failed"
+      );
+    });
+  }
+
+  async assembleHeldSnapshot() {
+    const assembledAtMs = this.now();
+    const assemblyTimingsMs = {};
+    const measure = async (name, loader) => {
+      const startedAt = performance.now();
+      try {
+        return await loader();
+      } finally {
+        assemblyTimingsMs[name] = Math.max(0, Math.round(performance.now() - startedAt));
+      }
+    };
+    const [flow, escrow, bank, treasuryBalance, chainHead] = await Promise.all([
+      measure("flow", () => this.readFlow()),
+      measure("escrow", () => this.readEscrow()),
+      measure("bank", () => this.readBank()),
+      measure("treasury-balance", () => this.readTreasuryBalance()),
+      measure("chain-head", () => this.readChainHead())
+    ]);
+    return {
+      assembledAtMs,
+      assemblyTimingsMs,
+      flow,
+      escrow,
+      bank,
+      treasuryBalance,
+      chainHead
+    };
+  }
+
+  buildSnapshot({
+    flow,
+    escrow,
+    bank,
+    treasuryBalance,
+    chainHead,
+    assemblyTimingsMs
+  }, generatedAtMs) {
     const subject = bank.subject;
     const generation = this.buildGeneration(subject, generatedAtMs);
     const treasuryLine = this.usdcField(treasuryBalance, "chain", generatedAtMs);
@@ -99,7 +183,7 @@ export class TransparencyService {
     return {
       schemaVersion: TRANSPARENCY_SCHEMA_VERSION,
       generatedAtMs,
-      readPolicy: this.buildReadPolicy(generatedAtMs),
+      readPolicy: this.buildReadPolicy(generatedAtMs, assemblyTimingsMs),
       // The head the reader was looking at. Published so a consumer can say
       // which block a figure came from instead of inferring one from a wall
       // clock — and so it degrades to `unknown` rather than to a plausible
@@ -181,7 +265,7 @@ export class TransparencyService {
     };
   }
 
-  buildReadPolicy(nowMs) {
+  buildReadPolicy(nowMs, assemblyTimingsMs) {
     const configField = (value, unit, proof) => toField({
       value,
       unit,
@@ -194,7 +278,14 @@ export class TransparencyService {
       freshnessWindows: Object.fromEntries(Object.entries(this.freshnessWindowsMs).map(([name, value]) => [
         name,
         configField(value, "ms", `TRANSPARENCY_FRESHNESS_WINDOWS_MS.${name}`)
-      ]))
+      ])),
+      assemblyTimingsMs: Object.fromEntries([
+        "flow",
+        "escrow",
+        "bank",
+        "treasury-balance",
+        "chain-head"
+      ].map((name) => [name, Number(assemblyTimingsMs?.[name] ?? 0)]))
     };
   }
 
@@ -272,20 +363,6 @@ export class TransparencyService {
       nowMs,
       freshnessWindowMs: this.freshnessWindowsMs[freshnessKey]
     });
-  }
-
-  async readCached(key, loader) {
-    const nowMs = this.now();
-    const cached = this.cache.get(key);
-    if (cached && cached.expiresAtMs > nowMs) return cached.promise;
-    const promise = Promise.resolve().then(loader);
-    this.cache.set(key, { expiresAtMs: nowMs + this.cacheTtlMs, promise });
-    try {
-      return await promise;
-    } catch (error) {
-      this.cache.delete(key);
-      throw error;
-    }
   }
 
   async readFlow() {
