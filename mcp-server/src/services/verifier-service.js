@@ -12,6 +12,8 @@ import {
   assertJobSnapshotIntegrity,
   requireJobSnapshot
 } from "../core/job-snapshot.js";
+import { buildPlatformFaultRemediationMarker } from "../core/platform-fault-remediation.js";
+import { PlatformFaultRemediationService } from "./platform-fault-remediation-service.js";
 
 // EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
 // Disputed=5, Closed=6. resolveSinglePayout only runs from Submitted and reverts
@@ -24,12 +26,25 @@ export const POSTER_REVIEW_HANDLER = "poster_review";
 export const POSTER_REVIEW_HANDLER_VERSION = 1;
 
 export class VerifierService {
-  constructor(platformService, stateStore, blockchainGateway = undefined, registry = new VerifierRegistry()) {
+  constructor(
+    platformService,
+    stateStore,
+    blockchainGateway = undefined,
+    registry = new VerifierRegistry(),
+    options = {}
+  ) {
     this.platformService = platformService;
     this.stateStore = stateStore;
     this.blockchainGateway = blockchainGateway;
     this.registry = registry;
     this.creditBookKeeper = undefined;
+    this.platformFaultRemediationService = options.platformFaultRemediationService
+      ?? new PlatformFaultRemediationService({
+        stateStore,
+        gateway: blockchainGateway,
+        eventBus: platformService?.eventBus,
+        logger: platformService?.logger
+      });
   }
 
   setCreditBookKeeper(creditBookKeeper) {
@@ -45,7 +60,7 @@ export class VerifierService {
     const validatedVerificationInput = this.validateVerificationInput(job, verificationInput, {
       pinnedSchema: snapshot.outputSchema?.schema
     });
-    const verdict = await this.registry.evaluate(
+    let verdict = await this.registry.evaluate(
       job,
       validatedVerificationInput,
       verificationClaimantContext(session)
@@ -57,6 +72,24 @@ export class VerifierService {
       reasonCode: verdict.reasonCode,
       details: verdict.details ?? null
     });
+    let platformFaultRemediation;
+    if (verdict.outcome === "platform_fault") {
+      if (verdict.workerConsequence && verdict.workerConsequence !== "none") {
+        throw new Error("A platform_fault verdict must carry workerConsequence none.");
+      }
+      verdict = { ...verdict, workerConsequence: "none" };
+      platformFaultRemediation = await this.platformFaultRemediationService.escalate({
+        session,
+        verdict,
+        reasoningHash
+      });
+      if (platformFaultRemediation) {
+        verdict = {
+          ...verdict,
+          internalRemediation: buildPlatformFaultRemediationMarker(platformFaultRemediation)
+        };
+      }
+    }
 
     // Idempotent settle. resolveSinglePayout mutates on-chain state BEFORE the
     // verdict is persisted below; if a prior attempt settled on-chain but then
@@ -97,7 +130,7 @@ export class VerifierService {
       job,
       verdict,
       verificationInput: validatedVerificationInput,
-      metadataURI,
+      metadataURI: platformFaultRemediation?.resolution?.metadataURI ?? metadataURI,
       payoutTx
     });
   }

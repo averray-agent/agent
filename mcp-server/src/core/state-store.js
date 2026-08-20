@@ -7,6 +7,7 @@ import {
   filterFinalFundedJobRecords,
   listCapabilityGrantRecords,
   listFundedJobRecords,
+  listPlatformFaultRemediationRecords,
   markXcmObservationFailedRecord,
   markXcmObservationProcessedRecord,
   mergeServiceStateRecord,
@@ -210,6 +211,7 @@ export class MemoryStateStore {
     this.content = new Map();
     this.fundedJobs = new Map();
     this.capabilityGrants = new Map();
+    this.platformFaultRemediations = new Map();
     this.eventLog = [];
     this.bankXcmLegDispatchEvidence = new Map();
     this.accountOverlays = new Map();
@@ -644,6 +646,21 @@ export class MemoryStateStore {
   async upsertMutationReceipt(bucket, key, receipt) {
     this.mutationReceipts.set(`${bucket}:${key}`, receipt);
     return receipt;
+  }
+
+  async getPlatformFaultRemediation(id) {
+    return cloneJsonRecord(this.platformFaultRemediations.get(String(id ?? "")));
+  }
+
+  async upsertPlatformFaultRemediation(record) {
+    const id = String(record?.id ?? "");
+    this.platformFaultRemediations.set(id, cloneJsonRecord(record));
+    return cloneJsonRecord(record);
+  }
+
+  async listPlatformFaultRemediations(options = {}) {
+    return listPlatformFaultRemediationRecords(this.platformFaultRemediations.values(), options)
+      .map((record) => cloneJsonRecord(record));
   }
 
   async getContent(hash) {
@@ -1503,6 +1520,37 @@ export class RedisStateStore {
     await this.connect();
     await this.client.set(this.key("mutation-receipt", `${bucket}:${key}`), JSON.stringify(receipt));
     return receipt;
+  }
+
+  async getPlatformFaultRemediation(id) {
+    await this.connect();
+    const raw = await this.client.get(this.key("platform-fault-remediation", String(id ?? "")));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async upsertPlatformFaultRemediation(record) {
+    await this.connect();
+    const id = String(record?.id ?? "");
+    await this.client.multi()
+      .set(this.key("platform-fault-remediation", id), JSON.stringify(record))
+      .zAdd(this.key("platform-fault-remediations", "all"), {
+        score: timestampScore(record?.queuedAt ?? record?.updatedAt ?? ""),
+        value: id
+      })
+      .exec();
+    return record;
+  }
+
+  async listPlatformFaultRemediations(options = {}) {
+    await this.connect();
+    const ids = await this.client.zRange(
+      this.key("platform-fault-remediations", "all"),
+      0,
+      -1,
+      { REV: true }
+    );
+    const records = await Promise.all(ids.map((id) => this.getPlatformFaultRemediation(id)));
+    return listPlatformFaultRemediationRecords(records.filter(Boolean), options);
   }
 
   async getContent(hash) {

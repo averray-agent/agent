@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { platformFaultRemediationIdForSession } from "../core/platform-fault-remediation.js";
 import { EventListener } from "./event-listener.js";
 
 const ACCOUNT = "0x1111111111111111111111111111111111111111";
@@ -31,7 +32,7 @@ const XCM_EVENT_TOPICS = {
   RequestLegDispatched: `0x${"06".repeat(32)}`
 };
 
-function makeListener({ gateway = {}, xcmRequest = {} } = {}) {
+function makeListener({ gateway = {}, xcmRequest = {}, stateStore = undefined } = {}) {
   const xcmWrapperContract = makeContract({
     address: XCM_CONTRACT_ADDRESS,
     eventTopics: XCM_EVENT_TOPICS
@@ -67,11 +68,62 @@ function makeListener({ gateway = {}, xcmRequest = {} } = {}) {
         return event;
       }
     },
-    undefined,
+    stateStore,
     { pollIntervalMs: 60_000 }
   );
   return { listener, xcmWrapperContract, events };
 }
+
+test("EventListener keeps an internally brokered platform-fault dispute off public dispute events", async () => {
+  const chainJobId = `0x${"77".repeat(32)}`;
+  const sessionId = "session-platform-fault";
+  const escrowContract = makeContract({
+    address: `0x${"88".repeat(20)}`,
+    eventTopics: { DisputeOpened: `0x${"09".repeat(32)}` }
+  });
+  escrowContract.jobs = async () => ({
+    poster: ACCOUNT,
+    worker: RECIPIENT,
+    asset: ASSET,
+    reward: 8_000_000n,
+    released: 300_000n,
+    claimExpiry: 0n,
+    claimStake: 500_000n,
+    claimStakeBps: 0n,
+    claimFee: 0n,
+    claimFeeBps: 0n,
+    claimEconomicsWaived: false,
+    rejectingVerifier: ACCOUNT,
+    rejectedAt: 1n,
+    disputedAt: 2n,
+    state: 5n
+  });
+  const stateStore = {
+    findSessionByChainJobId: async () => ({ sessionId, jobId: "logical-job" }),
+    getPlatformFaultRemediation: async (id) => {
+      assert.equal(id, platformFaultRemediationIdForSession(sessionId));
+      return {
+        id: "platform-fault-record",
+        sessionId,
+        chainJobId
+      };
+    }
+  };
+  const { listener, events } = makeListener({ gateway: { escrowContract }, stateStore });
+  await listener.start();
+
+  await emit(listener, "DisputeOpened", { jobId: chainJobId, opener: RECIPIENT, disputedAt: 2n });
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].topic, "platform.remediation_dispute_opened");
+  assert.equal(events[0].sessionId, sessionId);
+  assert.equal(events[0].wallet, undefined);
+  assert.deepEqual(events[0].wallets, []);
+  assert.equal(events[0].data.opener, undefined);
+  assert.equal(events[0].data.scope, "internal");
+  assert.equal(events[0].data.workerInitiated, false);
+  assert.equal(events[0].data.workerConsequence, "none");
+});
 
 const DEFAULT_LOG = {
   transactionHash: `0x${"12".repeat(32)}`,

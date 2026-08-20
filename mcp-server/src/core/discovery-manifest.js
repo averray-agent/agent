@@ -146,6 +146,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   { path: "/disputes", description: "Operator dispute queue derived from sessions requiring human review." },
   { path: "/disputes/:id", description: "Detailed dispute evidence, timeline, verdict, and stake release state." },
   { path: "/admin/sessions", description: "Admin/operator-wide recent sessions across worker wallets." },
+  { path: "/admin/platform-fault-remediations", description: "Admin-gated internal queue of platform-fault escalations awaiting out-of-band hardware-arbitrator signatures." },
   { path: "/admin/treasury/summary", description: "Admin-gated live credit, strategy lane, XCM observer, and TreasuryPolicy summary." },
   { path: "/session?sessionId=X", description: "Fetch a single session by its canonical sessionId query parameter (owner-scoped; id is accepted as a compatibility alias)." },
   { path: "/sessions", description: "Historical sessions for the signed-in wallet." },

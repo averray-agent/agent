@@ -11,6 +11,7 @@ import {
 } from "./dispute-resolution.js";
 import { isSyntheticAgentSessions } from "./agent-visibility.js";
 import { requireJobSnapshot } from "./job-snapshot.js";
+import { isInternalPlatformFaultRemediation } from "./platform-fault-remediation.js";
 
 /**
  * Build a v1 agent profile document from in-memory platform state.
@@ -256,21 +257,23 @@ function buildCurrentActivity(sessions, definitionOf) {
   if (!active) return null;
 
   const status = describeSessionStatus(active.status);
+  const internalRemediation = isInternalPlatformFaultRemediation(active);
   const job = definitionForSession(active, definitionOf);
   const deadlineAt = computeDeadlineAt(active, job);
   return compact({
     sessionId: active.sessionId,
     jobId: active.jobId,
-    status: status.status,
-    label: status.label,
-    phase: status.phase,
+    status: internalRemediation ? "awaiting_platform_remediation" : status.status,
+    label: internalRemediation ? "Platform remediation pending" : status.label,
+    phase: internalRemediation ? "remediation" : status.phase,
     outcome: status.outcome,
     claimedAt: isoOrUndefined(active.claimedAt),
     submittedAt: isoOrUndefined(active.submittedAt),
     updatedAt: isoOrUndefined(active.updatedAt),
     deadlineAt,
     canSubmit: status.status === "claimed",
-    awaitingVerification: status.status === "submitted" || status.status === "disputed"
+    awaitingVerification: !internalRemediation
+      && (status.status === "submitted" || status.status === "disputed")
   });
 }
 
@@ -456,6 +459,7 @@ function buildDisputeHistory(sessions, definitionOf, getDisputeReceipts) {
   const candidates = [];
   for (const session of sessions) {
     if (!session || typeof session !== "object") continue;
+    if (isInternalPlatformFaultRemediation(session)) continue;
     const status = String(session.status ?? "").toLowerCase();
     const receipts = getDisputeReceipts(session.sessionId) ?? {};
     const verdictReceipt = receipts.verdict ?? receipts.verdictReceipt;

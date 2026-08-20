@@ -21,6 +21,7 @@ import { createAdminCapabilityRoutes } from "./admin-capability-routes.js";
 import { createAdminCreditRoutes } from "./admin-credit-routes.js";
 import { createAdminGithubRoutes } from "./admin-github-routes.js";
 import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
+import { createAdminPlatformFaultRemediationRoutes } from "./admin-platform-fault-remediation-routes.js";
 import { createAdminSessionsRoutes } from "./admin-sessions-routes.js";
 import { createAdminStatusRoutes } from "./admin-status-routes.js";
 import { createAdminTreasuryRoutes } from "./admin-treasury-routes.js";
@@ -529,6 +530,13 @@ const handleAdminSessionsRoute = createAdminSessionsRoutes({
   service,
 });
 
+const handleAdminPlatformFaultRemediationRoute = createAdminPlatformFaultRemediationRoutes({
+  authMiddleware,
+  parseLimit,
+  respond,
+  stateStore,
+});
+
 const handleAdminXcmRoute = createAdminXcmRoutes({
   authMiddleware,
   buildMutationRequestHash,
@@ -988,6 +996,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleAdminSessionsRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleAdminPlatformFaultRemediationRoute({ request, response, url, pathname })) {
       return;
     }
 

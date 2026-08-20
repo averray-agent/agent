@@ -165,6 +165,28 @@ test("listAlerts keeps dispute and pending-policy alerts before session alerts",
   assert.equal(alerts[2].ctaHref, "/runs");
 });
 
+test("listAlerts does not relabel an internal platform fault as a worker dispute", async () => {
+  const alerts = await listAlerts({
+    limit: 5,
+    listDisputes: async () => [],
+    listPolicies: () => [],
+    service: {
+      listRecentSessions: async () => [{
+        sessionId: "session-internal-remediation",
+        jobId: "job-1",
+        status: "disputed",
+        internalRemediation: {
+          kind: "platform_fault_internal_remediation",
+          origin: "platform_fault",
+          workerInitiated: false
+        }
+      }]
+    }
+  });
+
+  assert.deepEqual(alerts, []);
+});
+
 test("createOperatorActivityFeed wires alert and audit dependencies", async () => {
   const feed = createOperatorActivityFeed({
     listDisputes: async () => [],

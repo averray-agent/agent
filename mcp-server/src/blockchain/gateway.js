@@ -2492,6 +2492,24 @@ export class BlockchainGateway {
     });
   }
 
+  async prepareResolveDispute(jobId, workerPayoutRaw, reasonCode, metadataURI = "") {
+    return this.withGatewayError("prepareResolveDispute", async () => {
+      const live = await this.readEscrowJob(jobId);
+      const escrowContract = this.escrowContractForLiveJob(live, { arbitrator: true });
+      const chainJobId = this.toJobId(jobId);
+      const payoutRaw = this.normalizeUint256(workerPayoutRaw, "dispute worker payout raw");
+      const encodedReasonCode = this.toDisputeReasonCode(reasonCode);
+      const args = [chainJobId, payoutRaw, encodedReasonCode, metadataURI];
+      return {
+        to: live.escrowAddress,
+        value: "0",
+        function: "resolveDispute(bytes32,uint256,bytes32,string)",
+        args: [chainJobId, payoutRaw.toString(), encodedReasonCode, metadataURI],
+        data: escrowContract.interface.encodeFunctionData("resolveDispute", args)
+      };
+    });
+  }
+
   async isTrustedSchemaIssuer(issuer) {
     return this.withGatewayError("isTrustedSchemaIssuer", async () => {
       if (!this.policyContract?.trustedSchemaIssuers) {

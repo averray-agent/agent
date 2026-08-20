@@ -654,6 +654,36 @@ test("buildAgentProfile leaves disputes empty when no contested sessions exist",
   });
 });
 
+test("internal platform-fault remediation never counts as a public worker dispute", () => {
+  const profile = buildAgentProfile({
+    wallet: WALLET,
+    reputation: { skill: 100, reliability: 100, economic: 100, tier: "pro" },
+    sessions: [{
+      sessionId: "internal-remediation-session",
+      wallet: WALLET,
+      jobId: "starter-coding-001",
+      status: "disputed",
+      disputedAt: "2026-08-20T10:00:00.000Z",
+      updatedAt: "2026-08-20T10:00:00.000Z",
+      internalRemediation: {
+        kind: "platform_fault_internal_remediation",
+        origin: "platform_fault",
+        id: "platform-fault-abc",
+        status: "awaiting_hardware_arbitrator",
+        workerInitiated: false,
+        workerConsequence: "none"
+      },
+      verification: { outcome: "platform_fault", workerConsequence: "none" }
+    }],
+    getJobDefinition: makeGetJob()
+  });
+
+  assert.deepEqual(profile.disputes, []);
+  assert.equal(profile.stats.disputes.total, 0);
+  assert.equal(profile.currentActivity.status, "awaiting_platform_remediation");
+  assert.equal(profile.currentActivity.label, "Platform remediation pending");
+});
+
 test("buildAgentProfile surfaces sub-contracting lineage when getLineage returns a parent or children", () => {
   const PARENT_WALLET = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   const sessions = [

@@ -1,4 +1,5 @@
 import { redactProviderError } from "../core/redact-provider-error.js";
+import { platformFaultRemediationIdForSession } from "../core/platform-fault-remediation.js";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const DEFAULT_POLL_INTERVAL_MS = 4_000;
@@ -193,7 +194,7 @@ export class EventListener {
 
     this.registerEscrow("DisputeOpened", "escrow.dispute_opened", async ({ args, payload }) => {
       const job = await this.readJob(args.jobId);
-      return this.buildChainEvent({
+      const event = await this.buildChainEvent({
         topic: "escrow.dispute_opened",
         args,
         payload,
@@ -202,6 +203,31 @@ export class EventListener {
         sessionId: buildSessionId(args.jobId, job.worker),
         job
       });
+      const remediation = await this.internalPlatformFaultRemediation(event.sessionId, event.data.chainJobId);
+      if (!remediation) {
+        return event;
+      }
+
+      // openDisputeFor emits the worker as the on-chain participant because
+      // EscrowCore requires a party to broker the transition.  That must not
+      // be projected as a worker-initiated dispute on public event surfaces:
+      // this is an internal platform remediation awaiting separate hardware
+      // arbitrator authority.
+      const { opener: _brokeredParticipant, ...data } = event.data;
+      return {
+        ...event,
+        topic: "platform.remediation_dispute_opened",
+        sessionId: remediation.sessionId,
+        wallet: undefined,
+        wallets: [],
+        data: {
+          ...data,
+          remediationId: remediation.id,
+          scope: "internal",
+          workerInitiated: false,
+          workerConsequence: "none"
+        }
+      };
     });
 
     this.registerEscrow("DisputeResolved", "escrow.dispute_resolved", async ({ args, payload }) => {
@@ -718,6 +744,23 @@ export class EventListener {
         job
       }
     };
+  }
+
+  async internalPlatformFaultRemediation(sessionId, chainJobId) {
+    if (!sessionId || typeof this.stateStore?.getPlatformFaultRemediation !== "function") {
+      return undefined;
+    }
+    const mappedSession = await this.stateStore.findSessionByChainJobId?.(chainJobId);
+    const remediationSessionId = mappedSession?.sessionId ?? sessionId;
+    const record = await this.stateStore.getPlatformFaultRemediation(
+      platformFaultRemediationIdForSession(remediationSessionId)
+    );
+    if (!record) {
+      return undefined;
+    }
+    return String(record.chainJobId ?? "").toLowerCase() === String(chainJobId ?? "").toLowerCase()
+      ? record
+      : undefined;
   }
 
   async getBlockTimestamp(blockNumber) {

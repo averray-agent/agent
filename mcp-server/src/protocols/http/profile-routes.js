@@ -3,6 +3,7 @@ import { getAddress } from "ethers";
 import { buildAgentProfile } from "../../core/agent-profile.js";
 import { disputeIdForSession } from "../../core/dispute-resolution.js";
 import { ValidationError } from "../../core/errors.js";
+import { isInternalPlatformFaultRemediation } from "../../core/platform-fault-remediation.js";
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/u;
 
@@ -83,6 +84,7 @@ export function createProfileRoutes({
     }
     const candidates = sessions.filter((session) => {
       if (!session || typeof session !== "object") return false;
+      if (isInternalPlatformFaultRemediation(session)) return false;
       const status = String(session.status ?? "").toLowerCase();
       return status === "disputed" || Boolean(session.disputedAt);
     });
