@@ -41,6 +41,14 @@ export function createAdminXcmRoutes({
   }
 
   return async function handleAdminXcmRoute({ request, response, url, pathname }) {
+    if (request.method === "GET" && pathname === "/admin/xcm/finalize-exhausted") {
+      await authMiddleware(request, url, { requireRole: "admin" });
+      const limit = normalizeListLimit(url.searchParams.get("limit"));
+      const items = await service.listXcmFinalizeExhausted(limit);
+      respond(response, 200, { count: items.length, items });
+      return true;
+    }
+
     if (request.method === "POST" && pathname === "/admin/xcm/observe") {
       const auth = await authenticateAndLimit(request, url);
       const payload = await readJsonBody(request);
@@ -202,4 +210,13 @@ export function createAdminXcmRoutes({
 
     return false;
   };
+}
+
+function normalizeListLimit(value) {
+  if (value === null || value === "") return 50;
+  const limit = Number(value);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
+    throw new ValidationError("limit must be an integer from 1 through 200.");
+  }
+  return limit;
 }

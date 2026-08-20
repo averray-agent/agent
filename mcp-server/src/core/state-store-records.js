@@ -55,12 +55,46 @@ export function mergeXcmObservationRecord(existing, observation, { now = new Dat
 
 export function markXcmObservationProcessedRecord(current, result = undefined, { now = new Date().toISOString() } = {}) {
   if (!current) return undefined;
+  const onChainOutcome = result?.onChainOutcome;
+  return {
+    ...current,
+    ...(onChainOutcome ? {
+      status: onChainOutcome.status,
+      settledAssets: onChainOutcome.settledAssets,
+      settledShares: onChainOutcome.settledShares,
+      remoteRef: onChainOutcome.remoteRef,
+      failureCode: onChainOutcome.failureCode
+    } : {}),
+    processed: true,
+    processedAt: now,
+    ...(result?.finalizeState ? { finalizeState: result.finalizeState } : {}),
+    result,
+    lastError: undefined,
+    nextAttemptAt: undefined,
+    retryDelayMs: undefined
+  };
+}
+
+export function markXcmObservationFinalizeExhaustedRecord(
+  current,
+  error,
+  {
+    now = new Date().toISOString(),
+    incrementAttempt = true,
+    maxFinalizeAttempts = undefined
+  } = {}
+) {
+  if (!current) return undefined;
+  const attemptCount = Number(current.attemptCount ?? 0) + (incrementAttempt ? 1 : 0);
   return {
     ...current,
     processed: true,
     processedAt: now,
-    result,
-    lastError: undefined,
+    finalizeState: "finalize_exhausted",
+    attemptCount,
+    maxFinalizeAttempts,
+    lastError: error?.message ?? String(error ?? current.lastError ?? "unknown_error"),
+    lastTriedAt: incrementAttempt ? now : current.lastTriedAt,
     nextAttemptAt: undefined,
     retryDelayMs: undefined
   };

@@ -4,6 +4,7 @@ const UINT256_MAX = (1n << 256n) - 1n;
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 const DEFAULT_RETRY_BASE_MS = 15_000;
 const DEFAULT_RETRY_MAX_MS = 5 * 60_000;
+const DEFAULT_MAX_FINALIZE_ATTEMPTS = 5;
 
 export class XcmSettlementWatcherService {
   constructor(
@@ -15,6 +16,7 @@ export class XcmSettlementWatcherService {
       pollIntervalMs = 15_000,
       retryBaseMs = DEFAULT_RETRY_BASE_MS,
       retryMaxMs = DEFAULT_RETRY_MAX_MS,
+      maxFinalizeAttempts = DEFAULT_MAX_FINALIZE_ATTEMPTS,
       expectedWrapper = undefined,
       now = () => Date.now(),
       logger = console
@@ -27,6 +29,7 @@ export class XcmSettlementWatcherService {
     this.pollIntervalMs = pollIntervalMs;
     this.retryBaseMs = retryBaseMs;
     this.retryMaxMs = retryMaxMs;
+    this.maxFinalizeAttempts = normalizePositiveInteger(maxFinalizeAttempts, "maxFinalizeAttempts");
     const configuredExpectedWrapper = String(expectedWrapper ?? "").trim();
     this.expectedWrapper = configuredExpectedWrapper
       ? normalizeWrapperAddress(configuredExpectedWrapper)
@@ -62,14 +65,23 @@ export class XcmSettlementWatcherService {
   }
 
   async getStatus() {
-    const pending = await this.stateStore.listPendingXcmObservations?.(50) ?? [];
+    const [pending, finalizeExhausted] = await Promise.all([
+      this.stateStore.listPendingXcmObservations?.(50) ?? [],
+      this.listFinalizeExhausted(50)
+    ]);
     return {
       enabled: this.enabled,
       running: this.running,
       settling: Boolean(this.settlementRunPromise),
       pendingCount: pending.length,
-      pending: pending.slice(0, 10)
+      pending: pending.slice(0, 10),
+      finalizeExhaustedCount: finalizeExhausted.length,
+      finalizeExhausted: finalizeExhausted.slice(0, 10)
     };
+  }
+
+  async listFinalizeExhausted(limit = 50) {
+    return await this.stateStore.listXcmFinalizeExhausted?.(normalizePositiveInteger(limit, "limit")) ?? [];
   }
 
   async observeOutcome(requestId, outcome = {}) {
@@ -161,6 +173,17 @@ export class XcmSettlementWatcherService {
 
     for (const observation of pending) {
       try {
+        const onChainRequest = await this.readOnChainRequest(observation.requestId);
+        if (isTerminalChainRequest(onChainRequest)) {
+          results.push(await this.reconcileTerminalObservation(observation, onChainRequest));
+          continue;
+        }
+        if (Number(observation.attemptCount ?? 0) >= this.maxFinalizeAttempts) {
+          await this.parkFinalizeExhausted(observation, observation.lastError ?? "finalize attempt budget exhausted", {
+            incrementAttempt: false
+          });
+          continue;
+        }
         let settlementPreflight;
         if (typeof this.platformService.preflightXcmSettlementOutcome === "function") {
           settlementPreflight = await this.platformService.preflightXcmSettlementOutcome(
@@ -204,6 +227,11 @@ export class XcmSettlementWatcherService {
         });
         results.push(finalizedWithPreflight);
       } catch (error) {
+        const nextAttemptCount = Number(observation.attemptCount ?? 0) + 1;
+        if (nextAttemptCount >= this.maxFinalizeAttempts) {
+          await this.parkFinalizeExhausted(observation, error);
+          continue;
+        }
         const retry = this.retrySchedule(observation);
         await this.stateStore.markXcmObservationFailed?.(
           observation.wrapperAddress,
@@ -220,6 +248,7 @@ export class XcmSettlementWatcherService {
             requestId: observation.requestId,
             wrapperAddress: observation.wrapperAddress,
             message: error?.message ?? "unknown_error",
+            customError: error?.details?.customError,
             nextAttemptAt: retry.nextAttemptAt,
             retryDelayMs: retry.retryDelayMs
           }
@@ -232,6 +261,101 @@ export class XcmSettlementWatcherService {
     }
 
     return results;
+  }
+
+  async readOnChainRequest(requestId) {
+    if (typeof this.platformService.getXcmRequest !== "function") {
+      throw new ValidationError("XCM reconciliation requires read-only getXcmRequest support.");
+    }
+    return this.platformService.getXcmRequest(requestId);
+  }
+
+  async reconcileTerminalObservation(observation, onChainRequest) {
+    const onChainOutcome = chainOutcome(onChainRequest);
+    const reconciledAt = new Date(this.now()).toISOString();
+    const result = {
+      requestId: observation.requestId,
+      wrapperAddress: observation.wrapperAddress,
+      finalizeState: "reconciled_terminal",
+      reconciledAt,
+      onChainOutcome,
+      chainSettlement: {
+        wrapperAddress: observation.wrapperAddress,
+        requestId: observation.requestId,
+        status: onChainOutcome.status,
+        settledAssetsRaw: onChainOutcome.settledAssets,
+        settledSharesRaw: onChainOutcome.settledShares,
+        remoteRef: onChainOutcome.remoteRef,
+        failureCode: onChainOutcome.failureCode,
+        confirmedAt: reconciledAt
+      }
+    };
+    await this.stateStore.markXcmObservationProcessed?.(
+      observation.wrapperAddress,
+      observation.requestId,
+      result
+    );
+    this.eventBus?.publish({
+      id: `xcm-reconciled-terminal-${observation.requestId}-${this.now()}`,
+      topic: "xcm.request_reconciled_terminal",
+      wallet: onChainRequest?.account,
+      wallets: [onChainRequest?.account].filter(Boolean),
+      correlationId: observation.requestId,
+      timestamp: reconciledAt,
+      data: {
+        requestId: observation.requestId,
+        wrapperAddress: observation.wrapperAddress,
+        onChainStatus: onChainOutcome.status,
+        failureCode: onChainOutcome.failureCode,
+        failureCodeLabel: onChainRequest?.failureCodeLabel,
+        settledAssetsRaw: onChainOutcome.settledAssets,
+        settledSharesRaw: onChainOutcome.settledShares,
+        remoteRef: onChainOutcome.remoteRef
+      }
+    });
+    this.logger.info?.(
+      {
+        requestId: observation.requestId,
+        onChainStatus: onChainOutcome.status,
+        failureCode: onChainOutcome.failureCode
+      },
+      "xcm_settlement_watcher.reconciled_terminal"
+    );
+    return result;
+  }
+
+  async parkFinalizeExhausted(observation, error, { incrementAttempt = true } = {}) {
+    const parked = await this.stateStore.markXcmObservationFinalizeExhausted?.(
+      observation.wrapperAddress,
+      observation.requestId,
+      error,
+      { incrementAttempt, maxFinalizeAttempts: this.maxFinalizeAttempts }
+    );
+    this.eventBus?.publish({
+      id: `xcm-finalize-exhausted-${observation.requestId}-${this.now()}`,
+      topic: "xcm.request_finalize_exhausted",
+      correlationId: observation.requestId,
+      timestamp: new Date(this.now()).toISOString(),
+      data: {
+        requestId: observation.requestId,
+        wrapperAddress: observation.wrapperAddress,
+        message: error?.message ?? String(error ?? observation.lastError ?? "unknown_error"),
+        customError: error?.details?.customError,
+        attemptCount: parked?.attemptCount ?? Number(observation.attemptCount ?? 0),
+        maxFinalizeAttempts: this.maxFinalizeAttempts,
+        finalizeState: "finalize_exhausted"
+      }
+    });
+    this.logger.error?.(
+      {
+        requestId: observation.requestId,
+        err: error,
+        attemptCount: parked?.attemptCount,
+        maxFinalizeAttempts: this.maxFinalizeAttempts
+      },
+      "xcm_settlement_watcher.finalize_exhausted"
+    );
+    return parked;
   }
 
   retryIsDue(observation) {
@@ -297,6 +421,39 @@ function normalizeWrapperAddress(value) {
     throw new ValidationError("XCM observation wrapperAddress must be a 20-byte address.");
   }
   return normalized;
+}
+
+function normalizePositiveInteger(value, label) {
+  const normalized = Number(value);
+  if (!Number.isSafeInteger(normalized) || normalized <= 0) {
+    throw new ValidationError(`${label} must be a positive integer.`);
+  }
+  return normalized;
+}
+
+function isTerminalChainRequest(request) {
+  return TERMINAL_STATUSES.has(normalizeChainStatus(request));
+}
+
+function normalizeChainStatus(request) {
+  if (Number.isInteger(request?.status)) {
+    return ["unknown", "pending", "succeeded", "failed", "cancelled"][request.status] ?? "unknown";
+  }
+  return String(request?.statusLabel ?? request?.status ?? "").trim().toLowerCase();
+}
+
+function chainOutcome(request) {
+  const status = normalizeChainStatus(request);
+  if (!TERMINAL_STATUSES.has(status)) {
+    throw new ValidationError("XCM reconciliation requires a terminal on-chain request.");
+  }
+  return {
+    status,
+    settledAssets: normalizeObservationAmount(request?.settledAssetsRaw, "settledAssetsRaw"),
+    settledShares: normalizeObservationAmount(request?.settledSharesRaw, "settledSharesRaw"),
+    remoteRef: request?.remoteRef,
+    failureCode: request?.failureCode
+  };
 }
 
 function chainSettlementProof(finalized, observation) {

@@ -43,6 +43,7 @@ import {
   PROFILE_BLOCKCHAIN_SIGNER,
 } from "../services/aws-credentials.js";
 import { buildXcmRequestPayload } from "./xcm-message-builder.js";
+import { decodeXcmWrapperRevert } from "./xcm-wrapper-errors.js";
 import { hashCanonicalContent } from "../core/canonical-content.js";
 import {
   EXTERNAL_SCHEMA_EIP712_VERSION,
@@ -3733,7 +3734,10 @@ export class BlockchainGateway {
       return error;
     }
 
-    const reason = this.extractGatewayReason(error);
+    const decodedXcmError = /^((get|finalize|preflight)Xcm|dispatchBankXcm)/u.test(operation)
+      ? decodeXcmWrapperRevert(error)
+      : undefined;
+    const reason = decodedXcmError?.reason ?? this.extractGatewayReason(error);
     const message = `${operation} failed: ${reason}`;
 
     if (
@@ -3743,7 +3747,8 @@ export class BlockchainGateway {
       return new BlockchainRevertError(message, {
         operation,
         rawCode: error?.code,
-        rawReason: reason
+        rawReason: reason,
+        ...(decodedXcmError ? { customError: decodedXcmError.name } : {})
       });
     }
 

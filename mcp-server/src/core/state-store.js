@@ -8,6 +8,7 @@ import {
   listCapabilityGrantRecords,
   listFundedJobRecords,
   listPlatformFaultRemediationRecords,
+  markXcmObservationFinalizeExhaustedRecord,
   markXcmObservationFailedRecord,
   markXcmObservationProcessedRecord,
   mergeServiceStateRecord,
@@ -813,6 +814,15 @@ export class MemoryStateStore {
       .sort((left, right) => String(left.observedAt ?? "").localeCompare(String(right.observedAt ?? ""))), { limit, offset: 0 });
   }
 
+  async listXcmFinalizeExhausted(limit = 50) {
+    return sliceWindow([...this.xcmObservations.values()]
+      .filter((entry) => entry.finalizeState === "finalize_exhausted")
+      .sort((left, right) => String(right.processedAt ?? "").localeCompare(String(left.processedAt ?? ""))), {
+      limit,
+      offset: 0
+    }).map((entry) => cloneJsonRecord(entry));
+  }
+
   async appendEventLog(event) {
     if (event?.topic === BANK_V22_LEG_DISPATCH_TOPIC) {
       await this.recordBankXcmLegDispatchEvidence(event);
@@ -872,6 +882,15 @@ export class MemoryStateStore {
     const storageId = xcmRequestStorageId(wrapperAddress, requestId);
     const current = this.xcmObservations.get(storageId);
     const updated = markXcmObservationFailedRecord(current, error, retry);
+    if (!updated) return undefined;
+    this.xcmObservations.set(storageId, updated);
+    return cloneJsonRecord(updated);
+  }
+
+  async markXcmObservationFinalizeExhausted(wrapperAddress, requestId, error, options = undefined) {
+    const storageId = xcmRequestStorageId(wrapperAddress, requestId);
+    const current = this.xcmObservations.get(storageId);
+    const updated = markXcmObservationFinalizeExhaustedRecord(current, error, options);
     if (!updated) return undefined;
     this.xcmObservations.set(storageId, updated);
     return cloneJsonRecord(updated);
@@ -1811,6 +1830,22 @@ export class RedisStateStore {
     return entries.filter((entry) => entry && !entry.processed);
   }
 
+  async listXcmFinalizeExhausted(limit = 50) {
+    await this.connect();
+    const { stop } = redisRangeFromLimitOffset(limit, 0);
+    const storageIds = await this.client.zRange(
+      this.key("xcm-observations", "finalize-exhausted"),
+      0,
+      stop,
+      { REV: true }
+    );
+    const entries = await Promise.all(storageIds.map(async (storageId) => {
+      const raw = await this.client.get(this.key("xcm-observation", storageId));
+      return raw ? JSON.parse(raw) : undefined;
+    }));
+    return entries.filter((entry) => entry?.finalizeState === "finalize_exhausted");
+  }
+
   async appendEventLog(event) {
     await this.connect();
     if (event?.topic === BANK_V22_LEG_DISPATCH_TOPIC) {
@@ -1901,6 +1936,23 @@ export class RedisStateStore {
       score: timestampScore(updated.observedAt),
       value: storageId
     });
+    return updated;
+  }
+
+  async markXcmObservationFinalizeExhausted(wrapperAddress, requestId, error, options = undefined) {
+    await this.connect();
+    const storageId = xcmRequestStorageId(wrapperAddress, requestId);
+    const current = await this.getXcmObservation(wrapperAddress, requestId);
+    const updated = markXcmObservationFinalizeExhaustedRecord(current, error, options);
+    if (!updated) return undefined;
+    await this.client.multi()
+      .set(this.key("xcm-observation", storageId), JSON.stringify(updated))
+      .zRem(this.key("xcm-observations", "pending"), storageId)
+      .zAdd(this.key("xcm-observations", "finalize-exhausted"), {
+        score: timestampScore(updated.processedAt),
+        value: storageId
+      })
+      .exec();
     return updated;
   }
 

@@ -617,6 +617,9 @@ test("balance delta finalizes through the existing watcher and credits the strat
   const store = new MemoryStateStore();
   const finalized = [];
   const platform = {
+    async getXcmRequest(requestId) {
+      return { requestId, status: 1, statusLabel: "pending" };
+    },
     async preflightXcmSettlementOutcome(requestId, outcome) {
       return { requestId, ok: true, boundedBy: "XcmWrapper._validateSettlementBounds", outcome };
     },
