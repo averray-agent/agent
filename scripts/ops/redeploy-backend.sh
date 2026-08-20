@@ -23,6 +23,8 @@
 #                       optional isolated Verify services (mainnet only)
 #   WITNESS_RUNTIME_ROOT host path shared with sandbox bind mounts
 #   WITNESS_SANDBOX_IMAGE exact prebuilt Witness execution image tag
+#   MCP_PROBER_SERVICE / MCP_EGRESS_PROXY_SERVICE
+#                       optional fixed-suite MCP prober services (mainnet only)
 #   SKIP_GIT_UPDATE=1  skip fetch/checkout/pull because caller already pinned the repo
 #   PRE_DEPLOY_SHA     rollback target SHA when SKIP_GIT_UPDATE=1 — supplied by
 #                      deploy-production.sh from the wrapper's pre-pull HEAD so
@@ -60,6 +62,10 @@ WITNESS_RUNNER_CONTAINER=${WITNESS_RUNNER_CONTAINER:-}
 WITNESS_PROXY_CONTAINER=${WITNESS_PROXY_CONTAINER:-}
 WITNESS_RUNTIME_ROOT=${WITNESS_RUNTIME_ROOT:-/srv/agent-stack-mainnet/witness-runtime}
 WITNESS_SANDBOX_IMAGE=${WITNESS_SANDBOX_IMAGE:-averray-witness-preflight:phase1-uv-0.12.5-python-3.12.12-uv-build-0.9.27}
+MCP_PROBER_SERVICE=${MCP_PROBER_SERVICE:-}
+MCP_EGRESS_PROXY_SERVICE=${MCP_EGRESS_PROXY_SERVICE:-}
+MCP_PROBER_CONTAINER=${MCP_PROBER_CONTAINER:-}
+MCP_EGRESS_PROXY_CONTAINER=${MCP_EGRESS_PROXY_CONTAINER:-}
 SKIP_GIT_UPDATE=${SKIP_GIT_UPDATE:-0}
 
 if ! [[ "$BACKEND_LOG_TAIL" =~ ^[1-9][0-9]*$ ]]; then
@@ -122,6 +128,27 @@ compose_up() {
     fi
     echo "Rollback target predates isolated Witness services; removing only their known containers."
     for container in "$WITNESS_RUNNER_CONTAINER" "$WITNESS_PROXY_CONTAINER"; do
+      if [[ -n "$container" ]]; then
+        docker container rm --force "$container" >/dev/null 2>&1 || true
+      fi
+    done
+  fi
+  if [[ -n "$MCP_PROBER_SERVICE" && -n "$MCP_EGRESS_PROXY_SERVICE" ]] \
+    && compose_has_service "$MCP_PROBER_SERVICE" \
+    && compose_has_service "$MCP_EGRESS_PROXY_SERVICE"; then
+    echo "Building isolated fixed-suite MCP prober and allowlist egress proxy"
+    docker compose \
+      --project-directory "$COMPOSE_PROJECT_DIRECTORY" \
+      -f "$COMPOSE_FILE" \
+      build "$MCP_EGRESS_PROXY_SERVICE" "$MCP_PROBER_SERVICE"
+    services+=("$MCP_EGRESS_PROXY_SERVICE" "$MCP_PROBER_SERVICE")
+  elif [[ -n "$MCP_PROBER_SERVICE" || -n "$MCP_EGRESS_PROXY_SERVICE" ]]; then
+    if [[ "$deployed_sha" != "$PREVIOUS_SHA" ]]; then
+      echo "Configured MCP prober services are missing from $COMPOSE_FILE at $deployed_sha." >&2
+      return 1
+    fi
+    echo "Rollback target predates MCP prober services; removing only their known containers."
+    for container in "$MCP_PROBER_CONTAINER" "$MCP_EGRESS_PROXY_CONTAINER"; do
       if [[ -n "$container" ]]; then
         docker container rm --force "$container" >/dev/null 2>&1 || true
       fi

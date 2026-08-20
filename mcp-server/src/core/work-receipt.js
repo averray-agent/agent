@@ -129,7 +129,8 @@ export function buildVerifyReceipt({ run, profile, execution, verdict, context =
       sourceBinding,
       evidenceHash: bytes32(verdict?.evidenceHash)
         ?? hashCanonicalContent(verdict?.evidence ?? execution?.report ?? null),
-      environment: execution?.environment
+      environment: execution?.environment,
+      checks: normalizeVerifyChecks(execution?.report?.checks)
     }),
     signers: Array.isArray(context.signers) ? context.signers : undefined
   });
@@ -140,6 +141,20 @@ export function buildVerifyReceipt({ run, profile, execution, verdict, context =
     receiptId,
     canonicalUrl: `${siteOrigin.replace(/\/+$/u, "")}/receipts/${receiptId}`
   };
+}
+
+function normalizeVerifyChecks(checks) {
+  if (!Array.isArray(checks) || checks.length === 0) return undefined;
+  return checks.map((check) => {
+    const name = firstString(check?.name);
+    const verdict = firstString(check?.verdict)?.toLowerCase();
+    const reason = firstString(check?.reason);
+    const detail = firstString(check?.detail);
+    if (!name || !["pass", "fail", "inconclusive"].includes(verdict) || !reason || !detail) {
+      throw new ValidationError("Verify receipt check evidence is malformed.");
+    }
+    return { name, verdict, reason, detail };
+  });
 }
 
 /** Hash the portable payload, excluding identities/signatures and self-links. */

@@ -281,7 +281,7 @@ export async function signTokenFromConfig(payload, opts, authConfig) {
  * tokens. We never use the alg claim to choose a cryptographic
  * operation — we use it only to route to the configured backend.
  */
-export async function verifyTokenFromConfig(token, authConfig) {
+export async function verifyTokenFromConfig(token, authConfig, verificationOverrides = undefined) {
   if (!authConfig || typeof authConfig !== "object") {
     throw new ConfigError("verifyTokenFromConfig: authConfig is required.");
   }
@@ -347,7 +347,7 @@ export async function verifyTokenFromConfig(token, authConfig) {
     // deploys never pay the @aws-sdk/client-kms import cost. The
     // dispatcher is async to accommodate that — the middleware
     // call site already awaits, so this is invisible to callers.
-    return await verifyEs256(token, authConfig);
+    return await verifyEs256(token, authConfig, verificationOverrides);
   }
 
   throw new AuthenticationError(
@@ -356,10 +356,10 @@ export async function verifyTokenFromConfig(token, authConfig) {
   );
 }
 
-async function verifyEs256(token, authConfig) {
+async function verifyEs256(token, authConfig, verificationOverrides = undefined) {
   const signer = await getKmsSigner(authConfig);
   try {
-    const claims = signer.verify(token);
+    const claims = signer.verify(token, verificationOverrides);
     // Bridge ES256's singular `role` claim (per design doc §6) to the
     // plural `roles` array that the rest of the auth stack expects
     // (capabilities.resolveCapabilities, config.hasRole, middleware

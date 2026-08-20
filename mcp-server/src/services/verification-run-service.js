@@ -5,7 +5,7 @@ import { AppError, NotFoundError, ValidationError } from "../core/errors.js";
 import { validateAgainstSchema } from "../core/job-schema-validation.js";
 import { buildVerifyReceipt } from "../core/work-receipt.js";
 import { VerifierRegistry } from "./verifier-handlers.js";
-import { VERIFY_INCONCLUSIVE_REASONS } from "./verification-profile-registry.js";
+import { MCP_FAILURE_SEMANTICS_PROFILE_REF, VERIFY_INCONCLUSIVE_REASONS } from "./verification-profile-registry.js";
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/u;
 const COMPLETE = "complete";
@@ -15,6 +15,7 @@ export class VerificationRunService {
     stateStore,
     profileRegistry,
     paymentGate = new UnavailableVerificationPaymentGate(),
+    executionDispatcher = undefined,
     verifierRegistry = new VerifierRegistry(),
     now = () => new Date(),
     randomUUIDImpl = randomUUID,
@@ -29,6 +30,7 @@ export class VerificationRunService {
     this.stateStore = stateStore;
     this.profileRegistry = profileRegistry;
     this.paymentGate = paymentGate;
+    this.executionDispatcher = executionDispatcher;
     this.verifierRegistry = verifierRegistry;
     this.now = now;
     this.randomUUIDImpl = randomUUIDImpl;
@@ -55,10 +57,13 @@ export class VerificationRunService {
     profileVersion,
     target,
     inputs,
-    paymentProof
+    paymentProof,
+    ephemeralCredential
   } = {}) {
     const profile = this.profileRegistry.requireAvailable(profileName, profileVersion);
     validateAgainstSchema({ target, inputs }, profile.inputSchema, "verifyRequest");
+    assertMcpEndpointCredentialBoundary(profile.ref, target);
+    assertEphemeralCredential({ target, ephemeralCredential });
     const requestHash = hashCanonicalContent({ profile: profile.ref, target, inputs });
     const paymentKey = paymentProof === undefined || paymentProof === null || paymentProof === ""
       ? undefined
@@ -94,6 +99,14 @@ export class VerificationRunService {
       paymentId: paymentKey ?? hashCanonicalContent(authorization.id),
       authorization: persistableAuthorization(authorization)
     });
+    if (reservation.created && this.executionDispatcher?.supports?.(profile.ref)) {
+      await this.executionDispatcher.start({
+        run: reservation.run,
+        profile,
+        ephemeralCredential
+      });
+      return await this.stateStore.getVerificationRun(reservation.run.runId) ?? reservation.run;
+    }
     return reservation.run;
   }
 
@@ -146,6 +159,8 @@ export class VerificationRunService {
           detail: "The backend could not recover the private payment authorization for this queued run. No payment was captured."
         };
         verdict = inconclusiveVerdict("runner_fault", execution.detail);
+      } else if (execution?.status === "platform_fault") {
+        verdict = platformFaultVerdict(execution.reason, execution.detail);
       } else if (execution?.status === "inconclusive") {
         verdict = inconclusiveVerdict(execution.reason, execution.detail);
       } else {
@@ -292,6 +307,19 @@ function inconclusiveVerdict(reason, detail) {
   };
 }
 
+function platformFaultVerdict(reason, detail) {
+  const normalized = VERIFY_INCONCLUSIVE_REASONS.includes(reason) ? reason : "runner_fault";
+  return {
+    handler: "deterministic",
+    handlerVersion: 1,
+    outcome: "platform_fault",
+    reason: normalized,
+    reasonCode: normalized,
+    detail: detail ?? "The verification platform refused an unsafe runner action.",
+    workerConsequence: "none"
+  };
+}
+
 function notBilled(profile) {
   return {
     status: "not_billed",
@@ -316,6 +344,30 @@ function persistableAuthorization(authorization) {
   return JSON.parse(JSON.stringify(authorization, (_key, value) =>
     typeof value === "bigint" ? value.toString() : value
   ));
+}
+
+function assertEphemeralCredential({ target, ephemeralCredential }) {
+  const supplied = ephemeralCredential !== undefined && ephemeralCredential !== null && String(ephemeralCredential) !== "";
+  if (target?.auth && !supplied) {
+    throw new ValidationError("target.auth requires the scoped credential in the verification-target-authorization header.");
+  }
+  if (!target?.auth && supplied) {
+    throw new ValidationError("verification-target-authorization is accepted only with target.auth.");
+  }
+}
+
+function assertMcpEndpointCredentialBoundary(profileRef, target) {
+  if (profileRef !== MCP_FAILURE_SEMANTICS_PROFILE_REF) return;
+  let endpoint;
+  try { endpoint = new URL(String(target?.endpoint ?? "")); }
+  catch { throw new ValidationError("MCP target endpoint must be an absolute https or wss URL."); }
+  if (!new Set(["https:", "wss:"]).has(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+    throw new ValidationError("MCP target endpoint must use https or wss and must not embed credentials, query values, or fragments.");
+  }
+  if ((target.transport === "streamable_http" && endpoint.protocol !== "https:")
+      || (target.transport === "websocket" && endpoint.protocol !== "wss:")) {
+    throw new ValidationError("MCP target transport must pair streamable_http with https or websocket with wss.");
+  }
 }
 
 function verificationRunLockId(runId) {

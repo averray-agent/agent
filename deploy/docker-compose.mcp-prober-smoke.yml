@@ -1,0 +1,74 @@
+name: averray-mcp-prober-smoke
+
+x-prober-image: &prober-image
+  image: averray-mcp-prober-smoke
+
+services:
+  mcp-grant-verifier:
+    <<: *prober-image
+    command: ["node", "src/demo/mcp-egress-grant-fixture.js"]
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    networks: [policy-control]
+  mcp-egress-proxy:
+    build: { context: .., dockerfile: deploy/mcp-egress-proxy/Dockerfile }
+    environment:
+      PORT: 8080
+      MCP_EGRESS_GRANT_VERIFY_URL: http://mcp-grant-verifier:8788
+      MCP_PROBER_URL: http://mcp-prober:8080
+      MCP_EGRESS_ALLOW_PRIVATE_FIXTURES: "1"
+    depends_on: [mcp-grant-verifier]
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    networks: [policy-control, probe-boundary, fixture-targets]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+  mcp-prober:
+    <<: *prober-image
+    build: { context: .., dockerfile: mcp-server/Dockerfile.mcp-prober }
+    command: ["node", "src/demo/mcp-prober-smoke-entry.js"]
+    environment:
+      MCP_EGRESS_PROXY_URL: http://mcp-egress-proxy:8080
+      MCP_PROBER_DIAGNOSTICS: "1"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    networks: [probe-boundary]
+  mcp-known-good:
+    <<: *prober-image
+    command: ["node", "src/demo/mcp-failure-semantics-fixture.js"]
+    environment: { MCP_FIXTURE_MODE: good }
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    networks: [fixture-targets]
+  mcp-known-bad:
+    <<: *prober-image
+    command: ["node", "src/demo/mcp-failure-semantics-fixture.js"]
+    environment: { MCP_FIXTURE_MODE: bad_destructive }
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    networks: [fixture-targets]
+  mcp-smoke-driver:
+    <<: *prober-image
+    command: ["node", "src/demo/mcp-prober-compose-smoke.js"]
+    depends_on:
+      mcp-egress-proxy: { condition: service_healthy }
+      mcp-prober: { condition: service_started }
+      mcp-known-good: { condition: service_started }
+      mcp-known-bad: { condition: service_started }
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    networks: [policy-control]
+
+networks:
+  policy-control: { internal: true }
+  probe-boundary: { internal: true }
+  fixture-targets: { internal: true }

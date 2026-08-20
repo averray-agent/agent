@@ -534,10 +534,15 @@ export async function createPlatformRuntime() {
     logger,
     () => createConfiguredX402VerificationPaymentGate(process.env, { logger })
   );
-  const { verificationProfileRegistry, verificationRunService, verificationRunFinalizer } = await initStepAsync(
+  const {
+    verificationProfileRegistry,
+    verificationRunService,
+    verificationRunFinalizer,
+    mcpEgressGrantVerifier
+  } = await initStepAsync(
     "init-verification-shelf",
     logger,
-    () => createVerificationShelf({ stateStore, logger, paymentGate: verificationPaymentGate })
+    () => createVerificationShelf({ stateStore, logger, paymentGate: verificationPaymentGate, authConfig })
   );
   const externalPostingConfig = initStep(
     "load-external-posting-config",
@@ -913,6 +918,7 @@ export async function createPlatformRuntime() {
     verificationProfileRegistry,
     verificationRunService,
     verificationRunFinalizer,
+    mcpEgressGrantVerifier,
     externalPostingService,
     x402PosterRamp,
     externalPostingWatcher,
@@ -1083,7 +1089,7 @@ export function loadHttpConfig(env = process.env) {
     allowedOrigins: new Set(allowedOrigins),
     allowAllOrigins,
     allowedMethods: "GET, POST, OPTIONS",
-    allowedHeaders: "authorization, content-type, last-event-id, mcp-method, mcp-name, mcp-protocol-version, mcp-session-id, payment-signature, sign-in-with-x, x-payment, x-request-id",
+    allowedHeaders: "authorization, content-type, last-event-id, mcp-method, mcp-name, mcp-protocol-version, mcp-session-id, payment-signature, sign-in-with-x, verification-target-authorization, x-payment, x-request-id",
     exposedHeaders: "mcp-protocol-version, mcp-session-id, payment-required, payment-response, retry-after, x-payment-required, x-payment-response, x-request-id",
     maxAgeSeconds: parsePositiveInt(env.CORS_MAX_AGE_SECONDS, 600)
   };

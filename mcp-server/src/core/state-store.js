@@ -110,6 +110,7 @@ return {1, ARGV[1]}
 
 const CLAIM_VERIFICATION_RUN_SCRIPT = `
 local runIds = redis.call("zrange", KEYS[1], 0, 31)
+local acceptedProfiles = cjson.decode(ARGV[6] or "[]")
 for _, runId in ipairs(runIds) do
   local runKey = ARGV[1] .. runId
   local raw = redis.call("get", runKey)
@@ -121,20 +122,41 @@ for _, runId in ipairs(runIds) do
     if run.status ~= "queued" then
       redis.call("zrem", KEYS[1], runId)
     else
-      local lockKey = ARGV[2] .. runId
-      local acquired = redis.call("set", lockKey, ARGV[3], "NX", "EX", ARGV[4])
-      if acquired then
-        run.status = "running"
-        run.startedAt = ARGV[5]
-        local encoded = cjson.encode(run)
-        redis.call("set", runKey, encoded)
-        redis.call("zrem", KEYS[1], runId)
-        return encoded
+      local profileAllowed = #acceptedProfiles == 0
+      for _, accepted in ipairs(acceptedProfiles) do
+        if run.profileRef == accepted then profileAllowed = true end
+      end
+      if profileAllowed then
+        local lockKey = ARGV[2] .. runId
+        local acquired = redis.call("set", lockKey, ARGV[3], "NX", "EX", ARGV[4])
+        if acquired then
+          run.status = "running"
+          run.startedAt = ARGV[5]
+          local encoded = cjson.encode(run)
+          redis.call("set", runKey, encoded)
+          redis.call("zrem", KEYS[1], runId)
+          return encoded
+        end
       end
     end
   end
 end
 return false
+`;
+
+const CLAIM_EXACT_VERIFICATION_RUN_SCRIPT = `
+local raw = redis.call("get", KEYS[1])
+if not raw then return false end
+local run = cjson.decode(raw)
+if run.status ~= "queued" or run.profileRef ~= ARGV[1] then return false end
+local acquired = redis.call("set", KEYS[2], ARGV[2], "NX", "EX", ARGV[3])
+if not acquired then return false end
+run.status = "running"
+run.startedAt = ARGV[4]
+local encoded = cjson.encode(run)
+redis.call("set", KEYS[1], encoded)
+redis.call("zrem", KEYS[3], run.runId)
+return encoded
 `;
 
 const STORE_VERIFICATION_EXECUTION_SCRIPT = `
@@ -401,10 +423,12 @@ export class MemoryStateStore {
       .map((run) => cloneJsonRecord(run));
   }
 
-  async claimNextVerificationRun({ owner, claimedAt, leaseSeconds = 180 } = {}) {
+  async claimNextVerificationRun({ owner, claimedAt, leaseSeconds = 180, profileRefs = [] } = {}) {
+    const accepted = new Set(profileRefs.map(String));
     const candidates = await this.listActiveVerificationRuns();
     for (const candidate of candidates) {
       if (candidate.status !== "queued") continue;
+      if (accepted.size > 0 && !accepted.has(candidate.profileRef)) continue;
       const lockId = verificationRunLockId(candidate.runId);
       if (!await this.acquireClaimLock(lockId, owner, leaseSeconds)) continue;
       const current = this.verificationRuns.get(candidate.runId);
@@ -417,6 +441,17 @@ export class MemoryStateStore {
       return cloneJsonRecord(claimed);
     }
     return undefined;
+  }
+
+  async claimVerificationRun(runId, { owner, claimedAt, leaseSeconds = 180, profileRef } = {}) {
+    const normalizedRunId = String(runId);
+    const current = this.verificationRuns.get(normalizedRunId);
+    if (current?.status !== "queued" || current.profileRef !== String(profileRef)) return undefined;
+    const lockId = verificationRunLockId(normalizedRunId);
+    if (!await this.acquireClaimLock(lockId, owner, leaseSeconds)) return undefined;
+    const claimed = cloneJsonRecord({ ...current, status: "running", startedAt: claimedAt });
+    this.verificationRuns.set(normalizedRunId, claimed);
+    return cloneJsonRecord(claimed);
   }
 
   async storeVerificationRunExecution(runId, { owner, execution, executedAt } = {}) {
@@ -1207,7 +1242,7 @@ export class RedisStateStore {
     return runs.filter(Boolean);
   }
 
-  async claimNextVerificationRun({ owner, claimedAt, leaseSeconds = 180 } = {}) {
+  async claimNextVerificationRun({ owner, claimedAt, leaseSeconds = 180, profileRefs = [] } = {}) {
     await this.connect();
     const raw = await this.client.eval(CLAIM_VERIFICATION_RUN_SCRIPT, {
       keys: [
@@ -1217,6 +1252,26 @@ export class RedisStateStore {
       arguments: [
         this.key("verification-run", ""),
         this.key("claim-lock", "verification-run:"),
+        String(owner),
+        String(Math.max(1, Math.ceil(leaseSeconds))),
+        String(claimedAt),
+        JSON.stringify(profileRefs.map(String))
+      ]
+    });
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async claimVerificationRun(runId, { owner, claimedAt, leaseSeconds = 180, profileRef } = {}) {
+    await this.connect();
+    const normalizedRunId = String(runId);
+    const raw = await this.client.eval(CLAIM_EXACT_VERIFICATION_RUN_SCRIPT, {
+      keys: [
+        this.key("verification-run", normalizedRunId),
+        this.key("claim-lock", verificationRunLockId(normalizedRunId)),
+        this.key("verification-runs", "queued")
+      ],
+      arguments: [
+        String(profileRef),
         String(owner),
         String(Math.max(1, Math.ceil(leaseSeconds))),
         String(claimedAt)

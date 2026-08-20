@@ -94,6 +94,63 @@ services:
       - mainnet-internal
       - witness-docker-control
 
+  mainnet-mcp-egress-proxy:
+    build:
+      context: ..
+      dockerfile: deploy/mcp-egress-proxy/Dockerfile
+    image: agent-mainnet-mcp-egress-proxy
+    container_name: agent-mainnet-mcp-egress-proxy
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      PORT: 8080
+      MCP_EGRESS_GRANT_VERIFY_SOCKET: /run/mcp-egress-control/grants.sock
+      MCP_PROBER_URL: http://mainnet-mcp-prober:8080
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=8m
+    volumes:
+      - mcp-egress-grant-control:/run/mcp-egress-control:ro
+    networks:
+      - mcp-probe-egress
+      - mcp-probe-submit-control
+      - mcp-target-egress
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  mainnet-mcp-prober:
+    build:
+      context: ..
+      dockerfile: mcp-server/Dockerfile.mcp-prober
+    image: agent-mainnet-mcp-prober
+    container_name: agent-mainnet-mcp-prober
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      MCP_EGRESS_PROXY_URL: http://mainnet-mcp-egress-proxy:8080
+    depends_on:
+      mainnet-mcp-egress-proxy:
+        condition: service_healthy
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    networks:
+      - mcp-probe-egress
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
   mainnet-backend:
     build:
       context: ..
@@ -107,6 +164,8 @@ services:
     environment:
       AWS_USE_ROLES_ANYWHERE: "true"
       AWS_CONFIG_FILE: /root/.aws/config
+      MCP_PROBER_URL: http://mainnet-mcp-egress-proxy:8080
+      MCP_EGRESS_GRANT_SOCKET: /run/mcp-egress-control/grants.sock
     depends_on:
       mainnet-redis:
         condition: service_healthy
@@ -117,8 +176,10 @@ services:
       - /etc/agent-stack-mainnet/aws-config:/root/.aws/config:ro
       - /usr/local/bin/aws_signing_helper:/usr/local/bin/aws_signing_helper:ro
       - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
+      - mcp-egress-grant-control:/run/mcp-egress-control
     networks:
       mainnet-internal: {}
+      mcp-probe-submit-control: {}
       caddy-testnet:
         aliases:
           - mainnet-backend
@@ -175,3 +236,15 @@ networks:
     internal: true
   witness-egress:
     name: agent-mainnet-witness-egress
+  mcp-probe-egress:
+    name: agent-mainnet-mcp-probe-egress
+    internal: true
+  mcp-probe-submit-control:
+    name: agent-mainnet-mcp-probe-submit-control
+    internal: true
+  mcp-target-egress:
+    name: agent-mainnet-mcp-target-egress
+
+volumes:
+  mcp-egress-grant-control:
+    name: agent-mainnet-mcp-egress-grant-control

@@ -25,8 +25,18 @@ test("compose mounts the raw socket only into the allowlisting proxy", async () 
   const compose = await readFile(resolve(REPO_ROOT, "deploy/docker-compose.mainnet.yml"), "utf8");
   const socketMounts = compose.match(/^\s*- \/var\/run\/docker\.sock:\/var\/run\/docker\.sock:ro$/gmu) ?? [];
   assert.equal(socketMounts.length, 1);
-  const runnerSection = compose.split("  mainnet-witness-runner:")[1].split("\n  mainnet-backend:")[0];
+  const runnerSection = compose.split("  mainnet-witness-runner:")[1].split("\n  mainnet-mcp-egress-proxy:")[0];
   assert.match(runnerSection, /DOCKER_HOST: tcp:\/\/mainnet-witness-docker-proxy:2375/u);
   assert.doesNotMatch(runnerSection, /env_file|ports:|docker\.sock/u);
   assert.doesNotMatch(runnerSection, /AUTH_|KMS_|AWS_|SIGNER_|X402_|PAYMENT/u);
+});
+
+test("networked MCP suite is a credential-free prober behind an allowlist proxy", async () => {
+  const compose = await readFile(resolve(REPO_ROOT, "deploy/docker-compose.mainnet.yml"), "utf8");
+  const prober = compose.split("  mainnet-mcp-prober:")[1].split("\n  mainnet-backend:")[0];
+  assert.doesNotMatch(prober, /env_file|ports:|AUTH_|KMS_|AWS_|SIGNER_|X402_|PAYMENT|REDIS_/u);
+  assert.match(prober, /MCP_EGRESS_PROXY_URL: http:\/\/mainnet-mcp-egress-proxy:8080/u);
+  assert.match(prober, /networks:\n\s+- mcp-probe-egress/u);
+  const backend = compose.split("  mainnet-backend:")[1].split("\n  mainnet-indexer:")[0];
+  assert.doesNotMatch(backend, /mcp-probe-egress/u);
 });

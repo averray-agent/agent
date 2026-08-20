@@ -1,0 +1,1 @@
+{"profile":"mcp-failure-semantics-v1@1","fixture":"known-good","expected":{"auth-boundary":"pass","timeout-recovery":"pass","tool-schema-stability":"pass","destructive-action-safety":"pass","error-shape-conformance":"pass"}}

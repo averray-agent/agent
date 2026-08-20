@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 
 import { ConfigError, ValidationError } from "../core/errors.js";
 import { GitPatchTestsRunner } from "./git-patch-tests-runner.js";
-import { VerificationProfileRegistry } from "./verification-profile-registry.js";
+import {
+  GIT_PATCH_TESTS_PROFILE_REF,
+  VerificationProfileRegistry
+} from "./verification-profile-registry.js";
 
 const DEFAULT_INTERVAL_MS = 500;
 const DEFAULT_CLAIM_LEASE_SECONDS = 180;
@@ -14,6 +17,7 @@ export class WitnessRunnerService {
     profileRegistry = new VerificationProfileRegistry(),
     intervalMs = DEFAULT_INTERVAL_MS,
     claimLeaseSeconds = DEFAULT_CLAIM_LEASE_SECONDS,
+    acceptedProfileRefs = [GIT_PATCH_TESTS_PROFILE_REF],
     owner = `witness-runner:${randomUUID()}`,
     now = () => new Date(),
     logger = console
@@ -24,6 +28,7 @@ export class WitnessRunnerService {
     this.profileRegistry = profileRegistry;
     this.intervalMs = positiveInteger(intervalMs, "Witness runner interval");
     this.claimLeaseSeconds = positiveInteger(claimLeaseSeconds, "Witness runner claim lease");
+    this.acceptedProfileRefs = Object.freeze(acceptedProfileRefs.map(String));
     this.owner = String(owner);
     this.now = now;
     this.logger = logger;
@@ -74,7 +79,8 @@ export class WitnessRunnerService {
     const run = await this.stateStore.claimNextVerificationRun({
       owner: this.owner,
       claimedAt,
-      leaseSeconds: this.claimLeaseSeconds
+      leaseSeconds: this.claimLeaseSeconds,
+      profileRefs: this.acceptedProfileRefs
     });
     if (!run) return undefined;
 

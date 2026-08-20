@@ -93,3 +93,15 @@ test("proxy refuses create bodies that widen host access", () => {
     );
   }
 });
+
+test("profile-1 zero-network admission remains load-bearing after the networked MCP prober lands", () => {
+  const offline = createBody();
+  assert.equal(offline.HostConfig.NetworkMode, "none");
+  assert.equal(authorize("POST", "/v1.52/containers/create?name=averray-witness-profile-one", offline).allowed, true);
+  const mutation = structuredClone(offline);
+  mutation.HostConfig.NetworkMode = "bridge";
+  assert.deepEqual(
+    authorize("POST", "/v1.52/containers/create?name=averray-witness-profile-one-mutated", mutation),
+    { allowed: false, reason: "container network mode must be none" }
+  );
+});

@@ -18,6 +18,15 @@ export const VERIFY_INCONCLUSIVE_REASONS = Object.freeze([
 ]);
 
 export const GIT_PATCH_TESTS_PROFILE_REF = "git-patch-tests-v1@1";
+export const MCP_FAILURE_SEMANTICS_PROFILE_REF = "mcp-failure-semantics-v1@1";
+
+export const MCP_FAILURE_SEMANTICS_CHECKS = Object.freeze([
+  "auth-boundary",
+  "timeout-recovery",
+  "tool-schema-stability",
+  "destructive-action-safety",
+  "error-shape-conformance"
+]);
 
 const GIT_ARTIFACT_SCHEMA = Object.freeze({
   type: "object",
@@ -103,9 +112,68 @@ const GIT_PATCH_TESTS_V1 = {
   }
 };
 
+const MCP_FAILURE_SEMANTICS_V1 = {
+  name: "mcp-failure-semantics-v1",
+  version: 1,
+  handler: "deterministic",
+  handlerVersion: 1,
+  inputSchema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["target", "inputs"],
+    properties: {
+      target: {
+        type: "object",
+        additionalProperties: false,
+        required: ["endpoint", "transport"],
+        properties: {
+          endpoint: { type: "string", pattern: "^(?:https|wss)://", maxLength: 2_048 },
+          transport: { type: "string", enum: ["streamable_http", "websocket"] },
+          auth: {
+            type: "object",
+            additionalProperties: false,
+            required: ["scheme"],
+            properties: {
+              scheme: { type: "string", enum: ["bearer"] },
+              credentialRef: { type: "string", minLength: 1, maxLength: 200 }
+            }
+          }
+        }
+      },
+      inputs: {
+        type: "object",
+        additionalProperties: false,
+        properties: {}
+      }
+    }
+  },
+  successCriteria: {
+    statement: "The declared endpoint passed each named mcp-failure-semantics-v1@1 check during one bounded observation. This is not a certification or blanket security claim.",
+    requiredEvidence: MCP_FAILURE_SEMANTICS_CHECKS.map((name) => `mcp_${name.replaceAll("-", "_")}_pass`)
+  },
+  limits: {
+    timeoutMs: 30_000,
+    sizeBytes: 64 * 1024,
+    cpuLimit: 1,
+    memoryMb: 256,
+    processLimit: 64,
+    temporaryStorageMb: 16,
+    outputLimitBytes: 512 * 1024
+  },
+  price: VERIFY_PROFILE_PRICE,
+  replayFixtureRef: "services/__fixtures__/mcp-failure-semantics-v1-known-good.json",
+  status: "published",
+  verifierConfig: {
+    version: 1,
+    handler: "deterministic",
+    expectedOutputs: MCP_FAILURE_SEMANTICS_CHECKS.map((name) => `mcp_${name.replaceAll("-", "_")}_pass`),
+    matchMode: "contains_all"
+  }
+};
+
 export class VerificationProfileRegistry {
   constructor({
-    profiles = [GIT_PATCH_TESTS_V1],
+    profiles = [GIT_PATCH_TESTS_V1, MCP_FAILURE_SEMANTICS_V1],
     autoDecidableModes = AUTO_DECIDABLE_MODES,
     availabilityByProfile = {}
   } = {}) {

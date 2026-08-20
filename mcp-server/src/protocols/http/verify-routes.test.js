@@ -3,13 +3,13 @@ import test from "node:test";
 
 import { createVerifyRoutes } from "./verify-routes.js";
 
-function harness({ createRun } = {}) {
+function harness({ createRun, payload } = {}) {
   const calls = [];
   const response = {};
   const route = createVerifyRoutes({
     enforceLimit: async (...args) => calls.push(["limit", ...args]),
     rateLimitConfig: { verifierRun: { limit: 5, windowSeconds: 60 } },
-    readJsonBody: async () => ({
+    readJsonBody: async () => payload ?? ({
       profile: "git-patch-tests-v1",
       profileVersion: 1,
       target: { repository: "repo", commit: "a".repeat(40) },
@@ -39,6 +39,30 @@ test("GET /verify/profiles is public and cacheable", async () => {
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.body, { profiles: [{ name: "git-patch-tests-v1", version: 1 }] });
   assert.equal(response.headers["cache-control"], "public, max-age=300");
+});
+
+test("POST /verify/runs forwards a scoped target token only through the ephemeral header seam", async () => {
+  const { calls, response, route } = harness({
+    payload: {
+      profile: "mcp-failure-semantics-v1",
+      profileVersion: 1,
+      target: { endpoint: "https://mcp.example.test/run", transport: "streamable_http", auth: { scheme: "bearer", credentialRef: "run-only" } },
+      inputs: {}
+    }
+  });
+  const request = {
+    method: "POST",
+    headers: {
+      "payment-signature": "proof",
+      "verification-target-authorization": "Bearer scoped-run-secret"
+    },
+    socket: { remoteAddress: "127.0.0.1" }
+  };
+  assert.equal(await route({ request, response, pathname: "/verify/runs" }), true);
+  const input = calls.find(([name]) => name === "createRun")[1];
+  assert.equal(input.ephemeralCredential, "scoped-run-secret");
+  assert.doesNotMatch(JSON.stringify(input.target), /scoped-run-secret/u);
+  assert.doesNotMatch(JSON.stringify(input.inputs), /scoped-run-secret/u);
 });
 
 test("POST /verify/runs accepts the standard x402 header and returns the queued run", async () => {

@@ -31,9 +31,12 @@ test("backend verification shelf boots, profiles, and queues without loading Wit
     env: {}
   });
 
-  const [profile] = verificationRunService.listProfiles();
+  const [profile, mcpProfile] = verificationRunService.listProfiles();
   assert.equal(profile.ref, "git-patch-tests-v1@1");
   assert.deepEqual(profile.availability, { status: "available" });
+  assert.equal(mcpProfile.ref, "mcp-failure-semantics-v1@1");
+  assert.equal(mcpProfile.availability.status, "unavailable");
+  assert.equal(mcpProfile.availability.reason, "isolated_mcp_prober_not_configured");
   assert.ok(verificationRunFinalizer);
   const queued = await verificationRunService.createRun({
     profile: "git-patch-tests-v1",
@@ -62,4 +65,27 @@ test("backend startup module graph has no Witness runner dependency, including u
 
   const deliberatelyMutated = `import { materializeArtifact } from "../../../witness/src/artifacts.mjs";\n${sources[0]}`;
   assert.throws(() => assertNoStaticWitnessImport(deliberatelyMutated), /startup module graph/u);
+});
+
+test("an unavailable MCP control socket degrades profile 2 without blocking backend verification startup", async () => {
+  const errors = [];
+  const shelf = await createVerificationShelf({
+    stateStore: new MemoryStateStore(),
+    paymentGate: { async authorize() { throw new Error("not used"); } },
+    authConfig: {
+      jwtBackend: "hmac",
+      signingSecret: "mcp-shelf-test-secret-that-is-long-enough-123",
+      secrets: ["mcp-shelf-test-secret-that-is-long-enough-123"]
+    },
+    env: {
+      MCP_PROBER_URL: "http://mcp-prober:8080",
+      MCP_EGRESS_GRANT_SOCKET: "/path-that-does-not-exist/and-cannot-be-created/grants.sock"
+    },
+    logger: { error(entry, message) { errors.push({ entry, message }); } }
+  });
+  const profiles = shelf.verificationRunService.listProfiles();
+  assert.equal(profiles.find(({ ref }) => ref === "git-patch-tests-v1@1").availability.status, "available");
+  assert.equal(profiles.find(({ ref }) => ref === "mcp-failure-semantics-v1@1").availability.status, "unavailable");
+  assert.equal(shelf.mcpEgressGrantVerifier, undefined);
+  assert.equal(errors.length, 1);
 });

@@ -265,3 +265,42 @@ test("verify and job receipts share the one canonical content-address function",
   const source = readFileSync(new URL("./work-receipt.js", import.meta.url), "utf8");
   assert.equal(source.match(/export function hashWorkReceiptContent/gu)?.length, 1);
 });
+
+test("MCP verify receipt names each bounded check and carries neither credential nor settlement", () => {
+  const secret = "credential-that-must-not-enter-receipt";
+  const checks = [
+    { name: "auth-boundary", verdict: "pass", reason: "unauthenticated_request_rejected", detail: "The boundary rejected the fixed probe." },
+    { name: "timeout-recovery", verdict: "pass", reason: "structured_timeout_error", detail: "A structured error returned." },
+    { name: "tool-schema-stability", verdict: "pass", reason: "malformed_input_rejected", detail: "Malformed input was rejected." },
+    { name: "destructive-action-safety", verdict: "fail", reason: "destructive_call_without_confirmation", detail: "The omission probe returned success." },
+    { name: "error-shape-conformance", verdict: "pass", reason: "bounded_mcp_error", detail: "The error was protocol-shaped." }
+  ];
+  const receipt = buildVerifyReceipt({
+    run: {
+      customer: live.poster,
+      target: { endpoint: "https://mcp.example.test/run", transport: "streamable_http", auth: { scheme: "bearer", credentialRef: "run-only" } },
+      inputs: {},
+      billing: { status: "captured" }
+    },
+    profile: {
+      name: "mcp-failure-semantics-v1",
+      version: 1,
+      ref: "mcp-failure-semantics-v1@1",
+      handler: "deterministic",
+      handlerVersion: 1,
+      limits: { timeoutMs: 30_000 },
+      price: { asset: "USDC", amount: "5", amountRaw: "5000000" }
+    },
+    execution: {
+      report: { checks },
+      environment: { kind: "averray_mcp_prober", egress: "declared_endpoint_only" }
+    },
+    verdict: { outcome: "rejected", reasonCode: "DETERMINISTIC_MISMATCH" }
+  });
+  assert.deepEqual(receipt.execution.checks, checks);
+  assert.equal(Object.hasOwn(receipt, "settlement"), false);
+  assert.equal(receipt.intent.specSource, "verify_request");
+  assert.doesNotMatch(JSON.stringify(receipt), new RegExp(secret, "u"));
+  assert.doesNotMatch(JSON.stringify(receipt), /\b(?:certified|secure)\b/iu);
+  assertWorkReceiptContentAddress(receipt);
+});
