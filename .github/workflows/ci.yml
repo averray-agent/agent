@@ -210,6 +210,7 @@ jobs:
         run: |
           printf '{"protocols":["http"]}\n' > site/.well-known/agent-tools.json
           npm run build:site
+          npm run check:site-content
           npm run check:discovery-manifest
 
   indexer:
