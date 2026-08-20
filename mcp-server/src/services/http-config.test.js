@@ -15,6 +15,7 @@ test("loadHttpConfig uses safe defaults when env is empty", () => {
   assert.match(config.allowedHeaders, /payment-signature/u);
   assert.match(config.allowedHeaders, /sign-in-with-x/u);
   assert.match(config.allowedHeaders, /x-payment/u);
+  assert.match(config.allowedHeaders, /verification-target-authorization/u);
   assert.match(config.exposedHeaders, /mcp-session-id/u);
   assert.match(config.exposedHeaders, /payment-required/u);
   assert.match(config.exposedHeaders, /payment-response/u);

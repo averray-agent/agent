@@ -198,6 +198,8 @@ test("mainnet backend deploy builds the sandbox and starts only the isolated run
   assert.match(script, /build "\$WITNESS_PROXY_SERVICE" "\$WITNESS_RUNNER_SERVICE"/u);
   assert.match(script, /services\+=\("\$WITNESS_PROXY_SERVICE" "\$WITNESS_RUNNER_SERVICE"\)/u);
   assert.doesNotMatch(script, /docker\.sock.*BACKEND_SERVICE|BACKEND_SERVICE.*docker\.sock/u);
+  assert.match(script, /build "\$MCP_EGRESS_PROXY_SERVICE" "\$MCP_PROBER_SERVICE"/u);
+  assert.match(script, /services\+=\("\$MCP_EGRESS_PROXY_SERVICE" "\$MCP_PROBER_SERVICE"\)/u);
 });
 
 test("rollback to a pre-runner commit removes only the two known isolated containers", async () => {
@@ -205,4 +207,5 @@ test("rollback to a pre-runner commit removes only the two known isolated contai
   assert.match(script, /"\$deployed_sha" != "\$PREVIOUS_SHA"/u);
   assert.match(script, /for container in "\$WITNESS_RUNNER_CONTAINER" "\$WITNESS_PROXY_CONTAINER"/u);
   assert.match(script, /docker container rm --force "\$container"/u);
+  assert.match(script, /for container in "\$MCP_PROBER_CONTAINER" "\$MCP_EGRESS_PROXY_CONTAINER"/u);
 });

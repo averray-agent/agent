@@ -21,6 +21,8 @@ test("parallel compose isolates mainnet identities, ports, Redis, and AWS mounts
   assert.deepEqual(Object.keys(config.services).sort(), [
     "mainnet-backend",
     "mainnet-indexer",
+    "mainnet-mcp-egress-proxy",
+    "mainnet-mcp-prober",
     "mainnet-redis",
     "mainnet-witness-docker-proxy",
     "mainnet-witness-runner",
@@ -31,11 +33,15 @@ test("parallel compose isolates mainnet identities, ports, Redis, and AWS mounts
   const redis = config.services["mainnet-redis"];
   const proxy = config.services["mainnet-witness-docker-proxy"];
   const runner = config.services["mainnet-witness-runner"];
+  const mcpProxy = config.services["mainnet-mcp-egress-proxy"];
+  const mcpProber = config.services["mainnet-mcp-prober"];
   assert.equal(backend.container_name, "agent-mainnet-backend");
   assert.equal(indexer.container_name, "agent-mainnet-indexer");
   assert.equal(redis.container_name, "agent-mainnet-redis");
   assert.equal(proxy.container_name, "agent-mainnet-witness-docker-proxy");
   assert.equal(runner.container_name, "agent-mainnet-witness-runner");
+  assert.equal(mcpProxy.container_name, "agent-mainnet-mcp-egress-proxy");
+  assert.equal(mcpProber.container_name, "agent-mainnet-mcp-prober");
   assert.equal(backend.ports[0].host_ip, "127.0.0.1");
   assert.equal(backend.ports[0].published, "18787");
   assert.equal(indexer.ports[0].host_ip, "127.0.0.1");
@@ -43,6 +49,8 @@ test("parallel compose isolates mainnet identities, ports, Redis, and AWS mounts
   assert.deepEqual(Object.keys(redis.networks), ["mainnet-internal"]);
   assert.equal(config.networks["mainnet-internal"].internal, true);
   assert.equal(config.networks["witness-docker-control"].internal, true);
+  assert.equal(config.networks["mcp-probe-egress"].internal, true);
+  assert.equal(config.networks["mcp-probe-submit-control"].internal, true);
   assert.equal(config.networks["caddy-testnet"].external, true);
   assert.equal(config.networks["caddy-testnet"].name, "agent-stack_default");
 
@@ -73,6 +81,14 @@ test("parallel compose isolates mainnet identities, ports, Redis, and AWS mounts
   assert.match(runner.environment.DOCKER_HOST, /^tcp:\/\/mainnet-witness-docker-proxy:/u);
   assert.deepEqual(Object.keys(proxy.networks), ["witness-docker-control"]);
   assert.ok(!Object.hasOwn(backend.networks, "witness-docker-control"));
+  assert.deepEqual(Object.keys(mcpProber.networks), ["mcp-probe-egress"]);
+  assert.equal(mcpProber.ports, undefined);
+  assert.equal(mcpProber.env_file, undefined);
+  assert.deepEqual(Object.keys(mcpProber.environment).sort(), ["MCP_EGRESS_PROXY_URL", "NODE_ENV", "PORT"]);
+  assert.ok(!Object.hasOwn(mcpProxy.networks, "mainnet-internal"));
+  assert.ok(Object.hasOwn(mcpProxy.networks, "mcp-target-egress"));
+  assert.ok(Object.hasOwn(backend.networks, "mcp-probe-submit-control"));
+  assert.ok(!Object.hasOwn(backend.networks, "mcp-probe-egress"));
 });
 
 test("mainnet AWS config has three isolated profiles and no testnet references", async () => {

@@ -90,6 +90,32 @@ test("runner failures become neutral runner_fault executions for backend finaliz
   assert.match(run.execution.detail, /sandbox host failed/u);
 });
 
+test("profile 2 cannot enter the profile-1 code sandbox", async () => {
+  const stateStore = new MemoryStateStore();
+  const mcpRun = await queueRun(stateStore, "verify-mcp");
+  mcpRun.profile = "mcp-failure-semantics-v1";
+  mcpRun.profileRef = "mcp-failure-semantics-v1@1";
+  mcpRun.target = { endpoint: "https://mcp.example.test", transport: "streamable_http" };
+  mcpRun.inputs = {};
+  await stateStore.updateVerificationRun(mcpRun.runId, mcpRun);
+  await queueRun(stateStore, "verify-git");
+  const seen = [];
+  const service = new WitnessRunnerService({
+    stateStore,
+    profileRegistry: PROFILE_REGISTRY,
+    runner: runnerDouble({ execute: async ({ runId }) => {
+      seen.push(runId);
+      return { status: "decidable", evidence: "source_binding_verified tests_passed" };
+    } }),
+    owner: "profile-one-only"
+  });
+
+  await service.runOnce();
+  assert.deepEqual(seen, ["verify-git"]);
+  assert.equal((await stateStore.getVerificationRun("verify-mcp")).status, "queued");
+  assert.equal((await stateStore.getVerificationRun("verify-git")).status, "executed");
+});
+
 test("runner accepts only minimal Redis and proxied Docker configuration", () => {
   assert.doesNotThrow(() => assertWitnessRunnerEnvironment({
     REDIS_URL: "redis://redis:6379",

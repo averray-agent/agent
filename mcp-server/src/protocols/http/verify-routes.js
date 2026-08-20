@@ -37,6 +37,9 @@ export function createVerifyRoutes({
       const paymentProof = firstHeader(request.headers?.["payment-signature"])
         || firstHeader(request.headers?.["x-payment"])
         || firstHeader(request.headers?.["verification-payment"]);
+      const ephemeralCredential = bearerCredential(
+        firstHeader(request.headers?.["verification-target-authorization"])
+      );
       let run;
       try {
         run = await verificationRunService.createRun({
@@ -44,7 +47,8 @@ export function createVerifyRoutes({
           profileVersion: payload?.profileVersion,
           target: payload?.target,
           inputs: payload?.inputs,
-          paymentProof: paymentProof || undefined
+          paymentProof: paymentProof || undefined,
+          ephemeralCredential
         });
       } catch (error) {
         if (error?.statusCode === 402 && error?.details?.paymentRequired) {
@@ -77,4 +81,10 @@ export function createVerifyRoutes({
 function firstHeader(value) {
   if (Array.isArray(value)) return String(value[0] ?? "").trim();
   return String(value ?? "").trim();
+}
+
+function bearerCredential(value) {
+  if (!value) return undefined;
+  const match = value.match(/^Bearer\s+([^\s]+)$/u);
+  return match?.[1] ?? "";
 }

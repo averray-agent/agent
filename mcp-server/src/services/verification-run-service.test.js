@@ -31,6 +31,16 @@ function request(paymentProof = "proof-1") {
   };
 }
 
+function mcpRequest(paymentProof = "mcp-proof") {
+  return {
+    profile: "mcp-failure-semantics-v1",
+    profileVersion: 1,
+    target: { endpoint: "https://mcp.example.test/run", transport: "streamable_http" },
+    inputs: {},
+    paymentProof
+  };
+}
+
 function paymentGate() {
   const calls = { authorize: 0, capture: 0, release: 0 };
   return {
@@ -192,6 +202,55 @@ test("inconclusive is never billed and never presents as an artifact failure", a
   assert.equal(context.gate.calls.release, 1);
   assert.equal(receipt.intent.valueAtRisk.amountRaw, "0");
   assert.equal(Object.hasOwn(receipt, "settlement"), false);
+});
+
+test("MCP target, TLS, and auth inability outcomes are never billed or converted to fail", async () => {
+  for (const [reason, detail] of [
+    ["target_unreachable", "The declared endpoint could not be reached."],
+    ["target_unreachable", "The TLS handshake could not be validated."],
+    ["ambiguous_evidence", "The scoped endpoint authentication could not be completed."]
+  ]) {
+    const context = harness({ runnerResult: { status: "inconclusive", reason, detail } });
+    await context.service.createRun(mcpRequest(`proof-${detail}`));
+    const run = await executeAndFinalize(context);
+    assert.equal(run.verdict.outcome, "inconclusive");
+    assert.notEqual(run.verdict.outcome, "rejected");
+    assert.equal(run.billing.status, "not_billed");
+    assert.equal(context.gate.calls.capture, 0);
+    assert.equal(context.gate.calls.release, 1);
+  }
+});
+
+test("MCP egress boundary faults are platform_fault and never billed", async () => {
+  const context = harness({
+    runnerResult: {
+      status: "platform_fault",
+      reason: "runner_fault",
+      detail: "The egress boundary refused an undeclared destination."
+    }
+  });
+  await context.service.createRun(mcpRequest("egress-fault-proof"));
+  const run = await executeAndFinalize(context);
+  assert.equal(run.verdict.outcome, "platform_fault");
+  assert.equal(run.billing.status, "not_billed");
+  assert.equal(context.gate.calls.capture, 0);
+});
+
+test("MCP endpoint cannot smuggle a credential into durable URL fields or mismatch its transport", async () => {
+  for (const [endpoint, transport] of [
+    ["https://secret@mcp.example.test/run", "streamable_http"],
+    ["https://mcp.example.test/run?token=secret", "streamable_http"],
+    ["wss://mcp.example.test/run", "streamable_http"],
+    ["https://mcp.example.test/run", "websocket"]
+  ]) {
+    const context = harness();
+    await assert.rejects(
+      () => context.service.createRun({ ...mcpRequest("boundary-proof"), target: { endpoint, transport } }),
+      /must not embed|transport must pair/u
+    );
+    assert.equal(context.gate.calls.authorize, 0);
+    assert.equal((await context.stateStore.listActiveVerificationRuns()).length, 0);
+  }
 });
 
 test("a broken runner is classified as inconclusive runner_fault, never fail", async () => {

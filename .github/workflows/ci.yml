@@ -155,6 +155,17 @@ jobs:
             --exit-code-from verify-smoke-backend \
             verify-smoke-backend verify-smoke-runner
 
+      - name: Verify real MCP good, bad, and egress-deny fixtures inside prober images
+        run: |
+          set -euo pipefail
+          cleanup() {
+            docker compose -f deploy/docker-compose.mcp-prober-smoke.yml down -v --remove-orphans
+          }
+          trap cleanup EXIT
+          docker compose -f deploy/docker-compose.mcp-prober-smoke.yml \
+            up --build --abort-on-container-exit \
+            --exit-code-from mcp-smoke-driver
+
   frontend:
     name: Operator app — static export
     runs-on: ubuntu-latest

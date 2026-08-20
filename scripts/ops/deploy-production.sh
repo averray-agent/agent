@@ -1976,7 +1976,7 @@ deploy() {
   # 1Password item → trigger workflow_dispatch → render produces new
   # /run env → hash differs → force-recreate. No SSH+rm dance needed.
   local backend_code_changed=0
-  if should_run backend "$RUN_BACKEND" '^(mcp-server/|witness/|sdk/|examples/|docs/schemas/|package(-lock)?\.json|scripts/ops/redeploy-backend\.sh|deploy/witness-docker-proxy/|deploy/docker-compose\.mainnet\.yml|deploy/backend(\.mainnet)?\.env\.template|deployments/(testnet|mainnet)\.json)'; then
+  if should_run backend "$RUN_BACKEND" '^(mcp-server/|witness/|sdk/|examples/|docs/schemas/|package(-lock)?\.json|scripts/ops/redeploy-backend\.sh|deploy/(witness-docker-proxy|mcp-egress-proxy)/|deploy/docker-compose\.mainnet\.yml|deploy/backend(\.mainnet)?\.env\.template|deployments/(testnet|mainnet)\.json)'; then
     backend_code_changed=1
   fi
   if [[ "$backend_code_changed" == "1" || "${RUNTIME_ENV_CHANGED_BACKEND:-0}" == "1" ]]; then
@@ -1994,9 +1994,13 @@ deploy() {
       fi
       local witness_runner_service=""
       local witness_proxy_service=""
+      local mcp_prober_service=""
+      local mcp_egress_proxy_service=""
       if [[ "$LIVE_NETWORK" == "mainnet" ]]; then
         witness_runner_service="mainnet-witness-runner"
         witness_proxy_service="mainnet-witness-docker-proxy"
+        mcp_prober_service="mainnet-mcp-prober"
+        mcp_egress_proxy_service="mainnet-mcp-egress-proxy"
       fi
       COMPOSE_FILE="$COMPOSE_FILE" \
         COMPOSE_PROJECT_DIRECTORY="$COMPOSE_PROJECT_DIRECTORY" \
@@ -2014,6 +2018,10 @@ deploy() {
         WITNESS_RUNNER_CONTAINER="agent-mainnet-witness-runner" \
         WITNESS_PROXY_CONTAINER="agent-mainnet-witness-docker-proxy" \
         WITNESS_RUNTIME_ROOT="/srv/agent-stack-mainnet/witness-runtime" \
+        MCP_PROBER_SERVICE="$mcp_prober_service" \
+        MCP_EGRESS_PROXY_SERVICE="$mcp_egress_proxy_service" \
+        MCP_PROBER_CONTAINER="agent-mainnet-mcp-prober" \
+        MCP_EGRESS_PROXY_CONTAINER="agent-mainnet-mcp-egress-proxy" \
         SKIP_GIT_UPDATE=1 \
         PRE_DEPLOY_SHA="$OLD_SHA" \
         "$APP_ROOT/scripts/ops/redeploy-backend.sh"
