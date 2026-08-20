@@ -171,6 +171,12 @@
       "abiHash": "sha256:c4e83bbe0610a473725287666bc247c4889186c8d3287c1ced79cc1af63555f2",
       "runtimeCodeHash": "sha256:f87dc0371c4f288f9a634bcc243b78b922b44addc0dd5e00a3c80b8d2ee8bad9",
       "verifiedAt": "2026-08-13T18:45:00.000Z"
+    },
+    "0x70441c9131Bc47c96E8D839C5B30850924838099": {
+      "sourceCommit": "810e93a903fc4db1e2006f9af489660e036becc9",
+      "abiHash": "sha256:ffb5920d140328c9e413789acca7d23b95953e7c9027612bec467854ef69b7e8",
+      "runtimeCodeHash": "sha256:08858e6f9948700edce5a85127d25f77cde3082fba5e150cf6a8a23652b4e252",
+      "verifiedAt": "2026-08-20T15:00:00.000Z"
     }
   },
   "knownUnshippedContractChanges": {
