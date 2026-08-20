@@ -122,6 +122,48 @@
     setText(badge, "[data-reader-label]", label);
   }
 
+  function readerMessageLine() {
+    var existing = document.querySelector("[data-reader-message]");
+    if (existing) return existing;
+    var host = document.querySelector(".band__right");
+    if (!host) return null;
+    var line = document.createElement("p");
+    line.className = "band__since";
+    line.dataset.readerMessage = "true";
+    line.setAttribute("role", "status");
+    line.setAttribute("aria-live", "polite");
+    host.appendChild(line);
+    return line;
+  }
+
+  function showReaderLoading() {
+    var line = readerMessageLine();
+    if (!line) return;
+    line.hidden = false;
+    line.textContent = "Loading live figures…";
+  }
+
+  function clearReaderMessage() {
+    var line = readerMessageLine();
+    if (!line) return;
+    line.replaceChildren();
+    line.hidden = true;
+  }
+
+  function showReaderFailure() {
+    var line = readerMessageLine();
+    if (!line) return;
+    var link = document.createElement("a");
+    link.href = ENDPOINT;
+    link.textContent = ENDPOINT;
+    line.replaceChildren(
+      document.createTextNode("Figures are served live; they could not be loaded just now — query "),
+      link,
+      document.createTextNode(" directly.")
+    );
+    line.hidden = false;
+  }
+
   function appendLog(text, dim) {
     var log = document.querySelector("[data-log]");
     if (!log) return;
@@ -163,6 +205,7 @@
 
     renderComposition(payload);
     setReaderState("live", "Reading now");
+    clearReaderMessage();
 
     var blockPart = headValue == null ? "head unavailable" : "#" + Number(headValue).toLocaleString("en-US");
     appendLog(
@@ -200,6 +243,7 @@
     } catch (error) {
       // Keep the last good reading on screen, ageing honestly. Replacing it
       // with zeros or blanks would be a worse lie than a visibly old number.
+      showReaderFailure();
       if (!stalled) {
         stalled = true;
         setReaderState("stalled", "Could not read");
@@ -211,6 +255,7 @@
   var placeholder = document.querySelector("[data-log] .log__line");
   if (placeholder) placeholder.dataset.placeholder = "true";
 
+  showReaderLoading();
   readOnce();
   window.setInterval(readOnce, POLL_MS);
   window.setInterval(tickAges, 1000);
