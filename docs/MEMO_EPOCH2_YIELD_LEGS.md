@@ -1,6 +1,6 @@
 # Decision memo — Epoch-2 yield legs (§B of CEREMONY_POOLV2_YIELD_EPOCH2)
 
-**Author:** Claude · **Ratifier:** Pascal · **Date:** 2026-08-20
+**Author:** Claude · **RATIFIED by Pascal 2026-08-20** · decisions E2-1..E2-5 stand
 Fills §B's open decisions so ceremony day is mechanical. Live state read 2026-08-20 ~14:3xZ, block-fresh.
 
 ## Live facts (chain-read, not modeled)
