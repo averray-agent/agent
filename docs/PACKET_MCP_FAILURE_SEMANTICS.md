@@ -1,6 +1,6 @@
 # PACKET — `mcp-failure-semantics-v1` (Verify profile 2)
 
-- **Status:** SPEC — one Pascal decision in §5, then ready for Codex.
+- **Status:** SPEC — RATIFIED 2026-08-20 (Pascal): §5 = egress-proxy allowlist (option 1). Ready for Codex.
 - **Phase:** Verify profile 2 of [`PACKET_VERIFY_SHELF.md`](./PACKET_VERIFY_SHELF.md).
   Profile 1 (`git-patch-tests-v1`) is PROVEN PAID end to end (2026-08-19).
 - **Why this one next:** the outreach segmentation leads its largest cohort — 8
@@ -97,7 +97,7 @@ evidence root R on <date>."* Truth-bound, timestamped, bounded — the
 - **The code sandbox's `NetworkMode: none` is UNTOUCHED.** A test asserts
   profile 1 still runs at zero-network after this lands.
 
-## 5. Decision for Pascal
+## 5. Decision — RATIFIED 2026-08-20 (Pascal): option 1, egress-proxy allowlist-of-one
 
 **How is the single-endpoint egress enforced?** Two viable shapes; I recommend
 the first:
