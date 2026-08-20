@@ -200,6 +200,18 @@ test("posting consent refuses the launch flag and always marks the external job 
   assert.equal(built.terms.jobDefinition.onboardingWaiverEligible, false);
 });
 
+test("direct CreditBook repayment is absent; borrowers must use the AAC sweep path", async () => {
+  const { service } = setup();
+  await assert.rejects(
+    service.buildTransactions(wallet.address, {
+      direction: "credit_book_repay",
+      loanId: `0x${"99".repeat(32)}`,
+      amount: "1000000"
+    }),
+    /direction must be cash_consent or posting_consent/u
+  );
+});
+
 test("enabled L3 sends the exact reserve through the configured external poster and never the borrower", async () => {
   const postingCalls = [];
   const externalPostingService = {

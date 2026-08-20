@@ -678,7 +678,7 @@
     },
     {
       "path": "/credit/transactions",
-      "description": "Build wallet-bound L1 templates, L2/L3 consent payloads, exact AAC sweep authorizations, or direct CreditBook repayment templates."
+      "description": "Build wallet-bound L1 templates or L2/L3 consent payloads with exact AAC sweep-repayment authorizations."
     },
     {
       "path": "/credit/consent",
@@ -860,7 +860,7 @@
     },
     {
       "name": "buildCreditTransactions",
-      "description": "Wallet-bound L1 templates, L2/L3 consent payloads, exact AAC sweep authorizations, and CreditBook repay templates."
+      "description": "Wallet-bound L1 templates and L2/L3 consent payloads with exact AAC sweep-repayment authorizations."
     },
     {
       "name": "estimateNetReward",

@@ -192,11 +192,11 @@ export function createMcpTools({
   tool({
     name: "buildCreditTransactions",
     title: "Build credit transactions and consent",
-    description: "Build wallet-bound L1 transaction templates, L2/L3 consent payloads with exact AAC repayment authorizations, or direct CreditBook repay templates from live state.",
+    description: "Build wallet-bound L1 transaction templates or L2/L3 consent payloads with exact AAC sweep-repayment authorizations.",
     inputSchema: {
       type: "object",
       properties: {
-        direction: { type: "string", enum: ["deposit", "withdraw", "borrow", "repay", "cash_consent", "posting_consent", "credit_book_repay"] },
+        direction: { type: "string", enum: ["deposit", "withdraw", "borrow", "repay", "cash_consent", "posting_consent"] },
         assets: { type: "string", pattern: "^[1-9][0-9]*$" },
         shares: { type: "string", pattern: "^[1-9][0-9]*$" },
         pledgeShares: { type: "string", pattern: "^[1-9][0-9]*$" },
