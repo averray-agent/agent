@@ -1,11 +1,10 @@
 import {
   Contract,
-  Interface,
   getAddress,
   verifyTypedData
 } from "ethers";
 
-import { AGENT_ACCOUNT_ABI, CREDIT_BOOK_ABI, ERC20_MOCK_ABI, ZERO_BYTES32 } from "../blockchain/abis.js";
+import { AGENT_ACCOUNT_ABI, CREDIT_BOOK_ABI, ZERO_BYTES32 } from "../blockchain/abis.js";
 import { buildSiweMessage, verifySiweMessage } from "../auth/siwe.js";
 import { canonicalizeContent, hashCanonicalContent } from "../core/canonical-content.js";
 import { ConfigError, ConflictError, NotFoundError, ValidationError } from "../core/errors.js";
@@ -19,8 +18,6 @@ export const CREDIT_PLATFORM_SWEEP_DISCLOSURE =
 const CASH = 0;
 const POSTING = 1;
 const THIRTY_DAYS_SECONDS = 30 * 24 * 60 * 60;
-const CREDIT_INTERFACE = new Interface(CREDIT_BOOK_ABI);
-const TOKEN_INTERFACE = new Interface(ERC20_MOCK_ABI);
 
 function amount(raw) {
   return { raw: BigInt(raw).toString(), decimals: 6 };
@@ -218,9 +215,8 @@ export class CreditBookDoorService {
     const direction = String(input?.direction ?? "").trim();
     if (direction === "cash_consent") return this.#buildConsent(wallet, input, CASH);
     if (direction === "posting_consent") return this.#buildConsent(wallet, input, POSTING);
-    if (direction === "credit_book_repay") return this.#buildRepay(wallet, input);
     throw new ValidationError(
-      "direction must be cash_consent, posting_consent, or credit_book_repay.",
+      "direction must be cash_consent or posting_consent.",
       { field: "direction" }
     );
   }
@@ -462,52 +458,6 @@ export class CreditBookDoorService {
         submit: { method: "POST", path: "/credit/consent" }
       },
       repaymentAuthorizations: sweepRequests,
-      disclosure: info.disclosure
-    };
-  }
-
-  async #buildRepay(wallet, input) {
-    this.#assertReady();
-    const loanId = bytes32(input.loanId, "loanId");
-    const repayment = exactPositiveRaw(input.amount, "amount");
-    const info = await this.getInfo(wallet);
-    if (!info.available) {
-      throw new ConflictError("CreditBook live state is unavailable.", "credit_book_live_read_failed");
-    }
-    const active = [info.wallet.cash.activeLoan, info.wallet.posting.activeLoan]
-      .find((candidate) => candidate?.loanId === loanId);
-    if (!active) throw new ConflictError("Loan is not active for the signed-in wallet.", "credit_loan_not_active");
-    if (repayment > BigInt(active.outstanding.raw)) {
-      throw new ConflictError("Repayment exceeds the active loan outstanding.", "credit_repayment_exceeds_outstanding");
-    }
-    return {
-      schemaVersion: 1,
-      available: true,
-      direction: "credit_book_repay",
-      wallet,
-      loanId,
-      amount: amount(repayment),
-      templates: [
-        {
-          step: "approve",
-          unsigned: true,
-          from: wallet,
-          to: info.asset,
-          value: "0",
-          chainId: this.chainId,
-          data: TOKEN_INTERFACE.encodeFunctionData("approve", [this.creditBookAddress, repayment])
-        },
-        {
-          step: "repay",
-          unsigned: true,
-          from: wallet,
-          to: this.creditBookAddress,
-          value: "0",
-          chainId: this.chainId,
-          prerequisite: "approve_confirmed_on_chain",
-          data: CREDIT_INTERFACE.encodeFunctionData("repay", [loanId, repayment])
-        }
-      ],
       disclosure: info.disclosure
     };
   }

@@ -91,6 +91,7 @@ export const CONTRACT_ARTIFACTS = Object.freeze({
   ],
   depositPoolV2: ["DepositPoolV2.sol", "DepositPoolV2"],
   creditPool: ["CreditPool.sol", "CreditPool"],
+  creditBook: ["CreditBook.sol", "CreditBook"],
 });
 
 function sha256(bytes) {

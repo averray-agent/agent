@@ -4,7 +4,6 @@ pragma solidity ^0.8.24;
 import {AgentAccountCore} from "./AgentAccountCore.sol";
 import {TreasuryPolicy} from "./TreasuryPolicy.sol";
 import {ReentrancyGuard} from "./lib/ReentrancyGuard.sol";
-import {SafeTransfer} from "./lib/SafeTransfer.sol";
 
 /// @title Averray receipt-graph credit book
 /// @notice Operator-seeded, zero-interest pilot book for receipt-graph cash
@@ -91,7 +90,7 @@ contract CreditBook is ReentrancyGuard {
     error BookCapExceeded(uint256 attempted, uint256 cap);
     error InsufficientBookLiquidity(uint256 available, uint256 required);
     error RepaymentExceedsOutstanding(uint256 attempted, uint256 outstanding);
-    error UnfundedRepayment(uint256 observedLiquidity, uint256 requiredLiquidity);
+    error UnaccountedLiquidityShortfall(uint256 observedLiquidity, uint256 requiredLiquidity);
 
     modifier onlyOperator() {
         if (msg.sender != operator) revert Unauthorized();
@@ -141,16 +140,14 @@ contract CreditBook is ReentrancyGuard {
         (liquid,,,,,) = accounts.positions(address(this), asset);
     }
 
+    /// @notice Reconcile liquidity already delivered to this book's AAC
+    ///         position by the operator's deposit -> sendToAgent transport.
     function seed(uint256 amountRaw) external onlyOperator nonReentrant {
         if (amountRaw == 0) revert ZeroAmount();
         uint256 managedAfter = accountedLiquidityRaw + totalOutstandingRaw + amountRaw;
         if (managedAfter > bookCapRaw) revert BookCapExceeded(managedAfter, bookCapRaw);
 
-        SafeTransfer.safeTransferFrom(asset, msg.sender, address(this), amountRaw);
-        SafeTransfer.safeApprove(asset, address(accounts), 0);
-        SafeTransfer.safeApprove(asset, address(accounts), amountRaw);
-        accounts.deposit(asset, amountRaw);
-        accountedLiquidityRaw += amountRaw;
+        _consumeUnaccountedLiquidity(amountRaw);
         emit Seeded(msg.sender, amountRaw, accountedLiquidityRaw);
     }
 
@@ -206,21 +203,6 @@ contract CreditBook is ReentrancyGuard {
 
         accounts.sendToAgent(recipient, asset, amountRaw);
         emit LoanOriginated(loanId, borrower, mode, amountRaw, recipient, termsHash);
-    }
-
-    function repay(bytes32 loanId, uint256 amountRaw) external nonReentrant {
-        Loan storage loan = _activeLoan(loanId);
-        if (amountRaw == 0) revert ZeroAmount();
-        if (amountRaw > loan.outstandingRaw) {
-            revert RepaymentExceedsOutstanding(amountRaw, loan.outstandingRaw);
-        }
-
-        SafeTransfer.safeTransferFrom(asset, msg.sender, address(this), amountRaw);
-        SafeTransfer.safeApprove(asset, address(accounts), 0);
-        SafeTransfer.safeApprove(asset, address(accounts), amountRaw);
-        accounts.deposit(asset, amountRaw);
-        accountedLiquidityRaw += amountRaw;
-        _recordRepayment(loanId, loan, amountRaw, msg.sender);
     }
 
     /// @notice Record a borrower-authorized AAC sweep after the shared
@@ -297,7 +279,7 @@ contract CreditBook is ReentrancyGuard {
     function _consumeUnaccountedLiquidity(uint256 amountRaw) internal {
         uint256 observed = bookLiquidRaw();
         uint256 required = accountedLiquidityRaw + amountRaw;
-        if (observed < required) revert UnfundedRepayment(observed, required);
+        if (observed < required) revert UnaccountedLiquidityShortfall(observed, required);
         accountedLiquidityRaw = required;
     }
 

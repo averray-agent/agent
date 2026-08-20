@@ -200,7 +200,7 @@ export class CreditPoolDoorService {
   async buildTransactions(wallet, input = {}) {
     const normalizedWallet = getAddress(wallet);
     const direction = String(input?.direction ?? "").trim();
-    if (["cash_consent", "posting_consent", "credit_book_repay"].includes(direction)) {
+    if (["cash_consent", "posting_consent"].includes(direction)) {
       if (!this.creditBookDoor) return unavailableCreditBook();
       return this.creditBookDoor.buildTransactions(normalizedWallet, input);
     }

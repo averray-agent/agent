@@ -45,8 +45,38 @@ contract CreditBookTest is Test {
         book = new CreditBook(policy, accounts, address(asset), address(this), poster);
 
         asset.mint(address(this), 250 * USDC);
-        asset.approve(address(book), type(uint256).max);
+        asset.approve(address(accounts), type(uint256).max);
+        accounts.deposit(address(asset), 250 * USDC);
+        accounts.sendToAgent(address(book), address(asset), 50 * USDC);
         book.seed(50 * USDC);
+    }
+
+    function testSeedWithoutPreArrivedAacLiquidityRevertsByName() public {
+        CreditBook emptyBook = new CreditBook(policy, accounts, address(asset), address(this), poster);
+
+        vmCredit.expectRevert(abi.encodeWithSelector(CreditBook.UnaccountedLiquidityShortfall.selector, 0, USDC));
+        emptyBook.seed(USDC);
+    }
+
+    function testSeedAfterSimulatedSendToAgentCreditPasses() public {
+        CreditBook fundedBook = new CreditBook(policy, accounts, address(asset), address(this), poster);
+        accounts.sendToAgent(address(fundedBook), address(asset), 2 * USDC);
+
+        fundedBook.seed(2 * USDC);
+
+        assertEq(fundedBook.accountedLiquidityRaw(), 2 * USDC);
+        assertEq(fundedBook.bookLiquidRaw(), 2 * USDC);
+    }
+
+    function testDoubleSeedReconcilesExactly() public {
+        CreditBook fundedBook = new CreditBook(policy, accounts, address(asset), address(this), poster);
+        accounts.sendToAgent(address(fundedBook), address(asset), 3 * USDC);
+
+        fundedBook.seed(USDC);
+        fundedBook.seed(2 * USDC);
+
+        assertEq(fundedBook.accountedLiquidityRaw(), 3 * USDC);
+        assertEq(fundedBook.bookLiquidRaw(), 3 * USDC);
     }
 
     function testCashOriginationSettlementSweepCloseAndWithdrawal() public {

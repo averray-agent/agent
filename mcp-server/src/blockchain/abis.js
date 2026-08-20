@@ -141,7 +141,6 @@ export const CREDIT_BOOK_ABI = [
   "function previewLoanId(address borrower) view returns (bytes32)",
   "function loans(bytes32 loanId) view returns (address borrower, uint8 mode, uint256 principalRaw, uint256 outstandingRaw, bytes32 termsHash, uint64 originatedAt, uint64 closedAt)",
   "function originate(address borrower, uint256 amountRaw, uint8 mode, bytes32 termsHash) returns (bytes32 loanId)",
-  "function repay(bytes32 loanId, uint256 amountRaw)",
   "function recordSweepRepayment(bytes32 loanId, uint256 amountRaw)",
   "function repayFromRefund(bytes32 loanId)",
   "event LoanOriginated(bytes32 indexed loanId,address indexed borrower,uint8 indexed mode,uint256 principalRaw,address recipient,bytes32 termsHash)",

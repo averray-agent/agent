@@ -19,11 +19,15 @@ interface VmCreditBookFork {
 
 interface ICreditBookForkUsdc {
     function balanceOf(address account) external view returns (uint256);
+
+    function approve(address spender, uint256 amount) external returns (bool);
 }
 
-/// @dev Set MAINNET_RPC_URL to exercise these against the deployed
-/// TreasuryPolicy, AgentAccountCore, and USDC precompile. Without it they skip
-/// cleanly so the hermetic contract suite remains available offline.
+/// @dev Start anvil with `--fork-url <Hub RPC> --chain-id 31337`, then set
+/// MAINNET_RPC_URL to that local endpoint. The fork supplies deployed Policy
+/// and AAC state. USDC remains an EVM test double because anvil cannot execute
+/// Hub's native asset precompile; the evidence boundary and pinned old failure
+/// are recorded in docs/CREDITBOOK_AAC_LIQUIDITY_REGRESSION.md.
 contract CreditBookForkTest is Test {
     VmCreditBookFork internal constant vmFork =
         VmCreditBookFork(address(uint160(uint256(keccak256("hevm cheat code")))));
@@ -36,7 +40,7 @@ contract CreditBookForkTest is Test {
     uint256 internal constant BORROWER_KEY = 0xC0FFEE;
     uint256 internal constant POSTER_KEY = 0xA11CE;
 
-    function testForkCashDrawSweepCloseAndUnrelatedWithdrawal() public {
+    function testForkFullLoopUsesAacLiquidityAndMakesBookWholeToRawUnit() public {
         if (!_selectMainnetFork()) return;
         address borrower = vmFork.addr(BORROWER_KEY);
         CreditBook book = _seedBook(address(0));
@@ -44,31 +48,25 @@ contract CreditBookForkTest is Test {
         bytes32 loanId = book.originate(borrower, ONE_USDC, CreditBook.Mode.CASH, keccak256("fork-cash"));
         (uint256 borrowerLiquid,,,,,) = ACCOUNTS.positions(borrower, address(USDC));
         assertEq(borrowerLiquid, ONE_USDC);
+        assertEq(book.accountedLiquidityRaw(), 4 * ONE_USDC);
 
-        _fundAccount(address(this), 2 * ONE_USDC);
-        ACCOUNTS.reserveForJob(address(this), address(USDC), 2 * ONE_USDC);
-        vmFork.prank(LIVE_ESCROW);
-        ACCOUNTS.settleReservedTo(
-            keccak256("credit-book-fork-settlement"), address(this), address(USDC), borrower, 2 * ONE_USDC
-        );
-
-        uint256 sweepRaw = 2 * ONE_USDC * book.repayBps() / book.BPS();
-        _authorizeTransfer(BORROWER_KEY, borrower, address(book), sweepRaw, 1);
-        book.recordSweepRepayment(loanId, sweepRaw);
+        _authorizeTransfer(BORROWER_KEY, borrower, address(book), ONE_USDC, 1);
+        book.recordSweepRepayment(loanId, ONE_USDC);
         (,,, uint256 outstandingRaw,,, uint64 closedAt) = book.loans(loanId);
         assertEq(outstandingRaw, 0);
         require(closedAt > 0, "fork cash loan did not close");
+        assertEq(book.totalOutstandingRaw(), 0);
+        assertEq(book.accountedLiquidityRaw(), 5 * ONE_USDC);
+        assertEq(book.bookLiquidRaw(), 5 * ONE_USDC);
+    }
 
-        (borrowerLiquid,,,,,) = ACCOUNTS.positions(borrower, address(USDC));
-        assertEq(borrowerLiquid, 2 * ONE_USDC);
-        address policyOwner = POLICY.owner();
-        vmFork.prank(policyOwner);
-        POLICY.setDailyOutflowCap(type(uint256).max);
-        vmFork.prank(policyOwner);
-        POLICY.setOutflowRecorder(address(ACCOUNTS), true);
-        vmFork.prank(borrower);
-        ACCOUNTS.withdraw(address(USDC), borrowerLiquid);
-        assertEq(USDC.balanceOf(borrower), borrowerLiquid);
+    function testForkAssetDoublePinsApproveZeroFalseRegression() public {
+        if (!_selectMainnetFork()) return;
+        _installAssetDouble();
+
+        bool approved = USDC.approve(address(ACCOUNTS), 0);
+
+        require(!approved, "approve(0) without an existing approval must stay false in the fork fixture");
     }
 
     function testForkPostingFlagPosterFundingAndRefundClose() public {
@@ -104,6 +102,7 @@ contract CreditBookForkTest is Test {
         string memory rpcUrl = vmFork.envOr("MAINNET_RPC_URL", string(""));
         if (bytes(rpcUrl).length == 0) return false;
         vmFork.createSelectFork(rpcUrl);
+        require(block.chainid == 31337, "credit fork must use anvil --chain-id 31337");
         return true;
     }
 
@@ -115,22 +114,18 @@ contract CreditBookForkTest is Test {
         POLICY.setDailyOutflowCap(type(uint256).max);
         vmFork.prank(policyOwner);
         POLICY.setOutflowRecorder(address(ACCOUNTS), true);
-        // Foundry's EVM cannot execute Polkadot's native ERC-20 precompile on
-        // a fork. Keep the production asset address while substituting a
-        // behavior-equivalent six-decimal token for state-changing calls.
-        CreditBookForkUsdc mockUsdc = new CreditBookForkUsdc();
-        vmFork.etch(address(USDC), address(mockUsdc).code);
+        _installAssetDouble();
         book = new CreditBook(POLICY, ACCOUNTS, address(USDC), address(this), poster);
         CreditBookForkUsdc(address(USDC)).mint(address(this), 5 * ONE_USDC);
-        _approveUsdc(address(book), 5 * ONE_USDC);
+        _approveUsdc(address(ACCOUNTS), 5 * ONE_USDC);
+        ACCOUNTS.deposit(address(USDC), 5 * ONE_USDC);
+        ACCOUNTS.sendToAgent(address(book), address(USDC), 5 * ONE_USDC);
         book.seed(5 * ONE_USDC);
     }
 
-    function _fundAccount(address account, uint256 amountRaw) internal {
-        CreditBookForkUsdc(address(USDC)).mint(address(this), amountRaw);
-        _approveUsdc(address(ACCOUNTS), amountRaw);
-        ACCOUNTS.deposit(address(USDC), amountRaw);
-        require(account == address(this), "fork helper only funds this test account");
+    function _installAssetDouble() internal {
+        CreditBookForkUsdc mockUsdc = new CreditBookForkUsdc();
+        vmFork.etch(address(USDC), address(mockUsdc).code);
     }
 
     function _approveUsdc(address spender, uint256 amountRaw) internal {
@@ -158,6 +153,7 @@ contract CreditBookForkUsdc {
     }
 
     function approve(address spender, uint256 amount) external returns (bool) {
+        if (amount == 0 && allowance[msg.sender][spender] == 0) return false;
         allowance[msg.sender][spender] = amount;
         return true;
     }
