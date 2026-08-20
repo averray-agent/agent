@@ -1,0 +1,69 @@
+{
+  "profile": "structured-output-evidence-v1@1",
+  "fixture": "known-good",
+  "request": {
+    "profile": "structured-output-evidence-v1",
+    "profileVersion": 1,
+    "target": {
+      "output": {
+        "sha256": "6708692f98f5f2c03f5c72b7ed1ccb94da6552a69a17b82f1e1b85cb18300f16",
+        "bytes": 282,
+        "locator": {
+          "kind": "https",
+          "url": "https://fixtures.averray.invalid/structured-output-evidence-v1/output.json"
+        },
+        "format": "json"
+      },
+      "schema": {
+        "sha256": "5f145731b05ea3460e9e02070b921f98aad38aa498fda07f2da956e8ac6d2bb1",
+        "bytes": 441,
+        "locator": {
+          "kind": "https",
+          "url": "https://fixtures.averray.invalid/structured-output-evidence-v1/schema.json"
+        },
+        "format": "json"
+      },
+      "sources": [
+        {
+          "sha256": "9bfe35ccaaf5444cf9e966b1404b6b645ae8401df0d59100f3c7986586b292a4",
+          "bytes": 94,
+          "locator": {
+            "kind": "https",
+            "url": "https://fixtures.averray.invalid/structured-output-evidence-v1/source-0.txt"
+          },
+          "format": "text"
+        },
+        {
+          "sha256": "28e0000dc146417a25ed55b1a40f3a0e0874724a7232c29446d05be03482fd37",
+          "bytes": 74,
+          "locator": {
+            "kind": "https",
+            "url": "https://fixtures.averray.invalid/structured-output-evidence-v1/source-1.md"
+          },
+          "format": "markdown"
+        }
+      ]
+    },
+    "inputs": {
+      "citationsPointer": "/citations"
+    }
+  },
+  "artifacts": {
+    "output": "{\"title\":\"Averray verification shelf\",\"summary\":\"Three profiles are published.\",\"citations\":[{\"source\":0,\"quote\":\"The Verify shelf has three published profiles.\"},{\"source\":1,\"quote\":\"Each run costs five USDC.\"},{\"source\":0,\"quote\":\"Hashes are checked\\ninside the sealed runner.\"}]}",
+    "schema": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"title\",\"summary\",\"citations\"],\"properties\":{\"title\":{\"type\":\"string\"},\"summary\":{\"type\":\"string\"},\"citations\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"source\",\"quote\"],\"properties\":{\"source\":{\"type\":\"integer\",\"minimum\":0},\"quote\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":2048}}}}}}",
+    "sources": [
+      "The Verify shelf has three published profiles.\nHashes are checked   inside the sealed runner.\n",
+      "Pricing note:\nEach run costs five USDC.\nInconclusive runs are not billed.\n"
+    ]
+  },
+  "expected": {
+    "verdict": "pass",
+    "evidenceOutputs": [
+      "structured_output_integrity_pass",
+      "structured_schema_valid_pass",
+      "structured_schema_conformance_pass",
+      "structured_citation_resolution_pass",
+      "structured_quote_support_pass"
+    ]
+  }
+}

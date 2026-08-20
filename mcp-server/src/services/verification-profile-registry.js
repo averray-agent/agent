@@ -19,6 +19,7 @@ export const VERIFY_INCONCLUSIVE_REASONS = Object.freeze([
 
 export const GIT_PATCH_TESTS_PROFILE_REF = "git-patch-tests-v1@1";
 export const MCP_FAILURE_SEMANTICS_PROFILE_REF = "mcp-failure-semantics-v1@1";
+export const STRUCTURED_OUTPUT_EVIDENCE_PROFILE_REF = "structured-output-evidence-v1@1";
 
 export const MCP_FAILURE_SEMANTICS_CHECKS = Object.freeze([
   "auth-boundary",
@@ -27,6 +28,22 @@ export const MCP_FAILURE_SEMANTICS_CHECKS = Object.freeze([
   "destructive-action-safety",
   "error-shape-conformance"
 ]);
+
+export const STRUCTURED_OUTPUT_EVIDENCE_CHECKS = Object.freeze([
+  "output-integrity",
+  "schema-valid",
+  "schema-conformance",
+  "citation-resolution",
+  "quote-support"
+]);
+
+export const STRUCTURED_OUTPUT_EVIDENCE_OUTPUTS = Object.freeze({
+  "output-integrity": "structured_output_integrity_pass",
+  "schema-valid": "structured_schema_valid_pass",
+  "schema-conformance": "structured_schema_conformance_pass",
+  "citation-resolution": "structured_citation_resolution_pass",
+  "quote-support": "structured_quote_support_pass"
+});
 
 const GIT_ARTIFACT_SCHEMA = Object.freeze({
   type: "object",
@@ -171,9 +188,90 @@ const MCP_FAILURE_SEMANTICS_V1 = {
   }
 };
 
+const STRUCTURED_OUTPUT_EVIDENCE_V1 = {
+  name: "structured-output-evidence-v1",
+  version: 1,
+  handler: "deterministic",
+  handlerVersion: 1,
+  inputSchema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["target", "inputs"],
+    properties: {
+      target: {
+        type: "object",
+        additionalProperties: false,
+        required: ["output", "schema", "sources"],
+        properties: {
+          output: artifactSchema({ formats: ["json"] }),
+          schema: artifactSchema({ formats: ["json"] }),
+          sources: {
+            type: "array",
+            minItems: 1,
+            maxItems: 16,
+            items: artifactSchema({ formats: ["text", "markdown", "json"] })
+          }
+        }
+      },
+      inputs: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          citationsPointer: {
+            type: "string",
+            maxLength: 256,
+            pattern: "^(?:|(?:/(?:[^~/]|~[01])*)+)$"
+          }
+        }
+      }
+    }
+  },
+  successCriteria: {
+    statement: "The output document parsed as JSON, validated against the declared schema, and every cited quote appears verbatim (whitespace-normalized) in its referenced source artifact during one bounded check. Verbatim presence is not an assessment that the sources semantically support the claims, and this is not a certification.",
+    requiredEvidence: STRUCTURED_OUTPUT_EVIDENCE_CHECKS.map(
+      (name) => STRUCTURED_OUTPUT_EVIDENCE_OUTPUTS[name]
+    )
+  },
+  limits: {
+    timeoutMs: 30_000,
+    sizeBytes: 8_388_608,
+    outputSizeBytes: 1_048_576,
+    schemaSizeBytes: 262_144,
+    sourceSizeBytes: 2_097_152,
+    schemaDepth: 32,
+    cpuLimit: 1,
+    memoryMb: 256,
+    processLimit: 64,
+    temporaryStorageMb: 32,
+    outputLimitBytes: 512 * 1024
+  },
+  price: VERIFY_PROFILE_PRICE,
+  replayFixtureRef: "services/__fixtures__/structured-output-evidence-v1-known-good.json",
+  status: "published",
+  verifierConfig: {
+    version: 1,
+    handler: "deterministic",
+    expectedOutputs: STRUCTURED_OUTPUT_EVIDENCE_CHECKS.map(
+      (name) => STRUCTURED_OUTPUT_EVIDENCE_OUTPUTS[name]
+    ),
+    matchMode: "contains_all",
+    citationContract: {
+      pointerSyntax: "RFC 6901",
+      defaultPointer: "/citations",
+      array: "non_empty",
+      entry: { source: "zero_based_source_index", quote: "string_1_to_2048_characters" }
+    },
+    quoteNormalization: {
+      whitespace: "trim_then_collapse_runs_to_single_ascii_space",
+      caseFolding: false,
+      fuzzyMatching: false
+    }
+  }
+};
+
 export class VerificationProfileRegistry {
   constructor({
-    profiles = [GIT_PATCH_TESTS_V1, MCP_FAILURE_SEMANTICS_V1],
+    profiles = [GIT_PATCH_TESTS_V1, MCP_FAILURE_SEMANTICS_V1, STRUCTURED_OUTPUT_EVIDENCE_V1],
     autoDecidableModes = AUTO_DECIDABLE_MODES,
     availabilityByProfile = {}
   } = {}) {
@@ -241,6 +339,16 @@ export class VerificationProfileRegistry {
       availability: this.availability(profile.ref)
     })));
   }
+}
+
+function artifactSchema({ formats }) {
+  return {
+    ...GIT_ARTIFACT_SCHEMA,
+    properties: {
+      ...GIT_ARTIFACT_SCHEMA.properties,
+      format: { type: "string", enum: formats }
+    }
+  };
 }
 
 const AVAILABLE = deepFreeze({ status: "available" });
