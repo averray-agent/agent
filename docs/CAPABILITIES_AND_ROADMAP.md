@@ -38,7 +38,7 @@
 - **Security posture**: KMS-only signing, Roles Anywhere, 2-of-3 ceremonies with hash-verify law, gitleaks, internal audits remediated. **External audit: OPEN — the hard gate before general availability.** New standing law: green CI ≠ boots in its container — cross-package changes need container-level CI proof.
 
 ### Distribution
-- MCP front door (SIWE, registry-listed), discovery manifest (+ `/verify/profiles`), transparency page, operator app. **No public "Averray Verify" marketing page yet — a stranger can already buy; the page waits for the first stranger to have done so** (truth-boundary).
+- MCP front door (SIWE, registry-listed), discovery manifest (+ `/verify/profiles`), transparency page, operator app. **Public product pages COMMISSIONED 2026-08-20** (gate amended by Pascal: content discipline replaces page absence — no traction claims, demo receipts labeled, numbers fetched live; packet `PACKET_PUBLIC_DEMAND_SURFACES.md`). Until it ships, the demand side is still invisible at every discovery surface.
 
 ---
 
