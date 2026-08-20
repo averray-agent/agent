@@ -19,7 +19,7 @@ const PROFILE_CURL = `curl -s https://api.averray.com/verify/profiles`;
     <SiteNav />
 
     <header class="page-hero">
-      <p class="eyebrow">Verify</p>
+      <p class="eyebrow">Paid verification runs</p>
       <h1 class="page-hero__title">Verify</h1>
       <p class="page-hero__lede">{PAGE_DESCRIPTION}</p>
     </header>
@@ -27,22 +27,22 @@ const PROFILE_CURL = `curl -s https://api.averray.com/verify/profiles`;
     <section class="section" aria-labelledby="verify-how">
       <div class="section__head">
         <div>
-          <p class="eyebrow">How it works</p>
+          <p class="eyebrow">Four steps</p>
           <h2 class="section__title" id="verify-how">How it works</h2>
         </div>
       </div>
       <ol class="steps">
-        <li>x402 402.</li>
-        <li>Offline EIP-3009 authorize.</li>
-        <li>Sealed run.</li>
-        <li>Capture only on decisive; inconclusive runs are never billed — we issue a receipt of NOT charging you.</li>
+        <li>Request a run. The API answers with an x402 payment challenge — the flat price for that profile, in USDC on Base.</li>
+        <li>Authorize offline. You sign an EIP-3009 payment authorization; no on-chain transaction and no gas on your side.</li>
+        <li>A sealed runner executes the pinned profile — pinned image, no network, read-only filesystem.</li>
+        <li>Payment is captured only on a decisive verdict. Inconclusive runs are never billed, and you get a receipt of not being charged.</li>
       </ol>
     </section>
 
     <section class="section" aria-labelledby="verify-profiles-heading">
       <div class="section__head">
         <div>
-          <p class="eyebrow">Profiles + pricing</p>
+          <p class="eyebrow">Live from the API</p>
           <h2 class="section__title" id="verify-profiles-heading">Profiles + pricing</h2>
         </div>
       </div>
@@ -54,7 +54,7 @@ const PROFILE_CURL = `curl -s https://api.averray.com/verify/profiles`;
 
     <section class="section" data-receipt-proof aria-labelledby="verify-receipts">
       <div class="receipts-strip">
-        <p class="eyebrow">Receipt proof</p>
+        <p class="eyebrow">Evidence</p>
         <h2 class="section__title" id="verify-receipts">Receipt proof</h2>
         <div class="link-row">
           <a href={`https://averray.com/receipts/${SETTLED_RECEIPT}`}>Settled work receipt</a>
@@ -66,7 +66,7 @@ const PROFILE_CURL = `curl -s https://api.averray.com/verify/profiles`;
     <section class="section" aria-labelledby="verify-start">
       <div class="section__head">
         <div>
-          <p class="eyebrow">Get started</p>
+          <p class="eyebrow">Two doors</p>
           <h2 class="section__title" id="verify-start">Get started</h2>
         </div>
         <p class="section__aside">Permissionless, in-protocol SIWE.</p>
@@ -74,7 +74,7 @@ const PROFILE_CURL = `curl -s https://api.averray.com/verify/profiles`;
       <div class="pillars">
         <article class="pillar">
           <p class="pillar__eyebrow">MCP endpoint</p>
-          <div class="link-row"><a href="https://api.averray.com/mcp">https://api.averray.com/mcp</a></div>
+          <pre class="codeblock"><code>https://api.averray.com/mcp</code></pre>
         </article>
         <article class="pillar">
           <p class="pillar__eyebrow">List profiles over HTTP</p>
