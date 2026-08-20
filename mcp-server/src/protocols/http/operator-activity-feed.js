@@ -1,4 +1,5 @@
 import { OPERATOR_SIGNERS } from "../../core/builtin-policies.js";
+import { isInternalPlatformFaultRemediation } from "../../core/platform-fault-remediation.js";
 
 export function createOperatorActivityFeed({
   defaultVerifierAddress,
@@ -204,7 +205,10 @@ export async function listAlerts({
       ctaHref: "/policies"
     });
   }
-  const submitted = sessions.filter((session) => ["submitted", "disputed"].includes(session.status));
+  const submitted = sessions.filter((session) =>
+    ["submitted", "disputed"].includes(session.status)
+    && !isInternalPlatformFaultRemediation(session)
+  );
   for (const session of submitted.slice(0, Math.max(0, limit - alerts.length))) {
     alerts.push({
       id: `alert-session-${session.sessionId}`,

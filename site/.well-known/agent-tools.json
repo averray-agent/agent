@@ -757,6 +757,10 @@
       "description": "Admin/operator-wide recent sessions across worker wallets."
     },
     {
+      "path": "/admin/platform-fault-remediations",
+      "description": "Admin-gated internal queue of platform-fault escalations awaiting out-of-band hardware-arbitrator signatures."
+    },
+    {
       "path": "/admin/treasury/summary",
       "description": "Admin-gated live credit, strategy lane, XCM observer, and TreasuryPolicy summary."
     },

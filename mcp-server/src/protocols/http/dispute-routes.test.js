@@ -3,6 +3,7 @@ import test from "node:test";
 import { AuthorizationError, ConfigError, ValidationError } from "../../core/errors.js";
 import { disputeIdForSession } from "../../core/dispute-resolution.js";
 import { buildJobSnapshot } from "../../core/job-snapshot.js";
+import { platformFaultRemediationIdForSession } from "../../core/platform-fault-remediation.js";
 import { createDisputeRoutes } from "./dispute-routes.js";
 
 const ADMIN = "0x1111111111111111111111111111111111111111";
@@ -35,6 +36,7 @@ function makeHarness(overrides = {}) {
   const calls = [];
   const response = {};
   const receipts = new Map(Object.entries(overrides.receipts ?? {}));
+  const platformFaultRemediations = new Map(Object.entries(overrides.platformFaultRemediations ?? {}));
   const auth = overrides.auth ?? { wallet: ADMIN, claims: { roles: ["admin"] } };
   const jobs = overrides.jobs ?? new Map([[JOB.id, JOB]]);
   const sessions = (overrides.sessions ?? [SESSION]).map((session) => {
@@ -134,6 +136,7 @@ function makeHarness(overrides = {}) {
       },
     },
     stateStore: {
+      getPlatformFaultRemediation: async (id) => platformFaultRemediations.get(id),
       getMutationReceipt: async (bucket, key) => {
         calls.push(["getMutationReceipt", { bucket, key }]);
         return receipts.get(`${bucket}:${key}`);
@@ -219,6 +222,49 @@ test("GET /disputes authenticates, parses limit, and returns open and receipt-ba
   assert.equal(response.body[1].arbitration.release.ready, true);
   assert.ok(calls.some(([name, detail]) => name === "parseLimit" && detail.limit === "7"));
   assert.ok(calls.some(([name]) => name === "authMiddleware"));
+});
+
+test("GET /disputes excludes marked and checkpoint-only internal platform-fault remediations", async () => {
+  const internal = {
+    ...SESSION,
+    sessionId: "session-internal-remediation",
+    internalRemediation: {
+      kind: "platform_fault_internal_remediation",
+      origin: "platform_fault",
+      id: "platform-fault-abc",
+      status: "awaiting_hardware_arbitrator",
+      workerInitiated: false,
+      workerConsequence: "none"
+    }
+  };
+  const checkpointOnly = {
+    ...SESSION,
+    sessionId: "session-internal-checkpoint-only"
+  };
+  const checkpointId = platformFaultRemediationIdForSession(checkpointOnly.sessionId);
+  const { response, route } = makeHarness({
+    sessions: [SESSION, internal, checkpointOnly],
+    platformFaultRemediations: {
+      [checkpointId]: {
+        id: checkpointId,
+        kind: "platform_fault_internal_remediation",
+        origin: "platform_fault",
+        workerInitiated: false,
+        workerConsequence: "none",
+        sessionId: checkpointOnly.sessionId,
+        status: "dispute_opened"
+      }
+    }
+  });
+
+  await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/disputes"),
+    pathname: "/disputes"
+  });
+
+  assert.deepEqual(response.body.map((dispute) => dispute.sessionId), [SESSION.sessionId]);
 });
 
 test("GET /disputes exposes github_pr to human_fallback escalation provenance", async () => {

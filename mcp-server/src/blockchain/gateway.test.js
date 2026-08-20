@@ -171,6 +171,35 @@ test("resolveDispute uses the arbitrator signer contract when configured", async
   assert.deepEqual(receipt, { txHash: "0xresolve", blockNumber: 8, status: 1 });
 });
 
+test("prepareResolveDispute emits exact raw calldata without an online arbitrator signer", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const iface = new Interface([
+    "function resolveDispute(bytes32 jobId,uint256 workerPayout,bytes32 reasonCode,string metadataURI)"
+  ]);
+  gateway.arbitratorSigner = undefined;
+  gateway.readEscrowJob = async () => ({
+    escrowAddress: "0x4444444444444444444444444444444444444444"
+  });
+  gateway.escrowContractForLiveJob = () => ({ interface: iface });
+  const jobId = `0x${"11".repeat(32)}`;
+  const metadataURI = `https://api.example.test/content/0x${"22".repeat(32)}`;
+
+  const prepared = await gateway.prepareResolveDispute(
+    jobId,
+    "9007199254740993",
+    "PLATFORM_FAULT_REMEDIATION",
+    metadataURI
+  );
+  const decoded = iface.decodeFunctionData("resolveDispute", prepared.data);
+
+  assert.equal(prepared.to, "0x4444444444444444444444444444444444444444");
+  assert.equal(prepared.value, "0");
+  assert.equal(decoded[0], jobId);
+  assert.equal(decoded[1], 9007199254740993n);
+  assert.equal(decoded[2], gateway.toDisputeReasonCode("PLATFORM_FAULT_REMEDIATION"));
+  assert.equal(decoded[3], metadataURI);
+});
+
 test("resolveDispute fails closed when no arbitrator signer exists", async () => {
   const gateway = new BlockchainGateway({ enabled: false });
   let resolveCalls = 0;

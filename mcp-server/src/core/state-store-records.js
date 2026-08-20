@@ -112,3 +112,19 @@ export function filterCapabilityGrantRecords(records, { status } = {}) {
     return true;
   });
 }
+
+export function listPlatformFaultRemediationRecords(
+  records,
+  { status, limit = 100, offset = 0 } = {}
+) {
+  const normalizedStatus = status ? String(status).trim().toLowerCase() : undefined;
+  return sliceWindow(
+    [...records]
+      .filter(Boolean)
+      .filter((record) => !normalizedStatus
+        || String(record.status ?? "").toLowerCase() === normalizedStatus)
+      .sort((left, right) => String(right.queuedAt ?? right.updatedAt ?? "")
+        .localeCompare(String(left.queuedAt ?? left.updatedAt ?? ""))),
+    { limit, offset }
+  );
+}

@@ -179,7 +179,7 @@ test("verifySubmission passes the actual claimant wallet and claim session to th
   });
 });
 
-test("inconclusive and platform_fault verifier outcomes never invoke settlement", async () => {
+test("inconclusive never settles and platform_fault stops after opening its internal remediation", async () => {
   for (const outcome of ["inconclusive", "platform_fault"]) {
     const stateStore = new MemoryStateStore();
     const job = {
@@ -194,7 +194,10 @@ test("inconclusive and platform_fault verifier outcomes never invoke settlement"
       submission: "evidence"
     }, job), "claimed", { reason: "job_claimed" });
     await stateStore.upsertSession(transitionSession(claimed, "submitted", { reason: "work_submitted" }));
-    let settlementCalls = 0;
+    let chainState = 3;
+    let rejectionCalls = 0;
+    let openDisputeCalls = 0;
+    let arbitratorSettlementCalls = 0;
     let ingested;
     const service = new VerifierService(
       {
@@ -207,8 +210,34 @@ test("inconclusive and platform_fault verifier outcomes never invoke settlement"
       stateStore,
       {
         isEnabled: () => true,
-        getJob: async () => ({ state: 3, specHash: claimed.jobSnapshot.specHash }),
-        resolveSinglePayout: async () => { settlementCalls += 1; }
+        getJob: async () => ({
+          state: chainState,
+          specHash: claimed.jobSnapshot.specHash,
+          worker: claimed.wallet,
+          asset: "0x0000053900000000000000000000000001200000",
+          reward: 1,
+          rewardRaw: "1000000",
+          released: 0,
+          releasedRaw: "0"
+        }),
+        prepareResolveDispute: async () => ({
+          to: "0x4444444444444444444444444444444444444444",
+          value: "0",
+          data: "0x1234"
+        }),
+        resolveSinglePayout: async () => {
+          rejectionCalls += 1;
+          chainState = 4;
+          return { txHash: "0xreject", status: 1 };
+        },
+        openDispute: async () => {
+          openDisputeCalls += 1;
+          chainState = 5;
+          return { txHash: "0xopen", status: 1 };
+        },
+        resolveDispute: async () => {
+          arbitratorSettlementCalls += 1;
+        }
       },
       {
         evaluate: async () => ({
@@ -223,7 +252,9 @@ test("inconclusive and platform_fault verifier outcomes never invoke settlement"
 
     const result = await service.verifySubmission({ sessionId: claimed.sessionId });
     assert.equal(result.outcome, outcome);
-    assert.equal(settlementCalls, 0);
+    assert.equal(rejectionCalls, outcome === "platform_fault" ? 1 : 0);
+    assert.equal(openDisputeCalls, outcome === "platform_fault" ? 1 : 0);
+    assert.equal(arbitratorSettlementCalls, 0);
     assert.equal(ingested.options.payoutTx, undefined);
   }
 });

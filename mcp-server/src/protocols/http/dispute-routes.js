@@ -14,6 +14,10 @@ import {
   assertJobSnapshotIntegrity,
   requireJobSnapshot
 } from "../../core/job-snapshot.js";
+import {
+  isInternalPlatformFaultRemediation,
+  platformFaultRemediationIdForSession
+} from "../../core/platform-fault-remediation.js";
 
 function compactObject(value) {
   return Object.fromEntries(
@@ -228,6 +232,17 @@ export function createDisputeRoutes({
     ]);
     const candidates = await Promise.all(
       sessions.map(async (session) => {
+        const durableRemediation = typeof stateStore.getPlatformFaultRemediation === "function"
+          ? await stateStore.getPlatformFaultRemediation(
+              platformFaultRemediationIdForSession(session.sessionId)
+            )
+          : undefined;
+        if (
+          isInternalPlatformFaultRemediation(session)
+          || isInternalPlatformFaultRemediation(durableRemediation)
+        ) {
+          return undefined;
+        }
         if (session.status === "disputed") {
           return session;
         }

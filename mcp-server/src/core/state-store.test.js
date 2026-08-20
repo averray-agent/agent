@@ -158,6 +158,32 @@ test("MemoryStateStore mutation receipts round-trip", async () => {
   assert.deepEqual(loaded, receipt);
 });
 
+test("MemoryStateStore keeps a durable, filterable platform-fault remediation queue", async () => {
+  const store = new MemoryStateStore();
+  await store.upsertPlatformFaultRemediation({
+    id: "remediation-old",
+    status: "escalating",
+    queuedAt: "2026-08-20T09:00:00.000Z"
+  });
+  await store.upsertPlatformFaultRemediation({
+    id: "remediation-ready",
+    status: "awaiting_hardware_arbitrator",
+    queuedAt: "2026-08-20T10:00:00.000Z"
+  });
+
+  assert.deepEqual(
+    (await store.listPlatformFaultRemediations({ status: "awaiting_hardware_arbitrator" }))
+      .map((record) => record.id),
+    ["remediation-ready"]
+  );
+  const fetched = await store.getPlatformFaultRemediation("remediation-ready");
+  fetched.status = "mutated-copy";
+  assert.equal(
+    (await store.getPlatformFaultRemediation("remediation-ready")).status,
+    "awaiting_hardware_arbitrator"
+  );
+});
+
 test("MemoryStateStore badge documents are write-once and cloned", async () => {
   const store = new MemoryStateStore();
   const original = { averray: { sessionId: "session-1", category: "security" } };

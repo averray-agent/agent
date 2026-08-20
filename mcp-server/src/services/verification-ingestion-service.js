@@ -9,6 +9,7 @@ import { buildBadgeFromSession, buildBadgeJobSnapshot } from "../core/badge-meta
 import { buildRunReceipt } from "../core/run-receipt.js";
 import { buildWorkReceipt } from "../core/work-receipt.js";
 import { requireJobSnapshot } from "../core/job-snapshot.js";
+import { isInternalPlatformFaultRemediation } from "../core/platform-fault-remediation.js";
 
 export class VerificationIngestionService {
   constructor(stateStore, eventBus = undefined, _legacyDefinitionResolver = undefined, logger = undefined, options = {}) {
@@ -61,6 +62,9 @@ export class VerificationIngestionService {
         : "rejected";
 
     const badgeSnapshot = session.badgeSnapshot ?? buildBadgeJobSnapshot(job);
+    const internalRemediation = isInternalPlatformFaultRemediation(verdict)
+      ? verdict.internalRemediation
+      : undefined;
     const transitioned = transitionSession({
       ...session,
       // Money-path invariant: the first write that makes a session terminal
@@ -69,6 +73,7 @@ export class VerificationIngestionService {
       // the second write failed.
       ...(payoutTx ? { payoutTx } : {}),
       ...(badgeSnapshot ? { badgeSnapshot } : {}),
+      ...(internalRemediation ? { internalRemediation } : {}),
       verificationSummary: {
         outcome: verdict.outcome,
         reasonCode: verdict.reasonCode,
@@ -79,7 +84,7 @@ export class VerificationIngestionService {
         verifierConfigVersion: auditFields.verifierConfigVersion
       }
     }, status, {
-      reason: "verification_resolved",
+      reason: internalRemediation ? "platform_fault_internal_remediation" : "verification_resolved",
       metadata: {
         outcome: verdict.outcome,
         reasonCode: verdict.reasonCode,
@@ -87,7 +92,12 @@ export class VerificationIngestionService {
         ...(verdict.escalatedFrom ? { escalatedFrom: verdict.escalatedFrom } : {}),
         handlerVersion: auditFields.handlerVersion ?? verdict.handlerVersion,
         verifierPolicyVersion: auditFields.verifierPolicyVersion,
-        verifierConfigVersion: auditFields.verifierConfigVersion
+        verifierConfigVersion: auditFields.verifierConfigVersion,
+        ...(internalRemediation ? {
+          internalRemediationId: internalRemediation.id,
+          workerInitiated: false,
+          workerConsequence: "none"
+        } : {})
       }
     });
     const verificationRecord = {
@@ -141,7 +151,12 @@ export class VerificationIngestionService {
         escalatedFrom: verdict.escalatedFrom,
         handlerVersion: auditFields.handlerVersion ?? verdict.handlerVersion,
         verifierPolicyVersion: auditFields.verifierPolicyVersion,
-        verifierConfigVersion: auditFields.verifierConfigVersion
+        verifierConfigVersion: auditFields.verifierConfigVersion,
+        ...(internalRemediation ? {
+          internalRemediationId: internalRemediation.id,
+          workerInitiated: false,
+          workerConsequence: "none"
+        } : {})
       }
     });
     this.publishWorkflowOutcomeEvent(updatedSession, verdict, auditFields, status, eventTimestamp);
@@ -270,8 +285,11 @@ export class VerificationIngestionService {
       return;
     }
 
-    const disputed = status === "disputed";
-    const topic = disputed
+    const internalRemediation = isInternalPlatformFaultRemediation(session);
+    const disputed = status === "disputed" && !internalRemediation;
+    const topic = internalRemediation
+      ? "platform.remediation_session_linked"
+      : disputed
       ? "dispute.opened"
       : status === "resolved"
         ? "settlement.session_resolved"
@@ -298,7 +316,10 @@ export class VerificationIngestionService {
         handlerVersion: auditFields.handlerVersion ?? verdict.handlerVersion,
         verifierPolicyVersion: auditFields.verifierPolicyVersion,
         verifierConfigVersion: auditFields.verifierConfigVersion,
-        disputeId: disputed ? disputeIdForSession(session.sessionId) : undefined
+        disputeId: disputed ? disputeIdForSession(session.sessionId) : undefined,
+        internalRemediationId: internalRemediation ? session.internalRemediation.id : undefined,
+        workerInitiated: internalRemediation ? false : undefined,
+        workerConsequence: internalRemediation ? "none" : undefined
       }
     });
   }
