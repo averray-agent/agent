@@ -51,6 +51,10 @@ function makeHarness(overrides = {}) {
       res.body = body;
     },
     service: {
+      listXcmFinalizeExhausted: async (limit) => {
+        calls.push(["listXcmFinalizeExhausted", { limit }]);
+        return overrides.exhausted ?? [];
+      },
       observeXcmOutcome: async (requestId, outcome) => {
         calls.push(["observeXcmOutcome", { requestId, outcome }]);
         return overrides.observed ?? { requestId, ...outcome, observed: true };
@@ -88,6 +92,25 @@ test("admin XCM routes ignore unrelated paths", async () => {
   assert.equal(handled, false);
   assert.deepEqual(calls, []);
   assert.deepEqual(response, {});
+});
+
+test("GET /admin/xcm/finalize-exhausted lists parked requests for ops", async () => {
+  const exhausted = [{ requestId: REQUEST_ID, finalizeState: "finalize_exhausted", attemptCount: 5 }];
+  const { calls, response, route } = makeHarness({ exhausted });
+
+  const handled = await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/admin/xcm/finalize-exhausted?limit=25"),
+    pathname: "/admin/xcm/finalize-exhausted"
+  });
+
+  assert.equal(handled, true);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, { count: 1, items: exhausted });
+  assert.deepEqual(calls.find(([name]) => name === "auth")?.[1], { requireRole: "admin" });
+  assert.deepEqual(calls.find(([name]) => name === "listXcmFinalizeExhausted")?.[1], { limit: 25 });
+  assert.ok(!calls.some(([name]) => name === "limit"), "read-only ops listing must not consume mutation quota");
 });
 
 test("POST /admin/xcm/observe records an observation and stores idempotent receipt", async () => {

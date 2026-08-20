@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { encodeBytes32String, id, Interface } from "ethers";
 
 import { BlockchainGateway } from "./gateway.js";
-import { ConfigError, InsufficientLiquidityError, ValidationError } from "../core/errors.js";
+import { BlockchainRevertError, ConfigError, InsufficientLiquidityError, ValidationError } from "../core/errors.js";
 import { EXTERNAL_SCHEMA_EIP712_VERSION } from "../core/job-schema-registry.js";
 
 const DOT_ASSET = {
@@ -39,6 +39,20 @@ function emptyPosition(overrides = {}) {
     ...overrides
   };
 }
+
+test("finalizeXcmRequest errors decode XcmWrapperV22 InvalidStatus from revert data", () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const revert = new Error("execution reverted (unknown custom error)");
+  revert.code = "CALL_EXCEPTION";
+  revert.data = id("InvalidStatus()").slice(0, 10);
+
+  const wrapped = gateway.wrapGatewayError("finalizeXcmRequest", revert);
+
+  assert.ok(wrapped instanceof BlockchainRevertError);
+  assert.match(wrapped.message, /XcmWrapperV22\.InvalidStatus\(\)/u);
+  assert.equal(wrapped.details.customError, "InvalidStatus");
+  assert.doesNotMatch(wrapped.message, /unknown custom error/u);
+});
 
 test("toDisputeReasonCode uses Solidity bytes32 string encoding", () => {
   const gateway = new BlockchainGateway({ enabled: false });

@@ -304,6 +304,23 @@ export const HYDRATION_USDC_ADAPTER_V22_ABI = [
 ];
 
 export const XCM_WRAPPER_ABI = [
+  // Keep this error block copied verbatim from contracts/XcmWrapperV22.sol.
+  // abis.test.js compares the complete Solidity error set so new wrapper
+  // errors cannot silently fall back to ethers' "unknown custom error".
+  "error Unauthorized()",
+  "error ProtocolPaused()",
+  "error UnknownRequest()",
+  "error InvalidRequest()",
+  "error InvalidStatus()",
+  "error InvalidTransition()",
+  "error InvalidSettlement()",
+  "error InvalidConfiguration()",
+  "error PlanMismatch()",
+  "error FeeAboveMaximum()",
+  "error DispatchDeadlineExpired()",
+  "error XcmPrecompileUnavailable()",
+  "error XcmDispatchFailed(bytes reason)",
+  "error CustodyMismatch()",
   "function strategyAdapter(bytes32 strategyId) view returns (address)",
   "function weighMessage(bytes message) view returns ((uint64 refTime, uint64 proofSize))",
   "function getRequest(bytes32 requestId) view returns (((bytes32 strategyId, uint8 kind, address account, address asset, address recipient, uint256 assets, uint256 shares, uint64 nonce) context, address queuedBy, uint8 status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode, uint64 createdAt, uint64 updatedAt))",

@@ -1899,6 +1899,13 @@ export class PlatformService {
     });
   }
 
+  async listXcmFinalizeExhausted(limit = 50) {
+    if (!this.xcmSettlementWatcher) {
+      throw new ValidationError("XCM finalize exhaustion listing requires the settlement watcher.");
+    }
+    return this.xcmSettlementWatcher.listFinalizeExhausted(limit);
+  }
+
   async backfillBankXcmWatch(requestId, options = {}) {
     if (!this.bankXcmRuntime) {
       throw new ValidationError("Bank v2.2 runtime is disabled; watch backfill is unavailable.");

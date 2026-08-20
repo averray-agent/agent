@@ -5,6 +5,8 @@ import { MemoryStateStore } from "../core/state-store.js";
 import { EventBus } from "../core/event-bus.js";
 import { XcmSettlementWatcherService as BaseXcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
 import { ValidationError } from "../core/errors.js";
+import { id } from "ethers";
+import { decodeXcmWrapperRevert } from "../blockchain/xcm-wrapper-errors.js";
 
 const REQUEST_ID = "0x1111111111111111111111111111111111111111111111111111111111111111";
 const REQUEST_ID_2 = "0x2222222222222222222222222222222222222222222222222222222222222222";
@@ -12,7 +14,10 @@ const WRAPPER = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 class XcmSettlementWatcherService extends BaseXcmSettlementWatcherService {
   constructor(platformService, stateStore, eventBus, options = {}) {
-    super(platformService, stateStore, eventBus, { expectedWrapper: WRAPPER, ...options });
+    super({
+      getXcmRequest: async (requestId) => ({ requestId, status: 1, statusLabel: "pending" }),
+      ...platformService
+    }, stateStore, eventBus, { expectedWrapper: WRAPPER, ...options });
   }
 }
 
@@ -117,6 +122,130 @@ test("runPendingSettlements finalizes stored observations and marks them process
   assert.equal(events[0].data.source, "observer");
 });
 
+test("reconcile-before-finalize drains five already-terminal requests on the first sweep", async () => {
+  const requestIds = Array.from({ length: 5 }, (_, index) =>
+    `0x${String(index + 1).repeat(64)}`
+  );
+  const failureCode = `0x51554f54${"0".repeat(56)}`;
+  const stateStore = new MemoryStateStore();
+  const eventBus = new EventBus();
+  const reconciledEvents = [];
+  eventBus.subscribe({ topics: ["xcm.request_reconciled_terminal"] }, (event) => reconciledEvents.push(event));
+  let finalizeCalls = 0;
+  const watcher = new XcmSettlementWatcherService(
+    {
+      getXcmRequest: async (requestId) => {
+        const failed = requestId === requestIds.at(-1);
+        return {
+          requestId,
+          account: "0x1111111111111111111111111111111111111111",
+          status: failed ? 3 : 2,
+          statusLabel: failed ? "failed" : "succeeded",
+          settledAssetsRaw: failed ? "0" : "100000",
+          settledSharesRaw: failed ? "0" : "100000",
+          remoteRef: `0x${"12".repeat(32)}`,
+          failureCode: failed ? failureCode : undefined,
+          failureCodeLabel: failed ? "QUOT" : undefined
+        };
+      },
+      finalizeXcmRequest: async () => {
+        finalizeCalls += 1;
+        throw new Error("terminal requests must never be finalized");
+      }
+    },
+    stateStore,
+    eventBus,
+    { enabled: false, logger: { info() {} } }
+  );
+  for (const requestId of requestIds) {
+    await watcher.observeOutcome(requestId, { status: "succeeded", settledAssets: 1 });
+  }
+
+  const results = await watcher.runPendingSettlements();
+  await watcher.runPendingSettlements();
+
+  assert.equal(results.length, 5);
+  assert.equal(finalizeCalls, 0);
+  assert.equal((await stateStore.listPendingXcmObservations()).length, 0);
+  assert.equal(reconciledEvents.length, 5, "each terminal request emits exactly one reconciliation row");
+  assert.deepEqual(reconciledEvents.map((event) => event.data.onChainStatus), [
+    "succeeded", "succeeded", "succeeded", "succeeded", "failed"
+  ]);
+  assert.equal(reconciledEvents.at(-1).data.failureCode, failureCode);
+  assert.equal(reconciledEvents.at(-1).data.failureCodeLabel, "QUOT");
+  const failed = await stateStore.getXcmObservation(WRAPPER, requestIds.at(-1));
+  assert.equal(failed.processed, true);
+  assert.equal(failed.finalizeState, "reconciled_terminal");
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.failureCode, failureCode);
+});
+
+test("mutation drill: reconcile guard prevents repeated finalize attempts against an already-Succeeded request", async () => {
+  const stateStore = new MemoryStateStore();
+  let nowMs = Date.parse("2026-08-20T02:58:00.000Z");
+  let finalizeCalls = 0;
+  const watcher = new XcmSettlementWatcherService(
+    {
+      getXcmRequest: async (requestId) => ({
+        requestId,
+        status: 2,
+        statusLabel: "succeeded",
+        settledAssetsRaw: "5",
+        settledSharesRaw: "0"
+      }),
+      finalizeXcmRequest: async () => {
+        finalizeCalls += 1;
+        throw new Error("InvalidStatus");
+      }
+    },
+    stateStore,
+    undefined,
+    {
+      enabled: false,
+      retryBaseMs: 1,
+      retryMaxMs: 1,
+      now: () => nowMs,
+      logger: { info() {}, warn() {}, error() {} }
+    }
+  );
+  await watcher.observeOutcome(REQUEST_ID, { status: "succeeded", settledAssets: 5 });
+
+  await watcher.runPendingSettlements();
+  nowMs += 2;
+  await watcher.runPendingSettlements();
+
+  assert.equal(finalizeCalls, 0, "removing the terminal reconcile guard causes two finalize attempts");
+  assert.equal((await stateStore.getXcmObservation(WRAPPER, REQUEST_ID)).finalizeState, "reconciled_terminal");
+});
+
+test("reconcile-before-finalize treats an on-chain Cancelled request as terminal", async () => {
+  const stateStore = new MemoryStateStore();
+  let finalizeCalls = 0;
+  const watcher = new XcmSettlementWatcherService(
+    {
+      getXcmRequest: async (requestId) => ({
+        requestId,
+        status: 4,
+        statusLabel: "cancelled",
+        settledAssetsRaw: "0",
+        settledSharesRaw: "0"
+      }),
+      finalizeXcmRequest: async () => {
+        finalizeCalls += 1;
+      }
+    },
+    stateStore,
+    undefined,
+    { enabled: false, logger: { info() {} } }
+  );
+  await watcher.observeOutcome(REQUEST_ID, { status: "cancelled" });
+
+  await watcher.runPendingSettlements();
+
+  assert.equal(finalizeCalls, 0);
+  assert.equal((await stateStore.getXcmObservation(WRAPPER, REQUEST_ID)).status, "cancelled");
+});
+
 test("runPendingSettlements serializes concurrent triggers and drains queued observations", async () => {
   const stateStore = new MemoryStateStore();
   const finalizedCalls = [];
@@ -209,6 +338,83 @@ test("runPendingSettlements emits a request_finalize_failed event with correlati
   assert.equal(events[0].correlationId, REQUEST_ID);
   assert.equal(events[0].data.requestId, REQUEST_ID);
   assert.match(events[0].data.message, /downstream settle failed/u);
+});
+
+test("InvalidStatus custom-error selector is decoded and named in the observer row", async () => {
+  const stateStore = new MemoryStateStore();
+  const eventBus = new EventBus();
+  const events = [];
+  eventBus.subscribe({ topics: ["xcm.request_finalize_failed"] }, (event) => events.push(event));
+  const revert = new Error("execution reverted (unknown custom error)");
+  revert.code = "CALL_EXCEPTION";
+  revert.data = id("InvalidStatus()").slice(0, 10);
+  const decoded = decodeXcmWrapperRevert(revert);
+  const decodedError = new Error(`finalizeXcmRequest failed: ${decoded.reason}`);
+  decodedError.details = { customError: decoded.name };
+  const watcher = new XcmSettlementWatcherService(
+    {
+      finalizeXcmRequest: async () => {
+        throw decodedError;
+      }
+    },
+    stateStore,
+    eventBus,
+    { enabled: false, logger: { warn() {} } }
+  );
+  await watcher.observeOutcome(REQUEST_ID, { status: "succeeded", settledAssets: 5 });
+
+  await watcher.runPendingSettlements();
+
+  assert.equal(events.length, 1);
+  assert.match(events[0].data.message, /XcmWrapperV22\.InvalidStatus\(\)/u);
+  assert.doesNotMatch(events[0].data.message, /unknown custom error/u);
+  assert.equal(events[0].data.customError, "InvalidStatus");
+});
+
+test("finalize attempt exhaustion parks the request and the ops listing exposes it", async () => {
+  const stateStore = new MemoryStateStore();
+  const eventBus = new EventBus();
+  const exhaustedEvents = [];
+  eventBus.subscribe({ topics: ["xcm.request_finalize_exhausted"] }, (event) => exhaustedEvents.push(event));
+  let nowMs = Date.parse("2026-08-20T03:00:00.000Z");
+  let finalizeCalls = 0;
+  const watcher = new XcmSettlementWatcherService(
+    {
+      finalizeXcmRequest: async () => {
+        finalizeCalls += 1;
+        throw new Error("permanent future revert class");
+      }
+    },
+    stateStore,
+    eventBus,
+    {
+      enabled: false,
+      maxFinalizeAttempts: 2,
+      retryBaseMs: 1,
+      retryMaxMs: 1,
+      now: () => nowMs,
+      logger: { warn() {}, error() {} }
+    }
+  );
+  await watcher.observeOutcome(REQUEST_ID, { status: "succeeded", settledAssets: 5 });
+
+  await watcher.runPendingSettlements();
+  nowMs += 2;
+  await watcher.runPendingSettlements();
+  nowMs += 2;
+  await watcher.runPendingSettlements();
+
+  const stored = await stateStore.getXcmObservation(WRAPPER, REQUEST_ID);
+  const parked = await watcher.listFinalizeExhausted();
+  assert.equal(finalizeCalls, 2);
+  assert.equal(stored.processed, true);
+  assert.equal(stored.finalizeState, "finalize_exhausted");
+  assert.equal(stored.attemptCount, 2);
+  assert.equal((await stateStore.listPendingXcmObservations()).length, 0);
+  assert.equal(parked.length, 1);
+  assert.equal(parked[0].requestId, REQUEST_ID);
+  assert.equal(exhaustedEvents.length, 1);
+  assert.equal(exhaustedEvents[0].data.finalizeState, "finalize_exhausted");
 });
 
 test("failed finalization retries with exponential backoff and then recovers", async () => {
