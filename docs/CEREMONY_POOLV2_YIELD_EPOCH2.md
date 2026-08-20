@@ -109,3 +109,30 @@ must first recall.
 | Pool lane position moved | **wrong lane touched** | Stop immediately, capture evidence, page Claude |
 
 Last row is the only incident. Everything else is the async design behaving.
+
+
+---
+
+# §A EXECUTED — 2026-08-19 → 2026-08-20
+
+**The 10 USDC is home. Ledger closes to zero unexplained raw units.**
+
+| Leg | What | Evidence |
+| --- | --- | --- |
+| A (multisig) | staged all 10,000,001 shares | second §8 operation, hash `0x33950729…`, blk 19647240 (first two attempts died on under-measured **proofSize** — 100k, then 116.8k vs measured 884,341; the law is now measured-per-call) |
+| B (KMS) | dispatch → par sale at Hydration → home → **auto-settle on arrival** | wrapper emissions blks 19649996/19650009; adapter settle event blk 19650022 = **9,998,432**; the driver's manual settle phase was preempted by the adapter's auto-settle — completion evidence reconstructed FROM CHAIN, then Leg C's builder re-verified the arrival against live balances anyway |
+| C (multisig) | transfer exact arrival → KMS signer | hash `0x4b3407c7…`, executed 2026-08-20 08:17, multisig closed at its exact opening 0.878804 |
+| D (KMS) | deposit → reward bank | txs `0xe09b84f3…`/`0xc87af0ac…` blks 19672968/70 |
+
+**Reconciliation:** sold 10,000,001 aUSDC at exact par (quote and fill identical) →
+arrived 9,998,432 → in-flight cost **1,569 raw (0.0016 USDC)** → transferred and
+deposited **exactly**. Venue residual 11,140 stays at the deployment account
+(accrual + fee refund — operator yield on operator capital). Pool lane
+**untouched throughout**: 4,950,004 backing intact. Reward bank
+10.775090 → **20.773522**. EOA back to 0.01 dust, allowances all zero, multisig
+at its opening. v1 book: **0**.
+
+**Remaining cleanliness (one small Nova call, any future session):**
+`XcmWrapper.setStrategyAdapter(HYDRATION_USDC_V1, 0x0)` — deregister the empty
+v1 lane so the treasury posture reads Green rather than carrying a
+registered-but-unapproved zero-balance row.
