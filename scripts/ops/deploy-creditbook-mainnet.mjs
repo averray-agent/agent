@@ -226,9 +226,9 @@ async function main() {
     throw new Error("--expected-start-nonce is required for --commit.");
   }
   const balance = await provider.getBalance(deployerIdentity.address);
-  if (balance < MINIMUM_DEPLOYER_BALANCE_WEI) {
-    throw new Error(`deployer balance ${balance} is below the 2.5 DOT ceremony floor.`);
-  }
+  const fundingShortfallWei = balance < MINIMUM_DEPLOYER_BALANCE_WEI
+    ? MINIMUM_DEPLOYER_BALANCE_WEI - balance
+    : 0n;
 
   const abandonedCode = await provider.getCode(ABANDONED_CREDIT_BOOK);
   if (abandonedCode === "0x") throw new Error(`abandoned CreditBook ${ABANDONED_CREDIT_BOOK} has no code.`);
@@ -274,6 +274,9 @@ async function main() {
     chainId: network.chainId.toString(),
     deployer: deployerIdentity.address,
     deployerBalanceWei: balance.toString(),
+    minimumDeployerBalanceWei: MINIMUM_DEPLOYER_BALANCE_WEI.toString(),
+    fundingReady: fundingShortfallWei === 0n,
+    fundingShortfallWei: fundingShortfallWei.toString(),
     startNonce,
     abandonedCreditBook: ABANDONED_CREDIT_BOOK,
     abandonedState: { accountedLiquidityRaw: "0", totalOutstandingRaw: "0", bookLiquidRaw: "0" },
@@ -283,6 +286,11 @@ async function main() {
     constructor: plan.decodedBindings
   };
   console.log(JSON.stringify(preview, null, 2));
+  if (fundingShortfallWei !== 0n) {
+    throw new Error(
+      `deployer balance ${balance} is below the 2.5 DOT ceremony floor by ${fundingShortfallWei} wei.`
+    );
+  }
   if (!args.commit) return;
 
   const confirmation = `DEPLOY CREDITBOOK ${plan.predictedAddress}`;
