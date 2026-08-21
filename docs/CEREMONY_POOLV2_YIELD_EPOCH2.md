@@ -105,7 +105,15 @@ Dry-run → **Claude gates** → `--commit`. Gates on completion:
 | deposit legs dispatched | stage `0xdd10d1a8…`; funding `0x652969ad…` (arrival 9,499,155); sell `0x36773f49…` 9.4 -> 9.4 aUSDC EXACT PAR (fee 56,708 = quote x2, under the 80k cap); auto-settle `0xab2dfeab…` |
 | venue verified | aUSDC 9,411,876 (9.4M position + 11,876 residue) · float 1,546,422 · returnBy 2026-08-28T16:48Z |
 
-**Fee ledger (roll total ~0.061 USDC):** recall 30,483 raw (28,722 float-paid + 1,761 principal-path) + deploy 29,368 raw (845 delivery + 28,523 sell) — against ~0.90/yr expected yield on 9.5 at ~5%.
+**Fee ledger (roll total ~0.060 USDC):** recall 30,483 raw (28,722 float-paid + 1,761 principal-path) + deploy 29,368 raw (845 delivery + 28,523 sell).
+
+**ECONOMICS CORRECTION (2026-08-21, supersedes the memo's E2-3 amendment):** measured
+roll cost is FLAT ~0.060/roll, not the 0.202% proportional figure the memo assumed.
+At 9.5 deployed and ~5% APY, weekly yield is 0.0090 vs 0.0599 cost — the weekly roll
+is 6.6x WASH-NEGATIVE at this size. Break-even deployed size ≈ 62 USDC weekly, or
+~15 USDC if a 30-day tier existed (the enum exists; deployToVenue hardcodes 7d).
+**Decision needed before the Aug 28 returnBy:** recall-and-pause the strategy until
+TVL scale or a 30-day-tier contract amendment, rather than knowingly rolling at a loss.
 
 **Laws banked:** ceremony-staged adapter requests need MANUAL driver dispatch (the keeper never picks them up — verify venue-side, not by waiting) · measure revive weights per call (write-off measured proofSize 242,216 vs the library's pinned 100k) · a native multisig's AccountId32 comes from `revive.originalAccount`, NEVER 0xEE-padding · depositor-impacting write-offs are lossReporter=multisig BY DESIGN.
 
