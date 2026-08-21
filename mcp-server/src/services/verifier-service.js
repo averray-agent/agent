@@ -14,7 +14,7 @@ import {
 } from "../core/job-snapshot.js";
 import { buildPlatformFaultRemediationMarker } from "../core/platform-fault-remediation.js";
 import { transitionSession } from "../core/session-state-machine.js";
-import { decodeEscrowCoreRevert } from "../blockchain/escrow-core-errors.js";
+import { classifyEscrowInvalidState } from "../blockchain/escrow-core-errors.js";
 import { PlatformFaultRemediationService } from "./platform-fault-remediation-service.js";
 
 // EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
@@ -25,6 +25,7 @@ const ESCROW_JOB_STATE_REJECTED = 4;
 const ESCROW_JOB_STATE_CLOSED = 6;
 export const ESCROW_JOB_STATE_SUBMITTED = 3;
 export const CHAIN_STATE_DIVERGED_STATUS = "chain_state_diverged";
+export const BROKERED_SUBMIT_RETRY_PENDING_OUTCOME = "brokered_submit_retry_pending";
 const ESCROW_JOB_STATE_LABELS = Object.freeze([
   "none",
   "open",
@@ -69,11 +70,15 @@ export class VerifierService {
   async verifySubmission({ sessionId, evidence = undefined, metadataURI = "ipfs://pending-badge" }) {
     const session = await this.platformService.resumeSession(sessionId);
     assertSessionCanReceiveVerification(session);
-    const { job, snapshot, liveJob } = await assertJobSnapshotIntegrity(
+    const { job, snapshot, liveJob: initialLiveJob } = await assertJobSnapshotIntegrity(
       session,
       this.blockchainGateway
     );
+    let liveJob = initialLiveJob;
     const chainJobId = session.chainJobId ?? session.jobId;
+    const reconciliation = await this.reconcileBrokeredSubmitDivergence({ session, liveJob });
+    if (reconciliation.result) return reconciliation.result;
+    liveJob = reconciliation.liveJob;
     const verificationInput = this.resolveVerificationInput(session, evidence);
     const validatedVerificationInput = this.validateVerificationInput(job, verificationInput, {
       pinnedSchema: snapshot.outputSchema?.schema
@@ -324,7 +329,9 @@ export class VerifierService {
     observedState,
     stage,
     customError = undefined,
-    selector = undefined
+    selector = undefined,
+    details = undefined,
+    sessionPatch = undefined
   }) {
     const current = await this.stateStore.getSession(session.sessionId) ?? session;
     if (current.status === CHAIN_STATE_DIVERGED_STATUS) {
@@ -340,6 +347,7 @@ export class VerifierService {
       stage,
       ...(customError ? { customError } : {}),
       ...(selector ? { selector } : {}),
+      ...(details ?? {}),
       observedAt: parkedAt
     };
     const transitioned = transitionSession(current, CHAIN_STATE_DIVERGED_STATUS, {
@@ -350,7 +358,8 @@ export class VerifierService {
     const parked = await this.stateStore.upsertSession({
       ...transitioned,
       chainJobId,
-      chainStateDivergence: divergence
+      chainStateDivergence: divergence,
+      ...(sessionPatch ?? {})
     });
     this.eventBus?.publish?.({
       id: `chain-state-diverged-${session.sessionId}-${Date.parse(parkedAt)}`,
@@ -371,6 +380,103 @@ export class VerifierService {
       "verifier.chain_state_diverged"
     );
     return chainStateDivergenceResult(parked);
+  }
+
+  async parkExpiredBrokeredSubmit({ session, recovery }) {
+    const remediation = await this.platformFaultRemediationService.enqueueBrokeredSubmitExpiry({
+      session,
+      live: recovery.liveJob,
+      evidenceHash: recovery.evidenceHash,
+      claimExpiresAt: recovery.claimExpiresAt,
+      attempts: recovery.attempts
+    });
+    const restoredAt = new Date().toISOString();
+    return this.parkChainStateDivergence({
+      session,
+      chainJobId: session.chainJobId ?? session.jobId,
+      observedState: normalizeEscrowJobState(recovery.liveJob?.state),
+      stage: "brokered_submit_expired",
+      details: {
+        evidenceHash: recovery.evidenceHash,
+        claimExpiresAt: recovery.claimExpiresAt,
+        attempts: recovery.attempts,
+        workerConsequence: "none",
+        remediationId: remediation?.id
+      },
+      sessionPatch: {
+        workerConsequence: "none",
+        onboardingWaiverConsumptionExemptedAt: restoredAt,
+        onboardingWaiverConsumptionExemption: {
+          reason: "brokered_submit_expired_platform_fault",
+          source: "state_store",
+          restoredAt
+        },
+        ...(remediation
+          ? { internalRemediation: buildPlatformFaultRemediationMarker(remediation) }
+          : {})
+      }
+    });
+  }
+
+  async reconcileSubmittedChainState({ sessionId }) {
+    const session = await this.platformService.resumeSession(sessionId);
+    assertSessionCanReceiveVerification(session);
+    const { liveJob } = await assertJobSnapshotIntegrity(session, this.blockchainGateway);
+    const reconciliation = await this.reconcileBrokeredSubmitDivergence({ session, liveJob });
+    return reconciliation.result ?? {
+      outcome: "brokered_submit_ready",
+      sessionId,
+      jobId: session.chainJobId ?? session.jobId,
+      observedState: normalizeEscrowJobState(reconciliation.liveJob?.state)
+    };
+  }
+
+  async reconcileBrokeredSubmitDivergence({ session, liveJob }) {
+    if (
+      !this.blockchainGateway?.isEnabled?.()
+      || typeof this.platformService.reconcileBrokeredSubmit !== "function"
+      || normalizeEscrowJobState(liveJob?.state) !== 2
+    ) {
+      return { liveJob };
+    }
+    const sessionId = session.sessionId;
+    const chainJobId = session.chainJobId ?? session.jobId;
+    const recovery = await this.platformService.reconcileBrokeredSubmit(sessionId);
+    const reconciledLiveJob = recovery.liveJob ?? liveJob;
+    if (recovery.status === "expired") {
+      return {
+        liveJob: reconciledLiveJob,
+        result: await this.parkExpiredBrokeredSubmit({
+          session: recovery.session ?? session,
+          recovery
+        })
+      };
+    }
+    if (recovery.status === "deferred") {
+      return {
+        liveJob: reconciledLiveJob,
+        result: {
+          outcome: BROKERED_SUBMIT_RETRY_PENDING_OUTCOME,
+          reasonCode: recovery.reason ?? "BROKERED_SUBMIT_RETRY_PENDING",
+          sessionId,
+          jobId: chainJobId,
+          retryAt: recovery.retryAt,
+          attempts: recovery.attempts
+        }
+      };
+    }
+    if (recovery.status === "diverged") {
+      return {
+        liveJob: reconciledLiveJob,
+        result: await this.parkChainStateDivergence({
+          session,
+          chainJobId,
+          observedState: normalizeEscrowJobState(reconciledLiveJob?.state),
+          stage: "brokered_submit_reconcile"
+        })
+      };
+    }
+    return { liveJob: reconciledLiveJob };
   }
 
   async replayVerification(sessionId) {
@@ -517,16 +623,6 @@ function escrowJobStateLabel(state) {
   return state === null
     ? "unknown"
     : ESCROW_JOB_STATE_LABELS[state] ?? `unknown_${state}`;
-}
-
-function classifyEscrowInvalidState(error) {
-  const decoded = decodeEscrowCoreRevert(error);
-  const name = error?.details?.customError ?? decoded?.name;
-  if (name !== "InvalidState") return undefined;
-  return {
-    name,
-    selector: error?.details?.selector ?? decoded?.selector
-  };
 }
 
 function chainStateDivergenceResult(session) {

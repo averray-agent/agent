@@ -22,6 +22,7 @@ import { GuardedSchedulerLoop, summaryErrorsOutcome } from "./guarded-scheduler-
 
 import { isJobSnapshotIntegrityError, requireJobSnapshot } from "../core/job-snapshot.js";
 import { isHostedCanaryClaimant } from "../core/claimant-attribution.js";
+import { BROKERED_SUBMIT_RETRY_PENDING_OUTCOME } from "./verifier-service.js";
 
 const DEFAULT_INTERVAL_MS = 60 * 1000;
 const DEFAULT_SCAN_LIMIT = 200;
@@ -221,9 +222,37 @@ export class SubmittedJobAutoVerifierService {
       }
       // A timed-out operation cannot be cancelled safely after it may have
       // submitted a payout transaction. Quarantine it until the original
-      // promise settles; unlike the old inFlight leak this state is explicit,
-      // health-degrading, and cannot launch a duplicate settlement.
+      // promise settles. Brokered-submit reconciliation is the one safe action
+      // allowed during quarantine: it runs under the same session lock and a
+      // fresh Claimed/Submitted chain read, and it never resolves a payout.
       if (this.pendingVerifications.has(sessionId)) {
+        if (typeof this.verifierService.reconcileSubmittedChainState === "function") {
+          try {
+            const reconciliation = await this.verifierService.reconcileSubmittedChainState({ sessionId });
+            if (reconciliation?.outcome === "chain_state_diverged") {
+              this.pendingVerifications.delete(sessionId);
+              this.inFlight.delete(sessionId);
+              summary.parkedCount += 1;
+              continue;
+            }
+            if (reconciliation?.outcome === BROKERED_SUBMIT_RETRY_PENDING_OUTCOME) {
+              summary.skipped.push({
+                ...diagnostic,
+                reason: reconciliation.reasonCode ?? BROKERED_SUBMIT_RETRY_PENDING_OUTCOME,
+                ...(reconciliation.retryAt ? { retryAt: reconciliation.retryAt } : {}),
+                ...(reconciliation.attempts !== undefined ? { attempts: reconciliation.attempts } : {})
+              });
+              continue;
+            }
+          } catch (error) {
+            this.recordVerificationFailure(
+              { ...diagnostic, mode: "brokered_submit_reconcile" },
+              error,
+              summary
+            );
+            continue;
+          }
+        }
         summary.skipped.push({ ...diagnostic, reason: "verification_timeout_pending" });
         continue;
       }
@@ -367,6 +396,17 @@ export class SubmittedJobAutoVerifierService {
     const outcome = result?.outcome;
     if (outcome === "chain_state_diverged") {
       if (summary) summary.parkedCount += 1;
+      return;
+    }
+    if (outcome === BROKERED_SUBMIT_RETRY_PENDING_OUTCOME) {
+      if (summary) {
+        summary.skipped.push({
+          ...candidate,
+          reason: result?.reasonCode ?? BROKERED_SUBMIT_RETRY_PENDING_OUTCOME,
+          ...(result?.retryAt ? { retryAt: result.retryAt } : {}),
+          ...(result?.attempts !== undefined ? { attempts: result.attempts } : {})
+        });
+      }
       return;
     }
     if (summary) {
