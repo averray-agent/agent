@@ -321,6 +321,7 @@ export const XCM_WRAPPER_ABI = [
   "error XcmDispatchFailed(bytes reason)",
   "error CustodyMismatch()",
   "function strategyAdapter(bytes32 strategyId) view returns (address)",
+  "function requestAdapter(bytes32 requestId) view returns (address)",
   "function weighMessage(bytes message) view returns ((uint64 refTime, uint64 proofSize))",
   "function getRequest(bytes32 requestId) view returns (((bytes32 strategyId, uint8 kind, address account, address asset, address recipient, uint256 assets, uint256 shares, uint64 nonce) context, address queuedBy, uint8 status, uint256 settledAssets, uint256 settledShares, bytes32 remoteRef, bytes32 failureCode, uint64 createdAt, uint64 updatedAt))",
   "function getRequestParameters(bytes32 requestId) view returns ((uint256 sellAmount, uint256 minimumOutput, uint256 maxFeePerLeg, uint64 dispatchDeadline))",

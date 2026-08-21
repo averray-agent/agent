@@ -2424,6 +2424,36 @@ test("async XCM request reader preserves unsafe uint64 metadata as raw strings",
   assert.equal(xcmRequest.updatedAtRaw, unsafeUpdatedAt.toString());
 });
 
+test("XCM request adapter registration is read from wrapper mappings without a signing path", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const requestId = `0x${"3".repeat(64)}`;
+  const strategyId = encodeBytes32String("HYDRATION_USDC_POOL_V1");
+  const requestAdapter = "0x88ee70277e486136676c0b50ed9b7d7a1a31371f";
+  const reads = [];
+  gateway.xcmWrapperContract = {
+    async requestAdapter(id) {
+      reads.push(["requestAdapter", id]);
+      return requestAdapter;
+    },
+    async strategyAdapter(id) {
+      reads.push(["strategyAdapter", id]);
+      return requestAdapter;
+    }
+  };
+
+  const registration = await gateway.getXcmRequestAdapterRegistration(requestId, strategyId);
+
+  assert.equal(registration.requestId, requestId);
+  assert.equal(registration.strategyId, strategyId);
+  assert.equal(registration.requestAdapter.toLowerCase(), requestAdapter);
+  assert.equal(registration.registeredStrategyAdapter.toLowerCase(), requestAdapter);
+  assert.equal(registration.adapterManaged, true);
+  assert.deepEqual(reads, [
+    ["requestAdapter", requestId],
+    ["strategyAdapter", strategyId]
+  ]);
+});
+
 test("finalizeXcmRequest rejects successful strategy withdrawals with zero settled assets before tx", async () => {
   const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
   const requestId = `0x${"2".repeat(64)}`;

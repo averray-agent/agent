@@ -5,6 +5,8 @@ const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 const DEFAULT_RETRY_BASE_MS = 15_000;
 const DEFAULT_RETRY_MAX_MS = 5 * 60_000;
 const DEFAULT_MAX_FINALIZE_ATTEMPTS = 5;
+const DEFAULT_ADAPTER_PENDING_EVENT_INTERVAL_MS = 5 * 60_000;
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 export class XcmSettlementWatcherService {
   constructor(
@@ -17,6 +19,7 @@ export class XcmSettlementWatcherService {
       retryBaseMs = DEFAULT_RETRY_BASE_MS,
       retryMaxMs = DEFAULT_RETRY_MAX_MS,
       maxFinalizeAttempts = DEFAULT_MAX_FINALIZE_ATTEMPTS,
+      adapterPendingEventIntervalMs = DEFAULT_ADAPTER_PENDING_EVENT_INTERVAL_MS,
       expectedWrapper = undefined,
       now = () => Date.now(),
       logger = console
@@ -30,6 +33,10 @@ export class XcmSettlementWatcherService {
     this.retryBaseMs = retryBaseMs;
     this.retryMaxMs = retryMaxMs;
     this.maxFinalizeAttempts = normalizePositiveInteger(maxFinalizeAttempts, "maxFinalizeAttempts");
+    this.adapterPendingEventIntervalMs = normalizePositiveInteger(
+      adapterPendingEventIntervalMs,
+      "adapterPendingEventIntervalMs"
+    );
     const configuredExpectedWrapper = String(expectedWrapper ?? "").trim();
     this.expectedWrapper = configuredExpectedWrapper
       ? normalizeWrapperAddress(configuredExpectedWrapper)
@@ -167,15 +174,30 @@ export class XcmSettlementWatcherService {
   }
 
   async runPendingSettlementBatch(limit) {
-    const pending = (await this.stateStore.listPendingXcmObservations?.(limit) ?? [])
-      .filter((observation) => this.retryIsDue(observation));
+    const [pending, finalizeExhausted] = await Promise.all([
+      this.stateStore.listPendingXcmObservations?.(limit) ?? [],
+      this.stateStore.listXcmFinalizeExhausted?.(limit) ?? []
+    ]);
+    const observations = uniqueObservations([...pending, ...finalizeExhausted]);
     const results = [];
 
-    for (const observation of pending) {
+    for (const observation of observations) {
       try {
         const onChainRequest = await this.readOnChainRequest(observation.requestId);
         if (isTerminalChainRequest(onChainRequest)) {
           results.push(await this.reconcileTerminalObservation(observation, onChainRequest));
+          continue;
+        }
+        const adapterRegistration = await this.readOnChainAdapterRegistration(onChainRequest);
+        if (isAdapterManagedRegistration(adapterRegistration)) {
+          results.push(await this.recordAdapterManagedPending(
+            observation,
+            onChainRequest,
+            adapterRegistration
+          ));
+          continue;
+        }
+        if (observation.finalizeState === "finalize_exhausted" || !this.retryIsDue(observation)) {
           continue;
         }
         if (Number(observation.attemptCount ?? 0) >= this.maxFinalizeAttempts) {
@@ -227,6 +249,13 @@ export class XcmSettlementWatcherService {
         });
         results.push(finalizedWithPreflight);
       } catch (error) {
+        if (observation.finalizeState === "finalize_exhausted") {
+          this.logger.warn?.(
+            { requestId: observation.requestId, err: error },
+            "xcm_settlement_watcher.finalize_exhausted_reconciliation_failed"
+          );
+          continue;
+        }
         const nextAttemptCount = Number(observation.attemptCount ?? 0) + 1;
         if (nextAttemptCount >= this.maxFinalizeAttempts) {
           await this.parkFinalizeExhausted(observation, error);
@@ -268,6 +297,70 @@ export class XcmSettlementWatcherService {
       throw new ValidationError("XCM reconciliation requires read-only getXcmRequest support.");
     }
     return this.platformService.getXcmRequest(requestId);
+  }
+
+  async readOnChainAdapterRegistration(onChainRequest) {
+    if (typeof this.platformService.getXcmRequestAdapterRegistration !== "function") {
+      throw new ValidationError("XCM reconciliation requires read-only request adapter lookup support.");
+    }
+    return this.platformService.getXcmRequestAdapterRegistration(
+      onChainRequest.requestId,
+      onChainRequest.strategyId
+    );
+  }
+
+  async recordAdapterManagedPending(observation, onChainRequest, adapterRegistration) {
+    const nowMs = this.now();
+    const observedAtMs = Date.parse(observation.adapterManagedPendingObservedAt ?? "");
+    const shouldPublish = !Number.isFinite(observedAtMs)
+      || nowMs - observedAtMs >= this.adapterPendingEventIntervalMs;
+    const timestamp = new Date(nowMs).toISOString();
+    const requestAdapter = normalizeAdapterAddress(adapterRegistration.requestAdapter, "requestAdapter");
+    const registeredStrategyAdapter = normalizeAdapterAddress(
+      adapterRegistration.registeredStrategyAdapter,
+      "registeredStrategyAdapter"
+    );
+    const updated = await this.stateStore.upsertXcmObservation?.({
+      ...observation,
+      processed: false,
+      finalizeState: "adapter_managed_pending",
+      adapterManaged: true,
+      requestAdapter,
+      registeredStrategyAdapter,
+      processedAt: undefined,
+      maxFinalizeAttempts: undefined,
+      lastError: undefined,
+      nextAttemptAt: undefined,
+      retryDelayMs: undefined,
+      ...(shouldPublish ? { adapterManagedPendingObservedAt: timestamp } : {})
+    });
+    if (shouldPublish) {
+      this.eventBus?.publish({
+        id: `xcm-adapter-managed-pending-${observation.requestId}-${nowMs}`,
+        topic: "xcm.request_adapter_managed_pending",
+        wallet: onChainRequest?.account,
+        wallets: [onChainRequest?.account].filter(Boolean),
+        correlationId: observation.requestId,
+        timestamp,
+        data: {
+          requestId: observation.requestId,
+          wrapperAddress: observation.wrapperAddress,
+          onChainStatus: normalizeChainStatus(onChainRequest),
+          strategyId: onChainRequest?.strategyId,
+          requestAdapter,
+          registeredStrategyAdapter
+        }
+      });
+      this.logger.info?.(
+        { requestId: observation.requestId, requestAdapter },
+        "xcm_settlement_watcher.adapter_managed_pending"
+      );
+    }
+    return updated ?? {
+      requestId: observation.requestId,
+      finalizeState: "adapter_managed_pending",
+      requestAdapter
+    };
   }
 
   async reconcileTerminalObservation(observation, onChainRequest) {
@@ -433,6 +526,32 @@ function normalizePositiveInteger(value, label) {
 
 function isTerminalChainRequest(request) {
   return TERMINAL_STATUSES.has(normalizeChainStatus(request));
+}
+
+function uniqueObservations(observations) {
+  const byIdentity = new Map();
+  for (const observation of observations) {
+    const identity = `${observation?.wrapperAddress ?? ""}:${observation?.requestId ?? ""}`;
+    if (!byIdentity.has(identity)) byIdentity.set(identity, observation);
+  }
+  return [...byIdentity.values()];
+}
+
+function isAdapterManagedRegistration(registration) {
+  const requestAdapter = normalizeAdapterAddress(registration?.requestAdapter, "requestAdapter");
+  const registeredStrategyAdapter = normalizeAdapterAddress(
+    registration?.registeredStrategyAdapter,
+    "registeredStrategyAdapter"
+  );
+  return requestAdapter !== ZERO_ADDRESS && requestAdapter === registeredStrategyAdapter;
+}
+
+function normalizeAdapterAddress(value, label) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/u.test(normalized)) {
+    throw new ValidationError(`${label} must be a 20-byte address.`);
+  }
+  return normalized;
 }
 
 function normalizeChainStatus(request) {
