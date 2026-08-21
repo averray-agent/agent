@@ -89,11 +89,27 @@ Dry-run → **Claude gates** → `--commit`. Gates on completion:
 
 ---
 
-## §B — Epoch-2 yield legs · TO BE SET WHEN SCHEDULED
+## §B EXECUTED 2026-08-20/21 — full record (roll: recall 5.0 → write-off → deploy 9.5)
 
-Deliberately empty. Fill from `PACKET_YIELD_CEREMONY.md` and the pool policy at
-the time — deployment size, `returnBy`, notice tier and observability gates all
-depend on the pool's balance and the memo posture on the day.
+**Deployed 9.5 USDC earning at the venue; pool NAV honest at 20.395225; every raw unit named.**
+
+| step | evidence |
+| --- | --- |
+| recall 4 staged (KMS) | `0x13d71db1…` — full 4.950004 incl. yield |
+| keeper gap found | the backend NEVER dispatches ceremony-staged requests — venue-side read (aUSDC unmoved) proved it; the §A-class driver `pool-venue-dispatch.mjs` is the dispatch path |
+| fee-guard amendment | Hydration withdraw-sell quote FLAT 28.6k > old 40k cap's 1.5x floor; #1191 (ratified by merge): recall ceiling 80k + `--fee-floor-ratio-bps` (hard min 13,500) |
+| recall dispatched @1.40x margin | sell `0xa5216924…` exact par 4,950,004 (fee 40k capped, actual 28,722 paid from float); home `0x68ba90dc…` arrival 4,948,243 (fees 1,761); auto-settled `0x6cdbf831…` |
+| pool settle | `0xaf4854bb…` — idle +4.948243 exact |
+| write-off 51,757 (MULTISIG — lossReporter by design) | Nova `revive.call` hash `0x77bd56f1…9efbe3`, executed 21 Aug 18:54; decomposed: 49,996 epoch-1 cost-basis gap + 1,761 recall fees; sharePrice -> 0.994824 (depositor-honest NAV) |
+| deploy 9.5 staged (KMS) | `0x7c9d98e9…` — E2-4 checks all true (value-neutral staging) |
+| deposit legs dispatched | stage `0xdd10d1a8…`; funding `0x652969ad…` (arrival 9,499,155); sell `0x36773f49…` 9.4 -> 9.4 aUSDC EXACT PAR (fee 56,708 = quote x2, under the 80k cap); auto-settle `0xab2dfeab…` |
+| venue verified | aUSDC 9,411,876 (9.4M position + 11,876 residue) · float 1,546,422 · returnBy 2026-08-28T16:48Z |
+
+**Fee ledger (roll total ~0.061 USDC):** recall 30,483 raw (28,722 float-paid + 1,761 principal-path) + deploy 29,368 raw (845 delivery + 28,523 sell) — against ~0.90/yr expected yield on 9.5 at ~5%.
+
+**Laws banked:** ceremony-staged adapter requests need MANUAL driver dispatch (the keeper never picks them up — verify venue-side, not by waiting) · measure revive weights per call (write-off measured proofSize 242,216 vs the library's pinned 100k) · a native multisig's AccountId32 comes from `revive.originalAccount`, NEVER 0xEE-padding · depositor-impacting write-offs are lossReporter=multisig BY DESIGN.
+
+**Next roll due by 2026-08-28T16:48Z** (weekly cadence per amended E2-3; keeper automation of the roll = open authority decision).
 
 Standing constraint from the bank lane: if a DepositPool window is near, fold
 epoch-2 into post-migration rather than deploying venue capital the migration
