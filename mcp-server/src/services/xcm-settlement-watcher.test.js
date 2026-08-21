@@ -11,11 +11,18 @@ import { decodeXcmWrapperRevert } from "../blockchain/xcm-wrapper-errors.js";
 const REQUEST_ID = "0x1111111111111111111111111111111111111111111111111111111111111111";
 const REQUEST_ID_2 = "0x2222222222222222222222222222222222222222222222222222222222222222";
 const WRAPPER = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const ADAPTER = "0x88ee70277e486136676c0b50ed9b7d7a1a31371f";
+const OTHER_ADAPTER = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 class XcmSettlementWatcherService extends BaseXcmSettlementWatcherService {
   constructor(platformService, stateStore, eventBus, options = {}) {
     super({
       getXcmRequest: async (requestId) => ({ requestId, status: 1, statusLabel: "pending" }),
+      getXcmRequestAdapterRegistration: async () => ({
+        requestAdapter: "0x0000000000000000000000000000000000000000",
+        registeredStrategyAdapter: "0x0000000000000000000000000000000000000000",
+        adapterManaged: false
+      }),
       ...platformService
     }, stateStore, eventBus, { expectedWrapper: WRAPPER, ...options });
   }
@@ -120,6 +127,225 @@ test("runPendingSettlements finalizes stored observations and marks them process
   assert.equal(events[0].data.settledShares, "5");
   assert.equal(events[0].data.settledSharesRaw, "5");
   assert.equal(events[0].data.source, "observer");
+});
+
+test("adapter-owned pending request makes zero finalize attempts across repeated sweeps", async () => {
+  const stateStore = new MemoryStateStore();
+  const eventBus = new EventBus();
+  const pendingEvents = [];
+  const failureEvents = [];
+  eventBus.subscribe({ topics: ["xcm.request_adapter_managed_pending"] }, (event) => pendingEvents.push(event));
+  eventBus.subscribe({ topics: ["xcm.request_finalize_failed"] }, (event) => failureEvents.push(event));
+  let finalizeCalls = 0;
+  const watcher = new XcmSettlementWatcherService(
+    {
+      getXcmRequest: async (requestId) => ({
+        requestId,
+        strategyId: `0x${"12".repeat(32)}`,
+        status: 1,
+        statusLabel: "pending"
+      }),
+      getXcmRequestAdapterRegistration: async () => ({
+        requestAdapter: ADAPTER,
+        registeredStrategyAdapter: ADAPTER,
+        adapterManaged: true
+      }),
+      finalizeXcmRequest: async () => {
+        finalizeCalls += 1;
+        throw new Error("adapter-owned requests must never use direct finalize");
+      }
+    },
+    stateStore,
+    eventBus,
+    { enabled: false, now: () => Date.parse("2026-08-21T13:20:00.000Z"), logger: { info() {} } }
+  );
+  await watcher.observeOutcome(REQUEST_ID, { status: "succeeded", settledAssets: 5 });
+
+  for (let sweep = 0; sweep < 6; sweep += 1) {
+    await watcher.runPendingSettlements();
+  }
+
+  const stored = await stateStore.getXcmObservation(WRAPPER, REQUEST_ID);
+  assert.equal(finalizeCalls, 0, "removing the adapter-ownership check causes repeated direct finalize attempts");
+  assert.equal(stored.processed, false);
+  assert.equal(stored.finalizeState, "adapter_managed_pending");
+  assert.equal(stored.attemptCount, 0);
+  assert.equal(pendingEvents.length, 1, "adapter-managed pending rows are low-frequency, not per-sweep");
+  assert.equal(pendingEvents[0].data.requestAdapter, ADAPTER);
+  assert.equal(failureEvents.length, 0);
+});
+
+test("adapter-owned request reconciles when it becomes terminal without a finalize attempt", async () => {
+  const stateStore = new MemoryStateStore();
+  const eventBus = new EventBus();
+  const reconciledEvents = [];
+  eventBus.subscribe({ topics: ["xcm.request_reconciled_terminal"] }, (event) => reconciledEvents.push(event));
+  let terminal = false;
+  let finalizeCalls = 0;
+  const watcher = new XcmSettlementWatcherService(
+    {
+      getXcmRequest: async (requestId) => ({
+        requestId,
+        strategyId: `0x${"12".repeat(32)}`,
+        account: "0x1111111111111111111111111111111111111111",
+        status: terminal ? 2 : 1,
+        statusLabel: terminal ? "succeeded" : "pending",
+        settledAssetsRaw: terminal ? "5" : "0",
+        settledSharesRaw: "0",
+        remoteRef: `0x${"34".repeat(32)}`
+      }),
+      getXcmRequestAdapterRegistration: async () => ({
+        requestAdapter: ADAPTER,
+        registeredStrategyAdapter: ADAPTER,
+        adapterManaged: true
+      }),
+      finalizeXcmRequest: async () => {
+        finalizeCalls += 1;
+      }
+    },
+    stateStore,
+    eventBus,
+    { enabled: false, logger: { info() {} } }
+  );
+  await watcher.observeOutcome(REQUEST_ID, { status: "succeeded", settledAssets: 5 });
+
+  await watcher.runPendingSettlements();
+  terminal = true;
+  await watcher.runPendingSettlements();
+
+  const stored = await stateStore.getXcmObservation(WRAPPER, REQUEST_ID);
+  assert.equal(finalizeCalls, 0);
+  assert.equal(stored.processed, true);
+  assert.equal(stored.finalizeState, "reconciled_terminal");
+  assert.equal(reconciledEvents.length, 1);
+  assert.equal(reconciledEvents[0].data.onChainStatus, "succeeded");
+});
+
+test("non-adapter request preserves reconcile-before-finalize behavior", async () => {
+  const stateStore = new MemoryStateStore();
+  let finalizeCalls = 0;
+  const watcher = new XcmSettlementWatcherService(
+    {
+      getXcmRequestAdapterRegistration: async () => ({
+        requestAdapter: ADAPTER,
+        registeredStrategyAdapter: OTHER_ADAPTER,
+        adapterManaged: false
+      }),
+      finalizeXcmRequest: async (_requestId, outcome) => {
+        finalizeCalls += 1;
+        return {
+          settledVia: "xcm_wrapper",
+          statusLabel: outcome.status,
+          settledAssetsRaw: outcome.settledAssets,
+          settledSharesRaw: outcome.settledShares
+        };
+      }
+    },
+    stateStore,
+    undefined,
+    { enabled: false }
+  );
+  await watcher.observeOutcome(REQUEST_ID, { status: "succeeded", settledAssets: 5 });
+
+  await watcher.runPendingSettlements();
+
+  const stored = await stateStore.getXcmObservation(WRAPPER, REQUEST_ID);
+  assert.equal(finalizeCalls, 1);
+  assert.equal(stored.processed, true);
+  assert.equal(stored.result.settledVia, "xcm_wrapper");
+});
+
+test("adapter-owned backfill leaves retry attempt count unchanged and clears its schedule", async () => {
+  const stateStore = new MemoryStateStore();
+  let finalizeCalls = 0;
+  const watcher = new XcmSettlementWatcherService(
+    {
+      getXcmRequestAdapterRegistration: async () => ({
+        requestAdapter: ADAPTER,
+        registeredStrategyAdapter: ADAPTER,
+        adapterManaged: true
+      }),
+      finalizeXcmRequest: async () => {
+        finalizeCalls += 1;
+      }
+    },
+    stateStore,
+    undefined,
+    { enabled: false, logger: { info() {} } }
+  );
+  await watcher.observeOutcome(REQUEST_ID, { status: "succeeded", settledAssets: 5 });
+  await stateStore.markXcmObservationFailed(
+    WRAPPER,
+    REQUEST_ID,
+    new Error("XcmWrapperV22.Unauthorized()"),
+    { nextAttemptAt: "2099-01-01T00:00:00.000Z", retryDelayMs: 60_000 }
+  );
+
+  await watcher.runPendingSettlements();
+  const stored = await stateStore.getXcmObservation(WRAPPER, REQUEST_ID);
+
+  assert.equal(finalizeCalls, 0);
+  assert.equal(stored.processed, false);
+  assert.equal(stored.finalizeState, "adapter_managed_pending");
+  assert.equal(stored.attemptCount, 1, "ownership reconciliation must not add a retry attempt");
+  assert.equal(stored.nextAttemptAt, undefined);
+  assert.equal(stored.retryDelayMs, undefined);
+  assert.equal(stored.lastError, undefined);
+});
+
+test("parked adapter-owned backfill drains finalize_exhausted and later reconciles by name", async () => {
+  const stateStore = new MemoryStateStore();
+  const eventBus = new EventBus();
+  const reconciledEvents = [];
+  eventBus.subscribe({ topics: ["xcm.request_reconciled_terminal"] }, (event) => reconciledEvents.push(event));
+  let terminal = false;
+  let finalizeCalls = 0;
+  const watcher = new XcmSettlementWatcherService(
+    {
+      getXcmRequest: async (requestId) => ({
+        requestId,
+        strategyId: `0x${"12".repeat(32)}`,
+        status: terminal ? 2 : 1,
+        statusLabel: terminal ? "succeeded" : "pending",
+        settledAssetsRaw: terminal ? "5" : "0",
+        settledSharesRaw: "0"
+      }),
+      getXcmRequestAdapterRegistration: async () => ({
+        requestAdapter: ADAPTER,
+        registeredStrategyAdapter: ADAPTER,
+        adapterManaged: true
+      }),
+      finalizeXcmRequest: async () => {
+        finalizeCalls += 1;
+      }
+    },
+    stateStore,
+    eventBus,
+    { enabled: false, logger: { info() {} } }
+  );
+  await watcher.observeOutcome(REQUEST_ID, { status: "succeeded", settledAssets: 5 });
+  await stateStore.markXcmObservationFinalizeExhausted(
+    WRAPPER,
+    REQUEST_ID,
+    new Error("XcmWrapperV22.Unauthorized()"),
+    { maxFinalizeAttempts: 5 }
+  );
+  assert.equal((await watcher.listFinalizeExhausted()).length, 1);
+
+  await watcher.runPendingSettlements();
+  let stored = await stateStore.getXcmObservation(WRAPPER, REQUEST_ID);
+  assert.equal(stored.processed, false);
+  assert.equal(stored.finalizeState, "adapter_managed_pending");
+  assert.equal((await watcher.listFinalizeExhausted()).length, 0);
+  assert.equal(finalizeCalls, 0);
+
+  terminal = true;
+  await watcher.runPendingSettlements();
+  stored = await stateStore.getXcmObservation(WRAPPER, REQUEST_ID);
+  assert.equal(stored.processed, true);
+  assert.equal(stored.finalizeState, "reconciled_terminal");
+  assert.equal(reconciledEvents.length, 1);
+  assert.equal(finalizeCalls, 0);
 });
 
 test("reconcile-before-finalize drains five already-terminal requests on the first sweep", async () => {

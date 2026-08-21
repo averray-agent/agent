@@ -620,6 +620,13 @@ test("balance delta finalizes through the existing watcher and credits the strat
     async getXcmRequest(requestId) {
       return { requestId, status: 1, statusLabel: "pending" };
     },
+    async getXcmRequestAdapterRegistration() {
+      return {
+        requestAdapter: "0x0000000000000000000000000000000000000000",
+        registeredStrategyAdapter: "0x0000000000000000000000000000000000000000",
+        adapterManaged: false
+      };
+    },
     async preflightXcmSettlementOutcome(requestId, outcome) {
       return { requestId, ok: true, boundedBy: "XcmWrapper._validateSettlementBounds", outcome };
     },

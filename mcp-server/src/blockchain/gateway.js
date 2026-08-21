@@ -3020,6 +3020,28 @@ export class BlockchainGateway {
     });
   }
 
+  async getXcmRequestAdapterRegistration(requestId, strategyId) {
+    return this.withGatewayError("getXcmRequestAdapterRegistration", async () => {
+      const contract = this.requireXcmWrapper("getXcmRequestAdapterRegistration");
+      const normalizedRequestId = this.toRequestId(requestId);
+      const normalizedStrategyId = this.toBytes32Value(strategyId, "strategyId");
+      const [requestAdapter, registeredStrategyAdapter] = await Promise.all([
+        contract.requestAdapter(normalizedRequestId),
+        contract.strategyAdapter(normalizedStrategyId)
+      ]);
+      const normalizedRequestAdapter = getAddress(requestAdapter);
+      const normalizedRegisteredAdapter = getAddress(registeredStrategyAdapter);
+      return {
+        requestId: normalizedRequestId,
+        strategyId: normalizedStrategyId,
+        requestAdapter: normalizedRequestAdapter,
+        registeredStrategyAdapter: normalizedRegisteredAdapter,
+        adapterManaged: normalizedRequestAdapter !== ZERO_ADDRESS
+          && normalizedRequestAdapter === normalizedRegisteredAdapter
+      };
+    });
+  }
+
   async getXcmRequestParameters(requestId) {
     return this.withGatewayError("getXcmRequestParameters", async () => {
       const contract = this.requireXcmWrapper("getXcmRequestParameters");

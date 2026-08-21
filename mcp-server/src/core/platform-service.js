@@ -1868,6 +1868,13 @@ export class PlatformService {
     return this.blockchainGateway.getXcmRequest(requestId);
   }
 
+  async getXcmRequestAdapterRegistration(requestId, strategyId) {
+    if (!this.blockchainGateway?.isEnabled()) {
+      throw new ValidationError("XCM request adapter lookup requires the blockchain gateway.");
+    }
+    return this.blockchainGateway.getXcmRequestAdapterRegistration(requestId, strategyId);
+  }
+
   async finalizeXcmRequest(requestId, outcome) {
     if (!this.blockchainGateway?.isEnabled()) {
       throw new ValidationError("XCM request finalization requires the blockchain gateway.");
