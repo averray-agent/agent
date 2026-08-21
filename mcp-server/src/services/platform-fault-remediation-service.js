@@ -12,6 +12,7 @@ import {
 } from "../core/platform-fault-remediation.js";
 
 const ESCROW_JOB_STATE_SUBMITTED = 3;
+const ESCROW_JOB_STATE_CLAIMED = 2;
 const ESCROW_JOB_STATE_REJECTED = 4;
 const ESCROW_JOB_STATE_DISPUTED = 5;
 const ESCROW_JOB_STATE_CLOSED = 6;
@@ -156,6 +157,118 @@ export class PlatformFaultRemediationService {
     });
   }
 
+  async enqueueBrokeredSubmitExpiry({
+    session,
+    live: suppliedLive = undefined,
+    evidenceHash,
+    claimExpiresAt,
+    attempts
+  }) {
+    if (!this.isEnabled()) return undefined;
+    this.requireQueueSurface();
+    const id = platformFaultRemediationIdForSession(session?.sessionId);
+    return this.withRemediationLock(id, async () => {
+      const existing = await this.stateStore.getPlatformFaultRemediation?.(id);
+      if (existing?.status === PLATFORM_FAULT_REMEDIATION_PENDING) return existing;
+      const chainJobId = session.chainJobId ?? session.jobId;
+      const live = suppliedLive ?? await this.gateway.getJob(chainJobId);
+      this.assertWorkerBinding(session, live);
+      if (Number(live?.state) !== ESCROW_JOB_STATE_CLAIMED) {
+        throw new ConflictError(
+          `Brokered-submit expiry remediation requires escrow state ${ESCROW_JOB_STATE_CLAIMED}.`,
+          "platform_fault_submit_expiry_state_invalid",
+          { id, chainJobId, liveState: Number(live?.state) }
+        );
+      }
+
+      const workerPayoutRaw = this.remainingRewardRaw(live);
+      if (workerPayoutRaw === "0") {
+        throw new ConflictError(
+          "Brokered-submit expiry remediation requires a positive worker payout.",
+          "platform_fault_remediation_zero_payout",
+          { id, chainJobId }
+        );
+      }
+      const createdAt = this.timestamp();
+      const rationale = "Averray's brokered submit did not land before claim expiry. The worker supplied durable evidence and bears no consequence; the full remaining reward is an internal remediation obligation.";
+      const contentRecord = buildContentRecord({
+        payload: {
+          disputeId: `internal-${id}`,
+          sessionId: session.sessionId,
+          verdict: "dismissed",
+          rationale,
+          decidedBy: "TreasuryPolicy.arbitrators (pending hardware decision)",
+          decidedAt: createdAt,
+          remediation: {
+            kind: PLATFORM_FAULT_REMEDIATION_KIND,
+            origin: PLATFORM_FAULT_REMEDIATION_ORIGIN,
+            workerInitiated: false,
+            workerConsequence: "none",
+            platformFaultReasonCode: "BROKERED_SUBMIT_EXPIRED",
+            workerPayoutRaw,
+            submissionFailure: {
+              jobId: session.jobId,
+              chainJobId,
+              evidenceHash,
+              claimExpiresAt,
+              attempts
+            }
+          }
+        },
+        contentType: "arbitrator_reasoning",
+        ownerWallet: session.wallet,
+        verdict: "pass",
+        createdAt
+      });
+      await this.stateStore.upsertContent?.(contentRecord);
+      const metadataURI = publicContentUri(contentRecord.hash, { publicBaseUrl: this.publicBaseUrl });
+      const record = await this.stateStore.upsertPlatformFaultRemediation({
+        id,
+        kind: PLATFORM_FAULT_REMEDIATION_KIND,
+        origin: PLATFORM_FAULT_REMEDIATION_ORIGIN,
+        visibility: "internal",
+        workerInitiated: false,
+        workerConsequence: "none",
+        status: PLATFORM_FAULT_REMEDIATION_PENDING,
+        sessionId: session.sessionId,
+        jobId: session.jobId,
+        chainJobId,
+        worker: session.wallet,
+        asset: live.asset,
+        chainState: Number(live.state),
+        createdAt,
+        updatedAt: createdAt,
+        queuedAt: createdAt,
+        escalation: {
+          type: "brokered_submit_expired",
+          submissionFailure: {
+            jobId: session.jobId,
+            chainJobId,
+            evidenceHash,
+            claimExpiresAt,
+            attempts
+          }
+        },
+        resolution: {
+          verdict: "dismissed",
+          authority: "TreasuryPolicy.arbitrators",
+          signerMode: "out_of_band_hardware",
+          method: "manual_platform_fault_compensation",
+          executable: false,
+          executionConstraint: "The escrow never reached Submitted, so resolveDispute calldata would be invalid and is deliberately not fabricated.",
+          workerPayout: Math.max(Number(live.reward ?? 0) - Number(live.released ?? 0), 0),
+          workerPayoutRaw,
+          reasonCode: PLATFORM_FAULT_REMEDIATION_REASON_CODE,
+          reasoningHash: contentRecord.hash,
+          metadataURI,
+          releasesClaimEconomics: false
+        }
+      });
+      this.publishQueued(record);
+      return record;
+    });
+  }
+
   async initializeRecord({ id, session, verdict, reasoningHash, live }) {
     const workerPayoutRaw = this.remainingRewardRaw(live);
     if (workerPayoutRaw === "0") {
@@ -250,6 +363,17 @@ export class PlatformFaultRemediationService {
         missing
       });
     }
+    if (
+      typeof this.stateStore?.getPlatformFaultRemediation !== "function"
+      || typeof this.stateStore?.upsertPlatformFaultRemediation !== "function"
+      || typeof this.stateStore?.acquireClaimLock !== "function"
+      || typeof this.stateStore?.releaseClaimLock !== "function"
+    ) {
+      throw new ConfigError("Platform-fault remediation requires durable queue storage and locking.");
+    }
+  }
+
+  requireQueueSurface() {
     if (
       typeof this.stateStore?.getPlatformFaultRemediation !== "function"
       || typeof this.stateStore?.upsertPlatformFaultRemediation !== "function"

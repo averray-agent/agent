@@ -55,11 +55,15 @@ import {
 } from "./claim-job-integrity.js";
 import { cloneJsonRecord } from "./state-store-records.js";
 import { isDesignatedJob, requireDesignatedClaimant } from "./designated-claimants.js";
+import { classifyEscrowInvalidState } from "../blockchain/escrow-core-errors.js";
 
 // EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
 // Disputed=5, Closed=6. Used to reconcile a mined-but-receipt-lost submit.
 const ESCROW_JOB_STATE_CLAIMED = 2;
 const ESCROW_JOB_STATE_SUBMITTED = 3;
+export const BROKERED_SUBMIT_RECOVERY_MAX_ATTEMPTS = 12;
+const BROKERED_SUBMIT_RECOVERY_BASE_BACKOFF_MS = 15_000;
+const BROKERED_SUBMIT_RECOVERY_MAX_BACKOFF_MS = 5 * 60_000;
 const CLAIM_ECONOMICS_INVARIANT_FIELDS = [
   "claimStake",
   "claimStakeBps",
@@ -710,6 +714,211 @@ export class JobExecutionService {
     }
   }
 
+  /**
+   * Reconcile the otherwise-impossible local `submitted` / chain `Claimed`
+   * split. The chain read under the session lock is the duplicate guard: only
+   * a still-Claimed escrow can be re-brokered, and each eligible scheduler pass
+   * emits at most one submitWork transaction.
+   */
+  async reconcileBrokeredSubmit(sessionId, { now = new Date() } = {}) {
+    const session = await this.requireSession(sessionId);
+    if (session.status !== "submitted" || !this.blockchainGateway?.isEnabled?.()) {
+      return { status: "not_applicable", session };
+    }
+    const { job } = requireJobSnapshot(session);
+    if (isExternalJob(job)) {
+      return { status: "not_applicable", session };
+    }
+    if (!session.submission) {
+      throw new ConflictError(
+        `Submitted session ${sessionId} has no durable submission to re-broker.`,
+        "brokered_submit_evidence_missing",
+        { sessionId, jobId: session.jobId }
+      );
+    }
+
+    const lockOwner = randomUUID();
+    const lockAcquired = await this.stateStore.acquireClaimLock?.(
+      sessionId,
+      lockOwner,
+      this.getClaimLockTtlSeconds(job)
+    );
+    if (lockAcquired === false) {
+      return {
+        status: "deferred",
+        reason: "brokered_submit_lock_busy",
+        session
+      };
+    }
+
+    try {
+      const current = await this.requireSession(sessionId);
+      if (current.status !== "submitted") {
+        return { status: "not_applicable", session: current };
+      }
+      const chainJobId = current.chainJobId ?? current.jobId;
+      let live = await this.blockchainGateway.getJob(chainJobId);
+      if (Number(live?.state) === ESCROW_JOB_STATE_SUBMITTED) {
+        return { status: "landed", session: current, liveJob: live, recovered: false };
+      }
+      if (Number(live?.state) !== ESCROW_JOB_STATE_CLAIMED) {
+        return { status: "diverged", session: current, liveJob: live };
+      }
+      if (!walletsEqual(live?.worker, current.wallet)) {
+        throw new ConflictError(
+          "Brokered submit recovery worker does not match the live escrow claimant.",
+          "brokered_submit_worker_mismatch",
+          { sessionId, sessionWorker: current.wallet, chainWorker: live?.worker }
+        );
+      }
+
+      const evidenceHash = hashSubmission(current.submission);
+      const claimExpiresAt = brokeredSubmitClaimExpiresAt(current, live);
+      const recovery = current.brokeredSubmitRecovery ?? {};
+      const attempts = Math.max(0, Number(recovery.attempts) || 0);
+      const nowMs = new Date(now).getTime();
+      if (!Number.isFinite(nowMs)) {
+        throw new ValidationError("Brokered submit recovery clock is invalid.");
+      }
+
+      if (claimExpiresAt && Date.parse(claimExpiresAt) < nowMs) {
+        const checkpoint = {
+          ...recovery,
+          status: "expired",
+          evidenceHash,
+          claimExpiresAt,
+          attempts,
+          expiredAt: new Date(nowMs).toISOString()
+        };
+        const persisted = await this.stateStore.upsertSession({
+          ...current,
+          brokeredSubmitRecovery: checkpoint
+        });
+        return {
+          status: "expired",
+          reason: "brokered_submit_expired",
+          session: persisted,
+          liveJob: live,
+          evidenceHash,
+          claimExpiresAt,
+          attempts
+        };
+      }
+
+      if (attempts >= BROKERED_SUBMIT_RECOVERY_MAX_ATTEMPTS) {
+        return {
+          status: "deferred",
+          reason: "brokered_submit_attempts_exhausted",
+          session: current,
+          liveJob: live,
+          evidenceHash,
+          claimExpiresAt,
+          attempts
+        };
+      }
+      const nextAttemptAtMs = Date.parse(recovery.nextAttemptAt ?? "");
+      if (Number.isFinite(nextAttemptAtMs) && nextAttemptAtMs > nowMs) {
+        return {
+          status: "deferred",
+          reason: "brokered_submit_backoff",
+          retryAt: new Date(nextAttemptAtMs).toISOString(),
+          session: current,
+          liveJob: live,
+          evidenceHash,
+          claimExpiresAt,
+          attempts
+        };
+      }
+
+      const nextAttempts = attempts + 1;
+      const attemptedAt = new Date(nowMs).toISOString();
+      const nextAttemptAt = new Date(nowMs + brokeredSubmitBackoffMs(nextAttempts)).toISOString();
+      let attemptedSession = await this.stateStore.upsertSession({
+        ...current,
+        brokeredSubmitRecovery: {
+          ...recovery,
+          status: "broadcasting",
+          evidenceHash,
+          claimExpiresAt,
+          attempts: nextAttempts,
+          lastAttemptAt: attemptedAt,
+          nextAttemptAt
+        }
+      });
+
+      try {
+        await this.blockchainGateway.submitWork(chainJobId, evidenceHash, current.wallet);
+      } catch (error) {
+        const invalidState = classifyEscrowInvalidState(error);
+        live = await this.blockchainGateway.getJob(chainJobId);
+        if (Number(live?.state) === ESCROW_JOB_STATE_SUBMITTED) {
+          const landed = await this.storeBrokeredSubmitLanded(attemptedSession, {
+            live,
+            evidenceHash,
+            claimExpiresAt,
+            attempts: nextAttempts,
+            attemptedAt,
+            racedInvalidState: Boolean(invalidState)
+          });
+          return { status: "landed", session: landed, liveJob: live, recovered: true };
+        }
+        attemptedSession = await this.stateStore.upsertSession({
+          ...attemptedSession,
+          brokeredSubmitRecovery: {
+            ...attemptedSession.brokeredSubmitRecovery,
+            status: "retry_wait",
+            lastError: brokeredSubmitErrorSummary(error, invalidState)
+          }
+        });
+        throw error;
+      }
+
+      live = await this.blockchainGateway.getJob(chainJobId);
+      if (Number(live?.state) !== ESCROW_JOB_STATE_SUBMITTED) {
+        throw new ConflictError(
+          "Brokered submit recovery returned without a Submitted on-chain job.",
+          "brokered_submit_not_landed",
+          { sessionId, chainJobId, liveState: live?.state }
+        );
+      }
+      const landed = await this.storeBrokeredSubmitLanded(attemptedSession, {
+        live,
+        evidenceHash,
+        claimExpiresAt,
+        attempts: nextAttempts,
+        attemptedAt,
+        racedInvalidState: false
+      });
+      return { status: "landed", session: landed, liveJob: live, recovered: true };
+    } finally {
+      await this.stateStore.releaseClaimLock?.(sessionId, lockOwner);
+    }
+  }
+
+  async storeBrokeredSubmitLanded(session, {
+    live,
+    evidenceHash,
+    claimExpiresAt,
+    attempts,
+    attemptedAt,
+    racedInvalidState
+  }) {
+    return this.stateStore.upsertSession({
+      ...session,
+      brokeredSubmitRecovery: {
+        ...session.brokeredSubmitRecovery,
+        status: "landed",
+        evidenceHash,
+        claimExpiresAt,
+        attempts,
+        lastAttemptAt: attemptedAt,
+        landedAt: new Date().toISOString(),
+        racedInvalidState,
+        observedState: Number(live?.state)
+      }
+    });
+  }
+
   async captureJobSnapshot(job, claimEconomics) {
     return captureClaimJobSnapshot({ job, claimEconomics, stateStore: this.stateStore });
   }
@@ -1121,6 +1330,31 @@ export class JobExecutionService {
       }
     });
   }
+}
+
+function brokeredSubmitClaimExpiresAt(session, live) {
+  const rawSeconds = Number(live?.claimExpiry ?? live?.claimExpiryRaw ?? 0);
+  if (Number.isFinite(rawSeconds) && rawSeconds > 0) {
+    return new Date(rawSeconds * 1000).toISOString();
+  }
+  return claimExpiresAt(session, requireJobSnapshot(session).job);
+}
+
+function brokeredSubmitBackoffMs(attempt) {
+  return Math.min(
+    BROKERED_SUBMIT_RECOVERY_BASE_BACKOFF_MS * (2 ** Math.max(0, attempt - 1)),
+    BROKERED_SUBMIT_RECOVERY_MAX_BACKOFF_MS
+  );
+}
+
+function brokeredSubmitErrorSummary(error, invalidState) {
+  return {
+    name: error?.name ?? "Error",
+    message: error?.message ?? String(error),
+    ...(error?.code ? { code: error.code } : {}),
+    ...(invalidState?.name ? { customError: invalidState.name } : {}),
+    ...(invalidState?.selector ? { selector: invalidState.selector } : {})
+  };
 }
 
 function summarizeClaimEconomics(economics) {

@@ -178,7 +178,10 @@ export class OnboardingSubsidyBudget {
 }
 
 export function countClaimedSessions(sessions = []) {
-  return sessions.filter((session) => session?.claimedAt || session?.status).length;
+  return sessions.filter((session) => (
+    (session?.claimedAt || session?.status)
+    && !session?.onboardingWaiverConsumptionExemptedAt
+  )).length;
 }
 
 /**

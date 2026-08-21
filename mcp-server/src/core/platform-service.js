@@ -1262,6 +1262,10 @@ export class PlatformService {
     return this.jobExecutionService.submitWork(sessionId, protocol, evidence);
   }
 
+  async reconcileBrokeredSubmit(sessionId, options = {}) {
+    return this.jobExecutionService.reconcileBrokeredSubmit(sessionId, options);
+  }
+
   async resumeSession(sessionId) {
     return this.jobExecutionService.resumeSession(sessionId);
   }

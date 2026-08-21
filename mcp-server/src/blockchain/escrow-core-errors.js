@@ -28,6 +28,16 @@ export function decodeEscrowCoreRevert(error) {
   }
 }
 
+export function classifyEscrowInvalidState(error) {
+  const decoded = decodeEscrowCoreRevert(error);
+  const name = error?.details?.customError ?? decoded?.name;
+  if (name !== "InvalidState") return undefined;
+  return {
+    name,
+    selector: error?.details?.selector ?? decoded?.selector
+  };
+}
+
 function firstHexRevertData(...values) {
   for (const value of values) {
     if (typeof value === "string" && /^0x[a-fA-F0-9]{8,}$/u.test(value)) return value;
