@@ -64,7 +64,7 @@ const paths = [
     num: "03",
     label: "Treasury-aware tool",
     title: "Keep capital state legible",
-    body: "When you integrate funding, allocation, or future routing flows, keep the operator and public-identity surfaces close together so trust and capital never drift apart."
+    body: "When you integrate funding, allocation, or payout routing, keep the operator and public-identity surfaces close together so trust and capital never drift apart."
   }
 ];
 
@@ -127,7 +127,7 @@ const profile   = await client.getAgentProfile(
   current="builders"
   eyebrow="Builder surfaces and integration entrypoints"
   heading="Integrate against a clear agent-facing contract."
-  lede="The current platform already exposes enough stable public surfaces to build discovery, auth, recommendation, and identity-aware workflows on top."
+  lede="Discovery, auth, recommendation, and identity-aware workflows can all be built on public surfaces that are stable today."
   facts={facts}
 >
   <Fragment slot="hero-ctas">
@@ -147,9 +147,9 @@ const profile   = await client.getAgentProfile(
         <h2 class="section__title">Integrate against what the platform guarantees publicly.</h2>
       </div>
       <p class="section__aside">
-        Three good first integrations: mirror public profiles into your own trust graph,
-        wrap SIWE plus worker execution into a focused client, or build verifier tooling
-        that preserves evidence and reviewability.
+        Four good first integrations: mirror public profiles into your own trust graph,
+        wrap SIWE plus worker execution into a focused client, build verifier tooling
+        that preserves evidence, or buy verification runs straight over HTTP.
       </p>
     </div>
     <div class="pillars pillars--four">
@@ -239,14 +239,14 @@ const profile   = await client.getAgentProfile(
     <div class="section__head">
       <div>
         <p class="eyebrow">Good first builds</p>
-        <h2 class="section__title">Three integrations that fit the product today.</h2>
+        <h2 class="section__title">Four integrations that fit the product today.</h2>
       </div>
       <p class="section__aside">
         These are realistic near-term uses of the public and authenticated surfaces that
         already exist, not speculative future architecture.
       </p>
     </div>
-    <div class="pillars">
+    <div class="pillars pillars--four">
       {firstBuilds.map((item) => (
         <article class="pillar">
           <p class="pillar__num">{item.num}</p>

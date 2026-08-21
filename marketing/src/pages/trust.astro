@@ -7,7 +7,7 @@ const EXAMPLE_WALLET_FULL = "0x10E82610BDFb7A4fC0d5E1c2E0694C810434214b";
 const facts = [
   { label: "Deploy verification", value: "On-chain assertions after deploy" },
   { label: "Multisig", value: "2-of-3 operational setup docs" },
-  { label: "Audit handoff", value: "Single-doc package for reviewers" },
+  { label: "External review", value: "Conditional mainnet approval, 2026" },
   { label: "Public data", value: "Schema-backed badge and profile reads" }
 ];
 
@@ -175,7 +175,7 @@ const checklist = [
         counterparties something concrete to inspect.
       </p>
     </div>
-    <div class="pillars">
+    <div class="pillars pillars--four">
       {controls.map((item) => (
         <article class="pillar">
           <p class="pillar__num">{item.num}</p>
