@@ -11,6 +11,11 @@ const JOBS = [
     category: "coding",
     jobType: "work",
     tier: "starter",
+    verifierMode: "deterministic",
+    claimTtlSeconds: 3600,
+    requiresSponsoredGas: true,
+    onboardingWaiverEligible: true,
+    acceptanceCriteria: ["Return a report with the failing checks and evidence."],
     rewardAsset: "USDC",
     rewardAmount: 1,
     lifecycle: {
@@ -163,11 +168,16 @@ test("public jobs response filters and compacts agent-friendly queries", () => {
     "category",
     "jobType",
     "tier",
+    "verifierMode",
+    "claimTtlSeconds",
+    "requiresSponsoredGas",
     "onboardingWaiverEligible",
+    "disposableProof",
     "stake",
     "reward",
     "createdAt",
     "summary",
+    "successCriteria",
     "definitionUrl",
     "sourceDetails"
   ]);
@@ -179,6 +189,11 @@ test("public jobs response filters and compacts agent-friendly queries", () => {
   assert.equal(response.jobs[0].source, "wikipedia");
   assert.equal(response.jobs[0].sourceType, "wikipedia_article");
   assert.equal(response.jobs[0].onboardingWaiverEligible, false);
+  assert.equal(response.jobs[0].verifierMode, null);
+  assert.equal(response.jobs[0].claimTtlSeconds, null);
+  assert.equal(response.jobs[0].requiresSponsoredGas, false);
+  assert.equal(response.jobs[0].disposableProof, false);
+  assert.equal(response.jobs[0].successCriteria, "");
   assert.equal(response.jobs[0].definitionUrl, "/jobs/definition?jobId=wiki-en-123-citation-repair-example");
   assert.deepEqual(response.jobs[0].sourceDetails, {
     taskType: "citation_repair",
@@ -285,6 +300,41 @@ test("public jobs response allows explicit full format with query params", () =>
   const response = buildPublicJobsResponse(JOBS, new URLSearchParams("source=wikipedia&format=full"));
 
   assert.equal(response, JOBS);
+});
+
+test("compact rows expose the human-work listing fields without changing the catalogue", async () => {
+  const { normalizeJobInput } = await import("../../core/job-catalog-normalization.js");
+  const normalized = normalizeJobInput({
+    ...JOBS[0],
+    id: "worker-canary-human-listing-fields",
+    verifierTerms: ["report"],
+    disposableProof: true
+  });
+
+  const response = buildPublicJobsResponse(
+    [normalized],
+    new URLSearchParams("limit=25")
+  );
+
+  assert.equal(response.total, 1, "the existing agent listing remains unchanged");
+  assert.deepEqual(
+    {
+      verifierMode: response.jobs[0].verifierMode,
+      claimTtlSeconds: response.jobs[0].claimTtlSeconds,
+      requiresSponsoredGas: response.jobs[0].requiresSponsoredGas,
+      onboardingWaiverEligible: response.jobs[0].onboardingWaiverEligible,
+      disposableProof: response.jobs[0].disposableProof,
+      successCriteria: response.jobs[0].successCriteria
+    },
+    {
+      verifierMode: "deterministic",
+      claimTtlSeconds: 3600,
+      requiresSponsoredGas: true,
+      onboardingWaiverEligible: true,
+      disposableProof: true,
+      successCriteria: "Return a report with the failing checks and evidence."
+    }
+  );
 });
 
 // End to end through the REAL normalizer, because the wiring is only worth anything

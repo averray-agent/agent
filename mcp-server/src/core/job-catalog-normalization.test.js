@@ -37,6 +37,7 @@ test("normalizeJobInput returns the canonical job record shape", () => {
     rewardAsset: "usdc",
     source: { type: "github_issue", repo: "example/project" },
     acceptanceCriteria: [" Open a PR ", "", "Run tests"],
+    disposableProof: true,
     agentInstructions: ["Keep the patch narrow."],
     delegationPolicy: {
       maxDepth: 1,
@@ -53,6 +54,7 @@ test("normalizeJobInput returns the canonical job record shape", () => {
   assert.equal(job.requiredRole, "reviewer");
   assert.equal(job.lane, "oss-anchored");
   assert.deepEqual(job.acceptanceCriteria, ["Open a PR", "Run tests"]);
+  assert.equal(job.disposableProof, true);
   assert.deepEqual(job.source, { type: "github_issue", repo: "example/project" });
   assert.deepEqual(job.delegationPolicy, {
     maxDepth: 1,

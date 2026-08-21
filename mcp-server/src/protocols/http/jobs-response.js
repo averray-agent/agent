@@ -120,7 +120,11 @@ function toCompactJobRow(job) {
     category: job.category ?? null,
     jobType: job.jobType ?? null,
     tier: job.tier ?? null,
+    verifierMode: job.verifierMode ?? null,
+    claimTtlSeconds: job.claimTtlSeconds ?? null,
+    requiresSponsoredGas: job.requiresSponsoredGas === true,
     onboardingWaiverEligible: job.onboardingWaiverEligible === true,
+    disposableProof: job.disposableProof === true,
     stake: job.claimStake ?? job.stake ?? null,
     reward: {
       asset: job.rewardAsset ?? null,
@@ -131,6 +135,7 @@ function toCompactJobRow(job) {
     ...(settlement ? { settlement } : {}),
     createdAt: lifecycle.createdAt ?? null,
     summary: summarizeJob(job),
+    successCriteria: summarizeSuccessCriteria(job),
     definitionUrl: `/jobs/definition?jobId=${encodeURIComponent(job.id)}`,
     ...(job.listingStatus ? { listingStatus: job.listingStatus } : {}),
     ...(job.contentTrust ? { contentTrust: job.contentTrust } : {}),
@@ -202,6 +207,17 @@ function summarizeJob(job) {
     return "";
   }
   return description.length > 180 ? `${description.slice(0, 177)}...` : description;
+}
+
+function summarizeSuccessCriteria(job) {
+  const criterion = Array.isArray(job.acceptanceCriteria)
+    ? job.acceptanceCriteria.find((value) => String(value ?? "").trim())
+    : undefined;
+  const text = String(criterion ?? "").replace(/\s+/gu, " ").trim();
+  if (!text) {
+    return "";
+  }
+  return text.length > 180 ? `${text.slice(0, 177)}...` : text;
 }
 
 function sourceCandidates(job) {
