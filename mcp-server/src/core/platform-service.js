@@ -1932,6 +1932,47 @@ export class PlatformService {
   }
 
   /**
+   * Return a platform-fault claimant's combined local claim lock. Local claims
+   * debit claimStake + claimFee into one jobStakeLocked ledger bucket, so the
+   * no-consequence return must move totalClaimLock back to liquid together.
+   *
+   * Chain-enabled runtimes are an explicit no-op: their claim economics are
+   * held by EscrowCore and release remains part of arbitrator-only
+   * resolveDispute. This method never calls a gateway money mutation.
+   */
+  async returnPlatformFaultClaimEconomics(session, job) {
+    const custody = session?.claimStakeCustody
+      ?? (this.blockchainGateway?.isEnabled?.() ? "chain_escrow" : "backend_ledger");
+    if (custody === "chain_escrow") {
+      return {
+        custody: "chain_escrow",
+        returned: false,
+        reason: "arbitrator_resolution_required"
+      };
+    }
+    if (custody !== "backend_ledger") {
+      throw new ValidationError(`Unknown claim-stake custody ${JSON.stringify(custody)}.`);
+    }
+
+    const amount = session?.totalClaimLock === undefined
+      ? Number(session?.claimStake ?? 0) + Number(session?.claimFee ?? 0)
+      : Number(session.totalClaimLock);
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new ValidationError("Platform-fault claim economics must be a non-negative number.");
+    }
+    if (amount === 0) {
+      return { custody, returned: true, amount: 0 };
+    }
+
+    const asset = job?.rewardAsset;
+    if (typeof asset !== "string" || !asset.trim()) {
+      throw new ValidationError("Platform-fault claim economics require a reward asset.");
+    }
+    await this.accountMutationService.releaseJobStake(session.wallet, asset, amount);
+    return { custody, returned: true, asset, amount };
+  }
+
+  /**
    * Public, sanitized counterpart to the providerOperations slice of
    * `getAdminStatus`. The full admin status carries `lastRun.errors[]` and
    * `lastRun.skipped[]`, which can include candidate URLs, query strings,

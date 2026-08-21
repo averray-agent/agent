@@ -545,6 +545,9 @@ export class JobExecutionService {
       claimEconomicsWaiverScope: "claim_time",
       claimNumber: claimEconomics.claimNumber,
       totalClaimLock: claimEconomics.totalClaimLock,
+      claimStakeCustody: this.blockchainGateway?.isEnabled?.()
+        ? "chain_escrow"
+        : "backend_ledger",
       ...(workerExposure ? { workerExposure } : {}),
       ...(dailyExposure?.entry ? { dailyExposure: dailyExposure.entry } : {}),
       ...(dailyExposure?.dailyAllowance ? { dailyAllowance: dailyExposure.dailyAllowance } : {}),
