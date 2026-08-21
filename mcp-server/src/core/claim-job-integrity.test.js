@@ -80,6 +80,10 @@ test("claim integrity permits creation only when the chain job does not exist", 
 
   assert.equal(inspected.decision.eligible, true);
   assert.equal(inspected.decision.status, "uncommitted");
+  assert.equal(
+    inspected.decision.message,
+    "This job is served fail-open pending its chain commitment. If claimed now, the resulting receipt will carry chain_unavailable_fail_open."
+  );
   assert.equal(inspected.liveJob.state, 0);
 });
 

@@ -67,7 +67,8 @@ export async function inspectClaimJobDefinitionIntegrity({
         applies: false,
         status: "uncommitted",
         reason: "job_definition_not_committed",
-        specHash: snapshot.specHash
+        specHash: snapshot.specHash,
+        message: "This job is served fail-open pending its chain commitment. If claimed now, the resulting receipt will carry chain_unavailable_fail_open."
       }
     };
   }
