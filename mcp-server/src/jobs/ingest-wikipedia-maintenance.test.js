@@ -6,6 +6,8 @@ import {
   scoreArticle,
   toPlatformJob
 } from "./ingest-wikipedia-maintenance.js";
+import { normalizeJobInput } from "../core/job-catalog-normalization.js";
+import { validateStructuredSubmission } from "../core/job-schema-registry.js";
 
 const ARTICLE = {
   language: "en",
@@ -40,13 +42,44 @@ test("toPlatformJob produces an Averray-attributed Wikipedia proposal job", () =
     "https://en.wikipedia.org/w/index.php?title=Example_article&oldid=987654321"
   );
   assert.equal(job.source.proposalOnly, true);
-  assert.equal(job.source.outputSchemaUrl, "/schemas/jobs/wikipedia-citation-repair-output.json");
+  assert.equal(job.source.outputSchemaUrl, "/schemas/jobs/wikipedia-citation-repair-output-v2.json");
   assert.equal(job.source.attributionPolicy, "Averray proposal only / no direct Wikipedia edit");
   assert.equal(job.source.writePolicy, "averray_company_reviewed_proposal_only");
   assert.equal(job.source.attribution.proposer, "Averray");
   assert.equal(job.source.attribution.directEdit, false);
   assert.equal(job.inputSchemaRef, "schema://jobs/wikipedia-maintenance-input");
-  assert.equal(job.outputSchemaRef, "schema://jobs/wikipedia-citation-repair-output");
+  assert.equal(job.outputSchemaRef, "schema://jobs/wikipedia-citation-repair-output-v2");
+  assert.deepEqual(job.verifierAnchorEvidence, {
+    kind: "wikipedia_revision_wikitext",
+    language: "en",
+    revisionId: "987654321"
+  });
+  const normalized = normalizeJobInput(job);
+  assert.deepEqual(normalized.verifierConfig.anchorEvidence, {
+    kind: "wikipedia_revision_wikitext",
+    language: "en",
+    revisionId: "987654321",
+    normalization: "trim_then_collapse_runs_to_single_ascii_space_case_sensitive"
+  });
+  assert.equal(normalized.verifierConfig.version, 2);
+  assert.doesNotThrow(() => validateStructuredSubmission(job.outputSchemaRef, {
+    page_title: "Example article",
+    revision_id: "987654321",
+    citation_findings: [{
+      section: "Lead",
+      problem: "dead_link",
+      current_claim: "Example claim",
+      source_quote: "Quoted revision text",
+      evidence_url: "https://example.invalid/archive"
+    }],
+    proposed_changes: [{
+      change_type: "replace_citation",
+      target_text: "Old source",
+      replacement_text: "Archived source",
+      source_url: "https://example.invalid/archive"
+    }],
+    review_notes: "Proposal only."
+  }));
   assert.ok(job.agentInstructions.some((entry) => entry.includes("Do not edit Wikipedia directly")));
   assert.ok(job.agentInstructions.some((entry) => entry.includes("Averray")));
   assert.deepEqual(job.verification.signals, [

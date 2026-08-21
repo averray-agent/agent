@@ -114,6 +114,7 @@ test("compact rows preserve explicit provenance and untrusted-content framing", 
       ...JOBS[0],
       listingStatus: "listed",
       contentTrust: "external-unreviewed",
+      verificationDepth: "Starter-tier benchmark check: output schema conformance and required reference terms. This is not a content audit.",
       provenance
     }],
     new URLSearchParams("limit=1")
@@ -121,6 +122,10 @@ test("compact rows preserve explicit provenance and untrusted-content framing", 
 
   assert.equal(response.jobs[0].listingStatus, "listed");
   assert.equal(response.jobs[0].contentTrust, "external-unreviewed");
+  assert.equal(
+    response.jobs[0].verificationDepth,
+    "Starter-tier benchmark check: output schema conformance and required reference terms. This is not a content audit."
+  );
   assert.deepEqual(response.jobs[0].provenance, provenance);
 });
 

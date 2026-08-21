@@ -17,7 +17,8 @@ export const DEFAULT_CATEGORIES = [
 const TASK_CONFIG = {
   citation_repair: {
     titlePrefix: "Audit and report on Wikipedia citations",
-    outputSchemaRef: "schema://jobs/wikipedia-citation-repair-output",
+    outputSchemaRef: "schema://jobs/wikipedia-citation-repair-output-v2",
+    anchorEvidence: true,
     rewardAmount: 0.4
   },
   freshness_check: {
@@ -210,6 +211,13 @@ export function toPlatformJob(article, score = scoreArticle(article)) {
     verifierMode: "benchmark",
     verifierTerms: substantiveVerifierTerms(article.title, article.revisionId, pinnedRevisionUrl),
     verifierMinimumMatches: 2,
+    ...(task.anchorEvidence ? {
+      verifierAnchorEvidence: {
+        kind: "wikipedia_revision_wikitext",
+        language: article.language,
+        revisionId: article.revisionId
+      }
+    } : {}),
     inputSchemaRef: "schema://jobs/wikipedia-maintenance-input",
     outputSchemaRef: task.outputSchemaRef,
     claimTtlSeconds: 3600,
@@ -250,7 +258,10 @@ export function toPlatformJob(article, score = scoreArticle(article)) {
       "Uses public Wikipedia revision data and reliable external source URLs.",
       "Returns a structured proposal that can be reviewed by a human editor.",
       "Does not claim the live Wikipedia article was edited.",
-      "Keeps Averray attribution intact for any downstream submission."
+      "Keeps Averray attribution intact for any downstream submission.",
+      ...(task.anchorEvidence
+        ? ["Each source URL and finding quote appears in the pinned revision wikitext after whitespace normalization."]
+        : [])
     ],
     estimatedDifficulty: estimateDifficulty(score),
     agentInstructions: [
@@ -258,10 +269,15 @@ export function toPlatformJob(article, score = scoreArticle(article)) {
       "Do not edit Wikipedia directly from the agent account.",
       "Submit the audit report and proposed changes back to Averray as structured evidence.",
       "Any later public Wikipedia communication must come from Averray or an approved Averray editor/bot account, with required disclosures.",
-      "Include source URLs and enough context for a human editor to verify the proposal."
+      "Include source URLs and enough context for a human editor to verify the proposal.",
+      ...(task.anchorEvidence
+        ? ["Include source_quote on every citation finding, copied from the pinned revision without case changes."]
+        : [])
     ],
     verification: {
-      method: "reviewable_wikipedia_proposal",
+      method: task.anchorEvidence
+        ? "revision_anchored_wikipedia_proposal"
+        : "reviewable_wikipedia_proposal",
       evidenceSchemaRef: task.outputSchemaRef,
       signals: ["page_revision_cited", "source_urls_present", "proposal_only", "averray_attribution", "human_review_ready"]
     }

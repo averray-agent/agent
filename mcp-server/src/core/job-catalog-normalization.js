@@ -127,7 +127,7 @@ export function normalizeJobInput(input) {
     rewardAmount,
     ...(lane ? { lane } : {}),
     verifierMode,
-    verifierConfig: buildVerifierConfig(verifierMode, input),
+    verifierConfig: buildVerifierConfig(verifierMode, input, { outputSchemaRef }),
     inputSchemaRef,
     outputSchemaRef,
     ...(schemaRegistrations.length ? { schemaRegistrations } : {}),
@@ -172,7 +172,7 @@ export function assertActiveCatalogTitleTruthBoundary(title, lifecycle = { statu
   }
 }
 
-export function buildVerifierConfig(verifierMode, input) {
+export function buildVerifierConfig(verifierMode, input, { outputSchemaRef } = {}) {
   const verifierTerms = Array.isArray(input?.verifierTerms)
     ? input.verifierTerms.map((value) => String(value).trim()).filter(Boolean)
     : [];
@@ -185,11 +185,18 @@ export function buildVerifierConfig(verifierMode, input) {
     if (!Number.isInteger(minimumMatches) || minimumMatches < 1) {
       throw new ValidationError("Benchmark minimum matches must be at least 1.");
     }
+    const anchorEvidence = normalizeBenchmarkAnchorEvidence(input?.verifierAnchorEvidence);
+    if (anchorEvidence && outputSchemaRef !== "schema://jobs/wikipedia-citation-repair-output-v2") {
+      throw new ValidationError(
+        "Wikipedia revision anchoring requires schema://jobs/wikipedia-citation-repair-output-v2."
+      );
+    }
     return {
-      version: 1,
+      version: anchorEvidence ? 2 : 1,
       handler: "benchmark",
       requiredKeywords: verifierTerms,
-      minimumMatches: Math.min(minimumMatches, verifierTerms.length)
+      minimumMatches: Math.min(minimumMatches, verifierTerms.length),
+      ...(anchorEvidence ? { anchorEvidence } : {})
     };
   }
 
@@ -240,6 +247,30 @@ export function buildVerifierConfig(verifierMode, input) {
     handler: "human_fallback",
     escalationMessage: String(input?.escalationMessage ?? "Escalate to human reviewer.").trim(),
     autoApprove: Boolean(input?.autoApprove)
+  };
+}
+
+function normalizeBenchmarkAnchorEvidence(value) {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ValidationError("verifierAnchorEvidence must be an object.");
+  }
+  if (value.kind !== "wikipedia_revision_wikitext") {
+    throw new ValidationError("verifierAnchorEvidence.kind must be wikipedia_revision_wikitext.");
+  }
+  const language = String(value.language ?? "").trim().toLowerCase();
+  const revisionId = String(value.revisionId ?? "").trim();
+  if (!/^[a-z][a-z0-9-]{0,15}$/u.test(language)) {
+    throw new ValidationError("verifierAnchorEvidence.language is invalid.");
+  }
+  if (!/^[1-9][0-9]*$/u.test(revisionId)) {
+    throw new ValidationError("verifierAnchorEvidence.revisionId must be a positive integer string.");
+  }
+  return {
+    kind: "wikipedia_revision_wikitext",
+    language,
+    revisionId,
+    normalization: "trim_then_collapse_runs_to_single_ascii_space_case_sensitive"
   };
 }
 

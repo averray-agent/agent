@@ -35,6 +35,7 @@ const fixtures = [
         section: "Lead",
         problem: "dead_link",
         current_claim: PLACEHOLDER,
+        source_quote: "The cited source is https://example.invalid/evidence",
         evidence_url: "https://example.invalid/evidence"
       }],
       proposed_changes: [{
@@ -186,7 +187,7 @@ for (const fixture of fixtures) {
   test(`${fixture.name} rejects schema-valid placeholder evidence`, async () => {
     validateStructuredSubmission(fixture.job.outputSchemaRef, fixture.submission);
     const normalizedJob = normalizeJobInput(fixture.job);
-    const result = await new VerifierRegistry().evaluate(normalizedJob, fixture.submission);
+    const result = await new VerifierRegistry(fixture.registryOptions).evaluate(normalizedJob, fixture.submission);
 
     assert.equal(result.outcome, "rejected");
     assert.equal(result.reasonCode, "BENCHMARK_THRESHOLD_MISSED");
@@ -203,7 +204,10 @@ for (const fixture of fixtures) {
     submission[firstStringField] = evidence;
     validateStructuredSubmission(fixture.job.outputSchemaRef, submission);
 
-    const result = await new VerifierRegistry().evaluate(normalizeJobInput(fixture.job), submission);
+    const registryOptions = fixture.name === "wikipedia citation repair"
+      ? { fetchImpl: wikipediaRevisionFetch(fixture.job, submission) }
+      : fixture.registryOptions;
+    const result = await new VerifierRegistry(registryOptions).evaluate(normalizeJobInput(fixture.job), submission);
     assert.equal(result.outcome, "approved");
   });
 }
@@ -219,3 +223,28 @@ test("persisted field-name-only benchmark snapshots fail closed", async () => {
   assert.equal(result.outcome, "rejected");
   assert.equal(result.reasonCode, "BENCHMARK_CONFIG_UNSAFE");
 });
+
+function wikipediaRevisionFetch(job, submission) {
+  const wikitext = [
+    ...submission.citation_findings.flatMap((finding) => [finding.source_quote, finding.evidence_url]),
+    ...submission.proposed_changes.map((change) => change.source_url)
+  ].join("\n");
+  return async (url) => {
+    assert.equal(url.searchParams.get("revids"), job.source.revisionId);
+    return {
+      ok: true,
+      async json() {
+        return {
+          query: {
+            pages: [{
+              revisions: [{
+                revid: Number(job.source.revisionId),
+                slots: { main: { content: wikitext } }
+              }]
+            }]
+          }
+        };
+      }
+    };
+  };
+}

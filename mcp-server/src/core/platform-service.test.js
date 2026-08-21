@@ -2956,6 +2956,10 @@ test("serving metadata exposes curated provenance without changing the canonical
 
   assert.equal(served.listingStatus, "listed");
   assert.equal(served.contentTrust, "operator-curated");
+  assert.equal(
+    served.verificationDepth,
+    "Starter-tier benchmark check: output schema conformance and required reference terms. This is not a content audit."
+  );
   assert.deepEqual(served.provenance, {
     posterAddress: EXTERNAL_POSTER,
     posterTier: "operator-curated",
@@ -2965,6 +2969,7 @@ test("serving metadata exposes curated provenance without changing the canonical
   });
   assert.equal(hashCanonicalContent(service.getJobDefinition("parent-job-001")), canonicalBefore);
   assert.equal(service.getJobDefinition("parent-job-001").provenance, undefined);
+  assert.equal(service.getJobDefinition("parent-job-001").verificationDepth, undefined);
 });
 
 test("external serving metadata uses the hash-pinned draft provenance", async () => {
