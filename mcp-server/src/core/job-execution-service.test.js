@@ -273,6 +273,7 @@ test("claimJob pins an immutable complete job snapshot to the session", async ()
   assert.equal(claimed.jobSnapshot.outputSchema.schema.$id, job.outputSchemaRef);
   assert.match(claimed.jobSnapshot.outputSchema.schemaHash, /^0x[0-9a-f]{64}$/u);
   assert.equal(claimed.jobSnapshot.claimEconomics.totalClaimLock, claimed.totalClaimLock);
+  assert.equal(claimed.claimStakeCustody, "backend_ledger");
 
   job.verifierConfig.requiredKeywords = ["mutated-live-catalogue"];
   assert.deepEqual(
@@ -854,6 +855,7 @@ test("claimJob proceeds when only the claim-time integrity read has a transient 
   assert.equal(claimed.status, "claimed");
   assert.equal(claimed.jobSnapshot.specHash, committed);
   assert.equal(claimed.jobSnapshot.specSource, "chain_unavailable_fail_open");
+  assert.equal(claimed.claimStakeCustody, "chain_escrow");
   assert.equal(brokerCalls, 1);
   assert.deepEqual(await stateStore.getSession(claimed.sessionId), claimed);
 });

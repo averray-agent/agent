@@ -7,6 +7,7 @@ import {
   PLATFORM_FAULT_REMEDIATION_KIND,
   PLATFORM_FAULT_REMEDIATION_PENDING,
 } from "../core/platform-fault-remediation.js";
+import { PlatformService } from "../core/platform-service.js";
 import { MemoryStateStore } from "../core/state-store.js";
 import { transitionSession } from "../core/session-state-machine.js";
 import { PlatformFaultRemediationService } from "./platform-fault-remediation-service.js";
@@ -94,6 +95,7 @@ function submittedSession({ designated = false } = {}) {
     chainJobId: CHAIN_JOB_ID,
     claimStake: 0.35,
     totalClaimLock: 0.35,
+    claimStakeCustody: "chain_escrow",
     submission: "bounded test evidence",
     jobSnapshot: buildJobSnapshot(job)
   }, "claimed", { reason: "job_claimed" });
@@ -159,6 +161,70 @@ function verifierHarness({ designated = false } = {}) {
     }
   });
   return { events, gateway, job, session, stateStore, verifier };
+}
+
+async function localLedgerVerifierHarness(outcome, { custody = "backend_ledger" } = {}) {
+  const stateStore = new MemoryStateStore();
+  const job = {
+    id: `local-ledger-${outcome}`,
+    verifierMode: "deterministic",
+    verifierConfig: { handler: "deterministic", version: 1 },
+    rewardAsset: "USDC",
+    rewardAmount: 8
+  };
+  const accounts = new Map([
+    [WORKER, {
+      wallet: WORKER,
+      liquid: { USDC: 1.65 },
+      reserved: {},
+      strategyAllocated: {},
+      collateralLocked: {},
+      jobStakeLocked: { USDC: 0.35 },
+      debtOutstanding: {}
+    }]
+  ]);
+  const ledger = new PlatformService(
+    [job],
+    new Map(),
+    accounts,
+    new Map(),
+    undefined,
+    stateStore
+  );
+  const claimed = transitionSession({
+    sessionId: `local-ledger-${outcome}-session`,
+    wallet: WORKER,
+    jobId: job.id,
+    claimStake: 0.25,
+    claimFee: 0.1,
+    totalClaimLock: 0.35,
+    claimStakeCustody: custody,
+    submission: "bounded test evidence",
+    jobSnapshot: buildJobSnapshot(job)
+  }, "claimed", { reason: "job_claimed" });
+  const session = transitionSession(claimed, "submitted", { reason: "work_submitted" });
+  await stateStore.upsertSession(session);
+  const platformService = {
+    resumeSession: (id) => stateStore.getSession(id),
+    returnPlatformFaultClaimEconomics: ledger.returnPlatformFaultClaimEconomics.bind(ledger),
+    ingestVerification: async () => stateStore.getSession(session.sessionId)
+  };
+  const verifier = new VerifierService(platformService, stateStore, undefined, {
+    async evaluate() {
+      return {
+        handler: "deterministic",
+        handlerVersion: 1,
+        outcome,
+        reasonCode: outcome === "platform_fault"
+          ? "PLATFORM_RUNTIME_FAILED"
+          : outcome === "inconclusive"
+            ? "EVIDENCE_AMBIGUOUS"
+            : "DETERMINISTIC_MISMATCH",
+        workerConsequence: outcome === "rejected" ? "no_payout" : "none"
+      };
+    }
+  });
+  return { accounts, session, verifier };
 }
 
 test("platform_fault escalates Submitted to Disputed and queues the exact full-payout hardware action", async () => {
@@ -251,6 +317,41 @@ test("ordinary submitted session records platform_fault as internal remediation,
   assert.equal(h.gateway.calls.filter(([name]) => name === "resolveDispute").length, 0);
 });
 
+test("platform_fault returns the backend-ledger claim economics in the verdict flow", async () => {
+  const h = await localLedgerVerifierHarness("platform_fault");
+  const before = h.accounts.get(WORKER);
+  assert.equal(before.liquid.USDC, 1.65);
+  assert.equal(before.jobStakeLocked.USDC, 0.35);
+
+  await h.verifier.verifySubmission({ sessionId: h.session.sessionId });
+
+  const after = h.accounts.get(WORKER);
+  assert.equal(after.liquid.USDC, 2);
+  assert.equal(after.jobStakeLocked.USDC, 0);
+});
+
+test("non-platform-fault verdicts do not use the immediate backend-ledger return", async () => {
+  for (const outcome of ["rejected", "inconclusive"]) {
+    const h = await localLedgerVerifierHarness(outcome);
+
+    await h.verifier.verifySubmission({ sessionId: h.session.sessionId });
+
+    const after = h.accounts.get(WORKER);
+    assert.equal(after.liquid.USDC, 1.65, outcome);
+    assert.equal(after.jobStakeLocked.USDC, 0.35, outcome);
+  }
+});
+
+test("chain-held claim economics never fall through to the backend ledger when the gateway is unavailable", async () => {
+  const h = await localLedgerVerifierHarness("platform_fault", { custody: "chain_escrow" });
+
+  await h.verifier.verifySubmission({ sessionId: h.session.sessionId });
+
+  const after = h.accounts.get(WORKER);
+  assert.equal(after.liquid.USDC, 1.65);
+  assert.equal(after.jobStakeLocked.USDC, 0.35);
+});
+
 test("designated claim keeps its posted stake while platform_fault queues the same no-consequence remediation", async () => {
   const h = verifierHarness({ designated: true });
   await h.stateStore.upsertSession(h.session);
@@ -264,6 +365,7 @@ test("designated claim keeps its posted stake while platform_fault queues the sa
   assert.equal(h.job.requiresSponsoredGas, false);
   assert.equal(stored.claimStake, 0.35);
   assert.equal(stored.totalClaimLock, 0.35);
+  assert.equal(stored.claimStakeCustody, "chain_escrow");
   assert.equal(stored.internalRemediation.workerConsequence, "none");
   assert.equal(record.resolution.workerPayoutRaw, "7700000");
   assert.equal(record.resolution.releasesClaimEconomics, true);
@@ -284,6 +386,27 @@ function assertNoBackendArbitratorExecution(source) {
     "platform-fault remediation must never use the half-payout timeout path"
   );
 }
+
+function assertImmediateLedgerStakeReturn(source) {
+  assert.match(
+    source,
+    /verdict\.outcome === "platform_fault"[\s\S]*returnPlatformFaultClaimEconomics/u,
+    "platform_fault verdicts must return backend-ledger claim economics immediately"
+  );
+}
+
+test("mutation drill: removing the platform-fault ledger return fails by name", () => {
+  const source = readFileSync(new URL("./verifier-service.js", import.meta.url), "utf8");
+  assertImmediateLedgerStakeReturn(source);
+  const deliberatelyMutated = source.replace(
+    /^.*returnPlatformFaultClaimEconomics.*\n/mu,
+    ""
+  );
+  assert.throws(
+    () => assertImmediateLedgerStakeReturn(deliberatelyMutated),
+    /return backend-ledger claim economics immediately/u
+  );
+});
 
 test("no-resolveDispute boundary guard rejects a deliberately wired backend arbitration call", () => {
   const source = readFileSync(new URL("./platform-fault-remediation-service.js", import.meta.url), "utf8");

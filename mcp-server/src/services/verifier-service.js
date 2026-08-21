@@ -78,6 +78,12 @@ export class VerifierService {
         throw new Error("A platform_fault verdict must carry workerConsequence none.");
       }
       verdict = { ...verdict, workerConsequence: "none" };
+      // The claim-time custody marker keeps this decision independent of the
+      // gateway's current availability. Backend-ledger claim stake + fee can be
+      // returned through existing ledger authority in this flow. Chain-held
+      // economics deliberately stay in EscrowCore: only the queued arbitrator
+      // resolveDispute action may release them.
+      await this.platformService.returnPlatformFaultClaimEconomics?.(session, job);
       platformFaultRemediation = await this.platformFaultRemediationService.escalate({
         session,
         verdict,
