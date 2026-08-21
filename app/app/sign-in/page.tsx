@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/toast";
 import { signIn, WalletUnavailableError } from "@/lib/auth/siwe";
 import { useAuth } from "@/lib/auth/use-auth";
+import { routeAfterSignIn } from "@/lib/work/human-work.js";
 
 export default function SignInPage() {
   return (
@@ -37,18 +38,20 @@ function SignInContent() {
   const auth = useAuth();
   const [pending, setPending] = useState(false);
 
-  const next = searchParams?.get("next") ?? "/overview";
+  const requestedNext = searchParams?.get("next") ?? undefined;
 
   useEffect(() => {
-    if (auth.authenticated) router.replace(next);
-  }, [auth.authenticated, next, router]);
+    if (auth.authenticated) {
+      router.replace(routeAfterSignIn(auth.roles, requestedNext));
+    }
+  }, [auth.authenticated, auth.roles, requestedNext, router]);
 
   async function handleSignIn() {
     setPending(true);
     try {
-      await signIn();
+      const session = await signIn();
       toast.success("Signed in. Welcome back.");
-      router.replace(next);
+      router.replace(routeAfterSignIn(session.roles, requestedNext));
     } catch (error) {
       if (error instanceof WalletUnavailableError) {
         toast.error(error.message);

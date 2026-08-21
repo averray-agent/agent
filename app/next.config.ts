@@ -13,6 +13,14 @@ const nextConfig: NextConfig = {
         async rewrites() {
           return [
             {
+              source: "/work/session/:sessionId",
+              destination: "/work/session",
+            },
+            {
+              source: "/work/:jobId",
+              destination: "/work/job",
+            },
+            {
               source: "/api/:path*",
               destination: `${apiBaseUrl}/:path*`,
             },

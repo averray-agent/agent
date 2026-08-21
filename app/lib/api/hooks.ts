@@ -47,11 +47,17 @@ export const useStrategyPositions = () => useApi("/account/strategies");
 export const useTreasurySummary = () =>
   useApi("/admin/treasury/summary", { refreshInterval: 30_000 });
 export const useJobs = () => useApi("/jobs");
+export const useHumanWorkJobs = () =>
+  useApi("/jobs?state=claimable&limit=100", { refreshInterval: 30_000 });
 export const useRecommendations = () => useApi("/jobs/recommendations");
 export const useJobDefinition = (id: string | null) =>
   useApi(id ? `/jobs/definition?jobId=${encodeURIComponent(id)}` : null);
 export const useJobPreflight = (id: string | null) =>
   useApi(id ? `/jobs/preflight?jobId=${encodeURIComponent(id)}` : null);
+export const useJobEligibility = (id: string | null) =>
+  useApi(id ? `/jobs/explain-eligibility?jobId=${encodeURIComponent(id)}` : null);
+export const useJobNetReward = (id: string | null) =>
+  useApi<number>(id ? `/jobs/estimate-reward?jobId=${encodeURIComponent(id)}` : null);
 export const useSessions = () => useApi("/sessions");
 export const useAdminSessions = () =>
   useApi("/admin/sessions?limit=100", { refreshInterval: 15_000 });

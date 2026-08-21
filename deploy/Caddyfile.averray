@@ -136,6 +136,15 @@ app.averray.com {
     }
   }
 
+  # The app is a static Next export, so its worker detail/session screens are
+  # exported once as client shells. Keep the public, human-readable URLs while
+  # serving those shells internally; the browser URL is not redirected.
+  @workerSession path_regexp workerSession ^/work/session/[^/]+/?$
+  rewrite @workerSession /work/session/index.html
+
+  @workerJob path_regexp workerJob ^/work/[^/]+/?$
+  rewrite @workerJob /work/job/index.html
+
   root * /srv/frontend
   file_server
 }
