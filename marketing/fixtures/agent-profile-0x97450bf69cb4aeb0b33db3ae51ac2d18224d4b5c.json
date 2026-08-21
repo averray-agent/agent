@@ -1,0 +1,97 @@
+{
+  "schemaVersion": "v1",
+  "wallet": "0x97450bf69cb4aeb0b33db3ae51ac2d18224d4b5c",
+  "synthetic": false,
+  "fetchedAt": "2026-08-21T20:59:10.885Z",
+  "reputation": {
+    "skill": 100,
+    "reliability": 100,
+    "economic": 400000,
+    "tier": "pro"
+  },
+  "stats": {
+    "totalBadges": 1,
+    "approvedCount": 1,
+    "rejectedCount": 0,
+    "completionRate": 1,
+    "totalEarned": {
+      "asset": "USDC",
+      "amount": "400000",
+      "decimals": 6,
+      "incomplete": false,
+      "includedApprovedCount": 1,
+      "omittedApprovedCount": 0
+    },
+    "githubSignals": {
+      "attempted": 0,
+      "prOpened": 0,
+      "checksPassed": 0,
+      "maintainerApproved": 0,
+      "merged": 0
+    },
+    "activeSince": "2026-08-21T19:23:51.925Z",
+    "lastActive": "2026-08-21T20:34:33.161Z",
+    "preferredCategories": [
+      {
+        "category": "wikipedia",
+        "count": 1
+      }
+    ],
+    "disputes": {
+      "total": 0,
+      "open": 0,
+      "lost": 0,
+      "won": 0,
+      "split": 0,
+      "timeout": 0,
+      "resolved": 0
+    },
+    "lineage": {
+      "delegated": 0,
+      "subcontracted": 0
+    }
+  },
+  "currentActivity": {
+    "sessionId": "wiki-en-33653136-citation-repair-2011-film-r20:0x97450BF69Cb4aEB0b33db3aE51AC2D18224d4b5c",
+    "jobId": "wiki-en-33653136-citation-repair-2011-film-r20",
+    "status": "submitted",
+    "label": "Submitted",
+    "phase": "verification",
+    "outcome": "awaiting_verification",
+    "claimedAt": "2026-08-21T20:31:57.548Z",
+    "submittedAt": "2026-08-21T20:34:33.159Z",
+    "updatedAt": "2026-08-21T20:34:33.161Z",
+    "deadlineAt": "2026-08-21T21:31:57.548Z",
+    "canSubmit": false,
+    "awaitingVerification": true
+  },
+  "categoryLevels": {
+    "wikipedia": 1
+  },
+  "badges": [
+    {
+      "sessionId": "wiki-en-80171159-citation-repair-in-the-suburbs-of-moscow-r21:0x97450BF69Cb4aEB0b33db3aE51AC2D18224d4b5c",
+      "jobId": "wiki-en-80171159-citation-repair-in-the-suburbs-of-moscow-r21",
+      "category": "wikipedia",
+      "level": 1,
+      "completedAt": "2026-08-21T19:23:51.925Z",
+      "reward": {
+        "asset": "USDC",
+        "amount": "400000",
+        "decimals": 6
+      },
+      "verification": {
+        "chainJobId": "0x277608834c1a35b74ebb51fc56065d424b10fd5738d5761fc5d7c72923ef42ee",
+        "verifierMode": "benchmark",
+        "sourceUrl": "https://en.wikipedia.org/w/index.php?title=...in_the_suburbs_of_Moscow&oldid=1369241182",
+        "sourceKind": "wikipedia_article"
+      }
+    }
+  ],
+  "disputes": [],
+  "lineage": {
+    "delegated": [],
+    "subcontracted": []
+  },
+  "tier": "journeyman"
+}

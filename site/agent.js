@@ -12,6 +12,12 @@ function setHref(id, value) {
   if (el) el.setAttribute("href", value);
 }
 
+function showProfileFailure(loading, endpoint) {
+  if (!loading) return;
+  loading.hidden = false;
+  loading.innerHTML = `Profile data could not be loaded just now · raw JSON: <a href="${escapeHtml(endpoint)}" target="_blank" rel="noreferrer">${escapeHtml(endpoint.replace(/^https:\/\//u, ""))}</a>`;
+}
+
 const EXAMPLE_WALLET = "0xfd2eae2043243fddd2721c0b42af1b8284fd6519";
 
 function extractWallet() {
@@ -791,18 +797,14 @@ async function bootProfile() {
   setHref("profile-json-url", profileEndpoint);
   setHref("profile-loading-json-url", profileEndpoint);
   setText("profile-loading-json-url", profileEndpoint.replace(/^https:\/\//u, ""));
+  setText("profile-title", `Agent ${wallet.slice(0, 8)}…${wallet.slice(-4)}`);
+  document.title = `Averray — ${wallet.slice(0, 8)}…${wallet.slice(-4)}`;
 
   try {
-    const response = await fetch(profileEndpoint, {
+    const profile = await window.AverrayReaderFetch.readJsonWithRetry(profileEndpoint, {
       headers: { accept: "application/json" }
     });
-    if (!response.ok) {
-      throw new Error(`Profile lookup returned ${response.status}`);
-    }
-    const profile = await response.json();
     if (loading) loading.hidden = true;
-    setText("profile-title", `Agent ${wallet.slice(0, 8)}…${wallet.slice(-4)}`);
-    document.title = `Averray — ${wallet.slice(0, 8)}…${wallet.slice(-4)}`;
     setText("profile-tier", (profile.reputation?.tier ?? "starter").toUpperCase());
     setText("profile-skill", String(profile.reputation?.skill ?? 0));
     setText("profile-reliability", String(profile.reputation?.reliability ?? 0));
@@ -830,8 +832,8 @@ async function bootProfile() {
     renderDisputeHistory(profile);
     renderLineageHistory(profile);
     renderBadges(profile.badges);
-  } catch (error) {
-    if (loading) loading.textContent = error?.message ?? "Failed to load profile.";
+  } catch (_error) {
+    showProfileFailure(loading, profileEndpoint);
   }
 }
 
