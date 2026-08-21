@@ -124,6 +124,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   { path: "/credit", description: "Live L1 CreditPool state plus receipt-graph L2 cash and L3 posting limits, debt, and sweep truth." },
   { path: "/credit/transactions", description: "Build wallet-bound L1 templates or L2/L3 consent payloads with exact AAC sweep-repayment authorizations." },
   { path: "/credit/consent", description: "Store a borrower-signed CreditBook terms blob and its exact, rolling repayment authorizations." },
+  { path: "/credit/interest", description: "Proven workers can register interest in a small zero-interest cash line (pilot). This opt-in records interest only and cannot approve credit." },
   { path: "/reputation", description: "Current reputation scores + tier." },
   { path: "/auth/refresh", description: "Rotate the caller's wallet JWT — revokes the old jti and mints a new one with the same sub + roles. Lets operators avoid re-SIWE every AUTH_TOKEN_TTL_SECONDS." },
   { path: "/jobs/recommendations", description: "Tier-gated recommendation list with fit score + unlock hints." },

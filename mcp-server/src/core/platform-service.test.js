@@ -3030,3 +3030,76 @@ test("external serving metadata uses the hash-pinned draft provenance", async ()
     specHash
   });
 });
+
+test("explainEligibility narrates the same effective cap and next raise as the gate", async () => {
+  const service = makePlatformService();
+  service.preflightJob = async () => ({
+    jobId: "parent-job-001",
+    wallet: WALLET,
+    eligible: true,
+    workerExposure: { consumesOperatorExposure: false, vestedAssetsRaw: "1000000" }
+  });
+  service.setWorkerProgressionService({
+    getProgression: async () => ({
+      tier: "pro",
+      effectiveCaps: {
+        perJobMax: { asset: "USDC", raw: "2000000", amount: 2, source: "capital_backed_external_reward_ceiling", components: { deposit: { raw: "1000000" } } },
+        rolling24h: { asset: "USDC", raw: "1500000", amount: 1.5 },
+        concurrent: { asset: "USDC", raw: "3000000", amount: 3, components: { deposit: { raw: "500000" } } }
+      },
+      raises: [
+        { action: "keep_completing", effect: "Complete one more job to unlock the next reputation tier." },
+        { action: "deposit", effect: "Deposit 3 USDC to raise the live cap." }
+      ]
+    })
+  });
+
+  const explained = await service.explainEligibility(WALLET, "parent-job-001");
+  assert.equal(explained.currentCap.raw, "2000000");
+  assert.equal(explained.capSource.gate, "capital_backed_external_reward_ceiling");
+  assert.equal(explained.capSource.tier, "pro");
+  assert.equal(explained.capSource.deposit.vestedRaw, "1000000");
+  assert.deepEqual(explained.nextRaise, {
+    action: "deposit",
+    effect: "Deposit 3 USDC to raise the live cap."
+  });
+});
+
+test("verification settlement persists progression and settled-session reads reuse it", async () => {
+  const store = new MemoryStateStore();
+  const service = makePlatformService(undefined, undefined, store);
+  const submitted = {
+    sessionId: "progression-payment-session",
+    jobId: "parent-job-001",
+    wallet: WALLET,
+    status: "submitted"
+  };
+  await store.upsertSession(submitted);
+  const calls = [];
+  service.setWorkerProgressionService({
+    async getProgression(_wallet, options = {}) {
+      calls.push(options);
+      return {
+        tier: "pro",
+        badges: [],
+        effectiveCaps: {},
+        justChanged: options.settlementSessionId
+          ? { field: "tier", from: "starter", to: "pro" }
+          : null,
+        raises: [],
+        creditInterest: { eligible: false, registered: false }
+      };
+    }
+  });
+  service.verificationIngestionService.ingest = async () => store.upsertSession({
+    ...submitted,
+    status: "resolved",
+    verificationSummary: { outcome: "approved" }
+  });
+
+  const settled = await service.ingestVerification(submitted.sessionId, { outcome: "approved" });
+  const resumed = await service.resumeSession(submitted.sessionId);
+  assert.deepEqual(settled.progression.justChanged, { field: "tier", from: "starter", to: "pro" });
+  assert.deepEqual(resumed.progression, settled.progression);
+  assert.equal(calls.filter((options) => options.settlementSessionId).length, 1);
+});

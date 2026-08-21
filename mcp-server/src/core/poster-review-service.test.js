@@ -81,6 +81,16 @@ async function makeHarness({
     },
     resumeSession(id) {
       return stateStore.getSession(id);
+    },
+    async getWorkerProgressionSafely() {
+      return {
+        tier: "starter",
+        badges: [],
+        effectiveCaps: {},
+        justChanged: null,
+        raises: [],
+        creditInterest: { eligible: false, registered: false }
+      };
     }
   };
   const gateway = {
@@ -194,7 +204,7 @@ async function makeHarness({
 }
 
 test("authz matrix: poster-of-job SIWE can decide", async () => {
-  const { service } = await makeHarness();
+  const { calls, service } = await makeHarness();
   const receipt = await service.reviewSubmission(JOB_ID, {
     wallet: POSTER,
     verdict: "approve"
@@ -202,6 +212,8 @@ test("authz matrix: poster-of-job SIWE can decide", async () => {
   assert.equal(receipt.status, "settled");
   assert.equal(receipt.decision, "approve");
   assert.equal(receipt.decidedBy, POSTER);
+  const ingestion = calls.find(([name]) => name === "ingestBrokeredDecision")[1];
+  assert.equal(ingestion.previousProgression.tier, "starter");
 });
 
 for (const [name, wallet] of [

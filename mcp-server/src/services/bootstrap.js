@@ -7,6 +7,7 @@ import {
 import { createWorkerExposurePolicy } from "../core/worker-exposure.js";
 import { loadDepositVestingConfig } from "../core/deposit-vesting.js";
 import { createWorkerDailyExposurePolicy } from "../core/worker-daily-exposure.js";
+import { WorkerProgressionService } from "../core/worker-progression.js";
 import { createCatalogueDailyBudget } from "../core/catalogue-daily-budget.js";
 import {
   assertCatalogueDefinitionsHaveLanes,
@@ -228,6 +229,14 @@ export function createPlatformService() {
     workerDailyExposurePolicy,
     catalogueDailyBudget
   );
+  const workerProgressionService = new WorkerProgressionService({
+    stateStore,
+    getReputation: platformService.getReputation.bind(platformService),
+    workerExposurePolicy,
+    workerDailyExposurePolicy,
+    selfIdentityRegistry
+  });
+  platformService.setWorkerProgressionService(workerProgressionService);
   platformService.setCatalogueLaneDiscipline(createCatalogueLaneDiscipline({
     stateStore,
     registry: catalogueLaneRegistry,
@@ -490,6 +499,20 @@ export async function createPlatformRuntime() {
       catalogueDailyBudget
     )
   );
+  const workerProgressionService = initStep(
+    "init-worker-progression-service",
+    logger,
+    () => new WorkerProgressionService({
+      stateStore,
+      getReputation: platformService.getReputation.bind(platformService),
+      workerExposurePolicy,
+      workerDailyExposurePolicy,
+      selfIdentityRegistry,
+      publicBaseUrl: process.env.PUBLIC_BASE_URL
+    })
+  );
+  platformService.setWorkerProgressionService(workerProgressionService);
+  platformService.logger = logger;
   const catalogueLaneDiscipline = initStep("init-catalogue-lane-discipline", logger, () =>
     createCatalogueLaneDiscipline({
       stateStore,
@@ -939,6 +962,7 @@ export async function createPlatformRuntime() {
   }
   return {
     platformService,
+    workerProgressionService,
     catalogueLaneDiscipline,
     rewardBankHealthProvider,
     policyService,

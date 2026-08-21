@@ -228,6 +228,7 @@ export class MemoryStateStore {
     this.externalPostingQuoteJobIndex = new Map();
     this.externalJobDelistings = new Map();
     this.externalPaymentFundings = new Map();
+    this.creditInterestRegistrations = new Map();
   }
 
   // ── policy proposals (Package G) ──────────────────────────────────
@@ -646,6 +647,26 @@ export class MemoryStateStore {
 
   async getMutationReceipt(bucket, key) {
     return this.mutationReceipts.get(`${bucket}:${key}`);
+  }
+
+  async getCreditInterestRegistration(wallet) {
+    return cloneJsonRecord(this.creditInterestRegistrations.get(normalizeWalletKey(wallet)));
+  }
+
+  async putCreditInterestRegistration(wallet, record) {
+    const key = normalizeWalletKey(wallet);
+    const existing = this.creditInterestRegistrations.get(key);
+    if (existing) return cloneJsonRecord(existing);
+    const stored = cloneJsonRecord({ ...record, wallet: key });
+    this.creditInterestRegistrations.set(key, stored);
+    return cloneJsonRecord(stored);
+  }
+
+  async listCreditInterestRegistrations({ limit = 100, offset = 0 } = {}) {
+    return [...this.creditInterestRegistrations.values()]
+      .sort((left, right) => String(left.registeredAt).localeCompare(String(right.registeredAt)))
+      .slice(offset, offset + limit)
+      .map((record) => cloneJsonRecord(record));
   }
 
   async upsertMutationReceipt(bucket, key, receipt) {
@@ -1567,6 +1588,34 @@ export class RedisStateStore {
     await this.connect();
     const raw = await this.client.get(this.key("mutation-receipt", `${bucket}:${key}`));
     return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async getCreditInterestRegistration(wallet) {
+    await this.connect();
+    const raw = await this.client.hGet(
+      this.key("credit-interest", "registrations"),
+      normalizeWalletKey(wallet)
+    );
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async putCreditInterestRegistration(wallet, record) {
+    await this.connect();
+    const key = normalizeWalletKey(wallet);
+    const redisKey = this.key("credit-interest", "registrations");
+    const stored = cloneJsonRecord({ ...record, wallet: key });
+    await this.client.hSetNX(redisKey, key, JSON.stringify(stored));
+    const raw = await this.client.hGet(redisKey, key);
+    return raw ? JSON.parse(raw) : stored;
+  }
+
+  async listCreditInterestRegistrations({ limit = 100, offset = 0 } = {}) {
+    await this.connect();
+    const values = await this.client.hVals(this.key("credit-interest", "registrations"));
+    return values
+      .map((raw) => JSON.parse(raw))
+      .sort((left, right) => String(left.registeredAt).localeCompare(String(right.registeredAt)))
+      .slice(offset, offset + limit);
   }
 
   async upsertMutationReceipt(bucket, key, receipt) {
@@ -2520,6 +2569,14 @@ function normalizeXcmBalanceWatchIdentity(wrapperAddress, requestId) {
 
 function normalizeXcmBalanceWatchRequestId(requestId) {
   return normalizeXcmRequestId(requestId);
+}
+
+function normalizeWalletKey(wallet) {
+  const normalized = String(wallet ?? "").trim().toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/u.test(normalized)) {
+    throw new ExternalServiceError("Credit-interest wallet must be an EVM address.");
+  }
+  return normalized;
 }
 
 function xcmBalanceWatchStorageId(wrapperAddress, requestId) {

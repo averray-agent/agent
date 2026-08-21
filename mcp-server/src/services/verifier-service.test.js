@@ -1513,6 +1513,33 @@ function makeIdempotencyHarness(onChainState) {
   return { stateStore, claimed, platformService, blockchainGateway, calls, payoutReceipt };
 }
 
+test("verifySubmission captures progression before the chain settlement boundary", async () => {
+  const h = makeIdempotencyHarness(3);
+  const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
+  await h.stateStore.upsertSession(submitted);
+  const before = {
+    tier: "starter",
+    badges: [],
+    effectiveCaps: {},
+    justChanged: null,
+    raises: [],
+    creditInterest: { eligible: false, registered: false }
+  };
+  h.platformService.getWorkerProgressionSafely = async () => {
+    assert.equal(h.calls.settle, 0, "progression snapshot must precede resolveSinglePayout");
+    return before;
+  };
+  const ingest = h.platformService.ingestVerification;
+  h.platformService.ingestVerification = async (sessionId, verdict, options) => {
+    assert.equal(h.calls.settle, 1, "terminal persistence follows the chain settlement");
+    assert.deepEqual(options.previousProgression, before);
+    return ingest(sessionId, verdict, options);
+  };
+
+  const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway);
+  await service.verifySubmission({ sessionId: submitted.sessionId });
+});
+
 test("verifySubmission is idempotent: skips re-settling an already-resolved (Closed) on-chain job and still converges the session", async () => {
   const h = makeIdempotencyHarness(6); // EscrowCore JobState.Closed — a prior attempt already settled
   const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
@@ -1716,6 +1743,25 @@ test("ingestBrokeredDecision sends poster approval through canonical verificatio
   const h = makeIdempotencyHarness(6);
   const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
   await h.stateStore.upsertSession(submitted);
+  const previousProgression = {
+    tier: "starter",
+    badges: [],
+    effectiveCaps: {},
+    justChanged: null,
+    raises: [],
+    creditInterest: { eligible: false, registered: false }
+  };
+  const nextProgression = {
+    ...previousProgression,
+    justChanged: { field: "creditInterest.eligible", from: false, to: true },
+    creditInterest: { eligible: true, registered: false }
+  };
+  const ingest = h.platformService.ingestVerification;
+  h.platformService.ingestVerification = async (sessionId, verdict, options) => {
+    assert.deepEqual(options.previousProgression, previousProgression);
+    const settled = await ingest(sessionId, verdict, options);
+    return h.stateStore.upsertSession({ ...settled, progression: nextProgression });
+  };
   const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway);
   const payoutTx = {
     txHash: "0xposterreview",
@@ -1735,6 +1781,7 @@ test("ingestBrokeredDecision sends poster approval through canonical verificatio
     metadataURI: "urn:averray:poster-review:0xabc",
     reasoningHash: `0x${"a".repeat(64)}`,
     payoutTx,
+    previousProgression,
     details: { authority: "external_poster_review" }
   });
 
@@ -1743,5 +1790,7 @@ test("ingestBrokeredDecision sends poster approval through canonical verificatio
   assert.equal(result.reasonCode, "POSTER_APPROVED");
   assert.deepEqual(result.payoutTx, payoutTx);
   assert.deepEqual(result.settlement, payoutTx.settlement);
+  assert.deepEqual(result.progression, result.session.progression);
+  assert.deepEqual(result.progression, nextProgression);
   assert.equal((await h.stateStore.getSession(submitted.sessionId)).status, "resolved");
 });

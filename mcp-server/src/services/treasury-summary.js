@@ -23,6 +23,7 @@ export class TreasurySummaryService {
     platformService,
     stateStore,
     bankLaneFeed,
+    workerProgressionService,
     now = () => Date.now(),
     chainMaxAgeMs = DEFAULT_CHAIN_MAX_AGE_MS,
     observerMaxAgeMs = DEFAULT_OBSERVER_MAX_AGE_MS
@@ -32,6 +33,7 @@ export class TreasurySummaryService {
     this.platformService = platformService;
     this.stateStore = stateStore;
     this.bankLaneFeed = bankLaneFeed;
+    this.workerProgressionService = workerProgressionService;
     this.now = now;
     this.chainMaxAgeMs = chainMaxAgeMs;
     this.observerMaxAgeMs = observerMaxAgeMs;
@@ -39,13 +41,14 @@ export class TreasurySummaryService {
 
   async getSummary(wallet) {
     const normalizedWallet = getAddress(wallet);
-    const [creditLine, strategyLanes, xcmObserver, policyGate] = await Promise.all([
+    const [creditLine, strategyLanes, xcmObserver, policyGate, creditInterest] = await Promise.all([
       this.#readFeed("creditLine", () => this.#creditLine(normalizedWallet)),
       this.#readFeed("strategyLanes", () => this.#strategyLanes()),
       this.#readFeed("xcmObserver", () => this.#xcmObserver()),
-      this.#readFeed("policyGate", () => this.#policyGate())
+      this.#readFeed("policyGate", () => this.#policyGate()),
+      this.#readFeed("creditInterest", () => this.#creditInterest())
     ]);
-    const warnings = [creditLine, strategyLanes, xcmObserver, policyGate]
+    const warnings = [creditLine, strategyLanes, xcmObserver, policyGate, creditInterest]
       .flatMap((feed) => feed.warning ? [feed.warning] : []);
     const summary = {};
     if (creditLine.available) {
@@ -73,7 +76,20 @@ export class TreasurySummaryService {
       strategyLanes: withoutWarning(strategyLanes),
       xcmObserver: withoutWarning(xcmObserver),
       policyGate: withoutWarning(policyGate),
+      creditInterest: withoutWarning(creditInterest),
       warnings
+    };
+  }
+
+  async #creditInterest() {
+    if (typeof this.workerProgressionService?.listCreditInterestRegistrations !== "function") {
+      return unavailable("credit_interest_registry_not_configured");
+    }
+    return {
+      available: true,
+      stale: false,
+      reason: "durable_worker_opt_in_records",
+      registrations: await this.workerProgressionService.listCreditInterestRegistrations({ limit: 250 })
     };
   }
 

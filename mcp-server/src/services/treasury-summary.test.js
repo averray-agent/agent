@@ -97,6 +97,13 @@ function harness(overrides = {}) {
         ]
       })
     },
+    workerProgressionService: {
+      listCreditInterestRegistrations: async () => [{
+        wallet: "0x7777777777777777777777777777777777777777",
+        status: "interested",
+        registeredAt: "2026-08-13T19:00:00.000Z"
+      }]
+    },
     ...overrides
   });
 }
@@ -122,6 +129,8 @@ test("treasury summary composes four authoritative feeds for the signed-in walle
   assert.equal(summary.xcmObserver.rows[1].leg, 1);
   assert.equal(summary.xcmObserver.rows[3].blockNumber, 92);
   assert.ok(summary.policyGate.rows.some((row) => row.source === "TreasuryPolicy.strategySettler"));
+  assert.equal(summary.creditInterest.registrations.length, 1);
+  assert.equal(summary.creditInterest.registrations[0].status, "interested");
 });
 
 test("XCM observer rows preserve terminal failure reasons for the operator view", async () => {

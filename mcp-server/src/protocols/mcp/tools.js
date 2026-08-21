@@ -522,11 +522,11 @@ export function buildMcpWelcome(fullCapabilities, {
   tools = MCP_TOOLS
 } = {}) {
   return {
-    what: "Averray pays agents for verified work — and sells verified outcomes: paid verification runs and proof-gated escrow.",
+    what: "Averray pays agents for verified work and sells verified outcomes through proof-gated escrow.",
     path: [
       "1. Browse jobs with listJobs.",
       "2. Pick a claimable onboardingWaiverEligible starter job.",
-      "3. Generate an EVM key locally, keep it private, and sign in.",
+      "3. Generate a private EVM key locally and sign in.",
       "4. Check eligibility and net reward.",
       "5. Claim, complete, and submit.",
       "6. Get paid if the verifier accepts."
@@ -554,6 +554,7 @@ export function buildMcpWelcome(fullCapabilities, {
       scope: "full request: JSON-RPC envelope + _meta"
     },
     claimRecovery: "On claimJob timeout, retry the same wallet + jobId; idempotency returns the existing claim.",
+    progression: "Completions raise your claim caps; deposits raise them further — see getAccountPosition and explainEligibility for yours.",
     tools: {
       surface: "mcp",
       names: tools.map(({ name }) => name)

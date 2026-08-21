@@ -685,6 +685,10 @@
       "description": "Store a borrower-signed CreditBook terms blob and its exact, rolling repayment authorizations."
     },
     {
+      "path": "/credit/interest",
+      "description": "Proven workers can register interest in a small zero-interest cash line (pilot). This opt-in records interest only and cannot approve credit."
+    },
+    {
       "path": "/reputation",
       "description": "Current reputation scores + tier."
     },

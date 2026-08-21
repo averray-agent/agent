@@ -70,6 +70,12 @@ export class VerifierService {
   async verifySubmission({ sessionId, evidence = undefined, metadataURI = "ipfs://pending-badge" }) {
     const session = await this.platformService.resumeSession(sessionId);
     assertSessionCanReceiveVerification(session);
+    // Capture the narrative boundary before any chain settlement can mint a
+    // badge or advance reputation. This read is advisory: an unavailable
+    // progression surface must never block the money path.
+    const previousProgression = await this.platformService.getWorkerProgressionSafely?.(
+      session.wallet
+    );
     const { job, snapshot, liveJob: initialLiveJob } = await assertJobSnapshotIntegrity(
       session,
       this.blockchainGateway
@@ -207,7 +213,8 @@ export class VerifierService {
       verdict,
       verificationInput: validatedVerificationInput,
       metadataURI: platformFaultRemediation?.resolution?.metadataURI ?? metadataURI,
-      payoutTx
+      payoutTx,
+      previousProgression
     });
   }
 
@@ -227,7 +234,8 @@ export class VerifierService {
     payoutTx = undefined,
     details = undefined,
     handler = POSTER_REVIEW_HANDLER,
-    handlerVersion = POSTER_REVIEW_HANDLER_VERSION
+    handlerVersion = POSTER_REVIEW_HANDLER_VERSION,
+    previousProgression = undefined
   }) {
     const session = await this.platformService.resumeSession(sessionId);
     assertSessionCanReceiveVerification(session, { reason: "brokered_review_decision" });
@@ -249,7 +257,8 @@ export class VerifierService {
       verdict,
       verificationInput,
       metadataURI,
-      payoutTx
+      payoutTx,
+      previousProgression
     });
   }
 
@@ -259,7 +268,8 @@ export class VerifierService {
     verdict,
     verificationInput,
     metadataURI,
-    payoutTx
+    payoutTx,
+    previousProgression = undefined
   }) {
     const sessionId = session.sessionId;
     const auditFields = buildVerificationAuditFields(job, { verdict, verificationInput });
@@ -279,7 +289,7 @@ export class VerifierService {
     const settledSession = await this.platformService.ingestVerification(
       sessionId,
       persistedVerdict,
-      { payoutTx }
+      { payoutTx, previousProgression }
     );
     if (payoutTx && settledSession?.payoutTx?.txHash !== payoutTx.txHash) {
       throw new Error(
@@ -292,7 +302,8 @@ export class VerifierService {
       metadataURI,
       ...(payoutTx ? { payoutTx } : {}),
       ...auditFields,
-      session: settledSession
+      session: settledSession,
+      ...(settledSession?.progression ? { progression: settledSession.progression } : {})
     };
 
     // Collection is deliberately downstream of the terminal session write.
