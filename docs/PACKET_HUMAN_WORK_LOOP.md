@@ -1,6 +1,6 @@
 # PACKET — Human find-work loop (screens, not docs)
 
-**Requirements:** Pascal, 2026-08-21 (verbatim brief in §1) · **Architecture:** Claude · **Ratifier:** Pascal
+**Requirements:** Pascal, 2026-08-21 (verbatim brief in §1) · **Architecture:** Claude · **RATIFIED by Pascal 2026-08-21** (D1-D8 stand)
 **Implementer:** Codex · **Deliverable:** TWO PRs (app, marketing) — mcp-server only if §D3's field audit finds a gap.
 
 ## 1. The requirement (Pascal's brief, binding)
