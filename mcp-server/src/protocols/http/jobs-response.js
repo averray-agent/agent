@@ -133,6 +133,7 @@ function toCompactJobRow(job) {
     summary: summarizeJob(job),
     definitionUrl: `/jobs/definition?jobId=${encodeURIComponent(job.id)}`,
     ...(job.listingStatus ? { listingStatus: job.listingStatus } : {}),
+    ...(job.verificationDepth ? { verificationDepth: job.verificationDepth } : {}),
     ...(job.contentTrust ? { contentTrust: job.contentTrust } : {}),
     ...(job.provenance ? { provenance: job.provenance } : {}),
     ...(job?.source?.type === "external" && job.source.poster

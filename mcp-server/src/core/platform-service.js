@@ -60,6 +60,7 @@ import {
 } from "./external-job-lifecycle.js";
 import { inspectClaimJobDefinitionIntegrity } from "./claim-job-integrity.js";
 import { hashCanonicalContent } from "./canonical-content.js";
+import { verificationDepthForJob } from "./verification-depth.js";
 import {
   evaluateDesignatedClaimant,
   isDesignatedJob,
@@ -264,9 +265,11 @@ export class PlatformService {
         ? "external-x402"
         : "external-direct-hub"
       : "curated";
+    const verificationDepth = verificationDepthForJob(job);
 
     return {
       ...job,
+      ...(verificationDepth ? { verificationDepth } : {}),
       listingStatus: "listed",
       contentTrust: external ? "external-unreviewed" : "operator-curated",
       provenance: {

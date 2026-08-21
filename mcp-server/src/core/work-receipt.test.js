@@ -10,6 +10,7 @@ import {
   hashWorkReceiptContent,
   WORK_RECEIPT_SCHEMA_VERSION
 } from "./work-receipt.js";
+import { STARTER_BENCHMARK_CHECK_DEPTH } from "./verification-depth.js";
 
 const live = JSON.parse(readFileSync(
   new URL("./fixtures/work-receipt-retention-2026-08-16.json", import.meta.url),
@@ -197,6 +198,22 @@ test("claim-time chain read failure remains explicit in receipt intent", () => {
   const receipt = buildWorkReceipt(input({ specSource: "chain_unavailable_fail_open" }));
   assert.equal(receipt.intent.specSource, "chain_unavailable_fail_open");
   assert.notEqual(receipt.intent.specSource, "chain_verified");
+});
+
+test("benchmark work receipt carries the starter check-depth statement verbatim", () => {
+  const fixture = input();
+  fixture.job.verifierMode = "benchmark";
+  fixture.job.verifierConfig = { version: 1, handler: "benchmark" };
+  fixture.session.jobSnapshot.definition = structuredClone(fixture.job);
+  fixture.verification.handler = "benchmark";
+  fixture.verification.handlerVersion = 2;
+
+  const receipt = buildWorkReceipt(fixture);
+  assert.equal(receipt.verification.checkDepth, STARTER_BENCHMARK_CHECK_DEPTH);
+  assert.equal(
+    receipt.verification.checkDepth,
+    "Starter-tier benchmark check: output schema conformance and required reference terms. This is not a content audit."
+  );
 });
 
 test("platform fault is inconclusive, never settles, and cannot blame the worker", () => {

@@ -248,6 +248,7 @@ test("public list and definition routes apply serving-only listing security meta
   const addMetadata = async (value) => {
     const decorate = (job) => ({
       ...job,
+      verificationDepth: "Starter-tier benchmark check: output schema conformance and required reference terms. This is not a content audit.",
       listingStatus: "listed",
       contentTrust: "operator-curated",
       provenance
@@ -261,6 +262,10 @@ test("public list and definition routes apply serving-only listing security meta
 
   assert.equal(await invoke(route, { path: "/jobs?limit=1", response }), true);
   assert.equal(response.body.jobs[0].contentTrust, "operator-curated");
+  assert.equal(
+    response.body.jobs[0].verificationDepth,
+    "Starter-tier benchmark check: output schema conformance and required reference terms. This is not a content audit."
+  );
   assert.deepEqual(response.body.jobs[0].provenance, provenance);
 
   const definitionResponse = {};
@@ -269,6 +274,10 @@ test("public list and definition routes apply serving-only listing security meta
     response: definitionResponse
   }), true);
   assert.equal(definitionResponse.body.listingStatus, "listed");
+  assert.equal(
+    definitionResponse.body.verificationDepth,
+    "Starter-tier benchmark check: output schema conformance and required reference terms. This is not a content audit."
+  );
   assert.deepEqual(definitionResponse.body.provenance, provenance);
 });
 

@@ -6,6 +6,7 @@ import { claimExpiresAt } from "./claim-state.js";
 import { decimalToBaseUnits, formatBaseUnits } from "./platform-service-helpers.js";
 import { buildRunReceipt } from "./run-receipt.js";
 import { hashSubmission } from "./submission.js";
+import { verificationDepthForJob } from "./verification-depth.js";
 
 export const WORK_RECEIPT_SCHEMA_VERSION = "averray.work-receipt.v1";
 export const WORK_RECEIPT_SITE_ORIGIN = "https://averray.com";
@@ -28,6 +29,7 @@ export function buildWorkReceipt({ session, job, verification, context = {} }) {
   const intent = buildIntent({ session, job, profile, version, poster, context });
   const execution = buildExecution({ session, verification, runReceipt, context });
   const settlement = buildSettlement({ session, job, verification, legacy: runReceipt.settlement });
+  const checkDepth = verificationDepthForJob(job);
   if (verification?.outcome === "approved" && !settlement) {
     throw new ValidationError("Approved work receipt requires complete settlement evidence.");
   }
@@ -48,6 +50,7 @@ export function buildWorkReceipt({ session, job, verification, context = {} }) {
       handler: profile,
       version
     }),
+    verification: checkDepth ? { checkDepth } : undefined,
     intent,
     execution,
     settlement

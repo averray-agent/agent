@@ -442,6 +442,43 @@ const BUILTIN_JOB_SCHEMAS = new Map([
       review_notes: stringSchema({ minLength: 1 })
     }
   })],
+  ["schema://jobs/wikipedia-citation-repair-output-v2", objectSchema({
+    $id: "schema://jobs/wikipedia-citation-repair-output-v2",
+    description: "Reviewable citation repair proposal with revision-anchored findings for Wikipedia articles.",
+    required: ["page_title", "revision_id", "citation_findings", "proposed_changes", "review_notes"],
+    properties: {
+      page_title: stringSchema({ minLength: 1 }),
+      revision_id: stringSchema({ minLength: 1 }),
+      citation_findings: {
+        type: "array",
+        minItems: 1,
+        items: objectSchema({
+          required: ["section", "problem", "current_claim", "source_quote", "evidence_url"],
+          properties: {
+            section: stringSchema({ minLength: 1 }),
+            problem: enumString(["dead_link", "missing_citation", "weak_source", "outdated_source", "claim_mismatch"]),
+            current_claim: stringSchema({ minLength: 1 }),
+            source_quote: stringSchema({ minLength: 1 }),
+            evidence_url: stringSchema({ minLength: 1, pattern: "^https://" })
+          }
+        })
+      },
+      proposed_changes: {
+        type: "array",
+        minItems: 1,
+        items: objectSchema({
+          required: ["change_type", "target_text", "replacement_text", "source_url"],
+          properties: {
+            change_type: enumString(["replace_citation", "add_citation", "flag_for_editor_review"]),
+            target_text: stringSchema({ minLength: 1 }),
+            replacement_text: stringSchema({ minLength: 1 }),
+            source_url: stringSchema({ minLength: 1, pattern: "^https://" })
+          }
+        })
+      },
+      review_notes: stringSchema({ minLength: 1 })
+    }
+  })],
   ["schema://jobs/wikipedia-freshness-check-output", objectSchema({
     $id: "schema://jobs/wikipedia-freshness-check-output",
     description: "Freshness and factual drift check for a public Wikipedia article.",

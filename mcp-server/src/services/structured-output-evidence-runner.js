@@ -6,6 +6,7 @@ import { join } from "node:path";
 import Ajv2020 from "ajv/dist/2020.js";
 
 import { hashCanonicalContent } from "../core/canonical-content.js";
+import { normalizeWhitespace } from "../core/evidence-normalization.js";
 import { ValidationError } from "../core/errors.js";
 import {
   STRUCTURED_OUTPUT_EVIDENCE_CHECKS,
@@ -239,9 +240,7 @@ export function evaluateStructuredOutputEvidence({
   };
 }
 
-export function normalizeWhitespace(value) {
-  return String(value).replace(/\s+/gu, " ").trim();
-}
+export { normalizeWhitespace } from "../core/evidence-normalization.js";
 
 async function materializeArtifactSet({ target, temporaryDirectory, materializeArtifactImpl }) {
   const materialize = (artifact, filename) => materializeArtifactImpl(

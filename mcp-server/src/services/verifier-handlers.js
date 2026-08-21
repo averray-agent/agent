@@ -4,6 +4,7 @@ import {
   inspectAverrayClaimantBinding
 } from "../core/maintainer-surface-policy.js";
 import { getJobSchema } from "../core/job-schema-registry.js";
+import { normalizeWhitespace } from "../core/evidence-normalization.js";
 
 const HANDLER_VERSION = 1;
 const BENCHMARK_HANDLER_VERSION = 2;
@@ -25,7 +26,17 @@ function structuredEvidence(input) {
   return {};
 }
 
-function createBenchmarkHandler() {
+export class BenchmarkEvidenceUnavailableError extends Error {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = "BenchmarkEvidenceUnavailableError";
+    this.code = "BENCHMARK_PINNED_REVISION_UNAVAILABLE";
+    this.outcome = "inconclusive";
+    this.workerConsequence = "none";
+  }
+}
+
+function createBenchmarkHandler({ fetchImpl = globalThis.fetch } = {}) {
   return {
     id: "benchmark",
     version: BENCHMARK_HANDLER_VERSION,
@@ -52,7 +63,7 @@ function createBenchmarkHandler() {
       const matched = substantiveKeywords.filter((keyword) => normalized.includes(keyword.toLowerCase()));
       const approved = matched.length >= job.verifierConfig.minimumMatches;
 
-      return {
+      const thresholdVerdict = {
         jobId: job.id,
         handler: "benchmark",
         handlerVersion: BENCHMARK_HANDLER_VERSION,
@@ -61,8 +72,119 @@ function createBenchmarkHandler() {
         reasonCode: approved ? "BENCHMARK_THRESHOLD_MET" : "BENCHMARK_THRESHOLD_MISSED",
         detail: `Matched ${matched.length}/${substantiveKeywords.length} substantive required keywords.`
       };
+      if (!job.verifierConfig.anchorEvidence || !approved) {
+        return thresholdVerdict;
+      }
+      return evaluateWikipediaRevisionAnchors({
+        job,
+        evidence,
+        thresholdVerdict,
+        fetchImpl
+      });
     }
   };
+}
+
+async function evaluateWikipediaRevisionAnchors({ job, evidence, thresholdVerdict, fetchImpl }) {
+  const anchor = job.verifierConfig.anchorEvidence;
+  let wikitext;
+  try {
+    wikitext = await fetchWikipediaRevisionWikitext(anchor, fetchImpl);
+  } catch (error) {
+    if (error instanceof BenchmarkEvidenceUnavailableError) throw error;
+    throw new BenchmarkEvidenceUnavailableError(
+      `Pinned Wikipedia revision ${anchor.revisionId} could not be read; verification remains pending.`,
+      { cause: error }
+    );
+  }
+
+  const normalizedWikitext = normalizeWhitespace(wikitext);
+  const anchors = wikipediaReportAnchors(structuredEvidence(evidence));
+  const unsupported = anchors.find(({ value }) =>
+    !normalizedWikitext.includes(normalizeWhitespace(value))
+  );
+  if (unsupported) {
+    return {
+      ...thresholdVerdict,
+      outcome: "rejected",
+      score: 0,
+      reasonCode: "BENCHMARK_REVISION_ANCHOR_MISMATCH",
+      detail: `Submitted ${unsupported.kind} at ${unsupported.path} does not appear in the pinned revision after whitespace normalization.`
+    };
+  }
+  return {
+    ...thresholdVerdict,
+    reasonCode: "BENCHMARK_REVISION_ANCHORS_MET",
+    detail: `${thresholdVerdict.detail} All ${anchors.length} submitted URL and quote anchors appear in the pinned revision after whitespace normalization.`
+  };
+}
+
+async function fetchWikipediaRevisionWikitext(anchor, fetchImpl) {
+  if (anchor?.kind !== "wikipedia_revision_wikitext" || typeof fetchImpl !== "function") {
+    throw new BenchmarkEvidenceUnavailableError("Pinned Wikipedia revision fetch is unavailable; verification remains pending.");
+  }
+  const url = new URL(`https://${anchor.language}.wikipedia.org/w/api.php`);
+  url.searchParams.set("action", "query");
+  url.searchParams.set("format", "json");
+  url.searchParams.set("formatversion", "2");
+  url.searchParams.set("prop", "revisions");
+  url.searchParams.set("rvprop", "ids|content");
+  url.searchParams.set("rvslots", "main");
+  url.searchParams.set("revids", anchor.revisionId);
+  url.searchParams.set("origin", "*");
+
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      headers: {
+        accept: "application/json",
+        "user-agent": "averray-benchmark-verifier/1.0"
+      }
+    });
+  } catch (error) {
+    throw new BenchmarkEvidenceUnavailableError(
+      `Pinned Wikipedia revision ${anchor.revisionId} could not be fetched; verification remains pending.`,
+      { cause: error }
+    );
+  }
+  if (!response?.ok) {
+    throw new BenchmarkEvidenceUnavailableError(
+      `Pinned Wikipedia revision ${anchor.revisionId} returned HTTP ${response?.status ?? "unknown"}; verification remains pending.`
+    );
+  }
+  let payload;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    throw new BenchmarkEvidenceUnavailableError(
+      `Pinned Wikipedia revision ${anchor.revisionId} returned unreadable JSON; verification remains pending.`,
+      { cause: error }
+    );
+  }
+  const page = Array.isArray(payload?.query?.pages)
+    ? payload.query.pages[0]
+    : Object.values(payload?.query?.pages ?? {})[0];
+  const revision = page?.revisions?.[0];
+  const returnedRevisionId = String(revision?.revid ?? "");
+  const content = revision?.slots?.main?.content ?? revision?.slots?.main?.["*"] ?? revision?.["*"];
+  if (returnedRevisionId !== anchor.revisionId || typeof content !== "string") {
+    throw new BenchmarkEvidenceUnavailableError(
+      `Pinned Wikipedia revision ${anchor.revisionId} was absent from the response; verification remains pending.`
+    );
+  }
+  return content;
+}
+
+function wikipediaReportAnchors(report) {
+  const anchors = [];
+  for (const [index, finding] of (report.citation_findings ?? []).entries()) {
+    anchors.push({ kind: "quote", path: `citation_findings[${index}].source_quote`, value: finding.source_quote });
+    anchors.push({ kind: "URL", path: `citation_findings[${index}].evidence_url`, value: finding.evidence_url });
+  }
+  for (const [index, change] of (report.proposed_changes ?? []).entries()) {
+    anchors.push({ kind: "URL", path: `proposed_changes[${index}].source_url`, value: change.source_url });
+  }
+  return anchors;
 }
 
 function createDeterministicHandler() {
@@ -302,7 +424,7 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
 export class VerifierRegistry {
   constructor(options = {}) {
     this.handlers = new Map([
-      ["benchmark", createBenchmarkHandler()],
+      ["benchmark", createBenchmarkHandler(options)],
       ["deterministic", createDeterministicHandler()],
       ["human_fallback", createHumanFallbackHandler()],
       ["github_pr", createGithubPrHandler(options)]
