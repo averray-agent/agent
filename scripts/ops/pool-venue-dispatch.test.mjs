@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 import {
+  DEFAULT_RECALL_FEE_FLOOR_RATIO_BPS,
   MAX_FEE_PER_LEG_RAW,
+  MIN_RECALL_FEE_FLOOR_RATIO_BPS,
   MIN_DISPATCH_MARGIN_SECONDS,
   assertDispatchMargin,
   assertFeeCeiling,
@@ -17,6 +19,7 @@ import {
   assertWireCarriesTopic,
   assertRecallRequestBinding,
   assertRequestBinding,
+  assertRecallFeeFloorRatioBps,
   assertUnstaged,
   assertVenuePostage,
   buildCancelPlan,
@@ -56,7 +59,15 @@ test("CLI is dry-run by default and requires explicit ceremony flags for writes"
   const parsed = parseArgs(["stage-dispatch", "--profile", "mainnet", "--request-id", REQUEST, "--deployment-id", "1"]);
   assert.equal(parsed.commit, false);
   assert.equal(parsed.useKms, false);
-  assert.equal(parsed.maxFeePerLeg, MAX_FEE_PER_LEG_RAW.toString());
+  assert.equal(parsed.maxFeePerLeg, "40000");
+  assert.equal(parsed.feeFloorRatioBps, DEFAULT_RECALL_FEE_FLOOR_RATIO_BPS.toString());
+
+  const recall = parseArgs([
+    "stage-recall", "--profile", "mainnet", "--request-id", REQUEST, "--recall-id", "1",
+    "--fee-floor-ratio-bps", "13500",
+  ]);
+  assert.equal(recall.maxFeePerLeg, MAX_FEE_PER_LEG_RAW.toString());
+  assert.equal(recall.feeFloorRatioBps, "13500");
 });
 
 test("wrong requestId fails loud before staging", () => {
@@ -90,6 +101,7 @@ test("stale pool observability refuses the venue ceremony", () => {
 });
 
 test("fee over the packet ceiling refuses", () => {
+  assert.equal(MAX_FEE_PER_LEG_RAW, 80_000n);
   assert.equal(assertFeeCeiling(MAX_FEE_PER_LEG_RAW), MAX_FEE_PER_LEG_RAW);
   assert.throws(() => assertFeeCeiling(MAX_FEE_PER_LEG_RAW + 1n), /exceeds the Packet 7 maximum/u);
 });
@@ -316,8 +328,47 @@ test("recall JIT fee doubles fresh quote, caps, and preserves the 1.5x floor", (
     feeAmount: 40_000n,
     feeSource: "fresh_remote_quote_capped",
   });
-  assert.throws(() => selectRecallDispatchFee({ quote: 27_000n, maximum: 40_000n, available: 50_000n }), /1.5×/u);
+  assert.throws(
+    () => selectRecallDispatchFee({ quote: 27_000n, maximum: 40_000n, available: 50_000n }),
+    /configured 1\.5× fresh quote floor \(15000 bps\)/u,
+  );
   assert.throws(() => selectRecallDispatchFee({ quote: 18_000n, maximum: 40_000n, available: 35_999n }), /cannot fund/u);
+});
+
+test("live 28,645 quote accepts the staged 40k cap at the hard-minimum 1.35x floor", () => {
+  // Hydration xcmPaymentApi.queryWeightToAssetFee measured 28,588–28,645 raw
+  // during 2026-08-21 12:24–13:20Z. Recall 4 has 40,000 baked on-chain.
+  assert.deepEqual(selectRecallDispatchFee({
+    quote: 28_645n,
+    maximum: 40_000n,
+    available: 50_000n,
+    floorBps: 13_500n,
+  }), {
+    feeAmount: 40_000n,
+    feeSource: "fresh_remote_quote_capped",
+  });
+  assert.throws(
+    () => selectRecallDispatchFee({ quote: 28_645n, maximum: 40_000n, available: 50_000n }),
+    /configured 1\.5× fresh quote floor \(15000 bps\)/u,
+  );
+});
+
+test("hard-minimum mutation guard refuses --fee-floor-ratio-bps 13400 by name", () => {
+  assert.equal(assertRecallFeeFloorRatioBps("13500"), MIN_RECALL_FEE_FLOOR_RATIO_BPS);
+  assert.throws(
+    () => selectRecallDispatchFee({
+      quote: 28_645n,
+      maximum: 40_000n,
+      available: 50_000n,
+      floorBps: 13_400n,
+    }),
+    /--fee-floor-ratio-bps 13400 is below the hard minimum 13500/u,
+  );
+
+  const result = spawnSync("node", [scriptPath, "stage-recall", "--fee-floor-ratio-bps", "13400"], { encoding: "utf8" });
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /--fee-floor-ratio-bps 13400 is below the hard minimum 13500/u);
+  assert.doesNotMatch(result.stderr, /Ceremony RPC preflight/u);
 });
 
 test("recall cancel is kind-agnostic and does not duplicate pool-side settlement", () => {
@@ -447,7 +498,8 @@ test("pool-lane fee law is wired through the created dispatcher, not a dead runt
   // must wrap the created dispatcher instance (the #1128 dead-override lesson).
   assert.match(source, /createDispatcher\(\) \{\n    const dispatcher = super\.createDispatcher\(\);/u);
   assert.match(source, /dispatcher\.resolveFee = /u);
-  assert.match(source, /selectRecallDispatchFee\(\{ quote: quote\.amount, maximum, available: available\.assets \}\)/u);
+  assert.match(source, /selectRecallDispatchFee\(\{[\s\S]*floorBps: runtime\.feeFloorRatioBps,[\s\S]*\}\)/u);
+  assert.match(source, /feeFloorRatioBps: args\.feeFloorRatioBps/u);
   assert.doesNotMatch(source, /async resolveFee\(input\) \{\n    if \(Number\(input\.legIndex\)/u);
   assert.match(source, /resumedFromStagedRequest/u);
   // bitmap 0 resumes both legs; bitmap 4 rebuilds the historical sell from
