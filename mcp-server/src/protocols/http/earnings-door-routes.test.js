@@ -79,7 +79,12 @@ test("HTTP and MCP earnings doors return byte-identical payloads", async () => {
   const mcpGet = await execute("getAccountPosition", { asset: "USDC" }, { request: sourceRequest });
   assert.equal(JSON.stringify(mcpGet), JSON.stringify(directGet.body));
 
-  const input = { asset: "USDC", amount: "1", destination: "0x2222222222222222222222222222222222222222" };
+  const input = {
+    asset: "USDC",
+    amount: "1",
+    destination: "0x2222222222222222222222222222222222222222",
+    requestGasGrant: true
+  };
   const directBuild = await invokeHttpRoute(route, {
     method: "POST", path: "/account/withdraw/transactions", body: input, sourceRequest
   });

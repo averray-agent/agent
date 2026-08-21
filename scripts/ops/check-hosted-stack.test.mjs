@@ -58,7 +58,7 @@ async function runHostedStackFixture({
     tools: ["getAccountPosition", "buildWithdrawTransactions"],
     onboarding: {
       withdrawEarnings: {
-        statement: "Withdraw via buildWithdrawTransactions — your signature, your gas, any destination.",
+        statement: "Withdraw via buildWithdrawTransactions — your signature and broadcast, any destination. Eligible workers can request Averray's one-time first-withdrawal DOT grant from that same withdrawal intent.",
         retentionNotGates: "whatYourBalanceCanDo is informational only. It never delays, conditions, prices, or adds steps to withdrawal, and complete templates remain present."
       }
     },

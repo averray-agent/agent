@@ -147,18 +147,19 @@ export function createMcpTools({
   tool({
     name: "buildWithdrawTransactions",
     title: "Build account withdrawal transactions",
-    description: "Build a complete wallet-bound unsigned AgentAccountCore withdrawal and, optionally, an onward ERC-20 transfer to any destination. Amount is an exact base-unit integer string. Your signature, your DOT gas, your broadcast; Averray never relays it.",
+    description: "Build a complete wallet-bound unsigned AgentAccountCore withdrawal and, optionally, an onward ERC-20 transfer. Eligible workers may set requestGasGrant on this live intent for the lifetime-once 0.03 DOT first-withdrawal grant. Your wallet still signs and broadcasts; Averray never relays it.",
     inputSchema: {
       type: "object",
       properties: {
         asset: { type: "string", default: "USDC", description: "Supported account asset symbol." },
         amount: { type: "string", pattern: "^[1-9][0-9]*$", description: "Exact asset base units." },
-        destination: { type: "string", pattern: "^0x[a-fA-F0-9]{40}$", description: "Optional onward ERC-20 destination after the withdrawal reaches this wallet." }
+        destination: { type: "string", pattern: "^0x[a-fA-F0-9]{40}$", description: "Optional onward ERC-20 destination after the withdrawal reaches this wallet." },
+        requestGasGrant: { type: "boolean", default: false, description: "Request the eligibility-bound, lifetime-once 0.03 DOT grant for this exact live withdrawal intent. This is not a standing faucet." }
       },
       required: ["amount"],
       additionalProperties: false
     },
-    readOnly: true,
+    readOnly: false,
     idempotent: true,
     auth: { required: true, scopes: [], requiredAction: "wallet_sign_in" }
   }),

@@ -248,6 +248,18 @@ test("EventBus classifies operational job and bootstrap topics", () => {
   assert.equal(failedSelfReport.severity, "error");
 });
 
+test("EventBus classifies first-withdrawal grants as operator gas outflow", () => {
+  const bus = new EventBus();
+  const event = bus.publish({
+    topic: "operator_gas.first_withdrawal_granted",
+    wallet: "0x1111111111111111111111111111111111111111",
+    data: { countedAsPayout: false, countedAsRevenue: false }
+  });
+  assert.equal(event.source, "operator_gas");
+  assert.equal(event.phase, "outflow");
+  assert.equal(event.severity, "info");
+});
+
 test("EventBus persists events and replays durable filters beyond the ring buffer", async () => {
   const store = new MemoryStateStore();
   const bus = new EventBus({ bufferSize: 1, eventStore: store });

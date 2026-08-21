@@ -122,6 +122,10 @@ import { fileURLToPath } from "node:url";
 import { ConfigError } from "../core/errors.js";
 import { resolveHubNetwork } from "../core/discovery-manifest.js";
 import { EarningsDoorService } from "./earnings-door.js";
+import {
+  FirstWithdrawalGasGrantService,
+  loadFirstWithdrawalGasGrantConfig
+} from "./first-withdrawal-gas-grant.js";
 import { assertMainnetSignerPosture, assertChainIdMatchesRpc } from "./startup-guards.js";
 import { createRewardBankHealthProvider } from "../core/health-capability.js";
 import {
@@ -259,8 +263,15 @@ export function createEarningsDoor({
   stateStore,
   eventBus,
   workerExposurePolicy,
-  chainReader
+  chainReader,
+  env = process.env
 } = {}) {
+  const gasGrantService = new FirstWithdrawalGasGrantService({
+    gateway,
+    stateStore,
+    eventBus,
+    ...loadFirstWithdrawalGasGrantConfig(env)
+  });
   return new EarningsDoorService({
     agentAccountAddress: gateway.config.agentAccountAddress,
     chainId: authConfig.chainId,
@@ -269,6 +280,7 @@ export function createEarningsDoor({
     stateStore,
     eventBus,
     workerExposurePolicy,
+    gasGrantService,
     provider: gateway.provider,
     chainReader
   });
@@ -756,6 +768,7 @@ export async function createPlatformRuntime() {
   const earningsDoor = initStep("init-earnings-door", logger, () =>
     createEarningsDoor({ gateway, authConfig, stateStore, eventBus, workerExposurePolicy })
   );
+  platformService.setFirstWithdrawalGasGrantStatusProvider(earningsDoor);
   const creditPoolDoor = initStep("init-credit-pool-door", logger, () =>
     createCreditPoolDoor({ gateway, authConfig, workerExposurePolicy, creditBookDoor })
   );

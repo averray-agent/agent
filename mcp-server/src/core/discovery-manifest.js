@@ -492,7 +492,7 @@ const DISCOVERY_TOOLS = [
   { name: "getDepositPoolInfo", description: "Live pool, depositor-risk disclosure, and wallet-specific vested-capacity truth." },
   { name: "buildDepositPoolTransactions", description: "Wallet-bound unsigned approve/deposit or redeem templates; never a relay." },
   { name: "getAccountPosition", description: "Read your own earnings account, statement, ownership proof, withdrawal door, and retention choices." },
-  { name: "buildWithdrawTransactions", description: "Complete unsigned account withdrawal and optional onward transfer; your signature, DOT gas, and broadcast." },
+  { name: "buildWithdrawTransactions", description: "Complete unsigned account withdrawal and optional onward transfer; eligible first withdrawals can request a lifetime-once 0.03 DOT grant from this exact intent." },
   { name: "getCreditInfo", description: "Live L1 plus receipt-graph L2/L3 limits, outstanding loans, disclosure, and sweep truth." },
   { name: "buildCreditTransactions", description: "Wallet-bound L1 templates and L2/L3 consent payloads with exact AAC sweep-repayment authorizations." },
   { name: "estimateNetReward", description: "Profile-aware reward estimate." },
@@ -588,9 +588,9 @@ const buildBaseManifest = (network) => ({
       statement: EARNINGS_WITHDRAWAL_STATEMENT,
       steps: [
         "Call getAccountPosition (or GET /account/position?asset=USDC) to read account.available, account.stakedOnOpenWork, the settlement statement, and the AgentAccountCore ownership proof.",
-        "Call buildWithdrawTransactions (or POST /account/withdraw/transactions) with an exact base-unit amount and, optionally, any onward destination.",
+        "Call buildWithdrawTransactions (or POST /account/withdraw/transactions) with an exact base-unit amount and, optionally, any onward destination. Read firstWithdrawalGasGrant: eligible workers can rebuild this same live intent with requestGasGrant: true — your first withdrawal's network fee is on us.",
         "Independently decode and verify every returned chainId, from, to, function, asset, amount, and destination before signing.",
-        "Sign with the account owner's key, pay the measured DOT gas, and broadcast through a returned public RPC URL.",
+        "Sign with the account owner's key and broadcast through a returned public RPC URL. If the grant is ineligible, its stable reason names whether it was already granted, the AAC balance is under the 0.25 USDC floor, or today's operator-gas cap is full; otherwise supply the measured DOT gas yourself.",
         "After confirmation, re-read the account and destination USDC balance."
       ],
       gas: {

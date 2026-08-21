@@ -5,6 +5,8 @@ import { loadAuthConfig } from "../auth/config.js";
 import { loadBlockchainConfig } from "../blockchain/config.js";
 import { BOOTSTRAP_JOBS } from "./bootstrap-jobs.js";
 import { createDepositPoolDoor, createEarningsDoor } from "./bootstrap.js";
+import { MemoryStateStore } from "../core/state-store.js";
+import { EventBus } from "../core/event-bus.js";
 
 const POOL_ASSET = "0x0000053900000000000000000000000001200000";
 
@@ -35,13 +37,15 @@ test("bootstrap wires string AUTH_CHAIN_ID and public mainnet RPC into the earni
         asset: { symbol: "USDC", address: POOL_ASSET, decimals: 6 },
         position: { liquidRaw: "1", jobStakeLockedRaw: "0" }
       };
-    }
+    },
+    async sendFirstWithdrawalGasGrant() { throw new Error("not requested"); }
   };
+  const stateStore = new MemoryStateStore();
   const door = createEarningsDoor({
     authConfig,
     gateway,
-    stateStore: { async listSessionsByWallet() { return []; } },
-    eventBus: { async replayDurable() { return { events: [] }; } },
+    stateStore,
+    eventBus: new EventBus({ eventStore: stateStore }),
     workerExposurePolicy: { async capacityForWallet() { return { vestingHours: 48 }; } },
     chainReader: {
       async gasQuote() {

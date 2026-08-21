@@ -141,6 +141,7 @@ export class EarningsDoorService {
     stateStore,
     eventBus,
     workerExposurePolicy,
+    gasGrantService,
     provider,
     chainReader
   } = {}) {
@@ -151,6 +152,7 @@ export class EarningsDoorService {
     this.stateStore = stateStore;
     this.eventBus = eventBus;
     this.workerExposurePolicy = workerExposurePolicy;
+    this.gasGrantService = gasGrantService;
     this.chainReader = chainReader ?? (provider ? new EvmEarningsDoorChainReader(provider) : undefined);
   }
 
@@ -173,13 +175,14 @@ export class EarningsDoorService {
       ...statementsForStakeEvents(stakeReplay?.events, asset)
     ].sort((left, right) => String(right.occurredAt ?? "").localeCompare(String(left.occurredAt ?? "")));
     const account = this.#accountFromProof(proof, statement);
+    const firstWithdrawalGrant = await this.#grantInspection(owner, proof);
     return {
       schemaVersion: 1,
       available: true,
       framing: EARNINGS_ACCOUNT_STATEMENT,
       account,
       ownershipProof: this.#ownershipProof(owner, asset),
-      withdrawal: this.#withdrawalDoor(),
+      withdrawal: this.#withdrawalDoor(firstWithdrawalGrant),
       whatYourBalanceCanDo: await this.#retention(owner, account.available.raw),
       boundary: EARNINGS_BOUNDARY
     };
@@ -187,7 +190,10 @@ export class EarningsDoorService {
 
   async buildWithdrawTransactions(wallet, input = {}) {
     this.#assertAvailable();
-    assertOnlyFields(input, new Set(["asset", "amount", "destination"]));
+    assertOnlyFields(input, new Set(["asset", "amount", "destination", "requestGasGrant"]));
+    if (input.requestGasGrant !== undefined && typeof input.requestGasGrant !== "boolean") {
+      throw new ValidationError("requestGasGrant must be a boolean.", { field: "requestGasGrant" });
+    }
     const owner = getAddress(wallet);
     const assetSymbol = this.#assetSymbol(input.asset ?? DEFAULT_ASSET);
     const requested = exactPositiveRaw(input.amount);
@@ -220,6 +226,26 @@ export class EarningsDoorService {
         }
       }
     };
+    const destination = input.destination ? getAddress(input.destination) : owner;
+    const grantIntent = {
+      wallet: owner,
+      assetSymbol: proof.asset.symbol,
+      assetAddress: proof.asset.address,
+      amountRaw: requested.toString(),
+      destination,
+      liveLiquidRaw: liquid.toString()
+    };
+    if (
+      input.requestGasGrant === true
+      && typeof this.gasGrantService?.grantForWithdrawalIntent !== "function"
+    ) {
+      throw new ValidationError("The first-withdrawal gas grant service is unavailable; no grant was attempted.", {
+        reason: "first_withdrawal_gas_grant_unavailable"
+      });
+    }
+    const firstWithdrawalGasGrant = input.requestGasGrant === true
+      ? await this.gasGrantService.grantForWithdrawalIntent(grantIntent)
+      : await this.#grantInspection(owner, proof);
     withdraw.gas = await this.#gas(withdraw, owner);
     const templates = [withdraw];
 
@@ -262,12 +288,20 @@ export class EarningsDoorService {
       },
       withdrawal: {
         amount: amount(requested, proof.asset.decimals),
-        destination: input.destination ? getAddress(input.destination) : owner,
+        destination,
         firstLandingAddress: owner
+      },
+      firstWithdrawalGasGrant: firstWithdrawalGasGrant ?? {
+        eligible: false,
+        status: "unavailable",
+        reason: "first_withdrawal_gas_grant_unavailable"
       },
       templates,
       instructions: [
         "Independently decode every template and verify chainId, from, to, function, asset, amount, and destination before signing.",
+        ...(firstWithdrawalGasGrant?.eligible === true
+          ? ["If this is your first withdrawal, rebuild with requestGasGrant: true. Your first withdrawal's network fee is on us when the returned eligibility guards pass."]
+          : []),
         "Sign and broadcast with this account owner's key through one of the returned public RPC URLs.",
         ...(input.destination
           ? ["Wait for withdrawal confirmation, rebuild for a live transfer gas estimate, then verify, sign, and broadcast the transfer template."]
@@ -308,7 +342,7 @@ export class EarningsDoorService {
     };
   }
 
-  #withdrawalDoor() {
+  #withdrawalDoor(firstWithdrawalGrant) {
     return {
       statement: EARNINGS_WITHDRAWAL_STATEMENT,
       http: { method: "POST", path: "/account/withdraw/transactions" },
@@ -317,7 +351,12 @@ export class EarningsDoorService {
         asset: "DOT",
         statement: EARNINGS_GAS_STATEMENT,
         acquisition: EARNINGS_GAS_ACQUISITION_STATEMENT,
-        gasless: EARNINGS_GASLESS_STATUS
+        gasless: EARNINGS_GASLESS_STATUS,
+        firstWithdrawalGrant: firstWithdrawalGrant ?? {
+          eligible: false,
+          status: "unavailable",
+          reason: "first_withdrawal_gas_grant_unavailable"
+        }
       },
       paymentRelay: EARNINGS_PAYMENT_RELAY_STATUS
     };
@@ -357,6 +396,31 @@ export class EarningsDoorService {
         note: "Where a job's claim tier requires stake, this available balance can fund it. Call preflightJob for the exact job-specific amount."
       }
     };
+  }
+
+  async #grantInspection(wallet, proof) {
+    if (typeof this.gasGrantService?.inspect !== "function") return undefined;
+    try {
+      return await this.gasGrantService.inspect({
+        wallet,
+        liquidRaw: proof.position.liquidRaw,
+        assetSymbol: proof.asset.symbol,
+        assetDecimals: proof.asset.decimals
+      });
+    } catch {
+      return {
+        eligible: false,
+        status: "unavailable",
+        reason: "first_withdrawal_gas_grant_status_read_failed"
+      };
+    }
+  }
+
+  async getGasGrantOpsStatus() {
+    if (typeof this.gasGrantService?.getOpsStatus !== "function") {
+      return { available: false, reason: "first_withdrawal_gas_grant_unavailable" };
+    }
+    return this.gasGrantService.getOpsStatus();
   }
 
   async #gas(template, wallet) {

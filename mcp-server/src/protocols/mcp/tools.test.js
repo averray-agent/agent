@@ -266,7 +266,6 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
     "explainEligibility",
     "getDepositPoolInfo",
     "getAccountPosition",
-    "buildWithdrawTransactions",
     "buildDepositPoolTransactions",
     "getCreditInfo",
     "buildCreditTransactions"
@@ -277,6 +276,9 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
     assert.equal(byName[name].annotations.idempotentHint, true, name);
   }
   assert.equal(byName.fetchAuthNonce.annotations.readOnlyHint, true);
+  assert.equal(byName.buildWithdrawTransactions.annotations.readOnlyHint, false);
+  assert.equal(byName.buildWithdrawTransactions.annotations.idempotentHint, true);
+  assert.match(byName.buildWithdrawTransactions.description, /lifetime-once 0\.03 DOT/u);
   assert.equal(byName.fetchAuthNonce.annotations.destructiveHint, false);
   assert.equal(byName.refreshAuthToken.annotations.destructiveHint, false);
   assert.equal(byName.claimJob.annotations.idempotentHint, true);

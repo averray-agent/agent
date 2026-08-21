@@ -304,7 +304,7 @@ jq -e '.protocols | index("http") != null' >/dev/null <<<"$onboarding_json"
 jq -e '
   (.tools | index("getAccountPosition") != null) and
   (.tools | index("buildWithdrawTransactions") != null) and
-  (.onboarding.withdrawEarnings.statement == "Withdraw via buildWithdrawTransactions — your signature, your gas, any destination.") and
+  (.onboarding.withdrawEarnings.statement | contains("one-time first-withdrawal DOT grant")) and
   (.onboarding.withdrawEarnings.retentionNotGates | contains("never delays, conditions, prices, or adds steps"))
 ' >/dev/null <<<"$onboarding_json" || {
   echo "Onboarding promises withdrawal without carrying the canonical earnings door and retention-not-gates contract." >&2
