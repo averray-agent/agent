@@ -195,6 +195,13 @@ function classifyEventTopic(topic, data = {}) {
       severity: fundingSeverity(topic, data)
     };
   }
+  if (topic.startsWith("operator_gas.")) {
+    return {
+      source: "operator_gas",
+      phase: "outflow",
+      severity: topic.includes("failed") ? "error" : "info"
+    };
+  }
   if (topic.startsWith("settlement.")) {
     return {
       source: "settlement",

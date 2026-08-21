@@ -12,7 +12,11 @@ const DESTINATION = "0x2222222222222222222222222222222222222222";
 const ACCOUNT = "0x3333333333333333333333333333333333333333";
 const USDC = "0x0000053900000000000000000000000001200000";
 
-function harness({ liquidRaw = "1250000", nativeBalance = 30_000_000_000_000_000n } = {}) {
+function harness({
+  liquidRaw = "1250000",
+  nativeBalance = 30_000_000_000_000_000n,
+  gasGrantService = undefined
+} = {}) {
   const capacityCalls = [];
   const gateway = {
     isEnabled: () => true,
@@ -119,6 +123,7 @@ function harness({ liquidRaw = "1250000", nativeBalance = 30_000_000_000_000_000
       stateStore,
       eventBus,
       workerExposurePolicy,
+      gasGrantService,
       chainReader
     })
   };
@@ -143,6 +148,24 @@ test("getAccountPosition is bank-statement shaped with account ownership, receip
   assert.equal(Object.hasOwn(result.whatYourBalanceCanDo, "borrow"), false, "L1 borrowing must not be advertised");
   assert.deepEqual(capacityCalls, [{}, { additionalVestedRaw: "1250000" }]);
   assert.equal(JSON.stringify(result).includes('"position"'), false, "agent response must not frame the account as a position");
+});
+
+test("getAccountPosition plainly offers the first-withdrawal grant and returns named ineligibility reasons", async () => {
+  const gasGrantService = {
+    async inspect() {
+      return {
+        eligible: true,
+        reason: "first_withdrawal_gas_grant_available",
+        offer: "Your first withdrawal's network fee is on us."
+      };
+    }
+  };
+  const { door } = harness({ gasGrantService });
+  const result = await door.getAccount(WALLET);
+
+  assert.equal(result.withdrawal.gas.firstWithdrawalGrant.eligible, true);
+  assert.equal(result.withdrawal.gas.firstWithdrawalGrant.reason, "first_withdrawal_gas_grant_available");
+  assert.equal(result.withdrawal.gas.firstWithdrawalGrant.offer, "Your first withdrawal's network fee is on us.");
 });
 
 test("buildWithdrawTransactions returns verified AAC withdraw and optional onward transfer without retention gates", async () => {
@@ -175,7 +198,50 @@ test("a wallet short of DOT still receives the complete template with an honest 
   const result = await door.buildWithdrawTransactions(WALLET, { amount: "1" });
   assert.equal(result.templates.length, 1);
   assert.equal(result.templates[0].gas.sufficient, false);
-  assert.match(result.templates[0].gas.acquisition, /Acquire DOT/u);
+  assert.match(result.templates[0].gas.acquisition, /acquire DOT/iu);
+});
+
+test("buildWithdrawTransactions binds the one-time grant to the authenticated wallet's live withdrawal intent", async () => {
+  const calls = [];
+  const gasGrantService = {
+    async grantForWithdrawalIntent(grantIntent) {
+      calls.push(grantIntent);
+      return {
+        status: "granted",
+        eligible: false,
+        reason: "first_withdrawal_gas_grant_sent",
+        txHash: `0x${"d".repeat(64)}`,
+        amount: { raw: "30000000000000000", decimals: 18, display: "0.03", symbol: "DOT" }
+      };
+    }
+  };
+  const { door } = harness({ liquidRaw: "400000", nativeBalance: 1n, gasGrantService });
+
+  const result = await door.buildWithdrawTransactions(WALLET, {
+    amount: "250000",
+    requestGasGrant: true
+  });
+
+  assert.equal(result.firstWithdrawalGasGrant.status, "granted");
+  assert.equal(result.firstWithdrawalGasGrant.txHash, `0x${"d".repeat(64)}`);
+  assert.deepEqual(calls, [{
+    wallet: WALLET,
+    assetSymbol: "USDC",
+    assetAddress: USDC,
+    amountRaw: "250000",
+    destination: WALLET,
+    liveLiquidRaw: "400000"
+  }]);
+  assert.equal(result.templates[0].unsigned, true);
+  assert.equal(result.broadcast.signer, "your own wallet");
+});
+
+test("requestGasGrant fails closed when the intent-bound grant service is unavailable", async () => {
+  const { door } = harness({ gasGrantService: undefined });
+  await assert.rejects(
+    door.buildWithdrawTransactions(WALLET, { amount: "250000", requestGasGrant: true }),
+    (error) => error?.details?.reason === "first_withdrawal_gas_grant_unavailable"
+  );
 });
 
 test("over-available withdrawal refuses before offering templates and echoes the account truth", async () => {

@@ -212,7 +212,11 @@ test("brokered submit recovery applies durable backoff and a finite attempt boun
 test("re-broker InvalidState race with an actual landed submit proceeds to verification without parking", async () => {
   const session = submittedSession();
   const chain = gateway({ invalidStateRace: true });
-  const h = verifierHarness({ session, chain });
+  const h = verifierHarness({
+    session,
+    chain,
+    recoveryNow: new Date("2026-08-21T20:50:00.000Z")
+  });
   await h.stateStore.upsertSession(session);
 
   const result = await h.verifier.verifySubmission({ sessionId: session.sessionId });

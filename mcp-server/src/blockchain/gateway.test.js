@@ -89,6 +89,71 @@ test("toContentHash accepts only canonical content hash values", () => {
   );
 });
 
+test("first-withdrawal gas grant sends the exact native amount through the configured signer and proves the wallet delta", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const recipient = "0x1111111111111111111111111111111111111111";
+  const operator = "0x2222222222222222222222222222222222222222";
+  const calls = [];
+  gateway.provider = {
+    async getBalance(wallet, blockTag) {
+      calls.push(["balance", wallet, blockTag]);
+      return blockTag === 123 ? 30_000_000_000_000_001n : 1n;
+    }
+  };
+  gateway.signer = {
+    async getAddress() { return operator; },
+    async sendTransaction(transaction) {
+      calls.push(["send", transaction]);
+      return {
+        hash: `0x${"f".repeat(64)}`,
+        async wait() {
+          return { status: 1, blockNumber: 123, gasUsed: 21_000n };
+        }
+      };
+    }
+  };
+
+  const result = await gateway.sendFirstWithdrawalGasGrant(recipient, 30_000_000_000_000_000n);
+
+  assert.deepEqual(calls[1], ["send", { to: recipient, value: 30_000_000_000_000_000n }]);
+  assert.equal(result.walletBalanceDeltaRaw, "30000000000000000");
+  assert.equal(result.balanceDeltaVerified, true);
+  assert.equal(result.operator, operator);
+  assert.equal(result.status, 1);
+});
+
+test("a post-receipt balance read failure does not erase the confirmed gas-grant transfer", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  let reads = 0;
+  gateway.provider = {
+    async getBalance() {
+      reads += 1;
+      if (reads > 1) throw new Error("secondary RPC unavailable");
+      return 1n;
+    }
+  };
+  gateway.signer = {
+    async getAddress() { return "0x2222222222222222222222222222222222222222"; },
+    async sendTransaction() {
+      return {
+        hash: `0x${"e".repeat(64)}`,
+        async wait() { return { status: 1, blockNumber: 124, gasUsed: 21_000n }; }
+      };
+    }
+  };
+
+  const result = await gateway.sendFirstWithdrawalGasGrant(
+    "0x1111111111111111111111111111111111111111",
+    30_000_000_000_000_000n
+  );
+  assert.equal(result.txHash, `0x${"e".repeat(64)}`);
+  assert.equal(result.status, 1);
+  assert.equal(result.walletBalanceAfterRaw, null);
+  assert.equal(result.walletBalanceDeltaRaw, null);
+  assert.equal(result.balanceDeltaVerified, false);
+  assert.equal(result.balanceReadError, "secondary RPC unavailable");
+});
+
 test("discloseContent relays SIWE wallet through discloseFor", async () => {
   const gateway = new BlockchainGateway({ enabled: false });
   const hash = `0x${"1".repeat(64)}`;

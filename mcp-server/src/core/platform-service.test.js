@@ -2070,6 +2070,34 @@ test("getAdminStatus exposes durable per-wallet SIWE conversion telemetry", asyn
   );
 });
 
+test("getAdminStatus exposes first-withdrawal grants as operator gas outflow rather than payout or revenue", async () => {
+  const service = makePlatformService();
+  service.setFirstWithdrawalGasGrantStatusProvider({
+    async getGasGrantOpsStatus() {
+      return {
+        schemaVersion: 1,
+        category: "operator_gas_outflow",
+        countedAsPayout: false,
+        countedAsRevenue: false,
+        daily: {
+          day: "2026-08-21",
+          limit: 25,
+          granted: 1,
+          total: { raw: "30000000000000000", decimals: 18, display: "0.03", symbol: "DOT" }
+        },
+        recent: [{ wallet: WALLET, balanceAtGrant: { raw: "400000", decimals: 6, display: "0.4", symbol: "USDC" } }]
+      };
+    }
+  });
+
+  const status = await service.getAdminStatus();
+
+  assert.equal(status.ops.firstWithdrawalGasGrants.category, "operator_gas_outflow");
+  assert.equal(status.ops.firstWithdrawalGasGrants.daily.total.display, "0.03");
+  assert.equal(status.ops.firstWithdrawalGasGrants.countedAsPayout, false);
+  assert.equal(status.ops.firstWithdrawalGasGrants.countedAsRevenue, false);
+});
+
 test("getAdminStatus reports treasury policy failures without failing the status response", async () => {
   const service = makePlatformService({
     config: {

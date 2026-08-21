@@ -450,6 +450,51 @@ export class BlockchainGateway {
     });
   }
 
+  async sendFirstWithdrawalGasGrant(wallet, amountWei) {
+    return this.withGatewayError("sendFirstWithdrawalGasGrant", async () => {
+      this.requireSigner("sendFirstWithdrawalGasGrant");
+      const recipient = getAddress(wallet);
+      const value = exactUint(amountWei, "first-withdrawal gas grant amount");
+      if (value <= 0n) {
+        throw new ValidationError("first-withdrawal gas grant amount must be positive.");
+      }
+      const [operator, walletBalanceBefore] = await Promise.all([
+        this.signer.getAddress(),
+        this.provider.getBalance(recipient)
+      ]);
+      const tx = await this.signer.sendTransaction({ to: recipient, value });
+      const receipt = await tx.wait();
+      if (Number(receipt?.status) !== 1) {
+        throw new Error("First-withdrawal gas grant transaction did not succeed.");
+      }
+      let walletBalanceAfter = null;
+      let walletBalanceDelta = null;
+      let balanceReadError = null;
+      try {
+        walletBalanceAfter = BigInt(await this.provider.getBalance(recipient, receipt.blockNumber));
+        walletBalanceDelta = walletBalanceAfter - BigInt(walletBalanceBefore);
+      } catch (error) {
+        // The transfer is already confirmed. A secondary balance-lens failure
+        // must not turn that external side effect into a retryable failure.
+        balanceReadError = error?.message ?? String(error);
+      }
+      return {
+        operator: getAddress(operator),
+        wallet: recipient,
+        amountRaw: value.toString(),
+        txHash: tx.hash,
+        blockNumber: Number(receipt.blockNumber),
+        status: Number(receipt.status),
+        gasUsed: receipt.gasUsed?.toString?.() ?? null,
+        walletBalanceBeforeRaw: BigInt(walletBalanceBefore).toString(),
+        walletBalanceAfterRaw: walletBalanceAfter?.toString() ?? null,
+        walletBalanceDeltaRaw: walletBalanceDelta?.toString() ?? null,
+        balanceReadError,
+        balanceDeltaVerified: walletBalanceDelta === value
+      };
+    });
+  }
+
   normalizeStrategyId(strategyId) {
     if (typeof strategyId === "string" && /^0x[a-fA-F0-9]{64}$/u.test(strategyId)) {
       return strategyId;

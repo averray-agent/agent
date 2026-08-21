@@ -245,7 +245,7 @@ test("A3 arrival payload: GET /llms.txt serves the agent-adjusted API-host mirro
   assert.match(response.body, /Already have a managed wallet \(Cloudflare Wallets, Coinbase, or similar\)/u);
   assert.match(response.body, /payment rails and can't sign on this chain/u);
   assert.match(response.body, /same key works on any EVM chain/u);
-  assert.match(response.body, /Withdraw via buildWithdrawTransactions — your signature, your gas, any destination\./u);
+  assert.match(response.body, /Eligible workers can request Averray's one-time first-withdrawal DOT grant/u);
   assert.match(response.body, /waiver is capped at 3 claims per wallet/u);
   assert.match(response.body, /Withdrawal is an on-chain act/u);
   assert.match(response.body, /docs\/BLIND_AGENT_CASE_STUDY\.md/u);

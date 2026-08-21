@@ -123,6 +123,7 @@ export class PlatformService {
     this.submittedJobAutoVerifier = undefined;
     this.firstExternalAgentAlert = undefined;
     this.rewardBankHealthProvider = undefined;
+    this.firstWithdrawalGasGrantStatusProvider = undefined;
     // Opt-in: pre-fund auto-ingested job rewards on-chain at ingestion time so a
     // job is genuinely funded before it is advertised claimable. Set in bootstrap
     // from INGESTION_PREFUND_ENABLED. Testnet-only is an operational invariant.
@@ -284,6 +285,10 @@ export class PlatformService {
 
   setRewardBankHealthProvider(provider) {
     this.rewardBankHealthProvider = typeof provider === "function" ? provider : undefined;
+  }
+
+  setFirstWithdrawalGasGrantStatusProvider(provider) {
+    this.firstWithdrawalGasGrantStatusProvider = provider;
   }
 
   setCatalogueLaneDiscipline(discipline) {
@@ -659,7 +664,8 @@ export class PlatformService {
       catalogueLanes,
       recentSessions,
       hostDiagnostics,
-      siweAuthTelemetry
+      siweAuthTelemetry,
+      firstWithdrawalGasGrants
     ] = await Promise.all([
       getTreasuryPolicyStatusSafely(this.blockchainGateway),
       this.jobCatalogService.getRecurringTemplateStatus(),
@@ -821,7 +827,8 @@ export class PlatformService {
       getCatalogueLaneStatusSafely(this.catalogueLaneDiscipline),
       this.jobExecutionService.listRecentSessions(14),
       Promise.resolve().then(() => collectHostDiagnostics()),
-      resolveSiweAuthTelemetry(this.stateStore)
+      resolveSiweAuthTelemetry(this.stateStore),
+      getFirstWithdrawalGasGrantStatusSafely(this.firstWithdrawalGasGrantStatusProvider)
     ]);
     const [xcmSettlementWatcher, xcmObservationRelay, xcmBalanceObserver, bankXcmRuntime] = await Promise.all([
       getXcmSettlementWatcherStatusSafely(this.xcmSettlementWatcher),
@@ -987,6 +994,7 @@ export class PlatformService {
           0
         ),
         resolvedRecently: recentSessions.filter((session) => session.status === "resolved").length,
+        firstWithdrawalGasGrants,
         topJobs
       },
       maintenance: {
@@ -2041,6 +2049,21 @@ async function getBankXcmRuntimeStatusSafely(runtime) {
     return await runtime.getStatus();
   } catch (error) {
     return { enabled: true, readyForStaging: false, error: error?.message ?? "status_failed" };
+  }
+}
+
+async function getFirstWithdrawalGasGrantStatusSafely(provider) {
+  if (typeof provider?.getGasGrantOpsStatus !== "function") {
+    return { available: false, reason: "first_withdrawal_gas_grant_unavailable" };
+  }
+  try {
+    return await provider.getGasGrantOpsStatus();
+  } catch (error) {
+    return {
+      available: false,
+      reason: "first_withdrawal_gas_grant_status_read_failed",
+      error: error?.message ?? "status_failed"
+    };
   }
 }
 
