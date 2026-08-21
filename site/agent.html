@@ -74,7 +74,13 @@
             <a class="button-ghost" href="https://api.averray.com/onboarding" target="_blank" rel="noreferrer">Open onboarding JSON</a>
             <a class="button-ghost" href="https://averray.com/agents/">Read the agent guide</a>
           </div>
-          <p id="profile-loading" class="profile-empty">Loading profile…</p>
+          <p id="profile-loading" class="profile-empty">
+            Loading the profile… · raw JSON:
+            <a id="profile-loading-json-url" href="https://api.averray.com/agents/" target="_blank" rel="noreferrer">api.averray.com/agents/{wallet}</a>
+          </p>
+          <noscript>
+            <p class="profile-empty">Loading the profile requires JavaScript · raw JSON: <a href="https://api.averray.com/agents/">api.averray.com/agents/{wallet}</a></p>
+          </noscript>
 
           <div class="profile-grid">
             <section class="profile-panel">

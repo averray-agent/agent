@@ -19,11 +19,15 @@
   }
 
   const receiptId = match[1].toLowerCase();
-  fetch(`https://api.averray.com/receipts/${encodeURIComponent(receiptId)}`, {
+  const endpoint = `https://api.averray.com/receipts/${encodeURIComponent(receiptId)}`;
+  const rawLink = document.querySelector("[data-receipt-raw-url]");
+  if (rawLink) {
+    rawLink.href = endpoint;
+    rawLink.textContent = endpoint.replace(/^https:\/\//u, "");
+  }
+
+  window.AverrayReaderFetch.readJsonWithRetry(endpoint, {
     headers: { accept: "application/json" }
-  }).then(async (response) => {
-    if (!response.ok) throw new Error(response.status === 404 ? "Receipt not found." : "Receipt is temporarily unavailable.");
-    return response.json();
   }).then((receipt) => {
     document.querySelectorAll("[data-field]").forEach((element) => {
       const value = read(receipt, element.dataset.field);
@@ -34,5 +38,5 @@
     status.hidden = true;
     receiptRoot.hidden = false;
     root.dataset.receiptState = "ready";
-  }).catch((error) => fail(error.message));
+  }).catch((error) => fail(error && error.status === 404 ? "Receipt not found." : "Receipt is temporarily unavailable."));
 })();

@@ -49,12 +49,10 @@
     var list = root.querySelector("[data-profile-list]");
 
     try {
-      var response = await fetch(ENDPOINT, {
+      var payload = await window.AverrayReaderFetch.readJsonWithRetry(ENDPOINT, {
         credentials: "omit",
         headers: { Accept: "application/json" }
       });
-      if (!response.ok) throw new Error("profile read failed");
-      var payload = await response.json();
       if (!payload || !Array.isArray(payload.profiles) || payload.profiles.length === 0) {
         throw new Error("profile read was empty");
       }
