@@ -132,6 +132,46 @@ function SignInContent() {
                 this browser will work.
               </p>
             </div>
+            <div
+              className="rounded-[var(--radius-md)] border border-[var(--line)] bg-[var(--paper)] p-4 text-sm leading-relaxed text-[var(--muted)]"
+              data-wallet-guidance
+            >
+              <p>
+                Your wallet is your sign-in and account identity. It ties your
+                runs, receipts, payments, and reputation to one address you
+                control.
+              </p>
+              <p className="mt-2">
+                Need one? Install{" "}
+                <Link
+                  href="https://metamask.io/download"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--accent)] underline underline-offset-2"
+                >
+                  MetaMask
+                </Link>{" "}
+                or{" "}
+                <Link
+                  href="https://talisman.xyz/download/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--accent)] underline underline-offset-2"
+                >
+                  Talisman
+                </Link>
+                , then return here and connect it.
+              </p>
+              <p className="mt-2">
+                There is no email signup.{" "}
+                <Link
+                  href="https://averray.com"
+                  className="text-[var(--accent)] underline underline-offset-2"
+                >
+                  What is Averray?
+                </Link>
+              </p>
+            </div>
             <Button
               size="lg"
               onClick={handleSignIn}
