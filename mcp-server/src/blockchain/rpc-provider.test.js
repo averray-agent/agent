@@ -101,6 +101,56 @@ test("createRpcProvider reaches a backup when the primary is blackholed", async 
   }
 });
 
+test("createRpcProvider coalesces one bounded flow wave into one HTTP batch", async () => {
+  let ethCallHttpRequests = 0;
+  let ethCallCount = 0;
+  const rpc = createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const payload = JSON.parse(body);
+      const entries = Array.isArray(payload) ? payload : [payload];
+      const calls = entries.filter((entry) => entry.method === "eth_call");
+      if (calls.length > 0) {
+        ethCallHttpRequests += 1;
+        ethCallCount += calls.length;
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(entries.map((entry) => ({
+        jsonrpc: "2.0",
+        id: entry.id,
+        result: entry.method === "eth_chainId" ? "0x190f1b43" : "0x"
+      }))));
+    });
+  });
+  await listen(rpc);
+  const provider = createRpcProvider({
+    rpcUrls: [serverUrl(rpc)],
+    rpcRequestTimeoutMs: 800
+  });
+  const itemCount = 50;
+
+  try {
+    await Promise.all(Array.from({ length: itemCount }, () => provider.send("eth_call", [{
+      to: "0x0000000000000000000000000000000000000001",
+      data: "0x"
+    }, "latest"])));
+
+    assert.equal(ethCallCount, itemCount);
+    assert.equal(
+      ethCallHttpRequests,
+      1,
+      "one 50-item flow wave must use one HTTP batch instead of 50 sequential requests"
+    );
+  } finally {
+    await provider.destroy();
+    await close(rpc);
+  }
+});
+
 test("write broadcaster waits through a two-second send response and settles on the first endpoint", async () => {
   const signedTransaction = await new Wallet(TEST_PRIVATE_KEY).signTransaction({
     chainId: 1,

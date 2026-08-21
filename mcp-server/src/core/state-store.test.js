@@ -320,8 +320,36 @@ test("MemoryStateStore funded jobs round-trip and list latest first", async () =
   });
 
   assert.equal((await store.getFundedJob("job-1")).finalStatus, "open");
+  assert.deepEqual(
+    (await store.getFundedJobs(["job-2", "missing", "job-1"])).map((entry) => entry?.jobId),
+    ["job-2", undefined, "job-1"]
+  );
   assert.deepEqual((await store.listFundedJobs({ limit: 2 })).map((entry) => entry.jobId), ["job-2", "job-1"]);
   assert.deepEqual((await store.listFundedJobs({ finalOnly: true })).map((entry) => entry.jobId), ["job-2"]);
+});
+
+test("RedisStateStore fetches N funded jobs with one MGET", async () => {
+  const store = new RedisStateStore("redis://unused", "test");
+  let mGetCalls = 0;
+  let observedKeys;
+  store.connect = async () => {};
+  store.client = {
+    async mGet(keys) {
+      mGetCalls += 1;
+      observedKeys = keys;
+      return [JSON.stringify({ jobId: "job-1" }), null, "malformed"];
+    }
+  };
+
+  const records = await store.getFundedJobs(["job-1", "missing", "bad"]);
+
+  assert.equal(mGetCalls, 1);
+  assert.deepEqual(observedKeys, [
+    "test:funded-job:job-1",
+    "test:funded-job:missing",
+    "test:funded-job:bad"
+  ]);
+  assert.deepEqual(records, [{ jobId: "job-1" }, undefined, undefined]);
 });
 
 test("MemoryStateStore xcm observations round-trip and clear from pending when processed", async () => {

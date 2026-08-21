@@ -678,6 +678,10 @@ export class MemoryStateStore {
     return this.fundedJobs.get(normalizeFundedJobId(jobId));
   }
 
+  async getFundedJobs(jobIds) {
+    return jobIds.map((jobId) => this.fundedJobs.get(normalizeFundedJobId(jobId)));
+  }
+
   async upsertFundedJob(record) {
     this.fundedJobs.set(normalizeFundedJobId(record?.jobId), record);
     return record;
@@ -1589,6 +1593,21 @@ export class RedisStateStore {
     await this.connect();
     const raw = await this.client.get(this.key("funded-job", normalizeFundedJobId(jobId)));
     return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async getFundedJobs(jobIds) {
+    await this.connect();
+    if (jobIds.length === 0) return [];
+    const records = await this.client.mGet(
+      jobIds.map((jobId) => this.key("funded-job", normalizeFundedJobId(jobId)))
+    );
+    return records.map((raw) => {
+      try {
+        return raw ? JSON.parse(raw) : undefined;
+      } catch {
+        return undefined;
+      }
+    });
   }
 
   async upsertFundedJob(record) {

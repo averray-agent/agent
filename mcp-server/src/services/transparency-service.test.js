@@ -467,6 +467,93 @@ test("transparency payload composes flow, escrow, and generation-bound treasury 
   assert.match(payload.treasury.lines.assetHubMultisig.balance.proof, new RegExp(TREASURY_ID, "iu"));
 });
 
+test("batched flow joins preserve the byte-identical serialized flow payload", async () => {
+  const batched = harness();
+  batched.gateway.getJobs = (jobIds) => Promise.allSettled(
+    jobIds.map((jobId) => batched.gateway.getJob(jobId))
+  );
+  batched.stateStore.getFundedJobs = (jobIds) => Promise.all(
+    jobIds.map((jobId) => batched.stateStore.getFundedJob(jobId))
+  );
+  const singleReadFallback = harness();
+
+  const [batchedFlow, fallbackFlow] = await Promise.all([
+    batched.readFlow(),
+    singleReadFallback.readFlow()
+  ]);
+
+  assert.equal(
+    JSON.stringify(batched.buildFlow(batchedFlow, NOW)),
+    JSON.stringify(singleReadFallback.buildFlow(fallbackFlow, NOW))
+  );
+});
+
+test("flow reader uses O(1)-ish batch joins for N synthetic settled items", async () => {
+  const itemCount = 50;
+  const sessions = Array.from({ length: itemCount }, (_, index) => ({
+    jobId: `synthetic-${index}`,
+    status: "resolved",
+    resolvedAt: "2026-08-06T11:00:00.000Z",
+    payoutTx: settlementReceipt(`synthetic-${index}`, "1000000")
+  }));
+  let sessionPageCalls = 0;
+  let chainBatchCalls = 0;
+  let fundedBatchCalls = 0;
+  let singleJoinCalls = 0;
+  const service = new TransparencyService({
+    now: () => NOW,
+    stateStore: {
+      async listRecentSessions(limit, offset) {
+        sessionPageCalls += 1;
+        return sessions.slice(offset, offset + limit);
+      },
+      async getFundedJobs(jobIds) {
+        fundedBatchCalls += 1;
+        assert.equal(jobIds.length, itemCount);
+        return jobIds.map(() => ({ sourceType: "external" }));
+      },
+      async getFundedJob() {
+        singleJoinCalls += 1;
+        throw new Error("flow must use the funded-job batch join");
+      }
+    },
+    gateway: {
+      config: {
+        supportedAssets: [{ symbol: "USDC", address: TOKEN, decimals: 6 }]
+      },
+      async getJobs(jobIds, { batchSize }) {
+        chainBatchCalls += 1;
+        assert.equal(batchSize, 64);
+        assert.equal(jobIds.length, itemCount);
+        return jobIds.map(() => ({ status: "fulfilled", value: job() }));
+      },
+      async getJob() {
+        singleJoinCalls += 1;
+        throw new Error("flow must use the chain-job batch join");
+      }
+    },
+    platformService: {
+      getJobDefinition() {
+        throw new Error("funded source metadata should avoid the definition fallback");
+      }
+    },
+    logger: { warn() {} }
+  });
+
+  const flow = service.buildFlow(await service.readFlow(), NOW);
+
+  assert.equal(flow.jobsSettled.allTime.value, itemCount);
+  assert.equal(sessionPageCalls, 1);
+  assert.equal(chainBatchCalls, 1);
+  assert.equal(fundedBatchCalls, 1);
+  assert.equal(singleJoinCalls, 0);
+  assert.equal(
+    chainBatchCalls + fundedBatchCalls,
+    2,
+    "N settled items must remain two batched join calls, not two sequential calls per item"
+  );
+});
+
 test("transparency settlement flow uses the shared registry for ours, outsiders, and unknown", async () => {
   const external = "0x1111111111111111111111111111111111111111";
   const acceptance = "0x2222222222222222222222222222222222222222";

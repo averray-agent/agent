@@ -918,6 +918,32 @@ test("getJob falls back to the legacy escrow struct when rc1 decoding fails", as
   assert.equal("contractLayout" in job, false);
 });
 
+test("getJobs bounds concurrent contract reads and preserves aligned failures", async () => {
+  const gateway = gatewayWithDot();
+  let active = 0;
+  let maximumActive = 0;
+  let callCount = 0;
+  gateway.getJob = async (jobId) => {
+    callCount += 1;
+    active += 1;
+    maximumActive = Math.max(maximumActive, active);
+    await new Promise((resolve) => setImmediate(resolve));
+    active -= 1;
+    if (jobId === "job-17") throw new Error("synthetic unreadable job");
+    return { jobId };
+  };
+  const jobIds = Array.from({ length: 41 }, (_, index) => `job-${index}`);
+
+  const results = await gateway.getJobs(jobIds, { batchSize: 8 });
+
+  assert.equal(callCount, jobIds.length);
+  assert.equal(maximumActive, 8);
+  assert.equal(results.length, jobIds.length);
+  assert.deepEqual(results[0], { status: "fulfilled", value: { jobId: "job-0" } });
+  assert.equal(results[17].status, "rejected");
+  assert.match(results[17].reason.message, /synthetic unreadable job/u);
+});
+
 test("toBaseUnits converts display asset amounts before uint256 contract calls", () => {
   const gateway = gatewayWithDot();
 
