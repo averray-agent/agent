@@ -37,7 +37,13 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
 
 export const MIN_DISPATCH_MARGIN_SECONDS = 6 * 60 * 60;
-export const MAX_FEE_PER_LEG_RAW = 40_000n;
+// Measured 2026-08-21 12:24–13:20Z: Hydration quoted 28,588–28,645 raw for
+// withdraw_sell. 80,000 gives future recall stagings more than 2× headroom
+// over that structural fee level while remaining a hard chain-side ceiling.
+export const MAX_FEE_PER_LEG_RAW = 80_000n;
+export const DEFAULT_RECALL_FEE_FLOOR_RATIO_BPS = 15_000n;
+export const MIN_RECALL_FEE_FLOOR_RATIO_BPS = 13_500n;
+const DEFAULT_DEPLOY_MAX_FEE_PER_LEG_RAW = 40_000n;
 export const DEFAULT_FLOAT_HEADROOM_RAW = 50_000n;
 // The venue image held 0.51 DOT when the recall packet was written. Requiring
 // 0.05 DOT preserves multiple measured 0.01-DOT-class calls and, crucially,
@@ -98,13 +104,20 @@ const venueInterface = new Interface(VENUE_ABI);
 const poolInterface = new Interface(POOL_ABI);
 
 export function parseArgs(argv) {
+  const command = argv[0] && !argv[0].startsWith("--") ? argv[0] : undefined;
   const args = {
-    command: argv[0] && !argv[0].startsWith("--") ? argv[0] : undefined,
+    command,
     profile: undefined,
     requestId: undefined,
     deploymentId: undefined,
     recallId: undefined,
-    maxFeePerLeg: MAX_FEE_PER_LEG_RAW.toString(),
+    // Keep deploy staging's 40k/50k fee/float pair intact. The raised ceiling
+    // is the default only for future recall stagings, which have no deploy
+    // float-headroom subtraction.
+    maxFeePerLeg: (command === "stage-recall"
+      ? MAX_FEE_PER_LEG_RAW
+      : DEFAULT_DEPLOY_MAX_FEE_PER_LEG_RAW).toString(),
+    feeFloorRatioBps: DEFAULT_RECALL_FEE_FLOOR_RATIO_BPS.toString(),
     floatHeadroom: DEFAULT_FLOAT_HEADROOM_RAW.toString(),
     laneNonce: undefined,
     observabilityUrl: undefined,
@@ -130,6 +143,7 @@ export function parseArgs(argv) {
     else if (flag === "--deployment-id") args.deploymentId = next();
     else if (flag === "--recall-id") args.recallId = next();
     else if (flag === "--max-fee-per-leg") args.maxFeePerLeg = next();
+    else if (flag === "--fee-floor-ratio-bps") args.feeFloorRatioBps = next();
     else if (flag === "--float-headroom") args.floatHeadroom = next();
     else if (flag === "--lane-nonce") args.laneNonce = next();
     else if (flag === "--observability-url") args.observabilityUrl = next();
@@ -364,12 +378,32 @@ export function assertVenuePostage(reading) {
   return raw;
 }
 
-export function selectRecallDispatchFee({ quote, maximum, available }) {
+export function assertRecallFeeFloorRatioBps(value) {
+  const floorBps = positiveBigInt(value, "--fee-floor-ratio-bps");
+  if (floorBps < MIN_RECALL_FEE_FLOOR_RATIO_BPS) {
+    throw new Error(
+      `--fee-floor-ratio-bps ${floorBps} is below the hard minimum ${MIN_RECALL_FEE_FLOOR_RATIO_BPS}.`,
+    );
+  }
+  return floorBps;
+}
+
+export function selectRecallDispatchFee({
+  quote,
+  maximum,
+  available,
+  floorBps = DEFAULT_RECALL_FEE_FLOOR_RATIO_BPS,
+}) {
   const quoted = positiveBigInt(quote, "recall remote fee quote");
   const cap = assertFeeCeiling(maximum);
+  const configuredFloorBps = assertRecallFeeFloorRatioBps(floorBps);
   const doubled = quoted * 2n;
   const feeAmount = doubled > cap ? cap : doubled;
-  if (feeAmount * 2n < quoted * 3n) throw new Error("Recall fee ceiling is below the required 1.5× fresh quote floor.");
+  if (feeAmount * 10_000n < quoted * configuredFloorBps) {
+    throw new Error(
+      `Recall fee ceiling is below the configured ${formatRatioBps(configuredFloorBps)}× fresh quote floor (${configuredFloorBps} bps).`,
+    );
+  }
   if (BigInt(available) < feeAmount) throw new Error("Remote asset-22 balance cannot fund the freshly priced recall fee budget.");
   return {
     feeAmount,
@@ -534,7 +568,7 @@ function usage() {
     "  node scripts/ops/pool-venue-dispatch.mjs cancel --profile mainnet --request-id 0x... --deployment-id 1 --observability-url URL --expected-signer 0x... [--commit --use-kms]",
     "  node scripts/ops/pool-venue-dispatch.mjs cancel --profile mainnet --request-id 0x... --recall-id 1 --observability-url URL --expected-signer 0x... [--commit --use-kms]",
     "  node scripts/ops/pool-venue-dispatch.mjs stage-dispatch --profile mainnet --request-id 0x... --deployment-id 1 --observability-url URL --expected-signer 0x... [--max-fee-per-leg 40000] [--float-headroom 50000] [--commit --use-kms]",
-    "  node scripts/ops/pool-venue-dispatch.mjs stage-recall --profile mainnet --request-id 0x... --recall-id 1 --observability-url URL --expected-signer 0x... [--max-fee-per-leg 40000] [--commit --use-kms]",
+    "  node scripts/ops/pool-venue-dispatch.mjs stage-recall --profile mainnet --request-id 0x... --recall-id 1 --observability-url URL --expected-signer 0x... [--max-fee-per-leg 80000] [--fee-floor-ratio-bps 15000] [--commit --use-kms]",
     "",
     "Dry-run is the default. Writes require both --commit and --use-kms. Raw keys are never accepted.",
   ].join("\n");
@@ -551,6 +585,12 @@ function positiveBigInt(value, label) {
   const result = BigInt(value);
   if (result <= 0n) throw new Error(`${label} must be positive.`);
   return result;
+}
+
+function formatRatioBps(value) {
+  const whole = value / 10_000n;
+  const fractional = (value % 10_000n).toString().padStart(4, "0").replace(/0+$/u, "");
+  return fractional ? `${whole}.${fractional}` : whole.toString();
 }
 
 function bigintJson(_key, value) {
@@ -878,10 +918,17 @@ class PoolLaneRecallRuntime extends BankXcmV22Runtime {
   // converted-account float is COMMINGLED capital — operating float plus pool
   // float — never a fee kitty; sweeping it both over-pays fees and trips the
   // float<=ceiling assert. Price the leg like deposit_sell instead: fresh
-  // remote quote ×2, capped by the staged ceiling, 1.5× floor, affordability
-  // against the live float. dispatch() consults the DISPATCHER's resolveFee,
+  // remote quote ×2, capped by the staged ceiling, configurable guarded floor,
+  // affordability against the live float. dispatch() consults the
+  // DISPATCHER's resolveFee,
   // so the override must wrap the created dispatcher — a method on this class
   // is never reached (the #1128 dead-override lesson).
+  constructor(options) {
+    const { feeFloorRatioBps = DEFAULT_RECALL_FEE_FLOOR_RATIO_BPS, ...runtimeOptions } = options;
+    super(runtimeOptions);
+    this.feeFloorRatioBps = assertRecallFeeFloorRatioBps(feeFloorRatioBps);
+  }
+
   createDispatcher() {
     const dispatcher = super.createDispatcher();
     const base = dispatcher.resolveFee.bind(dispatcher);
@@ -893,7 +940,12 @@ class PoolLaneRecallRuntime extends BankXcmV22Runtime {
       if (quote?.liveState !== true) throw new Error("Recall withdraw-sell fee quote is not marked liveState:true.");
       const available = await runtime.readRemoteOperatingFloat({ requestId: input.requestId });
       if (available?.liveState !== true) throw new Error("Remote asset-22 balance is not marked liveState:true.");
-      const selected = selectRecallDispatchFee({ quote: quote.amount, maximum, available: available.assets });
+      const selected = selectRecallDispatchFee({
+        quote: quote.amount,
+        maximum,
+        available: available.assets,
+        floorBps: runtime.feeFloorRatioBps,
+      });
       return {
         ...selected,
         remoteAsOf: quote.asOf,
@@ -950,6 +1002,7 @@ function makeRuntime({ provider, signer, wrapperAddress, laneAddress, convertedA
     adapterAddress: laneAddress,
     assetHubSubstrateEndpoint: args.assetHubWs,
     hydrationSubstrateEndpoint: args.hydrationWs,
+    ...(recall ? { feeFloorRatioBps: args.feeFloorRatioBps } : {}),
   });
   return { runtime, dispatcher: runtime.createDispatcher(), balanceReader, targets };
 }
@@ -965,6 +1018,7 @@ export async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   if (args.help) return console.log(usage());
   if (!['status', 'cancel', 'stage-dispatch', 'stage-recall'].includes(args.command)) throw new Error(`${usage()}\n\nA subcommand is required.`);
+  assertRecallFeeFloorRatioBps(args.feeFloorRatioBps);
   if (args.profile !== "mainnet") throw new Error("--profile mainnet is mandatory.");
   if (!args.requestId) throw new Error("--request-id is mandatory.");
   const isRecall = args.command === "stage-recall" || Boolean(args.recallId);
@@ -1195,7 +1249,7 @@ export async function main(argv = process.argv.slice(2)) {
           laneRequestId: predictedLaneRequestId,
           shares: derived.shares,
           // The stateful preview spends the authorized ceiling. The real send
-          // is repriced JIT to min(quote×2, ceiling) with a 1.5× floor.
+          // is repriced JIT to min(quote×2, ceiling) with the configured floor.
           feeAmount: maximum,
         });
         return { phase, capturedAt: new Date().toISOString(), derived, quote, stageData, stageDecoded: stageCall.decoded, predictedLaneRequestId, dryRun };
