@@ -23,6 +23,7 @@ const BASIS_POINTS_SCALE = 10_000n;
 const MAX_REBASE_CORROBORATION_BPS = 2n;
 const PAGE_SIZE = 250;
 const MAX_RECORDS = 10_000;
+const FLOW_JOIN_BATCH_SIZE = 64;
 const SETTLED_SESSION_STATUSES = new Set(["resolved", "rejected", "closed"]);
 const ACTIVE_ESCROW_STATES = new Set([1, 2, 3, 4, 5]);
 const OWNER_RECORDS = Object.freeze({
@@ -375,23 +376,23 @@ export class TransparencyService {
       const settledByJob = dedupeSettledSessions(sessions);
       const definitions = new Map();
       const chainJobs = new Map();
-      for (const session of settledByJob.values()) {
-        try {
-          chainJobs.set(
-            settlementJobKey(session),
-            await this.gateway.getJob(session.chainJobId ?? session.jobId)
-          );
-        } catch {
-          // Attribution becomes unknown below. A partial sum would understate
-          // operator-self-paid revenue and is less honest than no figure.
-          chainJobs.set(settlementJobKey(session), undefined);
-        }
-        let fundedJob;
-        try {
-          fundedJob = await this.stateStore.getFundedJob?.(session.jobId);
-        } catch {
-          // A missing stats join is represented as unclassified, never guessed.
-        }
+      const settledSessions = [...settledByJob.values()];
+      const [chainJobResults, fundedJobs] = await Promise.all([
+        readChainJobs(this.gateway, settledSessions),
+        readFundedJobs(this.stateStore, settledSessions)
+      ]);
+      for (let index = 0; index < settledSessions.length; index += 1) {
+        const session = settledSessions[index];
+        // Attribution becomes unknown when a chain read fails. A partial sum
+        // would understate operator-self-paid revenue and is less honest than
+        // no figure.
+        chainJobs.set(
+          settlementJobKey(session),
+          chainJobResults[index]?.status === "fulfilled"
+            ? chainJobResults[index].value
+            : undefined
+        );
+        const fundedJob = fundedJobs[index];
         if (fundedJob?.sourceType) {
           definitions.set(session.jobId, { source: { type: fundedJob.sourceType } });
           continue;
@@ -948,6 +949,48 @@ async function collectPaged(readPage) {
     if (page.length < PAGE_SIZE) return records;
   }
   throw new Error(`stats source exceeded the ${MAX_RECORDS} record transparency bound`);
+}
+
+async function readChainJobs(gateway, sessions) {
+  const jobIds = sessions.map((session) => session.chainJobId ?? session.jobId);
+  if (typeof gateway?.getJobs === "function") {
+    const results = await gateway.getJobs(jobIds, { batchSize: FLOW_JOIN_BATCH_SIZE });
+    if (!Array.isArray(results) || results.length !== jobIds.length) {
+      throw new Error("flow chain-job batch returned an invalid result count");
+    }
+    return results;
+  }
+  return allSettledInBatches(jobIds, FLOW_JOIN_BATCH_SIZE, (jobId) => gateway.getJob(jobId));
+}
+
+async function readFundedJobs(stateStore, sessions) {
+  const jobIds = sessions.map((session) => session.jobId);
+  if (typeof stateStore?.getFundedJobs === "function") {
+    try {
+      const results = await stateStore.getFundedJobs(jobIds);
+      if (!Array.isArray(results) || results.length !== jobIds.length) {
+        throw new Error("flow funded-job batch returned an invalid result count");
+      }
+      return results;
+    } catch {
+      // A failed stats join is represented as unclassified, never guessed.
+      return jobIds.map(() => undefined);
+    }
+  }
+  const results = await allSettledInBatches(
+    jobIds,
+    FLOW_JOIN_BATCH_SIZE,
+    (jobId) => stateStore.getFundedJob?.(jobId)
+  );
+  return results.map((result) => result.status === "fulfilled" ? result.value : undefined);
+}
+
+async function allSettledInBatches(items, batchSize, loader) {
+  const results = [];
+  for (let offset = 0; offset < items.length; offset += batchSize) {
+    results.push(...await Promise.allSettled(items.slice(offset, offset + batchSize).map(loader)));
+  }
+  return results;
 }
 
 function bankReading(reading, expectedSource, { source, proof, fallbackReadAtMs }) {

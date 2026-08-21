@@ -71,6 +71,7 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 const UINT64_MAX = (1n << 64n) - 1n;
 const UINT256_MAX = (1n << 256n) - 1n;
+const DEFAULT_READ_BATCH_SIZE = 64;
 const ESCROW_JOB_STATE_REJECTED = 4;
 const ESCROW_JOB_STATE_CLOSED = 6;
 const RECOVERY_LOG_CHUNK_SIZE = 50_000;
@@ -2941,6 +2942,24 @@ export class BlockchainGateway {
     return this.withGatewayError("getJob", async () => {
       return this.publicEscrowJob(await this.readEscrowJob(jobId));
     });
+  }
+
+  /**
+   * Read independent jobs in bounded waves. JsonRpcProvider coalesces each
+   * wave into bounded JSON-RPC batches, while allSettled preserves the flow
+   * feed's per-job unknown semantics when one contract read fails.
+   */
+  async getJobs(jobIds, { batchSize = DEFAULT_READ_BATCH_SIZE } = {}) {
+    const normalizedBatchSize = Number.isInteger(batchSize) && batchSize > 0
+      ? batchSize
+      : DEFAULT_READ_BATCH_SIZE;
+    const results = [];
+    for (let offset = 0; offset < jobIds.length; offset += normalizedBatchSize) {
+      results.push(...await Promise.allSettled(
+        jobIds.slice(offset, offset + normalizedBatchSize).map((jobId) => this.getJob(jobId))
+      ));
+    }
+    return results;
   }
 
   async getReputation(wallet) {

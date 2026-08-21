@@ -11,6 +11,7 @@ const DEFAULT_RPC_FAILOVER_STALL_MS = 250;
 const DEFAULT_RPC_REQUEST_TIMEOUT_MS = 750;
 const DEFAULT_RPC_WRITE_REQUEST_TIMEOUT_MS = 15_000;
 const MINIMUM_RPC_WRITE_REQUEST_TIMEOUT_MS = 15_000;
+const DEFAULT_RPC_BATCH_MAX_COUNT = 64;
 const MAX_PROVIDER_HISTORY = 256;
 const RPC_PROVIDER_LABEL = Symbol("averray.rpcProviderLabel");
 const RETRYABLE_BROADCAST_ERROR_CODES = new Set([
@@ -115,7 +116,9 @@ export function describeRpcProvider(provider) {
 function createLabeledJsonRpcProvider(url, requestTimeoutMs) {
   const request = new FetchRequest(url);
   request.timeout = requestTimeoutMs;
-  const provider = new JsonRpcProvider(request);
+  const provider = new JsonRpcProvider(request, undefined, {
+    batchMaxCount: DEFAULT_RPC_BATCH_MAX_COUNT
+  });
   Object.defineProperty(provider, RPC_PROVIDER_LABEL, {
     value: safeRpcOrigin(url),
     enumerable: false
