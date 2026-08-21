@@ -149,6 +149,7 @@ export const CREDIT_BOOK_ABI = [
 ];
 
 export const ESCROW_CORE_ABI = [
+  "error InvalidState()",
   "function accounts() view returns (address)",
   "function treasuryAccount() view returns (address)",
   "function DISPUTE_WINDOW() view returns (uint256)",

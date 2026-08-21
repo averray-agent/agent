@@ -528,7 +528,7 @@ export async function createPlatformRuntime() {
   const verifierService = initStep(
     "init-verifier-service",
     logger,
-    () => new VerifierService(platformService, stateStore, gateway)
+    () => new VerifierService(platformService, stateStore, gateway, undefined, { eventBus, logger })
   );
   const verificationPaymentGate = initStep(
     "init-verification-payment-gate",

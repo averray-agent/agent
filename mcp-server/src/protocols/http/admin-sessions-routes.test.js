@@ -104,6 +104,36 @@ test("GET /admin/sessions preserves limit query handling", async () => {
   assert.equal(response.body.limit, 125);
 });
 
+test("GET /admin/sessions lists parked chain divergence with its observed-state reason", async () => {
+  const divergence = {
+    reason: "chain_state_diverged",
+    expectedState: 3,
+    expectedStateLabel: "submitted",
+    observedState: 2,
+    observedStateLabel: "claimed",
+    stage: "pre_resolve",
+    observedAt: "2026-08-21T18:42:00.000Z"
+  };
+  const { response, route } = makeHarness({
+    recentSessions: [{
+      sessionId: "worker-canary-1787321274237:0x189684bb",
+      jobId: "worker-canary-1787321274237",
+      status: "chain_state_diverged",
+      chainStateDivergence: divergence
+    }]
+  });
+
+  await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/admin/sessions"),
+    pathname: "/admin/sessions"
+  });
+
+  assert.equal(response.body.sessions[0].status, "chain_state_diverged");
+  assert.deepEqual(response.body.sessions[0].chainStateDivergence, divergence);
+});
+
 test("GET /admin/sessions scopes to job history when jobId is present", async () => {
   const { calls, response, route } = makeHarness();
 

@@ -15,13 +15,14 @@ import {
 const EXPECTED_TRANSITIONS = {
   "__new__": ["claimed"],
   claimed: ["closed", "expired", "submitted", "timed_out"],
-  submitted: ["closed", "disputed", "rejected", "resolved", "timed_out"],
+  submitted: ["chain_state_diverged", "closed", "disputed", "rejected", "resolved", "timed_out"],
   disputed: ["closed", "rejected", "resolved"],
   resolved: [],
   rejected: [],
   closed: [],
   expired: [],
-  timed_out: []
+  timed_out: [],
+  chain_state_diverged: []
 };
 
 const PUBLIC_STATUSES = Object.keys(EXPECTED_TRANSITIONS).filter((status) => status !== "__new__");
@@ -30,7 +31,14 @@ test("describeSessionStatus exposes the verification phase and allowed transitio
   const submitted = describeSessionStatus("submitted");
   assert.equal(submitted.phase, "verification");
   assert.equal(submitted.terminal, false);
-  assert.deepEqual(submitted.allowedTransitions.sort(), ["closed", "disputed", "rejected", "resolved", "timed_out"]);
+  assert.deepEqual(submitted.allowedTransitions.sort(), [
+    "chain_state_diverged",
+    "closed",
+    "disputed",
+    "rejected",
+    "resolved",
+    "timed_out"
+  ]);
 });
 
 test("buildSessionLifecycle derives operator-facing flags from session state", () => {
@@ -55,6 +63,27 @@ test("getSessionStateMachineDefinition returns stable public statuses", () => {
   assert.ok(statuses.some((entry) => entry.status === "claimed"));
   assert.ok(statuses.some((entry) => entry.status === "resolved" && entry.terminal === true));
   assert.ok(!statuses.some((entry) => entry.status === "__new__"));
+});
+
+test("chain_state_diverged is terminal operator attention with its own timestamp", () => {
+  const submitted = transitionSession(
+    transitionSession({ sessionId: "diverged-session" }, "claimed", {
+      reason: "job_claimed",
+      timestamp: "2026-08-21T18:00:00.000Z"
+    }),
+    "submitted",
+    { reason: "work_submitted", timestamp: "2026-08-21T18:01:00.000Z" }
+  );
+  const parked = transitionSession(submitted, "chain_state_diverged", {
+    reason: "chain_state_diverged",
+    timestamp: "2026-08-21T18:02:00.000Z"
+  });
+  const lifecycle = buildSessionLifecycle(parked);
+
+  assert.equal(lifecycle.terminal, true);
+  assert.equal(lifecycle.needsOperatorAttention, true);
+  assert.equal(lifecycle.finalOutcome, "operator_attention");
+  assert.equal(lifecycle.timestamps.chainStateDivergedAt, "2026-08-21T18:02:00.000Z");
 });
 
 test("transitionSession rejects duplicate and illegal transitions with operator context", () => {

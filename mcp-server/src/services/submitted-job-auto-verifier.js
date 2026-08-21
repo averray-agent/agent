@@ -182,6 +182,7 @@ export class SubmittedJobAutoVerifierService {
       scanned: 0,
       candidateCount: 0,
       verifiedCount: 0,
+      parkedCount: 0,
       approvedCount: 0,
       rejectedCount: 0,
       deferredCount: 0,
@@ -364,6 +365,10 @@ export class SubmittedJobAutoVerifierService {
   recordVerificationSuccess(candidate, result, summary = undefined, { late = false } = {}) {
     const { sessionId, jobId, mode } = candidate;
     const outcome = result?.outcome;
+    if (outcome === "chain_state_diverged") {
+      if (summary) summary.parkedCount += 1;
+      return;
+    }
     if (summary) {
       summary.verifiedCount += 1;
       if (outcome === "approved") summary.approvedCount += 1;

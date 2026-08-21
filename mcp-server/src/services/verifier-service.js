@@ -13,6 +13,8 @@ import {
   requireJobSnapshot
 } from "../core/job-snapshot.js";
 import { buildPlatformFaultRemediationMarker } from "../core/platform-fault-remediation.js";
+import { transitionSession } from "../core/session-state-machine.js";
+import { decodeEscrowCoreRevert } from "../blockchain/escrow-core-errors.js";
 import { PlatformFaultRemediationService } from "./platform-fault-remediation-service.js";
 
 // EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
@@ -21,6 +23,17 @@ import { PlatformFaultRemediationService } from "./platform-fault-remediation-se
 // make verifySubmission idempotent across a post-payout persistence failure.
 const ESCROW_JOB_STATE_REJECTED = 4;
 const ESCROW_JOB_STATE_CLOSED = 6;
+export const ESCROW_JOB_STATE_SUBMITTED = 3;
+export const CHAIN_STATE_DIVERGED_STATUS = "chain_state_diverged";
+const ESCROW_JOB_STATE_LABELS = Object.freeze([
+  "none",
+  "open",
+  "claimed",
+  "submitted",
+  "rejected",
+  "disputed",
+  "closed"
+]);
 
 export const POSTER_REVIEW_HANDLER = "poster_review";
 export const POSTER_REVIEW_HANDLER_VERSION = 1;
@@ -38,6 +51,8 @@ export class VerifierService {
     this.blockchainGateway = blockchainGateway;
     this.registry = registry;
     this.creditBookKeeper = undefined;
+    this.eventBus = options.eventBus ?? platformService?.eventBus;
+    this.logger = options.logger ?? console;
     this.platformFaultRemediationService = options.platformFaultRemediationService
       ?? new PlatformFaultRemediationService({
         stateStore,
@@ -54,7 +69,10 @@ export class VerifierService {
   async verifySubmission({ sessionId, evidence = undefined, metadataURI = "ipfs://pending-badge" }) {
     const session = await this.platformService.resumeSession(sessionId);
     assertSessionCanReceiveVerification(session);
-    const { job, snapshot } = await assertJobSnapshotIntegrity(session, this.blockchainGateway);
+    const { job, snapshot, liveJob } = await assertJobSnapshotIntegrity(
+      session,
+      this.blockchainGateway
+    );
     const chainJobId = session.chainJobId ?? session.jobId;
     const verificationInput = this.resolveVerificationInput(session, evidence);
     const validatedVerificationInput = this.validateVerificationInput(job, verificationInput, {
@@ -122,26 +140,59 @@ export class VerifierService {
     // converge to resolved/rejected without the evidence.
     let payoutTx;
     const settlementOutcome = verdict.outcome === "approved" || verdict.outcome === "rejected";
-    const alreadySettled = settlementOutcome && await this.onChainAlreadySettled(chainJobId);
-    if (settlementOutcome && alreadySettled && this.blockchainGateway?.isEnabled()) {
-      if (typeof this.blockchainGateway.recoverSinglePayoutReceipt !== "function") {
-        throw new Error(
-          `Job ${chainJobId} is already settled on-chain, but the gateway cannot reconstruct its receipt.`
-        );
+    if (settlementOutcome && this.blockchainGateway?.isEnabled()) {
+      const observedState = normalizeEscrowJobState(liveJob?.state);
+      const alreadySettled = observedState === ESCROW_JOB_STATE_REJECTED
+        || observedState === ESCROW_JOB_STATE_CLOSED;
+      if (alreadySettled) {
+        if (typeof this.blockchainGateway.recoverSinglePayoutReceipt !== "function") {
+          throw new Error(
+            `Job ${chainJobId} is already settled on-chain, but the gateway cannot reconstruct its receipt.`
+          );
+        }
+        payoutTx = await this.blockchainGateway.recoverSinglePayoutReceipt(chainJobId, {
+          outcome: verdict.outcome,
+          worker: session.wallet,
+          submittedAt: session.submittedAt
+        });
+      } else if (observedState !== ESCROW_JOB_STATE_SUBMITTED) {
+        return this.parkChainStateDivergence({
+          session,
+          chainJobId,
+          observedState,
+          stage: "pre_resolve"
+        });
+      } else if (this.blockchainGateway.resolveSinglePayout) {
+        try {
+          payoutTx = await this.blockchainGateway.resolveSinglePayout(
+            chainJobId,
+            verdict.outcome === "approved",
+            verdict.reasonCode,
+            metadataURI,
+            reasoningHash
+          );
+        } catch (error) {
+          const invalidState = classifyEscrowInvalidState(error);
+          if (!invalidState) throw error;
+          let racedJob;
+          try {
+            racedJob = await this.blockchainGateway.getJob(chainJobId);
+          } catch (readError) {
+            this.logger.warn?.(
+              { sessionId, jobId: chainJobId, err: readError },
+              "verifier.chain_state_reread_failed"
+            );
+          }
+          return this.parkChainStateDivergence({
+            session,
+            chainJobId,
+            observedState: normalizeEscrowJobState(racedJob?.state),
+            stage: "resolve_invalid_state",
+            customError: invalidState.name,
+            selector: invalidState.selector
+          });
+        }
       }
-      payoutTx = await this.blockchainGateway.recoverSinglePayoutReceipt(chainJobId, {
-        outcome: verdict.outcome,
-        worker: session.wallet,
-        submittedAt: session.submittedAt
-      });
-    } else if (settlementOutcome && !alreadySettled && this.blockchainGateway?.isEnabled() && this.blockchainGateway.resolveSinglePayout) {
-      payoutTx = await this.blockchainGateway.resolveSinglePayout(
-        chainJobId,
-        verdict.outcome === "approved",
-        verdict.reasonCode,
-        metadataURI,
-        reasoningHash
-      );
     }
     this.assertTerminalChainEvidence({ chainJobId, verdict, payoutTx });
 
@@ -267,21 +318,59 @@ export class VerifierService {
     }
   }
 
-  // True if the on-chain job has already been resolved by a prior settle
-  // (approved → Closed, rejected → Rejected), i.e. resolveSinglePayout must not
-  // run again. Any read failure returns false (we cannot confirm), so the caller
-  // falls back to attempting the settle rather than silently skipping a real one.
-  async onChainAlreadySettled(jobId) {
-    try {
-      if (!this.blockchainGateway?.isEnabled?.() || typeof this.blockchainGateway.getJob !== "function") {
-        return false;
-      }
-      const job = await this.blockchainGateway.getJob(jobId);
-      const state = Number(job?.state);
-      return state === ESCROW_JOB_STATE_REJECTED || state === ESCROW_JOB_STATE_CLOSED;
-    } catch {
-      return false;
+  async parkChainStateDivergence({
+    session,
+    chainJobId,
+    observedState,
+    stage,
+    customError = undefined,
+    selector = undefined
+  }) {
+    const current = await this.stateStore.getSession(session.sessionId) ?? session;
+    if (current.status === CHAIN_STATE_DIVERGED_STATUS) {
+      return chainStateDivergenceResult(current);
     }
+    const parkedAt = new Date().toISOString();
+    const divergence = {
+      reason: CHAIN_STATE_DIVERGED_STATUS,
+      expectedState: ESCROW_JOB_STATE_SUBMITTED,
+      expectedStateLabel: escrowJobStateLabel(ESCROW_JOB_STATE_SUBMITTED),
+      observedState,
+      observedStateLabel: escrowJobStateLabel(observedState),
+      stage,
+      ...(customError ? { customError } : {}),
+      ...(selector ? { selector } : {}),
+      observedAt: parkedAt
+    };
+    const transitioned = transitionSession(current, CHAIN_STATE_DIVERGED_STATUS, {
+      reason: CHAIN_STATE_DIVERGED_STATUS,
+      timestamp: parkedAt,
+      metadata: divergence
+    });
+    const parked = await this.stateStore.upsertSession({
+      ...transitioned,
+      chainJobId,
+      chainStateDivergence: divergence
+    });
+    this.eventBus?.publish?.({
+      id: `chain-state-diverged-${session.sessionId}-${Date.parse(parkedAt)}`,
+      topic: "verifier.chain_state_diverged",
+      source: "chain",
+      phase: "settlement",
+      severity: "warn",
+      sessionId: session.sessionId,
+      jobId: chainJobId,
+      wallet: session.wallet,
+      wallets: [session.wallet].filter(Boolean),
+      correlationId: session.sessionId,
+      timestamp: parkedAt,
+      data: divergence
+    });
+    this.logger.warn?.(
+      { sessionId: session.sessionId, jobId: chainJobId, ...divergence },
+      "verifier.chain_state_diverged"
+    );
+    return chainStateDivergenceResult(parked);
   }
 
   async replayVerification(sessionId) {
@@ -417,6 +506,38 @@ export class VerifierService {
     }
     return normalized;
   }
+}
+
+function normalizeEscrowJobState(value) {
+  const state = Number(value);
+  return Number.isInteger(state) && state >= 0 ? state : null;
+}
+
+function escrowJobStateLabel(state) {
+  return state === null
+    ? "unknown"
+    : ESCROW_JOB_STATE_LABELS[state] ?? `unknown_${state}`;
+}
+
+function classifyEscrowInvalidState(error) {
+  const decoded = decodeEscrowCoreRevert(error);
+  const name = error?.details?.customError ?? decoded?.name;
+  if (name !== "InvalidState") return undefined;
+  return {
+    name,
+    selector: error?.details?.selector ?? decoded?.selector
+  };
+}
+
+function chainStateDivergenceResult(session) {
+  return {
+    outcome: CHAIN_STATE_DIVERGED_STATUS,
+    reasonCode: "CHAIN_STATE_DIVERGED",
+    sessionId: session.sessionId,
+    jobId: session.chainJobId ?? session.jobId,
+    chainStateDivergence: session.chainStateDivergence,
+    session
+  };
 }
 
 function detectReplayDrift({ existing, verdict, auditFields }) {

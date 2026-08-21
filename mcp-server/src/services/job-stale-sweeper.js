@@ -3,7 +3,14 @@ import { GuardedSchedulerLoop, schedulerRunTimeoutMs, summaryErrorsOutcome } fro
 const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_MAX_JOBS_PER_RUN = 25;
 const VALID_SWEEP_ACTIONS = new Set(["mark_stale", "pause", "archive"]);
-const TERMINAL_SESSION_STATUSES = new Set(["resolved", "rejected", "closed", "expired", "timed_out"]);
+const TERMINAL_SESSION_STATUSES = new Set([
+  "resolved",
+  "rejected",
+  "closed",
+  "expired",
+  "timed_out",
+  "chain_state_diverged"
+]);
 
 export class JobStaleSweeperService {
   constructor(platformService, stateStore, eventBus = undefined, {

@@ -6,6 +6,9 @@ import {
   loadSubmittedJobAutoVerifierConfig
 } from "./submitted-job-auto-verifier.js";
 import { buildJobSnapshot } from "../core/job-snapshot.js";
+import { MemoryStateStore } from "../core/state-store.js";
+import { transitionSession } from "../core/session-state-machine.js";
+import { VerifierService } from "./verifier-service.js";
 
 const JOBS = {
   "bench-001": { id: "bench-001", verifierMode: "benchmark", verifierConfig: { handler: "benchmark" } },
@@ -69,6 +72,79 @@ async function waitFor(predicate, { timeoutMs = 500, pollMs = 5 } = {}) {
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
   assert.fail(`Condition was not met within ${timeoutMs}ms.`);
+}
+
+async function makeChainDivergenceHarness({
+  sessionId = "chain-diverged-session",
+  jobId = "chain-diverged-job"
+} = {}) {
+  const job = {
+    id: jobId,
+    verifierMode: "deterministic",
+    verifierConfig: {
+      version: 1,
+      handler: "deterministic",
+      expectedOutputs: ["complete"],
+      matchMode: "contains_all"
+    }
+  };
+  const stateStore = new MemoryStateStore();
+  const claimed = transitionSession({
+    sessionId,
+    jobId,
+    chainJobId: `0x${"19".repeat(32)}`,
+    wallet: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    submission: "complete",
+    jobSnapshot: buildJobSnapshot(job)
+  }, "claimed", { reason: "job_claimed" });
+  await stateStore.upsertSession(transitionSession(claimed, "submitted", {
+    reason: "work_submitted"
+  }));
+  const events = [];
+  const logs = [];
+  let resolveCalls = 0;
+  const eventBus = { publish(event) { events.push(event); } };
+  const logger = {
+    info() {},
+    warn(fields, message) { logs.push({ fields, message }); }
+  };
+  const platformService = {
+    async listRecentSessions(limit) { return stateStore.listRecentSessions(limit); },
+    async resumeSession(id) { return stateStore.getSession(id); },
+    async ingestVerification() { throw new Error("diverged chain state must not settle locally"); },
+    eventBus
+  };
+  const gateway = {
+    isEnabled: () => true,
+    getTreasuryPolicyStatus: async () => ({ paused: false, settlementReady: true }),
+    getJob: async () => ({ state: 2, specHash: buildJobSnapshot(job).specHash }),
+    resolveSinglePayout: async () => {
+      resolveCalls += 1;
+      throw new Error("resolveSinglePayout must not be attempted");
+    }
+  };
+  const verifier = new VerifierService(
+    platformService,
+    stateStore,
+    gateway,
+    undefined,
+    { eventBus, logger }
+  );
+  const scheduler = new SubmittedJobAutoVerifierService(
+    platformService,
+    verifier,
+    gateway,
+    eventBus,
+    { enabled: true, logger }
+  );
+  return {
+    events,
+    gateway,
+    get resolveCalls() { return resolveCalls; },
+    logs,
+    scheduler,
+    stateStore
+  };
 }
 
 test("verifies submitted benchmark and deterministic jobs and settles each", async () => {
@@ -138,6 +214,48 @@ test("is idempotent across ticks — a settled session is not re-verified", asyn
   assert.equal(first.verifiedCount, 1);
   assert.equal(second.verifiedCount, 0);
   assert.deepEqual(harness.verifyCalls, ["s-bench"]);
+});
+
+test("(a) non-Submitted chain state makes zero resolve attempts across N passes by name", async () => {
+  const h = await makeChainDivergenceHarness();
+
+  const first = await h.scheduler.runOnceAndSchedule();
+  const second = await h.scheduler.runOnceAndSchedule();
+  const third = await h.scheduler.runOnceAndSchedule();
+
+  assert.equal(h.resolveCalls, 0, "resolveSinglePayout call count remains zero across every pass");
+  assert.equal(first.parkedCount, 1);
+  assert.equal(first.verifiedCount, 0);
+  assert.equal(second.candidateCount, 0);
+  assert.equal(third.candidateCount, 0);
+  assert.equal((await h.scheduler.getStatus()).consecutiveSchedulerFailures, 0);
+});
+
+test("(e) wedged-canary backfill drains on the first sweep by name", async () => {
+  const sessionId = "worker-canary-1787321274237:0x189684bb";
+  const h = await makeChainDivergenceHarness({
+    sessionId,
+    jobId: "worker-canary-1787321274237"
+  });
+
+  const first = await h.scheduler.runOnceAndSchedule();
+  const second = await h.scheduler.runOnceAndSchedule();
+  const parked = await h.stateStore.getSession(sessionId);
+
+  assert.equal(first.parkedCount, 1);
+  assert.equal(first.errors.length, 0);
+  assert.equal(second.candidateCount, 0, "the first sweep drains the submitted queue entry");
+  assert.equal(h.resolveCalls, 0);
+  assert.equal(parked.status, "chain_state_diverged");
+  assert.equal(parked.chainStateDivergence.observedState, 2);
+  assert.equal(parked.chainStateDivergence.observedStateLabel, "claimed");
+  assert.equal(h.events.filter((event) => event.topic === "verifier.chain_state_diverged").length, 1);
+  assert.equal(
+    h.logs.filter((entry) => entry.message === "verifier.chain_state_diverged").length,
+    1
+  );
+  assert.deepEqual(h.scheduler.listPersistentSubmittedFailures(), []);
+  assert.equal((await h.scheduler.getStatus()).consecutiveSchedulerFailures, 0);
 });
 
 test("skips a submitted session that already carries a verification result", async () => {

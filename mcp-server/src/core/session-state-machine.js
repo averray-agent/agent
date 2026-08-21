@@ -3,13 +3,14 @@ import { ConflictError } from "./errors.js";
 const ALLOWED_TRANSITIONS = new Map([
   ["__new__", new Set(["claimed"])],
   ["claimed", new Set(["submitted", "expired", "timed_out", "closed"])],
-  ["submitted", new Set(["resolved", "rejected", "disputed", "timed_out", "closed"])],
+  ["submitted", new Set(["resolved", "rejected", "disputed", "timed_out", "closed", "chain_state_diverged"])],
   ["disputed", new Set(["resolved", "rejected", "closed"])],
   ["resolved", new Set()],
   ["rejected", new Set()],
   ["closed", new Set()],
   ["expired", new Set()],
-  ["timed_out", new Set()]
+  ["timed_out", new Set()],
+  ["chain_state_diverged", new Set()]
 ]);
 
 const STATUS_METADATA = {
@@ -66,6 +67,12 @@ const STATUS_METADATA = {
     phase: "terminal",
     terminal: true,
     outcome: "timed_out"
+  },
+  chain_state_diverged: {
+    label: "Chain state diverged",
+    phase: "terminal",
+    terminal: true,
+    outcome: "operator_attention"
   }
 };
 
@@ -92,7 +99,10 @@ export function transitionSession(session, nextStatus, { reason, timestamp = new
     disputedAt: nextStatus === "disputed" ? timestamp : session?.disputedAt,
     closedAt: nextStatus === "closed" ? timestamp : session?.closedAt,
     expiredAt: nextStatus === "expired" ? timestamp : session?.expiredAt,
-    timedOutAt: nextStatus === "timed_out" ? timestamp : session?.timedOutAt
+    timedOutAt: nextStatus === "timed_out" ? timestamp : session?.timedOutAt,
+    chainStateDivergedAt: nextStatus === "chain_state_diverged"
+      ? timestamp
+      : session?.chainStateDivergedAt
   });
 }
 
@@ -175,7 +185,7 @@ export function buildSessionLifecycle(session = {}, verification = undefined) {
     finalOutcome,
     canSubmit: status.status === "claimed",
     awaitingVerification: status.status === "submitted" || status.status === "disputed",
-    needsOperatorAttention: status.status === "disputed",
+    needsOperatorAttention: status.status === "disputed" || status.status === "chain_state_diverged",
     timestamps: compact({
       claimedAt: session?.claimedAt,
       submittedAt: session?.submittedAt,
@@ -185,6 +195,7 @@ export function buildSessionLifecycle(session = {}, verification = undefined) {
       closedAt: session?.closedAt,
       expiredAt: session?.expiredAt,
       timedOutAt: session?.timedOutAt,
+      chainStateDivergedAt: session?.chainStateDivergedAt,
       updatedAt: session?.updatedAt
     })
   };
