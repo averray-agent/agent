@@ -1,6 +1,6 @@
 # PACKET — L3 posting keeper (purpose-bound job-posting credit, flag-on ready)
 
-**Author:** Claude (architect) · **Ratifier:** Pascal · **Date:** 2026-08-21
+**Author:** Claude (architect) · **RATIFIED by Pascal 2026-08-21** — build dispatch-ready; activation stays cohort-gated
 **Implementer:** Codex · **Deliverable:** ONE PR (mcp-server). **Build now, ship dormant** —
 the on-chain flag stays OFF; activation is a separate multisig ceremony gated on the
 ratified sequencing law (L2 cohort with real repayment behavior FIRST).
