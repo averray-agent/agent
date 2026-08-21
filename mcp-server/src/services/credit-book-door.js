@@ -1,6 +1,8 @@
 import {
   Contract,
   getAddress,
+  keccak256,
+  toUtf8Bytes,
   verifyTypedData
 } from "ethers";
 
@@ -18,6 +20,15 @@ export const CREDIT_PLATFORM_SWEEP_DISCLOSURE =
 const CASH = 0;
 const POSTING = 1;
 const THIRTY_DAYS_SECONDS = 30 * 24 * 60 * 60;
+
+export function hashCreditBookTerms(terms) {
+  if (terms?.mode === "POSTING") {
+    return keccak256(toUtf8Bytes(canonicalizeContent(terms)));
+  }
+  // CASH consents predate the L3 keeper and remain content-addressed with the
+  // existing v1 helper. Changing them would invalidate stored L2 consent.
+  return hashCanonicalContent(terms);
+}
 
 function amount(raw) {
   return { raw: BigInt(raw).toString(), decimals: 6 };
@@ -228,7 +239,7 @@ export class CreditBookDoorService {
     if (!terms || typeof terms !== "object" || Array.isArray(terms)) {
       throw new ValidationError("terms must be the unmodified object returned by buildCreditTransactions.");
     }
-    const termsHash = hashCanonicalContent(terms).toLowerCase();
+    const termsHash = hashCreditBookTerms(terms).toLowerCase();
     if (bytes32(input.termsHash, "termsHash") !== termsHash) {
       throw new ConflictError("Consent terms no longer reproduce termsHash.", "credit_terms_hash_mismatch");
     }
@@ -282,7 +293,10 @@ export class CreditBookDoorService {
     return record;
   }
 
-  async originateConsentedLoan(termsHashInput) {
+  async originateConsentedLoan(termsHashInput, {
+    l3Keeper = false,
+    expectedPosterWallet = undefined
+  } = {}) {
     const consent = await this.getConsent(termsHashInput);
     const info = await this.getInfo(consent.wallet);
     if (!info.available) {
@@ -290,6 +304,12 @@ export class CreditBookDoorService {
     }
     this.#assertLiveTerms(info, consent.terms);
     const mode = consent.terms.mode === "CASH" ? CASH : POSTING;
+    if (mode === POSTING && !l3Keeper) {
+      throw new ConflictError(
+        "POSTING-mode originations must pass through the L3 posting keeper.",
+        "l3_keeper_required"
+      );
+    }
     const modeInfo = mode === CASH ? info.wallet.cash : info.wallet.posting;
     const amountRaw = BigInt(consent.terms.amountRaw);
     const activeLoan = modeInfo.activeLoan;
@@ -317,11 +337,17 @@ export class CreditBookDoorService {
 
     let draft;
     if (mode === POSTING) {
-      if (!info.schedule.l3Enabled) throw new ConflictError("L3 posting credit is disabled.", "credit_l3_disabled");
+      if (!info.schedule.l3Enabled) throw new ConflictError("L3 posting credit is disabled.", "l3_disabled");
       if (typeof this.gateway?.getPooledFundingAccount !== "function") {
         throw new ConfigError("L3 posting requires the configured external-poster identity.");
       }
       const livePosterWallet = getAddress(await this.gateway.getPooledFundingAccount());
+      if (expectedPosterWallet && livePosterWallet !== getAddress(expectedPosterWallet)) {
+        throw new ConflictError(
+          "The L3 keeper poster binding no longer matches its live chain read.",
+          "l3_poster_binding_changed"
+        );
+      }
       if (livePosterWallet !== getAddress(info.book.l3PosterWallet)) {
         throw new ConflictError(
           "CreditBook l3PosterWallet does not match the configured external-poster identity.",
@@ -329,17 +355,20 @@ export class CreditBookDoorService {
         );
       }
       draft = await this.externalPostingService.createDraft(
-        consent.wallet,
+        livePosterWallet,
         consent.terms.jobDefinition,
         { fundingRail: EXTERNAL_FUNDING_RAILS.DIRECT_HUB, escrowPoster: livePosterWallet }
       );
-      if (
-        draft.status !== "live"
-        && BigInt(draft.fundingRequirement?.posterReservedRaw ?? 0) !== amountRaw
-      ) {
+      if (BigInt(draft.fundingRequirement?.posterReservedRaw ?? 0) !== amountRaw) {
         throw new ConflictError(
           "The live poster reserve no longer matches the consented posting principal.",
           "credit_posting_quote_changed"
+        );
+      }
+      if (draft.status === "live" && !matchingActiveLoan) {
+        throw new ConflictError(
+          "The borrower job definition has already been funded by the L3 poster.",
+          "l3_job_already_funded"
         );
       }
     }
@@ -363,6 +392,25 @@ export class CreditBookDoorService {
     // Persist the chain origination before the separate L3 job-creation step.
     // A posting failure can then be retried without attempting a second draw.
     await this.stateStore.upsertContent(updated);
+
+    if (
+      mode === POSTING
+      && (
+        !originated?.recipient
+        || getAddress(originated.recipient) !== getAddress(info.book.l3PosterWallet)
+        || getAddress(originated.recipient) === consent.wallet
+      )
+    ) {
+      throw new ConflictError(
+        "CreditBook POSTING principal did not land at the live poster identity.",
+        "l3_principal_recipient_mismatch",
+        {
+          borrower: consent.wallet,
+          expectedRecipient: info.book.l3PosterWallet,
+          observedRecipient: originated?.recipient ?? null
+        }
+      );
+    }
 
     if (draft && !updated.origination.posting) {
       let posting;
@@ -394,7 +442,7 @@ export class CreditBookDoorService {
     }
     const modeInfo = mode === CASH ? info.wallet.cash : info.wallet.posting;
     if (mode === POSTING && !info.schedule.l3Enabled) {
-      throw new ConflictError("L3 posting credit is disabled.", "credit_l3_disabled");
+      throw new ConflictError("L3 posting credit is disabled.", "l3_disabled");
     }
     if (requested > BigInt(modeInfo.headroom.raw)) {
       throw new ConflictError("Requested amount exceeds current receipt-graph headroom.", "credit_limit_exceeded", {
@@ -422,7 +470,7 @@ export class CreditBookDoorService {
       platformSweepDisclosure: CREDIT_PLATFORM_SWEEP_DISCLOSURE,
       ...(mode === POSTING ? { jobDefinition: postingDefinition(input.jobDefinition) } : {})
     };
-    const termsHash = hashCanonicalContent(terms).toLowerCase();
+    const termsHash = hashCreditBookTerms(terms).toLowerCase();
     const sweepRequests = (input.sweepPlan ?? []).map((entry, index) => {
       const amountRaw = exactPositiveRaw(entry?.amount, `sweepPlan[${index}].amount`);
       const nonce = exactUint(entry?.nonce, `sweepPlan[${index}].nonce`);
@@ -538,6 +586,9 @@ export class CreditBookDoorService {
   }
 
   #assertLiveTerms(info, terms) {
+    if (terms.mode === "POSTING" && !info.schedule.l3Enabled) {
+      throw new ConflictError("L3 posting credit is disabled.", "l3_disabled");
+    }
     if (
       getAddress(terms.asset) !== getAddress(info.asset)
       || Number(terms.interestBps) !== Number(info.schedule.interestBps)

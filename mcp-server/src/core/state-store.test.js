@@ -184,6 +184,36 @@ test("MemoryStateStore keeps a durable, filterable platform-fault remediation qu
   );
 });
 
+test("MemoryStateStore keeps L3 posting requests and named refusals independently filterable", async () => {
+  const store = new MemoryStateStore();
+  await store.upsertL3PostingRequest({
+    id: "l3-old",
+    borrower: "0x1111111111111111111111111111111111111111",
+    status: "repaid",
+    createdAt: "2026-08-21T09:00:00.000Z"
+  });
+  await store.upsertL3PostingRequest({
+    id: "l3-active",
+    borrower: "0x2222222222222222222222222222222222222222",
+    status: "posted",
+    createdAt: "2026-08-21T10:00:00.000Z"
+  });
+  await store.appendL3PostingRefusal({
+    id: "refusal-1",
+    reason: "l3_disabled",
+    refusedAt: "2026-08-21T10:01:00.000Z"
+  });
+
+  assert.deepEqual(
+    (await store.listL3PostingRequests({ status: "posted" })).map((record) => record.id),
+    ["l3-active"]
+  );
+  assert.deepEqual(
+    (await store.listL3PostingRefusals({ reason: "l3_disabled" })).map((record) => record.id),
+    ["refusal-1"]
+  );
+});
+
 test("MemoryStateStore badge documents are write-once and cloned", async () => {
   const store = new MemoryStateStore();
   const original = { averray: { sessionId: "session-1", category: "security" } };

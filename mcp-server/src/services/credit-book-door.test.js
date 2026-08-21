@@ -70,7 +70,11 @@ function setup(overrides = {}) {
       getPooledFundingAccount: async () => POSTER,
       originateCreditBookLoan: async (input) => {
         calls.push(["originate", input]);
-        return { loanId: `0x${"77".repeat(32)}`, txHash: `0x${"88".repeat(32)}` };
+        return {
+          loanId: `0x${"77".repeat(32)}`,
+          recipient: input.mode === 1 ? POSTER : input.borrower,
+          txHash: `0x${"88".repeat(32)}`
+        };
       },
       createEscrowFundedExternalJob: async (draft) => {
         calls.push(["post", draft]);
@@ -187,7 +191,7 @@ test("posting consent refuses the launch flag and always marks the external job 
       consentNonce: "nonce0003",
       jobDefinition: { rewardAmount: "1", onboardingWaiverEligible: false }
     }),
-    (error) => error.code === "credit_l3_disabled"
+    (error) => error.code === "l3_disabled"
   );
 
   const enabled = setup({ snapshot: { l3Enabled: true } });
@@ -198,6 +202,46 @@ test("posting consent refuses the launch flag and always marks the external job 
     jobDefinition: { rewardAmount: "1" }
   });
   assert.equal(built.terms.jobDefinition.onboardingWaiverEligible, false);
+});
+
+test("posting consent storage re-reads the chain flag and refuses l3_disabled after a flag-off", async () => {
+  let enabled = true;
+  const h = setup({ snapshot: { l3Enabled: true } });
+  h.service.chainReader = {
+    readSnapshot: async () => snapshot({ l3Enabled: enabled })
+  };
+  const built = await h.service.buildTransactions(wallet.address, {
+    direction: "posting_consent",
+    amount: "1000000",
+    consentNonce: "nonce0006",
+    jobDefinition: { rewardAmount: "1" },
+    sweepPlan: [{
+      amount: "500000",
+      nonce: "12",
+      deadline: String(Math.floor(NOW.getTime() / 1_000) + 10 * 24 * 60 * 60)
+    }]
+  });
+  const authorization = built.repaymentAuthorizations[0];
+  enabled = false;
+
+  await assert.rejects(
+    h.service.storeConsent(wallet.address, {
+      terms: built.terms,
+      termsHash: built.termsHash,
+      consentSignature: await wallet.signMessage(built.consent.message),
+      repaymentAuthorizations: [{
+        amount: authorization.amount,
+        nonce: authorization.nonce,
+        deadline: authorization.deadline,
+        signature: await wallet.signTypedData(
+          authorization.typedData.domain,
+          authorization.typedData.types,
+          authorization.typedData.message
+        )
+      }]
+    }),
+    (error) => error.code === "l3_disabled"
+  );
 });
 
 test("direct CreditBook repayment is absent; borrowers must use the AAC sweep path", async () => {
@@ -258,7 +302,10 @@ test("enabled L3 sends the exact reserve through the configured external poster 
     }]
   });
 
-  const result = await service.originateConsentedLoan(built.termsHash);
+  const result = await service.originateConsentedLoan(built.termsHash, {
+    l3Keeper: true,
+    expectedPosterWallet: POSTER
+  });
 
   assert.equal(calls[0][0], "originate");
   assert.equal(calls[0][1].borrower, wallet.address);

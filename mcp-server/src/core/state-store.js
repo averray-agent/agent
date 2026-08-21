@@ -7,6 +7,8 @@ import {
   filterFinalFundedJobRecords,
   listCapabilityGrantRecords,
   listFundedJobRecords,
+  listL3PostingRefusalRecords,
+  listL3PostingRequestRecords,
   listPlatformFaultRemediationRecords,
   markXcmObservationFinalizeExhaustedRecord,
   markXcmObservationFailedRecord,
@@ -213,6 +215,8 @@ export class MemoryStateStore {
     this.fundedJobs = new Map();
     this.capabilityGrants = new Map();
     this.platformFaultRemediations = new Map();
+    this.l3PostingRequests = new Map();
+    this.l3PostingRefusals = new Map();
     this.eventLog = [];
     this.bankXcmLegDispatchEvidence = new Map();
     this.accountOverlays = new Map();
@@ -661,6 +665,32 @@ export class MemoryStateStore {
 
   async listPlatformFaultRemediations(options = {}) {
     return listPlatformFaultRemediationRecords(this.platformFaultRemediations.values(), options)
+      .map((record) => cloneJsonRecord(record));
+  }
+
+  async getL3PostingRequest(id) {
+    return cloneJsonRecord(this.l3PostingRequests.get(String(id ?? "")));
+  }
+
+  async upsertL3PostingRequest(record) {
+    const id = String(record?.id ?? "");
+    this.l3PostingRequests.set(id, cloneJsonRecord(record));
+    return cloneJsonRecord(record);
+  }
+
+  async listL3PostingRequests(options = {}) {
+    return listL3PostingRequestRecords(this.l3PostingRequests.values(), options)
+      .map((record) => cloneJsonRecord(record));
+  }
+
+  async appendL3PostingRefusal(record) {
+    const id = String(record?.id ?? "");
+    this.l3PostingRefusals.set(id, cloneJsonRecord(record));
+    return cloneJsonRecord(record);
+  }
+
+  async listL3PostingRefusals(options = {}) {
+    return listL3PostingRefusalRecords(this.l3PostingRefusals.values(), options)
       .map((record) => cloneJsonRecord(record));
   }
 
@@ -1574,6 +1604,65 @@ export class RedisStateStore {
     );
     const records = await Promise.all(ids.map((id) => this.getPlatformFaultRemediation(id)));
     return listPlatformFaultRemediationRecords(records.filter(Boolean), options);
+  }
+
+  async getL3PostingRequest(id) {
+    await this.connect();
+    const raw = await this.client.get(this.key("l3-posting-request", String(id ?? "")));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async upsertL3PostingRequest(record) {
+    await this.connect();
+    const id = String(record?.id ?? "");
+    await this.client.multi()
+      .set(this.key("l3-posting-request", id), JSON.stringify(record))
+      .zAdd(this.key("l3-posting-requests", "all"), {
+        score: timestampScore(record?.createdAt ?? record?.updatedAt ?? ""),
+        value: id
+      })
+      .exec();
+    return record;
+  }
+
+  async listL3PostingRequests(options = {}) {
+    await this.connect();
+    const ids = await this.client.zRange(
+      this.key("l3-posting-requests", "all"),
+      0,
+      -1,
+      { REV: true }
+    );
+    const records = await Promise.all(ids.map((id) => this.getL3PostingRequest(id)));
+    return listL3PostingRequestRecords(records.filter(Boolean), options);
+  }
+
+  async appendL3PostingRefusal(record) {
+    await this.connect();
+    const id = String(record?.id ?? "");
+    await this.client.multi()
+      .set(this.key("l3-posting-refusal", id), JSON.stringify(record))
+      .zAdd(this.key("l3-posting-refusals", "all"), {
+        score: timestampScore(record?.refusedAt ?? ""),
+        value: id
+      })
+      .exec();
+    return record;
+  }
+
+  async listL3PostingRefusals(options = {}) {
+    await this.connect();
+    const ids = await this.client.zRange(
+      this.key("l3-posting-refusals", "all"),
+      0,
+      -1,
+      { REV: true }
+    );
+    const records = await Promise.all(ids.map(async (id) => {
+      const raw = await this.client.get(this.key("l3-posting-refusal", id));
+      return raw ? JSON.parse(raw) : undefined;
+    }));
+    return listL3PostingRefusalRecords(records.filter(Boolean), options);
   }
 
   async getContent(hash) {
