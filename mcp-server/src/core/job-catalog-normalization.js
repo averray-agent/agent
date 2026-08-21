@@ -135,6 +135,7 @@ export function normalizeJobInput(input) {
     claimTtlSeconds,
     retryLimit,
     requiresSponsoredGas: designatedClaimants ? false : Boolean(input?.requiresSponsoredGas),
+    ...(input?.disposableProof === true ? { disposableProof: true } : {}),
     ...(!designatedClaimants && input?.onboardingWaiverEligible === true
       ? { onboardingWaiverEligible: true }
       : {}),
