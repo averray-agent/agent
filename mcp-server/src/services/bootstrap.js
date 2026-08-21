@@ -93,6 +93,7 @@ import { DepositPoolDoorService } from "./deposit-pool-door.js";
 import { CreditPoolDoorService } from "./credit-pool-door.js";
 import { CreditBookDoorService } from "./credit-book-door.js";
 import { CreditBookKeeperService } from "./credit-book-keeper.js";
+import { L3PostingKeeperService } from "./l3-posting-keeper.js";
 import { EvmReceiptGraphReader, ReceiptGraphUnderwriter } from "./receipt-graph-underwriter.js";
 import {
   UpstreamStatusPollerService,
@@ -590,6 +591,18 @@ export async function createPlatformRuntime() {
     })
   );
   verifierService.setCreditBookKeeper(creditBookKeeper);
+  const l3PostingKeeper = initStep("init-l3-posting-keeper", logger, () =>
+    new L3PostingKeeperService({
+      creditBookAddress: gateway.config.creditBookAddress,
+      provider: gateway.config.creditBookAddress ? gateway.provider : undefined,
+      creditBookDoor,
+      stateStore,
+      gateway,
+      eventBus,
+      logger
+    })
+  );
+  l3PostingKeeper.start();
   const x402PosterRampConfig = initStep(
     "load-x402-poster-ramp-config",
     logger,
@@ -954,6 +967,7 @@ export async function createPlatformRuntime() {
     creditPoolDoor,
     creditBookDoor,
     creditBookKeeper,
+    l3PostingKeeper,
     venueBalanceReader,
     xcmObservationRelay,
     upstreamStatusPoller,

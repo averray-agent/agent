@@ -1729,16 +1729,26 @@ export class BlockchainGateway {
       );
       const receipt = await tx.wait();
       let loanId;
+      let recipient;
       for (const log of receipt?.logs ?? []) {
         try {
           const parsed = this.creditBookContract.interface.parseLog(log);
-          if (parsed?.name === "LoanOriginated") loanId = String(parsed.args.loanId).toLowerCase();
+          if (parsed?.name === "LoanOriginated") {
+            loanId = String(parsed.args.loanId).toLowerCase();
+            recipient = getAddress(parsed.args.recipient);
+          }
         } catch {
           // Ignore unrelated receipt logs.
         }
       }
       if (!loanId) throw new ExternalServiceError("CreditBook origination receipt omitted LoanOriginated.");
-      return { loanId, txHash: tx.hash, blockNumber: receipt?.blockNumber, status: Number(receipt?.status ?? 0) };
+      return {
+        loanId,
+        recipient,
+        txHash: tx.hash,
+        blockNumber: receipt?.blockNumber,
+        status: Number(receipt?.status ?? 0)
+      };
     });
   }
 
