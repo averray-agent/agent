@@ -83,7 +83,21 @@ export class VerifierService {
       // returned through existing ledger authority in this flow. Chain-held
       // economics deliberately stay in EscrowCore: only the queued arbitrator
       // resolveDispute action may release them.
-      await this.platformService.returnPlatformFaultClaimEconomics?.(session, job);
+      try {
+        await this.platformService.returnPlatformFaultClaimEconomics?.(session, job);
+      } catch (error) {
+        // Economics return is recoverable through the arbitrator remediation.
+        // It must never prevent that remediation from being queued or wedge
+        // this submitted session in every scheduler pass.
+        try {
+          this.platformFaultRemediationService.logger?.warn?.(
+            { sessionId, jobId: session.jobId, err: error },
+            "platform_fault.claim_economics_return_failed"
+          );
+        } catch {
+          // A broken observer cannot become another scheduler-fatal path.
+        }
+      }
       platformFaultRemediation = await this.platformFaultRemediationService.escalate({
         session,
         verdict,
