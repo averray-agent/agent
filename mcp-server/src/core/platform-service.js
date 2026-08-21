@@ -1941,17 +1941,17 @@ export class PlatformService {
    * resolveDispute. This method never calls a gateway money mutation.
    */
   async returnPlatformFaultClaimEconomics(session, job) {
-    const custody = session?.claimStakeCustody
-      ?? (this.blockchainGateway?.isEnabled?.() ? "chain_escrow" : "backend_ledger");
-    if (custody === "chain_escrow") {
+    const custody = session?.claimStakeCustody;
+    // Only the claim-time marker may authorize a local ledger release. Legacy
+    // sessions predate that marker, and unknown future values must follow the
+    // conservative chain-escrow path rather than infer custody from today's
+    // runtime configuration.
+    if (custody !== "backend_ledger") {
       return {
         custody: "chain_escrow",
         returned: false,
         reason: "arbitrator_resolution_required"
       };
-    }
-    if (custody !== "backend_ledger") {
-      throw new ValidationError(`Unknown claim-stake custody ${JSON.stringify(custody)}.`);
     }
 
     const amount = session?.totalClaimLock === undefined

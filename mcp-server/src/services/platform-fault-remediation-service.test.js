@@ -11,6 +11,7 @@ import { PlatformService } from "../core/platform-service.js";
 import { MemoryStateStore } from "../core/state-store.js";
 import { transitionSession } from "../core/session-state-machine.js";
 import { PlatformFaultRemediationService } from "./platform-fault-remediation-service.js";
+import { SubmittedJobAutoVerifierService } from "./submitted-job-auto-verifier.js";
 import { VerificationIngestionService } from "./verification-ingestion-service.js";
 import { VerifierService } from "./verifier-service.js";
 
@@ -372,6 +373,121 @@ test("designated claim keeps its posted stake while platform_fault queues the sa
   assert.equal(record.workerInitiated, false);
   assert.equal(h.gateway.state, 5);
   assert.equal(h.gateway.calls.filter(([name]) => name === "resolveDispute").length, 0);
+});
+
+function installLegacyClaimEconomics(h, warnings = []) {
+  const legacySession = { ...h.session };
+  delete legacySession.claimStakeCustody;
+  const economicsContext = {
+    // Custody must be decided by the claim-time marker, never by the gateway's
+    // current availability. Any attempted local release makes the test red.
+    blockchainGateway: undefined,
+    accountMutationService: {
+      async releaseJobStake() {
+        throw new Error("legacy claim economics must remain in chain escrow");
+      }
+    }
+  };
+  h.verifier.platformService.returnPlatformFaultClaimEconomics =
+    PlatformService.prototype.returnPlatformFaultClaimEconomics.bind(economicsContext);
+  h.verifier.platformService.listRecentSessions = (limit) => h.stateStore.listRecentSessions(limit);
+  h.verifier.platformFaultRemediationService.logger = {
+    info() {},
+    warn(fields, message) { warnings.push({ fields, message }); }
+  };
+  return legacySession;
+}
+
+function assertLegacyCustodyDefaultsToChainEscrow(source) {
+  assert.doesNotMatch(
+    source,
+    /Unknown claim-stake custody/u,
+    "legacy or unknown custody must default to chain escrow without throwing"
+  );
+  assert.match(
+    source,
+    /if \(custody !== "backend_ledger"\) \{[\s\S]*?custody: "chain_escrow"/u,
+    "only an affirmative backend_ledger marker may release claim economics"
+  );
+}
+
+test("legacy session (no claimStakeCustody) resolving platform_fault completes the verdict and queues remediation", async () => {
+  const h = verifierHarness();
+  const warnings = [];
+  const legacySession = installLegacyClaimEconomics(h, warnings);
+  await h.stateStore.upsertSession(legacySession);
+
+  const result = await h.verifier.verifySubmission({ sessionId: legacySession.sessionId });
+  const stored = await h.stateStore.getSession(legacySession.sessionId);
+  const remediations = await h.stateStore.listPlatformFaultRemediations();
+
+  assert.equal(result.outcome, "platform_fault");
+  assert.equal(stored.status, "disputed");
+  assert.equal(remediations.length, 1);
+  assert.equal(remediations[0].workerConsequence, "none");
+  assert.equal(warnings.some((entry) => entry.message === "platform_fault.claim_economics_return_failed"), false);
+
+  // Mutation drill: putting the legacy throw back must make this named guard
+  // fail. Confirm the mutation applied before trusting the assertion.
+  const source = readFileSync(new URL("../core/platform-service.js", import.meta.url), "utf8");
+  assertLegacyCustodyDefaultsToChainEscrow(source);
+  const anchor = '    if (custody !== "backend_ledger") {';
+  const deliberatelyMutated = source.replace(
+    anchor,
+    `    if (custody === undefined) {\n      throw new ValidationError("Unknown claim-stake custody.");\n    }\n${anchor}`
+  );
+  assert.notEqual(deliberatelyMutated, source, "legacy custody mutation must apply");
+  assert.throws(
+    () => assertLegacyCustodyDefaultsToChainEscrow(deliberatelyMutated),
+    /legacy or unknown custody must default to chain escrow without throwing/u
+  );
+});
+
+test("platform_fault claim-economics failure logs and still queues remediation", async () => {
+  const h = verifierHarness();
+  const warnings = [];
+  h.verifier.platformService.returnPlatformFaultClaimEconomics = async () => {
+    throw new Error("unexpected ledger outage");
+  };
+  h.verifier.platformFaultRemediationService.logger = {
+    info() {},
+    warn(fields, message) { warnings.push({ fields, message }); }
+  };
+  await h.stateStore.upsertSession(h.session);
+
+  const result = await h.verifier.verifySubmission({ sessionId: h.session.sessionId });
+  const stored = await h.stateStore.getSession(h.session.sessionId);
+
+  assert.equal(result.outcome, "platform_fault");
+  assert.equal(stored.status, "disputed");
+  assert.equal((await h.stateStore.listPlatformFaultRemediations()).length, 1);
+  assert.ok(warnings.some((entry) =>
+    entry.message === "platform_fault.claim_economics_return_failed"
+      && entry.fields.err.message === "unexpected ledger outage"
+  ));
+});
+
+test("scheduler processes a legacy platform-fault session without recording a scheduler failure", async () => {
+  const h = verifierHarness();
+  const warnings = [];
+  const legacySession = installLegacyClaimEconomics(h, warnings);
+  await h.stateStore.upsertSession(legacySession);
+  const scheduler = new SubmittedJobAutoVerifierService(
+    h.verifier.platformService,
+    h.verifier,
+    undefined,
+    undefined,
+    { enabled: true, logger: { info() {}, warn() {} } }
+  );
+
+  const run = await scheduler.runOnceAndSchedule(new Date("2026-08-21T18:55:00.000Z"));
+  const status = await scheduler.getStatus();
+
+  assert.equal(run.verifiedCount, 1);
+  assert.equal(run.errors.length, 0);
+  assert.equal(status.consecutiveSchedulerFailures, 0);
+  assert.equal((await h.stateStore.getSession(legacySession.sessionId)).status, "disputed");
+  assert.equal(warnings.some((entry) => entry.message === "platform_fault.claim_economics_return_failed"), false);
 });
 
 function assertNoBackendArbitratorExecution(source) {
