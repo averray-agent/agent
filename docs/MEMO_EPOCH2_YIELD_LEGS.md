@@ -19,6 +19,22 @@ The floor is NOT the strategy doc's 50% template — `DepositPool.bufferFloor()`
 requires idle to cover the **largest single depositor's full position**, and
 `deploy` reverts `BufferFloorBreached` below it. Sizing is against that law.
 
+## AMENDED 2026-08-20 (ratified by Pascal) — contract reality check
+
+Ceremony-day reads exposed two constraints the original E2-2/E2-3 missed:
+`deployToVenue` REQUIRES `returnBy` ≤ 7 days (NOTICE_7_DAYS), and only ONE
+venue deployment may be active at a time. Therefore:
+- **E2-2 amended:** the epoch-2 leg is executed as recall-then-redeploy —
+  recall deployment #2 (the active 5.0) in full incl. observed yield, settle,
+  then ONE fresh `deployToVenue(9.5, +7d)` — landing the memo's 9.5 target in
+  a single deployment.
+- **E2-3 amended:** "standing position" = **rolled weekly** (the contract's
+  shape). Friction ~0.202%/round-trip amortizes to ~0.02%/wk against ~0.1%/wk
+  yield — still positive, thinner than the one-time math. Keeper automation of
+  the roll (recall/redeploy are onlyOperator = the backend's KMS signer) is a
+  deliberate FUTURE authority decision, not folded in here.
+E2-1 sizing, E2-4 exit checks, E2-5 yield routing unchanged.
+
 ## Decisions (stand unless overridden)
 
 **E2-1 — Size: 4.5 USDC, by formula.** Ceremony-day leg =
