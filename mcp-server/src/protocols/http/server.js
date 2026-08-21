@@ -21,6 +21,7 @@ import { createAdminCapabilityRoutes } from "./admin-capability-routes.js";
 import { createAdminCreditRoutes } from "./admin-credit-routes.js";
 import { createAdminGithubRoutes } from "./admin-github-routes.js";
 import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
+import { createAdminL3PostingRoutes } from "./admin-l3-posting-routes.js";
 import { createAdminPlatformFaultRemediationRoutes } from "./admin-platform-fault-remediation-routes.js";
 import { createAdminSessionsRoutes } from "./admin-sessions-routes.js";
 import { createAdminStatusRoutes } from "./admin-status-routes.js";
@@ -105,6 +106,7 @@ const {
   earningsDoor,
   creditPoolDoor,
   creditBookDoor,
+  l3PostingKeeper,
   transparencyService,
   stateStore,
   contentRecoveryLog,
@@ -473,6 +475,14 @@ const handleCreditPoolRoute = createCreditPoolRoutes({
 const handleAdminCreditRoute = createAdminCreditRoutes({
   authMiddleware,
   creditBookDoor,
+  readJsonBody,
+  respond
+});
+
+const handleAdminL3PostingRoute = createAdminL3PostingRoutes({
+  authMiddleware,
+  l3PostingKeeper,
+  parseLimit,
   readJsonBody,
   respond
 });
@@ -1012,6 +1022,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleAdminCreditRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleAdminL3PostingRoute({ request, response, url, pathname })) {
       return;
     }
 

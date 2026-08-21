@@ -2212,6 +2212,49 @@ test("account mutations convert display amounts before contract calls", async ()
   ]);
 });
 
+test("originateCreditBookLoan returns the chain-reported principal recipient", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const borrower = "0x3333333333333333333333333333333333333333";
+  const recipient = "0x4444444444444444444444444444444444444444";
+  const loanId = `0x${"77".repeat(32)}`;
+  const termsHash = `0x${"88".repeat(32)}`;
+  const txHash = `0x${"99".repeat(32)}`;
+  const contractInterface = new Interface([
+    "event LoanOriginated(bytes32 indexed loanId,address indexed borrower,uint8 indexed mode,uint256 principalRaw,address recipient,bytes32 termsHash)"
+  ]);
+  const encoded = contractInterface.encodeEventLog(
+    contractInterface.getEvent("LoanOriginated"),
+    [loanId, borrower, 1, 1_050_000n, recipient, termsHash]
+  );
+  gateway.signer = {};
+  gateway.creditBookContract = {
+    interface: contractInterface,
+    async originate() {
+      return {
+        hash: txHash,
+        async wait() {
+          return {
+            blockNumber: 123,
+            status: 1,
+            logs: [{ topics: encoded.topics, data: encoded.data }]
+          };
+        }
+      };
+    }
+  };
+
+  const result = await gateway.originateCreditBookLoan({
+    borrower,
+    amountRaw: "1050000",
+    mode: 1,
+    termsHash
+  });
+
+  assert.equal(result.loanId, loanId);
+  assert.equal(result.recipient, recipient);
+  assert.equal(result.txHash, txHash);
+});
+
 test("submitAuthorizedAgentTransfer preserves exact raw units and returns the confirmed AgentTransfer", async () => {
   const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
   const from = "0x3333333333333333333333333333333333333333";

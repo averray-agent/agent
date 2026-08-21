@@ -162,3 +162,38 @@ export function listPlatformFaultRemediationRecords(
     { limit, offset }
   );
 }
+
+export function listL3PostingRequestRecords(
+  records,
+  { borrower, status, limit = 100, offset = 0 } = {}
+) {
+  const normalizedBorrower = borrower ? String(borrower).toLowerCase() : undefined;
+  const normalizedStatus = status ? String(status).trim().toLowerCase() : undefined;
+  return sliceWindow(
+    [...records]
+      .filter(Boolean)
+      .filter((record) => !normalizedBorrower
+        || String(record.borrower ?? "").toLowerCase() === normalizedBorrower)
+      .filter((record) => !normalizedStatus
+        || String(record.status ?? "").toLowerCase() === normalizedStatus)
+      .sort((left, right) => String(right.createdAt ?? right.updatedAt ?? "")
+        .localeCompare(String(left.createdAt ?? left.updatedAt ?? ""))),
+    { limit, offset }
+  );
+}
+
+export function listL3PostingRefusalRecords(
+  records,
+  { reason, limit = 100, offset = 0 } = {}
+) {
+  const normalizedReason = reason ? String(reason).trim().toLowerCase() : undefined;
+  return sliceWindow(
+    [...records]
+      .filter(Boolean)
+      .filter((record) => !normalizedReason
+        || String(record.reason ?? "").toLowerCase() === normalizedReason)
+      .sort((left, right) => String(right.refusedAt ?? "")
+        .localeCompare(String(left.refusedAt ?? ""))),
+    { limit, offset }
+  );
+}
