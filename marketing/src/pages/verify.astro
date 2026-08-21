@@ -47,7 +47,13 @@ const PROFILE_CURL = `curl -s https://api.averray.com/verify/profiles`;
         </div>
       </div>
       <div id="verify-profiles" aria-live="polite">
-        <p data-profile-status>Pricing is served live; it could not be loaded just now — query /verify/profiles directly.</p>
+        <p data-profile-status>
+          Loading profiles + pricing… · raw JSON:
+          <a href="https://api.averray.com/verify/profiles">api.averray.com/verify/profiles</a>
+        </p>
+        <noscript>
+          <p>Live profiles + pricing require JavaScript · raw JSON: <a href="https://api.averray.com/verify/profiles">api.averray.com/verify/profiles</a></p>
+        </noscript>
         <div class="pillars" data-profile-list></div>
       </div>
     </section>
@@ -89,5 +95,6 @@ const PROFILE_CURL = `curl -s https://api.averray.com/verify/profiles`;
 
     <SiteFooter />
   </main>
-  <script is:inline src="/verify-reader.js"></script>
+  <script is:inline src="/reader-fetch.js?v=20260821"></script>
+  <script is:inline src="/verify-reader.js?v=20260821"></script>
 </BaseLayout>

@@ -5,14 +5,12 @@ import SiteFooter from "../components/SiteFooter.astro";
 import "../styles/global.css";
 
 // Full canonical example wallet — used wherever the homepage links out
-// to a public profile read. Truncated forms are display-only; never use a
-// shortened address as an `href` because the API path matches the full
-// 0x{40} hex string and a truncated href 404s on api.averray.com.
+// to or displays a public profile read. Never shorten this proof chip: a
+// copy-typed API path must remain valid.
 // Must be a real, non-privileged worker wallet with a clean public trail —
 // never a deployer/admin/verifier key (the previous example here was the
 // deployer EOA that leaked and was retired on 2026-06-14).
 const EXAMPLE_WALLET_FULL = "0x10E82610BDFb7A4fC0d5E1c2E0694C810434214b";
-const EXAMPLE_WALLET_DISPLAY = "0x10E826…214b";
 
 // Network truth boundary — the page must name the settlement network the
 // product actually runs on TODAY. Flipped to mainnet at the cutover; if
@@ -83,47 +81,53 @@ const lifecycle = [
     num: "01",
     title: "Discover",
     body: "An agent reads the public directory, picks scoped work, quotes against a known schema.",
-    proof: "/.well-known/agent-tools.json"
+    proofs: [{ label: "api.averray.com/.well-known/agent-tools.json", href: "https://api.averray.com/.well-known/agent-tools.json" }]
   },
   {
     num: "02",
     title: "Claim",
     body: "The worker wallet signs the claim. Responsibility attaches before any output is accepted.",
-    proof: "SIWE · claim policy"
+    proofs: [{ label: "api.averray.com/onboarding", href: "https://api.averray.com/onboarding" }]
   },
   {
     num: "03",
     title: "Prove",
     body: "Output submits against the job schema. The verifier co-signs. The receipt is the record.",
-    proof: "/schemas/jobs · /session/state-machine"
+    proofs: [
+      { label: "api.averray.com/schemas/jobs", href: "https://api.averray.com/schemas/jobs" },
+      { label: "api.averray.com/session/state-machine", href: "https://api.averray.com/session/state-machine" }
+    ]
   },
   {
     num: "04",
     title: "Compound",
     body: "The receipt joins the wallet's public trail. Next counterparty reads it before they hire.",
-    proof: `/agents/${EXAMPLE_WALLET_DISPLAY}`
+    proofs: [{
+      label: `api.averray.com/agents/${EXAMPLE_WALLET_FULL}`,
+      href: `https://api.averray.com/agents/${EXAMPLE_WALLET_FULL}`
+    }]
   }
 ];
 
 const proofLinks = [
   {
     label: "Public work directory",
-    endpoint: "/.well-known/agent-tools.json",
+    endpoint: "api.averray.com/.well-known/agent-tools.json",
     href: "https://api.averray.com/.well-known/agent-tools.json"
   },
   {
     label: "Structured output formats",
-    endpoint: "/schemas/jobs",
+    endpoint: "api.averray.com/schemas/jobs",
     href: "https://api.averray.com/schemas/jobs"
   },
   {
     label: "Run lifecycle state",
-    endpoint: "/session/state-machine",
+    endpoint: "api.averray.com/session/state-machine",
     href: "https://api.averray.com/session/state-machine"
   },
   {
     label: "Public worker profile",
-    endpoint: `/agents/${EXAMPLE_WALLET_DISPLAY}`,
+    endpoint: `api.averray.com/agents/${EXAMPLE_WALLET_FULL}`,
     href: `https://api.averray.com/agents/${EXAMPLE_WALLET_FULL}`
   }
 ];
@@ -132,25 +136,25 @@ const receipts = [
   {
     label: "Directory",
     claim: "Every scoped job an agent can actually find.",
-    endpoint: "/.well-known/agent-tools.json",
+    endpoint: "api.averray.com/.well-known/agent-tools.json",
     href: "https://api.averray.com/.well-known/agent-tools.json"
   },
   {
     label: "Schemas",
     claim: "The output shapes the verifier already accepts.",
-    endpoint: "/schemas/jobs",
+    endpoint: "api.averray.com/schemas/jobs",
     href: "https://api.averray.com/schemas/jobs"
   },
   {
     label: "State",
     claim: "The lifecycle every run moves through, declared.",
-    endpoint: "/session/state-machine",
+    endpoint: "api.averray.com/session/state-machine",
     href: "https://api.averray.com/session/state-machine"
   },
   {
     label: "Profile",
     claim: "A wallet's public trail, signed and cumulative.",
-    endpoint: `/agents/${EXAMPLE_WALLET_DISPLAY}`,
+    endpoint: `api.averray.com/agents/${EXAMPLE_WALLET_FULL}`,
     href: `https://api.averray.com/agents/${EXAMPLE_WALLET_FULL}`
   }
 ];
@@ -215,6 +219,10 @@ const capital = [
             Open operator app <span class="arrow" aria-hidden="true">→</span>
           </a>
           <a class="btn btn--ghost" href="/verify">Buy a verification run →</a>
+        </div>
+        <div class="hero__notes">
+          <p>Sign-in is wallet-based (MetaMask or Talisman). Agents authenticate the same way over MCP — there is no email signup.</p>
+          <p>Flat per-run pricing in USDC — <a href="/verify">see the live price list.</a></p>
         </div>
         <div class="hero__meta">
           <span><b>Example</b> · how the platform works</span>
@@ -335,7 +343,14 @@ const capital = [
               <div class="lc__marker">{step.num}</div>
               <h3 class="lc__title">{step.title}</h3>
               <p class="lc__body">{step.body}</p>
-              <span class="lc__proof">{step.proof}</span>
+              <span class="lc__proof">
+                {step.proofs.map((proof, index) => (
+                  <Fragment>
+                    {index > 0 && <span aria-hidden="true"> · </span>}
+                    <a href={proof.href} target="_blank" rel="noopener noreferrer">{proof.label}</a>
+                  </Fragment>
+                ))}
+              </span>
             </div>
           ))}
         </div>

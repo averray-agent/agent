@@ -20,7 +20,13 @@ import "../styles/global.css";
 
     <section class="record-section" aria-live="polite">
       <div class="panel" data-receipt-state="loading">
-        <p data-receipt-status>Loading receipt…</p>
+        <p data-receipt-status>
+          Loading the receipt… · raw JSON:
+          <a data-receipt-raw-url href="https://api.averray.com/receipts/">api.averray.com/receipts/&#123;receiptId&#125;</a>
+        </p>
+        <noscript>
+          <p>Loading the receipt requires JavaScript · raw JSON: <a href="https://api.averray.com/receipts/">api.averray.com/receipts/&#123;receiptId&#125;</a></p>
+        </noscript>
         <div data-receipt hidden>
           <p><strong>Receipt</strong> <code data-field="receiptId"></code></p>
           <p><strong>Outcome</strong> <span data-field="verdict.outcome"></span> · <span data-field="verdict.reasonCode"></span></p>
@@ -43,5 +49,6 @@ import "../styles/global.css";
     </section>
     <SiteFooter />
   </main>
-  <script src="/receipt-reader.js" is:inline></script>
+  <script src="/reader-fetch.js?v=20260821" is:inline></script>
+  <script src="/receipt-reader.js?v=20260821" is:inline></script>
 </BaseLayout>

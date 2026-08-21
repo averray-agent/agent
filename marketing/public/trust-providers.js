@@ -205,9 +205,7 @@
 
   async function load() {
     try {
-      const res = await fetch(ENDPOINT, { credentials: "omit" });
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      const payload = await res.json();
+      const payload = await window.AverrayReaderFetch.readJsonWithRetry(ENDPOINT, { credentials: "omit" });
       const providers = extractProviders(payload);
       if (!providers.length) {
         setMeta("No provider data available.");

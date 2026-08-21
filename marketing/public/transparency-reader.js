@@ -234,9 +234,7 @@
 
   async function readOnce() {
     try {
-      var response = await fetch(ENDPOINT, { credentials: "omit" });
-      if (!response.ok) throw new Error("HTTP " + response.status);
-      var payload = await response.json();
+      var payload = await window.AverrayReaderFetch.readJsonWithRetry(ENDPOINT, { credentials: "omit" });
       stalled = false;
       render(payload);
       stampAges(payload);

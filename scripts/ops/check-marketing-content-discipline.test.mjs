@@ -49,6 +49,7 @@ test("marketing build, sync, and deploy gates name both public product pages", a
   ]);
 
   assert.match(syncScript, /"verify-reader\.js"/u);
+  assert.match(syncScript, /"reader-fetch\.js"/u);
   assert.match(syncScript, /"verify\/index\.html"/u);
   assert.match(syncScript, /"proof-to-pay\/index\.html"/u);
   assert.match(deployScript, /"verify\/index\.html \/verify\/"/u);

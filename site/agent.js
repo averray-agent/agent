@@ -787,10 +787,13 @@ async function bootProfile() {
   }
 
   setText("profile-wallet", wallet);
-  setHref("profile-json-url", `https://api.averray.com/agents/${wallet}`);
+  const profileEndpoint = `https://api.averray.com/agents/${wallet}`;
+  setHref("profile-json-url", profileEndpoint);
+  setHref("profile-loading-json-url", profileEndpoint);
+  setText("profile-loading-json-url", profileEndpoint.replace(/^https:\/\//u, ""));
 
   try {
-    const response = await fetch(`https://api.averray.com/agents/${wallet}`, {
+    const response = await fetch(profileEndpoint, {
       headers: { accept: "application/json" }
     });
     if (!response.ok) {

@@ -235,8 +235,8 @@ const checklist = [
   </section>
 
   {/* Live data. The ids and the aria-live region below are the contract with
-      trust-providers.js, which is carried over unchanged so its live /
-      dry-run / at-capacity / error / disabled states — and its honest
+      trust-providers.js. Its live / dry-run / at-capacity / error / disabled
+      states — and its honest
       "unavailable" fallbacks — behave exactly as before. */}
   <section class="section" id="provider-operations">
     <div class="section__head">
@@ -251,7 +251,13 @@ const checklist = [
         full per-row detail.
       </p>
     </div>
-    <p class="section__aside" id="provider-operations-meta">Loading live status…</p>
+    <p class="section__aside" id="provider-operations-meta">
+      Loading provider operations… · raw JSON:
+      <a href="https://api.averray.com/status/providers">api.averray.com/status/providers</a>
+    </p>
+    <noscript>
+      <p class="section__aside">Live provider operations require JavaScript · raw JSON: <a href="https://api.averray.com/status/providers">api.averray.com/status/providers</a></p>
+    </noscript>
     <div id="provider-operations-list" class="provider-operations-list" aria-live="polite">
       <article class="site-card">
         <p class="label">Live status</p>
@@ -293,5 +299,6 @@ const checklist = [
     </div>
   </section>
 
-  <script is:inline src="/trust-providers.js?v=20260725"></script>
+  <script is:inline src="/reader-fetch.js?v=20260821"></script>
+  <script is:inline src="/trust-providers.js?v=20260821"></script>
 </PageLayout>

@@ -63,6 +63,23 @@ averray.com {
     file_server
   }
 
+  # Human-guessed product and proof paths. Keep these at the edge so a typed
+  # URL lands on the canonical source instead of the static site's 404.
+  @docsPath path /docs /docs/
+  redir @docsPath https://github.com/averray-agent/agent/tree/main/docs 301
+
+  @fulfillPath path /fulfill /fulfill/
+  redir @fulfillPath /agents/ 301
+
+  @recordPath path /record /record/
+  redir @recordPath /transparency/ 301
+
+  @jobsSchemaPath path /schemas/jobs /schemas/jobs/
+  redir @jobsSchemaPath https://api.averray.com/schemas/jobs 301
+
+  @sessionStateMachinePath path /session/state-machine /session/state-machine/
+  redir @sessionStateMachinePath https://api.averray.com/session/state-machine 301
+
   @agentProfile path_regexp agentProfile ^/agents/(0x[a-fA-F0-9]{40})/?$
   rewrite @agentProfile /agent.html?wallet={re.agentProfile.1}
 
