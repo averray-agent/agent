@@ -2,7 +2,14 @@ import { normalizeAssetSymbol } from "./assets.js";
 import { decimalToBaseUnits } from "./platform-service-helpers.js";
 import { evaluateDesignatedClaimant } from "./designated-claimants.js";
 
-const TERMINAL_SESSION_STATUSES = new Set(["resolved", "rejected", "closed", "expired", "timed_out"]);
+const TERMINAL_SESSION_STATUSES = new Set([
+  "resolved",
+  "rejected",
+  "closed",
+  "expired",
+  "timed_out",
+  "chain_state_diverged"
+]);
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const BANK_INDEPENDENT_FUNDING_SOURCES = new Set([
   "external_escrow",

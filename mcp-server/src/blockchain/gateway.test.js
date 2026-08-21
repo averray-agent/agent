@@ -54,6 +54,21 @@ test("finalizeXcmRequest errors decode XcmWrapperV22 InvalidStatus from revert d
   assert.doesNotMatch(wrapped.message, /unknown custom error/u);
 });
 
+test("resolveSinglePayout errors decode EscrowCore InvalidState by ABI name", () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const revert = new Error("execution reverted (unknown custom error)");
+  revert.code = "CALL_EXCEPTION";
+  revert.data = id("InvalidState()").slice(0, 10);
+
+  const wrapped = gateway.wrapGatewayError("resolveSinglePayout", revert);
+
+  assert.ok(wrapped instanceof BlockchainRevertError);
+  assert.match(wrapped.message, /EscrowCore\.InvalidState\(\)/u);
+  assert.equal(wrapped.details.customError, "InvalidState");
+  assert.equal(wrapped.details.selector, "0xbaf3f0f7");
+  assert.doesNotMatch(wrapped.message, /unknown custom error/u);
+});
+
 test("toDisputeReasonCode uses Solidity bytes32 string encoding", () => {
   const gateway = new BlockchainGateway({ enabled: false });
 

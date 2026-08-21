@@ -1529,6 +1529,90 @@ test("verifySubmission is idempotent: skips re-settling an already-resolved (Clo
   assert.deepEqual(stored.payoutTx, h.payoutReceipt);
 });
 
+test("(a) non-Submitted chain state parks terminal with zero resolve attempts by name", async () => {
+  const h = makeIdempotencyHarness(2); // EscrowCore JobState.Claimed
+  const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
+  await h.stateStore.upsertSession(submitted);
+  const events = [];
+  const logs = [];
+  const service = new VerifierService(
+    h.platformService,
+    h.stateStore,
+    h.blockchainGateway,
+    undefined,
+    {
+      eventBus: { publish(event) { events.push(event); } },
+      logger: { warn(fields, message) { logs.push({ fields, message }); } }
+    }
+  );
+
+  const result = await service.verifySubmission({ sessionId: submitted.sessionId });
+
+  assert.equal(h.calls.settle, 0, "resolveSinglePayout must not run outside Submitted");
+  assert.equal(h.calls.recover, 0);
+  assert.equal(result.outcome, "chain_state_diverged");
+  assert.equal(result.session.status, "chain_state_diverged");
+  assert.deepEqual(result.chainStateDivergence, {
+    reason: "chain_state_diverged",
+    expectedState: 3,
+    expectedStateLabel: "submitted",
+    observedState: 2,
+    observedStateLabel: "claimed",
+    stage: "pre_resolve",
+    observedAt: result.chainStateDivergence.observedAt
+  });
+  assert.equal(events.length, 1, "parking emits exactly one observer row");
+  assert.equal(events[0].topic, "verifier.chain_state_diverged");
+  assert.equal(logs.filter((entry) => entry.message === "verifier.chain_state_diverged").length, 1);
+  assert.equal((await h.stateStore.getSession(submitted.sessionId)).status, "chain_state_diverged");
+});
+
+test("(b) InvalidState revert is ABI-classified and parked terminal without retry", async () => {
+  const h = makeIdempotencyHarness(3);
+  const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
+  await h.stateStore.upsertSession(submitted);
+  let chainState = 3;
+  h.blockchainGateway.getJob = async () => ({
+    state: chainState,
+    specHash: h.claimed.jobSnapshot.specHash
+  });
+  h.blockchainGateway.resolveSinglePayout = async () => {
+    h.calls.settle += 1;
+    chainState = 2;
+    const error = new Error("execution reverted (unknown custom error)");
+    error.code = "CALL_EXCEPTION";
+    error.data = "0xbaf3f0f7";
+    throw error;
+  };
+  const service = new VerifierService(
+    h.platformService,
+    h.stateStore,
+    h.blockchainGateway,
+    undefined,
+    { logger: { warn() {} } }
+  );
+
+  const result = await service.verifySubmission({ sessionId: submitted.sessionId });
+  await assert.rejects(
+    service.verifySubmission({ sessionId: submitted.sessionId }),
+    (error) => error.code === "invalid_session_transition"
+  );
+
+  assert.equal(h.calls.settle, 1, "the InvalidState transaction is never retried");
+  assert.equal(result.outcome, "chain_state_diverged");
+  assert.equal(result.chainStateDivergence.stage, "resolve_invalid_state");
+  assert.equal(result.chainStateDivergence.observedState, 2);
+  assert.equal(result.chainStateDivergence.observedStateLabel, "claimed");
+  assert.equal(result.chainStateDivergence.customError, "InvalidState");
+  assert.equal(result.chainStateDivergence.selector, "0xbaf3f0f7");
+});
+
+test("mutation drill: the non-Submitted pre-resolve guard has one source anchor", () => {
+  const source = readFileSync(new URL("./verifier-service.js", import.meta.url), "utf8");
+  const anchor = "else if (observedState !== ESCROW_JOB_STATE_SUBMITTED) {";
+  assert.equal(source.split(anchor).length - 1, 1, "reconcile-pre-read anchorOccurrences=1");
+});
+
 test("verifySubmission refuses an already-settled retry when chain evidence cannot be reconstructed", async () => {
   const h = makeIdempotencyHarness(6);
   const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
