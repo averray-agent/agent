@@ -66,6 +66,64 @@ Record the freeze commit, tag, generated evidence artifact, and any deployed
 contract addresses in the audit issue or engagement brief. Do not ask the
 auditor to review a moving target.
 
+## 2026-08 Surface Refresh — NEW attack surface since the July passes
+
+Everything below shipped AFTER the frozen tag `audit/mainnet-2026-07-07` and the
+2026-07-08 re-verification. **A new engagement scoped on the July package would miss
+all of it.** Each item names the load-bearing files and the property to attack.
+
+1. **Witness runner + Docker admission proxy** (paid code execution). Customer-chosen
+   code (git patches; profile inputs) executes in sandbox containers behind a
+   default-deny admission proxy — `deploy/witness-docker-proxy/policy.mjs`,
+   `witness/`, `mcp-server/src/services/witness-runner-service.js`,
+   `structured-output-evidence-runner.js`, `mcp-failure-semantics-runner.js`.
+   Sandbox law: pinned image, uid 65532, NetworkMode none, read-only rootfs, caps
+   dropped. Attack: escape, proxy-policy bypass, resource-limit evasion, and the
+   billing invariant (INCONCLUSIVE IS NEVER BILLED — capture must be unreachable on
+   any non-decisive path; auth release asserted).
+2. **x402 / EIP-3009 payment intake on Base** (eip155:8453). Offline
+   `transferWithAuthorization` accepted, captured only on decisive verdicts —
+   verify routes + payment handling in `mcp-server/src/protocols/http/` and the
+   capture path. EIP-712 domain from token `name()`. Attack: replay (chain nonce +
+   our paymentKey layer), capture-margin windows, double-capture, refund-less
+   never-capture correctness, cross-chain confusion (Base pot vs Hub books).
+3. **MCP egress proxy for endpoint probing** (`mcp-failure-semantics-v1`):
+   allowlist-of-one CONNECT proxy + SSRF denylist (loopback, RFC1918, 169.254.169.254,
+   ::1, fd00::). Attack: SSRF via redirects/DNS rebinding, allowlist race, probe
+   side effects (the profile's success statement forbids destructive actions).
+4. **Proof-to-Pay designated claims**: `designatedClaimants` gate shared by
+   preflight AND claim (divergence structurally impossible — verify), progression
+   valves bypassed, zero retention. Attack: designation spoofing, open-supply
+   leakage of designated jobs, fee-path correctness.
+5. **Work receipts** (`averray.work-receipt.v1`): content-addressed, ES256-signed,
+   public at `/receipts/:id`; reconciliation invariants in the builder
+   (`reward = worker + retention`, `posterTotal = reward + fee`). Attack: signing-key
+   handling, hash/content substitution, degraded-path honesty
+   (`chain_unavailable_fail_open`).
+6. **CreditBook (L2 live / L3 dormant)** at `0x70441c9131Bc47c96E8D839C5B30850924838099`
+   (`contracts/CreditBook.sol`): operator-underwritten zero-interest book, value moves
+   ONLY through AgentAccountCore (`sendToAgent`; seed/repay are AAC-internal
+   consumption — `_consumeUnaccountedLiquidity` — after #1188). Attack: unaccounted-
+   liquidity gaming (send-then-double-record), cap/ceiling bounds, POSTING-mode
+   routing (principal must never reach the borrower), operator-role blast radius.
+7. **Chain-behavior law (affects every contract handling the USDC precompile):**
+   `approve(spender, 0)` returns false with no prior approval; contract-context
+   approve reverts for DOT-less contracts (pallet approval deposit). Regression-pinned
+   by fork test (`test/CreditBookFork.t.sol`). Auditors should hunt for any remaining
+   contract-context ERC20 approve assumptions.
+8. **Bank XCM v2.2 lanes + DepositPool venue lifecycle** (deploy/recall/write-off):
+   now EXERCISED live (epoch-2 roll 2026-08-21) including the multisig-gated
+   `writeOffVenueLoss` (lossReporter). Previously "audited but disabled" — the
+   engagement should treat the pool-venue path as ACTIVE scope.
+9. **Demand surfaces** (manifest v0.5.0 `products`, two-sided MCP welcome,
+   marketing pages with live-fetched pricing): content-discipline lint in CI;
+   low-risk but in scope for information-disclosure review.
+
+Supporting docs: `THREAT_MODEL.md`, `PACKET_WITNESS_RUNNER.md`,
+`PACKET_VERIFY_X402_INTAKE.md`, `PACKET_MCP_FAILURE_SEMANTICS.md`,
+`PACKET_PROOF_TO_PAY.md`, `PACKET_CREDIT_L2L3_SPEC.md` (packets branch),
+`CREDITBOOK_AAC_LIQUIDITY_REGRESSION.md`.
+
 ## Pre-Audit Review & Static Baseline
 
 An internal multi-agent security pass on 2026-06-25 found 8 findings (1 Critical, 2 High,
