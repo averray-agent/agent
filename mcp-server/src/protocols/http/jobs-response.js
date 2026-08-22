@@ -122,6 +122,8 @@ function toCompactJobRow(job) {
     tier: job.tier ?? null,
     verifierMode: job.verifierMode ?? null,
     claimTtlSeconds: job.claimTtlSeconds ?? null,
+    listedAt: job.listedAt ?? null,
+    ...(job.priorityWindow ? { priorityWindow: job.priorityWindow } : {}),
     requiresSponsoredGas: job.requiresSponsoredGas === true,
     onboardingWaiverEligible: job.onboardingWaiverEligible === true,
     disposableProof: job.disposableProof === true,

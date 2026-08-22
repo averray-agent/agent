@@ -89,6 +89,20 @@ test("public jobs response keeps bare array for legacy callers", () => {
   assert.equal(response, JOBS);
 });
 
+test("compact listJobs preserves listedAt and the public priority window", () => {
+  const listedAt = "2026-08-22T12:00:00.000Z";
+  const priorityWindow = {
+    openAt: "2026-08-22T12:05:00.000Z",
+    qualifiesWith: "≥ 1 USDC vested deposit and no outstanding credit draw"
+  };
+  const response = buildPublicJobsResponse(
+    [{ ...JOBS[1], listedAt, priorityWindow }],
+    new URLSearchParams({ format: "compact" })
+  );
+  assert.equal(response.jobs[0].listedAt, listedAt);
+  assert.deepEqual(response.jobs[0].priorityWindow, priorityWindow);
+});
+
 test("source=external exposes only external rows with poster funding provenance", () => {
   const response = buildPublicJobsResponse(
     JOBS,
@@ -175,6 +189,7 @@ test("public jobs response filters and compacts agent-friendly queries", () => {
     "tier",
     "verifierMode",
     "claimTtlSeconds",
+    "listedAt",
     "requiresSponsoredGas",
     "onboardingWaiverEligible",
     "disposableProof",

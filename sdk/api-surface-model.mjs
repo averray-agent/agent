@@ -379,6 +379,23 @@ export interface JobSchemaContract extends ApiEnvelope {
   output?: SchemaContractSide;
 }
 
+export interface PriorityWindow {
+  openAt: ISODateTime;
+  qualifiesWith: string;
+}
+
+export interface PriorityQualification extends ApiEnvelope {
+  vestedDepositRaw?: string;
+  thresholdRaw?: string;
+  thresholdUsdc?: string;
+  vestingAvailable?: boolean;
+  outstandingCreditRaw?: string;
+  creditPositionAvailable?: boolean;
+  depositQualified?: boolean;
+  noOutstandingCreditDraw?: boolean;
+  qualifies?: boolean;
+}
+
 export interface JobDefinition extends ApiEnvelope {
   id: JobId;
   title?: string;
@@ -397,6 +414,8 @@ export interface JobDefinition extends ApiEnvelope {
   effectiveState?: string;
   currentWalletCanClaim?: boolean | null;
   reason?: string | null;
+  listedAt?: ISODateTime | null;
+  priorityWindow?: PriorityWindow;
   submissionContract?: SubmissionContract;
   schemaContract?: JobSchemaContract;
   source?: ApiEnvelope;
@@ -417,6 +436,8 @@ export interface JobSummary extends ApiEnvelope {
   claimable?: boolean;
   currentWalletCanClaim?: boolean | null;
   reason?: string | null;
+  listedAt?: ISODateTime | null;
+  priorityWindow?: PriorityWindow;
   rewardAmount?: number;
   rewardAsset?: AssetSymbol;
   claimExpiresAt?: ISODateTime | null;
@@ -461,6 +482,10 @@ export interface PreflightResponse extends ApiEnvelope {
   claimable?: boolean;
   currentWalletCanClaim?: boolean | null;
   reason?: string | null;
+  listedAt?: ISODateTime | null;
+  openAt?: ISODateTime;
+  priorityWindow?: PriorityWindow;
+  priorityQualification?: PriorityQualification;
   retryLimit?: number | null;
   claimExpiresAt?: ISODateTime | null;
   submissionContract?: SubmissionContract;

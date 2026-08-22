@@ -6,6 +6,7 @@ import {
   buildClaimTerms,
   filterHumanWorkListings,
   jobDefinitionRawUrl,
+  priorityWindowDisplay,
   publicReceiptUrl,
   routeAfterSignIn,
   serializeJobDefinition,
@@ -75,6 +76,38 @@ test("claim refusal is named before the claim action", () => {
   });
   assert.equal(terms.eligible, false);
   assert.equal(terms.refusalReason, "insufficient_liquidity");
+});
+
+test("work board priority window shows the honest countdown and qualifying condition", async () => {
+  assert.deepEqual(
+    priorityWindowDisplay(
+      {
+        openAt: "2026-08-22T12:05:00.000Z",
+        qualifiesWith: "≥ 1 USDC vested deposit and no outstanding credit draw"
+      },
+      Date.parse("2026-08-22T12:02:00.000Z")
+    ),
+    {
+      countdown: "opens to everyone in 3m",
+      qualifiesWith: "≥ 1 USDC vested deposit and no outstanding credit draw"
+    }
+  );
+  assert.equal(
+    priorityWindowDisplay(
+      { openAt: "2026-08-22T12:05:00.000Z", qualifiesWith: "vested deposit" },
+      Date.parse("2026-08-22T12:05:00.000Z")
+    ),
+    null
+  );
+
+  const source = await readFile(
+    new URL("../../components/work/WorkJobList.tsx", import.meta.url),
+    "utf8"
+  );
+  assert.match(source, /Priority window/u);
+  assert.match(source, /priority\.countdown/u);
+  assert.match(source, /Qualifies with \{priority\.qualifiesWith\}/u);
+  assert.doesNotMatch(source, /exclusive|premium/iu);
 });
 
 test("static-shell pretty paths recover job/session ids and canonical receipt links", () => {

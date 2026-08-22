@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Clock3, Fuel, ShieldCheck, WalletCards } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useHumanWorkJobs } from "@/lib/api/hooks";
 import { formatAmount } from "@/lib/format";
-import { filterHumanWorkListings, workCatalogueIsPending, workJobHref } from "@/lib/work/human-work.js";
+import { filterHumanWorkListings, priorityWindowDisplay, workCatalogueIsPending, workJobHref } from "@/lib/work/human-work.js";
 import type { HumanJobListing } from "./types";
 import { markAppMilestone } from "@/lib/ui/app-performance.js";
 
@@ -16,6 +16,7 @@ export function WorkJobList() {
   const jobs = filterHumanWorkListings(jobsQuery.data) as HumanJobListing[];
   const cataloguePending = workCatalogueIsPending(jobsQuery);
   const firstCatalogueMarked = useRef(false);
+  const [nowMs, setNowMs] = useState<number | null>(null);
 
   useEffect(() => {
     if (!firstCatalogueMarked.current && !cataloguePending && (jobsQuery.data !== undefined || jobsQuery.error)) {
@@ -23,6 +24,12 @@ export function WorkJobList() {
       markAppMilestone("work-catalogue-settled");
     }
   }, [cataloguePending, jobsQuery.data, jobsQuery.error]);
+
+  useEffect(() => {
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   if (cataloguePending) {
     return (
@@ -74,13 +81,14 @@ export function WorkJobList() {
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      {jobs.map((job) => <WorkJobCard key={job.id} job={job} />)}
+      {jobs.map((job) => <WorkJobCard key={job.id} job={job} nowMs={nowMs} />)}
     </div>
   );
 }
 
-function WorkJobCard({ job }: { job: HumanJobListing }) {
+function WorkJobCard({ job, nowMs }: { job: HumanJobListing; nowMs: number | null }) {
   const reward = formatAmount(job.reward?.amount ?? undefined, job.reward?.asset ?? "");
+  const priority = nowMs === null ? null : priorityWindowDisplay(job.priorityWindow, nowMs);
   return (
     <Card className="group flex h-full flex-col transition-transform hover:-translate-y-0.5 hover:border-[var(--line-strong)]">
       <CardContent className="flex h-full flex-col gap-5 py-6">
@@ -97,6 +105,12 @@ function WorkJobCard({ job }: { job: HumanJobListing }) {
         <p className="text-sm leading-relaxed text-[var(--muted)]">
           {job.successCriteria || job.summary || "Open the task to read the exact success criteria."}
         </p>
+        {priority ? (
+          <div className="rounded-[var(--radius-sm)] border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-xs leading-relaxed text-[var(--muted)]">
+            <p><span className="font-semibold text-[var(--ink)]">Priority window</span> · {priority.countdown}</p>
+            <p>Qualifies with {priority.qualifiesWith}.</p>
+          </div>
+        ) : null}
         <div className="mt-auto grid gap-2 border-t border-[var(--line)] pt-4 text-xs text-[var(--muted)] sm:grid-cols-2">
           <Term icon={Clock3}>{formatTtl(job.claimTtlSeconds)}</Term>
           <Term icon={WalletCards}>{formatStake(job.stake, job.reward?.asset)}</Term>

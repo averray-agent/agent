@@ -98,6 +98,7 @@ export class JobExecutionService {
     this.workerExposurePolicy = maintainerSurfaceConfig.workerExposurePolicy;
     this.workerDailyExposurePolicy = maintainerSurfaceConfig.workerDailyExposurePolicy;
     this.catalogueDailyBudget = maintainerSurfaceConfig.catalogueDailyBudget;
+    this.depositClaimPriorityPolicy = maintainerSurfaceConfig.depositClaimPriorityPolicy;
     this.logger = maintainerSurfaceConfig.logger ?? console;
     this.openPrCap = Number.isInteger(maintainerSurfaceConfig.openPrCap) && maintainerSurfaceConfig.openPrCap > 0
       ? maintainerSurfaceConfig.openPrCap
@@ -333,6 +334,8 @@ export class JobExecutionService {
           }
         }
       }
+
+      await this.depositClaimPriorityPolicy?.requireClaim({ wallet, job });
 
       const chainJobId = this.blockchainGateway?.isEnabled()
         ? this.blockchainGateway.toJobId(jobId)

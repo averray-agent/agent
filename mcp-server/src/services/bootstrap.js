@@ -5,6 +5,7 @@ import {
   loadOnboardingSubsidyBudgetConfig
 } from "../core/claim-economics.js";
 import { createWorkerExposurePolicy } from "../core/worker-exposure.js";
+import { createDepositClaimPriorityPolicy } from "../core/deposit-claim-priority.js";
 import { loadDepositVestingConfig } from "../core/deposit-vesting.js";
 import { createWorkerDailyExposurePolicy } from "../core/worker-daily-exposure.js";
 import { WorkerProgressionService } from "../core/worker-progression.js";
@@ -201,6 +202,9 @@ export function createPlatformService() {
     blockchainGateway: gateway,
     gasEstimateUsdc: subsidyConfig.gasEstimateUsdc
   });
+  const depositClaimPriorityPolicy = createDepositClaimPriorityPolicy({
+    workerExposurePolicy
+  });
   const workerDailyExposurePolicy = createWorkerDailyExposurePolicy({
     stateStore,
     workerExposurePolicy
@@ -227,7 +231,8 @@ export function createPlatformService() {
     onboardingSubsidyBudget,
     workerExposurePolicy,
     workerDailyExposurePolicy,
-    catalogueDailyBudget
+    catalogueDailyBudget,
+    depositClaimPriorityPolicy
   );
   const workerProgressionService = new WorkerProgressionService({
     stateStore,
@@ -430,6 +435,15 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const depositClaimPriorityPolicy = initStep(
+    "init-deposit-claim-priority",
+    logger,
+    () => createDepositClaimPriorityPolicy({
+      workerExposurePolicy,
+      env: process.env,
+      logger
+    })
+  );
   const workerDailyExposurePolicy = initStep(
     "init-worker-daily-exposure-policy",
     logger,
@@ -496,7 +510,8 @@ export async function createPlatformRuntime() {
       onboardingSubsidyBudget,
       workerExposurePolicy,
       workerDailyExposurePolicy,
-      catalogueDailyBudget
+      catalogueDailyBudget,
+      depositClaimPriorityPolicy
     )
   );
   const workerProgressionService = initStep(

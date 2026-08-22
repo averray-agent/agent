@@ -842,7 +842,7 @@
     },
     {
       "name": "listJobs",
-      "description": "All active jobs."
+      "description": "All active jobs with listing time and any priority window."
     },
     {
       "name": "getJobDefinition",
@@ -870,7 +870,7 @@
     },
     {
       "name": "preflightJob",
-      "description": "Pre-claim eligibility + stake + claim-tier check."
+      "description": "Pre-claim eligibility + stake + claim-tier + priority-window check."
     },
     {
       "name": "explainEligibility",
