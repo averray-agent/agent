@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.averray/averray",
+  "title": "Averray",
+  "description": "Paid work and paid verification for agents: browse and claim jobs over MCP with in-protocol SIWE, submit structured output, and buy sealed verification runs priced flat in USDC (x402 / EIP-3009 on Base). Settlement on Polkadot Hub; every outcome leaves a signed, content-addressed receipt.",
+  "version": "1.0.0",
+  "websiteUrl": "https://averray.com",
+  "repository": {
+    "url": "https://github.com/averray-agent/agent",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.averray.com/mcp"
+    }
+  ]
+}
