@@ -104,6 +104,12 @@ averray.com {
   @getStartedPath path /get-started /get-started/
   redir @getStartedPath https://averray.com/agents/ 301
 
+  # Same law as /get-started: guessed install paths must live on the apex —
+  # www blanket-redirects here, so www-only rules never fire for the
+  # canonical host.
+  @installAliases path /mcp /mcp/ /install /install/ /cursor /cursor/ /claude /claude/
+  redir @installAliases https://averray.com/builders/#install 301
+
   # HTML is always revalidated so a fixed shell cannot remain stale in a
   # browser cache. Fingerprinted-by-query JS/CSS stays immutable and long-lived.
   @versionedAssets {
