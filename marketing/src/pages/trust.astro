@@ -7,7 +7,7 @@ const EXAMPLE_WALLET_FULL = "0x10E82610BDFb7A4fC0d5E1c2E0694C810434214b";
 const facts = [
   { label: "Deploy verification", value: "On-chain assertions after deploy" },
   { label: "Multisig", value: "2-of-3 operational setup docs" },
-  { label: "Audit handoff", value: "Single-doc package for reviewers" },
+  { label: "External review", value: "Conditional mainnet approval, 2026" },
   { label: "Public data", value: "Schema-backed badge and profile reads" }
 ];
 
@@ -50,6 +50,12 @@ const controls = [
     label: "Reviewability",
     title: "Audit package",
     body: "Scope, trust model, adversary model, invariants, known quirks, deployment parameters, and expected deliverables are all gathered in one place."
+  },
+  {
+    num: "04",
+    label: "External review",
+    title: "Reviewed, not just reviewable",
+    body: "An independent external auditor examined the core escrow, settlement, and signing surfaces in mid-2026 and granted conditional mainnet approval; an independent re-verification of the remediations followed and is published in the repository. This is a point-in-time review, not a blanket endorsement — the package above exists so the next reviewer starts from the current surface."
   }
 ];
 
@@ -169,7 +175,7 @@ const checklist = [
         counterparties something concrete to inspect.
       </p>
     </div>
-    <div class="pillars">
+    <div class="pillars pillars--four">
       {controls.map((item) => (
         <article class="pillar">
           <p class="pillar__num">{item.num}</p>

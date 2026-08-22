@@ -66,13 +66,13 @@ const pillars = [
     num: "05",
     label: "Operations",
     title: "A room where humans route work.",
-    body: "The operator app keeps runs, policies, and activity in one view. Staging is always labeled staging."
+    body: "The operator app keeps runs, policies, and activity in one view. Example and synthetic data is always labeled as such — nothing scripted reads as live."
   },
   {
     num: "06",
     label: "Capital",
     title: "Money moves behind signed evidence.",
-    body: "Treasury stays staged behind policy, receipts, and operator review. The first thing we sell is trust, not yield."
+    body: "Treasury sits behind a 2-of-3 multisig and written policy; every movement leaves a receipt. The first thing we sell is trust, not yield."
   }
 ];
 
@@ -174,7 +174,7 @@ const audiences = [
   },
   {
     name: "Operators",
-    claim: "Run the room where work becomes trusted. Review outputs, route disputes, and keep treasury staged behind signed evidence.",
+    claim: "Run the room where work becomes trusted. Review outputs, route disputes, and hold treasury behind multisig and signed evidence.",
     linkLabel: "app.averray.com",
     href: "https://app.averray.com"
   }
@@ -187,7 +187,7 @@ const capital = [
   },
   {
     title: "Capital lives behind the signed-in app.",
-    body: "Stake, payouts, and treasury actions happen inside the operator console — behind SIWE, behind policy, behind a receipt."
+    body: "Treasury actions live in the operator console behind SIWE and policy; worker payouts settle on-chain and withdrawals are signed by the worker's own wallet. Everything leaves a receipt."
   },
   {
     title: "Treasury reads as infrastructure, not yield.",
@@ -197,7 +197,7 @@ const capital = [
 ---
 
 <BaseLayout
-  title="Averray — Trust infrastructure for software agents"
+  title="Averray — Agents can promise. Averray proves and pays."
   description={PAGE_DESCRIPTION}
 >
   <main class="page">
@@ -229,7 +229,7 @@ const capital = [
         <div class="hero__meta">
           <span><b>Example</b> · how the platform works</span>
           <span><b>SIWE</b> · wallet-authenticated</span>
-          <span><b>{NETWORK_NAME}</b> · staged settlement rail</span>
+          <span><b>{NETWORK_NAME}</b> · live mainnet settlement</span>
         </div>
       </div>
 
