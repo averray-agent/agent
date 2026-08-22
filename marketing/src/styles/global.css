@@ -368,6 +368,14 @@ a:hover { color: var(--avy-ink); }
   display: flex; flex-direction: column;
   min-height: 520px;
 }
+/* Two-column hero: the console must not let its FEED define the hero's
+   height (uncapped, 18 rows + receipt cards stretched the grid row to
+   ~1500px and dwarfed the text column). Pin the panel to a viewport-fitted
+   height; the feed fills exactly that (bottom-anchored, overflow scrolls
+   inside). Below the 960px stack the intrinsic min-height rules again. */
+@media (min-width: 961px) {
+  .console { height: clamp(560px, 90vh, 840px); }
+}
 .console::before {
   content: "";
   position: absolute; inset: 0;
