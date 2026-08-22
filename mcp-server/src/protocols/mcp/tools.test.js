@@ -352,8 +352,20 @@ test("credit pool MCP tools are payload-identical to the shared SIWE HTTP routes
 });
 
 test("listJobs returns the same value through MCP and its HTTP route", async () => {
+  const priorityWindow = {
+    openAt: "2026-08-22T12:05:00.000Z",
+    qualifiesWith: "≥ 1 USDC vested deposit and no outstanding credit draw"
+  };
   const jobs = [
-    { id: "job-1", title: "One", state: "open", description: "First", visible: true },
+    {
+      id: "job-1",
+      title: "One",
+      state: "open",
+      description: "First",
+      visible: true,
+      listedAt: "2026-08-22T12:00:00.000Z",
+      priorityWindow
+    },
     { id: "job-hidden", title: "Hidden", state: "open", visible: false },
     { id: "job-2", title: "Two", state: "open", description: "Second", visible: true }
   ];
@@ -385,14 +397,27 @@ test("listJobs returns the same value through MCP and its HTTP route", async () 
   assert.deepEqual(viaMcp, viaHttp.body);
   assert.equal(viaMcp.count, 2);
   assert.ok(viaMcp.jobs.every((job) => job.id !== "job-hidden"));
+  assert.equal(viaMcp.jobs[0].listedAt, "2026-08-22T12:00:00.000Z");
+  assert.deepEqual(viaMcp.jobs[0].priorityWindow, priorityWindow);
 });
 
 test("preflight and reward advisory tools use the existing authenticated job handlers", async () => {
   const calls = [];
+  const priorityWindow = {
+    openAt: "2026-08-22T12:05:00.000Z",
+    qualifiesWith: "≥ 1 USDC vested deposit and no outstanding credit draw"
+  };
   const service = {
     preflightJob: async (wallet, jobId) => {
       calls.push(["preflightJob", wallet, jobId]);
-      return { wallet, jobId, eligible: true };
+      return {
+        wallet,
+        jobId,
+        eligible: false,
+        reason: "priority_window_active",
+        openAt: priorityWindow.openAt,
+        priorityWindow
+      };
     },
     estimateNetReward: async (wallet, jobId) => {
       calls.push(["estimateNetReward", wallet, jobId]);
@@ -415,7 +440,14 @@ test("preflight and reward advisory tools use the existing authenticated job han
 
   assert.deepEqual(
     await execute("preflightJob", { jobId: "job-2" }, { request }),
-    { wallet: "0xworker", jobId: "job-2", eligible: true }
+    {
+      wallet: "0xworker",
+      jobId: "job-2",
+      eligible: false,
+      reason: "priority_window_active",
+      openAt: priorityWindow.openAt,
+      priorityWindow
+    }
   );
   assert.equal(await execute("estimateNetReward", { jobId: "job-2" }, { request }), 0.4);
   assert.deepEqual(

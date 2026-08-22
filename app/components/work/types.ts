@@ -12,6 +12,8 @@ export interface HumanJobListing {
   reason?: string | null;
   stake?: number | string | null;
   claimTtlSeconds?: number | null;
+  listedAt?: string | null;
+  priorityWindow?: HumanJobPriorityWindow;
   requiresSponsoredGas?: boolean;
   onboardingWaiverEligible?: boolean;
   disposableProof?: boolean;
@@ -28,6 +30,8 @@ export interface HumanJobDefinition extends Record<string, unknown> {
   rewardAmount?: number;
   rewardAsset?: string;
   claimTtlSeconds?: number;
+  listedAt?: string | null;
+  priorityWindow?: HumanJobPriorityWindow;
   requiresSponsoredGas?: boolean;
   onboardingWaiverEligible?: boolean;
   verifierMode?: string;
@@ -39,6 +43,11 @@ export interface HumanJobDefinition extends Record<string, unknown> {
   schemaContract?: Record<string, unknown>;
   verification?: Record<string, unknown>;
   verificationContract?: Record<string, unknown>;
+}
+
+export interface HumanJobPriorityWindow {
+  openAt: string;
+  qualifiesWith: string;
 }
 
 export interface WorkSessionRecord extends Record<string, unknown> {

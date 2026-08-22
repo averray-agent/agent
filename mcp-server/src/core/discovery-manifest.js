@@ -509,14 +509,14 @@ const HTTP_ACTION_REQUIREMENTS = [
 
 const DISCOVERY_TOOLS = [
   { name: "getPlatformCapabilities", description: "Capability + endpoint manifest for this deployment." },
-  { name: "listJobs", description: "All active jobs." },
+  { name: "listJobs", description: "All active jobs with listing time and any priority window." },
   { name: "getJobDefinition", description: "One job by id." },
   { name: "validateJobSubmission", description: "Check a draft payload against the job output schema before claiming or submitting." },
   { name: "getSessionStateMachine", description: "Read the canonical session lifecycle graph and allowed transitions." },
   { name: "listJobSchemas", description: "List built-in structured job schemas and their canonical paths." },
   { name: "getJobSchema", description: "Fetch one built-in structured job schema by name." },
   { name: "recommendJobs", description: "Wallet-scoped ranked recommendations with claim-tier gate info." },
-  { name: "preflightJob", description: "Pre-claim eligibility + stake + claim-tier check." },
+  { name: "preflightJob", description: "Pre-claim eligibility + stake + claim-tier + priority-window check." },
   { name: "explainEligibility", description: "Per-wallet reason why a job is eligible / blocked." },
   { name: "getDepositPoolInfo", description: "Live pool, depositor-risk disclosure, and wallet-specific vested-capacity truth." },
   { name: "buildDepositPoolTransactions", description: "Wallet-bound unsigned approve/deposit or redeem templates; never a relay." },

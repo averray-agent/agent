@@ -55,6 +55,22 @@ export function serializeJobDefinition(definition) {
   return JSON.stringify(definition, null, 2);
 }
 
+export function priorityWindowDisplay(priorityWindow, nowMs = Date.now()) {
+  const openAt = Date.parse(String(priorityWindow?.openAt ?? ""));
+  const current = Number(nowMs);
+  const qualifiesWith = typeof priorityWindow?.qualifiesWith === "string"
+    ? priorityWindow.qualifiesWith.trim()
+    : "";
+  if (!Number.isFinite(openAt) || !Number.isFinite(current) || openAt <= current || !qualifiesWith) {
+    return null;
+  }
+  const minutes = Math.max(1, Math.ceil((openAt - current) / 60_000));
+  return {
+    countdown: `opens to everyone in ${minutes}m`,
+    qualifiesWith
+  };
+}
+
 export function workSessionHref(sessionId) {
   return `/work/session/${encodeURIComponent(String(sessionId ?? "").trim())}`;
 }

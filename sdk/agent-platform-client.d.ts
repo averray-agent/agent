@@ -630,6 +630,26 @@ export interface WikipediaCitationRepairOutput {
   review_notes: string;
 }
 
+/** Reviewable citation repair proposal with revision-anchored findings for Wikipedia articles. */
+export interface WikipediaCitationRepairOutputV2 {
+  page_title: string;
+  revision_id: string;
+  citation_findings: Array<{
+    section: string;
+    problem: "dead_link" | "missing_citation" | "weak_source" | "outdated_source" | "claim_mismatch";
+    current_claim: string;
+    source_quote: string;
+    evidence_url: string;
+  }>;
+  proposed_changes: Array<{
+    change_type: "replace_citation" | "add_citation" | "flag_for_editor_review";
+    target_text: string;
+    replacement_text: string;
+    source_url: string;
+  }>;
+  review_notes: string;
+}
+
 /** Freshness and factual drift check for a public Wikipedia article. */
 export interface WikipediaFreshnessCheckOutput {
   page_title: string;
@@ -700,6 +720,7 @@ export interface BuiltinJobSchemaMap {
   "schema://jobs/openapi-quality-audit-output": OpenapiQualityAuditOutput;
   "schema://jobs/wikipedia-maintenance-input": WikipediaMaintenanceInput;
   "schema://jobs/wikipedia-citation-repair-output": WikipediaCitationRepairOutput;
+  "schema://jobs/wikipedia-citation-repair-output-v2": WikipediaCitationRepairOutputV2;
   "schema://jobs/wikipedia-freshness-check-output": WikipediaFreshnessCheckOutput;
   "schema://jobs/wikipedia-infobox-consistency-output": WikipediaInfoboxConsistencyOutput;
   "schema://jobs/product-proof-worker-loop": ProductProofWorkerLoop;
@@ -751,6 +772,23 @@ export interface JobSchemaContract extends ApiEnvelope {
   output?: SchemaContractSide;
 }
 
+export interface PriorityWindow {
+  openAt: ISODateTime;
+  qualifiesWith: string;
+}
+
+export interface PriorityQualification extends ApiEnvelope {
+  vestedDepositRaw?: string;
+  thresholdRaw?: string;
+  thresholdUsdc?: string;
+  vestingAvailable?: boolean;
+  outstandingCreditRaw?: string;
+  creditPositionAvailable?: boolean;
+  depositQualified?: boolean;
+  noOutstandingCreditDraw?: boolean;
+  qualifies?: boolean;
+}
+
 export interface JobDefinition extends ApiEnvelope {
   id: JobId;
   title?: string;
@@ -769,6 +807,8 @@ export interface JobDefinition extends ApiEnvelope {
   effectiveState?: string;
   currentWalletCanClaim?: boolean | null;
   reason?: string | null;
+  listedAt?: ISODateTime | null;
+  priorityWindow?: PriorityWindow;
   submissionContract?: SubmissionContract;
   schemaContract?: JobSchemaContract;
   source?: ApiEnvelope;
@@ -789,6 +829,8 @@ export interface JobSummary extends ApiEnvelope {
   claimable?: boolean;
   currentWalletCanClaim?: boolean | null;
   reason?: string | null;
+  listedAt?: ISODateTime | null;
+  priorityWindow?: PriorityWindow;
   rewardAmount?: number;
   rewardAsset?: AssetSymbol;
   claimExpiresAt?: ISODateTime | null;
@@ -833,6 +875,10 @@ export interface PreflightResponse extends ApiEnvelope {
   claimable?: boolean;
   currentWalletCanClaim?: boolean | null;
   reason?: string | null;
+  listedAt?: ISODateTime | null;
+  openAt?: ISODateTime;
+  priorityWindow?: PriorityWindow;
+  priorityQualification?: PriorityQualification;
   retryLimit?: number | null;
   claimExpiresAt?: ISODateTime | null;
   submissionContract?: SubmissionContract;

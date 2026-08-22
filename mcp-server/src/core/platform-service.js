@@ -91,7 +91,8 @@ export class PlatformService {
     onboardingSubsidyBudget = undefined,
     workerExposurePolicy = undefined,
     workerDailyExposurePolicy = undefined,
-    catalogueDailyBudget = undefined
+    catalogueDailyBudget = undefined,
+    depositClaimPriorityPolicy = undefined
   ) {
     this.jobs = jobs;
     this.profiles = profiles;
@@ -105,6 +106,7 @@ export class PlatformService {
     this.workerExposurePolicy = workerExposurePolicy;
     this.workerDailyExposurePolicy = workerDailyExposurePolicy;
     this.catalogueDailyBudget = catalogueDailyBudget;
+    this.depositClaimPriorityPolicy = depositClaimPriorityPolicy;
     this.workerProgressionService = undefined;
     this.catalogueLaneDiscipline = undefined;
     this.githubIssueIngestionScheduler = undefined;
@@ -157,7 +159,8 @@ export class PlatformService {
         onboardingSubsidyBudget: this.onboardingSubsidyBudget,
         workerExposurePolicy: this.workerExposurePolicy,
         workerDailyExposurePolicy: this.workerDailyExposurePolicy,
-        catalogueDailyBudget: this.catalogueDailyBudget
+        catalogueDailyBudget: this.catalogueDailyBudget,
+        depositClaimPriorityPolicy: this.depositClaimPriorityPolicy
       }
     );
     this.verificationIngestionService = new VerificationIngestionService(
@@ -1136,7 +1139,15 @@ export class PlatformService {
   }
 
   async recommendJobs(wallet) {
-    return this.jobCatalogService.recommendJobs(wallet);
+    const recommendations = await this.jobCatalogService.recommendJobs(wallet);
+    return this.depositClaimPriorityPolicy
+      ? recommendations.map((recommendation) => ({
+        ...recommendation,
+        ...this.depositClaimPriorityPolicy.listingFor(
+          this.getJobDefinition(recommendation.jobId)
+        )
+      }))
+      : recommendations;
   }
 
   async tierLadder(wallet) {
@@ -1153,6 +1164,10 @@ export class PlatformService {
     const claimStateEligible = designation.applies
       ? job.currentWalletCanClaim === true
       : job.claimable === true && job.currentWalletCanClaim !== false;
+    const priorityListing = this.depositClaimPriorityPolicy?.listingFor(rawJob) ?? {};
+    const priorityDecision = claimStateEligible && this.depositClaimPriorityPolicy
+      ? await this.depositClaimPriorityPolicy.assessClaim({ wallet, job: rawJob })
+      : undefined;
     const fundingBlocked = claimStateEligible && preflight.claimFundingSufficient === false;
     const subsidyBlocked = preflight.reason === "onboarding_subsidy_exhausted";
     const result = {
@@ -1168,7 +1183,8 @@ export class PlatformService {
       claimedAt: job.claimedAt,
       claimExpiresAt: job.claimExpiresAt,
       retryLimit: job.retryLimit,
-      sessionId: job.sessionId
+      sessionId: job.sessionId,
+      ...priorityListing
     };
     if (designation.applies && designation.eligible) {
       result.designatedClaimants = [...rawJob.designatedClaimants];
@@ -1178,6 +1194,26 @@ export class PlatformService {
       ? await this.stateStore.getExternalJobDelisting?.(jobId)
       : undefined;
     if (!delisting) {
+      if (priorityDecision?.eligible === false) {
+        return {
+          ...result,
+          eligible: false,
+          reason: priorityDecision.reason,
+          reasonMessage: priorityDecision.message,
+          openAt: priorityDecision.openAt,
+          priorityWindow: priorityDecision.priorityWindow,
+          priorityQualification: priorityDecision.qualification,
+          failureStates: [
+            ...new Set([
+              ...(Array.isArray(result.failureStates) ? result.failureStates : []),
+              priorityDecision.reason
+            ])
+          ]
+        };
+      }
+      if (priorityDecision?.qualification) {
+        result.priorityQualification = priorityDecision.qualification;
+      }
       if (result.eligible !== true) {
         return result;
       }
@@ -1326,10 +1362,11 @@ export class PlatformService {
       rewardBank,
       now
     });
-    return {
+    const attached = {
       ...job,
       ...claimStatusFields(claimStatus)
     };
+    return this.depositClaimPriorityPolicy?.projectListing(attached) ?? attached;
   }
 
   async listSessionHistory({ wallet = undefined, limit = 10, jobId = undefined } = {}) {

@@ -808,6 +808,10 @@ export function explainEligibilityFromPreflight(preflight) {
     dailyAllowance: preflight.dailyAllowance,
     catalogueAccess: preflight.catalogueAccess,
     catalogueDailyBudget: preflight.catalogueDailyBudget,
+    listedAt: preflight.listedAt,
+    priorityWindow: preflight.priorityWindow,
+    priorityQualification: preflight.priorityQualification,
+    openAt: preflight.openAt,
     failureStates: preflight.failureStates,
     reasonMessage: preflight.reasonMessage
       ?? preflight.catalogueDailyBudget?.message
