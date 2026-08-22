@@ -60,7 +60,7 @@ test("QA8 marketing exposes the canonical MCP install door and copy-safe snippet
   assert.match(llms, /Canonical MCP endpoint: https:\/\/api\.averray\.com\/mcp/u);
   assert.match(llms, /https:\/\/averray\.com\/builders\/#install/u);
   assert.match(llms, /MCP protocol endpoint lives on the API host only/u);
-  assert.match(llms, /Discovery manifest: https:\/\/api\.averray\.com\/\.well-known\/agent-tools\.json/u);
+  assert.match(llms, /Discovery manifest: https:\/\/averray\.com\/\.well-known\/agent-tools\.json/u);
 });
 
 test("QA3-A marketing wayfinding names real doors, live reads, and outbound proof surfaces", async () => {
