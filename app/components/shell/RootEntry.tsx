@@ -15,7 +15,8 @@ export function RootEntry() {
 
   return (
     <main className="grid min-h-screen place-items-center bg-[var(--bg)] px-6 py-12">
-      <section className="w-full max-w-[480px] rounded-[var(--radius-lg)] border border-[var(--line)] bg-[var(--paper-solid)] p-8 shadow-[var(--shadow-sm)]">
+      <div className="w-full max-w-[480px]">
+        <section className="rounded-[var(--radius-lg)] border border-[var(--line)] bg-[var(--paper-solid)] p-8 shadow-[var(--shadow-sm)]">
         <div className="flex items-center gap-2">
           <div className="grid h-8 w-8 place-items-center rounded-[var(--radius-sm)] bg-[var(--accent)] font-[family-name:var(--font-display)] text-sm font-bold text-white">
             A
@@ -35,7 +36,13 @@ export function RootEntry() {
             Browse paid work
           </Link>
         </div>
-      </section>
+        </section>
+        <footer className="mt-5 flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs text-[var(--muted)]">
+          <Link href="https://averray.com">averray.com</Link>
+          <Link href="https://averray.com/trust/">Trust</Link>
+          <Link href="https://averray.com/agents/">Agents guide</Link>
+        </footer>
+      </div>
     </main>
   );
 }

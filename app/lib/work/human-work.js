@@ -71,6 +71,11 @@ export function priorityWindowDisplay(priorityWindow, nowMs = Date.now()) {
   };
 }
 
+export function jobDefinitionFailureKind(error) {
+  if (!error) return null;
+  return Number(error.status) === 404 ? "not_found" : "unreadable";
+}
+
 export function workSessionHref(sessionId) {
   return `/work/session/${encodeURIComponent(String(sessionId ?? "").trim())}`;
 }

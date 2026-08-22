@@ -12,6 +12,7 @@ import { signIn, WalletUnavailableError } from "@/lib/auth/siwe";
 import { useAuth } from "@/lib/auth/use-auth";
 import { useWalletProvider } from "@/lib/auth/use-wallet-provider";
 import { routeAfterSignIn } from "@/lib/work/human-work.js";
+import { WalletInstallGuidance } from "@/components/auth/WalletInstallGuidance";
 
 export default function SignInPage() {
   return (
@@ -137,47 +138,10 @@ function SignInContent() {
                 this browser will work.
               </p>
             </div>
-            <div
-              className={`rounded-[var(--radius-md)] border p-4 text-sm leading-relaxed ${walletProvider === "unavailable" ? "border-[color:rgba(167,97,34,0.46)] bg-[var(--warn-soft)] text-[var(--ink)]" : "border-[var(--line)] bg-[var(--paper)] text-[var(--muted)]"}`}
-              data-wallet-guidance
-              data-wallet-provider={walletProvider}
-            >
-              <p>
-                Your wallet is your sign-in and account identity. It ties your
-                runs, receipts, payments, and reputation to one address you
-                control.
-              </p>
-              <p className="mt-2">
-                Need one? Install{" "}
-                <Link
-                  href="https://metamask.io/download"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[var(--accent)] underline underline-offset-2"
-                >
-                  MetaMask
-                </Link>{" "}
-                or{" "}
-                <Link
-                  href="https://talisman.xyz/download/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[var(--accent)] underline underline-offset-2"
-                >
-                  Talisman
-                </Link>
-                , then return here and connect it.
-              </p>
-              <p className="mt-2">
-                SIWE is the only sign-in door. There is no email signup by design.{" "}
-                <Link
-                  href="https://averray.com"
-                  className="text-[var(--accent)] underline underline-offset-2"
-                >
-                  What is Averray?
-                </Link>
-              </p>
-            </div>
+            <WalletInstallGuidance
+              provider={walletProvider}
+              showBrowseLink={walletProvider === "unavailable"}
+            />
             <Button
               size="lg"
               onClick={handleSignIn}
@@ -187,11 +151,6 @@ function SignInContent() {
               <Wallet className="h-4 w-4" />
               {pending ? "Signing…" : walletProvider === "unavailable" ? "Install a wallet to sign in" : "Sign in with wallet"}
             </Button>
-            {walletProvider === "unavailable" ? (
-              <Link href="/work" className="text-sm font-semibold text-[var(--accent)] underline underline-offset-4">
-                Browse paid work without a wallet →
-              </Link>
-            ) : null}
             {auth.lastReason ? (
               <p className="text-xs text-[var(--warn)]">{auth.lastReason}</p>
             ) : null}
