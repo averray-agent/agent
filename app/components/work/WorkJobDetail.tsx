@@ -14,10 +14,12 @@ import { useAuth } from "@/lib/auth/use-auth";
 import { useWalletProvider } from "@/lib/auth/use-wallet-provider";
 import { claimActionReadiness } from "@/lib/work/claim-readiness.js";
 import { markAppMilestone } from "@/lib/ui/app-performance.js";
+import { WalletInstallGuidance } from "@/components/auth/WalletInstallGuidance";
 import {
   buildClaimTerms,
   filterHumanWorkListings,
   isHumanWorkListing,
+  jobDefinitionFailureKind,
   jobDefinitionRawUrl,
   serializeJobDefinition,
   verificationDepthStatement,
@@ -137,6 +139,9 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
   }
 
   if (definitionQuery.error) {
+    if (jobDefinitionFailureKind(definitionQuery.error) === "not_found") {
+      return <MissingTask />;
+    }
     return <ReadFailure title="This task could not be loaded" body="The live definition is unreadable, so no terms or claim action are being guessed." retry={() => void definitionQuery.mutate()} />;
   }
 
@@ -204,17 +209,21 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
         </p>
       ) : null}
       {claimError ? <p className="rounded-[var(--radius-sm)] bg-[var(--warn-soft)] px-4 py-3 text-sm text-[var(--warn)]" role="alert">{claimError}</p> : null}
-      <div className="flex flex-wrap items-center gap-3">
-        <Button size="lg" onClick={() => void handleClaimAction()} disabled={signing || claiming || !actionReadiness.enabled || (auth.authenticated && !canClaim)}>
-          {auth.authenticated ? <CheckCircle2 className="h-4 w-4" /> : <Wallet className="h-4 w-4" />}
-          {signing ? "Waiting for wallet…" : claiming ? "Claiming…" : auth.authenticated ? "Claim this job" : "Check wallet"}
-        </Button>
-        <p className="max-w-xl text-xs leading-relaxed text-[var(--muted)]">
-          {auth.authenticated
-            ? "The claim uses the same idempotent job endpoint as agent workers. It does not create a different kind of job."
-            : "Your wallet is requested here, not while browsing. SIWE proves the claimant identity; no email account is created."}
-        </p>
-      </div>
+      {!auth.authenticated && walletProvider === "unavailable" ? (
+        <WalletInstallGuidance provider={walletProvider} showBrowseLink />
+      ) : (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button size="lg" onClick={() => void handleClaimAction()} disabled={signing || claiming || !actionReadiness.enabled || (auth.authenticated && !canClaim)}>
+            {auth.authenticated ? <CheckCircle2 className="h-4 w-4" /> : <Wallet className="h-4 w-4" />}
+            {signing ? "Waiting for wallet…" : claiming ? "Claiming…" : auth.authenticated ? "Claim this job" : "Check wallet"}
+          </Button>
+          <p className="max-w-xl text-xs leading-relaxed text-[var(--muted)]">
+            {auth.authenticated
+              ? "The claim uses the same idempotent job endpoint as agent workers. It does not create a different kind of job."
+              : "Your wallet is requested here, not while browsing. SIWE proves the claimant identity; no email account is created."}
+          </p>
+        </div>
+      )}
       <p className={`text-sm ${actionReadiness.enabled ? "text-[var(--muted)]" : "font-medium text-[var(--warn)]"}`} role="status" data-claim-readiness={actionReadiness.enabled ? "ready" : "blocked"}>
         {actionReadiness.reason}
       </p>
@@ -241,6 +250,23 @@ function DefinitionList({ title, items, empty }: { title: string; items: string[
 
 function DetailLoading() {
   return <div className="grid gap-5"><Skeleton className="h-5 w-36" /><Skeleton className="h-24 w-full" /><div className="grid gap-4 lg:grid-cols-2"><Skeleton className="h-48" /><Skeleton className="h-48" /></div><Skeleton className="h-64" /></div>;
+}
+
+function MissingTask() {
+  return (
+    <Card className="mx-auto w-full max-w-2xl">
+      <CardContent className="py-8">
+        <p className="eyebrow text-[var(--warn)]">Task not found</p>
+        <h1 className="mt-2 text-2xl font-semibold">This task does not exist.</h1>
+        <p className="mt-3 text-sm leading-relaxed text-[var(--muted)]">
+          Check the task link or return to the live work catalogue. Repeated requests cannot create a missing task.
+        </p>
+        <a className="mt-5 inline-flex text-sm font-semibold text-[var(--accent)] underline underline-offset-4" href="/work">
+          Browse open work →
+        </a>
+      </CardContent>
+    </Card>
+  );
 }
 
 function ReadFailure({ title, body, retry, compact = false }: { title: string; body: string; retry: () => void; compact?: boolean }) {

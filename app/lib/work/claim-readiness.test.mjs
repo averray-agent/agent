@@ -70,3 +70,14 @@ test("job detail links the canonical raw definition and copies the fetched JSON"
     /navigator\.clipboard\.writeText\(serializeJobDefinition\(definition\)\)/u
   );
 });
+
+test("missing jobs carry terminal 404 copy and no retry action", () => {
+  assert.match(workDetailSource, /jobDefinitionFailureKind\(definitionQuery\.error\) === "not_found"/u);
+  const missingTask = workDetailSource.slice(
+    workDetailSource.indexOf("function MissingTask"),
+    workDetailSource.indexOf("function ReadFailure")
+  );
+  assert.match(missingTask, /This task does not exist\./u);
+  assert.match(missingTask, /href="\/work"[\s\S]*Browse open work/u);
+  assert.doesNotMatch(missingTask, /Retry|onClick/u);
+});

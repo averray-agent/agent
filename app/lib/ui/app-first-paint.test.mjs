@@ -14,6 +14,9 @@ test("app root serves an honest choice wall instead of forcing the heavy overvie
   assert.match(entry, /Work is visible before a wallet is required\./u);
   assert.match(entry, /href="\/sign-in"/u);
   assert.match(entry, /href="\/work"/u);
+  assert.match(entry, /href="https:\/\/averray\.com"/u);
+  assert.match(entry, /href="https:\/\/averray\.com\/trust\/"/u);
+  assert.match(entry, /href="https:\/\/averray\.com\/agents\/"/u);
 });
 
 test("first-paint instrumentation separates navigation, blockers, and live-data milestones", () => {

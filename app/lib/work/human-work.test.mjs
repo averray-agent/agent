@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import {
   buildClaimTerms,
   filterHumanWorkListings,
+  jobDefinitionFailureKind,
   jobDefinitionRawUrl,
   priorityWindowDisplay,
   publicReceiptUrl,
@@ -14,6 +15,13 @@ import {
   workJobIdFromPath,
   workSessionIdFromPath
 } from "./human-work.js";
+
+test("job definition 404 is missing while outages remain retryable read failures", () => {
+  assert.equal(jobDefinitionFailureKind({ status: 404 }), "not_found");
+  assert.equal(jobDefinitionFailureKind({ status: 500 }), "unreadable");
+  assert.equal(jobDefinitionFailureKind(new TypeError("Failed to fetch")), "unreadable");
+  assert.equal(jobDefinitionFailureKind(null), null);
+});
 
 test("work catalogue loading banner clears for loaded and empty results", () => {
   assert.equal(workCatalogueIsPending({ isLoading: true, data: undefined }), true);
