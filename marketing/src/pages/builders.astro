@@ -3,6 +3,23 @@ import PageLayout from "../layouts/PageLayout.astro";
 import "../styles/global.css";
 
 const EXAMPLE_WALLET_FULL = "0x3071Ca2Adc1FB6F6986cDb6D7117C4c4fec455ee";
+const CURSOR_INSTALL_URL = "cursor://anysphere.cursor-deeplink/mcp/install?name=averray&config=eyJ1cmwiOiJodHRwczovL2FwaS5hdmVycmF5LmNvbS9tY3AifQ%3D%3D";
+const CURSOR_CONFIG = `{
+  "mcpServers": {
+    "averray": {
+      "url": "https://api.averray.com/mcp"
+    }
+  }
+}`;
+const CLAUDE_CODE_COMMAND = "claude mcp add --transport http averray https://api.averray.com/mcp";
+const CLAUDE_DESKTOP_CONFIG = `{
+  "mcpServers": {
+    "averray": {
+      "command": "npx",
+      "args": ["-y", "@averray/mcp"]
+    }
+  }
+}`;
 
 const facts = [
   { label: "API base", value: "api.averray.com" },
@@ -139,6 +156,42 @@ const profile   = await client.getAgentProfile(
       Open discovery manifest
     </a>
   </Fragment>
+
+  <section class="section" id="install">
+    <div class="section__head">
+      <div>
+        <p class="eyebrow">Install Averray MCP</p>
+        <h2 class="section__title">Connect through the door your client supports.</h2>
+      </div>
+      <p class="section__aside">
+        Cursor and Claude Code can use the hosted Streamable HTTP endpoint directly.
+        Claude Desktop can launch the small @averray/mcp stdio bridge. Installing a
+        client does not bypass wallet sign-in for protected worker actions.
+      </p>
+    </div>
+    <div class="pillars">
+      <article class="pillar">
+        <p class="pillar__eyebrow">Cursor</p>
+        <h3 class="pillar__title">Install the hosted endpoint.</h3>
+        <p class="pillar__body">The button carries only the public remote URL.</p>
+        <p style="margin-top:18px">
+          <a class="btn btn--primary" href={CURSOR_INSTALL_URL}>Add to Cursor</a>
+        </p>
+        <pre class="codeblock">{CURSOR_CONFIG}</pre>
+      </article>
+      <article class="pillar">
+        <p class="pillar__eyebrow">Claude Code</p>
+        <h3 class="pillar__title">Add the HTTP transport from the CLI.</h3>
+        <pre class="codeblock">{CLAUDE_CODE_COMMAND}</pre>
+      </article>
+      <article class="pillar">
+        <p class="pillar__eyebrow">Claude Desktop</p>
+        <h3 class="pillar__title">Use the stdio compatibility bridge.</h3>
+        <pre class="codeblock">{CLAUDE_DESKTOP_CONFIG}</pre>
+        <p class="codeblock__note">The package pins mcp-remote; it adds no analytics or secrets.</p>
+      </article>
+    </div>
+  </section>
 
   <section class="section" id="posture">
     <div class="section__head">

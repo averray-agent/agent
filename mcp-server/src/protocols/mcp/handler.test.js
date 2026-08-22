@@ -7,6 +7,7 @@ import {
   createMcpRoute,
   LEGACY_MCP_VERSION,
   MCP_BROWSER_INFO,
+  MCP_INSTALL,
   MCP_SERVER_INFO,
   MODERN_MCP_VERSION,
   SUPPORTED_MCP_VERSIONS
@@ -131,6 +132,30 @@ test("static GET /mcp explains the protocol before auth and points browsers to p
   assert.equal(result.headers["cache-control"], "public, max-age=300");
   assert.deepEqual(result.body, MCP_BROWSER_INFO);
   assert.equal(result.body.connect.clientConfig.mcpServers.averray.url, "https://api.averray.com/mcp");
+  assert.deepEqual(result.body.install, MCP_INSTALL);
+  assert.equal(result.body.install.npm.package, "@averray/mcp");
+  assert.equal(
+    result.body.install.claudeCode.command,
+    "claude mcp add --transport http averray https://api.averray.com/mcp"
+  );
+  assert.deepEqual(result.body.install.claudeDesktop.clientConfig, {
+    mcpServers: {
+      averray: {
+        command: "npx",
+        args: ["-y", "@averray/mcp"]
+      }
+    }
+  });
+
+  const cursorUrl = new URL(result.body.install.cursor.deeplink);
+  assert.equal(cursorUrl.protocol, "cursor:");
+  assert.equal(cursorUrl.hostname, "anysphere.cursor-deeplink");
+  assert.equal(cursorUrl.pathname, "/mcp/install");
+  assert.equal(cursorUrl.searchParams.get("name"), "averray");
+  assert.deepEqual(
+    JSON.parse(Buffer.from(cursorUrl.searchParams.get("config"), "base64").toString("utf8")),
+    { url: "https://api.averray.com/mcp" }
+  );
   assert.equal(result.body.plainHttpAlternative.path, "/verify/profiles");
   assert.deepEqual(limitCalls, []);
 });

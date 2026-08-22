@@ -2219,6 +2219,19 @@ test("http smoke: discovery manifest is served at both /agent-tools.json and the
     assert.equal(mcpInfo.type, "mcp_protocol_endpoint");
     assert.equal(mcpInfo.description, "This is an MCP protocol endpoint, not a browser page.");
     assert.equal(mcpInfo.connect.clientConfig.mcpServers.averray.url, "https://api.averray.com/mcp");
+    assert.equal(mcpInfo.install.npm.command, "npx -y @averray/mcp");
+    assert.equal(
+      mcpInfo.install.cursor.deeplink,
+      "cursor://anysphere.cursor-deeplink/mcp/install?name=averray&config=eyJ1cmwiOiJodHRwczovL2FwaS5hdmVycmF5LmNvbS9tY3AifQ%3D%3D"
+    );
+    assert.equal(
+      mcpInfo.install.claudeCode.command,
+      "claude mcp add --transport http averray https://api.averray.com/mcp"
+    );
+    assert.deepEqual(
+      mcpInfo.install.claudeDesktop.clientConfig.mcpServers.averray.args,
+      ["-y", "@averray/mcp"]
+    );
     assert.equal(mcpInfo.plainHttpAlternative.path, "/verify/profiles");
     assert.deepEqual(modernDiscover.result.supportedVersions, [...SUPPORTED_MCP_VERSIONS]);
     assert.equal(modernDiscover.result._meta["io.modelcontextprotocol/serverInfo"].name, "averray-agent-platform");

@@ -124,6 +124,11 @@ jobs:
       - name: Backend local suite (unit + HTTP smoke)
         run: npm test --workspace mcp-server
 
+      - name: MCP npm shim tests and dry pack proof
+        run: |
+          npm run test:mcp-package
+          npm run publish:dry --workspace @averray/mcp
+
       - name: Ops script regression tests
         run: npm run test:ops
 
