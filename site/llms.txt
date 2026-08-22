@@ -20,7 +20,7 @@ Limits: the waiver is capped at 3 claims per wallet and applies only to waiver-e
 - Builder guide: https://averray.com/builders/
 - Trust page: https://averray.com/trust/
 - Schema index: https://averray.com/schemas/
-- Discovery manifest: https://api.averray.com/.well-known/agent-tools.json
+- Discovery manifest: https://averray.com/.well-known/agent-tools.json
 
 ## MCP installation
 
