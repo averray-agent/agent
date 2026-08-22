@@ -272,6 +272,13 @@ async function runHostedStackFixture({
     ["/site/get-started", "https://averray.com/agents/"],
     ["/app/post", "https://app.averray.com/poster/"],
     ["/app/verify", "https://app.averray.com/runs/"],
+    ["/redirect/www/mcp", "https://averray.com/builders/#install"],
+    ["/redirect/www/install", "https://averray.com/builders/#install"],
+    ["/redirect/www/cursor", "https://averray.com/builders/#install"],
+    ["/redirect/www/claude", "https://averray.com/builders/#install"],
+    ["/redirect/app/mcp", "https://averray.com/builders/#install"],
+    ["/redirect/app/install", "https://averray.com/builders/#install"],
+    ["/redirect/app/connect", "https://averray.com/builders/#install"],
     ["/api/jobs/open", "https://api.averray.com/jobs"]
   ]);
   const requestCounts = new Map();
@@ -374,6 +381,13 @@ async function runHostedStackFixture({
       APP_URL: `${baseUrl}/app`,
       APP_POST_REDIRECT_URL: `${baseUrl}/app/post`,
       APP_VERIFY_REDIRECT_URL: `${baseUrl}/app/verify`,
+      WWW_MCP_INSTALL_REDIRECT_URL: `${baseUrl}/redirect/www/mcp`,
+      WWW_INSTALL_REDIRECT_URL: `${baseUrl}/redirect/www/install`,
+      WWW_CURSOR_INSTALL_REDIRECT_URL: `${baseUrl}/redirect/www/cursor`,
+      WWW_CLAUDE_INSTALL_REDIRECT_URL: `${baseUrl}/redirect/www/claude`,
+      APP_MCP_INSTALL_REDIRECT_URL: `${baseUrl}/redirect/app/mcp`,
+      APP_INSTALL_REDIRECT_URL: `${baseUrl}/redirect/app/install`,
+      APP_CONNECT_INSTALL_REDIRECT_URL: `${baseUrl}/redirect/app/connect`,
       API_HEALTH_URL: `${baseUrl}/health`,
       API_MCP_INFO_URL: `${baseUrl}/mcp`,
       API_POOL_URL: `${baseUrl}/pool`,

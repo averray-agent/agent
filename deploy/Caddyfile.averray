@@ -45,6 +45,10 @@
 # routing agree with what the markup already declares.
 www.averray.com {
   import security_headers
+
+  @installAliases path /mcp /mcp/ /install /install/ /cursor /cursor/ /claude /claude/
+  redir @installAliases https://averray.com/builders/#install 301
+
   redir https://averray.com{uri} permanent
 }
 
@@ -130,6 +134,9 @@ averray.com {
 app.averray.com {
   import security_headers
   encode zstd gzip
+
+  @installAliases path /mcp /mcp/ /install /install/ /connect /connect/
+  redir @installAliases https://averray.com/builders/#install 301
 
   # Public records live on the public site; the work board lives at /work in
   # this app. Keep the bare /receipts operator page local while forwarding

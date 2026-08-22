@@ -22,6 +22,13 @@ DISCOVERY_URL=${DISCOVERY_URL:-https://averray.com/.well-known/agent-tools.json}
 APP_URL=${APP_URL:-https://app.averray.com/}
 APP_POST_REDIRECT_URL=${APP_POST_REDIRECT_URL:-https://app.averray.com/post}
 APP_VERIFY_REDIRECT_URL=${APP_VERIFY_REDIRECT_URL:-https://app.averray.com/verify}
+WWW_MCP_INSTALL_REDIRECT_URL=${WWW_MCP_INSTALL_REDIRECT_URL:-https://www.averray.com/mcp}
+WWW_INSTALL_REDIRECT_URL=${WWW_INSTALL_REDIRECT_URL:-https://www.averray.com/install}
+WWW_CURSOR_INSTALL_REDIRECT_URL=${WWW_CURSOR_INSTALL_REDIRECT_URL:-https://www.averray.com/cursor}
+WWW_CLAUDE_INSTALL_REDIRECT_URL=${WWW_CLAUDE_INSTALL_REDIRECT_URL:-https://www.averray.com/claude}
+APP_MCP_INSTALL_REDIRECT_URL=${APP_MCP_INSTALL_REDIRECT_URL:-https://app.averray.com/mcp}
+APP_INSTALL_REDIRECT_URL=${APP_INSTALL_REDIRECT_URL:-https://app.averray.com/install}
+APP_CONNECT_INSTALL_REDIRECT_URL=${APP_CONNECT_INSTALL_REDIRECT_URL:-https://app.averray.com/connect}
 API_HEALTH_URL=${API_HEALTH_URL:-https://api.averray.com/health}
 API_MCP_INFO_URL=${API_MCP_INFO_URL:-https://api.averray.com/mcp}
 API_POOL_URL=${API_POOL_URL:-https://api.averray.com/pool}
@@ -301,6 +308,13 @@ assert_redirect "$PUBLIC_WORK_SUBPATH_REDIRECT_URL" "https://app.averray.com/wor
 assert_redirect "$PUBLIC_GET_STARTED_REDIRECT_URL" "https://averray.com/agents/" "Public get-started path"
 assert_redirect "$APP_POST_REDIRECT_URL" "https://app.averray.com/poster/" "App posting alias"
 assert_redirect "$APP_VERIFY_REDIRECT_URL" "https://app.averray.com/runs/" "App verification alias"
+assert_redirect "$WWW_MCP_INSTALL_REDIRECT_URL" "https://averray.com/builders/#install" "WWW MCP install alias"
+assert_redirect "$WWW_INSTALL_REDIRECT_URL" "https://averray.com/builders/#install" "WWW install alias"
+assert_redirect "$WWW_CURSOR_INSTALL_REDIRECT_URL" "https://averray.com/builders/#install" "WWW Cursor install alias"
+assert_redirect "$WWW_CLAUDE_INSTALL_REDIRECT_URL" "https://averray.com/builders/#install" "WWW Claude install alias"
+assert_redirect "$APP_MCP_INSTALL_REDIRECT_URL" "https://averray.com/builders/#install" "App MCP install alias"
+assert_redirect "$APP_INSTALL_REDIRECT_URL" "https://averray.com/builders/#install" "App install alias"
+assert_redirect "$APP_CONNECT_INSTALL_REDIRECT_URL" "https://averray.com/builders/#install" "App connect install alias"
 assert_redirect "$API_JOBS_OPEN_REDIRECT_URL" "https://api.averray.com/jobs" "API open-jobs alias"
 
 receipt_shell_html="$(fetch "$PUBLIC_RECEIPT_JUNK_URL")"

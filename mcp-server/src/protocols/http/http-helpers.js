@@ -1,9 +1,9 @@
 import { ValidationError } from "../../core/errors.js";
 
-export function respond(response, statusCode, payload, extraHeaders = {}) {
+export function respond(response, statusCode, payload, extraHeaders = {}, options = {}) {
   const headers = buildResponseHeaders(response, "application/json", extraHeaders);
   response.writeHead(statusCode, headers);
-  response.end(JSON.stringify(payload, exactJsonReplacer, 2));
+  response.end(options.headOnly ? undefined : JSON.stringify(payload, exactJsonReplacer, 2));
 }
 
 function exactJsonReplacer(_key, value) {

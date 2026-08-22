@@ -7,6 +7,7 @@ import {
   createMcpRoute,
   LEGACY_MCP_VERSION,
   MCP_BROWSER_INFO,
+  MCP_CORS_HEADERS,
   MCP_INSTALL,
   MCP_SERVER_INFO,
   MODERN_MCP_VERSION,
@@ -59,9 +60,9 @@ async function call(handler, body, headers = {}) {
   };
 }
 
-async function callGet(handler) {
+async function callRead(handler, method = "GET") {
   const request = {
-    method: "GET",
+    method,
     headers: {},
     socket: { remoteAddress: "198.51.100.8" }
   };
@@ -75,6 +76,8 @@ async function callGet(handler) {
     body: text ? JSON.parse(text) : undefined
   };
 }
+
+const callGet = (handler) => callRead(handler, "GET");
 
 function capturedResponse() {
   return {
@@ -158,6 +161,34 @@ test("static GET /mcp explains the protocol before auth and points browsers to p
   );
   assert.equal(result.body.plainHttpAlternative.path, "/verify/profiles");
   assert.deepEqual(limitCalls, []);
+});
+
+test("HEAD /mcp mirrors GET headers with an empty body", async () => {
+  const { handler } = createHarness({
+    authMiddleware: async () => {
+      throw new Error("HEAD /mcp must not authenticate");
+    }
+  });
+
+  const get = await callRead(handler, "GET");
+  const head = await callRead(handler, "HEAD");
+
+  assert.equal(head.handled, true);
+  assert.equal(head.statusCode, 200);
+  assert.deepEqual(head.headers, get.headers);
+  assert.equal(head.body, undefined);
+});
+
+test("MCP CORS contract is wildcard without cookie credentials", () => {
+  assert.equal(MCP_CORS_HEADERS["access-control-allow-origin"], "*");
+  assert.match(MCP_CORS_HEADERS["access-control-allow-methods"], /POST/u);
+  assert.match(MCP_CORS_HEADERS["access-control-allow-methods"], /GET/u);
+  assert.match(MCP_CORS_HEADERS["access-control-allow-methods"], /OPTIONS/u);
+  for (const header of ["Mcp-Session-Id", "Mcp-Method", "Content-Type", "Authorization"]) {
+    assert.match(MCP_CORS_HEADERS["access-control-allow-headers"], new RegExp(header, "u"));
+  }
+  assert.equal(MCP_CORS_HEADERS["access-control-expose-headers"], "Mcp-Session-Id");
+  assert.equal(MCP_CORS_HEADERS["access-control-allow-credentials"], undefined);
 });
 
 test("modern server/discover returns versions, capabilities, and identity without a session", async () => {

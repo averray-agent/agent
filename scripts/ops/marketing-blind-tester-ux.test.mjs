@@ -151,6 +151,19 @@ test("Caddy sends public records and work paths to their canonical domains", asy
   assert.doesNotMatch(caddy, /@publicReceiptSubpath path \/receipts(?:\s|$)/u, "bare /receipts must stay in the operator app");
 });
 
+test("Caddy sends guessed MCP install aliases to the canonical builders install section", async () => {
+  const caddy = await readFile(new URL("deploy/Caddyfile.averray", REPO_ROOT), "utf8");
+
+  assert.match(
+    caddy,
+    /www\.averray\.com \{[\s\S]*@installAliases path \/mcp \/mcp\/ \/install \/install\/ \/cursor \/cursor\/ \/claude \/claude\/[\s\S]*redir @installAliases https:\/\/averray\.com\/builders\/#install 301/u
+  );
+  assert.match(
+    caddy,
+    /app\.averray\.com \{[\s\S]*@installAliases path \/mcp \/mcp\/ \/install \/install\/ \/connect \/connect\/[\s\S]*redir @installAliases https:\/\/averray\.com\/builders\/#install 301/u
+  );
+});
+
 test("marketing clips the sticky nav 100vw band without creating a horizontal scroll container", async () => {
   const css = await readFile(new URL("marketing/src/styles/global.css", REPO_ROOT), "utf8");
 

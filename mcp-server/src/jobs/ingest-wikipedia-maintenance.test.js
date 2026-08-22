@@ -29,7 +29,7 @@ test("toPlatformJob produces an Averray-attributed Wikipedia proposal job", () =
   const job = toPlatformJob(ARTICLE, 88);
 
   assert.equal(job.id, "wiki-en-123-citation_repair-example-article");
-  assert.equal(job.title, "Audit and report on Wikipedia citations: Example article");
+  assert.equal(job.title, 'Audit and report on Wikipedia citations: "Example article"');
   assert.equal(job.category, "wikipedia");
   assert.equal(job.jobType, "review");
   assert.equal(job.rewardAsset, "USDC");
@@ -89,6 +89,15 @@ test("toPlatformJob produces an Averray-attributed Wikipedia proposal job", () =
     "averray_attribution",
     "human_review_ready"
   ]);
+});
+
+test("Wikipedia ingestion quotes punctuation-only article names without hiding the disambiguator", () => {
+  const job = toPlatformJob({
+    ...ARTICLE,
+    title: "? (2011 film)"
+  });
+
+  assert.equal(job.title, 'Audit and report on Wikipedia citations: "?" (2011 film)');
 });
 
 test("ingestWikipediaMaintenance turns category members into jobs", async () => {

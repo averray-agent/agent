@@ -69,7 +69,9 @@ export function resolveHubNetwork(chainId) {
   return HUB_NETWORKS[Number(chainId)] ?? HUB_NETWORKS[POLKADOT_HUB_TESTNET_CHAIN_ID];
 }
 
-const DISCOVERY_PUBLIC_ENDPOINTS = [
+const withDefaultGetMethod = (entries) => entries.map((entry) => ({ method: "GET", ...entry }));
+
+const DISCOVERY_PUBLIC_ENDPOINTS = withDefaultGetMethod([
   { path: "/health", description: "Liveness plus serviceHealth/capabilityHealth for state store, submitted-job settlement scheduler, blockchain, treasury mutations, XCM observer, indexer, and gas sponsor." },
   { path: "/metrics", description: "Prometheus text-format metrics. Bearer-gated in production via METRICS_BEARER_TOKEN." },
   { path: "/llms.txt", description: "Agent-adjusted orientation mirror served on the API host." },
@@ -78,7 +80,7 @@ const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/pool", description: "Public live DepositPool caps, headroom, yield, withdrawal, and risk disclosure; a wallet bearer token adds principal vesting and capital-backed capacity." },
   { path: "/jobs", description: "Public job catalog (no auth)." },
   { path: "/jobs/definition?jobId=X", description: "Canonical job definition by id." },
-  { path: "/jobs/validate-submission", description: "Read-only draft validation against a job's output schema." },
+  { method: "POST", path: "/jobs/validate-submission", description: "Read-only draft validation against a job's output schema." },
   { path: "/jobs/tiers", description: "Claim-tier skill requirements — the starter / pro / elite ladder that gates what a wallet may claim." },
   { path: "/session/state-machine", description: "Canonical session lifecycle graph for builders and operators." },
   { path: "/schemas/jobs", description: "List of built-in job schemas available for structured work." },
@@ -87,7 +89,7 @@ const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/badges/:sessionId", description: "Averray Agent Badge v1 metadata for a completed session." },
   { path: "/receipts/:receiptId", description: "Immutable Averray Work Receipt v1 JSON addressed by its canonical content hash." },
   { path: "/verify/profiles", description: "Published immutable verification profiles, pinned versions, limits, success criteria, and flat Base USDC pricing." },
-  { path: "/verify/runs", description: "Payment-gated standalone verification-run creation; the separate payment-intake adapter must authorize the exact request before work starts." },
+  { method: "POST", path: "/verify/runs", description: "Payment-gated standalone verification-run creation; the separate payment-intake adapter must authorize the exact request before work starts." },
   { path: "/verify/runs/:runId", description: "Poll one standalone verification run by its opaque run id." },
   { path: "/agents", description: "Recent public agent directory derived from live session and reputation data." },
   { path: "/agents/:wallet", description: "Averray Agent Profile v1 - aggregate reputation, stats, earned badges." },
@@ -95,9 +97,9 @@ const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/verifier/handlers", description: "List of supported verifier modes." },
   { path: "/gas/health", description: "Pimlico ERC-4337 gas-sponsor (paymaster) health. Distinct from starter-tier gas: starter jobs are claimed and settled on-chain by the backend signer, so they earn from zero even when this paymaster reads 'disabled'." },
   { path: "/gas/capabilities", description: "Available ERC-4337 sponsorship features." }
-];
+]);
 
-const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
+const DISCOVERY_AUTHENTICATED_ENDPOINTS = withDefaultGetMethod([
   {
     path: "/account",
     description:
@@ -120,34 +122,36 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
     description: "Newest-first content-addressed work receipts belonging only to the signed-in wallet."
   },
   {
+    method: "POST",
     path: "/account/withdraw/transactions",
     description: "Complete wallet-bound unsigned AgentAccountCore withdrawal and optional onward ERC-20 transfer. The owner signs, pays DOT gas, and broadcasts."
   },
-  { path: "/pool/transactions", description: "Build wallet-bound unsigned approve/deposit or redeem templates. The platform never signs, receives, brokers, or relays depositor funds." },
+  { method: "POST", path: "/pool/transactions", description: "Build wallet-bound unsigned approve/deposit or redeem templates. The platform never signs, receives, brokers, or relays depositor funds." },
   { path: "/credit", description: "Live L1 CreditPool state plus receipt-graph L2 cash and L3 posting limits, debt, and sweep truth." },
-  { path: "/credit/transactions", description: "Build wallet-bound L1 templates or L2/L3 consent payloads with exact AAC sweep-repayment authorizations." },
-  { path: "/credit/consent", description: "Store a borrower-signed CreditBook terms blob and its exact, rolling repayment authorizations." },
-  { path: "/credit/interest", description: "Proven workers can register interest in a small zero-interest cash line (pilot). This opt-in records interest only and cannot approve credit." },
+  { method: "POST", path: "/credit/transactions", description: "Build wallet-bound L1 templates or L2/L3 consent payloads with exact AAC sweep-repayment authorizations." },
+  { method: "POST", path: "/credit/consent", description: "Store a borrower-signed CreditBook terms blob and its exact, rolling repayment authorizations." },
+  { method: "POST", path: "/credit/interest", description: "Proven workers can register interest in a small zero-interest cash line (pilot). This opt-in records interest only and cannot approve credit." },
   { path: "/reputation", description: "Current reputation scores + public reputation tier." },
-  { path: "/auth/refresh", description: "Rotate the caller's wallet JWT — revokes the old jti and mints a new one with the same sub + roles. Lets operators avoid re-SIWE every AUTH_TOKEN_TTL_SECONDS." },
+  { method: "POST", path: "/auth/refresh", description: "Rotate the caller's wallet JWT — revokes the old jti and mints a new one with the same sub + roles. Lets operators avoid re-SIWE every AUTH_TOKEN_TTL_SECONDS." },
   { path: "/jobs/recommendations", description: "Tier-gated recommendation list with fit score + unlock hints." },
   { path: "/jobs/preflight?jobId=X", description: "GET-only per-job eligibility + claim-stake + fee-waiver + claim-tier gate snapshot. POST returns 405 Method Not Allowed." },
   { path: "/jobs/explain-eligibility", description: "Per-wallet reason why a job is eligible or blocked (used by the explainEligibility tool)." },
   { path: "/jobs/estimate-reward", description: "Profile-aware net-reward estimate after fees, waivers, and stake (used by the estimateNetReward tool)." },
   { path: "/jobs/:id/estimate", description: "Path-addressed REST twin of estimateNetReward for the signed-in wallet." },
-  { path: "/shares", description: "Create an expiring signed read-only URL for agent, session, dispute, or policy snapshots." },
+  { method: "POST", path: "/shares", description: "Create an expiring signed read-only URL for agent, session, dispute, or policy snapshots." },
   { path: "/admin/jobs/timeline", description: "Admin-gated job/session timeline and lineage endpoint." },
-  { path: "/admin/jobs/ingest/github", description: "Admin-gated GitHub issue ingestion preview/create endpoint with optional idempotencyKey replay." },
-  { path: "/admin/jobs/ingest/openapi", description: "Admin-gated OpenAPI quality audit ingestion preview/create endpoint with optional idempotencyKey replay." },
-  { path: "/admin/jobs/ingest/open-data", description: "Admin-gated Data.gov open-data quality audit ingestion preview/create endpoint with optional idempotencyKey replay." },
-  { path: "/admin/jobs/ingest/osv", description: "Admin-gated OSV npm advisory ingestion preview/create endpoint with optional idempotencyKey replay." },
-  { path: "/admin/jobs/ingest/standards", description: "Admin-gated standards freshness ingestion preview/create endpoint with optional idempotencyKey replay." },
-  { path: "/admin/jobs/ingest/wikipedia", description: "Admin-gated Wikipedia maintenance ingestion preview/create endpoint with optional idempotencyKey replay." },
-  { path: "/admin/service-tokens", description: "Admin-gated issue/list surface for grant-backed scoped service tokens." },
-  { path: "/admin/service-tokens/:id/rotate", description: "Admin-gated rotate flow: revoke old grant and return one new service-token secret." },
-  { path: "/admin/service-tokens/:id/revoke", description: "Admin-gated revoke flow for a grant-backed service token." },
+  { method: "POST", path: "/admin/jobs/ingest/github", description: "Admin-gated GitHub issue ingestion preview/create endpoint with optional idempotencyKey replay." },
+  { method: "POST", path: "/admin/jobs/ingest/openapi", description: "Admin-gated OpenAPI quality audit ingestion preview/create endpoint with optional idempotencyKey replay." },
+  { method: "POST", path: "/admin/jobs/ingest/open-data", description: "Admin-gated Data.gov open-data quality audit ingestion preview/create endpoint with optional idempotencyKey replay." },
+  { method: "POST", path: "/admin/jobs/ingest/osv", description: "Admin-gated OSV npm advisory ingestion preview/create endpoint with optional idempotencyKey replay." },
+  { method: "POST", path: "/admin/jobs/ingest/standards", description: "Admin-gated standards freshness ingestion preview/create endpoint with optional idempotencyKey replay." },
+  { method: "POST", path: "/admin/jobs/ingest/wikipedia", description: "Admin-gated Wikipedia maintenance ingestion preview/create endpoint with optional idempotencyKey replay." },
+  { path: "/admin/service-tokens", description: "Admin-gated list surface for grant-backed scoped service tokens." },
+  { method: "POST", path: "/admin/service-tokens", description: "Admin-gated issue surface for a grant-backed scoped service token." },
+  { method: "POST", path: "/admin/service-tokens/:id/rotate", description: "Admin-gated rotate flow: revoke old grant and return one new service-token secret." },
+  { method: "POST", path: "/admin/service-tokens/:id/revoke", description: "Admin-gated revoke flow for a grant-backed service token." },
   { path: "/content/:hash", description: "Hash-addressed content blob with read-time disclosure visibility." },
-  { path: "/content/:hash/publish", description: "Owner/admin one-way early publish for private hash-addressed content." },
+  { method: "POST", path: "/content/:hash/publish", description: "Owner/admin one-way early publish for private hash-addressed content." },
   { path: "/disputes", description: "Operator dispute queue derived from sessions requiring human review." },
   { path: "/disputes/:id", description: "Detailed dispute evidence, timeline, verdict, and stake release state." },
   { path: "/admin/sessions", description: "Admin/operator-wide recent sessions across worker wallets." },
@@ -157,7 +161,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   { path: "/sessions", description: "Historical sessions for the signed-in wallet." },
   { path: "/xcm/request?requestId=X", description: "Read one async XCM request by id (owner/admin scoped)." },
   { path: "/events", description: "SSE stream of platform events. Auth via ?token=." }
-];
+]);
 
 const AUTH_ENTRYPOINTS = ["/auth/nonce", "/auth/verify", "/auth/refresh", "/auth/logout"];
 
