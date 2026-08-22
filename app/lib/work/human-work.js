@@ -7,6 +7,7 @@ const TERMINAL_SESSION_STATUSES = new Set([
   "timed_out",
   "chain_state_diverged"
 ]);
+export const WORK_LAST_VISIT_STORAGE_KEY = "averray.work.lastVisitAt:v1";
 
 export function extractJobRows(payload) {
   if (Array.isArray(payload)) return payload;
@@ -25,6 +26,19 @@ export function isHumanWorkListing(job) {
 
 export function filterHumanWorkListings(payload) {
   return extractJobRows(payload).filter(isHumanWorkListing);
+}
+
+export function parseWorkLastVisit(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const parsed = /^[0-9]+$/u.test(raw) ? Number(raw) : Date.parse(raw);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+export function isJobNewSince(job, since) {
+  if (!Number.isSafeInteger(since) || since < 0) return false;
+  const listedAt = Date.parse(String(job?.listedAt ?? ""));
+  return Number.isFinite(listedAt) && listedAt > since;
 }
 
 export function workCatalogueIsPending(request) {

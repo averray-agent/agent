@@ -86,7 +86,10 @@ const JOBS = [
 test("public jobs response keeps bare array for legacy callers", () => {
   const response = buildPublicJobsResponse(JOBS, new URLSearchParams());
 
-  assert.equal(response, JOBS);
+  assert.equal(Array.isArray(response), true);
+  assert.equal(response.length, JOBS.length);
+  assert.equal(response[0].listedAt, "2026-07-28T10:00:00.000Z");
+  assert.equal(Object.hasOwn(JOBS[0], "listedAt"), false, "the read projection must not mutate the catalog");
 });
 
 test("source=external exposes only external rows with poster funding provenance", () => {
@@ -180,6 +183,7 @@ test("public jobs response filters and compacts agent-friendly queries", () => {
     "disposableProof",
     "stake",
     "reward",
+    "listedAt",
     "createdAt",
     "summary",
     "successCriteria",
@@ -197,6 +201,7 @@ test("public jobs response filters and compacts agent-friendly queries", () => {
   assert.equal(response.jobs[0].verifierMode, null);
   assert.equal(response.jobs[0].claimTtlSeconds, null);
   assert.equal(response.jobs[0].requiresSponsoredGas, false);
+  assert.equal(response.jobs[0].listedAt, "2026-04-28T10:00:00.000Z");
   assert.equal(response.jobs[0].disposableProof, false);
   assert.equal(response.jobs[0].successCriteria, "");
   assert.equal(response.jobs[0].definitionUrl, "/jobs/definition?jobId=wiki-en-123-citation-repair-example");
@@ -211,6 +216,39 @@ test("public jobs response filters and compacts agent-friendly queries", () => {
     attributionPolicy: "Averray proposal only / no direct Wikipedia edit",
     outputSchemaUrl: "/schemas/jobs/wikipedia-citation-repair-output.json"
   });
+});
+
+test("since counts strictly newer jobs without filtering the full listing", () => {
+  const boundary = Date.parse("2026-04-28T10:00:00.000Z");
+  const atBoundary = buildPublicJobsResponse(
+    JOBS,
+    new URLSearchParams(`limit=100&since=${boundary}`)
+  );
+  const oneMillisecondBefore = buildPublicJobsResponse(
+    JOBS,
+    new URLSearchParams(`limit=100&since=${boundary - 1}`)
+  );
+  const isoBoundary = buildPublicJobsResponse(
+    JOBS,
+    new URLSearchParams("limit=100&since=2026-04-28T10%3A00%3A00.000Z")
+  );
+
+  assert.equal(atBoundary.jobs.length, JOBS.length, "since annotates and never filters the listing");
+  assert.equal(atBoundary.meta.newSince, 2, "a job listed exactly at since is not new");
+  assert.equal(oneMillisecondBefore.meta.newSince, 3);
+  assert.equal(isoBoundary.meta.newSince, 2);
+  assert.ok(atBoundary.jobs.every((job) => Object.hasOwn(job, "listedAt")));
+});
+
+test("invalid since is ignored without rejecting or hiding jobs", () => {
+  for (const since of ["not-a-date", "2026-04-28", "999999999999999999999999"]) {
+    const response = buildPublicJobsResponse(
+      JOBS,
+      new URLSearchParams({ limit: "100", since })
+    );
+    assert.equal(response.jobs.length, JOBS.length, since);
+    assert.deepEqual(response.meta, { newSince: 0 }, since);
+  }
 });
 
 test("public jobs response filters compact rows by claim state", () => {
@@ -304,7 +342,8 @@ test("public jobs response supports category filters and pagination", () => {
 test("public jobs response allows explicit full format with query params", () => {
   const response = buildPublicJobsResponse(JOBS, new URLSearchParams("source=wikipedia&format=full"));
 
-  assert.equal(response, JOBS);
+  assert.equal(response.length, JOBS.length, "full format keeps the unfiltered legacy listing");
+  assert.ok(response.every((job) => Object.hasOwn(job, "listedAt")));
 });
 
 test("compact rows expose the human-work listing fields without changing the catalogue", async () => {

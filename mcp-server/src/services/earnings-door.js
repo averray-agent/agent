@@ -11,11 +11,19 @@ import {
   EARNINGS_PAYMENT_RELAY_STATUS,
   EARNINGS_WITHDRAWAL_STATEMENT
 } from "../core/earnings-door-copy.js";
+import {
+  DEFAULT_ONBOARDING_WAIVER_CLAIM_COUNT,
+  countClaimedSessions
+} from "../core/claim-economics.js";
 import { ValidationError } from "../core/errors.js";
+import { buildPublicReputation } from "../core/public-reputation.js";
+import { CREDIT_INTEREST_STATEMENT } from "../core/worker-progression.js";
 
 const ACCOUNT_INTERFACE = new Interface(AGENT_ACCOUNT_ABI);
 const TOKEN_INTERFACE = new Interface(ERC20_MOCK_ABI);
 const DEFAULT_ASSET = "USDC";
+export const WITHDRAWAL_STANDING_STATEMENT =
+  "Withdrawing never affects your tier, badges, caps, or eligibility — your standing stays with your wallet.";
 
 function amount(raw, decimals) {
   const value = BigInt(raw ?? 0);
@@ -141,6 +149,8 @@ export class EarningsDoorService {
     stateStore,
     eventBus,
     workerExposurePolicy,
+    workerProgressionService,
+    getReputation,
     gasGrantService,
     provider,
     chainReader
@@ -152,6 +162,8 @@ export class EarningsDoorService {
     this.stateStore = stateStore;
     this.eventBus = eventBus;
     this.workerExposurePolicy = workerExposurePolicy;
+    this.workerProgressionService = workerProgressionService;
+    this.getReputation = getReputation;
     this.gasGrantService = gasGrantService;
     this.chainReader = chainReader ?? (provider ? new EvmEarningsDoorChainReader(provider) : undefined);
   }
@@ -296,6 +308,7 @@ export class EarningsDoorService {
         status: "unavailable",
         reason: "first_withdrawal_gas_grant_unavailable"
       },
+      standing: await this.#standing(owner),
       templates,
       instructions: [
         "Independently decode every template and verify chainId, from, to, function, asset, amount, and destination before signing.",
@@ -395,6 +408,50 @@ export class EarningsDoorService {
         source: "account.available",
         note: "Where a job's claim tier requires stake, this available balance can fund it. Call preflightJob for the exact job-specific amount."
       }
+    };
+  }
+
+  async #standing(wallet) {
+    if (
+      typeof this.workerProgressionService?.getProgression !== "function"
+      || typeof this.getReputation !== "function"
+    ) {
+      throw new Error("Withdrawal standing requires the canonical worker progression and reputation readers.");
+    }
+    const waiverClaimsUsedPromise = this.gateway?.isEnabled?.()
+      && typeof this.gateway?.getWorkerClaimCount === "function"
+      ? this.gateway.getWorkerClaimCount(wallet)
+      : collectWalletSessions(this.stateStore, wallet).then(countClaimedSessions);
+    const [progression, reputation, waiverClaimsUsed] = await Promise.all([
+      this.workerProgressionService.getProgression(wallet),
+      this.getReputation(wallet),
+      waiverClaimsUsedPromise
+    ]);
+    if (!progression) {
+      throw new Error("Withdrawal standing is unavailable for this wallet.");
+    }
+    const creditInterest = {
+      eligible: progression.creditInterest?.eligible === true,
+      registered: progression.creditInterest?.registered === true
+    };
+    return {
+      claimTier: progression.tier,
+      claimTierLabel: "claim tier",
+      reputationTier: buildPublicReputation(reputation).tier,
+      badges: Array.isArray(progression.badges) ? progression.badges.length : 0,
+      waiverSlotsRemaining: Math.max(
+        DEFAULT_ONBOARDING_WAIVER_CLAIM_COUNT - Math.max(0, Number(waiverClaimsUsed) || 0),
+        0
+      ),
+      creditInterest,
+      ...(creditInterest.eligible
+        ? {
+            registerPath: "/credit/interest",
+            creditInterestStatement: CREDIT_INTEREST_STATEMENT
+          }
+        : {}),
+      persists: true,
+      statement: WITHDRAWAL_STANDING_STATEMENT
     };
   }
 

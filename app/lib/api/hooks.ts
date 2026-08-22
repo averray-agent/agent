@@ -64,8 +64,12 @@ export const useStrategyPositions = () => useApi("/account/strategies");
 export const useTreasurySummary = () =>
   useApi("/admin/treasury/summary", { refreshInterval: 30_000 });
 export const useJobs = () => useApi("/jobs");
-export const useHumanWorkJobs = () =>
-  useBoundedApi("/jobs?state=claimable&limit=100", { refreshInterval: 30_000 });
+export const useHumanWorkJobs = (since: number | null | undefined = null) => {
+  const path = since === undefined
+    ? null
+    : `/jobs?state=claimable&limit=100${since === null ? "" : `&since=${encodeURIComponent(String(since))}`}`;
+  return useBoundedApi(path, { refreshInterval: 30_000 });
+};
 export const useRecommendations = () => useApi("/jobs/recommendations");
 export const useJobDefinition = (id: string | null) =>
   useBoundedApi(id ? `/jobs/definition?jobId=${encodeURIComponent(id)}` : null);

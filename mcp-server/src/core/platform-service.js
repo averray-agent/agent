@@ -1345,7 +1345,10 @@ export class PlatformService {
   async attachWorkerProgression(session) {
     if (!session || session.status !== "resolved" || !this.workerProgressionService) return session;
     if (session.progression) return session;
-    const progression = await this.getWorkerProgressionSafely(session.wallet);
+    const progression = await this.getWorkerProgressionSafely(session.wallet, {
+      settlementSessionId: session.sessionId,
+      settlementSession: session
+    });
     return progression ? { ...session, progression } : session;
   }
 
@@ -1994,6 +1997,7 @@ export class PlatformService {
     if (!this.workerProgressionService || settled?.status !== "resolved") return settled;
     const progression = await this.getWorkerProgressionSafely(settled.wallet, {
       settlementSessionId: settled.sessionId,
+      settlementSession: settled,
       previousProgression
     });
     if (!progression) return settled;

@@ -4,6 +4,10 @@ import { buildAgentProfile } from "../../core/agent-profile.js";
 import { disputeIdForSession } from "../../core/dispute-resolution.js";
 import { ValidationError } from "../../core/errors.js";
 import { isInternalPlatformFaultRemediation } from "../../core/platform-fault-remediation.js";
+import {
+  buildPublicReputation,
+  publicReputationTier
+} from "../../core/public-reputation.js";
 import { SelfIdentityRegistry } from "../../core/self-identity-registry.js";
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/u;
@@ -16,21 +20,7 @@ function safeChecksum(raw) {
   }
 }
 
-function profileTierToOperatorTier(reputation = {}) {
-  const skill = Number(reputation.skill ?? 0);
-  if (skill >= 300) return "master";
-  if (reputation.tier === "elite" || skill >= 200) return "expert";
-  if (reputation.tier === "pro" || skill >= 100) return "journeyman";
-  return "apprentice";
-}
-
-export function buildPublicReputation(reputation = {}) {
-  return {
-    ...reputation,
-    jobEligibilityTier: reputation.tier ?? "starter",
-    tier: profileTierToOperatorTier(reputation)
-  };
-}
+export { buildPublicReputation } from "../../core/public-reputation.js";
 
 function handleForWallet(wallet) {
   const normalized = String(wallet ?? "").toLowerCase();
@@ -57,7 +47,7 @@ function buildAgentDirectoryRow(profile) {
     synthetic: profile.synthetic === true,
     identity: profile.identity,
     handle: handleForWallet(profile.wallet),
-    tier: profileTierToOperatorTier(reputation),
+    tier: publicReputationTier(reputation),
     reputationScore:
       Number(reputation.skill ?? 0) +
       Number(reputation.reliability ?? 0) +
@@ -248,7 +238,7 @@ export function createProfileRoutes({
       });
       respond(response, 200, {
         ...profile,
-        tier: profileTierToOperatorTier(profile.reputation),
+        tier: publicReputationTier(profile.reputation),
       }, { "cache-control": "public, max-age=30" });
       return true;
     }

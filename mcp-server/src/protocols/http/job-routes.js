@@ -26,9 +26,13 @@ export function createJobRoutes({
     const enriched = posterOnboardingService?.enrichExternalCatalogRows
       ? await posterOnboardingService.enrichExternalCatalogRows(projected)
       : projected;
-    return typeof service.addListingSecurityMetadata === "function"
+    const secured = typeof service.addListingSecurityMetadata === "function"
       ? service.addListingSecurityMetadata(enriched)
       : enriched;
+    return (await secured).map((job) => ({
+      ...job,
+      listedAt: job.listedAt ?? job.lifecycle?.createdAt ?? job.createdAt ?? job.firedAt ?? null
+    }));
   }
 
   return async function handleJobRoute({ request, response, url, pathname }) {

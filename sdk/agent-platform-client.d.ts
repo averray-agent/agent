@@ -223,6 +223,22 @@ export interface BuildWithdrawTransactionsInput {
   destination?: WalletAddress;
 }
 
+export interface WithdrawalStanding extends ApiEnvelope {
+  claimTier: string;
+  claimTierLabel: "claim tier";
+  reputationTier: string;
+  badges: number;
+  waiverSlotsRemaining: number;
+  creditInterest: {
+    eligible: boolean;
+    registered: boolean;
+  };
+  registerPath?: "/credit/interest";
+  creditInterestStatement?: string;
+  persists: true;
+  statement: string;
+}
+
 export interface UnsignedWithdrawalTemplate extends ApiEnvelope {
   step: "withdraw" | "transfer_to_destination";
   unsigned: true;
@@ -248,6 +264,7 @@ export interface BuildWithdrawTransactionsResponse extends ApiEnvelope {
     destination: WalletAddress;
     firstLandingAddress: WalletAddress;
   };
+  standing: WithdrawalStanding;
   templates: UnsignedWithdrawalTemplate[];
   instructions: string[];
   broadcast: ApiEnvelope;
@@ -630,6 +647,26 @@ export interface WikipediaCitationRepairOutput {
   review_notes: string;
 }
 
+/** Reviewable citation repair proposal with revision-anchored findings for Wikipedia articles. */
+export interface WikipediaCitationRepairOutputV2 {
+  page_title: string;
+  revision_id: string;
+  citation_findings: Array<{
+    section: string;
+    problem: "dead_link" | "missing_citation" | "weak_source" | "outdated_source" | "claim_mismatch";
+    current_claim: string;
+    source_quote: string;
+    evidence_url: string;
+  }>;
+  proposed_changes: Array<{
+    change_type: "replace_citation" | "add_citation" | "flag_for_editor_review";
+    target_text: string;
+    replacement_text: string;
+    source_url: string;
+  }>;
+  review_notes: string;
+}
+
 /** Freshness and factual drift check for a public Wikipedia article. */
 export interface WikipediaFreshnessCheckOutput {
   page_title: string;
@@ -700,6 +737,7 @@ export interface BuiltinJobSchemaMap {
   "schema://jobs/openapi-quality-audit-output": OpenapiQualityAuditOutput;
   "schema://jobs/wikipedia-maintenance-input": WikipediaMaintenanceInput;
   "schema://jobs/wikipedia-citation-repair-output": WikipediaCitationRepairOutput;
+  "schema://jobs/wikipedia-citation-repair-output-v2": WikipediaCitationRepairOutputV2;
   "schema://jobs/wikipedia-freshness-check-output": WikipediaFreshnessCheckOutput;
   "schema://jobs/wikipedia-infobox-consistency-output": WikipediaInfoboxConsistencyOutput;
   "schema://jobs/product-proof-worker-loop": ProductProofWorkerLoop;
@@ -779,6 +817,7 @@ export interface JobDefinition extends ApiEnvelope {
 
 export interface JobSummary extends ApiEnvelope {
   id: JobId;
+  listedAt?: ISODateTime | null;
   title?: string;
   category?: string;
   tier?: string;
@@ -810,6 +849,7 @@ export interface JobsListResponse extends ApiEnvelope {
   offset?: number;
   nextOffset?: number | null;
   compact?: boolean;
+  meta?: { newSince: number };
 }
 
 export interface ListJobsOptions {
@@ -820,6 +860,7 @@ export interface ListJobsOptions {
   format?: string;
   limit?: number;
   offset?: number;
+  since?: ISODateTime | number;
 }
 
 export interface RecommendationResponse extends ApiEnvelope {

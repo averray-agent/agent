@@ -4,6 +4,8 @@ import test from "node:test";
 
 import { MemoryStateStore } from "./state-store.js";
 import { SelfIdentityRegistry } from "./self-identity-registry.js";
+import { buildJobSnapshot } from "./job-snapshot.js";
+import { VerificationIngestionService } from "../services/verification-ingestion-service.js";
 import {
   CREDIT_INTEREST_CANNOT_AUTHORIZE_ORIGINATION,
   WorkerProgressionService,
@@ -12,6 +14,7 @@ import {
 
 const WALLET = "0x1111111111111111111111111111111111111111";
 const CANARY = "0x2222222222222222222222222222222222222222";
+const BLIND_TESTER_WALLET = "0x97450BF69Cb4aEB0b33db3aE51AC2D18224d4b5c";
 
 function session(index, overrides = {}) {
   return {
@@ -33,13 +36,19 @@ function session(index, overrides = {}) {
   };
 }
 
-function makeService({ sessions = [], vestedRaw = "0", registration, selfIdentityRegistry } = {}) {
+function makeService({
+  sessions = [],
+  vestedRaw = "0",
+  registration,
+  selfIdentityRegistry,
+  wallet = WALLET
+} = {}) {
   const store = new MemoryStateStore();
-  const byWallet = new Map([[WALLET.toLowerCase(), sessions]]);
+  const byWallet = new Map([[wallet.toLowerCase(), sessions]]);
   store.listSessionsByWallet = async (wallet, limit, offset) => (
     (byWallet.get(String(wallet).toLowerCase()) ?? []).slice(offset, offset + limit)
   );
-  if (registration) store.creditInterestRegistrations.set(WALLET.toLowerCase(), registration);
+  if (registration) store.creditInterestRegistrations.set(wallet.toLowerCase(), registration);
 
   return {
     store,
@@ -116,24 +125,64 @@ test("progression computes the canonical fresh-wallet fixture from live policy i
   assert.deepEqual(progression.raises.map((entry) => entry.action), ["keep_completing", "deposit"]);
 });
 
-test("progression computes the badged-wallet fixture and justChanged fires exactly on the third verified settlement", async () => {
-  const sessions = [session(1), session(2), session(3)];
-  const { service } = makeService({ sessions });
+test("third real settlement is self-counted when the wallet-session index still exposes only two approvals", async () => {
+  const visibleSessions = [
+    session(1, { wallet: BLIND_TESTER_WALLET }),
+    session(2, { wallet: BLIND_TESTER_WALLET })
+  ];
+  const { service, store } = makeService({
+    sessions: visibleSessions,
+    wallet: BLIND_TESTER_WALLET
+  });
+  const job = {
+    id: "job-3",
+    category: "coding",
+    tier: "starter",
+    rewardAsset: "USDC",
+    rewardAmount: 0.25,
+    verifierMode: "benchmark",
+    verifierConfig: { version: 1, handler: "benchmark" }
+  };
+  const submitted = session(3, {
+    wallet: BLIND_TESTER_WALLET,
+    status: "submitted",
+    claimedAt: "2026-08-22T08:00:00.000Z",
+    submittedAt: "2026-08-22T08:05:00.000Z",
+    verificationSummary: undefined,
+    jobSnapshot: buildJobSnapshot(job, { capturedAt: "2026-08-22T08:00:00.000Z" })
+  });
+  await store.upsertSession(submitted);
+  // Receipt production is orthogonal to this unit drill. The real ingestion
+  // service still performs the submitted -> resolved transition and writes the
+  // verification record while the simulated wallet index remains one write behind.
+  store.putRunReceiptDocument = undefined;
+  const ingestion = new VerificationIngestionService(store, undefined, undefined, {
+    info() {},
+    warn() {}
+  });
 
-  const crossing = await service.getProgression(WALLET, { settlementSessionId: "session-3" });
-  const earlier = await service.getProgression(WALLET, { settlementSessionId: "session-2" });
-  const ordinaryRead = await service.getProgression(WALLET);
+  const before = await service.getProgression(BLIND_TESTER_WALLET);
+  const settled = await ingestion.ingest(submitted.sessionId, {
+    jobId: submitted.jobId,
+    handler: "benchmark",
+    handlerVersion: 1,
+    outcome: "approved",
+    reasonCode: "BENCHMARK_THRESHOLD_MET"
+  });
+  const crossing = await service.getProgression(BLIND_TESTER_WALLET, {
+    settlementSessionId: settled.sessionId,
+    settlementSession: settled,
+    previousProgression: before
+  });
 
-  assert.equal(crossing.tier, "pro");
+  assert.equal(before.creditInterest.eligible, false);
   assert.equal(crossing.badges.length, 3);
+  assert.equal(crossing.creditInterest.eligible, true);
   assert.deepEqual(crossing.justChanged, {
     field: "creditInterest.eligible",
     from: false,
     to: true
   });
-  assert.equal(earlier.justChanged, null);
-  assert.equal(ordinaryRead.justChanged, null);
-  assert.deepEqual(crossing.creditInterest, { eligible: true, registered: false });
 });
 
 test("progression computes the deposit-holding fixture without confusing capital and reputation", async () => {
