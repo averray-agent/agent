@@ -66,6 +66,7 @@ import {
   isDesignatedJob,
   restrictDesignatedJobForPublic
 } from "./designated-claimants.js";
+import { buildEligibilityProgression } from "./worker-progression.js";
 
 const TIMELINE_VERSION = "v2";
 export const INGEST_REFUSED_SPEC_HASH_MISMATCH = "ingest_refused_spec_hash_mismatch";
@@ -104,6 +105,7 @@ export class PlatformService {
     this.workerExposurePolicy = workerExposurePolicy;
     this.workerDailyExposurePolicy = workerDailyExposurePolicy;
     this.catalogueDailyBudget = catalogueDailyBudget;
+    this.workerProgressionService = undefined;
     this.catalogueLaneDiscipline = undefined;
     this.githubIssueIngestionScheduler = undefined;
     this.wikipediaMaintenanceIngestionScheduler = undefined;
@@ -176,6 +178,26 @@ export class PlatformService {
       timelineVersion: TIMELINE_VERSION,
       statuses: getSessionStateMachineDefinition()
     };
+  }
+
+  setWorkerProgressionService(service) {
+    this.workerProgressionService = service;
+  }
+
+  async getWorkerProgression(wallet, options = {}) {
+    return this.workerProgressionService?.getProgression(wallet, options);
+  }
+
+  async getWorkerProgressionSafely(wallet, options = {}) {
+    try {
+      return await this.getWorkerProgression(wallet, options);
+    } catch (error) {
+      this.logger?.warn?.(
+        { wallet, error: error?.message ?? String(error) },
+        "worker_progression.read_failed"
+      );
+      return undefined;
+    }
   }
 
   listJobs(options = {}) {
@@ -1255,7 +1277,13 @@ export class PlatformService {
   }
 
   async explainEligibility(wallet, jobId) {
-    return explainEligibilityFromPreflight(await this.preflightJob(wallet, jobId));
+    const preflight = await this.preflightJob(wallet, jobId);
+    const explanation = explainEligibilityFromPreflight(preflight);
+    const progression = await this.getWorkerProgressionSafely(wallet);
+    return {
+      ...explanation,
+      ...buildEligibilityProgression({ preflight, progression })
+    };
   }
 
   async estimateNetReward(wallet, jobId) {
@@ -1275,7 +1303,7 @@ export class PlatformService {
   }
 
   async resumeSession(sessionId) {
-    return this.jobExecutionService.resumeSession(sessionId);
+    return this.attachWorkerProgression(await this.jobExecutionService.resumeSession(sessionId));
   }
 
   async attachClaimState(job, options = {}) {
@@ -1305,11 +1333,20 @@ export class PlatformService {
   }
 
   async listSessionHistory({ wallet = undefined, limit = 10, jobId = undefined } = {}) {
-    return this.jobExecutionService.listSessionHistory({ wallet, limit, jobId });
+    const sessions = await this.jobExecutionService.listSessionHistory({ wallet, limit, jobId });
+    return Promise.all(sessions.map((session) => this.attachWorkerProgression(session)));
   }
 
   async listRecentSessions(limit = 10) {
-    return this.jobExecutionService.listRecentSessions(limit);
+    const sessions = await this.jobExecutionService.listRecentSessions(limit);
+    return Promise.all(sessions.map((session) => this.attachWorkerProgression(session)));
+  }
+
+  async attachWorkerProgression(session) {
+    if (!session || session.status !== "resolved" || !this.workerProgressionService) return session;
+    if (session.progression) return session;
+    const progression = await this.getWorkerProgressionSafely(session.wallet);
+    return progression ? { ...session, progression } : session;
   }
 
   async getSessionTimeline(sessionId) {
@@ -1943,7 +1980,32 @@ export class PlatformService {
   }
 
   async ingestVerification(sessionId, verdict, options = undefined) {
-    return this.verificationIngestionService.ingest(sessionId, verdict, options);
+    const suppliedPreviousProgression = options
+      && Object.prototype.hasOwnProperty.call(options, "previousProgression");
+    const before = this.workerProgressionService && !suppliedPreviousProgression
+      ? await this.stateStore.getSession(sessionId)
+      : undefined;
+    const previousProgression = suppliedPreviousProgression
+      ? options.previousProgression
+      : before
+        ? await this.getWorkerProgressionSafely(before.wallet)
+        : undefined;
+    const settled = await this.verificationIngestionService.ingest(sessionId, verdict, options);
+    if (!this.workerProgressionService || settled?.status !== "resolved") return settled;
+    const progression = await this.getWorkerProgressionSafely(settled.wallet, {
+      settlementSessionId: settled.sessionId,
+      previousProgression
+    });
+    if (!progression) return settled;
+    try {
+      return await this.stateStore.upsertSession({ ...settled, progression });
+    } catch (error) {
+      this.logger?.warn?.(
+        { sessionId, error: error?.message ?? String(error) },
+        "worker_progression.persist_failed"
+      );
+      return settled;
+    }
   }
 
   /**

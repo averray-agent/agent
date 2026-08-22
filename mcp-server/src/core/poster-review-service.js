@@ -196,6 +196,20 @@ export class PosterReviewService {
       : undefined;
     let payoutTx = recordedReceipt.payoutTx;
 
+    // Persist the pre-settlement progression beside the durable decision
+    // before the broker mutates chain state. A retry after a receipt-write
+    // interruption can then narrate the same threshold change without
+    // re-settling or mistaking the post-settlement tier for the old tier.
+    if (!recordedReceipt.previousProgression && Number(live.state) === ESCROW_JOB_STATE_SUBMITTED) {
+      const previousProgression = await this.platformService.getWorkerProgressionSafely?.(
+        context.session.wallet
+      );
+      if (previousProgression) {
+        recordedReceipt = { ...recordedReceipt, previousProgression };
+        await this.storeDecisionReceipt(context.submissionIdentity, recordedReceipt);
+      }
+    }
+
     if (Number(live.state) === ESCROW_JOB_STATE_SUBMITTED) {
       payoutTx = await this.gateway.resolveSinglePayout(
         context.chainJobId,
@@ -226,6 +240,7 @@ export class PosterReviewService {
       rationaleHash: recordedReceipt.rationaleHash,
       metadataURI: recordedReceipt.metadataURI,
       payoutTx,
+      previousProgression: recordedReceipt.previousProgression,
       decidedBy: recordedReceipt.decidedBy,
       authority: recordedReceipt.authority,
       recordedDecision: recordedReceipt.decision
@@ -365,6 +380,7 @@ export class PosterReviewService {
       metadataURI: decision.metadataURI,
       reasoningHash: decision.rationaleHash,
       payoutTx: decision.payoutTx,
+      previousProgression: decision.previousProgression,
       details: {
         authority: decision.authority ?? "external_poster_review",
         submissionIdentity: context.submissionIdentity,

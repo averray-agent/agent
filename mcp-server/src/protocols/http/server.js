@@ -105,6 +105,7 @@ const {
   depositPoolDoor,
   earningsDoor,
   creditPoolDoor,
+  workerProgressionService,
   creditBookDoor,
   l3PostingKeeper,
   transparencyService,
@@ -420,7 +421,8 @@ const treasurySummary = new TreasurySummaryService({
   gateway,
   platformService: service,
   stateStore,
-  bankLaneFeed
+  bankLaneFeed,
+  workerProgressionService
 });
 const handleAdminTreasuryRoute = createAdminTreasuryRoutes({
   authMiddleware,
@@ -468,6 +470,7 @@ const handleCreditPoolRoute = createCreditPoolRoutes({
   authMiddleware,
   creditPoolDoor,
   creditBookDoor,
+  workerProgressionService,
   readJsonBody,
   respond,
 });

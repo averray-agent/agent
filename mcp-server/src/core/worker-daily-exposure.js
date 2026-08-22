@@ -94,6 +94,16 @@ export class WorkerDailyExposurePolicy {
     this.now = now;
   }
 
+  progressionConfig() {
+    return {
+      rolling24hRaw: this.budgetUnits.toString(),
+      rolling24hUsdc: usdcAmount(this.budgetUnits),
+      lifetimeCreditRaw: this.lifetimeCreditUnits.toString(),
+      lifetimeCreditUsdc: usdcAmount(this.lifetimeCreditUnits),
+      graduationSettledJobs: this.graduationSettledJobs
+    };
+  }
+
   async evaluate({ wallet, job, claimEconomics, workerExposure } = {}) {
     if (isExternalJob(job)) {
       return {

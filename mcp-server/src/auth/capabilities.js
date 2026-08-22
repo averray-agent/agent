@@ -86,6 +86,7 @@ const ROUTE_CAPABILITY_RULES = [
   { method: "GET", path: "/credit", capabilities: ["account:read"] },
   { method: "POST", path: "/credit/transactions", capabilities: ["account:read"] },
   { method: "POST", path: "/credit/consent", capabilities: ["account:borrow"] },
+  { method: "POST", path: "/credit/interest", capabilities: ["account:read"] },
   { method: "POST", path: "/jobs/claim", capabilities: ["jobs:claim"] },
   { method: "POST", path: "/jobs/submit", capabilities: ["jobs:submit"] },
   { method: "GET", path: "/jobs/sub", capabilities: ["subjobs:read"] },

@@ -136,6 +136,10 @@ test("getPlatformCapabilities defaults to a bounded welcome and preserves the fu
     page: "https://averray.com/proof-to-pay"
   });
   assert.match(welcome.freshWallet, /only from starter jobs marked onboardingWaiverEligible/u);
+  assert.equal(
+    welcome.progression,
+    "Completions raise your claim caps; deposits raise them further — see getAccountPosition and explainEligibility for yours."
+  );
   assert.deepEqual(welcome.requestLimit, {
     maxBodyBytes: DEFAULT_MCP_MAX_REQUEST_BODY_BYTES,
     scope: "full request: JSON-RPC envelope + _meta"

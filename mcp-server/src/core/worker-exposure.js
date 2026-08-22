@@ -226,6 +226,17 @@ export class WorkerExposurePolicy {
     const openCapUnits = this.capUnits + openRaiseUnits;
     const externalRaiseUnits = vestedUnits * this.externalCeilingPerVestedMilli / 1_000n;
     const externalCeilingUnits = this.externalRewardCeilingBase + externalRaiseUnits;
+    const nextConcurrentRaiseVestedUnits = this.vestedOpenExposureUnit > 0n
+      ? (integerSquareRoot(vestedWholeUsdc) + 1n) ** 2n * 1_000_000n
+      : vestedUnits;
+    const nextConcurrentRaiseAmountUnits = nextConcurrentRaiseVestedUnits > vestedUnits
+      ? nextConcurrentRaiseVestedUnits - vestedUnits
+      : 0n;
+    const nextVestedWholeUsdc = nextConcurrentRaiseVestedUnits / 1_000_000n;
+    const nextOpenExposureCapUnits = this.capUnits
+      + integerSquareRoot(nextVestedWholeUsdc) * this.vestedOpenExposureUnit;
+    const nextExternalRewardCeilingUnits = this.externalRewardCeilingBase
+      + nextConcurrentRaiseVestedUnits * this.externalCeilingPerVestedMilli / 1_000n;
     let credit = { available: false, reason: "credit_pool_not_configured" };
     if (typeof this.blockchainGateway?.readCreditPosition === "function") {
       try {
@@ -252,6 +263,12 @@ export class WorkerExposurePolicy {
       externalRewardCeilingRaiseUsdc: usdcAmount(externalRaiseUnits),
       externalRewardCeilingRaw: externalCeilingUnits.toString(),
       externalRewardCeilingUsdc: usdcAmount(externalCeilingUnits),
+      nextConcurrentRaiseVestedRaw: nextConcurrentRaiseVestedUnits.toString(),
+      nextConcurrentRaiseAmountRaw: nextConcurrentRaiseAmountUnits.toString(),
+      nextConcurrentOpenExposureCapRaw: nextOpenExposureCapUnits.toString(),
+      nextConcurrentOpenExposureCapUsdc: usdcAmount(nextOpenExposureCapUnits),
+      nextConcurrentExternalRewardCeilingRaw: nextExternalRewardCeilingUnits.toString(),
+      nextConcurrentExternalRewardCeilingUsdc: usdcAmount(nextExternalRewardCeilingUnits),
       vestingHours: Number(vesting?.vestingHours ?? 48),
       vestingAvailable: vesting?.available !== false,
       evaluatedAt: vesting?.evaluatedAt,
