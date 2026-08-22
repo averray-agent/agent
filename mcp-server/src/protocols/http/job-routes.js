@@ -17,20 +17,22 @@ export function createJobRoutes({
   service,
   verifyCanaryMarker,
 }) {
+  async function listPublicJobs(wallet) {
+    const jobs = await service.listJobsWithSessions({ wallet });
+    const projected = externalPostingService?.filterExternalCatalogProjection
+      ? await externalPostingService.filterExternalCatalogProjection(jobs)
+      : jobs;
+    const enriched = posterOnboardingService?.enrichExternalCatalogRows
+      ? await posterOnboardingService.enrichExternalCatalogRows(projected)
+      : projected;
+    return typeof service.addListingSecurityMetadata === "function"
+      ? service.addListingSecurityMetadata(enriched)
+      : enriched;
+  }
+
   return async function handleJobRoute({ request, response, url, pathname }) {
     if (request.method === "GET" && pathname === "/jobs") {
-      const jobs = await service.listJobsWithSessions({
-        wallet: url.searchParams.get("wallet") ?? undefined
-      });
-      const projected = externalPostingService?.filterExternalCatalogProjection
-        ? await externalPostingService.filterExternalCatalogProjection(jobs)
-        : jobs;
-      const enriched = posterOnboardingService?.enrichExternalCatalogRows
-        ? await posterOnboardingService.enrichExternalCatalogRows(projected)
-        : projected;
-      const secured = typeof service.addListingSecurityMetadata === "function"
-        ? await service.addListingSecurityMetadata(enriched)
-        : enriched;
+      const secured = await listPublicJobs(url.searchParams.get("wallet") ?? undefined);
       respond(response, 200, buildPublicJobsResponse(secured, url.searchParams));
       return true;
     }
@@ -125,6 +127,28 @@ export function createJobRoutes({
       const parentSessionId = url.searchParams.get("parentSessionId") ?? "";
       await ensureSessionOwnership(parentSessionId, auth.wallet);
       respond(response, 200, await service.listSubJobs(parentSessionId));
+      return true;
+    }
+
+    const publicJobMatch = request.method === "GET"
+      ? pathname.match(/^\/jobs\/([^/]+)$/u)
+      : null;
+    if (publicJobMatch) {
+      let jobId;
+      try {
+        jobId = decodeURIComponent(publicJobMatch[1]);
+      } catch {
+        jobId = "";
+      }
+      const jobs = jobId
+        ? await listPublicJobs(url.searchParams.get("wallet") ?? undefined)
+        : [];
+      const job = jobs.find((candidate) => candidate.id === jobId);
+      if (!job) {
+        respond(response, 404, { error: "not_found" });
+        return true;
+      }
+      respond(response, 200, job);
       return true;
     }
 
