@@ -34,10 +34,18 @@ async function runHostedStackFixture({
     disclosure: { statement: "Technical pilot. Principal at risk. No depositor protection." }
   },
   creditConfigured = false,
+  creditStatus = 200,
   credit = {
     available: true,
     chainId: 1,
     creditPool: `0x${"55".repeat(20)}`,
+    wallet: { outstanding: { raw: "0", decimals: 6 } },
+    receiptGraph: {
+      wallet: {
+        cash: { outstanding: { raw: "0", decimals: 6 } },
+        posting: { outstanding: { raw: "0", decimals: 6 } }
+      }
+    },
     disclosure: { statement: "Technical pilot. Principal at risk. No depositor protection." }
   }
 }) {
@@ -292,7 +300,7 @@ async function runHostedStackFixture({
       return;
     }
     if (request.url === "/credit") {
-      response.writeHead(200, { "content-type": "application/json" });
+      response.writeHead(creditStatus, { "content-type": "application/json" });
       response.end(JSON.stringify(credit));
       return;
     }
@@ -525,6 +533,39 @@ test("hosted smoke enforces CreditPool availability and the canonical disclosure
   assert.match(result.stdout, /Checking CreditPool door/u);
 });
 
+test("hosted smoke rejects an authenticated CreditPool 500", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    warnings: [],
+    creditConfigured: true,
+    creditStatus: 500,
+    credit: {
+      creditPool: `0x${"55".repeat(20)}`,
+      error: "internal_error",
+      message: "Do not know how to serialize a BigInt"
+    }
+  });
+  assert.notEqual(result.code, 0, result.stdout);
+});
+
+test("hosted smoke requires all wallet debt fields from the authenticated CreditPool response", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    warnings: [],
+    creditConfigured: true,
+    credit: {
+      available: true,
+      chainId: 1,
+      creditPool: `0x${"55".repeat(20)}`,
+      wallet: { outstanding: { raw: "0", decimals: 6 } },
+      receiptGraph: { wallet: { cash: { outstanding: { raw: "0", decimals: 6 } } } },
+      disclosure: { statement: "Technical pilot. Principal at risk. No depositor protection." }
+    }
+  });
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.match(result.stderr, /L1\/L2\/L3 debt fields/u);
+});
+
 test("hosted smoke rejects a configured CreditPool with drifted disclosure", async () => {
   const result = await runHostedStackFixture({
     autoVerifierOk: true,
@@ -534,6 +575,13 @@ test("hosted smoke rejects a configured CreditPool with drifted disclosure", asy
       available: true,
       chainId: 1,
       creditPool: `0x${"55".repeat(20)}`,
+      wallet: { outstanding: { raw: "0", decimals: 6 } },
+      receiptGraph: {
+        wallet: {
+          cash: { outstanding: { raw: "0", decimals: 6 } },
+          posting: { outstanding: { raw: "0", decimals: 6 } }
+        }
+      },
       disclosure: { statement: "Principal probably safe." }
     }
   });

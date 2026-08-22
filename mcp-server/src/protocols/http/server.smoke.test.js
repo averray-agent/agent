@@ -1456,6 +1456,57 @@ test("http smoke: /jobs/estimate-reward surfaces the estimateNetReward tool", { 
     // assert the shape is a finite non-negative number, matching the
     // implementation contract.
     assert.ok(typeof body === "number" && Number.isFinite(body) && body >= 0, `expected estimate-reward to return a finite non-negative number, got ${JSON.stringify(body)}`);
+
+    const pathResponse = await fetch(
+      `${base}/jobs/tier-smoke-reward-001/estimate`,
+      { headers: { authorization: `Bearer ${adminToken}` } }
+    );
+    assert.equal(pathResponse.status, 200);
+    assert.equal(await pathResponse.json(), body);
+
+    const unauthenticated = await fetch(`${base}/jobs/tier-smoke-reward-001/estimate`);
+    assert.equal(unauthenticated.status, 401);
+  });
+});
+
+test("http smoke: /me returns only existing signed-in worker surfaces", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const token = issueToken(STRANGER_WALLET);
+    const response = await fetch(`${base}/me`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const rawBody = await response.text();
+    assert.equal(response.status, 200, rawBody);
+    const body = JSON.parse(rawBody);
+    assert.equal(body.wallet, STRANGER_WALLET);
+    assert.equal(body.claimTier, "starter");
+    assert.equal(body.reputationTier, "apprentice");
+    assert.ok(body.progression);
+    assert.deepEqual(body.accountPosition.liquid, {});
+    assert.deepEqual(body.accountPosition.jobStakeLocked, {});
+    assert.deepEqual(body.accountPosition.raw.liquid, {});
+    assert.deepEqual(body.accountPosition.raw.jobStakeLocked, {});
+
+    const unauthenticated = await fetch(`${base}/me`);
+    assert.equal(unauthenticated.status, 401);
+  });
+});
+
+test("http smoke: /receipts is authenticated and restricted to the signed-in wallet", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const token = issueToken(STRANGER_WALLET);
+    const headers = { authorization: `Bearer ${token}` };
+
+    const response = await fetch(`${base}/receipts?limit=1`, { headers });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), []);
+
+    const unauthenticated = await fetch(`${base}/receipts`);
+    assert.equal(unauthenticated.status, 401);
+
+    const crossWallet = await fetch(`${base}/receipts?wallet=${ADMIN_WALLET}`, { headers });
+    assert.equal(crossWallet.status, 403);
+    assert.equal((await crossWallet.json()).error, "receipt_wallet_mismatch");
   });
 });
 

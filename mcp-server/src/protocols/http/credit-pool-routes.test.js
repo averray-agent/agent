@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { AuthenticationError } from "../../core/errors.js";
 import { createCreditPoolRoutes } from "./credit-pool-routes.js";
+import { respond } from "./http-helpers.js";
 
 const WALLET = "0x4444444444444444444444444444444444444444";
 
@@ -49,3 +51,78 @@ test("POST /credit/interest stores only the wallet's opt-in interest", async () 
   assert.match(calls[1][2].statement, /register interest/iu);
   assert.equal(calls[1][2].amount, undefined);
 });
+
+test("GET /credit requires wallet authentication", async () => {
+  const handler = createCreditPoolRoutes({
+    authMiddleware: async () => {
+      throw new AuthenticationError("Authentication required.", "missing_token");
+    },
+    creditPoolDoor: { getInfo: async () => assert.fail("door must not run") },
+    readJsonBody: async () => ({}),
+    respond
+  });
+  await assert.rejects(
+    handler({
+      request: { method: "GET", headers: {} },
+      response: capturedResponse(),
+      url: new URL("https://api/credit"),
+      pathname: "/credit"
+    }),
+    (error) => error instanceof AuthenticationError && error.statusCode === 401
+  );
+});
+
+test("GET /credit serializes a no-loan wallet response even when a chain evidence field is bigint", async () => {
+  const handler = createCreditPoolRoutes({
+    authMiddleware: async () => ({ wallet: WALLET }),
+    creditPoolDoor: {
+      getInfo: async () => ({
+        schemaVersion: 2,
+        available: true,
+        wallet: {
+          address: WALLET,
+          outstanding: { raw: "0", decimals: 6 }
+        },
+        receiptGraph: {
+          available: true,
+          underwriting: {
+            evidence: { headBlock: 19_766_671n }
+          },
+          wallet: {
+            cash: { outstanding: { raw: "0", decimals: 6 }, activeLoan: null },
+            posting: { outstanding: { raw: "0", decimals: 6 }, activeLoan: null }
+          }
+        }
+      })
+    },
+    readJsonBody: async () => ({}),
+    respond
+  });
+  const response = capturedResponse();
+
+  assert.equal(await handler({
+    request: { method: "GET", headers: { authorization: "Bearer token" } },
+    response,
+    url: new URL("https://api/credit"),
+    pathname: "/credit"
+  }), true);
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.equal(body.wallet.outstanding.raw, "0");
+  assert.equal(body.receiptGraph.wallet.cash.outstanding.raw, "0");
+  assert.equal(body.receiptGraph.wallet.posting.outstanding.raw, "0");
+  assert.equal(body.receiptGraph.underwriting.evidence.headBlock, "19766671");
+});
+
+function capturedResponse() {
+  return {
+    statusCode: 0,
+    body: "",
+    writeHead(statusCode) {
+      this.statusCode = statusCode;
+    },
+    end(body) {
+      this.body = String(body ?? "");
+    }
+  };
+}

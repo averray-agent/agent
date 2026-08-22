@@ -23,7 +23,7 @@ function profileTierToOperatorTier(reputation = {}) {
   return "apprentice";
 }
 
-function buildPublicReputation(reputation = {}) {
+export function buildPublicReputation(reputation = {}) {
   return {
     ...reputation,
     jobEligibilityTier: reputation.tier ?? "starter",

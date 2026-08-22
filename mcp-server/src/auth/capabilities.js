@@ -63,6 +63,8 @@ const ROLE_CAPABILITIES = {
 const ROUTE_CAPABILITY_RULES = [
   { method: "GET", path: "/account", capabilities: ["account:read"] },
   { method: "GET", path: "/account/position", capabilities: ["account:read"] },
+  { method: "GET", path: "/me", capabilities: ["account:read", "reputation:read"] },
+  { method: "GET", path: "/receipts", capabilities: ["session:read"] },
   { method: "POST", path: "/account/withdraw/transactions", capabilities: ["account:read"] },
   { method: "GET", path: "/account/strategies", capabilities: ["account:read", "strategies:list"] },
   { method: "GET", path: "/account/borrow-capacity", capabilities: ["account:read"] },
@@ -82,6 +84,7 @@ const ROUTE_CAPABILITY_RULES = [
   { method: "POST", path: "/disputes/:id/release", capabilities: ["disputes:release"] },
   { method: "GET", path: "/jobs/recommendations", capabilities: ["jobs:recommend"] },
   { method: "GET", path: "/jobs/preflight", capabilities: ["jobs:preflight"] },
+  { method: "GET", path: "/jobs/:id/estimate", capabilities: ["jobs:preflight"] },
   { method: "POST", path: "/pool/transactions", capabilities: ["account:read"] },
   { method: "GET", path: "/credit", capabilities: ["account:read"] },
   { method: "POST", path: "/credit/transactions", capabilities: ["account:read"] },

@@ -112,6 +112,14 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
     description: "The signed-in agent's own account: available balance, stake on open work, statement, ownership proof, exit door, and informational retention choices."
   },
   {
+    path: "/me",
+    description: "Signed-in wallet identity, explicitly labeled claim and reputation tiers, retention progression, and liquid/staked account position."
+  },
+  {
+    path: "/receipts",
+    description: "Newest-first content-addressed work receipts belonging only to the signed-in wallet."
+  },
+  {
     path: "/account/withdraw/transactions",
     description: "Complete wallet-bound unsigned AgentAccountCore withdrawal and optional onward ERC-20 transfer. The owner signs, pays DOT gas, and broadcasts."
   },
@@ -126,6 +134,7 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   { path: "/jobs/preflight?jobId=X", description: "GET-only per-job eligibility + claim-stake + fee-waiver + claim-tier gate snapshot. POST returns 405 Method Not Allowed." },
   { path: "/jobs/explain-eligibility", description: "Per-wallet reason why a job is eligible or blocked (used by the explainEligibility tool)." },
   { path: "/jobs/estimate-reward", description: "Profile-aware net-reward estimate after fees, waivers, and stake (used by the estimateNetReward tool)." },
+  { path: "/jobs/:id/estimate", description: "Path-addressed REST twin of estimateNetReward for the signed-in wallet." },
   { path: "/shares", description: "Create an expiring signed read-only URL for agent, session, dispute, or policy snapshots." },
   { path: "/admin/jobs/timeline", description: "Admin-gated job/session timeline and lineage endpoint." },
   { path: "/admin/jobs/ingest/github", description: "Admin-gated GitHub issue ingestion preview/create endpoint with optional idempotencyKey replay." },
@@ -340,6 +349,22 @@ const HTTP_ACTION_REQUIREMENTS = [
     notes: EARNINGS_ACCOUNT_STATEMENT
   },
   {
+    method: "GET",
+    path: "/me",
+    requiresAuth: true,
+    requiredAction: "read_own_worker_summary",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "GET",
+    path: "/receipts",
+    requiresAuth: true,
+    requiredAction: "read_own_work_receipts",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
     method: "POST",
     path: "/account/withdraw/transactions",
     requiresAuth: true,
@@ -427,6 +452,14 @@ const HTTP_ACTION_REQUIREMENTS = [
     path: "/jobs/preflight",
     requiresAuth: true,
     requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "GET",
+    path: "/jobs/:id/estimate",
+    requiresAuth: true,
+    requiredAction: "estimate_own_net_reward",
     authScheme: "SIWE_JWT",
     walletModes: ["evm-siwe"]
   },

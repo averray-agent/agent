@@ -396,6 +396,14 @@ if jq -e '.addresses.creditPool | strings | test("^0x[0-9a-fA-F]{40}$")' >/dev/n
     echo "CreditPool door did not report available: true." >&2
     exit 1
   }
+  jq -e '
+    (.wallet.outstanding.raw | strings | test("^[0-9]+$")) and
+    (.receiptGraph.wallet.cash.outstanding.raw | strings | test("^[0-9]+$")) and
+    (.receiptGraph.wallet.posting.outstanding.raw | strings | test("^[0-9]+$"))
+  ' >/dev/null <<<"$credit_json" || {
+    echo "CreditPool door did not return the wallet's L1/L2/L3 debt fields." >&2
+    exit 1
+  }
   jq -e '.disclosure.statement == "Technical pilot. Principal at risk. No depositor protection."' >/dev/null <<<"$credit_json" || {
     echo "CreditPool door did not carry the exact depositor-risk disclosure." >&2
     exit 1

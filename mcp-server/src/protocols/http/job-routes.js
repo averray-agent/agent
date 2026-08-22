@@ -128,6 +128,24 @@ export function createJobRoutes({
       return true;
     }
 
+    const estimateMatch = request.method === "GET"
+      ? pathname.match(/^\/jobs\/([^/]+)\/estimate$/u)
+      : null;
+    if (estimateMatch) {
+      const auth = await authMiddleware(request, url);
+      let jobId;
+      try {
+        jobId = decodeURIComponent(estimateMatch[1]);
+      } catch {
+        jobId = "";
+      }
+      if (!jobId) {
+        throw new ValidationError("jobId path segment is required.");
+      }
+      respond(response, 200, await service.estimateNetReward(auth.wallet, jobId));
+      return true;
+    }
+
     if (request.method === "GET" && pathname === "/jobs/sub") {
       const auth = await authMiddleware(request, url);
       const parentSessionId = url.searchParams.get("parentSessionId") ?? "";
