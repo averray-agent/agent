@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, CheckCircle2, Wallet } from "lucide-react";
+import { ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,6 +18,8 @@ import {
   buildClaimTerms,
   filterHumanWorkListings,
   isHumanWorkListing,
+  jobDefinitionRawUrl,
+  serializeJobDefinition,
   verificationDepthStatement,
   workSessionHref
 } from "@/lib/work/human-work.js";
@@ -36,6 +38,7 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
   const netRewardQuery = useJobNetReward(auth.authenticated ? jobId : null);
   const [signing, setSigning] = useState(false);
   const [claiming, setClaiming] = useState(false);
+  const [definitionCopied, setDefinitionCopied] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
   const firstLiveTermsMarked = useRef(false);
 
@@ -44,6 +47,7 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
     [jobId, jobsQuery.data]
   );
   const definition = definitionQuery.data as HumanJobDefinition | undefined;
+  const rawDefinitionUrl = jobDefinitionRawUrl(jobId);
   const schemaSide = asRecord(asRecord(definition?.schemaContract)?.output);
   const submissionContract = asRecord(definition?.submissionContract);
   const schemaUrl = text(schemaSide?.schemaUrl, text(submissionContract?.outputSchemaUrl));
@@ -117,6 +121,17 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
     }
   }
 
+  async function copyDefinition() {
+    if (!definition) return;
+    try {
+      await navigator.clipboard.writeText(serializeJobDefinition(definition));
+      setDefinitionCopied(true);
+      setTimeout(() => setDefinitionCopied(false), 1800);
+    } catch {
+      toast.error("Definition JSON could not be copied.");
+    }
+  }
+
   if (definitionQuery.isLoading || jobsQuery.isLoading) {
     return <DetailLoading />;
   }
@@ -141,9 +156,24 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
 
   return (
     <div className="grid gap-6">
-      <a className="inline-flex w-fit items-center gap-2 text-sm font-semibold text-[var(--muted)] hover:text-[var(--accent)]" href="/work">
-        <ArrowLeft className="h-4 w-4" /> Back to open work
-      </a>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <a className="inline-flex w-fit items-center gap-2 text-sm font-semibold text-[var(--muted)] hover:text-[var(--accent)]" href="/work">
+          <ArrowLeft className="h-4 w-4" /> Back to open work
+        </a>
+        <div className="flex flex-wrap items-center gap-2">
+          {rawDefinitionUrl ? (
+            <Button asChild variant="outline" size="sm">
+              <a href={rawDefinitionUrl} target="_blank" rel="noreferrer">
+                <ExternalLink aria-hidden="true" /> Raw JSON
+              </a>
+            </Button>
+          ) : null}
+          <Button type="button" variant="outline" size="sm" onClick={() => void copyDefinition()}>
+            {definitionCopied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+            {definitionCopied ? "Copied" : "Copy JSON"}
+          </Button>
+        </div>
+      </div>
       <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-end">
         <div>
           <p className="eyebrow">{definition.category || "Paid task"} · Claim tier: {definition.tier || "open"}</p>
