@@ -16,7 +16,7 @@
 #   HEALTH_INTERVAL_SEC       seconds between health polls (default: 5)
 #   APP_BASIC_AUTH_USER       optional browser basic-auth username
 #   APP_BASIC_AUTH_PASSWORD   optional browser basic-auth password
-#   APP_EXPECTED_MARKER       expected HTML marker (default: Opening the operator control room.)
+#   APP_EXPECTED_MARKER       expected Next build-id marker (default: averray-operator)
 #   FRONTEND_BUILD_RUNNER     auto, host, or docker (default: auto)
 #   FRONTEND_NODE_IMAGE       Docker image used when runner=docker (default: node:22-bookworm-slim)
 #   DEPLOY_AUTOSTASH=0        disable auto-stashing local server build artifacts before pull
@@ -39,7 +39,7 @@ BRANCH=${BRANCH:-main}
 APP_URL=${APP_URL:-https://app.averray.com/}
 HEALTH_TIMEOUT_SEC=${HEALTH_TIMEOUT_SEC:-120}
 HEALTH_INTERVAL_SEC=${HEALTH_INTERVAL_SEC:-5}
-APP_EXPECTED_MARKER=${APP_EXPECTED_MARKER:-"Opening the operator control room."}
+APP_EXPECTED_MARKER=${APP_EXPECTED_MARKER:-averray-operator}
 APP_BASIC_AUTH_USER=${APP_BASIC_AUTH_USER:-}
 APP_BASIC_AUTH_PASSWORD=${APP_BASIC_AUTH_PASSWORD:-}
 FRONTEND_BUILD_RUNNER=${FRONTEND_BUILD_RUNNER:-auto}

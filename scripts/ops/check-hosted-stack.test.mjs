@@ -8,6 +8,8 @@ import { spawn } from "node:child_process";
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const CHECK_SCRIPT = join(REPO_ROOT, "scripts/ops/check-hosted-stack.sh");
+const REDEPLOY_FRONTEND_SCRIPT = join(REPO_ROOT, "scripts/ops/redeploy-frontend.sh");
+const NEXT_CONFIG = join(REPO_ROOT, "app/next.config.ts");
 
 const ADDRESSES = {
   escrowCore: `0x${"11".repeat(20)}`,
@@ -169,7 +171,7 @@ async function runHostedStackFixture({
       <a href="/receipts/0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0">verification receipt</a>
       <a href="/transparency/">transparency</a>
     </body></html>`],
-    ["/app", "Opening the operator control room."],
+    ["/app", "averray-operator"],
     ["/.well-known/agent-tools.json", {
       discoveryUrl: "https://averray.com/.well-known/agent-tools.json",
       baseUrl: "https://api.averray.com",
@@ -365,6 +367,27 @@ async function runHostedStackFixture({
     await new Promise((resolve) => server.close(resolve));
   }
 }
+
+function extractShellMarkerDefault(source, label) {
+  const match = source.match(
+    /APP_EXPECTED_MARKER=\$\{APP_EXPECTED_MARKER:-(?:"([^"]+)"|'([^']+)'|([^}]+))\}/u
+  );
+  assert.ok(match, `${label} must declare an APP_EXPECTED_MARKER default`);
+  return match[1] ?? match[2] ?? match[3];
+}
+
+test("operator build id and hosted deploy markers stay in parity", async () => {
+  const [nextConfig, redeployScript, hostedCheckScript] = await Promise.all([
+    readFile(NEXT_CONFIG, "utf8"),
+    readFile(REDEPLOY_FRONTEND_SCRIPT, "utf8"),
+    readFile(CHECK_SCRIPT, "utf8")
+  ]);
+  const buildId = nextConfig.match(/NEXT_BUILD_ID\s*\?\?\s*"([^"]+)"/u)?.[1];
+
+  assert.ok(buildId, "app/next.config.ts must declare a default NEXT_BUILD_ID");
+  assert.equal(extractShellMarkerDefault(redeployScript, "redeploy-frontend.sh"), buildId);
+  assert.equal(extractShellMarkerDefault(hostedCheckScript, "check-hosted-stack.sh"), buildId);
+});
 
 test("hosted smoke rejects an unhealthy submitted-job verifier even with no warnings", async () => {
   const result = await runHostedStackFixture({ autoVerifierOk: false, warnings: [] });
