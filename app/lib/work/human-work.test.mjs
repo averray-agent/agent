@@ -5,8 +5,10 @@ import { readFile } from "node:fs/promises";
 import {
   buildClaimTerms,
   filterHumanWorkListings,
+  jobDefinitionRawUrl,
   publicReceiptUrl,
   routeAfterSignIn,
+  serializeJobDefinition,
   workCatalogueIsPending,
   workJobIdFromPath,
   workSessionIdFromPath
@@ -81,6 +83,18 @@ test("static-shell pretty paths recover job/session ids and canonical receipt li
   const receiptId = `0x${"a".repeat(64)}`;
   assert.equal(publicReceiptUrl(receiptId), `https://averray.com/receipts/${receiptId}`);
   assert.equal(publicReceiptUrl("session-1"), null);
+});
+
+test("job detail exposes the canonical raw definition URL and exact fetched JSON", () => {
+  assert.equal(
+    jobDefinitionRawUrl("job/with spaces"),
+    "https://api.averray.com/jobs/job%2Fwith%20spaces"
+  );
+  assert.equal(jobDefinitionRawUrl("  "), null);
+  assert.equal(
+    serializeJobDefinition({ id: "job-1", acceptanceCriteria: ["done"] }),
+    '{\n  "id": "job-1",\n  "acceptanceCriteria": [\n    "done"\n  ]\n}'
+  );
 });
 
 test("static deployment serves pretty job and session URLs through the worker shells", async () => {

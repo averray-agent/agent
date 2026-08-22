@@ -44,6 +44,17 @@ export function workJobHref(jobId) {
   return `/work/${encodeURIComponent(String(jobId ?? "").trim())}`;
 }
 
+export function jobDefinitionRawUrl(jobId) {
+  const normalized = String(jobId ?? "").trim();
+  return normalized
+    ? `https://api.averray.com/jobs/${encodeURIComponent(normalized)}`
+    : null;
+}
+
+export function serializeJobDefinition(definition) {
+  return JSON.stringify(definition, null, 2);
+}
+
 export function workSessionHref(sessionId) {
   return `/work/session/${encodeURIComponent(String(sessionId ?? "").trim())}`;
 }

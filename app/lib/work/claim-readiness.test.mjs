@@ -62,3 +62,11 @@ test("wallet sign-in is not presented as a claim before preflight resolves", () 
   assert.match(workDetailSource, /auth\.authenticated \? "Claim this job" : "Check wallet"/u);
   assert.match(workDetailSource, /disabled=\{signing \|\| claiming \|\| !actionReadiness\.enabled/u);
 });
+
+test("job detail links the canonical raw definition and copies the fetched JSON", () => {
+  assert.match(workDetailSource, /href=\{rawDefinitionUrl\}[\s\S]*Raw JSON/u);
+  assert.match(
+    workDetailSource,
+    /navigator\.clipboard\.writeText\(serializeJobDefinition\(definition\)\)/u
+  );
+});
