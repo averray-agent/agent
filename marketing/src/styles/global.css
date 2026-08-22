@@ -1357,7 +1357,12 @@ section.section { scroll-margin-top: 100px; }
 
 /* Install cards must not let a long command set the grid column's min-content
    width. The full bytes remain visible through horizontal scroll and copy. */
-.install-card { min-width: 0; }
+/* Install cards read as one row: full eyebrow -> title -> body cadence in
+   every card, CTA spacing owned by a class (not inline styles), and the
+   snippet pinned to the card foot so the three dark bars form a line. */
+.install-card { min-width: 0; display: flex; flex-direction: column; align-items: stretch; }
+.install-card__cta { margin: 14px 0 0; }
+.install-card .install-snippet { margin-top: auto; padding-top: 18px; }
 .install-snippet { min-width: 0; margin-top: 18px; }
 .install-snippet__bar {
   min-height: 34px;

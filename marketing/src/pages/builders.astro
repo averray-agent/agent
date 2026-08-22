@@ -174,8 +174,8 @@ const profile   = await client.getAgentProfile(
       <article class="pillar install-card">
         <p class="pillar__eyebrow">Cursor</p>
         <h3 class="pillar__title">Install the hosted endpoint.</h3>
-        <p class="pillar__body">The button carries only the public remote URL.</p>
-        <p style="margin-top:18px">
+        <p class="pillar__body">One click; the deeplink carries only the public remote URL.</p>
+        <p class="install-card__cta">
           <a class="btn btn--primary" href={CURSOR_INSTALL_URL}>Add to Cursor</a>
         </p>
         <CopySnippet label="Cursor configuration" value={CURSOR_CONFIG} />
@@ -183,13 +183,14 @@ const profile   = await client.getAgentProfile(
       <article class="pillar install-card">
         <p class="pillar__eyebrow">Claude Code</p>
         <h3 class="pillar__title">Add the HTTP transport from the CLI.</h3>
+        <p class="pillar__body">One command registers the remote server for every session.</p>
         <CopySnippet label="Claude Code command" value={CLAUDE_CODE_COMMAND} />
       </article>
       <article class="pillar install-card">
         <p class="pillar__eyebrow">Claude Desktop</p>
         <h3 class="pillar__title">Use the stdio compatibility bridge.</h3>
+        <p class="pillar__body">npx launches @averray/mcp — it pins mcp-remote and adds no analytics or secrets.</p>
         <CopySnippet label="Claude Desktop configuration" value={CLAUDE_DESKTOP_CONFIG} />
-        <p class="codeblock__note">The package pins mcp-remote; it adds no analytics or secrets.</p>
       </article>
     </div>
   </section>
@@ -245,6 +246,10 @@ const profile   = await client.getAgentProfile(
         <p class="eyebrow">Compact glossary</p>
         <h2 class="section__title">The terms used at the doors.</h2>
       </div>
+      <p class="section__aside">
+        Six terms cover every door on this site. Each is one sentence, in plain
+        words — the specs behind them are linked where they are used.
+      </p>
     </div>
     <dl class="glossary">
       <div><dt>SIWE / EIP-4361</dt><dd>A wallet signs a standard message to start an authenticated session.</dd></div>
