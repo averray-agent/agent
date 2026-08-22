@@ -31,8 +31,74 @@ test("blind-tester marketing copy exposes copyable proof links and honest loadin
     assert.ok(source.includes(endpoint), `${name} shell must expose its raw JSON endpoint`);
   }
 
-  assert.match(footer, /title="GitHub">Docs ↗<\/a>/u);
+  assert.match(footer, /title="GitHub">Docs \(GitHub\) ↗<\/a>/u);
   assert.match(footer, /rel="noopener"/u);
+});
+
+test("QA3-A marketing wayfinding names real doors, live reads, and outbound proof surfaces", async () => {
+  const [home, agents, builders, schemas, verify, proofToPay, transparency, trust, footer, consoleStream] =
+    await Promise.all([
+      readFile(new URL("marketing/src/pages/index.astro", REPO_ROOT), "utf8"),
+      readFile(new URL("marketing/src/pages/agents.astro", REPO_ROOT), "utf8"),
+      readFile(new URL("marketing/src/pages/builders.astro", REPO_ROOT), "utf8"),
+      readFile(new URL("marketing/src/pages/schemas.astro", REPO_ROOT), "utf8"),
+      readFile(new URL("marketing/src/pages/verify.astro", REPO_ROOT), "utf8"),
+      readFile(new URL("marketing/src/pages/proof-to-pay.astro", REPO_ROOT), "utf8"),
+      readFile(new URL("marketing/src/pages/transparency.astro", REPO_ROOT), "utf8"),
+      readFile(new URL("marketing/src/pages/trust.astro", REPO_ROOT), "utf8"),
+      readFile(new URL("marketing/src/components/SiteFooter.astro", REPO_ROOT), "utf8"),
+      readFile(new URL("marketing/public/console-stream.js", REPO_ROOT), "utf8")
+    ]);
+
+  const pages = [home, agents, builders, schemas, verify, proofToPay, transparency, trust];
+  const allMarketingCopy = [...pages, footer].join("\n");
+  const publishedWallet = "0x3071Ca2Adc1FB6F6986cDb6D7117C4c4fec455ee";
+
+  assert.doesNotMatch(allMarketingCopy, /0x10E82610BDFb7A4fC0d5E1c2E0694C810434214b/u);
+  assert.doesNotMatch(consoleStream, /0x10E826…214b/u);
+  assert.match(consoleStream, /0x3071Ca…55ee/u);
+  for (const [name, source] of [["home", home], ["agents", agents], ["builders", builders], ["schemas", schemas], ["trust", trust]]) {
+    assert.ok(source.includes(publishedWallet), `${name} must use the published case-study wallet`);
+  }
+
+  assert.doesNotMatch(pages.join("\n"), /\/strategies\b/u);
+  assert.match(agents, /GET \/verify\/profiles/u);
+  assert.match(builders, /\/verify\/profiles/u);
+  assert.doesNotMatch(allMarketingCopy, /JSON:[^\s<]/u);
+  assert.doesNotMatch(allMarketingCopy, /\bcertification\b/iu);
+
+  assert.match(home, /browse without a wallet/u);
+  assert.match(home, /wallet sign-in \(SIWE\)/u);
+  assert.match(home, /href: "\/proof-to-pay\/"/u);
+  assert.match(home, /posting settles on proof/iu);
+  assert.doesNotMatch(home, /marketplace/iu);
+
+  for (const [name, source] of [["verify", verify], ["proof-to-pay", proofToPay]]) {
+    assert.match(source, /HTTP\/MCP with payment authorization/u, `${name} must name the machine door`);
+    assert.match(source, /wallet sign-in/u, `${name} must name the operator door`);
+    assert.match(source, /\/work/u, `${name} must name the human door`);
+    assert.match(source, /\/builders\/#glossary/u, `${name} must link the glossary`);
+  }
+
+  for (const term of ["SIWE / EIP-4361", "EIP-3009", "x402", "Waiver-eligible", "Co-signer / multisig"]) {
+    assert.ok(builders.includes(term), `builders glossary must define ${term}`);
+  }
+
+  assert.match(agents, /Starter jobs are deliberately small; rewards and caps rise with settled history\./u);
+  assert.match(transparency, /deliberately small pilot treasury/u);
+  assert.match(transparency, /every figure is the live ledger, unedited/iu);
+  assert.match(transparency, /realized write-off \(venue loss\)/iu);
+
+  for (const label of [
+    "case study (GitHub)",
+    "Multisig setup (GitHub)",
+    "Audit package (GitHub)",
+    "README (GitHub)",
+    "Agent banking vision (GitHub)",
+    "Docs (GitHub)"
+  ]) {
+    assert.ok(allMarketingCopy.includes(label), `GitHub exit must be labeled: ${label}`);
+  }
 });
 
 test("Caddy returns explicit 301 redirects for guessed public paths", async () => {
