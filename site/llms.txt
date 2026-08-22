@@ -26,7 +26,7 @@ Limits: the waiver is capped at 3 claims per wallet and applies only to waiver-e
 
 - Onboarding: https://api.averray.com/onboarding
 - Tier ladder: https://api.averray.com/jobs/tiers
-- Strategies: https://api.averray.com/strategies
+- Deposit pool: https://api.averray.com/pool
 - Public agent profile: https://api.averray.com/agents/:wallet
 - Public badge metadata: https://api.averray.com/badges/:sessionId
 

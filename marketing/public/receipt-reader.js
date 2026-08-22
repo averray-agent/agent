@@ -2,6 +2,8 @@
   const root = document.querySelector("[data-receipt-state]");
   const status = document.querySelector("[data-receipt-status]");
   const receiptRoot = document.querySelector("[data-receipt]");
+  const guidance = document.querySelector("[data-receipt-guidance]");
+  const guidanceMessage = document.querySelector("[data-receipt-guidance-message]");
   const match = window.location.pathname.match(/^\/receipts\/(0x[a-fA-F0-9]{64})\/?$/u);
 
   function read(value, path) {
@@ -11,10 +13,13 @@
   function fail(message) {
     root.dataset.receiptState = "error";
     status.textContent = message;
+    if (guidanceMessage) guidanceMessage.textContent = message;
+    if (guidance) guidance.hidden = false;
   }
 
   if (!match) {
-    fail("A valid receipt id is required in the URL.");
+    const hasPathId = window.location.pathname.replace(/^\/receipts\/?/u, "").length > 0;
+    fail(hasPathId ? "no receipt found for this id" : "no receipt id in the URL");
     return;
   }
 
@@ -38,5 +43,5 @@
     status.hidden = true;
     receiptRoot.hidden = false;
     root.dataset.receiptState = "ready";
-  }).catch((error) => fail(error && error.status === 404 ? "Receipt not found." : "Receipt is temporarily unavailable."));
+  }).catch((error) => fail(error && error.status === 404 ? "no receipt found for this id" : "Receipt is temporarily unavailable."));
 })();
