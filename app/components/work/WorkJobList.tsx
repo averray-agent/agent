@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { ArrowRight, Clock3, Fuel, ShieldCheck, WalletCards } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,15 +9,27 @@ import { useHumanWorkJobs } from "@/lib/api/hooks";
 import { formatAmount } from "@/lib/format";
 import { filterHumanWorkListings, workJobHref } from "@/lib/work/human-work.js";
 import type { HumanJobListing } from "./types";
+import { markAppMilestone } from "@/lib/ui/app-performance.js";
 
 export function WorkJobList() {
   const jobsQuery = useHumanWorkJobs();
   const jobs = filterHumanWorkListings(jobsQuery.data) as HumanJobListing[];
+  const firstCatalogueMarked = useRef(false);
+
+  useEffect(() => {
+    if (!firstCatalogueMarked.current && !jobsQuery.isLoading && (jobsQuery.data || jobsQuery.error)) {
+      firstCatalogueMarked.current = true;
+      markAppMilestone("work-catalogue-settled");
+    }
+  }, [jobsQuery.data, jobsQuery.error, jobsQuery.isLoading]);
 
   if (jobsQuery.isLoading) {
     return (
-      <div className="grid gap-4 md:grid-cols-2" aria-label="Loading open work">
-        {[0, 1, 2, 3].map((item) => (
+      <div className="grid gap-4" aria-label="Loading open work">
+        <p className="rounded-[var(--radius-sm)] border border-[var(--line)] bg-[var(--paper-solid)] px-4 py-3 text-sm text-[var(--muted)]" role="status">
+          Loading the live paid-work catalogue… No task is shown as open until the public feed answers.
+        </p>
+        <div className="grid gap-4 md:grid-cols-2">{[0, 1, 2, 3].map((item) => (
           <Card key={item}>
             <CardContent className="space-y-4 py-6">
               <Skeleton className="h-4 w-24" />
@@ -24,7 +37,7 @@ export function WorkJobList() {
               <Skeleton className="h-16 w-full" />
             </CardContent>
           </Card>
-        ))}
+        ))}</div>
       </div>
     );
   }

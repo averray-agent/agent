@@ -26,8 +26,9 @@ export default function AuthedLayout({
   // The whole operator shell (rail + main column) lives inside
   // AuthedGuard so an unauthed visitor never sees the topbar,
   // navigation, or empty live cards that look like "platform has no
-  // activity" — only a neutral "Checking sign-in… / Redirecting…"
-  // placeholder before /sign-in takes over.
+  // activity" — only an honest, actionable wallet wall before /sign-in
+  // takes over. The wall is present in static HTML, so route hydration cannot
+  // leave an unauthenticated visitor staring at an indeterminate probe.
   return (
     <>
       <DemoModeBanner />

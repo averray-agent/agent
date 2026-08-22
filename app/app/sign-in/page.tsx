@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/toast";
 import { signIn, WalletUnavailableError } from "@/lib/auth/siwe";
 import { useAuth } from "@/lib/auth/use-auth";
+import { useWalletProvider } from "@/lib/auth/use-wallet-provider";
 import { routeAfterSignIn } from "@/lib/work/human-work.js";
 
 export default function SignInPage() {
@@ -36,6 +37,7 @@ function SignInContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const auth = useAuth();
+  const walletProvider = useWalletProvider();
   const [pending, setPending] = useState(false);
 
   const requestedNext = searchParams?.get("next") ?? undefined;
@@ -123,8 +125,8 @@ function SignInContent() {
 
         <Card className="flex flex-col justify-between">
           <CardContent className="flex flex-col gap-5 py-8">
-            <Badge tone="success" className="w-fit">
-              Ready to authenticate
+            <Badge tone={walletProvider === "available" ? "success" : "warn"} className="w-fit">
+              {walletProvider === "available" ? "Wallet provider ready" : walletProvider === "checking" ? "Checking for a wallet" : "Wallet required"}
             </Badge>
             <div>
               <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold tracking-tight">
@@ -136,8 +138,9 @@ function SignInContent() {
               </p>
             </div>
             <div
-              className="rounded-[var(--radius-md)] border border-[var(--line)] bg-[var(--paper)] p-4 text-sm leading-relaxed text-[var(--muted)]"
+              className={`rounded-[var(--radius-md)] border p-4 text-sm leading-relaxed ${walletProvider === "unavailable" ? "border-[color:rgba(167,97,34,0.46)] bg-[var(--warn-soft)] text-[var(--ink)]" : "border-[var(--line)] bg-[var(--paper)] text-[var(--muted)]"}`}
               data-wallet-guidance
+              data-wallet-provider={walletProvider}
             >
               <p>
                 Your wallet is your sign-in and account identity. It ties your
@@ -166,7 +169,7 @@ function SignInContent() {
                 , then return here and connect it.
               </p>
               <p className="mt-2">
-                There is no email signup.{" "}
+                SIWE is the only sign-in door. There is no email signup by design.{" "}
                 <Link
                   href="https://averray.com"
                   className="text-[var(--accent)] underline underline-offset-2"
@@ -178,12 +181,17 @@ function SignInContent() {
             <Button
               size="lg"
               onClick={handleSignIn}
-              disabled={pending}
+              disabled={pending || walletProvider !== "available"}
               className="justify-center"
             >
               <Wallet className="h-4 w-4" />
-              {pending ? "Signing…" : "Sign in with wallet"}
+              {pending ? "Signing…" : walletProvider === "unavailable" ? "Install a wallet to sign in" : "Sign in with wallet"}
             </Button>
+            {walletProvider === "unavailable" ? (
+              <Link href="/work" className="text-sm font-semibold text-[var(--accent)] underline underline-offset-4">
+                Browse paid work without a wallet →
+              </Link>
+            ) : null}
             {auth.lastReason ? (
               <p className="text-xs text-[var(--warn)]">{auth.lastReason}</p>
             ) : null}

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "@/styles/globals.css";
 import { Toaster } from "@/components/ui/toast";
+import { AppPerformanceObserver } from "@/components/shell/AppPerformanceObserver";
 
 // Vendored latin variable fonts (next/font/local): next/font/google fetches
 // from fonts.googleapis.com at BUILD time, and 2026-08-13 that dependency
@@ -35,6 +36,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${manrope.variable} ${spaceGrotesk.variable}`}>
       <body className="bg-[var(--bg)] text-[var(--ink)] font-[family-name:var(--font-body)]">
+        <AppPerformanceObserver />
         {children}
         <Toaster />
       </body>
