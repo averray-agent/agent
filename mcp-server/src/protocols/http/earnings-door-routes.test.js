@@ -29,6 +29,16 @@ function routeFixture({ eventBus } = {}) {
         return {
           available: true,
           wallet,
+          standing: {
+            claimTier: "starter",
+            claimTierLabel: "claim tier",
+            reputationTier: "apprentice",
+            badges: 0,
+            waiverSlotsRemaining: 3,
+            creditInterest: { eligible: false, registered: false },
+            persists: true,
+            statement: "Withdrawing never affects your tier, badges, caps, or eligibility — your standing stays with your wallet."
+          },
           templates: [{ unsigned: true }],
           firstWithdrawalGasGrant: { status: payload.requestGasGrant ? "granted" : "available", reason: "fixture" },
           whatYourBalanceCanDo: { retentionNotGates: { templatesRemainComplete: true } }
@@ -68,6 +78,8 @@ test("earnings HTTP routes bind every account read and template to the authentic
   ]);
   assert.equal(getResponse.body.account.owner, WALLET);
   assert.equal(buildResponse.body.templates[0].unsigned, true);
+  assert.equal(buildResponse.body.standing.claimTierLabel, "claim tier");
+  assert.equal(buildResponse.body.standing.waiverSlotsRemaining, 3);
 });
 
 test("withdrawal intent telemetry stores creation and grant status without transaction payloads", async () => {

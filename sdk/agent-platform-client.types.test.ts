@@ -80,6 +80,7 @@ const withdrawal: BuildWithdrawTransactionsResponse = await client.buildWithdraw
 });
 void earningsAccount.account.available.raw;
 void withdrawal.templates[0]?.data;
+void withdrawal.standing.waiverSlotsRemaining;
 await client.repayFunds({ amount: "1" });
 await client.sendToAgent({
   recipient: "0x1111111111111111111111111111111111111111",

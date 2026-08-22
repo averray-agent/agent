@@ -222,7 +222,13 @@ test("job helpers build compact filters, mutation bodies, and admin timeline URL
     }
   });
 
-  await client.listJobs({ source: "wikipedia", state: "claimable", limit: 5, offset: 10 });
+  await client.listJobs({
+    source: "wikipedia",
+    state: "claimable",
+    limit: 5,
+    offset: 10,
+    since: "2026-08-21T00:00:00.000Z"
+  });
   await client.listClaimableJobs({ category: "coding", limit: 2 });
   await client.validateJobSubmission("job with space", { summary: "Ready" });
   await client.claimJob("job with space", "claim-key-1");
@@ -238,7 +244,7 @@ test("job helpers build compact filters, mutation bodies, and admin timeline URL
 
   assert.equal(
     calls[0].url,
-    "https://api.example.test/jobs?source=wikipedia&state=claimable&limit=5&offset=10"
+    "https://api.example.test/jobs?source=wikipedia&state=claimable&limit=5&offset=10&since=2026-08-21T00%3A00%3A00.000Z"
   );
   assert.equal(calls[1].url, "https://api.example.test/jobs?category=coding&state=claimable&format=compact&limit=2");
   assert.equal(calls[2].url, "https://api.example.test/jobs/validate-submission");

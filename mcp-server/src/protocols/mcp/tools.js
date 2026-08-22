@@ -55,7 +55,14 @@ export function createMcpTools({
         offset: { type: "integer", minimum: 0 },
         source: { type: "string" },
         category: { type: "string" },
-        state: { type: "string" }
+        state: { type: "string" },
+        since: {
+          description: "Optional prior visit time as ISO 8601 or epoch milliseconds. The listing stays complete; meta.newSince counts rows listed strictly after it.",
+          oneOf: [
+            { type: "string" },
+            { type: "integer", minimum: 0 }
+          ]
+        }
       },
       additionalProperties: false
     },

@@ -214,7 +214,38 @@ test("GET /jobs lists live session-joined jobs and preserves response builder sh
     ["listJobsWithSessions", { wallet: "0xabc" }],
     ["respond", { statusCode: 200, body: response.body, headers: {} }],
   ]);
-  assert.deepEqual(response.body, [{ id: "job-1", title: "Job 1", lifecycle: { state: "open" }, category: "coding" }]);
+  assert.deepEqual(response.body, [{
+    id: "job-1",
+    title: "Job 1",
+    lifecycle: { state: "open" },
+    category: "coding",
+    listedAt: null
+  }]);
+});
+
+test("GET /jobs keeps every row while since adds strict returner freshness metadata", async () => {
+  const { response, route } = makeHarness({
+    jobs: [{
+      id: "boundary",
+      title: "Boundary",
+      lifecycle: { state: "open", createdAt: "2026-08-21T12:00:00.000Z" }
+    }, {
+      id: "newer",
+      title: "Newer",
+      lifecycle: { state: "open", createdAt: "2026-08-21T12:00:00.001Z" }
+    }]
+  });
+
+  assert.equal(await invoke(route, {
+    path: `/jobs?limit=100&since=${Date.parse("2026-08-21T12:00:00.000Z")}`,
+    response
+  }), true);
+  assert.equal(response.body.jobs.length, 2);
+  assert.deepEqual(response.body.jobs.map((job) => job.listedAt), [
+    "2026-08-21T12:00:00.000Z",
+    "2026-08-21T12:00:00.001Z"
+  ]);
+  assert.deepEqual(response.body.meta, { newSince: 1 });
 });
 
 test("GET /jobs applies the external projection boundary before source filtering", async () => {

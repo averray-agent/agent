@@ -264,7 +264,8 @@ export class AgentPlatformClient {
     state = undefined,
     format = undefined,
     limit = undefined,
-    offset = undefined
+    offset = undefined,
+    since = undefined
   } = {}) {
     const params = new URLSearchParams();
     if (wallet) params.set("wallet", wallet);
@@ -274,6 +275,7 @@ export class AgentPlatformClient {
     if (format) params.set("format", format);
     if (limit !== undefined) params.set("limit", String(limit));
     if (offset !== undefined) params.set("offset", String(offset));
+    if (since !== undefined) params.set("since", String(since));
     return this.request(`/jobs${params.size ? `?${params.toString()}` : ""}`);
   }
 
