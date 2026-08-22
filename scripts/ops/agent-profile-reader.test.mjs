@@ -23,7 +23,7 @@ const ELEMENT_IDS = [
   "profile-loading-json-url",
   "profile-title",
   "profile-tier",
-  "profile-synthetic",
+  "profile-identity",
   "profile-skill",
   "profile-reliability",
   "profile-economic",
@@ -58,7 +58,7 @@ const ELEMENT_IDS = [
 function createElement(id) {
   return {
     attributes: new Map(),
-    hidden: id === "profile-content" || id === "profile-tier" || id === "profile-synthetic",
+    hidden: id === "profile-content" || id === "profile-tier" || id === "profile-identity",
     id,
     innerHTML: "",
     textContent: "",
@@ -129,7 +129,8 @@ test("real tester-wallet fixture renders the API platform tier, category unlocks
   assert.equal(elements.get("profile-tier").hidden, false);
   assert.equal(elements.get("profile-content").hidden, false);
   assert.equal(elements.get("profile-category-levels").textContent, "wikipedia · level 1");
-  assert.equal(elements.get("profile-synthetic").hidden, true);
+  assert.equal(elements.get("profile-identity").hidden, false);
+  assert.equal(elements.get("profile-identity").textContent, "External wallet · shared self-identity registry");
   assert.equal(elements.get("profile-total-badges").textContent, "1");
   assert.equal(elements.get("profile-approved").textContent, "1");
   assert.equal(elements.get("profile-completion-rate").textContent, "100%");
@@ -144,17 +145,21 @@ test("synthetic fixture is labeled as operator-run and never presented as extern
   const elements = await renderFixture(syntheticProfileFixture);
 
   assert.equal(elements.get("profile-tier").textContent, `Reputation tier · ${syntheticProfileFixture.tier}`);
-  assert.equal(elements.get("profile-synthetic").hidden, false);
-  assert.match(elements.get("profile-synthetic").textContent, /operator-run synthetic identity/iu);
-  assert.match(elements.get("profile-synthetic").textContent, /not external demand/iu);
+  assert.equal(elements.get("profile-identity").hidden, false);
+  assert.match(elements.get("profile-identity").textContent, /operator-run · canary/iu);
+  assert.match(elements.get("profile-identity").textContent, /shared self-identity registry/iu);
+  assert.match(elements.get("profile-identity").textContent, /not external demand/iu);
   assert.equal(elements.get("profile-category-levels").textContent, "coding · level 2 · governance · level 1");
 });
 
-test("false or absent synthetic flags render no synthetic label", async () => {
-  for (const fixture of [profileFixture, { ...profileFixture, synthetic: undefined }]) {
+test("identity labels come from the shared registry projection, never the legacy synthetic flag", async () => {
+  for (const fixture of [
+    { ...profileFixture, synthetic: true },
+    { ...profileFixture, synthetic: undefined }
+  ]) {
     const elements = await renderFixture(fixture);
-    assert.equal(elements.get("profile-synthetic").hidden, true);
-    assert.equal(elements.get("profile-synthetic").textContent, "");
+    assert.equal(elements.get("profile-identity").hidden, false);
+    assert.equal(elements.get("profile-identity").textContent, "External wallet · shared self-identity registry");
   }
 });
 
@@ -206,13 +211,14 @@ test("friendly agent paths resolve every profile asset from the site root", () =
   assert.deepEqual(scripts, [
     "/site.js?v=20260821",
     "/reader-fetch.js?v=20260823",
-    "/agent.js?v=20260821"
+    "/agent.js?v=20260824"
   ]);
   assert.equal(new URL(stylesheet, friendlyUrl).pathname, "/styles.css");
   assert.equal(new URL(scripts[1], friendlyUrl).pathname, "/reader-fetch.js");
   assert.equal(new URL(scripts[2], friendlyUrl).pathname, "/agent.js");
   assert.match(profileHtml, /<noscript>[\s\S]*api\.averray\.com\/agents\/\{wallet\}/u);
   assert.match(profileHtml, /id="profile-tier"[^>]*hidden/u);
+  assert.match(profileHtml, /id="profile-identity"[^>]*hidden/u);
   assert.match(profileHtml, />Badge rewards</u);
   assert.doesNotMatch(profileHtml, />STARTER</u);
   assert.doesNotMatch(profileHtml, />Tier breakdown</u);

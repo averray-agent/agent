@@ -9,7 +9,10 @@ import {
   addSecondsIso,
   disputeIdForSession,
 } from "./dispute-resolution.js";
-import { isSyntheticAgentSessions } from "./agent-visibility.js";
+import {
+  SELF_IDENTITY_KINDS,
+  describeSelfIdentity
+} from "./self-identity-registry.js";
 import { requireJobSnapshot } from "./job-snapshot.js";
 import { isInternalPlatformFaultRemediation } from "./platform-fault-remediation.js";
 
@@ -60,13 +63,16 @@ export function buildAgentProfile({
   // `stats.lineage` counters without reaching into the catalog
   // itself. Callers that don't need lineage can omit it. Roadmap §8.
   getLineage,
+  selfIdentity,
 } = {}) {
   requireAddress(wallet, "wallet");
   const normalizedWallet = wallet.toLowerCase();
   const rep = normaliseReputation(reputation);
   const definitionOf = typeof getJobDefinition === "function" ? getJobDefinition : () => undefined;
   const safeSessions = Array.isArray(sessions) ? sessions : [];
-  const synthetic = isSyntheticAgentSessions(safeSessions);
+  const identity = describeSelfIdentity(selfIdentity);
+  const synthetic = selfIdentity?.actor === "self"
+    && selfIdentity?.kind === SELF_IDENTITY_KINDS.CANARY;
 
   // Split sessions into approved + rejected + other so the numerator and
   // denominator of completionRate are unambiguous.
@@ -214,6 +220,7 @@ export function buildAgentProfile({
     schemaVersion: AGENT_PROFILE_SCHEMA_VERSION,
     wallet: normalizedWallet,
     synthetic,
+    identity,
     fetchedAt: fetchedAt ?? new Date().toISOString(),
     reputation: rep,
     stats: {

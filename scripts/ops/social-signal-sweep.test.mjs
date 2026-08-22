@@ -37,7 +37,8 @@ function snapshot({ settled = 4, external = 0, settledStatus = "fresh", external
         ingested: field(1),
         external: field(external, externalStatus),
         unclassified: field(0)
-      }
+      },
+      settledToExternalWallets24h: field(external, externalStatus)
     }
   };
 }
@@ -124,7 +125,7 @@ test("an external-activity claim is vetoed while the public payload says zero", 
     signalId: "external-agents-first",
     claim: "An agent outside Averray completed work",
     claimsExternalActivity: true,
-    restsOn: [readField(snapshot({ external: 0 }), "flow.composition24h.external")]
+    restsOn: [readField(snapshot({ external: 0 }), "flow.settledToExternalWallets24h")]
   };
 
   const veto = vetoFor(candidate, snapshot({ external: 0 }));
@@ -138,7 +139,7 @@ test("the first external agent fires once the payload actually shows one", () =>
 
   const external = result.fired.find((signal) => signal.signalId === "external-agents-first");
   assert.ok(external, "external-agents-first should fire when the payload reports 1");
-  assert.equal(external.checkedAgainst.fields["flow.composition24h.external"].value, 1);
+  assert.equal(external.checkedAgainst.fields["flow.settledToExternalWallets24h"].value, 1);
   assert.equal(result.nextState.firedSignals["external-agents-first"].firedAt, NOW_ISO);
 });
 
@@ -225,7 +226,7 @@ test("socialSignalSweep seeds on a missing state file, then announces on the nex
   assert.equal(first.firstRun, true);
   assert.equal(first.quiet, true);
   assert.equal(first.seeded[0].signalId, "jobs-settled-10");
-  assert.equal(first.observed["flow.composition24h.external"].value, 0);
+  assert.equal(first.observed["flow.settledToExternalWallets24h"].value, 0);
   assert.equal(JSON.parse(await readFile(stateFile, "utf8")).highestSettlementMilestone, 10);
 
   const second = await run(60);
@@ -260,7 +261,7 @@ test("schema drift is degraded at the payload level", () => {
 test("a right-shaped payload with every dependency missing is degraded", () => {
   const gutted = snapshot();
   delete gutted.flow.jobsSettled.allTime;
-  delete gutted.flow.composition24h.external;
+  delete gutted.flow.settledToExternalWallets24h;
 
   assert.equal(assessPayload(gutted).state, "degraded");
 });

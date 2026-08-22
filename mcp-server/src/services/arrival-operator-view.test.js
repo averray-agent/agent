@@ -88,6 +88,7 @@ test("derives the 2026-08-11 furthest-ever payout burst and posted-work verdict 
   });
 
   const beforePosting = await buildArrivalOperatorView(input);
+  assert.equal(beforePosting.identityAuthority, "shared_self_identity_registry");
   assert.equal(beforePosting.outsiders.furthestEver.stage, "settled");
   assert.equal(beforePosting.outsiders.furthestEver.payouts, 42);
   assert.equal(beforePosting.outsiders.furthestEver.payoutWindow, "12h");

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const READER = new URL("../../marketing/public/transparency-reader.js", import.meta.url);
+const PAGE = new URL("../../marketing/src/pages/transparency.astro", import.meta.url);
 
 test("transparency reader shows loading before its first fetch and clears it on render", async () => {
   const source = await readFile(READER, "utf8");
@@ -26,4 +27,14 @@ test("transparency reader failure points directly to the live payload", async ()
   assert.match(source, /link\.href = ENDPOINT/u);
   assert.match(source, /document\.createTextNode\(" directly\."\)/u);
   assert.match(source, /catch \(error\) \{[\s\S]*showReaderFailure\(\);/u);
+});
+
+test("the Record separates job origin from registry-classified claimant ownership", async () => {
+  const source = await readFile(PAGE, "utf8");
+
+  assert.match(source, />Externally posted <b data-value>/u);
+  assert.doesNotMatch(source, />External agents <b data-value>/u);
+  assert.match(source, /data-read="flow\.settledToExternalWallets24h"/u);
+  assert.match(source, />Settled to external wallets \(24h\)</u);
+  assert.match(source, /shared\s+self-identity registry/u);
 });

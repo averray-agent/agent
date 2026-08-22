@@ -21,7 +21,9 @@ export function extractAgents(data: unknown): AgentRecord[] {
 export function extractAgent(data: unknown): AgentRecord | null {
   if (!data || typeof data !== "object") return null;
   const record = data as RawRecord;
-  if (isUiAgent(record)) return record as unknown as AgentRecord;
+  if (isUiAgent(record)) {
+    return { ...record, identity: identityFor(record) } as unknown as AgentRecord;
+  }
 
   const walletFull = text(record.wallet, "");
   if (!walletFull) return null;
@@ -44,6 +46,7 @@ export function extractAgent(data: unknown): AgentRecord | null {
   return {
     handle: text(record.handle, handleForWallet(walletFull)),
     synthetic: record.synthetic === true,
+    identity: identityFor(record),
     wallet: shortAddress(walletFull),
     walletFull,
     tier: tierFrom(record.tier, score),
@@ -64,6 +67,19 @@ export function extractAgent(data: unknown): AgentRecord | null {
     slashes: slashEvents(record.slashEvents),
     lineage,
     lineageStats,
+  };
+}
+
+function identityFor(record: RawRecord): AgentRecord["identity"] {
+  const raw = objectField(record, "identity");
+  const classification = raw?.classification === "operator-run" || raw?.classification === "external"
+    ? raw.classification
+    : "unknown";
+  return {
+    classification,
+    kind: text(raw?.kind, "unknown"),
+    authority: "shared_self_identity_registry",
+    evidence: text(raw?.evidence, "identity_unavailable"),
   };
 }
 

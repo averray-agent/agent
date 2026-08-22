@@ -101,13 +101,13 @@ export function checkDraft(text, { observed = {}, sources = [], deployVerified =
 
   // Only when the payload actually says zero, and says it freshly. A stale
   // reading is not grounds to accuse a draft of anything.
-  const external = observed["flow.composition24h.external"];
+  const external = observed["flow.settledToExternalWallets24h"];
   if (external && external.status === "fresh" && Number(external.value) === 0) {
     const hit = EXTERNAL_PATTERNS.find((p) => p.test(draft));
     if (hit) {
       violations.push({
         reason: DRAFT_VIOLATIONS.EXTERNAL_ACTIVITY,
-        detail: `matched ${hit} while composition24h.external is 0 — any reader can check the same endpoint`
+        detail: `matched ${hit} while settledToExternalWallets24h is 0 — any reader can check the same endpoint`
       });
     }
   }

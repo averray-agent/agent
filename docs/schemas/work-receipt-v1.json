@@ -46,7 +46,10 @@
       "required": ["provider", "providerClass", "artifactHash", "sourceBinding", "evidenceHash", "environment"],
       "properties": {
         "provider": { "$ref": "#/$defs/address" },
-        "providerClass": { "enum": ["ours", "external", "unknown"] },
+        "providerClass": {
+          "enum": ["operator-run", "external", "unknown", "ours"],
+          "description": "Provider wallet classification from the shared self-identity registry. `ours` is retained only for immutable receipts emitted before the registry label became authoritative."
+        },
         "artifactHash": { "$ref": "#/$defs/bytes32" },
         "evidenceHash": { "$ref": "#/$defs/bytes32" },
         "sourceBinding": {

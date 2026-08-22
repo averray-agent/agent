@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { AGENT_PROFILE_SCHEMA_VERSION, buildAgentProfile } from "./agent-profile.js";
 import { ValidationError } from "./errors.js";
 import { buildJobSnapshot } from "./job-snapshot.js";
+import { SelfIdentityRegistry } from "./self-identity-registry.js";
 
 const WALLET = "0x1234567890123456789012345678901234567890";
 
@@ -70,6 +71,8 @@ test("buildAgentProfile returns a schema-shaped document for a known wallet", ()
   assert.equal(profile.schemaVersion, AGENT_PROFILE_SCHEMA_VERSION);
   assert.equal(profile.wallet, WALLET.toLowerCase());
   assert.equal(profile.synthetic, false);
+  assert.equal(profile.identity.classification, "unknown");
+  assert.equal(profile.identity.authority, "shared_self_identity_registry");
   assert.equal(profile.reputation.tier, "pro");
   assert.equal(profile.stats.totalBadges, 3);
   assert.equal(profile.stats.approvedCount, 3);
@@ -215,7 +218,7 @@ test("buildAgentProfile returns null completionRate when no terminal sessions ex
   assert.deepEqual(profile.badges, []);
 });
 
-test("buildAgentProfile tags canary-only wallets synthetic until external activity appears", () => {
+test("buildAgentProfile takes synthetic identity only from the shared registry", () => {
   const canarySession = approvedSession({
     jobId: "worker-canary-1785151678417",
     sessionId: "canary-1",
@@ -225,6 +228,15 @@ test("buildAgentProfile tags canary-only wallets synthetic until external activi
     wallet: WALLET,
     reputation: { skill: 100, reliability: 100, economic: 100 },
     sessions: [canarySession],
+    selfIdentity: new SelfIdentityRegistry().classify({
+      wallet: WALLET,
+      session: {
+        claimantAttribution: {
+          kind: "hosted_worker_canary",
+          evidence: "wallet_bound_marker_v1"
+        }
+      }
+    }),
     getJobDefinition: () => ({
       id: canarySession.jobId,
       category: "coding",
@@ -233,6 +245,7 @@ test("buildAgentProfile tags canary-only wallets synthetic until external activi
     })
   });
   assert.equal(canaryOnly.synthetic, true);
+  assert.equal(canaryOnly.identity.classification, "operator-run");
 
   const mixed = buildAgentProfile({
     wallet: WALLET,
@@ -245,6 +258,7 @@ test("buildAgentProfile tags canary-only wallets synthetic until external activi
         updatedAt: "2026-07-27T11:00:00Z"
       })
     ],
+    selfIdentity: new SelfIdentityRegistry().classify({ wallet: WALLET }),
     getJobDefinition: (jobId) => ({
       id: jobId,
       category: "coding",

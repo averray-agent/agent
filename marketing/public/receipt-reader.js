@@ -31,11 +31,30 @@
 
   window.AverrayReaderFetch.readJsonWithRetry(endpoint, {
     headers: { accept: "application/json" }
-  }).then((receipt) => {
+  }).then(async (receipt) => {
+    const provider = read(receipt, "execution.provider");
+    let providerClass = "unknown";
+    if (/^0x[a-fA-F0-9]{40}$/u.test(String(provider ?? ""))) {
+      try {
+        const profile = await window.AverrayReaderFetch.readJsonWithRetry(
+          `https://api.averray.com/agents/${encodeURIComponent(provider)}`,
+          { headers: { accept: "application/json" } }
+        );
+        const classified = profile?.identity?.classification;
+        if (["operator-run", "external", "unknown"].includes(classified)) {
+          providerClass = classified;
+        }
+      } catch {
+        // The immutable receipt remains readable, but its historical label is
+        // not an identity authority. Unknown is the honest registry fallback.
+      }
+    }
     document.querySelectorAll("[data-field]").forEach((element) => {
       const value = read(receipt, element.dataset.field);
       element.textContent = value === undefined || value === null ? "—" : String(value);
     });
+    const providerClassElement = document.querySelector("[data-provider-class]");
+    if (providerClassElement) providerClassElement.textContent = providerClass;
     document.querySelector("[data-receipt-json]").textContent = JSON.stringify(receipt, null, 2);
     document.querySelector("[data-settlement]").hidden = !receipt.settlement;
     status.hidden = true;

@@ -1,5 +1,8 @@
 import { ConfigError } from "../core/errors.js";
-import { isExternalAgentJobId } from "../core/agent-visibility.js";
+import {
+  SELF_IDENTITY_AUTHORITY,
+  SelfIdentityRegistry
+} from "../core/self-identity-registry.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const STATE_SCOPE = "first-external-agent-alert";
@@ -8,11 +11,9 @@ const SETTLEMENT_TOPICS = Object.freeze([
   "settlement.session_rejected",
 ]);
 
-export { isExternalAgentJobId } from "../core/agent-visibility.js";
-
 /**
- * Delivers one durable launch milestone when the first non-canary settlement
- * reaches a terminal state.
+ * Delivers one durable launch milestone when the first registry-classified
+ * external claimant settlement reaches a terminal state.
  *
  * Delivery evidence is written only after the webhook accepts the request.
  * The in-process queue prevents concurrent settlement events from racing each
@@ -30,6 +31,7 @@ export class FirstExternalAgentAlertService {
     logger = console,
     now = () => new Date(),
     timeoutMs = DEFAULT_TIMEOUT_MS,
+    selfIdentityRegistry,
   } = {}) {
     this.stateStore = stateStore;
     this.eventBus = eventBus;
@@ -40,6 +42,9 @@ export class FirstExternalAgentAlertService {
     this.logger = logger;
     this.now = now;
     this.timeoutMs = timeoutMs;
+    this.selfIdentityRegistry = selfIdentityRegistry instanceof SelfIdentityRegistry
+      ? selfIdentityRegistry
+      : new SelfIdentityRegistry();
     this.running = false;
     this.unsubscribe = undefined;
     this.queue = Promise.resolve();
@@ -89,7 +94,12 @@ export class FirstExternalAgentAlertService {
   }
 
   async maybeDeliver(event, source) {
-    if (!this.enabled || !isExternalAgentJobId(event?.jobId)) return;
+    if (!this.enabled) return;
+    const session = event?.sessionId
+      ? await this.stateStore?.getSession?.(event.sessionId)
+      : undefined;
+    const identity = this.selfIdentityRegistry.classify({ wallet: event?.wallet, session });
+    if (identity.actor !== "external") return;
     if (await this.hasDelivered()) return;
 
     const sentAt = this.now().toISOString();
@@ -102,6 +112,8 @@ export class FirstExternalAgentAlertService {
       settlementTopic: event.topic,
       settlementTimestamp: event.timestamp,
       observedVia: source,
+      identityAuthority: SELF_IDENTITY_AUTHORITY,
+      identityEvidence: identity.evidence,
     };
     const text = `First external agent settlement on ${this.environment}: ${event.jobId}`;
     const payload = {

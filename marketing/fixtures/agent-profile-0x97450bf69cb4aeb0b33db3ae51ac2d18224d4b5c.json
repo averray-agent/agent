@@ -2,6 +2,12 @@
   "schemaVersion": "v1",
   "wallet": "0x97450bf69cb4aeb0b33db3ae51ac2d18224d4b5c",
   "synthetic": false,
+  "identity": {
+    "classification": "external",
+    "kind": "external",
+    "authority": "shared_self_identity_registry",
+    "evidence": "unlisted_wallet"
+  },
   "fetchedAt": "2026-08-21T20:59:10.885Z",
   "reputation": {
     "skill": 100,

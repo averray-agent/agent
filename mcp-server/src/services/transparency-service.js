@@ -348,6 +348,7 @@ export class TransparencyService {
         unknown: countField(flow.workers.unknown),
         total: countField(flow.windows.last24h.jobs)
       },
+      settledToExternalWallets24h: countField(flow.workers.outsiders),
       posterFeesAllTime: {
         external: moneyField(flow.posterFees.external),
         operatorSelfPaid: moneyField(flow.posterFees.operatorSelfPaid),

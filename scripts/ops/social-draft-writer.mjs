@@ -189,7 +189,7 @@ export async function readObserved({ fetchImpl = globalThis.fetch, url = DEFAULT
     };
   return {
     "flow.jobsSettled.allTime": pick("flow.jobsSettled.allTime"),
-    "flow.composition24h.external": pick("flow.composition24h.external")
+    "flow.settledToExternalWallets24h": pick("flow.settledToExternalWallets24h")
   };
 }
 

@@ -54,3 +54,16 @@ test("agents surfaces contain no fabricated trend or hardcoded DOT claims", () =
   assert.doesNotMatch(source, /["'`] DOT/gu);
   assert.doesNotMatch(source, /Slashed 30d|Slashed \(30d\)|visible roster · 30d/iu);
 });
+
+test("agent admin views label wallet ownership through the shared identity registry", () => {
+  const adapter = readFileSync(resolve(here, "agent-adapters.ts"), "utf8");
+  const table = readFileSync(resolve(agentsDir, "AgentDirectoryTable.tsx"), "utf8");
+  const drawer = readFileSync(resolve(agentsDir, "AgentDrawerBody.tsx"), "utf8");
+
+  assert.match(adapter, /identityFor\(record\)/u);
+  assert.match(adapter, /shared_self_identity_registry/u);
+  assert.match(table, /shared self-identity registry/u);
+  assert.match(drawer, /shared self-identity registry/u);
+  assert.doesNotMatch(table, /a\.synthetic\s*\?/u);
+  assert.doesNotMatch(drawer, /agent\.synthetic\s*\?/u);
+});

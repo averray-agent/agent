@@ -39,7 +39,7 @@ function CatalogueLaneCard({ lane }: { lane: CatalogueLaneCardData }) {
       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 font-[family-name:var(--font-mono)] text-[12px]">
         <Metric label="Spend · 24h" value={`${lane.spend24h} / ${lane.cap24h} USDC`} />
         <Metric label="Jobs posted" value={String(lane.jobsPosted24h)} />
-        <Metric label="External claimants" value={`${lane.externalClaimantShare} · ${lane.externalClaimantCount}`} />
+        <Metric label="External claimant wallets · shared registry" value={`${lane.externalClaimantShare} · ${lane.externalClaimantCount}`} />
         <Metric label="Retained · 14d" value={String(lane.retainedExternalWorkers14d)} />
         <Metric label="Cost / retained · 30d" value={lane.costPerRetainedExternalWorker30d} />
       </dl>

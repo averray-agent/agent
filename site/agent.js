@@ -70,14 +70,16 @@ function renderIdentityLabels(profile) {
     }
   }
 
-  const synthetic = byId("profile-synthetic");
-  if (synthetic) {
-    synthetic.textContent = "";
-    synthetic.hidden = true;
-    if (profile.synthetic === true) {
-      synthetic.textContent = "Operator-run synthetic identity · not external demand";
-      synthetic.hidden = false;
-    }
+  const identity = byId("profile-identity");
+  if (identity) {
+    const classification = profile.identity?.classification;
+    const kind = profile.identity?.kind;
+    identity.hidden = false;
+    identity.textContent = classification === "operator-run"
+      ? `Operator-run${kind && kind !== "unknown" ? ` · ${kind}` : ""} · shared self-identity registry · not external demand`
+      : classification === "external"
+        ? "External wallet · shared self-identity registry"
+        : "Identity unknown · shared self-identity registry";
   }
 }
 

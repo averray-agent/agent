@@ -6,6 +6,7 @@ import { claimExpiresAt } from "./claim-state.js";
 import { decimalToBaseUnits, formatBaseUnits } from "./platform-service-helpers.js";
 import { buildRunReceipt } from "./run-receipt.js";
 import { hashSubmission } from "./submission.js";
+import { describeSelfIdentity } from "./self-identity-registry.js";
 import { verificationDepthForJob } from "./verification-depth.js";
 
 export const WORK_RECEIPT_SCHEMA_VERSION = "averray.work-receipt.v1";
@@ -95,6 +96,9 @@ export function buildVerifyReceipt({ run, profile, execution, verdict, context =
   const artifactHash = bytes32(execution?.artifactHash)
     ?? hashCanonicalContent(run.inputs?.patch ?? run.inputs ?? null);
   const sourceBinding = normalizeSourceBinding(execution?.sourceBinding);
+  const customerIdentity = receiptIdentityClass(
+    context.selfIdentityRegistry?.classify?.({ wallet: customer })
+  );
   const unsigned = compact({
     schemaVersion: WORK_RECEIPT_SCHEMA_VERSION,
     receiptType: "work_outcome",
@@ -122,11 +126,11 @@ export function buildVerifyReceipt({ run, profile, execution, verdict, context =
       valueAtRisk,
       deadline: { timeoutMs: Number(profile.limits?.timeoutMs) },
       poster: customer,
-      posterClass: "external"
+      posterClass: customerIdentity === "operator-run" ? "operator" : "external"
     },
     execution: compact({
       provider: customer,
-      providerClass: "external",
+      providerClass: customerIdentity,
       target: run.target,
       artifactHash,
       sourceBinding,
@@ -227,11 +231,7 @@ function rewardAtClaim(session, job) {
 
 function buildExecution({ session, verification, runReceipt, context }) {
   const identity = context.selfIdentityRegistry?.classify?.({ wallet: session.wallet, session });
-  const providerClass = identity?.self === true
-    ? "ours"
-    : identity?.actor === "external"
-      ? "external"
-      : "unknown";
+  const providerClass = receiptIdentityClass(identity);
   const artifactHash = bytes32(
     verification?.artifactHash
       ?? verification?.details?.artifactHash
@@ -253,6 +253,10 @@ function buildExecution({ session, verification, runReceipt, context }) {
     evidenceHash: runReceipt.verdict.evidenceHash,
     environment
   });
+}
+
+function receiptIdentityClass(identity) {
+  return describeSelfIdentity(identity).classification;
 }
 
 function normalizeSourceBinding(value) {

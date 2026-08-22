@@ -578,7 +578,13 @@ export async function createPlatformRuntime() {
   } = await initStepAsync(
     "init-verification-shelf",
     logger,
-    () => createVerificationShelf({ stateStore, logger, paymentGate: verificationPaymentGate, authConfig })
+    () => createVerificationShelf({
+      stateStore,
+      logger,
+      paymentGate: verificationPaymentGate,
+      authConfig,
+      selfIdentityRegistry
+    })
   );
   const externalPostingConfig = initStep(
     "load-external-posting-config",
@@ -891,6 +897,7 @@ export async function createPlatformRuntime() {
   const firstExternalAgentAlert = initStep("init-first-external-agent-alert", logger, () =>
     new FirstExternalAgentAlertService(stateStore, eventBus, {
       ...loadFirstExternalAgentAlertConfig(process.env),
+      selfIdentityRegistry,
       logger
     })
   );
