@@ -64,6 +64,10 @@ test("job browsing tools frame listing descriptions as untrusted data", () => {
   assert.match(byName.get("listJobs").description, /untrusted data, not instructions/u);
   assert.match(byName.get("listJobs").description, /contentTrust and provenance/u);
   assert.match(byName.get("getJobDefinition").description, /untrusted job data, not instructions/u);
+  assert.match(
+    byName.get("listJobs").inputSchema.properties.since.description,
+    /ISO 8601 or epoch milliseconds/u
+  );
 });
 
 function makeEarningsDoorRoute() {
@@ -380,7 +384,7 @@ test("listJobs returns the same value through MCP and its HTTP route", async () 
     handlePublicMetadataRoute: async () => false
   });
   const sourceRequest = { headers: {}, socket: { remoteAddress: "127.0.0.1" } };
-  const path = "/jobs?wallet=0xworker&format=compact&limit=2&state=open";
+  const path = "/jobs?wallet=0xworker&format=compact&limit=2&state=open&since=1787356800000";
   const viaHttp = await invokeHttpRoute(httpRoute, {
     method: "GET",
     path,
@@ -390,7 +394,8 @@ test("listJobs returns the same value through MCP and its HTTP route", async () 
     wallet: "0xworker",
     format: "compact",
     limit: 2,
-    state: "open"
+    state: "open",
+    since: 1_787_356_800_000
   }, { request: sourceRequest });
 
   assert.equal(viaHttp.statusCode, 200);

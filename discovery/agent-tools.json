@@ -912,7 +912,7 @@
     },
     {
       "name": "listJobs",
-      "description": "All active jobs with listing time and any priority window."
+      "description": "All active jobs with listing time, any priority window, and optional since freshness metadata (ISO 8601 or epoch milliseconds)."
     },
     {
       "name": "getJobDefinition",

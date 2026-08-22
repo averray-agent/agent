@@ -34,15 +34,17 @@ const SOURCE_ALIASES = new Map([
 ]);
 
 export function buildPublicJobsResponse(jobs, searchParams) {
+  const listedJobs = jobs.map(withListedAt);
   if (!usesAgentFriendlyQuery(searchParams)) {
-    return jobs;
+    return listedJobs;
   }
 
   const limit = parseLimit(searchParams.get("limit"), DEFAULT_AGENT_LIMIT, MAX_AGENT_LIMIT);
   const offset = parseOffset(searchParams.get("offset"));
   const filters = parseJobFilters(searchParams);
-  const filteredJobs = jobs.filter((job) => matchesFilters(job, filters));
+  const filteredJobs = listedJobs.filter((job) => matchesFilters(job, filters));
   const page = filteredJobs.slice(offset, offset + limit);
+  const since = parseSince(searchParams.get("since"));
 
   return {
     jobs: page.map(toCompactJobRow),
@@ -52,8 +54,37 @@ export function buildPublicJobsResponse(jobs, searchParams) {
     offset,
     nextOffset: offset + limit < filteredJobs.length ? offset + limit : null,
     filters,
+    meta: {
+      newSince: since === undefined
+        ? 0
+        : filteredJobs.filter((job) => isListedAfter(job.listedAt, since)).length
+    },
     compact: true
   };
+}
+
+function withListedAt(job) {
+  return {
+    ...job,
+    listedAt: job.listedAt ?? job.lifecycle?.createdAt ?? job.createdAt ?? job.firedAt ?? null
+  };
+}
+
+function parseSince(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return undefined;
+  if (/^[0-9]+$/u.test(raw)) {
+    const epochMs = Number(raw);
+    return Number.isSafeInteger(epochMs) ? epochMs : undefined;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}T/u.test(raw)) return undefined;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function isListedAfter(listedAt, since) {
+  const parsed = Date.parse(String(listedAt ?? ""));
+  return Number.isFinite(parsed) && parsed > since;
 }
 
 function usesAgentFriendlyQuery(searchParams) {
@@ -132,6 +163,7 @@ function toCompactJobRow(job) {
       asset: job.rewardAsset ?? null,
       amount: job.rewardAmount ?? null
     },
+    listedAt: job.listedAt,
     // Beside the reward on purpose: an agent comparing two jobs is already looking
     // here, and how fast it gets paid is the other half of the price.
     ...(settlement ? { settlement } : {}),

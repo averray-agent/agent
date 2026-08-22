@@ -223,6 +223,22 @@ export interface BuildWithdrawTransactionsInput {
   destination?: WalletAddress;
 }
 
+export interface WithdrawalStanding extends ApiEnvelope {
+  claimTier: string;
+  claimTierLabel: "claim tier";
+  reputationTier: string;
+  badges: number;
+  waiverSlotsRemaining: number;
+  creditInterest: {
+    eligible: boolean;
+    registered: boolean;
+  };
+  registerPath?: "/credit/interest";
+  creditInterestStatement?: string;
+  persists: true;
+  statement: string;
+}
+
 export interface UnsignedWithdrawalTemplate extends ApiEnvelope {
   step: "withdraw" | "transfer_to_destination";
   unsigned: true;
@@ -248,6 +264,7 @@ export interface BuildWithdrawTransactionsResponse extends ApiEnvelope {
     destination: WalletAddress;
     firstLandingAddress: WalletAddress;
   };
+  standing: WithdrawalStanding;
   templates: UnsignedWithdrawalTemplate[];
   instructions: string[];
   broadcast: ApiEnvelope;
@@ -819,6 +836,7 @@ export interface JobDefinition extends ApiEnvelope {
 
 export interface JobSummary extends ApiEnvelope {
   id: JobId;
+  listedAt?: ISODateTime | null;
   title?: string;
   category?: string;
   tier?: string;
@@ -852,6 +870,7 @@ export interface JobsListResponse extends ApiEnvelope {
   offset?: number;
   nextOffset?: number | null;
   compact?: boolean;
+  meta?: { newSince: number };
 }
 
 export interface ListJobsOptions {
@@ -862,6 +881,7 @@ export interface ListJobsOptions {
   format?: string;
   limit?: number;
   offset?: number;
+  since?: ISODateTime | number;
 }
 
 export interface RecommendationResponse extends ApiEnvelope {

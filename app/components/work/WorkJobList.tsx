@@ -7,16 +7,52 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useHumanWorkJobs } from "@/lib/api/hooks";
 import { formatAmount } from "@/lib/format";
-import { filterHumanWorkListings, priorityWindowDisplay, workCatalogueIsPending, workJobHref } from "@/lib/work/human-work.js";
+import {
+  WORK_LAST_VISIT_STORAGE_KEY,
+  filterHumanWorkListings,
+  isJobNewSince,
+  parseWorkLastVisit,
+  priorityWindowDisplay,
+  workCatalogueIsPending,
+  workJobHref
+} from "@/lib/work/human-work.js";
 import type { HumanJobListing } from "./types";
 import { markAppMilestone } from "@/lib/ui/app-performance.js";
 
 export function WorkJobList() {
-  const jobsQuery = useHumanWorkJobs();
+  const [visitLoaded, setVisitLoaded] = useState(false);
+  const [previousVisit, setPreviousVisit] = useState<number | null>(null);
+  const visitStartedAt = useRef<number | null>(null);
+  const visitRecorded = useRef(false);
+  const jobsQuery = useHumanWorkJobs(visitLoaded ? previousVisit : undefined);
   const jobs = filterHumanWorkListings(jobsQuery.data) as HumanJobListing[];
-  const cataloguePending = workCatalogueIsPending(jobsQuery);
+  const cataloguePending = !visitLoaded || workCatalogueIsPending(jobsQuery);
   const firstCatalogueMarked = useRef(false);
   const [nowMs, setNowMs] = useState<number | null>(null);
+
+  useEffect(() => {
+    visitStartedAt.current = Date.now();
+    try {
+      setPreviousVisit(parseWorkLastVisit(window.localStorage.getItem(WORK_LAST_VISIT_STORAGE_KEY)));
+    } catch {
+      setPreviousVisit(null);
+    }
+    setVisitLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!visitLoaded || visitRecorded.current || jobsQuery.data === undefined) return;
+    visitRecorded.current = true;
+    try {
+      window.localStorage.setItem(
+        WORK_LAST_VISIT_STORAGE_KEY,
+        String(visitStartedAt.current ?? Date.now())
+      );
+    } catch {
+      // Freshness is deliberately client-local and optional. A blocked store
+      // never hides the live listing or invents server-side identity.
+    }
+  }, [jobsQuery.data, visitLoaded]);
 
   useEffect(() => {
     if (!firstCatalogueMarked.current && !cataloguePending && (jobsQuery.data !== undefined || jobsQuery.error)) {
@@ -81,12 +117,19 @@ export function WorkJobList() {
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      {jobs.map((job) => <WorkJobCard key={job.id} job={job} nowMs={nowMs} />)}
+      {jobs.map((job) => (
+        <WorkJobCard
+          key={job.id}
+          job={job}
+          isNew={previousVisit !== null && isJobNewSince(job, previousVisit)}
+          nowMs={nowMs}
+        />
+      ))}
     </div>
   );
 }
 
-function WorkJobCard({ job, nowMs }: { job: HumanJobListing; nowMs: number | null }) {
+function WorkJobCard({ job, isNew, nowMs }: { job: HumanJobListing; isNew: boolean; nowMs: number | null }) {
   const reward = formatAmount(job.reward?.amount ?? undefined, job.reward?.asset ?? "");
   const priority = nowMs === null ? null : priorityWindowDisplay(job.priorityWindow, nowMs);
   return (
@@ -96,6 +139,7 @@ function WorkJobCard({ job, nowMs }: { job: HumanJobListing; nowMs: number | nul
           <div>
             <div className="flex flex-wrap gap-2">
               <Badge tone="success">Open</Badge>
+              {isNew ? <Badge tone="accent">new</Badge> : null}
               {job.tier ? <Badge tone="muted">{job.tier} claim tier</Badge> : null}
             </div>
             <h2 className="mt-3 text-xl font-semibold leading-snug">{job.title || job.id}</h2>
