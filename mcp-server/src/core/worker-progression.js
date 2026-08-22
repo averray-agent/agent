@@ -41,10 +41,16 @@ export class WorkerProgressionService {
 
   async getProgression(wallet, {
     settlementSessionId = undefined,
+    settlementSession = undefined,
     previousProgression = undefined
   } = {}) {
     const normalizedWallet = normalizeWallet(wallet);
-    const allSessions = await collectAllWalletSessions(this.stateStore, normalizedWallet);
+    const storedSessions = await collectAllWalletSessions(this.stateStore, normalizedWallet);
+    const allSessions = includeSettlementSession(storedSessions, {
+      normalizedWallet,
+      settlementSessionId,
+      settlementSession
+    });
     const sessions = allSessions.filter((session) => !this.isSyntheticSession(normalizedWallet, session));
     if (this.isSyntheticWallet(normalizedWallet, allSessions, sessions)) return undefined;
 
@@ -339,6 +345,35 @@ async function collectAllWalletSessions(stateStore, wallet, { pageSize = 64, max
   }
   if (sessions.length >= maxSessions) throw new Error("Worker progression session history exceeded its read cap.");
   return sessions;
+}
+
+/**
+ * The terminal session returned by verification ingestion is the authoritative
+ * write for this request. A secondary wallet-session index may lag that write,
+ * so overlay the returned value by id before computing progression. This is a
+ * read-your-write join, not a retry: settlement never waits on an advisory
+ * progression read.
+ */
+function includeSettlementSession(sessions, {
+  normalizedWallet,
+  settlementSessionId,
+  settlementSession
+}) {
+  if (settlementSession === undefined) return sessions;
+  const suppliedId = String(settlementSession?.sessionId ?? "");
+  if (!settlementSessionId || suppliedId !== String(settlementSessionId)) {
+    throw new TypeError("worker progression settlement session must match settlementSessionId");
+  }
+  if (normalizeWallet(settlementSession.wallet) !== normalizedWallet) {
+    throw new TypeError("worker progression settlement session must belong to the requested wallet");
+  }
+  if (settlementSession.status !== "resolved") {
+    throw new TypeError("worker progression settlement session must be resolved");
+  }
+  return [
+    settlementSession,
+    ...sessions.filter((session) => session?.sessionId !== suppliedId)
+  ];
 }
 
 function normalizeTier(tier, skill) {
