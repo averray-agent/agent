@@ -3,9 +3,17 @@
 set -euo pipefail
 
 PUBLIC_SITE_URL=${PUBLIC_SITE_URL:-https://averray.com/}
+PUBLIC_AGENT_PROFILE_URL=${PUBLIC_AGENT_PROFILE_URL:-https://averray.com/agents/0x97450bf69cb4aeb0b33db3ae51ac2d18224d4b5c}
+PUBLIC_VERSIONED_ASSET_URL=${PUBLIC_VERSIONED_ASSET_URL:-https://averray.com/reader-fetch.js?v=20260821}
+PUBLIC_RECEIPT_JUNK_URL=${PUBLIC_RECEIPT_JUNK_URL:-https://averray.com/receipts/junk}
+PUBLIC_ONBOARDING_REDIRECT_URL=${PUBLIC_ONBOARDING_REDIRECT_URL:-https://averray.com/onboarding}
+PUBLIC_HEALTH_REDIRECT_URL=${PUBLIC_HEALTH_REDIRECT_URL:-https://averray.com/health}
+PUBLIC_JOB_TIERS_REDIRECT_URL=${PUBLIC_JOB_TIERS_REDIRECT_URL:-https://averray.com/jobs/tiers}
+PUBLIC_VERIFY_PROFILES_REDIRECT_URL=${PUBLIC_VERIFY_PROFILES_REDIRECT_URL:-https://averray.com/verify/profiles}
 DISCOVERY_URL=${DISCOVERY_URL:-https://averray.com/.well-known/agent-tools.json}
 APP_URL=${APP_URL:-https://app.averray.com/}
 API_HEALTH_URL=${API_HEALTH_URL:-https://api.averray.com/health}
+API_MCP_INFO_URL=${API_MCP_INFO_URL:-https://api.averray.com/mcp}
 API_POOL_URL=${API_POOL_URL:-https://api.averray.com/pool}
 API_ACCOUNT_POSITION_URL=${API_ACCOUNT_POSITION_URL:-https://api.averray.com/account/position?asset=USDC}
 API_ACCOUNT_WITHDRAW_URL=${API_ACCOUNT_WITHDRAW_URL:-https://api.averray.com/account/withdraw/transactions}
@@ -165,6 +173,40 @@ fetch_admin_status_once() {
   printf '%s' "$admin_status_json"
 }
 
+assert_cache_control() {
+  local url="$1"
+  local expected="$2"
+  local label="$3"
+  local headers actual
+  headers="$(curl_with_transport_retries -fsSI --max-time "$TIMEOUT_SEC" "$url")"
+  actual="$(awk '
+    tolower($1) == "cache-control:" {
+      sub(/^[^:]+:[[:space:]]*/, "")
+      value=$0
+    }
+    END { print value }
+  ' <<<"$headers" | tr -d '\r')"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "$label returned Cache-Control '$actual'; expected '$expected'." >&2
+    exit 1
+  fi
+}
+
+assert_redirect() {
+  local url="$1"
+  local expected="$2"
+  local label="$3"
+  local result status target
+  result="$(curl_with_transport_retries -sS --max-time "$TIMEOUT_SEC" \
+    -o /dev/null -w $'%{http_code}\n%{redirect_url}' "$url")"
+  status="${result%%$'\n'*}"
+  target="${result#*$'\n'}"
+  if [[ "$status" != "301" || "$target" != "$expected" ]]; then
+    echo "$label returned HTTP $status to '$target'; expected HTTP 301 to '$expected'." >&2
+    exit 1
+  fi
+}
+
 enabled() {
   case "${1:-}" in
     1|true|yes) return 0 ;;
@@ -230,12 +272,42 @@ grep -q "<title>Averray" <<<"$public_html" || {
   exit 1
 }
 
+echo "Checking public-site cache and routing contract"
+assert_cache_control "$PUBLIC_SITE_URL" "no-cache" "Public site HTML"
+assert_cache_control "$PUBLIC_AGENT_PROFILE_URL" "no-cache" "Agent-profile HTML rewrite"
+assert_cache_control "$PUBLIC_VERSIONED_ASSET_URL" "public, max-age=31536000, immutable" "Versioned public asset"
+assert_redirect "$PUBLIC_ONBOARDING_REDIRECT_URL" "https://api.averray.com/onboarding" "Public onboarding path"
+assert_redirect "$PUBLIC_HEALTH_REDIRECT_URL" "https://api.averray.com/health" "Public health path"
+assert_redirect "$PUBLIC_JOB_TIERS_REDIRECT_URL" "https://api.averray.com/jobs/tiers" "Public tier-ladder path"
+assert_redirect "$PUBLIC_VERIFY_PROFILES_REDIRECT_URL" "https://api.averray.com/verify/profiles" "Public verification-profile path"
+
+receipt_shell_html="$(fetch "$PUBLIC_RECEIPT_JUNK_URL")"
+for receipt_shell_marker in \
+  'data-receipt-state="loading"' \
+  '0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1' \
+  '0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0' \
+  'href="/transparency/"'; do
+  grep -Fq "$receipt_shell_marker" <<<"$receipt_shell_html" || {
+    echo "Junk receipt path did not serve the honest receipt shell ($receipt_shell_marker missing)." >&2
+    exit 1
+  }
+done
+
 echo "Checking discovery manifest"
 discovery_json="$(fetch "$DISCOVERY_URL")"
 jq -e '.discoveryUrl == "https://averray.com/.well-known/agent-tools.json"' >/dev/null <<<"$discovery_json"
 jq -e '.baseUrl == "https://api.averray.com"' >/dev/null <<<"$discovery_json"
 jq -e '.publicEndpoints | any(.path == "/poster/onboarding")' >/dev/null <<<"$discovery_json"
 jq -e '.onboarding.posterEntrypoint == "https://api.averray.com/poster/onboarding"' >/dev/null <<<"$discovery_json"
+jq -e '
+  ([.publicEndpoints[]?.path, .authenticatedEndpoints[]?.path] | index("/strategies") == null) and
+  ([.publicEndpoints[]?.path, .authenticatedEndpoints[]?.path] | index("/account/strategies") == null) and
+  ([.tools[]?.name] | index("getStrategyPositions") == null) and
+  ([.tools[]?.name] | index("listStrategies") == null)
+' >/dev/null <<<"$discovery_json" || {
+  echo "Discovery still advertises a retired strategy surface." >&2
+  exit 1
+}
 
 echo "Checking operator app shell"
 check_operator_app_shell
@@ -245,6 +317,21 @@ api_health_json="$(fetch "$API_HEALTH_URL")"
 jq -e '.status == "ok"' >/dev/null <<<"$api_health_json"
 jq -e '.components.stateStore.ok == true' >/dev/null <<<"$api_health_json"
 jq -e '.components.submittedJobAutoVerifier.ok == true' >/dev/null <<<"$api_health_json"
+
+echo "Checking browser-friendly MCP endpoint"
+mcp_info_json="$(fetch "$API_MCP_INFO_URL")"
+jq -e '
+  (.type == "mcp_protocol_endpoint") and
+  (.description == "This is an MCP protocol endpoint, not a browser page.") and
+  (.connect.url == "https://api.averray.com/mcp") and
+  (.connect.clientConfig.mcpServers.averray.url == "https://api.averray.com/mcp") and
+  (.plainHttpAlternative.method == "GET") and
+  (.plainHttpAlternative.path == "/verify/profiles") and
+  (.plainHttpAlternative.url == "https://api.averray.com/verify/profiles")
+' >/dev/null <<<"$mcp_info_json" || {
+  echo "GET /mcp did not return the browser-friendly MCP connection guide." >&2
+  exit 1
+}
 
 echo "Checking DepositPool door"
 pool_response="$(curl_with_transport_retries -sS --max-time "$TIMEOUT_SEC" --write-out $'\n%{http_code}' "$API_POOL_URL")"
@@ -301,6 +388,13 @@ echo "Checking onboarding contract"
 onboarding_json="$(fetch "$API_ONBOARDING_URL")"
 jq -e '.name | length > 0' >/dev/null <<<"$onboarding_json"
 jq -e '.protocols | index("http") != null' >/dev/null <<<"$onboarding_json"
+jq -e '
+  (.tools | index("getStrategyPositions") == null) and
+  (.tools | index("listStrategies") == null)
+' >/dev/null <<<"$onboarding_json" || {
+  echo "Onboarding still advertises a retired strategy tool." >&2
+  exit 1
+}
 jq -e '
   (.tools | index("getAccountPosition") != null) and
   (.tools | index("buildWithdrawTransactions") != null) and

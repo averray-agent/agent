@@ -6,6 +6,7 @@ import { respond } from "../http/http-helpers.js";
 import {
   createMcpRoute,
   LEGACY_MCP_VERSION,
+  MCP_BROWSER_INFO,
   MCP_SERVER_INFO,
   MODERN_MCP_VERSION,
   SUPPORTED_MCP_VERSIONS
@@ -44,6 +45,23 @@ async function call(handler, body, headers = {}) {
     method: "POST",
     headers,
     body,
+    socket: { remoteAddress: "198.51.100.8" }
+  };
+  const response = capturedResponse();
+  const handled = await handler({ request, response, pathname: "/mcp" });
+  const text = Buffer.concat(response.chunks).toString("utf8");
+  return {
+    handled,
+    statusCode: response.statusCode,
+    headers: response.headers,
+    body: text ? JSON.parse(text) : undefined
+  };
+}
+
+async function callGet(handler) {
+  const request = {
+    method: "GET",
+    headers: {},
     socket: { remoteAddress: "198.51.100.8" }
   };
   const response = capturedResponse();
@@ -99,6 +117,23 @@ function modernHeaders(method, name = undefined, version = MODERN_MCP_VERSION) {
     ...(name ? { "mcp-name": name } : {})
   };
 }
+
+test("static GET /mcp explains the protocol before auth and points browsers to plain HTTP", async () => {
+  const { handler, limitCalls } = createHarness({
+    authMiddleware: async () => {
+      throw new Error("GET /mcp must not authenticate");
+    }
+  });
+  const result = await callGet(handler);
+
+  assert.equal(result.handled, true);
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.headers["cache-control"], "public, max-age=300");
+  assert.deepEqual(result.body, MCP_BROWSER_INFO);
+  assert.equal(result.body.connect.clientConfig.mcpServers.averray.url, "https://api.averray.com/mcp");
+  assert.equal(result.body.plainHttpAlternative.path, "/verify/profiles");
+  assert.deepEqual(limitCalls, []);
+});
 
 test("modern server/discover returns versions, capabilities, and identity without a session", async () => {
   const { handler } = createHarness();

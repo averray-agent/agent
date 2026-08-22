@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 
 const REPO_ROOT = new URL("../../", import.meta.url);
 
@@ -41,9 +42,83 @@ test("Caddy returns explicit 301 redirects for guessed public paths", async () =
     ["@fulfillPath", "/agents/"],
     ["@recordPath", "/transparency/"],
     ["@jobsSchemaPath", "https://api.averray.com/schemas/jobs"],
-    ["@sessionStateMachinePath", "https://api.averray.com/session/state-machine"]
+    ["@sessionStateMachinePath", "https://api.averray.com/session/state-machine"],
+    ["@onboardingPath", "https://api.averray.com/onboarding"],
+    ["@healthPath", "https://api.averray.com/health"],
+    ["@jobTiersPath", "https://api.averray.com/jobs/tiers"],
+    ["@verifyProfilesPath", "https://api.averray.com/verify/profiles"]
   ];
   for (const [matcher, target] of redirects) {
     assert.ok(caddy.includes(`redir ${matcher} ${target} 301`), `${matcher} must be a 301 to ${target}`);
+  }
+});
+
+test("Caddy revalidates HTML, preserves versioned-asset caching, and rewrites every receipt path", async () => {
+  const caddy = await readFile(new URL("deploy/Caddyfile.averray", REPO_ROOT), "utf8");
+
+  assert.match(caddy, /@versionedAssets \{[\s\S]*path \*\.css \*\.js[\s\S]*query v=\*[\s\S]*\}/u);
+  assert.match(caddy, /header @versionedAssets Cache-Control "public, max-age=31536000, immutable"/u);
+  assert.match(caddy, /Cache-Control "no-cache"[\s\S]*match header Content-Type text\/html\*/u);
+  assert.match(caddy, /@workReceipt path \/receipts\/\*[\s\S]*rewrite @workReceipt \/receipts\/index\.html/u);
+});
+
+test("receipt shell distinguishes a missing id from an unknown id and keeps recovery links", async () => {
+  const [reader, shell] = await Promise.all([
+    readFile(new URL("marketing/public/receipt-reader.js", REPO_ROOT), "utf8"),
+    readFile(new URL("marketing/src/pages/receipts.astro", REPO_ROOT), "utf8")
+  ]);
+
+  function evaluate(pathname) {
+    const elements = {
+      "[data-receipt-state]": { dataset: {} },
+      "[data-receipt-status]": { textContent: "" },
+      "[data-receipt]": { hidden: true },
+      "[data-receipt-guidance]": { hidden: true },
+      "[data-receipt-guidance-message]": { textContent: "" }
+    };
+    runInNewContext(reader, {
+      document: {
+        querySelector(selector) { return elements[selector] ?? null; },
+        querySelectorAll() { return []; }
+      },
+      window: {
+        location: { pathname },
+        AverrayReaderFetch: {
+          readJsonWithRetry: async () => {
+            throw Object.assign(new Error("not found"), { status: 404 });
+          }
+        }
+      }
+    });
+    return elements;
+  }
+
+  const missing = evaluate("/receipts/");
+  assert.equal(missing["[data-receipt-status]"].textContent, "no receipt id in the URL");
+  assert.equal(missing["[data-receipt-guidance]"].hidden, false);
+
+  const unknown = evaluate("/receipts/abc");
+  assert.equal(unknown["[data-receipt-status]"].textContent, "no receipt found for this id");
+  assert.equal(unknown["[data-receipt-guidance]"].hidden, false);
+
+  const unknownHash = evaluate(`/receipts/0x${"0".repeat(64)}`);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(unknownHash["[data-receipt-status]"].textContent, "no receipt found for this id");
+  assert.equal(unknownHash["[data-receipt-guidance]"].hidden, false);
+
+  assert.match(shell, /0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1/u);
+  assert.match(shell, /0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0/u);
+  assert.match(shell, /href="\/transparency\/"/u);
+});
+
+test("marketing and the public orientation mirror do not advertise retired strategies", async () => {
+  const sources = await Promise.all([
+    readFile(new URL("marketing/src/pages/agents.astro", REPO_ROOT), "utf8"),
+    readFile(new URL("marketing/src/pages/builders.astro", REPO_ROOT), "utf8"),
+    readFile(new URL("site/llms.txt", REPO_ROOT), "utf8")
+  ]);
+
+  for (const source of sources) {
+    assert.doesNotMatch(source, /api\.averray\.com\/strategies|GET \/strategies|label: "\/strategies"/u);
   }
 });

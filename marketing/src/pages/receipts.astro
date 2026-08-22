@@ -3,6 +3,9 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 import SiteNav from "../components/SiteNav.astro";
 import SiteFooter from "../components/SiteFooter.astro";
 import "../styles/global.css";
+
+const SETTLED_WORK_RECEIPT = "0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1";
+const VERIFY_RECEIPT = "0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0";
 ---
 
 <BaseLayout
@@ -27,6 +30,15 @@ import "../styles/global.css";
         <noscript>
           <p>Loading the receipt requires JavaScript · raw JSON: <a href="https://api.averray.com/receipts/">api.averray.com/receipts/&#123;receiptId&#125;</a></p>
         </noscript>
+        <div data-receipt-guidance hidden>
+          <p data-receipt-guidance-message></p>
+          <p>
+            Published examples:
+            <a href={`/receipts/${SETTLED_WORK_RECEIPT}`}>settled work receipt</a>
+            · <a href={`/receipts/${VERIFY_RECEIPT}`}>verification receipt</a>
+            · <a href="/transparency/">transparency</a>
+          </p>
+        </div>
         <div data-receipt hidden>
           <p><strong>Receipt</strong> <code data-field="receiptId"></code></p>
           <p><strong>Outcome</strong> <span data-field="verdict.outcome"></span> · <span data-field="verdict.reasonCode"></span></p>
@@ -50,5 +62,5 @@ import "../styles/global.css";
     <SiteFooter />
   </main>
   <script src="/reader-fetch.js?v=20260821" is:inline></script>
-  <script src="/receipt-reader.js?v=20260821" is:inline></script>
+  <script src="/receipt-reader.js?v=20260822" is:inline></script>
 </BaseLayout>

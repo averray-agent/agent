@@ -137,6 +137,8 @@ test("A2 arrival payload: GET / identifies Averray and points to site, docs, and
   assert.ok(response.body.endpoints.includes("/llms.txt"));
   assert.ok(response.body.endpoints.includes("/.well-known/badge-receipt-jwks.json"));
   assert.ok(response.body.endpoints.every((endpoint) => !endpoint.includes("/jobs/draft")));
+  assert.ok(!response.body.endpoints.includes("/strategies"));
+  assert.ok(!response.body.endpoints.includes("/account/strategies"));
   assert.deepEqual(response.body.receiptVerification, {
     badgeReceipts: {
       alg: "ES256",

@@ -17,6 +17,30 @@ export const MCP_SERVER_INFO = Object.freeze({
   websiteUrl: "https://averray.com"
 });
 
+export const MCP_BROWSER_INFO = Object.freeze({
+  name: "Averray MCP endpoint",
+  type: "mcp_protocol_endpoint",
+  description: "This is an MCP protocol endpoint, not a browser page.",
+  transport: "streamable_http",
+  connect: {
+    url: "https://api.averray.com/mcp",
+    clientConfig: {
+      mcpServers: {
+        averray: {
+          transport: "streamable-http",
+          url: "https://api.averray.com/mcp"
+        }
+      }
+    }
+  },
+  plainHttpAlternative: {
+    method: "GET",
+    path: "/verify/profiles",
+    url: "https://api.averray.com/verify/profiles",
+    description: "Browse the published verification profiles over plain HTTP."
+  }
+});
+
 const SERVER_CAPABILITIES = Object.freeze({
   tools: { listChanged: false }
 });
@@ -72,6 +96,11 @@ export function createMcpRoute({
   const legacySessions = new Map();
 
   return async function handleMcpRoute({ request, response, pathname }) {
+    if (request.method === "GET" && pathname === "/mcp") {
+      respond(response, 200, MCP_BROWSER_INFO, { "cache-control": "public, max-age=300" });
+      return true;
+    }
+
     if (request.method !== "POST" || pathname !== "/mcp") {
       return false;
     }

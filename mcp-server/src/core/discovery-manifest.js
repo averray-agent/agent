@@ -83,7 +83,6 @@ const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/session/state-machine", description: "Canonical session lifecycle graph for builders and operators." },
   { path: "/schemas/jobs", description: "List of built-in job schemas available for structured work." },
   { path: "/schemas/jobs/:name.json", description: "Canonical JSON schema for one built-in job schema." },
-  { path: "/strategies", description: "Retired strategy surface; points agents to the self-custodied DepositPool and vested-capacity onboarding." },
   { path: "/badges", description: "Recent public badge receipts for completed sessions." },
   { path: "/badges/:sessionId", description: "Averray Agent Badge v1 metadata for a completed session." },
   { path: "/receipts/:receiptId", description: "Immutable Averray Work Receipt v1 JSON addressed by its canonical content hash." },
@@ -115,10 +114,6 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
   {
     path: "/account/withdraw/transactions",
     description: "Complete wallet-bound unsigned AgentAccountCore withdrawal and optional onward ERC-20 transfer. The owner signs, pays DOT gas, and broadcasts."
-  },
-  {
-    path: "/account/strategies",
-    description: "Retired strategy surface; points to the self-custodied DepositPool and vested-capacity onboarding."
   },
   { path: "/pool/transactions", description: "Build wallet-bound unsigned approve/deposit or redeem templates. The platform never signs, receives, brokers, or relays depositor funds." },
   { path: "/credit", description: "Live L1 CreditPool state plus receipt-graph L2 cash and L3 posting limits, debt, and sweep truth." },
@@ -499,8 +494,6 @@ const DISCOVERY_TOOLS = [
   { name: "estimateNetReward", description: "Profile-aware reward estimate." },
   { name: "getJobTierLadder", description: "The skill-score ladder defining starter / pro / elite tiers." },
   { name: "getAccountSummary", description: "Balance sheet for a wallet." },
-  { name: "getStrategyPositions", description: "Retired; use getDepositPoolInfo and buildVestedCapacity." },
-  { name: "listStrategies", description: "Retired; points to the DepositPool and vested-capacity onboarding." },
   { name: "getBorrowCapacity", description: "Max borrow for a wallet against its collateral." },
   { name: "getReputation", description: "Skill / reliability / economic + tier." },
   { name: "listAgents", description: "Recent agent directory rows for operator dashboards." },
@@ -643,7 +636,6 @@ const buildBaseManifest = (network) => ({
     blindAgentCaseStudy: BLIND_AGENT_CASE_STUDY_URL,
     blindAgentCaseStudyPullRequest: BLIND_AGENT_CASE_STUDY_PR,
     launchPlan: "https://github.com/averray-agent/agent/blob/main/docs/PHASE1_LAUNCH_PLAN.md",
-    vdotStrategy: "https://github.com/averray-agent/agent/blob/main/docs/strategies/vdot.md",
     subJobEscrow: "https://github.com/averray-agent/agent/blob/main/docs/patterns/sub-job-escrow.md",
     sendToAgent: "https://github.com/averray-agent/agent/blob/main/docs/payments/send-to-agent.md"
   },

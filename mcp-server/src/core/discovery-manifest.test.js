@@ -52,6 +52,10 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/poster/onboarding"));
   assert.ok(Array.isArray(manifest.authenticatedEndpoints));
   assert.ok(Array.isArray(manifest.tools));
+  assert.ok(!manifest.publicEndpoints.some((entry) => entry.path === "/strategies"));
+  assert.ok(!manifest.authenticatedEndpoints.some((entry) => entry.path === "/account/strategies"));
+  assert.ok(!manifest.tools.some((tool) => ["getStrategyPositions", "listStrategies"].includes(tool.name)));
+  assert.equal("vdotStrategy" in manifest.docs, false);
   assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/account/position"));
   assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/account/borrow-capacity"));
   assert.ok(!manifest.authenticatedEndpoints.some((entry) => entry.path === "/payments/send"));
@@ -250,6 +254,8 @@ test("buildPlatformCapabilities forwards the chainId to the manifest build", () 
   const mode = capabilities.onboarding.walletModes.find((entry) => entry.id === "evm-siwe");
   assert.equal(mode.chain.chainId, POLKADOT_HUB_MAINNET_CHAIN_ID);
   assert.equal(mode.chain.name, "Polkadot Hub");
+  assert.ok(!capabilities.tools.includes("getStrategyPositions"));
+  assert.ok(!capabilities.tools.includes("listStrategies"));
 });
 
 test("authenticated endpoint docs carry the query-parameter contracts agents tripped on", () => {

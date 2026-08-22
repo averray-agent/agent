@@ -21,6 +21,8 @@ async function runHostedStackFixture({
   warnings = [],
   healthTransportFailure = null,
   timeoutSec = "5",
+  htmlCacheControl = "no-cache",
+  versionedAssetCacheControl = "public, max-age=31536000, immutable",
   poolStatus = 200,
   operatorToken = "",
   accountUnauthenticatedOk = false,
@@ -159,14 +161,39 @@ async function runHostedStackFixture({
 
   const fixtures = new Map([
     ["/", "<html><head><title>Averray fixture</title></head></html>"],
+    ["/agent-profile", "<html><head><title>Averray agent fixture</title></head></html>"],
+    ["/reader-fetch.js?v=20260821", "window.AverrayReaderFetch = {};"],
+    ["/receipts/junk", `<html><body>
+      <div data-receipt-state="loading"></div>
+      <a href="/receipts/0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1">settled work receipt</a>
+      <a href="/receipts/0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0">verification receipt</a>
+      <a href="/transparency/">transparency</a>
+    </body></html>`],
     ["/app", "Opening the operator control room."],
     ["/.well-known/agent-tools.json", {
       discoveryUrl: "https://averray.com/.well-known/agent-tools.json",
       baseUrl: "https://api.averray.com",
       publicEndpoints: [{ path: "/poster/onboarding" }],
+      authenticatedEndpoints: [],
+      tools: [],
       onboarding: { posterEntrypoint: "https://api.averray.com/poster/onboarding" }
     }],
     ["/health", health],
+    ["/mcp", {
+      type: "mcp_protocol_endpoint",
+      description: "This is an MCP protocol endpoint, not a browser page.",
+      connect: {
+        url: "https://api.averray.com/mcp",
+        clientConfig: {
+          mcpServers: { averray: { url: "https://api.averray.com/mcp" } }
+        }
+      },
+      plainHttpAlternative: {
+        method: "GET",
+        path: "/verify/profiles",
+        url: "https://api.averray.com/verify/profiles"
+      }
+    }],
     ["/onboarding", onboarding],
     ["/poster/onboarding", posterOnboarding],
     ["/admin/status", {
@@ -198,6 +225,12 @@ async function runHostedStackFixture({
       }
     }]
   ]);
+  const redirects = new Map([
+    ["/site/onboarding", "https://api.averray.com/onboarding"],
+    ["/site/health", "https://api.averray.com/health"],
+    ["/site/jobs/tiers", "https://api.averray.com/jobs/tiers"],
+    ["/site/verify/profiles", "https://api.averray.com/verify/profiles"]
+  ]);
   const requestCounts = new Map();
   const server = createServer((request, response) => {
     const requestCount = (requestCounts.get(request.url) ?? 0) + 1;
@@ -215,6 +248,11 @@ async function runHostedStackFixture({
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify(health));
       }, 75);
+      return;
+    }
+    if (redirects.has(request.url)) {
+      response.writeHead(301, { location: redirects.get(request.url) });
+      response.end();
       return;
     }
     if (request.url === "/pool") {
@@ -251,9 +289,17 @@ async function runHostedStackFixture({
       response.end();
       return;
     }
-    response.writeHead(200, {
+    const headers = {
       "content-type": typeof value === "string" ? "text/html" : "application/json"
-    });
+    };
+    if (["/", "/agent-profile", "/receipts/junk"].includes(request.url)) {
+      headers["cache-control"] = htmlCacheControl;
+    }
+    if (request.url === "/reader-fetch.js?v=20260821") {
+      headers["content-type"] = "text/javascript";
+      headers["cache-control"] = versionedAssetCacheControl;
+    }
+    response.writeHead(200, headers);
     response.end(typeof value === "string" ? value : JSON.stringify(value));
   });
   await new Promise((resolve, reject) => {
@@ -266,9 +312,17 @@ async function runHostedStackFixture({
     const env = {
       ...process.env,
       PUBLIC_SITE_URL: `${baseUrl}/`,
+      PUBLIC_AGENT_PROFILE_URL: `${baseUrl}/agent-profile`,
+      PUBLIC_VERSIONED_ASSET_URL: `${baseUrl}/reader-fetch.js?v=20260821`,
+      PUBLIC_RECEIPT_JUNK_URL: `${baseUrl}/receipts/junk`,
+      PUBLIC_ONBOARDING_REDIRECT_URL: `${baseUrl}/site/onboarding`,
+      PUBLIC_HEALTH_REDIRECT_URL: `${baseUrl}/site/health`,
+      PUBLIC_JOB_TIERS_REDIRECT_URL: `${baseUrl}/site/jobs/tiers`,
+      PUBLIC_VERIFY_PROFILES_REDIRECT_URL: `${baseUrl}/site/verify/profiles`,
       DISCOVERY_URL: `${baseUrl}/.well-known/agent-tools.json`,
       APP_URL: `${baseUrl}/app`,
       API_HEALTH_URL: `${baseUrl}/health`,
+      API_MCP_INFO_URL: `${baseUrl}/mcp`,
       API_POOL_URL: `${baseUrl}/pool`,
       API_ACCOUNT_POSITION_URL: `${baseUrl}/account/position?asset=USDC`,
       API_ACCOUNT_WITHDRAW_URL: `${baseUrl}/account/withdraw/transactions`,
@@ -359,6 +413,36 @@ test("hosted smoke accepts a healthy submitted-job verifier", async () => {
   assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /Checking DepositPool door/u);
   assert.match(result.stdout, /Hosted stack smoke check passed\./u);
+});
+
+test("hosted smoke owns HTML caching, canonical redirects, GET MCP, and the junk-receipt shell", async () => {
+  const result = await runHostedStackFixture({ autoVerifierOk: true, warnings: [] });
+
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  for (const path of [
+    "/agent-profile",
+    "/reader-fetch.js?v=20260821",
+    "/receipts/junk",
+    "/site/onboarding",
+    "/site/health",
+    "/site/jobs/tiers",
+    "/site/verify/profiles",
+    "/mcp"
+  ]) {
+    assert.equal(result.requestCounts[path], 1, `${path} must be walked by the hosted smoke`);
+  }
+});
+
+test("hosted smoke fails closed when HTML is not explicitly revalidated", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    warnings: [],
+    htmlCacheControl: "public, max-age=300"
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.match(result.stderr, /expected 'no-cache'/u);
+  assert.equal(result.requestCounts["/"], 2, "body and header probes are separate assertions");
 });
 
 test("hosted smoke asserts the earnings account door is mounted and answers auth-first", async () => {

@@ -595,10 +595,6 @@
       "description": "Canonical JSON schema for one built-in job schema."
     },
     {
-      "path": "/strategies",
-      "description": "Retired strategy surface; points agents to the self-custodied DepositPool and vested-capacity onboarding."
-    },
-    {
       "path": "/badges",
       "description": "Recent public badge receipts for completed sessions."
     },
@@ -663,10 +659,6 @@
     {
       "path": "/account/withdraw/transactions",
       "description": "Complete wallet-bound unsigned AgentAccountCore withdrawal and optional onward ERC-20 transfer. The owner signs, pays DOT gas, and broadcasts."
-    },
-    {
-      "path": "/account/strategies",
-      "description": "Retired strategy surface; points to the self-custodied DepositPool and vested-capacity onboarding."
     },
     {
       "path": "/pool/transactions",
@@ -879,14 +871,6 @@
       "description": "Balance sheet for a wallet."
     },
     {
-      "name": "getStrategyPositions",
-      "description": "Retired; use getDepositPoolInfo and buildVestedCapacity."
-    },
-    {
-      "name": "listStrategies",
-      "description": "Retired; points to the DepositPool and vested-capacity onboarding."
-    },
-    {
       "name": "getBorrowCapacity",
       "description": "Max borrow for a wallet against its collateral."
     },
@@ -966,7 +950,6 @@
     "blindAgentCaseStudy": "https://github.com/averray-agent/agent/blob/main/docs/BLIND_AGENT_CASE_STUDY.md",
     "blindAgentCaseStudyPullRequest": "https://github.com/averray-agent/agent/pull/904",
     "launchPlan": "https://github.com/averray-agent/agent/blob/main/docs/PHASE1_LAUNCH_PLAN.md",
-    "vdotStrategy": "https://github.com/averray-agent/agent/blob/main/docs/strategies/vdot.md",
     "subJobEscrow": "https://github.com/averray-agent/agent/blob/main/docs/patterns/sub-job-escrow.md",
     "sendToAgent": "https://github.com/averray-agent/agent/blob/main/docs/payments/send-to-agent.md"
   },

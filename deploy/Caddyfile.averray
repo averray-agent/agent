@@ -80,10 +80,34 @@ averray.com {
   @sessionStateMachinePath path /session/state-machine /session/state-machine/
   redir @sessionStateMachinePath https://api.averray.com/session/state-machine 301
 
+  @onboardingPath path /onboarding /onboarding/
+  redir @onboardingPath https://api.averray.com/onboarding 301
+
+  @healthPath path /health /health/
+  redir @healthPath https://api.averray.com/health 301
+
+  @jobTiersPath path /jobs/tiers /jobs/tiers/
+  redir @jobTiersPath https://api.averray.com/jobs/tiers 301
+
+  @verifyProfilesPath path /verify/profiles /verify/profiles/
+  redir @verifyProfilesPath https://api.averray.com/verify/profiles 301
+
+  # HTML is always revalidated so a fixed shell cannot remain stale in a
+  # browser cache. Fingerprinted-by-query JS/CSS stays immutable and long-lived.
+  @versionedAssets {
+    path *.css *.js
+    query v=*
+  }
+  header @versionedAssets Cache-Control "public, max-age=31536000, immutable"
+  header {
+    Cache-Control "no-cache"
+    match header Content-Type text/html*
+  }
+
   @agentProfile path_regexp agentProfile ^/agents/(0x[a-fA-F0-9]{40})/?$
   rewrite @agentProfile /agent.html?wallet={re.agentProfile.1}
 
-  @workReceipt path_regexp workReceipt ^/receipts/(0x[a-fA-F0-9]{64})/?$
+  @workReceipt path /receipts/*
   rewrite @workReceipt /receipts/index.html
 
   file_server

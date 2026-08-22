@@ -2088,6 +2088,7 @@ test("http smoke: discovery manifest is served at both /agent-tools.json and the
       wellKnown,
       healthResponse,
       llmsResponse,
+      mcpInfoResponse,
       modernDiscoverResponse,
       legacyInitializeResponse
     ] = await Promise.all([
@@ -2095,6 +2096,7 @@ test("http smoke: discovery manifest is served at both /agent-tools.json and the
       fetch(`${base}/.well-known/agent-tools.json`),
       fetch(`${base}/health`),
       fetch(`${base}/llms.txt`),
+      fetch(`${base}/mcp`),
       fetch(`${base}/mcp`, {
         method: "POST",
         headers: {
@@ -2141,15 +2143,17 @@ test("http smoke: discovery manifest is served at both /agent-tools.json and the
     assert.equal(wellKnown.status, 200);
     assert.equal(healthResponse.status, 200);
     assert.equal(llmsResponse.status, 200);
+    assert.equal(mcpInfoResponse.status, 200);
     assert.equal(modernDiscoverResponse.status, 200);
     assert.equal(legacyInitializeResponse.status, 200);
     assert.match(canonical.headers.get("content-type") ?? "", /application\/json/);
     assert.match(wellKnown.headers.get("content-type") ?? "", /application\/json/);
     assert.match(llmsResponse.headers.get("content-type") ?? "", /text\/plain/);
-    const [canonicalBody, wellKnownBody, health, modernDiscover, legacyInitialize] = await Promise.all([
+    const [canonicalBody, wellKnownBody, health, mcpInfo, modernDiscover, legacyInitialize] = await Promise.all([
       canonical.json(),
       wellKnown.json(),
       healthResponse.json(),
+      mcpInfoResponse.json(),
       modernDiscoverResponse.json(),
       legacyInitializeResponse.json()
     ]);
@@ -2161,6 +2165,10 @@ test("http smoke: discovery manifest is served at both /agent-tools.json and the
       http: canonicalBody.baseUrl,
       mcp: `${canonicalBody.baseUrl}/mcp`
     });
+    assert.equal(mcpInfo.type, "mcp_protocol_endpoint");
+    assert.equal(mcpInfo.description, "This is an MCP protocol endpoint, not a browser page.");
+    assert.equal(mcpInfo.connect.clientConfig.mcpServers.averray.url, "https://api.averray.com/mcp");
+    assert.equal(mcpInfo.plainHttpAlternative.path, "/verify/profiles");
     assert.deepEqual(modernDiscover.result.supportedVersions, [...SUPPORTED_MCP_VERSIONS]);
     assert.equal(modernDiscover.result._meta["io.modelcontextprotocol/serverInfo"].name, "averray-agent-platform");
     assert.equal(legacyInitialize.result.protocolVersion, LEGACY_MCP_VERSION);
