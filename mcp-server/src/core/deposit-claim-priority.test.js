@@ -70,13 +70,18 @@ test("priority window clamps values above the 1800-second hard ceiling and warns
 
 test("curated and ingested inventory is windowed while waiver starter and external jobs never are", () => {
   const value = policy();
-  assert.deepEqual(value.listingFor(job()), {
+  const expectedWindowedListing = {
     listedAt: LISTED_AT,
     priorityWindow: {
       openAt: "2026-08-22T12:05:00.000Z",
       qualifiesWith: "≥ 1 USDC vested deposit and no outstanding credit draw"
     }
-  });
+  };
+  assert.deepEqual(value.listingFor(job()), expectedWindowedListing);
+  assert.deepEqual(
+    value.listingFor(job({ source: { type: "github_issue" } })),
+    expectedWindowedListing
+  );
   assert.deepEqual(
     value.listingFor(job({ onboardingWaiverEligible: true })),
     { listedAt: LISTED_AT }
