@@ -3058,6 +3058,8 @@ test("explainEligibility narrates the same effective cap and next raise as the g
   assert.equal(explained.currentCap.raw, "2000000");
   assert.equal(explained.capSource.gate, "capital_backed_external_reward_ceiling");
   assert.equal(explained.capSource.tier, "pro");
+  assert.equal(explained.capSource.tierLabel, "claim tier");
+  assert.equal(explained.tierLabel, "claim tier");
   assert.equal(explained.capSource.deposit.vestedRaw, "1000000");
   assert.deepEqual(explained.nextRaise, {
     action: "deposit",

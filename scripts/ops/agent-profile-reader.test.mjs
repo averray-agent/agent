@@ -125,7 +125,7 @@ test("real tester-wallet fixture renders the API platform tier, category unlocks
 
   assert.equal(requestedUrl, PROFILE_URL);
   assert.equal(elements.get("profile-title").textContent, "Agent 0x97450b…4b5c");
-  assert.equal(elements.get("profile-tier").textContent, "journeyman");
+  assert.equal(elements.get("profile-tier").textContent, "Reputation tier · journeyman");
   assert.equal(elements.get("profile-tier").hidden, false);
   assert.equal(elements.get("profile-content").hidden, false);
   assert.equal(elements.get("profile-category-levels").textContent, "wikipedia · level 1");
@@ -143,7 +143,7 @@ test("real tester-wallet fixture renders the API platform tier, category unlocks
 test("synthetic fixture is labeled as operator-run and never presented as external demand", async () => {
   const elements = await renderFixture(syntheticProfileFixture);
 
-  assert.equal(elements.get("profile-tier").textContent, syntheticProfileFixture.tier);
+  assert.equal(elements.get("profile-tier").textContent, `Reputation tier · ${syntheticProfileFixture.tier}`);
   assert.equal(elements.get("profile-synthetic").hidden, false);
   assert.match(elements.get("profile-synthetic").textContent, /operator-run synthetic identity/iu);
   assert.match(elements.get("profile-synthetic").textContent, /not external demand/iu);
@@ -205,7 +205,7 @@ test("friendly agent paths resolve every profile asset from the site root", () =
 
   assert.deepEqual(scripts, [
     "/site.js?v=20260821",
-    "/reader-fetch.js?v=20260821",
+    "/reader-fetch.js?v=20260823",
     "/agent.js?v=20260821"
   ]);
   assert.equal(new URL(stylesheet, friendlyUrl).pathname, "/styles.css");

@@ -27,6 +27,12 @@ export function filterHumanWorkListings(payload) {
   return extractJobRows(payload).filter(isHumanWorkListing);
 }
 
+export function workCatalogueIsPending(request) {
+  return request?.isLoading === true
+    && request?.data === undefined
+    && !request?.error;
+}
+
 export function routeAfterSignIn(roles, requestedNext) {
   const operator = Array.isArray(roles)
     && roles.some((role) => OPERATOR_ROLES.has(String(role).toLowerCase()));

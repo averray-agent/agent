@@ -97,7 +97,7 @@ export function createMcpTools({
   tool({
     name: "preflightJob",
     title: "Preflight job",
-    description: "Check whether your signed-in wallet can claim a job before committing. See bond, fee, waiver, funding, tier, and eligibility blockers.",
+    description: "Check whether your signed-in wallet can claim a job before committing. See bond, fee, waiver, funding, claim tier, and eligibility blockers.",
     inputSchema: jobIdSchema(),
     readOnly: true,
     idempotent: true,

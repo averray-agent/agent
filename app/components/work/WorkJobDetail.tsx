@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toast";
-import { useApi, useHumanWorkJobs, useJobDefinition, useJobEligibility, useJobNetReward, useJobPreflight } from "@/lib/api/hooks";
+import { useBoundedApi, useHumanWorkJobs, useJobDefinition, useJobEligibility, useJobNetReward, useJobPreflight } from "@/lib/api/hooks";
 import { extractApiErrorMessage, swrFetcher } from "@/lib/api/client";
 import { runClaimJob } from "@/lib/api/claim-job";
 import { signIn, WalletUnavailableError } from "@/lib/auth/siwe";
@@ -48,7 +48,7 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
   const submissionContract = asRecord(definition?.submissionContract);
   const schemaUrl = text(schemaSide?.schemaUrl, text(submissionContract?.outputSchemaUrl));
   const schemaRef = text(schemaSide?.schemaRef, text(submissionContract?.outputSchemaRef));
-  const schemaQuery = useApi<Record<string, unknown>>(schemaUrl || null);
+  const schemaQuery = useBoundedApi<Record<string, unknown>>(schemaUrl || null);
   const terms = buildClaimTerms({
     listing,
     definition,
@@ -146,7 +146,7 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
       </a>
       <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-end">
         <div>
-          <p className="eyebrow">{definition.category || "Paid task"} · {definition.tier || "open"}</p>
+          <p className="eyebrow">{definition.category || "Paid task"} · Claim tier: {definition.tier || "open"}</p>
           <h1 className="mt-3 max-w-4xl text-3xl font-semibold tracking-tight sm:text-5xl">{definition.title || jobId}</h1>
           <p className="mt-4 max-w-3xl text-base leading-relaxed text-[var(--muted)]">{definition.description || listing?.summary || "Read the instructions and exact success criteria below."}</p>
         </div>

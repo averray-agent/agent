@@ -3,7 +3,6 @@
   const status = document.querySelector("[data-receipt-status]");
   const receiptRoot = document.querySelector("[data-receipt]");
   const guidance = document.querySelector("[data-receipt-guidance]");
-  const guidanceMessage = document.querySelector("[data-receipt-guidance-message]");
   const match = window.location.pathname.match(/^\/receipts\/(0x[a-fA-F0-9]{64})\/?$/u);
 
   function read(value, path) {
@@ -13,7 +12,6 @@
   function fail(message) {
     root.dataset.receiptState = "error";
     status.textContent = message;
-    if (guidanceMessage) guidanceMessage.textContent = message;
     if (guidance) guidance.hidden = false;
   }
 

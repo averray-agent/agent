@@ -31,6 +31,11 @@ export function createJobRoutes({
   }
 
   return async function handleJobRoute({ request, response, url, pathname }) {
+    if (request.method === "GET" && pathname === "/jobs/open") {
+      respond(response, 301, { redirect: "/jobs" }, { location: "/jobs" });
+      return true;
+    }
+
     if (request.method === "GET" && pathname === "/jobs") {
       const secured = await listPublicJobs(url.searchParams.get("wallet") ?? undefined);
       respond(response, 200, buildPublicJobsResponse(secured, url.searchParams));
@@ -42,6 +47,7 @@ export function createJobRoutes({
         response,
         200,
         {
+          ladder: "claim tier",
           tiers: Object.entries(TIER_REQUIREMENTS).map(([tier, requires]) => ({ tier, requires }))
         },
         { "cache-control": "public, max-age=300" }

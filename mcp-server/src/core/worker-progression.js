@@ -228,6 +228,7 @@ export function buildEligibilityProgression({ preflight, progression }) {
     capSource: {
       gate,
       tier: progression.tier,
+      tierLabel: "claim tier",
       deposit: {
         vestedRaw: preflight?.workerExposure?.vestedAssetsRaw ?? "0",
         perJobRaiseRaw: progression.effectiveCaps.perJobMax.components?.deposit?.raw ?? "0",
@@ -264,7 +265,7 @@ function buildRaises({ tier, reputation, capacity, daily, settledCatalogueJobs }
   if (nextTier) {
     raises.push({
       action: "keep_completing",
-      effect: `Keep completing verified work to reach ${nextTier.tier} at ${nextTier.requires.skill} skill and unlock ${nextTier.tier}-tier claims.`
+      effect: `Keep completing verified work to reach the ${nextTier.tier} claim tier at ${nextTier.requires.skill} skill and unlock ${nextTier.tier}-tier claims.`
     });
   } else if (settledCatalogueJobs < daily.graduationSettledJobs) {
     raises.push({

@@ -2,8 +2,8 @@ export function AgentTierLegend() {
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
       <LegendCard
-        head="Tier ladder"
-        title="How tiers are assigned"
+        head="Reputation tier ladder"
+        title="How reputation tiers are assigned"
         body={
           <>
             The roster uses the tier returned by the profile API: <Code>T1 apprentice</Code>,{" "}

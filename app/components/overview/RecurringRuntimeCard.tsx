@@ -126,7 +126,7 @@ function RecurringTemplateRow({ template }: { template: RecurringTemplateStatus 
           {template.tier ? (
             <>
               <span>·</span>
-              <span>{template.tier}</span>
+              <span>claim tier {template.tier}</span>
             </>
           ) : null}
         </div>

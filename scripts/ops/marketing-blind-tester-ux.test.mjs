@@ -80,9 +80,14 @@ test("QA3-A marketing wayfinding names real doors, live reads, and outbound proo
     assert.match(source, /\/builders\/#glossary/u, `${name} must link the glossary`);
   }
 
-  for (const term of ["SIWE / EIP-4361", "EIP-3009", "x402", "Waiver-eligible", "Co-signer / multisig"]) {
+    for (const term of ["SIWE / EIP-4361", "EIP-3009", "x402", "Waiver-eligible", "Co-signer / multisig"]) {
     assert.ok(builders.includes(term), `builders glossary must define ${term}`);
   }
+  assert.match(builders, /Claim tier \/ Reputation tier/u);
+  assert.match(builders, /starter \/ pro \/ elite claim tier/u);
+  assert.match(builders, /apprentice \/ journeyman \/ expert \/ master reputation tier/u);
+  assert.match(proofToPay, /https:\/\/app\.averray\.com\/poster\//u);
+  assert.match(verify, /https:\/\/app\.averray\.com\/runs\//u);
 
   assert.match(agents, /Starter jobs are deliberately small; rewards and caps rise with settled history\./u);
   assert.match(transparency, /deliberately small pilot treasury/u);
@@ -112,7 +117,10 @@ test("Caddy returns explicit 301 redirects for guessed public paths", async () =
     ["@onboardingPath", "https://api.averray.com/onboarding"],
     ["@healthPath", "https://api.averray.com/health"],
     ["@jobTiersPath", "https://api.averray.com/jobs/tiers"],
-    ["@verifyProfilesPath", "https://api.averray.com/verify/profiles"]
+    ["@verifyProfilesPath", "https://api.averray.com/verify/profiles"],
+    ["@getStartedPath", "https://averray.com/agents/"],
+    ["@posterAliasPath", "/poster/"],
+    ["@verifyAliasPath", "/runs/"]
   ];
   for (const [matcher, target] of redirects) {
     assert.ok(caddy.includes(`redir ${matcher} ${target} 301`), `${matcher} must be a 301 to ${target}`);
@@ -157,8 +165,7 @@ test("receipt shell distinguishes a missing id from an unknown id and keeps reco
       "[data-receipt-state]": { dataset: {} },
       "[data-receipt-status]": { textContent: "" },
       "[data-receipt]": { hidden: true },
-      "[data-receipt-guidance]": { hidden: true },
-      "[data-receipt-guidance-message]": { textContent: "" }
+      "[data-receipt-guidance]": { hidden: true }
     };
     runInNewContext(reader, {
       document: {
@@ -190,6 +197,9 @@ test("receipt shell distinguishes a missing id from an unknown id and keeps reco
   assert.equal(unknownHash["[data-receipt-status]"].textContent, "no receipt found for this id");
   assert.equal(unknownHash["[data-receipt-guidance]"].hidden, false);
 
+  assert.doesNotMatch(shell, /data-receipt-guidance-message/u);
+  assert.match(shell, /id="receipt" class="record-anchor"/u);
+  assert.match(shell, /id="outcome" class="record-anchor"/u);
   assert.match(shell, /0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1/u);
   assert.match(shell, /0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0/u);
   assert.match(shell, /href="\/transparency\/"/u);

@@ -120,6 +120,20 @@ test("job routes ignore unrelated paths", async () => {
   assert.deepEqual(response, {});
 });
 
+test("GET /jobs/open redirects to the canonical public collection before per-id matching", async () => {
+  const { calls, response, route } = makeHarness();
+
+  assert.equal(await invoke(route, { path: "/jobs/open", response }), true);
+  assert.equal(response.statusCode, 301);
+  assert.equal(response.headers.location, "/jobs");
+  assert.deepEqual(response.body, { redirect: "/jobs" });
+  assert.deepEqual(calls, [["respond", {
+    statusCode: 301,
+    body: { redirect: "/jobs" },
+    headers: { location: "/jobs" }
+  }]]);
+});
+
 test("GET /jobs lists live session-joined jobs and preserves response builder shape", async () => {
   const { calls, response, route } = makeHarness({
     jobs: [{ id: "job-1", title: "Job 1", lifecycle: { state: "open" }, category: "coding" }],
@@ -281,6 +295,7 @@ test("GET /jobs/tiers returns cached tier requirements", async () => {
   assert.equal(await invoke(route, { path: "/jobs/tiers", response }), true);
   assert.equal(response.statusCode, 200);
   assert.equal(response.headers["cache-control"], "public, max-age=300");
+  assert.equal(response.body.ladder, "claim tier");
   assert(response.body.tiers.some((entry) => entry.tier === "starter"));
 });
 

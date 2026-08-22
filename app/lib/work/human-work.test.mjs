@@ -7,9 +7,17 @@ import {
   filterHumanWorkListings,
   publicReceiptUrl,
   routeAfterSignIn,
+  workCatalogueIsPending,
   workJobIdFromPath,
   workSessionIdFromPath
 } from "./human-work.js";
+
+test("work catalogue loading banner clears for loaded and empty results", () => {
+  assert.equal(workCatalogueIsPending({ isLoading: true, data: undefined }), true);
+  assert.equal(workCatalogueIsPending({ isLoading: true, data: { jobs: [] } }), false);
+  assert.equal(workCatalogueIsPending({ isLoading: false, data: { jobs: [{ id: "ready" }] } }), false);
+  assert.equal(workCatalogueIsPending({ isLoading: true, error: new Error("down") }), false);
+});
 
 test("human listing filters canary, witness, and disposable proof jobs only on the human surface", () => {
   const agentListing = {
@@ -28,6 +36,7 @@ test("human listing filters canary, witness, and disposable proof jobs only on t
 test("sign-in forks operator allowlists to the operator room and roleless wallets to work", () => {
   assert.equal(routeAfterSignIn(["admin"]), "/overview");
   assert.equal(routeAfterSignIn(["verifier"], "/runs"), "/runs");
+  assert.equal(routeAfterSignIn(["admin"], "/poster/"), "/poster/");
   assert.equal(routeAfterSignIn([], "/overview"), "/work");
   assert.equal(routeAfterSignIn([], "https://example.com"), "/work");
 });
