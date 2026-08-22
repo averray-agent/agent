@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -18,6 +19,18 @@ const CANARY = "0x5555555555555555555555555555555555555555";
 const OUTSIDER = "0x6666666666666666666666666666666666666666";
 const RETAINED_ACCEPTANCE = "0x60385dD643f10934E8F384aC7A04c0D798dFc936";
 const BLIND_TESTER = "0x97450BF69Cb4aEB0b33db3aE51AC2D18224d4b5c";
+
+function readTemplateEnv(relativePath) {
+  return Object.fromEntries(
+    readFileSync(new URL(relativePath, import.meta.url), "utf8")
+      .split("\n")
+      .filter((line) => /^[A-Z][A-Z0-9_]*=/u.test(line))
+      .map((line) => {
+        const separator = line.indexOf("=");
+        return [line.slice(0, separator), line.slice(separator + 1)];
+      })
+  );
+}
 
 test("the shared registry composes operator, acceptance, admin, verifier, and client identities", () => {
   const registry = createSelfIdentityRegistry({
@@ -84,6 +97,19 @@ test("retained acceptance is self while the blind tester remains external", () =
   assert.equal(tester.self, false);
   assert.equal(describeSelfIdentity(tester).classification, PUBLIC_IDENTITY_CLASSES.EXTERNAL);
   assert.equal(describeSelfIdentity(tester).authority, SELF_IDENTITY_AUTHORITY);
+});
+
+test("mainnet env template registers the retained acceptance wallet as self", () => {
+  const defaultEnv = readTemplateEnv("../../../deploy/backend.env.template");
+  const mainnetEnv = readTemplateEnv("../../../deploy/backend.mainnet.env.template");
+
+  assert.equal(defaultEnv.ARRIVAL_ACCEPTANCE_WALLETS, "");
+  assert.equal(mainnetEnv.ARRIVAL_ACCEPTANCE_WALLETS, RETAINED_ACCEPTANCE);
+
+  const registry = createSelfIdentityRegistry({ env: mainnetEnv });
+  const acceptance = registry.classify({ wallet: RETAINED_ACCEPTANCE });
+  assert.equal(acceptance.self, true);
+  assert.equal(acceptance.kind, SELF_IDENTITY_KINDS.ACCEPTANCE);
 });
 
 test("session classification follows durable canary evidence through the shared authority", () => {
