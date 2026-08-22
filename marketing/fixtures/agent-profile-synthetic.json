@@ -2,6 +2,12 @@
   "schemaVersion": 1,
   "wallet": "0x1111111111111111111111111111111111111111",
   "synthetic": true,
+  "identity": {
+    "classification": "operator-run",
+    "kind": "canary",
+    "authority": "shared_self_identity_registry",
+    "evidence": "wallet_bound_canary_marker"
+  },
   "fetchedAt": "2026-08-22T08:00:00.000Z",
   "reputation": {
     "tier": "elite",

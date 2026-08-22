@@ -15,6 +15,13 @@ export const SELF_IDENTITY_KINDS = Object.freeze({
   EXTERNAL: "external"
 });
 
+export const SELF_IDENTITY_AUTHORITY = "shared_self_identity_registry";
+export const PUBLIC_IDENTITY_CLASSES = Object.freeze({
+  OPERATOR_RUN: "operator-run",
+  EXTERNAL: "external",
+  UNKNOWN: "unknown"
+});
+
 /**
  * One truth source for deciding whether a wallet/client is Averray-operated.
  *
@@ -87,6 +94,22 @@ export class SelfIdentityRegistry {
     return this.classify(input).self;
   }
 
+  /**
+   * Classify a wallet across its durable sessions. A wallet-bound self marker
+   * on any session is stronger than the static wallet-only classification;
+   * this is how ephemeral canaries remain operator-run after their key is
+   * discarded without teaching downstream consumers a job-name heuristic.
+   */
+  classifySessions({ wallet, sessions = [] } = {}) {
+    let identity = this.classify({ wallet });
+    for (const session of Array.isArray(sessions) ? sessions : []) {
+      const classified = this.classify({ wallet, session });
+      if (classified.actor === "self") return classified;
+      if (classified.actor === "ambiguous") identity = classified;
+    }
+    return identity;
+  }
+
   replaceSelfClients(values) {
     this.selfClients = clientSet(values);
   }
@@ -131,6 +154,21 @@ export function resolveAmbiguousClients(env = process.env) {
 
 export function normalizeSelfIdentityWallet(value) {
   return normalizeWallet(value);
+}
+
+/** Stable public projection used by receipts, profiles, and operator views. */
+export function describeSelfIdentity(identity) {
+  const classification = identity?.actor === "self"
+    ? PUBLIC_IDENTITY_CLASSES.OPERATOR_RUN
+    : identity?.actor === "external"
+      ? PUBLIC_IDENTITY_CLASSES.EXTERNAL
+      : PUBLIC_IDENTITY_CLASSES.UNKNOWN;
+  return {
+    classification,
+    kind: identity?.kind ?? "unknown",
+    authority: SELF_IDENTITY_AUTHORITY,
+    evidence: identity?.evidence ?? "identity_unavailable"
+  };
 }
 
 function selfIdentity(kind, evidence) {

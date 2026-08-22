@@ -28,7 +28,7 @@ const ISSUE = { number: 1036, title: "Merged: …", body: ISSUE_BODY };
 const SNAPSHOT = {
   flow: {
     jobsSettled: { allTime: { value: 254, status: "fresh" } },
-    composition24h: { external: { value: 0, status: "fresh" } }
+    settledToExternalWallets24h: { value: 0, status: "fresh" }
   }
 };
 
@@ -164,7 +164,7 @@ test("the live reading is what the screen judges against", async () => {
 
   const observed = await readObserved({ fetchImpl });
 
-  assert.equal(observed["flow.composition24h.external"].value, 0);
+  assert.equal(observed["flow.settledToExternalWallets24h"].value, 0);
   assert.equal(observed["flow.jobsSettled.allTime"].value, 254);
 });
 

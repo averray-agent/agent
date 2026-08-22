@@ -8,6 +8,7 @@
     "schemaVersion",
     "wallet",
     "synthetic",
+    "identity",
     "fetchedAt",
     "reputation",
     "stats",
@@ -27,7 +28,19 @@
     },
     "synthetic": {
       "type": "boolean",
-      "description": "True when every observed session for this wallet belongs to a worker-canary-* synthetic regression run. Consumers must not count such a profile as external ecosystem participation."
+      "description": "True when the shared self-identity registry classifies this wallet from a durable canary marker. Retained as a canary-specific compatibility flag; consumers should use identity.classification for wallet ownership."
+    },
+    "identity": {
+      "type": "object",
+      "description": "Wallet ownership classification from the shared self-identity registry. This, not job origin or wallet-name heuristics, is authoritative for operator-run versus external demand.",
+      "required": ["classification", "kind", "authority", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "classification": { "enum": ["operator-run", "external", "unknown"] },
+        "kind": { "type": "string", "minLength": 1 },
+        "authority": { "const": "shared_self_identity_registry" },
+        "evidence": { "type": "string", "minLength": 1 }
+      }
     },
     "fetchedAt": {
       "type": "string",

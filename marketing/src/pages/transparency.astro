@@ -156,7 +156,7 @@ const PAGE_DESCRIPTION =
       <div class="record-head">
         <h2 id="s-work">Work paid for</h2>
       </div>
-      <div class="record-grid record-grid--3">
+      <div class="record-grid record-grid--4">
         <div class="read read--flat" data-read="flow.usdcPaid.last24h">
           <span class="read__label">Paid to workers · 24 h</span>
           <p class="read__value read__value--sm"><span data-value>—</span><span class="read__unit" data-unit></span></p>
@@ -172,19 +172,26 @@ const PAGE_DESCRIPTION =
           <p class="read__value read__value--sm"><span data-value>—</span><span class="read__unit" data-unit></span></p>
           <p class="read__src"><span data-read="flow.jobsSettled.allTime" data-inline><span data-value>—</span></span> jobs settled</p>
         </div>
+        <div class="read read--flat" data-read="flow.settledToExternalWallets24h">
+          <span class="read__label">Settled to external wallets (24h)</span>
+          <p class="read__value read__value--sm"><span data-value>—</span><span class="read__unit" data-unit></span></p>
+          <p class="read__src" data-source></p>
+          <div class="read__foot"><span data-block></span><span data-age></span></div>
+        </div>
       </div>
     </section>
 
     <!-- ============ COMPOSITION — the honest one ============ -->
     <section class="record-section" aria-labelledby="s-comp">
       <div class="record-head">
-        <h2 id="s-comp">Who did that work</h2>
+        <h2 id="s-comp">Where that work came from</h2>
       </div>
       <div class="panel">
         <p class="panel__prose">
-          A settlement count on its own would flatter us. This is the same last-24-hour work,
-          split by who actually did it. Averray runs its own verification workers, and those
-          settlements are counted here as ours.
+          This is the same last-24-hour work split by job origin: platform verification,
+          ingested catalogue work, externally posted work, or unclassified. It does not classify
+          claimants; the external-wallet settlement counter above does that through the shared
+          self-identity registry.
         </p>
         <div class="comp" data-comp hidden>
           <span class="comp__platform" data-comp-bar="platformVerificationRuns"></span>
@@ -200,7 +207,7 @@ const PAGE_DESCRIPTION =
             <i class="comp__ingested"></i>Ingested work <b data-value>—</b>
           </div>
           <div data-read="flow.composition24h.external" data-inline>
-            <i class="comp__external"></i>External agents <b data-value>—</b>
+            <i class="comp__external"></i>Externally posted <b data-value>—</b>
           </div>
           <div data-read="flow.composition24h.unclassified" data-inline>
             <i class="comp__unclassified"></i>Unclassified <b data-value>—</b>

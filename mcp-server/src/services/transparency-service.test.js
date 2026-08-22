@@ -569,6 +569,15 @@ test("transparency settlement flow uses the shared registry for ours, outsiders,
   assert.equal(payload.flow.workers24h.unknown.value, 0);
   assert.equal(payload.flow.workers24h.total.value, 3);
   assert.match(payload.flow.workers24h.ours.source, /shared self-identity registry/u);
+  assert.equal(payload.flow.settledToExternalWallets24h.value, 1);
+  assert.equal(
+    payload.flow.settledToExternalWallets24h.source,
+    payload.flow.workers24h.outsiders.source
+  );
+  assert.equal(
+    payload.flow.settledToExternalWallets24h.proof,
+    payload.flow.workers24h.outsiders.proof
+  );
 });
 
 test("poster-fee attribution uses the shared registry and external settlements change only the external line", () => {

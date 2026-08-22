@@ -38,12 +38,17 @@ export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
 
   return (
     <>
-      {agent.synthetic ? (
+      {agent.identity.classification === "operator-run" ? (
         <div className="mb-4 rounded-[10px] border border-[var(--avy-line)] bg-[#ebe7da] px-4 py-3 font-[family-name:var(--font-mono)] text-[12px] text-[#756d58]">
-          Synthetic hosted canary identity. Kept in the operator roster for
-          regression visibility and excluded from the public agent directory.
+          Operator-run wallet · {agent.identity.kind} · classified by the shared
+          self-identity registry. This is not external demand.
         </div>
-      ) : null}
+      ) : (
+        <div className="mb-4 rounded-[10px] border border-[var(--avy-line)] bg-[#ebe7da] px-4 py-3 font-[family-name:var(--font-mono)] text-[12px] text-[#756d58]">
+          {agent.identity.classification === "external" ? "External wallet" : "Wallet identity unknown"}
+          {" · shared self-identity registry"}
+        </div>
+      )}
       <Section title="Public identity">
         <PublicIdentityCard wallet={agent.walletFull} profileUrl={profileUrl} />
       </Section>

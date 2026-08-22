@@ -85,17 +85,18 @@ export function issueTitleFor(signal) {
  *
  * Derived from the live payload, stated where the post actually gets written.
  * The veto stops a false CLAIM from firing, but a human — or later a drafter —
- * writing prose around a true claim can still reach past it. `external = 0` is
+ * writing prose around a true claim can still reach past it. An external
+ * claimant settlement count of 0 is
  * the specific trap: a merged payments PR is real, and "agents are earning on
  * Averray" is not, and the second sentence is an easy one to write next to the
  * first.
  */
 export function guardrailsFor(observed = {}) {
   const rails = [];
-  const external = observed["flow.composition24h.external"];
+  const external = observed["flow.settledToExternalWallets24h"];
   if (external && external.status === "fresh" && Number(external.value) === 0) {
     rails.push(
-      "`composition24h.external` was **0** at sweep time. Nothing here supports saying " +
+      "`settledToExternalWallets24h` was **0** at sweep time. Nothing here supports saying " +
         "outside agents are active, earning, or picking up work — and any reader can check " +
         "the same endpoint."
     );

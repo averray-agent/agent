@@ -13,6 +13,7 @@ export async function createVerificationShelf({
   stateStore,
   paymentGate,
   authConfig,
+  selfIdentityRegistry,
   publicReceiptBaseUrl = process.env.PUBLIC_BASE_URL,
   env = process.env,
   logger = console
@@ -57,6 +58,7 @@ export async function createVerificationShelf({
     profileRegistry: verificationProfileRegistry,
     paymentGate,
     executionDispatcher,
+    selfIdentityRegistry,
     publicReceiptBaseUrl,
     runnerTimeoutMarginMs: config.runnerTimeoutMarginMs
   });

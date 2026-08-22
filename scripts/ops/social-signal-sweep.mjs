@@ -51,7 +51,7 @@ export const VETO_REASONS = Object.freeze({
 /** Fields the sweep cannot function without. */
 const REQUIRED_FIELDS = Object.freeze([
   "flow.jobsSettled.allTime",
-  "flow.composition24h.external"
+  "flow.settledToExternalWallets24h"
 ]);
 
 /**
@@ -107,7 +107,7 @@ export function readField(snapshot, path) {
 export function buildCandidates({ snapshot, state }) {
   const candidates = [];
 
-  const external = readField(snapshot, "flow.composition24h.external");
+  const external = readField(snapshot, "flow.settledToExternalWallets24h");
   if (!state.firedSignals?.["external-agents-first"] && numeric(external.value) >= 1) {
     candidates.push({
       signalId: "external-agents-first",
@@ -171,15 +171,14 @@ export function vetoFor(candidate, snapshot) {
     };
   }
 
-  // The specific trap this exists for: `composition24h.external` is publicly
-  // readable and currently 0. Any claim that outsiders are working is false and
-  // trivially falsifiable by a reader hitting the same endpoint.
+  // External-worker claims rest on claimant wallet ownership, never job
+  // origin. The registry-backed settlement field is the public authority.
   if (candidate.claimsExternalActivity) {
-    const external = readField(snapshot, "flow.composition24h.external");
+    const external = readField(snapshot, "flow.settledToExternalWallets24h");
     if (external.status !== "fresh" || numeric(external.value) < 1) {
       return {
         reason: VETO_REASONS.NO_EXTERNAL_ACTIVITY,
-        detail: `flow.composition24h.external is ${external.status} with value ${external.value ?? "null"}`
+        detail: `flow.settledToExternalWallets24h is ${external.status} with value ${external.value ?? "null"}`
       };
     }
   }
@@ -347,7 +346,7 @@ export async function socialSignalSweep({
     // was broken" without re-running the sweep.
     observed: {
       "flow.jobsSettled.allTime": readField(snapshot, "flow.jobsSettled.allTime"),
-      "flow.composition24h.external": readField(snapshot, "flow.composition24h.external"),
+      "flow.settledToExternalWallets24h": readField(snapshot, "flow.settledToExternalWallets24h"),
       "chain.head": readField(snapshot, "chain.head")
     }
   };

@@ -4,6 +4,7 @@ import { buildAgentProfile } from "../../core/agent-profile.js";
 import { disputeIdForSession } from "../../core/dispute-resolution.js";
 import { ValidationError } from "../../core/errors.js";
 import { isInternalPlatformFaultRemediation } from "../../core/platform-fault-remediation.js";
+import { SelfIdentityRegistry } from "../../core/self-identity-registry.js";
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/u;
 
@@ -54,6 +55,7 @@ function buildAgentDirectoryRow(profile) {
   return {
     wallet: profile.wallet,
     synthetic: profile.synthetic === true,
+    identity: profile.identity,
     handle: handleForWallet(profile.wallet),
     tier: profileTierToOperatorTier(reputation),
     reputationScore:
@@ -77,6 +79,7 @@ export function createProfileRoutes({
   respond,
   service,
   stateStore,
+  selfIdentityRegistry = new SelfIdentityRegistry(),
 }) {
   async function preloadDisputeReceipts(sessions) {
     if (!Array.isArray(sessions) || sessions.length === 0) {
@@ -179,6 +182,7 @@ export function createProfileRoutes({
         wallet: wallet.toLowerCase(),
         reputation,
         sessions: history,
+        selfIdentity: selfIdentityRegistry.classifySessions({ wallet, sessions: history }),
         getJobDefinition: (jobId) => {
           try {
             return service.getJobDefinition(jobId);
@@ -230,6 +234,7 @@ export function createProfileRoutes({
         wallet: rawWallet.toLowerCase(),
         reputation,
         sessions,
+        selfIdentity: selfIdentityRegistry.classifySessions({ wallet: rawWallet, sessions }),
         getJobDefinition: (jobId) => {
           try {
             return service.getJobDefinition(jobId);

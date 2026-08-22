@@ -107,7 +107,7 @@ test("2026-08-16 live settlement reconciles payout, retention, and poster fee", 
   assert.equal(receipt.intent.valueAtRisk.amountRaw, receipt.settlement.rewardAmountRaw);
   assert.equal(receipt.settlement.settlementTx, live.source.transactionHash);
   assert.equal(receipt.settlement.gasRetentionBps, 2000);
-  assert.equal(receipt.execution.providerClass, "ours");
+  assert.equal(receipt.execution.providerClass, "operator-run");
 });
 
 test("worker-facing reward must reconcile to payout plus gas retention", () => {
@@ -267,7 +267,10 @@ test("verify and job receipts share the one canonical content-address function",
       reasonCode: "DETERMINISTIC_MATCH",
       evidenceHash: `0x${"4".repeat(64)}`
     },
-    context: { publicReceiptBaseUrl: "https://averray.com" }
+    context: {
+      publicReceiptBaseUrl: "https://averray.com",
+      selfIdentityRegistry: new SelfIdentityRegistry({ operatorWallets: [live.poster] })
+    }
   });
 
   assert.equal(hashWorkReceiptContent(jobReceipt), jobReceipt.receiptId);
@@ -276,7 +279,8 @@ test("verify and job receipts share the one canonical content-address function",
   assertWorkReceiptContentAddress(verifyReceipt);
   assert.equal(verifyReceipt.intent.specSource, "verify_request");
   assert.equal(verifyReceipt.intent.valueAtRisk.amountRaw, "5000000");
-  assert.equal(verifyReceipt.execution.providerClass, "external");
+  assert.equal(verifyReceipt.execution.providerClass, "operator-run");
+  assert.equal(verifyReceipt.intent.posterClass, "operator");
   assert.equal(Object.hasOwn(verifyReceipt, "settlement"), false);
 
   const source = readFileSync(new URL("./work-receipt.js", import.meta.url), "utf8");

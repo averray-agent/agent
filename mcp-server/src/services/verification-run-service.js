@@ -20,6 +20,7 @@ export class VerificationRunService {
     now = () => new Date(),
     randomUUIDImpl = randomUUID,
     publicReceiptBaseUrl = undefined,
+    selfIdentityRegistry = undefined,
     runnerTimeoutMarginMs = 30_000,
     finalizerLockSeconds = 30,
     finalizerId = `verification-finalizer:${randomUUID()}`
@@ -35,6 +36,7 @@ export class VerificationRunService {
     this.now = now;
     this.randomUUIDImpl = randomUUIDImpl;
     this.publicReceiptBaseUrl = publicReceiptBaseUrl;
+    this.selfIdentityRegistry = selfIdentityRegistry;
     this.runnerTimeoutMarginMs = positiveInteger(runnerTimeoutMarginMs, "runnerTimeoutMarginMs");
     this.finalizerLockSeconds = positiveInteger(finalizerLockSeconds, "finalizerLockSeconds");
     this.finalizerId = String(finalizerId);
@@ -217,7 +219,10 @@ export class VerificationRunService {
       profile,
       execution,
       verdict,
-      context: { publicReceiptBaseUrl: this.publicReceiptBaseUrl }
+      context: {
+        publicReceiptBaseUrl: this.publicReceiptBaseUrl,
+        selfIdentityRegistry: this.selfIdentityRegistry
+      }
     });
     await this.stateStore.putWorkReceiptDocument(run.runId, receipt);
     const persisted = {

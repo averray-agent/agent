@@ -357,7 +357,10 @@ export class ArrivalObservatory {
       entry.attributionSources[attributionSource] += 1;
       if (canaryMarkerValid !== undefined) {
         entry.markerAttribution = markerAttribution(canaryMarkerValid);
-      } else if (canonicalWallet && !this.selfWallets.has(canonicalWallet)) {
+      } else if (
+        canonicalWallet
+        && this.identityRegistry.classify({ wallet: canonicalWallet }).actor !== "self"
+      ) {
         entry.markerAttribution = null;
       }
       // Re-marked on every call, not just at creation. A name that becomes

@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ValidationError } from "../../core/errors.js";
+import { createHostedCanaryClaimantAttribution } from "../../core/claimant-attribution.js";
+import { SelfIdentityRegistry } from "../../core/self-identity-registry.js";
 import { createProfileRoutes } from "./profile-routes.js";
 
 const WALLET = "0x1234567890123456789012345678901234567890";
 const OTHER_WALLET = "0x2222222222222222222222222222222222222222";
+const ACCEPTANCE_WALLET = "0x60385dD643f10934E8F384aC7A04c0D798dFc936";
+const BLIND_TESTER_WALLET = "0x97450BF69Cb4aEB0b33db3aE51AC2D18224d4b5c";
 const ROOT_LOGGER = { name: "root" };
 const REQUEST_LOGGER = { name: "request" };
 
@@ -96,6 +100,7 @@ function makeHarness(overrides = {}) {
         return undefined;
       }
     },
+    selfIdentityRegistry: overrides.selfIdentityRegistry ?? new SelfIdentityRegistry(),
   });
   return { calls, response, route };
 }
@@ -175,11 +180,14 @@ test("GET /agents returns a cached public directory", async () => {
   assert.equal(response.body[0].handle, "agent-1234-7890");
   assert.equal(response.body[0].tier, "expert");
   assert.equal(response.body[0].synthetic, false);
+  assert.equal(response.body[0].identity.classification, "external");
+  assert.equal(response.body[0].identity.authority, "shared_self_identity_registry");
 });
 
 test("GET /agents excludes canary-only wallets unless explicitly included", async () => {
   const canary = sessionFixture({
     jobId: "worker-canary-1785151678417",
+    claimantAttribution: createHostedCanaryClaimantAttribution(),
   });
   const { response, route } = makeHarness({
     sessions: [canary],
@@ -261,12 +269,41 @@ test("GET /agents/:wallet builds a public profile with request logger context", 
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.wallet, OTHER_WALLET);
   assert.equal(response.body.synthetic, false);
+  assert.equal(response.body.identity.classification, "external");
   assert.deepEqual(response.headers, { "cache-control": "public, max-age=30" });
   assert(calls.some((call) => (
     call[0] === "collectSessionHistory" &&
     call[1].wallet === OTHER_WALLET &&
     call[1].logger === REQUEST_LOGGER
   )));
+});
+
+test("GET /agents/:wallet classifies operator acceptance and blind-tester wallets through the shared registry", async () => {
+  const selfIdentityRegistry = new SelfIdentityRegistry({ acceptanceWallets: [ACCEPTANCE_WALLET] });
+  const acceptance = makeHarness({
+    history: [sessionFixture({ wallet: ACCEPTANCE_WALLET })],
+    selfIdentityRegistry,
+  });
+  await acceptance.route({
+    request: { method: "GET" },
+    response: acceptance.response,
+    url: new URL(`http://localhost/agents/${ACCEPTANCE_WALLET}`),
+    pathname: `/agents/${ACCEPTANCE_WALLET}`,
+  });
+  assert.equal(acceptance.response.body.identity.classification, "operator-run");
+  assert.equal(acceptance.response.body.identity.kind, "acceptance");
+
+  const external = makeHarness({
+    history: [sessionFixture({ wallet: BLIND_TESTER_WALLET })],
+    selfIdentityRegistry,
+  });
+  await external.route({
+    request: { method: "GET" },
+    response: external.response,
+    url: new URL(`http://localhost/agents/${BLIND_TESTER_WALLET}`),
+    pathname: `/agents/${BLIND_TESTER_WALLET}`,
+  });
+  assert.equal(external.response.body.identity.classification, "external");
 });
 
 test("GET /agents and GET /agents/:wallet return the same operator tier", async () => {

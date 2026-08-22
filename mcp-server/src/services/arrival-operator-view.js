@@ -1,4 +1,8 @@
-import { SELF_IDENTITY_KINDS, normalizeSelfIdentityWallet } from "../core/self-identity-registry.js";
+import {
+  SELF_IDENTITY_AUTHORITY,
+  SELF_IDENTITY_KINDS,
+  normalizeSelfIdentityWallet
+} from "../core/self-identity-registry.js";
 import { isExternalJob } from "../core/external-job-lifecycle.js";
 import {
   ARRIVAL_IDENTITY_STAGES,
@@ -69,6 +73,7 @@ export async function buildArrivalOperatorView({
   return {
     version: ARRIVALS_OPERATOR_VIEW_VERSION,
     generatedAtMs,
+    identityAuthority: SELF_IDENTITY_AUTHORITY,
     outsiders: {
       furthestEver,
       lastActivity,
@@ -230,10 +235,8 @@ function buildJourneys({ entries, sessionsByWallet, identityRegistry }) {
 }
 
 function classifyJourney(identityRegistry, entry, sessions) {
-  for (const session of sessions) {
-    const classified = identityRegistry.classify({ wallet: entry.wallet, session });
-    if (classified.actor === "self") return classified;
-  }
+  const sessionIdentity = identityRegistry.classifySessions({ wallet: entry.wallet, sessions });
+  if (sessionIdentity.actor === "self") return sessionIdentity;
   return identityRegistry.classify({
     wallet: entry.wallet,
     clientInfo: entry.name ? { name: entry.name } : undefined
@@ -241,13 +244,7 @@ function classifyJourney(identityRegistry, entry, sessions) {
 }
 
 function classifySessions(identityRegistry, wallet, sessions) {
-  let identity = identityRegistry.classify({ wallet });
-  for (const session of sessions) {
-    const classified = identityRegistry.classify({ wallet, session });
-    if (classified.actor === "self") return classified;
-    if (classified.actor === "ambiguous") identity = classified;
-  }
-  return identity;
+  return identityRegistry.classifySessions({ wallet, sessions });
 }
 
 function buildFurthestEver(outsiders) {

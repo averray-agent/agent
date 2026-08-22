@@ -122,10 +122,19 @@ export interface AgentStake {
   slashEventCount: number;
 }
 
+export interface AgentIdentity {
+  classification: "operator-run" | "external" | "unknown";
+  kind: string;
+  authority: "shared_self_identity_registry";
+  evidence: string;
+}
+
 export interface AgentRecord {
   handle: string;
   /** Hosted worker-canary identity; excluded from the public directory. */
   synthetic: boolean;
+  /** Authoritative wallet ownership class; never inferred from job origin. */
+  identity: AgentIdentity;
   wallet: string;
   walletFull: string;
   tier: AgentTier;

@@ -195,6 +195,7 @@ async function buildShareAgentProfile(wallet) {
     wallet: String(wallet).toLowerCase(),
     reputation,
     sessions,
+    selfIdentity: selfIdentityRegistry.classifySessions({ wallet, sessions }),
     getJobDefinition: (jobId) => {
       try {
         return service.getJobDefinition(jobId);
@@ -624,6 +625,7 @@ const handleProfileRoute = createProfileRoutes({
   respond,
   service,
   stateStore,
+  selfIdentityRegistry,
 });
 
 const handleWorkerRoute = createWorkerRoutes({

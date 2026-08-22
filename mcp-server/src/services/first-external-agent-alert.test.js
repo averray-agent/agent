@@ -3,10 +3,11 @@ import test from "node:test";
 
 import { EventBus } from "../core/event-bus.js";
 import { ConfigError } from "../core/errors.js";
+import { createHostedCanaryClaimantAttribution } from "../core/claimant-attribution.js";
+import { SelfIdentityRegistry } from "../core/self-identity-registry.js";
 import { MemoryStateStore } from "../core/state-store.js";
 import {
   FirstExternalAgentAlertService,
-  isExternalAgentJobId,
   loadFirstExternalAgentAlertConfig,
 } from "./first-external-agent-alert.js";
 
@@ -28,6 +29,7 @@ function settlementEvent(overrides = {}) {
 function makeHarness({
   fetchImpl = async () => ({ ok: true, status: 200 }),
   stateStore = new MemoryStateStore(),
+  selfIdentityRegistry = new SelfIdentityRegistry(),
 } = {}) {
   const eventBus = new EventBus({ eventStore: stateStore });
   const logs = [];
@@ -40,6 +42,7 @@ function makeHarness({
       environment: "mainnet",
       fetchImpl,
       now: () => new Date("2026-07-27T10:01:00.000Z"),
+      selfIdentityRegistry,
       logger: {
         info(fields, message) {
           logs.push({ level: "info", fields, message });
@@ -63,6 +66,13 @@ test("worker-canary settlements never fire the external-agent webhook", async ()
   });
   service.start();
   await service.flush();
+
+  await stateStore.upsertSession({
+    sessionId: "session-1",
+    wallet: WALLET,
+    jobId: "worker-canary-1785151678417",
+    claimantAttribution: createHostedCanaryClaimantAttribution()
+  });
 
   eventBus.publish(settlementEvent({
     jobId: "worker-canary-1785151678417",
@@ -98,6 +108,8 @@ test("first external settlement posts once and persists restart-safe evidence", 
   assert.equal(payload.jobId, "github-external-job-1");
   assert.equal(payload.sessionId, "session-1");
   assert.equal(payload.wallet, WALLET);
+  assert.equal(payload.identityAuthority, "shared_self_identity_registry");
+  assert.equal(payload.identityEvidence, "unlisted_wallet");
   assert.match(payload.text, /First external agent settlement/u);
 
   const evidence = await stateStore.getServiceState("first-external-agent-alert");
@@ -195,8 +207,20 @@ test("alert configuration is opt-in and fails fast without a webhook", () => {
   });
 });
 
-test("external classification follows job id rather than wallet identity", () => {
-  assert.equal(isExternalAgentJobId("worker-canary-123"), false);
-  assert.equal(isExternalAgentJobId("external-job-123"), true);
-  assert.equal(isExternalAgentJobId(""), false);
+test("operator-run wallets never fire even when the settled job id looks external", async () => {
+  const requests = [];
+  const { eventBus, service } = makeHarness({
+    selfIdentityRegistry: new SelfIdentityRegistry({ acceptanceWallets: [WALLET] }),
+    fetchImpl: async (...args) => {
+      requests.push(args);
+      return { ok: true, status: 200 };
+    }
+  });
+  service.start();
+  await service.flush();
+
+  eventBus.publish(settlementEvent({ jobId: "external-looking-acceptance-job" }));
+  await service.flush();
+
+  assert.equal(requests.length, 0);
 });

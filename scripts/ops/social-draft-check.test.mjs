@@ -11,7 +11,7 @@ import {
 
 const OBSERVED = {
   "flow.jobsSettled.allTime": { value: 254, status: "fresh" },
-  "flow.composition24h.external": { value: 0, status: "fresh" }
+  "flow.settledToExternalWallets24h": { value: 0, status: "fresh" }
 };
 
 const SOURCES = [
@@ -36,7 +36,7 @@ test("claiming outside agents are earning is rejected while the payload says zer
   const [violation] = checkDraft(draft, ctx());
 
   assert.equal(violation.reason, DRAFT_VIOLATIONS.EXTERNAL_ACTIVITY);
-  assert.match(violation.detail, /external is 0/u);
+  assert.match(violation.detail, /settledToExternalWallets24h is 0/u);
 });
 
 test("the softer phrasings are caught too", () => {
@@ -57,13 +57,13 @@ test("the softer phrasings are caught too", () => {
 });
 
 test("a STALE zero accuses nobody — we do not police from a number we distrust", () => {
-  const stale = { "flow.composition24h.external": { value: 0, status: "stale" } };
+  const stale = { "flow.settledToExternalWallets24h": { value: 0, status: "stale" } };
 
   assert.deepEqual(checkDraft("External agents are earning.", { observed: stale, sources: [] }), []);
 });
 
 test("once the payload actually shows outsiders, the claim is allowed", () => {
-  const live = { "flow.composition24h.external": { value: 2, status: "fresh" } };
+  const live = { "flow.settledToExternalWallets24h": { value: 2, status: "fresh" } };
 
   assert.deepEqual(
     checkDraft("Two external agents completed work today.", {
