@@ -489,10 +489,19 @@ a:hover { color: var(--avy-ink); }
   overflow-y: auto;
   flex: 1;
   min-height: 260px;
-  max-height: 360px;
   scroll-behavior: smooth;
   display: flex; flex-direction: column; gap: 10px;
 }
+/* The console stretches to match the hero's text column, so the feed must own
+   the full panel: no height cap, and rows pinned to the bottom like a real
+   terminal — history scrolls up, any shortfall sits under the header instead
+   of leaving a dead zone at the foot of the panel. margin-top:auto (not
+   justify-content:flex-end) keeps the overflow scrollable. */
+.stream > .ev:first-child { margin-top: auto; }
+/* Below 960px the hero stacks and the console's height is content-driven, so
+   an uncapped feed would grow into a very tall dark slab — restore a cap
+   there; the two-column layout above keeps the feed filling the panel. */
+@media (max-width: 960px) { .stream { max-height: 420px; } }
 .stream::-webkit-scrollbar { width: 6px; }
 .stream::-webkit-scrollbar-thumb { background: rgba(245, 243, 238, 0.12); border-radius: 3px; }
 
