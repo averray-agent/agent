@@ -1,6 +1,6 @@
 # MEMO — Deposit claim priority (retention without paying for it)
 
-**Author:** Claude · **Status:** DRAFT — awaiting Pascal's ratify · **Date:** 2026-08-22
+**Author:** Claude · **Status:** RATIFIED (Pascal, 2026-08-22) · **Date:** 2026-08-22
 **Implements nothing yet.** On ratify this becomes a Codex packet.
 
 ## 1. The problem (Pascal, 2026-08-22)

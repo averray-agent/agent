@@ -1,6 +1,6 @@
 # MEMO — Locked deposit tier ladder (perks always, yield only where it's real)
 
-**Author:** Claude · **Status:** DRAFT — awaiting Pascal's ratify · **Date:** 2026-08-22
+**Author:** Claude · **Status:** RATIFIED (Pascal, 2026-08-22) · **Date:** 2026-08-22
 **Companion to:** MEMO_DEPOSIT_CLAIM_PRIORITY (priority = the base perk).
 **Implements nothing yet.** On ratify this becomes packets (backend first; contract work explicitly deferred).
 
