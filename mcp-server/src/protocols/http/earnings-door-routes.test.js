@@ -15,7 +15,7 @@ function request(method, body) {
   return stream;
 }
 
-function routeFixture() {
+function routeFixture({ eventBus } = {}) {
   const calls = [];
   const route = createEarningsDoorRoutes({
     authMiddleware: async () => ({ wallet: WALLET }),
@@ -26,9 +26,16 @@ function routeFixture() {
       },
       async buildWithdrawTransactions(wallet, payload) {
         calls.push(["build", wallet, payload]);
-        return { available: true, wallet, templates: [{ unsigned: true }], whatYourBalanceCanDo: { retentionNotGates: { templatesRemainComplete: true } } };
+        return {
+          available: true,
+          wallet,
+          templates: [{ unsigned: true }],
+          firstWithdrawalGasGrant: { status: payload.requestGasGrant ? "granted" : "available", reason: "fixture" },
+          whatYourBalanceCanDo: { retentionNotGates: { templatesRemainComplete: true } }
+        };
       }
     },
+    eventBus,
     readJsonBody: async (source) => {
       let text = "";
       for await (const chunk of source) text += chunk;
@@ -61,6 +68,31 @@ test("earnings HTTP routes bind every account read and template to the authentic
   ]);
   assert.equal(getResponse.body.account.owner, WALLET);
   assert.equal(buildResponse.body.templates[0].unsigned, true);
+});
+
+test("withdrawal intent telemetry stores creation and grant status without transaction payloads", async () => {
+  const events = [];
+  const { route } = routeFixture({ eventBus: { publish: (event) => events.push(event) } });
+  await route({
+    request: request("POST", {
+      amount: "7000000",
+      destination: "0x2222222222222222222222222222222222222222",
+      requestGasGrant: true
+    }),
+    response: {},
+    url: new URL("http://local/account/withdraw/transactions"),
+    pathname: "/account/withdraw/transactions"
+  });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].topic, "journey.withdrawal_intent_created");
+  assert.equal(events[0].wallet, WALLET);
+  assert.deepEqual(events[0].data, {
+    status: "created",
+    gasGrantRequested: true,
+    gasGrantStatus: "granted",
+    gasGrantReason: "fixture"
+  });
+  assert.doesNotMatch(JSON.stringify(events[0]), /7000000|0x222222/u);
 });
 
 test("HTTP and MCP earnings doors return byte-identical payloads", async () => {

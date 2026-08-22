@@ -174,6 +174,7 @@ export function createMcpRoute({
       await recordArrival(arrivals, "recordReach", {
         era: "legacy",
         clientInfo: message.params?.clientInfo,
+        method: message.method,
         ip: clientIp?.(request)
       });
       return true;
@@ -486,6 +487,7 @@ async function dispatchRequest({
   // a caller that is refused still counts as having arrived.
   await recordArrival(arrivals, message.method === "tools/call" ? "recordTool" : "recordReach", {
     tool: message.params?.name,
+    method: message.method,
     era,
     clientInfo,
     ip: clientIp?.(request)

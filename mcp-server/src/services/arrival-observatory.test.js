@@ -3,8 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  ARRIVAL_SOFTWARE_CLASSES,
   ARRIVAL_STAGES,
   ArrivalObservatory,
+  PROSPECTIVE_ARRIVAL_SURFACES,
+  classifyArrivalSoftware,
   normalizeClientInfo,
   resolveAmbiguousClients,
   resolveSelfClients,
@@ -60,6 +63,81 @@ function harness({
 const STATE_SCOPE = "arrival-observatory";
 
 const CLAUDE = { name: "claude-ai", version: "1.2.0" };
+
+test("prospective pre-auth arrivals persist only fixed aggregate dimensions", async () => {
+  const nowMs = Date.parse("2026-08-22T10:15:00.000Z");
+  const { observatory, state } = harness({ now: () => nowMs });
+
+  await observatory.recordHttp({
+    method: "GET",
+    pathname: "/.well-known/agent-tools.json",
+    clientInfo: { name: "Mozilla/5.0 secret-agent", version: "5" },
+    ip: "203.0.113.9",
+    wallet: "0x1111111111111111111111111111111111111111"
+  });
+  await observatory.recordHttp({ method: "GET", pathname: "/onboarding", clientInfo: CLAUDE });
+  await observatory.recordReach({ method: "initialize", era: "legacy", clientInfo: { name: "Cursor", version: "1" } });
+
+  const source = await observatory.getPreAuthTimelineState();
+  assert.deepEqual(source.buckets, [{
+    startMs: Date.parse("2026-08-22T10:00:00.000Z"),
+    counts: [
+      { surface: "manifest", clientClass: "browser", count: 1 },
+      { surface: "mcp_initialize", clientClass: "cursor", count: 1 },
+      { surface: "onboarding", clientClass: "claude", count: 1 }
+    ]
+  }]);
+  assert.deepEqual(PROSPECTIVE_ARRIVAL_SURFACES, [
+    "manifest", "onboarding", "jobs_reads", "mcp_initialize", "verify_profiles"
+  ]);
+  assert.ok(ARRIVAL_SOFTWARE_CLASSES.includes("unidentified"));
+  const serialized = JSON.stringify(source);
+  assert.doesNotMatch(serialized, /203\.0\.113\.9|0x111111|secret-agent/u);
+  const persistedAggregate = JSON.stringify(state.get(STATE_SCOPE).preAuthHourlyBuckets);
+  assert.doesNotMatch(persistedAggregate, /203\.0\.113\.9|0x111111|secret-agent|Mozilla/u);
+
+  const publicSnapshot = await observatory.getSnapshot();
+  assert.equal(publicSnapshot.httpClients.length, 0, "machine reads remain aggregate-only");
+});
+
+test("prospective arrival buckets are pruned to a hard 30-day window on write", async () => {
+  let nowMs = Date.parse("2026-07-01T10:15:00.000Z");
+  const { observatory } = harness({ now: () => nowMs });
+  await observatory.recordHttp({ method: "GET", pathname: "/jobs" });
+  nowMs += 31 * 24 * 60 * 60 * 1_000;
+  await observatory.recordHttp({ method: "GET", pathname: "/verify/profiles" });
+
+  const source = await observatory.getPreAuthTimelineState();
+  assert.equal(source.buckets.length, 1);
+  assert.deepEqual(source.buckets[0].counts, [
+    { surface: "verify_profiles", clientClass: "unidentified", count: 1 }
+  ]);
+});
+
+test("prospective collectionSince and aggregate buckets survive restart without backfill", async () => {
+  const firstNow = Date.parse("2026-08-22T10:15:00.000Z");
+  const { observatory, state } = harness({ now: () => firstNow });
+  await observatory.recordHttp({ method: "GET", pathname: "/jobs", clientInfo: CLAUDE });
+  await observatory.maybeFlush(true);
+
+  const restarted = new ArrivalObservatory({
+    stateStore: {
+      async getServiceState(scope) { return state.get(scope); },
+      async upsertServiceState() {}
+    },
+    now: () => firstNow + 5 * 60 * 1_000
+  });
+  const source = await restarted.getPreAuthTimelineState();
+  assert.equal(source.collectionSinceMs, firstNow);
+  assert.equal(source.buckets[0].counts[0].count, 1);
+});
+
+test("software classification is fixed and never returns a raw declaration", () => {
+  assert.equal(classifyArrivalSoftware({ name: "Anthropic/ClaudeAI" }), "claude");
+  assert.equal(classifyArrivalSoftware({ name: "mcp-remote" }), "mcp_bridge");
+  assert.equal(classifyArrivalSoftware({ name: "PrivateCustomerAgent" }), "other_declared");
+  assert.equal(classifyArrivalSoftware(null), "unidentified");
+});
 
 test("tool calls map onto the arrival funnel", async () => {
   const { observatory } = harness();

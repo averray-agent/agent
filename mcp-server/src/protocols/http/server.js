@@ -21,6 +21,7 @@ import { createAdminCapabilityRoutes } from "./admin-capability-routes.js";
 import { createAdminCreditRoutes } from "./admin-credit-routes.js";
 import { createAdminGithubRoutes } from "./admin-github-routes.js";
 import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
+import { createAdminJourneyRoutes } from "./admin-journey-routes.js";
 import { createAdminL3PostingRoutes } from "./admin-l3-posting-routes.js";
 import { createAdminPlatformFaultRemediationRoutes } from "./admin-platform-fault-remediation-routes.js";
 import { createAdminSessionsRoutes } from "./admin-sessions-routes.js";
@@ -89,6 +90,7 @@ import {
 import { signTokenFromConfig, verifyTokenFromConfig } from "../../auth/jwt.js";
 import { createArrivalRoutes } from "./arrival-routes.js";
 import { TreasurySummaryService } from "../../services/treasury-summary.js";
+import { AdminJourneyReadService } from "../../services/admin-journey-reads.js";
 
 const {
   platformService: service,
@@ -464,6 +466,7 @@ const handleDepositPoolRoute = createDepositPoolRoutes({
 const handleEarningsDoorRoute = createEarningsDoorRoutes({
   authMiddleware,
   earningsDoor,
+  eventBus,
   readJsonBody,
   respond,
 });
@@ -648,6 +651,7 @@ const handleJobRoute = createJobRoutes({
   authMiddleware,
   enforceLimit,
   ensureSessionOwnership,
+  eventBus,
   rateLimitConfig,
   readJsonBody,
   respond,
@@ -661,6 +665,7 @@ const handleMcpJobRoute = createJobRoutes({
   authMiddleware,
   enforceLimit,
   ensureSessionOwnership,
+  eventBus,
   rateLimitConfig,
   readJsonBody,
   respond,
@@ -810,6 +815,7 @@ const handleAuthRoute = createAuthRoutes({
   authMiddleware,
   clientIp,
   enforceLimit,
+  eventBus,
   logger,
   rateLimitConfig,
   readJsonBody,
@@ -848,6 +854,20 @@ const handleArrivalRoute = createArrivalRoutes({
   enforceLimit,
   rateLimitConfig,
   readJsonBody
+});
+
+const adminJourneyReadService = new AdminJourneyReadService({
+  arrivalObservatory,
+  identityRegistry: selfIdentityRegistry,
+  platformService: service,
+  stateStore
+});
+
+const handleAdminJourneyRoute = createAdminJourneyRoutes({
+  adminJourneyReadService,
+  authMiddleware,
+  parseLimit,
+  respond
 });
 
 const handleMcpRoute = createMcpRoute({
@@ -1025,6 +1045,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleAdminSessionsRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleAdminJourneyRoute({ request, response, url, pathname })) {
       return;
     }
 

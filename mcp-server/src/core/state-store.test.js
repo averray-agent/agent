@@ -13,6 +13,32 @@ test("createStateStore returns MemoryStateStore in dev without REDIS_URL", () =>
   assert.ok(store instanceof MemoryStateStore);
 });
 
+test("journey telemetry is retained at a hard 250 events per wallet", async () => {
+  const store = new MemoryStateStore();
+  const wallet = "0x1111111111111111111111111111111111111111";
+  for (let index = 0; index < 251; index += 1) {
+    await store.appendEventLog({
+      id: `journey-${index}`,
+      topic: "journey.preflight_completed",
+      wallet,
+      timestamp: new Date(Date.UTC(2026, 7, 22, 0, 0, index)).toISOString(),
+      data: { eligible: true }
+    });
+  }
+  const result = await store.listEventLog({
+    wallet,
+    topics: ["journey.preflight_completed"],
+    limit: 500
+  });
+  assert.equal(result.events.length, 250);
+  assert.equal(result.events[0].id, "journey-1");
+  assert.equal(result.events.at(-1).id, "journey-250");
+  const walletResult = await store.listJourneyEvents({ wallet });
+  assert.equal(walletResult.events.length, 250);
+  assert.equal(walletResult.events[0].id, "journey-1");
+  assert.equal(walletResult.events.at(-1).id, "journey-250");
+});
+
 test("createStateStore throws in production when REDIS_URL is missing", () => {
   assert.throws(
     () => createStateStore({ NODE_ENV: "production" }, { logger: silentLogger() }),

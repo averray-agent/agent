@@ -77,6 +77,7 @@ function makeHarness(overrides = {}) {
       calls.push(["ensureSessionOwnership", { sessionId, wallet }]);
       return overrides.session ?? { sessionId, wallet };
     },
+    eventBus: overrides.eventBus,
     externalPostingService: overrides.externalPostingService,
     posterOnboardingService: overrides.posterOnboardingService,
     rateLimitConfig: { adminJobs: { max: 1, windowMs: 1000 } },
@@ -119,6 +120,33 @@ test("job routes ignore unrelated paths", async () => {
   assert.equal(handled, false);
   assert.deepEqual(calls, []);
   assert.deepEqual(response, {});
+});
+
+test("preflight appends only a wallet-bound verdict summary to journey telemetry", async () => {
+  const events = [];
+  const { route } = makeHarness({
+    preflight: {
+      eligible: true,
+      reason: "eligible",
+      claimable: true,
+      claimFundingSufficient: true,
+      privatePayload: { mustNotPersist: true }
+    },
+    eventBus: { publish: (event) => events.push(event) }
+  });
+
+  await invoke(route, { method: "GET", path: "/jobs/preflight?jobId=job-42" });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].topic, "journey.preflight_completed");
+  assert.equal(events[0].wallet, WALLET);
+  assert.deepEqual(events[0].data, {
+    jobId: "job-42",
+    eligible: true,
+    reason: "eligible",
+    claimable: true,
+    claimFundingSufficient: true
+  });
+  assert.doesNotMatch(JSON.stringify(events[0]), /mustNotPersist|privatePayload/u);
 });
 
 test("GET /jobs/open redirects to the canonical public collection before per-id matching", async () => {
