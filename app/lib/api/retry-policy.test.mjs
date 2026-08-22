@@ -90,9 +90,11 @@ test("useApi wires the shared policy and hand-rolls no status check", () => {
   assert.doesNotMatch(hooks, /err\.status\s*!==\s*401/u);
 });
 
-test("every capability-gated feed routes through useApi", () => {
+test("every capability-gated feed routes through a shared API hook", () => {
   // These 403 for a session without the operator capabilities; a raw useSWR
-  // here would carry SWR's retry-everything default and reopen the hole.
+  // here would carry SWR's retry-everything default and reopen the hole. Both
+  // shared hooks make auth failures terminal; useBoundedApi additionally owns
+  // the first-paint timeout budget.
   const gated = [
     "useAlerts",
     "usePolicies",
@@ -105,10 +107,10 @@ test("every capability-gated feed routes through useApi", () => {
   for (const hook of gated) {
     assert.match(
       hooks,
-      new RegExp(`export const ${hook} = [^;]*useApi\\s*[<(]`, "u"),
-      `${hook} must fetch through useApi`
+      new RegExp(`export const ${hook} = [^;]*use(?:Bounded)?Api\\s*[<(]`, "u"),
+      `${hook} must fetch through useApi or useBoundedApi`
     );
   }
   const directCalls = hooks.match(/useSWR\s*[<(]/gu) ?? [];
-  assert.equal(directCalls.length, 1, "useApi should be the only useSWR call site");
+  assert.equal(directCalls.length, 2, "the two shared API hooks should be the only useSWR call sites");
 });

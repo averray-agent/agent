@@ -5,8 +5,10 @@ import { readFile } from "node:fs/promises";
 import {
   buildClaimTerms,
   filterHumanWorkListings,
+  isJobNewSince,
   jobDefinitionRawUrl,
   publicReceiptUrl,
+  parseWorkLastVisit,
   routeAfterSignIn,
   serializeJobDefinition,
   workCatalogueIsPending,
@@ -33,6 +35,17 @@ test("human listing filters canary, witness, and disposable proof jobs only on t
 
   assert.equal(agentListing.jobs.length, 4, "the agent listing is unchanged");
   assert.deepEqual(filterHumanWorkListings(agentListing).map((job) => job.id), ["starter-real"]);
+});
+
+test("returner freshness parses local visit time and keeps the listedAt boundary strict", () => {
+  const previous = Date.parse("2026-08-21T12:00:00.000Z");
+  assert.equal(parseWorkLastVisit(String(previous)), previous);
+  assert.equal(parseWorkLastVisit("2026-08-21T12:00:00.000Z"), previous);
+  assert.equal(parseWorkLastVisit("invalid"), null);
+  assert.equal(isJobNewSince({ listedAt: "2026-08-21T12:00:00.001Z" }, previous), true);
+  assert.equal(isJobNewSince({ listedAt: "2026-08-21T12:00:00.000Z" }, previous), false);
+  assert.equal(isJobNewSince({ listedAt: "2026-08-21T11:59:59.999Z" }, previous), false);
+  assert.equal(isJobNewSince({ listedAt: "invalid" }, previous), false);
 });
 
 test("sign-in forks operator allowlists to the operator room and roleless wallets to work", () => {

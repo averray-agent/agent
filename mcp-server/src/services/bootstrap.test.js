@@ -38,6 +38,7 @@ test("bootstrap wires string AUTH_CHAIN_ID and public mainnet RPC into the earni
         position: { liquidRaw: "1", jobStakeLockedRaw: "0" }
       };
     },
+    async getWorkerClaimCount() { return 0; },
     async sendFirstWithdrawalGasGrant() { throw new Error("not requested"); }
   };
   const stateStore = new MemoryStateStore();
@@ -47,6 +48,16 @@ test("bootstrap wires string AUTH_CHAIN_ID and public mainnet RPC into the earni
     stateStore,
     eventBus: new EventBus({ eventStore: stateStore }),
     workerExposurePolicy: { async capacityForWallet() { return { vestingHours: 48 }; } },
+    workerProgressionService: {
+      async getProgression() {
+        return {
+          tier: "starter",
+          badges: [],
+          creditInterest: { eligible: false, registered: false }
+        };
+      }
+    },
+    getReputation: async () => ({ skill: 0, tier: "starter" }),
     chainReader: {
       async gasQuote() {
         return { gas: 10n, unitPrice: 2n, nativeBalance: 100n, blockNumber: 1 };

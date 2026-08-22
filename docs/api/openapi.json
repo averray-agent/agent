@@ -469,6 +469,24 @@
             "example": "open"
           },
           {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Prior visit time as ISO 8601 or epoch milliseconds. This never filters jobs; meta.newSince counts matching jobs whose listedAt is strictly newer. Invalid values are ignored.",
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              ]
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -563,6 +581,7 @@
                             "asset": "USDC",
                             "amount": 0.4
                           },
+                          "listedAt": "2026-04-28T10:00:00.000Z",
                           "createdAt": "2026-04-28T10:00:00.000Z",
                           "summary": "Review the article and return an editor-ready citation repair proposal.",
                           "definitionUrl": "/jobs/definition?jobId=wiki-en-123-citation-repair-example",
@@ -587,6 +606,9 @@
                       "filters": {
                         "source": "wikipedia",
                         "state": "open"
+                      },
+                      "meta": {
+                        "newSince": 0
                       },
                       "compact": true
                     }
@@ -2377,6 +2399,14 @@
             "type": "string",
             "const": "claimStatus"
           },
+          "listedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this job first entered the catalogue; stable across reads."
+          },
           "lifecycleStatusMeaning": {
             "type": "string"
           }
@@ -2475,6 +2505,7 @@
           "offset",
           "nextOffset",
           "filters",
+          "meta",
           "compact"
         ],
         "properties": {
@@ -2506,6 +2537,19 @@
             "type": "object",
             "additionalProperties": true
           },
+          "meta": {
+            "type": "object",
+            "required": [
+              "newSince"
+            ],
+            "properties": {
+              "newSince": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
           "compact": {
             "type": "boolean",
             "const": true
@@ -2526,6 +2570,7 @@
           "tier",
           "stake",
           "reward",
+          "listedAt",
           "createdAt",
           "summary",
           "definitionUrl"
@@ -2673,6 +2718,13 @@
               "string",
               "null"
             ]
+          },
+          "listedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
           },
           "summary": {
             "type": "string"

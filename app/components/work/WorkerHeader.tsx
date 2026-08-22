@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { BriefcaseBusiness, LogOut } from "lucide-react";
+import { BriefcaseBusiness, Landmark, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { shortAddress } from "@/lib/format";
 import { signOut } from "@/lib/auth/siwe";
@@ -28,6 +28,12 @@ export function WorkerHeader() {
             <BriefcaseBusiness className="h-4 w-4" />
             Find work
           </Link>
+          {auth.authenticated ? (
+            <Link className="inline-flex items-center gap-2 rounded-[var(--radius)] px-3 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-[var(--paper)]" href="/work/withdraw" aria-label="Withdraw earnings">
+              <Landmark className="h-4 w-4" />
+              <span className="hidden sm:inline">Earnings</span>
+            </Link>
+          ) : null}
           {operator ? (
             <Link className="rounded-[var(--radius)] px-3 py-2 text-sm font-semibold text-[var(--accent)] hover:bg-[var(--accent-soft)]" href="/overview">
               Operator room

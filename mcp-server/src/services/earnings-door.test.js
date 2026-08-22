@@ -5,7 +5,11 @@ import { Interface } from "ethers";
 
 import { AGENT_ACCOUNT_ABI, ERC20_MOCK_ABI } from "../blockchain/abis.js";
 import { EARNINGS_WITHDRAWAL_STATEMENT } from "../core/earnings-door-copy.js";
-import { EarningsDoorService } from "./earnings-door.js";
+import { CREDIT_INTEREST_STATEMENT } from "../core/worker-progression.js";
+import {
+  EarningsDoorService,
+  WITHDRAWAL_STANDING_STATEMENT
+} from "./earnings-door.js";
 
 const WALLET = "0x1111111111111111111111111111111111111111";
 const DESTINATION = "0x2222222222222222222222222222222222222222";
@@ -15,7 +19,14 @@ const USDC = "0x0000053900000000000000000000000001200000";
 function harness({
   liquidRaw = "1250000",
   nativeBalance = 30_000_000_000_000_000n,
-  gasGrantService = undefined
+  gasGrantService = undefined,
+  workerClaimCount = 0,
+  progression = {
+    tier: "starter",
+    badges: [],
+    creditInterest: { eligible: false, registered: false }
+  },
+  reputation = { skill: 0, reliability: 0, economic: 0, tier: "starter" }
 } = {}) {
   const capacityCalls = [];
   const gateway = {
@@ -34,6 +45,10 @@ function harness({
           jobStakeLockedRaw: "200000"
         }
       };
+    },
+    async getWorkerClaimCount(wallet) {
+      assert.equal(wallet, WALLET);
+      return workerClaimCount;
     }
   };
   const stateStore = {
@@ -123,6 +138,16 @@ function harness({
       stateStore,
       eventBus,
       workerExposurePolicy,
+      workerProgressionService: {
+        async getProgression(wallet) {
+          assert.equal(wallet, WALLET);
+          return progression;
+        }
+      },
+      getReputation: async (wallet) => {
+        assert.equal(wallet, WALLET);
+        return reputation;
+      },
       gasGrantService,
       chainReader
     })
@@ -184,6 +209,8 @@ test("buildWithdrawTransactions returns verified AAC withdraw and optional onwar
   assert.equal(result.templates[0].gas.sufficient, true);
   assert.equal(result.templates[1].prerequisite, "withdraw_confirmed_on_chain");
   assert.equal(result.whatYourBalanceCanDo.retentionNotGates.delaysWithdrawal, false);
+  assert.equal(result.standing.persists, true);
+  assert.equal(result.standing.statement, WITHDRAWAL_STANDING_STATEMENT);
 
   const withdrawal = new Interface(AGENT_ACCOUNT_ABI).decodeFunctionData("withdraw", result.templates[0].data);
   assert.equal(withdrawal.asset, USDC);
@@ -191,6 +218,65 @@ test("buildWithdrawTransactions returns verified AAC withdraw and optional onwar
   const transfer = new Interface(ERC20_MOCK_ABI).decodeFunctionData("transfer", result.templates[1].data);
   assert.equal(transfer.to, DESTINATION);
   assert.equal(transfer.amount, 250000n);
+});
+
+test("withdrawal standing matches a fresh wallet and omits the ineligible credit-interest line", async () => {
+  const { door } = harness();
+  const result = await door.buildWithdrawTransactions(WALLET, { amount: "1" });
+
+  assert.deepEqual(result.standing, {
+    claimTier: "starter",
+    claimTierLabel: "claim tier",
+    reputationTier: "apprentice",
+    badges: 0,
+    waiverSlotsRemaining: 3,
+    creditInterest: { eligible: false, registered: false },
+    persists: true,
+    statement: WITHDRAWAL_STANDING_STATEMENT
+  });
+  assert.equal(Object.hasOwn(result.standing, "registerPath"), false);
+  assert.equal(Object.hasOwn(result.standing, "creditInterestStatement"), false);
+});
+
+test("withdrawal standing matches a seasoned wallet's live tiers, badges, waiver use, and registration", async () => {
+  const { door } = harness({
+    workerClaimCount: 4,
+    progression: {
+      tier: "elite",
+      badges: [{}, {}, {}, {}],
+      creditInterest: { eligible: true, registered: true }
+    },
+    reputation: { skill: 250, reliability: 180, economic: 100, tier: "elite" }
+  });
+  const result = await door.buildWithdrawTransactions(WALLET, { amount: "1" });
+
+  assert.equal(result.standing.claimTier, "elite");
+  assert.equal(result.standing.reputationTier, "expert");
+  assert.equal(result.standing.badges, 4);
+  assert.equal(result.standing.waiverSlotsRemaining, 0);
+  assert.deepEqual(result.standing.creditInterest, { eligible: true, registered: true });
+  assert.equal(result.standing.registerPath, "/credit/interest");
+});
+
+test("withdrawal standing offers only the ratified line to an eligible unregistered wallet", async () => {
+  const { door } = harness({
+    workerClaimCount: 2,
+    progression: {
+      tier: "pro",
+      badges: [{}, {}, {}],
+      creditInterest: { eligible: true, registered: false }
+    },
+    reputation: { skill: 125, reliability: 110, economic: 40, tier: "pro" }
+  });
+  const result = await door.buildWithdrawTransactions(WALLET, { amount: "1" });
+
+  assert.equal(result.standing.claimTier, "pro");
+  assert.equal(result.standing.reputationTier, "journeyman");
+  assert.equal(result.standing.badges, 3);
+  assert.equal(result.standing.waiverSlotsRemaining, 1);
+  assert.deepEqual(result.standing.creditInterest, { eligible: true, registered: false });
+  assert.equal(result.standing.registerPath, "/credit/interest");
+  assert.equal(result.standing.creditInterestStatement, CREDIT_INTEREST_STATEMENT);
 });
 
 test("a wallet short of DOT still receives the complete template with an honest insufficient-gas warning", async () => {

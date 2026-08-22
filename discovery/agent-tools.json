@@ -842,7 +842,7 @@
     },
     {
       "name": "listJobs",
-      "description": "All active jobs."
+      "description": "All active jobs, with optional since freshness metadata (ISO 8601 or epoch milliseconds)."
     },
     {
       "name": "getJobDefinition",

@@ -16,6 +16,7 @@ export interface HumanJobListing {
   onboardingWaiverEligible?: boolean;
   disposableProof?: boolean;
   reward?: { amount?: number | null; asset?: string | null };
+  listedAt?: string | null;
   [key: string]: unknown;
 }
 

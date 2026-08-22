@@ -272,6 +272,8 @@ export function createEarningsDoor({
   stateStore,
   eventBus,
   workerExposurePolicy,
+  workerProgressionService,
+  getReputation,
   chainReader,
   env = process.env
 } = {}) {
@@ -289,6 +291,8 @@ export function createEarningsDoor({
     stateStore,
     eventBus,
     workerExposurePolicy,
+    workerProgressionService,
+    getReputation,
     gasGrantService,
     provider: gateway.provider,
     chainReader
@@ -795,7 +799,15 @@ export async function createPlatformRuntime() {
     createDepositPoolDoor({ gateway, authConfig, workerExposurePolicy })
   );
   const earningsDoor = initStep("init-earnings-door", logger, () =>
-    createEarningsDoor({ gateway, authConfig, stateStore, eventBus, workerExposurePolicy })
+    createEarningsDoor({
+      gateway,
+      authConfig,
+      stateStore,
+      eventBus,
+      workerExposurePolicy,
+      workerProgressionService,
+      getReputation: platformService.getReputation.bind(platformService)
+    })
   );
   platformService.setFirstWithdrawalGasGrantStatusProvider(earningsDoor);
   const creditPoolDoor = initStep("init-credit-pool-door", logger, () =>

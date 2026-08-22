@@ -509,7 +509,7 @@ const HTTP_ACTION_REQUIREMENTS = [
 
 const DISCOVERY_TOOLS = [
   { name: "getPlatformCapabilities", description: "Capability + endpoint manifest for this deployment." },
-  { name: "listJobs", description: "All active jobs." },
+  { name: "listJobs", description: "All active jobs, with optional since freshness metadata (ISO 8601 or epoch milliseconds)." },
   { name: "getJobDefinition", description: "One job by id." },
   { name: "validateJobSubmission", description: "Check a draft payload against the job output schema before claiming or submitting." },
   { name: "getSessionStateMachine", description: "Read the canonical session lifecycle graph and allowed transitions." },
