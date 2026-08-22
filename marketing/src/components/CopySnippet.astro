@@ -1,0 +1,67 @@
+---
+interface Props {
+  label: string;
+  value: string;
+}
+
+const { label, value } = Astro.props;
+---
+
+<div class="install-snippet" data-copy-snippet>
+  <div class="install-snippet__bar">
+    <span>{label}</span>
+    <button
+      class="install-snippet__copy"
+      type="button"
+      aria-label={`Copy ${label}`}
+      data-copy-snippet-button
+    >
+      Copy
+    </button>
+  </div>
+  <div class="install-snippet__scroll">
+    <pre class="codeblock"><code>{value}</code></pre>
+  </div>
+  <span class="install-snippet__status" aria-live="polite" data-copy-snippet-status></span>
+</div>
+
+<script>
+  function fallbackCopy(value) {
+    const field = document.createElement("textarea");
+    field.value = value;
+    field.setAttribute("readonly", "");
+    field.style.position = "fixed";
+    field.style.opacity = "0";
+    document.body.append(field);
+    field.select();
+    const copied = document.execCommand("copy");
+    field.remove();
+    if (!copied) throw new Error("Copy command was refused.");
+  }
+
+  document.querySelectorAll("[data-copy-snippet-button]").forEach((button) => {
+    if (!(button instanceof HTMLButtonElement) || button.dataset.copyBound === "true") return;
+    button.dataset.copyBound = "true";
+    button.addEventListener("click", async () => {
+      const snippet = button.closest("[data-copy-snippet]");
+      const code = snippet?.querySelector("code");
+      const status = snippet?.querySelector("[data-copy-snippet-status]");
+      const value = code?.textContent ?? "";
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(value);
+        } else {
+          fallbackCopy(value);
+        }
+        button.textContent = "Copied";
+        if (status) status.textContent = "Snippet copied to clipboard.";
+      } catch {
+        button.textContent = "Copy failed";
+        if (status) status.textContent = "Copy failed. Select the full snippet below.";
+      }
+      window.setTimeout(() => {
+        button.textContent = "Copy";
+      }, 1800);
+    });
+  });
+</script>
