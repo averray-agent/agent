@@ -54,7 +54,7 @@ test("QA8 marketing exposes the canonical MCP install door and copy-safe snippet
   assert.match(copySnippet, /querySelector\("code"\)/u);
   assert.match(copySnippet, /navigator\.clipboard\.writeText\(value\)/u);
   assert.match(css, /\.install-snippet__scroll \{[\s\S]*overflow-x: auto;/u);
-  assert.match(css, /\.install-card \{ min-width: 0; \}/u);
+  assert.match(css, /\.install-card \{ min-width: 0; display: flex; flex-direction: column;[^}]*\}/u);
   assert.ok(builders.includes("https://api.averray.com/mcp"), "the full canonical URL must remain in copyable source values");
 
   assert.match(llms, /Canonical MCP endpoint: https:\/\/api\.averray\.com\/mcp/u);
