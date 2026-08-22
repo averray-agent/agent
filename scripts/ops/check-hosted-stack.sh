@@ -10,6 +10,13 @@ PUBLIC_ONBOARDING_REDIRECT_URL=${PUBLIC_ONBOARDING_REDIRECT_URL:-https://averray
 PUBLIC_HEALTH_REDIRECT_URL=${PUBLIC_HEALTH_REDIRECT_URL:-https://averray.com/health}
 PUBLIC_JOB_TIERS_REDIRECT_URL=${PUBLIC_JOB_TIERS_REDIRECT_URL:-https://averray.com/jobs/tiers}
 PUBLIC_VERIFY_PROFILES_REDIRECT_URL=${PUBLIC_VERIFY_PROFILES_REDIRECT_URL:-https://averray.com/verify/profiles}
+APP_TRANSPARENCY_REDIRECT_URL=${APP_TRANSPARENCY_REDIRECT_URL:-https://app.averray.com/transparency}
+APP_TRANSPARENCY_SLASH_REDIRECT_URL=${APP_TRANSPARENCY_SLASH_REDIRECT_URL:-https://app.averray.com/transparency/}
+APP_RECEIPT_REDIRECT_URL=${APP_RECEIPT_REDIRECT_URL:-https://app.averray.com/receipts/example-receipt}
+APP_JOBS_REDIRECT_URL=${APP_JOBS_REDIRECT_URL:-https://app.averray.com/jobs}
+APP_JOB_SUBPATH_REDIRECT_URL=${APP_JOB_SUBPATH_REDIRECT_URL:-https://app.averray.com/jobs/example-job}
+PUBLIC_WORK_REDIRECT_URL=${PUBLIC_WORK_REDIRECT_URL:-https://averray.com/work}
+PUBLIC_WORK_SUBPATH_REDIRECT_URL=${PUBLIC_WORK_SUBPATH_REDIRECT_URL:-https://averray.com/work/example-job}
 DISCOVERY_URL=${DISCOVERY_URL:-https://averray.com/.well-known/agent-tools.json}
 APP_URL=${APP_URL:-https://app.averray.com/}
 API_HEALTH_URL=${API_HEALTH_URL:-https://api.averray.com/health}
@@ -280,6 +287,13 @@ assert_redirect "$PUBLIC_ONBOARDING_REDIRECT_URL" "https://api.averray.com/onboa
 assert_redirect "$PUBLIC_HEALTH_REDIRECT_URL" "https://api.averray.com/health" "Public health path"
 assert_redirect "$PUBLIC_JOB_TIERS_REDIRECT_URL" "https://api.averray.com/jobs/tiers" "Public tier-ladder path"
 assert_redirect "$PUBLIC_VERIFY_PROFILES_REDIRECT_URL" "https://api.averray.com/verify/profiles" "Public verification-profile path"
+assert_redirect "$APP_TRANSPARENCY_REDIRECT_URL" "https://averray.com/transparency/" "Operator-app transparency path"
+assert_redirect "$APP_TRANSPARENCY_SLASH_REDIRECT_URL" "https://averray.com/transparency/" "Operator-app transparency slash path"
+assert_redirect "$APP_RECEIPT_REDIRECT_URL" "https://averray.com/receipts/example-receipt" "Operator-app public receipt path"
+assert_redirect "$APP_JOBS_REDIRECT_URL" "https://app.averray.com/work" "Operator-app legacy jobs path"
+assert_redirect "$APP_JOB_SUBPATH_REDIRECT_URL" "https://app.averray.com/work" "Operator-app legacy job subpath"
+assert_redirect "$PUBLIC_WORK_REDIRECT_URL" "https://app.averray.com/work" "Public-site work path"
+assert_redirect "$PUBLIC_WORK_SUBPATH_REDIRECT_URL" "https://app.averray.com/work" "Public-site work subpath"
 
 receipt_shell_html="$(fetch "$PUBLIC_RECEIPT_JUNK_URL")"
 for receipt_shell_marker in \

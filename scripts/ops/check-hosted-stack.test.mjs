@@ -231,7 +231,14 @@ async function runHostedStackFixture({
     ["/site/onboarding", "https://api.averray.com/onboarding"],
     ["/site/health", "https://api.averray.com/health"],
     ["/site/jobs/tiers", "https://api.averray.com/jobs/tiers"],
-    ["/site/verify/profiles", "https://api.averray.com/verify/profiles"]
+    ["/site/verify/profiles", "https://api.averray.com/verify/profiles"],
+    ["/redirect/app/transparency", "https://averray.com/transparency/"],
+    ["/redirect/app/transparency/", "https://averray.com/transparency/"],
+    ["/redirect/app/receipts/example-receipt", "https://averray.com/receipts/example-receipt"],
+    ["/redirect/app/jobs", "https://app.averray.com/work"],
+    ["/redirect/app/jobs/example-job", "https://app.averray.com/work"],
+    ["/redirect/site/work", "https://app.averray.com/work"],
+    ["/redirect/site/work/example-job", "https://app.averray.com/work"]
   ]);
   const requestCounts = new Map();
   const server = createServer((request, response) => {
@@ -321,6 +328,13 @@ async function runHostedStackFixture({
       PUBLIC_HEALTH_REDIRECT_URL: `${baseUrl}/site/health`,
       PUBLIC_JOB_TIERS_REDIRECT_URL: `${baseUrl}/site/jobs/tiers`,
       PUBLIC_VERIFY_PROFILES_REDIRECT_URL: `${baseUrl}/site/verify/profiles`,
+      APP_TRANSPARENCY_REDIRECT_URL: `${baseUrl}/redirect/app/transparency`,
+      APP_TRANSPARENCY_SLASH_REDIRECT_URL: `${baseUrl}/redirect/app/transparency/`,
+      APP_RECEIPT_REDIRECT_URL: `${baseUrl}/redirect/app/receipts/example-receipt`,
+      APP_JOBS_REDIRECT_URL: `${baseUrl}/redirect/app/jobs`,
+      APP_JOB_SUBPATH_REDIRECT_URL: `${baseUrl}/redirect/app/jobs/example-job`,
+      PUBLIC_WORK_REDIRECT_URL: `${baseUrl}/redirect/site/work`,
+      PUBLIC_WORK_SUBPATH_REDIRECT_URL: `${baseUrl}/redirect/site/work/example-job`,
       DISCOVERY_URL: `${baseUrl}/.well-known/agent-tools.json`,
       APP_URL: `${baseUrl}/app`,
       API_HEALTH_URL: `${baseUrl}/health`,
@@ -450,6 +464,13 @@ test("hosted smoke owns HTML caching, canonical redirects, GET MCP, and the junk
     "/site/health",
     "/site/jobs/tiers",
     "/site/verify/profiles",
+    "/redirect/app/transparency",
+    "/redirect/app/transparency/",
+    "/redirect/app/receipts/example-receipt",
+    "/redirect/app/jobs",
+    "/redirect/app/jobs/example-job",
+    "/redirect/site/work",
+    "/redirect/site/work/example-job",
     "/mcp"
   ]) {
     assert.equal(result.requestCounts[path], 1, `${path} must be walked by the hosted smoke`);

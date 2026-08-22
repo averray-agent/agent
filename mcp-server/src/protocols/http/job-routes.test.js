@@ -217,6 +217,64 @@ test("GET /jobs carries the live external claim-bond estimate in full and compac
   assert.equal(compactResponse.body.jobs[0].poster.wallet, WALLET);
 });
 
+test("GET /jobs/:id serves a listed job with the collection-identical public projection", async () => {
+  const listed = {
+    id: "job-1",
+    title: "Job 1",
+    category: "coding",
+    lifecycle: { state: "open" }
+  };
+  const addMetadata = async (jobs) => jobs.map((job) => ({
+    ...job,
+    listingStatus: "listed",
+    contentTrust: "operator-curated"
+  }));
+  const { route } = makeHarness({
+    jobs: [listed],
+    service: { addListingSecurityMetadata: addMetadata }
+  });
+  const collectionResponse = {};
+  const detailResponse = {};
+
+  assert.equal(await invoke(route, { path: "/jobs", response: collectionResponse }), true);
+  assert.equal(await invoke(route, { path: "/jobs/job-1", response: detailResponse }), true);
+
+  assert.equal(detailResponse.statusCode, 200);
+  assert.deepEqual(detailResponse.body, collectionResponse.body[0]);
+});
+
+test("GET /jobs/:id returns the generic 404 shape for a nonexistent job", async () => {
+  const { response, route } = makeHarness();
+
+  assert.equal(await invoke(route, { path: "/jobs/missing-job", response }), true);
+  assert.equal(response.statusCode, 404);
+  assert.deepEqual(response.body, { error: "not_found" });
+});
+
+test("GET /jobs/:id keeps an existing but non-public job indistinguishable from nonexistent", async () => {
+  const hidden = {
+    id: "internal-job",
+    title: "Internal",
+    lifecycle: { state: "open" }
+  };
+  const { route } = makeHarness({
+    jobs: [hidden],
+    externalPostingService: {
+      async filterExternalCatalogProjection(jobs) {
+        return jobs.filter((job) => job.id !== hidden.id);
+      }
+    }
+  });
+  const hiddenResponse = {};
+  const missingResponse = {};
+
+  assert.equal(await invoke(route, { path: "/jobs/internal-job", response: hiddenResponse }), true);
+  assert.equal(await invoke(route, { path: "/jobs/missing-job", response: missingResponse }), true);
+
+  assert.equal(hiddenResponse.statusCode, 404);
+  assert.deepEqual(hiddenResponse, missingResponse);
+});
+
 test("GET /jobs/tiers returns cached tier requirements", async () => {
   const { response, route } = makeHarness();
 

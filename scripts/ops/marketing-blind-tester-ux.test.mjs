@@ -119,6 +119,24 @@ test("Caddy returns explicit 301 redirects for guessed public paths", async () =
   }
 });
 
+test("Caddy sends public records and work paths to their canonical domains", async () => {
+  const caddy = await readFile(new URL("deploy/Caddyfile.averray", REPO_ROOT), "utf8");
+
+  assert.match(caddy, /@operatorWorkPath path \/work \/work\/\*[\s\S]*redir @operatorWorkPath https:\/\/app\.averray\.com\/work 301/u);
+  assert.match(caddy, /@publicTransparencyPath path \/transparency \/transparency\/[\s\S]*redir @publicTransparencyPath https:\/\/averray\.com\/transparency\/ 301/u);
+  assert.match(caddy, /@publicReceiptSubpath path_regexp \^\/receipts\/\.\+\$[\s\S]*redir @publicReceiptSubpath https:\/\/averray\.com\{uri\} 301/u);
+  assert.match(caddy, /@legacyJobsPath path \/jobs \/jobs\/\*[\s\S]*redir @legacyJobsPath https:\/\/app\.averray\.com\/work 301/u);
+  assert.doesNotMatch(caddy, /@publicReceiptSubpath path \/receipts(?:\s|$)/u, "bare /receipts must stay in the operator app");
+});
+
+test("marketing clips the sticky nav 100vw band without creating a horizontal scroll container", async () => {
+  const css = await readFile(new URL("marketing/src/styles/global.css", REPO_ROOT), "utf8");
+
+  assert.match(css, /html \{[\s\S]*overflow-x: clip;[\s\S]*\}/u);
+  assert.match(css, /\.nav::before \{[\s\S]*width: 100vw;[\s\S]*\}/u);
+  assert.match(css, /sticky nav's full-viewport backdrop band uses 100vw/u);
+});
+
 test("Caddy revalidates HTML, preserves versioned-asset caching, and rewrites every receipt path", async () => {
   const caddy = await readFile(new URL("deploy/Caddyfile.averray", REPO_ROOT), "utf8");
 

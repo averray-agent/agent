@@ -92,6 +92,9 @@ averray.com {
   @verifyProfilesPath path /verify/profiles /verify/profiles/
   redir @verifyProfilesPath https://api.averray.com/verify/profiles 301
 
+  @operatorWorkPath path /work /work/*
+  redir @operatorWorkPath https://app.averray.com/work 301
+
   # HTML is always revalidated so a fixed shell cannot remain stale in a
   # browser cache. Fingerprinted-by-query JS/CSS stays immutable and long-lived.
   @versionedAssets {
@@ -122,6 +125,18 @@ averray.com {
 app.averray.com {
   import security_headers
   encode zstd gzip
+
+  # Public records live on the public site; the work board lives at /work in
+  # this app. Keep the bare /receipts operator page local while forwarding
+  # only receipt subpaths to their public, content-addressed record pages.
+  @publicTransparencyPath path /transparency /transparency/
+  redir @publicTransparencyPath https://averray.com/transparency/ 301
+
+  @publicReceiptSubpath path_regexp ^/receipts/.+$
+  redir @publicReceiptSubpath https://averray.com{uri} 301
+
+  @legacyJobsPath path /jobs /jobs/*
+  redir @legacyJobsPath https://app.averray.com/work 301
 
   # The Bank feed is intentionally credential-free because only services on
   # the private Compose network consume it. Never publish it through /api.

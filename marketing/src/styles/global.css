@@ -75,7 +75,13 @@
 
 * { box-sizing: border-box; letter-spacing: 0; }
 
-html { scroll-behavior: smooth; }
+html {
+  scroll-behavior: smooth;
+  /* The sticky nav's full-viewport backdrop band uses 100vw, which includes
+     the vertical scrollbar; clip that invisible overhang without creating a
+     horizontal scroll container. */
+  overflow-x: clip;
+}
 
 html, body { background: var(--avy-bg-marketing); }
 
