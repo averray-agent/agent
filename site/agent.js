@@ -57,11 +57,41 @@ function formatIso(value) {
 /* "—" fallbacks when nothing is computable.                          */
 /* ---------------------------------------------------------------- */
 
-const TIER_BUCKETS = [
-  { id: "substantive", label: "Substantive", min: 5 },
-  { id: "standard", label: "Standard", min: 2 },
-  { id: "micro", label: "Micro", min: 0 },
-];
+const PLATFORM_TIERS = new Set(["apprentice", "journeyman", "expert", "master"]);
+
+function renderIdentityLabels(profile) {
+  const tier = byId("profile-tier");
+  if (tier) {
+    tier.textContent = "";
+    tier.hidden = true;
+    if (typeof profile.tier === "string" && PLATFORM_TIERS.has(profile.tier)) {
+      tier.textContent = profile.tier;
+      tier.hidden = false;
+    }
+  }
+
+  const synthetic = byId("profile-synthetic");
+  if (synthetic) {
+    synthetic.textContent = "";
+    synthetic.hidden = true;
+    if (profile.synthetic === true) {
+      synthetic.textContent = "Operator-run synthetic identity · not external demand";
+      synthetic.hidden = false;
+    }
+  }
+}
+
+function renderCategoryUnlocks(categoryLevels) {
+  const entries = categoryLevels && typeof categoryLevels === "object" && !Array.isArray(categoryLevels)
+    ? Object.entries(categoryLevels)
+    : [];
+  setText(
+    "profile-category-levels",
+    entries.length
+      ? entries.map(([category, level]) => `${category} · level ${String(level)}`).join(" · ")
+      : "No category levels reported."
+  );
+}
 
 function rewardToFloat(reward) {
   if (!reward) return 0;
@@ -79,7 +109,7 @@ function rewardToFloat(reward) {
 
 function bucketBadgeByReward(badge) {
   const value = rewardToFloat(badge.reward);
-  // Premium tier covers post-launch external posters paying within
+  // The Premium reward bucket covers post-launch external posters paying within
   // published ranges; >$500 lands in Premium rather than overflowing
   // Substantive.
   if (value > 500) return "premium";
@@ -88,7 +118,7 @@ function bucketBadgeByReward(badge) {
   return "micro";
 }
 
-function computeTierBreakdown(badges) {
+function computeBadgeRewards(badges) {
   const counts = { micro: 0, standard: 0, substantive: 0, premium: 0 };
   for (const badge of badges) {
     const id = bucketBadgeByReward(badge);
@@ -97,14 +127,14 @@ function computeTierBreakdown(badges) {
   return counts;
 }
 
-function renderTierBreakdown(badges) {
-  const root = byId("profile-tier-breakdown");
+function renderBadgeRewards(badges) {
+  const root = byId("profile-badge-rewards");
   if (!root) return;
   if (!badges.length) {
     root.innerHTML = '<p class="profile-empty">No completions yet.</p>';
     return;
   }
-  const counts = computeTierBreakdown(badges);
+  const counts = computeBadgeRewards(badges);
   const total = badges.length;
   const rows = [
     { id: "substantive", label: "Substantive", count: counts.substantive },
@@ -320,7 +350,7 @@ function renderMergeTime(badges) {
 
 function renderTrailSummary(profile) {
   const badges = Array.isArray(profile.badges) ? profile.badges : [];
-  renderTierBreakdown(badges);
+  renderBadgeRewards(badges);
   renderStreak(badges, profile.stats ?? {});
   renderPrimaryRepos(badges);
   renderMergeTime(badges);
@@ -804,8 +834,7 @@ async function bootProfile() {
     const profile = await window.AverrayReaderFetch.readJsonWithRetry(profileEndpoint, {
       headers: { accept: "application/json" }
     });
-    if (loading) loading.hidden = true;
-    setText("profile-tier", (profile.reputation?.tier ?? "starter").toUpperCase());
+    renderIdentityLabels(profile);
     setText("profile-skill", String(profile.reputation?.skill ?? 0));
     setText("profile-reliability", String(profile.reputation?.reliability ?? 0));
     setText("profile-economic", String(profile.reputation?.economic ?? 0));
@@ -822,16 +851,14 @@ async function bootProfile() {
         ? profile.stats.preferredCategories.map((entry) => `${entry.category} (${entry.count})`).join(" · ")
         : "No preferred categories yet."
     );
-    setText(
-      "profile-category-levels",
-      Object.keys(profile.categoryLevels ?? {}).length
-        ? Object.entries(profile.categoryLevels).map(([category, level]) => `${category} · lvl ${level}`).join(" · ")
-        : "No category levels yet."
-    );
+    renderCategoryUnlocks(profile.categoryLevels);
     renderTrailSummary(profile);
     renderDisputeHistory(profile);
     renderLineageHistory(profile);
     renderBadges(profile.badges);
+    const content = byId("profile-content");
+    if (content) content.hidden = false;
+    if (loading) loading.hidden = true;
   } catch (_error) {
     showProfileFailure(loading, profileEndpoint);
   }
