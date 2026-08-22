@@ -16,6 +16,12 @@ test("sign-in explains wallet identity, install choices, and the no-email path a
   assert.match(signInPage, /Your wallet is your sign-in and account identity\./u);
   assert.match(signInPage, /href="https:\/\/metamask\.io\/download"[\s\S]*MetaMask/u);
   assert.match(signInPage, /href="https:\/\/talisman\.xyz\/download\/"[\s\S]*Talisman/u);
-  assert.match(signInPage, /There is no email signup\./u);
+  assert.match(signInPage, /SIWE is the only sign-in door\. There is no email signup by design\./u);
   assert.match(signInPage, /href="https:\/\/averray\.com"[\s\S]*What is Averray\?/u);
+});
+
+test("no-provider sign-in is disabled and offers the public work escape hatch", () => {
+  assert.match(signInPage, /disabled=\{pending \|\| walletProvider !== "available"\}/u);
+  assert.match(signInPage, /Install a wallet to sign in/u);
+  assert.match(signInPage, /href="\/work"[\s\S]*Browse paid work without a wallet →/u);
 });

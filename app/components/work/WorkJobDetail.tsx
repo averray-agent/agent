@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, CheckCircle2, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,6 +11,9 @@ import { extractApiErrorMessage, swrFetcher } from "@/lib/api/client";
 import { runClaimJob } from "@/lib/api/claim-job";
 import { signIn, WalletUnavailableError } from "@/lib/auth/siwe";
 import { useAuth } from "@/lib/auth/use-auth";
+import { useWalletProvider } from "@/lib/auth/use-wallet-provider";
+import { claimActionReadiness } from "@/lib/work/claim-readiness.js";
+import { markAppMilestone } from "@/lib/ui/app-performance.js";
 import {
   buildClaimTerms,
   filterHumanWorkListings,
@@ -25,6 +28,7 @@ import { asRecord, stringList, text } from "./types";
 
 export function WorkJobDetail({ jobId }: { jobId: string }) {
   const auth = useAuth();
+  const walletProvider = useWalletProvider();
   const jobsQuery = useHumanWorkJobs();
   const definitionQuery = useJobDefinition(jobId);
   const preflightQuery = useJobPreflight(auth.authenticated ? jobId : null);
@@ -33,6 +37,7 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
   const [signing, setSigning] = useState(false);
   const [claiming, setClaiming] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
+  const firstLiveTermsMarked = useRef(false);
 
   const listing = useMemo(
     () => (filterHumanWorkListings(jobsQuery.data) as HumanJobListing[]).find((job) => job.id === jobId),
@@ -57,16 +62,34 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
     && Boolean(preflightQuery.error || eligibilityQuery.error || netRewardQuery.error);
   const listingLoaded = !jobsQuery.isLoading;
   const publiclyListed = Boolean(listing && isHumanWorkListing(listing));
-  const canClaim = publiclyListed
-    && auth.authenticated
-    && !walletChecksLoading
-    && !walletChecksFailed
-    && terms.eligible
-    && Boolean(schemaQuery.data)
-    && !schemaQuery.error;
+  const actionReadiness = claimActionReadiness({
+    authenticated: auth.authenticated,
+    providerAvailable: walletProvider === "available",
+    publiclyListed,
+    definitionReady: Boolean(definition),
+    schemaReady: Boolean(schemaQuery.data),
+    schemaFailed: Boolean(schemaQuery.error),
+    walletChecksLoading,
+    walletChecksFailed,
+    eligible: terms.eligible,
+    refusalReason: terms.refusalReason,
+  });
+  const canClaim = auth.authenticated && actionReadiness.enabled;
+
+  useEffect(() => {
+    const publicReadsSettled = !definitionQuery.isLoading && !jobsQuery.isLoading
+      && Boolean(definitionQuery.data || definitionQuery.error)
+      && Boolean(jobsQuery.data || jobsQuery.error);
+    const schemaSettled = !schemaUrl || Boolean(schemaQuery.data || schemaQuery.error);
+    if (!firstLiveTermsMarked.current && publicReadsSettled && schemaSettled) {
+      firstLiveTermsMarked.current = true;
+      markAppMilestone("work-job-live-terms-ready");
+    }
+  }, [definitionQuery.data, definitionQuery.error, definitionQuery.isLoading, jobsQuery.data, jobsQuery.error, jobsQuery.isLoading, schemaQuery.data, schemaQuery.error, schemaUrl]);
 
   async function handleClaimAction() {
     setClaimError(null);
+    if (!actionReadiness.enabled) return;
     if (!auth.authenticated) {
       setSigning(true);
       try {
@@ -152,9 +175,9 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
       ) : null}
       {claimError ? <p className="rounded-[var(--radius-sm)] bg-[var(--warn-soft)] px-4 py-3 text-sm text-[var(--warn)]" role="alert">{claimError}</p> : null}
       <div className="flex flex-wrap items-center gap-3">
-        <Button size="lg" onClick={() => void handleClaimAction()} disabled={signing || claiming || (auth.authenticated && !canClaim) || !publiclyListed}>
+        <Button size="lg" onClick={() => void handleClaimAction()} disabled={signing || claiming || !actionReadiness.enabled || (auth.authenticated && !canClaim)}>
           {auth.authenticated ? <CheckCircle2 className="h-4 w-4" /> : <Wallet className="h-4 w-4" />}
-          {signing ? "Waiting for wallet…" : claiming ? "Claiming…" : auth.authenticated ? "Claim this job" : "Check wallet and claim"}
+          {signing ? "Waiting for wallet…" : claiming ? "Claiming…" : auth.authenticated ? "Claim this job" : "Check wallet"}
         </Button>
         <p className="max-w-xl text-xs leading-relaxed text-[var(--muted)]">
           {auth.authenticated
@@ -162,6 +185,9 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
             : "Your wallet is requested here, not while browsing. SIWE proves the claimant identity; no email account is created."}
         </p>
       </div>
+      <p className={`text-sm ${actionReadiness.enabled ? "text-[var(--muted)]" : "font-medium text-[var(--warn)]"}`} role="status" data-claim-readiness={actionReadiness.enabled ? "ready" : "blocked"}>
+        {actionReadiness.reason}
+      </p>
     </div>
   );
 }

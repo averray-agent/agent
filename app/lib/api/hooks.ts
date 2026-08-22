@@ -77,7 +77,7 @@ export const useReceiptDetail = (sessionId: string | null, kind: "run" | "badge"
   );
 export const useAlerts = () => useApi("/alerts");
 export const useAudit = () => useApi("/audit");
-export const usePolicies = () => useApi("/policies");
+export const usePolicies = (enabled = true) => useApi(enabled ? "/policies" : null);
 export const usePolicy = (tag: string | null) =>
   useApi(tag ? `/policies/${encodeURIComponent(tag)}` : null);
 export const useDisputes = () => useApi("/disputes");

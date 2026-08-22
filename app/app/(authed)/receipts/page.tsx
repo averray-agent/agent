@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ReceiptsTopbar } from "@/components/receipts/ReceiptsTopbar";
 import {
   ReceiptsKpiStrip,
@@ -36,6 +36,7 @@ import {
 import { useBadges, usePolicies, useReceiptDetail } from "@/lib/api/hooks";
 import { feedPresence } from "@/lib/api/feed-presence";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
+import { markAppMilestone } from "@/lib/ui/app-performance.js";
 
 const KPIS: ReceiptsKpi[] = [
   {
@@ -140,13 +141,18 @@ const SHAPES: ShapeEntry[] = [
 
 export default function ReceiptsPage() {
   const badgesRequest = useBadges();
+  const [secondaryFeedsEnabled, setSecondaryFeedsEnabled] = useState(false);
   // The co-sign KPI reads the active-policy set: with no co-sign mandate in
   // force it must render neutral "not required", never a below-target alarm.
   // Undefined data (loading / locked / down) renders as "requirement unknown".
-  const policiesRequest = usePolicies();
+  // It is secondary to the receipt ledger, so give the primary /badges read
+  // the first network turn and fill this truth-preserving "unknown" state on
+  // the browser's next idle turn.
+  const policiesRequest = usePolicies(secondaryFeedsEnabled);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [manifestStatus, setManifestStatus] = useState<string | null>(null);
+  const firstReceiptFeedsMarked = useRef(false);
   const liveRows = useMemo(() => extractReceiptRows(badgesRequest.data), [badgesRequest.data]);
   const rows = liveRows;
   const policiesPresence = feedPresence(policiesRequest);
@@ -164,6 +170,31 @@ export default function ReceiptsPage() {
   const signaturePresence = selected?.kind === "badge"
     ? feedPresence(detailRequest)
     : badgesPresence;
+
+  useEffect(() => {
+    const windowWithIdleCallback = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (windowWithIdleCallback.requestIdleCallback) {
+      const handle = windowWithIdleCallback.requestIdleCallback(
+        () => setSecondaryFeedsEnabled(true),
+        { timeout: 1_000 }
+      );
+      return () => windowWithIdleCallback.cancelIdleCallback?.(handle);
+    }
+    const handle = window.setTimeout(() => setSecondaryFeedsEnabled(true), 0);
+    return () => window.clearTimeout(handle);
+  }, []);
+
+  useEffect(() => {
+    const badgesSettled = !badgesRequest.isLoading && Boolean(badgesRequest.data || badgesRequest.error);
+    const policiesSettled = !policiesRequest.isLoading && Boolean(policiesRequest.data || policiesRequest.error);
+    if (!firstReceiptFeedsMarked.current && badgesSettled && policiesSettled) {
+      firstReceiptFeedsMarked.current = true;
+      markAppMilestone("receipts-feeds-settled");
+    }
+  }, [badgesRequest.data, badgesRequest.error, badgesRequest.isLoading, policiesRequest.data, policiesRequest.error, policiesRequest.isLoading]);
 
   const freshness = freshnessFromRequests(badgesRequest);
   const verifyReceiptManifest = () => {

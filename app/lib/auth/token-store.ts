@@ -25,6 +25,7 @@ export interface AuthSession {
 
 export interface AuthSnapshot {
   authenticated: boolean;
+  checked: boolean;
   wallet?: string;
   expiresAt?: string;
   roles: string[];
@@ -68,6 +69,7 @@ export function getAuthSnapshot(): AuthSnapshot {
   const session = readSession();
   return {
     authenticated: Boolean(session),
+    checked: true,
     wallet: session?.wallet,
     expiresAt: session?.expiresAt,
     roles: session?.roles ?? [],
@@ -103,9 +105,9 @@ export function clearSession(reason?: string): void {
   notify();
 }
 
-export function onAuthChange(listener: Listener): () => void {
+export function onAuthChange(listener: Listener, options: { emitCurrent?: boolean } = {}): () => void {
   listeners.add(listener);
-  listener(getAuthSnapshot());
+  if (options.emitCurrent !== false) listener(getAuthSnapshot());
   return () => {
     listeners.delete(listener);
   };

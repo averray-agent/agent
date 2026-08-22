@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth/use-auth";
 import { decideAuthGuardAction } from "@/lib/auth/auth-guard-decisions";
+import { AUTH_SESSION_PROBE_TIMEOUT_MS } from "@/lib/auth/session-probe.js";
 
 /**
  * P3.7 — Operator-app authed-layout guard.
@@ -19,13 +20,12 @@ import { decideAuthGuardAction } from "@/lib/auth/auth-guard-decisions";
  * ──────────────
  * The static-export HTML carries no auth state; `useAuth()` starts
  * with `authenticated: false` and only reads localStorage in its
- * post-mount effect. Without a hydration latch, every page paints a
+ * bounded post-mount probe. Without a hydration latch, every page paints a
  * "redirecting to sign-in" frame on the first client render, then
  * snaps back to the operator shell once the session is read. The
- * `hydrated` flag below holds the gate closed for that one render so
- * neither side flashes — signed-out visitors see only the neutral
- * placeholder before the redirect, and signed-in operators see the
- * placeholder before the shell.
+ * The `checked` flag from useAuth holds the gate closed for that read so
+ * neither side flashes — signed-out visitors see an actionable wall before
+ * the redirect, and signed-in operators see that wall before the shell.
  *
  * The actual decision lives in `auth-guard-decisions.js` so node:test
  * unit tests can cover the classifier without a React renderer.
@@ -35,17 +35,9 @@ export function AuthedGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
-  // `hydrated` flips to true on the first post-mount effect. Until
-  // then, `useAuth()` still returns its static initial value and
-  // cannot be trusted as a signed-in/out signal.
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => {
-    setHydrated(true);
-  }, []);
-
   const decision = decideAuthGuardAction({
     authenticated: auth.authenticated,
-    hydrated,
+    hydrated: auth.checked === true,
     currentPath: pathname ?? undefined,
   });
 
@@ -64,7 +56,7 @@ export function AuthedGuard({ children }: { children: React.ReactNode }) {
   }
 
   // "checking" (pre-hydration) and "redirect" (post-hydration, no
-  // session) both render the neutral placeholder. We intentionally do
+  // session) both render an honest, actionable wall. We intentionally do
   // NOT render any operator-shell affordance here — no topbar, no
   // OperatorRail — because doing so would be the exact misleading
   // authed shell P3.7 forbids.
@@ -72,18 +64,30 @@ export function AuthedGuard({ children }: { children: React.ReactNode }) {
 }
 
 function AuthedGuardPlaceholder({ reason }: { reason: "checking" | "redirect" }) {
-  const message = reason === "redirect"
-    ? "Sign-in required. Redirecting…"
-    : "Checking sign-in…";
   return (
     <div
-      role="status"
-      aria-live="polite"
       data-testid="authed-guard-placeholder"
       data-guard-state={reason}
-      className="grid min-h-[60vh] place-items-center px-6 py-12 text-sm text-[var(--avy-muted)]"
+      data-auth-probe-max-ms={AUTH_SESSION_PROBE_TIMEOUT_MS}
+      className="grid min-h-[60vh] place-items-center px-6 py-12"
     >
-      {message}
+      <section className="w-full max-w-[480px] rounded-[var(--radius-lg)] border border-[var(--line)] bg-[var(--paper-solid)] p-7 shadow-[var(--shadow-sm)]">
+        <p className="eyebrow">Wallet sign-in</p>
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight">Sign in to open the operator room.</h1>
+        <p className="mt-3 text-sm leading-relaxed text-[var(--muted)]" role="status" aria-live="polite">
+          {reason === "checking"
+            ? "Checking briefly for an existing SIWE session. This wall is usable immediately; a valid session will upgrade it in the background."
+            : "No active SIWE session is available. Redirecting to wallet sign-in."}
+        </p>
+        <div className="mt-5 flex flex-wrap gap-3">
+          <a className="inline-flex h-10 items-center rounded-[var(--radius)] bg-[var(--accent)] px-4 text-sm font-semibold text-white" href="/sign-in">
+            Sign in with wallet
+          </a>
+          <a className="inline-flex h-10 items-center rounded-[var(--radius)] border border-[var(--line)] px-4 text-sm font-semibold text-[var(--ink)]" href="/work">
+            Browse paid work
+          </a>
+        </div>
+      </section>
     </div>
   );
 }
