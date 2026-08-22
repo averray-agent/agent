@@ -75,6 +75,7 @@ export function createAuthRoutes({
   clientIp,
   consumeRefreshTokenImpl = consumeRefreshToken,
   enforceLimit,
+  eventBus,
   hashRefreshTokenImpl = hashRefreshToken,
   issueRefreshTokenImpl = issueRefreshToken,
   logger,
@@ -221,10 +222,26 @@ export function createAuthRoutes({
         );
       }
 
+      const verifiedAt = new Date().toISOString();
       await recordSiweAuthEvent({
         wallet,
         event: "verify_succeeded",
-        at: new Date().toISOString()
+        at: verifiedAt
+      });
+      // Identity begins only after the signature verifies. At that point the
+      // signed message lets us attach both timestamps to the recovered wallet
+      // without retaining its nonce, signature, or message.
+      publishJourneyAuthEvent(eventBus, {
+        wallet,
+        topic: "journey.auth_nonce_issued",
+        timestamp: verified.issuedAt,
+        outcome: "issued"
+      });
+      publishJourneyAuthEvent(eventBus, {
+        wallet,
+        topic: "journey.auth_verified",
+        timestamp: verifiedAt,
+        outcome: "succeeded"
       });
 
       return respondHandled(
@@ -420,4 +437,21 @@ export function createAuthRoutes({
 
     return false;
   };
+}
+
+function publishJourneyAuthEvent(eventBus, { wallet, topic, timestamp, outcome }) {
+  if (!eventBus?.publish) return;
+  try {
+    eventBus.publish({
+      topic,
+      source: "auth",
+      phase: "identity",
+      wallet,
+      wallets: [wallet],
+      timestamp,
+      data: { outcome }
+    });
+  } catch {
+    // Journey telemetry cannot change a successful SIWE exchange.
+  }
 }

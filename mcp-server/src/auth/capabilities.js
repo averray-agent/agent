@@ -110,6 +110,8 @@ const ROUTE_CAPABILITY_RULES = [
   { method: "POST", path: "/admin/jobs/resume", capabilities: ["jobs:resume-recurring"] },
   { method: "GET", path: "/admin/jobs/timeline", capabilities: ["jobs:timeline"] },
   { method: "GET", path: "/admin/sessions", capabilities: ["ops:view"] },
+  { method: "GET", path: "/admin/arrivals/timeline", capabilities: ["ops:view"] },
+  { method: "GET", path: "/admin/worker-journeys", capabilities: ["ops:view"] },
   { method: "GET", path: "/admin/status", capabilities: ["admin:status", "ops:view"] },
   { method: "POST", path: "/admin/agent-transfers", capabilities: ["agent-transfers:submit"] },
   { method: "GET", path: "/admin/treasury/summary", capabilities: ["admin:status", "ops:view"] },

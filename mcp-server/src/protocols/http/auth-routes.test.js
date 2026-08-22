@@ -95,6 +95,7 @@ function makeHarness(overrides = {}) {
     enforceLimit: async (bucket, key, limits) => {
       calls.push(["limit", { bucket, key, limits }]);
     },
+    eventBus: overrides.eventBus,
     hashRefreshTokenImpl: (rawToken) => {
       calls.push(["hashRefreshToken", rawToken]);
       return "hashed-refresh";
@@ -295,6 +296,25 @@ test("POST /auth/verify consumes nonce, signs token, and issues refresh cookie w
   assert.equal(verifyEvent.wallet, WALLET);
   assert.equal(verifyEvent.event, "verify_succeeded");
   assert.ok(Number.isFinite(Date.parse(verifyEvent.at)));
+});
+
+test("successful SIWE appends nonce and verify outcomes only after wallet proof", async () => {
+  const events = [];
+  const issuedAt = "2026-08-22T10:00:00.000Z";
+  const { response, route } = makeHarness({
+    payload: { message: "siwe", signature: VALID_SIGNATURE },
+    verified: { nonce: "private-nonce", recoveredAddress: WALLET, issuedAt },
+    eventBus: { publish: (event) => events.push(event) }
+  });
+
+  await callRoute(route, response, "POST", "/auth/verify");
+  assert.deepEqual(events.map((event) => event.topic), [
+    "journey.auth_nonce_issued",
+    "journey.auth_verified"
+  ]);
+  assert.equal(events[0].timestamp, issuedAt);
+  assert.ok(events.every((event) => event.wallet === WALLET));
+  assert.doesNotMatch(JSON.stringify(events), /private-nonce|siwe|signature/u);
 });
 
 test("POST /auth/verify rejects nonce wallet mismatch", async () => {

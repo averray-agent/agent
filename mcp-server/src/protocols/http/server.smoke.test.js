@@ -481,6 +481,35 @@ test("http smoke: /admin/sessions exposes operator-wide session activity", { ski
   });
 });
 
+test("http smoke: admin arrival and journey reads are operator-only and expose cutover guardrails", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    for (const path of ["/admin/arrivals/timeline", "/admin/worker-journeys"]) {
+      const unauthenticated = await fetch(`${base}${path}`);
+      assert.equal(unauthenticated.status, 401);
+    }
+
+    const timelineResponse = await fetch(`${base}/admin/arrivals/timeline?window=48h`, {
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(timelineResponse.status, 200);
+    const timeline = await timelineResponse.json();
+    assert.equal(timeline.window.bucket, "hour");
+    assert.equal(timeline.window.backfilled, false);
+    assert.ok(Number.isFinite(Date.parse(timeline.collectionSince)));
+    assert.equal(timeline.privacy.containsWallets, false);
+
+    const journeysResponse = await fetch(`${base}/admin/worker-journeys?limit=5`, {
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(journeysResponse.status, 200);
+    const journeys = await journeysResponse.json();
+    assert.equal(journeys.scope, "operator");
+    assert.equal(journeys.window.backfilled, false);
+    assert.ok(Number.isFinite(Date.parse(journeys.collectionSince)));
+  });
+});
+
 test("http smoke: /jobs/sub lets active workers create funded child jobs", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });

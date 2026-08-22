@@ -1,6 +1,7 @@
 export function createEarningsDoorRoutes({
   authMiddleware,
   earningsDoor,
+  eventBus,
   readJsonBody,
   respond
 }) {
@@ -14,9 +15,38 @@ export function createEarningsDoorRoutes({
     if (request.method === "POST" && pathname === "/account/withdraw/transactions") {
       const auth = await authMiddleware(request, url);
       const payload = await readJsonBody(request);
-      respond(response, 200, await earningsDoor.buildWithdrawTransactions(auth.wallet, payload));
+      const intent = await earningsDoor.buildWithdrawTransactions(auth.wallet, payload);
+      publishWithdrawalIntent(eventBus, auth.wallet, payload, intent);
+      respond(response, 200, intent);
       return true;
     }
     return false;
   };
+}
+
+function publishWithdrawalIntent(eventBus, wallet, request, intent) {
+  if (!eventBus?.publish) return;
+  const timestamp = new Date().toISOString();
+  try {
+    eventBus.publish({
+      topic: "journey.withdrawal_intent_created",
+      source: "account",
+      phase: "withdrawal",
+      wallet,
+      wallets: [wallet],
+      timestamp,
+      data: {
+        status: "created",
+        gasGrantRequested: request?.requestGasGrant === true,
+        gasGrantStatus: typeof intent?.firstWithdrawalGasGrant?.status === "string"
+          ? intent.firstWithdrawalGasGrant.status
+          : "unknown",
+        gasGrantReason: typeof intent?.firstWithdrawalGasGrant?.reason === "string"
+          ? intent.firstWithdrawalGasGrant.reason
+          : null
+      }
+    });
+  } catch {
+    // Journey telemetry cannot prevent a worker from receiving signable data.
+  }
 }

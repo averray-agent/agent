@@ -8,6 +8,7 @@ export function createJobRoutes({
   authMiddleware,
   enforceLimit,
   ensureSessionOwnership,
+  eventBus,
   externalPostingService,
   posterOnboardingService,
   protocol = "http",
@@ -92,11 +93,14 @@ export function createJobRoutes({
 
     if (request.method === "GET" && pathname === "/jobs/preflight") {
       const auth = await authMiddleware(request, url);
-      respond(
-        response,
-        200,
-        await service.preflightJob(auth.wallet, url.searchParams.get("jobId") ?? "")
-      );
+      const jobId = url.searchParams.get("jobId") ?? "";
+      const preflight = await service.preflightJob(auth.wallet, jobId);
+      publishJourneyPreflight(eventBus, {
+        wallet: auth.wallet,
+        jobId,
+        preflight
+      });
+      respond(response, 200, preflight);
       return true;
     }
 
@@ -261,6 +265,33 @@ export function createJobRoutes({
 
     return false;
   };
+}
+
+function publishJourneyPreflight(eventBus, { wallet, jobId, preflight }) {
+  if (!eventBus?.publish) return;
+  const timestamp = new Date().toISOString();
+  try {
+    eventBus.publish({
+      topic: "journey.preflight_completed",
+      source: "jobs",
+      phase: "evaluation",
+      wallet,
+      wallets: [wallet],
+      jobId,
+      timestamp,
+      data: {
+        jobId,
+        eligible: typeof preflight?.eligible === "boolean" ? preflight.eligible : null,
+        reason: typeof preflight?.reason === "string" ? preflight.reason : null,
+        claimable: typeof preflight?.claimable === "boolean" ? preflight.claimable : null,
+        claimFundingSufficient: typeof preflight?.claimFundingSufficient === "boolean"
+          ? preflight.claimFundingSufficient
+          : null
+      }
+    });
+  } catch {
+    // Journey telemetry cannot change a preflight verdict or response.
+  }
 }
 
 async function resolveClaimantAttribution({ marker, verifyCanaryMarker, wallet }) {

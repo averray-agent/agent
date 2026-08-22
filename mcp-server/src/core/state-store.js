@@ -24,6 +24,10 @@ import {
 
 const DEFAULT_EVENT_LOG_RETENTION = 5_000;
 const DEFAULT_SIWE_AUTH_WALLET_RETENTION = 1_000;
+export const JOURNEY_EVENT_PER_WALLET_RETENTION = 250;
+const JOURNEY_EXISTING_EVENT_TOPICS = new Set([
+  "operator_gas.first_withdrawal_granted"
+]);
 const BANK_V22_LEG_DISPATCH_TOPIC = "bank.v22_leg_dispatched";
 const BANK_V22_LEGS = new Set([
   "deposit_funding",
@@ -887,6 +891,7 @@ export class MemoryStateStore {
       this.eventLog.splice(existingIndex, 1);
     }
     this.eventLog.push(event);
+    pruneJourneyEventsForWallet(this.eventLog, event);
     if (this.eventLog.length > DEFAULT_EVENT_LOG_RETENTION) {
       this.eventLog.splice(0, this.eventLog.length - DEFAULT_EVENT_LOG_RETENTION);
     }
@@ -922,6 +927,21 @@ export class MemoryStateStore {
 
   async listEventLog(filter = {}) {
     return listEventLogFromRecords(this.eventLog, filter);
+  }
+
+  async listJourneyEvents({ wallet, limit = JOURNEY_EVENT_PER_WALLET_RETENTION } = {}) {
+    const normalizedWallet = normalizeJourneyWallet(wallet);
+    if (!normalizedWallet) return { events: [], gap: false };
+    const safeLimit = Math.min(
+      Math.max(Number(limit) || JOURNEY_EVENT_PER_WALLET_RETENTION, 1),
+      JOURNEY_EVENT_PER_WALLET_RETENTION
+    );
+    return {
+      events: this.eventLog
+        .filter((event) => journeyEventWallet(event) === normalizedWallet)
+        .slice(-safeLimit),
+      gap: false
+    };
   }
 
   async markXcmObservationProcessed(wrapperAddress, requestId, result = undefined) {
@@ -2013,8 +2033,29 @@ export class RedisStateStore {
     const score = timestampScore(event?.timestamp ?? "");
     const recordKey = this.key("event-log", id);
     const indexKey = this.key("event-log", "all");
-    await this.client.set(recordKey, JSON.stringify(event));
-    await this.client.zAdd(indexKey, { score, value: id });
+    const journeyWallet = journeyEventWallet(event);
+    const journeyIndexKey = journeyWallet
+      ? this.key("event-log", `journey-wallet:${journeyWallet}`)
+      : undefined;
+    const transaction = this.client.multi()
+      .set(recordKey, JSON.stringify(event))
+      .zAdd(indexKey, { score, value: id });
+    if (journeyIndexKey) transaction.zAdd(journeyIndexKey, { score, value: id });
+    await transaction.exec();
+    if (journeyIndexKey) {
+      const staleJourneyIds = await this.client.zRange(
+        journeyIndexKey,
+        0,
+        -(JOURNEY_EVENT_PER_WALLET_RETENTION + 1)
+      );
+      if (staleJourneyIds.length > 0) {
+        await this.client.multi()
+          .zRem(journeyIndexKey, staleJourneyIds)
+          .zRem(indexKey, staleJourneyIds)
+          .del(staleJourneyIds.map((staleId) => this.key("event-log", staleId)))
+          .exec();
+      }
+    }
     const staleIds = await this.client.zRange(indexKey, 0, -(DEFAULT_EVENT_LOG_RETENTION + 1));
     if (staleIds.length > 0) {
       await this.client.zRem(indexKey, staleIds);
@@ -2069,6 +2110,27 @@ export class RedisStateStore {
       return raw ? JSON.parse(raw) : undefined;
     }));
     return listEventLogFromRecords(records.filter(Boolean), filter);
+  }
+
+  async listJourneyEvents({ wallet, limit = JOURNEY_EVENT_PER_WALLET_RETENTION } = {}) {
+    await this.connect();
+    const normalizedWallet = normalizeJourneyWallet(wallet);
+    if (!normalizedWallet) return { events: [], gap: false };
+    const safeLimit = Math.min(
+      Math.max(Number(limit) || JOURNEY_EVENT_PER_WALLET_RETENTION, 1),
+      JOURNEY_EVENT_PER_WALLET_RETENTION
+    );
+    const ids = await this.client.zRange(
+      this.key("event-log", `journey-wallet:${normalizedWallet}`),
+      0,
+      safeLimit - 1,
+      { REV: true }
+    );
+    const records = await Promise.all(ids.map(async (id) => {
+      const raw = await this.client.get(this.key("event-log", id));
+      return raw ? JSON.parse(raw) : undefined;
+    }));
+    return { events: records.filter(Boolean), gap: false };
   }
 
   async markXcmObservationProcessed(wrapperAddress, requestId, result = undefined) {
@@ -2464,6 +2526,32 @@ function normalizeSiweActivityLimit(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return 100;
   return Math.min(Math.trunc(parsed), 1000);
+}
+
+function journeyEventWallet(event) {
+  const topic = String(event?.topic ?? "");
+  if (!topic.startsWith("journey.") && !JOURNEY_EXISTING_EVENT_TOPICS.has(topic)) return undefined;
+  return normalizeJourneyWallet(event?.wallet);
+}
+
+function normalizeJourneyWallet(value) {
+  const wallet = String(value ?? "").trim().toLowerCase();
+  return /^0x[a-f0-9]{40}$/u.test(wallet) ? wallet : undefined;
+}
+
+function pruneJourneyEventsForWallet(records, newest) {
+  const wallet = journeyEventWallet(newest);
+  if (!wallet) return;
+  const matchingIndexes = records
+    .map((event, index) => ({ event, index }))
+    .filter(({ event }) => journeyEventWallet(event) === wallet)
+    .sort((left, right) => String(left.event.timestamp ?? "")
+      .localeCompare(String(right.event.timestamp ?? "")));
+  const overflow = matchingIndexes.length - JOURNEY_EVENT_PER_WALLET_RETENTION;
+  if (overflow <= 0) return;
+  const stale = new Set(matchingIndexes.slice(0, overflow).map(({ index }) => index));
+  const retained = records.filter((_event, index) => !stale.has(index));
+  records.splice(0, records.length, ...retained);
 }
 
 function normalizeXcmRequestIdentity(wrapperAddress, requestId) {

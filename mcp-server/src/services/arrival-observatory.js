@@ -21,13 +21,40 @@ export { ARRIVAL_STAGES, stageRank } from "./arrival-stage-map.js";
 export const ARRIVALS_SCHEMA_VERSION = "averray.arrivals.v1";
 export const HTTP_ARRIVAL_CUTOVER_NOTE =
   "HTTP arrivals are measured from this cut-over only; earlier HTTP traffic was not backfilled.";
+export const PROSPECTIVE_ARRIVAL_RETENTION_DAYS = 30;
+export const PROSPECTIVE_ARRIVAL_SURFACES = Object.freeze([
+  "manifest",
+  "onboarding",
+  "jobs_reads",
+  "mcp_initialize",
+  "verify_profiles"
+]);
+export const ARRIVAL_SOFTWARE_CLASSES = Object.freeze([
+  "claude",
+  "cursor",
+  "codex",
+  "browser",
+  "mcp_bridge",
+  "directory",
+  "other_declared",
+  "unidentified"
+]);
 const STATE_SCOPE = "arrival-observatory";
 const DEFAULT_MAX_CLIENTS = 200;
 const DEFAULT_FLUSH_INTERVAL_MS = 10_000;
 const DEFAULT_LOAD_RETRY_INTERVAL_MS = 10_000;
+const HOUR_MS = 60 * 60 * 1_000;
+const PROSPECTIVE_ARRIVAL_RETENTION_MS = PROSPECTIVE_ARRIVAL_RETENTION_DAYS * 24 * HOUR_MS;
 const UNREADABLE = "arrival state could not be read";
 const WALLET_RE = /^0x[0-9a-f]{40}$/u;
 const ATTRIBUTION_SOURCES = Object.freeze(["siwe_wallet", "client_name", "ip_only"]);
+const NON_ARRIVAL_JOB_ROUTES = new Set([
+  "preflight",
+  "recommendations",
+  "estimate-reward",
+  "explain-eligibility",
+  "sub"
+]);
 export const ARRIVAL_CANARY_MARKER_HEADER = "x-averray-canary-marker";
 export const ARRIVAL_CANARY_MARKER_TTL_SECONDS = 15 * 60;
 
@@ -209,6 +236,11 @@ export class ArrivalObservatory {
     this.lastFlushMs = 0;
     this.startedAtMs = this.now();
     this.httpObservingSinceMs = this.now();
+    // Prospective telemetry has an explicit cut-over. Existing arrival state
+    // cannot be re-bucketed honestly because it retains only first/last seen
+    // timestamps and cumulative call counters.
+    this.prospectiveCollectionSinceMs = this.now();
+    this.preAuthHourlyBuckets = new Map();
   }
 
   // Backward-compatible handles for focused tests and callers that supplied
@@ -221,12 +253,16 @@ export class ArrivalObservatory {
   set ambiguousClients(values) { this.identityRegistry.replaceAmbiguousClients(values); }
 
   /** First contact: a handshake, or any request that reaches the door. */
-  async recordReach({ era, clientInfo, ip } = {}) {
+  async recordReach({ era, clientInfo, ip, method } = {}) {
+    const surface = mcpReachSurface(method);
+    if (surface) await this.recordPreAuthAggregate({ surface, clientInfo });
     await this.record({ stage: "reached", era, clientInfo, ip });
   }
 
   /** A tool call. Unknown tool names are counted as reach and nothing more. */
   async recordTool({ tool, era, clientInfo, ip } = {}) {
+    const surface = mcpToolSurface(tool);
+    if (surface) await this.recordPreAuthAggregate({ surface, clientInfo });
     await this.record({ stage: TOOL_STAGE[tool] ?? "reached", era, clientInfo, ip, tool });
   }
 
@@ -238,6 +274,13 @@ export class ArrivalObservatory {
     // uptime checks into apparent workers before any work surface was used.
     if (normalizedMethod === "OPTIONS" || normalizedMethod === "HEAD") return;
     const normalizedPath = normalizeHttpPath(pathname);
+    const aggregateSurface = httpPreAuthSurface(normalizedMethod, normalizedPath);
+    if (aggregateSurface) {
+      // This is deliberately recorded before the machine-path exclusion.
+      // Manifest and onboarding reads are arrival evidence for the private
+      // operator timeline, but still must not create correlatable client rows.
+      await this.recordPreAuthAggregate({ surface: aggregateSurface, clientInfo });
+    }
     if (isHttpMachinePath(normalizedPath)) return;
     const route = `${normalizedMethod} ${normalizedPath}`;
     const markerPresented = typeof canaryMarker === "string" && canaryMarker.trim().length > 0;
@@ -517,6 +560,66 @@ export class ArrivalObservatory {
   }
 
   /**
+   * Operator-only source for prospective arrival timelines.
+   *
+   * Buckets contain dimensions and counts only. The declared client hint is
+   * reduced to a fixed software class before persistence; no wallet, address,
+   * raw user-agent, or correlation key crosses this boundary.
+   */
+  async getPreAuthTimelineState() {
+    if (!(await this.ensureLoaded())) {
+      return {
+        collectionSinceMs: this.prospectiveCollectionSinceMs,
+        retentionDays: PROSPECTIVE_ARRIVAL_RETENTION_DAYS,
+        buckets: [],
+        unavailable: this.loadFailed ?? UNREADABLE
+      };
+    }
+    this.prunePreAuthBuckets(this.now());
+    return {
+      collectionSinceMs: this.prospectiveCollectionSinceMs,
+      retentionDays: PROSPECTIVE_ARRIVAL_RETENTION_DAYS,
+      buckets: [...this.preAuthHourlyBuckets.values()]
+        .sort((left, right) => left.startMs - right.startMs)
+        .map((bucket) => ({
+          startMs: bucket.startMs,
+          counts: Object.entries(bucket.counts)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, count]) => {
+              const [surface, clientClass] = key.split("|");
+              return { surface, clientClass, count };
+            })
+        }))
+    };
+  }
+
+  async recordPreAuthAggregate({ surface, clientInfo } = {}) {
+    try {
+      if (!PROSPECTIVE_ARRIVAL_SURFACES.includes(surface)) return;
+      if (!(await this.ensureLoaded())) return;
+      const nowMs = this.now();
+      const startMs = Math.floor(nowMs / HOUR_MS) * HOUR_MS;
+      const clientClass = classifyArrivalSoftware(clientInfo);
+      const key = `${surface}|${clientClass}`;
+      const bucket = this.preAuthHourlyBuckets.get(startMs) ?? { startMs, counts: {} };
+      bucket.counts[key] = (Number(bucket.counts[key]) || 0) + 1;
+      this.preAuthHourlyBuckets.set(startMs, bucket);
+      this.prunePreAuthBuckets(nowMs);
+      this.dirty = true;
+      await this.maybeFlush();
+    } catch {
+      // Arrival telemetry cannot refuse the public read it observes.
+    }
+  }
+
+  prunePreAuthBuckets(nowMs) {
+    const oldestStartMs = Math.floor((nowMs - PROSPECTIVE_ARRIVAL_RETENTION_MS) / HOUR_MS) * HOUR_MS;
+    for (const startMs of this.preAuthHourlyBuckets.keys()) {
+      if (startMs < oldestStartMs) this.preAuthHourlyBuckets.delete(startMs);
+    }
+  }
+
+  /**
    * Every number nulled and the failure named. The ops board renders this as a
    * broken instrument; a seven-zero funnel it would render as measured silence.
    *
@@ -698,6 +801,12 @@ export class ArrivalObservatory {
   async loadState() {
     try {
       const stored = await this.stateStore?.getServiceState?.(STATE_SCOPE);
+      const persistedCollectionSinceMs = finiteMs(stored?.prospectiveCollectionSinceMs);
+      if (persistedCollectionSinceMs !== undefined) {
+        this.prospectiveCollectionSinceMs = persistedCollectionSinceMs;
+      }
+      restorePreAuthBuckets(this.preAuthHourlyBuckets, stored?.preAuthHourlyBuckets);
+      this.prunePreAuthBuckets(this.now());
       restoreTotals(this.totals, stored?.totals);
       // State written before the split carries `totals` alone. The actor of
       // those calls is genuinely unknown, and unknown must not be spent as
@@ -737,9 +846,18 @@ export class ArrivalObservatory {
       if (Number.isFinite(stored?.httpObservingSinceMs)) {
         this.httpObservingSinceMs = stored.httpObservingSinceMs;
       }
+      if (persistedCollectionSinceMs === undefined) {
+        // Pin the cut-over on the first successful state read. Waiting for an
+        // observed arrival would move collectionSince on every quiet restart.
+        await this.stateStore?.upsertServiceState?.(STATE_SCOPE, {
+          prospectiveCollectionSinceMs: this.prospectiveCollectionSinceMs,
+          preAuthHourlyBuckets: serializePreAuthBuckets(this.preAuthHourlyBuckets)
+        });
+      }
       this.loaded = true;
       this.loadFailed = null;
     } catch (error) {
+      this.loaded = false;
       this.loadFailed = UNREADABLE;
       this.nextLoadAttemptMs = this.now() + this.loadRetryIntervalMs;
       throw error;
@@ -767,7 +885,9 @@ export class ArrivalObservatory {
       attributionSourceTotals: { ...this.attributionSourceTotals },
       httpAttributionSourceTotals: { ...this.httpAttributionSourceTotals },
       httpClients: [...this.httpClients.values()],
-      clientWalletLinks: Object.fromEntries(this.clientWalletLinks)
+      clientWalletLinks: Object.fromEntries(this.clientWalletLinks),
+      prospectiveCollectionSinceMs: this.prospectiveCollectionSinceMs,
+      preAuthHourlyBuckets: serializePreAuthBuckets(this.preAuthHourlyBuckets)
     });
   }
 
@@ -992,6 +1112,78 @@ export function extractHttpClientInfo(request) {
     name: product?.[1] ?? userAgent,
     version: product?.[2] ?? "unknown"
   });
+}
+
+/** Reduce an untrusted declared client/user-agent to a closed enum immediately. */
+export function classifyArrivalSoftware(clientInfo) {
+  const name = String(clientInfo?.name ?? "").trim().toLowerCase();
+  if (!name) return "unidentified";
+  if (/anthropic|claude/u.test(name)) return "claude";
+  if (/cursor/u.test(name)) return "cursor";
+  if (/openai|codex/u.test(name)) return "codex";
+  if (/mozilla|safari|chrome|firefox|edge/u.test(name)) return "browser";
+  if (/mcp[-_ ]?remote|mcp[-_ ]?publisher/u.test(name)) return "mcp_bridge";
+  if (/glama|smithery|registry|crawler|spider|bot/u.test(name)) return "directory";
+  return "other_declared";
+}
+
+function httpPreAuthSurface(method, pathname) {
+  if (method !== "GET") return undefined;
+  if (pathname === "/agent-tools.json" || pathname === "/.well-known/agent-tools.json") {
+    return "manifest";
+  }
+  if (pathname === "/onboarding") return "onboarding";
+  if (pathname === "/verify/profiles") return "verify_profiles";
+  if (pathname === "/jobs" || pathname === "/jobs/definition") {
+    return "jobs_reads";
+  }
+  const publicJobId = pathname.match(/^\/jobs\/(?<id>[^/]+)$/u)?.groups?.id;
+  if (publicJobId && !NON_ARRIVAL_JOB_ROUTES.has(publicJobId)) return "jobs_reads";
+  return undefined;
+}
+
+function mcpReachSurface(method) {
+  return method === "initialize" || method === "server/discover"
+    ? "mcp_initialize"
+    : undefined;
+}
+
+function mcpToolSurface(tool) {
+  if (tool === "getPlatformCapabilities") return "manifest";
+  if (tool === "listVerificationProfiles") return "verify_profiles";
+  if (tool === "listJobs" || tool === "getJobDefinition") return "jobs_reads";
+  return undefined;
+}
+
+function serializePreAuthBuckets(buckets) {
+  return [...buckets.values()]
+    .sort((left, right) => left.startMs - right.startMs)
+    .map((bucket) => ({ startMs: bucket.startMs, counts: { ...bucket.counts } }));
+}
+
+function restorePreAuthBuckets(target, stored) {
+  for (const candidate of Array.isArray(stored) ? stored : []) {
+    const startMs = finiteMs(candidate?.startMs);
+    if (startMs === undefined) continue;
+    const counts = {};
+    for (const [key, rawCount] of Object.entries(candidate?.counts ?? {})) {
+      const [surface, clientClass, extra] = key.split("|");
+      const count = Number(rawCount);
+      if (extra !== undefined
+        || !PROSPECTIVE_ARRIVAL_SURFACES.includes(surface)
+        || !ARRIVAL_SOFTWARE_CLASSES.includes(clientClass)
+        || !Number.isSafeInteger(count)
+        || count <= 0) continue;
+      counts[key] = count;
+    }
+    if (Object.keys(counts).length > 0) target.set(startMs, { startMs, counts });
+  }
+}
+
+function finiteMs(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function firstHeader(headers, names) {
