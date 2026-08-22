@@ -15,7 +15,7 @@ test("blind-tester marketing copy exposes copyable proof links and honest loadin
     readFile(new URL("site/agent.html", REPO_ROOT), "utf8")
   ]);
 
-  assert.match(home, /Sign-in is wallet-based \(MetaMask or Talisman\)\. Agents authenticate the same way over MCP — there is no email signup\./u);
+  assert.match(home, /href="\/builders\/#install">connect over MCP<\/a>[\s\S]*there is no email signup\./u);
   assert.match(home, /Flat per-run pricing in USDC —[\s\S]*see the live price list\./u);
   assert.match(home, /api\.averray\.com\/schemas\/jobs/u);
   assert.match(home, /api\.averray\.com\/session\/state-machine/u);
@@ -33,6 +33,34 @@ test("blind-tester marketing copy exposes copyable proof links and honest loadin
 
   assert.match(footer, /title="GitHub">Docs \(GitHub\) ↗<\/a>/u);
   assert.match(footer, /rel="noopener"/u);
+});
+
+test("QA8 marketing exposes the canonical MCP install door and copy-safe snippets", async () => {
+  const [home, builders, nav, copySnippet, css, llms] = await Promise.all([
+    readFile(new URL("marketing/src/pages/index.astro", REPO_ROOT), "utf8"),
+    readFile(new URL("marketing/src/pages/builders.astro", REPO_ROOT), "utf8"),
+    readFile(new URL("marketing/src/components/SiteNav.astro", REPO_ROOT), "utf8"),
+    readFile(new URL("marketing/src/components/CopySnippet.astro", REPO_ROOT), "utf8"),
+    readFile(new URL("marketing/src/styles/global.css", REPO_ROOT), "utf8"),
+    readFile(new URL("site/llms.txt", REPO_ROOT), "utf8")
+  ]);
+
+  assert.match(builders, /<section class="section" id="install">/u);
+  assert.match(nav, /label: "Install MCP", href: "\/builders\/#install"/u);
+  assert.match(home, /href="\/builders\/#install">connect over MCP<\/a>/u);
+
+  assert.equal((builders.match(/<CopySnippet /gu) ?? []).length, 3);
+  assert.match(copySnippet, /data-copy-snippet-button/u);
+  assert.match(copySnippet, /querySelector\("code"\)/u);
+  assert.match(copySnippet, /navigator\.clipboard\.writeText\(value\)/u);
+  assert.match(css, /\.install-snippet__scroll \{[\s\S]*overflow-x: auto;/u);
+  assert.match(css, /\.install-card \{ min-width: 0; \}/u);
+  assert.ok(builders.includes("https://api.averray.com/mcp"), "the full canonical URL must remain in copyable source values");
+
+  assert.match(llms, /Canonical MCP endpoint: https:\/\/api\.averray\.com\/mcp/u);
+  assert.match(llms, /https:\/\/averray\.com\/builders\/#install/u);
+  assert.match(llms, /MCP protocol endpoint lives on the API host only/u);
+  assert.match(llms, /Discovery manifest: https:\/\/api\.averray\.com\/\.well-known\/agent-tools\.json/u);
 });
 
 test("QA3-A marketing wayfinding names real doors, live reads, and outbound proof surfaces", async () => {

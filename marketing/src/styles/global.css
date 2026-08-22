@@ -1355,6 +1355,60 @@ section.section { scroll-margin-top: 100px; }
   margin: 12px 0 0;
 }
 
+/* Install cards must not let a long command set the grid column's min-content
+   width. The full bytes remain visible through horizontal scroll and copy. */
+.install-card { min-width: 0; }
+.install-snippet { min-width: 0; margin-top: 18px; }
+.install-snippet__bar {
+  min-height: 34px;
+  padding: 7px 10px 7px 14px;
+  border-radius: var(--card-radius) var(--card-radius) 0 0;
+  background: #191f1b;
+  color: rgba(245, 243, 238, 0.64);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.install-snippet__copy {
+  appearance: none;
+  border: 1px solid rgba(245, 243, 238, 0.2);
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: transparent;
+  color: #f5f3ee;
+  font: inherit;
+  cursor: pointer;
+}
+.install-snippet__copy:hover,
+.install-snippet__copy:focus-visible {
+  border-color: #9bd7b5;
+  color: #9bd7b5;
+}
+.install-snippet__scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: 0 0 var(--card-radius) var(--card-radius);
+}
+.install-snippet .codeblock {
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+  border-radius: 0;
+  overflow: visible;
+  box-shadow: none;
+}
+.install-snippet__status {
+  display: block;
+  min-height: 16px;
+  margin-top: 6px;
+  color: var(--avy-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
 .steps {
   counter-reset: step;
   display: grid;

@@ -21,7 +21,8 @@ const links = [
   { key: "builders", label: "Builders", href: "/builders/" },
   { key: "trust", label: "Trust", href: "/trust/" },
   { key: "schemas", label: "Schemas", href: "/schemas/" },
-  { key: "record", label: "Record", href: "/transparency/" }
+  { key: "record", label: "Record", href: "/transparency/" },
+  { key: null, label: "Install MCP", href: "/builders/#install" }
 ];
 ---
 
@@ -44,7 +45,7 @@ const links = [
   </button>
   <div class="nav__links" id="nav-links">
     {links.map((link) => (
-      <a href={link.href} aria-current={current === link.key ? "page" : undefined}>
+      <a href={link.href} aria-current={link.key !== null && current === link.key ? "page" : undefined}>
         {link.label}
       </a>
     ))}

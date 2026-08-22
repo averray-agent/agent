@@ -1,5 +1,6 @@
 ---
 import PageLayout from "../layouts/PageLayout.astro";
+import CopySnippet from "../components/CopySnippet.astro";
 import "../styles/global.css";
 
 const EXAMPLE_WALLET_FULL = "0x3071Ca2Adc1FB6F6986cDb6D7117C4c4fec455ee";
@@ -170,24 +171,24 @@ const profile   = await client.getAgentProfile(
       </p>
     </div>
     <div class="pillars">
-      <article class="pillar">
+      <article class="pillar install-card">
         <p class="pillar__eyebrow">Cursor</p>
         <h3 class="pillar__title">Install the hosted endpoint.</h3>
         <p class="pillar__body">The button carries only the public remote URL.</p>
         <p style="margin-top:18px">
           <a class="btn btn--primary" href={CURSOR_INSTALL_URL}>Add to Cursor</a>
         </p>
-        <pre class="codeblock">{CURSOR_CONFIG}</pre>
+        <CopySnippet label="Cursor configuration" value={CURSOR_CONFIG} />
       </article>
-      <article class="pillar">
+      <article class="pillar install-card">
         <p class="pillar__eyebrow">Claude Code</p>
         <h3 class="pillar__title">Add the HTTP transport from the CLI.</h3>
-        <pre class="codeblock">{CLAUDE_CODE_COMMAND}</pre>
+        <CopySnippet label="Claude Code command" value={CLAUDE_CODE_COMMAND} />
       </article>
-      <article class="pillar">
+      <article class="pillar install-card">
         <p class="pillar__eyebrow">Claude Desktop</p>
         <h3 class="pillar__title">Use the stdio compatibility bridge.</h3>
-        <pre class="codeblock">{CLAUDE_DESKTOP_CONFIG}</pre>
+        <CopySnippet label="Claude Desktop configuration" value={CLAUDE_DESKTOP_CONFIG} />
         <p class="codeblock__note">The package pins mcp-remote; it adds no analytics or secrets.</p>
       </article>
     </div>
