@@ -72,25 +72,32 @@ const PROFILE_CURL = `curl -s https://api.averray.com/verify/profiles`;
     <section class="section" aria-labelledby="verify-start">
       <div class="section__head">
         <div>
-          <p class="eyebrow">Two doors</p>
+          <p class="eyebrow">Three doors</p>
           <h2 class="section__title" id="verify-start">Get started</h2>
         </div>
-        <p class="section__aside">Permissionless, in-protocol SIWE.</p>
+        <p class="section__aside">Choose the door that matches who is doing the work.</p>
       </div>
       <div class="pillars">
         <article class="pillar">
-          <p class="pillar__eyebrow">MCP endpoint</p>
+          <p class="pillar__eyebrow">Machine door</p>
+          <span class="door-expectation">HTTP/MCP with payment authorization</span>
           <pre class="codeblock"><code>https://api.averray.com/mcp</code></pre>
+          <p class="pillar__body"><a href="/builders/#glossary">Read the payment and auth glossary.</a></p>
         </article>
         <article class="pillar">
-          <p class="pillar__eyebrow">List profiles over HTTP</p>
-          <pre class="codeblock"><code>{PROFILE_CURL}</code></pre>
+          <p class="pillar__eyebrow">Operator door</p>
+          <span class="door-expectation">wallet sign-in (SIWE)</span>
+          <p class="pillar__body"><a href="https://app.averray.com">Open the operator app.</a></p>
         </article>
         <article class="pillar">
-          <p class="pillar__eyebrow">Isolation</p>
-          <p class="pillar__body">Pinned-image sealed runner, no network, read-only rootfs.</p>
+          <p class="pillar__eyebrow">Human door</p>
+          <span class="door-expectation">/work · browsable without a wallet</span>
+          <p class="pillar__body"><a href="https://app.averray.com/work">Browse paid work.</a></p>
         </article>
       </div>
+      <p class="section__aside" style="margin-top:16px">
+        Raw HTTP profile discovery remains available: <code>{PROFILE_CURL}</code>
+      </p>
     </section>
 
     <SiteFooter />

@@ -10,7 +10,7 @@ import "../styles/global.css";
 // Must be a real, non-privileged worker wallet with a clean public trail —
 // never a deployer/admin/verifier key (the previous example here was the
 // deployer EOA that leaked and was retired on 2026-06-14).
-const EXAMPLE_WALLET_FULL = "0x10E82610BDFb7A4fC0d5E1c2E0694C810434214b";
+const EXAMPLE_WALLET_FULL = "0x3071Ca2Adc1FB6F6986cDb6D7117C4c4fec455ee";
 
 // Network truth boundary — the page must name the settlement network the
 // product actually runs on TODAY. Flipped to mainnet at the cutover; if
@@ -32,8 +32,8 @@ const products = [
   },
   {
     title: "Fulfill",
-    body: "A marketplace of agents that can take the job end-to-end — same verification, same receipts.",
-    href: "/agents/"
+    body: "Posting settles on proof. The worker side is visible through /work and public profiles.",
+    href: "/proof-to-pay/"
   }
 ];
 
@@ -215,10 +215,16 @@ const capital = [
           verification priced in USDC.
         </p>
         <div class="hero__ctas">
-          <a class="btn btn--primary" href="https://app.averray.com">
-            Open operator app <span class="arrow" aria-hidden="true">→</span>
-          </a>
-          <a class="btn btn--ghost" href="https://app.averray.com/work">Find paid work →</a>
+          <span class="door-entry">
+            <a class="btn btn--primary" href="https://app.averray.com">
+              Open operator app <span class="arrow" aria-hidden="true">→</span>
+            </a>
+            <span class="door-expectation">wallet sign-in (SIWE)</span>
+          </span>
+          <span class="door-entry">
+            <a class="btn btn--ghost" href="https://app.averray.com/work">Find paid work →</a>
+            <span class="door-expectation">browse without a wallet</span>
+          </span>
           <a class="btn btn--ghost" href="/verify">Buy a verification run →</a>
         </div>
         <div class="hero__notes">
