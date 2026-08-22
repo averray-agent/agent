@@ -89,6 +89,20 @@ test("QA3-A marketing wayfinding names real doors, live reads, and outbound proo
   assert.match(proofToPay, /https:\/\/app\.averray\.com\/poster\//u);
   assert.match(verify, /https:\/\/app\.averray\.com\/runs\//u);
 
+  assert.match(builders, /id="install"/u);
+  assert.match(builders, /Add to Cursor/u);
+  assert.match(builders, /claude mcp add --transport http averray https:\/\/api\.averray\.com\/mcp/u);
+  assert.match(builders, /"command": "npx"/u);
+  assert.match(builders, /"args": \["-y", "@averray\/mcp"\]/u);
+
+  const deeplink = builders.match(/cursor:\/\/anysphere\.cursor-deeplink\/mcp\/install\?name=averray&amp;config=([^"<]+)/u)
+    ?? builders.match(/cursor:\/\/anysphere\.cursor-deeplink\/mcp\/install\?name=averray&config=([^"<]+)/u);
+  assert.ok(deeplink, "builders must carry the Cursor MCP install deeplink");
+  const encodedConfig = decodeURIComponent(deeplink[1]);
+  assert.deepEqual(JSON.parse(Buffer.from(encodedConfig, "base64").toString("utf8")), {
+    url: "https://api.averray.com/mcp"
+  });
+
   assert.match(agents, /Starter jobs are deliberately small; rewards and caps rise with settled history\./u);
   assert.match(transparency, /deliberately small pilot treasury/u);
   assert.match(transparency, /every figure is the live ledger, unedited/iu);

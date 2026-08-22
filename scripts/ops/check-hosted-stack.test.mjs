@@ -190,6 +190,28 @@ async function runHostedStackFixture({
           mcpServers: { averray: { url: "https://api.averray.com/mcp" } }
         }
       },
+      install: {
+        npm: {
+          package: "@averray/mcp",
+          command: "npx -y @averray/mcp"
+        },
+        cursor: {
+          deeplink: "cursor://anysphere.cursor-deeplink/mcp/install?name=averray&config=eyJ1cmwiOiJodHRwczovL2FwaS5hdmVycmF5LmNvbS9tY3AifQ%3D%3D",
+          clientConfig: {
+            mcpServers: { averray: { url: "https://api.averray.com/mcp" } }
+          }
+        },
+        claudeCode: {
+          command: "claude mcp add --transport http averray https://api.averray.com/mcp"
+        },
+        claudeDesktop: {
+          clientConfig: {
+            mcpServers: {
+              averray: { command: "npx", args: ["-y", "@averray/mcp"] }
+            }
+          }
+        }
+      },
       plainHttpAlternative: {
         method: "GET",
         path: "/verify/profiles",

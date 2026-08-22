@@ -17,6 +17,37 @@ export const MCP_SERVER_INFO = Object.freeze({
   websiteUrl: "https://averray.com"
 });
 
+export const MCP_INSTALL = Object.freeze({
+  npm: {
+    package: "@averray/mcp",
+    command: "npx -y @averray/mcp",
+    description: "Stdio bridge for clients that cannot connect to Streamable HTTP directly."
+  },
+  cursor: {
+    deeplink: "cursor://anysphere.cursor-deeplink/mcp/install?name=averray&config=eyJ1cmwiOiJodHRwczovL2FwaS5hdmVycmF5LmNvbS9tY3AifQ%3D%3D",
+    clientConfig: {
+      mcpServers: {
+        averray: {
+          url: "https://api.averray.com/mcp"
+        }
+      }
+    }
+  },
+  claudeCode: {
+    command: "claude mcp add --transport http averray https://api.averray.com/mcp"
+  },
+  claudeDesktop: {
+    clientConfig: {
+      mcpServers: {
+        averray: {
+          command: "npx",
+          args: ["-y", "@averray/mcp"]
+        }
+      }
+    }
+  }
+});
+
 export const MCP_BROWSER_INFO = Object.freeze({
   name: "Averray MCP endpoint",
   type: "mcp_protocol_endpoint",
@@ -33,6 +64,7 @@ export const MCP_BROWSER_INFO = Object.freeze({
       }
     }
   },
+  install: MCP_INSTALL,
   plainHttpAlternative: {
     method: "GET",
     path: "/verify/profiles",

@@ -347,6 +347,13 @@ jq -e '
   (.description == "This is an MCP protocol endpoint, not a browser page.") and
   (.connect.url == "https://api.averray.com/mcp") and
   (.connect.clientConfig.mcpServers.averray.url == "https://api.averray.com/mcp") and
+  (.install.npm.package == "@averray/mcp") and
+  (.install.npm.command == "npx -y @averray/mcp") and
+  (.install.cursor.deeplink == "cursor://anysphere.cursor-deeplink/mcp/install?name=averray&config=eyJ1cmwiOiJodHRwczovL2FwaS5hdmVycmF5LmNvbS9tY3AifQ%3D%3D") and
+  (.install.cursor.clientConfig.mcpServers.averray.url == "https://api.averray.com/mcp") and
+  (.install.claudeCode.command == "claude mcp add --transport http averray https://api.averray.com/mcp") and
+  (.install.claudeDesktop.clientConfig.mcpServers.averray.command == "npx") and
+  (.install.claudeDesktop.clientConfig.mcpServers.averray.args == ["-y", "@averray/mcp"]) and
   (.plainHttpAlternative.method == "GET") and
   (.plainHttpAlternative.path == "/verify/profiles") and
   (.plainHttpAlternative.url == "https://api.averray.com/verify/profiles")
