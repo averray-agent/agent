@@ -112,9 +112,9 @@
   }
 
   function trimStream() {
-    // Keep the last ~18 rows so the feed can fill the uncapped panel on tall
-    // heroes without growing unbounded.
-    while (streamEl.childElementCount > 18) streamEl.removeChild(streamEl.firstElementChild);
+    // Keep the last ~12 rows: enough to fill the fixed-height panel with the
+    // overflow pinned to the bottom, without hoarding invisible history.
+    while (streamEl.childElementCount > 12) streamEl.removeChild(streamEl.firstElementChild);
   }
 
   // ---- one full run cycle -----------------------------------------
