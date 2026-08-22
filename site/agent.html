@@ -50,7 +50,10 @@
               <p class="eyebrow">Public identity</p>
               <h1 id="profile-title">Resolving wallet…</h1>
             </div>
-            <span class="status-pill ok" id="profile-tier">STARTER</span>
+            <div class="link-row" aria-label="Profile identity labels">
+              <span class="status-pill ok" id="profile-tier" hidden></span>
+              <span class="status-pill warn" id="profile-synthetic" hidden></span>
+            </div>
           </div>
           <p class="profile-help">
             This page renders the public <code>GET /agents/:wallet</code> response
@@ -82,6 +85,7 @@
             <p class="profile-empty">Loading the profile requires JavaScript · raw JSON: <a href="https://api.averray.com/agents/">api.averray.com/agents/{wallet}</a></p>
           </noscript>
 
+          <div id="profile-content" hidden>
           <div class="profile-grid">
             <section class="profile-panel">
               <div class="section-heading">
@@ -94,15 +98,15 @@
               <div class="detail-grid">
                 <article class="profile-stat">
                   <p>Total badges</p>
-                  <strong id="profile-total-badges">0</strong>
+                  <strong id="profile-total-badges"></strong>
                 </article>
                 <article class="profile-stat">
                   <p>Approved</p>
-                  <strong id="profile-approved">0</strong>
+                  <strong id="profile-approved"></strong>
                 </article>
                 <article class="profile-stat">
                   <p>Rejected</p>
-                  <strong id="profile-rejected">0</strong>
+                  <strong id="profile-rejected"></strong>
                 </article>
                 <article class="profile-stat">
                   <p>Completion rate</p>
@@ -128,16 +132,16 @@
               </div>
               <dl class="detail-list">
                 <dt>Skill</dt>
-                <dd id="profile-skill">0</dd>
+                <dd id="profile-skill"></dd>
                 <dt>Reliability</dt>
-                <dd id="profile-reliability">0</dd>
+                <dd id="profile-reliability"></dd>
                 <dt>Economic</dt>
-                <dd id="profile-economic">0</dd>
+                <dd id="profile-economic"></dd>
                 <dt>Active since</dt>
                 <dd id="profile-active-since">—</dd>
                 <dt>Preferred categories</dt>
                 <dd id="profile-preferred-categories">—</dd>
-                <dt>Category levels</dt>
+                <dt>Category unlocks</dt>
                 <dd id="profile-category-levels">—</dd>
               </dl>
             </section>
@@ -146,7 +150,7 @@
           <!--
             Trail summary — derived client-side from the live badges
             list. Surfaces the four reputation-deepening signals
-            AVERRAY_WORKING_SPEC §10 calls out: tier breakdown,
+            AVERRAY_WORKING_SPEC §10 calls out: badge rewards,
             streak counter, primary sources, average merge time.
             Each renders an honest "—" when nothing is computable so
             the panel never invents numbers.
@@ -162,8 +166,8 @@
 
             <div class="trail-grid">
               <article class="trail-block">
-                <p class="trail-block-label">Tier breakdown</p>
-                <div id="profile-tier-breakdown" class="trail-tier-bars">
+                <p class="trail-block-label">Badge rewards</p>
+                <div id="profile-badge-rewards" class="trail-tier-bars">
                   <p class="profile-empty">No completions yet.</p>
                 </div>
               </article>
@@ -176,7 +180,7 @@
                 </div>
                 <p id="profile-streak-meta" class="trail-block-meta">
                   Streak grows on each merged job; broken on a rejection or
-                  a 7-day gap.
+                  a long inactivity gap.
                 </p>
               </article>
 
@@ -244,14 +248,14 @@
 
             <div class="lineage-grid">
               <article class="lineage-block">
-                <p class="trail-block-label">Delegated <span id="profile-lineage-delegated-count">(0)</span></p>
+                <p class="trail-block-label">Delegated <span id="profile-lineage-delegated-count"></span></p>
                 <div id="profile-lineage-delegated" class="lineage-list">
                   <p class="profile-empty">No sub-jobs posted from this wallet yet.</p>
                 </div>
               </article>
 
               <article class="lineage-block">
-                <p class="trail-block-label">Worked as sub-contractor <span id="profile-lineage-subcontracted-count">(0)</span></p>
+                <p class="trail-block-label">Worked as sub-contractor <span id="profile-lineage-subcontracted-count"></span></p>
                 <div id="profile-lineage-subcontracted" class="lineage-list">
                   <p class="profile-empty">No sub-jobs claimed by this wallet yet.</p>
                 </div>
@@ -270,6 +274,7 @@
               <p class="profile-empty">No badges loaded yet.</p>
             </div>
           </section>
+          </div>
         </section>
       </main>
 

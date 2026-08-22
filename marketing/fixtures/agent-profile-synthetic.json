@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "wallet": "0x1111111111111111111111111111111111111111",
+  "synthetic": true,
+  "fetchedAt": "2026-08-22T08:00:00.000Z",
+  "reputation": {
+    "tier": "elite",
+    "skill": 220,
+    "reliability": 180,
+    "economic": 160
+  },
+  "stats": {
+    "totalBadges": 0,
+    "approvedCount": 0,
+    "rejectedCount": 0,
+    "completionRate": null,
+    "totalEarned": {
+      "asset": "USDC",
+      "amount": "0",
+      "decimals": 6,
+      "incomplete": false,
+      "includedApprovedCount": 0,
+      "omittedApprovedCount": 0
+    },
+    "githubSignals": {},
+    "activeSince": null,
+    "lastActive": null,
+    "preferredCategories": [],
+    "disputes": {
+      "total": 0,
+      "open": 0,
+      "lost": 0,
+      "won": 0,
+      "split": 0,
+      "timeout": 0,
+      "resolved": 0
+    },
+    "lineage": {
+      "delegated": 0,
+      "subcontracted": 0
+    }
+  },
+  "categoryLevels": {
+    "coding": 2,
+    "governance": 1
+  },
+  "badges": [],
+  "disputes": [],
+  "lineage": {
+    "delegated": [],
+    "subcontracted": []
+  },
+  "tier": "expert"
+}
