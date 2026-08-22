@@ -1,7 +1,7 @@
 "use client";
 
 import useSWR, { type SWRConfiguration } from "swr";
-import { swrFetcher, ApiError } from "./client";
+import { boundedReadFetcher, swrFetcher, ApiError } from "./client";
 import { shouldRetryApiError } from "./retry-policy.js";
 
 /**
@@ -20,6 +20,23 @@ export function useApi<T = unknown>(
   return useSWR<T, ApiError>(path, swrFetcher, {
     revalidateOnFocus: false,
     shouldRetryOnError: shouldRetryApiError,
+    ...config,
+  });
+}
+
+/**
+ * First-paint read with a 3s attempt cap and one immediate retry. SWR's own
+ * retry is disabled here because the fetcher already owns the single retry;
+ * focus/interval revalidation still recovers later without extending the
+ * initial loading wall.
+ */
+export function useBoundedApi<T = unknown>(
+  path: string | null,
+  config?: SWRConfiguration<T, ApiError>
+) {
+  return useSWR<T, ApiError>(path, boundedReadFetcher, {
+    revalidateOnFocus: false,
+    shouldRetryOnError: false,
     ...config,
   });
 }
@@ -48,16 +65,16 @@ export const useTreasurySummary = () =>
   useApi("/admin/treasury/summary", { refreshInterval: 30_000 });
 export const useJobs = () => useApi("/jobs");
 export const useHumanWorkJobs = () =>
-  useApi("/jobs?state=claimable&limit=100", { refreshInterval: 30_000 });
+  useBoundedApi("/jobs?state=claimable&limit=100", { refreshInterval: 30_000 });
 export const useRecommendations = () => useApi("/jobs/recommendations");
 export const useJobDefinition = (id: string | null) =>
-  useApi(id ? `/jobs/definition?jobId=${encodeURIComponent(id)}` : null);
+  useBoundedApi(id ? `/jobs/definition?jobId=${encodeURIComponent(id)}` : null);
 export const useJobPreflight = (id: string | null) =>
-  useApi(id ? `/jobs/preflight?jobId=${encodeURIComponent(id)}` : null);
+  useBoundedApi(id ? `/jobs/preflight?jobId=${encodeURIComponent(id)}` : null);
 export const useJobEligibility = (id: string | null) =>
-  useApi(id ? `/jobs/explain-eligibility?jobId=${encodeURIComponent(id)}` : null);
+  useBoundedApi(id ? `/jobs/explain-eligibility?jobId=${encodeURIComponent(id)}` : null);
 export const useJobNetReward = (id: string | null) =>
-  useApi<number>(id ? `/jobs/estimate-reward?jobId=${encodeURIComponent(id)}` : null);
+  useBoundedApi<number>(id ? `/jobs/estimate-reward?jobId=${encodeURIComponent(id)}` : null);
 export const useSessions = () => useApi("/sessions");
 export const useAdminSessions = () =>
   useApi("/admin/sessions?limit=100", { refreshInterval: 15_000 });
@@ -66,18 +83,18 @@ export const useAdminSessions = () =>
 export const useAgents = () => useApi("/agents?includeSynthetic=true");
 export const useAgent = (wallet: string | null) =>
   useApi(wallet ? `/agents/${encodeURIComponent(wallet)}` : null);
-export const useBadges = () => useApi("/badges");
+export const useBadges = () => useBoundedApi("/badges");
 export const useBadge = (sessionId: string | null) =>
   useApi(sessionId ? `/badges/${encodeURIComponent(sessionId)}` : null);
 export const useReceiptDetail = (sessionId: string | null, kind: "run" | "badge" | null) =>
-  useApi(
+  useBoundedApi(
     sessionId
       ? `/badges/${encodeURIComponent(sessionId)}${kind === "run" ? "/run" : ""}`
       : null
   );
 export const useAlerts = () => useApi("/alerts");
 export const useAudit = () => useApi("/audit");
-export const usePolicies = (enabled = true) => useApi(enabled ? "/policies" : null);
+export const usePolicies = (enabled = true) => useBoundedApi(enabled ? "/policies" : null);
 export const usePolicy = (tag: string | null) =>
   useApi(tag ? `/policies/${encodeURIComponent(tag)}` : null);
 export const useDisputes = () => useApi("/disputes");

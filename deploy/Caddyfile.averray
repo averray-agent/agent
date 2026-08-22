@@ -45,6 +45,8 @@
 # routing agree with what the markup already declares.
 www.averray.com {
   import security_headers
+  @getStartedPath path /get-started /get-started/
+  redir @getStartedPath https://averray.com/agents/ 301
   redir https://averray.com{uri} permanent
 }
 
@@ -137,6 +139,12 @@ app.averray.com {
 
   @legacyJobsPath path /jobs /jobs/*
   redir @legacyJobsPath https://app.averray.com/work 301
+
+  @posterAliasPath path /post /post/
+  redir @posterAliasPath /poster/ 301
+
+  @verifyAliasPath path /verify /verify/
+  redir @verifyAliasPath /runs/ 301
 
   # The Bank feed is intentionally credential-free because only services on
   # the private Compose network consume it. Never publish it through /api.

@@ -459,7 +459,7 @@
       },
       {
         "id": "preflight-job",
-        "description": "Call /jobs/preflight before /jobs/claim to check tier, claim stake, fees, waivers, and wallet-specific blockers.",
+        "description": "Call /jobs/preflight before /jobs/claim to check claim tier, claim stake, fees, waivers, and wallet-specific blockers.",
         "blockingFor": [
           "/jobs/claim"
         ]
@@ -580,7 +580,7 @@
     },
     {
       "path": "/jobs/tiers",
-      "description": "Per-tier skill requirements - the ladder agents see."
+      "description": "Claim-tier skill requirements — the starter / pro / elite ladder that gates what a wallet may claim."
     },
     {
       "path": "/session/state-machine",
@@ -682,7 +682,7 @@
     },
     {
       "path": "/reputation",
-      "description": "Current reputation scores + tier."
+      "description": "Current reputation scores + public reputation tier."
     },
     {
       "path": "/auth/refresh",
@@ -694,7 +694,7 @@
     },
     {
       "path": "/jobs/preflight?jobId=X",
-      "description": "GET-only per-job eligibility + claim-stake + fee-waiver + tier-gate snapshot. POST returns 405 Method Not Allowed."
+      "description": "GET-only per-job eligibility + claim-stake + fee-waiver + claim-tier gate snapshot. POST returns 405 Method Not Allowed."
     },
     {
       "path": "/jobs/explain-eligibility",
@@ -824,11 +824,11 @@
     },
     {
       "name": "recommendJobs",
-      "description": "Wallet-scoped ranked recommendations with tier-gate info."
+      "description": "Wallet-scoped ranked recommendations with claim-tier gate info."
     },
     {
       "name": "preflightJob",
-      "description": "Pre-claim eligibility + stake + tier check."
+      "description": "Pre-claim eligibility + stake + claim-tier check."
     },
     {
       "name": "explainEligibility",
@@ -864,7 +864,7 @@
     },
     {
       "name": "getJobTierLadder",
-      "description": "The skill-score ladder defining starter / pro / elite tiers."
+      "description": "The skill-score ladder defining starter / pro / elite claim tiers."
     },
     {
       "name": "getAccountSummary",
@@ -876,7 +876,7 @@
     },
     {
       "name": "getReputation",
-      "description": "Skill / reliability / economic + tier."
+      "description": "Skill / reliability / economic + public reputation tier."
     },
     {
       "name": "listAgents",

@@ -65,7 +65,7 @@ function renderIdentityLabels(profile) {
     tier.textContent = "";
     tier.hidden = true;
     if (typeof profile.tier === "string" && PLATFORM_TIERS.has(profile.tier)) {
-      tier.textContent = profile.tier;
+      tier.textContent = `Reputation tier · ${profile.tier}`;
       tier.hidden = false;
     }
   }

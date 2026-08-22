@@ -40,6 +40,33 @@ export function schemaFields(schema) {
   });
 }
 
+/**
+ * Presentation-only recursive schema description. The editor keeps consuming
+ * `schemaFields`; this richer tree lets the terms panel show the item contract
+ * of arrays (and nested object/array shapes) without changing validation.
+ */
+export function schemaDisplayFields(schema) {
+  return schemaFields(schema).map((field) => ({
+    ...field,
+    node: schemaDisplayNode(field.schema)
+  }));
+}
+
+export function schemaDisplayNode(schema) {
+  const record = objectValue(schema) ?? {};
+  return {
+    type: Array.isArray(record.type)
+      ? record.type.filter((entry) => entry !== "null").join(" or ")
+      : String(record.type ?? inferType(record)),
+    description: typeof record.description === "string" ? record.description : "",
+    enum: Array.isArray(record.enum) ? record.enum : null,
+    minLength: Number.isInteger(record.minLength) ? record.minLength : null,
+    minItems: Number.isInteger(record.minItems) ? record.minItems : null,
+    fields: schemaDisplayFields(record),
+    items: objectValue(record.items) ? schemaDisplayNode(record.items) : null
+  };
+}
+
 export function rawFieldDraft(schema, example = deriveSchemaExample(schema)) {
   const record = objectValue(example) ?? {};
   return Object.fromEntries(schemaFields(schema).map((field) => {

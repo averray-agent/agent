@@ -505,6 +505,7 @@ export class JobCatalogService {
     const next = summaries.find((summary) => !summary.unlocked);
     return {
       wallet,
+      ladder: "claim tier",
       reputation: {
         skill: Number.isInteger(reputation?.skill) ? reputation.skill : 0,
         reliability: Number.isInteger(reputation?.reliability) ? reputation.reliability : 0,
@@ -777,6 +778,7 @@ export function explainEligibilityFromPreflight(preflight) {
     jobId: preflight.jobId,
     wallet: preflight.wallet,
     tier: preflight.tier,
+    tierLabel: "claim tier",
     lifecycle: preflight.lifecycle,
     tierGate: preflight.tierGate,
     jobType: preflight.jobType,
@@ -1002,7 +1004,7 @@ function buildRecommendationExplanation({ job, eligible, tierGate, roleGate, pro
     const gaps = Object.entries(tierGate.missing)
       .map(([key, gap]) => `${gap} more ${key}`)
       .join(", ");
-    return `${job.tier} tier locked — earn ${gaps} to unlock this job.`;
+    return `${job.tier} claim tier locked — earn ${gaps} to unlock this job.`;
   }
   if (roleGate && !roleGate.unlocked) {
     const gaps = Object.entries(roleGate.missing)
@@ -1013,5 +1015,5 @@ function buildRecommendationExplanation({ job, eligible, tierGate, roleGate, pro
   if (!profile.verifierCompatibility.includes(job.verifierMode)) {
     return `Verifier mode ${job.verifierMode} not in this wallet's capability list.`;
   }
-  return "Missing eligibility, liquidity, or reputation requirements for this tier.";
+  return "Missing eligibility, liquidity, or reputation requirements for this claim tier.";
 }

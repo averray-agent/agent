@@ -4,7 +4,7 @@ set -euo pipefail
 
 PUBLIC_SITE_URL=${PUBLIC_SITE_URL:-https://averray.com/}
 PUBLIC_AGENT_PROFILE_URL=${PUBLIC_AGENT_PROFILE_URL:-https://averray.com/agents/0x97450bf69cb4aeb0b33db3ae51ac2d18224d4b5c}
-PUBLIC_VERSIONED_ASSET_URL=${PUBLIC_VERSIONED_ASSET_URL:-https://averray.com/reader-fetch.js?v=20260821}
+PUBLIC_VERSIONED_ASSET_URL=${PUBLIC_VERSIONED_ASSET_URL:-https://averray.com/reader-fetch.js?v=20260823}
 PUBLIC_RECEIPT_JUNK_URL=${PUBLIC_RECEIPT_JUNK_URL:-https://averray.com/receipts/junk}
 PUBLIC_ONBOARDING_REDIRECT_URL=${PUBLIC_ONBOARDING_REDIRECT_URL:-https://averray.com/onboarding}
 PUBLIC_HEALTH_REDIRECT_URL=${PUBLIC_HEALTH_REDIRECT_URL:-https://averray.com/health}
@@ -17,8 +17,11 @@ APP_JOBS_REDIRECT_URL=${APP_JOBS_REDIRECT_URL:-https://app.averray.com/jobs}
 APP_JOB_SUBPATH_REDIRECT_URL=${APP_JOB_SUBPATH_REDIRECT_URL:-https://app.averray.com/jobs/example-job}
 PUBLIC_WORK_REDIRECT_URL=${PUBLIC_WORK_REDIRECT_URL:-https://averray.com/work}
 PUBLIC_WORK_SUBPATH_REDIRECT_URL=${PUBLIC_WORK_SUBPATH_REDIRECT_URL:-https://averray.com/work/example-job}
+PUBLIC_GET_STARTED_REDIRECT_URL=${PUBLIC_GET_STARTED_REDIRECT_URL:-https://www.averray.com/get-started}
 DISCOVERY_URL=${DISCOVERY_URL:-https://averray.com/.well-known/agent-tools.json}
 APP_URL=${APP_URL:-https://app.averray.com/}
+APP_POST_REDIRECT_URL=${APP_POST_REDIRECT_URL:-https://app.averray.com/post}
+APP_VERIFY_REDIRECT_URL=${APP_VERIFY_REDIRECT_URL:-https://app.averray.com/verify}
 API_HEALTH_URL=${API_HEALTH_URL:-https://api.averray.com/health}
 API_MCP_INFO_URL=${API_MCP_INFO_URL:-https://api.averray.com/mcp}
 API_POOL_URL=${API_POOL_URL:-https://api.averray.com/pool}
@@ -28,6 +31,7 @@ API_STRATEGIES_URL=${API_STRATEGIES_URL:-https://api.averray.com/strategies}
 API_CREDIT_URL=${API_CREDIT_URL:-https://api.averray.com/credit}
 API_ONBOARDING_URL=${API_ONBOARDING_URL:-https://api.averray.com/onboarding}
 API_POSTER_ONBOARDING_URL=${API_POSTER_ONBOARDING_URL:-https://api.averray.com/poster/onboarding}
+API_JOBS_OPEN_REDIRECT_URL=${API_JOBS_OPEN_REDIRECT_URL:-https://api.averray.com/jobs/open}
 API_ADMIN_STATUS_URL=${API_ADMIN_STATUS_URL:-https://api.averray.com/admin/status}
 API_METRICS_URL=${API_METRICS_URL:-https://api.averray.com/metrics}
 INDEXER_URL=${INDEXER_URL:-https://index.averray.com/}
@@ -294,6 +298,10 @@ assert_redirect "$APP_JOBS_REDIRECT_URL" "https://app.averray.com/work" "Operato
 assert_redirect "$APP_JOB_SUBPATH_REDIRECT_URL" "https://app.averray.com/work" "Operator-app legacy job subpath"
 assert_redirect "$PUBLIC_WORK_REDIRECT_URL" "https://app.averray.com/work" "Public-site work path"
 assert_redirect "$PUBLIC_WORK_SUBPATH_REDIRECT_URL" "https://app.averray.com/work" "Public-site work subpath"
+assert_redirect "$PUBLIC_GET_STARTED_REDIRECT_URL" "https://averray.com/agents/" "Public get-started path"
+assert_redirect "$APP_POST_REDIRECT_URL" "https://app.averray.com/poster/" "App posting alias"
+assert_redirect "$APP_VERIFY_REDIRECT_URL" "https://app.averray.com/runs/" "App verification alias"
+assert_redirect "$API_JOBS_OPEN_REDIRECT_URL" "https://api.averray.com/jobs" "API open-jobs alias"
 
 receipt_shell_html="$(fetch "$PUBLIC_RECEIPT_JUNK_URL")"
 for receipt_shell_marker in \

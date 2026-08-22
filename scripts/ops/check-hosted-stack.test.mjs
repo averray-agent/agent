@@ -164,7 +164,7 @@ async function runHostedStackFixture({
   const fixtures = new Map([
     ["/", "<html><head><title>Averray fixture</title></head></html>"],
     ["/agent-profile", "<html><head><title>Averray agent fixture</title></head></html>"],
-    ["/reader-fetch.js?v=20260821", "window.AverrayReaderFetch = {};"],
+    ["/reader-fetch.js?v=20260823", "window.AverrayReaderFetch = {};"],
     ["/receipts/junk", `<html><body>
       <div data-receipt-state="loading"></div>
       <a href="/receipts/0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1">settled work receipt</a>
@@ -238,7 +238,11 @@ async function runHostedStackFixture({
     ["/redirect/app/jobs", "https://app.averray.com/work"],
     ["/redirect/app/jobs/example-job", "https://app.averray.com/work"],
     ["/redirect/site/work", "https://app.averray.com/work"],
-    ["/redirect/site/work/example-job", "https://app.averray.com/work"]
+    ["/redirect/site/work/example-job", "https://app.averray.com/work"],
+    ["/site/get-started", "https://averray.com/agents/"],
+    ["/app/post", "https://app.averray.com/poster/"],
+    ["/app/verify", "https://app.averray.com/runs/"],
+    ["/api/jobs/open", "https://api.averray.com/jobs"]
   ]);
   const requestCounts = new Map();
   const server = createServer((request, response) => {
@@ -304,7 +308,7 @@ async function runHostedStackFixture({
     if (["/", "/agent-profile", "/receipts/junk"].includes(request.url)) {
       headers["cache-control"] = htmlCacheControl;
     }
-    if (request.url === "/reader-fetch.js?v=20260821") {
+    if (request.url === "/reader-fetch.js?v=20260823") {
       headers["content-type"] = "text/javascript";
       headers["cache-control"] = versionedAssetCacheControl;
     }
@@ -322,7 +326,7 @@ async function runHostedStackFixture({
       ...process.env,
       PUBLIC_SITE_URL: `${baseUrl}/`,
       PUBLIC_AGENT_PROFILE_URL: `${baseUrl}/agent-profile`,
-      PUBLIC_VERSIONED_ASSET_URL: `${baseUrl}/reader-fetch.js?v=20260821`,
+      PUBLIC_VERSIONED_ASSET_URL: `${baseUrl}/reader-fetch.js?v=20260823`,
       PUBLIC_RECEIPT_JUNK_URL: `${baseUrl}/receipts/junk`,
       PUBLIC_ONBOARDING_REDIRECT_URL: `${baseUrl}/site/onboarding`,
       PUBLIC_HEALTH_REDIRECT_URL: `${baseUrl}/site/health`,
@@ -335,8 +339,11 @@ async function runHostedStackFixture({
       APP_JOB_SUBPATH_REDIRECT_URL: `${baseUrl}/redirect/app/jobs/example-job`,
       PUBLIC_WORK_REDIRECT_URL: `${baseUrl}/redirect/site/work`,
       PUBLIC_WORK_SUBPATH_REDIRECT_URL: `${baseUrl}/redirect/site/work/example-job`,
+      PUBLIC_GET_STARTED_REDIRECT_URL: `${baseUrl}/site/get-started`,
       DISCOVERY_URL: `${baseUrl}/.well-known/agent-tools.json`,
       APP_URL: `${baseUrl}/app`,
+      APP_POST_REDIRECT_URL: `${baseUrl}/app/post`,
+      APP_VERIFY_REDIRECT_URL: `${baseUrl}/app/verify`,
       API_HEALTH_URL: `${baseUrl}/health`,
       API_MCP_INFO_URL: `${baseUrl}/mcp`,
       API_POOL_URL: `${baseUrl}/pool`,
@@ -346,6 +353,7 @@ async function runHostedStackFixture({
       API_CREDIT_URL: `${baseUrl}/credit`,
       API_ONBOARDING_URL: `${baseUrl}/onboarding`,
       API_POSTER_ONBOARDING_URL: `${baseUrl}/poster/onboarding`,
+      API_JOBS_OPEN_REDIRECT_URL: `${baseUrl}/api/jobs/open`,
       API_ADMIN_STATUS_URL: `${baseUrl}/admin/status`,
       ADMIN_JWT: operatorToken,
       AVERRAY_TOKEN: "",
@@ -458,7 +466,7 @@ test("hosted smoke owns HTML caching, canonical redirects, GET MCP, and the junk
   assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
   for (const path of [
     "/agent-profile",
-    "/reader-fetch.js?v=20260821",
+    "/reader-fetch.js?v=20260823",
     "/receipts/junk",
     "/site/onboarding",
     "/site/health",
@@ -471,6 +479,10 @@ test("hosted smoke owns HTML caching, canonical redirects, GET MCP, and the junk
     "/redirect/app/jobs/example-job",
     "/redirect/site/work",
     "/redirect/site/work/example-job",
+    "/site/get-started",
+    "/app/post",
+    "/app/verify",
+    "/api/jobs/open",
     "/mcp"
   ]) {
     assert.equal(result.requestCounts[path], 1, `${path} must be walked by the hosted smoke`);

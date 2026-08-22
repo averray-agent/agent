@@ -1586,6 +1586,7 @@ section.section { scroll-margin-top: 100px; }
 }
 .record-sub { margin: 0; font-size: 17px; line-height: 1.6; color: var(--avy-muted); }
 .record-section { margin-top: 40px; }
+.record-anchor { scroll-margin-top: 120px; }
 .record-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
 .record-head h2 { margin: 0; font-family: var(--font-display); font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
 .record-aside { margin: 12px 0 0; max-width: 74ch; font-size: 13.5px; line-height: 1.6; color: var(--avy-muted); }

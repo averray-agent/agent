@@ -2,7 +2,7 @@
 (function (scope) {
   "use strict";
 
-  var DEFAULT_TIMEOUT_MS = 8000;
+  var DEFAULT_TIMEOUT_MS = 3000;
   var ATTEMPTS = 2;
 
   async function readJsonWithRetry(url, options, runtime) {

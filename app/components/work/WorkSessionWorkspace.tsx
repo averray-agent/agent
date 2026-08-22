@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useApi, useJobDefinition, useSession } from "@/lib/api/hooks";
+import { useBoundedApi, useJobDefinition, useSession } from "@/lib/api/hooks";
 import { extractApiErrorMessage } from "@/lib/api/client";
 import { signIn, WalletUnavailableError } from "@/lib/auth/siwe";
 import { useAuth } from "@/lib/auth/use-auth";
@@ -30,7 +30,7 @@ export function WorkSessionWorkspace({ sessionId }: { sessionId: string }) {
   const schemaSide = asRecord(asRecord(definition?.schemaContract)?.output);
   const submissionContract = asRecord(definition?.submissionContract);
   const schemaUrl = text(schemaSide?.schemaUrl, text(submissionContract?.outputSchemaUrl));
-  const schemaQuery = useApi<Record<string, unknown>>(schemaUrl || null);
+  const schemaQuery = useBoundedApi<Record<string, unknown>>(schemaUrl || null);
   const example = asRecord(asRecord(submissionContract?.submitPayloadExample)?.submission);
 
   async function connect() {

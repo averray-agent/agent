@@ -12,6 +12,7 @@
  */
 import { AgentPlatformClient } from "../../../sdk/agent-platform-client.js";
 import { getStoredToken } from "@/lib/auth/token-store";
+import { fetchAppReadWithRetry } from "./reader-fetch.js";
 
 export class ApiError extends Error {
   status: number;
@@ -56,6 +57,20 @@ export function setClientToken(token: string | undefined) {
 export async function swrFetcher<T = unknown>(
   key: string | [string, RequestInit?]
 ): Promise<T> {
+  return jsonFetcher<T>(key, false);
+}
+
+/** Bounded GET fetcher for first-paint surfaces. Mutations keep using swrFetcher. */
+export async function boundedReadFetcher<T = unknown>(
+  key: string | [string, RequestInit?]
+): Promise<T> {
+  return jsonFetcher<T>(key, true);
+}
+
+async function jsonFetcher<T>(
+  key: string | [string, RequestInit?],
+  boundedRead: boolean
+): Promise<T> {
   const [path, init] = Array.isArray(key) ? key : [key, undefined];
   const baseUrl = resolveBaseUrl();
   const url = path.startsWith("http") ? path : `${baseUrl}${path}`;
@@ -64,7 +79,10 @@ export async function swrFetcher<T = unknown>(
   headers.set("accept", "application/json");
   if (token) headers.set("authorization", `Bearer ${token}`);
 
-  const response = await fetch(url, { ...init, headers });
+  const method = String(init?.method ?? "GET").toUpperCase();
+  const response = boundedRead && method === "GET"
+    ? await fetchAppReadWithRetry(url, { ...init, headers })
+    : await fetch(url, { ...init, headers });
   const bodyText = await response.text();
   let body: unknown = bodyText;
   try {

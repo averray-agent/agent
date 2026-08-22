@@ -31,7 +31,6 @@ const VERIFY_RECEIPT = "0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8
           <p>Loading the receipt requires JavaScript · raw JSON: <a href="https://api.averray.com/receipts/">api.averray.com/receipts/&#123;receiptId&#125;</a></p>
         </noscript>
         <div data-receipt-guidance hidden>
-          <p data-receipt-guidance-message></p>
           <p>
             Published examples:
             <a href={`/receipts/${SETTLED_WORK_RECEIPT}`}>settled work receipt</a>
@@ -40,8 +39,8 @@ const VERIFY_RECEIPT = "0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8
           </p>
         </div>
         <div data-receipt hidden>
-          <p><strong>Receipt</strong> <code data-field="receiptId"></code></p>
-          <p><strong>Outcome</strong> <span data-field="verdict.outcome"></span> · <span data-field="verdict.reasonCode"></span></p>
+          <p id="receipt" class="record-anchor"><strong>Receipt</strong> <code data-field="receiptId"></code></p>
+          <p id="outcome" class="record-anchor"><strong>Outcome</strong> <span data-field="verdict.outcome"></span> · <span data-field="verdict.reasonCode"></span></p>
           <p><strong>Provider</strong> <code data-field="execution.provider"></code> (<span data-field="execution.providerClass"></span>)</p>
           <p><strong>Job</strong> <span data-field="jobId"></span></p>
           <p><strong>Specification</strong> <code data-field="intent.specHash"></code> (<span data-field="intent.specSource"></span>)</p>
@@ -61,6 +60,6 @@ const VERIFY_RECEIPT = "0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8
     </section>
     <SiteFooter />
   </main>
-  <script src="/reader-fetch.js?v=20260821" is:inline></script>
-  <script src="/receipt-reader.js?v=20260822" is:inline></script>
+  <script src="/reader-fetch.js?v=20260823" is:inline></script>
+  <script src="/receipt-reader.js?v=20260823" is:inline></script>
 </BaseLayout>

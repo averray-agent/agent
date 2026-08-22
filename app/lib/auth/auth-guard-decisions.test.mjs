@@ -95,6 +95,10 @@ test("buildSignInRedirect: preserves query strings and hash fragments", () => {
   );
 });
 
+test("poster guard preserves next=/poster/ through sign-in", () => {
+  assert.equal(buildSignInRedirect("/poster/"), "/sign-in?next=%2Fposter%2F");
+});
+
 test("constants: exported defaults match the public contract", () => {
   assert.equal(AUTH_GUARD_SIGN_IN_PATH, "/sign-in");
   assert.equal(AUTH_GUARD_DEFAULT_NEXT, "/overview");

@@ -7,23 +7,24 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useHumanWorkJobs } from "@/lib/api/hooks";
 import { formatAmount } from "@/lib/format";
-import { filterHumanWorkListings, workJobHref } from "@/lib/work/human-work.js";
+import { filterHumanWorkListings, workCatalogueIsPending, workJobHref } from "@/lib/work/human-work.js";
 import type { HumanJobListing } from "./types";
 import { markAppMilestone } from "@/lib/ui/app-performance.js";
 
 export function WorkJobList() {
   const jobsQuery = useHumanWorkJobs();
   const jobs = filterHumanWorkListings(jobsQuery.data) as HumanJobListing[];
+  const cataloguePending = workCatalogueIsPending(jobsQuery);
   const firstCatalogueMarked = useRef(false);
 
   useEffect(() => {
-    if (!firstCatalogueMarked.current && !jobsQuery.isLoading && (jobsQuery.data || jobsQuery.error)) {
+    if (!firstCatalogueMarked.current && !cataloguePending && (jobsQuery.data !== undefined || jobsQuery.error)) {
       firstCatalogueMarked.current = true;
       markAppMilestone("work-catalogue-settled");
     }
-  }, [jobsQuery.data, jobsQuery.error, jobsQuery.isLoading]);
+  }, [cataloguePending, jobsQuery.data, jobsQuery.error]);
 
-  if (jobsQuery.isLoading) {
+  if (cataloguePending) {
     return (
       <div className="grid gap-4" aria-label="Loading open work">
         <p className="rounded-[var(--radius-sm)] border border-[var(--line)] bg-[var(--paper-solid)] px-4 py-3 text-sm text-[var(--muted)]" role="status">
@@ -87,7 +88,7 @@ function WorkJobCard({ job }: { job: HumanJobListing }) {
           <div>
             <div className="flex flex-wrap gap-2">
               <Badge tone="success">Open</Badge>
-              {job.tier ? <Badge tone="muted">{job.tier}</Badge> : null}
+              {job.tier ? <Badge tone="muted">{job.tier} claim tier</Badge> : null}
             </div>
             <h2 className="mt-3 text-xl font-semibold leading-snug">{job.title || job.id}</h2>
           </div>

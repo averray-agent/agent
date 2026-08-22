@@ -30,7 +30,7 @@ test("public readers time out and retry a never-resolving fetch exactly once", a
     /request aborted by timeout/u
   );
   assert.equal(calls, 2, "the initial timed-out read gets one bounded retry");
-  assert.equal(context.AverrayReaderFetch.DEFAULT_TIMEOUT_MS, 8000);
+  assert.equal(context.AverrayReaderFetch.DEFAULT_TIMEOUT_MS, 3000);
 });
 
 test("all live marketing readers use the shared bounded reader", async () => {
