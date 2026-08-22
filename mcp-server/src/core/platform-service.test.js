@@ -12,6 +12,7 @@ import { InsufficientLiquidityError } from "./errors.js";
 import { MemoryStateStore } from "./state-store.js";
 import { buildJobSnapshot } from "./job-snapshot.js";
 import { WorkerDailyExposurePolicy } from "./worker-daily-exposure.js";
+import { WorkerProgressionService } from "./worker-progression.js";
 import { BOOTSTRAP_JOBS } from "../services/bootstrap-jobs.js";
 import {
   buildExternalSchemaRegistrationTypedData,
@@ -46,6 +47,7 @@ const EXTERNAL_SCHEMA = {
 };
 const EXTERNAL_LISTING_JOB_ID = `0x${"ab".repeat(32)}`;
 const EXTERNAL_POSTER = "0x1111111111111111111111111111111111111111";
+const BLIND_TESTER_WALLET = "0x97450bf69cb4aeb0b33db3ae51ac2d18224d4b5c";
 
 function makeParentJob(overrides = {}) {
   return {
@@ -3070,38 +3072,113 @@ test("explainEligibility narrates the same effective cap and next raise as the g
 test("verification settlement persists progression and settled-session reads reuse it", async () => {
   const store = new MemoryStateStore();
   const service = makePlatformService(undefined, undefined, store);
+  const approvedSession = (index) => ({
+    sessionId: `blind-tester-approved-${index}`,
+    jobId: `blind-tester-job-${index}`,
+    wallet: BLIND_TESTER_WALLET,
+    status: "resolved",
+    claimedAt: `2026-08-${18 + index}T08:00:00.000Z`,
+    submittedAt: `2026-08-${18 + index}T08:05:00.000Z`,
+    resolvedAt: `2026-08-${18 + index}T08:10:00.000Z`,
+    updatedAt: `2026-08-${18 + index}T08:10:00.000Z`,
+    verificationSummary: { outcome: "approved", handler: "benchmark" },
+    badgeSnapshot: { category: "coding", tier: "starter", level: 1 }
+  });
+  const visibleSessions = [approvedSession(1), approvedSession(2)];
+  for (const session of visibleSessions) await store.upsertSession(session);
   const submitted = {
-    sessionId: "progression-payment-session",
+    sessionId: "blind-tester-third-settlement",
     jobId: "parent-job-001",
-    wallet: WALLET,
-    status: "submitted"
+    wallet: BLIND_TESTER_WALLET,
+    status: "submitted",
+    claimedAt: "2026-08-22T08:00:00.000Z",
+    submittedAt: "2026-08-22T08:05:00.000Z",
+    updatedAt: "2026-08-22T08:05:00.000Z",
+    submission: {
+      summary: "Blind walkthrough third job.",
+      output: "complete verified output",
+      status: "complete"
+    },
+    jobSnapshot: buildJobSnapshot(makeParentJob(), {
+      capturedAt: "2026-08-22T08:00:00.000Z"
+    })
   };
   await store.upsertSession(submitted);
-  const calls = [];
-  service.setWorkerProgressionService({
-    async getProgression(_wallet, options = {}) {
-      calls.push(options);
-      return {
-        tier: "pro",
-        badges: [],
-        effectiveCaps: {},
-        justChanged: options.settlementSessionId
-          ? { field: "tier", from: "starter", to: "pro" }
-          : null,
-        raises: [],
-        creditInterest: { eligible: false, registered: false }
-      };
-    }
+  const persistedListSessionsByWallet = store.listSessionsByWallet.bind(store);
+  store.listSessionsByWallet = async (wallet, limit, offset) => {
+    const sessions = await persistedListSessionsByWallet(wallet, limit, offset);
+    return sessions.filter((session) => session.sessionId !== submitted.sessionId);
+  };
+  store.putRunReceiptDocument = undefined;
+  service.reputations.set(BLIND_TESTER_WALLET, {
+    skill: 100,
+    reliability: 100,
+    economic: 0,
+    tier: "pro"
   });
-  service.verificationIngestionService.ingest = async () => store.upsertSession({
-    ...submitted,
-    status: "resolved",
-    verificationSummary: { outcome: "approved" }
-  });
+  service.setWorkerProgressionService(new WorkerProgressionService({
+    stateStore: store,
+    getReputation: service.getReputation.bind(service),
+    workerExposurePolicy: {
+      async capacityForWallet() {
+        return {
+          vestedAssetsRaw: "0",
+          vestedAssetsUsdc: 0,
+          externalRewardCeilingBaseRaw: "1000000",
+          externalRewardCeilingBaseUsdc: 1,
+          externalRewardCeilingRaiseRaw: "0",
+          externalRewardCeilingRaiseUsdc: 0,
+          externalRewardCeilingRaw: "1000000",
+          externalRewardCeilingUsdc: 1,
+          baseOpenExposureCapRaw: "2500000",
+          baseOpenExposureCapUsdc: 2.5,
+          openExposureRaiseRaw: "0",
+          openExposureRaiseUsdc: 0,
+          openExposureCapRaw: "2500000",
+          openExposureCapUsdc: 2.5,
+          nextConcurrentRaiseVestedRaw: "1000000",
+          nextConcurrentRaiseAmountRaw: "1000000",
+          nextConcurrentOpenExposureCapRaw: "3000000",
+          nextConcurrentOpenExposureCapUsdc: 3,
+          nextConcurrentExternalRewardCeilingRaw: "2000000",
+          nextConcurrentExternalRewardCeilingUsdc: 2,
+          vestingHours: 48,
+          vestingAvailable: true
+        };
+      }
+    },
+    workerDailyExposurePolicy: {
+      progressionConfig: () => ({
+        rolling24hRaw: "1500000",
+        rolling24hUsdc: 1.5,
+        lifetimeCreditRaw: "10000000",
+        lifetimeCreditUsdc: 10,
+        graduationSettledJobs: 10
+      })
+    },
+    creditInterestSettledJobs: 3
+  }));
 
-  const settled = await service.ingestVerification(submitted.sessionId, { outcome: "approved" });
+  const before = await service.getWorkerProgression(BLIND_TESTER_WALLET);
+  const settled = await service.ingestVerification(submitted.sessionId, {
+    jobId: submitted.jobId,
+    handler: "benchmark",
+    handlerVersion: 1,
+    outcome: "approved",
+    reasonCode: "BENCHMARK_THRESHOLD_MET"
+  });
+  const { progression: _persistedProgression, ...resolvedWithoutProgression } = await store.getSession(
+    submitted.sessionId
+  );
+  await store.upsertSession(resolvedWithoutProgression);
   const resumed = await service.resumeSession(submitted.sessionId);
-  assert.deepEqual(settled.progression.justChanged, { field: "tier", from: "starter", to: "pro" });
+
+  assert.equal(before.creditInterest.eligible, false);
+  assert.equal(settled.progression.creditInterest.eligible, true);
+  assert.deepEqual(settled.progression.justChanged, {
+    field: "creditInterest.eligible",
+    from: false,
+    to: true
+  });
   assert.deepEqual(resumed.progression, settled.progression);
-  assert.equal(calls.filter((options) => options.settlementSessionId).length, 1);
 });
