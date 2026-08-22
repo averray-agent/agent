@@ -3,7 +3,11 @@ import { ValidationError } from "../../core/errors.js";
 export function respond(response, statusCode, payload, extraHeaders = {}) {
   const headers = buildResponseHeaders(response, "application/json", extraHeaders);
   response.writeHead(statusCode, headers);
-  response.end(JSON.stringify(payload, null, 2));
+  response.end(JSON.stringify(payload, exactJsonReplacer, 2));
+}
+
+function exactJsonReplacer(_key, value) {
+  return typeof value === "bigint" ? value.toString() : value;
 }
 
 export function respondText(response, statusCode, payload, extraHeaders = {}) {
@@ -178,6 +182,8 @@ export function metricPathLabel(pathname) {
     "/account/position",
     "/account/withdraw/transactions",
     "/account/repay",
+    "/me",
+    "/receipts",
     "/account/strategies",
     "/auth/session",
     "/payments/send",
@@ -218,6 +224,7 @@ export function metricPathLabel(pathname) {
   if (pathname.startsWith("/policies/")) return "/policies/:tag";
   if (pathname.startsWith("/badges/") && pathname.endsWith("/run")) return "/badges/:sessionId/run";
   if (pathname.startsWith("/badges/")) return "/badges/:sessionId";
+  if (/^\/jobs\/[^/]+\/estimate$/u.test(pathname)) return "/jobs/:id/estimate";
   if (pathname.startsWith("/agents/")) return "/agents/:wallet";
   if (pathname.startsWith("/shares/")) return "/shares/:token";
   return "other";

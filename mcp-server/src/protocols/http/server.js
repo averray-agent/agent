@@ -72,6 +72,7 @@ import { createTransparencyRoutes } from "./transparency-routes.js";
 import { createUsdcLiquidityRoutes } from "./usdc-liquidity-routes.js";
 import { createVerifierRoutes } from "./verifier-routes.js";
 import { createVerifyRoutes } from "./verify-routes.js";
+import { createWorkerRoutes } from "./worker-routes.js";
 import { createXcmRequestRoutes } from "./xcm-request-routes.js";
 import { createMcpRoute } from "../mcp/handler.js";
 import { createMcpToolExecutor, createMcpTools } from "../mcp/tools.js";
@@ -625,6 +626,15 @@ const handleProfileRoute = createProfileRoutes({
   stateStore,
 });
 
+const handleWorkerRoute = createWorkerRoutes({
+  authMiddleware,
+  parseLimit,
+  respond,
+  service,
+  stateStore,
+  workerProgressionService
+});
+
 const handleSessionRoute = createSessionRoutes({
   authMiddleware,
   ensureSessionOwnership,
@@ -985,6 +995,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleEarningsDoorRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleWorkerRoute({ request, response, url, pathname })) {
       return;
     }
 

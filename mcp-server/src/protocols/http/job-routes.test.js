@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ValidationError } from "../../core/errors.js";
+import { AuthenticationError, ValidationError } from "../../core/errors.js";
 import { createJobRoutes } from "./job-routes.js";
 
 const WALLET = "0x1111111111111111111111111111111111111111";
@@ -67,6 +67,7 @@ function makeHarness(overrides = {}) {
   const route = createJobRoutes({
     authMiddleware: async (_request, _url, options) => {
       calls.push(options === undefined ? ["authMiddleware"] : ["authMiddleware", options]);
+      if (overrides.authError) throw overrides.authError;
       return auth;
     },
     enforceLimit: async (bucket, key, limits) => {
@@ -132,6 +133,39 @@ test("GET /jobs/open redirects to the canonical public collection before per-id 
     body: { redirect: "/jobs" },
     headers: { location: "/jobs" }
   }]]);
+});
+
+test("GET /jobs/:id/estimate is the authenticated path twin of estimateNetReward", async () => {
+  const reward = {
+    jobId: "job/with spaces",
+    grossReward: { asset: "USDC", amount: 0.25 },
+    netReward: { asset: "USDC", amount: 0.2 }
+  };
+  const { calls, response, route } = makeHarness({ reward });
+
+  assert.equal(await invoke(route, {
+    path: "/jobs/job%2Fwith%20spaces/estimate",
+    response,
+    headers: { authorization: "Bearer token" }
+  }), true);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, reward);
+  assert.deepEqual(calls.slice(0, 3), [
+    ["authMiddleware"],
+    ["estimateNetReward", { wallet: WALLET, jobId: "job/with spaces" }],
+    ["respond", { statusCode: 200, body: reward, headers: {} }]
+  ]);
+  assert.equal(calls.some(([name]) => name === "listJobsWithSessions"), false);
+});
+
+test("GET /jobs/:id/estimate requires wallet authentication", async () => {
+  const { route } = makeHarness({
+    authError: new AuthenticationError("Authentication required.", "missing_token")
+  });
+  await assert.rejects(
+    invoke(route, { path: "/jobs/job-1/estimate" }),
+    (error) => error instanceof AuthenticationError && error.statusCode === 401
+  );
 });
 
 test("GET /jobs lists live session-joined jobs and preserves response builder shape", async () => {

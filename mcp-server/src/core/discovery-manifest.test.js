@@ -73,6 +73,9 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.ok(manifest.tools.some((tool) => tool.name === "estimateNetReward"));
   assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/jobs/explain-eligibility"));
   assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/jobs/estimate-reward"));
+  assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/jobs/:id/estimate"));
+  assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/me"));
+  assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/receipts"));
   assert.equal(manifest.tools[0]?.name, "getPlatformCapabilities");
   assert.equal(manifest.executionSurfaces.operatorApp, "https://app.example.com");
   assert.equal(manifest.schemas.agentBadge, "https://averray.com/schemas/agent-badge-v1.json");

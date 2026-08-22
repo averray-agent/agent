@@ -77,6 +77,9 @@ test("capabilityMatrix exposes base and role capability groups", () => {
 });
 
 test("getRouteCapabilityRequirements resolves method-specific route policies", () => {
+  assert.deepEqual(getRouteCapabilityRequirements("GET", "/me"), ["account:read", "reputation:read"]);
+  assert.deepEqual(getRouteCapabilityRequirements("GET", "/receipts"), ["session:read"]);
+  assert.deepEqual(getRouteCapabilityRequirements("GET", "/jobs/job-123/estimate"), ["jobs:preflight"]);
   assert.deepEqual(getRouteCapabilityRequirements("GET", "/admin/jobs"), ["ops:view"]);
   assert.deepEqual(getRouteCapabilityRequirements("GET", "/transparency"), ["ops:view"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/admin/jobs"), ["jobs:create"]);
