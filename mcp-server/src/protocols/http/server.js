@@ -74,7 +74,7 @@ import { createVerifierRoutes } from "./verifier-routes.js";
 import { createVerifyRoutes } from "./verify-routes.js";
 import { createWorkerRoutes } from "./worker-routes.js";
 import { createXcmRequestRoutes } from "./xcm-request-routes.js";
-import { createMcpRoute } from "../mcp/handler.js";
+import { createMcpRoute, MCP_CORS_HEADERS } from "../mcp/handler.js";
 import { createMcpToolExecutor, createMcpTools } from "../mcp/tools.js";
 import { makePolicy } from "../../core/builtin-policies.js";
 import { createPosterOnboardingService } from "../../core/poster-onboarding.js";
@@ -916,7 +916,9 @@ const server = createServer(async (request, response) => {
   const startedAt = process.hrtime.bigint();
   // Stash CORS headers + request id on the response so JSON and SSE responders
   // can echo them back without each route needing to thread them through.
-  response._corsHeaders = resolveCorsHeaders(request);
+  response._corsHeaders = pathname === "/mcp"
+    ? MCP_CORS_HEADERS
+    : resolveCorsHeaders(request);
   response._requestId = requestId;
   response.on("finish", () => {
     const durationMs = Number((process.hrtime.bigint() - startedAt) / 1_000_000n);
@@ -951,8 +953,8 @@ const server = createServer(async (request, response) => {
   });
 
   if (request.method === "OPTIONS") {
-    // CORS preflight: only acknowledge origins on the allowlist. Unlisted
-    // origins get a 204 with no CORS headers, so the browser rejects them.
+    // MCP is deliberately public and bearer-authenticated, so its browser
+    // preflight is origin-agnostic. Other routes remain origin-allowlisted.
     response.writeHead(204, response._corsHeaders);
     response.end();
     return;

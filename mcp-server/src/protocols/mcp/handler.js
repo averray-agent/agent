@@ -73,6 +73,17 @@ export const MCP_BROWSER_INFO = Object.freeze({
   }
 });
 
+// MCP is a public, bearer-authenticated protocol endpoint. It never uses
+// cookie credentials, so browser clients may safely discover and call it from
+// any origin while the SIWE bearer checks remain in-protocol.
+export const MCP_CORS_HEADERS = Object.freeze({
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "POST, GET, OPTIONS",
+  "access-control-allow-headers": "Mcp-Session-Id, Mcp-Method, Mcp-Name, Mcp-Protocol-Version, Content-Type, Authorization",
+  "access-control-expose-headers": "Mcp-Session-Id",
+  "access-control-max-age": "86400"
+});
+
 const SERVER_CAPABILITIES = Object.freeze({
   tools: { listChanged: false }
 });
@@ -128,8 +139,14 @@ export function createMcpRoute({
   const legacySessions = new Map();
 
   return async function handleMcpRoute({ request, response, pathname }) {
-    if (request.method === "GET" && pathname === "/mcp") {
-      respond(response, 200, MCP_BROWSER_INFO, { "cache-control": "public, max-age=300" });
+    if ((request.method === "GET" || request.method === "HEAD") && pathname === "/mcp") {
+      respond(
+        response,
+        200,
+        MCP_BROWSER_INFO,
+        { "cache-control": "public, max-age=300" },
+        { headOnly: request.method === "HEAD" }
+      );
       return true;
     }
 

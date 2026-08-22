@@ -51,6 +51,17 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.ok(Array.isArray(manifest.publicEndpoints));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/poster/onboarding"));
   assert.ok(Array.isArray(manifest.authenticatedEndpoints));
+  for (const endpoint of [...manifest.publicEndpoints, ...manifest.authenticatedEndpoints]) {
+    assert.match(endpoint.method, /^(GET|POST)$/u, `${endpoint.path} must advertise its HTTP method`);
+  }
+  assert.equal(
+    manifest.publicEndpoints.find((entry) => entry.path === "/jobs/validate-submission")?.method,
+    "POST"
+  );
+  assert.equal(
+    manifest.publicEndpoints.find((entry) => entry.path === "/verify/runs")?.method,
+    "POST"
+  );
   assert.ok(Array.isArray(manifest.tools));
   assert.ok(!manifest.publicEndpoints.some((entry) => entry.path === "/strategies"));
   assert.ok(!manifest.authenticatedEndpoints.some((entry) => entry.path === "/account/strategies"));

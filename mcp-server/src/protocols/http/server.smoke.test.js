@@ -737,6 +737,40 @@ test("http smoke: OPTIONS preflight returns CORS headers only for allowed origin
   });
 });
 
+test("http smoke: public MCP supports HEAD and wildcard credential-free CORS", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const [get, head, preflight] = await Promise.all([
+      fetch(`${base}/mcp`),
+      fetch(`${base}/mcp`, { method: "HEAD" }),
+      fetch(`${base}/mcp`, {
+        method: "OPTIONS",
+        headers: {
+          origin: "https://unlisted-client.example",
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "Authorization, Content-Type, Mcp-Method, Mcp-Session-Id"
+        }
+      })
+    ]);
+
+    assert.equal(head.status, 200);
+    assert.equal(await head.text(), "");
+    for (const header of ["content-type", "cache-control", "access-control-allow-origin"]) {
+      assert.equal(head.headers.get(header), get.headers.get(header), `${header} must match GET /mcp`);
+    }
+
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get("access-control-allow-origin"), "*");
+    assert.equal(preflight.headers.get("access-control-allow-credentials"), null);
+    for (const method of ["POST", "GET", "OPTIONS"]) {
+      assert.match(preflight.headers.get("access-control-allow-methods"), new RegExp(method, "u"));
+    }
+    for (const header of ["Mcp-Session-Id", "Mcp-Method", "Content-Type", "Authorization"]) {
+      assert.match(preflight.headers.get("access-control-allow-headers"), new RegExp(header, "iu"));
+    }
+    assert.equal(preflight.headers.get("access-control-expose-headers"), "Mcp-Session-Id");
+  });
+});
+
 test("http smoke: /auth/logout revokes the current token", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });

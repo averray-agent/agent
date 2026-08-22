@@ -198,7 +198,7 @@ export function toPlatformJob(article, score = scoreArticle(article)) {
 
   return {
     id,
-    title: `${task.titlePrefix}: ${article.title}`,
+    title: `${task.titlePrefix}: ${quoteWikipediaArticleTitle(article.title)}`,
     description:
       `Review Wikipedia article "${article.title}" at revision ${article.revisionId} and return an Averray-attributed, editor-ready proposal.`,
     jobType: "review",
@@ -282,6 +282,16 @@ export function toPlatformJob(article, score = scoreArticle(article)) {
       signals: ["page_revision_cited", "source_urls_present", "proposal_only", "averray_attribution", "human_review_ready"]
     }
   };
+}
+
+function quoteWikipediaArticleTitle(title) {
+  // Keep Wikipedia's final disambiguator outside the quotation marks: it
+  // identifies which article is meant, while the quoted base title makes
+  // punctuation-only names such as "?" unmistakably real content.
+  const disambiguated = /^(.*?)(\s+\([^()]+\))$/u.exec(title);
+  return disambiguated
+    ? `"${disambiguated[1]}"${disambiguated[2]}`
+    : `"${title}"`;
 }
 
 export function wikipediaPinnedRevisionUrl(article) {
