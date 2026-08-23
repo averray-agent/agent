@@ -1,6 +1,7 @@
 {
   "name": "@averray/mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "mcpName": "com.averray/mcp",
   "description": "A zero-configuration stdio bridge to the hosted Averray MCP endpoint.",
   "type": "module",
   "license": "UNLICENSED",
