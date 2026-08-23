@@ -20,12 +20,12 @@ test("WalletConnect project id and rollout flag bind both templates to the front
 
   assert.match(build, /NEXT_PUBLIC_API_BASE_URL=https:\/\/api\.averray\.com NEXT_PUBLIC_WC_PROJECT_ID=/u);
   assert.match(build, new RegExp(`NEXT_PUBLIC_WC_PROJECT_ID=${PROJECT_ID}(?:\\s|$)`, "u"));
-  assert.match(build, /NEXT_PUBLIC_WALLETCONNECT_ENABLED=false(?:\s|$)/u);
+  assert.match(build, /NEXT_PUBLIC_WALLETCONNECT_ENABLED=true(?:\s|$)/u);
 
   for (const template of TEMPLATES) {
     const source = await readFile(template, "utf8");
     assert.equal(assignment(source, "NEXT_PUBLIC_WC_PROJECT_ID"), PROJECT_ID);
-    assert.equal(assignment(source, "NEXT_PUBLIC_WALLETCONNECT_ENABLED"), "false");
+    assert.equal(assignment(source, "NEXT_PUBLIC_WALLETCONNECT_ENABLED"), "true");
   }
 });
 
