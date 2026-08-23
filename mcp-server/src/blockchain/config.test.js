@@ -24,6 +24,25 @@ test("loadBlockchainConfig prefers DWELLER_RPC_URL", () => {
   assert.equal(config.rpcUrl, "https://dweller.example");
   assert.equal(config.rpcRequestTimeoutMs, 750);
   assert.equal(config.rpcWriteRequestTimeoutMs, 15_000);
+  assert.equal(config.chainEvmFloorBlock, 0);
+});
+
+test("loadBlockchainConfig validates the optional EVM activation floor", () => {
+  const config = loadBlockchainConfig({
+    ...baseEnv,
+    RPC_URL: "https://legacy.example",
+    CHAIN_EVM_FLOOR_BLOCK: "19414957"
+  });
+
+  assert.equal(config.chainEvmFloorBlock, 19_414_957);
+  assert.throws(
+    () => loadBlockchainConfig({
+      ...baseEnv,
+      RPC_URL: "https://legacy.example",
+      CHAIN_EVM_FLOOR_BLOCK: "below-activation"
+    }),
+    /CHAIN_EVM_FLOOR_BLOCK must be a u32 integer/u
+  );
 });
 
 test("loadBlockchainConfig falls back from POLKADOT_RPC_URL to RPC_URL", () => {

@@ -271,6 +271,10 @@ export function loadBlockchainConfig(env = process.env) {
       DEFAULT_RPC_WRITE_REQUEST_TIMEOUT_MS,
       { minimum: 15_000, maximum: 120_000 }
     ),
+    chainEvmFloorBlock: normalizeOptionalU32(
+      env.CHAIN_EVM_FLOOR_BLOCK,
+      "CHAIN_EVM_FLOOR_BLOCK"
+    ) ?? 0,
     signerBackend,
     signerPrivateKey: env.SIGNER_PRIVATE_KEY ?? "",
     arbitratorSignerPrivateKey: env.ARBITRATOR_SIGNER_PRIVATE_KEY ?? "",

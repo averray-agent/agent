@@ -2368,17 +2368,32 @@ export class BlockchainGateway {
     if (!Number.isFinite(timestampMs)) {
       throw new ValidationError("Payout receipt recovery requires the session submittedAt timestamp.");
     }
-    let low = 0;
+    const configuredFloor = Number(this.config?.chainEvmFloorBlock ?? 0);
+    if (!Number.isSafeInteger(configuredFloor) || configuredFloor < 0) {
+      throw new ExternalServiceError(`Chain returned invalid EVM floor block ${this.config?.chainEvmFloorBlock}.`);
+    }
+    let low = configuredFloor;
     let high = Number(latestBlock);
     if (!Number.isInteger(high) || high < 0) {
       throw new ExternalServiceError(`Chain returned invalid latest block ${latestBlock}.`);
     }
+    if (high < low) {
+      throw new ExternalServiceError(
+        `Chain latest block ${high} is below configured EVM floor block ${low}.`
+      );
+    }
     while (low < high) {
       const middle = Math.floor((low + high) / 2);
       const block = await this.provider.getBlock(middle);
-      const blockTimestampMs = Number(block?.timestamp) * 1_000;
+      const blockTimestampMs = block?.timestamp === undefined || block?.timestamp === null
+        ? Number.NaN
+        : Number(block.timestamp) * 1_000;
       if (!Number.isFinite(blockTimestampMs)) {
-        throw new ExternalServiceError(`Chain block ${middle} has no readable timestamp.`);
+        // Polkadot Hub's eth-RPC returns null below EVM activation. Treat an
+        // unreadable probe as part of that pre-EVM zone and advance the lower
+        // bound; this also self-heals a CHAIN_EVM_FLOOR_BLOCK set too low.
+        low = middle + 1;
+        continue;
       }
       if (blockTimestampMs < timestampMs) low = middle + 1;
       else high = middle;

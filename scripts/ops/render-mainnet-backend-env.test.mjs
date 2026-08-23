@@ -331,6 +331,7 @@ test("generateAll: the real transform yields the mainnet essentials", () => {
   assert.ok(backend.includes(`RPC_URL=${MAINNET_BACKEND_RPC}`));
   assert.ok(backend.includes(`RPC_BACKUP_URLS=${MAINNET_RPC}`));
   assert.match(backend, /^RPC_WRITE_REQUEST_TIMEOUT_MS=15000$/mu);
+  assert.match(backend, /^CHAIN_EVM_FLOOR_BLOCK=19414957$/mu);
   assert.match(backend, /^SHARE_URL_SECRET=op:\/\/mainnet-backend\/share-url-secret\/password$/mu);
   assert.ok(!/^AUTH_JWT_SECRETS=/mu.test(backend), "no HMAC key");
   assert.ok(!/^ARBITRATOR_SIGNER_PRIVATE_KEY=/mu.test(backend), "no arbitrator key");

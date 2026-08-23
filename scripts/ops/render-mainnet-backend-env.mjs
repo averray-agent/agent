@@ -144,6 +144,7 @@ export const TODO_KEYS = {
   TREASURY_POLICY_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
   AGENT_ACCOUNT_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
   ESCROW_CORE_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
+  CHAIN_EVM_FLOOR_BLOCK: "EscrowCore v3 deployment block from deployments/mainnet.json",
   LEGACY_ESCROW_CORE_ADDRESS: "v1 drain address from deployments/mainnet.json, or empty after drain",
   REPUTATION_SBT_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
   DISCOVERY_REGISTRY_ADDRESS: "from deployments/mainnet.json (post-ceremony)",
@@ -286,6 +287,10 @@ export function buildManifestOverrides(manifest) {
     TREASURY_POLICY_ADDRESS: requireAddress(contracts.treasuryPolicy, "contracts.treasuryPolicy"),
     AGENT_ACCOUNT_ADDRESS: requireAddress(contracts.agentAccountCore, "contracts.agentAccountCore"),
     ESCROW_CORE_ADDRESS: requireAddress(contracts.escrowCore, "contracts.escrowCore"),
+    CHAIN_EVM_FLOOR_BLOCK: requireBlock(
+      blocks.escrowCoreV3 ?? blocks.escrowCore,
+      "deploymentBlocks.escrowCoreV3/escrowCore"
+    ),
     LEGACY_ESCROW_CORE_ADDRESS: contracts.legacyEscrowCore
       ? requireAddress(contracts.legacyEscrowCore, "contracts.legacyEscrowCore")
       : "",
