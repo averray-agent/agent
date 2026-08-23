@@ -541,7 +541,16 @@
       "retentionNotGates": "whatYourBalanceCanDo is informational only. It never delays, conditions, prices, or adds steps to withdrawal, and complete templates remain present."
     },
     "entrypoint": "https://api.averray.com/onboarding",
-    "posterEntrypoint": "https://api.averray.com/poster/onboarding"
+    "posterEntrypoint": "https://api.averray.com/poster/onboarding",
+    "poster": {
+      "entrypoint": "https://api.averray.com/poster/onboarding",
+      "minimumRewardUsdc": "1",
+      "quoteStep": {
+        "method": "POST",
+        "path": "/jobs/draft",
+        "description": "POST /jobs/draft is the quote step; there is no separate /jobs/quote endpoint."
+      }
+    }
   },
   "auth": {
     "scheme": "SIWE + JWT (ES256)",

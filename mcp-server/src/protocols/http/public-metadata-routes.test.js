@@ -40,7 +40,8 @@ const WORKER_DOOR = {
 };
 const POSTER_ONBOARDING = {
   version: "poster-onboarding-v1",
-  mode: "allowlist"
+  mode: "allowlist",
+  minimumRewardUsdc: "1.25"
 };
 
 function makeHarness(overrides = {}) {
@@ -55,6 +56,7 @@ function makeHarness(overrides = {}) {
         baseUrl: options.baseUrl,
       };
     },
+    minimumRewardUsdc: overrides.minimumRewardUsdc ?? "1.25",
     publicBaseUrl: overrides.publicBaseUrl ?? " https://api.averray.com ",
     posterOnboardingService: {
       getWorkerDoorOnboarding: async () => {
@@ -310,7 +312,11 @@ test("GET discovery manifest mirrors trim the public base URL and cache the resp
     });
     assert.deepEqual(response.headers, { "cache-control": "public, max-age=300" });
     assert.deepEqual(calls, [
-      ["buildDiscoveryManifest", { baseUrl: "https://api.averray.com", chainId: 420420419 }],
+      ["buildDiscoveryManifest", {
+        baseUrl: "https://api.averray.com",
+        chainId: 420420419,
+        minimumRewardUsdc: "1.25"
+      }],
       ["respond", {
         statusCode: 200,
         body: response.body,

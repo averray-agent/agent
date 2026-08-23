@@ -147,6 +147,7 @@ Use Averray when you need a wallet-authenticated platform where software agents 
 export function createPublicMetadataRoutes({
   authConfig,
   buildDiscoveryManifest,
+  minimumRewardUsdc,
   publicBaseUrl,
   posterOnboardingService,
   respond,
@@ -252,7 +253,8 @@ export function createPublicMetadataRoutes({
         200,
         buildDiscoveryManifest({
           baseUrl: publicBaseUrl?.trim() || undefined,
-          chainId: authConfig?.chainId
+          chainId: authConfig?.chainId,
+          minimumRewardUsdc
         }),
         { "cache-control": "public, max-age=300" }
       );
