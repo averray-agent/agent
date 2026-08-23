@@ -6,12 +6,15 @@ import test from "node:test";
 import {
   AVERRAY_MCP_URL,
   buildBridgeInvocation,
+  isDirectExecution,
   runBridge
 } from "../bin/averray-mcp.js";
 
-test("package keeps one exact transport dependency and no analytics SDK", () => {
+test("0.1.1 package metadata is registry-attachable and keeps one exact transport dependency", () => {
   const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
+  assert.equal(manifest.version, "0.1.1");
+  assert.equal(manifest.mcpName, "com.averray/mcp");
   assert.deepEqual(manifest.dependencies, { "mcp-remote": "0.1.43" });
 });
 
@@ -20,6 +23,19 @@ test("the pinned mcp-remote executable is present in the installed dependency gr
 
   assert.match(remoteBin, /mcp-remote\/dist\/proxy\.js$/u);
   assert.equal(statSync(remoteBin).isFile(), true);
+});
+
+test("the npm bin symlink resolves to the packaged executable", () => {
+  const targets = new Map([
+    ["/install/node_modules/.bin/averray-mcp", "/install/node_modules/@averray/mcp/bin/averray-mcp.js"],
+    ["/install/node_modules/@averray/mcp/bin/averray-mcp.js", "/install/node_modules/@averray/mcp/bin/averray-mcp.js"]
+  ]);
+
+  assert.equal(isDirectExecution({
+    argvEntry: "/install/node_modules/.bin/averray-mcp",
+    modulePath: "/install/node_modules/@averray/mcp/bin/averray-mcp.js",
+    realpath(path) { return targets.get(path); }
+  }), true);
 });
 
 test("npx @averray/mcp pins the hosted endpoint and mcp-remote HTTP transport", () => {

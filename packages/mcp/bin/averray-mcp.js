@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,6 +52,22 @@ export function runBridge({ args, execPath, resolve, spawnImpl = spawn } = {}) {
   return child;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+export function isDirectExecution({
+  argvEntry = process.argv[1],
+  modulePath = fileURLToPath(import.meta.url),
+  realpath = realpathSync
+} = {}) {
+  if (!argvEntry) return false;
+  try {
+    // npm/npx invokes package bins through node_modules/.bin symlinks. Compare
+    // their real targets so the packaged executable cannot silently import and
+    // exit before starting the bridge.
+    return realpath(argvEntry) === realpath(modulePath);
+  } catch {
+    return argvEntry === modulePath;
+  }
+}
+
+if (isDirectExecution()) {
   runBridge();
 }
