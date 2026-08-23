@@ -39,6 +39,7 @@ import {
   countConcurrentDesignatedAgreements,
   isDesignatedJob
 } from "./designated-claimants.js";
+import { DEFAULT_MIN_REWARD_USDC } from "./external-posting-policy.js";
 
 export const EXTERNAL_DRAFT_FUNDING_NOTE =
   "No draft or claimable job exists yet; the watcher materializes both only after a matching finalized escrow creation.";
@@ -51,7 +52,6 @@ export const EXTERNAL_FUNDING_RAILS = Object.freeze({
   X402: "x402"
 });
 
-export const DEFAULT_MIN_REWARD_USDC = "1";
 const DEFAULT_MAX_REWARD_USDC = "10000";
 const DEFAULT_DRAFT_TTL_HOURS = 72;
 export const DEFAULT_POSTER_REVIEW_WINDOW_HOURS = 7 * 24;

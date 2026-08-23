@@ -10,7 +10,7 @@ import {
   EARNINGS_GASLESS_STATUS,
   EARNINGS_WITHDRAWAL_STATEMENT
 } from "./earnings-door-copy.js";
-import { DEFAULT_MIN_REWARD_USDC } from "./external-posting-service.js";
+import { DEFAULT_MIN_REWARD_USDC } from "./external-posting-policy.js";
 
 const DEFAULT_BASE_URL = "https://api.averray.com";
 const DEFAULT_DISCOVERY_URL = "https://averray.com/.well-known/agent-tools.json";
