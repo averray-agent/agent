@@ -633,6 +633,7 @@ const handleProfileRoute = createProfileRoutes({
 
 const handleWorkerRoute = createWorkerRoutes({
   authMiddleware,
+  earningsDoor,
   parseLimit,
   respond,
   service,

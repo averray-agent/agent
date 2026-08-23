@@ -3,9 +3,18 @@ import test from "node:test";
 
 import {
   CREDIT_INTEREST_STATEMENT,
+  hasPositiveWithdrawalBalance,
   WITHDRAWAL_STANDING_STATEMENT,
   withdrawalStandingFromIntent
 } from "./withdrawal-standing.js";
+
+test("zero raw balance is not withdrawable even when the display value is truthy text", () => {
+  assert.equal(hasPositiveWithdrawalBalance("0"), false);
+  assert.equal(hasPositiveWithdrawalBalance("000000"), false);
+  assert.equal(hasPositiveWithdrawalBalance("1"), true);
+  assert.equal(hasPositiveWithdrawalBalance("0.0"), false);
+  assert.equal(hasPositiveWithdrawalBalance(undefined), false);
+});
 
 function standing(overrides = {}) {
   return {

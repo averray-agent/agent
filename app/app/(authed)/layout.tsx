@@ -4,6 +4,7 @@ import { LiveDataBridge } from "@/components/shell/LiveDataBridge";
 import { AuthRefreshBridge } from "@/components/shell/AuthRefreshBridge";
 import { AuthedGuard } from "@/components/shell/AuthedGuard";
 import { DemoModeBanner } from "@/components/shell/DemoModeBanner";
+import { OperatorDesktopGate } from "@/components/shell/OperatorDesktopGate";
 
 export default function AuthedLayout({
   children,
@@ -30,7 +31,7 @@ export default function AuthedLayout({
   // takes over. The wall is present in static HTML, so route hydration cannot
   // leave an unauthenticated visitor staring at an indeterminate probe.
   return (
-    <>
+    <OperatorDesktopGate>
       <DemoModeBanner />
       <AuthRefreshBridge />
       <PaperGridBackground />
@@ -43,6 +44,6 @@ export default function AuthedLayout({
           </div>
         </div>
       </AuthedGuard>
-    </>
+    </OperatorDesktopGate>
   );
 }

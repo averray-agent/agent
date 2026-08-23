@@ -163,13 +163,16 @@ app.averray.com {
   @posterAliasPath path /post /post/
   redir @posterAliasPath /poster/ 301
 
+  @posterJobsAliasPath path /poster/jobs /poster/jobs/
+  redir @posterJobsAliasPath /poster/ 301
+
   @verifyAliasPath path /verify /verify/
   redir @verifyAliasPath /runs/ 301
 
   # The withdrawal screen used to sit below /work, where the static job-shell
   # matcher interpreted "withdraw" as a job id. Keep old bookmarks working,
   # but put the real page outside that dynamic namespace.
-  @legacyWorkWithdrawal path /work/withdraw /work/withdraw/
+  @legacyWorkWithdrawal path /work/withdraw /work/withdraw/ /withdraw /withdraw/ /earnings /earnings/
   redir @legacyWorkWithdrawal /work-withdraw/ 301
 
   # The Bank feed is intentionally credential-free because only services on

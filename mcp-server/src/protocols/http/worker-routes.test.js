@@ -59,6 +59,23 @@ function makeHarness(overrides = {}) {
       }
       return { wallet: WALLET };
     },
+    earningsDoor: {
+      async getStanding(wallet) {
+        calls.push(["getStanding", wallet]);
+        return overrides.standing ?? {
+          claimTier: "pro",
+          claimTierLabel: "claim tier",
+          reputationTier: "journeyman",
+          badges: 3,
+          waiverSlotsRemaining: 1,
+          creditInterest: { eligible: true, registered: false },
+          registerPath: "/credit/interest",
+          creditInterestStatement: "Proven workers can register interest in a small zero-interest cash line (pilot).",
+          persists: true,
+          statement: "Withdrawing never affects your tier, badges, caps, or eligibility — your standing stays with your wallet."
+        };
+      }
+    },
     parseLimit: (_url, fallback, max) => Math.min(overrides.limit ?? fallback, max),
     respond(response, statusCode, body) {
       response.statusCode = statusCode;
@@ -71,7 +88,7 @@ function makeHarness(overrides = {}) {
       },
       async getAccountSummary(wallet) {
         calls.push(["getAccountSummary", wallet]);
-        return {
+        return overrides.account ?? {
           wallet,
           liquid: { USDC: 0.8 },
           reserved: { USDC: 1.05 },
@@ -143,6 +160,34 @@ test("GET /me echoes the wallet, labels both tier ladders, progression, and exis
       jobStakeLocked: { USDC: "0" }
     }
   });
+  assert.equal(response.body.standing.persists, true);
+  assert.equal(response.body.standing.waiverSlotsRemaining, 1);
+  assert.deepEqual(response.body.standing.creditInterest, {
+    eligible: true,
+    registered: false
+  });
+});
+
+test("GET /me keeps standing available when the wallet has no liquid balance", async () => {
+  const { route } = makeHarness({
+    account: {
+      wallet: WALLET,
+      liquid: { USDC: 0 },
+      reserved: { USDC: 0 },
+      jobStakeLocked: { USDC: 0 },
+      raw: {
+        liquid: { USDC: "0" },
+        reserved: { USDC: "0" },
+        jobStakeLocked: { USDC: "0" }
+      }
+    }
+  });
+  const { response } = await invoke(route, "/me");
+
+  assert.equal(response.body.accountPosition.raw.liquid.USDC, "0");
+  assert.equal(response.body.standing.persists, true);
+  assert.equal(response.body.standing.statement,
+    "Withdrawing never affects your tier, badges, caps, or eligibility — your standing stays with your wallet.");
 });
 
 test("GET /receipts returns only the signed-in wallet's receipts newest first with a bounded limit", async () => {

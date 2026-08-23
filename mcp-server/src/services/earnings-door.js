@@ -308,7 +308,7 @@ export class EarningsDoorService {
         status: "unavailable",
         reason: "first_withdrawal_gas_grant_unavailable"
       },
-      standing: await this.#standing(owner),
+      standing: await this.getStanding(owner),
       templates,
       instructions: [
         "Independently decode every template and verify chainId, from, to, function, asset, amount, and destination before signing.",
@@ -411,7 +411,7 @@ export class EarningsDoorService {
     };
   }
 
-  async #standing(wallet) {
+  async getStanding(wallet, { progression: progressionSource, reputation: reputationSource } = {}) {
     if (
       typeof this.workerProgressionService?.getProgression !== "function"
       || typeof this.getReputation !== "function"
@@ -423,8 +423,8 @@ export class EarningsDoorService {
       ? this.gateway.getWorkerClaimCount(wallet)
       : collectWalletSessions(this.stateStore, wallet).then(countClaimedSessions);
     const [progression, reputation, waiverClaimsUsed] = await Promise.all([
-      this.workerProgressionService.getProgression(wallet),
-      this.getReputation(wallet),
+      progressionSource ?? this.workerProgressionService.getProgression(wallet),
+      reputationSource ?? this.getReputation(wallet),
       waiverClaimsUsedPromise
     ]);
     if (!progression) {
