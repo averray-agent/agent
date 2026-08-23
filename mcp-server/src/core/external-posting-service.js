@@ -23,7 +23,10 @@ import {
   screenExternalListing,
   unavailableListingScreenVerdict
 } from "./listing-security.js";
-import { decimalToBaseUnits } from "./platform-service-helpers.js";
+import {
+  decimalToBaseUnits,
+  formatBaseUnits
+} from "./platform-service-helpers.js";
 import {
   EXTERNAL_JOB_LIFECYCLE_LOCK_TTL_SECONDS,
   EXTERNAL_JOB_TRANSITION_REASON,
@@ -470,6 +473,58 @@ export class ExternalPostingService {
     assertStoredDraftDeterminism(draft, this.config);
     const delisting = await this.stateStore.getExternalJobDelisting?.(draft.jobId);
     return presentDraft(draft, this.currentTime(), delisting);
+  }
+
+  async listPosterJobs(walletInput) {
+    const wallet = normalizeWallet(walletInput);
+    const drafts = await this.stateStore.listExternalJobDrafts?.({ limit: 10_000 }) ?? [];
+    const owned = drafts.filter((draft) => normalizeWallet(draft?.wallet) === wallet);
+    const jobs = await Promise.all(owned.map((draft) => this.projectPosterJob(draft)));
+    jobs.sort((left, right) => String(right.createdAt ?? "").localeCompare(String(left.createdAt ?? "")));
+    return { wallet, count: jobs.length, jobs };
+  }
+
+  async projectPosterJob(draft) {
+    assertStoredDraftDeterminism(draft, this.config);
+    const [delisting, sessions] = await Promise.all([
+      this.stateStore.getExternalJobDelisting?.(draft.jobId),
+      this.stateStore.listSessionsByJob?.(draft.jobId, 100) ?? []
+    ]);
+    const presented = presentDraft(draft, this.currentTime(), delisting);
+    const attached = await this.resolvePosterClaimState(draft.jobId);
+    const sessionSummaries = await Promise.all(
+      sessions.map(async (session) => projectPosterSession(
+        session,
+        await this.stateStore.getVerificationResult?.(session.sessionId)
+      ))
+    );
+    return {
+      draftId: draft.draftId,
+      jobId: draft.jobId,
+      title: draft.definition?.title ?? draft.jobId,
+      status: presented.status,
+      createdAt: draft.createdAt,
+      fundedAt: presented.fundedAt ?? null,
+      ...projectPosterClaimState(attached, sessions, draft.definition),
+      reservedEscrow: projectReservedEscrow(draft.fundingRequirement),
+      sessions: sessionSummaries
+    };
+  }
+
+  async resolvePosterClaimState(jobId) {
+    if (
+      typeof this.platformService?.getJobDefinition !== "function"
+      || typeof this.platformService?.attachClaimState !== "function"
+    ) {
+      return undefined;
+    }
+    try {
+      const job = this.platformService.getJobDefinition(jobId);
+      return await this.platformService.attachClaimState(job);
+    } catch (error) {
+      if (error?.code === "job_not_found") return undefined;
+      throw error;
+    }
   }
 
   async delistExternalJob(jobIdInput, {
@@ -1357,6 +1412,58 @@ function assertStoredDraftDeterminism(draft, config) {
       { draftId: draft.draftId }
     );
   }
+}
+
+function projectPosterClaimState(attached, sessions, definition) {
+  const current = sessions[0];
+  const attempts = attached?.claimAttemptCount
+    ?? sessions.filter((session) => session?.claimedAt || Number.isInteger(session?.claimNumber)).length;
+  const retryLimit = attached?.retryLimit
+    ?? (Number.isInteger(definition?.retryLimit) ? definition.retryLimit : 1);
+  return {
+    claimState: attached?.claimState ?? current?.status ?? "open",
+    claimedBy: attached?.claimedBy ?? current?.wallet ?? null,
+    claimAttemptCount: attempts,
+    retryLimit,
+    remainingClaimAttempts: attached?.remainingClaimAttempts
+      ?? (retryLimit > 0 ? Math.max(0, retryLimit - attempts) : null),
+    claimedAt: attached?.claimedAt ?? current?.claimedAt ?? null,
+    claimExpiresAt: attached?.claimExpiresAt ?? current?.claimExpiresAt ?? null,
+    sessionId: attached?.sessionId ?? current?.sessionId ?? null
+  };
+}
+
+function projectReservedEscrow(requirement) {
+  const raw = String(requirement?.posterReservedRaw ?? "").trim();
+  const decimals = Number(requirement?.decimals);
+  if (!/^\d+$/u.test(raw) || !Number.isInteger(decimals) || decimals < 0 || decimals > 30) {
+    return null;
+  }
+  return {
+    asset: String(requirement?.asset ?? "").trim(),
+    amount: formatBaseUnits(BigInt(raw), decimals),
+    amountRaw: raw,
+    decimals
+  };
+}
+
+function projectPosterSession(session, verification) {
+  return {
+    sessionId: session.sessionId,
+    status: session.status,
+    claimedBy: session.wallet ?? null,
+    claimNumber: session.claimNumber ?? null,
+    claimedAt: session.claimedAt ?? null,
+    submittedAt: session.submittedAt ?? null,
+    resolvedAt: session.resolvedAt ?? session.verifiedAt ?? null,
+    verification: verification
+      ? {
+          outcome: verification.outcome ?? null,
+          reasonCode: verification.reasonCode ?? verification.code ?? null,
+          verifiedAt: verification.verifiedAt ?? null
+        }
+      : null
+  };
 }
 
 function presentDraft(draft, now, delisting = undefined) {

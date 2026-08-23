@@ -7,6 +7,7 @@ import {
   AVERRAY_MCP_URL,
   buildBridgeInvocation,
   isDirectExecution,
+  resolveBridgeUrl,
   runBridge
 } from "../bin/averray-mcp.js";
 
@@ -55,6 +56,17 @@ test("npx @averray/mcp pins the hosted endpoint and mcp-remote HTTP transport", 
       "--silent"
     ]
   });
+});
+
+test("only tests can redirect the packed bridge to a local MCP endpoint", () => {
+  assert.equal(resolveBridgeUrl({
+    NODE_ENV: "test",
+    AVERRAY_MCP_TEST_URL: "http://127.0.0.1:43210/mcp"
+  }), "http://127.0.0.1:43210/mcp");
+  assert.equal(resolveBridgeUrl({
+    NODE_ENV: "production",
+    AVERRAY_MCP_TEST_URL: "http://127.0.0.1:43210/mcp"
+  }), AVERRAY_MCP_URL);
 });
 
 test("bridge inherits stdio and reports the delegated process exit", async () => {

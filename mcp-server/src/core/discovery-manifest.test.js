@@ -55,12 +55,23 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
       method: "POST",
       path: "/jobs/draft",
       description: "POST /jobs/draft is the quote step; there is no separate /jobs/quote endpoint."
+    },
+    jobs: {
+      method: "GET",
+      path: "/poster/jobs",
+      description: "SIWE-authenticated view of the caller's own postings and their escrow, claim, and session state."
+    },
+    mcpMirror: {
+      available: false,
+      status: "known_backlog",
+      description: "Poster job visibility is HTTP-only; there is no MCP poster tool yet."
     }
   });
   assert.equal(manifest.health, "https://api.example.com/health");
   assert.ok(Array.isArray(manifest.publicEndpoints));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/poster/onboarding"));
   assert.ok(Array.isArray(manifest.authenticatedEndpoints));
+  assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/poster/jobs"));
   for (const endpoint of [...manifest.publicEndpoints, ...manifest.authenticatedEndpoints]) {
     assert.match(endpoint.method, /^(GET|POST)$/u, `${endpoint.path} must advertise its HTTP method`);
   }

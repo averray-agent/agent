@@ -134,6 +134,8 @@ test("real tester-wallet fixture renders the API platform tier, category unlocks
   assert.equal(elements.get("profile-total-badges").textContent, "1");
   assert.equal(elements.get("profile-approved").textContent, "1");
   assert.equal(elements.get("profile-completion-rate").textContent, "100%");
+  assert.equal(elements.get("profile-economic").textContent, "0.40 USDC");
+  assert.equal(elements.get("profile-economic").attributes.get("title"), "Raw: 400000 (6 asset decimals)");
   assert.equal(elements.get("profile-total-earned").textContent, "0.4 USDC");
   assert.equal(elements.get("profile-preferred-categories").textContent, "wikipedia (1)");
   assert.match(elements.get("profile-badges").innerHTML, /wiki-en-80171159-citation-repair-in-the-suburbs-of-moscow-r21/u);
@@ -211,7 +213,7 @@ test("friendly agent paths resolve every profile asset from the site root", () =
   assert.deepEqual(scripts, [
     "/site.js?v=20260821",
     "/reader-fetch.js?v=20260823",
-    "/agent.js?v=20260824"
+    "/agent.js?v=20260825"
   ]);
   assert.equal(new URL(stylesheet, friendlyUrl).pathname, "/styles.css");
   assert.equal(new URL(scripts[1], friendlyUrl).pathname, "/reader-fetch.js");

@@ -81,6 +81,22 @@ export function createExternalJobRoutes({
       return true;
     }
 
+    if (request.method === "GET" && pathname === "/poster/jobs") {
+      const auth = await authMiddleware(request, url);
+      requireSiweWalletSession(auth);
+      await enforceLimit(
+        "external_drafts",
+        auth.wallet,
+        rateLimitConfig.externalDrafts
+      );
+      respond(
+        response,
+        200,
+        await externalPostingService.listPosterJobs(auth.wallet)
+      );
+      return true;
+    }
+
     const draftMatch = pathname.match(/^\/jobs\/draft\/([^/]+)$/u);
     if (request.method === "GET" && draftMatch) {
       const auth = await authMiddleware(request, url);

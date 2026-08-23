@@ -338,11 +338,11 @@ async function handleLegacyRequest({
     sendError(response, respond, 404, message.id ?? null, -32001, "MCP session not found or expired.");
     return;
   }
-  const headerVersion = request.headers?.["mcp-protocol-version"];
-  if (!headerVersion) {
-    sendError(response, respond, 400, message.id ?? null, HEADER_MISMATCH, "Missing MCP-Protocol-Version header.");
-    return;
-  }
+  // Streamable HTTP clients may omit the version header after initialize.
+  // The session already binds the negotiated version, so use that binding as
+  // the fallback while continuing to reject any explicit disagreement.
+  const headerVersion = request.headers?.["mcp-protocol-version"]
+    ?? session.protocolVersion;
   if (!SUPPORTED_MCP_VERSIONS.includes(headerVersion)) {
     sendUnsupportedVersion(response, respond, message.id, headerVersion);
     return;

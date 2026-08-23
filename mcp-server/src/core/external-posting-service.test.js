@@ -63,6 +63,7 @@ function makeService({
   now = () => new Date("2026-07-28T12:00:00.000Z"),
   store = new MemoryStateStore(),
   gateway = feeQuoteGateway(),
+  platformService = undefined,
   eventBus = undefined,
   contentScreen = undefined,
   logger = { warn() {} }
@@ -71,6 +72,7 @@ function makeService({
     store,
     service: new ExternalPostingService({
       stateStore: store,
+      platformService,
       gateway,
       config: config(env),
       now,
@@ -688,6 +690,122 @@ test("poster draft status reports a live job as delisted after the catalog backs
   assert.equal(draft.txHash, `0x${"f".repeat(64)}`);
 });
 
+test("poster jobs are owner-scoped and include claim, escrow, and job-session summaries", async () => {
+  const store = new MemoryStateStore();
+  const worker = "0x4444444444444444444444444444444444444444";
+  const platformService = {
+    getJobDefinition(jobId) {
+      return { ...definition(), id: jobId, lifecycle: { status: "open" } };
+    },
+    async attachClaimState(job) {
+      return {
+        ...job,
+        claimState: "claimed",
+        claimedBy: worker,
+        claimAttemptCount: 1,
+        remainingClaimAttempts: 0,
+        retryLimit: 1,
+        claimedAt: "2026-07-28T12:02:00.000Z",
+        claimExpiresAt: "2026-07-28T13:02:00.000Z",
+        sessionId: "own-session"
+      };
+    }
+  };
+  const { service } = makeService({ store, platformService });
+  const own = await service.createDraft(POSTER, {
+    definition: definition({ title: "Poster-visible job" })
+  });
+  const other = await service.createDraft(OTHER_POSTER, {
+    definition: definition({
+      title: "Another poster's job",
+      input: { task: "Other task.", acceptanceCriteria: ["Other result."] }
+    })
+  });
+  for (const [quote, poster, suffix] of [
+    [own, POSTER, "a"],
+    [other, OTHER_POSTER, "b"]
+  ]) {
+    await service.reconcileFinalizedCreation({
+      jobId: quote.jobId,
+      specHash: quote.specHash,
+      poster,
+      asset: USDC,
+      reward: "1000000",
+      opsReserve: "0",
+      contingencyReserve: "0",
+      fundedAt: "2026-07-28T12:01:00.000Z",
+      txHash: `0x${suffix.repeat(64)}`,
+      blockNumber: "123",
+      finalized: true
+    });
+  }
+  await store.upsertSession({
+    sessionId: "own-session",
+    jobId: own.jobId,
+    wallet: worker,
+    status: "claimed",
+    claimNumber: 1,
+    claimedAt: "2026-07-28T12:02:00.000Z"
+  });
+  await store.upsertVerificationResult("own-session", {
+    outcome: "approved",
+    reasonCode: "verified",
+    verifiedAt: "2026-07-28T12:30:00.000Z"
+  });
+  await store.upsertSession({
+    sessionId: "other-session",
+    jobId: other.jobId,
+    wallet: worker,
+    status: "submitted",
+    claimedAt: "2026-07-28T12:03:00.000Z"
+  });
+  const sessionReads = [];
+  const listSessionsByJob = store.listSessionsByJob.bind(store);
+  store.listSessionsByJob = async (...args) => {
+    sessionReads.push(args[0]);
+    return listSessionsByJob(...args);
+  };
+
+  const result = await service.listPosterJobs(POSTER);
+
+  assert.equal(result.wallet, POSTER);
+  assert.equal(result.count, 1);
+  assert.equal(result.jobs[0].jobId, own.jobId);
+  assert.equal(result.jobs[0].title, "Poster-visible job");
+  assert.equal(result.jobs[0].status, "live");
+  assert.deepEqual(result.jobs[0].reservedEscrow, {
+    asset: "USDC",
+    amount: "1.05",
+    amountRaw: "1050000",
+    decimals: 6
+  });
+  assert.equal(result.jobs[0].claimState, "claimed");
+  assert.equal(result.jobs[0].claimedBy, worker);
+  assert.equal(result.jobs[0].claimAttemptCount, 1);
+  assert.equal(result.jobs[0].retryLimit, 1);
+  assert.equal(result.jobs[0].remainingClaimAttempts, 0);
+  assert.equal(result.jobs[0].claimedAt, "2026-07-28T12:02:00.000Z");
+  assert.equal(result.jobs[0].claimExpiresAt, "2026-07-28T13:02:00.000Z");
+  assert.equal(result.jobs[0].sessionId, "own-session");
+  assert.deepEqual(result.jobs[0].sessions, [{
+    sessionId: "own-session",
+    status: "claimed",
+    claimedBy: worker,
+    claimNumber: 1,
+    claimedAt: "2026-07-28T12:02:00.000Z",
+    submittedAt: null,
+    resolvedAt: null,
+    verification: {
+      outcome: "approved",
+      reasonCode: "verified",
+      verifiedAt: "2026-07-28T12:30:00.000Z"
+    }
+  }]);
+  assert.deepEqual(sessionReads, [own.jobId]);
+  assert.equal(JSON.stringify(result).includes(other.jobId), false);
+  assert.equal(JSON.stringify(result).includes("other-session"), false);
+});
+
 test("poster-content quotes are idempotent and persist no pre-funding draft", async () => {
   const { service, store } = makeService({
     now: () => new Date("2026-07-20T00:00:00.000Z")
@@ -750,6 +868,16 @@ test("draft persistence cannot change GET /jobs or the discovery manifest", asyn
       method: "POST",
       path: "/jobs/draft",
       description: "POST /jobs/draft is the quote step; there is no separate /jobs/quote endpoint."
+    },
+    jobs: {
+      method: "GET",
+      path: "/poster/jobs",
+      description: "SIWE-authenticated view of the caller's own postings and their escrow, claim, and session state."
+    },
+    mcpMirror: {
+      available: false,
+      status: "known_backlog",
+      description: "Poster job visibility is HTTP-only; there is no MCP poster tool yet."
     }
   });
 });
