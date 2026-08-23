@@ -12,7 +12,7 @@ PUBLIC_JOB_TIERS_REDIRECT_URL=${PUBLIC_JOB_TIERS_REDIRECT_URL:-https://averray.c
 PUBLIC_VERIFY_PROFILES_REDIRECT_URL=${PUBLIC_VERIFY_PROFILES_REDIRECT_URL:-https://averray.com/verify/profiles}
 APP_TRANSPARENCY_REDIRECT_URL=${APP_TRANSPARENCY_REDIRECT_URL:-https://app.averray.com/transparency}
 APP_TRANSPARENCY_SLASH_REDIRECT_URL=${APP_TRANSPARENCY_SLASH_REDIRECT_URL:-https://app.averray.com/transparency/}
-APP_RECEIPT_REDIRECT_URL=${APP_RECEIPT_REDIRECT_URL:-https://app.averray.com/receipts/example-receipt}
+APP_RECEIPT_REDIRECT_URL=${APP_RECEIPT_REDIRECT_URL:-https://app.averray.com/receipts/0xabc123def4567890abc123def4567890abc123de}
 APP_JOBS_REDIRECT_URL=${APP_JOBS_REDIRECT_URL:-https://app.averray.com/jobs}
 APP_JOB_SUBPATH_REDIRECT_URL=${APP_JOB_SUBPATH_REDIRECT_URL:-https://app.averray.com/jobs/example-job}
 PUBLIC_WORK_REDIRECT_URL=${PUBLIC_WORK_REDIRECT_URL:-https://averray.com/work}
@@ -300,7 +300,7 @@ assert_redirect "$PUBLIC_JOB_TIERS_REDIRECT_URL" "https://api.averray.com/jobs/t
 assert_redirect "$PUBLIC_VERIFY_PROFILES_REDIRECT_URL" "https://api.averray.com/verify/profiles" "Public verification-profile path"
 assert_redirect "$APP_TRANSPARENCY_REDIRECT_URL" "https://averray.com/transparency/" "Operator-app transparency path"
 assert_redirect "$APP_TRANSPARENCY_SLASH_REDIRECT_URL" "https://averray.com/transparency/" "Operator-app transparency slash path"
-assert_redirect "$APP_RECEIPT_REDIRECT_URL" "https://averray.com/receipts/example-receipt" "Operator-app public receipt path"
+assert_redirect "$APP_RECEIPT_REDIRECT_URL" "https://averray.com/receipts/0xabc123def4567890abc123def4567890abc123de" "Operator-app public receipt path"
 assert_redirect "$APP_JOBS_REDIRECT_URL" "https://app.averray.com/work" "Operator-app legacy jobs path"
 assert_redirect "$APP_JOB_SUBPATH_REDIRECT_URL" "https://app.averray.com/work" "Operator-app legacy job subpath"
 assert_redirect "$PUBLIC_WORK_REDIRECT_URL" "https://app.averray.com/work" "Public-site work path"
