@@ -134,19 +134,31 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
     }
   }
 
+  // A terminal first response wins over concurrent loading. On client-side
+  // navigation the catalogue may still be revalidating when the definition
+  // has already answered 404; showing a retryable outage in that interval is
+  // both noisy and false.
+  if (jobDefinitionFailureKind(definitionQuery.error) === "not_found") {
+    return <MissingTask />;
+  }
+
+  const publicCatalogueResolved = jobsQuery.data !== undefined
+    && jobsQuery.data !== null
+    && !jobsQuery.error;
+  if (publicCatalogueResolved && !publiclyListed) {
+    return <MissingTask />;
+  }
+
   if (definitionQuery.isLoading || jobsQuery.isLoading) {
     return <DetailLoading />;
   }
 
   if (definitionQuery.error) {
-    if (jobDefinitionFailureKind(definitionQuery.error) === "not_found") {
-      return <MissingTask />;
-    }
     return <ReadFailure title="This task could not be loaded" body="The live definition is unreadable, so no terms or claim action are being guessed." retry={() => void definitionQuery.mutate()} />;
   }
 
   if (listingLoaded && !publiclyListed) {
-    return <ReadFailure title="This task is not listed for human work" body="It may be closed, synthetic, disposable proof, or Witness-managed. It is not being presented as public demand." retry={() => void jobsQuery.mutate()} />;
+    return <ReadFailure title="The public work catalogue could not confirm this task" body="No task is being presented while the live catalogue is unreadable." retry={() => void jobsQuery.mutate()} />;
   }
 
   if (!definition) {

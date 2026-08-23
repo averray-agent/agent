@@ -10,6 +10,15 @@ const nextConfig: NextConfig = {
   ...(staticExport
     ? {}
     : {
+        async redirects() {
+          return [
+            {
+              source: "/work/withdraw",
+              destination: "/work-withdraw",
+              permanent: true,
+            },
+          ];
+        },
         async rewrites() {
           return [
             {

@@ -92,7 +92,7 @@ export default function CapabilitiesPage() {
 
       {!unauthorized && session && !viewGate.allowed ? (
         <Notice tone="warn">
-          {viewGate.reason ?? "Your wallet does not have the admin:capabilities:read capability."}
+          {viewGate.reason ?? "Grant feed locked for this session."}
         </Notice>
       ) : null}
 
@@ -119,7 +119,9 @@ export default function CapabilitiesPage() {
 
       <GrantList
         title="Active grants"
-        emptyHint="No active grants. Use the form above to issue one."
+        emptyHint={grantGate.allowed
+          ? "No active grants. Use the form above to issue one."
+          : "No active grants."}
         grants={active}
         presence={grantsPresence}
         revokeGate={revokeGate}
@@ -239,6 +241,22 @@ function IssueGrantPanel({
     }
   }
 
+  if (!gate.allowed) {
+    return (
+      <section className="flex flex-col gap-2 rounded-[var(--radius-lg)] border border-[var(--line)] bg-[var(--paper-solid)] p-5 shadow-[var(--shadow-sm)]">
+        <span
+          className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-accent)]"
+          style={{ letterSpacing: "0.12em" }}
+        >
+          Capability grants
+        </span>
+        <p className="m-0 font-[family-name:var(--font-body)] text-[13px] text-[var(--muted)]">
+          {gate.reason ?? "Grant controls locked for this session."}
+        </p>
+      </section>
+    );
+  }
+
   return (
     <section className="flex flex-col gap-4 rounded-[var(--radius-lg)] border border-[var(--line)] bg-[var(--paper-solid)] p-5 shadow-[var(--shadow-sm)]">
       <header className="flex items-baseline justify-between gap-3">
@@ -248,15 +266,6 @@ function IssueGrantPanel({
         >
           Issue grant
         </span>
-        {!gate.allowed ? (
-          <span
-            className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
-            style={{ letterSpacing: 0 }}
-            title={gate.reason ?? ""}
-          >
-            {gate.reason ?? "Insufficient capability to issue grants"}
-          </span>
-        ) : null}
       </header>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">

@@ -29,7 +29,7 @@ export function WorkerHeader() {
             Find work
           </Link>
           {auth.authenticated ? (
-            <Link className="inline-flex items-center gap-2 rounded-[var(--radius)] px-3 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-[var(--paper)]" href="/work/withdraw" aria-label="Withdraw earnings">
+            <Link className="inline-flex items-center gap-2 rounded-[var(--radius)] px-3 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-[var(--paper)]" href="/work-withdraw" aria-label="Withdraw earnings">
               <Landmark className="h-4 w-4" />
               <span className="hidden sm:inline">Earnings</span>
             </Link>
