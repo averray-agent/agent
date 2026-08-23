@@ -64,9 +64,12 @@ import {
 } from "./external-posting-claimability.js";
 
 // EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
-// Disputed=5, Closed=6. Used to reconcile a mined-but-receipt-lost submit.
+// Disputed=5, Closed=6. Used to reconcile mined-but-receipt-lost lifecycle
+// transitions and to finalize claim timeouts without waiting for a later claim.
+const ESCROW_JOB_STATE_OPEN = 1;
 const ESCROW_JOB_STATE_CLAIMED = 2;
 const ESCROW_JOB_STATE_SUBMITTED = 3;
+const ESCROW_JOB_STATE_CLOSED = 6;
 export const BROKERED_SUBMIT_RECOVERY_MAX_ATTEMPTS = 12;
 const BROKERED_SUBMIT_RECOVERY_BASE_BACKOFF_MS = 15_000;
 const BROKERED_SUBMIT_RECOVERY_MAX_BACKOFF_MS = 5 * 60_000;
@@ -927,6 +930,144 @@ export class JobExecutionService {
         racedInvalidState: false
       });
       return { status: "landed", session: landed, liveJob: live, recovered: true };
+    } finally {
+      await this.stateStore.releaseClaimLock?.(sessionId, lockOwner);
+    }
+  }
+
+  /**
+   * Reconcile a local claimed/expired session against the authoritative chain
+   * state. Claim expiry is not passive in EscrowCore: someone must call
+   * handleClaimTimeout after the deadline to release the job inventory and
+   * settle the abandoned claim economics. Historically that only happened
+   * when another claim attempt arrived, leaving retry-exhausted jobs locked.
+   *
+   * The live state read under the per-session lock is the idempotency guard.
+   * A retry after handleClaimTimeout observes Open and cannot call it twice.
+   */
+  async reconcileClaimSession(sessionId, { now = new Date() } = {}) {
+    const session = await this.requireSession(sessionId);
+    if (
+      !["claimed", "expired"].includes(session.status)
+      || !this.blockchainGateway?.isEnabled?.()
+      || typeof this.blockchainGateway.getJob !== "function"
+    ) {
+      return { status: "not_applicable", session };
+    }
+
+    // Recovery must not depend on the live catalogue: old definitions may have
+    // rotated out, while claimExpiry and worker remain authoritative on-chain.
+    // A minimal job record is sufficient because chainClaimExpiresAt wins over
+    // claimTtlSeconds in the expiry calculation.
+    let job = cloneJsonRecord(session.jobSnapshot?.definition);
+    if (!job) {
+      try {
+        job = this.getJobDefinition(session.jobId);
+      } catch {
+        job = { id: session.jobId };
+      }
+    }
+    const lockOwner = randomUUID();
+    const lockAcquired = await this.stateStore.acquireClaimLock?.(
+      sessionId,
+      lockOwner,
+      this.getClaimLockTtlSeconds(job)
+    );
+    if (lockAcquired === false) {
+      return { status: "deferred", reason: "claim_reconciliation_lock_busy", session };
+    }
+
+    try {
+      const current = await this.requireSession(sessionId);
+      if (!["claimed", "expired"].includes(current.status)) {
+        return { status: "not_applicable", session: current };
+      }
+      const nowMs = new Date(now).getTime();
+      if (!Number.isFinite(nowMs)) {
+        throw new ValidationError("Claim reconciliation clock is invalid.");
+      }
+      const chainJobId = current.chainJobId ?? current.jobId;
+      let live = await this.blockchainGateway.getJob(chainJobId);
+      const liveState = Number(live?.state);
+
+      // A receipt/local-write loss after a complete on-chain lifecycle must
+      // not leave health and the worker profile claiming work is still open.
+      if (liveState === ESCROW_JOB_STATE_CLOSED) {
+        if (current.status === "expired") {
+          return { status: "chain_closed", session: current, liveJob: live };
+        }
+        const closed = transitionSession(current, "closed", {
+          reason: "chain_close_observed",
+          timestamp: new Date(nowMs).toISOString(),
+          metadata: { chainJobId, observedState: liveState }
+        });
+        const persisted = await this.stateStore.upsertSession(closed);
+        const fundedJob = await this.stateStore.getFundedJob?.(persisted.jobId);
+        await this.stateStore.upsertFundedJob?.(
+          updateFundedJobFromSession(fundedJob, { job, session: persisted })
+        );
+        this.publishSessionEvent("session.closed", persisted, {
+          reason: "chain_close_observed",
+          chainJobId,
+          observedState: liveState
+        });
+        return { status: "closed", session: persisted, liveJob: live };
+      }
+
+      const claimExpiresAtValue = brokeredSubmitClaimExpiresAt(current, live);
+      const expiryMs = Date.parse(claimExpiresAtValue ?? "");
+      const expired = Number.isFinite(expiryMs) && expiryMs < nowMs;
+
+      // Another permissionless caller may already have finalized the timeout.
+      // Converge the local record without broadcasting a second transaction.
+      if (liveState === ESCROW_JOB_STATE_OPEN) {
+        const persisted = current.status === "claimed" && expired
+          ? await this.materializeExpiredClaim(current, job, new Date(nowMs))
+          : current;
+        return { status: "expired", session: persisted, liveJob: live, recovered: false };
+      }
+      if (liveState !== ESCROW_JOB_STATE_CLAIMED || !expired) {
+        return {
+          status: liveState === ESCROW_JOB_STATE_CLAIMED ? "not_expired" : "chain_state_unhandled",
+          session: current,
+          liveJob: live,
+          claimExpiresAt: claimExpiresAtValue
+        };
+      }
+      if (!walletsEqual(live?.worker, current.wallet)) {
+        throw new ConflictError(
+          "Claim reconciliation worker does not match the live escrow claimant.",
+          "claim_reconciliation_worker_mismatch",
+          { sessionId, sessionWorker: current.wallet, chainWorker: live?.worker }
+        );
+      }
+      if (typeof this.blockchainGateway.handleClaimTimeout !== "function") {
+        throw new ConflictError(
+          "The blockchain gateway cannot finalize expired claims.",
+          "claim_timeout_unavailable",
+          { sessionId, chainJobId }
+        );
+      }
+
+      await this.blockchainGateway.handleClaimTimeout(chainJobId);
+      live = await this.blockchainGateway.getJob(chainJobId);
+      if (Number(live?.state) !== ESCROW_JOB_STATE_OPEN) {
+        throw new ConflictError(
+          "Claim timeout returned without reopening the on-chain job.",
+          "claim_timeout_not_reopened",
+          { sessionId, chainJobId, liveState: live?.state }
+        );
+      }
+      const persisted = current.status === "claimed"
+        ? await this.materializeExpiredClaim(current, job, new Date(nowMs))
+        : current;
+      return {
+        status: "timed_out",
+        session: persisted,
+        liveJob: live,
+        recovered: true,
+        claimExpiresAt: claimExpiresAtValue
+      };
     } finally {
       await this.stateStore.releaseClaimLock?.(sessionId, lockOwner);
     }

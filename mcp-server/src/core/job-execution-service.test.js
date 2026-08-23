@@ -602,6 +602,151 @@ test("submitWork rejects and materializes expired claims before mutation", async
   assert.equal(stored.expiredAt, "2026-05-01T10:01:00.000Z");
 });
 
+test("claim expiry reconciliation finalizes a lapsed chain claim without waiting for another claimant", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({ id: "expiry-sweep-claimed", rewardAsset: "USDC", claimTtlSeconds: 3600 });
+  const chainJobId = `0x${"31".repeat(32)}`;
+  const claimExpiry = Date.parse("2026-08-23T10:00:00.000Z") / 1000;
+  let liveState = 2;
+  let timeoutCalls = 0;
+  const gateway = {
+    isEnabled: () => true,
+    getJob: async () => ({ state: liveState, worker: WALLET, claimExpiry }),
+    handleClaimTimeout: async (observedJobId) => {
+      assert.equal(observedJobId, chainJobId);
+      timeoutCalls += 1;
+      liveState = 1;
+      return { status: 1, txHash: "0xtimeout" };
+    }
+  };
+  const service = new JobExecutionService(stateStore, gateway, () => job);
+  const claimed = transitionSession({
+    sessionId: `${job.id}:${WALLET}`,
+    jobId: job.id,
+    chainJobId,
+    wallet: WALLET,
+    chainClaimExpiresAt: new Date(claimExpiry * 1000).toISOString(),
+    jobSnapshot: buildJobSnapshot(job)
+  }, "claimed", {
+    reason: "job_claimed",
+    timestamp: "2026-08-23T09:00:00.000Z"
+  });
+  await stateStore.upsertSession(claimed);
+
+  const first = await service.reconcileClaimSession(claimed.sessionId, {
+    now: new Date("2026-08-23T12:00:00.000Z")
+  });
+  const second = await service.reconcileClaimSession(claimed.sessionId, {
+    now: new Date("2026-08-23T12:01:00.000Z")
+  });
+
+  assert.equal(first.status, "timed_out");
+  assert.equal(first.session.status, "expired");
+  assert.equal(second.status, "expired");
+  assert.equal(timeoutCalls, 1, "the live Open re-read prevents a duplicate timeout transaction");
+  assert.equal((await stateStore.getSession(claimed.sessionId)).status, "expired");
+});
+
+test("claim expiry reconciliation finalizes chain custody even after the local session was marked expired", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({ id: "expiry-sweep-local-terminal", rewardAsset: "USDC", claimTtlSeconds: 3600 });
+  const chainJobId = `0x${"32".repeat(32)}`;
+  const claimExpiry = Date.parse("2026-08-23T10:00:00.000Z") / 1000;
+  let liveState = 2;
+  let timeoutCalls = 0;
+  const gateway = {
+    isEnabled: () => true,
+    getJob: async () => ({ state: liveState, worker: WALLET, claimExpiry }),
+    handleClaimTimeout: async () => {
+      timeoutCalls += 1;
+      liveState = 1;
+    }
+  };
+  const service = new JobExecutionService(stateStore, gateway, () => job);
+  const claimed = transitionSession({
+    sessionId: `${job.id}:${WALLET}`,
+    jobId: job.id,
+    chainJobId,
+    wallet: WALLET,
+    chainClaimExpiresAt: new Date(claimExpiry * 1000).toISOString(),
+    jobSnapshot: buildJobSnapshot(job)
+  }, "claimed", { reason: "job_claimed", timestamp: "2026-08-23T09:00:00.000Z" });
+  const locallyExpired = transitionSession(claimed, "expired", {
+    reason: "claim_ttl_expired",
+    timestamp: "2026-08-23T10:00:00.000Z"
+  });
+  await stateStore.upsertSession(locallyExpired);
+
+  const result = await service.reconcileClaimSession(locallyExpired.sessionId, {
+    now: new Date("2026-08-23T12:00:00.000Z")
+  });
+
+  assert.equal(result.status, "timed_out");
+  assert.equal(result.session.status, "expired");
+  assert.equal(timeoutCalls, 1);
+});
+
+test("claim expiry reconciliation does not require a legacy job definition that rotated out", async () => {
+  const stateStore = new MemoryStateStore();
+  const sessionId = `rotated-definition:${WALLET}`;
+  const chainJobId = `0x${"34".repeat(32)}`;
+  const claimExpiry = Date.parse("2026-08-23T10:00:00.000Z") / 1000;
+  let liveState = 2;
+  let timeoutCalls = 0;
+  const claimed = transitionSession({
+    sessionId,
+    jobId: "rotated-definition",
+    chainJobId,
+    wallet: WALLET,
+    chainClaimExpiresAt: new Date(claimExpiry * 1000).toISOString()
+  }, "claimed", { reason: "job_claimed", timestamp: "2026-08-23T09:00:00.000Z" });
+  await stateStore.upsertSession(claimed);
+  const service = new JobExecutionService(stateStore, {
+    isEnabled: () => true,
+    getJob: async () => ({ state: liveState, worker: WALLET, claimExpiry }),
+    handleClaimTimeout: async () => {
+      timeoutCalls += 1;
+      liveState = 1;
+    }
+  }, () => {
+    throw new Error("job_not_found");
+  });
+
+  const result = await service.reconcileClaimSession(sessionId, {
+    now: new Date("2026-08-23T12:00:00.000Z")
+  });
+
+  assert.equal(result.status, "timed_out");
+  assert.equal(result.session.status, "expired");
+  assert.equal(timeoutCalls, 1);
+});
+
+test("claim reconciliation closes a stale local claim when the chain already paid and closed", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({ id: "claim-chain-closed", rewardAsset: "USDC" });
+  const claimed = transitionSession({
+    sessionId: `${job.id}:${WALLET}`,
+    jobId: job.id,
+    chainJobId: `0x${"33".repeat(32)}`,
+    wallet: WALLET,
+    jobSnapshot: buildJobSnapshot(job)
+  }, "claimed", { reason: "job_claimed", timestamp: "2026-08-23T09:00:00.000Z" });
+  await stateStore.upsertSession(claimed);
+  const service = new JobExecutionService(stateStore, {
+    isEnabled: () => true,
+    getJob: async () => ({ state: 6, worker: WALLET, claimExpiry: 0 }),
+    handleClaimTimeout: async () => assert.fail("closed jobs must never run claim timeout")
+  }, () => job);
+
+  const result = await service.reconcileClaimSession(claimed.sessionId, {
+    now: new Date("2026-08-23T12:00:00.000Z")
+  });
+
+  assert.equal(result.status, "closed");
+  assert.equal(result.session.status, "closed");
+  assert.equal((await stateStore.getSession(claimed.sessionId)).status, "closed");
+});
+
 test("claimJob reopens an expired claim when retry budget remains", async () => {
   const stateStore = new MemoryStateStore();
   const job = makeJob({

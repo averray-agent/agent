@@ -1362,6 +1362,10 @@ export class PlatformService {
     return this.jobExecutionService.reconcileBrokeredSubmit(sessionId, options);
   }
 
+  async reconcileClaimSession(sessionId, options = {}) {
+    return this.jobExecutionService.reconcileClaimSession(sessionId, options);
+  }
+
   async resumeSession(sessionId) {
     return this.attachWorkerProgression(await this.jobExecutionService.resumeSession(sessionId));
   }
