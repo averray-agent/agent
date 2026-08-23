@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&family=Space+Mono:wght@400;700&display=swap">
+<style>
+body{margin:0;background:#f3f1ea;font-family:'Manrope',sans-serif;color:#111315;}
+a{color:#1e6642;text-decoration:none;}a:hover{color:#0f6b4f;}
+</style>
+</helmet>
+<div style="padding:44px 48px 120px;min-width:2180px;box-sizing:border-box">
+
+  <div style="max-width:1100px;display:grid;gap:18px">
+    <div>
+      <div style="font-family:'Space Grotesk',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#1e6642;margin-bottom:10px">app.averray.com · mobile companion · 390–768px</div>
+      <h1 style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:40px;line-height:1;margin:0 0 10px">Operator control room — mobile</h1>
+      <p style="font-size:15.5px;line-height:1.6;color:#5f655f;max-width:62ch;margin:0">Same routes as the desktop room, restacked for one hand. Desktop (≥1080px) stays untouched — this is the companion layer below it.</p>
+    </div>
+    <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:20px 22px;display:grid;grid-template-columns:1fr 1fr;gap:24px">
+      <div style="display:grid;gap:8px;align-content:start">
+        <span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#5f655f">Assumptions</span>
+        <div style="font-size:13px;line-height:1.65;color:#111315">Connect and sign-in states are in scope — WalletConnect-first on mobile (SIWE signature unchanged). Same API as desktop, so every figure is a placeholder (<span style="font-family:'Space Mono',monospace">0.00 / —</span>) or desktop-kit sample content tagged <span style="font-family:'Space Mono',monospace">sample</span>. Portrait 390px is the baseline; behavior up to 768px is specced below, not separately mocked.</div>
+      </div>
+      <div style="display:grid;gap:8px;align-content:start">
+        <span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#5f655f">Decisions</span>
+        <div style="font-size:13px;line-height:1.65;color:#111315">Bottom bar carries Overview / Runs / Receipts + More — thumb-first. Wallet identity, sign-out and chain height live in the More sheet, mirroring the desktop rail footer. Each route is restacked (cards, rows, stepper), never a squeezed table. No icon set introduced: bar glyphs reuse the desktop rail's unicode marks.</div>
+      </div>
+      <div style="grid-column:1 / -1;background:#ebe7da;border-radius:8px;padding:10px 14px;font-family:'Space Mono',monospace;font-size:11px;color:#756d58">TRUTH RULES — figures are 0.00 / — placeholders · sample rows tagged · status chips limited to LIVE API · PARTIAL VIEW · LOCKED · copy = screen labels only</div>
+    </div>
+  </div>
+
+  <div style="margin-top:44px">
+    <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:16px"><span style="font-family:'Space Mono',monospace;font-size:10.5px;font-weight:700;background:#a76122;color:#fffdf7;border-radius:4px;padding:2px 7px">ADDENDUM</span><span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:16px">Wallet sign-in &amp; session</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">SIWE over WalletConnect · confirmed engineering</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:36px;align-items:flex-start">
+      <div style="flex:none;width:390px;display:grid;gap:10px" data-screen-label="06 Connect entry">
+        <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Space Mono',monospace;font-size:10.5px;font-weight:700;background:#111315;color:#fffdf7;border-radius:4px;padding:2px 7px">06</span><span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase">Sign in</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">connect entry · WC primary</span></div>
+        <dc-import name="OperatorPhone" auth="signin" nav-style="{{ navStyle }}" show-counts="{{ showCounts }}" hint-size="390px,846px"></dc-import>
+        <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f;line-height:1.6">WalletConnect leads — deeplink rows for acceptance-tested wallets only (MetaMask mobile at launch; the list grows row by row, no redesign). Wallet-browser path and /work are secondary. No dead ends.</div>
+      </div>
+      <div style="flex:none;width:390px;display:grid;gap:10px" data-screen-label="07 SIWE signing">
+        <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Space Mono',monospace;font-size:10.5px;font-weight:700;background:#111315;color:#fffdf7;border-radius:4px;padding:2px 7px">07</span><span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase">SIWE signing</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">in dApp browser · secondary path</span></div>
+        <dc-import name="OperatorPhone" auth="siwe" nav-style="{{ navStyle }}" show-counts="{{ showCounts }}" hint-size="390px,846px"></dc-import>
+        <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f;line-height:1.6">injected provider present. The full SIWE message is an in-page readable block — never a truncated modal. Sign message lands on Overview; Cancel returns.</div>
+      </div>
+      <div style="flex:none;width:390px;display:grid;gap:10px" data-screen-label="08 Approve in wallet">
+        <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Space Mono',monospace;font-size:10.5px;font-weight:700;background:#111315;color:#fffdf7;border-radius:4px;padding:2px 7px">08</span><span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase">WalletConnect</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">approve in wallet · waiting</span></div>
+        <dc-import name="OperatorPhone" auth="wc-waiting" nav-style="{{ navStyle }}" show-counts="{{ showCounts }}" hint-size="390px,846px"></dc-import>
+        <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f;line-height:1.6">signing happens in the wallet app, so attention leaves this screen: it shows what was sent (the full SIWE message) and a clear Abort. Mono "sample outcomes" jump to approved / chain refused / pairing dropped.</div>
+      </div>
+      <div style="flex:none;width:390px;display:grid;gap:10px" data-screen-label="09 Session expiry">
+        <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Space Mono',monospace;font-size:10.5px;font-weight:700;background:#111315;color:#fffdf7;border-radius:4px;padding:2px 7px">09</span><span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase">Session</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">expiry surfaced</span></div>
+        <dc-import name="OperatorPhone" route="overview" session="expiring" nav-style="{{ navStyle }}" show-counts="{{ showCounts }}" hint-size="390px,846px"></dc-import>
+        <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f;line-height:1.6">sessions persist — no re-sign per visit, never automatic. Amber strip = SIWE expiry (Re-sign is a gesture); a neutral strip covers WC pairing drop (Reconnect). The sheet card lists both expiries separately, with Sign out and Disconnect as distinct actions.</div>
+      </div>
+      <div style="flex:none;width:390px;display:grid;gap:10px" data-screen-label="10 Chain refused">
+        <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Space Mono',monospace;font-size:10.5px;font-weight:700;background:#111315;color:#fffdf7;border-radius:4px;padding:2px 7px">10</span><span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase">Chain refused</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">refusal · named honestly</span></div>
+        <dc-import name="OperatorPhone" auth="wc-chain-refused" nav-style="{{ navStyle }}" show-counts="{{ showCounts }}" hint-size="390px,846px"></dc-import>
+        <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f;line-height:1.6">the wallet declined Polkadot Hub — named, with what to do (switch the network in the wallet). One Retry, one Back.</div>
+      </div>
+      <div style="flex:none;width:390px;display:grid;gap:10px" data-screen-label="11 Pairing expired">
+        <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Space Mono',monospace;font-size:10.5px;font-weight:700;background:#111315;color:#fffdf7;border-radius:4px;padding:2px 7px">11</span><span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase">Pairing expired</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">refusal · one retry</span></div>
+        <dc-import name="OperatorPhone" auth="wc-expired" nav-style="{{ navStyle }}" show-counts="{{ showCounts }}" hint-size="390px,846px"></dc-import>
+        <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f;line-height:1.6">pairing dropped before approval — no signature was made. One retry returns to the connect entry; no retry loops. /work stays open.</div>
+      </div>
+      <div style="flex:none;width:560px;display:grid;gap:10px" data-screen-label="12 Desktop connect">
+        <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Space Mono',monospace;font-size:10.5px;font-weight:700;background:#111315;color:#fffdf7;border-radius:4px;padding:2px 7px">12</span><span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase">Desktop connect</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">injected primary · QR secondary</span></div>
+        <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.14);border-radius:14px;box-shadow:0 24px 60px rgba(34,43,36,0.10);overflow:hidden">
+          <div style="display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid rgba(17,19,21,0.08)">
+            <span style="width:11px;height:11px;border-radius:50%;background:#8ee0b4"></span><span style="width:11px;height:11px;border-radius:50%;background:#d8e8ff"></span><span style="width:11px;height:11px;border-radius:50%;background:#f5dfc6"></span>
+            <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;margin-left:6px">Connect &amp; sign in</span>
+            <span style="margin-left:auto;font-family:'Space Mono',monospace;font-size:10px;color:#5f655f">app.averray.com · desktop</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr">
+            <div style="padding:18px;display:grid;gap:11px;align-content:start;border-right:1px solid rgba(17,19,21,0.08)">
+              <span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#1e6642">Injected extension · primary</span>
+              <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-family:'Space Mono',monospace;font-size:11px;color:#5f655f">injected provider</span><span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:#d6eadf;color:#1e6642;font-family:'Space Grotesk',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">LIVE API</span></div>
+              <button style="height:44px;border-radius:8px;border:1px solid transparent;background:#1e6642;color:#fffdf7;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:11.5px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">Connect &amp; sign in</button>
+              <span style="font-family:'Space Mono',monospace;font-size:10px;color:#5f655f">siwe · signs in the extension</span>
+            </div>
+            <div style="padding:18px;display:grid;gap:11px;align-content:start;justify-items:start">
+              <span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#5f655f">Connect a mobile wallet</span>
+              <div style="width:128px;height:128px;border:1px dashed rgba(17,19,21,0.30);border-radius:8px;display:grid;place-items:center;text-align:center;padding:8px;box-sizing:border-box"><span style="font-family:'Space Mono',monospace;font-size:10px;color:#5f655f;line-height:1.6">pairing QR<br>walletconnect</span></div>
+              <span style="font-family:'Space Mono',monospace;font-size:10px;color:#5f655f">scan with MetaMask mobile</span>
+              <span style="font-family:'Space Mono',monospace;font-size:10px;color:#5f655f">code expires — · <span style="color:#1e6642;text-decoration:underline;cursor:pointer">regenerate ›</span></span>
+            </div>
+          </div>
+        </div>
+        <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f;line-height:1.6">desktop keeps the extension primary; WalletConnect appears as "Connect a mobile wallet" — QR panel with visible code expiry. Panel mock only; the desktop app is otherwise untouched.</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:36px;align-items:flex-start;margin-top:40px">
+    <div style="flex:none;width:390px;display:grid;gap:10px" data-screen-label="01 Overview">
+      <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Space Mono',monospace;font-size:10.5px;font-weight:700;background:#111315;color:#fffdf7;border-radius:4px;padding:2px 7px">01</span><span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase">Overview</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">nav closed</span></div>
+      <dc-import name="OperatorPhone" route="overview" nav-style="{{ navStyle }}" show-counts="{{ showCounts }}" hint-size="390px,846px"></dc-import>
+      <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f;line-height:1.6">verdict → KPIs → capabilities. Bottom bar routes are live — tap to move rooms.</div>
+    </div>
+    <div style="flex:none;width:390px;display:grid;gap:10px" data-screen-label="02 Navigation open">
+      <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Space Mono',monospace;font-size:10.5px;font-weight:700;background:#111315;color:#fffdf7;border-radius:4px;padding:2px 7px">02</span><span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase">Navigation</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">More sheet open</span></div>
+      <dc-import name="OperatorPhone" route="overview" sheet-open="{{ true }}" nav-style="{{ navStyle }}" show-counts="{{ showCounts }}" hint-size="390px,846px"></dc-import>
+      <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f;line-height:1.6">full route map (Room / Capital / Governance) + connected identity: wallet, chain, both expiries, Sign out and Disconnect. Tap backdrop to close.</div>
+    </div>
+    <div style="flex:none;width:390px;display:grid;gap:10px" data-screen-label="03 Runs">
+      <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Space Mono',monospace;font-size:10.5px;font-weight:700;background:#111315;color:#fffdf7;border-radius:4px;padding:2px 7px">03</span><span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase">Runs</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">card per run</span></div>
+      <dc-import name="OperatorPhone" route="runs" nav-style="{{ navStyle }}" show-counts="{{ showCounts }}" hint-size="390px,846px"></dc-import>
+      <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f;line-height:1.6">collapsible filter bar; one primary action per card. Tap Filters, then a state chip — the list filters live.</div>
+    </div>
+    <div style="flex:none;width:390px;display:grid;gap:10px" data-screen-label="04 Receipts">
+      <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Space Mono',monospace;font-size:10.5px;font-weight:700;background:#111315;color:#fffdf7;border-radius:4px;padding:2px 7px">04</span><span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase">Receipts</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">rows + detail push</span></div>
+      <dc-import name="OperatorPhone" route="receipts" nav-style="{{ navStyle }}" show-counts="{{ showCounts }}" hint-size="390px,846px"></dc-import>
+      <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f;line-height:1.6">pinned search + segments; compact 56px rows. Try typing "docs", or tap a row for the receipt detail.</div>
+    </div>
+    <div style="flex:none;width:390px;display:grid;gap:10px" data-screen-label="05 Posting">
+      <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Space Mono',monospace;font-size:10.5px;font-weight:700;background:#111315;color:#fffdf7;border-radius:4px;padding:2px 7px">05</span><span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;text-transform:uppercase">Posting</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">4-step stepper</span></div>
+      <dc-import name="OperatorPhone" route="posting" nav-style="{{ navStyle }}" show-counts="{{ showCounts }}" hint-size="390px,846px"></dc-import>
+      <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f;line-height:1.6">anchor → verify → draft → fund. Segments jump back; primary button advances.</div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:36px;align-items:flex-start;margin-top:48px">
+    <div style="flex:none;width:1050px;background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:24px 26px" data-screen-label="Breakpoint spec">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:6px">
+        <div>
+          <div style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#1e6642;margin-bottom:6px">Breakpoint spec</div>
+          <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px">What changes at 768px</div>
+        </div>
+        <div style="display:flex;gap:22px;align-items:flex-end">
+          <div style="display:grid;gap:6px;justify-items:center">
+            <div style="width:104px;height:190px;border:1px solid rgba(17,19,21,0.16);border-radius:10px;background:#f3f1ea;display:flex;flex-direction:column;overflow:hidden">
+              <div style="height:12px;border-bottom:1px solid rgba(17,19,21,0.10);background:#fffdf7"></div>
+              <div style="flex:1;padding:5px;display:grid;gap:4px;align-content:start">
+                <div style="height:26px;border-radius:4px;background:#d6eadf"></div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px"><div style="height:18px;border-radius:4px;background:#fffdf7;border:1px solid rgba(17,19,21,0.10)"></div><div style="height:18px;border-radius:4px;background:#fffdf7;border:1px solid rgba(17,19,21,0.10)"></div></div>
+                <div style="height:13px;border-radius:4px;background:#fffdf7;border:1px solid rgba(17,19,21,0.10)"></div>
+                <div style="height:13px;border-radius:4px;background:#fffdf7;border:1px solid rgba(17,19,21,0.10)"></div>
+                <div style="height:13px;border-radius:4px;background:#fffdf7;border:1px solid rgba(17,19,21,0.10)"></div>
+              </div>
+              <div style="height:16px;border-top:1px solid rgba(17,19,21,0.10);background:#fffdf7;display:flex;align-items:center;justify-content:space-around"><span style="width:5px;height:5px;border-radius:50%;background:#1e6642"></span><span style="width:5px;height:5px;border-radius:50%;background:rgba(17,19,21,0.22)"></span><span style="width:5px;height:5px;border-radius:50%;background:rgba(17,19,21,0.22)"></span><span style="width:5px;height:5px;border-radius:50%;background:rgba(17,19,21,0.22)"></span></div>
+            </div>
+            <span style="font-family:'Space Mono',monospace;font-size:10px;color:#5f655f">390 · single column</span>
+          </div>
+          <div style="display:grid;gap:6px;justify-items:center">
+            <div style="width:200px;height:190px;border:1px solid rgba(17,19,21,0.16);border-radius:10px;background:#f3f1ea;display:flex;flex-direction:column;overflow:hidden">
+              <div style="height:12px;border-bottom:1px solid rgba(17,19,21,0.10);background:#fffdf7"></div>
+              <div style="flex:1;padding:5px;display:grid;gap:4px;align-content:start">
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px"><div style="height:16px;border-radius:4px;background:#d6eadf"></div><div style="height:16px;border-radius:4px;background:#fffdf7;border:1px solid rgba(17,19,21,0.10)"></div><div style="height:16px;border-radius:4px;background:#fffdf7;border:1px solid rgba(17,19,21,0.10)"></div><div style="height:16px;border-radius:4px;background:#fffdf7;border:1px solid rgba(17,19,21,0.10)"></div></div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+                  <div style="display:grid;gap:4px"><div style="height:20px;border-radius:4px;background:#fffdf7;border:1px solid rgba(17,19,21,0.10)"></div><div style="height:20px;border-radius:4px;background:#fffdf7;border:1px solid rgba(17,19,21,0.10)"></div><div style="height:20px;border-radius:4px;background:#fffdf7;border:1px solid rgba(17,19,21,0.10)"></div></div>
+                  <div style="display:grid;gap:4px"><div style="height:20px;border-radius:4px;background:#fffdf7;border:1px solid rgba(17,19,21,0.10)"></div><div style="height:20px;border-radius:4px;background:#fffdf7;border:1px solid rgba(17,19,21,0.10)"></div><div style="height:20px;border-radius:4px;background:#fffdf7;border:1px solid rgba(17,19,21,0.10)"></div></div>
+                </div>
+              </div>
+              <div style="height:16px;border-top:1px solid rgba(17,19,21,0.10);background:#fffdf7;display:flex;align-items:center;justify-content:space-around"><span style="width:5px;height:5px;border-radius:50%;background:#1e6642"></span><span style="width:5px;height:5px;border-radius:50%;background:rgba(17,19,21,0.22)"></span><span style="width:5px;height:5px;border-radius:50%;background:rgba(17,19,21,0.22)"></span><span style="width:5px;height:5px;border-radius:50%;background:rgba(17,19,21,0.22)"></span></div>
+            </div>
+            <span style="font-family:'Space Mono',monospace;font-size:10px;color:#5f655f">768 · two columns, bar persists</span>
+          </div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:150px 1fr 1fr;gap:0 18px;padding:9px 0;border-bottom:1px solid rgba(17,19,21,0.12)">
+        <span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#5f655f">Component</span>
+        <span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#5f655f">390 baseline</span>
+        <span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#5f655f">≥768</span>
+      </div>
+      <sc-for list="{{ specRows }}" as="s" hint-placeholder-count="8">
+        <div style="display:grid;grid-template-columns:150px 1fr 1fr;gap:0 18px;padding:11px 0;border-bottom:1px solid rgba(17,19,21,0.07);align-items:start">
+          <span style="font-family:'Space Grotesk',sans-serif;font-size:12.5px;font-weight:700">{{ s.c }}</span>
+          <span style="font-size:12.5px;line-height:1.55;color:#111315">{{ s.a }}</span>
+          <span style="font-size:12.5px;line-height:1.55;color:#111315">{{ s.b }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="flex:none;width:1050px;display:grid;gap:36px">
+      <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:24px 26px" data-screen-label="Token mapping">
+        <div style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#1e6642;margin-bottom:6px">Token mapping</div>
+        <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:20px;margin-bottom:10px">New components → existing tokens</div>
+        <sc-for list="{{ tokenRows }}" as="t" hint-placeholder-count="10">
+          <div style="display:grid;grid-template-columns:170px 1fr;gap:0 18px;padding:10px 0;border-bottom:1px solid rgba(17,19,21,0.07);align-items:start">
+            <span style="font-family:'Space Grotesk',sans-serif;font-size:12.5px;font-weight:700">{{ t.c }}</span>
+            <span style="font-family:'Space Mono',monospace;font-size:11px;line-height:1.65;color:#5f655f">{{ t.v }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:20px 26px" data-screen-label="Flags and next steps">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+          <div>
+            <span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#a76122">Flagged substitutions</span>
+            <div style="font-size:12.5px;line-height:1.65;margin-top:8px">The brief specifies <span style="font-family:'Space Mono',monospace">Space Mono</span> for data; the design-system token lists JetBrains Mono. Space Mono is used here — swapping is one font-family change. Bar glyphs (▦ ▤ ◇ ⋯) reuse the desktop rail's unicode marks; no icon library introduced. A label-only bar variant is available in Tweaks.</div>
+          </div>
+          <div>
+            <span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#5f655f">Next steps</span>
+            <div style="font-size:12.5px;line-height:1.65;margin-top:8px">WalletConnect relay-telemetry and reconnect-in-place states · empty and error states per route · 768px build-out of the spec above · motion pass on sheet + detail push · midnight variant if the room ever needs a dark ops mode.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;navStyle&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;glyph+label&quot;,&quot;options&quot;:[&quot;glyph+label&quot;,&quot;label-only&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Navigation&quot;},&quot;showCounts&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Navigation&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      navStyle: this.props.navStyle ?? 'glyph+label',
+      showCounts: this.props.showCounts ?? true,
+      specRows: [
+        { c: 'Navigation', a: 'Bottom bar: Overview · Runs · Receipts · More; sheet rises from the bottom edge.', b: 'Bar unchanged (targets stay 44px); More becomes a 360px right-anchored drawer. Rail returns only at desktop ≥1080.' },
+        { c: 'Overview', a: 'Verdict card → 2×2 KPI grid → capability list, stacked by priority.', b: 'KPIs become a 4-up strip; verdict and capabilities sit side by side (7/5 split).' },
+        { c: 'Runs', a: 'Filters collapsed behind one button; one card per run, full width.', b: 'Filter row always open inline; run cards flow 2-up. Action button stays right-aligned in the card.' },
+        { c: 'Receipts', a: 'Pinned search + segments; 2-line 56px rows; detail pushes full-screen.', b: 'Rows gain agent + policy columns; detail becomes a 420px side sheet over the list.' },
+        { c: 'Posting', a: 'Horizontal 4-segment stepper; one step per screen.', b: 'Vertical step rail on the left, form on the right (max 520px). All step labels visible.' },
+        { c: 'Agents', a: 'Single-column directory cards with tier chips.', b: '2-up card grid.' },
+        { c: 'Treasury', a: 'Stacked figures, then policy-state list. No actions — read-only.', b: 'Figures 3-up in one row; policy list unchanged.' },
+        { c: 'Connect', a: 'WalletConnect-first entry: deeplink rows for acceptance-tested wallets; waiting and refusal states full-screen; SIWE message readable in-page.', b: 'Injected extension primary; WalletConnect = "Connect a mobile wallet" QR panel with code expiry (frame 12). States center as a 420px card.' },
+        { c: 'Global', a: 'Page padding 16px · hit targets ≥44px · type scale fixed.', b: 'Padding 24px · content max-width 720px, centered · targets and type unchanged.' }
+      ],
+      tokenRows: [
+        { c: 'Bottom bar', v: '#fffdf7 surface · top hairline rgba(17,19,21,.12) · active = #1e6642 on rgba(30,102,66,.10) wash (desktop rail active state) · Space Grotesk 700 labels · items ≥44px' },
+        { c: 'More sheet', v: 'paper rgba(255,253,247,.96) + blur(16) · backdrop rgba(17,19,21,.30) · 18px top radius · section labels reuse rail__section-label · wallet card reuses rail__wallet + sign tint rgba(30,102,66,.06)' },
+        { c: 'Status chips', v: 'LIVE API #d6eadf / #1e6642 · PARTIAL VIEW #f4e3cf / #a76122 · LOCKED #ebe7da / #756d58 · 999px pill, Space Grotesk 700, uppercase, .08em' },
+        { c: 'Verdict card', v: '#fffdf7 card, 14px radius, hairline · large LIVE API pill · mono chain / wallet meta in #5f655f' },
+        { c: 'Run card', v: '#fffdf7 · hairline rgba(17,19,21,.12) · 14px radius · state pills identical to desktop table pills · mono meta #5f655f · inner divider rgba(17,19,21,.08)' },
+        { c: 'Filter bar', v: 'chips 8px radius · selected = #d6eadf wash + border rgba(30,102,66,.35) · 44px height · sticky on #f3f1ea canvas' },
+        { c: 'Receipt rows', v: '56px compact rows · dividers rgba(17,19,21,.07) · mono ids · status dot #1e6642 / #a76122 · detail reuses desktop receipt drawer dl + dark code block #131715' },
+        { c: 'Stepper', v: 'segments: #1e6642 fill vs rgba(17,19,21,.14) track · step labels = eyebrow style · inputs 48px, 8px radius, #f7f9fa fill · sign strip = desktop .sign card' },
+        { c: 'Buttons', v: 'primary #1e6642 on #fffdf7 text · ghost #fffdf7 + hairline · dispute ghost rgba(167,97,34,.38) border, #a76122 text · all ≥44px, 8px radius' },
+        { c: 'Connect states', v: 'wallet list: 60px rows, hairline dividers, named wallets only (mark = neutral placeholder square, grows row by row) · waiting = text feedback, no spinner (DS stance) · chain refusal = #f4e3cf amber card · pairing expiry = paper card · SIWE message block #f7f9fa, mono 11/1.75 · sample-outcome controls mono-tagged' },
+        { c: 'Session strips', v: 'siwe expiry: #f4e3cf wash, #a76122 ink, Re-sign · wc pairing drop: #ebe7da neutral wash, Reconnect · sheet card lists both expiries + wallet + chain · Sign out (neutral ghost) vs Disconnect (amber ghost)' },
+        { c: 'Type', v: 'Space Grotesk (display, labels) · Manrope (body) · Space Mono (data — per app brief; DS token = JetBrains Mono, flagged) · mobile minimums: body 12.5px, mono meta 10.5px' },
+        { c: 'Elevation', v: 'in-app cards drop --shadow-card, hairlines only — calmer at density · the 24/60 shadow appears once, on the device mock frame' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

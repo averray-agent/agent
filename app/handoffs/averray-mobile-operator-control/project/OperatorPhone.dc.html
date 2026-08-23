@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&family=Space+Mono:wght@400;700&display=swap">
+<style>
+body{margin:0;background:#f3f1ea;font-family:'Manrope',sans-serif;}
+a{color:#1e6642;text-decoration:none;}a:hover{color:#0f6b4f;}
+@keyframes avyFade{from{opacity:0}to{opacity:1}}
+@keyframes avyUp{from{transform:translateY(30px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes avyIn{from{transform:translateX(28px);opacity:0}to{transform:translateX(0);opacity:1}}
+</style>
+</helmet>
+<div style="width:390px;height:844px;margin:0 auto;position:relative;display:flex;flex-direction:column;background:#f3f1ea;border:1px solid rgba(17,19,21,0.14);border-radius:26px;overflow:hidden;box-shadow:0 24px 60px rgba(34,43,36,0.10);font-family:'Manrope',sans-serif;color:#111315">
+
+  <div style="height:38px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 22px 0 24px">
+    <span style="font-family:'Space Mono',monospace;font-size:12px;font-weight:700">9:41</span>
+    <div style="display:flex;align-items:center;gap:7px">
+      <div style="display:flex;align-items:flex-end;gap:2px">
+        <div style="width:3px;height:4px;background:#111315;border-radius:1px"></div>
+        <div style="width:3px;height:6px;background:#111315;border-radius:1px"></div>
+        <div style="width:3px;height:8px;background:#111315;border-radius:1px"></div>
+        <div style="width:3px;height:10px;background:#111315;border-radius:1px;opacity:0.35"></div>
+      </div>
+      <div style="width:21px;height:10px;border:1px solid rgba(17,19,21,0.45);border-radius:3px;padding:1px;box-sizing:border-box"><div style="width:70%;height:100%;background:#111315;border-radius:1.5px"></div></div>
+    </div>
+  </div>
+
+  <div style="flex:none;display:flex;align-items:center;gap:10px;padding:8px 16px 12px">
+    <div style="width:26px;height:26px;flex:none;border-radius:7px;background:#1e6642;display:grid;place-items:center;color:#fffdf7;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px">A</div>
+    <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:18px;line-height:1">{{ title }}</div>
+    <div style="margin-left:auto;display:flex;align-items:center">
+      <sc-if value="{{ chipOk }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:999px;background:#d6eadf;color:#1e6642;font-family:'Space Grotesk',sans-serif;font-size:9.5px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase"><span style="width:5px;height:5px;border-radius:50%;background:currentColor;opacity:0.75"></span>LIVE API</span></sc-if>
+      <sc-if value="{{ chipWarn }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:999px;background:#f4e3cf;color:#a76122;font-family:'Space Grotesk',sans-serif;font-size:9.5px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase"><span style="width:5px;height:5px;border-radius:50%;background:currentColor;opacity:0.75"></span>PARTIAL VIEW</span></sc-if>
+      <sc-if value="{{ chipNeutral }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:999px;background:#ebe7da;color:#756d58;font-family:'Space Grotesk',sans-serif;font-size:9.5px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase"><span style="width:5px;height:5px;border-radius:50%;background:currentColor;opacity:0.75"></span>LOCKED</span></sc-if>
+    </div>
+  </div>
+
+  <div style="flex:1;min-height:0;overflow-y:auto;padding:4px 16px 28px;display:flex;flex-direction:column;gap:12px">
+
+    <sc-if value="{{ sessionExpiring }}" hint-placeholder-val="{{ false }}">
+      <div style="background:#f4e3cf;border:1px solid rgba(167,97,34,0.30);border-radius:10px;padding:10px 12px;display:flex;align-items:center;gap:10px">
+        <div style="flex:1;min-width:0;display:grid;gap:2px">
+          <span style="font-family:'Space Grotesk',sans-serif;font-size:10.5px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#a76122">Session expires soon</span>
+          <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#a76122">siwe · expires — · 0xFd2E…6519</span>
+        </div>
+        <button onClick="{{ goSiwe }}" style="flex:none;height:44px;padding:0 14px;border-radius:8px;border:1px solid rgba(167,97,34,0.38);background:#fffdf7;color:#a76122;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">Re-sign</button>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ pairingDropped }}" hint-placeholder-val="{{ false }}">
+      <div style="background:#ebe7da;border:1px solid rgba(17,19,21,0.14);border-radius:10px;padding:10px 12px;display:flex;align-items:center;gap:10px">
+        <div style="flex:1;min-width:0;display:grid;gap:2px">
+          <span style="font-family:'Space Grotesk',sans-serif;font-size:10.5px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#756d58">Wallet pairing dropped</span>
+          <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#756d58">wc · session still active · pairing needed before the next signature</span>
+        </div>
+        <button onClick="{{ goWaiting }}" style="flex:none;height:44px;padding:0 14px;border-radius:8px;border:1px solid rgba(17,19,21,0.16);background:#fffdf7;color:#111315;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">Reconnect</button>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isSignin }}" hint-placeholder-val="{{ false }}">
+      <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:18px 16px;display:grid;gap:12px;margin-top:4px">
+        <span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#1e6642">Connect &amp; sign in</span>
+        <div style="font-size:14px;line-height:1.6;color:#111315">Sign-in uses a wallet signature (SIWE). Mobile browsers have no extension wallets — connect through WalletConnect.</div>
+        <div style="display:grid;gap:9px;border-top:1px solid rgba(17,19,21,0.08);padding-top:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">walletconnect relay</span><span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:#d6eadf;color:#1e6642;font-family:'Space Grotesk',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">LIVE API</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">injected provider</span><span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:#ebe7da;color:#756d58;font-family:'Space Grotesk',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">LOCKED</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">siwe endpoint</span><span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:#d6eadf;color:#1e6642;font-family:'Space Grotesk',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">LIVE API</span></div>
+        </div>
+      </div>
+      <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;overflow:hidden">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:13px 16px;border-bottom:1px solid rgba(17,19,21,0.08)">
+          <span style="font-family:'Space Grotesk',sans-serif;font-size:12.5px;font-weight:700">Connect with WalletConnect</span>
+          <span style="font-family:'Space Mono',monospace;font-size:10px;color:#5f655f">acceptance-tested</span>
+        </div>
+        <div onClick="{{ goWaiting }}" style="display:flex;align-items:center;gap:12px;min-height:60px;padding:8px 16px;border-bottom:1px solid rgba(17,19,21,0.06);cursor:pointer">
+          <div style="width:30px;height:30px;flex:none;border-radius:8px;background:#ebe7da;display:grid;place-items:center;font-family:'Space Mono',monospace;font-size:12px;font-weight:700;color:#756d58">M</div>
+          <div style="flex:1;min-width:0;display:grid;gap:1px">
+            <span style="font-size:14px;font-weight:700">MetaMask mobile</span>
+            <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">wc: deeplink · opens the app</span>
+          </div>
+          <span style="color:#1e6642;font-size:17px;line-height:1">›</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;min-height:52px;padding:8px 16px;opacity:0.7">
+          <div style="width:30px;height:30px;flex:none;border-radius:8px;border:1px dashed rgba(17,19,21,0.25);box-sizing:border-box"></div>
+          <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">more wallets appear here as they pass acceptance</span>
+        </div>
+      </div>
+      <button onClick="{{ goSiwe }}" style="height:48px;border-radius:8px;border:1px solid rgba(17,19,21,0.16);background:#fffdf7;color:#111315;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">Open in your wallet's browser</button>
+      <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f;text-align:center;margin-top:-4px">secondary · uses the wallet's own dApp browser</div>
+      <div style="text-align:center;padding:8px 0 2px;display:grid;gap:3px">
+        <span style="font-size:13.5px;font-weight:600;color:#1e6642;cursor:pointer">Browse paid work without signing in ›</span>
+        <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">/work · public · no wallet needed</span>
+      </div>
+      <div style="font-family:'Space Mono',monospace;font-size:10px;color:#5f655f;text-align:center">on desktop · injected extension stays primary</div>
+    </sc-if>
+
+    <sc-if value="{{ isSiwe }}" hint-placeholder-val="{{ false }}">
+      <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:16px;display:grid;gap:9px;margin-top:4px">
+        <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#1e6642">Wallet detected</span><span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:#d6eadf;color:#1e6642;font-family:'Space Grotesk',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">LIVE API</span></div>
+        <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">provider</span><span style="font-family:'Space Mono',monospace;font-size:11.5px">injected · in-app browser</span></div>
+        <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">account</span><span style="font-family:'Space Mono',monospace;font-size:11.5px">0xFd2E…6519</span></div>
+      </div>
+      <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:16px;display:grid;gap:10px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#5f655f">SIWE message</span><span style="font-family:'Space Mono',monospace;font-size:10px;color:#5f655f">read before signing</span></div>
+        <div style="background:#f7f9fa;border:1px solid rgba(17,19,21,0.08);border-radius:8px;padding:12px 13px;font-family:'Space Mono',monospace;font-size:11px;line-height:1.75;color:#111315;word-break:break-word">app.averray.com wants you to sign in with your Ethereum account:<br>0xFd2EAE2043…Fd6519<br><br>Sign in to the Averray operator control room.<br><br>URI: https://app.averray.com<br>Version: 1<br>Chain ID: —<br>Nonce: —<br>Issued at: —<br>Expires: —</div>
+        <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">signature only · no gas · no transaction</span>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button onClick="{{ goSignin }}" style="height:48px;padding:0 18px;border-radius:8px;border:1px solid rgba(17,19,21,0.16);background:#fffdf7;color:#111315;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">Cancel</button>
+        <button onClick="{{ signMsg }}" style="flex:1;height:48px;border-radius:8px;border:1px solid transparent;background:#1e6642;color:#fffdf7;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">Sign message</button>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isWcWaiting }}" hint-placeholder-val="{{ false }}">
+      <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:16px;display:grid;gap:10px;margin-top:4px">
+        <span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#1e6642">Approve in your wallet</span>
+        <div style="font-size:14px;line-height:1.6;color:#111315">The sign-in request is open in MetaMask mobile. Nothing proceeds without your signature there.</div>
+        <div style="display:grid;gap:8px;border-top:1px solid rgba(17,19,21,0.08);padding-top:11px">
+          <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">wallet</span><span style="font-family:'Space Mono',monospace;font-size:11.5px">MetaMask mobile · wc</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">status</span><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#1e6642">waiting for approval…</span></div>
+        </div>
+      </div>
+      <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:16px;display:grid;gap:10px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#5f655f">What was sent · SIWE message</span></div>
+        <div style="background:#f7f9fa;border:1px solid rgba(17,19,21,0.08);border-radius:8px;padding:12px 13px;font-family:'Space Mono',monospace;font-size:11px;line-height:1.75;color:#111315;word-break:break-word">app.averray.com wants you to sign in with your Ethereum account:<br>0xFd2EAE2043…Fd6519<br><br>Sign in to the Averray operator control room.<br><br>URI: https://app.averray.com<br>Version: 1<br>Chain ID: — (Polkadot Hub)<br>Nonce: —<br>Issued at: —<br>Expires: —</div>
+        <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">signature only · no gas · no transaction</span>
+      </div>
+      <button onClick="{{ goSignin }}" style="height:48px;border-radius:8px;border:1px solid rgba(17,19,21,0.16);background:#fffdf7;color:#111315;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">Abort request</button>
+      <div style="display:flex;gap:10px;justify-content:center;align-items:center;font-family:'Space Mono',monospace;font-size:10px;color:#5f655f">sample outcomes:
+        <span onClick="{{ wcApprove }}" style="color:#1e6642;cursor:pointer;text-decoration:underline">approved</span>
+        <span onClick="{{ wcRefuse }}" style="color:#a76122;cursor:pointer;text-decoration:underline">chain refused</span>
+        <span onClick="{{ wcExpire }}" style="color:#756d58;cursor:pointer;text-decoration:underline">pairing dropped</span>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isWcRefused }}" hint-placeholder-val="{{ false }}">
+      <div style="background:#f4e3cf;border:1px solid rgba(167,97,34,0.30);border-radius:14px;padding:16px;display:grid;gap:10px;margin-top:4px">
+        <span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#a76122">Chain rejected</span>
+        <div style="font-size:14px;line-height:1.6;color:#111315">The wallet declined the requested chain. In MetaMask mobile, switch the active network to Polkadot Hub, then retry.</div>
+        <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.10);border-radius:8px;padding:11px 13px;display:grid;gap:8px">
+          <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">requested chain</span><span style="font-family:'Space Mono',monospace;font-size:11.5px">Polkadot Hub</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">chain approval</span><span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:#ebe7da;color:#756d58;font-family:'Space Grotesk',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">LOCKED</span></div>
+        </div>
+      </div>
+      <button onClick="{{ goWaiting }}" style="height:48px;border-radius:8px;border:1px solid transparent;background:#1e6642;color:#fffdf7;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">Retry connection</button>
+      <button onClick="{{ goSignin }}" style="height:44px;border-radius:8px;border:none;background:transparent;color:#1e6642;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">‹ Back to sign in</button>
+    </sc-if>
+
+    <sc-if value="{{ isWcExpired }}" hint-placeholder-val="{{ false }}">
+      <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:16px;display:grid;gap:10px;margin-top:4px">
+        <span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#756d58">Pairing expired</span>
+        <div style="font-size:14px;line-height:1.6;color:#111315">The WalletConnect pairing dropped before approval. No signature was made.</div>
+        <div style="display:grid;gap:8px;border-top:1px solid rgba(17,19,21,0.08);padding-top:11px">
+          <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">pairing uri</span><span style="font-family:'Space Mono',monospace;font-size:11.5px">wc:— · expired</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">relay</span><span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:#f4e3cf;color:#a76122;font-family:'Space Grotesk',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">PARTIAL VIEW</span></div>
+        </div>
+      </div>
+      <button onClick="{{ goSignin }}" style="height:48px;border-radius:8px;border:1px solid transparent;background:#1e6642;color:#fffdf7;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">Retry pairing</button>
+      <div style="text-align:center;display:grid;gap:3px;padding-top:2px">
+        <span style="font-size:13.5px;font-weight:600;color:#1e6642;cursor:pointer">Browse paid work without signing in ›</span>
+        <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">/work · public · no wallet needed</span>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+      <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:16px;display:grid;gap:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#1e6642">Room status</span>
+          <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">chain # —</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 14px;border-radius:999px;background:#d6eadf;color:#1e6642;font-family:'Space Grotesk',sans-serif;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;opacity:0.75"></span>LIVE API</span>
+          <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">— live · — locked</span>
+        </div>
+        <div style="border-top:1px solid rgba(17,19,21,0.08);padding-top:12px;display:grid;gap:6px">
+          <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:11px;color:#5f655f">worker wallet</span><span style="font-family:'Space Mono',monospace;font-size:11px;color:#111315">0xFd2E…6519</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:11px;color:#5f655f">finalized #</span><span style="font-family:'Space Mono',monospace;font-size:11px;color:#111315">—</span></div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="4">
+          <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:14px;display:grid;gap:6px;align-content:start">
+            <span style="font-family:'Space Grotesk',sans-serif;font-size:9.5px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#5f655f">{{ k.lbl }}</span>
+            <span style="font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:700;line-height:1;color:#111315">{{ k.val }}</span>
+            <span style="font-family:'Space Mono',monospace;font-size:10px;color:#5f655f">{{ k.sub }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;overflow:hidden">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:13px 16px;border-bottom:1px solid rgba(17,19,21,0.08)">
+          <span style="font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:700">Capabilities</span>
+          <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">— live · — locked</span>
+        </div>
+        <sc-for list="{{ caps }}" as="c" hint-placeholder-count="5">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:50px;padding:4px 16px;border-bottom:1px solid rgba(17,19,21,0.06)">
+            <span style="font-size:13.5px;font-weight:600">{{ c.name }}</span>
+            <span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:{{ c.bg }};color:{{ c.fg }};font-family:'Space Grotesk',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">{{ c.chip }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isRuns }}" hint-placeholder-val="{{ false }}">
+      <div style="position:sticky;top:0;z-index:3;background:#f3f1ea;padding:2px 0 10px;display:grid;gap:8px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <button onClick="{{ toggleRunsFilters }}" style="height:44px;padding:0 15px;border:1px solid rgba(17,19,21,0.14);border-radius:8px;background:#fffdf7;font-family:'Space Grotesk',sans-serif;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#111315;display:inline-flex;align-items:center;gap:8px;cursor:pointer">Filters <span style="font-size:9px">{{ filtersCaret }}</span></button>
+          <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">{{ runsSummary }}</span>
+        </div>
+        <sc-if value="{{ runsFiltersOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            <sc-for list="{{ runFilterChips }}" as="fc" hint-placeholder-count="4">
+              <button onClick="{{ fc.onTap }}" style="height:44px;padding:0 13px;border-radius:8px;border:1px solid {{ fc.bd }};background:{{ fc.bg }};color:{{ fc.fg }};font-family:'Space Grotesk',sans-serif;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">{{ fc.label }}</button>
+            </sc-for>
+          </div>
+          <div style="display:flex;gap:6px">
+            <select style="flex:1;height:44px;border:1px solid rgba(17,19,21,0.14);border-radius:8px;background:#fffdf7;font-family:'Space Mono',monospace;font-size:11.5px;color:#111315;padding:0 10px">
+              <option>agent · all</option><option>gov-review-2</option><option>coding-hand-1</option><option>coding-hand-3</option><option>writer-gov-1</option><option>ops-migrator-1</option>
+            </select>
+            <select style="flex:1;height:44px;border:1px solid rgba(17,19,21,0.14);border-radius:8px;background:#fffdf7;font-family:'Space Mono',monospace;font-size:11.5px;color:#111315;padding:0 10px">
+              <option>sort · newest</option><option>sort · claim age</option><option>sort · state</option>
+            </select>
+          </div>
+        </sc-if>
+      </div>
+      <sc-for list="{{ runsList }}" as="r" hint-placeholder-count="4">
+        <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:14px;display:grid;gap:9px">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+            <div style="font-size:14.5px;font-weight:700;line-height:1.3">{{ r.job }}</div>
+            <span style="flex:none;display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:999px;background:{{ r.pillBg }};color:{{ r.pillFg }};font-family:'Space Grotesk',sans-serif;font-size:9.5px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase"><span style="width:5px;height:5px;border-radius:50%;background:currentColor;opacity:0.75"></span>{{ r.state }}</span>
+          </div>
+          <div style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">{{ r.id }} · {{ r.agent }}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid rgba(17,19,21,0.08);padding-top:10px">
+            <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">claimed {{ r.time }}</span>
+            <button style="height:44px;padding:0 16px;border-radius:8px;border:1px solid {{ r.btnBd }};background:{{ r.btnBg }};color:{{ r.btnFg }};font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:11.5px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">{{ r.action }}</button>
+          </div>
+        </div>
+      </sc-for>
+      <sc-if value="{{ runsEmpty }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:28px 16px;text-align:center;font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f;border:1px dashed rgba(17,19,21,0.18);border-radius:14px">no runs in this state</div>
+      </sc-if>
+    </sc-if>
+
+    <sc-if value="{{ isReceipts }}" hint-placeholder-val="{{ false }}">
+      <div style="position:sticky;top:0;z-index:3;background:#f3f1ea;padding:2px 0 10px;display:grid;gap:8px">
+        <input onInput="{{ onQuery }}" placeholder="Search receipt id, job, agent" style="width:100%;box-sizing:border-box;height:46px;border:1px solid rgba(17,19,21,0.14);border-radius:10px;background:#fffdf7;padding:0 14px;font-family:'Space Mono',monospace;font-size:12.5px;color:#111315">
+        <div style="display:flex;gap:6px">
+          <sc-for list="{{ segChips }}" as="sg" hint-placeholder-count="3">
+            <button onClick="{{ sg.onTap }}" style="flex:1;height:44px;border-radius:8px;border:1px solid {{ sg.bd }};background:{{ sg.bg }};color:{{ sg.fg }};font-family:'Space Grotesk',sans-serif;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">{{ sg.label }}</button>
+          </sc-for>
+        </div>
+        <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">{{ receiptsCount }} shown · — total rows · sample data</div>
+      </div>
+      <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;overflow:hidden">
+        <sc-for list="{{ receiptRows }}" as="x" hint-placeholder-count="8">
+          <div onClick="{{ x.onTap }}" style="display:flex;align-items:center;gap:10px;padding:9px 14px;min-height:56px;border-bottom:1px solid rgba(17,19,21,0.07);cursor:pointer">
+            <span style="width:7px;height:7px;border-radius:50%;flex:none;background:{{ x.dotc }}"></span>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;gap:8px;align-items:baseline;min-width:0"><span style="font-family:'Space Mono',monospace;font-size:12px;font-weight:700">{{ x.id }}</span><span style="font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ x.job }}</span></div>
+              <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">{{ x.agent }} · {{ x.time }}</div>
+            </div>
+            <span style="color:#5f655f;font-size:17px;line-height:1">›</span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isPosting }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;gap:6px;padding:4px 0 2px">
+        <sc-for list="{{ postSegs }}" as="ps" hint-placeholder-count="4">
+          <div onClick="{{ ps.onTap }}" style="flex:1;display:grid;gap:6px;cursor:pointer">
+            <div style="height:3px;border-radius:999px;background:{{ ps.bar }}"></div>
+            <span style="font-family:'Space Grotesk',sans-serif;font-size:9.5px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:{{ ps.fg }}">{{ ps.label }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display:grid;gap:2px">
+        <span style="font-family:'Space Mono',monospace;font-size:10px;color:#5f655f">step {{ step }} of 4</span>
+        <span style="font-family:'Space Grotesk',sans-serif;font-size:17px;font-weight:700">{{ stepTitle }}</span>
+      </div>
+      <sc-if value="{{ stepIs1 }}" hint-placeholder-val="{{ true }}">
+        <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:16px;display:grid;gap:10px">
+          <label style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#5f655f">GitHub issue URL</label>
+          <input placeholder="github.com/org/repo/issues/—" style="width:100%;box-sizing:border-box;height:48px;border:1px solid rgba(17,19,21,0.14);border-radius:8px;background:#f7f9fa;padding:0 13px;font-family:'Space Mono',monospace;font-size:12.5px;color:#111315">
+          <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">anchor · issue + head commit</span>
+        </div>
+      </sc-if>
+      <sc-if value="{{ stepIs2 }}" hint-placeholder-val="{{ false }}">
+        <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:16px;display:grid;gap:9px">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#5f655f">Anchor</span><span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:#f4e3cf;color:#a76122;font-family:'Space Grotesk',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">PARTIAL VIEW</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">repo</span><span style="font-family:'Space Mono',monospace;font-size:11.5px">—</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">issue</span><span style="font-family:'Space Mono',monospace;font-size:11.5px">—</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">head sha</span><span style="font-family:'Space Mono',monospace;font-size:11.5px">—</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">anchor hash</span><span style="font-family:'Space Mono',monospace;font-size:11.5px">—</span></div>
+        </div>
+      </sc-if>
+      <sc-if value="{{ stepIs3 }}" hint-placeholder-val="{{ false }}">
+        <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:16px;display:grid;gap:12px">
+          <div style="display:grid;gap:7px">
+            <label style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#5f655f">Job title</label>
+            <input placeholder="Job title" style="width:100%;box-sizing:border-box;height:48px;border:1px solid rgba(17,19,21,0.14);border-radius:8px;background:#f7f9fa;padding:0 13px;font-family:'Manrope',sans-serif;font-size:13.5px;color:#111315">
+          </div>
+          <div style="display:grid;gap:7px">
+            <label style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#5f655f">Policy</label>
+            <select style="width:100%;box-sizing:border-box;height:48px;border:1px solid rgba(17,19,21,0.14);border-radius:8px;background:#f7f9fa;padding:0 10px;font-family:'Space Mono',monospace;font-size:12px;color:#111315">
+              <option>deps/sec-only</option><option>writer/no-external-links</option><option>ops/schema-dual-sign</option>
+            </select>
+          </div>
+          <div style="display:grid;gap:7px">
+            <label style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#5f655f">Stake (DOT)</label>
+            <input defaultValue="0.00" style="width:100%;box-sizing:border-box;height:48px;border:1px solid rgba(17,19,21,0.14);border-radius:8px;background:#f7f9fa;padding:0 13px;font-family:'Space Mono',monospace;font-size:12.5px;color:#111315">
+          </div>
+        </div>
+      </sc-if>
+      <sc-if value="{{ stepIs4 }}" hint-placeholder-val="{{ false }}">
+        <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:16px;display:grid;gap:9px">
+          <span style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#5f655f">Funding summary</span>
+          <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">stake</span><span style="font-family:'Space Mono',monospace;font-size:11.5px">0.00 DOT</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">network fee</span><span style="font-family:'Space Mono',monospace;font-size:11.5px">0.00 DOT</span></div>
+          <div style="display:flex;justify-content:space-between;border-top:1px solid rgba(17,19,21,0.08);padding-top:9px"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">total</span><span style="font-family:'Space Mono',monospace;font-size:11.5px;font-weight:700">0.00 DOT</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">policy</span><span style="font-family:'Space Mono',monospace;font-size:11.5px">deps/sec-only</span></div>
+        </div>
+        <div style="border:1px solid rgba(30,102,66,0.24);background:rgba(30,102,66,0.06);border-radius:10px;padding:13px 14px;display:flex;justify-content:space-between;align-items:center">
+          <span style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:12.5px;color:#1e6642">Ready to sign</span>
+          <span style="font-family:'Space Mono',monospace;font-size:11px;color:#1e6642">0xFd2E…6519</span>
+        </div>
+      </sc-if>
+      <div style="display:flex;gap:8px;margin-top:2px">
+        <sc-if value="{{ hasBack }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ postBack }}" style="height:48px;padding:0 18px;border-radius:8px;border:1px solid rgba(17,19,21,0.16);background:#fffdf7;color:#111315;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">Back</button>
+        </sc-if>
+        <button onClick="{{ postNext }}" style="flex:1;height:48px;border-radius:8px;border:1px solid transparent;background:#1e6642;color:#fffdf7;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">{{ nextLabel }}</button>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isAgents }}" hint-placeholder-val="{{ false }}">
+      <sc-for list="{{ agents }}" as="a" hint-placeholder-count="5">
+        <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:14px 16px;display:grid;gap:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+            <span style="font-family:'Space Mono',monospace;font-size:13.5px;font-weight:700">{{ a.name }}</span>
+            <span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:{{ a.bg }};color:{{ a.fg }};font-family:'Space Grotesk',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">{{ a.tier }}</span>
+          </div>
+          <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">runs — · last — · sample</div>
+        </div>
+      </sc-for>
+    </sc-if>
+
+    <sc-if value="{{ isTreasury }}" hint-placeholder-val="{{ false }}">
+      <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:4px 16px">
+        <div style="padding:15px 0;border-bottom:1px solid rgba(17,19,21,0.07);display:grid;gap:5px">
+          <span style="font-family:'Space Grotesk',sans-serif;font-size:9.5px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#5f655f">Balance</span>
+          <span style="font-family:'Space Grotesk',sans-serif;font-size:30px;font-weight:700;line-height:1">0.00 <span style="font-size:14px;color:#5f655f;font-weight:500">DOT</span></span>
+        </div>
+        <div style="padding:15px 0;border-bottom:1px solid rgba(17,19,21,0.07);display:grid;gap:5px">
+          <span style="font-family:'Space Grotesk',sans-serif;font-size:9.5px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#5f655f">Deposited</span>
+          <span style="font-family:'Space Grotesk',sans-serif;font-size:30px;font-weight:700;line-height:1">0.00 <span style="font-size:14px;color:#5f655f;font-weight:500">DOT</span></span>
+        </div>
+        <div style="padding:15px 0;display:grid;gap:5px">
+          <span style="font-family:'Space Grotesk',sans-serif;font-size:9.5px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#5f655f">Reserved</span>
+          <span style="font-family:'Space Grotesk',sans-serif;font-size:30px;font-weight:700;line-height:1">0.00 <span style="font-size:14px;color:#5f655f;font-weight:500">DOT</span></span>
+        </div>
+      </div>
+      <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;overflow:hidden">
+        <div style="padding:13px 16px;border-bottom:1px solid rgba(17,19,21,0.08)"><span style="font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:700">Policy state</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;min-height:50px;padding:4px 16px;border-bottom:1px solid rgba(17,19,21,0.06)"><span style="font-size:13.5px;font-weight:600">Movement</span><span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:#ebe7da;color:#756d58;font-family:'Space Grotesk',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">LOCKED</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;min-height:50px;padding:4px 16px;border-bottom:1px solid rgba(17,19,21,0.06)"><span style="font-size:13.5px;font-weight:600">Posting budget</span><span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:#f4e3cf;color:#a76122;font-family:'Space Grotesk',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">PARTIAL VIEW</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;min-height:50px;padding:4px 16px"><span style="font-size:13.5px;font-weight:600">Settlement</span><span style="display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:#d6eadf;color:#1e6642;font-family:'Space Grotesk',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">LIVE API</span></div>
+      </div>
+      <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f;text-align:center;padding:2px 0 6px">read-only view</div>
+    </sc-if>
+
+    <sc-if value="{{ isList }}" hint-placeholder-val="{{ false }}">
+      <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;overflow:hidden">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:13px 16px;border-bottom:1px solid rgba(17,19,21,0.08)">
+          <span style="font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:700">{{ listTitle }}</span>
+          <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">{{ listSub }}</span>
+        </div>
+        <sc-for list="{{ listRows }}" as="lr" hint-placeholder-count="4">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:58px;padding:9px 16px;border-bottom:1px solid rgba(17,19,21,0.06)">
+            <div style="min-width:0;display:grid;gap:2px">
+              <span style="font-size:13.5px;font-weight:600;line-height:1.3">{{ lr.primary }}</span>
+              <span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">{{ lr.meta }}</span>
+            </div>
+            <sc-if value="{{ lr.hasChip }}" hint-placeholder-val="{{ false }}">
+              <span style="flex:none;display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;background:{{ lr.bg }};color:{{ lr.fg }};font-family:'Space Grotesk',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">{{ lr.chip }}</span>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+  </div>
+
+  <sc-if value="{{ signedIn }}" hint-placeholder-val="{{ true }}"><div style="flex:none;background:#fffdf7;border-top:1px solid rgba(17,19,21,0.12);padding:8px 10px 4px">
+    <div style="display:flex;gap:4px">
+      <sc-for list="{{ navItems }}" as="n" hint-placeholder-count="4">
+        <div onClick="{{ n.onTap }}" style="flex:1;min-height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border-radius:10px;cursor:pointer;background:{{ n.bg }};color:{{ n.fg }}">
+          <sc-if value="{{ showGlyphs }}" hint-placeholder-val="{{ true }}"><span style="font-size:15px;line-height:1">{{ n.glyph }}</span></sc-if>
+          <span style="font-family:'Space Grotesk',sans-serif;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em">{{ n.label }}</span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="width:120px;height:4px;border-radius:999px;background:rgba(17,19,21,0.22);margin:8px auto 4px"></div>
+  </div></sc-if>
+
+  <sc-if value="{{ sheetOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeSheet }}" style="position:absolute;inset:0;background:rgba(17,19,21,0.30);animation:avyFade 160ms cubic-bezier(0.2,0.7,0.2,1)"></div>
+    <div style="position:absolute;left:0;right:0;bottom:0;max-height:78%;overflow-y:auto;background:rgba(255,253,247,0.96);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid rgba(17,19,21,0.12);border-radius:18px 18px 26px 26px;padding:10px 16px 24px;box-sizing:border-box;animation:avyUp 220ms cubic-bezier(0.2,0.7,0.2,1)">
+      <div style="width:36px;height:4px;border-radius:999px;background:rgba(17,19,21,0.18);margin:2px auto 12px"></div>
+      <div style="display:flex;align-items:center;gap:10px;padding:0 4px 12px">
+        <div style="width:26px;height:26px;border-radius:7px;background:#1e6642;display:grid;place-items:center;color:#fffdf7;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px">A</div>
+        <div>
+          <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:15px;line-height:1.1">Averray</div>
+          <div style="font-family:'Space Grotesk',sans-serif;font-size:9px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#1e6642">Control room</div>
+        </div>
+        <span style="margin-left:auto;font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">chain # — · finalized —</span>
+      </div>
+      <div style="border:1px solid rgba(30,102,66,0.24);background:rgba(30,102,66,0.06);border-radius:10px;padding:12px 14px;display:grid;gap:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-family:'Space Grotesk',sans-serif;font-size:9.5px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#1e6642">Signed in</span>
+          <span style="font-family:'Space Mono',monospace;font-size:10px;color:#5f655f">siwe · walletconnect</span>
+        </div>
+        <span style="font-family:'Space Mono',monospace;font-size:13px;color:#111315">0xFd2E…6519</span>
+        <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">wallet</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#111315">MetaMask mobile · wc</span></div>
+        <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">chain</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#111315">Polkadot Hub</span></div>
+        <div style="display:grid;gap:5px;border-top:1px solid rgba(17,19,21,0.08);padding-top:8px">
+          <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">siwe session</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#111315">expires —</span></div>
+          <div style="display:flex;justify-content:space-between"><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f">wc pairing</span><span style="font-family:'Space Mono',monospace;font-size:10.5px;color:#111315">expires —</span></div>
+          <span style="font-family:'Space Mono',monospace;font-size:9.5px;color:#5f655f">re-sign and re-pair are user gestures — never automatic</span>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:2px">
+          <button onClick="{{ signOut }}" style="flex:1;height:44px;border-radius:8px;border:1px solid rgba(17,19,21,0.16);background:#fffdf7;color:#111315;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">Sign out</button>
+          <button onClick="{{ disconnect }}" style="flex:1;height:44px;border-radius:8px;border:1px solid rgba(167,97,34,0.38);background:#fffdf7;color:#a76122;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">Disconnect</button>
+        </div>
+      </div>
+      <sc-for list="{{ sheetGroups }}" as="g" hint-placeholder-count="3">
+        <div style="margin-top:16px">
+          <div style="font-family:'Space Grotesk',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.13em;text-transform:uppercase;color:#5f655f;padding:0 6px 7px">{{ g.label }}</div>
+          <div style="display:grid;gap:2px">
+            <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="4">
+              <div onClick="{{ it.onTap }}" style="display:flex;align-items:center;gap:12px;min-height:46px;padding:0 10px;border-radius:10px;cursor:pointer;background:{{ it.bg }};color:{{ it.fg }}">
+                <span style="width:18px;text-align:center;font-size:14px;opacity:0.85;flex:none">{{ it.glyph }}</span>
+                <span style="font-size:14px;font-weight:{{ it.wt }}">{{ it.name }}</span>
+                <span style="margin-left:auto;display:flex;align-items:center;gap:8px">
+                  <sc-if value="{{ it.locked }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;background:#ebe7da;color:#756d58;font-family:'Space Grotesk',sans-serif;font-size:8.5px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">LOCKED</span></sc-if>
+                  <span style="font-family:'Space Mono',monospace;font-size:11px;color:#5f655f">{{ it.count }}</span>
+                </span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ rdOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;background:#f3f1ea;display:flex;flex-direction:column;animation:avyIn 200ms cubic-bezier(0.2,0.7,0.2,1)">
+      <div style="flex:none;display:flex;align-items:center;gap:8px;padding:26px 16px 10px">
+        <button onClick="{{ rdClose }}" style="height:44px;padding:0 12px 0 8px;border-radius:8px;border:none;background:transparent;color:#1e6642;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><span style="font-size:16px;line-height:1">‹</span> Receipts</button>
+        <span style="margin-left:auto;display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:999px;background:{{ rdPillBg }};color:{{ rdPillFg }};font-family:'Space Grotesk',sans-serif;font-size:9.5px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase"><span style="width:5px;height:5px;border-radius:50%;background:currentColor;opacity:0.75"></span>{{ rdState }}</span>
+      </div>
+      <div style="flex:1;min-height:0;overflow-y:auto;padding:2px 16px 28px;display:flex;flex-direction:column;gap:12px">
+        <div>
+          <div style="font-family:'Space Grotesk',sans-serif;font-size:19px;font-weight:700;line-height:1.2">{{ rdJob }}</div>
+          <div style="font-family:'Space Mono',monospace;font-size:11px;color:#5f655f;margin-top:4px">{{ rdId }} · polkadot · {{ rdTime }}</div>
+        </div>
+        <div style="background:#fffdf7;border:1px solid rgba(17,19,21,0.12);border-radius:14px;padding:16px;display:grid;gap:9px">
+          <div style="display:grid;grid-template-columns:92px 1fr;gap:10px"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">agent</span><span style="font-family:'Space Mono',monospace;font-size:11.5px;word-break:break-all">{{ rdAgent }}</span></div>
+          <div style="display:grid;grid-template-columns:92px 1fr;gap:10px"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">policy</span><span style="font-family:'Space Mono',monospace;font-size:11.5px;word-break:break-all">{{ rdPolicy }}</span></div>
+          <div style="display:grid;grid-template-columns:92px 1fr;gap:10px"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">wallet</span><span style="font-family:'Space Mono',monospace;font-size:11.5px;word-break:break-all">0xFd2EAE2043…Fd6519</span></div>
+          <div style="display:grid;grid-template-columns:92px 1fr;gap:10px"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">cosigner</span><span style="font-family:'Space Mono',monospace;font-size:11.5px;word-break:break-all">0x9A13…0cb2</span></div>
+          <div style="display:grid;grid-template-columns:92px 1fr;gap:10px"><span style="font-family:'Space Mono',monospace;font-size:11.5px;color:#5f655f">hash</span><span style="font-family:'Space Mono',monospace;font-size:11.5px;word-break:break-all">0x7a0c…b11e · sample</span></div>
+        </div>
+        <div style="font-family:'Space Mono',monospace;font-size:11.5px;padding:12px 14px;border-radius:8px;background:#131715;color:#f5f3ee;line-height:1.6">
+          <span style="color:#9bd7b5"># diff — package.json</span><br>
+          <span style="color:#f4c989">- </span>"lodash": "4.17.20"<br>
+          <span style="color:#f4c989">+ </span>"lodash": "4.17.21"
+        </div>
+        <div style="display:flex;gap:8px">
+          <button style="flex:1;height:48px;border-radius:8px;border:1px solid transparent;background:#1e6642;color:#fffdf7;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">Sign &amp; claim</button>
+          <button style="height:48px;padding:0 16px;border-radius:8px;border:1px solid rgba(167,97,34,0.38);background:#fffdf7;color:#a76122;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer">Dispute</button>
+        </div>
+        <div style="font-family:'Space Mono',monospace;font-size:10.5px;color:#5f655f;text-align:center">signed receipt · sample data</div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:430,&quot;height&quot;:900},&quot;route&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;overview&quot;,&quot;options&quot;:[&quot;overview&quot;,&quot;runs&quot;,&quot;receipts&quot;,&quot;posting&quot;,&quot;agents&quot;,&quot;treasury&quot;,&quot;sessions&quot;,&quot;policies&quot;,&quot;capabilities&quot;,&quot;disputes&quot;,&quot;audit&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;State&quot;},&quot;auth&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;in&quot;,&quot;options&quot;:[&quot;in&quot;,&quot;signin&quot;,&quot;siwe&quot;,&quot;wc-waiting&quot;,&quot;wc-chain-refused&quot;,&quot;wc-expired&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;State&quot;},&quot;session&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;quiet&quot;,&quot;options&quot;:[&quot;quiet&quot;,&quot;expiring&quot;,&quot;pairing-dropped&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;State&quot;},&quot;sheetOpen&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;State&quot;},&quot;navStyle&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;glyph+label&quot;,&quot;options&quot;:[&quot;glyph+label&quot;,&quot;label-only&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Navigation&quot;},&quot;showCounts&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Navigation&quot;}}">
+class Component extends DCLogic {
+  state = { route: null, sheetOpen: null, runsFiltersOpen: false, runsFilter: 'All', q: '', seg: 'All', rd: null, step: 1, auth: null, session: null };
+  nav(route) { this.setState({ route, sheetOpen: false, rd: null }); }
+  renderVals() {
+    const P = this.props;
+    const route = this.state.route ?? P.route ?? 'overview';
+    const sheetOpen = this.state.sheetOpen ?? P.sheetOpen ?? false;
+    const showGlyphs = (P.navStyle ?? 'glyph+label') !== 'label-only';
+    const showCounts = P.showCounts ?? true;
+    const auth = this.state.auth ?? P.auth ?? 'in';
+    const signedIn = auth === 'in';
+    const sessionv = this.state.session ?? P.session ?? 'quiet';
+    const C = { ok: ['#d6eadf', '#1e6642'], warn: ['#f4e3cf', '#a76122'], neutral: ['#ebe7da', '#756d58'] };
+    const titles = { overview: 'Overview', runs: 'Runs', receipts: 'Receipts', posting: 'Posting', agents: 'Agents', treasury: 'Treasury', sessions: 'Sessions', policies: 'Policies', capabilities: 'Capabilities', disputes: 'Disputes', audit: 'Audit log' };
+    const chipKind = { overview: 'ok', runs: 'ok', receipts: 'warn', posting: 'ok', agents: 'ok', treasury: 'neutral', sessions: 'ok', policies: 'ok', capabilities: 'warn', disputes: 'ok', audit: 'warn' };
+    const kind = signedIn ? (chipKind[route] || 'ok') : ({ signin: 'ok', siwe: 'ok', 'wc-waiting': 'ok', 'wc-chain-refused': 'warn', 'wc-expired': 'neutral' }[auth] || 'neutral');
+
+    const runsData = [
+      { id: 'run-2741', job: 'deps/sec-only bump', agent: 'gov-review-2', state: 'Verified', time: '14:08 UTC', action: 'Sign & claim', k: 'ok', btn: 'primary' },
+      { id: 'run-2739', job: 'sig-mismatch on handoff', agent: 'coding-hand-3', state: 'Disputed', time: '14:02 UTC', action: 'Review', k: 'warn', btn: 'warn' },
+      { id: 'run-2738', job: 'docs refresh — v3.1', agent: 'writer-gov-1', state: 'Verified', time: '13:58 UTC', action: 'Sign & claim', k: 'ok', btn: 'primary' },
+      { id: 'run-2736', job: 'schema migration · users', agent: 'ops-migrator-1', state: 'Pending', time: '13:49 UTC', action: 'Open', k: 'neutral', btn: 'ghost' },
+      { id: 'run-2735', job: 'lint & format sweep', agent: 'coding-hand-1', state: 'Verified', time: '13:41 UTC', action: 'Sign & claim', k: 'ok', btn: 'primary' }
+    ];
+    const btnS = {
+      primary: { bd: 'transparent', bg: '#1e6642', fg: '#fffdf7' },
+      ghost: { bd: 'rgba(17,19,21,0.16)', bg: '#fffdf7', fg: '#111315' },
+      warn: { bd: 'rgba(167,97,34,0.38)', bg: '#fffdf7', fg: '#a76122' }
+    };
+    const rf = this.state.runsFilter;
+    const runsList = runsData.filter(r => rf === 'All' || r.state === rf).map(r => ({
+      ...r, pillBg: C[r.k][0], pillFg: C[r.k][1], btnBd: btnS[r.btn].bd, btnBg: btnS[r.btn].bg, btnFg: btnS[r.btn].fg
+    }));
+    const runFilterChips = ['All', 'Verified', 'Pending', 'Disputed'].map(l => {
+      const on = rf === l;
+      return { label: l, bd: on ? 'rgba(30,102,66,0.35)' : 'rgba(17,19,21,0.14)', bg: on ? '#d6eadf' : '#fffdf7', fg: on ? '#1e6642' : '#111315', onTap: () => this.setState({ runsFilter: l }) };
+    });
+
+    const receiptsData = [
+      { id: 'r_4e12a', job: 'deps/sec-only bump', agent: 'gov-review-2', time: '14:08 UTC', k: 'ok', policy: 'deps/sec-only · pass' },
+      { id: 'r_4e10c', job: 'sig-mismatch on handoff', agent: 'coding-hand-3', time: '14:02 UTC', k: 'warn', policy: 'handoff/sig-verify · fail' },
+      { id: 'r_4e0f8', job: 'docs refresh — v3.1', agent: 'writer-gov-1', time: '13:58 UTC', k: 'ok', policy: 'writer/no-external-links · pass' },
+      { id: 'r_4e0c2', job: 'lint & format sweep', agent: 'coding-hand-1', time: '13:41 UTC', k: 'ok', policy: 'deps/sec-only · pass' },
+      { id: 'r_4e0b7', job: 'changelog assembly', agent: 'writer-gov-1', time: '13:33 UTC', k: 'ok', policy: 'writer/no-external-links · pass' },
+      { id: 'r_4e0a1', job: 'schema migration · users', agent: 'ops-migrator-1', time: '13:20 UTC', k: 'ok', policy: 'ops/schema-dual-sign · pass' },
+      { id: 'r_4df9d', job: 'test flake triage', agent: 'coding-hand-1', time: '13:04 UTC', k: 'ok', policy: 'deps/sec-only · pass' },
+      { id: 'r_4df88', job: 'deps/sec-only bump', agent: 'gov-review-2', time: '12:51 UTC', k: 'ok', policy: 'deps/sec-only · pass' },
+      { id: 'r_4df61', job: 'stake mismatch on settle', agent: 'ops-migrator-1', time: '12:38 UTC', k: 'warn', policy: 'settle/stake-match · fail' },
+      { id: 'r_4df44', job: 'docs refresh — v3.0', agent: 'writer-gov-1', time: '12:19 UTC', k: 'ok', policy: 'writer/no-external-links · pass' },
+      { id: 'r_4df29', job: 'lint & format sweep', agent: 'coding-hand-3', time: '12:02 UTC', k: 'ok', policy: 'deps/sec-only · pass' },
+      { id: 'r_4df0e', job: 'config drift check', agent: 'ops-migrator-1', time: '11:47 UTC', k: 'ok', policy: 'ops/config-freeze · pass' }
+    ];
+    const q = this.state.q.toLowerCase();
+    const seg = this.state.seg;
+    const receiptRows = receiptsData
+      .filter(r => (seg === 'All' || (seg === 'Pass' ? r.k === 'ok' : r.k === 'warn')) && (!q || (r.id + ' ' + r.job + ' ' + r.agent).toLowerCase().includes(q)))
+      .map(r => ({ ...r, dotc: r.k === 'ok' ? '#1e6642' : '#a76122', onTap: () => this.setState({ rd: r }) }));
+    const segChips = ['All', 'Pass', 'Disputed'].map(l => {
+      const on = seg === l;
+      return { label: l, bd: on ? 'rgba(30,102,66,0.35)' : 'rgba(17,19,21,0.14)', bg: on ? '#d6eadf' : '#fffdf7', fg: on ? '#1e6642' : '#111315', onTap: () => this.setState({ seg: l }) };
+    });
+    const rd = this.state.rd;
+
+    const step = this.state.step;
+    const segNames = ['Anchor', 'Verify', 'Draft', 'Fund'];
+    const postSegs = segNames.map((label, i) => {
+      const n = i + 1;
+      return {
+        label,
+        bar: n <= step ? '#1e6642' : 'rgba(17,19,21,0.14)',
+        fg: n === step ? '#111315' : (n < step ? '#1e6642' : '#5f655f'),
+        onTap: () => { if (n < step) this.setState({ step: n }); }
+      };
+    });
+
+    const capsData = [
+      { name: 'Claim runs', c: 'LIVE API', k: 'ok' },
+      { name: 'Read receipts', c: 'LIVE API', k: 'ok' },
+      { name: 'Post jobs', c: 'PARTIAL VIEW', k: 'warn' },
+      { name: 'Move treasury', c: 'LOCKED', k: 'neutral' },
+      { name: 'Vote disputes', c: 'LOCKED', k: 'neutral' }
+    ];
+    const caps = capsData.map(x => ({ name: x.name, chip: x.c, bg: C[x.k][0], fg: C[x.k][1] }));
+
+    const agents = [
+      { name: 'gov-review-2', tier: 'GOVERNANCE · 1', k: 'warn' },
+      { name: 'coding-hand-1', tier: 'CODING · 2', k: 'ok' },
+      { name: 'coding-hand-3', tier: 'CODING · 1', k: 'ok' },
+      { name: 'writer-gov-1', tier: 'GOVERNANCE · 1', k: 'warn' },
+      { name: 'ops-migrator-1', tier: 'CODING · 2', k: 'ok' }
+    ].map(a => ({ ...a, bg: C[a.k][0], fg: C[a.k][1] }));
+
+    const lists = {
+      sessions: { sub: 'lock states · sample', rows: [
+        { primary: 'sess_7f21', meta: 'operator app · expires —', chip: 'LIVE API', k: 'ok' },
+        { primary: 'sess_6b09', meta: 'operator app · expired —', chip: 'LOCKED', k: 'neutral' },
+        { primary: 'sess_5aa4', meta: 'ci token · revoked —', chip: 'LOCKED', k: 'neutral' }
+      ]},
+      policies: { sub: '— active · — pending', rows: [
+        { primary: 'Security-only dependency updates', meta: 'deps/sec-only · applied — runs', chip: 'LIVE API', k: 'ok' },
+        { primary: 'Content writer must cite internal docs', meta: 'writer/no-external-links · applied — runs', chip: 'LIVE API', k: 'ok' },
+        { primary: 'Schema migrations require co-signer', meta: 'ops/schema-dual-sign · awaiting signature', chip: 'LOCKED', k: 'neutral' }
+      ]},
+      capabilities: { sub: '— live · — locked', rows: capsData.map(x => ({ primary: x.name, meta: 'capability · operator scope', chip: x.c, k: x.k })) },
+      disputes: { sub: '— open · sample', rows: [
+        { primary: 'sig-mismatch on handoff', meta: 'run-2739 · coding-hand-3', chip: 'Disputed', k: 'warn' },
+        { primary: 'stake mismatch on settle', meta: 'run-2712 · ops-migrator-1', chip: 'Disputed', k: 'warn' }
+      ]},
+      audit: { sub: 'last — events · sample', rows: [
+        { primary: 'Receipt r_4e12a signed', meta: '14:08 UTC · run-2741 · deps/sec-only · pass', chip: 'LIVE API', k: 'ok' },
+        { primary: 'Dispute opened on r_4e10c', meta: '14:02 UTC · run-2739 · coding-hand-3', chip: 'Disputed', k: 'warn' },
+        { primary: 'Policy ops/schema-dual-sign attached', meta: '13:50 UTC · run-2736 · auto-apply', chip: null },
+        { primary: 'Session sess_6b09 expired', meta: '— UTC · auth', chip: 'LOCKED', k: 'neutral' }
+      ]}
+    };
+    const isList = signedIn && !!lists[route];
+    const L = lists[route] || { sub: '', rows: [] };
+    const listRows = L.rows.map(r => ({
+      primary: r.primary, meta: r.meta, hasChip: !!r.chip, chip: r.chip || '',
+      bg: r.chip ? C[r.k][0] : 'transparent', fg: r.chip ? C[r.k][1] : '#111315'
+    }));
+
+    const barDef = [
+      { key: 'overview', glyph: '▦', label: 'Overview' },
+      { key: 'runs', glyph: '▤', label: 'Runs' },
+      { key: 'receipts', glyph: '◇', label: 'Receipts' },
+      { key: 'more', glyph: '⋯', label: 'More' }
+    ];
+    const navItems = barDef.map(n => {
+      const active = n.key === 'more' ? sheetOpen : (route === n.key && !sheetOpen);
+      return { ...n, bg: active ? 'rgba(30,102,66,0.10)' : 'transparent', fg: active ? '#1e6642' : '#5f655f',
+        onTap: () => { if (n.key === 'more') this.setState({ sheetOpen: true }); else this.nav(n.key); } };
+    });
+
+    const grp = (label, items) => ({ label, items: items.map(([key, glyph, name, count, locked]) => {
+      const active = route === key;
+      return { key, glyph, name, locked: !!locked, count: showCounts && count ? count : '',
+        bg: active ? 'rgba(30,102,66,0.10)' : 'transparent', fg: active ? '#1e6642' : '#111315', wt: active ? 700 : 500,
+        onTap: () => this.nav(key) };
+    })});
+    const sheetGroups = [
+      grp('Room', [['overview', '▦', 'Overview', '', false], ['runs', '▤', 'Runs', '—', false], ['receipts', '◇', 'Receipts', '—', false], ['agents', '◎', 'Agents', '—', false]]),
+      grp('Capital', [['treasury', '◑', 'Treasury', '', true], ['posting', '✎', 'Posting', '', false], ['sessions', '⌘', 'Sessions', '—', false]]),
+      grp('Governance', [['policies', '◐', 'Policies', '—', false], ['capabilities', '◆', 'Capabilities', '', false], ['disputes', '◬', 'Disputes', '—', false], ['audit', '⌖', 'Audit log', '', false]])
+    ];
+
+    return {
+      title: signedIn ? titles[route] : ({ 'wc-waiting': 'Approve', 'wc-chain-refused': 'Connect', 'wc-expired': 'Connect' }[auth] || 'Sign in'), showGlyphs, signedIn,
+      isSignin: auth === 'signin', isSiwe: auth === 'siwe',
+      isWcWaiting: auth === 'wc-waiting', isWcRefused: auth === 'wc-chain-refused', isWcExpired: auth === 'wc-expired',
+      sessionExpiring: signedIn && sessionv === 'expiring',
+      pairingDropped: signedIn && sessionv === 'pairing-dropped',
+      goSiwe: () => this.setState({ auth: 'siwe' }),
+      goWaiting: () => this.setState({ auth: 'wc-waiting' }),
+      wcApprove: () => this.setState({ auth: 'in', session: 'quiet', route: 'overview', sheetOpen: false }),
+      wcRefuse: () => this.setState({ auth: 'wc-chain-refused' }),
+      wcExpire: () => this.setState({ auth: 'wc-expired' }),
+      disconnect: () => this.setState({ auth: 'signin', sheetOpen: false, rd: null }),
+      goSignin: () => this.setState({ auth: 'signin' }),
+      signMsg: () => this.setState({ auth: 'in', session: 'quiet', route: 'overview', sheetOpen: false }),
+      signOut: () => this.setState({ auth: 'signin', sheetOpen: false, rd: null }),
+      chipOk: kind === 'ok', chipWarn: kind === 'warn', chipNeutral: kind === 'neutral',
+      isOverview: signedIn && route === 'overview', isRuns: signedIn && route === 'runs', isReceipts: signedIn && route === 'receipts',
+      isPosting: signedIn && route === 'posting', isAgents: signedIn && route === 'agents', isTreasury: signedIn && route === 'treasury', isList,
+      kpis: [
+        { lbl: 'Claimable', val: '—', sub: 'live api' },
+        { lbl: 'Verified (24h)', val: '—', sub: '24h window' },
+        { lbl: 'Disputed', val: '—', sub: 'needs review' },
+        { lbl: 'Balance', val: '0.00', sub: 'DOT · in-app' }
+      ],
+      caps,
+      runsList, runFilterChips, runsEmpty: runsList.length === 0,
+      runsFiltersOpen: this.state.runsFiltersOpen,
+      toggleRunsFilters: () => this.setState(s => ({ runsFiltersOpen: !s.runsFiltersOpen })),
+      filtersCaret: this.state.runsFiltersOpen ? '▴' : '▾',
+      runsSummary: 'state · ' + rf.toLowerCase() + ' · sample data',
+      onQuery: (e) => this.setState({ q: e.target.value }),
+      segChips, receiptRows, receiptsCount: String(receiptRows.length),
+      rdOpen: !!rd, rdClose: () => this.setState({ rd: null }),
+      rdJob: rd ? rd.job : '', rdId: rd ? rd.id : '', rdTime: rd ? rd.time : '', rdAgent: rd ? rd.agent : '', rdPolicy: rd ? rd.policy : '',
+      rdState: rd ? (rd.k === 'ok' ? 'Pass' : 'Disputed') : '', rdPillBg: rd ? C[rd.k][0] : '', rdPillFg: rd ? C[rd.k][1] : '',
+      step, stepTitle: segNames[step - 1], postSegs,
+      stepIs1: step === 1, stepIs2: step === 2, stepIs3: step === 3, stepIs4: step === 4,
+      hasBack: step > 1,
+      nextLabel: ['Verify anchor', 'Continue', 'Continue', 'Sign & fund'][step - 1],
+      postNext: () => this.setState(s => ({ step: Math.min(4, s.step + 1) })),
+      postBack: () => this.setState(s => ({ step: Math.max(1, s.step - 1) })),
+      agents, listTitle: titles[route], listSub: L.sub, listRows,
+      navItems, sheetGroups, sheetOpen,
+      closeSheet: () => this.setState({ sheetOpen: false })
+    };
+  }
+}
+</script>
+</body>
+</html>
