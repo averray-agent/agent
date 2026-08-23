@@ -1,7 +1,7 @@
 # MEMO — Receipt-gated escrow release (P-ESCROW-AGENT, roadmap ticket 4)
 
-Status: **DRAFT — for ratification** · 2026-08-23 · Author: Claude (architect) ·
-Ratifier: Pascal · Implementer: Codex (packet follows ratification)
+Status: **RATIFIED — E1–E9 locked (Pascal, 2026-08-24)** · drafted 2026-08-23 ·
+Author: Claude (architect) · Implementer: Codex (packet follows roadmap ticket 1, per E8)
 
 ## What Product asked
 
@@ -132,4 +132,6 @@ operator-verified"** — never "trustless" — until B or A ships.
   `reasoningHash` semantics cannot be confused with the commitment
   (reasonCode-scoped).
 
-**RATIFY:** reply "ratify escrow memo", or amend by E-number.
+**RATIFIED** by Pascal, 2026-08-24, all nine decision points as written.
+Sequencing per E8: implementation packet is written after roadmap ticket 1
+freezes the receipt field set.
