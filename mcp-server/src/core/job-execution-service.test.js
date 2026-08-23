@@ -20,6 +20,8 @@ import {
 
 const WALLET = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const WALLET_2 = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const CURRENT_ESCROW = "0x1111111111111111111111111111111111111111";
+const LEGACY_ESCROW = "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC";
 const EXTERNAL_SCHEMA_SIGNER = new Wallet("0x0f4f07793b1c0fcd93c573bd21f40074441c202d8b0cd64bc9453fbd89f3ed1f");
 
 function makeJob(overrides = {}) {
@@ -697,7 +699,65 @@ test("claimJob stores on-chain claim expiry when blockchain is enabled", async (
   assert.equal(claimExpiresAt(claimed, job), "2026-05-01T10:01:00.000Z");
 });
 
-test("external claims return a direct worker transaction and never call the operator broker", async () => {
+test("legacy-era external claim refuses by name and never prepares an impossible transaction", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob({
+    id: "0x158d074f71c4f15a7d53305084854ad01bbea36b412ee7eba6471b1dbca5090f",
+    source: { type: "external", poster: { wallet: WALLET_2 } },
+    requiresSponsoredGas: false
+  });
+  await stateStore.materializeExternalJobDraft({
+    draftId: "legacy-external-draft",
+    jobId: job.id,
+    wallet: WALLET_2,
+    definition: job,
+    status: "live"
+  });
+  let transactionPreparations = 0;
+  let economicsPreviews = 0;
+  let liquidityChecks = 0;
+  const gateway = {
+    config: {
+      escrowCoreAddress: CURRENT_ESCROW,
+      legacyEscrowCoreAddress: LEGACY_ESCROW
+    },
+    isEnabled: () => true,
+    toJobId: (value) => value,
+    async getWorkerClaimCount() { return 0; },
+    async getClaimEconomicsDecisionState() {
+      return { state: 1, exists: true, contractLayout: "legacy", onboardingWaiverEligible: false };
+    },
+    async getJob() {
+      return {
+        state: 1,
+        escrowAddress: LEGACY_ESCROW,
+        specHash: buildJobSnapshot(job).specHash
+      };
+    },
+    async previewClaimEconomics() { economicsPreviews += 1; },
+    async ensureClaimStakeLiquidity() { liquidityChecks += 1; },
+    async prepareDirectClaimJob() { transactionPreparations += 1; }
+  };
+  const service = new JobExecutionService(stateStore, gateway, () => job);
+
+  await assert.rejects(
+    service.claimJob(WALLET, job.id, "mcp", "legacy-external-claim"),
+    (error) => {
+      assert.equal(error.code, "legacy_posting_unclaimable");
+      assert.match(error.message, /predates the current EscrowCore/u);
+      assert.equal(error.details.escrowGeneration, "legacy");
+      assert.equal(error.details.operatorActionRequired, true);
+      assert.equal(Object.hasOwn(error.details, "transaction"), false);
+      return true;
+    }
+  );
+  assert.equal(economicsPreviews, 0);
+  assert.equal(liquidityChecks, 0);
+  assert.equal(transactionPreparations, 0);
+  assert.equal(await stateStore.findSessionByJobId(job.id), undefined);
+});
+
+test("v3-era external claims return a direct worker transaction and never call the operator broker", async () => {
   const stateStore = new MemoryStateStore();
   const job = makeJob({
     source: { type: "external", poster: { wallet: WALLET_2 } },
@@ -711,8 +771,12 @@ test("external claims return a direct worker transaction and never call the oper
     status: "live"
   });
   let brokerCalls = 0;
-  const transaction = { to: "0x1111111111111111111111111111111111111111", value: "0", data: "0x1234" };
+  const transaction = { to: CURRENT_ESCROW, value: "0", data: "0x1234" };
   const gateway = {
+    config: {
+      escrowCoreAddress: CURRENT_ESCROW,
+      legacyEscrowCoreAddress: LEGACY_ESCROW
+    },
     isEnabled: () => true,
     toJobId: (value) => value,
     async getWorkerClaimCount() { return 0; },
@@ -731,7 +795,11 @@ test("external claims return a direct worker transaction and never call the oper
       };
     },
     async getJob() {
-      return { state: 1, specHash: buildJobSnapshot(job).specHash };
+      return {
+        state: 1,
+        escrowAddress: CURRENT_ESCROW,
+        specHash: buildJobSnapshot(job).specHash
+      };
     },
     async prepareDirectClaimJob(jobId) {
       assert.equal(jobId, job.id);

@@ -138,6 +138,8 @@ function toCompactJobRow(job) {
     currentWalletCanClaim: job.currentWalletCanClaim ?? null,
     fundingState: job.fundingState ?? null,
     reason: job.reason ?? null,
+    ...(job.escrowGeneration ? { escrowGeneration: job.escrowGeneration } : {}),
+    ...(job.legacyPostingUnclaimable === true ? { legacyPostingUnclaimable: true } : {}),
     claimedBy: job.claimedBy ?? null,
     claimedAt: job.claimedAt ?? null,
     claimExpiresAt: job.claimExpiresAt ?? null,

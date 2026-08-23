@@ -123,6 +123,35 @@ test("source=external exposes only external rows with poster funding provenance"
   });
 });
 
+test("compact listing carries the legacy-unclaimable truth boundary", () => {
+  const response = buildPublicJobsResponse(
+    [{
+      ...JOBS[0],
+      state: "unclaimable",
+      claimState: "unclaimable",
+      effectiveState: "unclaimable",
+      claimable: false,
+      currentWalletCanClaim: false,
+      reason: "legacy_posting_unclaimable",
+      escrowGeneration: "legacy",
+      legacyPostingUnclaimable: true
+    }],
+    new URLSearchParams("source=external")
+  );
+
+  assert.equal(response.jobs[0].claimable, false);
+  assert.equal(response.jobs[0].effectiveState, "unclaimable");
+  assert.equal(response.jobs[0].reason, "legacy_posting_unclaimable");
+  assert.equal(response.jobs[0].escrowGeneration, "legacy");
+  assert.equal(response.jobs[0].legacyPostingUnclaimable, true);
+
+  const claimable = buildPublicJobsResponse(
+    response.jobs,
+    new URLSearchParams("source=external&state=claimable")
+  );
+  assert.equal(claimable.total, 0);
+});
+
 test("compact rows preserve explicit provenance and untrusted-content framing", () => {
   const provenance = {
     posterAddress: JOBS[0].source.poster.wallet,
