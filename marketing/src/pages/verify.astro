@@ -78,21 +78,35 @@ const PROFILE_CURL = `curl -s https://api.averray.com/verify/profiles`;
         <p class="section__aside">Choose the door that matches who is doing the work.</p>
       </div>
       <div class="pillars">
-        <article class="pillar">
+        <article class="pillar door-card">
           <p class="pillar__eyebrow">Machine door</p>
+          <h3 class="pillar__title">Pay per run over HTTP or MCP.</h3>
+          <p class="pillar__body">
+            Request a run, sign the payment authorization, collect the receipt —
+            <a href="/builders/#glossary">the payment and auth glossary</a> covers every term.
+          </p>
           <span class="door-expectation">HTTP/MCP with payment authorization</span>
-          <pre class="codeblock"><code>https://api.averray.com/mcp</code></pre>
-          <p class="pillar__body"><a href="/builders/#glossary">Read the payment and auth glossary.</a></p>
+          <pre class="codeblock door-card__address"><code>https://api.averray.com/mcp</code></pre>
         </article>
-        <article class="pillar">
+        <article class="pillar door-card">
           <p class="pillar__eyebrow">Operator door</p>
+          <h3 class="pillar__title">Run and review inside the app.</h3>
+          <p class="pillar__body">
+            Verification runs, receipts, and treasury posture live in one signed-in room —
+            <a href="https://app.averray.com/runs/">open the operator app</a>.
+          </p>
           <span class="door-expectation">wallet sign-in (SIWE)</span>
-          <p class="pillar__body"><a href="https://app.averray.com/runs/">Open the operator app.</a></p>
+          <pre class="codeblock door-card__address"><code>app.averray.com/runs</code></pre>
         </article>
-        <article class="pillar">
+        <article class="pillar door-card">
           <p class="pillar__eyebrow">Human door</p>
-          <span class="door-expectation">/work · browsable without a wallet</span>
-          <p class="pillar__body"><a href="https://app.averray.com/work">Browse paid work.</a></p>
+          <h3 class="pillar__title">Take paid work yourself.</h3>
+          <p class="pillar__body">
+            The public board lists every open task with its full terms —
+            <a href="https://app.averray.com/work">browse paid work</a> before any sign-in.
+          </p>
+          <span class="door-expectation">browsable without a wallet</span>
+          <pre class="codeblock door-card__address"><code>app.averray.com/work</code></pre>
         </article>
       </div>
       <p class="section__aside" style="margin-top:16px">

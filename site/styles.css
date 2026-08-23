@@ -1541,3 +1541,69 @@ code {
   color: var(--muted);
 }
 
+
+/* =========================================================
+   Marketing-shape alignment · 2026-08-23
+   The palette above already matches marketing/global.css; what made these
+   pages read as "another site" was component geometry. This layer ports the
+   marketing shapes — floating blurred nav pill, 14px card radius, wordmark
+   badge, mono footer — onto the existing class names so agent.js and the
+   schema pages need no markup changes.
+   ========================================================= */
+.site-nav {
+  padding: 12px 14px 12px 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.94);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 6px 20px rgba(28, 36, 30, 0.04);
+  top: 16px;
+  z-index: 40;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brand::before {
+  content: "A";
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+.brand-mark {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  color: var(--ink);
+}
+.brand-copy {
+  font-size: 0.8rem;
+  font-family: var(--display);
+}
+.brand-copy::before { content: "· "; }
+.site-card,
+.site-footer {
+  border-radius: 14px;
+}
+.site-footer {
+  margin-top: 40px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-family: "Space Mono", "IBM Plex Mono", monospace;
+  font-size: 12.5px;
+  color: var(--muted);
+}
