@@ -3,22 +3,46 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  DESKTOP_ONLY_OPERATOR_PATHS,
   RESPONSIVE_OPERATOR_PATHS,
   activePostingStep,
   formatOperatorSessionExpiry,
-  isGovernanceOperatorPath,
+  isDesktopOnlyOperatorPath,
   receiptMatchesMobileQuery,
   updateMoreSheetState,
 } from "./mobile-operator.js";
 
 const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), "utf8");
 
-test("operator desktop gate is limited to governance while ratified routes remain mobile", () => {
-  for (const path of ["/policies", "/capabilities/key", "/disputes", "/audit-log/entry"]) {
-    assert.equal(isGovernanceOperatorPath(path), true, `${path} must remain gated below 768px`);
+test("operator desktop gate covers every route without a ratified mobile layout", () => {
+  for (const path of [
+    "/policies",
+    "/capabilities/key",
+    "/disputes",
+    "/audit-log/entry",
+    "/sessions",
+    "/runs/detail/anything",
+  ]) {
+    assert.equal(isDesktopOnlyOperatorPath(path), true, `${path} must remain gated below 768px`);
   }
   for (const path of RESPONSIVE_OPERATOR_PATHS) {
-    assert.equal(isGovernanceOperatorPath(path), false, `${path} must reach its responsive layout`);
+    assert.equal(isDesktopOnlyOperatorPath(path), false, `${path} must reach its responsive layout`);
+  }
+});
+
+test("every operator navigation href is classified exactly once for mobile", async () => {
+  const routes = await read("components/shell/OperatorRoutes.ts");
+  const hrefs = [...routes.matchAll(/href: "([^"]+)"/gu)].map((match) => match[1]);
+  assert.ok(hrefs.length > 0, "OPERATOR_NAV_GROUPS must expose literal hrefs");
+
+  for (const href of hrefs) {
+    const memberships = [DESKTOP_ONLY_OPERATOR_PATHS, RESPONSIVE_OPERATOR_PATHS]
+      .filter((paths) => paths.includes(href));
+    assert.equal(
+      memberships.length,
+      1,
+      `${href} must be in exactly one of DESKTOP_ONLY_OPERATOR_PATHS or RESPONSIVE_OPERATOR_PATHS`,
+    );
   }
 });
 

@@ -6,11 +6,13 @@
  * second, test-only description of the mobile contract.
  */
 
-export const GOVERNANCE_OPERATOR_PATHS = Object.freeze([
+export const DESKTOP_ONLY_OPERATOR_PATHS = Object.freeze([
   "/policies",
   "/capabilities",
   "/disputes",
   "/audit-log",
+  "/sessions",
+  "/runs/detail",
 ]);
 
 export const RESPONSIVE_OPERATOR_PATHS = Object.freeze([
@@ -22,8 +24,8 @@ export const RESPONSIVE_OPERATOR_PATHS = Object.freeze([
   "/treasury",
 ]);
 
-export function isGovernanceOperatorPath(pathname) {
-  return GOVERNANCE_OPERATOR_PATHS.some(
+export function isDesktopOnlyOperatorPath(pathname) {
+  return DESKTOP_ONLY_OPERATOR_PATHS.some(
     (path) => pathname === path || pathname?.startsWith(`${path}/`),
   );
 }

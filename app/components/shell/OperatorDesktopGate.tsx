@@ -2,17 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { isGovernanceOperatorPath } from "@/lib/ui/mobile-operator.js";
+import { isDesktopOnlyOperatorPath } from "@/lib/ui/mobile-operator.js";
 
 /**
- * Governance is still intentionally desktop-only below 768px. The operational
- * routes have ratified mobile layouts, so this gate is route-scoped rather
- * than hiding the entire authenticated shell.
+ * Routes without ratified mobile layouts remain desktop-only below 768px.
+ * Responsive operational routes pass through this route-scoped gate.
  */
 export function OperatorDesktopGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
-  if (!isGovernanceOperatorPath(pathname)) return children;
+  if (!isDesktopOnlyOperatorPath(pathname)) return children;
 
   return (
     <>
