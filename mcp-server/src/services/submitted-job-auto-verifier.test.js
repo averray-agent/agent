@@ -202,6 +202,32 @@ test("ignores sessions that are not in submitted state", async () => {
   assert.equal(harness.verifyCalls.length, 0);
 });
 
+test("scheduler proactively reconciles every lapsed claim before verification by name", async () => {
+  const sessions = Array.from({ length: 5 }, (_unused, index) => ({
+    sessionId: `expired-claim-${index}`,
+    jobId: "bench-001",
+    status: index === 4 ? "expired" : "claimed"
+  }));
+  const harness = makeHarness({ sessions });
+  const reconciliationCalls = [];
+  harness.platformService.reconcileClaimSession = async (sessionId) => {
+    reconciliationCalls.push(sessionId);
+    const session = harness.store.find((entry) => entry.sessionId === sessionId);
+    session.status = "expired";
+    return { status: "timed_out", session };
+  };
+  const service = makeService(harness);
+
+  const run = await service.runOnce(new Date("2026-08-23T12:00:00.000Z"));
+
+  assert.equal(run.claimReconciliationCandidateCount, 5);
+  assert.equal(run.claimTimeoutCount, 5);
+  assert.equal(run.errors.length, 0);
+  assert.deepEqual(reconciliationCalls.sort(), sessions.map((session) => session.sessionId).sort());
+  assert.equal(harness.store.filter((session) => session.status === "claimed").length, 0);
+  assert.equal(harness.verifyCalls.length, 0);
+});
+
 test("is idempotent across ticks — a settled session is not re-verified", async () => {
   const harness = makeHarness({
     sessions: [{ sessionId: "s-bench", jobId: "bench-001", status: "submitted" }]

@@ -184,6 +184,10 @@ export class SubmittedJobAutoVerifierService {
       candidateCount: 0,
       verifiedCount: 0,
       parkedCount: 0,
+      claimReconciliationCandidateCount: 0,
+      claimTimeoutCount: 0,
+      claimExpiredCount: 0,
+      claimClosedCount: 0,
       approvedCount: 0,
       rejectedCount: 0,
       deferredCount: 0,
@@ -210,6 +214,39 @@ export class SubmittedJobAutoVerifierService {
 
     const sessions = await this.platformService.listRecentSessions?.(this.scanLimit) ?? [];
     summary.scanned = sessions.length;
+
+    // EscrowCore claim expiry is an explicit transaction, not a passive state
+    // change. Reconcile claimed and locally-expired sessions on the existing
+    // minute scheduler so inventory/stake cannot remain locked until another
+    // worker happens to touch the same job.
+    if (typeof this.platformService.reconcileClaimSession === "function") {
+      const claimSessions = sessions.filter((session) => ["claimed", "expired"].includes(session?.status));
+      summary.claimReconciliationCandidateCount = claimSessions.length;
+      for (const session of claimSessions) {
+        const diagnostic = sessionDiagnostic(session);
+        if (this.dryRun) {
+          summary.skipped.push({ ...diagnostic, reason: "claim_reconciliation_dry_run" });
+          continue;
+        }
+        try {
+          const result = await this.platformService.reconcileClaimSession(session.sessionId, { now });
+          if (result?.status === "timed_out") summary.claimTimeoutCount += 1;
+          if (result?.status === "expired") summary.claimExpiredCount += 1;
+          if (result?.status === "closed") summary.claimClosedCount += 1;
+        } catch (error) {
+          summary.errors.push({
+            ...diagnostic,
+            mode: "claim_reconciliation",
+            ...(error?.code ? { code: error.code } : {}),
+            message: error?.message ?? String(error)
+          });
+          this.logger.warn?.(
+            { sessionId: session.sessionId, jobId: session.jobId, err: error },
+            "auto_verify.claim_reconciliation_failed"
+          );
+        }
+      }
+    }
 
     const candidates = [];
     for (const session of sessions) {
