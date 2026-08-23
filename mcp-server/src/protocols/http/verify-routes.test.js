@@ -4,7 +4,12 @@ import test from "node:test";
 import { VerificationProfileRegistry } from "../../services/verification-profile-registry.js";
 import { createVerifyRoutes } from "./verify-routes.js";
 
-function harness({ createRun, payload, profiles = new VerificationProfileRegistry().list() } = {}) {
+const PRESENTATION_ENV = {
+  X402_PAYMENT_NETWORK: "eip155:8453",
+  X402_PAYMENT_ASSET_ADDRESS: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+};
+
+function harness({ createRun, getRun, payload, profiles = new VerificationProfileRegistry().list() } = {}) {
   const calls = [];
   const response = {};
   const route = createVerifyRoutes({
@@ -17,9 +22,10 @@ function harness({ createRun, payload, profiles = new VerificationProfileRegistr
       inputs: { testCommand: ["npm", "test"] }
     }),
     respond: (target, statusCode, body, headers) => Object.assign(target, { statusCode, body, headers }),
+    presentationEnv: PRESENTATION_ENV,
     verificationRunService: {
       listProfiles: () => profiles,
-      getRun: async (runId) => ({ runId, status: "complete" }),
+      getRun: getRun ?? (async (runId) => ({ runId, status: "complete" })),
       createRun: createRun ?? (async (input) => {
         calls.push(["createRun", input]);
         return {
@@ -79,6 +85,12 @@ test("POST /verify/runs accepts the standard x402 header and returns the queued 
   assert.equal(await route({ request, response, pathname: "/verify/runs" }), true);
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.status, "queued");
+  assert.deepEqual(response.body.assetContext, {
+    symbol: "USDC",
+    chain: "eip155:8453",
+    chainName: "Base",
+    token: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+  });
   assert.equal(calls.filter(([name]) => name === "createRun").length, 1);
   assert.equal(calls.find(([name]) => name === "createRun")[1].paymentProof, "proof");
   assert.equal(response.headers, undefined);
@@ -109,7 +121,26 @@ test("POST /verify/runs returns the x402 challenge before work when unpaid", asy
 });
 
 test("GET /verify/runs/:runId polls by opaque run id", async () => {
-  const { response, route } = harness();
+  const { response, route } = harness({
+    getRun: async (runId) => ({
+      runId,
+      status: "complete",
+      verdict: { outcome: "approved", reasonCode: "DETERMINISTIC_MATCH" },
+      billing: { status: "captured", amountRaw: "5000000", asset: "USDC" }
+    })
+  });
   assert.equal(await route({ request: { method: "GET" }, response, pathname: "/verify/runs/verify-1" }), true);
-  assert.deepEqual(response.body, { runId: "verify-1", status: "complete" });
+  assert.deepEqual(response.body, {
+    runId: "verify-1",
+    status: "complete",
+    verdict: { outcome: "approved", reasonCode: "DETERMINISTIC_MATCH" },
+    billing: { status: "captured", amountRaw: "5000000", asset: "USDC" },
+    result: "PASS",
+    assetContext: {
+      symbol: "USDC",
+      chain: "eip155:8453",
+      chainName: "Base",
+      token: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
+    }
+  });
 });

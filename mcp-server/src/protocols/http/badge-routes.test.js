@@ -377,10 +377,16 @@ test("GET /badges/:sessionId/run returns not_found when no verdict receipt exist
   assert.deepEqual(response.body, { status: "not_found", kind: "run", sessionId: "never-claimed" });
 });
 
-test("GET /receipts/:receiptId serves immutable content-addressed work JSON", async () => {
-  const content = { schemaVersion: "averray.work-receipt.v1" };
+test("GET /receipts preserves stored receipt bytes and decorates only after content-address verification", async () => {
+  const content = {
+    schemaVersion: "averray.work-receipt.v1",
+    verdict: { outcome: "approved", reasonCode: "DETERMINISTIC_MATCH" },
+    intent: { specSource: "claim_snapshot", valueAtRisk: { asset: "USDC", amountRaw: "400000" } },
+    settlement: { assetSymbol: "USDC", workerAmountRaw: "400000" }
+  };
   const receiptId = hashWorkReceiptContent(content);
   const workReceipt = { ...content, receiptId };
+  const storedBytes = JSON.stringify(workReceipt);
   const { calls, response, route } = makeHarness({
     stateStore: { getWorkReceiptDocument: async (id) => {
       calls.push(["getWorkReceiptDocument", id]);
@@ -397,7 +403,21 @@ test("GET /receipts/:receiptId serves immutable content-addressed work JSON", as
 
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.body, workReceipt);
+  assert.equal(JSON.stringify(workReceipt), storedBytes, "serve-time decoration must not mutate storage");
+  assert.equal(hashWorkReceiptContent(workReceipt), receiptId, "pre-existing stored receipt must reproduce its hash");
+  assert.deepEqual(response.body, {
+    ...workReceipt,
+    result: "PASS",
+    assetContext: {
+      symbol: "USDC",
+      chain: "eip155:420420419",
+      chainName: "Polkadot Hub",
+      assetId: 1337,
+      token: "0x0000053900000000000000000000000001200000"
+    }
+  });
+  const { result: _result, assetContext: _assetContext, ...servedCanonical } = response.body;
+  assert.deepEqual(servedCanonical, workReceipt, "served receipt differs from storage only by presentation fields");
   assert.equal(response.headers["cache-control"], "public, max-age=31536000, immutable");
   assert.deepEqual(calls.map(([name]) => name), ["getWorkReceiptDocument", "respond"]);
 });
@@ -452,6 +472,9 @@ test("listBadgeReceipts emits run and badge rows for an approved session", async
   const receipts = await listBadgeReceipts(100);
   assert.deepEqual(receipts.map((receipt) => receipt.kind), ["run", "badge"]);
   assert.equal(receipts[0].verdict, "approved");
+  assert.equal(receipts[0].result, "PASS");
+  assert.equal(receipts[0].assetContext.chainName, "Polkadot Hub");
+  assert.equal(Object.hasOwn(receipts[0].runReceipt, "result"), false, "signed receipt remains canonical");
   assert.deepEqual(receipts[0].signature, runSignature);
   assert.deepEqual(receipts[1].signature, badgeSignature);
 });
@@ -474,6 +497,7 @@ test("listBadgeReceipts emits only a run row for a rejected session", async () =
   const receipts = await listBadgeReceipts(100);
   assert.deepEqual(receipts.map((receipt) => receipt.kind), ["run"]);
   assert.equal(receipts[0].verdict, "rejected");
+  assert.equal(receipts[0].result, "FAIL");
 });
 
 test("listBadgeReceipts includes a stored badge without looking up its pruned job", async () => {

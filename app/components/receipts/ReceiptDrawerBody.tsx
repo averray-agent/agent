@@ -40,6 +40,7 @@ export interface ReceiptDrawerBodyProps {
   evidenceMeta: string;
   evidenceRawHref: string;
   links: LinkedArtifact[];
+  assetLine?: string;
   /**
    * Source provenance + attribution for run-kind receipts. Unset for
    * non-run receipts (badge, settle on a loan, policy revision) where
@@ -57,10 +58,22 @@ export function ReceiptDrawerBody({
   evidenceMeta,
   evidenceRawHref,
   links,
+  assetLine,
   source,
 }: ReceiptDrawerBodyProps) {
   return (
     <>
+      {assetLine ? (
+        <DrawerSection title="Asset">
+          <p
+            className="m-0 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-ink)]"
+            style={{ letterSpacing: 0 }}
+          >
+            {assetLine}
+          </p>
+        </DrawerSection>
+      ) : null}
+
       {source ? (
         <DrawerSection title="Source">
           <div

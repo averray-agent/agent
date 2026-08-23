@@ -4,6 +4,7 @@ import test from "node:test";
 
 import { MemoryStateStore } from "../core/state-store.js";
 import { VerificationProfileRegistry } from "./verification-profile-registry.js";
+import { decorateVerificationRunPresentation } from "../core/verdict-presentation.js";
 import { VerifierRegistry } from "./verifier-handlers.js";
 import {
   UnavailableVerificationPaymentGate,
@@ -367,4 +368,14 @@ test("standalone verification completes with a gateway double whose every method
 
   assert.equal(run.verdict.outcome, "approved");
   assert.equal(run.billing.status, "captured");
+  const presented = decorateVerificationRunPresentation(run, {
+    env: {
+      X402_PAYMENT_NETWORK: "eip155:8453",
+      X402_PAYMENT_ASSET_ADDRESS: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+    }
+  });
+  assert.equal(presented.result, "PASS");
+  assert.equal(presented.billing.status, "captured", "Verify PASS must retain captured billing truth");
+  assert.equal(presented.assetContext.chainName, "Base");
+  assert.equal(Object.hasOwn(presented, "settlement"), false, "Verify PASS is billed, never job-settled");
 });

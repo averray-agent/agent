@@ -15,6 +15,24 @@
     if (guidance) guidance.hidden = false;
   }
 
+  function assetContextLine(receipt) {
+    const context = receipt?.assetContext;
+    if (!context || typeof context !== "object") return "";
+    const symbol = String(context.symbol ?? "").trim();
+    const chain = String(context.chain ?? "").trim();
+    const chainName = String(context.chainName ?? "").trim();
+    if (!symbol || !chain || !chainName) return "";
+    if (chainName === "Polkadot Hub" && Number.isInteger(context.assetId)) {
+      const prefix = receipt.settlement ? "Settled in" : "Settlement asset";
+      return `${prefix} Hub ${symbol} · ${chainName} (${chain}) · asset ${context.assetId}`;
+    }
+    if (chainName === "Base") {
+      const prefix = ["PASS", "FAIL"].includes(receipt.result) ? "Billed in" : "Billing asset";
+      return `${prefix} Base ${symbol} (${chain})`;
+    }
+    return "";
+  }
+
   if (!match) {
     const hasPathId = window.location.pathname.replace(/^\/receipts\/?/u, "").length > 0;
     fail(hasPathId ? "no receipt found for this id" : "no receipt id in the URL");
@@ -55,6 +73,12 @@
     });
     const providerClassElement = document.querySelector("[data-provider-class]");
     if (providerClassElement) providerClassElement.textContent = providerClass;
+    const assetContextElement = document.querySelector("[data-asset-context]");
+    if (assetContextElement) {
+      const line = assetContextLine(receipt);
+      assetContextElement.textContent = line;
+      assetContextElement.hidden = !line;
+    }
     document.querySelector("[data-receipt-json]").textContent = JSON.stringify(receipt, null, 2);
     document.querySelector("[data-settlement]").hidden = !receipt.settlement;
     status.hidden = true;

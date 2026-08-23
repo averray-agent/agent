@@ -11,6 +11,7 @@ import {
   receiptHasSignature,
   selectCanonicalReceiptDocument,
 } from "@/lib/ui/receipt-signature-verification";
+import { formatReceiptAssetLine } from "@/lib/ui/receipt-asset-context";
 
 export type ReceiptRowWithMeta = ReceiptRow & {
   sessionId: string;
@@ -31,6 +32,7 @@ export interface ReceiptDrawerModel {
   evidenceMeta: string;
   evidenceRawHref: string;
   links: LinkedArtifact[];
+  assetLine?: string;
   /**
    * Provenance + attribution for the underlying run, when known. Used to
    * render a SourceBadge + a short attribution line in the drawer so an
@@ -133,6 +135,11 @@ export function buildReceiptDrawer(
     ? `/badges/${encodeURIComponent(row.sessionId)}/run`
     : `/badges/${encodeURIComponent(row.sessionId)}`;
   const evidenceJson = `// ${row.kind} receipt JSON — served by ${evidencePath}\n${JSON.stringify(raw, null, 2)}`;
+  const listRow = objectValue(row.listRow);
+  const assetLine = formatReceiptAssetLine({
+    assetContext: listRow?.assetContext,
+    result: listRow?.result,
+  });
 
   return {
     canonicalDocument,
@@ -146,6 +153,7 @@ export function buildReceiptDrawer(
     evidenceJson,
     evidenceMeta: `${sizeOf(raw)} · ${receiptHasSignature(raw) ? "application/jose+json" : "application/json"}`,
     evidenceRawHref: evidencePath,
+    ...(assetLine ? { assetLine } : {}),
     links: [
       { role: "Origin run", ref: text(averray?.jobId, row.subject) },
       { role: "Evidence", ref: text(averray?.evidenceHash, row.evidenceHash ?? "not indexed") },

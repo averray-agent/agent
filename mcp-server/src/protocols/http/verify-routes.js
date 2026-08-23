@@ -1,4 +1,5 @@
 import { extractClientKey } from "../../auth/rate-limit.js";
+import { decorateVerificationRunPresentation } from "../../core/verdict-presentation.js";
 import { paymentResponseHeaders } from "../../payments/x402-payment-primitives.js";
 
 export function createVerifyRoutes({
@@ -7,6 +8,7 @@ export function createVerifyRoutes({
   readJsonBody,
   respond,
   verificationRunService,
+  presentationEnv = process.env,
   trustProxy = false
 }) {
   return async function handleVerifyRoute({ request, response, pathname }) {
@@ -22,7 +24,10 @@ export function createVerifyRoutes({
       respond(
         response,
         200,
-        await verificationRunService.getRun(decodeURIComponent(runMatch[1]))
+        decorateVerificationRunPresentation(
+          await verificationRunService.getRun(decodeURIComponent(runMatch[1])),
+          { env: presentationEnv }
+        )
       );
       return true;
     }
@@ -70,7 +75,7 @@ export function createVerifyRoutes({
             amount: run.billing.amountRaw
           })
         : undefined;
-      respond(response, 200, run, headers);
+      respond(response, 200, decorateVerificationRunPresentation(run, { env: presentationEnv }), headers);
       return true;
     }
 

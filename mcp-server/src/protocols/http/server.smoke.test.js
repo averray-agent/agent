@@ -1525,7 +1525,16 @@ test("http smoke: /jobs/estimate-reward surfaces the estimateNetReward tool", { 
       { headers: { authorization: `Bearer ${adminToken}` } }
     );
     assert.equal(pathResponse.status, 200);
-    assert.equal(await pathResponse.json(), body);
+    assert.deepEqual(await pathResponse.json(), {
+      netReward: body,
+      assetContext: {
+        symbol: "USDC",
+        chain: "eip155:420420419",
+        chainName: "Polkadot Hub",
+        assetId: 1337,
+        token: "0x0000053900000000000000000000000001200000"
+      }
+    });
 
     const unauthenticated = await fetch(`${base}/jobs/tier-smoke-reward-001/estimate`);
     assert.equal(unauthenticated.status, 401);

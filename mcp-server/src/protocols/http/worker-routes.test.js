@@ -199,6 +199,14 @@ test("GET /receipts returns only the signed-in wallet's receipts newest first wi
   assert.equal(response.body.length, 1);
   assert.equal(response.body[0].sessionId, "session-new");
   assert.equal(response.body[0].outcome, "approved");
+  assert.equal(response.body[0].result, "PASS");
+  assert.deepEqual(response.body[0].assetContext, {
+    symbol: "USDC",
+    chain: "eip155:420420419",
+    chainName: "Polkadot Hub",
+    assetId: 1337,
+    token: "0x0000053900000000000000000000000001200000"
+  });
   assert.equal(response.body[0].amounts.rewardAmountRaw, "250000");
   assert.equal(response.body[0].timestamps.verifiedAt, "2026-08-22T12:00:00.000Z");
   assert.equal(response.body[0].canonicalUrl, `https://averray.com/receipts/${"0x"}${"1".repeat(64)}`);

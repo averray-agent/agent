@@ -11,6 +11,7 @@ import {
   WORK_RECEIPT_SCHEMA_VERSION
 } from "./work-receipt.js";
 import { STARTER_BENCHMARK_CHECK_DEPTH } from "./verification-depth.js";
+import { decorateReceiptPresentation } from "./verdict-presentation.js";
 
 const live = JSON.parse(readFileSync(
   new URL("./fixtures/work-receipt-retention-2026-08-16.json", import.meta.url),
@@ -227,6 +228,21 @@ test("platform fault is inconclusive, never settles, and cannot blame the worker
   assert.throws(() => buildWorkReceipt(mutation), /platform_fault.*workerConsequence none/u);
 });
 
+test("consumer PASS is equivalent to job settlement and PLATFORM_FAULT never settles", () => {
+  for (const outcome of ["approved", "rejected", "inconclusive", "platform_fault"]) {
+    const receipt = buildWorkReceipt(input({ outcome }));
+    const presented = decorateReceiptPresentation(receipt);
+    assert.equal(
+      presented.result === "PASS",
+      Object.hasOwn(receipt, "settlement"),
+      `${outcome} must preserve the settlement/result equivalence`
+    );
+    if (presented.result === "PLATFORM_FAULT") {
+      assert.equal(Object.hasOwn(receipt, "settlement"), false);
+    }
+  }
+});
+
 test("receipt id reproduces from served content and every content mutation changes it", () => {
   const receipt = buildWorkReceipt(input());
   assertWorkReceiptContentAddress(receipt);
@@ -285,6 +301,11 @@ test("verify and job receipts share the one canonical content-address function",
 
   const source = readFileSync(new URL("./work-receipt.js", import.meta.url), "utf8");
   assert.equal(source.match(/export function hashWorkReceiptContent/gu)?.length, 1);
+  const hashProjection = source.slice(
+    source.indexOf("export function hashWorkReceiptContent"),
+    source.indexOf("export function assertWorkReceiptContentAddress")
+  );
+  assert.doesNotMatch(hashProjection, /result|assetContext/u, "presentation fields must not become hash exclusions");
 });
 
 test("MCP verify receipt names each bounded check and carries neither credential nor settlement", () => {

@@ -99,6 +99,9 @@ averray.com {
   @operatorWorkPath path /work /work/*
   redir @operatorWorkPath https://app.averray.com/work 301
 
+  @posterDoorPath path /post /post/ /poster /poster/
+  redir @posterDoorPath https://app.averray.com/poster/ 301
+
   # /get-started must live on the apex: www blanket-redirects here, so a rule
   # only in the www vhost never fires for the canonical host (QA5 follow-up).
   @getStartedPath path /get-started /get-started/
