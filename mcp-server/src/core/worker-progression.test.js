@@ -41,13 +41,16 @@ function makeService({
   vestedRaw = "0",
   registration,
   selfIdentityRegistry,
-  wallet = WALLET
+  wallet = WALLET,
+  stateStore = undefined
 } = {}) {
-  const store = new MemoryStateStore();
-  const byWallet = new Map([[wallet.toLowerCase(), sessions]]);
-  store.listSessionsByWallet = async (wallet, limit, offset) => (
-    (byWallet.get(String(wallet).toLowerCase()) ?? []).slice(offset, offset + limit)
-  );
+  const store = stateStore ?? new MemoryStateStore();
+  if (!stateStore) {
+    const byWallet = new Map([[wallet.toLowerCase(), sessions]]);
+    store.listSessionsByWallet = async (wallet, limit, offset) => (
+      (byWallet.get(String(wallet).toLowerCase()) ?? []).slice(offset, offset + limit)
+    );
+  }
   if (registration) store.creditInterestRegistrations.set(wallet.toLowerCase(), registration);
 
   return {
@@ -183,6 +186,61 @@ test("third real settlement is self-counted when the wallet-session index still 
     from: false,
     to: true
   });
+});
+
+test("QA10 exact wallet counts all four mixed-era approved settlements and becomes credit-interest eligible", async () => {
+  const store = new MemoryStateStore();
+  const revisions = [21, 22, 23, 24];
+  const chainJobIds = [
+    "0x277608834c1a35b74ebb51fc56065d424b10fd5738d5761fc5d7c72923ef42ee",
+    "0x27e0c4671085235aec97ef3d127db5549cc3d0e9a2803e661c4f59fb6e55e249",
+    "0x4d038bf05c297a3ee4b52e2d83fe46270ad0b7d2ca6aeb9b3283adeed6cec4e8",
+    "0x7dddba8dc13a7c2616ef87310beb3e39e313cfa2728c6aa9a12959fa2f3bac51"
+  ];
+  const sessions = revisions.map((revision, index) => ({
+    sessionId: `wiki-en-80171159-citation-repair-in-the-suburbs-of-moscow-r${revision}:${BLIND_TESTER_WALLET}`,
+    jobId: `wiki-en-80171159-citation-repair-in-the-suburbs-of-moscow-r${revision}`,
+    chainJobId: chainJobIds[index],
+    wallet: index === 1 ? BLIND_TESTER_WALLET.toLowerCase() : BLIND_TESTER_WALLET,
+    status: "resolved",
+    resolvedAt: `2026-08-${index < 2 ? "21" : index === 2 ? "22" : "23"}T1${index}:00:00.000Z`,
+    updatedAt: `2026-08-${index < 2 ? "21" : index === 2 ? "22" : "23"}T1${index}:00:00.000Z`,
+    badgeSnapshot: { category: "wikipedia", tier: "starter", level: 1 },
+    ...(index === 0 ? {
+      verificationSummary: { outcome: "approved" },
+      jobSnapshot: { definition: { source: { type: "wikipedia_article" } } }
+    } : index === 1 ? {
+      jobSnapshot: { source: "wikipedia", sourceType: "wikipedia_article" }
+    } : index === 2 ? {
+      verification: { status: "approved" },
+      jobSnapshot: { specDefinition: { sourceType: "wikipedia_article" } }
+    } : {
+      verificationSummary: { status: "approved" },
+      jobSnapshot: { definition: { source: "wikipedia", sourceType: "wikipedia_article" } }
+    })
+  }));
+  for (const settled of sessions) store.sessions.set(settled.sessionId, settled);
+  store.walletSessions.set(BLIND_TESTER_WALLET, [
+    sessions[3].sessionId,
+    sessions[2].sessionId,
+    sessions[0].sessionId
+  ]);
+  store.walletSessions.set(BLIND_TESTER_WALLET.toLowerCase(), [sessions[1].sessionId]);
+  store.verificationResults.set(sessions[1].sessionId, { outcome: "approved" });
+  const repair = await store.reconcileWalletSessionIndex();
+  const { service } = makeService({
+    sessions,
+    wallet: BLIND_TESTER_WALLET,
+    stateStore: store
+  });
+
+  const progression = await service.getProgression(BLIND_TESTER_WALLET);
+
+  assert.equal(repair.mismatchedWallets, 1);
+  assert.equal(repair.missingEntries, 3);
+  assert.equal(progression.badges.length, 4);
+  assert.equal(progression.effectiveCaps.rolling24h.settledJobs, 4);
+  assert.deepEqual(progression.creditInterest, { eligible: true, registered: false });
 });
 
 test("progression computes the deposit-holding fixture without confusing capital and reputation", async () => {

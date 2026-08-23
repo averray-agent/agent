@@ -193,6 +193,57 @@ test("graduation boundary switches exactly at N settled and approved catalogue j
   assert.equal("depositedAssets" in after.dailyAllowance, false);
 });
 
+test("mixed-era verification and lane shapes produce one stable catalogue settlement count", async () => {
+  const stateStore = new MemoryStateStore();
+  const sessions = [
+    {
+      sessionId: "catalogue-current",
+      wallet: WALLET,
+      jobId: "catalogue-current-job",
+      status: "resolved",
+      verificationSummary: { outcome: "approved" },
+      jobSnapshot: { definition: { source: { type: "wikipedia_article" } } }
+    },
+    {
+      sessionId: "catalogue-stored-verification",
+      wallet: WALLET,
+      jobId: "catalogue-stored-verification-job",
+      status: "resolved",
+      jobSnapshot: { source: "wikipedia", sourceType: "wikipedia_article" }
+    },
+    {
+      sessionId: "catalogue-legacy-status",
+      wallet: WALLET,
+      jobId: "catalogue-legacy-status-job",
+      status: "resolved",
+      verification: { status: "approved" },
+      jobSnapshot: { specDefinition: { sourceType: "wikipedia_article" } }
+    },
+    {
+      sessionId: "external-public-projection",
+      wallet: WALLET,
+      jobId: "external-public-projection-job",
+      status: "resolved",
+      verificationSummary: { outcome: "approved" },
+      jobSnapshot: { specDefinition: { sourceType: "external" } }
+    }
+  ];
+  for (const session of sessions) await stateStore.upsertSession(session);
+  await stateStore.upsertVerificationResult("catalogue-stored-verification", { outcome: "approved" });
+
+  const decision = await makePolicy({
+    stateStore,
+    graduationSettledJobs: 3
+  }).evaluate({
+    wallet: WALLET,
+    job: job(),
+    claimEconomics: economics()
+  });
+
+  assert.equal(decision.catalogueAccess.mode, "rolling_daily");
+  assert.equal(decision.catalogueAccess.settledApprovedCatalogueJobs, 3);
+});
+
 test("external poster-funded work is outside catalogue lifetime and daily accounting", async () => {
   const decision = await makePolicy({ lifetimeCreditRaw: 0 }).evaluate({
     wallet: WALLET,

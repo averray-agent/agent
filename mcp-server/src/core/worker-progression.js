@@ -1,5 +1,10 @@
 import { ConflictError } from "./errors.js";
 import { nextLockedTier } from "./job-catalog-gates.js";
+import {
+  attachStoredVerificationResults,
+  isApprovedSettlement,
+  isExternalSettlement
+} from "./session-settlement.js";
 
 export const DEFAULT_CREDIT_INTEREST_SETTLED_JOBS = 3;
 export const CREDIT_INTEREST_STATEMENT =
@@ -112,7 +117,7 @@ export class WorkerProgressionService {
   }
 
   buildProgression({ normalizedWallet, sessions, approved, reputation, capacity, daily, registration }) {
-    const settledCatalogueJobs = approved.filter((session) => !isExternallyPosted(session)).length;
+    const settledCatalogueJobs = approved.filter((session) => !isExternalSettlement(session)).length;
     const rollingActive = settledCatalogueJobs >= daily.graduationSettledJobs;
     const tier = normalizeTier(reputation?.tier, reputation?.skill);
     const badges = approved
@@ -176,9 +181,9 @@ export class WorkerProgressionService {
     const approvedBefore = approvedThroughSettlement.filter(
       (session) => session.sessionId !== settlementSessionId
     );
-    const catalogueBefore = approvedBefore.filter((session) => !isExternallyPosted(session)).length;
+    const catalogueBefore = approvedBefore.filter((session) => !isExternalSettlement(session)).length;
     const catalogueAfter = approvedThroughSettlement
-      .filter((session) => !isExternallyPosted(session)).length;
+      .filter((session) => !isExternalSettlement(session)).length;
     if (catalogueBefore < daily.graduationSettledJobs
       && catalogueAfter >= daily.graduationSettledJobs) {
       return {
@@ -308,19 +313,6 @@ function approvedSettlements(sessions) {
   return sessions.filter(isApprovedSettlement);
 }
 
-function isApprovedSettlement(session) {
-  return session?.status === "resolved"
-    && (session?.verificationSummary?.outcome === "approved"
-      || session?.verification?.outcome === "approved");
-}
-
-function isExternallyPosted(session) {
-  const definition = session?.jobSnapshot?.definition;
-  return definition?.source === "external"
-    || definition?.source?.type === "external"
-    || definition?.sourceType === "external";
-}
-
 function cap({ raw, amount, source, components = undefined }) {
   return {
     asset: "USDC",
@@ -340,7 +332,7 @@ async function collectAllWalletSessions(stateStore, wallet, { pageSize = 64, max
   for (let offset = 0; offset < maxSessions; offset += pageSize) {
     const page = await stateStore.listSessionsByWallet(wallet, pageSize, offset);
     if (!Array.isArray(page) || page.length === 0) break;
-    sessions.push(...page);
+    sessions.push(...await attachStoredVerificationResults(stateStore, page));
     if (page.length < pageSize) break;
   }
   if (sessions.length >= maxSessions) throw new Error("Worker progression session history exceeded its read cap.");

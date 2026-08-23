@@ -41,6 +41,7 @@ import {
 } from "../core/badge-receipt-signing.js";
 import { backfillBadgeReceiptSignatures } from "./badge-receipt-backfill.js";
 import { backfillWorkReceipts } from "./work-receipt-backfill.js";
+import { repairWalletSessionIndex } from "./wallet-session-index-repair.js";
 import { createAuthMiddleware } from "../auth/middleware.js";
 import { createRateLimiter } from "../auth/rate-limit.js";
 import { resolveCapabilities, capabilityMatrix } from "../auth/capabilities.js";
@@ -423,6 +424,15 @@ export async function createPlatformRuntime() {
   }
   const pimlicoClient = initStep("init-pimlico-client", logger, () => new PimlicoClient());
   const stateStore = initStep("init-state-store", logger, () => createStateStore(process.env, { logger }));
+  try {
+    await repairWalletSessionIndex({ stateStore, logger });
+  } catch (error) {
+    logger.error(
+      { step: "repair-wallet-session-index", err: error instanceof Error ? error : new Error(String(error)) },
+      "bootstrap.init_failed"
+    );
+    throw error;
+  }
   const onboardingSubsidyBudget = initStep(
     "init-onboarding-subsidy-budget",
     logger,

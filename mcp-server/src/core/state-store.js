@@ -40,6 +40,10 @@ function hasIndexableIdempotencyKey(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function normalizeSessionWalletKey(wallet) {
+  return String(wallet ?? "").trim().toLowerCase();
+}
+
 function verificationRunLockId(runId) {
   return `verification-run:${String(runId)}`;
 }
@@ -307,9 +311,10 @@ export class MemoryStateStore {
       [persistedSession.sessionId, ...existingJobHistory.filter((sessionId) => sessionId !== persistedSession.sessionId)]
     );
 
-    const existing = this.walletSessions.get(persistedSession.wallet) ?? [];
+    const walletIndexKey = normalizeSessionWalletKey(persistedSession.wallet);
+    const existing = this.walletSessions.get(walletIndexKey) ?? [];
     this.walletSessions.set(
-      persistedSession.wallet,
+      walletIndexKey,
       [persistedSession.sessionId, ...existing.filter((sessionId) => sessionId !== persistedSession.sessionId)]
     );
     this.recentSessionIds = [
@@ -492,8 +497,41 @@ export class MemoryStateStore {
   }
 
   async listSessionsByWallet(wallet, limit = 10, offset = 0) {
-    const sessionIds = (this.walletSessions.get(wallet) ?? []).slice(offset, offset + limit);
+    const sessionIds = (this.walletSessions.get(normalizeSessionWalletKey(wallet)) ?? [])
+      .slice(offset, offset + limit);
     return sessionIds.map((sessionId) => this.sessions.get(sessionId)).filter(Boolean);
+  }
+
+  async reconcileWalletSessionIndex() {
+    const sessions = [...this.sessions.values()];
+    const { expected, invalidSessions } = expectedWalletSessionIndex(sessions);
+    let mismatchedWallets = 0;
+    let missingEntries = 0;
+    let orphanedEntries = 0;
+
+    for (const [wallet, expectedSessions] of expected) {
+      const expectedIds = expectedSessions.map((session) => String(session.sessionId));
+      const expectedSet = new Set(expectedIds);
+      const indexedIds = this.walletSessions.get(wallet) ?? [];
+      const indexedSet = new Set(indexedIds);
+      const missing = expectedIds.filter((sessionId) => !indexedSet.has(sessionId));
+      const orphaned = indexedIds.filter((sessionId) => !expectedSet.has(sessionId));
+      if (missing.length === 0 && orphaned.length === 0) continue;
+      mismatchedWallets += 1;
+      missingEntries += missing.length;
+      orphanedEntries += orphaned.length;
+      this.walletSessions.set(wallet, expectedIds);
+    }
+
+    return walletSessionIndexReconciliationResult({
+      documentsScanned: sessions.length,
+      expected,
+      invalidSessions,
+      mismatchedWallets,
+      missingEntries,
+      orphanedEntries,
+      repairedEntries: missingEntries
+    });
   }
 
   async listSessionsByJob(jobId, limit = 10, offset = 0) {
@@ -1201,7 +1239,7 @@ export class RedisStateStore {
       score: Date.now(),
       value: persistedSession.sessionId
     });
-    await this.client.zAdd(this.key("wallet-sessions", persistedSession.wallet), {
+    await this.client.zAdd(this.key("wallet-sessions", normalizeSessionWalletKey(persistedSession.wallet)), {
       score: Date.now(),
       value: persistedSession.sessionId
     });
@@ -1421,11 +1459,76 @@ export class RedisStateStore {
   async listSessionsByWallet(wallet, limit = 10, offset = 0) {
     await this.connect();
     const { start, stop } = redisRangeFromLimitOffset(limit, offset);
-    const sessionIds = await this.client.zRange(this.key("wallet-sessions", wallet), start, stop, {
-      REV: true
-    });
+    const sessionIds = await this.client.zRange(
+      this.key("wallet-sessions", normalizeSessionWalletKey(wallet)),
+      start,
+      stop,
+      {
+        REV: true
+      }
+    );
     const sessions = await Promise.all(sessionIds.map((sessionId) => this.getSession(sessionId)));
     return sessions.filter(Boolean);
+  }
+
+  async reconcileWalletSessionIndex() {
+    await this.connect();
+    const sessions = [];
+    let malformedDocuments = 0;
+    for await (const scanned of this.client.scanIterator({
+      MATCH: this.key("session", "*"),
+      COUNT: 200
+    })) {
+      const keys = Array.isArray(scanned) ? scanned : [scanned];
+      if (keys.length === 0) continue;
+      const records = await this.client.mGet(keys);
+      for (const raw of records) {
+        if (!raw) continue;
+        try {
+          sessions.push(JSON.parse(raw));
+        } catch {
+          malformedDocuments += 1;
+        }
+      }
+    }
+    const grouped = expectedWalletSessionIndex(sessions);
+    const invalidSessions = malformedDocuments + grouped.invalidSessions;
+    let mismatchedWallets = 0;
+    let missingEntries = 0;
+    let orphanedEntries = 0;
+
+    for (const [wallet, expectedSessions] of grouped.expected) {
+      const indexKey = this.key("wallet-sessions", wallet);
+      const indexedIds = await this.client.zRange(indexKey, 0, -1);
+      const indexedSet = new Set(indexedIds);
+      const expectedIds = new Set(expectedSessions.map((session) => String(session.sessionId)));
+      const missing = expectedSessions.filter((session) => !indexedSet.has(String(session.sessionId)));
+      const orphaned = indexedIds.filter((sessionId) => !expectedIds.has(sessionId));
+      if (missing.length === 0 && orphaned.length === 0) continue;
+      mismatchedWallets += 1;
+      missingEntries += missing.length;
+      orphanedEntries += orphaned.length;
+      if (missing.length > 0) {
+        await this.client.zAdd(
+          indexKey,
+          missing.map((session) => ({
+            score: sessionWalletIndexScore(session),
+            value: String(session.sessionId)
+          })),
+          { condition: "NX" }
+        );
+      }
+    }
+
+    return walletSessionIndexReconciliationResult({
+      documentsScanned: sessions.length + malformedDocuments,
+      expected: grouped.expected,
+      invalidSessions,
+      mismatchedWallets,
+      missingEntries,
+      orphanedEntries,
+      repairedEntries: missingEntries
+    });
   }
 
   async listSessionsByJob(jobId, limit = 10, offset = 0) {
@@ -2665,6 +2768,60 @@ function normalizeWalletKey(wallet) {
     throw new ExternalServiceError("Credit-interest wallet must be an EVM address.");
   }
   return normalized;
+}
+
+function expectedWalletSessionIndex(sessions) {
+  const byWallet = new Map();
+  let invalidSessions = 0;
+  for (const session of sessions) {
+    const wallet = normalizeSessionWalletKey(session?.wallet);
+    const sessionId = String(session?.sessionId ?? "");
+    if (!/^0x[a-f0-9]{40}$/u.test(wallet) || !sessionId) {
+      invalidSessions += 1;
+      continue;
+    }
+    const walletSessions = byWallet.get(wallet) ?? new Map();
+    walletSessions.set(sessionId, session);
+    byWallet.set(wallet, walletSessions);
+  }
+  const expected = new Map([...byWallet].map(([wallet, walletSessions]) => [
+    wallet,
+    [...walletSessions.values()].sort((left, right) => (
+      sessionWalletIndexScore(right) - sessionWalletIndexScore(left)
+      || String(right.sessionId).localeCompare(String(left.sessionId))
+    ))
+  ]));
+  return { expected, invalidSessions };
+}
+
+function sessionWalletIndexScore(session) {
+  return timestampScore(
+    session?.updatedAt
+      ?? session?.resolvedAt
+      ?? session?.submittedAt
+      ?? session?.claimedAt,
+    0
+  );
+}
+
+function walletSessionIndexReconciliationResult({
+  documentsScanned,
+  expected,
+  invalidSessions,
+  mismatchedWallets,
+  missingEntries,
+  orphanedEntries,
+  repairedEntries
+}) {
+  return {
+    documentsScanned,
+    walletsScanned: expected.size,
+    invalidSessions,
+    mismatchedWallets,
+    missingEntries,
+    orphanedEntries,
+    repairedEntries
+  };
 }
 
 function xcmBalanceWatchStorageId(wrapperAddress, requestId) {

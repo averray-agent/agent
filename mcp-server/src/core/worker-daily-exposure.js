@@ -1,6 +1,11 @@
 import { ConfigError } from "./errors.js";
 import { isExternalJob } from "./external-job-lifecycle.js";
 import { decimalToBaseUnits, formatBaseUnits } from "./platform-service-helpers.js";
+import {
+  attachStoredVerificationResults,
+  isApprovedCatalogueSettlement,
+  isExternalSettlement
+} from "./session-settlement.js";
 
 export const DEFAULT_WORKER_DAILY_EXPOSURE_BUDGET_RAW = 1_500_000;
 export const DEFAULT_WORKER_LIFETIME_CATALOGUE_CREDIT_RAW = 10_000_000;
@@ -249,17 +254,13 @@ export class WorkerDailyExposurePolicy {
 }
 
 function countSettledApprovedCatalogueJobs(sessions) {
-  return sessions.filter((session) => (
-    !isExternalJob(session?.jobSnapshot?.definition)
-    && session?.status === "resolved"
-    && session?.verificationSummary?.outcome === "approved"
-  )).length;
+  return sessions.filter(isApprovedCatalogueSettlement).length;
 }
 
 function lifetimeExposure(sessions) {
   let totalUnits = 0n;
   for (const session of sessions) {
-    if (isExternalJob(session?.jobSnapshot?.definition)) continue;
+    if (isExternalSettlement(session)) continue;
     if (session?.dailyExposure?.version !== D0_ENTRY_VERSION
       || session?.dailyExposure?.accessMode !== "lifetime_credit") continue;
     totalUnits += exposureFromPublicComponents(
@@ -276,7 +277,7 @@ function rollingExposure(sessions, now, workerExposurePolicy) {
   let oldestClaimedAt;
   let sessionCount = 0;
   for (const session of sessions) {
-    if (isExternalJob(session?.jobSnapshot?.definition)) continue;
+    if (isExternalSettlement(session)) continue;
     const claimedAt = claimTimestamp(session);
     if (!claimedAt || claimedAt.getTime() <= cutoffMs) continue;
     const exposure = session?.dailyExposure?.candidate
@@ -294,7 +295,7 @@ async function collectAllWalletSessions(stateStore, wallet, { pageSize = 64, max
   for (let offset = 0; offset < maxSessions; offset += pageSize) {
     const page = await stateStore.listSessionsByWallet(wallet, pageSize, offset);
     if (!Array.isArray(page) || page.length === 0) break;
-    sessions.push(...page);
+    sessions.push(...await attachStoredVerificationResults(stateStore, page));
     if (page.length < pageSize) break;
   }
   if (sessions.length >= maxSessions) {
