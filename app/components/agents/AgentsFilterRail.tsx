@@ -98,14 +98,14 @@ export function AgentsFilterRail({ filter, onChange }: AgentsFilterRailProps) {
         </Chip>
       </Group>
 
-      <div className="relative ml-auto min-w-[280px] max-w-[360px] flex-1">
+      <div className="relative ml-auto w-full min-w-0 max-w-[360px] flex-1 min-[1080px]:w-auto min-[1080px]:min-w-[280px]">
         <input
           ref={inputRef}
           type="text"
           value={filter.query}
           onChange={(e) => set("query", e.target.value)}
           placeholder="Filter by wallet, handle, badge, policy…"
-          className="h-8 w-full rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] pl-3 pr-10 font-[family-name:var(--font-body)] text-[13px] text-[var(--avy-ink)] placeholder:text-[var(--avy-muted)] focus:border-[color:rgba(30,102,66,0.45)] focus:outline-none focus:ring-[3px] focus:ring-[color:rgba(30,102,66,0.10)]"
+          className="h-11 w-full rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] pl-3 pr-10 font-[family-name:var(--font-body)] text-[13px] text-[var(--avy-ink)] placeholder:text-[var(--avy-muted)] focus:border-[color:rgba(30,102,66,0.45)] focus:outline-none focus:ring-[3px] focus:ring-[color:rgba(30,102,66,0.10)] min-[1080px]:h-8"
         />
         <span
           aria-hidden="true"
@@ -156,7 +156,7 @@ function Chip({
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-full border px-2.5 py-1 font-[family-name:var(--font-display)] text-[11px] font-bold transition-colors",
+        "min-h-11 rounded-full border px-2.5 py-1 font-[family-name:var(--font-display)] text-[11px] font-bold transition-colors min-[1080px]:min-h-0",
         on
           ? "border-[var(--avy-accent)] bg-[var(--avy-accent)] text-[var(--fg-invert)]"
           : "border-[var(--avy-line)] bg-transparent text-[var(--avy-muted)] hover:border-[color:rgba(17,19,21,0.22)] hover:text-[var(--avy-ink)]"

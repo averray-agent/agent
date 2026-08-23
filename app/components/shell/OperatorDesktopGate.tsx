@@ -1,11 +1,19 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { isGovernanceOperatorPath } from "@/lib/ui/mobile-operator.js";
 
 /**
- * The operator control room is intentionally desktop-only. This gate belongs
- * to the operator route-group layout so worker and sign-in surfaces retain
- * their independently verified mobile behaviour.
+ * Governance is still intentionally desktop-only below 768px. The operational
+ * routes have ratified mobile layouts, so this gate is route-scoped rather
+ * than hiding the entire authenticated shell.
  */
 export function OperatorDesktopGate({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+
+  if (!isGovernanceOperatorPath(pathname)) return children;
+
   return (
     <>
       <section

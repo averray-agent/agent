@@ -55,7 +55,7 @@ export function RunsTopbar({ freshness }: { freshness?: FreshnessState }) {
           type="button"
           disabled
           title="Creating a job from the console is not wired to a live backend yet."
-          className="inline-flex h-7 cursor-not-allowed items-center gap-2 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] opacity-40"
+          className="hidden h-7 cursor-not-allowed items-center gap-2 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] opacity-40 min-[1080px]:inline-flex"
           style={{ letterSpacing: "0.04em" }}
         >
           ＋ New job
@@ -66,7 +66,7 @@ export function RunsTopbar({ freshness }: { freshness?: FreshnessState }) {
           type="button"
           disabled
           title="Open a run by selecting it in the queue — this shortcut is not wired."
-          className="inline-flex h-7 cursor-not-allowed items-center gap-2 rounded-[8px] bg-[var(--avy-accent)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--fg-invert)] opacity-40"
+          className="hidden h-7 cursor-not-allowed items-center gap-2 rounded-[8px] bg-[var(--avy-accent)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--fg-invert)] opacity-40 min-[1080px]:inline-flex"
           style={{ letterSpacing: "0.04em" }}
         >
           Open run

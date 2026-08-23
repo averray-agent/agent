@@ -37,6 +37,7 @@ import { useBadges, usePolicies, useReceiptDetail } from "@/lib/api/hooks";
 import { feedPresence } from "@/lib/api/feed-presence";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { markAppMilestone } from "@/lib/ui/app-performance.js";
+import { MobileReceiptsList } from "@/components/receipts/MobileReceiptsList";
 
 const KPIS: ReceiptsKpi[] = [
   {
@@ -234,14 +235,25 @@ export default function ReceiptsPage() {
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
-      <ReceiptsTopbar
+      <MobileReceiptsList
+        rows={rows}
+        selectedId={selectedId}
         freshness={freshness}
-        onExportBundle={exportReceiptBundle}
-        onVerifyManifest={verifyReceiptManifest}
-        actionsDisabled={rows.length === 0}
+        onSelect={(row) => {
+          setSelectedId(row.id);
+          setDrawerOpen(true);
+        }}
       />
 
-      <header className="flex flex-col gap-1.5">
+      <div className="hidden flex-col gap-5 min-[1080px]:flex">
+        <ReceiptsTopbar
+          freshness={freshness}
+          onExportBundle={exportReceiptBundle}
+          onVerifyManifest={verifyReceiptManifest}
+          actionsDisabled={rows.length === 0}
+        />
+
+        <header className="flex flex-col gap-1.5">
         <span
           className="font-[family-name:var(--font-display)] text-[11px] font-extrabold uppercase text-[var(--avy-accent)]"
           style={{ letterSpacing: "0.12em" }}
@@ -255,27 +267,29 @@ export default function ReceiptsPage() {
           Every signed output a verified run has produced. Immutable, tamper-evident,
           co-signed where policy requires. Point buyers and auditors here to check the work.
         </p>
-      </header>
+        </header>
 
-      <ReceiptsKpiStrip kpis={kpis} />
-      <ReceiptsFilters groups={FILTERS} />
-      <ReceiptsTable
-        rows={rows}
-        selectedId={selectedId}
-        onSelect={(row) => {
-          setSelectedId(row.id);
-          setDrawerOpen(true);
-        }}
-        shownCount={rows.length}
-        totalCount={rows.length}
-        onVerifyManifest={verifyReceiptManifest}
-        manifestStatus={manifestStatus}
-      />
-      <ReceiptShapesLegend shapes={SHAPES} />
+        <ReceiptsKpiStrip kpis={kpis} />
+        <ReceiptsFilters groups={FILTERS} />
+        <ReceiptsTable
+          rows={rows}
+          selectedId={selectedId}
+          onSelect={(row) => {
+            setSelectedId(row.id);
+            setDrawerOpen(true);
+          }}
+          shownCount={rows.length}
+          totalCount={rows.length}
+          onVerifyManifest={verifyReceiptManifest}
+          manifestStatus={manifestStatus}
+        />
+        <ReceiptShapesLegend shapes={SHAPES} />
+      </div>
 
       <DetailDrawer
         open={drawerOpen && !!selected}
         onClose={() => setDrawerOpen(false)}
+        responsiveReceipt
         title={
           <h2
             className="m-0 font-[family-name:var(--font-mono)] text-[18px] font-semibold leading-none text-[var(--avy-accent)]"

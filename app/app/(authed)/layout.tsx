@@ -6,6 +6,7 @@ import { AuthedGuard } from "@/components/shell/AuthedGuard";
 import { DemoModeBanner } from "@/components/shell/DemoModeBanner";
 import { OperatorDesktopGate } from "@/components/shell/OperatorDesktopGate";
 import { WalletSessionNotice } from "@/components/auth/WalletSessionNotice";
+import { OperatorMobileNavigation } from "@/components/shell/OperatorMobileNavigation";
 
 export default function AuthedLayout({
   children,
@@ -39,12 +40,13 @@ export default function AuthedLayout({
       <PaperGridBackground />
       <AuthedGuard>
         <LiveDataBridge />
-        <div className="relative z-[1] mx-auto w-full max-w-[1440px] px-6 py-6">
+        <div className="relative z-[1] mx-auto w-full max-w-[720px] px-4 pb-28 pt-4 md:px-6 md:pt-6 min-[1080px]:max-w-[1440px] min-[1080px]:pb-6">
           <div className="flex items-start gap-5">
             <OperatorRail />
             <main className="flex min-w-0 flex-1 flex-col gap-5">{children}</main>
           </div>
         </div>
+        <OperatorMobileNavigation />
       </AuthedGuard>
     </OperatorDesktopGate>
   );

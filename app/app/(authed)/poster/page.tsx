@@ -52,14 +52,18 @@ export default function PosterPage() {
         </p>
       </header>
 
-      <PosterModeBanner
-        onboarding={onboardingRequest.data}
-        unavailable={Boolean(onboardingRequest.error) && !onboardingRequest.data}
-      />
+      <div className="order-3 min-[1080px]:order-none">
+        <PosterModeBanner
+          onboarding={onboardingRequest.data}
+          unavailable={Boolean(onboardingRequest.error) && !onboardingRequest.data}
+        />
+      </div>
 
-      <ReviewQueue rows={view.mine.filter((row) => row.state === "submitted")} />
+      <div className="order-4 min-[1080px]:order-none">
+        <ReviewQueue rows={view.mine.filter((row) => row.state === "submitted")} />
+      </div>
 
-      <section className="flex flex-col gap-2.5">
+      <section className="order-2 flex flex-col gap-2.5 min-[1080px]:order-none">
         <h2
           className="font-[family-name:var(--font-display)] text-[12px] font-extrabold uppercase text-[var(--avy-ink)]"
           style={{ letterSpacing: "0.1em" }}
@@ -69,7 +73,7 @@ export default function PosterPage() {
         <NewBountyPanel onboarding={onboardingRequest.data} wallet={wallet} />
       </section>
 
-      <section className="flex flex-col gap-2.5">
+      <section className="order-5 flex flex-col gap-2.5 min-[1080px]:order-none">
         <h2
           className="font-[family-name:var(--font-display)] text-[12px] font-extrabold uppercase text-[var(--avy-ink)]"
           style={{ letterSpacing: "0.1em" }}
@@ -89,7 +93,7 @@ export default function PosterPage() {
         />
       </section>
 
-      <section className="flex flex-col gap-2.5">
+      <section className="order-6 flex flex-col gap-2.5 min-[1080px]:order-none">
         <h2
           className="font-[family-name:var(--font-display)] text-[12px] font-extrabold uppercase text-[var(--avy-ink)]"
           style={{ letterSpacing: "0.1em" }}

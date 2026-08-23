@@ -130,7 +130,7 @@ export function SourceFilterBar({
               aria-selected={isActive}
               onClick={() => onChange(f.id)}
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-[6px] border border-transparent px-2.5 py-1 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-muted)] transition-colors hover:text-[var(--avy-ink)]",
+                "inline-flex min-h-11 items-center gap-1.5 rounded-[6px] border border-transparent px-2.5 py-1 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-muted)] transition-colors hover:text-[var(--avy-ink)] min-[1080px]:min-h-0",
                 isActive &&
                   "border-[var(--avy-line)] bg-[var(--avy-paper-solid)] text-[var(--avy-ink)] shadow-[0_1px_0_rgba(17,19,21,0.04)]"
               )}

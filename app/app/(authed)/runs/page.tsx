@@ -15,6 +15,7 @@ import {
   type SourceFilter,
 } from "@/components/runs/SourceFilter";
 import { RunQueueTable } from "@/components/runs/RunQueueTable";
+import { MobileRunsSurface } from "@/components/runs/MobileRunsSurface";
 import { RecommendationRail } from "@/components/runs/RecommendationRail";
 import { LoadedRunView } from "@/components/runs/LoadedRunView";
 import { LifecycleRail } from "@/components/runs/LifecycleRail";
@@ -319,42 +320,65 @@ function RunsPageInner() {
     recommendationFeedPresence
   );
 
+  const filterControls = rowsPresence === "live" ? (
+    <>
+      <QueueBar
+        filters={filters}
+        active={activeFilter}
+        onChange={onStateChange}
+      />
+      <SourceFilterBar
+        filters={sourceFilters}
+        active={activeSource}
+        onChange={onSourceChange}
+      />
+    </>
+  ) : null;
+
+  const lifecycleToggleControl = rowsPresence === "live" && (closedRowCount > 0 || showClosed || lifecycleToggle.blocked) ? (
+    <div className="flex items-center justify-between gap-3 rounded-[10px] border border-[var(--avy-line-soft)] bg-[var(--avy-paper)] px-3.5 py-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
+      <span>{lifecycleToggle.message}</span>
+      <button
+        type="button"
+        disabled={lifecycleToggle.blocked}
+        onClick={() => setShowClosed((v) => !v)}
+        title={lifecycleToggle.blocked ? "Requires operator access to /admin/jobs" : undefined}
+        className="min-h-11 shrink-0 rounded-full border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-ink)] disabled:cursor-not-allowed disabled:opacity-50 min-[1080px]:min-h-0"
+        style={{ letterSpacing: "0.08em" }}
+      >
+        {lifecycleToggle.button}
+      </button>
+    </div>
+  ) : null;
+
   return (
     <div className="flex w-full max-w-[1440px] flex-col gap-3.5">
       <RunsTopbar freshness={freshness} />
-      {rowsPresence === "live" ? (
-        <>
-          <QueueBar
-            filters={filters}
-            active={activeFilter}
-            onChange={onStateChange}
+      <MobileRunsSurface
+        filters={filterControls}
+        lifecycleToggle={lifecycleToggleControl}
+        queue={(
+          <RunQueueTable
+            rows={visibleRows}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            shownCount={visibleRows.length}
+            totalCount={rows.length}
+            unclaimedStake={sumReadyStake(rows)}
+            presence={rowsPresence}
+            liveStatus={liveStatus}
+            layout="mobile"
           />
-          <SourceFilterBar
-            filters={sourceFilters}
-            active={activeSource}
-            onChange={onSourceChange}
-          />
-        </>
-      ) : null}
-      {rowsPresence === "live" && (closedRowCount > 0 || showClosed || lifecycleToggle.blocked) ? (
-        <div className="flex items-center justify-between rounded-[10px] border border-[var(--avy-line-soft)] bg-[var(--avy-paper)] px-3.5 py-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
-          <span>{lifecycleToggle.message}</span>
-          <button
-            type="button"
-            disabled={lifecycleToggle.blocked}
-            onClick={() => setShowClosed((v) => !v)}
-            title={
-              lifecycleToggle.blocked
-                ? "Requires operator access to /admin/jobs"
-                : undefined
-            }
-            className="rounded-full border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2.5 py-1 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-ink)] transition-colors hover:border-[color:rgba(30,102,66,0.35)] hover:text-[var(--avy-accent)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-[var(--avy-line)] disabled:hover:text-[var(--avy-ink)]"
-            style={{ letterSpacing: "0.08em" }}
-          >
-            {lifecycleToggle.button}
-          </button>
-        </div>
-      ) : null}
+        )}
+        error={claimError ? (
+          <p role="alert" className="rounded-[8px] border border-[color:rgba(138,42,31,0.28)] bg-[#f4d5d0] px-3.5 py-2.5 font-[family-name:var(--font-mono)] text-[12px] text-[#8a2a1f]">
+            {claimError}
+          </p>
+        ) : null}
+      />
+      <div className="hidden flex-col gap-3.5 min-[1080px]:flex">
+        {filterControls}
+        {lifecycleToggleControl}
 
       {/*
        * Email-client layout: queue left, loaded-run detail right. The
@@ -428,6 +452,7 @@ function RunsPageInner() {
         onClaim={handleClaim}
         claimingJobId={claimingJobId}
       />
+      </div>
     </div>
   );
 }

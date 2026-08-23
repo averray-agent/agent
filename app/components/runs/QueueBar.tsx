@@ -29,7 +29,7 @@ export function QueueBar({ filters, active, onChange }: QueueBarProps) {
   return (
     <div className="flex flex-wrap items-center gap-2.5 rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3.5 py-2.5">
       <div
-        className="inline-flex items-center gap-0.5 rounded-[8px] bg-[color:rgba(17,19,21,0.04)] p-0.5"
+        className="inline-flex max-w-full items-center gap-0.5 overflow-x-auto rounded-[8px] bg-[color:rgba(17,19,21,0.04)] p-0.5 min-[1080px]:overflow-visible"
         role="tablist"
       >
         {filters.map((f) => {
@@ -42,7 +42,7 @@ export function QueueBar({ filters, active, onChange }: QueueBarProps) {
               aria-selected={isActive}
               onClick={() => onChange(f.id)}
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-[6px] border border-transparent px-2.5 py-1 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-muted)] transition-colors hover:text-[var(--avy-ink)]",
+                "inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-[6px] border border-transparent px-2.5 py-1 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-muted)] transition-colors hover:text-[var(--avy-ink)] min-[1080px]:min-h-0",
                 isActive &&
                   "border-[var(--avy-line)] bg-[var(--avy-paper-solid)] text-[var(--avy-ink)] shadow-[0_1px_0_rgba(17,19,21,0.04)]"
               )}
@@ -67,7 +67,7 @@ export function QueueBar({ filters, active, onChange }: QueueBarProps) {
 
       <div className="flex-1" />
 
-      <div className="relative">
+      <div className="relative w-full sm:w-auto">
         <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--avy-muted)]">
           ⌕
         </span>
@@ -76,7 +76,7 @@ export function QueueBar({ filters, active, onChange }: QueueBarProps) {
           placeholder="Filter by id, job, worker, hash…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          className="h-[30px] w-[260px] rounded-[8px] border border-[var(--avy-line)] bg-white px-3 pl-7 font-[family-name:var(--font-body)] text-[12.5px] text-[var(--avy-ink)] placeholder:text-[var(--avy-muted)] focus:border-[var(--avy-accent)] focus:outline-none focus:ring-2 focus:ring-[color:rgba(30,102,66,0.18)]"
+          className="h-11 w-full rounded-[8px] border border-[var(--avy-line)] bg-white px-3 pl-7 font-[family-name:var(--font-body)] text-[12.5px] text-[var(--avy-ink)] placeholder:text-[var(--avy-muted)] focus:border-[var(--avy-accent)] focus:outline-none focus:ring-2 focus:ring-[color:rgba(30,102,66,0.18)] sm:w-[260px] min-[1080px]:h-[30px]"
         />
         <span
           className="absolute right-2 top-1/2 -translate-y-1/2 rounded-[3px] bg-[color:rgba(17,19,21,0.05)] px-1.5 py-px font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"

@@ -16,6 +16,8 @@ import {
 } from "@/lib/github/issue";
 import { formatRawUsdc, parseUsdcToRaw } from "@/lib/wallet/funding";
 import { cn } from "@/lib/utils/cn";
+import { PostingStepper } from "@/components/poster/PostingStepper";
+import { activePostingStep } from "@/lib/ui/mobile-operator.js";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -24,7 +26,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 const FIELD =
-  "rounded-[8px] border border-[var(--avy-line)] bg-white/70 px-3 py-2 font-[family-name:var(--font-body)] text-[13px] text-[var(--avy-ink)] outline-none focus:border-[var(--avy-accent)]";
+  "min-h-11 rounded-[8px] border border-[var(--avy-line)] bg-white/70 px-3 py-2 font-[family-name:var(--font-body)] text-[13px] text-[var(--avy-ink)] outline-none focus:border-[var(--avy-accent)] min-[1080px]:min-h-0";
 const LABEL =
   "font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]";
 const MONO = "font-[family-name:var(--font-mono)]";
@@ -51,7 +53,7 @@ function StepHeading({ step, title, done }: { step: number; title: string; done:
 
 function primaryButton(enabled: boolean) {
   return cn(
-    "rounded-[8px] border px-3.5 py-2 font-[family-name:var(--font-display)] text-[11px] font-extrabold uppercase",
+    "min-h-11 rounded-[8px] border px-3.5 py-2 font-[family-name:var(--font-display)] text-[11px] font-extrabold uppercase min-[1080px]:min-h-0",
     enabled
       ? "border-[var(--avy-accent)] bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]"
       : "border-[var(--avy-line)] bg-[#faf8f1] text-[var(--avy-muted)]"
@@ -84,6 +86,7 @@ export function NewBountyPanel({
   const [title, setTitle] = useState("");
   // Step 3 — reward
   const [reward, setReward] = useState("");
+  const [mobileStep, setMobileStep] = useState(1);
   // Step 4 — draft + funding
   const [submitting, setSubmitting] = useState(false);
   const [draft, setDraft] = useState<unknown>(null);
@@ -117,9 +120,17 @@ export function NewBountyPanel({
     [criteria]
   );
   const contentOk = task.trim().length >= 10 && criteriaList.length >= 1;
+  const availableStep = activePostingStep({
+    issueVerified,
+    deliverableChosen: kind !== null,
+    contentReady: contentOk,
+    rewardReady: rewardOk,
+  });
+  const currentStep = Math.min(mobileStep, availableStep);
 
   async function verifyIssue() {
     const next = parseIssueUrl(url);
+    setMobileStep(1);
     setParsed(next);
     setLookup(null);
     setKind(null);
@@ -127,6 +138,7 @@ export function NewBountyPanel({
     setChecking(true);
     const result = await fetchIssue(next);
     setLookup(result);
+    if (result.ok && !result.isPullRequest) setMobileStep(2);
     setChecking(false);
   }
 
@@ -206,9 +218,15 @@ export function NewBountyPanel({
   }
 
   return (
-    <div className="flex flex-col gap-4 rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] p-4 shadow-[var(--shadow-card)]">
+    <div className="grid gap-4 md:grid-cols-[140px_minmax(0,520px)] md:items-start min-[1080px]:block">
+      <PostingStepper
+        currentStep={currentStep}
+        availableStep={availableStep}
+        onStepChange={setMobileStep}
+      />
+      <div className="flex min-w-0 flex-col gap-4 rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] p-4 shadow-[var(--shadow-card)]">
       {/* Step 1 — anchor to a real issue */}
-      <div className="flex flex-col gap-2">
+      <div className={cn("flex flex-col gap-2", currentStep !== 1 && "max-[1079px]:hidden")}>
         <StepHeading step={1} title="Anchor: your GitHub issue" done={issueVerified} />
         <p className="font-[family-name:var(--font-body)] text-[11.5px] text-[var(--avy-muted)]">
           Every bounty funds work on a real, public GitHub issue. Paste its
@@ -220,7 +238,7 @@ export function NewBountyPanel({
             onChange={(event) => setUrl(event.target.value)}
             placeholder="https://github.com/owner/repo/issues/123"
             spellCheck={false}
-            className={cn(FIELD, MONO, "min-w-[320px] flex-1 text-[12px]")}
+            className={cn(FIELD, MONO, "min-w-0 flex-1 text-[12px] sm:min-w-[320px]")}
           />
           <button
             type="button"
@@ -267,7 +285,7 @@ export function NewBountyPanel({
 
       {/* Step 2 — deliverable template */}
       {issueVerified ? (
-        <div className="flex flex-col gap-2">
+        <div className={cn("flex flex-col gap-2", currentStep !== 2 && "max-[1079px]:hidden")}>
           <StepHeading step={2} title="Deliverable: what the worker produces" done={kind !== null} />
           <div className="flex flex-wrap gap-2">
             {(
@@ -289,7 +307,7 @@ export function NewBountyPanel({
                 type="button"
                 onClick={() => chooseKind(value)}
                 className={cn(
-                  "flex max-w-[320px] flex-1 flex-col gap-1 rounded-[8px] border p-3 text-left",
+                  "flex min-h-11 max-w-[320px] flex-1 flex-col gap-1 rounded-[8px] border p-3 text-left",
                   kind === value
                     ? "border-[var(--avy-accent)] bg-[var(--avy-accent-soft)]"
                     : "border-[var(--avy-line)] bg-white/60 hover:border-[var(--avy-accent)]"
@@ -328,12 +346,23 @@ export function NewBountyPanel({
               </div>
             </div>
           ) : null}
+          {kind !== null ? (
+            <button
+              type="button"
+              disabled={!contentOk}
+              onClick={() => setMobileStep(3)}
+              className={cn(primaryButton(contentOk), "self-start min-[1080px]:hidden")}
+              style={{ letterSpacing: "0.1em" }}
+            >
+              Continue to reward
+            </button>
+          ) : null}
         </div>
       ) : null}
 
       {/* Step 3 — reward with live economics */}
       {issueVerified && kind !== null ? (
-        <div className="flex flex-col gap-2">
+        <div className={cn("flex flex-col gap-2", currentStep !== 3 && "max-[1079px]:hidden")}>
           <StepHeading step={3} title="Reward & the honest economics" done={rewardOk} />
           <div className="flex flex-wrap items-start gap-4">
             <div className="flex flex-col gap-1">
@@ -375,12 +404,21 @@ export function NewBountyPanel({
             re-read on-chain before you sign anything. Funds stay escrowed
             until the job resolves — there is no self-serve cancel.
           </p>
+          <button
+            type="button"
+            disabled={!rewardOk || !contentOk}
+            onClick={() => setMobileStep(4)}
+            className={cn(primaryButton(rewardOk && contentOk), "self-start min-[1080px]:hidden")}
+            style={{ letterSpacing: "0.1em" }}
+          >
+            Continue to review
+          </button>
         </div>
       ) : null}
 
       {/* Step 4 — review as the worker sees it */}
       {issueVerified && kind !== null && rewardOk && contentOk && parsed ? (
-        <div className="flex flex-col gap-2">
+        <div className={cn("flex flex-col gap-2", currentStep !== 4 && "max-[1079px]:hidden")}>
           <StepHeading step={4} title="Review — exactly what a worker sees" done={false} />
           <div className="flex flex-col gap-1.5 rounded-[8px] border border-[var(--avy-line-soft)] bg-[#faf8f1] p-3">
             <span className="font-[family-name:var(--font-body)] text-[13px] font-semibold text-[var(--avy-ink)]">
@@ -416,6 +454,7 @@ export function NewBountyPanel({
       ) : null}
 
       {error ? <p className="break-all text-[12.5px] text-[#b22222]">{error}</p> : null}
+      </div>
     </div>
   );
 }

@@ -4,7 +4,7 @@ import test from "node:test";
 
 const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), "utf8");
 
-test("desktop gate belongs only to the operator route-group shell", async () => {
+test("desktop gate belongs only to governance routes in the operator shell", async () => {
   const [gate, operatorLayout, workerLayout, signIn] = await Promise.all([
     read("components/shell/OperatorDesktopGate.tsx"),
     read("app/(authed)/layout.tsx"),
@@ -17,7 +17,9 @@ test("desktop gate belongs only to the operator route-group shell", async () => 
   assert.match(gate, /Open on desktop to continue\./u);
   assert.match(gate, /md:hidden/u);
   assert.match(gate, /hidden md:contents/u);
+  assert.match(gate, /isGovernanceOperatorPath\(pathname\)/u);
   assert.match(operatorLayout, /<OperatorDesktopGate>/u);
+  assert.match(operatorLayout, /<OperatorMobileNavigation/u);
   assert.doesNotMatch(workerLayout, /OperatorDesktopGate/u);
   assert.doesNotMatch(signIn, /OperatorDesktopGate/u);
 });

@@ -22,27 +22,34 @@ export interface BalanceCard {
 export interface BalanceSheetStripProps {
   cards: BalanceCard[];
   scope: ReactNode;
+  layout?: "default" | "mobile";
 }
 
-export function BalanceSheetStrip({ cards, scope }: BalanceSheetStripProps) {
+export function BalanceSheetStrip({ cards, scope, layout = "default" }: BalanceSheetStripProps) {
   return (
     <div>
       <SectionEyebrow label="Balance sheet · live snapshot" scope={scope} />
-      <div className="grid grid-cols-1 overflow-hidden rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] shadow-[var(--shadow-card)] backdrop-blur-[10px] md:grid-cols-2 xl:grid-cols-4">
+      <div
+        className={cn(
+          "grid grid-cols-1 overflow-hidden rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] shadow-[var(--shadow-card)] backdrop-blur-[10px]",
+          layout === "mobile" ? "md:grid-cols-3" : "md:grid-cols-2 xl:grid-cols-4",
+        )}
+      >
         {cards.map((card, i) => (
-          <BalanceCell key={card.label} card={card} isLast={i === cards.length - 1} />
+          <BalanceCell key={card.label} card={card} isLast={i === cards.length - 1} layout={layout} />
         ))}
       </div>
     </div>
   );
 }
 
-function BalanceCell({ card, isLast }: { card: BalanceCard; isLast: boolean }) {
+function BalanceCell({ card, isLast, layout }: { card: BalanceCard; isLast: boolean; layout: "default" | "mobile" }) {
   return (
     <div
       className={cn(
         "grid min-w-0 gap-2.5 p-[18px_20px]",
-        !isLast && "xl:border-r border-[var(--avy-line-soft)]",
+        !isLast && layout === "default" && "xl:border-r border-[var(--avy-line-soft)]",
+        !isLast && layout === "mobile" && "border-b border-[var(--avy-line-soft)] md:border-b-0 md:border-r",
         card.warn &&
           "bg-gradient-to-b from-[rgba(244,227,207,0.55)] to-transparent to-[60%]"
       )}

@@ -2,19 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  AlertTriangle,
-  Coins,
-  FileCheck2,
-  Gauge,
-  History,
-  KeyRound,
-  LayoutDashboard,
-  Megaphone,
-  ScrollText,
-  ShieldCheck,
-  Users,
-} from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { useAuth } from "@/lib/auth/use-auth";
 import { signOut } from "@/lib/auth/siwe";
@@ -31,47 +18,7 @@ import {
   openDisputesCount,
   openJobsCount,
 } from "@/lib/ui/sidebar-counts";
-
-interface NavItem {
-  href: string;
-  label: string;
-  icon: typeof LayoutDashboard;
-  count?: number | string;
-}
-
-interface NavGroup {
-  label: string;
-  items: NavItem[];
-}
-
-const NAV_GROUPS: NavGroup[] = [
-  {
-    label: "Room",
-    items: [
-      { href: "/overview", label: "Overview", icon: LayoutDashboard },
-      { href: "/runs", label: "Runs", icon: Gauge },
-      { href: "/receipts", label: "Receipts", icon: ScrollText },
-      { href: "/agents", label: "Agents", icon: Users },
-    ],
-  },
-  {
-    label: "Capital",
-    items: [
-      { href: "/treasury", label: "Treasury", icon: Coins },
-      { href: "/poster", label: "Posting", icon: Megaphone },
-      { href: "/sessions", label: "Sessions", icon: History },
-    ],
-  },
-  {
-    label: "Governance",
-    items: [
-      { href: "/policies", label: "Policies", icon: ShieldCheck },
-      { href: "/capabilities", label: "Capabilities", icon: KeyRound },
-      { href: "/disputes", label: "Disputes", icon: AlertTriangle },
-      { href: "/audit-log", label: "Audit log", icon: FileCheck2 },
-    ],
-  },
-];
+import { OPERATOR_NAV_GROUPS } from "@/components/shell/OperatorRoutes";
 
 export function OperatorRail() {
   const pathname = usePathname();
@@ -94,7 +41,7 @@ export function OperatorRail() {
   };
 
   return (
-    <aside className="sticky top-6 flex h-[calc(100vh-3rem)] w-[17rem] shrink-0 flex-col gap-5 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--line)] bg-[var(--paper-solid)] p-5 shadow-[var(--shadow-sm)]">
+    <aside className="sticky top-6 hidden h-[calc(100vh-3rem)] w-[17rem] shrink-0 flex-col gap-5 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--line)] bg-[var(--paper-solid)] p-5 shadow-[var(--shadow-sm)] min-[1080px]:flex">
       <header className="flex items-center gap-2.5">
         <div className="grid h-9 w-9 place-items-center rounded-[var(--radius-sm)] bg-[var(--ink)] font-[family-name:var(--font-display)] text-sm font-bold text-white">
           A
@@ -110,7 +57,7 @@ export function OperatorRail() {
       </header>
 
       <nav className="flex flex-1 flex-col gap-4 overflow-y-auto pr-1">
-        {NAV_GROUPS.map((group) => (
+        {OPERATOR_NAV_GROUPS.map((group) => (
           <div key={group.label} className="flex flex-col gap-1">
             <p className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
               {group.label}
