@@ -7,6 +7,7 @@ import {
   type Address,
   type Hex,
 } from "viem";
+import { WalletChainRefusedError, type Eip1193Provider } from "@/lib/auth/wallet-provider.js";
 
 /**
  * C2 funding rail. Trust shape mirrors scripts/ops/post-external-bounty.mjs:
@@ -45,16 +46,6 @@ const MAINNET_ADD_CHAIN = {
     "https://eth-rpc.polkadot.io/",
   ],
 };
-
-export interface Eip1193Provider {
-  request(args: { method: string; params?: unknown[] }): Promise<unknown>;
-}
-
-export function getInjectedProvider(): Eip1193Provider | null {
-  if (typeof window === "undefined") return null;
-  const provider = (window as unknown as { ethereum?: Eip1193Provider }).ethereum;
-  return provider?.request ? provider : null;
-}
 
 const BYTES32_RE = /^0x[0-9a-f]{64}$/iu;
 const ADDRESS_RE = /^0x[0-9a-f]{40}$/iu;
@@ -301,17 +292,21 @@ export async function ensureWalletReady(
   } catch (error) {
     const code = (error as { code?: number }).code;
     if (code === 4902 && chainId === MAINNET_ADD_CHAIN.chainId) {
-      await provider.request({
-        method: "wallet_addEthereumChain",
-        params: [{ ...MAINNET_ADD_CHAIN, chainId: chainHex }],
-      });
+      try {
+        await provider.request({
+          method: "wallet_addEthereumChain",
+          params: [{ ...MAINNET_ADD_CHAIN, chainId: chainHex }],
+        });
+      } catch {
+        throw new WalletChainRefusedError();
+      }
     } else {
-      throw error;
+      throw new WalletChainRefusedError();
     }
   }
   const current = parseInt(String(await provider.request({ method: "eth_chainId" })), 16);
   if (current !== chainId) {
-    throw new Error(`Wallet is on chain ${current}; expected ${chainId}.`);
+    throw new WalletChainRefusedError();
   }
   return { account: account as Address };
 }

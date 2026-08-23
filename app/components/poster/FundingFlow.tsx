@@ -9,7 +9,6 @@ import {
   buildFundingPlan,
   ensureWalletReady,
   formatRawUsdc,
-  getInjectedProvider,
   sendApprove,
   sendCreateJob,
   sendDeposit,
@@ -17,6 +16,7 @@ import {
   waitForReceipt,
   type FundingPlan,
 } from "@/lib/wallet/funding";
+import { getActiveWalletProvider, type Eip1193Provider } from "@/lib/auth/wallet-provider.js";
 import { cn } from "@/lib/utils/cn";
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -104,8 +104,7 @@ export function FundingFlow({
 
   async function prepare() {
     await run("preparing", async () => {
-      const provider = getInjectedProvider();
-      if (!provider) throw new Error("No wallet provider detected in this browser.");
+      const { provider } = await getActiveWalletProvider();
       if (!chainId) throw new Error("Live chainId unavailable from /poster/onboarding.");
       const ready = await ensureWalletReady(provider, { expectedWallet: wallet, chainId });
       const nextPlan = await buildFundingPlan(provider, { ...addresses, wallet: ready.account, verified });
@@ -115,16 +114,16 @@ export function FundingFlow({
     });
   }
 
-  async function refreshPlan(provider: NonNullable<ReturnType<typeof getInjectedProvider>>, acct: Address) {
+  async function refreshPlan(provider: Eip1193Provider, acct: Address) {
     const nextPlan = await buildFundingPlan(provider, { ...addresses, wallet: acct, verified });
     setPlan(nextPlan);
     return nextPlan;
   }
 
   async function stepApprove() {
-    const provider = getInjectedProvider();
-    if (!provider || !account || !plan) return;
+    if (!account || !plan) return;
     await run("approving", async () => {
+      const { provider } = await getActiveWalletProvider();
       const hash = await sendApprove(provider, account, addresses.tokenAddress, addresses.agentAccountCore, plan.depositRequiredRaw);
       setTxs((t) => ({ ...t, approve: hash }));
       if (!(await waitForReceipt(provider, hash))) throw new Error("Approve transaction reverted.");
@@ -134,9 +133,9 @@ export function FundingFlow({
   }
 
   async function stepDeposit() {
-    const provider = getInjectedProvider();
-    if (!provider || !account || !plan) return;
+    if (!account || !plan) return;
     await run("depositing", async () => {
+      const { provider } = await getActiveWalletProvider();
       const hash = await sendDeposit(provider, account, addresses.agentAccountCore, addresses.tokenAddress, plan.depositRequiredRaw);
       setTxs((t) => ({ ...t, deposit: hash }));
       if (!(await waitForReceipt(provider, hash))) throw new Error("Deposit transaction reverted.");
@@ -146,9 +145,9 @@ export function FundingFlow({
   }
 
   async function stepCreate() {
-    const provider = getInjectedProvider();
-    if (!provider || !account) return;
+    if (!account) return;
     await run("creating", async () => {
+      const { provider } = await getActiveWalletProvider();
       const hash = await sendCreateJob(provider, account, verified);
       setTxs((t) => ({ ...t, create: hash }));
       if (!(await waitForReceipt(provider, hash))) throw new Error("Create-job transaction reverted.");

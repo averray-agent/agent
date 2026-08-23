@@ -5,6 +5,7 @@ import { AuthRefreshBridge } from "@/components/shell/AuthRefreshBridge";
 import { AuthedGuard } from "@/components/shell/AuthedGuard";
 import { DemoModeBanner } from "@/components/shell/DemoModeBanner";
 import { OperatorDesktopGate } from "@/components/shell/OperatorDesktopGate";
+import { WalletSessionNotice } from "@/components/auth/WalletSessionNotice";
 
 export default function AuthedLayout({
   children,
@@ -34,6 +35,7 @@ export default function AuthedLayout({
     <OperatorDesktopGate>
       <DemoModeBanner />
       <AuthRefreshBridge />
+      <WalletSessionNotice />
       <PaperGridBackground />
       <AuthedGuard>
         <LiveDataBridge />

@@ -59,8 +59,10 @@ test("signed-in claim opens only after all live claim terms resolve", () => {
 
 test("wallet sign-in is not presented as a claim before preflight resolves", () => {
   assert.doesNotMatch(workDetailSource, /Check wallet and claim/u);
-  assert.match(workDetailSource, /auth\.authenticated \? "Claim this job" : "Check wallet"/u);
-  assert.match(workDetailSource, /disabled=\{signing \|\| claiming \|\| !actionReadiness\.enabled/u);
+  assert.match(workDetailSource, /!auth\.authenticated \? \([\s\S]*<WalletSignInFlow/u);
+  assert.match(workDetailSource, /disabled=\{!actionReadiness\.enabled\}/u);
+  assert.match(workDetailSource, /disabled=\{claiming \|\| !actionReadiness\.enabled \|\| !canClaim\}/u);
+  assert.match(workDetailSource, /Claim this job/u);
 });
 
 test("job detail links the canonical raw definition and copies the fetched JSON", () => {

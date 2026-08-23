@@ -1,15 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowLeft, Clock3, Wallet } from "lucide-react";
+import { ArrowLeft, Clock3 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBoundedApi, useJobDefinition, useSession } from "@/lib/api/hooks";
 import { extractApiErrorMessage } from "@/lib/api/client";
-import { signIn, WalletUnavailableError } from "@/lib/auth/siwe";
 import { useAuth } from "@/lib/auth/use-auth";
+import { WalletSignInFlow } from "@/components/auth/WalletSignInFlow";
 import { isTerminalSessionStatus, verificationDepthStatement } from "@/lib/work/human-work.js";
 import { SchemaGuidedEditor } from "./SchemaGuidedEditor";
 import { VerificationWatchPanel } from "./VerificationWatchPanel";
@@ -18,8 +17,6 @@ import { asRecord, stringList, text } from "./types";
 
 export function WorkSessionWorkspace({ sessionId }: { sessionId: string }) {
   const auth = useAuth();
-  const [signing, setSigning] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
   const [submittedSession, setSubmittedSession] = useState<WorkSessionRecord | null>(null);
   const sessionQuery = useSession(auth.authenticated ? sessionId : null);
   const loadedSession = sessionQuery.data as WorkSessionRecord | undefined;
@@ -33,18 +30,6 @@ export function WorkSessionWorkspace({ sessionId }: { sessionId: string }) {
   const schemaQuery = useBoundedApi<Record<string, unknown>>(schemaUrl || null);
   const example = asRecord(asRecord(submissionContract?.submitPayloadExample)?.submission);
 
-  async function connect() {
-    setSigning(true);
-    setAuthError(null);
-    try {
-      await signIn();
-    } catch (error) {
-      setAuthError(error instanceof WalletUnavailableError ? error.message : error instanceof Error ? error.message : "Wallet sign-in failed.");
-    } finally {
-      setSigning(false);
-    }
-  }
-
   if (!auth.authenticated) {
     return (
       <Card className="mx-auto w-full max-w-2xl">
@@ -52,8 +37,7 @@ export function WorkSessionWorkspace({ sessionId }: { sessionId: string }) {
           <Badge tone="muted">Claimant workspace</Badge>
           <h1 className="mt-4 text-3xl font-semibold">Sign in to open this claimed session.</h1>
           <p className="mt-3 text-sm leading-relaxed text-[var(--muted)]">The session endpoint is wallet-owned. SIWE proves you are its claimant; no email account or second identity is used.</p>
-          {authError ? <p className="mt-4 text-sm text-[var(--warn)]" role="alert">{authError}</p> : null}
-          <Button className="mt-6" size="lg" disabled={signing} onClick={() => void connect()}><Wallet className="h-4 w-4" />{signing ? "Waiting for wallet…" : "Sign in with claimant wallet"}</Button>
+          <div className="mt-6"><WalletSignInFlow compact onSignedIn={() => undefined} /></div>
         </CardContent>
       </Card>
     );

@@ -65,6 +65,16 @@ function readSession(): AuthSession | undefined {
   return { token, wallet, expiresAt, roles: readRoles() };
 }
 
+function storedSessionExpired(): boolean {
+  if (!hasWindow()) return false;
+  const token = localStorage.getItem(TOKEN_KEY);
+  const wallet = localStorage.getItem(WALLET_KEY);
+  const expiresAt = localStorage.getItem(EXPIRES_KEY);
+  if (!token || !wallet || !expiresAt) return false;
+  const expiresMs = Date.parse(expiresAt);
+  return !Number.isFinite(expiresMs) || expiresMs - EXPIRY_SAFETY_MARGIN_MS <= Date.now();
+}
+
 export function getAuthSnapshot(): AuthSnapshot {
   const session = readSession();
   return {
@@ -73,7 +83,9 @@ export function getAuthSnapshot(): AuthSnapshot {
     wallet: session?.wallet,
     expiresAt: session?.expiresAt,
     roles: session?.roles ?? [],
-    lastReason: hasWindow() ? localStorage.getItem(REAUTH_REASON_KEY) ?? undefined : undefined,
+    lastReason: hasWindow()
+      ? localStorage.getItem(REAUTH_REASON_KEY) ?? (storedSessionExpired() ? "siwe_expired" : undefined)
+      : undefined,
   };
 }
 

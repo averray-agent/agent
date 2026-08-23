@@ -1,18 +1,15 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ShieldCheck, Wallet } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ShieldCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/toast";
-import { signIn, WalletUnavailableError } from "@/lib/auth/siwe";
 import { useAuth } from "@/lib/auth/use-auth";
-import { useWalletProvider } from "@/lib/auth/use-wallet-provider";
 import { routeAfterSignIn } from "@/lib/work/human-work.js";
-import { WalletInstallGuidance } from "@/components/auth/WalletInstallGuidance";
+import { WalletSignInFlow } from "@/components/auth/WalletSignInFlow";
+import type { AuthSession } from "@/lib/auth/token-store";
 
 export default function SignInPage() {
   return (
@@ -38,8 +35,6 @@ function SignInContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const auth = useAuth();
-  const walletProvider = useWalletProvider();
-  const [pending, setPending] = useState(false);
 
   const requestedNext = searchParams?.get("next") ?? undefined;
 
@@ -49,27 +44,15 @@ function SignInContent() {
     }
   }, [auth.authenticated, auth.roles, requestedNext, router]);
 
-  async function handleSignIn() {
-    setPending(true);
-    try {
-      const session = await signIn();
-      toast.success("Signed in. Welcome back.");
-      router.replace(routeAfterSignIn(session.roles, requestedNext));
-    } catch (error) {
-      if (error instanceof WalletUnavailableError) {
-        toast.error(error.message);
-      } else {
-        toast.error(error instanceof Error ? error.message : "Sign-in failed");
-      }
-    } finally {
-      setPending(false);
-    }
+  function handleSignedIn(session: AuthSession) {
+    toast.success("Signed in. Welcome back.");
+    router.replace(routeAfterSignIn(session.roles, requestedNext));
   }
 
   return (
     <main className="grid min-h-screen place-items-center bg-[var(--bg)] px-6 py-12">
       <div className="grid w-full max-w-[960px] gap-8 md:grid-cols-[1.1fr_1fr] md:items-stretch">
-        <section className="flex flex-col justify-between rounded-[var(--radius-lg)] border border-[var(--line)] bg-[var(--paper-solid)] p-8 shadow-[var(--shadow)]">
+        <section className="hidden flex-col justify-between rounded-[var(--radius-lg)] border border-[var(--line)] bg-[var(--paper-solid)] p-8 shadow-[var(--shadow)] md:flex">
           <div>
             <div className="flex items-center gap-2">
               <div className="grid h-8 w-8 place-items-center rounded-[var(--radius-sm)] bg-[var(--accent)] font-[family-name:var(--font-display)] text-sm font-bold text-white">
@@ -126,40 +109,22 @@ function SignInContent() {
 
         <Card className="flex flex-col justify-between">
           <CardContent className="flex flex-col gap-5 py-8">
-            <Badge tone={walletProvider === "available" ? "success" : "warn"} className="w-fit">
-              {walletProvider === "available" ? "Wallet provider ready" : walletProvider === "checking" ? "Checking for a wallet" : "Wallet required"}
-            </Badge>
-            <div>
-              <h2 className="font-[family-name:var(--font-display)] text-xl font-semibold tracking-tight">
-                Connect a wallet
-              </h2>
-              <p className="mt-1 text-sm leading-relaxed text-[var(--muted)]">
-                MetaMask, Talisman, Rabby, or any EIP-1193 wallet injected into
-                this browser will work.
-              </p>
-            </div>
-            <WalletInstallGuidance
-              provider={walletProvider}
-              showBrowseLink={walletProvider === "unavailable"}
-            />
-            <Button
-              size="lg"
-              onClick={handleSignIn}
-              disabled={pending || walletProvider !== "available"}
-              className="justify-center"
-            >
-              <Wallet className="h-4 w-4" />
-              {pending ? "Signing…" : walletProvider === "unavailable" ? "Install a wallet to sign in" : "Sign in with wallet"}
-            </Button>
-            {auth.lastReason ? (
-              <p className="text-xs text-[var(--warn)]">{auth.lastReason}</p>
-            ) : null}
-            <div className="mt-2 border-t border-[var(--line)] pt-4 text-xs text-[var(--muted)]">
-              Don&apos;t have a wallet yet?{" "}
-              <Link href="https://averray.com/agents/" className="text-[var(--accent)] underline-offset-2 hover:underline">
-                Read the agent guide
+            <div className="flex items-center justify-between gap-4 md:hidden">
+              <Link href="/work" className="flex items-center gap-2" aria-label="Averray paid work">
+                <span className="grid h-8 w-8 place-items-center rounded-[var(--radius-sm)] bg-[var(--accent)] font-[family-name:var(--font-display)] text-sm font-bold text-white">A</span>
+                <strong className="font-[family-name:var(--font-display)]">Averray</strong>
               </Link>
-              .
+              <Link href="/work" className="text-xs font-semibold text-[var(--accent)]">Browse work</Link>
+            </div>
+            {auth.lastReason === "siwe_expired" || auth.lastReason === "token_refresh_rejected" ? (
+              <div className="rounded-[var(--radius)] border border-[color:rgba(167,97,34,0.38)] bg-[var(--warn-soft)] p-4" data-session-expiry="siwe">
+                <p className="text-sm font-semibold text-[var(--ink)]">Your Averray sign-in expired.</p>
+                <p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">Re-sign the readable SIWE message to continue. Your wallet pairing is separate and may still be active.</p>
+              </div>
+            ) : null}
+            <WalletSignInFlow onSignedIn={handleSignedIn} />
+            <div className="mt-2 border-t border-[var(--line)] pt-4 text-xs text-[var(--muted)]">
+              SIWE is the only sign-in door. There is no email signup. <Link href="https://averray.com/agents/" className="text-[var(--accent)] underline-offset-2 hover:underline">Read the agent guide</Link>.
             </div>
           </CardContent>
         </Card>
