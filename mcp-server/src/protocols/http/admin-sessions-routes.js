@@ -6,7 +6,7 @@ export function createAdminSessionsRoutes({
 }) {
   return async function handleAdminSessionsRoute({ request, response, url, pathname }) {
     if (request.method === "GET" && pathname === "/admin/sessions") {
-      await authMiddleware(request, url, { requireRole: "admin" });
+      await authMiddleware(request, url, { requireCapability: "ops:view" });
       const limit = parseLimit(url, 50, 250);
       const jobId = url.searchParams.get("jobId") ?? undefined;
       const sessions = jobId

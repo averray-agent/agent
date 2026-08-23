@@ -150,7 +150,7 @@ export default function PoliciesPage() {
         changes={policyChanges}
         emptyHint="No policy revision with a before/after rule is available yet."
         presence={policiesPresence}
-        blockedHint="Policy feed locked for this session (no operator role)."
+        blockedHint="Policy feed unreachable — retrying."
         activeId={
           pickedDiffRev
             ? policyChanges.find(

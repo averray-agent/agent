@@ -298,6 +298,25 @@ test("POST /auth/verify consumes nonce, signs token, and issues refresh cookie w
   assert.ok(Number.isFinite(Date.parse(verifyEvent.at)));
 });
 
+test("POST /auth/verify mints the viewer role from a casing-normalized allowlist match", async () => {
+  const normalized = CHECKSUMMED_WALLET.toLowerCase();
+  const { calls, response, route } = makeHarness({
+    payload: { message: "siwe", signature: VALID_SIGNATURE },
+    consumedWallet: normalized,
+    verified: { nonce: "nonce-1", recoveredAddress: CHECKSUMMED_WALLET },
+    roles: ["viewer"]
+  });
+
+  assert.equal(await callRoute(route, response, "POST", "/auth/verify"), true);
+  assert.deepEqual(response.body.roles, ["viewer"]);
+  assert.equal(response.body.wallet, normalized);
+  assert.equal(calls.find(([name]) => name === "resolveRoles")?.[1], normalized);
+  assert.deepEqual(calls.find(([name]) => name === "signToken")?.[1].claims, {
+    sub: normalized,
+    roles: ["viewer"]
+  });
+});
+
 test("successful SIWE appends nonce and verify outcomes only after wallet proof", async () => {
   const events = [];
   const issuedAt = "2026-08-22T10:00:00.000Z";

@@ -11,7 +11,9 @@ export function createAdminStatusRoutes({
 }) {
   return async function handleAdminStatusRoute({ request, response, url, pathname }) {
     if (request.method === "GET" && pathname === "/admin/status") {
-      const auth = await authMiddleware(request, url, { requireRole: "admin" });
+      const auth = await authMiddleware(request, url, {
+        requireCapabilities: ["admin:status", "ops:view"]
+      });
       respond(response, 200, await service.getAdminStatus({ auth }));
       return true;
     }

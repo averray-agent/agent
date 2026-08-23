@@ -28,6 +28,7 @@ const LONG_SECRET = "x".repeat(40);
 const ADMIN_WALLET = "0x1111111111111111111111111111111111111111";
 const VERIFIER_WALLET = "0x2222222222222222222222222222222222222222";
 const STRANGER_WALLET = "0x3333333333333333333333333333333333333333";
+const VIEWER_WALLET = "0x4444444444444444444444444444444444444444";
 const TRANSFER_AUTHORIZATION = {
   nonce: "42",
   deadline: "2000000000",
@@ -64,6 +65,7 @@ async function startServer(port, envOverrides = {}) {
       AUTH_CHAIN_ID: "1",
       AUTH_ADMIN_WALLETS: ADMIN_WALLET,
       AUTH_VERIFIER_WALLETS: VERIFIER_WALLET,
+      OPERATOR_VIEWER_WALLETS: VIEWER_WALLET,
       STATE_STORE_ALLOW_MEMORY: "1",
       LOG_LEVEL: "silent",
       RATE_LIMIT_AUTH_NONCE_LIMIT: "3",
@@ -478,6 +480,67 @@ test("http smoke: /admin/sessions exposes operator-wide session activity", { ski
     assert.equal(payload.sessions[0].sessionId, claimed.sessionId);
     assert.equal(payload.sessions[0].wallet, STRANGER_WALLET);
     assert.equal(payload.sessions[0].jobId, "operator-session-smoke-001");
+  });
+});
+
+test("http smoke: viewer JWT reads every operator surface without mutation authority", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const token = issueToken(VIEWER_WALLET, { roles: ["viewer"] });
+    const headers = { authorization: `Bearer ${token}` };
+    const readPaths = [
+      "/admin/status",
+      "/admin/jobs",
+      "/admin/sessions?limit=20",
+      "/badges",
+      "/agents?includeSynthetic=true",
+      "/admin/treasury/summary",
+      "/alerts",
+      "/audit",
+      "/policies",
+      "/admin/capability-grants?limit=20"
+    ];
+
+    for (const path of readPaths) {
+      const response = await fetch(`${base}${path}`, { headers });
+      assert.equal(response.status, 200, `${path} must be viewer-readable`);
+    }
+
+    const session = await fetch(`${base}/auth/session`, { headers });
+    assert.equal(session.status, 200);
+    const issued = await session.json();
+    assert.deepEqual(issued.roles, ["viewer"]);
+    assert.ok(issued.capabilities.includes("ops:view"));
+    assert.equal(issued.capabilities.includes("jobs:claim"), false);
+    assert.equal(issued.capabilities.includes("jobs:lifecycle"), false);
+  });
+});
+
+test("http smoke: viewer JWT denies POST-shaped operator mutations with the standard capability envelope", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const token = issueToken(VIEWER_WALLET, { roles: ["viewer"] });
+    const headers = {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`
+    };
+    const mutations = [
+      ["/admin/jobs/pause", { templateId: "viewer-must-not-pause" }],
+      ["/policies", { tag: "VIEWER-MUST-NOT-PROPOSE" }],
+      ["/disputes/missing/verdict", { verdict: "upheld" }],
+      ["/admin/arrivals/canary-marker", { wallet: VIEWER_WALLET }],
+      ["/account/fund", { asset: "DOT", amount: 1 }]
+    ];
+
+    for (const [path, body] of mutations) {
+      const response = await fetch(`${base}${path}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body)
+      });
+      assert.equal(response.status, 403, `${path} must remain denied`);
+      const payload = await response.json();
+      assert.equal(payload.error, "missing_capability");
+      assert.equal(payload.details.denialReason, "viewer_read_only");
+    }
   });
 });
 

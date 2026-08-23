@@ -22,6 +22,8 @@
 //   │                 │ wrapper renders a neutral placeholder, NOT    │
 //   │                 │ the operator shell or a redirect frame.       │
 //   │ "render"        │ A live session is present. Render children.   │
+//   │ "role_wall"     │ A live non-operator session is present. Show │
+//   │                 │ the worker CTA without mounting the shell.    │
 //   │ "redirect"      │ No live session. Redirect to /sign-in with    │
 //   │                 │ a `?next=<currentPath>` query so the post-    │
 //   │                 │ sign-in handler can return the operator where │
@@ -35,6 +37,7 @@
  *   The static HTML render and the FIRST client render are both
  *   pre-hydration; `useEffect` flipping a `useState` is what marks
  *   hydration complete. Set to `false` during these and `true` after.
+ * @property {string[]} [roles] — role claims stored from the SIWE session.
  * @property {string} [currentPath] — the path the visitor is on (e.g.
  *   `/overview`, `/runs/detail`). Used to build the `?next=` query so
  *   the sign-in flow returns them where they tried to go. Defaults to
@@ -43,13 +46,14 @@
 
 /**
  * @typedef {Object} GuardAction
- * @property {"checking"|"render"|"redirect"} action
+ * @property {"checking"|"render"|"role_wall"|"redirect"} action
  * @property {string} [redirectTo] — when action === "redirect", the
  *   absolute path to navigate to (always starts with `/sign-in`).
  */
 
 const SIGN_IN_PATH = "/sign-in";
 const DEFAULT_NEXT_PATH = "/overview";
+const OPERATOR_ROLES = new Set(["admin", "verifier", "viewer"]);
 
 /**
  * Decide what the authed-layout guard should do for a given auth +
@@ -69,7 +73,10 @@ export function decideAuthGuardAction(input) {
   }
 
   if (authenticated) {
-    return { action: "render" };
+    const roles = Array.isArray(input?.roles) ? input.roles : [];
+    return roles.some((role) => OPERATOR_ROLES.has(role))
+      ? { action: "render" }
+      : { action: "role_wall" };
   }
 
   return {

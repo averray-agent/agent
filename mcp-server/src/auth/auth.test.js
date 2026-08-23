@@ -303,19 +303,22 @@ test("requireAuth accepts ?token= when allowQueryToken is true", async () => {
   assert.equal(result.via, "query_token");
 });
 
-test("loadAuthConfig parses admin and verifier wallet lists", () => {
+test("loadAuthConfig parses admin, verifier, and operator-viewer wallet lists", () => {
   const config = loadAuthConfig({ JWT_BACKEND: "hmac",
     AUTH_MODE: "strict",
     AUTH_JWT_SECRETS: LONG_SECRET,
     AUTH_DOMAIN: "example.com",
     AUTH_CHAIN_ID: "1",
     AUTH_ADMIN_WALLETS: "0x1111111111111111111111111111111111111111,0x2222222222222222222222222222222222222222",
-    AUTH_VERIFIER_WALLETS: "0x3333333333333333333333333333333333333333"
+    AUTH_VERIFIER_WALLETS: "0x3333333333333333333333333333333333333333",
+    OPERATOR_VIEWER_WALLETS: "0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa"
   });
   assert.equal(config.adminWallets.size, 2);
   assert.equal(config.verifierWallets.size, 1);
+  assert.equal(config.viewerWallets.size, 1);
   assert.deepEqual(config.resolveRoles("0x1111111111111111111111111111111111111111"), ["admin"]);
   assert.deepEqual(config.resolveRoles("0x3333333333333333333333333333333333333333"), ["verifier"]);
+  assert.deepEqual(config.resolveRoles("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), ["viewer"]);
   assert.deepEqual(config.resolveRoles("0x4444444444444444444444444444444444444444"), []);
 });
 
@@ -334,9 +337,48 @@ test("loadAuthConfig rejects malformed admin wallet entries", () => {
 test("resolveRoles is case-insensitive and deduplicates via set membership", () => {
   const roles = resolveRoles("0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", {
     adminWallets: new Set(["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]),
-    verifierWallets: new Set(["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"])
+    verifierWallets: new Set(["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]),
+    viewerWallets: new Set(["0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"])
   });
-  assert.deepEqual(roles, ["admin", "verifier"]);
+  assert.deepEqual(roles, ["admin", "verifier", "viewer"]);
+});
+
+test("viewer JWT denies POST-shaped requests with the standard capability envelope", async () => {
+  const authConfig = {
+    jwtBackend: "hmac",
+    secrets: [LONG_SECRET],
+    signingSecret: LONG_SECRET,
+    permissive: false,
+    strict: true,
+    adminWallets: new Set(),
+    verifierWallets: new Set(),
+    viewerWallets: new Set()
+  };
+  const middleware = createAuthMiddleware({ authConfig, logger: silentLogger() });
+  const { token } = signToken(
+    { sub: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", roles: ["viewer"] },
+    { secret: LONG_SECRET, expiresInSeconds: 60 }
+  );
+
+  const headers = { authorization: `Bearer ${token}` };
+  const read = await middleware(
+    { method: "GET", headers },
+    new URL("http://localhost/admin/status")
+  );
+  assert.ok(read.capabilities.includes("admin:status"));
+
+  await assert.rejects(
+    () => middleware(
+      { method: "POST", headers },
+      new URL("http://localhost/admin/arrivals/canary-marker")
+    ),
+    (error) => {
+      assert.ok(error instanceof AuthorizationError);
+      assert.equal(error.code, "missing_capability");
+      assert.equal(error.details.denialReason, "viewer_read_only");
+      return true;
+    }
+  );
 });
 
 test("hasRole returns false for invalid role names", () => {

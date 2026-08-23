@@ -47,7 +47,7 @@ test("GET /admin/platform-fault-remediations exposes only the internal hardware-
   assert.equal(response.body.execution, "out_of_band_hardware");
   assert.equal(response.body.workerInitiated, false);
   assert.deepEqual(calls, [
-    ["auth", { requireRole: "admin" }],
+    ["auth", { requireCapability: "ops:view" }],
     ["list", { status: "awaiting_hardware_arbitrator", limit: 25 }]
   ]);
 });

@@ -5,6 +5,7 @@ import { ARRIVAL_CANARY_MARKER_TOKEN_KIND } from "./token-kinds.js";
 import { hasRole, resolveRoles } from "./config.js";
 import {
   getRouteCapabilityRequirements,
+  isViewerOnlyClaims,
   missingCapabilities,
   resolveCapabilities
 } from "./capabilities.js";
@@ -80,6 +81,10 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
   async function expandCapabilities(claims, baseCapabilities, grantMaxAgeMs = GRANT_CACHE_TTL_MS) {
     const subject = String(claims?.sub ?? "").trim();
     if (!subject) return baseCapabilities;
+    // Viewer-only authority is immutable for the life of the session. A stale
+    // or accidental capability grant must never turn the phone-safe identity
+    // into a mutation signer.
+    if (isViewerOnlyClaims(claims)) return baseCapabilities;
     if (isServiceTokenClaims(claims)) {
       const grantId = String(claims?.capabilityGrantId ?? "").trim();
       if (!grantId || typeof stateStore?.getCapabilityGrant !== "function") {
@@ -154,9 +159,11 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
             sub: fallbackWallet,
             roles: resolveRoles(fallbackWallet, {
               adminWallets: authConfig.adminWallets ?? new Set(),
-              verifierWallets: authConfig.verifierWallets ?? new Set()
+              verifierWallets: authConfig.verifierWallets ?? new Set(),
+              viewerWallets: authConfig.viewerWallets ?? new Set()
             })
           };
+          enforceViewerReadOnly(permissiveClaims, request, authDetails);
           const baseCapabilities = resolveCapabilities(permissiveClaims);
           const capabilities = await expandCapabilities(permissiveClaims, baseCapabilities, grantMaxAgeMs);
           enforceRole(permissiveClaims, requireRole, authDetails);
@@ -207,6 +214,7 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
     }
 
     const baseCapabilities = resolveCapabilities(claims);
+    enforceViewerReadOnly(claims, request, authDetails);
     const capabilities = await expandCapabilities(claims, baseCapabilities, grantMaxAgeMs);
     enforceRole(claims, requireRole, authDetails);
     enforceCapabilities(capabilities, requiredCapabilities, authDetails);
@@ -264,6 +272,21 @@ function enforceCapabilities(capabilities, requiredCapabilities, authDetails = u
       missingCapabilities: missing
     });
   }
+}
+
+function enforceViewerReadOnly(claims, request, authDetails = undefined) {
+  if (!isViewerOnlyClaims(claims) || !isMutatingRequest(request)) return;
+  throw new AuthorizationError(
+    "Operator viewer sessions are read-only.",
+    "missing_capability",
+    {
+      ...(authDetails ?? {}),
+      requiresAuth: true,
+      requiredCapabilities: ["mutation:execute"],
+      missingCapabilities: ["mutation:execute"],
+      denialReason: "viewer_read_only"
+    }
+  );
 }
 
 function normalizeRequiredCapabilities(values = []) {

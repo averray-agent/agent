@@ -34,7 +34,7 @@ function harness() {
   };
 }
 
-test("GET /admin/arrivals/timeline is admin-authed and defaults to 48h", async () => {
+test("GET /admin/arrivals/timeline requires operator read capability and defaults to 48h", async () => {
   const { calls, response, route } = harness();
   assert.equal(await route({
     request: { method: "GET" },
@@ -43,14 +43,14 @@ test("GET /admin/arrivals/timeline is admin-authed and defaults to 48h", async (
     pathname: "/admin/arrivals/timeline"
   }), true);
   assert.deepEqual(calls, [
-    ["auth", { requireRole: "admin" }],
+    ["auth", { requireCapability: "ops:view" }],
     ["timeline", "48h"]
   ]);
   assert.equal(response.statusCode, 200);
   assert.equal(response.headers["cache-control"], "no-store");
 });
 
-test("GET /admin/worker-journeys passes wallet and bounded list arguments after admin auth", async () => {
+test("GET /admin/worker-journeys passes wallet and bounded list arguments after operator read auth", async () => {
   const { calls, response, route } = harness();
   await route({
     request: { method: "GET" },
@@ -59,7 +59,7 @@ test("GET /admin/worker-journeys passes wallet and bounded list arguments after 
     pathname: "/admin/worker-journeys"
   });
   assert.deepEqual(calls, [
-    ["auth", { requireRole: "admin" }],
+    ["auth", { requireCapability: "ops:view" }],
     ["limit", 25, 100],
     ["journeys", { wallet: "0xabc", limit: 40 }]
   ]);

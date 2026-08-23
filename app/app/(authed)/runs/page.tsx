@@ -413,7 +413,7 @@ function RunsPageInner() {
               {rowsPresence === "loading"
                 ? "Loading live run details…"
                 : rowsPresence === "locked"
-                  ? "Run details are locked for this session."
+                  ? "Run details are unreachable — retrying."
                   : rowsPresence === "down"
                     ? "Live run details are unavailable right now."
                     : "The live job feed is genuinely empty; there is no run to select."}

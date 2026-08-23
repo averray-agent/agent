@@ -135,7 +135,7 @@ test("admin capability routes ignore unrelated paths", async () => {
   assert.deepEqual(response, {});
 });
 
-test("GET /admin/capability-grants lists projected grants with filters", async () => {
+test("GET /admin/capability-grants uses the operator read capability and lists projected grants", async () => {
   const { calls, response, route } = makeHarness();
 
   const handled = await callRoute(
@@ -153,7 +153,7 @@ test("GET /admin/capability-grants lists projected grants with filters", async (
     offset: 3
   });
   assert.deepEqual(calls.slice(0, 3), [
-    ["auth", { requireRole: "admin" }],
+    ["auth", { requireCapability: "admin:capabilities:read" }],
     ["parseLimit", { fallback: 50, max: 200 }],
     ["listCapabilityGrants", {
       subject: SUBJECT,

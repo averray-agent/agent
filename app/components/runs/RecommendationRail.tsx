@@ -47,7 +47,7 @@ export function RecommendationRail({
             : presence === "loading"
               ? "Loading /jobs/recommendations…"
               : presence === "locked"
-                ? "Recommendation feed locked for this session"
+                ? "Recommendation feed unreachable — retrying"
                 : "Recommendation feed unavailable"}
         </p>
       </header>

@@ -8,10 +8,10 @@ import {
   runsRowsPresence,
 } from "./runs-feed-status.js";
 
-test("queue status declares locked admin lifecycle metadata", () => {
+test("queue status declares unreachable admin lifecycle metadata", () => {
   assert.equal(
     runsQueueLiveStatus("locked", "live"),
-    "public feed · lifecycle metadata locked for this session"
+    "public feed · lifecycle metadata unreachable — retrying"
   );
 });
 
@@ -29,7 +29,7 @@ test("blocked public jobs take precedence over admin degradation copy", () => {
   );
   assert.equal(
     runsQueueLiveStatus("loading", "locked"),
-    "job feed locked for this session"
+    "job feed unreachable — retrying"
   );
 });
 
@@ -58,11 +58,11 @@ test("runs freshness declares mixed loading, locked, and down states", () => {
   assert.equal(runsPageFreshness("live", "live"), "live");
 });
 
-test("hidden lifecycle copy blocks the toggle when admin metadata is locked", () => {
+test("hidden lifecycle copy blocks the toggle when admin metadata is unreachable", () => {
   assert.deepEqual(hiddenLifecycleCopy("locked", 0, false), {
     blocked: true,
     message:
-      "Lifecycle metadata locked for this session — paused, archived, and stale rows cannot be shown.",
+      "Lifecycle metadata unreachable — retrying. Paused, archived, and stale rows cannot be shown right now.",
     button: "Show hidden",
   });
 });

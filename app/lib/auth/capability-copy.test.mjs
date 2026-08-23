@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { controlLockedReason } from "./capability-copy.js";
 
 test("capability refusals use human session copy instead of policy identifiers", () => {
-  assert.equal(controlLockedReason("admin.capabilities.view"), "Grant feed locked for this session.");
+  assert.equal(controlLockedReason("admin.capabilities.view"), "Grant feed unreachable — retrying.");
   assert.equal(controlLockedReason("admin.capabilities.grant"), "Grant controls locked for this session.");
   assert.equal(controlLockedReason("admin.jobs.lifecycle"), "Lifecycle controls locked for this session.");
   assert.doesNotMatch(controlLockedReason("unknown"), /capability|admin:|jobs:/iu);

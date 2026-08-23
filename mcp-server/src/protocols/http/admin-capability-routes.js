@@ -165,7 +165,7 @@ export function createAdminCapabilityRoutes({
      * any time. Roadmap §6.
      */
     if (request.method === "GET" && pathname === "/admin/capability-grants") {
-      await authMiddleware(request, url, { requireRole: "admin" });
+      await authMiddleware(request, url, { requireCapability: "admin:capabilities:read" });
       const subject = (url.searchParams.get("subject") ?? "").trim().toLowerCase() || undefined;
       const status = (url.searchParams.get("status") ?? "").trim().toLowerCase() || undefined;
       const limit = parseLimit(url, 50, 200);
@@ -232,7 +232,7 @@ export function createAdminCapabilityRoutes({
     }
 
     if (request.method === "GET" && pathname === "/admin/service-tokens") {
-      await authMiddleware(request, url, { requireRole: "admin" });
+      await authMiddleware(request, url, { requireCapability: "admin:capabilities:read" });
       const subject = (url.searchParams.get("subject") ?? "").trim().toLowerCase() || undefined;
       const status = (url.searchParams.get("status") ?? "").trim().toLowerCase() || undefined;
       const limit = parseLimit(url, 50, 200);

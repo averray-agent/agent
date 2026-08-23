@@ -31,6 +31,46 @@ test("resolveCapabilities expands admin and verifier capabilities", () => {
   assert.ok(capabilities.includes("xcm:finalize"));
 });
 
+test("viewer-only capability issuance contains every operator read and no mutation capability", () => {
+  const capabilities = resolveCapabilities({
+    roles: ["viewer"],
+    capabilities: ["jobs:create"],
+    scopes: ["disputes:verdict"]
+  });
+
+  for (const capability of [
+    "account:read",
+    "admin:capabilities:read",
+    "admin:status",
+    "agents:list",
+    "badges:list",
+    "disputes:list",
+    "events:read",
+    "jobs:list",
+    "jobs:timeline",
+    "ops:view",
+    "session:read"
+  ]) {
+    assert.ok(capabilities.includes(capability), `viewer must receive ${capability}`);
+  }
+  for (const capability of [
+    "account:fund",
+    "admin:capabilities:grant",
+    "credit:originate",
+    "disputes:verdict",
+    "jobs:claim",
+    "jobs:create",
+    "jobs:lifecycle",
+    "jobs:pause-recurring",
+    "payments:send",
+    "policies:propose",
+    "verifier:run",
+    "xcm:finalize"
+  ]) {
+    assert.equal(capabilities.includes(capability), false, `viewer must not receive ${capability}`);
+  }
+});
+
 test("resolveCapabilities includes explicit future scopes from signed claims", () => {
   const capabilities = resolveCapabilities({
     roles: [],
@@ -63,6 +103,8 @@ test("capabilityMatrix exposes base and role capability groups", () => {
   assert.ok(matrix.roles.admin.includes("xcm:observe"));
   assert.ok(matrix.roles.admin.includes("xcm:finalize"));
   assert.ok(matrix.roles.verifier.includes("verifier:replay"));
+  assert.ok(matrix.roles.viewer.includes("ops:view"));
+  assert.equal(matrix.roles.viewer.includes("jobs:lifecycle"), false);
   assert.deepEqual(matrix.routes["/admin/jobs/pause"], ["jobs:pause-recurring"]);
   assert.deepEqual(matrix.routes["/admin/jobs/timeline"], ["jobs:timeline"]);
   assert.deepEqual(matrix.routes["/admin/xcm/observe"], ["xcm:observe"]);

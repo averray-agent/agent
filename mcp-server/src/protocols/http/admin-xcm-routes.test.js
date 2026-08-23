@@ -108,7 +108,7 @@ test("GET /admin/xcm/finalize-exhausted lists parked requests for ops", async ()
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.body, { count: 1, items: exhausted });
-  assert.deepEqual(calls.find(([name]) => name === "auth")?.[1], { requireRole: "admin" });
+  assert.deepEqual(calls.find(([name]) => name === "auth")?.[1], { requireCapability: "ops:view" });
   assert.deepEqual(calls.find(([name]) => name === "listXcmFinalizeExhausted")?.[1], { limit: 25 });
   assert.ok(!calls.some(([name]) => name === "limit"), "read-only ops listing must not consume mutation quota");
 });

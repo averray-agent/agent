@@ -357,7 +357,7 @@ function initialVerifyStatus(
     return { tone: "unavailable", title: "Loading", detail: "Waiting for the canonical receipt document." };
   }
   if (presence === "locked") {
-    return { tone: "unavailable", title: "Locked", detail: "Receipt feed locked for this session; verification was not attempted." };
+    return { tone: "unavailable", title: "Unreachable", detail: "Receipt feed unreachable — retrying; verification was not attempted." };
   }
   if (presence === "down") {
     return { tone: "unavailable", title: "Unavailable", detail: "Receipt feed is unavailable; verification was not attempted." };
@@ -380,7 +380,7 @@ function presenceReason(
   document: Record<string, unknown> | null
 ): string | null {
   if (presence === "loading") return "Disabled while the canonical receipt is loading.";
-  if (presence === "locked") return "Disabled: receipt feed locked for this session.";
+  if (presence === "locked") return "Disabled: receipt feed unreachable — retrying.";
   if (presence === "down") return "Disabled: receipt feed unavailable.";
   if (!document) return "Disabled: canonical receipt document unavailable.";
   return null;

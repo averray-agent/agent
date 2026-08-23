@@ -240,8 +240,8 @@ export default function OverviewPage() {
   const vitals = vitalsWithLoadingHints;
   const alerts = endpointAlerts.length ? endpointAlerts : liveAlerts;
   const lanes = liveLanes;
-  // Needs-action truth boundary: when the alert feed is locked (this
-  // session lacks an operator role) or down, an empty list means "can't
+  // Needs-action truth boundary: when the alert feed is denied or down,
+  // an empty list means "can't
   // see", not "nothing to do" — never render it as `0 open`.
   const alertsPresence = feedPresence(apiAlerts);
   const alertFeedBlocked = alertsPresence === "locked" || alertsPresence === "down";
@@ -252,8 +252,8 @@ export default function OverviewPage() {
       : `${alerts.length} open`;
   const alertsNotice = alertFeedBlocked
     ? alertsPresence === "locked"
-      ? "The operator alert feed is locked for this session (no operator role on this wallet), so open alerts can't be listed here. What is shown comes from the feeds this session can read."
-      : "The operator alert feed is unavailable right now, so open alerts can't be listed here. What is shown comes from the feeds this session can read."
+      ? "The operator alert feed denied this authorized session and is being retried. Available feeds remain live and are shown."
+      : "The operator alert feed is unreachable right now and is being retried. Available feeds remain live and are shown."
     : undefined;
   const disputedSessions = Array.isArray(sessions.data)
     ? sessions.data.filter((session) => session?.status === "disputed").length
@@ -300,7 +300,7 @@ export default function OverviewPage() {
         lanes={lanes}
         freshness={freshness}
         visibleAlertCount={alerts.length}
-        alertFeedIncomplete={alertsPresence !== "live"}
+        alertFeedPresence={alertsPresence}
       />
       <div className="hidden w-full max-w-[1100px] flex-col gap-7 min-[1080px]:flex">
       <OverviewTopbar capabilityWarning={capabilityWarning} freshness={freshness} />
@@ -326,7 +326,7 @@ export default function OverviewPage() {
             ? "Amber"
             : liveVitals[3]?.value === "Green"
               ? "Green"
-              : "Unknown"
+              : "—"
         }
         policiesAppliedToday={policiesBlocked ? "—" : policiesAppliedToday}
       />

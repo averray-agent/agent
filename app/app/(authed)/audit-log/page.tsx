@@ -198,7 +198,7 @@ export default function AuditLogPage() {
             row hashes from the live audit response.
           </>
         ) : auditPresence === "locked" ? (
-          "Audit feed locked for this session (no operator role)."
+          "Audit feed unreachable — retrying."
         ) : auditPresence === "down" ? (
           "Audit feed unavailable."
         ) : (

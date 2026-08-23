@@ -15,7 +15,7 @@ export const NO_SESSION_VERIFIER_MESSAGE =
   "No verifier output yet — this run has not been claimed.";
 
 export const LOCKED_VERIFIER_MESSAGE =
-  "Verifier log locked for this session (missing operator role)";
+  "Verifier log unreachable — retrying";
 
 /**
  * @param {object} input

@@ -73,7 +73,7 @@ test("admin status routes ignore unrelated paths", async () => {
   assert.deepEqual(response, {});
 });
 
-test("GET /admin/status requires admin auth and returns service status", async () => {
+test("GET /admin/status requires operator status read capabilities and returns service status", async () => {
   const { calls, response, route } = makeHarness();
 
   const handled = await route({
@@ -87,7 +87,7 @@ test("GET /admin/status requires admin auth and returns service status", async (
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.body, { ok: true, auth: { wallet: AUTH.wallet } });
   assert.deepEqual(calls, [
-    ["auth", { requireRole: "admin" }],
+    ["auth", { requireCapabilities: ["admin:status", "ops:view"] }],
     ["getAdminStatus", AUTH],
     ["respond", { statusCode: 200, body: { ok: true, auth: { wallet: AUTH.wallet } } }],
   ]);

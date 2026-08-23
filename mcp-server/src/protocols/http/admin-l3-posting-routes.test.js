@@ -38,9 +38,9 @@ test("admin L3 posting routes expose the durable queue and named-refusal log", a
   }), true);
 
   assert.deepEqual(h.calls, [
-    ["auth", { requireRole: "admin" }],
+    ["auth", { requireCapability: "ops:view" }],
     ["list", { borrower: undefined, status: "posted", limit: 25 }],
-    ["auth", { requireRole: "admin" }],
+    ["auth", { requireCapability: "ops:view" }],
     ["refusals", { reason: "l3_disabled", limit: 25 }]
   ]);
   assert.equal(h.responses[0].body.count, 1);

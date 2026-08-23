@@ -8,7 +8,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const appRoot = resolve(here, "../..");
 const read = (path) => readFileSync(resolve(appRoot, path), "utf8");
 
-test("locked policy, audit, and capability feeds are threaded into their panels", () => {
+test("unreachable policy and audit feeds are threaded into their panels", () => {
   const policiesPage = read("app/(authed)/policies/page.tsx");
   const auditPage = read("app/(authed)/audit-log/page.tsx");
   const capabilitiesPage = read("app/(authed)/capabilities/page.tsx");
@@ -17,11 +17,11 @@ test("locked policy, audit, and capability feeds are threaded into their panels"
 
   assert.match(policiesPage, /policiesPresence\s*=\s*feedPresence\(policiesRequest\)/u);
   assert.match(policiesPage, /presence=\{policiesPresence\}/u);
-  assert.match(policyStrip, /policy feed locked for this session \(no operator role\)/u);
+  assert.match(policyStrip, /policy feed unreachable — retrying/u);
   assert.match(auditPage, /auditPresence\s*=\s*feedPresence\(auditRequest\)/u);
-  assert.match(auditStrip, /audit feed locked for this session \(no operator role\)/u);
+  assert.match(auditStrip, /audit feed unreachable — retrying/u);
   assert.match(capabilitiesPage, /grantsPresence\s*=\s*feedPresence\(grantsRequest\)/u);
-  assert.match(capabilitiesPage, /Grant feed locked for this session/u);
+  assert.match(capabilitiesPage, /Grant feed unreachable — retrying/u);
 });
 
 test("dispute surfaces use emitted assets, real resolution timestamps, and honest identities", () => {

@@ -6,7 +6,7 @@ export function createAdminGithubRoutes({
 }) {
   return async function handleAdminGithubRoute({ request, response, url, pathname }) {
     if (request.method === "GET" && pathname === "/admin/github/status") {
-      await authMiddleware(request, url, { requireRole: "admin" });
+      await authMiddleware(request, url, { requireCapability: "ops:view" });
       respond(response, 200, await service.getGithubOperatorStatus({
         repos: url.searchParams.has("repos") ? url.searchParams.get("repos") : undefined,
         limit: parseLimit(url, 5, 20),

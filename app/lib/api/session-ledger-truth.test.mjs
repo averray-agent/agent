@@ -16,13 +16,13 @@ const table = readFileSync(resolve(sessionsDir, "SessionsTable.tsx"), "utf8");
 const topbar = readFileSync(resolve(sessionsDir, "SessionsTopbar.tsx"), "utf8");
 const adapter = readFileSync(resolve(here, "session-adapters.ts"), "utf8");
 
-test("locked admin sessions stay locked throughout the sessions surface", () => {
+test("unreachable admin sessions stay explicit throughout the sessions surface", () => {
   assert.equal(feedPresence({ error: { status: 403 } }), "locked");
   assert.match(page, /sessionsPresence\s*=\s*feedPresence\(sessionsQuery\)/u);
   assert.match(page, /<SessionsAggregateStrip[\s\S]*presence=\{sessionsPresence\}/u);
   assert.match(page, /<SessionsTable[\s\S]*presence=\{sessionsPresence\}/u);
-  assert.match(aggregate, /session feed locked for this session \(no operator role\)/u);
-  assert.match(table, /Session ledger locked for this session/u);
+  assert.match(aggregate, /session feed unreachable — retrying/u);
+  assert.match(table, /Session ledger unreachable — retrying/u);
   assert.doesNotMatch(adapter, /claimedJobSession|liveSessionRows/u);
 });
 

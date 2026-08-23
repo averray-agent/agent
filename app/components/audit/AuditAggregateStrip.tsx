@@ -13,7 +13,7 @@ export function AuditAggregateStrip({
   if (presence !== "live") {
     const meta =
       presence === "locked"
-        ? "audit feed locked for this session (no operator role)"
+        ? "audit feed unreachable — retrying"
         : presence === "down"
           ? "audit feed unavailable"
           : "audit feed loading";

@@ -89,7 +89,12 @@ const ROUTE_BINDINGS = [
     source: "app/(authed)/overview/page.tsx",
     anchor: "<MobileOverview",
     component: "components/overview/MobileOverview.tsx",
-    semantics: [/Current verdict/u, /<RoomVitals/u, /Capabilities/u],
+    semantics: [
+      /Current verdict/u,
+      /deriveOperatorRoomVerdict/u,
+      /<RoomVitals/u,
+      /Capabilities/u,
+    ],
   },
   {
     route: "runs",
@@ -167,6 +172,28 @@ test("bottom bar and More sheet expose the complete route and session contract",
   assert.match(navigation, />\s*Sign out\s*</u);
   assert.match(navigation, />\s*Disconnect\s*</u);
   assert.match(navigation, /min-h-11/u);
+});
+
+test("operator role wall precedes every shell and mobile navigation surface", async () => {
+  const [layout, guard, wall] = await Promise.all([
+    read("app/(authed)/layout.tsx"),
+    read("components/shell/AuthedGuard.tsx"),
+    read("components/shell/OperatorRoleWall.tsx"),
+  ]);
+  assert.match(layout, /<AuthedGuard>[\s\S]*<OperatorDesktopGate>/u);
+  assert.match(guard, /decision\.action === "role_wall"/u);
+  assert.match(guard, /<OperatorRoleWall/u);
+  assert.match(wall, /this wallet doesn&apos;t have operator access/iu);
+  assert.match(wall, /href="\/work"/u);
+  assert.match(wall, />\s*Find paid work\s*</u);
+  assert.match(wall, />\s*Sign out\s*</u);
+});
+
+test("mobile overview pins degraded copy to the shared room-verdict derivation", async () => {
+  const verdict = await read("lib/ui/operator-room-verdict.js");
+  assert.match(verdict, /Live view degraded — some feeds are unreachable right now/u);
+  assert.match(verdict, /alert feed denied this session/u);
+  assert.match(verdict, /available feeds remain live and are shown/u);
 });
 
 test("receipt detail is full-screen on phones, 420px on tablets, and retains desktop width", async () => {

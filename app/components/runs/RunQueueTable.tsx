@@ -183,7 +183,7 @@ function QueuePresenceNotice({ presence }: { presence: FeedPresence }) {
     presence === "loading"
       ? "Loading live jobs…"
       : presence === "locked"
-        ? "The job feed is locked for this session. Queue activity and totals cannot be shown."
+        ? "The job feed is unreachable — retrying. Queue activity and totals cannot be shown right now."
         : "The live job feed is unavailable. Queue activity and totals cannot be shown right now.";
   return (
     <div

@@ -10,11 +10,11 @@ export function runsRowsPresence(adminPresence, publicPresence) {
 
 export function runsQueueLiveStatus(adminPresence, publicPresence = "live") {
   if (adminPresence === "live") return "live operator feed";
-  if (publicPresence === "locked") return "job feed locked for this session";
+  if (publicPresence === "locked") return "job feed unreachable — retrying";
   if (publicPresence === "down") return "job feed unavailable";
   if (publicPresence === "loading") return "loading live jobs";
   if (adminPresence === "locked") {
-    return "public feed · lifecycle metadata locked for this session";
+    return "public feed · lifecycle metadata unreachable — retrying";
   }
   if (adminPresence === "down") {
     return "public feed · lifecycle metadata unavailable";
@@ -50,7 +50,7 @@ export function hiddenLifecycleCopy(adminPresence, closedRowCount, showClosed) {
     return {
       blocked: true,
       message:
-        "Lifecycle metadata locked for this session — paused, archived, and stale rows cannot be shown.",
+        "Lifecycle metadata unreachable — retrying. Paused, archived, and stale rows cannot be shown right now.",
       button: "Show hidden",
     };
   }

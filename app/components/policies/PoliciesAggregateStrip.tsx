@@ -12,7 +12,7 @@ export function PoliciesAggregateStrip({
   if (presence !== "live") {
     const meta =
       presence === "locked"
-        ? "policy feed locked for this session (no operator role)"
+        ? "policy feed unreachable — retrying"
         : presence === "down"
           ? "policy feed unavailable"
           : "policy feed loading";

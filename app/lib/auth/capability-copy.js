@@ -1,5 +1,5 @@
 const CONTROL_LOCKED_COPY = new Map([
-  ["admin.capabilities.view", "Grant feed locked for this session."],
+  ["admin.capabilities.view", "Grant feed unreachable — retrying."],
   ["admin.capabilities.grant", "Grant controls locked for this session."],
   ["admin.capabilities.revoke", "Grant controls locked for this session."],
   ["admin.jobs.lifecycle", "Lifecycle controls locked for this session."],

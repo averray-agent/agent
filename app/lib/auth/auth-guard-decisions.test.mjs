@@ -29,11 +29,24 @@ test("decideAuthGuardAction: pre-hydration always returns 'checking', regardless
   );
 });
 
-test("decideAuthGuardAction: hydrated + authenticated returns 'render' (the operator shell)", () => {
-  assert.deepEqual(
-    decideAuthGuardAction({ authenticated: true, hydrated: true, currentPath: "/overview" }),
-    { action: "render" }
-  );
+test("decideAuthGuardAction: only admin, verifier, and viewer roles render the operator shell", () => {
+  for (const role of ["admin", "verifier", "viewer"]) {
+    assert.deepEqual(
+      decideAuthGuardAction({ authenticated: true, hydrated: true, roles: [role], currentPath: "/overview" }),
+      { action: "render" },
+      role
+    );
+  }
+});
+
+test("decideAuthGuardAction: authenticated non-operator roles render the role wall", () => {
+  for (const roles of [[], ["worker"], ["service"]]) {
+    assert.deepEqual(
+      decideAuthGuardAction({ authenticated: true, hydrated: true, roles, currentPath: "/overview" }),
+      { action: "role_wall" },
+      JSON.stringify(roles)
+    );
+  }
 });
 
 test("decideAuthGuardAction: hydrated + unauthenticated returns 'redirect' with next=<currentPath>", () => {
@@ -53,7 +66,7 @@ test("decideAuthGuardAction: defensively coerces missing/non-boolean fields", ()
   // @ts-expect-error — deliberately exercising the coercion path
   assert.deepEqual(decideAuthGuardAction({}), { action: "checking" });
   // @ts-expect-error — deliberately exercising the coercion path
-  assert.deepEqual(decideAuthGuardAction({ hydrated: 1, authenticated: 1 }), { action: "render" });
+  assert.deepEqual(decideAuthGuardAction({ hydrated: 1, authenticated: 1 }), { action: "role_wall" });
 });
 
 // ── buildSignInRedirect path normalization ───────────────────────────

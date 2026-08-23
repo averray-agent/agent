@@ -5,7 +5,7 @@ export function createUsdcLiquidityRoutes({
 }) {
   return async function handleUsdcLiquidityRoute({ request, response, url, pathname }) {
     if (request.method === "GET" && pathname === "/admin/usdc-liquidity/status") {
-      await authMiddleware(request, url, { requireRole: "admin" });
+      await authMiddleware(request, url, { requireCapability: "ops:view" });
       respond(response, 200, await usdcLiquidityStatusService.getStatus());
       return true;
     }
