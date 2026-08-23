@@ -1,3 +1,5 @@
+import { controlLockedReason } from "./capability-copy.js";
+
 /**
  * Auth-policy v1 (PR #159) adapter for the operator app.
  *
@@ -120,7 +122,7 @@ export function canUseControl(
     allowed: false,
     required,
     missing,
-    reason: `Missing capability: ${missing.join(", ")}`,
+    reason: controlLockedReason(controlName),
   };
 }
 

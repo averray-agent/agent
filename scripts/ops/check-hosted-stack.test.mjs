@@ -28,6 +28,7 @@ async function runHostedStackFixture({
   poolStatus = 200,
   operatorToken = "",
   accountUnauthenticatedOk = false,
+  receiptRscStatus = 200,
   pool = {
     available: true,
     chainId: 1,
@@ -180,6 +181,7 @@ async function runHostedStackFixture({
       <a href="/transparency/">transparency</a>
     </body></html>`],
     ["/app", "averray-operator"],
+    ["/app/receipts/__next._tree.txt", "receipts route tree"],
     ["/.well-known/agent-tools.json", {
       discoveryUrl: "https://averray.com/.well-known/agent-tools.json",
       baseUrl: "https://api.averray.com",
@@ -305,6 +307,13 @@ async function runHostedStackFixture({
       response.end();
       return;
     }
+    if (request.url === "/app/receipts/__next._tree.txt" && receiptRscStatus !== 200) {
+      response.writeHead(receiptRscStatus, receiptRscStatus >= 300 && receiptRscStatus < 400
+        ? { location: "https://averray.com/receipts/__next._tree.txt" }
+        : {});
+      response.end();
+      return;
+    }
     if (request.url === "/pool") {
       response.writeHead(poolStatus, { "content-type": "application/json" });
       response.end(JSON.stringify(pool));
@@ -372,6 +381,7 @@ async function runHostedStackFixture({
       APP_TRANSPARENCY_REDIRECT_URL: `${baseUrl}/redirect/app/transparency`,
       APP_TRANSPARENCY_SLASH_REDIRECT_URL: `${baseUrl}/redirect/app/transparency/`,
       APP_RECEIPT_REDIRECT_URL: `${baseUrl}/redirect/app/receipts/0xabc123def4567890abc123def4567890abc123de`,
+      APP_RECEIPTS_RSC_URL: `${baseUrl}/app/receipts/__next._tree.txt`,
       APP_JOBS_REDIRECT_URL: `${baseUrl}/redirect/app/jobs`,
       APP_JOB_SUBPATH_REDIRECT_URL: `${baseUrl}/redirect/app/jobs/example-job`,
       PUBLIC_WORK_REDIRECT_URL: `${baseUrl}/redirect/site/work`,
@@ -453,6 +463,16 @@ test("operator build id and hosted deploy markers stay in parity", async () => {
   assert.ok(buildId, "app/next.config.ts must declare a default NEXT_BUILD_ID");
   assert.equal(extractShellMarkerDefault(redeployScript, "redeploy-frontend.sh"), buildId);
   assert.equal(extractShellMarkerDefault(hostedCheckScript, "check-hosted-stack.sh"), buildId);
+});
+
+test("hosted smoke refuses a cross-origin receipts client-navigation asset redirect", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    receiptRscStatus: 301,
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.match(result.stderr, /receipts client-navigation asset returned HTTP 301/u);
 });
 
 test("hosted smoke rejects an unhealthy submitted-job verifier even with no warnings", async () => {

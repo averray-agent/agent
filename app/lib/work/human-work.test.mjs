@@ -25,6 +25,18 @@ test("job definition 404 is missing while outages remain retryable read failures
   assert.equal(jobDefinitionFailureKind(null), null);
 });
 
+test("first-response 404 outranks concurrent job-feed loading", async () => {
+  const detail = await readFile(
+    new URL("../../components/work/WorkJobDetail.tsx", import.meta.url),
+    "utf8"
+  );
+  const notFoundDecision = detail.indexOf('jobDefinitionFailureKind(definitionQuery.error) === "not_found"');
+  const loadingDecision = detail.indexOf("definitionQuery.isLoading || jobsQuery.isLoading");
+  assert.ok(notFoundDecision >= 0, "detail must classify the definition response");
+  assert.ok(loadingDecision >= 0, "detail must retain an honest loading state");
+  assert.ok(notFoundDecision < loadingDecision, "a first 404 must render terminally before concurrent loading can mask it");
+});
+
 test("work catalogue loading banner clears for loaded and empty results", () => {
   assert.equal(workCatalogueIsPending({ isLoading: true, data: undefined }), true);
   assert.equal(workCatalogueIsPending({ isLoading: true, data: { jobs: [] } }), false);
@@ -160,4 +172,16 @@ test("static deployment serves pretty job and session URLs through the worker sh
   assert.match(caddy, /rewrite @workerJob \/work\/job\/index\.html/u);
   assert.match(nextConfig, /source: "\/work\/session\/:sessionId"/u);
   assert.match(nextConfig, /source: "\/work\/:jobId"/u);
+});
+
+test("earnings navigation leaves the dynamic job-id namespace", async () => {
+  const [header, page, caddy] = await Promise.all([
+    readFile(new URL("../../components/work/WorkerHeader.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../../app/(worker)/work-withdraw/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../../../deploy/Caddyfile.averray", import.meta.url), "utf8"),
+  ]);
+  assert.match(header, /href="\/work-withdraw"/u, "client navigation must target the collision-free route");
+  assert.match(page, /return <WorkWithdrawal \/>/u, "the static route must render the real withdrawal standing UI");
+  assert.match(caddy, /@legacyWorkWithdrawal path \/work\/withdraw \/work\/withdraw\//u);
+  assert.match(caddy, /redir @legacyWorkWithdrawal \/work-withdraw\/ 301/u);
 });

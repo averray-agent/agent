@@ -13,6 +13,7 @@ PUBLIC_VERIFY_PROFILES_REDIRECT_URL=${PUBLIC_VERIFY_PROFILES_REDIRECT_URL:-https
 APP_TRANSPARENCY_REDIRECT_URL=${APP_TRANSPARENCY_REDIRECT_URL:-https://app.averray.com/transparency}
 APP_TRANSPARENCY_SLASH_REDIRECT_URL=${APP_TRANSPARENCY_SLASH_REDIRECT_URL:-https://app.averray.com/transparency/}
 APP_RECEIPT_REDIRECT_URL=${APP_RECEIPT_REDIRECT_URL:-https://app.averray.com/receipts/0xabc123def4567890abc123def4567890abc123de}
+APP_RECEIPTS_RSC_URL=${APP_RECEIPTS_RSC_URL:-https://app.averray.com/receipts/__next._tree.txt}
 APP_JOBS_REDIRECT_URL=${APP_JOBS_REDIRECT_URL:-https://app.averray.com/jobs}
 APP_JOB_SUBPATH_REDIRECT_URL=${APP_JOB_SUBPATH_REDIRECT_URL:-https://app.averray.com/jobs/example-job}
 PUBLIC_WORK_REDIRECT_URL=${PUBLIC_WORK_REDIRECT_URL:-https://averray.com/work}
@@ -225,6 +226,24 @@ assert_redirect() {
   fi
 }
 
+assert_app_side_asset() {
+  local url="$1"
+  local label="$2"
+  local status
+  local curl_args=(-sS --max-time "$TIMEOUT_SEC" -o /dev/null -w "%{http_code}")
+  if [[ -n "$APP_BASIC_AUTH_USER" && -n "$APP_BASIC_AUTH_PASSWORD" ]]; then
+    curl_args+=(-u "$APP_BASIC_AUTH_USER:$APP_BASIC_AUTH_PASSWORD")
+  fi
+  status="$(curl_with_transport_retries "${curl_args[@]}" "$url")"
+  case "$status" in
+    301|302|303|307|308)
+      echo "$label returned HTTP $status; the client-navigation request escaped the app vhost." >&2
+      exit 1
+      ;;
+    *) return 0 ;;
+  esac
+}
+
 enabled() {
   case "${1:-}" in
     1|true|yes) return 0 ;;
@@ -301,6 +320,7 @@ assert_redirect "$PUBLIC_VERIFY_PROFILES_REDIRECT_URL" "https://api.averray.com/
 assert_redirect "$APP_TRANSPARENCY_REDIRECT_URL" "https://averray.com/transparency/" "Operator-app transparency path"
 assert_redirect "$APP_TRANSPARENCY_SLASH_REDIRECT_URL" "https://averray.com/transparency/" "Operator-app transparency slash path"
 assert_redirect "$APP_RECEIPT_REDIRECT_URL" "https://averray.com/receipts/0xabc123def4567890abc123def4567890abc123de" "Operator-app public receipt path"
+assert_app_side_asset "$APP_RECEIPTS_RSC_URL" "Operator-app receipts client-navigation asset"
 assert_redirect "$APP_JOBS_REDIRECT_URL" "https://app.averray.com/work" "Operator-app legacy jobs path"
 assert_redirect "$APP_JOB_SUBPATH_REDIRECT_URL" "https://app.averray.com/work" "Operator-app legacy job subpath"
 assert_redirect "$PUBLIC_WORK_REDIRECT_URL" "https://app.averray.com/work" "Public-site work path"

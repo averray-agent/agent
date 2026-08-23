@@ -166,6 +166,12 @@ app.averray.com {
   @verifyAliasPath path /verify /verify/
   redir @verifyAliasPath /runs/ 301
 
+  # The withdrawal screen used to sit below /work, where the static job-shell
+  # matcher interpreted "withdraw" as a job id. Keep old bookmarks working,
+  # but put the real page outside that dynamic namespace.
+  @legacyWorkWithdrawal path /work/withdraw /work/withdraw/
+  redir @legacyWorkWithdrawal /work-withdraw/ 301
+
   # The Bank feed is intentionally credential-free because only services on
   # the private Compose network consume it. Never publish it through /api.
   handle /api/monitor/bank-feed* {
