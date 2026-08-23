@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowLeft, ExternalLink, Landmark, Wallet } from "lucide-react";
+import { ArrowLeft, ExternalLink, Landmark } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,18 +9,19 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getClient, extractApiErrorMessage } from "@/lib/api/client";
 import { useBoundedApi } from "@/lib/api/hooks";
-import { signIn, WalletUnavailableError } from "@/lib/auth/siwe";
 import { useAuth } from "@/lib/auth/use-auth";
+import { WalletSignInFlow } from "@/components/auth/WalletSignInFlow";
 import {
   ensureWalletReady,
   formatRawUsdc,
-  getInjectedProvider,
   parseUsdcToRaw
 } from "@/lib/wallet/funding";
+import { getActiveWalletProvider, sendWalletTransaction } from "@/lib/auth/wallet-provider.js";
 import {
   hasPositiveWithdrawalBalance,
   withdrawalStandingFromIntent
 } from "@/lib/work/withdrawal-standing.js";
+import { withdrawalTransactionFromIntent } from "@/lib/work/wallet-transaction.js";
 import { asRecord, text } from "./types";
 
 export function WorkWithdrawal() {
@@ -37,17 +38,6 @@ export function WorkWithdrawal() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
-
-  async function connect() {
-    setError(null);
-    try {
-      await signIn();
-    } catch (cause) {
-      setError(cause instanceof WalletUnavailableError
-        ? cause.message
-        : cause instanceof Error ? cause.message : "Wallet sign-in failed.");
-    }
-  }
 
   async function buildIntent(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -74,33 +64,21 @@ export function WorkWithdrawal() {
   }
 
   async function sendWithdrawal() {
-    const provider = getInjectedProvider();
-    const template = withdrawalTemplate(intent, auth.wallet);
+    const transaction = withdrawalTransactionFromIntent(intent, auth.wallet);
     const chainId = Number(intent?.chainId);
-    if (!provider) {
-      setError("No injected EVM wallet is available in this browser.");
-      return;
-    }
-    if (!template || !Number.isSafeInteger(chainId) || chainId <= 0 || !auth.wallet) {
+    if (!transaction || !Number.isSafeInteger(chainId) || chainId <= 0 || !auth.wallet) {
       setError("The live withdrawal template is incomplete; nothing was sent.");
       return;
     }
     setSending(true);
     setError(null);
     try {
+      const { provider } = await getActiveWalletProvider();
       const { account } = await ensureWalletReady(provider, {
         expectedWallet: auth.wallet,
         chainId
       });
-      const hash = await provider.request({
-        method: "eth_sendTransaction",
-        params: [{
-          from: account,
-          to: template.to,
-          data: template.data,
-          value: "0x0"
-        }]
-      });
+      const hash = await sendWalletTransaction({ ...transaction, from: account });
       setTxHash(typeof hash === "string" ? hash : null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The wallet did not send the withdrawal.");
@@ -117,8 +95,7 @@ export function WorkWithdrawal() {
           <Badge tone="muted">Wallet-owned earnings</Badge>
           <h1 className="mt-4 text-3xl font-semibold">Sign in to withdraw your earnings.</h1>
           <p className="mt-3 text-sm leading-relaxed text-[var(--muted)]">SIWE proves which AgentAccountCore balance is yours. Averray never receives your wallet key.</p>
-          {error ? <p className="mt-4 text-sm text-[var(--warn)]" role="alert">{error}</p> : null}
-          <Button className="mt-6" size="lg" onClick={() => void connect()}><Wallet />Sign in with wallet</Button>
+          <div className="mt-6"><WalletSignInFlow compact onSignedIn={() => undefined} /></div>
         </CardContent>
       </Card>
     );
@@ -220,22 +197,6 @@ function WithdrawalStandingCard({ standing }: { standing: NonNullable<ReturnType
 
 function StandingFact({ label, value }: { label: string; value: string }) {
   return <div className="rounded-[var(--radius-sm)] bg-[var(--paper)] p-3"><span className="block text-xs text-[var(--muted)]">{label}</span><strong className="mt-1 block capitalize">{value}</strong></div>;
-}
-
-function withdrawalTemplate(intent: Record<string, unknown> | null, wallet?: string) {
-  const templates = Array.isArray(intent?.templates) ? intent.templates : [];
-  const template = asRecord(templates.find((entry) => asRecord(entry)?.step === "withdraw"));
-  const from = text(template?.from);
-  const to = text(template?.to);
-  const data = text(template?.data);
-  if (
-    template?.unsigned !== true
-    || !wallet
-    || from.toLowerCase() !== wallet.toLowerCase()
-    || !/^0x[0-9a-f]{40}$/iu.test(to)
-    || !/^0x[0-9a-f]+$/iu.test(data)
-  ) return null;
-  return { to, data };
 }
 
 function formatIntentAmount(intent: Record<string, unknown>) {

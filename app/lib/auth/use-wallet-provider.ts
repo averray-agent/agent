@@ -1,30 +1,58 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
+import {
+  getWalletProviderSnapshot,
+  inspectWalletProviders,
+  restoreWalletProvider,
+  subscribeWalletProvider,
+  type WalletProviderSnapshot,
+} from "./wallet-provider.js";
 
 export type WalletProviderState = "checking" | "available" | "unavailable";
 
-export function useWalletProvider(): WalletProviderState {
-  const [state, setState] = useState<WalletProviderState>("checking");
+let discoveryStarted = false;
+const serverSnapshot: WalletProviderSnapshot = {
+  availability: "checking",
+  status: "idle",
+  kind: null,
+  account: null,
+  pairingUri: null,
+  pairingExpiresAt: null,
+  sessionExpiresAt: null,
+  injectedAvailable: false,
+  walletConnectAvailable: false,
+  errorCode: null,
+  errorMessage: null,
+};
+
+function startDiscovery() {
+  if (discoveryStarted || typeof window === "undefined") return;
+  discoveryStarted = true;
+  const inspect = () => inspectWalletProviders();
+  inspect();
+  window.addEventListener("ethereum#initialized", inspect, { once: true });
+  window.setTimeout(inspect, 500);
+  // The WalletConnect SDK owns its encrypted session persistence. Restoration
+  // is deliberate and never triggers SIWE or a signature request.
+  void restoreWalletProvider();
+}
+
+export function useWalletConnection(): WalletProviderSnapshot {
+  const snapshot = useSyncExternalStore(
+    subscribeWalletProvider,
+    getWalletProviderSnapshot,
+    () => serverSnapshot,
+  );
 
   useEffect(() => {
-    let active = true;
-    const inspect = () => {
-      if (!active) return;
-      setState(window.ethereum?.request ? "available" : "unavailable");
-    };
-
-    inspect();
-    // MetaMask can inject after the document starts. Honour its standard
-    // initialization event without keeping wallet access ambiguously enabled.
-    window.addEventListener("ethereum#initialized", inspect, { once: true });
-    const lateInjectionCheck = window.setTimeout(inspect, 500);
-    return () => {
-      active = false;
-      window.clearTimeout(lateInjectionCheck);
-      window.removeEventListener("ethereum#initialized", inspect);
-    };
+    startDiscovery();
   }, []);
 
-  return state;
+  return snapshot;
+}
+
+/** Compatibility projection used by the established readiness classifiers. */
+export function useWalletProvider(): WalletProviderState {
+  return useWalletConnection().availability;
 }

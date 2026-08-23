@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, Wallet } from "lucide-react";
+import { ArrowLeft, Check, CheckCircle2, Copy, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -9,12 +9,11 @@ import { toast } from "@/components/ui/toast";
 import { useBoundedApi, useHumanWorkJobs, useJobDefinition, useJobEligibility, useJobNetReward, useJobPreflight } from "@/lib/api/hooks";
 import { extractApiErrorMessage, swrFetcher } from "@/lib/api/client";
 import { runClaimJob } from "@/lib/api/claim-job";
-import { signIn, WalletUnavailableError } from "@/lib/auth/siwe";
 import { useAuth } from "@/lib/auth/use-auth";
 import { useWalletProvider } from "@/lib/auth/use-wallet-provider";
 import { claimActionReadiness } from "@/lib/work/claim-readiness.js";
 import { markAppMilestone } from "@/lib/ui/app-performance.js";
-import { WalletInstallGuidance } from "@/components/auth/WalletInstallGuidance";
+import { WalletSignInFlow } from "@/components/auth/WalletSignInFlow";
 import {
   buildClaimTerms,
   filterHumanWorkListings,
@@ -38,7 +37,6 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
   const preflightQuery = useJobPreflight(auth.authenticated ? jobId : null);
   const eligibilityQuery = useJobEligibility(auth.authenticated ? jobId : null);
   const netRewardQuery = useJobNetReward(auth.authenticated ? jobId : null);
-  const [signing, setSigning] = useState(false);
   const [claiming, setClaiming] = useState(false);
   const [definitionCopied, setDefinitionCopied] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
@@ -96,18 +94,6 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
   async function handleClaimAction() {
     setClaimError(null);
     if (!actionReadiness.enabled) return;
-    if (!auth.authenticated) {
-      setSigning(true);
-      try {
-        await signIn();
-        toast.success("Wallet checked. Review the live terms, then claim.");
-      } catch (error) {
-        setClaimError(error instanceof WalletUnavailableError ? error.message : error instanceof Error ? error.message : "Wallet sign-in failed.");
-      } finally {
-        setSigning(false);
-      }
-      return;
-    }
     if (!canClaim) return;
     setClaiming(true);
     try {
@@ -221,18 +207,23 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
         </p>
       ) : null}
       {claimError ? <p className="rounded-[var(--radius-sm)] bg-[var(--warn-soft)] px-4 py-3 text-sm text-[var(--warn)]" role="alert">{claimError}</p> : null}
-      {!auth.authenticated && walletProvider === "unavailable" ? (
-        <WalletInstallGuidance provider={walletProvider} showBrowseLink />
+      {!auth.authenticated ? (
+        <div className="grid gap-3 rounded-[var(--radius-lg)] border border-[var(--line)] bg-[var(--paper-solid)] p-5">
+          <p className="text-sm font-semibold">Check this task with your wallet</p>
+          <WalletSignInFlow
+            compact
+            disabled={!actionReadiness.enabled}
+            onSignedIn={() => toast.success("Wallet checked. Review the live terms, then claim.")}
+          />
+        </div>
       ) : (
         <div className="flex flex-wrap items-center gap-3">
-          <Button size="lg" onClick={() => void handleClaimAction()} disabled={signing || claiming || !actionReadiness.enabled || (auth.authenticated && !canClaim)}>
-            {auth.authenticated ? <CheckCircle2 className="h-4 w-4" /> : <Wallet className="h-4 w-4" />}
-            {signing ? "Waiting for wallet…" : claiming ? "Claiming…" : auth.authenticated ? "Claim this job" : "Check wallet"}
+          <Button size="lg" onClick={() => void handleClaimAction()} disabled={claiming || !actionReadiness.enabled || !canClaim}>
+            <CheckCircle2 className="h-4 w-4" />
+            {claiming ? "Claiming…" : "Claim this job"}
           </Button>
           <p className="max-w-xl text-xs leading-relaxed text-[var(--muted)]">
-            {auth.authenticated
-              ? "The claim uses the same idempotent job endpoint as agent workers. It does not create a different kind of job."
-              : "Your wallet is requested here, not while browsing. SIWE proves the claimant identity; no email account is created."}
+            The claim uses the same idempotent job endpoint as agent workers. It does not create a different kind of job.
           </p>
         </div>
       )}
