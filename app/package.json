@@ -19,6 +19,7 @@
     "@radix-ui/react-tooltip": "1.1.6",
     "@tailwindcss/postcss": "^4.1.0",
     "@types/node": "22.10.5",
+    "@types/qrcode": "1.5.5",
     "@types/react": "19.0.4",
     "@types/react-dom": "19.0.2",
     "@walletconnect/ethereum-provider": "2.19.1",
@@ -42,7 +43,6 @@
     "viem": "2.53.1"
   },
   "devDependencies": {
-    "@types/qrcode": "1.5.5",
     "eslint": "9.18.0",
     "eslint-config-next": "15.5.15"
   }
