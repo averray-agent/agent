@@ -56,6 +56,12 @@ import {
 import { cloneJsonRecord } from "./state-store-records.js";
 import { isDesignatedJob, requireDesignatedClaimant } from "./designated-claimants.js";
 import { classifyEscrowInvalidState } from "../blockchain/escrow-core-errors.js";
+import {
+  EXTERNAL_POSTING_ESCROW_UNVERIFIED,
+  LEGACY_POSTING_UNCLAIMABLE,
+  LEGACY_POSTING_UNCLAIMABLE_MESSAGE,
+  resolveExternalEscrowGeneration
+} from "./external-posting-claimability.js";
 
 // EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
 // Disputed=5, Closed=6. Used to reconcile a mined-but-receipt-lost submit.
@@ -397,6 +403,34 @@ export class JobExecutionService {
           throw new ConflictError(`Job ${jobId} is not claimable in its current on-chain state.`, "job_not_claimable");
         }
         if (isExternalJob(job)) {
+          const escrowGeneration = resolveExternalEscrowGeneration(this.blockchainGateway, live);
+          if (escrowGeneration === "legacy") {
+            throw new ConflictError(
+              LEGACY_POSTING_UNCLAIMABLE_MESSAGE,
+              LEGACY_POSTING_UNCLAIMABLE,
+              {
+                jobId,
+                worker: wallet,
+                claimable: false,
+                escrowGeneration,
+                escrowAddress: live.escrowAddress,
+                operatorActionRequired: true
+              }
+            );
+          }
+          if (escrowGeneration !== "current") {
+            throw new ConflictError(
+              "The EscrowCore holding this external posting could not be verified, so no claim transaction was prepared.",
+              EXTERNAL_POSTING_ESCROW_UNVERIFIED,
+              {
+                jobId,
+                worker: wallet,
+                claimable: false,
+                escrowGeneration,
+                escrowAddress: live.escrowAddress
+              }
+            );
+          }
           if (!isDesignatedJob(job)) {
             workerExposure = await this.requireWorkerExposureAllowance({ wallet, job, claimEconomics });
             dailyExposure = await this.requireDailyExposureAllowance({ wallet, job, claimEconomics, workerExposure });

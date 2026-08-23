@@ -67,6 +67,10 @@ import {
   restrictDesignatedJobForPublic
 } from "./designated-claimants.js";
 import { buildEligibilityProgression } from "./worker-progression.js";
+import {
+  projectExternalPostingClaimability,
+  sweepExternalPostingClaimability
+} from "./external-posting-claimability.js";
 
 const TIMELINE_VERSION = "v2";
 export const INGEST_REFUSED_SPEC_HASH_MISMATCH = "ingest_refused_spec_hash_mismatch";
@@ -128,6 +132,11 @@ export class PlatformService {
     this.firstExternalAgentAlert = undefined;
     this.rewardBankHealthProvider = undefined;
     this.firstWithdrawalGasGrantStatusProvider = undefined;
+    this.externalPostingClaimability = new Map();
+    this.externalPostingClaimabilitySweep = {
+      candidateCount: 0,
+      legacyUnclaimableCount: 0
+    };
     // Opt-in: pre-fund auto-ingested job rewards on-chain at ingestion time so a
     // job is genuinely funded before it is advertised claimable. Set in bootstrap
     // from INGESTION_PREFUND_ENABLED. Testnet-only is an operational invariant.
@@ -230,6 +239,7 @@ export class PlatformService {
       ...catalogOptions
     } = options;
     const jobs = this.jobCatalogService.listJobs({ ...catalogOptions, now });
+    await this.refreshExternalPostingClaimability(jobs, { replace: true });
     const rewardBank = jobs.length > 0
       ? await this.resolveRewardBankHealthForClaimability(now)
       : undefined;
@@ -634,7 +644,19 @@ export class PlatformService {
   }
 
   getJobLifecycleSummary() {
-    return this.jobCatalogService.getJobLifecycleSummary();
+    const summary = this.jobCatalogService.getJobLifecycleSummary();
+    for (const [jobId, observation] of this.externalPostingClaimability) {
+      if (!observation.blocksClaim) continue;
+      const job = this.jobs.find((candidate) => candidate.id === jobId);
+      if (job && this.jobCatalogService.isClaimableJob(job) && !isDesignatedJob(job)) {
+        summary.claimable = Math.max(0, summary.claimable - 1);
+      }
+    }
+    return summary;
+  }
+
+  getExternalPostingClaimabilitySweep() {
+    return { ...this.externalPostingClaimabilitySweep };
   }
 
   getRecurringTemplateStatus() {
@@ -671,6 +693,7 @@ export class PlatformService {
   }
 
   async getAdminStatus({ auth = undefined } = {}) {
+    await this.refreshExternalPostingClaimability(this.jobCatalogService.listJobs(), { replace: true });
     const [
       policy,
       recurring,
@@ -1031,7 +1054,8 @@ export class PlatformService {
         }
       },
       recurring: recurring,
-      jobLifecycle: this.jobCatalogService.getJobLifecycleSummary(),
+      jobLifecycle: this.getJobLifecycleSummary(),
+      externalPostingClaimabilitySweep: this.getExternalPostingClaimabilitySweep(),
       jobSpecHashIntegrity: this.jobCatalogService.getSpecHashIntegrityStatus(),
       jobSpecHashSweeper,
       jobStaleSweeper,
@@ -1366,7 +1390,34 @@ export class PlatformService {
       ...job,
       ...claimStatusFields(claimStatus)
     };
-    return this.depositClaimPriorityPolicy?.projectListing(attached) ?? attached;
+    if (
+      isExternalJob(job)
+      && this.blockchainGateway?.isEnabled?.()
+      && !this.externalPostingClaimability.has(job.id)
+    ) {
+      await this.refreshExternalPostingClaimability([job]);
+    }
+    const prioritised = this.depositClaimPriorityPolicy?.projectListing(attached) ?? attached;
+    return projectExternalPostingClaimability(
+      prioritised,
+      this.externalPostingClaimability.get(job.id)
+    );
+  }
+
+  async refreshExternalPostingClaimability(jobs, { replace = false } = {}) {
+    const sweep = await sweepExternalPostingClaimability({
+      jobs,
+      blockchainGateway: this.blockchainGateway
+    });
+    if (replace) this.externalPostingClaimability = new Map();
+    for (const [jobId, observation] of sweep.observations) {
+      this.externalPostingClaimability.set(jobId, observation);
+    }
+    this.externalPostingClaimabilitySweep = {
+      candidateCount: sweep.candidateCount,
+      legacyUnclaimableCount: sweep.legacyUnclaimableCount
+    };
+    return this.getExternalPostingClaimabilitySweep();
   }
 
   async listSessionHistory({ wallet = undefined, limit = 10, jobId = undefined } = {}) {

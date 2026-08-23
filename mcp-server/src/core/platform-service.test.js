@@ -1351,6 +1351,53 @@ test("designated agreements are restricted and excluded from every open inventor
   assert.deepEqual(await service.recommendJobs(WALLET), []);
 });
 
+test("legacy external posting is visibly unclaimable and excluded from claimable inventory", async () => {
+  const currentEscrow = "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793";
+  const legacyEscrow = "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC";
+  const gateway = {
+    config: {
+      escrowCoreAddress: currentEscrow,
+      legacyEscrowCoreAddress: legacyEscrow
+    },
+    isEnabled: () => true,
+    async getJobs(jobIds) {
+      assert.deepEqual(jobIds, ["parent-job-001"]);
+      return [{
+        status: "fulfilled",
+        value: { state: 1, escrowAddress: legacyEscrow }
+      }];
+    }
+  };
+  const service = makePlatformService(
+    gateway,
+    undefined,
+    new MemoryStateStore(),
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      source: { type: "external" },
+      funding: { source: "external_escrow", state: "funded" },
+      requiresSponsoredGas: false
+    }
+  );
+
+  const [listing] = await service.listJobsWithSessions({ wallet: WALLET });
+
+  assert.equal(listing.escrowGeneration, "legacy");
+  assert.equal(listing.legacyPostingUnclaimable, true);
+  assert.equal(listing.claimable, false);
+  assert.equal(listing.currentWalletCanClaim, false);
+  assert.equal(listing.effectiveState, "unclaimable");
+  assert.equal(listing.reason, "legacy_posting_unclaimable");
+  assert.deepEqual(service.getExternalPostingClaimabilitySweep(), {
+    candidateCount: 1,
+    legacyUnclaimableCount: 1
+  });
+  assert.equal(service.getJobLifecycleSummary().claimable, 0);
+});
+
 test("progression valves run for routed external jobs, skip designated jobs, and both claims post stake", async () => {
   const makePolicies = () => {
     const calls = { worker: 0, daily: 0, catalogue: 0 };

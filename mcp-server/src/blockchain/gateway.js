@@ -45,6 +45,7 @@ import {
 import { buildXcmRequestPayload } from "./xcm-message-builder.js";
 import { decodeXcmWrapperRevert } from "./xcm-wrapper-errors.js";
 import { decodeEscrowCoreRevert } from "./escrow-core-errors.js";
+import { classifyEscrowGeneration } from "./escrow-generation.js";
 import { hashCanonicalContent } from "../core/canonical-content.js";
 import {
   EXTERNAL_SCHEMA_EIP712_VERSION,
@@ -2757,6 +2758,10 @@ export class BlockchainGateway {
       return arbitrator ? this.arbitratorEscrowContract : this.v1EscrowContract;
     }
     return arbitrator ? this.arbitratorEscrowContract : this.escrowContract;
+  }
+
+  classifyEscrowGeneration(job) {
+    return classifyEscrowGeneration(job, this.config);
   }
 
   async createSinglePayoutJobForLayout(

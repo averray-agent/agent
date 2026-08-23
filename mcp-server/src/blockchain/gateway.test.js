@@ -105,6 +105,23 @@ test("toDisputeReasonCode uses Solidity bytes32 string encoding", () => {
   );
 });
 
+test("escrow generation classification follows the holding contract address", () => {
+  const current = "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793";
+  const legacy = "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC";
+  const gateway = new BlockchainGateway({
+    enabled: false,
+    escrowCoreAddress: current,
+    legacyEscrowCoreAddress: legacy
+  });
+
+  assert.equal(gateway.classifyEscrowGeneration({ escrowAddress: current }), "current");
+  assert.equal(gateway.classifyEscrowGeneration({ escrowAddress: legacy }), "legacy");
+  assert.equal(
+    gateway.classifyEscrowGeneration({ escrowAddress: "0x3333333333333333333333333333333333333333" }),
+    "unknown"
+  );
+});
+
 test("toContentHash accepts only canonical content hash values", () => {
   const gateway = new BlockchainGateway({ enabled: false });
   const hash = `0x${"A".repeat(64)}`;
