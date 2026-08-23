@@ -5,7 +5,12 @@ import {
   parseNonNegativeInt,
   withReissueJobId
 } from "./inventory-replenishment.js";
-import { recordLanePostingRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
+import {
+  finishIngestionRun,
+  recordIngestSpecHashRefusal,
+  recordLanePostingRefusal,
+  upsertScheduledIngestedJob
+} from "./ingested-job-upsert.js";
 
 export class WikipediaMaintenanceIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -73,6 +78,7 @@ export class WikipediaMaintenanceIngestionScheduler {
       currentClaimableJobs: inventory.claimableCount,
       minimumWaiverEligibleClaimableJobs: this.minClaimableJobs,
       currentWaiverEligibleClaimableJobs: waiverEligibleClaimableJobs,
+      parkedSpecHashRefusals: Number(this.lastRun?.parkedSpecHashRefusals ?? 0),
       lastRun: this.lastRun
     };
   }
@@ -92,6 +98,8 @@ export class WikipediaMaintenanceIngestionScheduler {
       activeSourceCount: inventory.activeSourceKeys.size,
       candidateCount: 0,
       createdCount: 0,
+      ingestRefusedSpecHashMismatchCount: 0,
+      parkedSpecHashRefusals: 0,
       skipped: [],
       errors: []
     };
@@ -155,6 +163,7 @@ export class WikipediaMaintenanceIngestionScheduler {
             await upsertScheduledIngestedJob(this.platformService, replenishedJob, { prefund: true, now });
           } catch (error) {
             if (recordLanePostingRefusal(summary, replenishedJob, error)) continue;
+            if (recordIngestSpecHashRefusal(summary, replenishedJob, error)) continue;
             throw error;
           }
         }
@@ -199,9 +208,7 @@ export class WikipediaMaintenanceIngestionScheduler {
   }
 
   finishRun(summary) {
-    summary.finishedAt = new Date().toISOString();
-    this.lastRun = summary;
-    return summary;
+    return finishIngestionRun(this, summary, "wikipedia_ingest.run_complete");
   }
 
   async inventorySnapshot(now = new Date()) {

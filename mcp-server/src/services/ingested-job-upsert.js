@@ -26,13 +26,36 @@ export function recordIngestSpecHashRefusal(summary, job, error) {
   if (error?.code !== INGEST_REFUSED_SPEC_HASH_MISMATCH) return false;
   summary.ingestRefusedSpecHashMismatchCount =
     Number(summary.ingestRefusedSpecHashMismatchCount ?? 0) + 1;
-  summary.skipped.push({
+  summary.parkedSpecHashRefusals =
+    Number(summary.parkedSpecHashRefusals ?? 0) + 1;
+  const refusal = {
     id: job.id,
     reason: INGEST_REFUSED_SPEC_HASH_MISMATCH,
     committedSpecHash: error?.details?.committedSpecHash ?? null,
     candidateSpecHash: error?.details?.candidateSpecHash ?? null
-  });
+  };
+  if (error?.details?.recovery) {
+    refusal.jobId = error?.details?.jobId ?? job.id;
+    refusal.recovery = error.details.recovery;
+  }
+  summary.skipped.push(refusal);
   return true;
+}
+
+export function finishIngestionRun(scheduler, summary, eventName) {
+  summary.finishedAt = new Date().toISOString();
+  summary.parkedSpecHashRefusals = Number(summary.parkedSpecHashRefusals ?? 0);
+  scheduler.lastRun = summary;
+  scheduler.logger.info?.({
+    startedAt: summary.startedAt,
+    finishedAt: summary.finishedAt,
+    candidateCount: Number(summary.candidateCount ?? 0),
+    createdCount: Number(summary.createdCount ?? 0),
+    skippedCount: Array.isArray(summary.skipped) ? summary.skipped.length : 0,
+    errorCount: Array.isArray(summary.errors) ? summary.errors.length : 0,
+    parkedSpecHashRefusals: summary.parkedSpecHashRefusals
+  }, eventName);
+  return summary;
 }
 
 export function recordLanePostingRefusal(summary, job, error) {

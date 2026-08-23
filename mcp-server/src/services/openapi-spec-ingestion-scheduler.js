@@ -1,6 +1,11 @@
 import { ingestOpenApiSpecs, openApiSpecKey, parseOpenApiSpecs } from "../jobs/ingest-openapi-specs.js";
 import { GuardedSchedulerLoop, ingestionSchedulerOutcome, schedulerRunTimeoutMs } from "./guarded-scheduler-loop.js";
-import { recordIngestSpecHashRefusal, recordLanePostingRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
+import {
+  finishIngestionRun,
+  recordIngestSpecHashRefusal,
+  recordLanePostingRefusal,
+  upsertScheduledIngestedJob
+} from "./ingested-job-upsert.js";
 
 export class OpenApiSpecIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -67,6 +72,7 @@ export class OpenApiSpecIngestionScheduler {
       maxJobsPerRun: this.maxJobsPerRun,
       maxOpenJobs: this.maxOpenJobs,
       currentOpenJobs: this.countOpenApiJobs(),
+      parkedSpecHashRefusals: Number(this.lastRun?.parkedSpecHashRefusals ?? 0),
       lastRun: this.lastRun,
       ...this.schedulerLoop.getStatus()
     };
@@ -83,6 +89,7 @@ export class OpenApiSpecIngestionScheduler {
       candidateCount: 0,
       createdCount: 0,
       ingestRefusedSpecHashMismatchCount: 0,
+      parkedSpecHashRefusals: 0,
       skipped: [],
       errors: []
     };
@@ -163,9 +170,7 @@ export class OpenApiSpecIngestionScheduler {
   }
 
   finishRun(summary) {
-    summary.finishedAt = new Date().toISOString();
-    this.lastRun = summary;
-    return summary;
+    return finishIngestionRun(this, summary, "openapi_ingest.run_complete");
   }
 
   countOpenApiJobs() {

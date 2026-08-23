@@ -97,6 +97,60 @@ test("WikipediaMaintenanceIngestionScheduler creates jobs when dryRun is false",
   assert.equal(platform.listJobs()[0].onboardingWaiverEligible, true);
 });
 
+test("WikipediaMaintenanceIngestionScheduler parks a poisoned legacy job and still mints fresh A and B", async () => {
+  const jobs = [];
+  const logLines = [];
+  const platform = {
+    listJobs() {
+      return [...jobs];
+    },
+    async listJobsWithSessions() {
+      return [...jobs];
+    },
+    async createIngestedJob(job) {
+      if (job.source.pageId === 101) throw specHashRefusal(job.id);
+      jobs.unshift(job);
+      return job;
+    }
+  };
+  const scheduler = new WikipediaMaintenanceIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    minClaimableJobs: 2,
+    maxJobsPerRun: 2,
+    categories: [{ title: "Category:All articles with dead external links", taskType: "citation_repair" }],
+    minScore: 55,
+    fetchImpl: makeThreeArticleFetch(),
+    logger: {
+      info(payload, event) { logLines.push({ payload, event }); },
+      warn() {}
+    }
+  });
+
+  const summary = await scheduler.runOnce(new Date("2026-08-23T10:00:00.000Z"));
+  const parked = summary.skipped.find((entry) => entry.reason === "ingest_refused_spec_hash_mismatch");
+
+  assert.equal(summary.createdCount, 2);
+  assert.equal(summary.parkedSpecHashRefusals, 1);
+  assert.equal(summary.errors.length, 0);
+  assert.deepEqual(jobs.map((job) => job.source.pageId).sort(), [202, 303]);
+  assert.equal(parked.jobId, "wiki-en-101-citation-repair-poisoned-legacy");
+  assert.equal(parked.recovery, "operator_tombstone_rescue_after_review_window");
+  assert.equal((await scheduler.getStatus()).parkedSpecHashRefusals, 1);
+  assert.deepEqual(logLines.at(-1), {
+    event: "wikipedia_ingest.run_complete",
+    payload: {
+      startedAt: "2026-08-23T10:00:00.000Z",
+      finishedAt: summary.finishedAt,
+      candidateCount: 3,
+      createdCount: 2,
+      skippedCount: 1,
+      errorCount: 0,
+      parkedSpecHashRefusals: 1
+    }
+  });
+});
+
 test("WikipediaMaintenanceIngestionScheduler dedupes by article revision", async () => {
   const platform = makePlatformService([
     {
@@ -268,6 +322,46 @@ test("WikipediaMaintenanceIngestionScheduler avoids historical session id collis
   assert.equal(platform.jobs[0].source.reissueOf, CANONICAL_WIKI_JOB_ID);
 });
 
+test("WikipediaMaintenanceIngestionScheduler never reuses a parked spec-hash job id", async () => {
+  const catalog = new JobCatalogService(
+    [claimableWikipediaJob(CANONICAL_WIKI_JOB_ID, 123)],
+    [],
+    () => ({}),
+    () => ({}),
+    () => 0
+  );
+  catalog.markSpecHashDrift(CANONICAL_WIKI_JOB_ID, {
+    committedSpecHash: `0x${"ab".repeat(32)}`,
+    candidateSpecHash: `0x${"cd".repeat(32)}`,
+    recovery: "operator_tombstone_rescue_after_review_window"
+  });
+  const platform = {
+    jobCatalogService: catalog,
+    listJobs(options = {}) {
+      return catalog.listJobs(options);
+    },
+    createJob(job) {
+      return catalog.createJob(job);
+    }
+  };
+  const scheduler = new WikipediaMaintenanceIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    minClaimableJobs: 1,
+    categories: [{ title: "Category:All articles with dead external links", taskType: "citation_repair" }],
+    minScore: 55,
+    fetchImpl: makeFetch(),
+    logger: SILENT_LOGGER
+  });
+
+  const summary = await scheduler.runOnce(new Date("2026-08-23T10:00:00.000Z"));
+  const jobs = catalog.listJobs({ includeStale: true });
+
+  assert.equal(summary.createdCount, 1);
+  assert.equal(jobs[0].id, `${CANONICAL_WIKI_JOB_ID}-r2`);
+  assert.equal(jobs[0].source.reissueOf, CANONICAL_WIKI_JOB_ID);
+});
+
 test("loadWikipediaMaintenanceIngestionConfig parses env knobs safely", () => {
   const config = loadWikipediaMaintenanceIngestionConfig({
     WIKIPEDIA_INGEST_ENABLED: "true",
@@ -325,6 +419,51 @@ function jsonResponse(payload) {
       return payload;
     }
   };
+}
+
+function makeThreeArticleFetch() {
+  return async (url) => {
+    const parsed = new URL(url);
+    if (parsed.searchParams.get("list") === "categorymembers") {
+      return jsonResponse({
+        query: {
+          categorymembers: [
+            { pageid: 101, ns: 0, title: "Poisoned legacy" },
+            { pageid: 202, ns: 0, title: "Fresh A" },
+            { pageid: 303, ns: 0, title: "Fresh B" }
+          ]
+        }
+      });
+    }
+    const pageId = Number(parsed.searchParams.get("pageids"));
+    const titles = { 101: "Poisoned legacy", 202: "Fresh A", 303: "Fresh B" };
+    return jsonResponse({
+      query: {
+        pages: {
+          [pageId]: {
+            pageid: pageId,
+            title: titles[pageId],
+            fullurl: `https://en.wikipedia.org/wiki/${titles[pageId].replaceAll(" ", "_")}`,
+            revisions: [{ revid: 900_000 + pageId, timestamp: "2026-08-23T09:00:00Z" }],
+            templates: [{ title: "Template:Dead link" }]
+          }
+        }
+      }
+    });
+  };
+}
+
+function specHashRefusal(jobId) {
+  const error = new Error("refreshed definition does not match the commitment");
+  error.code = "ingest_refused_spec_hash_mismatch";
+  error.details = {
+    jobId,
+    committedSpecHash: `0x${"ab".repeat(32)}`,
+    candidateSpecHash: `0x${"cd".repeat(32)}`,
+    legacyDrift: true,
+    recovery: "operator_tombstone_rescue_after_review_window"
+  };
+  return error;
 }
 
 function claimableWikipediaJob(id, pageId) {

@@ -19,6 +19,7 @@ export async function buildInventorySnapshot(platformService, {
     })
     : jobs;
   const historicalSessionJobIds = await listHistoricalSessionJobIds(platformService);
+  const parkedSpecHashJobIds = listParkedSpecHashJobIds(platformService);
   const sourceJobs = jobs
     .filter((job) => job?.source?.type === sourceType)
     .filter((job) => !job.recurring);
@@ -39,7 +40,8 @@ export async function buildInventorySnapshot(platformService, {
   const allJobIds = new Set(
     [
       ...allJobs.map((job) => job?.id),
-      ...historicalSessionJobIds
+      ...historicalSessionJobIds,
+      ...parkedSpecHashJobIds
     ].flatMap(normalizedJobIdEntries).filter(Boolean)
   );
 
@@ -53,6 +55,13 @@ export async function buildInventorySnapshot(platformService, {
     claimableCount: claimableJobs.length,
     totalCount: scopedJobs.length
   };
+}
+
+function listParkedSpecHashJobIds(platformService) {
+  const integrity = platformService?.jobCatalogService?.getSpecHashIntegrityStatus?.();
+  return Array.isArray(integrity?.drifted)
+    ? integrity.drifted.map((record) => record?.jobId).filter(Boolean)
+    : [];
 }
 
 export function desiredInventoryCreates({

@@ -50,6 +50,19 @@ function makePlatformService(initialJobs = []) {
   };
 }
 
+function specHashRefusal(jobId) {
+  const error = new Error("refreshed definition does not match the commitment");
+  error.code = "ingest_refused_spec_hash_mismatch";
+  error.details = {
+    jobId,
+    committedSpecHash: `0x${"ab".repeat(32)}`,
+    candidateSpecHash: `0x${"cd".repeat(32)}`,
+    legacyDrift: true,
+    recovery: "operator_tombstone_rescue_after_review_window"
+  };
+  return error;
+}
+
 test("GithubIssueIngestionScheduler dry-run does not create jobs", async () => {
   const platform = makePlatformService();
   const scheduler = new GithubIssueIngestionScheduler(platform, undefined, {
@@ -80,6 +93,68 @@ test("GithubIssueIngestionScheduler creates jobs when dryRun is false", async ()
   assert.equal(summary.createdCount, 1);
   assert.equal(platform.listJobs().length, 1);
   assert.equal(platform.listJobs()[0].source.issueNumber, 42);
+});
+
+test("GithubIssueIngestionScheduler parks a poisoned legacy job and still mints fresh A and B", async () => {
+  const jobs = [];
+  const logLines = [];
+  const platform = {
+    listJobs() {
+      return [...jobs];
+    },
+    getJobDefinition(jobId) {
+      const job = jobs.find((candidate) => candidate.id === jobId);
+      if (!job) throw new Error("not found");
+      return job;
+    },
+    async upsertIngestedJob(job) {
+      if (job.source.issueNumber === 1) throw specHashRefusal(job.id);
+      jobs.unshift(job);
+      return job;
+    }
+  };
+  const issues = [1, 2, 3].map((number) => ({
+    ...ISSUE,
+    number,
+    html_url: `https://github.com/example/project/issues/${number}`
+  }));
+  const scheduler = new GithubIssueIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    queries: ["is:issue is:open label:good-first-issue"],
+    minScore: 55,
+    maxJobsPerRun: 2,
+    maxJobsPerQuery: 2,
+    fetchImpl: makeFetch(issues),
+    logger: {
+      info(payload, event) { logLines.push({ payload, event }); },
+      warn() {}
+    }
+  });
+
+  const summary = await scheduler.runOnce(new Date("2026-08-23T10:00:00.000Z"));
+  const parked = summary.skipped.find((entry) => entry.reason === "ingest_refused_spec_hash_mismatch");
+
+  assert.equal(summary.createdCount, 2);
+  assert.equal(summary.queries[0].created, 2);
+  assert.equal(summary.parkedSpecHashRefusals, 1);
+  assert.equal(summary.errors.length, 0);
+  assert.deepEqual(jobs.map((job) => job.source.issueNumber).sort(), [2, 3]);
+  assert.equal(parked.jobId, "oss-example-project-1-add-tests-for-parser-validation-error");
+  assert.equal(parked.recovery, "operator_tombstone_rescue_after_review_window");
+  assert.equal((await scheduler.getStatus()).parkedSpecHashRefusals, 1);
+  assert.deepEqual(logLines.at(-1), {
+    event: "github_ingest.run_complete",
+    payload: {
+      startedAt: "2026-08-23T10:00:00.000Z",
+      finishedAt: summary.finishedAt,
+      candidateCount: 3,
+      createdCount: 2,
+      skippedCount: 1,
+      errorCount: 0,
+      parkedSpecHashRefusals: 1
+    }
+  });
 });
 
 test("GithubIssueIngestionScheduler dedupes by source repo and issue number", async () => {

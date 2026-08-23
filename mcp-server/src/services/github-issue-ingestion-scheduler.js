@@ -1,5 +1,10 @@
 import { ingestGithubIssues } from "../jobs/ingest-github-issues.js";
-import { recordIngestSpecHashRefusal, recordLanePostingRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
+import {
+  finishIngestionRun,
+  recordIngestSpecHashRefusal,
+  recordLanePostingRefusal,
+  upsertScheduledIngestedJob
+} from "./ingested-job-upsert.js";
 import {
   DEFAULT_OPEN_PR_CAP_PER_REPO,
   DEFAULT_SECURITY_STANDARDS_DENYLIST,
@@ -86,6 +91,7 @@ export class GithubIssueIngestionScheduler {
       denylistRepoCount: this.denylistRepos.length,
       scanRepoPolicies: this.scanRepoPolicies,
       currentOpenJobs: this.countOpenGithubJobs(),
+      parkedSpecHashRefusals: Number(this.lastRun?.parkedSpecHashRefusals ?? 0),
       lastRun: this.lastRun,
       ...this.schedulerLoop.getStatus()
     };
@@ -102,6 +108,7 @@ export class GithubIssueIngestionScheduler {
       candidateCount: 0,
       createdCount: 0,
       ingestRefusedSpecHashMismatchCount: 0,
+      parkedSpecHashRefusals: 0,
       skipped: [],
       errors: [],
       queries: []
@@ -125,10 +132,11 @@ export class GithubIssueIngestionScheduler {
     for (const query of this.queries) {
       if (remaining <= 0) break;
       const queryLimit = Math.min(remaining, this.maxJobsPerQuery);
+      const candidateLimit = Math.max(queryLimit * 3, queryLimit + 1);
       try {
         const result = await ingestGithubIssues({
           query,
-          limit: queryLimit,
+          limit: candidateLimit,
           minScore: this.minScore,
           githubToken: this.githubToken,
           fetchImpl: this.fetchImpl,
@@ -148,7 +156,7 @@ export class GithubIssueIngestionScheduler {
         };
         querySummary.skipped.push(...(result.skippedDetails ?? []));
         for (const job of result.jobs) {
-          if (remaining <= 0) break;
+          if (remaining <= 0 || querySummary.created >= queryLimit) break;
           const sourceKey = githubIssueKey(job);
           if (sourceKey && seenSources.has(sourceKey)) {
             querySummary.skipped.push({ id: job.id, reason: "source_already_ingested" });
@@ -204,9 +212,7 @@ export class GithubIssueIngestionScheduler {
   }
 
   finishRun(summary) {
-    summary.finishedAt = new Date().toISOString();
-    this.lastRun = summary;
-    return summary;
+    return finishIngestionRun(this, summary, "github_ingest.run_complete");
   }
 
   countOpenGithubJobs() {

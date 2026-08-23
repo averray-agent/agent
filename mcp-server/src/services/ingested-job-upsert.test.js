@@ -1,10 +1,41 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
   legacyCatalogueDefinitions,
   upsertScheduledIngestedJob
 } from "./ingested-job-upsert.js";
+
+const INGESTION_SCHEDULERS = [
+  "wikipedia-maintenance",
+  "github-issue",
+  "osv-advisory",
+  "open-data",
+  "standards-spec",
+  "openapi-spec"
+];
+
+test("every scheduled ingestion lane parks spec-hash refusals and surfaces their count", async () => {
+  for (const lane of INGESTION_SCHEDULERS) {
+    const source = await readFile(new URL(`./${lane}-ingestion-scheduler.js`, import.meta.url), "utf8");
+    assert.match(
+      source,
+      /recordIngestSpecHashRefusal\(summary, [^,]+, error\)\) continue/u,
+      `${lane} must absorb the per-candidate integrity refusal`
+    );
+    assert.match(
+      source,
+      /parkedSpecHashRefusals: Number\(this\.lastRun\?\.parkedSpecHashRefusals \?\? 0\)/u,
+      `${lane} status must expose parked integrity refusals`
+    );
+    assert.match(
+      source,
+      /return finishIngestionRun\(this, summary,/u,
+      `${lane} must publish the common ingestion run summary`
+    );
+  }
+});
 
 test("pre-D3 liveness definitions retain their exact lane-less reward variants", () => {
   const current = {
