@@ -51,7 +51,7 @@ export const EXTERNAL_FUNDING_RAILS = Object.freeze({
   X402: "x402"
 });
 
-const DEFAULT_MIN_REWARD_USDC = "1";
+export const DEFAULT_MIN_REWARD_USDC = "1";
 const DEFAULT_MAX_REWARD_USDC = "10000";
 const DEFAULT_DRAFT_TTL_HOURS = 72;
 export const DEFAULT_POSTER_REVIEW_WINDOW_HOURS = 7 * 24;

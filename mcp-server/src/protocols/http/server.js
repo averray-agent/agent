@@ -788,6 +788,7 @@ const handleEventRoute = createEventRoutes({
 const handlePublicMetadataRoute = createPublicMetadataRoutes({
   authConfig,
   buildDiscoveryManifest,
+  minimumRewardUsdc: externalPostingService.config.minRewardUsdc,
   posterOnboardingService,
   publicBaseUrl: process.env.PUBLIC_BASE_URL,
   respond,

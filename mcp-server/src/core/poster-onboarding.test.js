@@ -85,6 +85,7 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
   assert.equal(payload.escrowCore, ESCROW);
   assert.equal(payload.agentAccountCore, ACCOUNTS);
   assert.deepEqual(payload.token, { symbol: "USDC", address: TOKEN, decimals: 6 });
+  assert.equal(payload.minimumRewardUsdc, "1.25");
   assert.deepEqual(payload.economics, {
     protocolFeeBps: 321,
     posterFeeBps: 321,
@@ -104,6 +105,10 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
       feeRecipient: { status: "available" }
     }
   });
+  assert.equal(
+    payload.flow.find((step) => step.id === "draft")?.body.definition.rewardAmount,
+    "<USDC amount at or above minimumRewardUsdc>"
+  );
   assert.deepEqual(payload.workerFacts.claimBond, {
     available: true,
     asset: "USDC",

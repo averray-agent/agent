@@ -10,6 +10,7 @@ import {
   EARNINGS_GASLESS_STATUS,
   EARNINGS_WITHDRAWAL_STATEMENT
 } from "./earnings-door-copy.js";
+import { DEFAULT_MIN_REWARD_USDC } from "./external-posting-service.js";
 
 const DEFAULT_BASE_URL = "https://api.averray.com";
 const DEFAULT_DISCOVERY_URL = "https://averray.com/.well-known/agent-tools.json";
@@ -692,7 +693,8 @@ export function buildDiscoveryManifest({
   discoveryUrl = DEFAULT_DISCOVERY_URL,
   profile = DEFAULT_PROFILE_URL,
   operatorAppUrl = DEFAULT_OPERATOR_APP_URL,
-  chainId = undefined
+  chainId = undefined,
+  minimumRewardUsdc = DEFAULT_MIN_REWARD_USDC
 } = {}) {
   const manifest = JSON.parse(JSON.stringify(buildBaseManifest(resolveHubNetwork(chainId))));
   manifest.baseUrl = baseUrl;
@@ -707,6 +709,15 @@ export function buildDiscoveryManifest({
   manifest.schemas.jobSchemaPathTemplate = `${baseUrl}/schemas/jobs/<name>.json`;
   manifest.onboarding.entrypoint = `${baseUrl}/onboarding`;
   manifest.onboarding.posterEntrypoint = `${baseUrl}/poster/onboarding`;
+  manifest.onboarding.poster = {
+    entrypoint: `${baseUrl}/poster/onboarding`,
+    minimumRewardUsdc: String(minimumRewardUsdc),
+    quoteStep: {
+      method: "POST",
+      path: "/jobs/draft",
+      description: "POST /jobs/draft is the quote step; there is no separate /jobs/quote endpoint."
+    }
+  };
   manifest.health = `${baseUrl}/health`;
   return manifest;
 }

@@ -185,6 +185,7 @@ async function buildSnapshot({
     agentAccountCore: gateway?.config?.agentAccountAddress,
     token,
     mode,
+    minimumRewardUsdc: config.minRewardUsdc,
     ...(mode === "open" ? {} : { allowlistEnrollment: enrollmentText(mode) }),
     economics: {
       ...(protocolFeeRead.available
@@ -267,7 +268,7 @@ function buildPostingFlow({ publicBaseUrl, token, agentAccountCore, escrowCore, 
           tier: "starter",
           jobType: "work",
           requiredRole: "worker",
-          rewardAmount: "<USDC amount at or above economics.minRewardUsdc>",
+          rewardAmount: "<USDC amount at or above minimumRewardUsdc>",
           rewardAsset: "USDC",
           verifierMode: "<one verification.modes[].id>",
           escalationMessage: "<human_fallback maintainer review instruction>",

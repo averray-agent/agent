@@ -743,7 +743,15 @@ test("draft persistence cannot change GET /jobs or the discovery manifest", asyn
 
   assert.equal(jobsAfter, jobsBefore);
   assert.equal(manifestAfter, manifestBefore);
-  assert.doesNotMatch(manifestAfter, /jobs\/draft|external posting/iu);
+  assert.deepEqual(JSON.parse(manifestAfter).onboarding.poster, {
+    entrypoint: "https://api.averray.com/poster/onboarding",
+    minimumRewardUsdc: "1",
+    quoteStep: {
+      method: "POST",
+      path: "/jobs/draft",
+      description: "POST /jobs/draft is the quote step; there is no separate /jobs/quote endpoint."
+    }
+  });
 });
 
 test("admin delist only removes future catalog projection and leaves on-chain state untouched", async () => {

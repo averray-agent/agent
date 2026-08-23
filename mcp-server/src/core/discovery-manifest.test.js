@@ -17,6 +17,7 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
     profile: "https://app.example.com/agents/<wallet>",
     operatorAppUrl: "https://app.example.com",
     chainId: 420420417,
+    minimumRewardUsdc: "1.25",
     rpcUrl: "https://eth-rpc-testnet.polkadot.io"
   });
 
@@ -47,6 +48,15 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   });
   assert.equal(manifest.onboarding.entrypoint, "https://api.example.com/onboarding");
   assert.equal(manifest.onboarding.posterEntrypoint, "https://api.example.com/poster/onboarding");
+  assert.deepEqual(manifest.onboarding.poster, {
+    entrypoint: "https://api.example.com/poster/onboarding",
+    minimumRewardUsdc: "1.25",
+    quoteStep: {
+      method: "POST",
+      path: "/jobs/draft",
+      description: "POST /jobs/draft is the quote step; there is no separate /jobs/quote endpoint."
+    }
+  });
   assert.equal(manifest.health, "https://api.example.com/health");
   assert.ok(Array.isArray(manifest.publicEndpoints));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/poster/onboarding"));
