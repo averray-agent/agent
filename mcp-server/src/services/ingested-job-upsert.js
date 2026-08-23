@@ -1,5 +1,9 @@
 const INGEST_REFUSED_SPEC_HASH_MISMATCH = "ingest_refused_spec_hash_mismatch";
-const LANE_POSTING_REFUSALS = new Set(["lane_budget_exhausted", "lane_paused"]);
+const LANE_POSTING_REFUSALS = new Set([
+  "lane_budget_exhausted",
+  "lane_backlog_saturated",
+  "lane_paused"
+]);
 
 export async function upsertScheduledIngestedJob(platformService, job, { prefund = false, now = new Date() } = {}) {
   const liveJob = await readLiveJobForPosting(platformService, job.id);

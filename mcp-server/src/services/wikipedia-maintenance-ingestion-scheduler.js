@@ -5,7 +5,11 @@ import {
   parseNonNegativeInt,
   withReissueJobId
 } from "./inventory-replenishment.js";
-import { recordLanePostingRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
+import {
+  recordIngestSpecHashRefusal,
+  recordLanePostingRefusal,
+  upsertScheduledIngestedJob
+} from "./ingested-job-upsert.js";
 
 export class WikipediaMaintenanceIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -92,6 +96,7 @@ export class WikipediaMaintenanceIngestionScheduler {
       activeSourceCount: inventory.activeSourceKeys.size,
       candidateCount: 0,
       createdCount: 0,
+      ingestRefusedSpecHashMismatchCount: 0,
       skipped: [],
       errors: []
     };
@@ -155,6 +160,7 @@ export class WikipediaMaintenanceIngestionScheduler {
             await upsertScheduledIngestedJob(this.platformService, replenishedJob, { prefund: true, now });
           } catch (error) {
             if (recordLanePostingRefusal(summary, replenishedJob, error)) continue;
+            if (recordIngestSpecHashRefusal(summary, replenishedJob, error)) continue;
             throw error;
           }
         }

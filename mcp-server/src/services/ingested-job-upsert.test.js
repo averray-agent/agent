@@ -1,10 +1,31 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
   legacyCatalogueDefinitions,
   upsertScheduledIngestedJob
 } from "./ingested-job-upsert.js";
+
+const INGESTION_SCHEDULERS = [
+  "github-issue-ingestion-scheduler.js",
+  "wikipedia-maintenance-ingestion-scheduler.js",
+  "osv-advisory-ingestion-scheduler.js",
+  "open-data-ingestion-scheduler.js",
+  "standards-spec-ingestion-scheduler.js",
+  "openapi-spec-ingestion-scheduler.js"
+];
+
+test("all six ingestion schedulers park spec-hash refusals in their per-job catch", async () => {
+  for (const file of INGESTION_SCHEDULERS) {
+    const source = await readFile(new URL(file, import.meta.url), "utf8");
+    assert.match(
+      source,
+      /catch \(error\) \{[\s\S]{0,400}recordIngestSpecHashRefusal\(summary,/u,
+      file
+    );
+  }
+});
 
 test("pre-D3 liveness definitions retain their exact lane-less reward variants", () => {
   const current = {

@@ -133,6 +133,7 @@ export function createCatalogueLaneDiscipline({
   gasEstimateUsdc,
   selfWallets = new Set(),
   selfIdentityRegistry,
+  listCatalogJobs,
   now = () => new Date(),
   logger = console
 } = {}) {
@@ -142,13 +143,23 @@ export function createCatalogueLaneDiscipline({
     gasEstimateUsdc,
     selfWallets,
     selfIdentityRegistry,
+    listCatalogJobs,
     now,
     logger
   });
 }
 
 export class CatalogueLaneDiscipline {
-  constructor({ stateStore, registry, gasEstimateUsdc = 0.059, selfWallets, selfIdentityRegistry, now, logger } = {}) {
+  constructor({
+    stateStore,
+    registry,
+    gasEstimateUsdc = 0.059,
+    selfWallets,
+    selfIdentityRegistry,
+    listCatalogJobs,
+    now,
+    logger
+  } = {}) {
     if (typeof stateStore?.getServiceState !== "function" || typeof stateStore?.upsertServiceState !== "function") {
       throw packetConfigError("lane posting budgets require durable service-state reads and writes");
     }
@@ -164,6 +175,7 @@ export class CatalogueLaneDiscipline {
     this.selfIdentityRegistry = selfIdentityRegistry instanceof SelfIdentityRegistry
       ? selfIdentityRegistry
       : new SelfIdentityRegistry({ operatorWallets: selfWallets });
+    this.listCatalogJobs = typeof listCatalogJobs === "function" ? listCatalogJobs : undefined;
     this.now = now ?? (() => new Date());
     this.logger = logger ?? console;
     this.queue = Promise.resolve();
@@ -252,7 +264,7 @@ export class CatalogueLaneDiscipline {
           maxUnclaimedBacklog: lane.maxUnclaimedBacklog,
           oldestUnclaimedAt: backlog.oldestAt ?? null,
           withheldJobId: String(job.id),
-          retryWhen: "a queued job in this lane is claimed or ages out of the window"
+          retryWhen: "a queued job in this lane is claimed, stops serving, or ages out of the window"
         };
         // Never a silent cap: an operator reading the log must see what was
         // withheld and why, or a throttled lane is indistinguishable from a
@@ -260,7 +272,7 @@ export class CatalogueLaneDiscipline {
         this.logger.info?.(details, LANE_BACKLOG_SATURATED);
         throw new CatalogueLanePostingError(
           LANE_BACKLOG_SATURATED,
-          `Catalogue lane ${lane.id} already has ${backlog.count} unclaimed job(s) open; posting is throttled until one is claimed or ages out.`,
+          `Catalogue lane ${lane.id} already has ${backlog.count} unclaimed job(s) open; posting is throttled until one is claimed, stops serving, or ages out.`,
           details
         );
       }
@@ -347,8 +359,32 @@ export class CatalogueLaneDiscipline {
       && record.disposableProof !== true
       && withinWindow(record.postedAt, evaluatedAt, DAY_MS));
     if (posted.length === 0) return { count: 0, oldestAt: null };
+    let serving = posted;
+    if (this.listCatalogJobs) {
+      try {
+        const jobs = await this.listCatalogJobs({
+          includeArchived: true,
+          includePaused: true,
+          includeStale: true,
+          now: evaluatedAt
+        });
+        if (!Array.isArray(jobs)) {
+          throw new Error("catalogue lane backlog catalog source returned a non-array result");
+        }
+        const catalogById = new Map(jobs.map((job) => [String(job?.id ?? ""), job]));
+        serving = posted.filter((record) => isServingCatalogJob(catalogById.get(String(record.jobId))));
+      } catch (error) {
+        // Catalog truth narrows the conservative ledger count. When it cannot
+        // be read, retain the pre-existing record/session calculation so a
+        // transient read failure cannot accidentally open the posting valve.
+        this.logger.warn?.(
+          { err: error, lane: laneId, recordCount: posted.length },
+          "catalogue_lane_backlog.catalog_read_failed"
+        );
+      }
+    }
     const claimed = await collectClaimedJobIdsSince(this.stateStore, since);
-    const open = posted
+    const open = serving
       .filter((record) => !claimed.has(String(record.jobId)))
       .sort((left, right) => Date.parse(left.postedAt) - Date.parse(right.postedAt));
     return { count: open.length, oldestAt: open[0]?.postedAt ?? null };
@@ -361,6 +397,18 @@ export class CatalogueLaneDiscipline {
       evaluatedAt: evaluatedAt.toISOString()
     });
   }
+}
+
+function isServingCatalogJob(job) {
+  if (!job) return false;
+  if (job.claimable === true) return true;
+  if (job.claimable === false) return false;
+  const effectiveState = String(job.effectiveState ?? "").trim().toLowerCase();
+  if (effectiveState) return effectiveState === "claimable" || effectiveState === "open";
+  const lifecycleState = String(
+    job?.lifecycle?.state ?? job?.lifecycle?.status ?? job?.state ?? "open"
+  ).trim().toLowerCase();
+  return lifecycleState === "open";
 }
 
 async function collectClaimedJobIdsSince(stateStore, since) {
