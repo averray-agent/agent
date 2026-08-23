@@ -11,6 +11,11 @@ import { verificationDepthForJob } from "./verification-depth.js";
 
 export const WORK_RECEIPT_SCHEMA_VERSION = "averray.work-receipt.v1";
 export const WORK_RECEIPT_SITE_ORIGIN = "https://averray.com";
+export const WORK_RECEIPT_COMMITMENT_SECTIONS = Object.freeze([
+  "intent",
+  "execution",
+  "verdict"
+]);
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/u;
 const BYTES32_RE = /^0x[a-fA-F0-9]{64}$/u;

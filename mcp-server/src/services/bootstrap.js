@@ -42,6 +42,7 @@ import {
 import { backfillBadgeReceiptSignatures } from "./badge-receipt-backfill.js";
 import { backfillWorkReceipts } from "./work-receipt-backfill.js";
 import { repairWalletSessionIndex } from "./wallet-session-index-repair.js";
+import { repairWorkReceiptJobIndex } from "./work-receipt-job-index-repair.js";
 import { createAuthMiddleware } from "../auth/middleware.js";
 import { createRateLimiter } from "../auth/rate-limit.js";
 import { resolveCapabilities, capabilityMatrix } from "../auth/capabilities.js";
@@ -433,6 +434,16 @@ export async function createPlatformRuntime() {
       "bootstrap.init_failed"
     );
     throw error;
+  }
+  try {
+    await repairWorkReceiptJobIndex({ stateStore, logger });
+  } catch (error) {
+    // Alias repair is additive. A transient scan failure must not take down
+    // the canonical receipt route; the next startup resumes the repair.
+    logger.warn?.(
+      { step: "repair-work-receipt-job-index", err: error instanceof Error ? error : new Error(String(error)) },
+      "bootstrap.backfill_incomplete"
+    );
   }
   const onboardingSubsidyBudget = initStep(
     "init-onboarding-subsidy-budget",

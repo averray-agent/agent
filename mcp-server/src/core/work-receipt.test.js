@@ -8,6 +8,7 @@ import {
   buildVerifyReceipt,
   buildWorkReceipt,
   hashWorkReceiptContent,
+  WORK_RECEIPT_COMMITMENT_SECTIONS,
   WORK_RECEIPT_SCHEMA_VERSION
 } from "./work-receipt.js";
 import { STARTER_BENCHMARK_CHECK_DEPTH } from "./verification-depth.js";
@@ -306,6 +307,25 @@ test("verify and job receipts share the one canonical content-address function",
     source.indexOf("export function assertWorkReceiptContentAddress")
   );
   assert.doesNotMatch(hashProjection, /result|assetContext/u, "presentation fields must not become hash exclusions");
+});
+
+test("work receipt commitment documentation is bound to the exported frozen verdict-core sections", () => {
+  const schema = JSON.parse(readFileSync(
+    new URL("../../../docs/schemas/work-receipt-v1.json", import.meta.url),
+    "utf8"
+  ));
+  const documentation = readFileSync(
+    new URL("../../../docs/schemas/work-receipt-v1.md", import.meta.url),
+    "utf8"
+  );
+
+  assert.deepEqual(
+    schema["x-averrayCommitment"].sections,
+    WORK_RECEIPT_COMMITMENT_SECTIONS
+  );
+  assert.match(documentation, /\["intent", "execution", "verdict"\]/u);
+  assert.match(documentation, /stored field set is frozen/u);
+  assert.equal(Object.isFrozen(WORK_RECEIPT_COMMITMENT_SECTIONS), true);
 });
 
 test("MCP verify receipt names each bounded check and carries neither credential nor settlement", () => {

@@ -63,6 +63,7 @@ test("receipt and Verify-run decoration is additive and never rewrites canonical
     verdict: { outcome: "approved", reasonCode: "DETERMINISTIC_MATCH" },
     intent: {
       specSource: "verify_request",
+      poster: "0x1111111111111111111111111111111111111111",
       valueAtRisk: { asset: "USDC", amountRaw: "5000000" }
     }
   };
@@ -71,8 +72,10 @@ test("receipt and Verify-run decoration is additive and never rewrites canonical
   assert.deepEqual(stored, before);
   assert.equal(served.verdict.outcome, "approved");
   assert.equal(served.result, "PASS");
+  assert.equal(served.buyer, stored.intent.poster);
   assert.equal(served.assetContext.chainName, "Base");
   assert.equal(Object.hasOwn(stored, "result"), false);
+  assert.equal(Object.hasOwn(stored, "buyer"), false);
 
   const run = decorateVerificationRunPresentation({
     verdict: { outcome: "platform_fault" },
@@ -81,6 +84,24 @@ test("receipt and Verify-run decoration is additive and never rewrites canonical
   assert.equal(run.result, "PLATFORM_FAULT");
   assert.equal(run.billing.status, "not_billed");
   assert.equal(run.assetContext.chain, "eip155:8453");
+});
+
+test("buyer is a serve-time alias of the funding poster in both job and Verify lanes", () => {
+  const jobPoster = "0x1111111111111111111111111111111111111111";
+  const verifyCustomer = "0x2222222222222222222222222222222222222222";
+  const jobDocument = {
+    intent: { specSource: "chain_verified", poster: jobPoster },
+    verdict: { outcome: "approved" }
+  };
+  const verifyDocument = {
+    intent: { specSource: "verify_request", poster: verifyCustomer },
+    verdict: { outcome: "rejected" }
+  };
+
+  assert.equal(decorateReceiptPresentation(jobDocument).buyer, jobPoster);
+  assert.equal(decorateReceiptPresentation(verifyDocument, { env: VERIFY_ENV }).buyer, verifyCustomer);
+  assert.equal(Object.hasOwn(jobDocument, "buyer"), false);
+  assert.equal(Object.hasOwn(verifyDocument, "buyer"), false);
 });
 
 test("path-addressed job estimate wraps the scalar without changing its value", () => {

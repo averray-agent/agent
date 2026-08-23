@@ -142,19 +142,33 @@ export function createBadgeRoutes({
     }
 
     if (request.method === "GET" && pathname.startsWith("/receipts/")) {
-      const receiptId = decodeURIComponent(pathname.slice("/receipts/".length)).toLowerCase();
-      if (!/^0x[a-f0-9]{64}$/u.test(receiptId)) {
-        throw new ValidationError("receiptId must be a 32-byte content hash.");
-      }
-      const storedReceipt = await stateStore?.getWorkReceiptDocument?.(receiptId);
-      if (!storedReceipt) {
-        respond(response, 404, { status: "not_found", kind: "work", receiptId });
+      const requestedId = decodeURIComponent(pathname.slice("/receipts/".length)).trim().toLowerCase();
+      if (!requestedId) throw new ValidationError("receipt id path segment is required.");
+
+      // Exact content ids always win. This ordering is load-bearing because a
+      // chain job id has the same 0x + 64-hex shape as a receipt id.
+      const exactReceipt = await stateStore?.getWorkReceiptDocument?.(requestedId);
+      if (exactReceipt) {
+        assertWorkReceiptContentAddress(exactReceipt);
+        respond(response, 200, decorateReceiptPresentation(exactReceipt, { env: presentationEnv }), {
+          "cache-control": "public, max-age=31536000, immutable"
+        });
         return true;
       }
-      assertWorkReceiptContentAddress(storedReceipt);
-      respond(response, 200, decorateReceiptPresentation(storedReceipt, { env: presentationEnv }), {
-        "cache-control": "public, max-age=31536000, immutable"
-      });
+
+      const sessionReceipt = await stateStore?.getWorkReceiptDocumentBySession?.(requestedId);
+      if (sessionReceipt) {
+        redirectToCanonicalReceipt(response, sessionReceipt, respond);
+        return true;
+      }
+
+      const jobReceipt = await stateStore?.getWorkReceiptDocumentByJob?.(requestedId);
+      if (jobReceipt) {
+        redirectToCanonicalReceipt(response, jobReceipt, respond);
+        return true;
+      }
+
+      respond(response, 404, { status: "not_found", kind: "work", id: requestedId });
       return true;
     }
 
@@ -230,4 +244,14 @@ export function createBadgeRoutes({
 
     return false;
   };
+}
+
+function redirectToCanonicalReceipt(response, document, respond) {
+  assertWorkReceiptContentAddress(document);
+  const receiptId = String(document.receiptId).toLowerCase();
+  const location = `/receipts/${receiptId}`;
+  respond(response, 301, { status: "moved_permanently", receiptId, location }, {
+    location,
+    "cache-control": "public, max-age=300"
+  });
 }

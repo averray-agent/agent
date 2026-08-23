@@ -75,6 +75,36 @@ local ttl = redis.call("pttl", KEYS[1])
 return {current, ttl}
 `;
 
+// The approved receipt dominates every other final outcome for a job. Within
+// the same outcome class, the most recent final receipt wins. Keeping this
+// comparison in Redis makes concurrent receipt writers deterministic.
+const UPSERT_WORK_RECEIPT_JOB_INDEX_SCRIPT = `
+local currentRaw = redis.call("get", KEYS[1])
+if not currentRaw then
+  redis.call("set", KEYS[1], ARGV[1])
+  return 1
+end
+local current = cjson.decode(currentRaw)
+local candidate = cjson.decode(ARGV[1])
+local currentApproved = current.outcome == "approved"
+local candidateApproved = candidate.outcome == "approved"
+local replace = false
+if candidateApproved and not currentApproved then
+  replace = true
+elseif candidateApproved == currentApproved then
+  if candidate.finalAt > current.finalAt then
+    replace = true
+  elseif candidate.finalAt == current.finalAt and candidate.receiptId > current.receiptId then
+    replace = true
+  end
+end
+if replace then
+  redis.call("set", KEYS[1], ARGV[1])
+  return 1
+end
+return 0
+`;
+
 // Atomically reserve capacity from a named daily aggregate. Reservation ids
 // make claim retries idempotent, while the day in the Redis key makes a wallet
 // change irrelevant and gives the budget an unambiguous UTC reset boundary.
@@ -208,6 +238,7 @@ export class MemoryStateStore {
     this.runReceiptDocuments = new Map();
     this.workReceiptDocuments = new Map();
     this.sessionWorkReceiptDocuments = new Map();
+    this.jobWorkReceiptIndexes = new Map();
     this.verificationRuns = new Map();
     this.verificationPaymentRuns = new Map();
     this.verificationRunAuthorizations = new Map();
@@ -376,7 +407,8 @@ export class MemoryStateStore {
 
   async getRunReceiptDocument(sessionId) {
     return cloneJsonRecord(
-      this.sessionWorkReceiptDocuments.get(sessionId) ?? this.runReceiptDocuments.get(sessionId)
+      this.sessionWorkReceiptDocuments.get(normalizeReceiptIndexId(sessionId))
+        ?? this.runReceiptDocuments.get(sessionId)
     );
   }
 
@@ -389,19 +421,53 @@ export class MemoryStateStore {
   }
 
   async getWorkReceiptDocument(receiptId) {
-    return cloneJsonRecord(this.workReceiptDocuments.get(String(receiptId).toLowerCase()));
+    return cloneJsonRecord(this.workReceiptDocuments.get(normalizeReceiptIndexId(receiptId)));
+  }
+
+  async getWorkReceiptDocumentBySession(sessionId) {
+    return cloneJsonRecord(this.sessionWorkReceiptDocuments.get(normalizeReceiptIndexId(sessionId)));
+  }
+
+  async getWorkReceiptDocumentByJob(jobId) {
+    const index = this.jobWorkReceiptIndexes.get(normalizeReceiptIndexId(jobId));
+    return index ? this.getWorkReceiptDocument(index.receiptId) : undefined;
   }
 
   async putWorkReceiptDocument(sessionId, document) {
-    const receiptId = String(document?.receiptId ?? "").toLowerCase();
+    const receiptId = normalizeReceiptIndexId(document?.receiptId);
     const existing = this.workReceiptDocuments.get(receiptId);
-    if (existing) return cloneJsonRecord(existing);
-    const stored = cloneJsonRecord(document);
-    this.workReceiptDocuments.set(receiptId, stored);
-    if (!this.sessionWorkReceiptDocuments.has(sessionId)) {
-      this.sessionWorkReceiptDocuments.set(sessionId, stored);
+    const stored = existing ?? cloneJsonRecord(document);
+    if (!existing) this.workReceiptDocuments.set(receiptId, stored);
+    const normalizedSessionId = normalizeReceiptIndexId(sessionId);
+    if (normalizedSessionId && !this.sessionWorkReceiptDocuments.has(normalizedSessionId)) {
+      this.sessionWorkReceiptDocuments.set(normalizedSessionId, stored);
     }
+    await this.indexWorkReceiptDocument(stored);
     return cloneJsonRecord(stored);
+  }
+
+  async indexWorkReceiptDocument(document) {
+    const normalizedSessionId = normalizeReceiptIndexId(document?.sessionId);
+    if (normalizedSessionId && !this.sessionWorkReceiptDocuments.has(normalizedSessionId)) {
+      this.sessionWorkReceiptDocuments.set(normalizedSessionId, cloneJsonRecord(document));
+    }
+    const candidate = workReceiptJobIndexRecord(document);
+    if (!candidate) return { sessionIndexed: Boolean(normalizedSessionId), jobIndexed: false };
+    const current = this.jobWorkReceiptIndexes.get(candidate.jobId);
+    const replace = shouldReplaceWorkReceiptJobIndex(current, candidate);
+    if (replace) this.jobWorkReceiptIndexes.set(candidate.jobId, candidate);
+    return { sessionIndexed: Boolean(normalizedSessionId), jobIndexed: replace };
+  }
+
+  async scanWorkReceiptDocuments({ cursor = "0", limit = 200 } = {}) {
+    const documents = [...this.workReceiptDocuments.values()];
+    const start = Math.max(0, Number.parseInt(String(cursor), 10) || 0);
+    const size = Math.max(1, Number.parseInt(String(limit), 10) || 200);
+    const end = Math.min(documents.length, start + size);
+    return {
+      documents: documents.slice(start, end).map((document) => cloneJsonRecord(document)),
+      nextCursor: end >= documents.length ? "0" : String(end)
+    };
   }
 
   async getVerificationRun(runId) {
@@ -1313,7 +1379,9 @@ export class RedisStateStore {
 
   async getRunReceiptDocument(sessionId) {
     await this.connect();
-    const raw = await this.client.get(this.key("work-receipt-session", sessionId))
+    const raw = await this.client.get(
+      this.key("work-receipt-session", normalizeReceiptIndexId(sessionId))
+    )
       ?? await this.client.get(this.key("run-receipt", sessionId));
     return raw ? JSON.parse(raw) : undefined;
   }
@@ -1327,17 +1395,68 @@ export class RedisStateStore {
 
   async getWorkReceiptDocument(receiptId) {
     await this.connect();
-    const raw = await this.client.get(this.key("work-receipt", String(receiptId).toLowerCase()));
+    const raw = await this.client.get(this.key("work-receipt", normalizeReceiptIndexId(receiptId)));
     return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async getWorkReceiptDocumentBySession(sessionId) {
+    await this.connect();
+    const raw = await this.client.get(
+      this.key("work-receipt-session", normalizeReceiptIndexId(sessionId))
+    );
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async getWorkReceiptDocumentByJob(jobId) {
+    await this.connect();
+    const raw = await this.client.get(this.key("work-receipt-job", normalizeReceiptIndexId(jobId)));
+    if (!raw) return undefined;
+    const index = JSON.parse(raw);
+    return this.getWorkReceiptDocument(index.receiptId);
   }
 
   async putWorkReceiptDocument(sessionId, document) {
     await this.connect();
-    const receiptId = String(document?.receiptId ?? "").toLowerCase();
+    const receiptId = normalizeReceiptIndexId(document?.receiptId);
     const encoded = JSON.stringify(document);
     await this.client.set(this.key("work-receipt", receiptId), encoded, { NX: true });
-    await this.client.set(this.key("work-receipt-session", sessionId), encoded, { NX: true });
-    return this.getWorkReceiptDocument(receiptId);
+    const normalizedSessionId = normalizeReceiptIndexId(sessionId);
+    if (normalizedSessionId) {
+      await this.client.set(this.key("work-receipt-session", normalizedSessionId), encoded, { NX: true });
+    }
+    const stored = await this.getWorkReceiptDocument(receiptId);
+    await this.indexWorkReceiptDocument(stored);
+    return stored;
+  }
+
+  async indexWorkReceiptDocument(document) {
+    await this.connect();
+    const encoded = JSON.stringify(document);
+    const normalizedSessionId = normalizeReceiptIndexId(document?.sessionId);
+    if (normalizedSessionId) {
+      await this.client.set(this.key("work-receipt-session", normalizedSessionId), encoded, { NX: true });
+    }
+    const candidate = workReceiptJobIndexRecord(document);
+    if (!candidate) return { sessionIndexed: Boolean(normalizedSessionId), jobIndexed: false };
+    const changed = await this.client.eval(UPSERT_WORK_RECEIPT_JOB_INDEX_SCRIPT, {
+      keys: [this.key("work-receipt-job", candidate.jobId)],
+      arguments: [JSON.stringify(candidate)]
+    });
+    return { sessionIndexed: Boolean(normalizedSessionId), jobIndexed: Number(changed) === 1 };
+  }
+
+  async scanWorkReceiptDocuments({ cursor = "0", limit = 200 } = {}) {
+    await this.connect();
+    const page = await this.client.scan(String(cursor), {
+      MATCH: this.key("work-receipt", "*"),
+      COUNT: Math.max(1, Number.parseInt(String(limit), 10) || 200)
+    });
+    const keys = page.keys ?? [];
+    const rawDocuments = keys.length > 0 ? await this.client.mGet(keys) : [];
+    return {
+      documents: rawDocuments.filter(Boolean).map((raw) => JSON.parse(raw)),
+      nextCursor: String(page.cursor ?? "0")
+    };
   }
 
   async getVerificationRun(runId) {
@@ -2505,6 +2624,36 @@ export class RedisStateStore {
   key(kind, id) {
     return `${this.namespace}:${kind}:${id}`;
   }
+}
+
+function normalizeReceiptIndexId(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function workReceiptJobIndexRecord(document) {
+  const receiptId = normalizeReceiptIndexId(document?.receiptId);
+  const jobId = normalizeReceiptIndexId(document?.jobId);
+  if (!receiptId || !jobId) return undefined;
+  return {
+    receiptId,
+    jobId,
+    outcome: String(document?.verdict?.outcome ?? "").trim().toLowerCase(),
+    finalAt: String(
+      document?.timestamps?.verifiedAt
+        ?? document?.timestamps?.completedAt
+        ?? document?.timestamps?.resolvedAt
+        ?? ""
+    )
+  };
+}
+
+function shouldReplaceWorkReceiptJobIndex(current, candidate) {
+  if (!current) return true;
+  const currentApproved = current.outcome === "approved";
+  const candidateApproved = candidate.outcome === "approved";
+  if (candidateApproved !== currentApproved) return candidateApproved;
+  if (candidate.finalAt !== current.finalAt) return candidate.finalAt > current.finalAt;
+  return candidate.receiptId > current.receiptId;
 }
 
 export function createStateStore(env = process.env, { logger = console } = {}) {

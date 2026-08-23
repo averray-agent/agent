@@ -62,6 +62,7 @@ export function presentAssetContext(lane, symbol, { env = process.env } = {}) {
 
 export function receiptPresentationFields(document, options = {}) {
   const result = presentResult(document?.verdict?.outcome);
+  const buyer = document?.intent?.poster;
   const verifyLane = document?.intent?.specSource === "verify_request";
   const symbol = verifyLane
     ? document?.intent?.valueAtRisk?.asset
@@ -74,7 +75,7 @@ export function receiptPresentationFields(document, options = {}) {
     symbol,
     options
   );
-  return compact({ result, assetContext });
+  return compact({ result, assetContext, buyer });
 }
 
 export function decorateReceiptPresentation(document, options = {}) {
