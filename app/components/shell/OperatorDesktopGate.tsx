@@ -1,11 +1,18 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { isDesktopOnlyOperatorPath } from "@/lib/ui/mobile-operator.js";
 
 /**
- * The operator control room is intentionally desktop-only. This gate belongs
- * to the operator route-group layout so worker and sign-in surfaces retain
- * their independently verified mobile behaviour.
+ * Routes without ratified mobile layouts remain desktop-only below 768px.
+ * Responsive operational routes pass through this route-scoped gate.
  */
 export function OperatorDesktopGate({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+
+  if (!isDesktopOnlyOperatorPath(pathname)) return children;
+
   return (
     <>
       <section

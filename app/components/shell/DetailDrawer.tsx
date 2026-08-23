@@ -11,6 +11,7 @@ export interface DetailDrawerProps {
   meta?: React.ReactNode;
   children: React.ReactNode;
   width?: number;
+  responsiveReceipt?: boolean;
 }
 
 /**
@@ -31,6 +32,7 @@ export function DetailDrawer({
   meta,
   children,
   width = 520,
+  responsiveReceipt = false,
 }: DetailDrawerProps) {
   // Portal target lives on window.document; render nothing on the server
   // so SSR HTML matches the first client render. Flip `mounted` after the
@@ -65,9 +67,10 @@ export function DetailDrawer({
         aria-hidden={!open}
         className={cn(
           "fixed inset-y-0 right-0 z-40 flex flex-col overflow-hidden border-l border-[var(--avy-line)] bg-[var(--avy-paper-solid)] shadow-[-24px_0_60px_rgba(34,43,36,0.14)] transition-transform duration-200",
+          responsiveReceipt && "left-0 w-full border-l-0 md:left-auto md:w-[420px] md:border-l min-[1080px]:w-[520px]",
           open ? "translate-x-0" : "translate-x-full"
         )}
-        style={{ width: `min(${width}px, 92vw)` }}
+        style={responsiveReceipt ? undefined : { width: `min(${width}px, 92vw)` }}
       >
         <header className="flex items-start justify-between gap-4 border-b border-[var(--avy-line-soft)] px-5 py-4">
           <div className="min-w-0">
@@ -78,7 +81,10 @@ export function DetailDrawer({
             type="button"
             aria-label="Close"
             onClick={onClose}
-            className="grid h-8 w-8 place-items-center rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] font-[family-name:var(--font-mono)] text-sm text-[var(--avy-muted)] hover:border-[var(--avy-ink)] hover:text-[var(--avy-ink)]"
+            className={cn(
+              "grid place-items-center rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] font-[family-name:var(--font-mono)] text-sm text-[var(--avy-muted)] hover:border-[var(--avy-ink)] hover:text-[var(--avy-ink)]",
+              responsiveReceipt ? "h-11 w-11 min-[1080px]:h-8 min-[1080px]:w-8" : "h-8 w-8",
+            )}
           >
             ✕
           </button>

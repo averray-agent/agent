@@ -23,13 +23,21 @@ export interface KpiData {
 export interface RoomVitalsProps {
   vitals: KpiData[];
   comparedTo: string;
+  layout?: "default" | "mobile";
 }
 
-export function RoomVitals({ vitals, comparedTo }: RoomVitalsProps) {
+export function RoomVitals({ vitals, comparedTo, layout = "default" }: RoomVitalsProps) {
   return (
     <section>
       <SectionHead title="Room vitals" meta={`vs. ${comparedTo}`} />
-      <div className="grid grid-cols-1 gap-[0.9rem] md:grid-cols-2 xl:grid-cols-4">
+      <div
+        className={cn(
+          "grid gap-[0.9rem]",
+          layout === "mobile"
+            ? "grid-cols-2 md:grid-cols-4"
+            : "grid-cols-1 md:grid-cols-2 xl:grid-cols-4",
+        )}
+      >
         {vitals.map((kpi) => (
           <KpiCard key={kpi.label} {...kpi} />
         ))}

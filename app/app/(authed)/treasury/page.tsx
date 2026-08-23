@@ -24,6 +24,7 @@ import {
   treasuryFeedAvailable,
   treasuryHasWarnings,
 } from "@/lib/api/treasury-adapters";
+import { MobileTreasury } from "@/components/treasury/MobileTreasury";
 
 export default function TreasuryPage() {
   const account = useAccount();
@@ -63,9 +64,18 @@ export default function TreasuryPage() {
   const freshness = requestFreshness === "live" && treasuryHasWarnings(treasurySummary.data)
     ? "fallback"
     : requestFreshness;
+  const policySub = policyItems.length ? "TreasuryPolicy · live reads" : "policy gate feed not emitted by API yet";
 
   return (
-    <div className="flex w-full max-w-[1100px] flex-col gap-5">
+    <>
+      <MobileTreasury
+        cards={balanceCards}
+        policyItems={policyItems}
+        policySub={policySub}
+        scope="AgentAccountCore · asset hub"
+        freshness={freshness}
+      />
+      <div className="hidden w-full max-w-[1100px] flex-col gap-5 min-[1080px]:flex">
       <TreasuryTopbar freshness={freshness} />
       <BalanceSheetStrip
         cards={balanceCards}
@@ -103,7 +113,7 @@ export default function TreasuryPage() {
 
       <PolicyGateFooter
         items={policyItems}
-        sub={policyItems.length ? "TreasuryPolicy · live reads" : "policy gate feed not emitted by API yet"}
+        sub={policySub}
       />
 
       <p className="flex flex-wrap gap-x-5 gap-y-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
@@ -123,7 +133,8 @@ export default function TreasuryPage() {
         </span>
         <span>All actions are operator-initiated · every action emits a signed receipt</span>
       </p>
-    </div>
+      </div>
+    </>
   );
 }
 

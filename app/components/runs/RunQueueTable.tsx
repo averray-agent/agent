@@ -74,6 +74,7 @@ export interface RunQueueTableProps {
   unclaimedStake: string;
   presence: FeedPresence;
   liveStatus?: string;
+  layout?: "default" | "mobile";
 }
 
 export function RunQueueTable({
@@ -85,6 +86,7 @@ export function RunQueueTable({
   unclaimedStake,
   presence,
   liveStatus = "live API",
+  layout = "default",
 }: RunQueueTableProps) {
   const isLive = presence === "live";
   return (
@@ -125,10 +127,20 @@ export function RunQueueTable({
           )}
         </div>
       ) : (
-        <ul className="divide-y divide-[var(--avy-line-soft)]" role="list">
+        <ul
+          className={cn(
+            layout === "mobile"
+              ? "grid grid-cols-1 divide-y divide-[var(--avy-line-soft)] md:grid-cols-2 md:divide-y-0"
+              : "divide-y divide-[var(--avy-line-soft)]",
+          )}
+          role="list"
+        >
           {rows.map((row) => (
             <RunRowCard
               key={row.id}
+              listItemClassName={cn(
+                layout === "mobile" && "md:border-b md:border-[var(--avy-line-soft)] md:odd:border-r",
+              )}
               row={row}
               selected={row.id === selectedId}
               onSelect={() => onSelect(row.id)}
@@ -137,7 +149,12 @@ export function RunQueueTable({
         </ul>
       )}
 
-      <footer className="flex items-center justify-between border-t border-[var(--avy-line-soft)] bg-[#faf8f1] px-4 py-2.5 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
+      <footer
+        className={cn(
+          "flex items-center justify-between border-t border-[var(--avy-line-soft)] bg-[#faf8f1] px-4 py-2.5 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]",
+          layout === "mobile" && "flex-wrap gap-2",
+        )}
+      >
         {isLive ? (
           <>
             <span>
@@ -190,13 +207,15 @@ function RunRowCard({
   row,
   selected,
   onSelect,
+  listItemClassName,
 }: {
   row: RunRow;
   selected: boolean;
   onSelect: () => void;
+  listItemClassName?: string;
 }) {
   return (
-    <li>
+    <li className={listItemClassName}>
       <button
         type="button"
         onClick={onSelect}

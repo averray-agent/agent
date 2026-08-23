@@ -17,6 +17,7 @@ import {
 } from "@/components/overview/LaneStatusGrid";
 import { CatalogueLaneGrid } from "@/components/overview/CatalogueLaneGrid";
 import { PlatformPulse, type PulseEvent } from "@/components/overview/PlatformPulse";
+import { MobileOverview } from "@/components/overview/MobileOverview";
 import { ProviderOperationsCard } from "@/components/overview/ProviderOperationsCard";
 import { RecurringRuntimeCard } from "@/components/overview/RecurringRuntimeCard";
 import { JobLifecycleStrip } from "@/components/overview/JobLifecycleStrip";
@@ -293,7 +294,15 @@ export default function OverviewPage() {
       : `stream ${stream.state} · ${stream.events.length} recent events`;
 
   return (
-    <div className="flex w-full max-w-[1100px] flex-col gap-7">
+    <>
+      <MobileOverview
+        vitals={vitals}
+        lanes={lanes}
+        freshness={freshness}
+        visibleAlertCount={alerts.length}
+        alertFeedIncomplete={alertsPresence !== "live"}
+      />
+      <div className="hidden w-full max-w-[1100px] flex-col gap-7 min-[1080px]:flex">
       <OverviewTopbar capabilityWarning={capabilityWarning} freshness={freshness} />
       <OrientationCard
         roomActivityCount={roomActivityCount}
@@ -347,7 +356,8 @@ export default function OverviewPage() {
         endpoint="/events"
         meta={pulseMeta}
       />
-    </div>
+      </div>
+    </>
   );
 }
 

@@ -47,7 +47,7 @@ export function AgentsTopbar({ freshness }: { freshness?: FreshnessState }) {
           type="button"
           disabled
           title="Roster export is not wired to a live backend yet."
-          className="inline-flex h-8 cursor-not-allowed items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-white/60 px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--avy-ink)] opacity-40"
+          className="hidden h-8 cursor-not-allowed items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-white/60 px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--avy-ink)] opacity-40 min-[1080px]:inline-flex"
           style={{ letterSpacing: "0.04em" }}
         >
           ⤓ Export roster
@@ -59,7 +59,7 @@ export function AgentsTopbar({ freshness }: { freshness?: FreshnessState }) {
           type="button"
           disabled
           title="Agent invites are not yet wired to a live backend."
-          className="inline-flex h-8 cursor-not-allowed items-center gap-1.5 rounded-[8px] bg-[var(--avy-accent)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--fg-invert)] opacity-40"
+          className="hidden h-8 cursor-not-allowed items-center gap-1.5 rounded-[8px] bg-[var(--avy-accent)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--fg-invert)] opacity-40 min-[1080px]:inline-flex"
           style={{ letterSpacing: "0.04em" }}
         >
           ＋ Invite agent

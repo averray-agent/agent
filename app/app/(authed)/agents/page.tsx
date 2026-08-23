@@ -18,6 +18,7 @@ import { extractAgent, extractAgents } from "@/lib/api/agent-adapters";
 import { matchesAgentStatusFilter } from "@/lib/api/agent-roster-truth.js";
 import { useAgent, useAgents } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
+import { MobileAgentCards } from "@/components/agents/MobileAgentCards";
 
 export default function AgentsPage() {
   const agentsRequest = useAgents();
@@ -85,6 +86,11 @@ export default function AgentsPage() {
   };
 
   const freshness = freshnessFromRequests(agentsRequest);
+  const filterRail = <AgentsFilterRail filter={filter} onChange={setFilter} />;
+  const openAgentDrawer = (agent: (typeof agents)[number]) => {
+    setOpenHandle(agent.handle);
+    setDrawerOpen(true);
+  };
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
@@ -108,7 +114,7 @@ export default function AgentsPage() {
 
       <AgentsAggregateStrip agents={agents} />
 
-      <AgentsFilterRail filter={filter} onChange={setFilter} />
+      {filterRail}
 
       {comparingAgents.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-[color:rgba(30,102,66,0.28)] bg-[var(--avy-accent-soft)] px-4 py-2.5">
@@ -139,18 +145,22 @@ export default function AgentsPage() {
         </div>
       ) : null}
 
-      <AgentDirectoryTable
-        rows={filtered}
-        total={agents.length}
+      <MobileAgentCards
+        agents={filtered}
         selectedHandle={openHandle}
-        onSelect={(agent) => {
-          setOpenHandle(agent.handle);
-          setDrawerOpen(true);
-        }}
-        comparing={comparingSet}
-        onToggleCompare={toggleCompare}
-        compareFull={comparingAgents.length >= COMPARE_MAX}
+        onSelect={openAgentDrawer}
       />
+      <div className="hidden min-[1080px]:block">
+        <AgentDirectoryTable
+          rows={filtered}
+          total={agents.length}
+          selectedHandle={openHandle}
+          onSelect={openAgentDrawer}
+          comparing={comparingSet}
+          onToggleCompare={toggleCompare}
+          compareFull={comparingAgents.length >= COMPARE_MAX}
+        />
+      </div>
 
       <AgentTierLegend />
 
