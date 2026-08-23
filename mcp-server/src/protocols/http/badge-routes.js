@@ -2,6 +2,10 @@ import { ValidationError, normalizeError } from "../../core/errors.js";
 import { buildBadgeSigners } from "../../core/badge-metadata.js";
 import { BADGE_RECEIPT_JWKS_PATH } from "../../core/badge-receipt-signing.js";
 import { assertWorkReceiptContentAddress } from "../../core/work-receipt.js";
+import {
+  decorateReceiptPresentation,
+  receiptPresentationFields
+} from "../../core/verdict-presentation.js";
 
 export function createListBadgeReceipts({
   buildBadgeFromSession,
@@ -96,6 +100,7 @@ function buildRunReceiptRow(document, { session } = {}) {
     policyTags: Array.isArray(verdict.policyTags) ? verdict.policyTags : [],
     blockRef: document.chainJobId,
     canonicalUrl: document.canonicalUrl,
+    ...receiptPresentationFields(document),
     ...(document.signature ? { signature: document.signature } : {}),
     runReceipt: document
   };
@@ -119,6 +124,7 @@ export function createBadgeRoutes({
   stateStore,
   verifierAddress,
   verifierService,
+  presentationEnv = process.env,
 }) {
   return async function handleBadgeRoute({ request, response, url, pathname }) {
     if (request.method === "GET" && pathname === BADGE_RECEIPT_JWKS_PATH) {
@@ -146,7 +152,7 @@ export function createBadgeRoutes({
         return true;
       }
       assertWorkReceiptContentAddress(storedReceipt);
-      respond(response, 200, storedReceipt, {
+      respond(response, 200, decorateReceiptPresentation(storedReceipt, { env: presentationEnv }), {
         "cache-control": "public, max-age=31536000, immutable"
       });
       return true;

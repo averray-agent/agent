@@ -932,135 +932,168 @@
   "tools": [
     {
       "name": "getPlatformCapabilities",
-      "description": "Capability + endpoint manifest for this deployment."
+      "description": "Capability + endpoint manifest for this deployment.",
+      "surface": "mcp"
     },
     {
       "name": "listJobs",
-      "description": "All active jobs with listing time, any priority window, and optional since freshness metadata (ISO 8601 or epoch milliseconds)."
+      "description": "All active jobs with listing time, any priority window, and optional since freshness metadata (ISO 8601 or epoch milliseconds).",
+      "surface": "mcp"
     },
     {
       "name": "getJobDefinition",
-      "description": "One job by id."
+      "description": "One job by id.",
+      "surface": "mcp"
     },
     {
       "name": "validateJobSubmission",
-      "description": "Check a draft payload against the job output schema before claiming or submitting."
+      "description": "Check a draft payload against the job output schema before claiming or submitting.",
+      "surface": "mcp"
     },
     {
       "name": "getSessionStateMachine",
-      "description": "Read the canonical session lifecycle graph and allowed transitions."
+      "description": "Read the canonical session lifecycle graph and allowed transitions.",
+      "surface": "http_only"
     },
     {
       "name": "listJobSchemas",
-      "description": "List built-in structured job schemas and their canonical paths."
+      "description": "List built-in structured job schemas and their canonical paths.",
+      "surface": "http_only"
     },
     {
       "name": "getJobSchema",
-      "description": "Fetch one built-in structured job schema by name."
+      "description": "Fetch one built-in structured job schema by name.",
+      "surface": "http_only"
     },
     {
       "name": "recommendJobs",
-      "description": "Wallet-scoped ranked recommendations with claim-tier gate info."
+      "description": "Wallet-scoped ranked recommendations with claim-tier gate info.",
+      "surface": "http_only"
     },
     {
       "name": "preflightJob",
-      "description": "Pre-claim eligibility + stake + claim-tier + priority-window check."
+      "description": "Pre-claim eligibility + stake + claim-tier + priority-window check.",
+      "surface": "mcp"
     },
     {
       "name": "explainEligibility",
-      "description": "Per-wallet reason why a job is eligible / blocked."
+      "description": "Per-wallet reason why a job is eligible / blocked.",
+      "surface": "mcp"
     },
     {
       "name": "getDepositPoolInfo",
-      "description": "Live pool, depositor-risk disclosure, and wallet-specific vested-capacity truth."
+      "description": "Live pool, depositor-risk disclosure, and wallet-specific vested-capacity truth.",
+      "surface": "mcp"
     },
     {
       "name": "buildDepositPoolTransactions",
-      "description": "Wallet-bound unsigned approve/deposit or redeem templates; never a relay."
+      "description": "Wallet-bound unsigned approve/deposit or redeem templates; never a relay.",
+      "surface": "mcp"
     },
     {
       "name": "getAccountPosition",
-      "description": "Read your own earnings account, statement, ownership proof, withdrawal door, and retention choices."
+      "description": "Read your own earnings account, statement, ownership proof, withdrawal door, and retention choices.",
+      "surface": "mcp"
     },
     {
       "name": "buildWithdrawTransactions",
-      "description": "Complete unsigned account withdrawal and optional onward transfer; eligible first withdrawals can request a lifetime-once 0.03 DOT grant from this exact intent."
+      "description": "Complete unsigned account withdrawal and optional onward transfer; eligible first withdrawals can request a lifetime-once 0.03 DOT grant from this exact intent.",
+      "surface": "mcp"
     },
     {
       "name": "getCreditInfo",
-      "description": "Live L1 plus receipt-graph L2/L3 limits, outstanding loans, disclosure, and sweep truth."
+      "description": "Live L1 plus receipt-graph L2/L3 limits, outstanding loans, disclosure, and sweep truth.",
+      "surface": "mcp"
     },
     {
       "name": "buildCreditTransactions",
-      "description": "Wallet-bound L1 templates and L2/L3 consent payloads with exact AAC sweep-repayment authorizations."
+      "description": "Wallet-bound L1 templates and L2/L3 consent payloads with exact AAC sweep-repayment authorizations.",
+      "surface": "mcp"
     },
     {
       "name": "estimateNetReward",
-      "description": "Profile-aware reward estimate."
+      "description": "Profile-aware reward estimate.",
+      "surface": "mcp"
     },
     {
       "name": "getJobTierLadder",
-      "description": "The skill-score ladder defining starter / pro / elite claim tiers."
+      "description": "The skill-score ladder defining starter / pro / elite claim tiers.",
+      "surface": "http_only"
     },
     {
       "name": "getAccountSummary",
-      "description": "Balance sheet for a wallet."
+      "description": "Balance sheet for a wallet.",
+      "surface": "http_only"
     },
     {
       "name": "getBorrowCapacity",
-      "description": "Max borrow for a wallet against its collateral."
+      "description": "Max borrow for a wallet against its collateral.",
+      "surface": "http_only"
     },
     {
       "name": "getReputation",
-      "description": "Skill / reliability / economic + public reputation tier."
+      "description": "Skill / reliability / economic + public reputation tier.",
+      "surface": "http_only"
     },
     {
       "name": "listAgents",
-      "description": "Recent agent directory rows for operator dashboards."
+      "description": "Recent agent directory rows for operator dashboards.",
+      "surface": "http_only"
     },
     {
       "name": "getAgentProfile",
-      "description": "Aggregate agent profile (reputation + badges + stats)."
+      "description": "Aggregate agent profile (reputation + badges + stats).",
+      "surface": "http_only"
     },
     {
       "name": "listBadges",
-      "description": "Recent badge receipts for completed sessions."
+      "description": "Recent badge receipts for completed sessions.",
+      "surface": "http_only"
     },
     {
       "name": "getAgentBadge",
-      "description": "Per-completion badge metadata by sessionId."
+      "description": "Per-completion badge metadata by sessionId.",
+      "surface": "http_only"
     },
     {
       "name": "listDisputes",
-      "description": "Read the dispute queue for operator review."
+      "description": "Read the dispute queue for operator review.",
+      "surface": "http_only"
     },
     {
       "name": "getDispute",
-      "description": "Read one dispute evidence bundle and timeline."
+      "description": "Read one dispute evidence bundle and timeline.",
+      "surface": "http_only"
     },
     {
       "name": "getVerificationResult",
-      "description": "Read the last verifier outcome for a session."
+      "description": "Read the last verifier outcome for a session.",
+      "surface": "http_only"
     },
     {
       "name": "listVerifierHandlers",
-      "description": "Supported verifier modes + configs."
+      "description": "Supported verifier modes + configs.",
+      "surface": "http_only"
     },
     {
       "name": "listVerificationProfiles",
-      "description": "Published standalone verification profiles with pinned versions, limits, and pricing."
+      "description": "Published standalone verification profiles with pinned versions, limits, and pricing.",
+      "surface": "mcp"
     },
     {
       "name": "resumeSession",
-      "description": "Load the latest state of a session."
+      "description": "Load the latest state of a session.",
+      "surface": "http_only"
     },
     {
       "name": "listSessions",
-      "description": "Lifetime session history for a wallet."
+      "description": "Lifetime session history for a wallet.",
+      "surface": "http_only"
     },
     {
       "name": "getXcmRequest",
-      "description": "Read the current lifecycle state of one async XCM request."
+      "description": "Read the current lifecycle state of one async XCM request.",
+      "surface": "http_only"
     }
   ],
   "schemas": {

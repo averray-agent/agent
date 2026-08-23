@@ -1,5 +1,6 @@
 import { AuthorizationError } from "../../core/errors.js";
 import { WORK_RECEIPT_SITE_ORIGIN } from "../../core/work-receipt.js";
+import { receiptPresentationFields } from "../../core/verdict-presentation.js";
 import { buildPublicReputation } from "./profile-routes.js";
 
 const DEFAULT_RECEIPT_LIMIT = 20;
@@ -82,6 +83,7 @@ function projectOwnReceipt(document, session, wallet) {
     receiptId: document.receiptId,
     sessionId: document.sessionId ?? session.sessionId,
     outcome: document.verdict?.outcome ?? null,
+    ...receiptPresentationFields(document),
     amounts: settlement ? projectAmounts(settlement) : null,
     timestamps: document.timestamps ?? {},
     canonicalUrl: document.canonicalUrl

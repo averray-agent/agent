@@ -2,6 +2,10 @@ import { ValidationError } from "../../core/errors.js";
 import { TIER_REQUIREMENTS } from "../../core/job-catalog-service.js";
 import { createHostedCanaryClaimantAttribution } from "../../core/claimant-attribution.js";
 import { ARRIVAL_CANARY_MARKER_HEADER } from "../../services/arrival-observatory.js";
+import {
+  decorateJobEstimatePresentation,
+  decorateJobPresentation
+} from "../../core/verdict-presentation.js";
 import { buildPublicJobsResponse } from "./jobs-response.js";
 
 export function createJobRoutes({
@@ -29,7 +33,7 @@ export function createJobRoutes({
     const secured = typeof service.addListingSecurityMetadata === "function"
       ? service.addListingSecurityMetadata(enriched)
       : enriched;
-    return (await secured).map((job) => ({
+    return (await secured).map((job) => decorateJobPresentation({
       ...job,
       listedAt: job.listedAt ?? job.lifecycle?.createdAt ?? job.createdAt ?? job.firedAt ?? null
     }));
@@ -150,7 +154,11 @@ export function createJobRoutes({
       if (!jobId) {
         throw new ValidationError("jobId path segment is required.");
       }
-      respond(response, 200, await service.estimateNetReward(auth.wallet, jobId));
+      respond(
+        response,
+        200,
+        decorateJobEstimatePresentation(await service.estimateNetReward(auth.wallet, jobId))
+      );
       return true;
     }
 

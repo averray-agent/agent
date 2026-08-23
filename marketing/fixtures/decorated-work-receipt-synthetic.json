@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "averray.work-receipt.v1",
+  "receiptId": "0xea4e81d6857792580406b4a05a6a3fb1b86e223674b2055bea56e182fb0a4cb0",
+  "canonicalUrl": "https://averray.com/receipts/0xea4e81d6857792580406b4a05a6a3fb1b86e223674b2055bea56e182fb0a4cb0",
+  "jobId": "synthetic-hub-usdc-settlement",
+  "sessionId": "synthetic-hub-usdc-settlement:0x1111111111111111111111111111111111111111",
+  "worker": "0x1111111111111111111111111111111111111111",
+  "intent": {
+    "specHash": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "specSource": "claim_snapshot",
+    "valueAtRisk": { "asset": "USDC", "amountRaw": "400000" },
+    "successPolicy": { "profile": "deterministic", "version": 1 }
+  },
+  "execution": {
+    "provider": "0x3333333333333333333333333333333333333333",
+    "artifactHash": "0x4444444444444444444444444444444444444444444444444444444444444444"
+  },
+  "verdict": {
+    "outcome": "approved",
+    "reasonCode": "DETERMINISTIC_MATCH",
+    "evidenceHash": "0x5555555555555555555555555555555555555555555555555555555555555555"
+  },
+  "settlement": {
+    "assetSymbol": "USDC",
+    "rewardAmount": "0.40",
+    "rewardAmountRaw": "400000",
+    "workerAmount": "0.40",
+    "workerAmountRaw": "400000",
+    "gasRetentionAmount": "0",
+    "gasRetentionAmountRaw": "0",
+    "protocolFeeAmount": "0.02",
+    "protocolFeeAmountRaw": "20000",
+    "posterTotalAmount": "0.42",
+    "posterTotalAmountRaw": "420000"
+  },
+  "timestamps": { "verifiedAt": "2026-08-23T12:00:00.000Z" },
+  "result": "PASS",
+  "assetContext": {
+    "symbol": "USDC",
+    "chain": "eip155:420420419",
+    "chainName": "Polkadot Hub",
+    "assetId": 1337,
+    "token": "0x0000053900000000000000000000000001200000"
+  }
+}

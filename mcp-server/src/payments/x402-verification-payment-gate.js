@@ -25,7 +25,24 @@ import {
 
 export const VERIFY_X402_NETWORK = "eip155:8453";
 export const VERIFY_X402_CHAIN_ID = 8453;
+export const VERIFY_X402_CHAIN_NAME = "Base";
 export const VERIFY_X402_CAPTURE_MARGIN_SECONDS = 10 * 60;
+
+/**
+ * Read the public asset identity from the same environment binding used by
+ * Verify's x402 payment gate. This deliberately returns undefined rather than
+ * weakening the gate's strict startup validation: presentation must disappear
+ * when the configured billing asset cannot be established.
+ */
+export function resolveX402VerificationPresentationAsset(env = process.env) {
+  const network = String(env.X402_PAYMENT_NETWORK ?? "").trim().toLowerCase();
+  const rawAsset = String(env.X402_PAYMENT_ASSET_ADDRESS ?? "").trim();
+  if (network !== VERIFY_X402_NETWORK || !isAddress(rawAsset)) return undefined;
+  return Object.freeze({
+    network,
+    asset: getAddress(rawAsset).toLowerCase()
+  });
+}
 
 const VERIFY_PATH = "/verify/runs";
 const BYTES32_RE = /^0x[a-fA-F0-9]{64}$/u;

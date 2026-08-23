@@ -165,6 +165,7 @@ function toCompactJobRow(job) {
       asset: job.rewardAsset ?? null,
       amount: job.rewardAmount ?? null
     },
+    ...(job.assetContext ? { assetContext: job.assetContext } : {}),
     listedAt: job.listedAt,
     // Beside the reward on purpose: an agent comparing two jobs is already looking
     // here, and how fast it gets paid is the other half of the price.

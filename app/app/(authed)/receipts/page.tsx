@@ -323,6 +323,7 @@ export default function ReceiptsPage() {
             evidenceMeta={drawerModel.evidenceMeta}
             evidenceRawHref={drawerModel.evidenceRawHref}
             links={drawerModel.links}
+            assetLine={drawerModel.assetLine}
             source={drawerModel.source}
           />
         ) : null}

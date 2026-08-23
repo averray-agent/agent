@@ -516,7 +516,7 @@ const HTTP_ACTION_REQUIREMENTS = [
   }
 ];
 
-const DISCOVERY_TOOLS = [
+const DISCOVERY_TOOL_DEFINITIONS = [
   { name: "getPlatformCapabilities", description: "Capability + endpoint manifest for this deployment." },
   {
     name: "listJobs",
@@ -554,6 +554,51 @@ const DISCOVERY_TOOLS = [
   { name: "listSessions", description: "Lifetime session history for a wallet." },
   { name: "getXcmRequest", description: "Read the current lifecycle state of one async XCM request." }
 ];
+
+// These tools exist on an initialized, authenticated MCP connection but are
+// deliberately absent from the directory-safe discovery slice: three create
+// or rotate the connection's wallet session, and two mutate worker state.
+// Keeping the omission explicit prevents a new MCP tool from silently drifting
+// out of discovery.
+export const CONNECTED_ONLY_TOOLS = Object.freeze([
+  "fetchAuthNonce",
+  "verifySiwe",
+  "refreshAuthToken",
+  "claimJob",
+  "submitWork"
+]);
+
+// These names describe existing HTTP read surfaces and have no same-named MCP
+// tool. Their explicit marker prevents discovery copy from implying an MCP
+// capability that the transport cannot resolve.
+export const DISCOVERY_HTTP_ONLY_TOOLS = Object.freeze([
+  "getSessionStateMachine",
+  "listJobSchemas",
+  "getJobSchema",
+  "recommendJobs",
+  "getJobTierLadder",
+  "getAccountSummary",
+  "getBorrowCapacity",
+  "getReputation",
+  "listAgents",
+  "getAgentProfile",
+  "listBadges",
+  "getAgentBadge",
+  "listDisputes",
+  "getDispute",
+  "getVerificationResult",
+  "listVerifierHandlers",
+  "resumeSession",
+  "listSessions",
+  "getXcmRequest"
+]);
+
+const HTTP_ONLY_TOOL_NAMES = new Set(DISCOVERY_HTTP_ONLY_TOOLS);
+
+export const DISCOVERY_TOOLS = Object.freeze(DISCOVERY_TOOL_DEFINITIONS.map((entry) => Object.freeze({
+  ...entry,
+  surface: HTTP_ONLY_TOOL_NAMES.has(entry.name) ? "http_only" : "mcp"
+})));
 
 const buildBaseManifest = (network) => ({
   name: "Averray — trusted agent work + identity runtime",

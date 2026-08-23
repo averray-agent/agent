@@ -5,6 +5,13 @@ import { AuthenticationError, ValidationError } from "../../core/errors.js";
 import { createJobRoutes } from "./job-routes.js";
 
 const WALLET = "0x1111111111111111111111111111111111111111";
+const HUB_ASSET_CONTEXT = {
+  symbol: "USDC",
+  chain: "eip155:420420419",
+  chainName: "Polkadot Hub",
+  assetId: 1337,
+  token: "0x0000053900000000000000000000000001200000"
+};
 
 function makeHarness(overrides = {}) {
   const calls = [];
@@ -177,11 +184,11 @@ test("GET /jobs/:id/estimate is the authenticated path twin of estimateNetReward
     headers: { authorization: "Bearer token" }
   }), true);
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.body, reward);
+  assert.deepEqual(response.body, { ...reward, assetContext: HUB_ASSET_CONTEXT });
   assert.deepEqual(calls.slice(0, 3), [
     ["authMiddleware"],
     ["estimateNetReward", { wallet: WALLET, jobId: "job/with spaces" }],
-    ["respond", { statusCode: 200, body: reward, headers: {} }]
+    ["respond", { statusCode: 200, body: { ...reward, assetContext: HUB_ASSET_CONTEXT }, headers: {} }]
   ]);
   assert.equal(calls.some(([name]) => name === "listJobsWithSessions"), false);
 });
@@ -219,7 +226,8 @@ test("GET /jobs lists live session-joined jobs and preserves response builder sh
     title: "Job 1",
     lifecycle: { state: "open" },
     category: "coding",
-    listedAt: null
+    listedAt: null,
+    assetContext: HUB_ASSET_CONTEXT
   }]);
 });
 
