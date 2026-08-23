@@ -247,7 +247,8 @@ export function createPlatformService() {
     stateStore,
     registry: catalogueLaneRegistry,
     gasEstimateUsdc: subsidyConfig.gasEstimateUsdc,
-    selfIdentityRegistry
+    selfIdentityRegistry,
+    listCatalogJobs: (options) => platformService.listJobsWithSessions(options)
   }));
   return platformService;
 }
@@ -548,6 +549,7 @@ export async function createPlatformRuntime() {
       registry: catalogueLaneRegistry,
       gasEstimateUsdc: loadOnboardingSubsidyBudgetConfig(process.env).gasEstimateUsdc,
       selfIdentityRegistry,
+      listCatalogJobs: (options) => platformService.listJobsWithSessions(options),
       logger
     })
   );

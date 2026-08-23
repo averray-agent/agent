@@ -39,6 +39,41 @@ function makeFetch() {
   };
 }
 
+function makeMultiArticleFetch(articles) {
+  return async (url) => {
+    const requestUrl = new URL(url);
+    if (requestUrl.searchParams.get("list") === "categorymembers") {
+      return jsonResponse({
+        query: {
+          categorymembers: articles.map((article) => ({
+            pageid: article.pageId,
+            ns: 0,
+            title: article.title
+          }))
+        }
+      });
+    }
+    const pageId = Number(requestUrl.searchParams.get("pageids"));
+    const article = articles.find((candidate) => candidate.pageId === pageId);
+    return jsonResponse({
+      query: {
+        pages: {
+          [pageId]: {
+            pageid: pageId,
+            title: article.title,
+            fullurl: `https://en.wikipedia.org/wiki/${encodeURIComponent(article.title)}`,
+            revisions: [{
+              revid: article.revisionId,
+              timestamp: "2026-08-23T08:00:00Z"
+            }],
+            templates: [{ title: "Template:Dead link" }]
+          }
+        }
+      }
+    });
+  };
+}
+
 function makePlatformService(initialJobs = []) {
   const jobs = [...initialJobs];
   return {
@@ -95,6 +130,62 @@ test("WikipediaMaintenanceIngestionScheduler creates jobs when dryRun is false",
   assert.equal(platform.listJobs().length, 1);
   assert.equal(platform.listJobs()[0].source.type, "wikipedia_article");
   assert.equal(platform.listJobs()[0].onboardingWaiverEligible, true);
+});
+
+test("ingestion parks a poisoned legacy candidate and still mints both fresh jobs", async () => {
+  const committedSpecHash = `0x${"ab".repeat(32)}`;
+  const candidateSpecHash = `0x${"cd".repeat(32)}`;
+  const jobs = [];
+  const attemptedIds = [];
+  const platform = {
+    listJobs() { return [...jobs]; },
+    async listJobsWithSessions() { return [...jobs]; },
+    async upsertIngestedJob(job) {
+      attemptedIds.push(job.id);
+      if (job.id.includes("poisoned-legacy")) {
+        const error = new Error("refreshed definition does not match the commitment");
+        error.code = "ingest_refused_spec_hash_mismatch";
+        error.details = { committedSpecHash, candidateSpecHash };
+        throw error;
+      }
+      jobs.unshift(job);
+      return job;
+    }
+  };
+  const scheduler = new WikipediaMaintenanceIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    minClaimableJobs: 2,
+    maxJobsPerRun: 2,
+    categories: [{ title: "Category:All articles with dead external links", taskType: "citation_repair" }],
+    minScore: 55,
+    fetchImpl: makeMultiArticleFetch([
+      { pageId: 101, title: "Poisoned legacy", revisionId: 1001 },
+      { pageId: 102, title: "Fresh A", revisionId: 1002 },
+      { pageId: 103, title: "Fresh B", revisionId: 1003 }
+    ]),
+    logger: SILENT_LOGGER
+  });
+
+  const summary = await scheduler.runOnce(new Date("2026-08-23T08:00:00.000Z"));
+
+  assert.equal(summary.createdCount, 2);
+  assert.equal(summary.ingestRefusedSpecHashMismatchCount, 1);
+  assert.deepEqual(summary.errors, []);
+  assert.deepEqual(summary.skipped.at(-1), {
+    id: "wiki-en-101-citation-repair-poisoned-legacy",
+    reason: "ingest_refused_spec_hash_mismatch",
+    committedSpecHash,
+    candidateSpecHash
+  });
+  assert.deepEqual(
+    jobs.map((job) => job.id).sort(),
+    [
+      "wiki-en-102-citation-repair-fresh-a",
+      "wiki-en-103-citation-repair-fresh-b"
+    ]
+  );
+  assert.equal(new Set(attemptedIds).size, attemptedIds.length, "a parked id is never re-selected");
 });
 
 test("WikipediaMaintenanceIngestionScheduler dedupes by article revision", async () => {

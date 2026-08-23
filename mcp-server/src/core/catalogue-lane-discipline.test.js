@@ -338,6 +338,63 @@ test("posting resumes as soon as a queued job is claimed", async () => {
   assert.deepEqual(posted, ["live-1", "live-2", "live-3"]);
 });
 
+test("lane backlog counts only catalog jobs that still serve and fails closed when catalog truth is unreadable", async () => {
+  const catalogJobs = new Map();
+  let catalogReadFails = false;
+  const store = stateStore();
+  const discipline = new CatalogueLaneDiscipline({
+    stateStore: store,
+    registry: roomyRegistry(3),
+    gasEstimateUsdc: 0,
+    now: () => NOW,
+    listCatalogJobs: async () => {
+      if (catalogReadFails) throw new Error("catalog unavailable");
+      return [...catalogJobs.values()];
+    },
+    logger: { info() {}, warn() {} }
+  });
+  const posted = [];
+
+  for (const id of ["expired-1", "expired-2", "expired-3"]) {
+    catalogJobs.set(id, { ...job(id), claimable: true, effectiveState: "claimable" });
+    await discipline.post(job(id), async () => posted.push(id));
+  }
+  for (const id of catalogJobs.keys()) {
+    catalogJobs.set(id, { ...job(id), claimable: false, effectiveState: "expired" });
+  }
+  catalogJobs.set("fresh-after-expiry", {
+    ...job("fresh-after-expiry"),
+    claimable: true,
+    effectiveState: "claimable"
+  });
+  await discipline.post(job("fresh-after-expiry"), async () => posted.push("fresh-after-expiry"));
+  assert.deepEqual(posted, ["expired-1", "expired-2", "expired-3", "fresh-after-expiry"]);
+
+  const openCatalog = new Map();
+  const openDiscipline = new CatalogueLaneDiscipline({
+    stateStore: stateStore(),
+    registry: roomyRegistry(3),
+    gasEstimateUsdc: 0,
+    now: () => NOW,
+    listCatalogJobs: async () => [...openCatalog.values()],
+    logger: { info() {}, warn() {} }
+  });
+  for (const id of ["open-1", "open-2", "open-3"]) {
+    openCatalog.set(id, { ...job(id), claimable: true, effectiveState: "claimable" });
+    await openDiscipline.post(job(id), async () => {});
+  }
+  await assert.rejects(
+    openDiscipline.post(job("open-4"), async () => {}),
+    (error) => error.code === LANE_BACKLOG_SATURATED && error.details.unclaimedCount === 3
+  );
+
+  catalogReadFails = true;
+  await assert.rejects(
+    discipline.post(job("blocked-while-catalog-unreadable"), async () => {}),
+    (error) => error.code === LANE_BACKLOG_SATURATED && error.details.unclaimedCount === 4
+  );
+});
+
 test("backlog cap is validated, not silently coerced", () => {
   assert.throws(
     () => validateCatalogueLaneRegistry({

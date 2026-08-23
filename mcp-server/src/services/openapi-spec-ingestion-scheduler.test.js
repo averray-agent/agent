@@ -115,6 +115,61 @@ test("OpenApiSpecIngestionScheduler counts specHash overwrite refusals without r
   });
 });
 
+test("a backlog-throttled ingestion run is a healthy skip while genuine errors increment scheduler failures", async () => {
+  const throttleWarnings = [];
+  const throttledPlatform = makePlatformService();
+  throttledPlatform.upsertIngestedJob = async () => {
+    const error = new Error("lane backlog is full");
+    error.code = "lane_backlog_saturated";
+    error.details = {
+      lane: "liveness",
+      resumeAt: "2026-08-23T09:00:00.000Z",
+      retryWhen: "a queued job is claimed"
+    };
+    throw error;
+  };
+  const throttled = new OpenApiSpecIngestionScheduler(throttledPlatform, undefined, {
+    enabled: true,
+    dryRun: false,
+    specs: [SPEC],
+    fetchImpl: makeFetch(),
+    logger: { warn(...args) { throttleWarnings.push(args); } }
+  });
+
+  const summary = await throttled.runOnceAndSchedule(new Date("2026-08-23T08:00:00.000Z"));
+  assert.equal(summary.createdCount, 0);
+  assert.deepEqual(summary.errors, []);
+  assert.deepEqual(summary.skipped.at(-1), {
+    id: "openapi-averray-averray-http-api",
+    reason: "lane_backlog_saturated",
+    lane: "liveness",
+    resumeAt: "2026-08-23T09:00:00.000Z",
+    retryWhen: "a queued job is claimed"
+  });
+  assert.equal(throttled.schedulerLoop.consecutiveSchedulerFailures, 0);
+  assert.equal(throttleWarnings.length, 0, "healthy throttles never emit run_failed");
+
+  const failingPlatform = makePlatformService();
+  failingPlatform.upsertIngestedJob = async () => {
+    throw new Error("unexpected write failure");
+  };
+  const failureWarnings = [];
+  const failing = new OpenApiSpecIngestionScheduler(failingPlatform, undefined, {
+    enabled: true,
+    dryRun: false,
+    specs: [SPEC],
+    fetchImpl: makeFetch(),
+    logger: { warn(...args) { failureWarnings.push(args); } }
+  });
+
+  assert.equal(
+    await failing.runOnceAndSchedule(new Date("2026-08-23T08:00:00.000Z")),
+    undefined
+  );
+  assert.equal(failing.schedulerLoop.consecutiveSchedulerFailures, 1);
+  assert.ok(failureWarnings.some(([, event]) => event === "openapi_ingest.run_failed"));
+});
+
 test("OpenApiSpecIngestionScheduler dedupes by OpenAPI source", async () => {
   const platform = makePlatformService([
     {
