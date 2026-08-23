@@ -12,6 +12,7 @@ import { normalizeSubmission } from "../core/submission.js";
 import { buildAverrayDisclosureFooter } from "../core/maintainer-surface-policy.js";
 import { buildVerificationContract } from "../core/verifier-contract.js";
 import { buildJobSnapshot } from "../core/job-snapshot.js";
+import { BlockchainGateway } from "../blockchain/gateway.js";
 
 const FIXTURE_ROOT = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -1554,6 +1555,39 @@ test("verifySubmission is idempotent: skips re-settling an already-resolved (Clo
   const stored = await h.stateStore.getSession(submitted.sessionId);
   assert.equal(stored.status, "resolved", "session converges to resolved despite the earlier persistence failure");
   assert.deepEqual(stored.payoutTx, h.payoutReceipt);
+});
+
+test("stuck non-waived settlement resolves on its next tick when receipt search spans the null EVM zone", async () => {
+  const h = makeIdempotencyHarness(6);
+  const submitted = {
+    ...transitionSession(h.claimed, "submitted", { reason: "work_submitted" }),
+    submittedAt: new Date(100_000).toISOString()
+  };
+  await h.stateStore.upsertSession(submitted);
+
+  const searchGateway = new BlockchainGateway({ enabled: false, chainEvmFloorBlock: 50 });
+  const probes = [];
+  searchGateway.provider = {
+    async getBlock(blockNumber) {
+      probes.push(blockNumber);
+      return blockNumber < 90 ? null : { number: blockNumber, timestamp: blockNumber };
+    }
+  };
+  h.blockchainGateway.recoverSinglePayoutReceipt = async () => {
+    h.calls.recover += 1;
+    const submittedBlock = await searchGateway.findBlockAtOrAfterTimestamp(submitted.submittedAt, 200);
+    assert.equal(submittedBlock, 100);
+    return h.payoutReceipt;
+  };
+
+  const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway);
+  const result = await service.verifySubmission({ sessionId: submitted.sessionId });
+
+  assert.equal(h.calls.settle, 0, "the already-closed payout must not be submitted again");
+  assert.equal(h.calls.recover, 1);
+  assert.ok(probes.some((blockNumber) => blockNumber < 90), "the regression must exercise the null EVM zone");
+  assert.equal(result.outcome, "approved");
+  assert.equal((await h.stateStore.getSession(submitted.sessionId)).status, "resolved");
 });
 
 test("(a) non-Submitted chain state parks terminal with zero resolve attempts by name", async () => {

@@ -69,6 +69,33 @@ test("resolveSinglePayout errors decode EscrowCore InvalidState by ABI name", ()
   assert.doesNotMatch(wrapped.message, /unknown custom error/u);
 });
 
+test("findBlockAtOrAfterTimestamp respects the floor and self-heals null or timestamp-less EVM blocks", async () => {
+  for (const [kind, unreadableBlock] of [
+    ["null", () => null],
+    ["timestamp-less", (number) => ({ number })]
+  ]) {
+    const gateway = new BlockchainGateway({ enabled: false, chainEvmFloorBlock: 50 });
+    const probes = [];
+    gateway.provider = {
+      async getBlock(blockNumber) {
+        probes.push(blockNumber);
+        return blockNumber < 90
+          ? unreadableBlock(blockNumber)
+          : { number: blockNumber, timestamp: blockNumber };
+      }
+    };
+
+    const resolved = await gateway.findBlockAtOrAfterTimestamp(
+      new Date(120_000).toISOString(),
+      200
+    );
+
+    assert.equal(resolved, 120, kind);
+    assert.ok(probes.some((blockNumber) => blockNumber < 90), `${kind}: test must span the pre-EVM zone`);
+    assert.ok(probes.every((blockNumber) => blockNumber >= 50), `${kind}: no probe may cross the configured floor`);
+  }
+});
+
 test("toDisputeReasonCode uses Solidity bytes32 string encoding", () => {
   const gateway = new BlockchainGateway({ enabled: false });
 
@@ -447,7 +474,7 @@ test("resolveSinglePayout returns the settle/payout tx receipt", async () => {
   assert.equal(JSON.stringify(events).includes("secret"), false);
 });
 
-test("recoverSinglePayoutReceipt binds JobClosed, SettlementSplit, and deployed AAC reservations", async () => {
+test("recoverSinglePayoutReceipt settles the already-closed payout when timestamp search spans the null EVM zone", async () => {
   const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
   const escrow = "0x1111111111111111111111111111111111111111";
   const account = "0x2222222222222222222222222222222222222222";
@@ -498,16 +525,21 @@ test("recoverSinglePayoutReceipt binds JobClosed, SettlementSplit, and deployed 
     logs: [workerReservation, feeReservation, retentionReservation, split, retention, closed]
   };
   const filters = [];
+  const blockProbes = [];
   gateway.config = {
     ...gateway.config,
     agentAccountAddress: account,
     escrowCoreAddress: escrow,
     legacyEscrowCoreAddress: "",
+    chainEvmFloorBlock: 50,
     supportedAssets: [USDC_TRUST_ASSET]
   };
   gateway.provider = {
     async getBlockNumber() { return 200; },
-    async getBlock(blockNumber) { return { number: blockNumber, timestamp: blockNumber }; },
+    async getBlock(blockNumber) {
+      blockProbes.push(blockNumber);
+      return blockNumber < 90 ? null : { number: blockNumber, timestamp: blockNumber };
+    },
     async getLogs(filter) {
       filters.push(filter);
       assert.deepEqual(filter.topics, [id("JobClosed(bytes32,address,uint256)"), chainJobId]);
@@ -538,6 +570,8 @@ test("recoverSinglePayoutReceipt binds JobClosed, SettlementSplit, and deployed 
   });
 
   assert.equal(filters.length, 1);
+  assert.ok(blockProbes.some((blockNumber) => blockNumber < 90), "regression must span the null pre-EVM zone");
+  assert.ok(blockProbes.every((blockNumber) => blockNumber >= 50), "recovery search must honor its configured floor");
   assert.deepEqual(recovered, {
     txHash,
     blockNumber: 150,
