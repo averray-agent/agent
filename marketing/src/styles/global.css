@@ -1415,6 +1415,13 @@ section.section { scroll-margin-top: 100px; }
   overflow-x: auto;
   border-radius: 0 0 var(--card-radius) var(--card-radius);
 }
+/* Install configs are a few short lines: wrap them instead of clipping
+   mid-URL (QA 2026-08-23). overflow-x stays as the fallback for anything
+   genuinely unbreakable. */
+.install-snippet__scroll .codeblock {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .install-snippet .codeblock {
   width: max-content;
   min-width: 100%;
