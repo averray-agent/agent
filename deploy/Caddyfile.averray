@@ -150,7 +150,11 @@ app.averray.com {
   @publicTransparencyPath path /transparency /transparency/
   redir @publicTransparencyPath https://averray.com/transparency/ 301
 
-  @publicReceiptSubpath path_regexp ^/receipts/.+$
+  # Forward only receipt-hash-shaped deep links to the public reader. The
+  # broad /receipts/.+ form also caught Next's client-navigation assets
+  # (/receipts/__next._tree.txt and friends), 301'ing them cross-origin and
+  # blanking the operator receipts page on client-side nav (QA 2026-08-23).
+  @publicReceiptSubpath path_regexp ^/receipts/0x[0-9a-fA-F]{6,}/?$
   redir @publicReceiptSubpath https://averray.com{uri} 301
 
   @legacyJobsPath path /jobs /jobs/*
