@@ -174,7 +174,7 @@ test("Caddy sends public records and work paths to their canonical domains", asy
 
   assert.match(caddy, /@operatorWorkPath path \/work \/work\/\*[\s\S]*redir @operatorWorkPath https:\/\/app\.averray\.com\/work 301/u);
   assert.match(caddy, /@publicTransparencyPath path \/transparency \/transparency\/[\s\S]*redir @publicTransparencyPath https:\/\/averray\.com\/transparency\/ 301/u);
-  assert.match(caddy, /@publicReceiptSubpath path_regexp \^\/receipts\/\.\+\$[\s\S]*redir @publicReceiptSubpath https:\/\/averray\.com\{uri\} 301/u);
+  assert.match(caddy, /@publicReceiptSubpath path_regexp \^\/receipts\/0x\[0-9a-fA-F\]\{6,\}\/\?\$[\s\S]*redir @publicReceiptSubpath https:\/\/averray\.com\{uri\} 301/u);
   assert.match(caddy, /@legacyJobsPath path \/jobs \/jobs\/\*[\s\S]*redir @legacyJobsPath https:\/\/app\.averray\.com\/work 301/u);
   assert.doesNotMatch(caddy, /@publicReceiptSubpath path \/receipts(?:\s|$)/u, "bare /receipts must stay in the operator app");
 });
