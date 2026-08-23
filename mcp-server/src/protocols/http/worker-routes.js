@@ -7,6 +7,7 @@ const MAX_RECEIPT_LIMIT = 100;
 
 export function createWorkerRoutes({
   authMiddleware,
+  earningsDoor,
   parseLimit,
   respond,
   service,
@@ -16,10 +17,16 @@ export function createWorkerRoutes({
   return async function handleWorkerRoute({ request, response, url, pathname }) {
     if (request.method === "GET" && pathname === "/me") {
       const auth = await authMiddleware(request, url);
-      const [rawReputation, progression, account] = await Promise.all([
-        service.getReputation(auth.wallet),
-        workerProgressionService.getProgression(auth.wallet),
-        service.getAccountSummary(auth.wallet)
+      const reputationRead = service.getReputation(auth.wallet);
+      const progressionRead = workerProgressionService.getProgression(auth.wallet);
+      const [rawReputation, progression, account, standing] = await Promise.all([
+        reputationRead,
+        progressionRead,
+        service.getAccountSummary(auth.wallet),
+        earningsDoor.getStanding(auth.wallet, {
+          progression: progressionRead,
+          reputation: reputationRead
+        })
       ]);
       const reputation = buildPublicReputation(rawReputation);
       respond(response, 200, {
@@ -27,7 +34,8 @@ export function createWorkerRoutes({
         claimTier: reputation.jobEligibilityTier,
         reputationTier: reputation.tier,
         progression,
-        accountPosition: projectAccountPosition(account)
+        accountPosition: projectAccountPosition(account),
+        standing
       });
       return true;
     }

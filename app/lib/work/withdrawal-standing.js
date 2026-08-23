@@ -3,6 +3,10 @@ export const WITHDRAWAL_STANDING_STATEMENT =
 export const CREDIT_INTEREST_STATEMENT =
   "Proven workers can register interest in a small zero-interest cash line (pilot).";
 
+export function hasPositiveWithdrawalBalance(raw) {
+  return typeof raw === "string" && /^[0-9]+$/u.test(raw) && BigInt(raw) > 0n;
+}
+
 export function withdrawalStandingFromIntent(payload) {
   const standing = asRecord(asRecord(payload)?.standing);
   const creditInterest = asRecord(standing?.creditInterest);

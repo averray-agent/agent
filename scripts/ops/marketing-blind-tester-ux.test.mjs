@@ -162,6 +162,7 @@ test("Caddy returns explicit 301 redirects for guessed public paths", async () =
     ["@verifyProfilesPath", "https://api.averray.com/verify/profiles"],
     ["@getStartedPath", "https://averray.com/agents/"],
     ["@posterAliasPath", "/poster/"],
+    ["@posterJobsAliasPath", "/poster/"],
     ["@verifyAliasPath", "/runs/"]
   ];
   for (const [matcher, target] of redirects) {
@@ -176,6 +177,7 @@ test("Caddy sends public records and work paths to their canonical domains", asy
   assert.match(caddy, /@publicTransparencyPath path \/transparency \/transparency\/[\s\S]*redir @publicTransparencyPath https:\/\/averray\.com\/transparency\/ 301/u);
   assert.match(caddy, /@publicReceiptSubpath path_regexp \^\/receipts\/0x\[0-9a-fA-F\]\{6,\}\/\?\$[\s\S]*redir @publicReceiptSubpath https:\/\/averray\.com\{uri\} 301/u);
   assert.match(caddy, /@legacyJobsPath path \/jobs \/jobs\/\*[\s\S]*redir @legacyJobsPath https:\/\/app\.averray\.com\/work 301/u);
+  assert.match(caddy, /@legacyWorkWithdrawal path \/work\/withdraw \/work\/withdraw\/ \/withdraw \/withdraw\/ \/earnings \/earnings\/[\s\S]*redir @legacyWorkWithdrawal \/work-withdraw\/ 301/u);
   assert.doesNotMatch(caddy, /@publicReceiptSubpath path \/receipts(?:\s|$)/u, "bare /receipts must stay in the operator app");
 });
 

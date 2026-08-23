@@ -17,13 +17,19 @@ import {
   getInjectedProvider,
   parseUsdcToRaw
 } from "@/lib/wallet/funding";
-import { withdrawalStandingFromIntent } from "@/lib/work/withdrawal-standing.js";
+import {
+  hasPositiveWithdrawalBalance,
+  withdrawalStandingFromIntent
+} from "@/lib/work/withdrawal-standing.js";
 import { asRecord, text } from "./types";
 
 export function WorkWithdrawal() {
   const auth = useAuth();
   const accountQuery = useBoundedApi<Record<string, unknown>>(
     auth.authenticated ? "/account/position?asset=USDC" : null
+  );
+  const workerQuery = useBoundedApi<Record<string, unknown>>(
+    auth.authenticated ? "/me" : null
   );
   const [amount, setAmount] = useState("");
   const [intent, setIntent] = useState<Record<string, unknown> | null>(null);
@@ -122,7 +128,10 @@ export function WorkWithdrawal() {
   const available = asRecord(account?.available);
   const availableRaw = text(available?.raw);
   const availableDisplay = text(available?.display);
-  const standing = withdrawalStandingFromIntent(intent);
+  const hasAvailableBalance = hasPositiveWithdrawalBalance(availableRaw);
+  const balanceIsEmpty = availableRaw !== null && /^0+$/u.test(availableRaw);
+  const standing = withdrawalStandingFromIntent(workerQuery.data)
+    ?? withdrawalStandingFromIntent(intent);
 
   return (
     <div className="grid gap-6">
@@ -158,9 +167,12 @@ export function WorkWithdrawal() {
                 aria-describedby="withdrawal-available"
               />
             </label>
-            <Button disabled={building || !availableRaw} type="submit"><Landmark />{building ? "Building…" : "Build withdrawal"}</Button>
+            <Button disabled={building || !hasAvailableBalance} type="submit"><Landmark />{building ? "Building…" : "Build withdrawal"}</Button>
           </form>
           <p className="mt-2 text-xs text-[var(--muted)]" id="withdrawal-available">The amount is encoded to exact six-decimal USDC base units and checked against the live balance.</p>
+          {balanceIsEmpty ? (
+            <p className="mt-2 text-sm text-[var(--muted)]" role="status">There is no available USDC to withdraw.</p>
+          ) : null}
           {error ? <p className="mt-4 text-sm text-[var(--warn)]" role="alert">{error}</p> : null}
         </CardContent>
       </Card>

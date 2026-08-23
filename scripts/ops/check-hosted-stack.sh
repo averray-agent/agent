@@ -22,7 +22,12 @@ PUBLIC_GET_STARTED_REDIRECT_URL=${PUBLIC_GET_STARTED_REDIRECT_URL:-https://averr
 DISCOVERY_URL=${DISCOVERY_URL:-https://averray.com/.well-known/agent-tools.json}
 APP_URL=${APP_URL:-https://app.averray.com/}
 APP_POST_REDIRECT_URL=${APP_POST_REDIRECT_URL:-https://app.averray.com/post}
+APP_POSTER_JOBS_REDIRECT_URL=${APP_POSTER_JOBS_REDIRECT_URL:-https://app.averray.com/poster/jobs}
 APP_VERIFY_REDIRECT_URL=${APP_VERIFY_REDIRECT_URL:-https://app.averray.com/verify}
+APP_WITHDRAW_REDIRECT_URL=${APP_WITHDRAW_REDIRECT_URL:-https://app.averray.com/withdraw}
+APP_WITHDRAW_SLASH_REDIRECT_URL=${APP_WITHDRAW_SLASH_REDIRECT_URL:-https://app.averray.com/withdraw/}
+APP_EARNINGS_REDIRECT_URL=${APP_EARNINGS_REDIRECT_URL:-https://app.averray.com/earnings}
+APP_EARNINGS_SLASH_REDIRECT_URL=${APP_EARNINGS_SLASH_REDIRECT_URL:-https://app.averray.com/earnings/}
 WWW_MCP_INSTALL_REDIRECT_URL=${WWW_MCP_INSTALL_REDIRECT_URL:-https://averray.com/mcp}
 WWW_INSTALL_REDIRECT_URL=${WWW_INSTALL_REDIRECT_URL:-https://averray.com/install}
 WWW_CURSOR_INSTALL_REDIRECT_URL=${WWW_CURSOR_INSTALL_REDIRECT_URL:-https://averray.com/cursor}
@@ -327,7 +332,12 @@ assert_redirect "$PUBLIC_WORK_REDIRECT_URL" "https://app.averray.com/work" "Publ
 assert_redirect "$PUBLIC_WORK_SUBPATH_REDIRECT_URL" "https://app.averray.com/work" "Public-site work subpath"
 assert_redirect "$PUBLIC_GET_STARTED_REDIRECT_URL" "https://averray.com/agents/" "Public get-started path"
 assert_redirect "$APP_POST_REDIRECT_URL" "https://app.averray.com/poster/" "App posting alias"
+assert_redirect "$APP_POSTER_JOBS_REDIRECT_URL" "https://app.averray.com/poster/" "App poster-jobs alias"
 assert_redirect "$APP_VERIFY_REDIRECT_URL" "https://app.averray.com/runs/" "App verification alias"
+assert_redirect "$APP_WITHDRAW_REDIRECT_URL" "https://app.averray.com/work-withdraw/" "App withdrawal alias"
+assert_redirect "$APP_WITHDRAW_SLASH_REDIRECT_URL" "https://app.averray.com/work-withdraw/" "App withdrawal slash alias"
+assert_redirect "$APP_EARNINGS_REDIRECT_URL" "https://app.averray.com/work-withdraw/" "App earnings alias"
+assert_redirect "$APP_EARNINGS_SLASH_REDIRECT_URL" "https://app.averray.com/work-withdraw/" "App earnings slash alias"
 assert_redirect "$WWW_MCP_INSTALL_REDIRECT_URL" "https://averray.com/builders/#install" "WWW MCP install alias"
 assert_redirect "$WWW_INSTALL_REDIRECT_URL" "https://averray.com/builders/#install" "WWW install alias"
 assert_redirect "$WWW_CURSOR_INSTALL_REDIRECT_URL" "https://averray.com/builders/#install" "WWW Cursor install alias"

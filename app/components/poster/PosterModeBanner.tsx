@@ -1,5 +1,7 @@
 "use client";
 
+import { posterModeCopy } from "@/lib/ui/poster-mode.js";
+
 /**
  * The T8 honesty banner: states the live posting mode from
  * `GET /poster/onboarding` — never a dead "post" affordance, never a
@@ -29,9 +31,7 @@ export function PosterModeBanner({
   const economics = asRecord(payload.economics);
   const cancellation = asRecord(payload.cancellation);
   const docs = asRecord(payload.docs);
-  const enrollment =
-    text(payload.allowlistEnrollment) ??
-    "Posting requires operator enrollment while the door is allowlist-only.";
+  const modeCopy = posterModeCopy(payload);
   const feeBps = asRecord(economics.protocolFeeBps);
   const feeValue =
     typeof feeBps.value === "number"
@@ -68,10 +68,7 @@ export function PosterModeBanner({
         ) : null}
       </div>
       <p className="font-[family-name:var(--font-body)] text-[13px] leading-relaxed text-[var(--avy-ink)]">
-        {enrollment} Enrolled wallets can post below — the draft is created
-        first (no funds move), then your connected wallet signs the funding
-        transactions the platform itself issues. Non-enrolled drafts are
-        refused at submission; that refusal is the enrollment truth
+        {modeCopy.statement} {modeCopy.detail}
         {guideUrl ? (
           <>
             {" "}
@@ -87,7 +84,6 @@ export function PosterModeBanner({
             )
           </>
         ) : null}
-        .
       </p>
       {rescue ? (
         <p className="font-[family-name:var(--font-body)] text-[12px] text-[var(--avy-muted)]">
