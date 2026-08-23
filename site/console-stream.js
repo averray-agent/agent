@@ -17,7 +17,7 @@
 
   // ---- realistic-looking identifiers ------------------------------
   const WALLETS = [
-    "0x10E826…214b",
+    "0x3071Ca…55ee",
     "0x9A13C2…0cb2",
     "0x72aA41…d110",
     "0x4e12C9…b11e",
@@ -112,8 +112,9 @@
   }
 
   function trimStream() {
-    // Keep the last ~14 rows so the feed stays lively but not heavy.
-    while (streamEl.childElementCount > 14) streamEl.removeChild(streamEl.firstElementChild);
+    // Keep the last ~12 rows: enough to fill the fixed-height panel with the
+    // overflow pinned to the bottom, without hoarding invisible history.
+    while (streamEl.childElementCount > 12) streamEl.removeChild(streamEl.firstElementChild);
   }
 
   // ---- one full run cycle -----------------------------------------
@@ -129,6 +130,41 @@
   // needs ~7s to fill it. This paints a settled run immediately so the opening
   // frame reads as a console that is already doing something.
   function seedFrame() {
+    // A settled prior run first, so the opening frame reads as a console with
+    // history all the way down — not four rows floating in a dark panel.
+    const prevJob = JOBS[0];
+    const prevWallet = WALLETS[1];
+    const prevCosigner = WALLETS[3];
+    renderEvent({
+      topic: "session.claim.opened",
+      tone: "info",
+      body: `<span class="ev__meta">job</span> <span class="ev__hash">${prevJob.id}</span> <span class="ev__meta">wallet</span> <span class="ev__hash">${prevWallet}</span>`,
+    });
+    renderEvent({
+      topic: "siwe.signature.accepted",
+      tone: "ok",
+      body: `<span class="ev__meta">run</span> <span class="ev__hash">run-2731</span> <span class="ev__meta">claim</span> <span class="ev__hash">wallet accountable</span>`,
+    });
+    renderEvent({
+      topic: "session.output.submitted",
+      tone: "info",
+      body: `<span class="ev__meta">schema</span> <span class="ev__hash">${prevJob.schema}</span> <span class="ev__meta">size</span> <span class="ev__hash">2.7 KB</span>`,
+    });
+    renderEvent({
+      topic: "verifier.policy.loaded",
+      tone: "info",
+      body: `<span class="ev__meta">policy</span> <span class="ev__hash">${prevJob.policy}</span>`,
+    });
+    renderEvent({
+      topic: "verifier.checks.passing",
+      tone: "ok",
+      body: `<span class="ev__meta">3/3</span> <span class="ev__hash">schema · signer · co-signer</span>`,
+    });
+    renderEvent({
+      topic: "record.public.readable",
+      tone: "ok",
+      body: `<span class="ev__meta">surface</span> <span class="ev__hash">/agents/${prevWallet}</span> <span class="ev__meta">verifier</span> <span class="ev__hash">${prevCosigner}</span>`,
+    });
     const job = JOBS[2];
     const wallet = WALLETS[0];
     const cosigner = WALLETS[2];
