@@ -314,6 +314,52 @@ test("initialize selects an expiring 2025-11-25 session on the same endpoint", a
   });
 });
 
+test("an initialized legacy session accepts a missing version header but refuses an explicit mismatch", async () => {
+  const { handler } = createHarness();
+  const initialized = await call(handler, {
+    jsonrpc: "2.0",
+    id: "init-header-fallback",
+    method: "initialize",
+    params: {
+      protocolVersion: LEGACY_MCP_VERSION,
+      capabilities: {},
+      clientInfo: { name: "headerless-legacy-test", version: "1.0.0" }
+    }
+  });
+  const sessionHeaders = {
+    "mcp-session-id": initialized.headers["mcp-session-id"]
+  };
+
+  const ready = await call(handler, {
+    jsonrpc: "2.0",
+    method: "notifications/initialized",
+    params: {}
+  }, sessionHeaders);
+  assert.equal(ready.statusCode, 202);
+
+  const listed = await call(handler, {
+    jsonrpc: "2.0",
+    id: "headerless-tools-list",
+    method: "tools/list",
+    params: {}
+  }, sessionHeaders);
+  assert.equal(listed.statusCode, 200);
+  assert.ok(listed.body.result.tools.some((tool) => tool.name === "listJobs"));
+
+  const mismatched = await call(handler, {
+    jsonrpc: "2.0",
+    id: "mismatched-tools-list",
+    method: "tools/list",
+    params: {}
+  }, {
+    ...sessionHeaders,
+    "mcp-protocol-version": MODERN_MCP_VERSION
+  });
+  assert.equal(mismatched.statusCode, 400);
+  assert.equal(mismatched.body.error.code, -32020);
+  assert.match(mismatched.body.error.message, /does not match the session version/u);
+});
+
 test("unsupported initialize version also uses -32022 with the required data", async () => {
   const { handler } = createHarness();
   const result = await call(handler, {

@@ -19,6 +19,7 @@ const ROOT_ENDPOINTS = [
   "/llms.txt",
   "/onboarding",
   "/poster/onboarding",
+  "/poster/jobs",
   "/auth/nonce",
   "/auth/verify",
   "/auth/refresh",

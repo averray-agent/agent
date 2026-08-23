@@ -28,7 +28,7 @@ function extractWallet() {
   return match ? match[1].toLowerCase() : "";
 }
 
-function formatAmountFromBase(amountObj) {
+function formatAmountFromBase(amountObj, { minimumFractionDigits = 0 } = {}) {
   if (!amountObj) return "—";
   try {
     const raw = BigInt(amountObj.amount ?? "0");
@@ -36,12 +36,33 @@ function formatAmountFromBase(amountObj) {
     const base = 10n ** decimals;
     const whole = raw / base;
     const fraction = raw % base;
-    const fractionText = fraction.toString().padStart(Number(decimals), "0").slice(0, 4).replace(/0+$/u, "");
+    const fractionText = fraction.toString()
+      .padStart(Number(decimals), "0")
+      .slice(0, 4)
+      .replace(/0+$/u, "")
+      .padEnd(minimumFractionDigits, "0");
     const number = fractionText ? `${whole}.${fractionText}` : whole.toString();
     return `${number} ${amountObj.asset ?? ""}`.trim();
   } catch {
     return "—";
   }
+}
+
+function renderEconomicAmount(profile) {
+  const element = byId("profile-economic");
+  if (!element) return;
+  const raw = String(profile.reputation?.economic ?? "0");
+  const totalEarned = profile.stats?.totalEarned;
+  const formatted = formatAmountFromBase({
+    amount: raw,
+    decimals: totalEarned?.decimals,
+    asset: totalEarned?.asset
+  }, { minimumFractionDigits: 2 });
+  element.textContent = formatted === "—" ? raw : formatted;
+  element.setAttribute(
+    "title",
+    `Raw: ${raw} (${String(totalEarned?.decimals ?? "unknown")} asset decimals)`
+  );
 }
 
 function formatIso(value) {
@@ -839,7 +860,7 @@ async function bootProfile() {
     renderIdentityLabels(profile);
     setText("profile-skill", String(profile.reputation?.skill ?? 0));
     setText("profile-reliability", String(profile.reputation?.reliability ?? 0));
-    setText("profile-economic", String(profile.reputation?.economic ?? 0));
+    renderEconomicAmount(profile);
     setText("profile-total-badges", String(profile.stats?.totalBadges ?? 0));
     setText("profile-approved", String(profile.stats?.approvedCount ?? 0));
     setText("profile-rejected", String(profile.stats?.rejectedCount ?? 0));

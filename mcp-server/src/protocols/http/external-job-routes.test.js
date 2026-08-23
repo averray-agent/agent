@@ -61,6 +61,22 @@ function makeHarness(overrides = {}) {
           note: "funding detection runs in the watcher"
         };
       },
+      listPosterJobs: async (wallet) => {
+        calls.push(["listPosterJobs", { wallet }]);
+        return {
+          wallet,
+          count: 1,
+          jobs: [{
+            jobId: JOB_ID,
+            status: "live",
+            claimState: "open",
+            claimedBy: null,
+            claimAttemptCount: 0,
+            reservedEscrow: { asset: "USDC", amount: "1.05", amountRaw: "1050000", decimals: 6 },
+            sessions: []
+          }]
+        };
+      },
       delistExternalJob: async (jobId, payload) => {
         calls.push(["delistExternalJob", { jobId, payload }]);
         return { jobId, delisted: true };
@@ -221,6 +237,25 @@ test("GET /jobs/draft/:id is poster-owned and reports the unfunded quote honestl
   ]);
 });
 
+test("GET /poster/jobs authenticates the poster wallet and returns only its job projection", async () => {
+  const { calls, response, route } = makeHarness();
+
+  assert.equal(await invoke(route, { path: "/poster/jobs", response }), true);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.wallet, POSTER);
+  assert.equal(response.body.jobs[0].jobId, JOB_ID);
+  assert.equal(response.body.jobs[0].reservedEscrow.amount, "1.05");
+  assert.deepEqual(calls.filter(([name]) => name !== "respond"), [
+    ["authMiddleware", undefined],
+    ["enforceLimit", {
+      bucket: "external_drafts",
+      key: POSTER,
+      limits: { limit: 30, windowSeconds: 60 }
+    }],
+    ["listPosterJobs", { wallet: POSTER }]
+  ]);
+});
+
 test("GET /jobs/draft/:id rejects a different wallet", async () => {
   const { route } = makeHarness({ notOwned: true });
   await assert.rejects(
@@ -229,18 +264,25 @@ test("GET /jobs/draft/:id rejects a different wallet", async () => {
   );
 });
 
-test("draft routes reject service tokens because the poster must prove wallet control via SIWE", async () => {
-  const { route } = makeHarness({ serviceToken: true });
-  await assert.rejects(
-    invoke(route, { method: "POST", path: "/jobs/draft" }),
-    (error) => error instanceof AuthenticationError && error.code === "external_posting_siwe_required"
-  );
+test("poster routes reject service tokens because the poster must prove wallet control via SIWE", async () => {
+  for (const request of [
+    { method: "POST", path: "/jobs/draft" },
+    { method: "GET", path: `/jobs/draft/${DRAFT_ID}` },
+    { method: "GET", path: "/poster/jobs" }
+  ]) {
+    const { route } = makeHarness({ serviceToken: true });
+    await assert.rejects(
+      invoke(route, request),
+      (error) => error instanceof AuthenticationError && error.code === "external_posting_siwe_required"
+    );
+  }
 });
 
 test("draft routes rate-limit per wallet before doing any draft work", async () => {
   for (const attempt of [
     { method: "POST", path: "/jobs/draft" },
-    { method: "GET", path: `/jobs/draft/${DRAFT_ID}` }
+    { method: "GET", path: `/jobs/draft/${DRAFT_ID}` },
+    { method: "GET", path: "/poster/jobs" }
   ]) {
     const { calls, route } = makeHarness({ rateLimited: true });
     await assert.rejects(
@@ -250,7 +292,7 @@ test("draft routes rate-limit per wallet before doing any draft work", async () 
     const names = calls.map(([name]) => name);
     assert.ok(names.includes("enforceLimit"), `${attempt.path} must consult the limiter`);
     assert.deepEqual(
-      names.filter((name) => ["readJsonBody", "createDraft", "getDraft"].includes(name)),
+      names.filter((name) => ["readJsonBody", "createDraft", "getDraft", "listPosterJobs"].includes(name)),
       [],
       `${attempt.path} must not reach body parsing or the posting service once limited`
     );

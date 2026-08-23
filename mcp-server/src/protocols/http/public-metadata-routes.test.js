@@ -136,6 +136,7 @@ test("A2 arrival payload: GET / identifies Averray and points to site, docs, and
   assert.equal(response.body.authMode, "strict");
   assert.ok(response.body.endpoints.includes("/agent-tools.json"));
   assert.ok(response.body.endpoints.includes("/poster/onboarding"));
+  assert.ok(response.body.endpoints.includes("/poster/jobs"));
   assert.ok(response.body.endpoints.includes("/llms.txt"));
   assert.ok(response.body.endpoints.includes("/.well-known/badge-receipt-jwks.json"));
   assert.ok(response.body.endpoints.every((endpoint) => !endpoint.includes("/jobs/draft")));

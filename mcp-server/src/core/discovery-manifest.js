@@ -115,6 +115,10 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = withDefaultGetMethod([
     description: "The signed-in agent's own account: available balance, stake on open work, statement, ownership proof, exit door, and informational retention choices."
   },
   {
+    path: "/poster/jobs",
+    description: "SIWE-authenticated poster view of the caller's own postings, claim state, reserved escrow, and job-scoped session summaries."
+  },
+  {
     path: "/me",
     description: "Signed-in wallet identity, explicitly labeled claim and reputation tiers, retention progression, and liquid/staked account position."
   },
@@ -716,6 +720,16 @@ export function buildDiscoveryManifest({
       method: "POST",
       path: "/jobs/draft",
       description: "POST /jobs/draft is the quote step; there is no separate /jobs/quote endpoint."
+    },
+    jobs: {
+      method: "GET",
+      path: "/poster/jobs",
+      description: "SIWE-authenticated view of the caller's own postings and their escrow, claim, and session state."
+    },
+    mcpMirror: {
+      available: false,
+      status: "known_backlog",
+      description: "Poster job visibility is HTTP-only; there is no MCP poster tool yet."
     }
   };
   manifest.health = `${baseUrl}/health`;

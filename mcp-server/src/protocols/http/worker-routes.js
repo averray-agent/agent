@@ -56,9 +56,11 @@ export function createWorkerRoutes({
 function projectAccountPosition(account) {
   return {
     liquid: account?.liquid ?? {},
+    reserved: account?.reserved ?? {},
     jobStakeLocked: account?.jobStakeLocked ?? {},
     raw: {
       liquid: account?.raw?.liquid ?? {},
+      reserved: account?.raw?.reserved ?? {},
       jobStakeLocked: account?.raw?.jobStakeLocked ?? {}
     }
   };

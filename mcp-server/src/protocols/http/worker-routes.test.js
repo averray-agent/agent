@@ -74,9 +74,11 @@ function makeHarness(overrides = {}) {
         return {
           wallet,
           liquid: { USDC: 0.8 },
+          reserved: { USDC: 1.05 },
           jobStakeLocked: { USDC: 0 },
           raw: {
             liquid: { USDC: "800000" },
+            reserved: { USDC: "1050000" },
             jobStakeLocked: { USDC: "0" }
           }
         };
@@ -133,9 +135,11 @@ test("GET /me echoes the wallet, labels both tier ladders, progression, and exis
   assert.equal(response.body.progression.tier, "pro");
   assert.deepEqual(response.body.accountPosition, {
     liquid: { USDC: 0.8 },
+    reserved: { USDC: 1.05 },
     jobStakeLocked: { USDC: 0 },
     raw: {
       liquid: { USDC: "800000" },
+      reserved: { USDC: "1050000" },
       jobStakeLocked: { USDC: "0" }
     }
   });

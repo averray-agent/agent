@@ -8,12 +8,20 @@ import { fileURLToPath } from "node:url";
 
 export const AVERRAY_MCP_URL = "https://api.averray.com/mcp";
 
+export function resolveBridgeUrl(environment = process.env) {
+  const testUrl = String(environment.AVERRAY_MCP_TEST_URL ?? "").trim();
+  return environment.NODE_ENV === "test" && testUrl
+    ? testUrl
+    : AVERRAY_MCP_URL;
+}
+
 export function resolveMcpRemoteBin(resolve = createRequire(import.meta.url).resolve) {
   return join(dirname(resolve("mcp-remote/package.json")), "dist", "proxy.js");
 }
 
 export function buildBridgeInvocation({
   args = process.argv.slice(2),
+  environment = process.env,
   execPath = process.execPath,
   resolve
 } = {}) {
@@ -21,7 +29,7 @@ export function buildBridgeInvocation({
     command: execPath,
     args: [
       resolveMcpRemoteBin(resolve),
-      AVERRAY_MCP_URL,
+      resolveBridgeUrl(environment),
       "--transport",
       "http-only",
       ...args
@@ -29,8 +37,8 @@ export function buildBridgeInvocation({
   };
 }
 
-export function runBridge({ args, execPath, resolve, spawnImpl = spawn } = {}) {
-  const invocation = buildBridgeInvocation({ args, execPath, resolve });
+export function runBridge({ args, environment, execPath, resolve, spawnImpl = spawn } = {}) {
+  const invocation = buildBridgeInvocation({ args, environment, execPath, resolve });
   const child = spawnImpl(invocation.command, invocation.args, { stdio: "inherit" });
 
   for (const signal of ["SIGINT", "SIGTERM"]) {
