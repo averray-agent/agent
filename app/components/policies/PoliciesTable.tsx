@@ -50,7 +50,7 @@ export function PoliciesTable({
           {presence === "live"
             ? `sorted by last change · newest first · ${rows.length} of ${totalCount}`
             : presence === "locked"
-              ? "policy feed locked for this session"
+              ? "policy feed unreachable — retrying"
               : presence === "down"
                 ? "policy feed unavailable"
                 : "policy feed loading"}
@@ -79,7 +79,7 @@ export function PoliciesTable({
                   style={{ letterSpacing: 0 }}
                 >
                   {presence === "locked"
-                    ? "Policy feed locked for this session — this wallet lacks the operator role to read /policies."
+                    ? "Policy feed unreachable — retrying /policies."
                     : presence === "down"
                       ? "Policy feed unavailable — /policies could not be read."
                       : presence === "loading"

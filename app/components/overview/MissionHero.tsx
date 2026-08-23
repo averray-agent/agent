@@ -1,4 +1,4 @@
-export type TreasuryPostureLabel = "Green" | "Amber" | "Red" | "Unknown";
+export type TreasuryPostureLabel = "Green" | "Amber" | "Red" | "—";
 
 export interface MissionHeroProps {
   openRuns: number;
@@ -14,7 +14,7 @@ const POSTURE_COLOR: Record<TreasuryPostureLabel, string> = {
   Green: "var(--avy-accent)",
   Amber: "var(--avy-warn)",
   Red: "var(--avy-warn)",
-  Unknown: "var(--avy-muted)",
+  "—": "var(--avy-muted)",
 };
 
 export function MissionHero({

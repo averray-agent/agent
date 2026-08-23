@@ -52,7 +52,7 @@ export function RecurringRuntimeCard({ runtime }: RecurringRuntimeCardProps) {
   // was unavailable).
   const meta =
     runtime.presence === "locked"
-      ? "scheduler status locked for this session"
+      ? "scheduler status unreachable — retrying"
       : runtime.presence === "down"
         ? "scheduler status unavailable"
         : runtime.presence === "loading"
@@ -326,7 +326,7 @@ function EmptyRow({
   return (
     <div className="p-[1.05rem_1.15rem] font-[family-name:var(--font-body)] text-[13px] text-[var(--avy-muted)]">
       {presence === "locked"
-        ? "Recurring scheduler status is locked for this session — this wallet lacks the operator role to read /admin/status."
+        ? "Recurring scheduler status is unreachable — retrying /admin/status."
         : presence === "down"
           ? "Recurring scheduler status is unavailable right now."
           : presence === "loading"

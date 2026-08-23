@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { createAdminTreasuryRoutes } from "./admin-treasury-routes.js";
 
-test("GET /admin/treasury/summary authenticates an admin and always returns the service payload as 200", async () => {
+test("GET /admin/treasury/summary authenticates an operator reader and always returns the service payload as 200", async () => {
   const calls = [];
   const response = {};
   const route = createAdminTreasuryRoutes({
@@ -29,7 +29,10 @@ test("GET /admin/treasury/summary authenticates an admin and always returns the 
 
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(calls, [["auth", { requireRole: "admin" }], ["summary", "0xadmin"]]);
+  assert.deepEqual(calls, [
+    ["auth", { requireCapabilities: ["admin:status", "ops:view"] }],
+    ["summary", "0xadmin"]
+  ]);
   assert.deepEqual(response.body.warnings, [{ code: "strategyLanes_read_failed" }]);
 });
 

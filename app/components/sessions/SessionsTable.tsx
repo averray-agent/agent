@@ -37,7 +37,7 @@ export function SessionsTable({
           {presence === "live"
             ? `${rows.length} of ${totalCount.toLocaleString()} · newest first`
             : presence === "locked"
-              ? "session feed locked for this session"
+              ? "session feed unreachable — retrying"
               : presence === "down"
                 ? "session feed unavailable"
                 : "session feed loading"}
@@ -67,7 +67,7 @@ export function SessionsTable({
                   style={{ letterSpacing: 0 }}
                 >
                   {presence === "locked"
-                    ? "Session ledger locked for this session — this wallet lacks the operator role to read /admin/sessions."
+                    ? "Session ledger unreachable — retrying /admin/sessions."
                     : presence === "down"
                       ? "Session ledger unavailable — /admin/sessions could not be read."
                       : presence === "loading"

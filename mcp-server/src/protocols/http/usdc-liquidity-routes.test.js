@@ -50,7 +50,7 @@ test("USDC liquidity routes ignore unrelated paths", async () => {
   assert.deepEqual(response, {});
 });
 
-test("GET /admin/usdc-liquidity/status requires admin auth and returns status", async () => {
+test("GET /admin/usdc-liquidity/status requires operator read capability and returns status", async () => {
   const { calls, response, route, status } = makeHarness();
 
   const handled = await route({
@@ -64,7 +64,7 @@ test("GET /admin/usdc-liquidity/status requires admin auth and returns status", 
   assert.equal(response.statusCode, 200);
   assert.equal(response.body, status);
   assert.deepEqual(calls, [
-    ["auth", { requireRole: "admin" }],
+    ["auth", { requireCapability: "ops:view" }],
     ["getStatus"],
     ["respond", { statusCode: 200, body: status }]
   ]);

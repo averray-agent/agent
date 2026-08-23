@@ -59,7 +59,7 @@ export function SessionsFilterRail({
   if (presence !== "live" || rows.length === 0) {
     const message =
       presence === "locked"
-        ? "Session filters unavailable · feed locked for this session."
+        ? "Session filters unavailable · feed unreachable — retrying."
         : presence === "down"
           ? "Session filters unavailable · feed unavailable."
           : presence === "loading"

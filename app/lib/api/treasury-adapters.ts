@@ -443,13 +443,12 @@ export function buildRoomVitals(
   );
   const attentionCount = numberValue(summary.attentionCount);
   const activeAgents = new Set(sessions.map((s) => text(s.wallet)).filter(Boolean)).size;
-  // /admin/sessions can be locked for this session (role-less wallet) or
-  // down. Claims reconstructed from the public /jobs feed still count,
+  // /admin/sessions can be denied or down. Claims reconstructed from the
+  // public /jobs feed still count,
   // but "no claims observed yet" may only be said when the sessions feed
   // was actually readable — otherwise the room fabricates quiet.
   const sessionsBlocked = sessionsPresence === "locked" || sessionsPresence === "down";
-  const sessionsStateLabel =
-    sessionsPresence === "locked" ? "locked for this session" : "unavailable";
+  const sessionsStateLabel = "unreachable — retrying";
 
   return [
     {
@@ -482,11 +481,11 @@ export function buildRoomVitals(
     },
     buildCapitalAtWorkVital({ presence: strategyPresence, value: fmt(capital.value), unit: capital.unit }),
     // "Green" is a claim that the strategy feed was read and showed no
-    // lane attention — an unreadable feed must render Unknown, never
+    // lane attention — an unreadable feed must render an em dash, never
     // default to the good state.
     {
       label: "Treasury posture",
-      value: strategyPresence === "live" ? (attentionCount ? "Amber" : "Green") : "Unknown",
+      value: strategyPresence === "live" ? (attentionCount ? "Amber" : "Green") : "—",
       valueAccent: strategyPresence === "live" && !attentionCount,
       delta:
         strategyPresence === "live"
@@ -495,7 +494,7 @@ export function buildRoomVitals(
             : "No lane attention"
           : strategyPresence === "loading"
             ? "waiting for strategy feed"
-            : `strategy feed ${strategyPresence === "locked" ? "locked for this session" : "unavailable"}`,
+            : "strategy feed unreachable — retrying",
       deltaTone:
         strategyPresence === "live" ? (attentionCount ? "warn" : "good") : "neutral",
     },
@@ -592,7 +591,7 @@ export function buildLaneCards(
     : govAllLive
       ? "No open governance work"
       : govAnyLocked
-        ? "Some governance feeds are locked for this session"
+        ? "Some governance feeds are unreachable — retrying"
         : govAnyDown
           ? "Some governance feeds are unavailable"
           : "Waiting for governance feeds";
@@ -622,7 +621,7 @@ export function buildLaneCards(
         ? `Latest session ${latestSessionStatus}`
         : sessionsBlockedForLane
           ? sessionsPresence === "locked"
-            ? "Sessions feed locked for this session"
+            ? "Sessions feed unreachable — retrying"
             : "Sessions feed unavailable"
           : "No live sessions yet",
     },
@@ -631,7 +630,7 @@ export function buildLaneCards(
       href: "/treasury",
       // "Stable" may only be claimed from a live strategy read.
       pillLabel:
-        strategyPresence === "live" ? (attention ? "Attention" : "Stable") : "Unknown",
+        strategyPresence === "live" ? (attention ? "Attention" : "Stable") : "—",
       pillTone: strategyPresence === "live" && attention ? "warn" : strategyPresence === "live" ? "ok" : "neutral",
       metrics: [
         // Unit comes from the routed positions' actual asset (USDC on this
@@ -654,7 +653,7 @@ export function buildLaneCards(
           : strategyPresence === "loading"
             ? "Waiting for strategy feed"
             : strategyPresence === "locked"
-              ? "Strategy feed locked for this session"
+              ? "Strategy feed unreachable — retrying"
               : "Strategy feed unavailable",
     },
     {

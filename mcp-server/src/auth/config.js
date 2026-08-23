@@ -2,8 +2,8 @@ import { ConfigError } from "../core/errors.js";
 
 const VALID_MODES = new Set(["strict", "permissive"]);
 // Roles that may appear in a JWT's `roles` claim. SIWE-issued tokens
-// carry "admin" / "verifier" derived from the wallet-set env vars
-// (AUTH_ADMIN_WALLETS / AUTH_VERIFIER_WALLETS, resolved by
+// carry "admin" / "verifier" / "viewer" derived from the wallet-set env vars
+// (AUTH_ADMIN_WALLETS / AUTH_VERIFIER_WALLETS / OPERATOR_VIEWER_WALLETS, resolved by
 // resolveRoles below). Service tokens (issued via /admin/service-tokens)
 // carry "service" — added in Phase 4b.6 Stage 2C-1 so KmsJwtSigner's
 // expectedRoles allowlist accepts the canonical ES256 service-token
@@ -11,7 +11,7 @@ const VALID_MODES = new Set(["strict", "permissive"]);
 // service token come from the capabilityGrantId lookup, NOT from
 // hasRole(claims, "service"). resolveRoles never emits "service";
 // it can only originate from signServiceToken (server.js L1426).
-const VALID_ROLES = new Set(["admin", "verifier", "service"]);
+const VALID_ROLES = new Set(["admin", "verifier", "viewer", "service"]);
 const VALID_JWT_BACKENDS = new Set(["hmac", "kms", "both"]);
 const VALID_JWT_PRIMARY_ALGS = new Set(["hmac", "kms"]);
 const DEFAULT_JWT_KID = "jwt-1";
@@ -35,6 +35,7 @@ const DEFAULT_JWT_CLOCK_SKEW_SECONDS = 60;
  * - AUTH_NONCE_TTL_SECONDS: nonce lifetime (default 300 = 5 min).
  * - AUTH_ADMIN_WALLETS: comma-separated EVM addresses granted the "admin" role claim at sign-in.
  * - AUTH_VERIFIER_WALLETS: comma-separated EVM addresses granted the "verifier" role claim at sign-in.
+ * - OPERATOR_VIEWER_WALLETS: comma-separated EVM addresses granted the read-only "viewer" role at sign-in.
  *
  * Phase 4b — KMS-signed JWTs (see docs/PHASE_4B_KMS_JWT_PLAN.md):
  * - JWT_BACKEND: "kms" (default) | "hmac" | "both". Controls which JWT
@@ -113,6 +114,7 @@ export function loadAuthConfig(env = process.env) {
 
   const adminWallets = parseWalletSet(env.AUTH_ADMIN_WALLETS, "AUTH_ADMIN_WALLETS");
   const verifierWallets = parseWalletSet(env.AUTH_VERIFIER_WALLETS, "AUTH_VERIFIER_WALLETS");
+  const viewerWallets = parseWalletSet(env.OPERATOR_VIEWER_WALLETS, "OPERATOR_VIEWER_WALLETS");
 
   // ── Phase 4b — JWT dispatcher mode ────────────────────────────────────
   // jwtBackend is parsed above (it gates the HMAC-secret requirement).
@@ -131,11 +133,12 @@ export function loadAuthConfig(env = process.env) {
     strict: rawMode === "strict",
     adminWallets,
     verifierWallets,
+    viewerWallets,
     jwtBackend,
     jwtPrimaryAlg,
     kmsJwt,
     resolveRoles(wallet) {
-      return resolveRoles(wallet, { adminWallets, verifierWallets });
+      return resolveRoles(wallet, { adminWallets, verifierWallets, viewerWallets });
     }
   };
 }
@@ -341,7 +344,11 @@ function parseJwtRoles(raw) {
  * Return the set of role claims a wallet should receive at sign-in time.
  * Unknown wallets get an empty array; role membership is pinned by env config.
  */
-export function resolveRoles(wallet, { adminWallets, verifierWallets }) {
+export function resolveRoles(wallet, {
+  adminWallets = new Set(),
+  verifierWallets = new Set(),
+  viewerWallets = new Set()
+}) {
   if (typeof wallet !== "string" || wallet.length === 0) {
     return [];
   }
@@ -352,6 +359,9 @@ export function resolveRoles(wallet, { adminWallets, verifierWallets }) {
   }
   if (verifierWallets.has(key)) {
     roles.push("verifier");
+  }
+  if (viewerWallets.has(key)) {
+    roles.push("viewer");
   }
   return roles;
 }

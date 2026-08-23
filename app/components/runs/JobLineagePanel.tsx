@@ -162,7 +162,7 @@ function EmptyState({
         style={{ letterSpacing: 0 }}
       >
         {presence === "locked"
-          ? "Lineage locked for this session — missing operator role."
+          ? "Lineage feed unreachable — retrying."
           : presence === "down"
             ? "Lineage unavailable — /admin/jobs/timeline did not load."
             : presence === "loading"

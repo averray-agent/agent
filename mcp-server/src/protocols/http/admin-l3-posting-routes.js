@@ -7,7 +7,7 @@ export function createAdminL3PostingRoutes({
 }) {
   return async function handleAdminL3PostingRoute({ request, response, url, pathname }) {
     if (request.method === "GET" && pathname === "/admin/l3-posting/requests") {
-      await authMiddleware(request, url, { requireRole: "admin" });
+      await authMiddleware(request, url, { requireCapability: "ops:view" });
       const items = await l3PostingKeeper.list({
         borrower: url.searchParams.get("borrower") ?? undefined,
         status: url.searchParams.get("status") ?? undefined,
@@ -18,7 +18,7 @@ export function createAdminL3PostingRoutes({
     }
 
     if (request.method === "GET" && pathname === "/admin/l3-posting/refusals") {
-      await authMiddleware(request, url, { requireRole: "admin" });
+      await authMiddleware(request, url, { requireCapability: "ops:view" });
       const items = await l3PostingKeeper.listRefusals({
         reason: url.searchParams.get("reason") ?? undefined,
         limit: parseLimit(url, 50, 250)

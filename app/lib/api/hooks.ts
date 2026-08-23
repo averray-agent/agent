@@ -7,11 +7,11 @@ import { shouldRetryApiError } from "./retry-policy.js";
 /**
  * Generic hook for public or authed GET endpoints.
  *
- * Auth-locked responses do NOT auto-retry — a 401 has no session and a 403
- * has no capability, and neither becomes true by asking again. The sign-in
- * guard in the authed layout watches for ApiError status 401 and bounces to
- * /sign-in; a 403 leaves the surface rendered as locked (see feed-presence).
- * See ./retry-policy.js for why retrying these is not merely wasteful.
+ * A 401 does not auto-retry because the wallet session itself must refresh or
+ * return to sign-in. Entitled-session 403s do retry: the authed layout's role
+ * wall prevents non-operator wallets from mounting these hooks, so a denial
+ * here is a recoverable operator-feed/capability rollout mismatch. See
+ * ./retry-policy.js for the shared boundary.
  */
 export function useApi<T = unknown>(
   path: string | null,
@@ -87,18 +87,22 @@ export const useAdminSessions = () =>
 export const useAgents = () => useApi("/agents?includeSynthetic=true");
 export const useAgent = (wallet: string | null) =>
   useApi(wallet ? `/agents/${encodeURIComponent(wallet)}` : null);
-export const useBadges = () => useBoundedApi("/badges");
+export const useBadges = () => useBoundedApi("/badges", { shouldRetryOnError: shouldRetryApiError });
 export const useBadge = (sessionId: string | null) =>
   useApi(sessionId ? `/badges/${encodeURIComponent(sessionId)}` : null);
 export const useReceiptDetail = (sessionId: string | null, kind: "run" | "badge" | null) =>
   useBoundedApi(
     sessionId
       ? `/badges/${encodeURIComponent(sessionId)}${kind === "run" ? "/run" : ""}`
-      : null
+      : null,
+    { shouldRetryOnError: shouldRetryApiError }
   );
 export const useAlerts = () => useApi("/alerts");
 export const useAudit = () => useApi("/audit");
-export const usePolicies = (enabled = true) => useBoundedApi(enabled ? "/policies" : null);
+export const usePolicies = (enabled = true) => useBoundedApi(
+  enabled ? "/policies" : null,
+  { shouldRetryOnError: shouldRetryApiError }
+);
 export const usePolicy = (tag: string | null) =>
   useApi(tag ? `/policies/${encodeURIComponent(tag)}` : null);
 export const useDisputes = () => useApi("/disputes");

@@ -242,7 +242,7 @@ function EmptyRow({
         style={{ letterSpacing: 0 }}
       >
         {presence === "locked"
-          ? "Timeline locked for this session — missing operator role."
+          ? "Timeline feed unreachable — retrying."
           : presence === "down"
             ? "Timeline unavailable — /admin/jobs/timeline did not load."
             : presence === "loading"

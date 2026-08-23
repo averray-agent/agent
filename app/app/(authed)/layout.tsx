@@ -33,21 +33,23 @@ export default function AuthedLayout({
   // takes over. The wall is present in static HTML, so route hydration cannot
   // leave an unauthenticated visitor staring at an indeterminate probe.
   return (
-    <OperatorDesktopGate>
+    <>
       <DemoModeBanner />
       <AuthRefreshBridge />
       <WalletSessionNotice />
       <PaperGridBackground />
       <AuthedGuard>
-        <LiveDataBridge />
-        <div className="relative z-[1] mx-auto w-full max-w-[720px] px-4 pb-28 pt-4 md:px-6 md:pt-6 min-[1080px]:max-w-[1440px] min-[1080px]:pb-6">
-          <div className="flex items-start gap-5">
-            <OperatorRail />
-            <main className="flex min-w-0 flex-1 flex-col gap-5">{children}</main>
+        <OperatorDesktopGate>
+          <LiveDataBridge />
+          <div className="relative z-[1] mx-auto w-full max-w-[720px] px-4 pb-28 pt-4 md:px-6 md:pt-6 min-[1080px]:max-w-[1440px] min-[1080px]:pb-6">
+            <div className="flex items-start gap-5">
+              <OperatorRail />
+              <main className="flex min-w-0 flex-1 flex-col gap-5">{children}</main>
+            </div>
           </div>
-        </div>
-        <OperatorMobileNavigation />
+          <OperatorMobileNavigation />
+        </OperatorDesktopGate>
       </AuthedGuard>
-    </OperatorDesktopGate>
+    </>
   );
 }

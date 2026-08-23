@@ -10,6 +10,7 @@ export const SELF_IDENTITY_KINDS = Object.freeze({
   OPERATOR: "operator",
   ADMIN_CONSOLE: "admin_console",
   VERIFIER: "verifier",
+  VIEWER: "operator_viewer",
   CLIENT: "operator_client",
   AMBIGUOUS_CLIENT: "shared_client_name",
   EXTERNAL: "external"
@@ -36,6 +37,7 @@ export class SelfIdentityRegistry {
     acceptanceWallets = [],
     adminWallets = [],
     verifierWallets = [],
+    viewerWallets = [],
     selfClients = [],
     ambiguousClients = AMBIGUOUS_CLIENT_DEFAULTS
   } = {}) {
@@ -43,6 +45,7 @@ export class SelfIdentityRegistry {
     this.acceptanceWallets = walletSet(acceptanceWallets);
     this.adminWallets = walletSet(adminWallets);
     this.verifierWallets = walletSet(verifierWallets);
+    this.viewerWallets = walletSet(viewerWallets);
     this.selfClients = clientSet(selfClients);
     this.ambiguousClients = clientSet(ambiguousClients);
   }
@@ -70,6 +73,9 @@ export class SelfIdentityRegistry {
       }
       if (this.verifierWallets.has(normalizedWallet)) {
         return selfIdentity(SELF_IDENTITY_KINDS.VERIFIER, "auth_verifier_wallet_registry");
+      }
+      if (this.viewerWallets.has(normalizedWallet)) {
+        return selfIdentity(SELF_IDENTITY_KINDS.VIEWER, "operator_viewer_wallet_registry");
       }
       return externalIdentity("unlisted_wallet");
     }
@@ -129,6 +135,7 @@ export function createSelfIdentityRegistry({ env = process.env, authConfig } = {
     acceptanceWallets: parseWalletList(env?.ARRIVAL_ACCEPTANCE_WALLETS),
     adminWallets: authConfig?.adminWallets ?? parseWalletList(env?.AUTH_ADMIN_WALLETS),
     verifierWallets: authConfig?.verifierWallets ?? parseWalletList(env?.AUTH_VERIFIER_WALLETS),
+    viewerWallets: authConfig?.viewerWallets ?? parseWalletList(env?.OPERATOR_VIEWER_WALLETS),
     selfClients: parseClientNames(env?.ARRIVAL_SELF_CLIENTS),
     ambiguousClients: [
       ...AMBIGUOUS_CLIENT_DEFAULTS,

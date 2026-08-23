@@ -54,7 +54,7 @@ test("admin sessions routes ignore unrelated paths", async () => {
   assert.deepEqual(response, {});
 });
 
-test("GET /admin/sessions requires admin auth and returns recent sessions", async () => {
+test("GET /admin/sessions requires operator read capability and returns recent sessions", async () => {
   const { calls, response, route } = makeHarness();
 
   const handled = await route({
@@ -75,7 +75,7 @@ test("GET /admin/sessions requires admin auth and returns recent sessions", asyn
     scope: "operator"
   });
   assert.deepEqual(calls, [
-    ["auth", { requireRole: "admin" }],
+    ["auth", { requireCapability: "ops:view" }],
     ["parseLimit", { fallback: 50, max: 250 }],
     ["listRecentSessions", 50],
     ["respond", {

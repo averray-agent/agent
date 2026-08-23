@@ -1,13 +1,9 @@
 /**
  * Retry policy for the SWR-backed API reads in `hooks.ts`.
  *
- * A request that failed because this session may not read the route fails
- * the same way on every attempt: the capability is missing, not momentarily
- * unavailable. Retrying it buys nothing and costs backend
- * `auth_failures_total` counts — mcp-server/src/protocols/http/server.js
- * increments that counter on every 401 *and* 403 — so a role-less browser
- * tab left open emits a steady trickle of auth failures that reads like
- * probing in the metrics.
+ * A 401 cannot recover inside the data hook: the wallet session itself must
+ * refresh or return to sign-in. Retrying it buys nothing and costs backend
+ * `auth_failures_total` counts.
  *
  * That trickle does not stop on its own. SWR's default `onErrorRetry` has no
  * `errorRetryCount`, so it retries forever, backing off only to
@@ -15,10 +11,12 @@
  * sets `revalidateOnFocus: false`, SWR's "stop retrying while inactive"
  * branch never applies, so a backgrounded tab keeps retrying too.
  *
- * The classification is `feedPresence`'s, deliberately: "locked" is exactly
- * the set of statuses this session can never read (401/403), and the surfaces
- * already render those feeds as locked rather than empty. One classifier, so
- * a feed that renders as locked is also a feed we stop asking for.
+ * A 403 is different now that the authed layout has an operator-role wall:
+ * non-entitled wallets never mount these hooks. A 403 seen by an entitled
+ * admin/verifier/viewer therefore means an operator feed is temporarily out
+ * of alignment with the issued read capabilities. Keep probing so the UI's
+ * "unreachable — retrying" copy is operationally true and a backend rollout
+ * can recover the live room without a page reload.
  *
  * Polling needs no equivalent guard: SWR skips the `refreshInterval` tick
  * while an error is cached (`!getCache().error` in swr@2.3.0
@@ -26,13 +24,12 @@
  * and not errored"), and a failed fetch does write its error to the cache.
  * The interval timer keeps ticking, but it issues no request.
  */
-import { feedPresence } from "./feed-presence.js";
-
 /**
  * @param {unknown} error the value SWR caught from the fetcher
- * @returns {boolean} false for auth-locked failures, true for anything that
- *   could plausibly succeed on a later attempt (5xx, network, unknown shapes)
+ * @returns {boolean} false only for an invalid/expired session (401), true for
+ *   feed denials and failures that can recover on a later attempt
  */
 export function shouldRetryApiError(error) {
-  return feedPresence({ error }) !== "locked";
+  const status = error && typeof error === "object" ? error.status : undefined;
+  return status !== 401;
 }

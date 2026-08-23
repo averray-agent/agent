@@ -152,7 +152,7 @@ test("GET /admin/jobs lists operator-visible jobs with lifecycle summary", async
     jobLifecycle: { open: 1 }
   });
   assert.deepEqual(calls.slice(0, 4), [
-    ["auth", { requireRole: "admin" }],
+    ["auth", { requireCapability: "ops:view" }],
     ["limit", { bucket: "admin_jobs", key: AUTH.wallet, limits: { windowMs: 10_000, max: 5 } }],
     ["listJobsWithSessions", {
       wallet: AUTH.wallet,

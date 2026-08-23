@@ -1,7 +1,7 @@
 // Pure decision for the "Capital at work" room vital.
 //
 // Capital at work sums the strategy allocation with locked job stake, so an
-// unreadable strategy feed means the total is genuinely UNKNOWN — not zero.
+// unreadable strategy feed means the total is genuinely unavailable — not zero.
 // On 2026-08-18 the tile rendered a confident green "0 USDC" while 5.0 USDC sat
 // deployed at the venue: the feed was blind (#1121 — multisig writes are
 // Substrate extrinsics, whose contract events never reach eth_getLogs), not
@@ -20,11 +20,11 @@ export function buildCapitalAtWorkVital({ presence, value, unit } = {}) {
   }
   return {
     label: "Capital at work",
-    value: "Unknown",
+    value: "—",
     delta:
       presence === "loading"
         ? "waiting for strategy feed"
-        : `strategy feed ${presence === "locked" ? "locked for this session" : "unavailable"} — allocation not observable`,
+        : "strategy feed unreachable — retrying — allocation not observable",
     deltaTone: /** @type {const} */ ("neutral")
   };
 }

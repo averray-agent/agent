@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth/use-auth";
 import { decideAuthGuardAction } from "@/lib/auth/auth-guard-decisions";
 import { AUTH_SESSION_PROBE_TIMEOUT_MS } from "@/lib/auth/session-probe.js";
+import { OperatorRoleWall } from "@/components/shell/OperatorRoleWall";
 
 /**
  * P3.7 — Operator-app authed-layout guard.
@@ -38,6 +39,7 @@ export function AuthedGuard({ children }: { children: React.ReactNode }) {
   const decision = decideAuthGuardAction({
     authenticated: auth.authenticated,
     hydrated: auth.checked === true,
+    roles: auth.roles,
     currentPath: pathname ?? undefined,
   });
 
@@ -53,6 +55,10 @@ export function AuthedGuard({ children }: { children: React.ReactNode }) {
 
   if (decision.action === "render") {
     return <>{children}</>;
+  }
+
+  if (decision.action === "role_wall") {
+    return <OperatorRoleWall />;
   }
 
   // "checking" (pre-hydration) and "redirect" (post-hydration, no

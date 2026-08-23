@@ -92,7 +92,7 @@ export default function CapabilitiesPage() {
 
       {!unauthorized && session && !viewGate.allowed ? (
         <Notice tone="warn">
-          {viewGate.reason ?? "Grant feed locked for this session."}
+          {viewGate.reason ?? "Grant feed unreachable — retrying."}
         </Notice>
       ) : null}
 
@@ -108,7 +108,7 @@ export default function CapabilitiesPage() {
         changes={capabilityChanges}
         emptyHint="No grant or revoke event has been recorded yet."
         presence={grantsPresence}
-        blockedHint="Grant feed locked for this session."
+        blockedHint="Grant feed unreachable — retrying."
         activeId={pickedChange?.id ?? null}
         onSelect={(change) => setPickedChangeId(change.id)}
       />
@@ -421,7 +421,7 @@ function GrantList({
           style={{ letterSpacing: 0 }}
         >
           {presence === "locked"
-            ? "Grant feed locked for this session."
+            ? "Grant feed unreachable — retrying."
             : presence === "down"
               ? "Grant feed unavailable."
               : "Grant feed loading."}

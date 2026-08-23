@@ -15,6 +15,7 @@ const OPERATOR = "0x1111111111111111111111111111111111111111";
 const ACCEPTANCE = "0x2222222222222222222222222222222222222222";
 const ADMIN = "0x3333333333333333333333333333333333333333";
 const VERIFIER = "0x4444444444444444444444444444444444444444";
+const VIEWER = "0x7777777777777777777777777777777777777777";
 const CANARY = "0x5555555555555555555555555555555555555555";
 const OUTSIDER = "0x6666666666666666666666666666666666666666";
 const RETAINED_ACCEPTANCE = "0x60385dD643f10934E8F384aC7A04c0D798dFc936";
@@ -32,7 +33,7 @@ function readTemplateEnv(relativePath) {
   );
 }
 
-test("the shared registry composes operator, acceptance, admin, verifier, and client identities", () => {
+test("the shared registry composes operator, acceptance, admin, verifier, viewer, and client identities", () => {
   const registry = createSelfIdentityRegistry({
     env: {
       ARRIVAL_SELF_WALLETS: OPERATOR.toUpperCase(),
@@ -42,7 +43,8 @@ test("the shared registry composes operator, acceptance, admin, verifier, and cl
     },
     authConfig: {
       adminWallets: new Set([ADMIN]),
-      verifierWallets: new Set([VERIFIER])
+      verifierWallets: new Set([VERIFIER]),
+      viewerWallets: new Set([VIEWER])
     }
   });
 
@@ -50,6 +52,7 @@ test("the shared registry composes operator, acceptance, admin, verifier, and cl
   assert.equal(registry.classify({ wallet: ACCEPTANCE }).kind, SELF_IDENTITY_KINDS.ACCEPTANCE);
   assert.equal(registry.classify({ wallet: ADMIN }).kind, SELF_IDENTITY_KINDS.ADMIN_CONSOLE);
   assert.equal(registry.classify({ wallet: VERIFIER }).kind, SELF_IDENTITY_KINDS.VERIFIER);
+  assert.equal(registry.classify({ wallet: VIEWER }).kind, SELF_IDENTITY_KINDS.VIEWER);
   assert.equal(registry.classify({ clientInfo: { name: "Smoke-Probe" } }).kind, SELF_IDENTITY_KINDS.CLIENT);
   assert.equal(registry.classify({ clientInfo: { name: "averray-roadmap" } }).self, true);
   assert.equal(registry.classify({ clientInfo: { name: "Anthropic/ClaudeAI" } }).ambiguous, true);
@@ -110,6 +113,14 @@ test("mainnet env template registers the retained acceptance wallet as self", ()
   const acceptance = registry.classify({ wallet: RETAINED_ACCEPTANCE });
   assert.equal(acceptance.self, true);
   assert.equal(acceptance.kind, SELF_IDENTITY_KINDS.ACCEPTANCE);
+});
+
+test("backend templates expose an empty operator-viewer allowlist by default", () => {
+  const defaultEnv = readTemplateEnv("../../../deploy/backend.env.template");
+  const mainnetEnv = readTemplateEnv("../../../deploy/backend.mainnet.env.template");
+
+  assert.equal(defaultEnv.OPERATOR_VIEWER_WALLETS, "");
+  assert.equal(mainnetEnv.OPERATOR_VIEWER_WALLETS, "");
 });
 
 test("session classification follows durable canary evidence through the shared authority", () => {

@@ -24,8 +24,14 @@ export function createAdminJobsRoutes({
 }) {
   const importRouteDefinitions = createAdminJobImportRouteDefinitions({ parsePositiveInteger });
 
-  async function authenticateAndLimit(request, url) {
-    const auth = await authMiddleware(request, url, { requireRole: "admin" });
+  async function authenticateAndLimit(request, url, { readCapability } = {}) {
+    const auth = await authMiddleware(
+      request,
+      url,
+      readCapability
+        ? { requireCapability: readCapability }
+        : { requireRole: "admin" }
+    );
     await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
     return auth;
   }
@@ -73,7 +79,7 @@ export function createAdminJobsRoutes({
 
   return async function handleAdminJobsRoute({ request, response, url, pathname }) {
     if (request.method === "GET" && pathname === "/admin/jobs") {
-      const auth = await authenticateAndLimit(request, url);
+      const auth = await authenticateAndLimit(request, url, { readCapability: "ops:view" });
       // Operator-side full job listing including paused, archived, and
       // stale rows so the operator app can show lifecycle controls.
       // The public `/jobs` route filters those out by default.
@@ -95,7 +101,7 @@ export function createAdminJobsRoutes({
     }
 
     if (request.method === "GET" && pathname === "/admin/jobs/timeline") {
-      const auth = await authenticateAndLimit(request, url);
+      const auth = await authenticateAndLimit(request, url, { readCapability: "jobs:timeline" });
       const jobId = url.searchParams.get("jobId") ?? "";
       if (!jobId.trim()) {
         throw new ValidationError("jobId is required.");

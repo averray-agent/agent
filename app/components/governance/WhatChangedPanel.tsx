@@ -64,7 +64,7 @@ export function WhatChangedPanel({
       {presence !== "live" ? (
         <p className="m-0 text-[13px] leading-[1.5] text-[var(--muted)]">
           {presence === "locked"
-            ? blockedHint ?? "Governance feed locked for this session."
+            ? blockedHint ?? "Governance feed unreachable — retrying."
             : presence === "down"
               ? "Governance change feed unavailable."
               : "Loading governance changes."}

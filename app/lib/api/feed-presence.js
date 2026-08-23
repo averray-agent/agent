@@ -6,14 +6,13 @@
  * Four states, chosen so a surface can always say WHY it is empty:
  *   - "live"    · request resolved — render the data
  *   - "loading" · first response still in flight — render a waiting hint
- *   - "locked"  · API answered 401/403 — this session may not read the
- *                 surface; rendering zeros here fabricates an all-quiet room
+ *   - "locked"  · API answered 401/403 — the feed is unreachable to this
+ *                 entitled session; rendering zeros fabricates an all-quiet room
  *   - "down"    · request failed for any other reason — degraded, not empty
  *
- * "locked" is deliberately separate from "down": a role-less wallet
- * session 403s on /alerts, /policies and /admin/* while the public feeds
- * stay live, and an operator must be able to tell "I can't see this"
- * apart from "there is nothing to see".
+ * "locked" stays separate from "down" so the UI can name whether the API
+ * denied the feed or could not be reached. The role wall prevents an
+ * unentitled wallet from ever reaching these panel states.
  */
 
 /**
@@ -43,8 +42,8 @@ export function isFeedBlocked(request) {
 export const FEED_STATE_LABEL = {
   live: "live",
   loading: "loading",
-  locked: "locked for this session",
-  down: "unavailable",
+  locked: "unreachable — retrying",
+  down: "unreachable — retrying",
 };
 
 /**

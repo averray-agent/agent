@@ -234,7 +234,7 @@ export function LoadedRunView({
       : rowsPresence === "loading"
         ? "Loading live run details…"
         : rowsPresence === "locked"
-          ? "Run details are locked for this session."
+          ? "Run details are unreachable — retrying."
           : rowsPresence === "down"
             ? "Live run details are unavailable right now."
             : `Run ${runId} was not found in the live job feed.`;

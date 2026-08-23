@@ -67,27 +67,27 @@ test("co-sign KPI has no target chip when there are no rows", () => {
 test("co-sign KPI cannot claim anything while the policy feed is not readable", () => {
   const state = coSignKpiState([badgeRow()], undefined, "down");
   assert.equal(state.status, "unknown");
-  assert.equal(state.meta, "policy feed unavailable · co-sign requirement unknown");
+  assert.equal(state.meta, "policy feed unreachable — retrying · co-sign requirement unknown");
   assert.equal(state.metaTone, "muted");
 });
 
-test("policy feed loading and locked render as themselves, not as degraded", () => {
+test("policy feed loading and unreachable render as themselves, not as empty", () => {
   assert.equal(
     coSignKpiState([badgeRow()], undefined, "loading").meta,
     "policy feed loading · co-sign requirement unknown"
   );
   assert.equal(
     coSignKpiState([badgeRow()], undefined, "locked").meta,
-    "policy feed locked for this session · co-sign requirement unknown"
+    "policy feed unreachable — retrying · co-sign requirement unknown"
   );
   // No presence provided (or an unreadable "live" payload) degrades honestly.
   assert.equal(
     coSignKpiState([badgeRow()], undefined).meta,
-    "policy feed unavailable · co-sign requirement unknown"
+    "policy feed unreachable — retrying · co-sign requirement unknown"
   );
   assert.equal(
     coSignKpiState([badgeRow()], { not: "an array" }, "live").meta,
-    "policy feed unavailable · co-sign requirement unknown"
+    "policy feed unreachable — retrying · co-sign requirement unknown"
   );
 });
 

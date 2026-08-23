@@ -4,37 +4,22 @@ import { DataFreshnessPill } from "@/components/shell/DataFreshnessPill";
 import { RoomVitals, type KpiData } from "@/components/overview/RoomVitals";
 import type { LaneCardData } from "@/components/overview/LaneStatusGrid";
 import { cn } from "@/lib/utils/cn";
+import { deriveOperatorRoomVerdict } from "@/lib/ui/operator-room-verdict.js";
 
 export function MobileOverview({
   vitals,
   lanes,
   freshness,
   visibleAlertCount,
-  alertFeedIncomplete,
+  alertFeedPresence,
 }: {
   vitals: KpiData[];
   lanes: LaneCardData[];
   freshness: FreshnessState;
   visibleAlertCount: number;
-  alertFeedIncomplete: boolean;
+  alertFeedPresence: "live" | "loading" | "locked" | "down";
 }) {
-  const verdict = alertFeedIncomplete
-    ? {
-        eyebrow: "Room status incomplete",
-        detail: "At least one operator feed is locked or unavailable; visible signals are shown without an all-clear.",
-        tone: "unknown" as const,
-      }
-    : visibleAlertCount > 0
-      ? {
-          eyebrow: `${visibleAlertCount} visible item${visibleAlertCount === 1 ? "" : "s"} need attention`,
-          detail: "Open the affected capability to inspect the live evidence and next action.",
-          tone: "attention" as const,
-        }
-      : {
-          eyebrow: "No visible action items",
-          detail: "The operator feeds currently visible to this wallet report no action queue.",
-          tone: "clear" as const,
-        };
+  const verdict = deriveOperatorRoomVerdict({ alertFeedPresence, visibleAlertCount });
 
   return (
     <div className="flex flex-col gap-5 min-[1080px]:hidden" data-mobile-layout="overview">

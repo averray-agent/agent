@@ -57,6 +57,32 @@ const ROLE_CAPABILITIES = {
     "verifier:result:read",
     "verifier:replay",
     "verifier:run"
+  ],
+  // A viewer-only SIWE session is an operator read posture, not a worker
+  // session with a few admin reads added. resolveCapabilities therefore starts
+  // from this exact list instead of BASE_CAPABILITIES, whose claim/submit/fund
+  // entries are intentionally mutation-capable.
+  viewer: [
+    "account:read",
+    "admin:capabilities:read",
+    "admin:status",
+    "agents:list",
+    "badges:list",
+    "content:read",
+    "disputes:list",
+    "disputes:read",
+    "events:read",
+    "jobs:list",
+    "jobs:preflight",
+    "jobs:recommend",
+    "jobs:timeline",
+    "ops:view",
+    "reputation:read",
+    "session:read",
+    "session:timeline",
+    "strategies:list",
+    "subjobs:read",
+    "xcm:read"
   ]
 };
 
@@ -115,6 +141,10 @@ const ROUTE_CAPABILITY_RULES = [
   { method: "GET", path: "/admin/status", capabilities: ["admin:status", "ops:view"] },
   { method: "POST", path: "/admin/agent-transfers", capabilities: ["agent-transfers:submit"] },
   { method: "GET", path: "/admin/treasury/summary", capabilities: ["admin:status", "ops:view"] },
+  { method: "GET", path: "/admin/github/status", capabilities: ["ops:view"] },
+  { method: "GET", path: "/admin/platform-fault-remediations", capabilities: ["ops:view"] },
+  { method: "GET", path: "/admin/usdc-liquidity/status", capabilities: ["ops:view"] },
+  { method: "GET", path: "/admin/xcm/finalize-exhausted", capabilities: ["ops:view"] },
   { method: "POST", path: "/admin/arrivals/canary-marker", capabilities: ["ops:view"] },
   { method: "POST", path: "/admin/credit/originate", capabilities: ["credit:originate"] },
   { method: "GET", path: "/admin/l3-posting/requests", capabilities: ["ops:view"] },
@@ -201,16 +231,25 @@ export function listAllKnownCapabilities() {
 
 export function resolveCapabilities(claims = {}) {
   const serviceToken = claims?.serviceToken === true || claims?.tokenKind === "service";
-  const capabilities = new Set(serviceToken ? [] : BASE_CAPABILITIES);
   const roles = serviceToken ? [] : Array.isArray(claims.roles) ? claims.roles : [];
-  for (const role of roles) {
+  const viewerOnly = isViewerOnlyClaims(claims);
+  const capabilities = new Set(
+    serviceToken
+      ? []
+      : viewerOnly
+        ? ROLE_CAPABILITIES.viewer
+        : BASE_CAPABILITIES
+  );
+  for (const role of viewerOnly ? [] : roles) {
     for (const capability of ROLE_CAPABILITIES[role] ?? []) {
       capabilities.add(capability);
     }
   }
   const explicitCapabilities = serviceToken
     ? []
-    : [
+    : viewerOnly
+      ? []
+      : [
         ...(Array.isArray(claims.capabilities) ? claims.capabilities : []),
         ...(Array.isArray(claims.scopes) ? claims.scopes : [])
       ];
@@ -220,6 +259,12 @@ export function resolveCapabilities(claims = {}) {
     }
   }
   return [...capabilities].sort();
+}
+
+export function isViewerOnlyClaims(claims = {}) {
+  if (claims?.serviceToken === true || claims?.tokenKind === "service") return false;
+  const roles = Array.isArray(claims?.roles) ? claims.roles : [];
+  return roles.includes("viewer") && !roles.includes("admin") && !roles.includes("verifier");
 }
 
 export function capabilityMatrix() {

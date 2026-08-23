@@ -46,7 +46,7 @@ test("admin GitHub routes ignore unrelated paths", async () => {
   assert.deepEqual(response, {});
 });
 
-test("GET /admin/github/status requires admin auth and returns helper status", async () => {
+test("GET /admin/github/status requires operator read capability and returns helper status", async () => {
   const { calls, response, route } = makeHarness();
 
   const handled = await route({
@@ -67,7 +67,7 @@ test("GET /admin/github/status requires admin auth and returns helper status", a
     },
   });
   assert.deepEqual(calls, [
-    ["auth", { requireRole: "admin" }],
+    ["auth", { requireCapability: "ops:view" }],
     ["parseLimit", { fallback: 5, max: 20 }],
     ["getGithubOperatorStatus", {
       repos: undefined,

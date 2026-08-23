@@ -42,7 +42,7 @@ export function createAdminXcmRoutes({
 
   return async function handleAdminXcmRoute({ request, response, url, pathname }) {
     if (request.method === "GET" && pathname === "/admin/xcm/finalize-exhausted") {
-      await authMiddleware(request, url, { requireRole: "admin" });
+      await authMiddleware(request, url, { requireCapability: "ops:view" });
       const limit = normalizeListLimit(url.searchParams.get("limit"));
       const items = await service.listXcmFinalizeExhausted(limit);
       respond(response, 200, { count: items.length, items });

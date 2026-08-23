@@ -24,7 +24,7 @@ export function SessionsAggregateStrip({
   if (presence !== "live") {
     const meta =
       presence === "locked"
-        ? "session feed locked for this session (no operator role)"
+        ? "session feed unreachable — retrying"
         : presence === "down"
           ? "session feed unavailable"
           : "session feed loading";

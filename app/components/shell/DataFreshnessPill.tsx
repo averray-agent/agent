@@ -14,8 +14,8 @@ import { cn } from "@/lib/utils/cn";
  * Five states only — keep it tight:
  *   - `live`     · everything resolved, no errors      → green
  *   - `loading`  · still waiting on the first response → blue, pulsing
- *   - `partial`  · signed-in but some surfaces 401/403 → amber "Partial view"
- *   - `locked`   · the whole surface answered 401/403  → neutral "Not authorized"
+ *   - `partial`  · signed-in but some surfaces are unreachable → amber
+ *   - `locked`   · the whole surface is currently unreachable  → neutral
  *   - `fallback` · request errored or returned nothing → amber
  *
  * "Error" is not a separate state because operators mainly need to
@@ -68,8 +68,8 @@ const STATE_CLS: Record<
 const STATE_LABEL: Record<FreshnessState, string> = {
   live: "Live API",
   loading: "Loading",
-  partial: "Partial view",
-  locked: "Not authorized",
+  partial: "Live view degraded",
+  locked: "Feed unreachable",
   fallback: "Unavailable",
 };
 
@@ -77,9 +77,9 @@ const STATE_TITLE: Record<FreshnessState, string> = {
   live: "Live data from the operator API.",
   loading: "Still waiting on the first API response.",
   partial:
-    "Some surfaces on this page are locked for this session (missing role or capability). Everything else is live.",
+    "Some feeds are unreachable right now. Available surfaces remain live and are shown.",
   locked:
-    "The API answered and refused this session (missing role or capability). Nothing here failed to read.",
+    "This feed is unreachable right now. The client is retrying.",
   fallback:
     "API errored, is locked behind auth, or has not emitted this surface yet.",
 };
@@ -132,7 +132,7 @@ export function DataFreshnessPill({
  * This helper never returns `locked`, on purpose: its callers are
  * multi-request pages that still render something. A page whose ONE
  * request is refused should pass `locked` directly, because there
- * "Partial view" would overstate what is actually rendered.
+ * "Live view degraded" would overstate what is actually rendered.
  */
 export function freshnessFromRequests(
   ...requests: { data?: unknown; error?: unknown; isLoading?: boolean }[]

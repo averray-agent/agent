@@ -28,20 +28,20 @@ const here = dirname(fileURLToPath(import.meta.url));
 const read = (path) => readFileSync(resolve(here, path), "utf8");
 const hooks = read("hooks.ts");
 
-test("auth-locked failures are terminal — 403 no longer retries", () => {
-  assert.equal(shouldRetryApiError({ status: 403 }), false);
+test("operator feed denials retry while an invalid session stays terminal", () => {
+  assert.equal(shouldRetryApiError({ status: 403 }), true);
   assert.equal(shouldRetryApiError({ status: 401 }), false);
 });
 
-test("a real missing_capability error shape is not retried", () => {
-  // What swrFetcher throws for GET /alerts without `ops:view`.
+test("a real operator missing_capability response is retried", () => {
+  // The role wall means this can only be mounted by an entitled session.
   const err = {
     name: "ApiError",
     message: "403 Forbidden",
     status: 403,
     body: { code: "missing_capability", message: "requires ops:view" },
   };
-  assert.equal(shouldRetryApiError(err), false);
+  assert.equal(shouldRetryApiError(err), true);
 });
 
 test("transient failures still retry", () => {
@@ -51,35 +51,16 @@ test("transient failures still retry", () => {
   assert.equal(shouldRetryApiError({ status: 429 }), true);
 });
 
-test("non-auth 4xx and unknown error shapes retry — only 401/403 are terminal", () => {
+test("non-401 4xx and unknown error shapes retry", () => {
   assert.equal(shouldRetryApiError({ status: 400 }), true);
   assert.equal(shouldRetryApiError({ status: 404 }), true);
   assert.equal(shouldRetryApiError(new TypeError("Failed to fetch")), true);
   assert.equal(shouldRetryApiError({}), true);
 });
 
-test("retry policy and rendered presence share one classifier", () => {
-  // A feed we stop asking for must be a feed the UI shows as locked, and a
-  // feed the UI shows as down/live must stay retryable. Divergence would mean
-  // a surface renders "locked for this session" while the tab keeps probing,
-  // or a degraded feed silently stops recovering.
-  const errors = [
-    { status: 401 },
-    { status: 403 },
-    { status: 404 },
-    { status: 429 },
-    { status: 500 },
-    { status: 503 },
-    new Error("network"),
-  ];
-  for (const error of errors) {
-    const locked = feedPresence({ error }) === "locked";
-    assert.equal(
-      shouldRetryApiError(error),
-      !locked,
-      `retry decision disagrees with presence for ${JSON.stringify(error)}`
-    );
-  }
+test("403 remains an unreachable feed state while retrying", () => {
+  assert.equal(feedPresence({ error: { status: 403 } }), "locked");
+  assert.equal(shouldRetryApiError({ status: 403 }), true);
 });
 
 test("useApi wires the shared policy and hand-rolls no status check", () => {
@@ -91,10 +72,9 @@ test("useApi wires the shared policy and hand-rolls no status check", () => {
 });
 
 test("every capability-gated feed routes through a shared API hook", () => {
-  // These 403 for a session without the operator capabilities; a raw useSWR
-  // here would carry SWR's retry-everything default and reopen the hole. Both
-  // shared hooks make auth failures terminal; useBoundedApi additionally owns
-  // the first-paint timeout budget.
+  // These may 403 while an entitled session's role/capability rollout is out
+  // of alignment. Shared hooks keep that recovery behavior consistent;
+  // useBoundedApi additionally owns the first-paint timeout budget.
   const gated = [
     "useAlerts",
     "usePolicies",
@@ -113,4 +93,10 @@ test("every capability-gated feed routes through a shared API hook", () => {
   }
   const directCalls = hooks.match(/useSWR\s*[<(]/gu) ?? [];
   assert.equal(directCalls.length, 2, "the two shared API hooks should be the only useSWR call sites");
+});
+
+test("bounded operator feeds opt back into the shared recovery policy", () => {
+  assert.match(hooks, /useBadges[^;]*shouldRetryOnError:\s*shouldRetryApiError/su);
+  assert.match(hooks, /useReceiptDetail[\s\S]*shouldRetryOnError:\s*shouldRetryApiError/u);
+  assert.match(hooks, /usePolicies[\s\S]*shouldRetryOnError:\s*shouldRetryApiError/u);
 });

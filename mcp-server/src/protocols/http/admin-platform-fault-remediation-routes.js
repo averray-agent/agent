@@ -8,7 +8,7 @@ export function createAdminPlatformFaultRemediationRoutes({
     if (request.method !== "GET" || pathname !== "/admin/platform-fault-remediations") {
       return false;
     }
-    await authMiddleware(request, url, { requireRole: "admin" });
+    await authMiddleware(request, url, { requireCapability: "ops:view" });
     const limit = parseLimit(url, 50, 250);
     const requestedStatus = url.searchParams.get("status")?.trim();
     const status = !requestedStatus
