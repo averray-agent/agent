@@ -87,10 +87,16 @@ Never "APR", "guaranteed", "interest", "staking rewards".
 
 1. Ship backend lock ledger + Flex/T30/T90 (flag-off) → enable T30 first.
 2. **Success (day 30):** ≥ 2 external wallets in T30+, or Σ locked ≥ 10 USDC.
-3. **Abort (any day):** zero locks by day 30, or any evidence the lock gate
+3. **Safety abort (any day, unconditional):** any evidence the lock gate
    blocked a withdrawal outside its consent terms (auto-alarm) → flag off;
    locks honor their committed terms to expiry, no new locks.
-4. Venue deployment of the cohort begins only when L2's gate opens — possibly
+4. **Adoption review (day 30, no auto-abort — amended by Pascal 2026-08-24):**
+   zero adoption does not kill the feature. The flag-gated, zero-contract
+   ladder costs nothing while unused and the activation gate bounds economic
+   exposure at zero. If nothing is locked by day 30, review why (pitch never
+   delivered, perks not valued, wrong cohort) and decide keep / iterate /
+   retire deliberately.
+5. Venue deployment of the cohort begins only when L2's gate opens — possibly
    weeks after tiers ship. Perks make the tiers worth using in the meantime.
 
 ## 6. Sequencing
