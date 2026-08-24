@@ -422,6 +422,9 @@ export class DepositPoolDoorService {
       block: blockProof(snapshot),
       totalAssets: amount(snapshot.totalAssets),
       totalShares: amount(snapshot.totalSupply, SHARE_DECIMALS),
+      // The locked-tier quote consumes this info shape and refuses to price a
+      // lock without the pool's share price (poolSnapshot fail-closed check).
+      sharePrice: sharePrice(snapshot),
       bufferAssets: amount(snapshot.bufferAssets),
       caps: {
         totalAssetCap: amount(snapshot.totalAssetCap),
