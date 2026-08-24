@@ -466,7 +466,25 @@ export class EarningsDoorService {
       waiverClaimsUsedPromise
     ]);
     if (!progression) {
-      throw new Error("Withdrawal standing is unavailable for this wallet.");
+      // A wallet can legitimately have no worker progression: operator-run and
+      // synthetic wallets are excluded by design, and a depositor-only wallet
+      // has never claimed a job. Standing then reports what is true — no claim
+      // tier, no badges, full waiver window — instead of failing the whole
+      // account view (the 2026-08-24 locked-deposit seed wallet hit this).
+      return {
+        claimTier: null,
+        claimTierLabel: "claim tier",
+        reputationTier: buildPublicReputation(reputation).tier,
+        badges: 0,
+        waiverSlotsRemaining: Math.max(
+          DEFAULT_ONBOARDING_WAIVER_CLAIM_COUNT - Math.max(0, Number(waiverClaimsUsed) || 0),
+          0
+        ),
+        creditInterest: { eligible: false, registered: false },
+        workerProgression: "none — this wallet has no worker history",
+        persists: true,
+        statement: WITHDRAWAL_STANDING_STATEMENT
+      };
     }
     const creditInterest = {
       eligible: progression.creditInterest?.eligible === true,
