@@ -6,6 +6,10 @@ import { transitionSession } from "../core/session-state-machine.js";
 import { BADGE_RECEIPT_COSIGN_POLICY_TAG } from "../core/builtin-policies.js";
 import { buildJobSnapshot } from "../core/job-snapshot.js";
 import { VerificationIngestionService } from "./verification-ingestion-service.js";
+import {
+  buildWorkReceiptVerdictCore,
+  computeVerdictCoreCommitment
+} from "../core/work-receipt.js";
 
 function withJobSnapshot(session, job) {
   return { ...session, jobSnapshot: buildJobSnapshot(job) };
@@ -105,16 +109,30 @@ test("approved verification forward-emits the content-addressed work receipt and
       gasRetention: { retainedRaw: "50000", rewardRaw: "250000" }
     }
   };
-  const service = new VerificationIngestionService(stateStore, undefined, undefined, { info() {}, warn() {} });
-
-  const resolved = await service.ingest(submitted.sessionId, {
+  const verdict = {
     handler: "deterministic",
     handlerVersion: 1,
     outcome: "approved",
     reasonCode: "DETERMINISTIC_MATCH",
     payoutTx,
     settlement: payoutTx.settlement
-  }, { payoutTx });
+  };
+  const receiptContext = { posterAddress: poster };
+  payoutTx.verifiedEvent = {
+    reasoningHash: computeVerdictCoreCommitment(buildWorkReceiptVerdictCore({
+      session: submitted,
+      job,
+      verification: verdict,
+      context: receiptContext
+    })),
+    logIndex: 9
+  };
+  const service = new VerificationIngestionService(stateStore, undefined, undefined, { info() {}, warn() {} });
+
+  const resolved = await service.ingest(submitted.sessionId, verdict, {
+    payoutTx,
+    receiptContext
+  });
 
   assert.match(resolved.workReceiptId, /^0x[0-9a-f]{64}$/u);
   const byId = await stateStore.getWorkReceiptDocument(resolved.workReceiptId);

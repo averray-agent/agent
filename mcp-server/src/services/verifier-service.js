@@ -16,6 +16,10 @@ import { buildPlatformFaultRemediationMarker } from "../core/platform-fault-reme
 import { transitionSession } from "../core/session-state-machine.js";
 import { classifyEscrowInvalidState } from "../blockchain/escrow-core-errors.js";
 import { PlatformFaultRemediationService } from "./platform-fault-remediation-service.js";
+import {
+  buildWorkReceiptVerdictCore,
+  computeVerdictCoreCommitment
+} from "../core/work-receipt.js";
 
 // EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
 // Disputed=5, Closed=6. resolveSinglePayout only runs from Submitted and reverts
@@ -68,7 +72,7 @@ export class VerifierService {
   }
 
   async verifySubmission({ sessionId, evidence = undefined, metadataURI = "ipfs://pending-badge" }) {
-    const session = await this.platformService.resumeSession(sessionId);
+    let session = await this.platformService.resumeSession(sessionId);
     assertSessionCanReceiveVerification(session);
     // Capture the narrative boundary before any chain settlement can mint a
     // badge or advance reputation. This read is advisory: an unavailable
@@ -85,6 +89,7 @@ export class VerifierService {
     const reconciliation = await this.reconcileBrokeredSubmitDivergence({ session, liveJob });
     if (reconciliation.result) return reconciliation.result;
     liveJob = reconciliation.liveJob;
+    session = reconciliation.session ?? session;
     const verificationInput = this.resolveVerificationInput(session, evidence);
     const validatedVerificationInput = this.validateVerificationInput(job, verificationInput, {
       pinnedSchema: snapshot.outputSchema?.schema
@@ -94,7 +99,7 @@ export class VerifierService {
       validatedVerificationInput,
       verificationClaimantContext(session)
     );
-    const reasoningHash = hashCanonicalContent({
+    const disputeReasoningHash = hashCanonicalContent({
       handler: verdict.handler,
       handlerVersion: verdict.handlerVersion,
       outcome: verdict.outcome,
@@ -130,7 +135,7 @@ export class VerifierService {
       platformFaultRemediation = await this.platformFaultRemediationService.escalate({
         session,
         verdict,
-        reasoningHash
+        reasoningHash: disputeReasoningHash
       });
       if (platformFaultRemediation) {
         verdict = {
@@ -151,11 +156,23 @@ export class VerifierService {
     // converge to resolved/rejected without the evidence.
     let payoutTx;
     const settlementOutcome = verdict.outcome === "approved" || verdict.outcome === "rejected";
+    let settlementPreparation;
     if (settlementOutcome && this.blockchainGateway?.isEnabled()) {
       const observedState = normalizeEscrowJobState(liveJob?.state);
       const alreadySettled = observedState === ESCROW_JOB_STATE_REJECTED
         || observedState === ESCROW_JOB_STATE_CLOSED;
+      const prepareSettlement = async () => {
+        settlementPreparation ??= await this.prepareNonDisputeSettlement({
+          session,
+          job,
+          verdict,
+          verificationInput: validatedVerificationInput,
+          metadataURI
+        });
+        return settlementPreparation;
+      };
       if (alreadySettled) {
+        await prepareSettlement();
         if (typeof this.blockchainGateway.recoverSinglePayoutReceipt !== "function") {
           throw new Error(
             `Job ${chainJobId} is already settled on-chain, but the gateway cannot reconstruct its receipt.`
@@ -164,7 +181,8 @@ export class VerifierService {
         payoutTx = await this.blockchainGateway.recoverSinglePayoutReceipt(chainJobId, {
           outcome: verdict.outcome,
           worker: session.wallet,
-          submittedAt: session.submittedAt
+          submittedAt: session.submittedAt,
+          reasoningHash: settlementPreparation.commitment
         });
       } else if (observedState !== ESCROW_JOB_STATE_SUBMITTED) {
         return this.parkChainStateDivergence({
@@ -174,13 +192,14 @@ export class VerifierService {
           stage: "pre_resolve"
         });
       } else if (this.blockchainGateway.resolveSinglePayout) {
+        await prepareSettlement();
         try {
           payoutTx = await this.blockchainGateway.resolveSinglePayout(
             chainJobId,
             verdict.outcome === "approved",
             verdict.reasonCode,
             metadataURI,
-            reasoningHash
+            settlementPreparation.commitment
           );
         } catch (error) {
           const invalidState = classifyEscrowInvalidState(error);
@@ -205,7 +224,12 @@ export class VerifierService {
         }
       }
     }
-    this.assertTerminalChainEvidence({ chainJobId, verdict, payoutTx });
+    this.assertTerminalChainEvidence({
+      chainJobId,
+      verdict,
+      payoutTx,
+      commitment: settlementPreparation?.commitment
+    });
 
     return this.persistBrokeredDecision({
       session,
@@ -214,8 +238,89 @@ export class VerifierService {
       verificationInput: validatedVerificationInput,
       metadataURI: platformFaultRemediation?.resolution?.metadataURI ?? metadataURI,
       payoutTx,
-      previousProgression
+      previousProgression,
+      preparedVerdict: settlementPreparation?.preparedVerdict,
+      receiptContext: settlementPreparation?.receiptContext
     });
+  }
+
+  async prepareNonDisputeSettlement({
+    session,
+    job,
+    verdict,
+    verificationInput,
+    metadataURI,
+    receiptContext = undefined
+  }) {
+    if (verdict?.outcome !== "approved" && verdict?.outcome !== "rejected") {
+      throw new Error("Verdict-core settlement preparation requires an approved or rejected outcome.");
+    }
+    const existing = session?.receiptCommitment;
+    if (existing) {
+      const reproduced = computeVerdictCoreCommitment(existing.verdictCore);
+      const preparedReproduced = computeVerdictCoreCommitment(
+        existing.preparedVerdict?.receiptVerdictCore
+      );
+      if (
+        existing.version !== "work-receipt-verdict-core-v1"
+        || existing.outcome !== verdict.outcome
+        || existing.reasonCode !== verdict.reasonCode
+        || existing.commitment !== reproduced
+        || preparedReproduced !== reproduced
+        || existing.preparedVerdict?.receiptVerdictCoreCommitment !== reproduced
+      ) {
+        throw new Error("Persisted receipt commitment does not match the current non-dispute verdict.");
+      }
+      const receiptContext = await this.platformService.resolveReceiptSignerContext?.(job);
+      if (!receiptContext) {
+        throw new Error("Verdict-core settlement preparation requires receipt signer context.");
+      }
+      return {
+        commitment: reproduced,
+        preparedVerdict: existing.preparedVerdict,
+        receiptContext
+      };
+    }
+    let preparedVerdict = this.buildPersistedVerdict({
+      session,
+      job,
+      verdict,
+      verificationInput,
+      metadataURI
+    });
+    const resolvedContext = receiptContext
+      ?? await this.platformService.resolveReceiptSignerContext?.(job);
+    if (!resolvedContext) {
+      throw new Error("Verdict-core settlement preparation requires receipt signer context.");
+    }
+    const verdictCore = buildWorkReceiptVerdictCore({
+      session,
+      job,
+      verification: preparedVerdict,
+      context: resolvedContext
+    });
+    const commitment = computeVerdictCoreCommitment(verdictCore);
+    preparedVerdict = {
+      ...preparedVerdict,
+      receiptVerdictCore: verdictCore,
+      receiptVerdictCoreCommitment: commitment
+    };
+    await this.stateStore.upsertSession({
+      ...session,
+      receiptCommitment: {
+        version: "work-receipt-verdict-core-v1",
+        outcome: verdict.outcome,
+        reasonCode: verdict.reasonCode,
+        commitment,
+        verdictCore,
+        preparedVerdict
+      }
+    });
+    return {
+      commitment,
+      preparedVerdict,
+      receiptContext: resolvedContext
+    };
   }
 
   /**
@@ -235,7 +340,9 @@ export class VerifierService {
     details = undefined,
     handler = POSTER_REVIEW_HANDLER,
     handlerVersion = POSTER_REVIEW_HANDLER_VERSION,
-    previousProgression = undefined
+    previousProgression = undefined,
+    preparedVerdict = undefined,
+    receiptContext = undefined
   }) {
     const session = await this.platformService.resumeSession(sessionId);
     assertSessionCanReceiveVerification(session, { reason: "brokered_review_decision" });
@@ -258,7 +365,9 @@ export class VerifierService {
       verificationInput,
       metadataURI,
       payoutTx,
-      previousProgression
+      previousProgression,
+      preparedVerdict,
+      receiptContext
     });
   }
 
@@ -269,27 +378,27 @@ export class VerifierService {
     verificationInput,
     metadataURI,
     payoutTx,
-    previousProgression = undefined
+    previousProgression = undefined,
+    preparedVerdict = undefined,
+    receiptContext = undefined
   }) {
     const sessionId = session.sessionId;
-    const auditFields = buildVerificationAuditFields(job, { verdict, verificationInput });
     const persistedVerdict = {
-      ...verdict,
-      sessionId,
-      metadataURI,
-      environment: verdict.environment ?? {
-        kind: "node",
-        runtime: process.release.name,
-        version: process.version
-      },
+      ...(preparedVerdict ?? this.buildPersistedVerdict({
+        session,
+        job,
+        verdict,
+        verificationInput,
+        metadataURI
+      })),
       ...(payoutTx ? { payoutTx } : {}),
-      ...(payoutTx?.settlement ? { settlement: payoutTx.settlement } : {}),
-      ...auditFields
+      ...(payoutTx?.settlement ? { settlement: payoutTx.settlement } : {})
     };
+    const auditFields = buildVerificationAuditFields(job, { verdict, verificationInput });
     const settledSession = await this.platformService.ingestVerification(
       sessionId,
       persistedVerdict,
-      { payoutTx, previousProgression }
+      { payoutTx, previousProgression, receiptContext }
     );
     if (payoutTx && settledSession?.payoutTx?.txHash !== payoutTx.txHash) {
       throw new Error(
@@ -319,7 +428,22 @@ export class VerifierService {
     return result;
   }
 
-  assertTerminalChainEvidence({ chainJobId, verdict, payoutTx }) {
+  buildPersistedVerdict({ session, job, verdict, verificationInput, metadataURI }) {
+    const auditFields = buildVerificationAuditFields(job, { verdict, verificationInput });
+    return {
+      ...verdict,
+      sessionId: session.sessionId,
+      metadataURI,
+      environment: verdict.environment ?? {
+        kind: "node",
+        runtime: process.release.name,
+        version: process.version
+      },
+      ...auditFields
+    };
+  }
+
+  assertTerminalChainEvidence({ chainJobId, verdict, payoutTx, commitment = undefined }) {
     if (!this.blockchainGateway?.isEnabled?.()) return;
     if (verdict.outcome !== "approved" && verdict.outcome !== "rejected") return;
     if (!payoutTx?.txHash || Number(payoutTx.status) !== 1) {
@@ -330,6 +454,11 @@ export class VerifierService {
     if (verdict.outcome === "approved" && !payoutTx.settlement) {
       throw new Error(
         `Refusing approved transition for ${chainJobId} without chain-verified payout settlement evidence.`
+      );
+    }
+    if (!commitment || payoutTx?.verifiedEvent?.reasoningHash !== commitment) {
+      throw new Error(
+        `Refusing terminal ${verdict.outcome} transition for ${chainJobId} without its verdict-core commitment in the Verified event.`
       );
     }
   }
@@ -448,7 +577,7 @@ export class VerifierService {
       || typeof this.platformService.reconcileBrokeredSubmit !== "function"
       || normalizeEscrowJobState(liveJob?.state) !== 2
     ) {
-      return { liveJob };
+      return { liveJob, session };
     }
     const sessionId = session.sessionId;
     const chainJobId = session.chainJobId ?? session.jobId;
@@ -487,7 +616,7 @@ export class VerifierService {
         })
       };
     }
-    return { liveJob: reconciledLiveJob };
+    return { liveJob: reconciledLiveJob, session: recovery.session ?? session };
   }
 
   async replayVerification(sessionId) {

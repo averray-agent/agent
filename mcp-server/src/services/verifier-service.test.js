@@ -13,6 +13,9 @@ import { buildAverrayDisclosureFooter } from "../core/maintainer-surface-policy.
 import { buildVerificationContract } from "../core/verifier-contract.js";
 import { buildJobSnapshot } from "../core/job-snapshot.js";
 import { BlockchainGateway } from "../blockchain/gateway.js";
+import { ZERO_BYTES32 } from "../blockchain/abis.js";
+import { VerificationIngestionService } from "./verification-ingestion-service.js";
+import { computeVerdictCoreCommitment } from "../core/work-receipt.js";
 
 const FIXTURE_ROOT = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -1375,6 +1378,10 @@ test("verifySubmission surfaces the on-chain payout tx on the result and the ses
   }, "claimed", { reason: "job_claimed" });
   const job = {
     id: "payout-check-001",
+    rewardAsset: "USDC",
+    rewardAmount: 1,
+    claimTtlSeconds: 3600,
+    poster: "0xdddddddddddddddddddddddddddddddddddddddd",
     outputSchemaRef: "schema://jobs/release-readiness-output",
     verifierMode: "deterministic",
     verifierConfig: {
@@ -1395,6 +1402,7 @@ test("verifySubmission surfaces the on-chain payout tx on the result and the ses
   const platformService = {
     resumeSession: (sessionId) => stateStore.getSession(sessionId),
     getJobDefinition: () => job,
+    resolveReceiptSignerContext: async () => ({ posterAddress: job.poster }),
     ingestVerification: async (sessionId, verdict, { payoutTx } = {}) => {
       const current = await stateStore.getSession(sessionId);
       const updated = transitionSession({
@@ -1421,11 +1429,19 @@ test("verifySubmission surfaces the on-chain payout tx on the result and the ses
     protocolFeeAmountRaw: "25000",
     protocolFeeBps: 250
   };
-  const payoutReceipt = { txHash: "0xpayouttx", blockNumber: 4242, status: 1, settlement };
+  const payoutReceipt = {
+    txHash: `0x${"55".repeat(32)}`,
+    blockNumber: 4242,
+    status: 1,
+    settlement
+  };
   const blockchainGateway = {
     isEnabled: () => true,
     getJob: async () => ({ state: 3, specHash: submitted.jobSnapshot.specHash }),
-    resolveSinglePayout: async () => payoutReceipt
+    resolveSinglePayout: async (_jobId, _approved, _reasonCode, _metadataURI, commitment) => {
+      payoutReceipt.verifiedEvent = { reasoningHash: commitment, logIndex: 3 };
+      return payoutReceipt;
+    }
   };
 
   const service = new VerifierService(platformService, stateStore, blockchainGateway);
@@ -1445,10 +1461,115 @@ test("verifySubmission surfaces the on-chain payout tx on the result and the ses
   assert.deepEqual(verification.payoutTx, payoutReceipt);
 });
 
+async function runBoundSettlementRoundTrip() {
+  const stateStore = new MemoryStateStore();
+  const poster = "0xdddddddddddddddddddddddddddddddddddddddd";
+  const worker = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const job = {
+    id: "receipt-binding-round-trip",
+    rewardAsset: "USDC",
+    rewardAmount: 1,
+    claimTtlSeconds: 3600,
+    poster,
+    outputSchemaRef: "schema://jobs/release-readiness-output",
+    verifierMode: "deterministic",
+    verifierConfig: {
+      version: 1,
+      handler: "deterministic",
+      expectedOutputs: ["release_id", "checks_passed", "go_no_go"],
+      matchMode: "contains_all"
+    }
+  };
+  const claimed = transitionSession(withJobSnapshot({
+    sessionId: `${job.id}:${worker}`,
+    wallet: worker,
+    jobId: job.id,
+    submission: normalizeSubmission({
+      release_id: "release-binding-v1",
+      checks_passed: ["receipt-binding"],
+      checks_failed: [],
+      blockers: [],
+      go_no_go: "go"
+    }),
+    gasRetention: { brokered: true, waived: false, retentionCapBps: 0 }
+  }, job), "claimed", { reason: "job_claimed", timestamp: "2026-08-24T09:00:00.000Z" });
+  const submitted = transitionSession(claimed, "submitted", {
+    reason: "work_submitted",
+    timestamp: "2026-08-24T09:05:00.000Z"
+  });
+  await stateStore.upsertSession(submitted);
+
+  let submittedCommitment;
+  const payoutTxHash = `0x${"77".repeat(32)}`;
+  const gateway = {
+    isEnabled: () => true,
+    async getJob() {
+      return { state: 3, specHash: submitted.jobSnapshot.specHash, poster };
+    },
+    async resolveSinglePayout(_jobId, _approved, _reasonCode, _metadataURI, commitment) {
+      submittedCommitment = commitment;
+      return {
+        txHash: payoutTxHash,
+        blockNumber: 501,
+        status: 1,
+        verifiedEvent: { reasoningHash: commitment, logIndex: 8 },
+        settlement: {
+          worker,
+          treasuryAccount: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          asset: "0xcccccccccccccccccccccccccccccccccccccccc",
+          assetSymbol: "USDC",
+          workerAmount: 1,
+          workerAmountRaw: "1000000",
+          protocolFeeAmount: 0.05,
+          protocolFeeAmountRaw: "50000",
+          protocolFeeBps: 500
+        }
+      };
+    }
+  };
+  const ingestion = new VerificationIngestionService(
+    stateStore,
+    undefined,
+    undefined,
+    { info() {}, warn() {} },
+    { blockchainGateway: gateway }
+  );
+  const platformService = {
+    resumeSession: (sessionId) => stateStore.getSession(sessionId),
+    ingestVerification: (sessionId, verdict, options) => ingestion.ingest(sessionId, verdict, options),
+    resolveReceiptSignerContext: (definition) => ingestion.resolveReceiptSignerContext(definition)
+  };
+  const service = new VerifierService(platformService, stateStore, gateway);
+  const result = await service.verifySubmission({ sessionId: submitted.sessionId });
+  const receipt = await stateStore.getWorkReceiptDocument(result.session.workReceiptId);
+  return { receipt, submittedCommitment, payoutTxHash };
+}
+
+test("round trip: non-dispute settlement commitment equals finished stored receipt verdict core", async () => {
+  const { receipt, submittedCommitment, payoutTxHash } = await runBoundSettlementRoundTrip();
+  assert.ok(receipt, "the terminal write must persist its work receipt");
+  assert.equal(computeVerdictCoreCommitment(receipt), submittedCommitment);
+  assert.deepEqual(receipt.chainBinding, {
+    committedVerdictHash: submittedCommitment,
+    verifiedTxHash: payoutTxHash,
+    logIndex: 8
+  });
+});
+
+test("non-dispute settlement never sends ZERO_BYTES32", async () => {
+  const { submittedCommitment } = await runBoundSettlementRoundTrip();
+  assert.match(submittedCommitment, /^0x[a-f0-9]{64}$/u);
+  assert.notEqual(submittedCommitment, ZERO_BYTES32);
+});
+
 function makeIdempotencyHarness(onChainState) {
   const stateStore = new MemoryStateStore();
   const job = {
     id: "idem-001",
+    rewardAsset: "USDC",
+    rewardAmount: 1,
+    claimTtlSeconds: 3600,
+    poster: "0xdddddddddddddddddddddddddddddddddddddddd",
     outputSchemaRef: "schema://jobs/release-readiness-output",
     verifierMode: "deterministic",
     verifierConfig: {
@@ -1473,6 +1594,7 @@ function makeIdempotencyHarness(onChainState) {
   const platformService = {
     resumeSession: (id) => stateStore.getSession(id),
     getJobDefinition: () => job,
+    resolveReceiptSignerContext: async () => ({ posterAddress: job.poster }),
     ingestVerification: async (id, verdict, { payoutTx } = {}) => {
       const current = await stateStore.getSession(id);
       const updated = transitionSession({
@@ -1497,17 +1619,24 @@ function makeIdempotencyHarness(onChainState) {
     protocolFeeAmountRaw: "0",
     protocolFeeBps: 0
   };
-  const payoutReceipt = { txHash: "0xpayout", blockNumber: 1, status: 1, settlement };
+  const payoutReceipt = {
+    txHash: `0x${"66".repeat(32)}`,
+    blockNumber: 1,
+    status: 1,
+    settlement
+  };
   const calls = { settle: 0, recover: 0 };
   const blockchainGateway = {
     isEnabled: () => true,
     getJob: async () => ({ state: onChainState, specHash: claimed.jobSnapshot.specHash }),
-    resolveSinglePayout: async () => {
+    resolveSinglePayout: async (_jobId, _approved, _reasonCode, _metadataURI, commitment) => {
       calls.settle += 1;
+      payoutReceipt.verifiedEvent = { reasoningHash: commitment, logIndex: 4 };
       return payoutReceipt;
     },
-    recoverSinglePayoutReceipt: async () => {
+    recoverSinglePayoutReceipt: async (_jobId, { reasoningHash }) => {
       calls.recover += 1;
+      payoutReceipt.verifiedEvent = { reasoningHash, logIndex: 4 };
       return payoutReceipt;
     }
   };
@@ -1573,10 +1702,11 @@ test("stuck non-waived settlement resolves on its next tick when receipt search 
       return blockNumber < 90 ? null : { number: blockNumber, timestamp: blockNumber };
     }
   };
-  h.blockchainGateway.recoverSinglePayoutReceipt = async () => {
+  h.blockchainGateway.recoverSinglePayoutReceipt = async (_jobId, { reasoningHash }) => {
     h.calls.recover += 1;
     const submittedBlock = await searchGateway.findBlockAtOrAfterTimestamp(submitted.submittedAt, 200);
     assert.equal(submittedBlock, 100);
+    h.payoutReceipt.verifiedEvent = { reasoningHash, logIndex: 4 };
     return h.payoutReceipt;
   };
 
@@ -1696,13 +1826,16 @@ test("verifySubmission reconstructs after chain settlement outlives a failed fir
   const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
   await h.stateStore.upsertSession(submitted);
   let chainState = 3;
+  let firstCommitment;
   h.blockchainGateway.getJob = async () => ({
     state: chainState,
     specHash: h.claimed.jobSnapshot.specHash
   });
-  h.blockchainGateway.resolveSinglePayout = async () => {
+  h.blockchainGateway.resolveSinglePayout = async (_jobId, _approved, _reasonCode, _metadataURI, commitment) => {
     h.calls.settle += 1;
     chainState = 6;
+    firstCommitment = commitment;
+    h.payoutReceipt.verifiedEvent = { reasoningHash: commitment, logIndex: 4 };
     return h.payoutReceipt;
   };
   const originalUpsert = h.stateStore.upsertSession.bind(h.stateStore);
@@ -1722,6 +1855,14 @@ test("verifySubmission reconstructs after chain settlement outlives a failed fir
   );
   assert.equal((await h.stateStore.getSession(submitted.sessionId)).status, "submitted");
   assert.equal(await h.stateStore.getVerificationResult(submitted.sessionId), undefined);
+  assert.equal(
+    (await h.stateStore.getSession(submitted.sessionId)).receiptCommitment.commitment,
+    firstCommitment,
+    "the pre-settlement verdict core survives a failed terminal write"
+  );
+  service.buildPersistedVerdict = () => {
+    throw new Error("a receipt-lost retry must reuse the pinned verdict core");
+  };
 
   const recovered = await service.verifySubmission({ sessionId: submitted.sessionId });
   assert.equal(h.calls.settle, 1, "the retry must not submit a second settlement transaction");

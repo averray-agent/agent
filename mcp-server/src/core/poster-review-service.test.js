@@ -20,6 +20,9 @@ const ESCROW = "0x6666666666666666666666666666666666666666";
 const TREASURY = "0x7777777777777777777777777777777777777777";
 const USDC = "0x8888888888888888888888888888888888888888";
 const SUBMITTED_AT = "2026-08-01T10:00:00.000Z";
+const APPROVE_TX = `0x${"ab".repeat(32)}`;
+const REJECT_TX = `0x${"cd".repeat(32)}`;
+const TEST_COMMITMENT = `0x${"ef".repeat(32)}`;
 
 async function makeHarness({
   sessionStatus = "submitted",
@@ -52,6 +55,7 @@ async function makeHarness({
     category: "coding",
     rewardAmount: 1,
     rewardAsset: "USDC",
+    claimTtlSeconds: 3600,
     verifierMode: "human_fallback",
     outputSchemaRef: "schema://jobs/coding-output",
     source: { type: "external", poster: { wallet: POSTER } },
@@ -91,6 +95,9 @@ async function makeHarness({
         raises: [],
         creditInterest: { eligible: false, registered: false }
       };
+    },
+    async resolveReceiptSignerContext() {
+      return { posterAddress: POSTER };
     }
   };
   const gateway = {
@@ -116,9 +123,10 @@ async function makeHarness({
         };
       }
       return {
-        txHash: approved ? "0xapprove" : "0xreject",
+        txHash: approved ? APPROVE_TX : REJECT_TX,
         blockNumber: approved ? 101 : 102,
         status: 1,
+        verifiedEvent: { reasoningHash, logIndex: approved ? 4 : 5 },
         ...(approved ? {
           settlement: {
             worker: WORKER,
@@ -150,6 +158,13 @@ async function makeHarness({
     }
   };
   const verifierService = {
+    async prepareNonDisputeSettlement({ verdict }) {
+      return {
+        commitment: TEST_COMMITMENT,
+        preparedVerdict: verdict,
+        receiptContext: { posterAddress: POSTER }
+      };
+    },
     async ingestBrokeredDecision(decision) {
       calls.push(["ingestBrokeredDecision", decision]);
       const current = await stateStore.getSession(decision.sessionId);
@@ -166,8 +181,8 @@ async function makeHarness({
   };
   let canonicalIngestion;
   if (canonicalReceipts) {
-    platformService.ingestVerification = (sessionId, verdict) => (
-      canonicalIngestion.ingest(sessionId, verdict)
+    platformService.ingestVerification = (sessionId, verdict, options) => (
+      canonicalIngestion.ingest(sessionId, verdict, options)
     );
     canonicalIngestion = new VerificationIngestionService(
       stateStore,
@@ -345,7 +360,7 @@ test("idempotency: a chain-confirmed approval resumes signed receipt persistence
   const runReceipt = await stateStore.getRunReceiptDocument("session-external-1");
 
   assert.equal(receipt.status, "settled");
-  assert.equal(receipt.payoutTx.txHash, "0xapprove");
+  assert.equal(receipt.payoutTx.txHash, APPROVE_TX);
   assert.equal(calls.filter(([name]) => name === "resolveSinglePayout").length, 1);
   assert.equal((await stateStore.getSession("session-external-1")).status, "resolved");
   assert.equal(runReceipt.verifier.handler, "poster_review");
@@ -423,7 +438,8 @@ test("approve path binds the brokered SettlementSplit to the live worker, reward
   assert.equal(settle.id, JOB_ID);
   assert.equal(settle.approved, true);
   assert.equal(settle.reasonCode, POSTER_REVIEW_REASON_CODES.approve);
-  assert.equal(settle.reasoningHash, receipt.rationaleHash);
+  assert.equal(settle.reasoningHash, TEST_COMMITMENT);
+  assert.notEqual(settle.reasoningHash, receipt.rationaleHash);
   assert.equal((await stateStore.getSession("session-external-1")).status, "resolved");
 });
 
@@ -479,7 +495,7 @@ test("idempotency: interrupted timeout escalation resumes after the durable reje
   gateway.openDispute = openDispute;
   const receipt = await service.escalateExpiredSubmission(JOB_ID);
   assert.equal(receipt.status, "escalated");
-  assert.equal(receipt.rejectionTx.txHash, "0xreject");
+  assert.equal(receipt.rejectionTx.txHash, REJECT_TX);
   assert.equal(receipt.disputeTx.txHash, "0xdispute");
 });
 

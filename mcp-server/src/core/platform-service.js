@@ -2104,6 +2104,10 @@ export class PlatformService {
     }
   }
 
+  async resolveReceiptSignerContext(job) {
+    return this.verificationIngestionService.resolveReceiptSignerContext(job);
+  }
+
   /**
    * Return a platform-fault claimant's combined local claim lock. Local claims
    * debit claimStake + claimFee into one jobStakeLocked ledger bucket, so the

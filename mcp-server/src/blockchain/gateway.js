@@ -2229,9 +2229,10 @@ export class BlockchainGateway {
     });
   }
 
-  async resolveSinglePayout(jobId, approved, reasonCode, metadataURI, reasoningHash = ZERO_BYTES32) {
+  async resolveSinglePayout(jobId, approved, reasonCode, metadataURI, reasoningHash) {
     return this.withGatewayError("resolveSinglePayout", async () => {
       this.requireSigner("resolveSinglePayout");
+      const commitment = this.toVerdictCoreCommitment(reasoningHash);
       const startedAt = Date.now();
       const escrowContract = await this.escrowContractForJob(jobId);
       const tx = await escrowContract.resolveSinglePayout(
@@ -2239,7 +2240,7 @@ export class BlockchainGateway {
         approved,
         this.toReasonCode(reasonCode),
         metadataURI,
-        reasoningHash
+        commitment
       );
       // Ethers wraps the runner's TransactionResponse in a
       // ContractTransactionResponse and may replace/drop its provider metadata.
@@ -2259,6 +2260,12 @@ export class BlockchainGateway {
       // resolveDispute below) so callers can surface the on-chain payout tx to
       // the worker instead of discarding it. Settlement behavior is unchanged.
       const receipt = await tx.wait();
+      const verifiedEvent = this.extractVerifiedEvent(receipt, escrowContract, {
+        jobId: this.toJobId(jobId),
+        approved,
+        reasonCode: this.toReasonCode(reasonCode),
+        reasoningHash: commitment
+      });
       const settlement = this.extractSettlementSplit(receipt, escrowContract);
       const gasRetention = this.extractGasRetention(receipt, escrowContract);
       const durationMs = Date.now() - startedAt;
@@ -2276,7 +2283,37 @@ export class BlockchainGateway {
         txHash: tx.hash,
         blockNumber: receipt?.blockNumber,
         status: Number(receipt?.status ?? 0),
+        verifiedEvent,
         ...(settlement ? { settlement: { ...settlement, ...(gasRetention ? { gasRetention } : {}) } } : {})
+      };
+    });
+  }
+
+  async resolveMilestone(jobId, milestoneIndex, approved, reasonCode, metadataURI, reasoningHash) {
+    return this.withGatewayError("resolveMilestone", async () => {
+      this.requireSigner("resolveMilestone");
+      const commitment = this.toVerdictCoreCommitment(reasoningHash);
+      const escrowContract = await this.escrowContractForJob(jobId);
+      const tx = await escrowContract.resolveMilestone(
+        this.toJobId(jobId),
+        milestoneIndex,
+        approved,
+        this.toReasonCode(reasonCode),
+        metadataURI,
+        commitment
+      );
+      const receipt = await tx.wait();
+      const verifiedEvent = this.extractVerifiedEvent(receipt, escrowContract, {
+        jobId: this.toJobId(jobId),
+        approved,
+        reasonCode: this.toReasonCode(reasonCode),
+        reasoningHash: commitment
+      });
+      return {
+        txHash: tx.hash,
+        blockNumber: receipt?.blockNumber,
+        status: Number(receipt?.status ?? 0),
+        verifiedEvent
       };
     });
   }
@@ -2288,7 +2325,12 @@ export class BlockchainGateway {
    * both SettlementSplit and the deployed five-field AAC ReservationSettled
    * logs. Any ambiguity or unavailable proof fails closed.
    */
-  async recoverSinglePayoutReceipt(jobId, { outcome, worker, submittedAt } = {}) {
+  async recoverSinglePayoutReceipt(jobId, {
+    outcome,
+    worker,
+    submittedAt,
+    reasoningHash
+  } = {}) {
     return this.withGatewayError("recoverSinglePayoutReceipt", async () => {
       if (!this.provider) {
         throw new ExternalServiceError("Payout receipt recovery requires a readable chain provider.");
@@ -2343,6 +2385,11 @@ export class BlockchainGateway {
         );
       }
       const escrowContract = this.escrowContractForLiveJob(job);
+      const verifiedEvent = this.extractVerifiedEvent(receipt, escrowContract, {
+        jobId: chainJobId,
+        approved: outcome === "approved",
+        reasoningHash: this.toVerdictCoreCommitment(reasoningHash)
+      });
       this.assertRecoveredTerminalEvent({
         receipt,
         escrowContract,
@@ -2359,6 +2406,7 @@ export class BlockchainGateway {
         txHash,
         blockNumber: Number(receipt.blockNumber),
         status: Number(receipt.status),
+        verifiedEvent,
         ...(settlement ? { settlement } : {})
       };
     });
@@ -2440,6 +2488,52 @@ export class BlockchainGateway {
         throw new ExternalServiceError("Recovered JobClosed amount does not match the live escrow job.");
       }
     }
+  }
+
+  extractVerifiedEvent(receipt, escrowContract, {
+    jobId,
+    approved,
+    reasonCode = undefined,
+    reasoningHash
+  }) {
+    const expectedAddress = escrowContract?.target;
+    const expectedJobId = String(jobId).toLowerCase();
+    const expectedReasonCode = reasonCode ? String(reasonCode).toLowerCase() : undefined;
+    const expectedReasoningHash = this.toVerdictCoreCommitment(reasoningHash);
+    const matches = [];
+    for (const log of receipt?.logs ?? []) {
+      if (expectedAddress && log?.address && !sameAddress(log.address, expectedAddress)) continue;
+      let parsed;
+      try {
+        parsed = escrowContract?.interface?.parseLog?.(log);
+      } catch {
+        continue;
+      }
+      if (parsed?.name !== "Verified") continue;
+      if (String(parsed.args.jobId).toLowerCase() !== expectedJobId) continue;
+      matches.push({ parsed, log });
+    }
+    if (matches.length !== 1) {
+      throw new ExternalServiceError(
+        `Settlement receipt has ${matches.length} job-bound Verified events; expected exactly one.`
+      );
+    }
+    const [{ parsed, log }] = matches;
+    const eventReasonCode = String(parsed.args.reasonCode).toLowerCase();
+    const eventReasoningHash = String(parsed.args.reasoningHash).toLowerCase();
+    const logIndex = Number(log.index ?? log.logIndex);
+    if (
+      Boolean(parsed.args.approved) !== Boolean(approved)
+      || (expectedReasonCode && eventReasonCode !== expectedReasonCode)
+      || eventReasoningHash !== expectedReasoningHash
+      || !Number.isSafeInteger(logIndex)
+      || logIndex < 0
+    ) {
+      throw new ExternalServiceError(
+        "Settlement Verified event does not reproduce the expected verdict-core binding."
+      );
+    }
+    return { reasoningHash: eventReasoningHash, logIndex };
   }
 
   extractRecoveredSettlement(receipt, escrowContract, job) {
@@ -3627,6 +3721,14 @@ export class BlockchainGateway {
       throw new ValidationError("content hash must be a 0x-prefixed 32-byte hex string.");
     }
     return hash.toLowerCase();
+  }
+
+  toVerdictCoreCommitment(value) {
+    const commitment = this.toContentHash(value);
+    if (commitment === ZERO_BYTES32) {
+      throw new ValidationError("Verdict-core commitment must not be zero.");
+    }
+    return commitment;
   }
 
   toXcmStatus(status) {

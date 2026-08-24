@@ -7,6 +7,8 @@ import {
   assertWorkReceiptContentAddress,
   buildVerifyReceipt,
   buildWorkReceipt,
+  buildWorkReceiptVerdictCore,
+  computeVerdictCoreCommitment,
   hashWorkReceiptContent,
   WORK_RECEIPT_COMMITMENT_SECTIONS,
   WORK_RECEIPT_SCHEMA_VERSION
@@ -32,7 +34,7 @@ function input({ outcome = "approved", specSource = "chain_verified", settlement
     verifierMode: "deterministic",
     verifierConfig: { handler: "deterministic" }
   };
-  return {
+  const fixture = {
     session: {
       sessionId: "session-retention-live-proof",
       jobId: job.id,
@@ -84,6 +86,17 @@ function input({ outcome = "approved", specSource = "chain_verified", settlement
       selfIdentityRegistry: new SelfIdentityRegistry({ acceptanceWallets: [live.worker], operatorWallets: [live.poster] })
     }
   };
+  return refreshBinding(fixture);
+}
+
+function refreshBinding(fixture) {
+  if (!fixture.verification.payoutTx) return fixture;
+  const verdictCore = buildWorkReceiptVerdictCore(fixture);
+  fixture.verification.payoutTx.verifiedEvent = {
+    reasoningHash: computeVerdictCoreCommitment(verdictCore),
+    logIndex: 7
+  };
+  return fixture;
 }
 
 test("2026-08-16 live settlement reconciles payout, retention, and poster fee", () => {
@@ -133,6 +146,7 @@ test("poster total must reconcile to reward plus poster-side protocol fee", () =
 test("claim-time value at risk cannot drift from the settled worker reward", () => {
   const fixture = input();
   fixture.session.jobSnapshot.claimEconomics.gasRetention.rewardRaw = "260000";
+  refreshBinding(fixture);
   assert.throws(
     () => buildWorkReceipt(fixture),
     /intent valueAtRisk\.amountRaw must equal settlement rewardAmountRaw/u
@@ -181,6 +195,7 @@ test("designated external settlement pays provider plus poster fee with zero ret
   fixture.context.selfIdentityRegistry = new SelfIdentityRegistry({
     operatorWallets: [live.poster]
   });
+  refreshBinding(fixture);
 
   const receipt = buildWorkReceipt(fixture);
   assert.equal(receipt.execution.providerClass, "external");
@@ -209,6 +224,7 @@ test("benchmark work receipt carries the starter check-depth statement verbatim"
   fixture.session.jobSnapshot.definition = structuredClone(fixture.job);
   fixture.verification.handler = "benchmark";
   fixture.verification.handlerVersion = 2;
+  refreshBinding(fixture);
 
   const receipt = buildWorkReceipt(fixture);
   assert.equal(receipt.verification.checkDepth, STARTER_BENCHMARK_CHECK_DEPTH);
@@ -253,6 +269,31 @@ test("receipt id reproduces from served content and every content mutation chang
   mutated.verdict.reasonCode = "MUTATED";
   assert.notEqual(hashWorkReceiptContent(mutated), receipt.receiptId);
   assert.throws(() => assertWorkReceiptContentAddress(mutated), /content address mismatch/u);
+});
+
+test("verdict-core commitment uses the frozen receipt sections and chainBinding closes the loop", () => {
+  const fixture = input();
+  const receipt = buildWorkReceipt(fixture);
+  assert.equal(
+    computeVerdictCoreCommitment(receipt),
+    fixture.verification.payoutTx.verifiedEvent.reasoningHash
+  );
+  assert.deepEqual(receipt.chainBinding, {
+    committedVerdictHash: fixture.verification.payoutTx.verifiedEvent.reasoningHash,
+    verifiedTxHash: live.source.transactionHash,
+    logIndex: 7
+  });
+
+  const outsideCore = structuredClone(receipt);
+  outsideCore.settlement.workerAmount = "999";
+  assert.equal(computeVerdictCoreCommitment(outsideCore), receipt.chainBinding.committedVerdictHash);
+
+  const wrong = input();
+  wrong.verification.payoutTx.verifiedEvent.reasoningHash = `0x${"f".repeat(64)}`;
+  assert.throws(
+    () => buildWorkReceipt(wrong),
+    /verdict-core commitment mismatch/u
+  );
 });
 
 test("verify and job receipts share the one canonical content-address function", () => {
@@ -324,8 +365,20 @@ test("work receipt commitment documentation is bound to the exported frozen verd
     WORK_RECEIPT_COMMITMENT_SECTIONS
   );
   assert.match(documentation, /\["intent", "execution", "verdict"\]/u);
-  assert.match(documentation, /stored field set is frozen/u);
+  assert.match(documentation, /one ratified additive exception is the optional `chainBinding` section/u);
+  assert.equal(schema["x-averrayVersionFreeze"].ratifiedAdditiveSection, "chainBinding");
   assert.equal(Object.isFrozen(WORK_RECEIPT_COMMITMENT_SECTIONS), true);
+});
+
+test("receipt binding copy stays within the Option C truth boundary", () => {
+  const sources = [
+    "../../../docs/schemas/work-receipt-v1.md",
+    "../../../docs/schemas/work-receipt-v1.json",
+    "../../../scripts/ops/verify-receipt-binding.mjs",
+    "../../../.github/workflows/hosted-receipt-binding-proof.yml"
+  ].map((relative) => readFileSync(new URL(relative, import.meta.url), "utf8")).join("\n");
+  assert.match(sources, /receipt-keyed, operator-verified/iu);
+  assert.doesNotMatch(sources, /\btrustless\b|\bguaranteed\b|\bon-chain enforced\b/iu);
 });
 
 test("MCP verify receipt names each bounded check and carries neither credential nor settlement", () => {
