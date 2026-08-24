@@ -23,6 +23,7 @@ import { createAdminGithubRoutes } from "./admin-github-routes.js";
 import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
 import { createAdminJourneyRoutes } from "./admin-journey-routes.js";
 import { createAdminL3PostingRoutes } from "./admin-l3-posting-routes.js";
+import { createAdminOvernightLedgerRoutes } from "./admin-overnight-ledger-routes.js";
 import { createAdminPlatformFaultRemediationRoutes } from "./admin-platform-fault-remediation-routes.js";
 import { createAdminSessionsRoutes } from "./admin-sessions-routes.js";
 import { createAdminStatusRoutes } from "./admin-status-routes.js";
@@ -92,6 +93,10 @@ import { signTokenFromConfig, verifyTokenFromConfig } from "../../auth/jwt.js";
 import { createArrivalRoutes } from "./arrival-routes.js";
 import { TreasurySummaryService } from "../../services/treasury-summary.js";
 import { AdminJourneyReadService } from "../../services/admin-journey-reads.js";
+import {
+  OvernightLedgerService,
+  recordDeployMarker
+} from "../../services/overnight-ledger.js";
 
 const {
   platformService: service,
@@ -435,6 +440,25 @@ const handleAdminTreasuryRoute = createAdminTreasuryRoutes({
   respond,
   treasurySummary
 });
+
+const overnightLedger = new OvernightLedgerService({
+  stateStore,
+  selfIdentityRegistry,
+  env: process.env
+});
+const handleAdminOvernightLedgerRoute = createAdminOvernightLedgerRoutes({
+  authMiddleware,
+  overnightLedger,
+  respond
+});
+void recordDeployMarker({
+  stateStore,
+  eventBus,
+  deployedSha: process.env.DEPLOYED_SHA
+}).catch((error) => logger.warn?.(
+  { error: error?.message ?? String(error) },
+  "overnight_ledger.deploy_marker_failed"
+));
 
 const usdcLiquidityStatusService = createUsdcLiquidityStatusService({ gateway });
 const handleUsdcLiquidityRoute = createUsdcLiquidityRoutes({
@@ -931,6 +955,7 @@ const handleOperationalRoute = createOperationalRoutes({
   authConfig,
   externalPostingMode: externalPostingService.config.mode,
   externalPostingWatcher,
+  eventBus,
   gateway,
   getRewardBankHealth: rewardBankHealthProvider,
   indexerHealthProbe,
@@ -1080,6 +1105,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleAdminTreasuryRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleAdminOvernightLedgerRoute({ request, response, url, pathname })) {
       return;
     }
 

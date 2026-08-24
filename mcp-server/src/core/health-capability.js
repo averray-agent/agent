@@ -796,6 +796,10 @@ export async function resolveRewardBankHealth({ gateway, addresses, now }) {
     return {
       liquid: normalizeNumericAmount(asset.liquid),
       liquidRaw: asset.liquidRaw ?? null,
+      ...(asset.reserved !== undefined || asset.reservedRaw !== undefined ? {
+        reserved: normalizeNumericAmount(asset.reserved),
+        reservedRaw: asset.reservedRaw ?? null
+      } : {}),
       decimals,
       asOf,
       readable: true,

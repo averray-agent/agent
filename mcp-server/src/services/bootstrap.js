@@ -133,6 +133,7 @@ import {
 } from "./first-withdrawal-gas-grant.js";
 import { assertMainnetSignerPosture, assertChainIdMatchesRpc } from "./startup-guards.js";
 import { createRewardBankHealthProvider } from "../core/health-capability.js";
+import { createPersistedRewardBankHealthProvider } from "./overnight-ledger.js";
 import {
   ExternalPostingService,
   resolveExternalPostingConfig
@@ -614,9 +615,12 @@ export async function createPlatformRuntime() {
   const rewardBankHealthProvider = initStep(
     "init-reward-bank-health-provider",
     logger,
-    () => createRewardBankHealthProvider({
-      gateway,
-      env: process.env
+    () => createPersistedRewardBankHealthProvider({
+      getRewardBankHealth: createRewardBankHealthProvider({
+        gateway,
+        env: process.env
+      }),
+      stateStore
     })
   );
   platformService.setRewardBankHealthProvider(rewardBankHealthProvider);

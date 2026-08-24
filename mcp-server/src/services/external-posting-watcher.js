@@ -131,6 +131,8 @@ export class ExternalPostingWatcherService {
     try {
       await this.hydrateConfirmedProjections();
       const state = await this.stateStore.getServiceState?.(this.stateScope) ?? {};
+      let firstExternalPostingRecorded = state.firstExternalPostingRecorded === true;
+      let firstExternalPosting;
       const payload = await this.fetchFeed(state.cursor);
       const items = Array.isArray(payload.items) ? payload.items : [];
       const nextCursor = normalizeNextCursor(payload.nextCursor, items.length);
@@ -146,7 +148,29 @@ export class ExternalPostingWatcherService {
         const observation = normalizeCreationItem(item);
         const result = await this.externalPostingService.reconcileFinalizedCreation(observation);
         counts.observedCount += 1;
-        if (result.outcome === "live") counts.matchedCount += 1;
+        if (result.outcome === "live") {
+          counts.matchedCount += 1;
+          if (!firstExternalPostingRecorded) {
+            firstExternalPostingRecorded = true;
+            firstExternalPosting = {
+              jobId: observation.jobId,
+              poster: String(observation.poster ?? "").toLowerCase(),
+              observedAt: this.currentTime().toISOString()
+            };
+            this.eventBus?.publish?.({
+              id: `first-external-posting-${observation.jobId}`,
+              topic: "ops.first_external_posting",
+              wallet: firstExternalPosting.poster,
+              wallets: firstExternalPosting.poster ? [firstExternalPosting.poster] : [],
+              jobId: observation.jobId,
+              timestamp: firstExternalPosting.observedAt,
+              data: {
+                txHash: observation.txHash,
+                blockNumber: observation.blockNumber
+              }
+            });
+          }
+        }
         if (result.outcome === "mismatch") counts.mismatchCount += 1;
         if (result.outcome === "unknown") counts.unknownCount += 1;
       }
@@ -157,6 +181,8 @@ export class ExternalPostingWatcherService {
         lastMatchedCount: counts.matchedCount,
         lastMismatchCount: counts.mismatchCount,
         lastUnknownCount: counts.unknownCount,
+        firstExternalPostingRecorded,
+        ...(firstExternalPosting ? { firstExternalPosting } : {}),
         caughtUp: finalizedHead.caughtUp,
         finalizedBlockNumber: finalizedHead.blockNumber,
         finalizedBlockTimestamp: finalizedHead.blockTimestamp,

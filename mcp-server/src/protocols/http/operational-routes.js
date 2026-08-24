@@ -11,6 +11,7 @@ import {
   resolveServiceHealth
 } from "../../core/health-capability.js";
 import { buildOnboardingInventoryWarnings } from "../../core/onboarding-inventory.js";
+import { recordCapabilityWarningTransitions } from "../../services/overnight-ledger.js";
 
 function bearerTokenMatches(header, expectedToken) {
   const prefix = "Bearer ";
@@ -64,6 +65,7 @@ export function createOperationalRoutes({
   deployedSha = process.env.DEPLOYED_SHA?.trim() || "unknown",
   externalPostingMode = "closed",
   externalPostingWatcher,
+  eventBus,
   gateway,
   getRewardBankHealth,
   indexerHealthProbe,
@@ -149,6 +151,17 @@ export function createOperationalRoutes({
         externalPostingWatcherStatus
       });
       const productHealth = await getProductHealthSnapshot();
+      const warnings = [
+        ...buildCapabilityWarnings(capabilityHealth),
+        ...buildOnboardingInventoryWarnings(productHealth.onboarding),
+        ...buildSubmittedJobAutoVerifierWarnings(submittedJobAutoVerifierHealth),
+        ...buildLockedTierWarnings(lockedTierHealth)
+      ];
+      await recordCapabilityWarningTransitions({
+        stateStore,
+        eventBus,
+        warnings
+      }).catch(() => undefined);
 
       respond(response, serviceHealth.ok ? 200 : 503, {
         status: serviceHealth.ok ? "ok" : "degraded",
@@ -159,12 +172,7 @@ export function createOperationalRoutes({
         ...productHealth,
         // Structured, codeable warnings derived from capability and
         // correctness health without changing API-process liveness.
-        warnings: [
-          ...buildCapabilityWarnings(capabilityHealth),
-          ...buildOnboardingInventoryWarnings(productHealth.onboarding),
-          ...buildSubmittedJobAutoVerifierWarnings(submittedJobAutoVerifierHealth),
-          ...buildLockedTierWarnings(lockedTierHealth)
-        ],
+        warnings,
         components: {
           stateStore: storeHealth,
           blockchain: chainHealth,

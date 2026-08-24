@@ -1,7 +1,10 @@
 import { matchesFilter } from "./event-bus.js";
 
 export function listEventLogFromRecords(records, filter = {}) {
-  const limit = normalizeListLimit(filter.limit, 100, 500);
+  // Durable operator reads may need a complete 48-hour lifecycle window.
+  // Public routes still apply their own lower request caps before reaching
+  // this store helper.
+  const limit = normalizeListLimit(filter.limit, 100, 5_000);
   const lastEventId = String(filter.lastEventId ?? "").trim();
   const cursorIndex = lastEventId
     ? records.findIndex((event) => event.id === lastEventId)
