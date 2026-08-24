@@ -86,7 +86,10 @@ export const LITERAL_OVERRIDES = {
   INDEXER_STATUS_URL: "http://mainnet-indexer:42069/status",
   // Stable operator smoke identity. Fresh mainnet canary workers cannot be
   // listed here and use the short-lived server-signed marker instead.
-  ARRIVAL_SELF_WALLETS: "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+  // 0x42a4b866… is the operator yield-seed wallet (ladder memo L11a,
+  // registered 2026-08-24 BEFORE funding): its deposits and locks must
+  // classify as operator-run on every surface, never as external demand.
+  ARRIVAL_SELF_WALLETS: "0x9Ab8531FBb0948C542a31298FD61335f30064239,0x42a4b8663b8Cf5111898C8BE4bA75a010B0F0ABd",
   // The standing acceptance wallet (§7 instrument). Registered so acceptance
   // proofs and the Verify paid-door smoke are classified as OURS by every
   // downstream count — the smoke buyer must never read as external demand.
