@@ -328,6 +328,64 @@ test("MemoryStateStore indexes immutable work receipts by content id and upgrade
   assert.equal((await store.getRunReceiptDocument("session-work")).schemaVersion, "averray.work-receipt.v1");
 });
 
+test("MemoryStateStore job receipt index prefers approved receipt, otherwise the most recent final receipt", async () => {
+  const store = new MemoryStateStore();
+  const jobId = "Catalog-Job-Multi";
+  const receipt = (digit, outcome, verifiedAt) => ({
+    schemaVersion: "averray.work-receipt.v1",
+    receiptId: `0x${digit.repeat(64)}`,
+    sessionId: `Session-${digit}`,
+    jobId,
+    verdict: { outcome },
+    timestamps: { verifiedAt }
+  });
+  const rejectedOld = receipt("1", "rejected", "2026-08-24T08:00:00.000Z");
+  const rejectedNew = receipt("2", "rejected", "2026-08-24T10:00:00.000Z");
+  const approvedOlder = receipt("3", "approved", "2026-08-24T09:00:00.000Z");
+  const rejectedNewest = receipt("4", "rejected", "2026-08-24T11:00:00.000Z");
+
+  await store.putWorkReceiptDocument(rejectedOld.sessionId, rejectedOld);
+  await store.putWorkReceiptDocument(rejectedNew.sessionId, rejectedNew);
+  assert.equal((await store.getWorkReceiptDocumentByJob(jobId.toLowerCase())).receiptId, rejectedNew.receiptId);
+
+  await store.putWorkReceiptDocument(approvedOlder.sessionId, approvedOlder);
+  await store.putWorkReceiptDocument(rejectedNewest.sessionId, rejectedNewest);
+  assert.equal((await store.getWorkReceiptDocumentByJob(jobId.toUpperCase())).receiptId, approvedOlder.receiptId);
+  assert.equal((await store.getWorkReceiptDocumentBySession("SESSION-3")).receiptId, approvedOlder.receiptId);
+});
+
+test("RedisStateStore writes lowercase session and job receipt indexes", async () => {
+  const store = new RedisStateStore("redis://unused", "receipt-test");
+  const values = new Map();
+  store.connect = async () => {};
+  store.client = {
+    async set(key, value, options) {
+      if (!options?.NX || !values.has(key)) values.set(key, value);
+    },
+    async get(key) { return values.get(key); },
+    async eval(_script, { keys, arguments: args }) {
+      if (values.has(keys[0])) return 0;
+      values.set(keys[0], args[0]);
+      return 1;
+    }
+  };
+  const document = {
+    schemaVersion: "averray.work-receipt.v1",
+    receiptId: `0x${"a".repeat(64)}`,
+    sessionId: "Session-Mixed",
+    jobId: "Job-Mixed",
+    verdict: { outcome: "approved" },
+    timestamps: { verifiedAt: "2026-08-24T10:00:00.000Z" }
+  };
+
+  await store.putWorkReceiptDocument(document.sessionId, document);
+
+  assert.ok(values.has("receipt-test:work-receipt-session:session-mixed"));
+  assert.ok(values.has("receipt-test:work-receipt-job:job-mixed"));
+  assert.equal((await store.getWorkReceiptDocumentBySession("SESSION-MIXED")).receiptId, document.receiptId);
+  assert.equal((await store.getWorkReceiptDocumentByJob("JOB-MIXED")).receiptId, document.receiptId);
+});
+
 test("MemoryStateStore upgrades an unsigned badge with one signature only", async () => {
   const store = new MemoryStateStore();
   await store.putBadgeDocument("session-sign", { averray: { sessionId: "session-sign", category: "security" } });

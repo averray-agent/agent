@@ -2,6 +2,25 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/work-receipt-v1.json",
   "title": "Averray Work Receipt v1",
+  "x-averrayVersionFreeze": {
+    "frozenAt": "2026-08-24",
+    "storedFieldSetFrozen": true,
+    "futureAdditions": "serve_time_decoration_or_new_schema_version"
+  },
+  "x-averrayPresentationAliases": {
+    "buyer": {
+      "source": "intent.poster",
+      "stored": false,
+      "contentAddressed": false
+    }
+  },
+  "x-averrayCommitment": {
+    "name": "verdict_core",
+    "sections": ["intent", "execution", "verdict"],
+    "canonicalization": "work_receipt_content_address",
+    "excludedRootMaterial": ["settlement", "compatibility_identities", "signers", "signature", "receiptId", "canonicalUrl"],
+    "settlementExclusionReason": "Settlement cannot pre-exist the release transaction that consumes the verdict-core commitment."
+  },
   "type": "object",
   "required": ["schemaVersion", "kind", "receiptType", "receiptId", "sessionId", "jobId", "worker", "verifier", "intent", "execution", "verdict", "timestamps", "signers", "canonicalUrl"],
   "properties": {

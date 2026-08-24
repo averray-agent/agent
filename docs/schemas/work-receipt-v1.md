@@ -47,3 +47,42 @@ invented. A historical snapshot without recorded claim-time chain-read
 provenance is conservatively marked `chain_unavailable_fail_open`.
 
 The normative JSON shape is [`work-receipt-v1.json`](work-receipt-v1.json).
+
+## Version freeze
+
+The `averray.work-receipt.v1` stored field set is frozen as of 2026-08-24.
+Future consumer conveniences are serve-time presentation decorations, or they
+ship under a new `schemaVersion`; they are never added silently to a stored v1
+document. Existing stored receipts therefore remain byte-stable.
+
+## Presentation aliases
+
+Decorated API responses expose `buyer` as the consumer-facing alias of
+`intent.poster`. For job receipts that is the funding poster; for standalone
+Verify receipts it is the paying customer. `buyer` is computed only while
+serving the document: it is not a stored v1 field and does not alter the
+content address or signature.
+
+## Commitment (verdict core)
+
+The escrow-consumable verdict core is exactly these three root sections, in
+this order:
+
+```json
+["intent", "execution", "verdict"]
+```
+
+The slice is hashed with the same canonical JSON and SHA-256 procedure used by
+the work receipt content address. Root settlement evidence, compatibility
+identities outside the committed sections, signer attestations, signatures,
+and self-references are excluded. Identity values inside `intent` or
+`execution` remain part of the commitment because those complete sections are
+committed.
+
+Settlement is necessarily excluded: an approved receipt's settlement cannot
+exist before the release transaction that consumes this commitment. The
+binding therefore commits the verdict core before release and closes afterward
+through the completed receipt's settlement evidence. The decision and its
+rationale are recorded in
+[`MEMO_ESCROW_RECEIPT_BINDING.md`](../MEMO_ESCROW_RECEIPT_BINDING.md#decision-points),
+E1 and E8.

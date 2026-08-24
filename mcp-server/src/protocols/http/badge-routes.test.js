@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { NotFoundError, ValidationError } from "../../core/errors.js";
+import { MemoryStateStore } from "../../core/state-store.js";
 import { createBadgeRoutes, createListBadgeReceipts } from "./badge-routes.js";
 import { hashWorkReceiptContent } from "../../core/work-receipt.js";
 
@@ -56,6 +57,24 @@ const STORED_RUN_RECEIPT = {
   signers: SIGNERS,
   canonicalUrl: "https://api.averray.com/badges/session-pruned/run"
 };
+
+function addressedWorkReceipt({ sessionId, jobId, outcome = "approved", marker = "fixture" }) {
+  const content = {
+    schemaVersion: "averray.work-receipt.v1",
+    sessionId,
+    jobId,
+    marker,
+    verdict: { outcome, reasonCode: outcome === "approved" ? "MATCH" : "MISMATCH" },
+    intent: {
+      specSource: "chain_verified",
+      poster: "0x1111111111111111111111111111111111111111",
+      valueAtRisk: { asset: "USDC", amountRaw: "400000" }
+    },
+    settlement: { assetSymbol: "USDC", workerAmountRaw: "400000" },
+    timestamps: { verifiedAt: "2026-08-24T10:00:00.000Z" }
+  };
+  return { ...content, receiptId: hashWorkReceiptContent(content) };
+}
 
 function makeHarness(overrides = {}) {
   const calls = [];
@@ -381,7 +400,11 @@ test("GET /receipts preserves stored receipt bytes and decorates only after cont
   const content = {
     schemaVersion: "averray.work-receipt.v1",
     verdict: { outcome: "approved", reasonCode: "DETERMINISTIC_MATCH" },
-    intent: { specSource: "claim_snapshot", valueAtRisk: { asset: "USDC", amountRaw: "400000" } },
+    intent: {
+      specSource: "claim_snapshot",
+      poster: "0x1111111111111111111111111111111111111111",
+      valueAtRisk: { asset: "USDC", amountRaw: "400000" }
+    },
     settlement: { assetSymbol: "USDC", workerAmountRaw: "400000" }
   };
   const receiptId = hashWorkReceiptContent(content);
@@ -408,6 +431,7 @@ test("GET /receipts preserves stored receipt bytes and decorates only after cont
   assert.deepEqual(response.body, {
     ...workReceipt,
     result: "PASS",
+    buyer: workReceipt.intent.poster,
     assetContext: {
       symbol: "USDC",
       chain: "eip155:420420419",
@@ -416,23 +440,96 @@ test("GET /receipts preserves stored receipt bytes and decorates only after cont
       token: "0x0000053900000000000000000000000001200000"
     }
   });
-  const { result: _result, assetContext: _assetContext, ...servedCanonical } = response.body;
+  const { result: _result, assetContext: _assetContext, buyer: _buyer, ...servedCanonical } = response.body;
   assert.deepEqual(servedCanonical, workReceipt, "served receipt differs from storage only by presentation fields");
   assert.equal(response.headers["cache-control"], "public, max-age=31536000, immutable");
   assert.deepEqual(calls.map(([name]) => name), ["getWorkReceiptDocument", "respond"]);
 });
 
-test("GET /receipts/:receiptId rejects identifiers that are not content hashes", async () => {
+test("GET /receipts resolution order keeps exact receipt ids ahead of 0x-shaped job aliases", async () => {
+  const stateStore = new MemoryStateStore();
+  const exact = addressedWorkReceipt({ sessionId: "session-exact", jobId: "job-exact", marker: "exact" });
+  const aliasTarget = addressedWorkReceipt({
+    sessionId: "session-alias-target",
+    jobId: exact.receiptId,
+    marker: "job-alias-target"
+  });
+  await stateStore.putWorkReceiptDocument(exact.sessionId, exact);
+  await stateStore.putWorkReceiptDocument(aliasTarget.sessionId, aliasTarget);
+  const { response, route } = makeHarness({ stateStore });
+
+  await route({
+    request: { method: "GET" },
+    response,
+    url: new URL(`http://localhost/receipts/${exact.receiptId}`),
+    pathname: `/receipts/${exact.receiptId}`
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.receiptId, exact.receiptId);
+  assert.equal(response.body.marker, "exact");
+});
+
+test("GET /receipts session alias redirects once and the canonical fetch returns the immutable receipt", async () => {
+  const stateStore = new MemoryStateStore();
+  const document = addressedWorkReceipt({
+    sessionId: "Wiki-Session-R1:0xABC",
+    jobId: "wiki-job-r1",
+    marker: "session-round-trip"
+  });
+  await stateStore.putWorkReceiptDocument(document.sessionId, document);
+  const first = makeHarness({ stateStore });
+
+  await first.route({
+    request: { method: "GET" },
+    response: first.response,
+    url: new URL("http://localhost/receipts/wiki-session-r1%3A0xabc"),
+    pathname: "/receipts/wiki-session-r1%3A0xabc"
+  });
+
+  assert.equal(first.response.statusCode, 301);
+  assert.equal(first.response.headers.location, `/receipts/${document.receiptId}`);
+  const second = makeHarness({ stateStore });
+  await second.route({
+    request: { method: "GET" },
+    response: second.response,
+    url: new URL(`http://localhost${first.response.headers.location}`),
+    pathname: first.response.headers.location
+  });
+  assert.equal(second.response.statusCode, 200);
+  assert.equal(second.response.body.receiptId, document.receiptId);
+  assert.equal(second.response.body.marker, "session-round-trip");
+});
+
+test("GET /receipts job alias redirects to the selected canonical receipt", async () => {
+  const stateStore = new MemoryStateStore();
+  const document = addressedWorkReceipt({
+    sessionId: "session-job-alias",
+    jobId: "Catalog-Job-R7",
+    marker: "job-round-trip"
+  });
+  await stateStore.putWorkReceiptDocument(document.sessionId, document);
+  const { response, route } = makeHarness({ stateStore });
+  await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/receipts/catalog-job-r7"),
+    pathname: "/receipts/catalog-job-r7"
+  });
+  assert.equal(response.statusCode, 301);
+  assert.equal(response.headers.location, `/receipts/${document.receiptId}`);
+});
+
+test("GET /receipts returns not_found after exact, session, and job alias misses", async () => {
   const { response, route } = makeHarness({ stateStore: {} });
-  await assert.rejects(
-    route({
-      request: { method: "GET" },
-      response,
-      url: new URL("http://localhost/receipts/session-1"),
-      pathname: "/receipts/session-1"
-    }),
-    /receiptId must be a 32-byte content hash/u
-  );
+  await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/receipts/session-1"),
+    pathname: "/receipts/session-1"
+  });
+  assert.equal(response.statusCode, 404);
+  assert.deepEqual(response.body, { status: "not_found", kind: "work", id: "session-1" });
 });
 
 test("listBadgeReceipts exposes a persisted signature on the row and nested document", async () => {
