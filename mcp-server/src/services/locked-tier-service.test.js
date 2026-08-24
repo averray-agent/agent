@@ -295,3 +295,55 @@ test("new locked-deposit surfaces obey the ratified truth vocabulary", async () 
   assert.match(text, /priority/u);
   assert.match(text, /nav share/u);
 });
+
+// ── Seam test: the REAL door info shape must satisfy the quote's fail-closed
+// poolSnapshot requirements. The 2026-08-24 production incident: every quote
+// 409'd because the door's getInfo never emitted sharePrice while the service
+// required it — fixture poolInfo() had invented the field, so no test caught
+// the seam. This test feeds the service the door's actual output.
+import { DepositPoolDoorService } from "./deposit-pool-door.js";
+
+test("the real deposit-pool door info satisfies the locked-tier quote seam", async () => {
+  const h = harness();
+  const door = new DepositPoolDoorService({
+    poolAddress: "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30",
+    chainId: 420_420_419,
+    rpcUrls: ["https://example.invalid/"],
+    vestingHours: 48,
+    chainReader: {
+      async readSnapshot({ wallet }) {
+        return {
+          asset: USDC,
+          blockNumber: 123,
+          blockHash: `0x${"ab".repeat(32)}`,
+          blockTimestamp: 1_777_000_000,
+          totalAssets: "20000000",
+          totalSupply: "20000000",
+          bufferAssets: "10500000",
+          deployedPrincipal: "9500000",
+          totalAssetCap: "1000000000",
+          perAgentAssetCap: "100000000",
+          wallet: wallet
+            ? {
+                assetBalance: "1000000",
+                depositedAssets: "0",
+                shares: "0",
+                availableShares: "0",
+                allowance: "0"
+              }
+            : undefined
+        };
+      }
+    }
+  });
+  const poolInfoLive = await door.getInfo(SIGNER.address);
+  assert.equal(poolInfoLive.available, true);
+  assert.ok(poolInfoLive.sharePrice, "door info must carry sharePrice for the lock quote");
+  const quote = await h.service.quote(SIGNER.address, {
+    tier: "t90",
+    amountRaw: "25000000",
+    consentNonce: "seamnonce01"
+  }, { poolInfo: poolInfoLive });
+  assert.equal(quote.terms.tier, "t90");
+  assert.ok(quote.consent.message.length > 0);
+});
