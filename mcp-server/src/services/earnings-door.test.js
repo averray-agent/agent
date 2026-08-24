@@ -240,6 +240,22 @@ test("withdrawal standing matches a fresh wallet and omits the ineligible credit
   assert.equal(Object.hasOwn(result.standing, "creditInterestStatement"), false);
 });
 
+test("a wallet with no worker progression still gets an honest standing, not an error", async () => {
+  // Operator-run/synthetic wallets are excluded from progression by design, and
+  // a depositor-only wallet has never claimed a job. Either way the account view
+  // must still answer. Regression: the 2026-08-24 locked-deposit seed wallet
+  // made /me 500 with "Withdrawal standing is unavailable for this wallet."
+  const { door } = harness({ workerClaimCount: 0, progression: null });
+  const result = await door.buildWithdrawTransactions(WALLET, { amount: "1" });
+
+  assert.equal(result.standing.claimTier, null);
+  assert.equal(result.standing.badges, 0);
+  assert.equal(result.standing.waiverSlotsRemaining, 3);
+  assert.deepEqual(result.standing.creditInterest, { eligible: false, registered: false });
+  assert.equal(result.standing.workerProgression, "none — this wallet has no worker history");
+  assert.equal(result.standing.persists, true);
+});
+
 test("withdrawal standing matches a seasoned wallet's live tiers, badges, waiver use, and registration", async () => {
   const { door } = harness({
     workerClaimCount: 4,
