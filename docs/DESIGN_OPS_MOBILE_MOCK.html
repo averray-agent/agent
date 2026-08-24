@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@200;300;400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #050708; }
+  body { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; -webkit-font-smoothing: antialiased; }
+  a { color: #6fd3c5; text-decoration: none; }
+  a:hover { color: #9ee7dc; }
+  ::selection { background: #1d3a2c; color: #d7e0dd; }
+  @keyframes skel { 0%,100% { opacity: .35 } 50% { opacity: .8 } }
+</style>
+</helmet>
+<div style="--bg:#07090a;--panel:#0d1113;--panel-hi:#0f1417;--panel-alt:#0a0e10;--line:#1b2226;--line-strong:#263034;--ink:#d7e0dd;--ink-dim:#8a9895;--ink-mute:#5b6866;--ok:#46d17f;--ok-deep:#2c4a3d;--ok-bg:#0e1b15;--warn:#e0a03a;--warn-bg:#1c1609;--bad:#e2564a;--bad-bg:#1d0f0e;--mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;width:1320px;margin:0 auto;background:#050708;color:#d7e0dd;font-family:var(--mono);padding:0 20px 40px;box-sizing:border-box">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:52px;border-bottom:1px solid #1b2226;margin-bottom:22px">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="width:8px;height:8px;background:#46d17f;border-radius:1px"></div>
+      <span style="font:700 11px/1 var(--mono);letter-spacing:.22em;text-transform:uppercase">hermes / averray ops</span>
+      <span style="font:500 10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">mobile triage · 390px</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#46d17f;border:1px solid #234a35;background:#0e1b15;border-radius:2px;padding:4px 7px">live</span>
+      <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895;border:1px solid #263034;border-radius:2px;padding:4px 7px">loading</span>
+      <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px solid #4a3a17;background:#1c1609;border-radius:2px;padding:4px 7px">unauthorized</span>
+      <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e2564a;border:1px solid #4a2320;background:#1d0f0e;border-radius:2px;padding:4px 7px">unavailable</span>
+      <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866;border:1px dashed #263034;border-radius:2px;padding:4px 7px">mock · placeholder data</span>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:26px 30px;align-items:flex-start">
+
+    <div style="width:390px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:9px">
+        <span style="font:600 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">01 · status</span>
+        <span style="font:400 9px/1 var(--mono);letter-spacing:.08em;color:#5b6866">landing</span>
+      </div>
+      <div style="width:390px;min-height:844px;display:flex;flex-direction:column;background:#07090a;border:1px solid #1b2226;border-radius:3px;overflow:hidden;box-sizing:border-box">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px 6px;font:500 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums"><span>--:--</span><span style="display:flex;gap:5px;align-items:center"><span style="width:14px;height:5px;border:1px solid #263034;border-radius:1px"></span><span>—%</span></span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px 12px;border-bottom:1px solid #1b2226">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="width:7px;height:7px;background:#46d17f;border-radius:1px"></span>
+            <span style="font:700 10px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase">hermes ops</span>
+          </div>
+          <div style="display:flex;gap:0;border:1px solid #263034;border-radius:2px;overflow:hidden">
+            <button type="button" onClick="{{ set12 }}" style="{{ btn12 }}">12h</button>
+            <button type="button" onClick="{{ set24 }}" style="{{ btn24 }}">24h</button>
+            <button type="button" onClick="{{ set48 }}" style="{{ btn48 }}">48h</button>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 14px;border-bottom:1px solid #1b2226;background:#1c1609">
+          <span style="display:flex;align-items:center;gap:8px">
+            <span style="font:600 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px solid #4a3a17;border-radius:2px;padding:3px 6px">partial view</span>
+            <span style="font:400 10px/1 var(--mono);color:#8a9895">1 panel unreachable · no figure drawn as zero</span>
+          </span>
+          <span style="font:400 13px/1 var(--mono);color:#5b6866">›</span>
+        </div>
+
+        <div style="flex:1 1 auto;padding:14px 14px 18px;display:flex;flex-direction:column;gap:12px">
+
+          <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px;padding:16px 14px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <span style="font:600 9px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#5b6866">operator verdict</span>
+              <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#46d17f;border:1px solid #234a35;background:#0e1b15;border-radius:2px;padding:3px 6px">live</span>
+            </div>
+            <div style="font:300 40px/1 var(--mono);letter-spacing:.01em;color:#46d17f;margin-top:14px">CONFIRMED</div>
+            <div style="font:400 11px/1.55 var(--mono);color:#8a9895;margin-top:11px">— checks passing · — warnings open · sweep --:--</div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#1b2226;border:1px solid #1b2226;border-radius:2px">
+            <div style="background:#0d1113;padding:12px 12px 13px">
+              <div style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">settled {{ win }}</div>
+              <div style="font:300 26px/1 var(--mono);color:#5b6866;margin-top:10px;font-variant-numeric:tabular-nums">—</div>
+              <div style="font:400 9px/1.4 var(--mono);letter-spacing:.04em;color:#e0a03a;margin-top:8px">feed unreachable — retrying</div>
+            </div>
+            <div style="background:#0d1113;padding:12px 12px 13px">
+              <div style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">net paid</div>
+              <div style="font:300 26px/1 var(--mono);color:#d7e0dd;margin-top:10px;font-variant-numeric:tabular-nums">0.00</div>
+              <div style="font:400 9px/1 var(--mono);letter-spacing:.06em;color:#5b6866;margin-top:8px">USDC · 0.00 retained</div>
+            </div>
+            <div style="background:#0d1113;padding:12px 12px 13px">
+              <div style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">bank runway</div>
+              <div style="font:300 26px/1 var(--mono);color:#e0a03a;margin-top:10px;font-variant-numeric:tabular-nums">— <span style="font-size:11px;color:#5b6866">d</span></div>
+              <div style="font:400 9px/1 var(--mono);letter-spacing:.06em;color:#8a9895;margin-top:8px">liquid only · +0.00 rsv</div>
+            </div>
+            <div style="background:#0d1113;padding:12px 12px 13px">
+              <div style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">signer gas</div>
+              <div style="font:300 26px/1 var(--mono);color:#e0a03a;margin-top:10px;font-variant-numeric:tabular-nums">—</div>
+              <div style="font:400 9px/1 var(--mono);letter-spacing:.06em;color:#8a9895;margin-top:8px">DOT · below floor</div>
+            </div>
+          </div>
+
+          <div style="background:#0a0e10;border:1px solid #1b2226;border-radius:2px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid #1b2226;background:#0f1417">
+              <span style="font:600 9px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">overnight digest</span>
+              <span style="font:500 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px dashed #4a3a17;background:#1c1609;border-radius:2px;padding:3px 5px">needs ep</span>
+            </div>
+            <div style="display:flex;flex-direction:column">
+              <div style="display:flex;gap:8px;padding:10px 12px;border-bottom:1px solid #12181a"><span style="color:#46d17f;font:600 11px/1.6 var(--mono)">›</span><span style="font:400 11px/1.6 var(--mono);color:#d7e0dd;font-variant-numeric:tabular-nums">Last {{ winLower }}: — settlements by — wallets (— new) · 0.00 paid, 0.00 retained · bank 0.00 → 0.00 (0.00 locked).</span></div>
+              <div style="display:flex;gap:8px;padding:10px 12px;border-bottom:1px solid #12181a"><span style="color:#46d17f;font:600 11px/1.6 var(--mono)">›</span><span style="font:400 11px/1.6 var(--mono);color:#d7e0dd;font-variant-numeric:tabular-nums">Ladder: — graduated (→ pro) · — waiver windows exhausted · — first external postings.</span></div>
+              <div style="display:flex;gap:8px;padding:10px 12px"><span style="color:#e0a03a;font:600 11px/1.6 var(--mono)">›</span><span style="font:400 11px/1.6 var(--mono);color:#d7e0dd;font-variant-numeric:tabular-nums">— claims stuck · gas — DOT · — deploys · ledger {{ ledgerWord }} (Δ 0.00).</span></div>
+            </div>
+          </div>
+
+          <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid #1b2226;background:#0f1417">
+              <span style="font:600 9px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">act on this</span>
+              <button type="button" onClick="{{ toggleActs }}" style="background:transparent;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:500 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866" style-hover="color:#8a9895;border-color:#3a4649">{{ actsToggleLabel }}</button>
+            </div>
+            <sc-if value="{{ hasActs }}" hint-placeholder-val="{{ true }}">
+              <div>
+                <div style="display:grid;grid-template-columns:3px 1fr auto;column-gap:11px;align-items:center;padding:12px;border-bottom:1px solid #12181a" style-hover="background:#0f1417">
+                  <span style="align-self:stretch;background:#e2564a;border-radius:1px"></span>
+                  <div><div style="font:500 12px/1.4 var(--mono);color:#d7e0dd">signer gas below floor</div><div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:5px;font-variant-numeric:tabular-nums">— DOT · runway — d · top up</div></div>
+                  <span style="font:400 13px/1 var(--mono);color:#5b6866">›</span>
+                </div>
+                <div style="display:grid;grid-template-columns:3px 1fr auto;column-gap:11px;align-items:center;padding:12px;border-bottom:1px solid #12181a" style-hover="background:#0f1417">
+                  <span style="align-self:stretch;background:#e0a03a;border-radius:1px"></span>
+                  <div><div style="font:500 12px/1.4 var(--mono);color:#d7e0dd">— claim stuck &gt; threshold</div><div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:5px">0xSAMP…LE01 · since --:--</div></div>
+                  <span style="font:400 13px/1 var(--mono);color:#5b6866">›</span>
+                </div>
+                <div style="display:grid;grid-template-columns:3px 1fr auto;column-gap:11px;align-items:center;padding:12px" style-hover="background:#0f1417">
+                  <span style="align-self:stretch;background:#e0a03a;border-radius:1px"></span>
+                  <div><div style="font:500 12px/1.4 var(--mono);color:#d7e0dd">capability warning open</div><div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:5px">— · opened --:--</div></div>
+                  <span style="font:400 13px/1 var(--mono);color:#5b6866">›</span>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ noActs }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:34px 12px">
+                <span style="width:7px;height:7px;background:#46d17f;border-radius:50%"></span>
+                <span style="font:400 12px/1 var(--mono);color:#8a9895">nothing needs you</span>
+                <span style="font:400 9px/1 var(--mono);letter-spacing:.06em;color:#5b6866">— action items in {{ win }}</span>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(4,1fr) 66px;border-top:1px solid #1b2226;background:#0a0e10">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px;border-top:1px solid #46d17f;background:#0e1b15"><span style="width:12px;height:12px;border:1px solid #46d17f;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#46d17f">status</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">money</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">work</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">events</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px;border-left:1px solid #1b2226"><span style="display:flex;flex-direction:column;justify-content:center;gap:3px;width:12px;height:12px"><span style="height:1px;background:#3a4649"></span><span style="height:1px;background:#3a4649"></span><span style="height:1px;background:#3a4649"></span></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">more</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="width:390px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:9px">
+        <span style="font:600 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">01b · status</span>
+        <span style="font:400 9px/1 var(--mono);letter-spacing:.08em;color:#5b6866">loading skeleton</span>
+      </div>
+      <div style="width:390px;min-height:844px;display:flex;flex-direction:column;background:#07090a;border:1px solid #1b2226;border-radius:3px;overflow:hidden;box-sizing:border-box">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px 6px;font:500 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums"><span>--:--</span><span style="display:flex;gap:5px;align-items:center"><span style="width:14px;height:5px;border:1px solid #263034;border-radius:1px"></span><span>—%</span></span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px 12px;border-bottom:1px solid #1b2226">
+          <div style="display:flex;align-items:center;gap:8px"><span style="width:7px;height:7px;background:#2c4a3d;border-radius:1px"></span><span style="font:700 10px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:#8a9895">hermes ops</span></div>
+          <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895;border:1px solid #263034;border-radius:2px;padding:4px 7px">loading</span>
+        </div>
+        <div style="flex:1 1 auto;padding:14px 14px 18px;display:flex;flex-direction:column;gap:12px">
+          <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px;padding:16px 14px">
+            <div style="width:96px;height:8px;background:#161c1f;border-radius:1px;animation:skel 1.4s ease-in-out infinite"></div>
+            <div style="width:220px;height:34px;background:#161c1f;border-radius:1px;margin-top:16px;animation:skel 1.4s ease-in-out .1s infinite"></div>
+            <div style="width:250px;height:8px;background:#161c1f;border-radius:1px;margin-top:15px;animation:skel 1.4s ease-in-out .2s infinite"></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#1b2226;border:1px solid #1b2226;border-radius:2px">
+            <div style="background:#0d1113;padding:12px"><div style="width:62px;height:7px;background:#161c1f;animation:skel 1.4s ease-in-out infinite"></div><div style="width:44px;height:20px;background:#161c1f;margin-top:12px;animation:skel 1.4s ease-in-out .15s infinite"></div><div style="width:70px;height:7px;background:#161c1f;margin-top:10px;animation:skel 1.4s ease-in-out .25s infinite"></div></div>
+            <div style="background:#0d1113;padding:12px"><div style="width:52px;height:7px;background:#161c1f;animation:skel 1.4s ease-in-out .05s infinite"></div><div style="width:58px;height:20px;background:#161c1f;margin-top:12px;animation:skel 1.4s ease-in-out .2s infinite"></div><div style="width:80px;height:7px;background:#161c1f;margin-top:10px;animation:skel 1.4s ease-in-out .3s infinite"></div></div>
+            <div style="background:#0d1113;padding:12px"><div style="width:70px;height:7px;background:#161c1f;animation:skel 1.4s ease-in-out .1s infinite"></div><div style="width:40px;height:20px;background:#161c1f;margin-top:12px;animation:skel 1.4s ease-in-out .25s infinite"></div><div style="width:88px;height:7px;background:#161c1f;margin-top:10px;animation:skel 1.4s ease-in-out .35s infinite"></div></div>
+            <div style="background:#0d1113;padding:12px"><div style="width:58px;height:7px;background:#161c1f;animation:skel 1.4s ease-in-out .15s infinite"></div><div style="width:34px;height:20px;background:#161c1f;margin-top:12px;animation:skel 1.4s ease-in-out .3s infinite"></div><div style="width:76px;height:7px;background:#161c1f;margin-top:10px;animation:skel 1.4s ease-in-out .4s infinite"></div></div>
+          </div>
+          <div style="background:#0a0e10;border:1px solid #1b2226;border-radius:2px">
+            <div style="padding:9px 12px;border-bottom:1px solid #1b2226;background:#0f1417"><div style="width:104px;height:7px;background:#161c1f;animation:skel 1.4s ease-in-out infinite"></div></div>
+            <div style="padding:12px;display:flex;flex-direction:column;gap:9px">
+              <div style="width:100%;height:8px;background:#161c1f;animation:skel 1.4s ease-in-out infinite"></div>
+              <div style="width:88%;height:8px;background:#161c1f;animation:skel 1.4s ease-in-out .12s infinite"></div>
+              <div style="width:64%;height:8px;background:#161c1f;animation:skel 1.4s ease-in-out .24s infinite"></div>
+            </div>
+          </div>
+          <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px">
+            <div style="padding:9px 12px;border-bottom:1px solid #1b2226;background:#0f1417"><div style="width:78px;height:7px;background:#161c1f;animation:skel 1.4s ease-in-out infinite"></div></div>
+            <div style="padding:12px;display:flex;flex-direction:column;gap:13px">
+              <div style="display:flex;gap:11px"><div style="width:3px;height:30px;background:#161c1f"></div><div style="flex:1 1 auto"><div style="width:60%;height:8px;background:#161c1f;animation:skel 1.4s ease-in-out infinite"></div><div style="width:40%;height:7px;background:#161c1f;margin-top:8px;animation:skel 1.4s ease-in-out .1s infinite"></div></div></div>
+              <div style="display:flex;gap:11px"><div style="width:3px;height:30px;background:#161c1f"></div><div style="flex:1 1 auto"><div style="width:52%;height:8px;background:#161c1f;animation:skel 1.4s ease-in-out .2s infinite"></div><div style="width:34%;height:7px;background:#161c1f;margin-top:8px;animation:skel 1.4s ease-in-out .3s infinite"></div></div></div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;padding:2px 2px">
+            <span style="width:6px;height:6px;border:1px solid #2c4a3d;border-radius:50%;animation:skel 1.4s ease-in-out infinite"></span>
+            <span style="font:400 10px/1 var(--mono);letter-spacing:.06em;color:#5b6866">fetching {{ win }} window · no figure is drawn as zero until it arrives</span>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr) 66px;border-top:1px solid #1b2226;background:#0a0e10">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px;border-top:1px solid #46d17f;background:#0e1b15"><span style="width:12px;height:12px;border:1px solid #46d17f;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#46d17f">status</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">money</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">work</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">events</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px;border-left:1px solid #1b2226"><span style="display:flex;flex-direction:column;justify-content:center;gap:3px;width:12px;height:12px"><span style="height:1px;background:#3a4649"></span><span style="height:1px;background:#3a4649"></span><span style="height:1px;background:#3a4649"></span></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">more</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="width:390px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:9px">
+        <span style="font:600 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">02 · money</span>
+        <span style="font:400 9px/1 var(--mono);letter-spacing:.08em;color:#5b6866">ledger + solvency</span>
+      </div>
+      <div style="width:390px;display:flex;flex-direction:column;background:#07090a;border:1px solid #1b2226;border-radius:3px;overflow:hidden;box-sizing:border-box">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px 6px;font:500 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums"><span>--:--</span><span style="display:flex;gap:5px;align-items:center"><span style="width:14px;height:5px;border:1px solid #263034;border-radius:1px"></span><span>—%</span></span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px 12px;border-bottom:1px solid #1b2226">
+          <span style="font:600 10px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase">money</span>
+          <div style="display:flex;gap:0;border:1px solid #263034;border-radius:2px;overflow:hidden">
+            <button type="button" onClick="{{ set12 }}" style="{{ btn12 }}">12h</button>
+            <button type="button" onClick="{{ set24 }}" style="{{ btn24 }}">24h</button>
+            <button type="button" onClick="{{ set48 }}" style="{{ btn48 }}">48h</button>
+          </div>
+        </div>
+
+        <div style="flex:1 1 auto;padding:14px 14px 18px;display:flex;flex-direction:column;gap:12px">
+          <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid #1b2226;background:#0f1417">
+              <span style="font:600 9px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">movement — {{ win }}</span>
+              <span style="font:500 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px dashed #4a3a17;background:#1c1609;border-radius:2px;padding:3px 5px">needs ep</span>
+            </div>
+            <div style="padding:2px 12px 12px">
+              <div style="display:grid;grid-template-columns:14px 1fr auto;column-gap:10px;align-items:start">
+                <div style="display:flex;flex-direction:column;align-items:center;padding-top:15px"><span style="width:7px;height:7px;border:1px solid #46d17f;border-radius:50%"></span><span style="width:1px;flex:1 1 auto;min-height:26px;background:#1b2226"></span></div>
+                <div style="padding:13px 0 10px"><div style="font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase">opening liquid</div><div style="font:400 10px/1 var(--mono);color:#5b6866;margin-top:6px">window open · --:--</div></div>
+                <div style="padding:13px 0 10px;text-align:right"><span style="font:300 17px/1 var(--mono);font-variant-numeric:tabular-nums">0.00</span></div>
+              </div>
+              <div style="display:grid;grid-template-columns:14px 1fr auto;column-gap:10px;align-items:start;border-top:1px solid #12181a">
+                <div style="display:flex;flex-direction:column;align-items:center;padding-top:15px"><span style="width:7px;height:7px;border:1px solid #e2564a;border-radius:50%"></span><span style="width:1px;flex:1 1 auto;min-height:26px;background:#1b2226"></span></div>
+                <div style="padding:13px 0 10px"><div style="font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase">payouts out</div><div style="font:400 10px/1 var(--mono);color:#5b6866;margin-top:6px">— settlements · to — wallets</div></div>
+                <div style="padding:13px 0 10px;text-align:right"><span style="font:300 17px/1 var(--mono);color:#e2564a;font-variant-numeric:tabular-nums">−0.00</span></div>
+              </div>
+              <div style="display:grid;grid-template-columns:14px 1fr auto;column-gap:10px;align-items:start;border-top:1px solid #12181a">
+                <div style="display:flex;flex-direction:column;align-items:center;padding-top:15px"><span style="width:7px;height:7px;border:1px solid #46d17f;border-radius:50%"></span><span style="width:1px;flex:1 1 auto;min-height:26px;background:#1b2226"></span></div>
+                <div style="padding:13px 0 10px"><div style="font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase">retention in</div><div style="font:400 10px/1 var(--mono);color:#5b6866;margin-top:6px">charged share · fees</div></div>
+                <div style="padding:13px 0 10px;text-align:right"><span style="font:300 17px/1 var(--mono);color:#46d17f;font-variant-numeric:tabular-nums">+0.00</span></div>
+              </div>
+              <div style="display:grid;grid-template-columns:14px 1fr auto;column-gap:10px;align-items:start;border-top:1px solid #12181a">
+                <div style="display:flex;flex-direction:column;align-items:center;padding-top:15px"><span style="width:7px;height:7px;border:1px solid #e0a03a;border-radius:50%"></span><span style="width:1px;flex:1 1 auto;min-height:26px;background:#1b2226"></span></div>
+                <div style="padding:13px 0 10px"><div style="font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase">reserved Δ</div><div style="font:400 10px/1.5 var(--mono);color:#5b6866;margin-top:6px">locked behind minted / claimed jobs</div></div>
+                <div style="padding:13px 0 10px;text-align:right"><span style="font:300 17px/1 var(--mono);color:#e0a03a;font-variant-numeric:tabular-nums">±0.00</span></div>
+              </div>
+              <div style="display:grid;grid-template-columns:14px 1fr auto;column-gap:10px;align-items:center;border-top:1px solid #263034;background:#0b0f11;margin:0 -12px;padding:0 12px">
+                <div style="display:flex;justify-content:center"><span style="width:7px;height:7px;background:#46d17f;border-radius:50%"></span></div>
+                <div style="padding:13px 0"><div style="font:600 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase">closing liquid</div><div style="font:400 10px/1 var(--mono);color:#5b6866;margin-top:6px">window close · --:--</div></div>
+                <div style="padding:13px 0;text-align:right"><span style="font:300 22px/1 var(--mono);color:#46d17f;font-variant-numeric:tabular-nums">0.00</span></div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 -12px;padding:11px 12px;border-top:1px solid #1b2226;background:#0e1b15">
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <span style="display:flex;align-items:center;gap:7px"><span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#46d17f;border:1px solid #234a35;border-radius:2px;padding:3px 6px">confirmed</span><span style="font:400 10px/1 var(--mono);color:#8a9895">matches chain proof ✓</span></span>
+                  <a href="#payout-evidence" style="font:400 10px/1 var(--mono);letter-spacing:.04em">→ payout evidence · FLOW</a>
+                </div>
+                <span style="font:400 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">Δ 0.00</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid #1b2226;background:#0f1417">
+              <span style="font:600 9px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">solvency</span>
+              <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#46d17f;border:1px solid #234a35;background:#0e1b15;border-radius:2px;padding:3px 6px">live</span>
+            </div>
+
+            <div style="border-bottom:1px solid #12181a">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px" style-hover="background:#0f1417">
+                <div><div style="font:500 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase">signer gas</div><div style="font:400 10px/1 var(--mono);color:#e0a03a;margin-top:7px">below floor · runway — d</div></div>
+                <div style="display:flex;align-items:center;gap:9px"><span style="font:300 17px/1 var(--mono);color:#e0a03a;font-variant-numeric:tabular-nums">— <span style="font-size:10px;color:#5b6866">DOT</span></span><span style="font:400 13px/1 var(--mono);color:#5b6866">⌄</span></div>
+              </div>
+              <div style="padding:0 12px 13px">
+                <div style="position:relative;height:5px;background:#161c1f;border:1px solid #1b2226;border-radius:1px"><div style="width:0%;height:100%;background:#e0a03a"></div><div style="position:absolute;left:30%;top:-2px;bottom:-2px;width:1px;background:#e0a03a"></div></div>
+                <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:10px">
+                  <span style="font:400 10px/1 var(--mono);color:#5b6866">SS58</span>
+                  <button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>13SAMP…LE</button>
+                  <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866;border:1px solid #263034;border-radius:2px;padding:3px 6px">sample</span>
+                </div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:9px"><span style="font:400 10px/1 var(--mono);color:#8a9895">burn — / d</span><span style="font:400 10px/1 var(--mono);color:#8a9895">floor —</span></div>
+                <div style="margin-top:11px;padding:9px 10px;background:#0b0f11;border:1px solid #1b2226;border-radius:2px">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">top-up</span><span style="font:500 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px dashed #4a3a17;background:#1c1609;border-radius:2px;padding:3px 5px">needs ep</span></div>
+                  <div style="display:flex;align-items:center;gap:8px;margin-top:9px"><span style="font:400 11px/1 var(--mono)">13SAMP…LE</span><button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0d1113;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>copy</button></div>
+                  <div style="font:400 10px/1.55 var(--mono);color:#8a9895;margin-top:8px">send DOT · Polkadot Asset Hub</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="border-bottom:1px solid #12181a">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 12px 11px">
+                <div><div style="display:flex;align-items:center;gap:7px"><span style="font:500 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase">reward bank</span><span style="font:500 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895;border:1px solid #263034;border-radius:2px;padding:3px 5px">drop-in</span></div><div style="font:400 10px/1 var(--mono);color:#8a9895;margin-top:7px">runway — d <span style="color:#5b6866">(liquid only)</span></div></div>
+                <div style="display:flex;align-items:center;gap:9px"><span style="font:300 17px/1 var(--mono);font-variant-numeric:tabular-nums">0.00</span><span style="font:400 13px/1 var(--mono);color:#5b6866">⌄</span></div>
+              </div>
+              <div style="padding:0 12px 13px">
+                <div style="position:relative;display:flex;height:7px;background:#161c1f;border:1px solid #1b2226;border-radius:1px"><div style="width:62%;background:#46d17f"></div><div style="width:22%;background:#2c4a3d;border-left:1px solid #0d1113"></div><div style="position:absolute;left:30%;top:-2px;bottom:-2px;width:1px;background:#e0a03a"></div></div>
+                <div style="display:flex;align-items:center;gap:14px;margin-top:9px;flex-wrap:wrap">
+                  <span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;background:#46d17f;border-radius:1px"></span><span style="font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">liquid <span style="color:#d7e0dd">0.00</span></span></span>
+                  <span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;background:#2c4a3d;border-radius:1px"></span><span style="font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">reserved <span style="color:#d7e0dd">0.00</span></span></span>
+                </div>
+                <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:10px">
+                  <span style="font:400 10px/1 var(--mono);color:#5b6866">EVM</span>
+                  <button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>0xSAMP…LE02</button>
+                  <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866;border:1px solid #263034;border-radius:2px;padding:3px 6px">sample</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:9px;border-top:1px solid #12181a;font:400 10px/1 var(--mono);font-variant-numeric:tabular-nums;flex-wrap:wrap"><span style="color:#e2564a">liquid −0.00</span><span style="color:#5b6866">·</span><span style="color:#46d17f">reserved +0.00</span><span style="color:#5b6866">· {{ winLower }}</span></div>
+                <div style="margin-top:11px;padding:9px 10px;background:#0b0f11;border:1px solid #1b2226;border-radius:2px">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">top-up</span><span style="font:500 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px dashed #4a3a17;background:#1c1609;border-radius:2px;padding:3px 5px">needs ep</span></div>
+                  <div style="display:flex;align-items:center;gap:8px;margin-top:9px"><span style="font:400 11px/1 var(--mono)">13SAMP…LE</span><button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0d1113;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>copy</button></div>
+                  <div style="font:400 10px/1.55 var(--mono);color:#8a9895;margin-top:8px">send USDC · Polkadot Asset Hub <span style="color:#5b6866">(Coinbase: network “Polkadot”)</span></div>
+                  <div style="font:400 10px/1.55 var(--mono);color:#8a9895;margin-top:6px">lands in EOA — run <span style="color:#d7e0dd">fund-signer deposit</span> to move it into the bank</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;border-bottom:1px solid #12181a" style-hover="background:#0f1417">
+              <div><div style="font:500 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase">agent core</div><div style="font:400 10px/1 var(--mono);color:#46d17f;margin-top:7px">above floor · runway — d</div></div>
+              <div style="display:flex;align-items:center;gap:9px"><span style="font:300 17px/1 var(--mono);font-variant-numeric:tabular-nums">0.00</span><span style="font:400 13px/1 var(--mono);color:#5b6866">›</span></div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;border-bottom:1px solid #12181a" style-hover="background:#0f1417">
+              <div><div style="font:500 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase">treasury reserve</div><div style="font:400 10px/1 var(--mono);color:#46d17f;margin-top:7px">above floor · runway — d</div></div>
+              <div style="display:flex;align-items:center;gap:9px"><span style="font:300 17px/1 var(--mono);font-variant-numeric:tabular-nums">0.00</span><span style="font:400 13px/1 var(--mono);color:#5b6866">›</span></div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;border-bottom:1px solid #12181a" style-hover="background:#0f1417">
+              <div><div style="font:500 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase">escrow (in-flight)</div><div style="font:400 10px/1 var(--mono);color:#5b6866;margin-top:7px">— jobs locked · oldest --:--</div></div>
+              <div style="display:flex;align-items:center;gap:9px"><span style="font:300 17px/1 var(--mono);font-variant-numeric:tabular-nums">0.00</span><span style="font:400 13px/1 var(--mono);color:#5b6866">›</span></div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px" style-hover="background:#0f1417">
+              <div><div style="font:500 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase">protocol revenue</div><div style="font:400 10px/1 var(--mono);color:#8a9895;margin-top:7px">{{ winLower }} Δ +0.00</div></div>
+              <div style="display:flex;align-items:center;gap:9px"><span style="font:300 17px/1 var(--mono);font-variant-numeric:tabular-nums">0.00</span><span style="font:400 13px/1 var(--mono);color:#5b6866">›</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(4,1fr) 66px;border-top:1px solid #1b2226;background:#0a0e10;position:sticky;bottom:0">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">status</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px;border-top:1px solid #46d17f;background:#0e1b15"><span style="width:12px;height:12px;border:1px solid #46d17f;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#46d17f">money</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">work</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">events</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px;border-left:1px solid #1b2226"><span style="display:flex;flex-direction:column;justify-content:center;gap:3px;width:12px;height:12px"><span style="height:1px;background:#3a4649"></span><span style="height:1px;background:#3a4649"></span><span style="height:1px;background:#3a4649"></span></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">more</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="width:390px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:9px">
+        <span style="font:600 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">03 · work</span>
+        <span style="font:400 9px/1 var(--mono);letter-spacing:.08em;color:#5b6866">funnel + workers</span>
+      </div>
+      <div style="width:390px;display:flex;flex-direction:column;background:#07090a;border:1px solid #1b2226;border-radius:3px;overflow:hidden;box-sizing:border-box">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px 6px;font:500 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums"><span>--:--</span><span style="display:flex;gap:5px;align-items:center"><span style="width:14px;height:5px;border:1px solid #263034;border-radius:1px"></span><span>—%</span></span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px 12px;border-bottom:1px solid #1b2226">
+          <span style="font:600 10px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase">work</span>
+          <div style="display:flex;gap:0;border:1px solid #263034;border-radius:2px;overflow:hidden">
+            <button type="button" onClick="{{ set12 }}" style="{{ btn12 }}">12h</button>
+            <button type="button" onClick="{{ set24 }}" style="{{ btn24 }}">24h</button>
+            <button type="button" onClick="{{ set48 }}" style="{{ btn48 }}">48h</button>
+          </div>
+        </div>
+
+        <div style="flex:1 1 auto;padding:14px 14px 18px;display:flex;flex-direction:column;gap:12px">
+          <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid #1b2226;background:#0f1417">
+              <span style="font:600 9px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">money path — {{ win }}</span>
+              <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#46d17f;border:1px solid #234a35;background:#0e1b15;border-radius:2px;padding:3px 6px">live</span>
+            </div>
+            <div style="padding:12px">
+              <div style="display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;padding-bottom:11px">
+                <div><div style="font:500 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase">claimed</div><div style="height:5px;margin-top:9px;background:#161c1f;border:1px solid #1b2226;border-radius:1px"><div style="width:0%;height:100%;background:#46d17f"></div></div></div>
+                <span style="font:300 20px/1 var(--mono);font-variant-numeric:tabular-nums">—</span>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;padding:11px 0;border-top:1px solid #12181a">
+                <div><div style="display:flex;align-items:baseline;gap:8px"><span style="font:500 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase">submitted</span><span style="font:400 10px/1 var(--mono);color:#5b6866">—% of claimed</span></div><div style="height:5px;margin-top:9px;background:#161c1f;border:1px solid #1b2226;border-radius:1px"><div style="width:0%;height:100%;background:#46d17f"></div></div></div>
+                <span style="font:300 20px/1 var(--mono);font-variant-numeric:tabular-nums">—</span>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;padding:11px 0 0;border-top:1px solid #12181a">
+                <div><div style="display:flex;align-items:baseline;gap:8px"><span style="font:500 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase">settled</span><span style="font:400 10px/1 var(--mono);color:#5b6866">—% of submitted</span></div><div style="height:5px;margin-top:9px;background:#161c1f;border:1px solid #1b2226;border-radius:1px"><div style="width:0%;height:100%;background:#46d17f"></div></div></div>
+                <span style="font:300 20px/1 var(--mono);color:#46d17f;font-variant-numeric:tabular-nums">—</span>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid #12181a">
+                <span style="font:400 10px/1 var(--mono);color:#8a9895">— stuck &gt; threshold</span>
+                <a href="#payout-evidence" style="font:400 10px/1 var(--mono)">→ payout evidence · FLOW</a>
+              </div>
+            </div>
+          </div>
+
+          <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid #1b2226;background:#0f1417">
+              <span style="font:600 9px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">workers — {{ win }}</span>
+              <span style="font:500 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px dashed #4a3a17;background:#1c1609;border-radius:2px;padding:3px 5px">needs ep</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-bottom:1px solid #12181a;background:#0b0f11">
+              <span style="font:400 9px/1 var(--mono);letter-spacing:.08em;color:#5b6866">— wallets · sorted by net earned</span>
+              <span style="font:400 9px/1 var(--mono);letter-spacing:.08em;color:#5b6866">card per wallet</span>
+            </div>
+
+            <div style="padding:12px;border-bottom:1px solid #12181a">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                <span style="font:500 12px/1 var(--mono)">0xSAMP…LE01</span>
+                <span style="font:300 17px/1 var(--mono);color:#46d17f;font-variant-numeric:tabular-nums">0.00 <span style="font-size:9px;color:#5b6866">NET</span></span>
+              </div>
+              <div style="font:400 10px/1 var(--mono);color:#8a9895;margin-top:8px;font-variant-numeric:tabular-nums">--:-- → --:-- · —h · gross 0.00 <span style="color:#5b6866">→</span> net 0.00</div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:11px;background:#1b2226;border:1px solid #1b2226;border-radius:2px">
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">claims</div><div style="font:400 12px/1 var(--mono);margin-top:7px;font-variant-numeric:tabular-nums">—</div></div>
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">appr</div><div style="font:400 12px/1 var(--mono);color:#46d17f;margin-top:7px;font-variant-numeric:tabular-nums">—</div></div>
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">rej</div><div style="font:400 12px/1 var(--mono);color:#5b6866;margin-top:7px;font-variant-numeric:tabular-nums">—</div></div>
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">waiver n/3</div><div style="display:flex;align-items:center;gap:4px;margin-top:7px"><span style="width:5px;height:5px;border:1px solid #2c4a3d;border-radius:50%"></span><span style="width:5px;height:5px;border:1px solid #2c4a3d;border-radius:50%"></span><span style="width:5px;height:5px;border:1px solid #2c4a3d;border-radius:50%"></span><span style="font:400 10px/1 var(--mono);color:#5b6866">0/3</span></div></div>
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">tier</div><div style="font:400 11px/1 var(--mono);color:#5b6866;margin-top:7px">—</div></div>
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">retention</div><div style="font:400 11px/1 var(--mono);color:#8a9895;margin-top:7px;font-variant-numeric:tabular-nums">0.00</div></div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums"><span>balance now <span style="color:#d7e0dd">0.00</span></span><span>withdrawn <span style="color:#d7e0dd">0.00</span></span></div>
+            </div>
+
+            <div style="padding:12px;border-bottom:1px solid #12181a">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                <span style="display:flex;align-items:center;gap:7px"><span style="font:500 12px/1 var(--mono)">0xSAMP…LE04</span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#46d17f;border:1px solid #234a35;background:#0e1b15;border-radius:2px;padding:3px 4px">new</span></span>
+                <span style="font:300 17px/1 var(--mono);color:#46d17f;font-variant-numeric:tabular-nums">0.00 <span style="font-size:9px;color:#5b6866">NET</span></span>
+              </div>
+              <div style="font:400 10px/1 var(--mono);color:#8a9895;margin-top:8px;font-variant-numeric:tabular-nums">--:-- → --:-- · —h · gross 0.00 <span style="color:#5b6866">→</span> net 0.00</div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:11px;background:#1b2226;border:1px solid #1b2226;border-radius:2px">
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">claims</div><div style="font:400 12px/1 var(--mono);margin-top:7px;font-variant-numeric:tabular-nums">—</div></div>
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">appr</div><div style="font:400 12px/1 var(--mono);color:#46d17f;margin-top:7px;font-variant-numeric:tabular-nums">—</div></div>
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">rej</div><div style="font:400 12px/1 var(--mono);color:#5b6866;margin-top:7px;font-variant-numeric:tabular-nums">—</div></div>
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">waiver n/3</div><div style="display:flex;align-items:center;gap:4px;margin-top:7px"><span style="width:5px;height:5px;background:#2c4a3d;border-radius:50%"></span><span style="width:5px;height:5px;border:1px solid #2c4a3d;border-radius:50%"></span><span style="width:5px;height:5px;border:1px solid #2c4a3d;border-radius:50%"></span><span style="font:400 10px/1 var(--mono);color:#5b6866">—/3</span></div></div>
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">tier</div><div style="font:400 11px/1 var(--mono);color:#5b6866;margin-top:7px">—</div></div>
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">retention</div><div style="font:400 11px/1 var(--mono);color:#8a9895;margin-top:7px;font-variant-numeric:tabular-nums">0.00 <span style="color:#e0a03a;font-size:9px">waived</span></div></div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums"><span>balance now <span style="color:#d7e0dd">0.00</span></span><span>withdrawn <span style="color:#5b6866">—</span></span></div>
+            </div>
+
+            <div style="padding:12px;border-bottom:1px solid #12181a">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                <span style="font:500 12px/1 var(--mono)">0xSAMP…LE02</span>
+                <span style="font:300 17px/1 var(--mono);color:#46d17f;font-variant-numeric:tabular-nums">0.00 <span style="font-size:9px;color:#5b6866">NET</span></span>
+              </div>
+              <div style="font:400 10px/1 var(--mono);color:#8a9895;margin-top:8px;font-variant-numeric:tabular-nums">--:-- → --:-- · —h · gross 0.00 <span style="color:#5b6866">→</span> net 0.00</div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:11px;background:#1b2226;border:1px solid #1b2226;border-radius:2px">
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">claims</div><div style="font:400 12px/1 var(--mono);margin-top:7px;font-variant-numeric:tabular-nums">—</div></div>
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">appr</div><div style="font:400 12px/1 var(--mono);color:#46d17f;margin-top:7px;font-variant-numeric:tabular-nums">—</div></div>
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">rej</div><div style="font:400 12px/1 var(--mono);color:#e0a03a;margin-top:7px;font-variant-numeric:tabular-nums">—</div></div>
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">waiver n/3</div><div style="display:flex;align-items:center;gap:4px;margin-top:7px"><span style="width:5px;height:5px;background:#2c4a3d;border-radius:50%"></span><span style="width:5px;height:5px;background:#2c4a3d;border-radius:50%"></span><span style="width:5px;height:5px;border:1px solid #2c4a3d;border-radius:50%"></span><span style="font:400 10px/1 var(--mono);color:#5b6866">—/3</span></div></div>
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">tier</div><div style="font:400 11px/1 var(--mono);color:#46d17f;margin-top:7px">→ pro</div></div>
+                <div style="background:#0b0f11;padding:8px 9px"><div style="font:600 8px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866">retention</div><div style="font:400 11px/1 var(--mono);color:#8a9895;margin-top:7px;font-variant-numeric:tabular-nums">0.00</div></div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums"><span>balance now <span style="color:#d7e0dd">0.00</span></span><span>withdrawn <span style="color:#d7e0dd">0.00</span></span></div>
+            </div>
+
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 12px;background:#0b0f11">
+              <span style="font:600 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895">window total</span>
+              <span style="font:400 11px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">0.00 <span style="color:#5b6866">→</span> <span style="color:#46d17f">0.00</span> net</span>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:8px;padding:0 2px">
+            <span style="font:400 9px/1.6 var(--mono);letter-spacing:.04em;color:#5b6866">WAIVER = claim-economics free window · TIER = reputation ladder. Separate fields, never one column.</span>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(4,1fr) 66px;border-top:1px solid #1b2226;background:#0a0e10">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">status</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">money</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px;border-top:1px solid #46d17f;background:#0e1b15"><span style="width:12px;height:12px;border:1px solid #46d17f;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#46d17f">work</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">events</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px;border-left:1px solid #1b2226"><span style="display:flex;flex-direction:column;justify-content:center;gap:3px;width:12px;height:12px"><span style="height:1px;background:#3a4649"></span><span style="height:1px;background:#3a4649"></span><span style="height:1px;background:#3a4649"></span></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">more</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="width:390px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:9px">
+        <span style="font:600 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">04 · events</span>
+        <span style="font:400 9px/1 var(--mono);letter-spacing:.08em;color:#5b6866">feed · filterable</span>
+      </div>
+      <div style="width:390px;min-height:844px;display:flex;flex-direction:column;background:#07090a;border:1px solid #1b2226;border-radius:3px;overflow:hidden;box-sizing:border-box">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px 6px;font:500 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums"><span>--:--</span><span style="display:flex;gap:5px;align-items:center"><span style="width:14px;height:5px;border:1px solid #263034;border-radius:1px"></span><span>—%</span></span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px 12px;border-bottom:1px solid #1b2226">
+          <span style="font:600 10px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase">events</span>
+          <div style="display:flex;gap:0;border:1px solid #263034;border-radius:2px;overflow:hidden">
+            <button type="button" onClick="{{ set12 }}" style="{{ btn12 }}">12h</button>
+            <button type="button" onClick="{{ set24 }}" style="{{ btn24 }}">24h</button>
+            <button type="button" onClick="{{ set48 }}" style="{{ btn48 }}">48h</button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:7px;padding:10px 14px;border-bottom:1px solid #1b2226;background:#0a0e10">
+          <button type="button" onClick="{{ sevAll }}" style="{{ chipAll }}">all</button>
+          <button type="button" onClick="{{ sevOk }}" style="{{ chipOk }}">ok</button>
+          <button type="button" onClick="{{ sevWarn }}" style="{{ chipWarn }}">warn</button>
+          <button type="button" onClick="{{ sevFault }}" style="{{ chipFault }}">fault</button>
+          <span style="margin-left:auto;font:400 9px/1 var(--mono);letter-spacing:.08em;color:#5b6866">{{ win }}</span>
+        </div>
+
+        <div style="flex:1 1 auto">
+          <div style="display:grid;grid-template-columns:16px 1fr;column-gap:10px;padding:12px 14px;border-bottom:1px solid #12181a" style-hover="background:#0d1113">
+            <span style="width:6px;height:6px;background:#46d17f;border-radius:50%;margin-top:5px"></span>
+            <div><div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px"><span style="font:500 11px/1.4 var(--mono)">wallet graduated <span style="color:#46d17f">→ pro</span></span><span style="font:400 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">--:--</span></div><div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:6px">0xSAMP…LE02</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:16px 1fr;column-gap:10px;padding:12px 14px;border-bottom:1px solid #12181a" style-hover="background:#0d1113">
+            <span style="width:6px;height:6px;background:#e0a03a;border-radius:50%;margin-top:5px"></span>
+            <div><div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px"><span style="font:500 11px/1.4 var(--mono);color:#e0a03a">waiver window exhausted</span><span style="font:400 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">--:--</span></div><div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:6px">0xSAMP…LE03 · retention now charged</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:16px 1fr;column-gap:10px;padding:12px 14px;border-bottom:1px solid #12181a" style-hover="background:#0d1113">
+            <span style="width:6px;height:6px;background:#46d17f;border-radius:50%;margin-top:5px"></span>
+            <div><div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px"><span style="font:500 11px/1.4 var(--mono)">first external posting</span><span style="font:400 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">--:--</span></div><div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:6px">0xSAMP…LE04 <span style="color:#46d17f">new</span></div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:16px 1fr;column-gap:10px;padding:12px 14px;border-bottom:1px solid #12181a" style-hover="background:#0d1113">
+            <span style="width:6px;height:6px;background:#e2564a;border-radius:50%;margin-top:5px"></span>
+            <div><div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px"><span style="font:500 11px/1.4 var(--mono);color:#e2564a">capability warning opened</span><span style="font:400 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">--:--</span></div><div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:6px">— · gas below floor</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:16px 1fr;column-gap:10px;padding:12px 14px;border-bottom:1px solid #12181a" style-hover="background:#0d1113">
+            <span style="width:6px;height:6px;background:#e0a03a;border-radius:50%;margin-top:5px"></span>
+            <div><div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px"><span style="font:500 11px/1.4 var(--mono)">claim stuck &gt; threshold</span><span style="font:400 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">--:--</span></div><div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:6px">0xSAMP…LE01</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:16px 1fr;column-gap:10px;padding:12px 14px;border-bottom:1px solid #12181a" style-hover="background:#0d1113">
+            <span style="width:6px;height:6px;background:#46d17f;border-radius:50%;margin-top:5px"></span>
+            <div><div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px"><span style="font:500 11px/1.4 var(--mono)">capability warning closed</span><span style="font:400 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">--:--</span></div><div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:6px">open —</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:16px 1fr;column-gap:10px;padding:12px 14px;border-bottom:1px solid #12181a" style-hover="background:#0d1113">
+            <span style="width:6px;height:6px;background:#2c4a3d;border-radius:50%;margin-top:5px"></span>
+            <div><div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px"><span style="font:500 11px/1.4 var(--mono);color:#8a9895">deploy · build —</span><span style="font:400 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">--:--</span></div></div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:16px 14px">
+            <span style="width:5px;height:5px;border:1px solid #2c4a3d;border-radius:50%;animation:skel 1.4s ease-in-out infinite"></span>
+            <span style="font:400 10px/1 var(--mono);letter-spacing:.06em;color:#5b6866">loading older events…</span>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(4,1fr) 66px;border-top:1px solid #1b2226;background:#0a0e10">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">status</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">money</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">work</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px;border-top:1px solid #46d17f;background:#0e1b15"><span style="width:12px;height:12px;border:1px solid #46d17f;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#46d17f">events</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px;border-left:1px solid #1b2226"><span style="display:flex;flex-direction:column;justify-content:center;gap:3px;width:12px;height:12px"><span style="height:1px;background:#3a4649"></span><span style="height:1px;background:#3a4649"></span><span style="height:1px;background:#3a4649"></span></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">more</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="width:390px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:9px">
+        <span style="font:600 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">04b · events</span>
+        <span style="font:400 9px/1 var(--mono);letter-spacing:.08em;color:#5b6866">empty in window</span>
+      </div>
+      <div style="width:390px;min-height:844px;display:flex;flex-direction:column;background:#07090a;border:1px solid #1b2226;border-radius:3px;overflow:hidden;box-sizing:border-box">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px 6px;font:500 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums"><span>--:--</span><span style="display:flex;gap:5px;align-items:center"><span style="width:14px;height:5px;border:1px solid #263034;border-radius:1px"></span><span>—%</span></span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px 12px;border-bottom:1px solid #1b2226">
+          <span style="font:600 10px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase">events</span>
+          <div style="display:flex;gap:0;border:1px solid #263034;border-radius:2px;overflow:hidden">
+            <button type="button" onClick="{{ set12 }}" style="{{ btn12 }}">12h</button>
+            <button type="button" onClick="{{ set24 }}" style="{{ btn24 }}">24h</button>
+            <button type="button" onClick="{{ set48 }}" style="{{ btn48 }}">48h</button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:7px;padding:10px 14px;border-bottom:1px solid #1b2226;background:#0a0e10">
+          <button type="button" onClick="{{ sevAll }}" style="{{ chipAll }}">all</button>
+          <button type="button" onClick="{{ sevOk }}" style="{{ chipOk }}">ok</button>
+          <button type="button" onClick="{{ sevWarn }}" style="{{ chipWarn }}">warn</button>
+          <button type="button" onClick="{{ sevFault }}" style="{{ chipFault }}">fault</button>
+          <span style="margin-left:auto;font:400 9px/1 var(--mono);letter-spacing:.08em;color:#5b6866">{{ win }}</span>
+        </div>
+        <div style="flex:1 1 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:11px;padding:40px 26px">
+          <span style="width:24px;height:24px;border:1px solid #263034;border-radius:2px"></span>
+          <span style="font:400 12px/1.5 var(--mono);color:#8a9895;text-align:center">no events in this window.</span>
+          <span style="font:400 10px/1.6 var(--mono);color:#5b6866;text-align:center;text-wrap:pretty">the feed is live and reachable — nothing was recorded in the last {{ winLower }}.</span>
+          <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#46d17f;border:1px solid #234a35;background:#0e1b15;border-radius:2px;padding:4px 7px;margin-top:2px">live · 0 rows</span>
+          <button type="button" onClick="{{ set48 }}" style="margin-top:6px;background:transparent;border:1px solid #263034;border-radius:2px;padding:7px 11px;cursor:pointer;font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f">widen to 48h</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr) 66px;border-top:1px solid #1b2226;background:#0a0e10">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">status</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">money</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">work</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px;border-top:1px solid #46d17f;background:#0e1b15"><span style="width:12px;height:12px;border:1px solid #46d17f;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#46d17f">events</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px;border-left:1px solid #1b2226"><span style="display:flex;flex-direction:column;justify-content:center;gap:3px;width:12px;height:12px"><span style="height:1px;background:#3a4649"></span><span style="height:1px;background:#3a4649"></span><span style="height:1px;background:#3a4649"></span></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">more</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="width:390px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:9px">
+        <span style="font:600 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">05 · more</span>
+        <span style="font:400 9px/1 var(--mono);letter-spacing:.08em;color:#5b6866">full-height sheet</span>
+      </div>
+      <div style="width:390px;min-height:844px;display:flex;flex-direction:column;background:#07090a;border:1px solid #1b2226;border-radius:3px;overflow:hidden;box-sizing:border-box">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px 6px;font:500 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums"><span>--:--</span><span style="display:flex;gap:5px;align-items:center"><span style="width:14px;height:5px;border:1px solid #263034;border-radius:1px"></span><span>—%</span></span></div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:0;padding:2px 0 0">
+          <span style="width:34px;height:3px;background:#263034;border-radius:2px"></span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid #1b2226">
+          <span style="font:600 10px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase">more</span>
+          <button type="button" style="background:transparent;border:1px solid #263034;border-radius:2px;padding:6px 9px;cursor:pointer;min-height:30px;font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f">close ✕</button>
+        </div>
+
+        <div style="flex:1 1 auto;padding:14px 14px 18px;display:flex;flex-direction:column;gap:12px">
+
+          <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px;padding:13px 12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <span style="font:600 9px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#5b6866">operator session</span>
+              <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866;border:1px solid #263034;border-radius:2px;padding:3px 6px">sample</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:12px">
+              <span style="font:400 12px/1 var(--mono)">0xSAMP…LE01</span>
+              <button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:4px 7px;cursor:pointer;font:400 9px/1 var(--mono);color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>copy</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:11px">
+              <span style="font:500 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#46d17f;border:1px solid #234a35;background:#0e1b15;border-radius:2px;padding:3px 5px">ops:read</span>
+              <span style="font:500 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#e0a03a;border:1px solid #4a3a17;background:#1c1609;border-radius:2px;padding:3px 5px">ops:view missing</span>
+              <span style="font:400 9px/1 var(--mono);color:#5b6866">monitor token · expires --:--</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:12px;padding-top:11px;border-top:1px solid #12181a">
+              <span style="font:400 10px/1 var(--mono);color:#8a9895">window · governs every screen</span>
+              <div style="display:flex;gap:0;border:1px solid #263034;border-radius:2px;overflow:hidden">
+                <button type="button" onClick="{{ set12 }}" style="{{ btn12 }}">12h</button>
+                <button type="button" onClick="{{ set24 }}" style="{{ btn24 }}">24h</button>
+                <button type="button" onClick="{{ set48 }}" style="{{ btn48 }}">48h</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px">
+            <div style="padding:9px 12px;border-bottom:1px solid #1b2226;background:#0f1417"><span style="font:600 9px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">on mobile</span></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;border-bottom:1px solid #12181a" style-hover="background:#0f1417">
+              <div><div style="font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase">probe grid</div><div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:7px">— probes · — failing</div></div>
+              <span style="font:400 13px/1 var(--mono);color:#5b6866">›</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;border-bottom:1px solid #12181a" style-hover="background:#0f1417">
+              <div><div style="font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase">llm spend</div><div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:7px">{{ winLower }} 0.00 · budget 0.00</div></div>
+              <span style="font:400 13px/1 var(--mono);color:#5b6866">›</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;border-bottom:1px solid #12181a" style-hover="background:#0f1417">
+              <div><div style="font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase">retention &amp; waivers</div><div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:7px">charged 0.00 · waived 0.00</div></div>
+              <span style="font:400 13px/1 var(--mono);color:#5b6866">›</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px" style-hover="background:#0f1417">
+              <div><div style="font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase">deposit pool</div><div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:7px">0.00 · — depositors</div></div>
+              <span style="font:400 13px/1 var(--mono);color:#5b6866">›</span>
+            </div>
+          </div>
+
+          <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid #1b2226;background:#0f1417">
+              <span style="font:600 9px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">desktop routes</span>
+              <span style="font:400 9px/1 var(--mono);letter-spacing:.08em;color:#5b6866">gate card on tap</span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;border-bottom:1px solid #12181a" style-hover="background:#0f1417">
+              <div><div style="font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase">bank-lane detail</div><div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:7px">wide multi-lane reconciliation</div></div>
+              <span style="display:flex;align-items:center;gap:7px"><span style="font:500 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866;border:1px solid #263034;border-radius:2px;padding:3px 5px;white-space:nowrap">desktop</span><span style="font:400 13px/1 var(--mono);color:#5b6866">›</span></span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;border-bottom:1px solid #12181a" style-hover="background:#0f1417">
+              <div><div style="font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase">payout evidence table</div><div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:7px">full proof rows</div></div>
+              <span style="display:flex;align-items:center;gap:7px"><span style="font:500 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866;border:1px solid #263034;border-radius:2px;padding:3px 5px;white-space:nowrap">desktop</span><span style="font:400 13px/1 var(--mono);color:#5b6866">›</span></span>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px" style-hover="background:#0f1417">
+              <div><div style="font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase">probe grid (full)</div><div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:7px">— × — matrix</div></div>
+              <span style="display:flex;align-items:center;gap:7px"><span style="font:500 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866;border:1px solid #263034;border-radius:2px;padding:3px 5px;white-space:nowrap">desktop</span><span style="font:400 13px/1 var(--mono);color:#5b6866">›</span></span>
+            </div>
+          </div>
+
+          <button type="button" style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;background:#0d1113;border:1px solid #4a2320;border-radius:2px;padding:13px;cursor:pointer;min-height:44px;font:600 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#e2564a" style-hover="background:#1d0f0e">sign out</button>
+
+          <span style="font:400 9px/1.6 var(--mono);letter-spacing:.04em;color:#5b6866;padding:0 2px">mobile &lt; 768 · tablet ≤ 1079 · desktop board unchanged ≥ 1080</span>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(4,1fr) 66px;border-top:1px solid #1b2226;background:#0a0e10">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">status</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">money</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">work</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">events</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px;border-left:1px solid #1b2226;border-top:1px solid #46d17f;background:#0e1b15"><span style="display:flex;flex-direction:column;justify-content:center;gap:3px;width:12px;height:12px"><span style="height:1px;background:#46d17f"></span><span style="height:1px;background:#46d17f"></span><span style="height:1px;background:#46d17f"></span></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#46d17f">more</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="width:390px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:9px">
+        <span style="font:600 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">05b · routes &amp; states</span>
+        <span style="font:400 9px/1 var(--mono);letter-spacing:.08em;color:#5b6866">gate card · unauthorized</span>
+      </div>
+      <div style="width:390px;min-height:844px;display:flex;flex-direction:column;background:#07090a;border:1px solid #1b2226;border-radius:3px;overflow:hidden;box-sizing:border-box">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px 6px;font:500 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums"><span>--:--</span><span style="display:flex;gap:5px;align-items:center"><span style="width:14px;height:5px;border:1px solid #263034;border-radius:1px"></span><span>—%</span></span></div>
+        <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #1b2226">
+          <span style="font:400 13px/1 var(--mono);color:#8a9895">‹</span>
+          <span style="font:600 10px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase">bank-lane detail</span>
+        </div>
+
+        <div style="flex:1 1 auto;padding:14px 14px 18px;display:flex;flex-direction:column;gap:12px">
+          <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px;padding:22px 16px 18px;display:flex;flex-direction:column;align-items:center;text-align:center">
+            <span style="display:flex;align-items:flex-end;justify-content:center;gap:3px;width:44px;height:30px;border:1px solid #263034;border-radius:2px;padding:5px;box-sizing:border-box">
+              <span style="flex:1 1 auto;height:40%;background:#263034"></span>
+              <span style="flex:1 1 auto;height:70%;background:#263034"></span>
+              <span style="flex:1 1 auto;height:55%;background:#263034"></span>
+            </span>
+            <div style="font:500 13px/1.5 var(--mono);color:#d7e0dd;margin-top:15px">this view is built for desktop</div>
+            <div style="font:400 10px/1.65 var(--mono);color:#8a9895;margin-top:9px;text-wrap:pretty">bank-lane reconciliation needs the wide grid — — lanes side by side. It is not squeezed or partially rendered here on purpose.</div>
+            <button type="button" style="margin-top:16px;display:inline-flex;align-items:center;gap:7px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:11px 14px;cursor:pointer;min-height:44px;font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>copy link for desktop</button>
+            <div style="font:400 9px/1 var(--mono);letter-spacing:.06em;color:#5b6866;margin-top:11px">opens on the board at ≥ 1080px</div>
+          </div>
+
+          <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid #1b2226;background:#0f1417">
+              <span style="font:600 9px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">arrivals / demand</span>
+              <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px solid #4a3a17;background:#1c1609;border-radius:2px;padding:3px 6px">unauthorized</span>
+            </div>
+            <div style="padding:16px 12px 15px">
+              <div style="display:flex;align-items:flex-start;gap:10px">
+                <span style="width:14px;height:14px;border:1px solid #4a3a17;border-radius:2px;margin-top:1px"></span>
+                <div>
+                  <div style="font:500 11px/1.5 var(--mono);color:#e0a03a">feed unauthorized — monitor token lacks <span style="color:#d7e0dd">ops:view</span></div>
+                  <div style="font:400 10px/1.65 var(--mono);color:#8a9895;margin-top:8px;text-wrap:pretty">a permissions failure, not an empty window. LOOKED / KNOCKED counts are not rendered and no figure is drawn as zero.</div>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:9px;margin-top:14px">
+                <button type="button" style="background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:11px 13px;cursor:pointer;min-height:44px;font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f">re-auth</button>
+                <span style="font:400 9px/1.5 var(--mono);color:#5b6866">last ok --:--</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="background:#0a0e10;border:1px solid #1b2226;border-radius:2px;padding:11px 12px">
+            <div style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">panel state vocabulary</div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px">
+              <span style="font:500 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#46d17f;border:1px solid #234a35;background:#0e1b15;border-radius:2px;padding:3px 5px">live</span>
+              <span style="font:500 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#8a9895;border:1px solid #263034;border-radius:2px;padding:3px 5px">loading</span>
+              <span style="font:500 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#e0a03a;border:1px solid #4a3a17;background:#1c1609;border-radius:2px;padding:3px 5px">unauthorized</span>
+              <span style="font:500 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#e2564a;border:1px solid #4a2320;background:#1d0f0e;border-radius:2px;padding:3px 5px">unavailable</span>
+              <span style="font:500 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#e0a03a;border:1px solid #4a3a17;background:#1c1609;border-radius:2px;padding:3px 5px">partial view</span>
+            </div>
+            <div style="font:400 9px/1.65 var(--mono);color:#5b6866;margin-top:10px;text-wrap:pretty">every panel renders exactly one · a missing reading is never drawn as zero · every degraded panel names its reason</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(4,1fr) 66px;border-top:1px solid #1b2226;background:#0a0e10">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">status</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">money</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">work</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px"><span style="width:12px;height:12px;border:1px solid #3a4649;border-radius:1px"></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">events</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 14px;border-left:1px solid #1b2226;border-top:1px solid #46d17f;background:#0e1b15"><span style="display:flex;flex-direction:column;justify-content:center;gap:3px;width:12px;height:12px"><span style="height:1px;background:#46d17f"></span><span style="height:1px;background:#46d17f"></span><span style="height:1px;background:#46d17f"></span></span><span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#46d17f">more</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1320},&quot;window&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;12H&quot;,&quot;24H&quot;,&quot;48H&quot;],&quot;default&quot;:&quot;24H&quot;,&quot;tsType&quot;:&quot;\&quot;12H\&quot; | \&quot;24H\&quot; | \&quot;48H\&quot;&quot;,&quot;section&quot;:&quot;Window&quot;},&quot;actionItems&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;States&quot;},&quot;eventsSeverity&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;ALL&quot;,&quot;OK&quot;,&quot;WARN&quot;,&quot;FAULT&quot;],&quot;default&quot;:&quot;ALL&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;States&quot;},&quot;ledgerState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;CONFIRMED&quot;,&quot;SHORTFALL&quot;],&quot;default&quot;:&quot;CONFIRMED&quot;,&quot;tsType&quot;:&quot;\&quot;CONFIRMED\&quot; | \&quot;SHORTFALL\&quot;&quot;,&quot;section&quot;:&quot;States&quot;}}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      win: (props.window || "24H").toUpperCase(),
+      sev: (props.eventsSeverity || "ALL").toUpperCase(),
+      acts: props.actionItems !== false,
+      ledger: (props.ledgerState || "CONFIRMED").toUpperCase()
+    };
+  }
+  seg(active) {
+    return "background:" + (active ? "#0e1b15" : "transparent") +
+      ";border:none;border-right:1px solid #263034;padding:7px 11px;cursor:pointer;min-height:30px;" +
+      "font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:" +
+      (active ? "#46d17f" : "#5b6866") + ";";
+  }
+  chip(active, tone) {
+    const c = active ? (tone || "#46d17f") : "#5b6866";
+    return "background:" + (active ? "#0e1b15" : "transparent") + ";border:1px solid " + (active ? "#234a35" : "#263034") +
+      ";border-radius:2px;padding:7px 10px;cursor:pointer;min-height:30px;font:600 9px/1 'JetBrains Mono',monospace;" +
+      "letter-spacing:.12em;text-transform:uppercase;color:" + c + ";";
+  }
+  renderVals() {
+    const w = this.state.win, s = this.state.sev;
+    return {
+      win: w,
+      winLower: w.toLowerCase(),
+      set12: () => this.setState({ win: "12H" }),
+      set24: () => this.setState({ win: "24H" }),
+      set48: () => this.setState({ win: "48H" }),
+      btn12: this.seg(w === "12H"),
+      btn24: this.seg(w === "24H"),
+      btn48: this.seg(w === "48H") + "border-right:none;",
+      chipAll: this.chip(s === "ALL"),
+      chipOk: this.chip(s === "OK"),
+      chipWarn: this.chip(s === "WARN", "#e0a03a"),
+      chipFault: this.chip(s === "FAULT", "#e2564a"),
+      sevAll: () => this.setState({ sev: "ALL" }),
+      sevOk: () => this.setState({ sev: "OK" }),
+      sevWarn: () => this.setState({ sev: "WARN" }),
+      sevFault: () => this.setState({ sev: "FAULT" }),
+      hasActs: this.state.acts,
+      noActs: !this.state.acts,
+      actsToggleLabel: this.state.acts ? "preview clear state" : "preview items",
+      toggleActs: () => this.setState(st => ({ acts: !st.acts })),
+      ledgerWord: this.state.ledger
+    };
+  }
+}
+</script>
+</body>
+</html>
