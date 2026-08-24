@@ -86,6 +86,13 @@ export const LITERAL_OVERRIDES = {
   INDEXER_STATUS_URL: "http://mainnet-indexer:42069/status",
   // Stable operator smoke identity. Fresh mainnet canary workers cannot be
   // listed here and use the short-lived server-signed marker instead.
+  // The monitor board's dedicated read identity: a keypair that holds no
+  // funds, signs no transaction, and exists only to SIWE-authenticate the
+  // ops board's admin reads. Viewer-only by allowlist, so a leak of its key
+  // buys operator READS and nothing else — and unlike a service token it
+  // carries no expiry to rotate. Testnet keeps the list empty.
+  OPERATOR_VIEWER_WALLETS: "0x062DE35F58DE288B34d7b889E5aBe3cb09862a8A",
+
   // 0x42a4b866… is the operator yield-seed wallet (ladder memo L11a,
   // registered 2026-08-24 BEFORE funding): its deposits and locks must
   // classify as operator-run on every surface, never as external demand.

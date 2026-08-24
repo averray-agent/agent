@@ -115,12 +115,18 @@ test("mainnet env template registers the retained acceptance wallet as self", ()
   assert.equal(acceptance.kind, SELF_IDENTITY_KINDS.ACCEPTANCE);
 });
 
-test("backend templates expose an empty operator-viewer allowlist by default", () => {
+test("the operator-viewer allowlist stays empty on testnet and names only the monitor read wallet on mainnet", () => {
   const defaultEnv = readTemplateEnv("../../../deploy/backend.env.template");
   const mainnetEnv = readTemplateEnv("../../../deploy/backend.mainnet.env.template");
 
   assert.equal(defaultEnv.OPERATOR_VIEWER_WALLETS, "");
-  assert.equal(mainnetEnv.OPERATOR_VIEWER_WALLETS, "");
+  // The board's dedicated read identity — no funds, no transactions, reads
+  // only. Any addition here grants operator READ access, so the list is
+  // pinned: a new entry must be a deliberate, reviewed change.
+  assert.equal(
+    mainnetEnv.OPERATOR_VIEWER_WALLETS,
+    "0x062DE35F58DE288B34d7b889E5aBe3cb09862a8A"
+  );
 });
 
 test("session classification follows durable canary evidence through the shared authority", () => {
