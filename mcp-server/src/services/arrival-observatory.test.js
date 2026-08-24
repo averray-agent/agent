@@ -363,7 +363,7 @@ test("mainnet smoke attribution commits the operator wallet instead of relying o
   );
   assert.match(
     template,
-    /^ARRIVAL_SELF_WALLETS=0x9Ab8531FBb0948C542a31298FD61335f30064239$/mu
+    /^ARRIVAL_SELF_WALLETS=0x9Ab8531FBb0948C542a31298FD61335f30064239,0x42a4b8663b8Cf5111898C8BE4bA75a010B0F0ABd$/mu
   );
 });
 
