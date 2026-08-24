@@ -58,6 +58,23 @@ Part 1 (data endpoints) is LIVE on the platform backend since #1266
 - Deploy is ONLY via `ops/deploy-monitor.sh` (bakes GIT_SHA). Worktree dev
   needs the root node_modules symlink and a schemas-diff check first.
 
+## Added scope — static ops token for admin reads (the 403 fix)
+
+The monitor's admin-demand reads currently authenticate by SIWE-logging-in as
+the reference agent's wallet (`AGENT_WALLET_PRIVATE_KEY` →
+`AdminDemandSessionCache(siweLogin(...))` in
+`services/slack-operator/src/index.ts`). That wallet carries no `ops:view`,
+which is why the Arrivals & Journeys panel 403s today and why the new panels
+would too. Add `AVERRAY_OPS_TOKEN` (env, passed through `ops/compose.yml`
+like the other tokens): when set, every admin read — the existing
+arrivals/journeys feed AND the new overnight-ledger/topup fetches — sends it
+as the bearer and skips the SIWE session; when unset, current behavior stays
+and the panels render their honest `unauthorized` state. The operator has
+already minted this token (scoped service token, `ops:view` + `admin:status`
+only, read-only by construction). Never log the token; redact it from any
+config echo. Test: with the env set, the feed layer uses the static bearer;
+with it unset, behavior is unchanged.
+
 ## Out of scope
 
 Backend changes of any kind, the monitor service-token re-mint (operator
