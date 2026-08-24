@@ -131,6 +131,9 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = withDefaultGetMethod([
     path: "/account/withdraw/transactions",
     description: "Complete wallet-bound unsigned AgentAccountCore withdrawal and optional onward ERC-20 transfer. The owner signs, pays DOT gas, and broadcasts."
   },
+  { method: "POST", path: "/locked-deposits/quote", description: "Read complete locked-deposit disclosure and exact signed-consent payload before a lock exists." },
+  { method: "POST", path: "/locked-deposits/consent", description: "Create a backend lock only from unchanged quoted terms and the authenticated wallet's signature." },
+  { method: "POST", path: "/locked-deposits/:id/exit", description: "Forfeit tier perks immediately and return principal through the normal vesting path without haircut or fee." },
   { method: "POST", path: "/pool/transactions", description: "Build wallet-bound unsigned approve/deposit or redeem templates. The platform never signs, receives, brokers, or relays depositor funds." },
   { path: "/credit", description: "Live L1 CreditPool state plus receipt-graph L2 cash and L3 posting limits, debt, and sweep truth." },
   { method: "POST", path: "/credit/transactions", description: "Build wallet-bound L1 templates or L2/L3 consent payloads with exact AAC sweep-repayment authorizations." },
@@ -383,6 +386,33 @@ const HTTP_ACTION_REQUIREMENTS = [
     notes: EARNINGS_WITHDRAWAL_STATEMENT
   },
   {
+    method: "POST",
+    path: "/locked-deposits/quote",
+    requiresAuth: true,
+    requiredAction: "quote_locked_deposit_before_consent",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"],
+    notes: "Returns terms, early-exit consequences, activation gate, current NAV, risk sentence, and an exact EIP-4361 consent message."
+  },
+  {
+    method: "POST",
+    path: "/locked-deposits/consent",
+    requiresAuth: true,
+    requiredAction: "create_signed_locked_deposit",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"],
+    notes: "Requires the unchanged quote terms and authenticated wallet's signature; funds do not move."
+  },
+  {
+    method: "POST",
+    path: "/locked-deposits/:id/exit",
+    requiresAuth: true,
+    requiredAction: "request_locked_deposit_early_exit",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"],
+    notes: "Drops perks immediately and returns all principal through the normal vesting path without haircut or fee."
+  },
+  {
     method: "GET",
     path: "/credit",
     requiresAuth: true,
@@ -534,6 +564,7 @@ const DISCOVERY_TOOL_DEFINITIONS = [
   { name: "buildDepositPoolTransactions", description: "Wallet-bound unsigned approve/deposit or redeem templates; never a relay." },
   { name: "getAccountPosition", description: "Read your own earnings account, statement, ownership proof, withdrawal door, and retention choices." },
   { name: "buildWithdrawTransactions", description: "Complete unsigned account withdrawal and optional onward transfer; eligible first withdrawals can request a lifetime-once 0.03 DOT grant from this exact intent." },
+  { name: "quoteLockedDeposit", description: "Complete T30/T90 disclosure and exact EIP-4361 consent message before any lock exists." },
   { name: "getCreditInfo", description: "Live L1 plus receipt-graph L2/L3 limits, outstanding loans, disclosure, and sweep truth." },
   { name: "buildCreditTransactions", description: "Wallet-bound L1 templates and L2/L3 consent payloads with exact AAC sweep-repayment authorizations." },
   { name: "estimateNetReward", description: "Profile-aware reward estimate." },
@@ -565,7 +596,9 @@ export const CONNECTED_ONLY_TOOLS = Object.freeze([
   "verifySiwe",
   "refreshAuthToken",
   "claimJob",
-  "submitWork"
+  "submitWork",
+  "createLockedDeposit",
+  "requestLockedDepositExit"
 ]);
 
 // These names describe existing HTTP read surfaces and have no same-named MCP

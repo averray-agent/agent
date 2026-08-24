@@ -222,6 +222,10 @@ test("every tool advertised by the MCP welcome resolves through this surface", a
     handleDepositPoolRoute: makeDepositPoolRoute(),
     handleEarningsDoorRoute: makeEarningsDoorRoute(),
     handleJobRoute: makeJobRoute(service, "mcp"),
+    handleLockedTierRoute: async ({ response, pathname }) => {
+      respond(response, pathname.endsWith("/consent") ? 201 : 200, { pathname });
+      return true;
+    },
     handlePublicMetadataRoute: makePublicRoute({ discoveryUrl: "https://example.test/agent-tools.json" }),
     handleVerifyRoute: async ({ response, pathname }) => {
       respond(response, 200, { pathname, profiles: [] });
@@ -244,6 +248,13 @@ test("every tool advertised by the MCP welcome resolves through this surface", a
     getDepositPoolInfo: {},
     getAccountPosition: { asset: "USDC" },
     buildWithdrawTransactions: { asset: "USDC", amount: "1" },
+    quoteLockedDeposit: { tier: "t30", amountRaw: "1", consentNonce: "nonce0001" },
+    createLockedDeposit: {
+      terms: {},
+      termsHash: `0x${"1".repeat(64)}`,
+      consentSignature: `0x${"1".repeat(130)}`
+    },
+    requestLockedDepositExit: { lockId: `0x${"1".repeat(64)}` },
     buildDepositPoolTransactions: { direction: "withdraw", shares: "1" },
     getCreditInfo: {},
     buildCreditTransactions: { direction: "withdraw", shares: "1" },
@@ -274,6 +285,7 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
     "explainEligibility",
     "getDepositPoolInfo",
     "getAccountPosition",
+    "quoteLockedDeposit",
     "buildDepositPoolTransactions",
     "getCreditInfo",
     "buildCreditTransactions"
@@ -285,6 +297,8 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
   }
   assert.equal(byName.fetchAuthNonce.annotations.readOnlyHint, true);
   assert.equal(byName.buildWithdrawTransactions.annotations.readOnlyHint, false);
+  assert.equal(byName.createLockedDeposit.annotations.readOnlyHint, false);
+  assert.equal(byName.requestLockedDepositExit.annotations.readOnlyHint, false);
   assert.equal(byName.buildWithdrawTransactions.annotations.idempotentHint, true);
   assert.match(byName.buildWithdrawTransactions.description, /lifetime-once 0\.03 DOT/u);
   assert.equal(byName.fetchAuthNonce.annotations.destructiveHint, false);

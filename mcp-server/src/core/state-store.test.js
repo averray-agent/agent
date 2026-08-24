@@ -184,6 +184,46 @@ test("MemoryStateStore mutation receipts round-trip", async () => {
   assert.deepEqual(loaded, receipt);
 });
 
+test("MemoryStateStore atomically enforces locked-tier wallet and active-cohort caps", async () => {
+  const store = new MemoryStateStore();
+  const wallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const base = {
+    wallet,
+    tier: "t30",
+    amountRaw: "1000000",
+    lockedAt: "2026-08-24T00:00:00.000Z",
+    termDays: 30,
+    expiresAt: "2026-09-23T00:00:00.000Z",
+    consentRef: `0x${"01".repeat(32)}`,
+    status: "active"
+  };
+  const first = await store.createLockedTierEntry({ ...base, id: base.consentRef }, {
+    perWalletCapRaw: "1000000",
+    globalActiveCapRaw: "2000000"
+  });
+  const walletCap = await store.createLockedTierEntry({
+    ...base,
+    id: `0x${"02".repeat(32)}`,
+    consentRef: `0x${"02".repeat(32)}`
+  }, {
+    perWalletCapRaw: "1000000",
+    globalActiveCapRaw: "2000000"
+  });
+  const otherWallet = await store.createLockedTierEntry({
+    ...base,
+    id: `0x${"03".repeat(32)}`,
+    consentRef: `0x${"03".repeat(32)}`,
+    wallet: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }, {
+    perWalletCapRaw: "1000000",
+    globalActiveCapRaw: "1500000"
+  });
+  assert.equal(first.accepted, true);
+  assert.equal(walletCap.reason, "per_wallet_cap_exceeded");
+  assert.equal(otherWallet.reason, "global_cap_exceeded");
+  assert.equal((await store.listLockedTierEntries(wallet)).length, 1);
+});
+
 test("MemoryStateStore keeps a durable, filterable platform-fault remediation queue", async () => {
   const store = new MemoryStateStore();
   await store.upsertPlatformFaultRemediation({

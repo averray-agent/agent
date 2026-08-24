@@ -100,6 +100,7 @@ function makeHarness(overrides = {}) {
         return undefined;
       }
     },
+    lockedTierService: overrides.lockedTierService,
     selfIdentityRegistry: overrides.selfIdentityRegistry ?? new SelfIdentityRegistry(),
   });
   return { calls, response, route };
@@ -335,4 +336,29 @@ test("GET /agents and GET /agents/:wallet return the same operator tier", async 
   assert.equal(listResponse.body[0].tier, "journeyman");
   assert.equal(detailResponse.body.tier, listResponse.body[0].tier);
   assert.equal(detailResponse.body.reputation.tier, "pro");
+});
+
+test("public profiles expose the committed-depositor marker only from an explicit opt-in", async () => {
+  const commitment = { committedDepositor: true, tier: "t90" };
+  const optedIn = makeHarness({
+    lockedTierService: { getPublicCommitment: async () => commitment }
+  });
+  await optedIn.route({
+    request: { method: "GET" },
+    response: optedIn.response,
+    url: new URL(`http://localhost/agents/${WALLET}`),
+    pathname: `/agents/${WALLET}`,
+  });
+  assert.deepEqual(optedIn.response.body.lockedDeposit, commitment);
+
+  const privateProfile = makeHarness({
+    lockedTierService: { getPublicCommitment: async () => undefined }
+  });
+  await privateProfile.route({
+    request: { method: "GET" },
+    response: privateProfile.response,
+    url: new URL(`http://localhost/agents/${WALLET}`),
+    pathname: `/agents/${WALLET}`,
+  });
+  assert.equal(Object.hasOwn(privateProfile.response.body, "lockedDeposit"), false);
 });

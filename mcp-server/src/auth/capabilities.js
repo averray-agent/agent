@@ -3,6 +3,7 @@ export const AUTH_POLICY_VERSION = "auth-policy-v1";
 const BASE_CAPABILITIES = [
   "account:read",
   "account:fund",
+  "account:lock",
   "account:allocate",
   "account:deallocate",
   "account:borrow",
@@ -92,6 +93,9 @@ const ROUTE_CAPABILITY_RULES = [
   { method: "GET", path: "/me", capabilities: ["account:read", "reputation:read"] },
   { method: "GET", path: "/receipts", capabilities: ["session:read"] },
   { method: "POST", path: "/account/withdraw/transactions", capabilities: ["account:read"] },
+  { method: "POST", path: "/locked-deposits/quote", capabilities: ["account:lock"] },
+  { method: "POST", path: "/locked-deposits/consent", capabilities: ["account:lock"] },
+  { method: "POST", path: "/locked-deposits/:id/exit", capabilities: ["account:lock"] },
   { method: "GET", path: "/account/strategies", capabilities: ["account:read", "strategies:list"] },
   { method: "GET", path: "/account/borrow-capacity", capabilities: ["account:read"] },
   { method: "POST", path: "/account/fund", capabilities: ["account:fund"] },

@@ -135,6 +135,47 @@ redis.call("set", KEYS[3], ARGV[3])
 return 1
 `;
 
+// A lock consumes two distinct caps: every active/exiting record counts
+// against the wallet's encumbered-principal cap, while only active records
+// count against the cohort deployment cap (early exit drops venue eligibility
+// immediately). Keeping both checks and both writes in one script prevents two
+// concurrent consent submissions from independently observing spare room.
+const CREATE_LOCKED_TIER_ENTRY_SCRIPT = `
+local existing = redis.call("hget", KEYS[1], ARGV[1])
+if existing then
+  return {1, 1, existing, "0", ARGV[3]}
+end
+
+local walletTotal = 0
+for _, raw in ipairs(redis.call("hvals", KEYS[1])) do
+  local entry = cjson.decode(raw)
+  if entry.status == "active" or entry.status == "exiting" then
+    walletTotal = walletTotal + tonumber(entry.amountRaw)
+  end
+end
+local amount = tonumber(ARGV[4])
+local walletCap = tonumber(ARGV[3])
+if walletTotal + amount > walletCap then
+  return {0, 0, "per_wallet_cap_exceeded", tostring(walletTotal), ARGV[3]}
+end
+
+local globalActive = 0
+for _, raw in ipairs(redis.call("hvals", KEYS[2])) do
+  local entry = cjson.decode(raw)
+  if entry.status == "active" then
+    globalActive = globalActive + tonumber(entry.amountRaw)
+  end
+end
+local globalCap = tonumber(ARGV[5])
+if globalActive + amount > globalCap then
+  return {0, 0, "global_cap_exceeded", tostring(globalActive), ARGV[5]}
+end
+
+redis.call("hset", KEYS[1], ARGV[1], ARGV[2])
+redis.call("hset", KEYS[2], ARGV[1], ARGV[2])
+return {1, 0, ARGV[2], tostring(walletTotal), ARGV[3]}
+`;
+
 const RESERVE_VERIFICATION_RUN_SCRIPT = `
 local existing = redis.call("get", KEYS[1])
 if existing then
@@ -268,6 +309,7 @@ export class MemoryStateStore {
     this.externalJobDelistings = new Map();
     this.externalPaymentFundings = new Map();
     this.creditInterestRegistrations = new Map();
+    this.lockedTierEntries = new Map();
   }
 
   // ── policy proposals (Package G) ──────────────────────────────────
@@ -831,6 +873,65 @@ export class MemoryStateStore {
     const key = normalizeContentHash(record?.hash);
     this.content.set(key, record);
     return record;
+  }
+
+  async listLockedTierEntries(wallet = undefined) {
+    const walletKey = wallet ? normalizeSessionWalletKey(wallet) : undefined;
+    return [...this.lockedTierEntries.values()]
+      .filter((entry) => !walletKey || normalizeSessionWalletKey(entry.wallet) === walletKey)
+      .sort((left, right) => String(left.lockedAt ?? "").localeCompare(String(right.lockedAt ?? "")))
+      .map((entry) => cloneJsonRecord(entry));
+  }
+
+  async createLockedTierEntry(record, { perWalletCapRaw, globalActiveCapRaw } = {}) {
+    const id = String(record?.id ?? "").toLowerCase();
+    const existing = this.lockedTierEntries.get(id);
+    if (existing) {
+      return { accepted: true, created: false, entry: cloneJsonRecord(existing) };
+    }
+    const wallet = normalizeSessionWalletKey(record?.wallet);
+    const amountRaw = BigInt(record?.amountRaw ?? 0);
+    const walletTotal = [...this.lockedTierEntries.values()]
+      .filter((entry) => normalizeSessionWalletKey(entry.wallet) === wallet)
+      .filter((entry) => entry.status === "active" || entry.status === "exiting")
+      .reduce((sum, entry) => sum + BigInt(entry.amountRaw), 0n);
+    const walletCap = BigInt(perWalletCapRaw);
+    if (walletTotal + amountRaw > walletCap) {
+      return {
+        accepted: false,
+        created: false,
+        reason: "per_wallet_cap_exceeded",
+        existingRaw: walletTotal.toString(),
+        capRaw: walletCap.toString()
+      };
+    }
+    const globalActive = [...this.lockedTierEntries.values()]
+      .filter((entry) => entry.status === "active")
+      .reduce((sum, entry) => sum + BigInt(entry.amountRaw), 0n);
+    const globalCap = BigInt(globalActiveCapRaw);
+    if (globalActive + amountRaw > globalCap) {
+      return {
+        accepted: false,
+        created: false,
+        reason: "global_cap_exceeded",
+        existingRaw: globalActive.toString(),
+        capRaw: globalCap.toString()
+      };
+    }
+    const stored = cloneJsonRecord({ ...record, wallet });
+    this.lockedTierEntries.set(id, stored);
+    return { accepted: true, created: true, entry: cloneJsonRecord(stored) };
+  }
+
+  async upsertLockedTierEntry(record) {
+    const id = String(record?.id ?? "").toLowerCase();
+    const stored = cloneJsonRecord({
+      ...record,
+      id,
+      wallet: normalizeSessionWalletKey(record?.wallet)
+    });
+    this.lockedTierEntries.set(id, stored);
+    return cloneJsonRecord(stored);
   }
 
   async getFundedJob(jobId) {
@@ -1967,6 +2068,64 @@ export class RedisStateStore {
     const key = normalizeContentHash(record?.hash);
     await this.client.set(this.key("content", key), JSON.stringify(record));
     return record;
+  }
+
+  async listLockedTierEntries(wallet = undefined) {
+    await this.connect();
+    const walletKey = wallet ? normalizeSessionWalletKey(wallet) : undefined;
+    const records = walletKey
+      ? await this.client.hVals(this.key("locked-tier-wallet", walletKey))
+      : await this.client.hVals(this.key("locked-tier", "all"));
+    return records
+      .map((raw) => JSON.parse(raw))
+      .sort((left, right) => String(left.lockedAt ?? "").localeCompare(String(right.lockedAt ?? "")));
+  }
+
+  async createLockedTierEntry(record, { perWalletCapRaw, globalActiveCapRaw } = {}) {
+    await this.connect();
+    const id = String(record?.id ?? "").toLowerCase();
+    const wallet = normalizeSessionWalletKey(record?.wallet);
+    const stored = { ...record, id, wallet };
+    const reply = await this.client.eval(CREATE_LOCKED_TIER_ENTRY_SCRIPT, {
+      keys: [
+        this.key("locked-tier-wallet", wallet),
+        this.key("locked-tier", "all")
+      ],
+      arguments: [
+        id,
+        JSON.stringify(stored),
+        String(perWalletCapRaw),
+        String(stored.amountRaw),
+        String(globalActiveCapRaw)
+      ]
+    });
+    if (Number(reply?.[0]) !== 1) {
+      return {
+        accepted: false,
+        created: false,
+        reason: String(reply?.[2]),
+        existingRaw: String(reply?.[3] ?? "0"),
+        capRaw: String(reply?.[4] ?? "0")
+      };
+    }
+    return {
+      accepted: true,
+      created: Number(reply?.[1]) === 0,
+      entry: JSON.parse(String(reply?.[2]))
+    };
+  }
+
+  async upsertLockedTierEntry(record) {
+    await this.connect();
+    const id = String(record?.id ?? "").toLowerCase();
+    const wallet = normalizeSessionWalletKey(record?.wallet);
+    const stored = { ...record, id, wallet };
+    const encoded = JSON.stringify(stored);
+    await this.client.multi()
+      .hSet(this.key("locked-tier-wallet", wallet), id, encoded)
+      .hSet(this.key("locked-tier", "all"), id, encoded)
+      .exec();
+    return stored;
   }
 
   async getFundedJob(jobId) {

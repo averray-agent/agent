@@ -62,6 +62,7 @@ export function loadDepositClaimPriorityConfig(env = process.env, { logger = con
 
 export function createDepositClaimPriorityPolicy({
   workerExposurePolicy,
+  lockedTierPriorityReader,
   env = process.env,
   config = undefined,
   now = () => new Date(),
@@ -75,6 +76,7 @@ export function createDepositClaimPriorityPolicy({
   }
   return new DepositClaimPriorityPolicy({
     workerExposurePolicy,
+    lockedTierPriorityReader,
     config: resolvedConfig,
     now,
     logger
@@ -82,8 +84,15 @@ export function createDepositClaimPriorityPolicy({
 }
 
 export class DepositClaimPriorityPolicy {
-  constructor({ workerExposurePolicy, config, now = () => new Date(), logger = console } = {}) {
+  constructor({
+    workerExposurePolicy,
+    lockedTierPriorityReader,
+    config,
+    now = () => new Date(),
+    logger = console
+  } = {}) {
     this.workerExposurePolicy = workerExposurePolicy;
+    this.lockedTierPriorityReader = lockedTierPriorityReader;
     this.config = config ?? loadDepositClaimPriorityConfig({}, { logger });
     this.now = now;
     this.logger = logger;
@@ -167,7 +176,8 @@ export class DepositClaimPriorityPolicy {
       creditPositionAvailable: creditReadSufficient,
       depositQualified,
       noOutstandingCreditDraw,
-      qualifies: eligible
+      qualifies: eligible,
+      lockedTierPriority: await this.#lockedTierPriority(wallet)
     };
 
     return {
@@ -208,6 +218,23 @@ export class DepositClaimPriorityPolicy {
 
   #qualifiesWith() {
     return `≥ ${this.config.thresholdUsdc} USDC vested deposit and no outstanding credit draw`;
+  }
+
+  async #lockedTierPriority(wallet) {
+    if (typeof this.lockedTierPriorityReader !== "function") {
+      return { tier: "flex", rank: 0, perksActive: false };
+    }
+    try {
+      const priority = await this.lockedTierPriorityReader(wallet);
+      return {
+        tier: ["t30", "t90"].includes(priority?.tier) ? priority.tier : "flex",
+        rank: Number.isInteger(priority?.rank) ? priority.rank : 0,
+        perksActive: priority?.perksActive === true
+      };
+    } catch (error) {
+      this.logger.warn?.({ wallet, err: error }, "deposit_claim_priority.locked_tier_read_failed");
+      return { tier: "flex", rank: 0, perksActive: false };
+    }
   }
 }
 

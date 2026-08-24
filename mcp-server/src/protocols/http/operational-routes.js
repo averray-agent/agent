@@ -39,6 +39,16 @@ function buildSubmittedJobAutoVerifierWarnings(health) {
   }];
 }
 
+function buildLockedTierWarnings(health) {
+  if (health?.ok !== false) return [];
+  return [{
+    code: health.code ?? "locked_tier_unhealthy",
+    severity: "critical",
+    message: health.message
+      ?? "The locked-deposit withdrawal gate has a signed-consent integrity failure."
+  }];
+}
+
 export function resolveMetricsAuthConfig(env = process.env) {
   return {
     metricsBearerToken: env.METRICS_BEARER_TOKEN?.trim() || undefined,
@@ -60,6 +70,7 @@ export function createOperationalRoutes({
   metrics,
   metricsAuthRequired,
   metricsBearerToken,
+  lockedTierService,
   mutationBackendConfig,
   pimlicoClient,
   respond,
@@ -96,7 +107,8 @@ export function createOperationalRoutes({
         xcmWatcherStatus,
         indexerProbe,
         externalPostingWatcherStatus,
-        submittedJobAutoVerifierHealth
+        submittedJobAutoVerifierHealth,
+        lockedTierHealth
       ] = await Promise.all([
         stateStore.healthCheck?.() ?? { ok: true, backend: stateStore.constructor.name },
         getCachedBlockchainHealth(),
@@ -108,7 +120,12 @@ export function createOperationalRoutes({
         service?.submittedJobAutoVerifier?.getHealth?.()?.catch?.(() => ({
           ok: false,
           state: "status_unavailable"
-        })) ?? { ok: false, state: "status_unavailable" }
+        })) ?? { ok: false, state: "status_unavailable" },
+        lockedTierService?.getHealth?.()?.catch?.(() => ({
+          ok: false,
+          code: "locked_tier_health_unavailable",
+          message: "Locked-deposit health state is unreadable."
+        })) ?? { ok: true, state: "not_configured" }
       ]);
       const mutationBackendStatus = await getMutationBackendStatus({
         gateway,
@@ -145,7 +162,8 @@ export function createOperationalRoutes({
         warnings: [
           ...buildCapabilityWarnings(capabilityHealth),
           ...buildOnboardingInventoryWarnings(productHealth.onboarding),
-          ...buildSubmittedJobAutoVerifierWarnings(submittedJobAutoVerifierHealth)
+          ...buildSubmittedJobAutoVerifierWarnings(submittedJobAutoVerifierHealth),
+          ...buildLockedTierWarnings(lockedTierHealth)
         ],
         components: {
           stateStore: storeHealth,
@@ -153,7 +171,8 @@ export function createOperationalRoutes({
           gasSponsor: gasHealth,
           indexer: indexerProbe,
           externalPostingWatcher: externalPostingWatcherStatus,
-          submittedJobAutoVerifier: submittedJobAutoVerifierHealth
+          submittedJobAutoVerifier: submittedJobAutoVerifierHealth,
+          lockedTiers: lockedTierHealth
         }
       });
       return true;

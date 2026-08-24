@@ -76,6 +76,7 @@ function makeHarness(overrides = {}) {
         };
       }
     },
+    lockedTierService: overrides.lockedTierService,
     parseLimit: (_url, fallback, max) => Math.min(overrides.limit ?? fallback, max),
     respond(response, statusCode, body) {
       response.statusCode = statusCode;
@@ -166,6 +167,20 @@ test("GET /me echoes the wallet, labels both tier ladders, progression, and exis
     eligible: true,
     registered: false
   });
+});
+
+test("GET /me includes the authenticated wallet's lock ledger and gate state", async () => {
+  const lockedDeposits = {
+    tier: "t30",
+    entries: [{ id: "lock-1", tier: "t30", status: "active" }],
+    activationGate: { open: false, statement: "yield inactive — pool below activation threshold." }
+  };
+  const { route } = makeHarness({
+    lockedTierService: { getWalletState: async (wallet) => ({ ...lockedDeposits, wallet }) }
+  });
+  const { response } = await invoke(route, "/me");
+
+  assert.deepEqual(response.body.lockedDeposits, { ...lockedDeposits, wallet: WALLET });
 });
 
 test("GET /me keeps standing available when the wallet has no liquid balance", async () => {

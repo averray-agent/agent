@@ -25,7 +25,7 @@ function job(overrides = {}) {
   };
 }
 
-function policy({ capacity, now = "2026-08-22T12:02:00.000Z" } = {}) {
+function policy({ capacity, lockedTierPriority, now = "2026-08-22T12:02:00.000Z" } = {}) {
   return createDepositClaimPriorityPolicy({
     config: {
       enabled: true,
@@ -40,6 +40,9 @@ function policy({ capacity, now = "2026-08-22T12:02:00.000Z" } = {}) {
         credit: { available: true, outstandingDebtRaw: "0" }
       }
     },
+    lockedTierPriorityReader: lockedTierPriority
+      ? async () => lockedTierPriority
+      : undefined,
     now: () => new Date(now)
   });
 }
@@ -139,4 +142,34 @@ test("outstanding credit draw refuses priority despite enough vested deposit", a
   assert.equal(decision.reason, PRIORITY_WINDOW_ACTIVE_REASON);
   assert.equal(decision.qualification.depositQualified, true);
   assert.equal(decision.qualification.noOutstandingCreditDraw, false);
+});
+
+test("deposit priority reads the locked-tier rank without changing admission", async () => {
+  const base = {
+    capacity: {
+      vestedAssetsRaw: "5000000",
+      vestingAvailable: true,
+      credit: { available: true, outstandingDebtRaw: "0" }
+    }
+  };
+  const t90 = await policy({
+    ...base,
+    lockedTierPriority: { tier: "t90", rank: 2, perksActive: true }
+  }).assessClaim({ wallet: WALLET, job: job() });
+  const t30 = await policy({
+    ...base,
+    lockedTierPriority: { tier: "t30", rank: 1, perksActive: true }
+  }).assessClaim({ wallet: WALLET, job: job() });
+  const flex = await policy(base).assessClaim({ wallet: WALLET, job: job() });
+  assert.equal(t90.eligible, true);
+  assert.equal(t30.eligible, true);
+  assert.equal(flex.eligible, true);
+  assert.ok(
+    t90.qualification.lockedTierPriority.rank
+      > t30.qualification.lockedTierPriority.rank
+  );
+  assert.ok(
+    t30.qualification.lockedTierPriority.rank
+      > flex.qualification.lockedTierPriority.rank
+  );
 });

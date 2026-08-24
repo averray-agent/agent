@@ -84,6 +84,7 @@ function makeHarness(overrides = {}) {
     },
     metricsAuthRequired: overrides.metricsAuthRequired ?? false,
     metricsBearerToken: overrides.metricsBearerToken,
+    lockedTierService: overrides.lockedTierService,
     mutationBackendConfig: overrides.mutationBackendConfig ?? {
       mode: "required",
       defaulted: false,
@@ -224,6 +225,35 @@ test("GET /health exposes watcher lag and stages open external posting while the
   assert.equal(response.body.capabilityHealth.externalPostingWatcherLagSeconds, 3_600);
   assert.equal(response.body.components.externalPostingWatcher.current, false);
   assert.ok(response.body.warnings.some((warning) => warning.code === "external_posting_staged"));
+});
+
+test("GET /health exposes the synthetic lock-consent mismatch as a critical warning", async () => {
+  const { response, route } = makeHarness({
+    lockedTierService: {
+      async getHealth() {
+        return {
+          ok: false,
+          severity: "critical",
+          code: "locked_tier_withdrawal_consent_mismatch",
+          message: "Synthetic mismatch fixture tripped the abort trigger."
+        };
+      }
+    }
+  });
+  await route({
+    request: { method: "GET", headers: {} },
+    response,
+    pathname: "/health"
+  });
+  assert.equal(response.body.components.lockedTiers.ok, false);
+  assert.deepEqual(
+    response.body.warnings.find((warning) => warning.code === "locked_tier_withdrawal_consent_mismatch"),
+    {
+      code: "locked_tier_withdrawal_consent_mismatch",
+      severity: "critical",
+      message: "Synthetic mismatch fixture tripped the abort trigger."
+    }
+  );
 });
 
 test("GET /health reuses the injected reward-bank provider", async () => {

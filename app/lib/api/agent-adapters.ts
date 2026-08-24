@@ -43,12 +43,14 @@ export function extractAgent(data: unknown): AgentRecord | null {
   const lineage = lineageFor(record);
   const lineageStats = lineageStatsFor(record, lineage);
   const stake = stakeFor(record);
+  const lockedDeposit = lockedDepositFor(record);
   return {
     handle: text(record.handle, handleForWallet(walletFull)),
     synthetic: record.synthetic === true,
     identity: identityFor(record),
     wallet: shortAddress(walletFull),
     walletFull,
+    ...(lockedDeposit ? { lockedDeposit } : {}),
     tier: tierFrom(record.tier, score),
     score,
     badges: badgeIds,
@@ -68,6 +70,12 @@ export function extractAgent(data: unknown): AgentRecord | null {
     lineage,
     lineageStats,
   };
+}
+
+function lockedDepositFor(record: RawRecord): AgentRecord["lockedDeposit"] {
+  const value = objectField(record, "lockedDeposit");
+  if (value?.committedDepositor !== true || value?.tier !== "t90") return undefined;
+  return { committedDepositor: true, tier: "t90" };
 }
 
 function identityFor(record: RawRecord): AgentRecord["identity"] {

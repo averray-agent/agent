@@ -13,6 +13,7 @@ export function createWorkerRoutes({
   respond,
   service,
   stateStore,
+  lockedTierService,
   workerProgressionService
 }) {
   return async function handleWorkerRoute({ request, response, url, pathname }) {
@@ -20,14 +21,15 @@ export function createWorkerRoutes({
       const auth = await authMiddleware(request, url);
       const reputationRead = service.getReputation(auth.wallet);
       const progressionRead = workerProgressionService.getProgression(auth.wallet);
-      const [rawReputation, progression, account, standing] = await Promise.all([
+      const [rawReputation, progression, account, standing, lockedDeposits] = await Promise.all([
         reputationRead,
         progressionRead,
         service.getAccountSummary(auth.wallet),
         earningsDoor.getStanding(auth.wallet, {
           progression: progressionRead,
           reputation: reputationRead
-        })
+        }),
+        lockedTierService?.getWalletState?.(auth.wallet) ?? Promise.resolve(undefined)
       ]);
       const reputation = buildPublicReputation(rawReputation);
       respond(response, 200, {
@@ -36,7 +38,8 @@ export function createWorkerRoutes({
         reputationTier: reputation.tier,
         progression,
         accountPosition: projectAccountPosition(account),
-        standing
+        standing,
+        ...(lockedDeposits ? { lockedDeposits } : {})
       });
       return true;
     }

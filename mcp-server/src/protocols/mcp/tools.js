@@ -171,6 +171,59 @@ export function createMcpTools({
     auth: { required: true, scopes: [], requiredAction: "wallet_sign_in" }
   }),
   tool({
+    name: "quoteLockedDeposit",
+    title: "Quote a locked deposit",
+    description: "Read the complete T30/T90 terms, early-exit consequences, automatic activation gate, current NAV, risk sentence, AAC headroom, and the exact EIP-4361 consent message before signing anything.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tier: { type: "string", enum: ["t30", "t90"] },
+        amountRaw: { type: "string", pattern: "^[1-9][0-9]*$", description: "Exact USDC raw units (6 decimals)." },
+        consentNonce: { type: "string", minLength: 8, maxLength: 128 },
+        publicProfileOptIn: { type: "boolean", default: false, description: "T90 only. Explicitly publish the committed depositor flag while the perk is active." }
+      },
+      required: ["tier", "amountRaw", "consentNonce"],
+      additionalProperties: false
+    },
+    readOnly: true,
+    idempotent: true,
+    auth: { required: true, scopes: ["account:lock"], requiredAction: "wallet_sign_in" }
+  }),
+  tool({
+    name: "createLockedDeposit",
+    title: "Create a consented locked deposit",
+    description: "Create a backend lock-ledger entry only from the unchanged quoted terms plus the authenticated wallet's explicit EIP-4361 signature. Funds do not move.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        terms: { type: "object", additionalProperties: true },
+        termsHash: { type: "string", pattern: "^0x[0-9a-fA-F]{64}$" },
+        consentSignature: { type: "string", pattern: "^0x[0-9a-fA-F]{130}$" }
+      },
+      required: ["terms", "termsHash", "consentSignature"],
+      additionalProperties: false
+    },
+    readOnly: false,
+    idempotent: true,
+    auth: { required: true, scopes: ["account:lock"], requiredAction: "wallet_sign_in" }
+  }),
+  tool({
+    name: "requestLockedDepositExit",
+    title: "Request locked-deposit early exit",
+    description: "Drop to Flex immediately, forfeit current-period yield share and perks, and release all principal through the normal vesting path with no haircut or penalty fee.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        lockId: { type: "string", pattern: "^0x[0-9a-fA-F]{64}$" }
+      },
+      required: ["lockId"],
+      additionalProperties: false
+    },
+    readOnly: false,
+    idempotent: true,
+    auth: { required: true, scopes: ["account:lock"], requiredAction: "wallet_sign_in" }
+  }),
+  tool({
     name: "buildDepositPoolTransactions",
     title: "Build deposit pool transactions",
     description: "Build wallet-bound unsigned approve/deposit or redeem templates from live pool state. Amount inputs are exact base-unit integer strings with 6 decimals. Averray never signs, receives, brokers, or relays these transactions.",
@@ -324,6 +377,7 @@ export function createMcpToolExecutor({
   handleDepositPoolRoute,
   handleEarningsDoorRoute,
   handleJobRoute,
+  handleLockedTierRoute,
   handlePublicMetadataRoute,
   handleVerifyRoute,
   maxRequestBodyBytes = DEFAULT_MCP_MAX_REQUEST_BODY_BYTES,
@@ -417,6 +471,33 @@ export function createMcpToolExecutor({
           body: args,
           method: "POST",
           path: "/account/withdraw/transactions"
+        }));
+      case "quoteLockedDeposit":
+        requireString(args.tier, "tier");
+        requireString(args.amountRaw, "amountRaw");
+        requireString(args.consentNonce, "consentNonce");
+        return unwrap(await invokeHttpRoute(handleLockedTierRoute, {
+          ...common,
+          body: args,
+          method: "POST",
+          path: "/locked-deposits/quote"
+        }));
+      case "createLockedDeposit":
+        requireString(args.termsHash, "termsHash");
+        requireString(args.consentSignature, "consentSignature");
+        return unwrap(await invokeHttpRoute(handleLockedTierRoute, {
+          ...common,
+          body: args,
+          method: "POST",
+          path: "/locked-deposits/consent"
+        }));
+      case "requestLockedDepositExit":
+        requireString(args.lockId, "lockId");
+        return unwrap(await invokeHttpRoute(handleLockedTierRoute, {
+          ...common,
+          body: {},
+          method: "POST",
+          path: `/locked-deposits/${encodeURIComponent(args.lockId)}/exit`
         }));
       case "buildDepositPoolTransactions":
         requireString(args.direction, "direction");
@@ -529,11 +610,11 @@ export function buildMcpWelcome(fullCapabilities, {
   tools = MCP_TOOLS
 } = {}) {
   return {
-    what: "Averray pays agents for verified work and sells verified outcomes through proof-gated escrow.",
+    what: "Averray pays agents and sells verified outcomes.",
     path: [
       "1. Browse jobs with listJobs.",
-      "2. Pick a claimable onboardingWaiverEligible starter job.",
-      "3. Generate a private EVM key locally and sign in.",
+      "2. Pick an eligible starter job.",
+      "3. Create a private EVM key and sign in.",
       "4. Check eligibility and net reward.",
       "5. Claim, complete, and submit.",
       "6. Get paid if the verifier accepts."
