@@ -126,6 +126,7 @@ import { fileURLToPath } from "node:url";
 import { ConfigError } from "../core/errors.js";
 import { resolveHubNetwork } from "../core/discovery-manifest.js";
 import { EarningsDoorService } from "./earnings-door.js";
+import { LockedTierService, loadLockedTierConfig } from "./locked-tier-service.js";
 import {
   FirstWithdrawalGasGrantService,
   loadFirstWithdrawalGasGrantConfig
@@ -204,8 +205,16 @@ export function createPlatformService() {
     blockchainGateway: gateway,
     gasEstimateUsdc: subsidyConfig.gasEstimateUsdc
   });
+  const lockedTierService = createLockedTierService({
+    gateway,
+    authConfig: { chainId: gateway.config.chainId ?? 420_420_417, domain: "localhost" },
+    stateStore,
+    workerExposurePolicy,
+    env: {}
+  });
   const depositClaimPriorityPolicy = createDepositClaimPriorityPolicy({
-    workerExposurePolicy
+    workerExposurePolicy,
+    lockedTierPriorityReader: (wallet) => lockedTierService.getPriorityRank(wallet)
   });
   const workerDailyExposurePolicy = createWorkerDailyExposurePolicy({
     stateStore,
@@ -259,6 +268,7 @@ export function createDepositPoolDoor({
   authConfig,
   chainReader,
   workerExposurePolicy,
+  lockedTierService,
   env = process.env
 } = {}) {
   return new DepositPoolDoorService({
@@ -270,6 +280,7 @@ export function createDepositPoolDoor({
     provider: gateway.provider,
     chainReader,
     workerExposurePolicy,
+    lockedTierService,
     vestingHours: loadDepositVestingConfig(env).vestingHours
   });
 }
@@ -282,6 +293,7 @@ export function createEarningsDoor({
   workerExposurePolicy,
   workerProgressionService,
   getReputation,
+  lockedTierService,
   chainReader,
   env = process.env
 } = {}) {
@@ -302,8 +314,30 @@ export function createEarningsDoor({
     workerProgressionService,
     getReputation,
     gasGrantService,
+    lockedTierService,
     provider: gateway.provider,
     chainReader
+  });
+}
+
+export function createLockedTierService({
+  gateway,
+  authConfig,
+  stateStore,
+  workerExposurePolicy,
+  env = process.env,
+  now = () => new Date()
+} = {}) {
+  return new LockedTierService({
+    stateStore,
+    accountPositionReader: (wallet, asset) => gateway.getAccountPosition(wallet, asset),
+    creditPositionReader: (wallet) => workerExposurePolicy.capacityForWallet(wallet),
+    config: loadLockedTierConfig(env),
+    chainId: authConfig.chainId,
+    siweDomain: authConfig.domain,
+    publicBaseUrl: env.PUBLIC_BASE_URL ?? `https://${authConfig.domain}`,
+    vestingHours: loadDepositVestingConfig(env).vestingHours,
+    now
   });
 }
 
@@ -461,11 +495,23 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const lockedTierService = initStep(
+    "init-locked-tiers",
+    logger,
+    () => createLockedTierService({
+      gateway,
+      authConfig,
+      stateStore,
+      workerExposurePolicy,
+      env: process.env
+    })
+  );
   const depositClaimPriorityPolicy = initStep(
     "init-deposit-claim-priority",
     logger,
     () => createDepositClaimPriorityPolicy({
       workerExposurePolicy,
+      lockedTierPriorityReader: (wallet) => lockedTierService.getPriorityRank(wallet),
       env: process.env,
       logger
     })
@@ -834,7 +880,7 @@ export async function createPlatformRuntime() {
     })
   );
   const depositPoolDoor = initStep("init-deposit-pool-door", logger, () =>
-    createDepositPoolDoor({ gateway, authConfig, workerExposurePolicy })
+    createDepositPoolDoor({ gateway, authConfig, workerExposurePolicy, lockedTierService })
   );
   const earningsDoor = initStep("init-earnings-door", logger, () =>
     createEarningsDoor({
@@ -844,7 +890,8 @@ export async function createPlatformRuntime() {
       eventBus,
       workerExposurePolicy,
       workerProgressionService,
-      getReputation: platformService.getReputation.bind(platformService)
+      getReputation: platformService.getReputation.bind(platformService),
+      lockedTierService
     })
   );
   platformService.setFirstWithdrawalGasGrantStatusProvider(earningsDoor);
@@ -1058,6 +1105,7 @@ export async function createPlatformRuntime() {
     creditPoolObservability,
     depositPoolDoor,
     earningsDoor,
+    lockedTierService,
     creditPoolDoor,
     creditBookDoor,
     creditBookKeeper,

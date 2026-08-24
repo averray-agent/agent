@@ -129,6 +129,11 @@ export interface AgentIdentity {
   evidence: string;
 }
 
+export interface AgentLockedDepositCommitment {
+  committedDepositor: true;
+  tier: "t90";
+}
+
 export interface AgentRecord {
   handle: string;
   /** Hosted worker-canary identity; excluded from the public directory. */
@@ -137,6 +142,8 @@ export interface AgentRecord {
   identity: AgentIdentity;
   wallet: string;
   walletFull: string;
+  /** Present only after explicit public-profile consent on an active T90 lock. */
+  lockedDeposit?: AgentLockedDepositCommitment;
   tier: AgentTier;
   score: number;
   badges: string[];

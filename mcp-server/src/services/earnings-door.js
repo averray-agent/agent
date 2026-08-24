@@ -15,7 +15,7 @@ import {
   DEFAULT_ONBOARDING_WAIVER_CLAIM_COUNT,
   countClaimedSessions
 } from "../core/claim-economics.js";
-import { ValidationError } from "../core/errors.js";
+import { ConflictError, ValidationError } from "../core/errors.js";
 import { buildPublicReputation } from "../core/public-reputation.js";
 import { CREDIT_INTEREST_STATEMENT } from "../core/worker-progression.js";
 
@@ -152,6 +152,7 @@ export class EarningsDoorService {
     workerProgressionService,
     getReputation,
     gasGrantService,
+    lockedTierService,
     provider,
     chainReader
   } = {}) {
@@ -165,6 +166,7 @@ export class EarningsDoorService {
     this.workerProgressionService = workerProgressionService;
     this.getReputation = getReputation;
     this.gasGrantService = gasGrantService;
+    this.lockedTierService = lockedTierService;
     this.chainReader = chainReader ?? (provider ? new EvmEarningsDoorChainReader(provider) : undefined);
   }
 
@@ -186,7 +188,8 @@ export class EarningsDoorService {
       ...statementsForSessions(sessions, asset),
       ...statementsForStakeEvents(stakeReplay?.events, asset)
     ].sort((left, right) => String(right.occurredAt ?? "").localeCompare(String(left.occurredAt ?? "")));
-    const account = this.#accountFromProof(proof, statement);
+    const lockState = await this.lockedTierService?.getWalletState?.(owner);
+    const account = this.#accountFromProof(proof, statement, lockState);
     const firstWithdrawalGrant = await this.#grantInspection(owner, proof);
     return {
       schemaVersion: 1,
@@ -211,13 +214,39 @@ export class EarningsDoorService {
     const requested = exactPositiveRaw(input.amount);
     const proof = await this.gateway.getAccountPosition(owner, assetSymbol);
     const liquid = BigInt(proof.position.liquidRaw);
-    const account = this.#accountFromProof(proof, []);
+    const withdrawalDecision = await this.lockedTierService?.assessWithdrawal?.({
+      wallet: owner,
+      requestedRaw: requested.toString(),
+      liquidRaw: liquid.toString()
+    });
+    const lockState = await this.lockedTierService?.getWalletState?.(owner);
+    const account = this.#accountFromProof(proof, [], lockState);
     if (requested > liquid) {
       throw new ValidationError("Withdrawal amount exceeds this account's available balance.", {
         reason: "amount_exceeds_available",
         requested: amount(requested, proof.asset.decimals),
         account
       });
+    }
+    if (withdrawalDecision?.allowed === false) {
+      if (withdrawalDecision.consentMismatch === true) {
+        throw new ConflictError(
+          "Withdrawal stopped because the lock ledger is not covered by intact signed consent. A critical operator alarm was raised; do not retry until the platform confirms remediation.",
+          "locked_tier_withdrawal_consent_mismatch",
+          { alarm: withdrawalDecision.alarm }
+        );
+      }
+      throw new ValidationError(
+        "Withdrawal amount reaches principal covered by an active or exiting locked-deposit consent. Withdraw no more than the returned available amount, or request early exit and wait for its normal vesting release.",
+        {
+          reason: "locked_deposit_encumbered",
+          requested: amount(requested, proof.asset.decimals),
+          available: amount(withdrawalDecision.availableRaw, proof.asset.decimals),
+          encumbered: amount(withdrawalDecision.encumberedRaw, proof.asset.decimals),
+          earlyExit: { method: "POST", path: "/locked-deposits/:id/exit" },
+          account
+        }
+      );
     }
 
     const withdrawData = ACCOUNT_INTERFACE.encodeFunctionData("withdraw", [proof.asset.address, requested]);
@@ -296,7 +325,10 @@ export class EarningsDoorService {
       asset: proof.asset,
       account: {
         ...account,
-        availableAfter: amount(liquid - requested, proof.asset.decimals)
+        availableAfter: amount(
+          (withdrawalDecision?.availableRaw ?? liquid) - requested,
+          proof.asset.decimals
+        )
       },
       withdrawal: {
         amount: amount(requested, proof.asset.decimals),
@@ -333,13 +365,19 @@ export class EarningsDoorService {
     };
   }
 
-  #accountFromProof(proof, statement) {
+  #accountFromProof(proof, statement, lockState = undefined) {
+    const liquidRaw = BigInt(proof.position.liquidRaw);
+    const encumberedRaw = BigInt(lockState?.encumbered?.raw ?? 0);
+    const availableRaw = liquidRaw > encumberedRaw ? liquidRaw - encumberedRaw : 0n;
     return {
       owner: getAddress(proof.wallet),
       asset: proof.asset,
-      available: amount(proof.position.liquidRaw, proof.asset.decimals),
+      available: amount(availableRaw, proof.asset.decimals),
+      chainLiquid: amount(liquidRaw, proof.asset.decimals),
+      lockedDepositEncumbered: amount(encumberedRaw, proof.asset.decimals),
       stakedOnOpenWork: amount(proof.position.jobStakeLockedRaw, proof.asset.decimals),
-      statement
+      statement,
+      ...(lockState ? { lockedDepositTier: lockState } : {})
     };
   }
 

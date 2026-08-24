@@ -41,6 +41,7 @@ import { createDepositPoolObservabilityRoutes } from "./deposit-pool-observabili
 import { createCreditPoolObservabilityRoutes } from "./credit-pool-observability-routes.js";
 import { createDepositPoolRoutes } from "./deposit-pool-routes.js";
 import { createEarningsDoorRoutes } from "./earnings-door-routes.js";
+import { createLockedTierRoutes } from "./locked-tier-routes.js";
 import { createCreditPoolRoutes } from "./credit-pool-routes.js";
 import { createContentRoutes } from "./content-routes.js";
 import { createDisputeRoutes } from "./dispute-routes.js";
@@ -107,6 +108,7 @@ const {
   creditPoolObservability,
   depositPoolDoor,
   earningsDoor,
+  lockedTierService,
   creditPoolDoor,
   workerProgressionService,
   creditBookDoor,
@@ -471,6 +473,14 @@ const handleEarningsDoorRoute = createEarningsDoorRoutes({
   respond,
 });
 
+const handleLockedTierRoute = createLockedTierRoutes({
+  authMiddleware,
+  depositPoolDoor,
+  lockedTierService,
+  readJsonBody,
+  respond,
+});
+
 const handleCreditPoolRoute = createCreditPoolRoutes({
   authMiddleware,
   creditPoolDoor,
@@ -628,6 +638,7 @@ const handleProfileRoute = createProfileRoutes({
   respond,
   service,
   stateStore,
+  lockedTierService,
   selfIdentityRegistry,
 });
 
@@ -638,6 +649,7 @@ const handleWorkerRoute = createWorkerRoutes({
   respond,
   service,
   stateStore,
+  lockedTierService,
   workerProgressionService
 });
 
@@ -794,6 +806,7 @@ const handlePublicMetadataRoute = createPublicMetadataRoutes({
   publicBaseUrl: process.env.PUBLIC_BASE_URL,
   respond,
   respondText,
+  lockedTierService,
   service,
   strategies,
 });
@@ -831,6 +844,7 @@ const executeMcpTool = createMcpToolExecutor({
   handleDepositPoolRoute,
   handleEarningsDoorRoute,
   handleJobRoute: handleMcpJobRoute,
+  handleLockedTierRoute,
   handlePublicMetadataRoute,
   handleVerifyRoute,
   maxRequestBodyBytes: httpConfig.maxBodyBytes,
@@ -928,6 +942,7 @@ const handleOperationalRoute = createOperationalRoutes({
   respond,
   service,
   stateStore,
+  lockedTierService,
 });
 
 const server = createServer(async (request, response) => {
@@ -1021,6 +1036,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleEarningsDoorRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleLockedTierRoute({ request, response, url, pathname })) {
       return;
     }
 

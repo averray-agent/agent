@@ -67,3 +67,11 @@ test("agent admin views label wallet ownership through the shared identity regis
   assert.doesNotMatch(table, /a\.synthetic\s*\?/u);
   assert.doesNotMatch(drawer, /agent\.synthetic\s*\?/u);
 });
+
+test("read-only tier visibility is sourced only from the explicit public profile field", () => {
+  const adapter = readFileSync(resolve(here, "agent-adapters.ts"), "utf8");
+  const drawer = readFileSync(resolve(agentsDir, "AgentDrawerBody.tsx"), "utf8");
+
+  assert.match(adapter, /value\?\.committedDepositor !== true \|\| value\?\.tier !== "t90"/u);
+  assert.match(drawer, /Committed depositor · T90 locked deposit/u);
+});

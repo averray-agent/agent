@@ -72,6 +72,7 @@ function makeHarness(overrides = {}) {
         return overrides.posterOnboarding ?? POSTER_ONBOARDING;
       }
     },
+    lockedTierService: overrides.lockedTierService,
     respond: (res, statusCode, body, headers = {}) => {
       calls.push(["respond", { statusCode, body, headers }]);
       res.statusCode = statusCode;
@@ -229,6 +230,25 @@ test("A1 arrival payload: GET /onboarding keeps earn-from-zero proof and limits 
       headers: { "cache-control": "public, max-age=30" }
     }],
   ]);
+});
+
+test("platform capabilities expose the flag-off locked-tier gate without inventing yield", async () => {
+  const lockedDeposits = {
+    enabled: false,
+    activationGate: { open: false, statement: "yield inactive — pool below activation threshold." }
+  };
+  const { response, route } = makeHarness({
+    lockedTierService: { getCapability: async () => lockedDeposits }
+  });
+
+  await route({
+    request: { method: "GET" },
+    response,
+    pathname: "/onboarding",
+  });
+
+  assert.deepEqual(response.body.products.lockedDeposits, lockedDeposits);
+  assert.deepEqual(response.body.onboarding.lockedDeposits, lockedDeposits);
 });
 
 test("A3 arrival payload: GET /llms.txt serves the agent-adjusted API-host mirror", async () => {

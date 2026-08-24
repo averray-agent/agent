@@ -132,6 +132,7 @@ export class DepositPoolDoorService {
     provider,
     chainReader,
     workerExposurePolicy,
+    lockedTierService,
     vestingHours = 48
   } = {}) {
     this.poolAddress = poolAddress ? getAddress(poolAddress) : "";
@@ -139,6 +140,7 @@ export class DepositPoolDoorService {
     this.rpcUrls = [...new Set((rpcUrls ?? []).filter(Boolean).map(String))];
     this.chainReader = chainReader ?? (provider ? new EvmDepositPoolDoorChainReader(provider) : undefined);
     this.workerExposurePolicy = workerExposurePolicy;
+    this.lockedTierService = lockedTierService;
     this.vestingHours = Number(vestingHours);
   }
 
@@ -150,7 +152,12 @@ export class DepositPoolDoorService {
       poolAddress: this.poolAddress,
       wallet: normalizedWallet
     }));
-    return this.#infoFromSnapshot(snapshot, normalizedWallet);
+    const info = await this.#infoFromSnapshot(snapshot, normalizedWallet);
+    if (typeof this.lockedTierService?.getPoolTelemetry !== "function") return info;
+    return {
+      ...info,
+      lockedDeposits: await this.lockedTierService.getPoolTelemetry(normalizedWallet)
+    };
   }
 
   async buildTransactions(wallet, input = {}) {

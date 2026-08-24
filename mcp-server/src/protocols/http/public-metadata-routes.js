@@ -34,6 +34,9 @@ const ROOT_ENDPOINTS = [
   "/account/fund",
   "/account/position",
   "/account/withdraw/transactions",
+  "/locked-deposits/quote",
+  "/locked-deposits/consent",
+  "/locked-deposits/:id/exit",
   "/account/repay",
   "/me",
   "/receipts",
@@ -151,6 +154,7 @@ export function createPublicMetadataRoutes({
   minimumRewardUsdc,
   publicBaseUrl,
   posterOnboardingService,
+  lockedTierService,
   respond,
   respondText,
   service,
@@ -218,15 +222,27 @@ export function createPublicMetadataRoutes({
     }
 
     if (request.method === "GET" && pathname === "/onboarding") {
-      const [workerDoor, externalBounties] = await Promise.all([
+      const [workerDoor, externalBounties, lockedDeposits] = await Promise.all([
         posterOnboardingService.getWorkerDoorOnboarding(),
-        posterOnboardingService.getExternalBountiesOnboarding()
+        posterOnboardingService.getExternalBountiesOnboarding(),
+        lockedTierService?.getCapability?.() ?? Promise.resolve(undefined)
       ]);
+      const capabilities = service.getPlatformCapabilities({ chainId: authConfig?.chainId });
       respond(
         response,
         200,
         {
-          ...service.getPlatformCapabilities({ chainId: authConfig?.chainId }),
+          ...capabilities,
+          ...(lockedDeposits ? {
+            products: {
+              ...capabilities.products,
+              lockedDeposits
+            }
+          } : {}),
+          onboarding: {
+            ...capabilities.onboarding,
+            ...(lockedDeposits ? { lockedDeposits } : {})
+          },
           workerDoor,
           externalBounties
         },

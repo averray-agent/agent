@@ -42,6 +42,16 @@
         "evidence": { "type": "string", "minLength": 1 }
       }
     },
+    "lockedDeposit": {
+      "type": "object",
+      "description": "Explicitly opted-in public commitment marker. Omitted unless the wallet consented to publication and an eligible T90 locked deposit remains active.",
+      "required": ["committedDepositor", "tier"],
+      "additionalProperties": false,
+      "properties": {
+        "committedDepositor": { "const": true },
+        "tier": { "const": "t90" }
+      }
+    },
     "fetchedAt": {
       "type": "string",
       "format": "date-time",

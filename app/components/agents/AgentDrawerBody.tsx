@@ -50,7 +50,11 @@ export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
         </div>
       )}
       <Section title="Public identity">
-        <PublicIdentityCard wallet={agent.walletFull} profileUrl={profileUrl} />
+        <PublicIdentityCard
+          wallet={agent.walletFull}
+          profileUrl={profileUrl}
+          committedDepositor={agent.lockedDeposit?.committedDepositor === true}
+        />
       </Section>
 
       {agent.activeSession ? (
@@ -225,9 +229,11 @@ export function AgentDrawerBody({ agent }: { agent: AgentRecord }) {
 function PublicIdentityCard({
   wallet,
   profileUrl,
+  committedDepositor,
 }: {
   wallet: string;
   profileUrl: string | null;
+  committedDepositor: boolean;
 }) {
   const [copied, setCopied] = useState<"wallet" | "url" | null>(null);
 
@@ -255,6 +261,11 @@ function PublicIdentityCard({
       >
         {wallet}
       </span>
+      {committedDepositor ? (
+        <span className="w-fit rounded-full border border-[color:rgba(30,102,66,0.28)] bg-[var(--avy-paper-solid)] px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-accent)]">
+          Committed depositor · T90 locked deposit
+        </span>
+      ) : null}
       <div className="flex flex-wrap items-center gap-1.5">
         {profileUrl ? (
           <>

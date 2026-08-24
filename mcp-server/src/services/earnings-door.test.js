@@ -20,6 +20,7 @@ function harness({
   liquidRaw = "1250000",
   nativeBalance = 30_000_000_000_000_000n,
   gasGrantService = undefined,
+  lockedTierService = undefined,
   workerClaimCount = 0,
   progression = {
     tier: "starter",
@@ -149,6 +150,7 @@ function harness({
         return reputation;
       },
       gasGrantService,
+      lockedTierService,
       chainReader
     })
   };
@@ -337,6 +339,40 @@ test("over-available withdrawal refuses before offering templates and echoes the
     (error) => {
       assert.equal(error.details.reason, "amount_exceeds_available");
       assert.equal(error.details.account.available.raw, "9");
+      return true;
+    }
+  );
+});
+
+test("withdrawal available-balance subtracts consented lock encumbrance and names the early-exit path", async () => {
+  const lockedTierService = {
+    async getWalletState() {
+      return {
+        tier: "t30",
+        encumbered: { raw: "1000000", decimals: 6 },
+        entries: [{ id: `0x${"11".repeat(32)}`, status: "active" }]
+      };
+    },
+    async assessWithdrawal() {
+      return {
+        allowed: false,
+        availableRaw: 250000n,
+        encumberedRaw: 1000000n,
+        consentMismatch: false
+      };
+    }
+  };
+  const { door } = harness({ lockedTierService });
+  const account = await door.getAccount(WALLET);
+  assert.equal(account.account.chainLiquid.raw, "1250000");
+  assert.equal(account.account.lockedDepositEncumbered.raw, "1000000");
+  assert.equal(account.account.available.raw, "250000");
+  await assert.rejects(
+    () => door.buildWithdrawTransactions(WALLET, { amount: "250001" }),
+    (error) => {
+      assert.equal(error.details.reason, "locked_deposit_encumbered");
+      assert.equal(error.details.available.raw, "250000");
+      assert.equal(error.details.earlyExit.path, "/locked-deposits/:id/exit");
       return true;
     }
   );

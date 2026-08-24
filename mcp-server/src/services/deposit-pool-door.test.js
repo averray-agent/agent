@@ -39,7 +39,7 @@ function state(overrides = {}) {
   };
 }
 
-function service({ snapshot = state(), convertToShares, estimateGas } = {}) {
+function service({ snapshot = state(), convertToShares, estimateGas, lockedTierService } = {}) {
   const estimates = [];
   const reader = {
     async readSnapshot({ wallet }) {
@@ -66,6 +66,7 @@ function service({ snapshot = state(), convertToShares, estimateGas } = {}) {
       chainId: 420_420_419,
       rpcUrls: ["https://polkadot-asset-hub-rpc.polkadot.io"],
       chainReader: reader,
+      lockedTierService,
       workerExposurePolicy: {
         async capacityForWallet() {
           return {
@@ -114,6 +115,18 @@ test("pool info discloses pilot risk and authenticated info reports vested capac
   assert.equal("dailyAllowance" in authed.wallet, false);
   assert.equal(JSON.stringify(authed).includes("fromDeposits"), false);
   assert.deepEqual(authed.wallet.perAgentHeadroom, { raw: "90000000", decimals: 6 });
+});
+
+test("pool info exposes locked-cohort activation telemetry from the single gate source", async () => {
+  const telemetry = {
+    lockedTotalRaw: "3820000",
+    activationGate: { open: false, statement: "yield inactive — pool below activation threshold." }
+  };
+  const door = service({
+    lockedTierService: { getPoolTelemetry: async () => telemetry }
+  }).value;
+
+  assert.deepEqual((await door.getInfo()).lockedDeposits, telemetry);
 });
 
 test("profile without a pool returns unavailable without fabricated zero fields", async () => {

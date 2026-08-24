@@ -27,7 +27,7 @@ function handleForWallet(wallet) {
   return `agent-${normalized.slice(2, 6)}-${normalized.slice(-4)}`;
 }
 
-function buildAgentDirectoryRow(profile) {
+function buildAgentDirectoryRow(profile, publicCommitment = undefined) {
   const reputation = profile.reputation ?? {};
   const approvedCount = Number(profile.stats?.approvedCount ?? 0);
   const rejectedCount = Number(profile.stats?.rejectedCount ?? 0);
@@ -58,6 +58,7 @@ function buildAgentDirectoryRow(profile) {
     activeStake: 0,
     badges: profile.badges ?? [],
     slashEvents,
+    ...(publicCommitment ? { lockedDeposit: publicCommitment } : {})
   };
 }
 
@@ -69,6 +70,7 @@ export function createProfileRoutes({
   respond,
   service,
   stateStore,
+  lockedTierService,
   selfIdentityRegistry = new SelfIdentityRegistry(),
 }) {
   async function preloadDisputeReceipts(sessions) {
@@ -162,9 +164,10 @@ export function createProfileRoutes({
     const wallets = [...new Set(sessions.map((session) => session.wallet).filter(Boolean))];
     const rows = await Promise.all(wallets.map(async (wallet) => {
       const checksummed = safeChecksum(wallet);
-      const [reputation, history] = await Promise.all([
+      const [reputation, history, publicCommitment] = await Promise.all([
         service.getReputation(checksummed),
-        service.collectSessionHistory(checksummed, { logger })
+        service.collectSessionHistory(checksummed, { logger }),
+        lockedTierService?.getPublicCommitment?.(checksummed) ?? Promise.resolve(undefined)
       ]);
       const getDisputeReceipts = await preloadDisputeReceipts(history);
       const getLineage = preloadLineage(history);
@@ -184,7 +187,7 @@ export function createProfileRoutes({
         getDisputeReceipts,
         getLineage,
       });
-      return buildAgentDirectoryRow(profile);
+      return buildAgentDirectoryRow(profile, publicCommitment);
     }));
     return rows
       .filter((row) => includeSynthetic || row.synthetic !== true)
@@ -214,9 +217,10 @@ export function createProfileRoutes({
         throw new ValidationError("wallet path segment must be a 0x-prefixed 20-byte hex address.");
       }
       const checksummed = safeChecksum(rawWallet);
-      const [reputation, sessions] = await Promise.all([
+      const [reputation, sessions, publicCommitment] = await Promise.all([
         service.getReputation(checksummed),
-        service.collectSessionHistory(checksummed, { logger: requestLogger })
+        service.collectSessionHistory(checksummed, { logger: requestLogger }),
+        lockedTierService?.getPublicCommitment?.(checksummed) ?? Promise.resolve(undefined)
       ]);
       const getDisputeReceipts = await preloadDisputeReceipts(sessions);
       const getLineage = preloadLineage(sessions);
@@ -239,6 +243,7 @@ export function createProfileRoutes({
       respond(response, 200, {
         ...profile,
         tier: publicReputationTier(profile.reputation),
+        ...(publicCommitment ? { lockedDeposit: publicCommitment } : {})
       }, { "cache-control": "public, max-age=30" });
       return true;
     }
