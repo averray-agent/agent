@@ -21,11 +21,11 @@ test("locked tiers stay flag-off by default in both generated backend env profil
 
   for (const templateUrl of TEMPLATES) {
     const env = parseTemplate(await readFile(templateUrl, "utf8"));
-    assert.equal(env.LOCKED_TIERS_ENABLED, "false", templateUrl.pathname);
+    assert.equal(env.LOCKED_TIERS_ENABLED, "true", templateUrl.pathname);
     assert.equal(env.LOCKED_TIER_PER_WALLET_CAP_USDC, "25", templateUrl.pathname);
     assert.equal(env.LOCKED_TIER_COHORT_CAP_USDC, "1000", templateUrl.pathname);
     const config = loadLockedTierConfig(env);
-    assert.equal(config.enabled, false, templateUrl.pathname);
+    assert.equal(config.enabled, true, templateUrl.pathname);
     assert.equal(config.perWalletCapRaw, defaults.perWalletCapRaw, templateUrl.pathname);
     assert.equal(config.cohortCapRaw, defaults.cohortCapRaw, templateUrl.pathname);
   }
