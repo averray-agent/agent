@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #07090a; }
+  body { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; -webkit-font-smoothing: antialiased; }
+  a { color: #6fd3c5; text-decoration: none; }
+  a:hover { color: #9ee7dc; }
+  ::selection { background: #1d3a2c; color: #d7e0dd; }
+</style>
+</helmet>
+<div style="--bg:#07090a;--panel:#0d1113;--panel-hi:#0f1417;--panel-alt:#0a0e10;--line:#1b2226;--line-strong:#263034;--ink:#d7e0dd;--ink-dim:#8a9895;--ink-mute:#5b6866;--ok:#46d17f;--ok-deep:#2c4a3d;--ok-bg:#0e1b15;--warn:#e0a03a;--warn-bg:#1c1609;--bad:#e2564a;--bad-bg:#1d0f0e;--mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;width:1440px;min-width:1280px;margin:0 auto;background:#07090a;color:#d7e0dd;font-family:var(--mono);padding:0 20px 26px;box-sizing:border-box">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;height:44px;border-bottom:1px solid #1b2226">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="width:8px;height:8px;background:#46d17f;border-radius:1px"></div>
+      <span style="font:700 11px/1 var(--mono);letter-spacing:.22em;text-transform:uppercase;color:#d7e0dd">hermes / averray ops</span>
+      <span style="font:500 10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">overnight ledger ext.</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895;border:1px solid #263034;border-radius:2px;padding:4px 7px">6 additions</span>
+      <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866;border:1px dashed #263034;border-radius:2px;padding:4px 7px">mock · placeholder data</span>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:stretch;gap:0;border:1px solid #1b2226;border-top:none;background:#0d1113">
+    <div style="flex:1 1 auto;padding:18px 20px;display:flex;align-items:center;gap:22px;border-right:1px solid #1b2226">
+      <div>
+        <div style="font:600 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#5b6866;margin-bottom:10px">operator verdict</div>
+        <div style="display:flex;align-items:baseline;gap:10px">
+          <span style="font:700 34px/1 var(--mono);letter-spacing:.02em;color:#46d17f">CONFIRMED</span>
+          <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866;border:1px solid #263034;border-radius:2px;padding:3px 6px">sample</span>
+        </div>
+        <div style="font:400 11px/1.5 var(--mono);color:#8a9895;margin-top:8px">— checks passing · — open warnings · last sweep --:--</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,160px)">
+      <div style="padding:18px 16px;border-right:1px solid #1b2226">
+        <div style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">settlements</div>
+        <div style="font:600 20px/1 var(--mono);color:#d7e0dd;margin-top:10px;font-variant-numeric:tabular-nums">—</div>
+      </div>
+      <div style="padding:18px 16px;border-right:1px solid #1b2226">
+        <div style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">net paid</div>
+        <div style="font:600 20px/1 var(--mono);color:#d7e0dd;margin-top:10px;font-variant-numeric:tabular-nums">0.00</div>
+      </div>
+      <div style="padding:18px 16px;border-right:1px solid #1b2226">
+        <div style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">gas</div>
+        <div style="font:600 20px/1 var(--mono);color:#e0a03a;margin-top:10px;font-variant-numeric:tabular-nums">—</div>
+      </div>
+      <div style="padding:18px 16px">
+        <div style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">reward runway</div>
+        <div style="font:600 20px/1 var(--mono);color:#d7e0dd;margin-top:10px;font-variant-numeric:tabular-nums">— <span style="font-size:11px;color:#5b6866">d</span></div>
+        <div style="font:400 10px/1.5 var(--mono);color:#8a9895;margin-top:7px;font-variant-numeric:tabular-nums">liquid only · <span style="color:#2c4a3d">+</span> 0.00 reserved</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="border:1px solid #1b2226;border-top:none;background:#0a0e10">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;border-bottom:1px solid #1b2226;background:#0f1417">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:600 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">overnight digest</span>
+        <span style="font:400 9px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:#5b6866">template-generated · no prose engine</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px dashed #4a3a17;background:#1c1609;border-radius:2px;padding:4px 7px">data: needs endpoint</span>
+        <div style="display:flex;gap:0;border:1px solid #263034;border-radius:2px;overflow:hidden">
+          <button type="button" onClick="{{ set12 }}" style="{{ btn12 }}">12h</button>
+          <button type="button" onClick="{{ set24 }}" style="{{ btn24 }}">24h</button>
+          <button type="button" onClick="{{ set48 }}" style="{{ btn48 }}">48h</button>
+        </div>
+      </div>
+    </div>
+    <div style="padding:4px 0">
+      <div style="display:flex;align-items:baseline;gap:10px;padding:9px 14px;border-bottom:1px solid #12181a">
+        <span style="color:#46d17f;font:600 11px/1.5 var(--mono)">›</span>
+        <span style="font:400 13px/1.5 var(--mono);color:#d7e0dd;flex:1 1 auto;font-variant-numeric:tabular-nums">Last {{ winLower }}: — settlements by — wallets (— new) · 0.00 paid, 0.00 retained · bank 0.00 → 0.00 (0.00 locked) · — claims stuck · gas — DOT.</span>
+        <span style="font:400 9px/1 var(--mono);letter-spacing:.08em;color:#5b6866">tpl:money</span>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:10px;padding:9px 14px;border-bottom:1px solid #12181a">
+        <span style="color:#46d17f;font:600 11px/1.5 var(--mono)">›</span>
+        <span style="font:400 13px/1.5 var(--mono);color:#d7e0dd;flex:1 1 auto;font-variant-numeric:tabular-nums">Ladder: — graduated (→ pro) · — waiver windows exhausted · — first external postings · — wallets in free window.</span>
+        <span style="font:400 9px/1 var(--mono);letter-spacing:.08em;color:#5b6866">tpl:ladder</span>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:10px;padding:9px 14px">
+        <span style="color:#e0a03a;font:600 11px/1.5 var(--mono)">›</span>
+        <span style="font:400 13px/1.5 var(--mono);color:#d7e0dd;flex:1 1 auto;font-variant-numeric:tabular-nums">Capability: — warnings open, — closed · — deploys · ledger vs chain proof {{ ledgerWord }} (Δ 0.00).</span>
+        <span style="font:400 9px/1 var(--mono);letter-spacing:.08em;color:#5b6866">tpl:capability</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:flex-start;gap:14px;margin-top:14px">
+    <div style="flex:1 1 0;min-width:0">
+      <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 12px;border-bottom:1px solid #1b2226;background:#0f1417">
+          <span style="font:600 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">solvency</span>
+          <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#46d17f;border:1px solid #234a35;background:#0e1b15;border-radius:2px;padding:4px 7px">confirmed</span>
+        </div>
+
+        <div style="padding:11px 12px;border-bottom:1px solid #12181a">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+            <span style="font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895">signer gas</span>
+            <span style="font:500 12px/1 var(--mono);color:#e0a03a;font-variant-numeric:tabular-nums">— <span style="color:#5b6866">DOT</span></span>
+          </div>
+          <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:8px">
+            <span style="font:400 10px/1 var(--mono);color:#5b6866">EVM</span><button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.04em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>0xSAMP…LE01</button>
+            <span style="color:#5b6866">·</span>
+            <span style="font:400 10px/1 var(--mono);color:#5b6866">SS58</span><button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.04em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>13SAMP…LE</button>
+            <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866;border:1px solid #263034;border-radius:2px;padding:3px 6px">sample</span>
+          </div>
+          <div style="position:relative;height:5px;margin-top:10px;background:#161c1f;border:1px solid #1b2226;border-radius:1px">
+            <div style="width:0%;height:100%;background:#46d17f"></div>
+            <div style="position:absolute;left:30%;top:-2px;bottom:-2px;width:1px;background:#e0a03a"></div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px"><span style="font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">burn — / d</span><span style="font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">floor — · runway — d</span></div>
+          <div style="margin-top:10px;padding:9px 10px;background:#0b0f11;border:1px solid #1b2226;border-radius:2px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <span style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">top-up</span>
+              <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px dashed #4a3a17;background:#1c1609;border-radius:2px;padding:3px 6px">data: needs endpoint</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+              <span style="font:400 11px/1 var(--mono);color:#d7e0dd">13SAMP…LE</span><button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.04em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>copy</button>
+            </div>
+            <div style="font:400 10px/1.55 var(--mono);color:#8a9895;margin-top:7px">send DOT · Polkadot Asset Hub</div>
+          </div>
+        </div>
+
+        <div style="padding:11px 12px;border-bottom:1px solid #12181a">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+            <span style="font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895">reward bank</span>
+            <span style="display:flex;align-items:center;gap:8px">
+              <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895;border:1px solid #263034;border-radius:2px;padding:3px 6px">drop-in</span>
+              <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866;border:1px solid #263034;border-radius:2px;padding:3px 6px">sample split</span>
+              <span style="font:600 13px/1 var(--mono);color:#d7e0dd;font-variant-numeric:tabular-nums">0.00</span>
+            </span>
+          </div>
+          <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:8px">
+            <span style="font:400 10px/1 var(--mono);color:#5b6866">EVM</span><button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.04em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>0xSAMP…LE02</button>
+            <span style="color:#5b6866">·</span>
+            <span style="font:400 10px/1 var(--mono);color:#5b6866">SS58</span><button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.04em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>13SAMP…LE</button>
+            <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866;border:1px solid #263034;border-radius:2px;padding:3px 6px">sample</span>
+          </div>
+          <div style="position:relative;display:flex;height:7px;margin-top:11px;background:#161c1f;border:1px solid #1b2226;border-radius:1px">
+            <div style="width:62%;background:#46d17f"></div>
+            <div style="width:22%;background:#2c4a3d;border-left:1px solid #0b0f11"></div>
+            <div style="position:absolute;left:30%;top:-2px;bottom:-2px;width:1px;background:#e0a03a"></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:16px;margin-top:9px;flex-wrap:wrap">
+            <span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;background:#46d17f;border-radius:1px"></span><span style="font:400 11px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">liquid <span style="color:#d7e0dd">0.00</span></span></span>
+            <span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;background:#2c4a3d;border-radius:1px"></span><span style="font:400 11px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">reserved <span style="color:#d7e0dd">0.00</span></span></span>
+            <span style="font:400 11px/1 var(--mono);color:#8a9895;margin-left:auto;font-variant-numeric:tabular-nums">runway <span style="color:#d7e0dd">—</span> d <span style="color:#5b6866">(liquid only)</span></span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px"><span style="font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">burn — / d</span><span style="font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">floor —</span></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:9px;border-top:1px solid #12181a;font:400 11px/1 var(--mono);font-variant-numeric:tabular-nums;flex-wrap:wrap">
+            <span style="color:#e2564a">liquid −0.00</span>
+            <span style="color:#5b6866">·</span>
+            <span style="color:#46d17f">reserved +0.00</span>
+            <span style="color:#5b6866">·</span>
+            <span style="color:#5b6866">{{ winLower }}</span>
+            <span style="margin-left:auto"><span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px dashed #4a3a17;background:#1c1609;border-radius:2px;padding:3px 6px">data: needs endpoint</span></span>
+          </div>
+          <div style="margin-top:10px;padding:9px 10px;background:#0b0f11;border:1px solid #1b2226;border-radius:2px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <span style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">top-up</span>
+              <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px dashed #4a3a17;background:#1c1609;border-radius:2px;padding:3px 6px">data: needs endpoint</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+              <span style="font:400 11px/1 var(--mono);color:#d7e0dd">13SAMP…LE</span><button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.04em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>copy</button>
+            </div>
+            <div style="font:400 10px/1.55 var(--mono);color:#8a9895;margin-top:7px">send USDC · Polkadot Asset Hub <span style="color:#5b6866">(Coinbase: network “Polkadot”)</span></div>
+            <div style="font:400 10px/1.55 var(--mono);color:#8a9895;margin-top:7px">lands in EOA — run <span style="color:#d7e0dd">fund-signer deposit</span> to move it into the bank</div>
+          </div>
+        </div>
+
+        <div style="padding:11px 12px;border-bottom:1px solid #12181a">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+            <span style="font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895">agent core</span>
+            <span style="font:500 12px/1 var(--mono);color:#d7e0dd;font-variant-numeric:tabular-nums">0.00 <span style="color:#5b6866">USDC</span></span>
+          </div>
+          <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:8px">
+            <span style="font:400 10px/1 var(--mono);color:#5b6866">EVM</span><button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.04em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>0xSAMP…LE03</button>
+            <span style="color:#5b6866">·</span>
+            <span style="font:400 10px/1 var(--mono);color:#5b6866">SS58</span><button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.04em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>13SAMP…LE</button>
+            <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866;border:1px solid #263034;border-radius:2px;padding:3px 6px">sample</span>
+          </div>
+          <div style="position:relative;height:5px;margin-top:10px;background:#161c1f;border:1px solid #1b2226;border-radius:1px">
+            <div style="width:0%;height:100%;background:#46d17f"></div>
+            <div style="position:absolute;left:30%;top:-2px;bottom:-2px;width:1px;background:#e0a03a"></div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px"><span style="font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">burn — / d</span><span style="font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">floor — · runway — d</span></div>
+        </div>
+
+        <div style="padding:11px 12px;border-bottom:1px solid #12181a">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+            <span style="font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895">treasury reserve</span>
+            <span style="font:500 12px/1 var(--mono);color:#d7e0dd;font-variant-numeric:tabular-nums">0.00 <span style="color:#5b6866">USDC</span></span>
+          </div>
+          <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:8px">
+            <span style="font:400 10px/1 var(--mono);color:#5b6866">EVM</span><button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.04em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>0xSAMP…LE04</button>
+            <span style="color:#5b6866">·</span>
+            <span style="font:400 10px/1 var(--mono);color:#5b6866">SS58</span><button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.04em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>13SAMP…LE</button>
+            <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866;border:1px solid #263034;border-radius:2px;padding:3px 6px">sample</span>
+          </div>
+          <div style="position:relative;height:5px;margin-top:10px;background:#161c1f;border:1px solid #1b2226;border-radius:1px">
+            <div style="width:0%;height:100%;background:#46d17f"></div>
+            <div style="position:absolute;left:30%;top:-2px;bottom:-2px;width:1px;background:#e0a03a"></div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px"><span style="font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">burn — / d</span><span style="font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">floor — · runway — d</span></div>
+        </div>
+
+        <div style="padding:11px 12px;border-bottom:1px solid #12181a">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+            <span style="font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895">escrow (in-flight)</span>
+            <span style="font:500 12px/1 var(--mono);color:#d7e0dd;font-variant-numeric:tabular-nums">0.00 <span style="color:#5b6866">USDC</span></span>
+          </div>
+          <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:8px">
+            <span style="font:400 10px/1 var(--mono);color:#5b6866">EVM</span><button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.04em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>0xSAMP…LE05</button>
+            <span style="color:#5b6866">·</span>
+            <span style="font:400 10px/1 var(--mono);color:#5b6866">SS58</span><button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.04em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>13SAMP…LE</button>
+            <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866;border:1px solid #263034;border-radius:2px;padding:3px 6px">sample</span>
+          </div>
+          <div style="position:relative;height:5px;margin-top:10px;background:#161c1f;border:1px solid #1b2226;border-radius:1px">
+            <div style="width:0%;height:100%;background:#46d17f"></div>
+            <div style="position:absolute;left:30%;top:-2px;bottom:-2px;width:1px;background:#e0a03a"></div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px"><span style="font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">— jobs locked</span><span style="font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">oldest --:--</span></div>
+        </div>
+
+        <div style="padding:11px 12px">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+            <span style="font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895">protocol revenue</span>
+            <span style="font:500 12px/1 var(--mono);color:#d7e0dd;font-variant-numeric:tabular-nums">0.00 <span style="color:#5b6866">USDC</span></span>
+          </div>
+          <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:8px">
+            <span style="font:400 10px/1 var(--mono);color:#5b6866">EVM</span><button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.04em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>0xSAMP…LE06</button>
+            <span style="color:#5b6866">·</span>
+            <span style="font:400 10px/1 var(--mono);color:#5b6866">SS58</span><button type="button" style="display:inline-flex;align-items:center;gap:5px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:3px 6px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.04em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span>13SAMP…LE</button>
+            <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866;border:1px solid #263034;border-radius:2px;padding:3px 6px">sample</span>
+          </div>
+          <div style="position:relative;height:5px;margin-top:10px;background:#161c1f;border:1px solid #1b2226;border-radius:1px">
+            <div style="width:0%;height:100%;background:#46d17f"></div>
+            <div style="position:absolute;left:30%;top:-2px;bottom:-2px;width:1px;background:#e0a03a"></div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px"><span style="font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">{{ winLower }} Δ +0.00</span><span style="font:400 10px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">retention share —</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:14px">
+      <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 12px;border-bottom:1px solid #1b2226;background:#0f1417">
+          <span style="font:600 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">money movement — {{ win }}</span>
+          <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px dashed #4a3a17;background:#1c1609;border-radius:2px;padding:4px 7px">data: needs endpoint</span>
+        </div>
+
+        <div style="padding:6px 12px 12px">
+
+          <div style="display:grid;grid-template-columns:16px 1fr auto;align-items:start;column-gap:10px">
+            <div style="display:flex;flex-direction:column;align-items:center;padding-top:16px"><span style="width:7px;height:7px;border:1px solid #46d17f;background:#0d1113;border-radius:50%"></span><span style="width:1px;flex:1 1 auto;min-height:34px;background:#1b2226"></span></div>
+            <div style="padding:14px 0 12px">
+              <div style="font:600 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#d7e0dd">opening liquid</div>
+              <div style="font:400 10px/1 var(--mono);color:#5b6866;margin-top:7px">window open snapshot · --:--</div>
+              <button type="button" style="margin-top:9px;display:inline-flex;align-items:center;gap:6px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:4px 7px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.06em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span> proof 0xSAMP…LE01</button>
+            </div>
+            <div style="padding:14px 0 12px;text-align:right"><span style="font:600 15px/1 var(--mono);color:#d7e0dd;font-variant-numeric:tabular-nums">0.00</span></div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:16px 1fr auto;align-items:start;column-gap:10px;border-top:1px solid #12181a">
+            <div style="display:flex;flex-direction:column;align-items:center;padding-top:16px"><span style="width:7px;height:7px;border:1px solid #e2564a;background:#0d1113;border-radius:50%"></span><span style="width:1px;flex:1 1 auto;min-height:34px;background:#1b2226"></span></div>
+            <div style="padding:14px 0 12px">
+              <div style="font:600 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#d7e0dd">payouts out</div>
+              <div style="font:400 10px/1 var(--mono);color:#5b6866;margin-top:7px">— settlements · to — wallets</div>
+              <button type="button" style="margin-top:9px;display:inline-flex;align-items:center;gap:6px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:4px 7px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.06em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span> — txs · payout evidence</button>
+            </div>
+            <div style="padding:14px 0 12px;text-align:right"><span style="font:600 15px/1 var(--mono);color:#e2564a;font-variant-numeric:tabular-nums">−0.00</span><div style="font:400 10px/1 var(--mono);color:#5b6866;margin-top:7px">net USDC</div></div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:16px 1fr auto;align-items:start;column-gap:10px;border-top:1px solid #12181a">
+            <div style="display:flex;flex-direction:column;align-items:center;padding-top:16px"><span style="width:7px;height:7px;border:1px solid #46d17f;background:#0d1113;border-radius:50%"></span><span style="width:1px;flex:1 1 auto;min-height:34px;background:#1b2226"></span></div>
+            <div style="padding:14px 0 12px">
+              <div style="font:600 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#d7e0dd">retention + fees in</div>
+              <div style="font:400 10px/1 var(--mono);color:#5b6866;margin-top:7px">protocol retention · charged share</div>
+              <button type="button" style="margin-top:9px;display:inline-flex;align-items:center;gap:6px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:4px 7px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.06em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span> proof 0xSAMP…LE02</button>
+            </div>
+            <div style="padding:14px 0 12px;text-align:right"><span style="font:600 15px/1 var(--mono);color:#46d17f;font-variant-numeric:tabular-nums">+0.00</span></div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:16px 1fr auto;align-items:start;column-gap:10px;border-top:1px solid #12181a">
+            <div style="display:flex;flex-direction:column;align-items:center;padding-top:16px"><span style="width:7px;height:7px;border:1px solid #e0a03a;background:#0d1113;border-radius:50%"></span><span style="width:1px;flex:1 1 auto;min-height:34px;background:#1b2226"></span></div>
+            <div style="padding:14px 0 12px">
+              <div style="font:600 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#d7e0dd">reserved Δ</div>
+              <div style="font:400 10px/1.5 var(--mono);color:#5b6866;margin-top:7px">locked behind newly minted / claimed jobs</div>
+              <button type="button" style="margin-top:9px;display:inline-flex;align-items:center;gap:6px;background:#0b0f11;border:1px solid #263034;border-radius:2px;padding:4px 7px;cursor:pointer;font:400 9px/1 var(--mono);letter-spacing:.06em;color:#8a9895" style-hover="border-color:#46d17f;color:#46d17f"><span style="color:#46d17f">⧉</span> — escrow rows</button>
+            </div>
+            <div style="padding:14px 0 12px;text-align:right"><span style="font:600 15px/1 var(--mono);color:#e0a03a;font-variant-numeric:tabular-nums">±0.00</span><div style="font:400 10px/1 var(--mono);color:#5b6866;margin-top:7px">to reserved</div></div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:16px 1fr auto;align-items:center;column-gap:10px;border-top:1px solid #263034;background:#0b0f11;margin:0 -12px;padding:0 12px">
+            <div style="display:flex;justify-content:center"><span style="width:7px;height:7px;background:#46d17f;border-radius:50%"></span></div>
+            <div style="padding:14px 0">
+              <div style="font:700 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#d7e0dd">closing liquid</div>
+              <div style="font:400 10px/1 var(--mono);color:#5b6866;margin-top:7px">window close snapshot · --:--</div>
+            </div>
+            <div style="padding:14px 0;text-align:right"><span style="font:700 19px/1 var(--mono);color:#46d17f;font-variant-numeric:tabular-nums">0.00</span></div>
+          </div>
+
+          <sc-if value="{{ ledgerOk }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px -12px 0;padding:11px 12px;border-top:1px solid #1b2226;background:#0e1b15">
+              <div style="display:flex;align-items:center;gap:9px">
+                <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#46d17f;border:1px solid #234a35;border-radius:2px;padding:4px 7px">confirmed</span>
+                <span style="font:400 11px/1 var(--mono);color:#8a9895">ledger matches chain proof ✓</span>
+                <a href="#payout-evidence" style="font:400 10px/1 var(--mono);letter-spacing:.04em">→ payout evidence · FLOW</a>
+              </div>
+              <span style="font:400 11px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">Δ 0.00 · — proofs tied</span>
+            </div>
+          </sc-if>
+          <sc-if value="{{ ledgerBad }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px -12px 0;padding:11px 12px;border-top:1px solid #1b2226;background:#1d0f0e">
+              <div style="display:flex;align-items:center;gap:9px">
+                <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e2564a;border:1px solid #4a2320;border-radius:2px;padding:4px 7px">shortfall</span>
+                <span style="font:400 11px/1 var(--mono);color:#8a9895">ledger does not match chain proof</span>
+                <a href="#payout-evidence" style="font:400 10px/1 var(--mono);letter-spacing:.04em">→ payout evidence · FLOW</a>
+              </div>
+              <span style="font:400 11px/1 var(--mono);color:#e2564a;font-variant-numeric:tabular-nums">Δ 0.00 · — proofs missing</span>
+            </div>
+          </sc-if>
+          <div style="display:flex;justify-content:flex-end;margin-top:9px">
+            <button type="button" onClick="{{ toggleLedger }}" style="background:transparent;border:1px solid #263034;border-radius:2px;padding:4px 7px;cursor:pointer;font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866" style-hover="color:#8a9895;border-color:#3a4649">preview other state</button>
+          </div>
+        </div>
+      </div>
+      <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 12px;border-bottom:1px solid #1b2226;background:#0f1417">
+          <span style="font:600 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">retention &amp; waivers — {{ win }}</span>
+          <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px dashed #4a3a17;background:#1c1609;border-radius:2px;padding:4px 7px">data: needs endpoint</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr">
+          <div style="padding:12px;border-right:1px solid #12181a;border-bottom:1px solid #12181a">
+            <div style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">charged</div>
+            <div style="font:600 17px/1 var(--mono);color:#46d17f;margin-top:9px;font-variant-numeric:tabular-nums">0.00</div>
+            <div style="font:400 10px/1 var(--mono);color:#5b6866;margin-top:7px">— settlements retained</div>
+          </div>
+          <div style="padding:12px;border-bottom:1px solid #12181a">
+            <div style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">waived</div>
+            <div style="font:600 17px/1 var(--mono);color:#e0a03a;margin-top:9px;font-variant-numeric:tabular-nums">0.00</div>
+            <div style="font:400 10px/1 var(--mono);color:#5b6866;margin-top:7px">— settlements in free window</div>
+          </div>
+        </div>
+        <div style="padding:12px;border-bottom:1px solid #12181a">
+          <div style="display:flex;align-items:baseline;justify-content:space-between">
+            <span style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">waiver slots consumed</span>
+            <span style="font:500 11px/1 var(--mono);color:#d7e0dd;font-variant-numeric:tabular-nums">0 / — slots</span>
+          </div>
+          <div style="font:400 11px/1 var(--mono);color:#8a9895;margin-top:8px">— wallets in free window</div>
+        </div>
+        <div style="padding:12px;border-bottom:1px solid #12181a">
+          <div style="display:flex;align-items:baseline;justify-content:space-between">
+            <span style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">subsidy spend</span>
+            <span style="font:500 11px/1 var(--mono);color:#d7e0dd;font-variant-numeric:tabular-nums">0.00 / 0.00 <span style="color:#5b6866">daily budget</span></span>
+          </div>
+          <div style="height:5px;margin-top:10px;background:#161c1f;border:1px solid #1b2226;border-radius:1px;overflow:hidden">
+            <div style="width:0%;height:100%;background:#e0a03a"></div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 12px;background:#0b0f11">
+          <span style="font:500 10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#8a9895">→ protocol revenue Δ</span>
+          <span style="font:600 12px/1 var(--mono);color:#46d17f;font-variant-numeric:tabular-nums">+0.00</span>
+        </div>
+      </div>
+    </div>
+    <div style="flex:0 0 320px">
+      <div style="background:#0d1113;border:1px solid #1b2226;border-radius:2px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid #1b2226;background:#0f1417">
+          <span style="font:600 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895;white-space:nowrap">events — {{ win }}</span>
+          <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px dashed #4a3a17;background:#1c1609;border-radius:2px;padding:4px 6px;white-space:nowrap;flex-shrink:0">needs ep</span>
+        </div>
+        <div style="padding:2px 0">
+          <div style="display:grid;grid-template-columns:14px 1fr;column-gap:9px;padding:10px 12px;border-bottom:1px solid #12181a">
+            <span style="width:6px;height:6px;background:#46d17f;border-radius:50%;margin-top:5px"></span>
+            <div><div style="font:400 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">--:--</div><div style="font:400 11px/1.55 var(--mono);color:#d7e0dd;margin-top:5px">wallet graduated <span style="color:#46d17f">→ pro</span> · 0xSAMP…LE02</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:14px 1fr;column-gap:9px;padding:10px 12px;border-bottom:1px solid #12181a">
+            <span style="width:6px;height:6px;background:#e0a03a;border-radius:50%;margin-top:5px"></span>
+            <div><div style="font:400 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">--:--</div><div style="font:400 11px/1.55 var(--mono);color:#d7e0dd;margin-top:5px">waiver window exhausted · 0xSAMP…LE03 <span style="color:#5b6866">(retention now charged)</span></div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:14px 1fr;column-gap:9px;padding:10px 12px;border-bottom:1px solid #12181a">
+            <span style="width:6px;height:6px;background:#46d17f;border-radius:50%;margin-top:5px"></span>
+            <div><div style="font:400 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">--:--</div><div style="font:400 11px/1.55 var(--mono);color:#d7e0dd;margin-top:5px">first external posting · 0xSAMP…LE04 <span style="color:#46d17f">new</span></div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:14px 1fr;column-gap:9px;padding:10px 12px;border-bottom:1px solid #12181a">
+            <span style="width:6px;height:6px;background:#e0a03a;border-radius:50%;margin-top:5px"></span>
+            <div><div style="font:400 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">--:--</div><div style="font:400 11px/1.55 var(--mono);color:#e0a03a;margin-top:5px">capability warning opened</div><div style="font:400 10px/1.5 var(--mono);color:#5b6866;margin-top:4px">— · gas below floor</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:14px 1fr;column-gap:9px;padding:10px 12px;border-bottom:1px solid #12181a">
+            <span style="width:6px;height:6px;background:#46d17f;border-radius:50%;margin-top:5px"></span>
+            <div><div style="font:400 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">--:--</div><div style="font:400 11px/1.55 var(--mono);color:#d7e0dd;margin-top:5px">capability warning closed <span style="color:#5b6866">· open —</span></div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:14px 1fr;column-gap:9px;padding:10px 12px;border-bottom:1px solid #12181a">
+            <span style="width:6px;height:6px;background:#2c4a3d;border-radius:50%;margin-top:5px"></span>
+            <div><div style="font:400 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">--:--</div><div style="font:400 11px/1.55 var(--mono);color:#8a9895;margin-top:5px">deploy · build —</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:14px 1fr;column-gap:9px;padding:10px 12px;border-bottom:1px solid #12181a">
+            <span style="width:6px;height:6px;background:#e0a03a;border-radius:50%;margin-top:5px"></span>
+            <div><div style="font:400 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">--:--</div><div style="font:400 11px/1.55 var(--mono);color:#d7e0dd;margin-top:5px">claim stuck &gt; threshold · 0xSAMP…LE01</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:14px 1fr;column-gap:9px;padding:10px 12px;border-bottom:1px solid #12181a">
+            <span style="width:6px;height:6px;background:#2c4a3d;border-radius:50%;margin-top:5px"></span>
+            <div><div style="font:400 10px/1 var(--mono);color:#5b6866;font-variant-numeric:tabular-nums">--:--</div><div style="font:400 11px/1.55 var(--mono);color:#8a9895;margin-top:5px">reserved locked · — jobs minted</div></div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:center;padding:12px">
+            <span style="font:400 10px/1 var(--mono);letter-spacing:.08em;color:#5b6866">— older events in window</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <div style="margin-top:14px;background:#0d1113;border:1px solid #1b2226;border-radius:2px;min-width:0">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 12px;border-bottom:1px solid #1b2226;background:#0f1417">
+        <div style="display:flex;align-items:center;gap:14px">
+          <span style="font:600 10px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#8a9895">who showed up — {{ win }}</span>
+          <div style="display:flex;align-items:center;gap:2px">
+            <button type="button" onClick="{{ setLooked }}" style="{{ tabLooked }}">looked</button>
+            <button type="button" onClick="{{ setKnocked }}" style="{{ tabKnocked }}">knocked</button>
+            <button type="button" onClick="{{ setWorked }}" style="{{ tabWorked }}">worked</button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font:400 10px/1 var(--mono);color:#5b6866">{{ rosterNote }}</span>
+          <button type="button" onClick="{{ toggleWorkers }}" style="background:transparent;border:1px solid #263034;border-radius:2px;padding:4px 7px;cursor:pointer;font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866" style-hover="color:#8a9895;border-color:#3a4649">{{ workersToggleLabel }}</button>
+          <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px dashed #4a3a17;background:#1c1609;border-radius:2px;padding:3px 6px">data: needs endpoint</span>
+        </div>
+      </div>
+
+      <sc-if value="{{ rosterWorked }}" hint-placeholder-val="{{ true }}">
+        <div>
+          <div style="overflow-x:auto">
+            <div style="min-width:1142px">
+              <div style="display:grid;grid-template-columns:minmax(132px,1.1fr) minmax(156px,1.5fr) 52px 52px 46px minmax(140px,1fr) 96px 104px 96px 92px 100px;column-gap:8px;padding:8px 12px;border-bottom:1px solid #1b2226;background:#0b0f11;font:600 9px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">
+                <span>wallet</span><span>session span</span><span style="text-align:right">claims</span><span style="text-align:right">appr</span><span style="text-align:right">rej</span><span style="text-align:right;color:#8a9895">gross → net ▼</span><span style="text-align:right">retention</span><span style="text-align:right">waiver n/3</span><span style="border-left:1px solid #12181a;padding-left:10px">tier</span><span style="text-align:right">balance</span><span style="text-align:right">withdrawn</span>
+              </div>
+
+              <sc-if value="{{ workersRows }}" hint-placeholder-val="{{ true }}">
+                <div>
+              <div style="display:grid;grid-template-columns:minmax(132px,1.1fr) minmax(156px,1.5fr) 52px 52px 46px minmax(140px,1fr) 96px 104px 96px 92px 100px;column-gap:8px;align-items:center;padding:11px 12px;border-bottom:1px solid #12181a;font:400 11px/1 var(--mono);color:#d7e0dd;font-variant-numeric:tabular-nums" style-hover="background:#0f1417">
+                <span style="display:flex;align-items:center;gap:6px">0xSAMP…LE01</span>
+                <span style="color:#8a9895">--:-- → --:-- · —h</span>
+                <span style="text-align:right">—</span><span style="text-align:right;color:#46d17f">—</span><span style="text-align:right;color:#5b6866">—</span>
+                <span style="text-align:right">0.00 <span style="color:#5b6866">→</span> <span style="color:#46d17f">0.00</span></span>
+                <span style="text-align:right;color:#8a9895">0.00</span>
+                <span style="display:flex;align-items:center;justify-content:flex-end;gap:4px"><span style="width:5px;height:5px;border:1px solid #2c4a3d;border-radius:50%"></span><span style="width:5px;height:5px;border:1px solid #2c4a3d;border-radius:50%"></span><span style="width:5px;height:5px;border:1px solid #2c4a3d;border-radius:50%"></span><span style="color:#5b6866;font-size:10px">0/3</span></span>
+                <span style="border-left:1px solid #12181a;padding-left:10px"><span style="color:#5b6866">—</span></span>
+                <span style="text-align:right">0.00</span>
+                <span style="text-align:right;color:#8a9895">0.00</span>
+              </div>
+              <div style="display:grid;grid-template-columns:minmax(132px,1.1fr) minmax(156px,1.5fr) 52px 52px 46px minmax(140px,1fr) 96px 104px 96px 92px 100px;column-gap:8px;align-items:center;padding:11px 12px;border-bottom:1px solid #12181a;font:400 11px/1 var(--mono);color:#d7e0dd;font-variant-numeric:tabular-nums" style-hover="background:#0f1417">
+                <span style="display:flex;align-items:center;gap:6px">0xSAMP…LE02</span>
+                <span style="color:#8a9895">--:-- → --:-- · —h</span>
+                <span style="text-align:right">—</span><span style="text-align:right;color:#46d17f">—</span><span style="text-align:right;color:#5b6866">—</span>
+                <span style="text-align:right">0.00 <span style="color:#5b6866">→</span> <span style="color:#46d17f">0.00</span></span>
+                <span style="text-align:right;color:#8a9895">0.00</span>
+                <span style="display:flex;align-items:center;justify-content:flex-end;gap:4px"><span style="width:5px;height:5px;background:#2c4a3d;border-radius:50%"></span><span style="width:5px;height:5px;background:#2c4a3d;border-radius:50%"></span><span style="width:5px;height:5px;border:1px solid #2c4a3d;border-radius:50%"></span><span style="color:#5b6866;font-size:10px">—/3</span></span>
+                <span style="border-left:1px solid #12181a;padding-left:10px"><span style="color:#8a9895">—</span> <span style="color:#46d17f">→ pro</span></span>
+                <span style="text-align:right">0.00</span>
+                <span style="text-align:right;color:#8a9895">0.00</span>
+              </div>
+              <div style="display:grid;grid-template-columns:minmax(132px,1.1fr) minmax(156px,1.5fr) 52px 52px 46px minmax(140px,1fr) 96px 104px 96px 92px 100px;column-gap:8px;align-items:center;padding:11px 12px;border-bottom:1px solid #12181a;font:400 11px/1 var(--mono);color:#d7e0dd;font-variant-numeric:tabular-nums" style-hover="background:#0f1417">
+                <span style="display:flex;align-items:center;gap:6px">0xSAMP…LE03</span>
+                <span style="color:#8a9895">--:-- → --:-- · —h</span>
+                <span style="text-align:right">—</span><span style="text-align:right;color:#46d17f">—</span><span style="text-align:right;color:#e0a03a">—</span>
+                <span style="text-align:right">0.00 <span style="color:#5b6866">→</span> <span style="color:#46d17f">0.00</span></span>
+                <span style="text-align:right;color:#8a9895">0.00</span>
+                <span style="display:flex;align-items:center;justify-content:flex-end;gap:4px"><span style="width:5px;height:5px;background:#2c4a3d;border-radius:50%"></span><span style="width:5px;height:5px;border:1px solid #2c4a3d;border-radius:50%"></span><span style="width:5px;height:5px;border:1px solid #2c4a3d;border-radius:50%"></span><span style="color:#5b6866;font-size:10px">—/3</span></span>
+                <span style="border-left:1px solid #12181a;padding-left:10px"><span style="color:#5b6866">—</span></span>
+                <span style="text-align:right">0.00</span>
+                <span style="text-align:right;color:#8a9895">0.00</span>
+              </div>
+              <div style="display:grid;grid-template-columns:minmax(132px,1.1fr) minmax(156px,1.5fr) 52px 52px 46px minmax(140px,1fr) 96px 104px 96px 92px 100px;column-gap:8px;align-items:center;padding:11px 12px;border-bottom:1px solid #12181a;font:400 11px/1 var(--mono);color:#d7e0dd;font-variant-numeric:tabular-nums" style-hover="background:#0f1417">
+                <span style="display:flex;align-items:center;gap:6px">0xSAMP…LE04 <span style="font:600 8px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#46d17f;border:1px solid #234a35;background:#0e1b15;border-radius:2px;padding:3px 4px">new</span></span>
+                <span style="color:#8a9895">--:-- → --:-- · —h</span>
+                <span style="text-align:right">—</span><span style="text-align:right;color:#46d17f">—</span><span style="text-align:right;color:#5b6866">—</span>
+                <span style="text-align:right">0.00 <span style="color:#5b6866">→</span> <span style="color:#46d17f">0.00</span></span>
+                <span style="text-align:right;color:#8a9895">0.00 <span style="color:#e0a03a;font-size:10px">waived</span></span>
+                <span style="display:flex;align-items:center;justify-content:flex-end;gap:4px"><span style="width:5px;height:5px;background:#2c4a3d;border-radius:50%"></span><span style="width:5px;height:5px;border:1px solid #2c4a3d;border-radius:50%"></span><span style="width:5px;height:5px;border:1px solid #2c4a3d;border-radius:50%"></span><span style="color:#5b6866;font-size:10px">—/3</span></span>
+                <span style="border-left:1px solid #12181a;padding-left:10px"><span style="color:#5b6866">—</span></span>
+                <span style="text-align:right">0.00</span>
+                <span style="text-align:right;color:#8a9895">—</span>
+              </div>
+                  <div style="display:grid;grid-template-columns:minmax(132px,1.1fr) minmax(156px,1.5fr) 52px 52px 46px minmax(140px,1fr) 96px 104px 96px 92px 100px;column-gap:8px;align-items:center;padding:10px 12px;background:#0b0f11;font:600 11px/1 var(--mono);color:#8a9895;font-variant-numeric:tabular-nums">
+                    <span style="letter-spacing:.1em;text-transform:uppercase;font-size:9px">window total</span>
+                    <span></span>
+                    <span style="text-align:right">—</span><span style="text-align:right">—</span><span style="text-align:right">—</span>
+                    <span style="text-align:right;color:#d7e0dd">0.00 <span style="color:#5b6866">→</span> <span style="color:#46d17f">0.00</span></span>
+                    <span style="text-align:right">0.00</span>
+                    <span style="text-align:right;font-size:10px">0/—</span>
+                    <span style="border-left:1px solid #12181a;padding-left:10px;font-size:10px">— promo</span>
+                    <span style="text-align:right;color:#d7e0dd">0.00</span>
+                    <span style="text-align:right">0.00</span>
+                  </div>
+                </div>
+              </sc-if>
+              <sc-if value="{{ workersEmpty }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:46px 12px">
+                  <span style="font:400 12px/1 var(--mono);color:#5b6866">no external work in this window.</span>
+                  <span style="font:400 10px/1 var(--mono);letter-spacing:.06em;color:#5b6866">window {{ win }} · — wallets active</span>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+      <sc-if value="{{ rosterDemand }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:46px 12px">
+          <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895;border:1px solid #263034;border-radius:2px;padding:3px 6px">unchanged</span>
+          <span style="font:400 12px/1 var(--mono);color:#8a9895">existing {{ rosterTabLower }} roster renders here</span>
+          <span style="font:400 10px/1 var(--mono);color:#5b6866">demand signal · not work · untouched by this spec</span>
+        </div>
+      </sc-if>
+    </div>
+
+  <div style="display:flex;align-items:flex-start;gap:14px;margin-top:14px;padding:10px 12px;border:1px solid #1b2226;background:#0a0e10">
+    <span style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866;padding-top:2px;white-space:nowrap">removed / reconciled</span>
+    <div style="display:grid;grid-template-columns:1fr 1fr;column-gap:22px;row-gap:6px;font:400 10px/1.55 var(--mono);color:#8a9895">
+      <span><span style="color:#e2564a">delete</span> NEXT strip <span style="color:#5b6866">· covered by verdict subline + digest money line</span></span>
+      <span><span style="color:#e0a03a">replace</span> roster WORKED tab <span style="color:#5b6866">· now the WORKERS table; LOOKED / KNOCKED unchanged</span></span>
+      <span><span style="color:#e0a03a">recompute</span> REWARD RUNWAY KPI <span style="color:#5b6866">· liquid only, reserved as subline</span></span>
+      <span><span style="color:#e0a03a">no second proof box</span> <span style="color:#5b6866">· match row anchors PAYOUT EVIDENCE in FLOW</span></span>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:14px;padding:10px 12px;border:1px solid #1b2226;background:#0a0e10">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span style="font:600 9px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#5b6866">additions</span>
+      <span style="font:400 10px/1 var(--mono);color:#8a9895">money movement · workers · reward bank row (drop-in) · retention &amp; waivers · overnight digest · events lane · top-up blocks</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font:500 9px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:#5b6866">vocabulary</span>
+      <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#46d17f;border:1px solid #234a35;background:#0e1b15;border-radius:2px;padding:3px 6px">confirmed</span>
+      <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e2564a;border:1px solid #4a2320;background:#1d0f0e;border-radius:2px;padding:3px 6px">shortfall</span>
+      <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#8a9895;border:1px solid #263034;border-radius:2px;padding:3px 6px">drop-in</span>
+      <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#5b6866;border:1px solid #263034;border-radius:2px;padding:3px 6px">sample</span>
+      <span style="font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#e0a03a;border:1px dashed #4a3a17;background:#1c1609;border-radius:2px;padding:3px 6px">data: needs endpoint</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:1320},&quot;window&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;12H&quot;,&quot;24H&quot;,&quot;48H&quot;],&quot;default&quot;:&quot;24H&quot;,&quot;tsType&quot;:&quot;\&quot;12H\&quot; | \&quot;24H\&quot; | \&quot;48H\&quot;&quot;,&quot;section&quot;:&quot;Window&quot;},&quot;workersEmpty&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;States&quot;},&quot;ledgerState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;CONFIRMED&quot;,&quot;SHORTFALL&quot;],&quot;default&quot;:&quot;CONFIRMED&quot;,&quot;tsType&quot;:&quot;\&quot;CONFIRMED\&quot; | \&quot;SHORTFALL\&quot;&quot;,&quot;section&quot;:&quot;States&quot;}}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      win: (props.window || "24H").toUpperCase(),
+      empty: !!props.workersEmpty,
+      ledger: (props.ledgerState || "CONFIRMED").toUpperCase(),
+      roster: "worked"
+    };
+  }
+  tab(active) {
+    return "background:transparent;border:none;border-bottom:1px solid " + (active ? "#46d17f" : "transparent") +
+      ";padding:5px 8px;cursor:pointer;font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:" +
+      (active ? "#46d17f" : "#5b6866") + ";";
+  }
+  seg(active) {
+    const base = "background:transparent;border:none;border-right:1px solid #263034;padding:5px 10px;cursor:pointer;font:600 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;";
+    return base + (active
+      ? "background:#0e1b15;color:#46d17f;"
+      : "color:#5b6866;");
+  }
+  renderVals() {
+    const w = this.state.win;
+    return {
+      win: w,
+      winLower: w.toLowerCase(),
+      set12: () => this.setState({ win: "12H" }),
+      set24: () => this.setState({ win: "24H" }),
+      set48: () => this.setState({ win: "48H" }),
+      btn12: this.seg(w === "12H"),
+      btn24: this.seg(w === "24H"),
+      btn48: this.seg(w === "48H") + "border-right:none;",
+      rosterWorked: this.state.roster === "worked",
+      rosterDemand: this.state.roster !== "worked",
+      rosterTabLower: this.state.roster,
+      rosterNote: this.state.roster === "worked" ? "— wallets · sorted by net earned" : "— wallets in window",
+      tabLooked: this.tab(this.state.roster === "looked"),
+      tabKnocked: this.tab(this.state.roster === "knocked"),
+      tabWorked: this.tab(this.state.roster === "worked"),
+      setLooked: () => this.setState({ roster: "looked" }),
+      setKnocked: () => this.setState({ roster: "knocked" }),
+      setWorked: () => this.setState({ roster: "worked" }),
+      workersEmpty: this.state.empty,
+      workersRows: !this.state.empty,
+      workersToggleLabel: this.state.empty ? "show sample rows" : "preview empty state",
+      toggleWorkers: () => this.setState(s => ({ empty: !s.empty })),
+      ledgerWord: this.state.ledger,
+      ledgerOk: this.state.ledger === "CONFIRMED",
+      ledgerBad: this.state.ledger !== "CONFIRMED",
+      toggleLedger: () => this.setState(s => ({ ledger: s.ledger === "CONFIRMED" ? "SHORTFALL" : "CONFIRMED" }))
+    };
+  }
+}
+</script>
+</body>
+</html>
