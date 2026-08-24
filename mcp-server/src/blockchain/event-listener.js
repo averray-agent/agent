@@ -290,6 +290,76 @@ export class EventListener {
         }
       }));
 
+    this.registerAccount("Deposited", "account.deposited", async ({ args, payload }) =>
+      this.buildChainEvent({
+        topic: "account.deposited",
+        args,
+        payload,
+        wallet: args.account,
+        wallets: [args.account],
+        data: { asset: args.asset, amount: args.amount.toString() }
+      }));
+
+    this.registerAccount("Withdrawn", "account.withdrawn", async ({ args, payload }) =>
+      this.buildChainEvent({
+        topic: "account.withdrawn",
+        args,
+        payload,
+        wallet: args.account,
+        wallets: [args.account],
+        data: { asset: args.asset, amount: args.amount.toString() }
+      }));
+
+    this.registerAccount("Reserved", "account.reserved", async ({ args, payload }) =>
+      this.buildChainEvent({
+        topic: "account.reserved",
+        args,
+        payload,
+        wallet: args.account,
+        wallets: [args.account],
+        data: { asset: args.asset, amount: args.amount.toString() }
+      }));
+
+    this.registerAccount("ReservationReleased", "account.reservation_released", async ({ args, payload }) =>
+      this.buildChainEvent({
+        topic: "account.reservation_released",
+        args,
+        payload,
+        wallet: args.account,
+        wallets: [args.account],
+        data: { asset: args.asset, amount: args.amount.toString() }
+      }));
+
+    this.registerAccount("ReservationSettled", "account.reservation_settled", async ({ args, payload }) =>
+      this.buildChainEvent({
+        topic: "account.reservation_settled",
+        args,
+        payload,
+        wallet: args.account,
+        wallets: [args.account, args.recipient],
+        data: {
+          settlementId: args.settlementId,
+          recipient: args.recipient,
+          asset: args.asset,
+          amount: args.amount.toString()
+        }
+      }));
+
+    this.registerAccount("AgentTransfer", "account.agent_transfer", async ({ args, payload }) =>
+      this.buildChainEvent({
+        topic: "account.agent_transfer",
+        args,
+        payload,
+        wallet: args.from,
+        wallets: [args.from, args.to],
+        data: {
+          from: args.from,
+          to: args.to,
+          asset: args.asset,
+          amount: args.amount.toString()
+        }
+      }));
+
     this.registerAccount("JobStakeLocked", "account.job_stake_locked", async ({ args, payload }) =>
       this.buildChainEvent({
         topic: "account.job_stake_locked",

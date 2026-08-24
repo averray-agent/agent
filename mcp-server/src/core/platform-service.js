@@ -46,7 +46,11 @@ import {
   sumSubJobRewards,
   validationPathFromError
 } from "./platform-service-helpers.js";
-import { countClaimedSessions, resolveClaimEconomicsDecision } from "./claim-economics.js";
+import {
+  countClaimedSessions,
+  DEFAULT_ONBOARDING_WAIVER_CLAIM_COUNT,
+  resolveClaimEconomicsDecision
+} from "./claim-economics.js";
 import { claimStatusFields, isTerminalSession, summarizeJobClaimState } from "./claim-state.js";
 import { capabilityMatrix } from "../auth/capabilities.js";
 import { normalizeAssetSymbol } from "./assets.js";
@@ -2094,7 +2098,39 @@ export class PlatformService {
     });
     if (!progression) return settled;
     try {
-      return await this.stateStore.upsertSession({ ...settled, progression });
+      const persisted = await this.stateStore.upsertSession({ ...settled, progression });
+      const timestamp = persisted.resolvedAt ?? persisted.updatedAt ?? new Date().toISOString();
+      if (progression.justChanged?.field === "tier") {
+        this.eventBus?.publish?.({
+          id: `wallet-graduated-${persisted.sessionId}`,
+          topic: "ops.wallet_graduated",
+          wallet: String(persisted.wallet ?? "").toLowerCase(),
+          wallets: [String(persisted.wallet ?? "").toLowerCase()],
+          sessionId: persisted.sessionId,
+          jobId: persisted.jobId,
+          timestamp,
+          data: {
+            from: progression.justChanged.from,
+            to: progression.justChanged.to
+          }
+        });
+      }
+      if (
+        persisted.claimEconomicsWaivedAtClaim === true
+        && Number(persisted.claimNumber) === DEFAULT_ONBOARDING_WAIVER_CLAIM_COUNT
+      ) {
+        this.eventBus?.publish?.({
+          id: `waiver-window-exhausted-${persisted.sessionId}`,
+          topic: "ops.waiver_window_exhausted",
+          wallet: String(persisted.wallet ?? "").toLowerCase(),
+          wallets: [String(persisted.wallet ?? "").toLowerCase()],
+          sessionId: persisted.sessionId,
+          jobId: persisted.jobId,
+          timestamp,
+          data: { waiverSlotsTotal: DEFAULT_ONBOARDING_WAIVER_CLAIM_COUNT }
+        });
+      }
+      return persisted;
     } catch (error) {
       this.logger?.warn?.(
         { sessionId, error: error?.message ?? String(error) },

@@ -561,13 +561,25 @@ export class SubmittedJobAutoVerifierService {
       const reason = failure.reason ?? failure.code ?? "unknown";
       const key = failure.sessionId;
       const previous = this.submittedFailureStreaks.get(key);
-      next.set(key, {
+      const streak = {
         sessionId: failure.sessionId,
         jobId: failure.jobId,
         reason,
         consecutiveRuns: Number(previous?.consecutiveRuns ?? 0) + 1,
         lastSeenAt: summary.finishedAt
-      });
+      };
+      next.set(key, streak);
+      if (streak.consecutiveRuns === 2) {
+        this.eventBus?.publish?.({
+          id: `claim-stuck-${streak.sessionId}-${Date.parse(streak.lastSeenAt)}`,
+          topic: "ops.claim_stuck",
+          sessionId: streak.sessionId,
+          jobId: streak.jobId,
+          timestamp: streak.lastSeenAt,
+          severity: "warn",
+          data: { reason: streak.reason, consecutiveRuns: streak.consecutiveRuns }
+        });
+      }
     }
     this.submittedFailureStreaks = next;
   }
