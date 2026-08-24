@@ -27,14 +27,16 @@ const BYTES32_RE = /^0x[a-fA-F0-9]{64}$/u;
  */
 export function buildWorkReceipt({ session, job, verification, context = {} }) {
   const runReceipt = buildRunReceipt({ session, job, verification, context });
-  const profile = runReceipt.verifier.handler;
-  const version = runReceipt.verifier.version;
-  const poster = resolvePoster(job, context);
-  if (!poster) throw new ValidationError("Work receipt requires the funding poster address.");
-
-  const intent = buildIntent({ session, job, profile, version, poster, context });
-  const execution = buildExecution({ session, verification, runReceipt, context });
+  const verdictCore = pinnedVerdictCore(verification) ?? buildVerdictCoreFromRunReceipt({
+    session,
+    job,
+    verification,
+    context,
+    runReceipt
+  });
+  const { intent, execution, verdict } = verdictCore;
   const settlement = buildSettlement({ session, job, verification, legacy: runReceipt.settlement });
+  const chainBinding = buildChainBinding({ verification, verdictCore });
   const checkDepth = verificationDepthForJob(job);
   if (verification?.outcome === "approved" && !settlement) {
     throw new ValidationError("Approved work receipt requires complete settlement evidence.");
@@ -51,15 +53,17 @@ export function buildWorkReceipt({ session, job, verification, context = {} }) {
     attestation: "A single work run: the agreed intent, submitted evidence, verification outcome, and any resulting settlement. It makes no broader claim.",
     verifier: compact({
       ...runReceipt.verifier,
-      profile,
+      profile: runReceipt.verifier.handler,
       // One-release aliases retained above as handler/version.
-      handler: profile,
-      version
+      handler: runReceipt.verifier.handler,
+      version: runReceipt.verifier.version
     }),
     verification: checkDepth ? { checkDepth } : undefined,
     intent,
     execution,
-    settlement
+    verdict,
+    settlement,
+    chainBinding
   });
   const receiptId = hashWorkReceiptContent(unsigned);
   const siteOrigin = firstString(context.publicReceiptBaseUrl, context.publicSiteUrl) ?? WORK_RECEIPT_SITE_ORIGIN;
@@ -68,6 +72,38 @@ export function buildWorkReceipt({ session, job, verification, context = {} }) {
     receiptId,
     canonicalUrl: `${siteOrigin.replace(/\/+$/u, "")}/receipts/${receiptId}`
   };
+}
+
+/**
+ * Build the escrow-consumable sections before settlement. The compatibility
+ * run-receipt builder requires a terminal timestamp, but timestamps and
+ * signers are outside this projection. A submittedAt placeholder therefore
+ * permits the same verdict builder to be reused without entering the hash.
+ */
+export function buildWorkReceiptVerdictCore({ session, job, verification, context = {} }) {
+  const runReceipt = buildRunReceipt({
+    session: sessionWithVerdictTimestamp(session, verification?.outcome),
+    job,
+    verification,
+    context
+  });
+  return buildVerdictCoreFromRunReceipt({ session, job, verification, context, runReceipt });
+}
+
+/** Hash exactly the frozen verdict-core sections, in their frozen order. */
+export function computeVerdictCoreCommitment(document) {
+  if (!document || typeof document !== "object" || Array.isArray(document)) {
+    throw new ValidationError("Verdict-core commitment requires a receipt-shaped JSON object.");
+  }
+  const verdictCore = {};
+  for (const section of WORK_RECEIPT_COMMITMENT_SECTIONS) {
+    const value = document[section];
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new ValidationError(`Verdict-core commitment requires root section ${section}.`);
+    }
+    verdictCore[section] = value;
+  }
+  return hashCanonicalContent(verdictCore);
 }
 
 /**
@@ -182,6 +218,70 @@ export function hashWorkReceiptContent(document) {
     ...content
   } = document;
   return hashCanonicalContent(content);
+}
+
+function buildVerdictCoreFromRunReceipt({ session, job, verification, context, runReceipt }) {
+  const profile = runReceipt.verifier.handler;
+  const version = runReceipt.verifier.version;
+  const poster = resolvePoster(job, context);
+  if (!poster) throw new ValidationError("Work receipt requires the funding poster address.");
+  return {
+    intent: buildIntent({ session, job, profile, version, poster, context }),
+    execution: buildExecution({ session, verification, runReceipt, context }),
+    verdict: runReceipt.verdict
+  };
+}
+
+function pinnedVerdictCore(verification) {
+  const pinned = verification?.receiptVerdictCore;
+  if (!pinned) return undefined;
+  const commitment = bytes32(verification?.receiptVerdictCoreCommitment);
+  if (!commitment) {
+    throw new ValidationError("Pinned receipt verdict core requires its commitment.");
+  }
+  const reproduced = computeVerdictCoreCommitment(pinned);
+  if (commitment !== reproduced) {
+    throw new ValidationError(
+      `Pinned receipt verdict-core commitment mismatch: pinned ${commitment}, reproduced ${reproduced}.`
+    );
+  }
+  return pinned;
+}
+
+function sessionWithVerdictTimestamp(session, outcome) {
+  const submittedAt = firstIso(session?.submittedAt);
+  if (!submittedAt) return session;
+  if (outcome === "approved" && !session?.resolvedAt) {
+    return { ...session, resolvedAt: submittedAt };
+  }
+  if (outcome === "rejected" && !session?.rejectedAt) {
+    return { ...session, rejectedAt: submittedAt };
+  }
+  if (["inconclusive", "platform_fault"].includes(outcome) && !session?.disputedAt) {
+    return { ...session, disputedAt: submittedAt };
+  }
+  return session;
+}
+
+function buildChainBinding({ verification, verdictCore }) {
+  const payoutTx = verification?.payoutTx;
+  if (!payoutTx?.txHash) return undefined;
+  const verifiedEvent = payoutTx.verifiedEvent;
+  const committedVerdictHash = bytes32(verifiedEvent?.reasoningHash);
+  const verifiedTxHash = bytes32(payoutTx.txHash);
+  const logIndex = nonNegativeInteger(verifiedEvent?.logIndex);
+  if (!committedVerdictHash || !verifiedTxHash || logIndex === undefined) {
+    throw new ValidationError(
+      "On-chain work receipt requires the Verified event reasoningHash, transaction hash, and log index."
+    );
+  }
+  const reproduced = computeVerdictCoreCommitment(verdictCore);
+  if (committedVerdictHash !== reproduced) {
+    throw new ValidationError(
+      `Receipt verdict-core commitment mismatch: event ${committedVerdictHash}, reproduced ${reproduced}.`
+    );
+  }
+  return { committedVerdictHash, verifiedTxHash, logIndex };
 }
 
 export function assertWorkReceiptContentAddress(document) {

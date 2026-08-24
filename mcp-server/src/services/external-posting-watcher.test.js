@@ -399,10 +399,11 @@ test("local external-posting e2e signs issued calldata, watches funding, and rea
       const session = await stateStore.findSessionByJobId(jobId);
       return { state: 3, specHash: session?.jobSnapshot?.specHash };
     },
-    async resolveSinglePayout() {
+    async resolveSinglePayout(_jobId, _approved, _reasonCode, _metadataURI, commitment) {
       return {
         txHash: `0x${"cd".repeat(32)}`,
         status: 1,
+        verifiedEvent: { reasoningHash: commitment, logIndex: 12 },
         settlement: {
           worker: WORKER,
           treasuryAccount: "0x4444444444444444444444444444444444444444",

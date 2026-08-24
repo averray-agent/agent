@@ -195,6 +195,29 @@ export class PosterReviewService {
       ? await this.gateway.getProtocolFeeConfig()
       : undefined;
     let payoutTx = recordedReceipt.payoutTx;
+    const decisionDetails = {
+      authority: recordedReceipt.authority ?? "external_poster_review",
+      submissionIdentity: context.submissionIdentity,
+      decision: recordedReceipt.decision,
+      decidingWallet: recordedReceipt.decidedBy,
+      rationaleHash: recordedReceipt.rationaleHash
+    };
+    const settlementPreparation = await this.verifierService.prepareNonDisputeSettlement({
+      session: context.session,
+      job: context.job,
+      verdict: {
+        handler: "poster_review",
+        handlerVersion: 1,
+        outcome: approved ? "approved" : "rejected",
+        reasonCode: recordedReceipt.reasonCode,
+        reasoningHash: recordedReceipt.rationaleHash,
+        verifier: recordedReceipt.decidedBy,
+        details: decisionDetails,
+        verificationInput: context.session.submission
+      },
+      verificationInput: context.session.submission,
+      metadataURI: recordedReceipt.metadataURI
+    });
 
     // Persist the pre-settlement progression beside the durable decision
     // before the broker mutates chain state. A retry after a receipt-write
@@ -216,7 +239,7 @@ export class PosterReviewService {
         approved,
         recordedReceipt.reasonCode,
         recordedReceipt.metadataURI,
-        recordedReceipt.rationaleHash
+        settlementPreparation.commitment
       );
       const chainConfirmed = {
         ...recordedReceipt,
@@ -243,7 +266,10 @@ export class PosterReviewService {
       previousProgression: recordedReceipt.previousProgression,
       decidedBy: recordedReceipt.decidedBy,
       authority: recordedReceipt.authority,
-      recordedDecision: recordedReceipt.decision
+      recordedDecision: recordedReceipt.decision,
+      details: decisionDetails,
+      preparedVerdict: settlementPreparation.preparedVerdict,
+      receiptContext: settlementPreparation.receiptContext
     };
 
     if (approved) {
@@ -381,13 +407,15 @@ export class PosterReviewService {
       reasoningHash: decision.rationaleHash,
       payoutTx: decision.payoutTx,
       previousProgression: decision.previousProgression,
-      details: {
+      details: decision.details ?? {
         authority: decision.authority ?? "external_poster_review",
         submissionIdentity: context.submissionIdentity,
         decision: decision.recordedDecision,
         decidingWallet: decision.decidedBy,
         rationaleHash: decision.rationaleHash
-      }
+      },
+      preparedVerdict: decision.preparedVerdict,
+      receiptContext: decision.receiptContext
     });
   }
 

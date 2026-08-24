@@ -17,8 +17,8 @@ emitted or successfully backfilled sessions. The public reader is
 `receiptId`, `canonicalUrl`, `signers`, and `signature` properties. The first
 two are self-references; the latter two attest the already-addressed content
 and therefore cannot influence its identity. Any mutation to intent,
-execution, verdict, settlement, timestamps, or compatibility aliases changes
-the id.
+execution, verdict, chain binding, settlement, timestamps, or compatibility
+aliases changes the id.
 
 The detached ES256 signature still covers the complete unsigned document
 (everything except `signature`), including `receiptId`, `canonicalUrl`, and
@@ -50,10 +50,16 @@ The normative JSON shape is [`work-receipt-v1.json`](work-receipt-v1.json).
 
 ## Version freeze
 
-The `averray.work-receipt.v1` stored field set is frozen as of 2026-08-24.
-Future consumer conveniences are serve-time presentation decorations, or they
-ship under a new `schemaVersion`; they are never added silently to a stored v1
-document. Existing stored receipts therefore remain byte-stable.
+The `averray.work-receipt.v1` stored field set was frozen on 2026-08-24.
+The one ratified additive exception is the optional `chainBinding` section
+authorized by
+[`MEMO_ESCROW_RECEIPT_BINDING.md`](../MEMO_ESCROW_RECEIPT_BINDING.md#decision-points),
+E3. Receipts issued before this amendment lack the section and remain
+byte-stable; newly settled receipts include it inside their hashed content.
+This explicit amendment authorizes no other v1 stored-field addition. Future
+consumer conveniences are serve-time presentation decorations, or they ship
+under a new `schemaVersion`; they are never added silently to a stored v1
+document.
 
 ## Presentation aliases
 
@@ -86,3 +92,9 @@ through the completed receipt's settlement evidence. The decision and its
 rationale are recorded in
 [`MEMO_ESCROW_RECEIPT_BINDING.md`](../MEMO_ESCROW_RECEIPT_BINDING.md#decision-points),
 E1 and E8.
+
+For newly settled receipts, `chainBinding.committedVerdictHash` reproduces this
+slice, while `verifiedTxHash` and `logIndex` locate the exact `Verified` event
+that consumed it. This public replay is described as **receipt-keyed,
+operator-verified**: the event is independently checkable, while release
+authority remains with the registered verifier.

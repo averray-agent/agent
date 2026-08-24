@@ -1,0 +1,58 @@
+name: Hosted Receipt Binding Proof
+
+on:
+  schedule:
+    - cron: "17 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-receipt-binding-proof
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    name: Replay one hosted receipt binding
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install verifier dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Find one recent bound receipt
+        id: receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          receipt_id=""
+          while IFS= read -r job_id; do
+            [ -n "$job_id" ] || continue
+            document="$(curl -fsSL "https://api.averray.com/receipts/${job_id}" || true)"
+            candidate="$(jq -r 'select(.chainBinding != null) | .receiptId // empty' <<< "$document")"
+            if [ -n "$candidate" ]; then
+              receipt_id="$candidate"
+              break
+            fi
+          done < <(curl -fsSL 'https://api.averray.com/jobs?limit=100' | jq -r '(.jobs // .)[]?.id')
+
+          if [ -z "$receipt_id" ]; then
+            echo "no bound receipts yet" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "receipt_id=$receipt_id" >> "$GITHUB_OUTPUT"
+
+      - name: Replay receipt against its Verified event
+        if: steps.receipt.outputs.found == 'true'
+        run: node scripts/ops/verify-receipt-binding.mjs "${{ steps.receipt.outputs.receipt_id }}"

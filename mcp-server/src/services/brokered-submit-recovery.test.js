@@ -29,6 +29,7 @@ function job() {
     rewardAsset: "USDC",
     rewardAmount: 0.25,
     claimTtlSeconds: 3600,
+    poster: "0xdddddddddddddddddddddddddddddddddddddddd",
     onboardingWaiverEligible: true
   };
 }
@@ -99,13 +100,14 @@ function gateway({
       }
       return { txHash: TX_HASH, status: 1 };
     },
-    async resolveSinglePayout() {
+    async resolveSinglePayout(_jobId, _approved, _reasonCode, _metadataURI, commitment) {
       calls.push(["resolveSinglePayout"]);
       assert.equal(state, 3);
       state = 6;
       return {
         txHash: `0x${"66".repeat(32)}`,
         status: 1,
+        verifiedEvent: { reasoningHash: commitment, logIndex: 6 },
         settlement: { workerPayout: 0.25, asset: "USDC" }
       };
     }
@@ -124,6 +126,7 @@ function verifierHarness({ session, chain, recoveryNow = undefined }) {
       ...(recoveryNow ? { now: recoveryNow } : {})
     }),
     listRecentSessions: (limit) => stateStore.listRecentSessions(limit),
+    resolveReceiptSignerContext: async () => ({ posterAddress: job().poster }),
     async ingestVerification(sessionId, verdict, { payoutTx } = {}) {
       const current = await stateStore.getSession(sessionId);
       const resolved = transitionSession({ ...current, payoutTx }, "resolved", {

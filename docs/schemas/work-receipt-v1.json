@@ -5,6 +5,7 @@
   "x-averrayVersionFreeze": {
     "frozenAt": "2026-08-24",
     "storedFieldSetFrozen": true,
+    "ratifiedAdditiveSection": "chainBinding",
     "futureAdditions": "serve_time_decoration_or_new_schema_version"
   },
   "x-averrayPresentationAliases": {
@@ -96,6 +97,17 @@
         "policyTags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "rationaleHash": { "$ref": "#/$defs/bytes32" },
         "workerConsequence": { "enum": ["none", "stake_slashed", "no_payout"] }
+      },
+      "additionalProperties": false
+    },
+    "chainBinding": {
+      "type": "object",
+      "description": "Receipt-keyed, operator-verified link to the escrow Verified event for newly settled receipts.",
+      "required": ["committedVerdictHash", "verifiedTxHash", "logIndex"],
+      "properties": {
+        "committedVerdictHash": { "$ref": "#/$defs/bytes32" },
+        "verifiedTxHash": { "$ref": "#/$defs/bytes32" },
+        "logIndex": { "type": "integer", "minimum": 0 }
       },
       "additionalProperties": false
     },

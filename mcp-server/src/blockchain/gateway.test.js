@@ -446,6 +446,19 @@ test("resolveSinglePayout returns the settle/payout tx receipt", async () => {
     { logger: { info(fields, event) { events.push({ fields, event }); } } }
   );
   const calls = [];
+  const commitment = `0x${"44".repeat(32)}`;
+  const escrow = "0x1111111111111111111111111111111111111111";
+  const escrowInterface = new Interface([
+    "event Verified(bytes32 indexed jobId,address indexed verifier,bool approved,bytes32 reasonCode,bytes32 reasoningHash)"
+  ]);
+  const verified = {
+    address: escrow,
+    index: 4,
+    ...escrowInterface.encodeEventLog(
+      escrowInterface.getEvent("Verified"),
+      [id("wiki-job"), "0x2222222222222222222222222222222222222222", true, id("OK"), commitment]
+    )
+  };
   gateway.signer = {};
   gateway.writeBroadcaster = {
     takeProviderUsed(txHash) {
@@ -454,6 +467,8 @@ test("resolveSinglePayout returns the settle/payout tx receipt", async () => {
     }
   };
   gateway.escrowContract = {
+    target: escrow,
+    interface: escrowInterface,
     async resolveSinglePayout(...args) {
       calls.push(args);
       return {
@@ -464,16 +479,28 @@ test("resolveSinglePayout returns the settle/payout tx receipt", async () => {
           }
         },
         async wait() {
-          return { blockNumber: 99, status: 1 };
+          return { blockNumber: 99, status: 1, logs: [verified] };
         }
       };
     }
   };
 
-  const receipt = await gateway.resolveSinglePayout("wiki-job", true, "OK", "ipfs://badge");
+  const receipt = await gateway.resolveSinglePayout(
+    "wiki-job",
+    true,
+    "OK",
+    "ipfs://badge",
+    commitment
+  );
 
   assert.equal(calls.length, 1);
-  assert.deepEqual(receipt, { txHash: "0xpayout", blockNumber: 99, status: 1 });
+  assert.deepEqual(receipt, {
+    txHash: "0xpayout",
+    blockNumber: 99,
+    status: 1,
+    verifiedEvent: { reasoningHash: commitment, logIndex: 4 }
+  });
+  assert.equal(calls[0][4], commitment);
   assert.deepEqual(events.map(({ event }) => event), [
     "blockchain.resolve_single_payout.submitted",
     "blockchain.resolve_single_payout.confirmed"
@@ -491,6 +518,68 @@ test("resolveSinglePayout returns the settle/payout tx receipt", async () => {
   assert.equal(JSON.stringify(events).includes("secret"), false);
 });
 
+test("non-dispute settlement gateway refuses a missing or zero verdict-core commitment", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  gateway.signer = {};
+  gateway.escrowContract = { async resolveSinglePayout() { throw new Error("must not broadcast"); } };
+  await assert.rejects(
+    () => gateway.resolveSinglePayout("wiki-job", true, "OK", "ipfs://badge"),
+    /content hash must be a 0x-prefixed 32-byte hex string/u
+  );
+  await assert.rejects(
+    () => gateway.resolveSinglePayout("wiki-job", true, "OK", "ipfs://badge", `0x${"00".repeat(32)}`),
+    /must not be zero/u
+  );
+});
+
+test("resolveMilestone sends the same non-zero verdict-core commitment channel", async () => {
+  const gateway = new BlockchainGateway({ enabled: false });
+  const escrow = "0x1111111111111111111111111111111111111111";
+  const verifier = "0x2222222222222222222222222222222222222222";
+  const commitment = `0x${"45".repeat(32)}`;
+  const iface = new Interface([
+    "event Verified(bytes32 indexed jobId,address indexed verifier,bool approved,bytes32 reasonCode,bytes32 reasoningHash)"
+  ]);
+  const calls = [];
+  gateway.signer = {};
+  gateway.escrowContract = {
+    target: escrow,
+    interface: iface,
+    async resolveMilestone(...args) {
+      calls.push(args);
+      return {
+        hash: `0x${"46".repeat(32)}`,
+        async wait() {
+          return {
+            blockNumber: 100,
+            status: 1,
+            logs: [{
+              address: escrow,
+              index: 5,
+              ...iface.encodeEventLog(
+                iface.getEvent("Verified"),
+                [id("milestone-job"), verifier, true, id("OK"), commitment]
+              )
+            }]
+          };
+        }
+      };
+    }
+  };
+
+  const receipt = await gateway.resolveMilestone(
+    "milestone-job",
+    2,
+    true,
+    "OK",
+    "ipfs://badge",
+    commitment
+  );
+
+  assert.equal(calls[0][5], commitment);
+  assert.deepEqual(receipt.verifiedEvent, { reasoningHash: commitment, logIndex: 5 });
+});
+
 test("recoverSinglePayoutReceipt settles the already-closed payout when timestamp search spans the null EVM zone", async () => {
   const gateway = new BlockchainGateway({ enabled: false, supportedAssets: [USDC_TRUST_ASSET] });
   const escrow = "0x1111111111111111111111111111111111111111";
@@ -500,11 +589,13 @@ test("recoverSinglePayoutReceipt settles the already-closed payout when timestam
   const treasury = "0x5555555555555555555555555555555555555555";
   const chainJobId = `0x${"66".repeat(32)}`;
   const txHash = `0x${"77".repeat(32)}`;
+  const commitment = `0x${"ab".repeat(32)}`;
   const escrowInterface = new Interface([
     "event SettlementSplit(bytes32 indexed jobId,address indexed worker,address indexed treasuryAccount,address asset,uint256 workerAmount,uint256 protocolFeeAmount,uint16 protocolFeeBps)",
     "event GasRetentionApplied(bytes32 indexed jobId,address indexed worker,uint256 retainedRaw,uint256 rewardRaw)",
     "event JobClosed(bytes32 indexed jobId,address indexed worker,uint256 releasedAmount)",
-    "event JobRejected(bytes32 indexed jobId,bytes32 reasonCode)"
+    "event JobRejected(bytes32 indexed jobId,bytes32 reasonCode)",
+    "event Verified(bytes32 indexed jobId,address indexed verifier,bool approved,bytes32 reasonCode,bytes32 reasoningHash)"
   ]);
   const accountInterface = new Interface([
     "event ReservationSettled(bytes32 indexed settlementId,address indexed account,address indexed recipient,address asset,uint256 amount)"
@@ -534,12 +625,19 @@ test("recoverSinglePayoutReceipt settles the already-closed payout when timestam
     escrowInterface.getEvent("JobClosed"),
     [chainJobId, worker, 1_000_000n]
   ));
+  const verified = {
+    ...withAddress(escrow, escrowInterface.encodeEventLog(
+      escrowInterface.getEvent("Verified"),
+      [chainJobId, "0x6666666666666666666666666666666666666666", true, id("OK"), commitment]
+    )),
+    index: 6
+  };
   const receipt = {
     to: escrow,
     transactionHash: txHash,
     blockNumber: 150,
     status: 1,
-    logs: [workerReservation, feeReservation, retentionReservation, split, retention, closed]
+    logs: [workerReservation, feeReservation, retentionReservation, split, retention, closed, verified]
   };
   const filters = [];
   const blockProbes = [];
@@ -583,7 +681,8 @@ test("recoverSinglePayoutReceipt settles the already-closed payout when timestam
   const recovered = await gateway.recoverSinglePayoutReceipt(chainJobId, {
     outcome: "approved",
     worker,
-    submittedAt: new Date(100_000).toISOString()
+    submittedAt: new Date(100_000).toISOString(),
+    reasoningHash: commitment
   });
 
   assert.equal(filters.length, 1);
@@ -593,6 +692,7 @@ test("recoverSinglePayoutReceipt settles the already-closed payout when timestam
     txHash,
     blockNumber: 150,
     status: 1,
+    verifiedEvent: { reasoningHash: commitment, logIndex: 6 },
     settlement: {
       worker,
       treasuryAccount: treasury,
@@ -611,12 +711,13 @@ test("recoverSinglePayoutReceipt settles the already-closed payout when timestam
     }
   });
 
-  receipt.logs = [split, retention, closed];
+  receipt.logs = [split, retention, closed, verified];
   await assert.rejects(
     () => gateway.recoverSinglePayoutReceipt(chainJobId, {
       outcome: "approved",
       worker,
-      submittedAt: new Date(100_000).toISOString()
+      submittedAt: new Date(100_000).toISOString(),
+      reasoningHash: commitment
     }),
     /has 0 AAC reservations; expected 3/u,
     "an approved retry must not transition from SettlementSplit alone when AAC value proof is absent"

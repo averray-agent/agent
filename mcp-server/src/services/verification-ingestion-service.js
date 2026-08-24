@@ -37,7 +37,10 @@ export class VerificationIngestionService {
     this.selfIdentityRegistry = selfIdentityRegistry;
   }
 
-  async ingest(sessionId, verdict, { payoutTx = verdict?.payoutTx } = {}) {
+  async ingest(sessionId, verdict, {
+    payoutTx = verdict?.payoutTx,
+    receiptContext = undefined
+  } = {}) {
     const session = sessionId
       ? await this.stateStore.getSession(sessionId)
       : await this.stateStore.findSessionByJobId(verdict.jobId);
@@ -71,6 +74,7 @@ export class VerificationIngestionService {
       // must carry the chain receipt. Persisting `resolved` first and adding
       // payoutTx in a later upsert made resolved-without-receipt reachable when
       // the second write failed.
+      receiptCommitment: undefined,
       ...(payoutTx ? { payoutTx } : {}),
       ...(badgeSnapshot ? { badgeSnapshot } : {}),
       ...(internalRemediation ? { internalRemediation } : {}),
@@ -110,7 +114,12 @@ export class VerificationIngestionService {
       // Persist the signed verdict document before committing the terminal
       // session transition. If signing or durable storage fails, verification
       // refuses instead of silently producing a receipt-less final verdict.
-      const workReceipt = await this.persistRunReceiptDocument(transitioned, job, verificationRecord);
+      const workReceipt = await this.persistRunReceiptDocument(
+        transitioned,
+        job,
+        verificationRecord,
+        receiptContext
+      );
       if (workReceipt?.receiptId) transitioned.workReceiptId = workReceipt.receiptId;
     }
     const updatedSession = await this.stateStore.upsertSession(transitioned);
@@ -186,10 +195,10 @@ export class VerificationIngestionService {
     }
   }
 
-  async persistRunReceiptDocument(session, job, verification) {
+  async persistRunReceiptDocument(session, job, verification, suppliedContext = undefined) {
     if (typeof this.stateStore.putRunReceiptDocument !== "function") return;
     try {
-      const context = await this.resolveReceiptSignerContext(job);
+      const context = suppliedContext ?? await this.resolveReceiptSignerContext(job);
       const receipt = buildRunReceipt({ session, job, verification, context });
       const document = this.badgeReceiptSigner
         ? { ...receipt, signature: await this.badgeReceiptSigner.signDocument(receipt) }

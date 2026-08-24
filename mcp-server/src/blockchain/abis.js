@@ -183,6 +183,7 @@ export const ESCROW_CORE_ABI = [
   "function submitWorkFor(bytes32 jobId, address worker, bytes32 evidenceHash)",
   "function latestEvidence(bytes32 jobId) view returns (bytes32)",
   "function resolveSinglePayout(bytes32 jobId, bool approved, bytes32 reasonCode, string metadataURI, bytes32 reasoningHash)",
+  "function resolveMilestone(bytes32 jobId, uint256 milestoneIndex, bool approved, bytes32 reasonCode, string metadataURI, bytes32 reasoningHash)",
   "function finalizeRejectedJob(bytes32 jobId)",
   "function disclose(bytes32 hash)",
   "function discloseFor(bytes32 hash, address byWallet)",
