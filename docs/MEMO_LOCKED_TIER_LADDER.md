@@ -83,6 +83,19 @@ consent; the public profile flag only with the depositor's explicit opt-in
 **L10 — Truth vocabulary.** "Locked deposit", "priority", "NAV share".
 Never "APR", "guaranteed", "interest", "staking rewards".
 
+**L11 — Operator seed (ratified by Pascal, 2026-08-24).** The operator may
+bootstrap yield activation with a seed lock, under all of: (a) a dedicated,
+fresh operator wallet, registered operator-run in the self-identity registry
+before funding; (b) amount ≤ the per-wallet cap (25 USDC), through the same
+quote → signed consent → ledger path as anyone else — no special path;
+(c) tier T90 (cycle economics: ~5× friction margin at 25); (d) every yield
+surface shows the seed/external split — seeded liquidity is disclosed, never
+presented as organic traction; (e) the seed counts toward the L2 activation
+gate but NOT toward the day-30 adoption review numbers; (f) Aug 28
+choreography: recall the legacy unconsented operator float first, then
+re-enter as this consented labeled seed — one swap, executing §6's "whose
+capital rides next time" line.
+
 ## 5. Rollout + exit condition
 
 1. Ship backend lock ledger + Flex/T30/T90 (flag-off) → enable T30 first.
