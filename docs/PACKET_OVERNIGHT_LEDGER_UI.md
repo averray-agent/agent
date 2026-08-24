@@ -77,9 +77,9 @@ with it unset, behavior is unchanged.
 
 ## Out of scope
 
-Backend changes of any kind, the monitor service-token re-mint (operator
-step), the Arrivals & Journeys 403 fix (same token re-mint resolves it),
-mobile layouts for the board, any new colors or tokens.
+Backend changes of any kind, minting or handling token VALUES (the operator
+holds the minted token; this packet only adds the env plumbing), mobile
+layouts for the board, any new colors or tokens.
 
 ## Handback requirements
 
