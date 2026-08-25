@@ -1,5 +1,13 @@
 # RUNSHEET — Aug 28 venue recall (legacy operator float)
 
+> **SUPERSEDED 2026-08-25 — DO NOT EXECUTE.**
+> Replaced by `RUNSHEET_VENUE_RECALL_V2.md`. Step 0 disproved this
+> document's central premise: the request named below as "staged and
+> pending" is venueRecall[4], already settled against deployment 2. No
+> recall references deployment 3. The recall must be *staged*, not
+> dispatched, and the 40k/26,000 fee figures here are the deploy-side
+> ceiling, not the recall's 80k/53,333. Kept for history only.
+
 Status: **DRAFT — for the operator, 2026-08-28** · Author: Claude ·
 Executor: Pascal (every money step) · Gate: Claude (every output before
 `--commit`)

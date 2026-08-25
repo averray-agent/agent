@@ -1,0 +1,143 @@
+# RUNSHEET v2 — Venue recall, deployment 3
+
+Status: **READY** · Rewritten 2026-08-25 · Author: Claude (architect + gate) ·
+Executor: Pascal (every money step) · Deadline: **2026-08-28T16:48Z**
+
+**Supersedes `RUNSHEET_AUG28_RECALL.md`, which must not be executed.** Its
+premise was that a lane request stood staged and pending, needing only a
+dispatch. Step 0 disproved that on 2026-08-25: the request it named,
+`0xe1029b10…`, maps to pool request `0xd88a7b3b…`, which is **venueRecall[4],
+already settled against deployment 2** (requested 4.950004, returned
+4.948243). Scanning recall indices 0–19, **no recall references deployment 3
+at all.** Nothing was staged. This is a `stage-recall`, not a dispatch.
+
+## Established state (all verified live 2026-08-25)
+
+| fact | value | source |
+|---|---|---|
+| deployment 3 principal | 9.500000 | `venueDeployments(3)` |
+| recalled so far | 0.000000 | `venueDeployments(3)` |
+| **returnBy** | **2026-08-28T16:48Z** | `venueDeployments(3)` |
+| adapter reports landed | 9.400000 | `venueAdapter.managedAssets(pool)` |
+| actual aUSDC at venue | 9.414667 | Hydration ERC-20 `balanceOf` |
+| loose USDC at venue | 1.546422 | Hydration `tokens.accounts(acct, 22)` |
+| **venue DOT postage** | **0.000000** | Hydration `tokens.accounts(acct, 5)` |
+| pool totalAssets | 25.395226 | `poolV2.totalAssets()` |
+| quoted fee | ~27,952 | `quoteRemoteFee` |
+
+The gap decomposes with **opposite signs**, and this matters for what gets
+written off: `9.500000 → 9.400000` is **−0.100000 of certain, already-realised
+XCM/swap entry friction**, while `9.400000 → 9.414667` is **+0.014667 of
+unrealised venue accrual**. Net −0.085333. Only the first is a write-off.
+
+## Blocker — fix before anything else
+
+**The venue account holds 0 DOT.** `stage-recall` enforces
+`MIN_VENUE_POSTAGE_PLANCK = 500_000_000` (0.05 DOT) and will refuse before
+doing anything. The script comment records 0.51 DOT when the original packet
+was written; it has been consumed since.
+
+Pascal must send **≥0.05 DOT** (send 0.1 for margin) to the venue account
+`0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3` on
+Hydration, and confirm `tokens.accounts(acct, 5)` reads non-zero, before
+step 2. This is liveness postage, never pool principal.
+
+## The fee window is open — the old watcher was measuring the wrong cap
+
+`scratch-fee-watch.mjs` tests the quote against "≤26,000 for the 40k cap".
+That 40,000 is `DEFAULT_DEPLOY_MAX_FEE_PER_LEG_RAW` — the **deploy** ceiling,
+inherited from the staged artifact that turned out to be deployment-side.
+
+`stage-recall` defaults to `MAX_FEE_PER_LEG_RAW = 80_000` with
+`DEFAULT_RECALL_FEE_FLOOR_RATIO_BPS = 15_000` (150%), so the recall threshold
+is **≈53,333**, not 26,000. At ~27,952 the window is open with roughly 2×
+headroom. Do not raise any cap to make a number fit; if the quote ever exceeds
+53,333, wait.
+
+## Ceremony
+
+### 0 · Establish state (read-only, no signatures)
+
+Run `status` and confirm it agrees with the table above:
+
+```
+node scripts/ops/pool-venue-dispatch.mjs status --profile mainnet \
+  --deployment-id 3 --expected-signer 0x5a6836c6D4d293F6E5377E6c28054F4171915813 \
+  --asset-hub-ws wss://asset-hub-polkadot-rpc.n.dwellir.com \
+  --hydration-ws wss://hydration-rpc.n.dwellir.com \
+  --hydration-evm-rpc https://rpc.hydradx.cloud \
+  --observability-url http://127.0.0.1:18787/monitor/deposit-pool
+```
+
+The observability endpoint is VPS-internal — run on the VPS, or tunnel with
+`ssh -N -L 18787:127.0.0.1:18787 ubuntu@141.94.121.188`.
+
+**Gate:** paste the output. Any material disagreement with the table stops the
+ceremony.
+
+### 1 · Fund the venue postage
+
+Per the blocker above. **Gate:** paste the non-zero `tokens.accounts(acct, 5)`
+read.
+
+### 2 · Stage the recall (dry-run first)
+
+`stage-recall` against **deployment 3**, taking the 80k/150% defaults. Dry-run
+is the default; `--commit --use-kms` is required to write, and raw keys are
+never accepted.
+
+**Gate:** I check the derived recall parameters — share count, `minimumOutput`,
+`maxFeePerLeg`, deadline — before you add `--commit`.
+
+### 3 · Dispatch, then confirm arrival on both sides
+
+Funds return asynchronously. Confirm the Hydration side **falling** and the
+Asset Hub side **rising**. Two-sided confirmation is the rule; a single-sided
+read has misled us before. Then finalise.
+
+**Gate:** paste both balance reads.
+
+### 4 · Book the loss (multisig)
+
+`writeOffVenueLoss(3, 100000)` — 0.100000 USDC, the certain entry friction,
+**not** the 0.085333 net. Authority is `venueAdapter.lossReporter()` =
+`0x01E6eed8…874C`, verified as the 2-of-3 treasury multisig (SS58
+`14LA8vJD…Kc3YK`, mapped, funded 8.04 DOT ≈ 804× ED).
+
+Measure weight via `reviveApi.call().weightRequired` first — epoch 1 needed
+proofSize 242,216.
+
+**Multisig law in full:** I precompute the `blake2AsHex` call hash; you confirm
+Nova displays *exactly* that hash before the Vault signs.
+
+**Gate:** I verify the encoded call and hash before the first signature.
+
+### 5 · Reconcile and stop
+
+Confirm `venuePrincipalCostBasis()` reads 0. At zero the deposit gate (#1287)
+goes inert automatically and re-arms next epoch — no action needed.
+
+Settle the depositor question: `0x97450BF6…4b5c` bought 5.026011 shares at a
+price carrying the venue at cost, when the adapter had already reported
+9.400000 **in the block before their deposit**. Fair harm is **0.024764**.
+
+**Do not redeploy at this size.** Entry friction is 1.053% of principal;
+accrual runs ~0.0029/day (≈11.3% APY). Break-even is a **35.5-day** epoch
+against the **8.2 days** this one ran — 4.3× wash-negative. The venue is fine;
+the epoch is too short. The lane stays idle until consented locked capital can
+fund a real epoch.
+
+## Abort conditions (any one ⇒ stop and report)
+
+- `status` disagrees materially with the established-state table.
+- Venue DOT postage still below 0.05 at step 2.
+- Quoted fee exceeds 53,333 — wait; never raise the cap to fit.
+- Arrival confirmed on only one side.
+- Realised loss materially exceeds 0.100000 plus XCM fees.
+- Nova shows any hash other than the one I precomputed.
+
+## What this runsheet does not do
+
+Redeploy, touch the locked cohort, change the activation gate or per-wallet
+cap, or alter consent text. It ends with the venue position closed and the
+lane idle.
