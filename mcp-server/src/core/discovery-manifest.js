@@ -115,6 +115,11 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = withDefaultGetMethod([
     description: "The signed-in agent's own account: available balance, stake on open work, statement, ownership proof, exit door, and informational retention choices."
   },
   {
+    method: "POST",
+    path: "/account/deposit/transactions",
+    description: "Wallet-bound unsigned Hub USDC approve and AgentAccountCore self-deposit templates. The owner pays DOT gas, signs, and broadcasts."
+  },
+  {
     path: "/poster/jobs",
     description: "SIWE-authenticated poster view of the caller's own postings, claim state, reserved escrow, and job-scoped session summaries."
   },
@@ -361,6 +366,15 @@ const HTTP_ACTION_REQUIREMENTS = [
     notes: EARNINGS_ACCOUNT_STATEMENT
   },
   {
+    method: "POST",
+    path: "/account/deposit/transactions",
+    requiresAuth: true,
+    requiredAction: "build_unsigned_account_deposit",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"],
+    notes: "AgentAccountCore has no depositFor: nobody can deposit on the worker's behalf. A brokered claim does not broker the deposit; the owner pays DOT gas, signs, and broadcasts."
+  },
+  {
     method: "GET",
     path: "/me",
     requiresAuth: true,
@@ -574,6 +588,7 @@ const DISCOVERY_TOOL_DEFINITIONS = [
   { name: "getDepositPoolInfo", description: "Live pool, depositor-risk disclosure, and wallet-specific vested-capacity truth." },
   { name: "buildDepositPoolTransactions", description: "Wallet-bound unsigned approve/deposit or redeem templates; never a relay." },
   { name: "getAccountPosition", description: "Read your own earnings account, statement, ownership proof, withdrawal door, and retention choices." },
+  { name: "buildAccountDepositTransactions", description: "Complete unsigned Hub USDC approve and AgentAccountCore self-deposit templates; the account owner pays DOT gas, signs, and broadcasts." },
   { name: "buildWithdrawTransactions", description: "Complete unsigned account withdrawal and optional onward transfer; eligible first withdrawals can request a lifetime-once 0.03 DOT grant from this exact intent." },
   { name: "quoteLockedDeposit", description: "Complete T30/T90 disclosure and exact EIP-4361 consent message before any lock exists." },
   { name: "getCreditInfo", description: "Live L1 plus receipt-graph L2/L3 limits, outstanding loans, disclosure, and sweep truth." },

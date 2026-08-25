@@ -99,6 +99,16 @@ function makeEarningsDoorRoute() {
       respond(response, 200, { available: true, templates: [{ unsigned: true }] });
       return true;
     }
+    if (request.method === "POST" && pathname === "/account/deposit/transactions") {
+      respond(response, 200, {
+        available: true,
+        templates: [
+          { step: "approve", unsigned: true },
+          { step: "deposit", unsigned: true, prerequisite: "approve_confirmed_on_chain" }
+        ]
+      });
+      return true;
+    }
     return false;
   };
 }
@@ -274,6 +284,7 @@ test("every tool advertised by the MCP welcome resolves through this surface", a
     getDepositPoolInfo: {},
     getAccountPosition: { asset: "USDC" },
     buildWithdrawTransactions: { asset: "USDC", amount: "1" },
+    buildAccountDepositTransactions: { asset: "USDC", amount: "1" },
     quoteLockedDeposit: { tier: "t30", amountRaw: "1", consentNonce: "nonce0001" },
     createLockedDeposit: {
       terms: {},
@@ -327,10 +338,15 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
   assert.equal(byName.draftJob.annotations.readOnlyHint, false);
   assert.equal(byName.draftJob.annotations.idempotentHint, false);
   assert.equal(byName.buildWithdrawTransactions.annotations.readOnlyHint, false);
+  assert.equal(byName.buildAccountDepositTransactions.annotations.readOnlyHint, false);
   assert.equal(byName.createLockedDeposit.annotations.readOnlyHint, false);
   assert.equal(byName.requestLockedDepositExit.annotations.readOnlyHint, false);
   assert.equal(byName.buildWithdrawTransactions.annotations.idempotentHint, true);
+  assert.equal(byName.buildAccountDepositTransactions.annotations.idempotentHint, true);
   assert.match(byName.buildWithdrawTransactions.description, /lifetime-once 0\.03 DOT/u);
+  assert.match(byName.buildAccountDepositTransactions.description, /no depositFor/iu);
+  assert.match(byName.buildAccountDepositTransactions.description, /brokered claim does not broker the deposit/iu);
+  assert.match(byName.buildAccountDepositTransactions.description, /pay.*gas.*DOT/iu);
   assert.equal(byName.fetchAuthNonce.annotations.destructiveHint, false);
   assert.equal(byName.refreshAuthToken.annotations.destructiveHint, false);
   assert.equal(byName.claimJob.annotations.idempotentHint, true);
@@ -344,6 +360,7 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
   assert.equal(byName.buildPostJobTransactions._meta["com.averray/auth"].required, true);
   assert.equal(byName.getAccountPosition._meta["com.averray/auth"].required, true);
   assert.equal(byName.buildWithdrawTransactions._meta["com.averray/auth"].required, true);
+  assert.equal(byName.buildAccountDepositTransactions._meta["com.averray/auth"].required, true);
   assert.equal(byName.buildDepositPoolTransactions._meta["com.averray/auth"].required, true);
   assert.equal(byName.claimJob._meta["com.averray/auth"].required, true);
   assert.equal(byName.submitWork._meta["com.averray/auth"].required, true);
@@ -525,6 +542,17 @@ test("MCP postJob surface accepts no signing or relay material", async () => {
   assert.equal(built.boundary.signedTransactionRelay, false);
   assert.equal("signedTransaction" in built, false);
   assert.equal("rawTransaction" in built, false);
+});
+
+test("MCP account deposit surface accepts no signing, custody, or relay material", () => {
+  const tool = MCP_TOOLS.find(({ name }) => name === "buildAccountDepositTransactions");
+  assert.ok(tool);
+  assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["amount", "asset"]);
+  assert.doesNotMatch(
+    JSON.stringify(tool.inputSchema),
+    /private.?key|mnemonic|signature|signed.?transaction|raw.?transaction|broadcast|relay/iu
+  );
+  assert.equal(tool.inputSchema.properties.amount.pattern, "^[1-9][0-9]*$");
 });
 
 test("listJobs returns the same value through MCP and its HTTP route", async () => {

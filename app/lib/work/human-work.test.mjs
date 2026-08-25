@@ -181,7 +181,8 @@ test("earnings navigation leaves the dynamic job-id namespace", async () => {
     readFile(new URL("../../../deploy/Caddyfile.averray", import.meta.url), "utf8"),
   ]);
   assert.match(header, /href="\/work-withdraw"/u, "client navigation must target the collision-free route");
-  assert.match(page, /return <WorkWithdrawal \/>/u, "the static route must render the real withdrawal standing UI");
+  assert.match(page, /<WorkWithdrawal\s*\/>/u, "the static route must retain the real withdrawal standing UI");
+  assert.match(page, /<WorkAccountDeposit\s*\/>/u, "the same route must expose the account deposit path");
   assert.match(caddy, /@legacyWorkWithdrawal path \/work\/withdraw \/work\/withdraw\//u);
   assert.match(caddy, /redir @legacyWorkWithdrawal \/work-withdraw\/ 301/u);
 });

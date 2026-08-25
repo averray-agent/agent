@@ -231,6 +231,17 @@
         "notes": "This is your account. Earnings settle into its available balance; only your key can withdraw them."
       },
       {
+        "method": "POST",
+        "path": "/account/deposit/transactions",
+        "requiresAuth": true,
+        "requiredAction": "build_unsigned_account_deposit",
+        "authScheme": "SIWE_JWT",
+        "walletModes": [
+          "evm-siwe"
+        ],
+        "notes": "AgentAccountCore has no depositFor: nobody can deposit on the worker's behalf. A brokered claim does not broker the deposit; the owner pays DOT gas, signs, and broadcasts."
+      },
+      {
         "method": "GET",
         "path": "/me",
         "requiresAuth": true,
@@ -772,6 +783,11 @@
       "description": "The signed-in agent's own account: available balance, stake on open work, statement, ownership proof, exit door, and informational retention choices."
     },
     {
+      "method": "POST",
+      "path": "/account/deposit/transactions",
+      "description": "Wallet-bound unsigned Hub USDC approve and AgentAccountCore self-deposit templates. The owner pays DOT gas, signs, and broadcasts."
+    },
+    {
       "method": "GET",
       "path": "/poster/jobs",
       "description": "SIWE-authenticated poster view of the caller's own postings, claim state, reserved escrow, and job-scoped session summaries."
@@ -1051,6 +1067,11 @@
     {
       "name": "getAccountPosition",
       "description": "Read your own earnings account, statement, ownership proof, withdrawal door, and retention choices.",
+      "surface": "mcp"
+    },
+    {
+      "name": "buildAccountDepositTransactions",
+      "description": "Complete unsigned Hub USDC approve and AgentAccountCore self-deposit templates; the account owner pays DOT gas, signs, and broadcasts.",
       "surface": "mcp"
     },
     {

@@ -565,14 +565,7 @@ function buildWorkerFacts({
         reason: claimBondRead.reason
       };
   const tokenAddress = token?.address ?? "<token address>";
-  const accountAddress = agentAccountCore ?? "<AgentAccountCore address>";
-  const positionRead = {
-    contract: "AgentAccountCore",
-    ...(agentAccountCore ? { address: agentAccountCore } : {}),
-    abiFragment: AGENT_ACCOUNT_POSITIONS_ABI,
-    args: ["<worker EVM address>", tokenAddress],
-    resultField: "liquid"
-  };
+  const selfDeposit = buildWorkerSelfDepositRecipe({ token, agentAccountCore });
 
   return {
     claimBond,
@@ -593,34 +586,7 @@ function buildWorkerFacts({
       url: `${publicBaseUrl || ""}/jobs/preflight?jobId=X`,
       authorization: "worker SIWE bearer token"
     },
-    selfDeposit: {
-      requiredWhenLiquidIsShort: true,
-      routeAvailable: false,
-      explanation:
-        "AgentAccountCore has no depositFor path: the worker must approve the token and self-deposit into AgentAccountCore, paying that deposit transaction's gas. A brokered claim does not broker the deposit.",
-      requiredClaimLockRawFormula: "parseUnits(preflight.totalClaimLock, token.decimals)",
-      depositAmountRawFormula:
-        "max(requiredClaimLockRaw - positions(worker, token).liquid, 0)",
-      positionRead,
-      writes: [
-        {
-          contract: "token",
-          ...(token?.address ? { address: token.address } : {}),
-          abiFragment: EXTERNAL_POSTING_ERC20_APPROVE_ABI,
-          method: "approve",
-          args: [accountAddress, "<depositAmountRaw>"],
-          skipWhen: "depositAmountRaw == 0"
-        },
-        {
-          contract: "AgentAccountCore",
-          ...(agentAccountCore ? { address: agentAccountCore } : {}),
-          abiFragment: EXTERNAL_POSTING_ACCOUNT_DEPOSIT_ABI,
-          method: "deposit",
-          args: [tokenAddress, "<depositAmountRaw>"],
-          skipWhen: "depositAmountRaw == 0"
-        }
-      ]
-    },
+    selfDeposit,
     accountFund: {
       method: "POST",
       path: "/account/fund",
@@ -724,6 +690,7 @@ function workerDoorFromSnapshot(snapshot) {
     claimBond: snapshot.workerFacts.claimBond,
     preflight: snapshot.workerFacts.preflight,
     selfDeposit: snapshot.workerFacts.selfDeposit,
+    accountFunding: snapshot.workerFacts.selfDeposit,
     accountFund: snapshot.workerFacts.accountFund,
     withdrawal: snapshot.workerFacts.withdrawal,
     submissionValidation: snapshot.workerFacts.submissionValidation,
@@ -733,6 +700,55 @@ function workerDoorFromSnapshot(snapshot) {
       claimBond: snapshot.liveReads.claimBond,
       disputeWindow: snapshot.liveReads.disputeWindow
     }
+  };
+}
+
+export function buildWorkerSelfDepositRecipe({ token, agentAccountCore } = {}) {
+  const tokenAddress = token?.address ?? "<token address>";
+  const accountAddress = agentAccountCore ?? "<AgentAccountCore address>";
+  return {
+    requiredWhenLiquidIsShort: true,
+    routeAvailable: true,
+    explanation:
+      "AgentAccountCore has no depositFor path: nobody can deposit on the worker's behalf. The worker must approve the token and self-deposit into AgentAccountCore, paying the deposit gas in DOT. A brokered claim does not broker the deposit.",
+    http: {
+      method: "POST",
+      path: "/account/deposit/transactions",
+      authorization: "worker SIWE bearer token"
+    },
+    mcp: {
+      tool: "buildAccountDepositTransactions",
+      authorization: "worker SIWE bearer token"
+    },
+    requiredClaimLockRawFormula: "parseUnits(preflight.totalClaimLock, token.decimals)",
+    depositAmountRawFormula:
+      "max(requiredClaimLockRaw - positions(worker, token).liquid, 0)",
+    positionRead: {
+      contract: "AgentAccountCore",
+      ...(agentAccountCore ? { address: agentAccountCore } : {}),
+      abiFragment: AGENT_ACCOUNT_POSITIONS_ABI,
+      args: ["<worker EVM address>", tokenAddress],
+      resultField: "liquid"
+    },
+    writes: [
+      {
+        contract: "token",
+        ...(token?.address ? { address: token.address } : {}),
+        abiFragment: EXTERNAL_POSTING_ERC20_APPROVE_ABI,
+        method: "approve",
+        args: [accountAddress, "<depositAmountRaw>"],
+        skipWhen: "depositAmountRaw == 0"
+      },
+      {
+        contract: "AgentAccountCore",
+        ...(agentAccountCore ? { address: agentAccountCore } : {}),
+        abiFragment: EXTERNAL_POSTING_ACCOUNT_DEPOSIT_ABI,
+        method: "deposit",
+        args: [tokenAddress, "<depositAmountRaw>"],
+        prerequisite: "approve_confirmed_on_chain",
+        skipWhen: "depositAmountRaw == 0"
+      }
+    ]
   };
 }
 

@@ -90,6 +90,8 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.ok(!manifest.tools.some((tool) => ["getStrategyPositions", "listStrategies"].includes(tool.name)));
   assert.equal("vdotStrategy" in manifest.docs, false);
   assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/account/position"));
+  assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/account/deposit/transactions"));
+  assert.ok(manifest.tools.some((tool) => tool.name === "buildAccountDepositTransactions"));
   assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/account/borrow-capacity"));
   assert.ok(!manifest.authenticatedEndpoints.some((entry) => entry.path === "/payments/send"));
   assert.ok(!manifest.tools.some((tool) => tool.name === "sendToAgent"));

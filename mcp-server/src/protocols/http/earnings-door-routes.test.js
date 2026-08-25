@@ -43,6 +43,17 @@ function routeFixture({ eventBus } = {}) {
           firstWithdrawalGasGrant: { status: payload.requestGasGrant ? "granted" : "available", reason: "fixture" },
           whatYourBalanceCanDo: { retentionNotGates: { templatesRemainComplete: true } }
         };
+      },
+      async buildAccountDepositTransactions(wallet, payload) {
+        calls.push(["deposit", wallet, payload]);
+        return {
+          available: true,
+          wallet,
+          templates: [
+            { step: "approve", unsigned: true },
+            { step: "deposit", unsigned: true, prerequisite: "approve_confirmed_on_chain" }
+          ]
+        };
       }
     },
     eventBus,
@@ -63,6 +74,7 @@ test("earnings HTTP routes bind every account read and template to the authentic
   const { calls, route } = routeFixture();
   const getResponse = {};
   const buildResponse = {};
+  const depositResponse = {};
   await route({
     request: request("GET"), response: getResponse,
     url: new URL("http://local/account/position?asset=USDC"), pathname: "/account/position"
@@ -72,14 +84,21 @@ test("earnings HTTP routes bind every account read and template to the authentic
     response: buildResponse,
     url: new URL("http://local/account/withdraw/transactions"), pathname: "/account/withdraw/transactions"
   });
+  await route({
+    request: request("POST", { amount: "250000" }), response: depositResponse,
+    url: new URL("http://local/account/deposit/transactions"), pathname: "/account/deposit/transactions"
+  });
   assert.deepEqual(calls, [
     ["get", WALLET, "USDC"],
-    ["build", WALLET, { amount: "1", destination: "0x2222222222222222222222222222222222222222" }]
+    ["build", WALLET, { amount: "1", destination: "0x2222222222222222222222222222222222222222" }],
+    ["deposit", WALLET, { amount: "250000" }]
   ]);
   assert.equal(getResponse.body.account.owner, WALLET);
   assert.equal(buildResponse.body.templates[0].unsigned, true);
   assert.equal(buildResponse.body.standing.claimTierLabel, "claim tier");
   assert.equal(buildResponse.body.standing.waiverSlotsRemaining, 3);
+  assert.equal(depositResponse.body.wallet, WALLET);
+  assert.equal(depositResponse.body.templates[1].prerequisite, "approve_confirmed_on_chain");
 });
 
 test("withdrawal intent telemetry stores creation and grant status without transaction payloads", async () => {
@@ -134,4 +153,11 @@ test("HTTP and MCP earnings doors return byte-identical payloads", async () => {
   });
   const mcpBuild = await execute("buildWithdrawTransactions", input, { request: sourceRequest });
   assert.equal(JSON.stringify(mcpBuild), JSON.stringify(directBuild.body));
+
+  const depositInput = { asset: "USDC", amount: "250000" };
+  const directDeposit = await invokeHttpRoute(route, {
+    method: "POST", path: "/account/deposit/transactions", body: depositInput, sourceRequest
+  });
+  const mcpDeposit = await execute("buildAccountDepositTransactions", depositInput, { request: sourceRequest });
+  assert.equal(JSON.stringify(mcpDeposit), JSON.stringify(directDeposit.body));
 });

@@ -93,6 +93,7 @@ const ROUTE_CAPABILITY_RULES = [
   { method: "GET", path: "/me", capabilities: ["account:read", "reputation:read"] },
   { method: "GET", path: "/receipts", capabilities: ["session:read"] },
   { method: "POST", path: "/account/withdraw/transactions", capabilities: ["account:read"] },
+  { method: "POST", path: "/account/deposit/transactions", capabilities: ["account:read"] },
   { method: "POST", path: "/locked-deposits/quote", capabilities: ["account:lock"] },
   { method: "POST", path: "/locked-deposits/consent", capabilities: ["account:lock"] },
   { method: "POST", path: "/locked-deposits/:id/exit", capabilities: ["account:lock"] },
