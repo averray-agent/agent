@@ -26,10 +26,25 @@ their deposit, so "we could not know" is not available to us.
 
 **D3 — Do not redeploy.** Entry friction is 1.053% of principal against
 ~0.0029/day accrual (≈11.3% APY): break-even needs a **35.5-day** epoch and
-this one ran **8.2**, coming out 4.3× wash-negative. The venue is fine; the
-epoch is too short. Cost basis goes to zero, the gate self-disarms, and the
-lane stays idle until consented locked capital can fund a real epoch. Any
-future deployment is a fresh decision that must clear the 35.5-day bar.
+this one ran **8.2**, coming out 4.3× wash-negative.
+
+**And that bar is unreachable on the deployed contract.** `deployToVenue`
+hard-caps the clock at `NOTICE_7_DAYS`
+(`DepositPoolV2.sol:444-445`, `VenueDeadlineExceedsNoticeTier`), so no
+deployment can run longer than 7 days no matter what is passed. The
+`NoticeTier` enum declares `Notice30Days`, but nothing honours it. Committing
+capital for longer is not an option that exists.
+
+So this is not "not yet" — at current size the lane is **structurally**
+loss-making, and only two things change that:
+
+1. **Scale**: ~62 USDC deployed makes weekly-roll friction self-covering
+   (~15 if a 30-day tier existed), or
+2. **A contract amendment** that makes `Notice30Days` usable in
+   `deployToVenue`.
+
+Until one of those lands, every redeployment is a knowing loss. Cost basis
+goes to zero, the gate self-disarms, and the lane stays idle.
 
 ## Established state (all verified live 2026-08-25)
 
