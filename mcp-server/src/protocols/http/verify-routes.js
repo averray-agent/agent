@@ -24,9 +24,11 @@ export function createVerifyRoutes({
       respond(
         response,
         200,
-        decorateVerificationRunPresentation(
-          await verificationRunService.getRun(decodeURIComponent(runMatch[1])),
-          { env: presentationEnv }
+        decorateQueuedRun(
+          decorateVerificationRunPresentation(
+            await verificationRunService.getRun(decodeURIComponent(runMatch[1])),
+            { env: presentationEnv }
+          )
         )
       );
       return true;
@@ -75,11 +77,30 @@ export function createVerifyRoutes({
             amount: run.billing.amountRaw
           })
         : undefined;
-      respond(response, 200, decorateVerificationRunPresentation(run, { env: presentationEnv }), headers);
+      respond(
+        response,
+        200,
+        decorateQueuedRun(
+          decorateVerificationRunPresentation(run, { env: presentationEnv })
+        ),
+        headers
+      );
       return true;
     }
 
     return false;
+  };
+}
+
+function decorateQueuedRun(run) {
+  if (run?.status !== "queued") return run;
+  return {
+    ...run,
+    asyncStatus: {
+      meaning: "Queued means the request was accepted for asynchronous verification. It is neither a failure nor a completed purchase.",
+      poll: { method: "GET", path: `/verify/runs/${encodeURIComponent(run.runId)}` },
+      settlement: "The settlement transaction is absent while queued. For a PASS, it appears only after PASS completes and payment capture succeeds."
+    }
   };
 }
 

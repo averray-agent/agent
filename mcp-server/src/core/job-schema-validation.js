@@ -1,94 +1,114 @@
 import { ValidationError } from "./errors.js";
 
 export function validateAgainstSchema(value, schema, path = "value") {
+  const [violation] = collectSchemaViolations(value, schema, path);
+  if (violation) throw new ValidationError(violation.message);
+}
+
+export function validateAgainstSchemaAll(value, schema, path = "value") {
+  const violations = collectSchemaViolations(value, schema, path);
+  if (violations.length > 0) {
+    throw new ValidationError(violations[0].message, { violations });
+  }
+}
+
+export function collectSchemaViolations(value, schema, path = "value") {
   const expected = schema.type;
   if (expected === "object") {
     if (!isPlainObject(value)) {
-      throw new ValidationError(`${path} must be an object`);
+      return [violation(path, `${path} must be an object`)];
     }
+    const violations = [];
     const required = schema.required ?? [];
     for (const key of required) {
       if (!(key in value)) {
-        throw new ValidationError(`${path}.${key} is required`);
+        violations.push(violation(`${path}.${key}`, `${path}.${key} is required`));
       }
     }
     for (const [key, propertySchema] of Object.entries(schema.properties ?? {})) {
       if (key in value) {
-        validateAgainstSchema(value[key], propertySchema, `${path}.${key}`);
+        violations.push(...collectSchemaViolations(value[key], propertySchema, `${path}.${key}`));
       }
     }
     if (schema.additionalProperties === false) {
       const allowed = new Set(Object.keys(schema.properties ?? {}));
       for (const key of Object.keys(value)) {
         if (!allowed.has(key)) {
-          throw new ValidationError(`${path}.${key} is not an allowed field`);
+          violations.push(violation(`${path}.${key}`, `${path}.${key} is not an allowed field`));
         }
       }
     }
-    return;
+    return violations;
   }
 
   if (expected === "array") {
     if (!Array.isArray(value)) {
-      throw new ValidationError(`${path} must be an array`);
+      return [violation(path, `${path} must be an array`)];
     }
     if (Number.isInteger(schema.minItems) && value.length < schema.minItems) {
-      throw new ValidationError(`${path} must contain at least ${schema.minItems} item(s)`);
+      return [violation(path, `${path} must contain at least ${schema.minItems} item(s)`)];
     }
     if (Number.isInteger(schema.maxItems) && value.length > schema.maxItems) {
-      throw new ValidationError(`${path} must contain at most ${schema.maxItems} item(s)`);
+      return [violation(path, `${path} must contain at most ${schema.maxItems} item(s)`)];
     }
+    const violations = [];
     value.forEach((entry, index) => {
-      validateAgainstSchema(entry, schema.items ?? {}, `${path}[${index}]`);
+      violations.push(...collectSchemaViolations(entry, schema.items ?? {}, `${path}[${index}]`));
     });
-    return;
+    return violations;
   }
 
   if (expected === "string") {
     if (typeof value !== "string") {
-      throw new ValidationError(`${path} must be a string`);
+      return [violation(path, `${path} must be a string`)];
     }
     if (Number.isInteger(schema.minLength) && value.length < schema.minLength) {
-      throw new ValidationError(`${path} must be at least ${schema.minLength} character(s)`);
+      return [violation(path, `${path} must be at least ${schema.minLength} character(s)`)];
     }
     if (Number.isInteger(schema.maxLength) && value.length > schema.maxLength) {
-      throw new ValidationError(`${path} must be at most ${schema.maxLength} character(s)`);
+      return [violation(path, `${path} must be at most ${schema.maxLength} character(s)`)];
     }
     if (schema.pattern && !(new RegExp(schema.pattern, "u")).test(value)) {
-      throw new ValidationError(`${path} does not match the expected format`);
+      return [violation(path, `${path} does not match the expected format`)];
     }
     if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
-      throw new ValidationError(`${path} must be one of ${schema.enum.join(", ")}`);
+      return [violation(path, `${path} must be one of ${schema.enum.join(", ")}`)];
     }
-    return;
+    return [];
   }
 
   if (expected === "number") {
     if (!Number.isFinite(value)) {
-      throw new ValidationError(`${path} must be a number`);
+      return [violation(path, `${path} must be a number`)];
     }
     if (Number.isFinite(schema.minimum) && value < schema.minimum) {
-      throw new ValidationError(`${path} must be at least ${schema.minimum}`);
+      return [violation(path, `${path} must be at least ${schema.minimum}`)];
     }
-    return;
+    return [];
   }
 
   if (expected === "integer") {
     if (!Number.isInteger(value)) {
-      throw new ValidationError(`${path} must be an integer`);
+      return [violation(path, `${path} must be an integer`)];
     }
     if (Number.isFinite(schema.minimum) && value < schema.minimum) {
-      throw new ValidationError(`${path} must be at least ${schema.minimum}`);
+      return [violation(path, `${path} must be at least ${schema.minimum}`)];
     }
-    return;
+    return [];
   }
 
   if (expected === "boolean") {
     if (typeof value !== "boolean") {
-      throw new ValidationError(`${path} must be a boolean`);
+      return [violation(path, `${path} must be a boolean`)];
     }
-    return;
+    return [];
   }
+
+  return [];
+}
+
+function violation(path, message) {
+  return { path, message };
 }
 
 export function stringSchema(options = {}) {

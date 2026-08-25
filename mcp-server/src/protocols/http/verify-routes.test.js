@@ -96,6 +96,32 @@ test("POST /verify/runs accepts the standard x402 header and returns the queued 
   assert.equal(response.headers, undefined);
 });
 
+test("queued Verify response names the poll route and PASS settlement timing", async () => {
+  const { response, route } = harness();
+  const request = {
+    method: "POST",
+    headers: { "payment-signature": "proof" },
+    socket: { remoteAddress: "127.0.0.1" }
+  };
+
+  assert.equal(await route({ request, response, pathname: "/verify/runs" }), true);
+  assert.deepEqual(response.body.asyncStatus, {
+    meaning: "Queued means the request was accepted for asynchronous verification. It is neither a failure nor a completed purchase.",
+    poll: { method: "GET", path: "/verify/runs/verify-1" },
+    settlement: "The settlement transaction is absent while queued. For a PASS, it appears only after PASS completes and payment capture succeeds."
+  });
+
+  const polled = harness({
+    getRun: async (runId) => ({ runId, status: "queued" })
+  });
+  assert.equal(await polled.route({
+    request: { method: "GET" },
+    response: polled.response,
+    pathname: "/verify/runs/verify-1"
+  }), true);
+  assert.deepEqual(polled.response.body.asyncStatus, response.body.asyncStatus);
+});
+
 test("POST /verify/runs returns the x402 challenge before work when unpaid", async () => {
   const paymentRequired = {
     x402Version: 2,
