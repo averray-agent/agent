@@ -45,6 +45,32 @@ to the venue only while **Σ locked ≥ 15 USDC** AND **projected cycle yield �
 UI states "yield inactive — pool below activation threshold". The gate can
 never be overridden by copy or config; it is the wash-negative law as code.
 
+**L2a — the cycle is the shortest remaining lock term, not a constant
+(amended by Pascal, 2026-08-25).** v1 fixed `cycleDays` at 30 for every tier.
+That is wrong: friction is 0.060 USDC per venue **round trip**, and what
+forces a round trip is the shortest commitment in the deployed cohort. A
+T90-only cohort pays the toll once per ~90 days; a cohort containing a T30
+lock must be able to release in 30 and therefore pays it three times as
+often. Charging every tier a monthly cadence is true of T30 and false of
+T90 — it understated T90 yield by 3× and held the gate shut on capital that
+genuinely clears the bar.
+
+The cycle is therefore **the shortest remaining term across currently active
+locks**, and it re-derives whenever the cohort changes. Consequences, all
+intended:
+
+- The first T90 seed (25 USDC, ~89 days remaining) projects 0.301 against
+  0.12 required — 2.5× margin, gate **open**.
+- As any lock nears expiry the cycle shrinks and the gate closes. Correct:
+  capital about to be returned must not be deployed against an assumed
+  long-cycle yield.
+- A new short lock shortens the cycle for everyone and can close the gate.
+  Also correct — that is the real constraint arriving, not a penalty.
+
+Unchanged: the 15 USDC floor, the 2× margin, the 0.060 friction, the
+epoch-2 yield basis, and the rule that no config may open the gate. If the
+cohort composition cannot be read, fail closed.
+
 **L3 — NAV mechanics.** Existing poolV2 share-price accounting (proven live,
 including the write-off path — sharePrice 0.994824 precedent). Venue returns
 raise NAV; losses mark it down; locked depositors see both. No fixed APR
