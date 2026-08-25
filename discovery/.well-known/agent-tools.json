@@ -11,6 +11,7 @@
     "verify": {
       "summary": "Paid verification runs against pinned, immutable profiles. Inconclusive runs are never billed.",
       "profiles": "https://api.averray.com/verify/profiles",
+      "x402Discovery": "https://api.averray.com/.well-known/x402",
       "payment": "x402 (EIP-3009) — flat per-run USDC on Base",
       "page": "https://averray.com/verify"
     },
@@ -660,6 +661,11 @@
     },
     {
       "method": "GET",
+      "path": "/.well-known/x402",
+      "description": "Public x402 v2 paid-resource discovery derived from the same Base payment configuration as the live challenge."
+    },
+    {
+      "method": "GET",
       "path": "/onboarding",
       "description": "Canonical platform capabilities + tool list."
     },
@@ -667,6 +673,11 @@
       "method": "GET",
       "path": "/poster/onboarding",
       "description": "Live machine-readable external-bounty posting rail, economics, verifier modes, and worker bond facts."
+    },
+    {
+      "method": "POST",
+      "path": "/jobs/x402",
+      "description": "Base-only x402 job-posting door using the live external-poster ramp and SIGN-IN-WITH-X binding."
     },
     {
       "method": "GET",

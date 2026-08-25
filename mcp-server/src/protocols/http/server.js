@@ -83,6 +83,7 @@ import { makePolicy } from "../../core/builtin-policies.js";
 import { createPosterOnboardingService } from "../../core/poster-onboarding.js";
 import { createConfiguredIndexerHealthProbe } from "../../services/indexer-health-probe.js";
 import { createUsdcLiquidityStatusService } from "../../services/usdc-liquidity-status.js";
+import { buildX402DiscoveryDocument } from "../../payments/x402-discovery.js";
 import {
   ArrivalObservatory,
   ARRIVAL_CANARY_MARKER_HEADER,
@@ -103,6 +104,7 @@ const {
   rewardBankHealthProvider,
   policyService,
   verifierService,
+  verificationPaymentGate,
   verificationRunService,
   externalPostingService,
   x402PosterRamp,
@@ -826,6 +828,10 @@ const handleEventRoute = createEventRoutes({
 const handlePublicMetadataRoute = createPublicMetadataRoutes({
   authConfig,
   buildDiscoveryManifest,
+  getX402Discovery: () => buildX402DiscoveryDocument({
+    paymentGate: verificationPaymentGate,
+    profiles: verificationRunService.listProfiles()
+  }),
   minimumRewardUsdc: externalPostingService.config.minRewardUsdc,
   posterOnboardingService,
   publicBaseUrl: process.env.PUBLIC_BASE_URL,

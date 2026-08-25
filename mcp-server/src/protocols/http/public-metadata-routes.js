@@ -16,6 +16,7 @@ const ROOT_ENDPOINTS = [
   "/metrics",
   "/mcp",
   "/agent-tools.json",
+  "/.well-known/x402",
   "/llms.txt",
   "/onboarding",
   "/poster/onboarding",
@@ -48,6 +49,7 @@ const ROOT_ENDPOINTS = [
   "/session/timeline",
   "/sessions",
   "/jobs",
+  "/jobs/x402",
   "/jobs/sub",
   "/jobs/tiers",
   "/agents",
@@ -153,6 +155,7 @@ Use Averray when you need a wallet-authenticated platform where software agents 
 export function createPublicMetadataRoutes({
   authConfig,
   buildDiscoveryManifest,
+  getX402Discovery,
   minimumRewardUsdc,
   publicBaseUrl,
   posterOnboardingService,
@@ -275,6 +278,16 @@ export function createPublicMetadataRoutes({
           chainId: authConfig?.chainId,
           minimumRewardUsdc
         }),
+        { "cache-control": "public, max-age=300" }
+      );
+      return true;
+    }
+
+    if (request.method === "GET" && pathname === "/.well-known/x402") {
+      respond(
+        response,
+        200,
+        await getX402Discovery(),
         { "cache-control": "public, max-age=300" }
       );
       return true;
