@@ -375,7 +375,7 @@ test("buildPlatformCapabilities serves the complete account parity section", () 
   const parity = buildPlatformCapabilities().onboarding.agentSurfaceParity;
 
   assert.equal(parity.heading, "Use the agent surface for account work");
-  assert.equal(parity.actions.length, 9);
+  assert.equal(parity.actions.length, 12);
   assert.deepEqual(
     parity.actions.map(({ humanAction }) => humanAction),
     [
@@ -383,9 +383,12 @@ test("buildPlatformCapabilities serves the complete account parity section", () 
       "add funds",
       "withdraw",
       "browse and claim work",
+      "judge a job before claiming",
       "submit work",
       "lock a deposit",
       "exit a lock",
+      "use the deposit pool",
+      "borrow against standing",
       "post a job",
       "read standing / tier / receipts"
     ]
