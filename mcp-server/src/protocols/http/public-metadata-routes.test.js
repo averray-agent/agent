@@ -84,6 +84,7 @@ function makeHarness(overrides = {}) {
       }
     },
     lockedTierService: overrides.lockedTierService,
+    idleBalanceConsentService: overrides.idleBalanceConsentService,
     respond: (res, statusCode, body, headers = {}) => {
       calls.push(["respond", { statusCode, body, headers }]);
       res.statusCode = statusCode;
@@ -315,6 +316,25 @@ test("platform capabilities expose the flag-off locked-tier gate without inventi
 
   assert.deepEqual(response.body.products.lockedDeposits, lockedDeposits);
   assert.deepEqual(response.body.onboarding.lockedDeposits, lockedDeposits);
+});
+
+test("onboarding exposes route-not-live idle allocation without soliciting consent", async () => {
+  const idleBalanceAllocation = {
+    schemaVersion: 1,
+    available: false,
+    reason: "route_not_live",
+    product: "idle-balance allocation",
+    endpoints: { status: { method: "GET", path: "/account/idle-allocation" } }
+  };
+  const { response, route } = makeHarness({
+    idleBalanceConsentService: { getCapability: () => idleBalanceAllocation }
+  });
+
+  await route({ request: { method: "GET" }, response, pathname: "/onboarding" });
+
+  assert.deepEqual(response.body.products.idleBalanceAllocation, idleBalanceAllocation);
+  assert.deepEqual(response.body.onboarding.idleBalanceAllocation, idleBalanceAllocation);
+  assert.equal(JSON.stringify(idleBalanceAllocation).includes("/consent"), false);
 });
 
 test("A3 arrival payload: GET /llms.txt serves the agent-adjusted API-host mirror", async () => {

@@ -106,6 +106,29 @@ end
 return value
 `;
 
+// A revoked signed grant cannot be replayed to reactivate allocation. The
+// wallet's current record and the terms-hash tombstone change atomically.
+const PUT_IDLE_BALANCE_CONSENT_SCRIPT = `
+if redis.call("hexists", KEYS[2], ARGV[2]) == 1 then
+  return 0
+end
+redis.call("set", KEYS[1], ARGV[1])
+return 1
+`;
+
+const REVOKE_IDLE_BALANCE_CONSENT_SCRIPT = `
+local raw = redis.call("get", KEYS[1])
+if not raw then return false end
+local record = cjson.decode(raw)
+if record.status == "revoked" then return raw end
+record.status = "revoked"
+record.revokedAt = ARGV[1]
+local encoded = cjson.encode(record)
+redis.call("set", KEYS[1], encoded)
+redis.call("hset", KEYS[2], string.lower(record.termsHash), ARGV[1])
+return encoded
+`;
+
 // Fixed-window rate limit: INCR the counter, set TTL on first hit so the
 // window closes cleanly, then return both count and remaining TTL so the
 // caller can compute reset-at. Returned as a two-element array {count, ttl}.
@@ -353,6 +376,8 @@ export class MemoryStateStore {
     this.externalPaymentFundings = new Map();
     this.creditInterestRegistrations = new Map();
     this.lockedTierEntries = new Map();
+    this.idleBalanceConsents = new Map();
+    this.revokedIdleBalanceConsentHashes = new Set();
   }
 
   // ── policy proposals (Package G) ──────────────────────────────────
@@ -861,6 +886,32 @@ export class MemoryStateStore {
       .sort((left, right) => String(left.registeredAt).localeCompare(String(right.registeredAt)))
       .slice(offset, offset + limit)
       .map((record) => cloneJsonRecord(record));
+  }
+
+  async getIdleBalanceConsent(wallet) {
+    return cloneJsonRecord(this.idleBalanceConsents.get(normalizeWalletKey(wallet)));
+  }
+
+  async putIdleBalanceConsent(record) {
+    const wallet = normalizeWalletKey(record?.wallet);
+    const termsHash = normalizeContentHash(record?.termsHash);
+    if (this.revokedIdleBalanceConsentHashes.has(termsHash)) {
+      return { accepted: false, reason: "consent_revoked", record: undefined };
+    }
+    const stored = cloneJsonRecord({ ...record, wallet });
+    this.idleBalanceConsents.set(wallet, stored);
+    return { accepted: true, record: cloneJsonRecord(stored) };
+  }
+
+  async revokeIdleBalanceConsent(wallet, { revokedAt } = {}) {
+    const key = normalizeWalletKey(wallet);
+    const existing = this.idleBalanceConsents.get(key);
+    if (!existing) return undefined;
+    if (existing.status === "revoked") return cloneJsonRecord(existing);
+    const stored = cloneJsonRecord({ ...existing, status: "revoked", revokedAt });
+    this.idleBalanceConsents.set(key, stored);
+    this.revokedIdleBalanceConsentHashes.add(normalizeContentHash(stored.termsHash));
+    return cloneJsonRecord(stored);
   }
 
   async upsertMutationReceipt(bucket, key, receipt) {
@@ -2004,6 +2055,42 @@ export class RedisStateStore {
       .map((raw) => JSON.parse(raw))
       .sort((left, right) => String(left.registeredAt).localeCompare(String(right.registeredAt)))
       .slice(offset, offset + limit);
+  }
+
+  async getIdleBalanceConsent(wallet) {
+    await this.connect();
+    const raw = await this.client.get(this.key("idle-balance-consent", normalizeWalletKey(wallet)));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async putIdleBalanceConsent(record) {
+    await this.connect();
+    const wallet = normalizeWalletKey(record?.wallet);
+    const termsHash = normalizeContentHash(record?.termsHash);
+    const stored = cloneJsonRecord({ ...record, wallet });
+    const accepted = await this.client.eval(PUT_IDLE_BALANCE_CONSENT_SCRIPT, {
+      keys: [
+        this.key("idle-balance-consent", wallet),
+        this.key("idle-balance-consent-revoked", wallet)
+      ],
+      arguments: [JSON.stringify(stored), termsHash]
+    });
+    return Number(accepted) === 1
+      ? { accepted: true, record: stored }
+      : { accepted: false, reason: "consent_revoked", record: undefined };
+  }
+
+  async revokeIdleBalanceConsent(wallet, { revokedAt } = {}) {
+    await this.connect();
+    const normalizedWallet = normalizeWalletKey(wallet);
+    const raw = await this.client.eval(REVOKE_IDLE_BALANCE_CONSENT_SCRIPT, {
+      keys: [
+        this.key("idle-balance-consent", normalizedWallet),
+        this.key("idle-balance-consent-revoked", normalizedWallet)
+      ],
+      arguments: [String(revokedAt)]
+    });
+    return raw ? JSON.parse(raw) : undefined;
   }
 
   async upsertMutationReceipt(bucket, key, receipt) {

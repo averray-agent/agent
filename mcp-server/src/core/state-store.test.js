@@ -427,6 +427,53 @@ test("RedisStateStore writes lowercase session and job receipt indexes", async (
   assert.equal((await store.getWorkReceiptDocumentByJob("JOB-MIXED")).receiptId, document.receiptId);
 });
 
+test("RedisStateStore keeps idle-balance revocation durable and rejects replayed terms", async () => {
+  const store = new RedisStateStore("redis://unused", "idle-consent-test");
+  const values = new Map();
+  const revokedByWallet = new Map();
+  store.connect = async () => {};
+  store.client = {
+    async get(key) { return values.get(key); },
+    async eval(_script, { keys, arguments: args }) {
+      if (args.length === 2) {
+        const revoked = revokedByWallet.get(keys[1]) ?? new Set();
+        if (revoked.has(args[1])) return 0;
+        values.set(keys[0], args[0]);
+        return 1;
+      }
+      const raw = values.get(keys[0]);
+      if (!raw) return null;
+      const record = JSON.parse(raw);
+      if (record.status !== "revoked") {
+        record.status = "revoked";
+        record.revokedAt = args[0];
+        values.set(keys[0], JSON.stringify(record));
+        const revoked = revokedByWallet.get(keys[1]) ?? new Set();
+        revoked.add(record.termsHash.toLowerCase());
+        revokedByWallet.set(keys[1], revoked);
+      }
+      return values.get(keys[0]);
+    }
+  };
+  const wallet = "0x1111111111111111111111111111111111111111";
+  const record = {
+    wallet: wallet.toUpperCase().replace("0X", "0x"),
+    status: "active",
+    termsHash: `0x${"ab".repeat(32)}`
+  };
+
+  assert.equal((await store.putIdleBalanceConsent(record)).accepted, true);
+  assert.equal((await store.getIdleBalanceConsent(wallet)).wallet, wallet);
+  assert.equal((await store.revokeIdleBalanceConsent(wallet, {
+    revokedAt: "2026-08-25T12:00:00.000Z"
+  })).status, "revoked");
+  assert.deepEqual(await store.putIdleBalanceConsent(record), {
+    accepted: false,
+    reason: "consent_revoked",
+    record: undefined
+  });
+});
+
 test("MemoryStateStore upgrades an unsigned badge with one signature only", async () => {
   const store = new MemoryStateStore();
   await store.putBadgeDocument("session-sign", { averray: { sessionId: "session-sign", category: "security" } });

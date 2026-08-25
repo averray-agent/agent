@@ -43,6 +43,7 @@ import { createCreditPoolObservabilityRoutes } from "./credit-pool-observability
 import { createDepositPoolRoutes } from "./deposit-pool-routes.js";
 import { createEarningsDoorRoutes } from "./earnings-door-routes.js";
 import { createLockedTierRoutes } from "./locked-tier-routes.js";
+import { createIdleBalanceConsentRoutes } from "./idle-balance-consent-routes.js";
 import { createCreditPoolRoutes } from "./credit-pool-routes.js";
 import { createContentRoutes } from "./content-routes.js";
 import { createDisputeRoutes } from "./dispute-routes.js";
@@ -116,6 +117,7 @@ const {
   depositPoolDoor,
   earningsDoor,
   lockedTierService,
+  idleBalanceConsentService,
   creditPoolDoor,
   workerProgressionService,
   creditBookDoor,
@@ -508,6 +510,13 @@ const handleLockedTierRoute = createLockedTierRoutes({
   respond,
 });
 
+const handleIdleBalanceConsentRoute = createIdleBalanceConsentRoutes({
+  authMiddleware,
+  idleBalanceConsentService,
+  readJsonBody,
+  respond,
+});
+
 const handleCreditPoolRoute = createCreditPoolRoutes({
   authMiddleware,
   creditPoolDoor,
@@ -838,6 +847,7 @@ const handlePublicMetadataRoute = createPublicMetadataRoutes({
   respond,
   respondText,
   lockedTierService,
+  idleBalanceConsentService,
   service,
   strategies,
 });
@@ -1074,6 +1084,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleLockedTierRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleIdleBalanceConsentRoute({ request, response, url, pathname })) {
       return;
     }
 

@@ -136,6 +136,19 @@ test("getRouteCapabilityRequirements resolves method-specific route policies", (
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/disputes/dispute-123/verdict"), ["disputes:verdict"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/account/withdraw/transactions"), ["account:read"]);
   assert.deepEqual(getRouteCapabilityRequirements("POST", "/account/deposit/transactions"), ["account:read"]);
+  assert.deepEqual(getRouteCapabilityRequirements("GET", "/account/idle-allocation"), ["account:read"]);
+  assert.deepEqual(
+    getRouteCapabilityRequirements("POST", "/account/idle-allocation/quote"),
+    ["account:allocate"]
+  );
+  assert.deepEqual(
+    getRouteCapabilityRequirements("POST", "/account/idle-allocation/consent"),
+    ["account:allocate"]
+  );
+  assert.deepEqual(
+    getRouteCapabilityRequirements("POST", "/account/idle-allocation/revoke"),
+    ["account:allocate"]
+  );
   assert.deepEqual(getRouteCapabilityRequirements("GET", "/unknown"), []);
 });
 
