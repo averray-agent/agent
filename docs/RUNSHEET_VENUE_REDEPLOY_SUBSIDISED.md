@@ -68,6 +68,43 @@ subsidy) waits for Y3 to ship.** The gap is safe — depositors bear the frictio
 for at most one cycle, about 0.0964, and the subsidy can be paid retroactively
 in full once the split exists.
 
+## PRECONDITION found while gating #1288 — read before step 1
+
+**Deploying pool principal will make a locked-tier surface untrue.**
+
+#1288 correctly binds the locked yield text to deployed principal, and ships
+two strings:
+
+- zero deployed: *"NAV share **eligible, not deployed**"* — honest today.
+- positive deployed: *"NAV share **active** — pool principal is deployed to the
+  configured venue and the locked cohort satisfies the automatic activation
+  gate."*
+
+The second becomes false the moment this runsheet runs. The locked cohort holds
+**0.000000 pool shares** (verified live: T90 seed `0x42a4b866…`); it sits in
+AgentAccountCore, not the pool. Deploying *pool* principal gives it **nothing**,
+so "NAV share active" would announce a share that does not exist — the same
+defect class as the "NAV share active" bug #1288 was written to fix, relocated
+one branch over.
+
+The consent sentence is careful and correct — *"eligible for a pro-rata NAV
+share"* — and #1288's zero-deployed wording matches it. Only the active branch
+overreaches, because eligibility was never converted into a holding.
+
+**So step 1 must not run until one of these is true:**
+
+1. The locked cohort actually holds pool shares (fold locked capital into the
+   pool — option C in `MEMO_LOCKED_CAPITAL_DEPLOYMENT.md`, whose calculus
+   changed now that the alternative is a tier with no yield source), **or**
+2. The active-branch wording is corrected to describe pool deployment without
+   implying the locked cohort participates, **or**
+3. The consent is rewritten to describe locked tiers as a priority instrument
+   rather than a yield product.
+
+This is the memo's "real open question" arriving with a deadline attached. It is
+cheap to resolve — option 2 is a one-line copy change — but it must be resolved
+*before* deployment, not after.
+
 ## Ceremony
 
 ### 0 · Establish state (read-only)
@@ -143,6 +180,7 @@ the price for depositors.
 - Measured entry friction materially above epoch 3's 0.100000 — that means
   something moved in the route, and the subsidy sizing is no longer known.
 - Step 5 reached before Y3's disclosure split is live.
+- **Step 1 reached before the locked-tier active-branch wording is resolved** (see PRECONDITION).
 
 ## What this runsheet does not do
 
