@@ -13,6 +13,13 @@ reviewable changes and keep production deploys serialized.
   the worktree path to use.
 - Create one branch per task, for example `codex/github-pr-verifier` or
   `codex/runs-ui-polish`.
+- A fresh worktree has no `node_modules`. Run `npm install` in it before running
+  tests — the repo is an npm workspace, so one install at the worktree root
+  covers `mcp-server/`, `indexer/`, `app/`, `marketing/`, and `packages/*`.
+  Never symlink another worktree's `node_modules` in its place: `npm install`
+  then writes through the link into *that* worktree, and a partially-populated
+  target produces `ERR_MODULE_NOT_FOUND` failures that read as pre-existing
+  test noise. `node_modules` is gitignored in every form, symlinks included.
 - Keep the primary checkout on `main` for repo sync and branch creation. Agents
   should do implementation work in task worktrees, not in the primary checkout.
 - Keep PRs narrow. Split unrelated backend, frontend, contract, and docs work.
