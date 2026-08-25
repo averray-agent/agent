@@ -110,7 +110,7 @@ const ROLE_CAPABILITIES = {
   ]
 };
 
-const ROUTE_CAPABILITY_RULES = [
+export const ROUTE_CAPABILITY_RULES = [
   { method: "GET", path: "/account", capabilities: ["account:read"] },
   { method: "GET", path: "/account/position", capabilities: ["account:read"] },
   { method: "GET", path: "/me", capabilities: ["account:read", "reputation:read"] },

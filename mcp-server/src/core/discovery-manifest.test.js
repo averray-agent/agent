@@ -8,6 +8,7 @@ import {
   POLKADOT_HUB_MAINNET_CHAIN_ID,
   POLKADOT_HUB_TESTNET_CHAIN_ID
 } from "./discovery-manifest.js";
+import { buildAgentSurfaceParity } from "./agent-surface-parity.js";
 import { DEPOSIT_POOL_RISK_DISCLOSURE } from "./deposit-pool-disclosure.js";
 
 test("buildDiscoveryManifest returns the full public discovery shape", () => {
@@ -353,7 +354,8 @@ test("buildPlatformCapabilities stays aligned with the discovery tool list", () 
     readinessChecks: manifest.onboarding.readinessChecks,
     selfServeChecklist: manifest.onboarding.selfServeChecklist,
     buildVestedCapacity: manifest.onboarding.buildVestedCapacity,
-    withdrawEarnings: manifest.onboarding.withdrawEarnings
+    withdrawEarnings: manifest.onboarding.withdrawEarnings,
+    agentSurfaceParity: buildAgentSurfaceParity()
   });
   assert.deepEqual(capabilities.auth, {
     scheme: manifest.auth.scheme,
@@ -366,6 +368,27 @@ test("buildPlatformCapabilities stays aligned with the discovery tool list", () 
   assert.deepEqual(
     capabilities.tools,
     manifest.tools.map((tool) => tool.name)
+  );
+});
+
+test("buildPlatformCapabilities serves the complete account parity section", () => {
+  const parity = buildPlatformCapabilities().onboarding.agentSurfaceParity;
+
+  assert.equal(parity.heading, "Use the agent surface for account work");
+  assert.equal(parity.actions.length, 9);
+  assert.deepEqual(
+    parity.actions.map(({ humanAction }) => humanAction),
+    [
+      "see available balance",
+      "add funds",
+      "withdraw",
+      "browse and claim work",
+      "submit work",
+      "lock a deposit",
+      "exit a lock",
+      "post a job",
+      "read standing / tier / receipts"
+    ]
   );
 });
 

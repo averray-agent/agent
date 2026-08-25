@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import { buildPlatformCapabilities } from "../../core/discovery-manifest.js";
 import { createPublicMetadataRoutes } from "./public-metadata-routes.js";
 
 const STRATEGIES = [
@@ -275,6 +276,26 @@ test("A1 arrival payload: GET /onboarding keeps earn-from-zero proof and limits 
       headers: { "cache-control": "public, max-age=30" }
     }],
   ]);
+});
+
+test("GET /onboarding serves the derived account parity section without an app-session adoption path", async () => {
+  const platformCapabilities = buildPlatformCapabilities({ chainId: 420420419 });
+  const { response, route } = makeHarness({ platformCapabilities });
+
+  assert.equal(await route({
+    request: { method: "GET" },
+    response,
+    pathname: "/onboarding"
+  }), true);
+  const parity = response.body.onboarding.agentSurfaceParity;
+  assert.equal(parity.actions.length, 9);
+  assert.ok(parity.actions.some((action) => (
+    action.agentSurface.httpRoutes?.includes("GET /reputation")
+  )));
+  assert.match(parity.completeForAccounts, /complete for accounts/u);
+  assert.match(parity.appSessionBoundary, /cannot adopt an API session/u);
+  assert.equal(Object.hasOwn(parity, "sessionAdoption"), false);
+  assert.equal(parity.actions.some((action) => /JWT|token|adopt/iu.test(JSON.stringify(action))), false);
 });
 
 test("platform capabilities expose the flag-off locked-tier gate without inventing yield", async () => {
