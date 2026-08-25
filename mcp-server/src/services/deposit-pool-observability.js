@@ -1,6 +1,11 @@
-import { Contract, Interface, getAddress } from "ethers";
+import { Contract, Interface, ZeroAddress, getAddress } from "ethers";
 
-import { DEPOSIT_POOL_ABI, ERC20_MOCK_ABI } from "../blockchain/abis.js";
+import {
+  DEPOSIT_POOL_ABI,
+  DEPOSIT_POOL_VENUE_ADAPTER_ABI,
+  ERC20_MOCK_ABI
+} from "../blockchain/abis.js";
+import { evaluateVenueMark, markedSharePrice } from "../core/deposit-pool-venue-mark.js";
 import { redactProviderError } from "../core/redact-provider-error.js";
 import { depositPoolYieldStatus } from "./deposit-pool-yield-status.js";
 
@@ -93,7 +98,30 @@ export class EvmDepositPoolChainReader {
     ]);
     const token = new Contract(asset, ERC20_MOCK_ABI, this.provider);
     const buffer = await token.balanceOf(poolAddress, overrides);
-    return { asset, totalAssets, totalShares, buffer, deployed, totalAssetCap, perAgentAssetCap };
+    const venue = await this.#readVenueMark({ pool, poolAddress, deployed, overrides });
+    return { asset, totalAssets, totalShares, buffer, deployed, totalAssetCap, perAgentAssetCap, ...venue };
+  }
+
+  /**
+   * The venue leg's landed value per the pool's own immutable adapter. Read
+   * only while cost basis is positive, and never allowed to throw: an
+   * unreadable mark is reported as unreadable, not silently omitted.
+   */
+  async #readVenueMark({ pool, poolAddress, deployed, overrides }) {
+    if (BigInt(deployed) === 0n) return { venueMarkedAssets: null };
+    try {
+      const adapterAddress = await pool.venueAdapter(overrides);
+      if (!adapterAddress || adapterAddress === ZeroAddress) {
+        return { venueMarkUnreadable: "venue_adapter_not_configured" };
+      }
+      const adapter = new Contract(adapterAddress, DEPOSIT_POOL_VENUE_ADAPTER_ABI, this.provider);
+      return {
+        venueAdapter: getAddress(adapterAddress),
+        venueMarkedAssets: await adapter.managedAssets(poolAddress, overrides)
+      };
+    } catch (error) {
+      return { venueMarkUnreadable: redactProviderError(error) || "venue_managed_assets_read_failed" };
+    }
   }
 
   async readEvents({ poolAddress, fromBlock, toBlock }) {
@@ -142,8 +170,10 @@ export class DepositPoolObservabilityService {
     chainReader,
     catalogueDailyBudget,
     eventWindowBlocks = DEFAULT_EVENT_WINDOW_BLOCKS,
-    recentFlowLimit = DEFAULT_RECENT_FLOW_LIMIT
+    recentFlowLimit = DEFAULT_RECENT_FLOW_LIMIT,
+    venueMark = undefined
   } = {}) {
+    this.venueMarkConfig = venueMark;
     this.poolAddress = poolAddress ? getAddress(poolAddress) : "";
     this.chainReader = chainReader ?? (provider ? new EvmDepositPoolChainReader(provider) : undefined);
     this.catalogueDailyBudget = catalogueDailyBudget;
@@ -176,6 +206,14 @@ export class DepositPoolObservabilityService {
     const perAgentAssetCap = BigInt(state.perAgentAssetCap);
     const accounted = buffer + deployed;
     const sharePrice = totalShares === 0n ? SHARE_PRICE_SCALE : totalAssets * SHARE_PRICE_SCALE / totalShares;
+    const venueMark = evaluateVenueMark({
+      costBasisRaw: deployed,
+      markedRaw: state.venueMarkedAssets,
+      totalAssetsRaw: totalAssets,
+      toleranceBps: this.venueMarkConfig?.toleranceBps,
+      dustFloorRaw: this.venueMarkConfig?.dustFloorRaw,
+      unreadableReason: state.venueMarkUnreadable
+    });
     const yieldState = depositPoolYieldStatus(deployed);
     const fromBlock = Math.max(0, head - this.eventWindowBlocks + 1);
     const window = { fromBlock, toBlock: head, maxBlocks: this.eventWindowBlocks, recentLimit: this.recentFlowLimit };
@@ -218,12 +256,25 @@ export class DepositPoolObservabilityService {
       sharePrice: amount(sharePrice),
       buffer: amount(buffer),
       deployed: amount(deployed),
+      // Bookkeeping identity only: totalAssets IS buffer + costBasis, so this
+      // is true by construction and stayed true throughout the 2026-08-25
+      // mispricing. It proves the ledger adds up, never that the venue leg is
+      // worth what the ledger claims. venueMark below is the check that can fail.
       reconciled: accounted === totalAssets,
       reconciliation: {
         equation: "buffer + deployed = totalAssets",
+        model: "internal-bookkeeping-identity",
+        provesVenueValue: false,
         accountedRaw: accounted.toString(),
         differenceRaw: (totalAssets - accounted).toString()
       },
+      venueMark,
+      markedSharePrice: markedSharePrice({
+        bufferAssetsRaw: buffer,
+        markedRaw: state.venueMarkedAssets,
+        totalSupplyRaw: totalShares,
+        shareScale: SHARE_PRICE_SCALE
+      }),
       caps: {
         totalAssetCap: amount(totalAssetCap),
         perAgentAssetCap: amount(perAgentAssetCap),

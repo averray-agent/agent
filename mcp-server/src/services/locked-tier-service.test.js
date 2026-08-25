@@ -549,3 +549,59 @@ test("the real deposit-pool door info satisfies the locked-tier quote seam", asy
   assert.equal(quote.terms.tier, "t90");
   assert.ok(quote.consent.message.length > 0);
 });
+
+// A lock carries its pro-rata venue gain or loss, so the quote must not show
+// the cost-basis NAV alone while the pool's own venue adapter contradicts it.
+// The gate itself stays off this path: a lock encumbers AAC liquid and mints
+// no pool shares, so it is not a money-in-at-a-wrong-price surface.
+test("a locked-tier quote discloses the venue mark beside the cost-basis NAV", async () => {
+  const h = harness();
+  const mispriced = poolInfo(SIGNER.address, {
+    totalAssets: { raw: "20395226", decimals: 6 },
+    totalShares: { raw: "20501328", decimals: 6 },
+    sharePrice: {
+      model: "principal-cost-basis",
+      assetsPerShare: { raw: "994824", decimals: 6 },
+      numeratorAssetsRaw: "20395226",
+      denominatorSharesRaw: "20501328"
+    },
+    markedSharePrice: {
+      model: "venue-marked-to-adapter",
+      assetsPerShare: { raw: "989946", decimals: 6 },
+      numeratorAssetsRaw: "20295226",
+      denominatorSharesRaw: "20501328"
+    },
+    venueMark: {
+      status: "shortfall_exceeds_tolerance",
+      depositsBlocked: true,
+      shortfall: { raw: "100000", decimals: 6 },
+      source: "venue_adapter_managed_assets"
+    }
+  });
+  const quote = await h.service.quote(SIGNER.address, {
+    tier: "t30",
+    amountRaw: "1000000",
+    consentNonce: "quotevenuemark01"
+  }, { poolInfo: mispriced });
+
+  assert.equal(quote.nav.sharePrice.assetsPerShare.raw, "994824");
+  assert.equal(quote.markedSharePrice.assetsPerShare.raw, "989946");
+  assert.equal(quote.venueMark.status, "shortfall_exceeds_tolerance");
+  // The lock is still quoted: it encumbers AAC liquid and mints no pool
+  // shares, so the deposit gate deliberately does not reach this path.
+  assert.equal(quote.consent.required, true);
+  // The hashed consent artifact keeps its existing shape.
+  assert.equal(quote.terms.venueMark, undefined);
+  assert.equal(quote.terms.markedSharePrice, undefined);
+});
+
+test("a quote with no venue mark available reports null rather than an absent field", async () => {
+  const h = harness();
+  const quote = await h.service.quote(SIGNER.address, {
+    tier: "t30",
+    amountRaw: "1000000",
+    consentNonce: "quotenomark0001"
+  }, { poolInfo: h.poolInfo });
+  assert.equal(quote.venueMark, null);
+  assert.equal(quote.markedSharePrice, null);
+});

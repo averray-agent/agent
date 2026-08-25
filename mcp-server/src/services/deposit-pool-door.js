@@ -1,11 +1,21 @@
-import { Contract, Interface, getAddress } from "ethers";
+import { Contract, Interface, ZeroAddress, getAddress } from "ethers";
 
-import { DEPOSIT_POOL_ABI, ERC20_MOCK_ABI } from "../blockchain/abis.js";
+import {
+  DEPOSIT_POOL_ABI,
+  DEPOSIT_POOL_VENUE_ADAPTER_ABI,
+  ERC20_MOCK_ABI
+} from "../blockchain/abis.js";
 import {
   DEPOSIT_POOL_CAPITAL_SIGNAL_STATEMENT,
   DEPOSIT_POOL_RISK_DISCLOSURE
 } from "../core/deposit-pool-disclosure.js";
 import { ValidationError } from "../core/errors.js";
+import {
+  evaluateVenueMark,
+  loadDepositPoolVenueMarkConfig,
+  markedSharePrice
+} from "../core/deposit-pool-venue-mark.js";
+import { redactProviderError } from "../core/redact-provider-error.js";
 import { depositPoolYieldStatus } from "./deposit-pool-yield-status.js";
 
 const ASSET_DECIMALS = 6;
@@ -63,6 +73,20 @@ function refusal(reason, details) {
   });
 }
 
+/**
+ * Refuse to quote a deposit the pool would happily mint at a price it cannot
+ * prove. Deliberately not `refusal()`: this transaction would *succeed* on
+ * chain, at a share price the pool's own venue adapter contradicts. Saying it
+ * "would revert" would be false, and the whole point of this gate is that the
+ * chain will not stop a knowingly stale price on its own.
+ */
+function venueMarkRefusal(venueMark) {
+  return new ValidationError(
+    "VenueMarkShortfall: the pool's quoted share price carries its venue leg at cost basis, which its own venue adapter contradicts by more than the configured tolerance. This deposit would mint shares at an overstated price, so no transaction template was built. Withdrawals are unaffected.",
+    { reason: "VenueMarkShortfall", venueMark }
+  );
+}
+
 export class EvmDepositPoolDoorChainReader {
   constructor(provider) {
     this.provider = provider;
@@ -82,6 +106,7 @@ export class EvmDepositPoolDoorChainReader {
       pool.TOTAL_ASSET_CAP(blockTag),
       pool.PER_AGENT_ASSET_CAP(blockTag)
     ]);
+    const venueMark = await this.#readVenueMark({ pool, poolAddress, deployedPrincipal, blockTag });
     let walletState;
     if (wallet) {
       const token = new Contract(asset, ERC20_MOCK_ABI, this.provider);
@@ -105,8 +130,36 @@ export class EvmDepositPoolDoorChainReader {
       deployedPrincipal,
       totalAssetCap,
       perAgentAssetCap,
-      wallet: walletState
+      wallet: walletState,
+      ...venueMark
     };
+  }
+
+  /**
+   * Read the venue leg's landed value from the pool's own immutable adapter.
+   *
+   * A read failure is captured, never thrown: getInfo and the withdraw path
+   * must stay available and say plainly that the mark is unreadable, while
+   * evaluateVenueMark turns that same unreadability into a deposit refusal.
+   */
+  async #readVenueMark({ pool, poolAddress, deployedPrincipal, blockTag }) {
+    if (BigInt(deployedPrincipal) === 0n) return { venueAdapter: null, venueMarkedAssets: null };
+    try {
+      const venueAdapter = await pool.venueAdapter(blockTag);
+      if (!venueAdapter || venueAdapter === ZeroAddress) {
+        return { venueAdapter: null, venueMarkUnreadable: "venue_adapter_not_configured" };
+      }
+      const adapter = new Contract(venueAdapter, DEPOSIT_POOL_VENUE_ADAPTER_ABI, this.provider);
+      return {
+        venueAdapter: getAddress(venueAdapter),
+        venueMarkedAssets: await adapter.managedAssets(poolAddress, blockTag)
+      };
+    } catch (error) {
+      return {
+        venueAdapter: null,
+        venueMarkUnreadable: redactProviderError(error) || "venue_managed_assets_read_failed"
+      };
+    }
   }
 
   async estimateGas(transaction) {
@@ -133,7 +186,8 @@ export class DepositPoolDoorService {
     chainReader,
     workerExposurePolicy,
     lockedTierService,
-    vestingHours = 48
+    vestingHours = 48,
+    venueMark = loadDepositPoolVenueMarkConfig({})
   } = {}) {
     this.poolAddress = poolAddress ? getAddress(poolAddress) : "";
     this.chainId = Number(chainId);
@@ -142,6 +196,18 @@ export class DepositPoolDoorService {
     this.workerExposurePolicy = workerExposurePolicy;
     this.lockedTierService = lockedTierService;
     this.vestingHours = Number(vestingHours);
+    this.venueMarkConfig = venueMark;
+  }
+
+  #venueMark(snapshot) {
+    return evaluateVenueMark({
+      costBasisRaw: snapshot.deployedPrincipal,
+      markedRaw: snapshot.venueMarkedAssets,
+      totalAssetsRaw: snapshot.totalAssets,
+      toleranceBps: this.venueMarkConfig?.toleranceBps,
+      dustFloorRaw: this.venueMarkConfig?.dustFloorRaw,
+      unreadableReason: snapshot.venueMarkUnreadable
+    });
   }
 
   async getInfo(wallet = undefined) {
@@ -189,6 +255,10 @@ export class DepositPoolDoorService {
 
   async #buildDeposit(wallet, assets) {
     const snapshot = normalizeSnapshot(await this.chainReader.readSnapshot({ poolAddress: this.poolAddress, wallet }));
+    // Pool-level honesty is checked before anything request-specific: a stale
+    // venue mark makes every deposit quote wrong, not just this one.
+    const venueMark = this.#venueMark(snapshot);
+    if (venueMark.depositsBlocked) throw venueMarkRefusal(venueMark);
     const managedAfter = snapshot.totalAssets + assets;
     if (managedAfter > snapshot.totalAssetCap) {
       throw refusal("TotalAssetCapExceeded", {
@@ -272,8 +342,10 @@ export class DepositPoolDoorService {
         perAgentHeadroomBefore: amount(clampAtZero(snapshot.perAgentAssetCap - snapshot.wallet.depositedAssets)),
         perAgentHeadroomConsumed: amount(attemptedAgentAssets - snapshot.wallet.depositedAssets),
         sharePrice: sharePrice(snapshot),
+        markedSharePrice: markedSharePriceOf(snapshot),
         quoteBlockNumber: snapshot.blockNumber
       },
+      venueMark,
       templates,
       instructions: approveRequired
         ? [
@@ -362,8 +434,13 @@ export class DepositPoolDoorService {
         availableSharesBefore: amount(snapshot.wallet.availableShares, SHARE_DECIMALS),
         bufferAssetsBefore: amount(snapshot.bufferAssets),
         sharePrice: sharePrice(snapshot),
+        markedSharePrice: markedSharePriceOf(snapshot),
         quoteBlockNumber: snapshot.blockNumber
       },
+      // Redemptions are never gated on the venue mark. A holder exiting at an
+      // overstated price is not the party the gate protects, and closing exits
+      // is the worse failure. The mark is disclosed so the choice is informed.
+      venueMark: this.#venueMark(snapshot),
       templates: [template],
       instructions: [
         "Verify, sign, and broadcast the redeem template with this wallet through one of the returned RPC URLs.",
@@ -425,6 +502,8 @@ export class DepositPoolDoorService {
       // The locked-tier quote consumes this info shape and refuses to price a
       // lock without the pool's share price (poolSnapshot fail-closed check).
       sharePrice: sharePrice(snapshot),
+      markedSharePrice: markedSharePriceOf(snapshot),
+      venueMark: this.#venueMark(snapshot),
       bufferAssets: amount(snapshot.bufferAssets),
       caps: {
         totalAssetCap: amount(snapshot.totalAssetCap),
@@ -510,8 +589,25 @@ function normalizeSnapshot(input) {
     deployedPrincipal: BigInt(input.deployedPrincipal),
     totalAssetCap: BigInt(input.totalAssetCap),
     perAgentAssetCap: BigInt(input.perAgentAssetCap),
+    // Absent means "not read", which evaluateVenueMark treats as unreadable
+    // whenever cost basis is positive. A chain reader that does not supply the
+    // mark must never be mistaken for a pool with nothing at the venue.
+    venueMarkedAssets: input.venueMarkedAssets === undefined || input.venueMarkedAssets === null
+      ? null
+      : BigInt(input.venueMarkedAssets),
+    venueAdapter: input.venueAdapter ?? null,
+    venueMarkUnreadable: input.venueMarkUnreadable ?? undefined,
     wallet
   };
+}
+
+function markedSharePriceOf(snapshot) {
+  return markedSharePrice({
+    bufferAssetsRaw: snapshot.bufferAssets,
+    markedRaw: snapshot.venueMarkedAssets,
+    totalSupplyRaw: snapshot.totalSupply,
+    shareScale: SHARE_PRICE_SCALE
+  });
 }
 
 function sharePrice(snapshot) {

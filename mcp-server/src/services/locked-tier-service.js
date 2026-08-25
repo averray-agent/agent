@@ -287,6 +287,8 @@ export class LockedTierService {
       tierTerms: tierTerms(tier),
       activationGate: gate,
       nav: pool.nav,
+      venueMark: pool.venueMark,
+      markedSharePrice: pool.markedSharePrice,
       riskSentence: LOCKED_TIER_RISK_SENTENCE,
       balance: {
         liquid: amount(liquidRaw),
@@ -875,7 +877,14 @@ function poolSnapshot(poolInfo, wallet) {
       totalAssets: poolInfo.totalAssets,
       totalShares: poolInfo.totalShares,
       sharePrice: poolInfo.sharePrice
-    }
+    },
+    // A lock "carries its pro-rata venue gain or loss", so a quote must not
+    // show the cost-basis NAV alone while the pool's own venue adapter
+    // contradicts it. Carried beside `nav` rather than inside it: `nav` is part
+    // of the hashed consent artifact, and this PR discloses a price without
+    // changing what a depositor consents to.
+    venueMark: poolInfo.venueMark ?? null,
+    markedSharePrice: poolInfo.markedSharePrice ?? null
   };
 }
 

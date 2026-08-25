@@ -73,6 +73,31 @@ test("bootstrap wires string AUTH_CHAIN_ID and public mainnet RPC into the earni
   assert.deepEqual(built.broadcast.rpcUrls, ["https://eth-rpc.polkadot.io"]);
 });
 
+test("bootstrap carries the venue-mark tolerance from env into the DepositPool door", async () => {
+  const renderedEnv = {
+    AUTH_MODE: "permissive",
+    AUTH_CHAIN_ID: "420420419",
+    DEPOSIT_POOL_VENUE_MARK_TOLERANCE_BPS: "25",
+    DEPOSIT_POOL_VENUE_MARK_DUST_FLOOR_RAW: "2500"
+  };
+  const door = createDepositPoolDoor({
+    authConfig: loadAuthConfig(renderedEnv),
+    env: renderedEnv,
+    gateway: { config: loadBlockchainConfig(renderedEnv), provider: undefined },
+    chainReader: { async readSnapshot() { return {}; } }
+  });
+  assert.deepEqual(door.venueMarkConfig, { toleranceBps: 25, dustFloorRaw: 2_500n });
+
+  const defaults = createDepositPoolDoor({
+    authConfig: loadAuthConfig({ AUTH_MODE: "permissive", AUTH_CHAIN_ID: "420420419" }),
+    env: { AUTH_MODE: "permissive", AUTH_CHAIN_ID: "420420419" },
+    gateway: { config: loadBlockchainConfig({}), provider: undefined },
+    chainReader: { async readSnapshot() { return {}; } }
+  });
+  assert.equal(defaults.venueMarkConfig.toleranceBps, 10);
+  assert.equal(defaults.venueMarkConfig.dustFloorRaw, 1_000n);
+});
+
 test("bootstrap wires the rendered mainnet AUTH_CHAIN_ID into the configured DepositPool door", async () => {
   const renderedEnv = {
     AUTH_MODE: "permissive",
