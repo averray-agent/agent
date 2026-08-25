@@ -34,8 +34,14 @@ const EXTERNAL_BOUNTIES = {
   mode: "allowlist",
   posterOnboarding: "/poster/onboarding"
 };
+const ACCOUNT_FUNDING = {
+  routeAvailable: true,
+  http: { method: "POST", path: "/account/deposit/transactions" },
+  mcp: { tool: "buildAccountDepositTransactions" }
+};
 const WORKER_DOOR = {
-  selfDeposit: { routeAvailable: false },
+  selfDeposit: ACCOUNT_FUNDING,
+  accountFunding: ACCOUNT_FUNDING,
   withdrawal: { httpRouteAvailable: false }
 };
 const POSTER_ONBOARDING = {

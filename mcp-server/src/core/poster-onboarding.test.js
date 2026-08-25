@@ -158,7 +158,7 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
     }
   });
   assert.equal(payload.workerFacts.preflight.path, "/jobs/preflight?jobId=X");
-  assert.equal(payload.workerFacts.selfDeposit.routeAvailable, false);
+  assert.equal(payload.workerFacts.selfDeposit.routeAvailable, true);
   assert.deepEqual(payload.cancellation, {
     selfServeCancel: true,
     method: "cancelOpenJob(bytes32)",
@@ -362,10 +362,21 @@ test("poster funding instructions bind both directions of every watcher term", a
   assert.match(funding.exactTerms.warning, /Raising the reward is not generosity/iu);
 });
 
-test("worker onboarding documents self-deposit, mock fund limits, direct withdrawal, validation, and TTL truth", async () => {
+test("worker onboarding publishes accountFunding from the canonical selfDeposit recipe", async () => {
   const payload = await makeService().getWorkerDoorOnboarding();
 
   assert.equal(payload.preflight.path, "/jobs/preflight?jobId=X");
+  assert.equal(payload.accountFunding, payload.selfDeposit);
+  assert.equal(payload.accountFunding.routeAvailable, true);
+  assert.deepEqual(payload.accountFunding.http, {
+    method: "POST",
+    path: "/account/deposit/transactions",
+    authorization: "worker SIWE bearer token"
+  });
+  assert.deepEqual(payload.accountFunding.mcp, {
+    tool: "buildAccountDepositTransactions",
+    authorization: "worker SIWE bearer token"
+  });
   assert.equal(
     payload.selfDeposit.requiredClaimLockRawFormula,
     "parseUnits(preflight.totalClaimLock, token.decimals)"
@@ -397,6 +408,7 @@ test("worker onboarding documents self-deposit, mock fund limits, direct withdra
       abiFragment: "function deposit(address asset, uint256 amount)",
       method: "deposit",
       args: [TOKEN, "<depositAmountRaw>"],
+      prerequisite: "approve_confirmed_on_chain",
       skipWhen: "depositAmountRaw == 0"
     }
   ]);

@@ -33,6 +33,7 @@ const ROOT_ENDPOINTS = [
   "/account/deallocate",
   "/account/fund",
   "/account/position",
+  "/account/deposit/transactions",
   "/account/withdraw/transactions",
   "/locked-deposits/quote",
   "/locked-deposits/consent",
@@ -131,6 +132,7 @@ Limits: the waiver is capped at 3 claims per wallet and applies only to waiver-e
 - Onboarding: ${apiUrl}/onboarding
 - Tier ladder: ${apiUrl}/jobs/tiers
 - Earnings account: ${apiUrl}/account/position
+- Build deposit: ${apiUrl}/account/deposit/transactions
 - Build withdrawal: ${apiUrl}/account/withdraw/transactions
 - Deposit pool (strategy replacement): ${apiUrl}/pool
 - Public agent profile: ${apiUrl}/agents/:wallet

@@ -195,6 +195,23 @@ export function createMcpTools({
     auth: { required: true, scopes: [], requiredAction: "wallet_sign_in" }
   }),
   tool({
+    name: "buildAccountDepositTransactions",
+    title: "Build account deposit transactions",
+    description: "Build wallet-bound unsigned Hub USDC approve and AgentAccountCore deposit templates. AgentAccountCore has no depositFor: nobody can deposit on your behalf, a brokered claim does not broker the deposit, and your wallet pays gas in DOT, signs, and broadcasts both transactions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        asset: { type: "string", default: "USDC", description: "Hub USDC; no other asset is accepted." },
+        amount: { type: "string", pattern: "^[1-9][0-9]*$", description: "Exact Hub USDC base units (6 decimals)." }
+      },
+      required: ["amount"],
+      additionalProperties: false
+    },
+    readOnly: false,
+    idempotent: true,
+    auth: { required: true, scopes: [], requiredAction: "wallet_sign_in" }
+  }),
+  tool({
     name: "buildWithdrawTransactions",
     title: "Build account withdrawal transactions",
     description: "Build a complete wallet-bound unsigned AgentAccountCore withdrawal and, optionally, an onward ERC-20 transfer. Eligible workers may set requestGasGrant on this live intent for the lifetime-once 0.03 DOT first-withdrawal grant. Your wallet still signs and broadcasts; Averray never relays it.",
@@ -539,6 +556,14 @@ export function createMcpToolExecutor({
           body: args,
           method: "POST",
           path: "/account/withdraw/transactions"
+        }));
+      case "buildAccountDepositTransactions":
+        requireString(args.amount, "amount");
+        return unwrap(await invokeHttpRoute(handleEarningsDoorRoute, {
+          ...common,
+          body: args,
+          method: "POST",
+          path: "/account/deposit/transactions"
         }));
       case "quoteLockedDeposit":
         requireString(args.tier, "tier");

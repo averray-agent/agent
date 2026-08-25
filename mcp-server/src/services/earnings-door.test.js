@@ -4,7 +4,13 @@ import test from "node:test";
 import { Interface } from "ethers";
 
 import { AGENT_ACCOUNT_ABI, ERC20_MOCK_ABI } from "../blockchain/abis.js";
-import { EARNINGS_WITHDRAWAL_STATEMENT } from "../core/earnings-door-copy.js";
+import {
+  EARNINGS_BOUNDARY,
+  EARNINGS_GAS_ACQUISITION_STATEMENT,
+  EARNINGS_GAS_STATEMENT,
+  EARNINGS_WITHDRAWAL_STATEMENT
+} from "../core/earnings-door-copy.js";
+import { buildWorkerSelfDepositRecipe } from "../core/poster-onboarding.js";
 import { CREDIT_INTEREST_STATEMENT } from "../core/worker-progression.js";
 import {
   EarningsDoorService,
@@ -195,7 +201,7 @@ test("getAccountPosition plainly offers the first-withdrawal grant and returns n
   assert.equal(result.withdrawal.gas.firstWithdrawalGrant.offer, "Your first withdrawal's network fee is on us.");
 });
 
-test("buildWithdrawTransactions returns verified AAC withdraw and optional onward transfer without retention gates", async () => {
+test("withdraw path stays byte-identical: AAC withdraw, gas vocabulary, and optional onward transfer", async () => {
   const { door } = harness();
   const result = await door.buildWithdrawTransactions(WALLET, {
     asset: "USDC",
@@ -209,6 +215,8 @@ test("buildWithdrawTransactions returns verified AAC withdraw and optional onwar
   assert.equal(result.templates[0].gas.status, "measured");
   assert.equal(result.templates[0].gas.estimatedFee.display, "0.025");
   assert.equal(result.templates[0].gas.sufficient, true);
+  assert.equal(result.templates[0].gas.statement, EARNINGS_GAS_STATEMENT);
+  assert.equal(result.templates[0].gas.acquisition, EARNINGS_GAS_ACQUISITION_STATEMENT);
   assert.equal(result.templates[1].prerequisite, "withdraw_confirmed_on_chain");
   assert.equal(result.whatYourBalanceCanDo.retentionNotGates.delaysWithdrawal, false);
   assert.equal(result.standing.persists, true);
@@ -220,6 +228,86 @@ test("buildWithdrawTransactions returns verified AAC withdraw and optional onwar
   const transfer = new Interface(ERC20_MOCK_ABI).decodeFunctionData("transfer", result.templates[1].data);
   assert.equal(transfer.to, DESTINATION);
   assert.equal(transfer.amount, 250000n);
+});
+
+test("buildAccountDepositTransactions templates match the published selfDeposit recipe for identical inputs", async () => {
+  const { door } = harness();
+  const result = await door.buildAccountDepositTransactions(WALLET, {
+    asset: "USDC",
+    amount: "250000"
+  });
+  const recipe = buildWorkerSelfDepositRecipe({
+    token: result.asset,
+    agentAccountCore: ACCOUNT
+  });
+
+  assert.deepEqual(result.asset, {
+    name: "Hub USDC",
+    symbol: "USDC",
+    assetId: 1337,
+    address: USDC,
+    decimals: 6,
+    amountInput: "exact base-unit integer string",
+    x402Payable: false
+  });
+  assert.equal(result.chain.caip2, "eip155:420420419");
+  assert.equal(result.account.chainLiquid.raw, "1250000");
+  assert.deepEqual(result.positionRead, {
+    ...recipe.positionRead,
+    args: [WALLET, USDC],
+    result: { raw: "1250000", decimals: 6, display: "1.25" }
+  });
+  assert.deepEqual(
+    result.templates.map(({ to, prerequisite, decoded }) => ({
+      to,
+      prerequisite,
+      method: decoded.method,
+      args: decoded.args
+    })),
+    recipe.writes.map((write) => ({
+      to: write.address,
+      prerequisite: write.prerequisite,
+      method: write.method,
+      args: write.args.map((value) => value === "<depositAmountRaw>" ? "250000" : value)
+    }))
+  );
+  assert.equal(result.templates[0].unsigned, true);
+  assert.match(result.templates[0].gas.statement, /deposit approval uses DOT/u);
+  assert.doesNotMatch(result.templates[0].gas.statement, /grant/u);
+  assert.equal(result.templates[1].unsigned, true);
+  assert.equal(result.templates[1].prerequisite, "approve_confirmed_on_chain");
+  assert.deepEqual(result.boundary, EARNINGS_BOUNDARY);
+});
+
+test("no-custody: account deposit accepts no key, signed transaction, or relay input and returns unsigned owner-only templates", async () => {
+  const { door } = harness();
+  for (const forbidden of ["privateKey", "mnemonic", "signature", "signedTransaction", "rawTransaction", "broadcast"]) {
+    await assert.rejects(
+      () => door.buildAccountDepositTransactions(WALLET, { amount: "1", [forbidden]: "secret" }),
+      /Unsupported field/u
+    );
+  }
+  const result = await door.buildAccountDepositTransactions(WALLET, { amount: "1" });
+  assert.ok(result.templates.every((template) => template.unsigned === true));
+  assert.ok(result.templates.every((template) => template.from === WALLET));
+  assert.equal(result.broadcast.signer, "your own wallet");
+  assert.match(result.broadcast.note, /no signed-transaction relay/u);
+  assert.equal(result.boundary.platformHoldsFunds, false);
+  assert.equal(result.boundary.platformMovesFunds, false);
+  assert.equal(result.boundary.platformBrokersFunds, false);
+  assert.equal(result.boundary.platformSigns, false);
+  assert.equal(result.boundary.platformSeesKeys, false);
+  assert.equal(result.boundary.signedTransactionRelay, false);
+});
+
+test("account deposit accepts only positive exact base-unit integers", async () => {
+  const { door } = harness();
+  for (const amount of [undefined, "", "0", "1.0", "-1", 1.5]) {
+    await assert.rejects(
+      () => door.buildAccountDepositTransactions(WALLET, { amount }),
+      /positive exact base-unit integer string/u
+    );
+  }
 });
 
 test("withdrawal standing matches a fresh wallet and omits the ineligible credit-interest line", async () => {

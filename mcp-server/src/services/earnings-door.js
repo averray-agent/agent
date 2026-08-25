@@ -15,7 +15,9 @@ import {
   DEFAULT_ONBOARDING_WAIVER_CLAIM_COUNT,
   countClaimedSessions
 } from "../core/claim-economics.js";
+import { buildExternalPostingMoneyContext } from "../core/external-posting-service.js";
 import { ConflictError, ValidationError } from "../core/errors.js";
+import { buildWorkerSelfDepositRecipe } from "../core/poster-onboarding.js";
 import { buildPublicReputation } from "../core/public-reputation.js";
 import { CREDIT_INTEREST_STATEMENT } from "../core/worker-progression.js";
 
@@ -365,6 +367,101 @@ export class EarningsDoorService {
     };
   }
 
+  async buildAccountDepositTransactions(wallet, input = {}) {
+    this.#assertAvailable();
+    assertOnlyFields(input, new Set(["asset", "amount"]));
+    const owner = getAddress(wallet);
+    const assetSymbol = this.#assetSymbol(input.asset ?? DEFAULT_ASSET);
+    if (assetSymbol !== DEFAULT_ASSET) {
+      throw new ValidationError("Account deposits currently support Hub USDC only.", {
+        field: "asset",
+        requestedValue: input.asset,
+        supported: DEFAULT_ASSET
+      });
+    }
+    const requested = exactPositiveRaw(input.amount);
+    const proof = await this.gateway.getAccountPosition(owner, assetSymbol);
+    const moneyContext = buildExternalPostingMoneyContext({
+      chainId: this.chainId,
+      asset: proof.asset
+    });
+    const recipe = buildWorkerSelfDepositRecipe({
+      token: moneyContext.asset,
+      agentAccountCore: this.agentAccountAddress
+    });
+    const materializeArg = (value) => value === "<depositAmountRaw>"
+      ? requested.toString()
+      : value;
+    const templates = recipe.writes.map((write) => {
+      const args = write.args.map(materializeArg);
+      const transaction = {
+        step: write.method,
+        unsigned: true,
+        from: owner,
+        to: getAddress(write.address),
+        data: new Interface([write.abiFragment]).encodeFunctionData(write.method, args),
+        value: "0",
+        chainId: this.chainId,
+        ...(write.prerequisite ? { prerequisite: write.prerequisite } : {}),
+        decoded: {
+          method: write.method,
+          function: write.abiFragment.slice("function ".length),
+          args
+        }
+      };
+      return transaction;
+    });
+    templates[0].gas = await this.#gas(templates[0], owner, {
+      purpose: "deposit approval",
+      statement: "Account deposit approval uses DOT on Polkadot Hub. The account owner supplies its own DOT, signs, and broadcasts.",
+      acquisition: "Acquire DOT on Polkadot Hub through an exchange or bridge, then rebuild for a fresh gas quote. A brokered claim does not broker deposit gas."
+    });
+    templates[1].gas = {
+      status: "requires_prerequisite",
+      reason: "The approval must confirm on chain before an exact deposit simulation is meaningful. Rebuild after approval confirmation for a fresh estimate."
+    };
+
+    return {
+      schemaVersion: 1,
+      available: true,
+      wallet: owner,
+      chain: moneyContext.chain,
+      chainId: this.chainId,
+      asset: moneyContext.asset,
+      account: {
+        owner,
+        asset: moneyContext.asset,
+        chainLiquid: amount(proof.position.liquidRaw, moneyContext.asset.decimals)
+      },
+      positionRead: {
+        ...recipe.positionRead,
+        args: [owner, moneyContext.asset.address],
+        result: amount(proof.position.liquidRaw, moneyContext.asset.decimals)
+      },
+      deposit: {
+        amount: amount(requested, moneyContext.asset.decimals),
+        owner,
+        destination: this.agentAccountAddress
+      },
+      templates,
+      instructions: [
+        "Read the live AgentAccountCore liquid position and independently verify both unsigned templates before signing.",
+        "Sign and broadcast approve from this account owner's wallet, then wait for its on-chain confirmation.",
+        "Only after approval confirms, sign and broadcast deposit from the same wallet; nobody can deposit on your behalf because AgentAccountCore has no depositFor.",
+        "A brokered claim does not broker this deposit. You pay both transactions' network gas in DOT.",
+        "Re-read getAccountPosition after the deposit confirms."
+      ],
+      broadcast: {
+        rpcUrls: this.rpcUrls,
+        method: "eth_sendRawTransaction",
+        signer: "your own wallet",
+        feeAsset: "DOT",
+        note: "Sign locally and submit through your own RPC. Averray has no signed-transaction relay."
+      },
+      boundary: EARNINGS_BOUNDARY
+    };
+  }
+
   #accountFromProof(proof, statement, lockState = undefined) {
     const liquidRaw = BigInt(proof.position.liquidRaw);
     const encumberedRaw = BigInt(lockState?.encumbered?.raw ?? 0);
@@ -536,7 +633,11 @@ export class EarningsDoorService {
     return this.gasGrantService.getOpsStatus();
   }
 
-  async #gas(template, wallet) {
+  async #gas(template, wallet, {
+    purpose = "withdrawal",
+    statement = EARNINGS_GAS_STATEMENT,
+    acquisition = EARNINGS_GAS_ACQUISITION_STATEMENT
+  } = {}) {
     try {
       const quote = await this.chainReader.gasQuote({
         from: template.from,
@@ -555,11 +656,11 @@ export class EarningsDoorService {
         estimatedFee: amount(required, 18),
         walletBalance: amount(quote.nativeBalance, 18),
         sufficient: quote.nativeBalance >= required,
-        statement: EARNINGS_GAS_STATEMENT,
-        acquisition: EARNINGS_GAS_ACQUISITION_STATEMENT
+        statement,
+        acquisition
       };
     } catch (error) {
-      throw new ValidationError("A live withdrawal gas estimate is unavailable; no transaction was offered as broadcast-ready.", {
+      throw new ValidationError(`A live ${purpose} gas estimate is unavailable; no transaction was offered as broadcast-ready.`, {
         reason: "gas_estimate_unavailable",
         message: error?.message ?? String(error)
       });

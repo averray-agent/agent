@@ -20,6 +20,16 @@ export function createEarningsDoorRoutes({
       respond(response, 200, intent);
       return true;
     }
+    if (request.method === "POST" && pathname === "/account/deposit/transactions") {
+      const auth = await authMiddleware(request, url);
+      const payload = await readJsonBody(request);
+      respond(
+        response,
+        200,
+        await earningsDoor.buildAccountDepositTransactions(auth.wallet, payload)
+      );
+      return true;
+    }
     return false;
   };
 }
