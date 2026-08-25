@@ -61,6 +61,14 @@ function makeHarness(overrides = {}) {
           note: "funding detection runs in the watcher"
         };
       },
+      buildPostJobTransactions: async (wallet, draftId) => {
+        calls.push(["buildPostJobTransactions", { wallet, draftId }]);
+        return {
+          draftId,
+          wallet,
+          templates: [{ step: "create", unsigned: true }]
+        };
+      },
       listPosterJobs: async (wallet) => {
         calls.push(["listPosterJobs", { wallet }]);
         return {
@@ -237,6 +245,28 @@ test("GET /jobs/draft/:id is poster-owned and reports the unfunded quote honestl
   ]);
 });
 
+test("POST /jobs/draft/:id/transactions is poster-owned and delegates to the shared builder", async () => {
+  const { calls, response, route } = makeHarness();
+
+  assert.equal(await invoke(route, {
+    method: "POST",
+    path: `/jobs/draft/${DRAFT_ID}/transactions`,
+    response
+  }), true);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.wallet, POSTER);
+  assert.equal(response.body.templates[0].unsigned, true);
+  assert.deepEqual(calls.filter(([name]) => name !== "respond"), [
+    ["authMiddleware", undefined],
+    ["enforceLimit", {
+      bucket: "external_drafts",
+      key: POSTER,
+      limits: { limit: 30, windowSeconds: 60 }
+    }],
+    ["buildPostJobTransactions", { wallet: POSTER, draftId: DRAFT_ID }]
+  ]);
+});
+
 test("GET /poster/jobs authenticates the poster wallet and returns only its job projection", async () => {
   const { calls, response, route } = makeHarness();
 
@@ -267,6 +297,7 @@ test("GET /jobs/draft/:id rejects a different wallet", async () => {
 test("poster routes reject service tokens because the poster must prove wallet control via SIWE", async () => {
   for (const request of [
     { method: "POST", path: "/jobs/draft" },
+    { method: "POST", path: `/jobs/draft/${DRAFT_ID}/transactions` },
     { method: "GET", path: `/jobs/draft/${DRAFT_ID}` },
     { method: "GET", path: "/poster/jobs" }
   ]) {
@@ -281,6 +312,7 @@ test("poster routes reject service tokens because the poster must prove wallet c
 test("draft routes rate-limit per wallet before doing any draft work", async () => {
   for (const attempt of [
     { method: "POST", path: "/jobs/draft" },
+    { method: "POST", path: `/jobs/draft/${DRAFT_ID}/transactions` },
     { method: "GET", path: `/jobs/draft/${DRAFT_ID}` },
     { method: "GET", path: "/poster/jobs" }
   ]) {
@@ -292,7 +324,7 @@ test("draft routes rate-limit per wallet before doing any draft work", async () 
     const names = calls.map(([name]) => name);
     assert.ok(names.includes("enforceLimit"), `${attempt.path} must consult the limiter`);
     assert.deepEqual(
-      names.filter((name) => ["readJsonBody", "createDraft", "getDraft", "listPosterJobs"].includes(name)),
+      names.filter((name) => ["readJsonBody", "createDraft", "getDraft", "buildPostJobTransactions", "listPosterJobs"].includes(name)),
       [],
       `${attempt.path} must not reach body parsing or the posting service once limited`
     );

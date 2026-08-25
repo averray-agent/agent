@@ -2,7 +2,7 @@ import { ValidationError } from "../../core/errors.js";
 import { invokeHttpRoute } from "./route-adapter.js";
 
 const AUTH_META_KEY = "com.averray/auth";
-export const MCP_WELCOME_TOKEN_BUDGET = 750;
+export const MCP_WELCOME_TOKEN_BUDGET = 800;
 export const DEFAULT_MCP_MAX_REQUEST_BODY_BYTES = 64 * 1024;
 
 const noArgumentsSchema = {
@@ -33,6 +33,49 @@ export function createMcpTools({
     },
     readOnly: true,
     idempotent: true
+  }),
+  tool({
+    name: "getPosterOnboarding",
+    title: "Get poster onboarding",
+    description: "Read the live poster contract before drafting: mode, Hub chain and asset identity, additive fee economics, minimum reward, cancellation terms, worker-facing facts, and schema discovery paths.",
+    inputSchema: noArgumentsSchema,
+    readOnly: true,
+    idempotent: true
+  }),
+  tool({
+    name: "draftJob",
+    title: "Draft a job",
+    description: "Validate a job definition and return the deterministic direct-Hub funding quote. This records only the demand attempt; no claimable job exists until exact finalized escrow funding is observed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        definition: {
+          type: "object",
+          description: "The same definition object accepted by POST /jobs/draft, including built-in inputSchemaRef and outputSchemaRef values."
+        }
+      },
+      required: ["definition"],
+      additionalProperties: false
+    },
+    readOnly: false,
+    idempotent: false,
+    auth: { required: true, scopes: [], requiredAction: "wallet_sign_in" }
+  }),
+  tool({
+    name: "buildPostJobTransactions",
+    title: "Build job posting transactions",
+    description: "Build wallet-bound unsigned direct-Hub templates for an existing deterministic draft: token approval and AgentAccountCore deposit when needed, then the exact escrow create call. Your own signer submits them; Averray never relays signed transactions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        draftId: { type: "string", minLength: 1 }
+      },
+      required: ["draftId"],
+      additionalProperties: false
+    },
+    readOnly: true,
+    idempotent: true,
+    auth: { required: true, scopes: [], requiredAction: "wallet_sign_in" }
   }),
   tool({
     name: "listVerificationProfiles",
@@ -376,6 +419,7 @@ export function createMcpToolExecutor({
   handleCreditPoolRoute,
   handleDepositPoolRoute,
   handleEarningsDoorRoute,
+  handleExternalJobRoute,
   handleJobRoute,
   handleLockedTierRoute,
   handlePublicMetadataRoute,
@@ -401,6 +445,30 @@ export function createMcpToolExecutor({
         }));
         return detail === "full" ? full : buildMcpWelcome(full, { maxRequestBodyBytes, tools });
       }
+      case "getPosterOnboarding":
+        return unwrap(await invokeHttpRoute(handlePublicMetadataRoute, {
+          ...common,
+          method: "GET",
+          path: "/poster/onboarding"
+        }));
+      case "draftJob":
+        if (!args.definition || typeof args.definition !== "object" || Array.isArray(args.definition)) {
+          throw new ValidationError("definition is required and must be an object.");
+        }
+        return unwrap(await invokeHttpRoute(handleExternalJobRoute, {
+          ...common,
+          body: { definition: args.definition },
+          method: "POST",
+          path: "/jobs/draft"
+        }));
+      case "buildPostJobTransactions":
+        requireString(args.draftId, "draftId");
+        return unwrap(await invokeHttpRoute(handleExternalJobRoute, {
+          ...common,
+          body: {},
+          method: "POST",
+          path: `/jobs/draft/${encodeURIComponent(args.draftId)}/transactions`
+        }));
       case "listVerificationProfiles":
         return unwrap(await invokeHttpRoute(handleVerifyRoute, {
           ...common,

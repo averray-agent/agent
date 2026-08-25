@@ -82,9 +82,22 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
   const payload = await makeService().getPosterOnboarding();
 
   assert.equal(payload.chainId, 420420419);
+  assert.deepEqual(payload.chain, {
+    name: "Polkadot Hub",
+    chainId: 420420419,
+    caip2: "eip155:420420419"
+  });
   assert.equal(payload.escrowCore, ESCROW);
   assert.equal(payload.agentAccountCore, ACCOUNTS);
-  assert.deepEqual(payload.token, { symbol: "USDC", address: TOKEN, decimals: 6 });
+  assert.deepEqual(payload.token, {
+    name: "Hub USDC",
+    symbol: "USDC",
+    assetId: 1337,
+    address: TOKEN,
+    decimals: 6,
+    amountInput: "exact base-unit integer string",
+    x402Payable: false
+  });
   assert.equal(payload.minimumRewardUsdc, "1.25");
   assert.deepEqual(payload.economics, {
     protocolFeeBps: 321,
@@ -93,7 +106,7 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
     feeRecipient: POSTER,
     feeSemantics: "poster_additive",
     feeExplanation:
-      "The poster reserves the full worker reward plus max(posterFeeBps, posterFeeFloorRaw); worker gas retention is separate and applies only to brokered successful work.",
+      "The poster reserves the full worker reward plus the greater of the percentage-based poster fee and posterFeeFloorRaw; the fee is additive and never deducted from the worker reward. Worker gas retention is separate and applies only to brokered successful work.",
     posterReserveFormula:
       "reward + opsReserve + contingencyReserve + max(floor(reward * posterFeeBps / 10000), posterFeeFloorRaw)",
     minRewardUsdc: "1.25",

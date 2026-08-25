@@ -867,6 +867,7 @@ const executeMcpTool = createMcpToolExecutor({
   handleCreditPoolRoute,
   handleDepositPoolRoute,
   handleEarningsDoorRoute,
+  handleExternalJobRoute,
   handleJobRoute: handleMcpJobRoute,
   handleLockedTierRoute,
   handlePublicMetadataRoute,

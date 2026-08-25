@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { getAddress, id, isAddress } from "ethers";
+import { getAddress, id, Interface, isAddress } from "ethers";
 
 import { DEFAULT_ESCROW_ASSET } from "./assets.js";
 import { canonicalizeContent, hashCanonicalContent } from "./canonical-content.js";
@@ -49,6 +49,10 @@ export const EXTERNAL_DRAFT_FUNDING_NOTE =
 export const EXTERNAL_POSTING_MODES = new Set(["closed", "allowlist", "open"]);
 export const CREATE_SINGLE_PAYOUT_SIGNATURE =
   "createSinglePayoutJob(bytes32,address,uint256,uint256,uint256,uint256,bytes32,bytes32,bytes32)";
+export const EXTERNAL_POSTING_ERC20_APPROVE_ABI =
+  "function approve(address spender, uint256 amount) returns (bool)";
+export const EXTERNAL_POSTING_ACCOUNT_DEPOSIT_ABI =
+  "function deposit(address asset, uint256 amount)";
 export const EXTERNAL_QUOTE_IDENTITY_VERSION = "poster_content_v2";
 export const EXTERNAL_FUNDING_RAILS = Object.freeze({
   DIRECT_HUB: "direct_hub",
@@ -60,6 +64,21 @@ const DEFAULT_DRAFT_TTL_HOURS = 72;
 export const DEFAULT_POSTER_REVIEW_WINDOW_HOURS = 7 * 24;
 export const MIN_EXTERNAL_CLAIM_TTL_SECONDS = 60;
 const USDC_DECIMALS = 6;
+const POLKADOT_HUB_MAINNET_CHAIN_ID = 420_420_419;
+const POLKADOT_HUB_USDC_ASSET_ID = 1337;
+const TOKEN_INTERFACE = new Interface([EXTERNAL_POSTING_ERC20_APPROVE_ABI]);
+const ACCOUNT_INTERFACE = new Interface([EXTERNAL_POSTING_ACCOUNT_DEPOSIT_ABI]);
+const ESCROW_INTERFACE = new Interface([`function ${CREATE_SINGLE_PAYOUT_SIGNATURE}`]);
+const EXTERNAL_POSTING_BOUNDARY = Object.freeze({
+  custody: "poster_wallet_only",
+  platformHoldsFunds: false,
+  platformMovesFunds: false,
+  platformBrokersFunds: false,
+  platformSigns: false,
+  platformSeesKeys: false,
+  signedTransactionRelay: false,
+  statement: "Averray returns information and unsigned transaction templates only. Your wallet verifies, signs, and broadcasts through your chosen RPC."
+});
 const DESIGNATED_AGREEMENT_CAP_LOCK_ID = "designated-agreement-cap:global";
 const EXTERNAL_DEFINITION_FIELDS = new Set([
   "acceptMergedAsApproved",
@@ -262,6 +281,44 @@ export function rebuildExternalDraftArtifacts(draft, config) {
   };
 }
 
+export function buildExternalPostingMoneyContext({
+  chainId = POLKADOT_HUB_MAINNET_CHAIN_ID,
+  asset = DEFAULT_ESCROW_ASSET
+} = {}) {
+  const normalizedChainId = Number(chainId);
+  if (!Number.isSafeInteger(normalizedChainId) || normalizedChainId <= 0) {
+    throw new ConfigError("External posting requires a positive Hub chain id.");
+  }
+  const address = normalizeOptionalAddress(asset?.address, "USDC asset address");
+  if (!address) {
+    throw new ConfigError("USDC asset address is required for external posting.");
+  }
+  const decimals = Number(asset?.decimals ?? USDC_DECIMALS);
+  if (decimals !== USDC_DECIMALS) {
+    throw new ConfigError("External posting requires a 6-decimal USDC asset.");
+  }
+  const assetId = Number(asset?.assetId ?? POLKADOT_HUB_USDC_ASSET_ID);
+  if (assetId !== POLKADOT_HUB_USDC_ASSET_ID) {
+    throw new ConfigError("External posting requires Hub USDC asset id 1337.");
+  }
+  return {
+    chain: {
+      name: "Polkadot Hub",
+      chainId: normalizedChainId,
+      caip2: `eip155:${normalizedChainId}`
+    },
+    asset: {
+      name: "Hub USDC",
+      symbol: "USDC",
+      assetId,
+      address,
+      decimals,
+      amountInput: "exact base-unit integer string",
+      x402Payable: false
+    }
+  };
+}
+
 export class ExternalPostingService {
   constructor({
     stateStore,
@@ -271,7 +328,9 @@ export class ExternalPostingService {
     now = () => new Date(),
     logger = console,
     eventBus = undefined,
-    contentScreen = screenExternalListing
+    contentScreen = screenExternalListing,
+    chainId = POLKADOT_HUB_MAINNET_CHAIN_ID,
+    rpcUrls = []
   } = {}) {
     if (!stateStore) {
       throw new ConfigError("ExternalPostingService requires a state store.");
@@ -284,6 +343,8 @@ export class ExternalPostingService {
     this.logger = logger;
     this.eventBus = eventBus;
     this.contentScreen = contentScreen;
+    this.moneyContext = buildExternalPostingMoneyContext({ chainId, asset: config.usdcAsset });
+    this.rpcUrls = [...new Set((rpcUrls ?? []).filter(Boolean).map(String))];
   }
 
   async previewFundingRequirement(payload, {
@@ -403,7 +464,7 @@ export class ExternalPostingService {
         attemptedAt: createdAt
       });
       const delisting = await this.stateStore.getExternalJobDelisting?.(materialized.jobId);
-      return presentDraft(materialized, now, delisting);
+      return this.presentMoneyContext(presentDraft(materialized, now, delisting));
     }
     await this.assertDesignatedAgreementCapacity(definition, { stage: "draft" });
     let fundingRequirement;
@@ -445,7 +506,7 @@ export class ExternalPostingService {
       attemptedAt: createdAt,
       quote
     });
-    return presentQuote(storedSignal.quote, now, storedSignal);
+    return this.presentMoneyContext(presentQuote(storedSignal.quote, now, storedSignal));
   }
 
   async getDraft(walletInput, draftId) {
@@ -468,11 +529,155 @@ export class ExternalPostingService {
     }
     if (!draft) {
       assertStoredDraftDeterminism(quote, this.config);
-      return presentQuote(quote, this.currentTime(), signal);
+      return this.presentMoneyContext(presentQuote(quote, this.currentTime(), signal));
     }
     assertStoredDraftDeterminism(draft, this.config);
     const delisting = await this.stateStore.getExternalJobDelisting?.(draft.jobId);
-    return presentDraft(draft, this.currentTime(), delisting);
+    return this.presentMoneyContext(presentDraft(draft, this.currentTime(), delisting));
+  }
+
+  async buildPostJobTransactions(walletInput, draftId) {
+    const wallet = normalizeWallet(walletInput);
+    const draft = await this.getDraft(wallet, draftId);
+    if (draft.fundingRail !== EXTERNAL_FUNDING_RAILS.DIRECT_HUB) {
+      throw new ValidationError(
+        "buildPostJobTransactions only supports the direct Hub funding rail; x402 posting is a separate product.",
+        { draftId: draft.draftId, fundingRail: draft.fundingRail }
+      );
+    }
+    if (draft.status === "expired") {
+      throw new ValidationError("External job quote has expired; request a fresh draft before funding.", {
+        draftId: draft.draftId,
+        expiresAt: draft.expiresAt
+      });
+    }
+    if (draft.status !== "quoted") {
+      throw new ConflictError(
+        "Unsigned funding templates are available only while the deterministic quote awaits funding.",
+        "external_draft_not_awaiting_funding",
+        { draftId: draft.draftId, status: draft.status }
+      );
+    }
+    if (typeof this.gateway?.getAccountPosition !== "function") {
+      throw new ExternalServiceError(
+        "External posting requires a live AgentAccountCore position read before building funding templates.",
+        "external_position_read_unavailable"
+      );
+    }
+    const accountAddress = normalizeOptionalAddress(
+      this.gateway?.config?.agentAccountAddress,
+      "AgentAccountCore address"
+    );
+    if (!accountAddress) {
+      throw new ConfigError("AgentAccountCore address is required to build external posting transactions.");
+    }
+    const fundingRequirement = requirePlainObject(
+      draft.fundingRequirement,
+      "fundingRequirement"
+    );
+    const posterReservedRaw = parseExactRaw(
+      fundingRequirement.posterReservedRaw,
+      "fundingRequirement.posterReservedRaw"
+    );
+    const position = await this.gateway.getAccountPosition(wallet, this.moneyContext.asset.symbol);
+    const liquidRaw = parseExactRaw(position?.position?.liquidRaw, "positions(poster, token).liquid");
+    const depositAmountRaw = posterReservedRaw > liquidRaw
+      ? posterReservedRaw - liquidRaw
+      : 0n;
+    const templates = [];
+    const skippedSteps = [];
+
+    if (depositAmountRaw > 0n) {
+      templates.push(buildUnsignedExternalTemplate({
+        step: "approve",
+        wallet,
+        to: this.moneyContext.asset.address,
+        chainId: this.moneyContext.chain.chainId,
+        abiFragment: EXTERNAL_POSTING_ERC20_APPROVE_ABI,
+        method: "approve",
+        args: [accountAddress, depositAmountRaw.toString()],
+        data: TOKEN_INTERFACE.encodeFunctionData("approve", [accountAddress, depositAmountRaw])
+      }));
+      templates.push(buildUnsignedExternalTemplate({
+        step: "deposit",
+        wallet,
+        to: accountAddress,
+        chainId: this.moneyContext.chain.chainId,
+        abiFragment: EXTERNAL_POSTING_ACCOUNT_DEPOSIT_ABI,
+        method: "deposit",
+        args: [this.moneyContext.asset.address, depositAmountRaw.toString()],
+        data: ACCOUNT_INTERFACE.encodeFunctionData("deposit", [
+          this.moneyContext.asset.address,
+          depositAmountRaw
+        ]),
+        prerequisite: "approve_confirmed_on_chain"
+      }));
+    } else {
+      skippedSteps.push(
+        { step: "approve", reason: "agent_account_liquid_already_covers_poster_reserve" },
+        { step: "deposit", reason: "agent_account_liquid_already_covers_poster_reserve" }
+      );
+    }
+
+    const createArgs = draft.calldata?.args;
+    if (!Array.isArray(createArgs)) {
+      throw new ConflictError(
+        "Stored external draft is missing its deterministic escrow calldata arguments.",
+        "external_draft_integrity_failed",
+        { draftId: draft.draftId }
+      );
+    }
+    templates.push(buildUnsignedExternalTemplate({
+      step: "create",
+      wallet,
+      to: draft.calldata.to,
+      chainId: this.moneyContext.chain.chainId,
+      abiFragment: `function ${CREATE_SINGLE_PAYOUT_SIGNATURE}`,
+      method: "createSinglePayoutJob",
+      args: createArgs.map(String),
+      data: ESCROW_INTERFACE.encodeFunctionData("createSinglePayoutJob", createArgs),
+      prerequisite: depositAmountRaw > 0n ? "deposit_confirmed_on_chain" : undefined
+    }));
+
+    return {
+      schemaVersion: 1,
+      available: true,
+      draftId: draft.draftId,
+      jobId: draft.jobId,
+      specHash: draft.specHash,
+      wallet,
+      ...cloneJsonObject(this.moneyContext),
+      fundingRequirement: cloneJsonObject(fundingRequirement),
+      accountPosition: {
+        contract: "AgentAccountCore",
+        address: accountAddress,
+        field: "positions(poster, token).liquid",
+        liquidRaw: liquidRaw.toString()
+      },
+      depositAmountRaw: depositAmountRaw.toString(),
+      templates,
+      ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
+      watch: {
+        jobId: draft.jobId,
+        liveTools: ["getJobDefinition", "listJobs"],
+        liveWhen: "The finalized-event watcher matches the exact draft and the job appears in the public catalog."
+      },
+      broadcast: {
+        rpcUrls: this.rpcUrls,
+        method: "eth_sendRawTransaction",
+        signer: "your own wallet",
+        feeAsset: "DOT",
+        note: "Sign locally and submit through your own RPC. Averray has no signed-transaction relay."
+      },
+      boundary: EXTERNAL_POSTING_BOUNDARY
+    };
+  }
+
+  presentMoneyContext(value) {
+    return {
+      ...value,
+      ...cloneJsonObject(this.moneyContext)
+    };
   }
 
   async listPosterJobs(walletInput) {
@@ -1690,6 +1895,43 @@ function parseQuoteRaw(raw, label) {
   return BigInt(value);
 }
 
+function parseExactRaw(raw, label) {
+  const value = String(raw ?? "").trim();
+  if (!/^\d+$/u.test(value)) {
+    throw new ExternalServiceError(
+      `${label} must be an exact base-unit integer string.`,
+      "external_funding_amount_invalid"
+    );
+  }
+  return BigInt(value);
+}
+
+function buildUnsignedExternalTemplate({
+  step,
+  wallet,
+  to,
+  chainId,
+  abiFragment,
+  method,
+  args,
+  data,
+  prerequisite = undefined
+}) {
+  return {
+    step,
+    unsigned: true,
+    from: wallet,
+    to: getAddress(to),
+    data,
+    value: "0",
+    chainId,
+    abiFragment,
+    method,
+    args,
+    ...(prerequisite ? { prerequisite } : {})
+  };
+}
+
 function normalizeIso(raw, label) {
   const parsed = Date.parse(raw);
   if (!Number.isFinite(parsed)) {
@@ -1770,7 +2012,23 @@ function resolveUsdcAsset(rawAssets, rawLegacyAssets, { required } = {}) {
   if (decimals !== USDC_DECIMALS) {
     throw new ConfigError("External posting requires a 6-decimal USDC asset.");
   }
-  return Object.freeze({ symbol: "USDC", address, decimals });
+  const assetId = Number(resolved.assetId ?? (
+    address.toLowerCase() === DEFAULT_ESCROW_ASSET.address.toLowerCase()
+      ? DEFAULT_ESCROW_ASSET.assetId
+      : NaN
+  ));
+  if (assetId !== POLKADOT_HUB_USDC_ASSET_ID) {
+    throw new ConfigError("External posting requires Hub USDC asset id 1337.");
+  }
+  return Object.freeze({
+    symbol: "USDC",
+    name: "Hub USDC",
+    assetClass: "trust_backed",
+    assetId,
+    address,
+    decimals,
+    x402Payable: false
+  });
 }
 
 function parseWalletAllowlist(raw) {
