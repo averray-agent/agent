@@ -106,7 +106,7 @@ test("poster onboarding is a clean-room machine recipe backed by non-default liv
     feeRecipient: POSTER,
     feeSemantics: "poster_additive",
     feeExplanation:
-      "The poster reserves the full worker reward plus max(posterFeeBps, posterFeeFloorRaw); worker gas retention is separate and applies only to brokered successful work.",
+      "The poster reserves the full worker reward plus the greater of the percentage-based poster fee and posterFeeFloorRaw; the fee is additive and never deducted from the worker reward. Worker gas retention is separate and applies only to brokered successful work.",
     posterReserveFormula:
       "reward + opsReserve + contingencyReserve + max(floor(reward * posterFeeBps / 10000), posterFeeFloorRaw)",
     minRewardUsdc: "1.25",
