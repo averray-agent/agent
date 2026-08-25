@@ -388,7 +388,7 @@ test("buildPlatformCapabilities serves the complete account parity section", () 
       "lock a deposit",
       "exit a lock",
       "use the deposit pool",
-      "borrow against standing",
+      "read and use the credit line",
       "post a job",
       "read standing / tier / receipts"
     ]

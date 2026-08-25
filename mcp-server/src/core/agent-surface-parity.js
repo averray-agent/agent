@@ -41,7 +41,10 @@ export const ACCOUNT_ACTION_PARITY_MAPPINGS = Object.freeze([
   mapping("use the deposit pool", {
     mcpTools: ["getDepositPoolInfo", "buildDepositPoolTransactions"]
   }),
-  mapping("borrow against standing", {
+  // Names the surface, not the outcome: perAccountBorrowCap reads 0 on
+  // mainnet today, so "borrow against standing" would advertise an action
+  // that currently cannot succeed. The tools are reachable either way.
+  mapping("read and use the credit line", {
     mcpTools: ["getCreditInfo", "buildCreditTransactions"]
   }),
   mapping("post a job", {
