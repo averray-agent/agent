@@ -222,7 +222,9 @@ export class DepositPoolDoorService {
     if (typeof this.lockedTierService?.getPoolTelemetry !== "function") return info;
     return {
       ...info,
-      lockedDeposits: await this.lockedTierService.getPoolTelemetry(normalizedWallet)
+      lockedDeposits: await this.lockedTierService.getPoolTelemetry(normalizedWallet, {
+        deployedPrincipalRaw: snapshot.deployedPrincipal
+      })
     };
   }
 

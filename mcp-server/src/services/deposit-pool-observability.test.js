@@ -3,7 +3,10 @@ import test from "node:test";
 import { Interface } from "ethers";
 
 import { DEPOSIT_POOL_ABI } from "../blockchain/abis.js";
-import { depositPoolYieldStatus } from "./deposit-pool-yield-status.js";
+import {
+  DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT,
+  depositPoolYieldStatus
+} from "./deposit-pool-yield-status.js";
 import { DepositPoolObservabilityService, EvmDepositPoolChainReader } from "./deposit-pool-observability.js";
 
 const POOL = "0xCCF5FDF3108AF8e693F28bb9326A573d9dA0F476";
@@ -184,6 +187,14 @@ test("yieldStatus has one byte-identical source and flips the buffer alert with 
   );
   assert.equal(off.bufferFloorAlertEnabled, false);
   assert.equal(on.bufferFloorAlertEnabled, true);
+});
+
+test("not-earning copy states the D3 reopen conditions without implying an imminent ceremony", () => {
+  assert.equal(depositPoolYieldStatus(0n).yieldStatusText, DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT);
+  assert.match(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /capital is home/u);
+  assert.match(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /approximately 62 USDC/u);
+  assert.match(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /seven-day cap is amended/u);
+  assert.doesNotMatch(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /pending operator ceremony/u);
 });
 
 test("EVM reader decodes the deployed DepositPool event signatures without exposing depositor identities", async () => {

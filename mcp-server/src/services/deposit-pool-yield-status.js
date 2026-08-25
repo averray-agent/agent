@@ -1,5 +1,5 @@
 export const DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT =
-  "Deposits do not currently earn yield; pool capital deployment is a pending operator ceremony. A vested deposit is a capital-backed trust-and-capacity signal, never catalogue reward entitlement.";
+  "Deposits do not currently earn yield; pool capital is home, and venue deployment is not scheduled. The venue lane can reopen when deployable pool TVL reaches approximately 62 USDC or the seven-day cap is amended. A vested deposit is a capital-backed trust-and-capacity signal, never catalogue reward entitlement.";
 
 export const DEPOSIT_POOL_YIELD_EARNING_TEXT =
   "Pool capital is deployed to the configured venue; yield is recognized only when returned to pool accounting.";

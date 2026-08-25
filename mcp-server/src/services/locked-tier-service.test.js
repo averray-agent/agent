@@ -7,10 +7,14 @@ import {
   CREDIT_READ_GRACE_CEILING_MS,
   CREDIT_READ_GRACE_DEFAULT_MS,
   LOCKED_TIER_EARLY_EXIT_TERMS,
+  LOCKED_TIER_RISK_SENTENCE,
+  LOCKED_TIER_YIELD_ACTIVE_TEXT,
+  LOCKED_TIER_YIELD_ELIGIBLE_NOT_DEPLOYED_TEXT,
   LOCKED_TIER_YIELD_INACTIVE_TEXT,
   LockedTierService,
   loadLockedTierConfig,
   lockedTierActivationGate,
+  lockedTierActivationState,
   lockedTierPriority
 } from "./locked-tier-service.js";
 
@@ -166,7 +170,7 @@ test("quote discloses exact L4 exit terms, current NAV, gate state, and risk bef
   assert.equal(quote.activationGate.status, "closed");
   assert.equal(quote.activationGate.yieldStatusText, LOCKED_TIER_YIELD_INACTIVE_TEXT);
   assert.equal(quote.nav.sharePrice.assetsPerShare.raw, "1000000");
-  assert.match(quote.riskSentence, /pro-rata NAV share/u);
+  assert.equal(quote.riskSentence, LOCKED_TIER_RISK_SENTENCE);
   assert.equal(quote.consent.required, true);
 });
 
@@ -375,6 +379,26 @@ test("activation-gate-t90-89-days: today's 25-USDC T90 cohort opens on its true 
   assert.deepEqual(gate.blockers, []);
 });
 
+test("gate-open locked yield text is bound only to deployed principal", () => {
+  const cohort = [activationLock()];
+  const zeroDeployed = lockedTierActivationState(cohort, START, {
+    deployedPrincipalRaw: "0"
+  });
+  const positiveDeployed = lockedTierActivationState(cohort, START, {
+    deployedPrincipalRaw: "1"
+  });
+  const { yieldStatusText: zeroText, ...zeroGate } = zeroDeployed;
+  const { yieldStatusText: positiveText, ...positiveGate } = positiveDeployed;
+
+  assert.equal(zeroDeployed.open, true);
+  assert.equal(zeroDeployed.status, "open");
+  assert.equal(zeroText, LOCKED_TIER_YIELD_ELIGIBLE_NOT_DEPLOYED_TEXT);
+  assert.doesNotMatch(zeroText, /NAV share active/u);
+  assert.equal(positiveText, LOCKED_TIER_YIELD_ACTIVE_TEXT);
+  assert.notEqual(zeroText, positiveText);
+  assert.deepEqual(positiveGate, zeroGate);
+});
+
 test("activation-gate-near-expiry: ten remaining days close the gate on cycle economics", () => {
   const gate = lockedTierActivationGate([activationLock({ remainingDays: 10 })], START);
   assert.equal(gate.projection.cycleDays, 10);
@@ -548,6 +572,56 @@ test("the real deposit-pool door info satisfies the locked-tier quote seam", asy
   }, { poolInfo: poolInfoLive });
   assert.equal(quote.terms.tier, "t90");
   assert.ok(quote.consent.message.length > 0);
+});
+
+test("the /pool payload never claims active locked yield while deployed principal is zero", async () => {
+  const h = harness();
+  await seedActiveT90(h);
+  let deployedPrincipal = 0n;
+  const door = new DepositPoolDoorService({
+    poolAddress: "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30",
+    chainId: 420_420_419,
+    rpcUrls: ["https://example.invalid/"],
+    vestingHours: 48,
+    lockedTierService: h.service,
+    chainReader: {
+      async readSnapshot() {
+        const bufferAssets = 20_000_000n - deployedPrincipal;
+        return {
+          asset: USDC,
+          blockNumber: 123,
+          blockHash: `0x${"ab".repeat(32)}`,
+          blockTimestamp: 1_777_000_000,
+          totalAssets: 20_000_000n,
+          totalSupply: 20_000_000n,
+          bufferAssets,
+          deployedPrincipal,
+          venueMarkedAssets: deployedPrincipal === 0n ? null : deployedPrincipal,
+          totalAssetCap: 1_000_000_000n,
+          perAgentAssetCap: 100_000_000n
+        };
+      }
+    }
+  });
+
+  const home = await door.getInfo();
+  assert.equal(home.lockedDeposits.activationGate.open, true);
+  assert.equal(home.lockedDeposits.activationGate.status, "open");
+  assert.equal(
+    home.lockedDeposits.activationGate.yieldStatusText,
+    LOCKED_TIER_YIELD_ELIGIBLE_NOT_DEPLOYED_TEXT
+  );
+  assert.doesNotMatch(JSON.stringify(home.lockedDeposits), /NAV share active/u);
+  assert.equal(home.yieldStatus, "not_yet_earning");
+  assert.equal(home.venueMark.status, "not_deployed");
+
+  deployedPrincipal = 9_500_000n;
+  const deployed = await door.getInfo();
+  assert.equal(
+    deployed.lockedDeposits.activationGate.yieldStatusText,
+    LOCKED_TIER_YIELD_ACTIVE_TEXT
+  );
+  assert.equal(deployed.yieldStatus, "earning");
 });
 
 // A lock carries its pro-rata venue gain or loss, so the quote must not show

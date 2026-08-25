@@ -123,11 +123,18 @@ test("pool info exposes locked-cohort activation telemetry from the single gate 
     lockedTotalRaw: "3820000",
     activationGate: { open: false, statement: "yield inactive — pool below activation threshold." }
   };
+  let observedPrincipal;
   const door = service({
-    lockedTierService: { getPoolTelemetry: async () => telemetry }
+    lockedTierService: {
+      getPoolTelemetry: async (_wallet, { deployedPrincipalRaw }) => {
+        observedPrincipal = deployedPrincipalRaw;
+        return telemetry;
+      }
+    }
   }).value;
 
   assert.deepEqual((await door.getInfo()).lockedDeposits, telemetry);
+  assert.equal(observedPrincipal, 0n);
 });
 
 test("profile without a pool returns unavailable without fabricated zero fields", async () => {
