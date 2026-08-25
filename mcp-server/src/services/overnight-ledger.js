@@ -1,7 +1,4 @@
-import { createHash } from "node:crypto";
-
-import { base58 } from "@scure/base";
-import { getBytes, formatUnits } from "ethers";
+import { formatUnits } from "ethers";
 
 import {
   DEFAULT_ONBOARDING_WAIVER_CLAIM_COUNT,
@@ -11,12 +8,12 @@ import { ValidationError } from "../core/errors.js";
 import { loadDeploymentManifest, resolveHealthAddresses } from "../core/health-capability.js";
 import { SELF_IDENTITY_KINDS } from "../core/self-identity-registry.js";
 import { settlementOutcome } from "../core/session-settlement.js";
+import { h160ToSs58 } from "../core/wallet-identity.js";
 
 const USDC_DECIMALS = 6;
 // The signer gas balance is observed through the Hub EVM account, whose native
 // DOT unit is wei-shaped (18 decimals), not the relay-chain display precision.
 const DOT_DECIMALS = 18;
-const SS58_HASH_PREFIX = Buffer.from("SS58PRE");
 const EVENT_PAGE_SIZE = 200;
 const READ_PAGE_SIZE = 250;
 const READ_LIMIT = 10_000;
@@ -195,23 +192,11 @@ export class OvernightLedgerService {
 }
 
 export function evmAddressToAssetHubSs58(address) {
-  const evm = getBytes(String(address));
-  if (evm.length !== 20) {
+  try {
+    return h160ToSs58(address);
+  } catch {
     throw new ValidationError("Top-up EVM account must be a 20-byte address.");
   }
-  const accountId32 = new Uint8Array(32);
-  accountId32.set(evm);
-  accountId32.fill(0xee, 20);
-  const payload = new Uint8Array(33);
-  payload.set(accountId32, 1);
-  const checksum = createHash("blake2b512")
-    .update(SS58_HASH_PREFIX)
-    .update(payload)
-    .digest();
-  const encoded = new Uint8Array(35);
-  encoded.set(payload);
-  encoded.set(checksum.subarray(0, 2), payload.length);
-  return base58.encode(encoded);
 }
 
 export function createPersistedRewardBankHealthProvider({ getRewardBankHealth, stateStore }) {

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { createStateStore, MemoryStateStore, RedisStateStore } from "./state-store.js";
 import { ExternalServiceError } from "./errors.js";
+import { parseWalletIdentity } from "./wallet-identity.js";
 
 function silentLogger() {
   return { warn() {}, error() {}, info() {}, log() {} };
@@ -789,6 +790,43 @@ test("MemoryStateStore lists recent sessions in latest-first order", async () =>
 
   const sessions = await store.listRecentSessions(2);
   assert.deepEqual(sessions.map((entry) => entry.sessionId), ["session-2", "session-1"]);
+});
+
+test("dual-form session records index only by lowercase H160 and never by lowercased SS58", async () => {
+  const ss58 = "14RLk2G7hu2xMEYL1hbkcwbwWgjL6Nem3fL1maD2GYP1pGNe";
+  const identity = parseWalletIdentity(ss58);
+  const session = {
+    sessionId: "dual-form-session",
+    jobId: "dual-form-job",
+    wallet: identity.h160,
+    walletIdentity: identity,
+    status: "claimed"
+  };
+
+  const memory = new MemoryStateStore();
+  const stored = await memory.upsertSession(session);
+  assert.deepEqual(stored.walletIdentity, identity);
+  assert.equal(stored.wallet, identity.h160);
+  assert.deepEqual(memory.walletSessions.get(identity.h160), [session.sessionId]);
+  assert.equal(memory.walletSessions.has(ss58), false);
+  assert.equal(memory.walletSessions.has(ss58.toLowerCase()), false);
+  assert.equal((await memory.listSessionsByWallet(ss58))[0].sessionId, session.sessionId);
+
+  const redis = new RedisStateStore("redis://unused", "identity");
+  const indexKeys = [];
+  let storedRedisSession;
+  redis.connect = async () => {};
+  redis.client = {
+    async set(key, value) {
+      if (key === "identity:session:dual-form-session") storedRedisSession = JSON.parse(value);
+    },
+    async zAdd(key) { indexKeys.push(key); }
+  };
+  await redis.upsertSession(session);
+  assert.deepEqual(storedRedisSession.walletIdentity, identity);
+  assert.equal(storedRedisSession.wallet, identity.h160);
+  assert.ok(indexKeys.includes(`identity:wallet-sessions:${identity.h160}`));
+  assert.equal(indexKeys.some((key) => key.includes(ss58) || key.includes(ss58.toLowerCase())), false);
 });
 
 test("MemoryStateStore never indexes sessions under a missing idempotency key", async () => {

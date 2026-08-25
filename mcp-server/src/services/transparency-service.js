@@ -1,12 +1,13 @@
 import { readFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 
-import { getAddress, keccak256 } from "ethers";
+import { getAddress } from "ethers";
 
 import { findLatestDepositSwap } from "./bank-deposit-evidence.js";
 import { describeBalanceTarget } from "./bank-lane-feed.js";
 import { redactProviderError } from "../core/redact-provider-error.js";
 import { SelfIdentityRegistry } from "../core/self-identity-registry.js";
+import { deriveH160FromAccountId32 } from "../core/wallet-identity.js";
 
 export const TRANSPARENCY_SCHEMA_VERSION = "averray.transparency.v1";
 export const TRANSPARENCY_CACHE_TTL_MS = 15_000;
@@ -542,7 +543,7 @@ export class TransparencyService {
         ? getAddress(protocolFee.value)
         : null;
     const mappingValid = !identity?.nativeAccountId32
-      || (evmLens && evmLensFromAccountId32(identity.nativeAccountId32).toLowerCase() === evmLens.toLowerCase());
+      || (evmLens && deriveH160FromAccountId32(identity.nativeAccountId32).toLowerCase() === evmLens.toLowerCase());
     const common = {
       readAtMs: protocolFee.readAtMs,
       source: `native multisig EVM lens; eth_call balanceOf ${shortAddress(token?.address)} @ asset-hub | wrapper ${wrapper ?? "unknown"}`,
@@ -1147,9 +1148,4 @@ function loadTreasuryIdentity(chainId) {
   } catch {
     return undefined;
   }
-}
-
-function evmLensFromAccountId32(accountId32) {
-  const hash = keccak256(accountId32);
-  return getAddress(`0x${hash.slice(-40)}`);
 }
