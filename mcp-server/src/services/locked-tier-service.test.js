@@ -8,7 +8,7 @@ import {
   CREDIT_READ_GRACE_DEFAULT_MS,
   LOCKED_TIER_EARLY_EXIT_TERMS,
   LOCKED_TIER_RISK_SENTENCE,
-  LOCKED_TIER_YIELD_ACTIVE_TEXT,
+  LOCKED_TIER_YIELD_POOL_DEPLOYED_TEXT,
   LOCKED_TIER_YIELD_ELIGIBLE_NOT_DEPLOYED_TEXT,
   LOCKED_TIER_YIELD_INACTIVE_TEXT,
   LockedTierService,
@@ -394,7 +394,11 @@ test("gate-open locked yield text is bound only to deployed principal", () => {
   assert.equal(zeroDeployed.status, "open");
   assert.equal(zeroText, LOCKED_TIER_YIELD_ELIGIBLE_NOT_DEPLOYED_TEXT);
   assert.doesNotMatch(zeroText, /NAV share active/u);
-  assert.equal(positiveText, LOCKED_TIER_YIELD_ACTIVE_TEXT);
+  assert.equal(positiveText, LOCKED_TIER_YIELD_POOL_DEPLOYED_TEXT);
+  // The locked cohort holds no pool shares, so no branch may claim it has an
+  // active NAV share — not even when pool principal IS deployed.
+  assert.doesNotMatch(positiveText, /NAV share active/u);
+  assert.match(positiveText, /not itself allocated a pool position/u);
   assert.notEqual(zeroText, positiveText);
   assert.deepEqual(positiveGate, zeroGate);
 });
@@ -619,7 +623,7 @@ test("the /pool payload never claims active locked yield while deployed principa
   const deployed = await door.getInfo();
   assert.equal(
     deployed.lockedDeposits.activationGate.yieldStatusText,
-    LOCKED_TIER_YIELD_ACTIVE_TEXT
+    LOCKED_TIER_YIELD_POOL_DEPLOYED_TEXT
   );
   assert.equal(deployed.yieldStatus, "earning");
 });

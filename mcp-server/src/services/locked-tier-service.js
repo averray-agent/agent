@@ -25,8 +25,14 @@ export const LOCKED_TIER_YIELD_INACTIVE_TEXT =
   "yield inactive — pool below activation threshold.";
 export const LOCKED_TIER_YIELD_ELIGIBLE_NOT_DEPLOYED_TEXT =
   "NAV share eligible, not deployed — the locked cohort satisfies the automatic activation gate, but no pool principal is deployed to a venue.";
-export const LOCKED_TIER_YIELD_ACTIVE_TEXT =
-  "NAV share active — pool principal is deployed to the configured venue and the locked cohort satisfies the automatic activation gate.";
+// Deliberately does NOT say "NAV share active". The locked cohort holds no pool
+// shares — locked capital sits as liquid in each depositor's AgentAccountCore,
+// so deploying POOL principal allocates it nothing. Eligibility was never
+// converted into a holding, and the consent sentence is careful about exactly
+// that ("eligible for a pro-rata NAV share"). Claiming an active share here
+// would reintroduce the defect this binding was built to remove, one branch over.
+export const LOCKED_TIER_YIELD_POOL_DEPLOYED_TEXT =
+  "NAV share eligible — the locked cohort satisfies the automatic activation gate and pool principal is deployed to the configured venue, but locked capital is not itself allocated a pool position and holds no NAV share yet.";
 export const LOCKED_TIER_YIELD_UNOBSERVED_TEXT =
   "NAV share eligibility is known, but deployed principal is not available on this surface; read /pool for venue-deployment truth.";
 export const LOCKED_TIER_EARLY_EXIT_TERMS =
@@ -203,7 +209,7 @@ export function lockedTierYieldStatusText({ gateOpen, deployedPrincipalRaw } = {
   const deployedPrincipal = observedRaw(deployedPrincipalRaw);
   if (deployedPrincipal === null) return LOCKED_TIER_YIELD_UNOBSERVED_TEXT;
   return deployedPrincipal > 0n
-    ? LOCKED_TIER_YIELD_ACTIVE_TEXT
+    ? LOCKED_TIER_YIELD_POOL_DEPLOYED_TEXT
     : LOCKED_TIER_YIELD_ELIGIBLE_NOT_DEPLOYED_TEXT;
 }
 
