@@ -553,6 +553,17 @@ const DISCOVERY_TOOL_DEFINITIONS = [
     description: "All active jobs with listing time, any priority window, and optional since freshness metadata (ISO 8601 or epoch milliseconds)."
   },
   { name: "getJobDefinition", description: "One job by id." },
+  // The buyer half of the loop has to be findable, not just the worker half.
+  // This is the read-only, no-auth poster contract: economics, minimum
+  // reward, cancellation terms, and the funding flow. An agent browsing the
+  // directory can learn that posting exists and what it costs before it has
+  // any session. The two tools that follow it (draftJob and
+  // buildPostJobTransactions) stay connected-only because both are SIWE-bound.
+  {
+    name: "getPosterOnboarding",
+    description:
+      "The poster contract: fee semantics, minimum reward, cancellation terms, and the draft-fund-watch flow for funding a job from your own wallet."
+  },
   { name: "validateJobSubmission", description: "Check a draft payload against the job output schema before claiming or submitting." },
   { name: "getSessionStateMachine", description: "Read the canonical session lifecycle graph and allowed transitions." },
   { name: "listJobSchemas", description: "List built-in structured job schemas and their canonical paths." },
@@ -587,13 +598,14 @@ const DISCOVERY_TOOL_DEFINITIONS = [
 ];
 
 // These tools exist on an initialized, authenticated MCP connection but are
-// deliberately absent from the directory-safe discovery slice: three form the
-// connected poster flow (one public read, two SIWE-bound), three create or
-// rotate the wallet session, and four mutate authenticated account state.
+// deliberately absent from the directory-safe discovery slice: two are the
+// SIWE-bound half of the poster flow, three create or rotate the wallet
+// session, and four mutate authenticated account state. The poster flow's
+// public read (getPosterOnboarding) is deliberately NOT here — a browsing
+// agent must be able to discover that posting exists and what it costs.
 // Keeping the omission explicit prevents a new MCP tool from silently drifting
 // out of discovery.
 export const CONNECTED_ONLY_TOOLS = Object.freeze([
-  "getPosterOnboarding",
   "draftJob",
   "buildPostJobTransactions",
   "fetchAuthNonce",
