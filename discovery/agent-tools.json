@@ -999,6 +999,11 @@
       "surface": "mcp"
     },
     {
+      "name": "getPosterOnboarding",
+      "description": "The poster contract: fee semantics, minimum reward, cancellation terms, and the draft-fund-watch flow for funding a job from your own wallet.",
+      "surface": "mcp"
+    },
+    {
       "name": "validateJobSubmission",
       "description": "Check a draft payload against the job output schema before claiming or submitting.",
       "surface": "mcp"
