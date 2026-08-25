@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { ROUTE_CAPABILITY_RULES } from "../auth/capabilities.js";
+import { buildAgentSurfaceParity } from "./agent-surface-parity.js";
 import {
   CONNECTED_ONLY_TOOLS,
   DISCOVERY_HTTP_ONLY_TOOLS,
@@ -42,6 +44,27 @@ test("MCP and discovery tool catalogues agree except for the explicit connected-
       assert.equal(mcpNames.has(tool.name), false, `HTTP-only tool ${tool.name} unexpectedly resolves through MCP`);
     }
   }
+});
+
+test("every account parity tool and HTTP route resolves through its real registry", () => {
+  const mcpNames = new Set(MCP_TOOLS.map(({ name }) => name));
+  const httpRoutes = new Set(ROUTE_CAPABILITY_RULES.map(({ method, path }) => (
+    `${method} ${path}`
+  )));
+  const parity = buildAgentSurfaceParity();
+
+  for (const action of parity.actions) {
+    for (const name of action.agentSurface.mcpTools ?? []) {
+      assert.ok(mcpNames.has(name), `${action.humanAction} advertises missing MCP tool ${name}`);
+    }
+    for (const route of action.agentSurface.httpRoutes ?? []) {
+      assert.ok(httpRoutes.has(route), `${action.humanAction} advertises missing HTTP route ${route}`);
+    }
+  }
+  assert.ok(
+    parity.actions.some((action) => action.agentSurface.httpRoutes?.includes("GET /reputation")),
+    "HTTP-only reputation must remain visible in account parity"
+  );
 });
 
 test("committed site agent-tools mirror is byte-identical to the production generator", async () => {

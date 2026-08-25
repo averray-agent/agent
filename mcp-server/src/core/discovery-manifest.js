@@ -11,6 +11,7 @@ import {
   EARNINGS_WITHDRAWAL_STATEMENT
 } from "./earnings-door-copy.js";
 import { DEFAULT_MIN_REWARD_USDC } from "./external-posting-policy.js";
+import { buildAgentSurfaceParity } from "./agent-surface-parity.js";
 
 const DEFAULT_BASE_URL = "https://api.averray.com";
 const DEFAULT_DISCOVERY_URL = "https://averray.com/.well-known/agent-tools.json";
@@ -860,7 +861,8 @@ export function buildPlatformCapabilities({ chainId = undefined } = {}) {
       readinessChecks: manifest.onboarding.readinessChecks,
       selfServeChecklist: manifest.onboarding.selfServeChecklist,
       buildVestedCapacity: manifest.onboarding.buildVestedCapacity,
-      withdrawEarnings: manifest.onboarding.withdrawEarnings
+      withdrawEarnings: manifest.onboarding.withdrawEarnings,
+      agentSurfaceParity: buildAgentSurfaceParity()
     },
     auth: {
       scheme: manifest.auth.scheme,
