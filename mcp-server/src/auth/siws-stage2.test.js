@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import test from "node:test";
 
-import {
+const requireModule = createRequire(import.meta.url);
+const {
   ed25519PairFromSeed,
   ed25519Sign,
   encodeAddress,
   sr25519PairFromSeed,
   sr25519Sign,
-} from "@polkadot/util-crypto";
+} = requireModule("@polkadot/util-crypto");
 import { Wallet, hexlify } from "ethers";
 
 import {
@@ -99,6 +101,16 @@ test("SIWS Stage 2: EVM sign-in remains byte-identical at the shared verifier se
     requestId: undefined,
     recoveredAddress: wallet.address,
   });
+
+  const badChecksumAddress = wallet.address.replace("0x19E7", "0x19e7");
+  const badChecksumMessage = messageFor(badChecksumAddress);
+  assert.throws(
+    () => verifySiweMessage(badChecksumMessage, signature, {
+      expectedDomain: DOMAIN,
+      expectedChainId: CHAIN_ID,
+    }),
+    (error) => error?.code === "INVALID_ARGUMENT" && /bad address checksum/iu.test(error.message)
+  );
 });
 
 test("SIWS Stage 2: sr25519 and ed25519 verify the unchanged EIP-4361-shaped message", () => {
@@ -157,8 +169,9 @@ test("SIWS Stage 2: identity form selects the scheme and both cross-scheme signa
   );
 });
 
-test("SIWS Stage 2: native signatures keep the shared domain chain and expiry error codes", () => {
+test("SIWS Stage 2: native signatures keep the shared domain chain and expiry error codes", async () => {
   const native = nativeSigner("ed25519", 13);
+  const evm = new Wallet(`0x${"33".repeat(32)}`);
   const validMessage = messageFor(native.address);
   const signature = native.sign(validMessage);
   const cases = [
@@ -166,22 +179,35 @@ test("SIWS Stage 2: native signatures keep the shared domain chain and expiry er
     [{ expectedDomain: DOMAIN, expectedChainId: CHAIN_ID + 1 }, "siwe_chain_mismatch"],
   ];
   for (const [options, expectedCode] of cases) {
-    assert.throws(
-      () => verifySiweMessage(validMessage, signature, options),
-      (error) => error instanceof AuthenticationError && error.code === expectedCode
-    );
+    for (const [message, signed] of [
+      [validMessage, signature],
+      [messageFor(evm.address), await evm.signMessage(messageFor(evm.address))],
+    ]) {
+      assert.throws(
+        () => verifySiweMessage(message, signed, options),
+        (error) => error instanceof AuthenticationError && error.code === expectedCode
+      );
+    }
   }
 
   const expiredMessage = messageFor(native.address, {
     expirationTime: "2026-08-25T08:59:59.000Z",
   });
-  assert.throws(
-    () => verifySiweMessage(expiredMessage, native.sign(expiredMessage), {
-      expectedDomain: DOMAIN,
-      expectedChainId: CHAIN_ID,
-    }),
-    (error) => error instanceof AuthenticationError && error.code === "siwe_expired"
-  );
+  const expiredEvmMessage = messageFor(evm.address, {
+    expirationTime: "2026-08-25T08:59:59.000Z",
+  });
+  for (const [message, signed] of [
+    [expiredMessage, native.sign(expiredMessage)],
+    [expiredEvmMessage, await evm.signMessage(expiredEvmMessage)],
+  ]) {
+    assert.throws(
+      () => verifySiweMessage(message, signed, {
+        expectedDomain: DOMAIN,
+        expectedChainId: CHAIN_ID,
+      }),
+      (error) => error instanceof AuthenticationError && error.code === "siwe_expired"
+    );
+  }
 });
 
 test("SIWS Stage 2: native capabilities are closed read-only and earning refuses actionably", async () => {

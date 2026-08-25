@@ -22,7 +22,11 @@ import {
 
 const SIWE_STATEMENT = "Sign in to the Agent Platform.";
 const WALLET_RE = /^0x[a-fA-F0-9]{40}$/u;
-const SIGNATURE_RE = /^(?:0x)?(?:[0-9a-fA-F]{128}|[0-9a-fA-F]{130})$/u;
+// Keep the existing EVM request boundary byte-for-byte. Native signatures are
+// 64 bytes, but that alternate shape is admitted only when the identity line
+// in the signed message is itself a valid SS58 AccountId32.
+const EVM_SIGNATURE_RE = /^(0x)?[0-9a-fA-F]{130,132}$/u;
+const SUBSTRATE_SIGNATURE_RE = /^(?:0x)?(?:[0-9a-fA-F]{128}|[0-9a-fA-F]{130})$/u;
 
 function generateNonce(randomBytesImpl) {
   return randomBytesImpl(16).toString("hex");
@@ -33,6 +37,17 @@ function walletsMatch(a, b) {
     return false;
   }
   return String(a).toLowerCase() === String(b).toLowerCase();
+}
+
+function signaturePatternForMessage(message) {
+  const address = String(message ?? "").split("\n", 2)[1]?.trim();
+  try {
+    return parseWalletIdentity(address).source === "ss58"
+      ? SUBSTRATE_SIGNATURE_RE
+      : EVM_SIGNATURE_RE;
+  } catch {
+    return EVM_SIGNATURE_RE;
+  }
 }
 
 // True when the configured primary JWT signer can actually mint a token.
@@ -176,7 +191,7 @@ export function createAuthRoutes({
       if (message.length > 4096) {
         throw new ValidationError("SIWE message exceeds 4096 characters.");
       }
-      if (!SIGNATURE_RE.test(signature)) {
+      if (!signaturePatternForMessage(message).test(signature)) {
         throw new ValidationError("signature must be a 65-byte hex string.");
       }
       if (!canIssueTokens(authConfig)) {

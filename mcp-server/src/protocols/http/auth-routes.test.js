@@ -300,6 +300,28 @@ test("POST /auth/verify consumes nonce, signs token, and issues refresh cookie w
   assert.ok(Number.isFinite(Date.parse(verifyEvent.at)));
 });
 
+test("SIWS Stage 2: EVM verify retains the original signature gate and token claims", async () => {
+  const compact = makeHarness({
+    payload: { message: "siwe", signature: `0x${"1".repeat(128)}` },
+  });
+  await assert.rejects(
+    callRoute(compact.route, compact.response, "POST", "/auth/verify"),
+    (error) => error instanceof ValidationError
+      && error.message === "signature must be a 65-byte hex string."
+  );
+  assert.equal(compact.calls.some(([name]) => name === "verifySiwe"), false);
+
+  const full = makeHarness({
+    payload: { message: "siwe", signature: VALID_SIGNATURE },
+  });
+  assert.equal(await callRoute(full.route, full.response, "POST", "/auth/verify"), true);
+  assert.equal(full.response.body.token, "signed-token");
+  assert.deepEqual(full.calls.find(([name]) => name === "signToken")?.[1].claims, {
+    sub: WALLET,
+    roles: ["admin"],
+  });
+});
+
 test("SIWS Stage 2: SS58 JWT subject and lowercase H160 session index share one identity and nonce", async () => {
   const ss58 = "14RLk2G7hu2xMEYL1hbkcwbwWgjL6Nem3fL1maD2GYP1pGNe";
   const walletIdentity = parseWalletIdentity(ss58);
@@ -323,7 +345,10 @@ test("SIWS Stage 2: SS58 JWT subject and lowercase H160 session index share one 
 
   let nonceConsumptionCount = 0;
   const { calls, response, route } = makeHarness({
-    payload: { message: "siwe", signature: `0x${"1".repeat(128)}` },
+    payload: {
+      message: `app.example.test wants you to sign in with your Ethereum account:\n${ss58}`,
+      signature: `0x${"1".repeat(128)}`,
+    },
     verified: {
       nonce: "nonce-1",
       recoveredAddress: ss58,
