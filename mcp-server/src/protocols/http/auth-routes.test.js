@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { AuthenticationError, ValidationError } from "../../core/errors.js";
+import { MemoryStateStore } from "../../core/state-store.js";
+import { parseWalletIdentity } from "../../core/wallet-identity.js";
 import { createAuthRoutes } from "./auth-routes.js";
 
 const WALLET = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -296,6 +298,100 @@ test("POST /auth/verify consumes nonce, signs token, and issues refresh cookie w
   assert.equal(verifyEvent.wallet, WALLET);
   assert.equal(verifyEvent.event, "verify_succeeded");
   assert.ok(Number.isFinite(Date.parse(verifyEvent.at)));
+});
+
+test("SIWS Stage 2: EVM verify retains the original signature gate and token claims", async () => {
+  const compact = makeHarness({
+    payload: { message: "siwe", signature: `0x${"1".repeat(128)}` },
+  });
+  await assert.rejects(
+    callRoute(compact.route, compact.response, "POST", "/auth/verify"),
+    (error) => error instanceof ValidationError
+      && error.message === "signature must be a 65-byte hex string."
+  );
+  assert.equal(compact.calls.some(([name]) => name === "verifySiwe"), false);
+
+  const full = makeHarness({
+    payload: { message: "siwe", signature: VALID_SIGNATURE },
+  });
+  assert.equal(await callRoute(full.route, full.response, "POST", "/auth/verify"), true);
+  assert.equal(full.response.body.token, "signed-token");
+  assert.deepEqual(full.calls.find(([name]) => name === "signToken")?.[1].claims, {
+    sub: WALLET,
+    roles: ["admin"],
+  });
+});
+
+test("SIWS Stage 2: SS58 JWT subject and lowercase H160 session index share one identity and nonce", async () => {
+  const ss58 = "14RLk2G7hu2xMEYL1hbkcwbwWgjL6Nem3fL1maD2GYP1pGNe";
+  const walletIdentity = parseWalletIdentity(ss58);
+
+  const nonceHarness = makeHarness({ payload: { wallet: ss58 } });
+  const nonceRequest = {};
+  assert.equal(
+    await callRoute(nonceHarness.route, nonceHarness.response, "POST", "/auth/nonce", nonceRequest),
+    true
+  );
+  assert.equal(nonceHarness.response.body.wallet, ss58);
+  assert.equal(nonceRequest._arrivalWallet, walletIdentity.h160);
+  assert.equal(
+    nonceHarness.calls.find(([name]) => name === "storeNonce")?.[1].wallet,
+    walletIdentity.h160
+  );
+  assert.equal(
+    nonceHarness.calls.find(([name]) => name === "buildSiweMessage")?.[1].address,
+    ss58
+  );
+
+  let nonceConsumptionCount = 0;
+  const { calls, response, route } = makeHarness({
+    payload: {
+      message: `app.example.test wants you to sign in with your Ethereum account:\n${ss58}`,
+      signature: `0x${"1".repeat(128)}`,
+    },
+    verified: {
+      nonce: "nonce-1",
+      recoveredAddress: ss58,
+      walletIdentity,
+      issuedAt: "2026-08-25T09:00:00.000Z",
+    },
+    stateStore: {
+      consumeNonce: async () => {
+        nonceConsumptionCount += 1;
+        return nonceConsumptionCount === 1 ? walletIdentity.h160 : undefined;
+      },
+    },
+  });
+
+  const request = {};
+  assert.equal(await callRoute(route, response, "POST", "/auth/verify", request), true);
+  const mintedClaims = calls.find(([name]) => name === "signToken")?.[1].claims;
+  assert.deepEqual(mintedClaims, {
+    sub: ss58,
+    roles: [],
+    walletIdentity,
+  });
+  assert.equal(response.body.wallet, ss58);
+  assert.deepEqual(response.body.walletIdentity, walletIdentity);
+  assert.equal(request._arrivalWallet, walletIdentity.h160);
+  assert.equal(calls.some(([name]) => name === "issueRefreshToken"), false);
+
+  const store = new MemoryStateStore();
+  await store.upsertSession({
+    sessionId: "siws-stage2-session",
+    jobId: "read-only-session",
+    wallet: walletIdentity.h160,
+    walletIdentity,
+    status: "authenticated",
+  });
+  assert.deepEqual(store.walletSessions.get(walletIdentity.h160), ["siws-stage2-session"]);
+  assert.equal(store.walletSessions.has(ss58), false);
+  assert.equal(store.walletSessions.has(ss58.toLowerCase()), false);
+
+  await assert.rejects(
+    callRoute(route, response, "POST", "/auth/verify", {}),
+    (error) => error instanceof AuthenticationError && error.code === "invalid_nonce"
+  );
 });
 
 test("POST /auth/verify mints the viewer role from a casing-normalized allowlist match", async () => {

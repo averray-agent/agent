@@ -30,6 +30,29 @@ const BASE_CAPABILITIES = [
   "xcm:read"
 ];
 
+// Stage 2 Substrate sessions identify a native account but do not yet prove
+// pallet_revive mapping. Start from this closed read allowlist; never subtract
+// earning capabilities from BASE_CAPABILITIES, because a future base addition
+// must not silently become available to an unmapped account.
+export const SUBSTRATE_NATIVE_READ_CAPABILITIES = Object.freeze([
+  "account:read",
+  "agents:list",
+  "badges:list",
+  "content:read",
+  "disputes:list",
+  "disputes:read",
+  "events:read",
+  "jobs:list",
+  "jobs:preflight",
+  "jobs:recommend",
+  "reputation:read",
+  "session:read",
+  "session:timeline",
+  "strategies:list",
+  "subjobs:read",
+  "xcm:read"
+]);
+
 const ROLE_CAPABILITIES = {
   admin: [
     "agent-transfers:submit",
@@ -239,21 +262,24 @@ export function resolveCapabilities(claims = {}) {
   const serviceToken = claims?.serviceToken === true || claims?.tokenKind === "service";
   const roles = serviceToken ? [] : Array.isArray(claims.roles) ? claims.roles : [];
   const viewerOnly = isViewerOnlyClaims(claims);
+  const substrateNative = isSubstrateNativeClaims(claims);
   const capabilities = new Set(
     serviceToken
       ? []
-      : viewerOnly
-        ? ROLE_CAPABILITIES.viewer
-        : BASE_CAPABILITIES
+      : substrateNative
+        ? SUBSTRATE_NATIVE_READ_CAPABILITIES
+        : viewerOnly
+          ? ROLE_CAPABILITIES.viewer
+          : BASE_CAPABILITIES
   );
-  for (const role of viewerOnly ? [] : roles) {
+  for (const role of viewerOnly || substrateNative ? [] : roles) {
     for (const capability of ROLE_CAPABILITIES[role] ?? []) {
       capabilities.add(capability);
     }
   }
   const explicitCapabilities = serviceToken
     ? []
-    : viewerOnly
+    : viewerOnly || substrateNative
       ? []
       : [
         ...(Array.isArray(claims.capabilities) ? claims.capabilities : []),
@@ -271,6 +297,12 @@ export function isViewerOnlyClaims(claims = {}) {
   if (claims?.serviceToken === true || claims?.tokenKind === "service") return false;
   const roles = Array.isArray(claims?.roles) ? claims.roles : [];
   return roles.includes("viewer") && !roles.includes("admin") && !roles.includes("verifier");
+}
+
+export function isSubstrateNativeClaims(claims = {}) {
+  return claims?.serviceToken !== true
+    && claims?.tokenKind !== "service"
+    && claims?.walletIdentity?.source === "ss58";
 }
 
 export function capabilityMatrix() {

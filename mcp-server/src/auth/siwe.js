@@ -1,5 +1,11 @@
+import { createRequire } from "node:module";
+
 import { getAddress, verifyMessage } from "ethers";
 import { AuthenticationError, ValidationError } from "../core/errors.js";
+import { parseWalletIdentity } from "../core/wallet-identity.js";
+
+const requireModule = createRequire(import.meta.url);
+let substrateSignatureVerify;
 
 /**
  * Sign-in with Ethereum (EIP-4361) — minimal spec-compliant implementation.
@@ -59,9 +65,22 @@ export function parseSiweMessage(message) {
     throw new ValidationError("SIWE message header is malformed.");
   }
 
-  const address = lines[1]?.trim();
-  if (!address || !/^0x[a-fA-F0-9]{40}$/u.test(address)) {
-    throw new ValidationError("SIWE address line is missing or malformed.");
+  const addressInput = lines[1]?.trim();
+  let address;
+  if (addressInput && /^0x[a-fA-F0-9]{40}$/u.test(addressInput)) {
+    // Preserve the pre-SIWS EVM behavior exactly, including ethers rejecting
+    // an invalid mixed-case EIP-55 checksum. parseWalletIdentity deliberately
+    // canonicalizes H160 input for store keys, so using it here would widen
+    // the existing sign-in acceptance boundary.
+    address = getAddress(addressInput);
+  } else {
+    try {
+      const walletIdentity = parseWalletIdentity(addressInput);
+      if (walletIdentity.source !== "ss58") throw new Error("identity_shape");
+      address = walletIdentity.ss58;
+    } catch {
+      throw new ValidationError("SIWE address line is missing or malformed.");
+    }
   }
 
   if (lines[2] !== "") {
@@ -114,7 +133,7 @@ export function parseSiweMessage(message) {
 
   return {
     domain: headerMatch.groups.domain,
-    address: getAddress(address),
+    address,
     statement,
     uri: fields.URI,
     version: fields.Version,
@@ -131,7 +150,9 @@ export function parseSiweMessage(message) {
  * Verify a signed SIWE message against expected server configuration.
  *
  * Throws AuthenticationError with a specific code on any mismatch. On success,
- * returns the parsed fields + the recovered wallet address (checksummed).
+ * returns the parsed fields + the recovered wallet identity. EVM addresses
+ * retain their checksummed return shape; SS58 identities retain their exact,
+ * case-sensitive representation.
  */
 export function verifySiweMessage(message, signature, { expectedDomain, expectedChainId }) {
   const parsed = parseSiweMessage(message);
@@ -171,6 +192,35 @@ export function verifySiweMessage(message, signature, { expectedDomain, expected
     throw new AuthenticationError("SIWE message issued in the future.", "siwe_iat_future");
   }
 
+  const identity = parseWalletIdentity(parsed.address);
+  if (identity.source === "ss58") {
+    let verification;
+    try {
+      verification = getSubstrateSignatureVerify()(message, signature, identity.ss58);
+    } catch {
+      throw new AuthenticationError(
+        "SIWE signature does not match address.",
+        "siwe_signature_mismatch"
+      );
+    }
+    if (
+      verification?.isValid !== true
+      || !["sr25519", "ed25519"].includes(verification.crypto)
+    ) {
+      throw new AuthenticationError(
+        "SIWE signature does not match address.",
+        "siwe_signature_mismatch"
+      );
+    }
+    return {
+      ...parsed,
+      recoveredAddress: identity.ss58,
+      walletIdentity: identity
+    };
+  }
+
+  // Keep the existing EIP-191 seam byte-for-byte: only an SS58 identity can
+  // select the Substrate verifier above, and callers cannot supply a scheme.
   let recovered;
   try {
     recovered = verifyMessage(message, signature);
@@ -189,4 +239,15 @@ export function verifySiweMessage(message, signature, { expectedDomain, expected
     ...parsed,
     recoveredAddress: getAddress(recovered)
   };
+}
+
+function getSubstrateSignatureVerify() {
+  // Server startup and the existing EVM sign-in path must not pay the cost of
+  // loading the Substrate crypto bundle. The package's exported CJS subpath is
+  // loaded synchronously only after the signed message identifies an SS58
+  // account, preserving verifySiweMessage's existing synchronous contract.
+  substrateSignatureVerify ??= requireModule(
+    "@polkadot/util-crypto/signature/verify"
+  ).signatureVerify;
+  return substrateSignatureVerify;
 }

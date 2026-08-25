@@ -5,12 +5,14 @@ import { ARRIVAL_CANARY_MARKER_TOKEN_KIND } from "./token-kinds.js";
 import { hasRole, resolveRoles } from "./config.js";
 import {
   getRouteCapabilityRequirements,
+  isSubstrateNativeClaims,
   isViewerOnlyClaims,
   missingCapabilities,
   resolveCapabilities
 } from "./capabilities.js";
 import { isGrantActive, mergeGrantCapabilities } from "../core/capability-grants.js";
 import { buildAuthRequirementDetails } from "../core/discovery-manifest.js";
+import { parseWalletIdentity } from "../core/wallet-identity.js";
 
 const GRANT_CACHE_TTL_MS = 15_000;
 // B-03 — state-changing (mutating) requests re-check grants on a much tighter
@@ -84,7 +86,7 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
     // Viewer-only authority is immutable for the life of the session. A stale
     // or accidental capability grant must never turn the phone-safe identity
     // into a mutation signer.
-    if (isViewerOnlyClaims(claims)) return baseCapabilities;
+    if (isViewerOnlyClaims(claims) || isSubstrateNativeClaims(claims)) return baseCapabilities;
     if (isServiceTokenClaims(claims)) {
       const grantId = String(claims?.capabilityGrantId ?? "").trim();
       if (!grantId || typeof stateStore?.getCapabilityGrant !== "function") {
@@ -205,6 +207,7 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
     if (!claims?.sub) {
       throw new AuthenticationError("Token missing subject claim.", "missing_subject");
     }
+    const walletIdentity = resolveClaimsWalletIdentity(claims);
 
     if (stateStore?.isTokenRevoked && claims.jti) {
       const revoked = await stateStore.isTokenRevoked(claims.jti);
@@ -215,17 +218,21 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
 
     const baseCapabilities = resolveCapabilities(claims);
     enforceViewerReadOnly(claims, request, authDetails);
+    enforceSubstrateNativeReadOnly(claims, request, url.pathname, requiredCapabilities, authDetails);
     const capabilities = await expandCapabilities(claims, baseCapabilities, grantMaxAgeMs);
     enforceRole(claims, requireRole, authDetails);
     enforceCapabilities(capabilities, requiredCapabilities, authDetails);
 
-    const wallet = normalizeWallet(claims.sub);
-    const arrivalWallet = String(wallet ?? "").toLowerCase();
+    const wallet = walletIdentity.source === "ss58"
+      ? getAddress(walletIdentity.h160)
+      : normalizeWallet(claims.sub);
+    const arrivalWallet = walletIdentity.h160;
     if (/^0x[0-9a-f]{40}$/u.test(arrivalWallet)) {
       request._arrivalWallet = arrivalWallet;
     }
     return {
       wallet,
+      ...(walletIdentity.source === "ss58" ? { walletIdentity } : {}),
       claims,
       capabilities,
       capabilityRequirements: requiredCapabilities,
@@ -287,6 +294,68 @@ function enforceViewerReadOnly(claims, request, authDetails = undefined) {
       denialReason: "viewer_read_only"
     }
   );
+}
+
+function enforceSubstrateNativeReadOnly(
+  claims,
+  request,
+  pathname,
+  requiredCapabilities,
+  authDetails = undefined
+) {
+  if (
+    !isSubstrateNativeClaims(claims)
+    || !isMutatingRequest(request)
+    || ["/auth/refresh", "/auth/logout"].includes(pathname)
+  ) return;
+  throw new AuthorizationError(
+    "This is a Substrate-native read-only session. Mapping and earning arrive in a later stage; meanwhile it can browse jobs and read its own account and session history.",
+    "substrate_native_read_only",
+    {
+      ...(authDetails ?? {}),
+      requiresAuth: true,
+      requiredCapabilities,
+      missingCapabilities: missingCapabilities(resolveCapabilities(claims), requiredCapabilities),
+      denialReason: "substrate_native_read_only",
+      sessionType: "substrate-native",
+      access: "read_only",
+      earningEnabled: false,
+      mappingGate: "stage_3",
+      allowedMeanwhile: ["GET /me", "GET /jobs", "GET /account", "GET /sessions"]
+    }
+  );
+}
+
+function resolveClaimsWalletIdentity(claims) {
+  let subjectIdentity;
+  try {
+    subjectIdentity = parseWalletIdentity(claims?.sub);
+  } catch {
+    throw new AuthenticationError("Token subject is not a supported wallet identity.", "claims_mismatch");
+  }
+  const record = claims?.walletIdentity;
+  if (subjectIdentity.source === "h160" && record === undefined) {
+    return subjectIdentity;
+  }
+  if (!record || typeof record !== "object" || Array.isArray(record)) {
+    throw new AuthenticationError("Token wallet identity claim is missing or malformed.", "claims_mismatch");
+  }
+  let recordIdentity;
+  try {
+    recordIdentity = parseWalletIdentity(record.ss58 ?? record.h160);
+  } catch {
+    throw new AuthenticationError("Token wallet identity claim is missing or malformed.", "claims_mismatch");
+  }
+  if (
+    record.source !== subjectIdentity.source
+    || recordIdentity.source !== subjectIdentity.source
+    || recordIdentity.h160 !== subjectIdentity.h160
+    || record.h160 !== subjectIdentity.h160
+    || (subjectIdentity.source === "ss58" && record.ss58 !== claims.sub)
+  ) {
+    throw new AuthenticationError("Token subject and wallet identity claim do not match.", "claims_mismatch");
+  }
+  return subjectIdentity;
 }
 
 function normalizeRequiredCapabilities(values = []) {
