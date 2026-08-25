@@ -20,6 +20,7 @@ const POSTER = "0x1111111111111111111111111111111111111111";
 const OTHER_POSTER = "0x2222222222222222222222222222222222222222";
 const ESCROW = "0x3333333333333333333333333333333333333333";
 const USDC = "0x0000053900000000000000000000000001200000";
+const ACCOUNTS = "0x4444444444444444444444444444444444444444";
 const EXTERNAL_JOB_ID = `0x${"a".repeat(64)}`;
 const DESIGNATED_PROVIDER = "0x2222222222222222222222222222222222222222";
 
@@ -157,6 +158,91 @@ test("escrow-first quote persists only demand, prices the additive fee, and pres
   assert.equal(signal.fundingRail, "direct_hub");
   assert.equal(signal.fundingStatus, "unfunded");
   assert.equal(signal.quote.jobId, quote.jobId);
+});
+
+test("buildPostJobTransactions reserve matches shared HTTP draft quote", async () => {
+  const gateway = {
+    ...feeQuoteGateway(),
+    config: { agentAccountAddress: ACCOUNTS },
+    async getAccountPosition(wallet, asset) {
+      assert.equal(wallet, POSTER.toLowerCase());
+      assert.equal(asset, "USDC");
+      return { position: { liquidRaw: "100000" } };
+    }
+  };
+  const { service } = makeService({ gateway });
+  const httpDraftQuote = await service.createDraft(POSTER, { definition: definition() });
+  const built = await service.buildPostJobTransactions(POSTER, httpDraftQuote.draftId);
+
+  assert.equal(
+    built.fundingRequirement.posterReservedRaw,
+    httpDraftQuote.fundingRequirement.posterReservedRaw,
+    "the transaction builder must consume the shared HTTP quote reserve"
+  );
+  assert.equal(built.fundingRequirement.posterReservedRaw, "1050000");
+  assert.equal(built.depositAmountRaw, "950000");
+  for (const field of [
+    "rewardRaw",
+    "workerReceivesRaw",
+    "opsReserveRaw",
+    "contingencyReserveRaw",
+    "protocolFeeRaw",
+    "posterFeeFloorRaw",
+    "posterReservedRaw"
+  ]) {
+    assert.match(built.fundingRequirement[field], /^\d+$/u, `${field} must stay an exact integer string`);
+  }
+  assert.deepEqual(built.templates.map(({ step }) => step), ["approve", "deposit", "create"]);
+  assert.ok(built.templates.every(({ unsigned, value }) => unsigned === true && value === "0"));
+  assert.deepEqual(built.chain, {
+    name: "Polkadot Hub",
+    chainId: 420420419,
+    caip2: "eip155:420420419"
+  });
+  assert.deepEqual(built.asset, {
+    name: "Hub USDC",
+    symbol: "USDC",
+    assetId: 1337,
+    address: USDC,
+    decimals: 6,
+    amountInput: "exact base-unit integer string",
+    x402Payable: false
+  });
+  assert.deepEqual(httpDraftQuote.chain, built.chain);
+  assert.deepEqual(httpDraftQuote.asset, built.asset);
+});
+
+test("buildPostJobTransactions is idempotent for one deterministic draft", async () => {
+  let positionReads = 0;
+  const gateway = {
+    ...feeQuoteGateway(),
+    config: { agentAccountAddress: ACCOUNTS },
+    async getAccountPosition() {
+      positionReads += 1;
+      return { position: { liquidRaw: "100000" } };
+    }
+  };
+  const { service, store } = makeService({ gateway });
+  const quote = await service.createDraft(POSTER, { definition: definition() });
+
+  const first = await service.buildPostJobTransactions(POSTER, quote.draftId);
+  const second = await service.buildPostJobTransactions(POSTER, quote.draftId);
+
+  assert.deepEqual(second, first);
+  assert.equal(positionReads, 2, "each read revalidates the live funding gap without writing");
+  assert.equal((await store.listExternalPostingDemandSignals()).length, 1);
+  assert.equal((await store.listExternalJobDrafts()).length, 0, "building templates must not materialize a draft");
+});
+
+test("draftJob refuses a reward below the disclosed 1 USDC floor", async () => {
+  const { service } = makeService();
+
+  await assert.rejects(
+    service.createDraft(POSTER, { definition: definition({ rewardAmount: "0.99" }) }),
+    (error) => error.code === "external_reward_below_floor"
+      && error.details?.minimumRewardUsdc === "1"
+      && /at least 1 USDC/u.test(error.message)
+  );
 });
 
 test("external injection is quarantined before hash pinning and is durable and observable", async () => {
@@ -875,9 +961,10 @@ test("draft persistence cannot change GET /jobs or the discovery manifest", asyn
       description: "SIWE-authenticated view of the caller's own postings and their escrow, claim, and session state."
     },
     mcpMirror: {
-      available: false,
-      status: "known_backlog",
-      description: "Poster job visibility is HTTP-only; there is no MCP poster tool yet."
+      available: true,
+      status: "connected_session",
+      tools: ["getPosterOnboarding", "draftJob", "buildPostJobTransactions"],
+      description: "A connected MCP session exposes the same onboarding, deterministic draft, and wallet-bound unsigned funding-template services as the published HTTP poster flow."
     }
   });
 });

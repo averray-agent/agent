@@ -689,6 +689,8 @@ export async function createPlatformRuntime() {
       platformService,
       gateway,
       config: externalPostingConfig,
+      chainId: authConfig.chainId,
+      rpcUrls: [resolveHubNetwork(authConfig.chainId).rpcUrl],
       logger,
       eventBus
     })

@@ -1,13 +1,16 @@
 import { getAddress, id, isAddress } from "ethers";
 
+import {
+  buildExternalPostingMoneyContext,
+  EXTERNAL_POSTING_ACCOUNT_DEPOSIT_ABI,
+  EXTERNAL_POSTING_ERC20_APPROVE_ABI
+} from "./external-posting-service.js";
 import { decimalToBaseUnits } from "./platform-service-helpers.js";
 
 const POSTER_ONBOARDING_CACHE_MS = 30_000;
 const BPS_DENOMINATOR = 10_000n;
 const GUIDE_URL = "https://github.com/averray-agent/agent/blob/main/docs/POSTER_GUIDE.md";
 const DOGFOOD_EVIDENCE_URL = "https://github.com/averray-agent/agent/pull/874";
-const ERC20_APPROVE_ABI = "function approve(address spender, uint256 amount) returns (bool)";
-const AGENT_ACCOUNT_DEPOSIT_ABI = "function deposit(address asset, uint256 amount)";
 const AGENT_ACCOUNT_WITHDRAW_ABI = "function withdraw(address asset, uint256 amount)";
 const AGENT_ACCOUNT_POSITIONS_ABI =
   "function positions(address account, address asset) view returns (uint256 liquid, uint256 reserved, uint256 strategyAllocated, uint256 collateralLocked, uint256 jobStakeLocked, uint256 debtOutstanding)";
@@ -94,13 +97,11 @@ async function buildSnapshot({
   now
 }) {
   const config = externalPostingService?.config ?? {};
-  const token = config.usdcAsset
-    ? {
-        symbol: config.usdcAsset.symbol,
-        address: config.usdcAsset.address,
-        decimals: config.usdcAsset.decimals
-      }
+  const chainId = normalizeChainId(authConfig?.chainId);
+  const moneyContext = config.usdcAsset
+    ? buildExternalPostingMoneyContext({ chainId, asset: config.usdcAsset })
     : undefined;
+  const token = moneyContext?.asset;
   const asOf = now().toISOString();
   const chainEnabled = Boolean(gateway?.isEnabled?.());
   const unavailableReason = chainEnabled ? "live_chain_read_failed" : "blockchain_gateway_disabled";
@@ -180,7 +181,8 @@ async function buildSnapshot({
 
   return {
     version: "poster-onboarding-v1",
-    chainId: normalizeChainId(authConfig?.chainId),
+    chainId,
+    ...(moneyContext ? { chain: moneyContext.chain } : {}),
     escrowCore: config.escrowCoreAddress,
     agentAccountCore: gateway?.config?.agentAccountAddress,
     token,
@@ -338,7 +340,7 @@ function buildPostingFlow({ publicBaseUrl, token, agentAccountCore, escrowCore, 
         {
           contract: "token",
           ...(token?.address ? { address: token.address } : {}),
-          abiFragment: ERC20_APPROVE_ABI,
+          abiFragment: EXTERNAL_POSTING_ERC20_APPROVE_ABI,
           method: "approve",
           spender: "agentAccountCore",
           args: [agentAccountCore ?? "<AgentAccountCore address>", "<depositAmountRaw>"],
@@ -348,7 +350,7 @@ function buildPostingFlow({ publicBaseUrl, token, agentAccountCore, escrowCore, 
           contract: "agentAccountCore",
           contractName: "AgentAccountCore",
           ...(agentAccountCore ? { address: agentAccountCore } : {}),
-          abiFragment: AGENT_ACCOUNT_DEPOSIT_ABI,
+          abiFragment: EXTERNAL_POSTING_ACCOUNT_DEPOSIT_ABI,
           method: "deposit",
           asset: "token",
           args: [token?.address ?? "<token address>", "<depositAmountRaw>"],
@@ -604,7 +606,7 @@ function buildWorkerFacts({
         {
           contract: "token",
           ...(token?.address ? { address: token.address } : {}),
-          abiFragment: ERC20_APPROVE_ABI,
+          abiFragment: EXTERNAL_POSTING_ERC20_APPROVE_ABI,
           method: "approve",
           args: [accountAddress, "<depositAmountRaw>"],
           skipWhen: "depositAmountRaw == 0"
@@ -612,7 +614,7 @@ function buildWorkerFacts({
         {
           contract: "AgentAccountCore",
           ...(agentAccountCore ? { address: agentAccountCore } : {}),
-          abiFragment: AGENT_ACCOUNT_DEPOSIT_ABI,
+          abiFragment: EXTERNAL_POSTING_ACCOUNT_DEPOSIT_ABI,
           method: "deposit",
           args: [tokenAddress, "<depositAmountRaw>"],
           skipWhen: "depositAmountRaw == 0"

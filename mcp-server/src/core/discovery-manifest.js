@@ -587,11 +587,15 @@ const DISCOVERY_TOOL_DEFINITIONS = [
 ];
 
 // These tools exist on an initialized, authenticated MCP connection but are
-// deliberately absent from the directory-safe discovery slice: three create
-// or rotate the connection's wallet session, and two mutate worker state.
+// deliberately absent from the directory-safe discovery slice: three form the
+// connected poster flow (one public read, two SIWE-bound), three create or
+// rotate the wallet session, and four mutate authenticated account state.
 // Keeping the omission explicit prevents a new MCP tool from silently drifting
 // out of discovery.
 export const CONNECTED_ONLY_TOOLS = Object.freeze([
+  "getPosterOnboarding",
+  "draftJob",
+  "buildPostJobTransactions",
   "fetchAuthNonce",
   "verifySiwe",
   "refreshAuthToken",
@@ -805,9 +809,10 @@ export function buildDiscoveryManifest({
       description: "SIWE-authenticated view of the caller's own postings and their escrow, claim, and session state."
     },
     mcpMirror: {
-      available: false,
-      status: "known_backlog",
-      description: "Poster job visibility is HTTP-only; there is no MCP poster tool yet."
+      available: true,
+      status: "connected_session",
+      tools: ["getPosterOnboarding", "draftJob", "buildPostJobTransactions"],
+      description: "A connected MCP session exposes the same onboarding, deterministic draft, and wallet-bound unsigned funding-template services as the published HTTP poster flow."
     }
   };
   manifest.health = `${baseUrl}/health`;

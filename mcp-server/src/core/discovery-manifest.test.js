@@ -62,9 +62,10 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
       description: "SIWE-authenticated view of the caller's own postings and their escrow, claim, and session state."
     },
     mcpMirror: {
-      available: false,
-      status: "known_backlog",
-      description: "Poster job visibility is HTTP-only; there is no MCP poster tool yet."
+      available: true,
+      status: "connected_session",
+      tools: ["getPosterOnboarding", "draftJob", "buildPostJobTransactions"],
+      description: "A connected MCP session exposes the same onboarding, deterministic draft, and wallet-bound unsigned funding-template services as the published HTTP poster flow."
     }
   });
   assert.equal(manifest.health, "https://api.example.com/health");

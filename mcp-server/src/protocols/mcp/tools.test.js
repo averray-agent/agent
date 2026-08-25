@@ -4,6 +4,7 @@ import test from "node:test";
 import { createJobRoutes } from "../http/job-routes.js";
 import { createDepositPoolRoutes } from "../http/deposit-pool-routes.js";
 import { createCreditPoolRoutes } from "../http/credit-pool-routes.js";
+import { createExternalJobRoutes } from "../http/external-job-routes.js";
 import { DEPOSIT_POOL_RISK_DISCLOSURE } from "../../core/deposit-pool-disclosure.js";
 import { CREDIT_POOL_RISK_DISCLOSURE } from "../../core/credit-pool-disclosure.js";
 import { readJsonBody, respond } from "../http/http-helpers.js";
@@ -35,12 +36,30 @@ function makeJobRoute(service, protocol = "http") {
   });
 }
 
-function makePublicRoute(fullCapabilities) {
+function makePublicRoute(fullCapabilities, posterOnboarding = { mode: "open" }) {
   return async ({ request, response, pathname }) => {
-    if (request.method !== "GET" || pathname !== "/onboarding") return false;
-    respond(response, 200, fullCapabilities);
-    return true;
+    if (request.method !== "GET") return false;
+    if (pathname === "/onboarding") {
+      respond(response, 200, fullCapabilities);
+      return true;
+    }
+    if (pathname === "/poster/onboarding") {
+      respond(response, 200, posterOnboarding);
+      return true;
+    }
+    return false;
   };
+}
+
+function makeExternalJobRoute(externalPostingService) {
+  return createExternalJobRoutes({
+    authMiddleware: async () => ({ wallet: "0x1111111111111111111111111111111111111111", claims: {} }),
+    enforceLimit: async () => {},
+    externalPostingService,
+    rateLimitConfig: { externalDrafts: { limit: 30, windowSeconds: 60 } },
+    readJsonBody,
+    respond
+  });
 }
 
 function makeDepositPoolRoute() {
@@ -221,6 +240,10 @@ test("every tool advertised by the MCP welcome resolves through this surface", a
     handleCreditPoolRoute: makeCreditPoolRoute(),
     handleDepositPoolRoute: makeDepositPoolRoute(),
     handleEarningsDoorRoute: makeEarningsDoorRoute(),
+    handleExternalJobRoute: makeExternalJobRoute({
+      createDraft: async (_wallet, payload) => ({ draftId: "draft-1", definition: payload.definition }),
+      buildPostJobTransactions: async (_wallet, draftId) => ({ draftId, templates: [{ unsigned: true }] })
+    }),
     handleJobRoute: makeJobRoute(service, "mcp"),
     handleLockedTierRoute: async ({ response, pathname }) => {
       respond(response, pathname.endsWith("/consent") ? 201 : 200, { pathname });
@@ -238,6 +261,9 @@ test("every tool advertised by the MCP welcome resolves through this surface", a
   };
   const args = {
     getPlatformCapabilities: {},
+    getPosterOnboarding: {},
+    draftJob: { definition: { rewardAmount: "1" } },
+    buildPostJobTransactions: { draftId: "draft-1" },
     listVerificationProfiles: {},
     listJobs: {},
     getJobDefinition: { jobId: "job-1" },
@@ -276,6 +302,8 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
   const byName = Object.fromEntries(MCP_TOOLS.map((entry) => [entry.name, entry]));
   const idempotentReads = [
     "getPlatformCapabilities",
+    "getPosterOnboarding",
+    "buildPostJobTransactions",
     "listVerificationProfiles",
     "listJobs",
     "getJobDefinition",
@@ -296,6 +324,8 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
     assert.equal(byName[name].annotations.idempotentHint, true, name);
   }
   assert.equal(byName.fetchAuthNonce.annotations.readOnlyHint, true);
+  assert.equal(byName.draftJob.annotations.readOnlyHint, false);
+  assert.equal(byName.draftJob.annotations.idempotentHint, false);
   assert.equal(byName.buildWithdrawTransactions.annotations.readOnlyHint, false);
   assert.equal(byName.createLockedDeposit.annotations.readOnlyHint, false);
   assert.equal(byName.requestLockedDepositExit.annotations.readOnlyHint, false);
@@ -309,6 +339,9 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
   assert.deepEqual(byName.claimJob._meta["com.averray/auth"].scopes, ["jobs:claim"]);
   assert.deepEqual(byName.submitWork._meta["com.averray/auth"].scopes, ["jobs:submit"]);
   assert.equal(byName.getDepositPoolInfo._meta["com.averray/auth"].required, false);
+  assert.equal(byName.getPosterOnboarding._meta["com.averray/auth"].required, false);
+  assert.equal(byName.draftJob._meta["com.averray/auth"].required, true);
+  assert.equal(byName.buildPostJobTransactions._meta["com.averray/auth"].required, true);
   assert.equal(byName.getAccountPosition._meta["com.averray/auth"].required, true);
   assert.equal(byName.buildWithdrawTransactions._meta["com.averray/auth"].required, true);
   assert.equal(byName.buildDepositPoolTransactions._meta["com.averray/auth"].required, true);
@@ -367,6 +400,131 @@ test("credit pool MCP tools are payload-identical to the shared SIWE HTTP routes
   const input = { direction: "borrow", pledgeShares: "10", amount: "8" };
   const httpBuild = await invokeHttpRoute(handleCreditPoolRoute, { body: input, headers: request.headers, method: "POST", path: "/credit/transactions", sourceRequest: request });
   assert.deepEqual(await execute("buildCreditTransactions", input, { request }), httpBuild.body);
+});
+
+test("poster MCP tools are payload-identical to the shared onboarding and draft HTTP routes", async () => {
+  const posterOnboarding = {
+    mode: "open",
+    chain: { name: "Polkadot Hub", chainId: 420420419, caip2: "eip155:420420419" },
+    token: { name: "Hub USDC", assetId: 1337, decimals: 6, x402Payable: false },
+    economics: { feeSemantics: "poster_additive", minRewardUsdc: "1" }
+  };
+  const externalPostingService = {
+    async createDraft(wallet, payload) {
+      return {
+        wallet,
+        draftId: "draft-1",
+        definition: payload.definition,
+        fundingRequirement: { posterReservedRaw: "1050000" }
+      };
+    },
+    async buildPostJobTransactions(wallet, draftId) {
+      return {
+        wallet,
+        draftId,
+        depositAmountRaw: "950000",
+        templates: [{ step: "create", unsigned: true, value: "0" }]
+      };
+    }
+  };
+  const handlePublicMetadataRoute = makePublicRoute({}, posterOnboarding);
+  const handleExternalJobRoute = makeExternalJobRoute(externalPostingService);
+  const execute = createMcpToolExecutor({
+    handleAuthRoute: async () => false,
+    handleExternalJobRoute,
+    handleJobRoute: async () => false,
+    handlePublicMetadataRoute
+  });
+  const request = {
+    headers: { authorization: "Bearer poster-token" },
+    socket: { remoteAddress: "127.0.0.1" }
+  };
+
+  const onboardingHttp = await invokeHttpRoute(handlePublicMetadataRoute, {
+    method: "GET",
+    path: "/poster/onboarding",
+    sourceRequest: request
+  });
+  assert.deepEqual(await execute("getPosterOnboarding", {}, { request }), onboardingHttp.body);
+
+  const definition = { rewardAmount: "1", inputSchemaRef: "schema://jobs/coding-input" };
+  const draftHttp = await invokeHttpRoute(handleExternalJobRoute, {
+    body: { definition },
+    headers: request.headers,
+    method: "POST",
+    path: "/jobs/draft",
+    sourceRequest: request
+  });
+  assert.deepEqual(await execute("draftJob", { definition }, { request }), draftHttp.body);
+
+  const buildHttp = await invokeHttpRoute(handleExternalJobRoute, {
+    body: {},
+    headers: request.headers,
+    method: "POST",
+    path: "/jobs/draft/draft-1/transactions",
+    sourceRequest: request
+  });
+  assert.deepEqual(
+    await execute("buildPostJobTransactions", { draftId: "draft-1" }, { request }),
+    buildHttp.body
+  );
+});
+
+test("MCP postJob surface accepts no signing or relay material", async () => {
+  const names = ["getPosterOnboarding", "draftJob", "buildPostJobTransactions"];
+  const byName = Object.fromEntries(MCP_TOOLS.map((entry) => [entry.name, entry]));
+  for (const name of names) {
+    const input = JSON.stringify(byName[name].inputSchema);
+    assert.doesNotMatch(
+      input,
+      /private.?key|mnemonic|signature|signed.?transaction|raw.?transaction|broadcast/iu,
+      `${name} must not accept signing or relay material`
+    );
+  }
+
+  const handleExternalJobRoute = makeExternalJobRoute({
+    async buildPostJobTransactions(wallet, draftId) {
+      return {
+        wallet,
+        draftId,
+        templates: [{ unsigned: true }],
+        broadcast: {
+          signer: "your own wallet",
+          note: "Sign locally and submit through your own RPC. Averray has no signed-transaction relay."
+        },
+        boundary: {
+          platformHoldsFunds: false,
+          platformMovesFunds: false,
+          platformBrokersFunds: false,
+          platformSigns: false,
+          platformSeesKeys: false,
+          signedTransactionRelay: false
+        }
+      };
+    }
+  });
+  const execute = createMcpToolExecutor({
+    handleAuthRoute: async () => false,
+    handleExternalJobRoute,
+    handleJobRoute: async () => false,
+    handlePublicMetadataRoute: async () => false
+  });
+  const built = await execute(
+    "buildPostJobTransactions",
+    { draftId: "draft-1" },
+    {
+      request: {
+        headers: { authorization: "Bearer poster-token" },
+        socket: { remoteAddress: "127.0.0.1" }
+      }
+    }
+  );
+
+  assert.ok(built.templates.every(({ unsigned }) => unsigned === true));
+  assert.equal(built.boundary.platformSigns, false);
+  assert.equal(built.boundary.signedTransactionRelay, false);
+  assert.equal("signedTransaction" in built, false);
+  assert.equal("rawTransaction" in built, false);
 });
 
 test("listJobs returns the same value through MCP and its HTTP route", async () => {
