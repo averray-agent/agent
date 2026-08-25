@@ -1,6 +1,6 @@
 # MEMO — How idle balances reach the venue
 
-Status: **PROPOSED — for ratification** · Author: Claude (architect) ·
+Status: **RATIFIED — R1–R5, Q1/Q2 answered (Pascal, 2026-08-25)** · Author: Claude (architect) ·
 2026-08-25 · The design pass owed by `MEMO_IDLE_BALANCE_YIELD.md`, whose B1 I
 sent back. **B2–B5 and Q1–Q3 there stand; this decides only the route.**
 
@@ -79,7 +79,7 @@ does not use that path.
 That is a coherent trade, not a weakening: we relax a guard *and* remove the
 behaviour it was guarding against.
 
-## Decisions proposed (R1–R5)
+## Decisions — RATIFIED (Pascal, 2026-08-25)
 
 **R1 — Route idle AAC balances through DepositPoolV2**, not directly to the
 venue. Aggregation is required by the flat XCM cost.
@@ -127,23 +127,56 @@ was deliberately deregistered after the v1 recall. **Under R1 it is not needed**
 — the pool's existing venue lane is the route, and this adapter was the
 per-account direct path that R1 rejects. Leave it deregistered.
 
-## Open questions for the ratifier
+## Questions — ANSWERED (Pascal, 2026-08-25)
 
-**Q1 — Is a live-pool contract change acceptable for this?** R2 modifies
-`DepositPoolV2` while it holds real external money (the tester's 5 USDC among
-it). The alternative is deploying a pool v3 and migrating, which costs a
-migration that must price itself — the same trap the bank lane hit before.
-I lean to the targeted change: it is small, its semantics are provable, and
-migration risk exceeds it. **But this is the highest-risk item in the memo and
-it is your call, not mine.**
+**Q1 — How to change the pool? → TARGETED CHANGE TO THE LIVE POOL.** Exempt
+registry-known strategy adapters from `_checkAgentCap` and
+`_recordAgentShareHighWater`, paired with **R3**. Ceremony-grade: it modifies a
+contract holding real external money, including the tester's 5 USDC. Chosen
+over a v3 migration because the migration would have to price itself — the trap
+the bank lane already hit — and over adapter-sharding because N sub-cap
+adapters buy the same outcome at the cost of N deployments, N registration
+ceremonies, and permanent routing complexity.
 
-**Q2 — Should the per-agent cap apply to the aggregate at all?** R2 exempts the
-adapter, but a single agent could still route more than `PER_AGENT_ASSET_CAP`
-through it, since AAC tracks their share separately. If the cap is a real risk
-limit rather than a pilot guardrail, it must be re-enforced **upstream in AAC**
-per account — otherwise R2 quietly removes it.
+**Q2 — What happens to `PER_AGENT_ASSET_CAP`? → IT LAPSES for allocated
+balances.** It was a guardrail sized for a 25 USDC pilot pool, not a permanent
+risk limit, and carrying 100 forward by inheritance is not more principled than
+retiring it deliberately.
 
-**Q3 — What is the adapter's uncommitted-balance target?** R4's "instant while
-covered" needs a number. Too low and deallocation queues often, breaking the
-retention promise; too high and capital sits idle, defeating the purpose. This
-wants measurement once there is real allocation behaviour, not a guess now.
+**This is bounded, and that matters to the decision.** `_checkTotalCap` and
+`_checkAgentCap` are *separate* checks in the deposit path, and **R2 exempts
+only the agent one**. Verified live:
+
+```
+TOTAL_ASSET_CAP       1000.000000 USDC   <- SURVIVES, systemic ceiling intact
+PER_AGENT_ASSET_CAP    100.000000 USDC   <- lapses for adapter-routed balances
+```
+
+So the pool can never exceed **1000 USDC** in total however any single agent
+behaves, against 25.29 held today. The residual exposure is concentration
+*within* that ceiling — one agent could come to hold a large share of the pool
+— not unbounded growth. **If concentration ever becomes the concern, the place
+to re-enforce it is upstream in AAC per account**, where the per-account
+accounting already lives; that option stays open and costs nothing to keep.
+
+**Q3 — The adapter's uncommitted-balance target → still open, by design.**
+R4's "instant while covered" needs a number, and it should come from measured
+allocation behaviour rather than a guess. Too low and deallocation queues often,
+breaking the retention promise; too high and capital sits idle, defeating the
+purpose. Revisit once there is real traffic.
+
+## Build order
+
+1. **The pool change (Q1/R2 + R3)** — contract work, then a deploy and
+   registration ceremony. This is the blocker; nothing else routes without it.
+2. **The opt-in consent surface (B3)** — independent of the above and safe to
+   build in parallel. Nothing may allocate without it.
+3. **Per-agent disclosure (B5, and Y3's earned-vs-added split)** — required
+   before any subsidised or allocated balance is shown as earning.
+4. **Registration** — `setApprovedStrategy` → `registerStrategy` →
+   `setStrategyActive`, three cold-multisig calls per **R5**.
+
+`RUNSHEET_VENUE_REDEPLOY_SUBSIDISED.md` is largely superseded by this: once
+idle balances route in, the deployable base clears break-even on its own and
+the **Y1 subsidy becomes unnecessary rather than merely retired**. Keep it
+parked; do not execute it as written.
