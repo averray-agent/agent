@@ -76,8 +76,8 @@ Four properties that matter, all already true:
 - **Per-account accounting.** `strategyShares[account][strategyId]` — each
   agent's yield is tracked individually. No pooled-share migration needed.
 - **The platform may act for the agent.** `onlyAccountOrSettlementBroker` —
-  so this can be automatic rather than a decision. *This is also the sharpest
-  risk; see Y3′ below.*
+  so this could be automatic rather than a decision. *This is also the
+  sharpest risk — and Q1 answered it: opt-in only. See B3.*
 - **Reserved funds are protected.** `_requireWithdrawable` respects reserved
   and debt, so escrowed job capital cannot be swept into a venue.
 - **Withdraw is already debt-gated** (established at the credit workshop).
@@ -102,9 +102,9 @@ An agent's `liquid` allocates into the pool; the pool does what it already does
 no second product, working balance stays in the working account, and
 deallocation is synchronous back into `liquid`.
 
-Locked tiers then become what they should always have been: a **commitment tier
-on top of a balance that already earns**, buying priority and perks — not the
-only door to yield.
+Locked tiers then become the **top of a ladder** rather than the only door to
+yield: an idle balance earns a base rate, and locking buys a rate premium plus
+priority plus further perks (Q2). One continuous story instead of three pots.
 
 ## The scale effect — this may retire the subsidy
 
@@ -113,14 +113,16 @@ pool can currently deploy **15.4**, which is why Y1 requires an operator
 subsidy.
 
 Bring AAC idle balances into the same pool and the deployable base grows toward
-the ~119 USDC already on the platform. **At that scale the lane plausibly
-funds itself**, and Y5's retirement condition is met by wiring rather than by
-waiting for deposits. The capital to make the yield lane viable is already
-here — it is in the wrong pot.
+the ~119 USDC already on the platform. The capital to make the yield lane
+viable is already here — it is in the wrong pot.
 
-I have not modelled how much of the 119 is genuinely free versus reserved
-against open jobs. That number gates the claim above and must be measured
-before anyone relies on it.
+**Measured, so this is no longer a projection (Q3):** at least **52.568522**
+USDC is free and idle across 9 accounts holding positions (reserved 11.000000,
+strategyAllocated 0), with a further 55.78 unattributed outside the scan
+window — so the true free figure is higher, not lower. **52.57 free plus the
+pool's 15.4 deployable is ~68 against a ~60 break-even.** The lane can be
+self-funding without the Y1 subsidy once idle balances are wired in, and Y5's
+retirement condition is met by wiring rather than by waiting for deposits.
 
 ## Decisions — RATIFIED (Pascal, 2026-08-25)
 
