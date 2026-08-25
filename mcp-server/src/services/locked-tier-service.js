@@ -13,8 +13,11 @@ import { decimalToBaseUnits, formatBaseUnits } from "../core/platform-service-he
 export const LOCKED_TIERS_ENABLED_ENV = "LOCKED_TIERS_ENABLED";
 export const LOCKED_TIER_PER_WALLET_CAP_USDC_ENV = "LOCKED_TIER_PER_WALLET_CAP_USDC";
 export const LOCKED_TIER_COHORT_CAP_USDC_ENV = "LOCKED_TIER_COHORT_CAP_USDC";
+export const CREDIT_READ_GRACE_MS_ENV = "CREDIT_READ_GRACE_MS";
 export const LOCKED_TIER_PER_WALLET_CAP_CEILING_RAW = 25_000_000n;
 export const LOCKED_TIER_COHORT_CAP_CEILING_RAW = 1_000_000_000n;
+export const CREDIT_READ_GRACE_DEFAULT_MS = 5 * 60 * 1_000;
+export const CREDIT_READ_GRACE_CEILING_MS = 15 * 60 * 1_000;
 export const LOCKED_TIER_MINIMUM_COHORT_RAW = 15_000_000n;
 export const LOCKED_TIER_CYCLE_FRICTION_RAW = 60_000n;
 export const LOCKED_TIER_YIELD_MARGIN_MULTIPLE = 2n;
@@ -76,12 +79,33 @@ export function loadLockedTierConfig(env = process.env, { logger = console } = {
       "locked_tiers.cohort_cap_clamped"
     );
   }
+  const requestedCreditReadGraceMs = parseNonNegativeInteger(
+    env[CREDIT_READ_GRACE_MS_ENV] ?? CREDIT_READ_GRACE_DEFAULT_MS,
+    CREDIT_READ_GRACE_MS_ENV
+  );
+  const creditReadGraceMs = Math.min(
+    requestedCreditReadGraceMs,
+    CREDIT_READ_GRACE_DEFAULT_MS,
+    CREDIT_READ_GRACE_CEILING_MS
+  );
+  if (requestedCreditReadGraceMs > CREDIT_READ_GRACE_DEFAULT_MS) {
+    logger.warn?.(
+      {
+        configuredMs: requestedCreditReadGraceMs,
+        effectiveMs: creditReadGraceMs,
+        envMaximumMs: CREDIT_READ_GRACE_DEFAULT_MS,
+        ceilingMs: CREDIT_READ_GRACE_CEILING_MS
+      },
+      "locked_tiers.credit_read_grace_clamped"
+    );
+  }
   return Object.freeze({
     enabled,
     perWalletCapRaw,
     perWalletCapUsdc: formatBaseUnits(perWalletCapRaw, ASSET_DECIMALS),
     cohortCapRaw,
-    cohortCapUsdc: formatBaseUnits(cohortCapRaw, ASSET_DECIMALS)
+    cohortCapUsdc: formatBaseUnits(cohortCapRaw, ASSET_DECIMALS),
+    creditReadGraceMs
   });
 }
 
@@ -164,6 +188,14 @@ export class LockedTierService {
     this.accountPositionReader = accountPositionReader;
     this.creditPositionReader = creditPositionReader;
     this.config = config;
+    this.creditReadGraceMs = Math.min(
+      parseNonNegativeInteger(
+        config.creditReadGraceMs ?? CREDIT_READ_GRACE_DEFAULT_MS,
+        "config.creditReadGraceMs"
+      ),
+      CREDIT_READ_GRACE_CEILING_MS
+    );
+    this.lastSuccessfulCreditReadByWallet = new Map();
     this.chainId = Number(chainId);
     this.siweDomain = String(siweDomain);
     this.consentUri = new URL("/locked-deposits/consent", publicBaseUrl).toString();
@@ -442,8 +474,9 @@ export class LockedTierService {
     ]);
     const active = entries.filter((entry) => entry.status === "active");
     const highest = active.sort(compareTierDescending)[0];
-    const creditOutstanding = nonNegativeRaw(credit?.outstandingDebtRaw) > 0n;
-    const creditPositionReadable = isCreditPositionReadable(credit);
+    const creditEvidence = this.#creditForPerks(wallet, credit);
+    const creditOutstanding = nonNegativeRaw(creditEvidence.credit?.outstandingDebtRaw) > 0n;
+    const creditPositionReadable = isCreditPositionReadable(creditEvidence.credit);
     const t90Suspended = highest?.tier === "t90"
       && (creditOutstanding || !creditPositionReadable);
     const effectiveTier = t90Suspended ? "flex" : highest?.tier ?? "flex";
@@ -461,6 +494,11 @@ export class LockedTierService {
           ? "outstanding_credit_draw"
           : "credit_position_unavailable"
       } : {}),
+      ...(highest?.tier === "t90"
+        && !t90Suspended
+        && creditEvidence.staleSeconds !== undefined
+        ? { creditReadStaleSeconds: creditEvidence.staleSeconds }
+        : {}),
       locked: amount(sumActive(entries)),
       encumbered: amount(sumEncumbered(entries)),
       activationGate,
@@ -518,7 +556,7 @@ export class LockedTierService {
       && entry.publicProfileOptIn === true
     );
     if (!optedIn) return undefined;
-    const credit = await this.#readCredit(wallet);
+    const credit = this.#creditForPerks(wallet, await this.#readCredit(wallet)).credit;
     if (
       !isCreditPositionReadable(credit)
       || nonNegativeRaw(credit?.outstandingDebtRaw) > 0n
@@ -614,10 +652,33 @@ export class LockedTierService {
     }
     try {
       const capacity = await this.creditPositionReader(wallet);
-      return capacity?.credit ?? capacity ?? { available: false, reason: "credit_position_missing" };
+      const credit = capacity?.credit ?? capacity ?? { available: false, reason: "credit_position_missing" };
+      if (isCreditPositionReadable(credit)) {
+        this.lastSuccessfulCreditReadByWallet.set(wallet.toLowerCase(), {
+          outstandingDebtRaw: nonNegativeRaw(credit?.outstandingDebtRaw).toString(),
+          readAtMs: this.now().getTime()
+        });
+      }
+      return credit;
     } catch {
       return { available: false, reason: "credit_pool_read_failed", outstandingDebtRaw: "0" };
     }
+  }
+
+  #creditForPerks(wallet, freshCredit) {
+    if (isCreditPositionReadable(freshCredit)) return { credit: freshCredit };
+    const walletKey = wallet.toLowerCase();
+    const cached = this.lastSuccessfulCreditReadByWallet.get(walletKey);
+    if (!cached) return { credit: freshCredit };
+    const ageMs = Math.max(0, this.now().getTime() - cached.readAtMs);
+    if (ageMs >= this.creditReadGraceMs) {
+      this.lastSuccessfulCreditReadByWallet.delete(walletKey);
+      return { credit: freshCredit };
+    }
+    return {
+      credit: { available: true, outstandingDebtRaw: cached.outstandingDebtRaw },
+      staleSeconds: Math.floor(ageMs / 1_000)
+    };
   }
 
   #assertNoOutstandingCredit(credit) {
@@ -815,6 +876,18 @@ function parsePositiveUsdc(value, name) {
   } catch (error) {
     throw new ConfigError(error?.message ?? `${name} must be a positive USDC amount.`);
   }
+}
+
+function parseNonNegativeInteger(value, name) {
+  const raw = String(value ?? "").trim();
+  if (!/^\d+$/u.test(raw)) {
+    throw new ConfigError(`${name} must be a non-negative integer number of milliseconds.`);
+  }
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new ConfigError(`${name} must be a safe non-negative integer number of milliseconds.`);
+  }
+  return parsed;
 }
 
 function normalizeTier(value) {
