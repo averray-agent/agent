@@ -597,10 +597,12 @@ Three rules it enforces, each with a test:
    and a test pins that even a `red` tone leaves the closing line at "Nothing is waiting on
    you."
 
-**Worktree note:** that worktree has no `node_modules`. Sharing the main checkout's via
-symlink works for running tests, but `.gitignore` has `node_modules/` — a trailing-slash
-pattern matches directories, **not symlinks** — so the link is committable and must be
-removed before any `git add -A`. Prefer a real `npm install` in the worktree.
+**Worktree note:** that worktree has no `node_modules`. Run a real `npm install` in it.
+Do not symlink another worktree's tree in its place — `npm install` then writes through
+the link into *that* worktree, and the half-populated target throws
+`ERR_MODULE_NOT_FOUND` that reads as pre-existing test noise. (One such link was
+committed once, because `.gitignore` said `node_modules/` and a trailing-slash pattern
+matches directories, **not symlinks**; the rule is now `node_modules`, which matches both.)
 
 ## Replies — research only
 

@@ -4,8 +4,9 @@
 .env.*
 !.env.example
 
-node_modules/
-frontend/node_modules/
+# No trailing slash: that would match directories only, and a `node_modules`
+# symlink would stay committable (see AGENTS.md worktree setup).
+node_modules
 cache/
 out/
 broadcast/
