@@ -1,7 +1,7 @@
 # MEMO — Substrate sign-in (P-SIWS, roadmap ticket 5)
 
-Status: **DRAFT — for ratification** · 2026-08-25 · Author: Claude (architect)
-Ratifier: Pascal · Implementer: Codex (packet follows ratification)
+Status: **RATIFIED — S1–S8 locked, Q1–Q3 answered (Pascal, 2026-08-25)** ·
+drafted 2026-08-25 · Author: Claude (architect) · Implementer: Codex
 
 ## What Product asked
 
@@ -130,4 +130,15 @@ their tests move in the same branch.
   a signed-in agent that can read `/me` and be told exactly what to do next
   is better onboarding than a closed door.
 
-**RATIFY:** reply "ratify siws memo", or amend by S-number / Q-number.
+## Answers (Pascal, 2026-08-25)
+
+- **A1 — Reuse the SIWE message text.** A Substrate key signs the exact
+  EIP-4361-shaped message we already issue; only the signature scheme that
+  validates it changes. One nonce path, one expiry rule, one shape for
+  agents to learn.
+- **A2 — Averray does not pay the mapping deposit in v1.** Substrate natives
+  fund their own mapping. Documented, not subsidised; revisit if the
+  arrivals funnel shows natives bouncing off this wall.
+- **A3 — Unmapped natives may sign in read-only.** They get a session, can
+  read `/me` and the catalogue, and are told exactly what is missing and how
+  to fix it. Earning actions refuse with a named reason (S4).
