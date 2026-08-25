@@ -378,6 +378,7 @@ export class MemoryStateStore {
     this.lockedTierEntries = new Map();
     this.idleBalanceConsents = new Map();
     this.revokedIdleBalanceConsentHashes = new Set();
+    this.yieldSubsidyEntries = new Map();
   }
 
   // ── policy proposals (Package G) ──────────────────────────────────
@@ -912,6 +913,21 @@ export class MemoryStateStore {
     this.idleBalanceConsents.set(key, stored);
     this.revokedIdleBalanceConsentHashes.add(normalizeContentHash(stored.termsHash));
     return cloneJsonRecord(stored);
+  }
+
+  async putYieldSubsidyEntry(record) {
+    const txHash = String(record?.txHash ?? "").toLowerCase();
+    const existing = this.yieldSubsidyEntries.get(txHash);
+    if (existing) return { created: false, entry: cloneJsonRecord(existing) };
+    const stored = cloneJsonRecord({ ...record, txHash });
+    this.yieldSubsidyEntries.set(txHash, stored);
+    return { created: true, entry: cloneJsonRecord(stored) };
+  }
+
+  async listYieldSubsidyEntries() {
+    return [...this.yieldSubsidyEntries.values()]
+      .sort((left, right) => Number(left.blockNumber) - Number(right.blockNumber))
+      .map((entry) => cloneJsonRecord(entry));
   }
 
   async upsertMutationReceipt(bucket, key, receipt) {
@@ -2091,6 +2107,27 @@ export class RedisStateStore {
       arguments: [String(revokedAt)]
     });
     return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async putYieldSubsidyEntry(record) {
+    await this.connect();
+    const txHash = String(record?.txHash ?? "").toLowerCase();
+    const redisKey = this.key("yield-subsidy", "entries");
+    const stored = cloneJsonRecord({ ...record, txHash });
+    const created = await this.client.hSetNX(redisKey, txHash, JSON.stringify(stored));
+    const raw = await this.client.hGet(redisKey, txHash);
+    return {
+      created: Number(created) === 1,
+      entry: raw ? JSON.parse(raw) : stored
+    };
+  }
+
+  async listYieldSubsidyEntries() {
+    await this.connect();
+    const values = await this.client.hVals(this.key("yield-subsidy", "entries"));
+    return values
+      .map((raw) => JSON.parse(raw))
+      .sort((left, right) => Number(left.blockNumber) - Number(right.blockNumber));
   }
 
   async upsertMutationReceipt(bucket, key, receipt) {

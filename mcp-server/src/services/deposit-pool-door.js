@@ -186,6 +186,7 @@ export class DepositPoolDoorService {
     chainReader,
     workerExposurePolicy,
     lockedTierService,
+    yieldAttributionService,
     vestingHours = 48,
     venueMark = loadDepositPoolVenueMarkConfig({})
   } = {}) {
@@ -195,6 +196,7 @@ export class DepositPoolDoorService {
     this.chainReader = chainReader ?? (provider ? new EvmDepositPoolDoorChainReader(provider) : undefined);
     this.workerExposurePolicy = workerExposurePolicy;
     this.lockedTierService = lockedTierService;
+    this.yieldAttributionService = yieldAttributionService;
     this.vestingHours = Number(vestingHours);
     this.venueMarkConfig = venueMark;
   }
@@ -527,6 +529,9 @@ export class DepositPoolDoorService {
       broadcast: broadcastInstructions(this.rpcUrls),
       boundary: BOUNDARY
     };
+    if (typeof this.yieldAttributionService?.getAttribution === "function") {
+      response.yieldAttribution = await this.yieldAttributionService.getAttribution({ snapshot, wallet });
+    }
     if (wallet) {
       const capacity = await this.#capacityForWallet(wallet);
       response.wallet = {

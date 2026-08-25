@@ -43,6 +43,7 @@ import { backfillBadgeReceiptSignatures } from "./badge-receipt-backfill.js";
 import { backfillWorkReceipts } from "./work-receipt-backfill.js";
 import { repairWalletSessionIndex } from "./wallet-session-index-repair.js";
 import { repairWorkReceiptJobIndex } from "./work-receipt-job-index-repair.js";
+import { YieldAttributionService } from "./yield-attribution-service.js";
 import { createAuthMiddleware } from "../auth/middleware.js";
 import { createRateLimiter } from "../auth/rate-limit.js";
 import { resolveCapabilities, capabilityMatrix } from "../auth/capabilities.js";
@@ -279,6 +280,7 @@ export function createDepositPoolDoor({
   chainReader,
   workerExposurePolicy,
   lockedTierService,
+  yieldAttributionService,
   env = process.env
 } = {}) {
   return new DepositPoolDoorService({
@@ -291,6 +293,7 @@ export function createDepositPoolDoor({
     chainReader,
     workerExposurePolicy,
     lockedTierService,
+    yieldAttributionService,
     vestingHours: loadDepositVestingConfig(env).vestingHours,
     venueMark: loadDepositPoolVenueMarkConfig(env)
   });
@@ -923,11 +926,23 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const yieldAttributionService = initStep("init-yield-attribution-service", logger, () =>
+    new YieldAttributionService({
+      poolAddress: gateway.config.depositPoolAddress,
+      assetAddress: bankUsdcAsset?.address,
+      chainId: authConfig.chainId,
+      deploymentBlock: gateway.config.depositPoolV2DeploymentBlock
+        ?? gateway.config.depositPoolDeploymentBlock,
+      provider: gateway.provider,
+      stateStore
+    })
+  );
   const depositPoolObservability = initStep("init-deposit-pool-observability", logger, () =>
     new DepositPoolObservabilityService({
       poolAddress: gateway.config.depositPoolAddress,
       provider: gateway.provider,
-      catalogueDailyBudget
+      catalogueDailyBudget,
+      yieldAttributionService
     })
   );
   const creditPoolObservability = initStep("init-credit-pool-observability", logger, () =>
@@ -937,7 +952,13 @@ export async function createPlatformRuntime() {
     })
   );
   const depositPoolDoor = initStep("init-deposit-pool-door", logger, () =>
-    createDepositPoolDoor({ gateway, authConfig, workerExposurePolicy, lockedTierService })
+    createDepositPoolDoor({
+      gateway,
+      authConfig,
+      workerExposurePolicy,
+      lockedTierService,
+      yieldAttributionService
+    })
   );
   const earningsDoor = initStep("init-earnings-door", logger, () =>
     createEarningsDoor({
@@ -1164,6 +1185,7 @@ export async function createPlatformRuntime() {
     bankXcmDispatcher: bankXcmV22Services.dispatcher,
     bankLaneFeed,
     transparencyService,
+    yieldAttributionService,
     depositPoolObservability,
     creditPoolObservability,
     depositPoolDoor,

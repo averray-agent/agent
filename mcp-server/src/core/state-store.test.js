@@ -474,6 +474,28 @@ test("RedisStateStore keeps idle-balance revocation durable and rejects replayed
   });
 });
 
+test("MemoryStateStore keeps subsidy attestations append-only by lowercase transaction hash", async () => {
+  const store = new MemoryStateStore();
+  const txHash = `0x${"AB".repeat(32)}`;
+  const first = await store.putYieldSubsidyEntry({
+    txHash,
+    amountRaw: "1000000",
+    blockNumber: 100,
+    timestamp: "2026-08-25T12:00:00.000Z"
+  });
+  const replay = await store.putYieldSubsidyEntry({
+    txHash: txHash.toLowerCase(),
+    amountRaw: "9999999",
+    blockNumber: 101,
+    timestamp: "2026-08-25T12:01:00.000Z"
+  });
+
+  assert.equal(first.created, true);
+  assert.equal(replay.created, false);
+  assert.equal(replay.entry.amountRaw, "1000000");
+  assert.deepEqual(await store.listYieldSubsidyEntries(), [first.entry]);
+});
+
 test("MemoryStateStore upgrades an unsigned badge with one signature only", async () => {
   const store = new MemoryStateStore();
   await store.putBadgeDocument("session-sign", { averray: { sessionId: "session-sign", category: "security" } });
