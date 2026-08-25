@@ -11,6 +11,26 @@ already settled against deployment 2** (requested 4.950004, returned
 4.948243). Scanning recall indices 0–19, **no recall references deployment 3
 at all.** Nothing was staged. This is a `stage-recall`, not a dispatch.
 
+## Decisions — RATIFIED (Pascal, 2026-08-25)
+
+**D1 — Write-off timing: after the recall, inside reconciliation.** One
+multisig session against the true realised number. The recall's actual return
+carries exit friction and XCM fees on top of the 0.100000, so booking
+afterwards writes off the real total once instead of guessing now and topping
+up later. The deposit gate (#1287) is live, so the stale price cannot reach a
+new depositor in the interim — that is what removed the urgency.
+
+**D2 — Make the depositor whole: yes, 0.024764 USDC, paid after the recall.**
+Our own adapter reported the 9.400000 gap on Asset Hub in the block *before*
+their deposit, so "we could not know" is not available to us.
+
+**D3 — Do not redeploy.** Entry friction is 1.053% of principal against
+~0.0029/day accrual (≈11.3% APY): break-even needs a **35.5-day** epoch and
+this one ran **8.2**, coming out 4.3× wash-negative. The venue is fine; the
+epoch is too short. Cost basis goes to zero, the gate self-disarms, and the
+lane stays idle until consented locked capital can fund a real epoch. Any
+future deployment is a fresh decision that must clear the 35.5-day bar.
+
 ## Established state (all verified live 2026-08-25)
 
 | fact | value | source |
@@ -128,15 +148,10 @@ Nova displays *exactly* that hash before the Vault signs.
 Confirm `venuePrincipalCostBasis()` reads 0. At zero the deposit gate (#1287)
 goes inert automatically and re-arms next epoch — no action needed.
 
-Settle the depositor question: `0x97450BF6…4b5c` bought 5.026011 shares at a
-price carrying the venue at cost, when the adapter had already reported
-9.400000 **in the block before their deposit**. Fair harm is **0.024764**.
+Pay `0x97450BF6…4b5c` **0.024764 USDC** per **D2**. Record the tx hash beside
+the reconciliation evidence.
 
-**Do not redeploy at this size.** Entry friction is 1.053% of principal;
-accrual runs ~0.0029/day (≈11.3% APY). Break-even is a **35.5-day** epoch
-against the **8.2 days** this one ran — 4.3× wash-negative. The venue is fine;
-the epoch is too short. The lane stays idle until consented locked capital can
-fund a real epoch.
+Per **D3** the lane now stays idle. Do not stage a new deployment.
 
 ## Abort conditions (any one ⇒ stop and report)
 
