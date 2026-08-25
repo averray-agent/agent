@@ -21,7 +21,6 @@ export const CREDIT_READ_GRACE_CEILING_MS = 15 * 60 * 1_000;
 export const LOCKED_TIER_MINIMUM_COHORT_RAW = 15_000_000n;
 export const LOCKED_TIER_CYCLE_FRICTION_RAW = 60_000n;
 export const LOCKED_TIER_YIELD_MARGIN_MULTIPLE = 2n;
-export const LOCKED_TIER_CYCLE_DAYS = 30n;
 export const LOCKED_TIER_YIELD_INACTIVE_TEXT =
   "yield inactive — pool below activation threshold.";
 export const LOCKED_TIER_EARLY_EXIT_TERMS =
@@ -37,6 +36,7 @@ const DEFAULT_PER_WALLET_CAP_USDC = "25";
 const DEFAULT_COHORT_CAP_USDC = "1000";
 const DEFAULT_VESTING_HOURS = 48;
 const QUOTE_TTL_MS = 10 * 60 * 1_000;
+const DAY_MS = 24 * 60 * 60 * 1_000;
 const ALARM_SCOPE = "locked-tiers:withdrawal-consent-alarm";
 const TIERS = Object.freeze({
   t30: Object.freeze({ termDays: 30, priorityRank: 1 }),
@@ -110,20 +110,53 @@ export function loadLockedTierConfig(env = process.env, { logger = console } = {
 }
 
 /**
- * Pure activation law. Deliberately accepts only the locked cohort: there is
- * no environment switch, operator override, or caller-supplied rate.
+ * Pure activation law. Deliberately accepts only the durable lock cohort:
+ * there is no environment switch, operator override, caller-supplied rate,
+ * or caller-supplied cycle.
  *
  * The projection is the ratified epoch-2 observation (0.009 USDC earned by
- * 9.5 USDC in seven days), extended over the 30-day cycle. The second gate
- * requires that projection to cover twice the measured 0.060-USDC round trip.
+ * 9.5 USDC in seven days), extended over the shortest remaining active-lock
+ * term. The second gate requires that projection to cover twice the measured
+ * 0.060-USDC round trip.
  */
-export function lockedTierActivationGate(totalLockedRaw) {
-  const lockedRaw = nonNegativeRaw(totalLockedRaw);
-  const projectedCycleYieldRaw = lockedRaw * 9_000n * LOCKED_TIER_CYCLE_DAYS
-    / (9_500_000n * 7n);
+export function lockedTierActivationGate(entries, nowInput = new Date()) {
+  const cohort = deriveActiveLockedCohort(entries, nowInput);
   const requiredProjectedYieldRaw = LOCKED_TIER_CYCLE_FRICTION_RAW
     * LOCKED_TIER_YIELD_MARGIN_MULTIPLE;
-  const minimumMet = lockedRaw >= LOCKED_TIER_MINIMUM_COHORT_RAW;
+  if (!cohort.readable) {
+    return {
+      open: false,
+      status: "closed",
+      blockers: ["locked_cohort_composition_unavailable"],
+      totalLocked: null,
+      minimumLocked: amount(LOCKED_TIER_MINIMUM_COHORT_RAW),
+      projection: {
+        cycleDays: null,
+        projectedCycleYield: null,
+        cycleBasis: {
+          kind: "shortest_remaining_lock_term",
+          shortestRemainingTermDays: null,
+          activeLocksConsidered: null
+        },
+        basis: {
+          observedPrincipal: amount(9_500_000n),
+          observedYield: amount(9_000n),
+          observedDays: 7
+        }
+      },
+      friction: {
+        cycleFriction: amount(LOCKED_TIER_CYCLE_FRICTION_RAW),
+        marginMultiple: Number(LOCKED_TIER_YIELD_MARGIN_MULTIPLE),
+        requiredProjectedYield: amount(requiredProjectedYieldRaw)
+      },
+      override: "none",
+      yieldStatusText: LOCKED_TIER_YIELD_INACTIVE_TEXT
+    };
+  }
+
+  const projectedCycleYieldRaw = cohort.totalLockedRaw * 9_000n * BigInt(cohort.cycleDays)
+    / (9_500_000n * 7n);
+  const minimumMet = cohort.totalLockedRaw >= LOCKED_TIER_MINIMUM_COHORT_RAW;
   const economicsMet = projectedCycleYieldRaw >= requiredProjectedYieldRaw;
   const open = minimumMet && economicsMet;
   const blockers = [
@@ -134,11 +167,16 @@ export function lockedTierActivationGate(totalLockedRaw) {
     open,
     status: open ? "open" : "closed",
     blockers,
-    totalLocked: amount(lockedRaw),
+    totalLocked: amount(cohort.totalLockedRaw),
     minimumLocked: amount(LOCKED_TIER_MINIMUM_COHORT_RAW),
     projection: {
-      cycleDays: Number(LOCKED_TIER_CYCLE_DAYS),
+      cycleDays: cohort.cycleDays,
       projectedCycleYield: amount(projectedCycleYieldRaw),
+      cycleBasis: {
+        kind: "shortest_remaining_lock_term",
+        shortestRemainingTermDays: cohort.cycleDays,
+        activeLocksConsidered: cohort.activeLockCount
+      },
       basis: {
         observedPrincipal: amount(9_500_000n),
         observedYield: amount(9_000n),
@@ -236,7 +274,7 @@ export class LockedTierService {
     const pool = poolSnapshot(poolInfo, wallet);
     const globalActiveRaw = sumActive(allEntries);
     this.#assertPoolCapacity({ requested, activeRaw, globalActiveRaw, pool });
-    const gate = lockedTierActivationGate(globalActiveRaw);
+    const gate = lockedTierActivationGate(allEntries, this.now());
     const issuedAt = this.now();
     const quoteExpiresAt = new Date(issuedAt.getTime() + QUOTE_TTL_MS);
     const terms = {
@@ -482,7 +520,7 @@ export class LockedTierService {
     const effectiveTier = t90Suspended ? "flex" : highest?.tier ?? "flex";
     const priority = lockedTierPriority(effectiveTier);
     const allEntries = await this.#currentEntries();
-    const activationGate = lockedTierActivationGate(sumActive(allEntries));
+    const activationGate = lockedTierActivationGate(allEntries, this.now());
     return {
       enabledForNewLocks: this.config.enabled,
       tier: effectiveTier,
@@ -514,7 +552,7 @@ export class LockedTierService {
 
   async getPoolTelemetry(walletInput = undefined) {
     const entries = await this.#currentEntries();
-    const activationGate = lockedTierActivationGate(sumActive(entries));
+    const activationGate = lockedTierActivationGate(entries, this.now());
     return {
       enabledForNewLocks: this.config.enabled,
       product: "locked deposit",
@@ -944,6 +982,33 @@ function nonNegativeRaw(value) {
   } catch {
     return 0n;
   }
+}
+
+function deriveActiveLockedCohort(entries, nowInput) {
+  if (!Array.isArray(entries)) return { readable: false };
+  const nowMs = new Date(nowInput).getTime();
+  if (!Number.isFinite(nowMs)) return { readable: false };
+  const active = entries.filter((entry) => entry?.status === "active");
+  let totalLockedRaw = 0n;
+  let cycleDays;
+  for (const entry of active) {
+    const amountRaw = String(entry.amountRaw ?? "").trim();
+    const expiresAtMs = Date.parse(String(entry.expiresAt ?? ""));
+    if (!/^[1-9]\d*$/u.test(amountRaw) || !Number.isFinite(expiresAtMs)) {
+      return { readable: false };
+    }
+    totalLockedRaw += BigInt(amountRaw);
+    const remainingDays = Math.floor(Math.max(0, expiresAtMs - nowMs) / DAY_MS);
+    cycleDays = cycleDays === undefined
+      ? remainingDays
+      : Math.min(cycleDays, remainingDays);
+  }
+  return {
+    readable: true,
+    totalLockedRaw,
+    cycleDays: cycleDays ?? 0,
+    activeLockCount: active.length
+  };
 }
 
 function sumActive(entries) {

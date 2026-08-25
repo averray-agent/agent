@@ -17,6 +17,7 @@ import {
 const SIGNER = new Wallet(`0x${"11".repeat(32)}`);
 const START = new Date("2026-08-24T10:00:00.000Z");
 const USDC = "0x1111111111111111111111111111111111111111";
+const DAY_MS = 24 * 60 * 60 * 1_000;
 
 function harness({
   liquidRaw = "50000000",
@@ -99,6 +100,24 @@ function poolInfo(wallet, overrides = {}) {
       perAgentHeadroom: { raw: "100000000", decimals: 6 }
     },
     ...overrides
+  };
+}
+
+function activationLock({
+  amountRaw = "25000000",
+  daysRemaining = 89,
+  id = `0x${"ee".repeat(32)}`,
+  tier = "t90"
+} = {}) {
+  return {
+    id,
+    wallet: SIGNER.address.toLowerCase(),
+    tier,
+    amountRaw,
+    lockedAt: START.toISOString(),
+    termDays: tier === "t90" ? 90 : 30,
+    expiresAt: new Date(START.getTime() + daysRemaining * DAY_MS).toISOString(),
+    status: "active"
   };
 }
 
@@ -336,16 +355,96 @@ test("per-wallet cap and existing pool cap both refuse excess lock creation", as
   );
 });
 
-test("activation-gate-cannot-be-config-opened: config values cannot override the pure economic gate", () => {
+test("today's 25-USDC T90 cohort opens on its 89-day remaining cycle", async () => {
+  const h = harness({ now: new Date(START.getTime() + DAY_MS) });
+  await seedActiveT90(h);
+  const gate = (await h.service.getPoolTelemetry()).activationGate;
+  assert.equal(gate.projection.cycleDays, 89);
+  assert.deepEqual(gate.projection.projectedCycleYield, { raw: "301127", decimals: 6 });
+  assert.equal(gate.open, true);
+  assert.deepEqual(gate.blockers, []);
+  assert.deepEqual(gate.projection.cycleBasis, {
+    kind: "shortest_remaining_lock_term",
+    shortestRemainingTermDays: 89,
+    activeLocksConsidered: 1
+  });
+});
+
+test("a 25-USDC T90 lock with 10 days remaining closes the activation gate", () => {
+  const gate = lockedTierActivationGate([
+    activationLock({ daysRemaining: 10 })
+  ], START);
+  assert.equal(gate.projection.cycleDays, 10);
+  assert.equal(gate.projection.projectedCycleYield.raw, "33834");
+  assert.equal(gate.open, false);
+  assert.deepEqual(gate.blockers, ["projected_cycle_yield_below_2x_friction"]);
+});
+
+test("a new T30 lock shortens the shared cycle and recomputes the larger cohort", () => {
+  const gate = lockedTierActivationGate([
+    activationLock(),
+    activationLock({
+      amountRaw: "10000000",
+      daysRemaining: 30,
+      id: `0x${"ef".repeat(32)}`,
+      tier: "t30"
+    })
+  ], START);
+  assert.equal(gate.totalLocked.raw, "35000000");
+  assert.equal(gate.projection.cycleDays, 30);
+  assert.equal(gate.projection.projectedCycleYield.raw, "142105");
+  assert.equal(gate.projection.cycleBasis.activeLocksConsidered, 2);
+});
+
+test("the 15-USDC activation floor still binds independently of a long cycle", () => {
+  const gate = lockedTierActivationGate([
+    activationLock({ amountRaw: "14999999" })
+  ], START);
+  assert.equal(gate.projection.cycleDays, 89);
+  assert.equal(gate.open, false);
+  assert.deepEqual(gate.blockers, ["locked_cohort_below_minimum"]);
+});
+
+test("activation-gate-cannot-be-config-opened: config and entry overrides cannot override cohort economics", () => {
   const config = loadLockedTierConfig({
     LOCKED_TIERS_ENABLED: "true",
     LOCKED_TIER_ACTIVATION_GATE_OPEN: "true",
-    LOCKED_TIER_PROJECTED_YIELD_RAW: "999999999"
+    LOCKED_TIER_PROJECTED_YIELD_RAW: "999999999",
+    LOCKED_TIER_CYCLE_DAYS: "999",
+    LOCKED_TIER_YIELD_MARGIN_MULTIPLE: "0"
   });
   assert.equal(config.enabled, true);
   assert.equal(Object.hasOwn(config, "activationGateOpen"), false);
-  const gate = lockedTierActivationGate(3_820_000n);
+  const gate = lockedTierActivationGate([{
+    ...activationLock({ amountRaw: "3820000", daysRemaining: 10 }),
+    cycleDays: 999,
+    remainingTermDays: 999,
+    yieldMarginMultiple: 0
+  }], START);
   assert.equal(gate.open, false);
+  assert.equal(gate.projection.cycleDays, 10);
+  assert.equal(gate.friction.marginMultiple, 2);
+  assert.deepEqual(gate.blockers, [
+    "locked_cohort_below_minimum",
+    "projected_cycle_yield_below_2x_friction"
+  ]);
+});
+
+test("an unreadable active-lock composition fails closed with a named reason", () => {
+  const gate = lockedTierActivationGate(undefined, START);
+  assert.equal(gate.open, false);
+  assert.deepEqual(gate.blockers, ["locked_cohort_composition_unavailable"]);
+  assert.equal(gate.projection.cycleDays, null);
+  assert.equal(gate.projection.cycleBasis.activeLocksConsidered, null);
+});
+
+test("zero active locks close cleanly without division by zero", () => {
+  const gate = lockedTierActivationGate([], START);
+  assert.equal(gate.open, false);
+  assert.equal(gate.totalLocked.raw, "0");
+  assert.equal(gate.projection.cycleDays, 0);
+  assert.equal(gate.projection.projectedCycleYield.raw, "0");
+  assert.equal(gate.projection.cycleBasis.activeLocksConsidered, 0);
   assert.deepEqual(gate.blockers, [
     "locked_cohort_below_minimum",
     "projected_cycle_yield_below_2x_friction"
