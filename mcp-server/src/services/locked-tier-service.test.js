@@ -4,6 +4,8 @@ import { Wallet } from "ethers";
 
 import { MemoryStateStore } from "../core/state-store.js";
 import {
+  CREDIT_READ_GRACE_CEILING_MS,
+  CREDIT_READ_GRACE_DEFAULT_MS,
   LOCKED_TIER_EARLY_EXIT_TERMS,
   LOCKED_TIER_YIELD_INACTIVE_TEXT,
   LockedTierService,
@@ -16,10 +18,17 @@ const SIGNER = new Wallet(`0x${"11".repeat(32)}`);
 const START = new Date("2026-08-24T10:00:00.000Z");
 const USDC = "0x1111111111111111111111111111111111111111";
 
-function harness({ liquidRaw = "50000000", creditRaw = "0", now = START } = {}) {
+function harness({
+  liquidRaw = "50000000",
+  creditRaw = "0",
+  creditReadable = true,
+  creditReadGraceMs = CREDIT_READ_GRACE_DEFAULT_MS,
+  now = START
+} = {}) {
   const stateStore = new MemoryStateStore();
   let clock = new Date(now);
   let outstandingDebtRaw = creditRaw;
+  let creditPositionReadable = creditReadable;
   const service = new LockedTierService({
     stateStore,
     accountPositionReader: async (wallet) => ({
@@ -27,15 +36,16 @@ function harness({ liquidRaw = "50000000", creditRaw = "0", now = START } = {}) 
       asset: { address: USDC, symbol: "USDC", decimals: 6 },
       position: { liquidRaw, jobStakeLockedRaw: "0" }
     }),
-    creditPositionReader: async () => ({
-      credit: { available: true, outstandingDebtRaw }
-    }),
+    creditPositionReader: async () => creditPositionReadable
+      ? { credit: { available: true, outstandingDebtRaw } }
+      : { credit: { available: false, reason: "credit_pool_read_failed" } },
     config: {
       enabled: true,
       perWalletCapRaw: 25_000_000n,
       perWalletCapUsdc: "25",
       cohortCapRaw: 1_000_000_000n,
-      cohortCapUsdc: "1000"
+      cohortCapUsdc: "1000",
+      creditReadGraceMs
     },
     chainId: 420_420_419,
     siweDomain: "api.averray.com",
@@ -48,8 +58,24 @@ function harness({ liquidRaw = "50000000", creditRaw = "0", now = START } = {}) 
     stateStore,
     poolInfo: poolInfo(SIGNER.address),
     setNow(value) { clock = new Date(value); },
-    setCredit(value) { outstandingDebtRaw = String(value); }
+    setCredit(value) { outstandingDebtRaw = String(value); },
+    setCreditReadable(value) { creditPositionReadable = Boolean(value); }
   };
+}
+
+async function seedActiveT90(h) {
+  await h.stateStore.upsertLockedTierEntry({
+    id: `0x${"cc".repeat(32)}`,
+    wallet: SIGNER.address.toLowerCase(),
+    tier: "t90",
+    amountRaw: "25000000",
+    lockedAt: START.toISOString(),
+    termDays: 90,
+    expiresAt: "2026-11-22T10:00:00.000Z",
+    consentRef: `0x${"dd".repeat(32)}`,
+    status: "active",
+    publicProfileOptIn: true
+  });
 }
 
 function poolInfo(wallet, overrides = {}) {
@@ -194,18 +220,98 @@ test("outstanding credit refuses a lock and suspends an existing T90 priority pe
   );
 });
 
-test("T90 perks fail closed while the credit position cannot prove no draw", async () => {
-  const h = harness();
-  await signedLock(h, { tier: "t90", publicProfileOptIn: true });
-  h.service.creditPositionReader = async () => ({
-    credit: { available: false, reason: "credit_pool_read_failed" }
-  });
+test("T90 perks fail closed without a cached credit read and after the grace ceiling", async () => {
+  const noCache = harness({ creditReadable: false });
+  await seedActiveT90(noCache);
+  const unavailable = await noCache.service.getWalletState(SIGNER.address);
+  assert.equal(unavailable.tier, "flex");
+  assert.equal(unavailable.perksActive, false);
+  assert.equal(unavailable.perksSuspendedReason, "credit_position_unavailable");
+  assert.equal(unavailable.creditReadStaleSeconds, undefined);
 
-  const state = await h.service.getWalletState(SIGNER.address);
+  const expired = harness();
+  await signedLock(expired, { tier: "t90", publicProfileOptIn: true });
+  expired.setNow(new Date(START.getTime() + CREDIT_READ_GRACE_CEILING_MS + 1));
+  expired.setCreditReadable(false);
+  const state = await expired.service.getWalletState(SIGNER.address);
   assert.equal(state.tier, "flex");
   assert.equal(state.perksActive, false);
   assert.equal(state.perksSuspendedReason, "credit_position_unavailable");
-  assert.equal(await h.service.getPublicCommitment(SIGNER.address), undefined);
+  assert.equal(state.creditReadStaleSeconds, undefined);
+  assert.equal(await expired.service.getPublicCommitment(SIGNER.address), undefined);
+});
+
+test("T90 perks never grace a cached outstanding credit draw", async () => {
+  const h = harness();
+  await signedLock(h, { tier: "t90", publicProfileOptIn: true });
+  h.setCredit("1");
+  assert.equal((await h.service.getWalletState(SIGNER.address)).perksSuspendedReason, "outstanding_credit_draw");
+  h.setNow(new Date(START.getTime() + 60_000));
+  h.setCreditReadable(false);
+  const state = await h.service.getWalletState(SIGNER.address);
+  assert.equal(state.tier, "flex");
+  assert.equal(state.perksActive, false);
+  assert.equal(state.perksSuspendedReason, "outstanding_credit_draw");
+  assert.equal(state.creditReadStaleSeconds, undefined);
+});
+
+test("T90 perks survive one failed credit read for 60s and report staleness", async () => {
+  const h = harness();
+  await signedLock(h, { tier: "t90", publicProfileOptIn: true });
+  h.setNow(new Date(START.getTime() + 60_000));
+  h.setCreditReadable(false);
+  const state = await h.service.getWalletState(SIGNER.address);
+  assert.equal(state.contractualTier, "t90");
+  assert.equal(state.tier, "t90");
+  assert.equal(state.priorityRank, 2);
+  assert.equal(state.perksActive, true);
+  assert.equal(state.perksSuspendedReason, undefined);
+  assert.equal(state.creditReadStaleSeconds, 60);
+  assert.equal((await h.service.getPublicCommitment(SIGNER.address)).committedDepositor, true);
+});
+
+test("credit-read grace cannot be configured above the code ceiling", async () => {
+  const warnings = [];
+  const defaults = loadLockedTierConfig({});
+  const lowered = loadLockedTierConfig({ CREDIT_READ_GRACE_MS: "60000" });
+  const clamped = loadLockedTierConfig(
+    { CREDIT_READ_GRACE_MS: String(CREDIT_READ_GRACE_CEILING_MS * 10) },
+    { logger: { warn: (...args) => warnings.push(args) } }
+  );
+  assert.equal(defaults.creditReadGraceMs, CREDIT_READ_GRACE_DEFAULT_MS);
+  assert.equal(lowered.creditReadGraceMs, 60_000);
+  assert.equal(clamped.creditReadGraceMs, CREDIT_READ_GRACE_DEFAULT_MS);
+  assert.equal(warnings[0][1], "locked_tiers.credit_read_grace_clamped");
+
+  const codeCapped = harness({ creditReadGraceMs: CREDIT_READ_GRACE_CEILING_MS * 10 });
+  await signedLock(codeCapped, { tier: "t90", publicProfileOptIn: true });
+  codeCapped.setNow(new Date(START.getTime() + CREDIT_READ_GRACE_CEILING_MS));
+  codeCapped.setCreditReadable(false);
+  assert.equal(
+    (await codeCapped.service.getWalletState(SIGNER.address)).perksSuspendedReason,
+    "credit_position_unavailable"
+  );
+});
+
+test("lock creation still requires a live readable credit position during grace", async () => {
+  const h = harness();
+  const quote = await h.service.quote(SIGNER.address, {
+    tier: "t90",
+    amountRaw: "10000000",
+    consentNonce: "strictcredit"
+  }, { poolInfo: h.poolInfo });
+  h.setNow(new Date(START.getTime() + 60_000));
+  h.setCreditReadable(false);
+  const consentSignature = await SIGNER.signMessage(quote.consent.message);
+  await assert.rejects(
+    () => h.service.createLock(SIGNER.address, {
+      terms: quote.terms,
+      termsHash: quote.termsHash,
+      consentSignature
+    }, { poolInfo: h.poolInfo }),
+    (error) => error.code === "locked_tier_credit_position_unavailable"
+  );
+  assert.deepEqual(await h.stateStore.listLockedTierEntries(SIGNER.address), []);
 });
 
 test("per-wallet cap and existing pool cap both refuse excess lock creation", async () => {
