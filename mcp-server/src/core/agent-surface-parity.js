@@ -114,6 +114,12 @@ export const UNMAPPED_BY_DESIGN = Object.freeze({
     ...unmappedRoutes("registers interest in a pilot cash line; it records a waitlist intent and moves no balance", [
       ["POST", "/credit/interest"]
     ]),
+    ...unmappedRoutes("prospective consent gate with its own availability-aware onboarding product; it is not a current app action and must not solicit consent while the allocation route is unavailable", [
+      ["GET", "/account/idle-allocation"],
+      ["POST", "/account/idle-allocation/quote"],
+      ["POST", "/account/idle-allocation/consent"],
+      ["POST", "/account/idle-allocation/revoke"]
+    ]),
     ...unmappedRoutes("read-only HTTP surface with no MCP twin of its own; reading it moves nothing", [
       ["GET", "/account/borrow-capacity"],
       ["GET", "/disputes"],

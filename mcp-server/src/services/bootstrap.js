@@ -133,6 +133,10 @@ import { resolveHubNetwork } from "../core/discovery-manifest.js";
 import { EarningsDoorService } from "./earnings-door.js";
 import { LockedTierService, loadLockedTierConfig } from "./locked-tier-service.js";
 import {
+  IdleBalanceConsentService,
+  loadIdleBalanceConsentConfig
+} from "./idle-balance-consent-service.js";
+import {
   FirstWithdrawalGasGrantService,
   loadFirstWithdrawalGasGrantConfig
 } from "./first-withdrawal-gas-grant.js";
@@ -348,6 +352,30 @@ export function createLockedTierService({
   });
 }
 
+export function createIdleBalanceConsentService({
+  gateway,
+  authConfig,
+  stateStore,
+  env = process.env,
+  now = () => new Date()
+} = {}) {
+  const usdc = gateway.config.supportedAssets?.find(
+    (asset) => String(asset.symbol ?? "").toUpperCase() === "USDC"
+  );
+  return new IdleBalanceConsentService({
+    stateStore,
+    config: loadIdleBalanceConsentConfig(env, {
+      chainId: authConfig.chainId,
+      assetAddress: usdc?.address,
+      depositPoolAddress: gateway.config.depositPoolAddress
+    }),
+    chainId: authConfig.chainId,
+    siweDomain: authConfig.domain,
+    publicBaseUrl: env.PUBLIC_BASE_URL ?? `https://${authConfig.domain}`,
+    now
+  });
+}
+
 export function createCreditPoolDoor({ gateway, authConfig, chainReader, workerExposurePolicy, creditBookDoor } = {}) {
   return new CreditPoolDoorService({
     creditPoolAddress: gateway.config.creditPoolAddress,
@@ -510,6 +538,16 @@ export async function createPlatformRuntime() {
       authConfig,
       stateStore,
       workerExposurePolicy,
+      env: process.env
+    })
+  );
+  const idleBalanceConsentService = initStep(
+    "init-idle-balance-consent",
+    logger,
+    () => createIdleBalanceConsentService({
+      gateway,
+      authConfig,
+      stateStore,
       env: process.env
     })
   );
@@ -1131,6 +1169,7 @@ export async function createPlatformRuntime() {
     depositPoolDoor,
     earningsDoor,
     lockedTierService,
+    idleBalanceConsentService,
     creditPoolDoor,
     creditBookDoor,
     creditBookKeeper,

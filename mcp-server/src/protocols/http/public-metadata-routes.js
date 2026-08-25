@@ -160,6 +160,7 @@ export function createPublicMetadataRoutes({
   publicBaseUrl,
   posterOnboardingService,
   lockedTierService,
+  idleBalanceConsentService,
   respond,
   respondText,
   service,
@@ -227,10 +228,11 @@ export function createPublicMetadataRoutes({
     }
 
     if (request.method === "GET" && pathname === "/onboarding") {
-      const [workerDoor, externalBounties, lockedDeposits] = await Promise.all([
+      const [workerDoor, externalBounties, lockedDeposits, idleBalanceAllocation] = await Promise.all([
         posterOnboardingService.getWorkerDoorOnboarding(),
         posterOnboardingService.getExternalBountiesOnboarding(),
-        lockedTierService?.getCapability?.() ?? Promise.resolve(undefined)
+        lockedTierService?.getCapability?.() ?? Promise.resolve(undefined),
+        idleBalanceConsentService?.getCapability?.() ?? Promise.resolve(undefined)
       ]);
       const capabilities = service.getPlatformCapabilities({ chainId: authConfig?.chainId });
       respond(
@@ -241,12 +243,19 @@ export function createPublicMetadataRoutes({
           ...(lockedDeposits ? {
             products: {
               ...capabilities.products,
-              lockedDeposits
+              lockedDeposits,
+              ...(idleBalanceAllocation ? { idleBalanceAllocation } : {})
+            }
+          } : idleBalanceAllocation ? {
+            products: {
+              ...capabilities.products,
+              idleBalanceAllocation
             }
           } : {}),
           onboarding: {
             ...capabilities.onboarding,
-            ...(lockedDeposits ? { lockedDeposits } : {})
+            ...(lockedDeposits ? { lockedDeposits } : {}),
+            ...(idleBalanceAllocation ? { idleBalanceAllocation } : {})
           },
           workerDoor,
           externalBounties
