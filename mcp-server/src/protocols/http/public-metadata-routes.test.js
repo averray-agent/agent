@@ -64,6 +64,10 @@ function makeHarness(overrides = {}) {
     },
     minimumRewardUsdc: overrides.minimumRewardUsdc ?? "1.25",
     publicBaseUrl: overrides.publicBaseUrl ?? " https://api.averray.com ",
+    getX402Discovery: async () => {
+      calls.push(["getX402Discovery"]);
+      return overrides.x402Discovery ?? { x402Version: 2, resources: [] };
+    },
     posterOnboardingService: {
       getWorkerDoorOnboarding: async () => {
         calls.push(["getWorkerDoorOnboarding"]);
@@ -145,6 +149,8 @@ test("A2 arrival payload: GET / identifies Averray and points to site, docs, and
   assert.ok(response.body.endpoints.includes("/poster/onboarding"));
   assert.ok(response.body.endpoints.includes("/poster/jobs"));
   assert.ok(response.body.endpoints.includes("/llms.txt"));
+  assert.ok(response.body.endpoints.includes("/.well-known/x402"));
+  assert.ok(response.body.endpoints.includes("/jobs/x402"));
   assert.ok(response.body.endpoints.includes("/.well-known/badge-receipt-jwks.json"));
   assert.ok(response.body.endpoints.every((endpoint) => !endpoint.includes("/jobs/draft")));
   assert.ok(!response.body.endpoints.includes("/strategies"));
@@ -177,6 +183,39 @@ test("A2 arrival payload: GET / identifies Averray and points to site, docs, and
   assert.ok(response.body.endpoints.includes("/status/providers") === false);
   assert.deepEqual(calls, [
     ["respond", { statusCode: 200, body: response.body, headers: {} }],
+  ]);
+});
+
+test("GET /.well-known/x402 is public cacheable and contains no wallet-specific data", async () => {
+  const discovery = {
+    x402Version: 2,
+    resources: [{
+      resource: "https://api.averray.com/verify/runs",
+      method: "POST",
+      accepts: [{
+        scheme: "exact",
+        network: "eip155:8453",
+        asset: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+        amount: "5000000",
+        payTo: "0x1013e3fe3f6deb4e61dc023ff69d420dd9ce8f9f",
+        extra: { name: "USD Coin", version: "2" }
+      }]
+    }]
+  };
+  const { calls, response, route } = makeHarness({ x402Discovery: discovery });
+
+  assert.equal(await route({
+    request: { method: "GET", headers: {} },
+    response,
+    pathname: "/.well-known/x402"
+  }), true);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, discovery);
+  assert.deepEqual(response.headers, { "cache-control": "public, max-age=300" });
+  assert.doesNotMatch(JSON.stringify(response.body), /wallet|visitor|clientIp|userAgent/iu);
+  assert.deepEqual(calls, [
+    ["getX402Discovery"],
+    ["respond", { statusCode: 200, body: discovery, headers: response.headers }]
   ]);
 });
 

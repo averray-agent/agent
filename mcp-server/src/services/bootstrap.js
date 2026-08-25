@@ -1093,6 +1093,7 @@ export async function createPlatformRuntime() {
     rewardBankHealthProvider,
     policyService,
     verifierService,
+    verificationPaymentGate,
     verificationProfileRegistry,
     verificationRunService,
     verificationRunFinalizer,

@@ -27,6 +27,7 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
     verify: {
       summary: "Paid verification runs against pinned, immutable profiles. Inconclusive runs are never billed.",
       profiles: "https://api.averray.com/verify/profiles",
+      x402Discovery: "https://api.averray.com/.well-known/x402",
       payment: "x402 (EIP-3009) — flat per-run USDC on Base",
       page: "https://averray.com/verify"
     },
@@ -119,6 +120,10 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/schemas/jobs"));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/session/state-machine"));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/verify/profiles"));
+  assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/.well-known/x402"));
+  assert.ok(manifest.publicEndpoints.some((entry) => (
+    entry.path === "/jobs/x402" && entry.method === "POST"
+  )));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/verify/runs"));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/verify/runs/:runId"));
   assert.ok(manifest.tools.some((tool) => tool.name === "listJobSchemas"));
@@ -167,6 +172,27 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.ok(manifest.onboarding.actionRequirements.some((entry) => (
     entry.method === "POST" && entry.path === "/jobs/claim" && entry.requiredAction === "wallet_sign_in"
   )));
+});
+
+test("x402 discovery manifest consistently advertises the well-known and Base-only poster doors", () => {
+  const manifest = buildDiscoveryManifest({ chainId: POLKADOT_HUB_MAINNET_CHAIN_ID });
+
+  assert.equal(
+    manifest.products.verify.x402Discovery,
+    "https://api.averray.com/.well-known/x402"
+  );
+  assert.deepEqual(
+    manifest.publicEndpoints.find((entry) => entry.path === "/.well-known/x402"),
+    {
+      method: "GET",
+      path: "/.well-known/x402",
+      description: "Public x402 v2 paid-resource discovery derived from the same Base payment configuration as the live challenge."
+    }
+  );
+  const poster = manifest.publicEndpoints.find((entry) => entry.path === "/jobs/x402");
+  assert.equal(poster.method, "POST");
+  assert.match(poster.description, /Base-only x402/u);
+  assert.doesNotMatch(JSON.stringify({ discovery: manifest.products.verify, poster }), /420420419/u);
 });
 
 test("A1 manifest payload: walletless arrival states the perk, proof, and limits in one block", () => {

@@ -142,6 +142,7 @@ export function metricPathLabel(pathname) {
     "/mcp",
     "/agent-tools.json",
     "/.well-known/agent-tools.json",
+    "/.well-known/x402",
     "/llms.txt",
     "/onboarding",
     "/monitor/bank-feed",

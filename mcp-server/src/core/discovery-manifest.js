@@ -76,8 +76,10 @@ const DISCOVERY_PUBLIC_ENDPOINTS = withDefaultGetMethod([
   { path: "/health", description: "Liveness plus serviceHealth/capabilityHealth for state store, submitted-job settlement scheduler, blockchain, treasury mutations, XCM observer, indexer, and gas sponsor." },
   { path: "/metrics", description: "Prometheus text-format metrics. Bearer-gated in production via METRICS_BEARER_TOKEN." },
   { path: "/llms.txt", description: "Agent-adjusted orientation mirror served on the API host." },
+  { path: "/.well-known/x402", description: "Public x402 v2 paid-resource discovery derived from the same Base payment configuration as the live challenge." },
   { path: "/onboarding", description: "Canonical platform capabilities + tool list." },
   { path: "/poster/onboarding", description: "Live machine-readable external-bounty posting rail, economics, verifier modes, and worker bond facts." },
+  { method: "POST", path: "/jobs/x402", description: "Base-only x402 job-posting door using the live external-poster ramp and SIGN-IN-WITH-X binding." },
   { path: "/pool", description: "Public live DepositPool caps, headroom, yield, withdrawal, and risk disclosure; a wallet bearer token adds principal vesting and capital-backed capacity." },
   { path: "/jobs", description: "Public job catalog (no auth)." },
   { path: "/jobs/definition?jobId=X", description: "Canonical job definition by id." },
@@ -670,6 +672,7 @@ const buildBaseManifest = (network) => ({
     verify: {
       summary: "Paid verification runs against pinned, immutable profiles. Inconclusive runs are never billed.",
       profiles: "https://api.averray.com/verify/profiles",
+      x402Discovery: "https://api.averray.com/.well-known/x402",
       payment: "x402 (EIP-3009) — flat per-run USDC on Base",
       page: "https://averray.com/verify"
     },
