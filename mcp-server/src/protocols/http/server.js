@@ -29,6 +29,7 @@ import { createAdminSessionsRoutes } from "./admin-sessions-routes.js";
 import { createAdminStatusRoutes } from "./admin-status-routes.js";
 import { createAdminTreasuryRoutes } from "./admin-treasury-routes.js";
 import { createAdminXcmRoutes } from "./admin-xcm-routes.js";
+import { createAdminYieldSubsidyRoutes } from "./admin-yield-subsidy-routes.js";
 import {
   createAdminAgentTransferRoutes,
   resolveAgentTransferRecipientAllowlist,
@@ -123,6 +124,7 @@ const {
   creditBookDoor,
   l3PostingKeeper,
   transparencyService,
+  yieldAttributionService,
   stateStore,
   contentRecoveryLog,
   gateway,
@@ -444,6 +446,12 @@ const handleAdminTreasuryRoute = createAdminTreasuryRoutes({
   authMiddleware,
   respond,
   treasurySummary
+});
+const handleAdminYieldSubsidyRoute = createAdminYieldSubsidyRoutes({
+  authMiddleware,
+  readJsonBody,
+  respond,
+  yieldAttributionService
 });
 
 const overnightLedger = new OvernightLedgerService({
@@ -1128,6 +1136,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleAdminTreasuryRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleAdminYieldSubsidyRoute({ request, response, url, pathname })) {
       return;
     }
 

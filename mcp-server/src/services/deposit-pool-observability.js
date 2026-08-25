@@ -169,6 +169,7 @@ export class DepositPoolObservabilityService {
     provider,
     chainReader,
     catalogueDailyBudget,
+    yieldAttributionService,
     eventWindowBlocks = DEFAULT_EVENT_WINDOW_BLOCKS,
     recentFlowLimit = DEFAULT_RECENT_FLOW_LIMIT,
     venueMark = undefined
@@ -177,6 +178,7 @@ export class DepositPoolObservabilityService {
     this.poolAddress = poolAddress ? getAddress(poolAddress) : "";
     this.chainReader = chainReader ?? (provider ? new EvmDepositPoolChainReader(provider) : undefined);
     this.catalogueDailyBudget = catalogueDailyBudget;
+    this.yieldAttributionService = yieldAttributionService;
     this.eventWindowBlocks = eventWindowBlocks;
     this.recentFlowLimit = recentFlowLimit;
   }
@@ -215,6 +217,18 @@ export class DepositPoolObservabilityService {
       unreadableReason: state.venueMarkUnreadable
     });
     const yieldState = depositPoolYieldStatus(deployed);
+    const yieldAttribution = typeof this.yieldAttributionService?.getAttribution === "function"
+      ? await this.yieldAttributionService.getAttribution({
+          snapshot: {
+            blockNumber: head,
+            totalAssets,
+            totalSupply: totalShares,
+            bufferAssets: buffer,
+            deployedPrincipal: deployed,
+            venueMarkedAssets: state.venueMarkedAssets
+          }
+        })
+      : undefined;
     const fromBlock = Math.max(0, head - this.eventWindowBlocks + 1);
     const window = { fromBlock, toBlock: head, maxBlocks: this.eventWindowBlocks, recentLimit: this.recentFlowLimit };
     let flows;
@@ -275,6 +289,7 @@ export class DepositPoolObservabilityService {
         totalSupplyRaw: totalShares,
         shareScale: SHARE_PRICE_SCALE
       }),
+      ...(yieldAttribution ? { yieldAttribution } : {}),
       caps: {
         totalAssetCap: amount(totalAssetCap),
         perAgentAssetCap: amount(perAgentAssetCap),

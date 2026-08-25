@@ -654,6 +654,16 @@ test("a locked-tier quote discloses the venue mark beside the cost-basis NAV", a
       depositsBlocked: true,
       shortfall: { raw: "100000", decimals: 6 },
       source: "venue_adapter_managed_assets"
+    },
+    yieldAttribution: {
+      schemaVersion: 1,
+      status: "attributed",
+      gain: {
+        cumulativeNav: { raw: "100000", decimals: 6 },
+        venueEarned: { raw: "60000", decimals: 6 },
+        operatorAdded: { raw: "40000", decimals: 6 }
+      },
+      wallet: { address: SIGNER.address, gain: { raw: "123", decimals: 6 } }
     }
   });
   const quote = await h.service.quote(SIGNER.address, {
@@ -665,12 +675,16 @@ test("a locked-tier quote discloses the venue mark beside the cost-basis NAV", a
   assert.equal(quote.nav.sharePrice.assetsPerShare.raw, "994824");
   assert.equal(quote.markedSharePrice.assetsPerShare.raw, "989946");
   assert.equal(quote.venueMark.status, "shortfall_exceeds_tolerance");
+  assert.equal(quote.yieldAttribution.gain.venueEarned.raw, "60000");
+  assert.equal(quote.yieldAttribution.gain.operatorAdded.raw, "40000");
+  assert.equal(quote.yieldAttribution.wallet, undefined, "a pool holding must not be presented as locked-balance gain");
   // The lock is still quoted: it encumbers AAC liquid and mints no pool
   // shares, so the deposit gate deliberately does not reach this path.
   assert.equal(quote.consent.required, true);
   // The hashed consent artifact keeps its existing shape.
   assert.equal(quote.terms.venueMark, undefined);
   assert.equal(quote.terms.markedSharePrice, undefined);
+  assert.equal(quote.terms.yieldAttribution, undefined);
 });
 
 test("a quote with no venue mark available reports null rather than an absent field", async () => {

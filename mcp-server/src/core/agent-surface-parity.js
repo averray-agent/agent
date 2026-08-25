@@ -168,6 +168,7 @@ export const UNMAPPED_BY_DESIGN = Object.freeze({
       ["GET", "/admin/worker-journeys"],
       ["GET", "/admin/status"],
       ["GET", "/admin/treasury/summary"],
+      ["GET", "/admin/deposit-pool/subsidies"],
       ["GET", "/admin/github/status"],
       ["GET", "/admin/platform-fault-remediations"],
       ["GET", "/admin/usdc-liquidity/status"],
@@ -185,6 +186,9 @@ export const UNMAPPED_BY_DESIGN = Object.freeze({
     ...roleGatedRoutes("treasury movement performed by the operator", [
       ["POST", "/admin/agent-transfers"],
       ["POST", "/admin/bootstrap-self-report/send"]
+    ]),
+    ...roleGatedRoutes("operator accounting attestation; records a verified subsidy transaction without moving funds", [
+      ["POST", "/admin/deposit-pool/subsidies"]
     ]),
     ...roleGatedRoutes("capability and service-token administration", [
       ["GET", "/admin/capability-grants"],

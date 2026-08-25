@@ -329,6 +329,7 @@ export class LockedTierService {
       nav: pool.nav,
       venueMark: pool.venueMark,
       markedSharePrice: pool.markedSharePrice,
+      yieldAttribution: pool.yieldAttribution,
       riskSentence: LOCKED_TIER_RISK_SENTENCE,
       balance: {
         liquid: amount(liquidRaw),
@@ -931,8 +932,18 @@ function poolSnapshot(poolInfo, wallet) {
     // of the hashed consent artifact, and this PR discloses a price without
     // changing what a depositor consents to.
     venueMark: poolInfo.venueMark ?? null,
-    markedSharePrice: poolInfo.markedSharePrice ?? null
+    markedSharePrice: poolInfo.markedSharePrice ?? null,
+    yieldAttribution: poolYieldAttribution(poolInfo.yieldAttribution)
   };
+}
+
+function poolYieldAttribution(attribution) {
+  if (!attribution || typeof attribution !== "object" || Array.isArray(attribution)) return null;
+  // Locked AAC balances are not DepositPool shares. The quote may disclose
+  // the pool-level split beside NAV, but must not present an authenticated
+  // wallet's separate pool holding as gain on the proposed lock.
+  const { wallet: _wallet, ...poolLevel } = attribution;
+  return poolLevel;
 }
 
 function parseBoolean(value, fallback, name) {

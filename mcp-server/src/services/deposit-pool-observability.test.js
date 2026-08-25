@@ -94,6 +94,24 @@ test("deposit-pool snapshot distinguishes a chain-read born-empty pool from unav
   });
 });
 
+test("deposit-pool monitor serves the same named-block yield attribution", async () => {
+  const calls = [];
+  const attribution = { schemaVersion: 1, status: "zero", subsidyLedger: { entryCount: 0 } };
+  const snapshot = await service(reader(), {
+    yieldAttributionService: {
+      async getAttribution(input) {
+        calls.push(input);
+        return attribution;
+      }
+    }
+  }).getSnapshot();
+
+  assert.deepEqual(snapshot.yieldAttribution, attribution);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].snapshot.blockNumber, HEAD);
+  assert.equal(calls[0].snapshot.totalSupply, 0n);
+});
+
 test("catalogue budget read failure degrades only its board tile", async () => {
   const snapshot = await service(reader(), {
     catalogueDailyBudget: {

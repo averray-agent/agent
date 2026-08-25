@@ -39,7 +39,7 @@ function state(overrides = {}) {
   };
 }
 
-function service({ snapshot = state(), convertToShares, estimateGas, lockedTierService, venueMark } = {}) {
+function service({ snapshot = state(), convertToShares, estimateGas, lockedTierService, yieldAttributionService, venueMark } = {}) {
   const estimates = [];
   const reader = {
     async readSnapshot({ wallet }) {
@@ -67,6 +67,7 @@ function service({ snapshot = state(), convertToShares, estimateGas, lockedTierS
       rpcUrls: ["https://polkadot-asset-hub-rpc.polkadot.io"],
       chainReader: reader,
       lockedTierService,
+      yieldAttributionService,
       ...(venueMark ? { venueMark } : {}),
       workerExposurePolicy: {
         async capacityForWallet() {
@@ -135,6 +136,26 @@ test("pool info exposes locked-cohort activation telemetry from the single gate 
 
   assert.deepEqual((await door.getInfo()).lockedDeposits, telemetry);
   assert.equal(observedPrincipal, 0n);
+});
+
+test("pool info serves shared yield attribution at the same named block and wallet", async () => {
+  const calls = [];
+  const attribution = { schemaVersion: 1, status: "zero", gain: { cumulativeNav: { raw: "0", decimals: 6 } } };
+  const door = service({
+    yieldAttributionService: {
+      async getAttribution(input) {
+        calls.push(input);
+        return attribution;
+      }
+    }
+  }).value;
+
+  const info = await door.getInfo(WALLET);
+  assert.deepEqual(info.yieldAttribution, attribution);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].wallet, WALLET);
+  assert.equal(calls[0].snapshot.blockNumber, 19_200_000);
+  assert.equal(calls[0].snapshot.wallet.shares, 10_000_000n);
 });
 
 test("profile without a pool returns unavailable without fabricated zero fields", async () => {
