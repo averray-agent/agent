@@ -88,7 +88,19 @@ jobs:
         #   gh api repos/foundry-rs/foundry-toolchain/git/refs/tags/v1 --jq '.object.sha'
         # and verify the new SHA against the foundry-rs release notes
         # before updating.
-        uses: foundry-rs/foundry-toolchain@c7450ba673e133f5ee30098b3b54f444d3a2ca2d # v1
+        #
+        # Refreshed 2026-08-25 (c7450ba6 -> 908c5403, 24 commits) because the
+        # old pin broke: foundryup is now shipped as a COMPILED BINARY, and
+        # c7450ba6 invoked it as `bash "${foundryup}" ...`, which fails with
+        #   /home/runner/.foundry/bin/foundryup: cannot execute binary file
+        # 908c5403 runs it directly (`run(foundryup, args)`), which is the fix.
+        # Verified before updating: 908c5403 is the live v1 target, a
+        # GitHub-signature-verified commit; its installer URL
+        # (foundry-rs/foundryup@a27902ef/foundryup-init.sh) returns 200 and a
+        # valid POSIX script; the 24 intervening commits are dependabot/CI
+        # upkeep plus #135, #148 and #152 (foundryup invocation, download
+        # hardening, and the move to the foundryup installer repo).
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
         with:
           # Pinned (was "stable"): forge 1.7.1 is the toolchain that
           # reproduces the D-03 pinned EscrowCore v3 masked runtime hash.
