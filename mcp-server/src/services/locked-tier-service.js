@@ -23,6 +23,12 @@ export const LOCKED_TIER_CYCLE_FRICTION_RAW = 60_000n;
 export const LOCKED_TIER_YIELD_MARGIN_MULTIPLE = 2n;
 export const LOCKED_TIER_YIELD_INACTIVE_TEXT =
   "yield inactive — pool below activation threshold.";
+export const LOCKED_TIER_YIELD_ELIGIBLE_NOT_DEPLOYED_TEXT =
+  "NAV share eligible, not deployed — the locked cohort satisfies the automatic activation gate, but no pool principal is deployed to a venue.";
+export const LOCKED_TIER_YIELD_ACTIVE_TEXT =
+  "NAV share active — pool principal is deployed to the configured venue and the locked cohort satisfies the automatic activation gate.";
+export const LOCKED_TIER_YIELD_UNOBSERVED_TEXT =
+  "NAV share eligibility is known, but deployed principal is not available on this surface; read /pool for venue-deployment truth.";
 export const LOCKED_TIER_EARLY_EXIT_TERMS =
   "Request at any time; principal returns via the normal withdrawal path after the standard vesting delay; forfeits: current-period yield share + tier perks (drops to Flex immediately). No principal haircut.";
 export const LOCKED_TIER_RISK_SENTENCE =
@@ -168,11 +174,37 @@ export function lockedTierActivationGate(entries, observedAt = new Date()) {
       marginMultiple: Number(LOCKED_TIER_YIELD_MARGIN_MULTIPLE),
       requiredProjectedYield: amount(requiredProjectedYieldRaw)
     },
-    override: "none",
-    yieldStatusText: open
-      ? "NAV share active — the locked cohort satisfies the automatic activation gate."
-      : LOCKED_TIER_YIELD_INACTIVE_TEXT
+    override: "none"
   };
+}
+
+/**
+ * Join the activation permission to the deployed-principal observation.
+ * `open` alone can never claim activity: zero is eligible-but-not-deployed,
+ * positive is active, and an absent observation stays explicitly unknown.
+ */
+export function lockedTierActivationState(
+  entries,
+  observedAt = new Date(),
+  { deployedPrincipalRaw = undefined } = {}
+) {
+  const activationGate = lockedTierActivationGate(entries, observedAt);
+  return {
+    ...activationGate,
+    yieldStatusText: lockedTierYieldStatusText({
+      gateOpen: activationGate.open,
+      deployedPrincipalRaw
+    })
+  };
+}
+
+export function lockedTierYieldStatusText({ gateOpen, deployedPrincipalRaw } = {}) {
+  if (!gateOpen) return LOCKED_TIER_YIELD_INACTIVE_TEXT;
+  const deployedPrincipal = observedRaw(deployedPrincipalRaw);
+  if (deployedPrincipal === null) return LOCKED_TIER_YIELD_UNOBSERVED_TEXT;
+  return deployedPrincipal > 0n
+    ? LOCKED_TIER_YIELD_ACTIVE_TEXT
+    : LOCKED_TIER_YIELD_ELIGIBLE_NOT_DEPLOYED_TEXT;
 }
 
 export function lockedTierPriority(tier) {
@@ -254,7 +286,9 @@ export class LockedTierService {
     const pool = poolSnapshot(poolInfo, wallet);
     const globalActiveRaw = sumActive(allEntries);
     this.#assertPoolCapacity({ requested, activeRaw, globalActiveRaw, pool });
-    const gate = lockedTierActivationGate(activeLocks(allEntries), this.now());
+    const gate = lockedTierActivationState(activeLocks(allEntries), this.now(), {
+      deployedPrincipalRaw: pool.deployedPrincipalRaw
+    });
     const issuedAt = this.now();
     const quoteExpiresAt = new Date(issuedAt.getTime() + QUOTE_TTL_MS);
     const terms = {
@@ -486,7 +520,7 @@ export class LockedTierService {
     };
   }
 
-  async getWalletState(walletInput) {
+  async getWalletState(walletInput, { deployedPrincipalRaw = undefined } = {}) {
     const wallet = normalizeWalletAddress(walletInput);
     const [entries, credit] = await Promise.all([
       this.#currentEntries(wallet),
@@ -502,7 +536,9 @@ export class LockedTierService {
     const effectiveTier = t90Suspended ? "flex" : highest?.tier ?? "flex";
     const priority = lockedTierPriority(effectiveTier);
     const allEntries = await this.#currentEntries();
-    const activationGate = lockedTierActivationGate(activeLocks(allEntries), this.now());
+    const activationGate = lockedTierActivationState(activeLocks(allEntries), this.now(), {
+      deployedPrincipalRaw
+    });
     return {
       enabledForNewLocks: this.config.enabled,
       tier: effectiveTier,
@@ -532,10 +568,12 @@ export class LockedTierService {
     return { tier: state.tier, rank: state.priorityRank, perksActive: state.perksActive };
   }
 
-  async getPoolTelemetry(walletInput = undefined) {
+  async getPoolTelemetry(walletInput = undefined, { deployedPrincipalRaw = undefined } = {}) {
     const entries = await this.#currentEntries();
     const cohort = activeLocks(entries);
-    const activationGate = lockedTierActivationGate(cohort, this.now());
+    const activationGate = lockedTierActivationState(cohort, this.now(), {
+      deployedPrincipalRaw
+    });
     return {
       enabledForNewLocks: this.config.enabled,
       product: "locked deposit",
@@ -545,12 +583,14 @@ export class LockedTierService {
         activeLockCount: cohort.length,
         totalLocked: amount(sumActive(cohort))
       },
-      ...(walletInput ? { wallet: await this.getWalletState(walletInput) } : {})
+      ...(walletInput ? {
+        wallet: await this.getWalletState(walletInput, { deployedPrincipalRaw })
+      } : {})
     };
   }
 
-  async getCapability() {
-    const telemetry = await this.getPoolTelemetry();
+  async getCapability({ deployedPrincipalRaw = undefined } = {}) {
+    const telemetry = await this.getPoolTelemetry(undefined, { deployedPrincipalRaw });
     return {
       status: this.config.enabled ? "available" : "flag_off",
       enabled: this.config.enabled,
@@ -871,6 +911,7 @@ function poolSnapshot(poolInfo, wallet) {
   return {
     globalHeadroomRaw,
     perAgentHeadroomRaw,
+    deployedPrincipalRaw: observedRaw(poolInfo.venueMark?.costBasis?.raw),
     nav: {
       block: poolInfo.block,
       asset: poolInfo.asset,
@@ -972,6 +1013,13 @@ function nonNegativeRaw(value) {
   } catch {
     return 0n;
   }
+}
+
+function observedRaw(value) {
+  if (value === undefined || value === null) return null;
+  const raw = String(value).trim();
+  if (!/^\d+$/u.test(raw)) return null;
+  return BigInt(raw);
 }
 
 function activationCohort(entries, observedAt) {
