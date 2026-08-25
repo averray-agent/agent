@@ -210,7 +210,7 @@ test("SIWS Stage 2: native signatures keep the shared domain chain and expiry er
   }
 });
 
-test("SIWS Stage 2: native capabilities are closed read-only and earning refuses actionably", async () => {
+test("SIWS Stage 2: native capabilities stay read-only when the stage-3 mapping proof is unavailable", async () => {
   const native = nativeSigner("sr25519", 17);
   const walletIdentity = parseWalletIdentity(native.address);
   const { token } = signToken({
@@ -248,17 +248,21 @@ test("SIWS Stage 2: native capabilities are closed read-only and earning refuses
       ),
       (error) => {
         assert.ok(error instanceof AuthorizationError);
-        assert.equal(error.code, "substrate_native_read_only");
+        assert.equal(error.code, "substrate_mapping_unreadable");
         assert.equal(
           error.message,
-          "This is a Substrate-native read-only session. Mapping and earning arrive in a later stage; meanwhile it can browse jobs and read its own account and session history."
+          "This Substrate-native account's pallet_revive mapping could not be read, so earning is refused closed. Retry when Asset Hub is readable; if the account is not mapped, call pallet_revive.map_account first. Its refundable deposit is paid by the account owner, not Averray."
         );
         assert.deepEqual(error.details.requiredCapabilities, requiredCapabilities);
         assert.deepEqual(error.details.missingCapabilities, requiredCapabilities);
         assert.equal(error.details.sessionType, "substrate-native");
         assert.equal(error.details.access, "read_only");
         assert.equal(error.details.earningEnabled, false);
-        assert.equal(error.details.mappingGate, "stage_3");
+        assert.equal(error.details.mapping.status, "unreadable");
+        assert.equal(error.details.mapping.reason, "mapping_unreadable");
+        assert.equal(error.details.mapping.remedy, "pallet_revive.map_account");
+        assert.equal(error.details.mapping.deposit.paidByAverray, false);
+        assert.equal(error.details.mapping.deposit.refundableOn, "unmap");
         assert.deepEqual(error.details.allowedMeanwhile, [
           "GET /me",
           "GET /jobs",

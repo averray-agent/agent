@@ -83,6 +83,10 @@ import {
 import { XcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
 import { XcmObservationRelayService } from "./xcm-observation-relay.js";
 import { VenueBalanceReader } from "./venue-balance-reader.js";
+import {
+  SubstrateMappingGate,
+  loadSubstrateMappingGateConfig
+} from "./substrate-mapping-gate.js";
 import { XcmBalanceObserverService } from "./xcm-balance-observer.js";
 import { createBankXcmV22RuntimeServices } from "./bank-xcm-v22-runtime.js";
 import {
@@ -836,6 +840,13 @@ export async function createPlatformRuntime() {
     })
   );
   const venueBalanceReader = initStep("init-venue-balance-reader", logger, () => new VenueBalanceReader());
+  const substrateMappingGate = initStep("init-substrate-mapping-gate", logger, () =>
+    new SubstrateMappingGate({
+      balanceReader: venueBalanceReader,
+      ...loadSubstrateMappingGateConfig(process.env, { logger }),
+      logger
+    })
+  );
   const bankXcmFlowRequested = parseBooleanEnv(process.env.BANK_XCM_FLOW_ENABLED);
   const bankUsdcAsset = gateway.config.supportedAssets?.find(
     (asset) => String(asset.symbol ?? "").toUpperCase() === "USDC"
@@ -1058,7 +1069,12 @@ export async function createPlatformRuntime() {
   externalPosterReviewEscalator.start();
   firstExternalAgentAlert.start();
 
-  const authMiddleware = createAuthMiddleware({ authConfig, stateStore, logger });
+  const authMiddleware = createAuthMiddleware({
+    authConfig,
+    stateStore,
+    substrateMappingGate,
+    logger
+  });
   const rateLimiter = createRateLimiter({ stateStore, logger });
   const rateLimitConfig = loadRateLimitConfig();
   const httpConfig = loadHttpConfig();
@@ -1117,6 +1133,7 @@ export async function createPlatformRuntime() {
     creditBookKeeper,
     l3PostingKeeper,
     venueBalanceReader,
+    substrateMappingGate,
     xcmObservationRelay,
     upstreamStatusPoller,
     jobStaleSweeper,

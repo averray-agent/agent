@@ -69,14 +69,25 @@ function supportsRefreshStore(stateStore) {
   );
 }
 
-function buildTokenResponse({ token, claims, wallet, roles, authCapabilities, extra = {} }) {
+function buildTokenResponse({
+  token,
+  claims,
+  wallet,
+  roles,
+  authCapabilities,
+  substrateMapping = undefined,
+  extra = {}
+}) {
   return {
     token,
     wallet,
     roles,
-    capabilities: authCapabilities.resolveCapabilities(claims),
+    capabilities: authCapabilities.resolveCapabilities(claims, {
+      substrateNativeMapped: substrateMapping?.mapped === true
+    }),
     expiresAt: new Date(claims.exp * 1000).toISOString(),
     tokenType: "Bearer",
+    ...(substrateMapping ? { substrateMapping } : {}),
     ...extra,
   };
 }
@@ -105,6 +116,7 @@ export function createAuthRoutes({
   rotateRefreshTokenImpl = rotateRefreshToken,
   signTokenFromConfigImpl = signTokenFromConfig,
   stateStore,
+  substrateMappingGate,
   verifySiweMessageImpl = verifySiweMessage,
 }) {
   function respondHandled(response, statusCode, body, headers = {}) {
@@ -237,6 +249,11 @@ export function createAuthRoutes({
         { expiresInSeconds: authConfig.tokenTtlSeconds },
         authConfig,
       );
+      const substrateMapping = await readNativeMappingForCapabilities(
+        walletIdentity,
+        substrateMappingGate,
+        logger
+      );
 
       let setCookieHeader = null;
       try {
@@ -287,6 +304,7 @@ export function createAuthRoutes({
           wallet: subject,
           roles,
           authCapabilities,
+          substrateMapping,
           extra: walletIdentity.source === "ss58" ? { walletIdentity } : {},
         }),
         setCookieHeader ? { "Set-Cookie": setCookieHeader } : {}
@@ -474,6 +492,9 @@ export function createAuthRoutes({
         { expiresInSeconds: authConfig.tokenTtlSeconds },
         authConfig,
       );
+      const substrateMapping = nativeIdentity
+        ? await readNativeMappingForCapabilities(nativeIdentity, substrateMappingGate, logger)
+        : undefined;
 
       return respondHandled(response, 200, buildTokenResponse({
         token,
@@ -481,6 +502,7 @@ export function createAuthRoutes({
         wallet: subject,
         roles: effectiveRoles,
         authCapabilities,
+        substrateMapping,
         extra: {
           rotatedFromJti: oldJti,
           ...(nativeIdentity ? { walletIdentity: nativeIdentity } : {})
@@ -490,6 +512,29 @@ export function createAuthRoutes({
 
     return false;
   };
+}
+
+async function readNativeMappingForCapabilities(walletIdentity, substrateMappingGate, logger) {
+  if (walletIdentity?.source !== "ss58" || typeof substrateMappingGate?.check !== "function") {
+    return undefined;
+  }
+  try {
+    return await substrateMappingGate.check(walletIdentity);
+  } catch (error) {
+    logger?.warn?.(
+      { h160: walletIdentity.h160, error: error?.message ?? String(error) },
+      "substrate_mapping.auth_capability_read_failed"
+    );
+    return {
+      mapped: false,
+      mappingRequired: true,
+      status: "unreadable",
+      reason: "mapping_unreadable",
+      failure: "mapping_gate_failed",
+      h160: walletIdentity.h160,
+      ss58: walletIdentity.ss58
+    };
+  }
 }
 
 function publishJourneyAuthEvent(eventBus, { wallet, topic, timestamp, outcome }) {
