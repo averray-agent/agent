@@ -39,7 +39,7 @@ function state(overrides = {}) {
   };
 }
 
-function service({ snapshot = state(), convertToShares, estimateGas, lockedTierService } = {}) {
+function service({ snapshot = state(), convertToShares, estimateGas, lockedTierService, venueMark } = {}) {
   const estimates = [];
   const reader = {
     async readSnapshot({ wallet }) {
@@ -67,6 +67,7 @@ function service({ snapshot = state(), convertToShares, estimateGas, lockedTierS
       rpcUrls: ["https://polkadot-asset-hub-rpc.polkadot.io"],
       chainReader: reader,
       lockedTierService,
+      ...(venueMark ? { venueMark } : {}),
       workerExposurePolicy: {
         async capacityForWallet() {
           return {
@@ -259,4 +260,116 @@ test("door inputs cannot accept keys, signatures, signed blobs, or relay instruc
     }),
     /unsupported field/iu
   );
+});
+
+// ── Venue-mark gate ──────────────────────────────────────────────────────────
+// Live mainnet state at Asset Hub block 19868506, the block before the external
+// deposit at 19868507. The pool quoted 0.994825 carrying its venue leg at a
+// 9.500000 cost basis while its own adapter reported 9.400000 landed — an
+// honest 0.989946. The depositor received 5.026011 shares instead of 5.050775.
+const MISPRICED = {
+  blockNumber: 19_868_506,
+  totalAssets: 20_395_226n,
+  totalSupply: 20_501_328n,
+  bufferAssets: 10_895_226n,
+  deployedPrincipal: 9_500_000n,
+  venueMarkedAssets: 9_400_000n
+};
+
+test("deposit is refused when the venue mark contradicts cost basis beyond tolerance", async () => {
+  const { value: door } = service({ snapshot: state(MISPRICED) });
+  await assert.rejects(
+    () => door.buildTransactions(WALLET, { direction: "deposit", assets: "5000000" }),
+    (error) => {
+      assert.equal(error.details?.reason, "VenueMarkShortfall");
+      assert.equal(error.details.venueMark.status, "shortfall_exceeds_tolerance");
+      assert.equal(error.details.venueMark.shortfall.raw, "100000");
+      assert.equal(error.details.venueMark.costBasis.raw, "9500000");
+      assert.equal(error.details.venueMark.marked.raw, "9400000");
+      // Truth boundary: this transaction would SUCCEED on chain, at a bad
+      // price. Claiming it would revert would be a lie about the chain.
+      assert.doesNotMatch(error.message, /would revert/u);
+      assert.match(error.message, /overstated price/u);
+      return true;
+    }
+  );
+});
+
+test("the venue-mark gate never closes the exit: withdraw still quotes and discloses the mark", async () => {
+  const { value: door } = service({ snapshot: state(MISPRICED) });
+  const quote = await door.buildTransactions(WALLET, { direction: "withdraw", shares: "1000000" });
+  assert.equal(quote.direction, "withdraw");
+  assert.equal(quote.templates.length, 1);
+  assert.equal(quote.venueMark.status, "shortfall_exceeds_tolerance");
+  assert.equal(quote.venueMark.depositsBlocked, true);
+  assert.equal(quote.preview.markedSharePrice.assetsPerShare.raw, "989946");
+});
+
+test("pool info stays readable under a blocking shortfall and publishes both prices", async () => {
+  const { value: door } = service({ snapshot: state(MISPRICED) });
+  const info = await door.getInfo(WALLET);
+  assert.equal(info.available, true);
+  // The quoted price keeps its honest label; the marked price sits beside it,
+  // so no read ever shows only the flattering number.
+  assert.equal(info.sharePrice.model, "principal-cost-basis");
+  assert.equal(info.sharePrice.assetsPerShare.raw, "994824");
+  assert.equal(info.markedSharePrice.model, "venue-marked-to-adapter");
+  assert.equal(info.markedSharePrice.assetsPerShare.raw, "989946");
+  assert.equal(info.venueMark.status, "shortfall_exceeds_tolerance");
+  assert.equal(info.venueMark.depositsBlocked, true);
+  assert.equal(info.venueMark.source, "venue_adapter_managed_assets");
+});
+
+test("an unreadable venue mark with capital deployed refuses deposits rather than assuming health", async () => {
+  const { value: door } = service({
+    snapshot: state({ ...MISPRICED, venueMarkedAssets: undefined, venueMarkUnreadable: "venue_managed_assets_read_failed" })
+  });
+  await assert.rejects(
+    () => door.buildTransactions(WALLET, { direction: "deposit", assets: "5000000" }),
+    (error) => error.details?.venueMark?.status === "unreadable" && error.details.venueMark.depositsBlocked
+  );
+  const info = await door.getInfo(WALLET);
+  assert.equal(info.venueMark.status, "unreadable");
+  assert.equal(info.markedSharePrice, null);
+});
+
+test("the gate is inert with no capital at the venue and lets a clean deposit through", async () => {
+  const { value: door } = service();
+  const quote = await door.buildTransactions(WALLET, { direction: "deposit", assets: "5000000" });
+  assert.equal(quote.venueMark.status, "not_deployed");
+  assert.equal(quote.venueMark.depositsBlocked, false);
+  assert.equal(quote.templates.length, 2);
+});
+
+test("writing the shortfall off on chain reopens the door with no config change", async () => {
+  // writeOffVenueLoss(3, 100000) drops cost basis 9.500000 -> 9.400000 and
+  // totalAssets 20.395226 -> 20.295226, matching the adapter exactly.
+  const { value: door } = service({
+    snapshot: state({ ...MISPRICED, totalAssets: 20_295_226n, deployedPrincipal: 9_400_000n })
+  });
+  const quote = await door.buildTransactions(WALLET, { direction: "deposit", assets: "5000000" });
+  assert.equal(quote.venueMark.status, "ok");
+  assert.equal(quote.venueMark.shortfall.raw, "0");
+  assert.equal(quote.templates.length, 2);
+});
+
+test("a configured tolerance is honoured in both directions", async () => {
+  const tight = service({
+    snapshot: state({ ...MISPRICED, venueMarkedAssets: 9_499_000n }),
+    venueMark: { toleranceBps: 0, dustFloorRaw: 0n }
+  }).value;
+  await assert.rejects(
+    () => tight.buildTransactions(WALLET, { direction: "deposit", assets: "5000000" }),
+    (error) => error.details?.reason === "VenueMarkShortfall"
+  );
+
+  const loose = service({
+    snapshot: state(MISPRICED),
+    venueMark: { toleranceBps: 500, dustFloorRaw: 1_000n }
+  }).value;
+  // 20.395226 * 500bps = 0.101976, just above the 0.100000 shortfall.
+  const quote = await loose.buildTransactions(WALLET, { direction: "deposit", assets: "5000000" });
+  assert.equal(quote.venueMark.status, "ok");
+  assert.equal(quote.venueMark.tolerance.raw, "1019761");
+  assert.equal(quote.templates.length, 2);
 });

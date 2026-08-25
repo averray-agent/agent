@@ -98,6 +98,7 @@ import { TransparencyService } from "./transparency-service.js";
 import { DepositPoolObservabilityService } from "./deposit-pool-observability.js";
 import { CreditPoolObservabilityService } from "./credit-pool-observability.js";
 import { DepositPoolDoorService } from "./deposit-pool-door.js";
+import { loadDepositPoolVenueMarkConfig } from "../core/deposit-pool-venue-mark.js";
 import { CreditPoolDoorService } from "./credit-pool-door.js";
 import { CreditBookDoorService } from "./credit-book-door.js";
 import { CreditBookKeeperService } from "./credit-book-keeper.js";
@@ -286,7 +287,8 @@ export function createDepositPoolDoor({
     chainReader,
     workerExposurePolicy,
     lockedTierService,
-    vestingHours: loadDepositVestingConfig(env).vestingHours
+    vestingHours: loadDepositVestingConfig(env).vestingHours,
+    venueMark: loadDepositPoolVenueMarkConfig(env)
   });
 }
 

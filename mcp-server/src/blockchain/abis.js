@@ -70,6 +70,11 @@ export const DEPOSIT_POOL_ABI = [
   "event VenueLossWrittenOff(uint256 indexed deploymentId, uint256 assets, uint256 remainingPrincipalCostBasis)"
 ];
 
+export const DEPOSIT_POOL_VENUE_ADAPTER_ABI = [
+  "function managedAssets(address pool) view returns (uint256)",
+  "function lossReporter() view returns (address)"
+];
+
 export const DEPOSIT_POOL_V2_ABI = [
   ...DEPOSIT_POOL_ABI,
   "function creditPool() view returns (address)",
