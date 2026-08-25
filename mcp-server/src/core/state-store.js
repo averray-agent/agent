@@ -1,5 +1,5 @@
 import { createClient } from "redis";
-import { ExternalServiceError } from "./errors.js";
+import { ExternalServiceError, ValidationError } from "./errors.js";
 import { listEventLogFromRecords } from "./event-log-query.js";
 import {
   cloneJsonRecord,
@@ -21,6 +21,10 @@ import {
   sliceWindow,
   timestampScore
 } from "./state-store-records.js";
+import {
+  INVALID_WALLET_IDENTITY_REASON,
+  parseWalletIdentity
+} from "./wallet-identity.js";
 
 const DEFAULT_EVENT_LOG_RETENTION = 5_000;
 const DEFAULT_SIWE_AUTH_WALLET_RETENTION = 1_000;
@@ -41,7 +45,46 @@ function hasIndexableIdempotencyKey(value) {
 }
 
 function normalizeSessionWalletKey(wallet) {
-  return String(wallet ?? "").trim().toLowerCase();
+  const raw = String(wallet ?? "").trim();
+  try {
+    return parseWalletIdentity(raw).h160;
+  } catch {
+    // Preserve historical test/dev placeholders and malformed legacy records.
+    // A valid SS58 never reaches this branch, so it is never lowercased into a
+    // wallet-session key.
+    return raw.toLowerCase();
+  }
+}
+
+function normalizeDualFormSession(session) {
+  if (session?.walletIdentity === undefined) return session;
+  const record = session.walletIdentity;
+  if (!record || typeof record !== "object" || Array.isArray(record)) {
+    throw new ValidationError("session.walletIdentity must be a parsed wallet identity.", {
+      reason: INVALID_WALLET_IDENTITY_REASON
+    });
+  }
+  const identity = parseWalletIdentity(record.ss58 ?? record.h160);
+  const declaredH160 = parseWalletIdentity(record.h160).h160;
+  if (identity.h160 !== declaredH160 || record.source !== identity.source) {
+    throw new ValidationError("session.walletIdentity forms do not describe the same wallet.", {
+      reason: "wallet_identity_mismatch"
+    });
+  }
+  if (session.wallet !== undefined && parseWalletIdentity(session.wallet).h160 !== identity.h160) {
+    throw new ValidationError("session.wallet does not match session.walletIdentity.h160.", {
+      reason: "wallet_identity_mismatch"
+    });
+  }
+  return {
+    ...session,
+    wallet: identity.h160,
+    walletIdentity: identity
+  };
+}
+
+function sessionWalletIndexKey(session) {
+  return normalizeSessionWalletKey(session?.walletIdentity?.h160 ?? session?.wallet);
 }
 
 function verificationRunLockId(runId) {
@@ -364,8 +407,9 @@ export class MemoryStateStore {
   }
 
   async upsertSession(session) {
+    const normalizedSession = normalizeDualFormSession(session);
     const persistedSession = {
-      ...session,
+      ...normalizedSession,
       updatedAt: new Date().toISOString()
     };
 
@@ -384,7 +428,7 @@ export class MemoryStateStore {
       [persistedSession.sessionId, ...existingJobHistory.filter((sessionId) => sessionId !== persistedSession.sessionId)]
     );
 
-    const walletIndexKey = normalizeSessionWalletKey(persistedSession.wallet);
+    const walletIndexKey = sessionWalletIndexKey(persistedSession);
     const existing = this.walletSessions.get(walletIndexKey) ?? [];
     this.walletSessions.set(
       walletIndexKey,
@@ -1390,8 +1434,9 @@ export class RedisStateStore {
 
   async upsertSession(session) {
     await this.connect();
+    const normalizedSession = normalizeDualFormSession(session);
     const persistedSession = {
-      ...session,
+      ...normalizedSession,
       updatedAt: new Date().toISOString()
     };
     await this.client.set(this.key("session", persistedSession.sessionId), JSON.stringify(persistedSession));
@@ -1406,7 +1451,7 @@ export class RedisStateStore {
       score: Date.now(),
       value: persistedSession.sessionId
     });
-    await this.client.zAdd(this.key("wallet-sessions", normalizeSessionWalletKey(persistedSession.wallet)), {
+    await this.client.zAdd(this.key("wallet-sessions", sessionWalletIndexKey(persistedSession)), {
       score: Date.now(),
       value: persistedSession.sessionId
     });
@@ -3082,7 +3127,7 @@ function expectedWalletSessionIndex(sessions) {
   const byWallet = new Map();
   let invalidSessions = 0;
   for (const session of sessions) {
-    const wallet = normalizeSessionWalletKey(session?.wallet);
+    const wallet = sessionWalletIndexKey(session);
     const sessionId = String(session?.sessionId ?? "");
     if (!/^0x[a-f0-9]{40}$/u.test(wallet) || !sessionId) {
       invalidSessions += 1;
