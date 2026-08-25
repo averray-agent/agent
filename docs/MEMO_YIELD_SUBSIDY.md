@@ -1,6 +1,6 @@
 # MEMO — Yield as acquisition spend, not as a P&L line
 
-Status: **PROPOSED — for ratification** · Author: Claude (architect) ·
+Status: **RATIFIED — Y1–Y5 (Pascal, 2026-08-25)** · Author: Claude (architect) ·
 2026-08-25 · Follows the epoch-3 recall (`RUNSHEET_VENUE_RECALL_V2.md`) and
 amends the posture set by **D3**.
 
@@ -68,7 +68,7 @@ Break-even for an unsubsidised lane remains ~60 deployed (~70 TVL, a 44.6 gap),
 and that number is unreachable-by-growth in any near term. The subsidy removes
 it as a constraint entirely — the lane runs at any size.
 
-## Decisions proposed (Y1–Y5)
+## Decisions — RATIFIED (Pascal, 2026-08-25)
 
 **Y1 — Reopen the lane, subsidised.** D3's "do not redeploy" was correct while
 depositors bore the friction. With the operator carrying it, redeployment is no
@@ -107,12 +107,35 @@ stays shelved: deploying *locked* capital is a separate decision from running a
 subsidised operator lane, and the locked cohort's consent describes venue gain
 or loss, not a subsidised rate.
 
-## Open question for the ratifier
+## Open question — WITHDRAWN, the premise was wrong
 
-**Q — Does the subsidy extend to locked deposits, or only to Flex?** Locked
-consent promises pro-rata venue gain *or loss*; a subsidy that erases the loss
-is more generous than what was signed, which is safe, but it makes the locked
-tier's advertised risk profile untrue in the depositor's favour. Cleanest is to
-subsidise the pool as a whole — everyone holds the same shares — and to describe
-it accurately for both tiers rather than splitting the rail. Recommendation:
-**one pool, one subsidy, disclosed to both.**
+I asked whether the subsidy should extend to locked deposits or only Flex.
+**Locked deposits are not in the pool.** Read live 2026-08-25: the T90 locked
+seed `0x42a4b866…` holds **0.000000 pool shares**, while the Flex depositor
+`0x97450BF6…` holds 5.026011 of the 25.527339 supply. The locked cohort sits as
+`liquid` in each depositor's AgentAccountCore, exactly as
+`MEMO_LOCKED_CAPITAL_DEPLOYMENT.md` recorded. A pool subsidy therefore cannot
+reach locked capital by any route, and there was nothing to decide.
+
+## The real open question this exposed
+
+**The locked cohort has no yield path at all.** It is not in the pool, it was
+never deployed, and under Y1 the subsidised lane serves pool capital only. Yet
+locked consent promises a lock "carries its pro-rata venue gain or loss" — and
+it is currently exposed to neither. The activation gate reads `open` at 2.5×
+margin against a cohort that has nothing to activate into.
+
+This is the same truth-boundary thread as `PACKET_LOCKED_YIELD_TRUTH.md`, which
+fixes the *copy*. The copy fix is correct and should ship regardless. But it
+describes the gap rather than closing it, and the gap is structural:
+
+- **Fold locked capital into the pool**, so a lock is a pool position with a
+  lock flag and the subsidy reaches it. This is option C from the deployment
+  memo, previously rejected as "a different architecture from what shipped" —
+  the calculus changes now that the alternative is a tier with no yield source.
+- **Or accept that locked tiers are a priority/reputation instrument, not a
+  yield product**, and rewrite the consent to say so.
+
+Both are honest. The current state — promising venue exposure and delivering
+none — is not. **This wants a decision, but not urgently: nothing is misleading
+anyone the moment the copy packet ships.**
