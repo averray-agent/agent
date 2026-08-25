@@ -1,5 +1,17 @@
 # PACKET — Deploy locked capital to the venue
 
+> **SHELVED 2026-08-25 — DO NOT IMPLEMENT.**
+> Superseded by **D3** (ratified 2026-08-25): the venue lane is closed. The
+> Aug-25 recall measured the round trip at **5.4x wash-negative** (entry
+> 0.100000 + exit 0.029576 against 0.023852 earned over 8.2 days), and
+> `deployToVenue` hard-caps epochs at `NOTICE_7_DAYS` while break-even needs
+> ~35.5 days — so the bar is unreachable on the deployed contract. This packet
+> builds the mechanism to do the thing we decided not to do.
+>
+> It becomes live again only if TVL reaches ~62 USDC deployed or a contract
+> amendment makes `Notice30Days` usable in `deployToVenue`. Until then the
+> lane stays idle. See `RUNSHEET_VENUE_RECALL_V2.md`.
+
 Status: READY FOR CODEX · 2026-08-25 · Author: Claude (architect+gate) ·
 Repo: **platform (averray-agent/agent), mcp-server** · One PR.
 Authority: `docs/MEMO_LOCKED_CAPITAL_DEPLOYMENT.md` (RATIFIED V1–V7,
