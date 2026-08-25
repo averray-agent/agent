@@ -1,6 +1,6 @@
 # MEMO — Earn where the money already sits
 
-Status: **PROPOSED — for ratification** · Author: Claude (architect) ·
+Status: **RATIFIED — B1–B5 + Q1/Q2 answered (Pascal, 2026-08-25)** · Author: Claude (architect) ·
 2026-08-25 · Supersedes the framing of the locked-capital question in
 `MEMO_YIELD_SUBSIDY.md` ("the real open question this exposed").
 
@@ -122,7 +122,7 @@ I have not modelled how much of the 119 is genuinely free versus reserved
 against open jobs. That number gates the claim above and must be measured
 before anyone relies on it.
 
-## Decisions proposed (B1–B5)
+## Decisions — RATIFIED (Pascal, 2026-08-25)
 
 **B1 — Idle AAC balances become yield-eligible** by registering DepositPoolV2
 as an active AAC strategy. No new venue, no new pot.
@@ -154,18 +154,64 @@ much of that we added.
 The activation gate, per-wallet caps, the deposit gate (#1287), consent text
 for existing locks, or the shelved `PACKET_LOCKED_CAPITAL_DEPLOYMENT.md`.
 
-## Open questions for the ratifier
+## Questions — ANSWERED (Pascal, 2026-08-25)
 
-**Q1 — Opt-in or opt-out?** Opt-out maximises retention and is what the thesis
-implies; opt-in is the honest default for other people's money. I recommend
-**opt-in with a genuinely good offer**, because the first time an agent
-discovers we allocated funds it did not consent to, we lose the trust the whole
-platform runs on. The retention win is not worth that risk.
+**Q1 — Opt-in or opt-out? → OPT-IN, with a strong offer.** The agent
+explicitly enables earning on its idle balance, and we make the offer
+obviously worth taking: a real rate, instant deallocation, no penalty. We
+accept losing the retention from agents who never opt in. The reasoning stands
+as written — `onlyAccountOrSettlementBroker` means we *could* do this silently,
+and the first time an agent discovers we moved funds it did not consent to, we
+lose the trust the platform runs on. **B3 is therefore binding, not advisory.**
 
-**Q2 — Does this retire locked tiers?** Once an idle balance earns, a lock buys
-only priority and perks. That may be the right product (a five-minute head
-start on claims is worth more to a worker than yield on a 25 USDC cap), or the
-tier may be worth retiring. Not urgent — the cohort is one lock, ours.
+**Q2 — What happens to locked tiers? → THEY BECOME THE TOP OF A LADDER.**
+Not retired, not priority-only. A lock buys **more yield than an idle balance,
+plus priority, plus further perks still to be designed.** The product becomes
+one continuous story rather than three pots:
 
-**Q3 — How much of the 119 is actually free?** Gates the scale claim. Measure
-before relying on it.
+| | liquidity | yield | priority |
+|---|---|---|---|
+| idle AAC balance (opt-in) | instant | base rate | none |
+| T30 | 30-day term | **above base** | above Flex |
+| T90 | 90-day term | **best rate** | top, + committed flag |
+
+**Q3 — How much of the 119 is free? → at least 52.568522 USDC.** Measured live
+2026-08-25 across 9 accounts holding positions: liquid **52.568522**, reserved
+11.000000, strategyAllocated 0. A further **55.78** is unattributed — accounts
+outside the 200k-block scan window — so the true free figure is higher, not
+lower. **This clears the scale claim:** 52.57 free plus the pool's 15.4
+deployable is ~68 against a ~60 break-even, so the lane can be self-funding
+without the Y1 subsidy once idle balances are wired in.
+
+## The constraint Q2 creates — where does the premium come from?
+
+A lock must pay **more** than an idle balance. The venue produces **one** rate,
+so a premium has to come from somewhere, and there are only two sources:
+
+1. **The operator pays it** — the premium is acquisition spend, exactly as Y1
+   framed the friction subsidy. Honest, bounded, and disclosable.
+2. **Flex holders are paid less than they earned** — a cross-subsidy from
+   liquid depositors to locked ones.
+
+**Option 2 is prohibited unless it is disclosed in those words.** Quietly
+routing part of a Flex depositor's earnings to locked depositors is the same
+class of defect as this morning's "NAV share active": a surface describing a
+benefit the holder is not actually receiving. If a cross-subsidy is ever
+wanted, it must say so plainly on the Flex surface.
+
+**Default: option 1.** The premium is operator-funded and disclosed under
+**Y3**'s earned-versus-added split, which already exists to separate venue
+earnings from operator contribution. The tier ladder is a marketing
+instrument funded like one.
+
+Sizing is a later decision. It should be set against what the tier is meant to
+buy — retention and commitment — not against what the venue happens to yield.
+
+## Still to invent
+
+Perks beyond yield and priority are explicitly open (Pascal, 2026-08-25). The
+tier ladder is the frame; what fills the T30/T90 rows past the rate premium and
+claim priority has not been designed. Candidates worth considering when that
+work starts: higher per-wallet caps, credit-line terms (the L2 book already
+underwrites from settlement history), reduced retention on rewards, or
+priority in dispute handling — none of these are decided.
