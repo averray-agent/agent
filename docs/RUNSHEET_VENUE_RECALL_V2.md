@@ -1,6 +1,19 @@
 # RUNSHEET v2 — Venue recall, deployment 3
 
-Status: **READY** · Rewritten 2026-08-25 · Author: Claude (architect + gate) ·
+> **COMPLETE.** Executed end to end 2026-08-25. Final state: cost basis **0**,
+> deployment 3 **closed**, `managedAssets` **0**, share price **0.990840**,
+> buffer == totalAssets **25.293503**. Write-off was **101723** (the post-
+> settlement outstanding, not the 100000 adapter-book gap — the 1,723 home
+> transit fee is part of the realised loss). Multisig call hash
+> `0xe034f823089730ef14fde80f04cc0d1c14d2f50290c6ac1120c010225b6c5318`,
+> timepoint 19872704-2. Deposit gate self-disarmed to `not_deployed`.
+> **Remaining: D2 — pay 0x97450BF6…4b5c 0.024538 USDC.**
+>
+> Two corrections learned in execution, both now in the steps below: the recall
+> is a TWO-transaction sequence (`recall` then `stage-recall`), and `status`
+> requires an in-flight request so it cannot establish pre-staging state.
+
+Status: **EXECUTED AND CLOSED 2026-08-25T14:41Z** · Rewritten 2026-08-25 · Author: Claude (architect + gate) ·
 Executor: Pascal (every money step) · Deadline: **2026-08-28T16:48Z**
 
 **Supersedes `RUNSHEET_AUG28_RECALL.md`, which must not be executed.** Its
