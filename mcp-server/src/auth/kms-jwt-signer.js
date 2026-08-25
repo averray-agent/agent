@@ -32,7 +32,9 @@
  *
  * Claims validation:
  *   - iss, aud match configured expected values
- *   - sub present, non-empty, lowercase
+ *   - sub present and non-empty; H160 remains lowercase, while a native
+ *     Substrate session preserves its case-sensitive SS58 subject and binds
+ *     it to the dual-form walletIdentity claim
  *   - role(s), when present, all in the configured allowlist; an empty
  *     roles array is valid (a roleless ordinary-worker token)
  *   - iat, nbf, exp numeric; exp - iat ≤ MAX_TTL_SECONDS
@@ -50,6 +52,7 @@ import {
 
 import { parseP256Spki } from "./p256-spki.js";
 import { jwsRawFromDer, jwsRawToDer } from "./jws-ecdsa.js";
+import { parseWalletIdentity } from "../core/wallet-identity.js";
 
 const HEADER_TYP = "averray-auth+jwt";
 const HEADER_ALG = "ES256";
@@ -525,7 +528,9 @@ export class KmsJwtSigner {
     if (typeof claims.sub !== "string" || claims.sub.length === 0) {
       throw new Error("KmsJwtSigner.verify: sub claim missing or empty");
     }
-    if (claims.sub !== claims.sub.toLowerCase()) {
+    if (claims.walletIdentity?.source === "ss58") {
+      assertSubstrateSubjectBinding(claims);
+    } else if (claims.sub !== claims.sub.toLowerCase()) {
       throw new Error("KmsJwtSigner.verify: sub claim must be lowercase");
     }
     // Accept either claims.roles (Stage 2B canonical multi-role shape)
@@ -589,6 +594,28 @@ export class KmsJwtSigner {
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────
+
+function assertSubstrateSubjectBinding(claims) {
+  let subjectIdentity;
+  let declaredIdentity;
+  try {
+    subjectIdentity = parseWalletIdentity(claims.sub);
+    declaredIdentity = parseWalletIdentity(
+      claims.walletIdentity?.ss58 ?? claims.walletIdentity?.h160
+    );
+  } catch {
+    throw new Error("KmsJwtSigner.verify: Substrate sub claim is malformed");
+  }
+  if (
+    subjectIdentity.source !== "ss58"
+    || declaredIdentity.source !== "ss58"
+    || claims.walletIdentity.ss58 !== claims.sub
+    || claims.walletIdentity.h160 !== subjectIdentity.h160
+    || declaredIdentity.h160 !== subjectIdentity.h160
+  ) {
+    throw new Error("KmsJwtSigner.verify: Substrate sub claim does not match walletIdentity");
+  }
+}
 
 function base64UrlEncode(input) {
   if (input instanceof Uint8Array && !Buffer.isBuffer(input)) {

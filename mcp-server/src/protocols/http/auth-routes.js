@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 
 import { AuthenticationError, ValidationError } from "../../core/errors.js";
+import { parseWalletIdentity } from "../../core/wallet-identity.js";
 import { buildSiweMessage, verifySiweMessage } from "../../auth/siwe.js";
 import { signTokenFromConfig } from "../../auth/jwt.js";
 import {
@@ -21,7 +22,7 @@ import {
 
 const SIWE_STATEMENT = "Sign in to the Agent Platform.";
 const WALLET_RE = /^0x[a-fA-F0-9]{40}$/u;
-const SIGNATURE_RE = /^(0x)?[0-9a-fA-F]{130,132}$/u;
+const SIGNATURE_RE = /^(?:0x)?(?:[0-9a-fA-F]{128}|[0-9a-fA-F]{130})$/u;
 
 function generateNonce(randomBytesImpl) {
   return randomBytesImpl(16).toString("hex");
@@ -58,7 +59,7 @@ function buildTokenResponse({ token, claims, wallet, roles, authCapabilities, ex
     token,
     wallet,
     roles,
-    capabilities: authCapabilities.resolveCapabilities({ roles }),
+    capabilities: authCapabilities.resolveCapabilities(claims),
     expiresAt: new Date(claims.exp * 1000).toISOString(),
     tokenType: "Bearer",
     ...extra,
@@ -115,19 +116,31 @@ export function createAuthRoutes({
       await enforceLimit("auth_nonce", clientIp(request), rateLimitConfig.authNonce);
       const payload = await readJsonBody(request);
       const wallet = String(payload?.wallet ?? "").trim();
-      if (!WALLET_RE.test(wallet)) {
+      let walletIdentity;
+      try {
+        // WALLET_RE remains the unchanged H160 validator. Identity routing is
+        // shared: the alternate accepted form is parsed as a real SS58
+        // AccountId32 rather than loosening the EVM regex.
+        const hasH160Shape = WALLET_RE.test(wallet);
+        walletIdentity = parseWalletIdentity(wallet);
+        if ((walletIdentity.source === "h160") !== hasH160Shape) throw new Error("identity_shape");
+      } catch {
         throw new ValidationError("wallet must be a 0x-prefixed 20-byte hex address.");
       }
-      request._arrivalWallet = wallet.toLowerCase();
+      request._arrivalWallet = walletIdentity.h160;
       const nonce = generateNonce(randomBytesImpl);
-      const stored = await stateStore.storeNonce?.(nonce, wallet.toLowerCase(), authConfig.nonceTtlSeconds);
+      const stored = await stateStore.storeNonce?.(
+        nonce,
+        walletIdentity.h160,
+        authConfig.nonceTtlSeconds
+      );
       if (stored === false) {
         throw new ValidationError("Nonce collision — retry.");
       }
       const issuedAt = new Date().toISOString();
       const expiresAt = new Date(Date.now() + authConfig.nonceTtlSeconds * 1000).toISOString();
       await recordSiweAuthEvent({
-        wallet: wallet.toLowerCase(),
+        wallet: walletIdentity.h160,
         event: "nonce_issued",
         at: issuedAt
       });
@@ -177,36 +190,42 @@ export function createAuthRoutes({
         expectedDomain: authConfig.domain,
         expectedChainId: authConfig.chainId
       });
+      const walletIdentity = verified.walletIdentity
+        ?? parseWalletIdentity(verified.recoveredAddress);
 
       const consumedWallet = await stateStore.consumeNonce?.(verified.nonce);
       if (!consumedWallet) {
         throw new AuthenticationError("Nonce missing or already consumed.", "invalid_nonce");
       }
-      if (!walletsMatch(consumedWallet, verified.recoveredAddress)) {
+      if (!walletsMatch(consumedWallet, walletIdentity.h160)) {
         throw new AuthenticationError("Nonce was issued for a different wallet.", "nonce_wallet_mismatch");
       }
 
-      // ethers' signature recovery returns the EIP-55 *checksummed* address,
-      // but the canonical wallet form across the platform is lowercase: every
-      // JWT `sub` is minted lowercase and KmsJwtSigner.verify REJECTS a non-
-      // lowercase `sub` ("sub claim must be lowercase" → 401 claims_mismatch).
-      // Normalize once here so the access-token `sub`, the refresh record
-      // (whose wallet seeds future `sub`s on /auth/refresh), and the response
-      // wallet all use the canonical lowercase form. Without this, /auth/verify
-      // returns 200 yet every authed call with the minted token self-rejects.
-      const wallet = verified.recoveredAddress.toLowerCase();
+      // ethers' signature recovery returns an EIP-55 checksummed address. EVM
+      // subjects retain the platform's lowercase H160 contract; native
+      // subjects retain their exact, case-sensitive SS58 form and carry the
+      // derived lowercase H160 separately for service/store indexing.
+      const wallet = walletIdentity.h160;
+      const subject = walletIdentity.source === "ss58" ? walletIdentity.ss58 : wallet;
       request._arrivalWallet = wallet;
 
-      const roles = authConfig.resolveRoles?.(wallet) ?? [];
+      const roles = walletIdentity.source === "ss58"
+        ? []
+        : authConfig.resolveRoles?.(wallet) ?? [];
+      const tokenPayload = {
+        sub: subject,
+        roles,
+        ...(walletIdentity.source === "ss58" ? { walletIdentity } : {})
+      };
       const { token, claims } = await signTokenFromConfigImpl(
-        { sub: wallet, roles },
+        tokenPayload,
         { expiresInSeconds: authConfig.tokenTtlSeconds },
         authConfig,
       );
 
       let setCookieHeader = null;
       try {
-        if (supportsRefreshStore(stateStore)) {
+        if (walletIdentity.source === "h160" && supportsRefreshStore(stateStore)) {
           const refreshAdapter = makeRefreshStoreAdapterImpl(stateStore);
           const refreshIssue = await issueRefreshTokenImpl({
             wallet,
@@ -250,9 +269,10 @@ export function createAuthRoutes({
         buildTokenResponse({
           token,
           claims,
-          wallet,
+          wallet: subject,
           roles,
           authCapabilities,
+          extra: walletIdentity.source === "ss58" ? { walletIdentity } : {},
         }),
         setCookieHeader ? { "Set-Cookie": setCookieHeader } : {}
       );
@@ -260,8 +280,12 @@ export function createAuthRoutes({
 
     if (request.method === "GET" && pathname === "/auth/session") {
       const auth = await authMiddleware(request, url);
+      const nativeIdentity = auth.claims?.walletIdentity?.source === "ss58"
+        ? auth.claims.walletIdentity
+        : undefined;
       return respondHandled(response, 200, {
-        wallet: auth.wallet,
+        wallet: nativeIdentity ? auth.claims.sub : auth.wallet,
+        ...(nativeIdentity ? { walletIdentity: nativeIdentity } : {}),
         roles: auth.claims?.roles ?? [],
         tokenKind: auth.claims?.tokenKind ?? (auth.claims?.serviceToken === true ? "service" : "wallet"),
         serviceToken: auth.claims?.serviceToken === true,
@@ -300,7 +324,9 @@ export function createAuthRoutes({
         200,
         {
           status: "logged_out",
-          wallet: auth.wallet,
+          wallet: auth.claims?.walletIdentity?.source === "ss58"
+            ? auth.claims.sub
+            : auth.wallet,
           jti
         },
         { "Set-Cookie": buildClearCookieHeaderImpl() }
@@ -415,12 +441,21 @@ export function createAuthRoutes({
         await stateStore.revokeToken?.(oldJti, ttlSeconds);
       }
 
-      const roles = authConfig.resolveRoles?.(auth.wallet) ?? auth.claims?.roles ?? [];
-      // auth.wallet derives from a verified token's `sub`, which the verifier
-      // already enforces lowercase — lowercased here too to keep the "every
-      // minted sub is lowercase" invariant explicit at every mint site.
+      const nativeIdentity = auth.claims?.walletIdentity?.source === "ss58"
+        ? auth.claims.walletIdentity
+        : undefined;
+      const effectiveRoles = nativeIdentity
+        ? []
+        : authConfig.resolveRoles?.(auth.wallet) ?? auth.claims?.roles ?? [];
+      // EVM auth.wallet derives from a verified lowercase token subject;
+      // Substrate sessions preserve their case-sensitive SS58 subject.
+      const subject = nativeIdentity ? auth.claims.sub : auth.wallet.toLowerCase();
       const { token, claims } = await signTokenFromConfigImpl(
-        { sub: auth.wallet.toLowerCase(), roles },
+        {
+          sub: subject,
+          roles: effectiveRoles,
+          ...(nativeIdentity ? { walletIdentity: nativeIdentity } : {})
+        },
         { expiresInSeconds: authConfig.tokenTtlSeconds },
         authConfig,
       );
@@ -428,10 +463,13 @@ export function createAuthRoutes({
       return respondHandled(response, 200, buildTokenResponse({
         token,
         claims,
-        wallet: auth.wallet,
-        roles,
+        wallet: subject,
+        roles: effectiveRoles,
         authCapabilities,
-        extra: { rotatedFromJti: oldJti }
+        extra: {
+          rotatedFromJti: oldJti,
+          ...(nativeIdentity ? { walletIdentity: nativeIdentity } : {})
+        }
       }));
     }
 

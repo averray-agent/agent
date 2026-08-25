@@ -23,6 +23,7 @@ import { p256 } from "@noble/curves/nist.js";
 
 import { KmsJwtSigner } from "./kms-jwt-signer.js";
 import { signToken as signHmacToken } from "./jwt.js";
+import { parseWalletIdentity } from "../core/wallet-identity.js";
 
 // ───────────────────────────────────────────────────────────────────
 // Fake KMS — single P-256 keypair generated at module load.
@@ -572,6 +573,29 @@ test("KmsJwtSigner: non-lowercase sub is rejected", async () => {
   const claims = makeClaims({ sub: "0xABCDEF0000000000000000000000000000000123" });
   const token = await forgeTokenWithKey(makeHeader(), claims);
   assert.throws(() => signer.verify(token), /sub claim must be lowercase/);
+});
+
+test("KmsJwtSigner: native SS58 subject is bound to its dual-form identity", async () => {
+  const signer = buildSigner();
+  const ss58 = "14RLk2G7hu2xMEYL1hbkcwbwWgjL6Nem3fL1maD2GYP1pGNe";
+  const walletIdentity = parseWalletIdentity(ss58);
+  const claims = makeClaims({ sub: ss58, roles: [], walletIdentity });
+  delete claims.role;
+  const token = await forgeTokenWithKey(makeHeader(), claims);
+  assert.deepEqual(signer.verify(token), claims);
+
+  const mismatchedClaims = {
+    ...claims,
+    walletIdentity: {
+      ...walletIdentity,
+      h160: "0x0000000000000000000000000000000000000001",
+    },
+  };
+  const mismatchedToken = await forgeTokenWithKey(makeHeader(), mismatchedClaims);
+  assert.throws(
+    () => signer.verify(mismatchedToken),
+    /Substrate sub claim does not match walletIdentity/u
+  );
 });
 
 test("KmsJwtSigner: role not in allowlist is rejected", async () => {

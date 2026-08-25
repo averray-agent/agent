@@ -1,5 +1,7 @@
 import { getAddress, verifyMessage } from "ethers";
+import { signatureVerify } from "@polkadot/util-crypto";
 import { AuthenticationError, ValidationError } from "../core/errors.js";
+import { parseWalletIdentity } from "../core/wallet-identity.js";
 
 /**
  * Sign-in with Ethereum (EIP-4361) — minimal spec-compliant implementation.
@@ -59,10 +61,16 @@ export function parseSiweMessage(message) {
     throw new ValidationError("SIWE message header is malformed.");
   }
 
-  const address = lines[1]?.trim();
-  if (!address || !/^0x[a-fA-F0-9]{40}$/u.test(address)) {
+  const addressInput = lines[1]?.trim();
+  let walletIdentity;
+  try {
+    walletIdentity = parseWalletIdentity(addressInput);
+  } catch {
     throw new ValidationError("SIWE address line is missing or malformed.");
   }
+  const address = walletIdentity.source === "h160"
+    ? getAddress(walletIdentity.h160)
+    : walletIdentity.ss58;
 
   if (lines[2] !== "") {
     throw new ValidationError("SIWE message missing blank line after address.");
@@ -114,7 +122,7 @@ export function parseSiweMessage(message) {
 
   return {
     domain: headerMatch.groups.domain,
-    address: getAddress(address),
+    address: walletIdentity.source === "h160" ? getAddress(address) : address,
     statement,
     uri: fields.URI,
     version: fields.Version,
@@ -131,7 +139,9 @@ export function parseSiweMessage(message) {
  * Verify a signed SIWE message against expected server configuration.
  *
  * Throws AuthenticationError with a specific code on any mismatch. On success,
- * returns the parsed fields + the recovered wallet address (checksummed).
+ * returns the parsed fields + the recovered wallet identity. EVM addresses
+ * retain their checksummed return shape; SS58 identities retain their exact,
+ * case-sensitive representation.
  */
 export function verifySiweMessage(message, signature, { expectedDomain, expectedChainId }) {
   const parsed = parseSiweMessage(message);
@@ -171,6 +181,35 @@ export function verifySiweMessage(message, signature, { expectedDomain, expected
     throw new AuthenticationError("SIWE message issued in the future.", "siwe_iat_future");
   }
 
+  const identity = parseWalletIdentity(parsed.address);
+  if (identity.source === "ss58") {
+    let verification;
+    try {
+      verification = signatureVerify(message, signature, identity.ss58);
+    } catch {
+      throw new AuthenticationError(
+        "SIWE signature does not match address.",
+        "siwe_signature_mismatch"
+      );
+    }
+    if (
+      verification?.isValid !== true
+      || !["sr25519", "ed25519"].includes(verification.crypto)
+    ) {
+      throw new AuthenticationError(
+        "SIWE signature does not match address.",
+        "siwe_signature_mismatch"
+      );
+    }
+    return {
+      ...parsed,
+      recoveredAddress: identity.ss58,
+      walletIdentity: identity
+    };
+  }
+
+  // Keep the existing EIP-191 seam byte-for-byte: only an SS58 identity can
+  // select the Substrate verifier above, and callers cannot supply a scheme.
   let recovered;
   try {
     recovered = verifyMessage(message, signature);
