@@ -127,6 +127,7 @@ const {
   eventBus,
   authConfig,
   selfIdentityRegistry,
+  substrateMappingGate,
   authMiddleware,
   authCapabilities,
   rateLimiter,
@@ -860,6 +861,7 @@ const handleAuthRoute = createAuthRoutes({
   readJsonBody,
   respond,
   stateStore,
+  substrateMappingGate,
 });
 
 const executeMcpTool = createMcpToolExecutor({

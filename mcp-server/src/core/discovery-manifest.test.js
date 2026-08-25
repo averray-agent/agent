@@ -123,7 +123,8 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.ok(manifest.tools.some((tool) => tool.name === "listVerificationProfiles"));
   assert.ok(manifest.tools.some((tool) => tool.name === "getSessionStateMachine"));
   assert.equal(manifest.auth.schemeId, "SIWE_JWT");
-  assert.deepEqual(manifest.auth.supportedWalletModes, ["evm-siwe"]);
+  assert.deepEqual(manifest.auth.supportedWalletModes, ["evm-siwe", "substrate-native"]);
+  assert.deepEqual(manifest.auth.plannedWalletModes, []);
   assert.equal(manifest.docs.walletOnboarding, "https://github.com/averray-agent/agent/blob/main/docs/AGENT_WALLET_ONBOARDING.md");
   assert.equal(manifest.docs.productionChecklist, "https://github.com/averray-agent/agent/blob/main/docs/PRODUCTION_CHECKLIST.md");
   assert.equal(manifest.docs.threatModel, "https://github.com/averray-agent/agent/blob/main/docs/THREAT_MODEL.md");
@@ -138,11 +139,14 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
     && mode.chain.faucetUrl === "https://faucet.polkadot.io/"
     && mode.setup.secretHandling.includes("never paste raw keys")
   )));
+  assert.equal(manifest.onboarding.walletModes.some((mode) => mode.id === "substrate-mapped"), false);
   assert.ok(manifest.onboarding.walletModes.some((mode) => (
-    mode.id === "substrate-mapped"
-    && mode.status === "documented_not_yet_supported_for_http_auth"
+    mode.id === "substrate-native"
+    && mode.status === "supported"
+    && mode.authScheme === "SIWE_JWT"
     && mode.mappingRequirement.includes("pallet_revive.map_account")
-    && mode.currentBlocker.includes("do not yet accept native Substrate signatures")
+    && mode.setup.mappingGuidance.includes("not Averray")
+    && mode.setup.mappingGuidance.includes("refunded on unmap")
   )));
   assert.ok(manifest.onboarding.walletModes.some((mode) => (
     mode.id === "agent-self-custody"
@@ -228,7 +232,7 @@ test("mainnet chainId renders the mainnet chain block on every network-dependent
     rpcUrl: "https://eth-rpc.polkadot.io"
   };
 
-  for (const id of ["evm-siwe", "agent-self-custody"]) {
+  for (const id of ["evm-siwe", "agent-self-custody", "substrate-native"]) {
     const mode = manifest.onboarding.walletModes.find((entry) => entry.id === id);
     assert.deepEqual(mode.chain, mainnetChain, `${id} must advertise the mainnet chain`);
   }
@@ -270,7 +274,7 @@ test("testnet chainId and unknown/unset chainIds keep the historical testnet blo
     rpcUrl: "https://eth-rpc-testnet.polkadot.io",
     faucetUrl: "https://faucet.polkadot.io/"
   };
-  for (const id of ["evm-siwe", "agent-self-custody"]) {
+  for (const id of ["evm-siwe", "agent-self-custody", "substrate-native"]) {
     const mode = testnetManifest.onboarding.walletModes.find((entry) => entry.id === id);
     assert.deepEqual(mode.chain, testnetChain, `${id} must advertise the testnet chain`);
   }

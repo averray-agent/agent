@@ -43,7 +43,13 @@ const MUTATION_GRANT_CACHE_TTL_MS = 2_000;
  * A `stateStore` with `isTokenRevoked(jti)` is optional. When supplied the
  * middleware rejects tokens whose `jti` is in the revocation list.
  */
-export function createAuthMiddleware({ authConfig, stateStore, logger = console, now = () => new Date() }) {
+export function createAuthMiddleware({
+  authConfig,
+  stateStore,
+  substrateMappingGate,
+  logger = console,
+  now = () => new Date()
+}) {
   // Per-subject grant cache. The grant list is stable for the lifetime of a
   // JWT and lookups happen on every authed request, so a short in-process
   // cache keeps the steady-state cost of capability merging low. Grant/revoke
@@ -216,9 +222,26 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
       }
     }
 
-    const baseCapabilities = resolveCapabilities(claims);
+    const substrateMapping = await resolveSubstrateMapping({
+      claims,
+      walletIdentity,
+      request,
+      pathname: url.pathname,
+      substrateMappingGate
+    });
+    enforceSubstrateNativeMapping(
+      claims,
+      request,
+      url.pathname,
+      requiredCapabilities,
+      substrateMapping,
+      walletIdentity,
+      authDetails
+    );
+    const baseCapabilities = resolveCapabilities(claims, {
+      substrateNativeMapped: substrateMapping?.mapped === true
+    });
     enforceViewerReadOnly(claims, request, authDetails);
-    enforceSubstrateNativeReadOnly(claims, request, url.pathname, requiredCapabilities, authDetails);
     const capabilities = await expandCapabilities(claims, baseCapabilities, grantMaxAgeMs);
     enforceRole(claims, requireRole, authDetails);
     enforceCapabilities(capabilities, requiredCapabilities, authDetails);
@@ -236,6 +259,7 @@ export function createAuthMiddleware({ authConfig, stateStore, logger = console,
       claims,
       capabilities,
       capabilityRequirements: requiredCapabilities,
+      ...(substrateMapping ? { substrateMapping } : {}),
       via: headerToken ? "header" : "query_token"
     };
   }
@@ -296,11 +320,13 @@ function enforceViewerReadOnly(claims, request, authDetails = undefined) {
   );
 }
 
-function enforceSubstrateNativeReadOnly(
+function enforceSubstrateNativeMapping(
   claims,
   request,
   pathname,
   requiredCapabilities,
+  mapping,
+  walletIdentity,
   authDetails = undefined
 ) {
   if (
@@ -308,22 +334,69 @@ function enforceSubstrateNativeReadOnly(
     || !isMutatingRequest(request)
     || ["/auth/refresh", "/auth/logout"].includes(pathname)
   ) return;
+  if (mapping?.mapped === true) return;
+  const unreadable = mapping?.status === "unreadable";
   throw new AuthorizationError(
-    "This is a Substrate-native read-only session. Mapping and earning arrive in a later stage; meanwhile it can browse jobs and read its own account and session history.",
-    "substrate_native_read_only",
+    unreadable
+      ? "This Substrate-native account's pallet_revive mapping could not be read, so earning is refused closed. Retry when Asset Hub is readable; if the account is not mapped, call pallet_revive.map_account first. Its refundable deposit is paid by the account owner, not Averray."
+      : "This Substrate-native account is not mapped for earning. Call pallet_revive.map_account first; it requires a refundable deposit paid by the account owner, not Averray, and the deposit is returned on unmap.",
+    unreadable ? "substrate_mapping_unreadable" : "substrate_mapping_required",
     {
       ...(authDetails ?? {}),
       requiresAuth: true,
       requiredCapabilities,
       missingCapabilities: missingCapabilities(resolveCapabilities(claims), requiredCapabilities),
-      denialReason: "substrate_native_read_only",
+      denialReason: unreadable ? "substrate_mapping_unreadable" : "substrate_mapping_required",
       sessionType: "substrate-native",
       access: "read_only",
       earningEnabled: false,
-      mappingGate: "stage_3",
+      mapping: {
+        status: mapping?.status ?? "unreadable",
+        check: "revive.originalAccount",
+        reason: mapping?.reason ?? "mapping_unreadable",
+        ...(mapping?.failure ? { failure: mapping.failure } : {}),
+        remedy: "pallet_revive.map_account",
+        deposit: {
+          required: true,
+          paidBy: "account_owner",
+          paidByAverray: false,
+          refundableOn: "unmap"
+        }
+      },
+      payout: {
+        address: walletIdentity?.h160,
+        source: "derived_h160",
+        enabled: false
+      },
       allowedMeanwhile: ["GET /me", "GET /jobs", "GET /account", "GET /sessions"]
     }
   );
+}
+
+async function resolveSubstrateMapping({
+  claims,
+  walletIdentity,
+  request,
+  pathname,
+  substrateMappingGate
+}) {
+  if (
+    !isSubstrateNativeClaims(claims)
+    || (!isMutatingRequest(request) && pathname !== "/auth/session")
+    || ["/auth/refresh", "/auth/logout"].includes(pathname)
+  ) return undefined;
+  if (typeof substrateMappingGate?.check !== "function") {
+    return {
+      mapped: false,
+      mappingRequired: true,
+      status: "unreadable",
+      reason: "mapping_unreadable",
+      failure: "mapping_gate_unavailable",
+      h160: walletIdentity?.h160,
+      ss58: walletIdentity?.ss58
+    };
+  }
+  return substrateMappingGate.check(walletIdentity);
 }
 
 function resolveClaimsWalletIdentity(claims) {

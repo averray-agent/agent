@@ -172,11 +172,12 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = withDefaultGetMethod([
 ]);
 
 const AUTH_ENTRYPOINTS = ["/auth/nonce", "/auth/verify", "/auth/refresh", "/auth/logout"];
+const SUPPORTED_WORKER_WALLET_MODES = Object.freeze(["evm-siwe", "substrate-native"]);
 
 const buildWalletReadinessChecks = (network) => [
   {
     id: "select-wallet-mode",
-    description: "Choose evm-siwe for protected HTTP actions today; inspect walletModes before using a native or mapped account.",
+    description: "Choose evm-siwe or substrate-native. Native accounts must prove pallet_revive mapping before earning.",
     blockingFor: ["/jobs/claim", "/jobs/submit", "/account", "/sessions"]
   },
   {
@@ -191,9 +192,9 @@ const buildWalletReadinessChecks = (network) => [
   },
   {
     id: "siwe-session",
-    description: "Request /auth/nonce, sign with personal_sign, verify at /auth/verify, then send Authorization: Bearer <token>.",
+    description: "Request /auth/nonce, sign the returned EIP-4361-shaped message with the selected EVM or Substrate account, verify at /auth/verify, then send Authorization: Bearer <token>.",
     authScheme: "SIWE_JWT",
-    walletModes: ["evm-siwe"],
+    walletModes: [...SUPPORTED_WORKER_WALLET_MODES],
     blockingFor: ["/jobs/claim", "/jobs/submit", "/account", "/sessions"]
   },
   {
@@ -234,7 +235,7 @@ const buildWalletModes = (network) => [
       secretHandling:
         "AGENT_WALLET_PRIVATE_KEY style config is for local service configuration or secret managers only; never paste raw keys or seed phrases into chat.",
       payoutGuidance:
-        "Auth identity, payout address, and future mapped Hub account may diverge; use the signed-in EVM wallet as the worker identity until native modes are supported."
+        "The signed-in EVM wallet is the worker identity and payout address. Substrate-native identities use their separate derived, mapping-verified H160."
     },
     chain: { ...network },
     readinessChecks: ["dedicated-agent-account", "private-key-local-only", "siwe-session", "wallet-funded", "preflight-job"],
@@ -275,34 +276,28 @@ const buildWalletModes = (network) => [
     ]
   },
   {
-    id: "substrate-mapped",
-    status: "documented_not_yet_supported_for_http_auth",
-    addressFormat: "32-byte native Polkadot account mapped to an EVM-compatible address",
-    supportedWallets: ["Talisman Substrate account"],
-    authScheme: "planned_substrate_signing",
-    mappingRequirement: "Native Polkadot accounts must call pallet_revive.map_account before using Ethereum-compatible contract tooling.",
-    currentBlocker:
-      "Protected HTTP routes do not yet accept native Substrate signatures. Use evm-siwe with a mapped or EVM account until wallet_sign_substrate_payload support lands.",
-    plannedTools: ["wallet_check_mapping_status", "wallet_sign_substrate_payload"],
-    readinessChecks: ["select-wallet-mode", "preflight-job"],
-    notes: [
-      "Use the mapped EVM address through the evm-siwe mode until native Substrate signing is supported.",
-      "Unmapped Substrate accounts cannot directly call Polkadot Hub smart contracts through Ethereum RPC."
-    ]
-  },
-  {
     id: "substrate-native",
-    status: "planned",
-    addressFormat: "32-byte native Polkadot account",
+    status: "supported",
+    forAutonomousAgents: true,
+    addressFormat: "SS58 AccountId32 identity with a derived H160 payout address",
     supportedWallets: ["Talisman Substrate account", "Polkadot.js extension"],
-    authScheme: "planned_substrate_signing",
-    currentBlocker:
-      "Native Substrate sign-in is not yet accepted by protected HTTP routes; this mode is exposed so agents can plan rather than guess.",
-    plannedTools: ["wallet_export_public_addresses", "wallet_sign_substrate_payload"],
-    readinessChecks: ["select-wallet-mode"],
+    authScheme: "SIWE_JWT",
+    signMessageMethods: ["sr25519", "ed25519"],
+    mappingRequirement:
+      "Native Ed25519/Sr25519 accounts must call pallet_revive.map_account before earning; Averray verifies revive.originalAccount against the signing AccountId32 and fails closed when it cannot read the mapping.",
+    setup: {
+      accountGuidance:
+        "Sign the standard Averray EIP-4361-shaped message with the native account. The JWT subject stays SS58; service storage and payout use its derived H160.",
+      mappingGuidance:
+        "Call pallet_revive.map_account from the same native account before claiming. It requires a held deposit paid by the account owner, not Averray; the deposit is refunded on unmap.",
+      payoutGuidance:
+        "Rewards settle to the same account's derived H160 only after revive.originalAccount proves that mapping belongs to the signing AccountId32."
+    },
+    chain: { ...network },
+    readinessChecks: ["select-wallet-mode", "siwe-session", "preflight-job"],
     notes: [
-      "Native Substrate sign-in is not yet accepted by protected HTTP routes.",
-      "Agents should inspect walletModes before choosing an account type."
+      "EVM-derived AccountId32 identities ending in twelve 0xEE bytes are natively addressable and do not require map_account.",
+      "Unmapped native accounts can sign in read-only, but every earning mutation refuses with the mapping remedy and deposit terms."
     ]
   },
   {
@@ -357,7 +352,7 @@ const HTTP_ACTION_REQUIREMENTS = [
     requiresAuth: true,
     requiredAction: "read_own_earnings_account",
     authScheme: "SIWE_JWT",
-    walletModes: ["evm-siwe"],
+    walletModes: [...SUPPORTED_WORKER_WALLET_MODES],
     notes: EARNINGS_ACCOUNT_STATEMENT
   },
   {
@@ -366,7 +361,7 @@ const HTTP_ACTION_REQUIREMENTS = [
     requiresAuth: true,
     requiredAction: "read_own_worker_summary",
     authScheme: "SIWE_JWT",
-    walletModes: ["evm-siwe"]
+    walletModes: [...SUPPORTED_WORKER_WALLET_MODES]
   },
   {
     method: "GET",
@@ -374,7 +369,7 @@ const HTTP_ACTION_REQUIREMENTS = [
     requiresAuth: true,
     requiredAction: "read_own_work_receipts",
     authScheme: "SIWE_JWT",
-    walletModes: ["evm-siwe"]
+    walletModes: [...SUPPORTED_WORKER_WALLET_MODES]
   },
   {
     method: "POST",
@@ -434,14 +429,14 @@ const HTTP_ACTION_REQUIREMENTS = [
     path: "/auth/nonce",
     requiresAuth: false,
     requiredAction: "request_siwe_nonce",
-    walletModes: ["evm-siwe"]
+    walletModes: [...SUPPORTED_WORKER_WALLET_MODES]
   },
   {
     method: "POST",
     path: "/auth/verify",
     requiresAuth: false,
     requiredAction: "verify_siwe_signature",
-    walletModes: ["evm-siwe"]
+    walletModes: [...SUPPORTED_WORKER_WALLET_MODES]
   },
   {
     method: "POST",
@@ -458,7 +453,7 @@ const HTTP_ACTION_REQUIREMENTS = [
     requiresAuth: true,
     requiredAction: "wallet_sign_in",
     authScheme: "SIWE_JWT",
-    walletModes: ["evm-siwe"],
+    walletModes: [...SUPPORTED_WORKER_WALLET_MODES],
     notes: "Claiming is an on-chain write that can exceed 10 seconds and locks stake/fee state to the signed-in worker wallet. The idempotency key defaults to <wallet>:<jobId>; if the response times out, retry with the same signed-in wallet and job id. The call returns the existing active claim without creating a second claim."
   },
   {
@@ -467,7 +462,7 @@ const HTTP_ACTION_REQUIREMENTS = [
     requiresAuth: true,
     requiredAction: "wallet_sign_in",
     authScheme: "SIWE_JWT",
-    walletModes: ["evm-siwe"],
+    walletModes: [...SUPPORTED_WORKER_WALLET_MODES],
     notes: "Submitting work is owner-scoped to the wallet that claimed the session."
   },
   {
@@ -476,7 +471,7 @@ const HTTP_ACTION_REQUIREMENTS = [
     requiresAuth: true,
     requiredAction: "wallet_sign_in",
     authScheme: "SIWE_JWT",
-    walletModes: ["evm-siwe"]
+    walletModes: [...SUPPORTED_WORKER_WALLET_MODES]
   },
   {
     method: "*",
@@ -492,7 +487,7 @@ const HTTP_ACTION_REQUIREMENTS = [
     requiresAuth: true,
     requiredAction: "wallet_sign_in",
     authScheme: "SIWE_JWT",
-    walletModes: ["evm-siwe"]
+    walletModes: [...SUPPORTED_WORKER_WALLET_MODES]
   },
   {
     method: "GET",
@@ -500,7 +495,7 @@ const HTTP_ACTION_REQUIREMENTS = [
     requiresAuth: true,
     requiredAction: "estimate_own_net_reward",
     authScheme: "SIWE_JWT",
-    walletModes: ["evm-siwe"]
+    walletModes: [...SUPPORTED_WORKER_WALLET_MODES]
   },
   {
     method: "*",
@@ -508,7 +503,7 @@ const HTTP_ACTION_REQUIREMENTS = [
     requiresAuth: true,
     requiredAction: "wallet_sign_in",
     authScheme: "SIWE_JWT",
-    walletModes: ["evm-siwe"]
+    walletModes: [...SUPPORTED_WORKER_WALLET_MODES]
   },
   {
     method: "*",
@@ -516,7 +511,7 @@ const HTTP_ACTION_REQUIREMENTS = [
     requiresAuth: true,
     requiredAction: "wallet_sign_in",
     authScheme: "SIWE_JWT",
-    walletModes: ["evm-siwe"]
+    walletModes: [...SUPPORTED_WORKER_WALLET_MODES]
   },
   {
     method: "*",
@@ -524,7 +519,7 @@ const HTTP_ACTION_REQUIREMENTS = [
     requiresAuth: true,
     requiredAction: "wallet_sign_in",
     authScheme: "SIWE_JWT",
-    walletModes: ["evm-siwe"]
+    walletModes: [...SUPPORTED_WORKER_WALLET_MODES]
   },
   {
     method: "*",
@@ -739,13 +734,13 @@ const buildBaseManifest = (network) => ({
     schemeId: "SIWE_JWT",
     flow: [
       "POST /auth/nonce { wallet } -> { nonce, message }",
-      "personal_sign(message) via wallet provider -> signature",
+      "Sign the message with personal_sign (EVM) or sr25519/ed25519 (Substrate-native) -> signature",
       "POST /auth/verify { message, signature } -> { token, wallet, expiresAt }",
       "Authorization: Bearer <token> on every subsequent call"
     ],
     entrypoints: AUTH_ENTRYPOINTS,
-    supportedWalletModes: ["evm-siwe"],
-    plannedWalletModes: ["substrate-mapped", "substrate-native"],
+    supportedWalletModes: [...SUPPORTED_WORKER_WALLET_MODES],
+    plannedWalletModes: [],
     logout: "POST /auth/logout with Bearer token revokes the jti",
     modes: ["strict", "permissive"]
   },

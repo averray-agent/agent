@@ -26,6 +26,34 @@ export function deriveH160FromSs58(ss58) {
 }
 
 /**
+ * Decode the exact AccountId32 signed by an SS58 identity.
+ *
+ * Mapping checks need the original bytes to compare against
+ * `revive.originalAccount`. Exporting the shared decoder keeps SS58 parsing
+ * and the pallet_revive address branch in one place.
+ */
+export function accountId32FromSs58(ss58) {
+  return new Uint8Array(decodeSs58AccountId32(ss58));
+}
+
+/**
+ * EVM-derived AccountId32 values are natively addressable and therefore do
+ * not need a `pallet_revive.map_account` reverse mapping.
+ */
+export function isEvmDerivedAccountId32(value) {
+  let accountId;
+  try {
+    accountId = value instanceof Uint8Array ? value : getBytes(value);
+  } catch {
+    throw invalidWalletIdentity("account_id32_shape");
+  }
+  if (accountId.length !== 32) {
+    throw invalidWalletIdentity("account_id32_shape");
+  }
+  return EVM_ACCOUNT_SUFFIX.every((byte, index) => accountId[index + 20] === byte);
+}
+
+/**
  * Shared branch implementation for callers that already hold AccountId32.
  * SS58 parsing delegates here; no consumer may reimplement pallet_revive's
  * EVM-derived/native split.
@@ -40,7 +68,7 @@ export function deriveH160FromAccountId32(value) {
   if (accountId.length !== 32) {
     throw invalidWalletIdentity("account_id32_shape");
   }
-  const h160 = isEvmDerivedAccountId(accountId)
+  const h160 = isEvmDerivedAccountId32(accountId)
     ? hexlify(accountId.subarray(0, 20))
     : `0x${keccak256(accountId).slice(-40)}`;
   return getAddress(h160.toLowerCase());
@@ -137,10 +165,6 @@ function ss58Checksum(payload) {
     .update(SS58_HASH_PREFIX)
     .update(payload)
     .digest();
-}
-
-function isEvmDerivedAccountId(accountId) {
-  return EVM_ACCOUNT_SUFFIX.every((byte, index) => accountId[index + 20] === byte);
 }
 
 function invalidWalletIdentity(cause) {

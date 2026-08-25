@@ -258,7 +258,7 @@ export function listAllKnownCapabilities() {
   return new Set([...all].sort());
 }
 
-export function resolveCapabilities(claims = {}) {
+export function resolveCapabilities(claims = {}, { substrateNativeMapped = false } = {}) {
   const serviceToken = claims?.serviceToken === true || claims?.tokenKind === "service";
   const roles = serviceToken ? [] : Array.isArray(claims.roles) ? claims.roles : [];
   const viewerOnly = isViewerOnlyClaims(claims);
@@ -266,7 +266,7 @@ export function resolveCapabilities(claims = {}) {
   const capabilities = new Set(
     serviceToken
       ? []
-      : substrateNative
+      : substrateNative && !substrateNativeMapped
         ? SUBSTRATE_NATIVE_READ_CAPABILITIES
         : viewerOnly
           ? ROLE_CAPABILITIES.viewer
