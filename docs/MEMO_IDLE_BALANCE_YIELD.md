@@ -1,6 +1,6 @@
 # MEMO — Earn where the money already sits
 
-Status: **RATIFIED — B1–B5 + Q1/Q2 answered (Pascal, 2026-08-25)** · Author: Claude (architect) ·
+Status: **RATIFIED (B2–B5, Q1–Q3) — B1 SENT BACK, see "B1 is self-defeating"** · Author: Claude (architect) ·
 2026-08-25 · Supersedes the framing of the locked-capital question in
 `MEMO_YIELD_SUBSIDY.md` ("the real open question this exposed").
 
@@ -92,7 +92,52 @@ Note `allocateIdleFunds` reverts for **async** adapters. DepositPoolV2's
 the async `requestStrategyDeposit` remains available if a direct venue route is
 ever wanted.
 
-## The proposal
+## B1 IS SELF-DEFEATING — found while scoping the Codex packet, 2026-08-25
+
+**Do not build the pool-as-AAC-strategy adapter.** Two guards in
+`DepositPoolV2` bind any adapter that holds shares in its own name:
+
+- **`_checkAgentCap(receiver, …)`** measures `balanceOf[receiver]` against
+  `PER_AGENT_ASSET_CAP`. A single adapter is therefore capped at **100 USDC
+  total**, not 100 per agent — it inherits one agent's allowance for the whole
+  platform.
+- **`_recordAgentShareHighWater(receiver)`** sets `maxIssuedAgentShares` to the
+  adapter's balance, and `bufferFloor = convertToAssets(maxIssuedAgentShares)`.
+
+The second kills the scale claim outright. Since
+`deployable = bufferAssets − bufferFloor`, routing X through one adapter gives:
+
+```
+deployable = (25.29 + X) − X = 25.29     — flat, for any X above the 9.91 floor
+```
+
+**The floor absorbs the entire contribution.** Adding 52 USDC of idle balances
+through a single adapter adds *nothing* deployable. The guard is working as
+designed — it exists so the largest position can always exit — and a
+platform-sized adapter is exactly the position it is designed to reserve
+against.
+
+(`_requireAgentReceiver` is *not* a blocker: it rejects only `address(0)` and
+the pool itself, so a contract may hold shares.)
+
+### The corrected direction
+
+Do not go through the pool. **Allocate AAC balances directly to a venue
+adapter**, which is what `AgentAccountCore`'s strategy surface was built for
+and what `contracts.hydrationUsdcAdapter` (`0x96091d44…`, currently inactive
+and holding the retired v1 lane's 10 USDC) already is.
+
+That path avoids the pool's per-agent cap and high-water entirely, because the
+pool is not involved. `requestStrategyDeposit` is the async route and the
+Hydration adapter is async, so it fits — `allocateIdleFunds` would revert.
+
+This is a materially different build from B1 and needs its own design pass
+before any packet: adapter reactivation-or-redeploy, the async settle path,
+who calls it, and how per-agent shares reconcile against a venue position.
+**B2–B5 and Q1–Q3 stand unchanged** — the destination changed, not the
+principles.
+
+## The superseded proposal (kept for the record)
 
 **Register DepositPoolV2 as an AAC strategy, so an idle balance earns where it
 already sits.**
