@@ -102,29 +102,38 @@ headroom. Do not raise any cap to make a number fit; if the quote ever exceeds
 
 ## Ceremony
 
-### 0 · Establish state (read-only, no signatures)
+### 0 · Establish state (read-only, no signatures) — **DONE 2026-08-25T13:43Z**
 
-Run `status` and confirm it agrees with the table above:
+**`status` cannot be used here.** It calls `assertRequestBinding`, which
+requires an *active* request id; before a recall is staged both
+`activeDeployRequestId` and `activeRecallRequestId` read ZERO and it exits
+`Wrong requestId`. `status` is a tool for inspecting something in flight — it
+becomes usable **after** step 2, not before. Passing deployment 3's
+`adapterRequestId` does not help; that request settled.
 
-```
-node scripts/ops/pool-venue-dispatch.mjs status --profile mainnet \
-  --deployment-id 3 --expected-signer 0x5a6836c6D4d293F6E5377E6c28054F4171915813 \
-  --asset-hub-ws wss://asset-hub-polkadot-rpc.n.dwellir.com \
-  --hydration-ws wss://hydration-rpc.n.dwellir.com \
-  --hydration-evm-rpc https://rpc.hydradx.cloud \
-  --observability-url http://127.0.0.1:18787/monitor/deposit-pool
-```
+Establishment is therefore direct chain reads. All cleared:
 
-The observability endpoint is VPS-internal — run on the VPS, or tunnel with
-`ssh -N -L 18787:127.0.0.1:18787 ubuntu@141.94.121.188`.
+| check | result |
+|---|---|
+| totalAssets / totalSupply / buffer / cost basis | match the table exactly |
+| `managedAssets(pool)` | 9.400000 — matches |
+| deployment 3 | 9.500000 principal, 0.000000 recalled |
+| `pool.activeVenueDeploymentId` | **3** — the live position |
+| `activeDeployRequestId` / `activeRecallRequestId` | **both ZERO** — nothing in flight to collide with staging |
+| recall against deployment 3 | **none** (indices 0–19) — `stage-recall` is correct |
+| returnBy margin | 75.1h, far past the 6h `assertDispatchMargin` floor |
+| postage (Asset Hub) | 0.510000 DOT, 10.2× floor |
+| fee quote | 27,733 vs ~53,333 recall threshold — open |
 
-**Gate:** paste the output. Any material disagreement with the table stops the
-ceremony.
+Only drift: actual aUSDC read 9.414715 vs 9.414667, **+0.000048** — about four
+hours of accrual at the measured rate. It does not move the write-off, which
+books the cost-basis-to-adapter gap (0.100000), a figure that has not changed.
 
-### 1 · Confirm postage (read-only)
+**Gate: passed.** Nothing blocks staging.
 
-Already verified clear at 0.510000 DOT. `status` re-reads it; confirm the
-plan's `postage.raw` is at or above 500000000. No transfer is expected.
+### 1 · Postage — confirmed clear
+
+0.510000 DOT on Asset Hub, 10.2× the 500000000 floor. No transfer needed.
 
 ### 2 · Stage the recall (dry-run first)
 
@@ -134,6 +143,12 @@ never accepted.
 
 **Gate:** I check the derived recall parameters — share count, `minimumOutput`,
 `maxFeePerLeg`, deadline — before you add `--commit`.
+
+Once staged, `status --recall-id <id>` becomes usable and is the right way to
+inspect the staged request, including the observability cross-check
+(`--observability-url`, VPS-internal: tunnel with
+`ssh -N -L 18787:127.0.0.1:18787 ubuntu@141.94.121.188`, which goes silent on
+success — that is the tunnel working, not a hang).
 
 ### 3 · Dispatch, then confirm arrival on both sides
 
