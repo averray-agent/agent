@@ -21,7 +21,7 @@ at all.** Nothing was staged. This is a `stage-recall`, not a dispatch.
 | adapter reports landed | 9.400000 | `venueAdapter.managedAssets(pool)` |
 | actual aUSDC at venue | 9.414667 | Hydration ERC-20 `balanceOf` |
 | loose USDC at venue | 1.546422 | Hydration `tokens.accounts(acct, 22)` |
-| **venue DOT postage** | **0.000000** | Hydration `tokens.accounts(acct, 5)` |
+| **venue DOT postage** | **0.510000** | **Asset Hub** `system.account` (see below) |
 | pool totalAssets | 25.395226 | `poolV2.totalAssets()` |
 | quoted fee | ~27,952 | `quoteRemoteFee` |
 
@@ -30,17 +30,28 @@ written off: `9.500000 → 9.400000` is **−0.100000 of certain, already-realis
 XCM/swap entry friction**, while `9.400000 → 9.414667` is **+0.014667 of
 unrealised venue accrual**. Net −0.085333. Only the first is a write-off.
 
-## Blocker — fix before anything else
+## Postage — verified clear, no funding needed
 
-**The venue account holds 0 DOT.** `stage-recall` enforces
-`MIN_VENUE_POSTAGE_PLANCK = 500_000_000` (0.05 DOT) and will refuse before
-doing anything. The script comment records 0.51 DOT when the original packet
-was written; it has been consumed since.
+`stage-recall` enforces `MIN_VENUE_POSTAGE_PLANCK = 500_000_000` (0.05 DOT).
+**Read live 2026-08-25: 0.510000 DOT — 10.2× the floor. Nothing to fund.**
 
-Pascal must send **≥0.05 DOT** (send 0.1 for margin) to the venue account
-`0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3` on
-Hydration, and confirm `tokens.accounts(acct, 5)` reads non-zero, before
-step 2. This is liveness postage, never pool principal.
+Read the *right* account, because two plausible wrong ones exist. Per
+`pool-venue-dispatch.mjs:1058`, postage is:
+
+```
+ledger  : substrate_system (native DOT)
+chain   : ASSET HUB              <- not Hydration
+account : venueAddress || 0xEE * 12   <- the ADAPTER contract, EVM-derived
+        = 0xe2801e6c640e0180798912649fd567e1ea459a35eeeeeeeeeeeeeeeeeeeeeeee
+SS58    = 167yt7KXEjXLrZhVcwhaPv8Z7KEVMgsnzizB7yg1PANPxf53
+```
+
+The script's other far-side targets (`float`, `position`) *are* the Hydration
+converted account `0x48df881b…91e7f3`, which is why postage looks like it
+should be too. It is not. Reading DOT there returns 0 and produces a false
+blocker; that mistake was made and corrected while writing this runsheet.
+If postage ever does need topping up, it is a **DOT transfer on Asset Hub**
+to the SS58 above — never a Hydration transfer.
 
 ## The fee window is open — the old watcher was measuring the wrong cap
 
@@ -75,10 +86,10 @@ The observability endpoint is VPS-internal — run on the VPS, or tunnel with
 **Gate:** paste the output. Any material disagreement with the table stops the
 ceremony.
 
-### 1 · Fund the venue postage
+### 1 · Confirm postage (read-only)
 
-Per the blocker above. **Gate:** paste the non-zero `tokens.accounts(acct, 5)`
-read.
+Already verified clear at 0.510000 DOT. `status` re-reads it; confirm the
+plan's `postage.raw` is at or above 500000000. No transfer is expected.
 
 ### 2 · Stage the recall (dry-run first)
 
@@ -130,7 +141,7 @@ fund a real epoch.
 ## Abort conditions (any one ⇒ stop and report)
 
 - `status` disagrees materially with the established-state table.
-- Venue DOT postage still below 0.05 at step 2.
+- Plan `postage.raw` below 500000000 (0.05 DOT) on Asset Hub.
 - Quoted fee exceeds 53,333 — wait; never raise the cap to fit.
 - Arrival confirmed on only one side.
 - Realised loss materially exceeds 0.100000 plus XCM fees.
