@@ -167,6 +167,33 @@ async function runWithServerEnv(envOverrides, fn) {
   }
 }
 
+test("http smoke: Verify returns every named request violation in one response", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const response = await fetch(`${base}/verify/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        profile: "git-patch-tests-v1",
+        profileVersion: 1,
+        target: {},
+        inputs: { testCommand: ["npm", "test"] }
+      })
+    });
+    assert.equal(response.status, 400);
+    const payload = await response.json();
+    assert.equal(payload.error, "invalid_request");
+    assert.deepEqual(
+      payload.details.violations.map(({ path }) => path),
+      [
+        "verifyRequest.target.repository",
+        "verifyRequest.target.commit",
+        "verifyRequest.inputs.gitBundle",
+        "verifyRequest.inputs.patch"
+      ]
+    );
+  });
+});
+
 test("http smoke: production active money-like routes require a chain backend", { skip: !RUN }, async () => {
   await runWithServerEnv({
     NODE_ENV: "production",

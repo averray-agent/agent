@@ -8,7 +8,8 @@ import { decorateVerificationRunPresentation } from "../core/verdict-presentatio
 import { VerifierRegistry } from "./verifier-handlers.js";
 import {
   UnavailableVerificationPaymentGate,
-  VerificationRunService
+  VerificationRunService,
+  validateVerificationRunRequest
 } from "./verification-run-service.js";
 
 const CUSTOMER = "0x1111111111111111111111111111111111111111";
@@ -179,6 +180,65 @@ test("published profile is immutable and queued re-runs reproduce verdict and re
   assert.equal(replay.verdict.outcome, first.verdict.outcome);
   assert.equal(replay.receiptId, first.receiptId);
   assert.equal(first.profileRef, "git-patch-tests-v1@1");
+});
+
+test("Verify returns four named request violations in one response", async () => {
+  const context = harness();
+
+  await assert.rejects(
+    () => context.service.createRun({
+      profile: "git-patch-tests-v1",
+      profileVersion: 1,
+      target: {},
+      inputs: { testCommand: ["npm", "test"] },
+      paymentProof: "must-not-be-authorized"
+    }),
+    (error) => {
+      assert.equal(error.statusCode, 400);
+      assert.equal(error.code, "invalid_request");
+      assert.equal(error.message, "verifyRequest.target.repository is required");
+      assert.deepEqual(error.details?.violations, [
+        {
+          path: "verifyRequest.target.repository",
+          message: "verifyRequest.target.repository is required"
+        },
+        {
+          path: "verifyRequest.target.commit",
+          message: "verifyRequest.target.commit is required"
+        },
+        {
+          path: "verifyRequest.inputs.gitBundle",
+          message: "verifyRequest.inputs.gitBundle is required"
+        },
+        {
+          path: "verifyRequest.inputs.patch",
+          message: "verifyRequest.inputs.patch is required"
+        }
+      ]);
+      return true;
+    }
+  );
+  assert.equal(context.gate.calls.authorize, 0);
+});
+
+test("every published Verify worked example passes validation without trial calls", () => {
+  const profileRegistry = new VerificationProfileRegistry();
+  const profiles = profileRegistry.list();
+
+  for (const profile of profiles) {
+    assert.doesNotThrow(
+      () => validateVerificationRunRequest(profile.workedExample.request, profileRegistry),
+      `${profile.ref} worked example must validate as published`
+    );
+    assert.deepEqual(profile.price, {
+      amount: "5",
+      amountRaw: "5000000",
+      asset: "USDC",
+      decimals: 6,
+      network: "eip155:8453",
+      billingRule: "inconclusive_not_billed"
+    });
+  }
 });
 
 test("inconclusive is never billed and never presents as an artifact failure", async () => {

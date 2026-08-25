@@ -2,13 +2,24 @@ import { randomUUID } from "node:crypto";
 
 import { hashCanonicalContent } from "../core/canonical-content.js";
 import { AppError, NotFoundError, ValidationError } from "../core/errors.js";
-import { validateAgainstSchema } from "../core/job-schema-validation.js";
+import { validateAgainstSchemaAll } from "../core/job-schema-validation.js";
 import { buildVerifyReceipt } from "../core/work-receipt.js";
 import { VerifierRegistry } from "./verifier-handlers.js";
 import { MCP_FAILURE_SEMANTICS_PROFILE_REF, VERIFY_INCONCLUSIVE_REASONS } from "./verification-profile-registry.js";
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/u;
 const COMPLETE = "complete";
+const VERIFY_REQUEST_ENVELOPE_SCHEMA = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["profile", "profileVersion", "target", "inputs"],
+  properties: {
+    profile: { type: "string", minLength: 1 },
+    profileVersion: { type: "integer", minimum: 1 },
+    target: { type: "object" },
+    inputs: { type: "object" }
+  }
+});
 
 export class VerificationRunService {
   constructor({
@@ -62,8 +73,12 @@ export class VerificationRunService {
     paymentProof,
     ephemeralCredential
   } = {}) {
-    const profile = this.profileRegistry.requireAvailable(profileName, profileVersion);
-    validateAgainstSchema({ target, inputs }, profile.inputSchema, "verifyRequest");
+    const profile = validateVerificationRunRequest({
+      profile: profileName,
+      profileVersion,
+      target,
+      inputs
+    }, this.profileRegistry);
     assertMcpEndpointCredentialBoundary(profile.ref, target);
     assertEphemeralCredential({ target, ephemeralCredential });
     const requestHash = hashCanonicalContent({ profile: profile.ref, target, inputs });
@@ -255,6 +270,17 @@ export class VerificationRunService {
       workerConsequence: "none"
     };
   }
+}
+
+export function validateVerificationRunRequest(request, profileRegistry) {
+  validateAgainstSchemaAll(request, VERIFY_REQUEST_ENVELOPE_SCHEMA, "verifyRequest");
+  const profile = profileRegistry.requireAvailable(request.profile, request.profileVersion);
+  validateAgainstSchemaAll(
+    { target: request.target, inputs: request.inputs },
+    profile.inputSchema,
+    "verifyRequest"
+  );
+  return profile;
 }
 
 export class UnavailableVerificationPaymentGate {

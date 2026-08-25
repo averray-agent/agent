@@ -126,6 +126,42 @@ const GIT_PATCH_TESTS_V1 = {
     handler: "deterministic",
     expectedOutputs: ["source_binding_verified", "tests_passed"],
     matchMode: "contains_all"
+  },
+  workedExample: {
+    request: {
+      profile: "git-patch-tests-v1",
+      profileVersion: 1,
+      target: {
+        repository: "https://example.invalid/repository.git",
+        commit: "0".repeat(40)
+      },
+      inputs: {
+        gitBundle: artifactExample({
+          path: "repository.bundle",
+          sha256: "1".repeat(64),
+          bytes: 123456,
+          format: "git-bundle"
+        }),
+        patch: artifactExample({
+          path: "candidate.patch",
+          sha256: "2".repeat(64),
+          bytes: 1234,
+          format: "file"
+        }),
+        testCommand: ["npm", "test"],
+        workingDirectory: ".",
+        allowedPaths: ["**"],
+        protectedPaths: [],
+        maximumChangedFiles: 100
+      }
+    },
+    notes: [
+      "Replace target.commit with the pinned <40-hex> commit and each artifact sha256 with its <64-hex> digest.",
+      "The git bundle must advertise exactly one head. Create and inspect it as a binary git-bundle artifact before publishing it.",
+      "inputs.gitBundle.format is git-bundle; inputs.patch.format is file.",
+      "Artifacts are fetched from locator.url. Each URL must be reachable by the runner, byte-stable, and binary-safe; a text-only host can corrupt a git bundle.",
+      "inputs.testCommand is an array of the executable followed by its arguments, not a shell command string."
+    ]
   }
 };
 
@@ -185,6 +221,21 @@ const MCP_FAILURE_SEMANTICS_V1 = {
     handler: "deterministic",
     expectedOutputs: MCP_FAILURE_SEMANTICS_CHECKS.map((name) => `mcp_${name.replaceAll("-", "_")}_pass`),
     matchMode: "contains_all"
+  },
+  workedExample: {
+    request: {
+      profile: "mcp-failure-semantics-v1",
+      profileVersion: 1,
+      target: {
+        endpoint: "https://example.invalid/mcp",
+        transport: "streamable_http"
+      },
+      inputs: {}
+    },
+    notes: [
+      "Replace target.endpoint with the reachable MCP endpoint to observe.",
+      "For a bearer-protected endpoint, add target.auth with scheme bearer and send the credential separately in Verification-Target-Authorization; never put a secret in the request body."
+    ]
   }
 };
 
@@ -266,6 +317,48 @@ const STRUCTURED_OUTPUT_EVIDENCE_V1 = {
       caseFolding: false,
       fuzzyMatching: false
     }
+  },
+  workedExample: {
+    request: {
+      profile: "structured-output-evidence-v1",
+      profileVersion: 1,
+      target: {
+        output: artifactExample({
+          path: "output.json",
+          sha256: "3".repeat(64),
+          bytes: 2048,
+          format: "json"
+        }),
+        schema: artifactExample({
+          path: "schema.json",
+          sha256: "4".repeat(64),
+          bytes: 1024,
+          format: "json"
+        }),
+        sources: [
+          artifactExample({
+            path: "source-1.txt",
+            sha256: "5".repeat(64),
+            bytes: 4096,
+            format: "text"
+          }),
+          artifactExample({
+            path: "source-2.md",
+            sha256: "6".repeat(64),
+            bytes: 4096,
+            format: "markdown"
+          })
+        ]
+      },
+      inputs: {
+        citationsPointer: "/citations"
+      }
+    },
+    notes: [
+      "Replace each artifact sha256 with its <64-hex> digest and set bytes to the exact byte length.",
+      "Artifacts are fetched from locator.url. Each URL must be reachable by the runner, byte-stable, and binary-safe.",
+      "The default citationsPointer is /citations. It uses RFC 6901 and must resolve to a non-empty citations array."
+    ]
   }
 };
 
@@ -348,6 +441,15 @@ function artifactSchema({ formats }) {
       ...GIT_ARTIFACT_SCHEMA.properties,
       format: { type: "string", enum: formats }
     }
+  };
+}
+
+function artifactExample({ path, sha256, bytes, format }) {
+  return {
+    sha256,
+    bytes,
+    locator: { kind: "https", url: `https://example.invalid/${path}` },
+    format
   };
 }
 
