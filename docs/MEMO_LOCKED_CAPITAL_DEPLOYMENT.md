@@ -1,8 +1,8 @@
 # MEMO — How locked capital reaches the venue
 
-Status: **DRAFT — for ratification** · 2026-08-25 · Author: Claude (architect)
-Ratifier: Pascal · Urgency: **before Thursday's recall**, because the recall
-empties the lane and this decides what rides it next.
+Status: **RATIFIED — V1–V7 locked, Q answered (Pascal, 2026-08-25)** ·
+Author: Claude (architect) · Implementer: Codex (packet follows) ·
+Sequenced behind Thursday's recall per V7.
 
 ## The gap
 
@@ -128,4 +128,20 @@ never bother). Recommendation: **platform-initiated**, because the consent
 already discloses venue exposure and a depositor who wanted manual control
 would use Flex — but this is your call, not mine.
 
-**RATIFY:** reply "ratify deployment memo", or amend by V-number / answer Q.
+## Answer (Pascal, 2026-08-25)
+
+**A — Platform-initiated.** We deploy locked capital automatically whenever
+the gate is open. **Locking is the instruction**: the signed consent already
+discloses venue exposure, and a depositor who wanted manual control would
+have chosen Flex.
+
+This puts real weight on the consent text, so it must keep carrying it:
+- The consent's venue-exposure sentence is now load-bearing and may not be
+  weakened, shortened, or moved below the fold in any surface.
+- Deployment happens only for **locked** amounts, never a wallet's free
+  balance — V3's test is the guard.
+- V4's visibility obligation is not optional. Automatic movement without
+  disclosure is how this becomes a truth-boundary failure; the depositor
+  must always be able to see what is deployed versus idle.
+
+**RATIFIED V1–V7 as written.**
