@@ -322,6 +322,14 @@ export function loadBlockchainConfig(env = process.env) {
       deploymentManifest?.deploymentBlocks?.depositPoolV21,
       "deployments/<profile>.json#deploymentBlocks.depositPoolV21"
     ),
+    aacPoolAggregatorAdapterAddress: normalizeOptionalAddress(
+      deploymentManifest?.contracts?.aacPoolAggregatorAdapter,
+      "deployments/<profile>.json#contracts.aacPoolAggregatorAdapter"
+    ),
+    aacPoolAggregatorAdapterDeploymentBlock: normalizeOptionalU32(
+      deploymentManifest?.deploymentBlocks?.aacPoolAggregatorAdapter,
+      "deployments/<profile>.json#deploymentBlocks.aacPoolAggregatorAdapter"
+    ),
     creditPoolAddress: normalizeOptionalAddress(
       deploymentManifest?.contracts?.creditPool,
       "deployments/<profile>.json#contracts.creditPool"

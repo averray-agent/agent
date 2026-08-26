@@ -3,6 +3,7 @@ import { ValidationError } from "../../core/errors.js";
 export function createIdleBalanceConsentRoutes({
   authMiddleware,
   idleBalanceConsentService,
+  idleBalanceAllocationKeeper,
   readJsonBody,
   respond
 }) {
@@ -31,6 +32,17 @@ export function createIdleBalanceConsentRoutes({
         throw new ValidationError("Idle-balance consent revocation accepts no caller-supplied terms.");
       }
       respond(response, 200, await idleBalanceConsentService.revokeConsent(auth.wallet));
+      return true;
+    }
+    if (request.method === "POST" && pathname === "/account/idle-allocation/deallocate") {
+      const auth = await authMiddleware(request, url);
+      const payload = await readJsonBody(request);
+      const fields = Object.keys(payload ?? {});
+      if (fields.length !== 1 || fields[0] !== "amountRaw") {
+        throw new ValidationError("Idle-balance deallocation accepts exactly amountRaw in USDC base units.");
+      }
+      const result = await idleBalanceAllocationKeeper.deallocate(auth.wallet, payload);
+      respond(response, result.status === "queued" ? 202 : 200, result);
       return true;
     }
     return false;

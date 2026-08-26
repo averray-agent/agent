@@ -119,6 +119,7 @@ const {
   earningsDoor,
   lockedTierService,
   idleBalanceConsentService,
+  idleBalanceAllocationKeeper,
   creditPoolDoor,
   workerProgressionService,
   creditBookDoor,
@@ -521,6 +522,7 @@ const handleLockedTierRoute = createLockedTierRoutes({
 const handleIdleBalanceConsentRoute = createIdleBalanceConsentRoutes({
   authMiddleware,
   idleBalanceConsentService,
+  idleBalanceAllocationKeeper,
   readJsonBody,
   respond,
 });

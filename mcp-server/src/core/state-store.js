@@ -113,6 +113,7 @@ if redis.call("hexists", KEYS[2], ARGV[2]) == 1 then
   return 0
 end
 redis.call("set", KEYS[1], ARGV[1])
+redis.call("sadd", KEYS[3], ARGV[3])
 return 1
 `;
 
@@ -378,6 +379,8 @@ export class MemoryStateStore {
     this.lockedTierEntries = new Map();
     this.idleBalanceConsents = new Map();
     this.revokedIdleBalanceConsentHashes = new Set();
+    this.idleBalanceMovementEvidence = new Map();
+    this.idleBalanceDeallocationRequests = new Map();
     this.yieldSubsidyEntries = new Map();
   }
 
@@ -893,6 +896,13 @@ export class MemoryStateStore {
     return cloneJsonRecord(this.idleBalanceConsents.get(normalizeWalletKey(wallet)));
   }
 
+  async listIdleBalanceConsents({ limit = 100, offset = 0 } = {}) {
+    return [...this.idleBalanceConsents.values()]
+      .sort((left, right) => String(left.consentedAt ?? "").localeCompare(String(right.consentedAt ?? "")))
+      .slice(offset, offset + limit)
+      .map((record) => cloneJsonRecord(record));
+  }
+
   async putIdleBalanceConsent(record) {
     const wallet = normalizeWalletKey(record?.wallet);
     const termsHash = normalizeContentHash(record?.termsHash);
@@ -913,6 +923,43 @@ export class MemoryStateStore {
     this.idleBalanceConsents.set(key, stored);
     this.revokedIdleBalanceConsentHashes.add(normalizeContentHash(stored.termsHash));
     return cloneJsonRecord(stored);
+  }
+
+  async putIdleBalanceMovementEvidence(record) {
+    const id = String(record?.id ?? "");
+    const existing = this.idleBalanceMovementEvidence.get(id);
+    if (existing) return { created: false, record: cloneJsonRecord(existing) };
+    const stored = cloneJsonRecord(record);
+    this.idleBalanceMovementEvidence.set(id, stored);
+    return { created: true, record: cloneJsonRecord(stored) };
+  }
+
+  async listIdleBalanceMovementEvidence({ wallet, limit = 100, offset = 0 } = {}) {
+    const normalizedWallet = wallet ? normalizeWalletKey(wallet) : undefined;
+    return [...this.idleBalanceMovementEvidence.values()]
+      .filter((record) => !normalizedWallet || record.wallet === normalizedWallet)
+      .sort((left, right) => String(right.recordedAt ?? "").localeCompare(String(left.recordedAt ?? "")))
+      .slice(offset, offset + limit)
+      .map((record) => cloneJsonRecord(record));
+  }
+
+  async upsertIdleBalanceDeallocationRequest(record) {
+    const wallet = normalizeWalletKey(record?.wallet);
+    const stored = cloneJsonRecord({ ...record, wallet });
+    this.idleBalanceDeallocationRequests.set(wallet, stored);
+    return cloneJsonRecord(stored);
+  }
+
+  async getIdleBalanceDeallocationRequest(wallet) {
+    return cloneJsonRecord(this.idleBalanceDeallocationRequests.get(normalizeWalletKey(wallet)));
+  }
+
+  async listIdleBalanceDeallocationRequests({ status, limit = 100, offset = 0 } = {}) {
+    return [...this.idleBalanceDeallocationRequests.values()]
+      .filter((record) => !status || record.status === status)
+      .sort((left, right) => String(left.queuedAt ?? "").localeCompare(String(right.queuedAt ?? "")))
+      .slice(offset, offset + limit)
+      .map((record) => cloneJsonRecord(record));
   }
 
   async putYieldSubsidyEntry(record) {
@@ -2079,6 +2126,31 @@ export class RedisStateStore {
     return raw ? JSON.parse(raw) : undefined;
   }
 
+  async listIdleBalanceConsents({ limit = 100, offset = 0 } = {}) {
+    await this.connect();
+    const indexKey = this.key("idle-balance-consents", "wallets");
+    const wallets = new Set(await this.client.sMembers(indexKey));
+    // #1292 predates the scan index. Backfill its per-wallet keys lazily so
+    // every already-ratified consent remains eligible after keeper rollout.
+    const migrationKey = this.key("idle-balance-consents", "index-migrated-v1");
+    const migrationComplete = await this.client.get(migrationKey);
+    if (migrationComplete !== "1" && typeof this.client.scanIterator === "function") {
+      const prefix = this.key("idle-balance-consent", "");
+      for await (const batch of this.client.scanIterator({ MATCH: `${prefix}*`, COUNT: 100 })) {
+        for (const key of Array.isArray(batch) ? batch : [batch]) {
+          if (String(key).startsWith(prefix)) wallets.add(String(key).slice(prefix.length));
+        }
+      }
+      if (wallets.size > 0) await this.client.sAdd(indexKey, [...wallets]);
+      await this.client.set(migrationKey, "1");
+    }
+    const records = await Promise.all([...wallets].map((wallet) => this.getIdleBalanceConsent(wallet)));
+    return records
+      .filter(Boolean)
+      .sort((left, right) => String(left.consentedAt ?? "").localeCompare(String(right.consentedAt ?? "")))
+      .slice(offset, offset + limit);
+  }
+
   async putIdleBalanceConsent(record) {
     await this.connect();
     const wallet = normalizeWalletKey(record?.wallet);
@@ -2087,9 +2159,10 @@ export class RedisStateStore {
     const accepted = await this.client.eval(PUT_IDLE_BALANCE_CONSENT_SCRIPT, {
       keys: [
         this.key("idle-balance-consent", wallet),
-        this.key("idle-balance-consent-revoked", wallet)
+        this.key("idle-balance-consent-revoked", wallet),
+        this.key("idle-balance-consents", "wallets")
       ],
-      arguments: [JSON.stringify(stored), termsHash]
+      arguments: [JSON.stringify(stored), termsHash, wallet]
     });
     return Number(accepted) === 1
       ? { accepted: true, record: stored }
@@ -2107,6 +2180,61 @@ export class RedisStateStore {
       arguments: [String(revokedAt)]
     });
     return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async putIdleBalanceMovementEvidence(record) {
+    await this.connect();
+    const id = String(record?.id ?? "");
+    const redisKey = this.key("idle-balance-movements", "all");
+    const stored = cloneJsonRecord(record);
+    const created = await this.client.hSetNX(redisKey, id, JSON.stringify(stored));
+    const raw = await this.client.hGet(redisKey, id);
+    return {
+      created: Number(created) === 1,
+      record: raw ? JSON.parse(raw) : stored
+    };
+  }
+
+  async listIdleBalanceMovementEvidence({ wallet, limit = 100, offset = 0 } = {}) {
+    await this.connect();
+    const normalizedWallet = wallet ? normalizeWalletKey(wallet) : undefined;
+    const values = await this.client.hVals(this.key("idle-balance-movements", "all"));
+    return values
+      .map((raw) => JSON.parse(raw))
+      .filter((record) => !normalizedWallet || record.wallet === normalizedWallet)
+      .sort((left, right) => String(right.recordedAt ?? "").localeCompare(String(left.recordedAt ?? "")))
+      .slice(offset, offset + limit);
+  }
+
+  async upsertIdleBalanceDeallocationRequest(record) {
+    await this.connect();
+    const wallet = normalizeWalletKey(record?.wallet);
+    const stored = cloneJsonRecord({ ...record, wallet });
+    await this.client.hSet(
+      this.key("idle-balance-deallocations", "all"),
+      wallet,
+      JSON.stringify(stored)
+    );
+    return stored;
+  }
+
+  async getIdleBalanceDeallocationRequest(wallet) {
+    await this.connect();
+    const raw = await this.client.hGet(
+      this.key("idle-balance-deallocations", "all"),
+      normalizeWalletKey(wallet)
+    );
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async listIdleBalanceDeallocationRequests({ status, limit = 100, offset = 0 } = {}) {
+    await this.connect();
+    const values = await this.client.hVals(this.key("idle-balance-deallocations", "all"));
+    return values
+      .map((raw) => JSON.parse(raw))
+      .filter((record) => !status || record.status === status)
+      .sort((left, right) => String(left.queuedAt ?? "").localeCompare(String(right.queuedAt ?? "")))
+      .slice(offset, offset + limit);
   }
 
   async putYieldSubsidyEntry(record) {
@@ -3242,7 +3370,7 @@ function normalizeXcmBalanceWatchRequestId(requestId) {
 function normalizeWalletKey(wallet) {
   const normalized = String(wallet ?? "").trim().toLowerCase();
   if (!/^0x[a-f0-9]{40}$/u.test(normalized)) {
-    throw new ExternalServiceError("Credit-interest wallet must be an EVM address.");
+    throw new ExternalServiceError("State-store wallet key must be an EVM address.");
   }
   return normalized;
 }

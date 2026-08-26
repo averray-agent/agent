@@ -431,14 +431,16 @@ test("RedisStateStore keeps idle-balance revocation durable and rejects replayed
   const store = new RedisStateStore("redis://unused", "idle-consent-test");
   const values = new Map();
   const revokedByWallet = new Map();
+  const consentWallets = new Set();
   store.connect = async () => {};
   store.client = {
     async get(key) { return values.get(key); },
     async eval(_script, { keys, arguments: args }) {
-      if (args.length === 2) {
+      if (args.length === 3) {
         const revoked = revokedByWallet.get(keys[1]) ?? new Set();
         if (revoked.has(args[1])) return 0;
         values.set(keys[0], args[0]);
+        consentWallets.add(args[2]);
         return 1;
       }
       const raw = values.get(keys[0]);
@@ -453,7 +455,8 @@ test("RedisStateStore keeps idle-balance revocation durable and rejects replayed
         revokedByWallet.set(keys[1], revoked);
       }
       return values.get(keys[0]);
-    }
+    },
+    async sMembers() { return [...consentWallets]; }
   };
   const wallet = "0x1111111111111111111111111111111111111111";
   const record = {
@@ -464,6 +467,7 @@ test("RedisStateStore keeps idle-balance revocation durable and rejects replayed
 
   assert.equal((await store.putIdleBalanceConsent(record)).accepted, true);
   assert.equal((await store.getIdleBalanceConsent(wallet)).wallet, wallet);
+  assert.equal((await store.listIdleBalanceConsents())[0].wallet, wallet);
   assert.equal((await store.revokeIdleBalanceConsent(wallet, {
     revokedAt: "2026-08-25T12:00:00.000Z"
   })).status, "revoked");
