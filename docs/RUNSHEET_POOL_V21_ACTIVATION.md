@@ -1,6 +1,6 @@
 # RUNSHEET — Pool v2.1 activation (phased)
 
-Status: **DRAFT — HOLD until the venue-setter amendment merges** · 2026-08-26 ·
+Status: **CEREMONY A IN PROGRESS — A0–A2 EXECUTED 2026-08-26; A4 signing scheduled 2026-08-27** · 2026-08-26 ·
 Author: Claude (architect + gate) · Executor: Pascal (every money step) ·
 Authority: `MEMO_IDLE_BALANCE_ROUTE.md` R1–R5, Q1′, Q1″, Q2 (all RATIFIED).
 
@@ -10,13 +10,48 @@ activates aggregation (idle balances flow, capital sits in buffer). Ceremony B
 activates yield (venue stack + bind). Splitting halves the risk per signing
 session and lets A run as soon as the amendment lands.
 
-## HOLD gates (all must clear before Ceremony A)
+## HOLD gates — ALL CLEARED 2026-08-26
 
-- [ ] Venue-setter amendment merged; **new masked runtime hash** recorded here: `________`
-- [ ] Its `verify_contract_source=1` Tier-3 dispatch green
-- [ ] Aggregator adapter (#1297, merged) hash re-confirmed at deploy time: `sha256:8090ce50…f2ad2`
-- [ ] Deployer funded: **≥ 3 DOT** on admin EOA `0x9Ab8531F…4239` (2 CREATEs ≈ 1.8 + upfront holds + margin; the 1010 lesson)
-- [ ] This runsheet's step-0 reads re-verified same-day (runsheet-already-ran law)
+- [x] Venue-setter #1299 merged (`684ab886`); pool masked hash `sha256:100a21cd5139b36528c6d6d6b5f716ff2ed67c5a89fbde48f407b27e10754355`
+- [x] Tier-3 `verify_contract_source=1` green (run 32992784374)
+- [x] Adapter hash: on-chain == merged-main artifact (18 slots masked). **The #1297
+      handback figure `8090ce50…` is superseded, benignly**: #1299 changed
+      `DepositPoolV2.sol`, which the adapter imports, moving only the 32-byte
+      embedded metadata digest (bytes 4329–4360); functional bytecode is
+      byte-identical. Proven by artifact diff across both PR trees.
+- [x] Deployer ran at 2.58 DOT (per-CREATE floor enforced in-script; both cleared)
+- [x] A0 same-day reads executed and gated
+
+## EXECUTED RECORD — 2026-08-26
+
+| step | result |
+|---|---|
+| **A1 · DepositPool v2.1** | **`0x9B35A102d656Fb86d798aF81959e09961DEc28E0`** — tx `0xc8d09a2c…4fe7a06a`, block 19913549, nonce 22, prediction matched, on-chain masked runtime == artifact == waiver (`100a21cd…`), constructor `(policy, USDC, operator, 0x0, creditPool)` all live-read, venue unbound |
+| **A2 · AacPoolAggregatorAdapter** | **`0x1DDcA7097c752580c6561e1bF8C673D6C1665CA5`** — tx `0x913702ed…69c9e4ef`, block 19913651, nonce 23, 4,372 runtime bytes, strategyId `AAC_IDLE_DEPOSIT_POOL_V21`, operator derived from pool, async probe reverts (SYNC classification) |
+| A0 holder map | `0xdc1Ed106…` 10.000000 · `0x60385dD6…` 0.501328 · tester `0x97450BF6…` 5.026011 · **protocol-held 10.000000 (no exit path exists — stays in v2 permanently, guaranteeing the tester's exit liquidity)** |
+| A3 postage targets | AAC → `151MENb3J9ZiBv147yhNkPDiY8rXF7TrWc13PqWYJeLuupBd` · adapter → `1g9wJAYj7y99R7ttFUPxqrCroEqvRwhXS7LFz1mXu76gT41` (0.1 DOT each, Asset Hub) |
+| Deploy tooling | `scripts/ops/deploy-pool-v21.mjs` (in the gate1299 worktree; committed to this branch alongside this runsheet) |
+
+## A4 SIGNING PACKAGE — for the 2026-08-27 session (precomputed, verified by simulation)
+
+Four `revive.call` extrinsics, gas 4e9 / proof 600k / deposit 1e9. **Execute
+strictly in order** — 2 requires 1's state, 3 requires 2's (their simulations
+revert-flag on today's state for exactly that reason; 1 and 4 simulate clean).
+Nova must display EXACTLY these hashes:
+
+1. `policy.setApprovedStrategy(0x1DDcA709…, true)` → `0x28d620db749d43fa686b8c369ce331a2e592636e2f29c9816409c60d01912927`
+2. `registry.registerStrategy(0x1DDcA709…)` → `0x596b319f3b0f1fe4cf86da09834e5caf4c7890863abcb44b7d3a2c22a1f550e1`
+3. `registry.setStrategyActive(AAC_IDLE_DEPOSIT_POOL_V21, true)` → `0x9ddc7a2f65be9cf2b6f8c106dbb859e043082992f1bfad668bfb42e3e6076a6a`
+4. `poolV21.setAggregatorAdapter(0x1DDcA709…, true)` → `0xc01e74ead8f55502cd193200813ec1954282c5ac74f1433b1b0ed92fb92ccd96`
+
+Call-data hex blocks live in the session log of 2026-08-26 and are
+reproducible from the four (target, selector, args) tuples above; regenerate
+and re-hash on the day if there is any doubt — the hashes must reproduce.
+
+**Re-verify before signing (runsheet-already-ran law):** all four target
+states still read unset (`approvedStrategies(adapter)=false`, no registry
+entry, `aggregatorAdapters(adapter)=false`), and postage reads non-zero on
+both A3 accounts.
 
 ## Ceremony A — aggregation live
 
