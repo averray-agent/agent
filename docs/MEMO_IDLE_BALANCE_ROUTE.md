@@ -1,6 +1,6 @@
 # MEMO — How idle balances reach the venue
 
-Status: **RATIFIED — R1–R5, Q1/Q2 answered (Pascal, 2026-08-25)** · Author: Claude (architect) ·
+Status: **RATIFIED — R1–R5; Q1 SUPERSEDED by Q1′ (Pascal, 2026-08-26); Q2 stands** · Author: Claude (architect) ·
 2026-08-25 · The design pass owed by `MEMO_IDLE_BALANCE_YIELD.md`, whose B1 I
 sent back. **B2–B5 and Q1–Q3 there stand; this decides only the route.**
 
@@ -129,14 +129,29 @@ per-account direct path that R1 rejects. Leave it deregistered.
 
 ## Questions — ANSWERED (Pascal, 2026-08-25)
 
-**Q1 — How to change the pool? → TARGETED CHANGE TO THE LIVE POOL.** Exempt
-registry-known strategy adapters from `_checkAgentCap` and
-`_recordAgentShareHighWater`, paired with **R3**. Ceremony-grade: it modifies a
-contract holding real external money, including the tester's 5 USDC. Chosen
-over a v3 migration because the migration would have to price itself — the trap
-the bank lane already hit — and over adapter-sharding because N sub-cap
-adapters buy the same outcome at the cost of N deployments, N registration
-ceremonies, and permanent routing complexity.
+**Q1 — SUPERSEDED. My question rested on a false premise.** I offered
+"targeted change to the live pool" as an alternative to redeployment. Verified
+2026-08-26: **DepositPoolV2 is immutable** — no upgrade surface in source, not
+behind a proxy (both EIP-1967 slots zero), direct deployment, 12,391 bytes of
+runtime code. A live change is physically impossible, and the ratified choice
+described a thing that does not exist. The error was mine, in how the options
+were posed.
+
+**Q1′ — RATIFIED (Pascal, 2026-08-26): deploy v2.1, migrate promptly, tester
+at leisure.** The minimal-diff pool — same source plus the R2/R3 guards —
+deploys as a new contract. All new activity (idle route, locked tiers, new
+deposits) targets v2.1 immediately. Operator positions (~20 of the 25.29) hop
+by the proven v1→v2 choreography: withdraw → redeposit, vesting tranches
+preserved in the backend (`depositPoolVestingMigration` precedent, executed
+byte-exact). The tester's 5.026011 shares are **non-transferable, so only they
+can move them** — one friendly message, redeem at the honest price and
+redeposit with no value change; until then they simply remain v2 holders and
+every v2 surface stays truthful about it. Nothing external blocks the
+programme.
+
+Costs: one Hub CREATE (~0.9 DOT per the gas law) plus the D-03 deploy-gate
+waiver choreography, since a contract change without a manifest entry fails
+the deploy closed.
 
 **Q2 — What happens to `PER_AGENT_ASSET_CAP`? → IT LAPSES for allocated
 balances.** It was a guardrail sized for a 25 USDC pilot pool, not a permanent
