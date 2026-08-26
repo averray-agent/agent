@@ -7,6 +7,7 @@ import {CreditPool} from "../contracts/CreditPool.sol";
 import {DepositPoolV2, IDepositPoolV2Errors} from "../contracts/DepositPoolV2.sol";
 import {IDepositPoolPledge} from "../contracts/interfaces/IDepositPoolPledge.sol";
 import {IDepositPoolVenueAdapter} from "../contracts/interfaces/IDepositPoolVenueAdapter.sol";
+import {TreasuryPolicy} from "../contracts/TreasuryPolicy.sol";
 
 interface VmCreditPoolSign {
     function sign(uint256 privateKey, bytes32 digest) external returns (uint8 v, bytes32 r, bytes32 s);
@@ -21,6 +22,7 @@ contract CreditPoolL1Test is Test {
     uint256 internal constant OPERATOR_KEY = 0xA11CE;
 
     CreditPoolMockUsdc internal asset;
+    TreasuryPolicy internal policy;
     DepositPoolV2 internal depositPool;
     CreditPool internal creditPool;
     address internal operator;
@@ -30,14 +32,16 @@ contract CreditPoolL1Test is Test {
 
     function setUp() public {
         operator = 0xe05fcC23807536bEe418f142D19fa0d21BB0cfF7;
+        policy = new TreasuryPolicy();
         asset = new CreditPoolMockUsdc();
 
         // A freshly-created test contract starts at nonce 1. The mock asset is
-        // CREATE #1, DepositPoolV2 is #2, and CreditPool is #3.
+        // CREATE #2 after TreasuryPolicy, DepositPoolV2 is #3, and CreditPool is #4.
         address predictedCreditPool =
-            address(uint160(uint256(keccak256(abi.encodePacked(hex"d694", address(this), hex"03")))));
-        depositPool =
-            new DepositPoolV2(address(asset), operator, IDepositPoolVenueAdapter(address(0)), predictedCreditPool);
+            address(uint160(uint256(keccak256(abi.encodePacked(hex"d694", address(this), hex"04")))));
+        depositPool = new DepositPoolV2(
+            policy, address(asset), operator, IDepositPoolVenueAdapter(address(0)), predictedCreditPool
+        );
         creditPool = new CreditPool(address(asset), operator, IDepositPoolPledge(address(depositPool)));
         assertEq(address(creditPool), predictedCreditPool);
 

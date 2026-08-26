@@ -241,8 +241,17 @@ test("mainnet carries no escrow pins post-v3-ceremony and points escrowCore at t
   // depositPoolV2, creditPool) + creditBook (2026-08-20 L2 ceremony).
   assert.equal(contracts.length, 17);
   // The v3 ceremony (2026-08-13) deleted both escrow pins per their own reason
-  // text; only the hydration adapter successor remains staged.
-  assert.deepEqual([...allowlist.keys()].sort(), ["hydrationUsdcAdapter", "legacyEscrowCore"]);
+  // text. The two deposit-pool names alias one live address, so the exact v2.1
+  // runtime must be pinned independently for both D-03 contract keys.
+  assert.deepEqual(
+    [...allowlist.keys()].sort(),
+    ["depositPool", "depositPoolV2", "hydrationUsdcAdapter", "legacyEscrowCore"]
+  );
+  assert.equal(
+    allowlist.get("depositPool")?.[0]?.maskedRuntimeCodeHash,
+    "sha256:0286239658d1d38574cf285903fa2d71c41af49fc6dc7b5e96cf2ebb0083777b"
+  );
+  assert.deepEqual(allowlist.get("depositPoolV2"), allowlist.get("depositPool"));
   assert.equal(
     contracts.find((contract) => contract.name === "escrowCore")?.address,
     "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793"

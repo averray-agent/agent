@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {IDepositPoolVenueAdapter} from "./interfaces/IDepositPoolVenueAdapter.sol";
-import {ReentrancyGuard} from "./lib/ReentrancyGuard.sol";
-import {SafeTransfer} from "./lib/SafeTransfer.sol";
-import {TreasuryPolicy} from "./TreasuryPolicy.sol";
+import {IDepositPoolVenueAdapter} from "../../contracts/interfaces/IDepositPoolVenueAdapter.sol";
+import {ReentrancyGuard} from "../../contracts/lib/ReentrancyGuard.sol";
+import {SafeTransfer} from "../../contracts/lib/SafeTransfer.sol";
 
 interface IERC20PoolAsset {
     function balanceOf(address account) external view returns (uint256);
     function decimals() external view returns (uint8);
 }
 
-interface IDepositPoolV2Errors {
+interface IDepositPoolV2BaselineErrors {
     error SharesPledged();
 }
 
@@ -19,11 +18,11 @@ interface ICreditPoolLoanIds {
     function previewLoanId(address borrower) external view returns (bytes32);
 }
 
-/// @title Averray Agent Deposit Pool v2
+/// @title Frozen DepositPool v2 test baseline
 /// @notice DepositPool v1 byte-for-byte logic plus the L1 pledge registry.
 /// @dev This is deliberately not advertised as ERC-4626 compliant: shares cannot move
 ///      between accounts and notice redemption is a small purpose-built extension.
-contract DepositPoolV2 is ReentrancyGuard {
+contract DepositPoolV2Baseline is ReentrancyGuard {
     string public constant name = "Averray Agent Deposit Pool Share";
     string public constant symbol = "avUSDC";
     uint8 public constant decimals = 6;
@@ -35,7 +34,6 @@ contract DepositPoolV2 is ReentrancyGuard {
     uint256 public constant NOTICE_30_DAYS = 30 days;
     uint256 public constant DEPLOYMENT_EPOCH = 1 days;
 
-    TreasuryPolicy public immutable policy;
     address public immutable asset;
     address public immutable operator;
     address public immutable creditPool;
@@ -44,7 +42,6 @@ contract DepositPoolV2 is ReentrancyGuard {
     uint256 public totalSupply;
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
-    mapping(address => bool) public aggregatorAdapters;
 
     /// @notice Principal supplied by the operator through the dedicated capital entry.
     /// @dev Protocol-owned shares are minted alongside principal, while the principal
@@ -155,7 +152,6 @@ contract DepositPoolV2 is ReentrancyGuard {
     event SharesPledged(address indexed owner, uint256 shares, bytes32 indexed loanId);
     event SharesReleased(address indexed owner, uint256 shares, bytes32 indexed loanId);
     event SharesSeized(address indexed owner, address indexed receiver, uint256 shares, uint256 assets, bytes32 loanId);
-    event AggregatorAdapterSet(address indexed adapter, bool enabled);
 
     error Unauthorized();
     error ZeroAddress();
@@ -189,13 +185,6 @@ contract DepositPoolV2 is ReentrancyGuard {
     error PledgeNotFound();
     error PledgeAlreadyExists();
     error InvalidLoanId();
-    error InvalidAggregatorAdapter();
-    error AggregatorMustUseNoticeExit();
-
-    modifier onlyOwner() {
-        if (msg.sender != policy.owner()) revert Unauthorized();
-        _;
-    }
 
     modifier onlyOperator() {
         if (msg.sender != operator) revert Unauthorized();
@@ -212,19 +201,8 @@ contract DepositPoolV2 is ReentrancyGuard {
         _;
     }
 
-    constructor(
-        TreasuryPolicy policy_,
-        address asset_,
-        address operator_,
-        IDepositPoolVenueAdapter venueAdapter_,
-        address creditPool_
-    ) {
-        if (
-            address(policy_) == address(0) || asset_ == address(0) || operator_ == address(0)
-                || creditPool_ == address(0)
-        ) {
-            revert ZeroAddress();
-        }
+    constructor(address asset_, address operator_, IDepositPoolVenueAdapter venueAdapter_, address creditPool_) {
+        if (asset_ == address(0) || operator_ == address(0) || creditPool_ == address(0)) revert ZeroAddress();
         if (IERC20PoolAsset(asset_).decimals() != decimals) revert InvalidAssetDecimals();
         if (address(venueAdapter_) != address(0)) {
             if (
@@ -234,17 +212,10 @@ contract DepositPoolV2 is ReentrancyGuard {
                 revert InvalidVenueAdapter();
             }
         }
-        policy = policy_;
         asset = asset_;
         operator = operator_;
         creditPool = creditPool_;
         venueAdapter = venueAdapter_;
-    }
-
-    function setAggregatorAdapter(address adapter, bool enabled) external onlyOwner {
-        if (adapter == address(0) || adapter == address(this)) revert InvalidAggregatorAdapter();
-        aggregatorAdapters[adapter] = enabled;
-        emit AggregatorAdapterSet(adapter, enabled);
     }
 
     /// @notice Total depositor and protocol-owned assets at buffer cash plus venue cost.
@@ -366,12 +337,10 @@ contract DepositPoolV2 is ReentrancyGuard {
         _checkTotalCap(managedBefore, assets);
         shares = _convertToShares(assets, managedBefore, supplyBefore, false);
         if (shares == 0) revert ZeroShares();
-        if (!aggregatorAdapters[receiver]) {
-            _checkAgentCap(receiver, shares, managedBefore + assets, supplyBefore + shares);
-        }
+        _checkAgentCap(receiver, shares, managedBefore + assets, supplyBefore + shares);
 
         _mint(receiver, shares);
-        if (!aggregatorAdapters[receiver]) _recordAgentShareHighWater(receiver);
+        _recordAgentShareHighWater(receiver);
         _collectAssets(msg.sender, assets);
         emit Deposit(msg.sender, receiver, assets, shares);
     }
@@ -385,12 +354,10 @@ contract DepositPoolV2 is ReentrancyGuard {
         assets = _convertToAssets(shares, managedBefore, supplyBefore, true);
         if (assets == 0) revert ZeroAmount();
         _checkTotalCap(managedBefore, assets);
-        if (!aggregatorAdapters[receiver]) {
-            _checkAgentCap(receiver, shares, managedBefore + assets, supplyBefore + shares);
-        }
+        _checkAgentCap(receiver, shares, managedBefore + assets, supplyBefore + shares);
 
         _mint(receiver, shares);
-        if (!aggregatorAdapters[receiver]) _recordAgentShareHighWater(receiver);
+        _recordAgentShareHighWater(receiver);
         _collectAssets(msg.sender, assets);
         emit Deposit(msg.sender, receiver, assets, shares);
     }
@@ -418,11 +385,10 @@ contract DepositPoolV2 is ReentrancyGuard {
     function redeem(uint256 shares, address receiver, address owner) external nonReentrant returns (uint256 assets) {
         if (shares == 0) revert ZeroShares();
         if (receiver == address(0) || owner == address(0)) revert ZeroAddress();
-        if (aggregatorAdapters[owner]) revert AggregatorMustUseNoticeExit();
         if (msg.sender != owner) _spendAllowance(owner, msg.sender, shares);
         uint256 unlockedBeforePledges = balanceOf[owner] - lockedShares[owner];
         if (unlockedBeforePledges < shares) revert InsufficientUnlockedShares();
-        if (availableShares(owner) < shares) revert IDepositPoolV2Errors.SharesPledged();
+        if (availableShares(owner) < shares) revert IDepositPoolV2BaselineErrors.SharesPledged();
 
         assets = convertToAssets(shares);
         if (assets == 0) revert ZeroAmount();
@@ -435,7 +401,7 @@ contract DepositPoolV2 is ReentrancyGuard {
         if (receiver == address(0)) revert ZeroAddress();
         uint256 unlockedBeforePledges = balanceOf[msg.sender] - lockedShares[msg.sender];
         if (unlockedBeforePledges < shares) revert InsufficientUnlockedShares();
-        if (availableShares(msg.sender) < shares) revert IDepositPoolV2Errors.SharesPledged();
+        if (availableShares(msg.sender) < shares) revert IDepositPoolV2BaselineErrors.SharesPledged();
 
         uint256 period = tier == NoticeTier.Notice7Days ? NOTICE_7_DAYS : NOTICE_30_DAYS;
         uint64 unlockAt = uint64(block.timestamp + period);
@@ -744,3 +710,4 @@ contract DepositPoolV2 is ReentrancyGuard {
         }
     }
 }
+
