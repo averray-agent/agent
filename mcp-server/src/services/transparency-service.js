@@ -1,13 +1,14 @@
 import { readFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 
-import { getAddress } from "ethers";
+import { Contract, getAddress } from "ethers";
 
 import { findLatestDepositSwap } from "./bank-deposit-evidence.js";
 import { describeBalanceTarget } from "./bank-lane-feed.js";
 import { redactProviderError } from "../core/redact-provider-error.js";
 import { SelfIdentityRegistry } from "../core/self-identity-registry.js";
 import { deriveH160FromAccountId32 } from "../core/wallet-identity.js";
+import { DEPOSIT_POOL_ABI } from "../blockchain/abis.js";
 
 export const TRANSPARENCY_SCHEMA_VERSION = "averray.transparency.v1";
 export const TRANSPARENCY_CACHE_TTL_MS = 15_000;
@@ -32,6 +33,29 @@ const OWNER_RECORDS = Object.freeze({
   "420420417": new URL("../../../deployments/testnet-multisig-owner.json", import.meta.url)
 });
 
+export class EvmTransparencyDepositPoolReader {
+  constructor(provider) {
+    this.provider = provider;
+  }
+
+  async read(address) {
+    const poolAddress = getAddress(address);
+    const blockNumber = await this.provider.getBlockNumber();
+    const pool = new Contract(poolAddress, DEPOSIT_POOL_ABI, this.provider);
+    const [totalAssets, bufferAssets, deployedPrincipal] = await Promise.all([
+      pool.totalAssets({ blockTag: blockNumber }),
+      pool.bufferAssets({ blockTag: blockNumber }),
+      pool.venuePrincipalCostBasis({ blockTag: blockNumber })
+    ]);
+    return {
+      blockNumber,
+      totalAssets: BigInt(totalAssets),
+      bufferAssets: BigInt(bufferAssets),
+      deployedPrincipal: BigInt(deployedPrincipal)
+    };
+  }
+}
+
 /**
  * Read-only model behind the authenticated Capital / Transparency panel.
  *
@@ -47,6 +71,7 @@ export class TransparencyService {
     platformService,
     stateStore,
     venueBalanceReader,
+    depositPoolReader,
     selfIdentityRegistry,
     cacheTtlMs = TRANSPARENCY_CACHE_TTL_MS,
     freshnessWindowsMs = TRANSPARENCY_FRESHNESS_WINDOWS_MS,
@@ -59,6 +84,12 @@ export class TransparencyService {
     this.platformService = platformService;
     this.stateStore = stateStore;
     this.venueBalanceReader = venueBalanceReader;
+    this.depositPoolReader = depositPoolReader
+      ?? (gateway?.provider ? new EvmTransparencyDepositPoolReader(gateway.provider) : undefined);
+    this.depositPools = Object.freeze([
+      { key: "live", label: "Live v2.1", address: gateway?.config?.depositPoolV21Address },
+      { key: "legacy", label: "Legacy v2", address: gateway?.config?.depositPoolV2Address ?? gateway?.config?.depositPoolAddress }
+    ]);
     this.selfIdentityRegistry = selfIdentityRegistry instanceof SelfIdentityRegistry
       ? selfIdentityRegistry
       : new SelfIdentityRegistry();
@@ -136,12 +167,13 @@ export class TransparencyService {
         assemblyTimingsMs[name] = Math.max(0, Math.round(performance.now() - startedAt));
       }
     };
-    const [flow, escrow, bank, treasuryBalance, chainHead] = await Promise.all([
+    const [flow, escrow, bank, treasuryBalance, chainHead, depositPools] = await Promise.all([
       measure("flow", () => this.readFlow()),
       measure("escrow", () => this.readEscrow()),
       measure("bank", () => this.readBank()),
       measure("treasury-balance", () => this.readTreasuryBalance()),
-      measure("chain-head", () => this.readChainHead())
+      measure("chain-head", () => this.readChainHead()),
+      measure("deposit-pools", () => this.readDepositPools())
     ]);
     return {
       assembledAtMs,
@@ -150,7 +182,8 @@ export class TransparencyService {
       escrow,
       bank,
       treasuryBalance,
-      chainHead
+      chainHead,
+      depositPools
     };
   }
 
@@ -160,7 +193,8 @@ export class TransparencyService {
     bank,
     treasuryBalance,
     chainHead,
-    assemblyTimingsMs
+    assemblyTimingsMs,
+    depositPools
   }, generatedAtMs) {
     const subject = bank.subject;
     const generation = this.buildGeneration(subject, generatedAtMs);
@@ -205,6 +239,14 @@ export class TransparencyService {
         posterObligationsInFlight: this.usdcField(escrow.obligations, "chain", generatedAtMs),
         balanceHeldByEscrowContract: this.usdcField(escrow.balance, "chain", generatedAtMs)
       },
+      depositPools: Object.fromEntries(Object.entries(depositPools).map(([key, pool]) => [key, {
+        label: toField(pool.label, { nowMs: generatedAtMs, freshnessWindowMs: this.freshnessWindowsMs.chain }),
+        address: toField(pool.address, { nowMs: generatedAtMs, freshnessWindowMs: this.freshnessWindowsMs.chain }),
+        totalAssets: this.usdcField(pool.totalAssets, "chain", generatedAtMs),
+        bufferAssets: this.usdcField(pool.bufferAssets, "chain", generatedAtMs),
+        deployedPrincipal: this.usdcField(pool.deployedPrincipal, "chain", generatedAtMs),
+        deployedStatus: toField(pool.deployedStatus, { nowMs: generatedAtMs, freshnessWindowMs: this.freshnessWindowsMs.chain })
+      }])),
       treasury: {
         generation,
         totalUsdcEquivalent: this.usdcField(total, "bank", generatedAtMs),
@@ -286,7 +328,8 @@ export class TransparencyService {
         "escrow",
         "bank",
         "treasury-balance",
-        "chain-head"
+        "chain-head",
+        "deposit-pools"
       ].map((name) => [name, Number(assemblyTimingsMs?.[name] ?? 0)]))
     };
   }
@@ -735,6 +778,75 @@ export class TransparencyService {
         return { value: blockNumber, readAtMs: this.now() };
       }
     });
+  }
+
+  async readDepositPools() {
+    return Object.fromEntries(await Promise.all(this.depositPools.map(async ({ key, label, address }) => {
+      const readAtMs = this.now();
+      const labelReading = {
+        value: label,
+        unit: "pool generation",
+        readAtMs,
+        source: "deployments manifest pool generation",
+        proof: address ? `configured pool ${address}` : "pool address unavailable"
+      };
+      const addressReading = {
+        value: address ? getAddress(address) : null,
+        unit: "address",
+        readAtMs,
+        source: "blockchain configuration rendered from deployments manifest",
+        proof: address ? `configured ${key} deposit pool` : `${key} deposit pool unavailable`
+      };
+      if (!address || !this.depositPoolReader) {
+        const missing = {
+          raw: null,
+          readAtMs,
+          source: "DepositPool state",
+          proof: !address ? `${key} deposit pool address unavailable` : "deposit pool reader unavailable"
+        };
+        return [key, {
+          label: labelReading,
+          address: addressReading,
+          totalAssets: missing,
+          bufferAssets: missing,
+          deployedPrincipal: missing,
+          deployedStatus: { ...missing, value: null, unit: "deployment status" }
+        }];
+      }
+      try {
+        const reading = await this.depositPoolReader.read(address);
+        const proof = `eth_call at block ${reading.blockNumber} against ${getAddress(address)}`;
+        const base = { readAtMs: this.now(), source: "DepositPool state at one named block", proof };
+        const deployedPrincipal = BigInt(reading.deployedPrincipal);
+        return [key, {
+          label: labelReading,
+          address: addressReading,
+          totalAssets: { ...base, raw: BigInt(reading.totalAssets) },
+          bufferAssets: { ...base, raw: BigInt(reading.bufferAssets) },
+          deployedPrincipal: { ...base, raw: deployedPrincipal },
+          deployedStatus: {
+            ...base,
+            value: deployedPrincipal > 0n ? "deployed" : "not_deployed",
+            unit: "deployment status"
+          }
+        }];
+      } catch (error) {
+        const missing = {
+          raw: null,
+          readAtMs: this.now(),
+          source: "DepositPool state at one named block",
+          proof: redactProviderError(error) || "deposit_pool_read_failed"
+        };
+        return [key, {
+          label: labelReading,
+          address: addressReading,
+          totalAssets: missing,
+          bufferAssets: missing,
+          deployedPrincipal: missing,
+          deployedStatus: { ...missing, value: null, unit: "deployment status" }
+        }];
+      }
+    })));
   }
 
   async safeRawRead({ source, proof, loader }) {
