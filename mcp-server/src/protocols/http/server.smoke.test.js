@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -22,6 +22,15 @@ import {
 // package's standard `npm test` runs a second CI-parity phase with this flag on.
 
 const RUN = process.env.RUN_HTTP_SMOKE === "1";
+
+// Shared options for every test below. The timeout is set here, per test,
+// rather than as a CLI --test-timeout: on Node 22 that flag also bounds the
+// synthetic whole-file test, whose duration is the SUM of all subtests — each
+// one boots its own server child (~1s, boot-dominated), so the file-level
+// bound trips as the suite grows even with every subtest green. 15s bounds a
+// single test: startServer's boot poll gives up at 10s and a healthy test
+// finishes in ~1s, so only a genuine hang can cross it.
+const SMOKE_TEST_OPTIONS = { skip: !RUN, timeout: 15_000 };
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const serverPath = resolve(moduleDir, "server.js");
 const LONG_SECRET = "x".repeat(40);
@@ -48,6 +57,16 @@ const OPEN_DATA_INGEST_TARGET = {
   modified: "2026-01-01T00:00:00Z",
   metadataModified: "2026-05-01T00:00:00Z"
 };
+
+// Every server child that is still alive. A test that hits its per-test
+// timeout never reaches the finally that stops its server, and the leaked
+// child's stderr pipe would keep this process alive long after the run —
+// the sweep below reaps whatever the tests themselves did not.
+const liveChildren = new Set();
+
+after(() => {
+  for (const child of liveChildren) child.kill("SIGKILL");
+});
 
 async function startServer(port, envOverrides = {}) {
   const child = spawn(process.execPath, [serverPath], {
@@ -87,6 +106,8 @@ async function startServer(port, envOverrides = {}) {
     stdio: ["ignore", "ignore", "pipe"],
     detached: false
   });
+  liveChildren.add(child);
+  child.once("exit", () => liveChildren.delete(child));
 
   let stderr = "";
   child.stderr?.setEncoding("utf8");
@@ -167,7 +188,7 @@ async function runWithServerEnv(envOverrides, fn) {
   }
 }
 
-test("http smoke: Verify returns every named request violation in one response", { skip: !RUN }, async () => {
+test("http smoke: Verify returns every named request violation in one response", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const response = await fetch(`${base}/verify/runs`, {
       method: "POST",
@@ -194,7 +215,7 @@ test("http smoke: Verify returns every named request violation in one response",
   });
 });
 
-test("http smoke: production active money-like routes require a chain backend", { skip: !RUN }, async () => {
+test("http smoke: production active money-like routes require a chain backend", SMOKE_TEST_OPTIONS, async () => {
   await runWithServerEnv({
     NODE_ENV: "production",
     BADGE_RECEIPT_SIGNING: "disabled",
@@ -238,7 +259,7 @@ test("http smoke: production active money-like routes require a chain backend", 
   });
 });
 
-test("http smoke: /health separates service liveness from treasury capability", { skip: !RUN }, async () => {
+test("http smoke: /health separates service liveness from treasury capability", SMOKE_TEST_OPTIONS, async () => {
   await runWithServerEnv({
     NODE_ENV: "production",
     BADGE_RECEIPT_SIGNING: "disabled",
@@ -267,7 +288,7 @@ test("http smoke: /health separates service liveness from treasury capability", 
   });
 });
 
-test("http smoke: active sync money-like routes replay idempotent receipts", { skip: !RUN }, async () => {
+test("http smoke: active sync money-like routes replay idempotent receipts", SMOKE_TEST_OPTIONS, async () => {
   await runWithServerEnv({ PAYMENTS_SEND_ENABLED: "1" }, async (base) => {
     const token = issueToken(ADMIN_WALLET);
     const headers = {
@@ -318,7 +339,7 @@ test("http smoke: active sync money-like routes replay idempotent receipts", { s
   });
 });
 
-test("http smoke: /admin/jobs rejects unauthenticated requests", { skip: !RUN }, async () => {
+test("http smoke: /admin/jobs rejects unauthenticated requests", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const response = await fetch(`${base}/admin/jobs`, {
       method: "POST",
@@ -329,7 +350,7 @@ test("http smoke: /admin/jobs rejects unauthenticated requests", { skip: !RUN },
   });
 });
 
-test("http smoke: /admin/jobs rejects non-admin token", { skip: !RUN }, async () => {
+test("http smoke: /admin/jobs rejects non-admin token", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(STRANGER_WALLET, { roles: [] });
     const response = await fetch(`${base}/admin/jobs`, {
@@ -343,7 +364,7 @@ test("http smoke: /admin/jobs rejects non-admin token", { skip: !RUN }, async ()
   });
 });
 
-test("http smoke: /admin/jobs accepts admin-scoped token", { skip: !RUN }, async () => {
+test("http smoke: /admin/jobs accepts admin-scoped token", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const response = await fetch(`${base}/admin/jobs`, {
@@ -365,7 +386,7 @@ test("http smoke: /admin/jobs accepts admin-scoped token", { skip: !RUN }, async
   });
 });
 
-test("http smoke: /jobs/validate-submission validates draft output before claim", { skip: !RUN }, async () => {
+test("http smoke: /jobs/validate-submission validates draft output before claim", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const jobId = "smoke-schema-validation-001";
@@ -418,7 +439,7 @@ test("http smoke: /jobs/validate-submission validates draft output before claim"
   });
 });
 
-test("http smoke: /admin/jobs/timeline exposes job lineage", { skip: !RUN }, async () => {
+test("http smoke: /admin/jobs/timeline exposes job lineage", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const jobId = "smoke-job-timeline-001";
@@ -451,7 +472,7 @@ test("http smoke: /admin/jobs/timeline exposes job lineage", { skip: !RUN }, asy
   });
 });
 
-test("http smoke: /admin/sessions exposes operator-wide session activity", { skip: !RUN }, async () => {
+test("http smoke: /admin/sessions exposes operator-wide session activity", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const workerToken = issueToken(STRANGER_WALLET);
@@ -510,7 +531,7 @@ test("http smoke: /admin/sessions exposes operator-wide session activity", { ski
   });
 });
 
-test("http smoke: viewer JWT reads every operator surface without mutation authority", { skip: !RUN }, async () => {
+test("http smoke: viewer JWT reads every operator surface without mutation authority", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(VIEWER_WALLET, { roles: ["viewer"] });
     const headers = { authorization: `Bearer ${token}` };
@@ -542,7 +563,7 @@ test("http smoke: viewer JWT reads every operator surface without mutation autho
   });
 });
 
-test("http smoke: viewer JWT denies POST-shaped operator mutations with the standard capability envelope", { skip: !RUN }, async () => {
+test("http smoke: viewer JWT denies POST-shaped operator mutations with the standard capability envelope", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(VIEWER_WALLET, { roles: ["viewer"] });
     const headers = {
@@ -571,7 +592,7 @@ test("http smoke: viewer JWT denies POST-shaped operator mutations with the stan
   });
 });
 
-test("http smoke: admin arrival and journey reads are operator-only and expose cutover guardrails", { skip: !RUN }, async () => {
+test("http smoke: admin arrival and journey reads are operator-only and expose cutover guardrails", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     for (const path of ["/admin/arrivals/timeline", "/admin/worker-journeys"]) {
@@ -600,7 +621,7 @@ test("http smoke: admin arrival and journey reads are operator-only and expose c
   });
 });
 
-test("http smoke: /jobs/sub lets active workers create funded child jobs", { skip: !RUN }, async () => {
+test("http smoke: /jobs/sub lets active workers create funded child jobs", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const workerToken = issueToken(STRANGER_WALLET);
@@ -676,7 +697,7 @@ test("http smoke: /jobs/sub lets active workers create funded child jobs", { ski
   });
 });
 
-test("http smoke: /admin/status returns recurring + maintenance data for admin tokens", { skip: !RUN }, async () => {
+test("http smoke: /admin/status returns recurring + maintenance data for admin tokens", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
 
@@ -708,7 +729,7 @@ test("http smoke: /admin/status returns recurring + maintenance data for admin t
   });
 });
 
-test("http smoke: /admin/treasury/summary stays available when live feeds warn", { skip: !RUN }, async () => {
+test("http smoke: /admin/treasury/summary stays available when live feeds warn", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const response = await fetch(`${base}/admin/treasury/summary`, {
@@ -727,7 +748,7 @@ test("http smoke: /admin/treasury/summary stays available when live feeds warn",
   });
 });
 
-test("http smoke: static retired notice needs no auth, leaks nothing, and is outside money-like classification", { skip: !RUN }, async () => {
+test("http smoke: static retired notice needs no auth, leaks nothing, and is outside money-like classification", SMOKE_TEST_OPTIONS, async () => {
   const asyncStrategyId = "0x56444f545f56315f4d4f434b0000000000000000000000000000000000000000";
   await runWithServerEnv(
     {
@@ -770,7 +791,7 @@ test("http smoke: static retired notice needs no auth, leaks nothing, and is out
   );
 });
 
-test("http smoke: admin XCM observation idempotency guards payload drift", { skip: !RUN }, async () => {
+test("http smoke: admin XCM observation idempotency guards payload drift", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const headers = { "content-type": "application/json", authorization: `Bearer ${token}` };
@@ -829,7 +850,7 @@ test("http smoke: admin XCM observation idempotency guards payload drift", { ski
   });
 });
 
-test("http smoke: /auth/nonce returns 429 once the window limit is crossed", { skip: !RUN }, async () => {
+test("http smoke: /auth/nonce returns 429 once the window limit is crossed", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const body = JSON.stringify({ wallet: Wallet.createRandom().address });
     const headers = { "content-type": "application/json" };
@@ -844,7 +865,7 @@ test("http smoke: /auth/nonce returns 429 once the window limit is crossed", { s
   });
 });
 
-test("http smoke: OPTIONS preflight returns CORS headers only for allowed origins", { skip: !RUN }, async () => {
+test("http smoke: OPTIONS preflight returns CORS headers only for allowed origins", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const response = await fetch(`${base}/jobs`, {
       method: "OPTIONS",
@@ -856,7 +877,7 @@ test("http smoke: OPTIONS preflight returns CORS headers only for allowed origin
   });
 });
 
-test("http smoke: public MCP supports HEAD and wildcard credential-free CORS", { skip: !RUN }, async () => {
+test("http smoke: public MCP supports HEAD and wildcard credential-free CORS", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const [get, head, preflight] = await Promise.all([
       fetch(`${base}/mcp`),
@@ -890,7 +911,7 @@ test("http smoke: public MCP supports HEAD and wildcard credential-free CORS", {
   });
 });
 
-test("http smoke: /auth/logout revokes the current token", { skip: !RUN }, async () => {
+test("http smoke: /auth/logout revokes the current token", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const authHeader = { authorization: `Bearer ${token}` };
@@ -912,7 +933,7 @@ test("http smoke: /auth/logout revokes the current token", { skip: !RUN }, async
   });
 });
 
-test("http smoke: /auth/refresh rotates the wallet token and revokes the old jti", { skip: !RUN }, async () => {
+test("http smoke: /auth/refresh rotates the wallet token and revokes the old jti", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const oldToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const oldHeader = { authorization: `Bearer ${oldToken}` };
@@ -945,7 +966,7 @@ test("http smoke: /auth/refresh rotates the wallet token and revokes the old jti
   });
 });
 
-test("http smoke: /auth/refresh rejects service tokens with service_token_refresh_unsupported", { skip: !RUN }, async () => {
+test("http smoke: /auth/refresh rejects service tokens with service_token_refresh_unsupported", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     // Mint a service-style token directly (mirrors what /admin/service-tokens issues).
     const serviceToken = issueToken(ADMIN_WALLET, {
@@ -965,14 +986,14 @@ test("http smoke: /auth/refresh rejects service tokens with service_token_refres
   });
 });
 
-test("http smoke: /auth/refresh rejects an unauthenticated caller", { skip: !RUN }, async () => {
+test("http smoke: /auth/refresh rejects an unauthenticated caller", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const refresh = await fetch(`${base}/auth/refresh`, { method: "POST" });
     assert.equal(refresh.status, 401);
   });
 });
 
-test("http smoke: /account/borrow-capacity returns the signed-in wallet headroom", { skip: !RUN }, async () => {
+test("http smoke: /account/borrow-capacity returns the signed-in wallet headroom", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const response = await fetch(`${base}/account/borrow-capacity?asset=DOT`, {
@@ -986,7 +1007,7 @@ test("http smoke: /account/borrow-capacity returns the signed-in wallet headroom
   });
 });
 
-test("http smoke: /badges/:sessionId returns 404 for unknown sessions", { skip: !RUN }, async () => {
+test("http smoke: /badges/:sessionId returns 404 for unknown sessions", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const response = await fetch(`${base}/badges/unknown-session-id`);
     assert.equal(response.status, 404);
@@ -995,7 +1016,7 @@ test("http smoke: /badges/:sessionId returns 404 for unknown sessions", { skip: 
   });
 });
 
-test("http smoke: /badges/:sessionId returns schema-compliant JSON for approved sessions", { skip: !RUN }, async () => {
+test("http smoke: /badges/:sessionId returns schema-compliant JSON for approved sessions", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const verifierToken = issueToken(VERIFIER_WALLET, { roles: ["verifier"] });
@@ -1078,7 +1099,7 @@ test("http smoke: /badges/:sessionId returns schema-compliant JSON for approved 
   });
 });
 
-test("http smoke: /agents/:wallet returns a v1 profile for a fresh wallet", { skip: !RUN }, async () => {
+test("http smoke: /agents/:wallet returns a v1 profile for a fresh wallet", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     // A never-seen wallet still gets a zero-state profile rather than 404.
     const freshWallet = "0xCa11Cafe00000000000000000000000000000001";
@@ -1093,7 +1114,7 @@ test("http smoke: /agents/:wallet returns a v1 profile for a fresh wallet", { sk
   });
 });
 
-test("http smoke: /agents/:wallet aggregates approved sessions into badges", { skip: !RUN }, async () => {
+test("http smoke: /agents/:wallet aggregates approved sessions into badges", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const verifierToken = issueToken(VERIFIER_WALLET, { roles: ["verifier"] });
@@ -1162,7 +1183,7 @@ test("http smoke: /agents/:wallet aggregates approved sessions into badges", { s
   });
 });
 
-test("http smoke: /agents exposes a claimed session as current activity", { skip: !RUN }, async () => {
+test("http smoke: /agents exposes a claimed session as current activity", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
 
@@ -1222,7 +1243,7 @@ test("http smoke: /agents exposes a claimed session as current activity", { skip
   });
 });
 
-test("http smoke: /disputes exposes human-review sessions and records verdict/release receipts", { skip: !RUN }, async () => {
+test("http smoke: /disputes exposes human-review sessions and records verdict/release receipts", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const verifierToken = issueToken(VERIFIER_WALLET, { roles: ["verifier"] });
@@ -1405,7 +1426,7 @@ test("http smoke: /disputes exposes human-review sessions and records verdict/re
   });
 });
 
-test("http smoke: operator policy, alert, and audit endpoints are available", { skip: !RUN }, async () => {
+test("http smoke: operator policy, alert, and audit endpoints are available", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const authHeader = { authorization: `Bearer ${adminToken}` };
@@ -1453,7 +1474,7 @@ test("http smoke: operator policy, alert, and audit endpoints are available", { 
   });
 });
 
-test("http smoke: /agents/:wallet rejects non-address path segments", { skip: !RUN }, async () => {
+test("http smoke: /agents/:wallet rejects non-address path segments", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const response = await fetch(`${base}/agents/not-a-wallet`);
     assert.equal(response.status, 400);
@@ -1462,7 +1483,7 @@ test("http smoke: /agents/:wallet rejects non-address path segments", { skip: !R
   });
 });
 
-test("http smoke: /payments/send moves liquid balance between agent accounts", { skip: !RUN }, async () => {
+test("http smoke: /payments/send moves liquid balance between agent accounts", SMOKE_TEST_OPTIONS, async () => {
   await runWithServerEnv({ PAYMENTS_SEND_ENABLED: "1" }, async (base) => {
     const senderToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
 
@@ -1491,7 +1512,7 @@ test("http smoke: /payments/send moves liquid balance between agent accounts", {
   });
 });
 
-test("http smoke: /payments/send rejects self-transfer", { skip: !RUN }, async () => {
+test("http smoke: /payments/send rejects self-transfer", SMOKE_TEST_OPTIONS, async () => {
   await runWithServerEnv({ PAYMENTS_SEND_ENABLED: "1" }, async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const response = await fetch(`${base}/payments/send`, {
@@ -1508,7 +1529,7 @@ test("http smoke: /payments/send rejects self-transfer", { skip: !RUN }, async (
   });
 });
 
-test("http smoke: /strategies is a static retirement notice when STRATEGIES_JSON is unset", { skip: !RUN }, async () => {
+test("http smoke: /strategies is a static retirement notice when STRATEGIES_JSON is unset", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const response = await fetch(`${base}/strategies`);
     assert.equal(response.status, 200);
@@ -1521,7 +1542,7 @@ test("http smoke: /strategies is a static retirement notice when STRATEGIES_JSON
   });
 });
 
-test("http smoke: /jobs/tiers returns the public tier ladder without auth", { skip: !RUN }, async () => {
+test("http smoke: /jobs/tiers returns the public tier ladder without auth", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const response = await fetch(`${base}/jobs/tiers`);
     assert.equal(response.status, 200);
@@ -1534,7 +1555,7 @@ test("http smoke: /jobs/tiers returns the public tier ladder without auth", { sk
   });
 });
 
-test("http smoke: /jobs/explain-eligibility surfaces the explainEligibility tool", { skip: !RUN }, async () => {
+test("http smoke: /jobs/explain-eligibility surfaces the explainEligibility tool", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
 
@@ -1572,7 +1593,7 @@ test("http smoke: /jobs/explain-eligibility surfaces the explainEligibility tool
   });
 });
 
-test("http smoke: /jobs/estimate-reward surfaces the estimateNetReward tool", { skip: !RUN }, async () => {
+test("http smoke: /jobs/estimate-reward surfaces the estimateNetReward tool", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
 
@@ -1631,7 +1652,7 @@ test("http smoke: /jobs/estimate-reward surfaces the estimateNetReward tool", { 
   });
 });
 
-test("http smoke: /me returns only existing signed-in worker surfaces", { skip: !RUN }, async () => {
+test("http smoke: /me returns only existing signed-in worker surfaces", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(STRANGER_WALLET);
     const response = await fetch(`${base}/me`, {
@@ -1654,7 +1675,7 @@ test("http smoke: /me returns only existing signed-in worker surfaces", { skip: 
   });
 });
 
-test("http smoke: /receipts is authenticated and restricted to the signed-in wallet", { skip: !RUN }, async () => {
+test("http smoke: /receipts is authenticated and restricted to the signed-in wallet", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(STRANGER_WALLET);
     const headers = { authorization: `Bearer ${token}` };
@@ -1672,7 +1693,7 @@ test("http smoke: /receipts is authenticated and restricted to the signed-in wal
   });
 });
 
-test("http smoke: /jobs/recommendations includes per-job tierGate with missing-skill gap", { skip: !RUN }, async () => {
+test("http smoke: /jobs/recommendations includes per-job tierGate with missing-skill gap", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
 
@@ -1708,7 +1729,7 @@ test("http smoke: /jobs/recommendations includes per-job tierGate with missing-s
   });
 });
 
-test("http smoke: /admin/jobs/fire produces a derivative from a recurring template", { skip: !RUN }, async () => {
+test("http smoke: /admin/jobs/fire produces a derivative from a recurring template", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
 
@@ -1748,7 +1769,7 @@ test("http smoke: /admin/jobs/fire produces a derivative from a recurring templa
   });
 });
 
-test("http smoke: admin job creation idempotency replays and rejects payload drift", { skip: !RUN }, async () => {
+test("http smoke: admin job creation idempotency replays and rejects payload drift", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
@@ -1797,7 +1818,7 @@ test("http smoke: admin job creation idempotency replays and rejects payload dri
   });
 });
 
-test("http smoke: provider ingestion idempotency replays and rejects payload drift", { skip: !RUN }, async () => {
+test("http smoke: provider ingestion idempotency replays and rejects payload drift", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
@@ -1847,7 +1868,7 @@ test("http smoke: provider ingestion idempotency replays and rejects payload dri
   });
 });
 
-test("http smoke: capability grants reject capabilities the issuer token lacks", { skip: !RUN }, async () => {
+test("http smoke: capability grants reject capabilities the issuer token lacks", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const response = await fetch(`${base}/admin/capability-grants`, {
@@ -1868,7 +1889,7 @@ test("http smoke: capability grants reject capabilities the issuer token lacks",
   });
 });
 
-test("http smoke: capability grant idempotency replays and rejects payload drift", { skip: !RUN }, async () => {
+test("http smoke: capability grant idempotency replays and rejects payload drift", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
@@ -1914,7 +1935,7 @@ test("http smoke: capability grant idempotency replays and rejects payload drift
   });
 });
 
-test("http smoke: capability revoke idempotency replays and rejects payload drift", { skip: !RUN }, async () => {
+test("http smoke: capability revoke idempotency replays and rejects payload drift", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
@@ -1969,7 +1990,7 @@ test("http smoke: capability revoke idempotency replays and rejects payload drif
   });
 });
 
-test("http smoke: service token issue/rotate/revoke is grant-backed and one-time-secret", { skip: !RUN }, async () => {
+test("http smoke: service token issue/rotate/revoke is grant-backed and one-time-secret", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const adminHeaders = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
@@ -2074,7 +2095,7 @@ test("http smoke: service token issue/rotate/revoke is grant-backed and one-time
   });
 });
 
-test("http smoke: admin recurring fire idempotency replays and rejects firedAt drift", { skip: !RUN }, async () => {
+test("http smoke: admin recurring fire idempotency replays and rejects firedAt drift", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
@@ -2133,7 +2154,7 @@ test("http smoke: admin recurring fire idempotency replays and rejects firedAt d
   });
 });
 
-test("http smoke: recurring pause/resume accept idempotency keys", { skip: !RUN }, async () => {
+test("http smoke: recurring pause/resume accept idempotency keys", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
@@ -2207,7 +2228,7 @@ test("http smoke: recurring pause/resume accept idempotency keys", { skip: !RUN 
   });
 });
 
-test("http smoke: /admin/jobs rejects recurring template with missing schedule", { skip: !RUN }, async () => {
+test("http smoke: /admin/jobs rejects recurring template with missing schedule", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const response = await fetch(`${base}/admin/jobs`, {
@@ -2238,7 +2259,7 @@ function findRecurringTemplate(status, templateId) {
   return template;
 }
 
-test("http smoke: /metrics emits Prometheus text format with baseline series", { skip: !RUN }, async () => {
+test("http smoke: /metrics emits Prometheus text format with baseline series", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     // Warm the metrics: one unauthenticated admin call to populate counters.
     await fetch(`${base}/admin/jobs`, { method: "POST" }).catch(() => undefined);
@@ -2254,7 +2275,7 @@ test("http smoke: /metrics emits Prometheus text format with baseline series", {
   });
 });
 
-test("http smoke: /metrics is bearer-gated when metrics auth is required", { skip: !RUN }, async () => {
+test("http smoke: /metrics is bearer-gated when metrics auth is required", SMOKE_TEST_OPTIONS, async () => {
   await runWithServerEnv(
     {
       METRICS_AUTH_REQUIRED: "1",
@@ -2279,7 +2300,7 @@ test("http smoke: /metrics is bearer-gated when metrics auth is required", { ski
   );
 });
 
-test("http smoke: production /metrics fails closed when token is missing", { skip: !RUN }, async () => {
+test("http smoke: production /metrics fails closed when token is missing", SMOKE_TEST_OPTIONS, async () => {
   await runWithServerEnv(
     {
       NODE_ENV: "production",
@@ -2294,7 +2315,7 @@ test("http smoke: production /metrics fails closed when token is missing", { ski
   );
 });
 
-test("http smoke: discovery manifest is served at both /agent-tools.json and the RFC 8615 .well-known path", { skip: !RUN }, async () => {
+test("http smoke: discovery manifest is served at both /agent-tools.json and the RFC 8615 .well-known path", SMOKE_TEST_OPTIONS, async () => {
   await runWithServerEnv({ AUTH_CHAIN_ID: "420420419" }, async (base) => {
     const [
       canonical,
