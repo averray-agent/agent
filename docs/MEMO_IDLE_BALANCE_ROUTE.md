@@ -153,6 +153,19 @@ Costs: one Hub CREATE (~0.9 DOT per the gas law) plus the D-03 deploy-gate
 waiver choreography, since a contract change without a manifest entry fails
 the deploy closed.
 
+**Q1″ — RATIFIED (Pascal, 2026-08-26): the pool's venue binding becomes
+owner-settable, set-once, before v2.1 deploys.** Found while scoping the
+ceremony: pool→venueAdapter, venueAdapter→pool and lane→adapter are all
+immutable, so a venue-bearing v2.1 needs the nonce-precomputed multi-CREATE
+ceremony — the most error-prone class we have — at deploy AND at every future
+venue change, while venueAdapter=0 would kill yield on the instance forever.
+Amendment (PACKET_POOL_V21_VENUE_SETTER): `setVenueAdapter`, `policy.owner()`
+only, exactly once, constructor-identical validation. The adapter↔lane pair
+still deploys as a precomputed two-CREATE pair — acceptable, they hold no
+external money at deploy; the pool, which does, never again needs nonce
+choreography. Deploy order becomes: v2.1 plain → adapter+lane pair → one
+multisig bind → registration calls.
+
 **Q2 — What happens to `PER_AGENT_ASSET_CAP`? → IT LAPSES for allocated
 balances.** It was a guardrail sized for a 25 USDC pilot pool, not a permanent
 risk limit, and carrying 100 forward by inheritance is not more principled than
