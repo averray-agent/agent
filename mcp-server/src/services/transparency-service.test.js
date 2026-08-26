@@ -23,6 +23,8 @@ const TREASURY = "0x01E6eed856e989201F4FF6346E18EAb7e46C874C";
 const TREASURY_ID = "0x93511e8deef3e7ec69cc1f18a573176da9870a0fb474ab2e0c18d88a5e74fd47";
 const CONVERTED = "0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3";
 const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
+const LIVE_POOL = "0x9B35A102d656Fb86d798aF81959e09961DEc28E0";
+const LEGACY_POOL = "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30";
 const NOW = Date.parse("2026-08-06T12:00:00.000Z");
 const OPERATOR_POSTER = "0x1111111111111111111111111111111111111111";
 const EXTERNAL_POSTER = "0x2222222222222222222222222222222222222222";
@@ -190,6 +192,8 @@ function harness(overrides = {}) {
         rpcUrl: "https://services.polkadothub-rpc.com/mainnet/",
         xcmWrapperAddress: WRAPPER,
         escrowCoreAddress: ESCROW,
+        depositPoolV21Address: LIVE_POOL,
+        depositPoolV2Address: LEGACY_POOL,
         supportedAssets: [{ symbol: "USDC", address: TOKEN, decimals: 6 }]
       },
       async getProtocolFeeConfig() {
@@ -228,6 +232,17 @@ function harness(overrides = {}) {
           return { raw: 0n, asOf: new Date(NOW).toISOString() };
         }
         throw new Error("unexpected target");
+      }
+    },
+    depositPoolReader: overrides.depositPoolReader ?? {
+      async read(address) {
+        if (String(address).toLowerCase() === LIVE_POOL.toLowerCase()) {
+          return { blockNumber: 9_218_453, totalAssets: 10_405_132n, bufferAssets: 10_405_132n, deployedPrincipal: 0n };
+        }
+        if (String(address).toLowerCase() === LEGACY_POOL.toLowerCase()) {
+          return { blockNumber: 9_218_453, totalAssets: 14_888_371n, bufferAssets: 14_888_371n, deployedPrincipal: 0n };
+        }
+        throw new Error("unexpected pool");
       }
     },
     bankLaneFeed: {
@@ -433,7 +448,8 @@ test("transparency payload composes flow, escrow, and generation-bound treasury 
     "escrow",
     "bank",
     "treasury-balance",
-    "chain-head"
+    "chain-head",
+    "deposit-pools"
   ]);
   for (const durationMs of Object.values(payload.readPolicy.assemblyTimingsMs)) {
     assert.equal(Number.isFinite(durationMs) && durationMs >= 0, true);
@@ -448,6 +464,13 @@ test("transparency payload composes flow, escrow, and generation-bound treasury 
   assert.match(payload.flow.posterFeesAllTime.external.source, /shared self-identity registry/u);
   assert.equal(payload.escrow.posterObligationsInFlight.value, "1.63");
   assert.equal(payload.escrow.balanceHeldByEscrowContract.value, "0");
+  assert.equal(payload.depositPools.live.label.value, "Live v2.1");
+  assert.equal(payload.depositPools.live.totalAssets.value, "10.405132");
+  assert.equal(payload.depositPools.live.bufferAssets.value, "10.405132");
+  assert.equal(payload.depositPools.live.deployedStatus.value, "not_deployed");
+  assert.equal(payload.depositPools.legacy.label.value, "Legacy v2");
+  assert.equal(payload.depositPools.legacy.totalAssets.value, "14.888371");
+  assert.equal(payload.depositPools.legacy.deployedStatus.value, "not_deployed");
   assert.equal(payload.treasury.totalUsdcEquivalent.value, "10.908804");
   assert.equal(payload.treasury.lines.assetHubMultisig.balance.value, "0.878804");
   assert.equal(payload.treasury.lines.hydrationPosition.total.value, "10");
@@ -465,6 +488,30 @@ test("transparency payload composes flow, escrow, and generation-bound treasury 
   assert.equal(payload.treasury.generation.state.value, "ok");
   assert.match(payload.treasury.lines.hydrationPosition.total.source, new RegExp(WRAPPER, "iu"));
   assert.match(payload.treasury.lines.assetHubMultisig.balance.proof, new RegExp(TREASURY_ID, "iu"));
+});
+
+test("deposit-pool transparency reads both manifest pools and degrades one failed lane independently", async () => {
+  const reads = [];
+  const payload = await harness({
+    depositPoolReader: {
+      async read(address) {
+        reads.push(address);
+        if (String(address).toLowerCase() === LIVE_POOL.toLowerCase()) {
+          return { blockNumber: 9_218_500, totalAssets: 10_000_000n, bufferAssets: 6_000_000n, deployedPrincipal: 4_000_000n };
+        }
+        throw new Error("legacy rpc read failed");
+      }
+    }
+  }).getSnapshot();
+
+  assert.deepEqual(reads.map((value) => value.toLowerCase()).sort(), [LIVE_POOL, LEGACY_POOL].map((value) => value.toLowerCase()).sort());
+  assert.equal(payload.depositPools.live.totalAssets.value, "10");
+  assert.equal(payload.depositPools.live.bufferAssets.value, "6");
+  assert.equal(payload.depositPools.live.deployedPrincipal.value, "4");
+  assert.equal(payload.depositPools.live.deployedStatus.value, "deployed");
+  assert.equal(payload.depositPools.legacy.totalAssets.status, "unknown");
+  assert.equal(payload.depositPools.legacy.bufferAssets.value, null);
+  assert.equal(payload.depositPools.legacy.deployedStatus.status, "unknown");
 });
 
 test("batched flow joins preserve the byte-identical serialized flow payload", async () => {

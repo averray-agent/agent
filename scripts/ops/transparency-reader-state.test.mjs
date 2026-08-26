@@ -4,6 +4,8 @@ import test from "node:test";
 
 const READER = new URL("../../marketing/public/transparency-reader.js", import.meta.url);
 const PAGE = new URL("../../marketing/src/pages/transparency.astro", import.meta.url);
+const SYNC = new URL("../sync-marketing-site.mjs", import.meta.url);
+const DEPLOY = new URL("./deploy-production.sh", import.meta.url);
 
 test("transparency reader shows loading before its first fetch and clears it on render", async () => {
   const source = await readFile(READER, "utf8");
@@ -37,4 +39,27 @@ test("the Record separates job origin from registry-classified claimant ownershi
   assert.match(source, /data-read="flow\.settledToExternalWallets24h"/u);
   assert.match(source, />Settled to external wallets \(24h\)</u);
   assert.match(source, /shared\s+self-identity registry/u);
+});
+
+test("deposit-pool transparency contains two live-read lanes and no baked figure", async () => {
+  const source = await readFile(PAGE, "utf8");
+  const section = source.match(/<section[^>]*data-deposit-pools[^>]*>([\s\S]*?)<\/section>/u)?.[1];
+
+  assert.ok(section, "deposit-pool transparency section must exist");
+  for (const generation of ["live", "legacy"]) {
+    assert.match(section, new RegExp(`data-read="depositPools\\.${generation}\\.label"`, "u"));
+    assert.match(section, new RegExp(`data-read="depositPools\\.${generation}\\.totalAssets"`, "u"));
+    assert.match(section, new RegExp(`data-read="depositPools\\.${generation}\\.bufferAssets"`, "u"));
+    assert.match(section, new RegExp(`data-read="depositPools\\.${generation}\\.deployedStatus"`, "u"));
+  }
+  assert.doesNotMatch(section, /\b[0-9]+(?:\.[0-9]+)?\s*(?:USDC|DOT)\b/iu);
+  assert.doesNotMatch(section, /0x[a-fA-F0-9]{40}/u);
+});
+
+test("the transparency page and reader remain in both deployment allow-lists", async () => {
+  const [sync, deploy] = await Promise.all([readFile(SYNC, "utf8"), readFile(DEPLOY, "utf8")]);
+  assert.match(sync, /"transparency-reader\.js"/u);
+  assert.match(sync, /"transparency\/index\.html"/u);
+  assert.match(deploy, /"transparency\/index\.html \/transparency\/"/u);
+  assert.match(deploy, /"transparency-reader\.js \/transparency-reader\.js"/u);
 });

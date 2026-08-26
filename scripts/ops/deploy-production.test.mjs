@@ -572,6 +572,8 @@ test("deploy rebuilds and verifies the public site even when no site paths chang
   assert.match(await readFile(deployLog, "utf8"), /run build:site/u);
   assert.match(run.stdout, /Served .*\/ matches built site\/index\.html/u);
   assert.match(run.stdout, /Served .*\/console-stream\.js matches built site\/console-stream\.js/u);
+  assert.match(run.stdout, /Served .*\/transparency\/ matches built site\/transparency\/index\.html/u);
+  assert.match(run.stdout, /Served .*\/transparency-reader\.js matches built site\/transparency-reader\.js/u);
   assert.match(run.stdout, /Served .*\/verify\/ matches built site\/verify\/index\.html/u);
   assert.match(run.stdout, /Served .*\/proof-to-pay\/ matches built site\/proof-to-pay\/index\.html/u);
   assert.deepEqual(parseDeployResult(run.stdout), {
@@ -1789,6 +1791,7 @@ async function makeSiteFixture() {
 
   await mkdir(join(appRoot, "scripts/ops"), { recursive: true });
   await mkdir(join(appRoot, "site"), { recursive: true });
+  await mkdir(join(appRoot, "site/transparency"), { recursive: true });
   await mkdir(join(appRoot, "site/verify"), { recursive: true });
   await mkdir(join(appRoot, "site/proof-to-pay"), { recursive: true });
   await mkdir(stackRoot, { recursive: true });
@@ -1821,6 +1824,8 @@ async function makeSiteFixture() {
     "name=index.html",
     "case \"$url\" in",
     "  */console-stream.js) name=console-stream.js ;;",
+    "  */transparency/) name=transparency/index.html ;;",
+    "  */transparency-reader.js) name=transparency-reader.js ;;",
     "  */verify/) name=verify/index.html ;;",
     "  */proof-to-pay/) name=proof-to-pay/index.html ;;",
     "esac",
@@ -1838,6 +1843,8 @@ async function makeSiteFixture() {
   await writeFile(join(appRoot, "README.md"), "base\n");
   await writeFile(join(appRoot, "site/index.html"), "<title>Averray</title> fresh build\n");
   await writeFile(join(appRoot, "site/console-stream.js"), "// fresh console stream\n");
+  await writeFile(join(appRoot, "site/transparency/index.html"), "<title>Transparency</title> fresh build\n");
+  await writeFile(join(appRoot, "site/transparency-reader.js"), "// fresh transparency reader\n");
   await writeFile(join(appRoot, "site/verify/index.html"), "<title>Averray Verify</title> fresh build\n");
   await writeFile(join(appRoot, "site/proof-to-pay/index.html"), "<title>Proof-to-Pay</title> fresh build\n");
   git(appRoot, "add", ".");

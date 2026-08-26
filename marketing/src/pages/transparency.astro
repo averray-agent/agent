@@ -66,6 +66,53 @@ const PAGE_DESCRIPTION =
       </p>
     </div>
 
+    <!-- ============ DEPOSIT POOLS ============ -->
+    <section class="record-section" aria-labelledby="s-pools" data-deposit-pools>
+      <div class="record-head">
+        <h2 id="s-pools">Deposit pools</h2>
+      </div>
+      <div class="record-grid record-grid--2">
+        <div class="read">
+          <span class="read__label" data-read="depositPools.live.label" data-inline><span data-value>—</span></span>
+          <p class="read__value read__value--sm" data-read="depositPools.live.totalAssets" data-inline>
+            <span data-value>—</span><span class="read__unit" data-unit></span>
+          </p>
+          <p class="read__src">Total assets</p>
+          <div class="panel__inner">
+            <div class="cell" data-read="depositPools.live.bufferAssets">
+              <span class="read__label">Pool buffer</span>
+              <p class="read__value read__value--sm"><span data-value>—</span><span class="read__unit" data-unit></span></p>
+              <p class="read__src" data-source></p>
+            </div>
+            <div class="cell" data-read="depositPools.live.deployedStatus">
+              <span class="read__label">Venue deployment</span>
+              <p class="read__value read__value--sm"><span data-value>—</span></p>
+              <p class="read__src" data-source></p>
+            </div>
+          </div>
+        </div>
+        <div class="read">
+          <span class="read__label" data-read="depositPools.legacy.label" data-inline><span data-value>—</span></span>
+          <p class="read__value read__value--sm" data-read="depositPools.legacy.totalAssets" data-inline>
+            <span data-value>—</span><span class="read__unit" data-unit></span>
+          </p>
+          <p class="read__src">Total assets</p>
+          <div class="panel__inner">
+            <div class="cell" data-read="depositPools.legacy.bufferAssets">
+              <span class="read__label">Pool buffer</span>
+              <p class="read__value read__value--sm"><span data-value>—</span><span class="read__unit" data-unit></span></p>
+              <p class="read__src" data-source></p>
+            </div>
+            <div class="cell" data-read="depositPools.legacy.deployedStatus">
+              <span class="read__label">Venue deployment</span>
+              <p class="read__value read__value--sm"><span data-value>—</span></p>
+              <p class="read__src" data-source></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ============ TREASURY ============ -->
     <section class="record-section" aria-labelledby="s-holds">
       <div class="record-head">
