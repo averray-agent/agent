@@ -239,7 +239,10 @@ test("mainnet carries no escrow pins post-v3-ceremony and points escrowCore at t
   // 17 = the 12 pre-L1 contracts + the pool-v2/CreditPool quartet (2026-08-13
   // L1 ceremony: depositPoolLaneV2, hydrationDepositPoolAdapterV2,
   // depositPoolV2, creditPool) + creditBook (2026-08-20 L2 ceremony).
-  assert.equal(contracts.length, 17);
+  // 19 = the 17 above + the Ceremony-A pair deployed 2026-08-26 (pool v2.1
+  // 0x9B35A102 and the AAC aggregator adapter 0x1DDcA709), both verified
+  // deployed source==chain; the immutable v2's waivers remain independently.
+  assert.equal(contracts.length, 19);
   // The v3 ceremony (2026-08-13) deleted both escrow pins per their own reason
   // text. The two deposit-pool names alias one live address, so the exact v2.1
   // runtime must be pinned independently for both D-03 contract keys.

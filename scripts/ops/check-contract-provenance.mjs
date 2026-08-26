@@ -72,6 +72,11 @@ export const CONTRACT_ARTIFACTS = Object.freeze({
   // source-drift findings and any exact known-unshipped waiver are reasoned
   // about independently for each deployed address.
   depositPoolLane: ["HydrationUsdcAdapterV22.sol", "HydrationUsdcAdapterV22"],
+  // Ceremony A, 2026-08-26: the venue-less v2.1 pool (Q1'' set-once bind) and
+  // the AAC idle-balance aggregator. Deployed from merged main 684ab886; both
+  // masked runtimes reproduce from source at their addresses.
+  depositPoolV21: ["DepositPoolV2.sol", "DepositPoolV2"],
+  aacPoolAggregatorAdapter: ["AacPoolAggregatorAdapter.sol", "AacPoolAggregatorAdapter"],
   hydrationDepositPoolAdapter: [
     "HydrationDepositPoolAdapter.sol",
     "HydrationDepositPoolAdapter",

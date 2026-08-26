@@ -30,7 +30,9 @@
     "hydrationDepositPoolAdapterV2": "0xE2801E6C640e0180798912649fD567E1Ea459a35",
     "depositPoolV2": "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30",
     "creditPool": "0x903B318586A3772c99185000676f4AC356DD6E4B",
-    "creditBook": "0x70441c9131Bc47c96E8D839C5B30850924838099"
+    "creditBook": "0x70441c9131Bc47c96E8D839C5B30850924838099",
+    "depositPoolV21": "0x9B35A102d656Fb86d798aF81959e09961DEc28E0",
+    "aacPoolAggregatorAdapter": "0x1DDcA7097c752580c6561e1bF8C673D6C1665CA5"
   },
   "contractProvenance": {
     "0x226F14252A98BD2eA140271647De20132F09AF20": {
@@ -177,6 +179,18 @@
       "abiHash": "sha256:ffb5920d140328c9e413789acca7d23b95953e7c9027612bec467854ef69b7e8",
       "runtimeCodeHash": "sha256:08858e6f9948700edce5a85127d25f77cde3082fba5e150cf6a8a23652b4e252",
       "verifiedAt": "2026-08-20T15:00:00.000Z"
+    },
+    "0x9B35A102d656Fb86d798aF81959e09961DEc28E0": {
+      "sourceCommit": "684ab8860f8e2f3ffd76ac0587f742f5e9d517e2",
+      "abiHash": "sha256:e6560c200df5a6aa2fac349aacb1fb53cd30720aac41d6529694b0c0c65d2133",
+      "runtimeCodeHash": "sha256:9fe6d70a4085b3bc2fa83165eb4d94fdaced8a693435aa790b6cec54e51188f3",
+      "verifiedAt": "2026-08-26T17:32:44.000Z"
+    },
+    "0x1DDcA7097c752580c6561e1bF8C673D6C1665CA5": {
+      "sourceCommit": "684ab8860f8e2f3ffd76ac0587f742f5e9d517e2",
+      "abiHash": "sha256:4be9b1c749fd318a485b1947a17f602e3bc669ef462d654c2c2ee1099eb7db03",
+      "runtimeCodeHash": "sha256:acb112ee59529213aa642c9c0dc7c813866becbcc692f5973ef686cb6ca0698b",
+      "verifiedAt": "2026-08-26T17:32:44.000Z"
     }
   },
   "knownUnshippedContractChanges": {
@@ -205,7 +219,7 @@
       {
         "sourceCommit": "052b3a7a791112001257226ecfbea7a919d9aca2",
         "maskedRuntimeCodeHash": "sha256:f194f90545c90989f58fe3512ac189ef84882031f9322dfcc934b3e8ccf919a2",
-        "reason": "Post-v3-ceremony drain state (2026-08-13): HEAD source compiles the EscrowCore v3 artifact, while legacyEscrowCore at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC intentionally remains the deployed v2 runtime until its open jobs and dispute windows drain (16 unsettled at cutover, incl. the 2026-08-16 rescue finalize). v2's own provenance stays verified via contractProvenance (sha256:bc0d1cfe\u2026) and deployments/interfaces/mainnet-escrow-core-v2.json. This entry allowlists exactly the v3 candidate artifact against the legacy address and must be deleted when v2 fully drains and exits the manifest alongside the operator revocation legs."
+        "reason": "Post-v3-ceremony drain state (2026-08-13): HEAD source compiles the EscrowCore v3 artifact, while legacyEscrowCore at 0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC intentionally remains the deployed v2 runtime until its open jobs and dispute windows drain (16 unsettled at cutover, incl. the 2026-08-16 rescue finalize). v2's own provenance stays verified via contractProvenance (sha256:bc0d1cfe…) and deployments/interfaces/mainnet-escrow-core-v2.json. This entry allowlists exactly the v3 candidate artifact against the legacy address and must be deleted when v2 fully drains and exits the manifest alongside the operator revocation legs."
       }
     ]
   },
@@ -252,7 +266,9 @@
     "depositPoolV1": 19380506,
     "depositPoolLaneV1": 19380501,
     "hydrationDepositPoolAdapterV1": 19380504,
-    "creditBook": 19686485
+    "creditBook": 19686485,
+    "depositPoolV21": 19913549,
+    "aacPoolAggregatorAdapter": 19913651
   },
   "runtime": {
     "auth": {
@@ -301,7 +317,9 @@
     "hydrationUsdcAdapterV2_2_1": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     "depositPoolLane": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     "hydrationDepositPoolAdapter": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
-    "depositPool": "0x9Ab8531FBb0948C542a31298FD61335f30064239"
+    "depositPool": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+    "depositPoolV21": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+    "aacPoolAggregatorAdapter": "0x9Ab8531FBb0948C542a31298FD61335f30064239"
   },
   "escrowRedeployedAt": "2026-07-30T10:01:56.005Z",
   "escrowRedeployTxHashes": {
