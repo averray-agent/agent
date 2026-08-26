@@ -101,8 +101,13 @@ function splitRatio(totalGain, venueEarned, operatorAdded) {
     status: "available",
     model: "pool_level_cumulative_nav_gain_ratio",
     denominator: "cumulative_nav_gain",
+    // Floor-divide one side and derive the other, so the pair always sums to
+    // exactly 10000. Independent floor division reads 9999 whenever the split
+    // is inexact (e.g. 0.5/1.0 -> 3333 + 6666), and a reader WILL add these
+    // two numbers on the one surface whose whole job is not inviting doubt.
+    // The raw venueEarned/operatorAdded amounts remain the exact record.
     venueEarnedBps: (venueEarned * 10_000n / totalGain).toString(),
-    operatorAddedBps: (operatorAdded * 10_000n / totalGain).toString()
+    operatorAddedBps: (10_000n - venueEarned * 10_000n / totalGain).toString()
   };
 }
 
