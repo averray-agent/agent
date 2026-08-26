@@ -39,7 +39,7 @@ contract DepositPoolV2 is ReentrancyGuard {
     address public immutable asset;
     address public immutable operator;
     address public immutable creditPool;
-    IDepositPoolVenueAdapter public immutable venueAdapter;
+    IDepositPoolVenueAdapter public venueAdapter;
 
     uint256 public totalSupply;
     mapping(address => uint256) public balanceOf;
@@ -156,6 +156,7 @@ contract DepositPoolV2 is ReentrancyGuard {
     event SharesReleased(address indexed owner, uint256 shares, bytes32 indexed loanId);
     event SharesSeized(address indexed owner, address indexed receiver, uint256 shares, uint256 assets, bytes32 loanId);
     event AggregatorAdapterSet(address indexed adapter, bool enabled);
+    event VenueAdapterSet(address indexed adapter);
 
     error Unauthorized();
     error ZeroAddress();
@@ -191,6 +192,7 @@ contract DepositPoolV2 is ReentrancyGuard {
     error InvalidLoanId();
     error InvalidAggregatorAdapter();
     error AggregatorMustUseNoticeExit();
+    error VenueAdapterAlreadySet();
 
     modifier onlyOwner() {
         if (msg.sender != policy.owner()) revert Unauthorized();
@@ -226,19 +228,20 @@ contract DepositPoolV2 is ReentrancyGuard {
             revert ZeroAddress();
         }
         if (IERC20PoolAsset(asset_).decimals() != decimals) revert InvalidAssetDecimals();
-        if (address(venueAdapter_) != address(0)) {
-            if (
-                address(venueAdapter_).code.length == 0 || venueAdapter_.asset() != asset_
-                    || venueAdapter_.lossReporter() == address(0)
-            ) {
-                revert InvalidVenueAdapter();
-            }
-        }
         policy = policy_;
         asset = asset_;
         operator = operator_;
         creditPool = creditPool_;
+        if (address(venueAdapter_) != address(0)) _validateVenueAdapter(venueAdapter_);
         venueAdapter = venueAdapter_;
+    }
+
+    function setVenueAdapter(IDepositPoolVenueAdapter adapter_) external onlyOwner {
+        if (address(venueAdapter) != address(0)) revert VenueAdapterAlreadySet();
+        if (address(adapter_) == address(0)) revert ZeroAddress();
+        _validateVenueAdapter(adapter_);
+        venueAdapter = adapter_;
+        emit VenueAdapterSet(address(adapter_));
     }
 
     function setAggregatorAdapter(address adapter, bool enabled) external onlyOwner {
@@ -591,7 +594,7 @@ contract DepositPoolV2 is ReentrancyGuard {
     }
 
     /// @notice Account for cash returned through the adapter's recovery path.
-    /// @dev The immutable adapter calls this after transferring USDC. Normal
+    /// @dev The bound adapter calls this after transferring USDC. Normal
     ///      recall/deploy claims are balance-delta measured by the pool itself.
     function recordVenueReturn(bytes32 adapterRequestId, uint256 assets) external onlyVenueAdapter nonReentrant {
         if (assets == 0) revert ZeroAmount();
@@ -602,7 +605,7 @@ contract DepositPoolV2 is ReentrancyGuard {
     }
 
     /// @notice Reduce depositor NAV for principal that cannot return.
-    /// @dev Only the TreasuryPolicy owner exposed by the immutable adapter may
+    /// @dev Only the TreasuryPolicy owner exposed by the bound adapter may
     ///      take this depositor-impacting action; operator and settler keys may not.
     function writeOffVenueLoss(uint256 deploymentId, uint256 assets) external nonReentrant {
         if (address(venueAdapter) == address(0)) revert VenueNotConfigured();
@@ -626,6 +629,12 @@ contract DepositPoolV2 is ReentrancyGuard {
             venuePrincipalCostBasis -= principalReduction;
         }
         emit VenuePrincipalReturned(deploymentId, returnedAssets, principalReduction);
+    }
+
+    function _validateVenueAdapter(IDepositPoolVenueAdapter adapter_) private view {
+        if (address(adapter_).code.length == 0 || adapter_.asset() != asset || adapter_.lossReporter() == address(0)) {
+            revert InvalidVenueAdapter();
+        }
     }
 
     function _outstandingVenuePrincipal(uint256 deploymentId) private view returns (uint256) {
