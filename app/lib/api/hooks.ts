@@ -1,7 +1,7 @@
 "use client";
 
 import useSWR, { type SWRConfiguration } from "swr";
-import { boundedReadFetcher, swrFetcher, ApiError } from "./client";
+import { boundedReadFetcher, publicBoundedReadFetcher, swrFetcher, ApiError } from "./client";
 import { shouldRetryApiError } from "./retry-policy.js";
 
 /**
@@ -32,12 +32,13 @@ export function useApi<T = unknown>(
  */
 export function useBoundedApi<T = unknown>(
   path: string | null,
-  config?: SWRConfiguration<T, ApiError>
+  config?: SWRConfiguration<T, ApiError> & { publicRead?: boolean }
 ) {
-  return useSWR<T, ApiError>(path, boundedReadFetcher, {
+  const { publicRead = false, ...swrConfig } = config ?? {};
+  return useSWR<T, ApiError>(path, publicRead ? publicBoundedReadFetcher : boundedReadFetcher, {
     revalidateOnFocus: false,
     shouldRetryOnError: false,
-    ...config,
+    ...swrConfig,
   });
 }
 
@@ -68,7 +69,7 @@ export const useHumanWorkJobs = (since: number | null | undefined = null) => {
   const path = since === undefined
     ? null
     : `/jobs?state=claimable&limit=100${since === null ? "" : `&since=${encodeURIComponent(String(since))}`}`;
-  return useBoundedApi(path, { refreshInterval: 30_000 });
+  return useBoundedApi(path, { refreshInterval: 30_000, publicRead: true });
 };
 export const useRecommendations = () => useApi("/jobs/recommendations");
 export const useJobDefinition = (id: string | null) =>

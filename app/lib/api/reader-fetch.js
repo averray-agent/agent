@@ -2,6 +2,22 @@ export const APP_READER_TIMEOUT_MS = 3_000;
 export const APP_READER_ATTEMPTS = 2;
 
 /**
+ * Public first-paint reads must stay public even when the browser still holds
+ * a rejected SIWE session. Removing the stale bearer avoids turning a public
+ * GET into a cross-origin authenticated/preflight path before logged-out
+ * content can render.
+ */
+export function publicReadInit(init = {}) {
+  const headers = new Headers(init.headers ?? {});
+  headers.delete("authorization");
+  return { ...init, headers };
+}
+
+export function fetchAppPublicReadWithRetry(url, init = {}, runtime = {}) {
+  return fetchAppReadWithRetry(url, publicReadInit(init), runtime);
+}
+
+/**
  * Bound first-paint reads so a restricted client cannot hold an honest loading
  * state behind one lost request for eight seconds. Each attempt gets a fresh
  * controller; an explicit caller abort is final, while a local timeout may use
