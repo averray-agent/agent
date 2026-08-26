@@ -249,7 +249,7 @@ test("mainnet carries no escrow pins post-v3-ceremony and points escrowCore at t
   );
   assert.equal(
     allowlist.get("depositPool")?.[0]?.maskedRuntimeCodeHash,
-    "sha256:0286239658d1d38574cf285903fa2d71c41af49fc6dc7b5e96cf2ebb0083777b"
+    "sha256:100a21cd5139b36528c6d6d6b5f716ff2ed67c5a89fbde48f407b27e10754355"
   );
   assert.deepEqual(allowlist.get("depositPoolV2"), allowlist.get("depositPool"));
   assert.equal(

@@ -182,16 +182,16 @@
   "knownUnshippedContractChanges": {
     "depositPool": [
       {
-        "sourceCommit": "2774bf1e13eef532620e2a8d0061256a547da808",
-        "maskedRuntimeCodeHash": "sha256:0286239658d1d38574cf285903fa2d71c41af49fc6dc7b5e96cf2ebb0083777b",
-        "reason": "DepositPool v2.1 adds the cold-policy-owner aggregator registry, exempts only registered aggregators from the per-agent cap and high-water floor while retaining the total cap, and requires aggregators to use notice redemption. The immutable live v2 pool intentionally remains deployed until the separately authorized v2.1 deployment and migration ceremony. This exact candidate runtime is allowlisted only to keep the waiver-landing deploy open; that deploy requires the verify_contract_source=1 manual dispatch."
+        "sourceCommit": "3d3818a55d41556a69e81fcc0606202b4aa2ceaa",
+        "maskedRuntimeCodeHash": "sha256:100a21cd5139b36528c6d6d6b5f716ff2ed67c5a89fbde48f407b27e10754355",
+        "reason": "DepositPool v2.1 adds the cold-policy-owner aggregator registry, exempts only registered aggregators from the per-agent cap and high-water floor while retaining the total cap, requires aggregators to use notice redemption, and lets the cold policy owner bind a constructor-validated venue adapter exactly once. The immutable live v2 pool intentionally remains deployed until the separately authorized v2.1 deployment and migration ceremony. This exact candidate runtime is allowlisted only to keep the waiver-landing deploy open; that deploy requires the verify_contract_source=1 manual dispatch."
       }
     ],
     "depositPoolV2": [
       {
-        "sourceCommit": "2774bf1e13eef532620e2a8d0061256a547da808",
-        "maskedRuntimeCodeHash": "sha256:0286239658d1d38574cf285903fa2d71c41af49fc6dc7b5e96cf2ebb0083777b",
-        "reason": "DepositPool v2.1 adds the cold-policy-owner aggregator registry, exempts only registered aggregators from the per-agent cap and high-water floor while retaining the total cap, and requires aggregators to use notice redemption. The immutable live v2 pool intentionally remains deployed until the separately authorized v2.1 deployment and migration ceremony. This exact candidate runtime is allowlisted only to keep the waiver-landing deploy open; that deploy requires the verify_contract_source=1 manual dispatch."
+        "sourceCommit": "3d3818a55d41556a69e81fcc0606202b4aa2ceaa",
+        "maskedRuntimeCodeHash": "sha256:100a21cd5139b36528c6d6d6b5f716ff2ed67c5a89fbde48f407b27e10754355",
+        "reason": "DepositPool v2.1 adds the cold-policy-owner aggregator registry, exempts only registered aggregators from the per-agent cap and high-water floor while retaining the total cap, requires aggregators to use notice redemption, and lets the cold policy owner bind a constructor-validated venue adapter exactly once. The immutable live v2 pool intentionally remains deployed until the separately authorized v2.1 deployment and migration ceremony. This exact candidate runtime is allowlisted only to keep the waiver-landing deploy open; that deploy requires the verify_contract_source=1 manual dispatch."
       }
     ],
     "hydrationUsdcAdapter": [
