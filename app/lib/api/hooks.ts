@@ -116,6 +116,8 @@ export const useVerifierResult = (sessionId: string | null) =>
   useApi(sessionId ? `/verifier/result?sessionId=${encodeURIComponent(sessionId)}` : null);
 export const useStrategies = () => useApi("/strategies");
 export const useHealth = () => useApi("/health");
+/** Public DepositPool facts; the page renders the server-owned disclosure verbatim. */
+export const useDepositPool = () => useBoundedApi("/pool", { refreshInterval: 30_000 });
 /**
  * Operator-app provider operations status. Authed via `/admin/status`,
  * which carries the full `lastRun.errors[]` / `lastRun.skipped[]` arrays.
