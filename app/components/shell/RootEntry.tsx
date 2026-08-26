@@ -40,6 +40,7 @@ export function RootEntry() {
         <footer className="mt-5 flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs text-[var(--muted)]">
           <Link href="https://averray.com">averray.com</Link>
           <Link href="https://averray.com/trust/">Trust</Link>
+          <Link href="/pool">Pool</Link>
           <Link href="https://averray.com/agents/">Agents guide</Link>
         </footer>
       </div>
