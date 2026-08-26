@@ -70,15 +70,21 @@ try {
     runnerTimeoutMarginMs: 30_000,
     finalizerId: "compose-smoke-finalizer"
   });
-  const queued = await service.createRun(FIXTURE);
-  assert.equal(queued.status, "queued");
+  const created = await service.createRun(FIXTURE);
+  // createRun re-reads the run after its atomic reserve, and the runner
+  // container (100ms poll) can claim it between those two round trips, so
+  // either lifecycle state proves the enqueue; completion is asserted below.
+  assert.ok(
+    ["queued", "running"].includes(created.status),
+    `expected the enqueued run to be queued or claimed, got: ${JSON.stringify(created)}`
+  );
   assert.deepEqual(calls, { authorize: 1, capture: 0, release: 0 });
 
   const deadline = Date.now() + 180_000;
-  let run = queued;
+  let run = created;
   while (run.status !== "complete" && Date.now() < deadline) {
     await service.finalizeAvailableRuns();
-    run = await service.getRun(queued.runId);
+    run = await service.getRun(created.runId);
     if (run.status !== "complete") await delay(250);
   }
 
