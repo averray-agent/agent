@@ -1,6 +1,6 @@
 # RUNSHEET — Pool v2.1 activation (phased)
 
-Status: **CEREMONY A IN PROGRESS — A0–A2 EXECUTED 2026-08-26; A4 signing scheduled 2026-08-27** · 2026-08-26 ·
+Status: **CEREMONY A: A0–A2 + A5 EXECUTED; only A4 (multisig, 2026-08-27) and A6 (cutover, gated on A4) remain** · 2026-08-26 ·
 Author: Claude (architect + gate) · Executor: Pascal (every money step) ·
 Authority: `MEMO_IDLE_BALANCE_ROUTE.md` R1–R5, Q1′, Q1″, Q2 (all RATIFIED).
 
@@ -31,6 +31,22 @@ session and lets A run as soon as the amendment lands.
 | A0 holder map | `0xdc1Ed106…` 10.000000 · `0x60385dD6…` 0.501328 · tester `0x97450BF6…` 5.026011 · **protocol-held 10.000000 (no exit path exists — stays in v2 permanently, guaranteeing the tester's exit liquidity)** |
 | A3 postage targets | AAC → `151MENb3J9ZiBv147yhNkPDiY8rXF7TrWc13PqWYJeLuupBd` · adapter → `1g9wJAYj7y99R7ttFUPxqrCroEqvRwhXS7LFz1mXu76gT41` (0.1 DOT each, Asset Hub) |
 | Deploy tooling | `scripts/ops/deploy-pool-v21.mjs` (in the gate1299 worktree; committed to this branch alongside this runsheet) |
+
+## A5 EXECUTED — 2026-08-26 evening (before A4; verified independent of it)
+
+Both operator positions migrated by owner-signed redeem→approve→deposit,
+exact-delta, pre-existing wallet USDC untouched
+(`scripts/ops/migrate-pool-v21.mjs`, committed on this branch):
+
+| wallet | v2 shares → v2.1 shares | txs (redeem/approve/deposit) |
+|---|---|---|
+| dogfood `0xdc1Ed106…` (op://mainnet-critical/dogfood-depositor-mainnet/password) | 10.000000 → **9.908397** | `0xce661446…` / `0xc8e41d76…` / `0xd8ce160b…` |
+| acceptance `0x60385dD6…` (op://mainnet-critical/acceptance worker wallet/password) | 0.501328 → **0.496735** | `0x5ac66b32…` / `0x446510d1…` / `0x8e189a74…` |
+
+End state, book-verified: **v2.1 supply/assets 10.405132 / 10.405132, price
+exactly 1.000000**; v2 retains the tester (5.026011 at 0.990840, untouched)
+plus the permanently-parked protocol 10.0. v2.1's `maxIssuedAgentShares` is
+now 9.908397 (the dogfood position) — its bufferFloor accordingly.
 
 ## A4 SIGNING PACKAGE — for the 2026-08-27 session (precomputed, verified by simulation)
 
