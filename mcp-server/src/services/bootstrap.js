@@ -137,6 +137,7 @@ import {
   IdleBalanceConsentService,
   loadIdleBalanceConsentConfig
 } from "./idle-balance-consent-service.js";
+import { createIdleBalanceAllocationKeeper } from "./idle-balance-allocation-keeper.js";
 import {
   FirstWithdrawalGasGrantService,
   loadFirstWithdrawalGasGrantConfig
@@ -370,7 +371,7 @@ export function createIdleBalanceConsentService({
     config: loadIdleBalanceConsentConfig(env, {
       chainId: authConfig.chainId,
       assetAddress: usdc?.address,
-      depositPoolAddress: gateway.config.depositPoolAddress
+      depositPoolAddress: gateway.config.depositPoolV21Address
     }),
     chainId: authConfig.chainId,
     siweDomain: authConfig.domain,
@@ -552,6 +553,17 @@ export async function createPlatformRuntime() {
       authConfig,
       stateStore,
       env: process.env
+    })
+  );
+  const idleBalanceAllocationKeeper = initStep(
+    "init-idle-balance-allocation-keeper",
+    logger,
+    () => createIdleBalanceAllocationKeeper({
+      gateway,
+      stateStore,
+      consentService: idleBalanceConsentService,
+      env: process.env,
+      logger
     })
   );
   const depositClaimPriorityPolicy = initStep(
@@ -1129,6 +1141,7 @@ export async function createPlatformRuntime() {
   transparencyService.start();
   externalPosterReviewEscalator.start();
   firstExternalAgentAlert.start();
+  idleBalanceAllocationKeeper.start();
 
   const authMiddleware = createAuthMiddleware({
     authConfig,
@@ -1192,6 +1205,7 @@ export async function createPlatformRuntime() {
     earningsDoor,
     lockedTierService,
     idleBalanceConsentService,
+    idleBalanceAllocationKeeper,
     creditPoolDoor,
     creditBookDoor,
     creditBookKeeper,

@@ -288,10 +288,16 @@ test("loadBlockchainConfig resolves DepositPool from the network manifest only w
   assert.equal(mainnet.depositPoolAddress, "0x6061f0accc3aa66add9508708dd2285bffac5f30");
   assert.equal(mainnet.depositPoolV21Address, "0x9b35a102d656fb86d798af81959e09961dec28e0");
   assert.equal(mainnet.depositPoolDeploymentBlock, 19_421_397);
+  assert.equal(mainnet.depositPoolV21Address, "0x9b35a102d656fb86d798af81959e09961dec28e0");
+  assert.equal(mainnet.depositPoolV21DeploymentBlock, 19_913_549);
+  assert.equal(mainnet.aacPoolAggregatorAdapterAddress, "0x1ddca7097c752580c6561e1bf8c673d6c1665ca5");
+  assert.equal(mainnet.aacPoolAggregatorAdapterDeploymentBlock, 19_913_651);
   assert.equal(mainnet.xcmWrapperDeploymentBlock, 19_101_467);
   assert.equal(testnet.depositPoolAddress, "");
   assert.equal(testnet.depositPoolV21Address, "");
   assert.equal(testnet.depositPoolDeploymentBlock, undefined);
+  assert.equal(testnet.depositPoolV21Address, "");
+  assert.equal(testnet.aacPoolAggregatorAdapterAddress, "");
   assert.equal(testnet.xcmWrapperDeploymentBlock, undefined);
 });
 
