@@ -1,6 +1,6 @@
 # RUNSHEET — Pool v2.1 activation (phased)
 
-Status: **CEREMONY A: A0–A2 + A5 EXECUTED; only A4 (multisig, 2026-08-27) and A6 (cutover, gated on A4) remain** · 2026-08-26 ·
+Status: **CEREMONY A: A0–A3 + A5 EXECUTED AND PROBED; only A4 (multisig, 2026-08-27) and A6 (cutover, gated on A4) remain** · 2026-08-26 ·
 Author: Claude (architect + gate) · Executor: Pascal (every money step) ·
 Authority: `MEMO_IDLE_BALANCE_ROUTE.md` R1–R5, Q1′, Q1″, Q2 (all RATIFIED).
 
@@ -29,7 +29,7 @@ session and lets A run as soon as the amendment lands.
 | **A1 · DepositPool v2.1** | **`0x9B35A102d656Fb86d798aF81959e09961DEc28E0`** — tx `0xc8d09a2c…4fe7a06a`, block 19913549, nonce 22, prediction matched, on-chain masked runtime == artifact == waiver (`100a21cd…`), constructor `(policy, USDC, operator, 0x0, creditPool)` all live-read, venue unbound |
 | **A2 · AacPoolAggregatorAdapter** | **`0x1DDcA7097c752580c6561e1bF8C673D6C1665CA5`** — tx `0x913702ed…69c9e4ef`, block 19913651, nonce 23, 4,372 runtime bytes, strategyId `AAC_IDLE_DEPOSIT_POOL_V21`, operator derived from pool, async probe reverts (SYNC classification) |
 | A0 holder map | `0xdc1Ed106…` 10.000000 · `0x60385dD6…` 0.501328 · tester `0x97450BF6…` 5.026011 · **protocol-held 10.000000 (no exit path exists — stays in v2 permanently, guaranteeing the tester's exit liquidity)** |
-| A3 postage targets | AAC → `151MENb3J9ZiBv147yhNkPDiY8rXF7TrWc13PqWYJeLuupBd` · adapter → `1g9wJAYj7y99R7ttFUPxqrCroEqvRwhXS7LFz1mXu76gT41` (0.1 DOT each, Asset Hub) |
+| **A3 postage — EXECUTED** | Both funded to **0.21 DOT** (0.01 + 0.2 top-up after the 0.01=ED-only finding). **Definitive probe passed 2026-08-26 evening: both approve legs (AAC→adapter, adapter→pool) succeed via real eth_call.** Lesson recorded: exactly-ED postage fails (deposit needs free balance above ED), and EVM stateOverride cannot probe this — the precompile reads the Substrate balance. |
 | Deploy tooling | `scripts/ops/deploy-pool-v21.mjs` (in the gate1299 worktree; committed to this branch alongside this runsheet) |
 
 ## A5 EXECUTED — 2026-08-26 evening (before A4; verified independent of it)
