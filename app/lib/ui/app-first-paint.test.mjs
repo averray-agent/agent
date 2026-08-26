@@ -33,6 +33,15 @@ test("first-paint instrumentation separates navigation, blockers, and live-data 
   assert.match(receipts, /receipts-feeds-settled/u);
 });
 
+test("the public work catalogue uses the anonymous bounded reader", () => {
+  const hooks = read("lib", "api", "hooks.ts");
+  const humanWorkHook = hooks.slice(
+    hooks.indexOf("export const useHumanWorkJobs"),
+    hooks.indexOf("export const useRecommendations")
+  );
+  assert.match(humanWorkHook, /useBoundedApi\(path, \{ refreshInterval: 30_000, publicRead: true \}\)/u);
+});
+
 test("receipts defers its secondary policy feed without inventing a value", () => {
   const receipts = read("app", "(authed)", "receipts", "page.tsx");
   assert.match(receipts, /usePolicies\(secondaryFeedsEnabled\)/u);

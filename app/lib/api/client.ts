@@ -12,7 +12,7 @@
  */
 import { AgentPlatformClient } from "../../../sdk/agent-platform-client.js";
 import { getStoredToken } from "@/lib/auth/token-store";
-import { fetchAppReadWithRetry } from "./reader-fetch.js";
+import { fetchAppPublicReadWithRetry, fetchAppReadWithRetry } from "./reader-fetch.js";
 
 export class ApiError extends Error {
   status: number;
@@ -64,25 +64,34 @@ export async function swrFetcher<T = unknown>(
 export async function boundedReadFetcher<T = unknown>(
   key: string | [string, RequestInit?]
 ): Promise<T> {
-  return jsonFetcher<T>(key, true);
+  return jsonFetcher<T>(key, "bounded");
+}
+
+/** Public first-paint GETs never inherit a browser's stale SIWE bearer. */
+export async function publicBoundedReadFetcher<T = unknown>(
+  key: string | [string, RequestInit?]
+): Promise<T> {
+  return jsonFetcher<T>(key, "public-bounded");
 }
 
 async function jsonFetcher<T>(
   key: string | [string, RequestInit?],
-  boundedRead: boolean
+  mode: false | "bounded" | "public-bounded"
 ): Promise<T> {
   const [path, init] = Array.isArray(key) ? key : [key, undefined];
   const baseUrl = resolveBaseUrl();
   const url = path.startsWith("http") ? path : `${baseUrl}${path}`;
-  const token = getStoredToken();
+  const token = mode === "public-bounded" ? undefined : getStoredToken();
   const headers = new Headers(init?.headers ?? {});
   headers.set("accept", "application/json");
   if (token) headers.set("authorization", `Bearer ${token}`);
 
   const method = String(init?.method ?? "GET").toUpperCase();
-  const response = boundedRead && method === "GET"
-    ? await fetchAppReadWithRetry(url, { ...init, headers })
-    : await fetch(url, { ...init, headers });
+  const response = method === "GET" && mode === "public-bounded"
+    ? await fetchAppPublicReadWithRetry(url, { ...init, headers })
+    : method === "GET" && mode === "bounded"
+      ? await fetchAppReadWithRetry(url, { ...init, headers })
+      : await fetch(url, { ...init, headers });
   const bodyText = await response.text();
   let body: unknown = bodyText;
   try {

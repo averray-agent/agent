@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   APP_READER_ATTEMPTS,
   APP_READER_TIMEOUT_MS,
+  fetchAppPublicReadWithRetry,
   fetchAppReadWithRetry
 } from "./reader-fetch.js";
 
@@ -46,4 +47,45 @@ test("caller abort is terminal and never spends the retry", async () => {
   external.abort();
   await assert.rejects(pending, /caller abort/u);
   assert.equal(calls, 1);
+});
+
+test("expired SIWE public work falls back on the logged-out one-request path", async () => {
+  let calls = 0;
+  const response = { ok: true };
+
+  const result = await fetchAppPublicReadWithRetry("https://api.example/jobs", {
+    headers: {
+      authorization: "Bearer rejected-session",
+      accept: "application/json"
+    }
+  }, {
+    fetchImpl: async (_url, init) => {
+      calls += 1;
+      const headers = new Headers(init.headers);
+      assert.equal(headers.has("authorization"), false);
+      assert.equal(headers.get("accept"), "application/json");
+      return response;
+    }
+  });
+
+  assert.equal(result, response);
+  assert.equal(calls, 1, "expired-session fallback must match the logged-out request count");
+});
+
+test("expired SIWE public work never starts an auth retry storm", async () => {
+  let calls = 0;
+  await assert.rejects(
+    fetchAppPublicReadWithRetry("https://api.example/jobs", {
+      headers: { authorization: "Bearer rejected-session" }
+    }, {
+      attempts: APP_READER_ATTEMPTS,
+      fetchImpl: async (_url, init) => {
+        calls += 1;
+        assert.equal(new Headers(init.headers).has("authorization"), false);
+        throw new Error("offline");
+      }
+    }),
+    /offline/u
+  );
+  assert.equal(calls, APP_READER_ATTEMPTS);
 });
