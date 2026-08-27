@@ -32,12 +32,25 @@ const { buildSiweMessage } = await tryImport([
   "../../mcp-server/src/auth/siwe.js",
   "/app/src/auth/siwe.js"
 ]);
+// Mainnet KMS auth is Roles Anywhere via the named shared-config profile
+// "averray-signer" (PROFILE_BLOCKCHAIN_SIGNER). The SDK default chain finds
+// NOTHING in this environment, so plumb the provider exactly as gateway.js
+// does — otherwise getAddress() dies with "Could not load credentials".
+const { buildKmsCredentialsProvider, PROFILE_BLOCKCHAIN_SIGNER } = await tryImport([
+  "../../mcp-server/src/services/aws-credentials.js",
+  "/app/src/services/aws-credentials.js"
+]);
+const credentialsProvider = buildKmsCredentialsProvider({ profile: PROFILE_BLOCKCHAIN_SIGNER });
 import { randomUUID } from "node:crypto";
 
 const API = process.env.API_BASE ?? "https://api.averray.com";
 const mode = process.argv.find((a) => ["--status", "--quote", "--commit", "--revoke"].includes(a)) ?? "--status";
 
-const signer = new KmsSigner({ keyId: process.env.KMS_KEY_ID, region: process.env.AWS_REGION });
+const signer = new KmsSigner({
+  keyId: process.env.KMS_KEY_ID,
+  region: process.env.AWS_REGION,
+  credentialsProvider
+});
 const wallet = await signer.getAddress();
 console.log(`signer: ${wallet}`);
 
