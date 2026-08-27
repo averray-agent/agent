@@ -88,7 +88,7 @@ if (mode === "--revoke") {
 
 if (status.available !== true) throw new Error(`route not available: ${status.reason ?? "unknown"} — is IDLE_BALANCE_ALLOCATION_ROUTE_LIVE set?`);
 
-const quote = await call("/account/idle-allocation/quote", { method: "POST", token, body: { consentNonce: randomUUID() } });
+const quote = await call("/account/idle-allocation/quote", { method: "POST", token, body: { consentNonce: randomUUID().replace(/-/gu, "") }  // alphanumeric only: hyphens are rejected });
 console.log("\n--- TERMS YOU ARE ABOUT TO CONSENT TO ---");
 console.log("fundsMovement :", quote.terms.fundsMovement);
 console.log("venue         :", quote.terms.venueDisclosure);
