@@ -4,11 +4,14 @@ import test from "node:test";
 import { loadAuthConfig } from "../auth/config.js";
 import { loadBlockchainConfig } from "../blockchain/config.js";
 import { BOOTSTRAP_JOBS } from "./bootstrap-jobs.js";
-import { createDepositPoolDoor, createEarningsDoor } from "./bootstrap.js";
+import { createCreditPoolDoor, createDepositPoolDoor, createEarningsDoor } from "./bootstrap.js";
 import { MemoryStateStore } from "../core/state-store.js";
 import { EventBus } from "../core/event-bus.js";
 
 const POOL_ASSET = "0x0000053900000000000000000000000001200000";
+const CREDIT_POOL = "0x903B318586A3772c99185000676f4AC356DD6E4B";
+const CREDIT_POOL_DEPOSIT_POOL_BINDING = "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30";
+const CANONICAL_DEPOSIT_POOL = "0x9B35A102d656Fb86d798aF81959e09961DEc28E0";
 
 test("bootstrap retains closed starter ids only as archived history", () => {
   const publicJobs = BOOTSTRAP_JOBS.filter((job) => job.lifecycle?.status !== "archived");
@@ -71,6 +74,36 @@ test("bootstrap wires string AUTH_CHAIN_ID and public mainnet RPC into the earni
   );
   assert.equal(built.chainId, 420420419);
   assert.deepEqual(built.broadcast.rpcUrls, ["https://eth-rpc.polkadot.io"]);
+});
+
+test("bootstrap wires the CreditPool door to CreditPool.depositPool() instead of the canonical pool pointer", async () => {
+  const deployedCreditPool = {
+    address: CREDIT_POOL,
+    async depositPool() {
+      return CREDIT_POOL_DEPOSIT_POOL_BINDING;
+    }
+  };
+  const gateway = {
+    config: {
+      creditPoolAddress: deployedCreditPool.address,
+      depositPoolAddress: CANONICAL_DEPOSIT_POOL,
+      depositPoolV2Address: CANONICAL_DEPOSIT_POOL,
+      legacyDepositPoolV2Address: CREDIT_POOL_DEPOSIT_POOL_BINDING
+    },
+    provider: undefined,
+    async signCreditVestingAttestation() {
+      throw new Error("not requested");
+    }
+  };
+  const door = createCreditPoolDoor({
+    gateway,
+    authConfig: loadAuthConfig({ AUTH_MODE: "permissive", AUTH_CHAIN_ID: "420420419" }),
+    chainReader: {},
+    workerExposurePolicy: { async capacityForWallet() { return {}; } }
+  });
+
+  assert.equal(door.depositPoolAddress, await deployedCreditPool.depositPool());
+  assert.notEqual(door.depositPoolAddress, gateway.config.depositPoolAddress);
 });
 
 test("bootstrap carries the venue-mark tolerance from env into the DepositPool door", async () => {
