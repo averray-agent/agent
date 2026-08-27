@@ -4,7 +4,7 @@ import test from "node:test";
 import { loadAuthConfig } from "../auth/config.js";
 import { loadBlockchainConfig } from "../blockchain/config.js";
 import { BOOTSTRAP_JOBS } from "./bootstrap-jobs.js";
-import { createDepositPoolDoor, createEarningsDoor } from "./bootstrap.js";
+import { createCreditPoolDoor, createDepositPoolDoor, createEarningsDoor } from "./bootstrap.js";
 import { MemoryStateStore } from "../core/state-store.js";
 import { EventBus } from "../core/event-bus.js";
 
@@ -71,6 +71,36 @@ test("bootstrap wires string AUTH_CHAIN_ID and public mainnet RPC into the earni
   );
   assert.equal(built.chainId, 420420419);
   assert.deepEqual(built.broadcast.rpcUrls, ["https://eth-rpc.polkadot.io"]);
+});
+
+test("bootstrap wires the credit door to the pool returned by CreditPool.depositPool()", async () => {
+  const creditPoolContract = {
+    async depositPool() {
+      return "0x2222222222222222222222222222222222222222";
+    }
+  };
+  const contractBinding = await creditPoolContract.depositPool();
+  const gateway = {
+    config: {
+      creditPoolAddress: "0x1111111111111111111111111111111111111111",
+      depositPoolV2Address: "0x3333333333333333333333333333333333333333",
+      legacyDepositPoolV2Address: contractBinding
+    },
+    provider: undefined,
+    async signCreditVestingAttestation() {
+      throw new Error("not requested");
+    }
+  };
+
+  const door = createCreditPoolDoor({
+    gateway,
+    authConfig: { chainId: 420_420_419 },
+    chainReader: {},
+    workerExposurePolicy: { async capacityForWallet() { return {}; } }
+  });
+
+  assert.equal(door.depositPoolAddress, contractBinding);
+  assert.notEqual(door.depositPoolAddress, gateway.config.depositPoolV2Address);
 });
 
 test("bootstrap carries the venue-mark tolerance from env into the DepositPool door", async () => {
