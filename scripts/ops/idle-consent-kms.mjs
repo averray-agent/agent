@@ -28,10 +28,6 @@ const { KmsSigner } = await tryImport([
   "../../mcp-server/src/blockchain/kms-signer.js",
   "/app/src/blockchain/kms-signer.js"
 ]);
-const { buildSiweMessage } = await tryImport([
-  "../../mcp-server/src/auth/siwe.js",
-  "/app/src/auth/siwe.js"
-]);
 // Mainnet KMS auth is Roles Anywhere via the named shared-config profile
 // "averray-signer" (PROFILE_BLOCKCHAIN_SIGNER). The SDK default chain finds
 // NOTHING in this environment, so plumb the provider exactly as gateway.js
@@ -67,13 +63,14 @@ const call = async (path, { method = "GET", token, body } = {}) => {
 };
 
 // --- SIWE sign-in with the KMS key -----------------------------------------
-const { nonce } = await call(`/auth/nonce?address=${wallet}`);
-const domain = new URL(API).host;
-const prepared = buildSiweMessage({
-  domain, address: wallet, uri: API,
-  chainId: Number(process.env.CHAIN_ID ?? 420420419), nonce,
-  statement: "Sign in to Averray.", issuedAt: new Date().toISOString()
-});
+// /auth/nonce is POST { wallet } and returns a fully-built SIWE message.
+// Sign THAT, never a locally reconstructed one: the server verifies the exact
+// string it issued, so building our own can only introduce drift.
+const nonceRes = await call("/auth/nonce", { method: "POST", body: { wallet } });
+const prepared = nonceRes.message;
+if (typeof prepared !== "string" || !prepared.includes(wallet)) {
+  throw new Error(`/auth/nonce did not return a SIWE message binding ${wallet}: ${JSON.stringify(nonceRes).slice(0, 200)}`);
+}
 const siweSignature = await signer.signMessage(prepared);
 const session = await call("/auth/verify", { method: "POST", body: { message: prepared, signature: siweSignature } });
 const token = session.token ?? session.accessToken;
