@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { getAddress } from "ethers";
 
 import { ConfigError, ConflictError, ExternalServiceError, ValidationError } from "../core/errors.js";
+import { loadDeploymentManifest } from "../core/health-capability.js";
 import { GuardedSchedulerLoop, schedulerRunTimeoutMs, summaryErrorsOutcome } from "./guarded-scheduler-loop.js";
 import {
   AAC_IDLE_DEPOSIT_POOL_V21,
@@ -21,6 +22,7 @@ export const IDLE_BALANCE_ALLOCATION_MAX_COUNT_PER_RUN_ENV =
 export const IDLE_BALANCE_ALLOCATION_MAX_TOTAL_RAW_PER_RUN_ENV =
   "IDLE_BALANCE_ALLOCATION_MAX_TOTAL_RAW_PER_RUN";
 export const IDLE_BALANCE_ALLOCATION_FLOAT_TARGET_RAW_ENV = "IDLE_BALANCE_ALLOCATION_FLOAT_TARGET_RAW";
+export const IDLE_BALANCE_ALLOCATION_FLOAT_TARGET_BPS_ENV = "IDLE_BALANCE_ALLOCATION_FLOAT_TARGET_BPS";
 export const IDLE_BALANCE_ALLOCATION_INTERVAL_MS_ENV = "IDLE_BALANCE_ALLOCATION_INTERVAL_MS";
 
 export const DEFAULT_WORKING_HEADROOM_RAW = 2_000_000n;
@@ -28,7 +30,9 @@ export const DEFAULT_MIN_ALLOCATION_TICK_RAW = 500_000n;
 export const DEFAULT_MAX_ALLOCATIONS_PER_RUN = 25;
 export const DEFAULT_MAX_ALLOCATION_TOTAL_RAW = 100_000_000n;
 export const DEFAULT_FLOAT_TARGET_RAW = 10_000_000n;
+export const DEFAULT_FLOAT_TARGET_BPS = 2_500;
 
+const BPS = 10_000n;
 const DEFAULT_INTERVAL_MS = 60_000;
 const DEFAULT_SCAN_LIMIT = 1_000;
 const LOCK_TTL_SECONDS = 300;
@@ -42,6 +46,7 @@ export function loadIdleBalanceAllocationKeeperConfig(env = process.env, {
   poolAddress,
   adapterAddress
 } = {}) {
+  const deploymentManifest = loadDeploymentManifest(env);
   const routeLive = parseBoolean(env[IDLE_BALANCE_ALLOCATION_ROUTE_LIVE_ENV], false,
     IDLE_BALANCE_ALLOCATION_ROUTE_LIVE_ENV);
   const keeperEnabled = parseBoolean(env[IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED_ENV], false,
@@ -77,6 +82,12 @@ export function loadIdleBalanceAllocationKeeperConfig(env = process.env, {
       DEFAULT_FLOAT_TARGET_RAW,
       IDLE_BALANCE_ALLOCATION_FLOAT_TARGET_RAW_ENV
     ),
+    floatTargetBps: boundedBasisPoints(
+      env[IDLE_BALANCE_ALLOCATION_FLOAT_TARGET_BPS_ENV],
+      DEFAULT_FLOAT_TARGET_BPS,
+      IDLE_BALANCE_ALLOCATION_FLOAT_TARGET_BPS_ENV
+    ),
+    allocationExclusions: operatorFundingExclusions(deploymentManifest),
     scanLimit: DEFAULT_SCAN_LIMIT,
     lockTtlSeconds: LOCK_TTL_SECONDS,
     agentAccountAddress,
@@ -121,6 +132,7 @@ export function createIdleBalanceAllocationKeeper({
     consentService,
     chainReader: chain,
     movementGateway: chain,
+    settlementSignerReader: () => gateway?.signer?.getAddress(),
     logger,
     now
   });
@@ -133,6 +145,7 @@ export class IdleBalanceAllocationKeeperService {
     consentService,
     chainReader,
     movementGateway,
+    settlementSignerReader,
     logger = console,
     now = () => new Date(),
     ownerFactory = randomUUID
@@ -142,6 +155,7 @@ export class IdleBalanceAllocationKeeperService {
     this.consentService = consentService;
     this.chainReader = chainReader;
     this.movementGateway = movementGateway;
+    this.settlementSignerReader = settlementSignerReader;
     this.logger = logger;
     this.now = now;
     this.ownerFactory = ownerFactory;
@@ -184,7 +198,9 @@ export class IdleBalanceAllocationKeeperService {
       minAllocationTickRaw: this.config.minAllocationTickRaw.toString(),
       maxAllocationsPerRun: this.config.maxAllocationsPerRun,
       maxAllocationTotalRaw: this.config.maxAllocationTotalRaw.toString(),
-      floatTargetRaw: this.config.floatTargetRaw.toString(),
+      floatTargetBps: this.config.floatTargetBps,
+      floatTargetCapRaw: this.config.floatTargetRaw.toString(),
+      allocationExclusions: this.config.allocationExclusions,
       lastRun: this.lastRun,
       ...this.schedulerLoop.getStatus()
     };
@@ -234,11 +250,21 @@ export class IdleBalanceAllocationKeeperService {
         return this.#failRun(summary, "idle_balance_consent_store_unreadable", error);
       }
       summary.candidateCount = candidates.length;
+      let allocationExclusions;
+      try {
+        allocationExclusions = await this.#resolveAllocationExclusions();
+      } catch (error) {
+        return this.#failRun(summary, "allocation_exclusion_wallet_unreadable", error);
+      }
       let allocatedTotal = 0n;
       for (const candidate of candidates) {
         if (summary.allocationCount >= this.config.maxAllocationsPerRun) break;
         if (allocatedTotal >= this.config.maxAllocationTotalRaw) break;
         if (candidate?.status !== "active" || !candidate.wallet) continue;
+        if (allocationExclusions.has(String(candidate.wallet).toLowerCase())) {
+          this.#skip(summary, candidate.wallet, "allocation_excluded_operator_funding_source");
+          continue;
+        }
         const remaining = this.config.maxAllocationTotalRaw - allocatedTotal;
         let result;
         try {
@@ -473,6 +499,23 @@ export class IdleBalanceAllocationKeeperService {
     } catch (error) {
       throw namedError("allocation_keeper_float_state_unreadable", "Persisted float state could not be read.", error);
     }
+    let queued;
+    try {
+      queued = await this.stateStore.listIdleBalanceDeallocationRequests({ status: "queued" });
+    } catch (error) {
+      throw namedError("idle_balance_deallocation_queue_unreadable", "Deallocation queue could not be read.", error);
+    }
+    const queuedTotal = queued.reduce((total, request) => total + BigInt(request.amountRaw ?? 0), 0n);
+    const proportionalTarget = proportionalFloatTarget({
+      totalAssetsRaw: floatState.totalAssetsRaw,
+      targetBps: this.config.floatTargetBps,
+      absoluteCapRaw: this.config.floatTargetRaw
+    });
+    // Queued exits sit above the operating target: the 25% decision sizes
+    // ordinary instant liquidity, while already-promised exits remain fully backed.
+    const target = proportionalTarget + queuedTotal;
+    const current = BigInt(floatState.floatRaw);
+
     const pending = persisted?.pendingExit;
     if (pending) {
       if (!pending.requestId) {
@@ -495,6 +538,26 @@ export class IdleBalanceAllocationKeeperService {
           "Persisted float exit is not owned by and payable to the deployed adapter.");
       }
       if (!exit.fulfilled && Number(exit.unlockAt) <= Math.floor(this.now().getTime() / 1_000)) {
+        const needed = target > current ? target - current : 0n;
+        const pendingAssets = assetsForShares(
+          exit.sharesRaw,
+          floatState.poolAssetsRaw,
+          floatState.poolSharesRaw
+        );
+        // A legacy request may lock more shares than the relative target needs.
+        // There is no cancel/resize entrypoint, so leave an oversized matured
+        // request unfulfilled until exit demand needs its full value.
+        if (pendingAssets > needed) {
+          return {
+            action: "leaveOversizedFloatExit",
+            reason: "pending_exit_exceeds_relative_float_need",
+            requestId: pending.requestId,
+            unlockAt: exit.unlockAt,
+            requestedAssetsRaw: pendingAssets.toString(),
+            neededAssetsRaw: needed.toString(),
+            targetRaw: target.toString()
+          };
+        }
         const result = await this.movementGateway.fulfilFloatExit(pending.requestId);
         await this.stateStore.upsertServiceState(FLOAT_STATE_SCOPE, {
           pendingExit: null,
@@ -502,29 +565,26 @@ export class IdleBalanceAllocationKeeperService {
         });
         return { action: "fulfilFloatExit", requestId: pending.requestId, ...result };
       }
-      if (!exit.fulfilled) return { action: "awaitFloatExit", requestId: pending.requestId, unlockAt: exit.unlockAt };
+      if (!exit.fulfilled) {
+        return {
+          action: "awaitFloatExit",
+          requestId: pending.requestId,
+          unlockAt: exit.unlockAt,
+          targetRaw: target.toString()
+        };
+      }
       await this.stateStore.upsertServiceState(FLOAT_STATE_SCOPE, { pendingExit: null });
     }
-
-    let queued;
-    try {
-      queued = await this.stateStore.listIdleBalanceDeallocationRequests({ status: "queued" });
-    } catch (error) {
-      throw namedError("idle_balance_deallocation_queue_unreadable", "Deallocation queue could not be read.", error);
-    }
-    const queuedTotal = queued.reduce((total, request) => total + BigInt(request.amountRaw ?? 0), 0n);
     // Keep the working float target intact after every queued exit is paid.
     // This makes replenishment genuinely prior to queue service rather than
     // paying a queue from the operational float and repairing it next tick.
-    const target = this.config.floatTargetRaw + queuedTotal;
-    const current = BigInt(floatState.floatRaw);
     if (current > target) {
       const amount = current - target;
       const result = await this.movementGateway.sweepToPool(amount.toString());
       await this.stateStore.upsertServiceState(FLOAT_STATE_SCOPE, {
         lastAction: { action: "sweepToPool", amountRaw: amount.toString(), ...result, at: this.now().toISOString() }
       });
-      return { action: "sweepToPool", amountRaw: amount.toString(), ...result };
+      return { action: "sweepToPool", amountRaw: amount.toString(), targetRaw: target.toString(), ...result };
     }
     if (current < target && BigInt(floatState.poolSharesRaw ?? 0) > 0n) {
       const deficit = target - current;
@@ -567,9 +627,26 @@ export class IdleBalanceAllocationKeeperService {
         pendingExit,
         lastAction: { action: "requestFloatExit", ...pendingExit }
       });
-      return { action: "requestFloatExit", ...pendingExit };
+      return { action: "requestFloatExit", targetRaw: target.toString(), ...pendingExit };
     }
-    return { action: "none", reason: current === target ? "float_at_target" : "pool_shares_unavailable" };
+    return {
+      action: "none",
+      reason: current === target ? "float_at_target" : "pool_shares_unavailable",
+      targetRaw: target.toString()
+    };
+  }
+
+  async #resolveAllocationExclusions() {
+    const exclusions = new Map(
+      (this.config.allocationExclusions ?? []).map((entry) => [entry.wallet.toLowerCase(), entry])
+    );
+    const settlementSigner = getAddress(await this.settlementSignerReader());
+    exclusions.set(settlementSigner.toLowerCase(), {
+      wallet: settlementSigner,
+      role: "settlement_signer",
+      source: "runtime_signer"
+    });
+    return exclusions;
   }
 
   async #readFloatState() {
@@ -714,6 +791,9 @@ export class IdleBalanceAllocationKeeperService {
     if (typeof this.consentService?.assessAllocationAttempt !== "function") {
       throw new ConfigError("A live allocation keeper requires attempt-time idle-balance consent assessment.");
     }
+    if (typeof this.settlementSignerReader !== "function") {
+      throw new ConfigError("A live allocation keeper requires its settlement signer exclusion reader.");
+    }
     const chainMethods = [
       "getAccountPosition",
       "getStrategyShares",
@@ -785,6 +865,29 @@ function assertLiveConfig(config) {
   if (adapter !== getAddress(DEPLOYED_AAC_POOL_AGGREGATOR_ADAPTER)) {
     throw new ConfigError(`Allocation keeper adapter must be deployed ${DEPLOYED_AAC_POOL_AGGREGATOR_ADAPTER}.`);
   }
+  if (!(config.allocationExclusions ?? []).some((entry) => entry.role === "settlement_signer")) {
+    throw new ConfigError("A live allocation keeper must exclude the deployment's settlement signer funding wallet.");
+  }
+}
+
+function operatorFundingExclusions(manifest) {
+  const candidates = [
+    { wallet: manifest?.verifier, role: "settlement_signer", source: "deployment_manifest.verifier" },
+    ...(Array.isArray(manifest?.operatorFundingWallets)
+      ? manifest.operatorFundingWallets.map((wallet) => ({
+          wallet,
+          role: "operator_funding_source",
+          source: "deployment_manifest.operatorFundingWallets"
+        }))
+      : [])
+  ];
+  const exclusions = new Map();
+  for (const candidate of candidates) {
+    if (!candidate.wallet) continue;
+    const wallet = requiredAddress(candidate.wallet, candidate.role);
+    exclusions.set(wallet.toLowerCase(), { ...candidate, wallet });
+  }
+  return [...exclusions.values()];
 }
 
 function requiredAddress(value, label) {
@@ -807,6 +910,14 @@ function positiveInteger(value, fallback, name) {
   if (value === undefined || value === null || value === "") return fallback;
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new ConfigError(`${name} must be a positive integer.`);
+  return parsed;
+}
+
+function boundedBasisPoints(value, fallback, name) {
+  const parsed = value === undefined || value === null || value === "" ? fallback : Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > Number(BPS)) {
+    throw new ConfigError(`${name} must be an integer between 1 and 10000.`);
+  }
   return parsed;
 }
 
@@ -837,6 +948,12 @@ function assetsForShares(sharesRaw, totalAssetsRaw, totalSharesRaw) {
   const totalShares = BigInt(totalSharesRaw ?? 0);
   if (shares === 0n || totalAssets === 0n || totalShares === 0n) return 0n;
   return shares * totalAssets / totalShares;
+}
+
+export function proportionalFloatTarget({ totalAssetsRaw, targetBps, absoluteCapRaw }) {
+  const proportional = BigInt(totalAssetsRaw ?? 0) * BigInt(targetBps) / BPS;
+  const cap = BigInt(absoluteCapRaw ?? 0);
+  return proportional < cap ? proportional : cap;
 }
 
 function namedError(code, message, cause = undefined) {
