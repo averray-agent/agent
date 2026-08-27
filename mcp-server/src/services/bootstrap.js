@@ -383,7 +383,7 @@ export function createIdleBalanceConsentService({
 export function createCreditPoolDoor({ gateway, authConfig, chainReader, workerExposurePolicy, creditBookDoor } = {}) {
   return new CreditPoolDoorService({
     creditPoolAddress: gateway.config.creditPoolAddress,
-    depositPoolAddress: gateway.config.depositPoolV2Address,
+    depositPoolAddress: gateway.config.legacyDepositPoolV2Address,
     chainId: authConfig.chainId,
     rpcUrls: [resolveHubNetwork(authConfig.chainId).rpcUrl],
     provider: gateway.provider,
