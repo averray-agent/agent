@@ -40,7 +40,7 @@ const credentialsProvider = buildKmsCredentialsProvider({ profile: PROFILE_BLOCK
 import { randomUUID } from "node:crypto";
 
 const API = process.env.API_BASE ?? "https://api.averray.com";
-const mode = process.argv.find((a) => ["--status", "--quote", "--commit", "--revoke"].includes(a)) ?? "--status";
+const mode = process.argv.find((a) => ["--status", "--quote", "--commit", "--revoke", "--deallocate"].includes(a)) ?? "--status";
 
 const signer = new KmsSigner({
   keyId: process.env.KMS_KEY_ID,
@@ -80,6 +80,22 @@ console.log("SIWE session established.");
 const status = await call("/account/idle-allocation", { token });
 console.log("\nstatus:", JSON.stringify(status, null, 2).slice(0, 900));
 if (mode === "--status") { console.log("\nREAD ONLY — nothing signed."); process.exit(0); }
+
+if (mode === "--deallocate") {
+  // Exit is NEVER consent-gated by design: a revoked wallet can still withdraw.
+  // Synchronous while the adapter's uncommitted float covers it (R4); beyond
+  // that the endpoint answers 202 with a queued status and a disclosed ETA.
+  const idx = process.argv.indexOf("--deallocate");
+  const arg = process.argv[idx + 1];
+  if (!arg || !/^\d+(\.\d+)?$/u.test(arg)) {
+    throw new Error("usage: --deallocate <amount in USDC, e.g. 10.0>");
+  }
+  const amountRaw = String(BigInt(Math.round(Number(arg) * 1e6)));
+  console.log(`\nrequesting deallocation of ${arg} USDC (${amountRaw} base units)`);
+  const out = await call("/account/idle-allocation/deallocate", { method: "POST", token, body: { amountRaw } });
+  console.log(JSON.stringify(out, null, 2).slice(0, 900));
+  process.exit(0);
+}
 
 if (mode === "--revoke") {
   console.log("\nrevoke:", JSON.stringify(await call("/account/idle-allocation/revoke", { method: "POST", token, body: {} }), null, 2).slice(0, 600));
