@@ -1827,6 +1827,7 @@ async function makeSiteFixture() {
     "  */transparency/) name=transparency/index.html ;;",
     "  */transparency-reader.js) name=transparency-reader.js ;;",
     "  */verify/) name=verify/index.html ;;",
+    "  */verify-reader.js) name=verify-reader.js ;;",
     "  */proof-to-pay/) name=proof-to-pay/index.html ;;",
     "esac",
     "if [[ -n \"$out\" && -n \"${FAKE_SERVED_DIR:-}\" ]]; then",
@@ -1846,6 +1847,7 @@ async function makeSiteFixture() {
   await writeFile(join(appRoot, "site/transparency/index.html"), "<title>Transparency</title> fresh build\n");
   await writeFile(join(appRoot, "site/transparency-reader.js"), "// fresh transparency reader\n");
   await writeFile(join(appRoot, "site/verify/index.html"), "<title>Averray Verify</title> fresh build\n");
+  await writeFile(join(appRoot, "site/verify-reader.js"), "// fresh verify reader\n");
   await writeFile(join(appRoot, "site/proof-to-pay/index.html"), "<title>Proof-to-Pay</title> fresh build\n");
   git(appRoot, "add", ".");
   git(appRoot, "commit", "-m", "base");

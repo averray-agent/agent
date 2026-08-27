@@ -35,11 +35,14 @@ const generatedNestedFiles = [
   ".well-known/agent-tools.json",
 ];
 
-// The transparency lane is two-file runtime surface: the generated page and
-// its live reader must both survive the source→site sync allow-lists.
+// The transparency and Verify lanes each have a two-file runtime surface: the
+// generated page and its live reader must both survive the source→site sync
+// allow-lists.
 for (const [entry, allowList] of [
   ["transparency-reader.js", generatedEntries],
   ["transparency/index.html", generatedNestedFiles],
+  ["verify-reader.js", generatedEntries],
+  ["verify/index.html", generatedNestedFiles],
 ]) {
   if (!allowList.includes(entry)) {
     throw new Error(`Marketing sync allow-list is missing ${entry}`);

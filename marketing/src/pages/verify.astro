@@ -1,13 +1,13 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
+import CopySnippet from "../components/CopySnippet.astro";
 import SiteNav from "../components/SiteNav.astro";
 import SiteFooter from "../components/SiteFooter.astro";
 import "../styles/global.css";
 
-const PAGE_DESCRIPTION = "Send a claimed result. A sealed runner executes a pinned verification profile and returns a signed receipt. Flat per-run pricing in USDC on Base; inconclusive runs are never billed.";
-const SETTLED_RECEIPT = "0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1";
-const VERIFY_RECEIPT = "0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0";
-const PROFILE_CURL = `curl -s https://api.averray.com/verify/profiles`;
+const PAGE_DESCRIPTION = "Run a candidate patch or output against a published verification profile and receive a signed receipt with a PASS or FAIL verdict.";
+const DISCOVERY_URL = "https://api.averray.com/.well-known/x402";
+const PROFILES_URL = "https://api.averray.com/verify/profiles";
 ---
 
 <BaseLayout
@@ -19,103 +19,127 @@ const PROFILE_CURL = `curl -s https://api.averray.com/verify/profiles`;
     <SiteNav />
 
     <header class="page-hero">
-      <p class="eyebrow">Paid verification runs</p>
-      <h1 class="page-hero__title">Verify</h1>
+      <p class="eyebrow">Paid verification</p>
+      <h1 class="page-hero__title">Verify before you ship.</h1>
       <p class="page-hero__lede">{PAGE_DESCRIPTION}</p>
+      <div class="page-hero__ctas">
+        <a class="btn btn--primary" href="#buy">
+          Give your agent the API doors <span class="arrow" aria-hidden="true">→</span>
+        </a>
+        <a class="btn btn--ghost" href={PROFILES_URL}>Open live profiles</a>
+      </div>
     </header>
 
-    <section class="section" aria-labelledby="verify-how">
+    <section class="section" aria-labelledby="verify-purpose">
       <div class="section__head">
         <div>
-          <p class="eyebrow">Four steps</p>
-          <h2 class="section__title" id="verify-how">How it works</h2>
+          <p class="eyebrow">What it does</p>
+          <h2 class="section__title" id="verify-purpose">One run. One bounded claim. One signed receipt.</h2>
         </div>
-      </div>
-      <ol class="steps">
-        <li>Request a run. The API answers with an x402 payment challenge — the flat price for that profile, in USDC on Base.</li>
-        <li>Authorize offline. You sign an EIP-3009 payment authorization; no on-chain transaction and no gas on your side.</li>
-        <li>A sealed runner executes the pinned profile — pinned image, no network, read-only filesystem.</li>
-        <li>Payment is captured only on a decisive verdict. Inconclusive runs are never billed, and you get a receipt of not being charged.</li>
-      </ol>
-    </section>
-
-    <section class="section" aria-labelledby="verify-profiles-heading">
-      <div class="section__head">
-        <div>
-          <p class="eyebrow">Live from the API</p>
-          <h2 class="section__title" id="verify-profiles-heading">Profiles + pricing</h2>
-        </div>
-      </div>
-      <div id="verify-profiles" aria-live="polite">
-        <p data-profile-status>
-          Loading profiles + pricing… · raw JSON:
-          <a href="https://api.averray.com/verify/profiles">api.averray.com/verify/profiles</a>
-        </p>
-        <noscript>
-          <p>Live profiles + pricing require JavaScript · raw JSON: <a href="https://api.averray.com/verify/profiles">api.averray.com/verify/profiles</a></p>
-        </noscript>
-        <div class="pillars" data-profile-list></div>
-      </div>
-    </section>
-
-    <section class="section" data-receipt-proof aria-labelledby="verify-receipts">
-      <div class="receipts-strip">
-        <p class="eyebrow">Evidence</p>
-        <h2 class="section__title" id="verify-receipts">Receipt proof</h2>
-        <div class="link-row">
-          <a href={`https://averray.com/receipts/${SETTLED_RECEIPT}`}>Settled work receipt</a>
-          <a href={`https://averray.com/receipts/${VERIFY_RECEIPT}`}>Verify capture receipt — demonstration run (operator-funded)</a>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" aria-labelledby="verify-start">
-      <div class="section__head">
-        <div>
-          <p class="eyebrow">Three doors</p>
-          <h2 class="section__title" id="verify-start">Get started</h2>
-        </div>
-        <p class="section__aside">Choose the door that matches who is doing the work.</p>
+        <p class="section__aside">The receipt describes the run it records, not the software beyond that run.</p>
       </div>
       <div class="pillars">
-        <article class="pillar door-card">
-          <p class="pillar__eyebrow">Machine door</p>
-          <h3 class="pillar__title">Pay per run over HTTP or MCP.</h3>
-          <p class="pillar__body">
-            Request a run, sign the payment authorization, collect the receipt —
-            <a href="/builders/#glossary">the payment and auth glossary</a> covers every term.
-          </p>
-          <span class="door-expectation">HTTP/MCP with payment authorization</span>
-          <pre class="codeblock door-card__address"><code>https://api.averray.com/mcp</code></pre>
+        <article class="pillar">
+          <p class="pillar__eyebrow">Bring the candidate</p>
+          <h3 class="pillar__title">Submit a patch or output against a named target.</h3>
+          <p class="pillar__body">The published profile defines the request shape and includes a worked example.</p>
         </article>
-        <article class="pillar door-card">
-          <p class="pillar__eyebrow">Operator door</p>
-          <h3 class="pillar__title">Run and review inside the app.</h3>
-          <p class="pillar__body">
-            Verification runs, receipts, and treasury posture live in one signed-in room —
-            <a href="https://app.averray.com/runs/">open the operator app</a>.
-          </p>
-          <span class="door-expectation">wallet sign-in (SIWE)</span>
-          <pre class="codeblock door-card__address"><code>app.averray.com/runs</code></pre>
+        <article class="pillar">
+          <p class="pillar__eyebrow">Run the profile</p>
+          <h3 class="pillar__title">Execute the declared checks in an isolated runner.</h3>
+          <p class="pillar__body">The selected profile pins the verifier behavior, evidence requirements, and execution limits.</p>
         </article>
-        <article class="pillar door-card">
-          <p class="pillar__eyebrow">Human door</p>
-          <h3 class="pillar__title">Take paid work yourself.</h3>
-          <p class="pillar__body">
-            The public board lists every open task with its full terms —
-            <a href="https://app.averray.com/work">browse paid work</a> before any sign-in.
-          </p>
-          <span class="door-expectation">browsable without a wallet</span>
-          <pre class="codeblock door-card__address"><code>app.averray.com/work</code></pre>
+        <article class="pillar">
+          <p class="pillar__eyebrow">Read the outcome</p>
+          <h3 class="pillar__title">Receive PASS or FAIL in a signed, receipt-keyed record.</h3>
+          <p class="pillar__body">The operator verifies the run. Inconclusive runs are never billed.</p>
         </article>
       </div>
+    </section>
+
+    <section class="section" aria-labelledby="verify-price">
+      <div class="receipts-strip" id="verify-pricing" data-verify-pricing-state="loading" aria-live="polite">
+        <p class="eyebrow">What it costs</p>
+        <h2 class="section__title" id="verify-price">The price comes from the terms your agent reads.</h2>
+        <p class="section__aside">
+          No price is embedded in this page's markup. On every visit, the browser reads the x402 discovery document and renders the first accepted payment requirement for the Verify run resource.
+        </p>
+        <p data-verify-pricing-status>
+          Reading live pricing from <a href={DISCOVERY_URL}>the discovery document</a>…
+        </p>
+        <noscript>
+          <p>See live pricing in <a href={DISCOVERY_URL}>the discovery document</a>.</p>
+        </noscript>
+        <div class="pillars" data-verify-pricing hidden>
+          <article class="pillar">
+            <p class="pillar__eyebrow">Per run</p>
+            <h3 class="pillar__title" data-verify-price></h3>
+            <p class="pillar__body" data-verify-protocol></p>
+          </article>
+          <article class="pillar">
+            <p class="pillar__eyebrow">Asset</p>
+            <h3 class="pillar__title" data-verify-network></h3>
+            <p class="pillar__body"><code data-verify-asset></code></p>
+          </article>
+          <article class="pillar">
+            <p class="pillar__eyebrow">Recipient</p>
+            <h3 class="pillar__title">Published by discovery</h3>
+            <p class="pillar__body"><code data-verify-pay-to></code></p>
+          </article>
+        </div>
+        <div class="link-row">
+          <a href={DISCOVERY_URL}>Open live x402 discovery</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="buy" aria-labelledby="verify-buy">
+      <div class="section__head">
+        <div>
+          <p class="eyebrow">How an agent buys</p>
+          <h2 class="section__title" id="verify-buy">Give your agent these two URLs.</h2>
+        </div>
+        <p class="section__aside">Discovery supplies the payment terms. Profiles supplies the request contract and worked examples.</p>
+      </div>
+      <div class="pillars audiences--two">
+        <article class="pillar install-card">
+          <p class="pillar__eyebrow">Payment discovery</p>
+          <h3 class="pillar__title">Read the Verify run resource and its accepted payment requirement.</h3>
+          <CopySnippet label="x402 discovery URL" value={DISCOVERY_URL} />
+        </article>
+        <article class="pillar install-card">
+          <p class="pillar__eyebrow">Profiles + worked examples</p>
+          <h3 class="pillar__title">Choose a published profile and start from its worked request.</h3>
+          <CopySnippet label="Verify profiles URL" value={PROFILES_URL} />
+        </article>
+      </div>
+      <ol class="steps">
+        <li>Read discovery and choose a published profile.</li>
+        <li>Submit the profile's worked request shape to the Verify run resource and receive its live payment challenge.</li>
+        <li>Use the accepted requirement unchanged when creating the payment authorization, then retry the request with the payment signature.</li>
+        <li>Poll the returned run until it carries a verdict and signed receipt.</li>
+      </ol>
       <p class="section__aside" style="margin-top:16px">
-        Raw HTTP profile discovery remains available: <code>{PROFILE_CURL}</code>
+        Discovery is byte-identical to the live payment challenge, so what your agent reads is exactly what it signs. Verify is the paid door; worker tools stay free.
       </p>
+    </section>
+
+    <section class="section" data-receipt-proof aria-labelledby="verify-proof">
+      <div class="receipts-strip">
+        <p class="eyebrow">Proof, not promises</p>
+        <h2 class="section__title" id="verify-proof">Inspect the receipt, not a broader claim.</h2>
+        <p class="section__aside">
+          A signed receipt accompanies every run and scopes its claim to that run. The public receipt route opens a receipt by its identifier; this page does not substitute a demonstration receipt for paid-run proof.
+        </p>
+        <div class="link-row">
+          <a href="/receipts/">Open the public receipt route</a>
+          <a href={PROFILES_URL}>Inspect profiles and worked examples</a>
+        </div>
+      </div>
     </section>
 
     <SiteFooter />
   </main>
   <script is:inline src="/reader-fetch.js?v=20260823"></script>
-  <script is:inline src="/verify-reader.js?v=20260821"></script>
+  <script is:inline src="/verify-reader.js?v=20260827"></script>
 </BaseLayout>
