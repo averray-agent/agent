@@ -1,22 +1,35 @@
 import {
+  Contract,
+  ZeroAddress,
   getAddress,
   verifyMessage
 } from "ethers";
 
 import { buildSiweMessage } from "../auth/siwe.js";
 import { canonicalizeContent } from "../core/canonical-content.js";
-import { ConfigError, ConflictError, ValidationError } from "../core/errors.js";
+import { ConfigError, ConflictError, ExternalServiceError, ValidationError } from "../core/errors.js";
 import { hashLockedTierTerms } from "./locked-tier-service.js";
 
 export const IDLE_BALANCE_ALLOCATION_ROUTE_LIVE_ENV = "IDLE_BALANCE_ALLOCATION_ROUTE_LIVE";
 export const IDLE_BALANCE_AMOUNT_BASIS =
   "At each allocation attempt, only unreserved AAC liquid above the configured working-capital floor is eligible; this consent does not authorize a fixed amount.";
-export const IDLE_BALANCE_VENUE_DISCLOSURE =
+export const IDLE_BALANCE_ACTIVE_VENUE_DISCLOSURE =
   "Eligible idle USDC may be routed through the configured DepositPoolV2 strategy adapter and deployed from that pool to its configured external venue.";
-export const IDLE_BALANCE_FUNDS_MOVEMENT =
+export const IDLE_BALANCE_ACTIVE_FUNDS_MOVEMENT =
   "Funds leave position.liquid and are deployed through the configured DepositPoolV2 strategy adapter to an external venue. Principal is at risk, and return is not instant in all cases.";
+export const IDLE_BALANCE_UNBOUND_VENUE_DISCLOSURE =
+  "No external venue is bound and no venue deployment is active. Eligible idle USDC is held in the DepositPoolV2 buffer with no venue exposure and no venue yield today.";
+export const IDLE_BALANCE_BOUND_INACTIVE_VENUE_DISCLOSURE =
+  "An external venue is configured, but no venue deployment is active. Eligible idle USDC is held in the DepositPoolV2 buffer with no venue exposure and no venue yield today.";
+export const IDLE_BALANCE_BUFFER_FUNDS_MOVEMENT =
+  "Funds leave position.liquid and are held in the DepositPoolV2 buffer. There is no external venue exposure and no venue yield today. Principal is at risk, and return is not instant in all cases.";
 export const IDLE_BALANCE_RETURN_TERMS =
   "Deallocation returns to position.liquid synchronously while the adapter's uncommitted balance covers it; otherwise it queues with a disclosed ETA.";
+
+const IDLE_BALANCE_POOL_ABI = [
+  "function venueAdapter() view returns (address)",
+  "function activeVenueDeploymentId() view returns (uint256)"
+];
 
 const PRODUCT = "idle-balance allocation";
 const QUOTE_TTL_MS = 10 * 60 * 1_000;
@@ -61,6 +74,8 @@ export class IdleBalanceConsentService {
   constructor({
     stateStore,
     config,
+    provider,
+    venueStateReader,
     chainId,
     siweDomain = "localhost",
     publicBaseUrl = "http://localhost",
@@ -79,6 +94,8 @@ export class IdleBalanceConsentService {
       chainId: Number(config?.chainId ?? chainId)
     };
     if (this.config.routeLive) assertLiveRouteConfig(this.config);
+    this.venueStateReader = venueStateReader
+      ?? (provider ? new EvmIdleBalanceVenueStateReader(provider) : undefined);
     this.siweDomain = String(siweDomain);
     this.consentUri = new URL("/account/idle-allocation/consent", publicBaseUrl).toString();
     this.now = now;
@@ -113,7 +130,7 @@ export class IdleBalanceConsentService {
     };
   }
 
-  quote(walletInput, input = {}) {
+  async quote(walletInput, input = {}) {
     if (!this.config.routeLive) return this.#availability();
     assertOnlyFields(input, new Set(["consentNonce"]));
     const wallet = normalizeWallet(walletInput);
@@ -121,6 +138,7 @@ export class IdleBalanceConsentService {
     const issuedAt = this.now();
     const quoteExpiresAt = new Date(issuedAt.getTime() + QUOTE_TTL_MS);
     const consentExpiresAt = new Date(issuedAt.getTime() + CONSENT_TTL_MS);
+    const venueTerms = await this.#venueTerms();
     const terms = {
       schemaVersion: 1,
       wallet,
@@ -135,10 +153,10 @@ export class IdleBalanceConsentService {
       venue: {
         route: "deposit_pool_v2",
         depositPool: this.config.depositPoolAddress,
-        downstream: "configured external venue"
+        downstream: venueTerms.downstream
       },
-      venueDisclosure: IDLE_BALANCE_VENUE_DISCLOSURE,
-      fundsMovement: IDLE_BALANCE_FUNDS_MOVEMENT,
+      venueDisclosure: venueTerms.venueDisclosure,
+      fundsMovement: venueTerms.fundsMovement,
       returnTerms: IDLE_BALANCE_RETURN_TERMS,
       consentNonce,
       issuedAt: issuedAt.toISOString(),
@@ -320,11 +338,21 @@ export class IdleBalanceConsentService {
       decimals: 6,
       chainId: this.config.chainId
     });
-    const venueMatches = canonicalizeContent(terms.venue) === canonicalizeContent({
-      route: "deposit_pool_v2",
-      depositPool: this.config.depositPoolAddress,
-      downstream: "configured external venue"
-    });
+    const venueTermsMatch = validVenueTerms().some((variant) =>
+      canonicalizeContent({
+        venue: terms.venue,
+        venueDisclosure: terms.venueDisclosure,
+        fundsMovement: terms.fundsMovement
+      }) === canonicalizeContent({
+        venue: {
+          route: "deposit_pool_v2",
+          depositPool: this.config.depositPoolAddress,
+          downstream: variant.downstream
+        },
+        venueDisclosure: variant.venueDisclosure,
+        fundsMovement: variant.fundsMovement
+      })
+    );
     if (
       !rootFieldsMatch
       || Number(terms.schemaVersion) !== 1
@@ -332,9 +360,7 @@ export class IdleBalanceConsentService {
       || terms.product !== PRODUCT
       || terms.amountBasis !== IDLE_BALANCE_AMOUNT_BASIS
       || !assetMatches
-      || !venueMatches
-      || terms.venueDisclosure !== IDLE_BALANCE_VENUE_DISCLOSURE
-      || terms.fundsMovement !== IDLE_BALANCE_FUNDS_MOVEMENT
+      || !venueTermsMatch
       || terms.returnTerms !== IDLE_BALANCE_RETURN_TERMS
       || consentNonceValue(terms.consentNonce) !== terms.consentNonce
       || !Number.isFinite(issuedAt)
@@ -368,6 +394,26 @@ export class IdleBalanceConsentService {
     }
   }
 
+  async #venueTerms() {
+    if (typeof this.venueStateReader?.readVenueState !== "function") {
+      throw new ExternalServiceError(
+        "Current DepositPool venue state could not be read, so no idle-balance consent quote was issued.",
+        "idle_balance_venue_state_unavailable"
+      );
+    }
+    try {
+      const state = await this.venueStateReader.readVenueState({
+        depositPoolAddress: this.config.depositPoolAddress
+      });
+      return idleBalanceVenueTerms(state);
+    } catch {
+      throw new ExternalServiceError(
+        "Current DepositPool venue state could not be read, so no idle-balance consent quote was issued.",
+        "idle_balance_venue_state_unavailable"
+      );
+    }
+  }
+
   #consentMessage(terms, termsHash) {
     return buildSiweMessage({
       domain: this.siweDomain,
@@ -382,8 +428,65 @@ export class IdleBalanceConsentService {
   }
 }
 
+export class EvmIdleBalanceVenueStateReader {
+  constructor(provider) {
+    this.provider = provider;
+  }
+
+  async readVenueState({ depositPoolAddress }) {
+    const blockNumber = await this.provider.getBlockNumber();
+    const pool = new Contract(depositPoolAddress, IDLE_BALANCE_POOL_ABI, this.provider);
+    const blockTag = { blockTag: blockNumber };
+    const [venueAdapter, activeVenueDeploymentId] = await Promise.all([
+      pool.venueAdapter(blockTag),
+      pool.activeVenueDeploymentId(blockTag)
+    ]);
+    return {
+      blockNumber,
+      venueAdapter: getAddress(venueAdapter),
+      activeVenueDeploymentId: BigInt(activeVenueDeploymentId)
+    };
+  }
+}
+
+export function idleBalanceVenueTerms({ venueAdapter, activeVenueDeploymentId } = {}) {
+  if (venueAdapter === undefined || activeVenueDeploymentId === undefined) {
+    throw new TypeError("DepositPool venue state must include venueAdapter and activeVenueDeploymentId.");
+  }
+  const normalizedAdapter = getAddress(String(venueAdapter));
+  const deploymentId = BigInt(activeVenueDeploymentId);
+  if (normalizedAdapter !== ZeroAddress && deploymentId > 0n) {
+    return {
+      downstream: "configured external venue",
+      venueDisclosure: IDLE_BALANCE_ACTIVE_VENUE_DISCLOSURE,
+      fundsMovement: IDLE_BALANCE_ACTIVE_FUNDS_MOVEMENT
+    };
+  }
+  return {
+    downstream: "pool buffer",
+    venueDisclosure: normalizedAdapter === ZeroAddress
+      ? IDLE_BALANCE_UNBOUND_VENUE_DISCLOSURE
+      : IDLE_BALANCE_BOUND_INACTIVE_VENUE_DISCLOSURE,
+    fundsMovement: IDLE_BALANCE_BUFFER_FUNDS_MOVEMENT
+  };
+}
+
 export function hashIdleBalanceConsentTerms(terms) {
   return hashLockedTierTerms(terms);
+}
+
+function validVenueTerms() {
+  return [
+    idleBalanceVenueTerms({ venueAdapter: ZeroAddress, activeVenueDeploymentId: 0n }),
+    idleBalanceVenueTerms({
+      venueAdapter: "0x1111111111111111111111111111111111111111",
+      activeVenueDeploymentId: 0n
+    }),
+    idleBalanceVenueTerms({
+      venueAdapter: "0x1111111111111111111111111111111111111111",
+      activeVenueDeploymentId: 1n
+    })
+  ];
 }
 
 function presentConsent(record, assessment) {

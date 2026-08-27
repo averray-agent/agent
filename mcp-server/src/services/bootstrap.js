@@ -373,6 +373,7 @@ export function createIdleBalanceConsentService({
       assetAddress: usdc?.address,
       depositPoolAddress: gateway.config.depositPoolV21Address
     }),
+    provider: gateway.provider,
     chainId: authConfig.chainId,
     siweDomain: authConfig.domain,
     publicBaseUrl: env.PUBLIC_BASE_URL ?? `https://${authConfig.domain}`,
