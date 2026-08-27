@@ -325,14 +325,15 @@ test("float management runs before the consent scan and without any consent", as
   assert.deepEqual(order, ["float_management", "consent_scan"]);
 });
 
-test("matured legacy full-position float request stays pooled while it exceeds relative need", async () => {
+test("matured oversized float request fulfils then sweeps surplus and restores available shares", async () => {
   const h = await harness();
   h.chain.float = floatState({
     floatRaw: 0n,
     totalAssetsRaw: 4_073_522n,
     totalSharesRaw: 4_073_522n,
     poolSharesRaw: 4_073_522n,
-    poolAssetsRaw: 4_073_522n
+    poolAssetsRaw: 4_073_522n,
+    poolAvailableSharesRaw: 0n
   });
   h.chain.getFloatExit = async () => ({
     requestId: "1",
@@ -342,6 +343,18 @@ test("matured legacy full-position float request stays pooled while it exceeds r
     unlockAt: Math.floor(NOW.getTime() / 1_000) - 1,
     fulfilled: false
   });
+  h.chain.fulfilFloatExit = async (requestId) => {
+    h.chain.calls.fulfilFloatExit.push(requestId);
+    h.chain.float = floatState({
+      floatRaw: 4_073_522n,
+      totalAssetsRaw: 4_073_522n,
+      totalSharesRaw: 4_073_522n,
+      poolSharesRaw: 0n,
+      poolAssetsRaw: 0n,
+      poolAvailableSharesRaw: 0n
+    });
+    return receipt(h.chain.calls.fulfilFloatExit.length + 400, { requestIdRaw: String(requestId) });
+  };
   await h.stateStore.upsertServiceState("idle-balance-allocation-keeper:float", {
     pendingExit: {
       status: "confirmed",
@@ -354,18 +367,17 @@ test("matured legacy full-position float request stays pooled while it exceeds r
 
   const result = await h.keeper.runOnce(NOW);
 
-  assert.deepEqual(result.floatAction, {
-    action: "leaveOversizedFloatExit",
-    reason: "pending_exit_exceeds_relative_float_need",
-    requestId: "1",
-    unlockAt: Math.floor(NOW.getTime() / 1_000) - 1,
-    requestedAssetsRaw: "4073522",
-    neededAssetsRaw: "1018380",
-    targetRaw: "1018380"
-  });
-  assert.equal(h.chain.calls.fulfilFloatExit.length, 0);
-  assert.equal(h.chain.calls.sweep.length, 0);
-  assert.equal((await h.stateStore.getServiceState("idle-balance-allocation-keeper:float")).pendingExit.requestId, "1");
+  assert.equal(result.floatAction.action, "fulfilFloatExitAndSweep");
+  assert.equal(result.floatAction.requestId, "1");
+  assert.equal(result.floatAction.amountRaw, "3055142");
+  assert.equal(result.floatAction.targetRaw, "1018380");
+  assert.deepEqual(h.chain.calls.fulfilFloatExit, ["1"]);
+  assert.deepEqual(h.chain.calls.sweep, ["3055142"]);
+  assert.equal(h.chain.float.floatRaw, "1018380");
+  assert.equal(h.chain.float.poolSharesRaw, "3055142");
+  assert.equal(h.chain.float.poolAvailableSharesRaw, "3055142");
+  assert.ok(BigInt(h.chain.float.poolAvailableSharesRaw) > 0n);
+  assert.equal((await h.stateStore.getServiceState("idle-balance-allocation-keeper:float")).pendingExit, null);
 });
 
 async function harness({ wallets = [] } = {}) {
@@ -485,9 +497,13 @@ function fakeChain() {
     },
     async sweepToPool(amountRaw) {
       calls.sweep.push(amountRaw);
-      const remaining = BigInt(this.float.floatRaw) - BigInt(amountRaw);
+      const amount = BigInt(amountRaw);
+      const remaining = BigInt(this.float.floatRaw) - amount;
       this.float.floatRaw = remaining.toString();
       this.float.maxWithdrawRaw = remaining.toString();
+      this.float.poolAssetsRaw = (BigInt(this.float.poolAssetsRaw) + amount).toString();
+      this.float.poolSharesRaw = (BigInt(this.float.poolSharesRaw) + amount).toString();
+      this.float.poolAvailableSharesRaw = (BigInt(this.float.poolAvailableSharesRaw) + amount).toString();
       return receipt(calls.sweep.length + 200, { assetsRaw: amountRaw });
     },
     async requestFloatExit(input) {
@@ -518,7 +534,8 @@ function floatState({
   totalAssetsRaw = 10_000_000n,
   totalSharesRaw = 10_000_000n,
   poolSharesRaw = 0n,
-  poolAssetsRaw = 0n
+  poolAssetsRaw = 0n,
+  poolAvailableSharesRaw = poolSharesRaw
 } = {}) {
   return {
     adapter: DEPLOYED_AAC_POOL_AGGREGATOR_ADAPTER,
@@ -528,7 +545,8 @@ function floatState({
     totalAssetsRaw: totalAssetsRaw.toString(),
     totalSharesRaw: totalSharesRaw.toString(),
     poolSharesRaw: poolSharesRaw.toString(),
-    poolAssetsRaw: poolAssetsRaw.toString()
+    poolAssetsRaw: poolAssetsRaw.toString(),
+    poolAvailableSharesRaw: poolAvailableSharesRaw.toString()
   };
 }
 
