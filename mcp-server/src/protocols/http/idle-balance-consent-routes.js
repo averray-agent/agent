@@ -16,7 +16,7 @@ export function createIdleBalanceConsentRoutes({
     if (request.method === "POST" && pathname === "/account/idle-allocation/quote") {
       const auth = await authMiddleware(request, url);
       const payload = await readJsonBody(request);
-      respond(response, 200, idleBalanceConsentService.quote(auth.wallet, payload));
+      respond(response, 200, await idleBalanceConsentService.quote(auth.wallet, payload));
       return true;
     }
     if (request.method === "POST" && pathname === "/account/idle-allocation/consent") {

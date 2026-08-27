@@ -6,10 +6,13 @@ import { Wallet } from "ethers";
 import { MemoryStateStore } from "../core/state-store.js";
 import { createIdleBalanceConsentRoutes } from "../protocols/http/idle-balance-consent-routes.js";
 import {
+  IDLE_BALANCE_ACTIVE_FUNDS_MOVEMENT,
+  IDLE_BALANCE_ACTIVE_VENUE_DISCLOSURE,
   IDLE_BALANCE_AMOUNT_BASIS,
-  IDLE_BALANCE_FUNDS_MOVEMENT,
+  IDLE_BALANCE_BOUND_INACTIVE_VENUE_DISCLOSURE,
+  IDLE_BALANCE_BUFFER_FUNDS_MOVEMENT,
   IDLE_BALANCE_RETURN_TERMS,
-  IDLE_BALANCE_VENUE_DISCLOSURE,
+  IDLE_BALANCE_UNBOUND_VENUE_DISCLOSURE,
   IdleBalanceConsentService,
   hashIdleBalanceConsentTerms,
   loadIdleBalanceConsentConfig
@@ -22,9 +25,13 @@ const ASSET = "0x0000053900000000000000000000000001200000";
 const POOL = "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30";
 const POOL_V21 = "0x9B35A102d656Fb86d798aF81959e09961DEc28E0";
 
-function harness({ routeLive = true } = {}) {
+function harness({ routeLive = true, venueState: initialVenueState } = {}) {
   const stateStore = new MemoryStateStore();
   let clock = new Date(START);
+  let venueState = initialVenueState ?? {
+    venueAdapter: "0x0000000000000000000000000000000000000000",
+    activeVenueDeploymentId: 0n
+  };
   const service = new IdleBalanceConsentService({
     stateStore,
     config: {
@@ -32,6 +39,11 @@ function harness({ routeLive = true } = {}) {
       chainId: 420_420_419,
       assetAddress: ASSET,
       depositPoolAddress: POOL
+    },
+    venueStateReader: {
+      async readVenueState() {
+        return venueState;
+      }
     },
     chainId: 420_420_419,
     siweDomain: "api.averray.com",
@@ -41,12 +53,13 @@ function harness({ routeLive = true } = {}) {
   return {
     service,
     stateStore,
+    setVenueState(value) { venueState = value; },
     setNow(value) { clock = new Date(value); }
   };
 }
 
 async function signedPayload(h, nonce = "consent001") {
-  const quote = h.service.quote(SIGNER.address, { consentNonce: nonce });
+  const quote = await h.service.quote(SIGNER.address, { consentNonce: nonce });
   return {
     quote,
     payload: {
@@ -152,7 +165,7 @@ test("the consent signature rejects every material-term mutation", async () => {
   assert.equal(await h.stateStore.getIdleBalanceConsent(SIGNER.address), undefined);
 });
 
-test("served terms disclose movement, principal risk, and the queued-return boundary", async () => {
+test("served consent terms change only when the live venue exposure state changes", async () => {
   const h = harness();
   const result = await invoke(routes(h), "/account/idle-allocation/quote", {
     consentNonce: "terms001"
@@ -173,10 +186,10 @@ test("served terms disclose movement, principal risk, and the queued-return boun
     venue: {
       route: "deposit_pool_v2",
       depositPool: POOL,
-      downstream: "configured external venue"
+      downstream: "pool buffer"
     },
-    venueDisclosure: IDLE_BALANCE_VENUE_DISCLOSURE,
-    fundsMovement: IDLE_BALANCE_FUNDS_MOVEMENT,
+    venueDisclosure: IDLE_BALANCE_UNBOUND_VENUE_DISCLOSURE,
+    fundsMovement: IDLE_BALANCE_BUFFER_FUNDS_MOVEMENT,
     returnTerms: IDLE_BALANCE_RETURN_TERMS,
     consentNonce: "terms001",
     issuedAt: "2026-08-25T10:00:00.000Z",
@@ -184,11 +197,53 @@ test("served terms disclose movement, principal risk, and the queued-return boun
     consentExpiresAt: "2026-11-23T10:00:00.000Z"
   });
   assert.match(quote.terms.fundsMovement, /leave position\.liquid/u);
-  assert.match(quote.terms.fundsMovement, /external venue/u);
+  assert.doesNotMatch(quote.terms.venueDisclosure, /deployed .* external venue/u);
+  assert.match(quote.terms.venueDisclosure, /held in the DepositPoolV2 buffer/u);
+  assert.match(quote.terms.venueDisclosure, /no venue exposure and no venue yield today/u);
   assert.match(quote.terms.fundsMovement, /Principal is at risk/u);
   assert.match(quote.terms.fundsMovement, /not instant/u);
   assert.doesNotMatch(quote.terms.fundsMovement, /none —/u);
   assert.match(quote.terms.returnTerms, /queues with a disclosed ETA/u);
+
+  h.setVenueState({
+    venueAdapter: "0x1111111111111111111111111111111111111111",
+    activeVenueDeploymentId: 0n
+  });
+  const boundInactive = await h.service.quote(SIGNER.address, { consentNonce: "terms002" });
+  assert.equal(boundInactive.terms.venue.downstream, "pool buffer");
+  assert.equal(boundInactive.terms.venueDisclosure, IDLE_BALANCE_BOUND_INACTIVE_VENUE_DISCLOSURE);
+  assert.equal(boundInactive.terms.fundsMovement, IDLE_BALANCE_BUFFER_FUNDS_MOVEMENT);
+
+  h.setVenueState({
+    venueAdapter: "0x1111111111111111111111111111111111111111",
+    activeVenueDeploymentId: 7n
+  });
+  const active = await h.service.quote(SIGNER.address, { consentNonce: "terms003" });
+  assert.equal(active.terms.venue.downstream, "configured external venue");
+  assert.equal(active.terms.venueDisclosure, IDLE_BALANCE_ACTIVE_VENUE_DISCLOSURE);
+  assert.equal(active.terms.fundsMovement, IDLE_BALANCE_ACTIVE_FUNDS_MOVEMENT);
+  assert.notEqual(active.terms.venueDisclosure, quote.terms.venueDisclosure);
+  assert.notEqual(active.terms.fundsMovement, quote.terms.fundsMovement);
+  assert.notEqual(active.termsHash, boundInactive.termsHash);
+  assert.equal(active.terms.returnTerms, quote.terms.returnTerms);
+
+  const promisedYieldRate = /\b(?:apy|apr)\b|\d+(?:\.\d+)?\s*%|guaranteed yield|yield rate/iu;
+  for (const terms of [quote.terms, boundInactive.terms, active.terms]) {
+    assert.doesNotMatch(JSON.stringify(terms), promisedYieldRate);
+  }
+});
+
+test("a consent quote fails closed when the live venue state is unreadable", async () => {
+  const h = harness();
+  h.service.venueStateReader = {
+    async readVenueState() {
+      throw new Error("rpc unavailable");
+    }
+  };
+  await assert.rejects(
+    () => h.service.quote(SIGNER.address, { consentNonce: "unreadable1" }),
+    (error) => error.code === "idle_balance_venue_state_unavailable"
+  );
 });
 
 test("route-not-live serves a named unavailable state and captures no consent", async () => {
