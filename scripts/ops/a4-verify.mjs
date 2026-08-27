@@ -38,9 +38,9 @@ const check = (label, cond, detail = "") => { console.log(`  ${cond ? "OK  " : "
 
 const [approved, regAdapter, regActive, agg] = await Promise.all([
   c.readContract({ address: POLICY, abi: parseAbi(["function approvedStrategies(address) view returns (bool)"]), functionName: "approvedStrategies", args: [ADAPTER] }),
-  c.readContract({ address: REGISTRY, abi: parseAbi(["function strategies(bytes32) view returns (address adapter,address asset,bool active,string riskLabel)"]), functionName: "strategies", args: [SID] }),
+  c.readContract({ address: REGISTRY, abi: parseAbi(["function strategies(bytes32) view returns (bytes32 strategyId,address adapter,address asset,string riskLabel,bool active)"]), functionName: "strategies", args: [SID] }),
   null, null,
-]).then(async ([a, s]) => [a, s[0], s[2], await c.readContract({ address: POOL21, abi: parseAbi(["function aggregatorAdapters(address) view returns (bool)"]), functionName: "aggregatorAdapters", args: [ADAPTER] })]);
+]).then(async ([a, s]) => [a, s[1], s[4], await c.readContract({ address: POOL21, abi: parseAbi(["function aggregatorAdapters(address) view returns (bool)"]), functionName: "aggregatorAdapters", args: [ADAPTER] })]);
 
 console.log(`A4 ${mode}-verification @ ${new Date().toISOString()}`);
 if (mode === "pre") {

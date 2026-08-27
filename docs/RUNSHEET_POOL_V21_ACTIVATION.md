@@ -1,6 +1,6 @@
 # RUNSHEET — Pool v2.1 activation (phased)
 
-Status: **CEREMONY A: A0–A3 + A5 EXECUTED AND PROBED; only A4 (multisig, 2026-08-27) and A6 (cutover, gated on A4) remain** · 2026-08-26 ·
+Status: **CEREMONY A COMPLETE — A4 EXECUTED 2026-08-27. Only A6 (backend cutover) remains.** · 2026-08-26 ·
 Author: Claude (architect + gate) · Executor: Pascal (every money step) ·
 Authority: `MEMO_IDLE_BALANCE_ROUTE.md` R1–R5, Q1′, Q1″, Q2 (all RATIFIED).
 
@@ -47,6 +47,40 @@ End state, book-verified: **v2.1 supply/assets 10.405132 / 10.405132, price
 exactly 1.000000**; v2 retains the tester (5.026011 at 0.990840, untouched)
 plus the permanently-parked protocol 10.0. v2.1's `maxIssuedAgentShares` is
 now 9.908397 (the dogfood position) — its bufferFloor accordingly.
+
+## A4 EXECUTED — 2026-08-27 morning · THREE calls, not four
+
+| # | call | hash shown in Nova | timepoint | verified on-chain |
+|---|---|---|---|---|
+| 1 | `policy.setApprovedStrategy(adapter,true)` | `0x28d620db…912927` | 19935783-5 | `approvedStrategies` = true |
+| 2 | `registry.registerStrategy(adapter)` | `0x596b319f…f550e1` | 19935980-2 | adapter + `active` both set |
+| ~~3~~ | ~~`setStrategyActive(SID,true)`~~ | **SKIPPED — NO-OP** | — | see below |
+| 4 | `poolV21.setAggregatorAdapter(adapter,true)` | `0xc01e74ea…2ccd96` | 19936091-2 | `aggregatorAdapters` = true |
+
+**Call 3 was a no-op and was correctly skipped.** `registerStrategy` writes
+`active: true` inside its struct literal (StrategyAdapterRegistry.sol), so the
+flag AAC's allocation guard reads was already true after call 2; no off-chain
+consumer reads the `StrategyStatusUpdated` event. My runsheet planned
+register and activate as separate steps without reading `registerStrategy`'s
+body — the ceremony was three calls. **Lesson: read the body of every call in
+a ceremony, not just its name; a plausible-sounding sequence can contain a
+step the contract already performs.**
+
+**END-TO-END PROOF (the check that actually matters):** with all state set,
+`allocateIdleFunds(broker, AAC_IDLE_DEPOSIT_POOL_V21, amount)` **simulates
+clean at both 1.0 and 5.0 USDC** by eth_call from the live settlementBroker
+against the broker's real 16.073522 liquid. The adapter still fails the async
+probe (correctly classified synchronous). The route is live.
+
+### ABI defect found and fixed during this ceremony
+
+`a4-verify.mjs` carried a WRONG `strategies(bytes32)` shape — four fields in
+the wrong order versus the real five (`bytes32 strategyId, address adapter,
+address asset, string riskLabel, bool active`). It read fine while the slot
+was all zeros (a zero slot decodes as a valid empty tuple) and **reverted on
+the first populated read**. The pre-run's "registry entry UNSET" was therefore
+right by luck, not construction. Same class hit `positions`, which is keyed
+`(account, asset)` not `(account)`. Both corrected against contract source.
 
 ## A4 SIGNING PACKAGE — for the 2026-08-27 session (precomputed, verified by simulation)
 
