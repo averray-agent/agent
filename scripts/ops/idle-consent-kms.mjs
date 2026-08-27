@@ -14,7 +14,7 @@
  * and only while IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED is true.
  */
 import { KmsSigner } from "../../mcp-server/src/blockchain/kms-signer.js";
-import { SiweMessage } from "siwe";
+import { buildSiweMessage } from "../../mcp-server/src/auth/siwe.js";
 import { randomUUID } from "node:crypto";
 
 const API = process.env.API_BASE ?? "https://api.averray.com";
@@ -39,12 +39,11 @@ const call = async (path, { method = "GET", token, body } = {}) => {
 // --- SIWE sign-in with the KMS key -----------------------------------------
 const { nonce } = await call(`/auth/nonce?address=${wallet}`);
 const domain = new URL(API).host;
-const siwe = new SiweMessage({
-  domain, address: wallet, uri: API, version: "1",
+const prepared = buildSiweMessage({
+  domain, address: wallet, uri: API,
   chainId: Number(process.env.CHAIN_ID ?? 420420419), nonce,
   statement: "Sign in to Averray.", issuedAt: new Date().toISOString()
 });
-const prepared = siwe.prepareMessage();
 const siweSignature = await signer.signMessage(prepared);
 const session = await call("/auth/verify", { method: "POST", body: { message: prepared, signature: siweSignature } });
 const token = session.token ?? session.accessToken;
