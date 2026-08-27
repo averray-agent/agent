@@ -2904,7 +2904,10 @@ test("upsertIngestedJob hydrates an exact pre-D3 definition without manufacturin
     lifecycle: {
       status: "open",
       createdAt: now.toISOString(),
-      updatedAt: now.toISOString()
+      updatedAt: now.toISOString(),
+      // This test controls `now` and is about exact legacy hydration, not
+      // wall-clock staleness. Keep the fixture open across future CI runs.
+      staleAt: "9999-12-31T23:59:59.999Z"
     }
   };
   let live = { state: 0 };

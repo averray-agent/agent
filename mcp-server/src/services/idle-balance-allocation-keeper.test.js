@@ -18,9 +18,64 @@ import {
 
 const WALLET_A = "0x1111111111111111111111111111111111111111";
 const WALLET_B = "0x2222222222222222222222222222222222222222";
+const SETTLEMENT_SIGNER = "0x5a6836c6D4d293F6E5377E6c28054F4171915813";
 const ACCOUNT = "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57";
 const USDC = "0x0000053900000000000000000000000001200000";
 const NOW = new Date("2026-08-26T08:30:00.000Z");
+
+test("settlement signer funding wallet is structurally excluded even with active consent", async () => {
+  const config = loadIdleBalanceAllocationKeeperConfig({
+    AUTH_CHAIN_ID: "420420419",
+    IDLE_BALANCE_ALLOCATION_ROUTE_LIVE: "true",
+    IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED: "true"
+  }, {
+    agentAccountAddress: ACCOUNT,
+    assetAddress: USDC,
+    poolAddress: DEPLOYED_DEPOSIT_POOL_V21,
+    adapterAddress: DEPLOYED_AAC_POOL_AGGREGATOR_ADAPTER
+  });
+  assert.deepEqual(config.allocationExclusions, [{
+    wallet: SETTLEMENT_SIGNER,
+    role: "settlement_signer",
+    source: "deployment_manifest.verifier"
+  }]);
+
+  const h = await harness({ wallets: [SETTLEMENT_SIGNER] });
+  h.chain.positions.set(SETTLEMENT_SIGNER, position(16_073_522n));
+  h.consent.assessAllocationAttempt = async () => {
+    throw new Error("an excluded funding wallet must be rejected before consent assessment");
+  };
+
+  const result = await h.keeper.runOnce(NOW);
+
+  assert.equal(result.allocationCount, 0);
+  assert.equal(h.chain.calls.allocate.length, 0);
+  assert.equal(h.chain.calls.positionReads, 0);
+  assert.ok(result.skipped.some((entry) =>
+    entry.wallet === SETTLEMENT_SIGNER.toLowerCase()
+      && entry.reason === "allocation_excluded_operator_funding_source"));
+});
+
+test("excluded settlement signer can still deallocate an existing position", async () => {
+  const h = await harness({ wallets: [SETTLEMENT_SIGNER] });
+  h.chain.shares.set(SETTLEMENT_SIGNER, 4_073_522n);
+  h.chain.float = floatState({
+    floatRaw: 1_018_380n,
+    totalAssetsRaw: 4_073_522n,
+    totalSharesRaw: 4_073_522n,
+    poolSharesRaw: 3_055_142n,
+    poolAssetsRaw: 3_055_142n
+  });
+  h.consent.assessAllocationAttempt = async () => {
+    throw new Error("exit must never consult consent or allocation exclusions");
+  };
+
+  const result = await h.keeper.deallocate(SETTLEMENT_SIGNER, { amountRaw: "1000000" });
+
+  assert.equal(result.status, "deallocated");
+  assert.deepEqual(h.chain.calls.deallocate, [{ wallet: SETTLEMENT_SIGNER, amountRaw: "1000000" }]);
+  assert.equal(result.evidence.consent.reason, "exit_never_requires_consent");
+});
 
 test("revoked-between-scan-and-send refuses with idle_balance_consent_revoked and sends nothing", async () => {
   const h = await harness({ wallets: [WALLET_A] });
@@ -122,6 +177,8 @@ test("keeper-enable env off causes zero chain interaction regardless of consents
   assert.equal(defaults.keeperEnabled, false);
   assert.equal(defaults.workingHeadroomRaw, 2_000_000n);
   assert.equal(defaults.minAllocationTickRaw, 500_000n);
+  assert.equal(defaults.floatTargetBps, 2_500);
+  assert.equal(defaults.floatTargetRaw, 10_000_000n);
   let chainInteractions = 0;
   const chain = new Proxy({}, {
     get() {
@@ -181,27 +238,134 @@ test("concurrent second run allocates nothing while the keeper lock is held", as
   assert.deepEqual(second.skipped, [{ reason: "allocation_keeper_lock_held" }]);
 });
 
-test("float below target requests an adapter-bound exit and float above target sweeps without agent positions", async () => {
-  const below = await harness();
-  below.chain.float = floatState({
-    floatRaw: 4_000_000n,
-    poolSharesRaw: 20_000_000n,
-    poolAssetsRaw: 20_000_000n
+test("4.073522 allocated targets a 25 percent float instead of a full-position exit", async () => {
+  const h = await harness();
+  h.chain.float = floatState({
+    floatRaw: 0n,
+    totalAssetsRaw: 4_073_522n,
+    totalSharesRaw: 4_073_522n,
+    poolSharesRaw: 4_073_522n,
+    poolAssetsRaw: 4_073_522n
   });
-  const belowResult = await below.keeper.runOnce(NOW);
-  assert.equal(belowResult.floatAction.action, "requestFloatExit");
-  assert.deepEqual(below.chain.calls.requestFloatExit, [{
-    poolSharesRaw: "6000000",
+
+  const result = await h.keeper.runOnce(NOW);
+
+  assert.equal(result.floatAction.action, "requestFloatExit");
+  assert.equal(result.floatAction.targetRaw, "1018380");
+  assert.deepEqual(h.chain.calls.requestFloatExit, [{
+    poolSharesRaw: "1018380",
     receiver: DEPLOYED_AAC_POOL_AGGREGATOR_ADAPTER
   }]);
-  assert.equal(below.chain.calls.positionReads, 0);
+  assert.notEqual(h.chain.calls.requestFloatExit[0].poolSharesRaw, "4073522");
+});
 
-  const above = await harness();
-  above.chain.float = floatState({ floatRaw: 12_000_000n });
-  const aboveResult = await above.keeper.runOnce(NOW);
-  assert.equal(aboveResult.floatAction.action, "sweepToPool");
-  assert.deepEqual(above.chain.calls.sweep, ["2000000"]);
-  assert.equal(above.chain.calls.positionReads, 0);
+test("relative float target respects its absolute cap and sweeps only the excess", async () => {
+  const h = await harness();
+  h.chain.float = floatState({
+    floatRaw: 12_000_000n,
+    totalAssetsRaw: 50_000_000n,
+    totalSharesRaw: 50_000_000n,
+    poolSharesRaw: 38_000_000n,
+    poolAssetsRaw: 38_000_000n
+  });
+
+  const result = await h.keeper.runOnce(NOW);
+
+  assert.equal(result.floatAction.action, "sweepToPool");
+  assert.equal(result.floatAction.targetRaw, "10000000");
+  assert.deepEqual(h.chain.calls.sweep, ["2000000"]);
+  assert.equal(h.chain.calls.positionReads, 0);
+});
+
+test("proportional float fully backs synchronous deallocation up to its exact size", async () => {
+  const covered = await harness({ wallets: [WALLET_A] });
+  covered.chain.shares.set(WALLET_A, 4_073_522n);
+  covered.chain.float = floatState({
+    floatRaw: 1_018_380n,
+    totalAssetsRaw: 4_073_522n,
+    totalSharesRaw: 4_073_522n,
+    poolSharesRaw: 3_055_142n,
+    poolAssetsRaw: 3_055_142n
+  });
+  const result = await covered.keeper.deallocate(WALLET_A, { amountRaw: "1018380" });
+  assert.equal(result.status, "deallocated");
+
+  const beyond = await harness({ wallets: [WALLET_A] });
+  beyond.chain.shares.set(WALLET_A, 4_073_522n);
+  beyond.chain.float = structuredClone(covered.chain.float);
+  const queued = await beyond.keeper.deallocate(WALLET_A, { amountRaw: "1018381" });
+  assert.equal(queued.status, "queued");
+  assert.equal(queued.reason, "adapter_float_insufficient");
+});
+
+test("float management runs before the consent scan and without any consent", async () => {
+  const h = await harness();
+  const order = [];
+  const listConsents = h.stateStore.listIdleBalanceConsents.bind(h.stateStore);
+  h.stateStore.listIdleBalanceConsents = async (...args) => {
+    order.push("consent_scan");
+    return listConsents(...args);
+  };
+  const requestFloatExit = h.chain.requestFloatExit.bind(h.chain);
+  h.chain.requestFloatExit = async (...args) => {
+    order.push("float_management");
+    return requestFloatExit(...args);
+  };
+  h.chain.float = floatState({
+    floatRaw: 0n,
+    totalAssetsRaw: 4_073_522n,
+    totalSharesRaw: 4_073_522n,
+    poolSharesRaw: 4_073_522n,
+    poolAssetsRaw: 4_073_522n
+  });
+
+  const result = await h.keeper.runOnce(NOW);
+
+  assert.equal(result.candidateCount, 0);
+  assert.deepEqual(order, ["float_management", "consent_scan"]);
+});
+
+test("matured legacy full-position float request stays pooled while it exceeds relative need", async () => {
+  const h = await harness();
+  h.chain.float = floatState({
+    floatRaw: 0n,
+    totalAssetsRaw: 4_073_522n,
+    totalSharesRaw: 4_073_522n,
+    poolSharesRaw: 4_073_522n,
+    poolAssetsRaw: 4_073_522n
+  });
+  h.chain.getFloatExit = async () => ({
+    requestId: "1",
+    owner: DEPLOYED_AAC_POOL_AGGREGATOR_ADAPTER,
+    receiver: DEPLOYED_AAC_POOL_AGGREGATOR_ADAPTER,
+    sharesRaw: "4073522",
+    unlockAt: Math.floor(NOW.getTime() / 1_000) - 1,
+    fulfilled: false
+  });
+  await h.stateStore.upsertServiceState("idle-balance-allocation-keeper:float", {
+    pendingExit: {
+      status: "confirmed",
+      requestId: "1",
+      poolSharesRaw: "4073522",
+      receiver: DEPLOYED_AAC_POOL_AGGREGATOR_ADAPTER,
+      requestedAt: "2026-08-27T12:41:12.000Z"
+    }
+  });
+
+  const result = await h.keeper.runOnce(NOW);
+
+  assert.deepEqual(result.floatAction, {
+    action: "leaveOversizedFloatExit",
+    reason: "pending_exit_exceeds_relative_float_need",
+    requestId: "1",
+    unlockAt: Math.floor(NOW.getTime() / 1_000) - 1,
+    requestedAssetsRaw: "4073522",
+    neededAssetsRaw: "1018380",
+    targetRaw: "1018380"
+  });
+  assert.equal(h.chain.calls.fulfilFloatExit.length, 0);
+  assert.equal(h.chain.calls.sweep.length, 0);
+  assert.equal((await h.stateStore.getServiceState("idle-balance-allocation-keeper:float")).pendingExit.requestId, "1");
 });
 
 async function harness({ wallets = [] } = {}) {
@@ -233,6 +397,7 @@ async function harness({ wallets = [] } = {}) {
     consentService: consent,
     chainReader: chain,
     movementGateway: chain,
+    settlementSignerReader: async () => SETTLEMENT_SIGNER,
     now: () => NOW,
     ownerFactory: () => `keeper-test-${++id}`,
     logger: { warn() {} }
@@ -251,6 +416,12 @@ function liveConfig() {
     maxAllocationsPerRun: 25,
     maxAllocationTotalRaw: 100_000_000n,
     floatTargetRaw: 10_000_000n,
+    floatTargetBps: 2_500,
+    allocationExclusions: [{
+      wallet: SETTLEMENT_SIGNER,
+      role: "settlement_signer",
+      source: "deployment_manifest.verifier"
+    }],
     scanLimit: 1_000,
     lockTtlSeconds: 300,
     agentAccountAddress: ACCOUNT,
@@ -275,7 +446,7 @@ function fakeChain() {
     positions,
     shares,
     calls,
-    float: floatState({ floatRaw: 10_000_000n }),
+    float: floatState({ floatRaw: 2_500_000n }),
     async getAccountPosition(wallet) {
       calls.positionReads += 1;
       return positions.get(wallet) ?? position(0n);
@@ -294,6 +465,7 @@ function fakeChain() {
         requestId,
         owner: DEPLOYED_AAC_POOL_AGGREGATOR_ADAPTER,
         receiver: DEPLOYED_AAC_POOL_AGGREGATOR_ADAPTER,
+        sharesRaw: "1",
         unlockAt: Math.floor(NOW.getTime() / 1_000) + 100,
         fulfilled: false
       };
@@ -313,6 +485,9 @@ function fakeChain() {
     },
     async sweepToPool(amountRaw) {
       calls.sweep.push(amountRaw);
+      const remaining = BigInt(this.float.floatRaw) - BigInt(amountRaw);
+      this.float.floatRaw = remaining.toString();
+      this.float.maxWithdrawRaw = remaining.toString();
       return receipt(calls.sweep.length + 200, { assetsRaw: amountRaw });
     },
     async requestFloatExit(input) {
