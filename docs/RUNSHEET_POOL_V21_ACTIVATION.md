@@ -1,6 +1,6 @@
 # RUNSHEET — Pool v2.1 activation (phased)
 
-Status: **CEREMONY A COMPLETE — A4 EXECUTED 2026-08-27. Only A6 (backend cutover) remains.** · 2026-08-26 ·
+Status: **COMPLETE AND PROVEN LIVE 2026-08-27 — first real allocation executed end to end; R2 exemption verified in production.** · 2026-08-26 ·
 Author: Claude (architect + gate) · Executor: Pascal (every money step) ·
 Authority: `MEMO_IDLE_BALANCE_ROUTE.md` R1–R5, Q1′, Q1″, Q2 (all RATIFIED).
 
@@ -47,6 +47,37 @@ End state, book-verified: **v2.1 supply/assets 10.405132 / 10.405132, price
 exactly 1.000000**; v2 retains the tester (5.026011 at 0.990840, untouched)
 plus the permanently-parked protocol 10.0. v2.1's `maxIssuedAgentShares` is
 now 9.908397 (the dogfood position) — its bufferFloor accordingly.
+
+## FIRST LIVE ALLOCATION — 2026-08-27 11:49Z · THE R2 EXEMPTION IS PROVEN
+
+Operator consent captured by KMS-signed SIWE from inside agent-mainnet-backend
+(terms hash `0xe78c3d7e…`, active to 2026-11-25). Keeper allocated on its next
+tick, unattended, at full size per the operator's decision.
+
+| measure | before | after | meaning |
+|---|---|---|---|
+| operator `liquid` | 16.073522 | **2.000000** | 2.0 headroom respected exactly |
+| operator `strategyAllocated` | 0 | **14.073522** | per-agent accounting works |
+| adapter float | 0 | 10.000000 | swept down to the 10.0 target |
+| pool `totalAssets` | 10.405132 | **14.478654** | +4.073522 swept in |
+| pool `bufferFloor` | 9.908397 | **9.908397** | **UNCHANGED — the whole point** |
+| pool `maxDeployableAssets` | 0.496735 | **4.570257** | **+4.073522, one-for-one** |
+
+**Deployable rose by exactly the aggregator's deposit.** Under v2's guards the
+same deposit would have raised the floor by its own size and left deployable
+flat (`deployable = (25.29 + X) − X`) — the defect that sent B1 back on
+2026-08-25. The exemption behaves in production exactly as designed.
+
+**Correction to my own gate expectation:** I predicted the floor test would
+fire on the allocation tick. It did not and could not — `allocateIdleFunds`
+puts USDC in the adapter's FLOAT; the pool only moves on `sweepToPool`. The
+floor reading unchanged immediately after allocation proved nothing; the proof
+came one tick later, on the sweep. **An invariant is only tested by the
+operation that actually exercises it.**
+
+**Q3 (adapter float target) now has data instead of a guess:** the 10.0 default
+held 71% of a 14.07 allocation as instantly-redeemable float. Revisit once
+there is more than one holder.
 
 ## A4 EXECUTED — 2026-08-27 morning · THREE calls, not four
 
