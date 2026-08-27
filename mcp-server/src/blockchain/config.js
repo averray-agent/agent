@@ -314,6 +314,14 @@ export function loadBlockchainConfig(env = process.env) {
       deploymentManifest?.deploymentBlocks?.depositPoolV2,
       "deployments/<profile>.json#deploymentBlocks.depositPoolV2"
     ),
+    legacyDepositPoolV2Address: normalizeOptionalAddress(
+      deploymentManifest?.contracts?.legacyDepositPoolV2,
+      "deployments/<profile>.json#contracts.legacyDepositPoolV2"
+    ),
+    legacyDepositPoolV2DeploymentBlock: normalizeOptionalU32(
+      deploymentManifest?.deploymentBlocks?.legacyDepositPoolV2,
+      "deployments/<profile>.json#deploymentBlocks.legacyDepositPoolV2"
+    ),
     depositPoolV21Address: normalizeOptionalAddress(
       deploymentManifest?.contracts?.depositPoolV21,
       "deployments/<profile>.json#contracts.depositPoolV21"

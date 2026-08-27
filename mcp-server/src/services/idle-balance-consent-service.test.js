@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { Wallet } from "ethers";
 
@@ -19,6 +20,7 @@ const OTHER = new Wallet(`0x${"22".repeat(32)}`);
 const START = new Date("2026-08-25T10:00:00.000Z");
 const ASSET = "0x0000053900000000000000000000000001200000";
 const POOL = "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30";
+const POOL_V21 = "0x9B35A102d656Fb86d798aF81959e09961DEc28E0";
 
 function harness({ routeLive = true } = {}) {
   const stateStore = new MemoryStateStore();
@@ -219,6 +221,38 @@ test("route-not-live serves a named unavailable state and captures no consent", 
     (error) => error.code === "route_not_live"
   );
   assert.equal(await h.stateStore.getIdleBalanceConsent(SIGNER.address), undefined);
+});
+
+test("mainnet A6 serves idle-allocation consent as available while the default remains off", () => {
+  const template = readFileSync(
+    new URL("../../../deploy/backend.mainnet.env.template", import.meta.url),
+    "utf8"
+  );
+  const match = template.match(/^IDLE_BALANCE_ALLOCATION_ROUTE_LIVE=(.+)$/mu);
+  assert.ok(match, "mainnet template must declare the consent-route switch");
+  const config = loadIdleBalanceConsentConfig({
+    IDLE_BALANCE_ALLOCATION_ROUTE_LIVE: match[1]
+  }, {
+    chainId: 420_420_419,
+    assetAddress: ASSET,
+    depositPoolAddress: POOL_V21
+  });
+  const service = new IdleBalanceConsentService({
+    stateStore: new MemoryStateStore(),
+    config,
+    chainId: 420_420_419,
+    siweDomain: "api.averray.com",
+    publicBaseUrl: "https://api.averray.com"
+  });
+
+  assert.equal(service.getCapability().available, true);
+  assert.equal(service.getCapability().reason, undefined);
+  assert.equal(config.depositPoolAddress, POOL_V21);
+  assert.equal(loadIdleBalanceConsentConfig({}, {
+    chainId: 420_420_419,
+    assetAddress: ASSET,
+    depositPoolAddress: POOL_V21
+  }).routeLive, false);
 });
 
 test("consent capture changes no balance, position, or allocation", async () => {

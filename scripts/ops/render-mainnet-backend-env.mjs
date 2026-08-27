@@ -80,6 +80,9 @@ export const LITERAL_OVERRIDES = {
   RPC_WRITE_REQUEST_TIMEOUT_MS: "15000",
   USDC_LIQUIDITY_CHAIN: "mainnet",
   INGESTION_PREFUND_ENABLED: "false",
+  // A6 exposes consent after Ceremony A; movement remains separately gated by
+  // IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED, which stays false at cutover.
+  IDLE_BALANCE_ALLOCATION_ROUTE_LIVE: "1",
   USDC_LIQUIDITY_ACCOUNTS_JSON: "[]",
   REDIS_URL: "redis://mainnet-redis:6379",
   REDIS_NAMESPACE: "agent-platform-mainnet",

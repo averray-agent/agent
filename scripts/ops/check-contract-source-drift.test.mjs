@@ -239,22 +239,21 @@ test("mainnet carries no escrow pins post-v3-ceremony and points escrowCore at t
   // 17 = the 12 pre-L1 contracts + the pool-v2/CreditPool quartet (2026-08-13
   // L1 ceremony: depositPoolLaneV2, hydrationDepositPoolAdapterV2,
   // depositPoolV2, creditPool) + creditBook (2026-08-20 L2 ceremony).
-  // 19 = the 17 above + the Ceremony-A pair deployed 2026-08-26 (pool v2.1
-  // 0x9B35A102 and the AAC aggregator adapter 0x1DDcA709), both verified
-  // deployed source==chain; the immutable v2's waivers remain independently.
-  assert.equal(contracts.length, 19);
+  // 20 = the 19 above + the A6 legacy alias for immutable v2. The two active
+  // pool keys now point at deployed v2.1; only the named legacy key needs the
+  // exact current-source waiver.
+  assert.equal(contracts.length, 20);
   // The v3 ceremony (2026-08-13) deleted both escrow pins per their own reason
-  // text. The two deposit-pool names alias one live address, so the exact v2.1
-  // runtime must be pinned independently for both D-03 contract keys.
+  // text. The v2.1 aliases reproduce deployed source; the exact current
+  // runtime is pinned only against the retired immutable v2 address.
   assert.deepEqual(
     [...allowlist.keys()].sort(),
-    ["depositPool", "depositPoolV2", "hydrationUsdcAdapter", "legacyEscrowCore"]
+    ["hydrationUsdcAdapter", "legacyDepositPoolV2", "legacyEscrowCore"]
   );
   assert.equal(
-    allowlist.get("depositPool")?.[0]?.maskedRuntimeCodeHash,
+    allowlist.get("legacyDepositPoolV2")?.[0]?.maskedRuntimeCodeHash,
     "sha256:100a21cd5139b36528c6d6d6b5f716ff2ed67c5a89fbde48f407b27e10754355"
   );
-  assert.deepEqual(allowlist.get("depositPoolV2"), allowlist.get("depositPool"));
   assert.equal(
     contracts.find((contract) => contract.name === "escrowCore")?.address,
     "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793"

@@ -212,8 +212,9 @@ test("mainnet manifest covers every deployed source-controlled contract address"
       "depositPoolLaneV2",
       "hydrationDepositPoolAdapterV2",
       "depositPoolV2",
+      "legacyDepositPoolV2",
       "creditPool",
-    "creditBook",
+      "creditBook",
       "depositPoolV21",
       "aacPoolAggregatorAdapter",
     ]
@@ -232,17 +233,14 @@ test("mainnet manifest covers every deployed source-controlled contract address"
       "464fd8c018c5735a7f1e495c9a2eeb17c378bb0d"
     );
   }
-  // Post-L1-cutover, the un-versioned pool keys all alias the v2 instances
-  // (the ceremony script and doors bind them); the L1 quartet compiles from
-  // the same main tree. The drained v1 pool trio keeps orphaned provenance
-  // entries as historical record.
+  // The lane and retired v2 pool compile from the L1 ceremony tree. A6 moves
+  // both canonical pool keys to v2.1 while preserving v2 under its legacy key.
   for (const name of [
-    "depositPool",
     "depositPoolLane",
     "hydrationDepositPoolAdapter",
     "depositPoolLaneV2",
     "hydrationDepositPoolAdapterV2",
-    "depositPoolV2",
+    "legacyDepositPoolV2",
     "creditPool",
   ]) {
     assert.equal(
@@ -250,6 +248,16 @@ test("mainnet manifest covers every deployed source-controlled contract address"
       "9a6f3dffa6010ddbdc6b50617454e1632afe0b99"
     );
   }
+  for (const name of ["depositPool", "depositPoolV2", "depositPoolV21"]) {
+    assert.equal(
+      contracts.find((contract) => contract.name === name)?.provenance.sourceCommit,
+      "684ab8860f8e2f3ffd76ac0587f742f5e9d517e2"
+    );
+  }
+  assert.deepEqual(CONTRACT_ARTIFACTS.legacyDepositPoolV2, [
+    "DepositPoolV2.sol",
+    "DepositPoolV2",
+  ]);
   assert.deepEqual(CONTRACT_ARTIFACTS.depositPoolLane, [
     "HydrationUsdcAdapterV22.sol",
     "HydrationUsdcAdapterV22",

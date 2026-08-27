@@ -95,6 +95,7 @@ export const CONTRACT_ARTIFACTS = Object.freeze({
     "HydrationDepositPoolAdapter",
   ],
   depositPoolV2: ["DepositPoolV2.sol", "DepositPoolV2"],
+  legacyDepositPoolV2: ["DepositPoolV2.sol", "DepositPoolV2"],
   creditPool: ["CreditPool.sol", "CreditPool"],
   creditBook: ["CreditBook.sol", "CreditBook"],
 });
