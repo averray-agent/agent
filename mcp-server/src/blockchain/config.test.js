@@ -272,7 +272,7 @@ test("loadBlockchainConfig accepts the optional Hydration adapter settlement add
   assert.equal(config.hydrationUsdcAdapterAddress, "0x631a09913b2403b18b2b659a1397916621b29b4c");
 });
 
-test("loadBlockchainConfig resolves DepositPool from the network manifest only where deployed", () => {
+test("loadBlockchainConfig resolves the v2.1 cutover and preserves the legacy v2 address", () => {
   const mainnet = loadBlockchainConfig({
     ...baseEnv,
     RPC_URL: "https://rpc.example",
@@ -284,19 +284,24 @@ test("loadBlockchainConfig resolves DepositPool from the network manifest only w
     AUTH_CHAIN_ID: "420420417"
   });
 
-  // Post-L1-cutover (2026-08-13) the deposit door serves the v2 pool.
-  assert.equal(mainnet.depositPoolAddress, "0x6061f0accc3aa66add9508708dd2285bffac5f30");
+  // A6 (2026-08-27) moves the active door to v2.1 without orphaning v2.
+  assert.equal(mainnet.depositPoolAddress, "0x9b35a102d656fb86d798af81959e09961dec28e0");
+  assert.equal(mainnet.depositPoolV2Address, "0x9b35a102d656fb86d798af81959e09961dec28e0");
   assert.equal(mainnet.depositPoolV21Address, "0x9b35a102d656fb86d798af81959e09961dec28e0");
-  assert.equal(mainnet.depositPoolDeploymentBlock, 19_421_397);
-  assert.equal(mainnet.depositPoolV21Address, "0x9b35a102d656fb86d798af81959e09961dec28e0");
+  assert.equal(mainnet.legacyDepositPoolV2Address, "0x6061f0accc3aa66add9508708dd2285bffac5f30");
+  assert.equal(mainnet.depositPoolDeploymentBlock, 19_913_549);
+  assert.equal(mainnet.depositPoolV2DeploymentBlock, 19_913_549);
   assert.equal(mainnet.depositPoolV21DeploymentBlock, 19_913_549);
+  assert.equal(mainnet.legacyDepositPoolV2DeploymentBlock, 19_421_397);
   assert.equal(mainnet.aacPoolAggregatorAdapterAddress, "0x1ddca7097c752580c6561e1bf8c673d6c1665ca5");
   assert.equal(mainnet.aacPoolAggregatorAdapterDeploymentBlock, 19_913_651);
   assert.equal(mainnet.xcmWrapperDeploymentBlock, 19_101_467);
   assert.equal(testnet.depositPoolAddress, "");
+  assert.equal(testnet.depositPoolV2Address, "");
   assert.equal(testnet.depositPoolV21Address, "");
+  assert.equal(testnet.legacyDepositPoolV2Address, "");
   assert.equal(testnet.depositPoolDeploymentBlock, undefined);
-  assert.equal(testnet.depositPoolV21Address, "");
+  assert.equal(testnet.legacyDepositPoolV2DeploymentBlock, undefined);
   assert.equal(testnet.aacPoolAggregatorAdapterAddress, "");
   assert.equal(testnet.xcmWrapperDeploymentBlock, undefined);
 });

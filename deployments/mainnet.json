@@ -25,10 +25,11 @@
     "hydrationUsdcAdapter": "0x96091d4477Fe37E79557276d63883bBbbdE73159",
     "depositPoolLane": "0x88eE70277E486136676c0b50Ed9b7D7A1a31371f",
     "hydrationDepositPoolAdapter": "0xE2801E6C640e0180798912649fD567E1Ea459a35",
-    "depositPool": "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30",
+    "depositPool": "0x9B35A102d656Fb86d798aF81959e09961DEc28E0",
     "depositPoolLaneV2": "0x88eE70277E486136676c0b50Ed9b7D7A1a31371f",
     "hydrationDepositPoolAdapterV2": "0xE2801E6C640e0180798912649fD567E1Ea459a35",
-    "depositPoolV2": "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30",
+    "depositPoolV2": "0x9B35A102d656Fb86d798aF81959e09961DEc28E0",
+    "legacyDepositPoolV2": "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30",
     "creditPool": "0x903B318586A3772c99185000676f4AC356DD6E4B",
     "creditBook": "0x70441c9131Bc47c96E8D839C5B30850924838099",
     "depositPoolV21": "0x9B35A102d656Fb86d798aF81959e09961DEc28E0",
@@ -194,18 +195,11 @@
     }
   },
   "knownUnshippedContractChanges": {
-    "depositPool": [
+    "legacyDepositPoolV2": [
       {
         "sourceCommit": "3d3818a55d41556a69e81fcc0606202b4aa2ceaa",
         "maskedRuntimeCodeHash": "sha256:100a21cd5139b36528c6d6d6b5f716ff2ed67c5a89fbde48f407b27e10754355",
-        "reason": "DepositPool v2.1 adds the cold-policy-owner aggregator registry, exempts only registered aggregators from the per-agent cap and high-water floor while retaining the total cap, requires aggregators to use notice redemption, and lets the cold policy owner bind a constructor-validated venue adapter exactly once. The immutable live v2 pool intentionally remains deployed until the separately authorized v2.1 deployment and migration ceremony. This exact candidate runtime is allowlisted only to keep the waiver-landing deploy open; that deploy requires the verify_contract_source=1 manual dispatch."
-      }
-    ],
-    "depositPoolV2": [
-      {
-        "sourceCommit": "3d3818a55d41556a69e81fcc0606202b4aa2ceaa",
-        "maskedRuntimeCodeHash": "sha256:100a21cd5139b36528c6d6d6b5f716ff2ed67c5a89fbde48f407b27e10754355",
-        "reason": "DepositPool v2.1 adds the cold-policy-owner aggregator registry, exempts only registered aggregators from the per-agent cap and high-water floor while retaining the total cap, requires aggregators to use notice redemption, and lets the cold policy owner bind a constructor-validated venue adapter exactly once. The immutable live v2 pool intentionally remains deployed until the separately authorized v2.1 deployment and migration ceremony. This exact candidate runtime is allowlisted only to keep the waiver-landing deploy open; that deploy requires the verify_contract_source=1 manual dispatch."
+        "reason": "After the 2026-08-27 v2.1 backend cutover, legacyDepositPoolV2 remains the immutable live v2 runtime because it still holds depositor shares and parked protocol principal. HEAD compiles the ratified v2.1 source, so this entry permits exactly that candidate masked runtime against the legacy address while the deployed v2 provenance remains independently pinned."
       }
     ],
     "hydrationUsdcAdapter": [
@@ -257,11 +251,12 @@
     "hydrationUsdcAdapterV2_2_1": 19101470,
     "depositPoolLane": 19421392,
     "hydrationDepositPoolAdapter": 19421395,
-    "depositPool": 19421397,
+    "depositPool": 19913549,
     "escrowCoreV3": 19414957,
     "depositPoolLaneV2": 19421392,
     "hydrationDepositPoolAdapterV2": 19421395,
-    "depositPoolV2": 19421397,
+    "depositPoolV2": 19913549,
+    "legacyDepositPoolV2": 19421397,
     "creditPool": 19421558,
     "depositPoolV1": 19380506,
     "depositPoolLaneV1": 19380501,

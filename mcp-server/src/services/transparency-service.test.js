@@ -193,7 +193,8 @@ function harness(overrides = {}) {
         xcmWrapperAddress: WRAPPER,
         escrowCoreAddress: ESCROW,
         depositPoolV21Address: LIVE_POOL,
-        depositPoolV2Address: LEGACY_POOL,
+        depositPoolV2Address: LIVE_POOL,
+        legacyDepositPoolV2Address: LEGACY_POOL,
         supportedAssets: [{ symbol: "USDC", address: TOKEN, decimals: 6 }]
       },
       async getProtocolFeeConfig() {
