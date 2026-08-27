@@ -492,7 +492,7 @@ export class IdleBalanceAllocationKeeperService {
   }
 
   async #manageFloat() {
-    const floatState = await this.#readFloatState();
+    let floatState = await this.#readFloatState();
     let persisted;
     try {
       persisted = await this.stateStore.getServiceState(FLOAT_STATE_SCOPE);
@@ -506,15 +506,15 @@ export class IdleBalanceAllocationKeeperService {
       throw namedError("idle_balance_deallocation_queue_unreadable", "Deallocation queue could not be read.", error);
     }
     const queuedTotal = queued.reduce((total, request) => total + BigInt(request.amountRaw ?? 0), 0n);
-    const proportionalTarget = proportionalFloatTarget({
+    let proportionalTarget = proportionalFloatTarget({
       totalAssetsRaw: floatState.totalAssetsRaw,
       targetBps: this.config.floatTargetBps,
       absoluteCapRaw: this.config.floatTargetRaw
     });
     // Queued exits sit above the operating target: the 25% decision sizes
     // ordinary instant liquidity, while already-promised exits remain fully backed.
-    const target = proportionalTarget + queuedTotal;
-    const current = BigInt(floatState.floatRaw);
+    let target = proportionalTarget + queuedTotal;
+    let current = BigInt(floatState.floatRaw);
 
     const pending = persisted?.pendingExit;
     if (pending) {
@@ -538,32 +538,45 @@ export class IdleBalanceAllocationKeeperService {
           "Persisted float exit is not owned by and payable to the deployed adapter.");
       }
       if (!exit.fulfilled && Number(exit.unlockAt) <= Math.floor(this.now().getTime() / 1_000)) {
-        const needed = target > current ? target - current : 0n;
-        const pendingAssets = assetsForShares(
-          exit.sharesRaw,
-          floatState.poolAssetsRaw,
-          floatState.poolSharesRaw
-        );
-        // A legacy request may lock more shares than the relative target needs.
-        // There is no cancel/resize entrypoint, so leave an oversized matured
-        // request unfulfilled until exit demand needs its full value.
-        if (pendingAssets > needed) {
-          return {
-            action: "leaveOversizedFloatExit",
-            reason: "pending_exit_exceeds_relative_float_need",
-            requestId: pending.requestId,
-            unlockAt: exit.unlockAt,
-            requestedAssetsRaw: pendingAssets.toString(),
-            neededAssetsRaw: needed.toString(),
-            targetRaw: target.toString()
-          };
-        }
-        const result = await this.movementGateway.fulfilFloatExit(pending.requestId);
+        // Redeem requests lock their shares and cannot be cancelled. Fulfil a
+        // matured oversized request to unlock the position, then synchronously
+        // sweep any excess float back into the pool at the proportional target.
+        const fulfilment = await this.movementGateway.fulfilFloatExit(pending.requestId);
         await this.stateStore.upsertServiceState(FLOAT_STATE_SCOPE, {
           pendingExit: null,
-          lastAction: { action: "fulfilFloatExit", ...result, at: this.now().toISOString() }
+          lastAction: { action: "fulfilFloatExit", ...fulfilment, at: this.now().toISOString() }
         });
-        return { action: "fulfilFloatExit", requestId: pending.requestId, ...result };
+        floatState = await this.#readFloatState();
+        proportionalTarget = proportionalFloatTarget({
+          totalAssetsRaw: floatState.totalAssetsRaw,
+          targetBps: this.config.floatTargetBps,
+          absoluteCapRaw: this.config.floatTargetRaw
+        });
+        target = proportionalTarget + queuedTotal;
+        current = BigInt(floatState.floatRaw);
+        if (current > target) {
+          const amount = current - target;
+          const sweep = await this.movementGateway.sweepToPool(amount.toString());
+          await this.stateStore.upsertServiceState(FLOAT_STATE_SCOPE, {
+            lastAction: {
+              action: "fulfilFloatExitAndSweep",
+              requestId: pending.requestId,
+              amountRaw: amount.toString(),
+              fulfilment,
+              sweep,
+              at: this.now().toISOString()
+            }
+          });
+          return {
+            action: "fulfilFloatExitAndSweep",
+            requestId: pending.requestId,
+            amountRaw: amount.toString(),
+            targetRaw: target.toString(),
+            fulfilment,
+            sweep
+          };
+        }
+        return { action: "fulfilFloatExit", requestId: pending.requestId, targetRaw: target.toString(), ...fulfilment };
       }
       if (!exit.fulfilled) {
         return {
