@@ -37,7 +37,7 @@ test("A6 manifest makes v2.1 canonical and preserves legacy v2 provenance", () =
   assert.equal(waivers.has("legacyDepositPoolV2"), true);
 });
 
-test("A6 exposes consent but leaves allocation movement dark at the ratified parameters", () => {
+test("production enables consent and allocation at the ratified parameters", () => {
   const mainnet = readFileSync(
     new URL("../../deploy/backend.mainnet.env.template", import.meta.url),
     "utf8"
@@ -48,7 +48,7 @@ test("A6 exposes consent but leaves allocation movement dark at the ratified par
   );
 
   assert.equal(envValue(mainnet, "IDLE_BALANCE_ALLOCATION_ROUTE_LIVE"), "1");
-  assert.equal(envValue(mainnet, "IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED"), "false");
+  assert.equal(envValue(mainnet, "IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED"), "1");
   assert.equal(envValue(defaults, "IDLE_BALANCE_ALLOCATION_ROUTE_LIVE"), "false");
   assert.equal(envValue(defaults, "IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED"), "false");
   assert.equal(envValue(mainnet, "IDLE_BALANCE_ALLOCATION_WORKING_HEADROOM_RAW"), "2000000");

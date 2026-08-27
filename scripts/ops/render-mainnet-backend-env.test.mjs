@@ -116,6 +116,10 @@ test("transformLine: identity literals flip to mainnet", () => {
     "IDLE_BALANCE_ALLOCATION_ROUTE_LIVE=1"
   );
   assert.equal(
+    transformLine("IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED=false"),
+    "IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED=1"
+  );
+  assert.equal(
     transformLine("BANK_LANE_FEED_HYDRATION_EVM_RPC_BACKUP_URLS="),
     "BANK_LANE_FEED_HYDRATION_EVM_RPC_BACKUP_URLS=https://hydration-rpc.n.dwellir.com"
   );
