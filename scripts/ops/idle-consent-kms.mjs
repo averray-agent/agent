@@ -13,8 +13,25 @@
  * This captures CONSENT ONLY. It moves no funds. Allocation happens later,
  * and only while IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED is true.
  */
-import { KmsSigner } from "../../mcp-server/src/blockchain/kms-signer.js";
-import { buildSiweMessage } from "../../mcp-server/src/auth/siwe.js";
+// Resolve against BOTH layouts: the repo (mcp-server/src/...) and the deployed
+// backend image, whose Dockerfile copies mcp-server/src to /app/src. That lets
+// this run inside agent-mainnet-backend, which is the only place the mainnet
+// KMS key can be used (Roles Anywhere; no static access keys exist by design).
+const tryImport = async (specifiers) => {
+  let last;
+  for (const spec of specifiers) {
+    try { return await import(spec); } catch (error) { last = error; }
+  }
+  throw new Error(`could not resolve ${specifiers[0]} in either layout: ${last?.message ?? last}`);
+};
+const { KmsSigner } = await tryImport([
+  "../../mcp-server/src/blockchain/kms-signer.js",
+  "/app/src/blockchain/kms-signer.js"
+]);
+const { buildSiweMessage } = await tryImport([
+  "../../mcp-server/src/auth/siwe.js",
+  "/app/src/auth/siwe.js"
+]);
 import { randomUUID } from "node:crypto";
 
 const API = process.env.API_BASE ?? "https://api.averray.com";
