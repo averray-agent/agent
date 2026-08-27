@@ -1,6 +1,6 @@
 # MEMO — The commitment ladder: why longer locks earn more, honestly
 
-Status: **DRAFT — decisions D1–D5 open** · Author: Claude (architect) ·
+Status: **RATIFIED — D1–D6 decided (Pascal, 2026-08-27)** · Author: Claude (architect) ·
 2026-08-27 · Operator direction: Pascal, 2026-08-27 —
 *"flex without any binding is less and no perk, then 7 day, 30 and 90 each with
 more yield and more perks. Also on the locks the credit comes into play as a
@@ -66,7 +66,102 @@ only draw on 90-day-committed capital.
 
 This is the whole engineering problem. Everything else is parameters.
 
-## Decisions needed
+## THE LADDER — RATIFIED 2026-08-27
+
+| | **Flex** | **7 day** | **30 day** | **90 day** |
+|---|---|---|---|---|
+| Yield | **none** | **2% operator floor**, sunsetting | earned (+3–8%) | earned (+6–10%) |
+| Claim bond | full | **−50%** | waived | waived |
+| Priority claim access | basic | ✓ | ✓✓ | first look |
+| Exposure / daily caps | +25% | +50% | +100% | +200% |
+| Credit qualification | — | — | ✓ | ✓ better terms |
+| Priority settlement | — | — | ✓ | ✓ |
+
+**Organising principle: Flex gets what costs us nothing; commitment buys what
+costs us risk.** Priority is free, so Flex may have it. Bond relief and credit
+are exposure we carry, so they require capital that cannot leave the same
+afternoon.
+
+## D1 — Tier set: Flex / 7 / 30 / 90. RATIFIED.
+
+Flex pays **no yield**. This is arithmetic, not stinginess: at a 7-day window,
+capital below ~60 USDC loses money every cycle.
+
+## D2 — Rates are EARNED, except one disclosed floor. RATIFIED.
+
+30d and 90d quote what their window actually produces. **The 7-day tier gets a
+2% operator-funded floor**, because a 7d tranche standing alone is −15.7% at 25
+USDC deployed and only turns positive near 100 — it cannot earn its own way at
+entry scale, and an entry rung of zero gives agents nowhere to step.
+
+**Three conditions, all binding:**
+
+1. **Disclosed as operator-added, never venue-earned**, through the Y3
+   earned-vs-added split that already ships. A 7d holder must be able to see
+   that their return came from us. This is that surface's first real use.
+2. **Sunsets automatically** once the 7d tranche passes its own break-even
+   (~60 USDC deployed), after which the quoted rate is genuinely earned. The
+   sunset is not optional — without it we permanently fund a tier that was
+   supposed to fund itself.
+3. **Never funded from the 30/90 tiers.** That is Y2's prohibited
+   cross-subsidy: paying committed holders less than they earned to flatter the
+   entry rate.
+
+Cost at a 2% floor: 0.50 USDC/yr per 25 USDC of cohort — 2.00/yr on a 100 USDC
+cohort. Trivial against what it buys.
+
+## D3 — Credit is a QUALIFICATION SIGNAL, not collateral. RATIFIED.
+
+30d+ qualifies; 90d gets better terms. Locked balance is an underwriting
+signal alongside settlement history. **It is explicitly not collateral** — the
+locked tier has forfeit terms for early exit, not a seizure path for job
+default. Making it real collateral needs a contract change and a liquidation
+design we do not want yet.
+
+**Recorded as a risk decision, not dressed as security:** bond relief on locked
+tiers is *uncollateralised risk we choose to take*, justified by demonstrated
+commitment and an observable balance, and bounded by the caps ladder.
+
+## D4 — Early exit forfeits YIELD, never principal. RATIFIED.
+
+`LOCKED_TIER_EARLY_EXIT_TERMS` and the forfeit-terms hash carry forward.
+Principal forfeiture on a technical pilot would be indefensible.
+
+## D5 — Sequencing: non-yield perks FIRST. RATIFIED.
+
+Ship bond relief, caps, priority and credit qualification on the **existing**
+contracts. The yield ladder follows when v2.2 lands. Rationale: it delivers
+retention levers in weeks instead of after another ceremony, and our own
+measurement says friction removal outweighs rate — a blind agent chose a
+**0.4 zero-bond** job over a **1.0 external bounty**.
+
+## D6 — The retention discount is REJECTED. RATIFIED, with reasoning.
+
+An earlier draft proposed discounting retention as Flex's headline perk, on the
+grounds that it "costs revenue only when agents earn." **That was wrong and
+must not be revived.**
+
+`_calculateGasRetention(reward, brokered, waived, …)` shows retention is **gas
+recovery**: it repays gas we front when brokering a claim. Measured cost is
+**0.0748 DOT ≈ $0.059 per lifecycle** against a **0.05 USDC** retention — so it
+already recovers only ~85% of its own cost, and our own banked note says the
+fix is to retain *more*, not less.
+
+**Discounting it means paying agents to transact — cash out per job, not
+forgone margin.** Any future proposal to discount retention must first show
+that retention exceeds its gas cost.
+
+## Open at build time
+
+The caps ladder (+25/50/100/200%) is a **shape, not a number**. Caps are risk
+against a reward bank that is a hard ceiling, so the top of that ladder needs an
+operator figure before it ships.
+
+Every rate here still scales off two **single observations** from epoch 3
+(11.3%/yr, 0.129576 friction). Re-measure both on a live deployment before any
+tier quotes a rate to an external agent.
+
+## Decisions needed (SUPERSEDED — see the ratified section above; kept for reasoning)
 
 **D1 — Tier set.** Operator direction is Flex / 7 / 30 / 90. Confirm, and
 confirm Flex pays **no** yield (which the arithmetic says is the truthful
