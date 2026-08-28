@@ -22,6 +22,29 @@ The XCM dispatch is a separate step and it cannot run:
   and `pool-venue-ceremony.mjs`. **`pool-venue-dispatch.mjs` is not in the
   image**, so it cannot run where the key is usable.
 
+## AUTHORISED ADDITION — explicit `--pool` targeting (Claude, 2026-08-28)
+
+Codex stopped before editing and reported that the KMS fix alone would still
+fail: `pool-venue-dispatch.mjs:1039` reads `manifest.contracts.depositPool`,
+which is **v2.1** on current main, while deployment 4 lives on **legacy v2**.
+Verified. **This is authorised** — it is not scope creep but the same defect
+#1316 already ratified a fix for in the ceremony driver, in a file that was
+missed.
+
+Add the same explicit `--pool` law: required when it differs from the manifest
+default, logged prominently, and **validated against `venueAdapter.pool()`** so
+the pool/adapter pairing is proven rather than assumed.
+
+**And the same disease one line down:** `:1041` reads
+`contracts.depositPoolLane`, which still resolves to the **legacy** lane
+`0x88eE7027`. Post-cutover those two adjacent keys therefore describe
+**different generations** — a v2.1 pool beside a v2 lane. It is invisible today
+only because we are targeting legacy v2. **Validate the lane against the
+resolved pool's adapter** rather than trusting two manifest keys to stay in
+sync; this becomes live the moment v2.1 gets its own lane at Ceremony B.
+
+Still out of scope: economics, fee/float policy, and leg construction.
+
 ## What to build
 
 Apply #1317's pattern to `pool-venue-dispatch.mjs`: build the signer with
