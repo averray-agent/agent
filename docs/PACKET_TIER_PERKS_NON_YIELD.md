@@ -23,8 +23,20 @@ same way the keeper did.
 ## Caps are BANK-LINKED, with a floor (operator decision)
 
 Open exposure is a share of the **live reward bank**, not a fixed number, so we
-can never promise more exposure than we can actually pay. At the 50 USDC target
-this yields Flex 2.5 / 7d 5.0 / 30d 7.5 / 90d 10.0.
+can never promise more exposure than we can actually pay.
+
+**The bank was funded to 52.075000 on 2026-08-27 (chain-verified; deposit tx
+`0xe7c06156…`), so the ladder resolves live as:**
+
+| tier | share | resolved cap |
+|---|---|---|
+| Flex | 5% | **2.604** |
+| 7d | 10% | **5.208** |
+| 30d | 15% | **7.811** |
+| 90d | 20% | **10.415** |
+
+Every tier clears the floor at this bank size, so the floor never engages
+today — but it must still exist, for the reason below.
 
 **Floor at today's values.** The bank is 12.0 USDC right now, where the shares
 alone would give Flex 0.60 and even 90d only 2.40 — **below the current 2.5
