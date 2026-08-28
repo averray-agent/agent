@@ -127,15 +127,24 @@ export class EvmReceiptGraphReader {
 }
 
 export class ReceiptGraphUnderwriter {
-  constructor({ reader, cashAlphaBps = 5_000, postingAlphaBps = 10_000 } = {}) {
+  constructor({
+    reader,
+    tierPerksPolicy,
+    cashAlphaBps = 5_000,
+    postingAlphaBps = 10_000
+  } = {}) {
     this.reader = reader;
+    this.tierPerksPolicy = tierPerksPolicy;
     this.cashAlphaBps = BigInt(cashAlphaBps);
     this.postingAlphaBps = BigInt(postingAlphaBps);
   }
 
   async evaluate({ wallet, asset, cashCapRaw, postingCapRaw }) {
     try {
-      const evidence = await this.reader.readWindow({ wallet, asset });
+      const [evidence, tierPerks] = await Promise.all([
+        this.reader.readWindow({ wallet, asset }),
+        this.tierPerksPolicy?.forWallet?.(wallet)
+      ]);
       const trailingNetRaw = evidence.settlements.reduce(
         (sum, settlement) => sum + BigInt(settlement.workerAmountRaw),
         0n
@@ -166,7 +175,8 @@ export class ReceiptGraphUnderwriter {
           upheldDisputeCount: evidence.upheldDisputes.length,
           fromBlock: evidence.fromBlock,
           headBlock: evidence.headBlock
-        }
+        },
+        ...(tierPerks ? { tierQualification: tierPerks.creditQualification } : {})
       };
     } catch (error) {
       return {

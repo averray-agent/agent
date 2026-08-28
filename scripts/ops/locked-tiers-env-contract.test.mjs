@@ -17,6 +17,7 @@ const TEMPLATES = [
 test("locked tiers stay flag-off by default in both generated backend env profiles", async () => {
   const defaults = loadLockedTierConfig({});
   assert.equal(defaults.enabled, false);
+  assert.equal(defaults.tierPerksEnabled, false);
   assert.equal(defaults.perWalletCapRaw, 25_000_000n);
   assert.equal(defaults.cohortCapRaw, 1_000_000_000n);
   assert.equal(defaults.creditReadGraceMs, CREDIT_READ_GRACE_DEFAULT_MS);
@@ -24,11 +25,13 @@ test("locked tiers stay flag-off by default in both generated backend env profil
   for (const templateUrl of TEMPLATES) {
     const env = parseTemplate(await readFile(templateUrl, "utf8"));
     assert.equal(env.LOCKED_TIERS_ENABLED, "true", templateUrl.pathname);
+    assert.equal(env.NON_YIELD_TIER_PERKS_ENABLED, "false", templateUrl.pathname);
     assert.equal(env.LOCKED_TIER_PER_WALLET_CAP_USDC, "25", templateUrl.pathname);
     assert.equal(env.LOCKED_TIER_COHORT_CAP_USDC, "1000", templateUrl.pathname);
     assert.equal(env.CREDIT_READ_GRACE_MS, "300000", templateUrl.pathname);
     const config = loadLockedTierConfig(env);
     assert.equal(config.enabled, true, templateUrl.pathname);
+    assert.equal(config.tierPerksEnabled, false, templateUrl.pathname);
     assert.equal(config.perWalletCapRaw, defaults.perWalletCapRaw, templateUrl.pathname);
     assert.equal(config.cohortCapRaw, defaults.cohortCapRaw, templateUrl.pathname);
     assert.equal(config.creditReadGraceMs, defaults.creditReadGraceMs, templateUrl.pathname);

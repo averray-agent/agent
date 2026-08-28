@@ -60,6 +60,7 @@ export function createWorkerExposurePolicy({
   stateStore,
   blockchainGateway,
   gasEstimateUsdc,
+  tierPerksPolicy = undefined,
   env = process.env,
   config = loadWorkerExposureConfig(env),
   vestingConfig = loadDepositVestingConfig(env),
@@ -74,6 +75,7 @@ export function createWorkerExposurePolicy({
     vestedOpenExposureUnitRaw: config.vestedOpenExposureUnitRaw,
     externalRewardCeilingBaseRaw: config.externalRewardCeilingBaseRaw,
     externalCeilingPerVestedMilli: config.externalCeilingPerVestedMilli,
+    tierPerksPolicy,
     resolveVesting: resolveVesting ?? (async (wallet) => {
       if (typeof blockchainGateway?.readDepositVesting === "function") {
         return blockchainGateway.readDepositVesting(wallet, {
@@ -95,6 +97,7 @@ export class WorkerExposurePolicy {
     vestedOpenExposureUnitRaw = DEFAULT_WORKER_VESTED_OPEN_EXPOSURE_UNIT_RAW,
     externalRewardCeilingBaseRaw = DEFAULT_WORKER_EXTERNAL_REWARD_CEILING_BASE_RAW,
     externalCeilingPerVestedMilli = DEFAULT_WORKER_EXTERNAL_CEILING_PER_VESTED_MILLI,
+    tierPerksPolicy = undefined,
     resolveVesting = undefined,
     logger = console
   } = {}) {
@@ -117,6 +120,7 @@ export class WorkerExposurePolicy {
       "external ceiling per vested milli"
     );
     this.gasEstimateUnits = usdcUnits(gasEstimateUsdc, "brokered gas estimate");
+    this.tierPerksPolicy = tierPerksPolicy;
     this.resolveVesting = resolveVesting ?? (async (wallet) => {
       if (typeof blockchainGateway?.readDepositVesting === "function") {
         return blockchainGateway.readDepositVesting(wallet);
@@ -124,6 +128,10 @@ export class WorkerExposurePolicy {
       return { vestedRaw: 0n, tranches: [], available: false };
     });
     this.logger = logger;
+  }
+
+  setTierPerksPolicy(tierPerksPolicy) {
+    this.tierPerksPolicy = tierPerksPolicy;
   }
 
   async evaluate({ wallet, job, claimEconomics } = {}) {
@@ -222,8 +230,21 @@ export class WorkerExposurePolicy {
     const additionalVestedUnits = nonNegativeRawUnits(additionalVestedRaw, "projected additional vested assets");
     const vestedUnits = currentlyVestedUnits + additionalVestedUnits;
     const vestedWholeUsdc = vestedUnits / 1_000_000n;
-    const openRaiseUnits = integerSquareRoot(vestedWholeUsdc) * this.vestedOpenExposureUnit;
-    const openCapUnits = this.capUnits + openRaiseUnits;
+    const legacyOpenRaiseUnits = integerSquareRoot(vestedWholeUsdc) * this.vestedOpenExposureUnit;
+    const tierPerks = await this.tierPerksPolicy?.forWallet?.(wallet, {
+      defaultOpenExposureCapRaw: this.capUnits.toString()
+    });
+    const baseOpenCapUnits = tierPerks
+      ? nonNegativeRawUnits(
+          tierPerks.exposure?.resolvedOpenExposureCapRaw,
+          "tier-perk open exposure cap"
+        )
+      : this.capUnits;
+    const legacyOpenCapUnits = this.capUnits + legacyOpenRaiseUnits;
+    const openCapUnits = baseOpenCapUnits > legacyOpenCapUnits
+      ? baseOpenCapUnits
+      : legacyOpenCapUnits;
+    const openRaiseUnits = openCapUnits - baseOpenCapUnits;
     const externalRaiseUnits = vestedUnits * this.externalCeilingPerVestedMilli / 1_000n;
     const externalCeilingUnits = this.externalRewardCeilingBase + externalRaiseUnits;
     const nextConcurrentRaiseVestedUnits = this.vestedOpenExposureUnit > 0n
@@ -233,8 +254,11 @@ export class WorkerExposurePolicy {
       ? nextConcurrentRaiseVestedUnits - vestedUnits
       : 0n;
     const nextVestedWholeUsdc = nextConcurrentRaiseVestedUnits / 1_000_000n;
-    const nextOpenExposureCapUnits = this.capUnits
+    const nextLegacyOpenExposureCapUnits = this.capUnits
       + integerSquareRoot(nextVestedWholeUsdc) * this.vestedOpenExposureUnit;
+    const nextOpenExposureCapUnits = baseOpenCapUnits > nextLegacyOpenExposureCapUnits
+      ? baseOpenCapUnits
+      : nextLegacyOpenExposureCapUnits;
     const nextExternalRewardCeilingUnits = this.externalRewardCeilingBase
       + nextConcurrentRaiseVestedUnits * this.externalCeilingPerVestedMilli / 1_000n;
     let credit = { available: false, reason: "credit_pool_not_configured" };
@@ -251,8 +275,8 @@ export class WorkerExposurePolicy {
       vestedAssetsUsdc: usdcAmount(vestedUnits),
       currentlyVestedAssetsRaw: currentlyVestedUnits.toString(),
       additionalVestedAssetsRaw: additionalVestedUnits.toString(),
-      baseOpenExposureCapRaw: this.capUnits.toString(),
-      baseOpenExposureCapUsdc: usdcAmount(this.capUnits),
+      baseOpenExposureCapRaw: baseOpenCapUnits.toString(),
+      baseOpenExposureCapUsdc: usdcAmount(baseOpenCapUnits),
       openExposureRaiseRaw: openRaiseUnits.toString(),
       openExposureRaiseUsdc: usdcAmount(openRaiseUnits),
       openExposureCapRaw: openCapUnits.toString(),
@@ -273,7 +297,8 @@ export class WorkerExposurePolicy {
       vestingAvailable: vesting?.available !== false,
       evaluatedAt: vesting?.evaluatedAt,
       tranches: publicVestingTranches(vesting?.tranches),
-      credit
+      credit,
+      ...(tierPerks ? { tierPerks } : {})
     };
   }
 

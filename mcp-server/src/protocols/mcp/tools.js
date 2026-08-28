@@ -233,11 +233,11 @@ export function createMcpTools({
   tool({
     name: "quoteLockedDeposit",
     title: "Quote a locked deposit",
-    description: "Read the complete T30/T90 terms, early-exit consequences, automatic activation gate, current NAV, risk sentence, AAC headroom, and the exact EIP-4361 consent message before signing anything.",
+    description: "Read the complete T7/T30/T90 terms, early-exit consequences, automatic activation gate, current NAV, risk sentence, AAC headroom, and the exact EIP-4361 consent message before signing anything. T7 carries non-yield perks only.",
     inputSchema: {
       type: "object",
       properties: {
-        tier: { type: "string", enum: ["t30", "t90"] },
+        tier: { type: "string", enum: ["t7", "t30", "t90"] },
         amountRaw: { type: "string", pattern: "^[1-9][0-9]*$", description: "Exact USDC raw units (6 decimals)." },
         consentNonce: { type: "string", minLength: 8, maxLength: 128 },
         publicProfileOptIn: { type: "boolean", default: false, description: "T90 only. Explicitly publish the committed depositor flag while the perk is active." }

@@ -1,6 +1,7 @@
 import { ConfigError, ConflictError } from "./errors.js";
 import { isExternalJob } from "./external-job-lifecycle.js";
 import { decimalToBaseUnits, formatBaseUnits } from "./platform-service-helpers.js";
+import { NON_YIELD_TIER_PERKS_ENABLED_ENV } from "./tier-perks-non-yield.js";
 
 export const DEPOSIT_CLAIM_PRIORITY_ENABLED_ENV = "DEPOSIT_CLAIM_PRIORITY_ENABLED";
 export const PRIORITY_WINDOW_SECONDS_ENV = "PRIORITY_WINDOW_SECONDS";
@@ -13,11 +14,17 @@ export const DEFAULT_PRIORITY_DEPOSIT_THRESHOLD_USDC = "1.0";
 const USDC_DECIMALS = 6;
 
 export function loadDepositClaimPriorityConfig(env = process.env, { logger = console } = {}) {
-  const enabled = parseBoolean(
+  const priorityEnabled = parseBoolean(
     env[DEPOSIT_CLAIM_PRIORITY_ENABLED_ENV],
     false,
     DEPOSIT_CLAIM_PRIORITY_ENABLED_ENV
   );
+  const tierPerksEnabled = parseBoolean(
+    env[NON_YIELD_TIER_PERKS_ENABLED_ENV],
+    false,
+    NON_YIELD_TIER_PERKS_ENABLED_ENV
+  );
+  const enabled = priorityEnabled || tierPerksEnabled;
   const requestedWindowSeconds = positiveInteger(
     env[PRIORITY_WINDOW_SECONDS_ENV],
     DEFAULT_PRIORITY_WINDOW_SECONDS,
@@ -63,6 +70,7 @@ export function loadDepositClaimPriorityConfig(env = process.env, { logger = con
 export function createDepositClaimPriorityPolicy({
   workerExposurePolicy,
   lockedTierPriorityReader,
+  tierPerksPolicy,
   env = process.env,
   config = undefined,
   now = () => new Date(),
@@ -77,6 +85,7 @@ export function createDepositClaimPriorityPolicy({
   return new DepositClaimPriorityPolicy({
     workerExposurePolicy,
     lockedTierPriorityReader,
+    tierPerksPolicy,
     config: resolvedConfig,
     now,
     logger
@@ -87,12 +96,14 @@ export class DepositClaimPriorityPolicy {
   constructor({
     workerExposurePolicy,
     lockedTierPriorityReader,
+    tierPerksPolicy,
     config,
     now = () => new Date(),
     logger = console
   } = {}) {
     this.workerExposurePolicy = workerExposurePolicy;
     this.lockedTierPriorityReader = lockedTierPriorityReader;
+    this.tierPerksPolicy = tierPerksPolicy;
     this.config = config ?? loadDepositClaimPriorityConfig({}, { logger });
     this.now = now;
     this.logger = logger;
@@ -166,7 +177,10 @@ export class DepositClaimPriorityPolicy {
     const depositQualified = capacity?.vestingAvailable !== false
       && vestedRaw >= this.config.thresholdRaw;
     const noOutstandingCreditDraw = creditReadSufficient && outstandingCreditRaw === 0n;
-    const eligible = depositQualified && noOutstandingCreditDraw;
+    const lockedTierPriority = await this.#lockedTierPriority(wallet, capacity);
+    const committedTierQualified = lockedTierPriority.perksActive === true
+      && lockedTierPriority.rank > 0;
+    const eligible = (depositQualified || committedTierQualified) && noOutstandingCreditDraw;
     const qualification = {
       vestedDepositRaw: vestedRaw.toString(),
       thresholdRaw: this.config.thresholdRaw.toString(),
@@ -175,9 +189,10 @@ export class DepositClaimPriorityPolicy {
       outstandingCreditRaw: outstandingCreditRaw.toString(),
       creditPositionAvailable: creditReadSufficient,
       depositQualified,
+      committedTierQualified,
       noOutstandingCreditDraw,
       qualifies: eligible,
-      lockedTierPriority: await this.#lockedTierPriority(wallet)
+      lockedTierPriority
     };
 
     return {
@@ -217,17 +232,31 @@ export class DepositClaimPriorityPolicy {
   }
 
   #qualifiesWith() {
-    return `≥ ${this.config.thresholdUsdc} USDC vested deposit and no outstanding credit draw`;
+    const deposit = `≥ ${this.config.thresholdUsdc} USDC vested deposit and no outstanding credit draw`;
+    return this.tierPerksPolicy?.isEnabled?.()
+      ? `an active 7d+ commitment, or ${deposit}`
+      : deposit;
   }
 
-  async #lockedTierPriority(wallet) {
+  async #lockedTierPriority(wallet, capacity) {
+    const tierPerks = capacity?.tierPerks;
+    if (tierPerks) {
+      return {
+        tier: ["t7", "t30", "t90"].includes(tierPerks.tier) ? tierPerks.tier : "flex",
+        rank: Number.isInteger(tierPerks.priorityClaimAccess?.rank)
+          ? tierPerks.priorityClaimAccess.rank
+          : 0,
+        perksActive: tierPerks.priorityClaimAccess?.eligibleDuringPriorityWindow === true,
+        access: tierPerks.priorityClaimAccess?.access ?? "basic"
+      };
+    }
     if (typeof this.lockedTierPriorityReader !== "function") {
       return { tier: "flex", rank: 0, perksActive: false };
     }
     try {
       const priority = await this.lockedTierPriorityReader(wallet);
       return {
-        tier: ["t30", "t90"].includes(priority?.tier) ? priority.tier : "flex",
+        tier: ["t7", "t30", "t90"].includes(priority?.tier) ? priority.tier : "flex",
         rank: Number.isInteger(priority?.rank) ? priority.rank : 0,
         perksActive: priority?.perksActive === true
       };

@@ -9,6 +9,7 @@ import { buildSiweMessage } from "../auth/siwe.js";
 import { canonicalizeContent } from "../core/canonical-content.js";
 import { ConfigError, ConflictError, NotFoundError, ValidationError } from "../core/errors.js";
 import { decimalToBaseUnits, formatBaseUnits } from "../core/platform-service-helpers.js";
+import { NON_YIELD_TIER_PERKS_ENABLED_ENV } from "../core/tier-perks-non-yield.js";
 
 export const LOCKED_TIERS_ENABLED_ENV = "LOCKED_TIERS_ENABLED";
 export const LOCKED_TIER_PER_WALLET_CAP_USDC_ENV = "LOCKED_TIER_PER_WALLET_CAP_USDC";
@@ -37,10 +38,17 @@ export const LOCKED_TIER_YIELD_UNOBSERVED_TEXT =
   "NAV share eligibility is known, but deployed principal is not available on this surface; read /pool for venue-deployment truth.";
 export const LOCKED_TIER_EARLY_EXIT_TERMS =
   "Request at any time; principal returns via the normal withdrawal path after the standard vesting delay; forfeits: current-period yield share + tier perks (drops to Flex immediately). No principal haircut.";
+export const NON_YIELD_TIER_EARLY_EXIT_TERMS =
+  "Request at any time; principal returns via the normal withdrawal path after the standard vesting delay; forfeits: tier perks (drops to Flex immediately). No principal haircut.";
 export const LOCKED_TIER_RISK_SENTENCE =
   "A locked deposit is eligible for a pro-rata NAV share only while the activation gate is open and carries its pro-rata venue gain or loss; Flex and working balances never leave the platform.";
+export const NON_YIELD_TIER_RISK_SENTENCE =
+  "The locked balance remains in AgentAccountCore and qualifies only for the stated non-yield tier perks; early exit forfeits those perks, never principal.";
 export const LOCKED_TIER_FORFEIT_TERMS_HASH = keccak256(
   toUtf8Bytes(LOCKED_TIER_EARLY_EXIT_TERMS)
+).toLowerCase();
+export const NON_YIELD_TIER_FORFEIT_TERMS_HASH = keccak256(
+  toUtf8Bytes(NON_YIELD_TIER_EARLY_EXIT_TERMS)
 ).toLowerCase();
 
 const ASSET_DECIMALS = 6;
@@ -51,12 +59,19 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
 const QUOTE_TTL_MS = 10 * 60 * 1_000;
 const ALARM_SCOPE = "locked-tiers:withdrawal-consent-alarm";
 const TIERS = Object.freeze({
+  t7: Object.freeze({ termDays: 7, priorityRank: 1 }),
   t30: Object.freeze({ termDays: 30, priorityRank: 1 }),
   t90: Object.freeze({ termDays: 90, priorityRank: 2 })
 });
+const NON_YIELD_PRIORITY_RANK = Object.freeze({ flex: 0, t7: 1, t30: 2, t90: 3 });
 
 export function loadLockedTierConfig(env = process.env, { logger = console } = {}) {
   const enabled = parseBoolean(env[LOCKED_TIERS_ENABLED_ENV], false, LOCKED_TIERS_ENABLED_ENV);
+  const tierPerksEnabled = parseBoolean(
+    env[NON_YIELD_TIER_PERKS_ENABLED_ENV],
+    false,
+    NON_YIELD_TIER_PERKS_ENABLED_ENV
+  );
   const requestedRaw = parsePositiveUsdc(
     env[LOCKED_TIER_PER_WALLET_CAP_USDC_ENV] ?? DEFAULT_PER_WALLET_CAP_USDC,
     LOCKED_TIER_PER_WALLET_CAP_USDC_ENV
@@ -113,6 +128,7 @@ export function loadLockedTierConfig(env = process.env, { logger = console } = {
   }
   return Object.freeze({
     enabled,
+    tierPerksEnabled,
     perWalletCapRaw,
     perWalletCapUsdc: formatBaseUnits(perWalletCapRaw, ASSET_DECIMALS),
     cohortCapRaw,
@@ -213,11 +229,14 @@ export function lockedTierYieldStatusText({ gateOpen, deployedPrincipalRaw } = {
     : LOCKED_TIER_YIELD_ELIGIBLE_NOT_DEPLOYED_TEXT;
 }
 
-export function lockedTierPriority(tier) {
+export function lockedTierPriority(tier, { expanded = false } = {}) {
   const normalized = String(tier ?? "flex").toLowerCase();
+  const knownTier = TIERS[normalized] ? normalized : "flex";
   return {
-    tier: TIERS[normalized] ? normalized : "flex",
-    rank: TIERS[normalized]?.priorityRank ?? 0
+    tier: knownTier,
+    rank: expanded
+      ? NON_YIELD_PRIORITY_RANK[knownTier]
+      : TIERS[knownTier]?.priorityRank ?? 0
   };
 }
 
@@ -263,17 +282,19 @@ export class LockedTierService {
     this.#assertNewLocksEnabled();
     assertOnlyFields(input, new Set(["tier", "amountRaw", "consentNonce", "publicProfileOptIn"]));
     const wallet = normalizeWalletAddress(walletInput);
-    const tier = normalizeTier(input.tier);
+    const tier = normalizeTier(input.tier, { allowT7: this.config.tierPerksEnabled === true });
     const tierDefinition = TIERS[tier];
     const requested = exactPositiveRaw(input.amountRaw, "amountRaw");
     const consentNonce = consentNonceValue(input.consentNonce);
     const publicProfileOptIn = input.publicProfileOptIn === true;
+    const earlyExitTerms = earlyExitTermsForTier(tier);
+    const riskSentence = riskSentenceForTier(tier);
     if (input.publicProfileOptIn !== undefined && typeof input.publicProfileOptIn !== "boolean") {
       throw new ValidationError("publicProfileOptIn must be a boolean.", { field: "publicProfileOptIn" });
     }
     if (tier !== "t90" && publicProfileOptIn) {
       throw new ValidationError(
-        "The committed depositor public-profile flag is a T90 perk and cannot be selected for T30.",
+        "The committed depositor public-profile flag is a T90 perk and cannot be selected for another tier.",
         { field: "publicProfileOptIn", tier }
       );
     }
@@ -309,9 +330,9 @@ export class LockedTierService {
       consentNonce,
       issuedAt: issuedAt.toISOString(),
       quoteExpiresAt: quoteExpiresAt.toISOString(),
-      forfeitTermsHash: LOCKED_TIER_FORFEIT_TERMS_HASH,
-      earlyExitTerms: LOCKED_TIER_EARLY_EXIT_TERMS,
-      riskSentence: LOCKED_TIER_RISK_SENTENCE,
+      forfeitTermsHash: forfeitTermsHashForTier(tier),
+      earlyExitTerms,
+      riskSentence,
       publicProfileOptIn,
       fundsMovement: "none — the ledger encumbers existing AAC liquid",
       activationGate: gate,
@@ -324,13 +345,13 @@ export class LockedTierService {
       product: "locked deposit",
       terms,
       termsHash,
-      tierTerms: tierTerms(tier),
+      tierTerms: tierTerms(tier, { expanded: this.config.tierPerksEnabled === true }),
       activationGate: gate,
       nav: pool.nav,
       venueMark: pool.venueMark,
       markedSharePrice: pool.markedSharePrice,
       yieldAttribution: pool.yieldAttribution,
-      riskSentence: LOCKED_TIER_RISK_SENTENCE,
+      riskSentence,
       balance: {
         liquid: amount(liquidRaw),
         alreadyEncumbered: amount(encumberedRaw),
@@ -504,7 +525,7 @@ export class LockedTierService {
         exitRequestedAt.getTime() + this.vestingHours * 60 * 60 * 1_000
       ).toISOString(),
       forfeiture: {
-        yieldShare: "current_period",
+        yieldShare: entry.tier === "t7" ? "not_applicable" : "current_period",
         perks: "immediate",
         principalHaircutRaw: "0",
         penaltyFeeRaw: "0"
@@ -517,7 +538,7 @@ export class LockedTierService {
       consequence: {
         tier: "flex",
         perks: "forfeited immediately",
-        yieldShare: "current period forfeited",
+        yieldShare: entry.tier === "t7" ? "not_applicable" : "current period forfeited",
         principal: "returns through the normal withdrawal path after the standard vesting delay",
         releaseAt: updated.releaseAt,
         principalHaircutRaw: "0",
@@ -541,7 +562,9 @@ export class LockedTierService {
     const t90Suspended = highest?.tier === "t90"
       && (creditOutstanding || !creditPositionReadable);
     const effectiveTier = t90Suspended ? "flex" : highest?.tier ?? "flex";
-    const priority = lockedTierPriority(effectiveTier);
+    const priority = lockedTierPriority(effectiveTier, {
+      expanded: this.config.tierPerksEnabled === true
+    });
     const allEntries = await this.#currentEntries();
     const activationGate = lockedTierActivationState(activeLocks(allEntries), this.now(), {
       deployedPrincipalRaw
@@ -577,7 +600,7 @@ export class LockedTierService {
 
   async getPoolTelemetry(walletInput = undefined, { deployedPrincipalRaw = undefined } = {}) {
     const entries = await this.#currentEntries();
-    const cohort = activeLocks(entries);
+    const cohort = yieldEligibleLocks(entries);
     const activationGate = lockedTierActivationState(cohort, this.now(), {
       deployedPrincipalRaw
     });
@@ -602,8 +625,16 @@ export class LockedTierService {
       status: this.config.enabled ? "available" : "flag_off",
       enabled: this.config.enabled,
       product: "locked deposit",
-      tiers: [tierTerms("t30"), tierTerms("t90")],
-      priority: "T90 ranks above T30 ranks above Flex inside the deposit-claim-priority window.",
+      tiers: this.config.tierPerksEnabled === true
+        ? [
+            tierTerms("t7", { expanded: true }),
+            tierTerms("t30", { expanded: true }),
+            tierTerms("t90", { expanded: true })
+          ]
+        : [tierTerms("t30"), tierTerms("t90")],
+      priority: this.config.tierPerksEnabled === true
+        ? "T90 first look ranks above T30 enhanced priority, T7 priority, and Flex basic access inside the deposit-claim-priority window."
+        : "T90 ranks above T30 ranks above Flex inside the deposit-claim-priority window.",
       activationGate: telemetry.activationGate,
       yieldStatusText: telemetry.yieldStatusText,
       endpoints: {
@@ -807,7 +838,7 @@ export class LockedTierService {
   }
 
   #assertTermsBinding(wallet, terms) {
-    const tier = normalizeTier(terms.tier);
+    const tier = normalizeTier(terms.tier, { allowT7: this.config.tierPerksEnabled === true });
     const issuedAt = Date.parse(terms.issuedAt);
     const quoteExpiresAt = Date.parse(terms.quoteExpiresAt);
     const asset = getAddress(terms.asset);
@@ -818,9 +849,9 @@ export class LockedTierService {
       || Number(terms.assetDecimals) !== ASSET_DECIMALS
       || exactPositiveRaw(terms.amountRaw, "terms.amountRaw") <= 0n
       || Number(terms.termDays) !== TIERS[tier].termDays
-      || terms.forfeitTermsHash !== LOCKED_TIER_FORFEIT_TERMS_HASH
-      || terms.earlyExitTerms !== LOCKED_TIER_EARLY_EXIT_TERMS
-      || terms.riskSentence !== LOCKED_TIER_RISK_SENTENCE
+      || terms.forfeitTermsHash !== forfeitTermsHashForTier(tier)
+      || terms.earlyExitTerms !== earlyExitTermsForTier(tier)
+      || terms.riskSentence !== riskSentenceForTier(tier)
       || (tier !== "t90" && terms.publicProfileOptIn === true)
       || !Number.isFinite(issuedAt)
       || !Number.isFinite(quoteExpiresAt)
@@ -845,8 +876,8 @@ export class LockedTierService {
       || consent.terms.tier !== entry.tier
       || String(consent.terms.amountRaw) !== String(entry.amountRaw)
       || Number(consent.terms.termDays) !== Number(entry.termDays)
-      || consent.terms.forfeitTermsHash !== LOCKED_TIER_FORFEIT_TERMS_HASH
-      || consent.terms.earlyExitTerms !== LOCKED_TIER_EARLY_EXIT_TERMS
+      || consent.terms.forfeitTermsHash !== forfeitTermsHashForTier(entry.tier)
+      || consent.terms.earlyExitTerms !== earlyExitTermsForTier(entry.tier)
     ) return false;
     const expectedMessage = this.#consentMessage(consent.terms, termsHash);
     if (expectedMessage !== consent.consentMessage) return false;
@@ -885,18 +916,27 @@ export function hashLockedTierTerms(terms) {
   return keccak256(toUtf8Bytes(canonicalizeContent(terms))).toLowerCase();
 }
 
-function tierTerms(tier) {
+function tierTerms(tier, { expanded = false } = {}) {
   const definition = TIERS[tier];
+  const perks = tier === "t90"
+    ? [
+        "first-look priority claim access",
+        "credit qualification with better-terms class",
+        "committed depositor flag with explicit opt-in"
+      ]
+    : tier === "t30"
+      ? ["enhanced priority claim access", "credit qualification"]
+      : ["priority claim access"];
   return {
     tier,
     product: "locked deposit",
     termDays: definition.termDays,
-    priorityRank: definition.priorityRank,
-    perks: tier === "t90"
-      ? ["top priority", "committed depositor flag with explicit opt-in"]
-      : ["priority above Flex"],
-    yield: "pro-rata NAV share only when the automatic activation gate is open",
-    earlyExit: LOCKED_TIER_EARLY_EXIT_TERMS
+    priorityRank: expanded ? NON_YIELD_PRIORITY_RANK[tier] : definition.priorityRank,
+    perks,
+    yield: tier === "t7"
+      ? "not included in the non-yield tier-perks rollout"
+      : "pro-rata NAV share only when the automatic activation gate is open",
+    earlyExit: earlyExitTermsForTier(tier)
   };
 }
 
@@ -976,10 +1016,13 @@ function parseNonNegativeInteger(value, name) {
   return parsed;
 }
 
-function normalizeTier(value) {
+function normalizeTier(value, { allowT7 = false } = {}) {
   const tier = String(value ?? "").trim().toLowerCase();
-  if (!TIERS[tier]) {
-    throw new ValidationError("tier must be t30 or t90.", { field: "tier", requestedValue: value });
+  if (!TIERS[tier] || (tier === "t7" && !allowT7)) {
+    throw new ValidationError(
+      allowT7 ? "tier must be t7, t30, or t90." : "tier must be t30 or t90.",
+      { field: "tier", requestedValue: value }
+    );
   }
   return tier;
 }
@@ -1052,7 +1095,7 @@ function activationCohort(entries, observedAt) {
   const observedAtMs = observedAt instanceof Date
     ? observedAt.getTime()
     : Date.parse(String(observedAt ?? ""));
-  const active = entries.filter((entry) => entry?.status === "active");
+  const active = entries.filter((entry) => entry?.status === "active" && entry?.tier !== "t7");
   if (!Number.isFinite(observedAtMs)) {
     return {
       totalLockedRaw: 0n,
@@ -1108,6 +1151,22 @@ function activeLocks(entries) {
   return entries.filter((entry) => entry.status === "active");
 }
 
+function yieldEligibleLocks(entries) {
+  return activeLocks(entries).filter((entry) => entry.tier !== "t7");
+}
+
+function earlyExitTermsForTier(tier) {
+  return tier === "t7" ? NON_YIELD_TIER_EARLY_EXIT_TERMS : LOCKED_TIER_EARLY_EXIT_TERMS;
+}
+
+function forfeitTermsHashForTier(tier) {
+  return tier === "t7" ? NON_YIELD_TIER_FORFEIT_TERMS_HASH : LOCKED_TIER_FORFEIT_TERMS_HASH;
+}
+
+function riskSentenceForTier(tier) {
+  return tier === "t7" ? NON_YIELD_TIER_RISK_SENTENCE : LOCKED_TIER_RISK_SENTENCE;
+}
+
 function sumEncumbered(entries) {
   return entries
     .filter(isEncumbered)
@@ -1124,7 +1183,7 @@ function isEncumbered(entry) {
 }
 
 function compareTierDescending(left, right) {
-  return (TIERS[right.tier]?.priorityRank ?? 0) - (TIERS[left.tier]?.priorityRank ?? 0);
+  return (TIERS[right.tier]?.termDays ?? 0) - (TIERS[left.tier]?.termDays ?? 0);
 }
 
 function amount(raw) {
