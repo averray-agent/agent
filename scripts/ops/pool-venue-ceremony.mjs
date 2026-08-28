@@ -21,11 +21,28 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { KmsSigner } from "../../mcp-server/src/blockchain/kms-signer.js";
 import { createCeremonyRpcContext } from "./ceremony-rpc.mjs";
+import { importCeremonyModule } from "./ceremony-module-loader.mjs";
+
+const { KmsSigner } = await importCeremonyModule({
+  label: "KMS signer",
+  candidates: [
+    new URL("../../mcp-server/src/blockchain/kms-signer.js", import.meta.url),
+    "file:///app/src/blockchain/kms-signer.js"
+  ]
+});
+const {
+  buildKmsCredentialsProvider,
+  PROFILE_BLOCKCHAIN_SIGNER
+} = await importCeremonyModule({
+  label: "Roles Anywhere credentials provider",
+  candidates: [
+    new URL("../../mcp-server/src/services/aws-credentials.js", import.meta.url),
+    "file:///app/src/services/aws-credentials.js"
+  ]
+});
 
 const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(here, "..", "..");
 
 export const PROOF_RETURN_WINDOW_SECONDS = 48 * 60 * 60;
 // Packet 6 originally said 14 days; Codex's gate finding (recorded in the
@@ -152,6 +169,36 @@ export function buildPoolObservabilityUrl(url, poolAddress) {
   return resolved.toString();
 }
 
+export function deploymentManifestPaths(profile, moduleUrl = import.meta.url) {
+  const moduleDirectory = dirname(fileURLToPath(moduleUrl));
+  return [
+    resolve(moduleDirectory, "..", "..", "deployments", `${profile}.json`),
+    resolve("/deployments", `${profile}.json`),
+  ];
+}
+
+export async function readDeploymentManifest(profile, {
+  paths = deploymentManifestPaths(profile),
+  readFileImpl = readFile,
+} = {}) {
+  const attempted = [];
+  for (const path of paths) {
+    attempted.push(path);
+    try {
+      return JSON.parse(await readFileImpl(path, "utf8"));
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
+  }
+  const error = new Error(
+    `ceremony_manifest_resolution_failed: deployments/${profile}.json was not found. `
+    + `Attempted paths: ${attempted.join(", ")}.`,
+  );
+  error.code = "ceremony_manifest_resolution_failed";
+  throw error;
+}
+
 export function assertExpectedSigner(resolvedSigner, expectedSigner) {
   let resolved;
   let expected;
@@ -276,18 +323,26 @@ function positiveBigInt(value, flag) {
   return parsed;
 }
 
-async function resolveSigner(args, provider) {
+export async function resolveSigner(args, provider, {
+  env = process.env,
+  KmsSignerClass = KmsSigner,
+  credentialsProviderBuilder = buildKmsCredentialsProvider,
+} = {}) {
   if (!args.expectedSigner) throw new Error("--expected-signer is mandatory; the ceremony never guesses its operator.");
   if (args.commit && !args.useKms) throw new Error("--commit requires --use-kms; raw private keys are not accepted.");
   if (!args.useKms) {
     const address = assertExpectedSigner(args.expectedSigner, args.expectedSigner);
     return { address, signer: null, backend: "expected-signer (dry-run only)" };
   }
-  const keyId = String(process.env.KMS_KEY_ID ?? "").trim();
-  const region = String(process.env.AWS_REGION ?? "").trim();
+  const keyId = String(env.KMS_KEY_ID ?? "").trim();
+  const region = String(env.AWS_REGION ?? "").trim();
   if (!keyId) throw new Error("--use-kms requires KMS_KEY_ID.");
   if (!region) throw new Error("--use-kms requires AWS_REGION.");
-  const signer = new KmsSigner({ keyId, region, provider });
+  const credentialsProvider = credentialsProviderBuilder({
+    profile: PROFILE_BLOCKCHAIN_SIGNER,
+    env,
+  });
+  const signer = new KmsSignerClass({ keyId, region, provider, credentialsProvider });
   const address = assertExpectedSigner(await signer.getAddress(), args.expectedSigner);
   return { address, signer, backend: "aws-kms" };
 }
@@ -417,7 +472,7 @@ async function main() {
   if (!args.profile) throw new Error("--profile is mandatory; a money-moving script never guesses its chain.");
   if (args.profile !== "mainnet") throw new Error("Packet 6 is a mainnet ceremony; only --profile mainnet is accepted.");
   if (args.commit && !args.useKms) throw new Error("--commit requires --use-kms; raw private keys are not accepted.");
-  const deployments = JSON.parse(await readFile(resolve(repoRoot, "deployments", `${args.profile}.json`), "utf8"));
+  const deployments = await readDeploymentManifest(args.profile);
   const { poolAddress, source: poolAddressSource } = resolvePoolTarget({
     requestedPool: args.pool,
     manifestPool: deployments.contracts?.depositPool,

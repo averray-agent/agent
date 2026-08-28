@@ -32,6 +32,13 @@ RUN npm install --omit=dev
 
 COPY mcp-server/src ./src
 
+# The money-moving venue ceremony must authenticate through the backend
+# container's Roles Anywhere profile. Ship only the driver and its read/RPC
+# helpers; it remains dry-run by default and exposes no new service surface.
+COPY scripts/ops/ceremony-module-loader.mjs ./scripts/ops/ceremony-module-loader.mjs
+COPY scripts/ops/ceremony-rpc.mjs ./scripts/ops/ceremony-rpc.mjs
+COPY scripts/ops/pool-venue-ceremony.mjs ./scripts/ops/pool-venue-ceremony.mjs
+
 # Runtime data read from /deployments by code under ./src.
 #
 # The image layout differs from a repo checkout: ./src sits at the image root,
