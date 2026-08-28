@@ -30,6 +30,7 @@ test("blind-tester marketing copy exposes copyable proof links and honest loadin
     assert.match(source, /<noscript>/u, `${name} shell must remain useful without JavaScript`);
     assert.ok(source.includes(endpoint), `${name} shell must expose its raw JSON endpoint`);
   }
+  assert.ok(verify.includes("https://api.averray.com/.well-known/x402"));
 
   assert.match(footer, /title="GitHub">Docs \(GitHub\) ↗<\/a>/u);
   assert.match(footer, /rel="noopener"/u);
@@ -64,13 +65,14 @@ test("QA8 marketing exposes the canonical MCP install door and copy-safe snippet
 });
 
 test("QA3-A marketing wayfinding names real doors, live reads, and outbound proof surfaces", async () => {
-  const [home, agents, builders, schemas, verify, proofToPay, transparency, trust, footer, consoleStream] =
+  const [home, agents, builders, schemas, verify, verifyReader, proofToPay, transparency, trust, footer, consoleStream] =
     await Promise.all([
       readFile(new URL("marketing/src/pages/index.astro", REPO_ROOT), "utf8"),
       readFile(new URL("marketing/src/pages/agents.astro", REPO_ROOT), "utf8"),
       readFile(new URL("marketing/src/pages/builders.astro", REPO_ROOT), "utf8"),
       readFile(new URL("marketing/src/pages/schemas.astro", REPO_ROOT), "utf8"),
       readFile(new URL("marketing/src/pages/verify.astro", REPO_ROOT), "utf8"),
+      readFile(new URL("marketing/public/verify-reader.js", REPO_ROOT), "utf8"),
       readFile(new URL("marketing/src/pages/proof-to-pay.astro", REPO_ROOT), "utf8"),
       readFile(new URL("marketing/src/pages/transparency.astro", REPO_ROOT), "utf8"),
       readFile(new URL("marketing/src/pages/trust.astro", REPO_ROOT), "utf8"),
@@ -101,12 +103,18 @@ test("QA3-A marketing wayfinding names real doors, live reads, and outbound proo
   assert.match(home, /posting settles on proof/iu);
   assert.doesNotMatch(home, /marketplace/iu);
 
-  for (const [name, source] of [["verify", verify], ["proof-to-pay", proofToPay]]) {
+  for (const [name, source] of [["proof-to-pay", proofToPay]]) {
     assert.match(source, /HTTP\/MCP with payment authorization/u, `${name} must name the machine door`);
     assert.match(source, /wallet sign-in/u, `${name} must name the operator door`);
     assert.match(source, /\/work/u, `${name} must name the human door`);
     assert.match(source, /\/builders\/#glossary/u, `${name} must link the glossary`);
   }
+
+  assert.ok(verify.includes("https://api.averray.com/.well-known/x402"), "Verify must expose live payment discovery");
+  assert.ok(verify.includes("https://api.averray.com/verify/profiles"), "Verify must expose profiles and worked examples");
+  assert.match(verify, /Verify is the paid door; worker tools stay free\./u);
+  assert.match(verifyReader, /payload\.resources\[0\]/u, "Verify pricing must parse the first live resource");
+  assert.match(verifyReader, /resource\.accepts\[0\]/u, "Verify pricing must parse its first accepted requirement");
 
     for (const term of ["SIWE / EIP-4361", "EIP-3009", "x402", "Waiver-eligible", "Co-signer / multisig"]) {
     assert.ok(builders.includes(term), `builders glossary must define ${term}`);
@@ -115,7 +123,6 @@ test("QA3-A marketing wayfinding names real doors, live reads, and outbound proo
   assert.match(builders, /starter \/ pro \/ elite claim tier/u);
   assert.match(builders, /apprentice \/ journeyman \/ expert \/ master reputation tier/u);
   assert.match(proofToPay, /https:\/\/app\.averray\.com\/poster\//u);
-  assert.match(verify, /https:\/\/app\.averray\.com\/runs\//u);
 
   assert.match(builders, /id="install"/u);
   assert.match(builders, /Add to Cursor/u);

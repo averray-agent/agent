@@ -14,6 +14,7 @@ const FORBIDDEN_TERMS = Object.freeze([
   ["certification", /certification/iu],
   ["AI agent verification", /AI agent verification/iu],
   ["trusted by", /trusted by/iu],
+  ["trustless", /\btrustless\b/iu],
   ["customers", /customers/iu],
   ["testimonial", /testimonial/iu],
   ["revenue", /revenue/iu]
@@ -53,10 +54,19 @@ export function assertMarketingContentDiscipline(pages) {
 
   const verify = pages["site/verify/index.html"];
   if (!/never billed/iu.test(verify)) fail("site/verify/index.html: required never billed disclosure is missing");
+  for (const url of [
+    "https://api.averray.com/.well-known/x402",
+    "https://api.averray.com/verify/profiles"
+  ]) {
+    if (!verify.includes(url)) fail(`site/verify/index.html: required live API door is missing: ${url}`);
+  }
   const receiptBlock = verify.match(/<section\b[^>]*data-receipt-proof[^>]*>([\s\S]*?)<\/section>/iu)?.[1];
   if (!receiptBlock) fail("site/verify/index.html: receipt proof block is missing");
-  if (!/demonstration/iu.test(receiptBlock)) {
-    fail("site/verify/index.html: receipt proof block must label the demonstration");
+  if (!/href="\/receipts\/"/iu.test(receiptBlock)) {
+    fail("site/verify/index.html: receipt proof block must link the public receipt route");
+  }
+  if (/href="\/receipts\/0x/iu.test(receiptBlock)) {
+    fail("site/verify/index.html: paid-run proof must not be replaced by a demonstration receipt");
   }
 }
 
