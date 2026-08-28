@@ -14,6 +14,7 @@
 import {
   Contract,
   Interface,
+  ZeroAddress,
   getAddress,
 } from "ethers";
 import { readFile } from "node:fs/promises";
@@ -75,6 +76,7 @@ export function parseArgs(argv) {
   const args = {
     command: argv[0] && !argv[0].startsWith("--") ? argv[0] : undefined,
     profile: undefined,
+    pool: undefined,
     assets: undefined,
     returnBy: undefined,
     deploymentKind: "proof",
@@ -95,6 +97,7 @@ export function parseArgs(argv) {
       return value;
     };
     if (arg === "--profile") args.profile = next();
+    else if (arg === "--pool") args.pool = next();
     else if (arg === "--assets") args.assets = next();
     else if (arg === "--return-by") args.returnBy = next();
     else if (arg === "--deployment-kind") args.deploymentKind = next();
@@ -109,6 +112,44 @@ export function parseArgs(argv) {
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return args;
+}
+
+export function resolvePoolTarget({ requestedPool, manifestPool, log = console.log }) {
+  let poolAddress;
+  try {
+    poolAddress = getAddress(requestedPool ?? manifestPool);
+  } catch {
+    throw new Error(`${requestedPool === undefined ? "Manifest depositPool" : "--pool"} must be a 20-byte EVM address.`);
+  }
+  const source = requestedPool === undefined ? "manifest contracts.depositPool" : "explicit --pool";
+  log(`POOL TARGET: ${poolAddress} (${source})`);
+  return { poolAddress, source };
+}
+
+export function assertVenueAdapterBound(venueAdapter, poolAddress) {
+  let resolvedAdapter;
+  try {
+    resolvedAdapter = getAddress(venueAdapter);
+  } catch {
+    throw new Error(`venue_adapter_unreadable: pool ${poolAddress} returned an invalid venueAdapter address.`);
+  }
+  if (resolvedAdapter === ZeroAddress) {
+    const error = new Error(`venue_adapter_not_bound: pool ${getAddress(poolAddress)} has venueAdapter() == address(0); refusing before building a ceremony plan.`);
+    error.code = "venue_adapter_not_bound";
+    throw error;
+  }
+  return resolvedAdapter;
+}
+
+export function buildPoolObservabilityUrl(url, poolAddress) {
+  let resolved;
+  try {
+    resolved = new URL(url);
+  } catch {
+    throw new Error("--observability-url must be an absolute URL.");
+  }
+  resolved.searchParams.set("pool", getAddress(poolAddress));
+  return resolved.toString();
 }
 
 export function assertExpectedSigner(resolvedSigner, expectedSigner) {
@@ -218,11 +259,12 @@ export function assertAccountingPostcondition({
 function usage() {
   return [
     "Usage:",
-    "  node scripts/ops/pool-venue-ceremony.mjs deploy --profile mainnet --assets 2000000 --return-by <unix> --deployment-kind proof --observability-url <internal-url> --expected-signer 0x... [--use-kms] [--commit]",
-    "  node scripts/ops/pool-venue-ceremony.mjs settle --profile mainnet (--deployment-id <id> | --recall-id <id>) --expected-signer 0x... [--use-kms] [--commit]",
-    "  node scripts/ops/pool-venue-ceremony.mjs recall --profile mainnet --deployment-id <id> --assets 500000 --expected-signer 0x... [--use-kms] [--commit]",
+    "  node scripts/ops/pool-venue-ceremony.mjs deploy --profile mainnet [--pool 0x...] --assets 2000000 --return-by <unix> --deployment-kind proof --observability-url <internal-url> --expected-signer 0x... [--use-kms] [--commit]",
+    "  node scripts/ops/pool-venue-ceremony.mjs settle --profile mainnet [--pool 0x...] (--deployment-id <id> | --recall-id <id>) --expected-signer 0x... [--use-kms] [--commit]",
+    "  node scripts/ops/pool-venue-ceremony.mjs recall --profile mainnet [--pool 0x...] --deployment-id <id> --assets 500000 --expected-signer 0x... [--use-kms] [--commit]",
     "",
     "Dry-run is the default. --commit requires --use-kms, KMS_KEY_ID, and AWS_REGION.",
+    "--pool is required when targeting any pool other than manifest contracts.depositPool.",
     "No private-key signer path exists. --expected-signer is mandatory in every mode.",
   ].join("\n");
 }
@@ -376,11 +418,14 @@ async function main() {
   if (args.profile !== "mainnet") throw new Error("Packet 6 is a mainnet ceremony; only --profile mainnet is accepted.");
   if (args.commit && !args.useKms) throw new Error("--commit requires --use-kms; raw private keys are not accepted.");
   const deployments = JSON.parse(await readFile(resolve(repoRoot, "deployments", `${args.profile}.json`), "utf8"));
+  const { poolAddress, source: poolAddressSource } = resolvePoolTarget({
+    requestedPool: args.pool,
+    manifestPool: deployments.contracts?.depositPool,
+  });
   if (!args.expectedSigner) throw new Error("--expected-signer is mandatory; the ceremony never guesses its operator.");
   // The manifest identity check is deliberately before RPC creation. The live
   // immutable operator is checked again after the chain-id-gated provider is up.
   assertExpectedSigner(args.expectedSigner, deployments.verifier);
-  const poolAddress = getAddress(deployments.contracts?.depositPool);
   const manifestAdapter = getAddress(deployments.contracts?.hydrationDepositPoolAdapter);
   const rpc = await createCeremonyRpcContext({
     manifest: deployments,
@@ -394,6 +439,7 @@ async function main() {
   if (!latest) throw new Error("Could not read the live chain head.");
   const before = await readPoolState(pool, latest.number);
   assertExpectedSigner(before.operator, args.expectedSigner);
+  assertVenueAdapterBound(before.venueAdapter, poolAddress);
   if (before.venueAdapter !== manifestAdapter) {
     throw new Error(`Pool venueAdapter ${before.venueAdapter} != manifest ${manifestAdapter}.`);
   }
@@ -410,6 +456,7 @@ async function main() {
     chainId: rpc.chainId,
     chainHead: { number: latest.number, hash: latest.hash, timestamp: latest.timestamp },
     pool: poolAddress,
+    poolAddressSource,
     venueAdapter: before.venueAdapter,
     signer: identity.address,
     signerBackend: identity.backend,
@@ -435,7 +482,8 @@ async function main() {
       contractMaxReturnSeconds: before.notice7Days,
       deploymentKind: args.deploymentKind,
     });
-    const observability = await fetchObservability(args.observabilityUrl);
+    const observabilityUrl = buildPoolObservabilityUrl(args.observabilityUrl, poolAddress);
+    const observability = await fetchObservability(observabilityUrl);
     assertObservability(observability, { poolAddress, chainTimestamp: BigInt(latest.timestamp) });
     if (before.activeVenueDeploymentId !== 0n) throw new Error(`Active venue deployment ${before.activeVenueDeploymentId} already exists.`);
     data = poolInterface.encodeFunctionData("deployToVenue", [assets, returnBy]);
@@ -449,7 +497,7 @@ async function main() {
       deploymentKind: args.deploymentKind,
       predictedDeploymentId: before.nextVenueDeploymentId,
       observability: {
-        url: args.observabilityUrl,
+        url: observabilityUrl,
         block: observability.block,
         reconciled: observability.reconciled,
         flowsStatus: observability.flows.status,

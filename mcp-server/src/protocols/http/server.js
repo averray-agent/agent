@@ -1072,7 +1072,7 @@ const server = createServer(async (request, response) => {
     if (await handleBankLaneFeedRoute({ request, response, pathname })) {
       return;
     }
-    if (await handleDepositPoolObservabilityRoute({ request, response, pathname })) {
+    if (await handleDepositPoolObservabilityRoute({ request, response, url, pathname })) {
       return;
     }
     if (await handleCreditPoolObservabilityRoute({ request, response, pathname })) {

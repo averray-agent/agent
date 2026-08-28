@@ -11,11 +11,16 @@ import {
   assertDeployAdmission,
   assertExpectedSigner,
   assertObservability,
+  assertVenueAdapterBound,
+  buildPoolObservabilityUrl,
   parseArgs,
+  resolvePoolTarget,
 } from "./pool-venue-ceremony.mjs";
 
 const OPERATOR = "0x5a6836c6D4d293F6E5377E6c28054F4171915813";
 const POOL = "0xCCF5FDF3108AF8e693F28bb9326A573d9dA0F476";
+const LEGACY_POOL = "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30";
+const VENUE_ADAPTER = "0xE2801E6C640e0180798912649fD567E1Ea459a35";
 const here = dirname(fileURLToPath(import.meta.url));
 const scriptPath = resolve(here, "pool-venue-ceremony.mjs");
 
@@ -39,6 +44,7 @@ test("parseArgs keeps dry-run as the default and parses each ceremony leg", () =
   assert.deepEqual(parseArgs(["deploy", "--profile", "mainnet", "--assets", "2000000"]), {
     command: "deploy",
     profile: "mainnet",
+    pool: undefined,
     assets: "2000000",
     returnBy: undefined,
     deploymentKind: "proof",
@@ -51,7 +57,28 @@ test("parseArgs keeps dry-run as the default and parses each ceremony leg", () =
     help: false,
   });
   assert.equal(parseArgs(["settle", "--recall-id", "3", "--commit", "--use-kms"]).recallId, "3");
-  assert.equal(parseArgs(["recall", "--deployment-id", "2", "--assets", "500000"]).command, "recall");
+  assert.equal(parseArgs(["recall", "--pool", LEGACY_POOL, "--deployment-id", "2", "--assets", "500000"]).pool, LEGACY_POOL);
+});
+
+test("omitted --pool resolves and logs the manifest default", () => {
+  const lines = [];
+  const resolved = resolvePoolTarget({
+    manifestPool: POOL,
+    requestedPool: undefined,
+    log: (line) => lines.push(line),
+  });
+
+  assert.equal(resolved.poolAddress, POOL);
+  assert.notEqual(resolved.poolAddress, LEGACY_POOL);
+  assert.deepEqual(lines, [`POOL TARGET: ${POOL} (manifest contracts.depositPool)`]);
+});
+
+test("venue_adapter_not_bound refuses before a ceremony plan can be built", () => {
+  assert.throws(
+    () => assertVenueAdapterBound("0x0000000000000000000000000000000000000000", POOL),
+    (error) => error?.code === "venue_adapter_not_bound" && /before building a ceremony plan/u.test(error.message),
+  );
+  assert.equal(assertVenueAdapterBound(VENUE_ADAPTER, LEGACY_POOL), VENUE_ADAPTER);
 });
 
 test("wrong signer refuses before ceremony reads", () => {
@@ -149,7 +176,7 @@ test("standing policy still refuses honestly if the contract ever tightens below
   );
 });
 
-test("observability must be live, current-generation, reconciled, and event-readable", () => {
+test("wrong-pool or missing observability snapshots remain refused by mutation", () => {
   const base = {
     available: true,
     pool: POOL,
@@ -161,6 +188,37 @@ test("observability must be live, current-generation, reconciled, and event-read
     poolAddress: POOL,
     chainTimestamp: 1_800_000_100n,
   }));
+  assert.throws(() => assertObservability(undefined, {
+    poolAddress: POOL,
+    chainTimestamp: 1_800_000_100n,
+  }), /unavailable \(no snapshot\)/u);
+  assert.throws(() => assertObservability({ ...base, pool: OPERATOR }, {
+    poolAddress: POOL,
+    chainTimestamp: 1_800_000_100n,
+  }), /different pool generation/u);
+});
+
+test("matching legacy pool snapshot passes the unchanged observability guard", () => {
+  assert.doesNotThrow(() => assertObservability({
+    available: true,
+    pool: LEGACY_POOL,
+    reconciled: true,
+    flows: { status: "ok" },
+    block: { timestamp: 1_800_000_000 },
+  }, {
+    poolAddress: LEGACY_POOL,
+    chainTimestamp: 1_800_000_100n,
+  }));
+});
+
+test("observability still requires reconciliation and event-readable flow", () => {
+  const base = {
+    available: true,
+    pool: POOL,
+    reconciled: true,
+    flows: { status: "ok" },
+    block: { timestamp: 1_800_000_000 },
+  };
   assert.throws(() => assertObservability({ ...base, reconciled: false }, {
     poolAddress: POOL,
     chainTimestamp: 1_800_000_100n,
@@ -169,10 +227,13 @@ test("observability must be live, current-generation, reconciled, and event-read
     poolAddress: POOL,
     chainTimestamp: 1_800_000_100n,
   }), /event flow is unavailable/u);
-  assert.throws(() => assertObservability({ ...base, pool: OPERATOR }, {
-    poolAddress: POOL,
-    chainTimestamp: 1_800_000_100n,
-  }), /different pool generation/u);
+});
+
+test("observability request is explicitly bound to the resolved pool", () => {
+  assert.equal(
+    buildPoolObservabilityUrl("http://127.0.0.1:8787/monitor/deposit-pool?pool=wrong", LEGACY_POOL),
+    `http://127.0.0.1:8787/monitor/deposit-pool?pool=${LEGACY_POOL}`,
+  );
 });
 
 test("postcondition accepts the exact principal-cost reduction and reconciliation", () => {
