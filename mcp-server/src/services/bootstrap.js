@@ -6,6 +6,7 @@ import {
 } from "../core/claim-economics.js";
 import { createWorkerExposurePolicy } from "../core/worker-exposure.js";
 import { createDepositClaimPriorityPolicy } from "../core/deposit-claim-priority.js";
+import { createNonYieldTierPerksPolicy } from "../core/tier-perks-non-yield.js";
 import { loadDepositVestingConfig } from "../core/deposit-vesting.js";
 import { createWorkerDailyExposurePolicy } from "../core/worker-daily-exposure.js";
 import { WorkerProgressionService } from "../core/worker-progression.js";
@@ -224,9 +225,16 @@ export function createPlatformService() {
     workerExposurePolicy,
     env: {}
   });
+  const tierPerksPolicy = createNonYieldTierPerksPolicy({
+    getTierState: (wallet) => lockedTierService.getWalletState(wallet),
+    getRewardBankHealth: async () => ({ readable: false }),
+    env: {}
+  });
+  workerExposurePolicy.setTierPerksPolicy(tierPerksPolicy);
   const depositClaimPriorityPolicy = createDepositClaimPriorityPolicy({
     workerExposurePolicy,
-    lockedTierPriorityReader: (wallet) => lockedTierService.getPriorityRank(wallet)
+    lockedTierPriorityReader: (wallet) => lockedTierService.getPriorityRank(wallet),
+    tierPerksPolicy
   });
   const workerDailyExposurePolicy = createWorkerDailyExposurePolicy({
     stateStore,
@@ -346,7 +354,9 @@ export function createLockedTierService({
   return new LockedTierService({
     stateStore,
     accountPositionReader: (wallet, asset) => gateway.getAccountPosition(wallet, asset),
-    creditPositionReader: (wallet) => workerExposurePolicy.capacityForWallet(wallet),
+    creditPositionReader: (wallet) => typeof gateway.readCreditPosition === "function"
+      ? gateway.readCreditPosition(wallet)
+      : { available: false, reason: "credit_pool_not_configured", outstandingDebtRaw: "0" },
     config: loadLockedTierConfig(env),
     chainId: authConfig.chainId,
     siweDomain: authConfig.domain,
@@ -546,6 +556,21 @@ export async function createPlatformRuntime() {
       env: process.env
     })
   );
+  let rewardBankHealthProvider;
+  const tierPerksPolicy = initStep(
+    "init-non-yield-tier-perks",
+    logger,
+    () => createNonYieldTierPerksPolicy({
+      getTierState: (wallet) => lockedTierService.getWalletState(wallet),
+      getRewardBankHealth: () => rewardBankHealthProvider?.() ?? Promise.resolve({
+        readable: false,
+        source: "reward_bank_reader_unavailable"
+      }),
+      env: process.env,
+      logger
+    })
+  );
+  workerExposurePolicy.setTierPerksPolicy(tierPerksPolicy);
   const idleBalanceConsentService = initStep(
     "init-idle-balance-consent",
     logger,
@@ -573,6 +598,7 @@ export async function createPlatformRuntime() {
     () => createDepositClaimPriorityPolicy({
       workerExposurePolicy,
       lockedTierPriorityReader: (wallet) => lockedTierService.getPriorityRank(wallet),
+      tierPerksPolicy,
       env: process.env,
       logger
     })
@@ -672,7 +698,7 @@ export async function createPlatformRuntime() {
     })
   );
   platformService.setCatalogueLaneDiscipline(catalogueLaneDiscipline);
-  const rewardBankHealthProvider = initStep(
+  rewardBankHealthProvider = initStep(
     "init-reward-bank-health-provider",
     logger,
     () => createPersistedRewardBankHealthProvider({
@@ -757,6 +783,7 @@ export async function createPlatformRuntime() {
   );
   const receiptGraphUnderwriter = initStep("init-receipt-graph-underwriter", logger, () =>
     new ReceiptGraphUnderwriter({
+      tierPerksPolicy,
       reader: new EvmReceiptGraphReader({
         provider: gateway.provider,
         escrowAddresses: [gateway.config.escrowCoreAddress, gateway.config.legacyEscrowCoreAddress],

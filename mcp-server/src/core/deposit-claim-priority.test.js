@@ -58,6 +58,13 @@ test("deposit claim priority defaults off at 300 seconds and 1.0 USDC", () => {
   assert.deepEqual(dormant.listingFor(job()), { listedAt: LISTED_AT });
 });
 
+test("the non-yield tier-perks rollout activates the existing priority window", () => {
+  const config = loadDepositClaimPriorityConfig({ NON_YIELD_TIER_PERKS_ENABLED: "true" });
+  assert.equal(config.enabled, true);
+  assert.equal(config.windowSeconds, DEFAULT_PRIORITY_WINDOW_SECONDS);
+  assert.equal(config.thresholdUsdc, "1");
+});
+
 test("priority window clamps values above the 1800-second hard ceiling and warns", () => {
   const warnings = [];
   const config = loadDepositClaimPriorityConfig(
@@ -107,6 +114,28 @@ test("qualifying vested wallet passes inside the priority window", async () => {
   assert.equal(decision.eligible, true);
   assert.equal(decision.status, "priority_qualified");
   assert.equal(decision.qualification.qualifies, true);
+});
+
+test("active 7d commitment gains priority claim access without a vested pool deposit", async () => {
+  const decision = await policy({
+    capacity: {
+      vestedAssetsRaw: "0",
+      vestingAvailable: true,
+      credit: { available: true, outstandingDebtRaw: "0" },
+      tierPerks: {
+        tier: "t7",
+        priorityClaimAccess: {
+          access: "priority",
+          rank: 1,
+          eligibleDuringPriorityWindow: true
+        }
+      }
+    }
+  }).assessClaim({ wallet: WALLET, job: job() });
+  assert.equal(decision.eligible, true);
+  assert.equal(decision.qualification.depositQualified, false);
+  assert.equal(decision.qualification.committedTierQualified, true);
+  assert.equal(decision.qualification.lockedTierPriority.tier, "t7");
 });
 
 test("non-qualifying wallet is refused by name inside and succeeds after openAt", async () => {

@@ -49,3 +49,31 @@ test("event-read failure fails closed without inventing earnings", async () => {
   assert.equal(result.cashLimitRaw, "0");
   assert.equal(result.disqualificationReason, "receipt_graph_unavailable");
 });
+
+test("credit underwriting surfaces the live 30d tier qualification without changing receipt-graph limits", async () => {
+  let tier = "t7";
+  const service = new ReceiptGraphUnderwriter({
+    reader: {
+      readWindow: async () => ({
+        settlements: [{ workerAmountRaw: "10000000" }],
+        slashes: [], upheldDisputes: [], fromBlock: 10, headBlock: 20
+      })
+    },
+    tierPerksPolicy: {
+      forWallet: async () => ({
+        creditQualification: {
+          qualified: ["t30", "t90"].includes(tier),
+          termsClass: tier === "t90" ? "better_terms" : tier === "t30" ? "standard" : null
+        }
+      })
+    }
+  });
+  const before = await service.evaluate(input);
+  tier = "t30";
+  const after = await service.evaluate(input);
+  assert.equal(before.tierQualification.qualified, false);
+  assert.equal(after.tierQualification.qualified, true);
+  assert.equal(after.tierQualification.termsClass, "standard");
+  assert.equal(after.cashLimitRaw, before.cashLimitRaw);
+  assert.equal(after.postingLimitRaw, before.postingLimitRaw);
+});

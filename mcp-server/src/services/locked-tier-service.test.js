@@ -11,6 +11,8 @@ import {
   LOCKED_TIER_YIELD_POOL_DEPLOYED_TEXT,
   LOCKED_TIER_YIELD_ELIGIBLE_NOT_DEPLOYED_TEXT,
   LOCKED_TIER_YIELD_INACTIVE_TEXT,
+  NON_YIELD_TIER_EARLY_EXIT_TERMS,
+  NON_YIELD_TIER_RISK_SENTENCE,
   LockedTierService,
   loadLockedTierConfig,
   lockedTierActivationGate,
@@ -44,6 +46,7 @@ function harness({
   creditRaw = "0",
   creditReadable = true,
   creditReadGraceMs = CREDIT_READ_GRACE_DEFAULT_MS,
+  tierPerksEnabled = false,
   now = START
 } = {}) {
   const stateStore = new MemoryStateStore();
@@ -62,6 +65,7 @@ function harness({
       : { credit: { available: false, reason: "credit_pool_read_failed" } },
     config: {
       enabled: true,
+      tierPerksEnabled,
       perWalletCapRaw: 25_000_000n,
       perWalletCapUsdc: "25",
       cohortCapRaw: 1_000_000_000n,
@@ -183,6 +187,43 @@ test("signed consent creates a lowercase durable lock without moving funds", asy
   assert.equal(result.entry.amountRaw, "10000000");
   assert.equal(result.entry.consentRef, result.entry.id);
   assert.equal(result.tierState.encumbered.raw, "10000000");
+});
+
+test("7d locked tier is admitted only while the non-yield perk rollout is enabled", async () => {
+  await assert.rejects(
+    () => harness().service.quote(SIGNER.address, {
+      tier: "t7",
+      amountRaw: "10000000",
+      consentNonce: "tier7off1"
+    }, { poolInfo: poolInfo(SIGNER.address) }),
+    /tier must be t30 or t90/u
+  );
+
+  const h = harness({ tierPerksEnabled: true });
+  const quote = await h.service.quote(SIGNER.address, {
+    tier: "t7",
+    amountRaw: "10000000",
+    consentNonce: "tier7copy"
+  }, { poolInfo: h.poolInfo });
+  assert.equal(quote.terms.earlyExitTerms, NON_YIELD_TIER_EARLY_EXIT_TERMS);
+  assert.equal(quote.terms.riskSentence, NON_YIELD_TIER_RISK_SENTENCE);
+  assert.doesNotMatch(JSON.stringify(quote.terms), /yield share|venue gain|venue loss/iu);
+  const result = await signedLock(h, { tier: "t7", nonce: "tier7on01" });
+  assert.equal(result.entry.tier, "t7");
+  assert.equal(result.entry.termDays, 7);
+  await signedLock(h, { tier: "t30", nonce: "tier30on1" });
+  assert.equal((await h.service.getWalletState(SIGNER.address)).tier, "t30");
+  const capability = await h.service.getCapability();
+  assert.deepEqual(capability.tiers.map((tier) => tier.tier), ["t7", "t30", "t90"]);
+  assert.deepEqual(capability.tiers.map((tier) => tier.priorityRank), [1, 2, 3]);
+  assert.deepEqual(capability.tiers[0].perks, ["priority claim access"]);
+  assert.doesNotMatch(
+    JSON.stringify(capability.tiers),
+    /bond relief|reduced bond|waived bond|\b(?:collateral|security|backing)\b/iu
+  );
+  const telemetry = await h.service.getPoolTelemetry();
+  assert.equal(telemetry.cohort.activeLockCount, 1);
+  assert.equal(telemetry.cohort.totalLocked.raw, "10000000");
 });
 
 test("a consent retry is idempotent even after its quote expires", async () => {
