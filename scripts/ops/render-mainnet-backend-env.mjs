@@ -84,6 +84,7 @@ export const LITERAL_OVERRIDES = {
   // enabled together, using the separately pinned keeper bounds below.
   IDLE_BALANCE_ALLOCATION_ROUTE_LIVE: "1",
   IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED: "1",
+  NON_YIELD_TIER_PERKS_ENABLED: "1",
   USDC_LIQUIDITY_ACCOUNTS_JSON: "[]",
   REDIS_URL: "redis://mainnet-redis:6379",
   REDIS_NAMESPACE: "agent-platform-mainnet",

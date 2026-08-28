@@ -120,6 +120,10 @@ test("transformLine: identity literals flip to mainnet", () => {
     "IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED=1"
   );
   assert.equal(
+    transformLine("NON_YIELD_TIER_PERKS_ENABLED=false"),
+    "NON_YIELD_TIER_PERKS_ENABLED=1"
+  );
+  assert.equal(
     transformLine("IDLE_BALANCE_ALLOCATION_FLOAT_TARGET_BPS=2500"),
     "IDLE_BALANCE_ALLOCATION_FLOAT_TARGET_BPS=2500"
   );

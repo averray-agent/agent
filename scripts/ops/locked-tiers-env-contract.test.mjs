@@ -9,12 +9,10 @@ import {
   loadLockedTierConfig
 } from "../../mcp-server/src/services/locked-tier-service.js";
 
-const TEMPLATES = [
-  new URL("../../deploy/backend.env.template", import.meta.url),
-  new URL("../../deploy/backend.mainnet.env.template", import.meta.url)
-];
+const DEFAULT_TEMPLATE = new URL("../../deploy/backend.env.template", import.meta.url);
+const MAINNET_TEMPLATE = new URL("../../deploy/backend.mainnet.env.template", import.meta.url);
 
-test("locked tiers stay flag-off by default in both generated backend env profiles", async () => {
+test("locked tiers stay flag-off by default while mainnet enables non-yield perks", async () => {
   const defaults = loadLockedTierConfig({});
   assert.equal(defaults.enabled, false);
   assert.equal(defaults.tierPerksEnabled, false);
@@ -22,16 +20,19 @@ test("locked tiers stay flag-off by default in both generated backend env profil
   assert.equal(defaults.cohortCapRaw, 1_000_000_000n);
   assert.equal(defaults.creditReadGraceMs, CREDIT_READ_GRACE_DEFAULT_MS);
 
-  for (const templateUrl of TEMPLATES) {
+  for (const [templateUrl, tierPerksEnabled] of [
+    [DEFAULT_TEMPLATE, false],
+    [MAINNET_TEMPLATE, true]
+  ]) {
     const env = parseTemplate(await readFile(templateUrl, "utf8"));
     assert.equal(env.LOCKED_TIERS_ENABLED, "true", templateUrl.pathname);
-    assert.equal(env.NON_YIELD_TIER_PERKS_ENABLED, "false", templateUrl.pathname);
+    assert.equal(env.NON_YIELD_TIER_PERKS_ENABLED, tierPerksEnabled ? "1" : "false", templateUrl.pathname);
     assert.equal(env.LOCKED_TIER_PER_WALLET_CAP_USDC, "25", templateUrl.pathname);
     assert.equal(env.LOCKED_TIER_COHORT_CAP_USDC, "1000", templateUrl.pathname);
     assert.equal(env.CREDIT_READ_GRACE_MS, "300000", templateUrl.pathname);
     const config = loadLockedTierConfig(env);
     assert.equal(config.enabled, true, templateUrl.pathname);
-    assert.equal(config.tierPerksEnabled, false, templateUrl.pathname);
+    assert.equal(config.tierPerksEnabled, tierPerksEnabled, templateUrl.pathname);
     assert.equal(config.perWalletCapRaw, defaults.perWalletCapRaw, templateUrl.pathname);
     assert.equal(config.cohortCapRaw, defaults.cohortCapRaw, templateUrl.pathname);
     assert.equal(config.creditReadGraceMs, defaults.creditReadGraceMs, templateUrl.pathname);
