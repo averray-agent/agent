@@ -1,10 +1,19 @@
 # RUNSHEET — Ceremony B: bind a venue to pool v2.1
 
-Status: **DRAFT — scoped, not yet executable** · 2026-08-27 · Author: Claude
+Status: **DRAFT — BLOCKED BY DESIGN until the venue is measured (Pascal, 2026-08-27: measure first)** · 2026-08-27 · Author: Claude
 (architect + gate) · Executor: Pascal (every money step and every signature).
 Authority: `MEMO_IDLE_BALANCE_ROUTE.md` **Q1″** (the set-once venue setter
 exists precisely for this) and `MEMO_POOL_V22_DEPLOYMENT_WINDOW.md`, which
 needs a measurement on the live lane.
+
+## SEQUENCING DECISION — measure before binding
+
+**Pascal, 2026-08-27:** do not run this until the venue has a second
+measurement. `setVenueAdapter` is permanent, and binding first would marry v2.1
+to Hydration on the strength of two epoch-3 observations. The rate and friction
+are properties of the **venue and XCM route**, not of which adapter calls them,
+so a measurement on legacy v2's adapter yields valid numbers for the same
+venue. `PACKET_VENUE_CEREMONY_EXPLICIT_POOL.md` unblocks that.
 
 ## Why this, and why now
 
@@ -72,9 +81,14 @@ above, and until the adapter is the one we intend to live with.
 
 ## Open before this is executable
 
-**B1 — the new strategy id.** The lane needs a fresh `bytes32`;
-`HYDRATION_USDC_POOL_V1` is taken by the legacy lane. Choose it, and confirm
-whether the legacy id should be deregistered in the same paused window.
+**B1 — DECIDED 2026-08-27: the strategy id is `AAC_IDLE_HYDRATION_V1`.** Names
+the purpose rather than a version, matching the `AAC_IDLE_DEPOSIT_POOL_V21`
+style already live, and avoids the v2-vs-v2.1 collision that has already
+confused one manifest key.
+
+**Legacy lane: DECIDED — leave `HYDRATION_USDC_POOL_V1` registered.** Legacy v2
+still holds the tester's 5.026011 and the parked protocol 10.0; leaving its
+lane registered keeps a recall path open for that pool. Costs nothing.
 
 **B2 — deployer and cost.** Two CREATEs at roughly 0.9 DOT each per the gas
 law, from the ceremony deployer (`op://mainnet-critical/admin-eoa-mainnet/credential`).
