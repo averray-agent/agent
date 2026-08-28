@@ -53,7 +53,12 @@ export function assertMarketingContentDiscipline(pages) {
   }
 
   const verify = pages["site/verify/index.html"];
-  if (!/never billed/iu.test(verify)) fail("site/verify/index.html: required never billed disclosure is missing");
+  if (!/data-verify-inconclusive(?:\s|>|=)/iu.test(verify)) {
+    fail("site/verify/index.html: discovery-rendered inconclusive-run target is missing");
+  }
+  if (/Inconclusive runs\b/iu.test(verify)) {
+    fail("site/verify/index.html: inconclusive-run wording must be rendered from x402 discovery, not baked into markup");
+  }
   for (const url of [
     "https://api.averray.com/.well-known/x402",
     "https://api.averray.com/verify/profiles"

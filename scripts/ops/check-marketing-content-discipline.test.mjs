@@ -21,7 +21,7 @@ function safePages(verifyHtml) {
 
 test("content discipline accepts the required Verify disclosures", () => {
   assert.doesNotThrow(() => assertMarketingContentDiscipline(safePages(
-    '<main>Inconclusive runs are never billed. https://api.averray.com/.well-known/x402 https://api.averray.com/verify/profiles<section data-receipt-proof><a href="/receipts/">Open the public receipt route</a></section></main>'
+    '<main><span data-verify-inconclusive>Loading live terms…</span> https://api.averray.com/.well-known/x402 https://api.averray.com/verify/profiles<section data-receipt-proof><a href="/receipts/">Open the public receipt route</a></section></main>'
   )));
 });
 
@@ -44,12 +44,23 @@ test("hard-coding 5 USDC into verify.astro fails the content-discipline lint by 
 
 test("the forbidden Verify claim is rejected", () => {
   const pages = safePages(
-    '<main>Inconclusive runs are never billed. https://api.averray.com/.well-known/x402 https://api.averray.com/verify/profiles<section data-receipt-proof><a href="/receipts/">Open receipts</a></section><p>trustless</p></main>'
+    '<main><span data-verify-inconclusive>Loading live terms…</span> https://api.averray.com/.well-known/x402 https://api.averray.com/verify/profiles<section data-receipt-proof><a href="/receipts/">Open receipts</a></section><p>trustless</p></main>'
   );
 
   assert.throws(
     () => assertMarketingContentDiscipline(pages),
     /forbidden public claim "trustless"/u
+  );
+});
+
+test("static Verify inconclusive-run wording is rejected in favor of discovery rendering", () => {
+  const pages = safePages(
+    '<main><span data-verify-inconclusive>Inconclusive runs are never charged.</span> https://api.averray.com/.well-known/x402 https://api.averray.com/verify/profiles<section data-receipt-proof><a href="/receipts/">Open receipts</a></section></main>'
+  );
+
+  assert.throws(
+    () => assertMarketingContentDiscipline(pages),
+    /inconclusive-run wording must be rendered from x402 discovery/u
   );
 });
 
@@ -62,6 +73,7 @@ test("Verify pricing parses resources[0].accepts[0] and rejects schema drift", a
     x402Version: 2,
     resources: [{
       resource: "https://api.averray.com/verify/runs",
+      description: "Run a pinned Averray verification profile. Inconclusive runs are never charged.",
       accepts: [{
         scheme: "exact",
         network: "eip155:8453",
@@ -75,17 +87,49 @@ test("Verify pricing parses resources[0].accepts[0] and rejects schema drift", a
   const terms = reader.parseDiscovery(valid);
   assert.equal(terms.amount, "5");
   assert.equal(terms.assetLabel, "USDC");
+  assert.equal(terms.inconclusiveRuns, "Inconclusive runs are never charged.");
   assert.equal(terms.networkLabel, "Base");
   assert.equal(terms.payTo, valid.resources[0].accepts[0].payTo);
-  assert.equal(reader.FALLBACK, "See live pricing in the discovery document.");
+  assert.equal(reader.FALLBACK, "Live pricing could not be loaded.");
 
   for (const malformed of [
     {},
     { x402Version: 2, resources: [] },
+    { x402Version: 2, resources: [{ resource: valid.resources[0].resource, description: "No inconclusive terms.", accepts: valid.resources[0].accepts }] },
     { x402Version: 2, resources: [{ resource: valid.resources[0].resource, accepts: [] }] }
   ]) {
     assert.throws(() => reader.parseDiscovery(malformed));
   }
+});
+
+test("Verify door links use one label per destination and keep the hero on-page", async () => {
+  const source = await readFile(new URL("marketing/src/pages/verify.astro", REPO_ROOT), "utf8");
+  const labelsFor = (constantName) => [...source.matchAll(
+    new RegExp(`<a[^>]+href=\\{${constantName}\\}[^>]*>([^<]+)<\\/a>`, "gu")
+  )].map((match) => match[1].trim());
+
+  assert.deepEqual([...new Set(labelsFor("DISCOVERY_URL"))], ["x402 discovery"]);
+  assert.deepEqual([...new Set(labelsFor("PROFILES_URL"))], ["Profiles and worked examples"]);
+  assert.match(source, /<CopySnippet label="x402 discovery" value=\{DISCOVERY_URL\} \/>/u);
+  assert.match(source, /<CopySnippet label="Profiles and worked examples" value=\{PROFILES_URL\} \/>/u);
+  assert.doesNotMatch(source, /Open live profiles|Inspect profiles and worked examples|the discovery document|Open live x402 discovery/u);
+
+  const hero = source.match(/<header class="page-hero">([\s\S]*?)<\/header>/u)?.[1] ?? "";
+  assert.match(hero, /href="#verify-purpose">See how Verify works<\/a>/u);
+  assert.doesNotMatch(hero, /href=\{(?:DISCOVERY_URL|PROFILES_URL)\}/u);
+});
+
+test("Verify cost cards use their middle slot for values without repeating the per-run unit", async () => {
+  const [page, reader] = await Promise.all([
+    readFile(new URL("marketing/src/pages/verify.astro", REPO_ROOT), "utf8"),
+    readFile(new URL("marketing/public/verify-reader.js", REPO_ROOT), "utf8")
+  ]);
+
+  assert.match(page, /<p class="pillar__eyebrow">Per run<\/p>\s*<h3 class="pillar__title" data-verify-price>/u);
+  assert.match(page, /<p class="pillar__eyebrow">Asset<\/p>\s*<h3 class="pillar__title" data-verify-asset-label>/u);
+  assert.match(page, /<p class="pillar__eyebrow">Recipient<\/p>\s*<h3 class="pillar__title verify-term__address"><code data-verify-pay-to>/u);
+  assert.doesNotMatch(page, /Published by discovery/u);
+  assert.doesNotMatch(reader, /assetLabel \+ " per run"/u);
 });
 
 test("marketing build, sync, and deploy gates name both public product pages", async () => {

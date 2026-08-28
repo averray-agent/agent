@@ -722,6 +722,10 @@ section.section { scroll-margin-top: 100px; }
   color: var(--avy-muted);
   margin: 0;
 }
+.verify-term__address {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 
 .glossary {
   margin: 0;
