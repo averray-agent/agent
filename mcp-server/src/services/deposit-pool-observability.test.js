@@ -7,9 +7,14 @@ import {
   DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT,
   depositPoolYieldStatus
 } from "./deposit-pool-yield-status.js";
-import { DepositPoolObservabilityService, EvmDepositPoolChainReader } from "./deposit-pool-observability.js";
+import {
+  DepositPoolObservabilitySelector,
+  DepositPoolObservabilityService,
+  EvmDepositPoolChainReader
+} from "./deposit-pool-observability.js";
 
 const POOL = "0xCCF5FDF3108AF8e693F28bb9326A573d9dA0F476";
+const LEGACY_POOL = "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30";
 const ASSET = "0x0000053900000000000000000000000001200000";
 const HEAD = 19_380_600;
 
@@ -92,6 +97,36 @@ test("deposit-pool snapshot distinguishes a chain-read born-empty pool from unav
       reason: "catalogue_daily_budget_not_configured"
     }
   });
+});
+
+test("legacy pool selector obtains a matching allowlisted observability snapshot", async () => {
+  const current = service(reader());
+  const legacyReader = reader({
+    state: { totalAssets: 10_000_001n, totalShares: 10_000_001n, buffer: 10_000_001n }
+  });
+  const legacy = new DepositPoolObservabilityService({
+    poolAddress: LEGACY_POOL,
+    chainReader: legacyReader
+  });
+  const selector = new DepositPoolObservabilitySelector({
+    defaultPoolAddress: POOL,
+    services: [current, legacy]
+  });
+
+  const defaultSnapshot = await selector.getSnapshot();
+  const legacySnapshot = await selector.getSnapshot({ poolAddress: LEGACY_POOL.toLowerCase() });
+  const unknownSnapshot = await selector.getSnapshot({
+    poolAddress: "0x1111111111111111111111111111111111111111"
+  });
+
+  assert.equal(defaultSnapshot.pool, POOL);
+  assert.equal(legacySnapshot.pool, LEGACY_POOL);
+  assert.equal(legacySnapshot.available, true);
+  assert.equal(legacySnapshot.reconciled, true);
+  assert.equal(legacySnapshot.flows.status, "ok");
+  assert.equal(legacyReader.calls.every((call) => call.poolAddress === LEGACY_POOL), true);
+  assert.equal(unknownSnapshot.available, false);
+  assert.equal(unknownSnapshot.reason, "deposit_pool_observability_target_not_configured");
 });
 
 test("deposit-pool monitor serves the same named-block yield attribution", async () => {

@@ -97,7 +97,10 @@ import {
   loadBankLaneFeedConfig
 } from "./bank-lane-feed.js";
 import { TransparencyService } from "./transparency-service.js";
-import { DepositPoolObservabilityService } from "./deposit-pool-observability.js";
+import {
+  DepositPoolObservabilitySelector,
+  DepositPoolObservabilityService
+} from "./deposit-pool-observability.js";
 import { CreditPoolObservabilityService } from "./credit-pool-observability.js";
 import { DepositPoolDoorService } from "./deposit-pool-door.js";
 import { loadDepositPoolVenueMarkConfig } from "../core/deposit-pool-venue-mark.js";
@@ -977,14 +980,29 @@ export async function createPlatformRuntime() {
       stateStore
     })
   );
-  const depositPoolObservability = initStep("init-deposit-pool-observability", logger, () =>
-    new DepositPoolObservabilityService({
+  const depositPoolObservability = initStep("init-deposit-pool-observability", logger, () => {
+    const current = new DepositPoolObservabilityService({
       poolAddress: gateway.config.depositPoolAddress,
       provider: gateway.provider,
       catalogueDailyBudget,
       yieldAttributionService
-    })
-  );
+    });
+    const services = [current];
+    if (
+      gateway.config.legacyDepositPoolV2Address
+      && gateway.config.legacyDepositPoolV2Address !== gateway.config.depositPoolAddress
+    ) {
+      services.push(new DepositPoolObservabilityService({
+        poolAddress: gateway.config.legacyDepositPoolV2Address,
+        provider: gateway.provider,
+        catalogueDailyBudget
+      }));
+    }
+    return new DepositPoolObservabilitySelector({
+      defaultPoolAddress: gateway.config.depositPoolAddress,
+      services
+    });
+  });
   const creditPoolObservability = initStep("init-credit-pool-observability", logger, () =>
     new CreditPoolObservabilityService({
       poolAddress: gateway.config.creditPoolAddress,

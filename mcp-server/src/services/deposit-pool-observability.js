@@ -163,6 +163,43 @@ export class EvmDepositPoolChainReader {
   }
 }
 
+export class DepositPoolObservabilitySelector {
+  constructor({ defaultPoolAddress, services = [] } = {}) {
+    this.defaultPoolAddress = defaultPoolAddress ? getAddress(defaultPoolAddress) : "";
+    this.servicesByPool = new Map();
+    for (const service of services) {
+      if (!service?.poolAddress) continue;
+      this.servicesByPool.set(getAddress(service.poolAddress).toLowerCase(), service);
+    }
+    this.defaultService = this.servicesByPool.get(this.defaultPoolAddress.toLowerCase()) ?? services[0];
+  }
+
+  async getSnapshot({ poolAddress } = {}) {
+    if (!poolAddress && this.defaultService) return this.defaultService.getSnapshot();
+    const requested = poolAddress || this.defaultPoolAddress;
+    let normalized;
+    try {
+      normalized = getAddress(requested);
+    } catch {
+      return {
+        schemaVersion: 1,
+        available: false,
+        reason: "deposit_pool_observability_target_invalid"
+      };
+    }
+    const service = this.servicesByPool.get(normalized.toLowerCase());
+    if (!service) {
+      return {
+        schemaVersion: 1,
+        available: false,
+        reason: "deposit_pool_observability_target_not_configured",
+        pool: normalized
+      };
+    }
+    return service.getSnapshot();
+  }
+}
+
 export class DepositPoolObservabilityService {
   constructor({
     poolAddress,
