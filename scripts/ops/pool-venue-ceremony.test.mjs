@@ -1,8 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { importCeremonyModule } from "./ceremony-module-loader.mjs";
 
 import {
   PROOF_RETURN_WINDOW_SECONDS,
@@ -13,7 +16,10 @@ import {
   assertObservability,
   assertVenueAdapterBound,
   buildPoolObservabilityUrl,
+  deploymentManifestPaths,
   parseArgs,
+  readDeploymentManifest,
+  resolveSigner,
   resolvePoolTarget,
 } from "./pool-venue-ceremony.mjs";
 
@@ -115,6 +121,124 @@ test("CLI commit refuses a non-KMS signer before RPC access", () => {
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stderr, /--commit requires --use-kms/u);
   assert.doesNotMatch(result.stderr, /Ceremony RPC preflight/u);
+});
+
+test("--use-kms binds KmsSigner to the averray-signer Roles Anywhere provider", async () => {
+  const credentialsProvider = async () => ({ accessKeyId: "temporary", secretAccessKey: "temporary" });
+  const seen = { builder: [], signer: [] };
+  class FakeKmsSigner {
+    constructor(options) { seen.signer.push(options); }
+    async getAddress() { return OPERATOR; }
+  }
+  const provider = { name: "read-provider" };
+  const env = {
+    AWS_REGION: "eu-central-2",
+    AWS_USE_ROLES_ANYWHERE: "true",
+    KMS_KEY_ID: "arn:aws:kms:eu-central-2:123456789012:key/example",
+  };
+
+  const identity = await resolveSigner({
+    expectedSigner: OPERATOR,
+    useKms: true,
+    commit: true,
+  }, provider, {
+    env,
+    KmsSignerClass: FakeKmsSigner,
+    credentialsProviderBuilder(options) {
+      seen.builder.push(options);
+      return credentialsProvider;
+    },
+  });
+
+  assert.equal(seen.builder.length, 1);
+  assert.equal(seen.builder[0].profile, "averray-signer");
+  assert.equal(seen.builder[0].env, env);
+  assert.equal(seen.signer.length, 1);
+  assert.equal(seen.signer[0].credentialsProvider, credentialsProvider);
+  assert.equal(seen.signer[0].provider, provider);
+  assert.equal(identity.backend, "aws-kms");
+});
+
+test("dry run constructs no KMS signer and requests no credentials", async () => {
+  const identity = await resolveSigner({
+    expectedSigner: OPERATOR,
+    useKms: false,
+    commit: false,
+  }, { name: "read-provider" }, {
+    KmsSignerClass: class RefuseKmsConstruction {
+      constructor() { throw new Error("dry run constructed KMS"); }
+    },
+    credentialsProviderBuilder() {
+      throw new Error("dry run requested credentials");
+    },
+  });
+
+  assert.equal(identity.address, OPERATOR);
+  assert.equal(identity.signer, null);
+  assert.equal(identity.backend, "expected-signer (dry-run only)");
+});
+
+test("dual-layout module resolution falls back to the image and names both attempted paths", async () => {
+  const repoPath = "file:///repo/mcp-server/src/blockchain/kms-signer.js";
+  const imagePath = "file:///app/src/blockchain/kms-signer.js";
+  const attempts = [];
+  const loaded = await importCeremonyModule({
+    label: "KMS signer",
+    candidates: [repoPath, imagePath],
+    async importer(specifier) {
+      attempts.push(specifier);
+      if (specifier === repoPath) throw new Error("not found in checkout layout");
+      return { layout: "image" };
+    },
+  });
+  assert.deepEqual(attempts, [repoPath, imagePath]);
+  assert.deepEqual(loaded, { layout: "image" });
+
+  await assert.rejects(
+    importCeremonyModule({
+      label: "KMS signer",
+      candidates: [repoPath, imagePath],
+      importer: async () => { throw new Error("missing"); },
+    }),
+    (error) => error?.code === "ceremony_module_resolution_failed"
+      && error.message.includes(repoPath)
+      && error.message.includes(imagePath),
+  );
+});
+
+test("deployment manifest resolves from the checkout and image layouts", async () => {
+  assert.deepEqual(
+    deploymentManifestPaths("mainnet", new URL("file:///repo/scripts/ops/pool-venue-ceremony.mjs")),
+    ["/repo/deployments/mainnet.json", "/deployments/mainnet.json"],
+  );
+  assert.deepEqual(
+    deploymentManifestPaths("mainnet", new URL("file:///app/scripts/ops/pool-venue-ceremony.mjs")),
+    ["/app/deployments/mainnet.json", "/deployments/mainnet.json"],
+  );
+
+  const attempts = [];
+  const manifest = await readDeploymentManifest("mainnet", {
+    paths: ["/app/deployments/mainnet.json", "/deployments/mainnet.json"],
+    async readFileImpl(path) {
+      attempts.push(path);
+      if (path.startsWith("/app/")) {
+        const error = new Error("missing");
+        error.code = "ENOENT";
+        throw error;
+      }
+      return JSON.stringify({ profile: "mainnet" });
+    },
+  });
+  assert.deepEqual(attempts, ["/app/deployments/mainnet.json", "/deployments/mainnet.json"]);
+  assert.deepEqual(manifest, { profile: "mainnet" });
+});
+
+test("backend image ships the ceremony and only its required runtime helpers", async () => {
+  const dockerfile = await readFile(resolve(here, "..", "..", "mcp-server", "Dockerfile"), "utf8");
+  assert.match(dockerfile, /^COPY scripts\/ops\/ceremony-module-loader\.mjs \.\/scripts\/ops\/ceremony-module-loader\.mjs$/mu);
+  assert.match(dockerfile, /^COPY scripts\/ops\/ceremony-rpc\.mjs \.\/scripts\/ops\/ceremony-rpc\.mjs$/mu);
+  assert.match(dockerfile, /^COPY scripts\/ops\/pool-venue-ceremony\.mjs \.\/scripts\/ops\/pool-venue-ceremony\.mjs$/mu);
+  assert.match(dockerfile, /^COPY deployments\/mainnet\.json \/deployments\/mainnet\.json$/mu);
 });
 
 test("proof tranche at exactly 50% of total assets is admitted", () => {

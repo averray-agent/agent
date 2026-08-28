@@ -1,7 +1,15 @@
-import {
+import { importCeremonyModule } from "./ceremony-module-loader.mjs";
+
+const {
   createRpcProvider,
   createWriteRpcBroadcaster
-} from "../../mcp-server/src/blockchain/rpc-provider.js";
+} = await importCeremonyModule({
+  label: "ceremony RPC provider",
+  candidates: [
+    new URL("../../mcp-server/src/blockchain/rpc-provider.js", import.meta.url),
+    "file:///app/src/blockchain/rpc-provider.js"
+  ]
+});
 
 export const POLKADOT_HUB_MAINNET_CHAIN_ID = 420420419;
 export const POLKADOT_HUB_TESTNET_CHAIN_ID = 420420417;
