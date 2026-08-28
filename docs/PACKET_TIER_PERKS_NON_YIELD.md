@@ -9,14 +9,14 @@ ladder waits for v2.2.
 
 ## What ships
 
-The four perks that need no ceremony: **bond relief, exposure caps, priority
-claim access, credit qualification.** Ships dark behind a default-off env, the
+The three perks that need no ceremony: **exposure caps, priority claim access,
+credit qualification.** (Bond relief was in this packet and has been REMOVED —
+see below.) Ships dark behind a default-off env, the
 same way the keeper did.
 
 | perk | Flex | 7d | 30d | 90d |
 |---|---|---|---|---|
 | Open exposure cap | 5% of bank | 10% | 15% | 20% |
-| Claim bond | full | −50% | waived | waived |
 | Priority claim access | basic | ✓ | ✓✓ | first look |
 | Credit qualification | — | — | ✓ | ✓ better terms |
 
@@ -60,22 +60,46 @@ must never widen a cap.
    about runway, not an at-risk number. **This packet links only OPEN exposure
    to the bank.** Propose, but do not implement, a daily-budget rule.
 
-## Bond relief is uncollateralised risk — record it as such
+## BOND RELIEF IS REMOVED — it is not backend-feasible (Codex, 2026-08-27)
 
-Per D3, locked balance is a **qualification signal, not collateral**: there is
-no seizure path for job default, only early-exit forfeit terms. Bond relief on
-locked tiers is therefore risk the operator chooses to take, bounded by the
-caps above. **No surface may describe a lock as securing or backing anything.**
-Assert that absence in a test, the way #1291 asserts the absence of "NAV share
-active".
+Codex stopped rather than ship it, correctly. Verified in `EscrowCore.sol`:
+
+```solidity
+claimNumber = workerClaimCount[worker] + 1;
+waived = onboardingWaiverEligibleJobs[jobId] && claimNumber <= policy.onboardingWaiverClaimCount();
+claimStakeBps = policy.defaultClaimStakeBps();      // GLOBAL
+claimStake = (job.reward * claimStakeBps) / 10_000;
+```
+
+The only waiver is **per-job × first-N-claims**; `defaultClaimStakeBps` and
+`onboardingWaiverClaimCount` are **global policy**. There is no per-worker or
+per-tier lever. `claimJobFor` computes and locks the stake on-chain, and the
+backend deliberately replaces its own projection with the authoritative
+contract preview before claiming — so a backend-only build would DISPLAY relief
+while the worker still locked the full bond. That is the "NAV share active"
+defect. Enabling the existing waiver instead would waive the bond for unrelated
+claimants.
+
+**Rejected alternatives:** an operator-funded subsidy rail (the operator
+posting the stake destroys the bond's purpose as worker skin-in-the-game and
+invents a stake-recovery problem), and an EscrowCore change (a live contract
+holding active escrows; a v3→v4 cutover is our most expensive ceremony and one
+perk does not justify it).
+
+**Bond relief is deferred to whenever EscrowCore is next opened for an
+independent reason.** This is a real loss: it was the perk with measurement
+behind it — a blind agent chose a 0.4 zero-bond job over a 1.0 external
+bounty. The ladder is weaker without it, and that is preferable to displaying
+relief that does not exist.
 
 ## Non-negotiables (each pinned by a test)
 
 1. Caps never fall below today's defaults, at any bank value including zero —
    proven by mutation (set bank to 0, assert the floor holds).
 2. An unreadable bank fails closed to fixed defaults and never widens a cap.
-3. Bond relief applies only at 7d+, and a Flex wallet gets the full bond.
-4. Credit qualification applies only at 30d+.
+3. Credit qualification applies only at 30d+.
+4. **No surface mentions bond relief, a reduced bond, or a waived bond for any
+   tier** — assert the absence, since the contract cannot deliver it.
 5. No surface claims a lock is collateral, security, or backing.
 6. Perks are gated on a live-read tier that is **re-read at use time, never
    cached** — the same law that governs the allocation consent check.
