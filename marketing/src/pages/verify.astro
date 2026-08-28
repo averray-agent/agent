@@ -26,7 +26,7 @@ const PROFILES_URL = "https://api.averray.com/verify/profiles";
         <a class="btn btn--primary" href="#buy">
           Give your agent the API doors <span class="arrow" aria-hidden="true">→</span>
         </a>
-        <a class="btn btn--ghost" href={PROFILES_URL}>Open live profiles</a>
+        <a class="btn btn--ghost" href="#verify-purpose">See how Verify works</a>
       </div>
     </header>
 
@@ -52,7 +52,9 @@ const PROFILES_URL = "https://api.averray.com/verify/profiles";
         <article class="pillar">
           <p class="pillar__eyebrow">Read the outcome</p>
           <h3 class="pillar__title">Receive PASS or FAIL in a signed, receipt-keyed record.</h3>
-          <p class="pillar__body">The operator verifies the run. Inconclusive runs are never billed.</p>
+          <p class="pillar__body">
+            The operator verifies the run. <span data-verify-inconclusive>Reading the live inconclusive-run terms…</span>
+          </p>
         </article>
       </div>
     </section>
@@ -62,13 +64,13 @@ const PROFILES_URL = "https://api.averray.com/verify/profiles";
         <p class="eyebrow">What it costs</p>
         <h2 class="section__title" id="verify-price">The price comes from the terms your agent reads.</h2>
         <p class="section__aside">
-          No price is embedded in this page's markup. On every visit, the browser reads the x402 discovery document and renders the first accepted payment requirement for the Verify run resource.
+          No price is embedded in this page's markup. On every visit, the browser reads x402 discovery and renders the first accepted payment requirement for the Verify run resource.
         </p>
         <p data-verify-pricing-status>
-          Reading live pricing from <a href={DISCOVERY_URL}>the discovery document</a>…
+          Reading live pricing from <a href={DISCOVERY_URL}>x402 discovery</a>…
         </p>
         <noscript>
-          <p>See live pricing in <a href={DISCOVERY_URL}>the discovery document</a>.</p>
+          <p>See live pricing and inconclusive-run terms in <a href={DISCOVERY_URL}>x402 discovery</a>.</p>
         </noscript>
         <div class="pillars" data-verify-pricing hidden>
           <article class="pillar">
@@ -78,17 +80,20 @@ const PROFILES_URL = "https://api.averray.com/verify/profiles";
           </article>
           <article class="pillar">
             <p class="pillar__eyebrow">Asset</p>
-            <h3 class="pillar__title" data-verify-network></h3>
-            <p class="pillar__body"><code data-verify-asset></code></p>
+            <h3 class="pillar__title" data-verify-asset-label></h3>
+            <p class="pillar__body">
+              <span data-verify-network></span><br />
+              <code class="verify-term__address" data-verify-asset></code>
+            </p>
           </article>
           <article class="pillar">
             <p class="pillar__eyebrow">Recipient</p>
-            <h3 class="pillar__title">Published by discovery</h3>
-            <p class="pillar__body"><code data-verify-pay-to></code></p>
+            <h3 class="pillar__title verify-term__address"><code data-verify-pay-to></code></h3>
+            <p class="pillar__body">Base payment recipient</p>
           </article>
         </div>
         <div class="link-row">
-          <a href={DISCOVERY_URL}>Open live x402 discovery</a>
+          <a href={DISCOVERY_URL}>x402 discovery</a>
         </div>
       </div>
     </section>
@@ -99,22 +104,22 @@ const PROFILES_URL = "https://api.averray.com/verify/profiles";
           <p class="eyebrow">How an agent buys</p>
           <h2 class="section__title" id="verify-buy">Give your agent these two URLs.</h2>
         </div>
-        <p class="section__aside">Discovery supplies the payment terms. Profiles supplies the request contract and worked examples.</p>
+        <p class="section__aside">x402 discovery supplies the payment terms. Profiles and worked examples supply the request contract.</p>
       </div>
       <div class="pillars audiences--two">
         <article class="pillar install-card">
-          <p class="pillar__eyebrow">Payment discovery</p>
+          <p class="pillar__eyebrow">x402 discovery</p>
           <h3 class="pillar__title">Read the Verify run resource and its accepted payment requirement.</h3>
-          <CopySnippet label="x402 discovery URL" value={DISCOVERY_URL} />
+          <CopySnippet label="x402 discovery" value={DISCOVERY_URL} />
         </article>
         <article class="pillar install-card">
-          <p class="pillar__eyebrow">Profiles + worked examples</p>
+          <p class="pillar__eyebrow">Profiles and worked examples</p>
           <h3 class="pillar__title">Choose a published profile and start from its worked request.</h3>
-          <CopySnippet label="Verify profiles URL" value={PROFILES_URL} />
+          <CopySnippet label="Profiles and worked examples" value={PROFILES_URL} />
         </article>
       </div>
       <ol class="steps">
-        <li>Read discovery and choose a published profile.</li>
+        <li>Read x402 discovery and choose a published profile.</li>
         <li>Submit the profile's worked request shape to the Verify run resource and receive its live payment challenge.</li>
         <li>Use the accepted requirement unchanged when creating the payment authorization, then retry the request with the payment signature.</li>
         <li>Poll the returned run until it carries a verdict and signed receipt.</li>
@@ -133,7 +138,7 @@ const PROFILES_URL = "https://api.averray.com/verify/profiles";
         </p>
         <div class="link-row">
           <a href="/receipts/">Open the public receipt route</a>
-          <a href={PROFILES_URL}>Inspect profiles and worked examples</a>
+          <a href={PROFILES_URL}>Profiles and worked examples</a>
         </div>
       </div>
     </section>
@@ -141,5 +146,5 @@ const PROFILES_URL = "https://api.averray.com/verify/profiles";
     <SiteFooter />
   </main>
   <script is:inline src="/reader-fetch.js?v=20260823"></script>
-  <script is:inline src="/verify-reader.js?v=20260827"></script>
+  <script is:inline src="/verify-reader.js?v=20260828"></script>
 </BaseLayout>
