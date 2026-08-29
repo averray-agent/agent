@@ -5,6 +5,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
+import { importCeremonyModule } from "./ceremony-module-loader.mjs";
+
 import {
   DEFAULT_RECALL_FEE_FLOOR_RATIO_BPS,
   MAX_FEE_PER_LEG_RAW,
@@ -33,6 +35,8 @@ import {
   pendingWithdrawLegs,
   reconcilePoolRecall,
   reconcilePoolTranche,
+  resolveSigner,
+  resolveVenueBindings,
   selectRecallDispatchFee,
   unwindAccrualCeiling,
 } from "./pool-venue-dispatch.mjs";
@@ -46,6 +50,8 @@ const ZERO32 = `0x${"00".repeat(32)}`;
 const OPERATOR = "0x5a6836c6D4d293F6E5377E6c28054F4171915813";
 const VENUE = "0xE2801E6C640e0180798912649fD567E1Ea459a35";
 const POOL = "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30";
+const CURRENT_POOL = "0x9B35A102d656Fb86d798aF81959e09961DEc28E0";
+const LANE = "0x88eE70277E486136676c0b50Ed9b7D7A1a31371f";
 
 function pendingRecall(overrides = {}) {
   return { kind: 1, status: 1, requestedAssets: 500_000n, settledAssets: 0n, returnBy: 2_000_000_000n, claimed: false, ...overrides };
@@ -59,6 +65,7 @@ test("CLI is dry-run by default and requires explicit ceremony flags for writes"
   const parsed = parseArgs(["stage-dispatch", "--profile", "mainnet", "--request-id", REQUEST, "--deployment-id", "1"]);
   assert.equal(parsed.commit, false);
   assert.equal(parsed.useKms, false);
+  assert.equal(parsed.pool, undefined);
   assert.equal(parsed.maxFeePerLeg, "40000");
   assert.equal(parsed.feeFloorRatioBps, DEFAULT_RECALL_FEE_FLOOR_RATIO_BPS.toString());
 
@@ -68,6 +75,113 @@ test("CLI is dry-run by default and requires explicit ceremony flags for writes"
   ]);
   assert.equal(recall.maxFeePerLeg, MAX_FEE_PER_LEG_RAW.toString());
   assert.equal(recall.feeFloorRatioBps, "13500");
+});
+
+test("explicit legacy pool is parsed and validated against the adapter-reported lane", () => {
+  const parsed = parseArgs([
+    "stage-dispatch", "--profile", "mainnet", "--pool", POOL,
+    "--request-id", REQUEST, "--deployment-id", "4",
+  ]);
+  assert.equal(parsed.pool, POOL);
+  assert.deepEqual(resolveVenueBindings({
+    poolAddress: parsed.pool,
+    adapterPool: POOL,
+    adapterLane: LANE,
+  }), { poolAddress: POOL, laneAddress: LANE });
+  assert.throws(() => resolveVenueBindings({
+    poolAddress: CURRENT_POOL,
+    adapterPool: POOL,
+    adapterLane: LANE,
+  }), /refusing mixed-generation dispatch/u);
+  assert.throws(() => resolveVenueBindings({
+    poolAddress: POOL,
+    adapterPool: POOL,
+    adapterLane: "0x0000000000000000000000000000000000000000",
+  }), /lane is address\(0\)/u);
+});
+
+test("dispatch resolves pool explicitly and derives its lane from adapter state", () => {
+  const source = readFileSync(scriptPath, "utf8");
+  assert.match(source, /resolvePoolTarget\(\{\s*requestedPool: args\.pool,/u);
+  assert.match(source, /venue\.pool\(\{ blockTag: adapterBindingBlock \}\)/u);
+  assert.match(source, /venue\.lane\(\{ blockTag: adapterBindingBlock \}\)/u);
+  assert.doesNotMatch(source, /manifest\.contracts\.depositPoolLane/u);
+});
+
+test("--use-kms binds dispatch signer to the averray-signer Roles Anywhere provider", async () => {
+  const credentialsProvider = async () => ({ accessKeyId: "temporary", secretAccessKey: "temporary" });
+  const seen = { builder: [], signer: [] };
+  class FakeKmsSigner {
+    constructor(options) { seen.signer.push(options); }
+    async getAddress() { return OPERATOR; }
+  }
+  const provider = { name: "read-provider" };
+  const env = {
+    AWS_REGION: "eu-central-2",
+    AWS_USE_ROLES_ANYWHERE: "true",
+    KMS_KEY_ID: "arn:aws:kms:eu-central-2:123456789012:key/example",
+  };
+
+  const identity = await resolveSigner({
+    expectedSigner: OPERATOR,
+    useKms: true,
+    commit: true,
+  }, provider, {
+    env,
+    KmsSignerClass: FakeKmsSigner,
+    credentialsProviderBuilder(options) {
+      seen.builder.push(options);
+      return credentialsProvider;
+    },
+  });
+
+  assert.equal(seen.builder.length, 1);
+  assert.equal(seen.builder[0].profile, "averray-signer");
+  assert.equal(seen.builder[0].env, env);
+  assert.equal(seen.signer.length, 1);
+  assert.equal(seen.signer[0].credentialsProvider, credentialsProvider);
+  assert.equal(seen.signer[0].provider, provider);
+  assert.equal(identity.backend, "aws-kms");
+});
+
+test("dispatch dry run constructs no KMS signer and requests no credentials", async () => {
+  const identity = await resolveSigner({
+    expectedSigner: OPERATOR,
+    useKms: false,
+    commit: false,
+  }, { name: "read-provider" }, {
+    KmsSignerClass: class RefuseKmsConstruction {
+      constructor() { throw new Error("dry run constructed KMS"); }
+    },
+    credentialsProviderBuilder() {
+      throw new Error("dry run requested credentials");
+    },
+  });
+
+  assert.equal(identity.address, OPERATOR);
+  assert.equal(identity.signer, null);
+  assert.equal(identity.backend, "expected-signer (dry-run only)");
+});
+
+test("dispatch dual-layout import failure names both attempted paths", async () => {
+  const repoPath = "file:///repo/mcp-server/src/services/venue-balance-reader.js";
+  const imagePath = "file:///app/src/services/venue-balance-reader.js";
+  await assert.rejects(
+    importCeremonyModule({
+      label: "venue balance reader",
+      candidates: [repoPath, imagePath],
+      importer: async () => { throw new Error("missing"); },
+    }),
+    (error) => error?.code === "ceremony_module_resolution_failed"
+      && error.message.includes(repoPath)
+      && error.message.includes(imagePath),
+  );
+});
+
+test("backend image ships dispatch and only its required script helper", () => {
+  const dockerfile = readFileSync(resolve(here, "..", "..", "mcp-server", "Dockerfile"), "utf8");
+  assert.match(dockerfile, /^COPY scripts\/ops\/pool-venue-dispatch\.mjs \.\/scripts\/ops\/pool-venue-dispatch\.mjs$/mu);
+  assert.match(dockerfile, /^COPY scripts\/ops\/capture-bank-xcm-v22-staging-quote\.mjs \.\/scripts\/ops\/capture-bank-xcm-v22-staging-quote\.mjs$/mu);
 });
 
 test("wrong requestId fails loud before staging", () => {
@@ -121,6 +235,21 @@ test("two-USDC staging leaves explicit fee and operating-float headroom", () => 
     nonce: 1n,
   });
   assert.equal(parameters.sellAmount + 50_000n, 2_000_000n);
+});
+
+test("fee and float mutation refuses when headroom falls below maxFeePerLeg", () => {
+  const authorized = {
+    requestedAssets: 4_500_000n,
+    maxFeePerLeg: 40_000n,
+    floatHeadroom: 50_000n,
+    returnBy: 2_000_000_000n,
+    nonce: 1n,
+  };
+  assert.doesNotThrow(() => deriveStagingParameters(authorized));
+  assert.throws(
+    () => deriveStagingParameters({ ...authorized, floatHeadroom: 39_999n }),
+    /Float headroom must be at least maxFeePerLeg/u,
+  );
 });
 
 test("pool lane request identity is deterministic and nonce-bound", () => {

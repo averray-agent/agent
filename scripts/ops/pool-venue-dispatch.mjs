@@ -18,23 +18,60 @@ import {
   getAddress,
   keccak256,
 } from "ethers";
-import { readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
-import { KmsSigner } from "../../mcp-server/src/blockchain/kms-signer.js";
-import { XCM_WRAPPER_ABI } from "../../mcp-server/src/blockchain/abis.js";
-import {
-  BankXcmV22Runtime,
-  assertConvertedAccountDeposit,
-} from "../../mcp-server/src/services/bank-xcm-v22-runtime.js";
-import { VenueBalanceReader } from "../../mcp-server/src/services/venue-balance-reader.js";
 import { createCeremonyRpcContext } from "./ceremony-rpc.mjs";
-import { assertExpectedSigner, assertObservability } from "./pool-venue-ceremony.mjs";
+import { importCeremonyModule } from "./ceremony-module-loader.mjs";
+import {
+  assertExpectedSigner,
+  assertObservability,
+  readDeploymentManifest,
+  resolvePoolTarget,
+} from "./pool-venue-ceremony.mjs";
 import { extractAaveQuote } from "./capture-bank-xcm-v22-staging-quote.mjs";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(here, "..", "..");
+const { KmsSigner } = await importCeremonyModule({
+  label: "KMS signer",
+  candidates: [
+    new URL("../../mcp-server/src/blockchain/kms-signer.js", import.meta.url),
+    "file:///app/src/blockchain/kms-signer.js",
+  ],
+});
+const { XCM_WRAPPER_ABI } = await importCeremonyModule({
+  label: "XCM wrapper ABI",
+  candidates: [
+    new URL("../../mcp-server/src/blockchain/abis.js", import.meta.url),
+    "file:///app/src/blockchain/abis.js",
+  ],
+});
+const {
+  BankXcmV22Runtime,
+  assertConvertedAccountDeposit,
+} = await importCeremonyModule({
+  label: "bank XCM runtime",
+  candidates: [
+    new URL("../../mcp-server/src/services/bank-xcm-v22-runtime.js", import.meta.url),
+    "file:///app/src/services/bank-xcm-v22-runtime.js",
+  ],
+});
+const { VenueBalanceReader } = await importCeremonyModule({
+  label: "venue balance reader",
+  candidates: [
+    new URL("../../mcp-server/src/services/venue-balance-reader.js", import.meta.url),
+    "file:///app/src/services/venue-balance-reader.js",
+  ],
+});
+const {
+  buildKmsCredentialsProvider,
+  PROFILE_BLOCKCHAIN_SIGNER,
+} = await importCeremonyModule({
+  label: "Roles Anywhere credentials provider",
+  candidates: [
+    new URL("../../mcp-server/src/services/aws-credentials.js", import.meta.url),
+    "file:///app/src/services/aws-credentials.js",
+  ],
+});
 
 export const MIN_DISPATCH_MARGIN_SECONDS = 6 * 60 * 60;
 // Measured 2026-08-21 12:24–13:20Z: Hydration quoted 28,588–28,645 raw for
@@ -108,6 +145,7 @@ export function parseArgs(argv) {
   const args = {
     command,
     profile: undefined,
+    pool: undefined,
     requestId: undefined,
     deploymentId: undefined,
     recallId: undefined,
@@ -139,6 +177,7 @@ export function parseArgs(argv) {
       return value;
     };
     if (flag === "--profile") args.profile = next();
+    else if (flag === "--pool") args.pool = next();
     else if (flag === "--request-id") args.requestId = next();
     else if (flag === "--deployment-id") args.deploymentId = next();
     else if (flag === "--recall-id") args.recallId = next();
@@ -244,6 +283,19 @@ export function deriveStagingParameters({ requestedAssets, maxFeePerLeg, floatHe
     dispatchDeadline: BigInt(returnBy),
     nonce: positiveBigInt(nonce, "lane nonce"),
   };
+}
+
+export function resolveVenueBindings({ poolAddress, adapterPool, adapterLane }) {
+  const resolvedPool = getAddress(poolAddress);
+  const boundPool = getAddress(adapterPool);
+  const laneAddress = getAddress(adapterLane);
+  if (boundPool !== resolvedPool) {
+    throw new Error(`Venue adapter pool ${boundPool} does not match resolved pool ${resolvedPool}; refusing mixed-generation dispatch.`);
+  }
+  if (laneAddress === getAddress(ZERO_ADDRESS)) {
+    throw new Error("Venue adapter lane is address(0); refusing dispatch without a chain-bound lane.");
+  }
+  return { poolAddress: resolvedPool, laneAddress };
 }
 
 export function computeRecallShares({ requestedAssets, venueAssets, venueShares }) {
@@ -563,12 +615,12 @@ export async function waitForAaveSwap(api, { requestId, fromBlock, expectedInput
 function usage() {
   return [
     "Usage:",
-    "  node scripts/ops/pool-venue-dispatch.mjs status --profile mainnet --request-id 0x... --deployment-id 1 --observability-url URL --expected-signer 0x...",
-    "  node scripts/ops/pool-venue-dispatch.mjs status --profile mainnet --request-id 0x... --recall-id 1 --observability-url URL --expected-signer 0x...",
-    "  node scripts/ops/pool-venue-dispatch.mjs cancel --profile mainnet --request-id 0x... --deployment-id 1 --observability-url URL --expected-signer 0x... [--commit --use-kms]",
-    "  node scripts/ops/pool-venue-dispatch.mjs cancel --profile mainnet --request-id 0x... --recall-id 1 --observability-url URL --expected-signer 0x... [--commit --use-kms]",
-    "  node scripts/ops/pool-venue-dispatch.mjs stage-dispatch --profile mainnet --request-id 0x... --deployment-id 1 --observability-url URL --expected-signer 0x... [--max-fee-per-leg 40000] [--float-headroom 50000] [--commit --use-kms]",
-    "  node scripts/ops/pool-venue-dispatch.mjs stage-recall --profile mainnet --request-id 0x... --recall-id 1 --observability-url URL --expected-signer 0x... [--max-fee-per-leg 80000] [--fee-floor-ratio-bps 15000] [--commit --use-kms]",
+    "  node scripts/ops/pool-venue-dispatch.mjs status --profile mainnet [--pool 0x...] --request-id 0x... --deployment-id 1 --observability-url URL --expected-signer 0x...",
+    "  node scripts/ops/pool-venue-dispatch.mjs status --profile mainnet [--pool 0x...] --request-id 0x... --recall-id 1 --observability-url URL --expected-signer 0x...",
+    "  node scripts/ops/pool-venue-dispatch.mjs cancel --profile mainnet [--pool 0x...] --request-id 0x... --deployment-id 1 --observability-url URL --expected-signer 0x... [--commit --use-kms]",
+    "  node scripts/ops/pool-venue-dispatch.mjs cancel --profile mainnet [--pool 0x...] --request-id 0x... --recall-id 1 --observability-url URL --expected-signer 0x... [--commit --use-kms]",
+    "  node scripts/ops/pool-venue-dispatch.mjs stage-dispatch --profile mainnet [--pool 0x...] --request-id 0x... --deployment-id 1 --observability-url URL --expected-signer 0x... [--max-fee-per-leg 40000] [--float-headroom 50000] [--commit --use-kms]",
+    "  node scripts/ops/pool-venue-dispatch.mjs stage-recall --profile mainnet [--pool 0x...] --request-id 0x... --recall-id 1 --observability-url URL --expected-signer 0x... [--max-fee-per-leg 80000] [--fee-floor-ratio-bps 15000] [--commit --use-kms]",
     "",
     "Dry-run is the default. Writes require both --commit and --use-kms. Raw keys are never accepted.",
   ].join("\n");
@@ -612,16 +664,24 @@ async function fetchJson(url, label) {
   }
 }
 
-async function resolveSigner(args, provider) {
+export async function resolveSigner(args, provider, {
+  env = process.env,
+  KmsSignerClass = KmsSigner,
+  credentialsProviderBuilder = buildKmsCredentialsProvider,
+} = {}) {
   if (!args.expectedSigner) throw new Error("--expected-signer is mandatory.");
   if (args.commit && !args.useKms) throw new Error("--commit requires --use-kms; raw private keys are not accepted.");
   if (!args.useKms) {
     return { address: getAddress(args.expectedSigner), signer: null, backend: "expected-signer (dry-run only)" };
   }
-  const keyId = String(process.env.KMS_KEY_ID ?? "").trim();
-  const region = String(process.env.AWS_REGION ?? "").trim();
+  const keyId = String(env.KMS_KEY_ID ?? "").trim();
+  const region = String(env.AWS_REGION ?? "").trim();
   if (!keyId || !region) throw new Error("--use-kms requires KMS_KEY_ID and AWS_REGION.");
-  const signer = new KmsSigner({ keyId, region, provider });
+  const credentialsProvider = credentialsProviderBuilder({
+    profile: PROFILE_BLOCKCHAIN_SIGNER,
+    env,
+  });
+  const signer = new KmsSignerClass({ keyId, region, provider, credentialsProvider });
   return {
     address: assertExpectedSigner(await signer.getAddress(), args.expectedSigner),
     signer,
@@ -1035,19 +1095,28 @@ export async function main(argv = process.argv.slice(2)) {
   const requestId = normalizeBytes32(args.requestId, "--request-id");
   const deploymentId = args.deploymentId ? positiveBigInt(args.deploymentId, "--deployment-id") : 0n;
   const recallId = args.recallId ? positiveBigInt(args.recallId, "--recall-id") : 0n;
-  const manifest = JSON.parse(await readFile(resolve(repoRoot, "deployments", "mainnet.json"), "utf8"));
-  const poolAddress = getAddress(manifest.contracts.depositPool);
+  const manifest = await readDeploymentManifest("mainnet");
+  const { poolAddress } = resolvePoolTarget({
+    requestedPool: args.pool,
+    manifestPool: manifest.contracts.depositPool,
+  });
   const venueAddress = getAddress(manifest.contracts.hydrationDepositPoolAdapter);
-  const laneAddress = getAddress(manifest.contracts.depositPoolLane);
   const operatingLane = getAddress(manifest.contracts.hydrationUsdcAdapter);
   const wrapperAddress = getAddress(manifest.contracts.xcmWrapper);
-  if (laneAddress === operatingLane) throw new Error("Manifest aliases the dedicated pool lane to the operating adapter; refusing.");
   assertExpectedSigner(args.expectedSigner, manifest.verifier);
 
   const rpc = await createCeremonyRpcContext({ manifest, phase: `pool-venue-${args.command}`, write: args.commit });
   const identity = await resolveSigner(args, rpc.provider);
-  const pool = new Contract(poolAddress, POOL_ABI, rpc.provider);
   const venue = new Contract(venueAddress, VENUE_ABI, rpc.provider);
+  const adapterBindingBlock = await rpc.provider.getBlockNumber();
+  const [adapterPool, adapterLane] = await Promise.all([
+    venue.pool({ blockTag: adapterBindingBlock }),
+    venue.lane({ blockTag: adapterBindingBlock }),
+  ]);
+  const { laneAddress } = resolveVenueBindings({ poolAddress, adapterPool, adapterLane });
+  console.log(`VENUE PAIRING: pool ${poolAddress} -> adapter ${venueAddress} -> lane ${laneAddress} (block ${adapterBindingBlock})`);
+  if (laneAddress === operatingLane) throw new Error("Chain-bound pool lane aliases the operating adapter; refusing.");
+  const pool = new Contract(poolAddress, POOL_ABI, rpc.provider);
   const lane = new Contract(laneAddress, LANE_ABI, rpc.provider);
   const wrapper = new Contract(wrapperAddress, XCM_WRAPPER_ABI, rpc.provider);
   const balanceReader = new VenueBalanceReader();
