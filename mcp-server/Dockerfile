@@ -38,6 +38,8 @@ COPY mcp-server/src ./src
 COPY scripts/ops/ceremony-module-loader.mjs ./scripts/ops/ceremony-module-loader.mjs
 COPY scripts/ops/ceremony-rpc.mjs ./scripts/ops/ceremony-rpc.mjs
 COPY scripts/ops/pool-venue-ceremony.mjs ./scripts/ops/pool-venue-ceremony.mjs
+COPY scripts/ops/capture-bank-xcm-v22-staging-quote.mjs ./scripts/ops/capture-bank-xcm-v22-staging-quote.mjs
+COPY scripts/ops/pool-venue-dispatch.mjs ./scripts/ops/pool-venue-dispatch.mjs
 
 # Runtime data read from /deployments by code under ./src.
 #
