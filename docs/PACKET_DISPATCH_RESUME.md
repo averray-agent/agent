@@ -1,6 +1,6 @@
 # PACKET — `stage-dispatch` cannot resume a partially dispatched ceremony
 
-Status: **READY FOR CODEX — BLOCKING, FUNDS ARE MID-FLIGHT** · 2026-08-30 ·
+Status: **SHIPPED — #1320 merged 2026-08-30; resumed deployment 4 successfully** · 2026-08-30 ·
 Author: Claude (architect+gate) · Repo: **platform** · One PR.
 **No contract changes. No economics, fee policy, or leg construction changes.**
 

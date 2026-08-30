@@ -1,6 +1,6 @@
 # PACKET — Files ship in the backend image but do not trigger its rebuild
 
-Status: **READY FOR CODEX — a green deploy silently left stale code in production** ·
+Status: **SHIPPED — #1321 merged 2026-08-30 (its node dependency then blocked deploys; fixed by #1324)** ·
 2026-08-30 · Author: Claude (architect+gate) · Repo: **platform** · One PR.
 **No contract changes.**
 

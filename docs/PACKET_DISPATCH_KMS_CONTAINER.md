@@ -1,6 +1,6 @@
 # PACKET — The dispatch step has the same defect, and is mid-ceremony
 
-Status: **READY FOR CODEX — TIME-SENSITIVE** · 2026-08-28 · Author: Claude
+Status: **SHIPPED — #1318 merged 2026-08-30** · 2026-08-28 · Author: Claude
 (architect+gate) · Repo: **platform, scripts** · One PR.
 Same shape as #1317; this is that fix applied to the step I failed to scope.
 

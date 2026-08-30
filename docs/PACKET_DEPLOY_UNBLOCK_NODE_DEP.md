@@ -1,6 +1,6 @@
 # PACKET — #1321 blocks every deploy: the host has no `node`
 
-Status: **READY FOR CODEX — PRODUCTION DEPLOYS ARE FULLY BLOCKED** ·
+Status: **SHIPPED — #1324 merged 2026-08-30; deploys green again, shell/awk derivation** ·
 2026-08-30 · Author: Claude (architect+gate) · Repo: **platform** · One PR.
 
 ## What happened

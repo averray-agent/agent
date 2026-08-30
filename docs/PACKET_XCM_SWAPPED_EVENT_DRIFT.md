@@ -1,6 +1,6 @@
 # PACKET — The dispatch guard expects an event Hydration no longer emits
 
-Status: **READY FOR CODEX — BLOCKING A LIVE CEREMONY** · 2026-08-30 ·
+Status: **SHIPPED — #1319 merged 2026-08-30; Swapped3 now accepted** · 2026-08-30 ·
 Author: Claude (architect+gate) · Repo: **platform, mcp-server** · One PR.
 **No contract changes. Nothing about economics, legs, or fee policy.**
 
