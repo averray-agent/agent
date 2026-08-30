@@ -40,7 +40,7 @@ correcting it. Today the correction lost.
 It also silently breaks the usual guarantee that a fresh host, rebuilt from the
 repo, reproduces production — a rebuild would come up on the 25 July schema.
 
-## The decision this needs — A or B
+## DECISION — RATIFIED 2026-08-30 (Pascal): option B, drop it from the repo
 
 **A — Rotation writes back to the repo.** A schema rotation produces a change
 to `runtime.indexer.schema`, so the manifest stays true. One source of truth,
@@ -51,11 +51,20 @@ becomes the only source, and the render stops emitting a competing value it
 cannot know. Needs a bootstrap path for a host with no persisted state (mint a
 fresh schema rather than inherit a stale literal).
 
-**Recommend B**, on the grounds that host state is *already* authoritative — it
-is what the running container claimed — and a second, weaker copy in the repo
-buys nothing except the chance to be wrong. A only helps if we also want the
-schema reproducible from the repo, which conflicts with rotation being a
-runtime decision.
+**RATIFIED: B.** Remove `runtime.indexer.schema` from the manifest and
+`DATABASE_SCHEMA` from the rendered indexer template. Host state is already
+authoritative — it is what the running container claimed — and a weaker second
+copy in the repo buys nothing except the chance to be wrong.
+
+**Accepted costs, stated plainly so nobody is surprised later:**
+
+1. **The repo will no longer record which schema production runs.** That fact
+   lives only on the VPS. Anyone debugging from a checkout must read host state
+   to know it. Document where.
+2. **A rebuilt host re-syncs from scratch** rather than adopting the existing
+   schema, because it has no persisted state to inherit and must mint fresh.
+   That is a full historical re-sync, and it is the price of never rendering a
+   wrong value.
 
 ## Regardless of A or B — fail closed on disagreement
 
