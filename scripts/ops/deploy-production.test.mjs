@@ -11,6 +11,7 @@ import {
   buildSelection,
   writeSelectionAtomic,
 } from "./caddy-network-selection.mjs";
+import { buildBackendRebuildPattern } from "./backend-image-rebuild-pattern.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const DEPLOY_SCRIPT = join(REPO_ROOT, "scripts/ops/deploy-production.sh");
@@ -1198,6 +1199,57 @@ test("a change confined to a Dockerfile-copied ops script rebuilds the backend",
     components: ["backend"],
   });
   assert.match(await readFile(fixture.deployLog, "utf8"), /^backend$/mu);
+});
+
+test("backend matcher derives without node on PATH and byte-matches the CI reference", async () => {
+  const fixture = await makeBackendPointerFixture();
+  const hostOnlyPath = `${fixture.fakeBin}:/usr/bin:/bin`;
+  assert.equal(
+    spawnSync("node", ["--version"], { env: { PATH: hostOnlyPath } }).error?.code,
+    "ENOENT",
+    "the deploy proof must run with no Node executable available",
+  );
+  await mkdir(fixture.stateDir, { recursive: true });
+  await writeFile(join(fixture.stateDir, "backend.last-good"), `${fixture.backendSha}\n`);
+  git(fixture.appRoot, "checkout", fixture.copiedScriptSha);
+  const dockerfileText = await readFile(join(fixture.appRoot, "mcp-server/Dockerfile"), "utf8");
+  const expectedPattern = buildBackendRebuildPattern({
+    dockerfileText,
+    repoRoot: fixture.appRoot,
+  });
+
+  const deployed = runDeploy(fixture.appRoot, {
+    ...fixture.env,
+    PATH: hostOnlyPath,
+    DEPLOY_OLD_SHA: fixture.backendSha,
+    DEPLOY_NEW_SHA: fixture.copiedScriptSha,
+    FAKE_HEALTH_SHA: fixture.copiedScriptSha,
+    RUN_BACKEND: "auto",
+  });
+
+  assert.equal(deployed.status, 0, deployed.stderr);
+  assert.equal(
+    deployed.stdout.split("\n").find((line) => line.startsWith("Backend rebuild pattern: ")),
+    `Backend rebuild pattern: ${expectedPattern}`,
+  );
+  assert.match(await readFile(fixture.deployLog, "utf8"), /^backend$/mu);
+});
+
+test("empty Dockerfile COPY derivation fails the deploy closed", async () => {
+  const fixture = await makeBackendPointerFixture();
+  await writeFile(join(fixture.appRoot, "mcp-server/Dockerfile"), "FROM node:22-alpine\n");
+
+  const refused = runDeploy(fixture.appRoot, {
+    ...fixture.env,
+    PATH: `${fixture.fakeBin}:/usr/bin:/bin`,
+    FAKE_HEALTH_SHA: fixture.docsSha,
+    RUN_BACKEND: "auto",
+  });
+
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /exposes no parseable build-context COPY sources/u);
+  assert.match(refused.stderr, /refusing a potentially stale deploy/u);
+  assert.doesNotMatch(await readFile(fixture.deployLog, "utf8").catch(() => ""), /^backend$/mu);
 });
 
 test("deploy exits non-zero when public health serves a different deployedSha", async () => {
