@@ -14,6 +14,8 @@ import {
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const DEPLOY_SCRIPT = join(REPO_ROOT, "scripts/ops/deploy-production.sh");
+const BACKEND_REBUILD_PATTERN_SCRIPT = join(REPO_ROOT, "scripts/ops/backend-image-rebuild-pattern.mjs");
+const BACKEND_DOCKERFILE = join(REPO_ROOT, "mcp-server/Dockerfile");
 const FRONTEND_DEPLOY_SCRIPT = join(REPO_ROOT, "scripts/ops/redeploy-frontend.sh");
 const APP_PACKAGE = join(REPO_ROOT, "app/package.json");
 // DERIVE_SETTLEMENT_ENV_SCRIPT was removed in PR 2.6: deploy-production.sh
@@ -136,6 +138,7 @@ test("deploy wrapper retries frontend after an earlier failed indexer deploy", a
     DEPLOY_NEW_SHA: frontendSha,
     DEPLOY_LOG: deployLog,
     FAIL_INDEXER: "1",
+    RUN_BACKEND: "0",
     RUN_INDEXER: "1",
     RUN_SITE: "0",
     RUN_CADDY: "0",
@@ -1061,6 +1064,31 @@ test("a skipped backend keeps its pointer so the next automatic run deploys it",
     (await readFile(join(fixture.stateDir, "backend.last-good"), "utf8")).trim(),
     fixture.backendSha,
   );
+});
+
+test("a change confined to a Dockerfile-copied ops script rebuilds the backend", async () => {
+  const fixture = await makeBackendPointerFixture();
+  await mkdir(fixture.stateDir, { recursive: true });
+  await writeFile(join(fixture.stateDir, "backend.last-good"), `${fixture.backendSha}\n`);
+  git(fixture.appRoot, "checkout", fixture.copiedScriptSha);
+
+  const deployed = runDeploy(fixture.appRoot, {
+    ...fixture.env,
+    DEPLOY_OLD_SHA: fixture.backendSha,
+    DEPLOY_NEW_SHA: fixture.copiedScriptSha,
+    FAKE_HEALTH_SHA: fixture.copiedScriptSha,
+    RUN_BACKEND: "auto",
+  });
+
+  assert.equal(deployed.status, 0, deployed.stderr);
+  assert.deepEqual(parseDeployResult(deployed.stdout), {
+    schemaVersion: 1,
+    changed: true,
+    oldSha: fixture.backendSha,
+    newSha: fixture.copiedScriptSha,
+    components: ["backend"],
+  });
+  assert.match(await readFile(fixture.deployLog, "utf8"), /^backend$/mu);
 });
 
 test("deploy exits non-zero when public health serves a different deployedSha", async () => {
@@ -2025,6 +2053,8 @@ async function makeBackendPointerFixture() {
   await mkdir(fakeBin, { recursive: true });
   await writeFile(join(stackRoot, "docker-compose.yml"), "services: {}\n");
   await copyFile(DEPLOY_SCRIPT, join(appRoot, "scripts/ops/deploy-production.sh"));
+  await copyFile(BACKEND_REBUILD_PATTERN_SCRIPT, join(appRoot, "scripts/ops/backend-image-rebuild-pattern.mjs"));
+  await copyFile(BACKEND_DOCKERFILE, join(appRoot, "mcp-server/Dockerfile"));
   await chmod(join(appRoot, "scripts/ops/deploy-production.sh"), 0o755);
   await writeExecutable(join(appRoot, "scripts/ops/redeploy-backend.sh"), [
     "#!/usr/bin/env bash",
@@ -2044,6 +2074,7 @@ async function makeBackendPointerFixture() {
   git(appRoot, "config", "user.name", "Deploy Test");
   await writeFile(join(appRoot, "README.md"), "base\n");
   await writeFile(join(appRoot, "mcp-server/src/server.js"), "export const version = 1;\n");
+  await writeFile(join(appRoot, "scripts/ops/pool-venue-dispatch.mjs"), "export const version = 1;\n");
   git(appRoot, "add", ".");
   git(appRoot, "commit", "-m", "base");
   const baseSha = revParse(appRoot, "HEAD");
@@ -2057,6 +2088,11 @@ async function makeBackendPointerFixture() {
   git(appRoot, "add", ".");
   git(appRoot, "commit", "-m", "backend change");
   const backendSha = revParse(appRoot, "HEAD");
+
+  await writeFile(join(appRoot, "scripts/ops/pool-venue-dispatch.mjs"), "export const version = 2;\n");
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", "copied ops change");
+  const copiedScriptSha = revParse(appRoot, "HEAD");
   git(appRoot, "checkout", docsSha);
 
   return {
@@ -2068,6 +2104,7 @@ async function makeBackendPointerFixture() {
     baseSha,
     docsSha,
     backendSha,
+    copiedScriptSha,
     env: {
       PATH: `${fakeBin}:${process.env.PATH}`,
       STACK_ROOT: stackRoot,
@@ -2133,6 +2170,8 @@ async function makeDurableMainnetTargetFixture() {
       join(appRoot, "scripts/ops", name),
     );
   }
+  await copyFile(BACKEND_REBUILD_PATTERN_SCRIPT, join(appRoot, "scripts/ops/backend-image-rebuild-pattern.mjs"));
+  await copyFile(BACKEND_DOCKERFILE, join(appRoot, "mcp-server/Dockerfile"));
   await writeExecutable(join(appRoot, "scripts/ops/redeploy-backend.sh"), [
     "#!/usr/bin/env bash",
     "set -euo pipefail",
