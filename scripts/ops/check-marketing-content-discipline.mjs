@@ -7,7 +7,8 @@ const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 export const MARKETING_CONTENT_FILES = Object.freeze([
   "site/index.html",
   "site/verify/index.html",
-  "site/proof-to-pay/index.html"
+  "site/proof-to-pay/index.html",
+  "site/pool/index.html"
 ]);
 
 const FORBIDDEN_TERMS = Object.freeze([
@@ -47,7 +48,7 @@ export function assertMarketingContentDiscipline(pages) {
     }
   }
 
-  for (const relativePath of ["site/verify/index.html", "site/proof-to-pay/index.html"]) {
+  for (const relativePath of ["site/verify/index.html", "site/proof-to-pay/index.html", "site/pool/index.html"]) {
     const amount = pages[relativePath].match(BAKED_AMOUNT);
     if (amount) fail(`${relativePath}: baked amount "${amount[0]}" is forbidden`);
   }
@@ -72,6 +73,28 @@ export function assertMarketingContentDiscipline(pages) {
   }
   if (/href="\/receipts\/0x/iu.test(receiptBlock)) {
     fail("site/verify/index.html: paid-run proof must not be replaced by a demonstration receipt");
+  }
+
+  const pool = pages["site/pool/index.html"];
+  const poolSurface = pool.match(/<div\b[^>]*data-public-pool[^>]*>([\s\S]*?)<\/div>\s*<footer\b/iu)?.[1];
+  if (!poolSurface) fail("site/pool/index.html: public pool surface is missing");
+  const poolText = poolSurface.replace(/<[^>]+>/gu, " ").replace(/\s+/gu, " ").trim();
+  if (/\b[0-9]+(?:\.[0-9]+)?\b/u.test(poolText)) {
+    fail("site/pool/index.html: numeric pool figure is baked into markup");
+  }
+  if (!/data-pool-risk-statement(?:\s|>|=)/iu.test(poolSurface)) {
+    fail("site/pool/index.html: API-rendered risk disclosure target is missing");
+  }
+  if (/Technical pilot\. Principal at risk\. No depositor protection\./iu.test(poolSurface)) {
+    fail("site/pool/index.html: risk disclosure must be rendered from GET /pool, not baked into markup");
+  }
+  if (/\b(?:rate|apy|projection)\b|yield\s+date/iu.test(poolText)) {
+    fail("site/pool/index.html: forbidden future-performance copy is present");
+  }
+  const statePosition = poolSurface.indexOf("data-pool-yield-heading");
+  const actionPosition = poolSurface.indexOf("data-pool-cta");
+  if (statePosition < 0 || actionPosition < 0 || statePosition > actionPosition) {
+    fail("site/pool/index.html: live earning state must precede the depositor control");
   }
 }
 

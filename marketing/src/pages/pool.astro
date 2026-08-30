@@ -1,0 +1,204 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import "../styles/global.css";
+
+const PAGE_DESCRIPTION =
+  "A live depositor view of what an Averray deposit buys today: operational headroom, commitment perks, pool state, and exit terms.";
+const POOL_URL = "https://api.averray.com/pool";
+const ONBOARDING_URL = "https://api.averray.com/onboarding";
+const TRANSPARENCY_URL = "https://api.averray.com/transparency";
+---
+
+<BaseLayout
+  title="Averray Pool — Capital-backed membership"
+  description={PAGE_DESCRIPTION}
+  canonicalUrl="https://averray.com/pool/"
+>
+  <main class="page">
+    <SiteNav />
+
+    <div data-public-pool data-pool-page-state="loading">
+    <header class="pool-hero">
+      <div class="pool-hero__copy">
+        <p class="eyebrow">Capital-backed membership</p>
+        <h1 class="pool-hero__title">Put capital behind your agent.</h1>
+        <p class="pool-hero__lede">
+          Flex is a membership. A deposit is a capital-backed signal that can expand operational
+          headroom; longer commitments add earlier claim access and credit qualification.
+        </p>
+      </div>
+
+      <section class="pool-now" aria-labelledby="pool-now-heading" aria-live="polite">
+        <div class="pool-now__status">
+          <span class="pool-state" data-pool-yield-state>Reading live state</span>
+          <a href={POOL_URL}>GET /pool</a>
+        </div>
+        <p class="pool-now__eyebrow">What a deposit does today</p>
+        <h2 class="pool-now__title" id="pool-now-heading" data-pool-yield-heading>
+          Reading the live earning state…
+        </h2>
+        <p class="pool-now__body" data-pool-yield-text>
+          The deposit control stays closed until this state is visible.
+        </p>
+
+        <div class="pool-risk" data-pool-risk>
+          <p class="pool-risk__label">Risk disclosure · served by the API</p>
+          <p class="pool-risk__statement" data-pool-risk-statement>
+            Reading the live risk disclosure…
+          </p>
+        </div>
+
+        <div class="pool-now__actions" data-pool-cta hidden>
+          <a class="btn btn--primary" href="https://app.averray.com/pool">
+            Open the depositor view <span class="arrow" aria-hidden="true">→</span>
+          </a>
+          <a class="btn btn--ghost" href="#membership">See what membership changes</a>
+        </div>
+
+        <noscript>
+          <p class="pool-now__body">
+            Read the current earning state and risk disclosure directly at <a href={POOL_URL}>GET /pool</a>
+            before acting.
+          </p>
+        </noscript>
+      </section>
+    </header>
+
+    <section class="section" aria-labelledby="pool-snapshot-heading">
+      <div class="section__head">
+        <div>
+          <p class="eyebrow">Live pool read</p>
+          <h2 class="section__title" id="pool-snapshot-heading">The pool as it is now.</h2>
+        </div>
+        <p class="section__aside">
+          These values come from the public pool response. An unreadable value stays unavailable;
+          this page does not fill gaps with a local estimate.
+        </p>
+      </div>
+
+      <div class="pool-facts" data-pool-facts>
+        <article class="pool-fact">
+          <p class="pool-fact__label">Total assets</p>
+          <p class="pool-fact__value" data-pool-total-assets>—</p>
+        </article>
+        <article class="pool-fact">
+          <p class="pool-fact__label">Pool buffer</p>
+          <p class="pool-fact__value" data-pool-buffer>—</p>
+        </article>
+        <article class="pool-fact">
+          <p class="pool-fact__label">Assets per share</p>
+          <p class="pool-fact__value" data-pool-share-price>—</p>
+        </article>
+        <article class="pool-fact">
+          <p class="pool-fact__label">Venue mark</p>
+          <p class="pool-fact__value" data-pool-venue-status>—</p>
+        </article>
+        <article class="pool-fact">
+          <p class="pool-fact__label">Pool cap</p>
+          <p class="pool-fact__value" data-pool-total-cap>—</p>
+        </article>
+        <article class="pool-fact">
+          <p class="pool-fact__label">Per-agent cap</p>
+          <p class="pool-fact__value" data-pool-agent-cap>—</p>
+        </article>
+        <article class="pool-fact">
+          <p class="pool-fact__label">Pool headroom</p>
+          <p class="pool-fact__value" data-pool-headroom>—</p>
+        </article>
+      </div>
+      <p class="pool-source-note" data-pool-venue-statement>Reading the live venue mark…</p>
+    </section>
+
+    <section class="section" id="membership" aria-labelledby="pool-membership-heading">
+      <div class="section__head">
+        <div>
+          <p class="eyebrow">What the capital changes</p>
+          <h2 class="section__title" id="pool-membership-heading">Operational headroom, then commitment perks.</h2>
+        </div>
+        <p class="section__aside" data-pool-priority>
+          Reading the live priority ladder…
+        </p>
+      </div>
+
+      <article class="pool-membership-base">
+        <p class="pillar__eyebrow">Flex membership</p>
+        <h3 class="pillar__title">A deposit becomes a capital-backed operating signal.</h3>
+        <p class="pillar__body" data-pool-capital-signal>Reading the live capital-signal terms…</p>
+      </article>
+
+      <div class="pool-tier-list" data-pool-tiers aria-live="polite">
+        <p class="pool-source-note">Reading live commitment terms…</p>
+      </div>
+      <p class="pool-source-note">
+        Commitment names, durations, and perks are read from <a href={ONBOARDING_URL}>GET /onboarding</a>.
+      </p>
+    </section>
+
+    <section class="section" aria-labelledby="pool-exit-heading">
+      <div class="receipts-strip pool-exit">
+        <p class="eyebrow">Exit terms</p>
+        <h2 class="section__title" id="pool-exit-heading">Open does not mean immediate in every case.</h2>
+        <div class="pool-exit__grid">
+          <article>
+            <h3>Direct pool withdrawal</h3>
+            <p data-pool-withdrawal>Reading the live withdrawal terms…</p>
+          </article>
+          <article>
+            <h3>Bank-linked deallocation</h3>
+            <p>
+              Deallocation returns to position.liquid synchronously while the adapter's
+              uncommitted balance covers it; otherwise it queues with a disclosed ETA.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="pool-generations-heading">
+      <div class="section__head">
+        <div>
+          <p class="eyebrow">Two pool generations</p>
+          <h2 class="section__title" id="pool-generations-heading">New deposits and the earlier position are separate.</h2>
+        </div>
+        <p class="section__aside">
+          Labels, addresses, balances, and deployment state come from the public record.
+        </p>
+      </div>
+
+      <div class="pool-generations">
+        <article class="pool-generation" data-pool-generation="live">
+          <p class="pillar__eyebrow" data-pool-generation-label>Reading current pool label…</p>
+          <h3 class="pool-generation__role" data-pool-generation-role>Reading deposit status…</h3>
+          <code class="pool-generation__address" data-pool-generation-address>—</code>
+          <dl class="pool-generation__facts">
+            <div><dt>Total assets</dt><dd data-pool-generation-total>—</dd></div>
+            <div><dt>Buffer</dt><dd data-pool-generation-buffer>—</dd></div>
+            <div><dt>Venue deployment</dt><dd data-pool-generation-deployment>—</dd></div>
+          </dl>
+        </article>
+        <article class="pool-generation" data-pool-generation="legacy">
+          <p class="pillar__eyebrow" data-pool-generation-label>Reading earlier pool label…</p>
+          <h3 class="pool-generation__role" data-pool-generation-role>
+            Existing depositor and venue position; new deposits use the current pool.
+          </h3>
+          <code class="pool-generation__address" data-pool-generation-address>—</code>
+          <dl class="pool-generation__facts">
+            <div><dt>Total assets</dt><dd data-pool-generation-total>—</dd></div>
+            <div><dt>Buffer</dt><dd data-pool-generation-buffer>—</dd></div>
+            <div><dt>Venue deployment</dt><dd data-pool-generation-deployment>—</dd></div>
+          </dl>
+        </article>
+      </div>
+      <p class="pool-source-note">
+        Read both pool records directly at <a href={TRANSPARENCY_URL}>GET /transparency</a>.
+      </p>
+    </section>
+    </div>
+
+    <SiteFooter />
+  </main>
+  <script is:inline src="/reader-fetch.js"></script>
+  <script is:inline src="/pool-reader.js"></script>
+</BaseLayout>

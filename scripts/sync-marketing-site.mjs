@@ -14,7 +14,7 @@ const siteDir = path.join(repoRoot, "site");
 // directory, so stale content-hashed assets get pruned.
 // `fonts` carries the self-hosted webfonts from marketing/public/fonts —
 // standalone site/ pages (agent.html, schema docs) reference them too.
-const generatedEntries = ["index.html", "_astro", "console-stream.js", "reader-fetch.js", "receipt-reader.js", "trust-providers.js", "transparency-reader.js", "verify-reader.js", "fonts", "polkadot-mark.svg"];
+const generatedEntries = ["index.html", "_astro", "console-stream.js", "reader-fetch.js", "receipt-reader.js", "trust-providers.js", "transparency-reader.js", "verify-reader.js", "pool-reader.js", "fonts", "polkadot-mark.svg"];
 
 // These nested files are generated too, but they live in directories that also
 // hold hand-authored files — schema reference docs, badge SVGs, and potentially
@@ -32,10 +32,11 @@ const generatedNestedFiles = [
   "receipts/index.html",
   "verify/index.html",
   "proof-to-pay/index.html",
+  "pool/index.html",
   ".well-known/agent-tools.json",
 ];
 
-// The transparency and Verify lanes each have a two-file runtime surface: the
+// The transparency, Verify, and pool lanes each have a two-file runtime surface: the
 // generated page and its live reader must both survive the source→site sync
 // allow-lists.
 for (const [entry, allowList] of [
@@ -43,6 +44,8 @@ for (const [entry, allowList] of [
   ["transparency/index.html", generatedNestedFiles],
   ["verify-reader.js", generatedEntries],
   ["verify/index.html", generatedNestedFiles],
+  ["pool-reader.js", generatedEntries],
+  ["pool/index.html", generatedNestedFiles],
 ]) {
   if (!allowList.includes(entry)) {
     throw new Error(`Marketing sync allow-list is missing ${entry}`);

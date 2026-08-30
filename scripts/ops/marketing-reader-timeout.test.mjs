@@ -36,6 +36,7 @@ test("public readers time out and retry a never-resolving fetch exactly once", a
 test("all live marketing readers use the shared bounded reader", async () => {
   const readers = [
     "verify-reader.js",
+    "pool-reader.js",
     "trust-providers.js",
     "receipt-reader.js",
     "transparency-reader.js"
