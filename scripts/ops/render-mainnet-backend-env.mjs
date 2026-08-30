@@ -180,12 +180,10 @@ export const TODO_KEYS = {
   PONDER_START_BLOCK_TREASURY: "mainnet deploy block",
   PONDER_START_BLOCK_ESCROW: "mainnet deploy block",
   PONDER_START_BLOCK_REPUTATION: "mainnet deploy block",
-  DATABASE_SCHEMA: "fresh mainnet ponder schema name",
 };
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/u;
 const ACCOUNT_ID32_RE = /^0x[0-9a-fA-F]{64}$/u;
-const SCHEMA_RE = /^[a-z_][a-z0-9_]{0,62}$/u;
 
 function requireAddress(value, label) {
   if (typeof value !== "string" || !ADDRESS_RE.test(value)) {
@@ -278,9 +276,6 @@ export function buildManifestOverrides(manifest) {
   const blocks = manifest.deploymentBlocks ?? {};
   const auth = manifest.runtime?.auth ?? {};
   const indexer = manifest.runtime?.indexer ?? {};
-  if (typeof indexer.schema !== "string" || !SCHEMA_RE.test(indexer.schema)) {
-    throw new Error("deployments/mainnet.json: runtime.indexer.schema must be a lowercase PostgreSQL identifier");
-  }
   if (indexer.database !== "averray_mainnet") {
     throw new Error("deployments/mainnet.json: runtime.indexer.database must be averray_mainnet");
   }
@@ -347,7 +342,6 @@ export function buildManifestOverrides(manifest) {
       blocks.discoveryRegistry,
       "deploymentBlocks.discoveryRegistry"
     ),
-    DATABASE_SCHEMA: indexer.schema,
   };
 }
 
@@ -498,10 +492,37 @@ export function generateAll(readFile = (p) => readFileSync(join(REPO_ROOT, p), "
   return files;
 }
 
+/** Return generated outputs whose committed bytes are absent or stale. */
+export function findGeneratedDrift(
+  files,
+  readFile = (p) => readFileSync(join(REPO_ROOT, p), "utf8"),
+) {
+  const drift = [];
+  for (const [rel, content] of Object.entries(files)) {
+    let current;
+    try {
+      current = readFile(rel);
+    } catch {
+      current = null;
+    }
+    if (current !== content) drift.push(rel);
+  }
+  return drift;
+}
+
 async function main() {
   const check = process.argv.slice(2).includes("--check");
   const files = generateAll();
-  const drift = [];
+  if (check) {
+    const drift = findGeneratedDrift(files);
+    if (drift.length) {
+      console.error(`render-mainnet-backend-env --check: STALE — regenerate:\n  - ${drift.join("\n  - ")}`);
+      console.error(`  run: node scripts/ops/render-mainnet-backend-env.mjs`);
+      process.exit(1);
+    }
+    console.log("render-mainnet-backend-env --check: ok (committed output matches generator)");
+    return;
+  }
   for (const [rel, content] of Object.entries(files)) {
     const abs = join(REPO_ROOT, rel);
     let current = "";
@@ -510,24 +531,12 @@ async function main() {
     } catch {
       current = null;
     }
-    if (check) {
-      if (current !== content) drift.push(rel);
+    if (current !== content) {
+      writeFileSync(abs, content);
+      console.log(`  wrote ${rel}`);
     } else {
-      if (current !== content) {
-        writeFileSync(abs, content);
-        console.log(`  wrote ${rel}`);
-      } else {
-        console.log(`  ok    ${rel} (unchanged)`);
-      }
+      console.log(`  ok    ${rel} (unchanged)`);
     }
-  }
-  if (check) {
-    if (drift.length) {
-      console.error(`render-mainnet-backend-env --check: STALE — regenerate:\n  - ${drift.join("\n  - ")}`);
-      console.error(`  run: node scripts/ops/render-mainnet-backend-env.mjs`);
-      process.exit(1);
-    }
-    console.log("render-mainnet-backend-env --check: ok (committed output matches generator)");
   }
 }
 

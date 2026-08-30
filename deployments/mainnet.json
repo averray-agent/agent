@@ -278,8 +278,7 @@
       ]
     },
     "indexer": {
-      "database": "averray_mainnet",
-      "schema": "agent_indexer_mainnet_20260725131847"
+      "database": "averray_mainnet"
     }
   },
   "strategies": [

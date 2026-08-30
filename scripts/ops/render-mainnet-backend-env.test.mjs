@@ -19,6 +19,7 @@ import {
   buildInventoryBlock,
   spliceInventory,
   generateAll,
+  findGeneratedDrift,
 } from "./render-mainnet-backend-env.mjs";
 
 const MANIFEST = {
@@ -67,7 +68,6 @@ const MANIFEST = {
     },
     indexer: {
       database: "averray_mainnet",
-      schema: "agent_indexer_mainnet_20260725131847",
     },
   },
 };
@@ -151,7 +151,7 @@ test("transformLine: per-deploy unknowns become commented TODO(operator)", () =>
   assert.match(admin, /NEVER the testnet hot key nor the leaked 0xFd2E/u);
 });
 
-test("buildManifestOverrides: resolves addresses, auth, blocks, and schema", () => {
+test("buildManifestOverrides: resolves addresses, auth, and blocks without a repo-owned schema", () => {
   const overrides = buildManifestOverrides(MANIFEST);
   assert.equal(overrides.TREASURY_POLICY_ADDRESS, MANIFEST.contracts.treasuryPolicy);
   assert.equal(overrides.AUTH_ADMIN_WALLETS, MANIFEST.runtime.auth.adminWallets.join(","));
@@ -166,7 +166,7 @@ test("buildManifestOverrides: resolves addresses, auth, blocks, and schema", () 
   );
   assert.equal(overrides.BANK_XCM_FLOW_ENABLED, "true");
   assert.equal(overrides.PONDER_START_BLOCK_REGISTRIES, "104");
-  assert.equal(overrides.DATABASE_SCHEMA, MANIFEST.runtime.indexer.schema);
+  assert.equal(overrides.DATABASE_SCHEMA, undefined);
   assert.equal(overrides.BANK_LANE_FEED_HYDRATION_ACCOUNT_ID32, "141ujyV9aKBYqZncx6SYRWU2XQCxUcYiGYE8U7jprEKVUZNJ");
   assert.equal(overrides.BANK_LANE_FEED_POSTAGE_ACCOUNT, "1yKNU414vYDyXYXL6pu845puajfeGTezD1rBiUYwp9UKBaZ");
   assert.equal(
@@ -393,11 +393,25 @@ test("generateAll: the real transform yields the mainnet essentials", () => {
   assert.match(indexer, /^PONDER_START_BLOCK_ESCROW=18647537$/mu);
   assert.match(indexer, /^PONDER_START_BLOCK_REPUTATION=18647544$/mu);
   assert.match(indexer, /^PONDER_START_BLOCK_REGISTRIES=18647552$/mu);
-  assert.match(indexer, /^DATABASE_SCHEMA=agent_indexer_mainnet_20260725131847$/mu);
+  assert.doesNotMatch(
+    indexer,
+    /^DATABASE_SCHEMA=/mu,
+    "the rendered template must leave the host's persisted schema authoritative",
+  );
   assert.doesNotMatch(
     indexer,
     /^\s*#?\s*[A-Z][A-Z0-9_]*=.*TODO\(operator\)/mu
   );
   // no testnet RPC anywhere in the rendered mainnet templates
   assert.ok(!indexer.includes("eth-rpc-testnet.polkadot.io"));
+});
+
+test("generator --check drift detector still reports a genuinely stale template", () => {
+  const files = generateAll();
+  const stale = "deploy/indexer.mainnet.env.template";
+  const drift = findGeneratedDrift(files, (path) => (
+    path === stale ? `${files[path]}# stale bytes\n` : files[path]
+  ));
+
+  assert.deepEqual(drift, [stale]);
 });

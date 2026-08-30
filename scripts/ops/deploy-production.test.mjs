@@ -139,7 +139,6 @@ test("deploy wrapper retries frontend after an earlier failed indexer deploy", a
       "POLKADOT_CHAIN_ID=420420417",
       "POLKADOT_CHAIN_NAME=polkadotHubTestnet",
       "PONDER_ESCROW_CORE_ADDRESS=0x1111111111111111111111111111111111111111",
-      "DATABASE_SCHEMA=agent_indexer_existing",
       "",
     ].join("\n")
   );
@@ -224,8 +223,13 @@ test("indexer source, resolved Ponder version, or contract-config changes rotate
   await mkdir(join(appRoot, "deploy"), { recursive: true });
   await mkdir(stackRoot, { recursive: true });
   await mkdir(fakeBin, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
   await writeFile(join(stackRoot, "docker-compose.yml"), "services: {}\n");
   await writeFile(indexerEnv, "DATABASE_SCHEMA=agent_indexer_existing\n");
+  await writeFile(
+    join(stateDir, "indexer.database-schema.testnet"),
+    "agent_indexer_existing\n",
+  );
   await copyFile(DEPLOY_SCRIPT, join(appRoot, "scripts/ops/deploy-production.sh"));
   await chmod(join(appRoot, "scripts/ops/deploy-production.sh"), 0o755);
   await writeExecutable(join(appRoot, "scripts/ops/redeploy-indexer.sh"), [
@@ -257,7 +261,6 @@ test("indexer source, resolved Ponder version, or contract-config changes rotate
       "POLKADOT_CHAIN_NAME=polkadotHubTestnet",
       "PONDER_ESCROW_CORE_ADDRESS=0x1111111111111111111111111111111111111111",
       "PONDER_START_BLOCK_ESCROW=100",
-      "DATABASE_SCHEMA=agent_indexer_existing",
       "",
     ].join("\n")
   );
@@ -369,7 +372,6 @@ test("indexer source, resolved Ponder version, or contract-config changes rotate
       "POLKADOT_CHAIN_NAME=polkadotHubTestnet",
       "PONDER_ESCROW_CORE_ADDRESS=0x2222222222222222222222222222222222222222",
       "PONDER_START_BLOCK_ESCROW=200",
-      "DATABASE_SCHEMA=agent_indexer_existing",
       "",
     ].join("\n")
   );
@@ -973,9 +975,70 @@ test("deploy wrapper can trigger a one-shot bootstrap self-report before smoke",
   );
 });
 
-test("indexer schema recovery persists across normal runtime-env renders", async () => {
+test("rendered and persisted indexer schema disagreement fails before container start", async () => {
+  const fixture = await makeIndexerSchemaSourceFixture({
+    runtimeSchema: "agent_indexer_rendered_stale",
+  });
+  await writeFile(
+    join(fixture.stateDir, "indexer.database-schema.testnet"),
+    "agent_indexer_persisted\n",
+  );
+
+  const refused = runDeploy(fixture.appRoot, fixture.env);
+
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /Indexer schema source-of-truth disagreement/u);
+  assert.match(refused.stderr, /Refusing before DATABASE_SCHEMA or the running container can change/u);
+  assert.equal(await readFile(fixture.deployLog, "utf8").catch(() => ""), "");
+  assert.equal(
+    (await readFile(fixture.indexerEnv, "utf8")).trim(),
+    "DATABASE_SCHEMA=agent_indexer_rendered_stale",
+    "a refused deploy must not silently repair the rendered value",
+  );
+
+  const resolved = runDeploy(fixture.appRoot, {
+    ...fixture.env,
+    INDEXER_DATABASE_SCHEMA: "agent_indexer_persisted",
+  });
+  assert.equal(resolved.status, 0, resolved.stderr);
+  assert.match(resolved.stderr, /Explicit operator schema selection is resolving/u);
+  assert.match(await readFile(fixture.deployLog, "utf8"), /^indexer rollback=agent_indexer_persisted$/mu);
+});
+
+test("fresh host mints a schema instead of inheriting an unowned runtime literal", async () => {
+  const fixture = await makeIndexerSchemaSourceFixture({
+    runtimeSchema: "agent_indexer_unowned_literal",
+  });
+
+  const deployed = runDeploy(fixture.appRoot, fixture.env);
+
+  assert.equal(deployed.status, 0, deployed.stderr);
+  assert.match(deployed.stderr, /ignoring unowned rendered DATABASE_SCHEMA=agent_indexer_unowned_literal/u);
+  const selected = (await readFile(fixture.indexerEnv, "utf8"))
+    .match(/^DATABASE_SCHEMA=(.+)$/mu)?.[1];
+  assert.match(selected, /^agent_indexer_testnet_\d{14}_[0-9a-f]{8}$/u);
+  assert.notEqual(selected, "agent_indexer_unowned_literal");
+  assert.equal(
+    (await readFile(join(fixture.stateDir, "indexer.database-schema.testnet"), "utf8")).trim(),
+    selected,
+  );
+  assert.match(
+    await readFile(join(fixture.stateDir, "indexer.resync.testnet"), "utf8"),
+    /^reason=fresh_host_bootstrap$/mu,
+  );
+  assert.match(await readFile(fixture.deployLog, "utf8"), /^indexer rollback=$/mu);
+});
+
+test("indexer schema host state survives normal runtime-env renders", async () => {
   const script = await readFile(DEPLOY_SCRIPT, "utf8");
   const indexerTemplate = await readFile(join(REPO_ROOT, "deploy/indexer.env.template"), "utf8");
+  const mainnetTemplate = await readFile(
+    join(REPO_ROOT, "deploy/indexer.mainnet.env.template"),
+    "utf8",
+  );
+  const mainnetManifest = JSON.parse(
+    await readFile(join(REPO_ROOT, "deployments/mainnet.json"), "utf8"),
+  );
 
   assert.match(
     script,
@@ -1009,8 +1072,13 @@ test("indexer schema recovery persists across normal runtime-env renders", async
   );
   assert.match(
     script,
-    /Reapplying persisted indexer DATABASE_SCHEMA override/u,
-    "normal deploys should reapply a persisted schema override after rendering the template"
+    /Indexer deploy was selected without a completed host-state schema preflight; refusing before container recreation/u,
+    "every wrapper-selected container recreation must carry a completed host-state schema decision",
+  );
+  assert.match(
+    script,
+    /Applying persisted host-owned indexer DATABASE_SCHEMA/u,
+    "normal deploys should inject persisted host state after rendering the template"
   );
   const renderIndex = script.indexOf("  render_runtime_envs");
   const applyIndex = script.indexOf("    apply_indexer_database_schema 1", renderIndex);
@@ -1018,11 +1086,13 @@ test("indexer schema recovery persists across normal runtime-env renders", async
     renderIndex > -1 && applyIndex > renderIndex,
     "schema override must run after op inject renders /run env files"
   );
-  assert.match(
+  assert.doesNotMatch(
     indexerTemplate,
-    /^DATABASE_SCHEMA=agent_indexer_20260516080108$/m,
-    "the template should match the known-good production Ponder schema"
+    /^DATABASE_SCHEMA=/mu,
+    "the base template must not compete with host state",
   );
+  assert.doesNotMatch(mainnetTemplate, /^DATABASE_SCHEMA=/mu);
+  assert.equal(mainnetManifest.runtime.indexer.schema, undefined);
 });
 
 test("badge-receipt preflight declaration is per network and byte-matches aws-config.mainnet", async () => {
@@ -2386,6 +2456,86 @@ async function makeDurableMainnetTargetFixture() {
       FAKE_HEALTH_SHA: newSha,
       RUN_BACKEND: "auto",
       RUN_INDEXER: "0",
+      RUN_FRONTEND: "0",
+      RUN_SITE: "0",
+      RUN_CADDY: "0",
+      RUN_SMOKE: "0",
+    },
+  };
+}
+
+async function makeIndexerSchemaSourceFixture({ runtimeSchema = "" } = {}) {
+  const root = await mkdtemp(join(tmpdir(), "deploy-indexer-schema-source-"));
+  const appRoot = join(root, "app");
+  const stackRoot = join(root, "stack");
+  const fakeBin = join(root, "bin");
+  const stateDir = join(root, "state");
+  const deployLog = join(root, "deploy.log");
+  const indexerEnv = join(root, "indexer.env");
+
+  await mkdir(join(appRoot, "scripts/ops"), { recursive: true });
+  await mkdir(join(appRoot, "indexer"), { recursive: true });
+  await mkdir(join(appRoot, "deploy"), { recursive: true });
+  await mkdir(stackRoot, { recursive: true });
+  await mkdir(fakeBin, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(join(stackRoot, "docker-compose.yml"), "services: {}\n");
+  await writeFile(
+    indexerEnv,
+    runtimeSchema ? `DATABASE_SCHEMA=${runtimeSchema}\n` : "",
+  );
+  await copyFile(DEPLOY_SCRIPT, join(appRoot, "scripts/ops/deploy-production.sh"));
+  await chmod(join(appRoot, "scripts/ops/deploy-production.sh"), 0o755);
+  await writeExecutable(join(appRoot, "scripts/ops/redeploy-indexer.sh"), [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "printf 'indexer rollback=%s\\n' \"${ROLLBACK_INDEXER_SCHEMA:-}\" >> \"$DEPLOY_LOG\"",
+  ].join("\n"));
+  for (const command of ["docker", "npm", "flock"]) {
+    await writeExecutable(join(fakeBin, command), "#!/usr/bin/env bash\nexit 0\n");
+  }
+  await writeFakeHealthCurl(join(fakeBin, "curl"));
+
+  await writeFile(
+    join(appRoot, "indexer/package-lock.json"),
+    '{"lockfileVersion":3,"packages":{"":{"dependencies":{"ponder":"^0.16.6"}},"node_modules/ponder":{"version":"0.16.6"}}}\n',
+  );
+  await writeFile(
+    join(appRoot, "deploy/indexer.env.template"),
+    [
+      "POLKADOT_CHAIN_ID=420420417",
+      "POLKADOT_CHAIN_NAME=polkadotHubTestnet",
+      "PONDER_ESCROW_CORE_ADDRESS=0x1111111111111111111111111111111111111111",
+      "PONDER_START_BLOCK_ESCROW=100",
+      "",
+    ].join("\n"),
+  );
+
+  git(appRoot, "init");
+  git(appRoot, "config", "user.email", "test@example.com");
+  git(appRoot, "config", "user.name", "Deploy Test");
+  await writeFile(join(appRoot, "README.md"), "schema source fixture\n");
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", "base");
+  const sha = revParse(appRoot, "HEAD");
+
+  return {
+    appRoot,
+    stateDir,
+    deployLog,
+    indexerEnv,
+    env: {
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      STACK_ROOT: stackRoot,
+      COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
+      DEPLOY_LOCK_FILE: join(root, "deploy.lock"),
+      DEPLOY_STATE_DIR: stateDir,
+      INDEXER_ENV_FILE: indexerEnv,
+      DEPLOY_OLD_SHA: sha,
+      DEPLOY_NEW_SHA: sha,
+      DEPLOY_LOG: deployLog,
+      RUN_BACKEND: "0",
+      RUN_INDEXER: "1",
       RUN_FRONTEND: "0",
       RUN_SITE: "0",
       RUN_CADDY: "0",
