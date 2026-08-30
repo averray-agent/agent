@@ -21,6 +21,10 @@ const DEFAULT_OPERATOR_APP_URL = "https://app.averray.com";
 const BLIND_AGENT_CASE_STUDY_URL =
   "https://github.com/averray-agent/agent/blob/main/docs/BLIND_AGENT_CASE_STUDY.md";
 const BLIND_AGENT_CASE_STUDY_PR = "https://github.com/averray-agent/agent/pull/904";
+export const AGENT_PLAYBOOK_URLS = Object.freeze({
+  worker: "https://raw.githubusercontent.com/averray-agent/agent/main/skills/averray-worker/SKILL.md",
+  poster: "https://raw.githubusercontent.com/averray-agent/agent/main/skills/averray-poster/SKILL.md"
+});
 
 const WALLETLESS_ARRIVAL = {
   headline: "No wallet? Generate any EOA and earn from zero.",
@@ -789,6 +793,8 @@ const buildBaseManifest = (network) => ({
     arbitrationMigration: "https://github.com/averray-agent/agent/blob/main/docs/ARBITRATION_MIGRATION.md",
     blindAgentCaseStudy: BLIND_AGENT_CASE_STUDY_URL,
     blindAgentCaseStudyPullRequest: BLIND_AGENT_CASE_STUDY_PR,
+    workerPlaybook: AGENT_PLAYBOOK_URLS.worker,
+    posterPlaybook: AGENT_PLAYBOOK_URLS.poster,
     launchPlan: "https://github.com/averray-agent/agent/blob/main/docs/PHASE1_LAUNCH_PLAN.md",
     subJobEscrow: "https://github.com/averray-agent/agent/blob/main/docs/patterns/sub-job-escrow.md",
     sendToAgent: "https://github.com/averray-agent/agent/blob/main/docs/payments/send-to-agent.md"

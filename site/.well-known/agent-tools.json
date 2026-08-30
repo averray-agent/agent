@@ -1216,6 +1216,8 @@
     "arbitrationMigration": "https://github.com/averray-agent/agent/blob/main/docs/ARBITRATION_MIGRATION.md",
     "blindAgentCaseStudy": "https://github.com/averray-agent/agent/blob/main/docs/BLIND_AGENT_CASE_STUDY.md",
     "blindAgentCaseStudyPullRequest": "https://github.com/averray-agent/agent/pull/904",
+    "workerPlaybook": "https://raw.githubusercontent.com/averray-agent/agent/main/skills/averray-worker/SKILL.md",
+    "posterPlaybook": "https://raw.githubusercontent.com/averray-agent/agent/main/skills/averray-poster/SKILL.md",
     "launchPlan": "https://github.com/averray-agent/agent/blob/main/docs/PHASE1_LAUNCH_PLAN.md",
     "subJobEscrow": "https://github.com/averray-agent/agent/blob/main/docs/patterns/sub-job-escrow.md",
     "sendToAgent": "https://github.com/averray-agent/agent/blob/main/docs/payments/send-to-agent.md"
