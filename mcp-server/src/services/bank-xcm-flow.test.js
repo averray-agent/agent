@@ -269,6 +269,21 @@ function dispatcher(overrides = {}) {
   return { instance, calls };
 }
 
+function swapDryRun(overrides = {}) {
+  return {
+    liveState: true,
+    ok: true,
+    executionSucceeded: true,
+    calldata: "0x1234",
+    events: [{
+      section: "Broadcast",
+      method: "Swapped3",
+      data: { fillerType: "AAVE", assetIn: 22, assetOut: 1003 }
+    }],
+    ...overrides
+  };
+}
+
 test("v2.2 dispatcher derives every limit live and refuses fork-derived evidence", async () => {
   let signed = 0;
   const { instance } = dispatcher({
@@ -350,6 +365,143 @@ test("v2.2 dispatcher owns the leg expectation and caller input cannot weaken it
     /Broadcast\.Swapped/u
   );
   assert.equal(signed, 0);
+});
+
+test("v2.2 swap guard accepts Broadcast.Swapped3 and legacy Broadcast.Swapped on both swap legs", async () => {
+  for (const method of ["Swapped3", "Swapped"]) {
+    const deposit = dispatcher({
+      dryRunMessage: async () => swapDryRun({
+        events: [{
+          section: "Broadcast",
+          method,
+          data: { fillerType: "AAVE", assetIn: 22, assetOut: 1003 }
+        }]
+      })
+    });
+    await deposit.instance.dispatch({ requestId: REQUEST_ID, leg: "deposit_sell" });
+    assert.equal(deposit.calls.filter((entry) => entry.type === "sign").length, 1);
+
+    const withdraw = dispatcher({
+      readLiveRequest: async () => liveRequest({
+        kind: "withdraw",
+        bitmap: 0,
+        assets: "0",
+        parameters: {
+          sellAmount: "100000",
+          minimumOutput: "95000",
+          maxFeePerLeg: "120000",
+          dispatchDeadline: "0"
+        }
+      }),
+      dryRunMessage: async () => swapDryRun({
+        events: [{
+          section: "Broadcast",
+          method,
+          data: { fillerType: "AAVE", assetIn: 1003, assetOut: 22 }
+        }]
+      })
+    });
+    await withdraw.instance.dispatch({ requestId: REQUEST_ID, leg: "withdraw_sell" });
+    assert.equal(withdraw.calls.filter((entry) => entry.type === "sign").length, 1);
+  }
+});
+
+test("v2.2 swap guard refuses Router.Swapped3 from the wrong section", async () => {
+  let signed = 0;
+  const { instance } = dispatcher({
+    dryRunMessage: async () => swapDryRun({
+      events: [{
+        section: "Router",
+        method: "Swapped3",
+        data: { fillerType: "AAVE", assetIn: 22, assetOut: 1003 }
+      }]
+    }),
+    signAndDispatch: async () => { signed += 1; }
+  });
+
+  await assert.rejects(
+    instance.dispatch({ requestId: REQUEST_ID, leg: "deposit_sell" }),
+    /Broadcast\.Swapped/u
+  );
+  assert.equal(signed, 0);
+});
+
+test("v2.2 missing-swap mutation refuses an unrelated Broadcast event", async () => {
+  const valid = swapDryRun();
+  const mutated = structuredClone(valid);
+  mutated.events[0].method = "Executed";
+  assert.notDeepEqual(mutated, valid, "missing-swap mutation must apply");
+
+  const passing = dispatcher({ dryRunMessage: async () => valid });
+  await passing.instance.dispatch({ requestId: REQUEST_ID, leg: "deposit_sell" });
+
+  let signed = 0;
+  const failing = dispatcher({
+    dryRunMessage: async () => mutated,
+    signAndDispatch: async () => { signed += 1; }
+  });
+  await assert.rejects(
+    failing.instance.dispatch({ requestId: REQUEST_ID, leg: "deposit_sell" }),
+    /Broadcast\.Swapped/u
+  );
+  assert.equal(signed, 0);
+});
+
+test("v2.2 swap guard refuses when executionSucceeded is not true", async () => {
+  let signed = 0;
+  const { instance } = dispatcher({
+    dryRunMessage: async () => swapDryRun({ executionSucceeded: false }),
+    signAndDispatch: async () => { signed += 1; }
+  });
+
+  await assert.rejects(
+    instance.dispatch({ requestId: REQUEST_ID, leg: "deposit_sell" }),
+    /did not complete successfully/u
+  );
+  assert.equal(signed, 0);
+});
+
+test("v2.2 forwarded-paraId guard still refuses the wrong sibling", async () => {
+  let signed = 0;
+  const { instance } = dispatcher({
+    readLiveRequest: async () => liveRequest({ bitmap: 0 }),
+    dryRunMessage: async () => ({
+      liveState: true,
+      ok: true,
+      executionSucceeded: true,
+      calldata: "0xfunding",
+      forwardedParaIds: [1000],
+      events: [{ section: "Tokens", method: "Deposited", data: {} }]
+    }),
+    signAndDispatch: async () => { signed += 1; }
+  });
+
+  await assert.rejects(
+    instance.dispatch({ requestId: REQUEST_ID, leg: "deposit_funding" }),
+    /Sibling\(2034\)/u
+  );
+  assert.equal(signed, 0);
+});
+
+test("v2.2 versioned swap spelling leaves fee policy leg construction and dispatch parameters unchanged", async () => {
+  const dispatchInputs = [];
+  for (const method of ["Swapped", "Swapped3"]) {
+    const { instance, calls } = dispatcher({
+      dryRunMessage: async () => swapDryRun({
+        events: [{
+          section: "Broadcast",
+          method,
+          data: { fillerType: "AAVE", assetIn: 22, assetOut: 1003 }
+        }]
+      })
+    });
+    await instance.dispatch({ requestId: REQUEST_ID, leg: "deposit_sell" });
+    dispatchInputs.push(calls.find((entry) => entry.type === "sign").input);
+  }
+
+  assert.deepEqual(dispatchInputs[1], dispatchInputs[0]);
+  assert.equal(dispatchInputs[0].leg, 1);
+  assert.equal(dispatchInputs[0].feeAmount, 34_000n);
 });
 
 test("v2.2 deposit staging margin includes the fresh funding-transfer fee headroom", async () => {
