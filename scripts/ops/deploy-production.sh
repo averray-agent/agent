@@ -1960,11 +1960,11 @@ deploy() {
     apply_indexer_database_schema 1
   fi
 
-  # Phase 2 PR 2.6: the trigger for backend redeploy is now path-based
-  # only — we added deploy/backend.env.template and
-  # deployments/testnet.json to the regex because changes there can
-  # affect rendered /run/backend.env content even without code changes
-  # (the manifest feeds the template via the CI parity guard).
+  # Phase 2 PR 2.6: the trigger for backend redeploy is now path-based.
+  # The pre-existing trigger set stays fixed in
+  # backend-image-rebuild-pattern.mjs. The Dockerfile build-context inputs are
+  # derived from its COPY instructions at deploy time, so a file cannot enter
+  # the backend image without also entering the rebuild trigger.
   #
   # Phase 2 PR 2.7d.1: ALSO trigger on /run env content change. When
   # the trigger is JUST the env content (no code path changed),
@@ -1976,7 +1976,17 @@ deploy() {
   # 1Password item → trigger workflow_dispatch → render produces new
   # /run env → hash differs → force-recreate. No SSH+rm dance needed.
   local backend_code_changed=0
-  if should_run backend "$RUN_BACKEND" '^(mcp-server/|witness/|sdk/|examples/|docs/schemas/|package(-lock)?\.json|scripts/ops/redeploy-backend\.sh|deploy/(witness-docker-proxy|mcp-egress-proxy)/|deploy/docker-compose\.mainnet\.yml|deploy/backend(\.mainnet)?\.env\.template|deployments/(testnet|mainnet)\.json)'; then
+  local backend_rebuild_pattern='^$'
+  if [[ "$RUN_BACKEND" == "auto" ]]; then
+    if ! backend_rebuild_pattern=$(node \
+      "$APP_ROOT/scripts/ops/backend-image-rebuild-pattern.mjs" \
+      "$APP_ROOT/mcp-server/Dockerfile" \
+      "$APP_ROOT"); then
+      echo "Cannot derive the backend rebuild trigger from mcp-server/Dockerfile; refusing a potentially stale deploy." >&2
+      exit 1
+    fi
+  fi
+  if should_run backend "$RUN_BACKEND" "$backend_rebuild_pattern"; then
     backend_code_changed=1
   fi
   if [[ "$backend_code_changed" == "1" || "${RUNTIME_ENV_CHANGED_BACKEND:-0}" == "1" ]]; then
