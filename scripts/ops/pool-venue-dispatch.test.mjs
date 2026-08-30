@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 import { importCeremonyModule } from "./ceremony-module-loader.mjs";
+import { BankXcmV22Dispatcher } from "../../mcp-server/src/services/bank-xcm-flow.js";
 
 import {
   DEFAULT_RECALL_FEE_FLOOR_RATIO_BPS,
@@ -14,6 +15,7 @@ import {
   MIN_DISPATCH_MARGIN_SECONDS,
   assertDispatchMargin,
   assertFeeCeiling,
+  assertMatchingStagedDeploy,
   assertParAaveQuote,
   assertParAaveUnwindQuote,
   assertAaveSwapEvent,
@@ -31,12 +33,15 @@ import {
   deriveRecallParameters,
   deriveStagingParameters,
   deriveLaneRequestId,
+  depositLegPlan,
   parseArgs,
   pendingWithdrawLegs,
   reconcilePoolRecall,
   reconcilePoolTranche,
+  reconcileResumedPoolSell,
   resolveSigner,
   resolveVenueBindings,
+  runDepositLegPlan,
   selectRecallDispatchFee,
   unwindAccrualCeiling,
 } from "./pool-venue-dispatch.mjs";
@@ -199,9 +204,169 @@ test("wrong requestId fails loud before staging", () => {
   }), /Wrong requestId/u);
 });
 
-test("already-staged request fails loud", () => {
+test("cancel still refuses an already-staged request", () => {
   assert.doesNotThrow(() => assertUnstaged({ laneRequestId: ZERO32 }));
   assert.throws(() => assertUnstaged({ laneRequestId: OTHER }), /already staged/u);
+});
+
+const DEPLOY_PARAMETERS = Object.freeze({
+  sellAmount: 4_450_000n,
+  minimumOutput: 4_450_000n,
+  maxFeePerLeg: 40_000n,
+  dispatchDeadline: 2_000_000_000n,
+  nonce: 1n,
+});
+
+test("matching staged deploy parameters resume with only the undispatched leg pending", () => {
+  assert.equal(assertMatchingStagedDeploy({
+    stagedParameters: DEPLOY_PARAMETERS,
+    stagedNonce: DEPLOY_PARAMETERS.nonce,
+    expectedParameters: DEPLOY_PARAMETERS,
+  }), true);
+  assert.deepEqual(depositLegPlan(1n), [
+    { leg: "deposit_funding", bit: 0, status: "skipped" },
+    { leg: "deposit_sell", bit: 1, status: "pending" },
+  ]);
+  const source = readFileSync(scriptPath, "utf8");
+  assert.match(source, /if \(isResume\) \{\s+assertMatchingStagedDeploy\(\{/u);
+});
+
+test("every staged deploy parameter mismatch refuses and names the differing field", () => {
+  for (const field of ["sellAmount", "minimumOutput", "maxFeePerLeg", "dispatchDeadline", "nonce"]) {
+    const stagedParameters = { ...DEPLOY_PARAMETERS };
+    let stagedNonce = DEPLOY_PARAMETERS.nonce;
+    if (field === "nonce") stagedNonce += 1n;
+    else stagedParameters[field] += 1n;
+    assert.throws(
+      () => assertMatchingStagedDeploy({ stagedParameters, stagedNonce, expectedParameters: DEPLOY_PARAMETERS }),
+      new RegExp(`Staged deploy ${field} mismatch`, "u"),
+      field,
+    );
+  }
+});
+
+test("completed deposit legs are skipped and reported instead of dispatched", async () => {
+  const calls = [];
+  const results = await runDepositLegPlan({
+    bitmap: 1n,
+    dispatchFunding: async () => { calls.push("deposit_funding"); },
+    dispatchSell: async () => { calls.push("deposit_sell"); return { txHash: OTHER }; },
+  });
+  assert.deepEqual(calls, ["deposit_sell"]);
+  assert.deepEqual(results.deposit_funding, {
+    status: "skipped",
+    reason: "wrapper bitmap bit 0 is already set",
+    bit: 0,
+  });
+  assert.equal(results.deposit_sell.status, "dispatched");
+});
+
+test("resumed deposit sell still refuses when its exact dry-run guard fails", async () => {
+  let signed = 0;
+  const dispatcher = new BankXcmV22Dispatcher({
+    enabled: true,
+    expectedWrapper: VENUE,
+    readLiveRequest: async () => ({
+      wrapper: VENUE,
+      liveState: true,
+      requestId: REQUEST,
+      kind: "deposit",
+      status: "pending",
+      dispatchPaused: false,
+      operatorMatches: true,
+      bitmap: 1,
+      assets: "4500000",
+      parameters: {
+        sellAmount: "4450000",
+        minimumOutput: "4450000",
+        maxFeePerLeg: "40000",
+        dispatchDeadline: "2000000000",
+      },
+    }),
+    quoteRemoteFee: async () => ({ liveState: true, amount: "17000", asOf: 2_000_000_000 }),
+    quoteHomeExecutionFee: async () => ({ liveState: true, amount: "1", asOf: 2_000_000_000 }),
+    readRemoteOperatingFloat: async () => ({
+      liveState: true,
+      assets: "6017926",
+      asOf: 2_000_000_000,
+      remoteRef: OTHER,
+    }),
+    readFundingTransferFee: async () => ({ liveState: true, amount: "643", asOf: 2_000_000_000 }),
+    dryRunMessage: async () => ({
+      liveState: true,
+      ok: true,
+      executionSucceeded: true,
+      calldata: "0x1234",
+      events: [],
+    }),
+    simulateReviveCall: async () => ({ liveState: true, success: true, weightUsed: { refTime: 1, proofSize: 1 }, storageDepositUsed: 1 }),
+    estimateGas: async () => 1,
+    requireArmedWatch: async () => ({ registrationSource: "chain_event" }),
+    recordRemoteOperatingFloat: async () => ({ status: 1 }),
+    signAndDispatch: async () => { signed += 1; return { status: 1, gasUsed: 1 }; },
+    now: () => 2_000_000_000_000,
+  });
+  await assert.rejects(
+    runDepositLegPlan({
+      bitmap: 1n,
+      dispatchFunding: async () => { throw new Error("completed funding leg was replayed"); },
+      dispatchSell: async () => dispatcher.dispatch({ requestId: REQUEST, leg: "deposit_sell" }),
+    }),
+    /did not emit expected Broadcast\.Swapped/u,
+  );
+  assert.equal(signed, 0);
+  const source = readFileSync(scriptPath, "utf8");
+  assert.match(source, /const legResults = await runDepositLegPlan\(\{/u);
+});
+
+test("fully unstaged deposit dispatch retains the original funding then sell order", async () => {
+  const calls = [];
+  const results = await runDepositLegPlan({
+    bitmap: 0n,
+    dispatchFunding: async () => { calls.push("deposit_funding"); return { txHash: REQUEST }; },
+    dispatchSell: async () => { calls.push("deposit_sell"); return { txHash: OTHER }; },
+  });
+  assert.deepEqual(calls, ["deposit_funding", "deposit_sell"]);
+  assert.equal(results.deposit_funding.status, "dispatched");
+  assert.equal(results.deposit_sell.status, "dispatched");
+});
+
+test("resume leaves fee policy, leg construction, and dispatch parameters unchanged", () => {
+  const derived = deriveStagingParameters({
+    requestedAssets: 4_500_000n,
+    maxFeePerLeg: 40_000n,
+    floatHeadroom: 50_000n,
+    returnBy: 2_000_000_000n,
+    nonce: 1n,
+  });
+  assert.deepEqual(derived, DEPLOY_PARAMETERS);
+  assert.deepEqual(depositLegPlan(0n).map(({ leg }) => leg), ["deposit_funding", "deposit_sell"]);
+  assert.throws(() => depositLegPlan(2n), /unexpected dispatch bitmap 2/u);
+  const source = readFileSync(scriptPath, "utf8");
+  assert.match(source, /services\.dispatcher\.dispatch\(\{ requestId: liveLaneRequestId, leg: "deposit_funding" \}\)/u);
+  assert.match(source, /services\.dispatcher\.dispatch\(\{ requestId: liveLaneRequestId, leg: "deposit_sell" \}\)/u);
+});
+
+test("resumed sell evidence reconciles only the observable remaining leg", () => {
+  assert.deepEqual(reconcileResumedPoolSell({
+    committed: 4_500_000n,
+    floatBeforeSell: 6_017_926n,
+    finalFloat: 1_567_426n,
+    swapInput: 4_450_000n,
+    deployedAUsdc: 4_450_000n,
+  }), {
+    committedRaw: 4_500_000n,
+    fundingArrivalRaw: null,
+    fundingTransferFeeRaw: null,
+    remoteFloatBeforeSellRaw: 6_017_926n,
+    remoteFloatAfterSellRaw: 1_567_426n,
+    swapInputRaw: 4_450_000n,
+    aUsdcMintedRaw: 4_450_000n,
+    sellExecutionFeeRaw: 500n,
+    reconciled: false,
+    remainingLegReconciled: true,
+    disclosure: "Funding was dispatched before this process; its historical balance baseline is not reconstructed or invented.",
+  });
 });
 
 test("stale pool observability refuses the venue ceremony", () => {
