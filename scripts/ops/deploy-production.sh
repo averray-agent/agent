@@ -1723,11 +1723,11 @@ apply_indexer_database_schema() {
   if [[ -n "$current_schema" ]]; then
     echo "Current indexer DATABASE_SCHEMA in $INDEXER_ENV_FILE: $current_schema"
   else
-    echo "No DATABASE_SCHEMA set in $INDEXER_ENV_FILE; indexer will use Ponder's default."
+    echo "Rendered indexer env contains no DATABASE_SCHEMA; resolving it from host state."
   fi
 
   case "$INDEXER_FRESH_SCHEMA" in
-    1|true|yes) ;;
+    1|true|yes) INDEXER_FRESH_SCHEMA=1 ;;
     0|false|no|"") INDEXER_FRESH_SCHEMA=0 ;;
     *)
       echo "Invalid INDEXER_FRESH_SCHEMA toggle: $INDEXER_FRESH_SCHEMA (expected 0 or 1)" >&2
@@ -1745,6 +1745,23 @@ apply_indexer_database_schema() {
   persisted_schema=$(read_persisted_indexer_schema)
   if [[ -n "$persisted_schema" ]]; then
     validate_indexer_schema "$persisted_schema"
+  fi
+
+  # Host state is the only normal source of schema truth. A checked-in or
+  # otherwise rendered value cannot know which schema the running Ponder app
+  # owns. Legacy runtime envs may still carry such a value during rollout; if
+  # it contradicts persisted state, refuse before changing the env or starting
+  # a container unless the operator explicitly selects the resolution.
+  if [[ -n "$current_schema" \
+    && -n "$persisted_schema" \
+    && "$current_schema" != "$persisted_schema" ]]; then
+    if [[ -z "$INDEXER_DATABASE_SCHEMA" && "$INDEXER_FRESH_SCHEMA" != "1" ]]; then
+      echo "::error::Indexer schema source-of-truth disagreement." >&2
+      echo "Rendered $INDEXER_ENV_FILE sets DATABASE_SCHEMA=$current_schema, but persisted host state sets DATABASE_SCHEMA=$persisted_schema." >&2
+      echo "Refusing before DATABASE_SCHEMA or the running container can change. Remove the rendered literal, or explicitly resolve with INDEXER_DATABASE_SCHEMA=<name> or INDEXER_FRESH_SCHEMA=1." >&2
+      exit 1
+    fi
+    echo "::warning::Explicit operator schema selection is resolving rendered/persisted disagreement: rendered=$current_schema persisted=$persisted_schema" >&2
   fi
 
   local candidate_tree_identity=""
@@ -1848,6 +1865,16 @@ apply_indexer_database_schema() {
     INDEXER_SCHEMA_ROTATED=1
     INDEXER_SCHEMA_ROTATION_REASON="operator_requested_fresh_schema"
     echo "INDEXER_FRESH_SCHEMA=1 — minting fresh DATABASE_SCHEMA: $target_schema"
+  elif [[ -z "$persisted_schema" ]]; then
+    target_schema=$(mint_indexer_schema "$candidate_identity")
+    validate_indexer_schema "$target_schema"
+    INDEXER_SCHEMA_ROTATED=1
+    INDEXER_SCHEMA_ROTATION_REASON="fresh_host_bootstrap"
+    if [[ -n "$current_schema" ]]; then
+      echo "::warning::No persisted indexer schema exists; ignoring unowned rendered DATABASE_SCHEMA=$current_schema and minting $target_schema." >&2
+    else
+      echo "::warning::No persisted indexer schema exists; minting fresh DATABASE_SCHEMA=$target_schema." >&2
+    fi
   elif [[ "$identity_changed" == "1" ]]; then
     target_schema=$(mint_indexer_schema "$candidate_identity")
     validate_indexer_schema "$target_schema"
@@ -1855,20 +1882,14 @@ apply_indexer_database_schema() {
     INDEXER_SCHEMA_ROTATION_REASON="$identity_change_reason"
     echo "::warning::Indexer app/config identity changed; automatically rotating DATABASE_SCHEMA before container recreation: ${current_schema:-${persisted_schema:-<default>}} -> $target_schema"
   else
-    if [[ -n "$persisted_schema" ]]; then
-      target_schema="$persisted_schema"
-      echo "Reapplying persisted indexer DATABASE_SCHEMA override: $target_schema"
-    elif [[ -n "$current_schema" ]]; then
-      target_schema="$current_schema"
-    else
-      return 0
-    fi
+    target_schema="$persisted_schema"
+    echo "Applying persisted host-owned indexer DATABASE_SCHEMA: $target_schema"
   fi
 
-  # The rendered env may have just reset DATABASE_SCHEMA to the committed
-  # template. The persisted value is the schema the running container actually
-  # claimed, so it is the rollback source of truth when one exists.
-  INDEXER_PREVIOUS_SCHEMA="${persisted_schema:-$current_schema}"
+  # Only a persisted schema was ever recorded after a healthy deploy, so it is
+  # the sole rollback source of truth. Never promote an unowned rendered value
+  # into the rollback path on a fresh host.
+  INDEXER_PREVIOUS_SCHEMA="$persisted_schema"
   INDEXER_TARGET_SCHEMA="$target_schema"
   INDEXER_PREVIOUS_IDENTITY="$previous_identity"
   INDEXER_TARGET_IDENTITY="$candidate_identity"
@@ -2196,6 +2217,10 @@ deploy() {
   if [[ "$indexer_code_changed" == "1" \
     || "$indexer_config_changed" == "1" \
     || "${RUNTIME_ENV_CHANGED_INDEXER:-0}" == "1" ]]; then
+    if [[ "$INDEXER_OWNERSHIP_STATE_PENDING" != "1" || -z "$INDEXER_TARGET_SCHEMA" ]]; then
+      echo "Indexer deploy was selected without a completed host-state schema preflight; refusing before container recreation." >&2
+      exit 1
+    fi
     run_indexer=1
     deployed_components+=(indexer)
     local indexer_build_image=0

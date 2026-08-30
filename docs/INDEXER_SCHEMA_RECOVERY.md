@@ -17,8 +17,8 @@ entrypoint. It:
    configuration.
 3. Compares it with the identity that last deployed successfully.
 4. Reuses the persisted schema when the identity matches.
-5. Mints a unique, network-scoped schema when the identity changed, then
-   recreates the indexer.
+5. Mints a unique, network-scoped schema when the identity changed or when a
+   new host has no persisted schema, then recreates the indexer.
 6. Requires `/health` to remain stable for at least 15 seconds. A rotation
    deliberately leaves `/ready` staged while historical indexing catches up.
 7. Persists the new schema and owner identity only after the health gate
@@ -37,6 +37,34 @@ The state files are outside the checkout under `$DEPLOY_STATE_DIR`:
 - `indexer.resync.<network>` — auditable re-sync-start record, including the
   initial staged status, source SHA, actor, reason, previous schema, and start
   time. It is historical evidence, not the current catch-up signal.
+
+`DATABASE_SCHEMA` is deliberately absent from both the deployment manifest and
+the rendered indexer templates. The repository does not record production's
+active schema because it cannot keep that value synchronized with rotations
+that become authoritative only after a healthy deploy. On the production host,
+read the authoritative mainnet value with:
+
+```sh
+sudo awk 'NF { print; exit }' /srv/agent-stack/.deploy-state/indexer.database-schema.mainnet
+```
+
+After deploy preflight has injected that state into the runtime env, the same
+value is visible with:
+
+```sh
+sudo awk -F= '/^DATABASE_SCHEMA=/{print $2}' /run/agent-stack-mainnet/indexer.env
+```
+
+A rebuilt host has no persisted ownership state. Its first indexer deploy mints
+a fresh schema and performs a full historical re-sync; it never adopts a
+literal left in an old runtime env. This is an accepted recovery cost of keeping
+one source of truth.
+
+During migration, a legacy runtime env may still contain a rendered schema. If
+that value disagrees with persisted state, deployment fails before modifying
+the env or recreating the container. An operator must remove the stale literal
+or explicitly resolve the conflict with `indexer_database_schema=<name>` or
+`indexer_fresh_schema=1`.
 
 An identity change prints `INDEXER HISTORICAL RE-SYNC STARTING` as a workflow
 warning. During that window the backend's

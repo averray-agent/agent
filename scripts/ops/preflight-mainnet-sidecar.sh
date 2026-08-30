@@ -31,6 +31,14 @@ require_env_value() {
   [[ "$actual" == "$expected" ]] || fail "$file must set $key=$expected"
 }
 
+require_env_nonempty() {
+  local file="$1"
+  local key="$2"
+  local actual
+  actual=$(awk -F= -v key="$key" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$file")
+  [[ -n "$actual" ]] || fail "$file must set a non-empty $key from host state"
+}
+
 require_mode_owner() {
   local file="$1"
   local mode owner group
@@ -154,7 +162,10 @@ agent_start=$(jq -r '[.deploymentBlocks.agentAccountCore, .deploymentBlocks.escr
 require_env_value "$INDEXER_ENV" PONDER_START_BLOCK_ESCROW "$agent_start"
 require_env_value "$INDEXER_ENV" PONDER_START_BLOCK_REPUTATION "$(jq -r '.deploymentBlocks.reputationSbt' "$DEPLOYMENT_FILE")"
 require_env_value "$INDEXER_ENV" PONDER_START_BLOCK_REGISTRIES "$(jq -r '.deploymentBlocks.discoveryRegistry' "$DEPLOYMENT_FILE")"
-require_env_value "$INDEXER_ENV" DATABASE_SCHEMA "$(jq -r '.runtime.indexer.schema' "$DEPLOYMENT_FILE")"
+
+# DATABASE_SCHEMA is host-owned runtime state, not deployment-manifest data.
+# The normal deploy wrapper validates and injects it before container startup.
+require_env_nonempty "$INDEXER_ENV" DATABASE_SCHEMA
 
 docker network inspect agent-stack_default >/dev/null 2>&1 \
   || fail "required live Caddy/Postgres network agent-stack_default is absent"
