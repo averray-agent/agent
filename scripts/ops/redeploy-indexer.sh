@@ -194,6 +194,15 @@ dump_indexer_diagnostics() {
       -f "$COMPOSE_FILE" \
       logs --tail="$INDEXER_LOG_TAIL" "$INDEXER_SERVICE" 2>&1 || true
   )
+
+  # Schema ownership refusal is a distinct recovery action, not a generic Node
+  # crash. Name it once before the raw logs so repeated uncaughtException lines
+  # cannot bury the operator instruction.
+  if printf '%s\n' "$indexer_log" | grep -Fq 'was previously used by a different Ponder app'; then
+    echo "::error::Ponder schema ownership mismatch: DATABASE_SCHEMA was previously used by a different Ponder app."
+    echo "Recovery: rerun the deploy with indexer_fresh_schema=1 so Ponder starts on a fresh schema."
+  fi
+
   printf '%s\n' "$indexer_log"
 
   echo "Indexer diagnostics: last ${INDEXER_LOG_TAIL} Caddy log lines"
@@ -215,6 +224,7 @@ dump_indexer_diagnostics() {
   matches=$(
     printf '%s\n' "$indexer_log" \
       | grep -E 'MigrationError|TypeError|uncaughtException|unhandledRejection|FATAL|Cannot find module|ECONNREFUSED.*postgres|postgres.*ECONNREFUSED|start_block.*greater than head' \
+      | awk '!seen[$0]++' \
       | head -20 \
       || true
   )

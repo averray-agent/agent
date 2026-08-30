@@ -26,6 +26,24 @@ test("redeploy-indexer emits startup diagnostics before rollback", async () => {
   );
 });
 
+test("redeploy-indexer names schema ownership failure and points to indexer_fresh_schema", async () => {
+  const script = await readFile(REDEPLOY_SCRIPT, "utf8");
+  const ownershipMatch = script.indexOf("was previously used by a different Ponder app");
+  const actionableError = script.indexOf("Ponder schema ownership mismatch", ownershipMatch);
+  const recovery = script.indexOf("indexer_fresh_schema=1", actionableError);
+  const rawLogs = script.indexOf('printf \'%s\\n\' "$indexer_log"', recovery);
+
+  assert.ok(ownershipMatch > 0, "the exact Ponder ownership refusal must be recognized");
+  assert.ok(actionableError > ownershipMatch, "the refusal must emit a named one-line cause");
+  assert.ok(recovery > actionableError, "the named cause must carry the recovery input");
+  assert.ok(rawLogs > recovery, "the actionable diagnosis must appear before repeated raw logs");
+  assert.match(
+    script,
+    /grep -E [^\n]+[\s\S]*?awk '!seen\[\$0\]\+\+'[\s\S]*?head -20/u,
+    "the generic fatal summary must deduplicate repeated exception lines",
+  );
+});
+
 // Structural tests for the rollback() function in redeploy-indexer.sh.
 // Mirrors the test pattern in redeploy-backend.test.mjs (#467). The
 // indexer's rollback flow has the same shape as the backend's — git

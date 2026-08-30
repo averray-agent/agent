@@ -1588,13 +1588,40 @@ indexer_ponder_config_identity() {
   printf '%s\n' "$config" | git -C "$APP_ROOT" hash-object --stdin
 }
 
-indexer_app_identity() {
+indexer_ponder_version() {
+  local revision="$1"
+  local lockfile=""
+  if ! lockfile=$(git -C "$APP_ROOT" show "${revision}:indexer/package-lock.json" 2>/dev/null); then
+    # Historical revisions predate the indexer-scoped lockfile. Keep those
+    # revisions addressable for rollback/identity migration, but never mistake
+    # an unlocked build for a resolved Ponder version.
+    printf 'legacy-unlocked\n'
+    return 0
+  fi
+  printf '%s\n' "$lockfile" \
+    | jq -er '.packages["node_modules/ponder"].version | strings | select(length > 0)'
+}
+
+indexer_legacy_app_identity() {
   local revision="$1"
   local tree_identity=""
   local config_identity=""
   tree_identity=$(indexer_tree_identity "$revision") || return 1
   config_identity=$(indexer_ponder_config_identity "$revision") || return 1
   printf 'indexer_tree=%s\nponder_config=%s\n' "$tree_identity" "$config_identity" \
+    | git -C "$APP_ROOT" hash-object --stdin
+}
+
+indexer_app_identity() {
+  local revision="$1"
+  local tree_identity=""
+  local config_identity=""
+  local ponder_version=""
+  tree_identity=$(indexer_tree_identity "$revision") || return 1
+  config_identity=$(indexer_ponder_config_identity "$revision") || return 1
+  ponder_version=$(indexer_ponder_version "$revision") || return 1
+  printf 'indexer_tree=%s\nponder_config=%s\nponder_version=%s\n' \
+    "$tree_identity" "$config_identity" "$ponder_version" \
     | git -C "$APP_ROOT" hash-object --stdin
 }
 
@@ -1725,18 +1752,27 @@ apply_indexer_database_schema() {
     echo "Cannot compute the incoming indexer source identity from $NEW_SHA:indexer; refusing schema selection before container recreation." >&2
     exit 1
   }
+  local candidate_ponder_version=""
+  candidate_ponder_version=$(indexer_ponder_version "$NEW_SHA") || {
+    echo "Cannot read the resolved Ponder version from $NEW_SHA:indexer/package-lock.json; refusing schema selection before container recreation." >&2
+    exit 1
+  }
   local candidate_identity=""
   candidate_identity=$(indexer_app_identity "$NEW_SHA") || {
-    echo "Cannot compute the incoming indexer app/config identity from $NEW_SHA:indexer and $INDEXER_ENV_TEMPLATE; refusing schema selection before container recreation." >&2
+    echo "Cannot compute the incoming indexer app/config/Ponder identity from $NEW_SHA:indexer and $INDEXER_ENV_TEMPLATE; refusing schema selection before container recreation." >&2
     exit 1
   }
   local persisted_identity=""
   persisted_identity=$(read_persisted_indexer_identity)
   local deployed_identity=""
+  local deployed_legacy_identity=""
   local deployed_tree_identity=""
+  local deployed_ponder_version=""
   local deployed_sha=""
   deployed_sha=$(read_component_sha indexer)
   deployed_tree_identity=$(indexer_tree_identity "$deployed_sha" || true)
+  deployed_ponder_version=$(indexer_ponder_version "$deployed_sha" || true)
+  deployed_legacy_identity=$(indexer_legacy_app_identity "$deployed_sha" || true)
   deployed_identity=$(indexer_app_identity "$deployed_sha" || true)
 
   # #833 originally persisted only the indexer Git tree. Upgrade that legacy
@@ -1753,6 +1789,18 @@ apply_indexer_database_schema() {
     echo "Upgrading legacy tree-only indexer owner identity from last-good deploy $deployed_sha: $previous_identity"
   fi
 
+  # The app identity predating this packet bound tree + config but omitted the
+  # resolved Ponder version. Upgrade that persisted shape in memory from the
+  # last-good revision so an otherwise unchanged deploy does not pay for a
+  # needless historical re-sync merely because the identity format matured.
+  if [[ -n "$previous_identity" \
+    && -n "$deployed_legacy_identity" \
+    && "$previous_identity" == "$deployed_legacy_identity" \
+    && -n "$deployed_identity" ]]; then
+    previous_identity="$deployed_identity"
+    echo "Upgrading pre-version indexer owner identity from last-good deploy $deployed_sha: $previous_identity"
+  fi
+
   # Hosts predating any ownership record can safely bootstrap only when the
   # incoming composite identity is byte-identical to the last successfully
   # deployed app/config identity. Any other unknown/mismatched identity rotates
@@ -1766,7 +1814,9 @@ apply_indexer_database_schema() {
   local identity_change_reason="app_identity_changed"
   if [[ "$indexer_deploy_requested" == "1" && "$candidate_identity" != "$previous_identity" ]]; then
     identity_changed=1
-    if [[ -n "$deployed_tree_identity" && "$candidate_tree_identity" == "$deployed_tree_identity" ]]; then
+    if [[ -n "$deployed_ponder_version" && "$candidate_ponder_version" != "$deployed_ponder_version" ]]; then
+      identity_change_reason="ponder_version_changed"
+    elif [[ -n "$deployed_tree_identity" && "$candidate_tree_identity" == "$deployed_tree_identity" ]]; then
       identity_change_reason="ponder_config_changed"
     fi
     if [[ -n "$previous_identity" ]]; then
