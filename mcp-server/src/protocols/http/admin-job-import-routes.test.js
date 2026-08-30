@@ -82,6 +82,30 @@ test("createJobsFromImportResult separates created, duplicate, and errored jobs"
   );
 });
 
+test("provider import retires keyword-only candidates before they reach the catalog", async () => {
+  let created = 0;
+  const result = await createJobsFromImportResult({
+    createJob() {
+      created += 1;
+    }
+  }, [{
+    id: "unsafe-openapi-audit",
+    verifierMode: "benchmark",
+    verifierTerms: ["openapi", "audit"],
+    source: { type: "openapi_spec" }
+  }]);
+
+  assert.equal(created, 0);
+  assert.deepEqual(result, {
+    created: [],
+    skipped: [{
+      id: "unsafe-openapi-audit",
+      reason: "catalog_verifier_cannot_reject_bad_work"
+    }],
+    errors: []
+  });
+});
+
 test("github import definition normalizes payload and dry-run body like the route did", () => {
   const github = routeDefinitions({ GITHUB_TOKEN: " token-1 " })
     .find((definition) => definition.pathname === "/admin/jobs/ingest/github");

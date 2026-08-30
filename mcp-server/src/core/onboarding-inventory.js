@@ -29,6 +29,12 @@ export function isRealWaiverEligibleJob(job) {
     && ONBOARDING_WAIVER_INGESTION_SOURCES.has(job?.source?.type);
 }
 
+export function countRealWaiverEligibleClaimableJobs(jobs) {
+  return (Array.isArray(jobs) ? jobs : []).filter((job) => (
+    isRealWaiverEligibleJob(job) && job.claimable === true
+  )).length;
+}
+
 export async function resolveOnboardingInventoryHealth({
   service,
   rewardBank,
@@ -48,9 +54,7 @@ export async function resolveOnboardingInventoryHealth({
       rewardBank,
       now
     })));
-    const waiverEligibleClaimableJobs = jobs.filter((job) => (
-      isRealWaiverEligibleJob(job) && job.claimable === true
-    )).length;
+    const waiverEligibleClaimableJobs = countRealWaiverEligibleClaimableJobs(jobs);
     const status = waiverEligibleClaimableJobs >= minimum ? "ready" : "warning";
     const reason = waiverEligibleClaimableJobs === 0
       ? "onboarding_waiver_inventory_empty"

@@ -74,7 +74,7 @@ export class JobCatalogService {
     this.parentSessionIndex = new Map();
     this.specHashDriftedJobs = new Map();
     for (const job of this.jobs) {
-      assertActiveCatalogTitleTruthBoundary(job?.title, job?.lifecycle);
+      assertActiveCatalogTitleTruthBoundary(job?.title, job?.lifecycle, job);
       this.indexJob(job);
     }
   }
@@ -195,7 +195,7 @@ export class JobCatalogService {
       ? patch.status.trim().toLowerCase()
       : undefined;
     const status = this.resolveLifecycleStatus({ action, requestedStatus, currentStatus: current.status });
-    assertActiveCatalogTitleTruthBoundary(job?.title, { status });
+    assertActiveCatalogTitleTruthBoundary(job?.title, { status }, job);
     const timestamp = updatedAt.toISOString();
     const lifecycle = {
       ...current,

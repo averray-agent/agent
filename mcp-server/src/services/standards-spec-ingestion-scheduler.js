@@ -1,6 +1,11 @@
 import { ingestStandardsSpecs, parseSpecs, standardsSpecKey } from "../jobs/ingest-standards-specs.js";
 import { GuardedSchedulerLoop, ingestionSchedulerOutcome, schedulerRunTimeoutMs } from "./guarded-scheduler-loop.js";
-import { recordIngestSpecHashRefusal, recordLanePostingRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
+import {
+  recordIngestSpecHashRefusal,
+  recordIngestVerifierRefusal,
+  recordLanePostingRefusal,
+  upsertScheduledIngestedJob
+} from "./ingested-job-upsert.js";
 
 export class StandardsSpecIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -132,6 +137,7 @@ export class StandardsSpecIngestionScheduler {
           } catch (error) {
             if (recordLanePostingRefusal(summary, job, error)) continue;
             if (recordIngestSpecHashRefusal(summary, job, error)) continue;
+            if (recordIngestVerifierRefusal(summary, job, error)) continue;
             throw error;
           }
         }

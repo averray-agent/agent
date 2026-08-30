@@ -105,20 +105,6 @@ const fixtures = [
     }
   },
   {
-    name: "GitHub issue",
-    job: githubJob({
-      title: "Add parser regression coverage",
-      body: "Add a focused parser regression test.",
-      number: 42,
-      html_url: "https://github.com/example/project/issues/42",
-      repository_url: "https://api.github.com/repos/example/project",
-      labels: [{ name: "good first issue" }],
-      comments: 0,
-      locked: false
-    }, 92),
-    submission: { summary: PLACEHOLDER, output: PLACEHOLDER, status: "complete" }
-  },
-  {
     name: "OSV advisory",
     job: osvJob({
       target: {
@@ -182,6 +168,30 @@ const fixtures = [
     }
   }
 ];
+
+test("GitHub issue rejects schema-valid evidence without the target PR", async () => {
+  const job = githubJob({
+    title: "Add parser regression coverage",
+    body: "Add a focused parser regression test.",
+    number: 42,
+    html_url: "https://github.com/example/project/issues/42",
+    repository_url: "https://api.github.com/repos/example/project",
+    labels: [{ name: "good first issue" }],
+    comments: 0,
+    locked: false
+  }, 92);
+  const submission = {
+    prUrl: "https://github.com/unrelated/project/pull/7",
+    summary: PLACEHOLDER,
+    tests: "not run"
+  };
+  validateStructuredSubmission(job.outputSchemaRef, submission);
+
+  const result = await new VerifierRegistry({ githubToken: "" })
+    .evaluate(normalizeJobInput(job), submission);
+  assert.equal(result.outcome, "rejected");
+  assert.equal(result.reasonCode, "GITHUB_PR_EVIDENCE_INCOMPLETE");
+});
 
 for (const fixture of fixtures) {
   test(`${fixture.name} rejects schema-valid placeholder evidence`, async () => {

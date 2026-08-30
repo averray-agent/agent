@@ -7,6 +7,7 @@ import {
 } from "./inventory-replenishment.js";
 import {
   recordIngestSpecHashRefusal,
+  recordIngestVerifierRefusal,
   recordLanePostingRefusal,
   upsertScheduledIngestedJob
 } from "./ingested-job-upsert.js";
@@ -161,6 +162,7 @@ export class WikipediaMaintenanceIngestionScheduler {
           } catch (error) {
             if (recordLanePostingRefusal(summary, replenishedJob, error)) continue;
             if (recordIngestSpecHashRefusal(summary, replenishedJob, error)) continue;
+            if (recordIngestVerifierRefusal(summary, replenishedJob, error)) continue;
             throw error;
           }
         }

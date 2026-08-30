@@ -6,7 +6,12 @@ import {
   parseDatasets
 } from "../jobs/ingest-open-data-datasets.js";
 import { GuardedSchedulerLoop, ingestionSchedulerOutcome, schedulerRunTimeoutMs } from "./guarded-scheduler-loop.js";
-import { recordIngestSpecHashRefusal, recordLanePostingRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
+import {
+  recordIngestSpecHashRefusal,
+  recordIngestVerifierRefusal,
+  recordLanePostingRefusal,
+  upsertScheduledIngestedJob
+} from "./ingested-job-upsert.js";
 
 export class OpenDataIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -168,6 +173,7 @@ export class OpenDataIngestionScheduler {
             } catch (error) {
               if (recordLanePostingRefusal(summary, job, error)) continue;
               if (recordIngestSpecHashRefusal(summary, job, error)) continue;
+              if (recordIngestVerifierRefusal(summary, job, error)) continue;
               throw error;
             }
           }

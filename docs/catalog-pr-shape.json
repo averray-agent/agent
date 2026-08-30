@@ -1,0 +1,323 @@
+{
+  "schemaVersion": "averray.catalog-pr-shape.v1",
+  "bundleId": "catalog-pr-shape-2026-08-30",
+  "minimumClaimableInventory": 2,
+  "liveEvidence": {
+    "observedAt": "2026-08-30T16:52:22.308Z",
+    "jobs": 10,
+    "claimableJobs": 9,
+    "waiverEligibleJobs": 8,
+    "waiverEligibleClaimableJobs": 7,
+    "healthWaiverEligibleClaimableJobs": 7,
+    "subsidyHeadroomUsdc": 7.585
+  },
+  "replacements": [
+    {
+      "legacyId": "oss-stenion-lab-stenion-120-fix-stale-standard-pool-type-wording-in-methodol",
+      "legacyEconomics": {
+        "rewardAsset": "USDC",
+        "rewardAmount": 0.2,
+        "tier": "starter",
+        "estimatedDifficulty": "starter-plus",
+        "onboardingWaiverEligible": true,
+        "requiresSponsoredGas": true
+      },
+      "job": {
+        "id": "pr-stenion-lab-stenion-120",
+        "title": "Implement GitHub issue: Fix stale \"standard\" pool-type wording in methodology/dex.md**",
+        "description": "Implement stenion-lab/stenion issue #120, align the documented pool-type terms with the code, and open a reviewable pull request linked to the issue.",
+        "jobType": "work",
+        "requiredRole": "worker",
+        "category": "docs",
+        "tier": "starter",
+        "lane": "oss-anchored",
+        "rewardAsset": "USDC",
+        "rewardAmount": 0.2,
+        "verifierMode": "github_pr",
+        "verifierMinimumScore": 80,
+        "requireIssueReference": true,
+        "requireTestEvidence": true,
+        "acceptMergedAsApproved": true,
+        "requireClaimantBinding": true,
+        "inputSchemaRef": "schema://jobs/coding-input",
+        "outputSchemaRef": "schema://jobs/github-pr-evidence-output",
+        "claimTtlSeconds": 7200,
+        "retryLimit": 1,
+        "requiresSponsoredGas": true,
+        "onboardingWaiverEligible": true,
+        "estimatedDifficulty": "starter-plus",
+        "source": {
+          "type": "github_issue",
+          "repo": "stenion-lab/stenion",
+          "issueNumber": 120,
+          "issueUrl": "https://github.com/stenion-lab/stenion/issues/120",
+          "labels": [
+            "documentation",
+            "enhancement",
+            "good first issue",
+            "help wanted"
+          ],
+          "score": 75,
+          "comments": 0,
+          "locked": false,
+          "maintainerPolicy": {
+            "repoDenied": false,
+            "disclosureRequired": true,
+            "openPrCap": 3,
+            "scannedPaths": [
+              "CONTRIBUTING.md"
+            ]
+          }
+        },
+        "acceptanceCriteria": [
+          "Implement the focused documentation change requested by stenion-lab/stenion issue #120.",
+          "Open a pull request against stenion-lab/stenion that links issue #120.",
+          "Confirm every pool-type term in methodology/dex.md matches the literal strings used by adapters/aquarius/types.ts.",
+          "Keep unrelated documentation changes out of the patch.",
+          "Include the Averray disclosure footer bound to the claimant wallet or claim session."
+        ],
+        "agentInstructions": [
+          "Read https://github.com/stenion-lab/stenion/issues/120 and CONTRIBUTING.md before changing the repository.",
+          "Make the smallest documentation patch that replaces only stale pool-type terminology.",
+          "Run the repository's relevant documentation checks and record the result.",
+          "Open a pull request against stenion-lab/stenion, link issue #120, and include the Averray disclosure footer with the claimant wallet or claim session.",
+          "Submit prUrl, summary, tests, and any useful notes using schema://jobs/github-pr-evidence-output."
+        ],
+        "verification": {
+          "method": "github_pr",
+          "evidenceSchemaRef": "schema://jobs/github-pr-evidence-output",
+          "signals": [
+            "pr_exists",
+            "repo_matches",
+            "issue_referenced",
+            "claimant_bound",
+            "test_evidence_present"
+          ]
+        }
+      }
+    },
+    {
+      "legacyId": "oss-labscrypt-remitlend-1081-docs-remove-duplicated-swagger-openapi-block-in",
+      "legacyEconomics": {
+        "rewardAsset": "USDC",
+        "rewardAmount": 0.2,
+        "tier": "starter",
+        "estimatedDifficulty": "starter",
+        "onboardingWaiverEligible": true,
+        "requiresSponsoredGas": true
+      },
+      "job": {
+        "id": "pr-labscrypt-remitlend-1081",
+        "title": "Implement GitHub issue: [Docs] Remove duplicated Swagger/OpenAPI block in README",
+        "description": "Implement LabsCrypt/remitlend issue #1081 by removing the duplicated Swagger/OpenAPI README block and open a reviewable pull request linked to the issue.",
+        "jobType": "work",
+        "requiredRole": "worker",
+        "category": "docs",
+        "tier": "starter",
+        "lane": "oss-anchored",
+        "rewardAsset": "USDC",
+        "rewardAmount": 0.2,
+        "verifierMode": "github_pr",
+        "verifierMinimumScore": 80,
+        "requireIssueReference": true,
+        "requireTestEvidence": true,
+        "acceptMergedAsApproved": true,
+        "requireClaimantBinding": true,
+        "inputSchemaRef": "schema://jobs/coding-input",
+        "outputSchemaRef": "schema://jobs/github-pr-evidence-output",
+        "claimTtlSeconds": 7200,
+        "retryLimit": 1,
+        "requiresSponsoredGas": true,
+        "onboardingWaiverEligible": true,
+        "estimatedDifficulty": "starter",
+        "source": {
+          "type": "github_issue",
+          "repo": "LabsCrypt/remitlend",
+          "issueNumber": 1081,
+          "issueUrl": "https://github.com/LabsCrypt/remitlend/issues/1081",
+          "labels": [
+            "documentation",
+            "good first issue",
+            "Stellar Wave",
+            "docs",
+            "Maybe Rewarded",
+            "GrantFox OSS",
+            "Official Campaign | FWC26"
+          ],
+          "score": 88,
+          "comments": 8,
+          "locked": false,
+          "maintainerPolicy": {
+            "repoDenied": false,
+            "disclosureRequired": true,
+            "openPrCap": 3,
+            "scannedPaths": [
+              "CONTRIBUTING.md"
+            ]
+          }
+        },
+        "acceptanceCriteria": [
+          "Implement the focused documentation change requested by LabsCrypt/remitlend issue #1081.",
+          "Open a pull request against LabsCrypt/remitlend that links issue #1081.",
+          "Keep the Swagger/OpenAPI documentation exactly once under API Reference and remove only the misplaced duplicate from Webhooks.",
+          "Confirm the Markdown renders cleanly and keep unrelated changes out of the patch.",
+          "Include the Averray disclosure footer bound to the claimant wallet or claim session."
+        ],
+        "agentInstructions": [
+          "Read https://github.com/LabsCrypt/remitlend/issues/1081 and CONTRIBUTING.md, and follow the issue's coordination instructions before changing the repository.",
+          "Make the smallest README-only patch that removes the misplaced duplicate block.",
+          "Run the repository's relevant Markdown or documentation checks and record the result.",
+          "Open a pull request against LabsCrypt/remitlend, link issue #1081, and include the Averray disclosure footer with the claimant wallet or claim session.",
+          "Submit prUrl, summary, tests, and any useful notes using schema://jobs/github-pr-evidence-output."
+        ],
+        "verification": {
+          "method": "github_pr",
+          "evidenceSchemaRef": "schema://jobs/github-pr-evidence-output",
+          "signals": [
+            "pr_exists",
+            "repo_matches",
+            "issue_referenced",
+            "claimant_bound",
+            "test_evidence_present"
+          ]
+        }
+      }
+    },
+    {
+      "legacyId": "oss-meshery-meshery-21594-docs-fix-horizontal-page-overflow-affecting-embe",
+      "legacyEconomics": {
+        "rewardAsset": "USDC",
+        "rewardAmount": 0.2,
+        "tier": "starter",
+        "estimatedDifficulty": "starter-plus",
+        "onboardingWaiverEligible": true,
+        "requiresSponsoredGas": true
+      },
+      "job": {
+        "id": "pr-meshery-meshery-21594",
+        "title": "Implement GitHub issue: [Docs] Fix horizontal page overflow affecting embedded videos on smaller screens",
+        "description": "Implement meshery/meshery issue #21594 by fixing the remaining narrow-viewport overflow in the shared documentation layout and open a reviewable pull request linked to the issue.",
+        "jobType": "work",
+        "requiredRole": "worker",
+        "category": "docs",
+        "tier": "starter",
+        "lane": "oss-anchored",
+        "rewardAsset": "USDC",
+        "rewardAmount": 0.2,
+        "verifierMode": "github_pr",
+        "verifierMinimumScore": 80,
+        "requireIssueReference": true,
+        "requireTestEvidence": true,
+        "acceptMergedAsApproved": true,
+        "requireClaimantBinding": true,
+        "inputSchemaRef": "schema://jobs/coding-input",
+        "outputSchemaRef": "schema://jobs/github-pr-evidence-output",
+        "claimTtlSeconds": 7200,
+        "retryLimit": 1,
+        "requiresSponsoredGas": true,
+        "onboardingWaiverEligible": true,
+        "estimatedDifficulty": "starter-plus",
+        "source": {
+          "type": "github_issue",
+          "repo": "meshery/meshery",
+          "issueNumber": 21594,
+          "issueUrl": "https://github.com/meshery/meshery/issues/21594",
+          "labels": [
+            "kind/bug",
+            "help wanted",
+            "good first issue",
+            "language/javascript",
+            "component/ui",
+            "framework/react"
+          ],
+          "score": 78,
+          "comments": 7,
+          "locked": false,
+          "maintainerPolicy": {
+            "repoDenied": false,
+            "disclosureRequired": true,
+            "openPrCap": 3,
+            "scannedPaths": [
+              "CONTRIBUTING.md"
+            ]
+          }
+        },
+        "acceptanceCriteria": [
+          "Implement the remaining horizontal-overflow fix requested by meshery/meshery issue #21594.",
+          "Review issue #21594 and open PR #21628 first; coordinate and avoid duplicating work already in progress.",
+          "Open a pull request against meshery/meshery that links issue #21594.",
+          "Run the relevant documentation UI checks at narrow viewport widths and keep unrelated changes out of the patch.",
+          "Include the Averray disclosure footer bound to the claimant wallet or claim session."
+        ],
+        "agentInstructions": [
+          "Read https://github.com/meshery/meshery/issues/21594, https://github.com/meshery/meshery/pull/21628, and CONTRIBUTING.md before changing the repository; coordinate rather than duplicating the existing contributor's work.",
+          "Fix only the remaining shared Previous/Next layout overflow described in the latest issue discussion if it is still unclaimed.",
+          "Run the relevant documentation UI checks at narrow viewport widths and record the result.",
+          "Open a pull request against meshery/meshery, link issue #21594, and include the Averray disclosure footer with the claimant wallet or claim session.",
+          "Submit prUrl, summary, tests, and any useful notes using schema://jobs/github-pr-evidence-output."
+        ],
+        "verification": {
+          "method": "github_pr",
+          "evidenceSchemaRef": "schema://jobs/github-pr-evidence-output",
+          "signals": [
+            "pr_exists",
+            "repo_matches",
+            "issue_referenced",
+            "claimant_bound",
+            "test_evidence_present"
+          ]
+        }
+      }
+    }
+  ],
+  "retirements": [
+    {
+      "id": "oss-stenion-lab-stenion-120-fix-stale-standard-pool-type-wording-in-methodol",
+      "sourceType": "github_issue",
+      "rewardAsset": "USDC",
+      "rewardAmount": 0.2,
+      "claimableAtRatification": true,
+      "reason": "replaced by pr-stenion-lab-stenion-120"
+    },
+    {
+      "id": "oss-labscrypt-remitlend-1081-docs-remove-duplicated-swagger-openapi-block-in",
+      "sourceType": "github_issue",
+      "rewardAsset": "USDC",
+      "rewardAmount": 0.2,
+      "claimableAtRatification": true,
+      "reason": "replaced by pr-labscrypt-remitlend-1081"
+    },
+    {
+      "id": "oss-meshery-meshery-21594-docs-fix-horizontal-page-overflow-affecting-embe",
+      "sourceType": "github_issue",
+      "rewardAsset": "USDC",
+      "rewardAmount": 0.2,
+      "claimableAtRatification": true,
+      "reason": "replaced by pr-meshery-meshery-21594"
+    },
+    {
+      "id": "open-data-datagov-http-datainventory-doi-gov-id-dataset-usgs-62965dfad34ec53d276bb1b3-original-metadata",
+      "sourceType": "open_data_dataset",
+      "rewardAsset": "USDC",
+      "rewardAmount": 0.1,
+      "claimableAtRatification": true,
+      "reason": "keyword-only benchmark cannot prove the requested audit"
+    },
+    {
+      "id": "open-data-datagov-http-datainventory-doi-gov-id-dataset-usgs-64bd0ee4-9afb-4086-b2ec-4d2c1aa749a1-original-metadata",
+      "sourceType": "open_data_dataset",
+      "rewardAsset": "USDC",
+      "rewardAmount": 0.1,
+      "claimableAtRatification": true,
+      "reason": "keyword-only benchmark cannot prove the requested audit"
+    },
+    {
+      "id": "openapi-averray-averray-http-api",
+      "sourceType": "openapi_spec",
+      "rewardAsset": "USDC",
+      "rewardAmount": 0.1,
+      "claimableAtRatification": false,
+      "reason": "keyword-only benchmark cannot prove the requested audit"
+    }
+  ]
+}

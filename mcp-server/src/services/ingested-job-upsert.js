@@ -1,3 +1,7 @@
+import {
+  NON_FAILABLE_VERIFIER_CODE
+} from "../core/catalog-verifier-integrity.js";
+
 const INGEST_REFUSED_SPEC_HASH_MISMATCH = "ingest_refused_spec_hash_mismatch";
 const LANE_POSTING_REFUSALS = new Set([
   "lane_budget_exhausted",
@@ -24,6 +28,17 @@ export async function upsertScheduledIngestedJob(platformService, job, { prefund
   return platformService.catalogueLaneDiscipline?.post
     ? platformService.catalogueLaneDiscipline.post(job, action, { now })
     : action();
+}
+
+export function recordIngestVerifierRefusal(summary, job, error) {
+  if (error?.code !== NON_FAILABLE_VERIFIER_CODE) return false;
+  summary.skipped.push({
+    id: job.id,
+    reason: NON_FAILABLE_VERIFIER_CODE,
+    verifierMode: job?.verifierMode ?? null,
+    sourceType: job?.source?.type ?? null
+  });
+  return true;
 }
 
 export function recordIngestSpecHashRefusal(summary, job, error) {

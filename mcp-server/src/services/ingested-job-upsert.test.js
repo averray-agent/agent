@@ -6,6 +6,7 @@ import {
   legacyCatalogueDefinitions,
   upsertScheduledIngestedJob
 } from "./ingested-job-upsert.js";
+import { assertIngestedCatalogVerifierCanReject } from "../core/catalog-verifier-integrity.js";
 
 const INGESTION_SCHEDULERS = [
   "github-issue-ingestion-scheduler.js",
@@ -25,6 +26,29 @@ test("all six ingestion schedulers park spec-hash refusals in their per-job catc
       file
     );
   }
+});
+
+test("all six ingestion schedulers park non-failable verifier refusals", async () => {
+  for (const file of INGESTION_SCHEDULERS) {
+    const source = await readFile(new URL(file, import.meta.url), "utf8");
+    assert.match(
+      source,
+      /catch \(error\) \{[\s\S]{0,500}recordIngestVerifierRefusal\(summary,/u,
+      file
+    );
+  }
+});
+
+test("production catalog write guard refuses keyword-only ingested benchmarks", () => {
+  assert.throws(
+    () => assertIngestedCatalogVerifierCanReject({
+      id: "unsafe-open-data",
+      verifierMode: "benchmark",
+      verifierTerms: ["dataset", "audit"],
+      source: { type: "open_data_dataset" }
+    }),
+    (error) => error?.code === "catalog_verifier_cannot_reject_bad_work"
+  );
 });
 
 test("pre-D3 liveness definitions retain their exact lane-less reward variants", () => {
