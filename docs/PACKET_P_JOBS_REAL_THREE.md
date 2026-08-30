@@ -1,6 +1,6 @@
 # PACKET — P-JOBS-REAL-THREE: a catalog a worker would actually claim
 
-Status: **NEEDS AN OPERATOR DECISION BEFORE BUILD** · 2026-08-29 ·
+Status: **READY FOR CODEX — reward ratified at 2.0 USDC (Pascal, 2026-08-30)** · 2026-08-29 ·
 Author: Claude (architect+gate), from the Product handover 2026-08-28 ·
 Repo: **platform** · Ships jobs, not code, plus whatever job definitions need.
 
@@ -74,7 +74,18 @@ attribution.
 Changing the minimum poster reward, yield, KYC, or making x402 the poster path.
 The Circle job does not count toward the three.
 
-## Operator decision needed before build
+## Operator decision — RATIFIED 2026-08-30
 
-**How much to commit.** Three jobs at 1–2 USDC is 3–6 USDC against a 51.675
-bank. Confirm the per-job reward and whether all three fund at once.
+**2.0 USDC per job, all three funded together.** Total 6.00 in rewards plus
+~0.18 brokered gas = **6.18 against a 50.275 bank (12.0%)**, leaving 45.50.
+
+Why 2.0 and not 1.0: a 1.0 external job already exists on the platform and has
+not pulled an external claimant, so repeating that price tests nothing. 2.0 is
+5x the current 0.40 starters and plainly worth an agent's compute for real work.
+
+**What this is actually buying, stated honestly:** our own measurement showed a
+blind agent choose a **0.4 zero-bond** job over a **1.0 external bounty** —
+reward size is not the lever, friction is. So 2.0 is not expected to convert on
+price. It is set high enough that *reward is not the excuse*, which is what lets
+a null result mean something: if nobody claims a fail-able 2.0 USDC job, the
+problem is not the money.
