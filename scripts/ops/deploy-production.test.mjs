@@ -18,6 +18,9 @@ const BACKEND_REBUILD_PATTERN_SCRIPT = join(REPO_ROOT, "scripts/ops/backend-imag
 const BACKEND_DOCKERFILE = join(REPO_ROOT, "mcp-server/Dockerfile");
 const FRONTEND_DEPLOY_SCRIPT = join(REPO_ROOT, "scripts/ops/redeploy-frontend.sh");
 const APP_PACKAGE = join(REPO_ROOT, "app/package.json");
+const INDEXER_DOCKERFILE = join(REPO_ROOT, "indexer/Dockerfile");
+const INDEXER_PACKAGE = join(REPO_ROOT, "indexer/package.json");
+const INDEXER_LOCKFILE = join(REPO_ROOT, "indexer/package-lock.json");
 // DERIVE_SETTLEMENT_ENV_SCRIPT was removed in PR 2.6: deploy-production.sh
 // no longer calls derive-settlement-env.mjs at runtime (the template carries
 // the settlement values directly, and CI enforces drift via
@@ -48,6 +51,27 @@ test("production static builders omit dev dependencies and classify their build 
     );
     assert.equal(appPackage.devDependencies?.[dependency], undefined);
   }
+});
+
+test("indexer image installs deterministically from its committed lockfile", async () => {
+  const [dockerfile, packageText, lockText] = await Promise.all([
+    readFile(INDEXER_DOCKERFILE, "utf8"),
+    readFile(INDEXER_PACKAGE, "utf8"),
+    readFile(INDEXER_LOCKFILE, "utf8"),
+  ]);
+  const packageJson = JSON.parse(packageText);
+  const lockfile = JSON.parse(lockText);
+
+  assert.match(dockerfile, /COPY indexer\/package\*\.json \.\//u);
+  assert.match(dockerfile, /RUN npm ci --omit=dev/u);
+  assert.doesNotMatch(dockerfile, /RUN npm install/u);
+  assert.equal(lockfile.lockfileVersion, 3);
+  assert.equal(lockfile.packages?.[""]?.dependencies?.ponder, packageJson.dependencies.ponder);
+  assert.equal(
+    lockfile.packages?.["node_modules/ponder"]?.version,
+    "0.16.6",
+    "the hotfix must pin the existing Ponder release, not upgrade it",
+  );
 });
 
 test("deploy wrapper retries frontend after an earlier failed indexer deploy", async () => {
@@ -185,7 +209,7 @@ test("deploy wrapper retries frontend after an earlier failed indexer deploy", a
   assert.equal((await readFile(join(stateDir, "frontend.last-good"), "utf8")).trim(), indexerFixSha);
 });
 
-test("indexer source or contract-config changes rotate schema while root lock changes do not", async () => {
+test("indexer source, resolved Ponder version, or contract-config changes rotate while unchanged identity does not", async () => {
   const root = await mkdtemp(join(tmpdir(), "deploy-indexer-gate-"));
   const appRoot = join(root, "app");
   const stackRoot = join(root, "stack");
@@ -217,7 +241,14 @@ test("indexer source or contract-config changes rotate schema while root lock ch
   git(appRoot, "config", "user.email", "test@example.com");
   git(appRoot, "config", "user.name", "Deploy Test");
   await writeFile(join(appRoot, "package-lock.json"), '{"lockfileVersion":3,"packages":{}}\n');
-  await writeFile(join(appRoot, "indexer/package.json"), '{"name":"indexer","dependencies":{}}\n');
+  await writeFile(
+    join(appRoot, "indexer/package.json"),
+    '{"name":"indexer","dependencies":{"ponder":"^0.16.6"}}\n',
+  );
+  await writeFile(
+    join(appRoot, "indexer/package-lock.json"),
+    '{"lockfileVersion":3,"packages":{"":{"dependencies":{"ponder":"^0.16.6"}},"node_modules/ponder":{"version":"0.16.6"}}}\n',
+  );
   await writeFile(
     join(appRoot, "deploy/indexer.env.template"),
     [
@@ -264,15 +295,12 @@ test("indexer source or contract-config changes rotate schema while root lock ch
   assert.match(appOnlyRun.stdout, /Skipping indexer deploy/u);
   assert.equal(await readFile(deployLog, "utf8").catch(() => ""), "");
 
-  await writeFile(
-    join(appRoot, "indexer/package.json"),
-    '{"name":"indexer","dependencies":{"ponder":"0.16.6"}}\n'
-  );
+  await writeFile(join(appRoot, "indexer/fix.ts"), "export const fixed = true;\n");
   git(appRoot, "add", ".");
-  git(appRoot, "commit", "-m", "indexer dependency");
-  const indexerDependencySha = revParse(appRoot, "HEAD");
+  git(appRoot, "commit", "-m", "indexer source change");
+  const indexerSourceSha = revParse(appRoot, "HEAD");
 
-  const indexerRun = runDeploy(appRoot, env(appDependencySha, indexerDependencySha));
+  const indexerRun = runDeploy(appRoot, env(appDependencySha, indexerSourceSha));
   assert.equal(indexerRun.status, 0, indexerRun.stderr);
   assert.match(
     indexerRun.stderr,
@@ -297,7 +325,7 @@ test("indexer source or contract-config changes rotate schema while root lock ch
     selectedSchema,
     "the healthy replacement should become the persisted schema"
   );
-  const sourceTreeIdentity = revParse(appRoot, `${indexerDependencySha}:indexer`);
+  const sourceTreeIdentity = revParse(appRoot, `${indexerSourceSha}:indexer`);
   const persistedAppIdentity = (
     await readFile(join(stateDir, "indexer.app-identity.testnet"), "utf8")
   ).trim();
@@ -306,6 +334,27 @@ test("indexer source or contract-config changes rotate schema while root lock ch
     persistedAppIdentity,
     sourceTreeIdentity,
     "the schema owner must bind both the source tree and committed Ponder config"
+  );
+  const template = await readFile(join(appRoot, "deploy/indexer.env.template"), "utf8");
+  const configInput = template
+    .trimEnd()
+    .split("\n")
+    .filter((line) => {
+      const key = line.split("=", 1)[0];
+      return key === "POLKADOT_CHAIN_ID"
+        || key === "POLKADOT_CHAIN_NAME"
+        || /^PONDER_[A-Z0-9_]+$/u.test(key);
+    })
+    .sort()
+    .join("\n") + "\n";
+  const configIdentity = gitHashObject(appRoot, configInput);
+  assert.equal(
+    persistedAppIdentity,
+    gitHashObject(
+      appRoot,
+      `indexer_tree=${sourceTreeIdentity}\nponder_config=${configIdentity}\nponder_version=0.16.6\n`,
+    ),
+    "the persisted owner identity must explicitly include the resolved Ponder version",
   );
   const resync = await readFile(join(stateDir, "indexer.resync.testnet"), "utf8");
   assert.match(resync, /^initial_status=staged$/mu);
@@ -378,6 +427,66 @@ test("indexer source or contract-config changes rotate schema while root lock ch
     configTreeIdentity,
     "the successful deploy should persist the composite identity"
   );
+
+  const configIdentityV2 = gitHashObject(
+    appRoot,
+    [
+      "POLKADOT_CHAIN_ID=420420417",
+      "POLKADOT_CHAIN_NAME=polkadotHubTestnet",
+      "PONDER_ESCROW_CORE_ADDRESS=0x2222222222222222222222222222222222222222",
+      "PONDER_START_BLOCK_ESCROW=200",
+      "",
+    ].join("\n"),
+  );
+  const preVersionIdentity = gitHashObject(
+    appRoot,
+    `indexer_tree=${configTreeIdentity}\nponder_config=${configIdentityV2}\n`,
+  );
+  await writeFile(join(stateDir, "indexer.app-identity.testnet"), `${preVersionIdentity}\n`);
+  await writeFile(deployLog, "");
+  const preVersionStateRun = runDeploy(appRoot, {
+    ...env(configChangeSha, configChangeSha),
+    RUN_INDEXER: "1",
+  });
+  assert.equal(preVersionStateRun.status, 0, preVersionStateRun.stderr);
+  assert.match(preVersionStateRun.stdout, /Upgrading pre-version indexer owner identity/u);
+  assert.doesNotMatch(preVersionStateRun.stderr, /INDEXER HISTORICAL RE-SYNC STARTING/u);
+  assert.equal(
+    (await readFile(indexerEnv, "utf8")).match(/^DATABASE_SCHEMA=(.+)$/mu)?.[1],
+    configSchema,
+    "adding the version field to the identity format alone must not rotate a healthy schema",
+  );
+
+  await writeFile(deployLog, "");
+  const unchangedRun = runDeploy(appRoot, {
+    ...env(configChangeSha, configChangeSha),
+    RUN_INDEXER: "1",
+  });
+  assert.equal(unchangedRun.status, 0, unchangedRun.stderr);
+  assert.doesNotMatch(unchangedRun.stderr, /INDEXER HISTORICAL RE-SYNC STARTING/u);
+  assert.equal(
+    (await readFile(indexerEnv, "utf8")).match(/^DATABASE_SCHEMA=(.+)$/mu)?.[1],
+    configSchema,
+    "unchanged tree, config, and resolved Ponder version must retain the schema",
+  );
+
+  await writeFile(
+    join(appRoot, "indexer/package-lock.json"),
+    '{"lockfileVersion":3,"packages":{"":{"dependencies":{"ponder":"^0.16.6"}},"node_modules/ponder":{"version":"0.16.7"}}}\n',
+  );
+  git(appRoot, "add", ".");
+  git(appRoot, "commit", "-m", "deliberate Ponder upgrade");
+  const ponderUpgradeSha = revParse(appRoot, "HEAD");
+  await writeFile(deployLog, "");
+
+  const versionRun = runDeploy(appRoot, env(configChangeSha, ponderUpgradeSha));
+  assert.equal(versionRun.status, 0, versionRun.stderr);
+  assert.match(versionRun.stderr, /INDEXER HISTORICAL RE-SYNC STARTING/u);
+  const versionSchema = (await readFile(indexerEnv, "utf8"))
+    .match(/^DATABASE_SCHEMA=(.+)$/mu)?.[1];
+  assert.notEqual(versionSchema, configSchema);
+  const versionResync = await readFile(join(stateDir, "indexer.resync.testnet"), "utf8");
+  assert.match(versionResync, /^reason=ponder_version_changed$/mu);
 });
 
 test("unchanged Caddy content does not imply an indexer smoke check", async () => {
@@ -2239,6 +2348,14 @@ function git(cwd, ...args) {
 
 function revParse(cwd, revision) {
   return execFileSync("git", ["rev-parse", revision], { cwd, encoding: "utf8" }).trim();
+}
+
+function gitHashObject(cwd, input) {
+  return execFileSync("git", ["hash-object", "--stdin"], {
+    cwd,
+    encoding: "utf8",
+    input,
+  }).trim();
 }
 
 function runDeploy(cwd, env) {
