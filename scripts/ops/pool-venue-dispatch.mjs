@@ -491,6 +491,29 @@ export function reconcilePoolTranche({ committed, baselineFloat, fundedFloat, fi
   return { committedRaw, fundingArrivalRaw, aUsdcMintedRaw, poolFloatRemainingRaw, fundingTransferFeeRaw, sellExecutionFeeRaw, reconciled: true };
 }
 
+export function reconcileResumedPoolSell({ committed, floatBeforeSell, finalFloat, swapInput, deployedAUsdc }) {
+  const committedRaw = BigInt(committed);
+  const remoteFloatBeforeSellRaw = BigInt(floatBeforeSell);
+  const remoteFloatAfterSellRaw = BigInt(finalFloat);
+  const swapInputRaw = BigInt(swapInput);
+  const aUsdcMintedRaw = BigInt(deployedAUsdc);
+  const sellExecutionFeeRaw = remoteFloatBeforeSellRaw - remoteFloatAfterSellRaw - swapInputRaw;
+  if (sellExecutionFeeRaw < 0n) throw new Error("Resumed pool sell ledger contains a negative execution fee.");
+  return {
+    committedRaw,
+    fundingArrivalRaw: null,
+    fundingTransferFeeRaw: null,
+    remoteFloatBeforeSellRaw,
+    remoteFloatAfterSellRaw,
+    swapInputRaw,
+    aUsdcMintedRaw,
+    sellExecutionFeeRaw,
+    reconciled: false,
+    remainingLegReconciled: true,
+    disclosure: "Funding was dispatched before this process; its historical balance baseline is not reconstructed or invented.",
+  };
+}
+
 export function reconcilePoolRecall({ requestedAssets, sharesSold, swapOutput, floatBefore, floatAfterSell, floatAfterHome, homeArrival }) {
   const requested = BigInt(requestedAssets);
   const sold = BigInt(sharesSold);
@@ -1026,6 +1049,77 @@ export function pendingWithdrawLegs(bitmap) {
   throw new Error(`Staged recall carries unexpected dispatch bitmap ${value}; refusing to guess the pending legs.`);
 }
 
+const DEPLOY_PARAMETER_FIELDS = Object.freeze([
+  "sellAmount",
+  "minimumOutput",
+  "maxFeePerLeg",
+  "dispatchDeadline",
+]);
+
+export function assertMatchingStagedDeploy({ stagedParameters, stagedNonce, expectedParameters }) {
+  for (const field of DEPLOY_PARAMETER_FIELDS) {
+    const staged = BigInt(stagedParameters?.[field] ?? -1);
+    const expected = BigInt(expectedParameters?.[field] ?? -2);
+    if (staged !== expected) {
+      throw new Error(`Staged deploy ${field} mismatch: on-chain ${staged}, invocation ${expected}.`);
+    }
+  }
+  const staged = BigInt(stagedNonce ?? -1);
+  const expected = BigInt(expectedParameters?.nonce ?? -2);
+  if (staged !== expected) {
+    throw new Error(`Staged deploy nonce mismatch: on-chain ${staged}, invocation ${expected}.`);
+  }
+  return true;
+}
+
+function assertStagedDeployBinding({ record, laneAddress, venueAddress, requestedAssets, nonce }) {
+  if (
+    String(record?.context?.strategyId).toLowerCase() !== EXPECTED_STRATEGY_ID
+    || Number(record?.context?.kind) !== 0
+    || getAddress(record?.queuedBy) !== getAddress(laneAddress)
+    || getAddress(record?.context?.account) !== getAddress(venueAddress)
+    || BigInt(record?.context?.assets ?? -1) !== BigInt(requestedAssets)
+    || BigInt(record?.context?.nonce ?? -1) !== BigInt(nonce)
+    || Number(record?.status) !== 1
+  ) {
+    throw new Error("Staged wrapper request is not a pending deploy bound to the dedicated pool lane, venue adapter, exact assets, and nonce.");
+  }
+  return true;
+}
+
+// Deposit legs occupy bitmap bits 0 (deposit_funding) and 1 (deposit_sell).
+// Any other shape contradicts the wrapper's enforced ordering and is refused
+// rather than interpreted as a new ceremony state.
+export function depositLegPlan(bitmap) {
+  const value = BigInt(bitmap);
+  if (value !== 0n && value !== 1n && value !== 3n) {
+    throw new Error(`Staged deploy carries unexpected dispatch bitmap ${value}; refusing to guess the pending legs.`);
+  }
+  return [
+    { leg: "deposit_funding", bit: 0, status: (value & 1n) !== 0n ? "skipped" : "pending" },
+    { leg: "deposit_sell", bit: 1, status: (value & 2n) !== 0n ? "skipped" : "pending" },
+  ];
+}
+
+export async function runDepositLegPlan({ bitmap, dispatchFunding, dispatchSell }) {
+  const callbacks = { deposit_funding: dispatchFunding, deposit_sell: dispatchSell };
+  const results = {};
+  for (const entry of depositLegPlan(bitmap)) {
+    if (entry.status === "skipped") {
+      results[entry.leg] = {
+        status: "skipped",
+        reason: `wrapper bitmap bit ${entry.bit} is already set`,
+        bit: entry.bit,
+      };
+      continue;
+    }
+    const dispatch = callbacks[entry.leg];
+    if (typeof dispatch !== "function") throw new Error(`Missing ${entry.leg} dispatch callback.`);
+    results[entry.leg] = { status: "dispatched", value: await dispatch() };
+  }
+  return results;
+}
+
 function makeRuntime({ provider, signer, wrapperAddress, laneAddress, convertedAccountId32, args, recall = false }) {
   const balanceReader = new VenueBalanceReader();
   const targets = {
@@ -1189,10 +1283,9 @@ export async function main(argv = process.argv.slice(2)) {
       return common;
     }
 
-    // stage-recall performs its own staged-state handling: an already-staged
-    // recall (a prior commit that failed between staging and leg dispatch) is
-    // RESUMED there, not refused here. cancel keeps the unstaged requirement.
-    if (args.command !== "stage-recall") assertUnstaged({ laneRequestId: state.venue.laneRequestId });
+    // Both staging commands own state-aware resume handling. Cancellation is
+    // the only command that must remain strictly unstaged.
+    if (args.command === "cancel") assertUnstaged({ laneRequestId: state.venue.laneRequestId });
     if (args.command === "cancel") {
       const transactions = buildCancelPlan({ venueAddress, poolAddress, requestId, deploymentId, recallId, kind: isRecall ? "recall" : "deploy" });
       await venue.getFunction("cancelUnstaged").staticCall(requestId, { from: identity.address });
@@ -1597,7 +1690,6 @@ export async function main(argv = process.argv.slice(2)) {
     const maxFeePerLeg = assertFeeCeiling(args.maxFeePerLeg);
     const laneNonce = args.laneNonce ? positiveBigInt(args.laneNonce, "--lane-nonce") : 1n;
     const parameters = deriveStagingParameters({ requestedAssets: state.venue.request.requestedAssets, maxFeePerLeg, floatHeadroom: args.floatHeadroom, returnBy: state.venue.request.returnBy, nonce: laneNonce });
-    const quote = await captureParQuote(args.hydrationWs, parameters.sellAmount);
     const stageData = venueInterface.encodeFunctionData("stageDeploy", [requestId, parameters]);
     const predictedLaneRequestId = deriveLaneRequestId({
       venueAddress,
@@ -1605,120 +1697,210 @@ export async function main(argv = process.argv.slice(2)) {
       assets: state.venue.request.requestedAssets,
       nonce: parameters.nonce,
     });
-    if (normalizeBytes32(await venue.poolRequestForLaneRequest(predictedLaneRequestId), "reverse lane mapping") !== ZERO32) throw new Error("Predicted lane requestId is already bridged to another pool request.");
-    const emptyWrapper = await wrapper.getRequest(predictedLaneRequestId);
-    if (String(emptyWrapper.context.account).toLowerCase() !== ZERO_ADDRESS) throw new Error("Predicted lane requestId already exists in the wrapper.");
-    let stagedFundingDryRun;
-    try {
-      stagedFundingDryRun = await dryRunStageAndFunding({
-        args,
-        signerAddress: identity.address,
+    const isResume = state.venue.laneRequestId !== ZERO32;
+    let resumeBitmap = 0n;
+    if (isResume) {
+      assertMatchingStagedDeploy({
+        stagedParameters: state.wrapper.parameters,
+        stagedNonce: state.wrapper.request?.context?.nonce,
+        expectedParameters: parameters,
+      });
+      assertStagedDeployBinding({
+        record: state.wrapper.request,
+        laneAddress,
         venueAddress,
-        wrapperAddress,
-        stageData,
-        laneRequestId: predictedLaneRequestId,
-        convertedAccountId32,
+        requestedAssets: state.venue.request.requestedAssets,
+        nonce: parameters.nonce,
       });
-    } catch (error) {
-      let stageDiagnostic = null;
-      try {
-        await rpc.provider.call({ from: identity.address, to: venueAddress, data: stageData, value: 0n });
-        stageDiagnostic = { outcome: "eth_call_success" };
-      } catch (stageError) {
-        stageDiagnostic = {
-          outcome: "eth_call_revert",
-          selector: String(stageError?.data ?? stageError?.info?.error?.data ?? "").slice(0, 10) || null,
-          message: stageError?.shortMessage ?? stageError?.info?.error?.message ?? stageError?.message,
-        };
+      if (state.venue.laneRequestId !== predictedLaneRequestId) {
+        throw new Error(`Staged deploy laneRequestId mismatch: on-chain ${state.venue.laneRequestId}, invocation ${predictedLaneRequestId}.`);
       }
-      await persistEvidence(args, {
-        ...common,
-        timing: {
-          returnBy: state.venue.request.returnBy,
-          marginSeconds: margin,
-          minimumMarginSeconds: MIN_DISPATCH_MARGIN_SECONDS,
-        },
-        freshParQuote: quote,
-        staging: {
-          parameters,
-          predictedLaneRequestId,
-          transaction: { to: venueAddress, data: stageData, value: "0" },
-        },
-        stagedFundingDryRun: {
-          status: "failed",
-          error: error?.message ?? String(error),
-          stageDiagnostic,
-        },
-        action: "Do not sign or broadcast. Repair the named preflight condition, or run cancel before the six-hour margin closes.",
-      });
-      throw new Error(`${error.message} Stage diagnostic: ${JSON.stringify(stageDiagnostic)}.`);
+      const reverse = normalizeBytes32(await venue.poolRequestForLaneRequest(state.venue.laneRequestId), "reverse lane mapping");
+      if (reverse !== requestId) {
+        throw new Error(`Staged deploy reverse mapping mismatch: on-chain ${reverse}, invocation ${requestId}.`);
+      }
+      resumeBitmap = BigInt(state.wrapper.bitmap ?? -1);
+      depositLegPlan(resumeBitmap);
+    } else {
+      assertUnstaged({ laneRequestId: state.venue.laneRequestId });
+      if (normalizeBytes32(await venue.poolRequestForLaneRequest(predictedLaneRequestId), "reverse lane mapping") !== ZERO32) throw new Error("Predicted lane requestId is already bridged to another pool request.");
+      const emptyWrapper = await wrapper.getRequest(predictedLaneRequestId);
+      if (String(emptyWrapper.context.account).toLowerCase() !== ZERO_ADDRESS) throw new Error("Predicted lane requestId already exists in the wrapper.");
     }
+    const quote = await captureParQuote(args.hydrationWs, parameters.sellAmount);
+    let stagedFundingDryRun;
+    if (isResume) {
+      stagedFundingDryRun = {
+        status: "skipped",
+        reason: "stageDeploy is already committed; every remaining leg retains its own JIT dispatch guards",
+      };
+    } else {
+      try {
+        stagedFundingDryRun = await dryRunStageAndFunding({
+          args,
+          signerAddress: identity.address,
+          venueAddress,
+          wrapperAddress,
+          stageData,
+          laneRequestId: predictedLaneRequestId,
+          convertedAccountId32,
+        });
+      } catch (error) {
+        let stageDiagnostic = null;
+        try {
+          await rpc.provider.call({ from: identity.address, to: venueAddress, data: stageData, value: 0n });
+          stageDiagnostic = { outcome: "eth_call_success" };
+        } catch (stageError) {
+          stageDiagnostic = {
+            outcome: "eth_call_revert",
+            selector: String(stageError?.data ?? stageError?.info?.error?.data ?? "").slice(0, 10) || null,
+            message: stageError?.shortMessage ?? stageError?.info?.error?.message ?? stageError?.message,
+          };
+        }
+        await persistEvidence(args, {
+          ...common,
+          timing: {
+            returnBy: state.venue.request.returnBy,
+            marginSeconds: margin,
+            minimumMarginSeconds: MIN_DISPATCH_MARGIN_SECONDS,
+          },
+          freshParQuote: quote,
+          staging: {
+            parameters,
+            predictedLaneRequestId,
+            transaction: { to: venueAddress, data: stageData, value: "0" },
+          },
+          stagedFundingDryRun: {
+            status: "failed",
+            error: error?.message ?? String(error),
+            stageDiagnostic,
+          },
+          action: "Do not sign or broadcast. Repair the named preflight condition, or run cancel before the six-hour margin closes.",
+        });
+        throw new Error(`${error.message} Stage diagnostic: ${JSON.stringify(stageDiagnostic)}.`);
+      }
+    }
+    const legPlan = depositLegPlan(resumeBitmap);
     const plan = {
       ...common,
       timing: { returnBy: state.venue.request.returnBy, marginSeconds: margin, minimumMarginSeconds: MIN_DISPATCH_MARGIN_SECONDS },
       freshParQuote: quote,
-      staging: { parameters, predictedLaneRequestId, transaction: { to: venueAddress, data: stageData, value: "0" } },
+      staging: { status: isResume ? "already_staged_matching" : "pending", parameters, predictedLaneRequestId, transaction: isResume ? null : { to: venueAddress, data: stageData, value: "0" } },
+      resume: {
+        resumedFromStagedRequest: isResume,
+        bitmap: resumeBitmap,
+        legs: legPlan,
+        skippedLegs: legPlan.filter((entry) => entry.status === "skipped").map((entry) => entry.leg),
+        pendingLegs: legPlan.filter((entry) => entry.status === "pending").map((entry) => entry.leg),
+      },
       feeLedgerAuthorization: { trancheRaw: state.venue.request.requestedAssets, sellAmountRaw: parameters.sellAmount, retainedFloatAndFundingFeesRaw: BigInt(state.venue.request.requestedAssets) - parameters.sellAmount, maxFeePerLegRaw: parameters.maxFeePerLeg },
       stagedFundingDryRun,
-      guards: { dedicatedLaneOnly: true, operatingLaneUntouched: operatingLane, requestUnstaged: true, wrapperRequestUnknown: true, freshExactAmountAaveParQuote: true, find20RuntimeTransformedFrame: true },
+      guards: { dedicatedLaneOnly: true, operatingLaneUntouched: operatingLane, requestUnstaged: !isResume, stagedParametersMatched: isResume, wrapperRequestUnknown: !isResume, freshExactAmountAaveParQuote: true, find20RuntimeTransformedFrame: true },
     };
     if (!args.commit) {
       await persistEvidence(args, plan);
-      console.log("\nDRY RUN ONLY — stage bytes emitted; no signature requested. Funding/sell JIT proofs run after staging and before each signature.");
+      console.log(isResume
+        ? `\nDRY RUN ONLY — matching staged request will resume at ${plan.resume.pendingLegs.join(", ") || "no remaining leg"}; no signature requested.`
+        : "\nDRY RUN ONLY — stage bytes emitted; no signature requested. Funding/sell JIT proofs run after staging and before each signature.");
       return plan;
     }
 
-    const stageTx = await identity.signer.sendTransaction({ to: venueAddress, data: stageData, value: 0n });
-    const stageReceipt = await stageTx.wait();
-    if (!stageReceipt || stageReceipt.status !== 1) throw new Error("stageDeploy transaction failed.");
-    const liveLaneRequestId = normalizeBytes32(await venue.poolRequestForLaneRequest(predictedLaneRequestId), "post-stage reverse mapping") === requestId
-      ? normalizeBytes32(predictedLaneRequestId, "lane requestId") : ZERO32;
+    let stageTx = null;
+    let stageReceipt = null;
+    if (!isResume) {
+      stageTx = await identity.signer.sendTransaction({ to: venueAddress, data: stageData, value: 0n });
+      stageReceipt = await stageTx.wait();
+      if (!stageReceipt || stageReceipt.status !== 1) throw new Error("stageDeploy transaction failed.");
+    }
+    const liveLaneRequestId = isResume
+      ? state.venue.laneRequestId
+      : normalizeBytes32(await venue.poolRequestForLaneRequest(predictedLaneRequestId), "post-stage reverse mapping") === requestId
+        ? normalizeBytes32(predictedLaneRequestId, "lane requestId") : ZERO32;
     if (liveLaneRequestId === ZERO32) throw new Error("Postcondition failed: pool↔lane request bridge was not established.");
     const stagedWrapperRecord = await wrapper.getRequest(liveLaneRequestId);
-    if (
-      String(stagedWrapperRecord.context.strategyId).toLowerCase() !== EXPECTED_STRATEGY_ID
-      || getAddress(stagedWrapperRecord.queuedBy) !== laneAddress
-      || getAddress(stagedWrapperRecord.context.account) !== venueAddress
-    ) {
-      throw new Error("Postcondition failed: wrapper request is not bound to the dedicated pool lane and venue adapter.");
-    }
+    assertStagedDeployBinding({
+      record: stagedWrapperRecord,
+      laneAddress,
+      venueAddress,
+      requestedAssets: state.venue.request.requestedAssets,
+      nonce: parameters.nonce,
+    });
     const services = makeRuntime({ provider: rpc.provider, signer: identity.signer, wrapperAddress, laneAddress, convertedAccountId32, args });
     try {
-      const funding = await services.dispatcher.dispatch({ requestId: liveLaneRequestId, leg: "deposit_funding" });
-      const fundingDeposit = funding.evidence.dryRun?.fundingDeposits?.[0];
-      if (!fundingDeposit || funding.evidence.dryRun?.wireFrames?.[0]?.frameSource !== "runtime_transformed_local_execute") {
-        throw new Error("FIND #20 postcondition failed: funding did not use the runtime-transformed local-execute frame.");
-      }
-      // Wait for the remote reserve transfer to become observable before the
-      // exact sell preflight. A bounded wait cannot silently become a daemon.
       let remote;
-      for (let attempt = 0; attempt < 30; attempt += 1) {
-        remote = await services.balanceReader.read(services.targets.float);
-        const poolFundingDelta = remote.raw - BigInt(state.farSide.floatAsset22.raw);
-        if (poolFundingDelta >= parameters.sellAmount + parameters.maxFeePerLeg) break;
-        await new Promise((done) => setTimeout(done, 10_000));
-      }
-      const fundingDelta = remote ? remote.raw - BigInt(state.farSide.floatAsset22.raw) : -1n;
-      if (!remote || fundingDelta < parameters.sellAmount + parameters.maxFeePerLeg) {
-        throw new Error("Funding landed insufficient remote headroom for the staged sell; stopping without another dispatch.");
-      }
-      const hydrationApi = await services.balanceReader.getSubstrateApi(args.hydrationWs);
-      const sellScanStart = (await hydrationApi.rpc.chain.getHeader()).number.toNumber();
-      const sell = await services.dispatcher.dispatch({ requestId: liveLaneRequestId, leg: "deposit_sell" });
-      const swap = await waitForAaveSwap(hydrationApi, {
-        requestId: liveLaneRequestId,
-        fromBlock: sellScanStart,
-        expectedInput: parameters.sellAmount,
+      let swap;
+      const legResults = await runDepositLegPlan({
+        bitmap: resumeBitmap,
+        dispatchFunding: async () => {
+          const funding = await services.dispatcher.dispatch({ requestId: liveLaneRequestId, leg: "deposit_funding" });
+          const fundingDeposit = funding.evidence.dryRun?.fundingDeposits?.[0];
+          if (!fundingDeposit || funding.evidence.dryRun?.wireFrames?.[0]?.frameSource !== "runtime_transformed_local_execute") {
+            throw new Error("FIND #20 postcondition failed: funding did not use the runtime-transformed local-execute frame.");
+          }
+          // Wait for the remote reserve transfer to become observable before
+          // the exact sell preflight. A bounded wait cannot silently become a
+          // daemon.
+          for (let attempt = 0; attempt < 30; attempt += 1) {
+            remote = await services.balanceReader.read(services.targets.float);
+            const poolFundingDelta = remote.raw - BigInt(state.farSide.floatAsset22.raw);
+            if (poolFundingDelta >= parameters.sellAmount + parameters.maxFeePerLeg) break;
+            await new Promise((done) => setTimeout(done, 10_000));
+          }
+          const fundingDelta = remote ? remote.raw - BigInt(state.farSide.floatAsset22.raw) : -1n;
+          if (!remote || fundingDelta < parameters.sellAmount + parameters.maxFeePerLeg) {
+            throw new Error("Funding landed insufficient remote headroom for the staged sell; stopping without another dispatch.");
+          }
+          return funding;
+        },
+        dispatchSell: async () => {
+          if (!remote) {
+            remote = await services.balanceReader.read(services.targets.float);
+            if (BigInt(remote.raw) < parameters.sellAmount + parameters.maxFeePerLeg) {
+              throw new Error("Completed funding leg left insufficient live remote headroom for the staged sell; refusing resume.");
+            }
+          }
+          const hydrationApi = await services.balanceReader.getSubstrateApi(args.hydrationWs);
+          const sellScanStart = (await hydrationApi.rpc.chain.getHeader()).number.toNumber();
+          const sell = await services.dispatcher.dispatch({ requestId: liveLaneRequestId, leg: "deposit_sell" });
+          swap = await waitForAaveSwap(hydrationApi, {
+            requestId: liveLaneRequestId,
+            fromBlock: sellScanStart,
+            expectedInput: parameters.sellAmount,
+          });
+          return sell;
+        },
       });
+      if (!swap) {
+        const completed = {
+          ...plan,
+          mode: "commit",
+          receipts: {
+            stage: { status: "skipped", reason: "stageDeploy already committed" },
+            funding: legResults.deposit_funding,
+            sell: legResults.deposit_sell,
+          },
+          action: "All dispatch legs are already recorded on-chain; no transaction was repeated. Settlement requires the existing request-bound swap observation.",
+        };
+        await persistEvidence(args, completed);
+        return completed;
+      }
       const afterPosition = await services.balanceReader.read(services.targets.position);
       const afterFloat = await services.balanceReader.read(services.targets.float);
-      const feeLedger = reconcilePoolTranche({
-        committed: state.venue.request.requestedAssets,
-        baselineFloat: state.farSide.floatAsset22.raw,
-        fundedFloat: remote.raw,
-        finalFloat: afterFloat.raw,
-        deployedAUsdc: swap.amountOutRaw,
-      });
+      const feeLedger = legResults.deposit_funding.status === "skipped"
+        ? reconcileResumedPoolSell({
+            committed: state.venue.request.requestedAssets,
+            floatBeforeSell: remote.raw,
+            finalFloat: afterFloat.raw,
+            swapInput: swap.amountInRaw,
+            deployedAUsdc: swap.amountOutRaw,
+          })
+        : reconcilePoolTranche({
+            committed: state.venue.request.requestedAssets,
+            baselineFloat: state.farSide.floatAsset22.raw,
+            fundedFloat: remote.raw,
+            finalFloat: afterFloat.raw,
+            deployedAUsdc: swap.amountOutRaw,
+          });
       if (feeLedger.aUsdcMintedRaw < parameters.minimumOutput) throw new Error("Sell postcondition failed: aUSDC delta is below minimumOutput.");
       const observedPositionDelta = afterPosition.raw - BigInt(state.farSide.aUsdc.raw);
       if (observedPositionDelta < feeLedger.aUsdcMintedRaw) throw new Error("aUSDC balance moved below the request-bound swap output.");
@@ -1752,7 +1934,18 @@ export async function main(argv = process.argv.slice(2)) {
       const evidence = {
         ...plan,
         mode: "commit",
-        receipts: { stage: { hash: stageTx.hash, blockNumber: stageReceipt.blockNumber, gasUsed: stageReceipt.gasUsed }, funding: funding.evidence, sell: sell.evidence, settlement: { hash: settleTx.hash, blockNumber: settleReceipt.blockNumber, gasUsed: settleReceipt.gasUsed } },
+        receipts: {
+          stage: isResume
+            ? { status: "skipped", reason: "stageDeploy already committed" }
+            : { hash: stageTx.hash, blockNumber: stageReceipt.blockNumber, gasUsed: stageReceipt.gasUsed },
+          funding: legResults.deposit_funding.status === "skipped"
+            ? legResults.deposit_funding
+            : legResults.deposit_funding.value.evidence,
+          sell: legResults.deposit_sell.status === "skipped"
+            ? legResults.deposit_sell
+            : legResults.deposit_sell.value.evidence,
+          settlement: { hash: settleTx.hash, blockNumber: settleReceipt.blockNumber, gasUsed: settleReceipt.gasUsed },
+        },
         hydrationSwap: swap,
         postState: { laneRequestId: liveLaneRequestId, wrapperRequest: settledWrapper, adapterRequest: settledAdapter, wrapperBitmap: await wrapper.requestDispatchBitmap(liveLaneRequestId), farSideAUsdc: afterPosition, farSideFloat: afterFloat },
         settlementProof: { hydrationBlockNumber: hydrationHead.number, hydrationBlockHash: hydrationHead.hash, settledAssetsRaw: observedPositionDelta, settledSharesRaw: observedPositionDelta, preSettlementAccrualRaw, poolSettleVenueDeploymentRunnable: true },
