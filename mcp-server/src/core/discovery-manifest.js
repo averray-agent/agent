@@ -12,6 +12,7 @@ import {
 } from "./earnings-door-copy.js";
 import { DEFAULT_MIN_REWARD_USDC } from "./external-posting-policy.js";
 import { buildAgentSurfaceParity } from "./agent-surface-parity.js";
+import { LIST_VERIFICATION_PROFILES_DESCRIPTION } from "./verify-product-copy.js";
 
 const DEFAULT_BASE_URL = "https://api.averray.com";
 const DEFAULT_DISCOVERY_URL = "https://averray.com/.well-known/agent-tools.json";
@@ -604,7 +605,7 @@ const DISCOVERY_TOOL_DEFINITIONS = [
   { name: "getDispute", description: "Read one dispute evidence bundle and timeline." },
   { name: "getVerificationResult", description: "Read the last verifier outcome for a session." },
   { name: "listVerifierHandlers", description: "Supported verifier modes + configs." },
-  { name: "listVerificationProfiles", description: "Published standalone verification profiles with pinned versions, limits, and pricing." },
+  { name: "listVerificationProfiles", description: LIST_VERIFICATION_PROFILES_DESCRIPTION },
   { name: "resumeSession", description: "Load the latest state of a session." },
   { name: "listSessions", description: "Lifetime session history for a wallet." },
   { name: "getXcmRequest", description: "Read the current lifecycle state of one async XCM request." }

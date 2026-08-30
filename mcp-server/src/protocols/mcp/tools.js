@@ -1,4 +1,5 @@
 import { ValidationError } from "../../core/errors.js";
+import { LIST_VERIFICATION_PROFILES_DESCRIPTION } from "../../core/verify-product-copy.js";
 import { invokeHttpRoute } from "./route-adapter.js";
 
 const AUTH_META_KEY = "com.averray/auth";
@@ -80,7 +81,7 @@ export function createMcpTools({
   tool({
     name: "listVerificationProfiles",
     title: "List verification profiles",
-    description: "List immutable standalone verification profiles with pinned handler versions, input schemas, limits, success criteria, and flat Base USDC pricing. Inconclusive runs are not billed.",
+    description: LIST_VERIFICATION_PROFILES_DESCRIPTION,
     inputSchema: noArgumentsSchema,
     readOnly: true,
     idempotent: true

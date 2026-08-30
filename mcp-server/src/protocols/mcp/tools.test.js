@@ -7,6 +7,8 @@ import { createCreditPoolRoutes } from "../http/credit-pool-routes.js";
 import { createExternalJobRoutes } from "../http/external-job-routes.js";
 import { DEPOSIT_POOL_RISK_DISCLOSURE } from "../../core/deposit-pool-disclosure.js";
 import { CREDIT_POOL_RISK_DISCLOSURE } from "../../core/credit-pool-disclosure.js";
+import { buildDiscoveryManifest } from "../../core/discovery-manifest.js";
+import { LIST_VERIFICATION_PROFILES_DESCRIPTION } from "../../core/verify-product-copy.js";
 import { readJsonBody, respond } from "../http/http-helpers.js";
 import {
   createMcpToolExecutor,
@@ -87,6 +89,18 @@ test("job browsing tools frame listing descriptions as untrusted data", () => {
     byName.get("listJobs").inputSchema.properties.since.description,
     /ISO 8601 or epoch milliseconds/u
   );
+});
+
+test("listVerificationProfiles names Base x402 discovery without restating a price", () => {
+  const tool = MCP_TOOLS.find(({ name }) => name === "listVerificationProfiles");
+  const discovered = buildDiscoveryManifest().tools.find(({ name }) => name === "listVerificationProfiles");
+
+  assert.equal(tool.description, LIST_VERIFICATION_PROFILES_DESCRIPTION);
+  assert.equal(discovered.description, LIST_VERIFICATION_PROFILES_DESCRIPTION);
+  assert.match(tool.description, /https:\/\/api\.averray\.com\/\.well-known\/x402/u);
+  assert.match(tool.description, /USDC 0x833589fcd6edb6e08f4c7c32d4f71b54bda02913 on Base eip155:8453/u);
+  assert.doesNotMatch(tool.description, /(?:\b5(?:\.0+)?\s*USDC\b|\b5000000\b|\$5\b)/iu);
+  assert.doesNotMatch(tool.description, /(?:eip155:420420419|asset 1337|0x0000053900000000000000000000000001200000)/iu);
 });
 
 function makeEarningsDoorRoute() {
