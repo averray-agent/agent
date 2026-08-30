@@ -58,6 +58,7 @@ import { collectGithubOperatorStatus } from "./github-operator-helper.js";
 import { collectHostDiagnostics } from "./host-diagnostics.js";
 import { registerExternalSchema, validateSubmissionAgainstRegisteredSchema } from "../services/schema-registry.js";
 import { applyIngestionOnboardingWaiverPolicy } from "./onboarding-inventory.js";
+import { assertIngestedCatalogVerifierCanReject } from "./catalog-verifier-integrity.js";
 import {
   EXTERNAL_JOB_DELISTED_REASON,
   isExternalJob
@@ -432,6 +433,7 @@ export class PlatformService {
   }
 
   async createAdminJob(input, { posterWallet = undefined } = {}) {
+    assertIngestedCatalogVerifierCanReject(input);
     const jobInput = await this.withRegisteredExternalSchema(input);
     const action = async () => {
       const created = this.createJob(jobInput);
@@ -491,6 +493,7 @@ export class PlatformService {
   }
 
   async upsertIngestedJob(input, options = {}) {
+    assertIngestedCatalogVerifierCanReject(input);
     const now = options.now ?? new Date();
     const compatibleDefinitions = Array.isArray(options.compatibleDefinitions)
       ? options.compatibleDefinitions

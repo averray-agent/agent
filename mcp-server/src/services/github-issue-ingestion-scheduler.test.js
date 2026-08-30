@@ -82,9 +82,10 @@ test("GithubIssueIngestionScheduler creates jobs when dryRun is false", async ()
   assert.equal(platform.listJobs()[0].source.issueNumber, 42);
 });
 
-test("GithubIssueIngestionScheduler dedupes by source repo and issue number", async () => {
+test("GithubIssueIngestionScheduler dedupes github_pr jobs by source repo and issue number", async () => {
   const existing = {
     id: "existing",
+    verifierMode: "github_pr",
     source: {
       type: "github_issue",
       repo: "example/project",
@@ -104,6 +105,31 @@ test("GithubIssueIngestionScheduler dedupes by source repo and issue number", as
   assert.equal(summary.createdCount, 0);
   assert.equal(platform.listJobs().length, 1);
   assert.equal(summary.queries[0].skipped[0].reason, "source_already_ingested");
+});
+
+test("GithubIssueIngestionScheduler replaces a legacy benchmark for the same issue", async () => {
+  const existing = {
+    id: "oss-example-project-42-legacy-report",
+    verifierMode: "benchmark",
+    source: {
+      type: "github_issue",
+      repo: "example/project",
+      issueNumber: 42
+    }
+  };
+  const platform = makePlatformService([existing]);
+  const scheduler = new GithubIssueIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    queries: ["is:issue is:open label:good-first-issue"],
+    minScore: 55,
+    fetchImpl: makeFetch()
+  });
+
+  const summary = await scheduler.runOnce(new Date("2026-08-30T10:00:00.000Z"));
+  assert.equal(summary.createdCount, 1);
+  assert.equal(platform.listJobs().length, 2, "create replacement before retiring legacy inventory");
+  assert.ok(platform.listJobs().some((job) => job.id === "pr-example-project-42"));
 });
 
 test("GithubIssueIngestionScheduler stops when max open GitHub jobs is reached", async () => {

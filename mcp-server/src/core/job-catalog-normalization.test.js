@@ -101,6 +101,13 @@ test("active catalog titles cannot promise upstream side effects before delivery
     title: "Fix status badge (historical)",
     lifecycle: { status: "archived" }
   }));
+  assert.doesNotThrow(() => normalizeJobInput({
+    ...BASE_JOB,
+    title: "Implement GitHub issue: Fix status badge",
+    verifierMode: "github_pr",
+    outputSchemaRef: "schema://jobs/github-pr-evidence-output",
+    source: { type: "github_issue", repo: "example/project", issueNumber: 42 }
+  }));
 });
 
 test("normalizeJobInput preserves recurring schedule and finite reserve policy", () => {

@@ -1,4 +1,8 @@
 import { normalizeError } from "../../core/errors.js";
+import {
+  assertIngestedCatalogVerifierCanReject,
+  NON_FAILABLE_VERIFIER_CODE
+} from "../../core/catalog-verifier-integrity.js";
 import { ingestGithubIssues } from "../../jobs/ingest-github-issues.js";
 import { ingestOpenDataDatasets, parseDatasets as parseOpenDataDatasets } from "../../jobs/ingest-open-data-datasets.js";
 import { ingestOpenApiSpecs, parseOpenApiSpecs } from "../../jobs/ingest-openapi-specs.js";
@@ -36,6 +40,7 @@ export async function createJobsFromImportResult(service, jobs, { now = new Date
 
   for (const job of jobs) {
     try {
+      assertIngestedCatalogVerifierCanReject(job);
       const action = () => service.createJob(job);
       created.push(await (service.catalogueLaneDiscipline?.post
         ? service.catalogueLaneDiscipline.post(job, action, { now })
@@ -44,6 +49,10 @@ export async function createJobsFromImportResult(service, jobs, { now = new Date
       const normalized = normalizeError(error);
       if (normalized.code === "job_exists") {
         skipped.push({ id: job.id, reason: "already_exists" });
+        continue;
+      }
+      if (normalized.code === NON_FAILABLE_VERIFIER_CODE) {
+        skipped.push({ id: job.id, reason: normalized.code });
         continue;
       }
       if (normalized.code === "lane_budget_exhausted" || normalized.code === "lane_paused") {

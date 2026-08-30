@@ -1,5 +1,10 @@
 import { ingestGithubIssues } from "../jobs/ingest-github-issues.js";
-import { recordIngestSpecHashRefusal, recordLanePostingRefusal, upsertScheduledIngestedJob } from "./ingested-job-upsert.js";
+import {
+  recordIngestSpecHashRefusal,
+  recordIngestVerifierRefusal,
+  recordLanePostingRefusal,
+  upsertScheduledIngestedJob
+} from "./ingested-job-upsert.js";
 import {
   DEFAULT_OPEN_PR_CAP_PER_REPO,
   DEFAULT_SECURITY_STANDARDS_DENYLIST,
@@ -169,6 +174,7 @@ export class GithubIssueIngestionScheduler {
             } catch (error) {
               if (recordLanePostingRefusal(summary, job, error)) continue;
               if (recordIngestSpecHashRefusal(summary, job, error)) continue;
+              if (recordIngestVerifierRefusal(summary, job, error)) continue;
               throw error;
             }
           }
@@ -219,6 +225,9 @@ export class GithubIssueIngestionScheduler {
   existingGithubIssueKeys() {
     return new Set(
       this.platformService.listJobs()
+        // Legacy report-only definitions for the same issue must not suppress
+        // their immutable-ID github_pr replacements during this migration.
+        .filter((job) => job.verifierMode === "github_pr")
         .map((job) => githubIssueKey(job))
         .filter(Boolean)
     );

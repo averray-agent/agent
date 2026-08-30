@@ -2713,7 +2713,24 @@ const INGEST_JOB_INPUT = {
   verifierMode: "benchmark",
   verifierTerms: ["complete"],
   verifierMinimumMatches: 1,
-  source: { type: "open_data_dataset" }
+  source: { type: "operator_upload" }
+};
+
+const VERIFIABLE_REAL_INGEST_JOB_INPUT = {
+  ...INGEST_JOB_INPUT,
+  id: "pr-example-project-42",
+  verifierMode: "github_pr",
+  verifierMinimumScore: 80,
+  requireIssueReference: true,
+  requireTestEvidence: true,
+  requireClaimantBinding: true,
+  outputSchemaRef: "schema://jobs/github-pr-evidence-output",
+  source: {
+    type: "github_issue",
+    repo: "example/project",
+    issueNumber: 42,
+    issueUrl: "https://github.com/example/project/issues/42"
+  }
 };
 
 function makePrefundGateway(ensureJob) {
@@ -2735,7 +2752,7 @@ test("createIngestedJob does not prefund when the flag is off (no funding stamp)
   // prefundIngestedJobs defaults to false
   const created = await service.createIngestedJob(INGEST_JOB_INPUT);
   assert.equal(created.funding, undefined);
-  assert.equal(created.onboardingWaiverEligible, true);
+  assert.equal(created.onboardingWaiverEligible, undefined);
   assert.equal(gateway.calls.length, 0);
 });
 
@@ -2749,8 +2766,7 @@ test("fresh wallets retain a real waiver-eligible claimable path after demo reti
     new MemoryStateStore()
   );
   await service.createIngestedJob({
-    ...INGEST_JOB_INPUT,
-    id: "open-data-real-starter-001",
+    ...VERIFIABLE_REAL_INGEST_JOB_INPUT,
     rewardAmount: 0.25
   });
 
@@ -2758,7 +2774,7 @@ test("fresh wallets retain a real waiver-eligible claimable path after demo reti
     wallet: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
   });
   const eligible = jobs.filter((job) => (
-    job.source?.type === "open_data_dataset"
+    job.source?.type === "github_issue"
     && job.onboardingWaiverEligible === true
     && job.claimable === true
   ));
@@ -2775,13 +2791,26 @@ test("ingestion waiver policy is source-scoped and starter-only", async () => {
     source: { type: "operator_upload" }
   });
   const pro = await service.createIngestedJob({
-    ...INGEST_JOB_INPUT,
-    id: "open-data-pro",
+    ...VERIFIABLE_REAL_INGEST_JOB_INPUT,
+    id: "pr-example-project-43",
     tier: "pro"
   });
 
   assert.equal(unknown.onboardingWaiverEligible, undefined);
   assert.equal(pro.onboardingWaiverEligible, undefined);
+});
+
+test("production ingestion refuses new keyword-only provider jobs", async () => {
+  const service = makePlatformService();
+  await assert.rejects(
+    () => service.createIngestedJob({
+      ...INGEST_JOB_INPUT,
+      id: "unsafe-open-data-job",
+      source: { type: "open_data_dataset" }
+    }),
+    (error) => error?.code === "catalog_verifier_cannot_reject_bad_work"
+  );
+  assert.equal(service.listJobs().some((job) => job.id === "unsafe-open-data-job"), false);
 });
 
 test("createIngestedJob does not prefund when the gateway is disabled", async () => {

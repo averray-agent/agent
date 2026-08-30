@@ -96,7 +96,11 @@ export function normalizeJobInput(input) {
   const delegationPolicy = normaliseDelegationPolicy(input?.delegationPolicy, { rewardAmount, rewardAsset });
   const lineage = normalisePlainObject(input?.lineage, "lineage");
   const lifecycle = normaliseLifecycle(input?.lifecycle, { disableStale: recurring });
-  assertActiveCatalogTitleTruthBoundary(title, lifecycle);
+  assertActiveCatalogTitleTruthBoundary(title, lifecycle, {
+    verifierMode,
+    outputSchemaRef,
+    source
+  });
   const recurringPolicy = normaliseRecurringPolicy(input?.recurringPolicy, {
     recurring,
     rewardAmount,
@@ -162,8 +166,15 @@ export function activeCatalogTitlePromisesUpstreamSideEffect(title) {
   return UPSTREAM_SIDE_EFFECT_TITLE_PATTERN.test(String(title ?? "").trim());
 }
 
-export function assertActiveCatalogTitleTruthBoundary(title, lifecycle = { status: "open" }) {
+export function assertActiveCatalogTitleTruthBoundary(title, lifecycle = { status: "open" }, job = {}) {
   if (!title || lifecycle?.status !== "open") {
+    return;
+  }
+  if (
+    job?.verifierMode === "github_pr"
+    && job?.source?.type === "github_issue"
+    && job?.outputSchemaRef === "schema://jobs/github-pr-evidence-output"
+  ) {
     return;
   }
   if (activeCatalogTitlePromisesUpstreamSideEffect(title)) {

@@ -7,7 +7,6 @@ import {
   repoFromIssue
 } from "../core/maintainer-surface-policy.js";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
-import { substantiveVerifierTerms } from "./substantive-verifier-terms.js";
 
 /**
  * Ingest agent-suitable GitHub issues into the Agent Platform job catalog.
@@ -171,27 +170,31 @@ export function toPlatformJob(issue, score = scoreIssue(issue), {
   const issueTitle = String(issue.title ?? `GitHub issue #${issueNumber}`).trim();
   const body = String(issue.body ?? "").trim();
   const category = inferCategory(issue);
-  const slug = slugify(issueTitle).slice(0, 48);
-  const id = `oss-${slugify(repo)}-${issueNumber}-${slug}`.slice(0, 120);
+  // A new ID is deliberate: the immutable on-chain specHash for the legacy
+  // report-only job cannot be overwritten with a PR-verifier definition.
+  const id = `pr-${slugify(repo)}-${issueNumber}`.slice(0, 120);
   const acceptanceCriteria = buildAcceptanceCriteria({ category, repo, issueNumber });
 
   return {
     id,
-    title: `Audit and report on GitHub issue: ${issueTitle}`,
+    title: `Implement GitHub issue: ${issueTitle}`,
     description:
-      `Audit ${repo} issue #${issueNumber} and return a focused implementation report. Upstream issue context: ${summariseIssueBody(body)}`,
-    jobType: "review",
+      `Implement ${repo} issue #${issueNumber}, validate the focused change, and open a reviewable pull request linked to the issue. Upstream issue context: ${summariseIssueBody(body)}`,
+    jobType: "work",
     requiredRole: "worker",
     category,
     tier: "starter",
     lane: "oss-anchored",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 0.2,
-    verifierMode: "benchmark",
-    verifierTerms: substantiveVerifierTerms(repo, `#${issueNumber}`, issueTitle, issueUrl),
-    verifierMinimumMatches: 2,
+    verifierMode: "github_pr",
+    verifierMinimumScore: 80,
+    requireIssueReference: true,
+    requireTestEvidence: true,
+    acceptMergedAsApproved: true,
+    requireClaimantBinding: true,
     inputSchemaRef: "schema://jobs/coding-input",
-    outputSchemaRef: "schema://jobs/coding-output",
+    outputSchemaRef: "schema://jobs/github-pr-evidence-output",
     claimTtlSeconds: 7200,
     retryLimit: 1,
     requiresSponsoredGas: true,
@@ -216,17 +219,23 @@ export function toPlatformJob(issue, score = scoreIssue(issue), {
     acceptanceCriteria,
     estimatedDifficulty: estimateDifficulty(score),
     agentInstructions: [
-      `Read ${issueUrl} and audit the reported behavior against the linked repository.`,
-      "Describe the smallest focused change that would address the issue.",
-      "Report the relevant tests or docs build that should validate the proposed change.",
-      "Do not modify the upstream repository or open a pull request; submit the audit report to Averray only.",
-      "Submit the report with summary, output, and status fields."
+      `Read ${issueUrl} and the repository contribution policy before changing the repository.`,
+      "Check the issue's current assignment, latest comments, and linked open pull requests; coordinate before starting and do not duplicate work in progress.",
+      "Make the smallest focused patch that satisfies the issue and keep unrelated refactors out.",
+      "Run the relevant tests, lint, or docs build and record the result.",
+      `Open a pull request against ${repo}, link issue #${issueNumber}, and include the Averray disclosure footer with the claimant wallet or claim session.`,
+      "Submit prUrl, summary, tests, and any useful notes using schema://jobs/github-pr-evidence-output."
     ],
     verification: {
-      method: "benchmark",
-      suggestedCheck: "github_issue_audit_report_complete",
-      signals: ["issue_reviewed", "proposed_change_reported", "validation_plan_reported"],
-      evidenceSchemaRef: "schema://jobs/coding-output"
+      method: "github_pr",
+      signals: [
+        "pr_exists",
+        "repo_matches",
+        "issue_referenced",
+        "claimant_bound",
+        "test_evidence_present"
+      ],
+      evidenceSchemaRef: "schema://jobs/github-pr-evidence-output"
     }
   };
 }
@@ -290,15 +299,15 @@ function inferCategory(issue) {
 
 function buildAcceptanceCriteria({ category, repo, issueNumber }) {
   return [
-    `Audit ${repo} issue #${issueNumber} and cite the issue in the report.`,
-    "Describe a focused proposed change without modifying the upstream repository.",
+    `Implement the focused change requested by ${repo} issue #${issueNumber}.`,
+    `Open a pull request against ${repo} that links issue #${issueNumber}.`,
     category === "docs"
-      ? "Report the docs build or review steps that should validate the proposed change."
-      : "Report the relevant tests that should validate the proposed change.",
+      ? "Run the relevant docs build or review checks and include the result in the PR evidence."
+      : "Run the relevant tests and include the result in the PR evidence.",
     category === "testing"
-      ? "Describe a regression test or coverage improvement where practical."
-      : "Keep unrelated refactors out of the recommendation.",
-    "Submit the audit report to Averray; do not open a pull request."
+      ? "Add a regression test or coverage improvement where practical."
+      : "Keep unrelated refactors out of the patch.",
+    "Include the Averray disclosure footer bound to the claimant wallet or claim session."
   ];
 }
 

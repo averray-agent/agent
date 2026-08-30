@@ -1,5 +1,9 @@
 import { buildSettlementExpectation } from "../../core/settlement-expectation.js";
 import { schemaRefToJobSchemaPath } from "../../core/job-schema-registry.js";
+import {
+  countRealWaiverEligibleClaimableJobs,
+  isRealWaiverEligibleJob
+} from "../../core/onboarding-inventory.js";
 
 const DEFAULT_AGENT_LIMIT = 25;
 const MAX_AGENT_LIMIT = 100;
@@ -54,6 +58,12 @@ export function buildPublicJobsResponse(jobs, searchParams) {
     offset,
     nextOffset: offset + limit < filteredJobs.length ? offset + limit : null,
     filters,
+    inventory: {
+      claimableJobs: listedJobs.filter((job) => job.claimable === true).length,
+      waiverEligibleJobs: listedJobs.filter(isRealWaiverEligibleJob).length,
+      waiverEligibleClaimableJobs: countRealWaiverEligibleClaimableJobs(listedJobs),
+      definition: "starter + real ingestion source + onboardingWaiverEligible=true + claimable=true"
+    },
     meta: {
       newSince: since === undefined
         ? 0

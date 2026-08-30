@@ -1818,7 +1818,7 @@ test("http smoke: admin job creation idempotency replays and rejects payload dri
   });
 });
 
-test("http smoke: provider ingestion idempotency replays and rejects payload drift", SMOKE_TEST_OPTIONS, async () => {
+test("http smoke: non-failable provider ingestion refusal replays and rejects payload drift", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
@@ -1840,7 +1840,11 @@ test("http smoke: provider ingestion idempotency replays and rejects payload dri
     assert.equal(created.provider, "data.gov");
     assert.equal(created.dryRun, false);
     assert.equal(created.candidateCount, 1);
-    assert.equal(created.created.length, 1);
+    assert.equal(created.created.length, 0);
+    assert.deepEqual(created.skipped, [{
+      id: "open-data-datagov-provider-idempotency-dataset-provider-idempotency-resource",
+      reason: "catalog_verifier_cannot_reject_bad_work"
+    }]);
     assert.equal(created.errors.length, 0);
 
     const replay = await fetch(`${base}/admin/jobs/ingest/open-data`, {
