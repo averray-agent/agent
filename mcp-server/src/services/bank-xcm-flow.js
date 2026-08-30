@@ -419,7 +419,7 @@ export function assertDryRunEvidence(evidence = {}, expected = {}) {
   if (expected.event) {
     const match = (evidence.events ?? []).some((event) => eventMatches(event, expected.event));
     if (!match) {
-      const label = [expected.event.section, expected.event.method].filter(Boolean).join(".");
+      const label = [expected.event.section, expected.event.method ?? expected.event.methodPrefix].filter(Boolean).join(".");
       throw new ValidationError(`Exact XCM dry-run did not emit expected ${label || "event"}; refusing to sign.`);
     }
   }
@@ -428,7 +428,8 @@ export function assertDryRunEvidence(evidence = {}, expected = {}) {
 
 function eventMatches(event = {}, expected = {}) {
   if (expected.section && String(event.section).toLowerCase() !== String(expected.section).toLowerCase()) return false;
-  if (expected.method && String(event.method).toLowerCase() !== String(expected.method).toLowerCase()) return false;
+  if (expected.methodPrefix && !String(event.method).startsWith(String(expected.methodPrefix))) return false;
+  if (!expected.methodPrefix && expected.method && String(event.method).toLowerCase() !== String(expected.method).toLowerCase()) return false;
   for (const [key, value] of Object.entries(expected.fields ?? {})) {
     if (String(event.data?.[key] ?? "").toLowerCase() !== String(value).toLowerCase()) return false;
   }
@@ -467,7 +468,7 @@ function expectedV22DryRun(legIndex) {
     return {
       event: {
         section: "Broadcast",
-        method: "Swapped",
+        methodPrefix: "Swapped",
         fields: { fillerType: "AAVE", assetIn: 22, assetOut: 1003 }
       }
     };
@@ -476,7 +477,7 @@ function expectedV22DryRun(legIndex) {
     return {
       event: {
         section: "Broadcast",
-        method: "Swapped",
+        methodPrefix: "Swapped",
         fields: { fillerType: "AAVE", assetIn: 1003, assetOut: 22 }
       }
     };
