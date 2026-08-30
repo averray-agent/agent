@@ -1,11 +1,63 @@
 # RUNSHEET — Measure the venue rate and friction (second observation)
 
-Status: **READY, fee-gated** · 2026-08-27 · Author: Claude (architect + gate) ·
+Status: **DEPLOYED AND EARNING 2026-08-30 — entry measured; recall due before 2026-09-04T16:25:12Z** · 2026-08-27 · Author: Claude (architect + gate) ·
 Executor: Pascal (every money step).
 Purpose: **buy a second data point**, not yield. Every figure in
 `MEMO_COMMITMENT_LADDER.md` and the case for v2.2 rests on two single
 observations from epoch 3 (11.3%/yr implied, 0.129576 friction). This runsheet
 costs about 0.13 USDC and tells us whether those numbers are real.
+
+## EXECUTED — deployment 4, entry side complete 2026-08-30
+
+| step | tx | result |
+|---|---|---|
+| deploy (pool→adapter) | `0xe152e284…` | 4.500000 committed, buffer 14.888371 → 10.388371 |
+| leg 0 funding (XCM) | (first commit attempt) | Hydration asset-22 +4,499,357 |
+| leg 1 sell (resumed) | `0x92f296ee…` | AAVE par swap 4,450,000 → 4,450,000 aUSDC |
+| settle | `0xc534b635…` | `VenueDeploymentSettled(4, status 2, 4450000)` |
+
+**ENTRY FRICTION — MEASURED, reconciles to the raw unit:**
+
+```
+sent from pool          4.500000
+transport (leg 0)      -0.000643
+sell execution fee     -0.021821
+                        ---------
+TOTAL ENTRY FRICTION    0.022464 USDC
+```
+
+Check: 4.450000 aUSDC + 0.027536 retained asset-22 float + 0.022464 friction
+= 4.500000 exactly.
+
+**The epoch-3 prior was 0.100000. Measured entry is 4.45x cheaper.** The swap
+filled at exact par (AAVE, zero accrual), so essentially all friction is
+transport plus the XCM execution fee — not slippage.
+
+**Venue clock starts 2026-08-30T13:00Z** (when the swap landed), NOT at the
+deployment. Days at venue, not window length, is the denominator.
+
+## The pool does NOT mark down at settlement — NAV is briefly overstated
+
+`principalCostBasisReductionRaw: 0`. `venuePrincipalCostBasis` stays 4.500000
+while 4.450000 is actually deployed. So right now:
+
+| | |
+|---|---|
+| reported `totalAssets` | 14.888371 |
+| true recoverable | 14.865907 |
+| **overstated by** | **0.022464 (0.151%)** |
+
+That is exactly the already-consumed friction; the loss is recognised at
+**recall**, not at deployment. Small, but **any surface reading NAV or share
+price off this pool before the recall is optimistic by that amount.** Worth
+knowing before anyone quotes it.
+
+## Remaining
+
+Recall before **2026-09-04T16:25:12Z**, then measure exit friction and the
+earned amount, then recompute the ladder's break-even table from measured
+values and update `MEMO_COMMITMENT_LADDER.md` in place. Reimburse the pool for
+the full measured round trip (operator-funded, Y3 ledger).
 
 ## Why this needs no ceremony
 
