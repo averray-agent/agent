@@ -1784,3 +1784,297 @@ section.section { scroll-margin-top: 100px; }
   .band__live i { animation: none; }
   .read__value { transition: none; }
 }
+
+/* ==========================================
+   13. PUBLIC POOL (/pool)
+   A depositor page whose primary product state is read before its action is
+   enabled. Warm paper carries membership; the dark live-read panel carries
+   the earning state and API-owned risk sentence above the depositor door.
+   ========================================== */
+.pool-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(420px, 1.1fr);
+  gap: 44px;
+  align-items: center;
+  margin-top: 48px;
+}
+.pool-hero__title {
+  margin: 12px 0 18px;
+  max-width: 10ch;
+  font-family: var(--font-display);
+  font-size: clamp(3rem, 6vw, 5.8rem);
+  font-weight: 700;
+  line-height: 0.94;
+  letter-spacing: -0.055em;
+  text-wrap: balance;
+}
+.pool-hero__lede {
+  max-width: 47ch;
+  margin: 0;
+  color: var(--avy-muted);
+  font-size: 17px;
+  line-height: 1.65;
+}
+.pool-now {
+  position: relative;
+  overflow: hidden;
+  padding: 28px;
+  border-radius: var(--card-radius);
+  background: var(--avy-dark);
+  color: #f5f3ee;
+  box-shadow: var(--shadow-hero);
+}
+.pool-now::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(155, 215, 181, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(155, 215, 181, 0.055) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(circle at 75% 10%, black 8%, transparent 70%);
+  -webkit-mask-image: radial-gradient(circle at 75% 10%, black 8%, transparent 70%);
+  pointer-events: none;
+}
+.pool-now > * { position: relative; z-index: 1; }
+.pool-now__status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 30px;
+}
+.pool-now__status a {
+  color: rgba(245, 243, 238, 0.62);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.pool-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #f4c989;
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+}
+.pool-state::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+[data-pool-page-state="live"] .pool-state { color: #9bd7b5; }
+[data-pool-page-state="unavailable"] .pool-state { color: #f0c08a; }
+.pool-now__eyebrow,
+.pool-risk__label {
+  margin: 0;
+  color: rgba(245, 243, 238, 0.48);
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+}
+.pool-now__title {
+  margin: 9px 0 12px;
+  max-width: 16ch;
+  color: #f5f3ee;
+  font-family: var(--font-display);
+  font-size: clamp(30px, 4vw, 46px);
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+}
+.pool-now__body {
+  max-width: 58ch;
+  margin: 0;
+  color: rgba(245, 243, 238, 0.67);
+  font-size: 14px;
+  line-height: 1.65;
+}
+.pool-now__body a { color: #9bd7b5; }
+.pool-risk {
+  margin-top: 24px;
+  padding: 16px 17px;
+  border: 1px solid rgba(244, 201, 137, 0.28);
+  border-radius: var(--radius);
+  background: rgba(244, 201, 137, 0.08);
+}
+.pool-risk__label { color: #f4c989; }
+.pool-risk__statement {
+  margin: 7px 0 0;
+  color: #fff5e8;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+.pool-now__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+.pool-now__actions[hidden] { display: none; }
+.pool-now .btn--ghost { color: #f5f3ee; border-color: rgba(245, 243, 238, 0.2); }
+.pool-now .btn--ghost:hover { background: rgba(245, 243, 238, 0.08); }
+
+.pool-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.pool-fact {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--avy-line);
+  border-radius: var(--card-radius);
+  background: var(--avy-paper-solid);
+}
+.pool-fact__label {
+  margin: 0;
+  color: var(--avy-muted);
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+.pool-fact__value {
+  margin: 12px 0 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.pool-source-note {
+  margin: 14px 0 0;
+  color: var(--avy-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.pool-source-note a { color: var(--avy-accent); }
+
+.pool-membership-base {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.28fr) minmax(230px, 0.7fr) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+  padding: 24px;
+  border: 1px solid rgba(30, 102, 66, 0.24);
+  border-radius: var(--card-radius);
+  background: var(--avy-accent-wash);
+}
+.pool-membership-base .pillar__title,
+.pool-membership-base .pillar__body { margin: 0; }
+.pool-tier-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.pool-tier {
+  padding: 22px;
+  border: 1px solid var(--avy-line);
+  border-radius: var(--card-radius);
+  background: var(--avy-paper-solid);
+}
+.pool-tier__perks {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 14px 0 0 18px;
+  border-top: 1px dashed var(--avy-line);
+  color: var(--avy-muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.pool-exit { padding: 30px; }
+.pool-exit__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(245, 243, 238, 0.12);
+  border-radius: var(--radius);
+  background: rgba(245, 243, 238, 0.12);
+}
+.pool-exit__grid article { padding: 20px; background: var(--avy-dark); }
+.pool-exit__grid h3 {
+  margin: 0;
+  color: #f5f3ee;
+  font-family: var(--font-display);
+  font-size: 17px;
+}
+.pool-exit__grid p {
+  margin: 9px 0 0;
+  color: rgba(245, 243, 238, 0.66);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.pool-generations {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.pool-generation {
+  padding: 24px;
+  border: 1px solid var(--avy-line);
+  border-radius: var(--card-radius);
+  background: var(--avy-paper-solid);
+}
+.pool-generation__role {
+  margin: 9px 0 18px;
+  max-width: 30ch;
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 1.25;
+}
+.pool-generation__address {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--avy-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.pool-generation__facts {
+  display: grid;
+  gap: 10px;
+  margin: 20px 0 0;
+  padding-top: 16px;
+  border-top: 1px dashed var(--avy-line);
+}
+.pool-generation__facts div { display: flex; justify-content: space-between; gap: 16px; }
+.pool-generation__facts dt { color: var(--avy-muted); font-size: 12px; }
+.pool-generation__facts dd {
+  margin: 0;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+@media (max-width: 980px) {
+  .pool-hero { grid-template-columns: 1fr; }
+  .pool-hero__title { max-width: 12ch; }
+  .pool-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pool-membership-base { grid-template-columns: 1fr; }
+}
+@media (max-width: 720px) {
+  .pool-hero { margin-top: 34px; gap: 28px; }
+  .pool-now { padding: 22px; }
+  .pool-tier-list,
+  .pool-generations,
+  .pool-exit__grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .pool-facts { grid-template-columns: 1fr; }
+  .pool-now__status { align-items: flex-start; flex-direction: column; }
+}

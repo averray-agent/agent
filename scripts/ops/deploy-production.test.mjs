@@ -691,6 +691,8 @@ test("deploy rebuilds and verifies the public site even when no site paths chang
   assert.match(run.stdout, /Served .*\/transparency-reader\.js matches built site\/transparency-reader\.js/u);
   assert.match(run.stdout, /Served .*\/verify\/ matches built site\/verify\/index\.html/u);
   assert.match(run.stdout, /Served .*\/proof-to-pay\/ matches built site\/proof-to-pay\/index\.html/u);
+  assert.match(run.stdout, /Served .*\/pool\/ matches built site\/pool\/index\.html/u);
+  assert.match(run.stdout, /Served .*\/pool-reader\.js matches built site\/pool-reader\.js/u);
   assert.deepEqual(parseDeployResult(run.stdout), {
     schemaVersion: 1,
     changed: false,
@@ -2053,6 +2055,7 @@ async function makeSiteFixture() {
   await mkdir(join(appRoot, "site/transparency"), { recursive: true });
   await mkdir(join(appRoot, "site/verify"), { recursive: true });
   await mkdir(join(appRoot, "site/proof-to-pay"), { recursive: true });
+  await mkdir(join(appRoot, "site/pool"), { recursive: true });
   await mkdir(stackRoot, { recursive: true });
   await mkdir(fakeBin, { recursive: true });
   await writeFile(join(stackRoot, "docker-compose.yml"), "services: {}\n");
@@ -2088,6 +2091,8 @@ async function makeSiteFixture() {
     "  */verify/) name=verify/index.html ;;",
     "  */verify-reader.js) name=verify-reader.js ;;",
     "  */proof-to-pay/) name=proof-to-pay/index.html ;;",
+    "  */pool/) name=pool/index.html ;;",
+    "  */pool-reader.js) name=pool-reader.js ;;",
     "esac",
     "if [[ -n \"$out\" && -n \"${FAKE_SERVED_DIR:-}\" ]]; then",
     "  cp \"$FAKE_SERVED_DIR/$name\" \"$out\"",
@@ -2108,6 +2113,8 @@ async function makeSiteFixture() {
   await writeFile(join(appRoot, "site/verify/index.html"), "<title>Averray Verify</title> fresh build\n");
   await writeFile(join(appRoot, "site/verify-reader.js"), "// fresh verify reader\n");
   await writeFile(join(appRoot, "site/proof-to-pay/index.html"), "<title>Proof-to-Pay</title> fresh build\n");
+  await writeFile(join(appRoot, "site/pool/index.html"), "<title>Pool</title> fresh build\n");
+  await writeFile(join(appRoot, "site/pool-reader.js"), "// fresh pool reader\n");
   git(appRoot, "add", ".");
   git(appRoot, "commit", "-m", "base");
   const baseSha = revParse(appRoot, "HEAD");

@@ -15,7 +15,8 @@ function safePages(verifyHtml) {
   return {
     "site/index.html": `${meta}<main>Outcome verification and work receipts.</main>`,
     "site/verify/index.html": `${meta}${verifyHtml}`,
-    "site/proof-to-pay/index.html": `${meta}<main>Proof-gated escrow. Release on PASS only.</main>`
+    "site/proof-to-pay/index.html": `${meta}<main>Proof-gated escrow. Release on PASS only.</main>`,
+    "site/pool/index.html": `${meta}<main><div data-public-pool><h2 data-pool-yield-heading>Reading live state</h2><p data-pool-risk-statement>Reading live disclosure</p><div data-pool-cta hidden>Open depositor view</div></div><footer>Footer</footer></main>`
   };
 }
 

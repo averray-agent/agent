@@ -996,7 +996,7 @@ site_content_hash() {
 verify_site_served() {
   local base_url="${PUBLIC_SITE_URL%/}"
   local entry
-  for entry in "index.html /" "console-stream.js /console-stream.js" "transparency/index.html /transparency/" "transparency-reader.js /transparency-reader.js" "verify/index.html /verify/" "verify-reader.js /verify-reader.js" "proof-to-pay/index.html /proof-to-pay/"; do
+  for entry in "index.html /" "console-stream.js /console-stream.js" "transparency/index.html /transparency/" "transparency-reader.js /transparency-reader.js" "verify/index.html /verify/" "verify-reader.js /verify-reader.js" "proof-to-pay/index.html /proof-to-pay/" "pool/index.html /pool/" "pool-reader.js /pool-reader.js"; do
     local file="${entry%% *}"
     local url_path="${entry#* }"
     local local_file="$APP_ROOT/site/$file"
