@@ -242,11 +242,12 @@ test("yieldStatus has one byte-identical source and flips the buffer alert with 
   assert.equal(on.bufferFloorAlertEnabled, true);
 });
 
-test("not-earning copy states the D3 reopen conditions without implying an imminent ceremony", () => {
+test("not-earning copy states the measured-friction condition without a numeric threshold", () => {
   assert.equal(depositPoolYieldStatus(0n).yieldStatusText, DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT);
   assert.match(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /capital is home/u);
-  assert.match(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /approximately 62 USDC/u);
-  assert.match(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /seven-day cap is amended/u);
+  assert.match(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /sufficient against measured round-trip friction/u);
+  assert.match(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /currently being re-measured/u);
+  assert.doesNotMatch(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /\d/u);
   assert.doesNotMatch(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /pending operator ceremony/u);
 });
 
