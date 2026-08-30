@@ -1175,7 +1175,7 @@
     },
     {
       "name": "listVerificationProfiles",
-      "description": "Published standalone verification profiles with pinned versions, limits, and pricing.",
+      "description": "Published standalone verification profiles with pinned versions, limits, and success criteria. Read the exact price and EIP-3009 payment requirements from https://api.averray.com/.well-known/x402; the paid surface uses USDC 0x833589fcd6edb6e08f4c7c32d4f71b54bda02913 on Base eip155:8453. Inconclusive runs are not billed.",
       "surface": "mcp"
     },
     {

@@ -40,13 +40,13 @@ function harness({ createRun, getRun, payload, profiles = new VerificationProfil
   return { calls, response, route };
 }
 
-test("GET /verify/profiles is public and cacheable", async () => {
+test("GET /verify/profiles is public, cacheable, and leads with the URL-only MCP profile", async () => {
   const { response, route } = harness();
   assert.equal(await route({ request: { method: "GET" }, response, pathname: "/verify/profiles" }), true);
   assert.equal(response.statusCode, 200);
   assert.deepEqual(
     response.body.profiles.map(({ ref }) => ref),
-    ["git-patch-tests-v1@1", "mcp-failure-semantics-v1@1", "structured-output-evidence-v1@1"]
+    ["mcp-failure-semantics-v1@1", "git-patch-tests-v1@1", "structured-output-evidence-v1@1"]
   );
   assert.equal(response.headers["cache-control"], "public, max-age=300");
 });
@@ -146,7 +146,7 @@ test("POST /verify/runs returns the x402 challenge before work when unpaid", asy
   assert.equal(response.headers["payment-required"], encoded);
 });
 
-test("GET /verify/runs/:runId polls by opaque run id", async () => {
+test("GET /verify/runs/:runId is public and polls by opaque run id", async () => {
   const { response, route } = harness({
     getRun: async (runId) => ({
       runId,

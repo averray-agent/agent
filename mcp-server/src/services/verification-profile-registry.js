@@ -364,7 +364,7 @@ const STRUCTURED_OUTPUT_EVIDENCE_V1 = {
 
 export class VerificationProfileRegistry {
   constructor({
-    profiles = [GIT_PATCH_TESTS_V1, MCP_FAILURE_SEMANTICS_V1, STRUCTURED_OUTPUT_EVIDENCE_V1],
+    profiles = [MCP_FAILURE_SEMANTICS_V1, GIT_PATCH_TESTS_V1, STRUCTURED_OUTPUT_EVIDENCE_V1],
     autoDecidableModes = AUTO_DECIDABLE_MODES,
     availabilityByProfile = {}
   } = {}) {

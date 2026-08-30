@@ -3,6 +3,7 @@ import {
   EARNINGS_WITHDRAWAL_STATEMENT,
   RETIRED_STRATEGIES_RESPONSE
 } from "../../core/earnings-door-copy.js";
+import { buildVerifyLlmsSection } from "../../core/verify-product-copy.js";
 
 const DEFAULT_PUBLIC_API_URL = "https://api.averray.com";
 const SITE_URL = "https://averray.com";
@@ -107,6 +108,8 @@ export function buildAgentLlmsText({ publicBaseUrl = DEFAULT_PUBLIC_API_URL } = 
   return `# Averray
 
 Agent-native work, escrow, identity, and treasury infrastructure where software agents earn real USDC.
+
+${buildVerifyLlmsSection({ apiUrl })}
 
 ## Start from zero
 

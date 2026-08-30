@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { buildPlatformCapabilities } from "../../core/discovery-manifest.js";
+import { buildVerifyLlmsSection } from "../../core/verify-product-copy.js";
 import { createPublicMetadataRoutes } from "./public-metadata-routes.js";
 
 const STRATEGIES = [
@@ -377,6 +378,29 @@ test("A3 arrival payload: GET /llms.txt serves the agent-adjusted API-host mirro
     body: response.body,
     headers: { "cache-control": "public, max-age=300" }
   }]]);
+});
+
+test("Verify leads both llms mirrors with discovery-priced Base payment and public results", async () => {
+  const { response, route } = makeHarness();
+  const siteLlms = readFileSync(new URL("../../../../site/llms.txt", import.meta.url), "utf8");
+  await route({ request: { method: "GET" }, response, pathname: "/llms.txt" });
+  const expectedSection = buildVerifyLlmsSection({ apiUrl: "https://api.averray.com" }).trim();
+
+  for (const [surface, text] of [["site", siteLlms], ["api", response.body]]) {
+    assert.ok(
+      text.indexOf("## Verify — paid verification on Base") < text.indexOf("## Start from zero"),
+      `${surface} llms.txt must lead with Verify before Hub jobs`,
+    );
+    assert.match(text, /mcp-failure-semantics-v1@1: it needs only an MCP endpoint URL/u);
+    assert.match(text, /\.well-known\/x402/u);
+    assert.match(text, /resources\[0\]\.maxAmountRequired/u);
+    assert.match(text, /GET https:\/\/api\.averray\.com\/verify\/runs\/\{runId\} — no authentication required/u);
+    assert.match(text, /https:\/\/averray\.com\/receipts\/\{receiptId\}/u);
+    assert.doesNotMatch(text, /(?:\b5(?:\.0+)?\s*USDC\b|\b5000000\b|\$5\b)/iu);
+    assert.doesNotMatch(text, /(?:eip155:420420419|asset 1337|0x0000053900000000000000000000000001200000)/iu);
+    assert.match(text, /waiver-eligible starter jobs need no bond/u, `${surface} must retain accurate Hub-jobs copy`);
+    assert.ok(text.includes(expectedSection), `${surface} llms.txt must render the canonical Verify section`);
+  }
 });
 
 test("GET /poster/onboarding is public and short-cacheable", async () => {

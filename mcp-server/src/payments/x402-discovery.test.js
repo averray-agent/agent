@@ -81,6 +81,7 @@ test("x402 discovery requirements are byte-equal to the live Verify 402 for the 
   assert.equal(resource.inputContract.url, "https://api.averray.com/verify/profiles");
   assert.equal(resource.maxAmountRequired, "5000000");
   assert.equal(resource.accepts.length, profiles.length);
+  assert.equal(resource.accepts[0].extra.profile, "mcp-failure-semantics-v1@1");
 
   for (const profile of profiles) {
     const advertised = resource.accepts.find((entry) => entry.extra.profile === profile.ref);
@@ -130,7 +131,7 @@ test("x402 copy lock refuses Hub payment requirements and Hub-paired description
 
 test("POST /jobs/x402 refuses a non-Base payment with a named network reason", async () => {
   const gate = makeGate();
-  const [profile] = new VerificationProfileRegistry().list();
+  const profile = new VerificationProfileRegistry().get("git-patch-tests-v1", 1);
   const challenge = await liveChallenge(gate, profile);
   const requirements = challenge.accepts[0];
   const accepted = structuredClone(requirements);
@@ -165,7 +166,7 @@ test("POST /jobs/x402 refuses a non-Base payment with a named network reason", a
 
 test("the existing Verify 402 envelope remains byte-identical", async () => {
   const gate = makeGate();
-  const [profile] = new VerificationProfileRegistry().list();
+  const profile = new VerificationProfileRegistry().get("git-patch-tests-v1", 1);
   const challenge = await liveChallenge(gate, profile);
   const request = profile.workedExample.request;
   const requestHash = hashCanonicalContent({

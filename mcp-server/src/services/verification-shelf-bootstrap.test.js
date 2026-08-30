@@ -31,12 +31,12 @@ test("backend verification shelf boots, profiles, and queues without loading Wit
     env: {}
   });
 
-  const [profile, mcpProfile, structuredProfile] = verificationRunService.listProfiles();
-  assert.equal(profile.ref, "git-patch-tests-v1@1");
-  assert.deepEqual(profile.availability, { status: "available" });
+  const [mcpProfile, profile, structuredProfile] = verificationRunService.listProfiles();
   assert.equal(mcpProfile.ref, "mcp-failure-semantics-v1@1");
   assert.equal(mcpProfile.availability.status, "unavailable");
   assert.equal(mcpProfile.availability.reason, "isolated_mcp_prober_not_configured");
+  assert.equal(profile.ref, "git-patch-tests-v1@1");
+  assert.deepEqual(profile.availability, { status: "available" });
   assert.equal(structuredProfile.ref, "structured-output-evidence-v1@1");
   assert.deepEqual(structuredProfile.availability, { status: "available" });
   assert.ok(verificationRunFinalizer);
