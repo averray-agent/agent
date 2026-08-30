@@ -119,8 +119,13 @@ test("every Dockerfile COPY source is covered by the backend rebuild pattern", (
   const deploySource = readFileSync(deployScript, "utf8");
   assert.match(
     deploySource,
-    /backend_rebuild_pattern=\$\(node[\s\S]*?backend-image-rebuild-pattern\.mjs[\s\S]*?mcp-server\/Dockerfile/u,
+    /backend_rebuild_pattern=\$\(derive_backend_rebuild_pattern[\s\S]*?mcp-server\/Dockerfile/u,
     "production deploy must use the Dockerfile-derived matcher that this test checks",
+  );
+  assert.doesNotMatch(
+    deploySource,
+    /backend_rebuild_pattern=\$\(node/u,
+    "the VPS deploy path must not require Node to derive the backend matcher",
   );
 });
 

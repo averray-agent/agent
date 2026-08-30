@@ -1925,6 +1925,94 @@ commit_indexer_schema_ownership() {
   fi
 }
 
+backend_copy_source_pattern() {
+  local source="${1#./}"
+  local character=""
+  local escaped=""
+  local index=0
+
+  case "$source" in
+    ""|/*|..|../*|*/../*|--*|*'$'*|*'"'*|*"'"*)
+      echo "Unsupported mcp-server/Dockerfile COPY source: $1" >&2
+      return 1
+      ;;
+  esac
+
+  if [[ "$source" == "." ]]; then
+    printf '.+\n'
+    return 0
+  fi
+
+  while (( index < ${#source} )); do
+    character=${source:index:1}
+    case "$character" in
+      "*") escaped="${escaped}[^/]*" ;;
+      "?") escaped="${escaped}[^/]" ;;
+      "[")
+        echo "Dockerfile COPY bracket globs are not supported by the deploy matcher: $source" >&2
+        return 1
+        ;;
+      "\\"|"^"|'$'|"."|"+"|"("|")"|"|"|"{"|"}"|"]")
+        escaped="${escaped}\\${character}"
+        ;;
+      *) escaped="${escaped}${character}" ;;
+    esac
+    index=$((index + 1))
+  done
+
+  if [[ "$source" == *"*"* || "$source" == *"?"* ]]; then
+    printf '%s$\n' "$escaped"
+  elif [[ "$source" == */ || -d "$APP_ROOT/$source" ]]; then
+    printf '%s(/|$)\n' "${escaped%/}"
+  else
+    printf '%s$\n' "$escaped"
+  fi
+}
+
+derive_backend_rebuild_pattern() {
+  local dockerfile="$1"
+  local copy_sources=""
+  local source=""
+  local source_pattern=""
+  local alternatives='mcp-server/|witness/|sdk/|examples/|docs/schemas/|package(-lock)?\.json|scripts/ops/redeploy-backend\.sh|deploy/(witness-docker-proxy|mcp-egress-proxy)/|deploy/docker-compose\.mainnet\.yml|deploy/backend(\.mainnet)?\.env\.template|deployments/(testnet|mainnet)\.json'
+
+  if [[ ! -r "$dockerfile" ]]; then
+    echo "Cannot read backend Dockerfile at $dockerfile." >&2
+    return 1
+  fi
+
+  # Production Dockerfile inputs are literal `COPY <src> <dst>` lines. Keep
+  # the runtime parser in the host's POSIX toolchain: the VPS deliberately has
+  # no Node binary. Unsupported COPY forms fail closed in the normalizer below.
+  if ! copy_sources=$(
+    awk '
+      /^[[:space:]]*COPY[[:space:]]+/ {
+        line = $0
+        sub(/^[[:space:]]*COPY[[:space:]]+/, "", line)
+        count = split(line, fields, /[[:space:]]+/)
+        if (count < 2) exit 2
+        for (field_number = 1; field_number < count; field_number += 1) {
+          if (!seen[fields[field_number]]++) print fields[field_number]
+        }
+        found = 1
+      }
+      END { if (!found) exit 3 }
+    ' "$dockerfile"
+  ); then
+    echo "mcp-server/Dockerfile exposes no parseable build-context COPY sources." >&2
+    return 1
+  fi
+
+  while IFS= read -r source; do
+    [[ -n "$source" ]] || continue
+    source_pattern=$(backend_copy_source_pattern "$source") || return 1
+    alternatives="${alternatives}|${source_pattern}"
+  done <<< "$copy_sources"
+
+  [[ "$alternatives" == *"|"* ]] || return 1
+  printf '^(%s)\n' "$alternatives"
+}
+
 deploy() {
   echo "Production deploy lock acquired: $DEPLOY_LOCK_FILE"
   echo "Updating repo in $APP_ROOT"
@@ -2011,10 +2099,10 @@ deploy() {
   fi
 
   # Phase 2 PR 2.6: the trigger for backend redeploy is now path-based.
-  # The pre-existing trigger set stays fixed in
-  # backend-image-rebuild-pattern.mjs. The Dockerfile build-context inputs are
-  # derived from its COPY instructions at deploy time, so a file cannot enter
-  # the backend image without also entering the rebuild trigger.
+  # The pre-existing trigger set stays fixed while Dockerfile build-context
+  # inputs are derived from COPY instructions at deploy time, so a file cannot
+  # enter the backend image without also entering the rebuild trigger. This
+  # host-side path deliberately uses only shell tooling; production has no Node.
   #
   # Phase 2 PR 2.7d.1: ALSO trigger on /run env content change. When
   # the trigger is JUST the env content (no code path changed),
@@ -2028,13 +2116,12 @@ deploy() {
   local backend_code_changed=0
   local backend_rebuild_pattern='^$'
   if [[ "$RUN_BACKEND" == "auto" ]]; then
-    if ! backend_rebuild_pattern=$(node \
-      "$APP_ROOT/scripts/ops/backend-image-rebuild-pattern.mjs" \
-      "$APP_ROOT/mcp-server/Dockerfile" \
-      "$APP_ROOT"); then
+    if ! backend_rebuild_pattern=$(derive_backend_rebuild_pattern \
+      "$APP_ROOT/mcp-server/Dockerfile"); then
       echo "Cannot derive the backend rebuild trigger from mcp-server/Dockerfile; refusing a potentially stale deploy." >&2
       exit 1
     fi
+    echo "Backend rebuild pattern: $backend_rebuild_pattern"
   fi
   if should_run backend "$RUN_BACKEND" "$backend_rebuild_pattern"; then
     backend_code_changed=1
