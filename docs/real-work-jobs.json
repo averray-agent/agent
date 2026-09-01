@@ -128,7 +128,7 @@
         "Fetch the pinned Data.gov page and CDC CSV URL and report status, content type, redirect behavior, and observed update metadata.",
         "Inspect a bounded sample and report the exact column set, missing-value patterns, duplicate-key risks, and consistency between Site_WVAL and Site_WVAL_Category.",
         "Provide evidence for every check and at least one actionable finding, or set no_issue_found=true only when every requested check has supporting evidence.",
-        "Submit the exact pinned dataset_url and resource_url; verification fetches both and rejects missing, substituted, or unreachable evidence."
+        "Submit the exact pinned dataset_url and resource_url; verification rejects missing or substituted evidence, while an unavailable operator-pinned target is inconclusive with no worker consequence."
       ],
       "agentInstructions": [
         "Treat this as a public-data quality audit; do not edit the source or contact the agency.",

@@ -95,25 +95,66 @@ test("GitHub PR job accepts a live matching PR bound to the claimant", async () 
   assert.equal(verdict.checks.claimantBinding, true);
 });
 
-test("open-data job rejects missing pinned evidence and a resource that does not fetch", async () => {
+test("open-data job rejects missing or substituted worker evidence before fetching", async () => {
   const job = jobs[1];
   const base = validOpenDataSubmission();
   const deficient = { ...base };
   delete deficient.resource_url;
+  const substituted = {
+    ...base,
+    resource_url: "https://example.com/worker-supplied-resource.csv",
+    summary: `${base.summary} Pinned source: ${job.source.resourceUrl}`
+  };
+  let fetchCalls = 0;
+  const registry = new VerifierRegistry({
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      return okResponse();
+    }
+  });
 
-  const missing = await new VerifierRegistry({ fetchImpl: async () => okResponse() }).evaluate(
-    job,
-    normalizeSubmission(deficient)
-  );
+  const missing = await registry.evaluate(job, normalizeSubmission(deficient));
   assert.equal(missing.outcome, "rejected");
 
-  const unreachable = await new VerifierRegistry({
-    fetchImpl: async (url) => String(url) === job.source.resourceUrl
-      ? { ok: false, status: 404, body: { async cancel() {} } }
-      : okResponse()
-  }).evaluate(job, normalizeSubmission(base));
-  assert.equal(unreachable.outcome, "rejected");
-  assert.equal(unreachable.reasonCode, "DETERMINISTIC_FETCH_EVIDENCE_UNREACHABLE");
+  const mismatch = await registry.evaluate(job, normalizeSubmission(substituted));
+  assert.equal(mismatch.outcome, "rejected");
+  assert.equal(mismatch.reasonCode, "DETERMINISTIC_FETCH_EVIDENCE_MISMATCH");
+  assert.equal(fetchCalls, 0);
+});
+
+test("open-data job keeps every operator-pinned fetch outage inconclusive and consequence-free", async () => {
+  const job = jobs[1];
+  const submission = normalizeSubmission(validOpenDataSubmission());
+  const scenarios = [
+    {
+      name: "missing fetcher",
+      fetchImpl: null,
+      detail: /fetcher is unavailable/u
+    },
+    {
+      name: "network failure",
+      fetchImpl: async () => { throw new Error("temporary dataset host failure"); },
+      detail: /could not be fetched: temporary dataset host failure/u
+    },
+    {
+      name: "non-ok response",
+      fetchImpl: async () => ({
+        ok: false,
+        status: 503,
+        body: { async cancel() {} }
+      }),
+      detail: /returned HTTP 503/u
+    }
+  ];
+
+  for (const scenario of scenarios) {
+    const verdict = await new VerifierRegistry({ fetchImpl: scenario.fetchImpl })
+      .evaluate(job, submission);
+    assert.equal(verdict.outcome, "inconclusive", scenario.name);
+    assert.equal(verdict.workerConsequence, "none", scenario.name);
+    assert.equal(verdict.reasonCode, "DETERMINISTIC_FETCH_EVIDENCE_UNREACHABLE", scenario.name);
+    assert.match(verdict.detail, scenario.detail, scenario.name);
+  }
 });
 
 test("open-data job accepts schema-valid evidence only after both pinned URLs fetch", async () => {

@@ -251,7 +251,7 @@ async function evaluateFetchableOpenDataEvidence({ job, evidence, fetchImpl }) {
   }
 
   if (typeof fetchImpl !== "function") {
-    return fetchableEvidenceRejection(job, "The deterministic evidence fetcher is unavailable.");
+    return fetchableEvidenceInconclusive(job, "The deterministic evidence fetcher is unavailable.");
   }
 
   for (const { field, expectedUrl } of targets) {
@@ -270,14 +270,14 @@ async function evaluateFetchableOpenDataEvidence({ job, evidence, fetchImpl }) {
         }
       });
     } catch (error) {
-      return fetchableEvidenceRejection(
+      return fetchableEvidenceInconclusive(
         job,
         `${field} could not be fetched: ${boundedErrorMessage(error)}`
       );
     }
     try {
       if (!response?.ok) {
-        return fetchableEvidenceRejection(
+        return fetchableEvidenceInconclusive(
           job,
           `${field} returned HTTP ${response?.status ?? "unknown"}.`
         );
@@ -303,14 +303,15 @@ async function evaluateFetchableOpenDataEvidence({ job, evidence, fetchImpl }) {
   };
 }
 
-function fetchableEvidenceRejection(job, detail) {
+function fetchableEvidenceInconclusive(job, detail) {
   return {
     jobId: job.id,
     handler: "deterministic",
     handlerVersion: HANDLER_VERSION,
-    outcome: "rejected",
+    outcome: "inconclusive",
     score: 0,
     reasonCode: "DETERMINISTIC_FETCH_EVIDENCE_UNREACHABLE",
+    workerConsequence: "none",
     detail
   };
 }
