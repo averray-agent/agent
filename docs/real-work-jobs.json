@@ -1,0 +1,217 @@
+{
+  "schemaVersion": "averray.real-work-job-bundle.v1",
+  "bundleId": "p-jobs-real-three-2026-08-30",
+  "network": {
+    "name": "Polkadot Hub",
+    "chainId": 420420419,
+    "asset": "USDC",
+    "assetId": 1337
+  },
+  "funding": {
+    "rewardPerJob": 2,
+    "rewardTotal": 6,
+    "brokeredGasBudget": 0.18,
+    "requiredBankBalance": 6.18,
+    "ratifiedBankBalance": 50.275,
+    "ratifiedAt": "2026-08-30"
+  },
+  "poster": {
+    "classification": "operator-run",
+    "postingRoute": "curated",
+    "contentTrust": "operator-curated"
+  },
+  "jobs": [
+    {
+      "id": "real-pr-tricklepay-icon-controls-165",
+      "title": "Audit and report on an accessibility patch for TricklePay icon controls",
+      "description": "Implement TricklePay frontend issue #165, add accessible names to every icon-only control without changing the visual layout, and open a reviewable pull request linked to the issue.",
+      "jobType": "work",
+      "requiredRole": "worker",
+      "category": "accessibility",
+      "tier": "starter",
+      "lane": "oss-anchored",
+      "rewardAsset": "USDC",
+      "rewardAmount": 2,
+      "verifierMode": "github_pr",
+      "verifierMinimumScore": 80,
+      "requireIssueReference": true,
+      "requireTestEvidence": true,
+      "acceptMergedAsApproved": true,
+      "requireClaimantBinding": true,
+      "inputSchemaRef": "schema://jobs/coding-input",
+      "outputSchemaRef": "schema://jobs/github-pr-evidence-output",
+      "claimTtlSeconds": 10800,
+      "retryLimit": 1,
+      "requiresSponsoredGas": true,
+      "onboardingWaiverEligible": false,
+      "source": {
+        "type": "github_issue",
+        "repo": "TricklePay/tricklepay-frontend",
+        "issueNumber": 165,
+        "issueUrl": "https://github.com/TricklePay/tricklepay-frontend/issues/165",
+        "labels": [
+          "good first issue",
+          "accessibility"
+        ],
+        "maintainerPolicy": {
+          "repoDenied": false,
+          "disclosureRequired": true,
+          "openPrCap": 3,
+          "scannedPaths": [
+            "CONTRIBUTING.md"
+          ]
+        }
+      },
+      "acceptanceCriteria": [
+        "Every icon-only control has a programmatic accessible name that describes the action rather than the icon.",
+        "The visual layout is unchanged and the repository's lint, typecheck, test, and build checks pass.",
+        "The pull request links issue #165 and carries the Averray disclosure footer bound to the claimant wallet or claim session."
+      ],
+      "agentInstructions": [
+        "Read the issue and CONTRIBUTING.md before changing the repository.",
+        "Make the smallest focused accessibility patch and add or update regression coverage where the repository's existing test patterns support it.",
+        "Run npm run lint, npm run typecheck, npm test, and npm run build.",
+        "Open a pull request against TricklePay/tricklepay-frontend, link issue #165, and include the Averray disclosure footer with your claimant wallet or claim session.",
+        "Submit prUrl, summary, tests, and any useful notes using schema://jobs/github-pr-evidence-output."
+      ],
+      "verification": {
+        "method": "github_pr",
+        "evidenceSchemaRef": "schema://jobs/github-pr-evidence-output",
+        "signals": [
+          "pr_exists",
+          "repo_matches",
+          "issue_referenced",
+          "claimant_bound",
+          "test_evidence_present"
+        ]
+      }
+    },
+    {
+      "id": "real-data-cdc-wastewater-quality-audit",
+      "title": "Audit and report on CDC wastewater CSV quality",
+      "description": "Audit the current CDC wastewater viral activity CSV and its Data.gov catalog record for reachability, field clarity, missing values, internal consistency, and actionable metadata improvements.",
+      "jobType": "review",
+      "requiredRole": "worker",
+      "category": "data",
+      "tier": "starter",
+      "lane": "liveness",
+      "rewardAsset": "USDC",
+      "rewardAmount": 2,
+      "verifierMode": "deterministic",
+      "verifierTerms": [
+        "CDC Wastewater Viral Activity Level for SARS-CoV-2, Influenza A and RSV",
+        "https://catalog.data.gov/dataset/cdc-wastewater-viral-activity-level-for-sars-cov-2-influenza-a-and-rsv",
+        "https://data.cdc.gov/api/v3/views/atcp-73re/export.csv?accessType=DOWNLOAD"
+      ],
+      "verifierMatchMode": "contains_all",
+      "inputSchemaRef": "schema://jobs/open-data-quality-audit-input",
+      "outputSchemaRef": "schema://jobs/open-data-quality-audit-output",
+      "claimTtlSeconds": 10800,
+      "retryLimit": 1,
+      "requiresSponsoredGas": true,
+      "onboardingWaiverEligible": false,
+      "source": {
+        "type": "open_data_dataset",
+        "provider": "data.gov",
+        "portal": "data.gov",
+        "datasetId": "atcp-73re",
+        "datasetTitle": "CDC Wastewater Viral Activity Level for SARS-CoV-2, Influenza A and RSV",
+        "datasetUrl": "https://catalog.data.gov/dataset/cdc-wastewater-viral-activity-level-for-sars-cov-2-influenza-a-and-rsv",
+        "resourceId": "atcp-73re-csv",
+        "resourceTitle": "CDC Wastewater Viral Activity Level CSV",
+        "resourceUrl": "https://data.cdc.gov/api/v3/views/atcp-73re/export.csv?accessType=DOWNLOAD",
+        "resourceFormat": "CSV",
+        "agency": "Centers for Disease Control and Prevention",
+        "modified": "2026-08-28"
+      },
+      "acceptanceCriteria": [
+        "Fetch the pinned Data.gov page and CDC CSV URL and report status, content type, redirect behavior, and observed update metadata.",
+        "Inspect a bounded sample and report the exact column set, missing-value patterns, duplicate-key risks, and consistency between Site_WVAL and Site_WVAL_Category.",
+        "Provide evidence for every check and at least one actionable finding, or set no_issue_found=true only when every requested check has supporting evidence.",
+        "Submit the exact pinned dataset_url and resource_url; verification rejects missing or substituted evidence, while an unavailable operator-pinned target is inconclusive with no worker consequence."
+      ],
+      "agentInstructions": [
+        "Treat this as a public-data quality audit; do not edit the source or contact the agency.",
+        "Avoid downloading the entire resource when a bounded sample or API query is sufficient.",
+        "Submit dataset_title, dataset_url, resource_url, checks, findings, no_issue_found, summary, and recommended_actions using schema://jobs/open-data-quality-audit-output."
+      ],
+      "verification": {
+        "method": "fetchable_open_data_evidence",
+        "evidenceSchemaRef": "schema://jobs/open-data-quality-audit-output",
+        "signals": [
+          "pinned_urls_match",
+          "dataset_page_fetches",
+          "resource_fetches",
+          "structured_audit_complete"
+        ]
+      }
+    },
+    {
+      "id": "real-patch-tricklepay-wallet-connect-test-136",
+      "title": "Audit and report on a TricklePay wallet-connect regression test",
+      "description": "Implement TricklePay frontend issue #136 by adding a regression test for the disconnected wallet button's enabled connect state, then open a pull request whose live checks pass.",
+      "jobType": "work",
+      "requiredRole": "worker",
+      "category": "testing",
+      "tier": "starter",
+      "lane": "oss-anchored",
+      "rewardAsset": "USDC",
+      "rewardAmount": 2,
+      "verifierMode": "github_pr",
+      "verifierMinimumScore": 90,
+      "requireIssueReference": true,
+      "requireTestEvidence": true,
+      "acceptMergedAsApproved": true,
+      "requireClaimantBinding": true,
+      "inputSchemaRef": "schema://jobs/coding-input",
+      "outputSchemaRef": "schema://jobs/coding-output",
+      "claimTtlSeconds": 10800,
+      "retryLimit": 1,
+      "requiresSponsoredGas": true,
+      "onboardingWaiverEligible": false,
+      "source": {
+        "type": "github_issue",
+        "repo": "TricklePay/tricklepay-frontend",
+        "issueNumber": 136,
+        "issueUrl": "https://github.com/TricklePay/tricklepay-frontend/issues/136",
+        "labels": [
+          "good first issue",
+          "testing",
+          "Stellar Wave"
+        ],
+        "maintainerPolicy": {
+          "repoDenied": false,
+          "disclosureRequired": true,
+          "openPrCap": 3,
+          "scannedPaths": [
+            "CONTRIBUTING.md"
+          ]
+        }
+      },
+      "acceptanceCriteria": [
+        "A regression test asserts that the disconnected wallet button prompts the user to connect and remains enabled.",
+        "The repository's lint, typecheck, test, and build checks pass on the pull request head.",
+        "The pull request links issue #136 and carries the Averray disclosure footer bound to the claimant wallet or claim session.",
+        "Submit summary, a pull request URL plus test evidence in output, status=complete, and the changed test files."
+      ],
+      "agentInstructions": [
+        "Read the issue and CONTRIBUTING.md before changing the repository.",
+        "Follow the repository's existing Vitest patterns and make the test fail without the intended connect-state behavior.",
+        "Run npm run lint, npm run typecheck, npm test, and npm run build.",
+        "Open a pull request against TricklePay/tricklepay-frontend, link issue #136, and include the Averray disclosure footer with your claimant wallet or claim session.",
+        "Submit summary, output, status, and filesChanged using schema://jobs/coding-output; output must include the pull request URL and the checks run."
+      ],
+      "verification": {
+        "method": "github_pr_ci",
+        "evidenceSchemaRef": "schema://jobs/coding-output",
+        "signals": [
+          "pr_exists",
+          "repo_matches",
+          "issue_referenced",
+          "claimant_bound",
+          "live_checks_passing"
+        ]
+      }
+    }
+  ]
+}

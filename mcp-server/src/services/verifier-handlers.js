@@ -187,30 +187,149 @@ function wikipediaReportAnchors(report) {
   return anchors;
 }
 
-function createDeterministicHandler() {
+const FETCHABLE_OPEN_DATA_EVIDENCE_METHOD = "fetchable_open_data_evidence";
+
+function createDeterministicHandler({ fetchImpl = globalThis.fetch } = {}) {
   return {
     id: "deterministic",
     version: HANDLER_VERSION,
-    evaluate(job, evidence) {
+    async evaluate(job, evidence) {
       const normalized = normalizeEvidence(evidence);
       const expected = job.verifierConfig.expectedOutputs.map((value) => value.toLowerCase());
       const approved = job.verifierConfig.matchMode === "exact"
         ? expected.includes(normalized)
         : expected.every((value) => normalized.includes(value));
 
-      return {
-        jobId: job.id,
-        handler: "deterministic",
-        handlerVersion: HANDLER_VERSION,
-        outcome: approved ? "approved" : "rejected",
-        score: approved ? 100 : 0,
-        reasonCode: approved ? "DETERMINISTIC_MATCH" : "DETERMINISTIC_MISMATCH",
-        detail: approved
-          ? `Submission satisfied ${job.verifierConfig.matchMode} deterministic checks.`
-          : `Submission failed ${job.verifierConfig.matchMode} deterministic checks.`
-      };
+      if (!approved || !requiresFetchableOpenDataEvidence(job)) {
+        return deterministicThresholdVerdict(job, approved);
+      }
+
+      return evaluateFetchableOpenDataEvidence({ job, evidence, fetchImpl });
     }
   };
+}
+
+function deterministicThresholdVerdict(job, approved) {
+  return {
+    jobId: job.id,
+    handler: "deterministic",
+    handlerVersion: HANDLER_VERSION,
+    outcome: approved ? "approved" : "rejected",
+    score: approved ? 100 : 0,
+    reasonCode: approved ? "DETERMINISTIC_MATCH" : "DETERMINISTIC_MISMATCH",
+    detail: approved
+      ? `Submission satisfied ${job.verifierConfig.matchMode} deterministic checks.`
+      : `Submission failed ${job.verifierConfig.matchMode} deterministic checks.`
+  };
+}
+
+function requiresFetchableOpenDataEvidence(job) {
+  return job?.source?.type === "open_data_dataset"
+    && job?.verification?.method === FETCHABLE_OPEN_DATA_EVIDENCE_METHOD;
+}
+
+async function evaluateFetchableOpenDataEvidence({ job, evidence, fetchImpl }) {
+  const structured = structuredEvidence(evidence);
+  const targets = [
+    { field: "dataset_url", expectedUrl: job.source?.datasetUrl },
+    { field: "resource_url", expectedUrl: job.source?.resourceUrl }
+  ];
+  const mismatched = targets.find(({ field, expectedUrl }) => (
+    !isPinnedPublicHttpsUrl(expectedUrl)
+    || String(structured?.[field] ?? "").trim() !== String(expectedUrl).trim()
+  ));
+  if (mismatched) {
+    return {
+      jobId: job.id,
+      handler: "deterministic",
+      handlerVersion: HANDLER_VERSION,
+      outcome: "rejected",
+      score: 0,
+      reasonCode: "DETERMINISTIC_FETCH_EVIDENCE_MISMATCH",
+      detail: `${mismatched.field} must exactly match the operator-pinned public evidence URL.`
+    };
+  }
+
+  if (typeof fetchImpl !== "function") {
+    return fetchableEvidenceInconclusive(job, "The deterministic evidence fetcher is unavailable.");
+  }
+
+  for (const { field, expectedUrl } of targets) {
+    let response;
+    try {
+      response = await fetchImpl(expectedUrl, {
+        method: "GET",
+        // Refuse redirects so an operator-pinned public URL cannot be turned
+        // into a backend-network probe after the job snapshot is committed.
+        redirect: "error",
+        signal: AbortSignal.timeout(10_000),
+        headers: {
+          accept: field === "resource_url" ? "*/*" : "text/html,application/json;q=0.9,*/*;q=0.8",
+          range: "bytes=0-1023",
+          "user-agent": "averray-open-data-verifier/1.0"
+        }
+      });
+    } catch (error) {
+      return fetchableEvidenceInconclusive(
+        job,
+        `${field} could not be fetched: ${boundedErrorMessage(error)}`
+      );
+    }
+    try {
+      if (!response?.ok) {
+        return fetchableEvidenceInconclusive(
+          job,
+          `${field} returned HTTP ${response?.status ?? "unknown"}.`
+        );
+      }
+    } finally {
+      try {
+        await response?.body?.cancel?.();
+      } catch {
+        // The status already establishes reachability; draining/cancelling a
+        // provider-specific response body is best-effort cleanup only.
+      }
+    }
+  }
+
+  return {
+    jobId: job.id,
+    handler: "deterministic",
+    handlerVersion: HANDLER_VERSION,
+    outcome: "approved",
+    score: 100,
+    reasonCode: "DETERMINISTIC_FETCH_EVIDENCE_VERIFIED",
+    detail: "Submission matched both pinned open-data URLs and both public evidence targets fetched successfully."
+  };
+}
+
+function fetchableEvidenceInconclusive(job, detail) {
+  return {
+    jobId: job.id,
+    handler: "deterministic",
+    handlerVersion: HANDLER_VERSION,
+    outcome: "inconclusive",
+    score: 0,
+    reasonCode: "DETERMINISTIC_FETCH_EVIDENCE_UNREACHABLE",
+    workerConsequence: "none",
+    detail
+  };
+}
+
+function isPinnedPublicHttpsUrl(value) {
+  try {
+    const url = new URL(String(value ?? ""));
+    return url.protocol === "https:"
+      && !url.username
+      && !url.password
+      && !new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1"]).has(url.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+function boundedErrorMessage(error) {
+  return String(error?.message ?? error ?? "unknown fetch error").slice(0, 300);
 }
 
 function createHumanFallbackHandler() {
@@ -325,6 +444,9 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       if (!repoMatches) blockers.push(`PR repo must match ${githubSource?.repo ?? "the source repo"}`);
       if (issueReferenceRequired && !issueReferenced) blockers.push(`submission must reference issue #${expectedIssueNumber}`);
       if (testEvidenceRequired && !testEvidenceSubmitted && !mergedAccepted) blockers.push("test or docs-build evidence");
+      if (githubVerified && githubLookup.ciStatus === "failing" && !mergedAccepted) {
+        blockers.push("live GitHub checks must pass");
+      }
       if (disclosureRequired && disclosureFooterObservable && !disclosureFooterPresent) {
         blockers.push("Averray disclosure footer");
       }
@@ -425,7 +547,7 @@ export class VerifierRegistry {
   constructor(options = {}) {
     this.handlers = new Map([
       ["benchmark", createBenchmarkHandler(options)],
-      ["deterministic", createDeterministicHandler()],
+      ["deterministic", createDeterministicHandler(options)],
       ["human_fallback", createHumanFallbackHandler()],
       ["github_pr", createGithubPrHandler(options)]
     ]);
@@ -617,7 +739,7 @@ function summarizeGithubChecks(combinedStatus, checkRuns) {
     const allOk = checkRuns.check_runs.every((run) => terminalOk.has(run.conclusion));
     return {
       checksPassing: allCompleted && allOk,
-      ciStatus: allCompleted && allOk ? "passing" : "pending"
+      ciStatus: allCompleted ? allOk ? "passing" : "failing" : "pending"
     };
   }
   if (combinedStatus?.state === "success") {
