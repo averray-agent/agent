@@ -64,11 +64,11 @@ or hosted worker account.
    then sign and broadcast them with the worker wallet. The worker supplies DOT
    for this deposit gas.
 
-Current waiver-eligible starter inventory is zero. Do not tell a new worker that
-free starter work is available. Brokered gas is not free money: only when the
-live response explicitly offers it does the operator front claim and submission
-gas, then recover that service through the disclosed claim retention after
-successful work. External jobs use the worker's own gas.
+Do not tell a new worker that free starter work is available unless the live
+response explicitly offers it. Brokered gas is not free money: only when that
+live response offers it does the operator front claim and submission gas, then
+recover that service through the disclosed claim retention after successful
+work. External jobs use the worker's own gas.
 
 ### 4. Claim once
 
