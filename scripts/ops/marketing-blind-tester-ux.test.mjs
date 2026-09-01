@@ -37,17 +37,19 @@ test("blind-tester marketing copy exposes copyable proof links and honest loadin
 });
 
 test("QA8 marketing exposes the canonical MCP install door and copy-safe snippets", async () => {
-  const [home, builders, nav, copySnippet, css, llms] = await Promise.all([
+  const [home, builders, nav, navItems, copySnippet, css, llms] = await Promise.all([
     readFile(new URL("marketing/src/pages/index.astro", REPO_ROOT), "utf8"),
     readFile(new URL("marketing/src/pages/builders.astro", REPO_ROOT), "utf8"),
     readFile(new URL("marketing/src/components/SiteNav.astro", REPO_ROOT), "utf8"),
+    readFile(new URL("marketing/src/navigation.mjs", REPO_ROOT), "utf8"),
     readFile(new URL("marketing/src/components/CopySnippet.astro", REPO_ROOT), "utf8"),
     readFile(new URL("marketing/src/styles/global.css", REPO_ROOT), "utf8"),
     readFile(new URL("site/llms.txt", REPO_ROOT), "utf8")
   ]);
 
   assert.match(builders, /<section class="section" id="install">/u);
-  assert.match(nav, /label: "Install MCP", href: "\/builders\/#install"/u);
+  assert.match(nav, /PRIMARY_NAV_ITEMS/u);
+  assert.match(navItems, /label: "Install MCP", href: "\/builders\/#install"/u);
   assert.match(home, /href="\/builders\/#install">connect over MCP<\/a>/u);
 
   assert.equal((builders.match(/<CopySnippet /gu) ?? []).length, 3);

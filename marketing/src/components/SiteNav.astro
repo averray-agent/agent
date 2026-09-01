@@ -1,36 +1,42 @@
 ---
-/**
- * The single navigation used by every page.
- *
- * The homepage and the four topic pages previously shipped two different
- * navs — different brand treatment, different button shape, and a different
- * set of destinations — so following a link from the homepage read as landing
- * on an older version of the product. This is now page-level and identical
- * everywhere, which is what makes the crossover seamless; the homepage's
- * sections stay reachable by scrolling its linear narrative.
- */
+import { PRIMARY_NAV_ITEMS } from "../navigation.mjs";
+
+type NavKey =
+  | "home"
+  | "verify"
+  | "agents"
+  | "schemas"
+  | "proof-to-pay"
+  | "pool"
+  | "transparency"
+  | "receipts"
+  | "builders"
+  | "trust";
+
 interface Props {
-  /** Marks the current page in the nav for assistive tech and styling. */
-  current?: "agents" | "builders" | "trust" | "schemas" | "record" | null;
+  /** Replaces the current page's link with text, so the nav has no dead door. */
+  current?: NavKey | null;
 }
 
 const { current = null } = Astro.props;
 
-const links = [
-  { key: "agents", label: "Agents", href: "/agents/" },
-  { key: "builders", label: "Builders", href: "/builders/" },
-  { key: "trust", label: "Trust", href: "/trust/" },
-  { key: "schemas", label: "Schemas", href: "/schemas/" },
-  { key: "record", label: "Record", href: "/transparency/" },
-  { key: null, label: "Install MCP", href: "/builders/#install" }
-];
+function isCurrent(key: string | null) {
+  return key !== null && current === key;
+}
 ---
 
 <nav class="nav" aria-label="Primary">
-  <a class="nav__brand" href="/">
-    <span class="nav__brand-mark" aria-hidden="true">A</span>
-    Averray
-  </a>
+  {current === "home" ? (
+    <span class="nav__brand nav__brand--current" aria-current="page">
+      <span class="nav__brand-mark" aria-hidden="true">A</span>
+      Averray
+    </span>
+  ) : (
+    <a class="nav__brand" href="/">
+      <span class="nav__brand-mark" aria-hidden="true">A</span>
+      Averray
+    </a>
+  )}
   {/* Hidden until the nav script runs, so a no-JS visit never gets an
       inert button — it keeps the links visible and wrapping instead. */}
   <button
@@ -44,10 +50,24 @@ const links = [
     Menu
   </button>
   <div class="nav__links" id="nav-links">
-    {links.map((link) => (
-      <a href={link.href} aria-current={link.key !== null && current === link.key ? "page" : undefined}>
-        {link.label}
-      </a>
+    {PRIMARY_NAV_ITEMS.map((item) => item.children ? (
+      <details
+        class="nav__group"
+        data-current-group={item.children.some((link) => isCurrent(link.key)) ? "true" : undefined}
+      >
+        <summary>{item.label}<span aria-hidden="true">⌄</span></summary>
+        <div class="nav__menu">
+          {item.children.map((link) => isCurrent(link.key) ? (
+            <span class="nav__current" aria-current="page">{link.label}</span>
+          ) : (
+            <a href={link.href}>{link.label}</a>
+          ))}
+        </div>
+      </details>
+    ) : isCurrent(item.key) ? (
+      <span class="nav__current" aria-current="page">{item.label}</span>
+    ) : (
+      <a href={item.href}>{item.label}</a>
     ))}
   </div>
   <a class="nav__cta" href="https://app.averray.com">
@@ -82,11 +102,21 @@ const links = [
     // Tapping a destination should dismiss the panel, including same-page
     // anchors where no navigation event follows.
     links.addEventListener("click", function (event) {
-      if (event.target.closest("a")) setOpen(false);
+      if (event.target.closest("a")) {
+        links.querySelectorAll("details[open]").forEach(function (group) {
+          group.removeAttribute("open");
+        });
+        setOpen(false);
+      }
     });
 
     document.addEventListener("keydown", function (event) {
-      if (event.key === "Escape" && nav.dataset.open === "true") {
+      if (event.key !== "Escape") return;
+      var group = links.querySelector("details[open]");
+      if (group) {
+        group.removeAttribute("open");
+        group.querySelector("summary").focus();
+      } else if (nav.dataset.open === "true") {
         setOpen(false);
         toggle.focus();
       }

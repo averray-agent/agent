@@ -210,15 +210,49 @@ a:hover { color: var(--avy-ink); }
   display: grid; place-items: center;
   font-family: var(--font-display); font-weight: 800; font-size: 14px;
 }
-.nav__links { display: flex; gap: 26px; font-family: var(--font-body); font-size: 14px; font-weight: 500; color: var(--avy-muted); }
+.nav__links {
+  display: flex; align-items: center; gap: 18px;
+  font-family: var(--font-body); font-size: 14px; font-weight: 500; color: var(--avy-muted);
+}
 .nav__links a { color: var(--avy-muted); }
 .nav__links a:hover { color: var(--avy-ink); }
-/* The topic pages share one nav, so the current page needs to be visible —
-   otherwise the only cue you have moved is the content itself. */
-.nav__links a[aria-current="page"] {
+.nav__current,
+.nav__group[data-current-group="true"] > summary {
   color: var(--avy-ink);
   font-weight: 700;
 }
+.nav__brand--current { cursor: default; }
+.nav__group { position: relative; }
+.nav__group > summary {
+  display: flex; align-items: center; gap: 5px;
+  color: var(--avy-muted);
+  cursor: pointer;
+  list-style: none;
+}
+.nav__group > summary::-webkit-details-marker { display: none; }
+.nav__group > summary:hover,
+.nav__group[open] > summary { color: var(--avy-ink); }
+.nav__group > summary span {
+  font-size: 12px;
+  transition: transform var(--dur) var(--ease);
+}
+.nav__group[open] > summary span { transform: rotate(180deg); }
+.nav__menu {
+  position: absolute; top: calc(100% + 12px); left: -14px;
+  display: grid; gap: 2px;
+  min-width: 176px; padding: 8px;
+  border: 1px solid var(--avy-line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 12px 28px rgba(28, 36, 30, 0.12);
+}
+.nav__menu a,
+.nav__menu .nav__current {
+  display: flex; align-items: center;
+  min-height: 38px; padding: 0 10px;
+  border-radius: 6px;
+}
+.nav__menu a:hover { background: var(--avy-surface-soft); }
 .nav__cta {
   display: inline-flex; align-items: center; gap: 8px;
   height: 36px; padding: 0 14px;
@@ -295,16 +329,37 @@ a:hover { color: var(--avy-ink); }
     display: flex;
     flex-basis: 100%;
     flex-direction: column;
+    align-items: stretch;
     gap: 2px;
     margin-top: 4px;
     padding-top: 10px;
     border-top: 1px solid var(--avy-line-soft);
   }
   /* 44px rows: this is the whole navigation on a phone. */
-  .nav--collapsible[data-open="true"] .nav__links a {
+  .nav--collapsible[data-open="true"] .nav__links > a,
+  .nav--collapsible[data-open="true"] .nav__links > .nav__current,
+  .nav--collapsible[data-open="true"] .nav__group > summary,
+  .nav--collapsible[data-open="true"] .nav__menu a,
+  .nav--collapsible[data-open="true"] .nav__menu .nav__current {
     display: flex;
     align-items: center;
     min-height: 44px;
+    padding-right: 2px;
+    padding-left: 2px;
+  }
+  .nav--collapsible[data-open="true"] .nav__group { width: 100%; }
+  .nav--collapsible[data-open="true"] .nav__group > summary { justify-content: space-between; }
+  .nav--collapsible[data-open="true"] .nav__menu {
+    position: static;
+    gap: 0;
+    min-width: 0;
+    margin: 0 0 4px 12px;
+    padding: 0 0 0 12px;
+    border: 0;
+    border-left: 1px solid var(--avy-line-soft);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
   }
 }
 
