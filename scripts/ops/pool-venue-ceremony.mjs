@@ -52,6 +52,10 @@ export const PROOF_RETURN_WINDOW_SECONDS = 48 * 60 * 60;
 // refusal guard below stays: if the contract ever tightens further, refuse
 // rather than silently changing policy.
 export const STANDING_RETURN_WINDOW_SECONDS = 7 * 24 * 60 * 60;
+export const DEFAULT_FINALITY_CONFIRMATIONS = 12;
+export const MIN_FINALITY_CONFIRMATIONS = 8;
+export const FINALITY_TIMEOUT_MS = 10 * 60 * 1_000;
+export const FINALITY_POLL_INTERVAL_MS = 6_000;
 const OBSERVABILITY_MAX_AGE_SECONDS = 10 * 60;
 const ASSET_DECIMALS = 6n;
 const ASSET_SCALE = 10n ** ASSET_DECIMALS;
@@ -101,6 +105,7 @@ export function parseArgs(argv) {
     recallId: undefined,
     expectedSigner: undefined,
     observabilityUrl: undefined,
+    confirmations: DEFAULT_FINALITY_CONFIRMATIONS,
     useKms: false,
     commit: false,
     help: false,
@@ -122,6 +127,7 @@ export function parseArgs(argv) {
     else if (arg === "--recall-id") args.recallId = next();
     else if (arg === "--expected-signer") args.expectedSigner = next();
     else if (arg === "--observability-url") args.observabilityUrl = next();
+    else if (arg === "--confirmations") args.confirmations = finalityConfirmations(next());
     else if (arg === "--use-kms") args.useKms = true;
     else if (arg === "--commit") args.commit = true;
     else if (arg === "--dry-run") args.commit = false;
@@ -129,6 +135,17 @@ export function parseArgs(argv) {
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return args;
+}
+
+function finalityConfirmations(value) {
+  if (!/^[0-9]+$/u.test(String(value ?? ""))) {
+    throw new Error("--confirmations must be an unsigned integer.");
+  }
+  const confirmations = Number(value);
+  if (!Number.isSafeInteger(confirmations) || confirmations < MIN_FINALITY_CONFIRMATIONS) {
+    throw new Error(`--confirmations must be at least ${MIN_FINALITY_CONFIRMATIONS}.`);
+  }
+  return confirmations;
 }
 
 export function resolvePoolTarget({ requestedPool, manifestPool, log = console.log }) {
@@ -303,17 +320,210 @@ export function assertAccountingPostcondition({
   }
 }
 
+export function assertCeremonyEffectPostcondition({ command, parameters, after, event }) {
+  const eventArg = (name) => BigInt(event.args[name]);
+  if (command === "deploy") {
+    const deploymentId = BigInt(parameters.predictedDeploymentId);
+    if (
+      eventArg("deploymentId") !== deploymentId
+      || eventArg("assets") !== BigInt(parameters.assetsRaw)
+      || after.activeVenueDeploymentId !== deploymentId
+      || after.nextVenueDeploymentId !== deploymentId + 1n
+      || after.venueDeployment?.id !== deploymentId
+      || after.venueDeployment?.principalAssets !== BigInt(parameters.assetsRaw)
+      || after.venueDeployment?.returnBy !== BigInt(parameters.returnBy)
+      || normalizedHash(after.venueDeployment?.adapterRequestId) !== normalizedHash(event.args.adapterRequestId)
+      || after.venueDeployment?.status !== 1
+    ) {
+      throw new Error("Postcondition failed: confirmed deploy receipt and re-read deployment state diverge.");
+    }
+    return;
+  }
+  if (command === "recall") {
+    const recallId = BigInt(parameters.predictedRecallId);
+    if (
+      eventArg("recallId") !== recallId
+      || eventArg("deploymentId") !== BigInt(parameters.deploymentId)
+      || eventArg("requestedAssets") !== BigInt(parameters.assetsRaw)
+      || after.activeVenueRecallId !== recallId
+      || after.nextVenueRecallId !== recallId + 1n
+      || after.venueRecall?.id !== recallId
+      || after.venueRecall?.deploymentId !== BigInt(parameters.deploymentId)
+      || after.venueRecall?.requestedAssets !== BigInt(parameters.assetsRaw)
+      || normalizedHash(after.venueRecall?.adapterRequestId) !== normalizedHash(event.args.adapterRequestId)
+      || after.venueRecall?.status !== 1
+    ) {
+      throw new Error("Postcondition failed: confirmed recall receipt and re-read recall state diverge.");
+    }
+    return;
+  }
+  if (parameters.settlementKind === "deployment") {
+    const deploymentId = BigInt(parameters.deploymentId);
+    if (
+      eventArg("deploymentId") !== deploymentId
+      || after.venueDeployment?.id !== deploymentId
+      || after.venueDeployment?.status !== Number(eventArg("status"))
+      || after.venueDeployment.status < 2
+    ) {
+      throw new Error("Postcondition failed: confirmed deployment-settlement receipt and re-read state diverge.");
+    }
+    return;
+  }
+  const recallId = BigInt(parameters.recallId);
+  if (
+    eventArg("recallId") !== recallId
+    || after.venueRecall?.id !== recallId
+    || after.venueRecall?.deploymentId !== eventArg("deploymentId")
+    || after.venueRecall?.status !== Number(eventArg("status"))
+    || after.venueRecall?.returnedAssets !== eventArg("returnedAssets")
+    || after.venueRecall.status < 2
+    || after.activeVenueRecallId !== 0n
+  ) {
+    throw new Error("Postcondition failed: confirmed recall-settlement receipt and re-read state diverge.");
+  }
+}
+
 function usage() {
   return [
     "Usage:",
-    "  node scripts/ops/pool-venue-ceremony.mjs deploy --profile mainnet [--pool 0x...] --assets 2000000 --return-by <unix> --deployment-kind proof --observability-url <internal-url> --expected-signer 0x... [--use-kms] [--commit]",
-    "  node scripts/ops/pool-venue-ceremony.mjs settle --profile mainnet [--pool 0x...] (--deployment-id <id> | --recall-id <id>) --expected-signer 0x... [--use-kms] [--commit]",
-    "  node scripts/ops/pool-venue-ceremony.mjs recall --profile mainnet [--pool 0x...] --deployment-id <id> --assets 500000 --expected-signer 0x... [--use-kms] [--commit]",
+    "  node scripts/ops/pool-venue-ceremony.mjs deploy --profile mainnet [--pool 0x...] --assets 2000000 --return-by <unix> --deployment-kind proof --observability-url <internal-url> --expected-signer 0x... [--confirmations N] [--use-kms] [--commit]",
+    "  node scripts/ops/pool-venue-ceremony.mjs settle --profile mainnet [--pool 0x...] (--deployment-id <id> | --recall-id <id>) --expected-signer 0x... [--confirmations N] [--use-kms] [--commit]",
+    "  node scripts/ops/pool-venue-ceremony.mjs recall --profile mainnet [--pool 0x...] --deployment-id <id> --assets 500000 --expected-signer 0x... [--confirmations N] [--use-kms] [--commit]",
     "",
     "Dry-run is the default. --commit requires --use-kms, KMS_KEY_ID, and AWS_REGION.",
+    `Committed evidence waits for at least ${MIN_FINALITY_CONFIRMATIONS} confirmations (default ${DEFAULT_FINALITY_CONFIRMATIONS}).`,
     "--pool is required when targeting any pool other than manifest contracts.depositPool.",
     "No private-key signer path exists. --expected-signer is mandatory in every mode.",
   ].join("\n");
+}
+
+function normalizedHash(value) {
+  return typeof value === "string" ? value.toLowerCase() : "";
+}
+
+function finalityDivergence(message) {
+  const error = new Error(`REORG WARNING — COMMITTED EVIDENCE WITHHELD: ${message}`);
+  error.code = "ceremony_finality_diverged";
+  return error;
+}
+
+async function rereadCanonicalReceipt(provider, transactionHash, initialReceipt) {
+  const receipt = await provider.getTransactionReceipt(transactionHash);
+  if (!receipt) {
+    throw finalityDivergence(
+      `transaction ${transactionHash} was initially included at block ${initialReceipt.blockNumber} `
+      + `with hash ${initialReceipt.blockHash}, but its receipt is now absent.`,
+    );
+  }
+  if (receipt.status !== 1) {
+    throw finalityDivergence(
+      `transaction ${transactionHash} was initially successful, but its re-read status is ${receipt.status}.`,
+    );
+  }
+  if (
+    receipt.blockNumber !== initialReceipt.blockNumber
+    || normalizedHash(receipt.blockHash) !== normalizedHash(initialReceipt.blockHash)
+  ) {
+    throw finalityDivergence(
+      `transaction ${transactionHash} moved from block ${initialReceipt.blockNumber} hash ${initialReceipt.blockHash} `
+      + `to block ${receipt.blockNumber} hash ${receipt.blockHash}.`,
+    );
+  }
+  const block = await provider.getBlock(initialReceipt.blockNumber);
+  const rereadBlockHash = block?.hash ?? "missing";
+  if (normalizedHash(rereadBlockHash) !== normalizedHash(initialReceipt.blockHash)) {
+    throw finalityDivergence(
+      `block ${initialReceipt.blockNumber} changed from receipt hash ${initialReceipt.blockHash} `
+      + `to canonical re-read hash ${rereadBlockHash}.`,
+    );
+  }
+  return { receipt, block };
+}
+
+/**
+ * Treat the first successful receipt as a reference, not evidence. The receipt
+ * and its canonical block must remain byte-identical through the requested
+ * depth and on both sides of the post-state read.
+ */
+export async function confirmCanonicalPostState({
+  provider,
+  transactionHash,
+  initialReceipt,
+  readPostState,
+  confirmations = DEFAULT_FINALITY_CONFIRMATIONS,
+  timeoutMs = FINALITY_TIMEOUT_MS,
+  pollIntervalMs = FINALITY_POLL_INTERVAL_MS,
+  log = console.error,
+  now = Date.now,
+  sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)),
+}) {
+  const requiredConfirmations = finalityConfirmations(confirmations);
+  if (!initialReceipt || initialReceipt.status !== 1) {
+    throw new Error(`Transaction ${transactionHash} did not produce a successful reference receipt.`);
+  }
+  if (typeof readPostState !== "function") throw new Error("Finality verification requires a post-state reader.");
+  const startedAt = now();
+  log(
+    `FINALITY WAIT: transaction ${transactionHash} is in block ${initialReceipt.blockNumber}; `
+    + `waiting for ${requiredConfirmations} confirmations before evidence.`,
+  );
+
+  while (true) {
+    if (now() - startedAt >= timeoutMs) {
+      const error = new Error(
+        `FINALITY TIMEOUT — COMMITTED EVIDENCE WITHHELD: transaction ${transactionHash} `
+        + `did not reach ${requiredConfirmations} canonical confirmations within ${timeoutMs}ms.`,
+      );
+      error.code = "ceremony_finality_timeout";
+      throw error;
+    }
+    const canonical = await rereadCanonicalReceipt(provider, transactionHash, initialReceipt);
+    const head = await provider.getBlockNumber();
+    const observedConfirmations = Math.max(0, head - initialReceipt.blockNumber + 1);
+    log(`FINALITY WAIT: ${Math.min(observedConfirmations, requiredConfirmations)}/${requiredConfirmations} confirmations.`);
+
+    if (observedConfirmations >= requiredConfirmations) {
+      log("FINALITY WAIT: target reached; re-reading post-state and canonical receipt.");
+      const postState = await readPostState(canonical.receipt.blockNumber);
+      const verified = await rereadCanonicalReceipt(provider, transactionHash, initialReceipt);
+      const rereadHead = await provider.getBlockNumber();
+      const confirmationsWaited = Math.max(0, rereadHead - verified.receipt.blockNumber + 1);
+      if (confirmationsWaited >= requiredConfirmations) {
+        return {
+          receipt: verified.receipt,
+          block: verified.block,
+          postState,
+          confirmationsRequired: requiredConfirmations,
+          confirmationsWaited,
+          rereadBlockHash: verified.block.hash,
+          receiptReconfirmed: true,
+          postStateReconfirmed: true,
+        };
+      }
+    }
+
+    const remainingMs = timeoutMs - (now() - startedAt);
+    if (remainingMs <= 0) continue;
+    await sleep(Math.min(pollIntervalMs, remainingMs));
+  }
+}
+
+export function buildFinalityEvidence(initialReceipt, finality) {
+  return {
+    transaction: {
+      confirmationsWaited: finality.confirmationsWaited,
+      rereadBlockHash: finality.rereadBlockHash,
+    },
+    finality: {
+      confirmationsRequired: finality.confirmationsRequired,
+      confirmationsWaited: finality.confirmationsWaited,
+      initialReceiptBlockHash: initialReceipt.blockHash,
+      rereadReceiptBlockHash: finality.receipt.blockHash,
+      rereadBlockHash: finality.rereadBlockHash,
+      receiptReconfirmed: finality.receiptReconfirmed,
+      postStateReconfirmed: finality.postStateReconfirmed,
+    },
+  };
 }
 
 function positiveBigInt(value, flag) {
@@ -362,7 +572,17 @@ async function fetchObservability(url) {
   }
 }
 
-async function readPoolState(pool, blockTag) {
+function ceremonyStateFocus(command, parameters) {
+  if (command === "deploy") return { deploymentId: parameters.predictedDeploymentId };
+  if (command === "recall") {
+    return { deploymentId: parameters.deploymentId, recallId: parameters.predictedRecallId };
+  }
+  return parameters.settlementKind === "deployment"
+    ? { deploymentId: parameters.deploymentId }
+    : { recallId: parameters.recallId };
+}
+
+async function readPoolState(pool, blockTag, focus = {}) {
   const overrides = { blockTag };
   const [
     asset,
@@ -406,6 +626,32 @@ async function readPoolState(pool, blockTag) {
     .map((row, index) => ({ id: BigInt(index + 1), owner: row.owner, shares: BigInt(row.shares), fulfilled: row.fulfilled }))
     .filter((row) => row.owner !== "0x0000000000000000000000000000000000000000" && !row.fulfilled && row.shares > 0n)
     .map((row) => row.id);
+  let venueDeployment;
+  if (focus.deploymentId !== undefined) {
+    const id = BigInt(focus.deploymentId);
+    const row = await pool.venueDeployments(id, overrides);
+    venueDeployment = {
+      id,
+      principalAssets: BigInt(row.principalAssets),
+      recalledPrincipalAssets: BigInt(row.recalledPrincipalAssets),
+      returnBy: BigInt(row.returnBy),
+      adapterRequestId: row.adapterRequestId,
+      status: Number(row.status),
+    };
+  }
+  let venueRecall;
+  if (focus.recallId !== undefined) {
+    const id = BigInt(focus.recallId);
+    const row = await pool.venueRecalls(id, overrides);
+    venueRecall = {
+      id,
+      deploymentId: BigInt(row.deploymentId),
+      requestedAssets: BigInt(row.requestedAssets),
+      returnedAssets: BigInt(row.returnedAssets),
+      adapterRequestId: row.adapterRequestId,
+      status: Number(row.status),
+    };
+  }
   return {
     asset: getAddress(asset),
     operator: getAddress(operator),
@@ -424,6 +670,8 @@ async function readPoolState(pool, blockTag) {
     activeVenueDeploymentId: BigInt(activeVenueDeploymentId),
     activeVenueRecallId: BigInt(activeVenueRecallId),
     pendingRedemptionIds,
+    ...(venueDeployment ? { venueDeployment } : {}),
+    ...(venueRecall ? { venueRecall } : {}),
   };
 }
 
@@ -611,12 +859,25 @@ async function main() {
   }
 
   const tx = await identity.signer.sendTransaction({ to: poolAddress, data, value: 0n });
-  const receipt = await tx.wait();
-  if (!receipt || receipt.status !== 1) throw new Error(`Transaction ${tx.hash} did not succeed.`);
+  const initialReceipt = await tx.wait(1, FINALITY_TIMEOUT_MS);
+  if (!initialReceipt || initialReceipt.status !== 1) throw new Error(`Transaction ${tx.hash} did not succeed.`);
+  const finality = await confirmCanonicalPostState({
+    provider,
+    transactionHash: tx.hash,
+    initialReceipt,
+    confirmations: args.confirmations,
+    readPostState: (blockNumber) => readPoolState(
+      pool,
+      blockNumber,
+      ceremonyStateFocus(args.command, parameters),
+    ),
+  });
+  const receipt = finality.receipt;
   const events = parseReceiptEvents(receipt);
   const primary = eventByName(events, expectedEvent);
-  const afterBlock = await provider.getBlock(receipt.blockNumber);
-  const after = await readPoolState(pool, receipt.blockNumber);
+  const afterBlock = finality.block;
+  const after = finality.postState;
+  assertCeremonyEffectPostcondition({ command: args.command, parameters, after, event: primary });
   const reduction = principalReduction(events);
   assertAccountingPostcondition({
     beforePrincipalCostBasis: before.venuePrincipalCostBasis,
@@ -638,6 +899,7 @@ async function main() {
       throw new Error("Postcondition failed: recall request creation changed pool accounting before assets returned.");
     }
   }
+  const finalityEvidence = buildFinalityEvidence(initialReceipt, finality);
   const evidence = {
     ...common,
     capturedAt: new Date().toISOString(),
@@ -648,6 +910,7 @@ async function main() {
       blockHash: receipt.blockHash,
       gasUsed: receipt.gasUsed,
       status: receipt.status,
+      ...finalityEvidence.transaction,
     },
     event: { name: primary.name, args: primary.args.toObject() },
     principalReturnEvents: events
@@ -659,6 +922,7 @@ async function main() {
       principalCostBasisReductionRaw: reduction,
       chainTimestamp: afterBlock?.timestamp ?? null,
     },
+    finality: finalityEvidence.finality,
   };
   console.log("\n# COMMITTED EVIDENCE");
   console.log(serialize(evidence));

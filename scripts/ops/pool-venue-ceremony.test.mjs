@@ -8,14 +8,19 @@ import { fileURLToPath } from "node:url";
 import { importCeremonyModule } from "./ceremony-module-loader.mjs";
 
 import {
+  DEFAULT_FINALITY_CONFIRMATIONS,
+  MIN_FINALITY_CONFIRMATIONS,
   PROOF_RETURN_WINDOW_SECONDS,
   STANDING_RETURN_WINDOW_SECONDS,
   assertAccountingPostcondition,
+  assertCeremonyEffectPostcondition,
   assertDeployAdmission,
   assertExpectedSigner,
   assertObservability,
   assertVenueAdapterBound,
   buildPoolObservabilityUrl,
+  buildFinalityEvidence,
+  confirmCanonicalPostState,
   deploymentManifestPaths,
   parseArgs,
   readDeploymentManifest,
@@ -58,12 +63,22 @@ test("parseArgs keeps dry-run as the default and parses each ceremony leg", () =
     recallId: undefined,
     expectedSigner: undefined,
     observabilityUrl: undefined,
+    confirmations: DEFAULT_FINALITY_CONFIRMATIONS,
     useKms: false,
     commit: false,
     help: false,
   });
   assert.equal(parseArgs(["settle", "--recall-id", "3", "--commit", "--use-kms"]).recallId, "3");
   assert.equal(parseArgs(["recall", "--pool", LEGACY_POOL, "--deployment-id", "2", "--assets", "500000"]).pool, LEGACY_POOL);
+});
+
+test("confirmation policy defaults to 12, is upward configurable, and refuses unsafe depths", () => {
+  assert.equal(DEFAULT_FINALITY_CONFIRMATIONS, 12);
+  assert.equal(parseArgs(["recall", "--confirmations", "20"]).confirmations, 20);
+  assert.throws(
+    () => parseArgs(["deploy", "--confirmations", String(MIN_FINALITY_CONFIRMATIONS - 1)]),
+    new RegExp(`at least ${MIN_FINALITY_CONFIRMATIONS}`, "u"),
+  );
 });
 
 test("omitted --pool resolves and logs the manifest default", () => {
@@ -399,4 +414,213 @@ test("postcondition fails loud on injected reconciliation mismatch", () => {
     afterBufferAssets: 8_000_000n,
     afterTotalAssets: 10_000_001n,
   }), /buffer \+ deployed != totalAssets/u);
+});
+
+test("canonical wait reports progress, re-reads post-state, and only adds to the evidence shape", async () => {
+  const transactionHash = `0x${"aa".repeat(32)}`;
+  const blockHash = `0x${"bb".repeat(32)}`;
+  const initialReceipt = {
+    blockNumber: 100,
+    blockHash,
+    status: 1,
+  };
+  const receipt = { ...initialReceipt };
+  const progress = [];
+  const stateReads = [];
+  const result = await confirmCanonicalPostState({
+    provider: {
+      async getTransactionReceipt(hash) {
+        assert.equal(hash, transactionHash);
+        return receipt;
+      },
+      async getBlock(number) {
+        assert.equal(number, initialReceipt.blockNumber);
+        return { number, hash: blockHash, timestamp: 1_800_000_000 };
+      },
+      async getBlockNumber() { return 111; },
+    },
+    transactionHash,
+    initialReceipt,
+    readPostState: async (blockNumber) => {
+      stateReads.push(blockNumber);
+      return { activeVenueRecallId: 6n, nextVenueRecallId: 7n };
+    },
+    log: (line) => progress.push(line),
+  });
+
+  assert.deepEqual(stateReads, [100]);
+  assert.equal(result.postState.activeVenueRecallId, 6n);
+  assert.equal(result.confirmationsWaited, 12);
+  assert.equal(result.rereadBlockHash, blockHash);
+  assert.equal(result.postStateReconfirmed, true);
+  assert.ok(progress.some((line) => line.includes("12/12 confirmations")));
+  assert.ok(progress.some((line) => line.includes("re-reading post-state")));
+
+  const legacyTransaction = {
+    hash: transactionHash,
+    blockNumber: 100,
+    blockHash,
+    gasUsed: 42n,
+    status: 1,
+  };
+  const additions = buildFinalityEvidence(initialReceipt, result);
+  assert.deepEqual({ ...legacyTransaction, ...additions.transaction }, {
+    ...legacyTransaction,
+    confirmationsWaited: 12,
+    rereadBlockHash: blockHash,
+  });
+  assert.deepEqual(additions.finality, {
+    confirmationsRequired: 12,
+    confirmationsWaited: 12,
+    initialReceiptBlockHash: blockHash,
+    rereadReceiptBlockHash: blockHash,
+    rereadBlockHash: blockHash,
+    receiptReconfirmed: true,
+    postStateReconfirmed: true,
+  });
+});
+
+test("mutated canonical block hash withholds evidence and names both hashes", async () => {
+  const transactionHash = `0x${"aa".repeat(32)}`;
+  const originalHash = `0x${"bb".repeat(32)}`;
+  const replacementHash = `0x${"cc".repeat(32)}`;
+  const initialReceipt = { blockNumber: 100, blockHash: originalHash, status: 1 };
+
+  await assert.rejects(
+    confirmCanonicalPostState({
+      provider: {
+        async getTransactionReceipt() { return { ...initialReceipt }; },
+        async getBlock() { return { number: 100, hash: replacementHash }; },
+        async getBlockNumber() { return 111; },
+      },
+      transactionHash,
+      initialReceipt,
+      readPostState: async () => ({ shouldNeverBeRead: true }),
+      log: () => {},
+    }),
+    (error) => error?.code === "ceremony_finality_diverged"
+      && error.message.includes("COMMITTED EVIDENCE WITHHELD")
+      && error.message.includes(originalHash)
+      && error.message.includes(replacementHash),
+  );
+});
+
+test("a reorg between post-state and receipt re-read fails every ceremony effect shape", async () => {
+  const transactionHash = `0x${"aa".repeat(32)}`;
+  const originalHash = `0x${"bb".repeat(32)}`;
+  const replacementHash = `0x${"cc".repeat(32)}`;
+  const initialReceipt = { blockNumber: 100, blockHash: originalHash, status: 1 };
+  let blockReads = 0;
+
+  await assert.rejects(
+    confirmCanonicalPostState({
+      provider: {
+        async getTransactionReceipt() { return { ...initialReceipt }; },
+        async getBlock() {
+          blockReads += 1;
+          return { number: 100, hash: blockReads === 1 ? originalHash : replacementHash };
+        },
+        async getBlockNumber() { return 111; },
+      },
+      transactionHash,
+      initialReceipt,
+      readPostState: async () => ({ activeVenueRecallId: 6n }),
+      log: () => {},
+    }),
+    (error) => error?.code === "ceremony_finality_diverged"
+      && error.message.includes(originalHash)
+      && error.message.includes(replacementHash),
+  );
+
+  const event = (args) => ({ args });
+  const requestId = `0x${"dd".repeat(32)}`;
+  assert.doesNotThrow(() => assertCeremonyEffectPostcondition({
+    command: "deploy",
+    parameters: { predictedDeploymentId: 4n, assetsRaw: 2_000_000n, returnBy: 1_800_000_000n },
+    event: event({ deploymentId: 4n, adapterRequestId: requestId, assets: 2_000_000n }),
+    after: {
+      activeVenueDeploymentId: 4n,
+      nextVenueDeploymentId: 5n,
+      venueDeployment: {
+        id: 4n,
+        principalAssets: 2_000_000n,
+        returnBy: 1_800_000_000n,
+        adapterRequestId: requestId,
+        status: 1,
+      },
+    },
+  }));
+  assert.doesNotThrow(() => assertCeremonyEffectPostcondition({
+    command: "recall",
+    parameters: { predictedRecallId: 6n, deploymentId: 4n, assetsRaw: 500_000n },
+    event: event({ recallId: 6n, deploymentId: 4n, adapterRequestId: requestId, requestedAssets: 500_000n }),
+    after: {
+      activeVenueRecallId: 6n,
+      nextVenueRecallId: 7n,
+      venueRecall: {
+        id: 6n,
+        deploymentId: 4n,
+        requestedAssets: 500_000n,
+        adapterRequestId: requestId,
+        status: 1,
+      },
+    },
+  }));
+  assert.doesNotThrow(() => assertCeremonyEffectPostcondition({
+    command: "settle",
+    parameters: { settlementKind: "deployment", deploymentId: 4n },
+    event: event({ deploymentId: 4n, status: 2n }),
+    after: { venueDeployment: { id: 4n, status: 2 } },
+  }));
+  assert.doesNotThrow(() => assertCeremonyEffectPostcondition({
+    command: "settle",
+    parameters: { settlementKind: "recall", recallId: 6n },
+    event: event({ recallId: 6n, deploymentId: 4n, status: 2n, returnedAssets: 500_000n }),
+    after: {
+      activeVenueRecallId: 0n,
+      venueRecall: { id: 6n, deploymentId: 4n, status: 2, returnedAssets: 500_000n },
+    },
+  }));
+  assert.throws(() => assertCeremonyEffectPostcondition({
+    command: "recall",
+    parameters: { predictedRecallId: 6n, deploymentId: 4n, assetsRaw: 500_000n },
+    event: event({ recallId: 6n, deploymentId: 4n, adapterRequestId: requestId, requestedAssets: 500_000n }),
+    after: {
+      activeVenueRecallId: 0n,
+      nextVenueRecallId: 6n,
+      venueRecall: { id: 6n, deploymentId: 0n, requestedAssets: 0n, status: 0 },
+    },
+  }), /confirmed recall receipt and re-read recall state diverge/u);
+});
+
+test("stalled finality wait is bounded, noisy, and exits without post-state evidence", async () => {
+  const transactionHash = `0x${"aa".repeat(32)}`;
+  const blockHash = `0x${"bb".repeat(32)}`;
+  const initialReceipt = { blockNumber: 100, blockHash, status: 1 };
+  const progress = [];
+  let clock = 0;
+  let postStateReads = 0;
+
+  await assert.rejects(
+    confirmCanonicalPostState({
+      provider: {
+        async getTransactionReceipt() { return { ...initialReceipt }; },
+        async getBlock() { return { number: 100, hash: blockHash }; },
+        async getBlockNumber() { return 100; },
+      },
+      transactionHash,
+      initialReceipt,
+      readPostState: async () => { postStateReads += 1; },
+      timeoutMs: 20,
+      pollIntervalMs: 5,
+      now: () => clock,
+      sleep: async (ms) => { clock += ms; },
+      log: (line) => progress.push(line),
+    }),
+    (error) => error?.code === "ceremony_finality_timeout"
+      && error.message.includes("COMMITTED EVIDENCE WITHHELD"),
+  );
+  assert.equal(postStateReads, 0);
+  assert.ok(progress.length >= 2);
+  assert.ok(progress.some((line) => line.includes("1/12 confirmations")));
 });
