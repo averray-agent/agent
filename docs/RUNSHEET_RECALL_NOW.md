@@ -1,6 +1,6 @@
 # RUNSHEET — Recall deployment 4 now (measure exit friction)
 
-Status: **READY TO EXECUTE** · 2026-08-30 · Operator: Pascal ·
+Status: **IN FLIGHT — recall 6 requested, STAGING STEP WAS MISSING (my error), see Step 2b** · 2026-08-30 · Operator: Pascal ·
 Authorised by Pascal 2026-08-30 ("recall and start now"), ahead of the
 2026-09-04 deadline.
 
@@ -59,6 +59,34 @@ Step down (e.g. `4440000`) only after reading the reason.
 
 Same command **plus `--commit`**. Record the returned **recallId** and tx hash.
 
+## Step 2b — STAGE THE RECALL. **This step was missing from the first version of
+this runsheet and cost ~2 hours of waiting on a request that was never dispatched.**
+
+`recallVenueDeployment` only *creates* the request on the pool. A second
+transaction, on a **different script**, stages the XCM legs that unwind at
+Hydration and bridge the assets home. Without it the adapter request sits at
+`status: 1 (Pending)`, `settled: 0.000000`, and the adapter emits nothing —
+which looks exactly like a slow bridge and is not.
+
+```
+docker exec agent-mainnet-backend node scripts/ops/pool-venue-dispatch.mjs stage-recall \
+  --profile mainnet \
+  --pool 0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30 \
+  --request-id 0xe69b4a13983bda6bced68afefec896d01f2d0f93c2819b911c035a350522d959 \
+  --recall-id 6 \
+  --observability-url http://127.0.0.1:18787/monitor/deposit-pool \
+  --expected-signer 0x5a6836c6D4d293F6E5377E6c28054F4171915813 \
+  --use-kms
+```
+
+`--request-id` is the **adapterRequestId** from the `VenueRecallRequested`
+event, not the recall id. Dry run first; add `--commit` when green.
+
+**Watch for `MIN_VENUE_POSTAGE_PLANCK`** — the venue image needs ≥0.5 DOT of
+liveness postage. Short postage used to surface only as an opaque
+`ApprovalFailed()`; the script now refuses up front instead. This is postage,
+never pool principal.
+
 ## Step 3 — DRY RUN the settle
 
 ```
@@ -97,6 +125,15 @@ fixed **before** this data existed:
 - round trip ≤ 0.0325 → **scale path**, shelve v2.2
 - round trip ≈ 0.107+ → entry was the outlier, v2.2 is the only route
 - between → neither immediately, and say so
+
+## Lesson for the next ceremony
+
+This runsheet's own header said "Recall is TWO transactions" and the procedure
+then omitted the second one. **Carrying a fact into a document does not mean the
+procedure encodes it.** Any future ceremony runsheet must list every
+transaction as a numbered step with its script name, because the two legs live
+in *different scripts* — `pool-venue-ceremony.mjs` and `pool-venue-dispatch.mjs`
+— and that split is exactly what makes the omission easy.
 
 ## What must NOT happen
 
