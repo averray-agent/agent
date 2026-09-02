@@ -58,6 +58,7 @@ interface IXcmWrapper {
      */
     struct RequestRecord {
         RequestContext context;
+        address queuedBy;
         RequestStatus status;
         uint256 settledAssets;
         uint256 settledShares;
@@ -77,6 +78,14 @@ interface IXcmWrapper {
         uint256 assets,
         uint256 shares,
         uint64 nonce
+    );
+
+    event RequestPayloadStored(
+        bytes32 indexed requestId, bytes32 destinationHash, bytes32 messageHash, uint64 refTime, uint64 proofSize
+    );
+
+    event RequestDispatched(
+        bytes32 indexed requestId, address indexed xcmPrecompile, bytes32 destinationHash, bytes32 messageHash
     );
 
     event RequestStatusUpdated(
@@ -112,8 +121,9 @@ interface IXcmWrapper {
      *
      * `destination` and `message` are kept as raw bytes because the
      * transport wrapper may evolve independently from strategy-specific
-     * message builders. Strategy adapters should still construct these at
-     * a higher abstraction layer than vault accounting.
+     * message builders. The message must still include `SetTopic(requestId)`
+     * as the final declared SCALE-encoded instruction so async outcomes can
+     * be correlated back to this request.
      */
     function queueRequest(
         RequestContext calldata context,

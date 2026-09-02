@@ -125,16 +125,18 @@ Files:
 
 Owner: backend + DX
 
-- Publish 3 gold-path examples.
-- Ship a small TypeScript SDK as the first integration path.
+- Publish 3 gold-path examples. First pass shipped:
+  `profile-lookup`, `claim-and-submit-job`, and `read-job-timeline`.
+- Ship a small TypeScript SDK as the first integration path. First pass lives
+  in `sdk/agent-platform-client.js` with editor types.
 - Add explicit request / response examples for discovery, preflight, and profile lookups.
 
 Suggested outputs:
 
-- `examples/claim-starter-job/`
+- `examples/claim-and-submit-job/`
 - `examples/profile-lookup/` — shipped as a public discovery/schema/lifecycle/profile read example
-- `examples/verification-replay/`
-- `sdk/typescript/`
+- `examples/read-job-timeline/`
+- `sdk/`
 
 ## 5. Launch gate
 
@@ -190,7 +192,8 @@ Phase 1 is complete when all of the following are true:
 2. Sync every public manifest copy to that shape.
 3. Update discovery docs to reflect the discover/execute split.
 4. Fix any docs drift that weakens trust.
-5. Add example integrations and a first SDK.
+5. Add example integrations and a first SDK. First pass shipped; next pass
+   should add verifier replay once external verifier operators need it.
 
 Until those are done, the correct stance is:
 

@@ -1,3 +1,4 @@
+import { chainReferenceTitle } from "@/lib/chain/chain-reference";
 import { cn } from "@/lib/utils/cn";
 import type { PayoutEntry } from "./types";
 
@@ -56,8 +57,18 @@ export function PayoutTrail({ payouts }: { payouts: PayoutEntry[] }) {
             style={{ letterSpacing: 0 }}
           >
             {p.at}
-            {p.tx !== "—" ? (
-              <span className="ml-1.5 text-[var(--avy-accent)]">· {p.tx}</span>
+            {p.ref.kind !== "none" ? (
+              <span
+                className={cn(
+                  "ml-1.5",
+                  // Genuine tx reads as on-chain; an escrow job id stays muted
+                  // so the payout row never implies a clickable transaction.
+                  p.ref.kind === "tx" ? "text-[var(--avy-accent)]" : "text-[var(--avy-muted)]"
+                )}
+                title={chainReferenceTitle(p.ref)}
+              >
+                · {p.ref.value}
+              </span>
             ) : null}
           </span>
         </li>

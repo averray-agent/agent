@@ -3,7 +3,7 @@
     "id": "pr-review-findings-001",
     "category": "review",
     "tier": "starter",
-    "rewardAsset": "DOT",
+    "rewardAsset": "USDC",
     "rewardAmount": 6,
     "verifierMode": "benchmark",
     "verifierTerms": [
@@ -18,13 +18,14 @@
     "outputSchemaRef": "schema://jobs/pr-review-findings-output",
     "claimTtlSeconds": 5400,
     "retryLimit": 1,
-    "requiresSponsoredGas": true
+    "requiresSponsoredGas": true,
+    "onboardingWaiverEligible": true
   },
   {
     "id": "release-readiness-check-001",
     "category": "release",
     "tier": "starter",
-    "rewardAsset": "DOT",
+    "rewardAsset": "USDC",
     "rewardAmount": 7,
     "verifierMode": "deterministic",
     "verifierTerms": [
@@ -39,13 +40,14 @@
     "outputSchemaRef": "schema://jobs/release-readiness-output",
     "claimTtlSeconds": 3600,
     "retryLimit": 1,
-    "requiresSponsoredGas": true
+    "requiresSponsoredGas": true,
+    "onboardingWaiverEligible": true
   },
   {
     "id": "issue-defect-triage-001",
     "category": "triage",
     "tier": "starter",
-    "rewardAsset": "DOT",
+    "rewardAsset": "USDC",
     "rewardAmount": 5,
     "verifierMode": "deterministic",
     "verifierTerms": [
@@ -61,13 +63,14 @@
     "outputSchemaRef": "schema://jobs/issue-defect-triage-output",
     "claimTtlSeconds": 2700,
     "retryLimit": 1,
-    "requiresSponsoredGas": true
+    "requiresSponsoredGas": true,
+    "onboardingWaiverEligible": true
   },
   {
     "id": "docs-drift-audit-001",
     "category": "docs",
     "tier": "starter",
-    "rewardAsset": "DOT",
+    "rewardAsset": "USDC",
     "rewardAmount": 5,
     "verifierMode": "benchmark",
     "verifierTerms": [
@@ -82,7 +85,8 @@
     "outputSchemaRef": "schema://jobs/docs-drift-audit-output",
     "claimTtlSeconds": 3600,
     "retryLimit": 1,
-    "requiresSponsoredGas": true
+    "requiresSponsoredGas": true,
+    "onboardingWaiverEligible": true
   },
   {
     "id": "wikipedia-citation-repair-001",
@@ -90,7 +94,7 @@
     "description": "Review a public Wikipedia article revision and propose citation repairs without editing the live page directly.",
     "category": "wikipedia",
     "tier": "starter",
-    "rewardAsset": "DOT",
+    "rewardAsset": "USDC",
     "rewardAmount": 4,
     "verifierMode": "benchmark",
     "verifierTerms": [
@@ -106,6 +110,7 @@
     "claimTtlSeconds": 3600,
     "retryLimit": 1,
     "requiresSponsoredGas": true,
+    "onboardingWaiverEligible": true,
     "source": {
       "type": "wikipedia_article",
       "project": "wikipedia",
@@ -137,7 +142,7 @@
     "description": "Check a public page revision for stale or uncertain claims and return editor-ready review notes with evidence URLs.",
     "category": "wikipedia",
     "tier": "starter",
-    "rewardAsset": "DOT",
+    "rewardAsset": "USDC",
     "rewardAmount": 4,
     "verifierMode": "benchmark",
     "verifierTerms": [
@@ -153,6 +158,7 @@
     "claimTtlSeconds": 3600,
     "retryLimit": 1,
     "requiresSponsoredGas": true,
+    "onboardingWaiverEligible": true,
     "source": {
       "type": "wikipedia_article",
       "project": "wikipedia",
@@ -184,7 +190,7 @@
     "description": "Review a Wikipedia article infobox against the fixed article revision and cited sources, then propose editor-ready fixes.",
     "category": "wikipedia",
     "tier": "starter",
-    "rewardAsset": "DOT",
+    "rewardAsset": "USDC",
     "rewardAmount": 5,
     "verifierMode": "benchmark",
     "verifierTerms": [
@@ -200,6 +206,7 @@
     "claimTtlSeconds": 3600,
     "retryLimit": 1,
     "requiresSponsoredGas": true,
+    "onboardingWaiverEligible": true,
     "source": {
       "type": "wikipedia_article",
       "project": "wikipedia",

@@ -1,11 +1,44 @@
 import { randomUUID } from "node:crypto";
 import {
   ConflictError,
-  NotFoundError
+  InvalidSubmissionShapeError,
+  NotFoundError,
+  ValidationError
 } from "./errors.js";
-import { buildSessionLifecycle, describeSessionStatus, transitionSession } from "./session-state-machine.js";
-import { normalizeSubmission } from "./submission.js";
-import { getBuiltinJobSchema, validateStructuredSubmission } from "./job-schema-registry.js";
+import {
+  assertSessionCanTransition,
+  buildSessionLifecycle,
+  describeSessionStatus,
+  transitionSession
+} from "./session-state-machine.js";
+import { hashSubmission, isStructuredSubmission, normalizeSubmission } from "./submission.js";
+import {
+  EXTERNAL_SCHEMA_EIP712_VERSION,
+  getBuiltinJobSchema,
+  getJobSchema,
+  getRegisteredJobSchemaRegistration,
+  isRegisteredJobSchemaRef,
+  validateAgainstSchema,
+  validateStructuredSubmission
+} from "./job-schema-registry.js";
+import { validateSubmissionAgainstRegisteredSchema } from "../services/schema-registry.js";
+import {
+  buildFundedJobFromClaim,
+  parseGithubPullRequestUrl,
+  updateFundedJobFromSession
+} from "./funded-jobs.js";
+import { computeClaimEconomics, countClaimedSessions } from "./claim-economics.js";
+import {
+  DEFAULT_OPEN_PR_CAP_PER_REPO,
+  appendAverrayDisclosureFooter,
+  countOpenGithubPullRequestsForRepo
+} from "./maintainer-surface-policy.js";
+import { claimExpiresAt, countClaimAttempts, isExpiredClaim, isTerminalSession } from "./claim-state.js";
+
+// EscrowCore JobState enum: None=0, Open=1, Claimed=2, Submitted=3, Rejected=4,
+// Disputed=5, Closed=6. Used to reconcile a mined-but-receipt-lost submit.
+const ESCROW_JOB_STATE_CLAIMED = 2;
+const ESCROW_JOB_STATE_SUBMITTED = 3;
 
 export class JobExecutionService {
   constructor(
@@ -14,24 +47,54 @@ export class JobExecutionService {
     getJobDefinition,
     eventBus = undefined,
     accountMutationService = undefined,
-    getDefaultClaimStakeBps = async () => 500
+    getDefaultClaimStakeBps = async () => 500,
+    getClaimableJobDefinition = getJobDefinition,
+    getClaimEconomicsConfig = async () => ({}),
+    maintainerSurfaceConfig = {}
   ) {
     this.stateStore = stateStore;
     this.blockchainGateway = blockchainGateway;
     this.getJobDefinition = getJobDefinition;
+    this.getClaimableJobDefinition = getClaimableJobDefinition;
     this.eventBus = eventBus;
     this.accountMutationService = accountMutationService;
     this.getDefaultClaimStakeBps = getDefaultClaimStakeBps;
+    this.getClaimEconomicsConfig = getClaimEconomicsConfig;
+    this.openPrCap = Number.isInteger(maintainerSurfaceConfig.openPrCap) && maintainerSurfaceConfig.openPrCap > 0
+      ? maintainerSurfaceConfig.openPrCap
+      : DEFAULT_OPEN_PR_CAP_PER_REPO;
   }
 
   async claimJob(wallet, jobId, protocol, idempotencyKey) {
     const existing = await this.stateStore.findSessionByIdempotencyKey(idempotencyKey);
-    if (existing && !this.isTerminalSession(existing)) {
-      return existing;
+    if (existing) {
+      const existingJob = this.getJobDefinition(existing.jobId);
+      const refreshed = await this.materializeExpiredClaim(existing, existingJob);
+      if (!this.isTerminalSession(refreshed)) {
+        return refreshed;
+      }
+      throw new ConflictError(
+        "Idempotency key already belongs to a terminal claim session.",
+        "idempotency_key_already_used",
+        { sessionId: refreshed.sessionId, jobId: refreshed.jobId, status: refreshed.status }
+      );
     }
 
-    const job = this.getJobDefinition(jobId);
-    const sessionId = `${jobId}:${wallet}`;
+    const job = this.getClaimableJobDefinition(jobId);
+    const activeJobSession = await this.stateStore.findSessionByJobId(jobId);
+    const refreshedActiveJobSession = activeJobSession
+      ? await this.materializeExpiredClaim(activeJobSession, job)
+      : undefined;
+    const jobSessions = await this.listJobSessions(jobId);
+    const claimAttemptCount = countClaimAttempts(jobSessions);
+    if (this.isRetryExhausted(job, claimAttemptCount)) {
+      throw new ConflictError(
+        `Job ${jobId} exhausted its claim retry budget.`,
+        "retry_limit_exhausted",
+        { jobId, retryLimit: job.retryLimit, claimAttemptCount }
+      );
+    }
+    const sessionId = this.nextSessionId(jobId, wallet, jobSessions);
     const sessionLockId = sessionId;
     const lockOwner = randomUUID();
     const lockAcquired = await this.stateStore.acquireClaimLock?.(
@@ -50,84 +113,269 @@ export class JobExecutionService {
 
     try {
       const replay = await this.stateStore.findSessionByIdempotencyKey(idempotencyKey);
-      if (replay && !this.isTerminalSession(replay)) {
-        return replay;
+      if (replay) {
+        const replayJob = this.getJobDefinition(replay.jobId);
+        const refreshed = await this.materializeExpiredClaim(replay, replayJob);
+        if (!this.isTerminalSession(refreshed)) {
+          return refreshed;
+        }
+        throw new ConflictError(
+          "Idempotency key already belongs to a terminal claim session.",
+          "idempotency_key_already_used",
+          { sessionId: refreshed.sessionId, jobId: refreshed.jobId, status: refreshed.status }
+        );
       }
 
       const existingSession = await this.stateStore.getSession(sessionId);
       if (existingSession) {
-        if (this.isTerminalSession(existingSession)) {
-          throw new ConflictError(
-            `Job ${jobId} already has a completed session for this wallet. Create or select a different job to run again.`,
-            "job_session_completed"
-          );
+        const refreshed = await this.materializeExpiredClaim(existingSession, job);
+        if (this.isTerminalSession(refreshed)) {
+          const refreshedSessions = await this.listJobSessions(jobId);
+          if (refreshed.status === "expired" && !this.isRetryExhausted(job, countClaimAttempts(refreshedSessions))) {
+            await this.reopenExpiredClaim(jobId);
+          } else {
+            throw new ConflictError(
+              `Job ${jobId} already has a completed session for this wallet. Create or select a different job to run again.`,
+              refreshed.status === "expired" ? "retry_limit_exhausted" : "job_session_completed",
+              this.buildClaimExpiryDetails(refreshed, job)
+            );
+          }
         }
-        return existingSession;
+        if (!this.isTerminalSession(refreshed)) {
+          return refreshed;
+        }
       }
 
-      const liveJobSession = await this.stateStore.findSessionByJobId(jobId);
+      const liveJobSession = refreshedActiveJobSession ?? await this.stateStore.findSessionByJobId(jobId);
       if (liveJobSession && liveJobSession.sessionId !== sessionId) {
-        throw new ConflictError(`Job ${jobId} is already claimed by another wallet.`, "job_already_claimed");
+        const refreshed = await this.materializeExpiredClaim(liveJobSession, job);
+        if (!this.isTerminalSession(refreshed)) {
+          throw new ConflictError(
+            `Job ${jobId} is already claimed by another wallet.`,
+            "job_already_claimed",
+            this.buildClaimExpiryDetails(refreshed, job)
+          );
+        }
+        if (refreshed.status === "expired") {
+          const refreshedSessions = await this.listJobSessions(jobId);
+          if (!this.isRetryExhausted(job, countClaimAttempts(refreshedSessions))) {
+            await this.reopenExpiredClaim(jobId);
+          } else {
+            throw new ConflictError(
+              `Job ${jobId} exhausted its claim retry budget.`,
+              "retry_limit_exhausted",
+              this.buildClaimExpiryDetails(refreshed, job)
+            );
+          }
+        }
       }
 
       const chainJobId = this.blockchainGateway?.isEnabled()
         ? this.blockchainGateway.toJobId(jobId)
         : jobId;
-      const claimStakeBps = await this.getDefaultClaimStakeBps();
-      const claimStake = Math.max((Number(job.rewardAmount ?? 0) * claimStakeBps) / 10_000, 0);
+      let chainClaimTiming = {};
+      const priorClaimCount = this.blockchainGateway?.isEnabled()
+        && typeof this.blockchainGateway.getWorkerClaimCount === "function"
+        ? await this.blockchainGateway.getWorkerClaimCount(wallet)
+        : countClaimedSessions(await this.collectSessionHistory(wallet));
+      const claimEconomicsConfig = await this.getClaimEconomicsConfig();
+      let claimEconomics = computeClaimEconomics({
+        rewardAmount: job.rewardAmount,
+        rewardAsset: job.rewardAsset,
+        priorClaimCount,
+        onboardingWaiverEligible: Boolean(job.onboardingWaiverEligible),
+        claimStakeBps: await this.getDefaultClaimStakeBps(),
+        ...claimEconomicsConfig
+      });
       if (this.blockchainGateway?.isEnabled()) {
         const live = await this.blockchainGateway.getJob(jobId);
         if (live.state !== 0 && live.state !== 1) {
+          // The job is no longer Open on-chain. If a prior claim already mined
+          // for THIS wallet but the local session write was lost, converge and
+          // return the rebuilt session instead of stranding the worker behind
+          // job_not_claimable (MAIN-002). Any other non-open state is genuinely
+          // not claimable.
+          const converged = await this.convergeStrandedClaim({
+            sessionId, wallet, jobId, chainJobId, claimEconomics, job, protocol, idempotencyKey, live
+          });
+          if (converged) {
+            return converged;
+          }
           throw new ConflictError(`Job ${jobId} is not claimable in its current on-chain state.`, "job_not_claimable");
         }
         if (this.blockchainGateway.ensureJob) {
-          await this.blockchainGateway.ensureJob(job, jobId, claimStake);
+          await this.blockchainGateway.ensureJob(job, jobId, claimEconomics.totalClaimLock);
         }
-        await this.blockchainGateway.ensureClaimStakeLiquidity?.(job.rewardAsset, claimStake);
-        await this.blockchainGateway.claimJob(jobId);
-      } else if (claimStake > 0) {
-        await this.accountMutationService?.lockJobStake?.(wallet, job.rewardAsset, claimStake, undefined);
+        if (typeof this.blockchainGateway.previewClaimEconomics === "function") {
+          claimEconomics = await this.blockchainGateway.previewClaimEconomics(wallet, jobId).catch(() => claimEconomics);
+        }
+        await this.blockchainGateway.ensureClaimStakeLiquidity?.(wallet, job.rewardAsset, claimEconomics.totalClaimLock);
+        await this.blockchainGateway.claimJob(jobId, wallet);
+        chainClaimTiming = this.buildChainClaimTiming(
+          await this.blockchainGateway.getJob(jobId).catch(() => undefined)
+        );
+      } else if (claimEconomics.totalClaimLock > 0) {
+        await this.accountMutationService?.lockJobStake?.(wallet, job.rewardAsset, claimEconomics.totalClaimLock, undefined);
       }
 
-      const baseSession = {
-        sessionId,
-        wallet,
-        jobId,
-        chainJobId,
-        claimStake,
-        claimStakeBps,
-        idempotencyKey,
-        protocolHistory: [protocol]
-      };
-      const session = transitionSession(baseSession, "claimed", {
-        reason: "job_claimed",
-        metadata: { protocol, idempotencyKey }
+      return await this.finalizeClaim({
+        sessionId, wallet, jobId, chainJobId, claimEconomics, chainClaimTiming, job, protocol, idempotencyKey
       });
-
-      const persisted = await this.stateStore.upsertSession(session);
-      this.publishSessionEvent("session.claimed", persisted);
-      return persisted;
     } finally {
       await this.stateStore.releaseClaimLock?.(sessionLockId, lockOwner);
     }
   }
 
+  // Build + persist the local 'claimed' session, the funded-job record, and the
+  // claim events from an on-chain claim. Shared by the normal claim path and the
+  // MAIN-002 convergence path so both produce an identical session.
+  async finalizeClaim({ sessionId, wallet, jobId, chainJobId, claimEconomics, chainClaimTiming = {}, job, protocol, idempotencyKey }) {
+    const baseSession = {
+      sessionId,
+      wallet,
+      jobId,
+      chainJobId,
+      claimStake: claimEconomics.claimStake,
+      claimStakeBps: claimEconomics.claimStakeBps,
+      claimFee: claimEconomics.claimFee,
+      claimFeeBps: claimEconomics.claimFeeBps,
+      claimEconomicsWaived: claimEconomics.claimEconomicsWaived,
+      claimNumber: claimEconomics.claimNumber,
+      totalClaimLock: claimEconomics.totalClaimLock,
+      ...chainClaimTiming,
+      idempotencyKey,
+      protocolHistory: [protocol]
+    };
+    const session = transitionSession(baseSession, "claimed", {
+      reason: "job_claimed",
+      metadata: { protocol, idempotencyKey }
+    });
+
+    const persisted = await this.stateStore.upsertSession(session);
+    await this.stateStore.upsertFundedJob?.(buildFundedJobFromClaim({ job, session: persisted }));
+    this.publishSessionEvent("session.claimed", persisted);
+    this.publishClaimFundingEvent(persisted, job, claimEconomics);
+    return persisted;
+  }
+
+  // MAIN-002 self-heal. When claimJob mines on-chain but the subsequent local
+  // session/funded-job write fails, the chain job is left CLAIMED while Averray
+  // has no durable session — and a retry would 'job_not_claimable' because the
+  // job is no longer Open. If the on-chain claim is CLAIMED by THIS wallet and
+  // no local session exists, rebuild + persist the expected session (idempotent
+  // recovery, no second claimJob). Returns null for any other non-open state
+  // (claimed by another worker, submitted, closed) so the caller fails closed.
+  async convergeStrandedClaim({ sessionId, wallet, jobId, chainJobId, claimEconomics, job, protocol, idempotencyKey, live }) {
+    if (Number(live?.state) !== ESCROW_JOB_STATE_CLAIMED) {
+      return null;
+    }
+    if (typeof live?.worker !== "string" || live.worker.toLowerCase() !== String(wallet).toLowerCase()) {
+      return null;
+    }
+    const existing = await this.stateStore.getSession?.(sessionId);
+    if (existing) {
+      return existing;
+    }
+    return this.finalizeClaim({
+      sessionId,
+      wallet,
+      jobId,
+      chainJobId,
+      claimEconomics,
+      chainClaimTiming: this.buildChainClaimTiming(live),
+      job,
+      protocol,
+      idempotencyKey
+    });
+  }
+
   async submitWork(sessionId, protocol, submissionInput = "submitted-via-service") {
     const session = await this.requireSession(sessionId);
     const job = this.getJobDefinition(session.jobId);
-    const submission = normalizeSubmission(submissionInput);
-    if (submission.kind === "structured") {
-      validateStructuredSubmission(job.outputSchemaRef, submission.structured, { path: "submission" });
+    // Serialize on the session so concurrent/retried submits for the same claim
+    // cannot broker duplicate on-chain submitWork txs (pre-audit #6). Reuses the
+    // per-session claim lock, so a claim and a submit for one session also cannot
+    // race. On contention: return an already-advanced session idempotently, else
+    // surface a conflict rather than starting a second on-chain submit.
+    const sessionLockId = sessionId;
+    const lockOwner = randomUUID();
+    const lockAcquired = await this.stateStore.acquireClaimLock?.(
+      sessionLockId,
+      lockOwner,
+      this.getClaimLockTtlSeconds(job)
+    );
+    if (lockAcquired === false) {
+      const current = await this.stateStore.getSession(sessionId);
+      if (current && current.status && current.status !== "claimed") {
+        return current;
+      }
+      throw new ConflictError(`Submit already in progress for ${sessionId}`, "submit_in_progress");
     }
+    try {
+      return await this.submitWorkLocked(session, job, protocol, submissionInput);
+    } finally {
+      await this.stateStore.releaseClaimLock?.(sessionLockId, lockOwner);
+    }
+  }
+
+  async submitWorkLocked(session, job, protocol, submissionInput) {
+    const sessionId = session.sessionId;
+    const refreshed = await this.materializeExpiredClaim(session, job);
+    if (refreshed.status === "expired") {
+      throw new ConflictError(
+        `Claim ${sessionId} expired before submission.`,
+        "claim_expired",
+        this.buildClaimExpiryDetails(refreshed, job)
+      );
+    }
+    if (this.isTerminalSession(refreshed)) {
+      throw new ConflictError(
+        `Session ${sessionId} is already complete and cannot be submitted.`,
+        "job_session_completed",
+        this.buildClaimExpiryDetails(refreshed, job)
+      );
+    }
+    assertSessionCanTransition(refreshed, "submitted", { reason: "work_submitted" });
+    const submission = normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, submissionInput, {
+      registrations: job.schemaRegistrations
+    }));
+    await validateJobSubmissionAgainstSchema(job, submission);
+    await this.enforceMaintainerOpenPrCap(job, submission);
+    const guardedSubmission = this.applyMaintainerSubmissionGuards(job, refreshed, submission);
+    await validateJobSubmissionAgainstSchema(job, guardedSubmission);
     if (this.blockchainGateway?.isEnabled()) {
-      await this.blockchainGateway.submitWork(session.chainJobId ?? session.jobId, submission.evidenceText);
+      try {
+        await this.blockchainGateway.submitWork(
+          session.chainJobId ?? session.jobId,
+          hashSubmission(guardedSubmission),
+          session.wallet
+        );
+      } catch (error) {
+        // Reconcile against on-chain state before treating this as a failed
+        // attempt: a mined-but-receipt-lost submit (a flaky RPC dropping the
+        // connection before tx.wait() returns) still advanced the job to
+        // Submitted on-chain. If so, the submit really landed — fall through to
+        // the normal 'submitted' transition so the (auto-)verifier can settle it,
+        // instead of stranding the job and its escrowed reward with submitFailedAt.
+        // Only a genuine failure (true revert, or the chain unreachable so we
+        // cannot confirm) stamps submitFailedAt and rethrows.
+        const landed = await this.onChainSubmitLanded(session.chainJobId ?? session.jobId);
+        if (!landed) {
+          await this.stateStore.upsertSession({
+            ...refreshed,
+            submitFailedAt: new Date().toISOString()
+          });
+          throw error;
+        }
+      }
     }
-    const protocolHistory = [...new Set([...session.protocolHistory, protocol])];
+    const protocolHistory = [...new Set([...refreshed.protocolHistory, protocol])];
     const transitioned = transitionSession({
-      ...session,
+      ...refreshed,
       protocolHistory,
-      submission,
-      outputSchemaBuiltin: Boolean(getBuiltinJobSchema(job.outputSchemaRef))
+      submission: guardedSubmission,
+      outputSchemaBuiltin: Boolean(getBuiltinJobSchema(job.outputSchemaRef)),
+      outputSchemaRegistered: isRegisteredJobSchemaRef(job.outputSchemaRef, job.schemaRegistrations)
     }, "submitted", {
       reason: "work_submitted",
       metadata: {
@@ -137,11 +385,26 @@ export class JobExecutionService {
       }
     });
     const persisted = await this.stateStore.upsertSession(transitioned);
+    const fundedJob = await this.stateStore.getFundedJob?.(persisted.jobId);
+    await this.stateStore.upsertFundedJob?.(updateFundedJobFromSession(fundedJob, { job, session: persisted }));
     this.publishSessionEvent("session.submitted", persisted, {
       submissionKind: submission.kind,
       schemaRef: job.outputSchemaRef
     });
     return persisted;
+  }
+
+  // True only if the on-chain job has already advanced to Submitted (i.e. a prior
+  // submitWork tx mined even though its receipt was lost). Any read failure — e.g.
+  // the same RPC outage that dropped the receipt — returns false, so the caller
+  // safely treats the submit as a failed attempt rather than assuming it landed.
+  async onChainSubmitLanded(jobId) {
+    try {
+      const job = await this.blockchainGateway?.getJob?.(jobId);
+      return Number(job?.state) === ESCROW_JOB_STATE_SUBMITTED;
+    } catch {
+      return false;
+    }
   }
 
   async resumeSession(sessionId) {
@@ -228,12 +491,124 @@ export class JobExecutionService {
     return session;
   }
 
+  async materializeExpiredClaim(session, job, now = new Date()) {
+    if (!isExpiredClaim(session, job, now)) {
+      return session;
+    }
+    const expiredAt = claimExpiresAt(session, job) ?? now.toISOString();
+    const transitioned = transitionSession(session, "expired", {
+      reason: "claim_ttl_expired",
+      timestamp: expiredAt,
+      metadata: {
+        claimExpiresAt: expiredAt,
+        claimTtlSeconds: job?.claimTtlSeconds
+      }
+    });
+    const persisted = await this.stateStore.upsertSession(transitioned);
+    const fundedJob = await this.stateStore.getFundedJob?.(persisted.jobId);
+    await this.stateStore.upsertFundedJob?.(updateFundedJobFromSession(fundedJob, { job, session: persisted }));
+    this.publishSessionEvent("session.expired", persisted, {
+      claimExpiresAt: expiredAt,
+      reason: "claim_ttl_expired"
+    });
+    return persisted;
+  }
+
+  async reopenExpiredClaim(jobId) {
+    if (this.blockchainGateway?.isEnabled() && typeof this.blockchainGateway.handleClaimTimeout === "function") {
+      await this.blockchainGateway.handleClaimTimeout(jobId);
+    }
+  }
+
+  async listJobSessions(jobId, limit = 100) {
+    return await this.stateStore.listSessionsByJob?.(jobId, limit) ?? [];
+  }
+
+  isRetryExhausted(job, claimAttemptCount) {
+    const retryLimit = Number.isInteger(job?.retryLimit) ? job.retryLimit : 1;
+    return retryLimit > 0 && claimAttemptCount >= retryLimit;
+  }
+
+  nextSessionId(jobId, wallet, sessions = []) {
+    const baseSessionId = `${jobId}:${wallet}`;
+    const existingIds = new Set(sessions.map((session) => session?.sessionId).filter(Boolean));
+    if (!existingIds.has(baseSessionId)) {
+      return baseSessionId;
+    }
+    let attempt = existingIds.size + 1;
+    let candidate = `${baseSessionId}:${attempt}`;
+    while (existingIds.has(candidate)) {
+      attempt += 1;
+      candidate = `${baseSessionId}:${attempt}`;
+    }
+    return candidate;
+  }
+
+  buildClaimExpiryDetails(session, job) {
+    return {
+      sessionId: session?.sessionId,
+      jobId: session?.jobId,
+      claimedBy: session?.wallet,
+      claimedAt: session?.claimedAt,
+      claimExpiresAt: claimExpiresAt(session, job) ?? session?.expiredAt,
+      claimTtlSeconds: job?.claimTtlSeconds
+    };
+  }
+
+  buildChainClaimTiming(liveJob = undefined) {
+    const claimExpirySeconds = Number(liveJob?.claimExpiry ?? 0);
+    if (!Number.isFinite(claimExpirySeconds) || claimExpirySeconds <= 0) {
+      return {};
+    }
+    return {
+      chainClaimExpiresAt: new Date(claimExpirySeconds * 1000).toISOString()
+    };
+  }
+
   getClaimLockTtlSeconds(job) {
     return Math.max(60, Math.min(Number(job?.claimTtlSeconds ?? 300), 900));
   }
 
+  async enforceMaintainerOpenPrCap(job, submission) {
+    if (job?.source?.type !== "github_issue" || submission.kind !== "structured") return;
+    const parsed = parseGithubPullRequestUrl(submission.structured?.prUrl ?? submission.structured?.pullRequestUrl);
+    if (!parsed) return;
+    const repo = job.source.repo ?? parsed.repo;
+    const openCount = await countOpenGithubPullRequestsForRepo(this.stateStore, repo);
+    if (openCount >= this.openPrCap) {
+      throw new ConflictError(
+        `Repository ${repo} already has ${openCount} open Averray pull request submissions.`,
+        "maintainer_open_pr_cap_reached",
+        { repo, openCount, openPrCap: this.openPrCap }
+      );
+    }
+  }
+
+  applyMaintainerSubmissionGuards(job, session, submission) {
+    if (job?.source?.type !== "github_issue" || submission.kind !== "structured") {
+      return submission;
+    }
+    if (job.source?.maintainerPolicy?.disclosureRequired === false) {
+      return submission;
+    }
+    const prUrl = submission.structured?.prUrl ?? submission.structured?.pullRequestUrl;
+    if (!parseGithubPullRequestUrl(prUrl)) {
+      return submission;
+    }
+    return {
+      ...submission,
+      structured: {
+        ...submission.structured,
+        prBody: appendAverrayDisclosureFooter(submission.structured.prBody, {
+          agentWallet: session.wallet,
+          jobSpecUrl: job.definitionUrl ?? `https://api.averray.com/jobs/${encodeURIComponent(job.id ?? session.jobId)}`
+        })
+      }
+    };
+  }
+
   isTerminalSession(session) {
-    return ["resolved", "rejected", "closed", "expired", "timed_out"].includes(session?.status);
+    return isTerminalSession(session);
   }
 
   publishSessionEvent(topic, session, data = {}) {
@@ -262,4 +637,127 @@ export class JobExecutionService {
       }
     });
   }
+
+  publishClaimFundingEvent(session, job, claimEconomics) {
+    if (!this.eventBus || this.blockchainGateway?.isEnabled?.()) {
+      return;
+    }
+
+    const amount = Number(claimEconomics?.totalClaimLock ?? 0);
+    if (!Number.isFinite(amount) || amount < 0) {
+      return;
+    }
+
+    this.eventBus.publish({
+      id: `platform-funding-claim-lock-${session.sessionId}-${Date.now()}`,
+      topic: "funding.claim_lock_recorded",
+      wallet: session.wallet,
+      wallets: [session.wallet],
+      jobId: session.jobId,
+      sessionId: session.sessionId,
+      timestamp: new Date().toISOString(),
+      correlationId: session.sessionId,
+      data: {
+        sessionId: session.sessionId,
+        wallet: session.wallet,
+        jobId: session.jobId,
+        asset: job.rewardAsset,
+        amount,
+        claimStake: claimEconomics.claimStake,
+        claimFee: claimEconomics.claimFee,
+        totalClaimLock: claimEconomics.totalClaimLock,
+        claimEconomicsWaived: claimEconomics.claimEconomicsWaived,
+        source: "local_claim_lock"
+      }
+    });
+  }
+}
+
+export function normalizeSubmitPayloadShape(schemaRef, submissionInput, { registrations = [] } = {}) {
+  if (!isPlainObject(submissionInput) || !isStructuredSubmission(submissionInput.output)) {
+    return submissionInput;
+  }
+
+  const schema = getJobSchema(schemaRef, { registrations });
+  if (!schema) {
+    return submissionInput;
+  }
+
+  const directValidation = tryValidateAgainstSchema(submissionInput, schema, "submission");
+  if (directValidation.ok) {
+    return submissionInput;
+  }
+
+  const outputValidation = tryValidateAgainstSchema(submissionInput.output, schema, "submission.output");
+  if (outputValidation.ok) {
+    return submissionInput.output;
+  }
+
+  throw new InvalidSubmissionShapeError(
+    "Send the structured proposal object directly as submission, not under submission.output.",
+    {
+      expected: firstRequiredSubmissionPath(schema),
+      schemaValidates: "payload.submission",
+      received: "payload.submission.output",
+      hint: "Move the object currently under submission.output up to submission. Do not wrap the job output under an output key.",
+      directError: directValidation.message,
+      outputError: outputValidation.message
+    }
+  );
+}
+
+export function validateSubmissionContract(schemaRef, submission, { path = "submission", registrations = [] } = {}) {
+  const schema = getJobSchema(schemaRef, { registrations });
+  if (!schema) {
+    if (submission.kind === "structured") {
+      validateStructuredSubmission(schemaRef, submission.structured, { path, registrations });
+    }
+    return submission;
+  }
+
+  if (submission.kind !== "structured") {
+    throw new ValidationError(
+      `Schema-native jobs require payload.submission to be an object matching ${schemaRef}; plain evidence strings are not valid for this job.`,
+      {
+        schemaRef,
+        schemaValidates: "payload.submission",
+        received: "payload.evidence",
+        expected: firstRequiredSubmissionPath(schema),
+        hint: "Submit the direct JSON object shown in /jobs/definition.submissionContract.submitPayloadExample.submission."
+      }
+    );
+  }
+
+  validateStructuredSubmission(schemaRef, submission.structured, { path, registrations });
+  return submission;
+}
+
+async function validateJobSubmissionAgainstSchema(job, submission) {
+  const registration = getRegisteredJobSchemaRegistration(job?.outputSchemaRef, job?.schemaRegistrations);
+  if (registration?.registrationVersion === EXTERNAL_SCHEMA_EIP712_VERSION) {
+    await validateSubmissionAgainstRegisteredSchema(submission, job.id, {
+      schemaRef: job.outputSchemaRef,
+      registrations: job.schemaRegistrations
+    });
+    return;
+  }
+  validateSubmissionContract(job.outputSchemaRef, submission, { registrations: job.schemaRegistrations });
+}
+
+function tryValidateAgainstSchema(value, schema, path) {
+  try {
+    validateAgainstSchema(value, schema, path);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, message: error?.message ?? "invalid submission" };
+  }
+}
+
+function firstRequiredSubmissionPath(schema) {
+  const [firstRequired] = schema?.required ?? [];
+  return firstRequired ? `payload.submission.${firstRequired}` : "payload.submission";
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

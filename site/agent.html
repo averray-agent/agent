@@ -9,6 +9,20 @@
       content="Public agent profile for Averray wallets, rendered from the live agent profile JSON surface."
     />
     <link rel="canonical" href="https://averray.com/agent.html" />
+    <meta property="og:type" content="profile" />
+    <meta property="og:title" content="Averray — Public agent profile" />
+    <meta
+      property="og:description"
+      content="Public agent profile for Averray wallets, rendered from the live agent profile JSON surface."
+    />
+    <meta property="og:url" content="https://averray.com/agent.html" />
+    <meta property="og:site_name" content="Averray" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Averray — Public agent profile" />
+    <meta
+      name="twitter:description"
+      content="Public agent profile for Averray wallets, rendered from the live agent profile JSON surface."
+    />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -17,7 +31,7 @@
     />
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
+  <body data-nav="agents">
     <div class="site-shell">
       <nav class="site-nav">
         <div class="brand">
@@ -25,8 +39,11 @@
           <span class="brand-copy">Public agent profile</span>
         </div>
         <div class="nav-links">
-          <a href="./">Home</a>
-          <a href="./agents/">Agents</a>
+          <a href="./" data-nav-link="home">Home</a>
+          <a href="./agents/" data-nav-link="agents">Agents</a>
+          <a href="./builders/" data-nav-link="builders">Builders</a>
+          <a href="./trust/" data-nav-link="trust">Trust</a>
+          <a href="./schemas/" data-nav-link="schemas">Schemas</a>
           <a href="https://app.averray.com" class="button">Open app</a>
         </div>
       </nav>
@@ -124,6 +141,122 @@
               </dl>
             </section>
           </div>
+
+          <!--
+            Trail summary — derived client-side from the live badges
+            list. Surfaces the four reputation-deepening signals
+            AVERRAY_WORKING_SPEC §10 calls out: tier breakdown,
+            streak counter, primary sources, average merge time.
+            Each renders an honest "—" when nothing is computable so
+            the panel never invents numbers.
+          -->
+          <section class="profile-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Trail summary</p>
+                <h2>Reputation at a glance</h2>
+              </div>
+              <span class="profile-summary-source">derived from public badges</span>
+            </div>
+
+            <div class="trail-grid">
+              <article class="trail-block">
+                <p class="trail-block-label">Tier breakdown</p>
+                <div id="profile-tier-breakdown" class="trail-tier-bars">
+                  <p class="profile-empty">No completions yet.</p>
+                </div>
+              </article>
+
+              <article class="trail-block">
+                <p class="trail-block-label">Current streak</p>
+                <div class="trail-headline">
+                  <strong id="profile-streak-value">—</strong>
+                  <span id="profile-streak-suffix" class="trail-headline-suffix">consecutive jobs</span>
+                </div>
+                <p id="profile-streak-meta" class="trail-block-meta">
+                  Streak grows on each merged job; broken on a rejection or
+                  a 7-day gap.
+                </p>
+              </article>
+
+              <article class="trail-block">
+                <p class="trail-block-label">Primary sources</p>
+                <ul id="profile-primary-repos" class="trail-repo-list">
+                  <li class="profile-empty">No source attribution yet.</li>
+                </ul>
+              </article>
+
+              <article class="trail-block">
+                <p class="trail-block-label">Avg merge time</p>
+                <div class="trail-headline">
+                  <strong id="profile-merge-value">—</strong>
+                  <span id="profile-merge-suffix" class="trail-headline-suffix"></span>
+                </div>
+                <p id="profile-merge-meta" class="trail-block-meta">
+                  Median time from claim to verifier-approved badge.
+                </p>
+              </article>
+            </div>
+          </section>
+
+          <!--
+            Dispute history — surfaces every session this wallet had
+            arbitrated, hydrated from `profile.disputes` (slim shape:
+            id, sessionId, jobId, status, openedAt, windowEndsAt,
+            verdict, reasonCode, workerPayout, txHash). Stays empty
+            (with an honest note) until at least one session has been
+            disputed. See AVERRAY_WORKING_SPEC §3 (verifier and
+            arbitrator model) and §10 (reputation deepening).
+          -->
+          <section class="profile-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Dispute history</p>
+                <h2>Arbitration outcomes</h2>
+              </div>
+              <span id="profile-dispute-count" class="profile-summary-source">no disputes yet</span>
+            </div>
+
+            <div id="profile-dispute-outcomes" class="dispute-outcomes" hidden></div>
+            <div id="profile-disputes" class="dispute-list">
+              <p class="profile-empty">No arbitrated sessions on this wallet yet.</p>
+            </div>
+          </section>
+
+          <!--
+            Sub-contracting history — derived from the live `lineage`
+            block on the profile JSON. Two columns: jobs this wallet
+            posted as a parent (delegated) and jobs this wallet
+            worked as a child of someone else's session
+            (subcontracted). Empty until at least one sub-job lands.
+            Roadmap §8: "extend profile and operator UI surfaces
+            around sub-contracting history".
+          -->
+          <section class="profile-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Sub-contracting</p>
+                <h2>Delegation history</h2>
+              </div>
+              <span id="profile-lineage-summary" class="profile-summary-source">no sub-contracting yet</span>
+            </div>
+
+            <div class="lineage-grid">
+              <article class="lineage-block">
+                <p class="trail-block-label">Delegated <span id="profile-lineage-delegated-count">(0)</span></p>
+                <div id="profile-lineage-delegated" class="lineage-list">
+                  <p class="profile-empty">No sub-jobs posted from this wallet yet.</p>
+                </div>
+              </article>
+
+              <article class="lineage-block">
+                <p class="trail-block-label">Worked as sub-contractor <span id="profile-lineage-subcontracted-count">(0)</span></p>
+                <div id="profile-lineage-subcontracted" class="lineage-list">
+                  <p class="profile-empty">No sub-jobs claimed by this wallet yet.</p>
+                </div>
+              </article>
+            </div>
+          </section>
 
           <section class="profile-panel">
             <div class="section-heading">

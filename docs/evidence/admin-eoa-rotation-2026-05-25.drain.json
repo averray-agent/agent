@@ -1,0 +1,66 @@
+{
+  "profile": "testnet",
+  "chain": {
+    "rpcUrl": "https://eth-rpc-testnet.polkadot.io/",
+    "agentAccountAddress": "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08",
+    "usdcAddress": "0x0000053900000000000000000000000001200000"
+  },
+  "oldAdmin": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+  "newAdmin": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
+  "amountBaseUnits": "9339999",
+  "prefundPasWei": "9970000000000000000000",
+  "txs": [
+    {
+      "step": "0_prefund_pas",
+      "from": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+      "to": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
+      "txHash": "0x981fae4f3d715c7a2ca645c90e647d0ff5a90be6c2523e9a90638bb7147acbca",
+      "blockNumber": 9286375,
+      "valueWei": "9970000000000000000000"
+    },
+    {
+      "step": "1_withdraw_old",
+      "from": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+      "to": "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08",
+      "txHash": "0xc3a34edabd017c21d8b458b346303ae4d6813955dd92ba12b4133dee37ba641b",
+      "blockNumber": 9286377,
+      "calldata": "0xf3fef3a3000000000000000000000000000005390000000000000000000000000120000000000000000000000000000000000000000000000000000000000000008e845f"
+    },
+    {
+      "step": "2_transfer_old_to_new",
+      "from": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+      "to": "0x0000053900000000000000000000000001200000",
+      "txHash": "0xa37218d0c3f8d3032c37ed1360377ec3222d3698e68760c9e306fb7d66366919",
+      "blockNumber": 9286380,
+      "calldata": "0xa9059cbb0000000000000000000000006778f050eac8313e4dbb176d7bab44510e833ac800000000000000000000000000000000000000000000000000000000008e845f"
+    },
+    {
+      "step": "3_approve_new",
+      "from": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
+      "to": "0x0000053900000000000000000000000001200000",
+      "txHash": "0xa49df7879b5c5c0cbd6ea9829062e244c43b7f3d6a35d237dfb7d8de5f611601",
+      "blockNumber": 9286382,
+      "calldata": "0x095ea7b300000000000000000000000071b111d8c9df84be26cb9067d27dad7a2d5e7e0800000000000000000000000000000000000000000000000000000000008e845f"
+    },
+    {
+      "step": "4_deposit_new",
+      "from": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
+      "to": "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08",
+      "txHash": "0x88fc2fd7712c97a75347140fa6f27a571a60c97c83feb7f91aad8277714fa243",
+      "blockNumber": 9286384,
+      "calldata": "0x47e7ef24000000000000000000000000000005390000000000000000000000000120000000000000000000000000000000000000000000000000000000000000008e845f"
+    }
+  ],
+  "before": {
+    "oldEoa": "0",
+    "oldPositionLiquid": "9339999",
+    "newEoa": "0",
+    "newPositionLiquid": "0"
+  },
+  "after": {
+    "oldEoa": "0",
+    "oldPositionLiquid": "0",
+    "newEoa": "0",
+    "newPositionLiquid": "9339999"
+  }
+}

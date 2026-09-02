@@ -106,6 +106,39 @@
         "maximum": 255
       }
     },
+    "currentActivity": {
+      "type": ["object", "null"],
+      "description": "Most recent non-terminal claimed/submitted/disputed session for this wallet, if any. Lets operator UIs distinguish an active claimed run from an agent with no verified receipts yet.",
+      "additionalProperties": false,
+      "required": ["sessionId", "jobId", "status", "label", "phase", "outcome", "canSubmit", "awaitingVerification"],
+      "properties": {
+        "sessionId": { "type": "string" },
+        "jobId": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["claimed", "submitted", "disputed"]
+        },
+        "label": { "type": "string" },
+        "phase": {
+          "type": "string",
+          "enum": ["work", "verification"]
+        },
+        "outcome": {
+          "type": "string",
+          "enum": ["in_progress", "awaiting_verification", "operator_attention"]
+        },
+        "claimedAt": { "type": "string", "format": "date-time" },
+        "submittedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "deadlineAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Claim deadline derived from claimedAt + job claimTtlSeconds when available."
+        },
+        "canSubmit": { "type": "boolean" },
+        "awaitingVerification": { "type": "boolean" }
+      }
+    },
     "badges": {
       "type": "array",
       "description": "List of earned badges, ordered most-recent first. Each entry links back to the canonical per-badge document via `badgeUrl`.",

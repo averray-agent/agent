@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "restore-drill-evidence-v1",
+  "drillDate": "2026-05-27",
+  "completedAt": "2026-05-27T20:41:28.074Z",
+  "operator": {
+    "name": "GitHub Actions hosted restore drill",
+    "signature": "gh-26537480496"
+  },
+  "target": {
+    "type": "disposable_container",
+    "label": "GitHub Actions restore drill containers"
+  },
+  "readiness": {
+    "checkedAt": "2026-05-27T20:41:09Z",
+    "backupDir": "/srv/agent-stack/backups",
+    "maxAgeHours": 26,
+    "overallStatus": "ok",
+    "components": [
+      {
+        "name": "postgres",
+        "status": "ok",
+        "file": "/srv/agent-stack/backups/postgres/agent-20260527-205325.sql.gz",
+        "ageSeconds": 6464,
+        "message": "Newest backup is 1.8h old"
+      },
+      {
+        "name": "redis",
+        "status": "ok",
+        "file": "/srv/agent-stack/backups/redis/redis-20260527-205325.rdb.gz",
+        "ageSeconds": 6463,
+        "message": "Newest backup is 1.8h old"
+      }
+    ]
+  },
+  "postgres": {
+    "backupFile": "agent-20260527-205325.sql.gz",
+    "restoreTarget": "drill-postgres-1779914477336-2283",
+    "restoreExitCode": 0,
+    "rowCheck": {
+      "query": "select count(*) from information_schema.tables where table_schema = 'public';",
+      "rowCount": 0
+    }
+  },
+  "redis": {
+    "backupFile": "redis-20260527-205325.rdb.gz",
+    "restoreTarget": "drill-redis-1779914477336-2283",
+    "restoreExitCode": 0,
+    "dbSize": 2788
+  },
+  "cleanup": {
+    "postgresTargetRemoved": true,
+    "redisTargetRemoved": true,
+    "redisDataDirRemoved": true
+  }
+}

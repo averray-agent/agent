@@ -1,0 +1,19 @@
+{
+  "profile": "testnet",
+  "network": "Polkadot Hub TestNet",
+  "chainId": 420420417,
+  "rpcUrl": "https://services.polkadothub-rpc.com/testnet",
+  "contract": "DiscoveryRegistry",
+  "address": "0x9B1aDD0Dcd0AF57d8549307C27fc24555F8E293d",
+  "publisher": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+  "deployTxHash": "0xb4080929eb298c562107de56221ccfbb1079bc357dce83ce0b07798adcaa93da",
+  "deployBlockNumber": 8583585,
+  "firstManifestPublish": {
+    "workflowRunId": 25546750360,
+    "manifestUrl": "https://averray.com/.well-known/agent-tools.json",
+    "manifestHash": "0xddded191d8d70f5a3033d54d94165bee1a613e1a6e4f63d8cf52d667f54a6bf8",
+    "txHash": "0xe1f242d4b1aece3e18811367bd5d381f4cdc4133d0537597a81b7ece7a371b33",
+    "blockNumber": 8584322,
+    "registryVersion": 1
+  }
+}

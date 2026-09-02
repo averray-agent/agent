@@ -11,6 +11,7 @@ out/
 broadcast/
 .ponder/
 .pglite/
+.content-recovery-log/
 marketing/.astro/
 marketing/dist/
 app/.next/
@@ -18,3 +19,7 @@ app/out/
 app/tsconfig.tsbuildinfo
 
 *.log
+
+.claude/
+.codex/
+.keys/

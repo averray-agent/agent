@@ -14,18 +14,39 @@ contract TreasuryPolicy {
     uint256 public perAccountBorrowCap;
     uint256 public minimumCollateralRatioBps;
     uint16 public defaultClaimStakeBps;
+    uint16 public claimFeeBps;
+    uint16 public claimFeeVerifierBps;
+    uint256 public onboardingWaiverClaimCount;
     uint256 public rejectionSkillPenalty;
     uint256 public rejectionReliabilityPenalty;
     uint256 public disputeLossSkillPenalty;
     uint256 public disputeLossReliabilityPenalty;
 
+    struct AuthorizationWindow {
+        uint64 since;
+        uint64 until;
+    }
+
     mapping(address => bool) public approvedAssets;
     mapping(address => bool) public approvedStrategies;
-    mapping(address => bool) public serviceOperators;
+    mapping(address => bool) public settlementBroker;
+    mapping(address => bool) public agentTransferBroker;
+    mapping(address => bool) public strategySettler;
+    mapping(address => bool) public reputationWriter;
+    mapping(address => bool) public outflowRecorder;
+    mapping(address => bool) public trustedSchemaIssuers;
     mapping(address => bool) public verifiers;
+    mapping(address => uint64) public authorizedSince;
+    mapping(address => uint64) public authorizedUntil;
     mapping(address => bool) public arbitrators;
+    mapping(address => uint256) public minClaimFeeByAsset;
+    mapping(address => AuthorizationWindow[]) internal verifierAuthorizationWindows;
+    mapping(address => uint256) public accountOutflowDay;
+    mapping(address => uint256) public accountOutflowToday;
 
     uint256 public currentDay;
+    /// @notice Aggregate egress observed today. Informational only; caps are
+    ///         enforced per source account via accountOutflowToday.
     uint256 public outflowToday;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -33,18 +54,29 @@ contract TreasuryPolicy {
     event PauseUpdated(bool paused);
     event AssetApprovalUpdated(address indexed asset, bool approved);
     event StrategyApprovalUpdated(address indexed strategy, bool approved);
-    event ServiceOperatorUpdated(address indexed operator, bool approved);
+    event SettlementBrokerUpdated(address indexed operator, bool approved);
+    event AgentTransferBrokerUpdated(address indexed operator, bool approved);
+    event StrategySettlerUpdated(address indexed operator, bool approved);
+    event ReputationWriterUpdated(address indexed operator, bool approved);
+    event OutflowRecorderUpdated(address indexed operator, bool approved);
+    event TrustedSchemaIssuerSet(address indexed issuer, bool approved);
     event VerifierUpdated(address indexed verifier, bool approved);
     event ArbitratorUpdated(address indexed arbitrator, bool approved);
     event DailyOutflowCapUpdated(uint256 newCap);
     event PerAccountBorrowCapUpdated(uint256 newCap);
     event MinimumCollateralRatioUpdated(uint256 newRatioBps);
     event DefaultClaimStakeBpsUpdated(uint16 newClaimStakeBps);
+    event ClaimFeeBpsUpdated(uint16 newClaimFeeBps);
+    event ClaimFeeVerifierBpsUpdated(uint16 newClaimFeeVerifierBps);
+    event OnboardingWaiverClaimCountUpdated(uint256 newClaimCount);
+    event MinClaimFeeUpdated(address indexed asset, uint256 amount);
     event RejectionSkillPenaltyUpdated(uint256 newPenalty);
     event RejectionReliabilityPenaltyUpdated(uint256 newPenalty);
     event DisputeLossSkillPenaltyUpdated(uint256 newPenalty);
     event DisputeLossReliabilityPenaltyUpdated(uint256 newPenalty);
-    event OutflowRecorded(uint256 day, uint256 amount, uint256 newTotal);
+    event OutflowRecorded(
+        address indexed account, uint256 day, uint256 amount, uint256 accountTotal, uint256 aggregateTotal
+    );
 
     error Unauthorized();
     error Paused();
@@ -56,6 +88,9 @@ contract TreasuryPolicy {
         perAccountBorrowCap = type(uint256).max;
         minimumCollateralRatioBps = 15_000;
         defaultClaimStakeBps = 500;
+        claimFeeBps = 200;
+        claimFeeVerifierBps = 7_000;
+        onboardingWaiverClaimCount = 3;
         rejectionSkillPenalty = 10;
         rejectionReliabilityPenalty = 20;
         disputeLossSkillPenalty = 30;
@@ -106,14 +141,79 @@ contract TreasuryPolicy {
         emit StrategyApprovalUpdated(strategy, approved);
     }
 
-    function setServiceOperator(address operator, bool approved) external onlyOwner {
-        serviceOperators[operator] = approved;
-        emit ServiceOperatorUpdated(operator, approved);
+    function setSettlementBroker(address operator, bool approved) external onlyOwner {
+        settlementBroker[operator] = approved;
+        emit SettlementBrokerUpdated(operator, approved);
+    }
+
+    function setAgentTransferBroker(address operator, bool approved) external onlyOwner {
+        agentTransferBroker[operator] = approved;
+        emit AgentTransferBrokerUpdated(operator, approved);
+    }
+
+    function setStrategySettler(address operator, bool approved) external onlyOwner {
+        strategySettler[operator] = approved;
+        emit StrategySettlerUpdated(operator, approved);
+    }
+
+    function setReputationWriter(address operator, bool approved) external onlyOwner {
+        reputationWriter[operator] = approved;
+        emit ReputationWriterUpdated(operator, approved);
+    }
+
+    function setOutflowRecorder(address operator, bool approved) external onlyOwner {
+        outflowRecorder[operator] = approved;
+        emit OutflowRecorderUpdated(operator, approved);
+    }
+
+    function setTrustedSchemaIssuer(address issuer, bool approved) external onlyOwner {
+        trustedSchemaIssuers[issuer] = approved;
+        emit TrustedSchemaIssuerSet(issuer, approved);
     }
 
     function setVerifier(address verifier, bool approved) external onlyOwner {
+        uint64 timestamp = uint64(block.timestamp);
+        if (approved == verifiers[verifier]) {
+            emit VerifierUpdated(verifier, approved);
+            return;
+        }
+
         verifiers[verifier] = approved;
+        if (approved) {
+            authorizedSince[verifier] = timestamp;
+            authorizedUntil[verifier] = 0;
+            verifierAuthorizationWindows[verifier].push(AuthorizationWindow({since: timestamp, until: 0}));
+        } else {
+            authorizedUntil[verifier] = timestamp;
+            uint256 windowCount = verifierAuthorizationWindows[verifier].length;
+            if (windowCount > 0 && verifierAuthorizationWindows[verifier][windowCount - 1].until == 0) {
+                verifierAuthorizationWindows[verifier][windowCount - 1].until = timestamp;
+            }
+        }
         emit VerifierUpdated(verifier, approved);
+    }
+
+    function verifierAuthorizationWindowCount(address verifier) external view returns (uint256) {
+        return verifierAuthorizationWindows[verifier].length;
+    }
+
+    function verifierAuthorizationWindow(address verifier, uint256 index)
+        external
+        view
+        returns (uint64 since, uint64 until)
+    {
+        AuthorizationWindow memory window = verifierAuthorizationWindows[verifier][index];
+        return (window.since, window.until);
+    }
+
+    function wasAuthorizedAt(address verifier, uint64 timestamp) external view returns (bool) {
+        AuthorizationWindow[] storage windows = verifierAuthorizationWindows[verifier];
+        for (uint256 i = 0; i < windows.length; i++) {
+            if (timestamp >= windows[i].since && (windows[i].until == 0 || timestamp < windows[i].until)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     function setArbitrator(address arbitrator, bool approved) external onlyOwner {
@@ -143,6 +243,28 @@ contract TreasuryPolicy {
         emit DefaultClaimStakeBpsUpdated(claimStakeBps);
     }
 
+    function setClaimFeeBps(uint16 feeBps) external onlyOwner {
+        require(feeBps <= 10_000, "INVALID_BPS");
+        claimFeeBps = feeBps;
+        emit ClaimFeeBpsUpdated(feeBps);
+    }
+
+    function setClaimFeeVerifierBps(uint16 verifierBps) external onlyOwner {
+        require(verifierBps <= 10_000, "INVALID_BPS");
+        claimFeeVerifierBps = verifierBps;
+        emit ClaimFeeVerifierBpsUpdated(verifierBps);
+    }
+
+    function setOnboardingWaiverClaimCount(uint256 claimCount) external onlyOwner {
+        onboardingWaiverClaimCount = claimCount;
+        emit OnboardingWaiverClaimCountUpdated(claimCount);
+    }
+
+    function setMinClaimFee(address asset, uint256 amount) external onlyOwner {
+        minClaimFeeByAsset[asset] = amount;
+        emit MinClaimFeeUpdated(asset, amount);
+    }
+
     function setRejectionSkillPenalty(uint256 penalty) external onlyOwner {
         rejectionSkillPenalty = penalty;
         emit RejectionSkillPenaltyUpdated(penalty);
@@ -163,15 +285,31 @@ contract TreasuryPolicy {
         emit DisputeLossReliabilityPenaltyUpdated(penalty);
     }
 
-    function recordOutflow(uint256 amount) external whenNotPaused {
-        if (!serviceOperators[msg.sender]) revert Unauthorized();
+    function recordOutflow(address account, uint256 amount) external {
+        if (!outflowRecorder[msg.sender]) revert Unauthorized();
+        _recordOutflow(account, amount, true);
+    }
+
+    function recordProtocolOutflow(address account, uint256 amount) external {
+        if (!outflowRecorder[msg.sender]) revert Unauthorized();
+        _recordOutflow(account, amount, false);
+    }
+
+    function _recordOutflow(address account, uint256 amount, bool enforceCap) internal {
+        require(account != address(0), "ZERO_ACCOUNT");
         uint256 dayNumber = block.timestamp / 1 days;
         if (dayNumber != currentDay) {
             currentDay = dayNumber;
             outflowToday = 0;
         }
+        if (dayNumber != accountOutflowDay[account]) {
+            accountOutflowDay[account] = dayNumber;
+            accountOutflowToday[account] = 0;
+        }
+        uint256 accountTotal = accountOutflowToday[account] + amount;
+        if (enforceCap && accountTotal > dailyOutflowCap) revert OutflowCapExceeded();
+        accountOutflowToday[account] = accountTotal;
         outflowToday += amount;
-        if (outflowToday > dailyOutflowCap) revert OutflowCapExceeded();
-        emit OutflowRecorded(dayNumber, amount, outflowToday);
+        emit OutflowRecorded(account, dayNumber, amount, accountTotal, outflowToday);
     }
 }

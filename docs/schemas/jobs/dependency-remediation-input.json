@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "schema://jobs/dependency-remediation-input",
+  "title": "Dependency Remediation Input",
+  "description": "Dependency vulnerability remediation input from public advisory sources such as OSV/NVD.",
+  "type": "object",
+  "properties": {
+    "ecosystem": {
+      "type": "string",
+      "enum": [
+        "npm"
+      ]
+    },
+    "packageName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "vulnerableVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fixedVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo": {
+      "type": "string"
+    },
+    "manifestPath": {
+      "type": "string"
+    },
+    "advisoryIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "advisoryUrls": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "instructions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "ecosystem",
+    "packageName",
+    "vulnerableVersion",
+    "fixedVersion",
+    "advisoryIds",
+    "instructions"
+  ],
+  "additionalProperties": false
+}

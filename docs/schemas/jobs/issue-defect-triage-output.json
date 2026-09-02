@@ -1,15 +1,73 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "schema://jobs/issue-defect-triage-output",
   "title": "Issue Defect Triage Output",
+  "description": "Structured issue triage output.",
   "type": "object",
-  "required": ["category", "severity", "component", "repro_clarity", "next_owner", "duplication_risk"],
   "properties": {
-    "category": { "type": "string", "enum": ["bug", "ops", "docs", "governance", "integration"] },
-    "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
-    "component": { "type": "string", "enum": ["api", "indexer", "frontend", "contracts", "ops"] },
-    "repro_clarity": { "type": "string", "enum": ["clear", "partial", "unclear"] },
-    "next_owner": { "type": "string", "enum": ["backend", "frontend", "ops", "contracts", "docs"] },
-    "duplication_risk": { "type": "string", "enum": ["low", "medium", "high"] }
+    "category": {
+      "type": "string",
+      "enum": [
+        "bug",
+        "ops",
+        "docs",
+        "governance",
+        "integration"
+      ]
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "component": {
+      "type": "string",
+      "enum": [
+        "api",
+        "indexer",
+        "frontend",
+        "contracts",
+        "ops"
+      ]
+    },
+    "repro_clarity": {
+      "type": "string",
+      "enum": [
+        "clear",
+        "partial",
+        "unclear"
+      ]
+    },
+    "next_owner": {
+      "type": "string",
+      "enum": [
+        "backend",
+        "frontend",
+        "ops",
+        "contracts",
+        "docs"
+      ]
+    },
+    "duplication_risk": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    }
   },
+  "required": [
+    "category",
+    "severity",
+    "component",
+    "repro_clarity",
+    "next_owner",
+    "duplication_risk"
+  ],
   "additionalProperties": false
 }

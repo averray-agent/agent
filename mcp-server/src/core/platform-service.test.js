@@ -1,11 +1,42 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Wallet, id } from "ethers";
 
 import { PlatformService } from "./platform-service.js";
+import { EventBus } from "./event-bus.js";
+import { InsufficientLiquidityError } from "./errors.js";
+import { MemoryStateStore } from "./state-store.js";
+import {
+  buildExternalSchemaRegistrationTypedData,
+  hashExternalSchemaContent
+} from "./job-schema-registry.js";
 
 const WALLET = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const CANONICAL_USDC_ASSET = {
+  symbol: "USDC",
+  assetClass: "trust_backed",
+  assetId: 1337,
+  decimals: 6,
+  address: "0x0000053900000000000000000000000001200000",
+  minBalanceRaw: "70000"
+};
+const EXTERNAL_SCHEMA_SIGNER = new Wallet("0x8b3a350cf5c34c9194ca3a545d0ec67d61f328d6e5d11dd95b9af16e70ec4c63");
+const EXTERNAL_SCHEMA_REF = "schema://jobs/off-platform-output";
+const EXTERNAL_SCHEMA_URL = "https://schemas.example.com/jobs/off-platform-output.json";
+const EXTERNAL_SCHEMA_CHAIN_ID = 420420421n;
+const EXTERNAL_SCHEMA_VERIFYING_CONTRACT = "0x2222222222222222222222222222222222222222";
+const EXTERNAL_SCHEMA = {
+  $id: EXTERNAL_SCHEMA_REF,
+  type: "object",
+  additionalProperties: false,
+  required: ["summary", "result"],
+  properties: {
+    summary: { type: "string", minLength: 1 },
+    result: { type: "string", enum: ["pass", "fail"] }
+  }
+};
 
-function makePlatformService(blockchainGateway = undefined) {
+function makePlatformService(blockchainGateway = undefined, eventBus = undefined, stateStore = undefined) {
   const jobs = [
     {
       id: "parent-job-001",
@@ -24,7 +55,8 @@ function makePlatformService(blockchainGateway = undefined) {
       outputSchemaRef: "schema://jobs/coding-output",
       claimTtlSeconds: 3600,
       retryLimit: 1,
-      requiresSponsoredGas: true
+      requiresSponsoredGas: true,
+      onboardingWaiverEligible: true
     }
   ];
   const profiles = new Map([
@@ -53,7 +85,7 @@ function makePlatformService(blockchainGateway = undefined) {
   const reputations = new Map([
     [WALLET, { skill: 50, reliability: 50, economic: 50, tier: "starter" }]
   ]);
-  return new PlatformService(jobs, profiles, accounts, reputations, blockchainGateway);
+  return new PlatformService(jobs, profiles, accounts, reputations, blockchainGateway, stateStore, eventBus);
 }
 
 test("createSubJob links the child job to the active parent session", async () => {
@@ -76,15 +108,484 @@ test("createSubJob links the child job to the active parent session", async () =
   });
 
   assert.equal(subJob.parentSessionId, session.sessionId);
+  assert.equal(subJob.lineage.kind, "sub_job");
+  assert.equal(subJob.lineage.parentJobId, "parent-job-001");
+  assert.equal(subJob.lineage.depth, 1);
+  assert.equal(subJob.lineage.budget.usedAfterAmount, 2);
+  assert.equal(subJob.lineage.funding.asset, "DOT");
+  const account = await service.getAccountSummary(WALLET);
+  assert.equal(account.liquid.DOT, 8);
+  assert.equal(account.reserved.DOT, 2);
   const subJobs = await service.listSubJobs(session.sessionId);
   assert.equal(subJobs.length, 1);
   assert.equal(subJobs[0].id, "child-job-001");
 });
 
+test("createAdminJob reserves finite recurring template funding from the poster wallet", async () => {
+  const service = makePlatformService();
+
+  const template = await service.createAdminJob({
+    id: "weekly-recurring-001",
+    category: "coding",
+    tier: "starter",
+    rewardAmount: 5,
+    rewardAsset: "DOT",
+    verifierMode: "benchmark",
+    verifierTerms: ["complete"],
+    verifierMinimumMatches: 1,
+    recurring: true,
+    schedule: { cron: "0 9 * * 1" },
+    recurringPolicy: { reserveAmount: 10, reserveAsset: "DOT" }
+  }, { posterWallet: WALLET });
+
+  assert.equal(template.recurringPolicy.funding.source, "recurring_template_reserve");
+  assert.equal(template.recurringPolicy.funding.wallet, WALLET);
+  const account = await service.getAccountSummary(WALLET);
+  assert.equal(account.liquid.DOT, 0);
+  assert.equal(account.reserved.DOT, 10);
+
+  const derivative = service.fireRecurringJob("weekly-recurring-001", {
+    firedAt: new Date("2026-05-04T09:00:00.000Z")
+  });
+  assert.equal(derivative.funding.source, "recurring_template_reserve");
+  assert.equal(derivative.funding.wallet, WALLET);
+  assert.equal(derivative.funding.amount, 5);
+});
+
+test("external-schema admin job posts, claims, and validates against off-platform schema", async () => {
+  const schemaHash = hashExternalSchemaContent(EXTERNAL_SCHEMA);
+  const jobId = "off-platform-schema-job-001";
+  const typedData = buildExternalSchemaRegistrationTypedData({
+    schemaHash,
+    schemaUrl: EXTERNAL_SCHEMA_URL,
+    jobId: id(jobId),
+    chainId: EXTERNAL_SCHEMA_CHAIN_ID,
+    verifyingContract: EXTERNAL_SCHEMA_VERIFYING_CONTRACT
+  });
+  const signature = await EXTERNAL_SCHEMA_SIGNER.signTypedData(typedData.domain, typedData.types, typedData.value);
+  const calls = [];
+  let liveState = 0;
+  const gateway = {
+    isEnabled: () => true,
+    toJobId: (value) => id(value),
+    getDefaultClaimStakeBps: async () => 500,
+    getClaimEconomicsConfig: async () => ({}),
+    isTrustedSchemaIssuer: async (issuer) => issuer === EXTERNAL_SCHEMA_SIGNER.address,
+    getExternalSchemaSigningDomain: async () => ({
+      chainId: EXTERNAL_SCHEMA_CHAIN_ID,
+      verifyingContract: EXTERNAL_SCHEMA_VERIFYING_CONTRACT
+    }),
+    getJob: async () => ({ state: liveState }),
+    ensureJob: async (job, instanceJobId) => {
+      calls.push(["ensureJob", { job, instanceJobId }]);
+    },
+    ensureClaimStakeLiquidity: async () => {},
+    claimJob: async () => {
+      liveState = 1;
+      calls.push(["claimJob"]);
+    },
+    submitWork: async (_jobId, evidenceHash) => {
+      calls.push(["submitWork", evidenceHash]);
+    }
+  };
+  const service = makePlatformService(gateway, undefined, new MemoryStateStore());
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return EXTERNAL_SCHEMA;
+    }
+  });
+  try {
+    const job = await service.createAdminJob({
+      id: jobId,
+      category: "off-platform",
+      tier: "starter",
+      rewardAmount: 1,
+      rewardAsset: "DOT",
+      verifierMode: "benchmark",
+      verifierTerms: ["summary"],
+      verifierMinimumMatches: 1,
+      inputSchemaRef: "schema://jobs/coding-input",
+      outputSchemaRef: EXTERNAL_SCHEMA_REF,
+      claimTtlSeconds: 3600,
+      retryLimit: 1,
+      externalSchema: {
+        schemaHash,
+        schemaUrl: EXTERNAL_SCHEMA_URL,
+        schemaIssuer: EXTERNAL_SCHEMA_SIGNER.address,
+        signature
+      }
+    }, { posterWallet: WALLET });
+
+    assert.equal(job.schemaRegistrations[0].schemaIssuer, EXTERNAL_SCHEMA_SIGNER.address);
+    assert.equal(job.schemaRegistrations[0].schemaHash, schemaHash);
+    const claimed = await service.claimJob(WALLET, jobId, "http", "external-schema-claim");
+    const submitted = await service.submitWork(claimed.sessionId, "http", {
+      summary: "External schema was honored.",
+      result: "pass"
+    });
+
+    assert.equal(submitted.outputSchemaRegistered, true);
+    assert.equal(submitted.submission.structured.result, "pass");
+    assert.equal(calls.find(([name]) => name === "ensureJob")?.[1].job.schemaRegistrations[0].schemaHash, schemaHash);
+    assert.ok(calls.some(([name]) => name === "submitWork"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("createJob allows USDC rewards at or above asset minBalance", () => {
+  const service = makePlatformService({
+    config: { supportedAssets: [CANONICAL_USDC_ASSET] }
+  });
+
+  const exact = service.createJob({
+    id: "usdc-minbalance-exact",
+    category: "product_proof",
+    tier: "starter",
+    rewardAmount: 0.07,
+    rewardAsset: "USDC",
+    verifierMode: "benchmark",
+    verifierTerms: ["complete"],
+    verifierMinimumMatches: 1,
+    inputSchemaRef: "schema://jobs/coding-input",
+    outputSchemaRef: "schema://jobs/coding-output",
+    claimTtlSeconds: 1800,
+    retryLimit: 1
+  });
+  const double = service.createJob({
+    id: "usdc-minbalance-double",
+    category: "product_proof",
+    tier: "starter",
+    rewardAmount: 0.14,
+    rewardAsset: "USDC",
+    verifierMode: "benchmark",
+    verifierTerms: ["complete"],
+    verifierMinimumMatches: 1,
+    inputSchemaRef: "schema://jobs/coding-input",
+    outputSchemaRef: "schema://jobs/coding-output",
+    claimTtlSeconds: 1800,
+    retryLimit: 1
+  });
+
+  assert.equal(exact.rewardAmount, 0.07);
+  assert.equal(double.rewardAmount, 0.14);
+});
+
+test("createJob rejects USDC rewards below asset minBalance and rolls back catalog insertion", () => {
+  const service = makePlatformService({
+    config: { supportedAssets: [CANONICAL_USDC_ASSET] }
+  });
+
+  assert.throws(
+    () => service.createJob({
+      id: "usdc-minbalance-low",
+      category: "product_proof",
+      tier: "starter",
+      rewardAmount: 0.069999,
+      rewardAsset: "USDC",
+      verifierMode: "benchmark",
+      verifierTerms: ["complete"],
+      verifierMinimumMatches: 1,
+      inputSchemaRef: "schema://jobs/coding-input",
+      outputSchemaRef: "schema://jobs/coding-output",
+      claimTtlSeconds: 1800,
+      retryLimit: 1
+    }),
+    (error) => {
+      assert.equal(error.code, "invalid_request");
+      assert.match(error.message, /Job reward below asset minBalance/u);
+      assert.equal(error.details.rewardRaw, "69999");
+      assert.equal(error.details.minBalanceRaw, "70000");
+      return true;
+    }
+  );
+  assert.equal(service.listJobs().some((job) => job.id === "usdc-minbalance-low"), false);
+});
+
+test("createSubJob enforces parent delegation budget and count policy", async () => {
+  const service = makePlatformService();
+  service.jobs[0].delegationPolicy = { budgetAmount: 2, budgetAsset: "DOT", maxSubJobs: 1, maxDepth: 1 };
+  const session = await service.claimJob(WALLET, "parent-job-001", "http", "parent-budget-claim");
+
+  await assert.rejects(
+    () => service.createSubJob(session.sessionId, WALLET, {
+      id: "child-too-expensive",
+      category: "review",
+      tier: "starter",
+      rewardAmount: 3,
+      verifierMode: "benchmark",
+      verifierTerms: ["summary"],
+      verifierMinimumMatches: 1,
+      inputSchemaRef: "schema://jobs/review-input",
+      outputSchemaRef: "schema://jobs/pr-review-findings-output",
+      claimTtlSeconds: 1800,
+      retryLimit: 1,
+      requiresSponsoredGas: true
+    }),
+    (err) => err.code === "subjob_budget_exceeded"
+  );
+
+  await service.createSubJob(session.sessionId, WALLET, {
+    id: "child-budget-ok",
+    category: "review",
+    tier: "starter",
+    rewardAmount: 2,
+    verifierMode: "benchmark",
+    verifierTerms: ["summary"],
+    verifierMinimumMatches: 1,
+    inputSchemaRef: "schema://jobs/review-input",
+    outputSchemaRef: "schema://jobs/pr-review-findings-output",
+    claimTtlSeconds: 1800,
+    retryLimit: 1,
+    requiresSponsoredGas: true
+  });
+
+  await assert.rejects(
+    () => service.createSubJob(session.sessionId, WALLET, {
+      id: "child-too-many",
+      category: "review",
+      tier: "starter",
+      rewardAmount: 1,
+      verifierMode: "benchmark",
+      verifierTerms: ["summary"],
+      verifierMinimumMatches: 1,
+      inputSchemaRef: "schema://jobs/review-input",
+      outputSchemaRef: "schema://jobs/pr-review-findings-output",
+      claimTtlSeconds: 1800,
+      retryLimit: 1,
+      requiresSponsoredGas: true
+    }),
+    (err) => err.code === "subjob_count_exceeded"
+  );
+});
+
+test("createSubJob rejects grandchild delegation by default depth policy", async () => {
+  const service = makePlatformService();
+  const session = await service.claimJob(WALLET, "parent-job-001", "http", "parent-depth-claim");
+  const subJob = await service.createSubJob(session.sessionId, WALLET, {
+    id: "depth-child-job",
+    category: "coding",
+    tier: "starter",
+    rewardAmount: 2,
+    verifierMode: "benchmark",
+    verifierTerms: ["summary"],
+    verifierMinimumMatches: 1,
+    inputSchemaRef: "schema://jobs/coding-input",
+    outputSchemaRef: "schema://jobs/coding-output",
+    claimTtlSeconds: 1800,
+    retryLimit: 1,
+    requiresSponsoredGas: true
+  });
+  const childSession = await service.claimJob(WALLET, subJob.id, "http", "child-depth-claim");
+
+  await assert.rejects(
+    () => service.createSubJob(childSession.sessionId, WALLET, {
+      id: "grandchild-blocked",
+      category: "coding",
+      tier: "starter",
+      rewardAmount: 1,
+      verifierMode: "benchmark",
+      verifierTerms: ["summary"],
+      verifierMinimumMatches: 1,
+      inputSchemaRef: "schema://jobs/coding-input",
+      outputSchemaRef: "schema://jobs/coding-output",
+      claimTtlSeconds: 1800,
+      retryLimit: 1,
+      requiresSponsoredGas: true
+    }),
+    (err) => err.code === "subjob_depth_exceeded"
+  );
+});
+
+test("listJobsWithSessions joins active session state onto job rows", async () => {
+  const service = makePlatformService();
+
+  // Before any claim — listJobs and listJobsWithSessions agree.
+  const before = await service.listJobsWithSessions();
+  assert.equal(before.length, 1);
+  assert.equal(before[0].id, "parent-job-001");
+  assert.equal(before[0].claimedBy ?? null, null);
+  assert.equal(before[0].sessionId ?? null, null);
+  assert.equal(before[0].state, "open");
+  assert.equal(before[0].claimState, "open");
+  assert.equal(before[0].claimable, true);
+
+  // After a claim — the row carries claim state read live from the
+  // session store so the public /jobs feed and the operator queue
+  // stop showing the row as "ready / unclaimed" the moment a worker
+  // locks it in.
+  const session = await service.claimJob(WALLET, "parent-job-001", "http", "claim-state-test");
+  const after = await service.listJobsWithSessions();
+  assert.equal(after.length, 1);
+  assert.equal(after[0].id, "parent-job-001");
+  assert.equal(after[0].claimedBy, WALLET);
+  assert.equal(after[0].sessionId, session.sessionId);
+  assert.equal(typeof after[0].state, "string");
+  assert.equal(after[0].state, session.status);
+  assert.equal(after[0].claimState, "claimed");
+  assert.equal(after[0].claimable, false);
+  assert.equal(after[0].currentWalletCanClaim, null);
+  assert.equal(after[0].claimExpiresAt, new Date(Date.parse(session.claimedAt) + 3600 * 1000).toISOString());
+});
+
+test("listJobsWithSessions and definition expose expired claim affordances", async () => {
+  const service = makePlatformService();
+  const session = await service.claimJob(WALLET, "parent-job-001", "http", "expired-claim-test");
+  await service.stateStore.upsertSession({
+    ...session,
+    claimedAt: "2026-05-01T11:18:03.973Z",
+    statusHistory: [
+      {
+        from: null,
+        to: "claimed",
+        reason: "job_claimed",
+        at: "2026-05-01T11:18:03.973Z"
+      }
+    ]
+  });
+
+  const now = new Date("2026-05-01T12:18:04.000Z");
+  const rows = await service.listJobsWithSessions({ wallet: WALLET, now });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].state, "exhausted");
+  assert.equal(rows[0].claimState, "exhausted");
+  assert.equal(rows[0].effectiveState, "exhausted");
+  assert.equal(rows[0].claimable, false);
+  assert.equal(rows[0].currentWalletCanClaim, false);
+  assert.equal(rows[0].reason, "retry_limit_exhausted");
+  assert.equal(rows[0].claimAttemptCount, 1);
+  assert.equal(rows[0].remainingClaimAttempts, 0);
+  assert.equal(rows[0].claimedBy, WALLET);
+  assert.equal(rows[0].claimedAt, "2026-05-01T11:18:03.973Z");
+  assert.equal(rows[0].claimExpiresAt, "2026-05-01T12:18:03.973Z");
+  assert.equal(rows[0].retryLimit, 1);
+  assert.equal(rows[0].sessionId, session.sessionId);
+
+  const stored = await service.resumeSession(session.sessionId);
+  assert.equal(stored.status, "expired");
+  assert.equal(stored.expiredAt, "2026-05-01T12:18:03.973Z");
+
+  const definition = await service.getPublicJobDefinition("parent-job-001", { wallet: WALLET, now });
+  assert.equal(definition.lifecycle.state, "open");
+  assert.equal(definition.claimabilitySource, "claimStatus");
+  assert.match(definition.lifecycleStatusMeaning, /check claimStatus/u);
+  assert.equal(definition.claimState, "exhausted");
+  assert.equal(definition.effectiveState, "exhausted");
+  assert.equal(definition.claimStatus.claimExpiresAt, "2026-05-01T12:18:03.973Z");
+  assert.equal(definition.claimStatus.reason, "retry_limit_exhausted");
+  assert.equal(definition.claimStatus.claimabilitySource, "claimStatus");
+  assert.match(definition.claimStatus.lifecycleStatusMeaning, /check claimStatus/u);
+});
+
+test("preflight uses chain worker claim count for claim economics in blockchain mode", async () => {
+  const blockchainGateway = {
+    isEnabled() {
+      return true;
+    },
+    async getAccountSummary(wallet) {
+      assert.equal(wallet, WALLET);
+      return {
+        wallet,
+        liquid: { DOT: 10 },
+        reserved: {},
+        strategyAllocated: {},
+        collateralLocked: {},
+        jobStakeLocked: {},
+        debtOutstanding: {}
+      };
+    },
+    async getReputation(wallet) {
+      assert.equal(wallet, WALLET);
+      return { skill: 50, reliability: 50, economic: 50 };
+    },
+    async getDefaultClaimStakeBps() {
+      return 500;
+    },
+    async getClaimEconomicsConfig() {
+      return {
+        claimFeeBps: 200,
+        claimFeeVerifierBps: 7000,
+        onboardingWaiverClaimCount: 3,
+        minClaimFeeByAsset: { DOT: 0.05 }
+      };
+    },
+    async getWorkerClaimCount(wallet) {
+      assert.equal(wallet, WALLET);
+      return 3;
+    }
+  };
+  const service = makePlatformService(blockchainGateway);
+
+  const preflight = await service.preflightJob(WALLET, "parent-job-001");
+
+  assert.equal(preflight.claimNumber, 4);
+  assert.equal(preflight.claimEconomicsWaived, false);
+  assert.equal(preflight.claimStake, 0.25);
+  assert.equal(preflight.claimFee, 0.1);
+  assert.equal(preflight.totalClaimLock, 0.35);
+});
+
+test("getAccountPosition delegates to blockchain gateway for chain-authoritative liquidity", async () => {
+  const blockchainGateway = {
+    isEnabled() {
+      return true;
+    },
+    async getAccountPosition(wallet, asset) {
+      assert.equal(wallet, WALLET);
+      assert.equal(asset, "USDC");
+      return {
+        wallet,
+        asset: CANONICAL_USDC_ASSET,
+        source: { contract: "AgentAccountCore", method: "positions", field: "liquid" },
+        position: { liquidRaw: "250000", liquid: 0.25 }
+      };
+    }
+  };
+  const service = makePlatformService(blockchainGateway);
+
+  const position = await service.getAccountPosition(WALLET, "USDC");
+
+  assert.equal(position.position.liquidRaw, "250000");
+  assert.equal(position.source.contract, "AgentAccountCore");
+});
+
+test("validateJobSubmission gives a non-mutating schema-native verdict", async () => {
+  const service = makePlatformService();
+
+  const valid = await service.validateJobSubmission("parent-job-001", {
+    summary: "Parser fixed.",
+    output: "Added regression coverage.",
+    status: "complete"
+  });
+  assert.equal(valid.valid, true);
+  assert.equal(valid.submitSafe, true);
+  assert.equal(valid.schemaRef, "schema://jobs/coding-output");
+  assert.equal(valid.schemaValidates, "payload.submission");
+  assert.equal(valid.validationEndpoint, "POST /jobs/validate-submission");
+  assert.deepEqual(valid.requiredTopLevelKeys, ["summary", "output", "status"]);
+  assert.equal(valid.submissionKind, "structured");
+
+  const invalid = await service.validateJobSubmission("parent-job-001", "complete");
+  assert.equal(invalid.valid, false);
+  assert.equal(invalid.submitSafe, false);
+  assert.equal(invalid.schemaRef, "schema://jobs/coding-output");
+  assert.match(invalid.message, /Schema-native jobs require/u);
+  assert.equal(invalid.path, "payload.submission.summary");
+  assert.deepEqual(invalid.errorPaths, ["payload.submission.summary"]);
+  assert.equal(invalid.details.schemaValidates, "payload.submission");
+});
+
 test("getSessionTimeline includes transitions and verification state", async () => {
   const service = makePlatformService();
   const session = await service.claimJob(WALLET, "parent-job-001", "http", "timeline-claim");
-  const submitted = await service.submitWork(session.sessionId, "http", "complete");
+  const submitted = await service.submitWork(session.sessionId, "http", {
+    summary: "Timeline run complete.",
+    output: "complete verified output",
+    status: "complete"
+  });
   await service.ingestVerification(submitted.sessionId, {
     jobId: submitted.jobId,
     handler: "benchmark",
@@ -92,21 +593,255 @@ test("getSessionTimeline includes transitions and verification state", async () 
     outcome: "approved",
     reasonCode: "BENCHMARK_THRESHOLD_MET"
   });
+  const result = await service.stateStore.getVerificationResult(submitted.sessionId);
+  await assert.rejects(
+    () => service.ingestVerification(submitted.sessionId, {
+      jobId: submitted.jobId,
+      handler: "benchmark",
+      handlerVersion: 1,
+      outcome: "rejected",
+      reasonCode: "LATE_REJECT"
+    }),
+    (error) => {
+      assert.equal(error.code, "invalid_session_transition");
+      assert.equal(error.details.currentStatus, "resolved");
+      assert.equal(error.details.terminal, true);
+      return true;
+    }
+  );
+  const stillResolved = await service.stateStore.getSession(submitted.sessionId);
+  assert.equal(stillResolved.verificationSummary.reasonCode, "BENCHMARK_THRESHOLD_MET");
 
   const timeline = await service.getSessionTimeline(submitted.sessionId);
   assert.equal(timeline.timelineVersion, "v2");
   assert.equal(timeline.session.status, "resolved");
+  assert.equal(result.verifierPolicyVersion, 1);
+  assert.equal(result.verifierConfigVersion, 1);
+  assert.equal(result.verificationContract.version, "verification-contract-v1");
+  assert.equal(result.verificationContract.handler, "benchmark");
+  assert.equal(result.verificationContract.verifierPolicyVersion, 1);
+  assert.equal(result.verificationInput.kind, "structured");
+  assert.equal(typeof result.verifierConfigHash, "string");
+  assert.equal(typeof result.verificationInputHash, "string");
   assert.equal(timeline.lifecycle.currentPhase, "terminal");
   assert.equal(timeline.stateMachine.timelineVersion, "v2");
   assert.ok(Array.isArray(timeline.stateMachine.statuses));
   assert.ok(Array.isArray(timeline.lineage.childJobIds));
+  assert.equal(timeline.lineage.subJobBudget.asset, "DOT");
+  assert.equal(timeline.lineage.subJobPolicy.maxDepth, 1);
   assert.ok(timeline.timeline.some((entry) => entry.type === "session_transition"));
   assert.ok(timeline.timeline.some((entry) => entry.type === "verification"));
   assert.ok(timeline.timeline.every((entry) => entry.correlationId === submitted.sessionId));
+  assert.ok(timeline.timeline.every((entry) => entry.timestamp === entry.at));
+  assert.ok(timeline.timeline.every((entry) => entry.source && entry.topic && entry.severity));
+  assert.ok(timeline.timeline.every((entry) => entry.sessionId === submitted.sessionId || entry.type === "child_job"));
+  const submittedTransition = timeline.timeline.find((entry) => entry.type === "session_transition" && entry.data.to === "submitted");
+  assert.equal(submittedTransition.topic, "session.transition");
+  assert.equal(submittedTransition.source, "state");
+  assert.equal(submittedTransition.jobId, submitted.jobId);
+  assert.equal(submittedTransition.sessionId, submitted.sessionId);
+  const verificationEvent = timeline.timeline.find((entry) => entry.type === "verification");
+  assert.equal(verificationEvent.topic, "session.verification");
+  assert.equal(verificationEvent.source, "verification");
+  assert.equal(verificationEvent.data.handlerVersion, 1);
+  assert.equal(verificationEvent.data.verifierPolicyVersion, 1);
+  assert.equal(verificationEvent.data.verifierConfigVersion, 1);
+});
+
+test("getJobTimeline stitches sessions, verification, events, and child lineage", async () => {
+  const eventBus = new EventBus();
+  const service = makePlatformService(undefined, eventBus);
+  const session = await service.claimJob(WALLET, "parent-job-001", "http", "job-timeline-claim");
+  const subJob = await service.createSubJob(session.sessionId, WALLET, {
+    id: "timeline-child-job-001",
+    category: "review",
+    tier: "starter",
+    rewardAmount: 2,
+    verifierMode: "benchmark",
+    verifierTerms: ["summary"],
+    verifierMinimumMatches: 1,
+    inputSchemaRef: "schema://jobs/review-input",
+    outputSchemaRef: "schema://jobs/pr-review-findings-output",
+    claimTtlSeconds: 1800,
+    retryLimit: 1,
+    requiresSponsoredGas: true
+  });
+  const submitted = await service.submitWork(session.sessionId, "http", {
+    summary: "Timeline run complete.",
+    output: "complete verified output",
+    status: "complete"
+  });
+  await service.ingestVerification(submitted.sessionId, {
+    jobId: submitted.jobId,
+    handler: "benchmark",
+    handlerVersion: 1,
+    outcome: "approved",
+    reasonCode: "BENCHMARK_THRESHOLD_MET"
+  });
+  eventBus.publish({
+    id: "chain-funded-parent-job-001",
+    topic: "escrow.job_funded",
+    jobId: "parent-job-001",
+    blockNumber: 123,
+    txHash: "0xabc",
+    timestamp: "2026-01-01T00:00:00.000Z",
+    data: {
+      amount: "2",
+      asset: "DOT"
+    }
+  });
+
+  const timeline = await service.getJobTimeline("parent-job-001", { wallet: WALLET });
+  assert.equal(timeline.timelineVersion, "v2");
+  assert.equal(timeline.job.id, "parent-job-001");
+  assert.equal(timeline.job.claimState, "exhausted");
+  assert.equal(timeline.summary.sessionCount, 1);
+  assert.equal(timeline.summary.childJobCount, 1);
+  assert.deepEqual(timeline.lineage.sessionIds, [submitted.sessionId]);
+  assert.deepEqual(timeline.lineage.childJobIds, [subJob.id]);
+  assert.ok(timeline.timeline.some((entry) => entry.type === "job_state"));
+  assert.ok(timeline.timeline.some((entry) => entry.type === "session_transition" && entry.data.to === "submitted"));
+  assert.ok(timeline.timeline.some((entry) => entry.type === "verification"));
+  assert.ok(timeline.timeline.some((entry) => entry.type === "child_job"));
+  assert.ok(timeline.timeline.some((entry) => entry.type === "event_bus" && entry.data.topic === "session.claimed"));
+  assert.ok(timeline.timeline.every((entry) => entry.timestamp === entry.at));
+  assert.ok(timeline.timeline.every((entry) => entry.source && entry.topic && entry.severity));
+  const jobState = timeline.timeline.find((entry) => entry.type === "job_state");
+  assert.equal(jobState.topic, "job.state");
+  assert.equal(jobState.source, "state");
+  assert.equal(jobState.jobId, "parent-job-001");
+  const childJob = timeline.timeline.find((entry) => entry.type === "child_job");
+  assert.equal(childJob.topic, "job.child_created");
+  assert.equal(childJob.source, "lineage");
+  assert.equal(childJob.jobId, subJob.id);
+  const claimedEvent = timeline.timeline.find((entry) => entry.type === "event_bus" && entry.topic === "session.claimed");
+  assert.equal(claimedEvent.source, "state");
+  assert.equal(claimedEvent.jobId, "parent-job-001");
+  assert.equal(claimedEvent.sessionId, submitted.sessionId);
+  const claimFundingEvent = timeline.timeline.find((entry) => entry.topic === "funding.claim_lock_recorded");
+  assert.equal(claimFundingEvent.type, "event_bus");
+  assert.equal(claimFundingEvent.source, "settlement");
+  assert.equal(claimFundingEvent.phase, "funding");
+  assert.equal(claimFundingEvent.correlationId, submitted.sessionId);
+  assert.equal(claimFundingEvent.data.source, "local_claim_lock");
+  assert.equal(claimFundingEvent.data.asset, "DOT");
+  assert.equal(claimFundingEvent.data.totalClaimLock, 0);
+  assert.equal(claimFundingEvent.data.claimEconomicsWaived, true);
+  const settlementEvent = timeline.timeline.find((entry) => entry.topic === "settlement.session_resolved");
+  assert.equal(settlementEvent.type, "event_bus");
+  assert.equal(settlementEvent.source, "settlement");
+  assert.equal(settlementEvent.phase, "settlement");
+  assert.equal(settlementEvent.correlationId, submitted.sessionId);
+  assert.equal(settlementEvent.data.status, "resolved");
+  assert.equal(settlementEvent.data.reasonCode, "BENCHMARK_THRESHOLD_MET");
+  const fundedEvent = timeline.timeline.find((entry) => entry.topic === "escrow.job_funded");
+  assert.equal(fundedEvent.type, "event_bus");
+  assert.equal(fundedEvent.source, "chain");
+  assert.equal(fundedEvent.phase, "funding");
+  assert.equal(fundedEvent.severity, "info");
+  assert.equal(fundedEvent.correlationId, "parent-job-001");
+  assert.equal(fundedEvent.data.txHash, "0xabc");
+});
+
+test("getJobTimeline folds disputed verification into the canonical dispute trace", async () => {
+  const eventBus = new EventBus();
+  const service = makePlatformService(undefined, eventBus);
+  const session = await service.claimJob(WALLET, "parent-job-001", "http", "job-timeline-dispute-claim");
+  const submitted = await service.submitWork(session.sessionId, "http", {
+    summary: "Timeline run needs review.",
+    output: "Human fallback requested.",
+    status: "complete"
+  });
+  await service.ingestVerification(submitted.sessionId, {
+    jobId: submitted.jobId,
+    handler: "benchmark",
+    handlerVersion: 1,
+    outcome: "disputed",
+    reasonCode: "HUMAN_REVIEW_REQUIRED"
+  });
+
+  const timeline = await service.getJobTimeline("parent-job-001", {
+    wallet: WALLET,
+    phases: ["dispute"],
+    limit: 25
+  });
+  const disputeEvent = timeline.timeline.find((entry) => entry.topic === "dispute.opened");
+  assert.equal(disputeEvent.type, "event_bus");
+  assert.equal(disputeEvent.source, "settlement");
+  assert.equal(disputeEvent.phase, "dispute");
+  assert.equal(disputeEvent.severity, "warn");
+  assert.equal(disputeEvent.jobId, submitted.jobId);
+  assert.equal(disputeEvent.sessionId, submitted.sessionId);
+  assert.equal(disputeEvent.correlationId, submitted.sessionId);
+  assert.match(disputeEvent.data.disputeId, /^dispute-[a-f0-9]{12}$/u);
+  assert.equal(disputeEvent.data.reasonCode, "HUMAN_REVIEW_REQUIRED");
+  assert.deepEqual(timeline.summary.eventFilters.phases, ["dispute"]);
+});
+
+test("getJobTimeline reads durable event log and applies event filters", async () => {
+  const stateStore = new MemoryStateStore();
+  const writerBus = new EventBus({ bufferSize: 1, eventStore: stateStore });
+  writerBus.publish({
+    id: "durable-chain-funded",
+    topic: "escrow.job_funded",
+    jobId: "parent-job-001",
+    wallet: WALLET,
+    timestamp: "2026-01-01T00:00:00.000Z"
+  });
+  writerBus.publish({
+    id: "durable-settlement",
+    topic: "xcm.settlement_succeeded",
+    jobId: "parent-job-001",
+    wallet: WALLET,
+    correlationId: "settlement-correlation-1",
+    timestamp: "2026-01-01T00:00:01.000Z"
+  });
+  writerBus.publish({
+    id: "durable-other-wallet",
+    topic: "escrow.job_funded",
+    jobId: "parent-job-001",
+    wallet: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    timestamp: "2026-01-01T00:00:02.000Z"
+  });
+  await writerBus.flush();
+
+  const readerBus = new EventBus({ bufferSize: 1, eventStore: stateStore });
+  const service = makePlatformService(undefined, readerBus, stateStore);
+
+  const chainTimeline = await service.getJobTimeline("parent-job-001", {
+    wallet: WALLET,
+    sources: ["chain"],
+    limit: 10
+  });
+  assert.ok(chainTimeline.timeline.some((entry) => entry.id === "durable-chain-funded"));
+  assert.ok(!chainTimeline.timeline.some((entry) => entry.id === "durable-settlement"));
+  assert.deepEqual(chainTimeline.summary.eventFilters.sources, ["chain"]);
+
+  const correlationTimeline = await service.getJobTimeline("parent-job-001", {
+    wallet: WALLET,
+    correlationId: "settlement-correlation-1",
+    limit: 10
+  });
+  assert.ok(correlationTimeline.timeline.some((entry) => entry.id === "durable-settlement"));
+  assert.ok(!correlationTimeline.timeline.some((entry) => entry.id === "durable-chain-funded"));
+  assert.equal(correlationTimeline.summary.eventFilters.correlationId, "settlement-correlation-1");
+
+  const walletTimeline = await service.getJobTimeline("parent-job-001", {
+    wallet: WALLET,
+    eventWallet: WALLET,
+    limit: 10
+  });
+  assert.ok(walletTimeline.timeline.some((entry) => entry.id === "durable-chain-funded"));
+  assert.ok(!walletTimeline.timeline.some((entry) => entry.id === "durable-other-wallet"));
+  assert.equal(walletTimeline.summary.eventFilters.wallet, WALLET);
 });
 
 test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
   const service = makePlatformService();
+  service.updateJobLifecycle("parent-job-001", {
+    action: "pause",
+    reason: "operator hold"
+  });
   service.recurringScheduler = {
     getStatus() {
       return {
@@ -133,7 +868,320 @@ test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
   });
 
   assert.equal(status.auth.wallet, WALLET);
+  assert.equal(status.authPolicy.version, "auth-policy-v1");
+  assert.ok(status.authPolicy.roles.admin.includes("admin:status"));
+  assert.deepEqual(status.authPolicy.routes["/admin/status"], ["admin:status", "ops:view"]);
+  assert.deepEqual(status.authPolicy.uiControls["admin.status.view"], ["admin:status", "ops:view"]);
   assert.ok(status.anomalies.some((entry) => entry.code === "recurring_attention"));
+  assert.equal(status.hostDiagnostics.mutates, false);
+  assert.ok(["ok", "ok_with_notes", "attention", "critical"].includes(status.hostDiagnostics.health));
+  assert.equal(status.hostDiagnostics.process.pid, process.pid);
+  assert.equal(status.jobLifecycle.total, 1);
+  assert.equal(status.jobLifecycle.paused, 1);
+  assert.equal(status.jobLifecycle.claimable, 0);
+  assert.equal(status.jobStaleSweeper.enabled, false);
+});
+
+test("getAdminStatus reports treasury policy failures without failing the status response", async () => {
+  const service = makePlatformService({
+    config: {
+      treasuryPolicyAddress: "0x1111111111111111111111111111111111111111"
+    },
+    isEnabled() {
+      return true;
+    },
+    async getTreasuryPolicyStatus() {
+      const error = new Error("getTreasuryPolicyStatus failed: require(false)");
+      error.code = "blockchain_revert";
+      error.details = {
+        operation: "getTreasuryPolicyStatus",
+        rawCode: "CALL_EXCEPTION",
+        rawReason: "require(false)"
+      };
+      throw error;
+    }
+  });
+
+  const status = await service.getAdminStatus();
+
+  assert.equal(status.maintenance.policy.enabled, true);
+  assert.equal(status.maintenance.policy.policyAddress, "0x1111111111111111111111111111111111111111");
+  assert.equal(status.maintenance.policy.roles.agentAccountIsServiceOperator, false);
+  assert.equal(status.maintenance.policy.error.code, "blockchain_revert");
+  assert.equal(status.maintenance.policy.error.details.rawReason, "require(false)");
+  assert.ok(status.anomalies.some((entry) => entry.code === "policy_status_unavailable"));
+  assert.equal(status.jobStaleSweeper.enabled, false);
+});
+
+test("getAdminStatus surfaces public source ingestion scheduler status", async () => {
+  const service = makePlatformService();
+  service.githubIssueIngestionScheduler = {
+    getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        dryRun: true,
+        intervalMs: 900000,
+        queryCount: 2,
+        maxJobsPerRun: 2,
+        maxJobsPerQuery: 2,
+        maxOpenJobs: 12,
+        currentOpenJobs: 3,
+        lastRun: {
+          startedAt: "2026-04-27T08:00:00.000Z",
+          finishedAt: "2026-04-27T08:00:02.000Z",
+          candidateCount: 4,
+          createdCount: 1,
+          errors: [],
+          queries: [
+            {
+              query: "repo:averray-agent/agent label:good-first-issue",
+              skipped: [{ id: "github-1", reason: "source_already_ingested" }]
+            }
+          ]
+        }
+      };
+    }
+  };
+  service.wikipediaMaintenanceIngestionScheduler = {
+    getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        dryRun: true,
+        intervalMs: 1800000,
+        language: "en",
+        categoryCount: 1,
+        maxJobsPerRun: 2,
+        maxOpenJobs: 10,
+        currentOpenJobs: 0,
+        minClaimableJobs: 2,
+        currentClaimableJobs: 0,
+        lastRun: { candidateCount: 0, createdCount: 0, skipped: [{ reason: "no_candidates" }], errors: [] }
+      };
+    }
+  };
+  service.osvAdvisoryIngestionScheduler = {
+    getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        dryRun: true,
+        intervalMs: 3600000,
+        packageCount: 0,
+        manifestCount: 1,
+        targetCount: 1,
+        maxJobsPerRun: 2,
+        maxOpenJobs: 20,
+        currentOpenJobs: 2,
+        lastRun: { candidateCount: 2, createdCount: 0, skipped: [], errors: [] }
+      };
+    }
+  };
+  service.openDataIngestionScheduler = {
+    getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        dryRun: false,
+        intervalMs: 3600000,
+        query: "res_format:CSV",
+        queryCount: 7,
+        nextQuery: "transport",
+        datasetCount: 0,
+        targetCount: 3,
+        maxJobsPerRun: 2,
+        maxOpenJobs: 20,
+        currentOpenJobs: 4,
+        lastRun: {
+          candidateCount: 2,
+          createdCount: 1,
+          skipped: [
+            { datasetId: "abc", resourceId: "abc-1", reason: "dataset_already_ingested" }
+          ],
+          errors: []
+        }
+      };
+    }
+  };
+  service.standardsSpecIngestionScheduler = {
+    getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        dryRun: true,
+        intervalMs: 3600000,
+        specCount: 2,
+        maxJobsPerRun: 2,
+        maxOpenJobs: 20,
+        currentOpenJobs: 1,
+        lastRun: { candidateCount: 1, createdCount: 1, skipped: [], errors: [] }
+      };
+    }
+  };
+  service.openApiSpecIngestionScheduler = {
+    getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        dryRun: true,
+        intervalMs: 3600000,
+        specCount: 1,
+        maxJobsPerRun: 2,
+        maxOpenJobs: 20,
+        currentOpenJobs: 1,
+        lastRun: { candidateCount: 1, createdCount: 1, skipped: [], errors: [{ message: "temporary upstream failure" }] }
+      };
+    }
+  };
+  service.jobStaleSweeper = {
+    getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        dryRun: false,
+        mode: "live",
+        intervalMs: 3600000,
+        action: "archive",
+        maxJobsPerRun: 25,
+        lastRun: {
+          candidateCount: 3,
+          updatedCount: 2,
+          skipped: [{ id: "active", reason: "active_session" }],
+          errors: []
+        }
+      };
+    }
+  };
+  service.bootstrapSelfReportScheduler = {
+    getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        intervalMs: 604800000,
+        from: "Averray <ops@example.com>",
+        to: ["pascal@example.com"],
+        recipientCount: 1,
+        providerConfigured: true,
+        nextRunAt: "2026-05-08T00:00:00.000Z",
+        lastAttemptedAt: "2026-05-08T00:00:00.000Z",
+        lastSuccessfulAt: "2026-05-08T00:00:00.000Z",
+        lastFailureReason: undefined,
+        lastRun: { status: "sent", email: { providerId: "email_123" } }
+      };
+    }
+  };
+
+  const status = await service.getAdminStatus();
+  assert.equal(status.osvIngestion.packageCount, 0);
+  assert.equal(status.osvIngestion.manifestCount, 1);
+  assert.equal(status.osvIngestion.targetCount, 1);
+  assert.equal(status.openDataIngestion.query, "res_format:CSV");
+  assert.equal(status.openDataIngestion.lastRun.createdCount, 1);
+  assert.equal(status.standardsIngestion.specCount, 2);
+  assert.equal(status.openApiIngestion.specCount, 1);
+  assert.equal(status.providerOperations.github.label, "GitHub issues");
+  assert.equal(status.providerOperations.github.mode, "dry_run");
+  assert.equal(status.providerOperations.github.currentOpenJobs, 3);
+  assert.equal(status.providerOperations.github.maxJobsPerQuery, 2);
+  assert.equal(status.providerOperations.github.lastRun.createdCount, 1);
+  assert.equal(status.providerOperations.github.lastRun.skippedCount, 1);
+  assert.equal(status.providerOperations.github.lastRun.skipped[0].reason, "source_already_ingested");
+  assert.equal(status.providerOperations.wikipedia.minClaimableJobs, 2);
+  assert.equal(status.providerOperations.wikipedia.currentClaimableJobs, 0);
+  assert.equal(status.providerOperations.osv.targetCount, 1);
+  assert.equal(status.providerOperations.openData.mode, "live");
+  assert.equal(status.providerOperations.openData.health, "healthy");
+  assert.equal(status.providerOperations.openData.targetCount, 3);
+  // Open data rotates a query pool that's distinct from the dataset
+  // target list — both signals reach the operator UI.
+  assert.equal(status.providerOperations.openData.queryCount, 7);
+  assert.equal(status.providerOperations.openData.nextQuery, "transport");
+  assert.equal(status.providerOperations.openData.lastRun.summary, "2 candidate(s), 1 created, 1 skipped, 0 error(s)");
+  assert.equal(status.providerOperations.openData.lastRun.skipped[0].reason, "dataset_already_ingested");
+  // github's queryCount IS its targetCount — don't duplicate the
+  // field at the top level.
+  assert.equal(status.providerOperations.github.queryCount, undefined);
+  assert.equal(status.providerOperations.github.nextQuery, undefined);
+  assert.equal(status.providerOperations.openApi.health, "error");
+  assert.equal(status.providerOperations.openApi.lastRun.errorCount, 1);
+  assert.equal(status.jobStaleSweeper.mode, "live");
+  assert.equal(status.jobStaleSweeper.lastRun.updatedCount, 2);
+  assert.equal(status.bootstrapSelfReport.providerConfigured, true);
+  assert.equal(status.bootstrapSelfReport.from, "Averray <ops@example.com>");
+  assert.deepEqual(status.bootstrapSelfReport.to, ["pascal@example.com"]);
+  assert.equal(status.bootstrapSelfReport.lastAttemptedAt, "2026-05-08T00:00:00.000Z");
+  assert.equal(status.bootstrapSelfReport.lastSuccessfulAt, "2026-05-08T00:00:00.000Z");
+  assert.equal(status.bootstrapSelfReport.lastRun.email.providerId, "email_123");
+
+  // Public sanitized counterpart preserves health / mode / counts but
+  // strips lastRun.skipped[] and lastRun.errors[] (which can carry
+  // candidate URLs, query strings, stack traces, internal IDs).
+  const publicStatus = await service.getPublicProviderOperations();
+  assert.deepEqual(Object.keys(publicStatus), ["providerOperations"]);
+  // Same six providers as the admin payload.
+  assert.deepEqual(
+    Object.keys(publicStatus.providerOperations).sort(),
+    ["github", "openApi", "openData", "osv", "standards", "wikipedia"]
+  );
+  // Health, mode, counts, and human-readable summary survive…
+  assert.equal(publicStatus.providerOperations.github.mode, "dry_run");
+  assert.equal(publicStatus.providerOperations.github.currentOpenJobs, 3);
+  assert.equal(publicStatus.providerOperations.wikipedia.minClaimableJobs, 2);
+  assert.equal(publicStatus.providerOperations.wikipedia.currentClaimableJobs, 0);
+  assert.equal(publicStatus.providerOperations.github.lastRun.skippedCount, 1);
+  assert.equal(publicStatus.providerOperations.openApi.health, "error");
+  assert.equal(publicStatus.providerOperations.openApi.lastRun.errorCount, 1);
+  // …but the arrays themselves are emptied.
+  assert.deepEqual(publicStatus.providerOperations.github.lastRun.skipped, []);
+  assert.deepEqual(publicStatus.providerOperations.github.lastRun.errors, []);
+  assert.deepEqual(publicStatus.providerOperations.openApi.lastRun.skipped, []);
+  assert.deepEqual(publicStatus.providerOperations.openApi.lastRun.errors, []);
+  // No leakage of any admin-only top-level fields (auth, recurring,
+  // anomalies, recentSessions, etc.) — only providerOperations.
+  assert.equal(publicStatus.auth, undefined);
+  assert.equal(publicStatus.anomalies, undefined);
+  assert.equal(publicStatus.recurring, undefined);
+});
+
+test("runBootstrapSelfReport delegates to the configured scheduler", async () => {
+  const service = makePlatformService();
+  const attemptedAt = "2026-05-15T06:00:00.000Z";
+  let calledWith;
+  service.bootstrapSelfReportScheduler = {
+    async runOnce(now) {
+      calledWith = now;
+      return {
+        status: "sent",
+        email: { providerId: "email_live_123" }
+      };
+    },
+    async getStatus() {
+      return {
+        enabled: true,
+        running: true,
+        lastAttemptedAt: attemptedAt,
+        lastSuccessfulAt: attemptedAt,
+        lastRun: { status: "sent", email: { providerId: "email_live_123" } }
+      };
+    }
+  };
+
+  const result = await service.runBootstrapSelfReport({ now: new Date(attemptedAt) });
+
+  assert.equal(calledWith.toISOString(), attemptedAt);
+  assert.equal(result.ok, true);
+  assert.equal(result.result.status, "sent");
+  assert.equal(result.bootstrapSelfReport.lastSuccessfulAt, attemptedAt);
+});
+
+test("runBootstrapSelfReport fails closed without a scheduler", async () => {
+  const service = makePlatformService();
+
+  await assert.rejects(
+    () => service.runBootstrapSelfReport(),
+    /Bootstrap self-report scheduler is not initialised/u
+  );
 });
 
 test("finalizeXcmRequest records async treasury settlement when the request is strategy-backed", async () => {
@@ -175,6 +1223,66 @@ test("finalizeXcmRequest records async treasury settlement when the request is s
   assert.equal(account.treasuryTimeline[0].type, "allocate");
 });
 
+test("finalizeXcmRequest reconciles local treasury state for already-settled replays", async () => {
+  const gateway = {
+    isEnabled: () => true,
+    getAccountSummary: async (wallet) => ({
+      wallet,
+      liquid: { DOT: 10 },
+      reserved: {},
+      strategyAllocated: {},
+      collateralLocked: {},
+      jobStakeLocked: {},
+      debtOutstanding: {}
+    }),
+    finalizeXcmRequest: async () => ({
+      requestId: "0xrequest",
+      alreadySettled: true,
+      strategyRequest: {
+        account: WALLET,
+        strategyId: "0xstrategy",
+        assetSymbol: "DOT",
+        kindLabel: "deposit",
+        statusLabel: "succeeded",
+        requestedAssets: 5,
+        settledAssets: 5
+      }
+    })
+  };
+  const service = makePlatformService(gateway);
+  const pending = await service.getAccountSummary(WALLET);
+  pending.strategyPending["0xstrategy"] = {
+    asset: "DOT",
+    pendingDepositAssets: 5,
+    pendingDepositRequestIds: ["0xrequest"],
+    pendingWithdrawalShares: 0
+  };
+  service.accounts.set(WALLET, pending);
+
+  const finalized = await service.finalizeXcmRequest("0xrequest", {
+    status: "succeeded",
+    settledAssets: 5,
+    settledShares: 5
+  });
+  const account = await service.getAccountSummary(WALLET);
+
+  assert.equal(finalized.alreadySettled, true);
+  assert.equal(account.strategyAccounting["0xstrategy"].principal, 5);
+  assert.equal(account.strategyPending["0xstrategy"].pendingDepositAssets, 0);
+  assert.deepEqual(account.strategyPending["0xstrategy"].settledRequestIds, ["0xrequest"]);
+  assert.equal(account.treasuryTimeline.filter((event) => event.type === "allocate").length, 1);
+
+  await service.finalizeXcmRequest("0xrequest", {
+    status: "succeeded",
+    settledAssets: 5,
+    settledShares: 5
+  });
+  const replayed = await service.getAccountSummary(WALLET);
+
+  assert.equal(replayed.strategyAccounting["0xstrategy"].principal, 5);
+  assert.equal(replayed.treasuryTimeline.filter((event) => event.type === "allocate").length, 1);
+});
+
 test("getAdminStatus surfaces XCM observation relay status", async () => {
   const service = makePlatformService();
   service.xcmObservationRelay = {
@@ -196,4 +1304,176 @@ test("getAdminStatus surfaces XCM observation relay status", async () => {
   const status = await service.getAdminStatus();
   assert.equal(status.xcmObservationRelay.enabled, true);
   assert.equal(status.xcmObservationRelay.cursor, "cursor-1");
+});
+
+test("getAdminStatus reports XCM status read failures without failing the response", async () => {
+  const service = makePlatformService();
+  service.xcmSettlementWatcher = {
+    enabled: true,
+    running: true,
+    async getStatus() {
+      const error = new Error("redis unavailable");
+      error.code = "state_store_unavailable";
+      throw error;
+    }
+  };
+  service.xcmObservationRelay = {
+    enabled: true,
+    running: true,
+    syncing: true,
+    feedUrl: "https://observer.example/outcomes",
+    batchSize: 25,
+    pollIntervalMs: 30_000,
+    async getStatus() {
+      throw new Error("observer cursor read failed");
+    }
+  };
+
+  const status = await service.getAdminStatus();
+
+  assert.equal(status.xcmSettlementWatcher.enabled, true);
+  assert.equal(status.xcmSettlementWatcher.running, true);
+  assert.equal(status.xcmSettlementWatcher.pendingCount, 0);
+  assert.equal(status.xcmSettlementWatcher.error.code, "state_store_unavailable");
+  assert.equal(status.xcmObservationRelay.enabled, true);
+  assert.equal(status.xcmObservationRelay.running, true);
+  assert.equal(status.xcmObservationRelay.syncing, true);
+  assert.equal(status.xcmObservationRelay.feedUrl, "https://observer.example/outcomes");
+  assert.equal(status.xcmObservationRelay.error.code, "xcm_observation_relay_status_error");
+  assert.ok(status.anomalies.some((entry) => entry.code === "xcm_settlement_watcher_status_unavailable"));
+  assert.ok(status.anomalies.some((entry) => entry.code === "xcm_observation_relay_status_unavailable"));
+});
+
+test("getGithubOperatorStatus exposes the read-only GitHub helper", async () => {
+  const service = makePlatformService();
+  const status = await service.getGithubOperatorStatus({
+    repos: "",
+    view: "prs",
+    fetchImpl: async () => {
+      throw new Error("fetch should not be called when no repos are configured");
+    }
+  });
+
+  assert.equal(status.mutates, false);
+  assert.equal(status.configured, false);
+  assert.equal(status.selectedView.name, "prs");
+  assert.equal(status.digest.pullRequestsNeedingAttention.length, 0);
+});
+
+const INGEST_JOB_INPUT = {
+  id: "open-data-job-001",
+  category: "coding",
+  tier: "starter",
+  rewardAmount: 2,
+  rewardAsset: "DOT",
+  verifierMode: "benchmark",
+  verifierTerms: ["complete"],
+  verifierMinimumMatches: 1,
+  source: { type: "open_data_dataset" }
+};
+
+function makePrefundGateway(ensureJob) {
+  const calls = [];
+  return {
+    calls,
+    isEnabled: () => true,
+    ensureJob: async (job, instanceJobId, claimStake) => {
+      calls.push({ jobId: instanceJobId, claimStake });
+      return ensureJob(job, instanceJobId, claimStake);
+    }
+  };
+}
+
+test("createIngestedJob does not prefund when the flag is off (no funding stamp)", async () => {
+  const gateway = makePrefundGateway(async () => ({ state: 1 }));
+  const service = makePlatformService(gateway);
+  // prefundIngestedJobs defaults to false
+  const created = await service.createIngestedJob(INGEST_JOB_INPUT);
+  assert.equal(created.funding, undefined);
+  assert.equal(gateway.calls.length, 0);
+});
+
+test("createIngestedJob does not prefund when the gateway is disabled", async () => {
+  const gateway = { isEnabled: () => false, calls: [], ensureJob: async () => { gateway.calls.push(1); } };
+  const service = makePlatformService(gateway);
+  service.prefundIngestedJobs = true;
+  const created = await service.createIngestedJob(INGEST_JOB_INPUT);
+  assert.equal(created.funding, undefined);
+  assert.equal(gateway.calls.length, 0);
+});
+
+test("createIngestedJob escrows the reward and stamps funded on success", async () => {
+  const bus = new EventBus();
+  const gateway = makePrefundGateway(async () => ({ state: 1 }));
+  const service = makePlatformService(gateway, bus);
+  service.prefundIngestedJobs = true;
+
+  const created = await service.createIngestedJob(INGEST_JOB_INPUT);
+
+  assert.equal(gateway.calls.length, 1);
+  assert.equal(gateway.calls[0].claimStake, 0); // worker funds their own stake
+  assert.equal(created.funding.source, "ingestion_prefund");
+  assert.equal(created.funding.state, "funded");
+  assert.equal(created.funding.asset, "DOT");
+  assert.equal(created.funding.amount, 2);
+  assert.ok(created.funding.fundedAt);
+  // Must NOT carry recurring-reserve keys, or gateway.usesRecurringTemplateReserve misfires.
+  assert.equal("wallet" in created.funding, false);
+  assert.equal("templateId" in created.funding, false);
+  // The stamp is persisted on the catalog job and surfaces through discovery.
+  const claimable = await service.attachClaimState(created, {});
+  assert.equal(claimable.claimable, true);
+  assert.equal(claimable.fundingState, "funded");
+  const events = bus.replay({}, undefined).events;
+  assert.ok(events.some((event) => event.topic === "funding.ingestion_prefund_funded"));
+});
+
+test("createIngestedJob keeps the job and stamps pending on insufficient liquidity", async () => {
+  const bus = new EventBus();
+  const gateway = makePrefundGateway(async () => {
+    throw new InsufficientLiquidityError("DOT", { operation: "ensureJob" });
+  });
+  const service = makePlatformService(gateway, bus);
+  service.prefundIngestedJobs = true;
+
+  // Resolves (never rejects) so the ingest run is not aborted.
+  const created = await service.createIngestedJob(INGEST_JOB_INPUT);
+
+  assert.equal(created.funding.state, "pending");
+  assert.equal(created.funding.reason, "insufficient_liquidity");
+  assert.ok(created.funding.attemptedAt);
+  // Job is still in the catalog, discoverable but NOT claimable.
+  const fetched = service.getJobDefinition("open-data-job-001");
+  assert.equal(fetched.id, "open-data-job-001");
+  const claimable = await service.attachClaimState(fetched, { wallet: WALLET });
+  assert.equal(claimable.claimable, false);
+  assert.equal(claimable.currentWalletCanClaim, false);
+  assert.equal(claimable.reason, "reward_funding_pending");
+  assert.equal(claimable.fundingState, "pending");
+  const events = bus.replay({}, undefined).events;
+  assert.ok(events.some((event) => event.topic === "funding.ingestion_prefund_pending"));
+});
+
+test("createIngestedJob stamps pending on an unexpected gateway error and never aborts", async () => {
+  const gateway = makePrefundGateway(async () => {
+    throw new Error("RPC timeout");
+  });
+  const service = makePlatformService(gateway);
+  service.prefundIngestedJobs = true;
+
+  const created = await service.createIngestedJob(INGEST_JOB_INPUT);
+  assert.equal(created.funding.state, "pending");
+  assert.equal(created.funding.reason, "prefund_failed");
+});
+
+test("createIngestedJob propagates creation errors and does not attempt prefund", async () => {
+  const gateway = makePrefundGateway(async () => ({ state: 1 }));
+  const service = makePlatformService(gateway);
+  service.prefundIngestedJobs = true;
+
+  await service.createIngestedJob(INGEST_JOB_INPUT);
+  assert.equal(gateway.calls.length, 1);
+  // Duplicate id must reject from createJob before any second prefund attempt.
+  await assert.rejects(() => service.createIngestedJob(INGEST_JOB_INPUT));
+  assert.equal(gateway.calls.length, 1);
 });

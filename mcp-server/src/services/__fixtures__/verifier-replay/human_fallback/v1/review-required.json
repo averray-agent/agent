@@ -1,0 +1,25 @@
+{
+  "handler": "human_fallback",
+  "handlerVersion": 1,
+  "evidenceSchemaRef": "schema://jobs/human-review-output",
+  "job": {
+    "id": "human-review-001",
+    "verifierMode": "human_fallback",
+    "outputSchemaRef": "schema://jobs/human-review-output",
+    "verification": {
+      "policyVersion": 1
+    },
+    "verifierConfig": {
+      "version": 1,
+      "handler": "human_fallback",
+      "autoApprove": false,
+      "escalationMessage": "Manual verifier review required."
+    }
+  },
+  "verificationInput": "Manual review requested.",
+  "expected": {
+    "outcome": "disputed",
+    "reasonCode": "HUMAN_REVIEW_REQUIRED",
+    "score": 0
+  }
+}

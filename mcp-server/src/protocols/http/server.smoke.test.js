@@ -23,8 +23,27 @@ const LONG_SECRET = "x".repeat(40);
 const ADMIN_WALLET = "0x1111111111111111111111111111111111111111";
 const VERIFIER_WALLET = "0x2222222222222222222222222222222222222222";
 const STRANGER_WALLET = "0x3333333333333333333333333333333333333333";
+const TRANSFER_AUTHORIZATION = {
+  nonce: "42",
+  deadline: "2000000000",
+  signature: `0x${"1".repeat(130)}`
+};
+const OPEN_DATA_INGEST_TARGET = {
+  portal: "data.gov",
+  datasetId: "provider-idempotency-dataset",
+  datasetTitle: "Provider idempotency smoke dataset",
+  datasetUrl: "https://catalog.data.gov/dataset/provider-idempotency-smoke",
+  resourceId: "provider-idempotency-resource",
+  resourceTitle: "Provider idempotency CSV",
+  resourceUrl: "https://example.gov/provider-idempotency.csv",
+  resourceFormat: "CSV",
+  agency: "General Services Administration",
+  license: "CC0",
+  modified: "2026-01-01T00:00:00Z",
+  metadataModified: "2026-05-01T00:00:00Z"
+};
 
-async function startServer(port) {
+async function startServer(port, envOverrides = {}) {
   const child = spawn(process.execPath, [serverPath], {
     env: {
       ...process.env,
@@ -39,7 +58,8 @@ async function startServer(port) {
       STATE_STORE_ALLOW_MEMORY: "1",
       LOG_LEVEL: "silent",
       RATE_LIMIT_AUTH_NONCE_LIMIT: "3",
-      RATE_LIMIT_AUTH_NONCE_WINDOW_SECONDS: "60"
+      RATE_LIMIT_AUTH_NONCE_WINDOW_SECONDS: "60",
+      ...envOverrides
     },
     stdio: "ignore",
     detached: false
@@ -90,8 +110,8 @@ function stop(child) {
   });
 }
 
-function issueToken(wallet, { roles = [] } = {}) {
-  return signToken({ sub: wallet, roles }, { secret: LONG_SECRET, expiresInSeconds: 60 }).token;
+function issueToken(wallet, { roles = [], ...claims } = {}) {
+  return signToken({ sub: wallet, roles, ...claims }, { secret: LONG_SECRET, expiresInSeconds: 60 }).token;
 }
 
 async function runWithServer(fn) {
@@ -103,6 +123,159 @@ async function runWithServer(fn) {
     await stop(child);
   }
 }
+
+async function runWithServerEnv(envOverrides, fn) {
+  const port = 19_000 + Math.floor(Math.random() * 1_000);
+  const child = await startServer(port, envOverrides);
+  try {
+    await fn(`http://127.0.0.1:${port}`);
+  } finally {
+    await stop(child);
+  }
+}
+
+test("http smoke: production money-like routes require a chain backend", { skip: !RUN }, async () => {
+  await runWithServerEnv({
+    NODE_ENV: "production",
+    MUTATION_BACKEND: "required"
+  }, async (base) => {
+    const token = issueToken(ADMIN_WALLET);
+    const headers = {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`
+    };
+    const routes = [
+      ["/account/fund", { asset: "DOT", amount: 1 }],
+      ["/account/allocate", { asset: "DOT", amount: 1, strategyId: "default-low-risk" }],
+      ["/account/deallocate", { asset: "DOT", amount: 1, strategyId: "default-low-risk" }],
+      ["/account/borrow", { asset: "DOT", amount: 1 }],
+      ["/account/repay", { asset: "DOT", amount: 1 }],
+      ["/payments/send", { recipient: VERIFIER_WALLET, asset: "DOT", amount: 1, transferAuthorization: TRANSFER_AUTHORIZATION }]
+    ];
+
+    for (const [path, body] of routes) {
+      const response = await fetch(`${base}${path}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body)
+      });
+      assert.equal(response.status, 503, path);
+      const payload = await response.json();
+      assert.equal(payload.error, "chain_backend_required", path);
+      assert.equal(payload.reason, "blockchain gateway is disabled", path);
+      assert.equal(payload.details.mode, "required", path);
+      assert.equal(payload.details.route, path);
+    }
+  });
+});
+
+test("http smoke: /health separates service liveness from treasury capability", { skip: !RUN }, async () => {
+  await runWithServerEnv({
+    NODE_ENV: "production",
+    MUTATION_BACKEND: "required"
+  }, async (base) => {
+    const response = await fetch(`${base}/health`);
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.status, "ok");
+    assert.equal(payload.serviceHealth.ok, true);
+    assert.equal(payload.capabilityHealth.blockchain, "disabled");
+    assert.equal(payload.capabilityHealth.treasuryMutations, "unavailable");
+    assert.equal(payload.capabilityHealth.xcmObserver, "unavailable");
+    assert.equal(payload.capabilityHealth.indexer, "unavailable");
+    assert.equal(payload.components.blockchain.enabled, false);
+    // Structured warnings: operator dashboards / smoke checks match on
+    // `code` rather than parsing prose. Treasury unavailable on a
+    // production / chain-required posture must be `critical`.
+    assert.ok(Array.isArray(payload.warnings), "warnings must be an array");
+    const treasury = payload.warnings.find((w) => w.code === "treasury_mutations_unavailable");
+    assert.ok(treasury, "treasury_mutations_unavailable warning must be present");
+    assert.equal(treasury.severity, "critical");
+    const blockchain = payload.warnings.find((w) => w.code === "blockchain_disabled");
+    assert.ok(blockchain);
+    assert.equal(blockchain.severity, "warning");
+  });
+});
+
+test("http smoke: sync money-like routes replay idempotent receipts", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const token = issueToken(ADMIN_WALLET);
+    const headers = {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`
+    };
+    const postJson = async (path, body) => {
+      const response = await fetch(`${base}${path}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body)
+      });
+      const payload = await response.json();
+      return { response, payload };
+    };
+
+    const fundBody = { asset: "DOT", amount: 10, idempotencyKey: "money-fund-1" };
+    const firstFund = await postJson("/account/fund", fundBody);
+    assert.equal(firstFund.response.status, 200);
+    assert.equal(firstFund.payload.liquid.DOT, 10);
+    const replayFund = await postJson("/account/fund", fundBody);
+    assert.equal(replayFund.response.status, 200);
+    assert.deepEqual(replayFund.payload, firstFund.payload);
+    const fundConflict = await postJson("/account/fund", { ...fundBody, amount: 11 });
+    assert.equal(fundConflict.response.status, 409);
+    assert.equal(fundConflict.payload.error, "idempotency_key_payload_mismatch");
+
+    const allocateBody = {
+      asset: "DOT",
+      amount: 4,
+      strategyId: "default-low-risk",
+      idempotencyKey: "money-allocate-1"
+    };
+    const firstAllocate = await postJson("/account/allocate", allocateBody);
+    assert.equal(firstAllocate.response.status, 200);
+    assert.equal(firstAllocate.payload.liquid.DOT, 6);
+    assert.equal(firstAllocate.payload.strategyAllocated.DOT, 4);
+    const replayAllocate = await postJson("/account/allocate", allocateBody);
+    assert.equal(replayAllocate.response.status, 200);
+    assert.deepEqual(replayAllocate.payload, firstAllocate.payload);
+
+    const deallocateBody = {
+      asset: "DOT",
+      amount: 1,
+      strategyId: "default-low-risk",
+      idempotencyKey: "money-deallocate-1"
+    };
+    const firstDeallocate = await postJson("/account/deallocate", deallocateBody);
+    assert.equal(firstDeallocate.response.status, 200);
+    assert.equal(firstDeallocate.payload.liquid.DOT, 7);
+    assert.equal(firstDeallocate.payload.strategyAllocated.DOT, 3);
+    const replayDeallocate = await postJson("/account/deallocate", deallocateBody);
+    assert.equal(replayDeallocate.response.status, 200);
+    assert.deepEqual(replayDeallocate.payload, firstDeallocate.payload);
+
+    const transferBody = {
+      recipient: VERIFIER_WALLET,
+      asset: "DOT",
+      amount: 2,
+      transferAuthorization: TRANSFER_AUTHORIZATION,
+      idempotencyKey: "money-transfer-1"
+    };
+    const firstTransfer = await postJson("/payments/send", transferBody);
+    assert.equal(firstTransfer.response.status, 200);
+    assert.equal(firstTransfer.payload.status, "sent");
+    assert.equal(firstTransfer.payload.balances.from.liquid.DOT, 5);
+    assert.equal(firstTransfer.payload.balances.to.liquid.DOT, 2);
+    const replayTransfer = await postJson("/payments/send", transferBody);
+    assert.equal(replayTransfer.response.status, 200);
+    assert.deepEqual(replayTransfer.payload, firstTransfer.payload);
+
+    const account = await fetch(`${base}/account`, { headers });
+    assert.equal(account.status, 200);
+    const finalAccount = await account.json();
+    assert.equal(finalAccount.liquid.DOT, 5);
+    assert.equal(finalAccount.strategyAllocated.DOT, 3);
+  });
+});
 
 test("http smoke: /admin/jobs rejects unauthenticated requests", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
@@ -150,6 +323,223 @@ test("http smoke: /admin/jobs accepts admin-scoped token", { skip: !RUN }, async
   });
 });
 
+test("http smoke: /jobs/validate-submission validates draft output before claim", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const jobId = "smoke-schema-validation-001";
+    const create = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        id: jobId,
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 1,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        outputSchemaRef: "schema://jobs/coding-output"
+      })
+    });
+    assert.equal(create.status, 201);
+
+    const valid = await fetch(`${base}/jobs/validate-submission`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jobId,
+        submission: {
+          summary: "Complete.",
+          output: "complete verified output",
+          status: "complete"
+        }
+      })
+    });
+    assert.equal(valid.status, 200);
+    const validPayload = await valid.json();
+    assert.equal(validPayload.valid, true);
+    assert.equal(validPayload.submitSafe, true);
+    assert.equal(validPayload.validationEndpoint, "POST /jobs/validate-submission");
+
+    const invalid = await fetch(`${base}/jobs/validate-submission`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jobId, submission: "complete" })
+    });
+    assert.equal(invalid.status, 200);
+    const payload = await invalid.json();
+    assert.equal(payload.valid, false);
+    assert.equal(payload.submitSafe, false);
+    assert.equal(payload.schemaValidates, "payload.submission");
+    assert.equal(payload.path, "payload.submission.summary");
+  });
+});
+
+test("http smoke: /admin/jobs/timeline exposes job lineage", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const jobId = "smoke-job-timeline-001";
+    const create = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        id: jobId,
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 1,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        outputSchemaRef: "schema://jobs/smoke-output"
+      })
+    });
+    assert.equal(create.status, 201);
+
+    const response = await fetch(`${base}/admin/jobs/timeline?jobId=${jobId}`, {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.timelineVersion, "v2");
+    assert.equal(payload.job.id, jobId);
+    assert.deepEqual(payload.lineage.sessionIds, []);
+    assert.ok(payload.timeline.some((entry) => entry.type === "job_state"));
+  });
+});
+
+test("http smoke: /admin/sessions exposes operator-wide session activity", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const workerToken = issueToken(STRANGER_WALLET);
+
+    await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        id: "operator-session-smoke-001",
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 1,
+        claimTtlSeconds: 3600,
+        onboardingWaiverEligible: true,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        outputSchemaRef: "schema://jobs/operator-session-smoke-output"
+      })
+    });
+
+    await fetch(`${base}/account/fund?asset=DOT&amount=10`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+
+    const claim = await fetch(
+      `${base}/jobs/claim?jobId=operator-session-smoke-001&idempotencyKey=operator-session-smoke-claim`,
+      { method: "POST", headers: { authorization: `Bearer ${workerToken}` } }
+    );
+    assert.equal(claim.status, 200);
+    const claimed = await claim.json();
+
+    const walletScoped = await fetch(`${base}/sessions`, {
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(walletScoped.status, 200);
+    assert.deepEqual(await walletScoped.json(), []);
+
+    const forbidden = await fetch(`${base}/admin/sessions`, {
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+    assert.equal(forbidden.status, 403);
+
+    const response = await fetch(`${base}/admin/sessions?limit=20`, {
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.scope, "operator");
+    assert.equal(payload.count, 1);
+    assert.equal(payload.sessions[0].sessionId, claimed.sessionId);
+    assert.equal(payload.sessions[0].wallet, STRANGER_WALLET);
+    assert.equal(payload.sessions[0].jobId, "operator-session-smoke-001");
+  });
+});
+
+test("http smoke: /jobs/sub lets active workers create funded child jobs", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const workerToken = issueToken(STRANGER_WALLET);
+
+    await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        id: "subjob-parent-smoke-001",
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 5,
+        claimTtlSeconds: 3600,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        outputSchemaRef: "schema://jobs/subjob-parent-smoke-output",
+        delegationPolicy: { budgetAmount: 3, budgetAsset: "USDC", maxSubJobs: 2, maxDepth: 1 }
+      })
+    });
+
+    await fetch(`${base}/account/fund?asset=USDC&amount=10`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+
+    const claim = await fetch(
+      `${base}/jobs/claim?jobId=subjob-parent-smoke-001&idempotencyKey=subjob-parent-smoke-claim`,
+      { method: "POST", headers: { authorization: `Bearer ${workerToken}` } }
+    );
+    assert.equal(claim.status, 200);
+    const parentSession = await claim.json();
+
+    const create = await fetch(`${base}/jobs/sub`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${workerToken}` },
+      body: JSON.stringify({
+        parentSessionId: parentSession.sessionId,
+        id: "subjob-child-smoke-001",
+        category: "review",
+        tier: "starter",
+        rewardAmount: 2,
+        verifierMode: "benchmark",
+        verifierTerms: ["summary"],
+        verifierMinimumMatches: 1,
+        inputSchemaRef: "schema://jobs/review-input",
+        outputSchemaRef: "schema://jobs/pr-review-findings-output",
+        claimTtlSeconds: 1800,
+        retryLimit: 1,
+        requiresSponsoredGas: true
+      })
+    });
+    assert.equal(create.status, 201);
+    const child = await create.json();
+    assert.equal(child.parentSessionId, parentSession.sessionId);
+    assert.equal(child.lineage.kind, "sub_job");
+    assert.equal(child.lineage.budget.remainingAfterAmount, 1);
+
+    const listing = await fetch(`${base}/jobs/sub?parentSessionId=${encodeURIComponent(parentSession.sessionId)}`, {
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+    assert.equal(listing.status, 200);
+    const subJobs = await listing.json();
+    assert.equal(subJobs.length, 1);
+    assert.equal(subJobs[0].id, "subjob-child-smoke-001");
+
+    const account = await fetch(`${base}/account`, {
+      headers: { authorization: `Bearer ${workerToken}` }
+    });
+    const balances = await account.json();
+    assert.equal(balances.reserved.USDC, 2);
+  });
+});
+
 test("http smoke: /admin/status returns recurring + maintenance data for admin tokens", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
@@ -178,6 +568,148 @@ test("http smoke: /admin/status returns recurring + maintenance data for admin t
     assert.equal(payload.recurring.count, 1);
     assert.equal(payload.recurring.templates[0].templateId, "weekly-digest");
     assert.equal(typeof payload.maintenance.release.checklistDoc, "string");
+  });
+});
+
+test("http smoke: async XCM allocation requires admin role until assembler ships", { skip: !RUN }, async () => {
+  const asyncStrategyId = "0x56444f545f56315f4d4f434b0000000000000000000000000000000000000000";
+  await runWithServerEnv(
+    {
+      STRATEGIES_JSON: JSON.stringify([
+        {
+          strategyId: asyncStrategyId,
+          adapter: "0x1234567890123456789012345678901234567890",
+          kind: "polkadot_vdot",
+          executionMode: "async_xcm",
+          asset: "0xABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD"
+        }
+      ])
+    },
+    async (base) => {
+      const token = issueToken(STRANGER_WALLET, { roles: [] });
+      const response = await fetch(`${base}/account/allocate`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ strategyId: asyncStrategyId, amount: 1 })
+      });
+      assert.equal(response.status, 403);
+      const payload = await response.json();
+      assert.equal(payload.error, "async_xcm_admin_required");
+    }
+  );
+});
+
+test("http smoke: async XCM deallocation requires admin role until assembler ships", { skip: !RUN }, async () => {
+  const asyncStrategyId = "0x56444f545f56315f4d4f434b0000000000000000000000000000000000000000";
+  await runWithServerEnv(
+    {
+      STRATEGIES_JSON: JSON.stringify([
+        {
+          strategyId: asyncStrategyId,
+          adapter: "0x1234567890123456789012345678901234567890",
+          kind: "polkadot_vdot",
+          executionMode: "async_xcm",
+          asset: "0xABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD"
+        }
+      ])
+    },
+    async (base) => {
+      const token = issueToken(STRANGER_WALLET, { roles: [] });
+      const response = await fetch(`${base}/account/deallocate`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ strategyId: asyncStrategyId, amount: 1 })
+      });
+      assert.equal(response.status, 403);
+      const payload = await response.json();
+      assert.equal(payload.error, "async_xcm_admin_required");
+    }
+  );
+});
+
+test("http smoke: async XCM routes reject caller-supplied raw message bytes", { skip: !RUN }, async () => {
+  const asyncStrategyId = "0x56444f545f56315f4d4f434b0000000000000000000000000000000000000000";
+  await runWithServerEnv(
+    {
+      STRATEGIES_JSON: JSON.stringify([
+        {
+          strategyId: asyncStrategyId,
+          adapter: "0x1234567890123456789012345678901234567890",
+          kind: "polkadot_vdot",
+          executionMode: "async_xcm",
+          asset: "0xABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD"
+        }
+      ])
+    },
+    async (base) => {
+      const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+      const response = await fetch(`${base}/account/allocate`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ strategyId: asyncStrategyId, amount: 1, message: "0xdeadbeef" })
+      });
+      assert.equal(response.status, 400);
+      const payload = await response.json();
+      assert.equal(payload.error, "invalid_request");
+      assert.match(payload.message, /message is assembled by the server/u);
+    }
+  );
+});
+
+test("http smoke: admin XCM observation idempotency guards payload drift", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const headers = { "content-type": "application/json", authorization: `Bearer ${token}` };
+    const requestId = `0x${"ab".repeat(32)}`;
+    const payload = {
+      requestId,
+      status: "succeeded",
+      settledAssets: 5,
+      settledShares: 5,
+      remoteRef: `0x${"12".repeat(32)}`,
+      observedAt: "2026-05-14T12:00:00.000Z",
+      idempotencyKey: "observe-same-key"
+    };
+
+    const observe = await fetch(`${base}/admin/xcm/observe`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    });
+    assert.equal(observe.status, 200);
+    const observed = await observe.json();
+    assert.equal(observed.requestId, requestId);
+
+    const replay = await fetch(`${base}/admin/xcm/observe`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        status: "succeeded",
+        settledAssets: 5,
+        settledShares: 5,
+        remoteRef: `0x${"12".repeat(32)}`,
+        observedAt: "2026-05-14T12:00:00.000Z",
+        requestId,
+        idempotencyKey: "observe-same-key"
+      })
+    });
+    assert.equal(replay.status, 200);
+    assert.deepEqual(await replay.json(), observed);
+
+    const drift = await fetch(`${base}/admin/xcm/observe`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...payload,
+        settledAssets: 6
+      })
+    });
+    assert.equal(drift.status, 409);
+    const body = await drift.json();
+    assert.equal(body.error, "idempotency_key_payload_mismatch");
+    assert.equal(body.details.bucket, "admin_xcm_observe");
+    assert.ok(body.details.originalRequestHash);
+    assert.ok(body.details.requestHash);
   });
 });
 
@@ -230,6 +762,66 @@ test("http smoke: /auth/logout revokes the current token", { skip: !RUN }, async
   });
 });
 
+test("http smoke: /auth/refresh rotates the wallet token and revokes the old jti", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const oldToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const oldHeader = { authorization: `Bearer ${oldToken}` };
+
+    // Old token works before refresh.
+    const preRefresh = await fetch(`${base}/account`, { headers: oldHeader });
+    assert.equal(preRefresh.status, 200);
+
+    const refresh = await fetch(`${base}/auth/refresh`, { method: "POST", headers: oldHeader });
+    assert.equal(refresh.status, 200);
+    const payload = await refresh.json();
+    assert.equal(payload.tokenType, "Bearer");
+    assert.equal(String(payload.wallet).toLowerCase(), ADMIN_WALLET.toLowerCase());
+    assert.deepEqual(payload.roles, ["admin"]);
+    assert.ok(typeof payload.token === "string" && payload.token.length > 0);
+    assert.notEqual(payload.token, oldToken, "refresh must mint a new token, not echo the old one");
+    assert.ok(typeof payload.rotatedFromJti === "string" && payload.rotatedFromJti.length > 0);
+    assert.ok(typeof payload.expiresAt === "string" && !Number.isNaN(Date.parse(payload.expiresAt)));
+
+    // Old token rejected with token_revoked.
+    const postRefreshOld = await fetch(`${base}/account`, { headers: oldHeader });
+    assert.equal(postRefreshOld.status, 401);
+    const oldErr = await postRefreshOld.json();
+    assert.equal(oldErr.error, "token_revoked");
+
+    // New token works on the same protected route.
+    const newHeader = { authorization: `Bearer ${payload.token}` };
+    const postRefreshNew = await fetch(`${base}/account`, { headers: newHeader });
+    assert.equal(postRefreshNew.status, 200);
+  });
+});
+
+test("http smoke: /auth/refresh rejects service tokens with service_token_refresh_unsupported", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    // Mint a service-style token directly (mirrors what /admin/service-tokens issues).
+    const serviceToken = issueToken(ADMIN_WALLET, {
+      roles: ["admin"],
+      tokenKind: "service",
+      serviceToken: true,
+      capabilityGrantId: "test-grant"
+    });
+
+    const refresh = await fetch(`${base}/auth/refresh`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${serviceToken}` }
+    });
+    assert.equal(refresh.status, 401);
+    const err = await refresh.json();
+    assert.equal(err.error, "service_token_refresh_unsupported");
+  });
+});
+
+test("http smoke: /auth/refresh rejects an unauthenticated caller", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const refresh = await fetch(`${base}/auth/refresh`, { method: "POST" });
+    assert.equal(refresh.status, 401);
+  });
+});
+
 test("http smoke: /account/borrow-capacity returns the signed-in wallet headroom", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });
@@ -267,6 +859,7 @@ test("http smoke: /badges/:sessionId returns schema-compliant JSON for approved 
         category: "coding",
         tier: "starter",
         rewardAmount: 3,
+        onboardingWaiverEligible: true,
         verifierMode: "benchmark",
         verifierTerms: ["complete", "verified", "output"],
         verifierMinimumMatches: 2,
@@ -353,6 +946,7 @@ test("http smoke: /agents/:wallet aggregates approved sessions into badges", { s
         category: "coding",
         tier: "starter",
         rewardAmount: 4,
+        onboardingWaiverEligible: true,
         verifierMode: "benchmark",
         verifierTerms: ["complete", "verified", "output"],
         verifierMinimumMatches: 2,
@@ -389,8 +983,8 @@ test("http smoke: /agents/:wallet aggregates approved sessions into badges", { s
     assert.equal(profile.stats.approvedCount, 1);
     assert.equal(profile.stats.rejectedCount, 0);
     assert.equal(profile.stats.completionRate, 1);
-    // 4 DOT at 18 decimals = 4 * 10^18 base units
-    assert.equal(profile.stats.totalEarned.amount, "4000000000000000000");
+    // Job rewards default to USDC: 4 USDC at 6 decimals = 4 * 10^6 base units.
+    assert.equal(profile.stats.totalEarned.amount, "4000000");
     assert.equal(profile.badges[0].sessionId, sessionId);
     assert.equal(profile.badges[0].category, "coding");
     assert.equal(profile.badges[0].level, 1);
@@ -403,6 +997,65 @@ test("http smoke: /agents/:wallet aggregates approved sessions into badges", { s
     assert.ok(row);
     assert.equal(row.tier, "apprentice");
     assert.equal(row.totalJobs, 1);
+  });
+});
+
+test("http smoke: /agents exposes a claimed session as current activity", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+
+    const createJob = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        id: "profile-active-smoke-job-001",
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 4,
+        claimTtlSeconds: 3600,
+        onboardingWaiverEligible: true,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete", "verified", "output"],
+        verifierMinimumMatches: 2,
+        outputSchemaRef: "schema://jobs/profile-active-smoke"
+      })
+    });
+    assert.equal(createJob.status, 201);
+
+    await fetch(`${base}/account/fund?asset=DOT&amount=10`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+
+    const claim = await fetch(
+      `${base}/jobs/claim?jobId=profile-active-smoke-job-001&idempotencyKey=profile-active-smoke-claim`,
+      { method: "POST", headers: { authorization: `Bearer ${adminToken}` } }
+    );
+    assert.equal(claim.status, 200);
+    const { sessionId } = await claim.json();
+
+    const response = await fetch(`${base}/agents/${ADMIN_WALLET}`);
+    assert.equal(response.status, 200);
+    const profile = await response.json();
+    assert.equal(profile.stats.totalBadges, 0);
+    assert.equal(profile.stats.completionRate, null);
+    assert.deepEqual(profile.badges, []);
+    assert.equal(profile.currentActivity.sessionId, sessionId);
+    assert.equal(profile.currentActivity.jobId, "profile-active-smoke-job-001");
+    assert.equal(profile.currentActivity.status, "claimed");
+    assert.equal(profile.currentActivity.phase, "work");
+    assert.equal(profile.currentActivity.canSubmit, true);
+    assert.equal(profile.currentActivity.awaitingVerification, false);
+    assert.match(profile.currentActivity.deadlineAt, /^\d{4}-\d{2}-\d{2}T/u);
+
+    const listResponse = await fetch(`${base}/agents`);
+    assert.equal(listResponse.status, 200);
+    const agents = await listResponse.json();
+    const row = agents.find((agent) => agent.wallet === ADMIN_WALLET.toLowerCase());
+    assert.ok(row);
+    assert.equal(row.totalJobs, 0);
+    assert.equal(row.currentActivity.sessionId, sessionId);
+    assert.equal(row.currentActivity.status, "claimed");
   });
 });
 
@@ -419,6 +1072,7 @@ test("http smoke: /disputes exposes human-review sessions and records verdict/re
         category: "coding",
         tier: "starter",
         rewardAmount: 3,
+        onboardingWaiverEligible: true,
         verifierMode: "human_fallback",
         escalationMessage: "Needs operator review",
         autoApprove: false,
@@ -456,32 +1110,134 @@ test("http smoke: /disputes exposes human-review sessions and records verdict/re
     assert.ok(dispute);
     assert.equal(dispute.status, "open");
     assert.equal(dispute.verdict, null);
+    assert.match(dispute.openedAt, /^\d{4}-\d{2}-\d{2}T/u);
+    assert.match(dispute.windowEndsAt, /^\d{4}-\d{2}-\d{2}T/u);
+    assert.equal(dispute.slaSeconds, 14 * 24 * 60 * 60);
 
     const detail = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}`, {
       headers: { authorization: `Bearer ${adminToken}` }
     });
     assert.equal(detail.status, 200);
-    assert.equal((await detail.json()).sessionId, sessionId);
+    const detailBody = await detail.json();
+    assert.equal(detailBody.sessionId, sessionId);
+    assert.equal(detailBody.slaSeconds, dispute.slaSeconds);
+
+    const rejected = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/verdict`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${verifierToken}` },
+      body: JSON.stringify({ verdict: "not-a-real-verdict", rationale: "x" })
+    });
+    assert.equal(rejected.status, 400);
 
     const verdict = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/verdict`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${verifierToken}` },
-      body: JSON.stringify({ verdict: "upheld", rationale: "Submission needs correction." })
+      body: JSON.stringify({
+        verdict: "upheld",
+        rationale: "Submission needs correction.",
+        idempotencyKey: "dispute-verdict-same-key"
+      })
     });
     assert.equal(verdict.status, 200);
     const verdictBody = await verdict.json();
     assert.equal(verdictBody.status, "resolved");
     assert.equal(verdictBody.verdict, "upheld");
+    assert.equal(verdictBody.reasonCode, "DISPUTE_LOST");
+    assert.match(verdictBody.reasoningHash, /^0x[a-f0-9]{64}$/u);
+    assert.equal(verdictBody.metadataURI, `urn:averray:content:${verdictBody.reasoningHash}`);
+    assert.equal(verdictBody.chainStatus, "local_only");
+    assert.equal(verdictBody.txHash, undefined);
+
+    const verdictReplay = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/verdict`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${verifierToken}` },
+      body: JSON.stringify({
+        idempotencyKey: "dispute-verdict-same-key",
+        rationale: "Submission needs correction.",
+        verdict: "upheld"
+      })
+    });
+    assert.equal(verdictReplay.status, 200);
+    assert.deepEqual(await verdictReplay.json(), verdictBody);
+
+    const verdictDrift = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/verdict`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${verifierToken}` },
+      body: JSON.stringify({
+        verdict: "dismissed",
+        rationale: "Submission needs correction.",
+        idempotencyKey: "dispute-verdict-same-key"
+      })
+    });
+    assert.equal(verdictDrift.status, 409);
+    const verdictDriftBody = await verdictDrift.json();
+    assert.equal(verdictDriftBody.error, "idempotency_key_payload_mismatch");
+    assert.equal(verdictDriftBody.details.bucket, "dispute_verdict_idempotency");
+
+    const privateContent = await fetch(`${base}/content/${encodeURIComponent(verdictBody.reasoningHash)}`);
+    assert.equal(privateContent.status, 403);
+
+    const ownedContent = await fetch(`${base}/content/${encodeURIComponent(verdictBody.reasoningHash)}`, {
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(ownedContent.status, 200);
+    const contentBody = await ownedContent.json();
+    assert.equal(contentBody.hash, verdictBody.reasoningHash);
+    assert.equal(contentBody.contentType, "arbitrator_reasoning");
+    assert.equal(contentBody.visibility, "owner_only");
+    assert.equal(contentBody.payload.rationale, "Submission needs correction.");
+
+    const strangerToken = issueToken("0x3333333333333333333333333333333333333333");
+    const forbiddenPublish = await fetch(`${base}/content/${encodeURIComponent(verdictBody.reasoningHash)}/publish`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${strangerToken}` }
+    });
+    assert.equal(forbiddenPublish.status, 403);
+
+    const published = await fetch(`${base}/content/${encodeURIComponent(verdictBody.reasoningHash)}/publish`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(published.status, 200);
+    const publishedBody = await published.json();
+    assert.equal(publishedBody.visibility, "public");
+    assert.deepEqual(publishedBody.disclosureEvent, { emitted: false, reason: "blockchain_disabled" });
+    assert.match(publishedBody.publishedAt, /^\d{4}-\d{2}-\d{2}T/u);
+
+    const publicContent = await fetch(`${base}/content/${encodeURIComponent(verdictBody.reasoningHash)}`);
+    assert.equal(publicContent.status, 200);
+    const publicContentBody = await publicContent.json();
+    assert.equal(publicContentBody.visibility, "public");
+    assert.deepEqual(publicContentBody.autoDisclosureEvent, { emitted: false, reason: "not_auto_public" });
 
     const release = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/release`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
-      body: JSON.stringify({ action: "release", amount: 0.15 })
+      body: JSON.stringify({ action: "release", amount: 0.15, idempotencyKey: "dispute-release-same-key" })
     });
     assert.equal(release.status, 200);
     const releaseBody = await release.json();
     assert.equal(releaseBody.release.action, "release");
     assert.equal(releaseBody.release.amount, 0.15);
+    assert.equal(releaseBody.release.chainStatus, "local_only");
+
+    const releaseReplay = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/release`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ amount: "0.15", action: "release", idempotencyKey: "dispute-release-same-key" })
+    });
+    assert.equal(releaseReplay.status, 200);
+    assert.deepEqual(await releaseReplay.json(), releaseBody);
+
+    const releaseDrift = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/release`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ action: "release", amount: 0.2, idempotencyKey: "dispute-release-same-key" })
+    });
+    assert.equal(releaseDrift.status, 409);
+    const releaseDriftBody = await releaseDrift.json();
+    assert.equal(releaseDriftBody.error, "idempotency_key_payload_mismatch");
+    assert.equal(releaseDriftBody.details.bucket, "dispute_release_idempotency");
   });
 });
 
@@ -559,7 +1315,7 @@ test("http smoke: /payments/send moves liquid balance between agent accounts", {
         "content-type": "application/json",
         authorization: `Bearer ${senderToken}`
       },
-      body: JSON.stringify({ recipient: VERIFIER_WALLET, asset: "DOT", amount: 5 })
+      body: JSON.stringify({ recipient: VERIFIER_WALLET, asset: "DOT", amount: 5, transferAuthorization: TRANSFER_AUTHORIZATION })
     });
     assert.equal(response.status, 200);
     const body = await response.json();
@@ -580,7 +1336,7 @@ test("http smoke: /payments/send rejects self-transfer", { skip: !RUN }, async (
         "content-type": "application/json",
         authorization: `Bearer ${token}`
       },
-      body: JSON.stringify({ recipient: ADMIN_WALLET, asset: "DOT", amount: 1 })
+      body: JSON.stringify({ recipient: ADMIN_WALLET, asset: "DOT", amount: 1, transferAuthorization: TRANSFER_AUTHORIZATION })
     });
     assert.equal(response.status, 400);
     const body = await response.json();
@@ -608,6 +1364,82 @@ test("http smoke: /jobs/tiers returns the public tier ladder without auth", { sk
     assert.deepEqual(byTier.starter, { skill: 0 });
     assert.deepEqual(byTier.pro, { skill: 100 });
     assert.deepEqual(byTier.elite, { skill: 200 });
+  });
+});
+
+test("http smoke: /jobs/explain-eligibility surfaces the explainEligibility tool", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+
+    // Post a pro-tier job. A fresh wallet (skill=0) is below the gate.
+    await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        id: "tier-smoke-explain-001",
+        category: "coding",
+        tier: "pro",
+        rewardAmount: 8,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete", "verified"],
+        verifierMinimumMatches: 1,
+        outputSchemaRef: "schema://jobs/tier-smoke"
+      })
+    });
+
+    // jobId is required.
+    const missingJobId = await fetch(`${base}/jobs/explain-eligibility`, {
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(missingJobId.status, 400);
+
+    const response = await fetch(
+      `${base}/jobs/explain-eligibility?jobId=tier-smoke-explain-001`,
+      { headers: { authorization: `Bearer ${adminToken}` } }
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.jobId, "tier-smoke-explain-001");
+    assert.ok(typeof body.eligible === "boolean");
+  });
+});
+
+test("http smoke: /jobs/estimate-reward surfaces the estimateNetReward tool", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+
+    await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        id: "tier-smoke-reward-001",
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 4,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        outputSchemaRef: "schema://jobs/tier-smoke"
+      })
+    });
+
+    // jobId is required.
+    const missingJobId = await fetch(`${base}/jobs/estimate-reward`, {
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    assert.equal(missingJobId.status, 400);
+
+    const response = await fetch(
+      `${base}/jobs/estimate-reward?jobId=tier-smoke-reward-001`,
+      { headers: { authorization: `Bearer ${adminToken}` } }
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    // job-catalog-service.estimateNetReward returns a scalar (the net-
+    // reward number after gas + risk penalties). For the smoke pass we
+    // assert the shape is a finite non-negative number, matching the
+    // implementation contract.
+    assert.ok(typeof body === "number" && Number.isFinite(body) && body >= 0, `expected estimate-reward to return a finite non-negative number, got ${JSON.stringify(body)}`);
   });
 });
 
@@ -685,6 +1517,462 @@ test("http smoke: /admin/jobs/fire produces a derivative from a recurring templa
   });
 });
 
+test("http smoke: admin job creation idempotency replays and rejects payload drift", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
+    const payload = {
+      id: "admin-idempotency-create-smoke",
+      category: "coding",
+      tier: "starter",
+      rewardAmount: 2,
+      verifierMode: "benchmark",
+      verifierTerms: ["complete"],
+      verifierMinimumMatches: 1,
+      idempotencyKey: "admin-create-same-key"
+    };
+
+    const create = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    });
+    assert.equal(create.status, 201);
+    const created = await create.json();
+
+    const replay = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ verifierTerms: ["complete"], ...payload })
+    });
+    assert.equal(replay.status, 200);
+    assert.deepEqual(await replay.json(), created);
+
+    const drift = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...payload,
+        id: "admin-idempotency-create-smoke-other"
+      })
+    });
+    assert.equal(drift.status, 409);
+    const body = await drift.json();
+    assert.equal(body.error, "idempotency_key_payload_mismatch");
+    assert.equal(body.details.bucket, "admin_jobs");
+    assert.ok(body.details.originalRequestHash);
+    assert.ok(body.details.requestHash);
+  });
+});
+
+test("http smoke: provider ingestion idempotency replays and rejects payload drift", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
+    const payload = {
+      datasets: [OPEN_DATA_INGEST_TARGET],
+      dryRun: false,
+      limit: 5,
+      minScore: 55,
+      idempotencyKey: "provider-ingest-open-data-same-key"
+    };
+
+    const create = await fetch(`${base}/admin/jobs/ingest/open-data`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    });
+    assert.equal(create.status, 201);
+    const created = await create.json();
+    assert.equal(created.provider, "data.gov");
+    assert.equal(created.dryRun, false);
+    assert.equal(created.candidateCount, 1);
+    assert.equal(created.created.length, 1);
+    assert.equal(created.errors.length, 0);
+
+    const replay = await fetch(`${base}/admin/jobs/ingest/open-data`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ minScore: 55, ...payload })
+    });
+    assert.equal(replay.status, 200);
+    assert.deepEqual(await replay.json(), created);
+
+    const drift = await fetch(`${base}/admin/jobs/ingest/open-data`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...payload,
+        limit: 4
+      })
+    });
+    assert.equal(drift.status, 409);
+    const body = await drift.json();
+    assert.equal(body.error, "idempotency_key_payload_mismatch");
+    assert.equal(body.details.bucket, "admin_jobs_ingest_open_data");
+    assert.ok(body.details.originalRequestHash);
+    assert.ok(body.details.requestHash);
+  });
+});
+
+test("http smoke: capability grants reject capabilities the issuer token lacks", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const response = await fetch(`${base}/admin/capability-grants`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({
+        subject: STRANGER_WALLET,
+        capabilities: ["verifier:run"],
+        issuedAt: "2026-05-01T00:00:00.000Z",
+        nonce: "issuer-subset-smoke",
+        idempotencyKey: "issuer-subset-smoke"
+      })
+    });
+    assert.equal(response.status, 403);
+    const body = await response.json();
+    assert.equal(body.error, "grant_capability_not_owned");
+    assert.deepEqual(body.details.missingCapabilities, ["verifier:run"]);
+  });
+});
+
+test("http smoke: capability grant idempotency replays and rejects payload drift", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
+    const payload = {
+      subject: STRANGER_WALLET,
+      capabilities: ["jobs:lifecycle"],
+      scope: "worker-loop-smoke",
+      issuedAt: "2026-05-01T00:00:00.000Z",
+      nonce: "grant-idempotency-smoke",
+      idempotencyKey: "capability-grant-same-key"
+    };
+
+    const create = await fetch(`${base}/admin/capability-grants`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    });
+    assert.equal(create.status, 201);
+    const grant = await create.json();
+    assert.equal(grant.subject, STRANGER_WALLET.toLowerCase());
+    assert.deepEqual(grant.capabilities, ["jobs:lifecycle"]);
+
+    const replay = await fetch(`${base}/admin/capability-grants`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ capabilities: ["jobs:lifecycle"], ...payload })
+    });
+    assert.equal(replay.status, 200);
+    assert.deepEqual(await replay.json(), grant);
+
+    const drift = await fetch(`${base}/admin/capability-grants`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...payload,
+        capabilities: ["policies:propose"]
+      })
+    });
+    assert.equal(drift.status, 409);
+    const body = await drift.json();
+    assert.equal(body.error, "idempotency_key_payload_mismatch");
+    assert.equal(body.details.bucket, "capability_grant");
+  });
+});
+
+test("http smoke: capability revoke idempotency replays and rejects payload drift", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
+    const create = await fetch(`${base}/admin/capability-grants`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        subject: STRANGER_WALLET,
+        capabilities: ["jobs:lifecycle"],
+        scope: "revoke-smoke",
+        issuedAt: "2026-05-01T00:00:00.000Z",
+        nonce: "revoke-idempotency-smoke"
+      })
+    });
+    assert.equal(create.status, 201);
+    const grant = await create.json();
+
+    const revokePayload = {
+      note: "rotated service token",
+      idempotencyKey: "capability-revoke-same-key"
+    };
+    const revoke = await fetch(`${base}/admin/capability-grants/${grant.id}/revoke`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(revokePayload)
+    });
+    assert.equal(revoke.status, 200);
+    const revoked = await revoke.json();
+    assert.equal(revoked.status, "revoked");
+    assert.equal(revoked.revokeNote, "rotated service token");
+
+    const replay = await fetch(`${base}/admin/capability-grants/${grant.id}/revoke`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(revokePayload)
+    });
+    assert.equal(replay.status, 200);
+    assert.deepEqual(await replay.json(), revoked);
+
+    const drift = await fetch(`${base}/admin/capability-grants/${grant.id}/revoke`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...revokePayload,
+        note: "different operator note"
+      })
+    });
+    assert.equal(drift.status, 409);
+    const body = await drift.json();
+    assert.equal(body.error, "idempotency_key_payload_mismatch");
+    assert.equal(body.details.bucket, "capability_revoke");
+  });
+});
+
+test("http smoke: service token issue/rotate/revoke is grant-backed and one-time-secret", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const adminHeaders = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
+    const issuePayload = {
+      subject: STRANGER_WALLET,
+      capabilities: ["jobs:lifecycle"],
+      scope: "external-agent-smoke",
+      issuedAt: "2026-05-01T00:00:00.000Z",
+      nonce: "service-token-issue-smoke",
+      tokenTtlSeconds: 600,
+      idempotencyKey: "service-token-issue-key"
+    };
+
+    const issue = await fetch(`${base}/admin/service-tokens`, {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify(issuePayload)
+    });
+    assert.equal(issue.status, 201);
+    const issued = await issue.json();
+    assert.equal(typeof issued.token, "string");
+    assert.equal(issued.tokenKind, "service");
+    assert.equal(issued.wallet, STRANGER_WALLET.toLowerCase());
+    assert.deepEqual(issued.capabilities, ["jobs:lifecycle"]);
+
+    const replay = await fetch(`${base}/admin/service-tokens`, {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify(issuePayload)
+    });
+    assert.equal(replay.status, 200);
+    const replayed = await replay.json();
+    assert.equal(replayed.token, undefined);
+    assert.equal(replayed.tokenAvailable, false);
+    assert.equal(replayed.tokenOmittedReason, "service_token_secret_is_returned_once");
+    assert.equal(replayed.grant.id, issued.grant.id);
+
+    const session = await fetch(`${base}/auth/session`, {
+      headers: { authorization: `Bearer ${issued.token}` }
+    });
+    assert.equal(session.status, 200);
+    const serviceSession = await session.json();
+    assert.equal(serviceSession.tokenKind, "service");
+    assert.equal(serviceSession.serviceToken, true);
+    assert.equal(serviceSession.capabilityGrantId, issued.grant.id);
+    assert.deepEqual(serviceSession.capabilities, ["jobs:lifecycle"]);
+
+    const noBase = await fetch(`${base}/account`, {
+      headers: { authorization: `Bearer ${issued.token}` }
+    });
+    assert.equal(noBase.status, 403);
+
+    const rotate = await fetch(`${base}/admin/service-tokens/${issued.grant.id}/rotate`, {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        issuedAt: "2026-05-01T00:01:00.000Z",
+        nonce: "service-token-rotate-smoke",
+        tokenTtlSeconds: 600,
+        idempotencyKey: "service-token-rotate-key"
+      })
+    });
+    assert.equal(rotate.status, 201);
+    const rotated = await rotate.json();
+    assert.equal(typeof rotated.token, "string");
+    assert.notEqual(rotated.grant.id, issued.grant.id);
+    assert.equal(rotated.rotatedFrom.id, issued.grant.id);
+    assert.equal(rotated.rotatedFrom.status, "revoked");
+
+    const oldToken = await fetch(`${base}/admin/jobs/lifecycle`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${issued.token}` },
+      body: JSON.stringify({ jobId: "missing", action: "pause" })
+    });
+    assert.equal(oldToken.status, 403);
+
+    const newToken = await fetch(`${base}/auth/session`, {
+      headers: { authorization: `Bearer ${rotated.token}` }
+    });
+    assert.equal(newToken.status, 200);
+    assert.deepEqual((await newToken.json()).capabilities, ["jobs:lifecycle"]);
+
+    const revoke = await fetch(`${base}/admin/service-tokens/${rotated.grant.id}/revoke`, {
+      method: "POST",
+      headers: adminHeaders,
+      body: JSON.stringify({
+        note: "smoke complete",
+        idempotencyKey: "service-token-revoke-key"
+      })
+    });
+    assert.equal(revoke.status, 200);
+    const revoked = await revoke.json();
+    assert.equal(revoked.status, "revoked");
+    assert.equal(revoked.grant.status, "revoked");
+
+    const revokedToken = await fetch(`${base}/admin/jobs/lifecycle`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${rotated.token}` },
+      body: JSON.stringify({ jobId: "missing", action: "pause" })
+    });
+    assert.equal(revokedToken.status, 403);
+  });
+});
+
+test("http smoke: admin recurring fire idempotency replays and rejects firedAt drift", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
+
+    const template = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        id: "recurring-fire-idempotency-smoke",
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 2,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        recurring: true,
+        schedule: { cron: "0 9 * * 1", timezone: "Europe/Zurich" }
+      })
+    });
+    assert.equal(template.status, 201);
+
+    const firePayload = {
+      templateId: "recurring-fire-idempotency-smoke",
+      firedAt: "2026-04-20T09:00:00.000Z",
+      idempotencyKey: "fire-same-key"
+    };
+    const fire = await fetch(`${base}/admin/jobs/fire`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(firePayload)
+    });
+    assert.equal(fire.status, 201);
+    const derivative = await fire.json();
+
+    const replay = await fetch(`${base}/admin/jobs/fire`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(firePayload)
+    });
+    assert.equal(replay.status, 200);
+    assert.deepEqual(await replay.json(), derivative);
+
+    const drift = await fetch(`${base}/admin/jobs/fire`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        ...firePayload,
+        firedAt: "2026-04-27T09:00:00.000Z"
+      })
+    });
+    assert.equal(drift.status, 409);
+    const body = await drift.json();
+    assert.equal(body.error, "idempotency_key_payload_mismatch");
+    assert.equal(body.details.bucket, "admin_jobs_fire");
+  });
+});
+
+test("http smoke: recurring pause/resume accept idempotency keys", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const headers = { "content-type": "application/json", authorization: `Bearer ${adminToken}` };
+
+    const template = await fetch(`${base}/admin/jobs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        id: "recurring-idempotency-smoke",
+        category: "coding",
+        tier: "starter",
+        rewardAmount: 2,
+        verifierMode: "benchmark",
+        verifierTerms: ["complete"],
+        verifierMinimumMatches: 1,
+        recurring: true,
+        schedule: { cron: "0 9 * * 1", timezone: "Europe/Zurich" }
+      })
+    });
+    assert.equal(template.status, 201);
+
+    const pause = await fetch(`${base}/admin/jobs/pause`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        templateId: "recurring-idempotency-smoke",
+        idempotencyKey: "same-client-key"
+      })
+    });
+    assert.equal(pause.status, 200);
+    const paused = await pause.json();
+    assert.equal(findRecurringTemplate(paused, "recurring-idempotency-smoke").paused, true);
+
+    const pauseReplay = await fetch(`${base}/admin/jobs/pause`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        templateId: "recurring-idempotency-smoke",
+        idempotencyKey: "same-client-key"
+      })
+    });
+    assert.equal(pauseReplay.status, 200);
+    assert.deepEqual(await pauseReplay.json(), paused);
+
+    const pauseDrift = await fetch(`${base}/admin/jobs/pause`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        templateId: "recurring-idempotency-smoke",
+        idempotencyKey: "same-client-key",
+        reason: "different operator annotation"
+      })
+    });
+    assert.equal(pauseDrift.status, 409);
+    const pauseDriftBody = await pauseDrift.json();
+    assert.equal(pauseDriftBody.error, "idempotency_key_payload_mismatch");
+    assert.equal(pauseDriftBody.details.bucket, "admin_jobs_pause");
+
+    const resume = await fetch(`${base}/admin/jobs/resume`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        templateId: "recurring-idempotency-smoke",
+        idempotencyKey: "same-client-key"
+      })
+    });
+    assert.equal(resume.status, 200);
+    const resumed = await resume.json();
+    assert.equal(findRecurringTemplate(resumed, "recurring-idempotency-smoke").paused, false);
+  });
+});
+
 test("http smoke: /admin/jobs rejects recurring template with missing schedule", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
@@ -709,6 +1997,12 @@ test("http smoke: /admin/jobs rejects recurring template with missing schedule",
   });
 });
 
+function findRecurringTemplate(status, templateId) {
+  const template = status.recurring.templates.find((entry) => entry.templateId === templateId);
+  assert.ok(template, `expected recurring template ${templateId}`);
+  return template;
+}
+
 test("http smoke: /metrics emits Prometheus text format with baseline series", { skip: !RUN }, async () => {
   await runWithServer(async (base) => {
     // Warm the metrics: one unauthenticated admin call to populate counters.
@@ -722,5 +2016,61 @@ test("http smoke: /metrics emits Prometheus text format with baseline series", {
     assert.match(body, /# TYPE http_requests_total counter/);
     assert.match(body, /http_requests_total\{method="POST",path="\/admin\/jobs",status="401"\}/);
     assert.match(body, /state_store_backend\{backend="MemoryStateStore"\} 1/);
+  });
+});
+
+test("http smoke: /metrics is bearer-gated when metrics auth is required", { skip: !RUN }, async () => {
+  await runWithServerEnv(
+    {
+      METRICS_AUTH_REQUIRED: "1",
+      METRICS_BEARER_TOKEN: "metrics-smoke-token-1234567890"
+    },
+    async (base) => {
+      const noBearer = await fetch(`${base}/metrics`);
+      assert.equal(noBearer.status, 401);
+
+      const wrongBearer = await fetch(`${base}/metrics`, {
+        headers: { authorization: "Bearer wrong-token" }
+      });
+      assert.equal(wrongBearer.status, 401);
+
+      const response = await fetch(`${base}/metrics`, {
+        headers: { authorization: "Bearer metrics-smoke-token-1234567890" }
+      });
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get("content-type") ?? "", /text\/plain/);
+      assert.match(await response.text(), /# HELP http_requests_total/);
+    }
+  );
+});
+
+test("http smoke: production /metrics fails closed when token is missing", { skip: !RUN }, async () => {
+  await runWithServerEnv(
+    {
+      NODE_ENV: "production",
+      METRICS_BEARER_TOKEN: ""
+    },
+    async (base) => {
+      const response = await fetch(`${base}/metrics`);
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), { error: "metrics_auth_unconfigured" });
+    }
+  );
+});
+
+test("http smoke: discovery manifest is served at both /agent-tools.json and the RFC 8615 .well-known path", { skip: !RUN }, async () => {
+  await runWithServer(async (base) => {
+    const [canonical, wellKnown] = await Promise.all([
+      fetch(`${base}/agent-tools.json`),
+      fetch(`${base}/.well-known/agent-tools.json`)
+    ]);
+    assert.equal(canonical.status, 200);
+    assert.equal(wellKnown.status, 200);
+    assert.match(canonical.headers.get("content-type") ?? "", /application\/json/);
+    assert.match(wellKnown.headers.get("content-type") ?? "", /application\/json/);
+    const [canonicalBody, wellKnownBody] = await Promise.all([canonical.json(), wellKnown.json()]);
+    assert.deepEqual(canonicalBody, wellKnownBody, "well-known alias must return the same manifest");
+    assert.equal(typeof canonicalBody.name, "string");
+    assert.ok(Array.isArray(canonicalBody.protocols));
   });
 });

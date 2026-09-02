@@ -9,6 +9,12 @@ const CLOCK_SKEW_SECONDS = 60;
  *
  * Supports key rotation: pass an array of secrets; `verifyToken` accepts any,
  * `signToken` always uses the first (newest).
+ *
+ * Phase 4b (PR 4b.4) adds the dispatcher entry points
+ * `signTokenFromConfig` / `verifyTokenFromConfig` below the legacy
+ * `signToken` / `verifyToken` functions. The legacy API is preserved
+ * byte-for-byte so existing tests and the `scripts/ops/mint-admin-jwt.mjs`
+ * caller keep working under `JWT_BACKEND=hmac` (default).
  */
 
 export function signToken(payload, { secret, expiresInSeconds }) {
@@ -85,6 +91,315 @@ export function verifyToken(token, { secrets }) {
   }
 
   return payload;
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// Phase 4b dispatcher
+// ───────────────────────────────────────────────────────────────────────
+
+/**
+ * Lazily-cached KmsJwtSigner instance, keyed by the kmsJwt config
+ * reference (each config load creates one instance and the dispatcher
+ * keeps it alive for the process lifetime). Cached via a WeakMap so
+ * test code that loads multiple distinct configs doesn't accumulate
+ * dangling signers.
+ *
+ * We intentionally don't import @aws-sdk/client-kms eagerly — HMAC-only
+ * deploys must not pay the SDK import cost. The KmsJwtSigner module
+ * itself defers the SDK import to the first send().
+ */
+const SIGNER_CACHE = new WeakMap();
+
+async function getKmsSigner(authConfig) {
+  if (!authConfig?.kmsJwt) {
+    throw new ConfigError(
+      "JWT_BACKEND requires KMS but authConfig.kmsJwt is null. Set AWS_JWT_REGION / AWS_JWT_KEY_ID / JWT_PUBLIC_KEY_PEM / JWT_PUBLIC_KEY_FINGERPRINT.",
+    );
+  }
+  const cached = SIGNER_CACHE.get(authConfig.kmsJwt);
+  if (cached) return cached;
+  // Lazy-import; ensures hmac-only callers never pull in
+  // @aws-sdk/client-kms (KmsJwtSigner's own SDK import is also lazy).
+  const { KmsJwtSigner } = await import("./kms-jwt-signer.js");
+  // Phase 5a: when AWS_USE_ROLES_ANYWHERE=true, plumb an SDK credential
+  // provider keyed to the JWT-signer shared-config profile. Null
+  // otherwise — KmsJwtSigner falls through to the SDK's default chain.
+  const { buildKmsCredentialsProvider, PROFILE_JWT_SIGNER } = await import(
+    "../services/aws-credentials.js"
+  );
+  const credentialsProvider = buildKmsCredentialsProvider({ profile: PROFILE_JWT_SIGNER });
+  // Allow tests to inject a KMSClient via authConfig.kmsJwt.kmsClient
+  // without leaking that field into the loaded-from-env public shape —
+  // production env never sets it.
+  const signer = new KmsJwtSigner({
+    kmsClient: authConfig.kmsJwt.kmsClient,
+    region: authConfig.kmsJwt.region,
+    keyId: authConfig.kmsJwt.keyId,
+    kid: authConfig.kmsJwt.kid,
+    publicKeyPem: authConfig.kmsJwt.publicKeyPem,
+    expectedIssuer: authConfig.kmsJwt.expectedIssuer,
+    expectedAudience: authConfig.kmsJwt.expectedAudience,
+    expectedRoles: authConfig.kmsJwt.expectedRoles,
+    maxTtlSeconds: authConfig.kmsJwt.maxTtlSeconds,
+    clockSkewSeconds: authConfig.kmsJwt.clockSkewSeconds,
+    logger: authConfig.kmsJwt.logger,
+    credentialsProvider,
+  });
+  SIGNER_CACHE.set(authConfig.kmsJwt, signer);
+  return signer;
+}
+
+/**
+ * Determine which alg the sign path should produce.
+ *
+ *   hmac → always HS256
+ *   kms  → always ES256
+ *   both → JWT_PRIMARY_ALG decides (default "hmac")
+ */
+function pickSignAlg(authConfig) {
+  switch (authConfig?.jwtBackend) {
+    case "kms":
+      return "ES256";
+    case "both":
+      return authConfig.jwtPrimaryAlg === "kms" ? "ES256" : "HS256";
+    case "hmac":
+    case undefined: // treat missing as default "hmac" for safety
+    case null:
+      return "HS256";
+    default:
+      throw new ConfigError(`Unknown jwtBackend "${authConfig.jwtBackend}".`);
+  }
+}
+
+/**
+ * Sign a JWT according to `authConfig.jwtBackend`.
+ *
+ * HS256 path returns the same `{ token, claims }` shape as the existing
+ * `signToken` (and reuses it under the hood). ES256 path returns the
+ * same shape — the dispatcher decodes the produced token's claims to
+ * keep the interface uniform for callers that need the issued claims
+ * (e.g., HTTP handlers that echo `jti` back to clients).
+ *
+ * For ES256, the caller supplies `issuer` / `audience` / `subject` /
+ * `role` in `opts` (matching KmsJwtSigner's signAsync contract). When
+ * those are absent, the dispatcher derives sensible defaults from
+ * `authConfig.kmsJwt`'s configured expectations, so the HTTP-server
+ * sign-in handler can keep passing only the payload + TTL during the
+ * transition.
+ */
+export async function signTokenFromConfig(payload, opts, authConfig) {
+  if (!authConfig || typeof authConfig !== "object") {
+    throw new ConfigError("signTokenFromConfig: authConfig is required.");
+  }
+  if (!opts || typeof opts !== "object") {
+    throw new ConfigError("signTokenFromConfig: opts (with expiresInSeconds) is required.");
+  }
+  const alg = pickSignAlg(authConfig);
+
+  if (alg === "HS256") {
+    const secret = opts.secret ?? authConfig.signingSecret;
+    return signToken(payload, { secret, expiresInSeconds: opts.expiresInSeconds });
+  }
+
+  // ES256 path.
+  const signer = await getKmsSigner(authConfig);
+  const subject =
+    opts.subject ?? (typeof payload?.sub === "string" ? payload.sub : undefined);
+  // Stage 2B — pass the full role array through to KmsJwtSigner so
+  // multi-role wallets (admin + verifier) keep both capabilities under
+  // ES256 issuance. KmsJwtSigner.signAsync normalizes string → [string]
+  // internally, so legacy callers passing a single string still work.
+  // `role` is OPTIONAL. Ordinary worker wallets are roleless by design
+  // (config.resolveRoles returns [] for any non-admin/non-verifier
+  // wallet), and claiming / submitting jobs is auth-gated, not
+  // role-gated. When no role is derivable we mint a ROLELESS token
+  // (KmsJwtSigner.signAsync emits `roles: []`) instead of throwing —
+  // matching the HS256 path, which has never required a role. Only
+  // iss / aud / sub stay mandatory.
+  //
+  // Before this fix the ES256 path threw ConfigError → HTTP 500
+  // invalid_configuration for every roleless SIWE login once prod went
+  // ES256-only (JWT_BACKEND=kms). The HS256 path had no such check; that
+  // asymmetry was the bug. A roleless token grants NO privileges
+  // (capabilities derive from role membership via capabilities.js); it
+  // only identifies the wallet via `sub` for auth-gated actions.
+  const role =
+    opts.role
+    ?? (Array.isArray(payload?.roles) && payload.roles.length > 0 ? payload.roles : undefined)
+    ?? (typeof payload?.role === "string" ? payload.role : undefined);
+  const issuer = opts.issuer ?? authConfig.kmsJwt?.expectedIssuer;
+  const audience = opts.audience ?? authConfig.kmsJwt?.expectedAudience;
+
+  if (!issuer || !audience || !subject) {
+    throw new ConfigError(
+      "signTokenFromConfig (ES256): issuer/audience/subject must each be derivable from opts or authConfig.kmsJwt + payload.",
+    );
+  }
+
+  // Strip registered claims the signer manages itself so the merged
+  // payload doesn't accidentally override iat/exp/jti/iss/aud/sub/roles.
+  // Both `role` (legacy) and `roles` (Stage 2B canonical) are stripped —
+  // the signer emits `roles` from the normalized opts.role, never from
+  // payload spread.
+  const {
+    iss: _iss,
+    aud: _aud,
+    sub: _sub,
+    role: _role,
+    roles: _roles,
+    iat: _iat,
+    nbf: _nbf,
+    exp: _exp,
+    jti: _jti,
+    ...extras
+  } = payload ?? {};
+
+  const token = await signer.signAsync(extras, {
+    issuer,
+    audience,
+    subject,
+    role,
+    expiresInSeconds: opts.expiresInSeconds,
+  });
+  // Decode the just-signed claims for the caller without re-verifying —
+  // we trust our own emission.
+  const [, claimsB64] = token.split(".");
+  const claims = JSON.parse(base64UrlDecode(claimsB64).toString("utf8"));
+  return { token, claims };
+}
+
+/**
+ * Verify a JWT according to `authConfig.jwtBackend`. The dispatcher
+ * pre-parses the JOSE header to determine which backend to route to,
+ * then enforces strict header rules at the dispatcher boundary
+ * (alg=none and mixed-case variants rejected unconditionally) before
+ * any signature operation.
+ *
+ * Algorithm-confusion defense: each backend is told which algorithm it
+ * supports. HMAC verify rejects ES256 tokens; KMS verify rejects HS256
+ * tokens. We never use the alg claim to choose a cryptographic
+ * operation — we use it only to route to the configured backend.
+ */
+export async function verifyTokenFromConfig(token, authConfig) {
+  if (!authConfig || typeof authConfig !== "object") {
+    throw new ConfigError("verifyTokenFromConfig: authConfig is required.");
+  }
+  if (typeof token !== "string" || token.length === 0) {
+    throw new AuthenticationError("Missing token.", "missing_token");
+  }
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    throw new AuthenticationError("Malformed token.", "malformed_token");
+  }
+  const [headerPart] = parts;
+
+  let header;
+  try {
+    header = JSON.parse(base64UrlDecode(headerPart).toString("utf8"));
+  } catch {
+    throw new AuthenticationError("Invalid token header.", "malformed_token");
+  }
+  if (!header || typeof header !== "object" || Array.isArray(header)) {
+    throw new AuthenticationError("Invalid token header.", "malformed_token");
+  }
+
+  // Exact-match alg comparison — anything other than the two supported
+  // values is rejected here, BEFORE we touch the signature. Catches
+  // "none" / "None" / "NONE" / lowercase variants in one place. The
+  // per-backend code re-checks alg as defense-in-depth but the dispatcher
+  // is the canonical gate.
+  const alg = header.alg;
+  if (alg === "none" || alg === "None" || alg === "NONE") {
+    throw new AuthenticationError(
+      `Unsupported token algorithm "${alg}".`,
+      "unsupported_alg",
+    );
+  }
+
+  const backend = authConfig.jwtBackend ?? "hmac";
+
+  if (alg === "HS256") {
+    if (backend === "kms") {
+      throw new AuthenticationError(
+        `alg HS256 not supported in JWT_BACKEND=kms mode.`,
+        "unsupported_alg",
+      );
+    }
+    // hmac / both → existing HMAC path; verifyToken handles header.typ
+    // and signature rotation against authConfig.secrets.
+    return verifyToken(token, { secrets: authConfig.secrets });
+  }
+
+  if (alg === "ES256") {
+    if (backend === "hmac") {
+      throw new AuthenticationError(
+        `alg ES256 not supported in JWT_BACKEND=hmac mode.`,
+        "unsupported_alg",
+      );
+    }
+    // kms / both → KmsJwtSigner.verify enforces header.typ, kid,
+    // forbidden headers (jku/jwk/x5u/x5c/crit), the signature, and
+    // all claims-validation rules from design doc §6. verifyEs256
+    // lazy-imports the signer module on first call so HMAC-only
+    // deploys never pay the @aws-sdk/client-kms import cost. The
+    // dispatcher is async to accommodate that — the middleware
+    // call site already awaits, so this is invisible to callers.
+    return await verifyEs256(token, authConfig);
+  }
+
+  throw new AuthenticationError(
+    `Unsupported token algorithm "${alg}".`,
+    "unsupported_alg",
+  );
+}
+
+async function verifyEs256(token, authConfig) {
+  const signer = await getKmsSigner(authConfig);
+  try {
+    const claims = signer.verify(token);
+    // Bridge ES256's singular `role` claim (per design doc §6) to the
+    // plural `roles` array that the rest of the auth stack expects
+    // (capabilities.resolveCapabilities, config.hasRole, middleware
+    // expandCapabilities — all read claims.roles). The HS256 path
+    // already produces roles: array via the SIWE handler; this keeps
+    // downstream code algorithm-agnostic. If the token already carries
+    // a `roles` array (e.g., a future multi-role variant), we leave it
+    // untouched — `role` is the canonical ES256 shape but we don't
+    // forbid `roles` if present.
+    if (typeof claims.role === "string" && !Array.isArray(claims.roles)) {
+      claims.roles = [claims.role];
+    }
+    return claims;
+  } catch (err) {
+    // KmsJwtSigner throws plain Error objects with explanatory
+    // messages. Convert to AuthenticationError so the HTTP layer
+    // returns 401 / the right error envelope, matching how the HMAC
+    // path's AuthenticationError flows through middleware.js.
+    throw new AuthenticationError(
+      err?.message ?? "Token verification failed.",
+      classifyKmsVerifyError(err),
+    );
+  }
+}
+
+function classifyKmsVerifyError(err) {
+  const msg = String(err?.message ?? "");
+  if (/expired/iu.test(msg)) return "token_expired";
+  if (/not yet valid/iu.test(msg)) return "token_nbf_future";
+  if (/issued in the future/iu.test(msg)) return "token_iat_future";
+  if (/signature mismatch/iu.test(msg)) return "bad_signature";
+  if (/malformed token|malformed JWS|invalid header|invalid claims|invalid signature/iu.test(msg)) {
+    return "malformed_token";
+  }
+  if (/unsupported alg|unsupported typ/iu.test(msg)) return "unsupported_alg";
+  if (/forbidden header/iu.test(msg)) return "unsupported_alg";
+  if (/kid .* not in allowlist|kid header/iu.test(msg)) return "unknown_kid";
+  if (/unexpected iss|unexpected aud/iu.test(msg)) return "claims_mismatch";
+  if (/role .* not in allowlist/iu.test(msg)) return "role_not_allowed";
+  if (/sub claim|jti missing|jti .* UUIDv4|exp - iat|iat claim|nbf claim|exp claim/iu.test(msg)) {
+    return "claims_mismatch";
+  }
+  return "bad_signature";
 }
 
 function sign(input, secret) {

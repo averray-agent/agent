@@ -14,6 +14,12 @@ export class ValidationError extends AppError {
   }
 }
 
+export class InvalidSubmissionShapeError extends AppError {
+  constructor(message, details = undefined) {
+    super(message, { name: "InvalidSubmissionShapeError", code: "invalid_submission_shape", statusCode: 400, details });
+  }
+}
+
 export class NotFoundError extends AppError {
   constructor(message, code = "not_found", details = undefined) {
     super(message, { name: "NotFoundError", code, statusCode: 404, details });
@@ -35,6 +41,20 @@ export class ConfigError extends AppError {
 export class ExternalServiceError extends AppError {
   constructor(message, code = "upstream_failure", details = undefined) {
     super(message, { name: "ExternalServiceError", code, statusCode: 502, details });
+  }
+}
+
+export class ChainBackendRequiredError extends AppError {
+  constructor(reason, details = undefined) {
+    super("Chain backend is required for this mutation.", {
+      name: "ChainBackendRequiredError",
+      code: "chain_backend_required",
+      statusCode: 503,
+      details: {
+        reason,
+        ...(details ?? {})
+      }
+    });
   }
 }
 

@@ -21,6 +21,7 @@
 ## Recommended environment variables
 
 - `REDIS_NAMESPACE=agent-platform`
+- `DISCOVERY_REGISTRY_ADDRESS`
 - `PORT`
   Render sets this automatically for web services.
 

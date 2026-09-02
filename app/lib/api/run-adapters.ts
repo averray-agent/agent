@@ -5,8 +5,12 @@ import type { RunState, Tier } from "@/components/runs/StatePill";
 import type {
   GitHubJobContext,
   JobSource,
+  OpenDataJobContext,
+  OsvJobContext,
   WikipediaJobContext,
 } from "@/components/runs/types";
+import { buildJobLifecycle } from "@/lib/api/job-lifecycle";
+import { buildClaimSummary } from "@/lib/api/claim-status";
 
 type RawRecord = Record<string, unknown>;
 
@@ -166,6 +170,143 @@ export function buildJobSource(job: unknown): JobSource | undefined {
       ...(score !== undefined ? { score } : {}),
     };
   }
+  if (sourceType === "osv_advisory") {
+    const provider = text(src.provider, "osv");
+    const ecosystem = text(src.ecosystem, "npm");
+    const packageName = text(src.packageName);
+    const vulnerableVersion = text(src.vulnerableVersion);
+    const fixedVersion = text(src.fixedVersion);
+    const repo = text(src.repo);
+    const manifestPath = text(src.manifestPath);
+    const advisoryId = text(src.advisoryId);
+    if (
+      !packageName ||
+      !vulnerableVersion ||
+      !fixedVersion ||
+      !repo ||
+      !manifestPath ||
+      !advisoryId
+    ) {
+      return undefined;
+    }
+    const stringList = (value: unknown): string[] | undefined => {
+      if (!Array.isArray(value)) return undefined;
+      const arr = value.filter(
+        (item): item is string => typeof item === "string" && item.trim() !== ""
+      );
+      return arr.length ? arr : undefined;
+    };
+    return {
+      type: "osv_advisory",
+      provider,
+      ecosystem,
+      packageName,
+      vulnerableVersion,
+      fixedVersion,
+      repo,
+      manifestPath,
+      advisoryId,
+      ...(stringList(src.aliases) ? { aliases: stringList(src.aliases)! } : {}),
+      ...(stringList(src.cves) ? { cves: stringList(src.cves)! } : {}),
+      ...(stringList(src.nvdUrls) ? { nvdUrls: stringList(src.nvdUrls)! } : {}),
+      ...(text(src.summary) ? { summary: text(src.summary) } : {}),
+      ...(text(src.details) ? { details: text(src.details) } : {}),
+      ...(stringList(src.references)
+        ? { references: stringList(src.references)! }
+        : {}),
+      ...(text(src.severity) ? { severity: text(src.severity) } : {}),
+      ...(text(src.published) ? { published: text(src.published) } : {}),
+      ...(text(src.modified) ? { modified: text(src.modified) } : {}),
+      ...(typeof src.score === "number" ? { score: src.score } : {}),
+      ...(text(src.discoveryApi) ? { discoveryApi: text(src.discoveryApi) } : {}),
+    };
+  }
+  if (sourceType === "open_data_dataset") {
+    const provider = text(src.provider, "data.gov");
+    const datasetTitle = text(src.datasetTitle);
+    const datasetUrl = text(src.datasetUrl);
+    const resourceUrl = text(src.resourceUrl);
+    if (!datasetTitle || !datasetUrl || !resourceUrl) return undefined;
+    return {
+      type: "open_data_dataset",
+      provider,
+      ...(text(src.portal) ? { portal: text(src.portal) } : {}),
+      ...(text(src.datasetId) ? { datasetId: text(src.datasetId) } : {}),
+      datasetTitle,
+      datasetUrl,
+      ...(text(src.resourceId) ? { resourceId: text(src.resourceId) } : {}),
+      ...(text(src.resourceTitle)
+        ? { resourceTitle: text(src.resourceTitle) }
+        : {}),
+      resourceUrl,
+      ...(text(src.resourceFormat)
+        ? { resourceFormat: text(src.resourceFormat) }
+        : {}),
+      ...(text(src.agency) ? { agency: text(src.agency) } : {}),
+      ...(text(src.license) ? { license: text(src.license) } : {}),
+      ...(text(src.modified) ? { modified: text(src.modified) } : {}),
+      ...(text(src.metadataModified)
+        ? { metadataModified: text(src.metadataModified) }
+        : {}),
+      ...(typeof src.score === "number" ? { score: src.score } : {}),
+      ...(text(src.discoveryApi)
+        ? { discoveryApi: text(src.discoveryApi) }
+        : {}),
+    };
+  }
+  if (sourceType === "openapi_spec") {
+    const specId = text(src.specId);
+    const apiTitle = text(src.apiTitle);
+    const provider = text(src.provider);
+    const specUrl = text(src.specUrl);
+    if (!specId || !apiTitle || !provider || !specUrl) return undefined;
+    return {
+      type: "openapi_spec",
+      specId,
+      apiTitle,
+      provider,
+      specUrl,
+      ...(text(src.finalUrl) ? { finalUrl: text(src.finalUrl) } : {}),
+      ...(text(src.documentVersion)
+        ? { documentVersion: text(src.documentVersion) }
+        : {}),
+      ...(text(src.openapiVersion)
+        ? { openapiVersion: text(src.openapiVersion) }
+        : {}),
+      ...(text(src.repo) ? { repo: text(src.repo) } : {}),
+      ...(typeof src.pathCount === "number" ? { pathCount: src.pathCount } : {}),
+      ...(typeof src.operationCount === "number"
+        ? { operationCount: src.operationCount }
+        : {}),
+      ...(typeof src.schemaCount === "number"
+        ? { schemaCount: src.schemaCount }
+        : {}),
+      ...(typeof src.score === "number" ? { score: src.score } : {}),
+    };
+  }
+  if (sourceType === "standards_spec") {
+    const specId = text(src.specId);
+    const specTitle = text(src.specTitle);
+    const provider = text(src.provider);
+    const specUrl = text(src.specUrl);
+    if (!specId || !specTitle || !provider || !specUrl) return undefined;
+    return {
+      type: "standards_spec",
+      specId,
+      specTitle,
+      provider,
+      specUrl,
+      ...(text(src.finalUrl) ? { finalUrl: text(src.finalUrl) } : {}),
+      ...(text(src.expectedStatus)
+        ? { expectedStatus: text(src.expectedStatus) }
+        : {}),
+      ...(text(src.currentVersion)
+        ? { currentVersion: text(src.currentVersion) }
+        : {}),
+      ...(text(src.repo) ? { repo: text(src.repo) } : {}),
+      ...(typeof src.score === "number" ? { score: src.score } : {}),
+    };
+  }
   return undefined;
 }
 
@@ -247,6 +388,96 @@ export function buildWikipediaContext(
   };
 }
 
+/**
+ * Mirror of `buildGitHubContext` for OSV dependency-remediation runs.
+ * Returns undefined for any non-OSV row so the panel falls back to the
+ * generic layout. Defaults bake in the focused-PR verification path
+ * since OSV jobs are always "open one PR that bumps the vulnerable
+ * package and updates lockfiles + tests".
+ */
+export function buildOsvContext(
+  row: Pick<RunRow, "source" | "title">,
+  job: unknown
+): OsvJobContext | undefined {
+  if (row.source?.type !== "osv_advisory") return undefined;
+  const record = asRecord(job);
+  const verification = asRecord(record.verification);
+  const verificationMethod = text(verification.method, "osv_dependency_pr");
+  const verificationSignals = Array.isArray(verification.signals)
+    ? verification.signals.filter(
+        (signal): signal is string => typeof signal === "string"
+      )
+    : [
+        "PR opened against the vulnerable manifest",
+        "Lockfile updated to fixed version",
+        "Install + test evidence attached",
+      ];
+  const acceptance = Array.isArray(record.acceptanceCriteria)
+    ? record.acceptanceCriteria.filter(
+        (item): item is string => typeof item === "string"
+      )
+    : [];
+
+  return {
+    ...row.source,
+    title: text(record.title, row.title),
+    category: text(record.category, "security"),
+    body: text(
+      record.description,
+      text(record.body, row.source.summary ?? "")
+    ),
+    acceptanceCriteria: acceptance,
+    agentInstructions: textOrLines(record.agentInstructions),
+    verification: { method: verificationMethod, signals: verificationSignals },
+  };
+}
+
+/**
+ * Mirror of `buildOsvContext` for open-data dataset quality-audit runs.
+ * Returns undefined for any non-open-data row so the panel falls back to
+ * the generic layout. Defaults bake in the audit-only verification path
+ * since the platform never edits source data and never contacts the
+ * publishing agency from this workflow.
+ */
+export function buildOpenDataContext(
+  row: Pick<RunRow, "source" | "title">,
+  job: unknown
+): OpenDataJobContext | undefined {
+  if (row.source?.type !== "open_data_dataset") return undefined;
+  const record = asRecord(job);
+  const verification = asRecord(record.verification);
+  const verificationMethod = text(
+    verification.method,
+    "open_data_quality_audit"
+  );
+  const verificationSignals = Array.isArray(verification.signals)
+    ? verification.signals.filter(
+        (signal): signal is string => typeof signal === "string"
+      )
+    : [
+        "Dataset URL reachable",
+        "Resource URL reachable",
+        "Checks performed",
+        "Findings or no_issue_found recorded",
+        "Recommended actions present",
+      ];
+  const acceptance = Array.isArray(record.acceptanceCriteria)
+    ? record.acceptanceCriteria.filter(
+        (item): item is string => typeof item === "string"
+      )
+    : [];
+
+  return {
+    ...row.source,
+    title: text(record.title, row.title),
+    category: text(record.category, "data"),
+    body: text(record.description, text(record.body, "")),
+    acceptanceCriteria: acceptance,
+    agentInstructions: textOrLines(record.agentInstructions),
+    verification: { method: verificationMethod, signals: verificationSignals },
+  };
+}
+
 export function extractRunJobs(payload: unknown): RawRecord[] {
   return asArray(payload);
 }
@@ -262,20 +493,94 @@ export function buildRunRows(payload: unknown): RunRow[] {
     // For ingested-source jobs the row already shows the upstream
     // identity (owner/repo #N for GitHub, lang.wikipedia/page for
     // Wikipedia) via the SourceBadge, so drop the redundant job-id
-    // slug from jobMeta to keep the meta line scannable. Native jobs
+    // slug from jobMeta to keep the meta line scannable. Wikipedia
+    // rows additionally swap the job's own `category` (always
+    // "wikipedia", duplicating the SourceBadge) for the more specific
+    // task type so the meta line carries new signal. Native jobs
     // keep the full `id · category · tier` because there's no other
     // provenance signal.
-    const isIngested =
-      source?.type === "github_issue" || source?.type === "wikipedia_article";
-    const jobMeta = isIngested
-      ? `${text(job.category, "work")} · ${tierFromRaw(job.tier)}`
-      : `${id} · ${text(job.category, "work")} · ${tierFromRaw(job.tier)}`;
+    const tier = tierFromRaw(job.tier);
+    const category = text(job.category, "work");
+    // Source-aware meta: surface the most specific identity the row
+    // already shows visually (lang.wikipedia / page, owner/repo,
+    // ecosystem / package · advisory) and avoid re-printing the
+    // SourceBadge label as text. OSV in particular avoids the generic
+    // "security" category — operators want to scan
+    // `npm / minimist · GHSA-...` instead.
+    const jobMeta =
+      source?.type === "wikipedia_article"
+        ? `${source.taskType.replace(/_/g, " ")} · ${tier}`
+        : source?.type === "github_issue"
+          ? `${category} · ${tier}`
+          : source?.type === "osv_advisory"
+            ? `${source.ecosystem} / ${source.packageName} · ${source.advisoryId} · ${tier}`
+            : source?.type === "open_data_dataset"
+              ? // Spec: `Data.gov · <agency> · <resource_format> · quality
+                // audit`. Agency and format are optional in the catalog;
+                // drop the missing parts and any leading/trailing
+                // separators so the meta line never reads
+                // `Data.gov ·  ·  · quality audit`.
+                [
+                  "Data.gov",
+                  source.agency,
+                  source.resourceFormat,
+                  "quality audit",
+                  tier,
+                ]
+                  .filter(
+                    (part): part is string =>
+                      typeof part === "string" && part.length > 0
+                  )
+                  .join(" · ")
+              : source?.type === "openapi_spec"
+                ? // OpenAPI audit row meta: `<provider> / <openapi
+                  // version> · <op count> ops · quality audit · T*`.
+                  // Drop missing pieces gracefully.
+                  [
+                    source.provider,
+                    source.openapiVersion
+                      ? `OpenAPI ${source.openapiVersion}`
+                      : undefined,
+                    typeof source.operationCount === "number"
+                      ? `${source.operationCount} ops`
+                      : undefined,
+                    "quality audit",
+                    tier,
+                  ]
+                    .filter(
+                      (part): part is string =>
+                        typeof part === "string" && part.length > 0
+                    )
+                    .join(" · ")
+                : source?.type === "standards_spec"
+                  ? // Standards-freshness row meta: `<provider> · <expected
+                    // status> · freshness audit · T*`.
+                    [
+                      source.provider.toUpperCase(),
+                      source.expectedStatus,
+                      "freshness audit",
+                      tier,
+                    ]
+                      .filter(
+                        (part): part is string =>
+                          typeof part === "string" && part.length > 0
+                      )
+                      .join(" · ")
+                  : `${id} · ${category} · ${tier}`;
+    const lifecycle = buildJobLifecycle(job.lifecycle);
+    // Compact claim block read straight off the row. The backend
+    // documents `claimabilitySource: "claimStatus"` — claimable rows
+    // and pills must derive from this, never from `lifecycle.status`
+    // alone (a row can be lifecycle.open + claim.exhausted).
+    const claim = buildClaimSummary(job);
     return {
       id,
       sessionId: text(job.sessionId),
       title,
       jobMeta,
       ...(source ? { source } : {}),
+      ...(lifecycle ? { lifecycle } : {}),
+      ...(claim ? { claim } : {}),
       worker: {
         variant: worker ? "a" : "unclaimed",
         initials: worker ? "AG" : "-",
@@ -284,24 +589,84 @@ export function buildRunRows(payload: unknown): RunRow[] {
       state,
       stake: formatReward(job.stake ?? job.rewardAmount),
       age: formatWindow(job.claimTtlSeconds),
+      // The SourceBadge already shows where the row came from, so the
+      // lastEvent line carries the work *kind* instead of restating the
+      // source. The previous "Ingested from Wikipedia · proposal-only"
+      // truncated to "Inge…" in narrow queue columns and lost all
+      // signal.
       lastEvent:
         source?.type === "github_issue"
           ? state === "ready"
-            ? "Ingested from GitHub"
+            ? "Issue triage"
             : `State: ${state}`
           : source?.type === "wikipedia_article"
             ? state === "ready"
-              ? "Ingested from Wikipedia · proposal-only"
+              ? "Proposal-only"
               : `State: ${state}`
-            : state === "ready"
-              ? "Job listed"
-              : `State: ${state}`,
+            : source?.type === "osv_advisory"
+              ? state === "ready"
+                ? "Dependency remediation"
+                : `State: ${state}`
+              : source?.type === "open_data_dataset"
+                ? state === "ready"
+                  ? "Audit only"
+                  : `State: ${state}`
+                : source?.type === "openapi_spec"
+                  ? state === "ready"
+                    ? "Quality audit"
+                    : `State: ${state}`
+                  : source?.type === "standards_spec"
+                    ? state === "ready"
+                      ? "Freshness audit"
+                      : `State: ${state}`
+                    : state === "ready"
+                      ? "Job listed"
+                      : `State: ${state}`,
       lastEventMeta:
         source?.type === "github_issue"
           ? `${source.repo} #${source.issueNumber} · verifier ${verifierLabel(job.verifierMode)}`
           : source?.type === "wikipedia_article"
             ? `${source.language}.wikipedia · rev ${source.revisionId} · ${source.taskType.replace(/_/g, " ")}`
-            : `${text(job.rewardAsset, "DOT")} · verifier ${verifierLabel(job.verifierMode)}`,
+            : source?.type === "osv_advisory"
+              ? `${source.repo} · ${source.manifestPath} · ${source.vulnerableVersion} → ${source.fixedVersion}`
+              : source?.type === "open_data_dataset"
+                ? // Same graceful-degrade rule as jobMeta: drop missing
+                  // optional parts so the meta never has empty bullets.
+                  [source.agency, source.resourceFormat, source.datasetTitle]
+                    .filter(
+                      (part): part is string =>
+                        typeof part === "string" && part.length > 0
+                    )
+                    .join(" · ") ||
+                  `verifier ${verifierLabel(job.verifierMode)}`
+                : source?.type === "openapi_spec"
+                  ? [
+                      source.apiTitle,
+                      source.documentVersion
+                        ? `v${source.documentVersion}`
+                        : undefined,
+                      typeof source.pathCount === "number"
+                        ? `${source.pathCount} paths`
+                        : undefined,
+                    ]
+                      .filter(
+                        (part): part is string =>
+                          typeof part === "string" && part.length > 0
+                      )
+                      .join(" · ") ||
+                    `verifier ${verifierLabel(job.verifierMode)}`
+                  : source?.type === "standards_spec"
+                    ? [
+                        source.specTitle,
+                        source.expectedStatus,
+                      ]
+                        .filter(
+                          (part): part is string =>
+                            typeof part === "string" && part.length > 0
+                        )
+                        .join(" · ") ||
+                      `verifier ${verifierLabel(job.verifierMode)}`
+                    : `${text(job.rewardAsset, "DOT")} · verifier ${verifierLabel(job.verifierMode)}`,
     };
   });
 }
@@ -330,10 +695,37 @@ export function buildRecommendationCards(
 
     const source = buildJobSource(job);
     const category = text(job.category, "work");
+    // Recommendation card subtitle. OSV runs are most identifiable by
+    // ecosystem/package + advisory id — `npm / minimist · GHSA-...` —
+    // so the card shows that instead of the generic "security"
+    // category. GitHub/Wikipedia keep their existing single-token
+    // category subtitle (the SourceBadge already supplies the
+    // platform identity).
+    const jobMeta =
+      source?.type === "osv_advisory"
+        ? `${source.ecosystem} / ${source.packageName} · ${source.advisoryId}`
+        : source?.type === "open_data_dataset"
+          ? [
+              "Data.gov",
+              source.agency,
+              source.resourceFormat,
+              "quality audit",
+            ]
+              .filter(
+                (part): part is string =>
+                  typeof part === "string" && part.length > 0
+              )
+              .join(" · ")
+          : category;
+    const isIngested =
+      source?.type === "github_issue" ||
+      source?.type === "wikipedia_article" ||
+      source?.type === "osv_advisory" ||
+      source?.type === "open_data_dataset";
     return {
       id,
       title: text(job.title, text(job.description, titleFromId(id))),
-      jobMeta: category,
+      jobMeta,
       category,
       ...(source ? { source } : {}),
       rewardValue: formatReward(recommendation.netReward ?? job.rewardAmount),
@@ -347,22 +739,25 @@ export function buildRecommendationCards(
         { label: "Verifier", value: verifierLabel(job.verifierMode) },
         { label: "Window", value: formatWindow(job.claimTtlSeconds), accent: true },
         {
-          label:
-            source?.type === "github_issue" ||
-            source?.type === "wikipedia_article"
-              ? "Fit score"
-              : "Gas",
-          value:
-            source?.type === "github_issue" ||
-            source?.type === "wikipedia_article"
-              ? `${source.score ?? fitScore}/100`
-              : job.requiresSponsoredGas
-                ? "sponsored"
-                : "worker",
+          label: isIngested ? "Fit score" : "Gas",
+          value: isIngested
+            ? `${
+                (source && "score" in source && typeof source.score === "number"
+                  ? source.score
+                  : fitScore)
+              }/100`
+            : job.requiresSponsoredGas
+              ? "sponsored"
+              : "worker",
         },
       ],
       fit,
       hot: index === 0,
+      // Pass the live claim contract through so the JobCard's Claim
+      // button gates correctly on the rail. Recommendation rows are
+      // joined to the job feed by id above (`lookupJob`), so the
+      // contract is already present when the backend emits it.
+      ...(buildClaimSummary(job) ? { claim: buildClaimSummary(job)! } : {}),
     };
   });
 }

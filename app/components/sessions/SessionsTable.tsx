@@ -3,6 +3,8 @@
 import { cn } from "@/lib/utils/cn";
 import { SessionStatePill, VerifierModeChip } from "./pills";
 import { WorkerChip } from "./WorkerChip";
+import { OutcomeRationaleInline } from "@/components/common/OutcomeRationaleInline";
+import { SourceBadge } from "@/components/runs/StatePill";
 import type { SessionDetail } from "./types";
 
 export interface SessionsTableProps {
@@ -36,7 +38,7 @@ export function SessionsTable({
         <table className="w-full border-collapse font-[family-name:var(--font-body)] text-[13px]">
           <thead>
             <tr>
-              <Th width={140}>Session · run</Th>
+              <Th width={140}>Session id · run</Th>
               <Th>Job</Th>
               <Th>Worker</Th>
               <Th align="right" width={110}>Escrow</Th>
@@ -54,7 +56,9 @@ export function SessionsTable({
                   className="p-8 text-center font-[family-name:var(--font-mono)] text-[13px] text-[var(--avy-muted)]"
                   style={{ letterSpacing: 0 }}
                 >
-                  No sessions match these filters.
+                  {totalCount === 0
+                    ? "No worker sessions have been observed yet."
+                    : "No sessions match these filters."}
                 </td>
               </tr>
             ) : (
@@ -84,8 +88,11 @@ export function SessionsTable({
                       </div>
                     </Td>
                     <Td>
-                      <div className="text-[13px] leading-tight text-[var(--avy-ink)]">
-                        {s.job.title}
+                      <div className="flex items-center gap-2">
+                        {s.source ? <SourceBadge kind={s.source} /> : null}
+                        <span className="text-[13px] leading-tight text-[var(--avy-ink)]">
+                          {s.job.title}
+                        </span>
                       </div>
                       <div
                         className="mt-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
@@ -150,6 +157,9 @@ export function SessionsTable({
                       >
                         {s.lastEvent.meta}
                       </div>
+                      {s.outcomeRationale ? (
+                        <OutcomeRationaleInline rationale={s.outcomeRationale} compact />
+                      ) : null}
                     </Td>
                   </tr>
                 );
@@ -165,11 +175,12 @@ export function SessionsTable({
       >
         <span>
           Showing <b className="font-semibold text-[var(--avy-ink)]">{rows.length}</b> of{" "}
-          <b className="font-semibold text-[var(--avy-ink)]">1,284</b>
+          <b className="font-semibold text-[var(--avy-ink)]">{totalCount.toLocaleString()}</b>
         </span>
         <button
           type="button"
-          className="cursor-pointer border-b border-dashed border-[color:rgba(30,102,66,0.4)] pb-px text-[var(--avy-accent)] hover:text-[var(--avy-accent-2)]"
+          disabled
+          className="cursor-not-allowed border-b border-dashed border-[color:rgba(30,102,66,0.25)] pb-px text-[var(--avy-muted)] opacity-70"
         >
           load more
         </button>

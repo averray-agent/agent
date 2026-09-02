@@ -20,10 +20,14 @@ Recommended starting values:
 
 | Env var | Human value | Raw value | Why this starts conservative |
 |---|---:|---:|---|
-| `DAILY_OUTFLOW_CAP` | `250 DOT` | `250000000000000000000` | Limits aggregate damage from a bad verifier, bad operator flow, or mistaken config in the first launch phase. |
-| `BORROW_CAP` | `25 DOT` per account | `25000000000000000000` | High enough to help a good worker bridge claim stake, low enough that one account cannot lever the system hard. |
+| `DAILY_OUTFLOW_CAP` | `250 USDC` | `250000000` | Limits aggregate damage from a bad verifier, bad operator flow, or mistaken config in the first launch phase. |
+| `BORROW_CAP` | `25 USDC` per account | `25000000` | High enough to help a good worker bridge claim stake, low enough that one account cannot lever the system hard. |
 | `MIN_COLLATERAL_RATIO_BPS` | `20000` (200%) | `20000` | More conservative than the current 150% testnet setting while liquidation does not yet exist. |
 | `DEFAULT_CLAIM_STAKE_BPS` | `1000` (10%) | `1000` | Doubles worker skin-in-the-game versus testnet without making starter jobs unusable. |
+| `ONBOARDING_WAIVER_CLAIM_COUNT` | `3 claims` | `3` | Lets a new SIWE wallet earn its first USDC before paying stake or anti-spam fees. |
+| `CLAIM_FEE_BPS` | `200` (2%) | `200` | Adds refundable anti-spam friction after onboarding without changing worker net cost on success. |
+| `MIN_CLAIM_FEE` | `0.05 USDC` | `50000` | Keeps tiny funded jobs from being free to spam once onboarding is used. |
+| `CLAIM_FEE_VERIFIER_BPS` | `7000` (70%) | `7000` | Sends most failed-claim fee flow to verifier compensation; remainder supports treasury operations. |
 | `REJECTION_SKILL_PENALTY` | `10` | `10` | Keeps ordinary rejection meaningful without making recovery impossible. |
 | `REJECTION_RELIABILITY_PENALTY` | `25` | `25` | Makes failed runs hurt reliability more than pure skill, which better reflects operator trust. |
 | `DISPUTE_LOSS_SKILL_PENALTY` | `35` | `35` | Escalates the cost when the worker pushes a disputed submission and loses. |
@@ -40,32 +44,46 @@ These values should be treated as the **baseline launch policy** until:
 
 ## 2. Why these numbers
 
-### Daily outflow cap — `250 DOT`
+### Daily outflow cap — `250 USDC`
+
+> **⛔ DO NOT ARM A FINITE `DAILY_OUTFLOW_CAP` YET — audit-2 [H-1](MAINNET_AUDIT_2_REMEDIATION.md).**
+> As currently wired, `recordOutflow` meters internal `reserved → liquid` settlements (which move
+> **no** tokens) and is **never** called by `withdraw()` (the real ERC20 egress). A finite `250 USDC`
+> cap would therefore (a) do **nothing** to stop actual capital flight and (b) **self-DoS every
+> settlement/slash** once a day's *settlement volume* exceeds 250 USDC — freezing payouts until UTC
+> midnight while moving no funds. The `type(uint256).max` default is the only reason the system is
+> not already self-DoS-able. The breaker must be **re-implemented to meter real egress** (Codex,
+> audit-2 H-1) **before** this value is set to anything finite.
 
 The cap should be small enough that a policy or verifier mistake is
 painful but not existential. At the current product maturity, the right
 question is not "what is the most volume we can support?" but "what is
 the largest single-day mistake we are willing to absorb?".
 
-`250 DOT` is a launch-phase circuit breaker, not a forever ceiling.
+`250 USDC` is a launch-phase circuit breaker, not a forever ceiling.
 Raise it only after:
 
 - several successful production settlement cycles
 - alerting and incident ownership are live
 - operator rehearsals have been repeated on the exact deploy profile
 
-### Borrow cap — `25 DOT` per account
+### Borrow cap — `25 USDC` per account
 
 The current borrow model is flat, not reputation-weighted. That means the
 cap itself is doing most of the risk control.
 
-`25 DOT` is enough for the intended v1 use case:
+`25 USDC` is enough for the intended v1 use case:
 
 - bridging claim stake for a higher-tier job
 
 It is not large enough to treat the protocol like open-ended leverage.
 That is the right trade-off until liquidations and reputation-weighted
 credit policy exist.
+
+The contract path also treats native borrow as balance-sheet credit, not as
+cash sourced from an external lender reserve: debt-backed liquid balance cannot
+be withdrawn externally, and successful job payouts repay outstanding debt
+before any surplus becomes liquid account balance.
 
 ### Minimum collateral ratio — `200%`
 
@@ -76,6 +94,10 @@ stricter at origination.
 Moving from `150%` on testnet to `200%` on mainnet gives more room for
 operational mistakes and stale assumptions.
 
+This ratio is paired with debt-gated withdrawals and debt-first settlement.
+Do not loosen it until production settlement data, liquidation policy, and
+reputation-weighted caps are all available.
+
 ### Claim stake — `10%`
 
 The current `5%` testnet setting is useful for easy demos, but it is soft
@@ -84,6 +106,18 @@ submissions costlier without making ordinary work inaccessible.
 
 If this proves too heavy for early worker adoption, loosen it only after
 real session data justifies the change.
+
+### Onboarding waiver and claim fee
+
+The first three claims waive both stake and fee so a new agent can earn
+the USDC needed to become self-funding. From claim four onward, the worker
+locks both the substantive claim stake and a refundable anti-spam fee.
+
+The fee is `max(2% of payout, 0.05 USDC)` for USDC-denominated launch jobs.
+It is returned on verified success. On no-show or rejected submission, it
+is slashed separately from the claim stake: 70% to the verifier path when
+there is a verifier recipient, and the remainder to platform treasury. A
+no-show has no verifier recipient, so the fee routes fully to treasury.
 
 ### Slash penalties
 
@@ -112,6 +146,31 @@ Before a mainnet deploy:
 - replace the placeholder role addresses with the final owner, pauser,
   verifier, and arbitrator addresses
 - confirm the values still match this document
+- run the static USDC launch config guard:
+  ```bash
+  node scripts/ops/check-mainnet-usdc-config.mjs \
+    --env /path/to/private-mainnet.env
+  ```
+- before sign-off, capture Polkadot Hub mainnet runtime evidence for USDC
+  and rerun the guard with `--runtime-evidence ... --require-runtime`
+- capture redacted mainnet env/secrets evidence and validate that no testnet
+  secret material, raw-key fallback, or over-broad service token scope made it
+  into the launch configuration:
+  ```bash
+  node scripts/ops/check-mainnet-env-secrets-proof.mjs \
+    --file docs/evidence/mainnet-env-secrets-YYYY-MM-DD.json \
+    --max-completed-age-hours 24 \
+    --json
+  ```
+- after contracts, roles, service operators, asset config, and secrets are
+  final, run at least three low-value mainnet claim/submit/settle smokes and
+  validate the redacted evidence:
+  ```bash
+  node scripts/ops/check-mainnet-smoke-proof.mjs \
+    --file docs/evidence/mainnet-smoke-YYYY-MM-DD.json \
+    --max-completed-age-hours 24 \
+    --json
+  ```
 - run the multisig and pause rehearsals from
   [MULTISIG_SETUP.md](./MULTISIG_SETUP.md)
 - run the release gate and deployment verification from
@@ -149,5 +208,11 @@ Before using this profile on mainnet, confirm:
 - [ ] pauser hot key is final
 - [ ] verifier and arbitrator addresses are final
 - [ ] the chosen values are copied into the private deployment env
+- [ ] USDC asset config validates with
+      `scripts/ops/check-mainnet-usdc-config.mjs`
+- [ ] redacted mainnet env/secrets proof validates with
+      `scripts/ops/check-mainnet-env-secrets-proof.mjs`
+- [ ] three-run low-value mainnet smoke proof validates with
+      `scripts/ops/check-mainnet-smoke-proof.mjs`
 - [ ] audit sign-off still applies to the exact contract set being deployed
 - [ ] no one is assuming the old testnet defaults still apply

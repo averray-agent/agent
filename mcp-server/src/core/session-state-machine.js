@@ -71,18 +71,7 @@ const STATUS_METADATA = {
 
 export function transitionSession(session, nextStatus, { reason, timestamp = new Date().toISOString(), metadata = undefined } = {}) {
   const currentStatus = session?.status ?? "__new__";
-  if (currentStatus === nextStatus) {
-    return session;
-  }
-
-  const allowed = ALLOWED_TRANSITIONS.get(currentStatus) ?? new Set();
-  if (!allowed.has(nextStatus)) {
-    throw new ConflictError(
-      `Invalid session transition: ${currentStatus} -> ${nextStatus}`,
-      "invalid_session_transition",
-      { currentStatus, nextStatus, reason }
-    );
-  }
+  assertSessionCanTransition(session, nextStatus, { reason });
 
   const history = [...(session?.statusHistory ?? []), compact({
     from: currentStatus === "__new__" ? null : currentStatus,
@@ -105,6 +94,50 @@ export function transitionSession(session, nextStatus, { reason, timestamp = new
     expiredAt: nextStatus === "expired" ? timestamp : session?.expiredAt,
     timedOutAt: nextStatus === "timed_out" ? timestamp : session?.timedOutAt
   });
+}
+
+export function canTransitionSession(session, nextStatus) {
+  const currentStatus = session?.status ?? "__new__";
+  return (ALLOWED_TRANSITIONS.get(currentStatus) ?? new Set()).has(nextStatus);
+}
+
+export function assertSessionCanTransition(session, nextStatus, { reason = undefined } = {}) {
+  const currentStatus = session?.status ?? "__new__";
+  const allowedTransitions = getAllowedSessionTransitions(currentStatus);
+  if (allowedTransitions.includes(nextStatus)) {
+    return true;
+  }
+  throw new ConflictError(
+    `Invalid session transition: ${currentStatus} -> ${nextStatus}`,
+    "invalid_session_transition",
+    {
+      currentStatus,
+      nextStatus,
+      reason,
+      allowedTransitions,
+      currentPhase: describeSessionStatus(currentStatus).phase,
+      terminal: describeSessionStatus(currentStatus).terminal
+    }
+  );
+}
+
+export function assertSessionCanReceiveVerification(session, { reason = "verification_resolved" } = {}) {
+  const currentStatus = session?.status ?? "__new__";
+  if (currentStatus === "submitted" || currentStatus === "disputed") {
+    return true;
+  }
+  throw new ConflictError(
+    `Session ${session?.sessionId ?? "<unknown>"} cannot receive verification while ${currentStatus}.`,
+    "invalid_session_transition",
+    {
+      currentStatus,
+      nextStatus: "resolved|rejected|disputed",
+      reason,
+      allowedTransitions: getAllowedSessionTransitions(currentStatus),
+      currentPhase: describeSessionStatus(currentStatus).phase,
+      terminal: describeSessionStatus(currentStatus).terminal
+    }
+  );
 }
 
 export function getAllowedSessionTransitions(status = "__new__") {

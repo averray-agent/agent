@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Wallet } from "ethers";
 
 import {
   JobCatalogService,
@@ -7,6 +8,7 @@ import {
   roleRequirements,
   summarizeRoleGate
 } from "./job-catalog-service.js";
+import { buildExternalSchemaRegistrationMessage } from "./job-schema-registry.js";
 
 function makeService(reputation = { skill: 0, reliability: 0, economic: 0, tier: "starter" }) {
   const jobs = [];
@@ -30,6 +32,31 @@ const BASE_JOB = {
   claimTtlSeconds: 3600,
   retryLimit: 1
 };
+
+const EXTERNAL_SCHEMA_SIGNER = new Wallet("0x8b3a350cf5c34c9194ca3a545d0ec67d61f328d6e5d11dd95b9af16e70ec4c63");
+
+async function signedExternalSchemaRegistration(schemaRef = "schema://jobs/external-review-output") {
+  const base = {
+    schemaRef,
+    schemaUrl: "https://schemas.example.com/jobs/external-review-output.json",
+    schema: {
+      $id: schemaRef,
+      type: "object",
+      additionalProperties: false,
+      required: ["summary", "result"],
+      properties: {
+        summary: { type: "string", minLength: 1 },
+        result: { type: "string", enum: ["pass", "fail"] }
+      }
+    },
+    issuer: EXTERNAL_SCHEMA_SIGNER.address,
+    signedAt: "2026-05-23T00:00:00.000Z"
+  };
+  return {
+    ...base,
+    signature: await EXTERNAL_SCHEMA_SIGNER.signMessage(buildExternalSchemaRegistrationMessage(base))
+  };
+}
 
 test("createJob preserves autonomous work metadata", () => {
   const service = makeService();
@@ -71,6 +98,85 @@ test("jobs default to worker work when role fields are omitted", () => {
   assert.equal(job.requiredRole, "worker");
 });
 
+test("job lifecycle hides paused, archived, and stale jobs from public discovery", async () => {
+  const service = makeService();
+  const now = new Date("2026-04-27T10:00:00.000Z");
+  const open = service.createJob({
+    ...BASE_JOB,
+    id: "open-lifecycle-001",
+    lifecycle: {
+      createdAt: "2026-04-27T09:00:00.000Z",
+      updatedAt: "2026-04-27T09:00:00.000Z",
+      staleAt: "2026-05-11T09:00:00.000Z"
+    }
+  });
+  service.createJob({
+    ...BASE_JOB,
+    id: "stale-lifecycle-001",
+    lifecycle: {
+      createdAt: "2026-04-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      staleAt: "2026-04-15T00:00:00.000Z"
+    }
+  });
+
+  assert.equal(open.lifecycle.status, "open");
+  assert.equal(open.lifecycle.staleAt, "2026-05-11T09:00:00.000Z");
+  service.updateJobLifecycle("open-lifecycle-001", { action: "pause", reason: "waiting for provider fix" }, now);
+
+  assert.deepEqual(service.listJobs({ now }).map((job) => job.id), []);
+  assert.deepEqual(
+    service.listJobs({ includePaused: true, includeStale: true, now }).map((job) => [job.id, job.lifecycle.state]),
+    [
+      ["stale-lifecycle-001", "stale"],
+      ["open-lifecycle-001", "paused"]
+    ]
+  );
+
+  const preflight = await service.preflightJob("0xagent", "open-lifecycle-001");
+  assert.equal(preflight.eligible, false);
+  assert.equal(preflight.lifecycle.state, "paused");
+});
+
+test("job lifecycle supports archival and claimability guardrails", () => {
+  const service = makeService();
+  service.createJob({
+    ...BASE_JOB,
+    id: "archive-lifecycle-001",
+    lifecycle: {
+      createdAt: "2026-04-27T09:00:00.000Z",
+      updatedAt: "2026-04-27T09:00:00.000Z",
+      staleAt: "2026-05-11T09:00:00.000Z"
+    }
+  });
+
+  const archived = service.updateJobLifecycle("archive-lifecycle-001", {
+    action: "archive",
+    reason: "superseded"
+  }, new Date("2026-04-27T10:00:00.000Z"));
+
+  assert.equal(archived.lifecycle.state, "archived");
+  assert.throws(
+    () => service.getPublicJobDefinition("archive-lifecycle-001"),
+    /Unknown job: archive-lifecycle-001/
+  );
+  const archivedDefinition = service.getPublicJobDefinition("archive-lifecycle-001", { includeArchived: true });
+  assert.equal(archivedDefinition.id, "archive-lifecycle-001");
+  assert.equal(archivedDefinition.lifecycle.state, "archived");
+  assert.throws(
+    () => service.getClaimableJobDefinition("archive-lifecycle-001"),
+    /not claimable/
+  );
+  assert.deepEqual(service.getJobLifecycleSummary(), {
+    total: 1,
+    open: 0,
+    claimable: 0,
+    stale: 0,
+    paused: 0,
+    archived: 1
+  });
+});
+
 test("createJob accepts github_pr verifier configuration", () => {
   const service = makeService();
   const job = service.createJob({
@@ -85,6 +191,101 @@ test("createJob accepts github_pr verifier configuration", () => {
   assert.equal(job.verifierMode, "github_pr");
   assert.equal(job.verifierConfig.handler, "github_pr");
   assert.equal(job.verifierConfig.minimumScore, 70);
+});
+
+test("public Wikipedia definitions include direct agent affordances", () => {
+  const service = makeService();
+  service.createJob({
+    ...BASE_JOB,
+    id: "wiki-en-123-citation-repair-example",
+    title: "Wikipedia citation repair: Example article",
+    category: "wikipedia",
+    jobType: "review",
+    outputSchemaRef: "schema://jobs/wikipedia-citation-repair-output",
+    acceptanceCriteria: ["Names the page and revision.", "Does not edit Wikipedia directly."],
+    source: {
+      type: "wikipedia_article",
+      project: "wikipedia",
+      language: "en",
+      pageId: 123,
+      pageTitle: "Example article",
+      pageUrl: "https://en.wikipedia.org/wiki/Example_article",
+      revisionId: "987654321",
+      taskType: "citation_repair",
+      attribution: {
+        directEdit: false
+      }
+    }
+  });
+
+  const job = service.getPublicJobDefinition("wiki-en-123-citation-repair-example");
+
+  assert.deepEqual(job.publicDetails, {
+    jobId: "wiki-en-123-citation-repair-example",
+    source: "wikipedia",
+    taskType: "citation_repair",
+    pageTitle: "Example article",
+    lang: "en",
+    revisionId: "987654321",
+    articleUrl: "https://en.wikipedia.org/wiki/Example_article",
+    pinnedRevisionUrl: "https://en.wikipedia.org/w/index.php?title=Example_article&oldid=987654321",
+    acceptanceCriteria: ["Names the page and revision.", "Does not edit Wikipedia directly."],
+    outputSchemaRef: "schema://jobs/wikipedia-citation-repair-output",
+    outputSchemaUrl: "/schemas/jobs/wikipedia-citation-repair-output.json",
+    proposalOnly: true,
+    attributionPolicy: "Averray proposal only / no direct Wikipedia edit"
+  });
+  assert.equal(job.submissionContract.endpoint, "POST /jobs/submit");
+  assert.equal(job.submissionContract.validationEndpoint, "POST /jobs/validate-submission");
+  assert.equal(job.submissionContract.submissionShape, "direct_schema_object");
+  assert.equal(job.submissionContract.structuredSubmissionRequired, true);
+  assert.equal(job.submissionContract.schemaValidates, "payload.submission");
+  assert.equal(job.submissionContract.doNotWrapInOutput, true);
+  assert.deepEqual(job.submissionContract.compatibilityAliases, ["payload.submission.output"]);
+  assert.equal(job.submissionContract.submitPayloadExample.sessionId, "<session-id>");
+  assert.deepEqual(Object.keys(job.submissionContract.submitPayloadExample.submission), [
+    "page_title",
+    "revision_id",
+    "citation_findings",
+    "proposed_changes",
+    "review_notes"
+  ]);
+  assert.equal(job.submissionContract.submitPayloadExample.submission.page_title, "Example article");
+  assert.equal(job.schemaContract.output.validationEndpoint, "POST /jobs/validate-submission");
+  assert.equal(job.schemaContract.output.validates, "payload.submission");
+  assert.equal(job.verificationContract.version, "verification-contract-v1");
+  assert.equal(job.verificationContract.verifierMode, "benchmark");
+  assert.equal(job.verificationContract.handler, "benchmark");
+  assert.equal(job.verificationContract.verifierPolicyVersion, 1);
+  assert.equal(job.verificationContract.verifierConfigVersion, 1);
+  assert.equal(job.verificationContract.replayEndpoint, "POST /verifier/replay");
+  assert.equal(typeof job.verificationContract.verifierConfigHash, "string");
+});
+
+test("createJob exposes signed external schema contracts with trust metadata", async () => {
+  const service = makeService();
+  const registration = await signedExternalSchemaRegistration();
+  const job = service.createJob({
+    ...BASE_JOB,
+    id: "external-schema-review-001",
+    outputSchemaRef: registration.schemaRef,
+    schemaTrustPolicy: {
+      trustedIssuers: [EXTERNAL_SCHEMA_SIGNER.address]
+    },
+    schemaRegistrations: [registration]
+  });
+
+  assert.equal(job.schemaRegistrations[0].schemaRef, registration.schemaRef);
+  assert.equal(job.schemaRegistrations[0].trusted, true);
+  const publicJob = service.getPublicJobDefinition("external-schema-review-001");
+  assert.equal(publicJob.submissionContract.registeredSchema, true);
+  assert.equal(publicJob.submissionContract.outputSchemaUrl, registration.schemaUrl);
+  assert.equal(publicJob.submissionContract.schemaIssuer, EXTERNAL_SCHEMA_SIGNER.address);
+  assert.equal(publicJob.submissionContract.trustBoundary, "external_signed_schema");
+  assert.equal(publicJob.schemaContract.output.knownBuiltin, false);
+  assert.equal(publicJob.schemaContract.output.registered, true);
+  assert.equal(publicJob.schemaContract.output.trusted, true);
+  assert.equal(publicJob.schemaContract.output.signatureVerified, true);
 });
 
 test("reviewer role gate blocks low-score agents", async () => {

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "native-xcm-observer-evidence-v1",
+  "requestId": "0x7777777777777777777777777777777777777777777777777777777777777777",
+  "direction": "deposit",
+  "status": "failed",
+  "settledAssets": "0",
+  "settledShares": "0",
+  "remoteRef": null,
+  "failureCode": "0x9999999999999999999999999999999999999999999999999999999999999999",
+  "observedAt": "2026-04-23T12:10:00.000Z",
+  "correlation": {
+    "method": "request_id_in_message",
+    "confidence": "production_candidate",
+    "notes": "Sample only. Replace with evidence captured from a Chopsticks/PAPI replay proving the failure path remains correlated to the original SetTopic."
+  },
+  "hub": {
+    "chain": "polkadot-hub",
+    "blockNumber": "323",
+    "blockHash": "0x8888888888888888888888888888888888888888888888888888888888888888",
+    "extrinsicHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "messageHash": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "messageTopic": "0x7777777777777777777777777777777777777777777777777777777777777777",
+    "eventIndex": "323-7"
+  },
+  "bifrost": {
+    "chain": "bifrost-polkadot",
+    "blockNumber": "656",
+    "blockHash": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "eventIndex": "656-12",
+    "messageTopic": "0x7777777777777777777777777777777777777777777777777777777777777777",
+    "assetLocation": {
+      "parents": 1,
+      "interior": "Here"
+    },
+    "amount": "0"
+  },
+  "decision": {
+    "status": "failed",
+    "settledAssets": "0",
+    "settledShares": "0",
+    "remoteRef": null,
+    "failureCode": "0x9999999999999999999999999999999999999999999999999999999999999999",
+    "reason": "matched_terminal_failure_event"
+  }
+}

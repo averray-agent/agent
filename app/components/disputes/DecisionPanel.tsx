@@ -39,10 +39,10 @@ const DECISIONS: {
     tone: "neutral",
   },
   {
-    id: "request-more",
-    label: "Request more evidence",
-    subtitle: "pause and ping opener",
-    blurb: "Window paused. Opener notified to add payload or cite policy clause.",
+    id: "split",
+    label: "Split payout",
+    subtitle: "resolve with partial payout",
+    blurb: "Backend settles a split verdict with the default partial worker payout.",
     tone: "warn",
   },
 ];
@@ -61,8 +61,7 @@ export function DecisionPanel({
   error,
 }: DecisionPanelProps) {
   const rationaleOk = rationale.trim().length >= 20;
-  const destinationOk =
-    decision === "request-more" || destination !== null;
+  const destinationOk = destination !== null;
   const committable =
     !disabled && !busy && decision !== null && rationaleOk && roleConfirmed && destinationOk;
 
@@ -111,7 +110,7 @@ export function DecisionPanel({
           style={{ letterSpacing: 0 }}
         >
           <span>{rationale.trim().length} / 20 min</span>
-          <span>sha-256 hash of this text joins the signed receipt</span>
+          <span>canonical reasoning hash joins the signed receipt</span>
         </div>
       </label>
 

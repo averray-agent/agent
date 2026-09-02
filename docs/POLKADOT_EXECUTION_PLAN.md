@@ -250,6 +250,9 @@ Current status:
 - the broader blockchain config now accepts `SUPPORTED_ASSETS_JSON` with
   the same explicit asset metadata model and still preserves the old
   `SUPPORTED_ASSETS=SYMBOL:0x...` shorthand
+- `/admin/status` policy risk values now preserve exact raw chain strings
+  for `uint256` caps/penalties and only expose numeric mirrors when the
+  value fits JS safe-integer precision
 - next step is to thread the same model through deployment manifests and
   strategy registration outputs so operators do not lose metadata at the
   deploy boundary
@@ -367,6 +370,10 @@ Current status:
 - failed async deposits now refund escrowed local DOT back into
   `AgentAccountCore` during settlement instead of stranding funds in the
   adapter
+- successful async settlements now fail closed unless the observed
+  economic effect is non-zero: deposits require non-zero settled assets
+  and shares, while withdrawals require non-zero settled assets before
+  user strategy shares can be burned
 - the contract path is covered by
   [test/XcmVdotAdapter.t.sol](/Users/pascalkuriger/repo/Polkadot/test/XcmVdotAdapter.t.sol)
   and passes with `forge test --match-contract XcmVdotAdapterTest --offline`
@@ -392,6 +399,10 @@ Current status:
   - it auto-finalizes pending requests through
     `PlatformService.finalizeXcmRequest`
   - admin status can now surface watcher runtime + pending queue status
+  - watcher status reads now fail soft: if the durable state store is
+    temporarily unavailable, `/admin/status` keeps returning a degraded
+    watcher block plus an anomaly instead of failing the whole operator
+    status response
 - the hosted stack now also ships the first external observation
   connector:
   - `XcmObservationRelayService` polls an operator-configured observer
@@ -401,6 +412,9 @@ Current status:
     observation unless the payload actually changed
   - admin status now surfaces relay runtime, cursor, last sync time, and
     last relay error
+  - relay status reads now fail soft as well, preserving configured feed
+    URL / runtime flags and surfacing an anomaly when cursor state cannot
+    be read
 - the remaining gap is the network-specific relayer feed itself:
   the repo now includes the connector the API needs, but operators still
   need a real observer feed that watches Bifrost / XCM results and serves

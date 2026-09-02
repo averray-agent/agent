@@ -36,11 +36,7 @@ contract XcmVdotAdapter is IXcmStrategyAdapter, ReentrancyGuard {
 
     event DepositRequested(bytes32 indexed requestId, address indexed account, uint256 assets, uint64 nonce);
     event WithdrawRequested(
-        bytes32 indexed requestId,
-        address indexed account,
-        address indexed recipient,
-        uint256 shares,
-        uint64 nonce
+        bytes32 indexed requestId, address indexed account, address indexed recipient, uint256 shares, uint64 nonce
     );
     event RequestSettled(
         bytes32 indexed requestId,
@@ -57,6 +53,7 @@ contract XcmVdotAdapter is IXcmStrategyAdapter, ReentrancyGuard {
     error ZeroAmount();
     error InvalidRequest();
     error InvalidStatus();
+    error InvalidSettlementRatio();
     error AsyncOnly();
     error InsufficientLiquidity();
     error AlreadySettled();
@@ -69,7 +66,7 @@ contract XcmVdotAdapter is IXcmStrategyAdapter, ReentrancyGuard {
     }
 
     modifier onlyOperator() {
-        if (!policy.serviceOperators(msg.sender)) revert Unauthorized();
+        if (!policy.strategySettler(msg.sender)) revert Unauthorized();
         _;
     }
 
@@ -89,14 +86,8 @@ contract XcmVdotAdapter is IXcmStrategyAdapter, ReentrancyGuard {
     ) external override nonReentrant whenNotPaused onlyOperator returns (bytes32 requestId) {
         if (assets == 0) revert ZeroAmount();
 
-        IXcmWrapper.RequestContext memory context = _buildContext(
-            IXcmWrapper.RequestKind.Deposit,
-            account,
-            account,
-            assets,
-            0,
-            nonce
-        );
+        IXcmWrapper.RequestContext memory context =
+            _buildContext(IXcmWrapper.RequestKind.Deposit, account, account, assets, 0, nonce);
 
         requestId = xcmWrapper.previewRequestId(context);
         AdapterRequest storage existing = requests[requestId];
@@ -137,14 +128,8 @@ contract XcmVdotAdapter is IXcmStrategyAdapter, ReentrancyGuard {
         if (recipient == address(0) || account == address(0)) revert InvalidRequest();
         if (totalShares < pendingWithdrawalShares + shares) revert InsufficientLiquidity();
 
-        IXcmWrapper.RequestContext memory context = _buildContext(
-            IXcmWrapper.RequestKind.Withdraw,
-            account,
-            recipient,
-            0,
-            shares,
-            nonce
-        );
+        IXcmWrapper.RequestContext memory context =
+            _buildContext(IXcmWrapper.RequestKind.Withdraw, account, recipient, 0, shares, nonce);
 
         requestId = xcmWrapper.previewRequestId(context);
         AdapterRequest storage existing = requests[requestId];
@@ -178,7 +163,7 @@ contract XcmVdotAdapter is IXcmStrategyAdapter, ReentrancyGuard {
         uint256 settledShares,
         bytes32 remoteRef,
         bytes32 failureCode
-    ) external override nonReentrant whenNotPaused onlyOperator {
+    ) external override nonReentrant onlyOperator {
         if (status == IXcmWrapper.RequestStatus.Unknown || status == IXcmWrapper.RequestStatus.Pending) {
             revert InvalidStatus();
         }
@@ -186,14 +171,27 @@ contract XcmVdotAdapter is IXcmStrategyAdapter, ReentrancyGuard {
         AdapterRequest storage request = requests[requestId];
         if (request.requester == address(0)) revert InvalidRequest();
         if (request.settled) revert AlreadySettled();
+        if (
+            policy.paused()
+                && !(request.kind == IXcmWrapper.RequestKind.Deposit && status != IXcmWrapper.RequestStatus.Succeeded)
+        ) {
+            revert ProtocolPaused();
+        }
+
+        if (status == IXcmWrapper.RequestStatus.Succeeded) {
+            if (request.kind == IXcmWrapper.RequestKind.Deposit && (settledAssets == 0 || settledShares == 0)) {
+                revert InvalidStatus();
+            }
+            if (request.kind == IXcmWrapper.RequestKind.Withdraw && settledAssets == 0) revert InvalidStatus();
+            _validateSettlementRatio(request, settledAssets, settledShares);
+        }
 
         xcmWrapper.finalizeRequest(requestId, status, settledAssets, settledShares, remoteRef, failureCode);
 
         if (request.kind == IXcmWrapper.RequestKind.Deposit) {
             pendingDepositAssets -= request.requestedAssets;
             if (status == IXcmWrapper.RequestStatus.Succeeded) {
-                uint256 assetsToBook = settledAssets == 0 ? request.requestedAssets : settledAssets;
-                totalAssets += assetsToBook;
+                totalAssets += settledAssets;
                 totalShares += settledShares;
             } else {
                 SafeTransfer.safeTransfer(asset, request.requester, request.requestedAssets);
@@ -201,7 +199,9 @@ contract XcmVdotAdapter is IXcmStrategyAdapter, ReentrancyGuard {
         } else if (request.kind == IXcmWrapper.RequestKind.Withdraw) {
             pendingWithdrawalShares -= request.requestedShares;
             if (status == IXcmWrapper.RequestStatus.Succeeded) {
-                if (request.requestedShares > totalShares || settledAssets > totalAssets) revert InsufficientLiquidity();
+                if (request.requestedShares > totalShares || settledAssets > totalAssets) {
+                    revert InsufficientLiquidity();
+                }
                 totalShares -= request.requestedShares;
                 totalAssets -= settledAssets;
                 SafeTransfer.safeTransfer(asset, request.recipient, settledAssets);
@@ -218,6 +218,39 @@ contract XcmVdotAdapter is IXcmStrategyAdapter, ReentrancyGuard {
         request.settled = true;
 
         emit RequestSettled(requestId, request.kind, status, settledAssets, settledShares, remoteRef, failureCode);
+    }
+
+    function _validateSettlementRatio(AdapterRequest storage request, uint256 settledAssets, uint256 settledShares)
+        internal
+        view
+    {
+        if (request.kind == IXcmWrapper.RequestKind.Deposit) {
+            uint256 expectedShares = _sharesForAssets(settledAssets);
+            if (settledShares != expectedShares) revert InvalidSettlementRatio();
+            return;
+        }
+
+        if (request.kind == IXcmWrapper.RequestKind.Withdraw) {
+            uint256 maxAssets = _assetsForShares(request.requestedShares);
+            if (settledAssets > maxAssets) revert InvalidSettlementRatio();
+            return;
+        }
+
+        revert InvalidRequest();
+    }
+
+    function _sharesForAssets(uint256 assets) internal view returns (uint256) {
+        if (totalAssets == 0 || totalShares == 0) {
+            return assets;
+        }
+        return (assets * totalShares) / totalAssets;
+    }
+
+    function _assetsForShares(uint256 shares) internal view returns (uint256) {
+        if (totalShares == 0) {
+            return 0;
+        }
+        return (shares * totalAssets) / totalShares;
     }
 
     /// @notice Synchronous deposit is intentionally unsupported on the async lane.

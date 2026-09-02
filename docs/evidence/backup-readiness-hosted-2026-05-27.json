@@ -1,0 +1,22 @@
+{
+  "checkedAt": "2026-05-27T18:53:28Z",
+  "backupDir": "/srv/agent-stack/backups",
+  "maxAgeHours": 26,
+  "overallStatus": "ok",
+  "components": [
+    {
+      "name": "postgres",
+      "status": "ok",
+      "file": "/srv/agent-stack/backups/postgres/agent-20260527-205325.sql.gz",
+      "ageSeconds": 3,
+      "message": "Newest backup is 0.0h old"
+    },
+    {
+      "name": "redis",
+      "status": "ok",
+      "file": "/srv/agent-stack/backups/redis/redis-20260527-205325.rdb.gz",
+      "ageSeconds": 2,
+      "message": "Newest backup is 0.0h old"
+    }
+  ]
+}

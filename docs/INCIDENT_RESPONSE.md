@@ -8,6 +8,8 @@ Use it together with:
 - [VPS_RUNBOOK.md](../VPS_RUNBOOK.md) for host-level commands
 - [MULTISIG_SETUP.md](./MULTISIG_SETUP.md) for owner/pauser actions
 - [PRODUCTION_CHECKLIST.md](./PRODUCTION_CHECKLIST.md) for promotion gates
+- [CONTENT_RECOVERY_RUNBOOK.md](./CONTENT_RECOVERY_RUNBOOK.md) for
+  `/content/:hash` recovery from the append-only JSONL log
 
 ---
 
@@ -15,11 +17,24 @@ Use it together with:
 
 Fill these in before calling the system production-ready:
 
-- Primary on-call: `<name / handle>`
-- Backup on-call: `<name / handle>`
-- Contract owner signers: `<hot / warm / cold mapping>`
-- Pauser operator: `<name / handle>`
-- External escalation path: `<vendor, consultant, or empty>`
+- Primary on-call: <ops@averray.com>
+- Backup on-call: <ops@averray.com>
+- Contract owner signers: the three 2-of-3 signatories in
+  [`deployments/testnet-multisig-owner.json`](../deployments/testnet-multisig-owner.json)
+  are currently all hot dev keys (testnet posture). Mainnet adoption of
+  hot / warm / cold custody tiers is a separate launch-readiness item
+  tracked in [`MULTISIG_SETUP.md`](./MULTISIG_SETUP.md).
+- Pauser operator: <ops@averray.com>
+- External escalation path: empty. Intentionally not assigned — no
+  audit firm or incident-response retainer is engaged yet. Update when
+  that changes.
+
+`ops@averray.com` is the operator alias that delivers to whoever is on
+duty; primary on-call, backup on-call, and pauser operator all land in
+the same inbox. The pauser role is `setPaused`-only per
+[`THREAT_MODEL.md`](./THREAT_MODEL.md), so a compromised pauser key can
+grief by pausing but cannot drain funds — sharing the inbox with on-call
+is acceptable for the v1 posture.
 
 If these are blank, you do not have incident ownership yet.
 
@@ -77,22 +92,108 @@ The minimum useful alert set is:
 1. External uptime / cron runner hitting:
    - `./scripts/ops/check-hosted-stack-and-alert.sh`
 2. Backend Sentry for 5xx exceptions
-3. Human reports from operators or counterparties
+3. CloudWatch alarms from the KMS/auth alarm stack in
+   [`deploy/iac/cloudwatch/kms-signing-alarms.yaml`](../deploy/iac/cloudwatch/kms-signing-alarms.yaml)
+4. Human reports from operators or counterparties
 
 Recommended webhook env for the smoke-alert wrapper:
 
 ```bash
-ALERT_WEBHOOK_URL=https://your-alert-webhook
+ALERT_WEBHOOK_URL=<Slack Incoming Webhook URL from the operator alert channel>
 ALERT_SERVICE_NAME=averray-hosted-stack
 ALERT_ENVIRONMENT=production-like
 ```
 
-The webhook can point at Slack, Discord, PagerDuty Events API, or any internal
-relay that accepts JSON POSTs.
+The v1 alert destination is a Slack Incoming Webhook for the operator channel.
+The `Hosted Observability Proof` workflow does not read `ALERT_WEBHOOK_URL`
+from a GitHub secret: it SSHes to the VPS, runs
+`scripts/ops/collect-observability-proof.sh`, and that script sources the
+rendered `/run/agent-stack/backend.env` before calling
+`check-hosted-stack-and-alert.sh`. Keep the webhook in the `prod-backend`
+1Password vault so the VPS backend service account can render it from
+`deploy/backend.env.template` at deploy/boot time.
+
+Operator setup before running the proof:
+
+1. Pick the Slack destination channel for hosted smoke failures. The workflow
+   input defaults the evidence label to `ops-alerts`; if Pascal chooses another
+   channel, pass that exact channel name in the `alert_channel` input.
+2. Create a Slack Incoming Webhook for that channel.
+3. Store the webhook URL at `op://prod-backend/alert-webhook-url/url`.
+4. Redeploy or re-render the VPS backend env so `/run/agent-stack/backend.env`
+   contains `ALERT_WEBHOOK_URL`.
+5. Run the `Hosted Observability Proof` workflow in a separate proof step; it
+   sends one deliberate hosted smoke failure and records the channel-visible
+   correlation id in the sanitized observability artifact.
+
+To prove alert delivery without adding a synthetic endpoint, run a deliberate
+hosted smoke failure:
+
+1. Temporarily tighten the production scheduler env to
+   `INDEXER_MAX_STALENESS_SEC=1`.
+2. Run `./scripts/ops/check-hosted-stack-and-alert.sh`.
+3. Confirm the Slack operator channel receives the structured smoke-failure
+   alert.
+4. Restore the previous staleness value and re-run the hosted smoke green.
+
+Capture the Slack delivery confirmation in the observability evidence bundle
+with Metrics auth and the Sentry/logging decision.
 
 ---
 
-## 4. First 15 minutes
+## 4. KMS and auth alerts
+
+The KMS/auth alarm bundle separates the blockchain mutation signer from the JWT
+signer. Treat the alarm name prefix as the first routing clue:
+
+- `blockchain-kms-*`: chain mutations, escrow, settlement, and treasury actions
+  may be unable to sign or may be signing unexpectedly often.
+- `jwt-kms-*`: SIWE, refresh, service-token issuance, and admin JWT minting may
+  be unable to issue ES256 tokens.
+- `auth-*`: the backend is seeing anomalous authentication failures or refresh
+  replay detection.
+
+### Alarm meanings
+
+| Alarm | Severity | Meaning | First move |
+|---|---|---|---|
+| `*-kms-sign-error` | P1 | `kms:Sign` returned a CloudTrail error for that signer key. | Check CloudTrail event details, backend `kms.sign.duration` failure logs, and whether the key/role/region changed. |
+| `*-kms-access-denied` | P1 | KMS rejected the caller. This usually means a broken Roles Anywhere session, revoked permission, wrong key ARN, or policy drift. | Verify the shared-config profile and role session, then compare the effective IAM/KMS policy to the last known-good deployment. |
+| `*-kms-sign-spike` | P2 unless value movement is suspicious, then P1 | Sign call volume exceeded the baseline-derived 5-minute threshold. | Compare against expected worker traffic and recent deploys; pause mutating flows if the blockchain signer spike does not match known activity. |
+| `auth-failure-spike` | P2 | 401/403 responses exceeded the baseline-derived 5-minute threshold. | Inspect `http.error` logs by `code`, especially `bad_signature`, `token_expired`, `token_revoked`, and `missing_capability`. |
+| `auth-refresh-replay-detected` | P1 | Strict refresh-token replay detection fired. Treat as credential theft until disproven. | Revoke the affected refresh chain if not already revoked, identify wallet/session, and rotate any exposed operator credential. |
+
+### First debug commands
+
+```bash
+aws cloudwatch describe-alarms \
+  --region eu-central-2 \
+  --alarm-name-prefix averray-testnet
+
+aws logs filter-log-events \
+  --region eu-central-2 \
+  --log-group-name /averray/testnet/cloudtrail/kms \
+  --filter-pattern '{ ($.eventSource = "kms.amazonaws.com") && ($.eventName = "Sign") }'
+
+aws logs filter-log-events \
+  --region eu-central-2 \
+  --log-group-name /averray/testnet/backend \
+  --filter-pattern '{ $.event = "kms.sign.duration" }'
+
+aws logs filter-log-events \
+  --region eu-central-2 \
+  --log-group-name /averray/testnet/backend \
+  --filter-pattern '{ ($.msg = "http.error") && (($.status = 401) || ($.status = 403)) }'
+```
+
+If the blockchain signer alarm coincides with unexpected value movement, pause
+first and debug second. If the JWT signer is failing, expect wallet login,
+refresh, admin minting, and service-token issuance to fail while existing valid
+tokens continue until expiry.
+
+---
+
+## 5. First 15 minutes
 
 ### If value movement looks wrong
 
@@ -106,6 +207,10 @@ relay that accepts JSON POSTs.
    ```bash
    cd /srv/agent-stack/app
    ./scripts/ops/check-hosted-stack.sh
+
+   # If the operator app is deliberately behind browser auth and no app-shell
+   # credentials are available in this shell:
+   APP_ALLOW_PROTECTED_SHELL=1 ./scripts/ops/check-hosted-stack.sh
 
    # If an admin JWT is available, include async XCM operator status too:
    ADMIN_JWT='<admin-jwt>' ./scripts/ops/check-hosted-stack.sh
@@ -121,7 +226,7 @@ relay that accepts JSON POSTs.
 
 ---
 
-## 5. Response matrix
+## 6. Response matrix
 
 | Symptom | Severity | First move | Likely owner |
 |---|---|---|---|
@@ -130,12 +235,17 @@ relay that accepts JSON POSTs.
 | `index.averray.com/ready` failing | P2 | Check indexer logs/status, roll back or widen readiness window | Primary on-call |
 | Public site/app shell failing | P2 | Check Caddy + static mounts | Primary on-call |
 | Async XCM requests stuck in `pending` | P2 | Check watcher status, inspect `/xcm/request`, and rehearse manual finalize if needed | Primary on-call |
+| Blockchain KMS signer error or access denied | P1 | Pause if value movement is suspicious; inspect CloudTrail + backend signer logs | Primary on-call + pauser |
+| JWT KMS signer error or access denied | P1 | Inspect CloudTrail + backend signer logs; expect auth issuance failures | Primary on-call |
+| KMS sign call spike | P2/P1 | Compare against expected traffic; pause mutating flows if unexplained | Primary on-call |
+| Refresh replay detected | P1 | Revoke affected chain/session, identify exposure source | Primary on-call |
+| `/content/:hash` unexpectedly 404s after Redis loss/restore | P2 | Dry-run the content recovery replay log, then apply if clean | Primary on-call |
 | Redis restore drill fails | P1 | Treat as backup failure; stop risky deploys | Primary on-call |
 | Smoke check drift only | P3 | Fix docs/config/runtime mismatch | Repo owner |
 
 ---
 
-## 6. Rollback guidance
+## 7. Rollback guidance
 
 ### Backend
 
@@ -191,7 +301,7 @@ docker compose restart caddy
 
 ---
 
-## 7. Post-incident note
+## 8. Post-incident note
 
 Every P1/P2 should leave behind a short note containing:
 
@@ -209,12 +319,59 @@ If the incident required a pause, include:
 
 ---
 
-## 8. Minimum “ready for prod” bar
+## 9. Evidence gate
+
+Capture a redacted rehearsal artifact before closing the roadmap's incident
+response row. Validate it with:
+
+```bash
+node scripts/ops/check-incident-response-proof.mjs \
+  --file docs/evidence/incident-response-YYYY-MM-DD.json \
+  --max-completed-age-hours 24 \
+  --json
+```
+
+For mainnet readiness, add `--require-mainnet`. That requires the evidence to
+name Polkadot Hub mainnet, use a dedicated-pauser validation command, and point
+pause/unpause transaction proof at Polkadot Hub explorer URLs.
+
+The artifact must use schema `incident-response-proof-v1` and include:
+
+- `polkadotDocs`: must include `smart-contracts/explorers.md` and
+  `smart-contracts/for-eth-devs/accounts.md`.
+- `contacts`: primary/backup on-call, pauser operator, and either an engaged
+  external escalation contact or an explicit `not_engaged_v1` fallback.
+- `severityDrills`: P1 acknowledge <=5 minutes with owner engaged, P2
+  acknowledge <=15 minutes and mitigate/rollback <=60 minutes, P3 same-day
+  triage.
+- `alertDelivery`: `check-hosted-stack-and-alert.sh` ran, a deliberate failure
+  reached the operator channel, the webhook value is redacted, and the hosted
+  smoke returned green after restore.
+- `pauseFlow`: evidence validated by
+  `check-pauser-rehearsal-evidence.mjs`, live pause/unpause observed, final
+  paused state false, and both pause/unpause tx hashes plus explorer URLs.
+- `rollbackRehearsal`: backend, indexer, and frontend rollback paths exercised
+  through their component redeploy scripts with health gates observed.
+- `escalation`: primary/backup acknowledgements, owner signer reachability, and
+  a durable handoff record.
+- `postIncidentRecord`: timeline, blast radius, root cause, detection review,
+  prevention change, resume criteria, and no secrets.
+- `guardrails`: no private keys, raw webhooks, JWTs, provider keys, direct fund
+  movement claims, or leftover paused state.
+
+This validator is offline and read-only. It never sends alerts, pauses
+contracts, calls chain RPC, or rolls back services.
+
+---
+
+## 10. Minimum “ready for prod” bar
 
 Before calling the stack truly production-ready:
 
-- [ ] Primary and backup on-call are named
+- [x] Primary and backup on-call are named
 - [ ] A live alert webhook is configured
 - [ ] `check-hosted-stack-and-alert.sh` is running from an external scheduler
 - [ ] Pause path has been rehearsed recently
 - [ ] Rollback path has been rehearsed recently
+- [ ] A dated `incident-response-proof-v1` artifact validates with
+  `check-incident-response-proof.mjs`

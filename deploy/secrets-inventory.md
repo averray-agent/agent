@@ -1,0 +1,196 @@
+# Secrets inventory — Phase 2 mapping
+
+This is the **authoritative mapping** from every secret-class variable used at
+runtime to:
+
+1. Where it lives in 1Password (`op://vault/item/field`)
+2. Which 1Password service-account token is allowed to read it
+3. Who owns rotation
+4. Whether `scripts/ops/validate-env-render.sh` treats it as "critical-nonempty"
+   (i.e., render is aborted if the value resolves to an empty string)
+
+If you add a new secret to `deploy/backend.env.template` or
+`deploy/indexer.env.template`, **also add a row here**. The structural CI check
+(`scripts/ops/check-env-template-structure.mjs`) refuses to merge a PR that
+references an `op://` path with no matching row in this file.
+
+Non-secret config variables (RPC URLs, contract addresses, feature flags,
+LOG_LEVEL, etc.) are intentionally **not** in this table. They live as
+literals in the env templates and are managed via normal code review, not
+via 1Password.
+
+## Service-account tokens (recap)
+
+These are minted in the 1Password admin UI and stored as items in the
+`prod-critical` vault. Each token's vault scope is effectively immutable
+post-creation — rotate by minting a new token, not by widening scope.
+
+| Token (item name in `prod-critical`)    | Reads (whole-vault, read-only)                                  | Used by                                                  |
+| --------------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------- |
+| `op-token-prod-ci-deploy`               | `prod-ci`, `prod-ci-external`                                   | GitHub Actions deploy workflow (PR 2.1+)                 |
+| `op-token-prod-vps-backend`             | `prod-backend`, `prod-backend-external`                         | Backend VPS at deploy time (PR 2.3+)                     |
+| `op-token-prod-vps-indexer`             | `prod-indexer`                                                  | Indexer VPS at deploy time (PR 2.3+)                     |
+| `op-token-prod-smoke-tests`             | `prod-smoke`                                                    | Hosted product-proof smoke (PR 2.5+)                     |
+
+**No token reads `prod-critical`.** Critical holds the service-account tokens
+themselves plus the basic-auth raw password, Roles Anywhere CA private key,
+and other human-only material. This is the firebreak: a leaked runtime token
+cannot read its own replacement, cannot escalate.
+
+### Service-account token rotation (audit D-01)
+
+These tokens are long-lived bearer credentials. Scope is already least-privilege
+(the firebreak above), and CI usage is safe — they're passed only as masked env
+(`OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.* }}`) into the `op` CLI, never echoed or
+written to a log (verified across `.github/workflows/`). The two remaining gaps the
+audit flags are **expiry** and **anomaly monitoring**; close them as follows.
+
+**Set an expiry (one-time, then per rotation).** 1Password service-account tokens
+can carry an expiration; older tokens often have none. When you mint each token,
+set a 90-day expiry. The four tokens are tracked in `docs/SECRETS_CALENDAR.yml`
+(audit-D-01 section) — align each `expires_at` to the real token expiry; CI then
+warns 14 days out and forces the rotation.
+
+**Use the helper — it gets the scope right.** `scripts/ops/rotate-sa-token.mjs`
+does the mechanical middle (set the new token at the *consumed* scope, flag a
+dual-scope shadow) so the steps below can't be fat-fingered:
+
+```
+# dry-run (prints the exact plan + a shadow check; touches nothing):
+node scripts/ops/rotate-sa-token.mjs --token prod-smoke-tests
+# apply (pipe the freshly-minted token; never pass it as an argument):
+pbpaste | node scripts/ops/rotate-sa-token.mjs --token prod-smoke-tests --commit
+```
+
+> **SCOPE — the trap that already bit us.** Every workflow that consumes these
+> tokens pins `environment: production`, and GitHub resolves an **environment**
+> secret OVER a same-named **repo** secret. A `gh secret set …` *without*
+> `--env production` writes a repo-scoped copy that **nothing reads** — the live
+> env-scoped token stays stale and the rotation is silently ineffective. Always
+> set `--env production`; if a same-named repo-scoped copy exists, delete it
+> (`gh secret delete <NAME> --repo averray-agent/agent`) so there's one source of
+> truth. The helper checks and warns about this automatically.
+
+**Rotation procedure** (per token; scope is immutable, so re-mint, don't widen):
+
+1. In the 1Password admin console, mint a **new token on the same service account**
+   (90-day expiry). Copy it once.
+2. Update the consumer (the helper does this for you):
+   - `op-token-prod-ci-deploy` → GH secret `OP_SERVICE_ACCOUNT_TOKEN_PROD_CI`
+     at **`--env production`**.
+   - `op-token-prod-smoke-tests` → GH secret `OP_SERVICE_ACCOUNT_TOKEN_PROD_SMOKE`
+     at **`--env production`**.
+   - `op-token-prod-backend-canary` → GH secret `OP_SERVICE_ACCOUNT_TOKEN_PROD_BACKEND`
+     at **`--env production`**.
+   - `op-token-prod-vps-backend` / `op-token-prod-vps-indexer` → the VPS env
+     (`OP_SERVICE_ACCOUNT_TOKEN`) in `/etc/agent-stack/op-{backend,indexer}.env`,
+     then restart `agent-stack-env-render.service`.
+3. Run the consuming workflow / redeploy once to confirm the new token reads OK.
+4. **Revoke the old token** in 1Password (after a short grace window).
+5. Update the token's `expires_at` in `docs/SECRETS_CALENDAR.yml` to the new horizon.
+
+**Anomaly monitoring.** Enable the 1Password **Events API** (or review the Activity
+Log) for service-account usage, and alert on access from unexpected times/IPs or to
+items a token shouldn't touch. The Events API is the real-time/SIEM path; the
+Activity Log is the manual review.
+
+## Backend runtime secrets
+
+Read by the `op-token-prod-vps-backend` service-account token. Rendered into
+`/run/agent-stack/backend.env` (tmpfs, mode 0400) by `op inject`.
+
+| Env var               | `op://` path                                                          | Critical-nonempty | Rotation owner | Notes                                                                                                                                                            |
+| --------------------- | --------------------------------------------------------------------- | :---------------: | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~~`SIGNER_PRIVATE_KEY`~~  | ~~`op://prod-backend/signer-private-key/password`~~                       | n/a               | deployer       | **RETIRED 2026-05-16** in the Phase 3 backend-signer cutover and **RETIRED 2026-05-25** as the reused operator-side admin EOA after transcript leak. Backend now signs via AWS KMS — see `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `KMS_KEY_ID` rows below + `SIGNER_BACKEND=kms` literal in `backend.env.template`. OP item retained for ~30 days as rollback target, then retired. Verifier on-chain authorization revoked 2026-05-17 (block ≈8,956,633) — the OP item is now safely deletable; even if leaked, signatures from the recovered address would be rejected by `TreasuryPolicy.verify()` because `verifiers[0xFd2EAE…6519] == false`. **Postscript 2026-05-25:** this same `0xFd2EAE…6519` address was subsequently reused as the operator-side admin EOA (deployer/pauser/arbitrator per `deployments/testnet.json`) and held in `mcp-server/.env.local` under the same env-var name `SIGNER_PRIVATE_KEY` for ad-hoc admin ops. That local file's value leaked into a Claude Code session transcript on 2026-05-25, so the admin role was rotated to a fresh EOA `0x6778F050…3ac8` on the same day: AAC.positions drained + PAS swept + multisig-owned `setPauser` and batched `setArbitrator(new,true) / setArbitrator(old,false)` executed via the 2-of-3 multisig. On-chain `pauser` and approved `arbitrators` now point to the new address; the leaked key's only remaining capability would be on `reserved: 200_001` USDC (~0.20 USDC) tied to the old in-flight obligation path, mitigated by the in-process `loadKeyFromEnvFile` swap to the new key in `.env.local`. See `admin-eoa-testnet` row in §"Items in 1Password NOT loaded into any runtime template" for the active replacement, and `docs/AUDIT_REMEDIATION.md` §"Security incidents log — 2026-05-25 admin EOA rotation" for the full chain of mitigation. |
+| `AUTH_JWT_SECRETS`    | `op://prod-backend/auth-jwt-secrets/password`                         | ✅ yes            | deployer       | HMAC for SIWE sessions. Comma-separated list, newest first, supports zero-downtime rotation. Migrates to asymmetric KMS-signed JWTs in Phase 4b.                |
+| `RESEND_API_KEY`      | `op://prod-backend-external/resend-api-key/password`                  | ⚠️ no             | operator       | Optional branded self-report + alert email API key. Hermes/operator reporting is the launch proof channel. Rotate at https://resend.com/api-keys if enabled.     |
+| `GITHUB_TOKEN`        | `op://prod-backend-external/github-pat-issue-ingestion/password`      | ⚠️ no             | deployer       | GitHub PAT for issue ingestion. **Currently lives in prod-ci-external** (from initial load); MUST be moved to prod-backend-external before PR 2.3 cutover. v3 plan requires this to be a fine-grained PAT scoped to one repo with Issues:Read only. |
+| ~~`AWS_ACCESS_KEY_ID`~~     | ~~`op://prod-backend/aws-signer-testnet/access-key-id`~~        | n/a               | deployer       | **RETIRED from template 2026-05-21** in Phase 5a-cutover-retire-static-env. Static IAM user `averray-signer-testnet` (KMS sign-only on `arn:aws:kms:eu-central-2:079209845430:key/ff1927f1-3b5b-4e65-bec5-dfbe9fbff203`) is no longer rendered into `/run/agent-stack/backend.env` — the blockchain signer's `KMSClient` reaches AWS via IAM Roles Anywhere (profile `averray-signer-testnet-role`, see docker-compose `AWS_USE_ROLES_ANYWHERE=true` block on the VPS). 1Password item kept for ~30 days as rollback target, then `aws iam delete-access-key` + `op item delete` per `docs/PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md` §6 Phase 5a-retire. |
+| ~~`AWS_SECRET_ACCESS_KEY`~~ | ~~`op://prod-backend/aws-signer-testnet/secret-access-key`~~    | n/a               | deployer       | Pair to `AWS_ACCESS_KEY_ID` above. **RETIRED from template 2026-05-21** in the same cutover; same OP item; deleted together per the 30-day soak. |
+| `KMS_KEY_ID`            | `op://prod-backend/aws-signer-testnet/kms-key-id`           | ✅ yes            | deployer       | Full ARN of the KMS asymmetric key the `KmsSigner` (`mcp-server/src/blockchain/kms-signer.js`) calls. **Not a secret strictly** — ARNs are non-confidential — but stored in OP for centralized rotation. |
+| `AWS_REGION`            | `op://prod-backend/aws-signer-testnet/aws-region`           | ✅ yes            | deployer       | Region the KMS key lives in (`eu-central-2` for testnet). Used by the AWS SDK's KMSClient. |
+| ~~`AWS_JWT_ACCESS_KEY_ID`~~ | ~~`op://prod-backend/aws-jwt-signer-testnet/access-key-id`~~    | n/a               | deployer       | **RETIRED from template 2026-05-21** in Phase 5a-cutover-retire-static-env. Static IAM user `averray-jwt-signer-testnet` (sign-only on the JWT KMS key, distinct from the blockchain signer key on the `AWS_ACCESS_KEY_ID` row) is no longer rendered into `/run/agent-stack/backend.env` — the JWT signer's `KMSClient` reaches AWS via IAM Roles Anywhere (profile `averray-jwt-signer-testnet-role`). 1Password item kept for ~30 days as rollback target, then `aws iam delete-access-key` + `op item delete` per `docs/PHASE_5A_IAM_ROLES_ANYWHERE_PLAN.md` §6 Phase 5a-retire. |
+| ~~`AWS_JWT_SECRET_ACCESS_KEY`~~ | ~~`op://prod-backend/aws-jwt-signer-testnet/secret-access-key`~~ | n/a        | deployer       | Pair to `AWS_JWT_ACCESS_KEY_ID` above. **RETIRED from template 2026-05-21**; same OP item; deleted together per the 30-day soak. |
+| `AWS_JWT_REGION`        | `op://prod-backend/aws-jwt-signer-testnet/aws-region`       | ✅ yes            | deployer       | Region the JWT KMS key lives in (`eu-central-2` for testnet, matches the Phase 3 blockchain signer region for ops convenience; the KEYS themselves are distinct). |
+| `AWS_JWT_KEY_ID`        | `op://prod-backend/aws-jwt-signer-testnet/kms-key-id`       | ✅ yes            | deployer       | **Full KMS key ARN, not alias.** Per `docs/PHASE_4B_KMS_JWT_PLAN.md` §3 — alias retargeting (`kms:UpdateAlias`) would allow a signer-substitution attack; ARN closes that vector. The alias `alias/averray-jwt-signer-testnet` exists only for human ops convenience. |
+| `JWT_PUBLIC_KEY_PEM`    | `op://prod-backend/aws-jwt-signer-testnet/public-key-pem`   | ⚠️ no (use `_BASE64` variant in prod) | deployer | PEM-wrapped SPKI of the JWT KMS public key. Multi-line PEM — incompatible with docker-compose's `env_file` parser, so this raw variant is **only used in dev / `op run` flows**. Prod uses `JWT_PUBLIC_KEY_PEM_BASE64` (row below). The backend's `resolvePublicKeyPem` in `mcp-server/src/auth/config.js` accepts either input; the explicit PEM wins when both are set. Drift-checked at boot (PR 4b.4+) and by `scripts/ops/verify-jwt-kms-signer.mjs` against `kms:GetPublicKey` for `AWS_JWT_KEY_ID`. |
+| `JWT_PUBLIC_KEY_PEM_BASE64` | `op://prod-backend/aws-jwt-signer-testnet/public-key-pem-base64` | ✅ yes | deployer       | Base64 of the PEM text from the row above. Single-line — safe to render via `op inject` + consume via docker-compose `env_file`. Decoded at boot in `mcp-server/src/auth/config.js` (`resolvePublicKeyPem`); decode failure or missing BEGIN/END markers fails the boot loudly with a `ConfigError`. 1Password field populated 2026-05-17 (round-trip verified); template line uncommented in the PR that activated this row. |
+| `JWT_PUBLIC_KEY_FINGERPRINT` | `op://prod-backend/aws-jwt-signer-testnet/public-key-fingerprint` | ✅ yes  | deployer       | SHA-256 of the SPKI DER bytes (format: `sha256:<64-hex>`). Audit-trail anchor for detecting drift between the env-rendered `JWT_PUBLIC_KEY_PEM` and the actual KMS key. If this row's value differs from `shasum -a 256` of `aws kms get-public-key --key-id $AWS_JWT_KEY_ID --output text --query PublicKey \| base64 -d`, **the env is lying about what key signs your tokens** — fail-closed and re-provision per `docs/SECRETS_MIGRATION.md` §"PR 4b.3 operator runbook". |
+| `METRICS_BEARER_TOKEN` | `op://prod-backend/metrics-bearer-token/password` | ✅ yes | operator | High-entropy bearer token for the public `/metrics` scraper gate. Generate with `openssl rand -hex 32`, store the value before the next deploy, then run `Hosted Observability Proof` to prove unauthenticated `401` and authenticated `200` without writing the token to evidence. Rotate by updating the 1Password item and redeploying. |
+| `ALERT_WEBHOOK_URL` | `op://prod-backend/alert-webhook-url/url` | ✅ yes | operator | Slack Incoming Webhook for the operator alert channel. Consumed by the production-side `scripts/ops/check-hosted-stack-and-alert.sh` wrapper and the `Hosted Observability Proof` workflow; a failed hosted smoke POSTs structured JSON plus a channel-visible `correlationId` to this URL. Store it in prod-backend, not prod-critical, because the VPS backend service account reads backend runtime secrets. Rotate by creating a replacement Slack webhook, updating this 1Password field, re-rendering the env, and re-running the deliberate smoke-failure proof. |
+
+## Indexer runtime secrets
+
+Read by the `op-token-prod-vps-indexer` service-account token. Rendered into
+`/run/agent-stack/indexer.env` (tmpfs, mode 0400) by `op inject`.
+
+| Env var          | `op://` path                                  | Critical-nonempty | Rotation owner | Notes                                                                                                                |
+| ---------------- | --------------------------------------------- | :---------------: | -------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`   | `op://prod-indexer/database-url/password`     | ✅ yes            | deployer       | Postgres connection string for Ponder. DB user password embedded in URL. Rotate by changing Postgres password first. |
+
+## CI-side secrets (GitHub Actions runtime)
+
+Loaded by `1password/load-secrets-action` using the `op-token-prod-ci-deploy`
+service-account token. These never touch the VPS env files — they're only
+needed inside GitHub Actions runners.
+
+| Env var                          | `op://` path                                                              | Used in PR | Notes                                                                                                                                  |
+| -------------------------------- | ------------------------------------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `VPS_SSH_KEY`                    | `op://prod-ci/vps-ssh-key/private key`                                    | 2.1        | ED25519 private key. The op item also stores host/user/port as fields. **Rotated 2026-05-12 during PR 2.1 acceptance** (legacy GH-secret value was lost when an intermediate step overwrote it; recovered by minting a fresh key and installing via password SSH). |
+| `APP_BASIC_AUTH_USER`            | `op://prod-ci/app-basic-auth-hash/username`                               | 2.2        | Basic-auth username for Caddy on app.averray.com. Not strictly a secret but lives with the hash for atomic rotation.                  |
+| `APP_BASIC_AUTH_PASSWORD_HASH`   | `op://prod-ci/app-basic-auth-hash/credential`                             | 2.2        | bcrypt hash injected into Caddyfile. **Raw password lives only in `op://prod-critical/app-basic-auth/password`** (human-only). Different bcrypt salt each generation, so this hash will NOT byte-match any other hash of the same password. Item created during PR 2.2 operator setup. |
+
+## Smoke-test secrets
+
+Loaded by `1password/load-secrets-action` using the `op-token-prod-smoke-tests`
+token. This token reads ONLY `prod-smoke` — explicitly cannot read backend or
+CI vaults (the firebreak).
+
+| Env var       | `op://` path                                | Used in PR | Notes                                                                                                                                            |
+| ------------- | ------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ADMIN_JWT`   | `op://prod-smoke/admin-jwt/password`      | 2.8        | Long-lived (30d) admin JWT for hosted product-proof smoke. TRANSITIONAL — replaced by short-lived OIDC→KMS-signed JWTs in Phase 4b. PR 2.8a adds parity-check load (non-blocking); PR 2.8b flips active source and deletes legacy `${{ secrets.ADMIN_JWT }}`. |
+
+## Items in 1Password NOT loaded into any runtime template
+
+These exist in 1Password for human use, audit, or future phases. They are
+not consumed by any current render flow and intentionally have no row above.
+
+| Item                                     | Vault           | Purpose                                                                                                                                |
+| ---------------------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `app-basic-auth` (raw password + user)   | `prod-critical` | Operator browser login to app.averray.com. RAW password — human-only. CI uses the HASH from prod-ci, not this raw value.               |
+| `op-token-prod-ci-deploy`                | `prod-critical` | The CI service-account token itself.                                                                                                   |
+| `op-token-prod-vps-backend`              | `prod-critical` | The backend VPS service-account token itself.                                                                                          |
+| `op-token-prod-vps-indexer`              | `prod-critical` | The indexer VPS service-account token itself.                                                                                          |
+| `op-token-prod-smoke-tests`              | `prod-critical` | The smoke service-account token itself.                                                                                                |
+| `admin-eoa-testnet` (`op://prod-backend/admin-eoa-arbitrator-testnet/private key`) | `prod-critical` | Active operator-side admin EOA for Paseo Asset Hub TestNet (`deployer` / `pauser` / `arbitrator` per `deployments/testnet.json`). Derives to `0x6778F050…3ac8`. Created 2026-05-25 to replace `0xFd2EAE…6519` after that key's value leaked into a Claude Code session transcript (see `SIGNER_PRIVATE_KEY` row above for the lineage). **Not loaded into any backend template** — backend signs chain mutations via KMS (see `KMS_KEY_ID` row). This item is consumed only by ad-hoc operator-side admin scripts through in-process loaders or direct `op read` inside Node, such as `scripts/ops/rotate-admin-*.mjs` and `scripts/ops/redeploy-escrowcore.mjs --signer-secret-ref 'op://prod-backend/admin-eoa-arbitrator-testnet/private key'`; key bytes flow into `ethers.Wallet`, never to stdout, stderr, shell env, or temp files. Also held locally in `mcp-server/.env.local` (gitignored, mode 0600) only where legacy/local boot paths still require it; the OP item is the canonical store. |
+
+## Risk-accepted Dependabot alerts
+
+"Risk-accepted" here means: the vulnerable code path exists in our `package-lock.json`, but our own source code does not reach the exploitable surface. Each alert below has been audited against the specific advisory text — not waived on a generic "we don't use it" basis. We are tracking these alerts as **dismissed-with-justification** rather than force-bumping past `ponder@0.16.6`'s hard pins (`drizzle-orm: 0.41.0` exact, `kysely: ^0.26.3`), because doing so would put ponder's own internal code on untested transitive versions with no newer stable ponder release to fall back to (`ponder@1.0.0` is a major-version rewrite). Each row's "Why not exploitable" is **specific to that alert's vulnerable surface**, and the Verification subsection below gives the exact greps a future auditor must re-run before assuming the assessment still holds.
+
+| Alert # | Package       | Severity | Advisory                                                                       | Why not exploitable                                                                                                                                                                                                                                                                                                                                                                                       | Reviewed                | Re-evaluate when                                                                                                                                                  |
+| ------- | ------------- | -------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #28     | `drizzle-orm` | high     | `drizzle-orm` < 0.45.2 — SQL injection via improperly escaped SQL identifiers. | The advisory requires user-controlled data to flow into a function that accepts an SQL **identifier** (e.g., `sql.identifier(userInput)` or `sql.raw(userInput)`). Our drizzle surface is exactly two files in `indexer/src/api/`: `xcm-outcome-publisher.ts` uses only the tagged `sql\`...\`` template with `${value}` interpolations (bound as parameters, not identifiers — table/column names are literal strings in the template), and `xcm-outcomes.ts` only uses the typed query builder helpers `and / asc / eq / gt / inArray / or` against `schema.xcmRequest.<column>` (static schema objects, not user-controllable strings). No call site passes user input to an identifier-accepting API. | 2026-05-16 by pkuriger | ponder publishes a stable >0.16.6 with newer drizzle/kysely pins, or our usage patterns change to include user-controlled SQL identifiers / kysely usage. |
+| #25     | `kysely`      | high     | `kysely` >= 0.26.0, <= 0.28.11 — SQL injection via unsanitized JSON path keys. | The advisory requires user-controlled data to be passed as a **JSON path key** on kysely's query builder. We have **zero direct `kysely` imports** in our codebase (see Verification grep below) — kysely is only present transitively, used internally by ponder for its own table/migration management. Ponder's internal kysely calls do not accept end-user input as JSON path keys. We never instantiate a kysely `QueryBuilder` ourselves, so the vulnerable JSON-path API is unreachable from our source. | 2026-05-16 by pkuriger | ponder publishes a stable >0.16.6 with newer drizzle/kysely pins, or our usage patterns change to include user-controlled SQL identifiers / kysely usage. |
+| #26     | `kysely`      | high     | `kysely` <= 0.28.13 — MySQL SQL injection via insufficient backslash escaping. | The advisory is **MySQL-specific** and requires using kysely with a MySQL dialect against user-controlled string values that exploit the backslash-escape gap. Our stack uses **Postgres only** (see `DATABASE_URL` row above — Postgres connection string for ponder), and we have no direct kysely imports anyway, so neither the MySQL dialect nor any user-input path through kysely is wired up. | 2026-05-16 by pkuriger | ponder publishes a stable >0.16.6 with newer drizzle/kysely pins, or our usage patterns change to include user-controlled SQL identifiers / kysely usage. |
+| #52     | `kysely`      | high     | `kysely` >= 0.26.0, < 0.28.17 — JSON-path traversal via unsanitized path-leg metacharacters. | The advisory requires user-controlled data to be passed as a **JSON path leg** (the parts between `->`/`->>` operators) on kysely's query builder. Same surface analysis as #25: zero direct kysely imports in our code, so no call site of ours passes anything to a kysely JSON-path-leg API. Ponder's internal kysely usage is for its own static schema/migration plumbing and does not surface user input as path legs. | 2026-05-16 by pkuriger | ponder publishes a stable >0.16.6 with newer drizzle/kysely pins, or our usage patterns change to include user-controlled SQL identifiers / kysely usage. |
+
+### Verification
+
+Before assuming the per-alert assessment above still holds, a future auditor MUST re-run these two greps from the repo root and confirm the assertions:
+
+```sh
+# Assertion: zero direct kysely imports. Required result: NO matches (exit 1).
+grep -rE "from ['\"]kysely" --include='*.ts' --include='*.tsx' --include='*.js' --include='*.mjs' . --exclude-dir=node_modules
+
+# Assertion: drizzle-orm usage is bounded to indexer/src/api/xcm-outcome-publisher.ts
+# (tagged sql template with parameter-bound ${value} interpolations only) and
+# indexer/src/api/xcm-outcomes.ts (typed builder helpers against static schema.xcmRequest.<col>).
+# Required action: audit any NEW files that appear here for unsafe identifier
+# interpolation — specifically sql.identifier(userInput), sql.raw(userInput), or
+# user-controlled strings appearing outside ${...} in a sql`` template.
+grep -rE "from ['\"]drizzle-orm" --include='*.ts' --include='*.tsx' --include='*.js' --include='*.mjs' . --exclude-dir=node_modules
+```
+
+If either grep's result diverges from the above, **re-do the per-alert audit** before relying on the dismissals. The alerts themselves are dismissed via the GitHub Dependabot API with reason `tolerable_risk` and a link to this section.
+| `ARBITRATOR_SIGNER_PRIVATE_KEY` | `op://prod-backend/admin-eoa-arbitrator-testnet/private key` | ✅ yes (post-#557) | deployer | Private key for the on-chain arbitrator role used by `mcp-server/src/blockchain/gateway.js` `resolveDispute`. New admin EOA from the 2026-05-25 rotation (PR #522) — holds `arbitrators(newAdmin)=true` on `TreasuryPolicy`. Distinct from the KMS-backed blockchain signer (`KMS_KEY_ID`) and the JWT signer (`AWS_JWT_KEY_ID`). |

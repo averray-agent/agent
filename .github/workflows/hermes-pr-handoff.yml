@@ -1,0 +1,298 @@
+name: Hermes PR Handoff
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: hermes-pr-handoff-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  handoff:
+    name: Ask Hermes to review PR and run testbed checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # OP_SERVICE_ACCOUNT_TOKEN_PROD_CI is stored as a production
+    # environment secret, matching deploy-production.yml. Without this,
+    # workflow_run PR handoffs see an empty OP token and fail before SSH.
+    environment: production
+    if: github.event.workflow_run.conclusion == 'success'
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      # Phase 2 PR 2.7a removed the legacy `VPS_SSH_KEY` GH-secret
+      # job-env binding when the canonical source flipped to
+      # 1Password at op://prod-ci/vps-ssh-key/private key. The deploy
+      # workflow was updated; this workflow was missed and started
+      # failing the "Validate required secrets" check below with an
+      # empty $VPS_SSH_KEY (caught in production on 2026-05-14 as
+      # ~2/3 Hermes runs failing). We now load it from OP via the
+      # same SHA-pinned load-secrets-action used in deploy-production
+      # (step below) before the validate step runs.
+      HERMES_HANDOFF_TIMEOUT: 12m
+    steps:
+      - name: Extract PR context
+        id: pr
+        run: |
+          pr_number=$(jq -r '.workflow_run.pull_requests[0].number // empty' "$GITHUB_EVENT_PATH")
+          repo=$(jq -r '.workflow_run.repository.full_name' "$GITHUB_EVENT_PATH")
+          head_sha=$(jq -r '.workflow_run.head_sha' "$GITHUB_EVENT_PATH")
+          run_id=$(jq -r '.workflow_run.id' "$GITHUB_EVENT_PATH")
+
+          if [ -z "$pr_number" ]; then
+            echo "No pull request is attached to this CI run; skipping Hermes handoff."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
+          echo "correlation_id=github-pr-${pr_number}-${head_sha}-${run_id}" >> "$GITHUB_OUTPUT"
+
+      # Phase 2 PR 2.7a (catch-up for this workflow): load VPS_SSH_KEY
+      # from 1Password instead of the legacy GH-secret. Mirrors the
+      # pattern in deploy-production.yml — same SHA-pinned action,
+      # same OP path, same fail-closed shape check below.
+      - name: Load prod-ci secrets from 1Password (fail-closed)
+        if: steps.pr.outputs.skip != 'true'
+        # Pinned to 1password/load-secrets-action v4.0.0 commit SHA.
+        # v4.0.0 is the first Node-24-compatible release; refresh with
+        # the same procedure documented in deploy-production.yml.
+        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_CI }}
+          VPS_SSH_KEY_OP: op://prod-ci/vps-ssh-key/private key
+
+      - name: Validate required secrets
+        if: steps.pr.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          # VPS_SSH_KEY_OP must be a non-empty PEM/OpenSSH private key.
+          # Identical shape check to deploy-production.yml's
+          # "Verify prod-ci OP values loaded and shape-valid" step,
+          # collapsed to one block here because Hermes only needs the
+          # SSH key from prod-ci, not the basic-auth pair.
+          if [ -z "${VPS_SSH_KEY_OP:-}" ]; then
+            echo "::error::VPS_SSH_KEY_OP is empty after load step — check op://prod-ci/vps-ssh-key/private key and OP_SERVICE_ACCOUNT_TOKEN_PROD_CI"
+            exit 1
+          fi
+          case "$VPS_SSH_KEY_OP" in
+            -----BEGIN*PRIVATE\ KEY-----*)
+              echo "VPS_SSH_KEY_OP: SSH private-key shape valid"
+              ;;
+            *)
+              echo "::error::VPS_SSH_KEY_OP does not look like an OpenSSH/PEM private key"
+              exit 1
+              ;;
+          esac
+
+      - name: Configure SSH
+        if: steps.pr.outputs.skip != 'true'
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY_OP" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Ask Hermes for PR handoff verdict
+        id: hermes
+        if: steps.pr.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          HANDOFF_REPO: ${{ steps.pr.outputs.repo }}
+          HANDOFF_PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          HANDOFF_CORRELATION_ID: ${{ steps.pr.outputs.correlation_id }}
+        run: |
+          prompt=$(
+            cat <<PROMPT
+          Use Averray MCP tools only.
+
+          First call averray_invoke_agent_task with requester='github-actions', intent='pr_code_review', repo='${HANDOFF_REPO}', pullRequestNumber=${HANDOFF_PR_NUMBER}, correlationId='${HANDOFF_CORRELATION_ID}-code-review', reason='post-CI independent PR verifier'.
+
+          Then call averray_invoke_agent_task with requester='github-actions', intent='pr_handoff', repo='${HANDOFF_REPO}', pullRequestNumber=${HANDOFF_PR_NUMBER}, testCaseIds=['TBE2E-004'], correlationId='${HANDOFF_CORRELATION_ID}', reason='post-CI PR handoff'.
+
+          Treat the pr_code_review result as the independent verifier lane. Use its structured codeReview block when present:
+          - finalVerdict / mergeRecommendation
+          - riskCategory and highestRisk
+          - why
+          - checks.failed and checks.active
+          - tests.matchedTouchedAreas and tests.missingTestSignals
+          - rollout.notesRequired and rollout.notesPresent
+          - reasons / recommendations
+
+          If pr_code_review is unavailable because the deployed Averray MCP version is older, say so clearly and fall back to the codeReview block attached to pr_handoff if present. If neither structured codeReview block is available, mark codeReviewVerdict as needs_human_review.
+
+          Report these sections briefly:
+          - finalVerdict
+          - codeReviewVerdict: approve, conditional_approve, needs_human_review, or block
+          - codeReviewWhy
+          - riskCategory
+          - blockingFindings
+          - nonBlockingFindings
+          - missingTests
+          - requestedTests
+          - GitHub risk findings
+          - mergeRecommendation
+          - safety
+
+          Do not merge or mutate GitHub; this handoff is recommendation-only.
+          PROMPT
+          )
+
+          remote_env=$(printf 'HERMES_HANDOFF_PROMPT=%q ' "$prompt")
+
+          : > hermes-handoff.log
+          set +e
+          timeout "$HERMES_HANDOFF_TIMEOUT" ssh -p "${VPS_PORT:-22}" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=120 \
+            "$VPS_USER@$VPS_HOST" \
+            "${remote_env} bash -s" <<'REMOTE' | tee hermes-handoff.log
+          set -euo pipefail
+          cd /srv/averray-reference-agent
+          docker compose --env-file .env.prod \
+            -f ops/compose.yml \
+            -f ops/compose.prod.yml \
+            -p avg \
+            exec -T hermes /opt/hermes/.venv/bin/hermes chat \
+              --provider ollama-cloud \
+              -m deepseek-v4-pro:cloud \
+              -q "$HERMES_HANDOFF_PROMPT"
+          REMOTE
+          status=${PIPESTATUS[0]}
+          set -e
+          outcome=failed
+
+          if [ "$status" -eq 0 ]; then
+            outcome=success
+          elif [ "$status" -eq 124 ]; then
+            outcome=timeout
+            {
+              echo
+              echo "Hermes handoff timed out after ${HERMES_HANDOFF_TIMEOUT}."
+              echo "This usually means the model provider or remote agent call stalled."
+            } | tee -a hermes-handoff.log
+          fi
+
+          echo "exit_status=$status" >> "$GITHUB_OUTPUT"
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Hermes PR Handoff"
+            echo
+            echo "- Repo: \`${HANDOFF_REPO}\`"
+            echo "- PR: \`#${HANDOFF_PR_NUMBER}\`"
+            echo "- Correlation: \`${HANDOFF_CORRELATION_ID}\`"
+            echo "- Outcome: \`${outcome}\`"
+            echo
+            echo '```text'
+            tail -n 260 hermes-handoff.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$status"
+
+      - name: Upload Hermes handoff log
+        if: always() && steps.pr.outputs.skip != 'true' && steps.hermes.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hermes-handoff-${{ steps.pr.outputs.correlation_id }}
+          path: hermes-handoff.log
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Comment PR with Hermes handoff summary
+        if: always() && steps.pr.outputs.skip != 'true' && steps.hermes.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HANDOFF_REPO: ${{ steps.pr.outputs.repo }}
+          HANDOFF_PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          HANDOFF_CORRELATION_ID: ${{ steps.pr.outputs.correlation_id }}
+          HERMES_OUTCOME: ${{ steps.hermes.outputs.outcome || 'failed' }}
+        run: |
+          {
+            echo "<!-- hermes-pr-handoff:${HANDOFF_CORRELATION_ID} -->"
+            echo "### Hermes PR Handoff and Code Review"
+            echo
+            echo "- Outcome: \`${HERMES_OUTCOME}\`"
+            echo "- Correlation: \`${HANDOFF_CORRELATION_ID}\`"
+            echo "- Safety: recommendation-only; no GitHub mutations were requested from Hermes."
+            echo
+            echo "<details>"
+            echo "<summary>Hermes output</summary>"
+            echo
+            echo '```text'
+            tail -n 180 hermes-handoff.log
+            echo '```'
+            echo
+            echo "</details>"
+          } > hermes-comment.md
+
+          set +e
+          comment_id=$(
+            gh api "repos/${HANDOFF_REPO}/issues/${HANDOFF_PR_NUMBER}/comments" \
+              --jq "map(select(.body | contains(\"hermes-pr-handoff:${HANDOFF_CORRELATION_ID}\")) | .id) | last // \"\"" \
+              2>hermes-comment-api.err
+          )
+          lookup_status=$?
+
+          if [ "$lookup_status" -ne 0 ]; then
+            {
+              echo "### Hermes PR comment skipped"
+              echo
+              echo "Hermes completed, but GitHub did not allow this workflow to read PR comments."
+              echo
+              echo '```text'
+              cat hermes-comment-api.err
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          body=$(cat hermes-comment.md)
+          if [ -n "$comment_id" ]; then
+            gh api -X PATCH "repos/${HANDOFF_REPO}/issues/comments/${comment_id}" \
+              -f body="$body" >/dev/null 2>hermes-comment-api.err
+            comment_status=$?
+          else
+            gh api -X POST "repos/${HANDOFF_REPO}/issues/${HANDOFF_PR_NUMBER}/comments" \
+              -f body="$body" >/dev/null 2>hermes-comment-api.err
+            comment_status=$?
+          fi
+
+          if [ "$comment_status" -ne 0 ]; then
+            {
+              echo "### Hermes PR comment skipped"
+              echo
+              echo "Hermes completed, but GitHub did not allow this workflow to write a PR comment."
+              echo
+              echo '```text'
+              cat hermes-comment-api.err
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+      - name: Fail if Hermes handoff failed
+        if: always() && steps.pr.outputs.skip != 'true' && steps.hermes.outputs.exit_status != '0'
+        run: |
+          echo "Hermes PR handoff failed with status ${HERMES_STATUS:-unknown}."
+          exit 1
+        env:
+          HERMES_STATUS: ${{ steps.hermes.outputs.exit_status }}

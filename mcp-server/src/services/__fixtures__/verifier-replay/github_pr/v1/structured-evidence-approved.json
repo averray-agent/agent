@@ -1,0 +1,44 @@
+{
+  "handler": "github_pr",
+  "handlerVersion": 1,
+  "evidenceSchemaRef": "schema://jobs/github-pr-evidence-output",
+  "job": {
+    "id": "oss-example-project-42-add-tests",
+    "category": "testing",
+    "outputSchemaRef": "schema://jobs/github-pr-evidence-output",
+    "source": {
+      "type": "github_issue",
+      "repo": "example/project",
+      "issueNumber": 42,
+      "issueUrl": "https://github.com/example/project/issues/42"
+    },
+    "verifierConfig": {
+      "version": 1,
+      "handler": "github_pr",
+      "minimumScore": 60,
+      "requireIssueReference": true,
+      "requireTestEvidence": true
+    }
+  },
+  "verificationInput": {
+    "kind": "structured",
+    "structured": {
+      "prUrl": "https://github.com/example/project/pull/77",
+      "summary": "Adds regression coverage and fixes parser validation for #42.",
+      "tests": "npm test passed",
+      "issueNumber": 42,
+      "checksPassing": true
+    }
+  },
+  "expected": {
+    "outcome": "approved",
+    "reasonCode": "GITHUB_PR_EVIDENCE_ACCEPTED",
+    "minimumScore": 60,
+    "checks": {
+      "repoMatches": true,
+      "issueReferenced": true,
+      "testEvidenceSubmitted": true,
+      "checksPassing": true
+    }
+  }
+}

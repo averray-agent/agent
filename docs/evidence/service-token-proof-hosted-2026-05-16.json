@@ -1,0 +1,73 @@
+{
+  "proof": "scoped-service-token",
+  "apiBaseUrl": "https://api.averray.com",
+  "subject": "0x00000000000000000000000000000000000a11ce",
+  "scope": "hosted-smoke-service-token-proof",
+  "capabilities": [
+    "jobs:recommend"
+  ],
+  "allowedPath": "/jobs/recommendations",
+  "deniedPaths": [
+    "/account",
+    "/admin/status"
+  ],
+  "startedAt": "2026-05-16T18:16:57.013Z",
+  "admin": {
+    "wallet": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+    "roles": [
+      "admin",
+      "verifier"
+    ],
+    "grantCapabilitiesPresent": [
+      "jobs:recommend"
+    ]
+  },
+  "issue": {
+    "status": 201,
+    "grantId": "grant-e2e11741b0a7",
+    "issuedAt": "2026-05-16T18:16:57.670Z",
+    "expiresAt": "2026-05-16T18:26:57.000Z",
+    "tokenAvailable": true
+  },
+  "serviceSession": {
+    "tokenKind": "service",
+    "serviceToken": true,
+    "capabilityGrantId": "grant-e2e11741b0a7",
+    "capabilities": [
+      "jobs:recommend"
+    ],
+    "roles": []
+  },
+  "allowedBeforeRevoke": {
+    "path": "/jobs/recommendations",
+    "status": 200
+  },
+  "deniedBeforeRevoke": [
+    {
+      "path": "/account",
+      "status": 403
+    },
+    {
+      "path": "/admin/status",
+      "status": 403
+    }
+  ],
+  "revoke": {
+    "status": 200,
+    "grantId": "grant-e2e11741b0a7",
+    "grantStatus": "revoked",
+    "alreadyRevoked": false,
+    "revokedAt": "2026-05-16T18:16:58.724Z"
+  },
+  "deniedAfterRevoke": {
+    "path": "/jobs/recommendations",
+    "status": 403
+  },
+  "list": {
+    "status": 200,
+    "tokenAvailable": false,
+    "tokenPresent": false
+  },
+  "completedAt": "2026-05-16T18:16:58.998Z",
+  "status": "passed"
+}

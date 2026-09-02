@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "native-xcm-observer-evidence-v1",
+  "requestId": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "direction": "withdraw",
+  "status": "succeeded",
+  "settledAssets": "5000000000000",
+  "settledShares": "4900000000000",
+  "remoteRef": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "failureCode": null,
+  "observedAt": "2026-04-23T12:05:00.000Z",
+  "correlation": {
+    "method": "request_id_in_message",
+    "confidence": "production_candidate",
+    "notes": "Sample only. Replace with evidence captured from a Chopsticks/PAPI replay proving Bifrost preserves SetTopic on the withdraw reply leg."
+  },
+  "hub": {
+    "chain": "polkadot-hub",
+    "blockNumber": "223",
+    "blockHash": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "extrinsicHash": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "messageHash": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "messageTopic": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "eventIndex": "223-7"
+  },
+  "bifrost": {
+    "chain": "bifrost-polkadot",
+    "blockNumber": "556",
+    "blockHash": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "eventIndex": "556-12",
+    "messageTopic": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "assetLocation": {
+      "parents": 1,
+      "interior": "Here"
+    },
+    "amount": "5000000000000"
+  },
+  "decision": {
+    "status": "succeeded",
+    "settledAssets": "5000000000000",
+    "settledShares": "4900000000000",
+    "remoteRef": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "reason": "matched_terminal_bifrost_event"
+  }
+}

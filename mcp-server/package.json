@@ -9,12 +9,26 @@
     "test": "node --test src/**/*.test.js",
     "demo:e2e": "node src/demo/e2e-local.js",
     "demo:e2e:remote": "node src/demo/e2e-remote.js",
+    "demo:auto-verify:remote": "node src/demo/auto-verify-remote-smoke.js",
     "check:redis": "node src/demo/redis-persistence-check.js",
+    "replay:content-recovery": "node src/demo/replay-content-recovery-log.js",
     "ingest:github-issues": "node src/jobs/ingest-github-issues.js",
-    "ingest:wikipedia": "node src/jobs/ingest-wikipedia-maintenance.js"
+    "ingest:wikipedia": "node src/jobs/ingest-wikipedia-maintenance.js",
+    "ingest:osv-advisories": "node src/jobs/ingest-osv-advisories.js",
+    "ingest:open-data": "node src/jobs/ingest-open-data-datasets.js",
+    "ingest:standards-specs": "node src/jobs/ingest-standards-specs.js",
+    "ingest:openapi-specs": "node src/jobs/ingest-openapi-specs.js",
+    "bootstrap:upstream-status": "node src/jobs/bootstrap-upstream-status.js"
   },
   "dependencies": {
-    "ethers": "^6.16.0",
+    "@aws-sdk/client-kms": "^3.700.0",
+    "@aws-sdk/credential-provider-ini": "^3.700.0",
+    "@paraspell/sdk-core": "^13.4.0",
+    "ethers": "^6.17.0",
     "redis": "^5.11.0"
+  },
+  "devDependencies": {
+    "@noble/curves": "^2.2.0",
+    "jose": "^5.9.6"
   }
 }

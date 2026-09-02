@@ -1,6 +1,24 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+set +x
+
+# render-caddyfile.sh — render deploy/Caddyfile.averray with basic-auth block.
+#
+# Phase 2 PR 2.2 hardening:
+#   • REQUIRES the precomputed bcrypt hash. No in-script hashing.
+#   • REFUSES to run if APP_BASIC_AUTH_PASSWORD (raw) is set in the env —
+#     catches accidental fallback paths that would put the raw password
+#     into shell args / ps output / journald.
+#   • Raw passwords belong in `op://prod-critical/app-basic-auth` (human-only).
+#     CI and the VPS only ever see the bcrypt HASH, which Caddy uses to
+#     verify the password presented at HTTP basic-auth time.
+#
+# Backwards-incompat note: pre-PR-2.2 callers of this script could pass
+# APP_BASIC_AUTH_PASSWORD as plaintext and have it hashed in-process by
+# `caddy hash-password --plaintext`. That path is removed in this PR
+# because it puts the raw password on the script's command line, visible
+# in `ps -ef` for the duration of the call.
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
@@ -9,17 +27,27 @@ TEMPLATE_PATH="${TEMPLATE_PATH:-$REPO_ROOT/deploy/Caddyfile.averray}"
 usage() {
   cat <<'EOF'
 Usage:
-  APP_BASIC_AUTH_USER=operator APP_BASIC_AUTH_PASSWORD='secret' \
+  APP_BASIC_AUTH_USER=operator \
+  APP_BASIC_AUTH_PASSWORD_HASH='$2a$14$...' \
     ./scripts/ops/render-caddyfile.sh /path/to/output/Caddyfile
 
-Optional env:
-  TEMPLATE_PATH                 Override the source template
+Required env (when basic-auth is enabled — set both, or neither):
   APP_BASIC_AUTH_USER           Basic-auth username for app.averray.com
-  APP_BASIC_AUTH_PASSWORD       Plaintext password; rendered as bcrypt hash
-  APP_BASIC_AUTH_PASSWORD_HASH  Precomputed bcrypt hash; use instead of plaintext
+  APP_BASIC_AUTH_PASSWORD_HASH  bcrypt hash of the raw password.
+                                Generate with:
+                                  printf '%s' "$RAW" | caddy hash-password --algorithm bcrypt
 
-If no APP_BASIC_AUTH_* values are provided, the rendered file keeps
-app.averray.com public.
+Rejected env (the script fails if this is set):
+  APP_BASIC_AUTH_PASSWORD       Raw password. Removed in Phase 2 PR 2.2 —
+                                raw passwords no longer flow through CI.
+                                The raw lives only in op://prod-critical/app-basic-auth
+                                (human-only) for operator browser-login.
+
+Optional env:
+  TEMPLATE_PATH                 Override the source template.
+
+If neither APP_BASIC_AUTH_USER nor APP_BASIC_AUTH_PASSWORD_HASH is set,
+the rendered file keeps app.averray.com public.
 EOF
 }
 
@@ -34,21 +62,6 @@ require_command() {
   fi
 }
 
-render_hash() {
-  local plaintext="$1"
-  if command -v caddy >/dev/null 2>&1; then
-    caddy hash-password --plaintext "$plaintext"
-    return
-  fi
-
-  if command -v docker >/dev/null 2>&1; then
-    docker run --rm caddy:2 caddy hash-password --plaintext "$plaintext"
-    return
-  fi
-
-  fail "Need either 'caddy' or 'docker' installed to hash a basic-auth password"
-}
-
 [[ $# -eq 1 ]] || {
   usage >&2
   exit 1
@@ -56,26 +69,29 @@ render_hash() {
 
 OUTPUT_PATH="$1"
 APP_BASIC_AUTH_USER="${APP_BASIC_AUTH_USER:-}"
-APP_BASIC_AUTH_PASSWORD="${APP_BASIC_AUTH_PASSWORD:-}"
 APP_BASIC_AUTH_PASSWORD_HASH="${APP_BASIC_AUTH_PASSWORD_HASH:-}"
+
+# Hard reject — raw passwords MUST NOT enter this script.
+if [[ -n "${APP_BASIC_AUTH_PASSWORD:-}" ]]; then
+  fail "APP_BASIC_AUTH_PASSWORD (raw) is set, but Phase 2 PR 2.2 removed that code path. The raw password should live only in op://prod-critical/app-basic-auth. Pass APP_BASIC_AUTH_PASSWORD_HASH (bcrypt) instead — see usage."
+fi
 
 [[ -f "$TEMPLATE_PATH" ]] || fail "Template not found: $TEMPLATE_PATH"
 require_command awk
 
-if [[ -n "$APP_BASIC_AUTH_PASSWORD" && -n "$APP_BASIC_AUTH_PASSWORD_HASH" ]]; then
-  fail "Set either APP_BASIC_AUTH_PASSWORD or APP_BASIC_AUTH_PASSWORD_HASH, not both"
+# Basic-auth enabled requires BOTH user and hash. Half-set is an error.
+if [[ -n "$APP_BASIC_AUTH_USER" || -n "$APP_BASIC_AUTH_PASSWORD_HASH" ]]; then
+  [[ -n "$APP_BASIC_AUTH_USER" ]] || fail "APP_BASIC_AUTH_USER is required when APP_BASIC_AUTH_PASSWORD_HASH is set"
+  [[ -n "$APP_BASIC_AUTH_PASSWORD_HASH" ]] || fail "APP_BASIC_AUTH_PASSWORD_HASH is required when APP_BASIC_AUTH_USER is set"
+
+  # Sanity check: bcrypt hashes start with $2a$, $2b$, or $2y$.
+  if ! [[ "$APP_BASIC_AUTH_PASSWORD_HASH" =~ ^\$2[aby]\$ ]]; then
+    fail "APP_BASIC_AUTH_PASSWORD_HASH does not look like a bcrypt hash (expected leading \$2a\$, \$2b\$, or \$2y\$)"
+  fi
 fi
 
 auth_block_file=""
-if [[ -n "$APP_BASIC_AUTH_USER" || -n "$APP_BASIC_AUTH_PASSWORD" || -n "$APP_BASIC_AUTH_PASSWORD_HASH" ]]; then
-  [[ -n "$APP_BASIC_AUTH_USER" ]] || fail "APP_BASIC_AUTH_USER is required when enabling basic auth"
-
-  if [[ -n "$APP_BASIC_AUTH_PASSWORD" ]]; then
-    APP_BASIC_AUTH_PASSWORD_HASH="$(render_hash "$APP_BASIC_AUTH_PASSWORD")"
-  fi
-
-  [[ -n "$APP_BASIC_AUTH_PASSWORD_HASH" ]] || fail "APP_BASIC_AUTH_PASSWORD or APP_BASIC_AUTH_PASSWORD_HASH is required when enabling basic auth"
-
+if [[ -n "$APP_BASIC_AUTH_USER" && -n "$APP_BASIC_AUTH_PASSWORD_HASH" ]]; then
   auth_block_file=$(mktemp)
   cat >"$auth_block_file" <<EOF
   @protectedOperatorShell {

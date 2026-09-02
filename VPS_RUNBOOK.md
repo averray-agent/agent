@@ -211,6 +211,34 @@ these repository secrets for `.github/workflows/deploy-production.yml`:
 Keep branch protection enabled for `main`: require PRs, require CI, and use
 merge queue or auto-merge so multiple agents are serialized before deployment.
 
+### Local main sync after production deploys
+
+GitHub Actions cannot directly update a developer laptop after deployment. To
+keep a local macOS checkout's `main` branch current in the background, install
+the per-user launchd watcher from the repo root:
+
+```bash
+./scripts/ops/install-macos-production-sync-launchd.sh
+```
+
+The watcher polls the `Deploy Production` workflow on `main` and runs
+`./scripts/ops/sync-local-main.sh` after a new successful deploy. It does not
+switch away from active task branches.
+
+Useful commands:
+
+```bash
+# One-shot manual sync check
+./scripts/ops/watch-production-sync.sh --once
+
+# Watcher logs
+tail -f .codex/logs/production-sync.out.log
+tail -f .codex/logs/production-sync.err.log
+
+# Stop/remove the login watcher
+./scripts/ops/uninstall-macos-production-sync-launchd.sh
+```
+
 ### Frontend-only changes
 
 Use the scripted frontend deploy. The operator app is a static Next export
@@ -297,6 +325,8 @@ The script:
 4. Polls `https://index.averray.com/health` until the process is listening.
 5. Polls `https://index.averray.com/ready` until historical indexing is complete.
 6. Automatically rolls back to the previous SHA if either gate fails.
+7. Prints `docker compose ps indexer` plus recent indexer and Caddy logs before
+   rollback when a gate fails.
 
 Useful overrides:
 
@@ -306,6 +336,9 @@ WAIT_FOR_READY=0 ./scripts/ops/redeploy-indexer.sh
 
 # Give a heavy backfill more time before rollback.
 READY_TIMEOUT_SEC=3600 ./scripts/ops/redeploy-indexer.sh
+
+# Include more log context in a failed deploy report.
+INDEXER_LOG_TAIL=300 ./scripts/ops/redeploy-indexer.sh
 ```
 
 ### Remote hosted-stack smoke test
@@ -378,7 +411,28 @@ The script:
 
 ### Postgres restore outline
 
-Restore should be done deliberately and only after confirming the target file:
+A production restore over the live database is destructive. Run the
+**monthly drill** in [docs/BACKUP_RESTORE_DRILL.md](./docs/BACKUP_RESTORE_DRILL.md)
+against a disposable Postgres container first — that path does not
+need the approval gate below.
+
+**Approval gate for a real production restore** (must hold *before*
+any `psql ... <` runs):
+
+1. Named operator on the keyboard. No CI / workflow / agent invokes
+   this path.
+2. A second human acknowledgment in the incident channel quoting the
+   exact backup file path, the reason (incident reference, ticket,
+   or migration window), the expected data-loss window (gap between
+   backup and now), and the agreed rollback plan if the restore
+   makes things worse.
+3. Maintenance window posted to the operator channel before stopping
+   the backend.
+4. Run the readiness check first so the backup file you're about to
+   restore is the one the system claims is current:
+   `./scripts/ops/check-backup-readiness.sh`.
+
+Only after the gate holds:
 
 ```bash
 gunzip -c /srv/agent-stack/backups/postgres/<dump>.sql.gz | \
@@ -387,11 +441,23 @@ docker compose --project-directory /srv/agent-stack -f /srv/agent-stack/docker-c
 ```
 
 Do not restore over a live database unless you mean to replace it.
+Verify `/health` returns 200 and a basic smoke check passes before
+declaring the restore done.
 
 ### Redis restore outline
 
-Restore should be done deliberately because it rewinds nonce, session, lock,
-and token-revocation state. The safest path is:
+A production Redis restore is destructive — it rewinds nonce,
+session, lock, and token-revocation state. Run the drill in
+[docs/BACKUP_RESTORE_DRILL.md](./docs/BACKUP_RESTORE_DRILL.md)
+against a disposable Redis container first; the drill needs no
+approval gate.
+
+The same **approval gate** as the Postgres path above (named
+operator, second human acknowledgment in the incident channel,
+posted maintenance window, readiness check passes) must hold before
+any of the destructive commands below run.
+
+The safest path is:
 
 1. Confirm the target backup file.
 2. Stop the backend so it cannot mutate Redis during the restore.
@@ -503,6 +569,9 @@ Required contract env vars for the current live-chain backend:
 - `AGENT_ACCOUNT_ADDRESS`
 - `ESCROW_CORE_ADDRESS`
 - `REPUTATION_SBT_ADDRESS`
+- `VERIFIER_REGISTRY_ADDRESS`
+- `DISCOVERY_REGISTRY_ADDRESS`
+- `DISCLOSURE_LOG_ADDRESS`
 
 Required authentication env vars (backend, strict mode):
 
@@ -510,6 +579,31 @@ Required authentication env vars (backend, strict mode):
 - `AUTH_JWT_SECRETS` (comma-separated HS256 secrets, each ≥32 chars)
 - `AUTH_DOMAIN=api.averray.com`
 - `AUTH_CHAIN_ID=420420417`
+
+Required operator-reporting instrumentation env vars before marking the week-1
+instrumentation checklist complete:
+
+- `UPSTREAM_STATUS_POLLER_ENABLED=true`
+- `UPSTREAM_STATUS_POLLER_INTERVAL_MS=86400000`
+- `UPSTREAM_STATUS_POLLER_BATCH_SIZE=50`
+- `BOOTSTRAP_SELF_REPORT_ENABLED=false` unless branded email delivery is
+  explicitly enabled.
+
+```bash
+cd /srv/agent-stack/app
+ADMIN_JWT='<admin-jwt>' \
+CHECK_BOOTSTRAP_INSTRUMENTATION=1 \
+./scripts/ops/check-hosted-stack.sh
+```
+
+The production self-report proof channel is Hermes/operator reporting, not
+branded email. Keep `run_hermes_post_deploy=1` on production deploys and retain
+the scheduled Hermes ops health, daily operator brief, and private handoff
+monitor evidence. Resend remains optional; if branded email is later enabled,
+set `BOOTSTRAP_SELF_REPORT_ENABLED=true`, `BOOTSTRAP_SELF_REPORT_FROM`,
+`BOOTSTRAP_SELF_REPORT_TO`, `RESEND_API_KEY`, and
+`RESEND_API_BASE_URL=https://api.resend.com`, then run the optional
+`CHECK_BOOTSTRAP_SELF_REPORT_SENT=1` smoke gate after a successful send.
 
 ### JWT secret rotation
 
@@ -546,6 +640,9 @@ Matching contract env vars for the indexer:
 - `PONDER_ESCROW_CORE_ADDRESS`
 - `PONDER_AGENT_ACCOUNT_ADDRESS`
 - `PONDER_REPUTATION_SBT_ADDRESS`
+- `PONDER_VERIFIER_REGISTRY_ADDRESS`
+- `PONDER_DISCOVERY_REGISTRY_ADDRESS`
+- `PONDER_DISCLOSURE_LOG_ADDRESS`
 
 Do not commit server secrets back into the repository.
 
@@ -573,6 +670,19 @@ Do not commit server secrets back into the repository.
    - Postgres reachable
    - RPC reachable (`DWELLER_RPC_URL`, `POLKADOT_RPC_URL`, or `PONDER_RPC_URL_<chainId>`)
    - `DATABASE_URL` and `DATABASE_SCHEMA` correct
+
+If logs contain `Schema "..." was previously used by a different Ponder app`,
+rotate to a fresh Ponder schema instead of dropping the old one:
+
+1. Use a lowercase PostgreSQL-safe schema name, for example
+   `agent_indexer_20260501153000`.
+2. Dispatch the `Deploy Production` workflow with:
+   - `indexer_database_schema=<new schema>`
+   - `run_indexer=1`
+   - `wait_for_ready=0` if a long historical backfill is expected
+   - `smoke_check_indexer=0` only while the fresh schema is backfilling
+3. After `/ready` is healthy, re-run the hosted smoke check with indexer checks
+   enabled.
 
 ### TLS / domain issues
 

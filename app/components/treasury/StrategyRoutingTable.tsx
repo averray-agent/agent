@@ -41,6 +41,16 @@ export function StrategyRoutingTable({ lanes, sub }: StrategyRoutingTableProps) 
             </tr>
           </thead>
           <tbody>
+            {lanes.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={6}
+                  className="border-b border-[var(--avy-line-soft)] px-4 py-6 text-center font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-muted)]"
+                >
+                  No live strategy lanes configured yet.
+                </td>
+              </tr>
+            ) : null}
             {lanes.map((lane) => (
               <tr
                 key={lane.id}
@@ -75,10 +85,18 @@ export function StrategyRoutingTable({ lanes, sub }: StrategyRoutingTableProps) 
                 </Td>
                 <Td>
                   <div className="flex justify-end gap-1.5">
-                    <TinyBtn primary={lane.allocatePrimary} disabled={lane.allocateDisabled}>
+                    <TinyBtn
+                      disabled
+                      title="Strategy allocation actions are disabled until this UI has a live mutation flow."
+                    >
                       Allocate
                     </TinyBtn>
-                    <TinyBtn>Deallocate</TinyBtn>
+                    <TinyBtn
+                      disabled
+                      title="Strategy allocation actions are disabled until this UI has a live mutation flow."
+                    >
+                      Deallocate
+                    </TinyBtn>
                   </div>
                 </Td>
               </tr>
@@ -175,15 +193,18 @@ function TinyBtn({
   children,
   primary,
   disabled,
+  title,
 }: {
   children: React.ReactNode;
   primary?: boolean;
   disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       disabled={disabled}
+      title={title}
       className={cn(
         "rounded-[6px] border px-2.5 py-1 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase transition-colors",
         primary

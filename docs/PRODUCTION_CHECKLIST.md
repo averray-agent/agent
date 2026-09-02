@@ -1,5 +1,8 @@
 # Production Readiness Checklist
 
+> Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
+> This checklist remains the operator go/no-go gate for launch readiness.
+
 This is the operator-facing gate for promoting Averray from a healthy
 testnet deployment into something we can treat like a real production
 service. It complements:
@@ -9,6 +12,8 @@ service. It complements:
 - [VPS_RUNBOOK.md](../VPS_RUNBOOK.md) for day-to-day hosting operations
 - [MULTISIG_SETUP.md](./MULTISIG_SETUP.md) for owner/pauser control-plane setup
 - [AUDIT_PACKAGE.md](./AUDIT_PACKAGE.md) for external review scope and sign-off
+- [THREAT_MODEL.md](./THREAT_MODEL.md) for the current launch threat model
+- [NO_TOKEN.md](./NO_TOKEN.md) for the public no-token statement
 
 If this checklist is not green, the answer is "not ready yet".
 
@@ -16,52 +21,225 @@ If this checklist is not green, the answer is "not ready yet".
 
 ## 1. Control plane
 
-- [ ] `TreasuryPolicy.owner` is the intended multisig address.
+- [x] `TreasuryPolicy.owner` is the intended multisig address.
+- [x] `deployments/testnet-multisig-owner.json` is `status: "verified"` and matches the deployment manifest owner.
 - [ ] `TreasuryPolicy.pauser` is a hot key that only holds pause power.
-- [ ] `./scripts/verify_deployment.sh testnet` passes cleanly.
-- [ ] Pause and unpause were rehearsed from the pauser key.
-- [ ] At least one owner-only admin operation was rehearsed from the multisig.
+- [x] `./scripts/verify_deployment.sh testnet --require-owner-record-final`
+  passes cleanly after `deployments/testnet.json` was updated to the live
+  KMS verifier address (`0x31ad...7ab7F`).
+- [x] Pause and unpause were rehearsed from the pauser key.
+- [x] At least one owner-only admin operation was rehearsed from the multisig.
 
 See [MULTISIG_SETUP.md](./MULTISIG_SETUP.md) for the exact rehearsal flow.
+Use the dedicated pauser proof before closing the two remaining boxes:
+
+```bash
+# Read-only capability proof: no mutation, no private key.
+node scripts/ops/run-pauser-rehearsal.mjs \
+  --profile testnet \
+  --out docs/evidence/pauser-rehearsal-readonly-YYYY-MM-DD.json
+
+# Live launch evidence: pauses and unpauses the deployed TreasuryPolicy.
+PAUSER_PRIVATE_KEY=0x<pauser-testnet-key> \
+node scripts/ops/run-pauser-rehearsal.mjs \
+  --profile testnet \
+  --live \
+  --out docs/evidence/pauser-rehearsal-testnet-YYYY-MM-DD.json
+
+# Validate the captured evidence before ticking checklist boxes.
+node scripts/ops/check-pauser-rehearsal-evidence.mjs \
+  --file docs/evidence/pauser-rehearsal-readonly-YYYY-MM-DD.json \
+  --max-generated-age-hours 30
+
+node scripts/ops/check-pauser-rehearsal-evidence.mjs \
+  --file docs/evidence/pauser-rehearsal-testnet-YYYY-MM-DD.json \
+  --require-live \
+  --max-generated-age-hours 30
+```
+
+For mainnet or any real-funds rehearsal, add `--require-dedicated-pauser`
+to both the rehearsal and evidence validation commands.
+The max-age flag keeps older proof files useful for audit history without
+letting stale evidence close current launch boxes.
+The current testnet pauser address overlaps other testnet roles in
+`deployments/testnet.json`; that is acceptable only as a bounded testnet
+shortcut and must not be carried into mainnet.
+
+Read-only evidence captured on 2026-05-21:
+[`docs/evidence/pauser-rehearsal-readonly-2026-05-21.json`](evidence/pauser-rehearsal-readonly-2026-05-21.json).
+It proves the live pauser can call `setPaused(bool)` and cannot call owner-only
+functions, but it does not close the live pause/unpause rehearsal box.
+
+Live testnet pause/unpause evidence captured on 2026-05-27:
+[`docs/evidence/pauser-rehearsal-testnet-2026-05-27.json`](evidence/pauser-rehearsal-testnet-2026-05-27.json).
+It records pause tx
+`0x67da41f74f014af24c11926a901acca3f98be0fda29fd9ba2034465f8899a3e5`
+at block `9357194` and unpause tx
+`0x98ac3689daebef0e116229064b72cc328dc20125fa48f1259a82d2dea1f122ce`
+at block `9357197`, both with receipt status `1`, and confirms the final
+paused state returned to `false`.
+
+The current testnet pauser still overlaps deployer/arbitrator roles, so the
+"only holds pause power" box stays open for mainnet/real-funds readiness.
+Run the same proof with `--require-dedicated-pauser` before checking that box.
 
 ---
 
 ## 2. Data durability
 
-- [ ] Latest Postgres backup exists and is restorable.
-- [ ] Latest Redis backup exists and is restorable.
-- [ ] The monthly restore drill has been run at least once on the current stack shape.
+- [x] Latest Postgres backup exists and is recent. Evidence:
+  `./scripts/ops/check-backup-readiness.sh --json` reports
+  `components[postgres].status == "ok"` with `ageSeconds <
+  maxAgeHours * 3600`, then the saved JSON passes
+  `node scripts/ops/check-backup-readiness-evidence.mjs`.
+- [x] Latest Redis backup exists and is recent. Same readiness check,
+  `components[redis].status == "ok"` and the saved JSON validator passes.
+- [x] The monthly restore drill has been run on the current stack
+  shape. Evidence: a dated line in the operator log naming both
+  backup file paths used, the row count from the Postgres spot-check,
+  and the key count from `DBSIZE` on the restored Redis container,
+  plus a validated `docs/evidence/restore-drill-YYYY-MM-DD.json`
+  artifact checked with `node scripts/ops/check-restore-drill-evidence.mjs`.
+  Procedure: [BACKUP_RESTORE_DRILL.md](./BACKUP_RESTORE_DRILL.md).
+  Hosted proof: GitHub Actions run `26537480496` on 2026-05-27 restored
+  `agent-20260527-205325.sql.gz` and `redis-20260527-205325.rdb.gz`
+  into disposable containers, validated
+  [`docs/evidence/restore-drill-hosted-2026-05-27.json`](./evidence/restore-drill-hosted-2026-05-27.json),
+  and reported Postgres schema-table count `0` plus Redis `DBSIZE` `2788`.
 
-Use:
+Run backups (writes new snapshots):
 
 ```bash
 ./scripts/ops/backup-postgres.sh
 ./scripts/ops/backup-redis.sh
 ```
 
-Restore drills are documented in [VPS_RUNBOOK.md](../VPS_RUNBOOK.md).
+Or use GitHub Actions to create and prove hosted snapshots in one operator-run:
+run the `Hosted Backup Snapshot Proof` workflow from the production environment.
+It runs the two scripts above on the VPS, then uploads the readiness JSON and
+validator result as `hosted-backup-snapshot-proof-<run-id>`.
+
+Latest hosted proof: GitHub Actions run `26531944215` on 2026-05-27 uploaded
+`hosted-backup-snapshot-proof-26531944215`. The saved readiness evidence in
+[`docs/evidence/backup-readiness-hosted-2026-05-27.json`](evidence/backup-readiness-hosted-2026-05-27.json)
+validated with `overallStatus: "ok"`, Postgres file
+`agent-20260527-205325.sql.gz` at age 3s, and Redis file
+`redis-20260527-205325.rdb.gz` at age 2s.
+
+Run the readiness check (read-only, never restores or modifies a
+backup file):
+
+```bash
+./scripts/ops/check-backup-readiness.sh
+# or for machine-readable output:
+./scripts/ops/check-backup-readiness.sh --json \
+  > docs/evidence/backup-readiness-YYYY-MM-DD.json
+
+node scripts/ops/check-backup-readiness-evidence.mjs \
+  --file docs/evidence/backup-readiness-YYYY-MM-DD.json \
+  --max-checked-age-hours 30
+```
+
+Restore procedures:
+
+- **Monthly drill against a disposable target:**
+  [BACKUP_RESTORE_DRILL.md](./BACKUP_RESTORE_DRILL.md).
+- **Production restore (destructive, requires approval gate):**
+  [VPS_RUNBOOK.md](../VPS_RUNBOOK.md) §Backups. Never run a
+  production restore without a named operator on the keyboard, a
+  second human acknowledgment in the incident channel, and a posted
+  maintenance window. The drill never substitutes for that gate.
 
 ---
 
 ## 3. Hosted service health
 
-- [ ] Public site loads at `https://averray.com/`.
-- [ ] Discovery manifest loads at `https://averray.com/.well-known/agent-tools.json`.
-- [ ] Operator app loads at `https://app.averray.com/`.
-- [ ] API health is green at `https://api.averray.com/health`.
-- [ ] Indexer readiness is green at `https://index.averray.com/ready`.
-- [ ] Indexer freshness is within the accepted lag budget.
-- [ ] When an admin JWT is available, `/admin/status` reports the async XCM
-  watcher lane cleanly.
+- [x] Public site loads at `https://averray.com/`.
+- [x] Discovery manifest loads at `https://averray.com/.well-known/agent-tools.json`.
+- [x] Discovery manifest publish workflow reports `published` or
+  `already_current` for the deployed `DiscoveryRegistry` hash. Required
+  production secrets: `DISCOVERY_REGISTRY_ADDRESS`,
+  `DISCOVERY_PUBLISHER_PRIVATE_KEY`, and `DISCOVERY_PUBLISH_RPC_URL`
+  (or `POLKADOT_RPC_URL` / `RPC_URL`). First observed publish:
+  workflow run `25546750360`, tx
+  `0xe1f242d4b1aece3e18811367bd5d381f4cdc4133d0537597a81b7ece7a371b33`,
+  registry version `1`.
+- [x] Operator app protected shell responds at `https://app.averray.com/`.
+- [x] API health is green at `https://api.averray.com/health`.
+- [x] Indexer readiness is green at `https://index.averray.com/ready`.
+- [x] Indexer freshness is within the accepted lag budget.
+- [x] Latest `Deploy Production` workflow on `main` is green after the
+  1Password SSH/basic-auth/admin-JWT cutovers.
+- [x] When an admin JWT is available, `/admin/status` reports the async XCM
+  watcher lane cleanly. Evidence: Deploy Production run `26256776666` on
+  2026-05-21 reached `Checking admin async XCM status` against live
+  `/admin/status` with the rotated ES256 `ADMIN_JWT` and passed all watcher,
+  relay, and freshness assertions. Deploy Production run `26273097236`
+  reproduced the green assertion bundle on 2026-05-22.
+- [x] Hosted scoped service-token proof passes with sanitized evidence:
+  issue a least-privilege token, prove allowed and denied routes, revoke it,
+  and confirm `listServiceTokens` does not expose raw token material.
+  Evidence: GitHub Actions run
+  [`25969321980`](https://github.com/averray-agent/agent/actions/runs/25969321980),
+  archived at
+  [`docs/evidence/service-token-proof-hosted-2026-05-16.json`](evidence/service-token-proof-hosted-2026-05-16.json).
 
 Run:
 
 ```bash
 ./scripts/ops/check-hosted-stack.sh
 
+# If the operator app is intentionally protected by Caddy, Cloudflare Access,
+# or another browser auth layer and you do not have app-shell credentials in the
+# current shell:
+APP_ALLOW_PROTECTED_SHELL=1 ./scripts/ops/check-hosted-stack.sh
+
 # Optional: include the async XCM operator lane in the smoke check
 ADMIN_JWT='<admin-jwt>' ./scripts/ops/check-hosted-stack.sh
+
+# Optional: run the hosted scoped service-token proof from GitHub Actions.
+# The workflow loads ADMIN_JWT from op://prod-smoke/admin-jwt/password and
+# uploads a sanitized JSON artifact named hosted-service-token-proof-<run-id>.
+gh workflow run hosted-service-token-proof.yml -R averray-agent/agent --ref main
+
+# Optional local fallback: include the scoped service-token proof and write
+# sanitized evidence. Prefer the GitHub workflow when you do not already have
+# an admin JWT in your local shell.
+ADMIN_JWT='<admin-jwt>' \
+CHECK_SERVICE_TOKEN_PROOF=1 \
+SERVICE_TOKEN_PROOF_EVIDENCE_FILE=artifacts/service-token-proof.json \
+./scripts/ops/check-hosted-stack.sh
+
+# Optional: include operator-reporting instrumentation.
+ADMIN_JWT='<admin-jwt>' \
+CHECK_BOOTSTRAP_INSTRUMENTATION=1 \
+./scripts/ops/check-hosted-stack.sh
+
+# Optional branded-email delivery verification: require that the weekly email
+# report has actually sent. Use this only after a sender domain is verified.
+ADMIN_JWT='<admin-jwt>' \
+CHECK_BOOTSTRAP_INSTRUMENTATION=1 \
+CHECK_BOOTSTRAP_SELF_REPORT_SENT=1 \
+BOOTSTRAP_SELF_REPORT_EXPECTED_FROM='<exact backend.env from>' \
+BOOTSTRAP_SELF_REPORT_EXPECTED_TO='<exact backend.env to>' \
+./scripts/ops/check-hosted-stack.sh
+
+# Optional hosted email proof: send one report through the production admin
+# endpoint, then require the email-delivery evidence in the same smoke run.
+gh workflow run deploy-production.yml \
+  -f bootstrap_self_report_send_now=1 \
+  -f smoke_check_bootstrap_instrumentation=1 \
+  -f smoke_check_bootstrap_self_report_sent=1 \
+  -f run_hermes_post_deploy=1
+
+# Component-scoped deploys can skip indexer checks when the indexer was not
+# touched, while scheduled/full-stack smoke should keep the default.
+CHECK_INDEXER=0 ./scripts/ops/check-hosted-stack.sh
 ```
+
+For the GitHub production deploy workflow, set the repository/environment secret
+`APP_ALLOW_PROTECTED_SHELL=1` when `app.averray.com` should return an auth
+challenge instead of the public operator shell.
 
 ---
 
@@ -80,7 +258,13 @@ What it does:
 3. Rebuilds the public Astro landing page and syncs it into `site/`.
 4. Typechecks the indexer workspace.
 5. Verifies the deployed contracts against the manifest for the selected profile.
-6. Runs the hosted-stack smoke check.
+6. Runs the hosted-stack smoke check. The deploy entrypoint keeps indexer
+   checks for indexer/Caddy changes and full smoke-only runs, but skips them
+   for unrelated component deploys so an existing indexer outage does not
+   falsely mark a backend or frontend deploy as failed.
+7. Preserves previously generated frontend/site output across unrelated
+   component deploys. Server-local changes are only stashed if the
+   fast-forward pull actually cannot proceed with them present.
 
 Useful overrides:
 
@@ -101,50 +285,377 @@ RUN_SUBSCAN_XCM_VALIDATION=1 ./scripts/ops/check-release-readiness.sh testnet
 
 ## 5. Observability
 
-- [ ] Backend metrics are reachable and, if public, bearer-protected.
+- [ ] Backend metrics are bearer-protected and reachable with the scraper token.
 - [ ] Backend Sentry is configured for the active environment.
 - [ ] Frontend Sentry runtime config is set if browser error reporting is required.
 - [ ] Structured logs are visible from the current deploy target.
 - [ ] An alert destination is configured for hosted smoke-check failures.
-- [ ] [INCIDENT_RESPONSE.md](./INCIDENT_RESPONSE.md) has named on-call ownership.
+- [x] [INCIDENT_RESPONSE.md](./INCIDENT_RESPONSE.md) has named on-call ownership.
+- [x] Operator self-report proof is visible after deploy and on schedule. Flip
+  this box only when ALL of the following are true against the production stack:
+  - The production deploy workflow completes with `run_hermes_post_deploy=1`
+    and the GitHub Actions summary contains a Hermes post-deploy verification
+    report with final verdict, hosted health, requested test cases, and safety
+    outcome.
+  - The same workflow run includes the `hermes-post-deploy-<run-id>`
+    artifact, which preserves the full `hermes-post-deploy.log` beyond the
+    truncated summary.
+    - Verified on 2026-05-21: deploy run `26241427864` completed the Hermes
+      post-deploy step and uploaded artifact `hermes-post-deploy-26241427864`
+      (artifact id `7142450191`).
+  - The `Hermes Operator Report` workflow has run successfully for both
+    `ops_health` and `daily_operator_brief`, and each run includes a
+    `hermes-operator-report-<report-kind>-<run-id>-<run-attempt>` artifact
+    with the full Hermes log plus JSON evidence manifest.
+    - First proof captured on 2026-05-21: workflow run
+      `26211100734` succeeded with artifacts
+      `hermes-operator-report-ops_health-26211100734-1` (artifact id
+      `7129369151`) and
+      `hermes-operator-report-daily_operator_brief-26211100734-1`
+      (artifact id `7129370901`).
+  - The workflow summaries or artifacts expose correlation ids with the
+    `github-operator-report-<report-kind>-<run-id>-<run-attempt>` format
+    and no API keys, JWTs, or provider tokens.
+    - Verified against the downloaded run `26211100734` artifacts: correlation
+      ids `github-operator-report-ops_health-26211100734-1` and
+      `github-operator-report-daily_operator_brief-26211100734-1`; no obvious
+      API key, JWT, 1Password service-account token, or SSH private-key
+      patterns found.
+  - This command passes:
+    ```bash
+    ADMIN_JWT='<admin-jwt>' \
+    CHECK_BOOTSTRAP_INSTRUMENTATION=1 \
+    ./scripts/ops/check-hosted-stack.sh
+    ```
+    - Verified on 2026-05-21: focused deploy smoke run `26241544177` loaded the
+      production `ADMIN_JWT` from 1Password, ran with
+      `smoke_check_bootstrap_instrumentation=1`, reached `Checking bootstrap
+      instrumentation`, and ended with `Hosted stack smoke check passed.`
+    - Refreshed on 2026-05-27: Deploy Production run
+      [`26511414359`](https://github.com/averray-agent/agent/actions/runs/26511414359)
+      loaded `ADMIN_JWT` from `op://prod-smoke/admin-jwt/password`, ran with
+      `smoke_check_bootstrap_instrumentation=1`, completed Hermes post-deploy
+      verification, and triggered successful Publish Discovery Manifest run
+      [`26511490876`](https://github.com/averray-agent/agent/actions/runs/26511490876).
+  - The smoke gate verifies `upstreamStatus` is enabled/running, exposes a
+    durable evidence note plus bounded `fundedJobs` table counters, and that
+    the optional `.bootstrapSelfReport` status is well-formed and sanitized.
+  - `/admin/status.bootstrapSelfReport` does not contain API-key-shaped
+    tokens such as `Bearer ...` or `re_...`; only the boolean
+    `providerConfigured` may reveal that the provider is configured.
+  - Branded email via Resend is optional/deferred. If it is later enabled, run
+    the additional `CHECK_BOOTSTRAP_SELF_REPORT_SENT=1` gate with exact
+    `BOOTSTRAP_SELF_REPORT_EXPECTED_FROM` / `BOOTSTRAP_SELF_REPORT_EXPECTED_TO`
+    values and require `lastAttemptedAt`, `lastSuccessfulAt`, and the latest
+    provider id.
+
+### How to verify each §5 box
+
+The first five boxes are intentionally not auto-flipped because they need
+deployed-config evidence that lives outside the repo. The current RC1
+observability proof is complete: `Hosted Observability Proof` run
+`26594855907` on 2026-05-28 uploaded artifact
+`hosted-observability-proof-26594855907`, and the validation artifact returned
+`status: "ok"`. It proves unauthenticated `/metrics` `401`, authenticated
+`/metrics` `200`, deliberate alert delivery to `ops-alerts`, and the intended
+`log_only_deferred` Sentry posture with structured backend logs visible from
+`docker logs agent-backend --tail 200`. Future re-proofs should use the same
+manual workflow, which collects live VPS evidence, validates it, and uploads a
+sanitized artifact. Validate any archived copy with
+`node scripts/ops/check-observability-proof.mjs --file
+docs/evidence/observability-YYYY-MM-DD.json --max-completed-age-hours 30 --json`
+before moving the roadmap rows to `Proofed`. Concrete verification commands per
+box:
+
+- **Backend metrics bearer-protected and reachable.** Production fails closed
+  when metrics auth is required but no token is configured. Current proof:
+  hosted run `26594855907` confirmed unauthenticated `/metrics` `401` and
+  scraper-token `/metrics` `200`. Re-run this hosted gate when rotating the
+  metrics token:
+  ```bash
+  METRICS_BEARER_TOKEN='<metrics-scraper-token>' \
+  CHECK_METRICS_AUTH=1 \
+  ./scripts/ops/check-hosted-stack.sh
+  ```
+  The gate requires unauthenticated `/metrics` to return `401` and the same
+  request with `Authorization: Bearer <token>` to return `200`. The hosted
+  workflow performs this same check on the VPS by reading only the required
+  env-file keys and never writing the token to the artifact.
+- **Sentry/logging posture recorded for the active environment.** The current
+  v1 posture is recorded in
+  [`OBSERVABILITY_POSTURE.md`](./OBSERVABILITY_POSTURE.md): backend Sentry is
+  optional/deferred unless a `SENTRY_DSN` is configured, backend 5xx capture
+  always falls back to structured logs, and frontend Sentry is deferred for v1.
+  If Sentry is enabled, set `SENTRY_DSN` (and optionally
+  `SENTRY_ENVIRONMENT`, `SENTRY_RELEASE`, `SENTRY_TRACES_SAMPLE_RATE`) and
+  verify `observability.sentry_ready` appears after backend startup.
+- **Structured logs visible from the current deploy target.**
+  `LOG_LEVEL=info` is set; the backend writes structured JSON via the
+  default logger and records 5xx captures as
+  `observability.captured_exception`. Verify the operator can read backend
+  logs (via `journalctl`, `docker logs`, or the platform's log surface), then
+  flip. The hosted workflow samples `docker logs agent-backend --tail 200` and
+  fails closed if no structured JSON log line is visible.
+- **Alert destination for hosted smoke-check failures.** Set
+  `ALERT_WEBHOOK_URL` (and optionally `ALERT_SERVICE_NAME`,
+  `ALERT_ENVIRONMENT`) in the environment that runs
+  [`scripts/ops/check-hosted-stack-and-alert.sh`](../scripts/ops/check-hosted-stack-and-alert.sh).
+  Current proof: hosted run `26594855907` delivered the deliberate failure to
+  `ops-alerts` as `github-observability-alert-26594855907-1`. Re-verify with a
+  deliberate smoke failure (e.g. point `API_BASE_URL` at a non-existent host)
+  and confirm the webhook receives the JSON payload. The hosted workflow uses a
+  local deliberate-failure stub and includes
+  `correlationId: github-observability-alert-<run-id>-<attempt>` in the alert
+  payload; use that value as the evidence `messageId` when the webhook provider
+  does not return a native message timestamp. Flip after one verified delivery.
+- **Operator self-report proof visible after deploy and on schedule.** Use
+  [HERMES_OPERATOR_REPORTS.md](./HERMES_OPERATOR_REPORTS.md) as the evidence
+  map. Run `Hermes Operator Report` manually with `report_kind=all` after this
+  workflow lands, or wait for the next daily schedule. Flip only after both
+  `ops_health` and `daily_operator_brief` reports succeed, each artifact is
+  downloadable, and the hosted bootstrap instrumentation smoke above passes.
+
+### Incident response rehearsal evidence
+
+Before treating the stack as mainnet incident-ready, record the paging, alert,
+pause/unpause, rollback, escalation, and post-incident-note rehearsal in one
+redacted artifact:
+
+```bash
+node scripts/ops/check-incident-response-proof.mjs \
+  --file docs/evidence/incident-response-YYYY-MM-DD.json \
+  --max-completed-age-hours 24 \
+  --require-mainnet \
+  --json
+```
+
+The guard is offline and read-only. It expects schema
+`incident-response-proof-v1`, requires the live pauser proof to have passed
+`check-pauser-rehearsal-evidence.mjs`, requires backend/indexer/frontend
+rollback paths through the component redeploy scripts, and rejects pasted JWTs,
+private keys, Slack webhook URLs, provider API keys, or unlabelled 32-byte hex
+payloads. Omit `--require-mainnet` only for bounded testnet rehearsals.
 
 ---
 
-## 6. Product proof before production claims
+## 6. Launch Documentation
 
-- [ ] One complete worker loop has been run on the hosted stack:
+- [x] [THREAT_MODEL.md](./THREAT_MODEL.md) is published.
+- [x] [NO_TOKEN.md](./NO_TOKEN.md) is linked from the repo root.
+- [x] [WEEK12_GATE.md](./WEEK12_GATE.md) documents the week-12 gate thresholds and diagnostic order.
+- [x] [DISPUTE_CODES.md](./DISPUTE_CODES.md) publishes the reason-code registry.
+- [x] [ARBITRATION_MIGRATION.md](./ARBITRATION_MIGRATION.md) documents Phase 0 -> Phase 1 -> Phase 2 triggers.
+
+---
+
+## 7. Product proof before production claims
+
+- [x] One complete worker loop has been run on the hosted stack:
   discover -> sign in -> preflight -> claim -> submit -> verify -> badge/profile
-- [ ] Public discovery, schema, and trust pages reflect the current deployed behavior.
-- [ ] Canonical public discovery manifest matches the API mirror.
+- [x] A schema-native job submission has been validated through
+  `/jobs/validate-submission` and submitted as direct `payload.submission`
+  evidence, with no `submission.output` wrapper. The operator-app gate is in
+  place: `app/lib/api/guarded-submit.js` short-circuits the submit when the
+  validation response is not `{ valid: true }`. The hosted worker-loop evidence
+  must include both `validationReadiness` for the direct schema object and
+  `invalidValidationReadiness` for a rejected `submission.output` wrapper with
+  `submitAttempted=false`, plus `claimLiquidityReadiness` proving the worker's
+  USDC liquid balance covered reward plus preflight claim lock before claim.
+  Flip this box after the hosted run-detail surface or
+  product-proof worker loop has been used to validate at least one
+  structured-required job (one valid, one invalid) and the invalid attempt did
+  not consume the session's submit budget. Verify with the regression tests:
+  `node --test app/lib/api/guarded-submit.test.mjs scripts/ops/run-hosted-worker-loop.test.mjs scripts/ops/check-product-proof-gate.test.mjs`.
+  Completed on 2026-05-17 in Deploy Production run
+  `25988470399`: job `product-proof-worker-loop-1779014145578`, session
+  `product-proof-worker-loop-1779014145578:0x31ad432dFe083B998c69B6dB88A984ec5207ab7F`,
+  `verificationOutcome=approved`, `sessionStatus=resolved`, and the hosted
+  gate accepted `/srv/agent-stack/product-proof-worker-loop-evidence.json`.
+- [ ] The phase-0 dispute verdict path has been exercised on the hosted stack
+  with the configured arbitrator/gateway and a recorded on-chain tx state from
+  `POST /disputes/:id/verdict`. Flip this box only after running the dry-run
+  *and* the live-mode proof harness against a specific open dispute on the
+  hosted stack, and only when both runs print the documented evidence
+  fields:
+
+  ```bash
+  # 1. Dry-run first to confirm the payload the script will submit.
+  ADMIN_JWT=$op_admin_jwt \
+  DISPUTE_PROOF_ID=dispute-xxxxxxxxxx \
+  DISPUTE_PROOF_VERDICT=dismissed \
+  DISPUTE_PROOF_RATIONALE="upstream PR merged after the verifier's rejection" \
+  API_BASE_URL=https://api.averray.com \
+    node scripts/ops/run-dispute-verdict-proof.mjs
+  # Expect: { "mode": "dry_run", "payload": { ... } } and *no* network mutation.
+
+  # 2. Live run - only with Pascal-approved dispute id + LIVE=1.
+  ADMIN_JWT=$op_admin_jwt \
+  DISPUTE_PROOF_ID=dispute-xxxxxxxxxx \
+  DISPUTE_PROOF_VERDICT=dismissed \
+  DISPUTE_PROOF_RATIONALE="upstream PR merged after the verifier's rejection" \
+  DISPUTE_PROOF_LIVE=1 \
+  API_BASE_URL=https://api.averray.com \
+    node scripts/ops/run-dispute-verdict-proof.mjs
+  ```
+
+  Required live-mode evidence in the JSON output:
+  - `mode = "live"`,
+  - `response.verdict`, `response.reasonCode`, `response.reasoningHash`,
+    and `response.metadataURI` all populated,
+  - `response.chainStatus` is one of `confirmed | submitted | local_only`
+    (`confirmed`/`submitted` means the on-chain `EscrowCore.resolveDispute`
+    actually dispatched; `local_only` means blockchain env was not wired),
+  - `persisted.status = "resolved"` and `persisted.reasoningHash` matches
+    `response.reasoningHash` (proves the receipt persisted, not just echoed).
+
+  The script refuses to act without a specific `DISPUTE_PROOF_ID` and a
+  pre-existing open dispute. It never creates disputes and never iterates
+  the queue. Regression covered by
+  `node --test scripts/ops/run-dispute-verdict-proof.test.mjs`.
+
+  Preferred operator path: run the `Hosted Dispute Verdict Proof` workflow
+  from GitHub Actions with the same named dispute id, verdict, rationale,
+  optional split payout, and `live=true`. The workflow loads the production
+  admin/arbitrator JWT from 1Password, runs the live opt-in smoke gate, and
+  uploads a 90-day `hosted-dispute-verdict-proof-<run-id>` artifact.
+- [x] Public discovery, schema, and trust pages reflect the current deployed behavior.
+  Evidence: Deploy Production run `26256248052` on 2026-05-21 reached
+  `Checking product-proof gate` and passed public discovery manifest, API
+  mirror, onboarding/discovery agreement, public trust and schema pages,
+  identity schemas, and job schema index/sample schema checks before printing
+  `Product-proof gate passed.` Runs `26256776666` and `26273097236` reproduced
+  the green gate.
+- [x] Canonical public discovery manifest matches the API mirror. Evidence:
+  the same product-proof gate deep-equals
+  `https://averray.com/.well-known/agent-tools.json` against
+  `https://api.averray.com/agent-tools.json`; run `26256248052` passed that
+  assertion via `Checking public discovery manifest` then
+  `Checking API discovery mirror`.
 
 If any of these drift, external agents will learn the wrong contract.
 
+Run the read-only gate with:
+
+```bash
+npm run check:product-proof
+```
+
+After the hosted worker loop is complete, rerun it with
+`PRODUCT_PROOF_REQUIRE_WORKER_LOOP=1` and a
+`PRODUCT_PROOF_EVIDENCE_FILE`. See [PRODUCT_PROOF_GATE.md](./PRODUCT_PROOF_GATE.md)
+for the evidence file shape.
+
 ---
 
-## 7. Mainnet parameter package
+## 8. Mainnet parameter package
 
 - [ ] [MAINNET_PARAMETERS.md](./MAINNET_PARAMETERS.md) is still the intended launch profile.
+- [ ] [AUDIT_PACKAGE.md](./AUDIT_PACKAGE.md) has been refreshed for the frozen
+  audit commit/tag; `npm run prepare:mainnet-audit-freeze -- --tag
+  audit/mainnet-YYYY-MM-DD --create-tag --evidence
+  docs/evidence/mainnet-audit-freeze-YYYY-MM-DD.json --json` passed; the tag
+  was pushed; and the package was sent to the auditor and linked from the audit
+  engagement brief.
+- [ ] External audit report names the reviewed commit/tag and scope, and every
+  Critical/High finding is fixed or explicitly risk-accepted before real funds.
 - [ ] The private mainnet deploy env matches [deployments/mainnet.env.example](../deployments/mainnet.env.example) except for secrets and final addresses.
 - [ ] Any deviation from the recommended launch values has been written down and approved before deploy.
 - [ ] No operator is relying on the old testnet-friendly defaults from `deploy_contracts.sh`.
+- [ ] Mainnet USDC asset config has been checked against the Polkadot docs and
+  runtime evidence. Static env proof:
+  ```bash
+  node scripts/ops/check-mainnet-usdc-config.mjs \
+    --env deployments/mainnet.env.example
+  ```
+  Final mainnet proof, after capturing runtime state:
+  ```bash
+  node scripts/ops/check-mainnet-usdc-config.mjs \
+    --env /path/to/private-mainnet.env \
+    --runtime-evidence docs/evidence/mainnet-usdc-asset-config-YYYY-MM-DD.json \
+    --require-runtime \
+    --json
+  ```
+
+Runtime evidence must use schema `mainnet-usdc-asset-config-v1`, cite the
+Polkadot docs paths `smart-contracts/precompiles/erc20.md` and
+`reference/polkadot-hub/assets.md`, and include the runtime source, runtime
+block hash, plus USDC asset metadata (`assetId: 1337`, `decimals: 6`,
+`sufficient: true`, the Trust-Backed ERC20 precompile address, and
+`minBalanceRaw` from chain state). The ERC20 evidence must explicitly keep
+metadata functions marked unimplemented; the precompile only supports the core
+ERC20 subset.
+
+- [ ] Mainnet env/secrets proof has been captured from the private mainnet
+  runtime configuration and validated without exposing secrets:
+  ```bash
+  node scripts/ops/check-mainnet-env-secrets-proof.mjs \
+    --file docs/evidence/mainnet-env-secrets-YYYY-MM-DD.json \
+    --max-completed-age-hours 24 \
+    --json
+  ```
+
+Env/secrets evidence must use schema `mainnet-env-secrets-proof-v1` and stay
+redacted. It must prove: `environment.chainEnv` and `environment.profile` are
+mainnet, the RPC URL is `https://eth-rpc.polkadot.io/`, final contract
+addresses are non-zero and unique, role signers are fresh mainnet keys, the
+owner is the mapped mainnet multisig, blockchain signing uses multi-region
+`ECC_SECG_P256K1` KMS through IAM Roles Anywhere, JWT signing uses multi-region
+`ECC_NIST_P256` KMS with public-key fingerprint evidence, HMAC JWT fallback is
+off, raw private-key/static-AWS/JWT-secret fallbacks are absent, service-account
+tokens are mainnet-only and do not read `prod-critical` or wildcard vaults, and
+no testnet vault item, KMS key, service token, or wallet seed is reused.
+
+- [ ] Mainnet smoke proof has been captured from at least three low-value
+  mainnet claim/submit/settle runs and validated without exposing secrets:
+  ```bash
+  node scripts/ops/check-mainnet-smoke-proof.mjs \
+    --file docs/evidence/mainnet-smoke-YYYY-MM-DD.json \
+    --max-completed-age-hours 24 \
+    --json
+  ```
+
+Smoke evidence must use schema `mainnet-smoke-proof-v1`. It must cite the
+Polkadot docs paths `smart-contracts/precompiles/erc20.md`,
+`reference/polkadot-hub/assets.md`, and `smart-contracts/explorers.md`; use
+`environment.network: polkadot-hub-mainnet`; keep RPC at
+`https://eth-rpc.polkadot.io/`; include only mainnet API/explorer links; and
+prove canonical USDC (`assetId: 1337`, 6 decimals, Trust-Backed precompile
+`0x0000053900000000000000000000000001200000`, `minBalanceRaw: 70000`, ERC20
+metadata functions unimplemented). Each smoke run must have unique run/job/
+session IDs, a reward at least the USDC min balance and no more than
+`1_000_000` raw units by default, a confirmed claim transaction, a submitted
+session, approved verification using the stored structured submission, a
+confirmed settlement transaction, badge/profile verification, and timeline
+entries for claim, submit, and settlement. Mainnet smoke must use short-lived
+scoped auth or delegated-wallet/refresh flow evidence; do not use a long-lived
+admin JWT.
 
 ---
 
-## 8. Mainnet blockers that still remain
+## 9. Mainnet blockers that still remain
 
 This checklist improves release discipline, but it does not replace:
 
-- external audit sign-off on the mainnet contract set
+- external audit sign-off on the frozen mainnet audit package and contract set
 - the explicit mainnet launch profile in [MAINNET_PARAMETERS.md](./MAINNET_PARAMETERS.md)
 - a real, audited strategy adapter path instead of the mock vDOT adapter
 - explicit incident ownership and paging
+- hardware MFA across the admin trust chain. Evidence must be captured in
+  `docs/evidence/hardware-mfa-YYYY-MM-DD.json` and validated before mainnet
+  launch sign-off:
+  ```bash
+  node scripts/ops/check-hardware-mfa-evidence.mjs \
+    --file docs/evidence/hardware-mfa-YYYY-MM-DD.json \
+    --max-completed-age-hours 30 \
+    --json
+  ```
 
 Until those are done, treat the stack as production-like testnet, not
 irreversible real-funds infrastructure.
 
 ---
 
-## 9. Internal async XCM staging proof
+## 10. Internal async XCM staging proof
 
 - [ ] One async deposit request has been queued and settled on the hosted stack.
 - [ ] One async withdraw request has been queued and settled on the hosted stack.
@@ -167,7 +678,7 @@ The manual flow for creating the request itself lives in
 
 ---
 
-## 10. Optional external observer validation
+## 11. Optional external observer validation
 
 - [ ] A staging Subscan key has been exercised against the current
   `subscan_xcm` source adapter.
@@ -192,7 +703,7 @@ npm run validate:subscan-xcm -- --require-published
 
 ---
 
-## 11. Native observer gate
+## 12. Native observer gate
 
 - [ ] [NATIVE_XCM_OBSERVER.md](./NATIVE_XCM_OBSERVER.md) has a completed
   correlation decision for deposit and withdrawal requests.
@@ -200,6 +711,8 @@ npm run validate:subscan-xcm -- --require-published
   evidence linked back to the Averray `requestId`.
 - [ ] Captured evidence passes
   `npm run validate:native-xcm-evidence -- --file <capture.json>`.
+- [ ] Deposit, withdrawal, and failure captures pass
+  `npm run check:native-xcm-evidence-pack -- --deposit <deposit.json> --withdraw <withdraw.json> --failure <failure.json>`.
 - [ ] Captured evidence was assembled with
   `npm run capture:native-xcm-evidence` or contains the same
   `native-xcm-observer-evidence-v1` fields.
@@ -210,3 +723,63 @@ npm run validate:subscan-xcm -- --require-published
 
 Until this is green, Subscan or manual observation can help staging, but the
 native observer is not production settlement truth.
+
+---
+
+## 13. Manual deploy: signer USDC liquidity preflight
+
+Auto-triggered deploys (`workflow_run` events fired after CI on `main`) leave
+`PRODUCT_PROOF_REQUIRE_WORKER_LOOP=0` and never claim a job. **Manual
+`workflow_dispatch` deploys that set `product_proof_require_worker_loop=1`
+run a real hosted product-proof worker loop against production**, which
+calls `EscrowCore.claimJob` with the active backend signer. If that signer
+has no liquid USDC inside `AgentAccountCore`, the deploy fails at the
+worker-loop step *after* `Deploy production`'s smoke check has already
+acquired the production lock, with this signature in the log:
+
+```
+Insufficient liquid balance for USDC
+status=409; path=/jobs/claim; code=insufficient_liquidity
+account: <signer wallet>, asset: USDC, assetClass: trust_backed
+```
+
+USDC is trust-backed (not auto-minted), so the loop fails closed rather
+than minting; no chain or contract code is wrong.
+
+**Before manually dispatching a deploy with the worker loop enabled:**
+
+1. Identify the **active** backend signer wallet. After the 2026-05-16 KMS
+   cutover (see
+   [`docs/SECRETS_MIGRATION.md`](./SECRETS_MIGRATION.md)) the active signer
+   is the KMS-derived EVM address, not the `verifier` field still recorded
+   in [`deployments/testnet.json`](../deployments/testnet.json). The
+   authoritative current value is the `account` field printed in a prior
+   failing deploy log, or the address read from the KMS public key via
+   `node scripts/ops/derive-kms-signer-address.mjs`.
+2. Confirm that wallet's USDC position covers the worker-loop reward plus
+   the configured claim-stake basis points. The exact minimum is the
+   `required` value the failure log prints; current default is
+   `0.16 USDC`.
+3. If the position is short, top up the wallet via the playbook in
+   [`docs/TESTNET_FUND_SIGNER.md`](./TESTNET_FUND_SIGNER.md). Note that
+   doc's "read signer from `deployments/testnet.json#verifier`" line is
+   stale post-KMS-cutover and should be cross-referenced against step 1 of
+   this section before depositing — funding the old signer wallet will
+   silently *not* unblock the deploy.
+4. Re-run **Deploy Production** with the same dispatch parameters. The
+   product-proof worker loop will create, claim, submit, and settle a job
+   against the funded signer and write evidence under
+   `PRODUCT_PROOF_EVIDENCE_FILE`.
+
+If the worker loop is not the point of this particular dispatch, set
+`product_proof_require_worker_loop=0` in the **Run workflow** form and
+re-trigger; the deploy will skip the loop entirely. This is the right
+choice for a non-functional dispatch (Caddy-only change, hotfix smoke,
+cache invalidation) where the worker loop is not part of the test plan.
+
+Last strict hosted proof: Deploy Production run `25988470399` on 2026-05-17
+with `smoke_check_product_proof_gate=1` and
+`product_proof_require_worker_loop=1`. The KMS signer
+`0x31ad432dFe083B998c69B6dB88A984ec5207ab7F` reported `0.3 USDC` liquid in
+`AgentAccountCore`, the worker-loop reward required `0.1 USDC`, the session
+resolved, and `Product-proof gate passed`.

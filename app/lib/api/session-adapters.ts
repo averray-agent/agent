@@ -1,3 +1,6 @@
+import { classifyChainReference } from "@/lib/chain/chain-reference";
+import { buildSessionOutcomeRationale } from "@/lib/ui/outcome-rationale";
+import type { SourceKind } from "@/components/runs/StatePill";
 import type {
   LifecycleStageState,
   SessionAsset,
@@ -5,6 +8,7 @@ import type {
   SessionState,
   VerifierMode,
 } from "@/components/sessions/types";
+import type { OutcomeRationale } from "@/lib/ui/outcome-rationale-types";
 
 type RawRecord = Record<string, unknown>;
 
@@ -15,7 +19,7 @@ function asRecord(value: unknown): RawRecord {
 function asArray(value: unknown): RawRecord[] {
   if (Array.isArray(value)) return value.map(asRecord);
   const record = asRecord(value);
-  for (const key of ["items", "sessions", "history"]) {
+  for (const key of ["items", "sessions", "history", "jobs"]) {
     if (Array.isArray(record[key])) return record[key].map(asRecord);
   }
   return [];
@@ -124,6 +128,24 @@ function timeLabel(value: unknown): string {
   }).format(parsed);
 }
 
+/**
+ * Validate that a value is a parseable ISO-8601 string and return it
+ * verbatim. Returns undefined for missing / non-string / unparseable
+ * inputs so the caller can decide whether to drop the field entirely.
+ *
+ * Aggregate views (e.g. SessionsAggregateStrip's avg settle time)
+ * read the raw ISO so they can compute durations; without this the
+ * adapter would only ship pre-formatted display strings like
+ * "May 2, 14:48".
+ */
+function stringIso(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (!Number.isFinite(Date.parse(trimmed))) return undefined;
+  return trimmed;
+}
+
 function ageLabel(value: unknown): string {
   const raw = text(value);
   const parsed = Date.parse(raw);
@@ -136,6 +158,73 @@ function ageLabel(value: unknown): string {
 
 function jobFor(jobs: RawRecord[], jobId: string): RawRecord {
   return jobs.find((job) => text(job.id) === jobId) ?? {};
+}
+
+function sessionKey(session: RawRecord): string {
+  return text(session.sessionId, text(session.id, `${text(session.jobId)}:${text(session.wallet)}`));
+}
+
+function isActiveClaim(job: RawRecord): boolean {
+  const effectiveState = text(job.effectiveState, text(job.claimState, text(job.state))).toLowerCase();
+  if (effectiveState !== "claimed") return false;
+  if (!text(job.claimedBy)) return false;
+  const expiresAt = text(job.claimExpiresAt);
+  return !expiresAt || Number.isNaN(Date.parse(expiresAt)) || Date.parse(expiresAt) > Date.now();
+}
+
+function claimedJobSession(job: RawRecord): RawRecord {
+  const wallet = text(job.claimedBy);
+  const jobId = text(job.id);
+  const reward = asRecord(job.reward);
+  return {
+    sessionId: text(job.sessionId, `${jobId}:${wallet}`),
+    jobId,
+    wallet,
+    status: "claimed",
+    claimedAt: text(job.claimedAt),
+    updatedAt: text(job.claimedAt),
+    claimStake: job.claimStake ?? reward.amount,
+    totalClaimLock: job.totalClaimLock ?? reward.amount,
+  };
+}
+
+function liveSessionRows(sessionPayload: unknown, jobs: RawRecord[]): RawRecord[] {
+  const sessions = asArray(sessionPayload);
+  const seen = new Set(sessions.map(sessionKey).filter(Boolean));
+  const claimed = jobs.filter(isActiveClaim).map(claimedJobSession).filter((session) => {
+    const key = sessionKey(session);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return [...sessions, ...claimed];
+}
+
+/**
+ * Map a job's source.type onto the operator-app SourceKind enum so the
+ * sessions table can render the same SourceBadge already shown on the
+ * runs surface. Returns undefined for native or unknown sources so the
+ * row simply omits the badge — there's no fallback "OSS" treatment.
+ *
+ * Sessions are 1:1 with runs, so we read straight off the linked job
+ * record. If the backend later adds new source kinds to JobSource, the
+ * SourceKind union will need a corresponding extension; until then,
+ * unknown source.type values fall through to undefined.
+ */
+function sourceKindFromJob(job: RawRecord): SourceKind | undefined {
+  const sourceType = text(asRecord(job.source).type, text(job.sourceType));
+  switch (sourceType) {
+    case "github_issue":
+      return "github";
+    case "wikipedia_article":
+      return "wikipedia";
+    case "osv_advisory":
+      return "osv";
+    case "open_data_dataset":
+      return "data_gov";
+    default:
+      return undefined;
+  }
 }
 
 function lifecycle(session: RawRecord) {
@@ -159,19 +248,55 @@ function lifecycle(session: RawRecord) {
 
 export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknown): SessionDetail[] {
   const jobs = asArray(jobsPayload);
-  return asArray(sessionPayload).map((session) => {
+  return liveSessionRows(sessionPayload, jobs).map((session) => {
     const id = text(session.sessionId, text(session.id, "unknown-session"));
     const jobId = text(session.jobId, "unknown-job");
     const job = jobFor(jobs, jobId);
-    const rewardAsset = asset(job.rewardAsset);
-    const rewardAmount = amount(job.rewardAmount ?? session.claimStake);
+    const reward = asRecord(job.reward);
+    const rewardAsset = asset(job.rewardAsset ?? reward.asset);
+    const rewardAmount = amount(job.rewardAmount ?? reward.amount ?? session.claimStake);
     const currentState = state(session.status);
     const updatedAt = session.updatedAt ?? session.resolvedAt ?? session.submittedAt ?? session.claimedAt;
     const verification = asRecord(session.verification);
+    const policy = text(job.outputSchemaRef, "schema pending");
+    const verifierHref = `/session/timeline?sessionId=${encodeURIComponent(id)}`;
+    const disputeHref = currentState === "disputed" || currentState === "slashed"
+      ? `/disputes?sessionId=${encodeURIComponent(id)}`
+      : undefined;
+    const outcomeRationale = buildSessionOutcomeRationale({
+      state: currentState,
+      sessionId: id,
+      policy,
+      statusHistory: session.statusHistory,
+      verification,
+      verificationSummary: session.verificationSummary,
+      disputeHref,
+      verifierHref,
+    }) as OutcomeRationale | null;
+    // Settled timestamp = resolvedAt (verifier produced a final
+    // outcome) and falls back to closedAt for sessions whose terminal
+    // state predates the resolvedAt rollout. Both are ISO strings on
+    // the backend payload.
+    const rawClaimedAt = stringIso(session.claimedAt);
+    const rawSubmittedAt = stringIso(session.submittedAt);
+    const rawSettledAt = stringIso(session.resolvedAt) ?? stringIso(session.closedAt);
+    const rawUpdatedAt = stringIso(session.updatedAt) ?? stringIso(updatedAt);
+    const timestamps =
+      rawClaimedAt || rawSubmittedAt || rawSettledAt || rawUpdatedAt
+        ? {
+            ...(rawClaimedAt ? { claimedAt: rawClaimedAt } : {}),
+            ...(rawSubmittedAt ? { submittedAt: rawSubmittedAt } : {}),
+            ...(rawSettledAt ? { settledAt: rawSettledAt } : {}),
+            ...(rawUpdatedAt ? { updatedAt: rawUpdatedAt } : {}),
+          }
+        : undefined;
+
+    const sourceKind = sourceKindFromJob(job);
 
     return {
       id,
       runRef: jobId,
+      ...(sourceKind ? { source: sourceKind } : {}),
       job: {
         title: text(job.title, text(job.description, titleFromId(jobId))),
         meta: `${jobId} · ${text(job.category, "work")} · ${tierLabel(job.tier)}`,
@@ -191,10 +316,18 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
           ? `Verifier ${text(verification.outcome)}`
           : `Session ${text(session.status, "claimed")}`,
         meta: timeLabel(updatedAt),
-        tone: currentState === "approved" || currentState === "settled" ? "accent" : currentState === "disputed" ? "warn" : "neutral",
+        tone: currentState === "approved" || currentState === "settled"
+          ? "accent"
+          : currentState === "disputed"
+            ? "warn"
+            : currentState === "rejected" || currentState === "slashed"
+              ? "bad"
+              : "neutral",
       },
+      ...(outcomeRationale ? { outcomeRationale } : {}),
       openedAt: timeLabel(session.claimedAt),
-      policy: text(job.outputSchemaRef, "schema pending"),
+      ...(timestamps ? { timestamps } : {}),
+      policy,
       receipt: currentState === "approved" || currentState === "settled" ? text(session.sessionId) : undefined,
       lifecycle: lifecycle(session),
       movements: [
@@ -203,8 +336,8 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
           label: "session.claimed",
           from: shortAddress(session.wallet),
           to: "AgentAccountCore",
-          amount: `${amount(session.claimStake)} ${rewardAsset}`,
-          tx: text(session.chainJobId, "-"),
+          amount: `${amount(session.totalClaimLock ?? session.claimStake)} ${rewardAsset}`,
+          ref: classifyChainReference({ jobId: session.chainJobId }),
           tone: "accent",
         },
       ],
@@ -215,13 +348,13 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
               role: "worker",
               amount: `${rewardAmount} ${rewardAsset}`,
               at: timeLabel(session.resolvedAt ?? session.closedAt),
-              tx: text(session.chainJobId, "-"),
+              ref: classifyChainReference({ jobId: session.chainJobId }),
             },
           ]
         : [],
       evidenceHref: `/runs#${encodeURIComponent(jobId)}`,
-      verifierHref: `/session/timeline?sessionId=${encodeURIComponent(id)}`,
-      disputeHref: currentState === "disputed" ? `/disputes?sessionId=${encodeURIComponent(id)}` : undefined,
+      verifierHref,
+      disputeHref,
     };
   });
 }
@@ -245,14 +378,29 @@ export function mergeSessionTimeline(
   const movements = timeline.length
     ? timeline.map((entry) => {
         const data = asRecord(entry.data);
+        const source = text(entry.source);
+        const topic = text(entry.topic);
+        const phase = text(entry.phase);
+        const severity = text(entry.severity);
+        const wallet = text(entry.wallet ?? data.wallet);
+        const correlationId = text(entry.correlationId);
         return {
           at: timeLabel(entry.at),
           label: text(entry.type, text(entry.phase, "session.event")),
           from: shortAddress(data.from ?? data.wallet ?? "system"),
           to: shortAddress(data.to ?? "AgentAccountCore"),
           amount: text(data.amount, session.escrow.amount ? `${session.escrow.amount} ${session.escrow.asset}` : "-"),
-          tx: text(data.tx, text(data.chainJobId, "-")),
+          // `data.tx` is a genuine transaction; `data.chainJobId` is the escrow
+          // job key (bytes32, tx-hash-shaped but not a transaction). Classify
+          // by provenance so only a real tx is ever presented/linked as one.
+          ref: classifyChainReference({ txHash: data.tx, jobId: data.chainJobId }),
           tone: movementTone(entry.phase ?? entry.type),
+          ...(source ? { source } : {}),
+          ...(topic ? { topic } : {}),
+          ...(phase ? { phase } : {}),
+          ...(severity ? { severity } : {}),
+          ...(wallet ? { wallet } : {}),
+          ...(correlationId ? { correlationId } : {}),
         };
       })
     : session.movements;

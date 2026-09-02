@@ -5,6 +5,16 @@ import { cn } from "@/lib/utils/cn";
 import { StatePill, SourceBadge, type RunState } from "./StatePill";
 import { WorkerChip, type WorkerVariant } from "./WorkerChip";
 import type { JobSource } from "./types";
+import {
+  formatLifecycleLabel,
+  type JobLifecycle,
+  type JobLifecycleState,
+} from "@/lib/api/job-lifecycle";
+import {
+  CLAIM_STATE_LABEL,
+  type ClaimEffectiveState,
+  type ClaimSummary,
+} from "@/lib/api/claim-status";
 
 export interface RunRow {
   id: string;
@@ -17,6 +27,21 @@ export interface RunRow {
    * internal job id.
    */
   source?: JobSource;
+  /**
+   * Lifecycle metadata from PR #64. Present when the row was loaded
+   * from `/admin/jobs` (operator). Drives the lifecycle pill and the
+   * action bar in the loaded-run panel.
+   */
+  lifecycle?: JobLifecycle;
+  /**
+   * Claim-state block from `/jobs[]` and `/admin/jobs[]`. Present on
+   * every row the backend has rolled out the new claim contract for;
+   * absent on older fixtures. When present the row pill renders the
+   * claim `effectiveState` (which reflects retry-budget exhaustion)
+   * instead of the legacy `state` field, and recommendation / claim
+   * buttons gate on `claim.claimable`.
+   */
+  claim?: ClaimSummary;
   worker: {
     variant: WorkerVariant;
     initials: string;
@@ -168,7 +193,7 @@ function RunRowCard({
                     </span>
                   </span>
                   <span className="shrink-0 opacity-40">·</span>
-                  <span className="shrink-0 whitespace-nowrap">
+                  <span className="min-w-0 truncate whitespace-nowrap">
                     {row.jobMeta}
                   </span>
                 </>
@@ -178,11 +203,70 @@ function RunRowCard({
                   <span className="truncate">
                     <span>{row.source.language}.wikipedia</span>
                     <span className="text-[var(--avy-accent)]">
-                      {" "}/ {row.source.pageTitle}
+                      {" "}/ &ldquo;{row.source.pageTitle}&rdquo;
                     </span>
                   </span>
                   <span className="shrink-0 opacity-40">·</span>
-                  <span className="shrink-0 whitespace-nowrap">
+                  <span className="min-w-0 truncate whitespace-nowrap">
+                    {row.jobMeta}
+                  </span>
+                </>
+              ) : row.source?.type === "osv_advisory" ? (
+                <>
+                  <SourceBadge
+                    kind="osv"
+                    secondary={
+                      (row.source.cves?.length ?? 0) > 0 ? "NVD" : undefined
+                    }
+                    className="shrink-0"
+                  />
+                  <span className="truncate">
+                    {row.source.ecosystem} / {row.source.packageName}
+                    <span className="text-[var(--avy-accent)]">
+                      {" "}· {row.source.advisoryId}
+                    </span>
+                  </span>
+                  <span className="shrink-0 opacity-40">·</span>
+                  <span className="min-w-0 truncate whitespace-nowrap">
+                    {row.jobMeta}
+                  </span>
+                </>
+              ) : row.source?.type === "open_data_dataset" ? (
+                <>
+                  <SourceBadge kind="data_gov" className="shrink-0" />
+                  <span className="truncate text-[var(--avy-ink)]">
+                    {row.source.datasetTitle}
+                  </span>
+                  <span className="shrink-0 opacity-40">·</span>
+                  <span className="min-w-0 truncate whitespace-nowrap">
+                    {row.jobMeta}
+                  </span>
+                </>
+              ) : row.source?.type === "openapi_spec" ? (
+                <>
+                  <SourceBadge kind="openapi" className="shrink-0" />
+                  <span className="truncate">
+                    <span>{row.source.provider}</span>
+                    <span className="text-[var(--avy-accent)]">
+                      {" "}/ {row.source.apiTitle}
+                    </span>
+                  </span>
+                  <span className="shrink-0 opacity-40">·</span>
+                  <span className="min-w-0 truncate whitespace-nowrap">
+                    {row.jobMeta}
+                  </span>
+                </>
+              ) : row.source?.type === "standards_spec" ? (
+                <>
+                  <SourceBadge kind="standards" className="shrink-0" />
+                  <span className="truncate">
+                    <span>{row.source.provider.toUpperCase()}</span>
+                    <span className="text-[var(--avy-accent)]">
+                      {" "}/ {row.source.specTitle}
+                    </span>
+                  </span>
+                  <span className="shrink-0 opacity-40">·</span>
+                  <span className="min-w-0 truncate whitespace-nowrap">
                     {row.jobMeta}
                   </span>
                 </>
@@ -193,7 +277,24 @@ function RunRowCard({
           </div>
 
           <div className="flex shrink-0 flex-col items-end gap-0.5">
-            <StatePill state={row.state} />
+            <div className="flex items-center gap-1.5">
+              {row.lifecycle && row.lifecycle.state !== "open" ? (
+                <LifecyclePill state={row.lifecycle.state} />
+              ) : null}
+              {/*
+               * Prefer the claim `effectiveState` pill when the row
+               * carries the new claim contract — it tells the operator
+               * whether the job can actually be claimed (an "open" row
+               * can still be `exhausted` after every retry was used).
+               * Fall back to the legacy run-state pill for older
+               * fixtures and any backend that hasn't rolled out yet.
+               */}
+              {row.claim ? (
+                <EffectiveStatePill state={row.claim.state} />
+              ) : (
+                <StatePill state={row.state} />
+              )}
+            </div>
             <span className="font-[family-name:var(--font-mono)] text-[12.5px] leading-tight text-[var(--avy-ink)]">
               {row.stake}
               <small className="font-normal text-[var(--avy-muted)]"> DOT</small>
@@ -225,5 +326,63 @@ function RunRowCard({
         </div>
       </button>
     </li>
+  );
+}
+
+function LifecyclePill({ state }: { state: JobLifecycleState }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase",
+        state === "stale" &&
+          "bg-[var(--avy-warn-soft)] text-[var(--avy-warn)]",
+        state === "paused" &&
+          "bg-[color:rgba(17,19,21,0.06)] text-[var(--avy-muted)]",
+        state === "archived" &&
+          "bg-[color:rgba(17,19,21,0.06)] text-[var(--avy-muted)]",
+        state === "open" && "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]"
+      )}
+      style={{ letterSpacing: "0.1em" }}
+      title={`Lifecycle: ${state}`}
+    >
+      {formatLifecycleLabel(state)}
+    </span>
+  );
+}
+
+/**
+ * Pill for `claim.effectiveState`. Five buckets, one tone each:
+ *   - claimable → green (matches the existing "ready" affordance)
+ *   - claimed → blue-tinted (a worker holds it; not red)
+ *   - submitted → amber (awaiting verification)
+ *   - expired → amber (a prior claim TTL'd; reopen is implicit)
+ *   - exhausted → muted (retry budget gone)
+ *
+ * Brief explicitly calls out `lifecycle.status: "open"` +
+ * `claim.exhausted` rendering as Exhausted, not Open. This pill is the
+ * single place that decides that.
+ */
+function EffectiveStatePill({ state }: { state: ClaimEffectiveState }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase",
+        state === "claimable" &&
+          "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]",
+        state === "claimed" &&
+          "bg-[color:rgba(37,78,154,0.14)] text-[#254e9a]",
+        state === "submitted" &&
+          "bg-[var(--avy-warn-soft)] text-[var(--avy-warn)]",
+        state === "expired" &&
+          "bg-[var(--avy-warn-soft)] text-[var(--avy-warn)]",
+        state === "exhausted" &&
+          "bg-[color:rgba(17,19,21,0.06)] text-[var(--avy-muted)]"
+      )}
+      style={{ letterSpacing: "0.08em" }}
+      title={`Claim state: ${state}`}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
+      {CLAIM_STATE_LABEL[state]}
+    </span>
   );
 }

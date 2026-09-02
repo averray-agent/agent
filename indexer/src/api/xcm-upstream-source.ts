@@ -31,6 +31,7 @@ type FeedItem = {
 };
 
 type FetchLike = typeof fetch;
+const UINT256_MAX = (1n << 256n) - 1n;
 
 type NativePapiSourceConfig = {
   hubWs: string;
@@ -50,6 +51,7 @@ export type NativeXcmEvidence = {
   source?: unknown;
   hub?: Record<string, unknown>;
   bifrost?: Record<string, unknown>;
+  correlation?: Record<string, unknown>;
   decision?: Record<string, unknown>;
 };
 
@@ -60,11 +62,32 @@ export interface XcmUpstreamSourceAdapter {
 }
 
 function normalizeAmount(value: unknown) {
-  const parsed = Number(value ?? 0);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error("XCM upstream amounts must be finite non-negative numbers.");
+  if (value === undefined || value === null || value === "") {
+    return "0";
   }
-  return String(Math.trunc(parsed));
+
+  let parsed: bigint;
+  if (typeof value === "bigint") {
+    parsed = value;
+  } else if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error("XCM upstream amounts must be exact non-negative uint256 integers.");
+    }
+    parsed = BigInt(value);
+  } else if (typeof value === "string") {
+    const normalized = value.trim();
+    if (!/^\d+$/u.test(normalized)) {
+      throw new Error("XCM upstream amounts must be exact non-negative uint256 integers.");
+    }
+    parsed = BigInt(normalized);
+  } else {
+    throw new Error("XCM upstream amounts must be exact non-negative uint256 integers.");
+  }
+
+  if (parsed < 0n || parsed > UINT256_MAX) {
+    throw new Error("XCM upstream amounts must fit uint256.");
+  }
+  return parsed.toString();
 }
 
 function normalizeOptionalHex32(value: unknown) {
@@ -79,11 +102,38 @@ function normalizeOptionalHex32(value: unknown) {
 }
 
 function normalizeObservedAt(value: unknown) {
-  const observedAt = value ? new Date(value as string | number | Date) : new Date();
+  const observedAt = parseObservedAt(value);
   if (Number.isNaN(observedAt.getTime())) {
-    throw new Error("XCM upstream observedAt must be ISO-8601 when provided.");
+    throw new Error("XCM upstream observedAt must be ISO-8601 or an epoch timestamp when provided.");
   }
   return observedAt.toISOString();
+}
+
+function parseObservedAt(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return new Date();
+  }
+  if (value instanceof Date) {
+    return value;
+  }
+  if (typeof value === "number") {
+    return parseEpochTimestamp(value);
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    if (/^\d+$/u.test(normalized)) {
+      return parseEpochTimestamp(Number(normalized));
+    }
+    return new Date(normalized);
+  }
+  return new Date(value as string | number | Date);
+}
+
+function parseEpochTimestamp(value: number) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    return new Date(Number.NaN);
+  }
+  return new Date(value < 1_000_000_000_000 ? value * 1000 : value);
 }
 
 function normalizeStatus(value: unknown) {
@@ -92,6 +142,14 @@ function normalizeStatus(value: unknown) {
     throw new Error("XCM upstream items must use a terminal status.");
   }
   return normalized;
+}
+
+function normalizeFailureCode(value: unknown, status: string) {
+  const failureCode = normalizeOptionalHex32(value);
+  if (status === "failed" && !failureCode) {
+    throw new Error("XCM upstream failed items must include failureCode.");
+  }
+  return failureCode;
 }
 
 function normalizeFeedItem(item: unknown, fallbackSource = "external_xcm_source"): PublishedOutcome {
@@ -103,13 +161,14 @@ function normalizeFeedItem(item: unknown, fallbackSource = "external_xcm_source"
   if (!/^0x[a-fA-F0-9]{64}$/u.test(requestId)) {
     throw new Error("XCM upstream requestId must be a 0x-prefixed 32-byte hex string.");
   }
+  const status = normalizeStatus(sourceItem.status);
   return {
     requestId,
-    status: normalizeStatus(sourceItem.status),
+    status,
     settledAssets: normalizeAmount(sourceItem.settledAssets),
     settledShares: normalizeAmount(sourceItem.settledShares),
     remoteRef: normalizeOptionalHex32(sourceItem.remoteRef),
-    failureCode: normalizeOptionalHex32(sourceItem.failureCode),
+    failureCode: normalizeFailureCode(sourceItem.failureCode, status),
     observedAt: normalizeObservedAt(sourceItem.observedAt),
     source: typeof sourceItem.source === "string" && sourceItem.source.trim()
       ? sourceItem.source.trim()
@@ -163,6 +222,7 @@ export function normalizeNativeXcmEvidence(evidence: NativeXcmEvidence): Publish
   if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
     throw new Error("Native XCM evidence must be an object.");
   }
+  validateNativeCorrelationGate(evidence);
   return normalizeFeedItem({
     requestId: evidence.requestId,
     status: evidence.status,
@@ -175,6 +235,70 @@ export function normalizeNativeXcmEvidence(evidence: NativeXcmEvidence): Publish
       ? evidence.source.trim()
       : "native_papi_observer"
   }, "native_papi_observer");
+}
+
+export function validateNativeCorrelationGate(evidence: NativeXcmEvidence) {
+  const requestId = String(evidence.requestId ?? "");
+  if (!/^0x[a-fA-F0-9]{64}$/u.test(requestId)) {
+    throw new Error("Native XCM evidence requestId must be a 0x-prefixed 32-byte hex string.");
+  }
+
+  const correlation = evidence.correlation ?? {};
+  const method = String(correlation.method ?? "").trim().toLowerCase();
+  const confidence = String(correlation.confidence ?? "staging").trim().toLowerCase();
+  if (!["request_id_in_message", "remote_ref", "ledger_join"].includes(method)) {
+    throw new Error("Native XCM evidence correlation.method must be request_id_in_message, remote_ref, or ledger_join.");
+  }
+  if (!["staging", "production_candidate", "production"].includes(confidence)) {
+    throw new Error("Native XCM evidence correlation.confidence must be staging, production_candidate, or production.");
+  }
+
+  if (method === "request_id_in_message") {
+    assertTopicMatchesRequest(evidence.hub, requestId, "hub");
+    if (confidence !== "staging") {
+      assertTopicMatchesRequest(evidence.bifrost, requestId, "bifrost");
+    }
+    return;
+  }
+
+  if (method === "remote_ref") {
+    normalizeOptionalHex32(evidence.remoteRef ?? evidence.decision?.remoteRef);
+    if (!normalizeOptionalHex32(evidence.remoteRef ?? evidence.decision?.remoteRef)) {
+      throw new Error("Native XCM remote_ref correlation requires remoteRef.");
+    }
+    return;
+  }
+
+  if (confidence !== "staging") {
+    throw new Error("Native XCM ledger_join correlation is staging-only and cannot be production_candidate or production.");
+  }
+}
+
+function assertTopicMatchesRequest(evidence: Record<string, unknown> | undefined, requestId: string, label: string) {
+  if (!evidence || typeof evidence !== "object") {
+    throw new Error(`Native XCM ${label} evidence is required for request_id_in_message correlation.`);
+  }
+  const topic = pickEvidenceTopic(evidence);
+  if (!topic) {
+    throw new Error(`Native XCM ${label} evidence must include messageTopic/topic for request_id_in_message correlation.`);
+  }
+  if (topic.toLowerCase() !== requestId.toLowerCase()) {
+    throw new Error(`Native XCM ${label} message topic must equal requestId.`);
+  }
+}
+
+function pickEvidenceTopic(evidence: Record<string, unknown>) {
+  for (const key of ["messageTopic", "message_topic", "topic", "setTopic", "set_topic"]) {
+    const value = evidence[key];
+    if (typeof value === "string" && value.trim()) {
+      const normalized = value.trim();
+      if (!/^0x[a-fA-F0-9]{64}$/u.test(normalized)) {
+        throw new Error("Native XCM evidence topic must be a 0x-prefixed 32-byte hex string.");
+      }
+      return normalized;
+    }
+  }
+  return undefined;
 }
 
 export class HttpFeedSourceAdapter implements XcmUpstreamSourceAdapter {
@@ -235,6 +359,9 @@ type SubscanXcmRecord = Record<string, unknown>;
  * - Exact field names inside `data.list` are inferred from Subscan's common
  *   list conventions because the paid-plan payload could not be live-validated
  *   from this environment. Parsing is intentionally defensive.
+ * - Only rows carrying an explicit Averray request id / XCM SetTopic field are
+ *   published. Generic message, extrinsic, or record hashes are not local
+ *   request ids and are intentionally ignored.
  */
 export class SubscanXcmSourceAdapter implements XcmUpstreamSourceAdapter {
   type = "subscan_xcm";
@@ -287,7 +414,7 @@ export class SubscanXcmSourceAdapter implements XcmUpstreamSourceAdapter {
     const items = list
       .map((entry) => this.normalizeSubscanEntry(entry as SubscanXcmRecord))
       .filter((entry): entry is PublishedOutcome => Boolean(entry));
-    const nextCursor = list.length >= limit ? this.encodePageCursor(page + 1) : undefined;
+    const nextCursor = list.length > 0 ? this.encodePageCursor(page + 1) : undefined;
     return {
       items,
       nextCursor
@@ -311,10 +438,13 @@ export class SubscanXcmSourceAdapter implements XcmUpstreamSourceAdapter {
 
   normalizeSubscanEntry(entry: SubscanXcmRecord): PublishedOutcome | undefined {
     const requestId = this.pickString(entry, [
-      "msg_hash",
-      "message_hash",
-      "extrinsic_hash",
-      "hash"
+      "requestId",
+      "request_id",
+      "messageTopic",
+      "message_topic",
+      "setTopic",
+      "set_topic",
+      "topic"
     ]);
     if (!requestId || !/^0x[a-fA-F0-9]{64}$/u.test(requestId)) {
       return undefined;
@@ -338,8 +468,8 @@ export class SubscanXcmSourceAdapter implements XcmUpstreamSourceAdapter {
       settledAssets: "0",
       settledShares: "0",
       remoteRef: normalizeOptionalHex32(this.pickString(entry, ["remote_ref", "query_id"])),
-      failureCode: rawStatus === "failed"
-        ? normalizeOptionalHex32(this.pickString(entry, ["error_code", "failure_code"]))
+      failureCode: status === "failed"
+        ? normalizeFailureCode(this.pickString(entry, ["error_code", "failure_code"]), status)
         : null,
       observedAt: normalizeObservedAt(this.pickString(entry, ["block_timestamp", "timestamp", "time"])),
       source: "subscan_xcm_api"

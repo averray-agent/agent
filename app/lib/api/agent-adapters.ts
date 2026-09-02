@@ -1,6 +1,7 @@
 import {
   BADGES,
   tierFor,
+  type AgentActiveSession,
   type AgentRecord,
   type AgentSpecialty,
   type AgentState,
@@ -36,6 +37,10 @@ export function extractAgent(data: unknown): AgentRecord | null {
     ? number(stats?.completionRate, 0)
     : number(record.successRate, 0);
 
+  const activeSession = activeSessionFor(record);
+  const verifiedBadgeCount = badgesRaw.length;
+  const lineage = lineageFor(record);
+  const lineageStats = lineageStatsFor(record, lineage);
   return {
     handle: text(record.handle, handleForWallet(walletFull)),
     wallet: shortAddress(walletFull),
@@ -47,10 +52,14 @@ export function extractAgent(data: unknown): AgentRecord | null {
     badgeDates: badgeDatesFor(badgesRaw, badgeIds),
     specialty,
     stake: stakeFor(record),
-    activity: activityFor(record, badgesRaw, totalJobs),
-    state: stateFor(record, totalJobs),
+    activity: activityFor(record, badgesRaw, totalJobs, activeSession),
+    state: stateFor(record, totalJobs, activeSession),
+    ...(activeSession ? { activeSession } : {}),
+    hasVerifiedBadges: verifiedBadgeCount > 0,
     recentRuns: recentRunsFor(badgesRaw),
     slashes: slashEvents(record.slashEvents),
+    lineage,
+    lineageStats,
   };
 }
 
@@ -134,7 +143,29 @@ function stakeFor(record: RawRecord): AgentRecord["stake"] {
   };
 }
 
-function activityFor(record: RawRecord, badges: unknown[], totalJobs: number): AgentRecord["activity"] {
+function activityFor(
+  record: RawRecord,
+  badges: unknown[],
+  totalJobs: number,
+  activeSession: AgentActiveSession | undefined
+): AgentRecord["activity"] {
+  // Priority: live claim > most recent badge > fallback to the
+  // "no runs yet" empty-state copy.
+  if (activeSession) {
+    const verb =
+      activeSession.status === "claimed"
+        ? "Claimed"
+        : activeSession.status === "working"
+          ? "Working on"
+          : activeSession.status === "submitted"
+            ? "Submitted"
+            : "Disputed";
+    return {
+      msg: `${verb} ${activeSession.jobId}`,
+      ref: activeSession.jobId,
+      when: relativeTime(activeSession.lastEventAt ?? record.fetchedAt),
+    };
+  }
   const latest = badges[0] && typeof badges[0] === "object" ? (badges[0] as RawRecord) : null;
   const jobId = text(latest?.jobId, "");
   if (jobId) {
@@ -151,9 +182,68 @@ function activityFor(record: RawRecord, badges: unknown[], totalJobs: number): A
   };
 }
 
-function stateFor(record: RawRecord, totalJobs: number): AgentState {
+function stateFor(
+  record: RawRecord,
+  totalJobs: number,
+  activeSession: AgentActiveSession | undefined
+): AgentState {
   if (Array.isArray(record.slashEvents) && record.slashEvents.length) return "slashed";
+  if (activeSession) return activeSession.status;
   return totalJobs > 0 ? "active" : "idle";
+}
+
+function activeSessionFor(record: RawRecord): AgentActiveSession | undefined {
+  // The backend has shipped this block under three names across the
+  // recent indexer/deploy churns:
+  //   - `currentActivity` (live shape, see GET /agents/<wallet>):
+  //       { sessionId, jobId, status, label, phase, outcome,
+  //         claimedAt, updatedAt, deadlineAt, canSubmit,
+  //         awaitingVerification }
+  //     The session id doubles as the run id in this scheme — there's
+  //     no separate `runId` field today.
+  //   - `activeSession` / `currentSession` (older / fallback names that
+  //     PR #108 originally targeted)
+  // Tolerate any of the three so the drawer keeps rendering through
+  // schema rotations.
+  const block =
+    objectField(record, "currentActivity") ??
+    objectField(record, "activeSession") ??
+    objectField(record, "currentSession") ??
+    null;
+  if (!block) return undefined;
+  const jobId = text(block.jobId, "");
+  const sessionId = text(block.sessionId, "");
+  // `runId` is optional on the backend; fall back to sessionId so the
+  // drawer always has a value to display.
+  const runId = text(block.runId, "") || sessionId;
+  if (!runId || !jobId || !sessionId) return undefined;
+  const status = activeStatus(block.status);
+  if (!status) return undefined;
+  // `currentActivity` uses `updatedAt` and `label`; older `activeSession`
+  // shapes used `lastEventAt` / `lastEvent`. Fall through both so the
+  // drawer's "Last event" line is populated regardless of which key
+  // the backend emits today.
+  const lastEventAt = text(block.lastEventAt, "") || text(block.updatedAt, "");
+  const lastEvent = text(block.lastEvent, "") || text(block.label, "");
+  return {
+    runId,
+    jobId,
+    sessionId,
+    status,
+    ...(text(block.title) ? { title: text(block.title) } : {}),
+    ...(text(block.deadlineAt) ? { deadlineAt: text(block.deadlineAt) } : {}),
+    ...(lastEventAt ? { lastEventAt } : {}),
+    ...(lastEvent ? { lastEvent } : {}),
+  };
+}
+
+function activeStatus(value: unknown): AgentActiveSession["status"] | null {
+  const raw = text(value, "").toLowerCase();
+  if (raw === "claimed") return "claimed";
+  if (raw === "working" || raw === "in_progress") return "working";
+  if (raw === "submitted" || raw === "pending" || raw === "pending_verification") return "submitted";
+  if (raw === "disputed" || raw === "rejected") return "disputed";
+  return null;
 }
 
 function recentRunsFor(badges: unknown[]): AgentRecord["recentRuns"] {
@@ -180,6 +270,78 @@ function slashEvents(value: unknown): AgentRecord["slashes"] {
       ref: text(record.ref, `slash-${index + 1}`),
     };
   });
+}
+
+function lineageFor(record: RawRecord): AgentRecord["lineage"] {
+  const lineage = objectField(record, "lineage");
+  return {
+    delegated: arrayField(lineage, "delegated")
+      ?.map(delegatedLineageEntry)
+      .filter((entry): entry is AgentRecord["lineage"]["delegated"][number] => Boolean(entry))
+      ?? [],
+    subcontracted: arrayField(lineage, "subcontracted")
+      ?.map(subcontractedLineageEntry)
+      .filter((entry): entry is AgentRecord["lineage"]["subcontracted"][number] => Boolean(entry))
+      ?? [],
+  };
+}
+
+function lineageStatsFor(
+  record: RawRecord,
+  lineage: AgentRecord["lineage"]
+): AgentRecord["lineageStats"] {
+  const stats = objectField(record, "stats");
+  const raw = objectField(stats, "lineage");
+  return {
+    delegated: number(raw?.delegated, lineage.delegated.length),
+    subcontracted: number(raw?.subcontracted, lineage.subcontracted.length),
+  };
+}
+
+function delegatedLineageEntry(value: unknown): AgentRecord["lineage"]["delegated"][number] | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as RawRecord;
+  const sessionId = text(record.sessionId, "");
+  const jobId = text(record.jobId, "");
+  if (!sessionId || !jobId) return null;
+  const children = objectField(record, "children");
+  return {
+    role: "parent",
+    sessionId,
+    jobId,
+    ...(text(record.jobTitle, "") ? { jobTitle: text(record.jobTitle) } : {}),
+    status: text(record.status, "unknown"),
+    updatedAt: text(record.updatedAt, ""),
+    children: {
+      count: number(children?.count, arrayField(children, "jobIds")?.length ?? 0),
+      jobIds: stringArray(children, "jobIds"),
+      sessionIds: stringArray(children, "sessionIds"),
+      wallets: stringArray(children, "wallets"),
+    },
+  };
+}
+
+function subcontractedLineageEntry(value: unknown): AgentRecord["lineage"]["subcontracted"][number] | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as RawRecord;
+  const sessionId = text(record.sessionId, "");
+  const jobId = text(record.jobId, "");
+  if (!sessionId || !jobId) return null;
+  const parent = objectField(record, "parent");
+  return {
+    role: "child",
+    sessionId,
+    jobId,
+    ...(text(record.jobTitle, "") ? { jobTitle: text(record.jobTitle) } : {}),
+    status: text(record.status, "unknown"),
+    updatedAt: text(record.updatedAt, ""),
+    parent: {
+      ...(text(parent?.sessionId, "") ? { sessionId: text(parent?.sessionId) } : {}),
+      ...(text(parent?.jobId, "") ? { jobId: text(parent?.jobId) } : {}),
+      ...(text(parent?.wallet, "") ? { wallet: text(parent?.wallet).toLowerCase() } : {}),
+      ...(typeof parent?.isSelf === "boolean" ? { isSelf: parent.isSelf } : {}),
+    },
+  };
 }
 
 function sparkline(score: number): number[] {
@@ -240,4 +402,10 @@ function arrayField(value: unknown, key: string): unknown[] | null {
   if (!value || typeof value !== "object") return null;
   const field = (value as RawRecord)[key];
   return Array.isArray(field) ? field : null;
+}
+
+function stringArray(value: unknown, key: string): string[] {
+  return (arrayField(value, key) ?? [])
+    .map((entry) => text(entry, ""))
+    .filter(Boolean);
 }

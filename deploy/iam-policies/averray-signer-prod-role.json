@@ -1,0 +1,49 @@
+{
+  "_comment": "IAM permissions policy for averray-signer-prod-role. Phase 3a per docs/SECRETS_MIGRATION.md.",
+  "_comment_2": "Replace <primary-region>, <replica-region>, <account>, <key-id> before applying. Single-region testnet keys: omit the replica-region ARN.",
+  "_comment_3": "Sign + GetPublicKey are intentionally separate statements. kms:SigningAlgorithm and kms:MessageType are condition keys for Sign/Verify only, NOT GetPublicKey — combining them would implicitly deny GetPublicKey.",
+  "_comment_4": "The ExplicitDeny statement protects against signer-role compromise only. Admin-path protection (root, IAM admins) requires KMS key policy + SCPs + permission boundaries + CloudTrail alarms, not this role's permissions policy.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowGetPublicKey",
+      "Effect": "Allow",
+      "Action": "kms:GetPublicKey",
+      "Resource": [
+        "arn:aws:kms:<primary-region>:<account>:key/<key-id>",
+        "arn:aws:kms:<replica-region>:<account>:key/<key-id>"
+      ]
+    },
+    {
+      "Sid": "AllowSignDigestOnly",
+      "Effect": "Allow",
+      "Action": "kms:Sign",
+      "Resource": [
+        "arn:aws:kms:<primary-region>:<account>:key/<key-id>",
+        "arn:aws:kms:<replica-region>:<account>:key/<key-id>"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "kms:SigningAlgorithm": "ECDSA_SHA_256",
+          "kms:MessageType":      "DIGEST"
+        }
+      }
+    },
+    {
+      "Sid": "ExplicitDenyDangerousOpsForSignerRole",
+      "Effect": "Deny",
+      "Action": [
+        "kms:ScheduleKeyDeletion",
+        "kms:DisableKey",
+        "kms:PutKeyPolicy",
+        "kms:CreateGrant",
+        "kms:ReplicateKey",
+        "kms:UpdatePrimaryRegion"
+      ],
+      "Resource": [
+        "arn:aws:kms:<primary-region>:<account>:key/<key-id>",
+        "arn:aws:kms:<replica-region>:<account>:key/<key-id>"
+      ]
+    }
+  ]
+}

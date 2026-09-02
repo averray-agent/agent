@@ -1,29 +1,66 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "schema://jobs/docs-drift-audit-output",
   "title": "Docs Drift Audit Output",
+  "description": "Structured docs drift output.",
   "type": "object",
-  "required": ["source_surface", "drift_findings", "missing_updates", "severity", "fix_recommendation"],
   "properties": {
-    "source_surface": { "type": "string", "minLength": 1 },
+    "source_surface": {
+      "type": "string",
+      "minLength": 1
+    },
     "drift_findings": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["surface_a", "surface_b", "mismatch"],
         "properties": {
-          "surface_a": { "type": "string", "minLength": 1 },
-          "surface_b": { "type": "string", "minLength": 1 },
-          "mismatch": { "type": "string", "minLength": 1 }
+          "surface_a": {
+            "type": "string",
+            "minLength": 1
+          },
+          "surface_b": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mismatch": {
+            "type": "string",
+            "minLength": 1
+          }
         },
+        "required": [
+          "surface_a",
+          "surface_b",
+          "mismatch"
+        ],
         "additionalProperties": false
       }
     },
     "missing_updates": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
-    "severity": { "type": "string", "enum": ["low", "medium", "high"] },
-    "fix_recommendation": { "type": "string", "minLength": 1 }
+    "severity": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "fix_recommendation": {
+      "type": "string",
+      "minLength": 1
+    }
   },
+  "required": [
+    "source_surface",
+    "drift_findings",
+    "missing_updates",
+    "severity",
+    "fix_recommendation"
+  ],
   "additionalProperties": false
 }

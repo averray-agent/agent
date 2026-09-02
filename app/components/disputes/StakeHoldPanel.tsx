@@ -34,9 +34,16 @@ export function StakeHoldPanel({
   const allowedFor: Record<DecisionKind, ReleaseDestination[]> = {
     uphold: ["slash-to-treasury", "pay-verifier"],
     reject: ["return-to-depositor"],
-    "request-more": [],
+    split: ["return-to-depositor"],
+    timeout: ["return-to-depositor"],
   };
   const allowed = decision ? allowedFor[decision] : [];
+  const returnDestinationMeta =
+    decision === "split"
+      ? "Partial worker payout recorded by the split verdict."
+      : decision === "timeout"
+        ? "Worker-favorable auto-resolution after the arbitration window."
+        : "Full unlock to the worker wallet. Run resumes.";
 
   return (
     <div className="flex flex-col gap-3 rounded-[10px] border border-[color:rgba(167,97,34,0.28)] bg-[color:rgba(244,227,207,0.28)] p-4">
@@ -114,7 +121,7 @@ export function StakeHoldPanel({
           <DestinationRadio
             id="return-to-depositor"
             label="Return to depositor"
-            meta="Full unlock to the worker wallet. Run resumes."
+            meta={returnDestinationMeta}
             checked={destination === "return-to-depositor"}
             enabled={!disabled && allowed.includes("return-to-depositor")}
             onChange={() => onDestinationChange("return-to-depositor")}

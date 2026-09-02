@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useCallback, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { DetailDrawer } from "@/components/shell/DetailDrawer";
+import { ShareReadonlyButton } from "@/components/common/ShareReadonlyButton";
 import { SessionsTopbar } from "@/components/sessions/SessionsTopbar";
 import { SessionsAggregateStrip } from "@/components/sessions/SessionsAggregateStrip";
 import {
@@ -11,13 +13,19 @@ import {
 import { SessionsTable } from "@/components/sessions/SessionsTable";
 import { SessionDrawerBody } from "@/components/sessions/SessionDrawerBody";
 import { SessionStatePill } from "@/components/sessions/pills";
-import { SESSIONS } from "@/components/sessions/data";
-import { useJobs, useSession, useSessions, useSessionTimeline } from "@/lib/api/hooks";
+import {
+  useAdminSessions,
+  useJobs,
+  useSession,
+  useSessionTimeline,
+} from "@/lib/api/hooks";
+import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { buildSessionDetails, mergeSessionTimeline } from "@/lib/api/session-adapters";
-
-// TODO(data): wire to useApi("/sessions") once the backend emits
-// the list shape. Drill-in swaps to useApi(`/sessions/${id}`) for
-// the drawer.
+import {
+  applyTimelineEventFiltersToParams,
+  parseTimelineEventFilters,
+  type TimelineEventFilterValue,
+} from "@/components/runs/TimelineEventFilters";
 
 function valueBucket(amountStr: string): SessionsFilter["value"] {
   const n = Number(amountStr);
@@ -29,7 +37,33 @@ function valueBucket(amountStr: string): SessionsFilter["value"] {
 }
 
 export default function SessionsPage() {
-  const sessionsQuery = useSessions();
+  return (
+    <Suspense fallback={null}>
+      <SessionsPageInner />
+    </Suspense>
+  );
+}
+
+function SessionsPageInner() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const eventFilters = useMemo(
+    () => parseTimelineEventFilters(searchParams ?? null),
+    [searchParams]
+  );
+  const onEventFiltersChange = useCallback(
+    (next: TimelineEventFilterValue) => {
+      if (!pathname) return;
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      applyTimelineEventFiltersToParams(params, next);
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
+
+  const sessionsQuery = useAdminSessions();
   const jobsQuery = useJobs();
   const [filter, setFilter] = useState<SessionsFilter>({
     state: "all",
@@ -44,7 +78,7 @@ export default function SessionsPage() {
     () => buildSessionDetails(sessionsQuery.data, jobsQuery.data),
     [jobsQuery.data, sessionsQuery.data]
   );
-  const sessions = liveSessions.length ? liveSessions : SESSIONS;
+  const sessions = liveSessions;
 
   const filtered = useMemo(() => {
     const q = filter.q.trim().toLowerCase();
@@ -63,6 +97,11 @@ export default function SessionsPage() {
           s.worker.address,
           s.policy,
           s.receipt ?? "",
+          s.outcomeRationale?.reason ?? "",
+          s.outcomeRationale?.reasonCode ?? "",
+          s.outcomeRationale?.policyLabel ?? "",
+          s.outcomeRationale?.receiptLabel ?? "",
+          s.outcomeRationale?.summary ?? "",
         ]
           .join(" ")
           .toLowerCase();
@@ -84,24 +123,45 @@ export default function SessionsPage() {
     ? mergeSessionTimeline(pickedBase, sessionTimeline.data)
     : pickedBase;
 
+  const freshness = freshnessFromRequests(sessionsQuery, jobsQuery);
+
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
-      <SessionsTopbar />
+      <SessionsTopbar freshness={freshness} />
 
-      <header className="flex flex-col gap-1.5">
+      {/*
+       * Tighter header layout — eyebrow above, h1 + scope pill on one
+       * row so the operator-wide hint reads as a label on the page
+       * title (not a dangling pill below the description). One-line
+       * description trades the long marketing-flavour copy for a
+       * single sentence the auditor can scan.
+       */}
+      <header className="flex flex-col gap-1">
         <span
           className="font-[family-name:var(--font-display)] text-[11.5px] font-extrabold uppercase text-[var(--avy-accent)]"
           style={{ letterSpacing: "0.12em" }}
         >
           Capital movement
         </span>
-        <h1 className="m-0 font-[family-name:var(--font-display)] text-[2.4rem] font-bold leading-none text-[var(--avy-ink)]">
-          Sessions
-        </h1>
-        <p className="m-0 mt-0.5 max-w-[62ch] font-[family-name:var(--font-body)] text-[16px] leading-[1.55] text-[var(--avy-muted)]">
-          Every capital-movement lifecycle keyed to a run. Funded, claimed, submitted,
-          verified, settled — or disputed and slashed. Auditors read this page; nobody
-          edits it.
+        <div className="flex flex-wrap items-baseline gap-3">
+          <h1 className="m-0 font-[family-name:var(--font-display)] text-[2.4rem] font-bold leading-none text-[var(--avy-ink)]">
+            Sessions
+          </h1>
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+            style={{ letterSpacing: 0 }}
+            title="Operator-wide session activity sourced from /admin/sessions (every worker wallet, capped at the most recent 100). The wallet-scoped /sessions endpoint is reserved for 'my history' views."
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--avy-accent)]" />
+            operator-wide
+            <span className="opacity-40">·</span>
+            <code className="text-[var(--avy-ink)]">/admin/sessions</code>
+          </span>
+        </div>
+        <p className="m-0 mt-1 max-w-[64ch] font-[family-name:var(--font-body)] text-[14.5px] leading-[1.5] text-[var(--avy-muted)]">
+          Read-only ledger of every capital-movement lifecycle —
+          claimed, submitted, verified, settled, or disputed — across
+          every worker wallet. Auditors read this page; nobody edits it.
         </p>
       </header>
 
@@ -153,11 +213,18 @@ export default function SessionsPage() {
               <span>
                 {picked.escrow.amount} {picked.escrow.asset} escrow
               </span>
+              <ShareReadonlyButton surface="session" id={picked.id} label="Copy share link" />
             </div>
           ) : null
         }
       >
-        {picked ? <SessionDrawerBody session={picked} /> : null}
+        {picked ? (
+          <SessionDrawerBody
+            session={picked}
+            eventFilters={eventFilters}
+            onEventFiltersChange={onEventFiltersChange}
+          />
+        ) : null}
       </DetailDrawer>
     </div>
   );

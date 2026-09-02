@@ -1,19 +1,94 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { Wallet } from "ethers";
 
 import { ValidationError } from "./errors.js";
 import {
+  buildExternalSchemaRegistrationMessage,
   getBuiltinJobSchema,
   getBuiltinJobSchemaByName,
   getPublicBuiltinJobSchemaByName,
   listBuiltinJobSchemas,
+  normalizeExternalSchemaRegistrations,
   schemaRefToJobSchemaPath,
   validateStructuredSubmission
 } from "./job-schema-registry.js";
 
+const FIRST_WAVE_SCHEMA_REFS = [
+  "schema://jobs/review-input",
+  "schema://jobs/pr-review-findings-output",
+  "schema://jobs/release-input",
+  "schema://jobs/release-readiness-output",
+  "schema://jobs/triage-input",
+  "schema://jobs/issue-defect-triage-output",
+  "schema://jobs/docs-input",
+  "schema://jobs/docs-drift-audit-output"
+];
+
+const repoRoot = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
+const EXTERNAL_SCHEMA_SIGNER = new Wallet("0x59c6995e998f97a5a004497e5da795437b4466ad5c2af1c6a6d1dcb1b1ce36b9");
+
+function externalRegistrationBase(overrides = {}) {
+  const schemaRef = overrides.schemaRef ?? "schema://jobs/external-audit-output";
+  const schema = overrides.schema ?? {
+    $id: schemaRef,
+    type: "object",
+    additionalProperties: false,
+    required: ["summary", "score"],
+    properties: {
+      summary: { type: "string", minLength: 1 },
+      score: { type: "integer", minimum: 1 }
+    }
+  };
+  return {
+    schemaRef,
+    schemaUrl: "https://schemas.example.com/jobs/external-audit-output.json",
+    schema,
+    issuer: EXTERNAL_SCHEMA_SIGNER.address,
+    signedAt: "2026-05-23T00:00:00.000Z",
+    ...overrides
+  };
+}
+
+async function signedExternalRegistration(overrides = {}) {
+  const base = externalRegistrationBase(overrides);
+  return {
+    ...base,
+    signature: await EXTERNAL_SCHEMA_SIGNER.signMessage(buildExternalSchemaRegistrationMessage(base))
+  };
+}
+
 test("getBuiltinJobSchema resolves built-in first-wave schemas", () => {
   const schema = getBuiltinJobSchema("schema://jobs/pr-review-findings-output");
   assert.equal(schema?.$id, "schema://jobs/pr-review-findings-output");
+});
+
+test("first-wave schema-native job refs are public built-ins", () => {
+  for (const ref of FIRST_WAVE_SCHEMA_REFS) {
+    const schema = getBuiltinJobSchema(ref);
+    assert.equal(schema?.$id, ref);
+    assert.equal(schemaRefToJobSchemaPath(ref), `/schemas/jobs/${ref.slice("schema://jobs/".length)}.json`);
+    assert.equal(getPublicBuiltinJobSchemaByName(ref.slice("schema://jobs/".length))?.$id, ref);
+  }
+});
+
+test("ready-to-post first-wave jobs reference public built-in output schemas", () => {
+  const jobs = JSON.parse(readFileSync(resolve(repoRoot, "docs/ready-to-post-jobs.json"), "utf8"));
+  assert.ok(Array.isArray(jobs));
+  assert.ok(jobs.length >= 7);
+
+  for (const job of jobs) {
+    assert.ok(job.outputSchemaRef, `${job.id} must declare outputSchemaRef`);
+    const schema = getBuiltinJobSchema(job.outputSchemaRef);
+    assert.equal(schema?.$id, job.outputSchemaRef, `${job.id} output schema must be a built-in schema`);
+    assert.equal(
+      schemaRefToJobSchemaPath(job.outputSchemaRef),
+      `/schemas/jobs/${job.outputSchemaRef.slice("schema://jobs/".length)}.json`
+    );
+  }
 });
 
 test("validateStructuredSubmission accepts a schema-compliant PR review payload", () => {
@@ -34,6 +109,55 @@ test("validateStructuredSubmission accepts a schema-compliant PR review payload"
 
   assert.doesNotThrow(() => {
     validateStructuredSubmission("schema://jobs/pr-review-findings-output", payload);
+  });
+});
+
+test("validateStructuredSubmission accepts first-wave release readiness payloads", () => {
+  const payload = {
+    release_id: "release-2026-05-13",
+    checks_passed: ["api-health", "frontend-build"],
+    checks_failed: [],
+    blockers: [],
+    go_no_go: "go"
+  };
+
+  assert.doesNotThrow(() => {
+    validateStructuredSubmission("schema://jobs/release-readiness-output", payload);
+  });
+});
+
+test("validateStructuredSubmission accepts first-wave defect triage payloads", () => {
+  const payload = {
+    category: "bug",
+    severity: "high",
+    component: "api",
+    repro_clarity: "clear",
+    next_owner: "backend",
+    duplication_risk: "low"
+  };
+
+  assert.doesNotThrow(() => {
+    validateStructuredSubmission("schema://jobs/issue-defect-triage-output", payload);
+  });
+});
+
+test("validateStructuredSubmission accepts first-wave docs drift payloads", () => {
+  const payload = {
+    source_surface: "docs/CORE_FRAMEWORK_ROADMAP.md",
+    drift_findings: [
+      {
+        surface_a: "docs/CORE_FRAMEWORK_ROADMAP.md",
+        surface_b: "docs/SPEC_AUDIT_2026-05-13.md",
+        mismatch: "Roadmap still described convention-only schemas after runtime validation landed."
+      }
+    ],
+    missing_updates: ["docs/SPEC_AUDIT_2026-05-13.md"],
+    severity: "medium",
+    fix_recommendation: "Update the audit once the schema sync gate lands."
+  };
+
+  assert.doesNotThrow(() => {
+    validateStructuredSubmission("schema://jobs/docs-drift-audit-output", payload);
   });
 });
 
@@ -81,6 +205,110 @@ test("validateStructuredSubmission accepts Wikipedia citation repair payload", (
   });
 });
 
+test("validateStructuredSubmission accepts dependency remediation evidence", () => {
+  const payload = {
+    prUrl: "https://github.com/example/app/pull/12",
+    packageName: "minimist",
+    vulnerableVersion: "0.0.8",
+    fixedVersion: "1.2.3",
+    advisoryIds: ["GHSA-vh95-rmgr-6w4m", "CVE-2020-7598"],
+    summary: "Updated minimist and regenerated the npm lockfile.",
+    tests: "npm test passed",
+    manifestPath: "package.json",
+    lockfilesUpdated: ["package-lock.json"],
+    checksPassing: true,
+    ciStatus: "passing"
+  };
+
+  assert.doesNotThrow(() => {
+    validateStructuredSubmission("schema://jobs/dependency-remediation-output", payload);
+  });
+});
+
+test("validateStructuredSubmission accepts open-data audit evidence", () => {
+  const payload = {
+    dataset_title: "Federal sample spending data",
+    dataset_url: "https://catalog.data.gov/dataset/federal-sample-spending-data",
+    resource_url: "https://example.gov/spending.csv",
+    resource_format: "CSV",
+    checks: [
+      {
+        name: "resource_reachability",
+        status: "pass",
+        evidence: "HTTP 200 with text/csv content type."
+      }
+    ],
+    findings: [
+      {
+        severity: "low",
+        issue: "Metadata modified date is present but resource last_modified is five years old.",
+        evidence: "resource last_modified=2021-01-01",
+        recommendation: "Ask the publisher to confirm whether the resource is still refreshed."
+      }
+    ],
+    no_issue_found: false,
+    summary: "Resource is reachable; metadata freshness needs review.",
+    recommended_actions: ["Confirm refresh cadence", "Document column names in resource metadata"]
+  };
+
+  assert.doesNotThrow(() => {
+    validateStructuredSubmission("schema://jobs/open-data-quality-audit-output", payload);
+  });
+});
+
+test("validateStructuredSubmission accepts OpenAPI audit evidence", () => {
+  const payload = {
+    api_title: "Stripe OpenAPI",
+    spec_url: "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json",
+    local_surface: "mcp-server/src/protocols/http/server.js",
+    openapi_version: "3.1.0",
+    checks: [
+      {
+        name: "operation_descriptions",
+        status: "warn",
+        evidence: "One sampled operation has no summary or description."
+      }
+    ],
+    findings: [
+      {
+        severity: "low",
+        location: "GET /v1/customers",
+        issue: "Operation lacks a human-readable description.",
+        evidence: "summary and description are absent in the OpenAPI operation object.",
+        recommendation: "Add a concise description or link local docs to the canonical operation docs."
+      }
+    ],
+    no_issue_found: false,
+    summary: "Spec is reachable but one sampled operation needs documentation polish.",
+    recommended_actions: ["Add operation description", "Confirm local docs mention the endpoint"]
+  };
+
+  assert.doesNotThrow(() => {
+    validateStructuredSubmission("schema://jobs/openapi-quality-audit-output", payload);
+  });
+});
+
+test("validateStructuredSubmission accepts product-proof worker-loop evidence", () => {
+  const payload = {
+    summary: "complete verified output for product-proof-worker-loop-1700000000000",
+    output: "complete verified output for product-proof-worker-loop-1700000000000",
+    status: "complete",
+    job_id: "product-proof-worker-loop-1700000000000",
+    completed_at: "2026-05-13T11:11:31.000Z",
+    checks: [
+      {
+        name: "worker_output",
+        status: "pass",
+        evidence: "Benchmark output contains the required terms."
+      }
+    ]
+  };
+
+  assert.doesNotThrow(() => {
+    validateStructuredSubmission("schema://jobs/product-proof-worker-loop", payload);
+  });
+});
+
 test("validateStructuredSubmission rejects missing required fields", () => {
   assert.throws(
     () => validateStructuredSubmission("schema://jobs/pr-review-findings-output", {
@@ -93,7 +321,80 @@ test("validateStructuredSubmission rejects missing required fields", () => {
 test("validateStructuredSubmission rejects unknown schemas for structured payloads", () => {
   assert.throws(
     () => validateStructuredSubmission("schema://jobs/custom-output", { ok: true }),
-    (error) => error instanceof ValidationError && /known built-in schema/.test(error.message)
+    (error) => error instanceof ValidationError && /known built-in or registered schema/.test(error.message)
+  );
+});
+
+test("signed external schema registrations expose a trusted validation boundary", async () => {
+  const registration = await signedExternalRegistration();
+  const [normalized] = normalizeExternalSchemaRegistrations([registration], {
+    allowedSchemaRefs: [registration.schemaRef],
+    trustedIssuers: [EXTERNAL_SCHEMA_SIGNER.address]
+  });
+
+  assert.equal(normalized.schemaRef, "schema://jobs/external-audit-output");
+  assert.equal(normalized.issuer, EXTERNAL_SCHEMA_SIGNER.address);
+  assert.equal(normalized.trustBoundary, "external_signed_schema");
+  assert.equal(normalized.signatureVerified, true);
+  assert.equal(normalized.trusted, true);
+  assert.match(normalized.schemaHash, /^0x[0-9a-f]{64}$/u);
+  assert.equal(
+    schemaRefToJobSchemaPath(registration.schemaRef, { registrations: [normalized] }),
+    "https://schemas.example.com/jobs/external-audit-output.json"
+  );
+  assert.doesNotThrow(() => {
+    validateStructuredSubmission(
+      registration.schemaRef,
+      { summary: "Looks sane.", score: 3 },
+      { registrations: [normalized] }
+    );
+  });
+  assert.throws(
+    () => validateStructuredSubmission(
+      registration.schemaRef,
+      { summary: "Missing score." },
+      { registrations: [normalized] }
+    ),
+    /submission.score is required/u
+  );
+});
+
+test("external schema registrations reject untrusted issuers and tampered schemas", async () => {
+  const registration = await signedExternalRegistration();
+
+  assert.throws(
+    () => normalizeExternalSchemaRegistrations([registration], {
+      allowedSchemaRefs: [registration.schemaRef],
+      trustedIssuers: []
+    }),
+    /trustedIssuers must include/u
+  );
+
+  assert.throws(
+    () => normalizeExternalSchemaRegistrations([registration], {
+      allowedSchemaRefs: [registration.schemaRef],
+      trustedIssuers: ["0x0000000000000000000000000000000000000001"]
+    }),
+    /not trusted/u
+  );
+
+  assert.throws(
+    () => normalizeExternalSchemaRegistrations([
+      {
+        ...registration,
+        schema: {
+          ...registration.schema,
+          properties: {
+            ...registration.schema.properties,
+            summary: { type: "string", minLength: 2 }
+          }
+        }
+      }
+    ], {
+      allowedSchemaRefs: [registration.schemaRef],
+      trustedIssuers: [EXTERNAL_SCHEMA_SIGNER.address]
+    }),
+    /signature does not match issuer/u
   );
 });
 

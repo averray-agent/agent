@@ -28,8 +28,8 @@ contract MockVDotAdapterTest is Test {
         adapter = new MockVDotAdapter(policy, address(dot), STRATEGY_ID);
 
         policy.setApprovedAsset(address(dot), true);
-        policy.setServiceOperator(operator, true);
-        policy.setServiceOperator(otherOperator, true);
+        policy.setStrategySettler(operator, true);
+        policy.setStrategySettler(otherOperator, true);
 
         // Mint DOT into each operator wallet and pre-approve the adapter
         // so tests can call deposit() from the operator context without
@@ -55,7 +55,6 @@ contract MockVDotAdapterTest is Test {
         vm.prank(operator);
         adapter.deposit(100 ether);
         // Accrue 5% so totalAssets = 105 ether but totalShares still 100.
-        policy.setServiceOperator(address(this), true);
         adapter.simulateYieldBps(500);
         assertEq(adapter.totalAssets(), 105 ether);
 
@@ -72,7 +71,6 @@ contract MockVDotAdapterTest is Test {
     function testWithdrawSingleHopAfter500BpsYield() public {
         vm.prank(operator);
         adapter.deposit(200 ether);
-        policy.setServiceOperator(address(this), true);
         adapter.simulateYieldBps(500); // totalAssets 210, shares 200
 
         uint256 balanceBefore = dot.balanceOf(stranger);
@@ -88,7 +86,6 @@ contract MockVDotAdapterTest is Test {
     function testMaxWithdrawTracksCurrentBalance() public {
         vm.prank(operator);
         adapter.deposit(50 ether);
-        policy.setServiceOperator(address(this), true);
         adapter.simulateYieldBps(200); // totalAssets 51, shares 50
 
         uint256 max = adapter.maxWithdraw(operator);

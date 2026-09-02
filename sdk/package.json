@@ -1,3 +1,18 @@
 {
-  "type": "module"
+  "name": "@averray/agent-platform-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./agent-platform-client.d.ts",
+      "import": "./agent-platform-client.js"
+    }
+  },
+  "types": "./agent-platform-client.d.ts",
+  "files": [
+    "agent-platform-client.js",
+    "agent-platform-client.d.ts",
+    "README.md"
+  ]
 }

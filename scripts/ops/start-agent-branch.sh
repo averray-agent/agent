@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Start a new agent/task branch from the latest remote main.
-# This prevents agents from accidentally branching off a stale local checkout.
+# Start a new agent/task branch in the current worktree from the latest remote
+# main. Prefer start-agent-worktree.sh for multi-agent work.
 
 REMOTE=${REMOTE:-origin}
 BASE_BRANCH=${BASE_BRANCH:-main}
@@ -17,7 +17,7 @@ Example:
 
 Environment:
   REMOTE=origin       remote to fetch from
-  BASE_BRANCH=main    base branch to refresh before creating the new branch
+  BASE_BRANCH=main    remote base branch to create the new branch from
 USAGE
 }
 
@@ -51,11 +51,9 @@ if [[ -n "$tracked_changes" ]]; then
 fi
 
 echo "Refreshing $REMOTE/$BASE_BRANCH"
-git fetch "$REMOTE" --prune
-git switch "$BASE_BRANCH"
-git pull --ff-only "$REMOTE" "$BASE_BRANCH"
+git fetch "$REMOTE" "$BASE_BRANCH" --prune
 
-echo "Creating $new_branch from $(git rev-parse --short HEAD)"
-git switch -c "$new_branch"
+echo "Creating $new_branch from $(git rev-parse --short "$REMOTE/$BASE_BRANCH")"
+git switch -c "$new_branch" "$REMOTE/$BASE_BRANCH"
 
 echo "Ready on $new_branch"

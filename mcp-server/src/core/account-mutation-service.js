@@ -4,6 +4,80 @@ import {
   InsufficientLiquidityError,
   ValidationError
 } from "./errors.js";
+import { DEFAULT_ESCROW_ASSET_SYMBOL } from "./assets.js";
+import {
+  addRawAmount,
+  addRequestId,
+  applyRawDeallocation,
+  hasRequestId,
+  normalizeRequestIds,
+  normalizeUnsignedRawAmount,
+  removeRequestId,
+  subtractRawAmount
+} from "./account-raw-amounts.js";
+
+/**
+ * Classification of every account-level field this service produces or
+ * touches. This is the Phase 1 deliverable for Package C (P1.2 account
+ * overlay durability) — operators and auditors can read this table to
+ * know which fields are authoritative on chain, which are cached, and
+ * which only exist in operator-facing display state.
+ *
+ * Sources:
+ *   - `chain_authoritative`: source of truth is the chain; backend reads
+ *     it via `blockchainGateway.getAccountSummary(wallet)` and the live
+ *     value MUST win over any stored copy.
+ *   - `derived_cache`: source of truth is the chain (or another upstream
+ *     contract like `XcmWrapper`); the in-memory overlay holds a cache
+ *     refreshed by writes. Live wins per-key; stored fills gaps where the
+ *     live read does not surface a particular sub-key.
+ *   - `display_only`: operator-facing breadcrumb (timeline, last-activity
+ *     hints). Not on-chain; not currently in the live `blockchainGateway`
+ *     response shape. Stored is the only source today. A future indexer
+ *     pass can rebuild these from chain events.
+ *
+ * Field table:
+ *   liquid                 → chain_authoritative
+ *   reserved               → chain_authoritative
+ *   strategyAllocated      → chain_authoritative
+ *   collateralLocked       → chain_authoritative
+ *   jobStakeLocked         → chain_authoritative
+ *   debtOutstanding        → chain_authoritative
+ *   strategyShares         → derived_cache  (adapter share balance)
+ *   strategyActivity       → display_only   (last op per strategy)
+ *   strategyPending        → derived_cache  (XcmWrapper pending state)
+ *   strategyAccounting     → derived_cache  (principal+yield+markValue)
+ *   recurringTemplateReserves → derived_cache (template reserve accounting)
+ *   treasuryTimeline       → display_only   (recent treasury-ops event log)
+ *
+ * Precedence rule (enforced by `attachStoredTreasuryMetadata` below):
+ *   - For chain_authoritative + derived_cache fields: live wins per-key;
+ *     stored is a gap-fill ONLY where the live read does not surface the
+ *     sub-key.
+ *   - For display_only fields: stored wins because there is no live
+ *     equivalent; defensive code still prefers live where a future
+ *     gateway response begins providing it.
+ *
+ * The in-memory `accounts` Map this service receives at construction is
+ * still process-local — Phase 2 of Package C will move durable overlay
+ * fields out of process memory (see docs/AUDIT_REMEDIATION.md, Package
+ * C, "Move all non-chain account overlays that operators rely on to
+ * Redis or Postgres").
+ */
+export const ACCOUNT_OVERLAY_CLASSIFICATION = Object.freeze({
+  liquid: "chain_authoritative",
+  reserved: "chain_authoritative",
+  strategyAllocated: "chain_authoritative",
+  collateralLocked: "chain_authoritative",
+  jobStakeLocked: "chain_authoritative",
+  debtOutstanding: "chain_authoritative",
+  strategyShares: "derived_cache",
+  strategyActivity: "display_only",
+  strategyPending: "derived_cache",
+  strategyAccounting: "derived_cache",
+  recurringTemplateReserves: "derived_cache",
+  treasuryTimeline: "display_only"
+});
 
 export class AccountMutationService {
   constructor(accounts, blockchainGateway = undefined, getAccountSummary) {
@@ -28,6 +102,7 @@ export class AccountMutationService {
       strategyActivity: {},
       strategyPending: {},
       strategyAccounting: {},
+      recurringTemplateReserves: {},
       treasuryTimeline: [],
       collateralLocked: {},
       jobStakeLocked: {},
@@ -42,35 +117,67 @@ export class AccountMutationService {
     account.strategyActivity = account.strategyActivity ?? {};
     account.strategyPending = account.strategyPending ?? {};
     account.strategyAccounting = account.strategyAccounting ?? {};
+    account.recurringTemplateReserves = account.recurringTemplateReserves ?? {};
     account.treasuryTimeline = account.treasuryTimeline ?? [];
     return account;
   }
 
+  /**
+   * Merge stored overlay metadata onto a freshly-read live account.
+   *
+   * Precedence per `ACCOUNT_OVERLAY_CLASSIFICATION`:
+   *   - For `derived_cache` fields (strategyShares, strategyPending,
+   *     strategyAccounting, recurringTemplateReserves) the live read wins per-key. Stored fills
+   *     gaps only where the live read does not surface a particular
+   *     sub-key. This was inverted in Package C Phase 1 — the previous
+   *     order let a stale stored value override a fresh chain read.
+   *   - For `display_only` fields (strategyActivity, treasuryTimeline)
+   *     stored is the only source today; defensive code still prefers
+   *     live where a future gateway response begins providing it.
+   *
+   * The returned account is then mutated by callers (markStrategyActivity,
+   * updateStrategyAccounting*, etc.) before being written back to the
+   * stored Map. Phase 2 of Package C moves durable fields off of process
+   * memory.
+   */
   attachStoredTreasuryMetadata(wallet, liveAccount = {}) {
     const stored = this.getStoredAccount(wallet);
     return this.ensureTreasuryMetadata({
       ...liveAccount,
+      // derived_cache: live wins per-key, stored fills gaps
       strategyShares: {
-        ...(liveAccount.strategyShares ?? {}),
-        ...(stored.strategyShares ?? {})
-      },
-      strategyActivity: {
-        ...(liveAccount.strategyActivity ?? {}),
-        ...(stored.strategyActivity ?? {})
+        ...(stored.strategyShares ?? {}),
+        ...(liveAccount.strategyShares ?? {})
       },
       strategyPending: {
-        ...(liveAccount.strategyPending ?? {}),
-        ...(stored.strategyPending ?? {})
+        ...(stored.strategyPending ?? {}),
+        ...(liveAccount.strategyPending ?? {})
       },
       strategyAccounting: {
-        ...(liveAccount.strategyAccounting ?? {}),
-        ...(stored.strategyAccounting ?? {})
+        ...(stored.strategyAccounting ?? {}),
+        ...(liveAccount.strategyAccounting ?? {})
       },
-      treasuryTimeline: [...(stored.treasuryTimeline ?? [])]
+      recurringTemplateReserves: {
+        ...(stored.recurringTemplateReserves ?? {}),
+        ...(liveAccount.recurringTemplateReserves ?? {})
+      },
+      // display_only with defensive live-wins: today liveAccount does
+      // not carry strategyActivity, so stored wins; if a future gateway
+      // response begins surfacing per-strategy activity, that wins.
+      strategyActivity: {
+        ...(stored.strategyActivity ?? {}),
+        ...(liveAccount.strategyActivity ?? {})
+      },
+      // display_only with defensive live-wins for the same reason; the
+      // current gateway never returns a treasuryTimeline, so this
+      // resolves to the stored event log.
+      treasuryTimeline: Array.isArray(liveAccount.treasuryTimeline) && liveAccount.treasuryTimeline.length > 0
+        ? [...liveAccount.treasuryTimeline]
+        : [...(stored.treasuryTimeline ?? [])]
     });
   }
 
-  getStrategyAccounting(account, strategyId, asset = "DOT") {
+  getStrategyAccounting(account, strategyId, asset = DEFAULT_ESCROW_ASSET_SYMBOL) {
     this.ensureTreasuryMetadata(account);
     account.strategyAccounting[strategyId] = account.strategyAccounting[strategyId] ?? {
       asset,
@@ -86,7 +193,7 @@ export class AccountMutationService {
     return account.strategyAccounting[strategyId];
   }
 
-  getStrategyPending(account, strategyId, asset = "DOT") {
+  getStrategyPending(account, strategyId, asset = DEFAULT_ESCROW_ASSET_SYMBOL) {
     this.ensureTreasuryMetadata(account);
     account.strategyPending[strategyId] = account.strategyPending[strategyId] ?? {
       asset,
@@ -116,21 +223,29 @@ export class AccountMutationService {
     }
   }
 
-  updateStrategyAccountingOnAllocate(account, strategyId, asset, amount) {
+  updateStrategyAccountingOnAllocate(account, strategyId, asset, amount, { amountRaw = undefined } = {}) {
     const entry = this.getStrategyAccounting(account, strategyId, asset);
     entry.principal = Number(entry.principal ?? 0) + amount;
     entry.markValue = Number(entry.markValue ?? 0) + amount;
+    const normalizedAmountRaw = normalizeUnsignedRawAmount(amountRaw);
+    if (normalizedAmountRaw !== undefined) {
+      entry.principalRaw = addRawAmount(entry.principalRaw, normalizedAmountRaw);
+      entry.markValueRaw = addRawAmount(entry.markValueRaw, normalizedAmountRaw);
+    }
     entry.markedAt = new Date().toISOString();
     this.recordTreasuryEvent(account, {
       type: "allocate",
       strategyId,
       asset,
       amount,
-      principalAfter: entry.principal
+      ...(normalizedAmountRaw !== undefined ? { amountRaw: normalizedAmountRaw } : {}),
+      principalAfter: entry.principal,
+      ...(entry.principalRaw !== undefined ? { principalAfterRaw: entry.principalRaw } : {}),
+      ...(entry.markValueRaw !== undefined ? { markValueAfterRaw: entry.markValueRaw } : {})
     });
   }
 
-  updateStrategyAccountingOnDeallocate(account, strategyId, asset, assetsReturned) {
+  updateStrategyAccountingOnDeallocate(account, strategyId, asset, assetsReturned, { assetsReturnedRaw = undefined } = {}) {
     const entry = this.getStrategyAccounting(account, strategyId, asset);
     const principalBefore = Number(entry.principal ?? 0);
     const markValueBefore = Number(entry.markValue ?? principalBefore ?? 0);
@@ -143,6 +258,10 @@ export class AccountMutationService {
     entry.principal = Math.max(principalBefore - principalReleased, 0);
     entry.realizedYield = Number(entry.realizedYield ?? 0) + realizedYieldDelta;
     entry.markValue = Math.max(markValueBefore - assetsReturned, 0);
+    const normalizedAssetsReturnedRaw = normalizeUnsignedRawAmount(assetsReturnedRaw);
+    const rawSettlement = normalizedAssetsReturnedRaw !== undefined
+      ? applyRawDeallocation(entry, normalizedAssetsReturnedRaw)
+      : {};
     entry.markedAt = new Date().toISOString();
 
     this.recordTreasuryEvent(account, {
@@ -150,8 +269,14 @@ export class AccountMutationService {
       strategyId,
       asset,
       amount: assetsReturned,
+      ...(normalizedAssetsReturnedRaw !== undefined ? { amountRaw: normalizedAssetsReturnedRaw } : {}),
       realizedYieldDelta,
-      principalAfter: entry.principal
+      ...(rawSettlement.realizedYieldDeltaRaw !== undefined
+        ? { realizedYieldDeltaRaw: rawSettlement.realizedYieldDeltaRaw }
+        : {}),
+      principalAfter: entry.principal,
+      ...(entry.principalRaw !== undefined ? { principalAfterRaw: entry.principalRaw } : {}),
+      ...(entry.markValueRaw !== undefined ? { markValueAfterRaw: entry.markValueRaw } : {})
     });
   }
 
@@ -187,6 +312,10 @@ export class AccountMutationService {
       entry.asset = asset;
       entry.markValue = currentValue;
       entry.markedAt = recordedAt;
+      const currentValueRaw = normalizeUnsignedRawAmount(snapshot.currentValueRaw ?? snapshot.routedAmountRaw);
+      if (currentValueRaw !== undefined) {
+        entry.markValueRaw = currentValueRaw;
+      }
       if (Number.isFinite(sharePrice)) {
         entry.sharePrice = sharePrice;
       }
@@ -218,6 +347,39 @@ export class AccountMutationService {
     account.reserved[asset] = (account.reserved[asset] ?? 0) + amount;
     this.accounts.set(wallet, account);
     return account;
+  }
+
+  async reserveRecurringTemplateFunding(wallet, asset, amount, templateId) {
+    if (this.blockchainGateway?.isEnabled() && typeof this.blockchainGateway.reserveRecurringTemplateFunding === "function") {
+      return this.blockchainGateway.reserveRecurringTemplateFunding(wallet, asset, amount, templateId);
+    }
+
+    const account = await this.getAccountSummary(wallet);
+    const liquid = account.liquid[asset] ?? 0;
+    if (liquid < amount) {
+      throw new InsufficientLiquidityError(asset, {
+        wallet,
+        requiredAmount: amount,
+        availableAmount: liquid,
+        templateId
+      });
+    }
+
+    account.liquid[asset] = liquid - amount;
+    account.reserved[asset] = (account.reserved[asset] ?? 0) + amount;
+    account.recurringTemplateReserves = account.recurringTemplateReserves ?? {};
+    account.recurringTemplateReserves[templateId] = {
+      asset,
+      amount: (account.recurringTemplateReserves[templateId]?.amount ?? 0) + amount
+    };
+    this.accounts.set(wallet, account);
+    return {
+      wallet,
+      asset,
+      amount,
+      templateId,
+      source: "local_recurring_template_reserve"
+    };
   }
 
   async lockJobStake(wallet, asset, amount, posterWallet = undefined) {
@@ -292,7 +454,7 @@ export class AccountMutationService {
       throw new ValidationError("amount must be a positive number");
     }
     if (this.blockchainGateway?.isEnabled()) {
-      const liveAccount = await this.blockchainGateway.allocateIdleFunds(wallet, strategyId, amount);
+      const liveAccount = await this.blockchainGateway.allocateIdleFunds(wallet, strategyId, amount, asset);
       const account = this.attachStoredTreasuryMetadata(wallet, liveAccount);
       this.markStrategyActivity(account, strategyId, "allocate", amount, asset);
       this.updateStrategyAccountingOnAllocate(account, strategyId, asset, amount);
@@ -303,8 +465,15 @@ export class AccountMutationService {
     const account = await this.getAccountSummary(wallet);
     this.ensureTreasuryMetadata(account);
     const liquid = account.liquid[asset] ?? 0;
-    if (liquid < amount) {
-      throw new InsufficientLiquidityError(asset);
+    const withdrawable = this.withdrawableLiquid(account, asset);
+    if (withdrawable < amount) {
+      throw new InsufficientLiquidityError(asset, {
+        wallet,
+        required: amount,
+        available: withdrawable,
+        liquid,
+        debtOutstanding: account.debtOutstanding[asset] ?? 0
+      });
     }
 
     account.liquid[asset] = liquid - amount;
@@ -330,23 +499,40 @@ export class AccountMutationService {
     const liveAccount = await this.blockchainGateway.requestStrategyDeposit(wallet, strategy, amount, options);
     const account = this.attachStoredTreasuryMetadata(wallet, liveAccount);
     const pending = this.getStrategyPending(account, strategyId, asset);
-    pending.pendingDepositAssets = Number(pending.pendingDepositAssets ?? 0) + Number(liveAccount?.xcmRequest?.requestedAssets ?? amount);
-    pending.lastRequestId = liveAccount?.requestId;
-    pending.lastStatus = liveAccount?.xcmRequest?.statusLabel ?? "pending";
+    const requestId = liveAccount?.requestId;
+    const requestedAssetsRaw = normalizeUnsignedRawAmount(
+      liveAccount?.xcmRequest?.requestedAssetsRaw ?? liveAccount?.strategyRequest?.requestedAssetsRaw
+    );
+    const statusLabel = liveAccount?.strategyRequest?.statusLabel ?? liveAccount?.xcmRequest?.statusLabel ?? "pending";
+    pending.pendingDepositRequestIds = normalizeRequestIds(pending.pendingDepositRequestIds);
+    const duplicateRequest = hasRequestId(pending.pendingDepositRequestIds, requestId);
+    const shouldCountPending = statusLabel === "pending" && !duplicateRequest;
+    if (shouldCountPending) {
+      pending.pendingDepositAssets = Number(pending.pendingDepositAssets ?? 0) + Number(liveAccount?.xcmRequest?.requestedAssets ?? amount);
+      if (requestedAssetsRaw !== undefined) {
+        pending.pendingDepositAssetsRaw = addRawAmount(pending.pendingDepositAssetsRaw, requestedAssetsRaw);
+      }
+      pending.pendingDepositRequestIds = addRequestId(pending.pendingDepositRequestIds, requestId);
+    }
+    pending.lastRequestId = requestId;
+    pending.lastStatus = statusLabel;
     pending.lastKind = "deposit";
     pending.updatedAt = new Date().toISOString();
     this.markStrategyActivity(account, strategyId, "allocate_requested", amount, asset);
-    this.recordTreasuryEvent(account, {
-      type: "allocate_requested",
-      strategyId,
-      asset,
-      amount,
-      requestId: liveAccount?.requestId
-    });
+    if (shouldCountPending) {
+      this.recordTreasuryEvent(account, {
+        type: "allocate_requested",
+        strategyId,
+        asset,
+        amount,
+        ...(requestedAssetsRaw !== undefined ? { amountRaw: requestedAssetsRaw } : {}),
+        requestId
+      });
+    }
     this.accounts.set(wallet, account);
     return {
       ...account,
-      requestId: liveAccount?.requestId,
+      requestId,
       xcmRequest: liveAccount?.xcmRequest,
       strategyRequest: liveAccount?.strategyRequest
     };
@@ -399,29 +585,48 @@ export class AccountMutationService {
     const liveAccount = await this.blockchainGateway.requestStrategyWithdraw(wallet, strategy, amount, options);
     const account = this.attachStoredTreasuryMetadata(wallet, liveAccount);
     const pending = this.getStrategyPending(account, strategyId, asset);
-    pending.pendingWithdrawalShares = Number(pending.pendingWithdrawalShares ?? 0) + Number(
-      liveAccount?.strategyRequest?.requestedShares ??
-      liveAccount?.xcmRequest?.requestedShares ??
-      liveAccount?.requestedShares ??
-      amount
+    const requestId = liveAccount?.requestId;
+    const requestedSharesRaw = normalizeUnsignedRawAmount(
+      liveAccount?.strategyRequest?.requestedSharesRaw ??
+      liveAccount?.xcmRequest?.requestedSharesRaw ??
+      liveAccount?.requestedSharesRaw
     );
-    pending.lastRequestId = liveAccount?.requestId;
-    pending.lastStatus = liveAccount?.xcmRequest?.statusLabel ?? "pending";
+    const statusLabel = liveAccount?.strategyRequest?.statusLabel ?? liveAccount?.xcmRequest?.statusLabel ?? "pending";
+    pending.pendingWithdrawalRequestIds = normalizeRequestIds(pending.pendingWithdrawalRequestIds);
+    const duplicateRequest = hasRequestId(pending.pendingWithdrawalRequestIds, requestId);
+    const shouldCountPending = statusLabel === "pending" && !duplicateRequest;
+    if (shouldCountPending) {
+      pending.pendingWithdrawalShares = Number(pending.pendingWithdrawalShares ?? 0) + Number(
+        liveAccount?.strategyRequest?.requestedShares ??
+        liveAccount?.xcmRequest?.requestedShares ??
+        liveAccount?.requestedShares ??
+        amount
+      );
+      if (requestedSharesRaw !== undefined) {
+        pending.pendingWithdrawalSharesRaw = addRawAmount(pending.pendingWithdrawalSharesRaw, requestedSharesRaw);
+      }
+      pending.pendingWithdrawalRequestIds = addRequestId(pending.pendingWithdrawalRequestIds, requestId);
+    }
+    pending.lastRequestId = requestId;
+    pending.lastStatus = statusLabel;
     pending.lastKind = "withdraw";
     pending.updatedAt = new Date().toISOString();
     this.markStrategyActivity(account, strategyId, "deallocate_requested", amount, asset);
-    this.recordTreasuryEvent(account, {
-      type: "deallocate_requested",
-      strategyId,
-      asset,
-      amount,
-      requestedShares: pending.pendingWithdrawalShares,
-      requestId: liveAccount?.requestId
-    });
+    if (shouldCountPending) {
+      this.recordTreasuryEvent(account, {
+        type: "deallocate_requested",
+        strategyId,
+        asset,
+        amount,
+        requestedShares: pending.pendingWithdrawalShares,
+        ...(requestedSharesRaw !== undefined ? { requestedSharesRaw } : {}),
+        requestId
+      });
+    }
     this.accounts.set(wallet, account);
     return {
       ...account,
-      requestId: liveAccount?.requestId,
+      requestId,
       requestedShares: liveAccount?.requestedShares,
       xcmRequest: liveAccount?.xcmRequest,
       strategyRequest: liveAccount?.strategyRequest
@@ -450,42 +655,86 @@ export class AccountMutationService {
     const pending = this.getStrategyPending(account, strategyId, asset);
     const kind = result?.strategyRequest?.kindLabel;
     const status = result?.strategyRequest?.statusLabel ?? result?.statusLabel ?? "unknown";
+    const requestId = result?.requestId;
+    pending.settledRequestIds = normalizeRequestIds(pending.settledRequestIds);
+    if (hasRequestId(pending.settledRequestIds, requestId)) {
+      this.accounts.set(wallet, account);
+      return account;
+    }
     const requestedAssets = Number(result?.strategyRequest?.requestedAssets ?? 0);
     const requestedShares = Number(result?.strategyRequest?.requestedShares ?? 0);
     const settledAssets = Number(result?.strategyRequest?.settledAssets ?? result?.settledAssets ?? 0);
+    const requestedAssetsRaw = normalizeUnsignedRawAmount(
+      result?.strategyRequest?.requestedAssetsRaw ?? result?.requestedAssetsRaw
+    );
+    const requestedSharesRaw = normalizeUnsignedRawAmount(
+      result?.strategyRequest?.requestedSharesRaw ?? result?.requestedSharesRaw
+    );
+    const settledAssetsRaw = normalizeUnsignedRawAmount(
+      result?.strategyRequest?.settledAssetsRaw ?? result?.settledAssetsRaw
+    );
+    const settledSharesRaw = normalizeUnsignedRawAmount(
+      result?.strategyRequest?.settledSharesRaw ?? result?.settledSharesRaw
+    );
 
     if (kind === "deposit") {
       pending.pendingDepositAssets = Math.max(Number(pending.pendingDepositAssets ?? 0) - requestedAssets, 0);
+      pending.pendingDepositAssetsRaw = subtractRawAmount(
+        pending.pendingDepositAssetsRaw,
+        requestedAssetsRaw ?? settledAssetsRaw
+      );
+      pending.pendingDepositRequestIds = removeRequestId(pending.pendingDepositRequestIds, requestId);
       if (status === "succeeded") {
-        this.updateStrategyAccountingOnAllocate(account, strategyId, asset, settledAssets || requestedAssets);
+        this.updateStrategyAccountingOnAllocate(account, strategyId, asset, settledAssets || requestedAssets, {
+          amountRaw: settledAssetsRaw ?? requestedAssetsRaw
+        });
       } else {
         this.recordTreasuryEvent(account, {
           type: "allocate_failed",
           strategyId,
           asset,
           amount: requestedAssets,
-          requestId: result?.requestId,
+          ...(requestedAssetsRaw !== undefined ? { amountRaw: requestedAssetsRaw } : {}),
+          requestId,
           failureCode: result?.strategyRequest?.failureCodeLabel ?? result?.failureCodeLabel
         });
       }
     } else if (kind === "withdraw") {
       pending.pendingWithdrawalShares = Math.max(Number(pending.pendingWithdrawalShares ?? 0) - requestedShares, 0);
+      pending.pendingWithdrawalSharesRaw = subtractRawAmount(
+        pending.pendingWithdrawalSharesRaw,
+        requestedSharesRaw ?? settledSharesRaw
+      );
+      pending.pendingWithdrawalRequestIds = removeRequestId(pending.pendingWithdrawalRequestIds, requestId);
       if (status === "succeeded") {
-        this.updateStrategyAccountingOnDeallocate(account, strategyId, asset, settledAssets);
+        this.updateStrategyAccountingOnDeallocate(account, strategyId, asset, settledAssets, {
+          assetsReturnedRaw: settledAssetsRaw
+        });
       } else {
         this.recordTreasuryEvent(account, {
           type: "deallocate_failed",
           strategyId,
           asset,
           amount: settledAssets || requestedAssets,
+          ...(settledAssetsRaw !== undefined
+            ? { amountRaw: settledAssetsRaw }
+            : requestedAssetsRaw !== undefined
+              ? { amountRaw: requestedAssetsRaw }
+              : {}),
           requestedShares,
-          requestId: result?.requestId,
+          ...(requestedSharesRaw !== undefined
+            ? { requestedSharesRaw }
+            : settledSharesRaw !== undefined
+              ? { requestedSharesRaw: settledSharesRaw }
+              : {}),
+          requestId,
           failureCode: result?.strategyRequest?.failureCodeLabel ?? result?.failureCodeLabel
         });
       }
     }
 
-    pending.lastRequestId = result?.requestId;
+    pending.settledRequestIds = addRequestId(pending.settledRequestIds, requestId);
+    pending.lastRequestId = requestId;
     pending.lastStatus = status;
     pending.lastKind = kind;
     pending.updatedAt = new Date().toISOString();
@@ -514,7 +763,7 @@ export class AccountMutationService {
     }
 
     if (this.blockchainGateway?.isEnabled()) {
-      await this.blockchainGateway.borrow(asset, amount);
+      await this.blockchainGateway.borrow(wallet, asset, amount);
       const account = this.attachStoredTreasuryMetadata(wallet, await this.getAccountSummary(wallet));
       this.recordTreasuryEvent(account, { type: "borrow", asset, amount });
       this.accounts.set(wallet, account);
@@ -537,7 +786,11 @@ export class AccountMutationService {
    * contract primitive when the blockchain gateway is enabled, and falls
    * back to an in-memory bookkeeping update on the local dev path.
    */
-  async agentTransfer(from, recipient, asset, amount) {
+  withdrawableLiquid(account, asset) {
+    return Math.max((account.liquid[asset] ?? 0) - (account.debtOutstanding[asset] ?? 0), 0);
+  }
+
+  async agentTransfer(from, recipient, asset, amount, authorization = undefined) {
     if (!from || !recipient) {
       throw new ValidationError("from and recipient are required");
     }
@@ -549,7 +802,7 @@ export class AccountMutationService {
     }
 
     if (this.blockchainGateway?.isEnabled() && this.blockchainGateway.sendToAgent) {
-      await this.blockchainGateway.sendToAgent(from, recipient, asset, amount);
+      await this.blockchainGateway.sendToAgent(from, recipient, asset, amount, authorization);
       return {
         from: await this.getAccountSummary(from),
         to: await this.getAccountSummary(recipient)
@@ -559,11 +812,14 @@ export class AccountMutationService {
     const fromAccount = await this.getAccountSummary(from);
     const toAccount = await this.getAccountSummary(recipient);
     const fromLiquid = fromAccount.liquid[asset] ?? 0;
-    if (fromLiquid < amount) {
+    const fromWithdrawable = this.withdrawableLiquid(fromAccount, asset);
+    if (fromWithdrawable < amount) {
       throw new InsufficientLiquidityError(asset, {
         wallet: from,
         required: amount,
-        available: fromLiquid
+        available: fromWithdrawable,
+        liquid: fromLiquid,
+        debtOutstanding: fromAccount.debtOutstanding[asset] ?? 0
       });
     }
     fromAccount.liquid[asset] = fromLiquid - amount;
@@ -578,7 +834,7 @@ export class AccountMutationService {
       throw new ValidationError("amount must be a positive number");
     }
     if (this.blockchainGateway?.isEnabled()) {
-      await this.blockchainGateway.repay(asset, amount);
+      await this.blockchainGateway.repay(wallet, asset, amount);
       const account = this.attachStoredTreasuryMetadata(wallet, await this.getAccountSummary(wallet));
       this.recordTreasuryEvent(account, { type: "repay", asset, amount });
       this.accounts.set(wallet, account);

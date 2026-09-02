@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql } from "ponder";
 
 import { db } from "ponder:api";
 
@@ -7,6 +7,14 @@ import {
   type PublishedOutcome,
   type XcmUpstreamSourceAdapter
 } from "./xcm-upstream-source";
+import {
+  cursorForSource,
+  encodeCursor,
+  normalizeObservedAtIso,
+  type OutcomeCursor
+} from "./xcm-outcome-cursor";
+import { normalizeAdvancingNextCursor } from "./xcm-feed-cursor";
+import { buildUpsertExternalOutcomeSql } from "./xcm-outcome-publisher-sql";
 
 const DEFAULT_SCOPE = "xcm-outcome-publisher";
 
@@ -181,7 +189,7 @@ export class XcmOutcomePublisherService {
     return (await this.getPublishedOutcomeCount()) > 0;
   }
 
-  async listPublishedOutcomes({ cursor, limit }: { cursor?: { mode: "external"; observedAt: string; requestId: string } | { mode: "indexed"; blockNumber: bigint; requestId: string }; limit: number }) {
+  async listPublishedOutcomes({ cursor, limit }: { cursor?: OutcomeCursor; limit: number }) {
     if (!this.enabled) {
       return {
         items: [],
@@ -190,10 +198,11 @@ export class XcmOutcomePublisherService {
     }
 
     await this.init();
-    const where = cursor?.mode === "external"
+    const externalCursor = cursorForSource(cursor, "external");
+    const where = externalCursor
       ? sql`
-        WHERE observed_at > ${cursor.observedAt}
-        OR (observed_at = ${cursor.observedAt} AND request_id > ${cursor.requestId})
+        WHERE observed_at > ${externalCursor.observedAt}
+        OR (observed_at = ${externalCursor.observedAt} AND request_id > ${externalCursor.requestId})
       `
       : sql``;
     const result = await db.execute(sql`
@@ -223,11 +232,11 @@ export class XcmOutcomePublisherService {
       source: string;
     }>;
     const nextCursor = rows.length > limit
-      ? {
+      ? encodeCursor({
         mode: "external",
-        observedAt: new Date(page[page.length - 1]!.observed_at).toISOString(),
+        observedAt: requireObservedAtIso(page[page.length - 1]!.observed_at),
         requestId: String(page[page.length - 1]!.request_id)
-      }
+      })
       : undefined;
     return {
       items: page.map((row) => ({
@@ -237,7 +246,7 @@ export class XcmOutcomePublisherService {
         settledShares: String(row.settled_shares),
         remoteRef: row.remote_ref ? String(row.remote_ref) : undefined,
         failureCode: row.failure_code ? String(row.failure_code) : undefined,
-        observedAt: new Date(row.observed_at).toISOString(),
+        observedAt: requireObservedAtIso(row.observed_at),
         source: String(row.source)
       })),
       nextCursor
@@ -264,6 +273,11 @@ export class XcmOutcomePublisherService {
         limit: this.batchSize
       });
       const items = Array.isArray(payload?.items) ? payload.items : [];
+      const nextCursor = normalizeAdvancingNextCursor(
+        payload?.nextCursor,
+        items.length,
+        "XCM outcome publisher source"
+      );
       let observedCount = 0;
 
       for (const outcome of items) {
@@ -272,9 +286,7 @@ export class XcmOutcomePublisherService {
       }
 
       await this.setState({
-        cursor: typeof payload?.nextCursor === "string" && payload.nextCursor.trim()
-          ? payload.nextCursor.trim()
-          : state.cursor,
+        cursor: nextCursor ?? state.cursor,
         lastObservedCount: observedCount,
         lastSyncedAt: new Date().toISOString(),
         lastError: undefined
@@ -282,9 +294,7 @@ export class XcmOutcomePublisherService {
 
       return {
         observedCount,
-        cursor: typeof payload?.nextCursor === "string" && payload.nextCursor.trim()
-          ? payload.nextCursor.trim()
-          : state.cursor
+        cursor: nextCursor ?? state.cursor
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : "xcm_outcome_publisher_failed";
@@ -394,36 +404,7 @@ export class XcmOutcomePublisherService {
   }
 
   async upsertOutcome(outcome: PublishedOutcome) {
-    await db.execute(sql`
-      INSERT INTO xcm_external_outcomes (
-        request_id,
-        status,
-        settled_assets,
-        settled_shares,
-        remote_ref,
-        failure_code,
-        observed_at,
-        source
-      ) VALUES (
-        ${outcome.requestId},
-        ${outcome.status},
-        ${outcome.settledAssets},
-        ${outcome.settledShares},
-        ${outcome.remoteRef},
-        ${outcome.failureCode},
-        ${outcome.observedAt},
-        ${outcome.source}
-      )
-      ON CONFLICT (request_id) DO UPDATE SET
-        status = EXCLUDED.status,
-        settled_assets = EXCLUDED.settled_assets,
-        settled_shares = EXCLUDED.settled_shares,
-        remote_ref = EXCLUDED.remote_ref,
-        failure_code = EXCLUDED.failure_code,
-        observed_at = EXCLUDED.observed_at,
-        source = EXCLUDED.source,
-        ingested_at = now()
-    `);
+    await db.execute(buildUpsertExternalOutcomeSql(outcome));
   }
 
   async getPublishedOutcomeCount() {
@@ -433,4 +414,12 @@ export class XcmOutcomePublisherService {
     `);
     return Number(rowsOf(result)[0]?.count ?? 0);
   }
+}
+
+function requireObservedAtIso(value: unknown) {
+  const observedAt = normalizeObservedAtIso(value);
+  if (!observedAt) {
+    throw new Error("Invalid XCM external observed_at timestamp.");
+  }
+  return observedAt;
 }

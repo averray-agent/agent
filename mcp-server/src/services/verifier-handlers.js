@@ -1,4 +1,5 @@
 import { extractSubmissionText } from "../core/submission.js";
+import { hasAverrayDisclosureFooter } from "../core/maintainer-surface-policy.js";
 
 const HANDLER_VERSION = 1;
 
@@ -22,6 +23,7 @@ function structuredEvidence(input) {
 function createBenchmarkHandler() {
   return {
     id: "benchmark",
+    version: HANDLER_VERSION,
     evaluate(job, evidence) {
       const normalized = normalizeEvidence(evidence);
       const matched = job.verifierConfig.requiredKeywords.filter((keyword) => normalized.includes(keyword.toLowerCase()));
@@ -43,6 +45,7 @@ function createBenchmarkHandler() {
 function createDeterministicHandler() {
   return {
     id: "deterministic",
+    version: HANDLER_VERSION,
     evaluate(job, evidence) {
       const normalized = normalizeEvidence(evidence);
       const expected = job.verifierConfig.expectedOutputs.map((value) => value.toLowerCase());
@@ -68,6 +71,7 @@ function createDeterministicHandler() {
 function createHumanFallbackHandler() {
   return {
     id: "human_fallback",
+    version: HANDLER_VERSION,
     evaluate(job) {
       return {
         jobId: job.id,
@@ -85,6 +89,7 @@ function createHumanFallbackHandler() {
 function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = process.env.GITHUB_TOKEN, githubApiBaseUrl = "https://api.github.com" } = {}) {
   return {
     id: "github_pr",
+    version: HANDLER_VERSION,
     async evaluate(job, evidence) {
       const normalized = normalizeEvidence(evidence);
       const structured = structuredEvidence(evidence);
@@ -95,6 +100,7 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       const issueReferenceRequired = job.verifierConfig?.requireIssueReference !== false;
       const testEvidenceRequired = job.verifierConfig?.requireTestEvidence !== false;
       const acceptMergedAsApproved = job.verifierConfig?.acceptMergedAsApproved !== false;
+      const disclosureRequired = job.source?.maintainerPolicy?.disclosureRequired === true;
       const submittedIssueReferenced = referencesIssue({
         structured,
         normalized,
@@ -105,6 +111,8 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       const submittedChecksPassing = structured.checksPassing === true || structured.ciStatus === "passing";
       const submittedReviewApproved = structured.reviewApproved === true;
       const submittedMerged = structured.merged === true;
+      const submittedPrBody = firstNonEmptyString(structured.prBody, structured.pullRequestBody);
+      const submittedDisclosureFooterPresent = hasAverrayDisclosureFooter(submittedPrBody);
       const githubLookup = parsedPr && hasUsableGithubToken(githubToken) && typeof fetchImpl === "function"
         ? await fetchGithubPullRequestSnapshot({
             parsedPr,
@@ -125,6 +133,10 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       const checksPassing = githubVerified ? githubLookup.checksPassing : submittedChecksPassing;
       const reviewApproved = githubVerified ? githubLookup.reviewApproved : submittedReviewApproved;
       const merged = githubVerified ? githubLookup.merged : submittedMerged;
+      const disclosureFooterObservable = githubVerified || Boolean(submittedPrBody);
+      const disclosureFooterPresent = githubVerified
+        ? githubLookup.disclosureFooterPresent
+        : submittedDisclosureFooterPresent;
       const testEvidenceSubmitted = submittedTestEvidence || checksPassing || merged;
       const summarySubmitted = hasText(structured.summary) || hasText(structured.output) || Boolean(githubLookup.title);
 
@@ -137,7 +149,8 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
         testEvidenceSubmitted,
         checksPassing,
         reviewApproved,
-        merged
+        merged,
+        disclosureFooterPresent: !disclosureRequired || !disclosureFooterObservable || disclosureFooterPresent
       };
       const signals = {
         attempted: true,
@@ -157,6 +170,9 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       if (!repoMatches) blockers.push(`PR repo must match ${job.source?.repo ?? "the source repo"}`);
       if (issueReferenceRequired && !issueReferenced) blockers.push(`submission must reference issue #${expectedIssueNumber}`);
       if (testEvidenceRequired && !testEvidenceSubmitted && !mergedAccepted) blockers.push("test or docs-build evidence");
+      if (disclosureRequired && disclosureFooterObservable && !disclosureFooterPresent) {
+        blockers.push("Averray disclosure footer");
+      }
 
       const approved = score >= minimumScore && blockers.length === 0;
       return {
@@ -174,7 +190,8 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
           repo: parsedPr?.repo ?? null,
           pullNumber: parsedPr?.pullNumber ?? null,
           expectedRepo: expectedRepo || null,
-          expectedIssueNumber: Number.isFinite(expectedIssueNumber) ? expectedIssueNumber : null
+          expectedIssueNumber: Number.isFinite(expectedIssueNumber) ? expectedIssueNumber : null,
+          disclosureRequired
         },
         githubLookup,
         checks,
@@ -204,6 +221,13 @@ export class VerifierRegistry {
 
   listHandlers() {
     return [...this.handlers.keys()];
+  }
+
+  listHandlerMetadata() {
+    return [...this.handlers.values()].map((handler) => ({
+      id: handler.id,
+      version: handler.version
+    }));
   }
 
   async evaluate(job, evidence) {
@@ -295,6 +319,7 @@ async function fetchGithubPullRequestSnapshot({
       ciStatus: checkSummary.ciStatus,
       reviewApproved: reviewSummary.reviewApproved,
       reviewState: reviewSummary.reviewState,
+      disclosureFooterPresent: hasAverrayDisclosureFooter(body),
       partial: {
         status: statusResult?.status === "rejected" ? "unavailable" : "available",
         checkRuns: checkRunsResult?.status === "rejected" ? "unavailable" : "available",

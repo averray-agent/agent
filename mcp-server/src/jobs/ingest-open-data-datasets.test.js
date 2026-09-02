@@ -1,0 +1,333 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  DATA_GOV_CATALOG_SEARCH_URL,
+  extractPackageTargets,
+  extractCatalogResultTargets,
+  ingestOpenDataDatasets,
+  openDataDatasetKey,
+  openDataResourceKey,
+  parseDatasets,
+  scoreDatasetTarget,
+  searchDataGovDatasets,
+  selectBestResourcePerDataset,
+  toPlatformJob
+} from "./ingest-open-data-datasets.js";
+
+const TARGET = {
+  portal: "data.gov",
+  datasetId: "dataset-123",
+  datasetTitle: "Federal sample spending data",
+  datasetUrl: "https://catalog.data.gov/dataset/federal-sample-spending-data",
+  resourceId: "resource-456",
+  resourceTitle: "Spending CSV",
+  resourceUrl: "https://example.gov/spending.csv",
+  resourceFormat: "CSV",
+  agency: "General Services Administration",
+  license: "CC0",
+  modified: "2021-01-01T00:00:00Z",
+  metadataModified: "2026-01-01T00:00:00Z"
+};
+
+const CKAN_PACKAGE = {
+  id: "dataset-123",
+  name: "federal-sample-spending-data",
+  title: "Federal sample spending data",
+  license_title: "CC0",
+  metadata_modified: "2026-01-01T00:00:00Z",
+  organization: { title: "General Services Administration" },
+  resources: [
+    {
+      id: "resource-456",
+      name: "Spending CSV",
+      url: "https://example.gov/spending.csv",
+      format: "CSV",
+      last_modified: "2021-01-01T00:00:00Z"
+    }
+  ]
+};
+
+const CATALOG_RESULT = {
+  identifier: "catalog-dataset-123",
+  slug: "federal-sample-spending-data",
+  title: "Federal sample spending data",
+  publisher: "General Services Administration",
+  last_harvested_date: "2026-02-01T00:00:00Z",
+  dcat: {
+    title: "Federal sample spending data",
+    modified: "2026-01-01T00:00:00Z",
+    license: "https://creativecommons.org/publicdomain/zero/1.0/",
+    distribution: [
+      {
+        title: "Spending CSV",
+        downloadURL: "https://example.gov/spending.csv",
+        format: "CSV",
+        modified: "2021-01-01T00:00:00Z"
+      }
+    ]
+  }
+};
+
+test("parseDatasets accepts JSON and compact line syntax", () => {
+  assert.deepEqual(parseDatasets(JSON.stringify([TARGET])), [TARGET]);
+  assert.deepEqual(
+    parseDatasets("Federal sample spending data|https://catalog.data.gov/dataset/federal-sample-spending-data|https://example.gov/spending.csv|CSV|General Services Administration"),
+    [
+      {
+        portal: "data.gov",
+        datasetId: "",
+        datasetTitle: "Federal sample spending data",
+        datasetUrl: "https://catalog.data.gov/dataset/federal-sample-spending-data",
+        resourceId: "",
+        resourceTitle: "",
+        resourceUrl: "https://example.gov/spending.csv",
+        resourceFormat: "CSV",
+        agency: "General Services Administration",
+        license: "",
+        modified: "",
+        metadataModified: ""
+      }
+    ]
+  );
+});
+
+test("extractPackageTargets maps CKAN package resources", () => {
+  const targets = extractPackageTargets(CKAN_PACKAGE);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].datasetUrl, "https://catalog.data.gov/dataset/federal-sample-spending-data");
+  assert.equal(targets[0].resourceUrl, "https://example.gov/spending.csv");
+  assert.equal(targets[0].agency, "General Services Administration");
+});
+
+test("extractCatalogResultTargets maps current Data.gov catalog search results", () => {
+  const targets = extractCatalogResultTargets(CATALOG_RESULT);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].datasetId, "catalog-dataset-123");
+  assert.equal(targets[0].datasetUrl, "https://catalog.data.gov/dataset/federal-sample-spending-data");
+  assert.equal(targets[0].resourceUrl, "https://example.gov/spending.csv");
+  assert.equal(targets[0].resourceFormat, "CSV");
+  assert.equal(targets[0].discoveryApi, DATA_GOV_CATALOG_SEARCH_URL);
+});
+
+test("searchDataGovDatasets falls back to current catalog search when CKAN is unavailable", async () => {
+  const calls = [];
+  const targets = await searchDataGovDatasets({
+    query: "res_format:CSV",
+    limit: 5,
+    fetchImpl: async (url, request) => {
+      calls.push(url.toString());
+      assert.equal(request.headers.accept, "application/json");
+      if (url.pathname === "/api/3/action/package_search") {
+        return {
+          ok: false,
+          status: 404,
+          async text() {
+            return '{"message":"Not Found"}';
+          }
+        };
+      }
+      assert.equal(url.pathname, "/search");
+      assert.equal(url.searchParams.get("q"), "res_format:CSV");
+      assert.equal(url.searchParams.get("per_page"), "5");
+      return {
+        ok: true,
+        async json() {
+          return { results: [CATALOG_RESULT] };
+        }
+      };
+    }
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].resourceUrl, "https://example.gov/spending.csv");
+});
+
+test("scoreDatasetTarget prefers concrete resource audit targets", () => {
+  assert.ok(scoreDatasetTarget(TARGET) >= 80);
+  assert.equal(scoreDatasetTarget({ ...TARGET, resourceUrl: "" }), 46);
+});
+
+test("selectBestResourcePerDataset keeps one high-signal resource per dataset", () => {
+  const skipped = [];
+  const csv = { target: TARGET, score: 100 };
+  const geojson = {
+    target: {
+      ...TARGET,
+      resourceId: "resource-geojson",
+      resourceTitle: "Spending GeoJSON",
+      resourceUrl: "https://example.gov/spending.geojson",
+      resourceFormat: "GEOJSON"
+    },
+    score: 100
+  };
+
+  const selected = selectBestResourcePerDataset([geojson, csv], skipped);
+
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0].target.resourceFormat, "CSV");
+  assert.equal(skipped.length, 1);
+  assert.equal(skipped[0].reason, "duplicate_dataset_resource");
+  assert.equal(skipped[0].selectedResourceId, "resource-456");
+});
+
+test("open-data source keys dedupe resources and whole datasets", () => {
+  const job = toPlatformJob(TARGET, 92);
+
+  assert.equal(openDataDatasetKey(TARGET), "data.gov|dataset-123");
+  assert.equal(openDataDatasetKey(job), "data.gov|dataset-123");
+  assert.equal(openDataResourceKey(TARGET), "data.gov|dataset-123|resource-456");
+  assert.equal(openDataResourceKey(job), "data.gov|dataset-123|resource-456");
+});
+
+test("toPlatformJob creates a benchmark open-data audit job", () => {
+  const job = toPlatformJob(TARGET, 92);
+
+  assert.equal(job.id, "open-data-datagov-dataset-123-resource-456");
+  assert.equal(job.category, "data");
+  assert.equal(job.tier, "starter");
+  assert.equal(job.rewardAsset, "USDC");
+  assert.equal(job.verifierMode, "benchmark");
+  assert.equal(job.inputSchemaRef, "schema://jobs/open-data-quality-audit-input");
+  assert.equal(job.outputSchemaRef, "schema://jobs/open-data-quality-audit-output");
+  assert.equal(job.source.type, "open_data_dataset");
+  assert.equal(job.source.provider, "data.gov");
+  assert.equal(job.source.resourceFormat, "CSV");
+  assert.ok(job.acceptanceCriteria.some((entry) => entry.includes("no_issue_found")));
+  assert.ok(job.verifierTerms.includes("recommended_actions"));
+});
+
+test("searchDataGovDatasets queries the Data.gov CKAN API", async () => {
+  const targets = await searchDataGovDatasets({
+    query: "res_format:CSV",
+    limit: 5,
+    fetchImpl: async (url, request) => {
+      assert.equal(url.searchParams.get("q"), "res_format:CSV");
+      assert.equal(url.searchParams.get("rows"), "5");
+      assert.equal(request.headers.accept, "application/json");
+      return {
+        ok: true,
+        async json() {
+          return { result: { results: [CKAN_PACKAGE] } };
+        }
+      };
+    }
+  });
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].datasetId, "dataset-123");
+});
+
+test("ingestOpenDataDatasets uses explicit targets before remote search", async () => {
+  const payload = await ingestOpenDataDatasets({
+    datasets: [TARGET],
+    limit: 5,
+    minScore: 55,
+    fetchImpl: async () => {
+      throw new Error("fetch should not run for explicit datasets");
+    }
+  });
+
+  assert.equal(payload.provider, "data.gov");
+  assert.equal(payload.count, 1);
+  assert.equal(payload.jobs[0].source.datasetTitle, "Federal sample spending data");
+  assert.equal(payload.skipped.length, 0);
+});
+
+test("ingestOpenDataDatasets searches Data.gov and filters low-score resources", async () => {
+  const payload = await ingestOpenDataDatasets({
+    query: "res_format:CSV",
+    limit: 5,
+    minScore: 90,
+    fetchImpl: async () => ({
+      ok: true,
+      async json() {
+        return {
+          result: {
+            results: [
+              CKAN_PACKAGE,
+              {
+                id: "low",
+                name: "low-score-resource",
+                title: "Low-score resource",
+                resources: [{ id: "low-resource", name: "Low URL", url: "https://example.gov/file.txt", format: "TXT" }]
+              }
+            ]
+          }
+        };
+      }
+    })
+  });
+
+  assert.equal(payload.count, 1);
+  assert.equal(payload.skipped[0].reason, "below_min_score");
+});
+
+test("ingestOpenDataDatasets skips excluded resources and datasets before selecting jobs", async () => {
+  const siblingResource = {
+    ...TARGET,
+    resourceId: "resource-geojson",
+    resourceTitle: "Spending GeoJSON",
+    resourceUrl: "https://example.gov/spending.geojson",
+    resourceFormat: "GEOJSON"
+  };
+
+  const resourceExcluded = await ingestOpenDataDatasets({
+    datasets: [TARGET],
+    excludeResourceKeys: [openDataResourceKey(TARGET)],
+    limit: 5,
+    minScore: 55
+  });
+
+  assert.equal(resourceExcluded.count, 0);
+  assert.equal(resourceExcluded.skipped[0].reason, "source_already_ingested");
+
+  const datasetExcluded = await ingestOpenDataDatasets({
+    datasets: [siblingResource],
+    excludeDatasetKeys: [openDataDatasetKey(TARGET)],
+    limit: 5,
+    minScore: 55
+  });
+
+  assert.equal(datasetExcluded.count, 0);
+  assert.equal(datasetExcluded.skipped[0].reason, "dataset_already_ingested");
+});
+
+test("ingestOpenDataDatasets avoids duplicate resource jobs for one dataset", async () => {
+  const payload = await ingestOpenDataDatasets({
+    query: "traffic crashes",
+    limit: 5,
+    minScore: 55,
+    fetchImpl: async () => ({
+      ok: true,
+      async json() {
+        return {
+          result: {
+            results: [
+              {
+                ...CKAN_PACKAGE,
+                resources: [
+                  CKAN_PACKAGE.resources[0],
+                  {
+                    id: "resource-geojson",
+                    name: "Spending GeoJSON",
+                    url: "https://example.gov/spending.geojson",
+                    format: "GEOJSON",
+                    last_modified: "2021-01-01T00:00:00Z"
+                  }
+                ]
+              }
+            ]
+          }
+        };
+      }
+    })
+  });
+
+  assert.equal(payload.count, 1);
+  assert.equal(payload.jobs[0].source.resourceFormat, "CSV");
+  assert.equal(payload.skipped[0].reason, "duplicate_dataset_resource");
+});

@@ -224,7 +224,15 @@ test("requireAuth rejects missing token in strict mode", async () => {
   const url = new URL("http://localhost/api/account?wallet=0xabc");
   await assert.rejects(
     () => middleware(request, url),
-    (error) => error instanceof AuthenticationError && error.code === "missing_token"
+    (error) => {
+      assert.ok(error instanceof AuthenticationError);
+      assert.equal(error.code, "missing_token");
+      assert.equal(error.details.requiresAuth, true);
+      assert.equal(error.details.requiredAction, "wallet_sign_in");
+      assert.equal(error.details.authScheme, "SIWE_JWT");
+      assert.deepEqual(error.details.authEntrypoints, ["/auth/nonce", "/auth/verify", "/auth/refresh", "/auth/logout"]);
+      return true;
+    }
   );
 });
 
@@ -343,8 +351,68 @@ test("requireAuth rejects token missing required role", async () => {
   const url = new URL("http://localhost/api/admin/jobs");
   await assert.rejects(
     () => middleware(request, url, { requireRole: "admin" }),
-    (error) => error instanceof AuthorizationError && error.code === "missing_role"
+    (error) => {
+      assert.ok(error instanceof AuthorizationError);
+      assert.equal(error.code, "missing_role");
+      assert.equal(error.details.requiresAuth, true);
+      assert.equal(error.details.requiredRole, "admin");
+      assert.equal(error.details.requiredAction, "admin_wallet_sign_in");
+      return true;
+    }
   );
+});
+
+test("requireAuth rejects token missing route capability", async () => {
+  const authConfig = {
+    secrets: [LONG_SECRET],
+    signingSecret: LONG_SECRET,
+    permissive: false,
+    strict: true,
+    adminWallets: new Set(),
+    verifierWallets: new Set()
+  };
+  const middleware = createAuthMiddleware({ authConfig, logger: silentLogger() });
+  const { token } = signToken(
+    { sub: "0xcccccccccccccccccccccccccccccccccccccccc", roles: [] },
+    { secret: LONG_SECRET, expiresInSeconds: 60 }
+  );
+  const request = { method: "GET", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/admin/status");
+  await assert.rejects(
+    () => middleware(request, url),
+    (error) => {
+      assert.ok(error instanceof AuthorizationError);
+      assert.equal(error.code, "missing_capability");
+      assert.deepEqual(error.details.requiredCapabilities, ["admin:status", "ops:view"]);
+      assert.deepEqual(error.details.missingCapabilities, ["admin:status", "ops:view"]);
+      return true;
+    }
+  );
+});
+
+test("requireAuth accepts explicit capability scopes without a role", async () => {
+  const authConfig = {
+    secrets: [LONG_SECRET],
+    signingSecret: LONG_SECRET,
+    permissive: false,
+    strict: true,
+    adminWallets: new Set(),
+    verifierWallets: new Set()
+  };
+  const middleware = createAuthMiddleware({ authConfig, logger: silentLogger() });
+  const { token } = signToken(
+    {
+      sub: "0xcccccccccccccccccccccccccccccccccccccccc",
+      roles: [],
+      capabilities: ["ops:view"]
+    },
+    { secret: LONG_SECRET, expiresInSeconds: 60 }
+  );
+  const request = { method: "GET", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/admin/jobs");
+  const result = await middleware(request, url);
+  assert.deepEqual(result.capabilityRequirements, ["ops:view"]);
+  assert.ok(result.capabilities.includes("ops:view"));
 });
 
 test("requireAuth in permissive mode resolves roles from env wallet lists", async () => {
@@ -418,4 +486,313 @@ test("MemoryStateStore revokeToken expires after its TTL", async () => {
 test("MemoryStateStore isTokenRevoked is false for unknown jti", async () => {
   const store = new MemoryStateStore();
   assert.equal(await store.isTokenRevoked("never-seen"), false);
+});
+
+test("MemoryStateStore capability grants round-trip + filter by subject and status", async () => {
+  const store = new MemoryStateStore();
+  const subjectA = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const subjectB = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  await store.upsertCapabilityGrant({ id: "g-a1", subject: subjectA, status: "active", capabilities: ["jobs:lifecycle"], issuedAt: "2026-01-01T00:00:00.000Z" });
+  await store.upsertCapabilityGrant({ id: "g-a2", subject: subjectA, status: "revoked", capabilities: ["jobs:lifecycle"], issuedAt: "2026-01-02T00:00:00.000Z" });
+  await store.upsertCapabilityGrant({ id: "g-b1", subject: subjectB, status: "active", capabilities: ["policies:propose"], issuedAt: "2026-01-03T00:00:00.000Z" });
+
+  const all = await store.listCapabilityGrants({});
+  assert.equal(all.length, 3);
+  // Newest-first ordering.
+  assert.deepEqual(all.map((g) => g.id), ["g-b1", "g-a2", "g-a1"]);
+
+  const onlyA = await store.listCapabilityGrants({ subject: subjectA });
+  assert.deepEqual(onlyA.map((g) => g.id).sort(), ["g-a1", "g-a2"]);
+
+  const onlyActive = await store.listCapabilityGrants({ status: "active" });
+  assert.deepEqual(onlyActive.map((g) => g.id).sort(), ["g-a1", "g-b1"]);
+
+  const aActive = await store.listCapabilityGrants({ subject: subjectA, status: "active" });
+  assert.deepEqual(aActive.map((g) => g.id), ["g-a1"]);
+});
+
+test("requireAuth merges active capability grants for the subject", async () => {
+  const subject = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-x",
+    subject,
+    status: "active",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    issuedBy: "0x1111111111111111111111111111111111111111"
+  });
+  const authConfig = {
+    secrets: [LONG_SECRET],
+    signingSecret: LONG_SECRET,
+    permissive: false,
+    strict: true
+  };
+  const middleware = createAuthMiddleware({ authConfig, stateStore, logger: silentLogger() });
+  const { token } = signToken({ sub: subject, roles: [] }, {
+    secret: LONG_SECRET,
+    expiresInSeconds: 60
+  });
+  const request = { method: "POST", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/admin/jobs/lifecycle");
+  // Without the grant the request would fail capability enforcement
+  // because base capabilities do not include jobs:lifecycle. The
+  // grant promotes the subject above the route requirement.
+  const result = await middleware(request, url);
+  assert.ok(result.capabilities.includes("jobs:lifecycle"));
+});
+
+test("requireAuth ignores revoked grants when expanding capabilities", async () => {
+  const subject = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-y",
+    subject,
+    status: "revoked",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    revokedAt: new Date().toISOString(),
+    issuedBy: "0x1111111111111111111111111111111111111111"
+  });
+  const authConfig = {
+    secrets: [LONG_SECRET],
+    signingSecret: LONG_SECRET,
+    permissive: false,
+    strict: true
+  };
+  const middleware = createAuthMiddleware({ authConfig, stateStore, logger: silentLogger() });
+  const { token } = signToken({ sub: subject, roles: [] }, {
+    secret: LONG_SECRET,
+    expiresInSeconds: 60
+  });
+  const request = { method: "POST", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/admin/jobs/lifecycle");
+  await assert.rejects(
+    () => middleware(request, url),
+    (error) => error instanceof AuthorizationError && error.code === "missing_capability"
+  );
+});
+
+test("requireAuth exposes grant-cache invalidation for immediate operator revokes", async () => {
+  const subject = "0xcccccccccccccccccccccccccccccccccccccccc";
+  const issuedBy = "0x1111111111111111111111111111111111111111";
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-cache",
+    subject,
+    status: "active",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    issuedBy
+  });
+  const authConfig = {
+    secrets: [LONG_SECRET],
+    signingSecret: LONG_SECRET,
+    permissive: false,
+    strict: true
+  };
+  const middleware = createAuthMiddleware({ authConfig, stateStore, logger: silentLogger() });
+  const { token } = signToken({ sub: subject, roles: [] }, {
+    secret: LONG_SECRET,
+    expiresInSeconds: 60
+  });
+  const request = { method: "POST", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/admin/jobs/lifecycle");
+
+  assert.ok((await middleware(request, url)).capabilities.includes("jobs:lifecycle"));
+
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-cache",
+    subject,
+    status: "revoked",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    issuedBy,
+    revokedAt: new Date().toISOString(),
+    revokedBy: issuedBy
+  });
+  middleware.invalidateCapabilityGrantCache(subject);
+
+  await assert.rejects(
+    () => middleware(request, url),
+    (error) => error instanceof AuthorizationError && error.code === "missing_capability"
+  );
+});
+
+test("requireAuth binds service tokens to exactly one active grant without base capabilities", async () => {
+  const subject = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-service",
+    subject,
+    status: "active",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    issuedBy: "0x1111111111111111111111111111111111111111"
+  });
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-other",
+    subject,
+    status: "active",
+    capabilities: ["policies:propose"],
+    issuedAt: new Date().toISOString(),
+    issuedBy: "0x1111111111111111111111111111111111111111"
+  });
+  const authConfig = {
+    secrets: [LONG_SECRET],
+    signingSecret: LONG_SECRET,
+    permissive: false,
+    strict: true
+  };
+  const middleware = createAuthMiddleware({ authConfig, stateStore, logger: silentLogger() });
+  const { token } = signToken({
+    sub: subject,
+    roles: [],
+    tokenKind: "service",
+    serviceToken: true,
+    capabilityGrantId: "grant-service"
+  }, {
+    secret: LONG_SECRET,
+    expiresInSeconds: 60
+  });
+  const request = { method: "POST", headers: { authorization: `Bearer ${token}` } };
+
+  const lifecycle = await middleware(request, new URL("http://localhost/admin/jobs/lifecycle"));
+  assert.deepEqual(lifecycle.claims.roles, []);
+  assert.ok(lifecycle.capabilities.includes("jobs:lifecycle"));
+  assert.equal(lifecycle.capabilities.includes("account:read"), false);
+  assert.equal(lifecycle.capabilities.includes("policies:propose"), false);
+
+  await assert.rejects(
+    () => middleware({ method: "GET", headers: request.headers }, new URL("http://localhost/account")),
+    (error) => {
+      assert.ok(error instanceof AuthorizationError);
+      assert.equal(error.code, "missing_capability");
+      assert.deepEqual(error.details.missingCapabilities, ["account:read"]);
+      return true;
+    }
+  );
+
+  await assert.rejects(
+    () => middleware({ method: "POST", headers: request.headers }, new URL("http://localhost/policies")),
+    (error) => {
+      assert.ok(error instanceof AuthorizationError);
+      assert.equal(error.code, "missing_capability");
+      assert.deepEqual(error.details.missingCapabilities, ["policies:propose"]);
+      return true;
+    }
+  );
+
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-service",
+    subject,
+    status: "revoked",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    revokedAt: new Date().toISOString(),
+    issuedBy: "0x1111111111111111111111111111111111111111"
+  });
+  await assert.rejects(
+    () => middleware(request, new URL("http://localhost/admin/jobs/lifecycle")),
+    (error) => error instanceof AuthorizationError && error.code === "missing_capability"
+  );
+});
+
+// ─── B-03: mutations use a tighter grant-cache freshness bound than reads ──
+
+test("B-03: a mutation re-checks the grant within ~2s even without explicit cache invalidation (cross-process revoke)", async () => {
+  const subject = "0xdddddddddddddddddddddddddddddddddddddddd";
+  const issuedBy = "0x1111111111111111111111111111111111111111";
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-mut",
+    subject,
+    status: "active",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    issuedBy
+  });
+  const authConfig = { secrets: [LONG_SECRET], signingSecret: LONG_SECRET, permissive: false, strict: true };
+  let clockMs = 1_000_000;
+  const middleware = createAuthMiddleware({
+    authConfig,
+    stateStore,
+    logger: silentLogger(),
+    now: () => new Date(clockMs)
+  });
+  const { token } = signToken({ sub: subject, roles: [] }, { secret: LONG_SECRET, expiresInSeconds: 3600 });
+  const postReq = { method: "POST", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/admin/jobs/lifecycle");
+
+  // First mutation → grant honored and cached at t=0.
+  assert.ok((await middleware(postReq, url)).capabilities.includes("jobs:lifecycle"));
+
+  // Revoke in the store WITHOUT invalidating the in-process cache — the
+  // cross-process case (another node revoked; this node's cache is stale).
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-mut",
+    subject,
+    status: "revoked",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    revokedAt: new Date().toISOString(),
+    issuedBy,
+    revokedBy: issuedBy
+  });
+
+  // Past the 2s mutation TTL (but within the 15s read backstop).
+  clockMs += 2_500;
+
+  // The next mutation re-fetches, sees the revoke, and is rejected.
+  await assert.rejects(
+    () => middleware(postReq, url),
+    (error) => error instanceof AuthorizationError && error.code === "missing_capability"
+  );
+});
+
+test("B-03: reads keep the 15s cache — a GET still serves the grant in that same window (tightening is mutation-only)", async () => {
+  const subject = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+  const issuedBy = "0x1111111111111111111111111111111111111111";
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-read",
+    subject,
+    status: "active",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    issuedBy
+  });
+  const authConfig = { secrets: [LONG_SECRET], signingSecret: LONG_SECRET, permissive: false, strict: true };
+  let clockMs = 1_000_000;
+  const middleware = createAuthMiddleware({
+    authConfig,
+    stateStore,
+    logger: silentLogger(),
+    now: () => new Date(clockMs)
+  });
+  const { token } = signToken({ sub: subject, roles: [] }, { secret: LONG_SECRET, expiresInSeconds: 3600 });
+  const getReq = { method: "GET", headers: { authorization: `Bearer ${token}` } };
+  const url = new URL("http://localhost/some/read");
+  const opts = { requireCapability: "jobs:lifecycle" };
+
+  // First read → grant honored and cached at t=0.
+  assert.ok((await middleware(getReq, url, opts)).capabilities.includes("jobs:lifecycle"));
+
+  // Same cross-process revoke, no explicit invalidation.
+  await stateStore.upsertCapabilityGrant({
+    id: "grant-read",
+    subject,
+    status: "revoked",
+    capabilities: ["jobs:lifecycle"],
+    issuedAt: new Date().toISOString(),
+    revokedAt: new Date().toISOString(),
+    issuedBy,
+    revokedBy: issuedBy
+  });
+
+  // The +2.5s window that fails a mutation is still inside the read's 15s
+  // backstop, so the read keeps serving the (stale) grant — mutation-only.
+  clockMs += 2_500;
+  const res = await middleware(getReq, url, opts);
+  assert.ok(res.capabilities.includes("jobs:lifecycle"));
 });

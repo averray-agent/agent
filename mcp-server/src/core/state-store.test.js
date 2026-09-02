@@ -62,6 +62,44 @@ test("MemoryStateStore mutation receipts round-trip", async () => {
   assert.deepEqual(loaded, receipt);
 });
 
+test("MemoryStateStore content blobs round-trip by lowercase hash", async () => {
+  const store = new MemoryStateStore();
+  const record = {
+    hash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    payload: { rationale: "upheld" },
+    contentType: "arbitrator_reasoning",
+    ownerWallet: "0x1111111111111111111111111111111111111111",
+    verdict: "fail",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    autoPublicAt: "2026-06-30T00:00:00.000Z"
+  };
+
+  await store.upsertContent(record);
+
+  assert.deepEqual(
+    await store.getContent("0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+    record
+  );
+});
+
+test("MemoryStateStore funded jobs round-trip and list latest first", async () => {
+  const store = new MemoryStateStore();
+  await store.upsertFundedJob({
+    jobId: "job-1",
+    fundedAt: "2026-01-01T00:00:00.000Z",
+    finalStatus: "open"
+  });
+  await store.upsertFundedJob({
+    jobId: "job-2",
+    fundedAt: "2026-01-02T00:00:00.000Z",
+    finalStatus: "merged"
+  });
+
+  assert.equal((await store.getFundedJob("job-1")).finalStatus, "open");
+  assert.deepEqual((await store.listFundedJobs({ limit: 2 })).map((entry) => entry.jobId), ["job-2", "job-1"]);
+  assert.deepEqual((await store.listFundedJobs({ finalOnly: true })).map((entry) => entry.jobId), ["job-2"]);
+});
+
 test("MemoryStateStore xcm observations round-trip and clear from pending when processed", async () => {
   const store = new MemoryStateStore();
   await store.upsertXcmObservation({
@@ -82,6 +120,50 @@ test("MemoryStateStore xcm observations round-trip and clear from pending when p
 
   const after = await store.listPendingXcmObservations(10);
   assert.equal(after.length, 0);
+});
+
+test("MemoryStateStore event log survives buffer-sized reads and filters by source/correlation", async () => {
+  const store = new MemoryStateStore();
+  await store.appendEventLog({
+    id: "event-1",
+    topic: "escrow.job_funded",
+    source: "chain",
+    phase: "funding",
+    severity: "info",
+    wallet: "0xaaa",
+    wallets: ["0xaaa"],
+    jobId: "job-1",
+    correlationId: "job-1",
+    timestamp: "2026-01-01T00:00:00.000Z",
+    data: {}
+  });
+  await store.appendEventLog({
+    id: "event-2",
+    topic: "xcm.settlement_failed",
+    source: "settlement",
+    phase: "settlement",
+    severity: "error",
+    wallet: "0xaaa",
+    wallets: ["0xaaa"],
+    jobId: "job-1",
+    correlationId: "settlement-1",
+    timestamp: "2026-01-01T00:00:01.000Z",
+    data: {}
+  });
+
+  const sourceFiltered = await store.listEventLog({ jobId: "job-1", sources: ["chain"], limit: 10 });
+  assert.deepEqual(sourceFiltered.events.map((event) => event.id), ["event-1"]);
+  assert.equal(sourceFiltered.gap, false);
+
+  const correlationFiltered = await store.listEventLog({
+    wallet: "0xaaa",
+    correlationId: "settlement-1",
+    limit: 10
+  });
+  assert.deepEqual(correlationFiltered.events.map((event) => event.id), ["event-2"]);
+
+  const afterCursor = await store.listEventLog({ jobId: "job-1", lastEventId: "event-1", limit: 10 });
+  assert.deepEqual(afterCursor.events.map((event) => event.id), ["event-2"]);
 });
 
 test("MemoryStateStore service state round-trips and merges", async () => {

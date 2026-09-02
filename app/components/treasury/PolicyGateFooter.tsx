@@ -20,11 +20,17 @@ export function PolicyGateFooter({ items, sub }: PolicyGateFooterProps) {
       title="Policies currently governing this surface"
       sub={sub}
     >
-      <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-3">
-        {items.map((item) => (
-          <PolicyCard key={item.tag} item={item} />
-        ))}
-      </div>
+      {items.length ? (
+        <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-3">
+          {items.map((item) => (
+            <PolicyCard key={item.tag} item={item} />
+          ))}
+        </div>
+      ) : (
+        <div className="p-4 font-[family-name:var(--font-body)] text-[13px] text-[var(--avy-muted)]">
+          No live policy gate rows available.
+        </div>
+      )}
     </TreasuryPanel>
   );
 }

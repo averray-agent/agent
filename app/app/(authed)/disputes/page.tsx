@@ -12,14 +12,10 @@ import { DisputesTable } from "@/components/disputes/DisputesTable";
 import { DisputesLegend } from "@/components/disputes/DisputesLegend";
 import { DisputeDrawerBody } from "@/components/disputes/DisputeDrawerBody";
 import { DisputeStatePill, OriginPill } from "@/components/disputes/pills";
-import { DISPUTES } from "@/components/disputes/data";
+import { ShareReadonlyButton } from "@/components/common/ShareReadonlyButton";
 import { extractDispute, extractDisputeList } from "@/lib/api/dispute-adapters";
 import { useDispute, useDisputes } from "@/lib/api/hooks";
-
-// TODO(data): wire to useApi("/disputes") once the backend emits the list.
-// Drill-in swaps to useApi(`/disputes/${id}`) for the drawer. Fixture for
-// now so the decision panel, evidence diff, and stake-hold radios can be
-// exercised against realistic shapes.
+import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 
 export default function DisputesPage() {
   const disputesRequest = useDisputes();
@@ -35,7 +31,7 @@ export default function DisputesPage() {
     () => extractDisputeList(disputesRequest.data),
     [disputesRequest.data]
   );
-  const disputes = liveDisputes.length ? liveDisputes : DISPUTES;
+  const disputes = liveDisputes;
   const isLive = liveDisputes.length > 0;
   const pickedFromList = pickedId
     ? disputes.find((d) => d.id === pickedId) ?? null
@@ -60,6 +56,11 @@ export default function DisputesPage() {
           d.respondent.handle,
           d.respondent.address,
           d.summary,
+          d.outcomeRationale?.reason ?? "",
+          d.outcomeRationale?.reasonCode ?? "",
+          d.outcomeRationale?.policyLabel ?? "",
+          d.outcomeRationale?.receiptLabel ?? "",
+          d.outcomeRationale?.summary ?? "",
         ]
           .join(" ")
           .toLowerCase();
@@ -69,9 +70,11 @@ export default function DisputesPage() {
     });
   }, [disputes, filter]);
 
+  const freshness = freshnessFromRequests(disputesRequest);
+
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
-      <DisputesTopbar />
+      <DisputesTopbar freshness={freshness} />
 
       <header className="flex flex-col gap-1.5">
         <span
@@ -137,6 +140,7 @@ export default function DisputesPage() {
               </span>
               <span>·</span>
               <span>opened {picked.openedAt}</span>
+              <ShareReadonlyButton surface="dispute" id={picked.id} label="Copy share link" />
             </div>
           ) : null
         }

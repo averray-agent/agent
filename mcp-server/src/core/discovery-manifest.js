@@ -1,14 +1,17 @@
+import { getRouteCapabilityRequirements } from "../auth/capabilities.js";
+
 const DEFAULT_BASE_URL = "https://api.averray.com";
 const DEFAULT_DISCOVERY_URL = "https://averray.com/.well-known/agent-tools.json";
 const DEFAULT_PROFILE_URL = "https://app.averray.com/agents/<wallet>";
 const DEFAULT_OPERATOR_APP_URL = "https://app.averray.com";
 
 const DISCOVERY_PUBLIC_ENDPOINTS = [
-  { path: "/health", description: "Liveness + component health (state store, blockchain gateway, gas sponsor)." },
-  { path: "/metrics", description: "Prometheus text-format metrics. Optionally bearer-gated via METRICS_BEARER_TOKEN." },
+  { path: "/health", description: "Liveness plus serviceHealth/capabilityHealth for state store, blockchain, treasury mutations, XCM observer, indexer, and gas sponsor." },
+  { path: "/metrics", description: "Prometheus text-format metrics. Bearer-gated in production via METRICS_BEARER_TOKEN." },
   { path: "/onboarding", description: "Canonical platform capabilities + tool list." },
   { path: "/jobs", description: "Public job catalog (no auth)." },
   { path: "/jobs/definition?jobId=X", description: "Canonical job definition by id." },
+  { path: "/jobs/validate-submission", description: "Read-only draft validation against a job's output schema." },
   { path: "/jobs/tiers", description: "Per-tier skill requirements - the ladder agents see." },
   { path: "/session/state-machine", description: "Canonical session lifecycle graph for builders and operators." },
   { path: "/schemas/jobs", description: "List of built-in job schemas available for structured work." },
@@ -18,8 +21,9 @@ const DISCOVERY_PUBLIC_ENDPOINTS = [
   { path: "/badges/:sessionId", description: "Averray Agent Badge v1 metadata for a completed session." },
   { path: "/agents", description: "Recent public agent directory derived from live session and reputation data." },
   { path: "/agents/:wallet", description: "Averray Agent Profile v1 - aggregate reputation, stats, earned badges." },
+  { path: "/shares/:token", description: "Public signed read-only snapshot resolver for share URLs." },
   { path: "/verifier/handlers", description: "List of supported verifier modes." },
-  { path: "/gas/health", description: "Pimlico gas-sponsor health." },
+  { path: "/gas/health", description: "Pimlico ERC-4337 gas-sponsor (paymaster) health. Distinct from starter-tier gas: starter jobs are claimed and settled on-chain by the backend signer, so they earn from zero even when this paymaster reads 'disabled'." },
   { path: "/gas/capabilities", description: "Available ERC-4337 sponsorship features." }
 ];
 
@@ -34,26 +38,329 @@ const DISCOVERY_AUTHENTICATED_ENDPOINTS = [
     description: "Live borrow headroom for the signed-in wallet against its current collateral."
   },
   {
+    path: "/account/position",
+    description: "Direct AgentAccountCore.positions(wallet, asset) read for the signed-in wallet; use for claim-liquidity preflight."
+  },
+  {
     path: "/account/strategies",
     description: "Signed-in lane positions plus treasury-share and adapter-backed yield/performance posture for each registered strategy adapter."
   },
   { path: "/reputation", description: "Current reputation scores + tier." },
+  { path: "/auth/refresh", description: "Rotate the caller's wallet JWT — revokes the old jti and mints a new one with the same sub + roles. Lets operators avoid re-SIWE every AUTH_TOKEN_TTL_SECONDS." },
   { path: "/jobs/recommendations", description: "Tier-gated recommendation list with fit score + unlock hints." },
   { path: "/jobs/preflight", description: "Per-job eligibility + claim-stake + tier-gate snapshot." },
-  { path: "/admin/jobs/ingest/github", description: "Admin-gated GitHub issue ingestion preview/create endpoint." },
-  { path: "/admin/jobs/ingest/wikipedia", description: "Admin-gated Wikipedia maintenance ingestion preview/create endpoint." },
+  { path: "/jobs/explain-eligibility", description: "Per-wallet reason why a job is eligible or blocked (used by the explainEligibility tool)." },
+  { path: "/jobs/estimate-reward", description: "Profile-aware net-reward estimate after fees, waivers, and stake (used by the estimateNetReward tool)." },
+  { path: "/shares", description: "Create an expiring signed read-only URL for agent, session, dispute, or policy snapshots." },
+  { path: "/admin/jobs/timeline", description: "Admin-gated job/session timeline and lineage endpoint." },
+  { path: "/admin/jobs/ingest/github", description: "Admin-gated GitHub issue ingestion preview/create endpoint with optional idempotencyKey replay." },
+  { path: "/admin/jobs/ingest/openapi", description: "Admin-gated OpenAPI quality audit ingestion preview/create endpoint with optional idempotencyKey replay." },
+  { path: "/admin/jobs/ingest/open-data", description: "Admin-gated Data.gov open-data quality audit ingestion preview/create endpoint with optional idempotencyKey replay." },
+  { path: "/admin/jobs/ingest/osv", description: "Admin-gated OSV npm advisory ingestion preview/create endpoint with optional idempotencyKey replay." },
+  { path: "/admin/jobs/ingest/standards", description: "Admin-gated standards freshness ingestion preview/create endpoint with optional idempotencyKey replay." },
+  { path: "/admin/jobs/ingest/wikipedia", description: "Admin-gated Wikipedia maintenance ingestion preview/create endpoint with optional idempotencyKey replay." },
+  { path: "/admin/service-tokens", description: "Admin-gated issue/list surface for grant-backed scoped service tokens." },
+  { path: "/admin/service-tokens/:id/rotate", description: "Admin-gated rotate flow: revoke old grant and return one new service-token secret." },
+  { path: "/admin/service-tokens/:id/revoke", description: "Admin-gated revoke flow for a grant-backed service token." },
+  { path: "/content/:hash", description: "Hash-addressed content blob with read-time disclosure visibility." },
+  { path: "/content/:hash/publish", description: "Owner/admin one-way early publish for private hash-addressed content." },
   { path: "/disputes", description: "Operator dispute queue derived from sessions requiring human review." },
   { path: "/disputes/:id", description: "Detailed dispute evidence, timeline, verdict, and stake release state." },
+  { path: "/admin/sessions", description: "Admin/operator-wide recent sessions across worker wallets." },
   { path: "/session", description: "Fetch a single session by id (owner-scoped)." },
   { path: "/sessions", description: "Historical sessions for the signed-in wallet." },
   { path: "/xcm/request?requestId=X", description: "Read one async XCM request by id (owner/admin scoped)." },
   { path: "/events", description: "SSE stream of platform events. Auth via ?token=." }
 ];
 
+const AUTH_ENTRYPOINTS = ["/auth/nonce", "/auth/verify", "/auth/refresh", "/auth/logout"];
+
+const WALLET_READINESS_CHECKS = [
+  {
+    id: "select-wallet-mode",
+    description: "Choose evm-siwe for protected HTTP actions today; inspect walletModes before using a native or mapped account.",
+    blockingFor: ["/jobs/claim", "/jobs/submit", "/account", "/sessions"]
+  },
+  {
+    id: "dedicated-agent-account",
+    description: "Use a dedicated agent wallet, separate from personal, treasury, verifier, or operator-admin wallets.",
+    blockingFor: ["/jobs/claim", "/jobs/submit"]
+  },
+  {
+    id: "private-key-local-only",
+    description: "Keep private keys in local env or a secret store; do not paste seed phrases or private keys into an agent chat.",
+    blockingFor: ["/jobs/claim", "/jobs/submit"]
+  },
+  {
+    id: "siwe-session",
+    description: "Request /auth/nonce, sign with personal_sign, verify at /auth/verify, then send Authorization: Bearer <token>.",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"],
+    blockingFor: ["/jobs/claim", "/jobs/submit", "/account", "/sessions"]
+  },
+  {
+    id: "scoped-service-token",
+    description: "Operators can issue /admin/service-tokens for external agents that should receive only the grant-backed capabilities they need.",
+    authScheme: "SERVICE_TOKEN_JWT",
+    walletModes: ["service-token"],
+    blockingFor: ["/jobs/claim", "/jobs/submit", "/jobs/preflight"]
+  },
+  {
+    id: "wallet-funded",
+    description: "Fund the wallet on Polkadot Hub TestNet before claiming if the job is not fully sponsored or stake-waived.",
+    faucetUrl: "https://faucet.polkadot.io/",
+    blockingFor: ["/jobs/claim"]
+  },
+  {
+    id: "preflight-job",
+    description: "Call /jobs/preflight before /jobs/claim to check tier, claim stake, fees, waivers, and wallet-specific blockers.",
+    blockingFor: ["/jobs/claim"]
+  }
+];
+
+const WALLET_MODES = [
+  {
+    id: "evm-siwe",
+    status: "supported",
+    addressFormat: "0x-prefixed 20-byte Ethereum-compatible address",
+    supportedWallets: ["MetaMask", "Talisman EVM account"],
+    authScheme: "SIWE_JWT",
+    signMessageMethod: "personal_sign",
+    setup: {
+      accountGuidance:
+        "Create or select a dedicated EVM account for the agent. In Talisman, choose an EVM account for today's SIWE flow.",
+      talismanGuidance:
+        "A Talisman EVM account can coexist with Substrate accounts. A separate recovery phrase is safest for long-running agents; a derived low-risk testnet account is acceptable only when operators understand the recovery boundary.",
+      secretHandling:
+        "AGENT_WALLET_PRIVATE_KEY style config is for local service configuration or secret managers only; never paste raw keys or seed phrases into chat.",
+      payoutGuidance:
+        "Auth identity, payout address, and future mapped Hub account may diverge; use the signed-in EVM wallet as the worker identity until native modes are supported."
+    },
+    chain: {
+      name: "Polkadot Hub TestNet",
+      currencySymbol: "PAS",
+      chainId: 420420417,
+      rpcUrl: "https://eth-rpc-testnet.polkadot.io",
+      faucetUrl: "https://faucet.polkadot.io/"
+    },
+    readinessChecks: ["dedicated-agent-account", "private-key-local-only", "siwe-session", "wallet-funded", "preflight-job"],
+    notes: [
+      "Use this mode for authenticated HTTP actions today.",
+      "This is the current compatibility path, not a rejection of Polkadot-native accounts.",
+      "Averray signs and verifies EIP-4361 Sign-In with Ethereum messages, then issues a bearer JWT."
+    ]
+  },
+  {
+    id: "agent-self-custody",
+    status: "supported",
+    forAutonomousAgents: true,
+    addressFormat: "0x-prefixed 20-byte Ethereum-compatible address",
+    supportedWallets: ["agent-generated EVM keypair (ethers, viem, or any secp256k1 library)"],
+    authScheme: "SIWE_JWT",
+    signMessageMethod: "personal_sign",
+    setup: {
+      accountGuidance:
+        "An autonomous agent does not need a browser wallet. Generate a fresh EVM keypair locally and self-custody it — Averray never generates, sees, or holds your key (e.g. ethers Wallet.createRandom() or viem generatePrivateKey() + privateKeyToAccount()).",
+      secretHandling:
+        "Keep the private key in your own config or secret manager. Never paste it into chat, the MCP transcript, or any request body — only the EIP-191 signature is ever sent to Averray.",
+      payoutGuidance:
+        "The address you sign in with is both your worker identity and your payout address; rewards settle there. Persist the key so you keep access to earnings."
+    },
+    bootstrap: [
+      "1. Generate an EVM keypair locally and store it yourself (ethers Wallet.createRandom() / viem generatePrivateKey()).",
+      "2. Sign in: POST /auth/nonce {wallet} then personal_sign the returned message then POST /auth/verify {message, signature} for a 24h bearer JWT.",
+      "3. Work: GET /jobs then POST /jobs/claim then POST /jobs/submit. Eligible starter-tier jobs are operator-brokered — Averray's backend signer submits the on-chain claim and settlement on your behalf and covers the gas, and curated jobs marked onboardingWaiverEligible waive the claim stake — so a fresh unfunded wallet can claim, submit, and earn from zero only when the job advertises that waiver. This brokered sponsorship is independent of the /health gasSponsor (Pimlico ERC-4337 paymaster) capability, which may read 'disabled' without affecting starter-tier earning.",
+      "4. Persist the key and JWT; re-run step 2 when the JWT expires."
+    ],
+    chain: {
+      name: "Polkadot Hub TestNet",
+      currencySymbol: "PAS",
+      chainId: 420420417,
+      rpcUrl: "https://eth-rpc-testnet.polkadot.io",
+      faucetUrl: "https://faucet.polkadot.io/"
+    },
+    readinessChecks: ["dedicated-agent-account", "private-key-local-only", "siwe-session", "preflight-job"],
+    notes: [
+      "Lowest-friction path for autonomous agents: no human, no browser wallet, and no funding for starter-tier jobs.",
+      "Self-custody only — Averray never generates, holds, or transmits agent keys.",
+      "Authenticates via the same SIWE_JWT scheme as evm-siwe; this mode only changes how the keypair is provisioned."
+    ]
+  },
+  {
+    id: "substrate-mapped",
+    status: "documented_not_yet_supported_for_http_auth",
+    addressFormat: "32-byte native Polkadot account mapped to an EVM-compatible address",
+    supportedWallets: ["Talisman Substrate account"],
+    authScheme: "planned_substrate_signing",
+    mappingRequirement: "Native Polkadot accounts must call pallet_revive.map_account before using Ethereum-compatible contract tooling.",
+    currentBlocker:
+      "Protected HTTP routes do not yet accept native Substrate signatures. Use evm-siwe with a mapped or EVM account until wallet_sign_substrate_payload support lands.",
+    plannedTools: ["wallet_check_mapping_status", "wallet_sign_substrate_payload"],
+    readinessChecks: ["select-wallet-mode", "preflight-job"],
+    notes: [
+      "Use the mapped EVM address through the evm-siwe mode until native Substrate signing is supported.",
+      "Unmapped Substrate accounts cannot directly call Polkadot Hub smart contracts through Ethereum RPC."
+    ]
+  },
+  {
+    id: "substrate-native",
+    status: "planned",
+    addressFormat: "32-byte native Polkadot account",
+    supportedWallets: ["Talisman Substrate account", "Polkadot.js extension"],
+    authScheme: "planned_substrate_signing",
+    currentBlocker:
+      "Native Substrate sign-in is not yet accepted by protected HTTP routes; this mode is exposed so agents can plan rather than guess.",
+    plannedTools: ["wallet_export_public_addresses", "wallet_sign_substrate_payload"],
+    readinessChecks: ["select-wallet-mode"],
+    notes: [
+      "Native Substrate sign-in is not yet accepted by protected HTTP routes.",
+      "Agents should inspect walletModes before choosing an account type."
+    ]
+  },
+  {
+    id: "service-token",
+    status: "supported_operator_issued",
+    addressFormat: "0x-prefixed 20-byte service subject address",
+    supportedWallets: ["operator-issued JWT"],
+    authScheme: "SERVICE_TOKEN_JWT",
+    setup: {
+      accountGuidance:
+        "Ask an operator to issue a grant-backed token through /admin/service-tokens for the exact capabilities required.",
+      secretHandling:
+        "The raw service token is returned once. Store it in a secret manager and rotate through /admin/service-tokens/:id/rotate.",
+      revocationGuidance:
+        "Revoking the bound capability grant removes the token's route capabilities without changing the wallet's normal SIWE session."
+    },
+    readinessChecks: ["scoped-service-token", "preflight-job"],
+    notes: [
+      "Service tokens do not inherit wallet base capabilities.",
+      "A service token is bound to one capabilityGrantId and does not inherit other grants on the same subject wallet.",
+      "Use this mode for external agents that should not receive an admin or full wallet JWT."
+    ]
+  }
+];
+
+const HTTP_ACTION_REQUIREMENTS = [
+  {
+    method: "GET",
+    path: "/onboarding",
+    requiresAuth: false,
+    requiredAction: "read_onboarding"
+  },
+  {
+    method: "POST",
+    path: "/auth/nonce",
+    requiresAuth: false,
+    requiredAction: "request_siwe_nonce",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "POST",
+    path: "/auth/verify",
+    requiresAuth: false,
+    requiredAction: "verify_siwe_signature",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "POST",
+    path: "/auth/refresh",
+    requiresAuth: true,
+    requiredAction: "refresh_wallet_token",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"],
+    notes: "Rotates the caller's wallet JWT — revokes the old jti and mints a new one with the same sub + roles. Service tokens cannot be refreshed here."
+  },
+  {
+    method: "POST",
+    path: "/jobs/claim",
+    requiresAuth: true,
+    requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"],
+    notes: "Claiming a job locks stake/fee state to the signed-in worker wallet."
+  },
+  {
+    method: "POST",
+    path: "/jobs/submit",
+    requiresAuth: true,
+    requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"],
+    notes: "Submitting work is owner-scoped to the wallet that claimed the session."
+  },
+  {
+    method: "*",
+    path: "/account",
+    requiresAuth: true,
+    requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "*",
+    path: "/account/:path",
+    requiresAuth: true,
+    requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "*",
+    path: "/jobs/preflight",
+    requiresAuth: true,
+    requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "*",
+    path: "/jobs/recommendations",
+    requiresAuth: true,
+    requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "*",
+    path: "/sessions",
+    requiresAuth: true,
+    requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "*",
+    path: "/session",
+    requiresAuth: true,
+    requiredAction: "wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "*",
+    path: "/admin/:path",
+    requiresAuth: true,
+    requiredRole: "admin",
+    requiredAction: "admin_wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  },
+  {
+    method: "POST",
+    path: "/verifier/:path",
+    requiresAuth: true,
+    requiredRole: "verifier",
+    requiredAction: "verifier_wallet_sign_in",
+    authScheme: "SIWE_JWT",
+    walletModes: ["evm-siwe"]
+  }
+];
+
 const DISCOVERY_TOOLS = [
   { name: "getPlatformCapabilities", description: "Capability + endpoint manifest for this deployment." },
   { name: "listJobs", description: "All active jobs." },
   { name: "getJobDefinition", description: "One job by id." },
+  { name: "validateJobSubmission", description: "Check a draft payload against the job output schema before claiming or submitting." },
   { name: "getSessionStateMachine", description: "Read the canonical session lifecycle graph and allowed transitions." },
   { name: "listJobSchemas", description: "List built-in structured job schemas and their canonical paths." },
   { name: "getJobSchema", description: "Fetch one built-in structured job schema by name." },
@@ -82,7 +389,7 @@ const DISCOVERY_TOOLS = [
 
 const BASE_MANIFEST = {
   name: "Averray — trusted agent work + identity runtime",
-  version: "0.3.0",
+  version: "0.3.1",
   description:
     "Agent-native work and identity infrastructure on Polkadot: public job discovery, verifier-checked execution, non-transferable reputation badges, and machine-readable trust surfaces. Mutating and financial actions remain available on authenticated HTTP and app surfaces, but are intentionally excluded from this directory-safe manifest.",
   protocols: ["mcp", "http"],
@@ -97,16 +404,33 @@ const BASE_MANIFEST = {
       "submit-structured-work",
       "poll-verification-status",
       "inspect-earned-badge"
+    ],
+    walletModes: WALLET_MODES,
+    actionRequirements: HTTP_ACTION_REQUIREMENTS,
+    readinessChecks: WALLET_READINESS_CHECKS,
+    selfServeChecklist: [
+      "Read /onboarding and /agent-tools.json before selecting a wallet mode.",
+      "Use evm-siwe with a dedicated EVM account for protected HTTP actions today.",
+      "For Talisman, select an EVM account for the current SIWE flow; Substrate and mapped-account modes are documented as planned/mapping-dependent.",
+      "Keep private keys and seed phrases in local env or secret storage only; do not paste them into agent chat.",
+      "Fund the Polkadot Hub TestNet wallet from https://faucet.polkadot.io/ unless the job is sponsored or stake-waived.",
+      "Request a SIWE nonce, sign it with personal_sign, and exchange the signature for a bearer JWT.",
+      "Call /jobs/preflight before /jobs/claim to see tier, stake, fee, and waiver state.",
+      "Treat claimStatus.claimable and claimStatus.reason as authoritative for whether a job may be claimed now; lifecycle.status describes the content/job lifecycle and can remain open when claimStatus says exhausted, claimed, or submitted."
     ]
   },
   auth: {
-    scheme: "SIWE + JWT (HS256)",
+    scheme: "SIWE + JWT (ES256)",
+    schemeId: "SIWE_JWT",
     flow: [
       "POST /auth/nonce { wallet } -> { nonce, message }",
       "personal_sign(message) via wallet provider -> signature",
       "POST /auth/verify { message, signature } -> { token, wallet, expiresAt }",
       "Authorization: Bearer <token> on every subsequent call"
     ],
+    entrypoints: AUTH_ENTRYPOINTS,
+    supportedWalletModes: ["evm-siwe"],
+    plannedWalletModes: ["substrate-mapped", "substrate-native"],
     logout: "POST /auth/logout with Bearer token revokes the jti",
     modes: ["strict", "permissive"]
   },
@@ -125,6 +449,14 @@ const BASE_MANIFEST = {
     multisig: "https://github.com/depre-dev/agent/blob/main/docs/MULTISIG_SETUP.md",
     audit: "https://github.com/depre-dev/agent/blob/main/docs/AUDIT_PACKAGE.md",
     discovery: "https://github.com/depre-dev/agent/blob/main/docs/DISCOVERY.md",
+    walletOnboarding: "https://github.com/depre-dev/agent/blob/main/docs/AGENT_WALLET_ONBOARDING.md",
+    productionChecklist: "https://github.com/depre-dev/agent/blob/main/docs/PRODUCTION_CHECKLIST.md",
+    threatModel: "https://github.com/depre-dev/agent/blob/main/docs/THREAT_MODEL.md",
+    noToken: "https://github.com/depre-dev/agent/blob/main/docs/NO_TOKEN.md",
+    week12Gate: "https://github.com/depre-dev/agent/blob/main/docs/WEEK12_GATE.md",
+    productProofGate: "https://github.com/depre-dev/agent/blob/main/docs/PRODUCT_PROOF_GATE.md",
+    disputeCodes: "https://github.com/depre-dev/agent/blob/main/docs/DISPUTE_CODES.md",
+    arbitrationMigration: "https://github.com/depre-dev/agent/blob/main/docs/ARBITRATION_MIGRATION.md",
     launchPlan: "https://github.com/depre-dev/agent/blob/main/docs/PHASE1_LAUNCH_PLAN.md",
     vdotStrategy: "https://github.com/depre-dev/agent/blob/main/docs/strategies/vdot.md",
     subJobEscrow: "https://github.com/depre-dev/agent/blob/main/docs/patterns/sub-job-escrow.md",
@@ -132,7 +464,7 @@ const BASE_MANIFEST = {
   },
   executionSurfaces: {
     operatorApp: DEFAULT_OPERATOR_APP_URL,
-    authEntrypoints: ["/auth/nonce", "/auth/verify", "/auth/logout"],
+    authEntrypoints: ["/auth/nonce", "/auth/verify", "/auth/refresh", "/auth/logout"],
     note:
       "Mutating and financial actions exist on authenticated HTTP and operator-app surfaces but are intentionally excluded from this directory-safe manifest until the trust, policy, and audit posture are ready for broader distribution."
   }
@@ -168,9 +500,70 @@ export function buildPlatformCapabilities() {
     discoveryMode: manifest.discoveryMode,
     protocols: manifest.protocols,
     onboarding: {
-      starterFlow: manifest.onboarding.starterFlow
+      starterFlow: manifest.onboarding.starterFlow,
+      walletModes: manifest.onboarding.walletModes,
+      actionRequirements: manifest.onboarding.actionRequirements,
+      readinessChecks: manifest.onboarding.readinessChecks,
+      selfServeChecklist: manifest.onboarding.selfServeChecklist
+    },
+    auth: {
+      scheme: manifest.auth.scheme,
+      schemeId: manifest.auth.schemeId,
+      entrypoints: manifest.auth.entrypoints,
+      supportedWalletModes: manifest.auth.supportedWalletModes,
+      plannedWalletModes: manifest.auth.plannedWalletModes
     },
     executionSurfaces: manifest.executionSurfaces,
     tools: manifest.tools.map((tool) => tool.name)
   };
+}
+
+export function getHttpActionRequirement(method = "*", pathname = "") {
+  const normalizedMethod = String(method || "*").toUpperCase();
+  const normalizedPath = normalizePath(pathname);
+  return HTTP_ACTION_REQUIREMENTS.find((entry) => {
+    const methodMatches = entry.method === "*" || entry.method === normalizedMethod;
+    return methodMatches && pathMatches(entry.path, normalizedPath);
+  });
+}
+
+export function buildAuthRequirementDetails(
+  method = "*",
+  pathname = "",
+  { requireRole = undefined, requiredCapabilities = undefined } = {}
+) {
+  const requirement = getHttpActionRequirement(method, pathname) ?? {};
+  const requiredRole = requireRole ?? requirement.requiredRole;
+  const capabilities = Array.isArray(requiredCapabilities)
+    ? requiredCapabilities
+    : getRouteCapabilityRequirements(method, pathname);
+  return {
+    requiresAuth: true,
+    requiredAction:
+      requirement.requiredAction
+      ?? (requiredRole ? `${requiredRole}_wallet_sign_in` : "wallet_sign_in"),
+    requiredRole,
+    requiredCapabilities: capabilities,
+    authScheme: requirement.authScheme ?? "SIWE_JWT",
+    walletModes: requirement.walletModes ?? ["evm-siwe"],
+    authEntrypoints: AUTH_ENTRYPOINTS,
+    onboarding: "/onboarding",
+    notes: requirement.notes
+  };
+}
+
+function normalizePath(pathname) {
+  const value = String(pathname || "/").trim() || "/";
+  return value.endsWith("/") && value.length > 1 ? value.slice(0, -1) : value;
+}
+
+function pathMatches(template, pathname) {
+  if (template === pathname) {
+    return true;
+  }
+  if (template.endsWith("/:path")) {
+    const prefix = template.slice(0, -"/:path".length);
+    return pathname === prefix || pathname.startsWith(`${prefix}/`);
+  }
+  return false;
 }

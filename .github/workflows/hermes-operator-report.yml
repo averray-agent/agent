@@ -1,0 +1,243 @@
+name: Hermes Operator Report
+
+on:
+  workflow_dispatch:
+    inputs:
+      report_kind:
+        description: Which read-only Hermes operator report to run.
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - ops_health
+          - daily_operator_brief
+  schedule:
+    # Daily evidence lane for operator-visible self-reporting.
+    - cron: "17 7 * * *"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: hermes-operator-report-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  operator-report:
+    name: Hermes ${{ matrix.report_kind }} report
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - report_kind: ops_health
+            command: ops health
+          - report_kind: daily_operator_brief
+            command: daily operator brief
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      HERMES_OPERATOR_REPORT_TIMEOUT: 12m
+      REQUESTED_REPORT_KIND: ${{ github.event_name == 'workflow_dispatch' && inputs.report_kind || 'all' }}
+    steps:
+      - name: Select report
+        id: select
+        run: |
+          set -euo pipefail
+
+          if [ "$REQUESTED_REPORT_KIND" != "all" ] && [ "$REQUESTED_REPORT_KIND" != "${{ matrix.report_kind }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Hermes Operator Report"
+              echo
+              echo "- Report kind: \`${{ matrix.report_kind }}\`"
+              echo "- Outcome: \`skipped\`"
+              echo "- Requested: \`${REQUESTED_REPORT_KIND}\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          correlation_id="github-operator-report-${{ matrix.report_kind }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          artifact_name="hermes-operator-report-${{ matrix.report_kind }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "correlation_id=${correlation_id}" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=${artifact_name}" >> "$GITHUB_OUTPUT"
+
+      - name: Load prod-ci secrets from 1Password (fail-closed)
+        if: steps.select.outputs.skip != 'true'
+        # Pinned to 1password/load-secrets-action v4.0.0 commit SHA.
+        uses: 1password/load-secrets-action@92467eb28f72e8255933372f1e0707c567ce2259 # v4.0.0
+        with:
+          export-env: true
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN_PROD_CI }}
+          VPS_SSH_KEY_OP: op://prod-ci/vps-ssh-key/private key
+
+      - name: Validate required secrets
+        if: steps.select.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+
+          if [ -z "${VPS_SSH_KEY_OP:-}" ]; then
+            echo "::error::VPS_SSH_KEY_OP is empty after load step — check op://prod-ci/vps-ssh-key/private key and OP_SERVICE_ACCOUNT_TOKEN_PROD_CI"
+            exit 1
+          fi
+
+          case "$VPS_SSH_KEY_OP" in
+            -----BEGIN*PRIVATE\ KEY-----*)
+              echo "VPS_SSH_KEY_OP: SSH private-key shape valid"
+              ;;
+            *)
+              echo "::error::VPS_SSH_KEY_OP does not look like an OpenSSH/PEM private key"
+              exit 1
+              ;;
+          esac
+
+      - name: Configure SSH
+        if: steps.select.outputs.skip != 'true'
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY_OP" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "${VPS_PORT:-22}" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Ask Hermes for operator report
+        id: hermes
+        if: steps.select.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          HERMES_OPERATOR_REPORT_KIND: ${{ matrix.report_kind }}
+          HERMES_OPERATOR_COMMAND: ${{ matrix.command }}
+          HERMES_OPERATOR_CORRELATION_ID: ${{ steps.select.outputs.correlation_id }}
+          HERMES_OPERATOR_ARTIFACT_NAME: ${{ steps.select.outputs.artifact_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          log_path="artifacts/hermes-operator-${HERMES_OPERATOR_REPORT_KIND}.log"
+          evidence_path="artifacts/hermes-operator-${HERMES_OPERATOR_REPORT_KIND}.json"
+
+          prompt=$(
+            cat <<PROMPT
+          Use Averray MCP tools only.
+
+          Call averray_handle_operator_command with requester='github-actions' and text='${HERMES_OPERATOR_COMMAND}'. If the deployed tool schema exposes reason or correlationId fields, set reason='scheduled operator self-report evidence' and correlationId='${HERMES_OPERATOR_CORRELATION_ID}'; otherwise do not invent unsupported arguments.
+
+          This is a read-only operator evidence run. Do not claim jobs, do not submit jobs, do not edit Wikipedia, do not mutate GitHub, do not send Slack messages, and do not request approvals through tools.
+
+          Report these sections briefly:
+          - reportKind: ${HERMES_OPERATOR_REPORT_KIND}
+          - correlationId: ${HERMES_OPERATOR_CORRELATION_ID}
+          - finalVerdict
+          - checkedAt
+          - summary
+          - durableEvidenceDestination: GitHub Actions artifact ${HERMES_OPERATOR_ARTIFACT_NAME} and this workflow step summary
+          - safety
+          PROMPT
+          )
+
+          remote_env=$(printf 'HERMES_OPERATOR_REPORT_PROMPT=%q ' "$prompt")
+
+          : > "$log_path"
+          set +e
+          timeout "$HERMES_OPERATOR_REPORT_TIMEOUT" ssh -p "${VPS_PORT:-22}" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=120 \
+            "$VPS_USER@$VPS_HOST" \
+            "${remote_env} bash -s" <<'REMOTE' | tee "$log_path"
+          set -euo pipefail
+          cd /srv/averray-reference-agent
+          docker compose --env-file .env.prod \
+            -f ops/compose.yml \
+            -f ops/compose.prod.yml \
+            -p avg \
+            exec -T hermes /opt/hermes/.venv/bin/hermes chat \
+              --provider ollama-cloud \
+              -m deepseek-v4-pro:cloud \
+              -q "$HERMES_OPERATOR_REPORT_PROMPT"
+          REMOTE
+          status=${PIPESTATUS[0]}
+          set -e
+          outcome=failed
+
+          if [ "$status" -eq 0 ]; then
+            outcome=success
+          elif [ "$status" -eq 124 ]; then
+            outcome=timeout
+            {
+              echo
+              echo "Hermes operator report timed out after ${HERMES_OPERATOR_REPORT_TIMEOUT}."
+              echo "Inspect the remote Hermes session before relying on this report."
+            } | tee -a "$log_path"
+          fi
+
+          checked_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          workflow_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          cat > "$evidence_path" <<JSON
+          {
+            "reportKind": "${HERMES_OPERATOR_REPORT_KIND}",
+            "command": "${HERMES_OPERATOR_COMMAND}",
+            "correlationId": "${HERMES_OPERATOR_CORRELATION_ID}",
+            "outcome": "${outcome}",
+            "exitStatus": ${status},
+            "checkedAt": "${checked_at}",
+            "workflowRunId": "${GITHUB_RUN_ID}",
+            "workflowRunAttempt": "${GITHUB_RUN_ATTEMPT}",
+            "workflowUrl": "${workflow_url}",
+            "artifactName": "${HERMES_OPERATOR_ARTIFACT_NAME}",
+            "durableDestinations": [
+              "GitHub Actions artifact ${HERMES_OPERATOR_ARTIFACT_NAME}",
+              "GitHub Actions step summary for run ${GITHUB_RUN_ID}"
+            ],
+            "secretSafety": "workflow evidence contains correlation ids and report output only; no API keys or JWTs are written by this job"
+          }
+          JSON
+
+          echo "exit_status=$status" >> "$GITHUB_OUTPUT"
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+          echo "evidence_path=$evidence_path" >> "$GITHUB_OUTPUT"
+          echo "log_path=$log_path" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Hermes Operator Report"
+            echo
+            echo "- Report kind: \`${HERMES_OPERATOR_REPORT_KIND}\`"
+            echo "- Command: \`${HERMES_OPERATOR_COMMAND}\`"
+            echo "- Correlation: \`${HERMES_OPERATOR_CORRELATION_ID}\`"
+            echo "- Outcome: \`${outcome}\`"
+            echo "- Artifact: \`${HERMES_OPERATOR_ARTIFACT_NAME}\`"
+            echo
+            echo '```text'
+            sed -n '1,220p' "$log_path"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$status"
+
+      - name: Upload Hermes operator report evidence
+        if: always() && steps.select.outputs.skip != 'true' && steps.hermes.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ steps.select.outputs.artifact_name }}
+          path: |
+            artifacts/hermes-operator-${{ matrix.report_kind }}.log
+            artifacts/hermes-operator-${{ matrix.report_kind }}.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Fail if Hermes operator report failed
+        if: always() && steps.select.outputs.skip != 'true' && steps.hermes.outputs.exit_status != '0'
+        env:
+          HERMES_STATUS: ${{ steps.hermes.outputs.exit_status }}
+        run: |
+          echo "Hermes operator report failed with status ${HERMES_STATUS:-unknown}."
+          exit 1

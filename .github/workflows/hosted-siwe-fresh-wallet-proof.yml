@@ -1,0 +1,86 @@
+name: Hosted SIWE Fresh-Wallet Proof
+
+# Regression guard for the roleless-wallet SIWE→JWT mint. Performs a REAL
+# SIWE login with a FRESH, non-admin/non-verifier wallet end to end
+# (nonce → sign → verify → /account) and asserts a usable roleless bearer
+# token is minted. This is the exact front door every external agent uses
+# and that no other hosted proof exercises (they all use the pre-minted
+# multi-role ADMIN_JWT). It needs NO secrets — a fresh random wallet is
+# the whole point.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-siwe-fresh-wallet-proof
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    name: Run hosted SIWE fresh-wallet proof
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      APP_ALLOW_PROTECTED_SHELL: "1"
+      CHECK_INDEXER: "0"
+      CHECK_SIWE_FRESH_WALLET_PROOF: "1"
+      SIWE_FRESH_WALLET_PROOF_EVIDENCE_FILE: artifacts/siwe-fresh-wallet-proof-hosted-${{ github.run_id }}.json
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      # The proof script signs the SIWE message with `ethers` (a prod
+      # dependency of mcp-server), so unlike the source-only hosted proofs
+      # this one needs node_modules installed.
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run hosted proof
+        run: |
+          set -euo pipefail
+          set +x
+
+          ./scripts/ops/check-hosted-stack.sh
+
+      - name: Summarize proof evidence
+        if: always()
+        run: |
+          set -euo pipefail
+
+          evidence_file="$SIWE_FRESH_WALLET_PROOF_EVIDENCE_FILE"
+          if [ ! -s "$evidence_file" ]; then
+            echo "No SIWE fresh-wallet evidence file was produced." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          wallet="$(jq -r '.wallet' "$evidence_file")"
+          verify_status="$(jq -r '.verifyStatus' "$evidence_file")"
+          account_status="$(jq -r '.accountStatus' "$evidence_file")"
+          roles="$(jq -c '.roles' "$evidence_file")"
+
+          {
+            echo "## Hosted SIWE Fresh-Wallet Proof"
+            echo
+            echo "- Wallet: \`${wallet}\` (ephemeral)"
+            echo "- /auth/verify: \`HTTP ${verify_status}\`"
+            echo "- /account: \`HTTP ${account_status}\`"
+            echo "- Roles: \`${roles}\` (roleless worker)"
+            echo "- Evidence artifact: \`hosted-siwe-fresh-wallet-proof-${GITHUB_RUN_ID}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload SIWE fresh-wallet proof evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hosted-siwe-fresh-wallet-proof-${{ github.run_id }}
+          path: ${{ env.SIWE_FRESH_WALLET_PROOF_EVIDENCE_FILE }}
+          if-no-files-found: error
+          retention-days: 90

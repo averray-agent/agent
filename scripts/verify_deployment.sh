@@ -5,9 +5,12 @@
 # that:
 #   - each contract address responds to a known function selector
 #   - TreasuryPolicy.owner() matches the expected owner (multisig on prod)
+#   - optional deployments/<profile>-multisig-owner.json matches owner
+#   - optional owner record finality when --require-owner-record-final is set
 #   - TreasuryPolicy.pauser() matches the expected pauser hot-key
-#   - TreasuryPolicy.verifiers(VERIFIER) and arbitrators(ARBITRATOR) are true
+#   - TreasuryPolicy.verifiers(VERIFIER) and TreasuryPolicy.arbitrators(ARBITRATOR) are true
 #   - TreasuryPolicy.serviceOperators({escrow,account}) are true
+#   - AgentAccountCore.escrowOperators(escrow) is true
 #   - TreasuryPolicy.approvedAssets(TOKEN) is true
 #   - TreasuryPolicy is NOT paused (unless --allow-paused is set)
 #
@@ -26,6 +29,7 @@ PROFILE="${1:-${PROFILE:-dev}}"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "${script_dir}/.." && pwd)"
 manifest_path="${repo_root}/deployments/${PROFILE}.json"
+owner_record_path="${repo_root}/deployments/${PROFILE}-multisig-owner.json"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -43,9 +47,11 @@ if [[ ! -f "$manifest_path" ]]; then
 fi
 
 ALLOW_PAUSED=0
+REQUIRE_OWNER_RECORD_FINAL="${REQUIRE_OWNER_RECORD_FINAL:-0}"
 for arg in "$@"; do
   case "$arg" in
     --allow-paused) ALLOW_PAUSED=1 ;;
+    --require-owner-record-final) REQUIRE_OWNER_RECORD_FINAL=1 ;;
   esac
 done
 
@@ -59,6 +65,7 @@ TREASURY_POLICY="$(echo "$manifest" | jq -r '.contracts.treasuryPolicy')"
 STRATEGY_REGISTRY="$(echo "$manifest" | jq -r '.contracts.strategyAdapterRegistry')"
 AGENT_ACCOUNT="$(echo "$manifest" | jq -r '.contracts.agentAccountCore')"
 REPUTATION_SBT="$(echo "$manifest" | jq -r '.contracts.reputationSbt')"
+DISCOVERY_REGISTRY="$(echo "$manifest" | jq -r '.contracts.discoveryRegistry')"
 ESCROW_CORE="$(echo "$manifest" | jq -r '.contracts.escrowCore')"
 XCM_WRAPPER="$(echo "$manifest" | jq -r '.contracts.xcmWrapper // empty')"
 TOKEN_ADDRESS="$(echo "$manifest" | jq -r '.contracts.token')"
@@ -68,12 +75,22 @@ check() {
   local label="$1"
   local expected="$2"
   local actual="$3"
-  if [[ "${expected,,}" == "${actual,,}" ]]; then
+  if [[ "$(lower "$expected")" == "$(lower "$(strip_cast_annotation "$actual")")" ]]; then
     printf "  [ok] %s\n" "$label"
   else
     printf "  [FAIL] %s: expected %s, got %s\n" "$label" "$expected" "$actual"
     fail=1
   fi
+}
+
+lower() {
+  printf "%s" "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+strip_cast_annotation() {
+  # Some Foundry versions print integers as `50000 [5e4]`.
+  # Keep the plain ABI value for manifest comparisons.
+  printf "%s" "${1%% \[*}"
 }
 
 check_bool() {
@@ -119,6 +136,7 @@ for pair in \
   "StrategyAdapterRegistry=$STRATEGY_REGISTRY" \
   "AgentAccountCore=$AGENT_ACCOUNT" \
   "ReputationSBT=$REPUTATION_SBT" \
+  "DiscoveryRegistry=$DISCOVERY_REGISTRY" \
   "EscrowCore=$ESCROW_CORE" \
   "Token=$TOKEN_ADDRESS"; do
   name="${pair%%=*}"
@@ -156,16 +174,66 @@ else
   check_bool "not paused" "false" "$paused_raw"
 fi
 
+if [[ -f "$owner_record_path" ]]; then
+  echo ""
+  echo "Multisig owner record:"
+  record_owner="$(jq -r '.multisig.ownerEnvValue // empty' "$owner_record_path")"
+  record_status="$(jq -r '.status // empty' "$owner_record_path")"
+  record_ready="$(jq -r '.launchGate.readyForOwnerUse // false' "$owner_record_path")"
+  check "record owner" "$EXPECTED_OWNER" "$record_owner"
+  if [[ "$REQUIRE_OWNER_RECORD_FINAL" == "1" ]]; then
+    check "record status" "verified" "$record_status"
+    check_bool "record readyForOwnerUse" "true" "$record_ready"
+  else
+    printf "  [info] record status %s (final owner-record gate skipped)\n" "$record_status"
+    printf "  [info] record readyForOwnerUse %s (final owner-record gate skipped)\n" "$record_ready"
+  fi
+fi
+
 echo ""
 echo "Operator + verifier registration:"
 check_bool "serviceOperator(EscrowCore)"   "true" "$(call "$TREASURY_POLICY" "serviceOperators(address)(bool)" "$ESCROW_CORE")"
 check_bool "serviceOperator(AgentAccount)" "true" "$(call "$TREASURY_POLICY" "serviceOperators(address)(bool)" "$AGENT_ACCOUNT")"
+check_bool "agentAccountEscrowOperator(EscrowCore)" "true" "$(call "$AGENT_ACCOUNT" "escrowOperators(address)(bool)" "$ESCROW_CORE")"
 if [[ -n "$XCM_WRAPPER" ]]; then
   check_bool "serviceOperator(XcmWrapper)" "true" "$(call "$TREASURY_POLICY" "serviceOperators(address)(bool)" "$XCM_WRAPPER")"
 fi
 check_bool "verifier"                      "true" "$(call "$TREASURY_POLICY" "verifiers(address)(bool)" "$EXPECTED_VERIFIER")"
+check "discovery publisher"                "$EXPECTED_OWNER" "$(call "$DISCOVERY_REGISTRY" "publisher()(address)")"
 check_bool "arbitrator"                    "true" "$(call "$TREASURY_POLICY" "arbitrators(address)(bool)" "$EXPECTED_ARBITRATOR")"
 check_bool "approvedAsset(token)"          "true" "$(call "$TREASURY_POLICY" "approvedAssets(address)(bool)" "$TOKEN_ADDRESS")"
+
+if [[ "$(echo "$manifest" | jq -r '.parameters // empty')" != "" ]]; then
+  echo ""
+  echo "Launch parameters:"
+  check "defaultClaimStakeBps" "$(echo "$manifest" | jq -r '.parameters.defaultClaimStakeBps')" \
+    "$(call "$TREASURY_POLICY" "defaultClaimStakeBps()(uint16)")"
+  check "onboardingWaiverClaimCount" "$(echo "$manifest" | jq -r '.parameters.onboardingWaiverClaimCount')" \
+    "$(call "$TREASURY_POLICY" "onboardingWaiverClaimCount()(uint256)")"
+  check "claimFeeBps" "$(echo "$manifest" | jq -r '.parameters.claimFeeBps')" \
+    "$(call "$TREASURY_POLICY" "claimFeeBps()(uint16)")"
+  check "minClaimFee(token)" "$(echo "$manifest" | jq -r '.parameters.minClaimFee')" \
+    "$(call "$TREASURY_POLICY" "minClaimFeeByAsset(address)(uint256)" "$TOKEN_ADDRESS")"
+  check "claimFeeVerifierBps" "$(echo "$manifest" | jq -r '.parameters.claimFeeVerifierBps')" \
+    "$(call "$TREASURY_POLICY" "claimFeeVerifierBps()(uint16)")"
+fi
+
+strategy_count="$(echo "$manifest" | jq -r '.strategies | length')"
+if [[ "$strategy_count" != "0" ]]; then
+  echo ""
+  echo "Strategy adapters:"
+  while IFS=$'\t' read -r strategy_id adapter kind; do
+    code=$(cast code --rpc-url "$RPC_URL" "$adapter" 2>/dev/null || echo "0x")
+    if [[ "$code" == "0x" ]]; then
+      printf "  [FAIL] strategy %s (%s) at %s has no bytecode\n" "$strategy_id" "$kind" "$adapter"
+      fail=1
+    else
+      printf "  [ok] strategy %s (%s) at %s\n" "$strategy_id" "$kind" "$adapter"
+    fi
+    check_bool "approvedStrategy($kind)" "true" "$(call "$TREASURY_POLICY" "approvedStrategies(address)(bool)" "$adapter")"
+    check_bool "serviceOperator($kind)" "true" "$(call "$TREASURY_POLICY" "serviceOperators(address)(bool)" "$adapter")"
+  done < <(echo "$manifest" | jq -r '.strategies[] | [.strategyId, .adapter, .kind] | @tsv')
+fi
 
 echo ""
 if [[ "$fail" == "0" ]]; then

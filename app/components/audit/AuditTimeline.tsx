@@ -18,7 +18,20 @@ const DAY_LABEL: Record<string, string> = {
  * Entries are link-through only — clicking an event opens the relevant
  * surface (receipts, runs, policies, disputes) in the same tab.
  */
-export function AuditTimeline({ events }: { events: AuditEvent[] }) {
+export function AuditTimeline({
+  events,
+  unauthenticated,
+  filtersApplied,
+}: {
+  events: AuditEvent[];
+  /** True when the data fetch failed with 401/403 — the page renders
+   *  a sign-in hint instead of the generic "no events match" copy. */
+  unauthenticated?: boolean;
+  /** True when at least one filter (source/category/day/q) is set
+   *  beyond defaults. Distinguishes "your filters didn't match
+   *  anything" from "the log itself is quiet for everyone". */
+  filtersApplied?: boolean;
+}) {
   if (events.length === 0) {
     return (
       <div className="rounded-[10px] border border-dashed border-[var(--avy-line)] bg-[rgba(255,253,247,0.5)] p-8 text-center">
@@ -26,8 +39,11 @@ export function AuditTimeline({ events }: { events: AuditEvent[] }) {
           className="m-0 font-[family-name:var(--font-mono)] text-[13px] text-[var(--avy-muted)]"
           style={{ letterSpacing: 0 }}
         >
-          No events match these filters. The log is append-only, so a quiet
-          window means the platform is quiet — not stalled.
+          {unauthenticated
+            ? "Sign in with your operator wallet to load the audit log. Every claim, submission, and verification on this platform shows up here once you're authenticated."
+            : filtersApplied
+              ? "No events match these filters. Clear them to see the full log."
+              : "No events recorded yet. The log is append-only, so a quiet window means the platform is quiet — not stalled."}
         </p>
       </div>
     );
@@ -77,8 +93,13 @@ export function AuditTimeline({ events }: { events: AuditEvent[] }) {
 function EventCard({ event }: { event: AuditEvent }) {
   return (
     <li
+      // Stack vertically at narrow widths so timestamp/source/body/actor/
+      // link don't get crushed into a fragile 5-column grid below ~900px.
+      // At md+ (≥768px) the original 5-column layout takes over via
+      // arbitrary-value grid-cols.
       className={cn(
-        "grid items-start gap-3 rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] px-4 py-3 shadow-[var(--shadow-card)] backdrop-blur-[8px] transition-colors hover:border-[color:rgba(30,102,66,0.28)]",
+        "flex flex-col gap-2 rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] px-4 py-3 shadow-[var(--shadow-card)] backdrop-blur-[8px] transition-colors hover:border-[color:rgba(30,102,66,0.28)]",
+        "md:grid md:grid-cols-[76px_110px_1fr_200px_auto] md:items-start md:gap-3",
         event.tone === "warn" &&
           "border-l-[3px] border-l-[var(--avy-warn)]",
         event.tone === "bad" &&
@@ -86,7 +107,6 @@ function EventCard({ event }: { event: AuditEvent }) {
         event.tone === "accent" &&
           "border-l-[3px] border-l-[var(--avy-accent)]"
       )}
-      style={{ gridTemplateColumns: "76px 110px 1fr 200px auto" }}
     >
       <div className="flex flex-col">
         <span

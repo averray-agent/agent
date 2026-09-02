@@ -2,6 +2,7 @@ import { createConfig } from "ponder";
 
 import {
   AgentAccountCoreAbi,
+  DiscoveryRegistryAbi,
   EscrowCoreAbi,
   ReputationSbtAbi,
   TreasuryPolicyAbi,
@@ -38,8 +39,13 @@ const reputationSbtAddress = requireAddress(
   process.env.PONDER_REPUTATION_SBT_ADDRESS ?? process.env.REPUTATION_SBT_ADDRESS,
   "REPUTATION_SBT_ADDRESS"
 );
+const discoveryRegistryAddress = optionalAddress(
+  process.env.PONDER_DISCOVERY_REGISTRY_ADDRESS ?? process.env.DISCOVERY_REGISTRY_ADDRESS,
+  "DISCOVERY_REGISTRY_ADDRESS"
+);
 const xcmWrapperAddress = optionalAddress(
-  process.env.PONDER_XCM_WRAPPER_ADDRESS ?? process.env.XCM_WRAPPER_ADDRESS
+  process.env.PONDER_XCM_WRAPPER_ADDRESS ?? process.env.XCM_WRAPPER_ADDRESS,
+  "XCM_WRAPPER_ADDRESS"
 );
 
 const treasuryStartBlock = parseStartBlock(
@@ -52,6 +58,10 @@ const escrowStartBlock = parseStartBlock(
 );
 const reputationStartBlock = parseStartBlock(
   process.env.PONDER_START_BLOCK_REPUTATION,
+  lowMemoryMode ? "latest" : 0
+);
+const registryStartBlock = parseStartBlock(
+  process.env.PONDER_START_BLOCK_REGISTRIES,
   lowMemoryMode ? "latest" : 0
 );
 const xcmStartBlock = parseStartBlock(
@@ -84,6 +94,16 @@ const contracts = {
     address: reputationSbtAddress,
     startBlock: reputationStartBlock
   },
+  ...(discoveryRegistryAddress
+    ? {
+        DiscoveryRegistry: {
+          chain: chainName,
+          abi: DiscoveryRegistryAbi,
+          address: discoveryRegistryAddress,
+          startBlock: registryStartBlock
+        }
+      }
+    : {}),
   ...(xcmWrapperAddress
     ? {
         XcmWrapper: {
@@ -155,11 +175,11 @@ function requireAddress(raw: string | undefined, name: string): Address {
   return value as Address;
 }
 
-function optionalAddress(raw: string | undefined): Address | undefined {
+function optionalAddress(raw: string | undefined, name: string): Address | undefined {
   const value = raw?.trim();
   if (!value) return undefined;
   if (!/^0x[0-9a-fA-F]{40}$/u.test(value)) {
-    throw new Error(`Ponder: optional address ${value} is not a valid 20-byte EVM address.`);
+    throw new Error(`Ponder: ${name}=${value} is not a valid 20-byte EVM address.`);
   }
   return value as Address;
 }

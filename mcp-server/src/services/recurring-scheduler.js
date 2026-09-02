@@ -40,10 +40,15 @@ export class RecurringSchedulerService {
           lastResult: template.lastResult,
           ...(this.runtime.get(template.templateId) ?? {})
         };
-        const nextFireAt = runtime.nextFireAt ?? computeNextFireAt(template.schedule, now)?.toISOString();
+        const exhausted = Boolean(runtime.exhausted ?? template.exhausted ?? template.reserve?.exhausted);
+        const nextFireAt = exhausted
+          ? undefined
+          : (runtime.nextFireAt ?? computeNextFireAt(template.schedule, now)?.toISOString());
         return {
           templateId: template.templateId,
           paused: Boolean(runtime.paused),
+          exhausted,
+          reserve: runtime.reserve ?? template.reserve,
           lastFiredAt: runtime.lastFiredAt ?? template.lastFiredAt,
           nextFireAt,
           lastResult: runtime.lastResult
@@ -75,6 +80,19 @@ export class RecurringSchedulerService {
       if (runtime.paused) {
         continue;
       }
+      if (runtime.exhausted || template.exhausted || template.reserve?.exhausted) {
+        this.runtime.set(template.templateId, {
+          ...runtime,
+          exhausted: true,
+          nextFireAt: undefined,
+          reserve: runtime.reserve ?? template.reserve,
+          lastResult: runtime.lastResult ?? template.lastResult ?? {
+            status: "reserve_exhausted",
+            at: now.toISOString()
+          }
+        });
+        continue;
+      }
       const nextFireAt = runtime.nextFireAt
         ? new Date(runtime.nextFireAt)
         : computeNextFireAt(template.schedule, now, runtime.lastFiredAt);
@@ -95,24 +113,38 @@ export class RecurringSchedulerService {
 
       try {
         const derivative = this.platformService.fireRecurringJob(template.templateId, { firedAt: now });
-        const upcoming = computeNextFireAt(template.schedule, new Date(now.getTime() + 60_000), now.toISOString());
+        const updatedTemplate = this.platformService
+          .getRecurringTemplateStatus()
+          .templates
+          .find((candidate) => candidate.templateId === template.templateId);
+        const reserve = updatedTemplate?.reserve;
+        const exhausted = Boolean(updatedTemplate?.exhausted ?? reserve?.exhausted);
+        const upcoming = exhausted
+          ? undefined
+          : computeNextFireAt(template.schedule, new Date(now.getTime() + 60_000), now.toISOString());
         this.runtime.set(template.templateId, {
           ...runtime,
+          exhausted,
+          reserve,
           lastFiredAt: now.toISOString(),
           nextFireAt: upcoming?.toISOString(),
           lastResult: {
             status: "fired",
             at: now.toISOString(),
-            derivativeId: derivative.id
+            derivativeId: derivative.id,
+            ...(reserve ? { reserve } : {})
           }
         });
         this.platformService.jobCatalogService?.updateRecurringTemplateRuntime?.(template.templateId, {
+          exhausted,
+          reserve,
           lastFiredAt: now.toISOString(),
           nextFireAt: upcoming?.toISOString(),
           lastResult: {
             status: "fired",
             at: now.toISOString(),
-            derivativeId: derivative.id
+            derivativeId: derivative.id,
+            ...(reserve ? { reserve } : {})
           }
         });
         this.eventBus?.publish({
@@ -129,22 +161,36 @@ export class RecurringSchedulerService {
         fired.push(derivative);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        const status = error instanceof ConflictError ? "conflict" : "failed";
+        const status = error?.code === "recurring_reserve_exhausted"
+          ? "reserve_exhausted"
+          : (error instanceof ConflictError ? "conflict" : "failed");
+        const reserve = error?.details?.reserve;
+        const exhausted = status === "reserve_exhausted";
         this.runtime.set(template.templateId, {
           ...runtime,
-          nextFireAt: computeNextFireAt(template.schedule, new Date(now.getTime() + 60_000), runtime.lastFiredAt)?.toISOString(),
+          exhausted,
+          reserve: reserve ?? runtime.reserve,
+          nextFireAt: exhausted
+            ? undefined
+            : computeNextFireAt(template.schedule, new Date(now.getTime() + 60_000), runtime.lastFiredAt)?.toISOString(),
           lastResult: {
             status,
             at: now.toISOString(),
-            message
+            message,
+            ...(reserve ? { reserve } : {})
           }
         });
         this.platformService.jobCatalogService?.updateRecurringTemplateRuntime?.(template.templateId, {
-          nextFireAt: computeNextFireAt(template.schedule, new Date(now.getTime() + 60_000), runtime.lastFiredAt)?.toISOString(),
+          exhausted,
+          reserve,
+          nextFireAt: exhausted
+            ? undefined
+            : computeNextFireAt(template.schedule, new Date(now.getTime() + 60_000), runtime.lastFiredAt)?.toISOString(),
           lastResult: {
             status,
             at: now.toISOString(),
-            message
+            message,
+            ...(reserve ? { reserve } : {})
           }
         });
         this.logger.warn?.({ templateId: template.templateId, err: error }, "recurring_scheduler.fire_failed");

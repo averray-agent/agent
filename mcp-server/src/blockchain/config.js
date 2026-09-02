@@ -1,5 +1,8 @@
 import { ConfigError } from "../core/errors.js";
+import { knownAssetMinBalanceRaw } from "../core/assets.js";
 import { derivePolkadotHubAssetAddress } from "../services/strategy-asset-config.js";
+
+const DEFAULT_GAS_FEE_BUFFER_BPS = 2000;
 
 function parseLegacyAssets(rawAssets) {
   if (!rawAssets) {
@@ -50,6 +53,10 @@ function normalizeAssetEntry(entry, idx) {
     entry.foreignAssetIndex,
     `SUPPORTED_ASSETS_JSON[${idx}].foreignAssetIndex`
   );
+  const configuredMinBalanceRaw = normalizeOptionalRawAmount(
+    entry.minBalanceRaw,
+    `SUPPORTED_ASSETS_JSON[${idx}].minBalanceRaw`
+  );
   const address = entry.address === undefined
     ? undefined
     : normalizeAddress(entry.address, `SUPPORTED_ASSETS_JSON[${idx}].address`);
@@ -87,6 +94,8 @@ function normalizeAssetEntry(entry, idx) {
   if (assetId !== undefined) normalized.assetId = assetId;
   if (foreignAssetIndex !== undefined) normalized.foreignAssetIndex = foreignAssetIndex;
   if (xcmLocation !== undefined) normalized.xcmLocation = xcmLocation;
+  const minBalanceRaw = configuredMinBalanceRaw ?? knownAssetMinBalanceRaw(normalized);
+  if (minBalanceRaw !== undefined) normalized.minBalanceRaw = minBalanceRaw;
   return normalized;
 }
 
@@ -140,6 +149,17 @@ function normalizeAddress(raw, label) {
   return raw.toLowerCase();
 }
 
+function normalizeOptionalRawAmount(raw, label) {
+  if (raw === undefined || raw === null || raw === "") {
+    return undefined;
+  }
+  const value = typeof raw === "bigint" ? raw.toString() : String(raw).trim();
+  if (!/^\d+$/u.test(value)) {
+    throw new ConfigError(`${label} must be a non-negative integer string in base units.`);
+  }
+  return value;
+}
+
 function normalizeOptionalXcmLocation(raw, idx) {
   if (raw === undefined || raw === null || raw === "") {
     return undefined;
@@ -156,13 +176,41 @@ function normalizeOptionalXcmLocation(raw, idx) {
 export function loadBlockchainConfig(env = process.env) {
   const rpcUrl = resolveRpcUrl(env);
   const assetConfigPresent = Boolean(env.SUPPORTED_ASSETS_JSON || env.SUPPORTED_ASSETS);
+
+  // Phase 3 (per docs/SECRETS_MIGRATION.md §"Phase 3 — AWS KMS for the
+  // backend signer"): SIGNER_BACKEND selects which signing path the
+  // gateway constructs. Defaults to "local" for backwards compat —
+  // existing deployments that only set SIGNER_PRIVATE_KEY keep working.
+  // When "kms", we require KMS_KEY_ID + AWS_REGION instead, and the
+  // signer never sees raw key material.
+  const signerBackend = (env.SIGNER_BACKEND ?? "local").trim().toLowerCase();
+  if (signerBackend !== "local" && signerBackend !== "kms") {
+    throw new ConfigError(
+      `SIGNER_BACKEND must be "local" or "kms"; got "${env.SIGNER_BACKEND}"`,
+    );
+  }
+  if (signerBackend === "kms" && env.SIGNER_PRIVATE_KEY) {
+    throw new ConfigError(
+      "SIGNER_BACKEND=kms and SIGNER_PRIVATE_KEY are mutually exclusive. " +
+        "Unset SIGNER_PRIVATE_KEY when using KMS — keeping both is a " +
+        "Phase 3 anti-pattern: a deployed key plus a vault key undoes the " +
+        "non-exportability guarantee.",
+    );
+  }
+
   const requiredFields = [
     {
       key: "RPC_URL",
       configured: Boolean(rpcUrl),
       missingLabel: "RPC_URL (or DWELLER_RPC_URL / POLKADOT_RPC_URL)"
     },
-    { key: "SIGNER_PRIVATE_KEY", configured: Boolean(env.SIGNER_PRIVATE_KEY) },
+    signerBackend === "kms"
+      ? {
+          key: "KMS_KEY_ID",
+          configured: Boolean(env.KMS_KEY_ID) && Boolean(env.AWS_REGION),
+          missingLabel: "KMS_KEY_ID + AWS_REGION (required when SIGNER_BACKEND=kms)",
+        }
+      : { key: "SIGNER_PRIVATE_KEY", configured: Boolean(env.SIGNER_PRIVATE_KEY) },
     { key: "TREASURY_POLICY_ADDRESS", configured: Boolean(env.TREASURY_POLICY_ADDRESS) },
     { key: "AGENT_ACCOUNT_ADDRESS", configured: Boolean(env.AGENT_ACCOUNT_ADDRESS) },
     { key: "ESCROW_CORE_ADDRESS", configured: Boolean(env.ESCROW_CORE_ADDRESS) },
@@ -197,14 +245,34 @@ export function loadBlockchainConfig(env = process.env) {
   return {
     enabled,
     rpcUrl,
+    signerBackend,
     signerPrivateKey: env.SIGNER_PRIVATE_KEY ?? "",
+    arbitratorSignerPrivateKey: env.ARBITRATOR_SIGNER_PRIVATE_KEY ?? "",
+    kmsKeyId: env.KMS_KEY_ID ?? "",
+    awsRegion: env.AWS_REGION ?? "",
     treasuryPolicyAddress: env.TREASURY_POLICY_ADDRESS ?? "",
     agentAccountAddress: env.AGENT_ACCOUNT_ADDRESS ?? "",
     escrowCoreAddress: env.ESCROW_CORE_ADDRESS ?? "",
     reputationSbtAddress: env.REPUTATION_SBT_ADDRESS ?? "",
+    discoveryRegistryAddress: normalizeOptionalAddress(env.DISCOVERY_REGISTRY_ADDRESS, "DISCOVERY_REGISTRY_ADDRESS"),
     xcmWrapperAddress: normalizeOptionalAddress(env.XCM_WRAPPER_ADDRESS, "XCM_WRAPPER_ADDRESS"),
-    supportedAssets
+    supportedAssets,
+    gasFeeBufferBps: resolveGasFeeBufferBps(env)
   };
+}
+
+// Basis-point buffer added to Polkadot Hub tx fee ceilings (see fee-buffer.js).
+// Default 2000 (20%); GAS_FEE_BUFFER_BPS=0 disables it.
+function resolveGasFeeBufferBps(env = process.env) {
+  const raw = env.GAS_FEE_BUFFER_BPS;
+  if (raw === undefined || raw === null || String(raw).trim() === "") {
+    return DEFAULT_GAS_FEE_BUFFER_BPS;
+  }
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > 10_000) {
+    throw new ConfigError("GAS_FEE_BUFFER_BPS must be an integer in [0, 10000] (basis points).");
+  }
+  return value;
 }
 
 function resolveRpcUrl(env = process.env) {

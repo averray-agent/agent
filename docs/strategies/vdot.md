@@ -14,15 +14,23 @@ registered strategy adapter to earn yield while they're idle —
 Pillar 2 of [docs/AGENT_BANKING.md](../AGENT_BANKING.md).
 
 The vDOT adapter is the canonical first strategy: take DOT, stake it via
-Bifrost's liquid-staking primitive, earn Polkadot staking yield (roughly
-11–14% APY at time of writing), redeem DOT at the accrued rate when the
-agent withdraws.
+Bifrost's liquid-staking primitive, and account for the live vDOT/DOT rate when
+the agent withdraws. The current planning reference is roughly 5-6% base APR,
+but Averray must not display APY or book yield until the rate is sourced from
+validated Bifrost/runtime/observer data.
+
+The next planned portfolio candidate is Hydration GDOT, documented in
+[hydration-gdot.md](./hydration-gdot.md). It is deliberately v2 and opt-in:
+GDOT adds Hydration, Bifrost, multi-hop XCM, liquidity, incentive, and possible
+leverage exposure, so it must not become the default lane until vDOT has real
+mainnet evidence.
 
 Key properties for the platform:
 
-- **Non-custodial.** The adapter never takes discretionary custody of
-  agent funds. Every withdraw is deterministically computed from the
-  caller's recorded shares and the contract's current `totalAssets`.
+- **Non-discretionary smart-contract custody.** The adapter never takes
+  discretionary custody of agent funds. Every withdraw is deterministically
+  computed from the caller's recorded shares and the contract's current
+  `totalAssets`.
 - **Share-based.** Accounting is classic vault math: `share_price =
   totalAssets / totalShares`. Deposits mint shares at the current price,
   withdrawals redeem at the current price. Prior yield accrual is not
@@ -89,12 +97,13 @@ shape:
       `0x00000000000000000000000000000000000a0000` to send DOT to the vDOT
    pallet on Bifrost. The official Polkadot docs are explicit that this
    precompile is barebones: messages must be SCALE-encoded and
-   `weighMessage` is part of the execution flow. Returned vDOT shares
-   come back via the same precompile. The adapter therefore needs:
-   - A deposit path that XCM-sends DOT and waits for the callback that
-     credits vDOT shares.
-   - A withdraw path that XCM-sends a redeem request and waits for DOT
-     to settle back into the adapter's asset-hub balance.
+   `weighMessage` is part of the execution flow. XCM is async and does not give
+   Solidity an automatic success callback; the adapter therefore needs:
+   - A deposit path that XCM-sends DOT and waits for native observer evidence
+     that vDOT shares or equivalent strategy credit were created.
+   - A withdraw path that XCM-sends a redeem request and waits for native
+     observer evidence that DOT settled back into the adapter's asset-hub
+     balance.
    - Idempotency + partial-failure handling, because XCM is async.
       In practice this likely means a dedicated XCM-wrapper layer rather
       than embedding raw precompile calls directly into vault accounting.
@@ -115,7 +124,7 @@ shape:
 
 3. **Audit.** The v1 adapter uses `ReentrancyGuard` + `SafeTransfer` +
    `whenNotPaused` — but any XCM-extended adapter adds message-parsing
-   and async-callback surface that must be audited top-to-bottom before
+   and async-settlement surface that must be audited top-to-bottom before
    mainnet. This is scope (3) in
    [docs/AUDIT_PACKAGE.md](../AUDIT_PACKAGE.md) and should be flagged as
    a *separate* audit item from the core contract suite.
@@ -151,13 +160,13 @@ reproduce this disclosure verbatim:
 > your account. Averray does not insure strategy losses.
 
 The v1 mock adapter additionally carries a **testnet-only** risk tag:
-simulated yield is a governance knob; the accrued yield is not real
-staking yield. Do not present v1 APY numbers to real users as
-expectations for mainnet.
+simulated yield is a governance knob; the accrued yield is not real staking
+yield. Do not present APY numbers to real users until they are backed by a
+timestamped Bifrost/runtime/observer source.
 
 ---
 
-## How to register the adapter (testnet)
+## How to register the adapters (testnet)
 
 The deploy script has a `--with-vdot-mock` path that deploys the
 adapter and registers it with the strategy registry. Rough shape:
@@ -180,6 +189,35 @@ section with the adapter address and its `strategyId`. The backend reads
 that manifest so `/strategies` surfaces the registered adapter in its
 list.
 
+For the real async XCM-shaped staging lane, use `XcmWrapper` plus
+`XcmVdotAdapter` instead of the mock adapter:
+
+```bash
+PROFILE=testnet \
+RPC_URL=https://eth-rpc-testnet.polkadot.io/ \
+PRIVATE_KEY=0x... \
+TOKEN_ADDRESS=0x<hub-dot-or-staging-token-erc20> \
+OWNER=0x<multisig-mapped-evm> \
+PAUSER=0x<hot-key-evm> \
+VERIFIER=0x<verifier-evm> \
+ARBITRATOR=0x<arbitrator-evm> \
+WITH_XCM_WRAPPER=1 \
+WITH_XCM_VDOT_ADAPTER=1 \
+./scripts/deploy_contracts.sh
+```
+
+This writes `contracts.xcmWrapper` and a `strategies[]` entry shaped for the
+backend:
+
+- `kind: "polkadot_vdot"`
+- `executionMode: "async_xcm"`
+- local accounting asset: `TOKEN_ADDRESS`
+- XCM destination parachain: `2030` (Bifrost by default)
+
+`WITH_XCM_VDOT_ADAPTER=1` is intentionally blocked for `PROFILE=mainnet` until
+the native XCM evidence pack passes. The mock and XCM adapter paths are
+mutually exclusive for a single deployment manifest.
+
 For backend config, the preferred `STRATEGIES_JSON` shape is now the
 explicit asset-metadata form rather than a bare asset address. That lets
 the backend carry:
@@ -193,6 +231,11 @@ the backend carry:
 This is especially important for mainnet vDOT, where the asset identity
 is not just "one token address" but part of the real Polkadot Hub asset
 model.
+
+After deployment, copy the manifest strategy list into backend env as
+`STRATEGIES_JSON`, and copy `contracts.xcmWrapper` into `XCM_WRAPPER_ADDRESS`.
+The helper `scripts/write_server_env.sh` preserves `STRATEGIES_JSON` when it is
+already exported.
 
 ---
 
@@ -249,6 +292,11 @@ operator / watcher
     success: shares burned, DOT credited back to liquid if recipient is AgentAccountCore
     failure: shares remain with the agent
 ```
+
+The async settlement path fails closed on empty success claims: deposits
+must settle with non-zero assets and non-zero shares, and withdrawals
+must settle with non-zero assets before the agent's reserved strategy
+shares are burned.
 
 So the repo now has both lanes:
 - synchronous mock treasury flow through `allocateIdleFunds` /

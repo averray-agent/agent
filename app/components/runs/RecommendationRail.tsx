@@ -9,9 +9,10 @@ export interface RecommendationRailProps {
   /**
    * `"vertical"` stacks cards in a narrow sidebar (original shape, used when
    * there's real estate to the right of the queue). `"horizontal"` lays the
-   * cards out left-to-right and scrolls on overflow — used when the rail sits
-   * below a split-pane queue+detail area so it doesn't fight for vertical
-   * space.
+   * cards out in a flex-wrap grid — used when the rail sits below a
+   * split-pane queue+detail area so it doesn't fight for vertical space.
+   * Reflows to multiple rows at narrow widths instead of scrolling
+   * horizontally so trailing cards don't get silently clipped.
    */
   layout?: "vertical" | "horizontal";
 }
@@ -41,27 +42,25 @@ export function RecommendationRail({
         </p>
       </header>
 
-      {isHorizontal ? (
-        <div className="relative">
-          <div
-            className="flex gap-2 overflow-x-auto p-2.5 [-webkit-overflow-scrolling:touch]"
-            // Tuck a little extra padding on the right so the last card
-            // doesn't butt up against the fade overlay.
-            style={{ paddingRight: "2.5rem" }}
-          >
-            {jobs.map((job) => (
-              <div key={job.id} className="w-[300px] shrink-0">
-                <JobCard job={job} />
-              </div>
-            ))}
-          </div>
-          {/* Right-edge fade: tells the user there's more content past the
-              visible edge without relying on a visible scrollbar. Pointer-
-              events-none so it doesn't block clicks on the card underneath. */}
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-[var(--avy-paper-solid)] to-transparent"
-          />
+      {!jobs.length ? (
+        <div className="p-3.5 font-[family-name:var(--font-body)] text-[13px] leading-[1.5] text-[var(--avy-muted)]">
+          No live recommendations available.
+        </div>
+      ) : isHorizontal ? (
+        // Flex-wrap grid: cards keep a ~300px target width and reflow into
+        // additional rows at narrow viewports instead of overflowing the
+        // container. Avoids the previous behaviour where the rail's
+        // horizontal scroll silently clipped the last card on operator
+        // monitors that don't render a visible scrollbar.
+        <div className="flex flex-wrap gap-2 p-2.5">
+          {jobs.map((job) => (
+            <div
+              key={job.id}
+              className="min-w-[260px] grow basis-[280px]"
+            >
+              <JobCard job={job} />
+            </div>
+          ))}
         </div>
       ) : (
         <div className="flex flex-col gap-2 p-2.5">
@@ -78,7 +77,11 @@ export function RecommendationRail({
         <span>
           {jobs.length} of {totalMatches} matches
         </span>
-        <a className="cursor-pointer text-[var(--avy-accent)]">See all ready →</a>
+        {jobs.length ? (
+          <a className="cursor-pointer text-[var(--avy-accent)]">See all ready →</a>
+        ) : (
+          <span>waiting for /jobs/recommendations</span>
+        )}
       </footer>
     </aside>
   );

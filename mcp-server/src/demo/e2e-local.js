@@ -87,7 +87,8 @@ async function main() {
     CONTINGENCY_RESERVE,
     3600,
     id("benchmark"),
-    id("coding")
+    id("coding"),
+    id("local-e2e-spec")
   ));
 
   console.log("Claiming job as worker");
@@ -101,7 +102,7 @@ async function main() {
   await wait(await escrowAsWorker.submitWork(jobIdBytes, id("complete verified output")));
 
   console.log("Resolving through verifier role");
-  await wait(await escrow.resolveSinglePayout(jobIdBytes, true, id("AUTO_VERIFIER_PASS"), "ipfs://badge/local-e2e"));
+  await wait(await escrow.resolveSinglePayout(jobIdBytes, true, id("AUTO_VERIFIER_PASS"), "ipfs://badge/local-e2e", id("local-e2e-reasoning")));
 
   const workerBalance = await dot.balanceOf(workerWallet.address);
   const badgeBalance = await reputation.balanceOf(workerWallet.address);

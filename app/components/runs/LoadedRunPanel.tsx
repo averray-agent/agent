@@ -2,9 +2,19 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils/cn";
+import type {
+  JobSchemaContract,
+  SubmissionContract,
+  SubmissionValidationState,
+} from "@/lib/api/submission-contract";
 import { SourceBadge, type RunState } from "./StatePill";
 import { IssueMarkdown } from "./IssueMarkdown";
-import type { GitHubJobContext, WikipediaJobContext } from "./types";
+import type {
+  GitHubJobContext,
+  OpenDataJobContext,
+  OsvJobContext,
+  WikipediaJobContext,
+} from "./types";
 
 /**
  * Map the run's lifecycle state to the stake-block pill + copy. Keeps
@@ -76,6 +86,13 @@ export interface VerifierVerdict {
   scoreLabel: string;
 }
 
+export interface SubmissionContractView extends SubmissionContract {
+  schemaContract?: JobSchemaContract | null;
+  validation: SubmissionValidationState;
+  validating?: boolean;
+  onValidate?: (draft: string) => void | Promise<void>;
+}
+
 export interface LoadedRunPanelProps {
   kicker: string;
   title: string;
@@ -92,12 +109,20 @@ export interface LoadedRunPanelProps {
     metaRight: string;
     metaFoot: string;
   };
+  submissionContract?: SubmissionContractView;
   submission: {
     note: React.ReactNode;
     cta: string;
     onSubmit?: (evidence: string) => void | Promise<void>;
     submitting?: boolean;
     error?: string | null;
+    /**
+     * When set, the submit button is rendered disabled and the string
+     * is shown instead of the submit-error line. Gates the button on
+     * claimable / wallet ownership / canSubmit so a signed-out viewer
+     * doesn't fire a useless 401.
+     */
+    disabledReason?: string;
   };
   verifier: {
     runner: string;
@@ -130,6 +155,22 @@ export interface LoadedRunPanelProps {
    * `wikipedia` are mutually exclusive at runtime.
    */
   wikipedia?: WikipediaJobContext;
+  /**
+   * Same shape as `github` / `wikipedia` but for OSV dependency-
+   * remediation runs. The panel renders an OSV-specific evidence block
+   * that highlights the vulnerable package, the fix, the manifest
+   * path, and CVE/NVD cross-references. Mutually exclusive with the
+   * other two source contexts at runtime.
+   */
+  osv?: OsvJobContext;
+  /**
+   * Same shape as the others but for open-data dataset quality-audit
+   * runs (Data.gov today). The panel renders an audit-only evidence
+   * block that highlights the dataset/resource identity, agency, and
+   * format, with Dataset / Checks / Findings / Submission tabs.
+   * Mutually exclusive with the other source contexts at runtime.
+   */
+  openData?: OpenDataJobContext;
   /**
    * Lifecycle state of the loaded run. Drives the stake block's pill +
    * aux copy so the panel doesn't shout "LOCKED" on a run that hasn't
@@ -277,12 +318,17 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
 
           {/* Evidence — switches to a source-specific 4-tab layout when the
                loaded run was ingested from a third-party tracker (GitHub
-               issue, Wikipedia maintenance), so the operator sees real job
-               context instead of generic placeholder governance text. */}
+               issue, Wikipedia maintenance, OSV advisory, Data.gov
+               dataset audit), so the operator sees real job context
+               instead of generic placeholder governance text. */}
           {props.github ? (
             <GitHubEvidenceBlock ctx={props.github} />
           ) : props.wikipedia ? (
             <WikipediaEvidenceBlock ctx={props.wikipedia} />
+          ) : props.openData ? (
+            <OpenDataEvidenceBlock ctx={props.openData} />
+          ) : props.osv ? (
+            <OsvEvidenceBlock ctx={props.osv} />
           ) : (
             <div>
               <BlockLabel
@@ -344,38 +390,67 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
             </div>
           )}
 
-          {/* Submit */}
-          <div className="flex items-center justify-between gap-3 rounded-[8px] border border-[var(--avy-line)] bg-[#fffdf7] px-3.5 py-3">
-            <p
-              className="m-0 flex-1 min-w-0 font-[family-name:var(--font-mono)] text-[11px] leading-[1.4] text-[var(--avy-muted)]"
-              style={{ letterSpacing: 0 }}
-            >
-              {props.submission.note}
-            </p>
-            <button
-              type="button"
-              disabled={props.submission.submitting}
-              onClick={() => {
-                props.submission.onSubmit?.(evidenceValue);
-              }}
-              className="inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-[8px] bg-[var(--avy-accent)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"
-              style={{ letterSpacing: "0.04em" }}
-            >
-              {props.submission.submitting ? "Submitting..." : props.submission.cta}
-              <span
-                className="rounded-[3px] bg-black/20 px-1.5 py-px font-[family-name:var(--font-mono)] text-[10.5px] font-medium text-white/70"
+          {props.submissionContract ? (
+            <SubmissionContractPanel
+              contract={props.submissionContract}
+              draft={evidenceValue}
+              onDraftChange={setEvidenceValue}
+            />
+          ) : null}
+
+          {/* Submit
+              ─────────────────────────────────────────────────
+              The note and the button live on row 1; the disabled
+              hint / error line sits on row 2 below them. The previous
+              layout flattened all three into a single flex row with
+              `justify-between`, which squashed the button between the
+              note (flex-1) and the disabledReason text whenever the
+              disabledReason was set — visible on signed-out viewers
+              loading a claimable run. Stacking keeps the button at
+              its natural width regardless of whether a hint is shown. */}
+          <div className="rounded-[8px] border border-[var(--avy-line)] bg-[#fffdf7] px-3.5 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <p
+                className="m-0 min-w-0 flex-1 font-[family-name:var(--font-mono)] text-[11px] leading-[1.4] text-[var(--avy-muted)]"
                 style={{ letterSpacing: 0 }}
               >
-                ⏎
-              </span>
-            </button>
-            {props.submission.error ? (
-              <span
-                className="font-[family-name:var(--font-mono)] text-[11px] text-[#8c2a17]"
+                {props.submission.note}
+              </p>
+              <button
+                type="button"
+                disabled={
+                  props.submission.submitting || Boolean(props.submission.disabledReason)
+                }
+                onClick={() => {
+                  props.submission.onSubmit?.(evidenceValue);
+                }}
+                className="inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-[8px] bg-[var(--avy-accent)] px-3.5 font-[family-name:var(--font-display)] text-[11.5px] font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px hover:bg-[var(--avy-accent-2)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:bg-[var(--avy-accent)]"
+                style={{ letterSpacing: "0.04em" }}
+                title={props.submission.disabledReason}
+              >
+                {props.submission.submitting ? "Submitting..." : props.submission.cta}
+                <span
+                  className="rounded-[3px] bg-black/20 px-1.5 py-px font-[family-name:var(--font-mono)] text-[10.5px] font-medium text-white/70"
+                  style={{ letterSpacing: 0 }}
+                >
+                  ⏎
+                </span>
+              </button>
+            </div>
+            {props.submission.disabledReason ? (
+              <p
+                className="m-0 mt-2 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+                style={{ letterSpacing: 0 }}
+              >
+                {props.submission.disabledReason}
+              </p>
+            ) : props.submission.error ? (
+              <p
+                className="m-0 mt-2 font-[family-name:var(--font-mono)] text-[11px] text-[#8c2a17]"
                 style={{ letterSpacing: 0 }}
               >
                 {props.submission.error}
-              </span>
+              </p>
             ) : null}
           </div>
         </div>
@@ -491,6 +566,20 @@ export function LoadedRunPanel(props: LoadedRunPanelProps) {
                   <SmallGhostBtn>Raise dispute</SmallGhostBtn>
                   <SmallGhostBtn>Withdraw proposal</SmallGhostBtn>
                 </>
+              ) : props.osv ? (
+                <>
+                  <SmallGhostBtn className="flex-1">Ping maintainer</SmallGhostBtn>
+                  <SmallGhostBtn>Raise dispute</SmallGhostBtn>
+                  <SmallGhostBtn>Skip advisory</SmallGhostBtn>
+                </>
+              ) : props.openData ? (
+                <>
+                  <SmallGhostBtn className="flex-1">
+                    Flag stale catalog metadata
+                  </SmallGhostBtn>
+                  <SmallGhostBtn>Raise dispute</SmallGhostBtn>
+                  <SmallGhostBtn>Skip dataset</SmallGhostBtn>
+                </>
               ) : (
                 <>
                   <SmallGhostBtn className="flex-1">Request cosign</SmallGhostBtn>
@@ -549,14 +638,15 @@ function GitHubEvidenceBlock({ ctx }: { ctx: GitHubJobContext }) {
         {/* Source strip — always visible so the worker can always see the
             repo, issue, category, and fit score regardless of which tab is
             active. */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--avy-line-soft)] bg-[color:rgba(17,19,21,0.03)] px-3 py-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-[var(--avy-line-soft)] bg-[color:rgba(17,19,21,0.03)] px-3 py-2">
           <SourceBadge kind="github" />
           <a
             href={ctx.issueUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
+            className="truncate whitespace-nowrap font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
             style={{ letterSpacing: 0 }}
+            title={`${ctx.repo} #${ctx.issueNumber}`}
           >
             {ctx.repo}
             <span className="ml-0.5 text-[var(--avy-accent)]">
@@ -565,13 +655,13 @@ function GitHubEvidenceBlock({ ctx }: { ctx: GitHubJobContext }) {
           </a>
           <span className="opacity-40">·</span>
           <span
-            className="font-[family-name:var(--font-mono)] text-[11px] uppercase text-[var(--avy-muted)]"
+            className="whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] uppercase text-[var(--avy-muted)]"
             style={{ letterSpacing: "0.08em" }}
           >
             {ctx.category}
           </span>
           {typeof ctx.score === "number" ? (
-            <span className="ml-auto inline-flex items-center gap-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
+            <span className="ml-auto whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
               Fit score{" "}
               <b className="font-semibold text-[var(--avy-ink)]">{ctx.score}</b>
               <span className="text-[var(--avy-muted)]">/100</span>
@@ -618,7 +708,7 @@ function GitHubEvidenceBlock({ ctx }: { ctx: GitHubJobContext }) {
           style={{ letterSpacing: 0 }}
         >
           <span className="text-[var(--avy-accent)]">Verification</span>
-          <span className="inline-flex items-center rounded-full bg-[color:rgba(17,19,21,0.06)] px-1.5 py-px font-medium text-[var(--avy-ink)]">
+          <span className="inline-flex items-center whitespace-nowrap rounded-full bg-[color:rgba(17,19,21,0.06)] px-1.5 py-px font-medium text-[var(--avy-ink)]">
             {ctx.verification.method}
           </span>
           {ctx.verification.signals.map((s, i) => (
@@ -683,34 +773,35 @@ function WikipediaEvidenceBlock({ ctx }: { ctx: WikipediaJobContext }) {
       <div className="flex flex-col overflow-hidden rounded-[8px] border border-[var(--avy-line)] bg-white">
         {/* Source strip — pinned above the tabs so language, page, task
             type, and fit score stay readable on every tab. */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--avy-line-soft)] bg-[color:rgba(17,19,21,0.03)] px-3 py-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-[var(--avy-line-soft)] bg-[color:rgba(17,19,21,0.03)] px-3 py-2">
           <SourceBadge kind="wikipedia" />
           <a
             href={ctx.pageUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
+            className="truncate whitespace-nowrap font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
             style={{ letterSpacing: 0 }}
+            title={`${ctx.language}.wikipedia / "${ctx.pageTitle}"`}
           >
             <span className="text-[var(--avy-muted)]">{ctx.language}.wikipedia</span>
-            <span className="text-[var(--avy-accent)]"> / {ctx.pageTitle}</span>
+            <span className="text-[var(--avy-accent)]"> / &ldquo;{ctx.pageTitle}&rdquo;</span>
           </a>
           <span className="opacity-40">·</span>
           <span
-            className="font-[family-name:var(--font-mono)] text-[11px] uppercase text-[var(--avy-muted)]"
+            className="whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] uppercase text-[var(--avy-muted)]"
             style={{ letterSpacing: "0.08em" }}
           >
             {taskTypeLabel}
           </span>
           <span className="opacity-40">·</span>
           <span
-            className="font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+            className="whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
             style={{ letterSpacing: 0 }}
           >
             rev {ctx.revisionId}
           </span>
           {typeof ctx.score === "number" ? (
-            <span className="ml-auto inline-flex items-center gap-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
+            <span className="ml-auto whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
               Fit score{" "}
               <b className="font-semibold text-[var(--avy-ink)]">{ctx.score}</b>
               <span className="text-[var(--avy-muted)]">/100</span>
@@ -732,8 +823,9 @@ function WikipediaEvidenceBlock({ ctx }: { ctx: WikipediaJobContext }) {
             Policy
           </span>
           <span>
-            Proposal-only. Agents submit evidence to Averray; Wikipedia edits
-            require approved Averray review.
+            Proposal-only · the agent never edits Wikipedia. Evidence + a
+            structured proposal go to Averray; any public edit is performed
+            downstream by an approved Averray editor.
           </span>
         </div>
 
@@ -776,7 +868,7 @@ function WikipediaEvidenceBlock({ ctx }: { ctx: WikipediaJobContext }) {
           style={{ letterSpacing: 0 }}
         >
           <span className="text-[var(--avy-accent)]">Verification</span>
-          <span className="inline-flex items-center rounded-full bg-[color:rgba(17,19,21,0.06)] px-1.5 py-px font-medium text-[var(--avy-ink)]">
+          <span className="inline-flex items-center whitespace-nowrap rounded-full bg-[color:rgba(17,19,21,0.06)] px-1.5 py-px font-medium text-[var(--avy-ink)]">
             {ctx.verification.method}
           </span>
           {ctx.verification.signals.map((s) => (
@@ -937,6 +1029,793 @@ function WikiSubmissionTab({ ctx }: { ctx: WikipediaJobContext }) {
   );
 }
 
+/**
+ * OSV equivalent of `GitHubEvidenceBlock` / `WikipediaEvidenceBlock`.
+ * Same four-tab shape so an operator reads the surface the same way
+ * regardless of source: Advisory (vulnerability metadata + summary),
+ * Acceptance, Instructions, Submission. The block always renders the
+ * vulnerable package, the fixed version, the manifest path, and any
+ * CVE/NVD cross-references — these are the four facts a worker needs
+ * to write the focused PR without leaving the panel.
+ */
+type OsvTab = "advisory" | "acceptance" | "instructions" | "submission";
+
+function OsvEvidenceBlock({ ctx }: { ctx: OsvJobContext }) {
+  const [tab, setTab] = useState<OsvTab>("advisory");
+
+  const tabs: { id: OsvTab; label: string; sub?: string }[] = [
+    { id: "advisory", label: "Advisory" },
+    {
+      id: "acceptance",
+      label: "Acceptance",
+      sub: `·${ctx.acceptanceCriteria.length}`,
+    },
+    { id: "instructions", label: "Instructions" },
+    { id: "submission", label: "Submission" },
+  ];
+
+  const hasCves = (ctx.cves?.length ?? 0) > 0;
+  const advisoryUrl = `https://osv.dev/vulnerability/${encodeURIComponent(ctx.advisoryId)}`;
+
+  return (
+    <div>
+      <BlockLabel
+        right={
+          <a
+            href={advisoryUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="inline-flex items-center gap-1 text-[var(--avy-accent)] hover:underline"
+          >
+            Open OSV advisory ↗
+          </a>
+        }
+      >
+        Job context
+      </BlockLabel>
+      <div className="flex flex-col overflow-hidden rounded-[8px] border border-[var(--avy-line)] bg-white">
+        {/* Source strip — pinned above the tabs so package, advisory id,
+            severity, and CVE chip stay readable on every tab. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-[var(--avy-line-soft)] bg-[color:rgba(17,19,21,0.03)] px-3 py-2">
+          <SourceBadge kind="osv" secondary={hasCves ? "NVD" : undefined} />
+          <a
+            href={advisoryUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="truncate whitespace-nowrap font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
+            style={{ letterSpacing: 0 }}
+            title={`${ctx.ecosystem} / ${ctx.packageName} · ${ctx.advisoryId}`}
+          >
+            <span className="text-[var(--avy-muted)]">{ctx.ecosystem}</span>
+            <span className="text-[var(--avy-ink)]"> / {ctx.packageName}</span>
+            <span className="ml-0.5 text-[var(--avy-accent)]">
+              {" "}
+              · {ctx.advisoryId}
+            </span>
+          </a>
+          {ctx.severity ? (
+            <>
+              <span className="opacity-40">·</span>
+              <span
+                className="whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] uppercase text-[var(--avy-muted)]"
+                style={{ letterSpacing: "0.08em" }}
+              >
+                {ctx.severity}
+              </span>
+            </>
+          ) : null}
+          <span className="opacity-40">·</span>
+          <span
+            className="whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+            style={{ letterSpacing: 0 }}
+          >
+            {ctx.vulnerableVersion} → {ctx.fixedVersion}
+          </span>
+          {typeof ctx.score === "number" ? (
+            <span className="ml-auto whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
+              Fit score{" "}
+              <b className="font-semibold text-[var(--avy-ink)]">{ctx.score}</b>
+              <span className="text-[var(--avy-muted)]">/100</span>
+            </span>
+          ) : null}
+        </div>
+
+        {/* Scope banner — non-negotiable, rendered on every OSV run.
+            Re-uses the warn-tinted box the Wikipedia block uses for its
+            policy banner so the visual rhythm of "important, but not
+            error" notes stays consistent across source kinds. */}
+        <div
+          className="flex items-start gap-2 border-b border-[var(--avy-line-soft)] bg-[color:rgba(211,145,27,0.08)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] text-[var(--avy-ink)]"
+          style={{ letterSpacing: 0 }}
+        >
+          <span
+            className="mt-px shrink-0 rounded-full bg-[var(--avy-warn)] px-1.5 py-0.5 font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-white"
+            style={{ letterSpacing: "0.1em" }}
+          >
+            Scope
+          </span>
+          <span>
+            Open <b className="font-semibold">one focused PR</b> that bumps{" "}
+            <b className="font-semibold">{ctx.packageName}</b> to{" "}
+            <b className="font-semibold">{ctx.fixedVersion}</b> in{" "}
+            <b className="font-semibold">{ctx.manifestPath}</b>, refreshes the
+            lockfile, and attaches install + test evidence. No unrelated
+            refactors.
+          </span>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex items-center gap-2 border-b border-[var(--avy-line-soft)] bg-[#faf8f1] px-2.5 py-1.5">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className={cn(
+                "rounded-[5px] px-2 py-0.5 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]",
+                tab === t.id &&
+                  "bg-[var(--avy-paper-solid)] text-[var(--avy-ink)] shadow-[inset_0_0_0_1px_var(--avy-line)]"
+              )}
+              style={{ letterSpacing: "0.12em" }}
+            >
+              {t.label}
+              {t.sub ? (
+                <small className="ml-1 opacity-50" style={{ letterSpacing: 0 }}>
+                  {t.sub}
+                </small>
+              ) : null}
+            </button>
+          ))}
+        </div>
+
+        <div className="px-3.5 py-3">
+          {tab === "advisory" ? <OsvAdvisoryTab ctx={ctx} /> : null}
+          {tab === "acceptance" ? <OsvAcceptanceTab ctx={ctx} /> : null}
+          {tab === "instructions" ? <OsvInstructionsTab ctx={ctx} /> : null}
+          {tab === "submission" ? <OsvSubmissionTab ctx={ctx} /> : null}
+        </div>
+
+        {/* Verification footer — same shape as the GitHub/Wikipedia
+            blocks; reads as a focused-PR check sequence. */}
+        <div
+          className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-[var(--avy-line-soft)] bg-[#faf8f1] px-3 py-2 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+          style={{ letterSpacing: 0 }}
+        >
+          <span className="text-[var(--avy-accent)]">Verification</span>
+          <span className="inline-flex items-center whitespace-nowrap rounded-full bg-[color:rgba(17,19,21,0.06)] px-1.5 py-px font-medium text-[var(--avy-ink)]">
+            {ctx.verification.method}
+          </span>
+          {ctx.verification.signals.map((s) => (
+            <span key={s}>· {s}</span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OsvAdvisoryTab({ ctx }: { ctx: OsvJobContext }) {
+  // Pair CVEs with their NVD URLs in input order; either side may be
+  // shorter, so use whichever has the entry. The repo currently emits
+  // both arrays in lockstep but we don't want to assume.
+  const cveLinks = (ctx.cves ?? []).map((cve, i) => ({
+    cve,
+    href: ctx.nvdUrls?.[i],
+  }));
+
+  return (
+    <>
+      <h3 className="m-0 font-[family-name:var(--font-display)] text-[14px] font-bold leading-[1.3] text-[var(--avy-ink)]">
+        {ctx.title}
+      </h3>
+
+      <dl
+        className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-[family-name:var(--font-mono)] text-[11.5px]"
+        style={{ letterSpacing: 0 }}
+      >
+        <dt className="text-[var(--avy-muted)]">Package</dt>
+        <dd className="m-0 font-medium text-[var(--avy-ink)]">
+          {ctx.ecosystem} / {ctx.packageName}
+        </dd>
+        <dt className="text-[var(--avy-muted)]">Vulnerable</dt>
+        <dd className="m-0 font-medium text-[#a03a1a]">
+          {ctx.vulnerableVersion}
+        </dd>
+        <dt className="text-[var(--avy-muted)]">Fixed in</dt>
+        <dd className="m-0 font-medium text-[var(--avy-accent)]">
+          {ctx.fixedVersion}
+        </dd>
+        <dt className="text-[var(--avy-muted)]">Repo</dt>
+        <dd className="m-0 truncate font-medium text-[var(--avy-ink)]">
+          {ctx.repo}
+        </dd>
+        <dt className="text-[var(--avy-muted)]">Manifest</dt>
+        <dd className="m-0 truncate font-medium text-[var(--avy-ink)]">
+          {ctx.manifestPath}
+        </dd>
+        <dt className="text-[var(--avy-muted)]">Advisory</dt>
+        <dd className="m-0 font-medium text-[var(--avy-ink)]">
+          {ctx.advisoryId}
+        </dd>
+        {ctx.severity ? (
+          <>
+            <dt className="text-[var(--avy-muted)]">Severity</dt>
+            <dd className="m-0 font-medium text-[var(--avy-ink)]">
+              {ctx.severity}
+            </dd>
+          </>
+        ) : null}
+        {ctx.published ? (
+          <>
+            <dt className="text-[var(--avy-muted)]">Published</dt>
+            <dd className="m-0 font-medium text-[var(--avy-ink)]">
+              {ctx.published}
+            </dd>
+          </>
+        ) : null}
+      </dl>
+
+      {cveLinks.length > 0 ? (
+        <div className="mt-3">
+          <div
+            className="mb-1 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]"
+            style={{ letterSpacing: "0.14em" }}
+          >
+            CVE / NVD references
+          </div>
+          <ul
+            className="m-0 flex flex-wrap gap-1.5 p-0"
+            style={{ letterSpacing: 0 }}
+          >
+            {cveLinks.map(({ cve, href }) => (
+              <li key={cve} className="list-none">
+                {href ? (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="inline-flex items-center gap-1 rounded-[6px] border border-[var(--avy-line)] bg-[color:rgba(17,19,21,0.03)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-ink)] hover:border-[color:rgba(30,102,66,0.32)] hover:text-[var(--avy-accent)]"
+                  >
+                    {cve}
+                    <span className="text-[var(--avy-muted)]">↗</span>
+                  </a>
+                ) : (
+                  <span className="inline-flex items-center rounded-[6px] border border-[var(--avy-line)] bg-[color:rgba(17,19,21,0.03)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-ink)]">
+                    {cve}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {ctx.body ? (
+        <p
+          className="mt-3 max-h-[220px] overflow-y-auto whitespace-pre-wrap font-[family-name:var(--font-body)] text-[12.5px] leading-[1.5] text-[var(--avy-ink)]"
+          style={{ letterSpacing: 0 }}
+        >
+          {ctx.body}
+        </p>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <a
+          href={`https://osv.dev/vulnerability/${encodeURIComponent(ctx.advisoryId)}`}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex h-7 items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:text-[var(--avy-accent)]"
+          style={{ letterSpacing: "0.04em" }}
+        >
+          Open OSV advisory ↗
+        </a>
+        <a
+          href={`https://github.com/${ctx.repo}/blob/HEAD/${ctx.manifestPath}`}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex h-7 items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:text-[var(--avy-accent)]"
+          style={{ letterSpacing: "0.04em" }}
+        >
+          Open manifest ↗
+        </a>
+      </div>
+    </>
+  );
+}
+
+function OsvAcceptanceTab({ ctx }: { ctx: OsvJobContext }) {
+  if (ctx.acceptanceCriteria.length === 0) {
+    return (
+      <p
+        className="m-0 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        No explicit criteria were attached to this advisory.
+      </p>
+    );
+  }
+  return (
+    <ul className="m-0 flex flex-col gap-2 pl-0">
+      {ctx.acceptanceCriteria.map((item, i) => (
+        <li
+          key={i}
+          className="grid grid-cols-[18px_1fr] items-start gap-2 font-[family-name:var(--font-body)] text-[12.5px] leading-[1.45] text-[var(--avy-ink)]"
+          style={{ letterSpacing: 0 }}
+        >
+          <span
+            className="mt-px inline-grid h-[16px] w-[16px] place-items-center rounded-[4px] border border-[color:rgba(30,102,66,0.25)] bg-[color:rgba(30,102,66,0.06)] font-[family-name:var(--font-mono)] text-[9px] font-bold text-[var(--avy-accent)]"
+            style={{ letterSpacing: 0 }}
+            aria-hidden="true"
+          >
+            {i + 1}
+          </span>
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function OsvInstructionsTab({ ctx }: { ctx: OsvJobContext }) {
+  if (!ctx.agentInstructions) {
+    return (
+      <p
+        className="m-0 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        No agent instructions were generated for this advisory.
+      </p>
+    );
+  }
+  return (
+    <p
+      className="m-0 rounded-[6px] border border-[color:rgba(30,102,66,0.18)] bg-[color:rgba(30,102,66,0.04)] px-3 py-2.5 font-[family-name:var(--font-mono)] text-[12px] leading-[1.55] text-[var(--avy-ink)]"
+      style={{ letterSpacing: 0 }}
+    >
+      {ctx.agentInstructions}
+    </p>
+  );
+}
+
+function OsvSubmissionTab({ ctx }: { ctx: OsvJobContext }) {
+  return (
+    <div className="flex flex-col gap-2.5">
+      <p
+        className="m-0 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        Open one focused PR against{" "}
+        <b className="text-[var(--avy-ink)]">{ctx.repo}</b> that bumps{" "}
+        <b className="text-[var(--avy-ink)]">{ctx.packageName}</b> to{" "}
+        <b className="text-[var(--avy-ink)]">{ctx.fixedVersion}</b> in{" "}
+        <b className="text-[var(--avy-ink)]">{ctx.manifestPath}</b>, refreshes
+        the lockfile, and includes install + test evidence.
+      </p>
+      <SubField
+        label="PR URL"
+        required
+        placeholder={`https://github.com/${ctx.repo}/pull/…`}
+        mono
+      />
+      <SubField
+        label="Lockfile / commit URL"
+        placeholder={`https://github.com/${ctx.repo}/commit/…`}
+        mono
+      />
+      <div>
+        <SubLabel>Install + test evidence</SubLabel>
+        <textarea
+          spellCheck={false}
+          placeholder="Paste npm install / npm test output, or a CI run URL. Verifier walks this to confirm the lockfile resolves and tests pass on the fixed version."
+          className="min-h-[120px] w-full resize-y rounded-[6px] border border-[var(--avy-line)] bg-white px-2.5 py-2 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.5] text-[var(--avy-ink)] outline-none placeholder:text-[var(--avy-muted)] focus:border-[var(--avy-accent)] focus:ring-2 focus:ring-[color:rgba(30,102,66,0.15)]"
+          style={{ letterSpacing: 0 }}
+        />
+      </div>
+      <div>
+        <SubLabel>Notes for verifier (optional)</SubLabel>
+        <textarea
+          spellCheck={false}
+          placeholder="Caveats, breaking-change notes, anything the verifier should know about the bump."
+          className="min-h-[60px] w-full resize-y rounded-[6px] border border-[var(--avy-line)] bg-white px-2.5 py-2 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.5] text-[var(--avy-ink)] outline-none placeholder:text-[var(--avy-muted)] focus:border-[var(--avy-accent)] focus:ring-2 focus:ring-[color:rgba(30,102,66,0.15)]"
+          style={{ letterSpacing: 0 }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Open-data quality-audit equivalent of `GitHubEvidenceBlock` /
+ * `WikipediaEvidenceBlock` / `OsvEvidenceBlock`. Same four-tab shape so
+ * an operator reads the surface the same way regardless of source —
+ * here labelled **Dataset · Checks · Findings · Submission** to match
+ * the spec for open-data audit jobs. The header source strip carries
+ * Data.gov · agency · format and degrades gracefully when those
+ * optional catalog fields are missing.
+ *
+ * Critically renders an "audit only" policy banner above the tabs.
+ * The platform never edits source data and never contacts the
+ * publishing agency from this workflow.
+ */
+type OpenDataTab = "dataset" | "checks" | "findings" | "submission";
+
+function OpenDataEvidenceBlock({ ctx }: { ctx: OpenDataJobContext }) {
+  const [tab, setTab] = useState<OpenDataTab>("dataset");
+
+  const tabs: { id: OpenDataTab; label: string; sub?: string }[] = [
+    { id: "dataset", label: "Dataset" },
+    { id: "checks", label: "Checks" },
+    {
+      id: "findings",
+      label: "Findings",
+      sub: `·${ctx.acceptanceCriteria.length}`,
+    },
+    { id: "submission", label: "Submission" },
+  ];
+
+  return (
+    <div>
+      <BlockLabel
+        right={
+          <a
+            href={ctx.datasetUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="inline-flex items-center gap-1 text-[var(--avy-accent)] hover:underline"
+          >
+            Open Data.gov dataset ↗
+          </a>
+        }
+      >
+        Job context
+      </BlockLabel>
+      <div className="flex flex-col overflow-hidden rounded-[8px] border border-[var(--avy-line)] bg-white">
+        {/* Source strip — pinned above the tabs so portal, agency,
+            format, and Fit score stay readable on every tab. Agency
+            and format are optional in the catalog; we drop the chip
+            entirely instead of rendering an empty bullet. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-[var(--avy-line-soft)] bg-[color:rgba(17,19,21,0.03)] px-3 py-2">
+          <SourceBadge kind="data_gov" />
+          <a
+            href={ctx.datasetUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="truncate whitespace-nowrap font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-ink)] hover:text-[var(--avy-accent)]"
+            style={{ letterSpacing: 0 }}
+            title={ctx.datasetTitle}
+          >
+            <span className="text-[var(--avy-accent)]">{ctx.datasetTitle}</span>
+          </a>
+          {ctx.agency ? (
+            <>
+              <span className="opacity-40">·</span>
+              <span
+                className="whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+                style={{ letterSpacing: 0 }}
+              >
+                {ctx.agency}
+              </span>
+            </>
+          ) : null}
+          {ctx.resourceFormat ? (
+            <>
+              <span className="opacity-40">·</span>
+              <span
+                className="whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] uppercase text-[var(--avy-muted)]"
+                style={{ letterSpacing: "0.08em" }}
+              >
+                {ctx.resourceFormat}
+              </span>
+            </>
+          ) : null}
+          {typeof ctx.score === "number" ? (
+            <span className="ml-auto whitespace-nowrap font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]">
+              Fit score{" "}
+              <b className="font-semibold text-[var(--avy-ink)]">{ctx.score}</b>
+              <span className="text-[var(--avy-muted)]">/100</span>
+            </span>
+          ) : null}
+        </div>
+
+        {/* Audit-only policy banner — non-negotiable, rendered on every
+            open-data run. Same warn-tinted box as the Wikipedia /
+            OSV scope banners so the visual rhythm of "important, but
+            not error" notes stays consistent across source kinds. */}
+        <div
+          className="flex items-start gap-2 border-b border-[var(--avy-line-soft)] bg-[color:rgba(211,145,27,0.08)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] text-[var(--avy-ink)]"
+          style={{ letterSpacing: 0 }}
+        >
+          <span
+            className="mt-px shrink-0 rounded-full bg-[var(--avy-warn)] px-1.5 py-0.5 font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-white"
+            style={{ letterSpacing: "0.1em" }}
+          >
+            Audit only
+          </span>
+          <span>
+            Report dataset/resource quality issues. Do not edit source
+            data or contact agencies from this workflow.
+          </span>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex items-center gap-2 border-b border-[var(--avy-line-soft)] bg-[#faf8f1] px-2.5 py-1.5">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className={cn(
+                "rounded-[5px] px-2 py-0.5 font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]",
+                tab === t.id &&
+                  "bg-[var(--avy-paper-solid)] text-[var(--avy-ink)] shadow-[inset_0_0_0_1px_var(--avy-line)]"
+              )}
+              style={{ letterSpacing: "0.12em" }}
+            >
+              {t.label}
+              {t.sub ? (
+                <small className="ml-1 opacity-50" style={{ letterSpacing: 0 }}>
+                  {t.sub}
+                </small>
+              ) : null}
+            </button>
+          ))}
+        </div>
+
+        <div className="px-3.5 py-3">
+          {tab === "dataset" ? <OpenDataDatasetTab ctx={ctx} /> : null}
+          {tab === "checks" ? <OpenDataChecksTab ctx={ctx} /> : null}
+          {tab === "findings" ? <OpenDataFindingsTab ctx={ctx} /> : null}
+          {tab === "submission" ? <OpenDataSubmissionTab ctx={ctx} /> : null}
+        </div>
+
+        {/* Verification footer — same shape as the other source blocks;
+            reads as a quality-audit signal sequence. */}
+        <div
+          className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-[var(--avy-line-soft)] bg-[#faf8f1] px-3 py-2 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+          style={{ letterSpacing: 0 }}
+        >
+          <span className="text-[var(--avy-accent)]">Verification</span>
+          <span className="inline-flex items-center whitespace-nowrap rounded-full bg-[color:rgba(17,19,21,0.06)] px-1.5 py-px font-medium text-[var(--avy-ink)]">
+            {ctx.verification.method}
+          </span>
+          {ctx.verification.signals.map((s) => (
+            <span key={s}>· {s}</span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OpenDataDatasetTab({ ctx }: { ctx: OpenDataJobContext }) {
+  return (
+    <>
+      <h3 className="m-0 font-[family-name:var(--font-display)] text-[14px] font-bold leading-[1.3] text-[var(--avy-ink)]">
+        {ctx.datasetTitle}
+      </h3>
+
+      <dl
+        className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-[family-name:var(--font-mono)] text-[11.5px]"
+        style={{ letterSpacing: 0 }}
+      >
+        <dt className="text-[var(--avy-muted)]">Portal</dt>
+        <dd className="m-0 font-medium text-[var(--avy-ink)]">
+          {ctx.provider}
+        </dd>
+        {ctx.agency ? (
+          <>
+            <dt className="text-[var(--avy-muted)]">Agency</dt>
+            <dd className="m-0 truncate font-medium text-[var(--avy-ink)]">
+              {ctx.agency}
+            </dd>
+          </>
+        ) : null}
+        {ctx.resourceTitle ? (
+          <>
+            <dt className="text-[var(--avy-muted)]">Resource</dt>
+            <dd className="m-0 truncate font-medium text-[var(--avy-ink)]">
+              {ctx.resourceTitle}
+            </dd>
+          </>
+        ) : null}
+        {ctx.resourceFormat ? (
+          <>
+            <dt className="text-[var(--avy-muted)]">Format</dt>
+            <dd className="m-0 font-medium text-[var(--avy-ink)]">
+              {ctx.resourceFormat}
+            </dd>
+          </>
+        ) : null}
+        {ctx.license ? (
+          <>
+            <dt className="text-[var(--avy-muted)]">License</dt>
+            <dd className="m-0 truncate font-medium text-[var(--avy-ink)]">
+              {ctx.license}
+            </dd>
+          </>
+        ) : null}
+        {ctx.modified ? (
+          <>
+            <dt className="text-[var(--avy-muted)]">Modified</dt>
+            <dd className="m-0 font-medium text-[var(--avy-ink)]">
+              {ctx.modified}
+            </dd>
+          </>
+        ) : null}
+        {ctx.metadataModified ? (
+          <>
+            <dt className="text-[var(--avy-muted)]">Metadata modified</dt>
+            <dd className="m-0 font-medium text-[var(--avy-ink)]">
+              {ctx.metadataModified}
+            </dd>
+          </>
+        ) : null}
+      </dl>
+
+      {ctx.body ? (
+        <p
+          className="mt-3 max-h-[220px] overflow-y-auto whitespace-pre-wrap font-[family-name:var(--font-body)] text-[12.5px] leading-[1.5] text-[var(--avy-ink)]"
+          style={{ letterSpacing: 0 }}
+        >
+          {ctx.body}
+        </p>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <a
+          href={ctx.datasetUrl}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex h-7 items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:text-[var(--avy-accent)]"
+          style={{ letterSpacing: "0.04em" }}
+        >
+          Open dataset ↗
+        </a>
+        <a
+          href={ctx.resourceUrl}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex h-7 items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:text-[var(--avy-accent)]"
+          style={{ letterSpacing: "0.04em" }}
+        >
+          Open resource ↗
+        </a>
+      </div>
+    </>
+  );
+}
+
+function OpenDataChecksTab({ ctx }: { ctx: OpenDataJobContext }) {
+  // The instructions field is the worker-facing "what to do" prose
+  // emitted by the ingestor — re-purposed here as the "Checks" copy
+  // since the open-data audit instructions ARE the check list.
+  if (!ctx.agentInstructions) {
+    return (
+      <p
+        className="m-0 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        No check list was generated for this dataset.
+      </p>
+    );
+  }
+  return (
+    <p
+      className="m-0 whitespace-pre-wrap rounded-[6px] border border-[color:rgba(30,102,66,0.18)] bg-[color:rgba(30,102,66,0.04)] px-3 py-2.5 font-[family-name:var(--font-mono)] text-[12px] leading-[1.55] text-[var(--avy-ink)]"
+      style={{ letterSpacing: 0 }}
+    >
+      {ctx.agentInstructions}
+    </p>
+  );
+}
+
+function OpenDataFindingsTab({ ctx }: { ctx: OpenDataJobContext }) {
+  // Acceptance criteria are the "what counts as a complete audit"
+  // checklist the verifier runs against; rendered as a numbered list
+  // so the worker can see the bar before they submit.
+  if (ctx.acceptanceCriteria.length === 0) {
+    return (
+      <p
+        className="m-0 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        No acceptance criteria were attached to this audit.
+      </p>
+    );
+  }
+  return (
+    <ul className="m-0 flex flex-col gap-2 pl-0">
+      {ctx.acceptanceCriteria.map((item, i) => (
+        <li
+          key={i}
+          className="grid grid-cols-[18px_1fr] items-start gap-2 font-[family-name:var(--font-body)] text-[12.5px] leading-[1.45] text-[var(--avy-ink)]"
+          style={{ letterSpacing: 0 }}
+        >
+          <span
+            className="mt-px inline-grid h-[16px] w-[16px] place-items-center rounded-[4px] border border-[color:rgba(30,102,66,0.25)] bg-[color:rgba(30,102,66,0.06)] font-[family-name:var(--font-mono)] text-[9px] font-bold text-[var(--avy-accent)]"
+            style={{ letterSpacing: 0 }}
+            aria-hidden="true"
+          >
+            {i + 1}
+          </span>
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function OpenDataSubmissionTab({ ctx }: { ctx: OpenDataJobContext }) {
+  return (
+    <div className="flex flex-col gap-2.5">
+      <p
+        className="m-0 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        Submit a dataset quality audit report. Do not edit source data
+        and do not contact the publishing agency from this workflow.
+      </p>
+      <SubField
+        label="Dataset URL"
+        required
+        placeholder={ctx.datasetUrl}
+        mono
+      />
+      <SubField
+        label="Resource URL"
+        required
+        placeholder={ctx.resourceUrl}
+        mono
+      />
+      <div>
+        <SubLabel>Checks performed</SubLabel>
+        <textarea
+          spellCheck={false}
+          placeholder="One per line. e.g. dataset_landing_page=200, resource_url=200 (csv), schema_columns_listed, missing_metadata=license"
+          className="min-h-[90px] w-full resize-y rounded-[6px] border border-[var(--avy-line)] bg-white px-2.5 py-2 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.5] text-[var(--avy-ink)] outline-none placeholder:text-[var(--avy-muted)] focus:border-[var(--avy-accent)] focus:ring-2 focus:ring-[color:rgba(30,102,66,0.15)]"
+          style={{ letterSpacing: 0 }}
+        />
+      </div>
+      <div>
+        <SubLabel>Findings</SubLabel>
+        <textarea
+          spellCheck={false}
+          placeholder={`Concrete findings, or "no_issue_found" with evidence per check.`}
+          className="min-h-[90px] w-full resize-y rounded-[6px] border border-[var(--avy-line)] bg-white px-2.5 py-2 font-[family-name:var(--font-body)] text-[12.5px] leading-[1.5] text-[var(--avy-ink)] outline-none placeholder:text-[var(--avy-muted)] focus:border-[var(--avy-accent)] focus:ring-2 focus:ring-[color:rgba(30,102,66,0.15)]"
+          style={{ letterSpacing: 0 }}
+        />
+      </div>
+      <div>
+        <SubLabel>Recommended actions</SubLabel>
+        <textarea
+          spellCheck={false}
+          placeholder="Concrete cleanup recommendations the agency could action — separate from findings."
+          className="min-h-[60px] w-full resize-y rounded-[6px] border border-[var(--avy-line)] bg-white px-2.5 py-2 font-[family-name:var(--font-body)] text-[12.5px] leading-[1.5] text-[var(--avy-ink)] outline-none placeholder:text-[var(--avy-muted)] focus:border-[var(--avy-accent)] focus:ring-2 focus:ring-[color:rgba(30,102,66,0.15)]"
+          style={{ letterSpacing: 0 }}
+        />
+      </div>
+      <div>
+        <SubLabel>Notes for verifier (optional)</SubLabel>
+        <textarea
+          spellCheck={false}
+          placeholder="Caveats, partial-data notes, anything the verifier should know."
+          className="min-h-[60px] w-full resize-y rounded-[6px] border border-[var(--avy-line)] bg-white px-2.5 py-2 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.5] text-[var(--avy-ink)] outline-none placeholder:text-[var(--avy-muted)] focus:border-[var(--avy-accent)] focus:ring-2 focus:ring-[color:rgba(30,102,66,0.15)]"
+          style={{ letterSpacing: 0 }}
+        />
+      </div>
+      {ctx.discoveryApi ? (
+        <p
+          className="m-0 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+          style={{ letterSpacing: 0 }}
+        >
+          Discovered via{" "}
+          <span className="text-[var(--avy-ink)]">{ctx.discoveryApi}</span>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function IssueTab({ ctx }: { ctx: GitHubJobContext }) {
   return (
     <>
@@ -1041,6 +1920,232 @@ function InstructionsTab({ ctx }: { ctx: GitHubJobContext }) {
       {ctx.agentInstructions}
     </p>
   );
+}
+
+function SubmissionContractPanel({
+  contract,
+  draft,
+  onDraftChange,
+}: {
+  contract: SubmissionContractView;
+  draft: string;
+  onDraftChange: (value: string) => void;
+}) {
+  const output = schemaOutput(contract.schemaContract);
+  const input = schemaInput(contract.schemaContract);
+  const validation = contract.validation;
+  const validationTone =
+    validation.status === "valid"
+      ? "text-[var(--avy-accent)]"
+      : validation.status === "invalid"
+        ? "text-[#8c2a17]"
+        : "text-[var(--avy-muted)]";
+
+  return (
+    <div>
+      <BlockLabel
+        right={
+          <span className="font-[family-name:var(--font-mono)] text-[var(--avy-muted)]">
+            {contract.validationEndpoint ?? "POST /jobs/validate-submission"}
+          </span>
+        }
+      >
+        Submission contract
+      </BlockLabel>
+      <div className="flex flex-col gap-3 rounded-[8px] border border-[var(--avy-line)] bg-white p-3">
+        <div className="grid grid-cols-1 gap-2 font-[family-name:var(--font-mono)] text-[11px] sm:grid-cols-2">
+          <ContractFact
+            label="Submit endpoint"
+            value={contract.endpoint ?? "POST /jobs/submit"}
+          />
+          <ContractFact
+            label="Validates"
+            value={contract.schemaValidates ?? output.validates ?? "payload.submission"}
+          />
+          <ContractFact
+            label="Structured required"
+            value={contract.structuredSubmissionRequired ? "true" : "false"}
+          />
+          <ContractFact
+            label="Do not wrap"
+            value={contract.doNotWrapInOutput ? "submission.output" : "not specified"}
+          />
+          <ContractFact
+            label="Input schema"
+            value={input.schemaRef ?? "not emitted"}
+            href={input.schemaUrl}
+          />
+          <ContractFact
+            label="Output schema"
+            value={contract.outputSchemaRef ?? output.schemaRef ?? "not emitted"}
+            href={contract.outputSchemaUrl ?? output.schemaUrl}
+          />
+        </div>
+
+        <div className="rounded-[7px] border border-[color:rgba(140,42,23,0.22)] bg-[color:rgba(140,42,23,0.045)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] text-[#8c2a17]">
+          {contract.invalidWrappedOutputHint ??
+            "Do not wrap under submission.output. Send the schema object directly as payload.submission."}
+        </div>
+
+        <div>
+          <SubLabel>Exact JSON submit example</SubLabel>
+          <pre
+            className="max-h-[220px] overflow-auto rounded-[7px] border border-[var(--avy-line)] bg-[#131715] px-3 py-2.5 font-[family-name:var(--font-mono)] text-[11px] leading-[1.55] text-[#f5f3ee]"
+            style={{ letterSpacing: 0 }}
+          >
+            {formatJson(contract.submitPayloadExample)}
+          </pre>
+        </div>
+
+        <div>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <SubLabel>Draft payload.submission</SubLabel>
+            <span
+              className={`font-[family-name:var(--font-mono)] text-[10.5px] ${validationTone}`}
+              style={{ letterSpacing: 0 }}
+            >
+              {validationLabel(validation)}
+            </span>
+          </div>
+          <textarea
+            spellCheck={false}
+            value={draft}
+            onChange={(event) => onDraftChange(event.target.value)}
+            className="min-h-[190px] w-full resize-y rounded-[7px] border border-[var(--avy-line)] bg-[#fffdf7] px-3 py-2.5 font-[family-name:var(--font-mono)] text-[11.5px] leading-[1.55] text-[var(--avy-ink)] outline-none focus:border-[var(--avy-accent)] focus:ring-2 focus:ring-[color:rgba(30,102,66,0.15)]"
+            style={{ letterSpacing: 0 }}
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--avy-line-soft)] pt-2">
+          <p
+            className="m-0 min-w-0 flex-1 font-[family-name:var(--font-mono)] text-[10.5px] leading-[1.45] text-[var(--avy-muted)]"
+            style={{ letterSpacing: 0 }}
+          >
+            Read-only check. Sends{" "}
+            <b className="font-semibold text-[var(--avy-ink)]">
+              {"{ jobId, submission }"}
+            </b>{" "}
+            to the validation endpoint; it does not claim or submit the job.
+          </p>
+          <button
+            type="button"
+            onClick={() => contract.onValidate?.(draft)}
+            disabled={contract.validating || !contract.onValidate}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[8px] border border-[color:rgba(30,102,66,0.26)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-accent)] transition-transform hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+            style={{ letterSpacing: "0.06em" }}
+          >
+            {contract.validating ? "Checking..." : "Validate draft"}
+          </button>
+        </div>
+
+        {validation.status === "invalid" ? (
+          <div
+            className="rounded-[7px] border border-[color:rgba(140,42,23,0.18)] bg-[color:rgba(140,42,23,0.035)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] text-[#8c2a17]"
+            style={{ letterSpacing: 0 }}
+          >
+            <b className="font-semibold">Invalid</b>
+            {validation.message ? <> · {validation.message}</> : null}
+            {validation.path ? <> · path {validation.path}</> : null}
+            {validation.details ? (
+              <pre className="mt-1 max-h-[140px] overflow-auto whitespace-pre-wrap">
+                {formatJson(validation.details)}
+              </pre>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ContractFact({
+  label,
+  value,
+  href,
+}: {
+  label: string;
+  value: string;
+  href?: string;
+}) {
+  return (
+    <div className="min-w-0 rounded-[6px] border border-[var(--avy-line-soft)] bg-[#faf8f1] px-2.5 py-2">
+      <dt
+        className="font-[family-name:var(--font-display)] text-[9.5px] font-extrabold uppercase text-[var(--avy-muted)]"
+        style={{ letterSpacing: "0.12em" }}
+      >
+        {label}
+      </dt>
+      <dd
+        className="m-0 mt-0.5 min-w-0 break-words text-[var(--avy-ink)]"
+        style={{ letterSpacing: 0 }}
+      >
+        {href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="text-[var(--avy-accent)] hover:underline"
+          >
+            {value}
+          </a>
+        ) : (
+          value
+        )}
+      </dd>
+    </div>
+  );
+}
+
+function validationLabel(validation: SubmissionValidationState): string {
+  if (validation.status === "valid") return "Valid";
+  if (validation.status === "invalid") {
+    return validation.path ? `Invalid · ${validation.path}` : "Invalid";
+  }
+  return "Not checked";
+}
+
+function formatJson(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value ?? null, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function schemaInput(value: unknown): { schemaRef?: string; schemaUrl?: string } {
+  const record = asRecordLocal(value);
+  return schemaRecord(record?.input);
+}
+
+function schemaOutput(
+  value: unknown
+): { schemaRef?: string; schemaUrl?: string; validates?: string } {
+  const record = asRecordLocal(value);
+  return schemaRecord(record?.output);
+}
+
+function schemaRecord(value: unknown): {
+  schemaRef?: string;
+  schemaUrl?: string;
+  validates?: string;
+} {
+  const record = asRecordLocal(value);
+  return {
+    schemaRef: textLocal(record?.schemaRef),
+    schemaUrl: textLocal(record?.schemaUrl),
+    validates: textLocal(record?.validates),
+  };
+}
+
+function asRecordLocal(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function textLocal(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function SubmissionTab({ ctx }: { ctx: GitHubJobContext }) {

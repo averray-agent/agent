@@ -1,0 +1,209 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.adminEoaRotation",
+  "profile": "testnet",
+  "chain": {
+    "name": "Paseo Asset Hub TestNet",
+    "chainId": 420420417,
+    "ethRpc": "https://eth-rpc-testnet.polkadot.io/",
+    "substrateWss": "wss://sys.ibp.network/asset-hub-paseo"
+  },
+  "incident": {
+    "date": "2026-05-25",
+    "description": "Operator-side admin EOA private key (SIGNER_PRIVATE_KEY in mcp-server/.env.local) was inadvertently echoed into a Claude Code session transcript. The same address held the deployer/pauser/arbitrator roles on TreasuryPolicy per deployments/testnet.json plus an AAC.positions liquid balance (~9.34 USDC) and ~9977 PAS for gas. Same address was already retired from the backend-signer role on 2026-05-17 (KMS cutover), but still held the admin roles.",
+    "blastRadius": "Bounded — Paseo Asset Hub TestNet only, no mainnet exposure. ~9.34 USDC + ~9977 PAS + role-misuse (setPaused, resolveDispute) for the rotation window."
+  },
+  "addresses": {
+    "retired": {
+      "h160": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+      "rolesAtIncidentStart": ["deployer", "pauser", "arbitrator"],
+      "rolesAtIncidentEnd": []
+    },
+    "new": {
+      "h160": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
+      "rolesAtIncidentEnd": ["deployer", "pauser", "arbitrator"],
+      "secretsStore": "op://prod-critical/admin-eoa-testnet/private-key"
+    },
+    "owner": {
+      "multisigSs58": "12nHTKYfV64pnxsVRB6Cjn6kQPPH64Ehnr8zgqZxvfa8hJvQ",
+      "multisigH160": "0x1f8c4da4aaac79916350f1fabf1221309591b6f9",
+      "threshold": 2,
+      "signatories": [
+        { "label": "Polkadot Vault", "ss58": "13pav6xpfdapyCAqfRhWZXxUnqDhjrF92dJr3FBwVfBKUKSM" },
+        { "label": "Ledger Account", "ss58": "148tqwhGxeCva7ZX8RwvaLjCS7HvDJJaSbxfTUwE9Zyc5Xtm" },
+        { "label": "Hot Wallet", "ss58": "14ruuTeh5cXMTr9SLNuLt1NiroQZgt5ZQnwYrhg7K5LHiXQb" }
+      ]
+    },
+    "contracts": {
+      "treasuryPolicy": "0x648Cc5fdE94435992296C4e5ac642d18bB64c12B",
+      "agentAccountCore": "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08",
+      "usdc": "0x0000053900000000000000000000000001200000"
+    }
+  },
+  "mitigation": {
+    "rationale": "Drain financial position first with the leaked key in our hands, then move roles via the multisig. The leaked key cannot move roles (those require multisig.owner), but it CAN withdraw AAC.positions until rotated. Worst case if an attacker pauses mid-rotation: multisig sets new pauser, new pauser unpauses. Annoying but not catastrophic."
+  },
+  "steps": [
+    {
+      "step": 2,
+      "label": "Drain (5-tx sequence, in-process key loader)",
+      "evidenceFile": "docs/evidence/admin-eoa-rotation-2026-05-25.drain.json",
+      "txs": [
+        { "step": "0_prefund_pas", "from": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519", "to": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8", "txHash": "0x981fae4f3d715c7a2ca645c90e647d0ff5a90be6c2523e9a90638bb7147acbca", "blockNumber": 9286375, "valueWei": "9970000000000000000000" },
+        { "step": "1_withdraw_old", "from": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519", "to": "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08", "txHash": "0xc3a34edabd017c21d8b458b346303ae4d6813955dd92ba12b4133dee37ba641b", "blockNumber": 9286377 },
+        { "step": "2_transfer_old_to_new", "from": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519", "to": "0x0000053900000000000000000000000001200000", "txHash": "0xa37218d0c3f8d3032c37ed1360377ec3222d3698e68760c9e306fb7d66366919", "blockNumber": 9286380 },
+        { "step": "3_approve_new", "from": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8", "to": "0x0000053900000000000000000000000001200000", "txHash": "0xa49df7879b5c5c0cbd6ea9829062e244c43b7f3d6a35d237dfb7d8de5f611601", "blockNumber": 9286382 },
+        { "step": "4_deposit_new", "from": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8", "to": "0x71B111d8c9DF84Be26cb9067D27dAd7A2d5E7e08", "txHash": "0x88fc2fd7712c97a75347140fa6f27a571a60c97c83feb7f91aad8277714fa243", "blockNumber": 9286384 }
+      ],
+      "stateDelta": {
+        "oldAdmin.positions.liquid": { "before": "9339999", "after": "0" },
+        "newAdmin.positions.liquid": { "before": "0", "after": "9339999" },
+        "oldAdmin.positions.reserved": { "before": "200001", "after": "200001", "note": "Locked in an in-flight obligation. Tracked as follow-up; mitigated by Step 5 .env.local swap so the legitimate backend reads the new key first when the obligation releases." }
+      }
+    },
+    {
+      "step": 3,
+      "label": "Multisig 2-of-3 setPauser(newAdmin)",
+      "wrapper": "multisig.asMulti(threshold=2, otherSignatories=[…], maybeTimepoint, call=revive.call(setPauser), maxWeight)",
+      "innerCallHash": "0x911b5c229ce5222126fa148251dfe3b93bbd50ac9788817747a784889ca72dbc",
+      "legs": [
+        {
+          "leg": "3a_init",
+          "signer": "Ledger Account",
+          "signerSs58": "148tqwhGxeCva7ZX8RwvaLjCS7HvDJJaSbxfTUwE9Zyc5Xtm",
+          "blockNumber": 9288962,
+          "extrinsicIndex": 2,
+          "extrinsicHash": "0x8e0a004eb068ae0d723de4bb5c9ccbd7de515e8fe57f6e1853026001d1f3312d",
+          "maybeTimepoint": null,
+          "otherSignatories": ["13pav6xpfdapyCAqfRhWZXxUnqDhjrF92dJr3FBwVfBKUKSM", "14ruuTeh5cXMTr9SLNuLt1NiroQZgt5ZQnwYrhg7K5LHiXQb"]
+        },
+        {
+          "leg": "3b_exec",
+          "signer": "Hot Wallet",
+          "signerSs58": "14ruuTeh5cXMTr9SLNuLt1NiroQZgt5ZQnwYrhg7K5LHiXQb",
+          "blockNumber": 9289529,
+          "blockHash": "0x623bc3fbded27002f4d666ac0d06cbfc9814c4b5947744896023c90bb8811788",
+          "extrinsicIndex": 2,
+          "extrinsicHash": "0x7597f6d119c10b7d2fec061f73c934c87a2ef048c0d1e47b39947bd2c600e796",
+          "maybeTimepoint": { "height": 9288962, "index": 2 },
+          "otherSignatories": ["13pav6xpfdapyCAqfRhWZXxUnqDhjrF92dJr3FBwVfBKUKSM", "148tqwhGxeCva7ZX8RwvaLjCS7HvDJJaSbxfTUwE9Zyc5Xtm"],
+          "events": ["revive.ContractEmitted (TreasuryPolicy PauserUpdated)", "multisig.MultisigExecuted", "system.ExtrinsicSuccess"],
+          "weightConsumed": { "refTime": "1808359396", "proofSize": "26403" },
+          "result": "Ok"
+        }
+      ],
+      "verification": {
+        "rpcCall": "TreasuryPolicy.pauser()",
+        "expected": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
+        "observed": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
+        "blockObserved": 9289543
+      }
+    },
+    {
+      "step": 4,
+      "label": "Multisig 2-of-3 batched setArbitrator(new,true) + setArbitrator(old,false) — atomic via utility.batchAll",
+      "wrapper": "multisig.asMulti(threshold=2, otherSignatories=[…], maybeTimepoint, call=utility.batchAll([revive.call(setArbitrator(new,true)), revive.call(setArbitrator(old,false))]), maxWeight)",
+      "innerCallHash": "0xfff047822c17beda9176f66682046cf23a0b18f4b9ab3594a987c38e556d58db",
+      "legs": [
+        {
+          "leg": "4a_init",
+          "signer": "Ledger Account",
+          "signerSs58": "148tqwhGxeCva7ZX8RwvaLjCS7HvDJJaSbxfTUwE9Zyc5Xtm",
+          "blockNumber": 9290992,
+          "extrinsicIndex": 2,
+          "extrinsicHash": "0xce4357eaffeb33be51068cdf4114c822168ed5ad48a8fffd8905c19f93523b2b",
+          "maybeTimepoint": null,
+          "otherSignatories": ["13pav6xpfdapyCAqfRhWZXxUnqDhjrF92dJr3FBwVfBKUKSM", "14ruuTeh5cXMTr9SLNuLt1NiroQZgt5ZQnwYrhg7K5LHiXQb"]
+        },
+        {
+          "leg": "4b_exec",
+          "signer": "Hot Wallet",
+          "signerSs58": "14ruuTeh5cXMTr9SLNuLt1NiroQZgt5ZQnwYrhg7K5LHiXQb",
+          "blockNumber": 9291060,
+          "blockHash": "0xd7a17b68209a1964c07386f0544e46e1679a625f1a22567b965064167f14c2d6",
+          "extrinsicIndex": 2,
+          "extrinsicHash": "0x8ddf84217bd888a5eec26b1cf47a90df747799d8a672d0c9f27646c7b627240f",
+          "maybeTimepoint": { "height": 9290992, "index": 2 },
+          "otherSignatories": ["13pav6xpfdapyCAqfRhWZXxUnqDhjrF92dJr3FBwVfBKUKSM", "148tqwhGxeCva7ZX8RwvaLjCS7HvDJJaSbxfTUwE9Zyc5Xtm"],
+          "events": ["revive.ContractEmitted (TreasuryPolicy ArbitratorUpdated, new=true)", "utility.ItemCompleted", "revive.ContractEmitted (TreasuryPolicy ArbitratorUpdated, old=false)", "utility.ItemCompleted", "utility.BatchCompleted", "multisig.MultisigExecuted", "system.ExtrinsicSuccess"],
+          "weightConsumed": { "refTime": "2732587817", "proofSize": "32398" },
+          "result": "Ok",
+          "atomicity": "utility.BatchCompleted emitted — both inner setArbitrator calls landed in the same extrinsic, so the system was never in a half-rotated state (both old AND new approved, or neither approved)."
+        }
+      ],
+      "verification": {
+        "rpcCalls": [
+          "TreasuryPolicy.arbitrators(0x6778F050eAc8313e4dbB176d7BAB44510E833ac8)",
+          "TreasuryPolicy.arbitrators(0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519)"
+        ],
+        "expected": { "new": true, "old": false },
+        "observed": { "new": true, "old": false },
+        "blockObserved": 9291083
+      }
+    },
+    {
+      "step": 5,
+      "label": "Atomic in-process SIGNER_PRIVATE_KEY swap in mcp-server/.env.local",
+      "script": "scripts/ops/rotate-admin-swap-env.mjs",
+      "verification": "before-and-after re-derive: 0xFd2EAE…6519 → 0x6778F050…3ac8. File mode preserved at 0600. Atomic via tempfile + rename.",
+      "result": "Ok"
+    },
+    {
+      "step": 6,
+      "label": "deployments/testnet.json updated: deployer / pauser / arbitrator → new admin",
+      "verification": "scripts/ops/audit-launch-readiness.mjs --profile testnet — all role/parameter checks green for the rotation. The captured output also surfaces ONE pre-existing finding unrelated to this rotation: EscrowCore's deployed bytecode is missing claimJobFor(bytes32,address) [0x090cf6d5]. This was newly surfaced by PR #521 (bytecode-selector presence check) which merged into origin/main between the start of this rotation work and the final audit re-run. The rotation does not touch EscrowCore and is not the cause; tracked as a separate follow-up.",
+      "verificationOutput": "docs/evidence/admin-eoa-rotation-2026-05-25.audit-launch.txt",
+      "rotationStatus": "green",
+      "unrelatedFindings": [
+        {
+          "id": "escrowcore-claimjobfor-missing",
+          "kind": "bytecode_selector_missing",
+          "contract": "EscrowCore @ 0x7BB8fea44bDeE9870cF27c1dB616E7017BC38b0a",
+          "missingSelector": "claimJobFor(bytes32,address)  [0x090cf6d5]",
+          "surfacedBy": "PR #521 (commit 2c995a9)",
+          "rotationRelated": false
+        }
+      ]
+    }
+  ],
+  "safetyDiscipline": [
+    "Private keys never echoed to stdout, stderr, or process env at any step. All key handling via fs.readFileSync into ethers.Wallet (in-process).",
+    "Hot Wallet and Ledger Substrate keys signed via browser extension on polkadot-js-apps; sub-agent never touched Substrate keys.",
+    "Each major step paused for explicit operator approval before --commit (drain commit; Hot Wallet first leg signing).",
+    "Dry-run mode default on all admin scripts; --commit opt-in.",
+    "Pre-flight provider.call dry-run of every inner revive.call from the multisig H160 before signing — confirmed 0x returndata + no revert."
+  ],
+  "tooling": {
+    "branch": "claude/admin-eoa-rotation",
+    "scripts": [
+      "scripts/ops/rotate-admin-lib.mjs",
+      "scripts/ops/rotate-admin-generate-key.mjs",
+      "scripts/ops/rotate-admin-verify-old.mjs",
+      "scripts/ops/rotate-admin-drain.mjs",
+      "scripts/ops/rotate-admin-multisig-payload.mjs",
+      "scripts/ops/rotate-admin-build-batch.mjs",
+      "scripts/ops/rotate-admin-swap-env.mjs",
+      "scripts/ops/rotate-admin-find-blocks.mjs"
+    ]
+  },
+  "followUps": [
+    {
+      "id": "sweep-reserved-200001",
+      "description": "Sweep the 200_001 USDC currently in 0xFd2EAE…6519's AAC.positions.reserved once the in-flight obligation resolves and releases it to .liquid. Mitigated by Step 5 .env.local swap, but should be drained for cleanliness.",
+      "owner": "Pascal",
+      "verification": "policy.positions(0xFd2EAE…6519, USDC).liquid == 0 after the obligation completes"
+    },
+    {
+      "id": "delete-signer-private-key-op-item",
+      "description": "Delete the op://prod-backend/signer-private-key/password 1Password item now that the 30-day rollback soak is well-covered by both (a) the original 2026-05-16 KMS cutover and (b) the 2026-05-25 transcript-leak rotation."
+    },
+    {
+      "id": "remove-local-admin-key-file",
+      "description": "Review whether mcp-server/.env.local should hold a long-lived admin private key at all, or whether scripts/ops/rotate-admin-*.mjs should pull from op://prod-critical/admin-eoa-testnet/private-key via `op read` at call time instead. Eliminates the on-disk file as a leak vector."
+    }
+  ],
+  "audit": {
+    "tracker": "docs/AUDIT_REMEDIATION.md §\"Security incidents log — 2026-05-25 admin EOA rotation\"",
+    "inventory": "deploy/secrets-inventory.md (strikethrough postscript on SIGNER_PRIVATE_KEY + new admin-eoa-testnet row)"
+  }
+}

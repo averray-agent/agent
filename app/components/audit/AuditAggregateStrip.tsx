@@ -1,5 +1,4 @@
 import { cn } from "@/lib/utils/cn";
-import { Sparkline } from "@/components/overview/Sparkline";
 import type { AuditEvent } from "./types";
 
 export function AuditAggregateStrip({ events }: { events: AuditEvent[] }) {
@@ -14,7 +13,6 @@ export function AuditAggregateStrip({ events }: { events: AuditEvent[] }) {
         label="Events today"
         value={`${today}`}
         meta="signed & exportable"
-        right={<Sparkline points={[3, 5, 4, 8, 6, 10, 9, 14]} width={72} height={20} />}
       />
       <Card
         label="Operator actions"

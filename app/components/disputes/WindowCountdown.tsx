@@ -48,8 +48,15 @@ export function WindowCountdown({
   const expired = remaining === 0;
   const hot = !expired && pct <= 0.1;
 
-  const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
+  const dd = Math.floor(remaining / 86_400);
+  const hh = Math.floor((remaining % 86_400) / 3_600);
+  const mm = String(Math.floor((remaining % 3_600) / 60)).padStart(2, "0");
   const ss = String(remaining % 60).padStart(2, "0");
+  const label = dd > 0
+    ? `${dd}d ${String(hh).padStart(2, "0")}h`
+    : hh > 0
+      ? `${hh}h ${mm}m`
+      : `${mm}:${ss}`;
 
   return (
     <span
@@ -69,7 +76,7 @@ export function WindowCountdown({
           expired && "opacity-70"
         )}
       />
-      {expired ? "expired" : `${mm}:${ss}`}
+      {expired ? "expired" : label}
     </span>
   );
 }

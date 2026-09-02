@@ -43,17 +43,26 @@ export function createRateLimiter({ stateStore, logger = console } = {}) {
 }
 
 /**
- * Extract a stable client identifier from a Node http request. Prefers a
- * trusted X-Forwarded-For value when TRUST_PROXY is set, otherwise falls back
- * to the raw socket remote address.
+ * Extract a stable client identifier from a Node http request. When
+ * TRUST_PROXY is set the request arrives via the edge proxy (Caddy), which
+ * overwrites X-Forwarded-For with the real connecting IP. We read the
+ * RIGHTMOST X-Forwarded-For entry — the address appended by the nearest
+ * trusted proxy — never the leftmost, which is client-controlled and can be
+ * forged to spoof the rate-limit key (audit B-04). Falls back to the raw
+ * socket address when the header is absent or TRUST_PROXY is off.
  */
 export function extractClientKey(request, { trustProxy = false } = {}) {
   if (trustProxy) {
     const header = request.headers?.["x-forwarded-for"];
     if (typeof header === "string" && header.length > 0) {
-      const first = header.split(",")[0]?.trim();
-      if (first) {
-        return first;
+      // Walk from the right: the rightmost hop was appended by the trusted
+      // proxy (Caddy); every hop to its left is client-supplied and untrusted.
+      const hops = header.split(",");
+      for (let i = hops.length - 1; i >= 0; i -= 1) {
+        const candidate = hops[i]?.trim();
+        if (candidate) {
+          return candidate;
+        }
       }
     }
   }

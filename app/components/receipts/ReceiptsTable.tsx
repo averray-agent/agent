@@ -3,12 +3,21 @@
 import { cn } from "@/lib/utils/cn";
 import { KindChip, type ReceiptKind } from "./KindChip";
 import { SignerAvatars, type Signer } from "./SignerAvatars";
+import { SourceBadge, type SourceKind } from "@/components/runs/StatePill";
 
 export interface ReceiptRow {
   id: string;
   kind: ReceiptKind;
   subject: string;
   subjectSub: string;
+  /**
+   * Provenance of the underlying run/job. Optional because non-run
+   * receipts (badge, policy, settle on a loan) usually don't carry a
+   * platform source. When present, the table renders a SourceBadge so
+   * an auditor can scan GitHub-PR vs. Wikipedia-proposal receipts at
+   * a glance instead of opening the drawer.
+   */
+  source?: SourceKind;
   signers: Signer[];
   policy: string;
   size: string;
@@ -21,6 +30,8 @@ export interface ReceiptsTableProps {
   onSelect: (row: ReceiptRow) => void;
   shownCount: number;
   totalCount: number;
+  onVerifyManifest?: () => void;
+  manifestStatus?: React.ReactNode;
 }
 
 export function ReceiptsTable({
@@ -29,6 +40,8 @@ export function ReceiptsTable({
   onSelect,
   shownCount,
   totalCount,
+  onVerifyManifest,
+  manifestStatus,
 }: ReceiptsTableProps) {
   return (
     <div className="overflow-hidden rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] shadow-[var(--shadow-card)] backdrop-blur-[10px]">
@@ -55,7 +68,18 @@ export function ReceiptsTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => {
+            {rows.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={7}
+                  className="p-8 text-center font-[family-name:var(--font-mono)] text-[13px] text-[var(--avy-muted)]"
+                  style={{ letterSpacing: 0 }}
+                >
+                  No receipts match these filters.
+                </td>
+              </tr>
+            ) : (
+              rows.map((row) => {
               const selected = row.id === selectedId;
               return (
                 <tr
@@ -78,11 +102,14 @@ export function ReceiptsTable({
                     <KindChip kind={row.kind} />
                   </Td>
                   <Td>
-                    <div
-                      className="font-[family-name:var(--font-mono)] text-[12.5px] text-[var(--avy-ink)]"
-                      style={{ letterSpacing: 0 }}
-                    >
-                      {row.subject}
+                    <div className="flex items-center gap-2">
+                      {row.source ? <SourceBadge kind={row.source} /> : null}
+                      <span
+                        className="font-[family-name:var(--font-mono)] text-[12.5px] text-[var(--avy-ink)]"
+                        style={{ letterSpacing: 0 }}
+                      >
+                        {row.subject}
+                      </span>
                     </div>
                     <div
                       className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
@@ -120,30 +147,41 @@ export function ReceiptsTable({
                   </Td>
                 </tr>
               );
-            })}
+            })
+            )}
           </tbody>
         </table>
       </div>
 
       <footer className="flex items-center justify-between gap-3 border-t border-[var(--avy-line-soft)] bg-[rgba(250,248,241,0.5)] px-4 py-3 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]">
-        <div className="flex items-center gap-3.5">
+        <div className="flex min-w-0 flex-col gap-1">
           <span>
             Showing <b className="font-semibold text-[var(--avy-ink)]">{shownCount}</b> of{" "}
             <b className="font-semibold text-[var(--avy-ink)]">{totalCount.toLocaleString()}</b>
           </span>
-          <button
-            type="button"
-            className="cursor-pointer border-b border-dashed border-[color:rgba(30,102,66,0.4)] pb-px text-[var(--avy-accent)] hover:text-[var(--avy-accent-2)]"
-          >
-            load more
-          </button>
+          {manifestStatus ? (
+            <span className="truncate text-[11px] text-[var(--avy-accent)]">
+              {manifestStatus}
+            </span>
+          ) : null}
         </div>
         <button
           type="button"
-          className="cursor-pointer rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 py-1.5 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-ink)] hover:border-[color:rgba(30,102,66,0.3)] hover:text-[var(--avy-accent)]"
+          disabled={!onVerifyManifest || rows.length === 0}
+          onClick={onVerifyManifest}
+          title={
+            rows.length === 0
+              ? "No receipt rows are present in this view."
+              : "Rebuild and verify the manifest hash for the current receipt view."
+          }
+          className={cn(
+            "rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 py-1.5 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)]",
+            (!onVerifyManifest || rows.length === 0) &&
+              "cursor-not-allowed text-[var(--avy-muted)] opacity-60 hover:translate-y-0"
+          )}
           style={{ letterSpacing: "0.1em" }}
         >
-          ⤓ Download signed manifest of this view
+          Verify manifest of this view
         </button>
       </footer>
     </div>

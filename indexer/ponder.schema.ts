@@ -9,6 +9,7 @@ export const job = onchainTable("job", (p) => ({
   categoryLabel: p.text().notNull(),
   verifierMode: p.hex().notNull(),
   verifierModeLabel: p.text().notNull(),
+  specHash: p.hex(),
   reward: p.bigint().notNull(),
   opsReserve: p.bigint().notNull(),
   contingencyReserve: p.bigint().notNull(),
@@ -16,6 +17,12 @@ export const job = onchainTable("job", (p) => ({
   claimExpiry: p.bigint().notNull(),
   claimStake: p.bigint().notNull(),
   claimStakeBps: p.integer().notNull(),
+  claimFee: p.bigint().notNull(),
+  claimFeeBps: p.integer().notNull(),
+  claimEconomicsWaived: p.boolean().notNull(),
+  rejectingVerifier: p.hex(),
+  rejectedAt: p.bigint(),
+  disputedAt: p.bigint(),
   payoutMode: p.integer().notNull(),
   payoutModeLabel: p.text().notNull(),
   state: p.integer().notNull(),
@@ -34,7 +41,13 @@ export const jobEvent = onchainTable("job_event", (p) => ({
   actor: p.hex(),
   amount: p.bigint(),
   evidenceHash: p.hex(),
+  specHash: p.hex(),
+  payloadHash: p.hex(),
+  reasoningHash: p.hex(),
+  approved: p.boolean(),
   reasonCode: p.hex(),
+  metadataUri: p.text(),
+  disputedAt: p.bigint(),
   txHash: p.hex().notNull(),
   blockNumber: p.bigint().notNull(),
   timestamp: p.bigint().notNull()
@@ -98,6 +111,8 @@ export const jobStakeEvent = onchainTable("job_stake_event", (p) => ({
   kind: p.text().notNull(),
   amount: p.bigint().notNull(),
   posterAmount: p.bigint(),
+  verifierRecipient: p.hex(),
+  verifierAmount: p.bigint(),
   treasuryAmount: p.bigint(),
   txHash: p.hex().notNull(),
   blockNumber: p.bigint().notNull(),
@@ -109,6 +124,37 @@ export const treasuryOutflow = onchainTable("treasury_outflow", (p) => ({
   day: p.bigint().notNull(),
   amount: p.bigint().notNull(),
   newTotal: p.bigint().notNull(),
+  txHash: p.hex().notNull(),
+  blockNumber: p.bigint().notNull(),
+  timestamp: p.bigint().notNull()
+}));
+
+export const manifestPublication = onchainTable("manifest_publication", (p) => ({
+  id: p.text().primaryKey(),
+  version: p.bigint().notNull(),
+  hash: p.hex().notNull(),
+  publisher: p.hex().notNull(),
+  txHash: p.hex().notNull(),
+  blockNumber: p.bigint().notNull(),
+  timestamp: p.bigint().notNull()
+}));
+
+export const verifierRegistryEvent = onchainTable("verifier_registry_event", (p) => ({
+  id: p.text().primaryKey(),
+  kind: p.text().notNull(),
+  verifier: p.hex(),
+  adminFrom: p.hex(),
+  adminTo: p.hex(),
+  txHash: p.hex().notNull(),
+  blockNumber: p.bigint().notNull(),
+  timestamp: p.bigint().notNull()
+}));
+
+export const disclosureEvent = onchainTable("disclosure_event", (p) => ({
+  id: p.text().primaryKey(),
+  kind: p.text().notNull(),
+  hash: p.hex().notNull(),
+  byWallet: p.hex(),
   txHash: p.hex().notNull(),
   blockNumber: p.bigint().notNull(),
   timestamp: p.bigint().notNull()
@@ -130,6 +176,7 @@ export const xcmRequest = onchainTable("xcm_request", (p) => ({
   statusLabel: p.text().notNull(),
   destinationHash: p.hex(),
   messageHash: p.hex(),
+  xcmPrecompile: p.hex(),
   maxWeightRefTime: p.bigint(),
   maxWeightProofSize: p.bigint(),
   settledAssets: p.bigint().notNull(),
@@ -152,6 +199,7 @@ export const xcmRequestEvent = onchainTable("xcm_request_event", (p) => ({
   statusLabel: p.text(),
   destinationHash: p.hex(),
   messageHash: p.hex(),
+  xcmPrecompile: p.hex(),
   maxWeightRefTime: p.bigint(),
   maxWeightProofSize: p.bigint(),
   settledAssets: p.bigint(),

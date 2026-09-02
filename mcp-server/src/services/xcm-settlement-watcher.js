@@ -1,5 +1,8 @@
 import { ValidationError } from "../core/errors.js";
 
+const UINT256_MAX = (1n << 256n) - 1n;
+const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
+
 export class XcmSettlementWatcherService {
   constructor(
     platformService,
@@ -16,6 +19,8 @@ export class XcmSettlementWatcherService {
     this.running = false;
     this.timer = undefined;
     this.unsubscribe = undefined;
+    this.settlementRunPromise = undefined;
+    this.settlementRunQueued = false;
   }
 
   start() {
@@ -44,6 +49,7 @@ export class XcmSettlementWatcherService {
     return {
       enabled: this.enabled,
       running: this.running,
+      settling: Boolean(this.settlementRunPromise),
       pendingCount: pending.length,
       pending: pending.slice(0, 10)
     };
@@ -51,32 +57,45 @@ export class XcmSettlementWatcherService {
 
   async observeOutcome(requestId, outcome = {}) {
     const normalizedRequestId = this.requireRequestId(requestId);
+    const status = normalizeObservationStatus(outcome.status);
     const incoming = {
       requestId: normalizedRequestId,
-      status: outcome.status,
-      settledAssets: Number(outcome.settledAssets ?? 0),
-      settledShares: Number(outcome.settledShares ?? 0),
+      status,
+      settledAssets: normalizeObservationAmount(outcome.settledAssets, "settledAssets"),
+      settledShares: normalizeObservationAmount(outcome.settledShares, "settledShares"),
       remoteRef: outcome.remoteRef,
-      failureCode: outcome.failureCode,
+      failureCode: normalizeObservationFailureCode(outcome.failureCode, status),
       source: typeof outcome.source === "string" && outcome.source.trim() ? outcome.source.trim() : "observer",
-      observedAt: outcome.observedAt ?? new Date().toISOString(),
+      observedAt: normalizeObservationObservedAt(outcome.observedAt),
       processed: false
     };
     const existing = await this.stateStore.getXcmObservation?.(normalizedRequestId);
-    if (existing && this.isEquivalentObservation(existing, incoming)) {
-      return existing;
+    if (existing) {
+      if (
+        this.isEquivalentObservation(existing, incoming) ||
+        existing.processed ||
+        this.isStaleObservation(existing, incoming)
+      ) {
+        return existing;
+      }
     }
     const observation = await this.stateStore.upsertXcmObservation(incoming);
 
     this.eventBus?.publish({
       id: `xcm-outcome-observed-${normalizedRequestId}-${Date.now()}`,
       topic: "xcm.outcome_observed",
+      correlationId: normalizedRequestId,
       timestamp: new Date().toISOString(),
       data: {
         requestId: normalizedRequestId,
         status: observation.status,
         settledAssets: observation.settledAssets,
+        settledAssetsRaw: observation.settledAssets,
         settledShares: observation.settledShares,
+        settledSharesRaw: observation.settledShares,
+        remoteRef: observation.remoteRef,
+        failureCode: observation.failureCode,
+        observedAt: observation.observedAt,
         source: observation.source
       }
     });
@@ -89,6 +108,30 @@ export class XcmSettlementWatcherService {
   }
 
   async runPendingSettlements(limit = 20) {
+    if (this.settlementRunPromise) {
+      this.settlementRunQueued = true;
+      return this.settlementRunPromise;
+    }
+
+    this.settlementRunPromise = this.drainPendingSettlements(limit);
+    try {
+      return await this.settlementRunPromise;
+    } finally {
+      this.settlementRunPromise = undefined;
+      this.settlementRunQueued = false;
+    }
+  }
+
+  async drainPendingSettlements(limit) {
+    const results = [];
+    do {
+      this.settlementRunQueued = false;
+      results.push(...await this.runPendingSettlementBatch(limit));
+    } while (this.settlementRunQueued);
+    return results;
+  }
+
+  async runPendingSettlementBatch(limit) {
     const pending = await this.stateStore.listPendingXcmObservations?.(limit) ?? [];
     const results = [];
 
@@ -105,10 +148,18 @@ export class XcmSettlementWatcherService {
           topic: "xcm.request_auto_finalized",
           wallet: finalized?.strategyRequest?.account ?? finalized?.account,
           wallets: [finalized?.strategyRequest?.account ?? finalized?.account].filter(Boolean),
+          correlationId: observation.requestId,
           timestamp: new Date().toISOString(),
           data: {
             requestId: observation.requestId,
             status: finalized?.strategyRequest?.statusLabel ?? finalized?.statusLabel ?? observation.status,
+            settledAssets: observation.settledAssets,
+            settledAssetsRaw: observation.settledAssets,
+            settledShares: observation.settledShares,
+            settledSharesRaw: observation.settledShares,
+            remoteRef: observation.remoteRef,
+            failureCode: observation.failureCode,
+            source: observation.source,
             settledVia: finalized?.settledVia
           }
         });
@@ -118,6 +169,7 @@ export class XcmSettlementWatcherService {
         this.eventBus?.publish({
           id: `xcm-auto-finalize-failed-${observation.requestId}-${Date.now()}`,
           topic: "xcm.request_finalize_failed",
+          correlationId: observation.requestId,
           timestamp: new Date().toISOString(),
           data: {
             requestId: observation.requestId,
@@ -156,9 +208,80 @@ export class XcmSettlementWatcherService {
 
   isEquivalentObservation(existing, incoming) {
     return String(existing.status ?? "") === String(incoming.status ?? "")
-      && Number(existing.settledAssets ?? 0) === Number(incoming.settledAssets ?? 0)
-      && Number(existing.settledShares ?? 0) === Number(incoming.settledShares ?? 0)
+      && normalizeObservationAmount(existing.settledAssets, "settledAssets")
+        === normalizeObservationAmount(incoming.settledAssets, "settledAssets")
+      && normalizeObservationAmount(existing.settledShares, "settledShares")
+        === normalizeObservationAmount(incoming.settledShares, "settledShares")
       && String(existing.remoteRef ?? "") === String(incoming.remoteRef ?? "")
       && String(existing.failureCode ?? "") === String(incoming.failureCode ?? "");
   }
+
+  isStaleObservation(existing, incoming) {
+    const existingObservedAt = Date.parse(existing?.observedAt ?? "");
+    const incomingObservedAt = Date.parse(incoming?.observedAt ?? "");
+    return Number.isFinite(existingObservedAt) &&
+      Number.isFinite(incomingObservedAt) &&
+      incomingObservedAt <= existingObservedAt;
+  }
+}
+
+function normalizeObservationStatus(status) {
+  const normalized = typeof status === "number"
+    ? ["unknown", "pending", "succeeded", "failed", "cancelled"][status] ?? "unknown"
+    : String(status ?? "").trim().toLowerCase();
+  if (!TERMINAL_STATUSES.has(normalized)) {
+    throw new ValidationError("XCM observations must use a terminal status.");
+  }
+  return normalized;
+}
+
+function normalizeObservationAmount(value, label) {
+  if (value === undefined || value === null || value === "") {
+    return "0";
+  }
+
+  let parsed;
+  if (typeof value === "bigint") {
+    parsed = value;
+  } else if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new ValidationError(`${label} must be an exact non-negative uint256.`);
+    }
+    parsed = BigInt(value);
+  } else if (typeof value === "string") {
+    const normalized = value.trim();
+    if (!/^\d+$/u.test(normalized)) {
+      throw new ValidationError(`${label} must be an exact non-negative uint256.`);
+    }
+    parsed = BigInt(normalized);
+  } else {
+    throw new ValidationError(`${label} must be an exact non-negative uint256.`);
+  }
+
+  if (parsed < 0n || parsed > UINT256_MAX) {
+    throw new ValidationError(`${label} must fit uint256.`);
+  }
+  return parsed.toString();
+}
+
+function normalizeObservationFailureCode(value, status) {
+  const failureCode = typeof value === "string" && value.trim() ? value.trim() : undefined;
+  if (status === "failed" && !failureCode) {
+    throw new ValidationError("XCM failed observations must include failureCode.");
+  }
+  if (value !== undefined && value !== null && value !== "" && typeof value !== "string") {
+    throw new ValidationError("failureCode must be a non-empty string when provided.");
+  }
+  return failureCode;
+}
+
+function normalizeObservationObservedAt(value) {
+  if (value === undefined || value === null || value === "") {
+    return new Date().toISOString();
+  }
+  const observedAt = new Date(value);
+  if (Number.isNaN(observedAt.getTime())) {
+    throw new ValidationError("observedAt must be ISO-8601 when provided.");
+  }
+  return observedAt.toISOString();
 }

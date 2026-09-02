@@ -4,6 +4,8 @@ import { cn } from "@/lib/utils/cn";
 import { DisputeStatePill, OriginPill } from "./pills";
 import { PartyChip } from "./PartyChip";
 import { WindowCountdown } from "./WindowCountdown";
+import { OutcomeRationaleInline } from "@/components/common/OutcomeRationaleInline";
+import { SourceBadge } from "@/components/runs/StatePill";
 import type { Dispute } from "./types";
 
 export interface DisputesTableProps {
@@ -38,7 +40,7 @@ export function DisputesTable({
           <thead>
             <tr>
               <Th width={100}>Dispute</Th>
-              <Th width={100}>Run</Th>
+              <Th width={130}>Run</Th>
               <Th>Opener</Th>
               <Th>Respondent</Th>
               <Th width={90} align="right">Stake</Th>
@@ -55,7 +57,7 @@ export function DisputesTable({
                   className="p-8 text-center font-[family-name:var(--font-mono)] text-[13px] text-[var(--avy-muted)]"
                   style={{ letterSpacing: 0 }}
                 >
-                  No disputes match these filters. Queue is clear.
+                  No disputes match these filters.
                 </td>
               </tr>
             ) : (
@@ -79,12 +81,15 @@ export function DisputesTable({
                       </span>
                     </Td>
                     <Td>
-                      <span
-                        className="font-[family-name:var(--font-mono)] text-[12.5px] text-[var(--avy-ink)]"
-                        style={{ letterSpacing: 0 }}
-                      >
-                        {d.runRef}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {d.source ? <SourceBadge kind={d.source} /> : null}
+                        <span
+                          className="whitespace-nowrap font-[family-name:var(--font-mono)] text-[12.5px] text-[var(--avy-ink)]"
+                          style={{ letterSpacing: 0 }}
+                        >
+                          {d.runRef}
+                        </span>
+                      </div>
                     </Td>
                     <Td>
                       <PartyChip party={d.opener} />
@@ -113,6 +118,9 @@ export function DisputesTable({
                     </Td>
                     <Td>
                       <DisputeStatePill state={d.state} />
+                      {d.outcomeRationale ? (
+                        <OutcomeRationaleInline rationale={d.outcomeRationale} compact />
+                      ) : null}
                     </Td>
                   </tr>
                 );
@@ -131,12 +139,6 @@ export function DisputesTable({
           <b className="font-semibold text-[var(--avy-ink)]">{totalCount}</b> · queue empty
           when resolved
         </span>
-        <button
-          type="button"
-          className="cursor-pointer border-b border-dashed border-[color:rgba(30,102,66,0.4)] pb-px text-[var(--avy-accent)] hover:text-[var(--avy-accent-2)]"
-        >
-          What happens at window expiry? →
-        </button>
       </footer>
     </div>
   );

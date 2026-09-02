@@ -1,5 +1,8 @@
 import { PlatformService } from "../core/platform-service.js";
 import { createStateStore } from "../core/state-store.js";
+import { AccountOverlayStore } from "../core/account-overlay-store.js";
+import { PolicyService } from "../core/policy-service.js";
+import { BUILTIN_POLICIES } from "../core/builtin-policies.js";
 import { BlockchainGateway } from "../blockchain/gateway.js";
 import { VerifierService } from "./verifier-service.js";
 import { loadLocalEnv } from "./env-loader.js";
@@ -7,12 +10,16 @@ import { PimlicoClient } from "./pimlico-client.js";
 import { EventBus } from "../core/event-bus.js";
 import { EventListener } from "../blockchain/event-listener.js";
 import { loadAuthConfig } from "../auth/config.js";
+import { validateJwtKmsCredentialAccess } from "../auth/credential-check.js";
+import { buildKmsCredentialsProvider, PROFILE_JWT_SIGNER } from "./aws-credentials.js";
 import { createAuthMiddleware } from "../auth/middleware.js";
 import { createRateLimiter } from "../auth/rate-limit.js";
 import { resolveCapabilities, capabilityMatrix } from "../auth/capabilities.js";
 import { createLogger } from "../core/logger.js";
 import { MetricRegistry } from "../core/metrics.js";
 import { createObservability } from "../core/observability.js";
+import { createContentRecoveryLog } from "../core/content-recovery-log.js";
+import { describeMutationBackendStartup, loadMutationBackendConfig } from "../core/mutation-backend.js";
 import { RecurringSchedulerService } from "./recurring-scheduler.js";
 import {
   GithubIssueIngestionScheduler,
@@ -22,11 +29,46 @@ import {
   WikipediaMaintenanceIngestionScheduler,
   loadWikipediaMaintenanceIngestionConfig
 } from "./wikipedia-maintenance-ingestion-scheduler.js";
+import {
+  OsvAdvisoryIngestionScheduler,
+  loadOsvAdvisoryIngestionConfig
+} from "./osv-advisory-ingestion-scheduler.js";
+import {
+  OpenDataIngestionScheduler,
+  loadOpenDataIngestionConfig
+} from "./open-data-ingestion-scheduler.js";
+import {
+  StandardsSpecIngestionScheduler,
+  loadStandardsSpecIngestionConfig
+} from "./standards-spec-ingestion-scheduler.js";
+import {
+  OpenApiSpecIngestionScheduler,
+  loadOpenApiSpecIngestionConfig
+} from "./openapi-spec-ingestion-scheduler.js";
 import { XcmSettlementWatcherService } from "./xcm-settlement-watcher.js";
 import { XcmObservationRelayService } from "./xcm-observation-relay.js";
+import {
+  UpstreamStatusPollerService,
+  loadUpstreamStatusPollerConfig
+} from "./upstream-status-poller.js";
+import {
+  BootstrapSelfReportSchedulerService,
+  loadBootstrapSelfReportSchedulerConfig
+} from "./bootstrap-self-report-scheduler.js";
+import {
+  JobStaleSweeperService,
+  loadJobStaleSweeperConfig
+} from "./job-stale-sweeper.js";
+import {
+  SubmittedJobAutoVerifierService,
+  loadSubmittedJobAutoVerifierConfig
+} from "./submitted-job-auto-verifier.js";
 import { normaliseStrategyAssetConfig } from "./strategy-asset-config.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
+import { ConfigError } from "../core/errors.js";
+import { assertMainnetSignerPosture, assertChainIdMatchesRpc } from "./startup-guards.js";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 loadLocalEnv(process.cwd(), resolve(moduleDir, "../../"));
@@ -36,7 +78,7 @@ const jobs = [
     id: "starter-coding-001",
     category: "coding",
     tier: "starter",
-    rewardAsset: "DOT",
+    rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 5,
     verifierMode: "benchmark",
     verifierConfig: {
@@ -48,13 +90,14 @@ const jobs = [
     outputSchemaRef: "schema://jobs/coding-output",
     claimTtlSeconds: 3600,
     retryLimit: 1,
-    requiresSponsoredGas: true
+    requiresSponsoredGas: true,
+    onboardingWaiverEligible: true
   },
   {
     id: "governance-pro-001",
     category: "governance",
     tier: "pro",
-    rewardAsset: "DOT",
+    rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
     rewardAmount: 25,
     verifierMode: "deterministic",
     verifierConfig: {
@@ -83,17 +126,20 @@ const profiles = new Map([
   }]
 ]);
 
-const accounts = new Map([
-  ["0xagent", {
-    wallet: "0xagent",
-    liquid: { DOT: 25 },
-    reserved: { DOT: 0 },
-    strategyAllocated: { DOT: 5 },
-    collateralLocked: { DOT: 10 },
-    jobStakeLocked: { DOT: 0 },
-    debtOutstanding: { DOT: 0 }
-  }]
-]);
+// Demo seed for the legacy "0xagent" fixture wallet. Not a real wallet,
+// not used in production traffic; production wallets are SIWE-derived
+// `0x…` addresses populated through `getStoredAccount(wallet)` at request
+// time. Both factories below wrap this seed in an `AccountOverlayStore`
+// so writes mirror out to the durable state-store backing.
+const SEED_DEV_OVERLAY = ["0xagent", {
+  wallet: "0xagent",
+  liquid: { USDC: 25 },
+  reserved: { USDC: 0 },
+  strategyAllocated: {},
+  collateralLocked: { USDC: 10 },
+  jobStakeLocked: { USDC: 0 },
+  debtOutstanding: { USDC: 0 }
+}];
 
 const reputations = new Map([
   ["0xagent", {
@@ -107,7 +153,12 @@ const reputations = new Map([
 export function createPlatformService() {
   const gateway = new BlockchainGateway();
   const stateStore = createStateStore();
-  const eventBus = new EventBus();
+  const eventBus = new EventBus({ eventStore: stateStore });
+  const accounts = new AccountOverlayStore({ stateStore });
+  accounts.seed(...SEED_DEV_OVERLAY);
+  // No hydrate here — test factory uses a fresh in-memory state-store
+  // every construction; nothing to hydrate from. createPlatformRuntime
+  // below hydrates against the production durable store.
   return new PlatformService(jobs, profiles, accounts, reputations, gateway, stateStore, eventBus);
 }
 
@@ -123,10 +174,95 @@ export async function createPlatformRuntime() {
   // the step name before the process exits. Without this, a cryptic stack
   // trace is the only signal that a required env var was missing.
   const authConfig = initStep("load-auth-config", logger, () => loadAuthConfig());
-  const gateway = initStep("init-blockchain-gateway", logger, () => new BlockchainGateway());
+  if (authConfig.kmsJwt) {
+    authConfig.kmsJwt.logger = logger;
+  }
+
+  // Phase 5a prep — verify the AWS credential chain can actually reach
+  // the JWT KMS key before declaring the backend healthy. Without this
+  // a misconfigured credential chain (most common future failure mode:
+  // a botched IAM Roles Anywhere cert install) lets the backend boot
+  // green and only surface as a 500 on the next user-facing SIWE
+  // refresh. Skipped automatically under JWT_BACKEND=hmac (no kmsJwt
+  // config) and bypassable via JWT_KMS_CREDENTIAL_CHECK_SKIP=1 for
+  // tests / disconnected dev environments.
+  if (authConfig.kmsJwt) {
+    try {
+      // Build the same Roles Anywhere credentials-provider the runtime
+      // KmsJwtSigner uses (see getKmsSigner in auth/jwt.js). Without it
+      // the boot check falls through to the SDK default chain — which
+      // disagrees with the runtime path once AWS_USE_ROLES_ANYWHERE=true
+      // and static AWS_*_ACCESS_KEY_* env vars are absent (the Phase 5a
+      // Stage 2C-3 outage in #455/#456).
+      const credentialsProvider = buildKmsCredentialsProvider({ profile: PROFILE_JWT_SIGNER });
+      await validateJwtKmsCredentialAccess(authConfig.kmsJwt, { logger, credentialsProvider });
+    } catch (error) {
+      logger.error(
+        { step: "validate-jwt-kms-credentials", err: error instanceof Error ? error : new Error(String(error)) },
+        "bootstrap.init_failed",
+      );
+      throw error;
+    }
+  }
+
+  const mutationBackendConfig = initStep("load-mutation-backend-config", logger, () =>
+    loadMutationBackendConfig(process.env)
+  );
+  const gateway = initStep("init-blockchain-gateway", logger, () => new BlockchainGateway(undefined, { logger }));
+  logger.info(
+    describeMutationBackendStartup(mutationBackendConfig, gateway),
+    "mutation_backend.configured"
+  );
+  // Refuse to boot a real on-chain broker behind permissive auth (pre-audit
+  // #7). Permissive mode accepts an unauthenticated `?wallet=` and resolves
+  // that wallet's roles with no signature — harmless against a disabled
+  // gateway, but with chain brokering live it lets any caller broker on-chain
+  // operations as any allowlisted wallet.
+  initStep("check-auth-brokering-posture", logger, () =>
+    assertSafeAuthBrokeringPosture({ authConfig, gateway, env: process.env, logger })
+  );
+  // B-02 — on mainnet the on-chain broker must sign via KMS, never a local
+  // hot key. Fail-closed launch gate; no-op off mainnet / gateway disabled.
+  initStep("check-mainnet-signer-posture", logger, () =>
+    assertMainnetSignerPosture({ authConfig, gateway, env: process.env })
+  );
+  // D-02 — verify the RPC actually serves the configured chain id before the
+  // backend brokers anything. Async (an eth_chainId call), so it mirrors the
+  // KMS-credential check's try/catch rather than the sync initStep wrapper.
+  try {
+    await assertChainIdMatchesRpc({ authConfig, gateway, logger });
+  } catch (error) {
+    logger.error(
+      { step: "check-chain-id-match", err: error instanceof Error ? error : new Error(String(error)) },
+      "bootstrap.init_failed"
+    );
+    throw error;
+  }
   const pimlicoClient = initStep("init-pimlico-client", logger, () => new PimlicoClient());
   const stateStore = initStep("init-state-store", logger, () => createStateStore(process.env, { logger }));
-  const eventBus = initStep("init-event-bus", logger, () => new EventBus());
+  const contentRecoveryLog = initStep("init-content-recovery-log", logger, () =>
+    createContentRecoveryLog(process.env, { logger })
+  );
+  const eventBus = initStep("init-event-bus", logger, () => new EventBus({ eventStore: stateStore, logger }));
+  const accounts = initStep("init-account-overlay-store", logger, () => {
+    const store = new AccountOverlayStore({ stateStore, logger });
+    store.seed(...SEED_DEV_OVERLAY);
+    return store;
+  });
+  // Hydrate the overlay cache from durable state-store before any HTTP
+  // route is wired. Persisted writes from previous process incarnations
+  // will overwrite the dev seed where wallets overlap, which is the
+  // intended semantic — production writes always win over the static
+  // demo fixture.
+  const overlayHydration = await accounts.hydrate();
+  logger.info?.(overlayHydration, "account-overlay.hydrate");
+  const policyService = initStep("init-policy-service", logger, () =>
+    new PolicyService({ stateStore, seedPolicies: BUILTIN_POLICIES, logger })
+  );
+  // Hydrate operator-proposed policies before any /policies route is
+  // exposed. Built-in policies are seed data and don't need hydration.
+  const policyHydration = await policyService.hydrate();
+  logger.info?.(policyHydration, "policy.hydrate");
   const platformService = initStep(
     "init-platform-service",
     logger,
@@ -159,6 +295,30 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const osvAdvisoryIngestionScheduler = initStep("init-osv-advisory-ingestion-scheduler", logger, () =>
+    new OsvAdvisoryIngestionScheduler(platformService, eventBus, {
+      ...loadOsvAdvisoryIngestionConfig(process.env),
+      logger
+    })
+  );
+  const openDataIngestionScheduler = initStep("init-open-data-ingestion-scheduler", logger, () =>
+    new OpenDataIngestionScheduler(platformService, eventBus, {
+      ...loadOpenDataIngestionConfig(process.env),
+      logger
+    })
+  );
+  const standardsSpecIngestionScheduler = initStep("init-standards-spec-ingestion-scheduler", logger, () =>
+    new StandardsSpecIngestionScheduler(platformService, eventBus, {
+      ...loadStandardsSpecIngestionConfig(process.env),
+      logger
+    })
+  );
+  const openApiSpecIngestionScheduler = initStep("init-openapi-spec-ingestion-scheduler", logger, () =>
+    new OpenApiSpecIngestionScheduler(platformService, eventBus, {
+      ...loadOpenApiSpecIngestionConfig(process.env),
+      logger
+    })
+  );
   const xcmSettlementWatcher = initStep("init-xcm-settlement-watcher", logger, () =>
     new XcmSettlementWatcherService(platformService, stateStore, eventBus, {
       enabled: process.env.XCM_SETTLEMENT_WATCHER_ENABLED === undefined
@@ -180,16 +340,61 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const upstreamStatusPoller = initStep("init-upstream-status-poller", logger, () =>
+    new UpstreamStatusPollerService(stateStore, eventBus, {
+      ...loadUpstreamStatusPollerConfig(process.env),
+      logger
+    })
+  );
+  const bootstrapSelfReportScheduler = initStep("init-bootstrap-self-report-scheduler", logger, () =>
+    new BootstrapSelfReportSchedulerService(upstreamStatusPoller, eventBus, {
+      ...loadBootstrapSelfReportSchedulerConfig(process.env),
+      stateStore,
+      logger
+    })
+  );
+  const jobStaleSweeper = initStep("init-job-stale-sweeper", logger, () =>
+    new JobStaleSweeperService(platformService, stateStore, eventBus, {
+      ...loadJobStaleSweeperConfig(process.env),
+      logger
+    })
+  );
+  const submittedJobAutoVerifier = initStep("init-submitted-job-auto-verifier", logger, () =>
+    new SubmittedJobAutoVerifierService(platformService, verifierService, gateway, eventBus, {
+      ...loadSubmittedJobAutoVerifierConfig(process.env),
+      logger
+    })
+  );
   platformService.recurringScheduler = recurringScheduler;
   platformService.githubIssueIngestionScheduler = githubIssueIngestionScheduler;
   platformService.wikipediaMaintenanceIngestionScheduler = wikipediaMaintenanceIngestionScheduler;
+  platformService.osvAdvisoryIngestionScheduler = osvAdvisoryIngestionScheduler;
+  platformService.openDataIngestionScheduler = openDataIngestionScheduler;
+  platformService.standardsSpecIngestionScheduler = standardsSpecIngestionScheduler;
+  platformService.openApiSpecIngestionScheduler = openApiSpecIngestionScheduler;
   platformService.xcmSettlementWatcher = xcmSettlementWatcher;
   platformService.xcmObservationRelay = xcmObservationRelay;
+  platformService.upstreamStatusPoller = upstreamStatusPoller;
+  platformService.bootstrapSelfReportScheduler = bootstrapSelfReportScheduler;
+  platformService.jobStaleSweeper = jobStaleSweeper;
+  platformService.submittedJobAutoVerifier = submittedJobAutoVerifier;
+  // Opt-in (testnet-only operational invariant): escrow auto-ingested job
+  // rewards on-chain at ingestion so they are funded before being advertised
+  // claimable. Off by default; see deploy/backend.env.template.
+  platformService.prefundIngestedJobs = parseBooleanEnv(process.env.INGESTION_PREFUND_ENABLED);
   recurringScheduler.start();
   githubIssueIngestionScheduler.start();
   wikipediaMaintenanceIngestionScheduler.start();
+  osvAdvisoryIngestionScheduler.start();
+  openDataIngestionScheduler.start();
+  standardsSpecIngestionScheduler.start();
+  openApiSpecIngestionScheduler.start();
   xcmSettlementWatcher.start();
   xcmObservationRelay.start();
+  upstreamStatusPoller.start();
+  bootstrapSelfReportScheduler.start();
+  jobStaleSweeper.start();
+  submittedJobAutoVerifier.start();
 
   const authMiddleware = createAuthMiddleware({ authConfig, stateStore, logger });
   const rateLimiter = createRateLimiter({ stateStore, logger });
@@ -205,17 +410,27 @@ export async function createPlatformRuntime() {
   }
   return {
     platformService,
+    policyService,
     verifierService,
     gateway,
+    mutationBackendConfig,
     pimlicoClient,
     stateStore,
+    contentRecoveryLog,
     eventBus,
     eventListener,
     recurringScheduler,
     githubIssueIngestionScheduler,
     wikipediaMaintenanceIngestionScheduler,
+    osvAdvisoryIngestionScheduler,
+    openDataIngestionScheduler,
+    standardsSpecIngestionScheduler,
+    openApiSpecIngestionScheduler,
     xcmSettlementWatcher,
     xcmObservationRelay,
+    upstreamStatusPoller,
+    jobStaleSweeper,
+    submittedJobAutoVerifier,
     authConfig,
     authMiddleware,
     authCapabilities: {
@@ -256,10 +471,53 @@ function initStep(name, logger, factory) {
   }
 }
 
+/**
+ * Fail closed when a real on-chain broker is paired with permissive auth
+ * (pre-audit #7). In permissive mode, requireAuth accepts an unauthenticated
+ * `?wallet=<addr>` and grants that wallet's allowlisted roles with no
+ * signature check. That is acceptable for local dev against a disabled
+ * gateway, but if `gateway.isEnabled()` is true the same path lets any
+ * unauthenticated caller broker on-chain operations (claim/submit/settle) as
+ * any AUTH_*_WALLETS member. Refuse to boot that combination unless an
+ * operator has explicitly opted in via AUTH_ALLOW_PERMISSIVE_BROKERING — in
+ * which case we still log a loud warning so the posture is never silent.
+ *
+ * @param {object} args
+ * @param {{ permissive?: boolean }} args.authConfig
+ * @param {{ isEnabled?: () => boolean }} args.gateway
+ * @param {Record<string, string | undefined>} [args.env]
+ * @param {{ warn?: Function }} [args.logger]
+ */
+export function assertSafeAuthBrokeringPosture({ authConfig, gateway, env = process.env, logger } = {}) {
+  const permissive = authConfig?.permissive === true;
+  const gatewayEnabled = typeof gateway?.isEnabled === "function" && gateway.isEnabled() === true;
+  if (!permissive || !gatewayEnabled) {
+    return;
+  }
+  if (parseBooleanEnv(env.AUTH_ALLOW_PERMISSIVE_BROKERING)) {
+    logger?.warn?.(
+      { authMode: "permissive", gatewayEnabled: true },
+      "auth.permissive_brokering_explicitly_allowed"
+    );
+    return;
+  }
+  throw new ConfigError(
+    "AUTH_MODE=permissive with the blockchain gateway enabled lets an unauthenticated " +
+      "?wallet= caller broker on-chain operations as any allowlisted wallet. Set AUTH_MODE=strict " +
+      "(recommended), or, only if you intentionally want unauthenticated brokering (e.g. local dev " +
+      "against a live chain), set AUTH_ALLOW_PERMISSIVE_BROKERING=1."
+  );
+}
+
 function loadRateLimitConfig(env = process.env) {
   return {
     authNonce: buildLimit(env, "RATE_LIMIT_AUTH_NONCE", { limit: 10, windowSeconds: 60 }),
     authVerify: buildLimit(env, "RATE_LIMIT_AUTH_VERIFY", { limit: 10, windowSeconds: 60 }),
+    // Refresh has a stricter per-wallet limit than verify because a refresh
+    // call needs a valid token in hand — abusive callers would have to keep
+    // spending tokens to retry. 6/min is enough headroom for a tab that
+    // wakes up after sleep and a couple of background re-syncs.
+    authRefresh: buildLimit(env, "RATE_LIMIT_AUTH_REFRESH", { limit: 6, windowSeconds: 60 }),
     adminJobs: buildLimit(env, "RATE_LIMIT_ADMIN_JOBS", { limit: 60, windowSeconds: 60 }),
     verifierRun: buildLimit(env, "RATE_LIMIT_VERIFIER_RUN", { limit: 120, windowSeconds: 60 }),
     events: buildLimit(env, "RATE_LIMIT_EVENTS", { limit: 30, windowSeconds: 60 })
@@ -338,7 +596,7 @@ function normaliseStrategyEntry(entry, idx) {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
     throw new Error(`strategies[${idx}] must be an object`);
   }
-  const { strategyId, adapter, kind, riskLabel, asset, executionMode } = entry;
+  const { strategyId, adapter, kind, riskLabel, asset, executionMode, xcm } = entry;
   const assetConfig = normaliseStrategyAssetConfig(asset, idx);
   if (typeof strategyId !== "string" || !/^0x[a-fA-F0-9]{64}$/u.test(strategyId)) {
     throw new Error(`strategies[${idx}].strategyId must be 0x + 32-byte hex`);
@@ -353,8 +611,61 @@ function normaliseStrategyEntry(entry, idx) {
     executionMode: normaliseStrategyExecutionMode(executionMode, typeof kind === "string" ? kind : "unknown", idx),
     riskLabel: typeof riskLabel === "string" ? riskLabel : "",
     asset: assetConfig?.address,
-    assetConfig
+    assetConfig,
+    xcm: normaliseStrategyXcmConfig(xcm, idx)
   };
+}
+
+function normaliseStrategyXcmConfig(xcm, idx) {
+  if (xcm === undefined || xcm === null) {
+    return undefined;
+  }
+  if (typeof xcm !== "object" || Array.isArray(xcm)) {
+    throw new Error(`strategies[${idx}].xcm must be an object`);
+  }
+  if (
+    xcm.messagePrefixes !== undefined ||
+    xcm.messages !== undefined ||
+    xcm.depositMessagePrefix !== undefined ||
+    xcm.withdrawMessagePrefix !== undefined
+  ) {
+    throw new Error(
+      `strategies[${idx}].xcm must not include raw message prefixes; the backend assembles XCM from intent`
+    );
+  }
+  const destinationParachain = xcm.destinationParachain ?? xcm.destinationParaId;
+  const normalized = {};
+  if (!(destinationParachain === undefined || destinationParachain === null || destinationParachain === "")) {
+    const parsed = Number(destinationParachain);
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 0xffffffff) {
+      throw new Error(`strategies[${idx}].xcm.destinationParachain must be a uint32`);
+    }
+    normalized.destinationParachain = parsed;
+  }
+  for (const key of [
+    "originChain",
+    "destinationChain",
+    "feeAmount",
+    "executionFeeAmount",
+    "depositFeeAmount",
+    "withdrawFeeAmount",
+    "amount",
+    "depositAmount",
+    "withdrawAmount",
+    "beneficiary",
+    "beneficiaryLocation",
+    "depositBeneficiary",
+    "depositBeneficiaryLocation",
+    "withdrawBeneficiary",
+    "withdrawBeneficiaryLocation",
+    "assetLocation",
+    "feeAssetLocation"
+  ]) {
+    if (xcm[key] !== undefined) {
+      normalized[key] = xcm[key];
+    }
+  }
+  return Object.keys(normalized).length ? normalized : undefined;
 }
 
 function normaliseStrategyExecutionMode(rawExecutionMode, kind, idx) {

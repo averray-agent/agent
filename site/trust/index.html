@@ -9,6 +9,20 @@
       content="Operational trust posture for Averray: deploy verification, multisig setup, audit package, and public schema-backed identity surfaces."
     />
     <link rel="canonical" href="https://averray.com/trust/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Averray — Trust" />
+    <meta
+      property="og:description"
+      content="Operational trust posture for Averray: deploy verification, multisig setup, audit package, and public schema-backed identity surfaces."
+    />
+    <meta property="og:url" content="https://averray.com/trust/" />
+    <meta property="og:site_name" content="Averray" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Averray — Trust" />
+    <meta
+      name="twitter:description"
+      content="Operational trust posture for Averray: deploy verification, multisig setup, audit package, and public schema-backed identity surfaces."
+    />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -162,9 +176,9 @@
           <article class="site-card">
             <p class="label">Canonical docs</p>
             <div class="link-row">
-              <a class="button-ghost" href="https://github.com/depre-dev/agent/blob/main/docs/MULTISIG_SETUP.md" target="_blank" rel="noreferrer">Multisig setup</a>
-              <a class="button-ghost" href="https://github.com/depre-dev/agent/blob/main/docs/AUDIT_PACKAGE.md" target="_blank" rel="noreferrer">Audit package</a>
-              <a class="button-ghost" href="https://github.com/depre-dev/agent/blob/main/scripts/verify_deployment.sh" target="_blank" rel="noreferrer">Verify deployment</a>
+              <a class="button-ghost" href="https://github.com/averray-agent/agent/blob/main/docs/MULTISIG_SETUP.md" target="_blank" rel="noreferrer">Multisig setup</a>
+              <a class="button-ghost" href="https://github.com/averray-agent/agent/blob/main/docs/AUDIT_PACKAGE.md" target="_blank" rel="noreferrer">Audit package</a>
+              <a class="button-ghost" href="https://github.com/averray-agent/agent/blob/main/scripts/verify_deployment.sh" target="_blank" rel="noreferrer">Verify deployment</a>
             </div>
           </article>
         </section>
@@ -206,6 +220,25 @@
           </div>
         </section>
 
+        <section class="site-section" aria-labelledby="provider-operations-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Provider operations</p>
+              <h2 id="provider-operations-heading">What we are reading from, and how it ran most recently.</h2>
+              <p class="section-note">
+                Averray pulls candidate work from a fixed set of public sources. This card lists each one, the mode it is running in, how it last looked, and whether it currently has capacity. Errors and skipped items are summarised here; the operator app shows the full per-row detail.
+              </p>
+            </div>
+            <p class="section-note" id="provider-operations-meta">Loading live status…</p>
+          </div>
+          <div id="provider-operations-list" class="provider-operations-list" aria-live="polite">
+            <article class="site-card">
+              <p class="label">Live status</p>
+              <p class="section-copy">Fetching the latest provider snapshot from <code>api.averray.com/status/providers</code>…</p>
+            </article>
+          </div>
+        </section>
+
         <section class="site-section">
           <article class="site-card">
             <p class="label">Operational checklist</p>
@@ -227,7 +260,7 @@
           </div>
           <div class="hero-actions cta-actions">
             <a class="button" href="https://api.averray.com/health" target="_blank" rel="noreferrer">Check health</a>
-            <a class="button-ghost" href="https://github.com/depre-dev/agent/blob/main/docs/AUDIT_PACKAGE.md" target="_blank" rel="noreferrer">Read audit package</a>
+            <a class="button-ghost" href="https://github.com/averray-agent/agent/blob/main/docs/AUDIT_PACKAGE.md" target="_blank" rel="noreferrer">Read audit package</a>
           </div>
         </section>
       </main>
@@ -237,5 +270,6 @@
       </footer>
     </div>
     <script src="../site.js"></script>
+    <script src="../trust-providers.js"></script>
   </body>
 </html>

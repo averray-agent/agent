@@ -10,14 +10,17 @@ import {
 } from "@/components/policies/PoliciesFilterRail";
 import { PoliciesTable } from "@/components/policies/PoliciesTable";
 import { PolicyLegend } from "@/components/policies/PolicyLegend";
+import { WhatChangedPanel } from "@/components/governance/WhatChangedPanel";
 import {
   PolicyDrawerBody,
   PolicyDrawerHeader,
 } from "@/components/policies/PolicyDrawerBody";
-import { POLICIES } from "@/components/policies/policies-data";
+import { ShareReadonlyButton } from "@/components/common/ShareReadonlyButton";
 import { SIGNERS } from "@/components/policies/signers";
 import type { Policy, PolicyState } from "@/components/policies/types";
 import { usePolicies, usePolicy } from "@/lib/api/hooks";
+import { buildPolicyChangeEntries } from "@/lib/ui/governance-changelog";
+import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 
 const STATUS_TO_STATE: Record<Exclude<PoliciesFilter["status"], "all">, PolicyState> = {
   active: "Active",
@@ -25,10 +28,6 @@ const STATUS_TO_STATE: Record<Exclude<PoliciesFilter["status"], "all">, PolicySt
   "pending-signers": "Pending",
   retired: "Retired",
 };
-
-// TODO(data): replace the seed roster with useApi("/policies") once the
-// backend emits a list endpoint. Drill-in swaps to useApi(`/policies/${tag}`).
-// Propose-change form posts to POST /admin/policies and queues a proposal.
 
 export default function PoliciesPage() {
   const policiesRequest = usePolicies();
@@ -39,9 +38,10 @@ export default function PoliciesPage() {
     q: "",
   });
   const [pickedId, setPickedId] = useState<string | null>(null);
+  const [pickedDiffRev, setPickedDiffRev] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const livePolicies = useMemo(() => extractPolicies(policiesRequest.data), [policiesRequest.data]);
-  const policies = livePolicies.length ? livePolicies : POLICIES;
+  const policies = livePolicies;
   const pickedFromList = pickedId ? policies.find((p) => p.id === pickedId) ?? null : null;
   const detailRequest = usePolicy(drawerOpen && pickedFromList ? pickedFromList.tag : null);
   const pickedDetail = extractPolicy(detailRequest.data);
@@ -74,9 +74,12 @@ export default function PoliciesPage() {
     });
   }, [filter, policies]);
 
+  const policyChanges = useMemo(() => buildPolicyChangeEntries(policies), [policies]);
+  const freshness = freshnessFromRequests(policiesRequest);
+
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
-      <PoliciesTopbar />
+      <PoliciesTopbar freshness={freshness} />
 
       <header className="flex flex-col gap-1.5">
         <span
@@ -94,6 +97,25 @@ export default function PoliciesPage() {
       </header>
 
       <PoliciesAggregateStrip policies={policies} />
+      <WhatChangedPanel
+        eyebrow="What changed"
+        title="Recent policy revisions"
+        changes={policyChanges}
+        emptyHint="No policy revision with a before/after rule is available yet."
+        activeId={
+          pickedDiffRev
+            ? policyChanges.find(
+                (change) => change.subjectId === pickedId && change.fromRevision === pickedDiffRev
+              )?.id
+            : null
+        }
+        onSelect={(change) => {
+          if (!change.subjectId || !change.fromRevision) return;
+          setPickedId(change.subjectId);
+          setPickedDiffRev(change.fromRevision);
+          setDrawerOpen(true);
+        }}
+      />
       <PoliciesFilterRail filter={filter} onChange={setFilter} />
       <PoliciesTable
         rows={filtered}
@@ -101,6 +123,7 @@ export default function PoliciesPage() {
         selectedId={pickedId}
         onSelect={(p) => {
           setPickedId(p.id);
+          setPickedDiffRev(null);
           setDrawerOpen(true);
         }}
       />
@@ -112,7 +135,18 @@ export default function PoliciesPage() {
         width={620}
         title={picked ? <PolicyDrawerHeader policy={picked} /> : null}
       >
-        {picked ? <PolicyDrawerBody policy={picked} live={isLive} /> : null}
+        {picked ? (
+          <>
+            <div className="mb-3 flex justify-end">
+              <ShareReadonlyButton surface="policy" id={picked.tag} label="Copy share link" />
+            </div>
+            <PolicyDrawerBody
+              policy={picked}
+              live={isLive}
+              initialDiffRev={pickedDiffRev}
+            />
+          </>
+        ) : null}
       </DetailDrawer>
     </div>
   );

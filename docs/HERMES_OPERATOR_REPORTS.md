@@ -1,0 +1,149 @@
+# Hermes Operator Reports Inventory
+
+This is the operator runbook for finding evidence that a Hermes-driven
+report or check actually ran. **Audit-only.** It does not change
+behavior. It exists so a future incident-response or compliance pass
+does not have to re-derive "what did Hermes do, where did the evidence
+land, what id do I quote" from the workflow YAML.
+
+## What Hermes is, from this repo's perspective
+
+Hermes is an operator-side agent that lives in the
+`averray-reference-agent` deployment on the production VPS (not in this
+repo). Hermes is reached via `ssh ... docker compose ... exec -T hermes`
+calls from workflows in `.github/workflows/`. This repo's evidence
+surface for Hermes is therefore exactly what those workflows record on
+the GitHub side; anything else lives on the Hermes container and is
+audited from the `averray-reference-agent` repo.
+
+The operator-report families that an audit might ask about now have a
+repo-visible evidence lane for PR handoff, post-deploy verification, and
+scheduled operator self-reports.
+
+## Routines with a surface in this repo
+
+### 1. Private handoff monitor — PR handoff
+
+- Workflow: [.github/workflows/hermes-pr-handoff.yml](../.github/workflows/hermes-pr-handoff.yml)
+- Trigger: `workflow_run` on the CI workflow, `conclusion == 'success'`
+- Hermes invocation: `averray_invoke_agent_task` with `intent='pr_handoff'`, testbed case `TBE2E-004`
+- **Correlation ID format:** `github-pr-${pr_number}-${head_sha}-${run_id}`
+- Evidence destinations (most to least durable):
+  1. **PR comment** — best evidence path. Idempotent edit-or-create, anchored to a hidden HTML marker `<!-- hermes-pr-handoff:<correlation-id> -->` so the workflow finds and updates the same comment on retries instead of stacking duplicates. Lives in the PR thread for the life of the repo.
+  2. **Workflow artifact** — full `hermes-handoff.log`, uploaded as `hermes-handoff-<correlation-id>` with 90-day retention.
+  3. **`$GITHUB_STEP_SUMMARY`** — last 260 lines of `hermes-handoff.log`. Durable while GitHub retains the workflow run (default ~90 days).
+  4. **Runner-local `hermes-handoff.log`** — ephemeral; reaped with the runner after artifact upload.
+  5. **Hermes-container audit trail** — whatever Hermes itself records under the correlation id. Outside this repo's evidence model; audit from `averray-reference-agent`.
+- Comment posting is best-effort. If the workflow lacks the GitHub permission to read/write PR comments, the step summary still carries the full Hermes output and the run is not failed by the comment skip.
+- Outcomes:
+  - `success` — Hermes returned a verdict (exit 0).
+  - `timeout` — `HERMES_HANDOFF_TIMEOUT=12m` elapsed (exit 124).
+  - `failed` — any other non-zero exit.
+
+### 2. Post-deploy verification
+
+- Workflow step: `Ask Hermes for post-deploy testbed verification` in [.github/workflows/deploy-production.yml](../.github/workflows/deploy-production.yml)
+- Trigger: runs after a successful production deploy, gated by `DEPLOY_RUN_HERMES_POST_DEPLOY` (default `1`; can be set to `0` via `workflow_dispatch` input `run_hermes_post_deploy`)
+- Hermes invocation: `averray_invoke_agent_task` with `intent='testbed_suite'`, `testSuiteId='post_deploy'`, cases `TBE2E-001`/`002`/`003`/`006`/`007`/`008`/`009`/`010`. Fallback path: `averray_handle_operator_command` with `text='testbed e2e suite'`.
+- **Correlation ID format:** `github-deploy-${run_id}-${head_sha}`
+- Evidence destinations:
+  1. **Workflow artifact** — full `hermes-post-deploy.log`, uploaded as `hermes-post-deploy-<run-id>` with 90-day retention.
+  2. **`$GITHUB_STEP_SUMMARY`** — first 220 lines of `hermes-post-deploy.log`, including correlation id, deployed sha, outcome. Durable while GitHub retains the workflow run.
+  3. **Runner-local `hermes-post-deploy.log`** — ephemeral; reaped with the runner after artifact upload.
+  4. **Hermes-container audit trail** — outside this repo's evidence model.
+- **Asymmetry vs. PR handoff:** there is **no PR comment / external thread** to anchor evidence to on this side. The artifact plus step summary are the GitHub-durable records. If both are reaped and the Hermes-side audit is unavailable, the post-deploy verification result is not recoverable.
+- Outcomes:
+  - `success` — exit 0.
+  - `timeout` — `HERMES_POST_DEPLOY_TIMEOUT=12m` elapsed (exit 124). The deploy itself already completed at this point; the verification result is what becomes uncertain.
+  - `failed` — any other non-zero exit. Fails the deploy workflow at the final "Fail if Hermes post-deploy verification failed" step.
+
+### 3. Scheduled operator self-reports
+
+- Workflow: [.github/workflows/hermes-operator-report.yml](../.github/workflows/hermes-operator-report.yml)
+- Trigger: daily `schedule` at `07:17 UTC`, plus manual `workflow_dispatch`
+  with `report_kind=all`, `ops_health`, or `daily_operator_brief`
+- Hermes invocation: `averray_handle_operator_command` through the Hermes
+  chat CLI with one of two read-only commands:
+  - `ops health`
+  - `daily operator brief`
+- **Correlation ID format:** `github-operator-report-${report_kind}-${run_id}-${run_attempt}`
+- Evidence destinations:
+  1. **Workflow artifact** — full log plus a JSON evidence manifest,
+     uploaded as `hermes-operator-report-<report-kind>-<run-id>-<run-attempt>`
+     with 90-day retention.
+  2. **`$GITHUB_STEP_SUMMARY`** — compact report kind, command,
+     correlation id, outcome, artifact name, and first 220 lines of Hermes
+     output.
+  3. **Hermes-container audit trail** — whatever Hermes records under the
+     same correlation id. Outside this repo's evidence model, but now
+     cross-referenceable from the GitHub run.
+- The job explicitly asks Hermes not to claim jobs, submit jobs, mutate
+  GitHub, send Slack messages, edit Wikipedia, or request approvals.
+- Outcomes:
+  - `success` — exit 0.
+  - `timeout` — `HERMES_OPERATOR_REPORT_TIMEOUT=12m` elapsed (exit 124).
+  - `failed` — any other non-zero exit. Fails the report workflow after the
+    artifact upload step.
+
+**First production proof:** manual workflow run
+[`26211100734`](https://github.com/averray-agent/agent/actions/runs/26211100734)
+on 2026-05-21 completed both report kinds successfully against the deployed
+production stack:
+
+- `ops_health`: artifact
+  `hermes-operator-report-ops_health-26211100734-1`, artifact id
+  `7129369151`, correlation id
+  `github-operator-report-ops_health-26211100734-1`.
+- `daily_operator_brief`: artifact
+  `hermes-operator-report-daily_operator_brief-26211100734-1`, artifact id
+  `7129370901`, correlation id
+  `github-operator-report-daily_operator_brief-26211100734-1`.
+
+The downloaded manifests reported `outcome: success` for both reports, and a
+local scan of the artifacts found no obvious API key, JWT, 1Password service
+account token, or SSH private-key patterns.
+
+## Routines without a surface in this repo
+
+The repo-visible scheduled workflow above proves that GitHub can ask
+Hermes for ops-health and daily-brief reports and retain the output.
+Hermes may still have its own container-side cron or Slack routines in
+`averray-reference-agent`; those are outside this repo's evidence model.
+Audit them in the reference-agent repo and cross-reference their
+correlation ids with the GitHub artifacts where possible.
+
+The adjacent platform health surfaces remain:
+
+- `/admin/status` JSON (HTTP request/response; not durable per se, but
+  the bootstrap self-report, XCM watcher/relay, and treasury-policy
+  blocks summarize the same info Hermes would consume).
+- `scripts/ops/check-hosted-stack.sh` and
+  `scripts/ops/check-hosted-stack-and-alert.sh` (operator-run hosted
+  smoke; separately from Hermes).
+
+## Quoting an id during an audit
+
+If an operator needs to ask "did Hermes actually run for X" and quote
+a single id:
+
+- For a PR review, quote `github-pr-<pr-number>-<head-sha>-<run-id>`
+  and grep the PR thread for the matching `<!-- hermes-pr-handoff:... -->`
+  marker. If the comment is missing but the workflow run completed,
+  check the GitHub Actions step summary for that run.
+- For a deploy verification, quote
+  `github-deploy-<run-id>-<head-sha>` and locate the workflow run by
+  `run-id`; download the `hermes-post-deploy-<run-id>` artifact for
+  full output, then read the step summary for the compact verdict.
+  There is no comment thread on this side.
+- For a scheduled/manual operator report, quote
+  `github-operator-report-<report-kind>-<run-id>-<run-attempt>` and
+  locate the workflow run by `run-id`; download
+  `hermes-operator-report-<report-kind>-<run-id>-<run-attempt>` for the
+  full log and JSON evidence manifest.
+
+## Remaining follow-up hardening
+
+- Keep the scheduled operator-report workflow enabled and periodically confirm
+  that new daily runs still upload both report artifacts.
+- Confirm any Hermes-container-native Slack or cron routines in
+  `averray-reference-agent` use the same durable correlation-id discipline.

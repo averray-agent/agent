@@ -1,10 +1,24 @@
 import { Hono } from "hono";
-import { client, graphql } from "ponder";
+import { graphql } from "ponder";
 import { db } from "ponder:api";
 import schema from "ponder:schema";
 
 import { decodeCursor, listTerminalXcmOutcomes, normalizeLimit } from "./xcm-outcomes";
+import { cursorForSource, type OutcomeCursorMode } from "./xcm-outcome-cursor";
 import { XcmOutcomePublisherService } from "./xcm-outcome-publisher";
+
+const GRAPHQL_BEARER_TOKEN = process.env.GRAPHQL_BEARER_TOKEN?.trim() || undefined;
+if (!GRAPHQL_BEARER_TOKEN) {
+  // Loud warning rather than silent open route: /graphql exposes the full
+  // indexer schema (including the GraphiQL playground) and is reverse-proxied
+  // by Caddy on `index.averray.com` with no perimeter auth. Set
+  // GRAPHQL_BEARER_TOKEN to gate the endpoint; until then a startup line
+  // here records that the route is intentionally public.
+  // eslint-disable-next-line no-console
+  console.warn(
+    "[indexer] WARNING: /graphql is publicly reachable — GRAPHQL_BEARER_TOKEN is unset. Set it in deploy/indexer.env.template (see header comments) to require Bearer auth."
+  );
+}
 
 const app = new Hono();
 const xcmExternalSourceType = process.env.XCM_EXTERNAL_SOURCE_TYPE?.trim() || "feed";
@@ -30,7 +44,7 @@ app.get("/", (c) =>
   c.json({
     status: "ok",
     service: "agent-platform-indexer",
-    endpoints: ["/graphql", "/sql", "/xcm/outcomes", "/xcm/outcomes/status"]
+    endpoints: ["/graphql", "/xcm/outcomes", "/xcm/outcomes/status"]
   })
 );
 
@@ -38,9 +52,11 @@ app.get("/xcm/outcomes", async (c) => {
   const limit = normalizeLimit(c.req.query("limit"));
   const cursor = decodeCursor(c.req.query("cursor"));
   const usePublishedFeed = await xcmOutcomePublisher.hasPublishedOutcomes();
+  const sourceMode: OutcomeCursorMode = usePublishedFeed ? "external" : "indexed";
+  const sourceCursor = cursorForSource(cursor, sourceMode);
   const outcomes = usePublishedFeed
-    ? await xcmOutcomePublisher.listPublishedOutcomes({ limit, cursor })
-    : await listTerminalXcmOutcomes({ limit, cursor });
+    ? await xcmOutcomePublisher.listPublishedOutcomes({ limit, cursor: sourceCursor })
+    : await listTerminalXcmOutcomes({ limit, cursor: sourceCursor });
 
   return c.json({
     items: outcomes.items,
@@ -48,7 +64,13 @@ app.get("/xcm/outcomes", async (c) => {
     meta: {
       limit,
       terminalStatuses: ["succeeded", "failed", "cancelled"],
-      source: usePublishedFeed ? "external_xcm_observer_feed" : "indexer_terminal_status_feed"
+      source: usePublishedFeed ? "external_xcm_observer_feed" : "indexer_terminal_status_feed",
+      sourceMode,
+      cursor: {
+        requestedMode: cursor?.mode,
+        accepted: !cursor || Boolean(sourceCursor),
+        reset: Boolean(cursor && !sourceCursor)
+      }
     }
   });
 });
@@ -57,8 +79,25 @@ app.get("/xcm/outcomes/status", async (c) =>
   c.json(await xcmOutcomePublisher.getStatus())
 );
 
-app.use("/graphql", graphql({ db, schema }));
-app.use("/sql/*", client({ db, schema }));
+app.use(
+  "/graphql",
+  async (c, next) => {
+    // Optional Bearer gate. When GRAPHQL_BEARER_TOKEN is unset, the route
+    // remains publicly reachable for backward compatibility (a startup
+    // warning is logged in that case). When set, every request must carry
+    // `Authorization: Bearer <token>` — both POST queries and the GET
+    // GraphiQL playground are gated through the same middleware.
+    if (!GRAPHQL_BEARER_TOKEN) {
+      return next();
+    }
+    const header = c.req.header("authorization") ?? "";
+    if (header !== `Bearer ${GRAPHQL_BEARER_TOKEN}`) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+    return next();
+  },
+  graphql({ db, schema })
+);
 
 export default app;
 

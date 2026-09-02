@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  DataFreshnessPill,
+  type FreshnessState,
+} from "@/components/shell/DataFreshnessPill";
 
 function formatTime(d: Date): string {
   const hh = String(d.getUTCHours()).padStart(2, "0");
@@ -9,18 +13,13 @@ function formatTime(d: Date): string {
   return `${hh}:${mm}:${ss}`;
 }
 
-const SEED_BLOCK = 24_118_402;
-
-export function RunsTopbar() {
+export function RunsTopbar({ freshness }: { freshness?: FreshnessState }) {
   const [time, setTime] = useState("");
-  const [block, setBlock] = useState(SEED_BLOCK);
 
   useEffect(() => {
     const tick = () => {
       const d = new Date();
       setTime(formatTime(d));
-      // Polkadot block ~6s cadence — bump every 6s mod for the demo clock.
-      if (d.getUTCSeconds() % 6 === 0) setBlock((b) => b + 1);
     };
     tick();
     const id = setInterval(tick, 1000);
@@ -45,12 +44,10 @@ export function RunsTopbar() {
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#2d8e5e] shadow-[0_0_0_3px_rgba(45,142,94,0.18)]" />
         <span className="text-[var(--avy-muted)]">UTC</span>
         <span>{time || "—"}</span>
-        <span className="text-[var(--avy-muted)]">·</span>
-        <span className="text-[var(--avy-muted)]">block</span>
-        <span>{block.toLocaleString()}</span>
       </div>
 
       <div className="flex items-center justify-self-end gap-2">
+        {freshness ? <DataFreshnessPill state={freshness} /> : null}
         <button
           type="button"
           className="inline-flex h-7 items-center gap-2 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-ink)] transition-all hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] hover:bg-white"

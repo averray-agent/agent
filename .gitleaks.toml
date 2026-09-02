@@ -1,0 +1,139 @@
+# gitleaks configuration for averray-agent/agent
+#
+# Phase 4a (per docs/SECRETS_MIGRATION.md §"Phase 4 — Hardening" §4a):
+# CI gitleaks runs as a last-resort sweep after the pre-commit hook
+# (.githooks/pre-commit) and GitHub Secret Scanning push protection.
+# Patterns here are deliberately a strict superset of the pre-commit
+# hook so CI can catch anything the local hook missed (e.g., commits
+# made on a clone where the operator never ran scripts/install-hooks.sh).
+#
+# Rule design notes:
+#   - We disable gitleaks's default ruleset and write Averray-specific
+#     rules. Generic rules false-positive heavily on bytes32 test
+#     fixtures (jobIds, evidenceHashes, schema content hashes) and
+#     base64 evidence payloads.
+#   - Every rule should be tight enough that any match is a real leak.
+#     False negatives are acceptable; false positives that block the
+#     CI on legitimate test fixtures are not.
+
+title = "Averray repo gitleaks rules"
+
+# Use only our explicit rules — don't run gitleaks's default ruleset.
+# The defaults flag too many bytes32 test fixtures as "private keys".
+[extend]
+useDefault = false
+
+# ─── high-risk Averray-specific tokens ─────────────────────────────
+
+[[rules]]
+id = "averray-op-service-account-token"
+description = "1Password service-account token (ops_… prefix). A leak gives a vault scope read access."
+regex = '''ops_[A-Za-z0-9_-]{30,}'''
+keywords = ["ops_"]
+
+[[rules]]
+id = "averray-resend-api-key"
+description = "Resend API key (re_… prefix). A leak lets an attacker send mail as @averray.com."
+regex = '''re_[A-Za-z0-9]{6,}_[A-Za-z0-9]{20,}'''
+keywords = ["re_"]
+
+[[rules]]
+id = "averray-admin-jwt-with-role"
+description = "Averray ADMIN_JWT carrying a role claim (admin or verifier)."
+# Match 3-part JWT where the payload (segment 2) contains base64-encoded "roles" substring.
+# `cm9sZXM` is the base64-encoded prefix of "roles".
+regex = '''eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]*cm9sZXM[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'''
+keywords = ["eyJ", "cm9sZXM"]
+
+# ─── crypto primitives ─────────────────────────────────────────────
+
+[[rules]]
+id = "averray-evm-private-key"
+description = "Likely-EVM private key (64 hex) assigned to a key/secret/signer-shaped identifier. The bytes32-test-fixture false-positives are filtered by the lhs identifier name."
+# The leading lhs ensures we only match assignment-shaped lines like
+# `PRIVATE_KEY=0xabc…` or `signerKey: '0xabc…'`, not bare 64-hex
+# strings that show up in test vectors.
+regex = '''(key|Key|KEY|secret|Secret|SECRET|[Pp][Rr][Ii][Vv]|signer|Signer|SIGNER)[A-Za-z0-9_-]*[=:"][[:space:]]*(0x)?[a-fA-F0-9]{64}([^a-fA-F0-9]|$)'''
+keywords = ["KEY", "key", "Key", "secret", "Secret", "SECRET", "signer", "Signer", "SIGNER", "PRIV", "priv", "Priv"]
+
+[[rules]]
+id = "averray-pem-private-key"
+description = "PEM/OpenSSH private key block."
+regex = '''-----BEGIN [A-Z ]*PRIVATE KEY-----'''
+keywords = ["BEGIN", "PRIVATE"]
+
+# ─── third-party tokens we use ─────────────────────────────────────
+
+[[rules]]
+id = "averray-aws-access-key-id"
+description = "AWS Access Key ID (AKIA…). We use IAM Roles Anywhere + OIDC; a static AKIA in commits is by definition a leaked long-lived credential."
+regex = '''AKIA[0-9A-Z]{16}'''
+keywords = ["AKIA"]
+
+[[rules]]
+id = "averray-aws-secret-access-key"
+description = "AWS secret access key, named-context form."
+regex = '''aws_secret_access_key[[:space:]]*=[[:space:]]*[A-Za-z0-9/+=]{40}'''
+keywords = ["aws_secret_access_key"]
+
+[[rules]]
+id = "averray-slack-token"
+description = "Slack bot/app/user/refresh token."
+regex = '''xox[baprs]-[0-9A-Za-z-]{10,}'''
+keywords = ["xoxb", "xoxa", "xoxp", "xoxr", "xoxs"]
+
+[[rules]]
+id = "averray-github-pat"
+description = "GitHub fine-grained PAT (ghp_) or classic PAT (gho_/ghu_/ghs_/ghr_)."
+regex = '''gh[ouprs]_[A-Za-z0-9]{36,}'''
+keywords = ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"]
+
+# ─── allowlist for known-safe paths ────────────────────────────────
+#
+# These paths are deliberately excluded from secret scans because the
+# values they contain are not real secrets:
+#
+#   - mcp-server/src/auth/auth.test.js carries a fixed LONG_SECRET test
+#     constant used as the HS256 secret for JWT signing in tests.
+#   - sdk/agent-platform-client.test.mjs has JWT fixtures.
+#   - deployments/*.json carries on-chain addresses (not secrets) and
+#     occasional fixture hashes the rules above might flag.
+#
+# When you add a new file with known test-only fixtures, add it here
+# with a one-line comment explaining why. Resist the urge to allowlist
+# entire directories — every entry should be a deliberate decision.
+
+[allowlist]
+description = "Test fixtures, on-chain-public material, and the secret-pattern config itself"
+paths = [
+  '''mcp-server/src/auth/auth\.test\.js''',
+  '''mcp-server/src/auth/jwt\.test\.js''',
+  '''sdk/agent-platform-client\.test\.mjs''',
+  '''sdk/agent-platform-client\.types\.test\.ts''',
+  '''deployments/.*\.json''',
+  # All Foundry test fixtures generate bytes32 values that look like
+  # private keys to a naive matcher. Our `averray-evm-private-key`
+  # rule already gates on the lhs identifier, but allowlist the test
+  # tree explicitly so we never accidentally widen the rule and start
+  # blocking legitimate test work.
+  '''test/.*\.t\.sol''',
+  '''contracts/.*\.t\.sol''',
+  # These files DESCRIBE secret patterns (regex strings) but don't
+  # contain real secrets. The patterns themselves are written so they
+  # don't self-match (e.g., `ops_[A-Za-z0-9_-]{30,}` doesn't satisfy
+  # `ops_[A-Za-z0-9_-]{30,}` because `[` breaks the alphanumeric run).
+  # Allowlisted explicitly so a future widening of any pattern can't
+  # accidentally make the scanner block our own config files.
+  '''\.gitleaks\.toml''',
+  '''\.githooks/pre-commit''',
+  # GitHub Actions workflow files. These never contain raw secret
+  # values — they reference GitHub Actions secrets via
+  # `${{ secrets.X }}` or 1Password items via `op://...` URIs. They
+  # occasionally include documentation comments that quote the *shape*
+  # of secrets (e.g., PEM begin-markers used as string assertions
+  # in shape-validation steps). Allowlisting here means a real raw
+  # secret in a workflow file would slip past CI gitleaks — but the
+  # pre-commit hook + GitHub push protection are the load-bearing
+  # defenses for that case anyway.
+  '''\.github/workflows/.*\.ya?ml''',
+]

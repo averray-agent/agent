@@ -1,7 +1,21 @@
 # Core Framework Roadmap
 
+> Current roadmap/status source: [`PROJECT_ROADMAP.md`](./PROJECT_ROADMAP.md).
+> This framework roadmap remains the detailed implementation reference for
+> jobs, sessions, verification, SDK, timeline, and operations work.
+
 This roadmap turns the current platform framework into a more durable
 production core.
+
+The current project status and sequencing boundary lives in
+[PROJECT_ROADMAP.md](PROJECT_ROADMAP.md). The product and architecture source
+document remains [AVERRAY_WORKING_SPEC.md](AVERRAY_WORKING_SPEC.md).
+[RC1_WORKING_SPEC.md](RC1_WORKING_SPEC.md) is retained as historical context
+only. The PR-sized rc1 execution sequence in
+[RC1_IMPLEMENTATION_PLAN.md](RC1_IMPLEMENTATION_PLAN.md) and the
+[SPEC_AUDIT_2026-05-13.md](SPEC_AUDIT_2026-05-13.md) reconciliation are
+historical references unless `PROJECT_ROADMAP.md` explicitly pulls an item
+forward.
 
 It is intentionally grounded in the code that exists today:
 
@@ -27,18 +41,32 @@ What the framework already does well:
 - jobs are normalized into a consistent catalog shape
 - claim flows have idempotency keys and claim locks
 - verification is pluggable at the handler level
-- recurring templates already exist as metadata plus manual fire support
-- sub-jobs already work as a platform pattern using `parentSessionId`
+- verification results persist replay inputs and verifier config snapshots
+- recurring templates now have a scheduler runtime, reserve policy, admin
+  status, and operator controls
+- sub-jobs now have active-worker creation, parent/child indexes, delegation
+  policy, reward reservation, and profile/operator lineage surfaces
 - the HTTP layer exposes enough surface area to support an operator console
+- the SDK/client surface covers the first external integration path
+- job/session event traces persist through memory and Redis state stores
+- the testnet backend verifier signer has moved to AWS KMS, the legacy raw-key
+  verifier has been revoked on-chain, and the KMS signer funding path has an
+  operator runbook plus `--use-kms` helper
 
 What is still thin:
 
-- verifier contracts are simple keyword or string matching
-- job schemas are references, not strongly enforced contracts
-- session lifecycle is implicit, not modeled as a strict state machine
-- recurring jobs do not have a first-class scheduler runtime yet
-- sub-jobs are linked by convention, not by stronger orchestration rules
-- integrations still rely on ad hoc request shapes instead of a typed SDK
+- verifier contracts still need stronger schema and handler-version replay
+  discipline
+- first-wave job schemas need stricter runtime enforcement
+- settlement, timeout, and dispute phases need fuller state-machine coverage
+- remaining producer event payloads still need taxonomy cleanup after funding,
+  settlement, and dispute receipts were folded into the shared trace
+- visible operator filters lag the backend timeline filter surface
+- native XCM/vDOT remains gated on real evidence capture, not implementation
+  scaffolding alone
+- launch operations still have open proof items: backup restore drill, pauser
+  rehearsal, self-report delivery, Phase 4 JWT hardening, KMS signer monitoring,
+  and mainnet custody readiness
 
 ---
 
@@ -71,30 +99,35 @@ and works for v1, but the contract between:
 
 is still too loose for high-trust operation.
 
-### Gaps today
+### Current implementation
 
-- `benchmark` and `deterministic` handlers operate on plain text evidence
-- there is no versioned verifier config envelope
-- verification results are stored, but the framework does not treat them as
-  a replayable artifact with a clear input snapshot
-- there is no notion of verifier policy version or handler version in the
-  stored result
+- job definitions and preflight responses expose a `verificationContract`
+  envelope with handler, verifier config version, config hash, and replay/result
+  endpoints
+- verification results persist `verificationInput`,
+  `verificationInputHash`, `verifierConfigSnapshot`, `verifierConfigHash`,
+  `verifierPolicyVersion`, `verifierConfigVersion`, and `handlerVersion`
+- direct verification ingestion and `/verifier/run` both enrich stored verdicts
+  with the same audit fields
+- `/verifier/replay` evaluates against the stored verifier config snapshot when
+  one exists, so audits are not silently affected by later config edits
+- replay drift reports handler, handler-version, verifier-policy-version,
+  evidence-schema, and verifier-config-hash mismatches
+- every registered verifier handler has a current-version fixture under
+  `mcp-server/src/services/__fixtures__/verifier-replay/<handler>/vN/`
 
-### Improve to
+### Remaining gaps
 
-- versioned verifier configs
-- explicit evidence shape per verifier mode
-- persisted verification input snapshot
-- persisted handler version and policy version
-- deterministic replay command for disputes and audits
+- `benchmark` and `deterministic` handlers can still operate on plain text
+  evidence for legacy jobs
+- replay still uses the current handler implementation; `handlerVersion`
+  records the version that ran, but the code itself is not version-pinned
 
 ### Concrete next changes
 
-- add `verifierConfig.version`
 - add `evidenceSchemaRef` or `submissionSchemaRef` to jobs
-- persist `verificationInput`, `verifierConfigVersion`, and `handlerVersion`
-  alongside the verdict
-- add a `replayVerification(sessionId)` internal path for audit and dispute use
+- keep adding handler-versioned replay fixtures before introducing v2 verifier
+  handlers or changing current handler semantics
 
 ### What this unlocks
 
@@ -110,35 +143,56 @@ is still too loose for high-trust operation.
 ### Why this matters
 
 The platform already points at schema-first jobs through
-`inputSchemaRef` and `outputSchemaRef`, but those fields are still
-mostly metadata. Real quality control still depends heavily on
-verifier terms and operator discipline.
+`inputSchemaRef` and `outputSchemaRef`, and the first built-in schema-native
+paths now validate against the runtime registry before submit and verifier
+execution. Real quality control still depends on verifier terms and operator
+discipline for custom/off-platform schemas.
+
+### Current state
+
+- `docs/schemas/jobs/` is generated from the runtime registry and checked in CI
+- first-party schemas exist for PR review findings, release readiness, issue
+  triage, and docs drift audit
+- built-in schema-native outputs are validated at submit time and again before
+  verifier execution
+- `/jobs/definition.submissionContract` and `/jobs/validate-submission` remain
+  the no-mutation source of truth for exact submit shape
+- the SDK exposes fail-closed helpers that validate drafts before claim/submit
+  mutations (`assertSchemaNativeSubmissionReady`,
+  `claimJobAfterValidation`, and `submitValidatedWork`)
+- the hosted product-proof worker loop now uses a built-in
+  `schema://jobs/product-proof-worker-loop` output contract, validates its
+  structured submission before claim, probes an invalid `submission.output`
+  wrapper through the read-only validation route, runs verification from the
+  stored structured session submission, checks configured-signer and worker
+  AgentAccountCore USDC liquidity before mutation/claim, and records both
+  validation traces plus the verifier-input and funding modes in the launch
+  evidence gate
+- the generic claim-and-submit helper now uses the same schema-native readiness
+  guard before claim and resolves the expected schema from definition/preflight
+  first, so advertised contract drift blocks before any claim is consumed
 
 ### Gaps today
 
-- schema refs are not strongly validated at job creation time
-- submit flows do not validate structured output against a concrete schema
-- the first-wave jobs are structured by convention, not enforced runtime
-- schema libraries are still sparse outside the public profile and badge docs
+- custom/off-platform schema refs are still allowed without signed schema
+  registration
+- remaining third-party/reference-agent helper workflows should adopt the SDK
+  schema-native readiness helper as they graduate to structured output
+- richer verifier replay fixtures should land before introducing v2 handlers
 
 ### Improve to
 
-- a small reusable schema registry
 - job creation that verifies referenced schemas exist
-- submit-time validation before verifier execution
 - richer operator errors for invalid structured submissions
+- signed schema registration for custom/off-platform work
 
 ### Concrete next changes
 
-- add job schema docs under `docs/schemas/jobs/`
-- define first-party schemas for:
-  - PR review findings
-  - release readiness
-  - issue triage
-  - docs drift audit
-- validate `inputSchemaRef` and `outputSchemaRef` against known schema files
-- let `submitWork` accept structured JSON payloads in addition to plain text
-- run schema validation before `VerifierService.verifySubmission`
+- extend the product-proof validation-before-claim pattern + SDK
+  pre-validation helpers to each remaining hosted/reference-agent
+  helper workflow as it graduates to schema-native output
+- continue tightening custom/off-platform schema refs once a signed schema
+  registration flow exists
 
 ### What this unlocks
 
@@ -160,29 +214,32 @@ and
 That works, but it still behaves more like a set of updates than a strict state
 machine.
 
-### Gaps today
+### Current implementation
 
-- legal transitions are implicit
-- `claimed`, `submitted`, `resolved`, `rejected`, `closed`, `expired`,
-  `timed_out` exist, but transition rules are not centralized
-- evidence submission, verification, settlement, and dispute posture are not
-  modeled as first-class states
-- retries and re-open semantics are thin
+- `session-state-machine.js` defines the canonical transition table and public
+  status metadata
+- claim, submit, verification ingestion, expiry, and dispute resolution now
+  route through shared transition guards
+- duplicate submit attempts and verifier callbacks on non-verifiable sessions
+  fail closed before submission replacement, handler execution, chain
+  settlement, or verification result ingestion
+- sessions persist compact `statusHistory` entries with reason, timestamp, and
+  metadata
+- `session-state-machine.test.js` now covers every legal and illegal edge in
+  the current transition table, plus the verifier callback receive guard
 
-### Improve to
+### Remaining gaps
 
-- one explicit session transition table
-- precondition checks per transition
-- consistent event emission per transition
-- terminal-state semantics enforced in one place
+- settlement and dispute posture are still mostly transition outcomes and
+  metadata, not separately typed workflow phases
+- retries and re-open semantics still live primarily in claim handling
 
 ### Concrete next changes
 
-- create a `session-state-machine.js` module
-- define allowed transitions and side effects
-- route `claimJob`, `submitWork`, verification ingestion, timeout handling,
-  and future dispute actions through it
-- persist a compact state transition history for each session
+- route future settlement, timeout, and dispute actions through dedicated
+  state-machine helpers
+- expose richer transition reason taxonomy for operator UI timelines and agent
+  diagnostics
 
 ### What this unlocks
 
@@ -201,27 +258,30 @@ The claim path already has a good start with idempotency keys and claim locks.
 Admin mutations and some operator flows should reach the same standard before
 load and automation grow.
 
-### Gaps today
+### Current implementation
 
-- claim idempotency is stronger than job creation idempotency
-- posting bundles, recurring fires, and future schedulers need duplicate-safe
-  semantics
-- some mutation routes still depend on callers simply not repeating requests
+- claim idempotency is enforced through session lookup and claim locks
+- `POST /admin/jobs`, `POST /admin/jobs/fire`, recurring pause/resume,
+  provider ingestion routes, and async XCM actions persist mutation receipts in
+  the state store
+- admin job creation, manual recurring fires, recurring pause/resume, and
+  provider ingestion runs plus async XCM allocate/deallocate plus
+  observe/finalize store canonical request hashes with their idempotency
+  receipts, so same-key replays return the original result while same-key
+  payload drift fails with a clear conflict
+- dispute verdict and release routes keep their canonical dispute receipts while
+  also storing scoped idempotency envelopes keyed by wallet, dispute id, and
+  client key
 
-### Improve to
+### Remaining gaps
 
-- idempotency support across all meaningful write routes
-- duplicate-safe admin posting
-- clearer conflict codes for retries and replays
+- future direct settlement override routes should adopt the same receipt wrapper
 
 ### Concrete next changes
 
-- add optional idempotency keys to:
-  - `POST /admin/jobs`
-  - `POST /admin/jobs/fire`
-  - future dispute and settlement routes
-- persist mutation receipts in the state store
-- expose conflict reasons cleanly for operators and scripts
+- reuse the same receipt wrapper for future settlement routes
+- expose idempotency replay/conflict metadata in operator-facing docs and SDK
+  helpers
 
 ### What this unlocks
 
@@ -244,14 +304,49 @@ The platform needs to answer operator questions like:
 - did stake move?
 - did a recurring template fire?
 
-Today, some of this exists in logs, some in sessions, some in verification
-results, and some only in the operator app.
+Some of this exists in logs, some in sessions, some in verification results,
+and some only in the operator app. The backend now exposes the shared
+job/session timeline spine, but the remaining work is to make every producer
+emit into it with the same topic taxonomy.
 
-### Gaps today
+### Current implementation
 
-- no unified job/session timeline view in the backend model
-- recurring and sub-job lineage are visible only indirectly
-- verification and funding state are not yet merged into one operational trace
+- `/session/timeline` exposes v2 session lifecycle, verification, child-job,
+  and child-session events
+- `/admin/jobs/timeline` exposes v2 job state, sessions, verification,
+  child/derivative lineage, and replayed event-bus entries
+- timeline entries use one canonical envelope with `id`, `type`, `at`,
+  `timestamp`, `correlationId`, `phase`, `source`, `topic`, `severity`,
+  direct `jobId` / `sessionId` / `wallet` fields, and compact `data`
+- event-bus entries are persisted through the state store in both memory and
+  Redis modes, so `/events` replay and `/admin/jobs/timeline` can recover
+  recent event traces after a process restart
+- `/events` and `/admin/jobs/timeline` accept source, topic, phase, severity,
+  and correlation-id filters; the frontend client hook can pass the same filter
+  shape through to the backend
+- the operator app exposes visible job/session timeline controls for source,
+  topic, phase, severity, wallet, and correlation-id filters, and keeps the
+  filtered state in the URL for refreshable evidence links
+- event topic classification now covers the known non-chain producer families:
+  policy, capability grants, service tokens, job ingestion, job lifecycle
+  sweeps, funded-job upstream status, bootstrap self-reporting, recurring
+  scheduler events, and XCM observer/watcher events
+- request-scoped XCM observer/watcher events promote `requestId` to the
+  top-level `correlationId`, so queue/observe/finalize timelines are filterable
+  by one identifier
+- local claim-lock funding, verification settlement/rejection, disputed
+  verification, dispute verdict, and stake-release receipts emit canonical
+  `settlement` source events with funding, settlement, and dispute phases plus
+  direct job/session/wallet/correlation fields
+- recurring template fire history is reconstructed through derivative jobs,
+  and sub-job lineage is reconstructed through `parentSessionId`
+
+### Remaining gaps
+
+- future producer families can still drift if they add new topic prefixes
+  without classifier coverage and tests
+- payload schemas are still producer-owned; the next taxonomy pass should
+  standardize compact `data` shapes for newly added operational families
 
 ### Improve to
 
@@ -262,10 +357,10 @@ results, and some only in the operator app.
 
 ### Concrete next changes
 
-- standardize platform event topics and payload shapes
-- store or reconstruct timelines from events plus state snapshots
-- add admin/session endpoints for timeline inspection
-- include recurring template fire history and parent/child links in those views
+- require classifier tests alongside any new `eventBus.publish` topic family
+- standardize compact payload shapes for future operational event producers
+- keep operator filter presets in step with new canonical source, phase, and
+  topic names as producer coverage expands
 
 ### What this unlocks
 
@@ -283,12 +378,33 @@ results, and some only in the operator app.
 Auth is currently solid enough for launch, but capabilities are still spread
 across environment config, JWT roles, and route-level decisions.
 
-### Gaps today
+### Current implementation
 
-- roles are only `admin` and `verifier`
-- route protection is clear, but capability composition is still coarse
-- environment policy and runtime capability policy are not expressed in one
-  source of truth
+- `auth-policy-v1` defines the shared base capability set, role expansions,
+  method-aware route requirements, UI-control requirements, and automation
+  action requirements
+- auth middleware resolves capabilities from roles plus optional signed scopes,
+  and rejects route access when the required capabilities are missing
+- `/auth/session` and `/admin/status` expose the active capability matrix so
+  the operator app and automation clients can render controls from backend
+  policy instead of duplicating route rules
+- `scripts/ops/check-service-token-proof.mjs` and
+  `CHECK_SERVICE_TOKEN_PROOF=1 ./scripts/ops/check-hosted-stack.sh` provide an
+  opt-in hosted proof for issue -> use -> deny ungranted routes -> revoke ->
+  list-redacted behavior
+- `hosted-service-token-proof.yml` runs that proof from the production GitHub
+  environment, loads `ADMIN_JWT` from `op://prod-smoke/admin-jwt/password`, and
+  uploads the sanitized JSON evidence artifact without exposing token material
+- GitHub Actions run
+  [`25969321980`](https://github.com/averray-agent/agent/actions/runs/25969321980)
+  passed against production on 2026-05-16; the sanitized launch evidence is
+  archived at
+  [`docs/evidence/service-token-proof-hosted-2026-05-16.json`](evidence/service-token-proof-hosted-2026-05-16.json)
+
+### Remaining gaps
+
+- signed tokens are still issued from coarse environment role lists
+- delegated-wallet UX should expand again once native Substrate auth lands
 
 ### Improve to
 
@@ -301,14 +417,12 @@ across environment config, JWT roles, and route-level decisions.
 
 ### Concrete next changes
 
-- document and codify route-to-capability mapping
-- add a capability resolver layer on top of roles
-- let admin status expose the active capability model to the operator app
-- prepare for future scopes such as:
-  - `jobs:create`
-  - `jobs:fire-recurring`
-  - `verifier:run`
-  - `ops:view`
+- keep `hosted-service-token-proof.yml` green as the service-token grant
+  surface evolves
+- keep the service-token grant cache invalidation covered as the revocation
+  path evolves
+- revisit delegated-wallet UX when native Substrate sign-in is accepted by
+  protected HTTP routes
 
 ### What this unlocks
 
@@ -323,32 +437,37 @@ across environment config, JWT roles, and route-level decisions.
 ### Why this matters
 
 Recurring jobs are one of the strongest retention mechanics in the whole
-product, but today they are still a pattern plus manual fire endpoint.
+product. The scheduler/runtime foundation is now in place; the remaining work
+is proving the live reserve and firing behavior under hosted operation.
 
-### Gaps today
+### Remaining gaps
 
-- no built-in scheduler worker
-- no durable `lastFiredAt` / `nextFireAt` runtime record
-- no failure policy beyond external retries
-- no reserve-aware fire control
+- hosted recurring behavior still needs more live proof across real funded
+  templates
+- missed-fire behavior is conservative and does not backfill every skipped
+  interval
+- recurring telemetry should stay folded into job/session timelines as the
+  event taxonomy matures
 
 ### Improve to
 
-- a proper scheduler runtime
-- status visibility for templates
+- scheduler runtime as a product primitive
+- status visibility for templates and reserve exhaustion
 - pause/resume controls
 - conservative missed-fire behavior
 
 ### Concrete next changes
 
-- add a scheduler worker that scans recurring templates on boot
-- persist template runtime metadata:
+- [x] add a scheduler worker that scans recurring templates on boot
+- [x] persist template runtime metadata:
   - `lastFiredAt`
   - `nextFireAt`
   - `lastResult`
   - `paused`
-- gate firing on available reserve and policy checks
-- expose status in admin endpoints and operator UI
+- [x] gate firing on finite template reserve policy
+- [x] expose status in admin endpoints
+- [x] wire operator UI controls for reserve exhaustion and next firing
+- [x] back recurring reserve with escrow-native/on-chain poster funding
 
 ### What this unlocks
 
@@ -365,12 +484,12 @@ product, but today they are still a pattern plus manual fire endpoint.
 Sub-jobs already work as a pattern, which is good. The next jump is to make
 delegation feel like a framework feature instead of just a metadata convention.
 
-### Gaps today
+### Remaining gaps
 
-- `parentSessionId` is preserved but not strongly orchestrated
-- no parent budget policy or depth policy
-- no parent-centric child session view in the backend model
-- no narrower route for authenticated worker-created sub-jobs
+- no on-chain parent/child linkage
+- no automatic parent-to-child payout streaming
+- profile and dashboard lineage surfaces should keep improving as real
+  multi-agent workflows create sharper UX requirements
 
 ### Improve to
 
@@ -380,11 +499,16 @@ delegation feel like a framework feature instead of just a metadata convention.
 
 ### Concrete next changes
 
-- add a dedicated sub-job creation route that only works for the active worker
+- [x] add a dedicated sub-job creation route that only works for the active worker
   on an in-flight parent session
-- persist parent/child indexes for fast lookup
-- expose child runs on session detail endpoints
-- optionally add delegation budget fields later
+- [x] persist parent/child indexes for fast lookup
+- [x] expose child runs on session detail endpoints
+- [x] add delegation budget and depth policy fields
+- [x] reserve the child reward from the parent wallet at sub-job creation
+- [x] extend profile and operator UI surfaces around sub-contracting history
+  (PR #192 added the operator-side `JobLineagePanel` on `/runs/detail`;
+  PR #203 added the public agent profile's `lineage` block + delegation
+  history section)
 
 ### What this unlocks
 
@@ -399,37 +523,95 @@ delegation feel like a framework feature instead of just a metadata convention.
 ### Why this matters
 
 The platform is already programmable, but integrations still rely on raw HTTP
-shapes. The frontend client in
-[frontend/http-client.js](/Users/pascalkuriger/repo/Polkadot/frontend/http-client.js)
-proves the need, but it is UI-focused rather than an external integration SDK.
+shapes unless they use the first SDK surface. The current client is now good
+enough as a first integration path; future work should harden examples and
+replay helpers as external agents exercise it.
 
-### Gaps today
+### Remaining gaps
 
-- no shared typed client for jobs, sessions, auth, verifier, and admin flows
-- request shapes are duplicated across scripts, demos, and frontend code
-- no canonical integration surface for third-party builders
+- canonical integration examples are young and should grow with real external
+  agent use
+- verifier replay helpers and richer schema examples should be added when
+  external verifier operators need them
 
 ### Improve to
 
-- one small JS/TS SDK first
+- one small JS/TS SDK as the first integration path
 - generated types or hand-maintained types from the current API surface
 - stable helpers for auth, job posting, session operations, and admin actions
 
 ### Concrete next changes
 
-- create a lightweight `sdk/` package or `mcp-server/src/client/` module
-- wrap:
+- [x] keep hardening `sdk/agent-platform-client.js`
+- [x] ensure it wraps:
   - auth nonce + verify
   - list/recommend/preflight jobs
   - claim / submit / resume
+  - session and job timeline inspection
   - admin job create / recurring fire / status
-- share validation types with docs and scripts where possible
+- [x] add hand-maintained endpoint response declarations for the current API
+- [x] expose structured API errors for automation
+- [x] generate SDK types from the API/schema source instead of maintaining them
+  by hand
+- [x] share validation types with frontend scripts where possible
 
 ### What this unlocks
 
 - faster integrations
 - less duplicated request glue
 - easier automation and external builder adoption
+
+---
+
+## Current Audit Queue
+
+As of [SPEC_AUDIT_2026-05-13.md](SPEC_AUDIT_2026-05-13.md), the next work
+should prioritize live-proof and launch-risk items before adding new product
+surface:
+
+1. tighten schema-native jobs for the first-wave job families and extend helper
+   adoption beyond the product-proof loop
+2. finish dispute/arbitration launch wiring
+3. capture the native XCM deposit, withdraw, and failure evidence pack
+4. add visible timeline filters to the operator app
+5. continue Phase 4 JWT hardening, KMS signer monitoring, and mainnet custody
+   readiness
+
+Completed or reconciled since the audit:
+
+- The hosted bootstrap instrumentation proof is complete through the Hermes
+  operator-reporting path. Production deploy run
+  [`26511414359`](https://github.com/averray-agent/agent/actions/runs/26511414359)
+  passed on 2026-05-27 with `smoke_check_bootstrap_instrumentation=1`, a live
+  admin JWT loaded from 1Password, Hermes post-deploy verification enabled,
+  and no branded Resend send required. Publish Discovery Manifest run
+  [`26511490876`](https://github.com/averray-agent/agent/actions/runs/26511490876)
+  passed immediately afterward. Branded email remains an optional transport to
+  prove later with `bootstrap_self_report_send_now=1` after a verified sender
+  domain exists.
+- The hosted worker-loop product-proof evidence gate passed in Deploy
+  Production run `25988470399` on 2026-05-17 with
+  `smoke_check_product_proof_gate=1` and
+  `product_proof_require_worker_loop=1`. The evidence covered direct-object
+  validation, rejected `submission.output` wrapper validation, configured KMS
+  signer funding, claim, submit, verifier approval, resolved session state,
+  badge/profile lookup, and the final gate over
+  `/srv/agent-stack/product-proof-worker-loop-evidence.json`.
+- The KMS signer funding workflow now has a `--use-kms` path and updated
+  operator runbook (`scripts/ops/fund-signer-usdc-deposit.mjs`,
+  `docs/TESTNET_FUND_SIGNER.md`), so hosted product-proof funding no longer
+  depends on an exportable backend signer key.
+- Phase 3 backend-signer custody is complete for testnet: production runs with
+  `SIGNER_BACKEND=kms`, the KMS-derived address
+  `0x31ad432dFe083B998c69B6dB88A984ec5207ab7F` is authorized, and the retired
+  raw-key verifier `0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519` has been
+  revoked on-chain.
+- The first Phase 4B JWT hardening design pass has landed, covering KMS-signed
+  access tokens, opaque refresh-token replay rules, and key-rotation
+  expectations. Implementation/live proof remains in the queue above.
+- XCM publisher hardening advanced with required upstream failure codes and a
+  stale replay guard. The remaining XCM launch item is still live evidence for
+  native deposit/withdraw/failure paths, not the basic failure-code plumbing.
 
 ---
 

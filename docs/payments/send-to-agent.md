@@ -30,17 +30,48 @@ Two variants, both in [`contracts/AgentAccountCore.sol`](../../contracts/AgentAc
 | Function | Callable by | Typical caller |
 |---|---|---|
 | `sendToAgent(address recipient, address asset, uint256 amount)` | The sender themselves (via `msg.sender`) | A wallet signing a tx directly |
-| `sendToAgentFor(address from, address recipient, address asset, uint256 amount)` | Service operators only (TreasuryPolicy allowlist) | The backend hot signer relaying a SIWE-authenticated request |
+| `sendToAgentFor(address from, address recipient, address asset, uint256 amount, uint256 nonce, uint256 deadline, bytes signature)` | Service operators only, plus a valid EIP-712 signature from `from` | The backend hot signer relaying a user-signed payment intent |
 
 Both paths:
 
 - Revert `InvalidRecipient` for zero address or self-transfer
 - Revert `ZeroAmount` for amount == 0
 - Revert `InsufficientLiquidity` when the sender's `liquid[asset]` is
-  short of the requested amount
+  short of the requested amount after outstanding debt is reserved
 - Emit `AgentTransfer(from, to, asset, amount)`
 - Honour the `whenNotPaused` kill-switch — paused protocols cannot move
   balance, consistent with every other mutating path in the contract
+
+The relayed path additionally:
+
+- Reverts `InvalidSignature` unless `signature` recovers `from`
+- Reverts `ExpiredAuthorization` once `deadline` has passed
+- Reverts `AuthorizationAlreadyUsed` when the same `(from, nonce)` is
+  replayed
+
+The EIP-712 domain is:
+
+```json
+{
+  "name": "Averray AgentAccountCore",
+  "version": "1",
+  "chainId": "<current chain id>",
+  "verifyingContract": "<AgentAccountCore address>"
+}
+```
+
+The signed type is:
+
+```solidity
+SendToAgent(
+  address from,
+  address recipient,
+  address asset,
+  uint256 amount, // raw base units, e.g. 5 USDC = 5000000
+  uint256 nonce,
+  uint256 deadline
+)
+```
 
 Neither makes an external call, so there's no ReentrancyGuard. The
 entire state update is a bounded pair of `uint256` operations.
@@ -57,7 +88,12 @@ Content-Type: application/json
 {
   "recipient": "0x...",
   "asset": "DOT",
-  "amount": 5
+  "amount": 5,
+  "transferAuthorization": {
+    "nonce": "42",
+    "deadline": "1780000000",
+    "signature": "0x..."
+  }
 }
 ```
 
@@ -70,6 +106,10 @@ Response:
   "to": "0x<recipient-checksummed>",
   "asset": "DOT",
   "amount": 5,
+  "transferAuthorization": {
+    "nonce": "42",
+    "deadline": "1780000000"
+  },
   "balances": {
     "from": { "wallet": "...", "liquid": { "DOT": 15 }, ... },
     "to":   { "wallet": "...", "liquid": { "DOT": 5 }, ... }
@@ -84,10 +124,14 @@ Semantics:
   someone else's behalf, even with an admin role. If you need a third
   party to initiate a payment, that's a sub-job (see upcoming
   docs/payments/sub-jobs.md).
-- The backend hot signer calls `sendToAgentFor(auth.wallet, recipient, asset, amount)`
-  against the contract, so the on-chain operator-only gate is satisfied
-  by the platform signer, not the user's key. The user doesn't need to
-  hold native gas.
+- The backend hot signer calls
+  `sendToAgentFor(auth.wallet, recipient, asset, amount, nonce, deadline, signature)`
+  against the contract with `amount` converted to the asset's raw base
+  units. The EIP-712 authorization must sign that same raw amount. The
+  platform signer pays gas, but the contract validates the user's
+  EIP-712 intent before moving any liquid balance.
+- The response echoes `nonce` and `deadline` for reconciliation but never
+  echoes the signature.
 - Self-transfer is rejected at both the HTTP and contract layer.
 - The backend stashes both fresh account summaries in the response so
   the caller doesn't need a second `/account` round-trip to see the

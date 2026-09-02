@@ -6,6 +6,9 @@
  * This page is the auditor's read-only log of every session across all runs.
  */
 
+import type { SourceKind } from "@/components/runs/StatePill";
+import type { OutcomeRationale } from "@/lib/ui/outcome-rationale-types";
+
 export type SessionState =
   | "active"
   | "submitted"
@@ -25,6 +28,18 @@ export type VerifierMode =
 
 export type LifecycleStageState = "done" | "current" | "pending";
 
+/** Provenance-decided kind of a chain-anchored reference. Only `tx` is a real
+ *  on-chain transaction that may be linked to a block explorer. `job` is an
+ *  escrow `chainJobId` — the bytes32 EscrowCore key, shape-identical to a tx
+ *  hash but never a transaction and never linkable. `none` is the empty
+ *  placeholder. Classified by `@/lib/chain/chain-reference`. */
+export type ChainRefKind = "tx" | "job" | "none";
+
+export interface ChainRef {
+  kind: ChainRefKind;
+  value: string;
+}
+
 export interface SessionLifecycleStage {
   label: string;
   meta: string;
@@ -38,8 +53,23 @@ export interface EscrowMovement {
   from: string;
   to: string;
   amount: string;
-  tx: string;
+  /** Chain-anchored reference for the movement. Most movements carry the
+   *  escrow `chainJobId` (`kind: "job"`); only timeline events with a genuine
+   *  transaction field carry `kind: "tx"`. The ledger labels and styles the
+   *  two differently so a job id never reads as a transaction. */
+  ref: ChainRef;
   tone?: "neutral" | "accent" | "warn" | "bad";
+  /** Raw timeline metadata used by the session-drawer event filter. The
+   *  /session/timeline endpoint does not (yet) accept query-string
+   *  filters, so the drawer filters the rendered movements
+   *  client-side against these fields. Optional because legacy seed
+   *  movements predate the timeline-event filter rail. */
+  source?: string;
+  topic?: string;
+  phase?: string;
+  severity?: string;
+  wallet?: string;
+  correlationId?: string;
 }
 
 export interface PayoutEntry {
@@ -47,12 +77,20 @@ export interface PayoutEntry {
   role: "worker" | "verifier" | "co-signer" | "treasury";
   amount: string;
   at: string;
-  tx: string;
+  /** Chain-anchored reference for the payout — see `EscrowMovement.ref`. */
+  ref: ChainRef;
 }
 
 export interface SessionRow {
   id: string;
   runRef: string;
+  /**
+   * Provenance of the run this session is keyed to. Optional because
+   * legacy/native runs predate ingested sources. When set, the row renders
+   * a small SourceBadge so an auditor can scan GitHub-PR vs. Wikipedia-
+   * proposal-review sessions without opening the drawer.
+   */
+  source?: SourceKind;
   job: { title: string; meta: string };
   worker: {
     handle: string;
@@ -66,7 +104,25 @@ export interface SessionRow {
   age: string;
   ageStale?: boolean;
   lastEvent: { text: string; meta: string; tone?: "neutral" | "accent" | "warn" | "bad" };
+  outcomeRationale?: OutcomeRationale;
   openedAt: string;
+  /**
+   * Raw ISO timestamps from the backend session record. The `openedAt`
+   * field above is a display string (e.g. "14:48 UTC"); these are the
+   * unformatted source-of-truth values aggregate views need to compute
+   * real durations like avg / p50 / p95 settle time.
+   * Optional because older sessions may not have all four fields.
+   */
+  timestamps?: {
+    claimedAt?: string;
+    submittedAt?: string;
+    /** When the session reached its terminal state (verified, settled,
+     *  rejected, slashed). Maps to `resolvedAt` on the backend, falling
+     *  back to `closedAt`. */
+    settledAt?: string;
+    /** Most-recent backend mutation; useful for "age" recomputation. */
+    updatedAt?: string;
+  };
 }
 
 export interface SessionDetail extends SessionRow {

@@ -82,6 +82,32 @@ function SignInContent() {
               your wallet to runs, stakes, verifier receipts, and reputation —
               so the work you do becomes a legible trail.
             </p>
+            <div className="mt-6">
+              <p className="eyebrow">What you&apos;ll do here</p>
+              <ul className="mt-2 grid gap-1.5 text-sm text-[var(--ink)]">
+                <li className="flex items-start gap-2">
+                  <span
+                    className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-[var(--accent)]"
+                    aria-hidden="true"
+                  />
+                  Claim open runs and submit work for verification.
+                </li>
+                <li className="flex items-start gap-2">
+                  <span
+                    className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-[var(--accent)]"
+                    aria-hidden="true"
+                  />
+                  Hold and settle escrow in USDC — no platform token.
+                </li>
+                <li className="flex items-start gap-2">
+                  <span
+                    className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-[var(--accent)]"
+                    aria-hidden="true"
+                  />
+                  Build portable reputation from signed receipts.
+                </li>
+              </ul>
+            </div>
           </div>
           <div className="mt-8 grid gap-2 text-xs text-[var(--muted)]">
             <span className="inline-flex items-center gap-2">

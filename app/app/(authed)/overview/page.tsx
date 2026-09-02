@@ -1,359 +1,82 @@
 "use client";
 
 import { useMemo } from "react";
-import { OverviewTopbar } from "@/components/overview/OverviewTopbar";
+import {
+  OverviewTopbar,
+  type CapabilityWarning,
+} from "@/components/overview/OverviewTopbar";
 import { MissionHero } from "@/components/overview/MissionHero";
-import { RoomVitals, type KpiData } from "@/components/overview/RoomVitals";
+import { OrientationCard } from "@/components/overview/OrientationCard";
+import { RoomVitals } from "@/components/overview/RoomVitals";
 import {
   NeedsActionList,
   type AlertItem,
 } from "@/components/overview/NeedsActionList";
 import {
   LaneStatusGrid,
-  type LaneCardData,
 } from "@/components/overview/LaneStatusGrid";
+import { PlatformPulse } from "@/components/overview/PlatformPulse";
+import { ProviderOperationsCard } from "@/components/overview/ProviderOperationsCard";
+import { RecurringRuntimeCard } from "@/components/overview/RecurringRuntimeCard";
+import { JobLifecycleStrip } from "@/components/overview/JobLifecycleStrip";
 import {
-  PlatformPulse,
-  type PulseEvent,
-} from "@/components/overview/PlatformPulse";
-import { useAccount, useAlerts, useHealth, useJobs, useSessions, useStrategyPositions } from "@/lib/api/hooks";
+  useAccount,
+  useAdminSessions,
+  useAlerts,
+  useBadges,
+  useHealth,
+  useJobs,
+  usePolicies,
+  useProviderOperations,
+  usePublicProviderOperations,
+  useStrategyPositions,
+} from "@/lib/api/hooks";
+import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { extractRunJobs } from "@/lib/api/run-adapters";
+import { buildProviderOperations } from "@/lib/api/provider-operations";
+import { buildRecurringRuntimeSummary } from "@/lib/api/recurring-jobs";
+import {
+  buildJobLifecycleSummary,
+  buildPublicJobLifecycleSummary,
+  EMPTY_JOB_LIFECYCLE_SUMMARY,
+} from "@/lib/api/job-lifecycle";
 import {
   buildLaneCards,
   buildOverviewAlerts,
   buildRoomVitals,
 } from "@/lib/api/treasury-adapters";
 
-// TODO(data): replace each block's seed data with the matching SWR hook
-//   - Room vitals: useOnboarding() + useSessions() + useAccount()
-//   - Needs action now: useSessions().filter(needsAction)
-//   - Lanes: derived from useSessions() + useAccount() + usePolicies()
-//   - Platform pulse: startEventStream() from lib/events/stream.ts
-// Until those hook response shapes are stable, the page renders the same
-// fixture data Claude Design used so the layout reads correctly.
-
-const ROOM_VITALS: KpiData[] = [
-  {
-    label: "Runs in motion",
-    value: "14",
-    spark: [8, 9, 7, 10, 11, 9, 12, 11, 13, 12, 14],
-    delta: (
-      <>
-        <span className="font-[family-name:var(--font-display)] text-[11px] font-extrabold">
-          ↑
-        </span>
-        +3 since 09:00 · +21% vs yest.
-      </>
-    ),
-    deltaTone: "good",
-  },
-  {
-    label: "Agents active",
-    value: "8",
-    spark: [8, 8, 7, 8, 8, 9, 8, 7, 8, 8, 8],
-    sparkColor: "#8a8f88",
-    delta: <>→ flat vs. yesterday · 2 idle &gt;1h</>,
-    deltaTone: "neutral",
-  },
-  {
-    label: "Capital at work",
-    value: "214",
-    unit: "DOT",
-    spark: [182, 189, 195, 190, 198, 201, 196, 205, 207, 210, 214],
-    delta: (
-      <>
-        <span className="font-[family-name:var(--font-display)] text-[11px] font-extrabold">
-          ↑
-        </span>
-        +18 DOT locked · +9.2%
-      </>
-    ),
-    deltaTone: "good",
-  },
-  {
-    label: "Treasury posture",
-    value: "Green",
-    valueAccent: true,
-    spark: Array.from({ length: 11 }, (_, i) => 1 + Math.sin(i / 2) * 0.05),
-    delta: <>Stable 6d · coverage 3.2×</>,
-    deltaTone: "good",
-  },
-];
-
-const NEEDS_ACTION: AlertItem[] = [
-  {
-    id: "dispute-r_4e10c",
-    tone: "warn",
-    title: "Dispute on handoff signature",
-    ref: "run-2739 · r_4e10c",
-    body: (
-      <>
-        Co-signer{" "}
-        <code className="rounded-[6px] bg-[color:rgba(17,19,21,0.05)] px-1.5 py-px font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)]">
-          0x9A13…0cb2
-        </code>{" "}
-        reports payload hash mismatch. Stake of <b>3 DOT</b> locked pending
-        verifier review.
-      </>
-    ),
-    ctaLabel: "Open in Runs →",
-    ctaHref: "/runs",
-  },
-  {
-    id: "schema-dual-sign",
-    tone: "warn",
-    title: "Schema migration awaiting second signer",
-    ref: "run-2736",
-    body: (
-      <>
-        Policy{" "}
-        <code className="rounded-[6px] bg-[color:rgba(17,19,21,0.05)] px-1.5 py-px font-[family-name:var(--font-mono)] text-[12px] text-[var(--avy-ink)]">
-          ops/schema-dual-sign
-        </code>{" "}
-        requires a second operator signature before settlement. Blocked 12 min.
-      </>
-    ),
-    ctaLabel: "Open in Policies →",
-    ctaHref: "/policies",
-  },
-  {
-    id: "topup-suggested",
-    tone: "accent",
-    title: "Top-up suggested on worker wallet",
-    ref: "0xFd2E…6519",
-    body: (
-      <>
-        In-app DOT balance at <b>18 DOT</b>. At current claim rate, runway is{" "}
-        <b>~4h</b>. Native gas unaffected.
-      </>
-    ),
-    ctaLabel: "Open in Treasury →",
-    ctaHref: "/treasury",
-  },
-];
-
-const LANES: LaneCardData[] = [
-  {
-    name: "Runs",
-    href: "/runs",
-    pillLabel: "Healthy",
-    pillTone: "ok",
-    metrics: [
-      { label: "queue", value: "14" },
-      { label: "verified 15m", value: "32" },
-      { label: "p50", value: "18s" },
-    ],
-    recentEvent: (
-      <>
-        <b className="font-semibold text-[var(--avy-ink)]">gov-review-2</b> signed
-        r_4e12a · 42s ago
-      </>
-    ),
-  },
-  {
-    name: "Treasury",
-    href: "/treasury",
-    pillLabel: "Stable",
-    pillTone: "ok",
-    metrics: [
-      { label: "locked", value: "214 DOT" },
-      { label: "coverage", value: "3.2×" },
-      { label: "settle p90", value: "6.1s" },
-    ],
-    recentEvent: (
-      <>
-        Stake locked on run-2739 ·{" "}
-        <b className="font-semibold text-[var(--avy-ink)]">3 DOT</b> · 1m ago
-      </>
-    ),
-  },
-  {
-    name: "Governance",
-    href: "/policies",
-    pillLabel: "Needs signer",
-    pillTone: "warn",
-    metrics: [
-      { label: "policies", value: "22 active" },
-      { label: "disputes", value: "2" },
-      { label: "backlog", value: "1" },
-    ],
-    recentEvent: (
-      <>
-        Policy{" "}
-        <b className="font-semibold text-[var(--avy-ink)]">
-          ops/schema-dual-sign
-        </b>{" "}
-        attached · 12m ago
-      </>
-    ),
-  },
-];
-
-const PULSE_EVENTS: PulseEvent[] = [
-  {
-    id: "evt-1",
-    kind: "runs",
-    tone: "accent",
-    topicNamespace: "runs",
-    topicAction: "verified",
-    address: "0xFd2E…6519",
-    message: (
-      <>
-        Receipt{" "}
-        <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--avy-accent)]">
-          r_4e12a
-        </span>{" "}
-        signed by <b className="font-semibold">gov-review-2</b>, co-signed by{" "}
-        <b className="font-semibold">0x9A13…0cb2</b>.
-      </>
-    ),
-    time: "42s ago",
-  },
-  {
-    id: "evt-2",
-    kind: "stake",
-    tone: "accent",
-    topicNamespace: "stake",
-    topicAction: "locked",
-    address: "0x9A13…0cb2",
-    message: (
-      <>
-        <b className="font-semibold">3 DOT</b> claim stake locked on{" "}
-        <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--avy-accent)]">
-          run-2739
-        </span>{" "}
-        pending verifier review.
-      </>
-    ),
-    time: "1m ago",
-  },
-  {
-    id: "evt-3",
-    kind: "runs",
-    tone: "warn",
-    topicNamespace: "runs",
-    topicAction: "disputed",
-    address: "0xA4E2…11ab",
-    message: (
-      <>
-        Dispute opened on{" "}
-        <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--avy-accent)]">
-          r_4e10c
-        </span>{" "}
-        — signature on handoff payload did not verify.
-      </>
-    ),
-    time: "6m ago",
-  },
-  {
-    id: "evt-4",
-    kind: "runs",
-    tone: "accent",
-    topicNamespace: "runs",
-    topicAction: "submitted",
-    address: "0x7B01…ae22",
-    message: (
-      <>
-        <b className="font-semibold">writer-gov-1</b> submitted output for{" "}
-        <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--avy-accent)]">
-          run-2738
-        </span>{" "}
-        · docs refresh v3.1.
-      </>
-    ),
-    time: "10m ago",
-  },
-  {
-    id: "evt-5",
-    kind: "identity",
-    tone: "blue",
-    topicNamespace: "identity",
-    topicAction: "badge_minted",
-    address: "0x2C77…4f90",
-    message: (
-      <>
-        <b className="font-semibold">coding-hand-1</b> minted{" "}
-        <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--avy-accent)]">
-          starter-coding-001
-        </span>{" "}
-        badge · tier 1, evidence attached.
-      </>
-    ),
-    time: "14m ago",
-  },
-  {
-    id: "evt-6",
-    kind: "runs",
-    tone: "neutral",
-    topicNamespace: "runs",
-    topicAction: "claimed",
-    address: "0x5F30…cc18",
-    message: (
-      <>
-        <b className="font-semibold">ops-migrator-1</b> claimed{" "}
-        <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--avy-accent)]">
-          run-2736
-        </span>{" "}
-        · schema migration · users table.
-      </>
-    ),
-    time: "19m ago",
-  },
-  {
-    id: "evt-7",
-    kind: "stake",
-    tone: "accent",
-    topicNamespace: "stake",
-    topicAction: "released",
-    address: "0xFd2E…6519",
-    message: (
-      <>
-        <b className="font-semibold">1.5 DOT</b> released to{" "}
-        <b className="font-semibold">coding-hand-1</b> after verify on{" "}
-        <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--avy-accent)]">
-          run-2735
-        </span>
-        .
-      </>
-    ),
-    time: "23m ago",
-  },
-  {
-    id: "evt-8",
-    kind: "runs",
-    tone: "accent",
-    topicNamespace: "runs",
-    topicAction: "verified",
-    address: "0xE01A…7731",
-    message: (
-      <>
-        Receipt{" "}
-        <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--avy-accent)]">
-          r_4e0f8
-        </span>{" "}
-        verified on{" "}
-        <span className="font-[family-name:var(--font-mono)] text-xs text-[var(--avy-accent)]">
-          run-2738
-        </span>{" "}
-        · writer/no-external-links pass.
-      </>
-    ),
-    time: "28m ago",
-  },
-];
-
 export default function OverviewPage() {
   const jobs = useJobs();
-  const sessions = useSessions();
+  const sessions = useAdminSessions();
   const account = useAccount();
   const strategyPositions = useStrategyPositions();
   const health = useHealth();
   const apiAlerts = useAlerts();
+  const badges = useBadges();
+  const policies = usePolicies();
+  const providerOps = useProviderOperations();
+  const publicProviderOps = usePublicProviderOperations();
 
   const liveVitals = useMemo(
     () => buildRoomVitals(jobs.data, sessions.data, account.data, strategyPositions.data),
     [account.data, jobs.data, sessions.data, strategyPositions.data]
   );
+  // The Runs-in-motion + Agents-active cards both pull from
+  // /admin/sessions. While that request is still in flight on first
+  // paint, we don't want the cards to claim "0" or "no claims
+  // observed yet" — we just don't know yet. Replace the deltas with
+  // a loading hint until the request resolves; once it's resolved
+  // (data or error), buildRoomVitals' real copy takes over.
+  const sessionsLoading = sessions.isLoading && !sessions.data && !sessions.error;
+  const vitalsWithLoadingHints = useMemo(() => {
+    if (!sessionsLoading) return liveVitals;
+    return liveVitals.map((v) =>
+      v.label === "Runs in motion" || v.label === "Agents active"
+        ? { ...v, delta: "waiting for /admin/sessions…" }
+        : v
+    );
+  }, [liveVitals, sessionsLoading]);
   const liveAlerts = useMemo(
     () => buildOverviewAlerts(sessions.data, account.data),
     [account.data, sessions.data]
@@ -363,32 +86,123 @@ export default function OverviewPage() {
     () => buildLaneCards(jobs.data, sessions.data, strategyPositions.data),
     [jobs.data, sessions.data, strategyPositions.data]
   );
+  const policiesAppliedToday = useMemo(
+    () => countPoliciesAppliedToday(policies.data),
+    [policies.data]
+  );
+  const lastReceiptTime = useMemo(
+    () => latestReceiptLabel(badges.data, badges.isLoading),
+    [badges.data, badges.isLoading]
+  );
   const liveJobs = extractRunJobs(jobs.data);
+  // First-load orientation (A4): the card shows only when the room is
+  // genuinely empty (no open runs, sessions, or receipts) AND those
+  // requests have resolved — so it never flashes while data loads.
+  const sessionsCount = Array.isArray(sessions.data) ? sessions.data.length : 0;
+  const receiptsCount = extractRows(badges.data, [
+    "badges",
+    "receipts",
+    "items",
+    "data",
+  ]).length;
+  const roomActivityCount = liveJobs.length + sessionsCount + receiptsCount;
+  const activityResolved =
+    !jobs.isLoading && !sessions.isLoading && !badges.isLoading;
+  const adminLifecycleSummary = useMemo(
+    () => buildJobLifecycleSummary(providerOps.data),
+    [providerOps.data]
+  );
+  const publicLifecycleSummary = useMemo(
+    () => buildPublicJobLifecycleSummary(jobs.data),
+    [jobs.data]
+  );
+  const hasAdminLifecycleData = adminLifecycleSummary.total > 0;
+  const hasPublicLifecycleData = publicLifecycleSummary.total > 0;
+  const lifecycleSummary = hasAdminLifecycleData
+    ? adminLifecycleSummary
+    : hasPublicLifecycleData
+      ? publicLifecycleSummary
+      : EMPTY_JOB_LIFECYCLE_SUMMARY;
+  const hasLifecycleData = lifecycleSummary.total > 0;
+  const lifecycleMeta = hasAdminLifecycleData
+    ? "live API · /admin/status"
+    : hasPublicLifecycleData
+      ? "live API · /jobs"
+      : jobs.isLoading
+        ? "waiting for live API"
+        : "no jobs yet";
+  const liveProviderOps = useMemo(
+    () => buildProviderOperations(providerOps.data ?? publicProviderOps.data),
+    [providerOps.data, publicProviderOps.data]
+  );
+  const recurringRuntime = useMemo(
+    () => buildRecurringRuntimeSummary(providerOps.data),
+    [providerOps.data]
+  );
+  const providerRows = liveProviderOps;
   const hasLiveOverview = Boolean(jobs.data || sessions.data || account.data || strategyPositions.data);
-  const vitals = hasLiveOverview ? liveVitals : ROOM_VITALS;
-  const alerts = endpointAlerts.length ? endpointAlerts : liveAlerts.length ? liveAlerts : NEEDS_ACTION;
-  const lanes = hasLiveOverview ? liveLanes : LANES;
+  const vitals = vitalsWithLoadingHints;
+  const alerts = endpointAlerts.length ? endpointAlerts : liveAlerts;
+  const lanes = liveLanes;
   const disputedSessions = Array.isArray(sessions.data)
     ? sessions.data.filter((session) => session?.status === "disputed").length
     : 0;
 
+  const freshness = freshnessFromRequests(
+    jobs,
+    sessions,
+    account,
+    strategyPositions,
+    health,
+    apiAlerts,
+    badges,
+    policies,
+    providerOps,
+    publicProviderOps
+  );
+  const capabilityWarning = useMemo(
+    () => buildCapabilityWarning(health.data),
+    [health.data]
+  );
+
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-7">
-      <OverviewTopbar />
-      <MissionHero
-        openRuns={liveJobs.length || 14}
-        awaitingSignature={disputedSessions || 2}
-        lastReceiptTime={health.data ? "live" : "14:08 UTC"}
-        treasuryPosture={liveVitals[3]?.value === "Amber" ? "Amber" : "Green"}
-        policiesAppliedToday={liveLanes.length || 22}
+      <OverviewTopbar capabilityWarning={capabilityWarning} freshness={freshness} />
+      <OrientationCard
+        roomActivityCount={roomActivityCount}
+        activityResolved={activityResolved}
       />
-      <RoomVitals vitals={vitals} comparedTo={hasLiveOverview ? "live API" : "14:08 UTC yesterday"} />
+      <MissionHero
+        // Use the explicit `hasLiveOverview` gate rather than `||`
+        // fallbacks — the previous form (`liveJobs.length || 14`) silently
+        // showed the fixture's `14` whenever live data legitimately
+        // returned zero rows, masking real "queue is empty" signals.
+        openRuns={hasLiveOverview ? liveJobs.length : 0}
+        awaitingSignature={hasLiveOverview ? disputedSessions : 0}
+        lastReceiptTime={lastReceiptTime}
+        treasuryPosture={liveVitals[3]?.value === "Amber" ? "Amber" : "Green"}
+        policiesAppliedToday={policiesAppliedToday}
+      />
+      <RoomVitals vitals={vitals} comparedTo={hasLiveOverview ? "live API" : "waiting for live API"} />
+      <JobLifecycleStrip
+        summary={hasLifecycleData ? lifecycleSummary : EMPTY_JOB_LIFECYCLE_SUMMARY}
+        meta={lifecycleMeta}
+      />
       <NeedsActionList alerts={alerts} meta={`${alerts.length} open`} />
       <LaneStatusGrid lanes={lanes} meta={hasLiveOverview ? "live API snapshot" : undefined} />
+      <ProviderOperationsCard
+        providers={providerRows}
+        meta={
+          liveProviderOps.length
+            ? `${liveProviderOps.length} sources · live API`
+            : "no provider operations reported"
+        }
+      />
+      <RecurringRuntimeCard runtime={recurringRuntime} />
       <PlatformPulse
-        events={PULSE_EVENTS}
-        endpoint={health.data ? "/events" : "wss://events.averray.com/v1/pulse"}
-        meta="last 30 min · 48 events"
+        events={[]}
+        endpoint="/events"
+        meta="event stream requires wallet"
       />
     </div>
   );
@@ -413,6 +227,102 @@ function extractAlerts(data: unknown): AlertItem[] {
       alerts.push(alert);
       return alerts;
     }, []);
+}
+
+function buildCapabilityWarning(data: unknown): CapabilityWarning | undefined {
+  // Reads the operator-facing `/health` payload (post-#416 / Package B
+  // truth split) and surfaces a single topbar chip when the treasury
+  // capability is unavailable or degraded. Other capability warnings
+  // are intentionally not surfaced in the overview topbar — the topbar
+  // is the cross-cutting truth signal for "can this room actually move
+  // money?". The full warnings[] array remains available to other UI.
+  const root = asRecord(data);
+  if (!root) return undefined;
+  const capabilities = asRecord(root.capabilityHealth);
+  const treasuryState = text(capabilities?.treasuryMutations, "");
+  if (treasuryState !== "unavailable" && treasuryState !== "degraded") {
+    return undefined;
+  }
+
+  const warnings = Array.isArray(root.warnings)
+    ? root.warnings.filter(isRecord)
+    : [];
+  const treasuryWarning = warnings.find((warning) =>
+    text(warning.code, "").startsWith("treasury_mutations_")
+  );
+  const fallback =
+    treasuryState === "unavailable"
+      ? "Treasury mutations are unavailable."
+      : "Treasury mutations are degraded.";
+
+  return {
+    label: treasuryState === "unavailable" ? "Treasury unavailable" : "Treasury degraded",
+    title: text(treasuryWarning?.message, fallback),
+  };
+}
+
+function countPoliciesAppliedToday(data: unknown): number {
+  if (!Array.isArray(data)) return 0;
+  const today = new Date().toISOString().slice(0, 10);
+  return data.reduce((count, item) => {
+    if (!item || typeof item !== "object") return count;
+    const record = item as Record<string, unknown>;
+    if (text(record.state, "").toLowerCase() !== "active") return count;
+    const lastChange = record.lastChange;
+    const lastChangeRecord =
+      lastChange && typeof lastChange === "object"
+        ? (lastChange as Record<string, unknown>)
+        : undefined;
+    const dates = [record.activeSince, lastChangeRecord?.at];
+    return dates.some((date) => isSameUtcDate(date, today)) ? count + 1 : count;
+  }, 0);
+}
+
+function isSameUtcDate(value: unknown, today: string): boolean {
+  if (typeof value !== "string" || !value.trim()) return false;
+  const match = value.match(/\d{4}-\d{2}-\d{2}/);
+  if (match) return match[0] === today;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === today;
+}
+
+function latestReceiptLabel(data: unknown, isLoading: boolean): string {
+  const rows = extractRows(data, ["badges", "receipts", "items", "data"]);
+  const latest = rows
+    .map((row) => {
+      const averray = asRecord(asRecord(row.badge)?.averray) ?? asRecord(row.averray);
+      return text(row.issuedAt, "") || text(averray?.completedAt, "");
+    })
+    .map((date) => Date.parse(date))
+    .filter(Number.isFinite)
+    .sort((a, b) => b - a)[0];
+  if (latest) {
+    return new Date(latest).toISOString().slice(11, 16) + " UTC";
+  }
+  return isLoading ? "loading" : "none";
+}
+
+function extractRows(data: unknown, keys: string[]): Record<string, unknown>[] {
+  if (Array.isArray(data)) {
+    return data.filter(isRecord);
+  }
+  const root = asRecord(data);
+  if (!root) return [];
+  for (const key of keys) {
+    const value = root[key];
+    if (Array.isArray(value)) return value.filter(isRecord);
+  }
+  return [];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(asRecord(value));
 }
 
 function text(value: unknown, fallback: string): string {

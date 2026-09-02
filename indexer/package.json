@@ -12,9 +12,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "hono": "^4.5.0",
+    "hono": "^4.12.25",
     "ponder": "^0.16.6",
-    "viem": "^2.21.3"
+    "viem": "2.53.1"
   },
   "devDependencies": {
     "@types/node": "^20.9.0",

@@ -19,7 +19,9 @@ contract StrategyAdapterRegistry {
     bytes32[] internal strategyIds;
     mapping(bytes32 => bool) internal strategyKnown;
 
-    event StrategyRegistered(bytes32 indexed strategyId, address indexed adapter, address indexed asset, string riskLabel);
+    event StrategyRegistered(
+        bytes32 indexed strategyId, address indexed adapter, address indexed asset, string riskLabel
+    );
     event StrategyStatusUpdated(bytes32 indexed strategyId, bool active);
 
     error Unauthorized();
@@ -37,6 +39,9 @@ contract StrategyAdapterRegistry {
     function registerStrategy(address adapter) external onlyOwner {
         if (!policy.approvedStrategies(adapter)) revert StrategyNotApproved();
         bytes32 id = IStrategyAdapter(adapter).strategyId();
+        address asset = IStrategyAdapter(adapter).asset();
+        if (!policy.approvedAssets(asset)) revert StrategyNotApproved();
+        if (strategyKnown[id] && strategies[id].adapter != adapter) revert StrategyNotApproved();
         if (!strategyKnown[id]) {
             strategyKnown[id] = true;
             strategyIds.push(id);
@@ -44,20 +49,25 @@ contract StrategyAdapterRegistry {
         strategies[id] = StrategyMetadata({
             strategyId: id,
             adapter: adapter,
-            asset: IStrategyAdapter(adapter).asset(),
+            asset: asset,
             riskLabel: IStrategyAdapter(adapter).riskLabel(),
             active: true
         });
-        emit StrategyRegistered(id, adapter, IStrategyAdapter(adapter).asset(), IStrategyAdapter(adapter).riskLabel());
+        emit StrategyRegistered(id, adapter, asset, IStrategyAdapter(adapter).riskLabel());
     }
 
     function setStrategyActive(bytes32 strategyId, bool active) external onlyOwner {
+        if (!strategyKnown[strategyId]) revert StrategyNotApproved();
         strategies[strategyId].active = active;
         emit StrategyStatusUpdated(strategyId, active);
     }
 
     function getStrategy(bytes32 strategyId) external view returns (StrategyMetadata memory) {
-        return strategies[strategyId];
+        StrategyMetadata memory strategy = strategies[strategyId];
+        if (strategy.adapter != address(0) && !policy.approvedStrategies(strategy.adapter)) {
+            strategy.active = false;
+        }
+        return strategy;
     }
 
     function listStrategyIds() external view returns (bytes32[] memory) {

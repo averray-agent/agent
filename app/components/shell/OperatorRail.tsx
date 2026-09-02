@@ -3,12 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Activity,
   AlertTriangle,
   Coins,
   FileCheck2,
   Gauge,
   History,
+  KeyRound,
   LayoutDashboard,
   ScrollText,
   ShieldCheck,
@@ -20,13 +20,15 @@ import { signOut } from "@/lib/auth/siwe";
 import { shortAddress } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import {
-  useAgents,
-  useBadges,
+  useAdminSessions,
   useDisputes,
   useJobs,
-  usePolicies,
-  useSessions,
 } from "@/lib/api/hooks";
+import {
+  activeSessionsCount,
+  openDisputesCount,
+  openJobsCount,
+} from "@/lib/ui/sidebar-counts";
 
 interface NavItem {
   href: string;
@@ -40,18 +42,14 @@ interface NavGroup {
   items: NavItem[];
 }
 
-// Mirrors the IA from the Claude Design Overview: three groups, count chips.
-// Counts are seeded with the handoff fixture values so the rail reads
-// correctly out of the box; replace with live state when each surface
-// gets its data hook (e.g. counts.runs = useSessions().filter(s => s.open).length).
 const NAV_GROUPS: NavGroup[] = [
   {
     label: "Room",
     items: [
       { href: "/overview", label: "Overview", icon: LayoutDashboard },
-      { href: "/runs", label: "Runs", icon: Gauge, count: 14 },
-      { href: "/receipts", label: "Receipts", icon: ScrollText, count: "2,134" },
-      { href: "/agents", label: "Agents", icon: Users, count: 8 },
+      { href: "/runs", label: "Runs", icon: Gauge },
+      { href: "/receipts", label: "Receipts", icon: ScrollText },
+      { href: "/agents", label: "Agents", icon: Users },
     ],
   },
   {
@@ -64,8 +62,9 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "Governance",
     items: [
-      { href: "/policies", label: "Policies", icon: ShieldCheck, count: 22 },
-      { href: "/disputes", label: "Disputes", icon: AlertTriangle, count: 2 },
+      { href: "/policies", label: "Policies", icon: ShieldCheck },
+      { href: "/capabilities", label: "Capabilities", icon: KeyRound },
+      { href: "/disputes", label: "Disputes", icon: AlertTriangle },
       { href: "/audit-log", label: "Audit log", icon: FileCheck2 },
     ],
   },
@@ -75,18 +74,20 @@ export function OperatorRail() {
   const pathname = usePathname();
   const auth = useAuth();
   const jobs = useJobs();
-  const badges = useBadges();
-  const agents = useAgents();
-  const sessions = useSessions();
-  const policies = usePolicies();
+  // Operator-wide sessions (includes external-agent activity, not just
+  // the signed-in wallet) — matches what the /sessions page reads.
+  const sessions = useAdminSessions();
   const disputes = useDisputes();
+  // Attention-only count convention (roadmap A5): a badge appears only
+  // where the number is an action signal — open work, in-flight
+  // sessions, open disputes. Receipts/Agents/Policies/Capabilities/Audit
+  // intentionally carry no count (a raw total there is noise, not a
+  // decision input). Each helper returns undefined while loading so the
+  // rail never renders a confident "0".
   const counts: Record<string, number | string | undefined> = {
-    "/runs": countOf(jobs.data),
-    "/receipts": countOf(badges.data),
-    "/agents": countOf(agents.data),
-    "/sessions": countOf(sessions.data),
-    "/policies": countOf(policies.data),
-    "/disputes": countOf(disputes.data),
+    "/runs": openJobsCount(jobs.data),
+    "/sessions": activeSessionsCount(sessions.data),
+    "/disputes": openDisputesCount(disputes.data),
   };
 
   return (
@@ -186,12 +187,3 @@ export function OperatorRail() {
   );
 }
 
-function countOf(value: unknown): number | undefined {
-  if (Array.isArray(value)) return value.length;
-  if (!value || typeof value !== "object") return undefined;
-  const record = value as Record<string, unknown>;
-  for (const key of ["items", "data", "jobs", "sessions", "agents", "badges", "policies", "disputes"]) {
-    if (Array.isArray(record[key])) return record[key].length;
-  }
-  return undefined;
-}

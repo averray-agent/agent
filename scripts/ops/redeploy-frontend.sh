@@ -24,6 +24,10 @@
 #   STACK_ROOT                parent dir containing docker-compose.yml (default: repo parent)
 #   COMPOSE_FILE              path to docker-compose.yml
 #   SKIP_GIT_UPDATE=1         skip fetch/checkout/pull because caller already pinned the repo
+#   PRE_DEPLOY_SHA            rollback target SHA when SKIP_GIT_UPDATE=1 — supplied by
+#                             deploy-production.sh from the wrapper's pre-pull HEAD so
+#                             rollback() doesn't checkout the SAME commit that just
+#                             failed. Falls back to current HEAD if unset.
 #   SKIP_ROLLBACK=1           disable auto-rollback
 set -euo pipefail
 
@@ -93,8 +97,15 @@ if [[ "$RESTART_CADDY" == "1" ]]; then
   fi
 fi
 
-PREVIOUS_SHA=$(git -C "$APP_ROOT" rev-parse HEAD)
+# Pin the pre-deploy SHA. When the wrapper has already pulled origin/main,
+# `rev-parse HEAD` is the NEW SHA, so rollback would re-deploy the same code
+# that just failed. Honour PRE_DEPLOY_SHA from the wrapper.
+CURRENT_HEAD=$(git -C "$APP_ROOT" rev-parse HEAD)
+PREVIOUS_SHA=${PRE_DEPLOY_SHA:-$CURRENT_HEAD}
 echo "Pre-deploy SHA: $PREVIOUS_SHA"
+if [[ "$PREVIOUS_SHA" == "$CURRENT_HEAD" && "${SKIP_GIT_UPDATE:-0}" == "1" ]]; then
+  echo "Note: PRE_DEPLOY_SHA matches current HEAD; rollback would re-deploy the same SHA." >&2
+fi
 
 autostash_if_needed() {
   if [[ "$DEPLOY_AUTOSTASH" != "1" ]]; then
@@ -137,7 +148,10 @@ restart_caddy_if_requested() {
 }
 
 curl_app() {
-  local curl_args=(-fsS --max-time 5)
+  # Drop -f so 401 doesn't make curl exit non-zero; we want to inspect
+  # the status code and distinguish "Caddy returned 401 (protected app
+  # is up)" from "Caddy is down / 5xx / network error".
+  local curl_args=(-sS --max-time 5 -o /tmp/app-response.html -w '%{http_code}')
   if [[ -n "$APP_BASIC_AUTH_USER" && -n "$APP_BASIC_AUTH_PASSWORD" ]]; then
     curl_args+=(-u "$APP_BASIC_AUTH_USER:$APP_BASIC_AUTH_PASSWORD")
   fi
@@ -147,14 +161,32 @@ curl_app() {
 wait_for_app() {
   local deadline=$(( $(date +%s) + HEALTH_TIMEOUT_SEC ))
   local attempts=0
+  local http_status=""
   while [[ $(date +%s) -lt $deadline ]]; do
     attempts=$(( attempts + 1 ))
-    if html="$(curl_app 2>/dev/null)" && grep -Fq "$APP_EXPECTED_MARKER" <<<"$html"; then
-      echo "Operator app check passed after ${attempts} attempt(s)."
-      return 0
+    if http_status="$(curl_app 2>/dev/null)"; then
+      # Success path A: HTML marker found (auth worked OR app is public).
+      if [[ -f /tmp/app-response.html ]] && grep -Fq "$APP_EXPECTED_MARKER" /tmp/app-response.html; then
+        echo "Operator app check passed (marker found) after ${attempts} attempt(s)."
+        rm -f /tmp/app-response.html
+        return 0
+      fi
+      # Success path B: 401 returned and we deliberately didn't auth.
+      # Phase 2 PR 2.2 removed the raw basic-auth password from CI, so
+      # this script can't authenticate from the deploy runner. A 401
+      # response proves Caddy is up and serving the protected app —
+      # that's the verification depth we have here. The end-to-end
+      # auth-200 smoke is deferred to Phase 2 PR 2.5, which uses a
+      # smoke-side OP service-account token that can read the raw.
+      if [[ "$http_status" == "401" && -z "${APP_BASIC_AUTH_PASSWORD:-}" ]]; then
+        echo "Operator app check passed (HTTP 401, protected; raw not in CI) after ${attempts} attempt(s)."
+        rm -f /tmp/app-response.html
+        return 0
+      fi
     fi
     sleep "$HEALTH_INTERVAL_SEC"
   done
+  rm -f /tmp/app-response.html
   return 1
 }
 
@@ -163,6 +195,15 @@ rollback() {
     echo "SKIP_ROLLBACK=1 set; leaving the failed frontend deploy in place for inspection." >&2
     exit 1
   fi
+
+  local now_head
+  now_head=$(git -C "$APP_ROOT" rev-parse HEAD)
+  if [[ "$PREVIOUS_SHA" == "$now_head" ]]; then
+    echo "No usable rollback target: PREVIOUS_SHA ($PREVIOUS_SHA) matches current HEAD." >&2
+    echo "Leaving the failed frontend in place for inspection. Manual intervention required." >&2
+    exit 1
+  fi
+
   echo "Operator app check failed; rolling back to $PREVIOUS_SHA" >&2
   git -C "$APP_ROOT" checkout --quiet "$PREVIOUS_SHA"
   build_frontend

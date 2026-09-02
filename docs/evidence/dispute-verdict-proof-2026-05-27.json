@@ -1,0 +1,446 @@
+{
+  "schemaVersion": 1,
+  "kind": "averray.disputeVerdictHostedProof",
+  "proofDate": "2026-05-27",
+  "capturedAt": "2026-05-28T08:47:00.595Z",
+  "mode": "live",
+  "profile": "paseo-asset-hub-testnet",
+  "rpcUrl": "https://eth-rpc-testnet.polkadot.io/",
+  "disputeId": "dispute-e03d8e28d9d6",
+  "chainJobId": "0x46519cdd46ce82dccff06907c750c625c8f3fa2537ec855cfe02966586c593aa",
+  "contracts": {
+    "escrowCore": "0xb8fd8A932F69bD5E39700b7cf6D2920aF84d1B27"
+  },
+  "syntheticDisputeLifecycle": {
+    "reward": "0.1 USDC",
+    "createdBy": "admin proof lifecycle",
+    "claimant": "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+    "sessionId": "dispute-proof-20260527-20260527181853:0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+    "invalidWorkerOutput": "empty/out-of-spec synthetic payload",
+    "verifierOutcome": "rejected, opening dispute",
+    "verdict": "upheld",
+    "reasonCode": "DISPUTE_LOST",
+    "releaseAction": "slash-to-treasury",
+    "workerPayout": 0,
+    "remainingPayout": 0.1
+  },
+  "proofCommand": {
+    "checkHostedStackGate": "CHECK_DISPUTE_VERDICT_PROOF=1 DISPUTE_PROOF_LIVE=1 DISPUTE_PROOF_ID=dispute-e03d8e28d9d6 DISPUTE_PROOF_VERDICT=upheld DISPUTE_PROOF_RATIONALE=<synthetic-dispute-rationale> bash scripts/ops/check-hosted-stack.sh",
+    "note": "The hosted stack gate reached the dispute verdict proof step. The first live resolve attempt returned 'resolveDispute failed: transaction execution reverted'; an idempotent retry through the same hosted /disputes/:id/verdict route succeeded and persisted the confirmed chain receipt below. The original dispute is now resolved, so the open-dispute-only harness correctly refuses further mutation against this id."
+  },
+  "payload": {
+    "verdict": "upheld",
+    "rationale": "Synthetic dispute proof — worker submitted empty payload, verifier correctly rejected, arbitration upholds rejection. Captured 2026-05-27.",
+    "idempotencyKey": "dispute-proof-dispute-e03d8e28d9d6-debug"
+  },
+  "hostedVerdictResponse": {
+    "id": "dispute-e03d8e28d9d6",
+    "status": "resolved",
+    "verdict": "upheld",
+    "reasonCode": "DISPUTE_LOST",
+    "reasoningHash": "0xf8c954af95e826be07815775e801c3d12341c156d55fc9cf9548db635dc4e55c",
+    "metadataURI": "urn:averray:content:0xf8c954af95e826be07815775e801c3d12341c156d55fc9cf9548db635dc4e55c",
+    "workerPayout": 0,
+    "remainingPayout": 0.1,
+    "chainStatus": "confirmed",
+    "txHash": "0x3632c402966de8bf7dda55fb88627a9fa1019d9a867017008cf02b2ce02d7472",
+    "blockNumber": 9387753,
+    "arbitration": {
+      "version": 1,
+      "authority": {
+        "verdict": "admin_or_verifier",
+        "release": "admin"
+      },
+      "allowedVerdicts": [
+        "upheld",
+        "dismissed",
+        "split",
+        "timeout"
+      ],
+      "sla": {
+        "seconds": 1209600,
+        "openedAt": "2026-05-27T18:19:12.177Z",
+        "windowEndsAt": "2026-06-10T18:19:12.177Z",
+        "expired": false,
+        "secondsRemaining": 1160791
+      },
+      "reasoning": {
+        "contentType": "arbitrator_reasoning",
+        "hashAlgorithm": "keccak256",
+        "hashField": "reasoningHash",
+        "uriField": "metadataURI",
+        "canonicalHashRequired": true,
+        "publicContentPath": "/content/:hash"
+      },
+      "release": {
+        "mode": "verdict_records_chain_resolution_then_operator_receipt",
+        "verdictEndpoint": "/disputes/:id/verdict",
+        "releaseEndpoint": "/disputes/:id/release",
+        "requiresVerdict": true,
+        "ready": true,
+        "reason": "verdict_recorded"
+      }
+    },
+    "timeline": [
+      {
+        "id": "dispute-e03d8e28d9d6:session:0",
+        "at": "2026-05-27T18:19:03.305Z",
+        "actor": "system",
+        "action": "job_claimed",
+        "data": {
+          "from": null,
+          "to": "claimed",
+          "reason": "job_claimed",
+          "at": "2026-05-27T18:19:03.305Z",
+          "metadata": {
+            "protocol": "http",
+            "idempotencyKey": "dispute-proof-20260527181853-claim"
+          }
+        }
+      },
+      {
+        "id": "dispute-e03d8e28d9d6:session:1",
+        "at": "2026-05-27T18:19:07.718Z",
+        "actor": "system",
+        "action": "work_submitted",
+        "data": {
+          "from": "claimed",
+          "to": "submitted",
+          "reason": "work_submitted",
+          "at": "2026-05-27T18:19:07.718Z",
+          "metadata": {
+            "protocol": "http",
+            "submissionKind": "text",
+            "schemaRef": "schema://jobs/dispute-verdict-proof-20260527-output"
+          }
+        }
+      },
+      {
+        "id": "dispute-e03d8e28d9d6:session:2",
+        "at": "2026-05-27T18:19:12.177Z",
+        "actor": "system",
+        "action": "verification_resolved",
+        "data": {
+          "from": "submitted",
+          "to": "disputed",
+          "reason": "verification_resolved",
+          "at": "2026-05-27T18:19:12.177Z",
+          "metadata": {
+            "outcome": "disputed",
+            "reasonCode": "HUMAN_REVIEW_REQUIRED",
+            "handler": "human_fallback",
+            "handlerVersion": 1,
+            "verifierPolicyVersion": 1,
+            "verifierConfigVersion": 1
+          }
+        }
+      },
+      {
+        "id": "dispute-e03d8e28d9d6:verdict",
+        "at": "2026-05-28T07:52:37.459Z",
+        "actor": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+        "action": "verdict_submitted",
+        "data": {
+          "id": "dispute-e03d8e28d9d6",
+          "disputeId": "dispute-e03d8e28d9d6",
+          "sessionId": "dispute-proof-20260527-20260527181853:0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+          "jobId": "dispute-proof-20260527-20260527181853",
+          "chainJobId": "0x46519cdd46ce82dccff06907c750c625c8f3fa2537ec855cfe02966586c593aa",
+          "verdict": "upheld",
+          "workerPayout": 0,
+          "remainingPayout": 0.1,
+          "reasonCode": "DISPUTE_LOST",
+          "reasoningHash": "0xf8c954af95e826be07815775e801c3d12341c156d55fc9cf9548db635dc4e55c",
+          "metadataURI": "urn:averray:content:0xf8c954af95e826be07815775e801c3d12341c156d55fc9cf9548db635dc4e55c",
+          "rationale": "Synthetic dispute proof — worker submitted empty payload, verifier correctly rejected, arbitration upholds rejection. Captured 2026-05-27.",
+          "releaseAction": "slash-to-treasury",
+          "txHash": "0x3632c402966de8bf7dda55fb88627a9fa1019d9a867017008cf02b2ce02d7472",
+          "blockNumber": 9387753,
+          "chainStatus": "confirmed",
+          "decidedBy": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+          "decidedAt": "2026-05-28T07:52:37.459Z"
+        }
+      }
+    ]
+  },
+  "persistedDispute": {
+    "id": "dispute-e03d8e28d9d6",
+    "status": "resolved",
+    "verdict": "upheld",
+    "reasonCode": "DISPUTE_LOST",
+    "reasoningHash": "0xf8c954af95e826be07815775e801c3d12341c156d55fc9cf9548db635dc4e55c",
+    "metadataURI": "urn:averray:content:0xf8c954af95e826be07815775e801c3d12341c156d55fc9cf9548db635dc4e55c",
+    "chainStatus": "confirmed",
+    "txHash": "0x3632c402966de8bf7dda55fb88627a9fa1019d9a867017008cf02b2ce02d7472",
+    "blockNumber": 9387753,
+    "arbitration": {
+      "version": 1,
+      "authority": {
+        "verdict": "admin_or_verifier",
+        "release": "admin"
+      },
+      "allowedVerdicts": [
+        "upheld",
+        "dismissed",
+        "split",
+        "timeout"
+      ],
+      "sla": {
+        "seconds": 1209600,
+        "openedAt": "2026-05-27T18:19:12.177Z",
+        "windowEndsAt": "2026-06-10T18:19:12.177Z",
+        "expired": false,
+        "secondsRemaining": 1157653
+      },
+      "reasoning": {
+        "contentType": "arbitrator_reasoning",
+        "hashAlgorithm": "keccak256",
+        "hashField": "reasoningHash",
+        "uriField": "metadataURI",
+        "canonicalHashRequired": true,
+        "publicContentPath": "/content/:hash"
+      },
+      "release": {
+        "mode": "verdict_records_chain_resolution_then_operator_receipt",
+        "verdictEndpoint": "/disputes/:id/verdict",
+        "releaseEndpoint": "/disputes/:id/release",
+        "requiresVerdict": true,
+        "ready": true,
+        "reason": "verdict_recorded"
+      }
+    },
+    "timeline": [
+      {
+        "id": "dispute-e03d8e28d9d6:session:0",
+        "at": "2026-05-27T18:19:03.305Z",
+        "actor": "system",
+        "action": "job_claimed",
+        "data": {
+          "from": null,
+          "to": "claimed",
+          "reason": "job_claimed",
+          "at": "2026-05-27T18:19:03.305Z",
+          "metadata": {
+            "protocol": "http",
+            "idempotencyKey": "dispute-proof-20260527181853-claim"
+          }
+        }
+      },
+      {
+        "id": "dispute-e03d8e28d9d6:session:1",
+        "at": "2026-05-27T18:19:07.718Z",
+        "actor": "system",
+        "action": "work_submitted",
+        "data": {
+          "from": "claimed",
+          "to": "submitted",
+          "reason": "work_submitted",
+          "at": "2026-05-27T18:19:07.718Z",
+          "metadata": {
+            "protocol": "http",
+            "submissionKind": "text",
+            "schemaRef": "schema://jobs/dispute-verdict-proof-20260527-output"
+          }
+        }
+      },
+      {
+        "id": "dispute-e03d8e28d9d6:session:2",
+        "at": "2026-05-27T18:19:12.177Z",
+        "actor": "system",
+        "action": "verification_resolved",
+        "data": {
+          "from": "submitted",
+          "to": "disputed",
+          "reason": "verification_resolved",
+          "at": "2026-05-27T18:19:12.177Z",
+          "metadata": {
+            "outcome": "disputed",
+            "reasonCode": "HUMAN_REVIEW_REQUIRED",
+            "handler": "human_fallback",
+            "handlerVersion": 1,
+            "verifierPolicyVersion": 1,
+            "verifierConfigVersion": 1
+          }
+        }
+      },
+      {
+        "id": "dispute-e03d8e28d9d6:session:3",
+        "at": "2026-05-28T07:52:37.459Z",
+        "actor": "system",
+        "action": "DISPUTE_LOST",
+        "data": {
+          "from": "disputed",
+          "to": "rejected",
+          "reason": "DISPUTE_LOST",
+          "at": "2026-05-28T07:52:37.459Z",
+          "metadata": {
+            "disputeId": "dispute-e03d8e28d9d6",
+            "verdict": "upheld",
+            "workerPayout": 0,
+            "reasonCode": "DISPUTE_LOST",
+            "txHash": "0x3632c402966de8bf7dda55fb88627a9fa1019d9a867017008cf02b2ce02d7472"
+          }
+        }
+      },
+      {
+        "id": "dispute-e03d8e28d9d6:verdict",
+        "at": "2026-05-28T07:52:37.459Z",
+        "actor": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+        "action": "verdict_submitted",
+        "data": {
+          "id": "dispute-e03d8e28d9d6",
+          "disputeId": "dispute-e03d8e28d9d6",
+          "sessionId": "dispute-proof-20260527-20260527181853:0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+          "jobId": "dispute-proof-20260527-20260527181853",
+          "chainJobId": "0x46519cdd46ce82dccff06907c750c625c8f3fa2537ec855cfe02966586c593aa",
+          "verdict": "upheld",
+          "workerPayout": 0,
+          "remainingPayout": 0.1,
+          "reasonCode": "DISPUTE_LOST",
+          "reasoningHash": "0xf8c954af95e826be07815775e801c3d12341c156d55fc9cf9548db635dc4e55c",
+          "metadataURI": "urn:averray:content:0xf8c954af95e826be07815775e801c3d12341c156d55fc9cf9548db635dc4e55c",
+          "rationale": "Synthetic dispute proof — worker submitted empty payload, verifier correctly rejected, arbitration upholds rejection. Captured 2026-05-27.",
+          "releaseAction": "slash-to-treasury",
+          "txHash": "0x3632c402966de8bf7dda55fb88627a9fa1019d9a867017008cf02b2ce02d7472",
+          "blockNumber": 9387753,
+          "chainStatus": "confirmed",
+          "decidedBy": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+          "decidedAt": "2026-05-28T07:52:37.459Z"
+        }
+      }
+    ]
+  },
+  "chain": {
+    "latestBlockAtCapture": 9389357,
+    "opened": {
+      "event": "DisputeOpened",
+      "blockNumber": 9386778,
+      "blockTimestamp": 1779952584,
+      "transactionHash": "0x46d33967d7ce63813c71619cfd858a401f61fdd2d191a9d1f77eec8d6405375b",
+      "receiptStatus": 1,
+      "args": {
+        "jobId": "0x46519cdd46ce82dccff06907c750c625c8f3fa2537ec855cfe02966586c593aa",
+        "opener": "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+        "disputedAt": "1779952584"
+      }
+    },
+    "resolved": {
+      "event": "DisputeResolved",
+      "blockNumber": 9387753,
+      "blockTimestamp": 1779954744,
+      "transactionHash": "0x3632c402966de8bf7dda55fb88627a9fa1019d9a867017008cf02b2ce02d7472",
+      "receiptStatus": 1,
+      "args": {
+        "jobId": "0x46519cdd46ce82dccff06907c750c625c8f3fa2537ec855cfe02966586c593aa",
+        "arbitrator": "0x6778F050eAc8313e4dbB176d7BAB44510E833ac8",
+        "workerPayout": "0",
+        "reasonCode": "0x444953505554455f4c4f53540000000000000000000000000000000000000000",
+        "metadataURI": "urn:averray:content:0xf8c954af95e826be07815775e801c3d12341c156d55fc9cf9548db635dc4e55c"
+      }
+    },
+    "finalJob": {
+      "poster": "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+      "worker": "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+      "asset": "0x0000053900000000000000000000000001200000",
+      "verifierMode": "0x2ae907d8ec2240fb5bccfae890d1d076125637dc0a2755e58585386798ab560b",
+      "category": "0x67866c9024573b37f651b9a98095410d39d0a2e33cec839f0840ccc95a95e713",
+      "specHash": "0x6f36a637200352f44df2cd2487b08a0b6ce422606e3061cb6bfcd2dd559b1d2b",
+      "reward": "100000",
+      "opsReserve": "0",
+      "contingencyReserve": "0",
+      "released": "0",
+      "claimExpiry": "0",
+      "claimStake": "0",
+      "claimStakeBps": 0,
+      "claimFee": "0",
+      "claimFeeBps": 0,
+      "claimEconomicsWaived": false,
+      "rejectingVerifier": "0x0000000000000000000000000000000000000000",
+      "rejectedAt": "1779905940",
+      "disputedAt": "1779952584",
+      "payoutMode": 0,
+      "state": 6,
+      "stateLabel": "Closed"
+    }
+  },
+  "notification_rehearsal": {
+    "status": "proofed_via_hosted_event_and_operator_contract",
+    "destination": "operator dispute drawer / authenticated event stream",
+    "eventTopic": "dispute.verdict_recorded",
+    "timelineEvent": {
+      "id": "dispute-e03d8e28d9d6:verdict",
+      "at": "2026-05-28T07:52:37.459Z",
+      "actor": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+      "action": "verdict_submitted",
+      "data": {
+        "id": "dispute-e03d8e28d9d6",
+        "disputeId": "dispute-e03d8e28d9d6",
+        "sessionId": "dispute-proof-20260527-20260527181853:0x31ad432dFe083B998c69B6dB88A984ec5207ab7F",
+        "jobId": "dispute-proof-20260527-20260527181853",
+        "chainJobId": "0x46519cdd46ce82dccff06907c750c625c8f3fa2537ec855cfe02966586c593aa",
+        "verdict": "upheld",
+        "workerPayout": 0,
+        "remainingPayout": 0.1,
+        "reasonCode": "DISPUTE_LOST",
+        "reasoningHash": "0xf8c954af95e826be07815775e801c3d12341c156d55fc9cf9548db635dc4e55c",
+        "metadataURI": "urn:averray:content:0xf8c954af95e826be07815775e801c3d12341c156d55fc9cf9548db635dc4e55c",
+        "rationale": "Synthetic dispute proof — worker submitted empty payload, verifier correctly rejected, arbitration upholds rejection. Captured 2026-05-27.",
+        "releaseAction": "slash-to-treasury",
+        "txHash": "0x3632c402966de8bf7dda55fb88627a9fa1019d9a867017008cf02b2ce02d7472",
+        "blockNumber": 9387753,
+        "chainStatus": "confirmed",
+        "decidedBy": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
+        "decidedAt": "2026-05-28T07:52:37.459Z"
+      }
+    },
+    "operatorUiFieldsRehearsed": [
+      "SLA status and window",
+      "release readiness and reason",
+      "allowed verdicts",
+      "reasoning hash and metadata URI",
+      "authority labels",
+      "timeout verdict semantics",
+      "confirmed chain tx hash"
+    ],
+    "externalNotification": {
+      "requiredForThisProof": false,
+      "observed": false,
+      "note": "No Slack/email/webhook destination is configured as a required arbitrator-notification target for this proof. The hosted verdict route publishes the dispute.verdict_recorded event and the operator drawer/event surfaces carry the rehearsal payload."
+    }
+  },
+  "checks": [
+    {
+      "name": "hosted_response_resolved",
+      "ok": true
+    },
+    {
+      "name": "persisted_matches_verdict_response",
+      "ok": true
+    },
+    {
+      "name": "chain_dispatch_confirmed",
+      "ok": true
+    },
+    {
+      "name": "open_dispute_event_present",
+      "ok": true
+    },
+    {
+      "name": "resolved_event_matches_reasoning_uri",
+      "ok": true
+    },
+    {
+      "name": "final_chain_job_closed",
+      "ok": true
+    },
+    {
+      "name": "arbitration_semantics_present",
+      "ok": true
+    },
+    {
+      "name": "timeline_records_verdict_submitted",
+      "ok": true
+    }
+  ],
+  "status": "passed"
+}

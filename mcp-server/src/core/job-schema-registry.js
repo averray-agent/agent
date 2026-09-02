@@ -1,4 +1,31 @@
 import { ValidationError } from "./errors.js";
+import {
+  arrayOfStrings,
+  booleanSchema,
+  enumString,
+  integerSchema,
+  objectSchema,
+  stringSchema,
+  validateAgainstSchema
+} from "./job-schema-validation.js";
+import { normalizeJobSchemaRef } from "./job-schema-registration.js";
+
+export { validateAgainstSchema } from "./job-schema-validation.js";
+
+export {
+  EXTERNAL_SCHEMA_EIP712_DOMAIN_NAME,
+  EXTERNAL_SCHEMA_EIP712_DOMAIN_VERSION,
+  EXTERNAL_SCHEMA_EIP712_VERSION,
+  EXTERNAL_SCHEMA_TRUST_BOUNDARY,
+  buildExternalSchemaRegistrationDigest,
+  buildExternalSchemaRegistrationMessage,
+  buildExternalSchemaRegistrationTypedData,
+  hashExternalSchemaContent,
+  normalizeExternalSchemaRegistration,
+  normalizeExternalSchemaRegistrations,
+  recoverExternalSchemaRegistrationSigner,
+  recoverExternalSchemaRegistrationSignerV1
+} from "./job-schema-registration.js";
 
 const BUILTIN_JOB_SCHEMAS = new Map([
   ["schema://jobs/coding-input", objectSchema({
@@ -32,6 +59,7 @@ const BUILTIN_JOB_SCHEMAS = new Map([
       summary: stringSchema({ minLength: 1 }),
       tests: stringSchema({ minLength: 1 }),
       notes: stringSchema(),
+      prBody: stringSchema(),
       issueNumber: integerSchema({ minimum: 1 }),
       issueUrl: stringSchema(),
       commitUrl: stringSchema(),
@@ -176,6 +204,158 @@ const BUILTIN_JOB_SCHEMAS = new Map([
       fix_recommendation: stringSchema({ minLength: 1 })
     }
   })],
+  ["schema://jobs/dependency-remediation-input", objectSchema({
+    $id: "schema://jobs/dependency-remediation-input",
+    description: "Dependency vulnerability remediation input from public advisory sources such as OSV/NVD.",
+    required: ["ecosystem", "packageName", "vulnerableVersion", "fixedVersion", "advisoryIds", "instructions"],
+    properties: {
+      ecosystem: enumString(["npm"]),
+      packageName: stringSchema({ minLength: 1 }),
+      vulnerableVersion: stringSchema({ minLength: 1 }),
+      fixedVersion: stringSchema({ minLength: 1 }),
+      repo: stringSchema(),
+      manifestPath: stringSchema(),
+      advisoryIds: arrayOfStrings({ minItems: 1 }),
+      advisoryUrls: arrayOfStrings(),
+      instructions: arrayOfStrings({ minItems: 1 })
+    }
+  })],
+  ["schema://jobs/dependency-remediation-output", objectSchema({
+    $id: "schema://jobs/dependency-remediation-output",
+    description: "Structured pull request evidence for a dependency vulnerability remediation.",
+    required: ["prUrl", "packageName", "vulnerableVersion", "fixedVersion", "advisoryIds", "summary", "tests"],
+    properties: {
+      prUrl: stringSchema({ minLength: 1 }),
+      packageName: stringSchema({ minLength: 1 }),
+      vulnerableVersion: stringSchema({ minLength: 1 }),
+      fixedVersion: stringSchema({ minLength: 1 }),
+      advisoryIds: arrayOfStrings({ minItems: 1 }),
+      summary: stringSchema({ minLength: 1 }),
+      tests: stringSchema({ minLength: 1 }),
+      repo: stringSchema(),
+      manifestPath: stringSchema(),
+      lockfilesUpdated: arrayOfStrings(),
+      filesChanged: arrayOfStrings(),
+      ciStatus: enumString(["unknown", "pending", "passing", "failing"]),
+      checksPassing: booleanSchema(),
+      notes: stringSchema()
+    }
+  })],
+  ["schema://jobs/open-data-quality-audit-input", objectSchema({
+    $id: "schema://jobs/open-data-quality-audit-input",
+    description: "Public open-data dataset/resource quality audit input.",
+    required: ["portal", "datasetTitle", "datasetUrl", "resourceUrl", "instructions"],
+    properties: {
+      portal: enumString(["data.gov"]),
+      datasetId: stringSchema(),
+      datasetTitle: stringSchema({ minLength: 1 }),
+      datasetUrl: stringSchema({ minLength: 1 }),
+      resourceId: stringSchema(),
+      resourceTitle: stringSchema(),
+      resourceUrl: stringSchema({ minLength: 1 }),
+      resourceFormat: stringSchema(),
+      agency: stringSchema(),
+      license: stringSchema(),
+      modified: stringSchema(),
+      metadataModified: stringSchema(),
+      instructions: arrayOfStrings({ minItems: 1 })
+    }
+  })],
+  ["schema://jobs/open-data-quality-audit-output", objectSchema({
+    $id: "schema://jobs/open-data-quality-audit-output",
+    description: "Structured evidence for a public open-data dataset/resource quality audit.",
+    required: ["dataset_title", "dataset_url", "resource_url", "checks", "findings", "no_issue_found", "summary", "recommended_actions"],
+    properties: {
+      dataset_title: stringSchema({ minLength: 1 }),
+      dataset_url: stringSchema({ minLength: 1 }),
+      resource_url: stringSchema({ minLength: 1 }),
+      resource_format: stringSchema(),
+      checks: {
+        type: "array",
+        minItems: 1,
+        items: objectSchema({
+          required: ["name", "status", "evidence"],
+          properties: {
+            name: stringSchema({ minLength: 1 }),
+            status: enumString(["pass", "warn", "fail", "unknown"]),
+            evidence: stringSchema({ minLength: 1 })
+          }
+        })
+      },
+      findings: {
+        type: "array",
+        items: objectSchema({
+          required: ["severity", "issue", "evidence", "recommendation"],
+          properties: {
+            severity: enumString(["low", "medium", "high"]),
+            issue: stringSchema({ minLength: 1 }),
+            evidence: stringSchema({ minLength: 1 }),
+            recommendation: stringSchema({ minLength: 1 })
+          }
+        })
+      },
+      no_issue_found: booleanSchema(),
+      summary: stringSchema({ minLength: 1 }),
+      recommended_actions: arrayOfStrings({ minItems: 1 }),
+      notes: stringSchema()
+    }
+  })],
+  ["schema://jobs/openapi-quality-audit-input", objectSchema({
+    $id: "schema://jobs/openapi-quality-audit-input",
+    description: "Public OpenAPI quality audit input.",
+    required: ["apiTitle", "specUrl", "instructions"],
+    properties: {
+      apiTitle: stringSchema({ minLength: 1 }),
+      specUrl: stringSchema({ minLength: 1 }),
+      localSurface: stringSchema(),
+      repo: stringSchema(),
+      openapiVersion: stringSchema(),
+      pathCount: integerSchema({ minimum: 0 }),
+      operationCount: integerSchema({ minimum: 0 }),
+      schemaCount: integerSchema({ minimum: 0 }),
+      instructions: arrayOfStrings({ minItems: 1 })
+    }
+  })],
+  ["schema://jobs/openapi-quality-audit-output", objectSchema({
+    $id: "schema://jobs/openapi-quality-audit-output",
+    description: "Structured evidence for an OpenAPI spec quality audit.",
+    required: ["api_title", "spec_url", "checks", "findings", "no_issue_found", "summary", "recommended_actions"],
+    properties: {
+      api_title: stringSchema({ minLength: 1 }),
+      spec_url: stringSchema({ minLength: 1 }),
+      local_surface: stringSchema(),
+      openapi_version: stringSchema(),
+      checks: {
+        type: "array",
+        minItems: 1,
+        items: objectSchema({
+          required: ["name", "status", "evidence"],
+          properties: {
+            name: stringSchema({ minLength: 1 }),
+            status: enumString(["pass", "warn", "fail", "unknown"]),
+            evidence: stringSchema({ minLength: 1 })
+          }
+        })
+      },
+      findings: {
+        type: "array",
+        items: objectSchema({
+          required: ["severity", "location", "issue", "evidence", "recommendation"],
+          properties: {
+            severity: enumString(["low", "medium", "high"]),
+            location: stringSchema({ minLength: 1 }),
+            issue: stringSchema({ minLength: 1 }),
+            evidence: stringSchema({ minLength: 1 }),
+            recommendation: stringSchema({ minLength: 1 })
+          }
+        })
+      },
+      no_issue_found: booleanSchema(),
+      summary: stringSchema({ minLength: 1 }),
+      recommended_actions: arrayOfStrings({ minItems: 1 }),
+      notes: stringSchema()
+    }
+  })],
   ["schema://jobs/wikipedia-maintenance-input", objectSchema({
     $id: "schema://jobs/wikipedia-maintenance-input",
     description: "Wikipedia public article maintenance job input.",
@@ -183,10 +363,16 @@ const BUILTIN_JOB_SCHEMAS = new Map([
     properties: {
       project: enumString(["wikipedia"]),
       language: stringSchema(),
+      lang: stringSchema(),
       pageTitle: stringSchema({ minLength: 1 }),
       pageUrl: stringSchema({ minLength: 1 }),
+      articleUrl: stringSchema({ minLength: 1 }),
       revisionId: stringSchema({ minLength: 1 }),
+      pinnedRevisionUrl: stringSchema({ minLength: 1 }),
       taskType: enumString(["citation_repair", "freshness_check", "infobox_consistency"]),
+      proposalOnly: booleanSchema(),
+      attributionPolicy: stringSchema({ minLength: 1 }),
+      outputSchemaUrl: stringSchema({ minLength: 1 }),
       sourceUrls: arrayOfStrings(),
       instructions: arrayOfStrings({ minItems: 1 })
     }
@@ -287,6 +473,30 @@ const BUILTIN_JOB_SCHEMAS = new Map([
       },
       review_notes: stringSchema({ minLength: 1 })
     }
+  })],
+  ["schema://jobs/product-proof-worker-loop", objectSchema({
+    $id: "schema://jobs/product-proof-worker-loop",
+    description: "Structured evidence from the hosted product-proof worker loop.",
+    required: ["summary", "output", "status", "checks"],
+    properties: {
+      summary: stringSchema({ minLength: 1 }),
+      output: stringSchema({ minLength: 1 }),
+      status: enumString(["complete"]),
+      job_id: stringSchema({ minLength: 1 }),
+      completed_at: stringSchema({ minLength: 1 }),
+      checks: {
+        type: "array",
+        minItems: 1,
+        items: objectSchema({
+          required: ["name", "status", "evidence"],
+          properties: {
+            name: stringSchema({ minLength: 1 }),
+            status: enumString(["pass", "warn", "fail"]),
+            evidence: stringSchema({ minLength: 1 })
+          }
+        })
+      }
+    }
   })]
 ]);
 
@@ -317,15 +527,35 @@ export function getPublicBuiltinJobSchemaByName(name) {
   return toPublicSchemaDocument(schema);
 }
 
+export function getJobSchema(schemaRef, { registrations = [] } = {}) {
+  return getBuiltinJobSchema(schemaRef) ?? getRegisteredJobSchema(schemaRef, registrations);
+}
+
+export function getRegisteredJobSchema(schemaRef, registrations = []) {
+  return getRegisteredJobSchemaRegistration(schemaRef, registrations)?.schema;
+}
+
+export function getRegisteredJobSchemaRegistration(schemaRef, registrations = []) {
+  const ref = normalizeJobSchemaRef(schemaRef);
+  if (!ref || !Array.isArray(registrations)) {
+    return undefined;
+  }
+  return registrations.find((entry) => entry?.schemaRef === ref);
+}
+
+export function isRegisteredJobSchemaRef(schemaRef, registrations = []) {
+  return Boolean(getRegisteredJobSchemaRegistration(schemaRef, registrations));
+}
+
 export function isBuiltinJobSchemaRef(schemaRef) {
   return Boolean(getBuiltinJobSchema(schemaRef));
 }
 
-export function validateStructuredSubmission(schemaRef, submission, { path = "submission" } = {}) {
-  const schema = getBuiltinJobSchema(schemaRef);
+export function validateStructuredSubmission(schemaRef, submission, { path = "submission", registrations = [] } = {}) {
+  const schema = getJobSchema(schemaRef, { registrations });
   if (!schema) {
     throw new ValidationError(
-      `Structured submission requires a known built-in schema; unknown schema ref: ${schemaRef}`
+      `Structured submission requires a known built-in or registered schema; unknown schema ref: ${schemaRef}`
     );
   }
   validateAgainstSchema(submission, schema, path);
@@ -360,18 +590,42 @@ function cloneSchema(schema) {
 }
 
 function toPublicSchemaDocument(schema) {
+  const { $id, description, ...rest } = cloneSchema(schema);
   return {
     $schema: "http://json-schema.org/draft-07/schema#",
-    ...cloneSchema(schema)
+    $id,
+    title: titleFromSchemaRef($id),
+    ...(description ? { description } : {}),
+    ...rest
   };
 }
 
-export function schemaRefToJobSchemaPath(schemaRef) {
+export function schemaRefToJobSchemaPath(schemaRef, { registrations = [] } = {}) {
   const normalized = normalizeBuiltinJobSchemaRef(schemaRef);
-  if (!normalized) {
-    return undefined;
+  if (normalized) {
+    return `/schemas/jobs/${normalized.slice("schema://jobs/".length)}.json`;
   }
-  return `/schemas/jobs/${normalized.slice("schema://jobs/".length)}.json`;
+  return getRegisteredJobSchemaRegistration(schemaRef, registrations)?.schemaUrl;
+}
+
+function titleFromSchemaRef(schemaRef) {
+  const normalized = normalizeBuiltinJobSchemaRef(schemaRef) ?? "";
+  const name = normalized.slice("schema://jobs/".length);
+  return name
+    .split("-")
+    .filter(Boolean)
+    .map((part) => {
+      const lower = part.toLowerCase();
+      const acronym = {
+        api: "API",
+        docs: "Docs",
+        github: "GitHub",
+        openapi: "OpenAPI",
+        pr: "PR"
+      }[lower];
+      return acronym ?? `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`;
+    })
+    .join(" ");
 }
 
 export function jobSchemaPathToRef(pathname) {
@@ -387,144 +641,4 @@ export function jobSchemaPathToRef(pathname) {
     return undefined;
   }
   return normalizeBuiltinJobSchemaRef(`schema://jobs/${normalizedName}`);
-}
-
-export function validateAgainstSchema(value, schema, path = "value") {
-  const expected = schema.type;
-  if (expected === "object") {
-    if (!isPlainObject(value)) {
-      throw new ValidationError(`${path} must be an object`);
-    }
-    const required = schema.required ?? [];
-    for (const key of required) {
-      if (!(key in value)) {
-        throw new ValidationError(`${path}.${key} is required`);
-      }
-    }
-    for (const [key, propertySchema] of Object.entries(schema.properties ?? {})) {
-      if (key in value) {
-        validateAgainstSchema(value[key], propertySchema, `${path}.${key}`);
-      }
-    }
-    if (schema.additionalProperties === false) {
-      const allowed = new Set(Object.keys(schema.properties ?? {}));
-      for (const key of Object.keys(value)) {
-        if (!allowed.has(key)) {
-          throw new ValidationError(`${path}.${key} is not an allowed field`);
-        }
-      }
-    }
-    return;
-  }
-
-  if (expected === "array") {
-    if (!Array.isArray(value)) {
-      throw new ValidationError(`${path} must be an array`);
-    }
-    if (Number.isInteger(schema.minItems) && value.length < schema.minItems) {
-      throw new ValidationError(`${path} must contain at least ${schema.minItems} item(s)`);
-    }
-    if (Number.isInteger(schema.maxItems) && value.length > schema.maxItems) {
-      throw new ValidationError(`${path} must contain at most ${schema.maxItems} item(s)`);
-    }
-    value.forEach((entry, index) => {
-      validateAgainstSchema(entry, schema.items ?? {}, `${path}[${index}]`);
-    });
-    return;
-  }
-
-  if (expected === "string") {
-    if (typeof value !== "string") {
-      throw new ValidationError(`${path} must be a string`);
-    }
-    if (Number.isInteger(schema.minLength) && value.length < schema.minLength) {
-      throw new ValidationError(`${path} must be at least ${schema.minLength} character(s)`);
-    }
-    if (Number.isInteger(schema.maxLength) && value.length > schema.maxLength) {
-      throw new ValidationError(`${path} must be at most ${schema.maxLength} character(s)`);
-    }
-    if (schema.pattern && !(new RegExp(schema.pattern, "u")).test(value)) {
-      throw new ValidationError(`${path} does not match the expected format`);
-    }
-    if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
-      throw new ValidationError(`${path} must be one of ${schema.enum.join(", ")}`);
-    }
-    return;
-  }
-
-  if (expected === "number") {
-    if (!Number.isFinite(value)) {
-      throw new ValidationError(`${path} must be a number`);
-    }
-    if (Number.isFinite(schema.minimum) && value < schema.minimum) {
-      throw new ValidationError(`${path} must be at least ${schema.minimum}`);
-    }
-    return;
-  }
-
-  if (expected === "integer") {
-    if (!Number.isInteger(value)) {
-      throw new ValidationError(`${path} must be an integer`);
-    }
-    if (Number.isFinite(schema.minimum) && value < schema.minimum) {
-      throw new ValidationError(`${path} must be at least ${schema.minimum}`);
-    }
-    return;
-  }
-
-  if (expected === "boolean") {
-    if (typeof value !== "boolean") {
-      throw new ValidationError(`${path} must be a boolean`);
-    }
-    return;
-  }
-}
-
-function stringSchema(options = {}) {
-  return {
-    type: "string",
-    ...options
-  };
-}
-
-function integerSchema(options = {}) {
-  return {
-    type: "integer",
-    ...options
-  };
-}
-
-function booleanSchema() {
-  return {
-    type: "boolean"
-  };
-}
-
-function enumString(values) {
-  return {
-    type: "string",
-    enum: values
-  };
-}
-
-function arrayOfStrings(options = {}) {
-  return {
-    type: "array",
-    items: { type: "string", minLength: 1 },
-    ...options
-  };
-}
-
-function objectSchema({ properties = {}, required = [], additionalProperties = false, ...rest }) {
-  return {
-    type: "object",
-    properties,
-    required,
-    additionalProperties,
-    ...rest
-  };
-}
-
-function isPlainObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

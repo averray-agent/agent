@@ -113,3 +113,74 @@ export async function signOut(): Promise<void> {
   clearSession();
   setClientToken(undefined);
 }
+
+export type RefreshOutcome =
+  | { ok: true; session: AuthSession }
+  | { ok: false; reason: "no_session" | "endpoint_missing" | "unauthorized" | "network" | "shape" };
+
+/**
+ * Rotate the wallet JWT in place via POST /auth/refresh — the operator
+ * keeps their session without re-running SIWE.
+ *
+ * Fail-soft: if the endpoint is not yet deployed (404), or the network
+ * is unavailable, we leave the existing session alone and report the
+ * reason. Only `unauthorized` clears the session — that means the
+ * token is genuinely revoked / expired and the operator must re-SIWE.
+ */
+export async function refreshAuthToken(): Promise<RefreshOutcome> {
+  const token = getStoredToken();
+  if (!token) return { ok: false, reason: "no_session" };
+
+  let response: Response;
+  try {
+    response = await fetch(apiUrl("/auth/refresh"), {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    });
+  } catch {
+    return { ok: false, reason: "network" };
+  }
+
+  // Backend may not be deployed yet — fall through silently. The existing
+  // session keeps working; the operator will re-SIWE once it expires.
+  if (response.status === 404 || response.status === 405) {
+    return { ok: false, reason: "endpoint_missing" };
+  }
+
+  // Token revoked / expired / service-token attempt — clear the session
+  // and surface the reason so the UI can prompt re-SIWE.
+  if (response.status === 401 || response.status === 403) {
+    clearSession("token_refresh_rejected");
+    setClientToken(undefined);
+    return { ok: false, reason: "unauthorized" };
+  }
+
+  if (!response.ok) {
+    // Treat anything else (rate-limit, server error) as a soft miss —
+    // don't drop the existing session.
+    return { ok: false, reason: "network" };
+  }
+
+  const payload = (await response.json().catch(() => ({}))) as {
+    token?: string;
+    wallet?: string;
+    expiresAt?: string;
+    roles?: unknown;
+  };
+  if (!payload.token || !payload.expiresAt || !payload.wallet) {
+    return { ok: false, reason: "shape" };
+  }
+
+  const session: AuthSession = {
+    token: payload.token,
+    wallet: payload.wallet,
+    expiresAt: payload.expiresAt,
+    roles: Array.isArray(payload.roles)
+      ? payload.roles.filter((r): r is string => typeof r === "string")
+      : [],
+  };
+
+  writeSession(session);
+  setClientToken(session.token);
+  return { ok: true, session };
+}

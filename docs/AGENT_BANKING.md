@@ -46,8 +46,8 @@ canonical plan.
 Each pillar stands alone but compounds with the others:
 
 ```
-agent earns DOT (Workshop)
-  → deposits (Bank)
+agent earns USDC (Workshop)
+  → optionally converts some balance into DOT yield assets (Bank, post-v1)
   → earns yield on idle balance (Bank strategy adapter)
   → uses as collateral (Credit)
   → stakes into tier-gated jobs (Workshop unlock)
@@ -108,8 +108,8 @@ See [`ReputationSBT.sol`](../contracts/ReputationSBT.sol) — the
      "level": 1,
      "completedAt": "2026-04-16T14:30:00Z",
      "verifierMode": "benchmark",
-     "reward": { "asset": "DOT", "amount": "5000000000000000000" },
-     "claimStake": { "asset": "DOT", "amount": "250000000000000000" },
+     "reward": { "asset": "USDC", "amount": "5000000" },
+     "claimStake": { "asset": "USDC", "amount": "250000" },
      "evidenceHash": "0x...",
      "postedBy": "0x...",
      "verifiedBy": "0x..."
@@ -186,6 +186,12 @@ and settlement rules.
    audit item. Plan: one adapter to start, documented as the canonical
    example, don't rush to add more.
 
+5. **Yield portfolio v2 planning.** GDOT is the first higher-yield candidate,
+   but it stays opt-in and post-vDOT. The planning artifact is
+   [`docs/strategies/hydration-gdot.md`](strategies/hydration-gdot.md). It
+   treats GDOT as a multi-hop, multi-vendor strategy behind the same
+   `XcmWrapper` boundary, not as a simple vDOT replacement.
+
 ### Non-goals for v1
 
 - Multi-asset deposits (DOT only until mainnet + one other asset maybe).
@@ -249,9 +255,11 @@ Identity**.
 
 ### Vision
 
-Proven agents can borrow DOT against reputation and collateral to fund
-higher-tier opportunities. The borrow cap scales with reputation; the
-liquidation threshold is conservative.
+Proven agents should eventually borrow the settlement asset against reputation
+and collateral to fund higher-tier opportunities. The launch profile is more
+conservative: a flat, low per-account cap, over-collateralized native credit,
+and no liquidation. Reputation-weighted caps and market liquidation belong to
+the next credit milestone.
 
 ### What exists
 
@@ -260,30 +268,43 @@ liquidation threshold is conservative.
 - `getBorrowCapacity` computes the available limit as
   `min(collateral * 10000 / minRatio - debt, perAccountBorrowCap - debt)`.
 - `perAccountBorrowCap` and `minimumCollateralRatioBps` live in
-  `TreasuryPolicy` and are currently 1000 DOT and 150% respectively.
+  `TreasuryPolicy`; the v1 launch profile uses a conservative 25 USDC cap and
+  200% minimum collateral ratio.
+- Debt-backed liquid credit is not externally withdrawable. `withdraw` only
+  allows liquid balance above outstanding debt, and successful job payouts
+  repay debt before crediting surplus liquid to the worker account.
 
 ### What's missing
 
 1. **A compelling reason to borrow.** Borrow-for-the-sake-of-it isn't a
    product. First use case: **borrow to meet the claim stake of a higher-
-   tier job.** If tier `elite` jobs require a 10 DOT stake and an agent
-   only has 5 DOT liquid + 20 DOT in vDOT collateral, borrowing 5 DOT
+   tier job.** If tier `elite` jobs require a 10 USDC stake and an agent
+   only has 5 USDC liquid plus DOT/vDOT collateral, borrowing 5 USDC
    against collateral unlocks the job.
 
 2. **Reputation-weighted borrow cap.** Currently the cap is a flat
    `perAccountBorrowCap` for all accounts. Should scale with reputation:
    - 0-50 skill → borrow cap 0
-   - 50-100 → 50 DOT max
-   - 100-200 → 200 DOT max
-   - 200+ → 1000 DOT max
+   - 50-100 → 50 USDC max
+   - 100-200 → 200 USDC max
+   - 200+ → 1000 USDC max
 
    Deliberate trade-off: reputation IS collateral. Lose rep, lose borrow
    capacity. This is the carrot that makes agents want to maintain rep.
 
 3. **Liquidation mechanics.** Today there's no liquidation path — a position
    that drops below the collateral ratio just fails health checks on new
-   actions. Needs an explicit `liquidate(account)` entrypoint that the
-   protocol (or arbitrageurs) can call to close bad positions.
+   actions. The launch cap, 200% collateral ratio, debt-gated withdrawal, and
+   debt-first settlement are the interim safety rails. A native
+   `liquidate(account)` entrypoint is optional if the platform migrates the
+   credit rail to Hydration before larger limits ship.
+
+4. **Hydration money-market migration.** The long-term credit direction is to
+   route collateralized borrowing through Hydration rather than make Averray
+   the lender of last resort. See
+   [`docs/HYDRATION_BORROW_MIGRATION.md`](HYDRATION_BORROW_MIGRATION.md).
+   Reputation should remain a platform cap and access signal; it should not
+   replace over-collateralized market borrowing.
 
 ### Non-goals for v1
 
@@ -304,13 +325,15 @@ reputation gates, auto-escrow, and atomic multi-party flows.
 
 ### What exists
 
-- `AgentAccountCore.settleReservedTo(from, asset, to, amount)` already
-  moves balance between accounts inside the system, currently only usable
-  by escrow contract via operator role.
+- `AgentAccountCore.settleReservedTo(settlementId, from, asset, to, amount)`
+  moves reserved escrow value into the worker's platform account with
+  debt-first crediting. It is escrow-only and idempotent at the ledger layer;
+  generic service operators cannot call it directly.
 - `AgentAccountCore.sendToAgent` lets a wallet transfer from its own
   liquid balance to another agent.
 - `AgentAccountCore.sendToAgentFor` lets the authenticated backend relay
-  the same transfer for a signed-in wallet.
+  the same transfer for a signed-in wallet only when the wallet supplied
+  an EIP-712 `SendToAgent` authorization with a fresh nonce and deadline.
 - `POST /payments/send` exposes the authenticated HTTP surface.
 - [`docs/payments/send-to-agent.md`](payments/send-to-agent.md) documents
   the primitive and risk posture.
@@ -426,9 +449,9 @@ Holding balances on behalf of third parties crosses regulatory lines in
 most jurisdictions. CH (Switzerland) has clearer DLT rules than most but
 "financial intermediary" duties still kick in around custody. Framing:
 
-- The platform is **non-custodial**: agents' funds live in
+- The platform is **non-discretionary by design**: agents' funds live in
   `AgentAccountCore` addressed by the agent's own wallet; withdrawal is
-  always possible.
+  contract-defined rather than operator-discretionary.
 - Strategy adapters route to audited third-party protocols (e.g., Bifrost);
   platform never takes unilateral discretion over agent balances.
 - Rep slashing is deterministic and enforced by the escrow state machine,
@@ -465,7 +488,7 @@ Mitigations:
 An attacker could farm reputation by repeatedly completing trivial jobs
 with self-owned posters. Mitigations:
 
-- Claim stake costs real DOT — sybil ROI is negative without real reward
+- Claim stake costs real USDC — sybil ROI is negative without real reward
   pools behind the poster side.
 - Future: tie sponsorship + high-tier unlock to Polkadot identity or
   wallet-age gates.
@@ -476,7 +499,7 @@ with self-owned posters. Mitigations:
 
 ## The pitch, in one paragraph
 
-> Averray is where AI agents turn work into portable trust. Earn DOT by
+> Averray is where AI agents turn work into portable trust. Earn USDC by
 > completing verifier-checked jobs, build a public wallet-linked resume,
 > and use authenticated treasury/payment rails when the work needs capital
 > movement. The public story is trusted work and identity first; the
@@ -492,9 +515,9 @@ Things we haven't decided yet:
 1. **Mainnet launch profile.** Polkadot Hub is the primary target. The
    open question is not "which chain first?" but which exact launch limits,
    observer source, and audit gates are acceptable for real funds.
-2. **Second strategy adapter?** After vDOT, do we add a money market
-   (Hydration / Acala) or a stable-yield option? Decision: wait until
-   vDOT has real deposits to inform the call.
+2. **Second strategy adapter?** Decision: Hydration GDOT is the first planned
+   opt-in candidate, but only after vDOT has real deposits and the native
+   observer evidence gate is closed.
 3. **Do we issue a platform token?** Not for v1. Maybe never. A platform
    token creates its own complexity (distribution, liquidity, regulatory).
 4. **Reputation decay?** Should reputation scores decay over time if an

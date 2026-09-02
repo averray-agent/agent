@@ -1,5 +1,24 @@
 import { createClient } from "redis";
 import { ExternalServiceError } from "./errors.js";
+import { listEventLogFromRecords } from "./event-log-query.js";
+import {
+  cloneJsonRecord,
+  filterCapabilityGrantRecords,
+  filterFinalFundedJobRecords,
+  listCapabilityGrantRecords,
+  listFundedJobRecords,
+  markXcmObservationFailedRecord,
+  markXcmObservationProcessedRecord,
+  mergeServiceStateRecord,
+  mergeXcmObservationRecord,
+  normalizeContentHash,
+  normalizeFundedJobId,
+  redisRangeFromLimitOffset,
+  sliceWindow,
+  timestampScore
+} from "./state-store-records.js";
+
+const DEFAULT_EVENT_LOG_RETENTION = 5_000;
 
 const RELEASE_CLAIM_LOCK_SCRIPT = `
 if redis.call("get", KEYS[1]) == ARGV[1] then
@@ -44,6 +63,59 @@ export class MemoryStateStore {
     this.mutationReceipts = new Map();
     this.xcmObservations = new Map();
     this.serviceStates = new Map();
+    this.content = new Map();
+    this.fundedJobs = new Map();
+    this.capabilityGrants = new Map();
+    this.eventLog = [];
+    this.accountOverlays = new Map();
+    this.policyProposals = new Map();
+  }
+
+  // ── policy proposals (Package G) ──────────────────────────────────
+  //
+  // Backs the PolicyService write-through cache. Built-in policies are
+  // seed data loaded from builtin-policies.js; only operator-proposed
+  // policies land here. Mirrors the account-overlay storage shape:
+  // async API + deep-clone on the way in and out so callers cannot
+  // mutate the internal Map.
+
+  async getPolicyProposal(tag) {
+    if (!tag) return undefined;
+    const stored = this.policyProposals.get(String(tag));
+    return cloneJsonRecord(stored);
+  }
+
+  async upsertPolicyProposal(tag, proposal) {
+    if (!tag) return;
+    this.policyProposals.set(String(tag), cloneJsonRecord(proposal ?? {}));
+  }
+
+  async listPolicyProposalTags() {
+    return Array.from(this.policyProposals.keys());
+  }
+
+  // ── account overlays (Package C Phase 2) ───────────────────────────
+  //
+  // Backs the AccountOverlayStore write-through cache. Each entry holds
+  // the per-wallet derived_cache + display_only fields documented in
+  // ACCOUNT_OVERLAY_CLASSIFICATION (see account-mutation-service.js).
+  // chain_authoritative fields are still resolved live against the
+  // blockchain gateway on every read; persisting them here is harmless
+  // since attachStoredTreasuryMetadata makes live win per-key.
+
+  async getAccountOverlay(wallet) {
+    if (!wallet) return undefined;
+    const stored = this.accountOverlays.get(String(wallet));
+    return stored ? cloneAccountOverlay(stored) : undefined;
+  }
+
+  async upsertAccountOverlay(wallet, overlay) {
+    if (!wallet) return;
+    this.accountOverlays.set(String(wallet), cloneAccountOverlay(overlay));
+  }
+
+  async listAccountOverlayWallets() {
+    return Array.from(this.accountOverlays.keys());
   }
 
   async getSession(sessionId) {
@@ -203,54 +275,74 @@ export class MemoryStateStore {
     return receipt;
   }
 
+  async getContent(hash) {
+    return this.content.get(normalizeContentHash(hash));
+  }
+
+  async upsertContent(record) {
+    const key = normalizeContentHash(record?.hash);
+    this.content.set(key, record);
+    return record;
+  }
+
+  async getFundedJob(jobId) {
+    return this.fundedJobs.get(normalizeFundedJobId(jobId));
+  }
+
+  async upsertFundedJob(record) {
+    this.fundedJobs.set(normalizeFundedJobId(record?.jobId), record);
+    return record;
+  }
+
+  async listFundedJobs({ limit = 100, offset = 0, finalOnly = false } = {}) {
+    return listFundedJobRecords(this.fundedJobs.values(), { limit, offset, finalOnly });
+  }
+
   async getXcmObservation(requestId) {
     return this.xcmObservations.get(requestId);
   }
 
   async upsertXcmObservation(observation) {
     const existing = this.xcmObservations.get(observation.requestId) ?? {};
-    const merged = {
-      ...existing,
-      ...observation,
-      observedAt: observation.observedAt ?? existing.observedAt ?? new Date().toISOString(),
-      processed: Boolean(observation.processed ?? existing.processed),
-      attemptCount: Number(observation.attemptCount ?? existing.attemptCount ?? 0)
-    };
+    const merged = mergeXcmObservationRecord(existing, observation);
     this.xcmObservations.set(observation.requestId, merged);
     return merged;
   }
 
   async listPendingXcmObservations(limit = 50) {
-    return [...this.xcmObservations.values()]
+    return sliceWindow([...this.xcmObservations.values()]
       .filter((entry) => !entry.processed)
-      .sort((left, right) => String(left.observedAt ?? "").localeCompare(String(right.observedAt ?? "")))
-      .slice(0, Math.max(limit, 0));
+      .sort((left, right) => String(left.observedAt ?? "").localeCompare(String(right.observedAt ?? ""))), { limit, offset: 0 });
+  }
+
+  async appendEventLog(event) {
+    const existingIndex = this.eventLog.findIndex((entry) => entry.id === event.id);
+    if (existingIndex >= 0) {
+      this.eventLog.splice(existingIndex, 1);
+    }
+    this.eventLog.push(event);
+    if (this.eventLog.length > DEFAULT_EVENT_LOG_RETENTION) {
+      this.eventLog.splice(0, this.eventLog.length - DEFAULT_EVENT_LOG_RETENTION);
+    }
+    return event;
+  }
+
+  async listEventLog(filter = {}) {
+    return listEventLogFromRecords(this.eventLog, filter);
   }
 
   async markXcmObservationProcessed(requestId, result = undefined) {
     const current = this.xcmObservations.get(requestId);
-    if (!current) return undefined;
-    const updated = {
-      ...current,
-      processed: true,
-      processedAt: new Date().toISOString(),
-      result,
-      lastError: undefined
-    };
+    const updated = markXcmObservationProcessedRecord(current, result);
+    if (!updated) return undefined;
     this.xcmObservations.set(requestId, updated);
     return updated;
   }
 
   async markXcmObservationFailed(requestId, error) {
     const current = this.xcmObservations.get(requestId);
-    if (!current) return undefined;
-    const updated = {
-      ...current,
-      processed: false,
-      attemptCount: Number(current.attemptCount ?? 0) + 1,
-      lastError: error?.message ?? String(error ?? "unknown_error"),
-      lastTriedAt: new Date().toISOString()
-    };
+    const updated = markXcmObservationFailedRecord(current, error);
+    if (!updated) return undefined;
     this.xcmObservations.set(requestId, updated);
     return updated;
   }
@@ -261,13 +353,24 @@ export class MemoryStateStore {
 
   async upsertServiceState(scope, state) {
     const existing = this.serviceStates.get(scope) ?? {};
-    const merged = {
-      ...existing,
-      ...state,
-      updatedAt: new Date().toISOString()
-    };
+    const merged = mergeServiceStateRecord(existing, state);
     this.serviceStates.set(scope, merged);
     return merged;
+  }
+
+  async getCapabilityGrant(id) {
+    return this.capabilityGrants.get(String(id ?? ""));
+  }
+
+  async upsertCapabilityGrant(record) {
+    const id = String(record?.id ?? "");
+    if (!id) return record;
+    this.capabilityGrants.set(id, record);
+    return record;
+  }
+
+  async listCapabilityGrants({ subject, status, limit = 100, offset = 0 } = {}) {
+    return listCapabilityGrantRecords(this.capabilityGrants.values(), { subject, status, limit, offset });
   }
 
   async revokeToken(jti, ttlSeconds) {
@@ -299,6 +402,32 @@ export class MemoryStateStore {
       mode: "ephemeral"
     };
   }
+
+  // ── Phase 4b.5b: refresh-token persistence ─────────────────────────────
+  // Keyed by SHA-256(rawToken) hex. TTL = refresh-TTL + forensic grace
+  // (see mcp-server/src/auth/refresh.js for the design).
+  _evictExpiredRefreshRecords() {
+    if (!this.refreshRecords) return;
+    const now = Date.now();
+    for (const [hash, entry] of this.refreshRecords) {
+      if (entry.expiresAtMs <= now) this.refreshRecords.delete(hash);
+    }
+  }
+
+  async getRefreshRecord(hash) {
+    if (!this.refreshRecords) return null;
+    this._evictExpiredRefreshRecords();
+    const entry = this.refreshRecords.get(hash);
+    return entry ? entry.value : null;
+  }
+
+  async upsertRefreshRecord(hash, record, ttlSeconds) {
+    if (!this.refreshRecords) this.refreshRecords = new Map();
+    this.refreshRecords.set(hash, {
+      value: record,
+      expiresAtMs: Date.now() + ttlSeconds * 1000,
+    });
+  }
 }
 
 export class RedisStateStore {
@@ -307,6 +436,59 @@ export class RedisStateStore {
     this.namespace = namespace;
     this.client = createClient({ url: redisUrl });
     this.connectionPromise = undefined;
+  }
+
+  // ── account overlays (Package C Phase 2) ───────────────────────────
+  // Persisted as a single Redis hash `<namespace>:account-overlay` with
+  // wallet → JSON.stringified overlay. See MemoryStateStore for the
+  // contract and ACCOUNT_OVERLAY_CLASSIFICATION for field semantics.
+
+  async getAccountOverlay(wallet) {
+    if (!wallet) return undefined;
+    await this.connect();
+    const raw = await this.client.hGet(this.key("account-overlay", "all"), String(wallet));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async upsertAccountOverlay(wallet, overlay) {
+    if (!wallet) return;
+    await this.connect();
+    await this.client.hSet(
+      this.key("account-overlay", "all"),
+      String(wallet),
+      JSON.stringify(overlay ?? {})
+    );
+  }
+
+  async listAccountOverlayWallets() {
+    await this.connect();
+    return await this.client.hKeys(this.key("account-overlay", "all"));
+  }
+
+  // ── policy proposals (Package G) ──────────────────────────────────
+  // Mirrors the account-overlay shape: single hash
+  // `<namespace>:policy-proposal` keyed by tag.
+
+  async getPolicyProposal(tag) {
+    if (!tag) return undefined;
+    await this.connect();
+    const raw = await this.client.hGet(this.key("policy-proposal", "all"), String(tag));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async upsertPolicyProposal(tag, proposal) {
+    if (!tag) return;
+    await this.connect();
+    await this.client.hSet(
+      this.key("policy-proposal", "all"),
+      String(tag),
+      JSON.stringify(proposal ?? {})
+    );
+  }
+
+  async listPolicyProposalTags() {
+    await this.connect();
+    return await this.client.hKeys(this.key("policy-proposal", "all"));
   }
 
   async getSession(sessionId) {
@@ -374,8 +556,7 @@ export class RedisStateStore {
 
   async listSessionsByWallet(wallet, limit = 10, offset = 0) {
     await this.connect();
-    const start = Math.max(offset, 0);
-    const stop = start + Math.max(limit - 1, 0);
+    const { start, stop } = redisRangeFromLimitOffset(limit, offset);
     const sessionIds = await this.client.zRange(this.key("wallet-sessions", wallet), start, stop, {
       REV: true
     });
@@ -385,8 +566,7 @@ export class RedisStateStore {
 
   async listSessionsByJob(jobId, limit = 10, offset = 0) {
     await this.connect();
-    const start = Math.max(offset, 0);
-    const stop = start + Math.max(limit - 1, 0);
+    const { start, stop } = redisRangeFromLimitOffset(limit, offset);
     const sessionIds = await this.client.zRange(this.key("job-sessions", jobId), start, stop, {
       REV: true
     });
@@ -396,8 +576,7 @@ export class RedisStateStore {
 
   async listRecentSessions(limit = 10, offset = 0) {
     await this.connect();
-    const start = Math.max(offset, 0);
-    const stop = start + Math.max(limit - 1, 0);
+    const { start, stop } = redisRangeFromLimitOffset(limit, offset);
     const sessionIds = await this.client.zRange(this.key("sessions", "recent"), start, stop, {
       REV: true
     });
@@ -475,6 +654,44 @@ export class RedisStateStore {
     return receipt;
   }
 
+  async getContent(hash) {
+    await this.connect();
+    const raw = await this.client.get(this.key("content", normalizeContentHash(hash)));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async upsertContent(record) {
+    await this.connect();
+    const key = normalizeContentHash(record?.hash);
+    await this.client.set(this.key("content", key), JSON.stringify(record));
+    return record;
+  }
+
+  async getFundedJob(jobId) {
+    await this.connect();
+    const raw = await this.client.get(this.key("funded-job", normalizeFundedJobId(jobId)));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async upsertFundedJob(record) {
+    await this.connect();
+    const jobId = normalizeFundedJobId(record?.jobId);
+    await this.client.set(this.key("funded-job", jobId), JSON.stringify(record));
+    await this.client.zAdd(this.key("funded-jobs", "all"), {
+      score: timestampScore(record?.fundedAt ?? record?.updatedAt ?? ""),
+      value: jobId
+    });
+    return record;
+  }
+
+  async listFundedJobs({ limit = 100, offset = 0, finalOnly = false } = {}) {
+    await this.connect();
+    const { start, stop } = redisRangeFromLimitOffset(limit, offset);
+    const jobIds = await this.client.zRange(this.key("funded-jobs", "all"), start, stop, { REV: true });
+    const records = await Promise.all(jobIds.map((jobId) => this.getFundedJob(jobId)));
+    return filterFinalFundedJobRecords(records.filter(Boolean), finalOnly);
+  }
+
   async getXcmObservation(requestId) {
     await this.connect();
     const raw = await this.client.get(this.key("xcm-observation", requestId));
@@ -484,17 +701,11 @@ export class RedisStateStore {
   async upsertXcmObservation(observation) {
     await this.connect();
     const existing = await this.getXcmObservation(observation.requestId);
-    const merged = {
-      ...existing,
-      ...observation,
-      observedAt: observation.observedAt ?? existing?.observedAt ?? new Date().toISOString(),
-      processed: Boolean(observation.processed ?? existing?.processed),
-      attemptCount: Number(observation.attemptCount ?? existing?.attemptCount ?? 0)
-    };
+    const merged = mergeXcmObservationRecord(existing, observation);
     await this.client.set(this.key("xcm-observation", observation.requestId), JSON.stringify(merged));
     if (!merged.processed) {
       await this.client.zAdd(this.key("xcm-observations", "pending"), {
-        score: Date.parse(merged.observedAt) || Date.now(),
+        score: timestampScore(merged.observedAt),
         value: observation.requestId
       });
     } else {
@@ -505,26 +716,48 @@ export class RedisStateStore {
 
   async listPendingXcmObservations(limit = 50) {
     await this.connect();
+    const { stop } = redisRangeFromLimitOffset(limit, 0);
     const requestIds = await this.client.zRange(
       this.key("xcm-observations", "pending"),
       0,
-      Math.max(limit - 1, 0)
+      stop
     );
     const entries = await Promise.all(requestIds.map((requestId) => this.getXcmObservation(requestId)));
     return entries.filter((entry) => entry && !entry.processed);
   }
 
+  async appendEventLog(event) {
+    await this.connect();
+    const id = String(event?.id ?? "");
+    if (!id) return event;
+    const score = timestampScore(event?.timestamp ?? "");
+    const recordKey = this.key("event-log", id);
+    const indexKey = this.key("event-log", "all");
+    await this.client.set(recordKey, JSON.stringify(event));
+    await this.client.zAdd(indexKey, { score, value: id });
+    const staleIds = await this.client.zRange(indexKey, 0, -(DEFAULT_EVENT_LOG_RETENTION + 1));
+    if (staleIds.length > 0) {
+      await this.client.zRem(indexKey, staleIds);
+      await this.client.del(staleIds.map((staleId) => this.key("event-log", staleId)));
+    }
+    return event;
+  }
+
+  async listEventLog(filter = {}) {
+    await this.connect();
+    const ids = await this.client.zRange(this.key("event-log", "all"), 0, -1);
+    const records = await Promise.all(ids.map(async (id) => {
+      const raw = await this.client.get(this.key("event-log", id));
+      return raw ? JSON.parse(raw) : undefined;
+    }));
+    return listEventLogFromRecords(records.filter(Boolean), filter);
+  }
+
   async markXcmObservationProcessed(requestId, result = undefined) {
     await this.connect();
     const current = await this.getXcmObservation(requestId);
-    if (!current) return undefined;
-    const updated = {
-      ...current,
-      processed: true,
-      processedAt: new Date().toISOString(),
-      result,
-      lastError: undefined
-    };
+    const updated = markXcmObservationProcessedRecord(current, result);
+    if (!updated) return undefined;
     await this.client.set(this.key("xcm-observation", requestId), JSON.stringify(updated));
     await this.client.zRem(this.key("xcm-observations", "pending"), requestId);
     return updated;
@@ -533,17 +766,11 @@ export class RedisStateStore {
   async markXcmObservationFailed(requestId, error) {
     await this.connect();
     const current = await this.getXcmObservation(requestId);
-    if (!current) return undefined;
-    const updated = {
-      ...current,
-      processed: false,
-      attemptCount: Number(current.attemptCount ?? 0) + 1,
-      lastError: error?.message ?? String(error ?? "unknown_error"),
-      lastTriedAt: new Date().toISOString()
-    };
+    const updated = markXcmObservationFailedRecord(current, error);
+    if (!updated) return undefined;
     await this.client.set(this.key("xcm-observation", requestId), JSON.stringify(updated));
     await this.client.zAdd(this.key("xcm-observations", "pending"), {
-      score: Date.parse(updated.observedAt) || Date.now(),
+      score: timestampScore(updated.observedAt),
       value: requestId
     });
     return updated;
@@ -558,13 +785,46 @@ export class RedisStateStore {
   async upsertServiceState(scope, state) {
     await this.connect();
     const existing = await this.getServiceState(scope);
-    const merged = {
-      ...(existing ?? {}),
-      ...state,
-      updatedAt: new Date().toISOString()
-    };
+    const merged = mergeServiceStateRecord(existing, state);
     await this.client.set(this.key("service-state", scope), JSON.stringify(merged));
     return merged;
+  }
+
+  async getCapabilityGrant(id) {
+    await this.connect();
+    const raw = await this.client.get(this.key("capability-grant", String(id ?? "")));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async upsertCapabilityGrant(record) {
+    await this.connect();
+    const id = String(record?.id ?? "");
+    if (!id) return record;
+    await this.client.set(this.key("capability-grant", id), JSON.stringify(record));
+    // Sorted set indices so list queries by subject and by status are
+    // O(log n + k) instead of scanning every grant key.
+    await this.client.zAdd(this.key("capability-grants", "all"), {
+      score: timestampScore(record?.issuedAt ?? ""),
+      value: id
+    });
+    if (record?.subject) {
+      await this.client.zAdd(
+        this.key("capability-grants-by-subject", String(record.subject).toLowerCase()),
+        { score: timestampScore(record?.issuedAt ?? ""), value: id }
+      );
+    }
+    return record;
+  }
+
+  async listCapabilityGrants({ subject, status, limit = 100, offset = 0 } = {}) {
+    await this.connect();
+    const { start, stop } = redisRangeFromLimitOffset(limit, offset);
+    const indexKey = subject
+      ? this.key("capability-grants-by-subject", String(subject).toLowerCase())
+      : this.key("capability-grants", "all");
+    const ids = await this.client.zRange(indexKey, start, stop, { REV: true });
+    const records = await Promise.all(ids.map((id) => this.getCapabilityGrant(id)));
+    return filterCapabilityGrantRecords(records, { status });
   }
 
   async revokeToken(jti, ttlSeconds) {
@@ -580,6 +840,29 @@ export class RedisStateStore {
     await this.connect();
     const reply = await this.client.get(this.key("revoked", jti));
     return reply !== null && reply !== undefined;
+  }
+
+  // ── Phase 4b.5b: refresh-token persistence ─────────────────────────────
+  // Stores RefreshRecord JSON under `auth:refresh:<hash>` with explicit TTL.
+  // Keyspace + payload shape defined in mcp-server/src/auth/refresh.js.
+  async getRefreshRecord(hash) {
+    await this.connect();
+    const raw = await this.client.get(this.key("auth", "refresh", hash));
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  async upsertRefreshRecord(hash, record, ttlSeconds) {
+    await this.connect();
+    await this.client.set(
+      this.key("auth", "refresh", hash),
+      JSON.stringify(record),
+      { EX: Math.max(1, Math.ceil(ttlSeconds)) },
+    );
   }
 
   async healthCheck() {
@@ -644,4 +927,12 @@ export function createStateStore(env = process.env, { logger = console } = {}) {
     "state-store.memory_fallback"
   );
   return new MemoryStateStore();
+}
+
+// Deep clone for the in-memory overlay path so callers cannot retain a
+// reference into the store's internal Map and silently mutate it.
+// Overlays are plain JSON (numbers, strings, arrays, nested objects) —
+// JSON round-trip is the simplest correct clone for that shape.
+function cloneAccountOverlay(overlay) {
+  return cloneJsonRecord(overlay);
 }

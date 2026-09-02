@@ -1,0 +1,120 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "schema://jobs/open-data-quality-audit-output",
+  "title": "Open Data Quality Audit Output",
+  "description": "Structured evidence for a public open-data dataset/resource quality audit.",
+  "type": "object",
+  "properties": {
+    "dataset_title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dataset_url": {
+      "type": "string",
+      "minLength": 1
+    },
+    "resource_url": {
+      "type": "string",
+      "minLength": 1
+    },
+    "resource_format": {
+      "type": "string"
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "warn",
+              "fail",
+              "unknown"
+            ]
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "evidence"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "issue": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recommendation": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "severity",
+          "issue",
+          "evidence",
+          "recommendation"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "no_issue_found": {
+      "type": "boolean"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recommended_actions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "dataset_title",
+    "dataset_url",
+    "resource_url",
+    "checks",
+    "findings",
+    "no_issue_found",
+    "summary",
+    "recommended_actions"
+  ],
+  "additionalProperties": false
+}

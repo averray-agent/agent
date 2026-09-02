@@ -13,15 +13,54 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Phase 4c: default to least privilege. None of the CI jobs publish
+# artifacts, write to the repo, or comment on PRs — they only check
+# out code and run tests/lints. Jobs that need more must elevate
+# explicitly via a per-job `permissions:` block.
+permissions:
+  contents: read
+
 jobs:
+  generated-output-guard:
+    name: Generated output guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+
+      - name: Reject accidental generated deploy output edits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE_SHA:-}" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            node scripts/ops/check-generated-output-clean.mjs --last-commit
+          else
+            node scripts/ops/check-generated-output-clean.mjs --range "$BASE_SHA..HEAD"
+          fi
+
   solidity:
     name: Solidity — forge test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        # Phase 2 PR 2.9 follow-up: pinned to commit SHA (not moving @v1
+        # tag) so a compromised future foundry-rs release can't silently
+        # retarget our CI. To refresh: re-run
+        #   gh api repos/foundry-rs/foundry-toolchain/git/refs/tags/v1 --jq '.object.sha'
+        # and verify the new SHA against the foundry-rs release notes
+        # before updating.
+        uses: foundry-rs/foundry-toolchain@c7450ba673e133f5ee30098b3b54f444d3a2ca2d # v1
         with:
           version: stable
 
@@ -35,10 +74,10 @@ jobs:
     name: Backend — node --test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
           cache: npm
@@ -58,18 +97,27 @@ jobs:
         env:
           RUN_HTTP_SMOKE: "1"
         working-directory: mcp-server
-        run: node --test --test-timeout=30000 src/protocols/http/server.smoke.test.js
+        run: node --test --test-timeout=60000 src/protocols/http/server.smoke.test.js
+
+      - name: Ops script regression tests
+        run: npm run test:ops
+
+      - name: Discovery manifest sync check
+        run: npm run check:discovery-manifest
+
+      - name: Job schema docs sync check
+        run: npm run check:job-schemas
 
   frontend:
     name: Operator app — static export
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 2
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
           cache: npm
@@ -87,12 +135,12 @@ jobs:
     name: Public site — static export
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 2
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
           cache: npm
@@ -107,10 +155,10 @@ jobs:
     name: Indexer — typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
           cache: npm
@@ -120,3 +168,194 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck:indexer
+
+  env-template-structure:
+    name: Phase 2 — env template structural lint
+    runs-on: ubuntu-latest
+    # Structural check only: validates that every op:// reference in
+    # deploy/*.env.template matches a row in deploy/secrets-inventory.md,
+    # uses a known vault, and is read by a service-account that has access.
+    # Does NOT call `op inject` — that requires a real 1Password session
+    # and lands in PR 2.1 once the CI service-account token is wired up.
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: npm
+
+      # Phase 4d (PR #287 hotfix): the calendar check below needs
+      # `js-yaml` from node_modules, so we now have to install deps
+      # here. Earlier sibling checks (structural lint, manifest parity,
+      # install-script allowlist) use only Node stdlib and didn't
+      # require an install — that's why this job historically had no
+      # `npm ci`. Cost: ~30s install vs. ~12s before; calendar coverage
+      # is worth it.
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Structural lint
+        run: node scripts/ops/check-env-template-structure.mjs
+
+      # Phase 2 PR 2.6: enforce that deploy/backend.env.template matches
+      # the settlement values derived from deployments/testnet.json. Before
+      # this guard, the runtime configure_settlement_env in
+      # scripts/ops/deploy-production.sh would silently paper over drift
+      # by overwriting /srv/backend.env on every deploy. That function is
+      # retired in PR 2.6 — drift now needs to be caught at CI time.
+      - name: Template matches manifest (settlement values)
+        run: node scripts/ops/check-template-matches-manifest.mjs
+
+      # Phase 2 PR 2.9: npm install-script supply-chain guard.
+      # Scans package-lock.json for transitive deps with
+      # `hasInstallScript: true` and fails if any are not in the
+      # allowlist at deploy/npm-install-scripts-allowlist.json.
+      # Pre-empts the Mini Shai-Hulud (Sep 2026) attack shape:
+      # compromised transitive dep silently pulled into lockfile,
+      # executes attacker-controlled code with the runner's full
+      # secret access at install time. Our own package.json files
+      # have ZERO lifecycle scripts (verified at PR 2.9 build);
+      # this guard covers transitive deps.
+      - name: npm install-script supply-chain allowlist
+        run: node scripts/ops/check-npm-install-scripts.mjs
+
+      # Phase 4d (per SECRETS_MIGRATION.md §"Phase 4 — Hardening"):
+      # warn early, fail on past-expiry. The script reads
+      # docs/SECRETS_CALENDAR.yml and classifies each tracked secret
+      # against now():
+      #   - exit 0: all healthy or only emitting warnings (within
+      #     warn_days but not yet expired)
+      #   - exit 1: script error (bad YAML, missing file)
+      #   - exit 2: at least one entry past expiry — fails CI
+      # Warnings don't fail CI because a 7-day warning shouldn't block
+      # legitimate work, but they DO print in the run log so operators
+      # see them on every push and can plan rotations. `TBD` entries
+      # are treated as past-due aggressively until set — the unrotated
+      # vendor secrets (Pimlico, Subscan, etc.) are surfaced here so
+      # they don't get forgotten. To temporarily silence one, set
+      # warn_days higher or mark it `expires_at: "never"` with a
+      # justification.
+      - name: Secrets calendar expiry check
+        run: node scripts/ops/check-secrets-calendar.mjs
+
+  # Phase 4a (per docs/SECRETS_MIGRATION.md §"Phase 4 — Hardening" §4a):
+  # last-resort secret scan. Three layers of defense:
+  #   1. Local pre-commit hook (.githooks/pre-commit) — catches the
+  #      common case before push. Operator must run scripts/install-hooks.sh
+  #      once after cloning.
+  #   2. GitHub Secret Scanning push protection (enabled at the repo
+  #      level in Settings → Security → Secret scanning) — blocks the
+  #      push at the server side regardless of local hooks.
+  #   3. This job — runs on every PR and every push to main. Uses our
+  #      explicit ruleset at `.gitleaks.toml` (NOT gitleaks's default
+  #      rules; those false-positive on bytes32 test fixtures).
+  # The job is intentionally separate from env-template-structure so
+  # it can use fetch-depth: 0 for full-history scans without slowing
+  # the other lints.
+  ai-instruction-integrity:
+    # Supply-chain hygiene gate (TrapDoor-class defense). Lints AI-
+    # instruction files (AGENTS.md, docs/*.md, plus any tracked
+    # CLAUDE.md / .cursorrules) for zero-width Unicode codepoints, the
+    # signature persistence vector used by the npm/PyPI/Crates malware
+    # campaign Socket disclosed on 2026-05-24
+    # (https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates).
+    # The lint is a single node:test script with no network deps and
+    # runs in <1s; making it a required check ensures any compromised
+    # package that tries to graft hidden instructions into the repo's
+    # AI-assistant guides fails CI before merge.
+    name: AI-instruction integrity (zero-width Unicode lint)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+
+      - name: Run AI-instruction integrity lint
+        run: node scripts/ops/check-ai-instruction-integrity.mjs
+
+      - name: Run lint unit tests
+        run: node --test scripts/ops/check-ai-instruction-integrity.test.mjs
+
+  secrets-scan:
+    name: Phase 4a — gitleaks scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          # gitleaks-action wants the full history to scan new commits
+          # against base; default fetch-depth=1 would miss everything
+          # except the latest commit.
+          fetch-depth: 0
+
+      # We deliberately install the gitleaks BINARY rather than using
+      # gitleaks/gitleaks-action. As of v2.x the official Action requires
+      # a paid GITLEAKS_LICENSE secret for org-owned repos (the wrapper
+      # was monetized; the binary is still MIT). Pinning the release
+      # version makes a compromised future release no worse than what's
+      # already in our supply chain. To refresh:
+      #   tag=$(gh api repos/gitleaks/gitleaks/releases/latest --jq .tag_name)
+      # and update GITLEAKS_VERSION + the checksum below.
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+        run: |
+          set -euo pipefail
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL --max-time 60 "$url" -o /tmp/gitleaks.tar.gz
+          # Verify size sanity (~3-7 MB tarball; anything wildly off is a red flag).
+          size=$(wc -c </tmp/gitleaks.tar.gz)
+          if [ "$size" -lt 1000000 ] || [ "$size" -gt 20000000 ]; then
+            echo "::error::gitleaks tarball size unexpected: $size bytes"
+            exit 1
+          fi
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Run gitleaks against new commits in this event
+        env:
+          # On a PR event, scan base..head (the PR's own diff).
+          # On a push event, scan event.before..HEAD (the new commits).
+          # This focuses on FUTURE leaks instead of re-flagging historical
+          # text we can't un-commit — for example, shape-check comments
+          # in deploy-production.yml's SSH-validation step that quote
+          # PEM header markers as string assertions (the marker text
+          # appears as a literal in the case statement; not a real key).
+          # The pre-commit hook + GitHub push protection cover the
+          # first-leak case before merge; CI is the last-resort sweep
+          # on what's being added.
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: |
+          set -euo pipefail
+
+          # Resolve the log range. Fall back to scanning just HEAD if the
+          # base SHA is missing (first push to a new branch, etc.).
+          if [ -z "${BASE_SHA:-}" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            log_opts="-1"
+            echo "No base SHA available; scanning HEAD commit only."
+          else
+            log_opts="$BASE_SHA..HEAD"
+            echo "Scanning commits in range $log_opts"
+          fi
+
+          # --redact masks matched values in the log so we don't compound
+          # a leak with public CI output.
+          # --config keeps our explicit ruleset active (default rules off).
+          gitleaks detect \
+            --source . \
+            --config .gitleaks.toml \
+            --log-opts="$log_opts" \
+            --redact \
+            --no-banner \
+            --verbose

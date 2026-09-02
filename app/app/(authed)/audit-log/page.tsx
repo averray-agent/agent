@@ -8,23 +8,30 @@ import {
   type AuditFilter,
 } from "@/components/audit/AuditFilterRail";
 import { AuditTimeline } from "@/components/audit/AuditTimeline";
-import { AUDIT_EVENTS } from "@/components/audit/data";
 import type { AuditActor, AuditCategory, AuditEvent, AuditSource } from "@/components/audit/types";
 import { useAudit } from "@/lib/api/hooks";
+import { ApiError } from "@/lib/api/client";
+import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
+import {
+  buildAuditManifestPayload,
+  buildManifestEnvelope,
+  verifyManifestEnvelope,
+} from "@/lib/ui/evidence-verification";
 
-// TODO(data): wire to useApi("/audit") once backend emits an event
-// stream. The SSE channel in lib/events/stream.ts already carries most
-// of these topic names — the audit log is just the persisted version.
-
-const DAY_BUCKETS: Record<AuditFilter["day"], (d: string) => boolean> = {
+const DAY_BUCKETS: Record<AuditFilter["day"], (d: string, now?: Date) => boolean> = {
   all: () => true,
   today: (d) => d === "today",
   yesterday: (d) => d === "yesterday",
-  "7d": (d) => d === "today" || d === "yesterday" || d.startsWith("2026-04"),
+  "7d": (d, now = new Date()) => isWithinLastDays(d, now, 7),
 };
 
 export default function AuditLogPage() {
   const auditRequest = useAudit();
+  const [manifestStatus, setManifestStatus] = useState<{
+    tone: "ok" | "bad";
+    title: string;
+    detail: string;
+  } | null>(null);
   const [filter, setFilter] = useState<AuditFilter>({
     source: "all",
     category: "all",
@@ -32,7 +39,7 @@ export default function AuditLogPage() {
     q: "",
   });
   const liveEvents = useMemo(() => extractAuditEvents(auditRequest.data), [auditRequest.data]);
-  const events = liveEvents.length ? liveEvents : AUDIT_EVENTS;
+  const events = liveEvents;
 
   const filtered = useMemo(() => {
     const q = filter.q.trim().toLowerCase();
@@ -59,9 +66,42 @@ export default function AuditLogPage() {
     });
   }, [events, filter]);
 
+  const freshness = freshnessFromRequests(auditRequest);
+  // The /audit endpoint requires SIWE auth. When the viewer is signed
+  // out the request 401s and we render zero events — but the generic
+  // "no events match" copy reads as if the platform itself is quiet.
+  // Distinguish the two so the empty state can prompt sign-in.
+  const unauthenticated =
+    auditRequest.error instanceof ApiError &&
+    (auditRequest.error.status === 401 || auditRequest.error.status === 403);
+  const filtersApplied =
+    filter.source !== "all" ||
+    filter.category !== "all" ||
+    filter.day !== "all" ||
+    filter.q.trim().length > 0;
+  const verifyAuditManifest = () => {
+    const payload = buildAuditManifestPayload(events);
+    const envelope = buildManifestEnvelope(payload);
+    const result = verifyManifestEnvelope(envelope);
+    if (result.ok) {
+      const manifestHash = result.manifestHash ?? "";
+      setManifestStatus({
+        tone: "ok",
+        title: "Manifest verified",
+        detail: `${result.entryCount ?? 0} audit event${result.entryCount === 1 ? "" : "s"} · ${manifestHash.slice(0, 14)}…${manifestHash.slice(-8)}`,
+      });
+      return;
+    }
+    setManifestStatus({
+      tone: "bad",
+      title: "Manifest rejected",
+      detail: result.error ?? "Manifest verification failed.",
+    });
+  };
+
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
-      <AuditTopbar />
+      <AuditTopbar freshness={freshness} />
 
       <header className="flex flex-col gap-1.5">
         <span
@@ -82,7 +122,50 @@ export default function AuditLogPage() {
 
       <AuditAggregateStrip events={events} />
       <AuditFilterRail filter={filter} onChange={setFilter} />
-      <AuditTimeline events={filtered} />
+      <AuditTimeline
+        events={filtered}
+        unauthenticated={unauthenticated}
+        filtersApplied={filtersApplied}
+      />
+
+      <section className="rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] px-4 py-3.5 shadow-[var(--shadow-card)]">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <span
+              className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-accent)]"
+              style={{ letterSpacing: "0.12em" }}
+            >
+              Audit manifest
+            </span>
+            <p className="m-0 mt-1 max-w-[66ch] font-[family-name:var(--font-body)] text-[13px] leading-[1.45] text-[var(--avy-muted)]">
+              Rebuild the manifest hash from the current authenticated audit response
+              before exporting or handing it to an operator.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={unauthenticated || events.length === 0}
+            onClick={verifyAuditManifest}
+            className="inline-flex h-9 items-center rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-ink)] transition-transform hover:-translate-y-px hover:border-[color:rgba(30,102,66,0.24)] disabled:cursor-not-allowed disabled:text-[var(--avy-muted)] disabled:opacity-60 disabled:hover:translate-y-0"
+            style={{ letterSpacing: "0.08em" }}
+          >
+            Verify manifest
+          </button>
+        </div>
+        {manifestStatus ? (
+          <div
+            className={`mt-3 rounded-[8px] border px-3 py-2 font-[family-name:var(--font-mono)] text-[11px] leading-[1.5] ${
+              manifestStatus.tone === "ok"
+                ? "border-[color:rgba(30,102,66,0.24)] bg-[color:rgba(30,102,66,0.08)] text-[var(--avy-accent)]"
+                : "border-[color:rgba(176,72,55,0.28)] bg-[color:rgba(176,72,55,0.08)] text-[#b04837]"
+            }`}
+            style={{ letterSpacing: 0 }}
+          >
+            <b className="font-semibold">{manifestStatus.title}:</b>{" "}
+            {manifestStatus.detail}
+          </div>
+        ) : null}
+      </section>
 
       <p
         className="font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
@@ -90,9 +173,8 @@ export default function AuditLogPage() {
       >
         Showing <b className="font-semibold text-[var(--avy-ink)]">{filtered.length}</b> of{" "}
         <b className="font-semibold text-[var(--avy-ink)]">{events.length}</b> events.
-        The full history lives at <span className="text-[var(--avy-accent)]">/audit/export</span>{" "}
-        — signed manifest includes hashes, actor wallets, and block references for
-        every row.
+        The manifest verifier hashes event ids, actors, categories, targets, and
+        row hashes from the live audit response.
       </p>
     </div>
   );
@@ -135,6 +217,21 @@ function source(value: unknown): AuditSource {
   return "system";
 }
 
+/**
+ * Normalise the category emitted by the audit event stream into the
+ * fixed `AuditCategory` set the timeline filter rail knows how to
+ * render. The backend uses a finer-grained taxonomy than the UI
+ * (e.g. `session`, `escrow`, `reputation`, `admin`) so we collapse
+ * those into the closest UI bucket here:
+ *
+ *   - `session`                            → `runs`     (sessions are run lifecycle events)
+ *   - `escrow` / `reputation` / `admin`    → `treasury` (capital + control-plane)
+ *
+ * If you add a new audit category in the backend, add a passthrough
+ * here OR map it to one of the existing UI buckets — DO NOT silently
+ * drop it; the catch-all returns `"runs"` so unknown events still
+ * surface somewhere instead of disappearing.
+ */
 function category(value: unknown): AuditCategory {
   if (
     value === "policy" ||
@@ -191,4 +288,21 @@ function linkTarget(value: unknown): AuditEvent["link"] | undefined {
 
 function text(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function isWithinLastDays(day: string, now: Date, days: number): boolean {
+  if (day === "today" || day === "yesterday") return true;
+  const parsed = Date.parse(day);
+  if (!Number.isFinite(parsed)) return false;
+  const start = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() - (days - 1)
+  );
+  const eventDay = Date.UTC(
+    new Date(parsed).getUTCFullYear(),
+    new Date(parsed).getUTCMonth(),
+    new Date(parsed).getUTCDate()
+  );
+  return eventDay >= start && eventDay <= now.getTime();
 }

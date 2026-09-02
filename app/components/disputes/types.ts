@@ -6,6 +6,9 @@
  * the reasons a verifier or co-signer would contest a claim.
  */
 
+import type { SourceKind } from "@/components/runs/StatePill";
+import type { OutcomeRationale } from "@/lib/ui/outcome-rationale-types";
+
 export type DisputeState =
   | "open"
   | "awaiting-evidence"
@@ -29,7 +32,7 @@ export type ReleaseDestination =
   | "pay-verifier"
   | "slash-to-treasury";
 
-export type DecisionKind = "uphold" | "reject" | "request-more";
+export type DecisionKind = "uphold" | "reject" | "split" | "timeout";
 
 export interface DisputeParty {
   handle: string;
@@ -60,9 +63,49 @@ export interface DisputeTimelineEvent {
   tone?: "neutral" | "accent" | "warn" | "bad";
 }
 
+export interface DisputeArbitrationSemantics {
+  allowedVerdicts: string[];
+  authority: {
+    verdict: string;
+    release: string;
+  };
+  sla: {
+    seconds: number;
+    openedAt?: string;
+    windowEndsAt?: string;
+    expired?: boolean;
+    secondsRemaining?: number;
+  };
+  reasoning: {
+    contentType: string;
+    hashAlgorithm: string;
+    hashField: string;
+    uriField: string;
+    canonicalHashRequired: boolean;
+    publicContentPath: string;
+  };
+  release: {
+    mode: string;
+    verdictEndpoint: string;
+    releaseEndpoint: string;
+    requiresVerdict: boolean;
+    ready: boolean;
+    reason: string;
+  };
+}
+
 export interface Dispute {
   id: string;
   runRef: string;
+  sessionId?: string;
+  /**
+   * Provenance of the disputed run — orthogonal to `origin`, which is
+   * the *reason* a dispute was raised (signature, schema, …). When
+   * present, the table renders a SourceBadge alongside the run ref so
+   * the operator can see whether they're triaging a GitHub-PR vs.
+   * Wikipedia-proposal-review dispute without opening the drawer.
+   */
+  source?: SourceKind;
   openingReceipt: string;
   summary: string;
   origin: DisputeOrigin;
@@ -73,6 +116,17 @@ export interface Dispute {
   reviewer: DisputeParty;
   /** DOT. Sum of worker + verifier + treasury portions. */
   stakeFrozen: number;
+  /** Remaining worker payout available to the arbitrator settlement. */
+  remainingPayout?: number;
+  /** Worker payout selected in the final settlement. */
+  workerPayout?: number;
+  reasonCode?: string;
+  reasoningHash?: string;
+  metadataURI?: string;
+  txHash?: string;
+  chainStatus?: "confirmed" | "submitted" | "local_only" | "settled_by_verdict" | string;
+  outcomeRationale?: OutcomeRationale;
+  arbitration: DisputeArbitrationSemantics;
   stakeBreakdown: StakeBreakdown;
   /** ISO-ish string opened-at used only for the window countdown seed. */
   openedAt: string;
@@ -95,5 +149,16 @@ export interface Dispute {
     rationale: string;
     at: string;
     signer: DisputeParty;
+    reasonCode?: string;
+    workerPayout?: number;
+    txHash?: string;
+    chainStatus?: string;
+    metadataURI?: string;
+    /**
+     * Mirrors the top-level `reasoningHash` so the resolved-verdict
+     * card can render the verifier-attested content hash alongside
+     * the metadataURI it points to.
+     */
+    reasoningHash?: string;
   };
 }

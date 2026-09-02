@@ -1,9 +1,9 @@
-import { hexToString } from "viem";
+import { decodeFunctionResult, encodeFunctionData, hexToString } from "viem";
 
 import { ponder } from "ponder:registry";
 import schema from "ponder:schema";
 
-import { EscrowCoreAbi } from "../abis/contractsAbi";
+import { EscrowCoreAbi, EscrowCoreLegacyJobsAbi, EscrowCoreOldLegacyJobsAbi } from "../abis/contractsAbi";
 
 const payoutModeLabels = ["single", "milestone"] as const;
 const jobStateLabels = ["none", "open", "claimed", "submitted", "rejected", "disputed", "closed"] as const;
@@ -12,6 +12,9 @@ const requestStatusLabels = ["unknown", "pending", "succeeded", "failed", "cance
 const zeroHash = `0x${"0".repeat(64)}` as `0x${string}`;
 const hasXcmWrapper = Boolean(
   process.env.PONDER_XCM_WRAPPER_ADDRESS?.trim() || process.env.XCM_WRAPPER_ADDRESS?.trim()
+);
+const hasDiscoveryRegistry = Boolean(
+  process.env.PONDER_DISCOVERY_REGISTRY_ADDRESS?.trim() || process.env.DISCOVERY_REGISTRY_ADDRESS?.trim()
 );
 
 const decodeBytes32 = (value: string) => {
@@ -25,6 +28,65 @@ const decodeBytes32 = (value: string) => {
 const toEventId = (txHash: string, logIndex: number | bigint) => `${txHash}-${logIndex.toString()}`;
 const nullIfZeroHash = (value: `0x${string}`): `0x${string}` | null =>
   value.toLowerCase() === zeroHash ? null : value;
+const hexByteLength = (value: `0x${string}`) => (value.length - 2) / 2;
+const currentJobFields = [
+  "poster",
+  "worker",
+  "asset",
+  "verifierMode",
+  "category",
+  "specHash",
+  "reward",
+  "opsReserve",
+  "contingencyReserve",
+  "released",
+  "claimExpiry",
+  "claimStake",
+  "claimStakeBps",
+  "claimFee",
+  "claimFeeBps",
+  "claimEconomicsWaived",
+  "rejectingVerifier",
+  "rejectedAt",
+  "disputedAt",
+  "payoutMode",
+  "state"
+] as const;
+const legacyJobFields = [
+  "poster",
+  "worker",
+  "asset",
+  "verifierMode",
+  "category",
+  "specHash",
+  "reward",
+  "opsReserve",
+  "contingencyReserve",
+  "released",
+  "claimExpiry",
+  "claimStake",
+  "claimStakeBps",
+  "rejectedAt",
+  "disputedAt",
+  "payoutMode",
+  "state"
+] as const;
+const oldLegacyJobFields = [
+  "poster",
+  "worker",
+  "asset",
+  "verifierMode",
+  "category",
+  "reward",
+  "opsReserve",
+  "contingencyReserve",
+  "released",
+  "claimExpiry",
+  "claimStake",
+  "claimStakeBps",
+  "payoutMode",
+  "state"
+] as const;
 
 const toTier = (skill: bigint) => {
   if (skill >= 200n) return "elite";
@@ -41,12 +103,7 @@ const syncJob = async ({
   event: any;
   jobId: `0x${string}`;
 }) => {
-  const live = await context.client.readContract({
-    abi: EscrowCoreAbi,
-    address: event.log.address,
-    functionName: "jobs",
-    args: [jobId]
-  });
+  const live = await readLiveJob({ context, event, jobId });
 
   const [
     poster,
@@ -54,6 +111,7 @@ const syncJob = async ({
     asset,
     verifierMode,
     category,
+    specHash,
     reward,
     opsReserve,
     contingencyReserve,
@@ -61,6 +119,12 @@ const syncJob = async ({
     claimExpiry,
     claimStake,
     claimStakeBps,
+    claimFee,
+    claimFeeBps,
+    claimEconomicsWaived,
+    rejectingVerifier,
+    rejectedAt,
+    disputedAt,
     payoutMode,
     state
   ] = live;
@@ -76,6 +140,7 @@ const syncJob = async ({
       categoryLabel: decodeBytes32(category),
       verifierMode,
       verifierModeLabel: decodeBytes32(verifierMode),
+      specHash: nullIfZeroHash(specHash),
       reward,
       opsReserve,
       contingencyReserve,
@@ -83,6 +148,12 @@ const syncJob = async ({
       claimExpiry,
       claimStake,
       claimStakeBps,
+      claimFee,
+      claimFeeBps,
+      claimEconomicsWaived,
+      rejectingVerifier: rejectingVerifier === "0x0000000000000000000000000000000000000000" ? null : rejectingVerifier,
+      rejectedAt: rejectedAt === 0n ? null : rejectedAt,
+      disputedAt: disputedAt === 0n ? null : disputedAt,
       payoutMode,
       payoutModeLabel: payoutModeLabels[payoutMode] ?? "unknown",
       state,
@@ -95,10 +166,17 @@ const syncJob = async ({
     })
     .onConflictDoUpdate((row: any) => ({
       worker: row.worker,
+      specHash: row.specHash,
       released: row.released,
       claimExpiry: row.claimExpiry,
       claimStake: row.claimStake,
       claimStakeBps: row.claimStakeBps,
+      claimFee: row.claimFee,
+      claimFeeBps: row.claimFeeBps,
+      claimEconomicsWaived: row.claimEconomicsWaived,
+      rejectingVerifier: row.rejectingVerifier,
+      rejectedAt: row.rejectedAt,
+      disputedAt: row.disputedAt,
       payoutMode: row.payoutMode,
       payoutModeLabel: row.payoutModeLabel,
       state: row.state,
@@ -107,6 +185,174 @@ const syncJob = async ({
       updatedAtTimestamp: row.updatedAtTimestamp,
       lastTxHash: row.lastTxHash
     }));
+};
+
+const readLiveJob = async ({
+  context,
+  event,
+  jobId
+}: {
+  context: any;
+  event: any;
+  jobId: `0x${string}`;
+}) => {
+  const response = await context.client.call({
+    to: event.log.address,
+    data: encodeFunctionData({
+      abi: EscrowCoreAbi,
+      functionName: "jobs",
+      args: [jobId]
+    })
+  });
+  const data = (typeof response === "string" ? response : response?.data) as `0x${string}` | undefined;
+
+  if (!data || data === "0x") {
+    throw new Error(`EscrowCore.jobs returned empty data for ${jobId}`);
+  }
+
+  return decodeLiveJob(data);
+};
+
+const decodeLiveJob = (data: `0x${string}`) => {
+  const byteLength = hexByteLength(data);
+
+  if (byteLength >= 672) {
+    return tupleValues(
+      decodeFunctionResult({
+        abi: EscrowCoreAbi,
+        functionName: "jobs",
+        data
+      }) as any,
+      currentJobFields
+    );
+  }
+
+  if (byteLength >= 544) {
+    return normalizeLegacyJob(
+      decodeFunctionResult({
+        abi: EscrowCoreLegacyJobsAbi,
+        functionName: "jobs",
+        data
+      }) as any
+    );
+  }
+
+  return normalizeOldLegacyJob(
+    decodeFunctionResult({
+      abi: EscrowCoreOldLegacyJobsAbi,
+      functionName: "jobs",
+      data
+    }) as any
+  );
+};
+
+const tupleValues = (value: any, fields: readonly string[]) => {
+  if (Array.isArray(value)) {
+    if (value.length === 1 && value[0] && typeof value[0] === "object" && !Array.isArray(value[0])) {
+      return tupleValues(value[0], fields);
+    }
+
+    return value;
+  }
+
+  if (!value || typeof value !== "object") {
+    throw new Error("EscrowCore.jobs returned an unsupported tuple shape");
+  }
+
+  return fields.map((field, index) => {
+    const item = value[field] ?? value[index];
+    if (item === undefined) {
+      throw new Error(`EscrowCore.jobs decoded tuple is missing ${field}`);
+    }
+    return item;
+  });
+};
+
+const normalizeLegacyJob = (legacy: any) => {
+  const [
+    poster,
+    worker,
+    asset,
+    verifierMode,
+    category,
+    specHash,
+    reward,
+    opsReserve,
+    contingencyReserve,
+    released,
+    claimExpiry,
+    claimStake,
+    claimStakeBps,
+    rejectedAt,
+    disputedAt,
+    payoutMode,
+    state
+  ] = tupleValues(legacy, legacyJobFields);
+  return [
+    poster,
+    worker,
+    asset,
+    verifierMode,
+    category,
+    specHash,
+    reward,
+    opsReserve,
+    contingencyReserve,
+    released,
+    claimExpiry,
+    claimStake,
+    claimStakeBps,
+    0n,
+    0,
+    false,
+    "0x0000000000000000000000000000000000000000",
+    rejectedAt,
+    disputedAt,
+    payoutMode,
+    state
+  ] as const;
+};
+
+const normalizeOldLegacyJob = (oldLegacy: any) => {
+  const [
+    poster,
+    worker,
+    asset,
+    verifierMode,
+    category,
+    reward,
+    opsReserve,
+    contingencyReserve,
+    released,
+    claimExpiry,
+    claimStake,
+    claimStakeBps,
+    payoutMode,
+    state
+  ] = tupleValues(oldLegacy, oldLegacyJobFields);
+  return [
+    poster,
+    worker,
+    asset,
+    verifierMode,
+    category,
+    zeroHash,
+    reward,
+    opsReserve,
+    contingencyReserve,
+    released,
+    claimExpiry,
+    claimStake,
+    claimStakeBps,
+    0n,
+    0,
+    false,
+    "0x0000000000000000000000000000000000000000",
+    0n,
+    0n,
+    payoutMode,
+    state
+  ] as const;
 };
 
 ponder.on("EscrowCore:JobFunded", async ({ event, context }) => {
@@ -118,6 +364,23 @@ ponder.on("EscrowCore:JobFunded", async ({ event, context }) => {
     actor: event.args.poster,
     amount: event.args.totalReserved,
     evidenceHash: null,
+    reasonCode: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("EscrowCore:JobCreated", async ({ event, context }) => {
+  await syncJob({ context, event, jobId: event.args.jobId });
+  await context.db.insert(schema.jobEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    jobId: event.args.jobId,
+    kind: "JobCreated",
+    actor: event.args.poster,
+    amount: event.args.totalReserved,
+    evidenceHash: null,
+    specHash: event.args.specHash,
     reasonCode: null,
     txHash: event.transaction.hash,
     blockNumber: event.block.number,
@@ -141,6 +404,22 @@ ponder.on("EscrowCore:JobClaimed", async ({ event, context }) => {
   });
 });
 
+ponder.on("EscrowCore:ClaimEconomicsLocked", async ({ event, context }) => {
+  await syncJob({ context, event, jobId: event.args.jobId });
+  await context.db.insert(schema.jobEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    jobId: event.args.jobId,
+    kind: event.args.waived ? "ClaimEconomicsWaived" : "ClaimEconomicsLocked",
+    actor: event.args.worker,
+    amount: event.args.claimStake + event.args.claimFee,
+    evidenceHash: null,
+    reasonCode: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
 ponder.on("EscrowCore:WorkSubmitted", async ({ event, context }) => {
   await syncJob({ context, event, jobId: event.args.jobId });
   await context.db.insert(schema.jobEvent).values({
@@ -150,6 +429,23 @@ ponder.on("EscrowCore:WorkSubmitted", async ({ event, context }) => {
     actor: event.args.worker,
     amount: null,
     evidenceHash: event.args.evidenceHash,
+    reasonCode: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("EscrowCore:Submitted", async ({ event, context }) => {
+  await syncJob({ context, event, jobId: event.args.jobId });
+  await context.db.insert(schema.jobEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    jobId: event.args.jobId,
+    kind: "Submitted",
+    actor: event.args.worker,
+    amount: null,
+    evidenceHash: event.args.payloadHash,
+    payloadHash: event.args.payloadHash,
     reasonCode: null,
     txHash: event.transaction.hash,
     blockNumber: event.block.number,
@@ -189,6 +485,24 @@ ponder.on("EscrowCore:JobRejected", async ({ event, context }) => {
   });
 });
 
+ponder.on("EscrowCore:Verified", async ({ event, context }) => {
+  await syncJob({ context, event, jobId: event.args.jobId });
+  await context.db.insert(schema.jobEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    jobId: event.args.jobId,
+    kind: "Verified",
+    actor: event.args.verifier,
+    amount: null,
+    evidenceHash: null,
+    reasoningHash: event.args.reasoningHash,
+    approved: event.args.approved,
+    reasonCode: event.args.reasonCode,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
 ponder.on("EscrowCore:DisputeOpened", async ({ event, context }) => {
   await syncJob({ context, event, jobId: event.args.jobId });
   await context.db.insert(schema.jobEvent).values({
@@ -199,6 +513,42 @@ ponder.on("EscrowCore:DisputeOpened", async ({ event, context }) => {
     amount: null,
     evidenceHash: null,
     reasonCode: null,
+    disputedAt: event.args.disputedAt,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("EscrowCore:DisputeResolved", async ({ event, context }) => {
+  await syncJob({ context, event, jobId: event.args.jobId });
+  await context.db.insert(schema.jobEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    jobId: event.args.jobId,
+    kind: "DisputeResolved",
+    actor: event.args.arbitrator,
+    amount: event.args.workerPayout,
+    evidenceHash: null,
+    approved: event.args.workerPayout > 0n,
+    reasonCode: event.args.reasonCode,
+    metadataUri: event.args.metadataURI,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("EscrowCore:AutoResolvedOnTimeout", async ({ event, context }) => {
+  await syncJob({ context, event, jobId: event.args.jobId });
+  await context.db.insert(schema.jobEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    jobId: event.args.jobId,
+    kind: "AutoResolvedOnTimeout",
+    actor: event.args.caller,
+    amount: event.args.workerPayout,
+    evidenceHash: null,
+    approved: true,
+    reasonCode: event.args.reasonCode,
     txHash: event.transaction.hash,
     blockNumber: event.block.number,
     timestamp: event.block.timestamp
@@ -306,6 +656,57 @@ ponder.on("TreasuryPolicy:OutflowRecorded", async ({ event, context }) => {
   });
 });
 
+ponder.on("TreasuryPolicy:VerifierUpdated", async ({ event, context }) => {
+  await context.db.insert(schema.verifierRegistryEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    kind: event.args.approved ? "VerifierAdded" : "VerifierRemoved",
+    verifier: event.args.verifier,
+    adminFrom: null,
+    adminTo: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+if (hasDiscoveryRegistry) {
+ponder.on("DiscoveryRegistry:ManifestPublished" as any, async ({ event, context }: any) => {
+  await context.db.insert(schema.manifestPublication).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    version: event.args.version,
+    hash: event.args.hash,
+    publisher: event.args.publisher,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+}
+
+ponder.on("EscrowCore:Disclosed", async ({ event, context }) => {
+  await context.db.insert(schema.disclosureEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    kind: "Disclosed",
+    hash: event.args.hash,
+    byWallet: event.args.byWallet,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("EscrowCore:AutoDisclosed", async ({ event, context }) => {
+  await context.db.insert(schema.disclosureEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    kind: "AutoDisclosed",
+    hash: event.args.hash,
+    byWallet: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
 ponder.on("AgentAccountCore:JobStakeLocked", async ({ event, context }) => {
   await context.db.insert(schema.jobStakeEvent).values({
     id: toEventId(event.transaction.hash, event.log.logIndex),
@@ -314,6 +715,8 @@ ponder.on("AgentAccountCore:JobStakeLocked", async ({ event, context }) => {
     kind: "locked",
     amount: event.args.amount,
     posterAmount: null,
+    verifierRecipient: null,
+    verifierAmount: null,
     treasuryAmount: null,
     txHash: event.transaction.hash,
     blockNumber: event.block.number,
@@ -329,6 +732,8 @@ ponder.on("AgentAccountCore:JobStakeReleased", async ({ event, context }) => {
     kind: "released",
     amount: event.args.amount,
     posterAmount: null,
+    verifierRecipient: null,
+    verifierAmount: null,
     treasuryAmount: null,
     txHash: event.transaction.hash,
     blockNumber: event.block.number,
@@ -344,6 +749,27 @@ ponder.on("AgentAccountCore:JobStakeSlashed", async ({ event, context }) => {
     kind: "slashed",
     amount: event.args.amount,
     posterAmount: event.args.posterAmount,
+    verifierRecipient: null,
+    verifierAmount: null,
+    treasuryAmount: event.args.treasuryAmount,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("AgentAccountCore:ClaimFeeSlashed", async ({ event, context }) => {
+  await context.db.insert(schema.jobStakeEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    account: event.args.account,
+    asset: event.args.asset,
+    kind: "claim_fee_slashed",
+    amount: event.args.amount,
+    posterAmount: null,
+    verifierRecipient: event.args.verifierRecipient === "0x0000000000000000000000000000000000000000"
+      ? null
+      : event.args.verifierRecipient,
+    verifierAmount: event.args.verifierAmount,
     treasuryAmount: event.args.treasuryAmount,
     txHash: event.transaction.hash,
     blockNumber: event.block.number,
@@ -372,6 +798,7 @@ ponder.on("XcmWrapper:RequestQueued" as any, async ({ event, context }: any) => 
       statusLabel: requestStatusLabels[1],
       destinationHash: null,
       messageHash: null,
+      xcmPrecompile: null,
       maxWeightRefTime: null,
       maxWeightProofSize: null,
       settledAssets: 0n,
@@ -409,6 +836,7 @@ ponder.on("XcmWrapper:RequestQueued" as any, async ({ event, context }: any) => 
     statusLabel: requestStatusLabels[1],
     destinationHash: null,
     messageHash: null,
+    xcmPrecompile: null,
     maxWeightRefTime: null,
     maxWeightProofSize: null,
     settledAssets: null,
@@ -440,6 +868,7 @@ ponder.on("XcmWrapper:RequestPayloadStored" as any, async ({ event, context }: a
       statusLabel: requestStatusLabels[0],
       destinationHash: event.args.destinationHash,
       messageHash: event.args.messageHash,
+      xcmPrecompile: null,
       maxWeightRefTime: BigInt(event.args.refTime),
       maxWeightProofSize: BigInt(event.args.proofSize),
       settledAssets: 0n,
@@ -471,8 +900,72 @@ ponder.on("XcmWrapper:RequestPayloadStored" as any, async ({ event, context }: a
     statusLabel: null,
     destinationHash: event.args.destinationHash,
     messageHash: event.args.messageHash,
+    xcmPrecompile: null,
     maxWeightRefTime: BigInt(event.args.refTime),
     maxWeightProofSize: BigInt(event.args.proofSize),
+    settledAssets: null,
+    settledShares: null,
+    remoteRef: null,
+    failureCode: null,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp
+  });
+});
+
+ponder.on("XcmWrapper:RequestDispatched" as any, async ({ event, context }: any) => {
+  await context.db
+    .insert(schema.xcmRequest)
+    .values({
+      id: event.args.requestId,
+      strategyId: zeroHash,
+      strategyIdLabel: "",
+      kind: 0,
+      kindLabel: "unknown",
+      account: "0x0000000000000000000000000000000000000000",
+      asset: "0x0000000000000000000000000000000000000000",
+      recipient: "0x0000000000000000000000000000000000000000",
+      requestedAssets: 0n,
+      requestedShares: 0n,
+      nonce: 0n,
+      status: 0,
+      statusLabel: requestStatusLabels[0],
+      destinationHash: event.args.destinationHash,
+      messageHash: event.args.messageHash,
+      xcmPrecompile: event.args.xcmPrecompile,
+      maxWeightRefTime: null,
+      maxWeightProofSize: null,
+      settledAssets: 0n,
+      settledShares: 0n,
+      remoteRef: null,
+      failureCode: null,
+      createdAtBlock: event.block.number,
+      createdAtTimestamp: event.block.timestamp,
+      updatedAtBlock: event.block.number,
+      updatedAtTimestamp: event.block.timestamp,
+      queuedTxHash: event.transaction.hash,
+      lastTxHash: event.transaction.hash
+    })
+    .onConflictDoUpdate((row: any) => ({
+      destinationHash: row.destinationHash,
+      messageHash: row.messageHash,
+      xcmPrecompile: row.xcmPrecompile,
+      updatedAtBlock: row.updatedAtBlock,
+      updatedAtTimestamp: row.updatedAtTimestamp,
+      lastTxHash: row.lastTxHash
+    }));
+
+  await context.db.insert(schema.xcmRequestEvent).values({
+    id: toEventId(event.transaction.hash, event.log.logIndex),
+    requestId: event.args.requestId,
+    kind: "dispatched",
+    status: null,
+    statusLabel: null,
+    destinationHash: event.args.destinationHash,
+    messageHash: event.args.messageHash,
+    xcmPrecompile: event.args.xcmPrecompile,
+    maxWeightRefTime: null,
+    maxWeightProofSize: null,
     settledAssets: null,
     settledShares: null,
     remoteRef: null,
@@ -503,6 +996,7 @@ ponder.on("XcmWrapper:RequestStatusUpdated" as any, async ({ event, context }: a
       statusLabel: requestStatusLabels[status] ?? "unknown",
       destinationHash: null,
       messageHash: null,
+      xcmPrecompile: null,
       maxWeightRefTime: null,
       maxWeightProofSize: null,
       settledAssets: event.args.settledAssets,
@@ -536,6 +1030,7 @@ ponder.on("XcmWrapper:RequestStatusUpdated" as any, async ({ event, context }: a
     statusLabel: requestStatusLabels[status] ?? "unknown",
     destinationHash: null,
     messageHash: null,
+    xcmPrecompile: null,
     maxWeightRefTime: null,
     maxWeightProofSize: null,
     settledAssets: event.args.settledAssets,

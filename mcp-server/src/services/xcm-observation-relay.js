@@ -2,6 +2,7 @@ import { ExternalServiceError, ValidationError } from "../core/errors.js";
 
 const DEFAULT_SCOPE = "xcm-observation-relay";
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
+const UINT256_MAX = (1n << 256n) - 1n;
 
 export class XcmObservationRelayService {
   constructor(
@@ -81,6 +82,7 @@ export class XcmObservationRelayService {
       const state = await this.stateStore.getServiceState?.(this.stateScope) ?? {};
       const payload = await this.fetchFeed(state.cursor);
       const items = Array.isArray(payload?.items) ? payload.items : [];
+      const nextCursor = this.normalizeNextCursor(payload?.nextCursor, items.length);
       let observedCount = 0;
 
       for (const item of items) {
@@ -89,10 +91,18 @@ export class XcmObservationRelayService {
         this.eventBus?.publish({
           id: `xcm-observer-relayed-${normalized.requestId}-${Date.now()}`,
           topic: "xcm.outcome_relayed",
+          correlationId: normalized.requestId,
           timestamp: new Date().toISOString(),
           data: {
             requestId: normalized.requestId,
             status: normalized.status,
+            settledAssets: normalized.settledAssets,
+            settledAssetsRaw: normalized.settledAssets,
+            settledShares: normalized.settledShares,
+            settledSharesRaw: normalized.settledShares,
+            remoteRef: normalized.remoteRef,
+            failureCode: normalized.failureCode,
+            observedAt: normalized.observedAt,
             source: normalized.source
           }
         });
@@ -100,9 +110,7 @@ export class XcmObservationRelayService {
       }
 
       const nextState = await this.stateStore.upsertServiceState?.(this.stateScope, {
-        cursor: typeof payload?.nextCursor === "string" && payload.nextCursor.trim()
-          ? payload.nextCursor.trim()
-          : state.cursor,
+        cursor: nextCursor ?? state.cursor,
         lastObservedCount: observedCount,
         lastSyncedAt: new Date().toISOString(),
         lastError: undefined
@@ -216,32 +224,71 @@ export class XcmObservationRelayService {
     return {
       requestId,
       status,
-      settledAssets: this.normalizeCount(item.settledAssets),
-      settledShares: this.normalizeCount(item.settledShares),
+      settledAssets: this.normalizeUint256(item.settledAssets, "settledAssets"),
+      settledShares: this.normalizeUint256(item.settledShares, "settledShares"),
       remoteRef: this.normalizeOptionalHex32(item.remoteRef),
-      failureCode: this.normalizeOptionalHex32(item.failureCode),
+      failureCode: this.normalizeFailureCode(item.failureCode, status),
       source: typeof item.source === "string" && item.source.trim() ? item.source.trim() : "xcm_relay_feed",
       observedAt: this.normalizeObservedAt(item.observedAt)
     };
   }
 
   normalizeStatus(status) {
+    let normalized;
     if (typeof status === "number") {
-      return ["unknown", "pending", "succeeded", "failed", "cancelled"][status] ?? "unknown";
+      normalized = ["unknown", "pending", "succeeded", "failed", "cancelled"][status] ?? "unknown";
+    } else {
+      normalized = String(status ?? "").trim().toLowerCase();
     }
-    const normalized = String(status ?? "").trim().toLowerCase();
     if (!TERMINAL_STATUSES.has(normalized)) {
       throw new ValidationError("XCM observer items must use a terminal status.");
     }
     return normalized;
   }
 
-  normalizeCount(value) {
-    const parsed = Number(value ?? 0);
-    if (!Number.isFinite(parsed) || parsed < 0) {
-      throw new ValidationError("XCM observer amounts must be finite non-negative numbers.");
+  normalizeNextCursor(value, itemCount) {
+    const nextCursor = typeof value === "string" && value.trim() ? value.trim() : undefined;
+    if (itemCount > 0 && !nextCursor) {
+      throw new ValidationError("XCM observer feed returned items without nextCursor; non-empty XCM batches must advance the cursor.");
     }
-    return parsed;
+    return nextCursor;
+  }
+
+  normalizeFailureCode(value, status) {
+    const failureCode = this.normalizeOptionalHex32(value);
+    if (status === "failed" && !failureCode) {
+      throw new ValidationError("XCM observer failed items must include failureCode.");
+    }
+    return failureCode;
+  }
+
+  normalizeUint256(value, label) {
+    if (value === undefined || value === null || value === "") {
+      return "0";
+    }
+
+    let parsed;
+    if (typeof value === "bigint") {
+      parsed = value;
+    } else if (typeof value === "number") {
+      if (!Number.isSafeInteger(value) || value < 0) {
+        throw new ValidationError(`XCM observer ${label} must be an exact non-negative uint256.`);
+      }
+      parsed = BigInt(value);
+    } else if (typeof value === "string") {
+      const normalized = value.trim();
+      if (!/^\d+$/u.test(normalized)) {
+        throw new ValidationError(`XCM observer ${label} must be an exact non-negative uint256.`);
+      }
+      parsed = BigInt(normalized);
+    } else {
+      throw new ValidationError(`XCM observer ${label} must be an exact non-negative uint256.`);
+    }
+
+    if (parsed < 0n || parsed > UINT256_MAX) {
+      throw new ValidationError(`XCM observer ${label} must fit uint256.`);
+    }
+    return parsed.toString();
   }
 
   normalizeOptionalHex32(value) {

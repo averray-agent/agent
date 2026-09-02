@@ -7,6 +7,11 @@ import {
   type RunState,
 } from "./StatePill";
 import type { JobSource } from "./types";
+import {
+  CLAIM_STATE_LABEL,
+  formatClaimReason,
+  type ClaimSummary,
+} from "@/lib/api/claim-status";
 
 export interface JobCardData {
   id: string;
@@ -28,6 +33,12 @@ export interface JobCardData {
   meta: { label: string; value: string; accent?: boolean }[];
   fit: number; // 0..5
   hot?: boolean;
+  /**
+   * Claim contract surfaced from the job feed. Drives the Claim button
+   * (disabled unless `claimable === true`) and replaces the legacy
+   * "always claimable" assumption that used to live on this card.
+   */
+  claim?: ClaimSummary;
 }
 
 export function JobCard({ job }: { job: JobCardData }) {
@@ -66,7 +77,54 @@ export function JobCard({ job }: { job: JobCardData }) {
             >
               <span className="shrink-0">{job.source.language}.wikipedia</span>
               <span className="truncate text-[var(--avy-ink)]">
-                / {job.source.pageTitle}
+                / &ldquo;{job.source.pageTitle}&rdquo;
+              </span>
+            </p>
+          ) : job.source?.type === "osv_advisory" ? (
+            <p
+              className="mt-1 flex items-center gap-1 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+              style={{ letterSpacing: 0 }}
+            >
+              <span className="shrink-0">
+                {job.source.ecosystem} / {job.source.packageName}
+              </span>
+              <span className="truncate text-[var(--avy-accent)]">
+                · {job.source.advisoryId}
+              </span>
+            </p>
+          ) : job.source?.type === "open_data_dataset" ? (
+            <p
+              className="mt-1 flex items-center gap-1 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+              style={{ letterSpacing: 0 }}
+            >
+              <span className="truncate text-[var(--avy-ink)]">
+                {job.source.datasetTitle}
+              </span>
+              {job.source.agency ? (
+                <>
+                  <span className="shrink-0 opacity-40">·</span>
+                  <span className="shrink-0 truncate">{job.source.agency}</span>
+                </>
+              ) : null}
+            </p>
+          ) : job.source?.type === "openapi_spec" ? (
+            <p
+              className="mt-1 flex items-center gap-1 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+              style={{ letterSpacing: 0 }}
+            >
+              <span className="shrink-0">{job.source.provider}</span>
+              <span className="truncate text-[var(--avy-ink)]">
+                / {job.source.apiTitle}
+              </span>
+            </p>
+          ) : job.source?.type === "standards_spec" ? (
+            <p
+              className="mt-1 flex items-center gap-1 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+              style={{ letterSpacing: 0 }}
+            >
+              <span className="shrink-0">{job.source.provider.toUpperCase()}</span>
+              <span className="truncate text-[var(--avy-ink)]">
+                / {job.source.specTitle}
               </span>
             </p>
           ) : (
@@ -97,7 +155,22 @@ export function JobCard({ job }: { job: JobCardData }) {
       </header>
 
       <div className="flex flex-wrap items-center gap-1">
-        {job.source?.type === "github_issue" ? <SourceBadge kind="github" /> : null}
+        {job.source?.type === "github_issue" ? (
+          <SourceBadge kind="github" />
+        ) : job.source?.type === "wikipedia_article" ? (
+          <SourceBadge kind="wikipedia" />
+        ) : job.source?.type === "osv_advisory" ? (
+          <SourceBadge
+            kind="osv"
+            secondary={(job.source.cves?.length ?? 0) > 0 ? "NVD" : undefined}
+          />
+        ) : job.source?.type === "open_data_dataset" ? (
+          <SourceBadge kind="data_gov" />
+        ) : job.source?.type === "openapi_spec" ? (
+          <SourceBadge kind="openapi" />
+        ) : job.source?.type === "standards_spec" ? (
+          <SourceBadge kind="standards" />
+        ) : null}
         <TierPill tier={job.tier} />
         {job.category ? (
           <span
@@ -111,7 +184,7 @@ export function JobCard({ job }: { job: JobCardData }) {
       </div>
 
       <dl
-        className="grid grid-cols-2 gap-x-2.5 gap-y-1 border-t border-[var(--avy-line-soft)] pt-2 font-[family-name:var(--font-mono)] text-[10.5px]"
+        className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2.5 gap-y-1 border-t border-[var(--avy-line-soft)] pt-2 font-[family-name:var(--font-mono)] text-[10.5px]"
         style={{ letterSpacing: 0 }}
       >
         {job.meta.map((row) => (
@@ -119,7 +192,7 @@ export function JobCard({ job }: { job: JobCardData }) {
             <dt className="text-[var(--avy-muted)]">{row.label}</dt>
             <dd
               className={cn(
-                "m-0 font-medium",
+                "m-0 min-w-0 break-words font-medium",
                 row.accent ? "text-[var(--avy-accent)]" : "text-[var(--avy-ink)]"
               )}
             >
@@ -129,11 +202,60 @@ export function JobCard({ job }: { job: JobCardData }) {
         ))}
       </dl>
 
+      {/*
+       * When the row carries the new claim contract, surface
+       * `effectiveState` + the human reason so an operator scanning
+       * the rail can immediately tell why an "open" job isn't
+       * actually grabbable. Hidden when the row predates the
+       * contract, so older fixtures still render normally.
+       */}
+      {job.claim ? (
+        <p
+          className="font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+          style={{ letterSpacing: 0 }}
+          title={`reason: ${job.claim.reason}`}
+        >
+          <b
+            className={cn(
+              "font-semibold",
+              job.claim.claimable
+                ? "text-[var(--avy-accent)]"
+                : "text-[var(--avy-ink)]"
+            )}
+          >
+            {CLAIM_STATE_LABEL[job.claim.state]}
+          </b>
+          {" · "}
+          {formatClaimReason(job.claim.reason)}
+          {job.claim.retryLimit > 0
+            ? ` · ${job.claim.remainingClaimAttempts}/${job.claim.retryLimit} attempts left`
+            : null}
+        </p>
+      ) : null}
+
       <div className="mt-0.5 flex items-center justify-between gap-2">
         <FitMeter fit={job.fit} />
+        {/*
+         * Brief: "Disable claim/start buttons unless claimable === true."
+         * When the row doesn't carry a claim contract yet (older
+         * fixtures), default to enabled — that's the legacy behaviour
+         * and we don't want to silently disable everything during
+         * rollout.
+         */}
         <button
           type="button"
-          className="inline-flex h-6 items-center gap-1.5 rounded-[8px] bg-[var(--avy-accent)] px-2.5 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"
+          disabled={job.claim ? !job.claim.claimable : false}
+          title={
+            job.claim && !job.claim.claimable
+              ? formatClaimReason(job.claim.reason)
+              : undefined
+          }
+          className={cn(
+            "inline-flex h-6 items-center gap-1.5 rounded-[8px] px-2.5 font-[family-name:var(--font-display)] text-[10.5px] font-bold uppercase transition-transform",
+            job.claim && !job.claim.claimable
+              ? "cursor-not-allowed bg-[color:rgba(17,19,21,0.08)] text-[var(--avy-muted)]"
+              : "bg-[var(--avy-accent)] text-[var(--fg-invert)] hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"
+          )}
           style={{ letterSpacing: "0.06em" }}
         >
           Claim

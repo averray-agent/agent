@@ -2,20 +2,53 @@
 
 import { cn } from "@/lib/utils/cn";
 import { Sparkline } from "@/components/overview/Sparkline";
+import { publicProfileUrl } from "@/lib/agents/public-profile";
+import { formatDeadline } from "@/components/runs/buildLifecycleStages";
 import { BadgeStrip } from "./BadgeStrip";
 import { TierChip } from "./TierChip";
-import type { AgentRecord } from "./types";
+import type { AgentRecord, AgentActiveSession } from "./types";
 
 export interface AgentDirectoryTableProps {
   rows: AgentRecord[];
   total: number;
   selectedHandle: string | null;
   onSelect: (agent: AgentRecord) => void;
+  /** Handles currently checked for side-by-side comparison (C4). */
+  comparing: Set<string>;
+  /** Toggle an agent's comparison selection. */
+  onToggleCompare: (agent: AgentRecord) => void;
+  /** True when the comparison cap is reached — disables unchecked boxes. */
+  compareFull: boolean;
 }
 
-const STATE_PILL: Record<AgentRecord["state"], { cls: string; label: string }> = {
-  active: { cls: "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]", label: "Active" },
+// State pill palette. Lifecycle-position tones:
+//   - idle: neutral parchment, "no claim, no work in flight"
+//   - claimed/working/active: green family — currently producing or has
+//     a verified history
+//   - submitted: amber — produced something, awaiting verification
+//   - disputed/slashed: red family — operator action wanted
+const STATE_PILL: Record<
+  AgentRecord["state"],
+  { cls: string; label: string }
+> = {
   idle: { cls: "bg-[#ebe7da] text-[#756d58]", label: "Idle" },
+  claimed: {
+    cls: "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]",
+    label: "Claimed",
+  },
+  working: {
+    cls: "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]",
+    label: "Working",
+  },
+  submitted: {
+    cls: "bg-[var(--avy-warn-soft)] text-[var(--avy-warn)]",
+    label: "Submitted",
+  },
+  disputed: { cls: "bg-[#f3d9d9] text-[#8a2a2a]", label: "Disputed" },
+  active: {
+    cls: "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]",
+    label: "Active",
+  },
   slashed: { cls: "bg-[#f3d9d9] text-[#8a2a2a]", label: "Slashed" },
 };
 
@@ -24,6 +57,9 @@ export function AgentDirectoryTable({
   total,
   selectedHandle,
   onSelect,
+  comparing,
+  onToggleCompare,
+  compareFull,
 }: AgentDirectoryTableProps) {
   return (
     <div className="overflow-hidden rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper)] shadow-[var(--shadow-card)] backdrop-blur-[10px]">
@@ -40,6 +76,9 @@ export function AgentDirectoryTable({
         <table className="w-full border-collapse font-[family-name:var(--font-body)] text-[13px]">
           <thead>
             <tr>
+              <Th>
+                <span className="sr-only">Compare</span>
+              </Th>
               <Th>Handle / wallet</Th>
               <Th>Tier</Th>
               <Th>Reputation</Th>
@@ -53,7 +92,7 @@ export function AgentDirectoryTable({
             {rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="p-8 text-center font-[family-name:var(--font-mono)] text-[13px] text-[var(--avy-muted)]"
                   style={{ letterSpacing: 0 }}
                 >
@@ -67,6 +106,7 @@ export function AgentDirectoryTable({
                 const pill = STATE_PILL[a.state];
                 const selected = a.handle === selectedHandle;
                 const activityParts = a.activity.msg.split(a.activity.ref);
+                const profileHref = publicProfileUrl(a.walletFull);
                 return (
                   <tr
                     key={a.handle}
@@ -76,6 +116,19 @@ export function AgentDirectoryTable({
                       selected && "bg-[color:rgba(30,102,66,0.06)]"
                     )}
                   >
+                    <td
+                      className="border-t border-[var(--avy-line-soft)] px-3 py-3 align-top"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${a.handle} to compare`}
+                        checked={comparing.has(a.handle)}
+                        disabled={compareFull && !comparing.has(a.handle)}
+                        onChange={() => onToggleCompare(a)}
+                        className="h-4 w-4 cursor-pointer accent-[var(--avy-accent)] disabled:cursor-not-allowed disabled:opacity-40"
+                      />
+                    </td>
                     <Td>
                       <div className="text-[14px] font-semibold leading-tight text-[var(--avy-ink)]">
                         {a.handle}
@@ -86,6 +139,19 @@ export function AgentDirectoryTable({
                       >
                         {a.wallet}
                       </div>
+                      {profileHref ? (
+                        <a
+                          href={profileHref}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          onClick={(e) => e.stopPropagation()}
+                          title={`Public profile · ${a.walletFull}`}
+                          className="mt-1 inline-flex items-center gap-1 font-[family-name:var(--font-display)] text-[10px] font-bold uppercase text-[var(--avy-muted)] transition-colors hover:text-[var(--avy-accent)]"
+                          style={{ letterSpacing: "0.06em" }}
+                        >
+                          Public profile ↗
+                        </a>
+                      ) : null}
                     </Td>
                     <Td>
                       <TierChip tier={a.tier} />
@@ -98,7 +164,16 @@ export function AgentDirectoryTable({
                         >
                           {a.score}
                         </span>
-                        <Sparkline points={a.sparkline} width={72} height={20} />
+                        {/* Suppress a flat-zero spark on first-agent rows;
+                            it read as fake against a 0 score. */}
+                        {a.sparkline.some((v) => v > 0) ? (
+                          <Sparkline points={a.sparkline} width={72} height={20} />
+                        ) : (
+                          <span
+                            aria-hidden="true"
+                            className="block h-[2px] w-[72px] rounded-full bg-[color:rgba(17,19,21,0.08)]"
+                          />
+                        )}
                       </div>
                     </Td>
                     <Td>
@@ -124,7 +199,7 @@ export function AgentDirectoryTable({
                       </div>
                     </Td>
                     <Td>
-                      <div
+                      <span
                         className="text-[13px] leading-[1.3] text-[var(--avy-ink)]"
                         style={{ letterSpacing: 0 }}
                       >
@@ -138,13 +213,17 @@ export function AgentDirectoryTable({
                             ) : null}
                           </span>
                         ))}
-                      </div>
+                      </span>
                       <div
                         className="mt-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
                         style={{ letterSpacing: 0 }}
                       >
                         {a.activity.when}
                       </div>
+                      {a.activeSession ? (
+                        <ActiveSessionLine session={a.activeSession} />
+                      ) : null}
+                      <LineageLine agent={a} />
                     </Td>
                     <Td>
                       <span
@@ -173,12 +252,81 @@ export function AgentDirectoryTable({
         </span>
         <button
           type="button"
-          className="inline-flex h-7 items-center gap-1.5 rounded-[8px] bg-[var(--avy-accent)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--fg-invert)] transition-transform hover:-translate-y-px hover:bg-[var(--avy-accent-2)]"
+          disabled
+          title="Agent invites are not yet wired to a live backend."
+          className="inline-flex h-7 cursor-not-allowed items-center gap-1.5 rounded-[8px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-3 font-[family-name:var(--font-display)] text-[11px] font-bold uppercase text-[var(--avy-muted)] opacity-60"
           style={{ letterSpacing: "0.04em" }}
         >
           ＋ Invite new agent
         </button>
       </footer>
+    </div>
+  );
+}
+
+/**
+ * Compact one-liner that surfaces the agent's currently-claimed run on
+ * the row itself. Previously this lived only in the drawer body, so an
+ * operator scanning the directory couldn't tell which agents had a
+ * job in flight without clicking into each row. Reads jobId + the live
+ * deadline countdown from the agent's `currentActivity` block (mapped
+ * onto AgentActiveSession by the adapter).
+ */
+function ActiveSessionLine({ session }: { session: AgentActiveSession }) {
+  const deadlineLabel = session.deadlineAt ? formatDeadline(session.deadlineAt) : "";
+  const verb =
+    session.status === "submitted"
+      ? "Submitted"
+      : session.status === "disputed"
+        ? "Disputed"
+        : "On";
+  return (
+    <div
+      className="mt-1 inline-flex flex-wrap items-center gap-1 rounded-[6px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+      style={{ letterSpacing: 0 }}
+      title={`Active session ${session.sessionId}`}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-[var(--avy-accent)]" />
+      <span>
+        {verb}{" "}
+        <span className="text-[var(--avy-accent)]">{session.jobId}</span>
+      </span>
+      {deadlineLabel ? (
+        <>
+          <span className="opacity-40">·</span>
+          <span>{deadlineLabel}</span>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function LineageLine({ agent }: { agent: AgentRecord }) {
+  const stats = agent.lineageStats ?? {
+    delegated: agent.lineage?.delegated.length ?? 0,
+    subcontracted: agent.lineage?.subcontracted.length ?? 0,
+  };
+  if (stats.delegated + stats.subcontracted === 0) return null;
+  return (
+    <div
+      className="mt-1 inline-flex flex-wrap items-center gap-1 rounded-[6px] border border-[color:rgba(30,102,66,0.18)] bg-[color:rgba(30,102,66,0.04)] px-1.5 py-0.5 font-[family-name:var(--font-mono)] text-[10.5px] text-[var(--avy-muted)]"
+      style={{ letterSpacing: 0 }}
+      title="Sub-contracting history"
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-[var(--avy-accent)] opacity-70" />
+      {stats.delegated > 0 ? (
+        <span>
+          delegated <span className="text-[var(--avy-accent)]">{stats.delegated}</span>
+        </span>
+      ) : null}
+      {stats.delegated > 0 && stats.subcontracted > 0 ? (
+        <span className="opacity-40">·</span>
+      ) : null}
+      {stats.subcontracted > 0 ? (
+        <span>
+          sub-job <span className="text-[var(--avy-accent)]">{stats.subcontracted}</span>
+        </span>
+      ) : null}
     </div>
   );
 }

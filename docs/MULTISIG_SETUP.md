@@ -76,16 +76,25 @@ to "create" the multisig — it exists as soon as you commit to the signer set.
 4. Apps shows the derived address. **Copy this address** — it's your
    multisig's Substrate-native SS58 form.
 
-### Option B: CLI
+### Option B: repo helper
 
 ```bash
-npx @polkadot/api-cli --ws <HUB_WSS> \
-  derive.multisig \
+node scripts/ops/prepare-multisig-owner-record.mjs \
+  --profile testnet \
+  --threshold 2 \
   --signatories <HOT_SS58>,<WARM_SS58>,<COLD_SS58> \
-  --threshold 2
+  --out deployments/testnet-multisig-owner.json
 ```
 
-(Order matters — sort the addresses lexicographically before calling.)
+The helper sorts the signers, derives the deterministic pallet-multisig
+SS58/accountId, computes the H160 owner candidate used as `OWNER`, and writes
+a public operator record. It does **not** prove the account is safe to use as a
+contract owner yet — the initial record is `status: "draft"` until the
+`map_account` and testnet rehearsal evidence below are filled in.
+
+Do not put seeds or private labels in the record. Signer addresses, transaction
+hashes, workflow run ids, and the mapped owner address are public launch
+metadata.
 
 ---
 
@@ -120,6 +129,22 @@ testnet rehearsal succeeds.
 > "partially degraded" — it is effectively frozen out of admin control.
 > Treat owner-address verification as a launch gate, not a clerical step.
 
+After the multisig account has called `pallet_revive.map_account()` on Hub
+TestNet, update the record with the mapping transaction:
+
+```bash
+node scripts/ops/prepare-multisig-owner-record.mjs \
+  --profile testnet \
+  --threshold 2 \
+  --signatories <HOT_SS58>,<WARM_SS58>,<COLD_SS58> \
+  --map-account-tx 0x<tx-hash> \
+  --out deployments/testnet-multisig-owner.json
+```
+
+The record should stay `draft` at this point. It becomes `verified` only after
+ownership transfer, `verify_deployment.sh testnet`, and one owner-only admin
+rehearsal are all recorded.
+
 ---
 
 ## 5. Rehearse on testnet BEFORE mainnet
@@ -135,7 +160,7 @@ cd /path/to/agent
 PROFILE=testnet \
 RPC_URL=https://eth-rpc-testnet.polkadot.io/ \
 PRIVATE_KEY=0x<deployer-testnet-key> \
-TOKEN_ADDRESS=0x<hub-dot-precompile-or-testdot> \
+TOKEN_ADDRESS=0x0000053900000000000000000000000001200000 \
 OWNER=0x<multisig-mapped-evm>    \
 PAUSER=0x<hot-key-evm>           \
 VERIFIER=0x<verifier-evm>        \
@@ -145,6 +170,16 @@ ARBITRATOR=0x<arbitrator-evm>    \
 
 The deploy script transfers ownership to `OWNER` as the last step. After
 ownership transfer the deployer key can no longer touch admin ops.
+
+`TOKEN_ADDRESS` is the v1 escrow asset. Use USDC, Trust-Backed Asset ID
+`1337`, ERC20 precompile
+`0x0000053900000000000000000000000001200000`, 6 decimals. The same precompile
+address is used on Polkadot Hub mainnet and Polkadot Hub TestNet.
+
+There is no native DOT ERC20 precompile on Polkadot Hub. For local `dev`, the
+deploy script can still mint MockDOT automatically when this value is omitted.
+For `testnet` and `mainnet`, do not use a placeholder native-DOT precompile
+address.
 
 ### 5b. Verify the wiring
 
@@ -156,19 +191,44 @@ Every line must print `[ok]`. If anything says `[FAIL]` do **not** proceed.
 
 ### 5c. Rehearse pause from the hot key
 
-The pauser is a single EOA, so you can use `cast`:
+The pauser is a single EOA, but do the read-only proof first so you know the
+live transaction will exercise the right address and the right contract
+capability:
 
 ```bash
-cast send "$TREASURY_POLICY" "setPaused(bool)" true \
-  --rpc-url "$RPC_URL" --private-key "$PAUSER_KEY"
-
-# Confirm it stuck
-cast call "$TREASURY_POLICY" "paused()(bool)" --rpc-url "$RPC_URL"
-
-# Unpause
-cast send "$TREASURY_POLICY" "setPaused(bool)" false \
-  --rpc-url "$RPC_URL" --private-key "$PAUSER_KEY"
+node scripts/ops/run-pauser-rehearsal.mjs \
+  --profile testnet \
+  --out artifacts/pauser-rehearsal-readonly.json
 ```
+
+That proof checks:
+
+- live `owner`, `pauser`, and `paused` values against `deployments/testnet.json`
+- `pauser != owner` and `pauser != address(0)`
+- `eth_call` from the pauser can call `setPaused(bool)`
+- `eth_call` from the pauser cannot call owner-only functions such as
+  `setPauser`, `setVerifier`, `setServiceOperator`, or `transferOwnership`
+- whether the pauser address overlaps verifier/arbitrator/deployer roles
+
+For mainnet or any real-funds rehearsal, add `--require-dedicated-pauser` so
+the proof fails if the pauser overlaps deployer, verifier, arbitrator, or
+owner. The current testnet manifest deliberately carries a bounded overlap
+while we finish launch rehearsal; do not copy that shape to mainnet.
+
+Then run the live rehearsal from the pauser key:
+
+```bash
+PAUSER_PRIVATE_KEY=0x<pauser-testnet-key> \
+node scripts/ops/run-pauser-rehearsal.mjs \
+  --profile testnet \
+  --live \
+  --out docs/evidence/pauser-rehearsal-testnet-YYYY-MM-DD.json
+```
+
+The live mode sends `setPaused(true)`, confirms `paused() == true`, sends
+`setPaused(false)`, confirms `paused() == false`, and writes a sanitized JSON
+evidence file containing only public addresses, checks, and transaction hashes.
+Do not commit private keys or shell history containing them.
 
 ### 5d. Rehearse an admin op from the multisig
 
@@ -189,6 +249,175 @@ On Polkadot.js Apps:
 
 If this flow completes cleanly on testnet, your signer set + EVM mapping
 are correct. Revert the pauser back to the original hot key afterwards.
+
+Now finalize the owner record:
+
+```bash
+node scripts/ops/prepare-multisig-owner-record.mjs \
+  --profile testnet \
+  --threshold 2 \
+  --signatories <HOT_SS58>,<WARM_SS58>,<COLD_SS58> \
+  --map-account-tx 0x<map-account-tx> \
+  --ownership-transfer-tx 0x<deploy-or-transfer-tx> \
+  --admin-rehearsal-tx 0x<set-pauser-rehearsal-tx> \
+  --verify-deployment-run <workflow-run-or-terminal-log-id> \
+  --final \
+  --out deployments/testnet-multisig-owner.json
+```
+
+`./scripts/verify_deployment.sh testnet` automatically reads
+`deployments/testnet-multisig-owner.json` when present and fails if the manifest
+owner differs from the record owner or the record is still draft.
+
+---
+
+## Multisig.asMulti operational recipe — Paseo Asset Hub
+
+This section records the exact Paseo Asset Hub TestNet pattern exercised during
+the 2026-05-25/26 cutover. Polkadot docs MCP verification for this section:
+the official Polkadot Hub smart-contract docs confirm Hub supports Solidity
+contracts through REVM and that Asset Hub smart contracts use `pallet_revive`
+with multi-dimensional `refTime`, `proofSize`, and `storage_deposit`
+accounting. The concrete signer set, weights, blocks, and failure modes below
+are Averray testnet operator evidence from the cutover.
+
+### Owner and signer set
+
+The current testnet owner is the pallet multisig:
+
+- SS58: `12nHTKYfV64pnxsVRB6Cjn6kQPPH64Ehnr8zgqZxvfa8hJvQ`
+- H160 mapping: `0x1f8C4da4AAAC79916350f1fabF1221309591B6F9`
+
+The H160 is **not an EOA**. There is no private key for it. Any owner-gated
+`TreasuryPolicy` call must be wrapped in `multisig.asMulti` and executed by
+two of the three Substrate signers.
+
+Canonical signer order is AccountId32 byte order, not UI order:
+
+| Order | Signer | SS58 | AccountId32 prefix |
+| --- | --- | --- | --- |
+| 1 | Polkadot Vault | `13pav6xpfdapyCAqfRhWZXxUnqDhjrF92dJr3FBwVfBKUKSM` | `0x7c` |
+| 2 | Ledger | `148tqwhGxeCva7ZX8RwvaLjCS7HvDJJaSbxfTUwE9Zyc5Xtm` | `0x8a` |
+| 3 | Hot Wallet | `14ruuTeh5cXMTr9SLNuLt1NiroQZgt5ZQnwYrhg7K5LHiXQb` | `0xaa` |
+
+Canonical order matters because `otherSignatories` must be sorted by AccountId32
+bytes with the active signer omitted. Wrong order fails at dispatch with
+`SignatoriesOutOfOrder`. Do not trust the order a wallet UI happens to show.
+
+### asMulti shape for owner-gated EVM calls
+
+For a typical owner-gated `TreasuryPolicy` EVM call on Paseo Asset Hub:
+
+```text
+multisig.asMulti(
+  threshold: 2,
+  otherSignatories: <the other two signers, in canonical AccountId32 byte order>,
+  maybeTimepoint: None | Some({ height, index }),
+  call: revive.call(
+    dest: <TreasuryPolicy H160>,
+    value: 0,
+    weightLimit: { refTime: 4_000_000_000, proofSize: 100_000 },
+    storageDepositLimit: 1_000_000_000,
+    data: <4-byte selector + ABI-encoded args>
+  ),
+  maxWeight: { refTime: 4_500_000_000, proofSize: 150_000 }
+)
+```
+
+The inner `weightLimit` caps the `revive.call`. The outer `maxWeight` must
+cover the whole dispatch tree. For a single `revive.call`,
+`refTime: 4_500_000_000` and `proofSize: 150_000` are generous enough for the
+owner-gated role calls rehearsed so far. For a two-call `utility.batchAll`, the
+cutover scripts used `refTime: 9_000_000_000` and `proofSize: 300_000`.
+
+Use `storageDepositLimit: 1_000_000_000` (1 PAS) as the safe default. A zero
+storage deposit limit can revert with `StorageDepositLimitExhausted` when the
+inner call writes contract state.
+
+Reference generators:
+
+- `scripts/ops/rotate-admin-multisig-payload.mjs` for `setPauser` and batched
+  `setArbitrator(new, true)` / `setArbitrator(old, false)`.
+- `scripts/ops/redeploy-escrowcore-wire-multisig.mjs` for the EscrowCore swap
+  path from PR #525.
+
+### Two-leg execution
+
+1. First signer submits `multisig.asMulti` with `maybeTimepoint: None`.
+2. Wait for the extrinsic to be `inBlock` and for `multisig.NewMultisig`.
+3. Record the first leg's block height and extrinsic index. In the cutover
+   evidence this looked like `height: 9290992, index: 2`.
+4. Hand those values to the second signer.
+5. Second signer submits the same inner call with
+   `maybeTimepoint: Some({ height, index })`.
+6. Confirm `multisig.MultisigExecuted` and the inner contract event, then verify
+   the target state with a read call.
+
+The first leg stores intent. The second leg executes. If the second signer uses
+the wrong timepoint, wrong inner call, or wrong `otherSignatories` list, the
+runtime will not match the pending multisig.
+
+### Batch owner-gated calls when the state transition is one operation
+
+Use `utility.batchAll` to combine several owner-gated calls into a single
+multisig flow when they are one logical operation. It saves `N - 1` Hot+Ledger
+rounds and makes the transition atomic.
+
+The current EscrowCore swap shape replaces stale
+`0x7BB8fea44bDeE9870cF27c1dB616E7017BC38b0a` with
+`0xb8fd8A932F69bD5E39700b7cf6D2920aF84d1B27`:
+
+```text
+multisig.asMulti(
+  threshold: 2,
+  otherSignatories: <canonical other two>,
+  maybeTimepoint: None | Some({ height, index }),
+  call: utility.batchAll([
+    revive.call(AgentAccountCore.setEscrowOperator(newEscrowCore, true)),
+    revive.call(TreasuryPolicy.setServiceOperator(newEscrowCore, true)),
+    revive.call(AgentAccountCore.setEscrowOperator(oldEscrowCore, false)),
+    revive.call(TreasuryPolicy.setServiceOperator(oldEscrowCore, false))
+  ]),
+  maxWeight: { refTime: 18_000_000_000, proofSize: 600_000 }
+)
+```
+
+`setEscrowOperator` is the dedicated AgentAccountCore ledger authority for
+reserve/stake settlement. `setServiceOperator` remains the TreasuryPolicy
+authority used by EscrowCore entrypoints and readiness checks. Treat the two
+roles as a pair during EscrowCore swaps.
+
+The same pattern was used for admin arbitration rotation:
+`setArbitrator(new, true)` plus `setArbitrator(old, false)` in one
+`batchAll`. If either inner call fails, the batch fails as a unit.
+
+### Pre-flight before anyone signs
+
+Before either signer touches their wallet, dry-run the inner EVM call from the
+multisig H160:
+
+```js
+await provider.call({
+  from: "0x1f8C4da4AAAC79916350f1fabF1221309591B6F9",
+  to: treasuryPolicyAddress,
+  data: innerCallData,
+});
+```
+
+Use this against each inner `TreasuryPolicy` call before building the
+`revive.call`. It catches wrong selectors, wrong ABI arguments, wrong target
+contract, and role assumptions without consuming signer attention. The
+2026-05-25 cutover evidence explicitly records this pre-flight as green before
+wallet signing.
+
+### Common dispatch errors
+
+| Error | Diagnosis |
+| --- | --- |
+| `SignatoriesOutOfOrder` | `otherSignatories` are not in canonical AccountId32 byte order, or the active signer was included instead of omitted. |
+| `StorageDepositLimitExhausted` | `storageDepositLimit` is too low for the inner `revive.call` state writes. Use `1_000_000_000` unless a measured call proves less is safe. |
+| `MaxWeightTooLow` | Outer `maxWeight` is below actual consumed weight. Increase the outer value; do not confuse it with the inner `weightLimit`. |
+| `InvalidStateUnknownJob`, `InvalidStateAlreadyClaimed`, or another 4-byte revert | This is an inner contract custom error, not a multisig error. Decode the selector against the Solidity ABI before changing multisig parameters. |
 
 ---
 
@@ -247,11 +476,11 @@ value movement regardless of owner compromise.
 ## 8. Checklist before tagging v1.0.0-rc2
 
 - [ ] All three keys generated, backups stored in distinct locations.
-- [ ] Multisig address computed + EVM-mapped form recorded.
-- [ ] Testnet deploy transferred ownership to the multisig.
-- [ ] `verify_deployment.sh testnet` passes cleanly.
+- [x] Multisig address computed + EVM-mapped form recorded.
+- [x] Testnet deploy transferred ownership to the multisig.
+- [x] `verify_deployment.sh testnet` passes cleanly.
 - [ ] Pause + unpause from pauser EOA rehearsed.
-- [ ] Admin rotation (e.g., `setPauser`) from multisig rehearsed end-to-end.
+- [x] Admin rotation (e.g., `setPauser`) from multisig rehearsed end-to-end.
 - [ ] Recovery playbook dry-run: simulate each of the three "lost key"
       scenarios on paper.
 - [ ] Incident-response tabletop: walk through "hot key compromised" with

@@ -1,4 +1,9 @@
 import { ingestGithubIssues } from "../jobs/ingest-github-issues.js";
+import {
+  DEFAULT_OPEN_PR_CAP_PER_REPO,
+  DEFAULT_SECURITY_STANDARDS_DENYLIST,
+  parseRepoList
+} from "../core/maintainer-surface-policy.js";
 
 export class GithubIssueIngestionScheduler {
   constructor(platformService, eventBus = undefined, {
@@ -8,7 +13,11 @@ export class GithubIssueIngestionScheduler {
     queries = [],
     minScore = 75,
     maxJobsPerRun = 2,
+    maxJobsPerQuery = 2,
     maxOpenJobs = 20,
+    openPrCap = DEFAULT_OPEN_PR_CAP_PER_REPO,
+    denylistRepos = DEFAULT_SECURITY_STANDARDS_DENYLIST,
+    scanRepoPolicies = false,
     githubToken = undefined,
     fetchImpl = fetch,
     logger = console
@@ -21,7 +30,11 @@ export class GithubIssueIngestionScheduler {
     this.queries = queries;
     this.minScore = minScore;
     this.maxJobsPerRun = maxJobsPerRun;
+    this.maxJobsPerQuery = maxJobsPerQuery;
     this.maxOpenJobs = maxOpenJobs;
+    this.openPrCap = openPrCap;
+    this.denylistRepos = denylistRepos;
+    this.scanRepoPolicies = scanRepoPolicies;
     this.githubToken = githubToken;
     this.fetchImpl = fetchImpl;
     this.logger = logger;
@@ -55,7 +68,12 @@ export class GithubIssueIngestionScheduler {
       queryCount: this.queries.length,
       minScore: this.minScore,
       maxJobsPerRun: this.maxJobsPerRun,
+      maxJobsPerQuery: this.maxJobsPerQuery,
       maxOpenJobs: this.maxOpenJobs,
+      openPrCap: this.openPrCap,
+      denylistRepoCount: this.denylistRepos.length,
+      scanRepoPolicies: this.scanRepoPolicies,
+      currentOpenJobs: this.countOpenGithubJobs(),
       lastRun: this.lastRun
     };
   }
@@ -92,21 +110,29 @@ export class GithubIssueIngestionScheduler {
     const seenSources = this.existingGithubIssueKeys();
     for (const query of this.queries) {
       if (remaining <= 0) break;
+      const queryLimit = Math.min(remaining, this.maxJobsPerQuery);
       try {
         const result = await ingestGithubIssues({
           query,
-          limit: remaining,
+          limit: queryLimit,
           minScore: this.minScore,
           githubToken: this.githubToken,
-          fetchImpl: this.fetchImpl
+          fetchImpl: this.fetchImpl,
+          maintainerPolicy: {
+            denylistRepos: this.denylistRepos,
+            scanRepoPolicies: this.scanRepoPolicies,
+            openPrCap: this.openPrCap
+          }
         });
         summary.candidateCount += result.count;
         const querySummary = {
           query,
           candidates: result.count,
           created: 0,
+          maxJobsPerQuery: queryLimit,
           skipped: []
         };
+        querySummary.skipped.push(...(result.skippedDetails ?? []));
         for (const job of result.jobs) {
           if (remaining <= 0) break;
           const sourceKey = githubIssueKey(job);
@@ -197,7 +223,14 @@ export function loadGithubIssueIngestionConfig(env = process.env) {
     queries,
     minScore: parsePositiveInt(env.GITHUB_INGEST_MIN_SCORE, 75),
     maxJobsPerRun: parsePositiveInt(env.GITHUB_INGEST_MAX_JOBS_PER_RUN, 2),
+    maxJobsPerQuery: parsePositiveInt(env.GITHUB_INGEST_MAX_JOBS_PER_QUERY, 2),
     maxOpenJobs: parsePositiveInt(env.GITHUB_INGEST_MAX_OPEN_JOBS, 20),
+    openPrCap: parsePositiveInt(env.MAINTAINER_OPEN_PR_CAP ?? env.GITHUB_INGEST_OPEN_PR_CAP, DEFAULT_OPEN_PR_CAP_PER_REPO),
+    denylistRepos: [
+      ...DEFAULT_SECURITY_STANDARDS_DENYLIST,
+      ...parseRepoList(env.MAINTAINER_DENYLIST_REPOS ?? env.GITHUB_INGEST_DENYLIST_REPOS)
+    ],
+    scanRepoPolicies: parseBooleanEnv(env.GITHUB_INGEST_POLICY_SCAN_ENABLED),
     githubToken: env.GITHUB_TOKEN?.trim() || undefined
   };
 }

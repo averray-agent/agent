@@ -1,20 +1,38 @@
 {
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "schema://jobs/review-input",
   "title": "Review Input",
+  "description": "PR or document review input.",
   "type": "object",
-  "required": ["subject", "reviewScope", "rubric"],
   "properties": {
-    "subject": { "type": "string", "minLength": 1 },
-    "reviewScope": { "type": "string", "minLength": 1 },
+    "subject": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reviewScope": {
+      "type": "string",
+      "minLength": 1
+    },
     "rubric": {
       "type": "array",
-      "minItems": 1,
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
     },
     "files": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     }
   },
+  "required": [
+    "subject",
+    "reviewScope",
+    "rubric"
+  ],
   "additionalProperties": false
 }

@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "schema://jobs/dependency-remediation-output",
+  "title": "Dependency Remediation Output",
+  "description": "Structured pull request evidence for a dependency vulnerability remediation.",
+  "type": "object",
+  "properties": {
+    "prUrl": {
+      "type": "string",
+      "minLength": 1
+    },
+    "packageName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "vulnerableVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fixedVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "advisoryIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tests": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo": {
+      "type": "string"
+    },
+    "manifestPath": {
+      "type": "string"
+    },
+    "lockfilesUpdated": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "filesChanged": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "ciStatus": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "pending",
+        "passing",
+        "failing"
+      ]
+    },
+    "checksPassing": {
+      "type": "boolean"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "prUrl",
+    "packageName",
+    "vulnerableVersion",
+    "fixedVersion",
+    "advisoryIds",
+    "summary",
+    "tests"
+  ],
+  "additionalProperties": false
+}

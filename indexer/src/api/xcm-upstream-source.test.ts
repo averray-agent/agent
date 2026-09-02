@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  HttpFeedSourceAdapter,
   NativePapiXcmSourceAdapter,
+  SubscanXcmSourceAdapter,
   createXcmUpstreamSourceAdapter,
   decodeNativePapiCursor,
   encodeNativePapiCursor,
@@ -39,6 +41,10 @@ test("native PAPI evidence normalizes into the published outcome contract", () =
     status: "Succeeded",
     remoteRef,
     observedAt: "2026-04-23T12:00:00.000Z",
+    correlation: {
+      method: "remote_ref",
+      confidence: "staging"
+    },
     decision: {
       settledAssets: "5000000000000",
       settledShares: "4900000000000"
@@ -71,12 +77,289 @@ test("native PAPI evidence preserves explicit failure metadata", () => {
     settledShares: 0,
     failureCode,
     observedAt: "2026-04-23T12:30:00.000Z",
-    source: "native_papi_staging"
+    source: "native_papi_staging",
+    correlation: {
+      method: "ledger_join",
+      confidence: "staging"
+    }
   });
 
   assert.equal(outcome.status, "failed");
   assert.equal(outcome.failureCode, failureCode);
   assert.equal(outcome.source, "native_papi_staging");
+});
+
+test("native PAPI evidence rejects failed outcomes without failureCode", () => {
+  assert.throws(
+    () => normalizeNativeXcmEvidence({
+      requestId,
+      status: "failed",
+      observedAt: "2026-04-23T12:30:00.000Z",
+      correlation: {
+        method: "ledger_join",
+        confidence: "staging"
+      }
+    }),
+    /failed items must include failureCode/u
+  );
+});
+
+test("native PAPI evidence preserves large uint256 settlement amounts exactly", () => {
+  const settledAssets = "9007199254740993";
+  const settledShares = "18446744073709551616";
+  const outcome = normalizeNativeXcmEvidence({
+    requestId,
+    status: "succeeded",
+    settledAssets,
+    settledShares,
+    correlation: {
+      method: "ledger_join",
+      confidence: "staging"
+    }
+  });
+
+  assert.equal(outcome.settledAssets, settledAssets);
+  assert.equal(outcome.settledShares, settledShares);
+});
+
+test("native PAPI evidence normalizes epoch-second observedAt timestamps", () => {
+  const outcome = normalizeNativeXcmEvidence({
+    requestId,
+    status: "succeeded",
+    observedAt: 1712345678,
+    correlation: {
+      method: "ledger_join",
+      confidence: "staging"
+    }
+  });
+
+  assert.equal(outcome.observedAt, "2024-04-05T19:34:38.000Z");
+});
+
+test("native PAPI evidence rejects unsafe numeric settlement amounts", () => {
+  assert.throws(
+    () => normalizeNativeXcmEvidence({
+      requestId,
+      status: "succeeded",
+      settledAssets: Number.MAX_SAFE_INTEGER + 2,
+      correlation: {
+        method: "ledger_join",
+        confidence: "staging"
+      }
+    }),
+    /exact non-negative uint256/u
+  );
+});
+
+test("native PAPI evidence accepts SetTopic request-id correlation after Bifrost echo is proven", () => {
+  const outcome = normalizeNativeXcmEvidence({
+    requestId,
+    status: "succeeded",
+    settledAssets: "5000000000000",
+    settledShares: "4900000000000",
+    remoteRef,
+    observedAt: "2026-04-23T12:00:00.000Z",
+    correlation: {
+      method: "request_id_in_message",
+      confidence: "production_candidate"
+    },
+    hub: {
+      messageTopic: requestId
+    },
+    bifrost: {
+      messageTopic: requestId
+    }
+  });
+
+  assert.equal(outcome.requestId, requestId);
+  assert.equal(outcome.source, "native_papi_observer");
+});
+
+test("Subscan source normalizes numeric-string epoch timestamps", () => {
+  const adapter = new SubscanXcmSourceAdapter({
+    apiHost: "https://subscan.example",
+    apiKey: "test"
+  });
+
+  const outcome = adapter.normalizeSubscanEntry({
+    message_topic: requestId,
+    status: "success",
+    block_timestamp: "1712345678"
+  });
+
+  assert.equal(outcome?.observedAt, "2024-04-05T19:34:38.000Z");
+});
+
+test("Subscan source accepts explicit SetTopic request-id fields", () => {
+  const adapter = new SubscanXcmSourceAdapter({
+    apiHost: "https://subscan.example",
+    apiKey: "test"
+  });
+
+  const outcome = adapter.normalizeSubscanEntry({
+    setTopic: requestId,
+    status: "success",
+    block_timestamp: "1712345678"
+  });
+
+  assert.equal(outcome?.requestId, requestId);
+  assert.equal(outcome?.source, "subscan_xcm_api");
+});
+
+test("Subscan source preserves failure code for failed status variants", () => {
+  const adapter = new SubscanXcmSourceAdapter({
+    apiHost: "https://subscan.example",
+    apiKey: "test"
+  });
+
+  const outcome = adapter.normalizeSubscanEntry({
+    message_topic: requestId,
+    execution_status: "xcm_failed",
+    error_code: failureCode,
+    block_timestamp: "1712345678"
+  });
+
+  assert.equal(outcome?.status, "failed");
+  assert.equal(outcome?.failureCode, failureCode);
+});
+
+test("Subscan source advances after a non-empty final page", async () => {
+  const adapter = new SubscanXcmSourceAdapter({
+    apiHost: "https://subscan.example",
+    apiKey: "test",
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        code: 0,
+        data: {
+          list: [
+            {
+              message_topic: requestId,
+              status: "success",
+              block_timestamp: "1712345678"
+            }
+          ]
+        }
+      })
+    } as Response)
+  });
+
+  const payload = await adapter.fetchBatch({ limit: 25 });
+
+  assert.equal(payload.items.length, 1);
+  assert.equal(adapter.decodePageCursor(payload.nextCursor), 1);
+});
+
+test("Subscan source omits nextCursor for empty end-of-feed pages", async () => {
+  const adapter = new SubscanXcmSourceAdapter({
+    apiHost: "https://subscan.example",
+    apiKey: "test",
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        code: 0,
+        data: {
+          list: []
+        }
+      })
+    } as Response)
+  });
+
+  const payload = await adapter.fetchBatch({ limit: 25 });
+
+  assert.deepEqual(payload.items, []);
+  assert.equal(payload.nextCursor, undefined);
+});
+
+test("Subscan source rejects failed status variants without failure code", () => {
+  const adapter = new SubscanXcmSourceAdapter({
+    apiHost: "https://subscan.example",
+    apiKey: "test"
+  });
+
+  assert.throws(
+    () => adapter.normalizeSubscanEntry({
+      message_topic: requestId,
+      execution_status: "xcm_failed",
+      block_timestamp: "1712345678"
+    }),
+    /failed items must include failureCode/u
+  );
+});
+
+test("HTTP feed source rejects failed items without failureCode", async () => {
+  const adapter = new HttpFeedSourceAdapter({
+    url: "https://feed.example/xcm",
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            requestId,
+            status: "failed",
+            observedAt: "2026-04-23T12:30:00.000Z"
+          }
+        ]
+      })
+    } as Response)
+  });
+
+  await assert.rejects(
+    () => adapter.fetchBatch({ limit: 25 }),
+    /failed items must include failureCode/u
+  );
+});
+
+test("Subscan source ignores uncorrelated message and extrinsic hashes", () => {
+  const adapter = new SubscanXcmSourceAdapter({
+    apiHost: "https://subscan.example",
+    apiKey: "test"
+  });
+
+  const outcome = adapter.normalizeSubscanEntry({
+    msg_hash: requestId,
+    message_hash: requestId,
+    extrinsic_hash: remoteRef,
+    hash: failureCode,
+    status: "success",
+    block_timestamp: "1712345678"
+  });
+
+  assert.equal(outcome, undefined);
+});
+
+test("native PAPI evidence rejects promoted ledger joins and mismatched topics", () => {
+  assert.throws(
+    () => normalizeNativeXcmEvidence({
+      requestId,
+      status: "succeeded",
+      remoteRef,
+      correlation: {
+        method: "ledger_join",
+        confidence: "production_candidate"
+      }
+    }),
+    /staging-only/u
+  );
+
+  assert.throws(
+    () => normalizeNativeXcmEvidence({
+      requestId,
+      status: "succeeded",
+      remoteRef,
+      correlation: {
+        method: "request_id_in_message",
+        confidence: "production_candidate"
+      },
+      hub: {
+        messageTopic: requestId
+      },
+      bifrost: {
+        messageTopic: failureCode
+      }
+    }),
+    /bifrost message topic must equal requestId/u
+  );
 });
 
 test("native PAPI source validates required endpoints and describes configuration", () => {

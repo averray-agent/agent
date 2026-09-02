@@ -3,7 +3,10 @@
 import { useEffect, useState } from "react";
 import { mutate } from "swr";
 import { DrawerSection } from "@/components/shell/DetailDrawer";
+import { ExplorerLink } from "@/components/common/ExplorerLink";
+import { OutcomeRationaleInline } from "@/components/common/OutcomeRationaleInline";
 import { decisionToVerdict } from "@/lib/api/dispute-adapters";
+import { releaseAmountForDecision } from "@/lib/api/dispute-verdicts";
 import { swrFetcher } from "@/lib/api/client";
 import { DisputeStatePill, OriginPill } from "./pills";
 import { PartyChip } from "./PartyChip";
@@ -50,18 +53,14 @@ export function DisputeDrawerBody({
   }, [dispute.id, dispute.resolution, dispute.state]);
 
   // If the decision changes, reset the destination to stay consistent
-  // (uphold/reject pick different valid destinations; request-more has none).
+  // with the backend verdict settlement path.
   const handleDecision = (d: DecisionKind) => {
     setDecision(d);
-    if (d === "request-more") setDestination(null);
-    else {
-      // auto-pick a default that matches the decision.
-      if (d === "uphold" && destination !== "slash-to-treasury" && destination !== "pay-verifier") {
-        setDestination("slash-to-treasury");
-      }
-      if (d === "reject" && destination !== "return-to-depositor") {
-        setDestination("return-to-depositor");
-      }
+    if (d === "uphold" && destination !== "slash-to-treasury" && destination !== "pay-verifier") {
+      setDestination("slash-to-treasury");
+    }
+    if ((d === "reject" || d === "split" || d === "timeout") && destination !== "return-to-depositor") {
+      setDestination("return-to-depositor");
     }
   };
 
@@ -90,7 +89,7 @@ export function DisputeDrawerBody({
       ]);
       verdictCommitted = true;
 
-      if (destination && decision !== "request-more") {
+      if (destination) {
         await swrFetcher([
           `${detailKey}/release`,
           {
@@ -99,7 +98,11 @@ export function DisputeDrawerBody({
             body: JSON.stringify({
               action: destination,
               destination,
-              amount: dispute.stakeFrozen,
+              amount: releaseAmountForDecision({
+                decision,
+                remainingPayout: dispute.remainingPayout,
+                stakeFrozen: dispute.stakeFrozen,
+              }),
             }),
           },
         ]);
@@ -161,7 +164,14 @@ export function DisputeDrawerBody({
               Opened · <span className="text-[var(--avy-ink)]">{dispute.openedAt}</span>
             </span>
           </div>
+          {dispute.outcomeRationale ? (
+            <OutcomeRationaleInline rationale={dispute.outcomeRationale} />
+          ) : null}
         </div>
+      </DrawerSection>
+
+      <DrawerSection title="Arbitration">
+        <ArbitrationCard dispute={dispute} />
       </DrawerSection>
 
       <DrawerSection title="Evidence">
@@ -306,15 +316,222 @@ function PartyBlock({
   );
 }
 
+function ArbitrationCard({ dispute }: { dispute: Dispute }) {
+  const { arbitration } = dispute;
+  const slaStatus = arbitration.sla.expired
+    ? "Expired"
+    : typeof arbitration.sla.secondsRemaining === "number"
+      ? `${formatDuration(arbitration.sla.secondsRemaining)} left`
+      : "Window active";
+  const releaseReady = arbitration.release.ready;
+
+  return (
+    <div className="rounded-[10px] border border-[var(--avy-line)] bg-[var(--avy-paper-solid)] p-4">
+      <div className="grid gap-3 md:grid-cols-[1fr_1fr]">
+        <ArbitrationDatum
+          label="SLA"
+          value={slaStatus}
+          note={
+            arbitration.sla.windowEndsAt
+              ? `Ends ${formatIso(arbitration.sla.windowEndsAt)}`
+              : `${formatDuration(arbitration.sla.seconds)} window`
+          }
+          tone={arbitration.sla.expired ? "warn" : "accent"}
+        />
+        <ArbitrationDatum
+          label="Release"
+          value={releaseReady ? "Ready after verdict" : releaseReasonLabel(arbitration.release.reason)}
+          note={arbitration.release.requiresVerdict ? "Requires verdict receipt first" : "Admin receipt only"}
+          tone={releaseReady ? "accent" : "neutral"}
+        />
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {arbitration.allowedVerdicts.map((verdict) => (
+          <span
+            key={verdict}
+            className="rounded-full border border-[var(--avy-line)] bg-[color:rgba(17,19,21,0.03)] px-2.5 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-ink)]"
+            style={{ letterSpacing: 0 }}
+          >
+            {verdictLabel(verdict)}
+          </span>
+        ))}
+      </div>
+
+      <div
+        className="mt-3 grid gap-1.5 border-t border-[var(--avy-line-soft)] pt-3 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        <span>
+          Reasoning ·{" "}
+          <b className="font-semibold text-[var(--avy-ink)]">
+            {arbitration.reasoning.hashAlgorithm} {arbitration.reasoning.hashField}
+          </b>{" "}
+          → <b className="font-semibold text-[var(--avy-ink)]">{arbitration.reasoning.uriField}</b>
+        </span>
+        <span>
+          Authority ·{" "}
+          <b className="font-semibold text-[var(--avy-ink)]">
+            {authorityLabel(arbitration.authority.verdict)}
+          </b>{" "}
+          verdict ·{" "}
+          <b className="font-semibold text-[var(--avy-ink)]">
+            {authorityLabel(arbitration.authority.release)}
+          </b>{" "}
+          release
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function ArbitrationDatum({
+  label,
+  value,
+  note,
+  tone,
+}: {
+  label: string;
+  value: string;
+  note: string;
+  tone: "accent" | "neutral" | "warn";
+}) {
+  const toneClass = {
+    accent: "text-[var(--avy-accent)]",
+    neutral: "text-[var(--avy-ink)]",
+    warn: "text-[var(--avy-warn)]",
+  }[tone];
+  return (
+    <div className="rounded-[8px] border border-[var(--avy-line-soft)] bg-[color:rgba(17,19,21,0.025)] px-3 py-2.5">
+      <div
+        className="font-[family-name:var(--font-display)] text-[10px] font-extrabold uppercase text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        {label}
+      </div>
+      <div
+        className={`mt-1 font-[family-name:var(--font-display)] text-[13px] font-bold ${toneClass}`}
+        style={{ letterSpacing: 0 }}
+      >
+        {value}
+      </div>
+      <div
+        className="mt-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--avy-muted)]"
+        style={{ letterSpacing: 0 }}
+      >
+        {note}
+      </div>
+    </div>
+  );
+}
+
+const CHAIN_STATUS_LABEL: Record<string, string> = {
+  confirmed: "Confirmed",
+  submitted: "Submitted",
+  local_only: "Local only",
+  settled_by_verdict: "Settled by verdict",
+};
+
+const CHAIN_STATUS_DOT_CLASS: Record<string, string> = {
+  confirmed: "bg-[var(--avy-accent)]",
+  settled_by_verdict: "bg-[var(--avy-accent)]",
+  submitted: "bg-[#254e9a]",
+  local_only: "bg-[var(--avy-warn)]",
+};
+
+function humaniseChainStatus(status: string): string {
+  return CHAIN_STATUS_LABEL[status] ?? status.replace(/_/g, " ");
+}
+
+function chainStatusDotClass(status: string): string {
+  return CHAIN_STATUS_DOT_CLASS[status] ?? "bg-[var(--avy-muted)]";
+}
+
+function verdictLabel(value: string): string {
+  const normalized = value.replace(/_/g, " ");
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function authorityLabel(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
+function releaseReasonLabel(value: string): string {
+  const labels: Record<string, string> = {
+    awaiting_arbitrator_verdict: "Awaiting verdict",
+    verdict_recorded: "Verdict recorded",
+    release_already_recorded: "Release recorded",
+  };
+  return labels[value] ?? authorityLabel(value);
+}
+
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0m";
+  const days = Math.floor(seconds / 86400);
+  if (days >= 1) return `${days}d`;
+  const hours = Math.floor(seconds / 3600);
+  if (hours >= 1) return `${hours}h`;
+  const minutes = Math.max(1, Math.floor(seconds / 60));
+  return `${minutes}m`;
+}
+
+function formatIso(value: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return value;
+  const date = new Date(parsed);
+  const month = date.toLocaleString("en", { month: "short", timeZone: "UTC" });
+  const day = date.toLocaleString("en", { day: "numeric", timeZone: "UTC" });
+  const hh = String(date.getUTCHours()).padStart(2, "0");
+  const mm = String(date.getUTCMinutes()).padStart(2, "0");
+  return `${month} ${day} · ${hh}:${mm} UTC`;
+}
+
+function shortHash(hash: string): string {
+  if (hash.length <= 14) return hash;
+  return `${hash.slice(0, 8)}…${hash.slice(-4)}`;
+}
+
+function isLinkableUri(value: string): boolean {
+  return /^(?:https?|ipfs):\/\//u.test(value);
+}
+
+function formatPayoutAmount(value: number): string {
+  return value.toLocaleString("en-US", {
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 4,
+  });
+}
+
 function ResolvedCard({ dispute }: { dispute: Dispute }) {
   if (!dispute.resolution) return null;
-  const { decision, destination, rationale, at, signer } = dispute.resolution;
+  const {
+    decision,
+    destination,
+    rationale,
+    at,
+    signer,
+    reasonCode,
+    workerPayout,
+    txHash,
+    chainStatus,
+    metadataURI,
+    reasoningHash,
+  } = dispute.resolution;
+  const hasOnchainMeta =
+    Boolean(reasonCode) ||
+    typeof workerPayout === "number" ||
+    Boolean(chainStatus) ||
+    Boolean(txHash) ||
+    Boolean(metadataURI) ||
+    Boolean(reasoningHash);
   const decisionLabel =
     decision === "uphold"
       ? "Upheld"
       : decision === "reject"
         ? "Rejected"
-        : "Requested more evidence";
+        : decision === "timeout"
+          ? "Timeout"
+          : "Split payout";
   const destinationLabel =
     destination === "return-to-depositor"
       ? "Returned to depositor"
@@ -347,6 +564,75 @@ function ResolvedCard({ dispute }: { dispute: Dispute }) {
       >
         Stake → {destinationLabel}
       </div>
+      {hasOnchainMeta ? (
+        <div
+          className="grid gap-1 rounded-[8px] border border-[var(--avy-line-soft)] bg-[var(--avy-paper-solid)] px-3 py-2 font-[family-name:var(--font-mono)] text-[11.5px] text-[var(--avy-muted)]"
+          style={{ letterSpacing: 0 }}
+        >
+          {reasonCode ? (
+            <span>
+              Reason ·{" "}
+              <b className="font-semibold text-[var(--avy-ink)]">{reasonCode}</b>
+            </span>
+          ) : null}
+          {typeof workerPayout === "number" ? (
+            <span>
+              Worker payout ·{" "}
+              <b className="font-semibold text-[var(--avy-ink)]">
+                {formatPayoutAmount(workerPayout)} DOT
+              </b>
+            </span>
+          ) : null}
+          {chainStatus ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${chainStatusDotClass(chainStatus)}`}
+                aria-hidden="true"
+              />
+              <span>
+                Chain ·{" "}
+                <b className="font-semibold text-[var(--avy-ink)]">
+                  {humaniseChainStatus(chainStatus)}
+                </b>
+              </span>
+            </span>
+          ) : null}
+          {txHash ? (
+            <span>
+              Tx ·{" "}
+              <ExplorerLink kind="tx" value={txHash} label={shortHash(txHash)} />
+            </span>
+          ) : null}
+          {metadataURI ? (
+            <span className="break-all">
+              Reasoning URI ·{" "}
+              {isLinkableUri(metadataURI) ? (
+                <a
+                  href={metadataURI}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="font-semibold text-[var(--avy-ink)] hover:text-[var(--avy-accent)] hover:underline"
+                >
+                  {metadataURI} ↗
+                </a>
+              ) : (
+                <b className="font-semibold text-[var(--avy-ink)]">{metadataURI}</b>
+              )}
+            </span>
+          ) : null}
+          {reasoningHash ? (
+            <span>
+              Reasoning hash ·{" "}
+              <b
+                className="font-semibold text-[var(--avy-ink)]"
+                title={reasoningHash}
+              >
+                {shortHash(reasoningHash)}
+              </b>
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       <p
         className="m-0 text-[13px] leading-snug text-[var(--avy-ink)]"
         style={{ letterSpacing: 0 }}

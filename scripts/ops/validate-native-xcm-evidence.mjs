@@ -83,8 +83,8 @@ export function validateEvidence(value) {
   const observedAt = assertIsoDate(value.observedAt ?? value.decision?.observedAt, "observedAt");
 
   assertObject(value.correlation, "correlation");
-  assertOneOf(value.correlation.method, ["request_id_in_message", "remote_ref", "ledger_join"], "correlation.method");
-  assertOneOf(value.correlation.confidence, ["staging", "production_candidate", "production"], "correlation.confidence");
+  const correlationMethod = assertOneOf(value.correlation.method, ["request_id_in_message", "remote_ref", "ledger_join"], "correlation.method");
+  const correlationConfidence = assertOneOf(value.correlation.confidence, ["staging", "production_candidate", "production"], "correlation.confidence");
 
   assertObject(value.hub, "hub");
   assertChainEvidence(value.hub, "hub");
@@ -110,6 +110,14 @@ export function validateEvidence(value) {
   if (status === "succeeded" && !remoteRef) {
     fail("succeeded evidence must include a remoteRef.");
   }
+  validateCorrelationGate({
+    method: correlationMethod,
+    confidence: correlationConfidence,
+    requestId: value.requestId,
+    remoteRef,
+    hub: value.hub,
+    bifrost: value.bifrost
+  });
 
   return {
     requestId: value.requestId,
@@ -122,13 +130,57 @@ export function validateEvidence(value) {
   };
 }
 
+function validateCorrelationGate({ method, confidence, requestId, remoteRef, hub, bifrost }) {
+  if (method === "request_id_in_message") {
+    assertTopicMatchesRequest(hub, requestId, "hub");
+    if (confidence !== "staging") {
+      assertTopicMatchesRequest(bifrost, requestId, "bifrost");
+    }
+    return;
+  }
+  if (method === "remote_ref") {
+    if (!remoteRef) {
+      fail("remote_ref correlation requires remoteRef.");
+    }
+    return;
+  }
+  if (confidence !== "staging") {
+    fail("ledger_join correlation is staging-only and cannot be production_candidate or production.");
+  }
+}
+
 function assertChainEvidence(value, label) {
   assertString(value.chain, `${label}.chain`);
   assertNonNegativeIntegerString(value.blockNumber, `${label}.blockNumber`);
   assertHex32(value.blockHash, `${label}.blockHash`);
   if (value.extrinsicHash !== undefined) assertHex32(value.extrinsicHash, `${label}.extrinsicHash`);
   if (value.messageHash !== undefined) assertHex32(value.messageHash, `${label}.messageHash`);
+  if (value.messageTopic !== undefined) assertHex32(value.messageTopic, `${label}.messageTopic`);
+  if (value.message_topic !== undefined) assertHex32(value.message_topic, `${label}.message_topic`);
+  if (value.topic !== undefined) assertHex32(value.topic, `${label}.topic`);
+  if (value.setTopic !== undefined) assertHex32(value.setTopic, `${label}.setTopic`);
+  if (value.set_topic !== undefined) assertHex32(value.set_topic, `${label}.set_topic`);
   assertString(value.eventIndex, `${label}.eventIndex`);
+}
+
+function assertTopicMatchesRequest(value, requestId, label) {
+  const topic = pickTopic(value);
+  if (!topic) {
+    fail(`${label} evidence must include messageTopic/topic for request_id_in_message correlation.`);
+  }
+  if (topic.toLowerCase() !== requestId.toLowerCase()) {
+    fail(`${label} message topic must equal requestId.`);
+  }
+}
+
+function pickTopic(value) {
+  for (const key of ["messageTopic", "message_topic", "topic", "setTopic", "set_topic"]) {
+    const topic = value?.[key];
+    if (topic !== undefined && topic !== null && topic !== "") {
+      return assertHex32(topic, key);
+    }
+  }
+  return null;
 }
 
 function assertObject(value, label) {

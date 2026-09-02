@@ -11,7 +11,7 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
     operatorAppUrl: "https://app.example.com"
   });
 
-  assert.equal(manifest.version, "0.3.0");
+  assert.equal(manifest.version, "0.3.1");
   assert.equal(manifest.discoveryMode, "directory-safe");
   assert.equal(manifest.baseUrl, "https://api.example.com");
   assert.equal(manifest.discoveryUrl, "https://example.com/.well-known/agent-tools.json");
@@ -25,9 +25,23 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.ok(Array.isArray(manifest.publicEndpoints));
   assert.ok(Array.isArray(manifest.authenticatedEndpoints));
   assert.ok(Array.isArray(manifest.tools));
+  assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/account/position"));
   assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/account/borrow-capacity"));
   assert.ok(!manifest.authenticatedEndpoints.some((entry) => entry.path === "/payments/send"));
   assert.ok(!manifest.tools.some((tool) => tool.name === "sendToAgent"));
+  // /auth/refresh rotates the wallet JWT in place — both the entrypoint
+  // list and the authenticated-endpoints list must advertise it so clients
+  // can avoid re-running SIWE every AUTH_TOKEN_TTL_SECONDS.
+  assert.ok(manifest.executionSurfaces.authEntrypoints.includes("/auth/refresh"));
+  assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/auth/refresh"));
+  // Tools advertised in the manifest must also surface as authenticated endpoints
+  // so an MCP client following the manifest can actually call them. The
+  // explainEligibility / estimateNetReward tools were previously reachable only
+  // as sub-fields of preflightJob / recommendJobs — they now have direct routes.
+  assert.ok(manifest.tools.some((tool) => tool.name === "explainEligibility"));
+  assert.ok(manifest.tools.some((tool) => tool.name === "estimateNetReward"));
+  assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/jobs/explain-eligibility"));
+  assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.path === "/jobs/estimate-reward"));
   assert.equal(manifest.tools[0]?.name, "getPlatformCapabilities");
   assert.equal(manifest.executionSurfaces.operatorApp, "https://app.example.com");
   assert.equal(manifest.schemas.agentBadge, "https://averray.com/schemas/agent-badge-v1.json");
@@ -37,6 +51,43 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/session/state-machine"));
   assert.ok(manifest.tools.some((tool) => tool.name === "listJobSchemas"));
   assert.ok(manifest.tools.some((tool) => tool.name === "getSessionStateMachine"));
+  assert.equal(manifest.auth.schemeId, "SIWE_JWT");
+  assert.deepEqual(manifest.auth.supportedWalletModes, ["evm-siwe"]);
+  assert.equal(manifest.docs.walletOnboarding, "https://github.com/depre-dev/agent/blob/main/docs/AGENT_WALLET_ONBOARDING.md");
+  assert.equal(manifest.docs.productionChecklist, "https://github.com/depre-dev/agent/blob/main/docs/PRODUCTION_CHECKLIST.md");
+  assert.equal(manifest.docs.threatModel, "https://github.com/depre-dev/agent/blob/main/docs/THREAT_MODEL.md");
+  assert.equal(manifest.docs.noToken, "https://github.com/depre-dev/agent/blob/main/docs/NO_TOKEN.md");
+  assert.equal(manifest.docs.week12Gate, "https://github.com/depre-dev/agent/blob/main/docs/WEEK12_GATE.md");
+  assert.equal(manifest.docs.productProofGate, "https://github.com/depre-dev/agent/blob/main/docs/PRODUCT_PROOF_GATE.md");
+  assert.equal(manifest.docs.disputeCodes, "https://github.com/depre-dev/agent/blob/main/docs/DISPUTE_CODES.md");
+  assert.equal(manifest.docs.arbitrationMigration, "https://github.com/depre-dev/agent/blob/main/docs/ARBITRATION_MIGRATION.md");
+  assert.ok(manifest.onboarding.walletModes.some((mode) => (
+    mode.id === "evm-siwe"
+    && mode.status === "supported"
+    && mode.chain.faucetUrl === "https://faucet.polkadot.io/"
+    && mode.setup.secretHandling.includes("never paste raw keys")
+  )));
+  assert.ok(manifest.onboarding.walletModes.some((mode) => (
+    mode.id === "substrate-mapped"
+    && mode.status === "documented_not_yet_supported_for_http_auth"
+    && mode.mappingRequirement.includes("pallet_revive.map_account")
+    && mode.currentBlocker.includes("do not yet accept native Substrate signatures")
+  )));
+  assert.ok(manifest.onboarding.walletModes.some((mode) => (
+    mode.id === "agent-self-custody"
+    && mode.status === "supported"
+    && mode.forAutonomousAgents === true
+    && mode.authScheme === "SIWE_JWT"
+    && Array.isArray(mode.bootstrap) && mode.bootstrap.length >= 3
+    && mode.setup.secretHandling.includes("Never paste it into chat")
+  )));
+  assert.ok(manifest.onboarding.readinessChecks.some((check) => (
+    check.id === "wallet-funded" && check.faucetUrl === "https://faucet.polkadot.io/"
+  )));
+  assert.ok(manifest.onboarding.selfServeChecklist.some((entry) => entry.includes("do not paste")));
+  assert.ok(manifest.onboarding.actionRequirements.some((entry) => (
+    entry.method === "POST" && entry.path === "/jobs/claim" && entry.requiredAction === "wallet_sign_in"
+  )));
 });
 
 test("buildPlatformCapabilities stays aligned with the discovery tool list", () => {
@@ -48,7 +99,18 @@ test("buildPlatformCapabilities stays aligned with the discovery tool list", () 
   assert.equal(capabilities.discoveryMode, manifest.discoveryMode);
   assert.deepEqual(capabilities.protocols, manifest.protocols);
   assert.deepEqual(capabilities.onboarding, {
-    starterFlow: manifest.onboarding.starterFlow
+    starterFlow: manifest.onboarding.starterFlow,
+    walletModes: manifest.onboarding.walletModes,
+    actionRequirements: manifest.onboarding.actionRequirements,
+    readinessChecks: manifest.onboarding.readinessChecks,
+    selfServeChecklist: manifest.onboarding.selfServeChecklist
+  });
+  assert.deepEqual(capabilities.auth, {
+    scheme: manifest.auth.scheme,
+    schemeId: manifest.auth.schemeId,
+    entrypoints: manifest.auth.entrypoints,
+    supportedWalletModes: manifest.auth.supportedWalletModes,
+    plannedWalletModes: manifest.auth.plannedWalletModes
   });
   assert.deepEqual(capabilities.executionSurfaces, manifest.executionSurfaces);
   assert.deepEqual(

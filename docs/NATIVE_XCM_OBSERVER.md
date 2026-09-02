@@ -1,12 +1,13 @@
 # Native XCM Observer Design
 
-Status: **design next**. This is the implementation plan for replacing
+Status: **correlation gate scaffold shipped; empirical replay pending**. This is the implementation plan for replacing
 paid/third-party XCM shortcuts with an Averray-operated observer that
 publishes terminal outcomes into the existing `/xcm/outcomes` feed.
 
 This doc sits after:
 
 - [ASYNC_XCM_STAGING.md](./ASYNC_XCM_STAGING.md)
+- [NATIVE_XCM_EVIDENCE_CAPTURE_RUNBOOK.md](./NATIVE_XCM_EVIDENCE_CAPTURE_RUNBOOK.md)
 - [POLKADOT_EXECUTION_PLAN.md](./POLKADOT_EXECUTION_PLAN.md)
 - [strategies/vdot.md](./strategies/vdot.md)
 
@@ -117,8 +118,10 @@ stable correlation handle.
 Before implementation, choose and validate one correlation contract:
 
 1. **Request-id-in-message path**
-   Include `requestId` or a derivation of it in the XCM payload or the
-   downstream Bifrost operation metadata if the target flow supports it.
+   Include `requestId` as the trailing XCM `SetTopic(requestId)` instruction.
+   The Hub-side message topic must equal the Averray request id. To promote this
+   path beyond staging, Bifrost reply-leg evidence must also preserve the same
+   topic.
 
 2. **Remote-ref path**
    Derive a deterministic `remoteRef` from the outbound Hub transaction,
@@ -137,6 +140,10 @@ Ship gate:
   chain evidence without operator judgement
 - the match survives retry/idempotency behavior
 - duplicate observations collapse to one terminal outcome
+- `request_id_in_message` evidence marked `production_candidate` or
+  `production` includes matching Hub and Bifrost `messageTopic == requestId`
+- `ledger_join` evidence remains `staging` only and is rejected for
+  production-candidate use
 
 ---
 
@@ -164,6 +171,11 @@ Current implementation status:
 - env validation and status reporting exist
 - cursor encode/decode helpers exist
 - evidence-to-`PublishedOutcome` normalization exists
+- captured evidence is now correlation-gated: SetTopic/request-id evidence,
+  remote-ref evidence, and staging-only ledger joins are validated differently
+- decoded PAPI/Chopsticks/block-explorer events can be normalized into
+  `hub.json` / `bifrost.json` capture inputs with
+  `npm run extract:native-xcm-event`
 - live PAPI reads intentionally fail until the correlation gate is proven
 
 Adapter responsibilities:
@@ -263,6 +275,8 @@ Native observer output is acceptable for automated settlement only after:
 The repo includes a sample evidence envelope:
 
 - [docs/fixtures/xcm/native-observer-evidence.sample.json](./fixtures/xcm/native-observer-evidence.sample.json)
+- [docs/fixtures/xcm/native-observer-evidence-withdraw.sample.json](./fixtures/xcm/native-observer-evidence-withdraw.sample.json)
+- [docs/fixtures/xcm/native-observer-evidence-failure.sample.json](./fixtures/xcm/native-observer-evidence-failure.sample.json)
 - [docs/fixtures/xcm/native-hub-event.sample.json](./fixtures/xcm/native-hub-event.sample.json)
 - [docs/fixtures/xcm/native-bifrost-event.sample.json](./fixtures/xcm/native-bifrost-event.sample.json)
 
@@ -276,12 +290,30 @@ npm run capture:native-xcm-evidence -- \
   --status succeeded \
   --settled-assets 5000000000000 \
   --settled-shares 4900000000000 \
-  --method remote_ref \
-  --confidence staging \
+  --method request_id_in_message \
+  --confidence production_candidate \
+  --hub-topic 0x1111111111111111111111111111111111111111111111111111111111111111 \
+  --bifrost-topic 0x1111111111111111111111111111111111111111111111111111111111111111 \
   --hub-json docs/fixtures/xcm/native-hub-event.sample.json \
   --bifrost-json docs/fixtures/xcm/native-bifrost-event.sample.json \
   --output artifacts/xcm/native-observer-evidence.json
 ```
+
+If the replay output is raw decoded event JSON, normalize each side first:
+
+```bash
+npm run extract:native-xcm-event -- \
+  --chain hub \
+  --events-json artifacts/xcm/hub-events.json \
+  --request-id 0x1111111111111111111111111111111111111111111111111111111111111111 \
+  --output artifacts/xcm/hub.json
+```
+
+The extractor only promotes an explicit `messageTopic`, `topic`, `setTopic`, or
+`message_id`/`messageId` field to SetTopic evidence. It deliberately does not
+infer `messageTopic` just because the request id appears somewhere else in the
+decoded event body. Use `--allow-missing-topic` only when investigating the
+`remote_ref` fallback path; do not use it for SetTopic preservation proof.
 
 Validate a captured envelope with:
 
@@ -298,11 +330,50 @@ The validator checks:
 - settled asset/share amounts
 - Hub and Bifrost evidence blocks
 - correlation method and confidence level
+- for `request_id_in_message`, Hub `messageTopic` must equal `requestId`; for
+  `production_candidate`/`production`, Bifrost `messageTopic` must also equal
+  `requestId`
+- for `remote_ref`, a `remoteRef` is required
+- for `ledger_join`, confidence must remain `staging`
 - consistency between top-level outcome and decision payload
 
 This is intentionally stricter than the public `/xcm/outcomes` item. The
 compact feed is for automated settlement; the evidence envelope is for
 debugging, audit, and proving the native observer is not guessing.
+
+### Evidence pack gate
+
+Before the native observer can become settlement truth, collect three separate
+captures:
+
+1. successful vDOT deposit
+2. successful vDOT withdrawal
+3. one failed request with a stable `failureCode`
+
+Validate the whole pack:
+
+```bash
+npm run check:native-xcm-evidence-pack -- \
+  --deposit artifacts/xcm/native-deposit-evidence.json \
+  --withdraw artifacts/xcm/native-withdraw-evidence.json \
+  --failure artifacts/xcm/native-failure-evidence.json \
+  --decision-output artifacts/xcm/native-evidence-decision.md
+```
+
+The pack checker runs the single-envelope validator for each file, then applies
+the launch gate across all three captures:
+
+- deposit must be `direction=deposit` and `status=succeeded`
+- withdraw must be `direction=withdraw` and `status=succeeded`
+- failure must be `status=failed` and include a `failureCode`
+- every capture must be `production_candidate` or `production`
+- all captures must use the same production correlation method
+- `ledger_join` is rejected because it is staging-only
+
+If all three use `request_id_in_message`, the pack supports the SetTopic
+preservation path. If they all use `remote_ref`, the pack supports the fallback
+path and the fallback must be documented here before live reads are enabled.
+The optional `--decision-output` file is the review artifact for that decision.
 
 ---
 
@@ -324,14 +395,13 @@ debugging, audit, and proving the native observer is not guessing.
 
 ## Recommended next implementation slice
 
-1. Add a disabled `native_papi` source-type skeleton that fails clearly
-   unless required env vars are present.
-2. Capture one real staging evidence envelope with Chopsticks/PAPI using
-   `npm run capture:native-xcm-evidence`, then make it pass
-   `npm run validate:native-xcm-evidence`.
-3. Add tests for cursor encoding and evidence-to-`PublishedOutcome`
-   normalization.
-4. Only then wire live PAPI reads.
+1. Follow
+   [NATIVE_XCM_EVIDENCE_CAPTURE_RUNBOOK.md](./NATIVE_XCM_EVIDENCE_CAPTURE_RUNBOOK.md)
+   to capture one real staging evidence pack with Chopsticks/PAPI.
+2. If Bifrost does not preserve SetTopic on the reply leg, document the chosen
+   fallback (`remote_ref`, serialized dispatch, or amount perturbation) before
+   implementing live reads.
+3. Only then wire live PAPI reads.
 
 This keeps the next change reviewable and avoids turning the observer into
 an untestable network script.
