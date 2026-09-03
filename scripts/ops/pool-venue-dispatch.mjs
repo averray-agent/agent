@@ -1420,16 +1420,35 @@ export async function main(argv = process.argv.slice(2)) {
       let prepared = null;
       if (isResume) {
         // The stage is already on-chain; the stateful stage+dispatch preview
-        // cannot re-run (staging would revert). The unwind par quote against
-        // the STAGED share count remains a live preflight; each leg's JIT
-        // dry-run still runs inside the dispatcher before its signature.
-        const quote = await captureParQuote(args.hydrationWs, BigInt(resumeRecord.context.shares), {
-          assetIn: 1003,
-          assetOut: 22,
-          quoteAccount: convertedAccountId32,
-          quoteAccountBalance: state.farSide.aUsdc.raw,
-        });
-        prepared = { phase: "resume", capturedAt: new Date().toISOString(), quote };
+        // cannot re-run (staging would revert). A completed sell consumed its
+        // aUSDC, so prove that request-bound execution instead of re-quoting
+        // the spent position. Pending sells still require the full par quote;
+        // each pending leg also retains its JIT dry-run before signature.
+        let quote = null;
+        let executedUnwindSwap = null;
+        if (resumeState.sellDone) {
+          const hydrationApi = await balanceReader.getSubstrateApi(args.hydrationWs);
+          const head = (await hydrationApi.rpc.chain.getHeader()).number.toNumber();
+          executedUnwindSwap = {
+            resumedHistoricalLeg: true,
+            ...await waitForAaveSwap(hydrationApi, {
+              requestId: stagedLaneRequestId,
+              fromBlock: Math.max(1, head - 1200),
+              expectedInput: BigInt(resumeRecord.context.shares),
+              assetIn: 1003,
+              assetOut: 22,
+              attempts: 1,
+            }),
+          };
+        } else {
+          quote = await captureParQuote(args.hydrationWs, BigInt(resumeRecord.context.shares), {
+            assetIn: 1003,
+            assetOut: 22,
+            quoteAccount: convertedAccountId32,
+            quoteAccountBalance: state.farSide.aUsdc.raw,
+          });
+        }
+        prepared = { phase: "resume", capturedAt: new Date().toISOString(), quote, executedUnwindSwap };
       } else {
         prepared = await buildRecallPlan(state, "dry-run");
       }
@@ -1452,6 +1471,7 @@ export async function main(argv = process.argv.slice(2)) {
           decoded: prepared.stageDecoded,
         },
         freshParUnwindQuote: prepared.quote,
+        ...(prepared.executedUnwindSwap ? { executedUnwindSwap: prepared.executedUnwindSwap } : {}),
         ...(isResume ? {} : { stagedWithdrawDryRun: prepared.dryRun }),
         guards: {
           dedicatedLaneOnly: true,
@@ -1460,7 +1480,7 @@ export async function main(argv = process.argv.slice(2)) {
           wrapperRequestUnknown: !isResume,
           resumedFromStagedRequest: isResume,
           exactMinimumOutput: true,
-          freshExactAmountAaveParUnwindQuote: true,
+          freshExactAmountAaveParUnwindQuote: !resumeState?.sellDone,
           statefulTwoChainDryRun: !isResume,
           commitTimeShareRecomputeRequired: !isResume,
         },
