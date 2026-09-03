@@ -74,6 +74,11 @@ const {
 });
 
 export const MIN_DISPATCH_MARGIN_SECONDS = 6 * 60 * 60;
+// Historical read budgets, not dispatch/economic policy. Cover multi-day
+// recalls without allowing a bad createdAt or a stalled RPC to scan forever.
+export const MAX_RECALL_HISTORY_BLOCKS = 1_000_000;
+export const RECALL_HISTORY_TIMEOUT_MS = 180_000;
+const RECALL_HISTORY_MARGIN_SECONDS = 5 * 60;
 // Measured 2026-08-21 12:24–13:20Z: Hydration quoted 28,588–28,645 raw for
 // withdraw_sell. 80,000 gives future recall stagings more than 2× headroom
 // over that structural fee level while remaining a hard chain-side ceiling.
@@ -584,14 +589,81 @@ function extractAaveUnwindQuote(human, expectedInput) {
   };
 }
 
-export async function waitForAaveSwap(api, { requestId, fromBlock, expectedInput, assetIn = 22, assetOut = 1003, attempts = 30 }) {
+async function readBeforeDeadline(operation, deadlineMs) {
+  if (deadlineMs === undefined) return operation();
+  const remaining = deadlineMs - Date.now();
+  const timeoutError = () => new Error("Historical recall scan exceeded its read budget; refusing to dispatch.");
+  if (remaining <= 0) throw timeoutError();
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(timeoutError()), remaining); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function recoverHistoricalRecallSwap(api, { requestId, createdAt, expectedInput }) {
+  // Wrapper createdAt is seconds; Hydration timestamp.now is milliseconds.
+  const createdAtMs = positiveBigInt(createdAt, "Staged recall createdAt") * 1_000n;
+  const marginMs = BigInt(RECALL_HISTORY_MARGIN_SECONDS) * 1_000n;
+  const deadlineMs = Date.now() + RECALL_HISTORY_TIMEOUT_MS;
+  const read = (operation) => readBeforeDeadline(operation, deadlineMs);
+  const header = await read(() => api.rpc.chain.getHeader());
+  const head = header.number.toNumber();
+  if (!Number.isSafeInteger(head) || head < 1) throw new Error("Historical recall scan requires a valid Hydration head.");
+  const timestamps = new Map();
+  const timestampAt = async (block) => {
+    if (!timestamps.has(block)) {
+      if (timestamps.size >= 64) throw new Error("Historical recall timestamp search exceeded 64 reads.");
+      const hash = (await read(() => api.rpc.chain.getBlockHash(block))).toHex();
+      const at = await read(() => api.at(hash));
+      timestamps.set(block, positiveBigInt(await read(() => at.query.timestamp.now()), "Hydration block timestamp"));
+    }
+    return timestamps.get(block);
+  };
+  const headMs = await timestampAt(head);
+  if (createdAtMs > headMs + marginMs) throw new Error("Staged recall createdAt is ahead of Hydration beyond the safety margin.");
+
+  // Pad before staging for cross-chain timestamp skew; include ALL available
+  // history after staging (not just a short window around it) for delayed XCM
+  // execution. The captured head clamps the far side of that safety margin:
+  // this single historical pass never chases newly arriving blocks.
+  const startMs = createdAtMs > marginMs ? createdAtMs - marginMs : 0n;
+  let low = 1;
+  let high = head;
+  while (low < high) {
+    const mid = low + Math.floor((high - low) / 2);
+    if (await timestampAt(mid) < startMs) low = mid + 1;
+    else high = mid;
+  }
+  // Include the preceding block when the timestamp falls between blocks.
+  const fromBlock = Math.max(1, low - 1);
+  if (head - fromBlock + 1 > MAX_RECALL_HISTORY_BLOCKS) {
+    throw new Error(`Historical recall scan exceeds ${MAX_RECALL_HISTORY_BLOCKS} blocks from staged createdAt; refusing to dispatch.`);
+  }
+  const swap = await waitForAaveSwap(api, {
+    requestId, fromBlock, toBlock: head, expectedInput,
+    assetIn: 1003, assetOut: 22, attempts: 1, deadlineMs,
+  });
+  return {
+    ...swap,
+    scan: { source: "wrapper.createdAt", createdAt, safetyMarginSeconds: RECALL_HISTORY_MARGIN_SECONDS,
+      fromBlock, toBlock: head, maxBlocks: MAX_RECALL_HISTORY_BLOCKS, timeoutMs: RECALL_HISTORY_TIMEOUT_MS },
+  };
+}
+
+export async function waitForAaveSwap(api, { requestId, fromBlock, toBlock, expectedInput, assetIn = 22, assetOut = 1003, attempts = 30, deadlineMs }) {
+  const read = (operation) => readBeforeDeadline(operation, deadlineMs);
   let nextBlock = Number(fromBlock);
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const head = (await api.rpc.chain.getHeader()).number.toNumber();
+    const head = toBlock ?? (await read(() => api.rpc.chain.getHeader())).number.toNumber();
     for (; nextBlock <= head; nextBlock += 1) {
-      const blockHash = (await api.rpc.chain.getBlockHash(nextBlock)).toHex();
-      const at = await api.at(blockHash);
-      const records = (await at.query.system.events()).toHuman();
+      const blockHash = (await read(() => api.rpc.chain.getBlockHash(nextBlock))).toHex();
+      const at = await read(() => api.at(blockHash));
+      const records = (await read(() => at.query.system.events())).toHuman();
       for (const record of records) {
         const event = record?.event;
         if (String(event?.section).toLowerCase() !== "broadcast" || !/^Swapped/u.test(String(event?.method))) continue;
@@ -614,7 +686,7 @@ export async function waitForAaveSwap(api, { requestId, fromBlock, expectedInput
         if (event.data?.fillerType !== "AAVE" || !inputAcceptable || outputRaw <= 0n) {
           throw new Error(`Request-bound Broadcast.Swapped did not match AAVE ${assetIn}→${assetOut} filler-par accrual-bounded semantics.`);
         }
-        const timestamp = await at.query.timestamp.now();
+        const timestamp = await read(() => at.query.timestamp.now());
         return {
           liveState: true,
           blockNumber: nextBlock,
@@ -630,6 +702,7 @@ export async function waitForAaveSwap(api, { requestId, fromBlock, expectedInput
         };
       }
     }
+    if (toBlock !== undefined) break;
     await new Promise((done) => setTimeout(done, 6_000));
   }
   throw new Error(`Timed out without request-bound Broadcast.Swapped evidence for ${requestId}.`);
@@ -1428,16 +1501,12 @@ export async function main(argv = process.argv.slice(2)) {
         let executedUnwindSwap = null;
         if (resumeState.sellDone) {
           const hydrationApi = await balanceReader.getSubstrateApi(args.hydrationWs);
-          const head = (await hydrationApi.rpc.chain.getHeader()).number.toNumber();
           executedUnwindSwap = {
             resumedHistoricalLeg: true,
-            ...await waitForAaveSwap(hydrationApi, {
+            ...await recoverHistoricalRecallSwap(hydrationApi, {
               requestId: stagedLaneRequestId,
-              fromBlock: Math.max(1, head - 1200),
+              createdAt: resumeRecord.createdAt,
               expectedInput: BigInt(resumeRecord.context.shares),
-              assetIn: 1003,
-              assetOut: 22,
-              attempts: 1,
             }),
           };
         } else {
@@ -1559,14 +1628,10 @@ export async function main(argv = process.argv.slice(2)) {
           // chain history: locate the request-bound swap, then read the float
           // at the swap block's parent as the pre-sell baseline. Every number
           // stays chain-derived; nothing is trusted from memory.
-          const head = (await hydrationApi.rpc.chain.getHeader()).number.toNumber();
-          swap = await waitForAaveSwap(hydrationApi, {
+          swap = await recoverHistoricalRecallSwap(hydrationApi, {
             requestId: liveLaneRequestId,
-            fromBlock: Math.max(1, head - 1200),
+            createdAt: stagedWrapperRecord.createdAt,
             expectedInput: stagedShares,
-            assetIn: 1003,
-            assetOut: 22,
-            attempts: 1,
           });
           sell = { evidence: { resumedHistoricalLeg: true, hydrationBlockNumber: swap.blockNumber } };
           const preSellHash = await hydrationApi.rpc.chain.getBlockHash(swap.blockNumber - 1);

@@ -22,24 +22,37 @@ function sourceBetween(text, start, end) {
   return text.slice(offset, finish);
 }
 
-function fixture({ bitmap = 4n, balance = 15_351n, commit = true, fresh = false, script = source } = {}) {
-  const calls = { quotes: [], dispatch: [], history: 0 };
+function fixture({
+  bitmap = 4n, balance = 15_351n, commit = true, fresh = false, script = source,
+  head = 2, stagedBlock = 1, swapBlock = 1, createdAt,
+  floatBalance = 5_975_118n, advancingHead = false,
+} = {}) {
+  const calls = { quotes: [], dispatch: [], history: 0, heads: 0, eventBlocks: [], timestampBlocks: [] };
+  const timestamp = (block) => 1_999_000_000_000n + BigInt(block) * 2_000n;
   const quote = { fillerType: "AAVE", assetIn: 1003, assetOut: 22, amountInRaw: SHARES, amountOutRaw: SHARES };
   const api = {
     rpc: { chain: {
-      getHeader: async () => ({ number: { toNumber: () => 2 }, hash: { toHex: () => LANE_REQUEST } }),
-      getBlockHash: async (number) => ({ toHex: () => `block-${number}` }),
+      getHeader: async () => {
+        const number = head + (advancingHead ? calls.heads : 0);
+        calls.heads += 1;
+        return { number: { toNumber: () => number }, hash: { toHex: () => `block-${number}` } };
+      },
+      getBlockHash: async (number) => ({ toHex: () => `block-${number}`, toString: () => `block-${number}` }),
     } },
     at: async (hash) => {
       calls.history += 1;
+      const block = Number(String(hash).replace("block-", ""));
       return { query: {
-        system: { events: async () => ({ toHuman: () => hash === "block-1" ? [{ event: {
+        system: { events: async () => {
+          calls.eventBlocks.push(block);
+          return { toHuman: () => block === swapBlock ? [{ event: {
           section: "broadcast", method: "Swapped3",
           data: { fillerType: "AAVE", operationStack: [{ Xcm: [LANE_REQUEST] }],
             inputs: [{ asset: "1003", amount: SHARES.toString() }],
             outputs: [{ asset: "22", amount: SHARES.toString() }] },
-        } }] : [] }) },
-        timestamp: { now: async () => 1_000 },
+        } }] : [] };
+        } },
+        timestamp: { now: async () => { calls.timestampBlocks.push(block); return timestamp(block); } },
         tokens: { accounts: async () => ({ free: 1_546_105n }) },
       } };
     },
@@ -59,7 +72,10 @@ function fixture({ bitmap = 4n, balance = 15_351n, commit = true, fresh = false,
   )({ create: async () => api }, class {}, () => quote, driver.assertParAaveUnwindQuote);
 
   const request = { kind: 1, status: 1, requestedAssets: SHARES, settledAssets: 0n, returnBy: 2_000_000_000n, claimed: false };
-  const record = { context: { strategyId: STRATEGY, kind: 1, account: VENUE, shares: SHARES }, queuedBy: LANE, status: 1 };
+  const record = {
+    context: { strategyId: STRATEGY, kind: 1, account: VENUE, shares: SHARES }, queuedBy: LANE, status: 1,
+    createdAt: createdAt ?? timestamp(stagedBlock) / 1_000n,
+  };
   const state = {
     block: { timestamp: 1_999_900_000 },
     pool: { activeVenueRecallId: 6n, recall: { status: 1, requestedAssets: SHARES, adapterRequestId: REQUEST } },
@@ -67,11 +83,11 @@ function fixture({ bitmap = 4n, balance = 15_351n, commit = true, fresh = false,
       postage: { raw: 1_000_000_000n, asOf: "fixture" } },
     wrapper: { dispatchPaused: false },
     lane: { totalAssets: SHARES, totalShares: SHARES },
-    farSide: { aUsdc: { raw: balance }, floatAsset22: { raw: 5_975_118n } },
+    farSide: { aUsdc: { raw: balance }, floatAsset22: { raw: floatBalance } },
   };
   const balanceReader = {
     getSubstrateApi: async () => api,
-    read: async (target) => ({ raw: target === "float" ? 5_975_118n : 15_351n }),
+    read: async (target) => ({ raw: target === "float" ? floatBalance : 15_351n }),
     close: async () => {},
   };
   const bindings = {
@@ -99,7 +115,7 @@ function fixture({ bitmap = 4n, balance = 15_351n, commit = true, fresh = false,
   const recallSource = sourceBetween(script, '    if (args.command === "stage-recall") {', "\n    const margin = assertDispatchMargin(");
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   const run = () => new AsyncFunction(...Object.keys(bindings), recallSource)(...Object.values(bindings));
-  return { run, calls };
+  return { run, calls, api, record, timestamp };
 }
 
 test("bitmap 4 recall with near-zero asset-1003 reaches only withdraw_home dispatch", async () => {
@@ -148,4 +164,75 @@ test("sell-done recall evidence records the request-bound executed swap instead 
   assert.equal(plan.executedUnwindSwap.assetIn, 1003);
   assert.equal(plan.executedUnwindSwap.assetOut, 22);
   assert.equal(plan.executedUnwindSwap.amountOutRaw, SHARES);
+});
+
+test("sell-done resume derives both history scans from staging and finds a swap 80000 blocks behind head", async () => {
+  const { run, calls } = fixture({ head: 100_000, stagedBlock: 19_995, swapBlock: 20_000 });
+  await assert.rejects(run(), (error) => error === DISPATCH_REACHED);
+  assert.deepEqual(calls.dispatch, [{ requestId: LANE_REQUEST, leg: "withdraw_home" }]);
+  assert.equal(calls.eventBlocks.filter((block) => block === 20_000).length, 2, "preflight and commit both recover the old swap");
+  assert.equal(calls.quotes.length, 0);
+});
+
+test("historical recall scan includes safety margin before staging and delayed execution after staging", async () => {
+  for (const swapBlock of [490, 900]) {
+    const plan = await fixture({ head: 1_000, stagedBlock: 500, swapBlock, commit: false }).run();
+    assert.equal(plan.executedUnwindSwap.blockNumber, swapBlock);
+    assert.equal(plan.executedUnwindSwap.scan.source, "wrapper.createdAt");
+    assert.ok(plan.executedUnwindSwap.scan.fromBlock < 490);
+    assert.equal(plan.executedUnwindSwap.scan.toBlock, 1_000);
+  }
+});
+
+test("sell-done resume with no executed swap stops at the captured head after one bounded scan", async () => {
+  const { run, calls } = fixture({ head: 700, stagedBlock: 500, swapBlock: null, advancingHead: true });
+  await assert.rejects(run(), /without request-bound Broadcast.Swapped evidence/u);
+  assert.equal(calls.heads, 1, "history must not chase an advancing head");
+  assert.equal(calls.eventBlocks.at(-1), 700);
+  assert.equal(new Set(calls.eventBlocks).size, calls.eventBlocks.length, "attempts stays one");
+  assert.deepEqual(calls.dispatch, []);
+});
+
+test("bad staged timestamps fail closed before an unbounded historical event scan", async () => {
+  for (const createdAt of [0n, -1n, "not-a-timestamp", 1_999_999_999_999n]) {
+    const { run, calls } = fixture({ createdAt });
+    await assert.rejects(run(), /createdAt/u);
+    assert.deepEqual(calls.eventBlocks, []);
+    assert.deepEqual(calls.dispatch, []);
+  }
+  const { run, calls } = fixture({ head: 2_000_000, stagedBlock: 1 });
+  await assert.rejects(run(), /Historical recall scan exceeds/u);
+  assert.ok(calls.timestampBlocks.length <= 64, "timestamp search has a hard read bound");
+  assert.deepEqual(calls.eventBlocks, []);
+});
+
+test("historical recall reconstruction still refuses float movement outside the fee ceiling", async () => {
+  const { run, calls } = fixture({ floatBalance: 6_100_000n });
+  await assert.rejects(run(), /Historical sell reconstruction does not reconcile/u);
+  assert.deepEqual(calls.dispatch, []);
+});
+
+test("historical recall read budget refuses a stalled RPC without continuing the scan", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  const { api, record, calls } = fixture();
+  api.rpc.chain.getHeader = () => new Promise(() => {});
+  const result = assert.rejects(driver.recoverHistoricalRecallSwap(api, {
+    requestId: LANE_REQUEST, createdAt: record.createdAt, expectedInput: SHARES,
+  }), /Historical recall scan exceeded its read budget/u);
+  t.mock.timers.tick(driver.RECALL_HISTORY_TIMEOUT_MS);
+  await result;
+  assert.deepEqual(calls.eventBlocks, []);
+});
+
+test("history lookup fails closed when the staged timestamp cannot be read on Hydration", async () => {
+  const { api, record, calls } = fixture({ head: 100_000, stagedBlock: 19_995, swapBlock: 20_000 });
+  const at = api.at;
+  api.at = async (hash) => {
+    if (hash !== "block-100000") throw new Error("historical state unavailable");
+    return at(hash);
+  };
+  await assert.rejects(driver.recoverHistoricalRecallSwap(api, {
+    requestId: LANE_REQUEST, createdAt: record.createdAt, expectedInput: SHARES,
+  }), /historical state unavailable/u);
+  assert.deepEqual(calls.eventBlocks, []);
 });
