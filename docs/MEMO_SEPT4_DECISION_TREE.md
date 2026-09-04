@@ -1,6 +1,6 @@
 # MEMO — What we do on 4 September, decided in advance
 
-Status: **DECISION AID — thresholds fixed before the data arrives** ·
+Status: **ANSWERED 2026-09-03 — measured round trip 0.051490; see MEMO_VENUE_ROUND_TRIP_MEASURED.md. Outcome: neither row exactly; 30d/90d viable today, 7d short ~9.3 USDC, fork stays open.** ·
 Author: Claude (architect) · 2026-08-30.
 Purpose: make the recall a **decision**, not a week of deliberation. Written
 now, deliberately, so the thresholds cannot be rationalised to fit whatever
