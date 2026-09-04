@@ -40,6 +40,7 @@ COPY scripts/ops/ceremony-rpc.mjs ./scripts/ops/ceremony-rpc.mjs
 COPY scripts/ops/pool-venue-ceremony.mjs ./scripts/ops/pool-venue-ceremony.mjs
 COPY scripts/ops/capture-bank-xcm-v22-staging-quote.mjs ./scripts/ops/capture-bank-xcm-v22-staging-quote.mjs
 COPY scripts/ops/pool-venue-dispatch.mjs ./scripts/ops/pool-venue-dispatch.mjs
+COPY scripts/ops/deploy-venue-pair.mjs ./scripts/ops/deploy-venue-pair.mjs
 
 # Runtime data read from /deployments by code under ./src.
 #
