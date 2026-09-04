@@ -50,7 +50,7 @@ export const VENUE_PAIR_BINDINGS = Object.freeze({
   legacyPool: "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30",
 });
 
-const CONTRACT_ARTIFACTS = Object.freeze({
+export const CONTRACT_ARTIFACTS = Object.freeze({
   lane: ["HydrationUsdcAdapterV22.sol", "HydrationUsdcAdapterV22"],
   adapter: ["HydrationDepositPoolAdapter.sol", "HydrationDepositPoolAdapter"],
 });
@@ -206,7 +206,13 @@ export async function readArtifact(artifactsRoot, [sourceName, contractName]) {
   return artifact;
 }
 
-export async function buildVenuePairPlan({ deployer, nonce, artifacts, strategyName = VENUE_PAIR_STRATEGY_NAME }) {
+export async function buildVenuePairPlan({
+  deployer,
+  nonce,
+  artifacts,
+  strategyName = VENUE_PAIR_STRATEGY_NAME,
+  sourceCommit = process.env.DEPLOYED_SHA ?? "unknown",
+}) {
   const signer = checkedAddress("deployer", deployer);
   if (!Number.isSafeInteger(nonce) || nonce < 0) throw new Error("Pending deployer nonce must be a non-negative safe integer.");
   const pool = assertV21Pool(VENUE_PAIR_BINDINGS.pool);
@@ -221,13 +227,15 @@ export async function buildVenuePairPlan({ deployer, nonce, artifacts, strategyN
     agentAccountCore: adapterAddress,
   };
   const adapterArgs = { pool, lane: laneAddress };
+  const laneBytecode = artifactBytecode(artifacts.lane, "HydrationUsdcAdapterV22");
+  const adapterBytecode = artifactBytecode(artifacts.adapter, "HydrationDepositPoolAdapter");
   const laneFactory = new ContractFactory(
     artifacts.lane.abi,
-    artifactBytecode(artifacts.lane, "HydrationUsdcAdapterV22"),
+    laneBytecode,
   );
   const adapterFactory = new ContractFactory(
     artifacts.adapter.abi,
-    artifactBytecode(artifacts.adapter, "HydrationDepositPoolAdapter"),
+    adapterBytecode,
   );
   const laneTransaction = await laneFactory.getDeployTransaction(...Object.values(laneArgs));
   const adapterTransaction = await adapterFactory.getDeployTransaction(...Object.values(adapterArgs));
@@ -238,6 +246,19 @@ export async function buildVenuePairPlan({ deployer, nonce, artifacts, strategyN
     deployer: signer,
     startNonce: nonce,
     strategy,
+    artifactProvenance: {
+      sourceCommit: String(sourceCommit),
+      lane: {
+        path: `out/${CONTRACT_ARTIFACTS.lane[0]}/${CONTRACT_ARTIFACTS.lane[1]}.json`,
+        creationBytecodeHash: keccak256(laneBytecode),
+        creationBytecodeBytes: (laneBytecode.length - 2) / 2,
+      },
+      adapter: {
+        path: `out/${CONTRACT_ARTIFACTS.adapter[0]}/${CONTRACT_ARTIFACTS.adapter[1]}.json`,
+        creationBytecodeHash: keccak256(adapterBytecode),
+        creationBytecodeBytes: (adapterBytecode.length - 2) / 2,
+      },
+    },
     lane: {
       contract: "HydrationUsdcAdapterV22",
       nonce,
@@ -288,6 +309,13 @@ export function assertSelfCheckingCycle(plan) {
   return true;
 }
 
+export function assertArtifactSourceCommit(sourceCommit) {
+  if (!/^[0-9a-f]{40}$/iu.test(String(sourceCommit))) {
+    throw new Error("Commit mode requires a full 40-hex DEPLOYED_SHA for artifact attribution.");
+  }
+  return String(sourceCommit).toLowerCase();
+}
+
 export function publicPlan(plan) {
   return {
     schemaVersion: plan.schemaVersion,
@@ -296,6 +324,7 @@ export function publicPlan(plan) {
     deployer: plan.deployer,
     startNonce: plan.startNonce,
     strategy: plan.strategy,
+    artifactProvenance: plan.artifactProvenance,
     lane: {
       contract: plan.lane.contract,
       nonce: plan.lane.nonce,
@@ -488,6 +517,7 @@ export async function runVenuePair({
     log("DRY RUN ONLY — no signature requested and no transaction broadcast.");
     return { plan, evidence: null };
   }
+  assertArtifactSourceCommit(plan.artifactProvenance.sourceCommit);
   const evidence = await executeVenuePairDeployment({
     provider: rpcContext.provider,
     signer: identity.signer,
