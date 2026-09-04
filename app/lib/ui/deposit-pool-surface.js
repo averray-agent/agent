@@ -6,6 +6,27 @@ function text(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function evmAddress(value) {
+  const candidate = text(value);
+  return candidate && /^0x[a-fA-F0-9]{40}$/u.test(candidate) ? candidate : null;
+}
+
+function sameAddress(left, right) {
+  const normalizedLeft = evmAddress(left)?.toLowerCase();
+  const normalizedRight = evmAddress(right)?.toLowerCase();
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+}
+
+function poolIdentity(payload, manifest) {
+  const address = evmAddress(payload?.pool);
+  const generation = sameAddress(address, manifest?.depositPoolV21)
+    ? "Live v2.1"
+    : sameAddress(address, manifest?.legacyDepositPoolV2)
+      ? "Legacy v2"
+      : null;
+  return { generation, address };
+}
+
 function amount(value) {
   const candidate = record(value);
   const raw = text(candidate?.raw);
@@ -41,11 +62,12 @@ function count(value) {
 /**
  * Presentation-only projection of GET /pool.
  *
- * All descriptive sentences remain API-owned. This function supplies labels
- * and exact raw-unit formatting, but never substitutes client-side economics,
- * risk copy, venue claims, or transition claims.
+ * All descriptive sentences remain API-owned. Generation labels are selected
+ * only by matching the served address to the deployment manifest. This
+ * function supplies labels and exact raw-unit formatting, but never substitutes
+ * client-side economics, risk copy, venue claims, or transition claims.
  */
-export function buildDepositPoolSurface(input) {
+export function buildDepositPoolSurface(input, poolGenerationManifest = {}) {
   const payload = record(input);
   if (!payload || payload.available !== true) {
     return {
@@ -53,6 +75,7 @@ export function buildDepositPoolSurface(input) {
       reason: text(payload?.reason),
       disclosure: null,
       transition: null,
+      identity: { generation: null, address: null },
       facts: [],
       yield: null,
       venue: null,
@@ -72,6 +95,7 @@ export function buildDepositPoolSurface(input) {
     available: true,
     disclosure,
     transition: transitionStatement(payload),
+    identity: poolIdentity(payload, poolGenerationManifest),
     facts: [
       { label: "Total assets", value: amountWithUnit(payload.totalAssets) },
       { label: "Pool buffer", value: amountWithUnit(payload.bufferAssets) },

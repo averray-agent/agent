@@ -1,15 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, Landmark, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Check, Copy, Landmark, RefreshCw } from "lucide-react";
+import { useState } from "react";
 import { useDepositPool } from "@/lib/api/hooks";
 import { buildDepositPoolSurface } from "@/lib/ui/deposit-pool-surface.js";
 
 type SurfaceFact = { label: string; value: string | null };
+type PoolGenerationManifest = {
+  depositPoolV21: string;
+  legacyDepositPoolV2: string;
+};
 
-export function DepositPoolSurface() {
+export function DepositPoolSurface({
+  poolGenerationManifest
+}: {
+  poolGenerationManifest: PoolGenerationManifest;
+}) {
   const request = useDepositPool();
-  const surface = buildDepositPoolSurface(request.data);
+  const surface = buildDepositPoolSurface(request.data, poolGenerationManifest);
 
   return (
     <main className="min-h-screen bg-[var(--bg)] px-5 py-8 text-[var(--ink)] sm:px-8 sm:py-12">
@@ -29,9 +38,17 @@ export function DepositPoolSurface() {
               <p className="eyebrow">Depositor view</p>
               <h1 className="mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">Deposit pool</h1>
             </div>
-            {surface.transition ? (
-              <p className="m-0 text-sm leading-6 text-[var(--muted)]">{surface.transition}</p>
-            ) : null}
+            <div className="grid gap-3">
+              <PoolIdentity
+                generation={surface.identity.generation}
+                address={surface.identity.address}
+                yieldStatus={surface.yield?.status}
+                venueStatus={surface.venue?.status}
+              />
+              {surface.transition ? (
+                <p className="m-0 text-sm leading-6 text-[var(--muted)]">{surface.transition}</p>
+              ) : null}
+            </div>
           </div>
 
           <div className="border-t border-[var(--line)] bg-[#fff3e7] p-6 sm:p-8" data-testid="pool-risk-disclosure">
@@ -96,6 +113,69 @@ export function DepositPoolSurface() {
         )}
       </div>
     </main>
+  );
+}
+
+function PoolIdentity({
+  generation,
+  address,
+  yieldStatus,
+  venueStatus
+}: {
+  generation: string | null;
+  address: string | null;
+  yieldStatus?: string | null;
+  venueStatus?: string | null;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function copyAddress() {
+    if (!address) return;
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // The complete address remains visible and selectable if clipboard access fails.
+    }
+  }
+
+  return (
+    <aside className="rounded-[var(--radius)] border border-[var(--line)] bg-[var(--paper-solid)] p-4" aria-label="Pool identity" data-testid="pool-identity">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="eyebrow">Pool generation</p>
+        <span className="rounded-full border border-[var(--line)] px-2.5 py-1 text-xs font-semibold text-[var(--ink)]" data-testid="pool-generation">
+          {generation ?? "unavailable"}
+        </span>
+      </div>
+      <div className="mt-3">
+        <p className="text-xs text-[var(--muted)]">Pool address</p>
+        <code className="mt-1 block break-all text-xs leading-5 text-[var(--ink)]" data-testid="pool-address">
+          {address ?? "unavailable"}
+        </code>
+        {address ? (
+          <button
+            className="mt-2 inline-flex items-center gap-1.5 rounded-[6px] border border-[var(--line)] px-2.5 py-1.5 text-xs font-semibold text-[var(--muted)] hover:text-[var(--accent)]"
+            type="button"
+            onClick={() => void copyAddress()}
+            aria-label="Copy pool address"
+          >
+            {copied ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+            {copied ? "Copied" : "Copy address"}
+          </button>
+        ) : null}
+      </div>
+      <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-[var(--line)] pt-3 text-xs">
+        <div>
+          <dt className="text-[var(--muted)]">Yield status</dt>
+          <dd className="mt-1 break-words font-mono text-[var(--ink)]">{yieldStatus ?? "unavailable"}</dd>
+        </div>
+        <div>
+          <dt className="text-[var(--muted)]">Venue mark</dt>
+          <dd className="mt-1 break-words font-mono text-[var(--ink)]">{venueStatus ?? "unavailable"}</dd>
+        </div>
+      </dl>
+    </aside>
   );
 }
 
