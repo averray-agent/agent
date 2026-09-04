@@ -43,6 +43,18 @@ const deployScript = path.join(repoRoot, "scripts", "ops", "deploy-production.sh
 // there does not silently widen what the image is required to carry.
 const PROFILES = ["mainnet", "testnet"];
 
+// This is the operator-supported docker-exec surface, including the shared
+// helpers its entrypoints import. Adding an in-container ceremony script means
+// adding it here; this test then makes omitting its Dockerfile COPY impossible.
+const IN_CONTAINER_OPS_SCRIPTS = [
+  "scripts/ops/ceremony-module-loader.mjs",
+  "scripts/ops/ceremony-rpc.mjs",
+  "scripts/ops/pool-venue-ceremony.mjs",
+  "scripts/ops/capture-bank-xcm-v22-staging-quote.mjs",
+  "scripts/ops/pool-venue-dispatch.mjs",
+  "scripts/ops/deploy-venue-pair.mjs",
+];
+
 const LITERAL_MANIFEST = /deployments\/([A-Za-z0-9._-]+\.json)/gu;
 // e.g. resolve(repoRoot, "deployments", `${profile}.json`)
 const TEMPLATED_MANIFEST = /["']deployments["']\s*,\s*`\$\{[^}]+\}\.json`/u;
@@ -139,6 +151,24 @@ test("every Dockerfile-copied scripts ops file triggers a backend rebuild", () =
   for (const source of copiedOpsFiles) {
     assert.match(source, rebuildPattern, `${source} ships in the backend image and must rebuild it when changed`);
   }
+});
+
+test("every ops script intended for in-container execution is copied by the backend image", () => {
+  const dockerfileText = readFileSync(dockerfile, "utf8");
+  const copied = new Set(dockerfileCopySources(dockerfileText));
+  const missing = IN_CONTAINER_OPS_SCRIPTS.filter((source) => !copied.has(source));
+
+  for (const source of IN_CONTAINER_OPS_SCRIPTS) {
+    assert.ok(
+      statSync(path.join(repoRoot, source)).isFile(),
+      `registered in-container script does not exist: ${source}`,
+    );
+  }
+  assert.deepEqual(
+    missing,
+    [],
+    `mcp-server/Dockerfile omits operator-supported in-container script(s): ${missing.join(", ")}`,
+  );
 });
 
 test("inverse coverage mutation catches a newly COPYed path missing from a stale matcher", () => {
