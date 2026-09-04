@@ -47,6 +47,14 @@ contract HydrationDepositPoolAdapterTest is Test {
         asset.mint(pool, 20 * USDC);
     }
 
+    function testConstructorRejectsLaneBoundToWrongPredictedAdapter() public {
+        MockExclusiveHydrationLane mismatchedLane =
+            new MockExclusiveHydrationLane(policy, asset, address(0xBAD));
+
+        vmx.expectRevert(HydrationDepositPoolAdapter.InvalidConfiguration.selector);
+        new HydrationDepositPoolAdapter(address(depositPool), mismatchedLane);
+    }
+
     function testAsyncHydrationLifecycleKeepsPendingVisibleAndReturnsObservedYield() public {
         uint64 returnBy = uint64(block.timestamp + 7 days);
         vm.prank(pool);
