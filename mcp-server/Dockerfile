@@ -1,6 +1,28 @@
+ARG DEPLOYED_SHA=unknown
+
+# Build the two creation artifacts used by deploy-venue-pair.mjs from the same
+# repository snapshot as the backend image. The runtime stage below receives
+# only those JSON files; Foundry and the rest of out/ stay out of production.
+FROM ghcr.io/foundry-rs/foundry:v1.7.1@sha256:8347b728d5d393dac1c018691b36f506d23b9dcd78341d40ea0fcb11c3a19cdd AS venue-pair-artifacts
+
+USER root
+WORKDIR /build
+
+COPY foundry.toml ./foundry.toml
+COPY contracts ./contracts
+# foundry.toml's forge-std remapping is auto-discovered from this directory and
+# is embedded in Solidity metadata even though this pair does not import it.
+# Carrying it makes the image build byte-identical to a checkout build.
+COPY lib/forge-std ./lib/forge-std
+
+RUN forge build \
+  contracts/strategies/HydrationUsdcAdapterV22.sol \
+  contracts/strategies/HydrationDepositPoolAdapter.sol \
+  --skip test
+
 FROM node:22-bookworm-slim
 
-ARG DEPLOYED_SHA=unknown
+ARG DEPLOYED_SHA
 
 # ca-certificates: required by the IAM Roles Anywhere `aws_signing_helper`
 # binary (mounted at /usr/local/bin/aws_signing_helper by docker-compose
@@ -41,6 +63,12 @@ COPY scripts/ops/pool-venue-ceremony.mjs ./scripts/ops/pool-venue-ceremony.mjs
 COPY scripts/ops/capture-bank-xcm-v22-staging-quote.mjs ./scripts/ops/capture-bank-xcm-v22-staging-quote.mjs
 COPY scripts/ops/pool-venue-dispatch.mjs ./scripts/ops/pool-venue-dispatch.mjs
 COPY scripts/ops/deploy-venue-pair.mjs ./scripts/ops/deploy-venue-pair.mjs
+
+# These paths are derived from deploy-venue-pair.mjs CONTRACT_ARTIFACTS and
+# held in lockstep by venue-pair-artifacts-image.test.mjs. Do not copy all of
+# out/: Ceremony B's set-once binding must use this image's reproducible pair.
+COPY --from=venue-pair-artifacts /build/out/HydrationUsdcAdapterV22.sol/HydrationUsdcAdapterV22.json ./out/HydrationUsdcAdapterV22.sol/HydrationUsdcAdapterV22.json
+COPY --from=venue-pair-artifacts /build/out/HydrationDepositPoolAdapter.sol/HydrationDepositPoolAdapter.json ./out/HydrationDepositPoolAdapter.sol/HydrationDepositPoolAdapter.json
 
 # Runtime data read from /deployments by code under ./src.
 #

@@ -2012,6 +2012,9 @@ derive_backend_rebuild_pattern() {
         sub(/^[[:space:]]*COPY[[:space:]]+/, "", line)
         count = split(line, fields, /[[:space:]]+/)
         if (count < 2) exit 2
+        # Build-stage outputs are not repository inputs. Their own stage COPY
+        # instructions are parsed separately and remain rebuild triggers.
+        if (fields[1] ~ /^--from(=|$)/) next
         for (field_number = 1; field_number < count; field_number += 1) {
           if (!seen[fields[field_number]]++) print fields[field_number]
         }
