@@ -94,7 +94,6 @@ export const DEFAULT_FLOAT_HEADROOM_RAW = 50_000n;
 // refuses the below-ED/approval-deposit state that previously surfaced only as
 // ApprovalFailed(). This is liveness postage, never pool principal.
 export const MIN_VENUE_POSTAGE_PLANCK = 500_000_000n;
-const EXPECTED_STRATEGY_ID = "0x485944524154494f4e5f555344435f504f4f4c5f563100000000000000000000";
 const EXPECTED_AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const EXPECTED_HYDRATION_CHAIN_ID = 222_222;
 const ZERO32 = `0x${"00".repeat(32)}`;
@@ -133,6 +132,7 @@ const POOL_ABI = [
 ];
 
 const LANE_ABI = [
+  "function strategyId() view returns (bytes32)",
   "function asset() view returns (address)",
   "function agentAccountCore() view returns (address)",
   "function xcmWrapper() view returns (address)",
@@ -371,17 +371,17 @@ export function buildRecallStageCall({ requestId, parameters, requestedAssets })
   };
 }
 
-export function deriveLaneRequestId({ venueAddress, asset, assets, nonce }) {
+export function deriveLaneRequestId({ strategyId, venueAddress, asset, assets, nonce }) {
   return keccak256(AbiCoder.defaultAbiCoder().encode(
     ["bytes32", "uint8", "address", "address", "address", "uint256", "uint256", "uint64"],
-    [EXPECTED_STRATEGY_ID, 0, getAddress(venueAddress), getAddress(asset), getAddress(venueAddress), BigInt(assets), 0n, BigInt(nonce)],
+    [normalizeBytes32(strategyId, "lane strategyId"), 0, getAddress(venueAddress), getAddress(asset), getAddress(venueAddress), BigInt(assets), 0n, BigInt(nonce)],
   ));
 }
 
-export function deriveLaneRecallRequestId({ venueAddress, asset, shares, nonce }) {
+export function deriveLaneRecallRequestId({ strategyId, venueAddress, asset, shares, nonce }) {
   return keccak256(AbiCoder.defaultAbiCoder().encode(
     ["bytes32", "uint8", "address", "address", "address", "uint256", "uint256", "uint64"],
-    [EXPECTED_STRATEGY_ID, 1, getAddress(venueAddress), getAddress(asset), getAddress(venueAddress), 0n, BigInt(shares), BigInt(nonce)],
+    [normalizeBytes32(strategyId, "lane strategyId"), 1, getAddress(venueAddress), getAddress(asset), getAddress(venueAddress), 0n, BigInt(shares), BigInt(nonce)],
   ));
 }
 
@@ -805,6 +805,55 @@ async function findLaneRequestId(provider, venueAddress, requestId, fromBlock, t
   return normalizeBytes32(venueInterface.parseLog(logs[0]).args.laneRequestId, "LaneRequestStaged laneRequestId");
 }
 
+// Both committed EVM receipts and stage-only Substrate simulations use the
+// adapter's own event as identity evidence. A reverse mapping only checks it.
+export function readStagedLaneEvent(logs, { venueAddress, requestId }) {
+  const topic = venueInterface.getEvent("LaneRequestStaged").topicHash;
+  const matches = logs
+    .filter((log) => String(log.address).toLowerCase() === venueAddress.toLowerCase()
+      && String(log.topics?.[0]).toLowerCase() === topic.toLowerCase())
+    .map((log) => venueInterface.parseLog(log))
+    .filter((event) => String(event.args.requestId).toLowerCase() === requestId.toLowerCase());
+  if (matches.length !== 1) throw new Error(`Expected exactly one adapter LaneRequestStaged for ${requestId}; found ${matches.length}.`);
+  const laneRequestId = normalizeBytes32(matches[0].args.laneRequestId, "LaneRequestStaged laneRequestId");
+  if (laneRequestId === ZERO32) throw new Error("LaneRequestStaged emitted a zero lane requestId.");
+  return { laneRequestId, laneShares: BigInt(matches[0].args.laneShares) };
+}
+
+function dryRunContractLogs(result) {
+  const human = result.toHuman();
+  const events = result.isOk && result.asOk?.emittedEvents
+    ? result.asOk.emittedEvents
+    : human?.Ok?.emittedEvents ?? human?.ok?.emittedEvents ?? [];
+  const hex = (value) => value?.toHex?.() ?? String(value);
+  return [...events].filter((event) => String(event.section).toLowerCase() === "revive"
+    && String(event.method).toLowerCase() === "contractemitted").map((event) => {
+    const data = event.data;
+    return {
+      address: String(data.contract ?? data[0]),
+      data: hex(data.data ?? data[1]),
+      topics: [...(data.topics ?? data[2])].map(hex),
+    };
+  });
+}
+
+async function previewStage({ assetHub, operatorAccountId32, venueAddress, wrapperAddress, stageData, requestId, strategyId }) {
+  const stage = assetHub.tx.revive.call(venueAddress, 0n, HIGH_WEIGHT, HIGH_STORAGE_DEPOSIT, stageData);
+  const result = await assetHub.call.dryRunApi.dryRunCall({ system: { signed: operatorAccountId32 } }, stage, 5);
+  assertDryRunCallComplete(result.toJSON(), "Stage-only request discovery");
+  const logs = dryRunContractLogs(result);
+  const staged = readStagedLaneEvent(logs, { venueAddress, requestId });
+  const wrapperInterface = new Interface(XCM_WRAPPER_ABI);
+  const queued = logs.filter((log) => String(log.address).toLowerCase() === wrapperAddress.toLowerCase()
+    && log.topics[0]?.toLowerCase() === wrapperInterface.getEvent("RequestQueued").topicHash.toLowerCase())
+    .map((log) => wrapperInterface.parseLog(log))
+    .filter((event) => String(event.args.requestId).toLowerCase() === staged.laneRequestId);
+  if (queued.length !== 1 || String(queued[0].args.strategyId).toLowerCase() !== normalizeBytes32(strategyId, "lane strategyId")) {
+    throw new Error("Stage-only wrapper event strategyId does not match the chain-bound pool lane.");
+  }
+  return staged;
+}
+
 async function readState({ provider, pool, venue, venueAddress, venueFromBlock, lane, wrapper, requestId, deploymentId = 0n, recallId = 0n, balanceReader, targets }) {
   const block = await provider.getBlock("latest");
   if (!block) throw new Error("Could not read the Asset Hub chain head.");
@@ -978,14 +1027,15 @@ export function assertAaveSwapEvent(events, { assetIn, assetOut, expectedInput }
   return matches[0];
 }
 
-async function dryRunStageAndFunding({ args, signerAddress, venueAddress, wrapperAddress, stageData, laneRequestId, convertedAccountId32 }) {
-  const { ApiPromise, WsProvider } = await import("@polkadot/api");
+export async function dryRunStageAndFunding({ args, signerAddress, venueAddress, wrapperAddress, stageData, requestId, strategyId, convertedAccountId32 }, apiModule) {
+  const { ApiPromise, WsProvider } = apiModule ?? await import("@polkadot/api");
   const [assetHub, hydration] = await Promise.all([
     ApiPromise.create({ provider: new WsProvider(args.assetHubWs, 5_000), noInitWarn: true, throwOnConnect: true }),
     ApiPromise.create({ provider: new WsProvider(args.hydrationWs, 5_000), noInitWarn: true, throwOnConnect: true }),
   ]);
   try {
     const operatorAccountId32 = (await assetHub.call.reviveApi.accountId(signerAddress)).toHex();
+    const { laneRequestId } = await previewStage({ assetHub, operatorAccountId32, venueAddress, wrapperAddress, stageData, requestId, strategyId });
     const dispatchData = new Interface(XCM_WRAPPER_ABI).encodeFunctionData("dispatchLeg", [laneRequestId, 0, 0n]);
     const batch = assetHub.tx.utility.batchAll([
       assetHub.tx.revive.call(venueAddress, 0n, HIGH_WEIGHT, HIGH_STORAGE_DEPOSIT, stageData),
@@ -996,6 +1046,8 @@ async function dryRunStageAndFunding({ args, signerAddress, venueAddress, wrappe
       assetHub.call.dryRunApi.dryRunCall({ system: { signed: operatorAccountId32 } }, batch, 5),
     ]);
     assertDryRunCallComplete(hubResult.toJSON(), "Stateful stage + funding");
+    const replayed = readStagedLaneEvent(dryRunContractLogs(hubResult), { venueAddress, requestId });
+    if (replayed.laneRequestId !== laneRequestId) throw new Error("Stage + funding replay emitted a different lane requestId.");
     const forwarded = extractForwardedXcms(hubResult.toJSON()).filter((entry) => entry.paraId === 2034);
     if (forwarded.length !== 1) throw new Error(`Stateful funding dry-run forwarded ${forwarded.length} messages to Hydration; expected exactly one.`);
     // FIND #20: DepositFunding is local execute. Asset Hub's runtime builds the
@@ -1009,6 +1061,8 @@ async function dryRunStageAndFunding({ args, signerAddress, venueAddress, wrappe
     const hydrationEvents = normalizeRuntimeEvents(hydrationResult.toHuman());
     const deposit = assertConvertedAccountDeposit(hydration, hydrationEvents, convertedAccountId32);
     return {
+      status: "success",
+      laneRequestId,
       liveState: true,
       capturedAt: new Date().toISOString(),
       assetHub: { endpoint: args.assetHubWs, blockNumber: assetHubHeader.number.toNumber(), blockHash: assetHubHeader.hash.toHex(), timestamp: assetHubTimestamp.toString(), call: batch.method.toHex(), execution: "Complete" },
@@ -1020,14 +1074,15 @@ async function dryRunStageAndFunding({ args, signerAddress, venueAddress, wrappe
   }
 }
 
-async function dryRunStageAndRecallSell({ args, signerAddress, venueAddress, wrapperAddress, stageData, laneRequestId, shares, feeAmount }) {
-  const { ApiPromise, WsProvider } = await import("@polkadot/api");
+export async function dryRunStageAndRecallSell({ args, signerAddress, venueAddress, wrapperAddress, stageData, requestId, strategyId, shares, feeAmount }, apiModule) {
+  const { ApiPromise, WsProvider } = apiModule ?? await import("@polkadot/api");
   const [assetHub, hydration] = await Promise.all([
     ApiPromise.create({ provider: new WsProvider(args.assetHubWs, 5_000), noInitWarn: true, throwOnConnect: true }),
     ApiPromise.create({ provider: new WsProvider(args.hydrationWs, 5_000), noInitWarn: true, throwOnConnect: true }),
   ]);
   try {
     const operatorAccountId32 = (await assetHub.call.reviveApi.accountId(signerAddress)).toHex();
+    const { laneRequestId } = await previewStage({ assetHub, operatorAccountId32, venueAddress, wrapperAddress, stageData, requestId, strategyId });
     const dispatchData = new Interface(XCM_WRAPPER_ABI).encodeFunctionData("dispatchLeg", [laneRequestId, 2, feeAmount]);
     const batch = assetHub.tx.utility.batchAll([
       assetHub.tx.revive.call(venueAddress, 0n, HIGH_WEIGHT, HIGH_STORAGE_DEPOSIT, stageData),
@@ -1038,6 +1093,8 @@ async function dryRunStageAndRecallSell({ args, signerAddress, venueAddress, wra
       assetHub.call.dryRunApi.dryRunCall({ system: { signed: operatorAccountId32 } }, batch, 5),
     ]);
     assertDryRunCallComplete(hubResult.toJSON(), "Stateful stage recall + withdraw-sell");
+    const replayed = readStagedLaneEvent(dryRunContractLogs(hubResult), { venueAddress, requestId });
+    if (replayed.laneRequestId !== laneRequestId) throw new Error("Stage + recall replay emitted a different lane requestId.");
     const forwarded = extractForwardedXcms(hubResult.toJSON()).filter((entry) => entry.paraId === 2034);
     if (forwarded.length !== 1) throw new Error(`Stateful recall dry-run forwarded ${forwarded.length} messages to Hydration; expected exactly one.`);
     // This is a send leg. The runtime-returned bytes are the actual wire frame;
@@ -1063,6 +1120,7 @@ async function dryRunStageAndRecallSell({ args, signerAddress, venueAddress, wra
       hydration: { endpoint: args.hydrationWs, wireMessage: exactWire, origin: { parents: 1, interior: "X1(Parachain(1000))" }, execution: "Complete", swap },
       wireFrame: { frameSource: "runtime_forwarded_stateful_send", forwardedWireMessage: exactWire, consumedUnchanged: true },
       feeAmount,
+      laneRequestId,
     };
   } finally {
     await Promise.allSettled([assetHub.disconnect(), hydration.disconnect()]);
@@ -1147,9 +1205,9 @@ export function assertMatchingStagedDeploy({ stagedParameters, stagedNonce, expe
   return true;
 }
 
-function assertStagedDeployBinding({ record, laneAddress, venueAddress, requestedAssets, nonce }) {
+export function assertStagedDeployBinding({ record, strategyId, laneAddress, venueAddress, requestedAssets, nonce }) {
   if (
-    String(record?.context?.strategyId).toLowerCase() !== EXPECTED_STRATEGY_ID
+    String(record?.context?.strategyId).toLowerCase() !== normalizeBytes32(strategyId, "lane strategyId")
     || Number(record?.context?.kind) !== 0
     || getAddress(record?.queuedBy) !== getAddress(laneAddress)
     || getAddress(record?.context?.account) !== getAddress(venueAddress)
@@ -1159,6 +1217,19 @@ function assertStagedDeployBinding({ record, laneAddress, venueAddress, requeste
   ) {
     throw new Error("Staged wrapper request is not a pending deploy bound to the dedicated pool lane, venue adapter, exact assets, and nonce.");
   }
+  return true;
+}
+
+export function assertStagedRecallBinding({ record, strategyId, laneAddress, venueAddress, stagedShares }) {
+  if (
+    String(record?.context?.strategyId).toLowerCase() !== normalizeBytes32(strategyId, "lane strategyId")
+    || Number(record?.context?.kind) !== 1
+    || getAddress(record?.queuedBy) !== getAddress(laneAddress)
+    || getAddress(record?.context?.account) !== getAddress(venueAddress)
+    || (stagedShares === undefined
+      ? BigInt(record?.context?.shares ?? 0) <= 0n
+      : BigInt(record?.context?.shares ?? -1) !== BigInt(stagedShares))
+  ) throw new Error("Staged recall lane request is not bound to the dedicated pool lane, venue adapter, and shares.");
   return true;
 }
 
@@ -1243,7 +1314,20 @@ async function persistEvidence(args, evidence) {
   }
 }
 
-export async function main(argv = process.argv.slice(2)) {
+// External I/O seams for command-level tests. CLI callers use these exact
+// production implementations; no new command-line override or signing path.
+const COMMAND_IO = {
+  readDeploymentManifest, createCeremonyRpcContext, resolveSigner, Contract,
+  VenueBalanceReader, fetchJson, captureParQuote, dryRunStageAndFunding,
+  deriveLaneRequestId, makeRuntime, waitForAaveSwap, persistEvidence,
+};
+
+export async function main(argv = process.argv.slice(2), io = {}) {
+  const {
+    readDeploymentManifest, createCeremonyRpcContext, resolveSigner, Contract,
+    VenueBalanceReader, fetchJson, captureParQuote, dryRunStageAndFunding,
+    deriveLaneRequestId, makeRuntime, waitForAaveSwap, persistEvidence,
+  } = { ...COMMAND_IO, ...io };
   const args = parseArgs(argv);
   if (args.help) return console.log(usage());
   if (!['status', 'cancel', 'stage-dispatch', 'stage-recall'].includes(args.command)) throw new Error(`${usage()}\n\nA subcommand is required.`);
@@ -1293,6 +1377,9 @@ export async function main(argv = process.argv.slice(2)) {
   console.log(`VENUE PAIRING: pool ${poolAddress} -> adapter ${venueAddress} -> lane ${laneAddress} (block ${adapterBindingBlock})`);
   if (laneAddress === operatingLane) throw new Error("Chain-bound pool lane aliases the operating adapter; refusing.");
   const lane = new Contract(laneAddress, LANE_ABI, rpc.provider);
+  const strategyId = normalizeBytes32(await lane.strategyId({ blockTag: adapterBindingBlock }), "lane strategyId");
+  if (strategyId === ZERO32) throw new Error("Chain-bound pool lane has a zero strategyId; refusing.");
+  console.log(`LANE STRATEGY: ${strategyId} (lane ${laneAddress}, block ${adapterBindingBlock})`);
   const wrapper = new Contract(wrapperAddress, XCM_WRAPPER_ABI, rpc.provider);
   const balanceReader = new VenueBalanceReader();
   const convertedAccountId32 = String(manifest.bankXcmV2Deployment?.convertedAccountId32 ?? "").toLowerCase();
@@ -1349,6 +1436,7 @@ export async function main(argv = process.argv.slice(2)) {
       requestId,
       deploymentId,
       recallId: isRecall ? recallId : null,
+      strategyId,
       chainId: rpc.chainId,
       rpc: rpc.selectedUrl,
       addresses: { pool: poolAddress, venueAdapter: venueAddress, poolLane: laneAddress, wrapper: wrapperAddress, operatingLaneExcluded: operatingLane, convertedAccountId32 },
@@ -1438,13 +1526,7 @@ export async function main(argv = process.argv.slice(2)) {
       let resumeState = null;
       if (isResume) {
         resumeRecord = await wrapper.getRequest(stagedLaneRequestId);
-        if (
-          String(resumeRecord.context.strategyId).toLowerCase() !== EXPECTED_STRATEGY_ID
-          || Number(resumeRecord.context.kind) !== 1
-          || getAddress(resumeRecord.queuedBy) !== laneAddress
-          || getAddress(resumeRecord.context.account) !== venueAddress
-          || BigInt(resumeRecord.context.shares) <= 0n
-        ) throw new Error("Staged recall lane request is not bound to the dedicated pool lane and venue adapter.");
+        assertStagedRecallBinding({ record: resumeRecord, strategyId, laneAddress, venueAddress });
         if (Number(resumeRecord.status) !== 1) throw new Error("Staged recall lane request is not Pending; run status and read the wrapper record before resuming.");
         const reverse = normalizeBytes32(await venue.poolRequestForLaneRequest(stagedLaneRequestId), "reverse lane mapping");
         if (reverse !== requestId) throw new Error("Staged lane request does not map back to this recall adapter request.");
@@ -1474,6 +1556,7 @@ export async function main(argv = process.argv.slice(2)) {
         const stageCall = buildRecallStageCall({ requestId, parameters: derived.lane, requestedAssets: liveState.venue.request.requestedAssets });
         const stageData = stageCall.data;
         const predictedLaneRequestId = deriveLaneRecallRequestId({
+          strategyId,
           venueAddress,
           asset: manifest.contracts.token,
           shares: derived.shares,
@@ -1489,7 +1572,8 @@ export async function main(argv = process.argv.slice(2)) {
           venueAddress,
           wrapperAddress,
           stageData,
-          laneRequestId: predictedLaneRequestId,
+          requestId,
+          strategyId,
           shares: derived.shares,
           // The stateful preview spends the authorized ceiling. The real send
           // is repriced JIT to min(quote×2, ceiling) with the configured floor.
@@ -1601,25 +1685,16 @@ export async function main(argv = process.argv.slice(2)) {
         const stageTx = await identity.signer.sendTransaction({ to: venueAddress, data: prepared.stageData, value: 0n });
         const stageReceipt = await stageTx.wait();
         if (!stageReceipt || stageReceipt.status !== 1) throw new Error("stageRecall transaction failed.");
-        const stagedEvent = stageReceipt.logs
-          .map((log) => { try { return venueInterface.parseLog(log); } catch { return null; } })
-          .find((event) => event?.name === "LaneRequestStaged" && String(event.args.requestId).toLowerCase() === requestId);
-        if (!stagedEvent) throw new Error("stageRecall receipt omitted LaneRequestStaged.");
-        liveLaneRequestId = normalizeBytes32(stagedEvent.args.laneRequestId, "LaneRequestStaged laneRequestId");
-        stagedShares = BigInt(stagedEvent.args.laneShares);
+        const stagedEvent = readStagedLaneEvent(stageReceipt.logs, { venueAddress, requestId });
+        liveLaneRequestId = stagedEvent.laneRequestId;
+        stagedShares = stagedEvent.laneShares;
         if (liveLaneRequestId !== prepared.predictedLaneRequestId || stagedShares !== prepared.derived.shares) {
           throw new Error("stageRecall postcondition differs from the commit-time requestId/share derivation.");
         }
         stageReceiptEvidence = { hash: stageTx.hash, blockNumber: stageReceipt.blockNumber, gasUsed: stageReceipt.gasUsed };
       }
       const stagedWrapperRecord = await wrapper.getRequest(liveLaneRequestId);
-      if (
-        String(stagedWrapperRecord.context.strategyId).toLowerCase() !== EXPECTED_STRATEGY_ID
-        || Number(stagedWrapperRecord.context.kind) !== 1
-        || getAddress(stagedWrapperRecord.queuedBy) !== laneAddress
-        || getAddress(stagedWrapperRecord.context.account) !== venueAddress
-        || BigInt(stagedWrapperRecord.context.shares) !== stagedShares
-      ) throw new Error("Staged wrapper withdrawal is not bound to the dedicated pool lane, venue adapter, and exact shares.");
+      assertStagedRecallBinding({ record: stagedWrapperRecord, strategyId, laneAddress, venueAddress, stagedShares });
 
       const services = makeRuntime({ provider: rpc.provider, signer: identity.signer, wrapperAddress, laneAddress, convertedAccountId32, args, recall: true });
       try {
@@ -1785,6 +1860,7 @@ export async function main(argv = process.argv.slice(2)) {
     const parameters = deriveStagingParameters({ requestedAssets: state.venue.request.requestedAssets, maxFeePerLeg, floatHeadroom: args.floatHeadroom, returnBy: state.venue.request.returnBy, nonce: laneNonce });
     const stageData = venueInterface.encodeFunctionData("stageDeploy", [requestId, parameters]);
     const predictedLaneRequestId = deriveLaneRequestId({
+      strategyId,
       venueAddress,
       asset: manifest.contracts.token,
       assets: state.venue.request.requestedAssets,
@@ -1800,6 +1876,7 @@ export async function main(argv = process.argv.slice(2)) {
       });
       assertStagedDeployBinding({
         record: state.wrapper.request,
+        strategyId,
         laneAddress,
         venueAddress,
         requestedAssets: state.venue.request.requestedAssets,
@@ -1835,7 +1912,8 @@ export async function main(argv = process.argv.slice(2)) {
           venueAddress,
           wrapperAddress,
           stageData,
-          laneRequestId: predictedLaneRequestId,
+          requestId,
+          strategyId,
           convertedAccountId32,
         });
       } catch (error) {
@@ -1907,12 +1985,14 @@ export async function main(argv = process.argv.slice(2)) {
     }
     const liveLaneRequestId = isResume
       ? state.venue.laneRequestId
-      : normalizeBytes32(await venue.poolRequestForLaneRequest(predictedLaneRequestId), "post-stage reverse mapping") === requestId
-        ? normalizeBytes32(predictedLaneRequestId, "lane requestId") : ZERO32;
-    if (liveLaneRequestId === ZERO32) throw new Error("Postcondition failed: pool↔lane request bridge was not established.");
+      : readStagedLaneEvent(stageReceipt.logs, { venueAddress, requestId }).laneRequestId;
+    if (normalizeBytes32(await venue.poolRequestForLaneRequest(liveLaneRequestId), "post-stage reverse mapping") !== requestId) {
+      throw new Error("Postcondition failed: pool↔lane request bridge was not established.");
+    }
     const stagedWrapperRecord = await wrapper.getRequest(liveLaneRequestId);
     assertStagedDeployBinding({
       record: stagedWrapperRecord,
+      strategyId,
       laneAddress,
       venueAddress,
       requestedAssets: state.venue.request.requestedAssets,
