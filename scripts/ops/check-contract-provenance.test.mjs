@@ -217,6 +217,8 @@ test("mainnet manifest covers every deployed source-controlled contract address"
       "creditBook",
       "depositPoolV21",
       "aacPoolAggregatorAdapter",
+      "depositPoolLaneV21",
+      "hydrationDepositPoolAdapterV21",
     ]
   );
   assert.equal(
@@ -258,6 +260,15 @@ test("mainnet manifest covers every deployed source-controlled contract address"
     "DepositPoolV2.sol",
     "DepositPoolV2",
   ]);
+  for (const [name, artifact, creationBytecodeHash] of [
+    ["depositPoolLaneV21", "HydrationUsdcAdapterV22", "0x997ddcced2590a77dda1a555e07916e9e55231f28e130b5b26d6bc9fc10e1efe"],
+    ["hydrationDepositPoolAdapterV21", "HydrationDepositPoolAdapter", "0xe862dde09519a056c22c17d3bc8071a9b9f1f8df3eeecca4636de7a04ae49a44"],
+  ]) {
+    const { provenance } = contracts.find((contract) => contract.name === name);
+    assert.equal(provenance.sourceCommit, "9ada467d96753e55d7df164b32c08802ffa6a220");
+    assert.equal(provenance.creationBytecodeHash, creationBytecodeHash);
+    assert.deepEqual(CONTRACT_ARTIFACTS[name], [`${artifact}.sol`, artifact]);
+  }
   assert.deepEqual(CONTRACT_ARTIFACTS.depositPoolLane, [
     "HydrationUsdcAdapterV22.sol",
     "HydrationUsdcAdapterV22",

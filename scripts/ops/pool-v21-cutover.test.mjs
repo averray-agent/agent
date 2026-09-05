@@ -30,7 +30,7 @@ test("A6 manifest makes v2.1 canonical and preserves legacy v2 provenance", () =
   assert.equal(manifest.deploymentBlocks.depositPool, 19_913_549);
   assert.equal(manifest.deploymentBlocks.depositPoolV2, 19_913_549);
   assert.equal(manifest.deploymentBlocks.legacyDepositPoolV2, 19_421_397);
-  assert.equal(contracts.length, 20);
+  assert.equal(contracts.length, 22); // Ceremony B adds the v2.1 lane and adapter.
   assert.deepEqual(CONTRACT_ARTIFACTS.legacyDepositPoolV2, ["DepositPoolV2.sol", "DepositPoolV2"]);
   assert.equal(waivers.has("depositPool"), false);
   assert.equal(waivers.has("depositPoolV2"), false);

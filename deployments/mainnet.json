@@ -33,7 +33,9 @@
     "creditPool": "0x903B318586A3772c99185000676f4AC356DD6E4B",
     "creditBook": "0x70441c9131Bc47c96E8D839C5B30850924838099",
     "depositPoolV21": "0x9B35A102d656Fb86d798aF81959e09961DEc28E0",
-    "aacPoolAggregatorAdapter": "0x1DDcA7097c752580c6561e1bF8C673D6C1665CA5"
+    "aacPoolAggregatorAdapter": "0x1DDcA7097c752580c6561e1bF8C673D6C1665CA5",
+    "depositPoolLaneV21": "0x2E01Bff98adB023e4061044F8D1E2516151b3FB3",
+    "hydrationDepositPoolAdapterV21": "0x0e3929F1698550e66dC532beB7790663A7a3734B"
   },
   "contractProvenance": {
     "0x226F14252A98BD2eA140271647De20132F09AF20": {
@@ -192,6 +194,20 @@
       "abiHash": "sha256:4be9b1c749fd318a485b1947a17f602e3bc669ef462d654c2c2ee1099eb7db03",
       "runtimeCodeHash": "sha256:acb112ee59529213aa642c9c0dc7c813866becbcc692f5973ef686cb6ca0698b",
       "verifiedAt": "2026-08-26T17:32:44.000Z"
+    },
+    "0x2E01Bff98adB023e4061044F8D1E2516151b3FB3": {
+      "sourceCommit": "9ada467d96753e55d7df164b32c08802ffa6a220",
+      "creationBytecodeHash": "0x997ddcced2590a77dda1a555e07916e9e55231f28e130b5b26d6bc9fc10e1efe",
+      "abiHash": "sha256:53a7d2d069bb023a5c9b7eedae2dac463fb60f6512a67d3471656b817c9d217b",
+      "runtimeCodeHash": "sha256:7a9d7d9d7f23b46aa0cf462faea5416fa2b8b3930d99e61428b139dc64794244",
+      "verifiedAt": "2026-09-05T09:49:05.156Z"
+    },
+    "0x0e3929F1698550e66dC532beB7790663A7a3734B": {
+      "sourceCommit": "9ada467d96753e55d7df164b32c08802ffa6a220",
+      "creationBytecodeHash": "0xe862dde09519a056c22c17d3bc8071a9b9f1f8df3eeecca4636de7a04ae49a44",
+      "abiHash": "sha256:64e406be7c2d1a3045b6fadb92d390884924b888c1e5879eeac97c787d85d698",
+      "runtimeCodeHash": "sha256:0877ad55f2c108ad8373a1c1b360b811daca323bbcab63555fc04c06cd8501a1",
+      "verifiedAt": "2026-09-05T09:49:05.154Z"
     }
   },
   "knownUnshippedContractChanges": {
@@ -263,7 +279,9 @@
     "hydrationDepositPoolAdapterV1": 19380504,
     "creditBook": 19686485,
     "depositPoolV21": 19913549,
-    "aacPoolAggregatorAdapter": 19913651
+    "aacPoolAggregatorAdapter": 19913651,
+    "depositPoolLaneV21": 20272509,
+    "hydrationDepositPoolAdapterV21": 20272512
   },
   "runtime": {
     "auth": {

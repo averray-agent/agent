@@ -26,8 +26,10 @@ import { importCeremonyModule } from "./ceremony-module-loader.mjs";
 import {
   assertExpectedSigner,
   assertObservability,
+  assertPoolVenueAdapter,
   readDeploymentManifest,
   resolvePoolTarget,
+  resolvePoolVenuePair,
 } from "./pool-venue-ceremony.mjs";
 import { extractAaveQuote } from "./capture-bank-xcm-v22-staging-quote.mjs";
 
@@ -1267,23 +1269,29 @@ export async function main(argv = process.argv.slice(2)) {
     requestedPool: args.pool,
     manifestPool: manifest.contracts.depositPool,
   });
-  const venueAddress = getAddress(manifest.contracts.hydrationDepositPoolAdapter);
+  const { adapterAddress: venueAddress, laneAddress: manifestLane, adapterDeploymentBlock } = resolvePoolVenuePair(manifest, poolAddress);
   const operatingLane = getAddress(manifest.contracts.hydrationUsdcAdapter);
   const wrapperAddress = getAddress(manifest.contracts.xcmWrapper);
   assertExpectedSigner(args.expectedSigner, manifest.verifier);
 
   const rpc = await createCeremonyRpcContext({ manifest, phase: `pool-venue-${args.command}`, write: args.commit });
   const identity = await resolveSigner(args, rpc.provider);
-  const venue = new Contract(venueAddress, VENUE_ABI, rpc.provider);
+  const pool = new Contract(poolAddress, POOL_ABI, rpc.provider);
   const adapterBindingBlock = await rpc.provider.getBlockNumber();
+  assertPoolVenueAdapter({
+    poolAddress,
+    venueAdapter: await pool.venueAdapter({ blockTag: adapterBindingBlock }),
+    expectedAdapter: venueAddress,
+  });
+  const venue = new Contract(venueAddress, VENUE_ABI, rpc.provider);
   const [adapterPool, adapterLane] = await Promise.all([
     venue.pool({ blockTag: adapterBindingBlock }),
     venue.lane({ blockTag: adapterBindingBlock }),
   ]);
   const { laneAddress } = resolveVenueBindings({ poolAddress, adapterPool, adapterLane });
+  if (laneAddress !== manifestLane) throw new Error(`Pool ${poolAddress} adapter lane ${laneAddress} != manifest ${manifestLane}.`);
   console.log(`VENUE PAIRING: pool ${poolAddress} -> adapter ${venueAddress} -> lane ${laneAddress} (block ${adapterBindingBlock})`);
   if (laneAddress === operatingLane) throw new Error("Chain-bound pool lane aliases the operating adapter; refusing.");
-  const pool = new Contract(poolAddress, POOL_ABI, rpc.provider);
   const lane = new Contract(laneAddress, LANE_ABI, rpc.provider);
   const wrapper = new Contract(wrapperAddress, XCM_WRAPPER_ABI, rpc.provider);
   const balanceReader = new VenueBalanceReader();
@@ -1300,7 +1308,7 @@ export async function main(argv = process.argv.slice(2)) {
       pool,
       venue,
       venueAddress,
-      venueFromBlock: Number(manifest.deploymentBlocks.hydrationDepositPoolAdapter),
+      venueFromBlock: adapterDeploymentBlock,
       lane,
       wrapper,
       requestId,
