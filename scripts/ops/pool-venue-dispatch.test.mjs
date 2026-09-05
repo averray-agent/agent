@@ -108,9 +108,15 @@ test("explicit legacy pool is parsed and validated against the adapter-reported 
 test("dispatch resolves pool explicitly and derives its lane from adapter state", () => {
   const source = readFileSync(scriptPath, "utf8");
   assert.match(source, /resolvePoolTarget\(\{\s*requestedPool: args\.pool,/u);
+  assert.match(source, /resolvePoolVenuePair\(manifest, poolAddress\)/u);
+  assert.match(source, /pool\.venueAdapter\(\{ blockTag: adapterBindingBlock \}\)/u);
+  assert.match(source, /assertPoolVenueAdapter\(\{/u);
   assert.match(source, /venue\.pool\(\{ blockTag: adapterBindingBlock \}\)/u);
   assert.match(source, /venue\.lane\(\{ blockTag: adapterBindingBlock \}\)/u);
   assert.doesNotMatch(source, /manifest\.contracts\.depositPoolLane/u);
+  assert.doesNotMatch(source, /manifest\.contracts\.hydrationDepositPoolAdapter/u);
+  assert.doesNotMatch(source, /manifest\.deploymentBlocks\.hydrationDepositPoolAdapter/u);
+  assert.match(source, /venueFromBlock: adapterDeploymentBlock/u);
 });
 
 test("--use-kms binds dispatch signer to the averray-signer Roles Anywhere provider", async () => {

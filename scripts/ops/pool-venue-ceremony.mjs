@@ -175,6 +175,43 @@ export function assertVenueAdapterBound(venueAdapter, poolAddress) {
   return resolvedAdapter;
 }
 
+export function resolvePoolVenuePair(manifest, poolAddress) {
+  const target = getAddress(poolAddress);
+  const contracts = manifest.contracts ?? {};
+  // depositPool and depositPoolV2 are movable current-pool aliases. Only
+  // generation-specific pool identities can select a generation's venue pair.
+  const entries = [
+    ["legacyDepositPoolV2", "hydrationDepositPoolAdapterV2", "depositPoolLaneV2"],
+    ["depositPoolV21", "hydrationDepositPoolAdapterV21", "depositPoolLaneV21"],
+  ].filter(([poolKey]) => String(contracts[poolKey] ?? "").toLowerCase() === target.toLowerCase());
+  if (entries.length !== 1) {
+    throw new Error(`Pool ${target} has ${entries.length === 0 ? "no" : "ambiguous"} manifest venue pair; refusing without an explicit pool-specific entry.`);
+  }
+  const [, adapterKey, laneKey] = entries[0];
+  const address = (key) => {
+    try {
+      const value = getAddress(contracts[key]);
+      if (value !== ZeroAddress) return value;
+    } catch { /* Name the targeted pool and missing/invalid key below. */ }
+    throw new Error(`Pool ${target} has no valid manifest contracts.${key}; refusing to use another pool's venue pair.`);
+  };
+  const adapterAddress = address(adapterKey);
+  const laneAddress = address(laneKey);
+  const adapterDeploymentBlock = manifest.deploymentBlocks?.[adapterKey];
+  if (!Number.isSafeInteger(adapterDeploymentBlock) || adapterDeploymentBlock < 0) {
+    throw new Error(`Pool ${target} has no valid manifest deploymentBlocks.${adapterKey}.`);
+  }
+  return { adapterAddress, laneAddress, adapterDeploymentBlock };
+}
+
+export function assertPoolVenueAdapter({ poolAddress, venueAdapter, expectedAdapter }) {
+  const liveAdapter = assertVenueAdapterBound(venueAdapter, poolAddress);
+  if (liveAdapter !== getAddress(expectedAdapter)) {
+    throw new Error(`Pool ${getAddress(poolAddress)} venueAdapter ${liveAdapter} != manifest ${expectedAdapter}.`);
+  }
+  return liveAdapter;
+}
+
 export function buildPoolObservabilityUrl(url, poolAddress) {
   let resolved;
   try {
@@ -729,7 +766,7 @@ async function main() {
   // The manifest identity check is deliberately before RPC creation. The live
   // immutable operator is checked again after the chain-id-gated provider is up.
   assertExpectedSigner(args.expectedSigner, deployments.verifier);
-  const manifestAdapter = getAddress(deployments.contracts?.hydrationDepositPoolAdapter);
+  const { adapterAddress: manifestAdapter } = resolvePoolVenuePair(deployments, poolAddress);
   const rpc = await createCeremonyRpcContext({
     manifest: deployments,
     phase: `pool-yield-${args.command}`,
@@ -742,10 +779,7 @@ async function main() {
   if (!latest) throw new Error("Could not read the live chain head.");
   const before = await readPoolState(pool, latest.number);
   assertExpectedSigner(before.operator, args.expectedSigner);
-  assertVenueAdapterBound(before.venueAdapter, poolAddress);
-  if (before.venueAdapter !== manifestAdapter) {
-    throw new Error(`Pool venueAdapter ${before.venueAdapter} != manifest ${manifestAdapter}.`);
-  }
+  assertPoolVenueAdapter({ poolAddress, venueAdapter: before.venueAdapter, expectedAdapter: manifestAdapter });
 
   const common = {
     schemaVersion: 1,

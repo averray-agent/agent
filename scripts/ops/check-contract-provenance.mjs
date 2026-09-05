@@ -76,6 +76,9 @@ export const CONTRACT_ARTIFACTS = Object.freeze({
   // the AAC idle-balance aggregator. Deployed from merged main 684ab886; both
   // masked runtimes reproduce from source at their addresses.
   depositPoolV21: ["DepositPoolV2.sol", "DepositPoolV2"],
+  // Ceremony B, 2026-09-05: a separate venue pair for the v2.1 pool.
+  depositPoolLaneV21: ["HydrationUsdcAdapterV22.sol", "HydrationUsdcAdapterV22"],
+  hydrationDepositPoolAdapterV21: ["HydrationDepositPoolAdapter.sol", "HydrationDepositPoolAdapter"],
   aacPoolAggregatorAdapter: ["AacPoolAggregatorAdapter.sol", "AacPoolAggregatorAdapter"],
   hydrationDepositPoolAdapter: [
     "HydrationDepositPoolAdapter.sol",
