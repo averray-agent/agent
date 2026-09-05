@@ -5,7 +5,7 @@ import { AbiCoder, Interface, ZeroAddress, ZeroHash, encodeBytes32String, keccak
 import { XCM_WRAPPER_ABI } from "../../mcp-server/src/blockchain/abis.js";
 import {
   main, dryRunStageAndFunding, dryRunStageAndRecallSell, deriveLaneRequestId, deriveLaneRecallRequestId,
-  assertStagedRecallBinding, readStagedLaneEvent,
+  assertStagedDeployBinding, assertStagedRecallBinding, readStagedLaneEvent,
 } from "./pool-venue-dispatch.mjs";
 
 const manifest = JSON.parse(readFileSync(new URL("../../deployments/mainnet.json", import.meta.url)));
@@ -216,6 +216,19 @@ test("legacy dry run preserves original stage and funding call bytes and fee par
   assert.equal(calls[1].args[4], wrapperInterface.encodeFunctionData("dispatchLeg", [oldId, 0, 0n]));
   assert.deepEqual(calls[0].args.slice(1, 4), calls[1].args.slice(1, 4));
   assert.equal(plan.stagedFundingDryRun.wireFrame.consumedUnchanged, true);
+});
+
+test("deploy binding rejects a legacy strategyId in an otherwise valid v2.1 record", () => {
+  const f = fixture();
+  const record = {
+    context: { strategyId: CURRENT, kind: 0, account: f.venue, assets: ASSETS, nonce: 1n },
+    queuedBy: f.lane, status: 1,
+  };
+  const input = { record, strategyId: CURRENT, laneAddress: f.lane, venueAddress: f.venue, requestedAssets: ASSETS, nonce: 1n };
+  assert.equal(assertStagedDeployBinding(input), true);
+  assert.throws(() => assertStagedDeployBinding({
+    ...input, record: { ...record, context: { ...record.context, strategyId: LEGACY } },
+  }), /dedicated pool lane/);
 });
 
 test("v2.1 recall-resume binding accepts its chain strategy and refuses another pool lane", () => {
