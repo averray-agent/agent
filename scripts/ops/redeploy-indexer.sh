@@ -17,7 +17,7 @@
 #   BRANCH                branch to pull (default: main)
 #   HEALTH_URL            URL to poll for liveness (default: https://index.averray.com/health)
 #   READY_URL             URL to poll for readiness (default: https://index.averray.com/ready)
-#   HEALTH_TIMEOUT_SEC    max seconds to wait for /health (default: 120)
+#   HEALTH_TIMEOUT_SEC    max seconds to wait for /health (default: 240)
 #   HEALTH_STABILITY_SEC  seconds to re-check /health after first pass (default: 0)
 #   READY_TIMEOUT_SEC     max seconds to wait for /ready (default: 900)
 #   POLL_INTERVAL_SEC     seconds between polls (default: 5)
@@ -60,7 +60,7 @@ CADDY_CONTAINER=${CADDY_CONTAINER:-agent-caddy}
 BRANCH=${BRANCH:-main}
 HEALTH_URL=${HEALTH_URL:-https://index.averray.com/health}
 READY_URL=${READY_URL:-https://index.averray.com/ready}
-HEALTH_TIMEOUT_SEC=${HEALTH_TIMEOUT_SEC:-120}
+HEALTH_TIMEOUT_SEC=${HEALTH_TIMEOUT_SEC:-240}
 HEALTH_STABILITY_SEC=${HEALTH_STABILITY_SEC:-0}
 READY_TIMEOUT_SEC=${READY_TIMEOUT_SEC:-900}
 POLL_INTERVAL_SEC=${POLL_INTERVAL_SEC:-5}
@@ -203,6 +203,14 @@ dump_indexer_diagnostics() {
     echo "Recovery: rerun the deploy with indexer_fresh_schema=1 so Ponder starts on a fresh schema."
   fi
 
+  local rpc_probe_pattern='All JSON-RPC providers are inactive|JSON-RPC request unexpectedly surpassed timeout|TimeoutError: The request took too long'
+  if printf '%s\n' "$indexer_log" | grep -Eq "$rpc_probe_pattern"; then
+    local rpc_url
+    rpc_url=$(printf '%s\n' "$indexer_log" | sed -nE 's/.*URL: (https?:\/\/[^[:space:]]+).*/\1/p' | head -1)
+    echo "::error::indexer boot RPC probe timed out against ${rpc_url:-unknown (URL absent from diagnostic)}"
+    echo "See docs/PACKET_INDEXER_RECREATED_EVERY_DEPLOY_SINGLE_RPC_BOOT.md for provider fallback and the single boot budget."
+  fi
+
   printf '%s\n' "$indexer_log"
 
   echo "Indexer diagnostics: last ${INDEXER_LOG_TAIL} Caddy log lines"
@@ -223,7 +231,7 @@ dump_indexer_diagnostics() {
   local matches
   matches=$(
     printf '%s\n' "$indexer_log" \
-      | grep -E 'MigrationError|TypeError|uncaughtException|unhandledRejection|FATAL|Cannot find module|ECONNREFUSED.*postgres|postgres.*ECONNREFUSED|start_block.*greater than head' \
+      | grep -E "MigrationError|TypeError|uncaughtException|unhandledRejection|FATAL|Cannot find module|ECONNREFUSED.*postgres|postgres.*ECONNREFUSED|start_block.*greater than head|$rpc_probe_pattern" \
       | awk '!seen[$0]++' \
       | head -20 \
       || true
@@ -271,6 +279,15 @@ rollback() {
   local now_head
   now_head=$(git -C "$APP_ROOT" rev-parse HEAD)
   if [[ "$PREVIOUS_SHA" == "$now_head" ]]; then
+    local current_schema=""
+    if [[ -f "$INDEXER_ENV_TARGET" ]]; then
+      current_schema=$(awk -F= '/^DATABASE_SCHEMA=/{ sub(/^DATABASE_SCHEMA=/, ""); print; exit }' "$INDEXER_ENV_TARGET" | tr -d '"')
+    fi
+    if [[ -n "$ROLLBACK_INDEXER_SCHEMA" && "$ROLLBACK_INDEXER_SCHEMA" == "$current_schema" ]]; then
+      echo "Indexer same-build restart exhausted its health/readiness gate; no rollback target differs (SHA=$now_head, schema=$current_schema)." >&2
+      echo "Leaving the existing container in place; not recreating or resetting probe progress. Run failed on the indexer gate." >&2
+      exit 1
+    fi
     if [[ -z "$ROLLBACK_INDEXER_SCHEMA" ]]; then
       # Nothing earlier to roll back to — checking out the same SHA and
       # rebuilding would just repeat the same broken deploy.

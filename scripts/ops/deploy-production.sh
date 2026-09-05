@@ -1173,6 +1173,16 @@ run_bootstrap_self_report_once() {
 #   • /etc/agent-stack/op-*.env is mode 0400 root
 #   • /run/agent-stack/ is mode 0700 root
 #   • the deploy runs as the `ubuntu` user (passwordless sudo expected)
+runtime_env_hash() {
+  local runtime="$1" target="$2"
+  if [[ "$runtime" == "indexer" ]]; then
+    # Host-owned schema is injected after render; compare only rendered inputs.
+    sudo awk '!/^DATABASE_SCHEMA=/' "$target" | sha256sum | awk '{print $1}'
+  else
+    sudo sha256sum "$target" | awk '{print $1}'
+  fi
+}
+
 render_runtime_envs() {
   # Phase 2 PR 2.5: this function is now FAIL-CLOSED. As of the PR 2.5
   # compose env_file: flip on the VPS, /run/agent-stack/*.env is the
@@ -1248,7 +1258,7 @@ render_runtime_envs() {
     # below to detect whether the render produced different content.
     local before_hash=""
     if sudo test -f "$target"; then
-      before_hash=$(sudo sha256sum "$target" | awk '{print $1}')
+      before_hash=$(runtime_env_hash "$runtime" "$target")
     fi
 
     if ! sudo bash "$render_script" "$template" "$target" "$token"; then
@@ -1266,7 +1276,7 @@ render_runtime_envs() {
     # config hash already does in logs, and prefixes don't help an
     # attacker reverse the contents).
     local after_hash
-    after_hash=$(sudo sha256sum "$target" | awk '{print $1}')
+    after_hash=$(runtime_env_hash "$runtime" "$target")
     if [[ "$before_hash" != "$after_hash" ]]; then
       local before_label="${before_hash:0:8}"
       [[ -z "$before_hash" ]] && before_label="(none)"
@@ -1712,8 +1722,12 @@ write_indexer_schema() {
   trap - RETURN
 
   echo "Updated indexer DATABASE_SCHEMA in $INDEXER_ENV_FILE: $schema"
-  RUN_INDEXER=1
-  RUNTIME_ENV_CHANGED_INDEXER=1
+  if [[ "$schema" != "$INDEXER_PRE_RENDER_SCHEMA" ]]; then
+    RUN_INDEXER=1
+    RUNTIME_ENV_CHANGED_INDEXER=1
+  elif [[ "${RUNTIME_ENV_CHANGED_INDEXER:-0}" == "0" ]]; then
+    echo "indexer env unchanged apart from host-injected DATABASE_SCHEMA ($schema); not recreating"
+  fi
 }
 
 apply_indexer_database_schema() {
@@ -2114,6 +2128,7 @@ deploy() {
       ;;
   esac
 
+  INDEXER_PRE_RENDER_SCHEMA=$(read_current_indexer_schema)
   render_runtime_envs
   if [[ "$indexer_schema_check_requested" == "1" \
     || -n "$INDEXER_DATABASE_SCHEMA" \
@@ -2246,7 +2261,7 @@ deploy() {
       fi
       echo "::warning::Fresh indexer schema selected; gating on stable /health and leaving /ready staged during the historical re-sync."
     fi
-    COMPOSE_FILE="$COMPOSE_FILE" \
+    if COMPOSE_FILE="$COMPOSE_FILE" \
       COMPOSE_PROJECT_DIRECTORY="$COMPOSE_PROJECT_DIRECTORY" \
       INDEXER_SERVICE="$INDEXER_SERVICE" \
       INDEXER_ENV_TEMPLATE="$INDEXER_ENV_TEMPLATE" \
@@ -2264,7 +2279,20 @@ deploy() {
       HEALTH_STABILITY_SEC="$indexer_health_stability" \
       SKIP_GIT_UPDATE=1 \
       PRE_DEPLOY_SHA="$indexer_previous_sha" \
-      "$APP_ROOT/scripts/ops/redeploy-indexer.sh"
+      "$APP_ROOT/scripts/ops/redeploy-indexer.sh"; then
+      :
+    else
+      local indexer_exit=$?
+      if [[ "$backend_deployed_sha" == "$NEW_SHA" ]]; then
+        if [[ "$indexer_previous_sha" == "$NEW_SHA" && "$INDEXER_PREVIOUS_SCHEMA" == "$INDEXER_TARGET_SCHEMA" ]]; then
+          echo "::error::backend live at $NEW_SHA; indexer same-build restart; run failed on the indexer gate" >&2
+        else
+          echo "::error::backend verified live at $NEW_SHA before indexer rollback; run failed on the indexer gate" >&2
+        fi
+      fi
+      release_indexer_schema_lock
+      return "$indexer_exit"
+    fi
     commit_indexer_schema_ownership
     mark_component_deployed indexer
     release_indexer_schema_lock
