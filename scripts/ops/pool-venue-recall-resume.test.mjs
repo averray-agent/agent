@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { getAddress } from "ethers";
+import { encodeBytes32String, getAddress } from "ethers";
 import * as driver from "./pool-venue-dispatch.mjs";
 
 const source = readFileSync(new URL("./pool-venue-dispatch.mjs", import.meta.url), "utf8");
@@ -10,7 +10,7 @@ const LANE_REQUEST = `0x${"22".repeat(32)}`;
 const ZERO32 = `0x${"00".repeat(32)}`;
 const VENUE = "0xE2801E6C640e0180798912649fD567E1Ea459a35";
 const LANE = "0x88eE70277E486136676c0b50Ed9b7D7A1a31371f";
-const STRATEGY = "0x485944524154494f4e5f555344435f504f4c5f563100000000000000000000";
+const STRATEGY = encodeBytes32String("HYDRATION_USDC_POOL_V1");
 const SHARES = 4_450_000n;
 const DISPATCH_REACHED = new Error("fixture reached pending-leg dispatch; no transaction sent");
 
@@ -26,6 +26,7 @@ function fixture({
   bitmap = 4n, balance = 15_351n, commit = true, fresh = false, script = source,
   head = 2, stagedBlock = 1, swapBlock = 1, createdAt,
   floatBalance = 5_975_118n, advancingHead = false,
+  strategyId = STRATEGY, venueAddress = VENUE, laneAddress = LANE, queuedBy = laneAddress,
 } = {}) {
   const calls = { quotes: [], dispatch: [], history: 0, heads: 0, eventBlocks: [], timestampBlocks: [] };
   const timestamp = (block) => 1_999_000_000_000n + BigInt(block) * 2_000n;
@@ -73,7 +74,7 @@ function fixture({
 
   const request = { kind: 1, status: 1, requestedAssets: SHARES, settledAssets: 0n, returnBy: 2_000_000_000n, claimed: false };
   const record = {
-    context: { strategyId: STRATEGY, kind: 1, account: VENUE, shares: SHARES }, queuedBy: LANE, status: 1,
+    context: { strategyId, kind: 1, account: venueAddress, shares: SHARES }, queuedBy, status: 1,
     createdAt: createdAt ?? timestamp(stagedBlock) / 1_000n,
   };
   const state = {
@@ -92,10 +93,10 @@ function fixture({
   };
   const bindings = {
     ...driver, getAddress, state, common: {}, requestId: REQUEST, recallId: 6n,
-    venueAddress: VENUE, laneAddress: LANE, wrapperAddress: LANE, operatingLane: "excluded",
+    venueAddress, laneAddress, wrapperAddress: LANE, operatingLane: "excluded",
     convertedAccountId32: `0x${"33".repeat(32)}`, stateArgs: {}, balanceReader,
     args: { command: "stage-recall", commit, hydrationWs: "fixture://hydration", maxFeePerLeg: "80000" },
-    EXPECTED_STRATEGY_ID: STRATEGY, ZERO32, ZERO_ADDRESS: `0x${"00".repeat(20)}`,
+    strategyId, ZERO32, ZERO_ADDRESS: `0x${"00".repeat(20)}`,
     normalizeBytes32: (value) => value.toLowerCase(),
     wrapper: { getRequest: async () => record, requestDispatchBitmap: async () => bitmap },
     venue: { poolRequestForLaneRequest: async () => REQUEST },
@@ -124,6 +125,20 @@ test("bitmap 4 recall with near-zero asset-1003 reaches only withdraw_home dispa
   assert.deepEqual(calls.dispatch, [{ requestId: LANE_REQUEST, leg: "withdraw_home" }]);
   assert.equal(calls.quotes.length, 0);
   assert.ok(calls.history > 0);
+});
+
+test("v2.1 recall resume reaches dispatch and refuses a different pool lane", async () => {
+  const binding = {
+    strategyId: "0x4141435f49444c455f485944524154494f4e5f56310000000000000000000000",
+    venueAddress: "0x0e3929F1698550e66dC532beB7790663A7a3734B",
+    laneAddress: "0x2E01Bff98adB023e4061044F8D1E2516151b3FB3",
+  };
+  const good = fixture(binding);
+  await assert.rejects(good.run(), (error) => error === DISPATCH_REACHED);
+  assert.deepEqual(good.calls.dispatch, [{ requestId: LANE_REQUEST, leg: "withdraw_home" }]);
+  const wrongLane = fixture({ ...binding, queuedBy: LANE });
+  await assert.rejects(wrongLane.run(), /not bound to the dedicated pool lane/);
+  assert.deepEqual(wrongLane.calls.dispatch, []);
 });
 
 test("bitmap 0 recall retains the exact staged-share par quote before withdraw_sell", async () => {

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { encodeBytes32String } from "ethers";
 
 import { importCeremonyModule } from "./ceremony-module-loader.mjs";
 import { BankXcmV22Dispatcher } from "../../mcp-server/src/services/bank-xcm-flow.js";
@@ -57,6 +58,7 @@ const VENUE = "0xE2801E6C640e0180798912649fD567E1Ea459a35";
 const POOL = "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30";
 const CURRENT_POOL = "0x9B35A102d656Fb86d798aF81959e09961DEc28E0";
 const LANE = "0x88eE70277E486136676c0b50Ed9b7D7A1a31371f";
+const strategyId = encodeBytes32String("HYDRATION_USDC_POOL_V1");
 
 function pendingRecall(overrides = {}) {
   return { kind: 1, status: 1, requestedAssets: 500_000n, settledAssets: 0n, returnBy: 2_000_000_000n, claimed: false, ...overrides };
@@ -424,8 +426,8 @@ test("fee and float mutation refuses when headroom falls below maxFeePerLeg", ()
 });
 
 test("pool lane request identity is deterministic and nonce-bound", () => {
-  const one = deriveLaneRequestId({ venueAddress: VENUE, asset: "0x0000053900000000000000000000000001200000", assets: 2_000_000n, nonce: 1n });
-  const two = deriveLaneRequestId({ venueAddress: VENUE, asset: "0x0000053900000000000000000000000001200000", assets: 2_000_000n, nonce: 2n });
+  const one = deriveLaneRequestId({ strategyId, venueAddress: VENUE, asset: "0x0000053900000000000000000000000001200000", assets: 2_000_000n, nonce: 1n });
+  const two = deriveLaneRequestId({ strategyId, venueAddress: VENUE, asset: "0x0000053900000000000000000000000001200000", assets: 2_000_000n, nonce: 2n });
   assert.match(one, /^0x[0-9a-f]{64}$/u);
   assert.notEqual(one, two);
 });
@@ -586,8 +588,8 @@ test("recall parameters hard-bind minimumOutput to requestedAssets", () => {
 });
 
 test("recall lane request identity is withdraw-kind and nonce-bound", () => {
-  const one = deriveLaneRecallRequestId({ venueAddress: VENUE, asset: "0x0000053900000000000000000000000001200000", shares: 500_000n, nonce: 1n });
-  const two = deriveLaneRecallRequestId({ venueAddress: VENUE, asset: "0x0000053900000000000000000000000001200000", shares: 500_000n, nonce: 2n });
+  const one = deriveLaneRecallRequestId({ strategyId, venueAddress: VENUE, asset: "0x0000053900000000000000000000000001200000", shares: 500_000n, nonce: 1n });
+  const two = deriveLaneRecallRequestId({ strategyId, venueAddress: VENUE, asset: "0x0000053900000000000000000000000001200000", shares: 500_000n, nonce: 2n });
   assert.match(one, /^0x[0-9a-f]{64}$/u);
   assert.notEqual(one, two);
 });
