@@ -446,7 +446,7 @@ export class PlatformService {
       }
     };
     return this.catalogueLaneDiscipline?.post
-      ? this.catalogueLaneDiscipline.post(jobInput, action)
+      ? this.catalogueLaneDiscipline.post(jobInput, action, { origin: "operator" })
       : action();
   }
 
@@ -675,7 +675,7 @@ export class PlatformService {
     if (!this.catalogueLaneDiscipline?.post) return action();
     const firedAt = options.firedAt ?? new Date();
     const candidate = this.jobCatalogService.getRecurringPostingCandidate(templateId, { firedAt });
-    return this.catalogueLaneDiscipline.post(candidate, action, { now: firedAt });
+    return this.catalogueLaneDiscipline.post(candidate, action, { now: firedAt, origin: options.origin ?? "operator" });
   }
 
   pauseRecurringTemplate(templateId) {

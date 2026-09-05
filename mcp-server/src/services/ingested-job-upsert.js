@@ -6,6 +6,7 @@ const INGEST_REFUSED_SPEC_HASH_MISMATCH = "ingest_refused_spec_hash_mismatch";
 const LANE_POSTING_REFUSALS = new Set([
   "lane_budget_exhausted",
   "lane_backlog_saturated",
+  "lane_scheduler_headroom_reserved",
   "lane_paused"
 ]);
 
@@ -26,7 +27,7 @@ export async function upsertScheduledIngestedJob(platformService, job, { prefund
   // preserves pre-D3 open jobs without charging them to the new lane ledger.
   if (Number(liveJob?.state ?? 0) !== 0) return action();
   return platformService.catalogueLaneDiscipline?.post
-    ? platformService.catalogueLaneDiscipline.post(job, action, { now })
+    ? platformService.catalogueLaneDiscipline.post(job, action, { now, origin: "scheduler" })
     : action();
 }
 

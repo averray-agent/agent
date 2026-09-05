@@ -30,7 +30,8 @@ test("RecurringSchedulerService fires due templates and records runtime status",
         ]
       };
     },
-    fireRecurringJob(templateId, { firedAt }) {
+    fireRecurringJob(templateId, { firedAt, origin }) {
+      assert.equal(origin, "scheduler");
       const derivative = {
         id: `${templateId}-run-${firedAt.toISOString()}`,
         templateId

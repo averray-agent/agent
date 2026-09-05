@@ -125,3 +125,21 @@ test("a missing chain job passes the lane gate before posting", async () => {
 
   assert.deepEqual(calls, ["gate:new", "post:new"]);
 });
+
+test("scheduled ingestion explicitly declares scheduler origin at the posting boundary", async () => {
+  let seen;
+  const now = new Date("2026-09-05T12:00:00.000Z");
+  const candidate = { id: "github-scheduled", lane: "oss-anchored", source: { type: "github_issue" } };
+  await upsertScheduledIngestedJob({
+    catalogueLaneDiscipline: {
+      async post(job, action, options) {
+        seen = options;
+        assert.equal(job, candidate);
+        return action();
+      }
+    },
+    async upsertIngestedJob(job) { return job; }
+  }, candidate, { now });
+  assert.deepEqual(seen, { now, origin: "scheduler" });
+  assert.equal(candidate.origin, undefined, "posting metadata must not enter the committed definition");
+});

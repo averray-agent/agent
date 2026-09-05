@@ -125,7 +125,7 @@ export class RecurringSchedulerService {
       }
 
       try {
-        const derivative = await this.platformService.fireRecurringJob(template.templateId, { firedAt: now });
+        const derivative = await this.platformService.fireRecurringJob(template.templateId, { firedAt: now, origin: "scheduler" });
         const updatedTemplate = this.platformService
           .getRecurringTemplateStatus()
           .templates
@@ -176,7 +176,7 @@ export class RecurringSchedulerService {
         const message = error instanceof Error ? error.message : String(error);
         let status = error instanceof ConflictError ? "conflict" : "failed";
         if (error?.code === "recurring_reserve_exhausted") status = "reserve_exhausted";
-        if (error?.code === "lane_budget_exhausted" || error?.code === "lane_paused") status = error.code;
+        if (["lane_budget_exhausted", "lane_paused", "lane_scheduler_headroom_reserved"].includes(error?.code)) status = error.code;
         const reserve = error?.details?.reserve;
         const exhausted = status === "reserve_exhausted";
         this.runtime.set(template.templateId, {

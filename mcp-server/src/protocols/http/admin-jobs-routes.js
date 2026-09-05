@@ -197,7 +197,7 @@ export function createAdminJobsRoutes({
         respond(response, replay.statusCode, replay.body);
         return true;
       }
-      const derivative = await service.fireRecurringJob(templateId, { firedAt });
+      const derivative = await service.fireRecurringJob(templateId, { firedAt, origin: "operator" });
       await storeIdempotentMutationReceipt({
         bucket: "admin_jobs_fire",
         key: mutationKey,

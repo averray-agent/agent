@@ -347,7 +347,7 @@ test("POST /admin/jobs/fire validates and stores recurring derivative receipt", 
   });
   assert.deepEqual(calls.find(([name]) => name === "fireRecurringJob")?.[1], {
     templateId: "template-1",
-    options: { firedAt: new Date("2026-05-22T12:00:00.000Z") },
+    options: { firedAt: new Date("2026-05-22T12:00:00.000Z"), origin: "operator" },
   });
 });
 
