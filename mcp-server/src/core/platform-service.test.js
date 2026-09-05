@@ -715,6 +715,13 @@ test("createSubJob links the child job to the active parent session", async () =
 
 test("createAdminJob reserves finite recurring template funding from the poster wallet", async () => {
   const service = makePlatformService();
+  let declaredOrigin;
+  service.setCatalogueLaneDiscipline({
+    async post(candidate, action, { origin }) {
+      declaredOrigin = origin;
+      return action();
+    }
+  });
 
   const template = await service.createAdminJob({
     id: "weekly-recurring-001",
@@ -735,6 +742,8 @@ test("createAdminJob reserves finite recurring template funding from the poster 
   const account = await service.getAccountSummary(WALLET);
   assert.equal(account.liquid.DOT, 0);
   assert.equal(account.reserved.DOT, 10);
+  assert.equal(declaredOrigin, "operator");
+  service.setCatalogueLaneDiscipline(undefined);
 
   const derivative = service.fireRecurringJob("weekly-recurring-001", {
     firedAt: new Date("2026-05-04T09:00:00.000Z")
@@ -762,20 +771,21 @@ test("recurring catalogue derivatives pass the posting lane before creation", as
   }, { posterWallet: WALLET });
   const observed = [];
   service.setCatalogueLaneDiscipline({
-    async post(candidate, action, { now }) {
-      observed.push({ candidate, now });
+    async post(candidate, action, { now, origin }) {
+      observed.push({ candidate, now, origin });
       return action();
     }
   });
   const firedAt = new Date("2026-05-04T09:00:00.000Z");
 
-  const derivative = await service.fireRecurringJob("lane-recurring-001", { firedAt });
+  const derivative = await service.fireRecurringJob("lane-recurring-001", { firedAt, origin: "scheduler" });
 
   assert.equal(observed.length, 1);
   assert.equal(observed[0].candidate.id, derivative.id);
   assert.equal(observed[0].candidate.lane, "oss-anchored");
   assert.equal(observed[0].candidate.rewardAmount, 1);
   assert.equal(observed[0].now, firedAt);
+  assert.equal(observed[0].origin, "scheduler");
 });
 
 test("createAdminJob reserves the snapshotted success fees for every unwaived recurring run", async () => {

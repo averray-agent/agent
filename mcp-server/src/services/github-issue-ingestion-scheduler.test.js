@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { CatalogueLaneDiscipline, loadCatalogueLaneRegistry } from "../core/catalogue-lane-discipline.js";
+import { MemoryStateStore } from "../core/state-store.js";
+import { createJobsFromImportResult } from "../protocols/http/admin-job-import-routes.js";
 
 import {
   GithubIssueIngestionScheduler,
@@ -49,6 +52,50 @@ function makePlatformService(initialJobs = []) {
     }
   };
 }
+
+test("GitHub scheduler logs reserved headroom in summary.skipped while operator import still posts", async () => {
+  const platform = makePlatformService();
+  const now = new Date("2026-09-05T12:00:00.000Z");
+  const logged = [];
+  platform.catalogueLaneDiscipline = new CatalogueLaneDiscipline({
+    stateStore: new MemoryStateStore(),
+    registry: loadCatalogueLaneRegistry({}),
+    gasEstimateUsdc: 0,
+    now: () => now,
+    logger: { info(details, reason) { logged.push({ details, reason }); } }
+  });
+  const scheduler = new GithubIssueIngestionScheduler(platform, undefined, {
+    enabled: true,
+    dryRun: false,
+    queries: ["is:issue is:open label:good-first-issue"],
+    minScore: 55,
+    maxJobsPerRun: 8,
+    maxJobsPerQuery: 8,
+    maxOpenJobs: 30,
+    fetchImpl: makeFetch([ISSUE, { ...ISSUE, number: 43, html_url: "https://github.com/example/project/issues/43" }])
+  });
+  const summary = await scheduler.runOnce(now);
+  assert.equal(summary.createdCount, 1);
+  assert.deepEqual(summary.errors, []);
+  assert.equal(summary.skipped.length, 1);
+  const refusal = summary.skipped[0];
+  assert.equal(refusal.reason, "lane_scheduler_headroom_reserved");
+  assert.equal(refusal.lane, "oss-anchored");
+  assert.ok(refusal.id);
+  assert.ok(refusal.retryWhen);
+  assert.equal((await scheduler.getStatus()).lastRun, summary);
+  assert.ok(logged.some(({ details, reason }) => reason === refusal.reason
+    && details.withheldJobId === refusal.id && details.unclaimedCount === 1
+    && details.operatorReserve === 2 && details.origin === "scheduler"));
+
+  // Same github_issue source and verifier, different declared posting origin.
+  const operatorJob = { ...platform.listJobs()[0], id: "operator-bundle", rewardAmount: 2 };
+  const imported = await createJobsFromImportResult(platform, [operatorJob], { now });
+  assert.deepEqual(imported.errors, []);
+  assert.deepEqual(imported.skipped, []);
+  assert.equal(imported.created[0].id, operatorJob.id);
+  assert.equal(platform.listJobs().find(({ id }) => id !== operatorJob.id).rewardAmount, 0.2);
+});
 
 test("GithubIssueIngestionScheduler dry-run does not create jobs", async () => {
   const platform = makePlatformService();

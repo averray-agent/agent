@@ -10,6 +10,7 @@ export const CATALOGUE_LANE_PACKET = "PACKET_D3_LANE_DISCIPLINE.md";
 export const CATALOGUE_LANE_STATE_SCOPE = "catalogue-lane-discipline-v1";
 export const LANE_BUDGET_EXHAUSTED = "lane_budget_exhausted";
 export const LANE_BACKLOG_SATURATED = "lane_backlog_saturated";
+export const LANE_SCHEDULER_HEADROOM_RESERVED = "lane_scheduler_headroom_reserved";
 export const LANE_PAUSED = "lane_paused";
 
 const USDC_DECIMALS = 6;
@@ -30,6 +31,7 @@ export const DEFAULT_CATALOGUE_LANE_REGISTRY = Object.freeze({
     hypothesis: "Proof-of-life for the board; 0.10 USDC buys it as well as 0.25 USDC.",
     dailyCapRaw: "3000000",
     maxUnclaimedBacklog: 2,
+    operatorReserve: 1,
     stopCondition: "Zero external claimants for 14 consecutive days.",
     paused: false
   }),
@@ -37,6 +39,7 @@ export const DEFAULT_CATALOGUE_LANE_REGISTRY = Object.freeze({
     hypothesis: "Public artifacts and maintainer relationships create an external-worker funnel.",
     dailyCapRaw: "15000000",
     maxUnclaimedBacklog: 3,
+    operatorReserve: 2,
     stopCondition: "Cost per retained external worker exceeds 25 USDC over a trailing 30-day window.",
     paused: false
   }),
@@ -44,6 +47,7 @@ export const DEFAULT_CATALOGUE_LANE_REGISTRY = Object.freeze({
     hypothesis: "Verification coverage and demonstrable work provide a useful showcase.",
     dailyCapRaw: "5000000",
     maxUnclaimedBacklog: 2,
+    operatorReserve: 1,
     stopCondition: "Real external demand supersedes catalogue work in the same category.",
     paused: false
   })
@@ -96,6 +100,10 @@ export function validateCatalogueLaneRegistry(input) {
     if (!Number.isInteger(backlogRaw) || backlogRaw < 1) {
       throw packetConfigError(`lane ${id} maxUnclaimedBacklog must be a positive integer`);
     }
+    const operatorReserve = rawEntry.operatorReserve ?? 1;
+    if (!Number.isInteger(operatorReserve) || operatorReserve < 0 || operatorReserve > backlogRaw) {
+      throw packetConfigError(`lane ${id} operatorReserve must be an integer between 0 and maxUnclaimedBacklog`);
+    }
     const hypothesis = requiredText(rawEntry.hypothesis, `lane ${id} hypothesis`);
     const stopCondition = requiredText(rawEntry.stopCondition, `lane ${id} stopCondition`);
     const dailyCapRaw = rawUnits(rawEntry.dailyCapRaw, `lane ${id} dailyCapRaw`);
@@ -104,6 +112,7 @@ export function validateCatalogueLaneRegistry(input) {
       hypothesis,
       dailyCapRaw,
       maxUnclaimedBacklog: backlogRaw,
+      operatorReserve,
       stopCondition,
       paused: rawEntry.paused === true
     }));
@@ -181,15 +190,20 @@ export class CatalogueLaneDiscipline {
     this.queue = Promise.resolve();
   }
 
-  async post(job, action, { now = this.now() } = {}) {
+  async post(job, action, { now = this.now(), origin = "operator" } = {}) {
+    if (origin !== "operator" && origin !== "scheduler") {
+      throw new AppError("Catalogue posting origin must be scheduler or operator.", {
+        code: "invalid_catalogue_posting_origin", statusCode: 400
+      });
+    }
     if (isExternalJob(job)) return action();
-    const run = async () => this.#postSerial(job, action, asDate(now));
+    const run = async () => this.#postSerial(job, action, asDate(now), origin);
     const result = this.queue.then(run, run);
     this.queue = result.catch(() => undefined);
     return result;
   }
 
-  async #postSerial(job, action, evaluatedAt) {
+  async #postSerial(job, action, evaluatedAt, origin) {
     const lane = validateCatalogueDefinitionLane(job, this.registry);
     if (lane.paused) {
       throw new CatalogueLanePostingError(
@@ -212,13 +226,13 @@ export class CatalogueLaneDiscipline {
       );
     }
     try {
-      return await this.#postUnderLock(job, action, evaluatedAt, lane);
+      return await this.#postUnderLock(job, action, evaluatedAt, lane, origin);
     } finally {
       await this.stateStore.releaseClaimLock(lockId, lockOwner);
     }
   }
 
-  async #postUnderLock(job, action, evaluatedAt, lane) {
+  async #postUnderLock(job, action, evaluatedAt, lane, origin) {
     const state = await this.#readState();
     const records = pruneRecords(state.records, evaluatedAt);
     const existing = records.find((record) => record.jobId === String(job.id));
@@ -257,11 +271,20 @@ export class CatalogueLaneDiscipline {
     // the earn-from-zero proof for 19 hours.
     if (!existing && candidate.disposableProof !== true) {
       const backlog = await this.#unclaimedBacklog(records, lane.id, evaluatedAt);
-      if (backlog.count >= lane.maxUnclaimedBacklog) {
+      // Origin is a caller declaration, not source.type: both scheduled ingest
+      // and curated operator bundles can come from the same GitHub issue lane.
+      const postingLimit = lane.maxUnclaimedBacklog - (origin === "scheduler" ? lane.operatorReserve : 0);
+      if (backlog.count >= postingLimit) {
+        const reason = origin === "scheduler"
+          ? LANE_SCHEDULER_HEADROOM_RESERVED
+          : LANE_BACKLOG_SATURATED;
         const details = {
           lane: lane.id,
+          origin,
           unclaimedCount: backlog.count,
           maxUnclaimedBacklog: lane.maxUnclaimedBacklog,
+          operatorReserve: lane.operatorReserve,
+          postingLimit,
           oldestUnclaimedAt: backlog.oldestAt ?? null,
           withheldJobId: String(job.id),
           retryWhen: "a queued job in this lane is claimed, stops serving, or ages out of the window"
@@ -269,10 +292,12 @@ export class CatalogueLaneDiscipline {
         // Never a silent cap: an operator reading the log must see what was
         // withheld and why, or a throttled lane is indistinguishable from a
         // broken poster.
-        this.logger.info?.(details, LANE_BACKLOG_SATURATED);
+        this.logger.info?.(details, reason);
         throw new CatalogueLanePostingError(
-          LANE_BACKLOG_SATURATED,
-          `Catalogue lane ${lane.id} already has ${backlog.count} unclaimed job(s) open; posting is throttled until one is claimed, stops serving, or ages out.`,
+          reason,
+          origin === "scheduler"
+            ? `Catalogue lane ${lane.id} already has ${backlog.count} unclaimed job(s) open; ${lane.operatorReserve} slot(s) are reserved for operator posts. Retry when backlog falls below ${postingLimit}.`
+            : `Catalogue lane ${lane.id} already has ${backlog.count} unclaimed job(s) open; posting is throttled until one is claimed, stops serving, or ages out.`,
           details
         );
       }

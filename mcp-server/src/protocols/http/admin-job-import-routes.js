@@ -43,7 +43,7 @@ export async function createJobsFromImportResult(service, jobs, { now = new Date
       assertIngestedCatalogVerifierCanReject(job);
       const action = () => service.createJob(job);
       created.push(await (service.catalogueLaneDiscipline?.post
-        ? service.catalogueLaneDiscipline.post(job, action, { now })
+        ? service.catalogueLaneDiscipline.post(job, action, { now, origin: "operator" })
         : action()));
     } catch (error) {
       const normalized = normalizeError(error);

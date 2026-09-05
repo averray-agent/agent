@@ -57,6 +57,12 @@ test("normalizeSkippedWithNumericCount appends the legacy numeric skip counter",
 
 test("createJobsFromImportResult separates created, duplicate, and errored jobs", async () => {
   const service = {
+    catalogueLaneDiscipline: {
+      async post(job, action, { origin }) {
+        assert.equal(origin, "operator");
+        return action();
+      }
+    },
     createJob: (job) => {
       if (job.id === "duplicate") {
         throw new ConflictError("Job already exists.", "job_exists");

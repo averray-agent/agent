@@ -8,6 +8,7 @@ import {
   LANE_BACKLOG_SATURATED,
   LANE_BUDGET_EXHAUSTED,
   LANE_PAUSED,
+  LANE_SCHEDULER_HEADROOM_RESERVED,
   validateCatalogueLaneRegistry
 } from "./catalogue-lane-discipline.js";
 import { DEFAULT_WORKER_CATALOGUE_GLOBAL_DAILY_BUDGET_RAW } from "./catalogue-daily-budget.js";
@@ -406,6 +407,68 @@ test("backlog cap is validated, not silently coerced", () => {
       }
     }),
     /maxUnclaimedBacklog must be a positive integer/u
+  );
+});
+
+test("oss scheduler fills one slot then reserves two slots for same-source operator jobs", async () => {
+  const discipline = new CatalogueLaneDiscipline({
+    stateStore: stateStore(),
+    registry: validateCatalogueLaneRegistry(DEFAULT_CATALOGUE_LANE_REGISTRY),
+    gasEstimateUsdc: 0,
+    now: () => NOW,
+    logger: { info() {} }
+  });
+  const posted = [];
+  const githubJob = (id) => ({ ...job(id, "oss-anchored", 0.2), source: { type: "github_issue" } });
+  const post = (id, options) => discipline.post(githubJob(id), async () => posted.push(id), options);
+
+  await post("scheduled-first", { origin: "scheduler" });
+  await assert.rejects(post("scheduled-second", { origin: "scheduler" }), (error) => {
+    assert.equal(error.code, LANE_SCHEDULER_HEADROOM_RESERVED);
+    assert.equal(error.details.unclaimedCount, 1);
+    assert.equal(error.details.maxUnclaimedBacklog, 3);
+    assert.equal(error.details.operatorReserve, 2);
+    assert.equal(error.details.postingLimit, 1);
+    return true;
+  });
+  await post("operator-explicit", { origin: "operator" });
+  await post("operator-default");
+  assert.deepEqual(posted, ["scheduled-first", "operator-explicit", "operator-default"]);
+});
+
+test("operator reserve never raises the full oss lane cap of three", async () => {
+  const discipline = new CatalogueLaneDiscipline({
+    stateStore: stateStore(),
+    registry: validateCatalogueLaneRegistry(DEFAULT_CATALOGUE_LANE_REGISTRY),
+    gasEstimateUsdc: 0,
+    now: () => NOW,
+    logger: { info() {} }
+  });
+  for (const id of ["first", "second", "third"]) {
+    await discipline.post(job(id, "oss-anchored", 0.2), async () => {}, { origin: "operator" });
+  }
+  let posted = false;
+  await assert.rejects(
+    discipline.post(job("fourth", "oss-anchored", 0.2), async () => { posted = true; }, { origin: "operator" }),
+    (error) => error.code === LANE_BACKLOG_SATURATED && error.details.unclaimedCount === 3
+  );
+  assert.equal(posted, false);
+});
+
+test("operator reserves default to one and reject invalid or over-cap values", () => {
+  assert.equal(registry().get("liveness").operatorReserve, 1);
+  for (const operatorReserve of [-1, 1.5, "1", 4]) {
+    assert.throws(() => validateCatalogueLaneRegistry({
+      liveness: { ...DEFAULT_CATALOGUE_LANE_REGISTRY.liveness, operatorReserve }
+    }), /operatorReserve must be an integer between 0 and maxUnclaimedBacklog/u);
+  }
+});
+
+test("invalid posting origin refuses rather than silently using operator headroom", async () => {
+  const discipline = new CatalogueLaneDiscipline({ stateStore: stateStore(), registry: registry() });
+  await assert.rejects(
+    discipline.post(job("bad-origin"), async () => assert.fail("must not post"), { origin: "scheduled" }),
+    (error) => error.code === "invalid_catalogue_posting_origin"
   );
 });
 
