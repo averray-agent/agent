@@ -68,13 +68,14 @@ if (liveLaneRequestId === ZERO32) throw new Error("Postcondition failed: pool↔
 With the wrong prediction that reverse lookup returns nothing, so a real commit
 would have: **(1)** staged for real — 9.98 USDC moved into the lane, wrapper
 request queued under the real id — then **(2)** thrown the postcondition and
-stopped before `dispatchLeg`, then **(3)** been un-resumable, because the identity guards at `:1442` and
-`:1617` reject a v2.1 record whose `strategyId` is not the legacy constant.
-(`assertStagedDeployBinding`, holding the `:1152` guard, is called from the
-stage-dispatch dry-run at `:1801` and commit at `:1914` — **not** from `cancel`
-at `:1256`, whose handler shows no strategy-id gate, so a stranded stage appears
-**recoverable via `cancel`**, though that has not been exercised on v2.1.) **A
-stranded staged deployment the script could neither continue nor resume.**
+stopped before `dispatchLeg`, then **(3)** been **stranded**: the contract forbids cancelling a lane-staged
+request — `HydrationDepositPoolAdapter.cancelUnstaged` (`:182–187`) reverts
+`InvalidRequest` whenever `laneRequestId != bytes32(0)` — so **resume is the
+only exit**, and the deploy-resume path runs `assertStagedDeployBinding`
+(`:1914` → the `:1152` guard), which rejects any record whose `strategyId` is
+not the legacy constant. **Un-cancellable by contract, un-resumable by script.**
+(Codex caught that my earlier "recoverable via cancel" was wrong — the missing
+strategy gate on `cancel` is irrelevant because the contract refuses first.)
 
 The dry run's refusal is therefore load-bearing, not merely correct. **Do not
 bypass it.** The two commit paths are also inconsistent with each other — fix
@@ -117,8 +118,15 @@ and need the per-pool value regardless.
 4b. **The deploy commit path** likewise takes its lane id from the receipt's
    `LaneRequestStaged`; with a garbage predictor a mocked commit still
    dispatches against the emitted id and never throws the bridge postcondition.
-4c. `status` and `cancel` accept a v2.1 staged record — prove `cancel` on a
-   mocked stranded v2.1 stage, since it has never been exercised on this pool.
+4c. `status` accepts a staged v2.1 request; `cancel` succeeds **only before
+   lane staging** and continues to refuse afterward — matching
+   `cancelUnstaged` (`:182–187`). Never assert a post-staging cancel: the
+   contract cannot deliver it.
+4d. **A staged-but-undispatched v2.1 deploy RESUMES and dispatches** — the
+   `isResume` branch at `:1908` reads the live `laneRequestId` and
+   `assertStagedDeployBinding` accepts the v2.1 record. This is the sole rescue
+   path for a stranded stage and must be proven on a mocked v2.1 stage, not
+   only on legacy.
 5. No constant named after a single strategy remains as a correctness input;
    `EXPECTED_STRATEGY_ID` may survive only as the *legacy* manifest fallback,
    never as a default.
