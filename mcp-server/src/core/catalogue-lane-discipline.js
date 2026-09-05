@@ -25,6 +25,7 @@ const POSTING_LOCK_TTL_SECONDS = 300;
 // arriving agent as a market no one wants — the mirror of the "farmed board"
 // problem we removed by retiring our own sweeping worker.
 const DEFAULT_MAX_UNCLAIMED_BACKLOG = 3;
+const DEFAULT_OPERATOR_RESERVE = 1;
 
 export const DEFAULT_CATALOGUE_LANE_REGISTRY = Object.freeze({
   liveness: Object.freeze({
@@ -64,7 +65,7 @@ export class CatalogueLanePostingError extends AppError {
   }
 }
 
-export function loadCatalogueLaneRegistry(env = process.env) {
+export function loadCatalogueLaneRegistry(env = process.env, { logger = console } = {}) {
   const raw = env.CATALOGUE_LANE_REGISTRY_JSON;
   if (raw === undefined || String(raw).trim() === "") {
     return validateCatalogueLaneRegistry(DEFAULT_CATALOGUE_LANE_REGISTRY);
@@ -75,10 +76,10 @@ export function loadCatalogueLaneRegistry(env = process.env) {
   } catch (error) {
     throw packetConfigError(`CATALOGUE_LANE_REGISTRY_JSON is not valid JSON: ${error.message}`);
   }
-  return validateCatalogueLaneRegistry(parsed);
+  return validateCatalogueLaneRegistry(parsed, { logger });
 }
 
-export function validateCatalogueLaneRegistry(input) {
+export function validateCatalogueLaneRegistry(input, { logger } = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw packetConfigError("the catalogue lane registry must be an object keyed by lane id");
   }
@@ -96,11 +97,22 @@ export function validateCatalogueLaneRegistry(input) {
         throw packetConfigError(`lane ${id} is missing ${field}`);
       }
     }
-    const backlogRaw = rawEntry.maxUnclaimedBacklog ?? DEFAULT_MAX_UNCLAIMED_BACKLOG;
+    const numericField = (field, globalDefault) => {
+      if (rawEntry[field] !== undefined && rawEntry[field] !== null) return rawEntry[field];
+      const laneDefault = DEFAULT_CATALOGUE_LANE_REGISTRY[id]?.[field] ?? globalDefault;
+      if (laneDefault !== globalDefault) {
+        logger?.warn?.(
+          { lane: id, field, laneDefault, globalDefault },
+          `catalogue_lane_registry_implicit_default: lane ${id} omits ${field}; using per-lane code default ${laneDefault}, not global default ${globalDefault}. Make the env registry explicit.`
+        );
+      }
+      return laneDefault;
+    };
+    const backlogRaw = numericField("maxUnclaimedBacklog", DEFAULT_MAX_UNCLAIMED_BACKLOG);
     if (!Number.isInteger(backlogRaw) || backlogRaw < 1) {
       throw packetConfigError(`lane ${id} maxUnclaimedBacklog must be a positive integer`);
     }
-    const operatorReserve = rawEntry.operatorReserve ?? 1;
+    const operatorReserve = numericField("operatorReserve", DEFAULT_OPERATOR_RESERVE);
     if (!Number.isInteger(operatorReserve) || operatorReserve < 0 || operatorReserve > backlogRaw) {
       throw packetConfigError(`lane ${id} operatorReserve must be an integer between 0 and maxUnclaimedBacklog`);
     }

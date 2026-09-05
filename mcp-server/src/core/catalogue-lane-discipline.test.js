@@ -9,11 +9,78 @@ import {
   LANE_BUDGET_EXHAUSTED,
   LANE_PAUSED,
   LANE_SCHEDULER_HEADROOM_RESERVED,
+  loadCatalogueLaneRegistry,
   validateCatalogueLaneRegistry
 } from "./catalogue-lane-discipline.js";
 import { DEFAULT_WORKER_CATALOGUE_GLOBAL_DAILY_BUDGET_RAW } from "./catalogue-daily-budget.js";
 
 const NOW = new Date("2026-08-13T12:00:00.000Z");
+
+function envRegistry(registry) {
+  return { CATALOGUE_LANE_REGISTRY_JSON: JSON.stringify(registry) };
+}
+
+test("env operatorReserve omission mutation preserves oss-anchored reserve two", () => {
+  const entries = structuredClone(DEFAULT_CATALOGUE_LANE_REGISTRY);
+  const options = { logger: { warn() {} } };
+  assert.equal(loadCatalogueLaneRegistry(envRegistry(entries), options).get("oss-anchored").operatorReserve, 2);
+  assert.equal(Object.hasOwn(entries["oss-anchored"], "operatorReserve"), true);
+  delete entries["oss-anchored"].operatorReserve;
+  assert.equal(Object.hasOwn(entries["oss-anchored"], "operatorReserve"), false, "mutation must apply");
+  assert.equal(loadCatalogueLaneRegistry(envRegistry(entries), options).get("oss-anchored").operatorReserve, 2);
+});
+
+test("env backlog omission preserves liveness and benchmark backlog two", () => {
+  const entries = structuredClone(DEFAULT_CATALOGUE_LANE_REGISTRY);
+  for (const id of ["liveness", "benchmark-showcase"]) delete entries[id].maxUnclaimedBacklog;
+  const registry = loadCatalogueLaneRegistry(envRegistry(entries), { logger: { warn() {} } });
+  for (const id of ["liveness", "benchmark-showcase"]) assert.equal(registry.get(id).maxUnclaimedBacklog, 2);
+});
+
+test("env-only lanes retain global backlog three and operator reserve one", () => {
+  const registry = loadCatalogueLaneRegistry(envRegistry({
+    "operator-added": { hypothesis: "h", dailyCapRaw: "1000000", stopCondition: "s", paused: false }
+  }), { logger: { warn() { assert.fail("global defaults for a custom lane are not drift"); } } });
+  assert.deepEqual([...registry.keys()], ["operator-added"], "do not resurrect lanes excluded by the operator");
+  assert.equal(registry.get("operator-added").maxUnclaimedBacklog, 3);
+  assert.equal(registry.get("operator-added").operatorReserve, 1);
+});
+
+test("env implicit non-global defaults warn with the lane and field names", () => {
+  const entries = structuredClone(DEFAULT_CATALOGUE_LANE_REGISTRY);
+  for (const entry of Object.values(entries)) {
+    delete entry.maxUnclaimedBacklog;
+    delete entry.operatorReserve;
+  }
+  const warnings = [];
+  loadCatalogueLaneRegistry(envRegistry(entries), {
+    logger: { warn(details, message) { warnings.push({ details, message }); } }
+  });
+  assert.deepEqual(warnings.map(({ details }) => details), [
+    { lane: "liveness", field: "maxUnclaimedBacklog", laneDefault: 2, globalDefault: 3 },
+    { lane: "oss-anchored", field: "operatorReserve", laneDefault: 2, globalDefault: 1 },
+    { lane: "benchmark-showcase", field: "maxUnclaimedBacklog", laneDefault: 2, globalDefault: 3 }
+  ]);
+  for (const { details, message } of warnings) {
+    assert.match(message, /catalogue_lane_registry_implicit_default/u);
+    assert.ok(message.includes(details.lane));
+    assert.ok(message.includes(details.field));
+  }
+});
+
+test("explicit env numeric overrides still win and invalid values still refuse", () => {
+  const entries = structuredClone(DEFAULT_CATALOGUE_LANE_REGISTRY);
+  entries["oss-anchored"].maxUnclaimedBacklog = 4;
+  entries["oss-anchored"].operatorReserve = 0;
+  const options = { logger: { warn() { assert.fail("explicit configuration must not warn about omissions"); } } };
+  const lane = loadCatalogueLaneRegistry(envRegistry(entries), options).get("oss-anchored");
+  assert.equal(lane.maxUnclaimedBacklog, 4);
+  assert.equal(lane.operatorReserve, 0);
+  for (const bad of [-1, "2", 1.5, 5]) {
+    entries["oss-anchored"].operatorReserve = bad;
+    assert.throws(() => loadCatalogueLaneRegistry(envRegistry(entries), options), /operatorReserve must be an integer/u);
+  }
+});
 
 function job(id, lane = "liveness", rewardAmount = 0.5) {
   return { id, lane, rewardAmount, rewardAsset: "USDC" };
@@ -258,6 +325,7 @@ function roomyRegistry(maxUnclaimedBacklog = 2) {
       hypothesis: "liveness hypothesis",
       dailyCapRaw: "100000000",
       maxUnclaimedBacklog,
+      operatorReserve: 1,
       stopCondition: "liveness stop",
       paused: false
     },
@@ -265,6 +333,7 @@ function roomyRegistry(maxUnclaimedBacklog = 2) {
       hypothesis: "oss hypothesis",
       dailyCapRaw: "100000000",
       maxUnclaimedBacklog,
+      operatorReserve: 1,
       stopCondition: "oss stop",
       paused: false
     }
