@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { setImmediate } from "node:timers/promises";
 import { readFile } from "node:fs/promises";
+import { HttpRequestError } from "viem";
 
 import {
   createIndexerRpcFetch,
@@ -153,6 +154,7 @@ test("diagnostic 404 and 5xx retries happen after all fallback providers answere
 test("runtime fallback switches providers once each without diagnostic retries", async () => {
   for (const secondSucceeds of [true, false]) {
     const calls: string[] = [];
+    const sleeps: number[] = [];
     const transport = createIndexerRpcTransport(["https://first.invalid", "https://second.invalid"], {
       fetchImpl: async (input) => {
         calls.push(String(input));
@@ -160,11 +162,16 @@ test("runtime fallback switches providers once each without diagnostic retries",
           ? Response.json({ jsonrpc: "2.0", id: 1, result: "0x100" })
           : new Response("unavailable", { status: 503 });
       },
-      sleep: async () => { throw new Error("runtime request must not retry the chain"); },
+      sleep: async (ms) => { sleeps.push(ms); },
     })({});
     const result = transport.request({ method: "eth_blockNumber" });
     if (secondSucceeds) assert.equal(await result, "0x100");
-    else await assert.rejects(result);
+    else await assert.rejects(result, (error) => {
+      assert.ok(error instanceof HttpRequestError, "must preserve the provider failure, not a retry-helper error");
+      assert.equal(error.status, 503);
+      return true;
+    });
+    assert.deepEqual(sleeps, [], "runtime fallback must never invoke diagnostic backoff");
     assert.deepEqual(calls, ["https://first.invalid/", "https://second.invalid/"]);
   }
 });
