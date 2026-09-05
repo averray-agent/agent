@@ -54,9 +54,29 @@ difference is this constant.
 | `:1442` | **recall RESUME guard** | a stuck v2.1 recall could not be resumed — the exact 2026-09-01 scenario, un-recoverable |
 | `:1617` | staged-wrapper-record guard | same class |
 
-The **commit** path reads the real id from the `LaneRequestStaged` receipt, so
-a commit would likely work — and the script correctly refuses to commit on a
-failed dry run. Do **not** bypass that; fix the prediction.
+## CORRECTION — the deploy commit would NOT have worked; the dry run saved us
+
+Only the **recall** commit reads the real id from the `LaneRequestStaged`
+receipt (`:1604–1608`). The **deploy** commit (`:1908–1916`) does this instead:
+
+```js
+liveLaneRequestId = poolRequestForLaneRequest(predictedLaneRequestId) === requestId
+  ? predictedLaneRequestId : ZERO32;
+if (liveLaneRequestId === ZERO32) throw new Error("Postcondition failed: pool↔lane request bridge was not established.");
+```
+
+With the wrong prediction that reverse lookup returns nothing, so a real commit
+would have: **(1)** staged for real — 9.98 USDC moved into the lane, wrapper
+request queued under the real id — then **(2)** thrown the postcondition and
+stopped before `dispatchLeg`, then **(3)** been un-resumable, because the
+resume/identity guards at `:1442` and `:1617` reject a v2.1 record whose
+`strategyId` is not the legacy constant (and `assertStagedDeployBinding`, which holds the `:1152`
+guard, is on the status/cancel path). **A stranded staged deployment the script
+could neither continue, resume, nor cancel.**
+
+The dry run's refusal is therefore load-bearing, not merely correct. **Do not
+bypass it.** The two commit paths are also inconsistent with each other — fix
+that as part of this (see fix C).
 
 `pool-venue-ceremony.mjs` has zero occurrences — this is dispatch-only. It is the
 same defect family as #1339 (pool-blind global), one layer down.
@@ -75,8 +95,12 @@ Run the stage alone through `dryRunApi`, decode `LaneRequestStaged` from
 the commit path already does with the real receipt. This removes an entire
 class of prediction bugs and mirrors the proof above.
 
-Keep A even with B: the guards at `:1152/:1442/:1617` compare recorded ids and
-need the per-pool value regardless.
+**C — Make the deploy commit read the lane id from the receipt**, exactly as the
+recall commit does at `:1604–1608`. The reverse-mapping postcondition may stay
+as a *check* against the emitted id, never as the *source* of it.
+
+Keep A even with B and C: the guards at `:1152/:1442/:1617` compare recorded ids
+and need the per-pool value regardless.
 
 ## Non-negotiables (each pinned by a test)
 
@@ -88,6 +112,11 @@ need the per-pool value regardless.
 4. The dry-run funding simulation uses the id emitted by the staged events, not
    a local prediction — prove by making the predictor return garbage and
    asserting the simulation still targets the emitted id.
+4b. **The deploy commit path** likewise takes its lane id from the receipt's
+   `LaneRequestStaged`; with a garbage predictor a mocked commit still
+   dispatches against the emitted id and never throws the bridge postcondition.
+4c. `status` and `cancel` accept a v2.1 staged record — a stranded v2.1 stage
+   must be cancellable.
 5. No constant named after a single strategy remains as a correctness input;
    `EXPECTED_STRATEGY_ID` may survive only as the *legacy* manifest fallback,
    never as a default.
