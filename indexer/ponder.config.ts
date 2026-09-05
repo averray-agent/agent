@@ -9,7 +9,7 @@ import {
   TreasuryPolicyAbi,
   XcmWrapperAbi
 } from "./abis/contractsAbi";
-import { createIndexerRpcTransport } from "./src/rpc-transport";
+import { createIndexerRpcTransport, resolveIndexerRpcUrls } from "./src/rpc-transport";
 
 type Address = `0x${string}`;
 
@@ -24,7 +24,7 @@ const chainName = process.env.POLKADOT_CHAIN_NAME ?? "polkadotHubTestnet";
 const lowMemoryMode = process.env.PONDER_LOW_MEMORY === "true";
 const includeTreasury = process.env.PONDER_ENABLE_TREASURY !== "false";
 
-const rpcUrl = resolveRpcUrl(chainId);
+const rpcUrls = resolveIndexerRpcUrls(chainId);
 const treasuryPolicyAddress = requireAddress(
   process.env.PONDER_TREASURY_POLICY_ADDRESS ?? process.env.TREASURY_POLICY_ADDRESS,
   "TREASURY_POLICY_ADDRESS"
@@ -146,7 +146,7 @@ export default createConfig({
   chains: {
     [chainName]: {
       id: chainId,
-      rpc: createIndexerRpcTransport(rpcUrl),
+      rpc: createIndexerRpcTransport(rpcUrls),
       pollingInterval: lowMemoryMode ? 4_000 : 1_000,
       disableCache: lowMemoryMode,
       ethGetLogsBlockRange: lowMemoryMode ? 25 : undefined
@@ -166,28 +166,6 @@ function parsePositiveInt(raw: string | undefined, fallback: number): number {
   if (!raw) return fallback;
   const n = Number(raw);
   return Number.isInteger(n) && n > 0 ? n : fallback;
-}
-
-/**
- * Resolve the RPC URL for the configured chain. Precedence:
- *   1. `DWELLER_RPC_URL` — preferred private/provider endpoint
- *   2. `POLKADOT_RPC_URL` — explicit generic override
- *   3. `PONDER_RPC_URL_<chainId>` — Ponder's per-chain convention; retained
- *      for backwards compatibility with the existing TestNet Render deployment
- *   4. TestNet public endpoint — only when chainId is the TestNet id; any
- *      other chain must set an explicit RPC or boot fails.
- */
-function resolveRpcUrl(id: number): string {
-  const dweller = process.env.DWELLER_RPC_URL?.trim();
-  if (dweller) return dweller;
-  const direct = process.env.POLKADOT_RPC_URL?.trim();
-  if (direct) return direct;
-  const perChain = process.env[`PONDER_RPC_URL_${id}`]?.trim();
-  if (perChain) return perChain;
-  if (id === 420420417) return "https://eth-rpc-testnet.polkadot.io/";
-  throw new Error(
-    `Ponder: no RPC URL configured for chain id ${id}. Set DWELLER_RPC_URL, POLKADOT_RPC_URL, or PONDER_RPC_URL_${id}.`
-  );
 }
 
 function requireAddress(raw: string | undefined, name: string): Address {

@@ -248,6 +248,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck:indexer
 
+      - name: Indexer API and RPC transport tests
+        run: npm run test:indexer:api
+
   env-template-structure:
     name: Phase 2 — env template structural lint
     runs-on: ubuntu-latest
