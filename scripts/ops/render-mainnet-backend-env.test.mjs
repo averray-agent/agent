@@ -6,6 +6,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import {
+  DEFAULT_CATALOGUE_LANE_REGISTRY,
+  loadCatalogueLaneRegistry,
+} from "../../mcp-server/src/core/catalogue-lane-discipline.js";
 
 import {
   MAINNET_BACKEND_RPC,
@@ -414,4 +419,26 @@ test("generator --check drift detector still reports a genuinely stale template"
   ));
 
   assert.deepEqual(drift, [stale]);
+});
+
+test("rendered mainnet lane limits are explicit, code-aligned, and pass the drift check", () => {
+  const generated = generateAll();
+  const path = "deploy/backend.mainnet.env.template";
+  const source = readFileSync(new URL("../../deploy/backend.env.template", import.meta.url), "utf8");
+  for (const template of [source, generated[path]]) {
+    const json = template.match(/^CATALOGUE_LANE_REGISTRY_JSON=(.+)$/mu)?.[1];
+    assert.ok(json);
+    const entries = JSON.parse(json);
+    const registry = loadCatalogueLaneRegistry({ CATALOGUE_LANE_REGISTRY_JSON: json }, {
+      logger: { warn() { assert.fail("source and rendered template must not rely on implicit lane defaults"); } }
+    });
+    assert.deepEqual(Object.keys(entries), Object.keys(DEFAULT_CATALOGUE_LANE_REGISTRY));
+    for (const [id, defaults] of Object.entries(DEFAULT_CATALOGUE_LANE_REGISTRY)) {
+      for (const field of ["maxUnclaimedBacklog", "operatorReserve"]) {
+        assert.equal(entries[id][field], defaults[field], `${id}.${field} must be explicit in the template`);
+        assert.equal(registry.get(id)[field], defaults[field], `${id}.${field} must survive env parsing`);
+      }
+    }
+  }
+  assert.deepEqual(findGeneratedDrift({ [path]: generated[path] }), []);
 });
