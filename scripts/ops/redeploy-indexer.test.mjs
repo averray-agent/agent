@@ -240,3 +240,80 @@ async function writeExecutable(path, content) {
   await writeFile(path, `${content}\n`);
   await chmod(path, 0o755);
 }
+
+test("Ponder boot timeout is named and same-build restart gets one 240s health budget", async () => {
+  const fixture = await runFailedIndexerFixture();
+  const output = fixture.result.stdout + fixture.result.stderr;
+  assert.equal(fixture.result.status, 1, output);
+  assert.match(output, /timeout 240s/u);
+  assert.match(output, /indexer boot RPC probe timed out against https:\/\/eth-rpc.polkadot.io\//u);
+  assert.match(output, /docs\/PACKET_INDEXER_RECREATED_EVERY_DEPLOY_SINGLE_RPC_BOOT.md/u);
+  assert.doesNotMatch(output, /no known fatal-startup patterns/u);
+  assert.match(output, /same-build restart/u);
+  assert.doesNotMatch(output, /serving the previous build|Rollback succeeded/u);
+  assert.equal(fixture.starts, 1, "same-build failure must not reset Ponder's probe progress");
+  assert.equal(fixture.probes, 1, "fake clock must observe one 240s gate, not two hidden budgets");
+});
+
+test("different SHA or schema retains real rollback and previous-build wording", async () => {
+  for (const changed of ["sha", "schema"]) {
+    const fixture = await runFailedIndexerFixture(changed);
+    const output = fixture.result.stdout + fixture.result.stderr;
+    assert.equal(fixture.result.status, 1, output);
+    assert.equal(fixture.starts, 2, "a true rollback recreates after restoring its target");
+    assert.match(output, /Rollback succeeded; indexer is serving the previous build/u);
+    assert.doesNotMatch(output, /same-build restart/u);
+    assert.match(fixture.env, /DATABASE_SCHEMA=same_owner/u);
+    if (changed === "sha") assert.match(output, /Working tree restored to old_sha/u);
+    else assert.match(output, /performing schema-only rollback/u);
+  }
+});
+
+async function runFailedIndexerFixture(changed = "none") {
+  const root = await mkdtemp(join(tmpdir(), "indexer-boot-budget-"));
+  const appRoot = join(root, "app");
+  const fakeBin = join(root, "bin");
+  await mkdir(join(appRoot, "scripts/ops"), { recursive: true });
+  await mkdir(join(appRoot, ".git"));
+  await mkdir(fakeBin);
+  const scriptPath = join(appRoot, "scripts/ops/redeploy-indexer.sh");
+  await writeExecutable(scriptPath, await readFile(REDEPLOY_SCRIPT, "utf8"));
+  await writeFile(join(root, "compose.yml"), "services: {}\n");
+  await writeFile(join(root, "indexer.env"), `DATABASE_SCHEMA=${changed === "schema" ? "new_owner" : "same_owner"}\n`);
+  for (const [name, content] of Object.entries({ head: "new_sha", clock: "0", starts: "0", probes: "0" })) {
+    await writeFile(join(root, name), content);
+  }
+  await writeExecutable(join(fakeBin, "git"), `#!/usr/bin/env bash
+case "$*" in
+  *"checkout --quiet"*) echo "\${@: -1}" > "$FIXTURE_ROOT/head" ;;
+  *"rev-parse HEAD"*) cat "$FIXTURE_ROOT/head" ;;
+esac`);
+  await writeExecutable(join(fakeBin, "docker"), `#!/usr/bin/env bash
+case "$*" in
+  *"up -d"*) n=$(cat "$FIXTURE_ROOT/starts"); echo $((n + 1)) > "$FIXTURE_ROOT/starts" ;;
+  *"logs --tail="*"indexer"*)
+    echo 'WARN JSON-RPC request unexpectedly surpassed timeout chain=polkadotHubMainnet hostname=custom_transport'
+    echo 'WARN All JSON-RPC providers are inactive action=rpc_diagnostic chain=polkadotHubMainnet'
+    echo 'TimeoutError: The request took too long to respond.'
+    echo 'URL: https://eth-rpc.polkadot.io/'
+    echo 'Request body: {"method":"eth_chainId"}' ;;
+esac`);
+  await writeExecutable(join(fakeBin, "date"), `#!/usr/bin/env bash
+n=$(cat "$FIXTURE_ROOT/clock"); echo "$n"; echo $((n + 120)) > "$FIXTURE_ROOT/clock"`);
+  await writeExecutable(join(fakeBin, "curl"), `#!/usr/bin/env bash
+n=$(cat "$FIXTURE_ROOT/probes"); echo $((n + 1)) > "$FIXTURE_ROOT/probes"
+[[ $(cat "$FIXTURE_ROOT/starts") -ge 2 ]]`);
+  for (const command of ["sleep", "flock"]) {
+    await writeExecutable(join(fakeBin, command), "#!/usr/bin/env bash\nexit 0");
+  }
+  const result = spawnSync("bash", [scriptPath], {
+    env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, FIXTURE_ROOT: root,
+      COMPOSE_FILE: join(root, "compose.yml"), INDEXER_ENV_TARGET: join(root, "indexer.env"),
+      INDEXER_SCHEMA_LOCK_HELD: "1", INDEXER_SCHEMA_PREFLIGHTED: "1", INDEXER_BUILD_IMAGE: "0",
+      SKIP_GIT_UPDATE: "1", PRE_DEPLOY_SHA: changed === "sha" ? "old_sha" : "new_sha",
+      ROLLBACK_INDEXER_SCHEMA: "same_owner", WAIT_FOR_READY: "0" },
+    encoding: "utf8", timeout: 10_000,
+  });
+  return { result, starts: Number(await readFile(join(root, "starts"), "utf8")),
+    probes: Number(await readFile(join(root, "probes"), "utf8")), env: await readFile(join(root, "indexer.env"), "utf8") };
+}

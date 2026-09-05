@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 
 import {
   buildSelection,
@@ -2470,6 +2470,125 @@ async function makeDurableMainnetTargetFixture() {
     },
   };
 }
+
+test("unchanged second deploy does not recreate the indexer after host schema injection", async () => {
+  const fixture = await makeRenderedIndexerFixture();
+  const first = runDeploy(fixture.appRoot, fixture.env);
+  assert.equal(first.status, 0, first.stdout + first.stderr);
+  await writeFile(fixture.deployLog, "");
+  const second = runDeploy(fixture.appRoot, { ...fixture.env, RUN_INDEXER: "auto" });
+  assert.equal(second.status, 0, second.stdout + second.stderr);
+  assert.doesNotMatch(second.stdout, /Deploying indexer/u);
+  assert.doesNotMatch(await readFile(fixture.deployLog, "utf8"), /--force-recreate.*indexer/u);
+  assert.match(second.stdout, /indexer env unchanged apart from host-injected DATABASE_SCHEMA \(same_owner\); not recreating/u);
+});
+
+async function makeRenderedIndexerFixture() {
+  const fixture = await makeIndexerSchemaSourceFixture({ runtimeSchema: "same_owner" });
+  fixture.appRoot = realpathSync(fixture.appRoot);
+  await writeFile(join(fixture.stateDir, "indexer.database-schema.testnet"), "same_owner\n");
+  const root = join(fixture.appRoot, "..");
+  const runtimeRoot = join(root, "runtime");
+  const credentialsRoot = join(root, "credentials");
+  const fakeBin = join(root, "bin");
+  await mkdir(runtimeRoot);
+  await mkdir(credentialsRoot);
+  const indexerTemplate = join(fixture.appRoot, "deploy/indexer.env.template");
+  const backendTemplate = join(fixture.appRoot, "deploy/backend.env.template");
+  await writeFile(backendTemplate, "BACKEND_FIXTURE=1\n");
+  await copyFile(backendTemplate, join(runtimeRoot, "backend.env"));
+  fixture.indexerEnv = join(runtimeRoot, "indexer.env");
+  await writeFile(fixture.indexerEnv, `${await readFile(indexerTemplate, "utf8")}DATABASE_SCHEMA=same_owner\n`);
+  for (const name of ["backend", "indexer"]) {
+    await writeFile(join(credentialsRoot, `op-${name}.env`), "fixture-only\n");
+  }
+  const selectionFile = join(root, "selection.json");
+  await writeFile(selectionFile, "{}\n");
+  await writeFile(join(fixture.env.STACK_ROOT, "Caddyfile"), "fixture\n");
+  const target = {
+    network: "testnet", composeFile: fixture.env.COMPOSE_FILE,
+    projectDirectory: fixture.env.STACK_ROOT,
+    backendService: "backend", backendContainer: "agent-backend", indexerService: "indexer",
+    runtimeRoot, credentialsRoot, backendTemplate, indexerTemplate,
+  };
+  await writeExecutable(join(fixture.appRoot, "scripts/ops/run-caddy-network-selection.sh"),
+    `#!/usr/bin/env bash\nif [[ "$1" == status ]]; then\n  echo '{"consistent":true}'\nelse\n  echo '${JSON.stringify(target)}'\nfi\n`);
+  await writeExecutable(join(fixture.appRoot, "scripts/ops/render-vps-env.sh"),
+    '#!/usr/bin/env bash\ncp "$1" "$2"\n');
+  await writeExecutable(join(fakeBin, "sudo"), '#!/usr/bin/env bash\nexec "$@"\n');
+  await writeExecutable(join(fakeBin, "sleep"), '#!/usr/bin/env bash\nexit 0\n');
+  await writeExecutable(join(fakeBin, "docker"), '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$DEPLOY_LOG"\n');
+  await copyFile(join(REPO_ROOT, "scripts/ops/redeploy-indexer.sh"), join(fixture.appRoot, "scripts/ops/redeploy-indexer.sh"));
+  git(fixture.appRoot, "add", ".");
+  git(fixture.appRoot, "commit", "-m", "active runtime renderer");
+  const sha = revParse(fixture.appRoot, "HEAD");
+  fixture.env = { ...fixture.env, CADDY_NETWORK_STATE_FILE: selectionFile,
+    INDEXER_ENV_FILE: fixture.indexerEnv, DEPLOY_OLD_SHA: sha, DEPLOY_NEW_SHA: sha };
+  return fixture;
+}
+
+test("DWELLER env change recreates once and an explicit schema change still recreates", async () => {
+  const fixture = await makeRenderedIndexerFixture();
+  const first = runDeploy(fixture.appRoot, fixture.env);
+  assert.equal(first.status, 0, first.stdout + first.stderr);
+  await writeFile(fixture.deployLog, "");
+  const template = join(fixture.appRoot, "deploy/indexer.env.template");
+  await writeFile(template, `${await readFile(template, "utf8")}DWELLER_RPC_URL=https://services.polkadothub-rpc.com/testnet/\n`);
+  git(fixture.appRoot, "add", ".");
+  git(fixture.appRoot, "commit", "-m", "non-identity provider change");
+  const sha = revParse(fixture.appRoot, "HEAD");
+  const env = { ...fixture.env, RUN_INDEXER: "auto", DEPLOY_NEW_SHA: sha };
+  const changed = runDeploy(fixture.appRoot, env);
+  assert.equal(changed.status, 0, changed.stdout + changed.stderr);
+  assert.doesNotMatch(changed.stdout, /Fresh indexer schema selected/u);
+  assert.match(await readFile(fixture.indexerEnv, "utf8"), /DATABASE_SCHEMA=same_owner/u);
+  assert.equal((await readFile(fixture.deployLog, "utf8")).match(/--force-recreate indexer/gu)?.length, 1);
+  const repeated = runDeploy(fixture.appRoot, { ...env, DEPLOY_OLD_SHA: sha });
+  assert.equal(repeated.status, 0, repeated.stdout + repeated.stderr);
+  assert.doesNotMatch(repeated.stdout, /Deploying indexer/u);
+  assert.equal((await readFile(fixture.deployLog, "utf8")).match(/--force-recreate indexer/gu)?.length, 1);
+  const schemaChanged = runDeploy(fixture.appRoot, { ...env, DEPLOY_OLD_SHA: sha, INDEXER_DATABASE_SCHEMA: "new_owner" });
+  assert.equal(schemaChanged.status, 0, schemaChanged.stdout + schemaChanged.stderr);
+  assert.equal((await readFile(fixture.deployLog, "utf8")).match(/--force-recreate indexer/gu)?.length, 2);
+  assert.match(await readFile(fixture.indexerEnv, "utf8"), /DATABASE_SCHEMA=new_owner/u);
+});
+
+test("DWELLER provider addition leaves the actual Ponder config identity and mainnet RPC unchanged", async () => {
+  const fixture = await makeIndexerSchemaSourceFixture();
+  const script = await readFile(DEPLOY_SCRIPT, "utf8");
+  const identityFunction = script.match(/\nindexer_ponder_config_identity\(\) \{[\s\S]*?\n\}/u)?.[0];
+  assert.ok(identityFunction);
+  const templatePath = "deploy/indexer.env.template";
+  const mainnet = await readFile(join(REPO_ROOT, "deploy/indexer.mainnet.env.template"), "utf8");
+  const pinnedRpc = "PONDER_RPC_URL_420420419=https://eth-rpc.polkadot.io/";
+  assert.equal(mainnet.split("\n").find((line) => line.startsWith("PONDER_RPC_URL_420420419=")), pinnedRpc);
+  const identities = [];
+  for (const template of [mainnet.replace(/^DWELLER_RPC_URL=.*\n/gmu, ""), mainnet]) {
+    await writeFile(join(fixture.appRoot, templatePath), template);
+    git(fixture.appRoot, "add", ".");
+    git(fixture.appRoot, "commit", "--allow-empty", "-m", "provider identity fixture");
+    identities.push(execFileSync("bash", ["-c", `${identityFunction}\nindexer_ponder_config_identity HEAD`], {
+      env: { ...process.env, APP_ROOT: fixture.appRoot, INDEXER_ENV_TEMPLATE: join(fixture.appRoot, templatePath) },
+      encoding: "utf8",
+    }).trim());
+  }
+  assert.match(mainnet, /^DWELLER_RPC_URL=https:\/\/services.polkadothub-rpc.com\/mainnet\/$/mu);
+  assert.equal(identities[0], identities[1]);
+});
+
+test("indexer same-build failure summary names the backend already live at the new SHA", async () => {
+  const fixture = await makeRenderedIndexerFixture();
+  const first = runDeploy(fixture.appRoot, fixture.env);
+  assert.equal(first.status, 0, first.stdout + first.stderr);
+  await writeExecutable(join(fixture.appRoot, "scripts/ops/redeploy-backend.sh"), '#!/usr/bin/env bash\nexit 0\n');
+  await writeExecutable(join(fixture.appRoot, "scripts/ops/redeploy-indexer.sh"), '#!/usr/bin/env bash\nexit 1\n');
+  const template = join(fixture.appRoot, "deploy/indexer.env.template");
+  await writeFile(template, `${await readFile(template, "utf8")}DWELLER_RPC_URL=https://services.polkadothub-rpc.com/testnet/\n`);
+  const failed = runDeploy(fixture.appRoot, { ...fixture.env, RUN_BACKEND: "1", RUN_INDEXER: "auto" });
+  assert.equal(failed.status, 1, failed.stdout + failed.stderr);
+  assert.ok(failed.stderr.includes(`backend live at ${fixture.env.DEPLOY_NEW_SHA}; indexer same-build restart; run failed on the indexer gate`));
+  assert.doesNotMatch(failed.stdout, /Production deploy completed/u);
+});
 
 async function makeIndexerSchemaSourceFixture({ runtimeSchema = "" } = {}) {
   const root = await mkdtemp(join(tmpdir(), "deploy-indexer-schema-source-"));
