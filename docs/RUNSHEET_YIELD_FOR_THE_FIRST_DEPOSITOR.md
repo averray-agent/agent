@@ -44,7 +44,9 @@ only valid while the signer's nonce holds, so don't leave a gap.
 **3. Ceremony B** — one multisig session: pause dispatch → `setStrategyAdapter`
 → unpause → **`setVenueAdapter`** (irreversible).
 
-**4. First subsidised cycle** — `deployToVenue` for 7 days. **Size by the 50% POLICY,
+**4. First subsidised cycle** — `deployToVenue` for 7 days with
+**`--deployment-kind standing`** (≤7d; `proof` is the 48-hour measurement kind
+and refuses a 7-day return-by). **Size by the 50% POLICY,
 not by `maxDeployableAssets`:** the ceremony script admits only
 `(costBasis + assets) * 2 <= totalAssets` (`assertDeployAdmission`, equality
 allowed). At totalAssets 19.960274 that is **`--assets 9980137`** (9.980137),
