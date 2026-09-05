@@ -44,8 +44,12 @@ only valid while the signer's nonce holds, so don't leave a gap.
 **3. Ceremony B** — one multisig session: pause dispatch → `setStrategyAdapter`
 → unpause → **`setVenueAdapter`** (irreversible).
 
-**4. First subsidised cycle** — `deployToVenue` for 7 days at the then-current
-deployable, then recall and settle before the deadline. Two scripts:
+**4. First subsidised cycle** — `deployToVenue` for 7 days. **Size by the 50% POLICY,
+not by `maxDeployableAssets`:** the ceremony script admits only
+`(costBasis + assets) * 2 <= totalAssets` (`assertDeployAdmission`, equality
+allowed). At totalAssets 19.960274 that is **`--assets 9980137`** (9.980137),
+not the contract's 10.051877 deployable — the policy is the binding limit. Then
+recall and settle before the deadline. Two scripts:
 `pool-venue-ceremony.mjs` for deploy/recall/settle, `pool-venue-dispatch.mjs`
 for `stage-dispatch` / `stage-recall`. **Both legs, every time** — omitting the
 staging step cost two hours on 2026-09-01.
