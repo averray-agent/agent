@@ -26,6 +26,8 @@ export class GithubIssueIngestionScheduler {
     denylistRepos = DEFAULT_SECURITY_STANDARDS_DENYLIST,
     scanRepoPolicies = false,
     githubToken = undefined,
+    retirementBatchSize = 10,
+    retirementReadTimeoutMs = 3000,
     fetchImpl = fetch,
     logger = console
   } = {}) {
@@ -43,6 +45,10 @@ export class GithubIssueIngestionScheduler {
     this.denylistRepos = denylistRepos;
     this.scanRepoPolicies = scanRepoPolicies;
     this.githubToken = githubToken;
+    this.retirementBatchSize = Math.min(10, parsePositiveInt(retirementBatchSize, 10));
+    this.retirementReadTimeoutMs = Math.min(3000, parsePositiveInt(retirementReadTimeoutMs, 3000));
+    this.upstreamReads = new Map();
+    this.upstreamReadSequence = 0;
     this.fetchImpl = fetchImpl;
     this.logger = logger;
     this.timer = undefined;
@@ -107,6 +113,10 @@ export class GithubIssueIngestionScheduler {
       candidateCount: 0,
       createdCount: 0,
       ingestRefusedSpecHashMismatchCount: 0,
+      upstreamCheckedCount: 0,
+      upstreamUnknownCount: 0,
+      retiredCount: 0,
+      wouldRetireCount: 0,
       skipped: [],
       errors: [],
       queries: []
@@ -118,11 +128,11 @@ export class GithubIssueIngestionScheduler {
     }
     if (!this.queries.length) {
       summary.skipped.push({ reason: "no_queries_configured" });
-      return this.finishRun(summary);
+      return this.finishWithRetirement(summary, now);
     }
     if (openGithubJobs >= this.maxOpenJobs) {
       summary.skipped.push({ reason: "max_open_jobs_reached", openGithubJobs, maxOpenJobs: this.maxOpenJobs });
-      return this.finishRun(summary);
+      return this.finishWithRetirement(summary, now);
     }
 
     let remaining = Math.max(0, Math.min(this.maxJobsPerRun, this.maxOpenJobs - openGithubJobs));
@@ -202,7 +212,93 @@ export class GithubIssueIngestionScheduler {
       }
     }
 
+    return this.finishWithRetirement(summary, now);
+  }
+
+  async finishWithRetirement(summary, now) {
+    // Lifecycle retirement hides future supply; it never deletes definitions or
+    // mutates sessions. A worker's own merged PR may have closed the upstream.
+    const listed = this.platformService.listJobs().filter((job) =>
+      job.source?.type === "github_issue" && !job.recurring);
+    const ids = new Set(listed.map(({ id }) => id));
+    for (const id of this.upstreamReads.keys()) {
+      if (!ids.has(id)) this.upstreamReads.delete(id);
+    }
+    // Least-recently-checked first: a capped pass must not starve the tail.
+    listed.sort((a, b) => (this.upstreamReads.get(a.id)?.sequence ?? 0)
+      - (this.upstreamReads.get(b.id)?.sequence ?? 0));
+    for (const job of listed.slice(0, this.retirementBatchSize)) {
+      const previous = this.upstreamReads.get(job.id);
+      const read = { sequence: ++this.upstreamReadSequence, etag: previous?.etag };
+      this.upstreamReads.set(job.id, read);
+      summary.upstreamCheckedCount += 1;
+      let upstream;
+      try {
+        upstream = await this.readUpstreamIssue(job, previous);
+        read.etag = upstream.etag;
+        read.state = upstream.state;
+        read.closeReason = upstream.closeReason;
+      } catch {
+        // An outage, rate limit, malformed body or timeout is not a closed issue.
+        // Drop the cached validator after an unknown read; next tick asks afresh.
+        read.etag = undefined;
+        summary.upstreamUnknownCount += 1;
+        this.logger.warn?.({ jobId: job.id }, "catalogue.upstream_unknown");
+        continue;
+      }
+      if (upstream.state !== "closed") continue;
+      if (this.dryRun) {
+        summary.wouldRetireCount += 1;
+        continue;
+      }
+      const data = { jobId: job.id, repo: job.source.repo, issueNumber: job.source.issueNumber,
+        closeReason: upstream.closeReason };
+      try {
+        await this.platformService.updateJobLifecycle(job.id, {
+          action: "archive", reason: `upstream_closed:${upstream.closeReason}`
+        });
+        summary.retiredCount += 1;
+        this.eventBus?.publish?.({ id: `catalogue-upstream-retired-${job.id}-${now.getTime()}`,
+          topic: "catalogue.upstream_retired", jobId: job.id, timestamp: now.toISOString(), data });
+        this.logger.info?.(data, "catalogue.upstream_retired");
+      } catch (error) {
+        summary.errors.push({ jobId: job.id, message: "upstream_retirement_failed" });
+        this.logger.warn?.({ jobId: job.id, err: error }, "catalogue.upstream_retirement_failed");
+      }
+    }
     return this.finishRun(summary);
+  }
+
+  async readUpstreamIssue(job, previous) {
+    const { repo, issueNumber } = job.source;
+    if (!/^[\w.-]+\/[\w.-]+$/u.test(repo) || !Number.isSafeInteger(issueNumber) || issueNumber <= 0) {
+      throw new Error("invalid_upstream_reference");
+    }
+    const controller = new AbortController();
+    let timer;
+    try {
+      return await Promise.race([
+        (async () => {
+          const response = await this.fetchImpl(`https://api.github.com/repos/${repo}/issues/${issueNumber}`, {
+            signal: controller.signal,
+            headers: { Accept: "application/vnd.github+json",
+              ...(this.githubToken ? { Authorization: `Bearer ${this.githubToken}` } : {}),
+              ...(previous?.etag ? { "If-None-Match": previous.etag } : {}) }
+          });
+          if (response.status === 304 && previous?.etag && previous?.state) return previous;
+          if (response.status !== 200) throw new Error("upstream_unknown");
+          const body = await response.json();
+          if (body?.state !== "open" && body?.state !== "closed") throw new Error("upstream_unknown");
+          return { state: body.state, closeReason: typeof body.state_reason === "string" ? body.state_reason : "unspecified",
+            etag: response.headers?.get?.("etag") };
+        })(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => { controller.abort(); reject(new Error("upstream_timeout")); }, this.retirementReadTimeoutMs);
+        })
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async runOnceAndSchedule() {
