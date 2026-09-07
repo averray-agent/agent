@@ -179,7 +179,7 @@ test("patch job rejects a real matching PR when live tests fail", async () => {
   const submission = validPatchSubmission();
   validateStructuredSubmission(job.outputSchemaRef, submission);
 
-  const verdict = await githubRegistry({ issueNumber: 136, checksPassing: false }).evaluate(
+  const verdict = await githubRegistry({ issueNumber: 149, checksPassing: false }).evaluate(
     job,
     normalizeSubmission(submission),
     { claimantWallet: CLAIMANT, claimSessionId: CLAIM_SESSION }
@@ -192,7 +192,7 @@ test("patch job rejects a real matching PR when live tests fail", async () => {
 
 test("patch job accepts the same submission when live tests pass", async () => {
   const job = jobs[2];
-  const verdict = await githubRegistry({ issueNumber: 136, checksPassing: true }).evaluate(
+  const verdict = await githubRegistry({ issueNumber: 149, checksPassing: true }).evaluate(
     job,
     normalizeSubmission(validPatchSubmission()),
     { claimantWallet: CLAIMANT, claimSessionId: CLAIM_SESSION }
