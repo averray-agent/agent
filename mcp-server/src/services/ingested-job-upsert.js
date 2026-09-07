@@ -4,6 +4,7 @@ import {
 
 const INGEST_REFUSED_SPEC_HASH_MISMATCH = "ingest_refused_spec_hash_mismatch";
 const LANE_POSTING_REFUSALS = new Set([
+  "catalogue_job_retired",
   "lane_budget_exhausted",
   "lane_backlog_saturated",
   "lane_scheduler_headroom_reserved",
@@ -11,6 +12,7 @@ const LANE_POSTING_REFUSALS = new Set([
 ]);
 
 export async function upsertScheduledIngestedJob(platformService, job, { prefund = false, now = new Date() } = {}) {
+  platformService.catalogueMutations?.assertCanIngest(job);
   const liveJob = await readLiveJobForPosting(platformService, job.id);
   const compatibleDefinitions = legacyCatalogueDefinitions(job);
   const liveJobOption = liveJob === undefined ? {} : { liveJob };

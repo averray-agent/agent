@@ -254,7 +254,7 @@ export function createPlatformService() {
   // every construction; nothing to hydrate from. createPlatformRuntime
   // below hydrates against the production durable store.
   const platformService = new PlatformService(
-    jobs,
+    structuredClone(jobs),
     profiles,
     accounts,
     reputations,
@@ -661,7 +661,7 @@ export async function createPlatformRuntime() {
     "init-platform-service",
     logger,
     () => new PlatformService(
-      jobs,
+      structuredClone(jobs),
       profiles,
       accounts,
       reputations,
@@ -690,6 +690,8 @@ export async function createPlatformRuntime() {
   );
   platformService.setWorkerProgressionService(workerProgressionService);
   platformService.logger = logger;
+  const catalogueHydration = await platformService.hydrateCatalogue();
+  logger.info?.(catalogueHydration, "catalogue.mutations_hydrated");
   const catalogueLaneDiscipline = initStep("init-catalogue-lane-discipline", logger, () =>
     createCatalogueLaneDiscipline({
       stateStore,

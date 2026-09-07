@@ -41,7 +41,8 @@ export async function createJobsFromImportResult(service, jobs, { now = new Date
   for (const job of jobs) {
     try {
       assertIngestedCatalogVerifierCanReject(job);
-      const action = () => service.createJob(job);
+      const action = () => service.createOperatorImportedJob
+        ? service.createOperatorImportedJob(job) : service.createJob(job);
       created.push(await (service.catalogueLaneDiscipline?.post
         ? service.catalogueLaneDiscipline.post(job, action, { now, origin: "operator" })
         : action()));

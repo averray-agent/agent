@@ -368,6 +368,7 @@ export class MemoryStateStore {
     this.bankXcmLegDispatchEvidence = new Map();
     this.accountOverlays = new Map();
     this.policyProposals = new Map();
+    this.catalogueMutations = new Map();
     this.siweAuthActivity = new Map();
     this.externalJobDrafts = new Map();
     this.externalDraftJobIndex = new Map();
@@ -396,6 +397,14 @@ export class MemoryStateStore {
     if (!tag) return undefined;
     const stored = this.policyProposals.get(String(tag));
     return cloneJsonRecord(stored);
+  }
+
+  async putCatalogueMutation(record) {
+    this.catalogueMutations.set(record.jobId, cloneJsonRecord(record));
+  }
+
+  async listCatalogueMutations() {
+    return [...this.catalogueMutations.values()].map(cloneJsonRecord);
   }
 
   async upsertPolicyProposal(tag, proposal) {
@@ -1485,6 +1494,17 @@ export class RedisStateStore {
     this.namespace = namespace;
     this.client = createClient({ url: redisUrl });
     this.connectionPromise = undefined;
+  }
+
+  async putCatalogueMutation(record) {
+    await this.connect();
+    await this.client.hSet(this.key("catalogue-mutations", "v1"), record.jobId, JSON.stringify(record));
+  }
+
+  async listCatalogueMutations() {
+    await this.connect();
+    const records = await this.client.hVals(this.key("catalogue-mutations", "v1"));
+    return records.map((raw) => JSON.parse(raw));
   }
 
   // ── account overlays (Package C Phase 2) ───────────────────────────

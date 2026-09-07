@@ -103,7 +103,7 @@ export class JobStaleSweeperService {
           continue;
         }
         if (!this.dryRun) {
-          this.platformService.updateJobLifecycle(job.id, {
+          await this.platformService.updateJobLifecycle(job.id, {
             action: this.action,
             reason: this.reason
           });
