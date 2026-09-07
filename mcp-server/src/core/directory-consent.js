@@ -1,4 +1,3 @@
-import { getAddress } from "ethers";
 import { ValidationError } from "./errors.js";
 
 export const DIRECTORY_DEFAULT_PUBLIC_PROFILE_OPT_IN = false;
@@ -11,7 +10,9 @@ export const DIRECTORY_DISCLOSURE = Object.freeze({
 });
 
 function consentKey(wallet) {
-  return `directory-consent:${getAddress(String(wallet).toLowerCase()).toLowerCase()}`;
+  const normalized = String(wallet ?? "").toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/u.test(normalized)) throw new ValidationError("A signed-in wallet address is required.");
+  return `directory-consent:${normalized}`;
 }
 
 export async function readDirectoryConsent(stateStore, wallet) {
