@@ -7,6 +7,7 @@ import { findLatestDepositSwap } from "./bank-deposit-evidence.js";
 import { describeBalanceTarget } from "./bank-lane-feed.js";
 import { redactProviderError } from "../core/redact-provider-error.js";
 import { SelfIdentityRegistry } from "../core/self-identity-registry.js";
+import { directoryParticipationCounts } from "../core/directory-consent.js";
 import { deriveH160FromAccountId32 } from "../core/wallet-identity.js";
 import { DEPOSIT_POOL_ABI } from "../blockchain/abis.js";
 
@@ -393,6 +394,14 @@ export class TransparencyService {
         total: countField(flow.windows.last24h.jobs)
       },
       settledToExternalWallets24h: countField(flow.workers.outsiders),
+      directoryParticipants: {
+        label: "Unique participants in retained session history; listed-by-consent is a subset, not the participation total.",
+        window: { source: "retained sessions", scannedSessionLimit: MAX_RECORDS, lifetimeTotal: false },
+        ...Object.fromEntries(["total", "external", "operatorRun", "unknown", "listedByConsent", "externalListedByConsent"]
+          .map((name) => [name, countField(flow.participation?.[name] ?? {
+            value: null, unit: "wallets", readAtMs: null, source: "backend_state_store", proof: "participation_read_unavailable"
+          })]))
+      },
       posterFeesAllTime: {
         external: moneyField(flow.posterFees.external),
         operatorSelfPaid: moneyField(flow.posterFees.operatorSelfPaid),
@@ -500,7 +509,13 @@ export class TransparencyService {
         this.selfIdentityRegistry,
         { readAtMs, source, proof }
       );
-      return { windows, composition, workers, posterFees };
+      const counts = await directoryParticipationCounts(sessions, this.stateStore, this.selfIdentityRegistry);
+      const participation = Object.fromEntries(Object.entries(counts).map(([name, value]) => [name, {
+        value, unit: "wallets", readAtMs,
+        source: "retained backend sessions + shared self-identity registry + explicit directory consent",
+        proof: value === null ? "directory_consent_read_unavailable" : "distinct session.wallet; consent does not filter total"
+      }]));
+      return { windows, composition, workers, posterFees, participation };
     } catch (error) {
       const unknown = { value: null, raw: null, readAtMs, source, proof: redactProviderError(error) || "flow_read_failed" };
       return {

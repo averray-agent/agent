@@ -85,6 +85,10 @@ export const UNMAPPED_BY_DESIGN = Object.freeze({
     ])
   ]),
   httpRoutes: Object.freeze([
+    ...unmappedRoutes("directory privacy settings, disclosed in onboarding.directoryPrivacy; not a human app account action", [
+      ["GET", "/agents/consent"],
+      ["POST", "/agents/consent"]
+    ]),
     ...twinRoutes([
       ["GET", "/account/position", "getAccountPosition"],
       ["POST", "/account/deposit/transactions", "buildAccountDepositTransactions"],

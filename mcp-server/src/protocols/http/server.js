@@ -679,6 +679,7 @@ const handleVerifyRoute = createVerifyRoutes({
 
 const handleProfileRoute = createProfileRoutes({
   authMiddleware,
+  readJsonBody,
   logger,
   parseLimit,
   respond,

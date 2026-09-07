@@ -115,6 +115,8 @@ export const ROUTE_CAPABILITY_RULES = [
   { method: "GET", path: "/account", capabilities: ["account:read"] },
   { method: "GET", path: "/account/position", capabilities: ["account:read"] },
   { method: "GET", path: "/me", capabilities: ["account:read", "reputation:read"] },
+  { method: "GET", path: "/agents/consent", capabilities: ["account:read"] },
+  { method: "POST", path: "/agents/consent", capabilities: ["account:read"] },
   { method: "GET", path: "/receipts", capabilities: ["session:read"] },
   { method: "POST", path: "/account/withdraw/transactions", capabilities: ["account:read"] },
   { method: "POST", path: "/account/deposit/transactions", capabilities: ["account:read"] },

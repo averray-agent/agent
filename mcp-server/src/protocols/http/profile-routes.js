@@ -2,7 +2,8 @@ import { getAddress } from "ethers";
 
 import { buildAgentProfile } from "../../core/agent-profile.js";
 import { disputeIdForSession } from "../../core/dispute-resolution.js";
-import { ValidationError } from "../../core/errors.js";
+import { NotFoundError, ValidationError } from "../../core/errors.js";
+import { readDirectoryConsent, writeDirectoryConsent, publicProfileSessions } from "../../core/directory-consent.js";
 import { isInternalPlatformFaultRemediation } from "../../core/platform-fault-remediation.js";
 import {
   buildPublicReputation,
@@ -27,7 +28,7 @@ function handleForWallet(wallet) {
   return `agent-${normalized.slice(2, 6)}-${normalized.slice(-4)}`;
 }
 
-function buildAgentDirectoryRow(profile, publicCommitment = undefined) {
+function buildAgentDirectoryRow(profile, publicCommitment = undefined, consent = {}) {
   const reputation = profile.reputation ?? {};
   const approvedCount = Number(profile.stats?.approvedCount ?? 0);
   const rejectedCount = Number(profile.stats?.rejectedCount ?? 0);
@@ -54,7 +55,7 @@ function buildAgentDirectoryRow(profile, publicCommitment = undefined) {
       Number(reputation.economic ?? 0),
     successRate: profile.stats?.completionRate ?? null,
     totalJobs,
-    currentActivity: profile.currentActivity ?? null,
+    ...(consent.currentActivityOptIn ? { currentActivity: profile.currentActivity ?? null } : {}),
     activeStake: 0,
     badges: profile.badges ?? [],
     slashEvents,
@@ -68,6 +69,7 @@ export function createProfileRoutes({
   logger,
   parseLimit,
   respond,
+  readJsonBody,
   service,
   stateStore,
   lockedTierService,
@@ -161,20 +163,23 @@ export function createProfileRoutes({
     // store window before filtering so the public limit applies to real rows.
     const scanLimit = includeSynthetic ? limit : Math.min(Math.max(limit * 5, limit), 250);
     const sessions = await service.listRecentSessions(scanLimit);
-    const wallets = [...new Set(sessions.map((session) => session.wallet).filter(Boolean))];
+    const wallets = [...new Set(sessions.map((session) => session.wallet?.toLowerCase()).filter((wallet) => ADDRESS_RE.test(wallet ?? "")))];
     const rows = await Promise.all(wallets.map(async (wallet) => {
+      const consent = await readDirectoryConsent(stateStore, wallet);
+      if (!consent.publicProfileOptIn) return undefined;
       const checksummed = safeChecksum(wallet);
       const [reputation, history, publicCommitment] = await Promise.all([
         service.getReputation(checksummed),
         service.collectSessionHistory(checksummed, { logger }),
         lockedTierService?.getPublicCommitment?.(checksummed) ?? Promise.resolve(undefined)
       ]);
-      const getDisputeReceipts = await preloadDisputeReceipts(history);
-      const getLineage = preloadLineage(history);
+      const publicHistory = publicProfileSessions(history, consent);
+      const getDisputeReceipts = await preloadDisputeReceipts(publicHistory);
+      const getLineage = preloadLineage(publicHistory);
       const profile = buildAgentProfile({
         wallet: wallet.toLowerCase(),
         reputation,
-        sessions: history,
+        sessions: publicHistory,
         selfIdentity: selfIdentityRegistry.classifySessions({ wallet, sessions: history }),
         getJobDefinition: (jobId) => {
           try {
@@ -187,9 +192,10 @@ export function createProfileRoutes({
         getDisputeReceipts,
         getLineage,
       });
-      return buildAgentDirectoryRow(profile, publicCommitment);
+      return buildAgentDirectoryRow(profile, publicCommitment, consent);
     }));
     return rows
+      .filter(Boolean)
       .filter((row) => includeSynthetic || row.synthetic !== true)
       .sort((left, right) => {
         if (right.reputationScore !== left.reputationScore) {
@@ -201,12 +207,20 @@ export function createProfileRoutes({
   }
 
   return async function handleProfileRoute({ request, response, url, pathname, requestLogger }) {
+    if (pathname === "/agents/consent" && ["GET", "POST"].includes(request.method)) {
+      const auth = await authMiddleware(request, url, { requireCapability: "account:read" });
+      const consent = request.method === "POST"
+        ? await writeDirectoryConsent(stateStore, auth.wallet, await readJsonBody(request))
+        : await readDirectoryConsent(stateStore, auth.wallet);
+      respond(response, 200, consent, { "cache-control": "no-store" });
+      return true;
+    }
     if (request.method === "GET" && pathname === "/agents") {
       const includeSynthetic = url.searchParams.get("includeSynthetic") === "true";
       respond(response, 200, await buildAgentDirectory(parseLimit(url, 50, 250), {
         includeSynthetic
       }), {
-        "cache-control": "public, max-age=30"
+        "cache-control": "no-store"
       });
       return true;
     }
@@ -217,17 +231,20 @@ export function createProfileRoutes({
         throw new ValidationError("wallet path segment must be a 0x-prefixed 20-byte hex address.");
       }
       const checksummed = safeChecksum(rawWallet);
+      const consent = await readDirectoryConsent(stateStore, checksummed);
+      if (!consent.publicProfileOptIn) throw new NotFoundError("Agent profile is not listed.", "agent_not_found");
       const [reputation, sessions, publicCommitment] = await Promise.all([
         service.getReputation(checksummed),
         service.collectSessionHistory(checksummed, { logger: requestLogger }),
         lockedTierService?.getPublicCommitment?.(checksummed) ?? Promise.resolve(undefined)
       ]);
-      const getDisputeReceipts = await preloadDisputeReceipts(sessions);
-      const getLineage = preloadLineage(sessions);
+      const publicSessions = publicProfileSessions(sessions, consent);
+      const getDisputeReceipts = await preloadDisputeReceipts(publicSessions);
+      const getLineage = preloadLineage(publicSessions);
       const profile = buildAgentProfile({
         wallet: rawWallet.toLowerCase(),
         reputation,
-        sessions,
+        sessions: publicSessions,
         selfIdentity: selfIdentityRegistry.classifySessions({ wallet: rawWallet, sessions }),
         getJobDefinition: (jobId) => {
           try {
@@ -244,7 +261,7 @@ export function createProfileRoutes({
         ...profile,
         tier: publicReputationTier(profile.reputation),
         ...(publicCommitment ? { lockedDeposit: publicCommitment } : {})
-      }, { "cache-control": "public, max-age=30" });
+      }, { "cache-control": "no-store" });
       return true;
     }
 

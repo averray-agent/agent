@@ -1,4 +1,5 @@
 import { getRouteCapabilityRequirements } from "../auth/capabilities.js";
+import { DIRECTORY_DISCLOSURE } from "./directory-consent.js";
 import {
   DEPOSIT_POOL_CAPITAL_SIGNAL_STATEMENT,
   DEPOSIT_POOL_RISK_DISCLOSURE
@@ -869,7 +870,8 @@ export function buildPlatformCapabilities({ chainId = undefined } = {}) {
       selfServeChecklist: manifest.onboarding.selfServeChecklist,
       buildVestedCapacity: manifest.onboarding.buildVestedCapacity,
       withdrawEarnings: manifest.onboarding.withdrawEarnings,
-      agentSurfaceParity: buildAgentSurfaceParity()
+      agentSurfaceParity: buildAgentSurfaceParity(),
+      directoryPrivacy: DIRECTORY_DISCLOSURE
     },
     auth: {
       scheme: manifest.auth.scheme,
