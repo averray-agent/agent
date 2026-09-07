@@ -168,6 +168,15 @@ function issueToken(wallet, { roles = [], ...claims } = {}) {
   return signToken({ sub: wallet, roles, ...claims }, { secret: LONG_SECRET, expiresInSeconds: 60 }).token;
 }
 
+async function consentDirectory(base, wallet, currentActivityOptIn = false) {
+  const response = await fetch(`${base}/agents/consent`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${issueToken(wallet)}` },
+    body: JSON.stringify({ publicProfileOptIn: true, currentActivityOptIn })
+  });
+  assert.equal(response.status, 200, await response.text());
+}
+
 async function runWithServer(fn) {
   const port = 19_000 + Math.floor(Math.random() * 1_000);
   const child = await startServer(port);
@@ -1099,10 +1108,15 @@ test("http smoke: /badges/:sessionId returns schema-compliant JSON for approved 
   });
 });
 
-test("http smoke: /agents/:wallet returns a v1 profile for a fresh wallet", SMOKE_TEST_OPTIONS, async () => {
+test("http smoke: directory consent requires authentication and a fresh wallet stays private until opt-in", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
-    // A never-seen wallet still gets a zero-state profile rather than 404.
     const freshWallet = "0xCa11Cafe00000000000000000000000000000001";
+    assert.equal((await fetch(`${base}/agents/${freshWallet}`)).status, 404);
+    assert.equal((await fetch(`${base}/agents/consent`)).status, 401);
+    const denied = await fetch(`${base}/agents/consent`, { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ publicProfileOptIn: true, currentActivityOptIn: true }) });
+    assert.equal(denied.status, 401);
+    await consentDirectory(base, freshWallet);
     const response = await fetch(`${base}/agents/${freshWallet}`);
     assert.equal(response.status, 200);
     const profile = await response.json();
@@ -1116,6 +1130,7 @@ test("http smoke: /agents/:wallet returns a v1 profile for a fresh wallet", SMOK
 
 test("http smoke: /agents/:wallet aggregates approved sessions into badges", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
+    await consentDirectory(base, ADMIN_WALLET);
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
     const verifierToken = issueToken(VERIFIER_WALLET, { roles: ["verifier"] });
 
@@ -1183,8 +1198,9 @@ test("http smoke: /agents/:wallet aggregates approved sessions into badges", SMO
   });
 });
 
-test("http smoke: /agents exposes a claimed session as current activity", SMOKE_TEST_OPTIONS, async () => {
+test("http smoke: /agents exposes a claimed session only with separate activity consent", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
+    await consentDirectory(base, ADMIN_WALLET, true);
     const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
 
     const createJob = await fetch(`${base}/admin/jobs`, {

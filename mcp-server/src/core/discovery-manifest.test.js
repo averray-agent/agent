@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { DIRECTORY_DISCLOSURE } from "./directory-consent.js";
 import { readFileSync } from "node:fs";
 
 import {
@@ -355,7 +356,8 @@ test("buildPlatformCapabilities stays aligned with the discovery tool list", () 
     selfServeChecklist: manifest.onboarding.selfServeChecklist,
     buildVestedCapacity: manifest.onboarding.buildVestedCapacity,
     withdrawEarnings: manifest.onboarding.withdrawEarnings,
-    agentSurfaceParity: buildAgentSurfaceParity()
+    agentSurfaceParity: buildAgentSurfaceParity(),
+    directoryPrivacy: DIRECTORY_DISCLOSURE
   });
   assert.deepEqual(capabilities.auth, {
     scheme: manifest.auth.scheme,
