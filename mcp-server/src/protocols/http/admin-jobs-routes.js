@@ -216,7 +216,7 @@ export function createAdminJobsRoutes({
       if (!jobId) {
         throw new ValidationError("jobId is required.");
       }
-      const updated = service.updateJobLifecycle(jobId, {
+      const updated = await service.updateJobLifecycle(jobId, {
         action: payload?.action,
         status: payload?.status,
         staleAt: payload?.staleAt,

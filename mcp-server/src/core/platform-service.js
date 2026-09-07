@@ -1,6 +1,7 @@
 import { createStateStore } from "./state-store.js";
 import { AccountMutationService } from "./account-mutation-service.js";
 import { JobCatalogService, explainEligibilityFromPreflight } from "./job-catalog-service.js";
+import { CatalogueMutations } from "./catalogue-mutations.js";
 import {
   JobExecutionService,
   normalizeSubmitPayloadShape,
@@ -160,6 +161,7 @@ export class PlatformService {
       this.getDefaultClaimStakeBps.bind(this),
       this.getClaimEconomicsPreview.bind(this)
     );
+    this.catalogueMutations = new CatalogueMutations(this.jobCatalogService, this.stateStore);
     this.jobExecutionService = new JobExecutionService(
       this.stateStore,
       this.blockchainGateway,
@@ -436,9 +438,11 @@ export class PlatformService {
     assertIngestedCatalogVerifierCanReject(input);
     const jobInput = await this.withRegisteredExternalSchema(input);
     const action = async () => {
+      this.catalogueMutations.assertCanIngest(jobInput);
       const created = this.createJob(jobInput);
       try {
         await this.reserveRecurringTemplateFunding(created, posterWallet);
+        await this.catalogueMutations.persistOperator(created);
         return created;
       } catch (error) {
         this.jobCatalogService.removeJob(created.id);
@@ -448,6 +452,22 @@ export class PlatformService {
     return this.catalogueLaneDiscipline?.post
       ? this.catalogueLaneDiscipline.post(jobInput, action, { origin: "operator" })
       : action();
+  }
+
+  async createOperatorImportedJob(input) {
+    this.catalogueMutations.assertCanIngest(input);
+    const created = this.createJob(input);
+    try {
+      await this.catalogueMutations.persistOperator(created);
+      return created;
+    } catch (error) {
+      this.jobCatalogService.removeJob(created.id);
+      throw error;
+    }
+  }
+
+  hydrateCatalogue() {
+    return this.catalogueMutations.hydrate();
   }
 
   /**
@@ -493,6 +513,7 @@ export class PlatformService {
   }
 
   async upsertIngestedJob(input, options = {}) {
+    this.catalogueMutations.assertCanIngest(input);
     assertIngestedCatalogVerifierCanReject(input);
     const now = options.now ?? new Date();
     const compatibleDefinitions = Array.isArray(options.compatibleDefinitions)
@@ -508,16 +529,19 @@ export class PlatformService {
     });
     const candidate = this.jobCatalogService.normalizeJobInput(prepared);
     this.validateJobRewardMinBalance(candidate);
+    // Serialize the final write with lifecycle mutations and recheck retirement:
+    // an archive can finish while the chain specHash read is in flight.
+    const commit = (definition) => this.catalogueMutations.commitIngest(definition);
 
     if (!this.blockchainGateway?.isEnabled?.()) {
-      return this.jobCatalogService.upsertJob(prepared);
+      return commit(prepared);
     }
 
     const live = Object.hasOwn(options, "liveJob")
       ? options.liveJob
       : await this.blockchainGateway.getJob(candidate.id);
     if (Number(live?.state ?? 0) === 0) {
-      return this.jobCatalogService.upsertJob(prepared);
+      return commit(prepared);
     }
 
     const committedSpecHash = normalizeSpecHash(live?.specHash);
@@ -525,7 +549,7 @@ export class PlatformService {
       this.jobCatalogService.withLifecycle(candidate, now)
     );
     if (committedSpecHash && candidateSpecHash === committedSpecHash) {
-      return this.jobCatalogService.upsertJob(prepared);
+      return commit(prepared);
     }
 
     // Posting migrations may name exact historical definitions. They only
@@ -540,7 +564,7 @@ export class PlatformService {
         this.jobCatalogService.withLifecycle(compatible, now)
       );
       if (committedSpecHash && compatibleSpecHash === committedSpecHash) {
-        return this.jobCatalogService.upsertJob(compatiblePrepared);
+        return commit(compatiblePrepared);
       }
     }
 
@@ -560,6 +584,7 @@ export class PlatformService {
     };
 
     if (details.legacyDrift) {
+      this.catalogueMutations.assertCanIngest(input);
       if (!existing) {
         this.jobCatalogService.upsertJob(prepared);
       }
@@ -647,7 +672,7 @@ export class PlatformService {
   }
 
   updateJobLifecycle(jobId, patch = {}) {
-    return this.jobCatalogService.updateJobLifecycle(jobId, patch);
+    return this.catalogueMutations.updateLifecycle(jobId, patch);
   }
 
   getJobLifecycleSummary() {

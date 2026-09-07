@@ -114,6 +114,11 @@ export class JobCatalogService {
 
   upsertJob(input) {
     const job = this.normalizeJobInput(input);
+    return this.restoreJob(job);
+  }
+
+  restoreJob(document) {
+    const job = structuredClone(document);
     const index = this.jobs.findIndex((candidate) => candidate.id === job.id);
     if (index === -1) {
       this.jobs.unshift(job);

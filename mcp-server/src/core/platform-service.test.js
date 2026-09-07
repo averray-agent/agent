@@ -2047,7 +2047,7 @@ test("getJobTimeline reads durable event log and applies event filters", async (
 
 test("getAdminStatus surfaces recurring scheduler anomalies", async () => {
   const service = makePlatformService();
-  service.updateJobLifecycle("parent-job-001", {
+  await service.updateJobLifecycle("parent-job-001", {
     action: "pause",
     reason: "operator hold"
   });

@@ -9,6 +9,31 @@ function silentLogger() {
   return { warn() {}, error() {}, info() {}, log() {} };
 }
 
+test("memory and Redis catalogue mutation journals retain operator definitions and tombstones without aliasing", async () => {
+  const redis = new RedisStateStore("redis://unused", "catalogue-test");
+  const hashes = new Map();
+  redis.connect = async () => {};
+  redis.client = {
+    async hSet(key, field, value) { const hash = hashes.get(key) ?? new Map(); hash.set(field, value); hashes.set(key, hash); },
+    async hVals(key) { return [...(hashes.get(key)?.values() ?? [])]; }
+  };
+  for (const store of [new MemoryStateStore(), redis]) {
+    const record = { schemaVersion: 1, jobId: "operator-job", origin: "operator", definition: { id: "operator-job", rewardAmount: 2 } };
+    await store.putCatalogueMutation(record);
+    record.definition.rewardAmount = 900;
+    const retired = { schemaVersion: 1, jobId: "scheduled-job", lifecycle: { status: "archived" } };
+    await store.putCatalogueMutation(retired);
+    const records = await store.listCatalogueMutations();
+    assert.equal(records.length, 2);
+    assert.equal(records.find(({ jobId }) => jobId === "operator-job").definition.rewardAmount, 2);
+    records[0].definition.rewardAmount = 800;
+    assert.equal((await store.listCatalogueMutations())[0].definition.rewardAmount, 2);
+    await store.putCatalogueMutation({ ...retired, lifecycle: { status: "open" } });
+    assert.equal((await store.listCatalogueMutations()).length, 2);
+  }
+  assert.deepEqual([...hashes.keys()], ["catalogue-test:catalogue-mutations:v1"]);
+});
+
 test("createStateStore returns MemoryStateStore in dev without REDIS_URL", () => {
   const store = createStateStore({ NODE_ENV: "development", AUTH_MODE: "permissive" }, { logger: silentLogger() });
   assert.ok(store instanceof MemoryStateStore);
