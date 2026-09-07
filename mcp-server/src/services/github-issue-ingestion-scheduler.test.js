@@ -76,6 +76,16 @@ test("closed completed retires while open upstream remains claimable even at the
   }
 });
 
+test("retire pass covers listed recurring GitHub templates but not unrelated sources", async () => {
+  const { job, platform, scheduler } = retirementFixture();
+  platform.jobs.push({ ...job, id: "recurring-issue-template", recurring: true });
+  platform.jobs.push({ ...job, id: "other-source", source: { type: "external" } });
+  const summary = await scheduler.runOnce();
+  assert.equal(summary.retiredCount, 2);
+  assert.equal(platform.getJobDefinition("recurring-issue-template").lifecycle.status, "archived");
+  assert.equal(platform.getClaimableJobDefinition("other-source").id, "other-source");
+});
+
 test("unknown upstream 403 500 timeout or malformed JSON retires exactly zero listings", async (t) => {
   for (const [name, fetchImpl] of Object.entries({
     forbidden: async () => new Response(null, { status: 403 }),

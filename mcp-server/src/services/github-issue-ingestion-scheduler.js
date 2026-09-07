@@ -219,7 +219,7 @@ export class GithubIssueIngestionScheduler {
     // Lifecycle retirement hides future supply; it never deletes definitions or
     // mutates sessions. A worker's own merged PR may have closed the upstream.
     const listed = this.platformService.listJobs().filter((job) =>
-      job.source?.type === "github_issue" && !job.recurring);
+      job.source?.type === "github_issue");
     const ids = new Set(listed.map(({ id }) => id));
     for (const id of this.upstreamReads.keys()) {
       if (!ids.has(id)) this.upstreamReads.delete(id);
