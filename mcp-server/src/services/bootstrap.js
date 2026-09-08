@@ -979,6 +979,8 @@ export async function createPlatformRuntime() {
       deploymentBlock: gateway.config.depositPoolV2DeploymentBlock
         ?? gateway.config.depositPoolDeploymentBlock,
       provider: gateway.provider,
+      balanceReader: venueBalanceReader,
+      assetHubSubstrateEndpoint: process.env.BANK_XCM_ASSET_HUB_SUBSTRATE_RPC_URL,
       stateStore
     })
   );

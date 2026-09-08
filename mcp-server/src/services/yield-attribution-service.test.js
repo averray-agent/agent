@@ -60,10 +60,12 @@ test("ledger mutation attributes a subsidy-only NAV rise to operator-added asset
   const withoutAttestation = buildYieldAttribution({ snapshot: live, events });
   const withAttestation = buildYieldAttribution({ snapshot: live, events, ledgerEntries: [subsidy()] });
 
-  assert.equal(withoutAttestation.gain.venueEarned.raw, "1000000");
+  assert.equal(withoutAttestation.gain.venueEarned.raw, "0");
+  assert.equal(withoutAttestation.gain.unattributed.raw, "1000000");
   assert.equal(withoutAttestation.gain.operatorAdded.raw, "0");
   assert.equal(withAttestation.gain.cumulativeNav.raw, withoutAttestation.gain.cumulativeNav.raw);
-  assert.equal(withAttestation.gain.venueEarned.raw, "0", "the ledger mutation must remove the donation from venue earnings");
+  assert.equal(withAttestation.gain.venueEarned.raw, "0", "a donation is never venue earnings");
+  assert.equal(withAttestation.gain.unattributed.raw, "0");
   assert.equal(withAttestation.gain.operatorAdded.raw, "1000000");
 });
 
@@ -118,13 +120,13 @@ test("the split ratio always sums to exactly 10000 bps", () => {
   // yields 3333 + 6666 = 9999. The complement derivation must close the gap,
   // because a reader WILL add the two numbers on a trust surface.
   const events = [deposit(EARLY, 10_000_000, 10_000_000, 100)];
-  const live = snapshot({ totalAssets: 11_500_000n, bufferAssets: 11_500_000n });
+  const live = snapshot({ totalAssets: 11_000_000n, bufferAssets: 6_000_000n, deployedPrincipal: 5_000_000n, venueMarkedAssets: 5_500_000n });
   const attributed = buildYieldAttribution({ snapshot: live, events, ledgerEntries: [subsidy()] });
   assert.equal(attributed.gain.venueEarned.raw, "500000");
   assert.equal(attributed.gain.operatorAdded.raw, "1000000");
   const ratio = attributed.splitRatio;
   assert.equal(ratio.status, "available");
-  assert.equal(BigInt(ratio.venueEarnedBps) + BigInt(ratio.operatorAddedBps), 10_000n);
+  assert.equal(BigInt(ratio.venueEarnedBps) + BigInt(ratio.operatorAddedBps) + BigInt(ratio.unattributedBps), 10_000n);
   assert.equal(ratio.venueEarnedBps, "3333");
   assert.equal(ratio.operatorAddedBps, "6667");
 });
