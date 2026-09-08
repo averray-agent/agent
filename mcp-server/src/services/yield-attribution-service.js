@@ -3,6 +3,7 @@ import { Interface, getAddress } from "ethers";
 import { DEPOSIT_POOL_ABI, ERC20_MOCK_ABI } from "../blockchain/abis.js";
 import { ConflictError, ValidationError } from "../core/errors.js";
 import { redactProviderError } from "../core/redact-provider-error.js";
+import { ASSET_HUB_USDC_ADDRESS, SubstrateSubsidyReader } from "./substrate-subsidy-reader.js";
 
 const ASSET_DECIMALS = 6;
 const SHARE_DECIMALS = 6;
@@ -53,8 +54,11 @@ function publicLedgerEntry(entry) {
     timestamp: String(entry.timestamp),
     blockNumber: Number(entry.blockNumber),
     verification: {
-      method: "transaction_hash",
-      chainId: Number(entry.chainId)
+      method: entry.verificationMethod ?? "transaction_hash",
+      chainId: Number(entry.chainId),
+      ...(entry.verificationMethod === "substrate_extrinsic" ? {
+        blockHash: entry.blockHash, extrinsicIndex: entry.extrinsicIndex, eventIndex: entry.eventIndex
+      } : {})
     }
   };
 }
@@ -93,25 +97,27 @@ function cumulativeCapital(events) {
   };
 }
 
-function splitRatio(totalGain, venueEarned, operatorAdded) {
+function splitRatio(totalGain, venueEarned, operatorAdded, unattributed) {
   if (totalGain === 0n) {
     return { status: "not_applicable", reason: "zero_cumulative_nav_gain" };
   }
+  const venueEarnedBps = venueEarned * 10_000n / totalGain;
+  const operatorAddedBps = unattributed === 0n
+    ? 10_000n - venueEarnedBps
+    : operatorAdded * 10_000n / totalGain;
   return {
     status: "available",
     model: "pool_level_cumulative_nav_gain_ratio",
     denominator: "cumulative_nav_gain",
-    // Floor-divide one side and derive the other, so the pair always sums to
-    // exactly 10000. Independent floor division reads 9999 whenever the split
-    // is inexact (e.g. 0.5/1.0 -> 3333 + 6666), and a reader WILL add these
-    // two numbers on the one surface whose whole job is not inviting doubt.
-    // The raw venueEarned/operatorAdded amounts remain the exact record.
-    venueEarnedBps: (venueEarned * 10_000n / totalGain).toString(),
-    operatorAddedBps: (10_000n - venueEarned * 10_000n / totalGain).toString()
+    // Close rounding in the residual, or operator side when no residual exists.
+    // Never assign rounding or unproven NAV changes to venue performance.
+    venueEarnedBps: venueEarnedBps.toString(),
+    operatorAddedBps: operatorAddedBps.toString(),
+    unattributedBps: (10_000n - venueEarnedBps - operatorAddedBps).toString()
   };
 }
 
-function walletAttribution({ wallet, liveShares, totalShares, markedAssets, events, ratio, operatorAdded, totalGain }) {
+function walletAttribution({ wallet, liveShares, totalShares, markedAssets, events, ratio, venueEarned, operatorAdded, totalGain }) {
   let basisAssets = 0n;
   let basisShares = 0n;
   const normalizedWallet = getAddress(wallet);
@@ -169,13 +175,15 @@ function walletAttribution({ wallet, liveShares, totalShares, markedAssets, even
     };
   } else {
     const operatorGain = gain * operatorAdded / totalGain;
+    const venueGain = gain * venueEarned / totalGain;
     splitApproximation = {
       status: "approximation",
       model: "pool_level_cumulative_nav_gain_ratio",
-      statement: "The wallet gain and entry price are wallet-specific. Its venue-versus-operator split applies the pool-level cumulative gain ratio and is an approximation, not a holding-period attribution.",
+      statement: "The wallet gain and entry price are wallet-specific. Its venue-earned, operator-added and unattributed split applies the pool-level cumulative gain ratio and is an approximation, not a holding-period attribution.",
       poolRatio: ratio,
-      venueEarned: signedAmount(gain - operatorGain),
-      operatorAdded: signedAmount(operatorGain)
+      venueEarned: signedAmount(venueGain),
+      operatorAdded: signedAmount(operatorGain),
+      unattributed: signedAmount(gain - operatorGain - venueGain)
     };
   }
   return {
@@ -223,30 +231,35 @@ export function buildYieldAttribution({ snapshot, events = [], ledgerEntries = [
   const markedAssets = bufferAssets + (deployedPrincipal > 0n ? venueMarkedAssets : 0n);
   const totalGain = markedAssets - capital.net;
   const operatorAdded = BigInt(ledger.total.raw);
-  const venueEarned = totalGain - operatorAdded;
-  const ratio = splitRatio(totalGain, venueEarned, operatorAdded);
+  // A transfer into the buffer is not evidence of venue performance. Only the
+  // named-block adapter mark against its cost basis can establish that figure.
+  const venueEarned = deployedPrincipal > 0n ? venueMarkedAssets - deployedPrincipal : 0n;
+  const unattributed = totalGain - venueEarned - operatorAdded;
+  const ratio = splitRatio(totalGain, venueEarned, operatorAdded, unattributed);
   const exactZero = deployedPrincipal === 0n && totalGain === 0n && operatorAdded === 0n;
   const response = {
     schemaVersion: 1,
-    status: exactZero ? "zero" : "attributed",
+    status: exactZero ? "zero" : unattributed === 0n ? "attributed" : "partially_attributed",
     statement: exactZero
       ? "No deployed principal, operator-added assets, or cumulative NAV gain are recorded for this pool."
-      : "Cumulative marked NAV gain is separated into venue-earned and operator-added assets.",
+      : "Cumulative marked NAV gain is separated into venue-earned, operator-added and unattributed amounts. Unattributed is the observed NAV change the pool cannot attribute to the venue mark or an attested contribution; it may be a gain or a loss.",
     atBlock: blockNumber,
     basis: {
       model: "cumulative_marked_nav_gain",
-      equation: "marked assets - net share-backed capital = venue-earned + operator-added",
+      equation: "marked assets - net share-backed capital = venue-earned + operator-added + unattributed",
       markedAssets: amount(markedAssets),
       netShareBackedCapital: amount(capital.net),
       depositedCapital: amount(capital.deposits),
       withdrawnCapital: amount(capital.withdrawals),
       operatorPrincipal: amount(capital.operatorPrincipal),
-      deployedPrincipal: amount(deployedPrincipal)
+      deployedPrincipal: amount(deployedPrincipal),
+      venueMarkedAssets: amount(deployedPrincipal > 0n ? venueMarkedAssets : 0n)
     },
     gain: {
       cumulativeNav: signedAmount(totalGain),
       venueEarned: signedAmount(venueEarned),
-      operatorAdded: amount(operatorAdded)
+      operatorAdded: amount(operatorAdded),
+      unattributed: signedAmount(unattributed)
     },
     splitRatio: ratio,
     subsidyLedger: ledger
@@ -263,6 +276,7 @@ export function buildYieldAttribution({ snapshot, events = [], ledgerEntries = [
         markedAssets,
         events: boundedEvents,
         ratio,
+        venueEarned,
         operatorAdded,
         totalGain
       })
@@ -338,6 +352,9 @@ export class YieldAttributionService {
     deploymentBlock,
     provider,
     chainReader,
+    substrateReader,
+    balanceReader,
+    assetHubSubstrateEndpoint,
     stateStore,
     now = () => new Date()
   } = {}) {
@@ -345,6 +362,7 @@ export class YieldAttributionService {
     this.assetAddress = assetAddress ? getAddress(assetAddress) : "";
     this.chainId = Number(chainId);
     this.provider = provider;
+    this.substrateReader = substrateReader ?? new SubstrateSubsidyReader({ balanceReader, endpoint: assetHubSubstrateEndpoint });
     this.chainReader = chainReader ?? (provider && Number.isSafeInteger(Number(deploymentBlock))
       ? new EvmYieldAttributionChainReader(provider, { deploymentBlock })
       : undefined);
@@ -379,7 +397,11 @@ export class YieldAttributionService {
     return { schemaVersion: 1, available: true, ...ledgerPayload(await this.stateStore.listYieldSubsidyEntries()) };
   }
 
-  async attestSubsidy({ txHash: inputTxHash, attestedBy }) {
+  async attestSubsidy({ txHash: inputTxHash, extrinsicHash, blockNumber: substrateBlockNumber, attestedBy }) {
+    if (extrinsicHash !== undefined) {
+      if (inputTxHash !== undefined) throw new ValidationError("Provide either txHash or extrinsicHash, not both.");
+      return this.#attestSubstrate({ extrinsicHash, blockNumber: substrateBlockNumber, attestedBy });
+    }
     if (!this.provider || !this.poolAddress || !this.assetAddress || !this.stateStore?.putYieldSubsidyEntry) {
       throw new ConflictError(
         "Yield subsidy attestation is unavailable because its chain reader or durable ledger is not configured.",
@@ -433,8 +455,28 @@ export class YieldAttributionService {
       attestedAt: this.now().toISOString(),
       attestedBy: getAddress(attestedBy)
     };
+    return this.#storeEntry(entry);
+  }
+
+  async #attestSubstrate({ extrinsicHash, blockNumber, attestedBy }) {
+    if (!this.poolAddress || !this.stateStore?.putYieldSubsidyEntry || !this.substrateReader) {
+      throw new ConflictError("The subsidy ledger or Substrate reader is not configured.", "yield_subsidy_ledger_not_configured");
+    }
+    if (this.chainId !== 420420419 || this.assetAddress.toLowerCase() !== ASSET_HUB_USDC_ADDRESS) {
+      throw new ConflictError("Substrate subsidies require the configured Asset Hub USDC pool.", "yield_subsidy_extrinsic_wrong_chain_or_asset");
+    }
+    const txHash = normalizeTxHash(extrinsicHash);
+    const proof = await this.substrateReader.read({ extrinsicHash: txHash, blockNumber, poolAddress: this.poolAddress });
+    return this.#storeEntry({
+      schemaVersion: 1, txHash, pool: this.poolAddress, asset: this.assetAddress, chainId: this.chainId,
+      ...proof, attestedAt: this.now().toISOString(), attestedBy: getAddress(attestedBy)
+    });
+  }
+
+  async #storeEntry(entry) {
+    const txHash = entry.txHash;
     const stored = await this.stateStore.putYieldSubsidyEntry(entry);
-    const proofFields = ["txHash", "pool", "asset", "chainId", "from", "amountRaw", "blockNumber", "blockHash", "timestamp"];
+    const proofFields = ["txHash", "pool", "asset", "chainId", "from", "amountRaw", "blockNumber", "blockHash", "timestamp", "verificationMethod", "extrinsicIndex", "eventIndex"];
     if (proofFields.some((field) => String(stored.entry?.[field]) !== String(entry[field]))) {
       throw new ConflictError(
         "The transaction hash is already attested with different proof fields; append a separate correction instead of editing the entry.",
