@@ -65,6 +65,9 @@ test("Asset Hub subsidy takes its amount from the transfer event despite operato
   assert.equal(first.entry.timestamp, new Date(1788894000000).toISOString());
   assert.deepEqual(first.entry.verification, { method: "substrate_extrinsic", chainId: 420420419, blockHash: BLOCK_HASH, extrinsicIndex: 1, eventIndex: 0 });
   assert.equal((await f.stateStore.listYieldSubsidyEntries()).length, 1);
+  const changedEvent = fixture();
+  changedEvent.records[0].event.data[3] = "123456";
+  assert.equal((await changedEvent.attest({ amountRaw: "600000" })).entry.amount.raw, "123456", "changing chain evidence, not operator input, changes the recorded amount");
 });
 
 for (const [name, mutate, reason] of [
