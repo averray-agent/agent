@@ -12,6 +12,7 @@ import {
 } from "../../core/health-capability.js";
 import { buildOnboardingInventoryWarnings } from "../../core/onboarding-inventory.js";
 import { recordCapabilityWarningTransitions } from "../../services/overnight-ledger.js";
+import { createVerifyRevenueMetrics } from "../../services/verify-revenue-metrics.js";
 
 function bearerTokenMatches(header, expectedToken) {
   const prefix = "Bearer ";
@@ -79,6 +80,7 @@ export function createOperationalRoutes({
   service,
   stateStore
 }) {
+  const financialMetrics = createVerifyRevenueMetrics({ stateStore });
   const getLiveRewardBankHealth = getRewardBankHealth ?? createRewardBankHealthProvider({
     gateway
   });
@@ -200,12 +202,19 @@ export function createOperationalRoutes({
           return true;
         }
       }
+      // Never put private figures in the shared registry: a permissive local
+      // scrape must not inherit them from a previous authenticated scrape.
+      const privateFigures = metricsBearerToken
+        && bearerTokenMatches(request.headers.authorization ?? "", metricsBearerToken)
+        ? await financialMetrics()
+        : "";
       response.writeHead(200, {
         "content-type": "text/plain; version=0.0.4",
+        "cache-control": "private, no-store",
         ...(response._corsHeaders ?? {}),
         "x-request-id": response._requestId ?? ""
       });
-      response.end(metrics.serialize());
+      response.end(metrics.serialize() + privateFigures);
       return true;
     }
 
