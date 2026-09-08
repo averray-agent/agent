@@ -598,6 +598,13 @@ export class MemoryStateStore {
     return cloneJsonRecord(this.verificationRuns.get(String(runId)));
   }
 
+  async scanVerificationRuns({ cursor = "0", limit = 200 } = {}) {
+    const runs = [...this.verificationRuns.values()];
+    const start = Math.max(0, Number.parseInt(String(cursor), 10) || 0);
+    const end = Math.min(runs.length, start + Math.min(250, Math.max(1, Number(limit) || 200)));
+    return { runs: runs.slice(start, end).map(cloneJsonRecord), nextCursor: end >= runs.length ? "0" : String(end) };
+  }
+
   async getVerificationRunByPaymentId(paymentId) {
     const runId = this.verificationPaymentRuns.get(String(paymentId));
     return runId ? this.getVerificationRun(runId) : undefined;
@@ -1743,6 +1750,16 @@ export class RedisStateStore {
     await this.connect();
     const raw = await this.client.get(this.key("verification-run", String(runId)));
     return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async scanVerificationRuns({ cursor = "0", limit = 200 } = {}) {
+    await this.connect();
+    const page = await this.client.scan(String(cursor), {
+      MATCH: this.key("verification-run", "*"),
+      COUNT: Math.min(250, Math.max(1, Number(limit) || 200))
+    });
+    const records = page.keys?.length ? await this.client.mGet(page.keys) : [];
+    return { runs: records.filter(Boolean).map((record) => JSON.parse(record)), nextCursor: String(page.cursor ?? "0") };
   }
 
   async getVerificationRunByPaymentId(paymentId) {

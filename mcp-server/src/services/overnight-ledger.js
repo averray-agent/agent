@@ -76,6 +76,22 @@ export class OvernightLedgerService {
     this.now = now;
   }
 
+  async getSponsoredOutflows() {
+    if (!this.stateStore?.listRecentSessions || !this.stateStore?.listEventLog) {
+      throw new Error("Sponsored outflow sources unavailable");
+    }
+    const [sessions, result] = await Promise.all([
+      collectAllSessions(this.stateStore, { attachVerification: false }),
+      this.stateStore.listEventLog({ limit: 5_000 })
+    ]);
+    return {
+      ...summarizeSponsoredHubOutflows({ sessions, events: result.events ?? [] }),
+      // These stores are bounded. This is a retained-record reading, not an
+      // all-time expense ledger or a claim that unobserved fees were zero.
+      bounded: sessions.length >= READ_LIMIT || result.gap === true || (result.events?.length ?? 0) >= 5_000
+    };
+  }
+
   async getLedger(windowValue) {
     const window = parseOvernightLedgerWindow(windowValue);
     const generatedAt = asIso(this.now());
@@ -477,9 +493,10 @@ function buildRetention({ sessions, windowSessions, settlements, env, startMs, e
     inWindow(session.claimedAt, startMs, endMs)
     && (session.claimEconomicsWaivedAtClaim === true || session.claimEconomicsWaived === true)
   )).length;
-  const subsidySpendRaw = sum(windowSessions
-    .filter((session) => inWindow(session.claimedAt, startMs, endMs))
-    .map((session) => usdcRaw(session?.onboardingSubsidy?.estimatedClaimSubsidyUsdc ?? 0)));
+  const subsidySpendRaw = BigInt(summarizeSponsoredHubOutflows({
+    sessions: windowSessions.filter((session) => inWindow(session.claimedAt, startMs, endMs)),
+    events: []
+  }).claimSubsidyEstimateRaw);
   const subsidyConfig = loadOnboardingSubsidyBudgetConfig(env);
   const chargedRaw = sum(charged.map((row) => row.retainedRaw));
   const protocolRevenueRaw = sum(approved.map((session) => settlementAmounts(session).retentionFeesRaw));
@@ -625,7 +642,7 @@ function deriveAccountBalances(events) {
   return balances;
 }
 
-async function collectAllSessions(stateStore) {
+async function collectAllSessions(stateStore, { attachVerification = true } = {}) {
   const sessions = [];
   if (typeof stateStore?.listRecentSessions !== "function") return sessions;
   for (let offset = 0; offset < READ_LIMIT; offset += READ_PAGE_SIZE) {
@@ -634,6 +651,7 @@ async function collectAllSessions(stateStore) {
     sessions.push(...page);
     if (page.length < READ_PAGE_SIZE) break;
   }
+  if (!attachVerification) return sessions;
   return Promise.all(sessions.map(async (session) => {
     if (session.verification || session.verificationSummary?.outcome) return session;
     const verification = await stateStore.getVerificationResult?.(session.sessionId);
@@ -745,7 +763,7 @@ function reservedProofs(events, account) {
 function gasDeltaRaw(events) {
   return sum(events.flatMap((event) => {
     if (event.topic === "operator_gas.first_withdrawal_granted") {
-      return [-raw(event?.data?.amount?.raw)];
+      return [-firstWithdrawalGrantRaw(event)];
     }
     if (String(event?.data?.assetSymbol ?? "").toUpperCase() !== "DOT") return [];
     const amountRaw = rawFromEvent(event);
@@ -753,6 +771,23 @@ function gasDeltaRaw(events) {
     if (event.topic === "account.withdrawn") return [-amountRaw];
     return [];
   }));
+}
+
+function firstWithdrawalGrantRaw(event) {
+  return raw(event?.data?.amount?.raw);
+}
+
+export function summarizeSponsoredHubOutflows({ sessions, events }) {
+  const uniqueSessions = new Map(sessions.filter((row) => row?.sessionId).map((row) => [row.sessionId, row]));
+  const grants = new Map(events
+    .filter((event) => event.topic === "operator_gas.first_withdrawal_granted")
+    .map((event) => [String(event.txHash ?? event.id).toLowerCase(), event]));
+  return {
+    claimSubsidyEstimateRaw: sum([...uniqueSessions.values()]
+      .map((session) => usdcRaw(session?.onboardingSubsidy?.estimatedClaimSubsidyUsdc ?? 0))).toString(),
+    firstWithdrawalGrantRaw: sum([...grants.values()].map(firstWithdrawalGrantRaw)).toString(),
+    firstWithdrawalGrantCount: grants.size
+  };
 }
 
 function rawFromEvent(event) {
