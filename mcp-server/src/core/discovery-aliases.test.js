@@ -46,8 +46,10 @@ test("discovery aliases expose exactly the request-time directory-safe tools and
       assert.equal(response.json.name, marker);
       assert.equal(response.json.discoveryMode, "directory-safe");
       assert.deepEqual(response.json.capabilities, h.manifest().tools);
+      const serializedBody = JSON.stringify(response.json);
       for (const name of CONNECTED_ONLY_TOOLS) {
         assert.ok(!response.json.capabilities.some((tool) => tool.name === name), `${path}: ${name}`);
+        assert.equal(serializedBody.includes(name), false, `${path}: serialized body contains connected-only name ${name}`);
       }
     }
     assert.equal((await h.get(path, "POST")).handled, false);
@@ -68,6 +70,11 @@ test("discovery alias pricing follows changed live x402 terms with no literal or
       assert.ok(response.json.pricing.resources[0].accepts.every((terms) => terms.amount === amount));
     }
   }
+});
+
+test("ai-agent discovery has the exact directory-safe projection key set", async () => {
+  const { json: body } = await harness().get("/.well-known/ai-agent.json");
+  assert.deepEqual(Object.keys(body).sort(), ["auth", "capabilities", "description", "discoveryMode", "name", "pricing", "url"]);
 });
 
 test("agent card is descriptive only with no task or RPC endpoint and no A2A claim", async () => {
