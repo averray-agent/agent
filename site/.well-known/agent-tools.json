@@ -646,6 +646,11 @@
   "publicEndpoints": [
     {
       "method": "GET",
+      "path": "/openapi.json",
+      "description": "Public mainnet OpenAPI 3.1 contract; operator endpoints excluded."
+    },
+    {
+      "method": "GET",
       "path": "/health",
       "description": "Liveness plus serviceHealth/capabilityHealth for state store, submitted-job settlement scheduler, blockchain, treasury mutations, XCM observer, indexer, and gas sponsor."
     },
@@ -1233,6 +1238,7 @@
     "note": "Mutating and financial actions exist on authenticated HTTP and operator-app surfaces but are intentionally excluded from this directory-safe manifest until the trust, policy, and audit posture are ready for broader distribution."
   },
   "baseUrl": "https://api.averray.com",
+  "openapi": "https://api.averray.com/openapi.json",
   "discoveryUrl": "https://averray.com/.well-known/agent-tools.json",
   "profile": "https://app.averray.com/agents/<wallet>",
   "protocolEndpoints": {

@@ -49,6 +49,7 @@ The MCP protocol endpoint lives on the API host only. https://averray.com/mcp is
 ## Live machine-readable endpoints
 
 - API root: https://api.averray.com/
+- OpenAPI (public mainnet contract): https://api.averray.com/openapi.json
 - Onboarding: https://api.averray.com/onboarding
 - Tier ladder: https://api.averray.com/jobs/tiers
 - Earnings account: https://api.averray.com/account/position

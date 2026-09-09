@@ -150,6 +150,9 @@ jobs:
       - name: Job schema docs sync check
         run: npm run check:job-schemas
 
+      - name: Public OpenAPI contract drift check
+        run: npm run check:openapi
+
       - name: Verify real fixture inside backend, runner, and proxy images
         run: |
           set -euo pipefail

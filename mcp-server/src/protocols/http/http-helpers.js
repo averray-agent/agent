@@ -134,13 +134,15 @@ export function buildCorsHeaders(allowOrigin, httpConfig) {
  * which defeats the purpose. Known static paths pass through; anything
  * else collapses to a bucket label so scrape payloads stay small.
  */
-export function metricPathLabel(pathname) {
-  const known = new Set([
+// Also consumed by the documentation drift guard. This is a path inventory,
+// not an authorization policy; it deliberately contains protected routes.
+export const HTTP_METRIC_PATHS = Object.freeze([
     "/",
     "/health",
     "/metrics",
     "/mcp",
     "/agent-tools.json",
+    "/openapi.json",
     "/.well-known/agent-tools.json",
     "/.well-known/x402",
     "/llms.txt",
@@ -216,8 +218,11 @@ export function metricPathLabel(pathname) {
     "/gas/capabilities",
     "/gas/quote",
     "/gas/sponsor"
-  ]);
-  if (known.has(pathname)) return pathname;
+]);
+const knownMetricPaths = new Set(HTTP_METRIC_PATHS);
+
+export function metricPathLabel(pathname) {
+  if (knownMetricPaths.has(pathname)) return pathname;
   // Collapse sessionId/wallet-scoped routes to a single label so Prometheus
   // doesn't create one series per session or wallet.
   if (/^\/disputes\/[^/]+\/verdict$/u.test(pathname)) return "/disputes/:id/verdict";

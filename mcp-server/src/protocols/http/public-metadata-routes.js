@@ -4,6 +4,7 @@ import {
   RETIRED_STRATEGIES_RESPONSE
 } from "../../core/earnings-door-copy.js";
 import { buildVerifyLlmsSection } from "../../core/verify-product-copy.js";
+import { readPublicOpenApi } from "../../core/public-openapi.js";
 
 const DEFAULT_PUBLIC_API_URL = "https://api.averray.com";
 const SITE_URL = "https://averray.com";
@@ -17,6 +18,7 @@ const ROOT_ENDPOINTS = [
   "/metrics",
   "/mcp",
   "/agent-tools.json",
+  "/openapi.json",
   "/.well-known/x402",
   "/llms.txt",
   "/onboarding",
@@ -134,6 +136,7 @@ Limits: the waiver is capped at 3 claims per wallet and applies only to waiver-e
 ## Live machine-readable endpoints
 
 - API root: ${apiUrl}/
+- OpenAPI (public mainnet contract): ${apiUrl}/openapi.json
 - Onboarding: ${apiUrl}/onboarding
 - Tier ladder: ${apiUrl}/jobs/tiers
 - Earnings account: ${apiUrl}/account/position
@@ -211,6 +214,11 @@ export function createPublicMetadataRoutes({
         },
         endpoints: ROOT_ENDPOINTS
       });
+      return true;
+    }
+
+    if (request.method === "GET" && pathname === "/openapi.json") {
+      respond(response, 200, await readPublicOpenApi(), { "cache-control": "public, max-age=300" });
       return true;
     }
 
