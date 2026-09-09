@@ -47,10 +47,18 @@ export class WorkerProgressionService {
   async getProgression(wallet, {
     settlementSessionId = undefined,
     settlementSession = undefined,
-    previousProgression = undefined
+    previousProgression = undefined,
+    sessionHistoryCache = undefined
   } = {}) {
     const normalizedWallet = normalizeWallet(wallet);
-    const storedSessions = await collectAllWalletSessions(this.stateStore, normalizedWallet);
+    // Cache the promise before awaiting so concurrent sessions of one wallet
+    // share the same paginated read, never a settlement-specific result.
+    let history = sessionHistoryCache?.get(normalizedWallet);
+    if (!history) {
+      history = collectAllWalletSessions(this.stateStore, normalizedWallet);
+      sessionHistoryCache?.set(normalizedWallet, history);
+    }
+    const storedSessions = await history;
     const allSessions = includeSettlementSession(storedSessions, {
       normalizedWallet,
       settlementSessionId,

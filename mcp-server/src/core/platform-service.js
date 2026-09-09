@@ -1456,22 +1456,35 @@ export class PlatformService {
     return this.getExternalPostingClaimabilitySweep();
   }
 
-  async listSessionHistory({ wallet = undefined, limit = 10, jobId = undefined } = {}) {
+  async listSessionHistory({ wallet = undefined, limit = 10, jobId = undefined, progression = true } = {}) {
     const sessions = await this.jobExecutionService.listSessionHistory({ wallet, limit, jobId });
-    return Promise.all(sessions.map((session) => this.attachWorkerProgression(session)));
+    return progression ? this.attachListingProgression(sessions) : sessions;
   }
 
-  async listRecentSessions(limit = 10) {
+  // Identity-only consumers must not hydrate verification or wallet progression.
+  async listRecentSessionRecords(limit = 10) {
+    return this.stateStore.listRecentSessions?.(limit) ?? [];
+  }
+
+  async listRecentSessions(limit = 10, { progression = true } = {}) {
     const sessions = await this.jobExecutionService.listRecentSessions(limit);
-    return Promise.all(sessions.map((session) => this.attachWorkerProgression(session)));
+    return progression ? this.attachListingProgression(sessions) : sessions;
   }
 
-  async attachWorkerProgression(session) {
+  async attachListingProgression(sessions) {
+    // Share only history reads within this listing. Each settlement still gets
+    // its own overlay and justChanged calculation; no cross-request cache.
+    const sessionHistoryCache = new Map();
+    return Promise.all(sessions.map((session) => this.attachWorkerProgression(session, { sessionHistoryCache })));
+  }
+
+  async attachWorkerProgression(session, { sessionHistoryCache } = {}) {
     if (!session || session.status !== "resolved" || !this.workerProgressionService) return session;
     if (session.progression) return session;
     const progression = await this.getWorkerProgressionSafely(session.wallet, {
       settlementSessionId: session.sessionId,
-      settlementSession: session
+      settlementSession: session,
+      sessionHistoryCache
     });
     return progression ? { ...session, progression } : session;
   }

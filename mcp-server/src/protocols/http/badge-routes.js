@@ -19,7 +19,7 @@ export function createListBadgeReceipts({
   verifierService
 }) {
   return async function listBadgeReceipts(limit = 100) {
-    const sessions = await service.listRecentSessions(limit);
+    const sessions = await service.listRecentSessions(limit, { progression: false });
     const receipts = [];
     for (const session of sessions) {
       try {

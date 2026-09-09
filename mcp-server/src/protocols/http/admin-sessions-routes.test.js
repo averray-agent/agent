@@ -22,8 +22,8 @@ function makeHarness(overrides = {}) {
       res.body = body;
     },
     service: {
-      listRecentSessions: async (limit) => {
-        calls.push(["listRecentSessions", limit]);
+      listRecentSessions: async (limit, options) => {
+        calls.push(["listRecentSessions", limit, options]);
         return overrides.recentSessions ?? [
           { sessionId: "session-1", wallet: "0xworker", jobId: "job-1" }
         ];
@@ -77,7 +77,7 @@ test("GET /admin/sessions requires operator read capability and returns recent s
   assert.deepEqual(calls, [
     ["auth", { requireCapability: "ops:view" }],
     ["parseLimit", { fallback: 50, max: 250 }],
-    ["listRecentSessions", 50],
+    ["listRecentSessions", 50, { progression: false }],
     ["respond", {
       statusCode: 200,
       body: response.body,
@@ -99,7 +99,7 @@ test("GET /admin/sessions preserves limit query handling", async () => {
   assert.equal(response.statusCode, 200);
   assert.deepEqual(calls.slice(1, 3), [
     ["parseLimit", { fallback: 50, max: 250 }],
-    ["listRecentSessions", 125],
+    ["listRecentSessions", 125, { progression: false }],
   ]);
   assert.equal(response.body.limit, 125);
 });
@@ -157,7 +157,7 @@ test("GET /admin/sessions scopes to job history when jobId is present", async ()
   });
   assert.deepEqual(calls.slice(1, 3), [
     ["parseLimit", { fallback: 50, max: 250 }],
-    ["listSessionHistory", { jobId: "job-42", limit: 20 }],
+    ["listSessionHistory", { jobId: "job-42", limit: 20, progression: false }],
   ]);
 });
 
@@ -176,6 +176,6 @@ test("GET /admin/sessions treats an empty jobId query as recent-session mode", a
   assert.ok(!("jobId" in response.body));
   assert.deepEqual(calls.slice(1, 3), [
     ["parseLimit", { fallback: 50, max: 250 }],
-    ["listRecentSessions", 50],
+    ["listRecentSessions", 50, { progression: false }],
   ]);
 });
