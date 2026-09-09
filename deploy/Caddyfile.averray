@@ -63,6 +63,15 @@ averray.com {
   root * /srv/site
   encode zstd gzip
 
+  # Live discovery projections must bypass the static well-known directory.
+  # Keep these exact paths ahead of the wildcard; no checked-in alias copies.
+  @discoveryAliases path /.well-known/ai-agent.json /.well-known/agent-card.json
+  handle @discoveryAliases {
+    reverse_proxy backend:8787 {
+      import strip_forwarded_for
+    }
+  }
+
   handle /.well-known/* {
     file_server
   }

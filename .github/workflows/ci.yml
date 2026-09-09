@@ -141,6 +141,15 @@ jobs:
           npm run test:mcp-package
           npm run publish:dry --workspace @averray/mcp
 
+      - name: Provision pinned Caddy for discovery host parity proof
+        run: |
+          set -euo pipefail
+          container=$(docker create caddy:2.11.2-alpine)
+          trap 'docker rm "$container" >/dev/null' EXIT
+          docker cp "$container:/usr/bin/caddy" "$RUNNER_TEMP/caddy-discovery-proof"
+          chmod +x "$RUNNER_TEMP/caddy-discovery-proof"
+          echo "CADDY_BIN=$RUNNER_TEMP/caddy-discovery-proof" >> "$GITHUB_ENV"
+
       - name: Ops script regression tests
         run: npm run test:ops
 

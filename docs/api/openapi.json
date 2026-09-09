@@ -1409,6 +1409,36 @@
         }
       }
     },
+    "/.well-known/ai-agent.json": {
+      "get": {
+        "tags": ["Discovery"],
+        "operationId": "getAiAgentDiscovery",
+        "summary": "Read the directory-safe agent discovery projection",
+        "description": "Request-time projection of the same manifest tools and auth summary, with pricing embedding the live /.well-known/x402 document. No connected-only tools or inferred rate limits.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Directory-safe discovery and current payment terms.",
+            "content": { "application/json": { "schema": { "type": "object", "required": ["name", "url", "description", "discoveryMode", "capabilities", "auth", "pricing"], "additionalProperties": true } } }
+          }
+        }
+      }
+    },
+    "/.well-known/agent-card.json": {
+      "get": {
+        "tags": ["Discovery"],
+        "operationId": "getAgentCardDiscovery",
+        "summary": "Read the descriptive directory-safe agent card",
+        "description": "Request-time manifest projection with the same directory-safe capabilities and live x402 pricing. This descriptive card declares no task or RPC endpoint and makes no agent-protocol claim.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Descriptive card and current payment terms.",
+            "content": { "application/json": { "schema": { "type": "object", "required": ["name", "url", "description", "discoveryMode", "capabilities", "pricing"], "additionalProperties": true } } }
+          }
+        }
+      }
+    },
     "/llms.txt": {
       "get": {
         "tags": [

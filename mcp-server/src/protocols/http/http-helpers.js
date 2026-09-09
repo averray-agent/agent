@@ -144,6 +144,8 @@ export const HTTP_METRIC_PATHS = Object.freeze([
     "/agent-tools.json",
     "/openapi.json",
     "/.well-known/agent-tools.json",
+    "/.well-known/ai-agent.json",
+    "/.well-known/agent-card.json",
     "/.well-known/x402",
     "/llms.txt",
     "/onboarding",
