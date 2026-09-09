@@ -260,3 +260,46 @@ The operator runs both **before** the A deploy, after A, and after B, and
 pastes the output lines back. Codex has no production read path by design and
 must not be given one; curl from outside is acceptable **additional** evidence
 for `/agents` only (public), never for `/credit`.
+
+---
+
+# DECISION 2026-09-09 (2) — the vesting readers stay on chain; B does not widen
+
+Codex asked whether B may also move `capacityForWallet → readDepositVesting`
+(the DepositPool principal events and CreditPool loan events) to the indexer,
+because it too calls `getLogs` and would break a literal zero-`getLogs` test.
+
+Verified against `origin/main` (`blockchain/gateway.js:971–1130`): both readers
+are **incremental with a process-wide head-block cache**. Warm cost per request
+is one `getBlockNumber` plus, only when the head advanced, one `getLogs` over
+the new blocks per reader. The full chunked scan from the deployment block runs
+once per process start. That is a different cost class from the underwriter's
+per-request 30-day window (~134 calls, no cache), and it also feeds the claim
+gate (`deposit-claim-priority.js:163`) and the exposure policy, where a second,
+indexer-lagged source of truth for vesting would be a correctness risk, not
+just a latency one.
+
+**Decision: no.** B moves the receipt-graph evidence only. The indexer is the
+chosen source (Codex's recommendation, accepted): it already indexes both
+escrows' `SettlementSplit`, `DisputeOpened`/`DisputeResolved`/
+`AutoResolvedOnTimeout`, `ReputationSlashed` and the CreditPool loan events;
+B adds a worker index and a freshness checkpoint, and accepts the ~5 min replay.
+
+Non-negotiable 5 is restated so it measures the right thing without stubbing
+capacity: with a counting provider whose head does **not** advance between two
+consecutive `/credit` calls, the second call performs **0 `getLogs` and 0 bisect
+`getBlock`**; with the head advanced by one block, at most **2 `getLogs`** (one
+per vesting reader) and still 0 bisect. The underwriter's topics
+(`SETTLEMENT_TOPIC`, `DISPUTE_TOPIC`, the upheld topic) must never appear in a
+`getLogs` filter on the request path. Mutation: reintroduce `readWindow` — the
+topic assertion fails; mutation: drop the vesting cache — the ≤ 2 bound fails.
+Capacity is the real reader in these tests, not a stub.
+
+If measurements after B show the cold vesting scan matters at deploy time, that
+is its own packet with its own numbers.
+
+## A is live — first outside reading
+
+#1357 merged 13:34Z and deployed (`deployedSha 824c7d34`). `GET /agents` at the
+default limit from outside: 3.0 s → 0.2–0.4 s, still `[]`. The operator's log
+runsheet supplies the real-traffic p50/p95.
