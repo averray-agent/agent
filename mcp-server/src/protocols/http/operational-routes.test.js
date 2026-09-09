@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { createOperationalRoutes, resolveMetricsAuthConfig } from "./operational-routes.js";
@@ -129,8 +130,19 @@ test("operational routes ignore unrelated paths", async () => {
   assert.equal(response.statusCode, undefined);
 });
 
-test("GET /health reports service liveness separately from disabled capabilities", async () => {
+test("GET /health reports service liveness separately from disabled capabilities", async (t) => {
+  // Product health selects its manifest from the runtime env, independently of
+  // the route's authConfig. Name mainnet explicitly instead of inheriting a
+  // developer's shell or asserting addresses from the retired testnet harness.
+  const previousChainId = process.env.AUTH_CHAIN_ID;
+  process.env.AUTH_CHAIN_ID = "420420419";
+  t.after(() => {
+    if (previousChainId === undefined) delete process.env.AUTH_CHAIN_ID;
+    else process.env.AUTH_CHAIN_ID = previousChainId;
+  });
+  const deployment = JSON.parse(await readFile(new URL("../../../../deployments/mainnet.json", import.meta.url), "utf8"));
   const { calls, response, route } = makeHarness({
+    authConfig: { ...AUTH_CONFIG, chainId: "420420419" },
     deployedSha: "a".repeat(40)
   });
 
@@ -152,11 +164,11 @@ test("GET /health reports service liveness separately from disabled capabilities
   assert.equal(response.body.capabilityHealth.gasSponsor, "disabled");
   assert.equal(response.body.capabilityHealth.externalPosting, "disabled");
   assert.equal(response.body.capabilityHealth.externalPostingWatcherLagSeconds, null);
-  assert.equal(response.body.addresses.token, "0x0000053900000000000000000000000001200000");
-  assert.equal(response.body.addresses.agentAccountCore, "0x510918E24DEbcA163F306923CA234319e72b22d5");
-  assert.equal(response.body.addresses.escrowCore, "0xfE841c2dc58E4389b1AB59E3e42F9EB12A694Bea");
-  assert.equal(response.body.addresses.settlementSigner, "0x31ad432dFe083B998c69B6dB88A984ec5207ab7F");
-  assert.equal(response.body.addresses.treasuryReserve, "0x1f8c4da4aaac79916350f1fabf1221309591b6f9");
+  assert.equal(response.body.addresses.token, deployment.contracts.token);
+  assert.equal(response.body.addresses.agentAccountCore, deployment.contracts.agentAccountCore);
+  assert.equal(response.body.addresses.escrowCore, deployment.contracts.escrowCore);
+  assert.equal(response.body.addresses.settlementSigner, deployment.verifier);
+  assert.equal(response.body.addresses.treasuryReserve, deployment.treasuryReserve);
   assert.equal(Object.hasOwn(response.body.addresses, "treasuryPolicy"), false);
   assert.equal(response.body.rewardBank.readable, false);
   assert.equal(response.body.rewardBank.decimals, 6);

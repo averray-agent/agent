@@ -7,7 +7,7 @@
   "scripts": {
     "start:http": "node src/protocols/http/server.js",
     "test": "npm run test:unit && npm run test:http-smoke",
-    "test:unit": "node --test src/**/*.test.js src/protocols/http/profile-routes.test.js",
+    "test:unit": "node --test --test-reporter=../scripts/ops/backend-test-discovery-reporter.mjs 'src/**/*.test.js'",
     "test:http-smoke": "RUN_HTTP_SMOKE=1 node --test src/protocols/http/server.smoke.test.js",
     "demo:e2e": "node src/demo/e2e-local.js",
     "demo:e2e:remote": "node src/demo/e2e-remote.js",

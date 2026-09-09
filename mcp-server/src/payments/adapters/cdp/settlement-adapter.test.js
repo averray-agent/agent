@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { readFile, readdir, mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -158,15 +159,34 @@ test("adapter forwards only generic portable Bazaar metadata to verify and settl
 test("provider identifiers stay inside the adapter package", async () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const sourceRoot = resolve(here, "../../..");
-  const adapterRoot = resolve(here, "..");
+  await assertProviderBoundary(sourceRoot);
+});
+
+test("provider boundary rejects a production identifier outside adapters while allowing test fixtures", async (t) => {
+  const sourceRoot = await mkdtemp(join(tmpdir(), "provider-boundary-"));
+  t.after(() => rm(sourceRoot, { recursive: true, force: true }));
+  await mkdir(join(sourceRoot, "payments/adapters/cdp"), { recursive: true });
+  const providerSource = 'const endpoint = "https://api.cdp.coinbase.com";';
+  await writeFile(join(sourceRoot, "payments/adapters/cdp/provider.js"), providerSource);
+  await writeFile(join(sourceRoot, "payments/provider.test.js"), providerSource);
+  await assertProviderBoundary(sourceRoot);
+  await writeFile(join(sourceRoot, "payments/provider.js"), providerSource);
+  await assert.rejects(assertProviderBoundary(sourceRoot), (error) => (
+    error.code === "ERR_ASSERTION" && error.actual.includes(join("payments", "provider.js"))
+  ));
+});
+
+async function assertProviderBoundary(sourceRoot) {
+  const adapterRoot = join(sourceRoot, "payments/adapters");
   const offenders = [];
   for (const file of await walk(sourceRoot)) {
-    if (file.startsWith(adapterRoot)) continue;
+    // The boundary constrains shipped modules, not tests that exercise them.
+    if (file.startsWith(`${adapterRoot}${sep}`) || file.endsWith(".test.js")) continue;
     const content = await readFile(file, "utf8");
     if (/\bcdp\b/iu.test(content)) offenders.push(relative(sourceRoot, file));
   }
   assert.deepEqual(offenders, []);
-});
+}
 
 async function walk(directory) {
   const files = [];
