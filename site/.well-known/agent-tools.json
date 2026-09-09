@@ -651,6 +651,26 @@
     },
     {
       "method": "GET",
+      "path": "/agent-tools.json",
+      "description": "Directory-safe discovery manifest."
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/agent-tools.json",
+      "description": "Directory-safe discovery manifest."
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/ai-agent.json",
+      "description": "Request-time directory-safe manifest projection with live x402 pricing."
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/agent-card.json",
+      "description": "Descriptive directory-safe card with live x402 pricing; no task or RPC interface."
+    },
+    {
+      "method": "GET",
       "path": "/health",
       "description": "Liveness plus serviceHealth/capabilityHealth for state store, submitted-job settlement scheduler, blockchain, treasury mutations, XCM observer, indexer, and gas sponsor."
     },

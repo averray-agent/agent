@@ -81,6 +81,10 @@ const withDefaultGetMethod = (entries) => entries.map((entry) => ({ method: "GET
 
 const DISCOVERY_PUBLIC_ENDPOINTS = withDefaultGetMethod([
   { path: "/openapi.json", description: "Public mainnet OpenAPI 3.1 contract; operator endpoints excluded." },
+  { path: "/agent-tools.json", description: "Directory-safe discovery manifest." },
+  { path: "/.well-known/agent-tools.json", description: "Directory-safe discovery manifest." },
+  { path: "/.well-known/ai-agent.json", description: "Request-time directory-safe manifest projection with live x402 pricing." },
+  { path: "/.well-known/agent-card.json", description: "Descriptive directory-safe card with live x402 pricing; no task or RPC interface." },
   { path: "/health", description: "Liveness plus serviceHealth/capabilityHealth for state store, submitted-job settlement scheduler, blockchain, treasury mutations, XCM observer, indexer, and gas sponsor." },
   { path: "/metrics", description: "Prometheus text-format metrics. Bearer-gated in production via METRICS_BEARER_TOKEN." },
   { path: "/llms.txt", description: "Agent-adjusted orientation mirror served on the API host." },

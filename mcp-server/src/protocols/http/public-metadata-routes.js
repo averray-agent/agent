@@ -4,6 +4,7 @@ import {
   RETIRED_STRATEGIES_RESPONSE
 } from "../../core/earnings-door-copy.js";
 import { buildVerifyLlmsSection } from "../../core/verify-product-copy.js";
+import { buildDiscoveryAlias, DISCOVERY_ALIAS_PATHS } from "../../core/discovery-aliases.js";
 import { readPublicOpenApi } from "../../core/public-openapi.js";
 
 const DEFAULT_PUBLIC_API_URL = "https://api.averray.com";
@@ -18,6 +19,7 @@ const ROOT_ENDPOINTS = [
   "/metrics",
   "/mcp",
   "/agent-tools.json",
+  ...DISCOVERY_ALIAS_PATHS,
   "/openapi.json",
   "/.well-known/x402",
   "/llms.txt",
@@ -299,6 +301,23 @@ export function createPublicMetadataRoutes({
           minimumRewardUsdc
         }),
         { "cache-control": "public, max-age=300" }
+      );
+      return true;
+    }
+
+    if (request.method === "GET" && DISCOVERY_ALIAS_PATHS.includes(pathname)) {
+      const manifest = buildDiscoveryManifest({
+        baseUrl: publicBaseUrl?.trim() || undefined,
+        chainId: authConfig?.chainId,
+        minimumRewardUsdc
+      });
+      respond(
+        response,
+        200,
+        buildDiscoveryAlias(manifest, await getX402Discovery(), {
+          card: pathname === "/.well-known/agent-card.json"
+        }),
+        { "cache-control": "no-store" }
       );
       return true;
     }

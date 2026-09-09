@@ -2335,6 +2335,23 @@ test("http smoke: production /metrics fails closed when token is missing", SMOKE
   );
 });
 
+test("http smoke: discovery aliases are public in strict auth and share the live manifest and x402 document", SMOKE_TEST_OPTIONS, async () => {
+  await runWithServerEnv({ AUTH_CHAIN_ID: "420420419" }, async (base) => {
+    const manifest = await (await fetch(`${base}/agent-tools.json`)).json();
+    const pricing = await (await fetch(`${base}/.well-known/x402`)).json();
+    for (const path of ["/.well-known/ai-agent.json", "/.well-known/agent-card.json"]) {
+      const response = await fetch(`${base}${path}`);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-type"), "application/json");
+      const body = await response.json();
+      assert.equal(body.name, manifest.name);
+      assert.deepEqual(body.capabilities, manifest.tools);
+      assert.deepEqual(body.pricing, pricing);
+      assert.ok(manifest.publicEndpoints.some((entry) => entry.method === "GET" && entry.path === path));
+    }
+  });
+});
+
 test("http smoke: public OpenAPI and discovery links resolve without authentication", SMOKE_TEST_OPTIONS, async () => {
   await runWithServerEnv({ AUTH_CHAIN_ID: "420420419" }, async (base) => {
     const [openapi, manifestResponse, llmsResponse] = await Promise.all([
