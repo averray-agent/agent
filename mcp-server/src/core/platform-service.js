@@ -8,7 +8,7 @@ import {
   validateSubmissionContract
 } from "./job-execution-service.js";
 import { VerificationIngestionService } from "../services/verification-ingestion-service.js";
-import { ConflictError, InsufficientLiquidityError, ValidationError } from "./errors.js";
+import { ConfigError, ConflictError, InsufficientLiquidityError, ValidationError } from "./errors.js";
 import { normalizeSubmission } from "./submission.js";
 import { buildPlatformCapabilities } from "./discovery-manifest.js";
 import {
@@ -1463,7 +1463,10 @@ export class PlatformService {
 
   // Identity-only consumers must not hydrate verification or wallet progression.
   async listRecentSessionRecords(limit = 10) {
-    return this.stateStore.listRecentSessions?.(limit) ?? [];
+    if (typeof this.stateStore.listRecentSessions !== "function") {
+      throw new ConfigError("Session store must implement listRecentSessions.");
+    }
+    return this.stateStore.listRecentSessions(limit);
   }
 
   async listRecentSessions(limit = 10, { progression = true } = {}) {

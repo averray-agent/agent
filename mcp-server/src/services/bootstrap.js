@@ -108,7 +108,8 @@ import { CreditPoolDoorService } from "./credit-pool-door.js";
 import { CreditBookDoorService } from "./credit-book-door.js";
 import { CreditBookKeeperService } from "./credit-book-keeper.js";
 import { L3PostingKeeperService } from "./l3-posting-keeper.js";
-import { EvmReceiptGraphReader, ReceiptGraphUnderwriter } from "./receipt-graph-underwriter.js";
+import { ReceiptGraphUnderwriter } from "./receipt-graph-underwriter.js";
+import { IndexedReceiptGraphReader } from "./indexed-receipt-graph-reader.js";
 import {
   UpstreamStatusPollerService,
   loadUpstreamStatusPollerConfig
@@ -405,6 +406,21 @@ export function createCreditPoolDoor({ gateway, authConfig, chainReader, workerE
     capacityReader: (wallet) => workerExposurePolicy.capacityForWallet(wallet),
     vestingAttestor: (input) => gateway.signCreditVestingAttestation(input),
     creditBookDoor
+  });
+}
+
+export function createReceiptGraphUnderwriter({
+  gateway, authConfig, tierPerksPolicy, env = process.env, fetchImpl, now
+} = {}) {
+  return new ReceiptGraphUnderwriter({
+    tierPerksPolicy,
+    reader: new IndexedReceiptGraphReader({
+      env, fetchImpl, now,
+      chainId: authConfig.chainId,
+      assetAddress: gateway.config.supportedAssets?.find((asset) => asset.symbol?.toUpperCase() === "USDC")?.address,
+      escrowAddresses: [gateway.config.escrowCoreAddress, gateway.config.legacyEscrowCoreAddress],
+      accountAddress: gateway.config.agentAccountAddress
+    })
   });
 }
 
@@ -787,14 +803,7 @@ export async function createPlatformRuntime() {
     })
   );
   const receiptGraphUnderwriter = initStep("init-receipt-graph-underwriter", logger, () =>
-    new ReceiptGraphUnderwriter({
-      tierPerksPolicy,
-      reader: new EvmReceiptGraphReader({
-        provider: gateway.provider,
-        escrowAddresses: [gateway.config.escrowCoreAddress, gateway.config.legacyEscrowCoreAddress],
-        accountAddress: gateway.config.agentAccountAddress
-      })
-    })
+    createReceiptGraphUnderwriter({ gateway, authConfig, tierPerksPolicy })
   );
   const creditBookDoor = initStep("init-credit-book-door", logger, () =>
     new CreditBookDoorService({
