@@ -155,3 +155,108 @@ Two PR numbers; green CI (the smoke phase is now discovered by CI after #1356,
 so its result counts); the nine test names; drill evidence; the production
 before/after figures from the histogram or log for both paths; the named cause
 of the runner 20 s.
+
+---
+
+# REVISION 2026-09-09 — B re-scoped: the dominant `/credit` cost is the underwriter's per-request 30-day log scan, which the first draft omitted
+
+A landed as #1357 (gated, queued). Codex's B diagnostic was right and I verified
+it against `origin/main`: the cost is not the nine phases described above. It is
+`services/receipt-graph-underwriter.js` `readWindow`, run on **every** `/credit`:
+
+1. `getBlockNumber` — 1 call.
+2. `findFirstBlockAtOrAfter` (`:197`) — a **binary search over the whole chain
+   height** (~20.4 M blocks) for the 30-day cutoff: ~25 sequential `getBlock`.
+3. `readLogsChunked` (`:211`) — 30 days ≈ 432 k blocks in `LOG_CHUNK_SIZE`
+   = 25 000 steps → 18 chunks, **sequential**, × 3 filters (settlements by
+   worker, disputes **unfiltered by worker**, upheld by worker) × 2 escrow
+   sources (v3 + the v1 drain) ≈ 108 sequential `getLogs`.
+
+≈ 134 sequential RPC calls per request **independent of history** (Codex
+measured 133 for an empty wallet). At 50–150 ms per call against the public
+RPC that is 7–20 s cold; the "1.7 s warm" figure was the provider answering
+from cache. **The ~20 s runner case is therefore this scan against a
+rate-limited public RPC — named, with evidence, and not a timeout problem.**
+The original B items (concurrent doors, one block fetch, ≤ 3 phases) still
+apply to the L1 reader but are secondary; parallelising the doors cannot make
+a 134-call path three phases, as Codex said.
+
+## Revised B scope
+
+**B1 — evidence comes from a store, never from a per-request chain scan.**
+The indexer already materialises exactly what the settlement filter derives:
+`indexer/ponder.schema.ts:73` `settlement_split` (worker, asset, amounts,
+blockNumber, timestamp). Codex chooses one of two sources and says why:
+
+- (a) the indexer (`mainnet-indexer:42069`, Ponder's query endpoint), adding
+  a worker index to `settlement_split` and indexing the dispute events the
+  underwriter needs if they are not there yet (check `DisputeOpened` /
+  upheld verdicts in `indexer/src/index.ts`; anything under `indexer/` rotates
+  the schema, replay ≈ 5 min, plan the deploy accordingly). The backend today
+  knows the indexer only through `INDEXER_STATUS_URL`; a data client is new
+  code and must honour `INDEXER_LAG_BUDGET_SECONDS`.
+- (b) the backend's own persisted payout receipts on sessions
+  (`services/payout-receipt-backfill.js`), if they carry SettlementSplit
+  amounts and upheld-dispute outcomes for the window; otherwise extend the
+  backfill so they do.
+
+Either way: when the source is stale or missing, the receipt graph reports
+`available: false` with a named reason (`indexer_stale`, `receipt_store_missing`)
+in the existing `credit_book_live_read_failed` idiom. It **never** falls back
+to the chain scan silently. The chain scan may survive only as an explicit
+operator backfill/reconciliation tool, off the request path.
+
+**B2 — cutoff block without a bisect.** If any chain read remains in the path,
+the 30-day cutoff block is derived arithmetically from the 6 s block time and
+refined with at most two `getBlock` calls, cached per hour. One block fetch per
+`getInfo`, passed into every reader.
+
+**B3 — the original items.** Concurrent doors; L1 reader phases merged;
+per-phase timings in the `http.response` entry for `/credit`.
+
+**B4 — no timeout change.** With B1 in place the smoke should pass on the
+existing timeout; if it does not, the per-phase timings name the next cause.
+
+## Revised non-negotiables (replace 5–9 above)
+
+5. **Zero log scans in the request path.** Counting provider stub: `/credit`
+   performs 0 `getLogs` and 0 bisect `getBlock` calls. Mutation: reintroduce
+   `readWindow` on the request path — must fail.
+6. **Source honesty.** With a stubbed stale indexer / missing receipt store the
+   receipt graph reports `available:false` with the named reason and makes zero
+   chain calls. Mutation: fall back to the scan — must fail.
+7. **Evidence parity.** For a fixture wallet with N settlements across both
+   escrow sources and one upheld dispute inside the window plus one outside it,
+   the underwriting output from the store equals the output of the old chain
+   reader on the same fixture (keep the old reader **in tests only** as the
+   oracle). Mutation: drop the out-of-window exclusion — must fail.
+8. **One block fetch, concurrent doors, ≤ 3 sequential RPC phases** for what
+   remains on chain (the L1 snapshot): 50 ms-per-RPC stub, `getInfo` under
+   200 ms. Mutation: add a phase — must fail.
+9. **Production numbers.** See the measurement runsheet below; `/credit` warm
+   target < 600 ms, and the CreditPool smoke green on the unchanged timeout.
+10. **Carry-over nit from #1357.** `listRecentSessionRecords` must throw, not
+    return `[]`, when the store lacks `listRecentSessions`; an empty directory
+    must mean "nobody consented", never "the store is wrong".
+
+## Measurement runsheet (operator, before and after each deploy)
+
+Correction to the first draft: `http_request_duration_ms` is a count+sum
+histogram (`core/metrics.js:99`) — no quantiles. Percentiles come from the
+`http.response` log lines. On the VPS:
+
+```bash
+for p in /agents /credit; do docker logs agent-mainnet-backend --since 24h 2>&1 | grep 'http.response' | grep "\"path\":\"$p\"" | grep -o '"durationMs":[0-9]*' | cut -d: -f2 | sort -n | awk -v p="$p" '{a[NR]=$1} END {if (NR==0) {print p, "n=0"; exit} print p, "n="NR, "p50="a[int(NR*0.5)+1], "p95="a[int(NR*0.95)+1], "max="a[NR]}'; done
+```
+
+Average as a cross-check, from the histogram (the bearer stays in the
+container's environment; nothing is pasted anywhere):
+
+```bash
+docker exec agent-mainnet-backend sh -c 'curl -s -H "authorization: Bearer $METRICS_BEARER_TOKEN" http://127.0.0.1:8787/metrics' | grep -E 'http_request_duration_ms_(sum|count)\{[^}]*path="/(agents|credit)"'
+```
+
+The operator runs both **before** the A deploy, after A, and after B, and
+pastes the output lines back. Codex has no production read path by design and
+must not be given one; curl from outside is acceptable **additional** evidence
+for `/agents` only (public), never for `/credit`.
