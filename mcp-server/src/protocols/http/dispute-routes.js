@@ -227,7 +227,7 @@ export function createDisputeRoutes({
 
   async function listDisputes(limit = 100) {
     const [sessions, arbitrationExecution] = await Promise.all([
-      service.listRecentSessions(limit),
+      service.listRecentSessions(limit, { progression: false }),
       resolveArbitrationExecution()
     ]);
     const candidates = await Promise.all(

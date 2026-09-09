@@ -7,6 +7,7 @@ import { createProfileRoutes } from "../protocols/http/profile-routes.js";
 import { createSessionRoutes } from "../protocols/http/session-routes.js";
 import { createListBadgeReceipts } from "../protocols/http/badge-routes.js";
 import { createOperatorActivityFeed } from "../protocols/http/operator-activity-feed.js";
+import { createDisputeRoutes } from "../protocols/http/dispute-routes.js";
 
 const WALLETS = [1, 2, 3].map((n) => `0x${String(n).repeat(40)}`);
 const makeSessions = (wallets = WALLETS) => Array.from({ length: 250 }, (_, index) => ({
@@ -121,12 +122,14 @@ test("badges and activity feeds skip progression but retain verification enrichm
     assert.ok(rows.every((s) => Object.hasOwn(s, "verification")));
     return rows;
   };
-  const feed = createOperatorActivityFeed({ service, stateStore: store, listPolicies: () => [], listDisputes: async () => [] });
+  // Follow the real alerts dependency too: its dispute listing also scans sessions.
+  const { listDisputes } = createDisputeRoutes({ service, stateStore: store });
+  const feed = createOperatorActivityFeed({ service, stateStore: store, listPolicies: () => [], listDisputes });
   await feed.listAuditEvents();
   await feed.listAlerts();
   const badges = createListBadgeReceipts({ service, stateStore: store,
     verifierService: { getResult: async () => undefined }, buildBadgeFromSession: () => { throw new Error("no badge fixture"); }
   });
   await badges(250);
-  assert.deepEqual(options, [{ progression: false }, { progression: false }, { progression: false }]);
+  assert.deepEqual(options, Array.from({ length: 4 }, () => ({ progression: false })));
 });
