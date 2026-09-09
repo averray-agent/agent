@@ -80,6 +80,7 @@ export function resolveHubNetwork(chainId) {
 const withDefaultGetMethod = (entries) => entries.map((entry) => ({ method: "GET", ...entry }));
 
 const DISCOVERY_PUBLIC_ENDPOINTS = withDefaultGetMethod([
+  { path: "/openapi.json", description: "Public mainnet OpenAPI 3.1 contract; operator endpoints excluded." },
   { path: "/health", description: "Liveness plus serviceHealth/capabilityHealth for state store, submitted-job settlement scheduler, blockchain, treasury mutations, XCM observer, indexer, and gas sponsor." },
   { path: "/metrics", description: "Prometheus text-format metrics. Bearer-gated in production via METRICS_BEARER_TOKEN." },
   { path: "/llms.txt", description: "Agent-adjusted orientation mirror served on the API host." },
@@ -818,6 +819,7 @@ export function buildDiscoveryManifest({
 } = {}) {
   const manifest = JSON.parse(JSON.stringify(buildBaseManifest(resolveHubNetwork(chainId))));
   manifest.baseUrl = baseUrl;
+  manifest.openapi = `${baseUrl}/openapi.json`;
   manifest.discoveryUrl = discoveryUrl;
   manifest.profile = profile;
   manifest.executionSurfaces.operatorApp = operatorAppUrl;

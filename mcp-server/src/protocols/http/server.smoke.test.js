@@ -2335,6 +2335,30 @@ test("http smoke: production /metrics fails closed when token is missing", SMOKE
   );
 });
 
+test("http smoke: public OpenAPI and discovery links resolve without authentication", SMOKE_TEST_OPTIONS, async () => {
+  await runWithServerEnv({ AUTH_CHAIN_ID: "420420419" }, async (base) => {
+    const [openapi, manifestResponse, llmsResponse] = await Promise.all([
+      fetch(`${base}/openapi.json`), fetch(`${base}/agent-tools.json`), fetch(`${base}/llms.txt`)
+    ]);
+    assert.equal(openapi.status, 200);
+    assert.equal(openapi.headers.get("content-type"), "application/json");
+    const document = await openapi.json();
+    assert.equal(document.openapi, "3.1.0");
+    assert.ok(document.info.title && document.info.version && document.paths);
+    assert.deepEqual(document.servers.map(({ url }) => url), ["https://api.averray.com"]);
+    assert.equal(Object.keys(document.paths).some((path) => path.startsWith("/admin/")), false);
+    assert.doesNotMatch(JSON.stringify(document), /420420417/u);
+    const manifest = await manifestResponse.json();
+    const llms = await llmsResponse.text();
+    assert.equal(manifest.openapi, "https://api.averray.com/openapi.json");
+    assert.ok(llms.includes(manifest.openapi));
+    // Use the production link's path against this actual strict-auth server.
+    const linked = await fetch(`${base}${new URL(manifest.openapi).pathname}`);
+    assert.equal(linked.status, 200);
+    assert.deepEqual(await linked.json(), document);
+  });
+});
+
 test("http smoke: discovery manifest is served at both /agent-tools.json and the RFC 8615 .well-known path", SMOKE_TEST_OPTIONS, async () => {
   await runWithServerEnv({ AUTH_CHAIN_ID: "420420419" }, async (base) => {
     const [

@@ -54,6 +54,9 @@ RUN npm install --omit=dev
 
 COPY mcp-server/src ./src
 
+# The public OpenAPI reader resolves repo-relative docs/ to /docs in this image.
+COPY docs/api/openapi.json /docs/api/openapi.json
+
 # The money-moving venue ceremony must authenticate through the backend
 # container's Roles Anywhere profile. Ship only the driver and its read/RPC
 # helpers; it remains dry-run by default and exposes no new service surface.
