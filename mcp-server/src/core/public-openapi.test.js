@@ -7,7 +7,7 @@ import { createPublicMetadataRoutes, buildAgentLlmsText } from "../protocols/htt
 import { HTTP_METRIC_PATHS, respond, respondText } from "../protocols/http/http-helpers.js";
 import { buildX402DiscoveryDocument } from "../payments/x402-discovery.js";
 import { VerificationProfileRegistry } from "../services/verification-profile-registry.js";
-import { publicOpenApiErrors } from "./public-openapi-contract.js";
+import { OPENAPI_INVENTORY_EXCLUSIONS, PUBLIC_OPENAPI_EXCLUSIONS, publicOpenApiErrors } from "./public-openapi-contract.js";
 
 const readDocument = async () => JSON.parse(await readFile(new URL("../../../docs/api/openapi.json", import.meta.url), "utf8"));
 
@@ -34,6 +34,33 @@ test("public OpenAPI drift guard rejects a new unrepresented public registry ope
   assert.ok(publicOpenApiErrors(privateDocument).some((error) => error.includes("private admin path")));
   assert.ok(publicOpenApiErrors(document, { inventory: [...HTTP_METRIC_PATHS, "/unrepresented-public-read"] })
     .some((error) => error.includes("route inventory path needs documentation or a named exclusion")));
+});
+
+test("public OpenAPI drift guard rejects documented /monitor/deposit-pool", async () => {
+  const document = await readDocument();
+  document.paths["/monitor/deposit-pool"] = { get: {} };
+  assert.ok(publicOpenApiErrors(document).some((error) => error.startsWith("excluded path /monitor/deposit-pool must not be published")));
+});
+
+test("public OpenAPI drift guard rejects every documented inventory exclusion", async () => {
+  const document = await readDocument();
+  for (const path of Object.keys(OPENAPI_INVENTORY_EXCLUSIONS)) {
+    const candidate = structuredClone(document);
+    candidate.paths[path] = { get: {} };
+    assert.ok(publicOpenApiErrors(candidate).some((error) => error.startsWith(`excluded path ${path} must not be published`)), path);
+  }
+});
+
+test("public OpenAPI drift guard independently rejects every documented public operation exclusion", async () => {
+  const document = await readDocument();
+  for (const key of Object.keys(PUBLIC_OPENAPI_EXCLUSIONS)) {
+    const [method, path] = key.split(" ");
+    const candidate = structuredClone(document);
+    candidate.paths[path] = { [method.toLowerCase()]: {} };
+    // These operations also have path exclusions: that error alone must not
+    // mask a missing operation-level publication check.
+    assert.ok(publicOpenApiErrors(candidate).some((error) => error.startsWith(`excluded public operation ${key} must not be published`)), key);
+  }
 });
 
 test("public OpenAPI GET returns 200 application/json with the structural mainnet contract", async () => {

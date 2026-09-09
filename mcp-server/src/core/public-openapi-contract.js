@@ -70,8 +70,17 @@ export function publicOpenApiErrors(document, {
     errors.push("servers must contain only https://api.averray.com");
   }
   if (JSON.stringify(document).includes("420420417")) errors.push("testnet chain id 420420417 must not be published");
-  for (const path of Object.keys(document?.paths ?? {})) {
+  for (const [path, pathItem] of Object.entries(document?.paths ?? {})) {
     if (path.startsWith("/admin/")) errors.push(`private admin path ${path} must not be published`);
+    if (Object.hasOwn(OPENAPI_INVENTORY_EXCLUSIONS, path)) {
+      errors.push(`excluded path ${path} must not be published: ${OPENAPI_INVENTORY_EXCLUSIONS[path]}`);
+    }
+    for (const method of Object.keys(pathItem ?? {})) {
+      const key = `${method.toUpperCase()} ${path}`;
+      if (Object.hasOwn(PUBLIC_OPENAPI_EXCLUSIONS, key)) {
+        errors.push(`excluded public operation ${key} must not be published: ${PUBLIC_OPENAPI_EXCLUSIONS[key]}`);
+      }
+    }
   }
   const advertised = manifest.publicEndpoints.map(({ method, path }) => [method, toOpenApiPath(path)]);
   for (const [method, path] of [...advertised, ...PUBLIC_COMPANIONS]) {
