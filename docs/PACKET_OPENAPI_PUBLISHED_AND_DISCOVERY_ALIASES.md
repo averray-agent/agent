@@ -49,6 +49,9 @@ Worse, it is not fit to publish as-is. Verified against `origin/main`:
 
 ## Decision B — the discovery aliases (operator's call, recommendation stated)
 
+> **DECIDED 2026-09-09 by the operator: YES.** Build B under the three
+> constraints below. A is #1354 (gated, one fixup pending).
+
 Serving `/.well-known/ai-agent.json` and `/.well-known/agent-card.json` as
 **projections of the same `buildDiscoveryManifest` output** costs almost
 nothing and would likely lift the grade into the B range. It also creates two
