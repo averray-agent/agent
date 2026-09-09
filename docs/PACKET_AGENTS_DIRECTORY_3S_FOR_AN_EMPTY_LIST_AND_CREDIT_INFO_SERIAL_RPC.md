@@ -303,3 +303,19 @@ is its own packet with its own numbers.
 #1357 merged 13:34Z and deployed (`deployedSha 824c7d34`). `GET /agents` at the
 default limit from outside: 3.0 s → 0.2–0.4 s, still `[]`. The operator's log
 runsheet supplies the real-traffic p50/p95.
+
+## Operator log reading 2026-09-09 ~14:15Z (post-deploy container only)
+
+```
+/agents n=3 p50=50 p95=51 max=51
+/credit n=1 p50=5826 p95=5826 max=5826
+```
+
+Two facts and one caveat. `/agents` is now 50 ms server-side at the default
+limit (the three samples are my outside curls after the deploy; there was no
+other traffic). `/credit` took **5.8 s server-side** on the one real request
+since the deploy — the receipt-graph window scan on a warm process, and the
+authoritative "before" for B. Caveat: the deploy recreated the backend
+container, so `docker logs` no longer holds pre-deploy traffic; the "before"
+for `/agents` is the outside measurement table at the top of this packet
+(2.7–3.3 s). **Future rule: run the log runsheet before the deploy, not after.**
