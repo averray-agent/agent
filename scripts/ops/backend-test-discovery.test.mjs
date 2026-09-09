@@ -53,6 +53,10 @@ test("configured backend unit runner executes every repository test file", { tim
   console.log(line);
 });
 
+test("recursive runner needs no profile-routes append workaround", () => {
+  assert.doesNotMatch(unitScript, /src\/protocols\/http\/profile-routes\.test\.js/u);
+});
+
 test("historical packet census is 184 POSIX glob files versus 241 recursive files", async () => {
   const { stdout } = await exec("git", ["ls-tree", "-r", "--name-only", "6cb88d4495d813a85d7ade5c157c2da2b1af6964", "mcp-server/src"], { cwd: root });
   const files = stdout.trim().split("\n").filter((path) => path.endsWith(".test.js"));
