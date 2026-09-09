@@ -162,7 +162,7 @@ export function createProfileRoutes({
     // participants out of the recent-session window. Overscan the bounded
     // store window before filtering so the public limit applies to real rows.
     const scanLimit = includeSynthetic ? limit : Math.min(Math.max(limit * 5, limit), 250);
-    const sessions = await service.listRecentSessions(scanLimit);
+    const sessions = await service.listRecentSessionRecords(scanLimit);
     const wallets = [...new Set(sessions.map((session) => session.wallet?.toLowerCase()).filter((wallet) => ADDRESS_RE.test(wallet ?? "")))];
     const rows = await Promise.all(wallets.map(async (wallet) => {
       const consent = await readDirectoryConsent(stateStore, wallet);

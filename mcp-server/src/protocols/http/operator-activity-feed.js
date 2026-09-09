@@ -38,7 +38,7 @@ export async function listAuditEvents({
   service,
   stateStore,
 }) {
-  const sessions = await service.listRecentSessions(limit);
+  const sessions = await service.listRecentSessions(limit, { progression: false });
   const events = [];
   for (const session of sessions) {
     const actor = auditActor(`agent-${compactWallet(session.wallet)}`, compactWallet(session.wallet), "sage");
@@ -178,7 +178,7 @@ export async function listAlerts({
   service,
 }) {
   const [sessions, disputes] = await Promise.all([
-    service.listRecentSessions(limit),
+    service.listRecentSessions(limit, { progression: false }),
     listDisputes(limit)
   ]);
   const alerts = [];

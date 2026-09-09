@@ -76,8 +76,8 @@ function makeHarness(overrides = {}) {
     },
     readJsonBody: async (request) => request.body,
     service: {
-      listRecentSessions: async (limit) => {
-        calls.push(["listRecentSessions", limit]);
+      listRecentSessionRecords: async (limit) => {
+        calls.push(["listRecentSessionRecords", limit]);
         return sessions;
       },
       getReputation: async (wallet) => {

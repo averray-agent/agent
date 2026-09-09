@@ -10,8 +10,8 @@ export function createAdminSessionsRoutes({
       const limit = parseLimit(url, 50, 250);
       const jobId = url.searchParams.get("jobId") ?? undefined;
       const sessions = jobId
-        ? await service.listSessionHistory({ jobId, limit })
-        : await service.listRecentSessions(limit);
+        ? await service.listSessionHistory({ jobId, limit, progression: false })
+        : await service.listRecentSessions(limit, { progression: false });
       respond(response, 200, {
         sessions,
         count: sessions.length,
