@@ -55,14 +55,40 @@ test("stale or missing indexed receipt evidence refuses with a named reason and 
   }
 });
 
-test("credit shares one block and starts both doors concurrently within three 50ms RPC phases", async () => {
-  const provider = countingProvider({ delayMs: 50 });
+test("credit shares one block and starts both doors concurrently within three 50ms RPC phases", async (t) => {
+  // A deterministic RPC clock measures dependency depth, not CPU contention
+  // when the ops discovery guard nests the complete suite inside another run.
+  let now = 0;
+  let measuring = false;
+  let pending = [];
+  const provider = countingProvider({
+    delayMs: 50, clock: () => now,
+    sleep: (ms) => measuring
+      ? new Promise((resolve) => pending.push({ due: now + ms, resolve }))
+      : Promise.resolve()
+  });
   const fixture = creditReadFixture({ provider });
   await fixture.request(); // warm only the real vesting caches; no snapshot cache
   provider.calls.length = 0;
-  const start = performance.now();
-  const result = await fixture.request();
-  const elapsed = performance.now() - start;
+  measuring = true;
+  let complete = false;
+  let result;
+  let failure;
+  void fixture.request().then((value) => { result = value; complete = true; },
+    (error) => { failure = error; complete = true; });
+  for (let tick = 0; tick < 10 && !complete; tick += 1) {
+    await new Promise(setImmediate); // drain real async/ABI work before advancing RPC time
+    if (pending.length) {
+      now = Math.min(...pending.map((entry) => entry.due));
+      const ready = pending.filter((entry) => entry.due === now);
+      pending = pending.filter((entry) => entry.due !== now);
+      ready.forEach((entry) => entry.resolve());
+    }
+  }
+  assert.equal(complete, true, "bounded RPC schedule must complete");
+  if (failure) throw failure;
+  const elapsed = now;
+  t.diagnostic(`fixed 50ms RPC clock: complete warm getInfo = ${elapsed}ms`);
   assert.equal(result.body.receiptGraph.available, true);
   assert.equal(result.body.wallet.vestingAvailable, true);
   assert.equal(result.body.block.number, result.body.receiptGraph.block.number);

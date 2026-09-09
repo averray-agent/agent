@@ -49,7 +49,11 @@ export function indexerFetch({ checkpoint = checkpointData(), rows = {}, calls =
   };
 }
 
-export function countingProvider({ delayMs = 0 } = {}) {
+export function countingProvider({
+  delayMs = 0,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  clock = () => performance.now()
+} = {}) {
   const interfaces = {
     [addresses.credit]: new Interface(CREDIT_POOL_ABI),
     [addresses.deposit]: new Interface(DEPOSIT_POOL_V2_ABI),
@@ -61,8 +65,8 @@ export function countingProvider({ delayMs = 0 } = {}) {
   const calls = [];
   const encoded = new Map();
   const wait = async (call) => {
-    calls.push({ ...call, at: performance.now() });
-    if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    calls.push({ ...call, at: clock() });
+    if (delayMs) await sleep(delayMs);
   };
   const defaults = (type) => type.baseType === "array" ? []
     : type.baseType === "tuple" ? type.components.map(defaults)
