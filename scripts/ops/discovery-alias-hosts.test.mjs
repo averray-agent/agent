@@ -78,6 +78,7 @@ test("Caddy serves byte-identical discovery aliases on apex and API from the liv
     server.listen = [`127.0.0.1:${port}`];
     server.automatic_https = { disable: true };
     config.admin = { disabled: true };
+    config.storage = { module: "file_system", root: join(dir, "storage") };
     const configPath = join(dir, `caddy-${network}.json`);
     await writeFile(configPath, JSON.stringify(config));
     const child = spawn(caddyBin, ["run", "--config", configPath], { stdio: ["ignore", "ignore", "pipe"] });
