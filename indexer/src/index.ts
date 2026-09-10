@@ -25,6 +25,30 @@ const hasCreditPool = Boolean(
   process.env.PONDER_CREDIT_POOL_ADDRESS?.trim() || process.env.CREDIT_POOL_ADDRESS?.trim()
 );
 
+// These setup reads happen once per replay, never on an HTTP request. Coverage
+// and Ponder's indexed checkpoint together distinguish zero events from a
+// missing history. A `latest` start deliberately cannot certify a 30-day window.
+for (const contract of ["EscrowCore", "AgentAccountCore"] as const) {
+  ponder.on(`${contract}:setup`, async ({ context }) => {
+    const source = context.contracts[contract];
+    if (source.startBlock === "latest") return; // no historical coverage to attest
+    const fromBlock = BigInt(source.startBlock ?? 0);
+    const block = await context.client.getBlock({ blockNumber: fromBlock });
+    const addresses = Array.isArray(source.address) ? source.address : [source.address];
+    for (const address of addresses) {
+      if (typeof address !== "string") throw new Error("Receipt-graph source address is unavailable.");
+      await context.db.insert(schema.receiptGraphCoverage).values({
+        id: `${context.chain.id}:${contract}:${address.toLowerCase()}`,
+        chainId: context.chain.id,
+        contract,
+        address: address.toLowerCase() as `0x${string}`,
+        fromBlock,
+        fromTimestamp: block.timestamp
+      });
+    }
+  });
+}
+
 const decodeBytes32 = (value: string) => {
   try {
     return hexToString(value as `0x${string}`, { size: 32 }).replace(/\u0000/g, "");
@@ -210,6 +234,7 @@ const syncJob = async ({
       updatedAtTimestamp: row.updatedAtTimestamp,
       lastTxHash: row.lastTxHash
     }));
+  return { worker, asset };
 };
 
 const readLiveJob = async ({
@@ -623,11 +648,13 @@ ponder.on("EscrowCore:DisputeOpened", async ({ event, context }) => {
 });
 
 ponder.on("EscrowCore:DisputeResolved", async ({ event, context }) => {
-  await syncJob({ context, event, jobId: event.args.jobId });
+  const live = await syncJob({ context, event, jobId: event.args.jobId });
   await context.db.insert(schema.jobEvent).values({
     id: toEventId(event.transaction.hash, event.log.logIndex),
     jobId: event.args.jobId,
     kind: "DisputeResolved",
+    worker: live.worker.toLowerCase() as `0x${string}`,
+    escrowAddress: event.log.address.toLowerCase() as `0x${string}`,
     actor: event.args.arbitrator,
     amount: event.args.workerPayout,
     evidenceHash: null,
@@ -691,9 +718,10 @@ ponder.on("EscrowCore:SettlementSplit", async ({ event, context }) => {
   await context.db.insert(schema.settlementSplit).values({
     id: toEventId(event.transaction.hash, event.log.logIndex),
     jobId: event.args.jobId,
-    worker: event.args.worker,
+    worker: event.args.worker.toLowerCase() as `0x${string}`,
+    escrowAddress: event.log.address.toLowerCase() as `0x${string}`,
     treasuryAccount: event.args.treasuryAccount,
-    asset: event.args.asset,
+    asset: event.args.asset.toLowerCase() as `0x${string}`,
     workerAmount: event.args.workerAmount,
     protocolFeeAmount: event.args.protocolFeeAmount,
     protocolFeeBps: event.args.protocolFeeBps,

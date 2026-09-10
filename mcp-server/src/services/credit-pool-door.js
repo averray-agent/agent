@@ -6,6 +6,7 @@ import {
   CREDIT_POOL_RISK_DISCLOSURE
 } from "../core/credit-pool-disclosure.js";
 import { ValidationError } from "../core/errors.js";
+import { createCreditReadContext, timeCreditRead } from "./credit-read-context.js";
 
 const ASSET_DECIMALS = 6;
 const SHARE_DECIMALS = 6;
@@ -67,9 +68,8 @@ export class EvmCreditPoolDoorChainReader {
     this.provider = provider;
   }
 
-  async readSnapshot({ creditPoolAddress, depositPoolAddress, wallet }) {
-    const blockNumber = await this.provider.getBlockNumber();
-    const block = await this.provider.getBlock(blockNumber);
+  async readSnapshot({ creditPoolAddress, depositPoolAddress, wallet, readContext }) {
+    const { blockNumber, block } = await (readContext ?? createCreditReadContext(this.provider)).getBlock();
     const at = { blockTag: blockNumber };
     const credit = new Contract(creditPoolAddress, CREDIT_POOL_ABI, this.provider);
     const deposit = new Contract(depositPoolAddress, DEPOSIT_POOL_V2_ABI, this.provider);
@@ -79,7 +79,7 @@ export class EvmCreditPoolDoorChainReader {
       totalAssetCap, perLenderCap, maxLtvBps, maxInterestBps, platformFeeBps, disclosure,
       lenderShares, lenderAssets, lenderAvailableShares, outstandingDebt, nextLoanNonce,
       attestationNonce, depositShares, depositAvailableShares, pledgedShares
-    ] = await Promise.all([
+    ] = await timeCreditRead(readContext?.timings, "l1StateMs", () => Promise.all([
       credit.asset(at), credit.depositPool(at), credit.operator(at), credit.totalAssets(at),
       credit.totalSupply(at), credit.bufferAssets(at), credit.principalOutstanding(at),
       credit.totalPledgedShares(at), credit.defaults(at), credit.ltvBps(at), credit.interestBps(at),
@@ -89,16 +89,16 @@ export class EvmCreditPoolDoorChainReader {
       credit.outstandingDebt(wallet, at), credit.nextLoanNonce(wallet, at),
       credit.vestingAttestationNonces(wallet, at), deposit.balanceOf(wallet, at),
       deposit.availableShares(wallet, at), deposit.pledgedShares(wallet, at)
-    ]);
+    ]));
     if (getAddress(configuredDepositPool) !== getAddress(depositPoolAddress)) {
       throw new Error("CreditPool depositPool binding does not match configured DepositPool v2.");
     }
     const token = new Contract(asset, ERC20_MOCK_ABI, this.provider);
-    const [assetBalance, allowance, pledgedAssetValue] = await Promise.all([
+    const [assetBalance, allowance, pledgedAssetValue] = await timeCreditRead(readContext?.timings, "l1DependentMs", () => Promise.all([
       token.balanceOf(wallet, at),
       token.allowance(wallet, creditPoolAddress, at),
       deposit.convertToAssets(pledgedShares, at)
-    ]);
+    ]));
     return {
       blockNumber,
       blockHash: block?.hash ?? null,
@@ -167,6 +167,7 @@ export class CreditPoolDoorService {
     this.depositPoolAddress = depositPoolAddress ? getAddress(depositPoolAddress) : "";
     this.chainId = Number(chainId);
     this.rpcUrls = [...new Set((rpcUrls ?? []).filter(Boolean).map(String))];
+    this.provider = provider ?? chainReader?.provider;
     this.chainReader = chainReader ?? (provider ? new EvmCreditPoolDoorChainReader(provider) : undefined);
     this.capacityReader = capacityReader;
     this.vestingAttestor = vestingAttestor;
@@ -174,11 +175,11 @@ export class CreditPoolDoorService {
     this.now = now;
   }
 
-  async getInfo(wallet) {
-    const receiptGraph = this.creditBookDoor
-      ? await this.creditBookDoor.getInfo(wallet)
-      : undefined;
+  async getInfo(wallet, { timings = {} } = {}) {
+    const readContext = createCreditReadContext(this.provider, timings);
+    const receiptGraphRead = this.creditBookDoor?.getInfo(wallet, { readContext });
     if (!this.creditPoolAddress || !this.depositPoolAddress) {
+      const receiptGraph = await receiptGraphRead;
       if (!receiptGraph?.available) return unavailable();
       return {
         schemaVersion: 2,
@@ -189,9 +190,10 @@ export class CreditPoolDoorService {
     }
     this.#assertReadReady();
     const normalizedWallet = getAddress(wallet);
-    const [snapshot, capacity] = await Promise.all([
-      this.#snapshot(normalizedWallet),
-      this.#capacity(normalizedWallet)
+    const [snapshot, capacity, receiptGraph] = await Promise.all([
+      this.#snapshot(normalizedWallet, readContext),
+      timeCreditRead(timings, "capacityMs", () => this.#capacity(normalizedWallet)),
+      receiptGraphRead
     ]);
     const response = this.#response(snapshot, normalizedWallet, capacity);
     return receiptGraph ? { ...response, schemaVersion: 2, receiptGraph } : response;
@@ -546,11 +548,12 @@ export class CreditPoolDoorService {
     };
   }
 
-  async #snapshot(wallet) {
+  async #snapshot(wallet, readContext) {
     return normalizeSnapshot(await this.chainReader.readSnapshot({
       creditPoolAddress: this.creditPoolAddress,
       depositPoolAddress: this.depositPoolAddress,
-      wallet
+      wallet,
+      readContext
     }));
   }
 

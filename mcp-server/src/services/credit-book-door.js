@@ -11,6 +11,7 @@ import { buildSiweMessage, verifySiweMessage } from "../auth/siwe.js";
 import { canonicalizeContent, hashCanonicalContent } from "../core/canonical-content.js";
 import { ConfigError, ConflictError, NotFoundError, ValidationError } from "../core/errors.js";
 import { EXTERNAL_FUNDING_RAILS } from "../core/external-posting-service.js";
+import { createCreditReadContext, timeCreditRead } from "./credit-read-context.js";
 
 export const CREDIT_DEDUCTION_DISCLOSURE =
   "deduction-first — up to half of each payout services your loan until cleared.";
@@ -81,9 +82,8 @@ export class EvmCreditBookChainReader {
     this.provider = provider;
   }
 
-  async readSnapshot({ creditBookAddress, wallet }) {
-    const blockNumber = Number(await this.provider.getBlockNumber());
-    const block = await this.provider.getBlock(blockNumber);
+  async readSnapshot({ creditBookAddress, wallet, readContext }) {
+    const { blockNumber, block } = await (readContext ?? createCreditReadContext(this.provider)).getBlock();
     const at = { blockTag: blockNumber };
     const book = new Contract(creditBookAddress, CREDIT_BOOK_ABI, this.provider);
     const [
@@ -91,7 +91,7 @@ export class EvmCreditBookChainReader {
       totalOutstanding, accountedLiquidity, bookLiquid, l3Enabled, l3PosterWallet,
       perWalletCapCeiling, bookCapCeiling, interestBpsCeiling, cashOutstanding,
       postingOutstanding, cashLoanId, postingLoanId
-    ] = await Promise.all([
+    ] = await timeCreditRead(readContext?.timings, "receiptGraphStateMs", () => Promise.all([
       book.asset(at), book.operator(at), book.accounts(at), book.cashPerWalletCapRaw(at),
       book.postingPerWalletCapRaw(at), book.bookCapRaw(at), book.interestBps(at),
       book.repayBps(at), book.totalOutstandingRaw(at), book.accountedLiquidityRaw(at),
@@ -100,11 +100,11 @@ export class EvmCreditBookChainReader {
       book.INTEREST_BPS_CEILING(at), book.outstandingByModeRaw(wallet, CASH, at),
       book.outstandingByModeRaw(wallet, POSTING, at), book.activeLoanByMode(wallet, CASH, at),
       book.activeLoanByMode(wallet, POSTING, at)
-    ]);
-    const [cashLoanValue, postingLoanValue] = await Promise.all([
+    ]));
+    const [cashLoanValue, postingLoanValue] = await timeCreditRead(readContext?.timings, "receiptGraphLoansMs", () => Promise.all([
       String(cashLoanId).toLowerCase() === ZERO_BYTES32 ? null : book.loans(cashLoanId, at),
       String(postingLoanId).toLowerCase() === ZERO_BYTES32 ? null : book.loans(postingLoanId, at)
-    ]);
+    ]));
     return {
       blockNumber,
       blockHash: block?.hash ?? null,
@@ -147,15 +147,23 @@ export class CreditBookDoorService {
     this.now = now;
   }
 
-  async getInfo(walletInput) {
+  async getInfo(walletInput, { readContext } = {}) {
     if (!this.creditBookAddress) return unavailable();
     this.#assertReady();
     const wallet = getAddress(walletInput);
+    const prepared = await timeCreditRead(readContext?.timings, "receiptGraphEvidenceMs",
+      () => this.underwriter.prepare?.({ wallet }));
+    // Missing/stale evidence refuses before ANY receipt-graph chain or tier
+    // read; the independent L1 door may still return its own valid snapshot.
+    if (prepared?.available === false) {
+      return { schemaVersion: 1, available: false, reason: prepared.reason };
+    }
     let snapshot;
     try {
       snapshot = normalizeSnapshot(await this.chainReader.readSnapshot({
         creditBookAddress: this.creditBookAddress,
-        wallet
+        wallet,
+        readContext
       }));
     } catch {
       return {
@@ -164,12 +172,16 @@ export class CreditBookDoorService {
         reason: "credit_book_live_read_failed"
       };
     }
-    const underwriting = await this.underwriter.evaluate({
+    const underwriting = await timeCreditRead(readContext?.timings, "underwritingMs", () => this.underwriter.evaluate({
       wallet,
       asset: snapshot.asset,
       cashCapRaw: snapshot.cashCap,
-      postingCapRaw: snapshot.postingCap
-    });
+      postingCapRaw: snapshot.postingCap,
+      evidence: prepared?.evidence
+    }));
+    if (!underwriting.available) {
+      return { schemaVersion: 1, available: false, reason: underwriting.disqualificationReason, underwriting };
+    }
     const cashLimit = BigInt(underwriting.cashLimitRaw);
     const postingLimit = BigInt(underwriting.postingLimitRaw);
     const cashHeadroom = cashLimit > snapshot.cashOutstanding ? cashLimit - snapshot.cashOutstanding : 0n;
