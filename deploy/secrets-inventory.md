@@ -124,6 +124,7 @@ Read by the `op-token-prod-vps-backend` service-account token. Rendered into
 | `BADGE_RECEIPT_PUBLIC_KEY_FINGERPRINT` | `op://prod-backend/aws-badge-receipt-signer-testnet/public-key-fingerprint` | ✅ yes | deployer | SHA-256 of SPKI DER in `sha256:<64 lowercase hex>` form. Any mismatch fails startup loudly. |
 | `METRICS_BEARER_TOKEN` | `op://prod-backend/metrics-bearer-token/password` | ✅ yes | operator | High-entropy bearer token for the public `/metrics` scraper gate. Generate with `openssl rand -hex 32`, store the value before the next deploy, then run `Hosted Observability Proof` to prove unauthenticated `401` and authenticated `200` without writing the token to evidence. Rotate by updating the 1Password item and redeploying. |
 | `ALERT_WEBHOOK_URL` | `op://prod-backend/alert-webhook-url/url` | ✅ yes | operator | Slack Incoming Webhook for the operator alert channel. Consumed by the production-side `scripts/ops/check-hosted-stack-and-alert.sh` wrapper, the `Hosted Observability Proof` workflow, and the mainnet backend's one-shot first-external-agent settlement alert. A failed hosted smoke POSTs structured JSON plus a channel-visible `correlationId`; the milestone alert persists delivery evidence in Redis before it disarms across deploys. Store it in prod-backend, not prod-critical, because the VPS backend service account reads backend runtime secrets. Rotate by creating a replacement Slack webhook, updating this 1Password field, re-rendering the env, and re-running the deliberate smoke-failure proof. |
+| `INDEXER_GRAPHQL_BEARER_TOKEN` | `op://prod-backend/graphql-bearer-token/password` | ✅ yes | operator | Bearer the backend's `/credit` receipt-graph reader (#1358) sends to the indexer's compose-internal `/graphql`. MUST equal the indexer's `GRAPHQL_BEARER_TOKEN` — the same string lives in a second vault because the backend and indexer service-account tokens read disjoint vaults. Generate once with `openssl rand -hex 32` and store it in BOTH items before the deploy. Empty or mismatched → `/credit` reports `receiptGraph.available=false` with an `indexer_*` reason (fail-closed, no chain fallback). Rotate both items, then one deploy; proof in `docs/GRAPHQL_BEARER_HARDENING_RUNBOOK.md`. |
 
 ## Indexer runtime secrets
 
@@ -133,6 +134,7 @@ Read by the `op-token-prod-vps-indexer` service-account token. Rendered into
 | Env var          | `op://` path                                  | Critical-nonempty | Rotation owner | Notes                                                                                                                |
 | ---------------- | --------------------------------------------- | :---------------: | -------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `DATABASE_URL`   | `op://prod-indexer/database-url/password`     | ✅ yes            | deployer       | Postgres connection string for Ponder. DB user password embedded in URL. Rotate by changing Postgres password first. |
+| `GRAPHQL_BEARER_TOKEN` | `op://prod-indexer/graphql-bearer-token/password` | ✅ yes | operator | Gates `/graphql` (POST queries and the GET GraphiQL playground) on `index.averray.com` and under `app.averray.com/index/`. Unset, the route is an unbounded public query surface and the indexer logs a `publicly reachable` startup warning. Same string as `INDEXER_GRAPHQL_BEARER_TOKEN` in prod-backend. Not a Ponder/chain input: a value change recreates the container without rotating `DATABASE_SCHEMA`. The testnet stack is retired, so only the mainnet mirror is rendered. Proof: unauthenticated POST → 401, bearer → 200, per `docs/GRAPHQL_BEARER_HARDENING_RUNBOOK.md`. |
 
 ## CI-side secrets (GitHub Actions runtime)
 
@@ -223,11 +225,13 @@ tokens minted via `scripts/ops/bootstrap-mainnet-vault.mjs`.
 | `BADGE_RECEIPT_PUBLIC_KEY_FINGERPRINT` | `op://mainnet-backend/aws-badge-receipt-signer-mainnet/public-key-fingerprint` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
 | `RESEND_API_KEY` | `op://mainnet-backend-external/resend-api-key/password` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
 | `GITHUB_TOKEN` | `op://mainnet-backend-external/github-pat-issue-ingestion/password` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
+| `INDEXER_GRAPHQL_BEARER_TOKEN` | `op://mainnet-backend/graphql-bearer-token/password` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
 | `X402_SETTLEMENT_API_KEY_ID` | `op://mainnet-backend/x402-cdp-facilitator/username` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
 | `X402_SETTLEMENT_API_KEY_SECRET` | `op://mainnet-backend/x402-cdp-facilitator/credential` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
 | `METRICS_BEARER_TOKEN` | `op://mainnet-backend/metrics-bearer-token/password` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
 | `ALERT_WEBHOOK_URL` | `op://mainnet-backend/alert-webhook-url/url` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
 | `SHARE_URL_SECRET` | `op://mainnet-backend/share-url-secret/password` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
 | `DATABASE_URL` | `op://mainnet-indexer/database-url/password` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
+| `GRAPHQL_BEARER_TOKEN` | `op://mainnet-indexer/graphql-bearer-token/password` | see prod-* row | deployer | Mainnet mirror — generated; rotation detail on the matching prod-* row. |
 
 <!-- END mainnet-generated -->

@@ -965,6 +965,45 @@ test("metrics auth gate is opt-in and verifies both denied and allowed scrapes",
   );
 });
 
+test("indexer /graphql bearer gate is proven on both public doors inside the indexer check", async () => {
+  const script = await readFile(CHECK_SCRIPT, "utf8");
+
+  const indexerBlock = script.slice(
+    script.indexOf('if enabled "$CHECK_INDEXER"; then'),
+    script.indexOf('echo "CHECK_INDEXER=$CHECK_INDEXER set; skipping indexer checks."')
+  );
+  assert.match(
+    indexerBlock,
+    /Checking indexer \/graphql bearer gate/u,
+    "graphql gate proof should run whenever the indexer is checked, not behind a separate opt-in"
+  );
+  assert.match(
+    indexerBlock,
+    /"\$graphql_status" != "401"/u,
+    "graphql gate proof should require the indexer host to deny unauthenticated queries"
+  );
+  assert.match(
+    indexerBlock,
+    /jq -e '\.error == "unauthorized"'/u,
+    "graphql gate proof should require the indexer's own 401 body, not a perimeter 401"
+  );
+  assert.match(
+    indexerBlock,
+    /"\$app_graphql_status" == "200"/u,
+    "graphql gate proof should fail when the operator-app /index/ proxy still serves /graphql"
+  );
+  assert.match(
+    indexerBlock,
+    /authorization: Bearer \$INDEXER_GRAPHQL_BEARER_TOKEN/u,
+    "graphql gate proof should optionally prove the bearer-authenticated 200"
+  );
+  assert.match(
+    script,
+    /INDEXER_GRAPHQL_BEARER_TOKEN=\$\{INDEXER_GRAPHQL_BEARER_TOKEN:-\}/u,
+    "the bearer-authenticated leg must stay optional so CI without the token still proves the 401"
+  );
+});
+
 test("dispute verdict proof gate is opt-in, live-only, and requires chain dispatch", async () => {
   const script = await readFile(CHECK_SCRIPT, "utf8");
 
