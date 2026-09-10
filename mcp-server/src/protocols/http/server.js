@@ -1030,6 +1030,7 @@ const server = createServer(async (request, response) => {
         path: pathname,
         status: response.statusCode,
         durationMs,
+        ...(response._creditReadTimings ? { creditReadTimings: response._creditReadTimings } : {}),
         ip: extractClientKey(request, { trustProxy })
       },
       "http.response"

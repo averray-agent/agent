@@ -1166,14 +1166,14 @@ export class BlockchainGateway {
     }
     return this.withGatewayError("readCreditPosition", async () => {
       const normalizedWallet = getAddress(wallet);
-      const [outstandingDebt, pledgedShares, depositedShares, vested] = await Promise.all([
+      const [outstandingDebt, pledgedShares, depositedShares, vested, ltvBps] = await Promise.all([
         this.creditPoolContract.outstandingDebt(normalizedWallet),
         this.depositPoolV2Contract.pledgedShares(normalizedWallet),
         this.depositPoolV2Contract.balanceOf(normalizedWallet),
-        this.readDepositVesting(normalizedWallet)
+        this.readDepositVesting(normalizedWallet),
+        this.creditPoolContract.ltvBps()
       ]);
       const pledgedAssets = await this.depositPoolV2Contract.convertToAssets(pledgedShares);
-      const ltvBps = await this.creditPoolContract.ltvBps();
       const collateralBase = BigInt(pledgedAssets) < BigInt(vested.vestedRaw)
         ? BigInt(pledgedAssets)
         : BigInt(vested.vestedRaw);

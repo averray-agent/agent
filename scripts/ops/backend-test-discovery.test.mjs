@@ -46,7 +46,12 @@ const passingTest = 'const { test } = require("node:test"); test("discovered fix
 
 test("configured backend unit runner executes every repository test file", { timeout: 120_000 }, async () => {
   const count = (await inventory(join(backend, "src"))).length;
-  const { stdout } = await run(unitScript, backend);
+  const { stdout } = await run(unitScript, backend).catch((error) => {
+    const lines = String(error.stdout ?? "").split("\n");
+    const failures = lines.flatMap((line, i) => /^\s*not ok\b/.test(line) ? lines.slice(i, i + 35) : []);
+    error.message += "\nNested backend failures:\n" + failures.join("\n");
+    throw error;
+  });
   const line = `# backend-test-discovery expected=${count} executed=${count} missing=0`;
   assert.ok(stdout.includes(line), "the configured runner must report its actual file count");
   // Make the numeric evidence visible in the CI log, not just an assertion.

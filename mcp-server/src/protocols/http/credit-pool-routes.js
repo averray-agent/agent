@@ -11,7 +11,9 @@ export function createCreditPoolRoutes({
   return async function handleCreditPoolRoute({ request, response, url, pathname }) {
     if (request.method === "GET" && pathname === "/credit") {
       const auth = await authMiddleware(request, url);
-      respond(response, 200, await creditPoolDoor.getInfo(auth.wallet));
+      const timings = {};
+      response._creditReadTimings = timings;
+      respond(response, 200, await creditPoolDoor.getInfo(auth.wallet, { timings }));
       return true;
     }
     if (request.method === "POST" && pathname === "/credit/transactions") {

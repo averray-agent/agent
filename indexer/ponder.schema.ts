@@ -1,4 +1,15 @@
-import { onchainTable } from "ponder";
+import { index, onchainTable } from "ponder";
+
+// Written during replay setup, not inferred from the first event (an empty
+// wallet is not evidence that a source has been indexed).
+export const receiptGraphCoverage = onchainTable("receipt_graph_coverage", (p) => ({
+  id: p.text().primaryKey(),
+  chainId: p.integer().notNull(),
+  contract: p.text().notNull(),
+  address: p.hex().notNull(),
+  fromBlock: p.bigint().notNull(),
+  fromTimestamp: p.bigint().notNull()
+}));
 
 export const job = onchainTable("job", (p) => ({
   id: p.text().primaryKey(),
@@ -43,6 +54,9 @@ export const jobEvent = onchainTable("job_event", (p) => ({
   jobId: p.text().notNull(),
   kind: p.text().notNull(),
   actor: p.hex(),
+  // Dispute attribution is pinned at the event, never joined to a later claim.
+  worker: p.hex(),
+  escrowAddress: p.hex(),
   amount: p.bigint(),
   evidenceHash: p.hex(),
   specHash: p.hex(),
@@ -57,7 +71,7 @@ export const jobEvent = onchainTable("job_event", (p) => ({
   txHash: p.hex().notNull(),
   blockNumber: p.bigint().notNull(),
   timestamp: p.bigint().notNull()
-}));
+}), (t) => ({ workerWindow: index().on(t.worker, t.timestamp) }));
 
 export const payout = onchainTable("payout", (p) => ({
   id: p.text().primaryKey(),
@@ -74,6 +88,7 @@ export const settlementSplit = onchainTable("settlement_split", (p) => ({
   id: p.text().primaryKey(),
   jobId: p.text().notNull(),
   worker: p.hex().notNull(),
+  escrowAddress: p.hex().notNull(),
   treasuryAccount: p.hex().notNull(),
   asset: p.hex().notNull(),
   workerAmount: p.bigint().notNull(),
@@ -82,7 +97,7 @@ export const settlementSplit = onchainTable("settlement_split", (p) => ({
   txHash: p.hex().notNull(),
   blockNumber: p.bigint().notNull(),
   timestamp: p.bigint().notNull()
-}));
+}), (t) => ({ workerWindow: index().on(t.worker, t.timestamp) }));
 
 export const gasRetention = onchainTable("gas_retention", (p) => ({
   id: p.text().primaryKey(),
@@ -159,7 +174,7 @@ export const jobStakeEvent = onchainTable("job_stake_event", (p) => ({
   txHash: p.hex().notNull(),
   blockNumber: p.bigint().notNull(),
   timestamp: p.bigint().notNull()
-}));
+}), (t) => ({ accountWindow: index().on(t.account, t.timestamp) }));
 
 export const treasuryOutflow = onchainTable("treasury_outflow", (p) => ({
   id: p.text().primaryKey(),
