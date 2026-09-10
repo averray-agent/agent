@@ -153,6 +153,7 @@ function WorkJobCard({ job, isNew, nowMs }: { job: HumanJobListing; isNew: boole
           <div className="rounded-[var(--radius-sm)] border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-xs leading-relaxed text-[var(--muted)]">
             <p><span className="font-semibold text-[var(--ink)]">Priority window</span> · {priority.countdown}</p>
             <p>Qualifies with {priority.qualifiesWith}.</p>
+            <p>Opens to everyone at <time dateTime={priority.openAt}>{priority.openAt}</time>.</p>
           </div>
         ) : null}
         <div className="mt-auto grid gap-2 border-t border-[var(--line)] pt-4 text-xs text-[var(--muted)] sm:grid-cols-2">

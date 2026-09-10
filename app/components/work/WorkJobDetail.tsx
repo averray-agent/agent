@@ -20,6 +20,7 @@ import {
   isHumanWorkListing,
   jobDefinitionFailureKind,
   jobDefinitionRawUrl,
+  priorityWindowDisplay,
   serializeJobDefinition,
   verificationDepthStatement,
   workSessionHref
@@ -38,6 +39,7 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
   const eligibilityQuery = useJobEligibility(auth.authenticated ? jobId : null);
   const netRewardQuery = useJobNetReward(auth.authenticated ? jobId : null);
   const [claiming, setClaiming] = useState(false);
+  const [nowMs, setNowMs] = useState<number | null>(null);
   const [definitionCopied, setDefinitionCopied] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
   const firstLiveTermsMarked = useRef(false);
@@ -47,6 +49,7 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
     [jobId, jobsQuery.data]
   );
   const definition = definitionQuery.data as HumanJobDefinition | undefined;
+  const priority = nowMs === null ? null : priorityWindowDisplay(definition?.priorityWindow ?? listing?.priorityWindow, nowMs);
   const rawDefinitionUrl = jobDefinitionRawUrl(jobId);
   const schemaSide = asRecord(asRecord(definition?.schemaContract)?.output);
   const submissionContract = asRecord(definition?.submissionContract);
@@ -108,6 +111,12 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
       setClaiming(false);
     }
   }
+
+  useEffect(() => {
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   async function copyDefinition() {
     if (!definition) return;
@@ -205,6 +214,13 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
         <p className="rounded-[var(--radius-sm)] bg-[var(--warn-soft)] px-4 py-3 text-sm text-[var(--warn)]" role="alert">
           Wallet-specific terms could not be confirmed. Nothing was claimed. {preflightMessage || "Retry the live checks."}
         </p>
+      ) : null}
+      {priority ? (
+        <div className="rounded-[var(--radius-sm)] border border-[var(--line)] bg-[var(--paper)] px-4 py-3 text-sm text-[var(--muted)]">
+          <p className="font-semibold text-[var(--ink)]">Priority window · {priority.countdown}</p>
+          <p>Qualifies with {priority.qualifiesWith}.</p>
+          <p>Opens to everyone at <time dateTime={priority.openAt}>{priority.openAt}</time>.</p>
+        </div>
       ) : null}
       {claimError ? <p className="rounded-[var(--radius-sm)] bg-[var(--warn-soft)] px-4 py-3 text-sm text-[var(--warn)]" role="alert">{claimError}</p> : null}
       {!auth.authenticated ? (
