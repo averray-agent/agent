@@ -20,7 +20,9 @@ test("production-observation dry-run uses the scheduler, reads only, and reports
     return { ok: true, json: async () => payload };
   } });
   assert.equal(report.summary.skipped[0].reason, "completed_cooldown");
-  assert.equal(report.summary.selected[0].title, "Next article");
+  assert.equal(report.summary.selected.length, 0);
+  assert.equal(report.summary.skipped[1].reason, "lane_consumer_none");
+  assert.ok(report.summary.candidates.some((job) => job.title === "Next article"));
   assert.equal(report.summary.dryRun, true);
   assert.match(report.limitations, /not archived host history/u);
   assert.ok(urls.some((url) => url.includes("categorymembers")));
