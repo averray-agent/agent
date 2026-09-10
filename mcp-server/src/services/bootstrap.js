@@ -236,6 +236,7 @@ export function createPlatformService() {
   });
   workerExposurePolicy.setTierPerksPolicy(tierPerksPolicy);
   const depositClaimPriorityPolicy = createDepositClaimPriorityPolicy({
+    stateStore,
     workerExposurePolicy,
     lockedTierPriorityReader: (wallet) => lockedTierService.getPriorityRank(wallet),
     tierPerksPolicy
@@ -615,6 +616,7 @@ export async function createPlatformRuntime() {
     "init-deposit-claim-priority",
     logger,
     () => createDepositClaimPriorityPolicy({
+      stateStore,
       workerExposurePolicy,
       lockedTierPriorityReader: (wallet) => lockedTierService.getPriorityRank(wallet),
       tierPerksPolicy,

@@ -81,6 +81,7 @@ export function priorityWindowDisplay(priorityWindow, nowMs = Date.now()) {
   const minutes = Math.max(1, Math.ceil((openAt - current) / 60_000));
   return {
     countdown: `opens to everyone in ${minutes}m`,
+    openAt: new Date(openAt).toISOString(),
     qualifiesWith
   };
 }

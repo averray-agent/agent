@@ -18,7 +18,7 @@ function job(overrides = {}) {
     category: "coding",
     tier: "starter",
     rewardAsset: "USDC",
-    rewardAmount: 0.25,
+    rewardAmount: 1,
     onboardingWaiverEligible: false,
     lifecycle: { status: "open", createdAt: LISTED_AT, updatedAt: LISTED_AT },
     ...overrides
@@ -47,7 +47,7 @@ function policy({ capacity, lockedTierPriority, now = "2026-08-22T12:02:00.000Z"
   });
 }
 
-test("deposit claim priority defaults off at 300 seconds and 1.0 USDC", () => {
+test("deposit claim priority defaults off at 1800 seconds and 1.0 USDC", () => {
   const config = loadDepositClaimPriorityConfig({});
   assert.equal(config.enabled, false);
   assert.equal(config.windowSeconds, DEFAULT_PRIORITY_WINDOW_SECONDS);
@@ -78,13 +78,13 @@ test("priority window clamps values above the 1800-second hard ceiling and warns
   assert.equal(warnings[0][1], "deposit_claim_priority.window_clamped");
 });
 
-test("curated and ingested inventory is windowed while waiver starter and external jobs never are", () => {
+test("curated and ingested inventory including waiver jobs is windowed; external jobs stay first-come", () => {
   const value = policy();
   const expectedWindowedListing = {
     listedAt: LISTED_AT,
     priorityWindow: {
       openAt: "2026-08-22T12:05:00.000Z",
-      qualifiesWith: "≥ 1 USDC vested deposit and no outstanding credit draw"
+      qualifiesWith: "listed in the agent directory, or ≥ 1 USDC vested deposit with no outstanding credit draw"
     }
   };
   assert.deepEqual(value.listingFor(job()), expectedWindowedListing);
@@ -94,7 +94,7 @@ test("curated and ingested inventory is windowed while waiver starter and extern
   );
   assert.deepEqual(
     value.listingFor(job({ onboardingWaiverEligible: true })),
-    { listedAt: LISTED_AT }
+    expectedWindowedListing
   );
   assert.deepEqual(
     value.listingFor(job({ source: { type: "external" } })),
@@ -114,6 +114,21 @@ test("qualifying vested wallet passes inside the priority window", async () => {
   assert.equal(decision.eligible, true);
   assert.equal(decision.status, "priority_qualified");
   assert.equal(decision.qualification.qualifies, true);
+});
+
+test("priority pin: only catalogue USDC jobs at or above the configured reward threshold have a window", () => {
+  const value = policy();
+  assert.equal(value.listingFor(job({ rewardAmount: 0.1 })).priorityWindow, undefined);
+  assert.equal(value.listingFor(job({ rewardAmount: 0.999999 })).priorityWindow, undefined);
+  assert.ok(value.listingFor(job({ rewardAmount: 1 })).priorityWindow);
+  assert.ok(value.listingFor(job({ rewardAmount: 1, onboardingWaiverEligible: true })).priorityWindow);
+  assert.equal(value.listingFor(job({ rewardAmount: 1, rewardAsset: "DOT" })).priorityWindow, undefined);
+  value.config = loadDepositClaimPriorityConfig({ DEPOSIT_CLAIM_PRIORITY_ENABLED: "true", PRIORITY_MIN_REWARD_USDC: "2" });
+  assert.equal(value.listingFor(job({ rewardAmount: 1 })).priorityWindow, undefined);
+  assert.ok(value.listingFor(job({ rewardAmount: 2 })).priorityWindow);
+  for (const raw of ["0", "-1", "bad"]) {
+    assert.throws(() => loadDepositClaimPriorityConfig({ PRIORITY_MIN_REWARD_USDC: raw }));
+  }
 });
 
 test("active 7d commitment gains priority claim access without a vested pool deposit", async () => {

@@ -373,6 +373,38 @@ test("http smoke: /admin/jobs rejects non-admin token", SMOKE_TEST_OPTIONS, asyn
   });
 });
 
+test("http smoke: priority bootstrap wiring grants listed zero-deposit wallets the same thirty-minute window", SMOKE_TEST_OPTIONS, async () => {
+  await runWithServerEnv({
+    DEPOSIT_CLAIM_PRIORITY_ENABLED: "true", PRIORITY_MIN_REWARD_USDC: "1.0", PRIORITY_WINDOW_SECONDS: "1800"
+  }, async (base) => {
+    const adminToken = issueToken(ADMIN_WALLET, { roles: ["admin"] });
+    const workerToken = issueToken(STRANGER_WALLET);
+    const created = await fetch(base + "/admin/jobs", {
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + adminToken },
+      body: JSON.stringify({ id: "priority-bootstrap-smoke", lane: "liveness", category: "coding", tier: "starter",
+        rewardAmount: 1, rewardAsset: "USDC", verifierMode: "benchmark", verifierTerms: ["complete"],
+        verifierMinimumMatches: 1, outputSchemaRef: "schema://jobs/coding-output", onboardingWaiverEligible: true })
+    });
+    assert.equal(created.status, 201, await created.text());
+    const detail = await (await fetch(base + "/jobs/priority-bootstrap-smoke")).json();
+    assert.equal(Date.parse(detail.priorityWindow.openAt) - Date.parse(detail.listedAt), 1800000);
+    assert.match(detail.priorityWindow.qualifiesWith, /listed in the agent directory, or ≥ 1 USDC vested deposit with no outstanding credit draw/u);
+    const headers = { authorization: "Bearer " + workerToken };
+    const before = await (await fetch(base + "/jobs/preflight?jobId=priority-bootstrap-smoke", { headers })).json();
+    assert.equal(before.reason, "priority_window_active");
+    const rejected = await fetch(base + "/jobs/claim?jobId=priority-bootstrap-smoke&idempotencyKey=before-consent", { method: "POST", headers });
+    assert.equal(rejected.status, 409);
+    assert.equal((await rejected.json()).details.openAt, detail.priorityWindow.openAt);
+    await consentDirectory(base, STRANGER_WALLET);
+    const after = await (await fetch(base + "/jobs/preflight?jobId=priority-bootstrap-smoke", { headers })).json();
+    assert.equal(after.priorityQualification.directoryQualified, true);
+    assert.equal(after.priorityQualification.depositQualified, false);
+    assert.equal(after.eligible, true);
+    const claimed = await fetch(base + "/jobs/claim?jobId=priority-bootstrap-smoke&idempotencyKey=after-consent", { method: "POST", headers });
+    assert.equal(claimed.status, 200, await claimed.text());
+  });
+});
+
 test("http smoke: /admin/jobs accepts admin-scoped token", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });

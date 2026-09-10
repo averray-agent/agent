@@ -1,4 +1,5 @@
 import { ConfigError, ConflictError } from "./errors.js";
+import { readDirectoryConsent } from "./directory-consent.js";
 import { isExternalJob } from "./external-job-lifecycle.js";
 import { decimalToBaseUnits, formatBaseUnits } from "./platform-service-helpers.js";
 import { NON_YIELD_TIER_PERKS_ENABLED_ENV } from "./tier-perks-non-yield.js";
@@ -7,7 +8,9 @@ export const DEPOSIT_CLAIM_PRIORITY_ENABLED_ENV = "DEPOSIT_CLAIM_PRIORITY_ENABLE
 export const PRIORITY_WINDOW_SECONDS_ENV = "PRIORITY_WINDOW_SECONDS";
 export const PRIORITY_DEPOSIT_THRESHOLD_ENV = "PRIORITY_DEPOSIT_THRESHOLD";
 export const PRIORITY_WINDOW_ACTIVE_REASON = "priority_window_active";
-export const DEFAULT_PRIORITY_WINDOW_SECONDS = 300;
+export const DEFAULT_PRIORITY_WINDOW_SECONDS = 1_800;
+export const PRIORITY_MIN_REWARD_USDC_ENV = "PRIORITY_MIN_REWARD_USDC";
+export const DEFAULT_PRIORITY_MIN_REWARD_RAW = 1_000_000n;
 export const MAX_PRIORITY_WINDOW_SECONDS = 1_800;
 export const DEFAULT_PRIORITY_DEPOSIT_THRESHOLD_USDC = "1.0";
 
@@ -58,16 +61,25 @@ export function loadDepositClaimPriorityConfig(env = process.env, { logger = con
   if (thresholdRaw <= 0n) {
     throw new ConfigError(`${PRIORITY_DEPOSIT_THRESHOLD_ENV} must be greater than zero.`);
   }
+  let minRewardRaw;
+  try {
+    minRewardRaw = decimalToBaseUnits(env[PRIORITY_MIN_REWARD_USDC_ENV] ?? "1.0", USDC_DECIMALS, PRIORITY_MIN_REWARD_USDC_ENV);
+  } catch (error) {
+    throw new ConfigError(error.message);
+  }
+  if (minRewardRaw <= 0n) throw new ConfigError(`${PRIORITY_MIN_REWARD_USDC_ENV} must be greater than zero.`);
 
   return Object.freeze({
     enabled,
     windowSeconds,
     thresholdRaw,
+    minRewardRaw,
     thresholdUsdc: formatBaseUnits(thresholdRaw, USDC_DECIMALS)
   });
 }
 
 export function createDepositClaimPriorityPolicy({
+  stateStore,
   workerExposurePolicy,
   lockedTierPriorityReader,
   tierPerksPolicy,
@@ -83,6 +95,7 @@ export function createDepositClaimPriorityPolicy({
     );
   }
   return new DepositClaimPriorityPolicy({
+    stateStore,
     workerExposurePolicy,
     lockedTierPriorityReader,
     tierPerksPolicy,
@@ -94,6 +107,7 @@ export function createDepositClaimPriorityPolicy({
 
 export class DepositClaimPriorityPolicy {
   constructor({
+    stateStore,
     workerExposurePolicy,
     lockedTierPriorityReader,
     tierPerksPolicy,
@@ -102,6 +116,7 @@ export class DepositClaimPriorityPolicy {
     logger = console
   } = {}) {
     this.workerExposurePolicy = workerExposurePolicy;
+    this.stateStore = stateStore;
     this.lockedTierPriorityReader = lockedTierPriorityReader;
     this.tierPerksPolicy = tierPerksPolicy;
     this.config = config ?? loadDepositClaimPriorityConfig({}, { logger });
@@ -180,7 +195,15 @@ export class DepositClaimPriorityPolicy {
     const lockedTierPriority = await this.#lockedTierPriority(wallet, capacity);
     const committedTierQualified = lockedTierPriority.perksActive === true
       && lockedTierPriority.rank > 0;
-    const eligible = (depositQualified || committedTierQualified) && noOutstandingCreditDraw;
+    // Read consent on every assessment, including the claim gate after preflight.
+    // A missing/unreadable opt-in cannot grant directory priority.
+    let directoryQualified = false;
+    try {
+      directoryQualified = (await readDirectoryConsent(this.stateStore ?? {}, wallet)).publicProfileOptIn === true;
+    } catch (error) {
+      this.logger.warn?.({ wallet, err: error }, "deposit_claim_priority.consent_read_failed");
+    }
+    const eligible = directoryQualified || ((depositQualified || committedTierQualified) && noOutstandingCreditDraw);
     const qualification = {
       vestedDepositRaw: vestedRaw.toString(),
       thresholdRaw: this.config.thresholdRaw.toString(),
@@ -189,6 +212,7 @@ export class DepositClaimPriorityPolicy {
       outstandingCreditRaw: outstandingCreditRaw.toString(),
       creditPositionAvailable: creditReadSufficient,
       depositQualified,
+      directoryQualified,
       committedTierQualified,
       noOutstandingCreditDraw,
       qualifies: eligible,
@@ -226,13 +250,17 @@ export class DepositClaimPriorityPolicy {
   }
 
   #isWindowed(job) {
+    let rewardRaw;
+    try { rewardRaw = decimalToBaseUnits(job?.rewardAmount, USDC_DECIMALS, "priority reward"); }
+    catch { return false; }
     return this.config.enabled
-      && job?.onboardingWaiverEligible !== true
+      && job?.rewardAsset === "USDC"
+      && rewardRaw >= (this.config.minRewardRaw ?? DEFAULT_PRIORITY_MIN_REWARD_RAW)
       && !isExternalJob(job);
   }
 
   #qualifiesWith() {
-    const deposit = `≥ ${this.config.thresholdUsdc} USDC vested deposit and no outstanding credit draw`;
+    const deposit = `listed in the agent directory, or ≥ ${this.config.thresholdUsdc} USDC vested deposit with no outstanding credit draw`;
     return this.tierPerksPolicy?.isEnabled?.()
       ? `an active 7d+ commitment, or ${deposit}`
       : deposit;

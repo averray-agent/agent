@@ -122,6 +122,7 @@ test("work board priority window shows the honest countdown and qualifying condi
     ),
     {
       countdown: "opens to everyone in 3m",
+      openAt: "2026-08-22T12:05:00.000Z",
       qualifiesWith: "≥ 1 USDC vested deposit and no outstanding credit draw"
     }
   );
@@ -141,6 +142,12 @@ test("work board priority window shows the honest countdown and qualifying condi
   assert.match(source, /priority\.countdown/u);
   assert.match(source, /Qualifies with \{priority\.qualifiesWith\}/u);
   assert.doesNotMatch(source, /exclusive|premium/iu);
+  for (const filename of ["WorkJobList.tsx", "WorkJobDetail.tsx"]) {
+    const component = await readFile(new URL("../../components/work/" + filename, import.meta.url), "utf8");
+    assert.match(component, /Qualifies with \{priority\.qualifiesWith\}/u);
+    assert.match(component, /Opens to everyone at <time dateTime=\{priority\.openAt\}/u);
+    assert.doesNotMatch(component, /reserved/iu);
+  }
 });
 
 test("static-shell pretty paths recover job/session ids and canonical receipt links", () => {
