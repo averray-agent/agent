@@ -6,6 +6,7 @@
     "frozenAt": "2026-08-24",
     "storedFieldSetFrozen": true,
     "ratifiedAdditiveSection": "chainBinding",
+    "ratifiedQualityReviewAmendment": "review and reviewOf; packet 687169e9 with off-chain-only operator amendment 2026-09-10",
     "futureAdditions": "serve_time_decoration_or_new_schema_version"
   },
   "x-averrayPresentationAliases": {
@@ -29,6 +30,21 @@
     "kind": { "const": "run" },
     "receiptType": { "const": "work_outcome" },
     "receiptId": { "$ref": "#/$defs/bytes32" },
+    "reviewOf": { "$ref": "#/$defs/bytes32" },
+    "review": {
+      "description": "Explicit on new receipts. Optional only for immutable pre-amendment receipts. Human sampled review; never an on-chain reputation change.",
+      "type": "object",
+      "required": ["sampled"],
+      "properties": {
+        "sampled": { "type": "boolean" },
+        "score": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "reviewedAt": { "type": "string", "format": "date-time" },
+        "reliabilityAdjustment": { "type": "integer" },
+        "reputationWeight": { "type": "integer", "minimum": 0 },
+        "onchainApplied": { "const": false }
+      },
+      "additionalProperties": false
+    },
     "attestation": { "type": "string", "minLength": 1 },
     "sessionId": { "type": "string", "minLength": 1 },
     "jobId": { "type": "string", "minLength": 1 },

@@ -745,6 +745,31 @@ test("http smoke: /jobs/sub lets active workers create funded child jobs", SMOKE
   });
 });
 
+test("http smoke: quality review queue is admin-only and retained fields share the real status/transparency wiring", SMOKE_TEST_OPTIONS, async () => {
+  const port = 18896;
+  const child = await startServer(port);
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const headers = { authorization: `Bearer ${issueToken(ADMIN_WALLET, { roles: ["admin"] })}` };
+    const denied = await fetch(`${base}/admin/quality-reviews`, { headers: { authorization: `Bearer ${issueToken(STRANGER_WALLET)}` } });
+    assert.equal(denied.status, 403);
+    const response = await fetch(`${base}/admin/quality-reviews`, { headers });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { config: { sampleEvery: 5, reputationWeight: 20, onchainEnabled: false }, pending: [] });
+    const invalid = await fetch(`${base}/admin/quality-reviews`, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ sessionId: "missing", qualityScore: 9, note: "not valid" }) });
+    assert.equal(invalid.status, 400);
+    const statusResponse = await fetch(`${base}/admin/status`, { headers });
+    assert.equal(statusResponse.status, 200);
+    const status = await statusResponse.json();
+    assert.equal(status.catalogueLanes.retained.retainedExternalWorkers30d, 0);
+    assert.equal(status.catalogueLanes.retained.externalRewardOutlay30d.usdc, "0");
+    assert.equal(status.qualityReview.onchainEnabled, false);
+    const transparencyResponse = await fetch(`${base}/transparency`, { headers });
+    assert.equal(transparencyResponse.status, 200);
+    assert.equal((await transparencyResponse.json()).flow.retainedExternalWorkers30d.value, 0);
+  } finally { await stop(child); }
+});
+
 test("http smoke: /admin/status returns recurring + maintenance data for admin tokens", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     const token = issueToken(ADMIN_WALLET, { roles: ["admin"] });

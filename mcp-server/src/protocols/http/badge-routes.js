@@ -23,7 +23,7 @@ export function createListBadgeReceipts({
     const receipts = [];
     for (const session of sessions) {
       try {
-        const storedRunReceipt = await stateStore.getRunReceiptDocument?.(session.sessionId);
+        const storedRunReceipt = await latestReviewedReceipt(await stateStore.getRunReceiptDocument?.(session.sessionId), stateStore);
         if (storedRunReceipt) receipts.push(buildRunReceiptRow(storedRunReceipt, { session }));
       } catch {
         // Run and badge rows are isolated: one malformed document must not
@@ -156,13 +156,13 @@ export function createBadgeRoutes({
         return true;
       }
 
-      const sessionReceipt = await stateStore?.getWorkReceiptDocumentBySession?.(requestedId);
+      const sessionReceipt = await latestReviewedReceipt(await stateStore?.getWorkReceiptDocumentBySession?.(requestedId), stateStore);
       if (sessionReceipt) {
         redirectToCanonicalReceipt(response, sessionReceipt, respond);
         return true;
       }
 
-      const jobReceipt = await stateStore?.getWorkReceiptDocumentByJob?.(requestedId);
+      const jobReceipt = await latestReviewedReceipt(await stateStore?.getWorkReceiptDocumentByJob?.(requestedId), stateStore);
       if (jobReceipt) {
         redirectToCanonicalReceipt(response, jobReceipt, respond);
         return true;
@@ -175,7 +175,7 @@ export function createBadgeRoutes({
     if (request.method === "GET" && pathname.startsWith("/badges/") && pathname.endsWith("/run")) {
       const sessionId = decodeURIComponent(pathname.slice("/badges/".length, -"/run".length));
       if (!sessionId) throw new ValidationError("sessionId path segment is required.");
-      const storedRunReceipt = await stateStore?.getRunReceiptDocument?.(sessionId);
+      const storedRunReceipt = await latestReviewedReceipt(await stateStore?.getRunReceiptDocument?.(sessionId), stateStore);
       if (!storedRunReceipt) {
         respond(response, 404, { status: "not_found", kind: "run", sessionId });
         return true;
@@ -244,6 +244,17 @@ export function createBadgeRoutes({
 
     return false;
   };
+}
+
+async function latestReviewedReceipt(original, stateStore) {
+  if (!original?.receiptId || !original.sessionId) return original;
+  const session = await stateStore?.getSession?.(original.sessionId);
+  const reviewedId = session?.qualityReview?.receiptId;
+  if (!reviewedId || reviewedId === original.receiptId) return original;
+  const reviewed = await stateStore.getWorkReceiptDocument(reviewedId);
+  if (!reviewed || reviewed.reviewOf !== original.receiptId) throw new Error("quality_review_receipt_binding_mismatch");
+  assertWorkReceiptContentAddress(reviewed);
+  return reviewed;
 }
 
 function redirectToCanonicalReceipt(response, document, respond) {

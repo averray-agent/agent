@@ -3,12 +3,14 @@ export interface CatalogueLaneCardData {
   paused: boolean;
   hypothesis: string;
   stopCondition: string;
+  stopConditionMet: boolean | null;
   spend24h: string;
   cap24h: string;
   jobsPosted24h: number;
   externalClaimantShare: string;
   externalClaimantCount: number;
-  retainedExternalWorkers14d: number;
+  retainedExternalWorkers30d: number | null;
+  externalRewardOutlay30d: string;
   costPerRetainedExternalWorker30d: string;
   costComplete: boolean;
   omittedSettlementCount: number;
@@ -30,21 +32,24 @@ export function buildCatalogueLaneCards(payload: unknown): CatalogueLaneCardData
     if (!id || !hypothesis || !stopCondition || !exposure || !claimants || !cost) return [];
 
     const externalShareBps = nonNegativeInteger(claimants.externalShareBps);
-    const retained = nonNegativeInteger(lane?.retainedExternalWorkers14d);
+    const retained = typeof lane?.retainedExternalWorkers30d === "number" ? nonNegativeInteger(lane.retainedExternalWorkers30d) : null;
+    const outlay = nullableText(record(lane?.externalRewardOutlay30d)?.usdc);
     const costUsdc = nullableText(cost.usdc);
     return [{
       id,
       paused: lane?.paused === true,
       hypothesis,
       stopCondition,
+      stopConditionMet: typeof lane?.stopConditionMet === "boolean" ? lane.stopConditionMet : null,
       spend24h: text(exposure.used, "0"),
       cap24h: text(exposure.cap, "0"),
       jobsPosted24h: nonNegativeInteger(lane?.jobsPosted24h),
       externalClaimantShare: `${(externalShareBps / 100).toFixed(externalShareBps % 100 === 0 ? 0 : 2)}%`,
       externalClaimantCount: nonNegativeInteger(claimants.externalClaimantCount),
-      retainedExternalWorkers14d: retained,
+      retainedExternalWorkers30d: retained,
+      externalRewardOutlay30d: outlay === null ? "unknown" : `${outlay} USDC`,
       costPerRetainedExternalWorker30d: costUsdc === null
-        ? `not computable · ${retained} retained`
+        ? `not computable · ${retained ?? "unknown"} retained`
         : `${costUsdc} USDC`,
       costComplete: cost.complete === true,
       omittedSettlementCount: nonNegativeInteger(cost.omittedSettlementCount)

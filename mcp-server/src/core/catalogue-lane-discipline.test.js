@@ -295,8 +295,9 @@ test("board payload reports lane spend, external share, retained worker cost, hy
     externalClaimantCount: 1,
     externalShareBps: 5000
   });
-  assert.equal(lane.retainedExternalWorkers14d, 1);
-  assert.equal(lane.costPerRetainedExternalWorker30d.raw, "500000");
+  assert.equal(lane.retainedExternalWorkers30d, 0);
+  assert.equal(lane.externalRewardOutlay30d.raw, "400000");
+  assert.equal(lane.costPerRetainedExternalWorker30d.raw, null);
   assert.equal(lane.hypothesis, "liveness hypothesis");
   assert.equal(lane.stopCondition, "liveness stop");
   assert.equal(board.lanes.find((entry) => entry.id === "oss-anchored").claimantShare24h.externalClaimantCount, 0);
@@ -305,10 +306,13 @@ test("board payload reports lane spend, external share, retained worker cost, hy
 function settledSession(id, wallet, lane, workerAmountRaw, at) {
   return {
     sessionId: id,
+    jobId: `${id}-job`,
+    status: "resolved",
+    verificationSummary: { outcome: "approved" },
     wallet,
     claimedAt: at,
     resolvedAt: at,
-    jobSnapshot: { definition: { id: `${id}-job`, lane } },
+    jobSnapshot: { definition: { id: `${id}-job`, lane, source: { type: "github_issue", repo: "org/repo", issueNumber: 1 } } },
     payoutTx: {
       status: 1,
       settlement: { assetSymbol: "USDC", workerAmountRaw }

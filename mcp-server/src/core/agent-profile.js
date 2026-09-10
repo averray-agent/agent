@@ -15,6 +15,7 @@ import {
 } from "./self-identity-registry.js";
 import { requireJobSnapshot } from "./job-snapshot.js";
 import { isInternalPlatformFaultRemediation } from "./platform-fault-remediation.js";
+import { walletQualitySummary } from "./quality-review.js";
 
 /**
  * Build a v1 agent profile document from in-memory platform state.
@@ -223,6 +224,7 @@ export function buildAgentProfile({
     identity,
     fetchedAt: fetchedAt ?? new Date().toISOString(),
     reputation: rep,
+    ...walletQualitySummary(safeSessions, normalizedWallet),
     stats: {
       totalBadges: approved.length,
       approvedCount: approved.length,

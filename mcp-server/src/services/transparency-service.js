@@ -10,6 +10,7 @@ import { SelfIdentityRegistry } from "../core/self-identity-registry.js";
 import { directoryParticipationCounts } from "../core/directory-consent.js";
 import { deriveH160FromAccountId32 } from "../core/wallet-identity.js";
 import { DEPOSIT_POOL_ABI } from "../blockchain/abis.js";
+import { buildRetainedWorkerMetrics } from "../core/retained-workers.js";
 
 export const TRANSPARENCY_SCHEMA_VERSION = "averray.transparency.v1";
 export const TRANSPARENCY_CACHE_TTL_MS = 15_000;
@@ -394,6 +395,11 @@ export class TransparencyService {
         total: countField(flow.windows.last24h.jobs)
       },
       settledToExternalWallets24h: countField(flow.workers.outsiders),
+      ...Object.fromEntries(["retainedExternalWorkers30d", "externalRewardOutlay30d", "costPerRetainedExternalWorker30d"]
+        .map((name) => [name, countField(flow.retained?.[name] ?? {
+          value: null, unit: name === "retainedExternalWorkers30d" ? "wallets" : "USDC",
+          readAtMs: null, source: "backend_state_store", proof: "retained_worker_read_unavailable"
+        })])),
       directoryParticipants: {
         label: "Unique participants in retained session history; listed-by-consent is a subset, not the participation total.",
         window: { source: "retained sessions", scannedSessionLimit: MAX_RECORDS, lifetimeTotal: false },
@@ -515,7 +521,15 @@ export class TransparencyService {
         source: "retained backend sessions + shared self-identity registry + explicit directory consent",
         proof: value === null ? "directory_consent_read_unavailable" : "distinct session.wallet; consent does not filter total"
       }]));
-      return { windows, composition, workers, posterFees, participation };
+      const metrics = buildRetainedWorkerMetrics(sessions, { now: new Date(nowMs), selfIdentityRegistry: this.selfIdentityRegistry });
+      const retained = Object.fromEntries(["retainedExternalWorkers30d", "externalRewardOutlay30d", "costPerRetainedExternalWorker30d"]
+        .map((name) => [name, {
+          value: name === "retainedExternalWorkers30d" ? metrics[name] : metrics[name].usdc,
+          unit: name === "retainedExternalWorkers30d" ? "wallets" : "USDC", readAtMs,
+          source: "backend_state_store claim-time snapshots + approved payout receipts + claimant identity",
+          proof: `trailing 30d; >=2 distinct source keys per external claimant; ${metrics.costPerRetainedExternalWorker30d.reason ?? "complete"}`
+        }]));
+      return { windows, composition, workers, posterFees, participation, retained };
     } catch (error) {
       const unknown = { value: null, raw: null, readAtMs, source, proof: redactProviderError(error) || "flow_read_failed" };
       return {

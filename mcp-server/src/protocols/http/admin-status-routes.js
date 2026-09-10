@@ -10,6 +10,28 @@ export function createAdminStatusRoutes({
   service,
 }) {
   return async function handleAdminStatusRoute({ request, response, url, pathname }) {
+    if (pathname === "/admin/quality-reviews" && ["GET", "POST"].includes(request.method)) {
+      const auth = await authMiddleware(request, url, { requireRole: "admin" });
+      if (request.method === "GET") {
+        respond(response, 200, await service.verificationIngestionService.qualityReviewService.listPending(), { "cache-control": "no-store" });
+        return true;
+      }
+      await enforceLimit("admin_jobs", auth.wallet, rateLimitConfig.adminJobs);
+      const payload = await readJsonBody(request);
+      const idempotency = buildIdempotentMutationContext({
+        route: "/admin/quality-reviews", auth, payload, bucket: "quality_review"
+      });
+      const replay = await getIdempotentMutationReplay(idempotency);
+      if (replay) { respond(response, replay.statusCode, replay.body); return true; }
+      const session = await service.verificationIngestionService.recordQualityReview({
+        sessionId: payload.sessionId, qualityScore: payload.qualityScore, note: payload.note, reviewer: auth.wallet
+      });
+      await respondWithMutationReceipt(response, idempotency, 200, {
+        sessionId: session.sessionId, qualityScore: session.qualityScore, review: session.qualityReview
+      });
+      return true;
+    }
+
     if (request.method === "GET" && pathname === "/admin/status") {
       const auth = await authMiddleware(request, url, {
         requireCapabilities: ["admin:status", "ops:view"]

@@ -17,6 +17,11 @@
   ],
   "additionalProperties": false,
   "properties": {
+    "qualityAverage": { "type": ["number", "null"], "minimum": 0, "maximum": 5, "description": "Off-chain mean of sampled human scores in retained wallet session history; null when unreviewed." },
+    "qualityReviewCount": { "type": "integer", "minimum": 0 },
+    "qualityReliabilityAdjustment": { "type": "integer", "description": "Sum of per-review (score - 3) * pinned weight; NOT added to the on-chain reputation axes." },
+    "qualitySource": { "const": "offchain_sampled_human_reviews" },
+    "qualityOnchainApplied": { "const": false },
     "schemaVersion": {
       "type": "string",
       "const": "v1",

@@ -7,7 +7,8 @@ import { buildVerificationAuditFields } from "../core/verifier-contract.js";
 import { disputeIdForSession } from "../core/dispute-resolution.js";
 import { buildBadgeFromSession, buildBadgeJobSnapshot } from "../core/badge-metadata.js";
 import { buildRunReceipt } from "../core/run-receipt.js";
-import { buildWorkReceipt } from "../core/work-receipt.js";
+import { buildWorkReceipt, buildReviewedWorkReceipt } from "../core/work-receipt.js";
+import { QualityReviewService } from "../core/quality-review.js";
 import { requireJobSnapshot } from "../core/job-snapshot.js";
 import { isInternalPlatformFaultRemediation } from "../core/platform-fault-remediation.js";
 
@@ -23,6 +24,7 @@ export class VerificationIngestionService {
     this.blockchainGateway = options.blockchainGateway;
     this.policyService = options.policyService;
     this.selfIdentityRegistry = options.selfIdentityRegistry;
+    this.qualityReviewService = options.qualityReviewService ?? new QualityReviewService({ stateStore });
   }
 
   setBadgeReceiptSigner(signer) {
@@ -110,6 +112,7 @@ export class VerificationIngestionService {
       ...auditFields,
       ...(badgeSnapshot ? { badgeSnapshot } : {})
     };
+    transitioned.qualityReview = await this.qualityReviewService.assign(transitioned, job);
     if (status === "resolved" || status === "rejected" || ["inconclusive", "platform_fault"].includes(verdict.outcome)) {
       // Persist the signed verdict document before committing the terminal
       // session transition. If signing or durable storage fails, verification
@@ -193,6 +196,17 @@ export class VerificationIngestionService {
       );
       if (this.badgeReceiptSigner) throw error;
     }
+  }
+
+  async recordQualityReview(input) {
+    return this.qualityReviewService.record(input, async (session) => {
+      const original = await this.stateStore.getWorkReceiptDocument(session.workReceiptId);
+      if (!original) throw new Error("quality_review_original_receipt_unavailable");
+      const receipt = buildReviewedWorkReceipt(original, session);
+      const document = this.badgeReceiptSigner
+        ? { ...receipt, signature: await this.badgeReceiptSigner.signDocument(receipt) } : receipt;
+      return this.stateStore.putWorkReceiptDocument(session.sessionId, document);
+    });
   }
 
   async persistRunReceiptDocument(session, job, verification, suppliedContext = undefined) {

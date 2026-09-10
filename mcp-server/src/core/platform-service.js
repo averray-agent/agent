@@ -1100,6 +1100,7 @@ export class PlatformService {
       providerOperations,
       catalogueLanes,
       githubIngestion: githubIngestion,
+      qualityReview: this.verificationIngestionService.qualityReviewService.config,
       wikipediaIngestion: wikipediaIngestion,
       osvIngestion: osvIngestion,
       openDataIngestion: openDataIngestion,
