@@ -47,6 +47,7 @@ export class IndexedReceiptGraphReader {
     chainId, fetchImpl = globalThis.fetch, now = () => new Date()
   } = {}) {
     Object.assign(this, resolveIndexerHealthProbeConfig(env));
+    this.graphqlBearerToken = env.INDEXER_GRAPHQL_BEARER_TOKEN?.trim() || undefined;
     this.escrows = [...new Set(escrowAddresses.filter(Boolean).map(address))].sort();
     this.accountAddress = accountAddress ? address(accountAddress) : "";
     this.assetAddress = assetAddress ? address(assetAddress) : "";
@@ -65,7 +66,10 @@ export class IndexedReceiptGraphReader {
     const query = async (document, variables) => {
       try {
         const response = await this.fetchImpl(url, {
-          method: "POST", headers: { "content-type": "application/json" },
+          method: "POST", headers: {
+            "content-type": "application/json",
+            ...(this.graphqlBearerToken ? { authorization: `Bearer ${this.graphqlBearerToken}` } : {})
+          },
           body: JSON.stringify({ query: document, variables }), signal
         });
         if (!response.ok) refuse("indexer_evidence_unavailable");
