@@ -208,17 +208,14 @@ export class WikipediaMaintenanceIngestionScheduler {
           summary.skipped.push({ id: job.id, title: job.source.pageTitle, sourceKey, reason: "reissue_cap_reached", maxReissues: this.maxReissues });
           continue;
         }
-        if (!this.dryRun) {
-          try {
-            // Prefer the prefunding create path so the reward is escrowed at
-            // ingestion; fall back to createJob for callers/tests without it.
-            await upsertScheduledIngestedJob(this.platformService, replenishedJob, { prefund: true, now });
-          } catch (error) {
-            if (recordLanePostingRefusal(summary, replenishedJob, error)) continue;
-            if (recordIngestSpecHashRefusal(summary, replenishedJob, error)) continue;
-            if (recordIngestVerifierRefusal(summary, replenishedJob, error)) continue;
-            throw error;
-          }
+        try {
+          // Dry runs validate price and consumer but never post or prefund.
+          await upsertScheduledIngestedJob(this.platformService, replenishedJob, { dryRun: this.dryRun, prefund: true, now });
+        } catch (error) {
+          if (recordLanePostingRefusal(summary, replenishedJob, error)) continue;
+          if (recordIngestSpecHashRefusal(summary, replenishedJob, error)) continue;
+          if (recordIngestVerifierRefusal(summary, replenishedJob, error)) continue;
+          throw error;
         }
         seenSources.add(sourceKey);
         inventory.allSourceJobs.push(replenishedJob);

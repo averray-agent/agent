@@ -89,7 +89,8 @@ test("an already-posted job hydrates without consuming the new lane budget", asy
   const result = await upsertScheduledIngestedJob(platformService, {
     id: "existing",
     lane: "oss-anchored",
-    rewardAmount: 0.3,
+    rewardAmount: 0.1,
+    verifierMode: "benchmark",
     source: { type: "osv_advisory" }
   }, { now });
 
@@ -129,7 +130,7 @@ test("a missing chain job passes the lane gate before posting", async () => {
 test("scheduled ingestion explicitly declares scheduler origin at the posting boundary", async () => {
   let seen;
   const now = new Date("2026-09-05T12:00:00.000Z");
-  const candidate = { id: "github-scheduled", lane: "oss-anchored", source: { type: "github_issue" } };
+  const candidate = { id: "github-scheduled", lane: "oss-anchored", source: { type: "github_issue" }, verifierMode: "github_pr", rewardAmount: 1 };
   await upsertScheduledIngestedJob({
     catalogueLaneDiscipline: {
       async post(job, action, options) {

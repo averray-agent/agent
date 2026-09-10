@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path";
 import { Wallet } from "ethers";
 
 import { signToken } from "../../auth/jwt.js";
+import { DEFAULT_CATALOGUE_LANE_REGISTRY } from "../../core/catalogue-lane-discipline.js";
 import {
   LEGACY_MCP_VERSION,
   MODERN_MCP_VERSION,
@@ -97,6 +98,12 @@ async function startServer(port, envOverrides = {}) {
       WORKER_DAILY_EXPOSURE_BUDGET_RAW: "1000000000",
       WORKER_LIFETIME_CATALOGUE_CREDIT_RAW: "1000000000",
       WORKER_CATALOGUE_GLOBAL_DAILY_BUDGET_RAW: "1000000000",
+      // Synthetic operator fixtures have a test consumer. The production
+      // Wikipedia lane remains consumer:none and is covered by ingestion tests.
+      CATALOGUE_LANE_REGISTRY_JSON: JSON.stringify({
+        ...DEFAULT_CATALOGUE_LANE_REGISTRY,
+        "benchmark-showcase": { ...DEFAULT_CATALOGUE_LANE_REGISTRY["benchmark-showcase"], consumer: "Smoke-test assertions inspect fixture receipts." }
+      }),
       ...envOverrides
     },
     // stderr is piped purely so a boot failure can say WHY. A bad env used to

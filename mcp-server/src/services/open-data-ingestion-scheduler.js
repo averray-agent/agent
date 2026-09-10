@@ -167,15 +167,13 @@ export class OpenDataIngestionScheduler {
               // Missing jobs are expected and created below.
             }
           }
-          if (!this.dryRun) {
-            try {
-              await upsertScheduledIngestedJob(this.platformService, job, { prefund: true, now });
-            } catch (error) {
-              if (recordLanePostingRefusal(summary, job, error)) continue;
-              if (recordIngestSpecHashRefusal(summary, job, error)) continue;
-              if (recordIngestVerifierRefusal(summary, job, error)) continue;
-              throw error;
-            }
+          try {
+            await upsertScheduledIngestedJob(this.platformService, job, { dryRun: this.dryRun, prefund: true, now });
+          } catch (error) {
+            if (recordLanePostingRefusal(summary, job, error)) continue;
+            if (recordIngestSpecHashRefusal(summary, job, error)) continue;
+            if (recordIngestVerifierRefusal(summary, job, error)) continue;
+            throw error;
           }
           if (resourceKey) seenResources.add(resourceKey);
           if (datasetKey) seenDatasets.add(datasetKey);

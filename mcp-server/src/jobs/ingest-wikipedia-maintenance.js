@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { pathToFileURL } from "node:url";
+import { verifierClassReward } from "../core/verifier-class-rewards.js";
 import { schemaRefToJobSchemaPath } from "../core/job-schema-registry.js";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 import { substantiveVerifierTerms } from "./substantive-verifier-terms.js";
@@ -19,17 +20,14 @@ const TASK_CONFIG = {
     titlePrefix: "Audit and report on Wikipedia citations",
     outputSchemaRef: "schema://jobs/wikipedia-citation-repair-output-v2",
     anchorEvidence: true,
-    rewardAmount: 0.4
   },
   freshness_check: {
     titlePrefix: "Audit and report on Wikipedia freshness",
     outputSchemaRef: "schema://jobs/wikipedia-freshness-check-output",
-    rewardAmount: 0.4
   },
   infobox_consistency: {
     titlePrefix: "Audit and report on Wikipedia infobox consistency",
     outputSchemaRef: "schema://jobs/wikipedia-infobox-consistency-output",
-    rewardAmount: 0.4
   }
 };
 
@@ -221,7 +219,7 @@ export function toPlatformJob(article, score = scoreArticle(article)) {
     tier: "starter",
     lane: "benchmark-showcase",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
-    rewardAmount: task.rewardAmount,
+    rewardAmount: verifierClassReward("benchmark"),
     verifierMode: "benchmark",
     verifierTerms: substantiveVerifierTerms(article.title, article.revisionId, pinnedRevisionUrl),
     verifierMinimumMatches: 2,

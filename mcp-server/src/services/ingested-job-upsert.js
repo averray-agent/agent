@@ -1,9 +1,14 @@
 import {
   NON_FAILABLE_VERIFIER_CODE
 } from "../core/catalog-verifier-integrity.js";
+import { assertIngestedVerifierClassReward, VERIFIER_CLASS_REWARD_REFUSED } from "../core/verifier-class-rewards.js";
+import { assertCatalogueLaneConsumer } from "../core/catalogue-lane-discipline.js";
 
 const INGEST_REFUSED_SPEC_HASH_MISMATCH = "ingest_refused_spec_hash_mismatch";
 const LANE_POSTING_REFUSALS = new Set([
+  VERIFIER_CLASS_REWARD_REFUSED,
+  "lane_consumer_none",
+  "lane_consumer_missing",
   "catalogue_job_retired",
   "lane_budget_exhausted",
   "lane_backlog_saturated",
@@ -11,7 +16,10 @@ const LANE_POSTING_REFUSALS = new Set([
   "lane_paused"
 ]);
 
-export async function upsertScheduledIngestedJob(platformService, job, { prefund = false, now = new Date() } = {}) {
+export async function upsertScheduledIngestedJob(platformService, job, { prefund = false, dryRun = false, now = new Date() } = {}) {
+  assertIngestedVerifierClassReward(job, platformService.verifierClassRewards);
+  assertCatalogueLaneConsumer(job, platformService.catalogueLaneDiscipline?.registry);
+  if (dryRun) return job;
   platformService.catalogueMutations?.assertCanIngest(job);
   const liveJob = await readLiveJobForPosting(platformService, job.id);
   const compatibleDefinitions = legacyCatalogueDefinitions(job);
@@ -66,6 +74,7 @@ export function recordLanePostingRefusal(summary, job, error) {
     resumeAt: error?.details?.resumeAt ?? null,
     retryWhen: error?.details?.retryWhen ?? null
   };
+  if (error.code === VERIFIER_CLASS_REWARD_REFUSED) Object.assign(refusal, error.details);
   summary.skipped.push(refusal);
   return true;
 }

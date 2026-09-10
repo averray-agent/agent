@@ -131,15 +131,13 @@ export class OpenApiSpecIngestionScheduler {
             // Missing jobs are expected and created below.
           }
         }
-        if (!this.dryRun) {
-          try {
-            await upsertScheduledIngestedJob(this.platformService, job, { now });
-          } catch (error) {
-            if (recordLanePostingRefusal(summary, job, error)) continue;
-            if (recordIngestSpecHashRefusal(summary, job, error)) continue;
-            if (recordIngestVerifierRefusal(summary, job, error)) continue;
-            throw error;
-          }
+        try {
+          await upsertScheduledIngestedJob(this.platformService, job, { dryRun: this.dryRun, now });
+        } catch (error) {
+          if (recordLanePostingRefusal(summary, job, error)) continue;
+          if (recordIngestSpecHashRefusal(summary, job, error)) continue;
+          if (recordIngestVerifierRefusal(summary, job, error)) continue;
+          throw error;
         }
         seenSources.add(sourceKey);
         summary.createdCount += 1;

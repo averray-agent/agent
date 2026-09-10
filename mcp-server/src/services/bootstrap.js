@@ -1,4 +1,5 @@
 import { PlatformService } from "../core/platform-service.js";
+import { loadVerifierClassRewards } from "../core/verifier-class-rewards.js";
 import { createStateStore } from "../core/state-store.js";
 import {
   createOnboardingSubsidyBudget,
@@ -277,6 +278,7 @@ export function createPlatformService() {
     selfIdentityRegistry
   });
   platformService.setWorkerProgressionService(workerProgressionService);
+  platformService.verifierClassRewards = loadVerifierClassRewards();
   platformService.setCatalogueLaneDiscipline(createCatalogueLaneDiscipline({
     stateStore,
     registry: catalogueLaneRegistry,
@@ -719,6 +721,7 @@ export async function createPlatformRuntime() {
     })
   );
   platformService.setCatalogueLaneDiscipline(catalogueLaneDiscipline);
+  platformService.verifierClassRewards = loadVerifierClassRewards();
   rewardBankHealthProvider = initStep(
     "init-reward-bank-health-provider",
     logger,

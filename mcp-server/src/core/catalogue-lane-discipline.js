@@ -29,6 +29,7 @@ const DEFAULT_OPERATOR_RESERVE = 1;
 
 export const DEFAULT_CATALOGUE_LANE_REGISTRY = Object.freeze({
   liveness: Object.freeze({
+    consumer: "Operator monitors delivery and verification receipts to detect platform regressions.",
     hypothesis: "Proof-of-life for the board; 0.10 USDC buys it as well as 0.25 USDC.",
     dailyCapRaw: "3000000",
     maxUnclaimedBacklog: 2,
@@ -37,6 +38,7 @@ export const DEFAULT_CATALOGUE_LANE_REGISTRY = Object.freeze({
     paused: false
   }),
   "oss-anchored": Object.freeze({
+    consumer: "Upstream maintainers review and merge pull requests; dependency maintainers use advisory audit reports to plan upgrades.",
     hypothesis: "Public artifacts and maintainer relationships create an external-worker funnel.",
     dailyCapRaw: "15000000",
     maxUnclaimedBacklog: 3,
@@ -45,6 +47,7 @@ export const DEFAULT_CATALOGUE_LANE_REGISTRY = Object.freeze({
     paused: false
   }),
   "benchmark-showcase": Object.freeze({
+    consumer: "none",
     hypothesis: "Verification coverage and demonstrable work provide a useful showcase.",
     dailyCapRaw: "5000000",
     maxUnclaimedBacklog: 2,
@@ -92,7 +95,7 @@ export function validateCatalogueLaneRegistry(input, { logger } = {}) {
     if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) {
       throw packetConfigError(`lane ${id} must be an object`);
     }
-    for (const field of ["hypothesis", "dailyCapRaw", "stopCondition"]) {
+    for (const field of ["hypothesis", "dailyCapRaw", "stopCondition", "consumer"]) {
       if (rawEntry[field] === undefined || rawEntry[field] === null || rawEntry[field] === "") {
         throw packetConfigError(`lane ${id} is missing ${field}`);
       }
@@ -122,6 +125,7 @@ export function validateCatalogueLaneRegistry(input, { logger } = {}) {
     registry.set(id, Object.freeze({
       id,
       hypothesis,
+      consumer: requiredText(rawEntry.consumer, `lane ${id} consumer`),
       dailyCapRaw,
       maxUnclaimedBacklog: backlogRaw,
       operatorReserve,
@@ -135,6 +139,19 @@ export function validateCatalogueLaneRegistry(input, { logger } = {}) {
 
 export function assertCatalogueDefinitionsHaveLanes(definitions, registry) {
   for (const definition of definitions ?? []) validateCatalogueDefinitionLane(definition, registry);
+}
+
+export function assertCatalogueLaneConsumer(job, registry = loadCatalogueLaneRegistry()) {
+  if (isExternalJob(job)) return;
+  const lane = validateCatalogueDefinitionLane(job, registry);
+  const consumer = typeof lane.consumer === "string" ? lane.consumer.trim() : "";
+  if (!consumer || consumer.toLowerCase() === "none") {
+    throw new CatalogueLanePostingError(
+      consumer ? "lane_consumer_none" : "lane_consumer_missing",
+      `Catalogue lane ${lane.id} has no output consumer; posting is refused.`,
+      { lane: lane.id, consumer: consumer || null }
+    );
+  }
 }
 
 export function validateCatalogueDefinitionLane(definition, registry) {
@@ -217,6 +234,7 @@ export class CatalogueLaneDiscipline {
 
   async #postSerial(job, action, evaluatedAt, origin) {
     const lane = validateCatalogueDefinitionLane(job, this.registry);
+    assertCatalogueLaneConsumer(job, this.registry);
     if (lane.paused) {
       throw new CatalogueLanePostingError(
         LANE_PAUSED,
@@ -368,6 +386,7 @@ export class CatalogueLaneDiscipline {
           id: lane.id,
           paused: lane.paused,
           hypothesis: lane.hypothesis,
+          consumer: lane.consumer,
           stopCondition: lane.stopCondition,
           exposure24h: {
             usedRaw: usedRaw.toString(),
