@@ -59,17 +59,59 @@ claiming: `jobId`, `source: "wikipedia"`, `taskType`, `pageTitle`, `lang`,
 `GET /jobs?source=wikipedia...` rows include the same source affordances under
 `sourceDetails`, plus `definitionUrl` for the full canonical payload.
 
-In production, this crawler is enabled by default and creates jobs
-autonomously with conservative caps: two jobs per run, twenty open Wikipedia
-jobs maximum, a minimum of two claimable Wikipedia jobs, and a thirty-minute
-interval. The scheduler counts effective claimability from `claimStatus`, so
-exhausted jobs stay auditable without blocking fresh inventory. Replenished
-jobs receive distinct reissue ids when they come from a source item whose
-previous job is exhausted. Set
+The Wikipedia lane is operator-paused by #1361. This fix does not re-enable it;
+re-enabling after deployment is a separate operator decision. When enabled,
+the defaults are two jobs per run, twenty active Wikipedia sources maximum,
+a minimum of two claimable Wikipedia jobs, and a thirty-minute interval.
+The scheduler counts effective claimability from `claimStatus`. Completed,
+resolved and exhausted sources are seen separately from active inventory:
+`WIKIPEDIA_INGEST_COMPLETED_COOLDOWN_DAYS` defaults to 30, measured from the
+terminal session time (never from when the scheduler happened to observe it).
+Missing completion timestamps stay blocked, not presumed old. Catalogue
+history including archived rows and durable claim-time session pins survives
+listing removal. A new upstream revision is new inventory; a page that leaves
+the discovery category is no longer a candidate.
+
+`WIKIPEDIA_INGEST_MAX_REISSUES` defaults to 2 and caps the **generation ordinal**
+per `(language, pageId, revisionId)`: initial generation 1, one reissue at 2.
+Setting 1 permits no reissue; 0 permits no new candidate. Renames, task-type
+changes, category changes and restarts do not reset this cap. Distinct job ids
+remain collision-safe across revisions; their `-rN` suffix is an id namespace,
+while `source.reissueNumber` is the revision-scoped ordinal. The cap still
+applies after the cooldown expires. Run summaries name `completed_cooldown`,
+`reissue_cap_reached`, candidate order and selected titles.
+
+A wallet with a positive persisted worker payout for the same revision is
+refused as `source_already_paid` by both preflight and claim, across all
+reissues and task types. Payment-history reads are paginated and fail closed
+if unavailable or truncated (`source_payment_history_unavailable`). The guard
+uses claim-time source pins, with a catalogue fallback for older sessions;
+it does not call a verifier, change retention, or change the proposal-only policy.
+Category pagination advances with MediaWiki's `cmcontinue`; cyclic member
+rotation breaks score ties between consecutive passes, including dry runs.
+
+GitHub, OSV and OpenData were checked: on this base they use independent
+dedupe paths, not `buildInventorySnapshot`, and do not issue Wikipedia-style
+reissues. Their existing behavior stays unchanged. The shared helper's
+completed-source behavior is source-type agnostic for any future caller.
+
+Set
 `WIKIPEDIA_INGEST_ENABLED=false` to disable it, or
 `WIKIPEDIA_INGEST_DRY_RUN=true` to observe candidates without creating jobs.
 Use `WIKIPEDIA_INGEST_MIN_CLAIMABLE_JOBS` to tune the minimum claimable
 Wikipedia inventory.
+
+For a credential-free observation using the real scheduler and public
+production catalogue plus live Wikipedia data, run:
+
+```sh
+node mcp-server/src/jobs/dry-run-wikipedia-replenishment.js
+```
+
+This is strictly read-only and uses an in-memory dry-run with the inventory
+floor disabled for candidate evaluation. It is not a complete archived-host
+history audit; the JSON records that scope and preserves missing timestamps
+as unknown. It never changes the deployed lane flag or creates/funds jobs.
 
 ### Initial job types
 

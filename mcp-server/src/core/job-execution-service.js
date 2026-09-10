@@ -55,6 +55,7 @@ import {
 } from "./claim-job-integrity.js";
 import { cloneJsonRecord } from "./state-store-records.js";
 import { isDesignatedJob, requireDesignatedClaimant } from "./designated-claimants.js";
+import { assessPaidSourceClaim, requireUnpaidSourceClaim } from "./paid-source-claim.js";
 import { classifyEscrowInvalidState } from "../blockchain/escrow-core-errors.js";
 import {
   EXTERNAL_POSTING_ESCROW_UNVERIFIED,
@@ -112,6 +113,10 @@ export class JobExecutionService {
     this.openPrCap = Number.isInteger(maintainerSurfaceConfig.openPrCap) && maintainerSurfaceConfig.openPrCap > 0
       ? maintainerSurfaceConfig.openPrCap
       : DEFAULT_OPEN_PR_CAP_PER_REPO;
+  }
+
+  async assessPaidSourceClaim(job, wallet) {
+    return assessPaidSourceClaim({ stateStore: this.stateStore, getJobDefinition: this.getJobDefinition, job, wallet });
   }
 
   async claimJob(wallet, jobId, protocol, idempotencyKey, claimContext = undefined) {
@@ -345,6 +350,12 @@ export class JobExecutionService {
       }
 
       await this.depositClaimPriorityPolicy?.requireClaim({ wallet, job });
+      await requireUnpaidSourceClaim({
+        stateStore: this.stateStore,
+        getJobDefinition: this.getJobDefinition,
+        job,
+        wallet
+      });
 
       const chainJobId = this.blockchainGateway?.isEnabled()
         ? this.blockchainGateway.toJobId(jobId)
