@@ -5,6 +5,7 @@ import {
   WikipediaMaintenanceIngestionScheduler,
   loadWikipediaMaintenanceIngestionConfig
 } from "./wikipedia-maintenance-ingestion-scheduler.js";
+import { DEFAULT_CATALOGUE_LANE_REGISTRY, validateCatalogueLaneRegistry } from "../core/catalogue-lane-discipline.js";
 import { JobCatalogService } from "../core/job-catalog-service.js";
 
 const GENERATED_WIKI_JOB_ID = "wiki-en-123-citation_repair-example-article";
@@ -74,9 +75,18 @@ function makeMultiArticleFetch(articles) {
   };
 }
 
+// Only these isolated tests supply a review consumer; production remains blocked.
+function testConsumer() {
+  return { registry: validateCatalogueLaneRegistry({
+    ...DEFAULT_CATALOGUE_LANE_REGISTRY,
+    "benchmark-showcase": { ...DEFAULT_CATALOGUE_LANE_REGISTRY["benchmark-showcase"], consumer: "Test reviewer applies the proposal." }
+  }) };
+}
+
 function makePlatformService(initialJobs = []) {
   const jobs = [...initialJobs];
   return {
+    catalogueLaneDiscipline: testConsumer(),
     listJobs() {
       return [...jobs];
     },
@@ -96,6 +106,22 @@ function makePlatformService(initialJobs = []) {
     }
   };
 }
+
+test("consumer pin: Wikipedia refuses live and dry-run ingestion without a review-and-apply consumer", async () => {
+  for (const dryRun of [false, true]) {
+    const platform = makePlatformService();
+    delete platform.catalogueLaneDiscipline;
+    const scheduler = new WikipediaMaintenanceIngestionScheduler(platform, undefined, {
+      enabled: true, dryRun,
+      categories: [{ title: "Category:All articles with dead external links", taskType: "citation_repair" }],
+      minScore: 55, fetchImpl: makeFetch(), logger: SILENT_LOGGER
+    });
+    const summary = await scheduler.runOnce(new Date("2026-04-25T10:00:00.000Z"));
+    assert.equal(summary.createdCount, 0);
+    assert.equal(summary.skipped[0].reason, "lane_consumer_none");
+    assert.equal(platform.listJobs().length, 0);
+  }
+});
 
 test("WikipediaMaintenanceIngestionScheduler dry-run does not create jobs", async () => {
   const platform = makePlatformService();
@@ -138,6 +164,7 @@ test("ingestion parks a poisoned legacy candidate and still mints both fresh job
   const jobs = [];
   const attemptedIds = [];
   const platform = {
+    catalogueLaneDiscipline: testConsumer(),
     listJobs() { return [...jobs]; },
     async listJobsWithSessions() { return [...jobs]; },
     async upsertIngestedJob(job) {
@@ -295,6 +322,7 @@ test("WikipediaMaintenanceIngestionScheduler avoids hidden stale job id collisio
     () => 0
   );
   const platform = {
+    catalogueLaneDiscipline: testConsumer(),
     listJobs(options = {}) {
       return catalog.listJobs(options);
     },
@@ -324,6 +352,7 @@ test("WikipediaMaintenanceIngestionScheduler avoids hidden stale job id collisio
 
 test("WikipediaMaintenanceIngestionScheduler avoids historical session id collisions", async () => {
   const platform = {
+    catalogueLaneDiscipline: testConsumer(),
     jobs: [],
     listJobs() {
       return [...this.jobs];

@@ -39,7 +39,7 @@ test("env backlog omission preserves liveness and benchmark backlog two", () => 
 
 test("env-only lanes retain global backlog three and operator reserve one", () => {
   const registry = loadCatalogueLaneRegistry(envRegistry({
-    "operator-added": { hypothesis: "h", dailyCapRaw: "1000000", stopCondition: "s", paused: false }
+    "operator-added": { hypothesis: "h", dailyCapRaw: "1000000", consumer: "Test reviewer uses the output.", stopCondition: "s", paused: false }
   }), { logger: { warn() { assert.fail("global defaults for a custom lane are not drift"); } } });
   assert.deepEqual([...registry.keys()], ["operator-added"], "do not resurrect lanes excluded by the operator");
   assert.equal(registry.get("operator-added").maxUnclaimedBacklog, 3);
@@ -117,13 +117,13 @@ function registry(entries = {}) {
     liveness: {
       hypothesis: "liveness hypothesis",
       dailyCapRaw: "1000000",
-      stopCondition: "liveness stop",
+      consumer: "Test reviewer uses the output.", stopCondition: "liveness stop",
       paused: false
     },
     "oss-anchored": {
       hypothesis: "oss hypothesis",
       dailyCapRaw: "1000000",
-      stopCondition: "oss stop",
+      consumer: "Test reviewer uses the output.", stopCondition: "oss stop",
       paused: false
     },
     ...entries
@@ -208,7 +208,7 @@ test("paused lane creates nothing while an unpaused lane still posts", async () 
       liveness: {
         hypothesis: "liveness hypothesis",
         dailyCapRaw: "1000000",
-        stopCondition: "liveness stop",
+        consumer: "Test reviewer uses the output.", stopCondition: "liveness stop",
         paused: true
       }
     }),
@@ -231,7 +231,7 @@ test("external poster-funded jobs bypass catalogue lanes", async () => {
       liveness: {
         hypothesis: "liveness hypothesis",
         dailyCapRaw: "0",
-        stopCondition: "liveness stop",
+        consumer: "Test reviewer uses the output.", stopCondition: "liveness stop",
         paused: true
       }
     }),
@@ -326,7 +326,7 @@ function roomyRegistry(maxUnclaimedBacklog = 2) {
       dailyCapRaw: "100000000",
       maxUnclaimedBacklog,
       operatorReserve: 1,
-      stopCondition: "liveness stop",
+      consumer: "Test reviewer uses the output.", stopCondition: "liveness stop",
       paused: false
     },
     "oss-anchored": {
@@ -334,7 +334,7 @@ function roomyRegistry(maxUnclaimedBacklog = 2) {
       dailyCapRaw: "100000000",
       maxUnclaimedBacklog,
       operatorReserve: 1,
-      stopCondition: "oss stop",
+      consumer: "Test reviewer uses the output.", stopCondition: "oss stop",
       paused: false
     }
   });
@@ -472,7 +472,7 @@ test("backlog cap is validated, not silently coerced", () => {
         hypothesis: "h",
         dailyCapRaw: "1000000",
         maxUnclaimedBacklog: 0,
-        stopCondition: "s"
+        consumer: "Test reviewer uses the output.", stopCondition: "s"
       }
     }),
     /maxUnclaimedBacklog must be a positive integer/u

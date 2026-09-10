@@ -1,4 +1,5 @@
 import { createStateStore } from "./state-store.js";
+import { assertIngestedVerifierClassReward } from "./verifier-class-rewards.js";
 import { AccountMutationService } from "./account-mutation-service.js";
 import { JobCatalogService, explainEligibilityFromPreflight } from "./job-catalog-service.js";
 import { CatalogueMutations } from "./catalogue-mutations.js";
@@ -435,6 +436,7 @@ export class PlatformService {
   }
 
   async createAdminJob(input, { posterWallet = undefined } = {}) {
+    assertIngestedVerifierClassReward(input, this.verifierClassRewards);
     assertIngestedCatalogVerifierCanReject(input);
     const jobInput = await this.withRegisteredExternalSchema(input);
     const action = async () => {
@@ -513,6 +515,7 @@ export class PlatformService {
   }
 
   async upsertIngestedJob(input, options = {}) {
+    assertIngestedVerifierClassReward(input, this.verifierClassRewards);
     this.catalogueMutations.assertCanIngest(input);
     assertIngestedCatalogVerifierCanReject(input);
     const now = options.now ?? new Date();

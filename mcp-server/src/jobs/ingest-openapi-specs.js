@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { pathToFileURL } from "node:url";
+import { verifierClassReward } from "../core/verifier-class-rewards.js";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 import { substantiveVerifierTerms } from "./substantive-verifier-terms.js";
 
@@ -173,7 +174,7 @@ export function toPlatformJob(target, score = scoreOpenApiTarget(target)) {
     tier: "starter",
     lane: "liveness",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
-    rewardAmount: 0.1,
+    rewardAmount: verifierClassReward("benchmark"),
     verifierMode: "benchmark",
     verifierTerms: substantiveVerifierTerms(apiTitle, target.specUrl, localSurface, target.openapiVersion),
     verifierMinimumMatches: 2,

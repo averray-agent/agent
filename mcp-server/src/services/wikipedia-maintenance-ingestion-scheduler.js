@@ -154,17 +154,15 @@ export class WikipediaMaintenanceIngestionScheduler {
           continue;
         }
         const replenishedJob = withReissueJobId(job, inventory.allJobIds, { now });
-        if (!this.dryRun) {
-          try {
-            // Prefer the prefunding create path so the reward is escrowed at
-            // ingestion; fall back to createJob for callers/tests without it.
-            await upsertScheduledIngestedJob(this.platformService, replenishedJob, { prefund: true, now });
-          } catch (error) {
-            if (recordLanePostingRefusal(summary, replenishedJob, error)) continue;
-            if (recordIngestSpecHashRefusal(summary, replenishedJob, error)) continue;
-            if (recordIngestVerifierRefusal(summary, replenishedJob, error)) continue;
-            throw error;
-          }
+        try {
+          // Prefer the prefunding create path so the reward is escrowed at
+          // ingestion; fall back to createJob for callers/tests without it.
+          await upsertScheduledIngestedJob(this.platformService, replenishedJob, { dryRun: this.dryRun, prefund: true, now });
+        } catch (error) {
+          if (recordLanePostingRefusal(summary, replenishedJob, error)) continue;
+          if (recordIngestSpecHashRefusal(summary, replenishedJob, error)) continue;
+          if (recordIngestVerifierRefusal(summary, replenishedJob, error)) continue;
+          throw error;
         }
         seenSources.add(sourceKey);
         summary.createdCount += 1;

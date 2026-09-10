@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { pathToFileURL } from "node:url";
+import { verifierClassReward } from "../core/verifier-class-rewards.js";
 import {
   DEFAULT_OPEN_PR_CAP_PER_REPO,
   evaluateMaintainerSurfaceForIssue,
@@ -186,7 +187,7 @@ export function toPlatformJob(issue, score = scoreIssue(issue), {
     tier: "starter",
     lane: "oss-anchored",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
-    rewardAmount: 0.2,
+    rewardAmount: verifierClassReward("github_pr"),
     verifierMode: "github_pr",
     verifierMinimumScore: 80,
     requireIssueReference: true,

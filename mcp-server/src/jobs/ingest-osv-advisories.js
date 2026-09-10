@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { pathToFileURL } from "node:url";
+import { verifierClassReward } from "../core/verifier-class-rewards.js";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
 import { substantiveVerifierTerms } from "./substantive-verifier-terms.js";
 
@@ -277,7 +278,7 @@ export function toPlatformJob({ target, advisory, advisories, fixedVersion, scor
     tier: "starter",
     lane: "oss-anchored",
     rewardAsset: DEFAULT_ESCROW_ASSET_SYMBOL,
-    rewardAmount: 0.3,
+    rewardAmount: verifierClassReward("benchmark"),
     verifierMode: "benchmark",
     verifierTerms: substantiveVerifierTerms(target.name, target.version, effectiveFixedVersion, advisoryIds),
     verifierMinimumMatches: 3,

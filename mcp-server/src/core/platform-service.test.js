@@ -2777,7 +2777,7 @@ test("fresh wallets retain a real waiver-eligible claimable path after demo reti
   );
   await service.createIngestedJob({
     ...VERIFIABLE_REAL_INGEST_JOB_INPUT,
-    rewardAmount: 0.25
+    rewardAmount: 1.0
   });
 
   const jobs = await service.listJobsWithSessions({
@@ -2816,6 +2816,7 @@ test("production ingestion refuses new keyword-only provider jobs", async () => 
     () => service.createIngestedJob({
       ...INGEST_JOB_INPUT,
       id: "unsafe-open-data-job",
+      rewardAmount: 0.1,
       source: { type: "open_data_dataset" }
     }),
     (error) => error?.code === "catalog_verifier_cannot_reject_bad_work"

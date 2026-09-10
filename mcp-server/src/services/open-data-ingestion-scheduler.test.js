@@ -72,6 +72,22 @@ function makePlatformService(initialJobs = []) {
   };
 }
 
+test("pricing pin: scheduler records the class refusal in live and dry-run summaries", async () => {
+  for (const dryRun of [false, true]) {
+    const platform = makePlatformService();
+    platform.verifierClassRewards = { benchmark: 0.05 };
+    const scheduler = new OpenDataIngestionScheduler(platform, undefined, {
+      enabled: true, dryRun, datasets: [TARGET], fetchImpl: makeFetch()
+    });
+    const summary = await scheduler.runOnce(new Date("2026-04-26T10:00:00.000Z"));
+    assert.equal(summary.createdCount, 0);
+    assert.equal(summary.skipped[0].reason, "verifier_class_reward_out_of_bounds");
+    assert.equal(summary.skipped[0].rewardAmount, 0.1);
+    assert.equal(summary.skipped[0].bound, 0.05);
+    assert.equal(platform.listJobs().length, 0);
+  }
+});
+
 test("OpenDataIngestionScheduler dry-run does not create jobs", async () => {
   const platform = makePlatformService();
   const scheduler = new OpenDataIngestionScheduler(platform, undefined, {
@@ -331,7 +347,7 @@ test("OpenDataIngestionScheduler skips creation with a resume time when its lane
       liveness: {
         hypothesis: "test",
         dailyCapRaw: "100000",
-        stopCondition: "test stop"
+        consumer: "Test reviewer uses the output.", stopCondition: "test stop"
       }
     }),
     gasEstimateUsdc: 0,

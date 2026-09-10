@@ -224,7 +224,7 @@ test("GitHub scheduler logs reserved headroom in summary.skipped while operator 
   assert.deepEqual(imported.errors, []);
   assert.deepEqual(imported.skipped, []);
   assert.equal(imported.created[0].id, operatorJob.id);
-  assert.equal(platform.listJobs().find(({ id }) => id !== operatorJob.id).rewardAmount, 0.2);
+  assert.equal(platform.listJobs().find(({ id }) => id !== operatorJob.id).rewardAmount, 1);
 });
 
 test("GithubIssueIngestionScheduler dry-run does not create jobs", async () => {
