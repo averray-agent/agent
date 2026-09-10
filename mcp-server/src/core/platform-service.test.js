@@ -22,6 +22,67 @@ import {
 const WALLET = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DESIGNATED_WALLET = "0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa";
 const OTHER_WALLET = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+test("a wallet paid for a Wikipedia source cannot claim any reissue and preflight agrees", async () => {
+  const source = { type: "wikipedia_article", language: "en", pageId: 53577157,
+    revisionId: "1370991727", taskType: "citation_repair", reissueNumber: 25 };
+  const store = new MemoryStateStore();
+  const service = makePlatformService(undefined, undefined, store, undefined, undefined, undefined, undefined, { source });
+  const priorJob = { ...makeParentJob(), id: "removed-wiki-job-r16", source: { ...source, reissueNumber: 16 } };
+  await store.upsertSession({
+    sessionId: "paid-source", jobId: priorJob.id, wallet: WALLET.toUpperCase(),
+    status: "resolved", resolvedAt: "2026-09-08T12:00:00Z", updatedAt: "2026-09-08T12:00:00Z",
+    jobSnapshot: buildJobSnapshot(priorJob),
+    payoutTx: { status: 1, settlement: { workerAmountRaw: "350000" } }
+  });
+  // Payment lies beyond the first wallet-history page, and the old job is no
+  // longer in the catalogue. Its durable pin must still bind the source.
+  for (let index = 0; index < 70; index += 1) {
+    await store.upsertSession({ sessionId: `newer-${index}`, jobId: `other-${index}`,
+      wallet: WALLET, status: "expired", updatedAt: "2026-09-09T12:00:00Z" });
+  }
+  const preflight = await service.preflightJob(WALLET, "parent-job-001");
+  assert.equal(preflight.eligible, false);
+  assert.equal(preflight.currentWalletCanClaim, false);
+  assert.equal(preflight.reason, "source_already_paid");
+  assert.equal(preflight.sourcePayment.paidJobId, "removed-wiki-job-r16");
+  await assert.rejects(service.claimJob(WALLET, "parent-job-001", "http", "source-repeat"),
+    (error) => error.code === preflight.reason);
+  assert.equal(await store.findSessionByJobId("parent-job-001"), undefined);
+});
+
+test("unpaid, other-wallet and changed-revision Wikipedia histories do not block a new claim", async () => {
+  for (const variant of ["zero_payout", "other_wallet", "new_revision"]) {
+    const source = { type: "wikipedia_article", language: "en", pageId: 123, revisionId: "200" };
+    const store = new MemoryStateStore();
+    const service = makePlatformService(undefined, undefined, store, undefined, undefined, undefined, undefined, { source });
+    const priorJob = { ...makeParentJob(), id: "prior-wiki", source: { ...source,
+      revisionId: variant === "new_revision" ? "100" : "200" } };
+    await store.upsertSession({
+      sessionId: "prior", jobId: priorJob.id, wallet: variant === "other_wallet" ? OTHER_WALLET : WALLET,
+      status: "resolved", jobSnapshot: buildJobSnapshot(priorJob),
+      payoutTx: { status: 1, settlement: { workerAmountRaw: variant === "zero_payout" ? "0" : "350000" } }
+    });
+    assert.equal((await service.preflightJob(WALLET, "parent-job-001")).eligible, true, variant);
+    const claimed = await service.claimJob(WALLET, "parent-job-001", "http", variant);
+    assert.equal(claimed.status, "claimed", variant);
+  }
+});
+
+test("Wikipedia payment-history read failures refuse the shared assessment and claim", async () => {
+  const store = new MemoryStateStore();
+  const service = makePlatformService(undefined, undefined, store, undefined, undefined, undefined, undefined, {
+    source: { type: "wikipedia_article", language: "en", pageId: 123, revisionId: "200" }
+  });
+  // The ordinary progression read tolerates a cached empty history; this gate
+  // must not treat that as permission when the authoritative read is unavailable.
+  store.listSessionsByWallet = async () => { throw new Error("history unavailable"); };
+  const decision = await service.jobExecutionService.assessPaidSourceClaim(service.getJobDefinition("parent-job-001"), WALLET);
+  assert.equal(decision.reason, "source_payment_history_unavailable");
+  await assert.rejects(service.claimJob(WALLET, "parent-job-001", "http", "source-history-down"),
+    (error) => error.code === decision.reason);
+  assert.equal(await store.findSessionByJobId("parent-job-001"), undefined);
+});
 const CANONICAL_USDC_ASSET = {
   symbol: "USDC",
   assetClass: "trust_backed",

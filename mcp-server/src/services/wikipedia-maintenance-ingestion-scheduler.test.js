@@ -238,12 +238,13 @@ test("WikipediaMaintenanceIngestionScheduler skips replenishment when minimum cl
   assert.equal(summary.skipped[0].reason, "minimum_claimable_satisfied");
 });
 
-test("WikipediaMaintenanceIngestionScheduler reissues exhausted source jobs with a fresh id", async () => {
+test("WikipediaMaintenanceIngestionScheduler reissues exhausted source jobs only after the cooldown", async () => {
   const platform = makePlatformService([
     {
       ...claimableWikipediaJob(GENERATED_WIKI_JOB_ID, 123),
       claimable: false,
       effectiveState: "exhausted",
+      completedAt: "2026-03-25T10:00:00.000Z",
       claimState: "exhausted",
       reason: "retry_limit_exhausted"
     }
@@ -369,6 +370,8 @@ test("loadWikipediaMaintenanceIngestionConfig parses env knobs safely", () => {
     WIKIPEDIA_INGEST_MAX_JOBS_PER_RUN: "3",
     WIKIPEDIA_INGEST_MAX_OPEN_JOBS: "12",
     WIKIPEDIA_INGEST_MIN_CLAIMABLE_JOBS: "4",
+    WIKIPEDIA_INGEST_COMPLETED_COOLDOWN_DAYS: "45",
+    WIKIPEDIA_INGEST_MAX_REISSUES: "3",
     WIKIPEDIA_INGEST_CATEGORIES_JSON: '[{"title":"Category:Wikipedia articles in need of updating","taskType":"freshness_check"}]'
   });
 
@@ -380,6 +383,8 @@ test("loadWikipediaMaintenanceIngestionConfig parses env knobs safely", () => {
   assert.equal(config.maxJobsPerRun, 3);
   assert.equal(config.maxOpenJobs, 12);
   assert.equal(config.minClaimableJobs, 4);
+  assert.equal(config.completedCooldownDays, 45);
+  assert.equal(config.maxReissues, 3);
   assert.deepEqual(config.categories, [
     { title: "Category:Wikipedia articles in need of updating", taskType: "freshness_check" }
   ]);
@@ -397,6 +402,8 @@ test("loadWikipediaMaintenanceIngestionConfig enables production ingestion by de
   assert.equal(config.maxJobsPerRun, 2);
   assert.equal(config.maxOpenJobs, 20);
   assert.equal(config.minClaimableJobs, 2);
+  assert.equal(config.completedCooldownDays, 30);
+  assert.equal(config.maxReissues, 2);
 });
 
 test("loadWikipediaMaintenanceIngestionConfig stays opt-in outside production", () => {
@@ -435,3 +442,142 @@ function claimableWikipediaJob(id, pageId) {
     }
   };
 }
+
+const NOW = new Date("2026-09-10T12:00:00.000Z");
+const ARTICLES = [
+  { pageId: 123, title: "Example article", revisionId: 987654321 },
+  { pageId: 456, title: "Next article", revisionId: 987654322 },
+  { pageId: 789, title: "Third article", revisionId: 987654323 }
+];
+function completedJob(overrides = {}) {
+  return {
+    ...claimableWikipediaJob(CANONICAL_WIKI_JOB_ID, 123),
+    claimable: false,
+    effectiveState: "exhausted",
+    resolvedAt: "2026-09-09T12:00:00.000Z",
+    ...overrides
+  };
+}
+function replenisher(jobs, options = {}) {
+  const platform = makePlatformService(jobs);
+  const scheduler = new WikipediaMaintenanceIngestionScheduler(platform, undefined, {
+    enabled: true, dryRun: false, minClaimableJobs: 1, maxJobsPerRun: 1,
+    categories: [{ title: "Category:All articles with dead external links", taskType: "citation_repair" }],
+    minScore: 55, fetchImpl: makeMultiArticleFetch(ARTICLES), logger: SILENT_LOGGER,
+    ...options
+  });
+  return { platform, scheduler };
+}
+
+test("completed Wikipedia sources stay seen inside the cooldown without occupying active inventory", async () => {
+  for (const effectiveState of ["exhausted", "completed", "resolved"]) {
+    const { scheduler } = replenisher([completedJob({ effectiveState })]);
+    const snapshot = await scheduler.inventorySnapshot(NOW);
+    assert.equal(snapshot.activeSourceKeys.has("en:123:987654321"), false);
+    assert.equal(snapshot.seenSourceKeys.has("en:123:987654321"), true);
+    const summary = await scheduler.runOnce(NOW);
+    assert.equal(summary.skipped[0].reason, "completed_cooldown");
+    assert.equal(summary.createdCount, 1);
+    assert.equal(summary.selected[0].title, "Next article");
+    assert.deepEqual(summary.errors, []);
+  }
+});
+
+test("a changed upstream Wikipedia revision bypasses the completed cooldown and starts a new cap", async () => {
+  const old = completedJob();
+  old.source = { ...old.source, reissueNumber: 25 };
+  const { platform, scheduler } = replenisher([old], {
+    fetchImpl: makeMultiArticleFetch([{ ...ARTICLES[0], revisionId: 999999999 }])
+  });
+  const summary = await scheduler.runOnce(NOW);
+  assert.equal(summary.createdCount, 1);
+  assert.deepEqual(summary.skipped, []);
+  assert.equal(platform.listJobs()[0].source.revisionId, "999999999");
+  assert.equal(platform.listJobs()[0].source.reissueNumber, 1);
+});
+
+test("Wikipedia reissues never exceed the per-revision cap and report reissue_cap_reached", async () => {
+  const old = completedJob({ resolvedAt: "2026-07-01T12:00:00.000Z" });
+  const { platform, scheduler } = replenisher([old]);
+  const first = await scheduler.runOnce(NOW);
+  assert.equal(first.createdCount, 1);
+  const secondJob = platform.listJobs()[0];
+  assert.equal(secondJob.source.reissueNumber, 2);
+  Object.assign(secondJob, { effectiveState: "exhausted", claimable: false, resolvedAt: NOW.toISOString() });
+  // Restart, alter the title and the task type: none resets the revision cap.
+  const { scheduler: restarted } = replenisher(platform.listJobs(), {
+    categories: [{ title: "Category:Wikipedia articles in need of updating", taskType: "freshness_check" }],
+    fetchImpl: makeMultiArticleFetch([{ ...ARTICLES[0], title: "Renamed article" }, ARTICLES[1]])
+  });
+  const second = await restarted.runOnce(new Date("2026-10-11T12:00:00.000Z"));
+  assert.ok(second.selected.every((job) => job.reissueNumber <= 2), "no generation above the cap can be created");
+  assert.equal(second.skipped[0].reason, "reissue_cap_reached");
+  assert.equal(second.selected[0].title, "Next article");
+  assert.equal(second.selected[0].reissueNumber, 1);
+});
+
+test("two identical Wikipedia category runs rotate the first candidate after a skip", async () => {
+  const { scheduler } = replenisher([completedJob()], { dryRun: true });
+  const first = await scheduler.runOnce(NOW);
+  const second = await scheduler.runOnce(NOW);
+  assert.equal(first.candidates[0].title, "Example article");
+  assert.equal(first.skipped[0].reason, "completed_cooldown");
+  assert.equal(second.candidates[0].title, "Next article");
+  assert.equal(second.selected[0].title, "Next article");
+});
+
+test("Wikipedia category continuation advances beyond the first page and wraps on exhaustion", async () => {
+  const requests = [];
+  let categoryReads = 0;
+  const fetchArticles = makeMultiArticleFetch(ARTICLES);
+  const { scheduler } = replenisher([], {
+    dryRun: true,
+    fetchImpl: async (url) => {
+      if (new URL(url).searchParams.get("list") !== "categorymembers") return fetchArticles(url);
+      requests.push(new URL(url).searchParams.get("cmcontinue"));
+      categoryReads += 1;
+      return jsonResponse({ query: { categorymembers: [{ pageid: 456, title: "Next article" }] },
+        ...(categoryReads === 1 ? { continue: { cmcontinue: "page-2" } } : {}) });
+    }
+  });
+  await scheduler.runOnce(NOW);
+  await scheduler.runOnce(NOW);
+  await scheduler.runOnce(NOW);
+  assert.deepEqual(requests, [null, "page-2", null]);
+});
+
+test("archived and removed catalogue rows retain completion and cap evidence through session pins", async () => {
+  const { platform, scheduler } = replenisher([]);
+  platform.stateStore = {
+    async listRecentSessions() {
+      return [{ jobId: CANONICAL_WIKI_JOB_ID, status: "resolved", resolvedAt: NOW.toISOString(),
+        jobSnapshot: { definition: completedJob() } }];
+    }
+  };
+  const summary = await scheduler.runOnce(NOW);
+  assert.equal(summary.skipped[0].reason, "completed_cooldown");
+  assert.equal(summary.selected[0].title, "Next article");
+});
+
+test("overlapping replenisher calls share one pass and cannot race the reissue cap", async () => {
+  const { platform, scheduler } = replenisher([completedJob({ resolvedAt: "2026-07-01T00:00:00Z" })]);
+  const [first, second] = await Promise.all([scheduler.runOnce(NOW), scheduler.runOnce(NOW)]);
+  assert.deepEqual(first, second);
+  assert.equal(platform.listJobs().length, 2);
+  assert.equal(platform.listJobs()[0].source.reissueNumber, 2);
+});
+
+test("an article that leaves the upstream category is no longer a replenishment candidate", async () => {
+  const { scheduler } = replenisher([completedJob()], { fetchImpl: makeMultiArticleFetch([ARTICLES[1]]) });
+  const summary = await scheduler.runOnce(NOW);
+  assert.equal(summary.candidates.some((job) => job.sourceKey === "en:123:987654321"), false);
+  assert.equal(summary.selected[0].title, "Next article");
+});
+
+test("incomplete inventory fails closed with a run error before any upstream fetch or creation", async () => {
+  const { platform, scheduler } = replenisher([], { fetchImpl: async () => assert.fail("must not fetch") });
+  platform.stateStore = { listRecentSessions: async () => Array(200).fill({ jobId: "unknown" }) };
+  const summary = await scheduler.runOnce(NOW);
+  assert.equal(summary.createdCount, 0);
+  assert.equal(summary.errors[0].message, "inventory_history_incomplete");
+});

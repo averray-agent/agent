@@ -68,6 +68,8 @@ export async function ingestWikipediaMaintenance({
   categories = DEFAULT_CATEGORIES,
   limit = 10,
   minScore = 55,
+  rotation = 0,
+  categoryContinuations = new Map(),
   fetchImpl = fetch
 } = {}) {
   const normalizedLanguage = normalizeLanguage(language);
@@ -78,12 +80,16 @@ export async function ingestWikipediaMaintenance({
 
   for (const category of normalizedCategories) {
     if (candidates.length >= limit * 3) break;
-    const members = await fetchCategoryMembers({
+    const members = rotateCandidates(await fetchCategoryMembers({
       language: normalizedLanguage,
       categoryTitle: category.title,
       limit: Math.max(limit * 2, 10),
+      continueFrom: categoryContinuations.get(category.title),
+      onContinue: (cursor) => cursor
+        ? categoryContinuations.set(category.title, cursor)
+        : categoryContinuations.delete(category.title),
       fetchImpl
-    });
+    }), rotation);
     discovered += members.length;
     for (const member of members) {
       const article = await fetchArticleDetails({
@@ -98,13 +104,13 @@ export async function ingestWikipediaMaintenance({
       seen.add(key);
       const score = scoreArticle(article);
       if (score >= minScore) {
-        candidates.push({ article, score });
+        candidates.push({ article, score, order: candidates.length });
       }
     }
   }
 
   const jobs = candidates
-    .sort((left, right) => right.score - left.score)
+    .sort((left, right) => right.score - left.score || left.order - right.order)
     .slice(0, limit)
     .map(({ article, score }) => toPlatformJob(article, score));
 
@@ -118,7 +124,13 @@ export async function ingestWikipediaMaintenance({
   };
 }
 
-export async function fetchCategoryMembers({ language, categoryTitle, limit, fetchImpl = fetch }) {
+function rotateCandidates(candidates, rotation) {
+  if (!candidates.length) return candidates;
+  const offset = rotation % candidates.length;
+  return [...candidates.slice(offset), ...candidates.slice(0, offset)];
+}
+
+export async function fetchCategoryMembers({ language, categoryTitle, limit, continueFrom, onContinue, fetchImpl = fetch }) {
   const url = mediaWikiActionUrl(language);
   url.searchParams.set("action", "query");
   url.searchParams.set("format", "json");
@@ -126,6 +138,7 @@ export async function fetchCategoryMembers({ language, categoryTitle, limit, fet
   url.searchParams.set("cmtitle", categoryTitle);
   url.searchParams.set("cmnamespace", "0");
   url.searchParams.set("cmlimit", String(Math.min(limit, 50)));
+  if (continueFrom) url.searchParams.set("cmcontinue", continueFrom);
   url.searchParams.set("origin", "*");
 
   const response = await fetchImpl(url, { headers: requestHeaders() });
@@ -134,6 +147,7 @@ export async function fetchCategoryMembers({ language, categoryTitle, limit, fet
     throw new Error(`Wikipedia category query failed (${response.status}): ${body}`);
   }
   const payload = await response.json();
+  onContinue?.(payload?.continue?.cmcontinue);
   return payload?.query?.categorymembers ?? [];
 }
 

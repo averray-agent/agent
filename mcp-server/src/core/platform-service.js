@@ -1216,6 +1216,7 @@ export class PlatformService {
       this.attachClaimState(this.getJobDefinition(jobId), { wallet })
     ]);
     const rawJob = this.getJobDefinition(jobId);
+    const sourcePayment = await this.jobExecutionService.assessPaidSourceClaim(rawJob, wallet);
     const designation = evaluateDesignatedClaimant(rawJob, wallet);
     const claimStateEligible = designation.applies
       ? job.currentWalletCanClaim === true
@@ -1242,6 +1243,17 @@ export class PlatformService {
       sessionId: job.sessionId,
       ...priorityListing
     };
+    if (!sourcePayment.eligible) {
+      return {
+        ...result,
+        eligible: false,
+        currentWalletCanClaim: false,
+        reason: sourcePayment.reason,
+        reasonMessage: sourcePayment.message,
+        sourcePayment,
+        failureStates: [...new Set([...(result.failureStates ?? []), sourcePayment.reason])]
+      };
+    }
     if (designation.applies && designation.eligible) {
       result.designatedClaimants = [...rawJob.designatedClaimants];
       result.progressionValvesBypassed = true;
