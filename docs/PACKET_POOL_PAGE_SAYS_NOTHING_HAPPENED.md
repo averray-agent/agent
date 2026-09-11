@@ -130,3 +130,15 @@ profitable cycle's surplus is labelled venue-earned rather than "not yield".
 `cumulativeCapital` untouched. Pins: the cycle-1 numbers; a profitable-cycle
 fixture (returned > principal) shows positive venueEarned and zero
 unattributed; the wallet-level split uses the same ratio.
+
+## Correction 2026-09-11 (gate of #1369): write-offs never reach eth_getLogs
+
+The cycle-1 write-off was a multisig `revive.call` from a Substrate origin.
+Events emitted that way are not in the Ethereum RPC log view on any provider
+(verified: zero `VenueLossWrittenOff` logs on both providers; live attribution
+after #1367 still reads venueEarned 0). So the journal is structurally a
+**subset** for write-offs, and the contract getter
+`venueWrittenOffPrincipalAssets(id)` is the only source. The rule for the
+attribution reader is the one the history reader already uses: getter
+authoritative; journal > getter is the only inconsistent case. The earlier
+"surface unavailable on any disagreement" ask in this packet was wrong.
