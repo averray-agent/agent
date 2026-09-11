@@ -812,3 +812,83 @@ test("health addresses follow the running chain, never a hardcoded network", () 
     assert.equal(resolved.escrowCore, env.ESCROW_CORE_ADDRESS);
   }
 });
+
+test("resolveCapabilityHealth — indexer: stalled only when an old head has also stopped advancing", () => {
+  const tenMinutesAgo = Math.floor(Date.now() / 1000) - 600 - 1;
+  const replaying = resolveCapabilityHealth({
+    indexerProbe: {
+      ok: true,
+      blockNumber: 19_000_000,
+      blockTimestamp: tenMinutesAgo - 86_400,
+      lagBudgetSeconds: 600,
+      stallBudgetSeconds: 900,
+      headUnchangedSeconds: 30
+    }
+  });
+  assert.equal(replaying.indexer, INDEXER_STATUS.LAGGING, "a replay is old but moving");
+  assert.equal(replaying.indexerHeadUnchangedSeconds, 30);
+  assert.ok(replaying.indexerLagSeconds >= 86_400);
+
+  const stalled = resolveCapabilityHealth({
+    indexerProbe: {
+      ok: true,
+      blockNumber: 20_501_734,
+      blockTimestamp: tenMinutesAgo,
+      lagBudgetSeconds: 600,
+      stallBudgetSeconds: 900,
+      headUnchangedSeconds: 960
+    }
+  });
+  assert.equal(stalled.indexer, INDEXER_STATUS.STALLED);
+  assert.equal(stalled.indexerHeadUnchangedSeconds, 960);
+
+  const fresh = resolveCapabilityHealth({
+    indexerProbe: {
+      ok: true,
+      blockNumber: 20_521_542,
+      blockTimestamp: Math.floor(Date.now() / 1000) - 200,
+      lagBudgetSeconds: 600,
+      stallBudgetSeconds: 900,
+      headUnchangedSeconds: 5
+    }
+  });
+  assert.equal(fresh.indexer, INDEXER_STATUS.SYNCED);
+  assert.equal(fresh.indexerLagSeconds, 200);
+
+  const legacyProbe = resolveCapabilityHealth({
+    indexerProbe: { ok: true, blockTimestamp: tenMinutesAgo, lagBudgetSeconds: 600 }
+  });
+  assert.equal(legacyProbe.indexer, INDEXER_STATUS.LAGGING, "no progress memory never claims a stall");
+  assert.equal(legacyProbe.indexerHeadUnchangedSeconds, null);
+
+  const unavailable = resolveCapabilityHealth({ indexerProbe: { ok: false } });
+  assert.equal(unavailable.indexerLagSeconds, null);
+  assert.equal(unavailable.indexerHeadUnchangedSeconds, null);
+});
+
+test("buildCapabilityWarnings — a stalled indexer is critical (money doors answer from it); lagging stays a warning", () => {
+  const stalled = buildCapabilityWarnings({
+    blockchain: BLOCKCHAIN_STATUS.ENABLED,
+    treasuryMutations: TREASURY_MUTATIONS_STATUS.AVAILABLE,
+    xcmObserver: XCM_OBSERVER_STATUS.LIVE,
+    indexer: INDEXER_STATUS.STALLED,
+    indexerLagSeconds: 36_000,
+    indexerHeadUnchangedSeconds: 35_400,
+    gasSponsor: GAS_SPONSOR_STATUS.ENABLED
+  });
+  assert.equal(stalled.length, 1);
+  assert.equal(stalled[0].code, "indexer_stalled");
+  assert.equal(stalled[0].severity, "critical");
+  assert.match(stalled[0].message, /35400s/u);
+  assert.match(stalled[0].message, /36000s/u);
+  assert.match(stalled[0].message, /INCIDENT_RESPONSE/u);
+
+  const lagging = buildCapabilityWarnings({
+    blockchain: BLOCKCHAIN_STATUS.ENABLED,
+    treasuryMutations: TREASURY_MUTATIONS_STATUS.AVAILABLE,
+    xcmObserver: XCM_OBSERVER_STATUS.LIVE,
+    indexer: INDEXER_STATUS.LAGGING,
+    gasSponsor: GAS_SPONSOR_STATUS.ENABLED
+  });
+  assert.deepEqual(lagging.map((w) => [w.code, w.severity]), [["indexer_lagging", "warning"]]);
+});

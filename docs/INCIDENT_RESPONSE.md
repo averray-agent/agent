@@ -133,7 +133,8 @@ To prove alert delivery without adding a synthetic endpoint, run a deliberate
 hosted smoke failure:
 
 1. Temporarily tighten the production scheduler env to
-   `INDEXER_MAX_STALENESS_SEC=1`.
+   `INDEXER_MAX_STALENESS_SEC=1` (the sync-liveness budget; it runs on every
+   smoke regardless of `CHECK_INDEXER`).
 2. Run `./scripts/ops/check-hosted-stack-and-alert.sh`.
 3. Confirm the Slack operator channel receives the structured smoke-failure
    alert.
@@ -227,6 +228,84 @@ tokens continue until expiry.
    ```
 3. If the bad state follows a fresh deploy, use the known-good rollback path.
 
+### Indexer sync stall from a provider block hole
+
+Seen 2026-09-10 21:37Z → 2026-09-11 08:00Z on mainnet. Recognise it by the
+combination: `index.averray.com/health` **200**, `/ready` **503**, `/status`
+block timestamp not advancing, backend `/health` warning
+`indexer_stalled` (critical; `indexer_lagging` alone is also what a schema
+replay looks like — the difference is whether `/status` moves), hosted smoke
+failing at "Indexer sync is stalled" (or, before this runbook, at "CreditPool
+door did not return the wallet's L1/L2/L3 debt fields"), and indexer logs
+carrying `RpcProviderError: Inconsistent RPC response data … 'block.transactions'
+array does not contain a transaction matching that 'transactionIndex'` retried
+with growing `retry_delay`, then Postgres `terminating connection due to
+idle-in-transaction timeout`.
+
+Cause: one RPC provider served a block whose header says transactions ran
+(`gasUsed` and `logsBloom` non-zero) with an EMPTY `transactions` array —
+its receipt store has a gap for that block, so it also answers `eth_getLogs`
+with no logs for it and `eth_getTransactionReceipt` with `null`. Ponder's
+`fallback` transport mixed that provider's block with another provider's logs,
+rejected the pair, and retried inside one Postgres transaction until the
+connection was killed. The compose healthcheck only probes `/health` (process
+liveness), so nothing restarted it.
+
+**Reproduce against the provider (report these three calls to them):**
+
+```bash
+BLOCK=0x138d4e6   # mainnet 20501734, 2026-09-10T21:12:48Z
+TX=0xa432e1b35eaf2ee9a21d13edb729e78210a5ec508c264de52d277fa7d3f19030
+for URL in https://services.polkadothub-rpc.com/mainnet/ https://eth-rpc.polkadot.io/; do
+  echo "== $URL"
+  # 1. full block: hole provider → "transactions":[] although gasUsed=0x7191
+  curl -sS "$URL" -H 'content-type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getBlockByNumber\",\"params\":[\"$BLOCK\",true]}" \
+    | jq -c '.result | {hash, gasUsed, txs: (.transactions | length)}'
+  # 2. logs for the block: hole provider → [] ; healthy provider → 3 logs (txIndex 0x3)
+  curl -sS "$URL" -H 'content-type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"eth_getLogs\",\"params\":[{\"fromBlock\":\"$BLOCK\",\"toBlock\":\"$BLOCK\"}]}" \
+    | jq -c '.result | map({logIndex, transactionIndex})'
+  # 3. receipt: hole provider → null ; healthy provider → status 0x1, 3 logs
+  curl -sS "$URL" -H 'content-type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"eth_getTransactionReceipt\",\"params\":[\"$TX\"]}" \
+    | jq -c '.result | if . == null then null else {status, transactionIndex, logs: (.logs | length)} end'
+done
+```
+
+Both providers return the same block hash `0x2efe1d96…4d84cc`; on
+2026-09-11T09:47Z the hole provider still answered `txs: 0` / `[]` / `null`
+(the hashes-only form `eth_getBlockByNumber($BLOCK,false)` had by then
+recovered the transaction hash — the receipt-backed views had not).
+
+Two failure modes, both real on 2026-09-10/11:
+
+- **Loud:** logs from provider A + block from provider B → Ponder inconsistency
+  error → retry storm → idle-in-transaction kill → wedge.
+- **Silent:** after the restart the primary answered the historical range
+  `eth_getLogs` alone, so the three EscrowCore claim events of block 20501734
+  (`JobClaimed`, `ClaimRetentionSnapshot`, `ClaimEconomicsLocked` for job
+  `0x0620927a…`) were never indexed. Nothing errored.
+
+Mitigation in `indexer/src/rpc-transport.ts`: a block answer with an empty
+transaction list but non-zero `gasUsed`/`logsBloom` is rejected **per
+provider** (viem's fallback tries the next URL), and every `eth_getLogs` is
+asked of all configured providers, answering with the superset and logging
+`[indexer-rpc] <url> omitted N log(s) present at <url>` naming the hole;
+conflicting answers are refused rather than guessed. Grep `docker logs
+agent-mainnet-indexer` for `[indexer-rpc]` to see which provider served a hole.
+
+First moves:
+
+1. `docker restart agent-mainnet-indexer` — the sync resumes from its
+   checkpoint. Do this when `/status` is frozen and no schema replay is in
+   progress; the hosted smoke and `indexer_stalled` name exactly that state.
+2. If events may have been skipped (a `[indexer-rpc] … omitted` line, or a job
+   whose on-chain state is ahead of the index), redeploy the indexer with a
+   schema rotation: the replay re-fetches every range through the cross-check.
+   Any change under `indexer/` rotates the schema on the next deploy; otherwise
+   pass `INDEXER_FRESH_SCHEMA=1` (see `docs/INDEXER_SCHEMA_RECOVERY.md`).
+3. Report the three calls above to the provider with the block hash. Keep at
+   least two providers in `deploy/indexer.env.template`; a single provider
+   leaves the transport with nothing to compare against.
+
 ---
 
 ## 6. Response matrix
@@ -236,6 +315,7 @@ tokens continue until expiry.
 | Unexpected fund movement | P1 | Pause | Pauser + owner signer |
 | `api.averray.com/health` failing | P2 | Check backend logs, roll back if recent deploy | Primary on-call |
 | `index.averray.com/ready` failing | P2 | Check indexer logs/status, roll back or widen readiness window | Primary on-call |
+| `/status` frozen while `/health` is 200 (`indexer_stalled`, smoke "Indexer sync is stalled") | P2 | Restart the indexer container; if a provider hole is logged, rotate the schema so the replay re-fetches — see §5 | Primary on-call |
 | Public site/app shell failing | P2 | Check Caddy + static mounts | Primary on-call |
 | Async XCM requests stuck in `pending` | P2 | Check watcher status, inspect `/xcm/request`, and rehearse manual finalize if needed | Primary on-call |
 | Blockchain KMS signer error or access denied | P1 | Pause if value movement is suspicious; inspect CloudTrail + backend signer logs | Primary on-call + pauser |
