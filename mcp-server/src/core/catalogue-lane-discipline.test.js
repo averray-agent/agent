@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   assertCatalogueDefinitionsHaveLanes,
   CatalogueLaneDiscipline,
+  CATALOGUE_LANE_STATE_SCOPE,
   DEFAULT_CATALOGUE_LANE_REGISTRY,
   LANE_BACKLOG_SATURATED,
   LANE_BUDGET_EXHAUSTED,
@@ -30,11 +31,13 @@ test("env operatorReserve omission mutation preserves oss-anchored reserve two",
   assert.equal(loadCatalogueLaneRegistry(envRegistry(entries), options).get("oss-anchored").operatorReserve, 2);
 });
 
-test("env backlog omission preserves liveness and benchmark backlog two", () => {
+test("env backlog omission preserves liveness four, oss five and benchmark two", () => {
   const entries = structuredClone(DEFAULT_CATALOGUE_LANE_REGISTRY);
-  for (const id of ["liveness", "benchmark-showcase"]) delete entries[id].maxUnclaimedBacklog;
+  for (const id of Object.keys(entries)) delete entries[id].maxUnclaimedBacklog;
   const registry = loadCatalogueLaneRegistry(envRegistry(entries), { logger: { warn() {} } });
-  for (const id of ["liveness", "benchmark-showcase"]) assert.equal(registry.get(id).maxUnclaimedBacklog, 2);
+  for (const [id, cap] of Object.entries({ liveness: 4, "oss-anchored": 5, "benchmark-showcase": 2 })) {
+    assert.equal(registry.get(id).maxUnclaimedBacklog, cap);
+  }
 });
 
 test("env-only lanes retain global backlog three and operator reserve one", () => {
@@ -57,7 +60,8 @@ test("env implicit non-global defaults warn with the lane and field names", () =
     logger: { warn(details, message) { warnings.push({ details, message }); } }
   });
   assert.deepEqual(warnings.map(({ details }) => details), [
-    { lane: "liveness", field: "maxUnclaimedBacklog", laneDefault: 2, globalDefault: 3 },
+    { lane: "liveness", field: "maxUnclaimedBacklog", laneDefault: 4, globalDefault: 3 },
+    { lane: "oss-anchored", field: "maxUnclaimedBacklog", laneDefault: 5, globalDefault: 3 },
     { lane: "oss-anchored", field: "operatorReserve", laneDefault: 2, globalDefault: 1 },
     { lane: "benchmark-showcase", field: "maxUnclaimedBacklog", laneDefault: 2, globalDefault: 3 }
   ]);
@@ -483,10 +487,48 @@ test("backlog cap is validated, not silently coerced", () => {
   );
 });
 
+function ossRegistry(maxUnclaimedBacklog = 3) {
+  return validateCatalogueLaneRegistry({
+    "oss-anchored": { ...DEFAULT_CATALOGUE_LANE_REGISTRY["oss-anchored"], maxUnclaimedBacklog }
+  });
+}
+
+test("waiver pin 1: one operator job at cap three reserve two does not consume the scheduler slot", async () => {
+  const store = stateStore();
+  const options = { stateStore: store, registry: ossRegistry(), gasEstimateUsdc: 0, now: () => NOW };
+  const githubJob = (id) => ({ ...job(id, "oss-anchored", 0.2), source: { type: "github_issue" } });
+  await new CatalogueLaneDiscipline(options).post(githubJob("operator"), async () => {});
+  // A new instance must use the durable origin, not an in-process cache or the
+  // shared github_issue source type.
+  await new CatalogueLaneDiscipline(options).post(githubJob("scheduled"), async () => {}, { origin: "scheduler" });
+  assert.deepEqual((await store.getServiceState(CATALOGUE_LANE_STATE_SCOPE)).records.map(({ origin }) => origin),
+    ["operator", "scheduler"]);
+});
+
+test("waiver pin 2: two scheduler jobs at cap three reserve two refuse scheduler but allow operator", async () => {
+  const store = stateStore();
+  const options = { stateStore: store, gasEstimateUsdc: 0, now: () => NOW, logger: { info() {} } };
+  // Seed genuine persisted posts under the old wider allowance, then lower it.
+  const wider = new CatalogueLaneDiscipline({ ...options, registry: ossRegistry(5) });
+  for (const id of ["scheduled-1", "scheduled-2"]) {
+    await wider.post(job(id, "oss-anchored", 0.2), async () => {}, { origin: "scheduler" });
+  }
+  const discipline = new CatalogueLaneDiscipline({ ...options, registry: ossRegistry() });
+  await assert.rejects(discipline.post(job("refused", "oss-anchored", 0.2),
+    async () => assert.fail("scheduler action must not run"), { origin: "scheduler" }), (error) => {
+    assert.equal(error.code, LANE_SCHEDULER_HEADROOM_RESERVED);
+    assert.equal(error.details.schedulerUnclaimedCount, 2);
+    return true;
+  });
+  let posted = false;
+  await discipline.post(job("operator", "oss-anchored", 0.2), async () => { posted = true; }, { origin: "operator" });
+  assert.equal(posted, true);
+});
+
 test("oss scheduler fills one slot then reserves two slots for same-source operator jobs", async () => {
   const discipline = new CatalogueLaneDiscipline({
     stateStore: stateStore(),
-    registry: validateCatalogueLaneRegistry(DEFAULT_CATALOGUE_LANE_REGISTRY),
+    registry: ossRegistry(),
     gasEstimateUsdc: 0,
     now: () => NOW,
     logger: { info() {} }
@@ -509,10 +551,10 @@ test("oss scheduler fills one slot then reserves two slots for same-source opera
   assert.deepEqual(posted, ["scheduled-first", "operator-explicit", "operator-default"]);
 });
 
-test("operator reserve never raises the full oss lane cap of three", async () => {
+test("waiver pin 3: total backlog at cap refuses both origins", async () => {
   const discipline = new CatalogueLaneDiscipline({
     stateStore: stateStore(),
-    registry: validateCatalogueLaneRegistry(DEFAULT_CATALOGUE_LANE_REGISTRY),
+    registry: ossRegistry(),
     gasEstimateUsdc: 0,
     now: () => NOW,
     logger: { info() {} }
@@ -521,20 +563,53 @@ test("operator reserve never raises the full oss lane cap of three", async () =>
     await discipline.post(job(id, "oss-anchored", 0.2), async () => {}, { origin: "operator" });
   }
   let posted = false;
-  await assert.rejects(
-    discipline.post(job("fourth", "oss-anchored", 0.2), async () => { posted = true; }, { origin: "operator" }),
-    (error) => error.code === LANE_BACKLOG_SATURATED && error.details.unclaimedCount === 3
-  );
+  for (const origin of ["scheduler", "operator"]) {
+    await assert.rejects(
+      discipline.post(job("fourth", "oss-anchored", 0.2), async () => { posted = true; }, { origin }),
+      (error) => error.code === LANE_BACKLOG_SATURATED && error.details.unclaimedCount === 3
+    );
+  }
   assert.equal(posted, false);
 });
 
 test("operator reserves default to one and reject invalid or over-cap values", () => {
   assert.equal(registry().get("liveness").operatorReserve, 1);
-  for (const operatorReserve of [-1, 1.5, "1", 4]) {
+  for (const operatorReserve of [-1, 1.5, "1", 5]) {
     assert.throws(() => validateCatalogueLaneRegistry({
       liveness: { ...DEFAULT_CATALOGUE_LANE_REGISTRY.liveness, operatorReserve }
     }), /operatorReserve must be an integer between 0 and maxUnclaimedBacklog/u);
   }
+});
+
+test("waiver pin 4: disposable canaries consume neither scheduler nor total backlog", async () => {
+  const discipline = new CatalogueLaneDiscipline({
+    stateStore: stateStore(), registry: ossRegistry(), gasEstimateUsdc: 0, now: () => NOW,
+    logger: { info() {} }
+  });
+  for (const origin of ["scheduler", "operator"]) {
+    await discipline.post({ ...job(`proof-${origin}`, "oss-anchored", 0.2), disposableProof: true },
+      async () => {}, { origin });
+  }
+  const posted = [];
+  for (const [id, origin] of [["scheduled", "scheduler"], ["curated-1", "operator"], ["curated-2", "operator"]]) {
+    await discipline.post(job(id, "oss-anchored", 0.2), async () => posted.push(id), { origin });
+  }
+  assert.deepEqual(posted, ["scheduled", "curated-1", "curated-2"]);
+});
+
+test("pre-origin ledger records still consume the absolute cap without inferred origin", async () => {
+  const store = stateStore();
+  await store.upsertServiceState(CATALOGUE_LANE_STATE_SCOPE, { records: [{
+    jobId: "legacy", lane: "oss-anchored", postedAt: NOW.toISOString(), totalRaw: "200000", state: "posted"
+  }] });
+  const discipline = new CatalogueLaneDiscipline({
+    stateStore: store, registry: ossRegistry(), gasEstimateUsdc: 0, now: () => NOW, logger: { info() {} }
+  });
+  await discipline.post(job("scheduled", "oss-anchored", 0.2), async () => {}, { origin: "scheduler" });
+  await discipline.post(job("operator", "oss-anchored", 0.2), async () => {});
+  await assert.rejects(discipline.post(job("over-cap", "oss-anchored", 0.2),
+    async () => assert.fail("legacy record must count toward total cap")),
+  (error) => error.code === LANE_BACKLOG_SATURATED && error.details.unclaimedCount === 3);
 });
 
 test("invalid posting origin refuses rather than silently using operator headroom", async () => {

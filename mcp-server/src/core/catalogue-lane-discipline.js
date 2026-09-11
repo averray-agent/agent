@@ -33,7 +33,7 @@ export const DEFAULT_CATALOGUE_LANE_REGISTRY = Object.freeze({
     consumer: "Operator monitors delivery and verification receipts to detect platform regressions.",
     hypothesis: "Proof-of-life for the board; 0.10 USDC buys it as well as 0.25 USDC.",
     dailyCapRaw: "3000000",
-    maxUnclaimedBacklog: 2,
+    maxUnclaimedBacklog: 4,
     operatorReserve: 1,
     stopCondition: "Zero external claimants for 14 consecutive days.",
     paused: false
@@ -42,7 +42,7 @@ export const DEFAULT_CATALOGUE_LANE_REGISTRY = Object.freeze({
     consumer: "Upstream maintainers review and merge pull requests; dependency maintainers use advisory audit reports to plan upgrades.",
     hypothesis: "Public artifacts and maintainer relationships create an external-worker funnel.",
     dailyCapRaw: "15000000",
-    maxUnclaimedBacklog: 3,
+    maxUnclaimedBacklog: 5,
     operatorReserve: 2,
     stopCondition: "Cost per retained external worker exceeds 25 USDC over a trailing 30-day window.",
     paused: false
@@ -267,7 +267,7 @@ export class CatalogueLaneDiscipline {
     const state = await this.#readState();
     const records = pruneRecords(state.records, evaluatedAt);
     const existing = records.find((record) => record.jobId === String(job.id));
-    const candidate = candidateRecord(job, lane.id, evaluatedAt, this.expectedBrokeredGasRaw);
+    const candidate = candidateRecord(job, lane.id, evaluatedAt, this.expectedBrokeredGasRaw, origin);
     const active = records.filter((record) => withinWindow(record.postedAt, evaluatedAt, DAY_MS));
     const usedRaw = sumRaw(active.filter((record) => record.lane === lane.id));
     const candidateRaw = existing ? 0n : BigInt(candidate.totalRaw);
@@ -305,14 +305,14 @@ export class CatalogueLaneDiscipline {
       // Origin is a caller declaration, not source.type: both scheduled ingest
       // and curated operator bundles can come from the same GitHub issue lane.
       const postingLimit = lane.maxUnclaimedBacklog - (origin === "scheduler" ? lane.operatorReserve : 0);
-      if (backlog.count >= postingLimit) {
-        const reason = origin === "scheduler"
-          ? LANE_SCHEDULER_HEADROOM_RESERVED
-          : LANE_BACKLOG_SATURATED;
+      const totalSaturated = backlog.count >= lane.maxUnclaimedBacklog;
+      if (totalSaturated || (origin === "scheduler" && backlog.schedulerCount >= postingLimit)) {
+        const reason = totalSaturated ? LANE_BACKLOG_SATURATED : LANE_SCHEDULER_HEADROOM_RESERVED;
         const details = {
           lane: lane.id,
           origin,
           unclaimedCount: backlog.count,
+          schedulerUnclaimedCount: backlog.schedulerCount,
           maxUnclaimedBacklog: lane.maxUnclaimedBacklog,
           operatorReserve: lane.operatorReserve,
           postingLimit,
@@ -326,8 +326,8 @@ export class CatalogueLaneDiscipline {
         this.logger.info?.(details, reason);
         throw new CatalogueLanePostingError(
           reason,
-          origin === "scheduler"
-            ? `Catalogue lane ${lane.id} already has ${backlog.count} unclaimed job(s) open; ${lane.operatorReserve} slot(s) are reserved for operator posts. Retry when backlog falls below ${postingLimit}.`
+          reason === LANE_SCHEDULER_HEADROOM_RESERVED
+            ? `Catalogue lane ${lane.id} already has ${backlog.schedulerCount} unclaimed scheduler job(s) open; ${lane.operatorReserve} slot(s) are reserved for operator posts. Retry when scheduler backlog falls below ${postingLimit}.`
             : `Catalogue lane ${lane.id} already has ${backlog.count} unclaimed job(s) open; posting is throttled until one is claimed, stops serving, or ages out.`,
           details
         );
@@ -418,7 +418,7 @@ export class CatalogueLaneDiscipline {
       record.lane === laneId
       && record.disposableProof !== true
       && withinWindow(record.postedAt, evaluatedAt, DAY_MS));
-    if (posted.length === 0) return { count: 0, oldestAt: null };
+    if (posted.length === 0) return { count: 0, schedulerCount: 0, oldestAt: null };
     let serving = posted;
     if (this.listCatalogJobs) {
       try {
@@ -447,7 +447,13 @@ export class CatalogueLaneDiscipline {
     const open = serving
       .filter((record) => !claimed.has(String(record.jobId)))
       .sort((left, right) => Date.parse(left.postedAt) - Date.parse(right.postedAt));
-    return { count: open.length, oldestAt: open[0]?.postedAt ?? null };
+    return {
+      count: open.length,
+      // Pre-origin records still consume the total cap. Never infer posting
+      // origin from source.type: curated and scheduled jobs share sources.
+      schedulerCount: open.filter((record) => record.origin === "scheduler").length,
+      oldestAt: open[0]?.postedAt ?? null
+    };
   }
 
   async #writeRecords(records, evaluatedAt) {
@@ -491,7 +497,7 @@ async function collectClaimedJobIdsSince(stateStore, since) {
   return claimed;
 }
 
-function candidateRecord(job, lane, postedAt, expectedBrokeredGasRaw) {
+function candidateRecord(job, lane, postedAt, expectedBrokeredGasRaw, origin) {
   if (String(job?.rewardAsset ?? "USDC").toUpperCase() !== "USDC") {
     throw packetConfigError(`catalogue definition ${job?.id ?? "unknown"} rewardAsset must be USDC for lane accounting`);
   }
@@ -500,6 +506,7 @@ function candidateRecord(job, lane, postedAt, expectedBrokeredGasRaw) {
     reservationId: randomUUID(),
     jobId: String(job.id),
     lane,
+    origin,
     postedAt: postedAt.toISOString(),
     rewardRaw: rewardRaw.toString(),
     expectedBrokeredGasRaw: expectedBrokeredGasRaw.toString(),

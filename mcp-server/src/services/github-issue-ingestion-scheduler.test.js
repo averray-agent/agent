@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CatalogueLaneDiscipline, loadCatalogueLaneRegistry } from "../core/catalogue-lane-discipline.js";
+import { CatalogueLaneDiscipline, DEFAULT_CATALOGUE_LANE_REGISTRY, loadCatalogueLaneRegistry } from "../core/catalogue-lane-discipline.js";
 import { MemoryStateStore } from "../core/state-store.js";
 import { PlatformService } from "../core/platform-service.js";
 import { createJobsFromImportResult } from "../protocols/http/admin-job-import-routes.js";
+import { resolveOnboardingInventoryHealth } from "../core/onboarding-inventory.js";
 
 import {
   GithubIssueIngestionScheduler,
@@ -189,7 +190,9 @@ test("GitHub scheduler logs reserved headroom in summary.skipped while operator 
   const logged = [];
   platform.catalogueLaneDiscipline = new CatalogueLaneDiscipline({
     stateStore: new MemoryStateStore(),
-    registry: loadCatalogueLaneRegistry({}),
+    registry: loadCatalogueLaneRegistry({ CATALOGUE_LANE_REGISTRY_JSON: JSON.stringify({
+      "oss-anchored": { ...DEFAULT_CATALOGUE_LANE_REGISTRY["oss-anchored"], maxUnclaimedBacklog: 3 }
+    }) }),
     gasEstimateUsdc: 0,
     now: () => now,
     logger: { info(details, reason) { logged.push({ details, reason }); } }
@@ -225,6 +228,38 @@ test("GitHub scheduler logs reserved headroom in summary.skipped while operator 
   assert.deepEqual(imported.skipped, []);
   assert.equal(imported.created[0].id, operatorJob.id);
   assert.equal(platform.listJobs().find(({ id }) => id !== operatorJob.id).rewardAmount, 1);
+});
+
+test("waiver pin 6: two actual ingested claimable jobs meet the minimum and operator inventory never counts", async () => {
+  const platform = new PlatformService([], new Map(), new Map(), new Map(), undefined, new MemoryStateStore());
+  const now = new Date("2026-09-11T12:00:00Z");
+  platform.setCatalogueLaneDiscipline(new CatalogueLaneDiscipline({
+    stateStore: platform.stateStore, registry: loadCatalogueLaneRegistry({}), gasEstimateUsdc: 0,
+    now: () => now, listCatalogJobs: () => platform.listJobs()
+  }));
+  const scheduler = new GithubIssueIngestionScheduler(platform, undefined, {
+    enabled: true, dryRun: false, queries: ["is:issue is:open label:good-first-issue"], minScore: 55,
+    maxJobsPerRun: 2, maxJobsPerQuery: 2, maxOpenJobs: 30,
+    fetchImpl: makeFetch([ISSUE, { ...ISSUE, number: 43, html_url: "https://github.com/example/project/issues/43" }])
+  });
+  assert.equal((await scheduler.runOnce(now)).createdCount, 2);
+  const ingested = platform.listJobs();
+  assert.equal(ingested.length, 2);
+  for (const job of ingested) assert.equal(job.onboardingWaiverEligible, true);
+  // A curated operator bundle has the same source family but no ingestion flag.
+  const { onboardingWaiverEligible, ...curated } = ingested[0];
+  const imported = await createJobsFromImportResult(platform, [{ ...curated, id: "curated-bundle", rewardAmount: 2 }], { now });
+  assert.deepEqual(imported.errors, []);
+  assert.equal(imported.created.length, 1);
+  const healthy = await resolveOnboardingInventoryHealth({ service: platform, now });
+  assert.equal(healthy.status, "ready");
+  assert.equal(healthy.waiverEligibleClaimableJobs, 2);
+  assert.equal(healthy.minimumWaiverEligibleClaimableJobs, 2);
+  for (const job of ingested) await platform.updateJobLifecycle(job.id, { action: "pause", reason: "fixture claim unavailable" });
+  assert.equal((await platform.attachClaimState(platform.getJobDefinition("curated-bundle"), { now })).claimable, true);
+  const operatorsOnly = await resolveOnboardingInventoryHealth({ service: platform, now });
+  assert.equal(operatorsOnly.waiverEligibleClaimableJobs, 0);
+  assert.equal(operatorsOnly.reason, "onboarding_waiver_inventory_empty");
 });
 
 test("GithubIssueIngestionScheduler dry-run does not create jobs", async () => {

@@ -59,7 +59,8 @@ import { normalizeAssetSymbol } from "./assets.js";
 import { collectGithubOperatorStatus } from "./github-operator-helper.js";
 import { collectHostDiagnostics } from "./host-diagnostics.js";
 import { registerExternalSchema, validateSubmissionAgainstRegisteredSchema } from "../services/schema-registry.js";
-import { applyIngestionOnboardingWaiverPolicy } from "./onboarding-inventory.js";
+import { applyIngestionOnboardingWaiverPolicy, resolveOnboardingInventoryHealth } from "./onboarding-inventory.js";
+import { LANE_SCHEDULER_HEADROOM_RESERVED } from "./catalogue-lane-discipline.js";
 import { assertIngestedCatalogVerifierCanReject } from "./catalog-verifier-integrity.js";
 import {
   EXTERNAL_JOB_DELISTED_REASON,
@@ -1043,6 +1044,22 @@ export class PlatformService {
       standardsIngestion,
       openApiIngestion
     });
+    const onboarding = await resolveOnboardingInventoryHealth({
+      service: this,
+      rewardBank: await this.resolveRewardBankHealthForClaimability()
+    });
+    // These are refusals in each ingestion scheduler's latest run, not a
+    // lifetime counter or a diagnosis of the current inventory. Keep run times
+    // visible because schedulers can run at different intervals or be paused.
+    const byScheduler = Object.fromEntries(Object.entries({
+      githubIngestion, wikipediaIngestion, osvIngestion,
+      openDataIngestion, standardsIngestion, openApiIngestion
+    }).map(([name, status]) => [name, {
+      count: (status.lastRun?.skipped ?? []).filter(
+        (entry) => entry.reason === LANE_SCHEDULER_HEADROOM_RESERVED
+      ).length,
+      lastRunAt: status.lastRun?.startedAt ?? null
+    }]));
 
     return {
       auth: auth
@@ -1098,6 +1115,14 @@ export class PlatformService {
       scheduler,
       hostDiagnostics,
       providerOperations,
+      onboarding: {
+        ...onboarding,
+        laneSchedulerHeadroomReserved: {
+          count: Object.values(byScheduler).reduce((sum, entry) => sum + entry.count, 0),
+          scope: "latest_ingestion_run_per_scheduler",
+          byScheduler
+        }
+      },
       catalogueLanes,
       githubIngestion: githubIngestion,
       qualityReview: this.verificationIngestionService.qualityReviewService.config,
