@@ -58,6 +58,10 @@ export const XCM_OBSERVER_STATUS = Object.freeze({
 export const INDEXER_STATUS = Object.freeze({
   SYNCED: "synced",
   LAGGING: "lagging",
+  // Lagging AND the newest indexed block has not changed for the stall
+  // budget: the sync is wedged, not replaying. /health stays 200 (process
+  // liveness); this is the correctness signal operators act on.
+  STALLED: "stalled",
   UNAVAILABLE: "unavailable"
 });
 
@@ -176,9 +180,10 @@ export function resolveServiceHealth({
  *   pendingCount > 0 → live; enabled+running with pendingCount === 0 →
  *   staged; else → unavailable.
  * @param {object} [options.indexerProbe] — optional `{ ok, blockNumber,
- *   blockTimestamp, lagBudgetSeconds }`. When omitted the indexer
- *   capability resolves to `unavailable` rather than asserting a state
- *   we can't prove.
+ *   blockTimestamp, lagBudgetSeconds, stallBudgetSeconds,
+ *   headUnchangedSeconds }`. When omitted the indexer capability resolves
+ *   to `unavailable` rather than asserting a state we can't prove; without
+ *   `headUnchangedSeconds` an old head is `lagging`, never `stalled`.
  * @param {object} [options.gasSponsorHealth] — pimlico.healthCheck()
  *   output. `enabled === true` → enabled, else → disabled.
  */
@@ -191,11 +196,14 @@ export function resolveCapabilityHealth({
   externalPostingMode = "closed",
   externalPostingWatcherStatus
 }) {
+  const indexer = resolveIndexerStatus(indexerProbe);
   return {
     blockchain: resolveBlockchainStatus(blockchainHealth),
     treasuryMutations: resolveTreasuryStatus(mutationBackendStatus),
     xcmObserver: resolveXcmObserverStatus(xcmWatcherStatus),
-    indexer: resolveIndexerStatus(indexerProbe),
+    indexer: indexer.status,
+    indexerLagSeconds: indexer.lagSeconds,
+    indexerHeadUnchangedSeconds: indexer.headUnchangedSeconds,
     gasSponsor: resolveGasSponsorStatus(gasSponsorHealth),
     externalPosting: resolveExternalPostingStatus(
       externalPostingMode,
@@ -240,16 +248,33 @@ function resolveXcmObserverStatus(status) {
 }
 
 function resolveIndexerStatus(probe) {
+  const unavailable = {
+    status: INDEXER_STATUS.UNAVAILABLE,
+    lagSeconds: null,
+    headUnchangedSeconds: null
+  };
   if (!probe || probe.ok !== true) {
-    return INDEXER_STATUS.UNAVAILABLE;
+    return unavailable;
   }
   const lagBudget = Number.isFinite(probe.lagBudgetSeconds) ? probe.lagBudgetSeconds : 600;
   const headTs = Number(probe.blockTimestamp);
   if (!Number.isFinite(headTs)) {
-    return INDEXER_STATUS.UNAVAILABLE;
+    return unavailable;
   }
   const lagSeconds = Math.max(0, Math.floor(Date.now() / 1000) - headTs);
-  return lagSeconds <= lagBudget ? INDEXER_STATUS.SYNCED : INDEXER_STATUS.LAGGING;
+  const headUnchangedSeconds = Number.isFinite(probe.headUnchangedSeconds)
+    ? Number(probe.headUnchangedSeconds)
+    : null;
+  if (lagSeconds <= lagBudget) {
+    return { status: INDEXER_STATUS.SYNCED, lagSeconds, headUnchangedSeconds };
+  }
+  const stallBudget = Number.isFinite(probe.stallBudgetSeconds) ? probe.stallBudgetSeconds : 900;
+  const stalled = headUnchangedSeconds !== null && headUnchangedSeconds >= stallBudget;
+  return {
+    status: stalled ? INDEXER_STATUS.STALLED : INDEXER_STATUS.LAGGING,
+    lagSeconds,
+    headUnchangedSeconds
+  };
 }
 
 function resolveGasSponsorStatus(health) {
@@ -272,7 +297,8 @@ function resolveExternalPostingStatus(mode, watcherStatus) {
  * Translate a `capabilityHealth` block into an ordered list of structured
  * warning entries. Each warning has a stable `code` so operator dashboards
  * and CLI smoke checks can match on it without parsing prose. Severity is
- * `critical` only for capabilities that block real treasury action; the
+ * `critical` only for capabilities that block real treasury action or make
+ * a money door answer from stale data (a stalled index behind /credit); the
  * rest are `warning` so an XCM observer that is staged on a trust-core
  * launch does not page the on-call.
  *
@@ -311,7 +337,13 @@ export function buildCapabilityWarnings(capabilityHealth) {
     });
   }
 
-  if (capabilityHealth.indexer !== INDEXER_STATUS.SYNCED) {
+  if (capabilityHealth.indexer === INDEXER_STATUS.STALLED) {
+    warnings.push({
+      code: "indexer_stalled",
+      severity: "critical",
+      message: `Indexer sync is stalled: the newest indexed block has not advanced for ${capabilityHealth.indexerHeadUnchangedSeconds}s and is ${capabilityHealth.indexerLagSeconds}s behind the chain. Ponder keeps /health 200 in this state; see docs/INCIDENT_RESPONSE.md "Indexer sync stall from a provider block hole".`
+    });
+  } else if (capabilityHealth.indexer !== INDEXER_STATUS.SYNCED) {
     warnings.push({
       code: `indexer_${capabilityHealth.indexer}`,
       severity: "warning",

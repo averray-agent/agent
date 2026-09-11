@@ -218,6 +218,43 @@ Follow-up:
 - add a multi-process cache-invalidation pub/sub channel once any deploy runs
   more than one backend replica against the same Redis state-store
 
+### RPC Provider Data Hole
+
+Risk: the index (receipts, credit debt fields, job state the operator app and
+`/credit` answer from) is only as complete as the JSON-RPC providers it reads.
+A provider whose receipt store skipped a block answers `eth_getBlockByNumber`
+with an empty transaction list, `eth_getLogs` with no logs for that block and
+`eth_getTransactionReceipt` with `null` — all well-formed, none flagged. With
+plain provider fallback the indexer either wedges on the mixed answers (loud)
+or records the range as event-free (silent). Observed on mainnet 2026-09-10
+(block 20501734; see [`docs/INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md)
+"Indexer sync stall from a provider block hole"); the silent mode dropped
+three EscrowCore claim events from the index until the next replay.
+
+Current mitigation:
+
+- `indexer/src/rpc-transport.ts` rejects a block whose header proves
+  transactions ran (`gasUsed`, `logsBloom` non-zero) but whose transaction
+  list is empty, per provider, so viem's fallback reaches the next URL
+- every `eth_getLogs` is asked of all configured providers; the strict
+  superset answers and the omitting provider is named in the indexer log
+  (`[indexer-rpc] … omitted N log(s)`); conflicting answers are refused
+- backend `capabilityHealth.indexer` distinguishes `stalled` (head frozen for
+  `INDEXER_STALL_BUDGET_SECONDS`) from `lagging` (old but advancing, e.g. a
+  replay) and emits `indexer_stalled` at `critical`; the hosted smoke checks
+  sync liveness on every run, not only when the indexer was redeployed
+- any change under `indexer/` rotates the schema, so a replay through the
+  cross-checked transport is the repair path for a suspected gap
+
+Follow-up:
+
+- a periodic completeness audit (last-24h `eth_getLogs` per indexed contract
+  from two providers, diffed against the index by transaction hash) so a hole
+  that both configured providers share is still noticed
+- report the reproduction to the provider and track whether their
+  receipt-store gap closes; until then a single-provider indexer configuration
+  is unsupported
+
 ### Public Read-Surface Leakage
 
 Risk: data and metadata endpoints exposed without auth on `index.averray.com`
