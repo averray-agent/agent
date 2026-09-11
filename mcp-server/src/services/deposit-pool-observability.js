@@ -7,7 +7,8 @@ import {
 } from "../blockchain/abis.js";
 import { evaluateVenueMark, markedSharePrice } from "../core/deposit-pool-venue-mark.js";
 import { redactProviderError } from "../core/redact-provider-error.js";
-import { depositPoolYieldStatus } from "./deposit-pool-yield-status.js";
+import { depositPoolYieldStatus, depositPoolYieldAttributionText } from "./deposit-pool-yield-status.js";
+import { EvmDepositPoolVenueHistoryReader } from "./deposit-pool-venue-history.js";
 
 const ASSET_DECIMALS = 6;
 const SHARE_PRICE_SCALE = 1_000_000n;
@@ -207,6 +208,8 @@ export class DepositPoolObservabilityService {
     chainReader,
     catalogueDailyBudget,
     yieldAttributionService,
+    venueHistoryReader,
+    deploymentBlock,
     eventWindowBlocks = DEFAULT_EVENT_WINDOW_BLOCKS,
     recentFlowLimit = DEFAULT_RECENT_FLOW_LIMIT,
     venueMark = undefined
@@ -216,6 +219,9 @@ export class DepositPoolObservabilityService {
     this.chainReader = chainReader ?? (provider ? new EvmDepositPoolChainReader(provider) : undefined);
     this.catalogueDailyBudget = catalogueDailyBudget;
     this.yieldAttributionService = yieldAttributionService;
+    this.venueHistoryReader = venueHistoryReader ?? (provider ? new EvmDepositPoolVenueHistoryReader(provider, {
+      deploymentBlock, eventReader: yieldAttributionService?.chainReader
+    }) : undefined);
     this.eventWindowBlocks = eventWindowBlocks;
     this.recentFlowLimit = recentFlowLimit;
   }
@@ -253,7 +259,10 @@ export class DepositPoolObservabilityService {
       dustFloorRaw: this.venueMarkConfig?.dustFloorRaw,
       unreadableReason: state.venueMarkUnreadable
     });
-    const yieldState = depositPoolYieldStatus(deployed);
+    const venueHistory = state.venueHistory ?? await this.venueHistoryReader?.readHistory({
+      poolAddress: this.poolAddress, blockNumber: head, deployedPrincipal: deployed
+    }) ?? { status: "unavailable", reason: "venue_history_not_configured" };
+    const yieldState = depositPoolYieldStatus(deployed, venueHistory);
     const yieldAttribution = typeof this.yieldAttributionService?.getAttribution === "function"
       ? await this.yieldAttributionService.getAttribution({
           snapshot: {
@@ -327,6 +336,8 @@ export class DepositPoolObservabilityService {
         shareScale: SHARE_PRICE_SCALE
       }),
       ...(yieldAttribution ? { yieldAttribution } : {}),
+      yieldAttributionText: depositPoolYieldAttributionText(yieldAttribution),
+      venueHistory,
       caps: {
         totalAssetCap: amount(totalAssetCap),
         perAgentAssetCap: amount(perAgentAssetCap),

@@ -561,7 +561,7 @@
       "disclosure": {
         "statement": "Technical pilot. Principal at risk. No depositor protection."
       },
-      "meaning": "A time-weighted deposit is one capital-backed trust-and-capacity signal, used alongside verified work history and reputation.",
+      "meaning": "A deposit raises how much open work your agent may hold at once; it never buys a reward. Verified work history and reputation also matter.",
       "steps": [
         "Read the depositor-risk disclosure, then call getDepositPoolInfo (or GET /pool); sign in to include your deposited principal and vested-capacity schedule.",
         "Call buildDepositPoolTransactions (or POST /pool/transactions) with direction deposit and an exact USDC raw-unit amount.",

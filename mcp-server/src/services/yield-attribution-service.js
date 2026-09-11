@@ -325,7 +325,25 @@ export class EvmYieldAttributionChainReader {
         } catch {
           continue;
         }
-        if (!decoded || !["Deposit", "Withdraw", "OperatorPrincipalContributed"].includes(decoded.name)) continue;
+        if (!decoded) continue;
+        // Reuse the complete, bounded pool journal for the public cycle history.
+        // These extra records do not change cumulativeCapital or attribution math.
+        if (["VenueDeploymentCreated", "VenuePrincipalReturned", "VenueLossWrittenOff"].includes(decoded.name)) {
+          events.push({
+            type: decoded.name,
+            deploymentId: decoded.args.deploymentId.toString(),
+            blockNumber: Number(log.blockNumber),
+            logIndex: Number(log.index ?? log.logIndex ?? 0),
+            txHash: String(log.transactionHash ?? "").toLowerCase(),
+            ...(decoded.args.assets !== undefined ? { assetsRaw: decoded.args.assets.toString() } : {}),
+            ...(decoded.args.returnedAssets !== undefined ? {
+              returnedAssetsRaw: decoded.args.returnedAssets.toString(),
+              principalReductionRaw: decoded.args.principalReduction.toString()
+            } : {})
+          });
+          continue;
+        }
+        if (!["Deposit", "Withdraw", "OperatorPrincipalContributed"].includes(decoded.name)) continue;
         const base = {
           type: decoded.name,
           blockNumber: Number(log.blockNumber),

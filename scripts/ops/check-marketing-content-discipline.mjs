@@ -85,6 +85,12 @@ export function assertMarketingContentDiscipline(pages) {
   if (!/data-pool-risk-statement(?:\s|>|=)/iu.test(poolSurface)) {
     fail("site/pool/index.html: API-rendered risk disclosure target is missing");
   }
+  if (!/data-pool-yield-attribution(?:\s|>|=)/iu.test(poolSurface)) {
+    fail("site/pool/index.html: API-rendered yield attribution target is missing");
+  }
+  if (/not scheduled|being re-measured|trust-and-capacity|reward entitlement|Flex is a membership/iu.test(poolText)) {
+    fail("site/pool/index.html: stale pool history or insider vocabulary is present");
+  }
   if (/Technical pilot\. Principal at risk\. No depositor protection\./iu.test(poolSurface)) {
     fail("site/pool/index.html: risk disclosure must be rendered from GET /pool, not baked into markup");
   }

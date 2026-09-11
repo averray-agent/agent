@@ -58,6 +58,10 @@ export const DEPOSIT_POOL_ABI = [
   "function totalAssets() view returns (uint256)",
   "function totalSupply() view returns (uint256)",
   "function venuePrincipalCostBasis() view returns (uint256)",
+  "function nextVenueDeploymentId() view returns (uint256)",
+  "function activeVenueDeploymentId() view returns (uint256)",
+  "function venueDeployments(uint256) view returns (uint256 principalAssets,uint256 recalledPrincipalAssets,uint64 returnBy,bytes32 adapterRequestId,uint8 status)",
+  "function venueWrittenOffPrincipalAssets(uint256) view returns (uint256)",
   "function TOTAL_ASSET_CAP() view returns (uint256)",
   "function PER_AGENT_ASSET_CAP() view returns (uint256)",
   "function deposit(uint256 assets, address receiver) returns (uint256 shares)",
@@ -67,6 +71,8 @@ export const DEPOSIT_POOL_ABI = [
   "event RedeemRequested(uint256 indexed requestId, address indexed owner, address indexed receiver, uint256 shares, uint8 tier, uint64 unlockAt)",
   "event RedeemFulfilled(uint256 indexed requestId, uint256 shares, uint256 assets)",
   "event OperatorPrincipalContributed(uint256 assets, uint256 shares, uint256 totalPrincipal)",
+  "event VenueDeploymentCreated(uint256 indexed deploymentId, bytes32 indexed adapterRequestId, uint256 assets, uint64 returnBy)",
+  "event VenuePrincipalReturned(uint256 indexed deploymentId, uint256 returnedAssets, uint256 principalReduction)",
   "event VenueLossWrittenOff(uint256 indexed deploymentId, uint256 assets, uint256 remainingPrincipalCostBasis)"
 ];
 

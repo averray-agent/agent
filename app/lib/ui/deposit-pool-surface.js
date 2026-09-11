@@ -117,10 +117,11 @@ export function buildDepositPoolSurface(input, poolGenerationManifest = {}) {
     } : null,
     attribution: attribution ? {
       status: text(attribution.status),
-      statement: text(attribution.statement),
+      statement: text(payload.yieldAttributionText),
       cumulativeNav: amountWithUnit(gain?.cumulativeNav),
       venueEarned: amountWithUnit(gain?.venueEarned),
       operatorAdded: amountWithUnit(gain?.operatorAdded),
+      unattributed: amountWithUnit(gain?.unattributed),
       attestation: text(ledger?.attestation),
       entryCount: count(ledger?.entryCount)
     } : null

@@ -3,6 +3,7 @@ import test from "node:test";
 import { Interface } from "ethers";
 
 import { DEPOSIT_POOL_ABI } from "../blockchain/abis.js";
+import { EMPTY_VENUE_HISTORY } from "./deposit-pool-venue-history.js";
 import {
   DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT,
   depositPoolYieldStatus
@@ -35,6 +36,7 @@ function reader({ state = {}, events = [], eventError = undefined } = {}) {
         totalShares: 0n,
         buffer: 0n,
         deployed: 0n,
+        venueHistory: EMPTY_VENUE_HISTORY,
         totalAssetCap: 1_000_000_000n,
         perAgentAssetCap: 100_000_000n,
         ...state
@@ -232,7 +234,7 @@ test("yieldStatus has one byte-identical source and flips the buffer alert with 
 
   assert.deepEqual(
     { yieldStatus: off.yieldStatus, yieldStatusText: off.yieldStatusText },
-    depositPoolYieldStatus(0n)
+    depositPoolYieldStatus(0n, EMPTY_VENUE_HISTORY)
   );
   assert.deepEqual(
     { yieldStatus: on.yieldStatus, yieldStatusText: on.yieldStatusText },
@@ -242,11 +244,9 @@ test("yieldStatus has one byte-identical source and flips the buffer alert with 
   assert.equal(on.bufferFloorAlertEnabled, true);
 });
 
-test("not-earning copy states the measured-friction condition without a numeric threshold", () => {
-  assert.equal(depositPoolYieldStatus(0n).yieldStatusText, DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT);
-  assert.match(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /capital is home/u);
-  assert.match(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /sufficient against measured round-trip friction/u);
-  assert.match(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /currently being re-measured/u);
+test("never-deployed copy requires empty chain history and promises no reopening threshold", () => {
+  assert.equal(depositPoolYieldStatus(0n, EMPTY_VENUE_HISTORY).yieldStatusText, DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT);
+  assert.match(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /No venue deployment is recorded/u);
   assert.doesNotMatch(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /\d/u);
   assert.doesNotMatch(DEPOSIT_POOL_YIELD_NOT_EARNING_TEXT, /pending operator ceremony/u);
 });
