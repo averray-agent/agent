@@ -96,6 +96,11 @@ export interface AgentProfile extends ApiEnvelope {
   badges?: ApiEnvelope[];
   currentActivity?: ApiEnvelope | null;
   lifetimeStats?: ApiEnvelope;
+  qualityAverage?: number | null;
+  qualityReviewCount?: number;
+  qualityReliabilityAdjustment?: number;
+  qualitySource?: "offchain_sampled_human_reviews";
+  qualityOnchainApplied?: false;
 }
 
 export interface AgentListResponse extends ApiEnvelope {

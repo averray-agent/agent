@@ -8,6 +8,7 @@ import { buildRunReceipt } from "./run-receipt.js";
 import { hashSubmission } from "./submission.js";
 import { describeSelfIdentity } from "./self-identity-registry.js";
 import { verificationDepthForJob } from "./verification-depth.js";
+import { receiptReview } from "./quality-review.js";
 
 export const WORK_RECEIPT_SCHEMA_VERSION = "averray.work-receipt.v1";
 export const WORK_RECEIPT_SITE_ORIGIN = "https://averray.com";
@@ -63,6 +64,7 @@ export function buildWorkReceipt({ session, job, verification, context = {} }) {
     execution,
     verdict,
     settlement,
+    review: receiptReview(session),
     chainBinding
   });
   const receiptId = hashWorkReceiptContent(unsigned);
@@ -72,6 +74,13 @@ export function buildWorkReceipt({ session, job, verification, context = {} }) {
     receiptId,
     canonicalUrl: `${siteOrigin.replace(/\/+$/u, "")}/receipts/${receiptId}`
   };
+}
+
+export function buildReviewedWorkReceipt(original, session) {
+  const { receiptId: originalId, canonicalUrl, signature: _signature, ...content } = original;
+  const unsigned = { ...content, review: receiptReview(session), reviewOf: originalId };
+  const receiptId = hashWorkReceiptContent(unsigned);
+  return { ...unsigned, receiptId, canonicalUrl: canonicalUrl.replace(originalId, receiptId) };
 }
 
 /**
@@ -144,6 +153,7 @@ export function buildVerifyReceipt({ run, profile, execution, verdict, context =
     schemaVersion: WORK_RECEIPT_SCHEMA_VERSION,
     receiptType: "work_outcome",
     attestation: "A single standalone verification run: the requested intent, bounded execution evidence, and resulting verdict. It makes no broader claim.",
+    review: { sampled: false },
     verifier: {
       mode: profile.handler,
       profile: profile.name,

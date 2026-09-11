@@ -22,7 +22,9 @@ test("catalogue lane tile renders every D3 operator decision field", () => {
     "cap24h",
     "jobsPosted24h",
     "externalClaimantShare",
-    "retainedExternalWorkers14d",
+    "retainedExternalWorkers30d",
+    "externalRewardOutlay30d",
+    "stopConditionMet",
     "costPerRetainedExternalWorker30d",
     "hypothesis",
     "stopCondition"

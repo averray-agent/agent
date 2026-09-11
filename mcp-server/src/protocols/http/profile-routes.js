@@ -53,6 +53,11 @@ function buildAgentDirectoryRow(profile, publicCommitment = undefined, consent =
       Number(reputation.skill ?? 0) +
       Number(reputation.reliability ?? 0) +
       Number(reputation.economic ?? 0),
+    qualityAverage: profile.qualityAverage,
+    qualityReviewCount: profile.qualityReviewCount,
+    qualityReliabilityAdjustment: profile.qualityReliabilityAdjustment,
+    qualitySource: profile.qualitySource,
+    qualityOnchainApplied: false,
     successRate: profile.stats?.completionRate ?? null,
     totalJobs,
     ...(consent.currentActivityOptIn ? { currentActivity: profile.currentActivity ?? null } : {}),

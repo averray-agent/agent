@@ -5,6 +5,7 @@ import { isExternalJob } from "./external-job-lifecycle.js";
 import { decimalToBaseUnits, formatBaseUnits } from "./platform-service-helpers.js";
 import { isHostedCanaryClaimant } from "./claimant-attribution.js";
 import { SelfIdentityRegistry } from "./self-identity-registry.js";
+import { buildRetainedWorkerMetrics, retainedCostStopCondition } from "./retained-workers.js";
 
 export const CATALOGUE_LANE_PACKET = "PACKET_D3_LANE_DISCIPLINE.md";
 export const CATALOGUE_LANE_STATE_SCOPE = "catalogue-lane-discipline-v1";
@@ -15,7 +16,7 @@ export const LANE_PAUSED = "lane_paused";
 
 const USDC_DECIMALS = 6;
 const DAY_MS = 24 * 60 * 60 * 1_000;
-const RETAINED_WINDOW_MS = 14 * DAY_MS;
+const RETAINED_WINDOW_MS = 30 * DAY_MS;
 const COST_WINDOW_MS = 30 * DAY_MS;
 const MAX_SESSION_RECORDS = 10_000;
 const POSTING_LOCK_TTL_SECONDS = 300;
@@ -375,19 +376,22 @@ export class CatalogueLaneDiscipline {
       exposureWindowSeconds: DAY_MS / 1_000,
       retainedWindowSeconds: RETAINED_WINDOW_MS / 1_000,
       costWindowSeconds: COST_WINDOW_MS / 1_000,
+      retained: buildRetainedWorkerMetrics(sessions, { now: evaluatedAt, selfIdentityRegistry: this.selfIdentityRegistry }),
       lanes: [...this.registry.values()].map((lane) => {
         const active = records.filter(
           (record) => record.lane === lane.id && withinWindow(record.postedAt, evaluatedAt, DAY_MS)
         );
         const usedRaw = sumRaw(active);
         const remainingRaw = lane.dailyCapRaw > usedRaw ? lane.dailyCapRaw - usedRaw : 0n;
-        const metrics = claimantMetrics.get(lane.id) ?? emptyClaimantMetrics();
+        const metrics = claimantMetrics.get(lane.id);
         return {
           id: lane.id,
           paused: lane.paused,
           hypothesis: lane.hypothesis,
           consumer: lane.consumer,
           stopCondition: lane.stopCondition,
+          stopConditionMet: lane.id === "oss-anchored" ? retainedCostStopCondition(metrics) : null,
+          stopConditionEvaluation: lane.id === "oss-anchored" ? "external_worker_cost_30d" : "operator_evaluation_required",
           exposure24h: {
             usedRaw: usedRaw.toString(),
             capRaw: lane.dailyCapRaw.toString(),
@@ -505,92 +509,29 @@ function candidateRecord(job, lane, postedAt, expectedBrokeredGasRaw) {
 }
 
 function buildClaimantMetrics(sessions, registry, selfIdentityRegistry, now) {
-  const byLane = new Map([...registry.keys()].map((lane) => [lane, {
-    recentWallets: new Map(),
-    paid30Raw: 0n,
-    omittedSettlementCount30d: 0
-  }]));
-  const firstLaneByWallet = new Map();
-  const lastSettlementByWallet = new Map();
-  const ordered = [...sessions].sort((left, right) => sessionTimestamp(left) - sessionTimestamp(right));
-
-  for (const session of ordered) {
+  const byLane = new Map([...registry.keys()].map((lane) => [lane, new Map()]));
+  for (const session of sessions) {
     const lane = normalizeLaneId(session?.jobSnapshot?.definition?.lane);
     const wallet = normalizeWallet(session?.wallet);
     if (!lane || !registry.has(lane) || !wallet || isHostedCanaryClaimant(session)) continue;
     const external = !selfIdentityRegistry.isSelf({ wallet, session });
-    if (external && !firstLaneByWallet.has(wallet)) firstLaneByWallet.set(wallet, lane);
     const claimedAt = sessionTimestamp(session);
-    if (claimedAt > now.getTime() - DAY_MS) byLane.get(lane).recentWallets.set(wallet, external);
-
-    const settledAt = settlementTimestamp(session);
-    if (!Number.isFinite(settledAt)) continue;
-    const payoutRaw = settledPayoutRaw(session);
-    if (external && settledAt > (lastSettlementByWallet.get(wallet) ?? 0)) {
-      lastSettlementByWallet.set(wallet, settledAt);
-    }
-    if (settledAt > now.getTime() - COST_WINDOW_MS) {
-      if (payoutRaw === null) byLane.get(lane).omittedSettlementCount30d += 1;
-      else byLane.get(lane).paid30Raw += payoutRaw;
-    }
+    if (claimedAt > now.getTime() - DAY_MS && claimedAt <= now.getTime()) byLane.get(lane).set(wallet, external);
   }
-
-  const retainedByLane = new Map([...registry.keys()].map((lane) => [lane, 0]));
-  for (const [wallet, lane] of firstLaneByWallet) {
-    if ((lastSettlementByWallet.get(wallet) ?? 0) > now.getTime() - RETAINED_WINDOW_MS) {
-      retainedByLane.set(lane, retainedByLane.get(lane) + 1);
-    }
-  }
-
   const output = new Map();
-  for (const [lane, aggregate] of byLane) {
-    const claimantCount = aggregate.recentWallets.size;
-    const externalClaimantCount = [...aggregate.recentWallets.values()].filter(Boolean).length;
-    const retained = retainedByLane.get(lane);
-    const costRaw = retained > 0 ? aggregate.paid30Raw / BigInt(retained) : null;
+  for (const [lane, wallets] of byLane) {
+    const claimantCount = wallets.size;
+    const externalClaimantCount = [...wallets.values()].filter(Boolean).length;
     output.set(lane, {
+      ...buildRetainedWorkerMetrics(sessions, { lane, now, selfIdentityRegistry }),
       claimantShare24h: {
         claimantCount,
         externalClaimantCount,
         externalShareBps: claimantCount > 0 ? Math.floor((externalClaimantCount * 10_000) / claimantCount) : 0
-      },
-      retainedExternalWorkers14d: retained,
-      costPerRetainedExternalWorker30d: {
-        raw: costRaw?.toString() ?? null,
-        usdc: costRaw === null ? null : formatBaseUnits(costRaw, USDC_DECIMALS),
-        complete: aggregate.omittedSettlementCount30d === 0,
-        omittedSettlementCount: aggregate.omittedSettlementCount30d,
-        ...(retained === 0 ? { reason: "no_retained_external_workers" } : {})
       }
     });
   }
   return output;
-}
-
-function emptyClaimantMetrics() {
-  return {
-    claimantShare24h: { claimantCount: 0, externalClaimantCount: 0, externalShareBps: 0 },
-    retainedExternalWorkers14d: 0,
-    costPerRetainedExternalWorker30d: {
-      raw: null,
-      usdc: null,
-      complete: true,
-      omittedSettlementCount: 0,
-      reason: "no_retained_external_workers"
-    }
-  };
-}
-
-function settledPayoutRaw(session) {
-  const settlement = session?.payoutTx?.settlement;
-  if (Number(session?.payoutTx?.status) !== 1) return null;
-  if (String(settlement?.assetSymbol ?? "").toUpperCase() !== "USDC") return null;
-  const raw = settlement?.workerAmountRaw;
-  return typeof raw === "string" && /^(0|[1-9][0-9]*)$/u.test(raw) ? BigInt(raw) : null;
-}
-
-function settlementTimestamp(session) {
-  return Date.parse(session?.resolvedAt ?? session?.rejectedAt ?? session?.closedAt ?? "");
 }
 
 function sessionTimestamp(session) {

@@ -40,13 +40,14 @@ function CatalogueLaneCard({ lane }: { lane: CatalogueLaneCardData }) {
         <Metric label="Spend · 24h" value={`${lane.spend24h} / ${lane.cap24h} USDC`} />
         <Metric label="Jobs posted" value={String(lane.jobsPosted24h)} />
         <Metric label="External claimant wallets · shared registry" value={`${lane.externalClaimantShare} · ${lane.externalClaimantCount}`} />
-        <Metric label="Retained · 14d" value={String(lane.retainedExternalWorkers14d)} />
+        <Metric label="Retained external workers · 30d" value={String(lane.retainedExternalWorkers30d ?? "unknown")} />
+        <Metric label="External reward outlay · 30d" value={lane.externalRewardOutlay30d} />
         <Metric label="Cost / retained · 30d" value={lane.costPerRetainedExternalWorker30d} />
       </dl>
 
       {!lane.costComplete ? (
         <p className="text-[11px] text-[var(--avy-warn)]">
-          Incomplete cost: {lane.omittedSettlementCount} settlement receipt(s) omitted.
+          Incomplete settlement or source evidence; retained-worker cost is unknown.
         </p>
       ) : null}
       <p className="border-t border-[var(--avy-line-soft)] pt-2 text-[12px] leading-relaxed text-[var(--avy-muted)]">
@@ -54,7 +55,9 @@ function CatalogueLaneCard({ lane }: { lane: CatalogueLaneCardData }) {
       </p>
       <p className="text-[12px] leading-relaxed text-[var(--avy-muted)]">
         <strong className="text-[var(--avy-ink)]">Stop:</strong> {lane.stopCondition}
+        <span className="block font-semibold">{lane.stopConditionMet === null ? "Evaluation unknown / operator review required" : lane.stopConditionMet ? "Stop condition met" : "Stop condition not met"}</span>
       </p>
+      <p className="text-[11px] text-[var(--avy-muted)]">Retained: at least two approved settlements on distinct source keys in this lane, over 30 days. Claimant identity, not poster identity. Reissues count once.</p>
     </article>
   );
 }
