@@ -84,18 +84,47 @@ attribution. No attestation, contract call that writes state, env change or
 production action is part of this follow-up.
 
 Evidence coverage still matters: the read-only RPC check above returned no
-write-off log. If that remains true for the attribution reader, the loss stays
-unattributed even after attestation. This formula does not infer a write-off
-from NAV or substitute a contract getter for missing journal evidence. The
-cycle-history sentence can independently report the getter's write-off. The
-fixture results are not a claim that production has this complete journal or
-that Pascal has attested the contribution.
+write-off log. The original accounting follow-up (#1367) left that loss
+unattributed; the reconciliation follow-up below now makes attribution
+explicitly unavailable when journal and getter disagree. The fixture results
+are not a claim that production has a complete journal or that Pascal has
+attested the contribution.
 
 The three `realised venue pin` tests cover cycle 1, profitable returns and the
 shared wallet ratio. Further regressions cover ABI-decoded logs through the
 public `/pool` route and copy, cache reuse/extension, multiple returns and
 write-offs, snapshot bounds, unchanged capital basis, missing evidence,
 offsetting gains/losses at zero NAV gain, and an unreadable live mark.
+
+### Write-off reconciliation follow-up
+
+Before attribution, the reader enumerates deployment IDs from the contract's
+`nextVenueDeploymentId` and reads `venueWrittenOffPrincipalAssets(id)` for
+each one, all at the attribution snapshot block. This includes deployments
+entirely absent from the event journal. Each getter must equal that
+deployment's sum of `VenueLossWrittenOff.assets`; equal global totals cannot
+hide a per-deployment mismatch. This adds one count read plus one getter read
+per deployment, without adding a historical log scan. Cached journal reads
+are reconciled again at the requested block, including older snapshots.
+
+A missing, partial or excess log, or an unreadable getter, returns attribution
+`status: unavailable`, `reason: realised_venue_unavailable`, with an explicit
+`realisedVenueResult` status/reason. Mismatches identify the deployment, block,
+journal amount and getter amount. No scalar venue gain, residual or wallet
+ratio is published from that incomplete evidence. The reader does not infer
+loss from NAV or silently replace the journal with the getter.
+
+The cycle-history reader alone opts out of this stricter check: it already
+reconciles its latest record and can show the getter's write-off with no event
+date. `/pool` and withdrawals remain available when attribution is not.
+The accounting formula, `cumulativeCapital`, wallet arithmetic, contracts,
+envs and operator authority are unchanged.
+
+`write-off reconciliation pin — omitted log never serves silent zero when the
+getter records a loss` exercises ABI logs and getter calls through the public
+route. Further tests cover matching split logs, all disagreement directions,
+missing deployments, per-deployment totals, cache/block boundaries, unreadable
+getters and an empty contract ledger.
 
 ## Regression pins
 

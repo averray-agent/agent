@@ -1,4 +1,4 @@
-import { Interface, getAddress } from "ethers";
+import { Contract, Interface, getAddress } from "ethers";
 
 import { DEPOSIT_POOL_ABI, ERC20_MOCK_ABI } from "../blockchain/abis.js";
 import { ConflictError, ValidationError } from "../core/errors.js";
@@ -300,6 +300,14 @@ export function buildYieldAttribution({ snapshot, events = [], ledgerEntries = [
   return response;
 }
 
+class RealisedVenueUnavailableError extends Error {
+  constructor(reason, details, cause) {
+    super(reason, { cause });
+    this.reason = reason;
+    this.details = details;
+  }
+}
+
 export class EvmYieldAttributionChainReader {
   constructor(provider, { deploymentBlock, logChunkBlocks = DEFAULT_LOG_CHUNK_BLOCKS } = {}) {
     this.provider = provider;
@@ -309,7 +317,47 @@ export class EvmYieldAttributionChainReader {
     this.readPromise = undefined;
   }
 
-  async readHistory({ poolAddress, toBlock }) {
+  async readHistory({ poolAddress, toBlock, reconcileWriteOffs = true }) {
+    const events = await this.#readEvents({ poolAddress, toBlock });
+    if (reconcileWriteOffs && Number(toBlock) >= this.deploymentBlock) {
+      await this.#reconcileWriteOffs(poolAddress, Number(toBlock), events);
+    }
+    return events;
+  }
+
+  async #reconcileWriteOffs(poolAddress, atBlock, events) {
+    try {
+      const pool = new Contract(poolAddress, DEPOSIT_POOL_ABI, this.provider);
+      const overrides = { blockTag: atBlock };
+      const next = await pool.nextVenueDeploymentId(overrides);
+      if (next < 1n) throw new Error("invalid_deployment_count");
+      const journal = new Map();
+      for (const event of events) {
+        if (event.type !== "VenueLossWrittenOff") continue;
+        const id = BigInt(event.deploymentId);
+        if (id < 1n || id >= next) throw new Error("writeoff_deployment_not_in_contract_ledger");
+        journal.set(id, (journal.get(id) ?? 0n) + BigInt(event.assetsRaw));
+      }
+      // Enumerate the contract ledger, not just IDs present in the logs: an
+      // entirely omitted deployment must not turn a persisted loss into zero.
+      // Re-read at the requested block even when the event journal is cached.
+      for (let id = 1n; id < next; id += 1n) {
+        const writtenOff = await pool.venueWrittenOffPrincipalAssets(id, overrides);
+        const logged = journal.get(id) ?? 0n;
+        if (logged !== writtenOff) {
+          throw new RealisedVenueUnavailableError("venue_writeoff_journal_mismatch", {
+            atBlock, deploymentId: id.toString(),
+            journalWrittenOffRaw: logged.toString(), contractWrittenOffRaw: writtenOff.toString()
+          });
+        }
+      }
+    } catch (error) {
+      if (error instanceof RealisedVenueUnavailableError) throw error;
+      throw new RealisedVenueUnavailableError("venue_writeoff_ledger_unreadable", { atBlock }, error);
+    }
+  }
+
+  async #readEvents({ poolAddress, toBlock }) {
     const normalizedPool = getAddress(poolAddress);
     const target = exactBlockNumber(toBlock, "toBlock");
     if (target < this.deploymentBlock) return [];
@@ -414,6 +462,13 @@ export class YieldAttributionService {
       ]);
       return buildYieldAttribution({ snapshot, events, ledgerEntries, wallet });
     } catch (error) {
+      if (error instanceof RealisedVenueUnavailableError) {
+        return {
+          schemaVersion: 1, status: "unavailable", reason: "realised_venue_unavailable",
+          realisedVenueResult: { status: "unavailable", reason: error.reason, ...error.details },
+          lastError: redactProviderError(error.cause ?? error) || error.reason
+        };
+      }
       return {
         schemaVersion: 1,
         status: "unavailable",

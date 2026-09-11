@@ -215,6 +215,11 @@ test("yield attribution history reader decodes deposits withdrawals and operator
   });
   const calls = [];
   const reader = new EvmYieldAttributionChainReader({
+    async call(tx) {
+      assert.equal(Number(tx.blockTag), 102);
+      assert.equal(pool.parseTransaction(tx).name, "nextVenueDeploymentId");
+      return pool.encodeFunctionResult("nextVenueDeploymentId", [1n]);
+    },
     async getLogs(query) {
       calls.push(query);
       return encoded.filter((event) => event.blockNumber >= query.fromBlock && event.blockNumber <= query.toBlock);

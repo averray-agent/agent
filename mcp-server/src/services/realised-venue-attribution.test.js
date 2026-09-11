@@ -133,7 +133,7 @@ test("unreadable outstanding mark stays unavailable even when realised history i
   assert.equal(result.gain, undefined);
 });
 
-test("missing write-off evidence leaves the loss unattributed rather than inferring it from NAV", () => {
+test("pure journal arithmetic alone cannot detect missing write-off evidence", () => {
   const result = buildYieldAttribution({
     snapshot: snapshot(20_548_235n), events: cycleOne.filter((row) => row.type !== "VenueLossWrittenOff"), ledgerEntries: [subsidy]
   });
@@ -167,6 +167,15 @@ test("ABI-decoded realised journal reaches the public pool, cost/profit copy and
       ];
       const queries = [];
       const chainReader = new EvmYieldAttributionChainReader({
+        async call(tx) {
+          assert.equal(tx.to.toLowerCase(), poolAddress);
+          assert.ok([40, 41].includes(Number(tx.blockTag)));
+          const fn = abi.parseTransaction(tx);
+          if (fn.name === "nextVenueDeploymentId") return abi.encodeFunctionResult(fn.name, [2n]);
+          assert.equal(fn.name, "venueWrittenOffPrincipalAssets");
+          assert.equal(fn.args[0], 1n);
+          return abi.encodeFunctionResult(fn.name, [scenario.loss]);
+        },
         async getLogs(query) {
           assert.equal(query.address, poolAddress);
           queries.push(query);
