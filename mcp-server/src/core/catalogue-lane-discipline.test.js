@@ -495,12 +495,33 @@ function ossRegistry(maxUnclaimedBacklog = 3) {
 
 test("waiver pin 1: one operator job at cap three reserve two does not consume the scheduler slot", async () => {
   const store = stateStore();
-  const options = { stateStore: store, registry: ossRegistry(), gasEstimateUsdc: 0, now: () => NOW };
-  const githubJob = (id) => ({ ...job(id, "oss-anchored", 0.2), source: { type: "github_issue" } });
-  await new CatalogueLaneDiscipline(options).post(githubJob("operator"), async () => {});
+  const curated = {
+    ...job("curated-github-issue", "oss-anchored", 2),
+    source: { type: "github_issue", repo: "example/project", issueNumber: 42 }
+  };
+  const scheduled = {
+    ...job("scheduled-github-issue", "oss-anchored", 1),
+    source: { ...curated.source, issueNumber: 43 }
+  };
+  const catalog = [];
+  const options = {
+    stateStore: store, registry: ossRegistry(), gasEstimateUsdc: 0, now: () => NOW,
+    listCatalogJobs: () => catalog
+  };
+  await new CatalogueLaneDiscipline(options).post(curated, async () => catalog.push(curated), { origin: "operator" });
+  const persisted = await store.getServiceState(CATALOGUE_LANE_STATE_SCOPE);
+  assert.equal(persisted.records[0].origin, "operator");
+  // The writer currently omits source. Exercise an enriched persisted record
+  // too, so inferring scheduler origin from record.source.type cannot survive
+  // merely because the fixture discarded its GitHub metadata on the way in.
+  await store.upsertServiceState(CATALOGUE_LANE_STATE_SCOPE, {
+    ...persisted,
+    records: [{ ...persisted.records[0], source: curated.source }]
+  });
   // A new instance must use the durable origin, not an in-process cache or the
   // shared github_issue source type.
-  await new CatalogueLaneDiscipline(options).post(githubJob("scheduled"), async () => {}, { origin: "scheduler" });
+  await new CatalogueLaneDiscipline(options).post(scheduled, async () => catalog.push(scheduled), { origin: "scheduler" });
+  assert.deepEqual(catalog, [curated, scheduled]);
   assert.deepEqual((await store.getServiceState(CATALOGUE_LANE_STATE_SCOPE)).records.map(({ origin }) => origin),
     ["operator", "scheduler"]);
 });
