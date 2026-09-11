@@ -341,8 +341,8 @@ export class EvmYieldAttributionChainReader {
           continue;
         }
         if (!decoded) continue;
-        // Reuse the complete, bounded pool journal for the public cycle history.
-        // These extra records do not change cumulativeCapital or attribution math.
+        // Reuse the bounded pool journal for cycle history and realised results.
+        // Venue records never enter the share-backed cumulativeCapital basis.
         if (["VenueDeploymentCreated", "VenuePrincipalReturned", "VenueLossWrittenOff"].includes(decoded.name)) {
           events.push({
             type: decoded.name,

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildYieldAttribution } from "./yield-attribution-service.js";
+import { Interface } from "ethers";
+import { DEPOSIT_POOL_ABI } from "../blockchain/abis.js";
+import { createDepositPoolRoutes } from "../protocols/http/deposit-pool-routes.js";
+import { DepositPoolDoorService } from "./deposit-pool-door.js";
+import { buildYieldAttribution, EvmYieldAttributionChainReader, YieldAttributionService } from "./yield-attribution-service.js";
 
 const WALLET = "0x1111111111111111111111111111111111111111";
 const OTHER = "0x2222222222222222222222222222222222222222";
@@ -84,7 +88,8 @@ test("realised venue pin 3 — wallet split uses the pool ratio including realis
 test("realised history adds to the outstanding mark and remains bounded by the snapshot block", () => {
   const result = buildYieldAttribution({
     snapshot: snapshot(15_150_000n, { deployedPrincipal: 5_000_000n, venueMarkedAssets: 5_030_000n }),
-    events: [deposit(WALLET, 20_000_000), returned(3_100_000, 3_000_000), returned(2_070_000, 2_000_000, 21), writeOff(20_000),
+    events: [deposit(WALLET, 20_000_000), returned(3_100_000, 3_000_000),
+      { ...returned(2_070_000, 2_000_000, 21), deploymentId: "2" }, writeOff(20_000),
       returned(9_000_000, 1_000_000, 41), writeOff(999_999, 42)],
     ledgerEntries: [{ ...subsidy, blockNumber: 41 }]
   });
@@ -126,4 +131,97 @@ test("unreadable outstanding mark stays unavailable even when realised history i
   assert.equal(result.status, "unavailable");
   assert.equal(result.reason, "venue_mark_unreadable");
   assert.equal(result.gain, undefined);
+});
+
+test("missing write-off evidence leaves the loss unattributed rather than inferring it from NAV", () => {
+  const result = buildYieldAttribution({
+    snapshot: snapshot(20_548_235n), events: cycleOne.filter((row) => row.type !== "VenueLossWrittenOff"), ledgerEntries: [subsidy]
+  });
+  assert.equal(result.status, "partially_attributed");
+  assert.equal(result.gain.venueEarned.raw, "0");
+  assert.equal(result.gain.unattributed.raw, "-51765");
+  assertCloses(result);
+});
+
+test("ABI-decoded realised journal reaches the public pool, cost/profit copy and wallet split without cache double-counting", async (t) => {
+  const poolAddress = "0x3333333333333333333333333333333333333333";
+  const assetAddress = "0x0000053900000000000000000000000001200000";
+  const abi = new Interface(DEPOSIT_POOL_ABI);
+  const log = (name, args, blockNumber) => ({
+    ...abi.encodeEventLog(abi.getEvent(name), args), address: poolAddress,
+    blockNumber, index: 0, transactionHash: `0x${String(blockNumber).padStart(64, "0")}`
+  });
+  for (const scenario of [
+    { name: "cycle 1", returned: 9_928_372n, reduction: 9_928_372n, loss: 51_765n, buffer: 20_548_235n,
+      entries: [subsidy], expected: "-51765", text: /cost of 0\.051765 USDC/u },
+    { name: "profitable cycle", returned: 10_230_137n, reduction: 9_980_137n, loss: 0n, buffer: 20_250_000n,
+      entries: [], expected: "250000", text: /venue result is 0\.25 USDC/u }
+  ]) {
+    await t.test(scenario.name, async () => {
+      const logs = [
+        log("Deposit", [WALLET, WALLET, 10_000_000n, 10_000_000n], 1),
+        log("Deposit", [OTHER, OTHER, 10_000_000n, 10_000_000n], 2),
+        log("VenueDeploymentCreated", [1n, subsidy.txHash, 9_980_137n, 1_800_000_000], 10),
+        log("VenuePrincipalReturned", [1n, scenario.returned, scenario.reduction], 20),
+        ...(scenario.loss ? [log("VenueLossWrittenOff", [1n, scenario.loss, 0n], 25)] : [])
+      ];
+      const queries = [];
+      const chainReader = new EvmYieldAttributionChainReader({
+        async getLogs(query) {
+          assert.equal(query.address, poolAddress);
+          queries.push(query);
+          return logs.filter((row) => row.blockNumber >= query.fromBlock && row.blockNumber <= query.toBlock);
+        }
+      }, { deploymentBlock: 1 });
+      const yieldAttributionService = new YieldAttributionService({
+        poolAddress, assetAddress, chainId: 420420419, chainReader,
+        stateStore: { async listYieldSubsidyEntries() { return scenario.entries; } }
+      });
+      const door = new DepositPoolDoorService({
+        poolAddress, chainId: 420420419, yieldAttributionService,
+        chainReader: {
+          async readSnapshot({ wallet }) {
+            return snapshot(scenario.buffer, {
+              asset: assetAddress, totalAssetCap: 1_000_000_000n, perAgentAssetCap: 100_000_000n,
+              ...(wallet ? { wallet: {
+                shares: 10_000_000n, availableShares: 10_000_000n,
+                depositedAssets: scenario.buffer / 2n, assetBalance: 0n, allowance: 0n
+              } } : {})
+            });
+          }
+        }
+      });
+      let body;
+      let authCalls = 0;
+      const route = createDepositPoolRoutes({
+        depositPoolDoor: door,
+        authMiddleware() { authCalls += 1; return { wallet: WALLET }; },
+        respond(_response, status, payload) { assert.equal(status, 200); body = payload; }
+      });
+      const request = { method: "GET", headers: {} };
+      const context = { request, response: {}, pathname: "/pool", url: new URL("https://example.test/pool") };
+      assert.equal(await route(context), true);
+      assert.equal(authCalls, 0, "public pool needs no authentication");
+      assert.equal(body.available, true);
+      const publicAttribution = body.yieldAttribution;
+      assert.equal(publicAttribution.gain.venueEarned.raw, scenario.expected);
+      assert.equal(publicAttribution.gain.unattributed.raw, "0");
+      assert.equal(publicAttribution.basis.netShareBackedCapital.raw, "20000000");
+      assert.match(body.yieldAttributionText, scenario.text);
+      if (scenario.loss) assert.match(body.yieldAttributionText, /0\.6 USDC.*added by the operator/u);
+
+      await route({ ...context, request: { ...request, headers: { authorization: "Bearer fixture" } } });
+      assert.equal(authCalls, 1);
+      const split = body.yieldAttribution.wallet.splitApproximation;
+      assert.deepEqual(body.yieldAttribution.gain, publicAttribution.gain);
+      assert.deepEqual(split.poolRatio, publicAttribution.splitRatio);
+      assert.equal(split.venueEarned.raw, scenario.loss ? "-25882" : "125000");
+      assert.equal(split.unattributed.raw, "0");
+      assert.equal(queries.length, 1, "the wallet read reuses the same complete journal");
+      await chainReader.readHistory({ poolAddress, toBlock: 41 });
+      assert.deepEqual(queries[1], { address: poolAddress, fromBlock: 41, toBlock: 41 });
+      await route(context);
+      assert.deepEqual(body.yieldAttribution, publicAttribution, "cache extension cannot duplicate prior realised results");
+    });
+  }
 });
