@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,7 +34,8 @@ async function fixture(t, overrides = {}, args = [], options = {}) {
   await writeFile(join(dir, "docker"), `#!${process.execPath}
 const fs = require('node:fs');
 const args = process.argv.slice(2);
-const sql = args[0] === 'exec' ? fs.readFileSync(0, 'utf8') : '';
+const input = ['exec', 'run'].includes(args[0]) ? fs.readFileSync(0, 'utf8') : '';
+const sql = args[0] === 'exec' ? input : '';
 const call = { args, sql };
 if (args[0] === 'exec') call.claimAtSql = fs.existsSync(process.env.RESET_TEST_CLAIM)
   ? fs.readFileSync(process.env.RESET_TEST_CLAIM, 'utf8') : null;
@@ -47,15 +48,43 @@ if (args[0] === 'inspect' && args[2] === '{{.State.Running}}') {
   for (const networks of JSON.parse(process.env.RESET_TEST_NETWORKS)) console.log(JSON.stringify(networks));
 } else if (args[0] === 'exec') {
   process.exit(Number(process.env.RESET_TEST_SQL_EXIT || '0'));
+} else if (args[0] === 'run') {
+  if (process.env.RESET_TEST_RUN_EXIT) process.exit(Number(process.env.RESET_TEST_RUN_EXIT));
+  const mounts = args.flatMap((arg, i) => arg === '--mount' ? [args[i + 1]] : [])
+    .map(value => Object.fromEntries(value.split(',').map(part => part.split('='))));
+  const envMount = mounts.find(mount => mount.target === '/input/indexer.env');
+  const inspectMount = mounts.find(mount => mount.target === '/input/inspect');
+  if (mounts.length !== 2 || !envMount || !inspectMount
+    || !mounts.every(mount => Object.hasOwn(mount, 'readonly'))) process.exit(98);
+  const imageIndex = args.indexOf('node:22-bookworm-slim');
+  const expectedTail = ['node', '--input-type=module', '-', '/input/indexer.env', '/input/inspect/networks.jsonl'];
+  if (imageIndex < 0 || JSON.stringify(args.slice(imageIndex + 1)) !== JSON.stringify(expectedTail)) process.exit(97);
+  // Emulate only bind-path translation; execute the REAL parser. Its PATH has
+  // no Docker/Node command, just as the isolated image has no Docker socket/CLI.
+  const parsed = require('node:child_process').spawnSync(process.execPath,
+    ['--input-type=module', '-', envMount.source, inspectMount.source + '/networks.jsonl'],
+    { input, encoding: 'utf8', env: { PATH: '/no-host-tools' } });
+  process.stdout.write(parsed.stdout || '');
+  process.stderr.write(parsed.stderr || '');
+  process.exit(parsed.status ?? 96);
 } else process.exit(99);
 `, { mode: 0o755 });
   await writeFile(join(dir, "flock"), `#!${process.execPath}
 require('node:fs').appendFileSync(process.env.RESET_TEST_LOCK_TRACE, JSON.stringify(process.argv.slice(2)) + '\\n');
 process.exit(process.argv[3] === process.env.RESET_TEST_LOCKED_FD ? 1 : 0);
 `, { mode: 0o755 });
+  if (options.withoutNode) {
+    // Do not rely on /usr/bin being Node-free on either macOS or CI.
+    for (const command of ['bash', 'mktemp', 'rm', 'rmdir', 'id']) {
+      const resolved = spawnSync('/bin/sh', ['-c', 'command -v "$1"', '_', command], { encoding: 'utf8' });
+      assert.equal(resolved.status, 0, `locate fixture command ${command}`);
+      await symlink(resolved.stdout.trim(), join(dir, command));
+    }
+    assert.equal(spawnSync('node', ['--version'], { env: { PATH: dir } }).error?.code, 'ENOENT');
+  }
   const result = spawnSync("bash", [script, ...args], {
     env: {
-      PATH: `${dir}:${process.env.PATH}`, INDEXER_FRESH_SCHEMA: "1",
+      PATH: options.withoutNode ? dir : `${dir}:${process.env.PATH}`, INDEXER_FRESH_SCHEMA: "1",
       DEPLOY_LOCK_FILE: join(dir, "deploy.lock"), INDEXER_SCHEMA_LOCK_FILE: join(dir, "schema.lock"),
       INDEXER_ENV_FILE: envFile, DEPLOY_STATE_DIR: stateDir,
       RESET_TEST_TRACE: trace, RESET_TEST_LOCK_TRACE: lockTrace, RESET_TEST_CLAIM: schemaStateFile,
@@ -75,6 +104,11 @@ process.exit(process.argv[3] === process.env.RESET_TEST_LOCKED_FD ? 1 : 0);
   assert.ok(!output.includes("reset-fixture-secret"), "never print URL credentials, even on parse errors");
   assert.ok(!JSON.stringify(calls).includes("reset-fixture-secret"), "never put URL credentials in Docker argv");
   const lockFilesExist = [join(dir, "deploy.lock"), join(dir, "schema.lock")].some(existsSync);
+  for (const call of calls.filter(call => call.args[0] === 'run')) {
+    const mount = call.args.find(arg => arg.includes('target=/input/inspect,'));
+    if (mount) assert.equal(existsSync(mount.split(',').find(part => part.startsWith('source=')).slice(7)), false,
+      'temporary inspect data is removed on both success and failure');
+  }
   return { ...result, calls, locks, lockFilesExist, claim, schemaStateFile, output };
 }
 
@@ -130,6 +164,47 @@ test("print-target is read-only without the fresh flag or a stopped indexer", as
   }]);
 });
 
+test("PATH without node uses the Docker Node fallback and still prints the validated target", async (t) => {
+  const result = await fixture(t, { INDEXER_FRESH_SCHEMA: undefined, RESET_TEST_RUNNING: 'true' }, ['--print-target'], { withoutNode: true });
+  assert.equal(result.status, 0, result.output);
+  assert.match(result.output, /host=postgres container=agent-postgres user=indexer_owner dbname=indexer_actual_mainnet port=5432/u);
+  assert.equal(result.claim, previousClaim);
+  assert.deepEqual(result.locks, []);
+  assert.equal(result.lockFilesExist, false);
+  assert.deepEqual(result.calls.map(call => call.args[0]), ['inspect', 'run'], 'inspect stays on the host, before the parser runs');
+  const args = result.calls[1].args;
+  assert.ok(args.includes('node:22-bookworm-slim'));
+  assert.deepEqual(args.slice(0, 6), ['run', '--rm', '-i', '--network', 'none', '--read-only']);
+  assert.ok(args.includes('--cap-drop=ALL'));
+  assert.ok(args.includes('--security-opt=no-new-privileges'));
+  assert.equal(args[args.indexOf('--user') + 1], `${process.getuid()}:${process.getgid()}`);
+  const groupIds = args.flatMap((arg, i) => arg === '--group-add' ? [Number(args[i + 1])] : []);
+  for (const groupId of process.getgroups()) assert.ok(groupIds.includes(groupId));
+  const mounts = args.flatMap((arg, i) => arg === '--mount' ? [args[i + 1]] : []);
+  assert.equal(mounts.length, 2);
+  assert.ok(mounts.every(mount => mount.endsWith(',readonly')));
+  assert.ok(mounts.some(mount => mount.includes('target=/input/indexer.env,')));
+  assert.ok(mounts.some(mount => mount.includes('target=/input/inspect,')));
+  assert.ok(args.every(arg => !arg.includes('docker.sock')));
+  assert.ok(!args.includes('-e') && !args.includes('--env-file'), 'no credentials forwarded as container environment');
+});
+
+test("Docker Node fallback preserves SQL success/failure claim semantics and fails closed if parsing cannot run", async (t) => {
+  for (const sqlExit of ['0', '3']) {
+    const result = await fixture(t, { RESET_TEST_SQL_EXIT: sqlExit }, [], { withoutNode: true });
+    assert.equal(result.status, sqlExit === '0' ? 0 : 1, result.output);
+    assert.equal(result.claim, sqlExit === '0' ? null : previousClaim);
+    assert.deepEqual(result.calls.map(call => call.args[0]), ['inspect', 'inspect', 'run', 'exec']);
+    assert.equal(result.calls.at(-1).claimAtSql, previousClaim);
+  }
+  for (const options of [{ databaseUrl: 'postgres://owner:reset-fixture-secret@elsewhere/db' }, {}]) {
+    const result = await fixture(t, options.databaseUrl ? {} : { RESET_TEST_RUN_EXIT: '125' }, [], { ...options, withoutNode: true });
+    assert.notEqual(result.status, 0);
+    assert.equal(result.claim, previousClaim);
+    assert.ok(result.calls.every(call => call.args[0] !== 'exec'));
+  }
+});
+
 test("DATABASE_URL host must identify Postgres on a shared indexer network", async (t) => {
   for (const host of ["elsewhere.example", "postgres.evil.example", "127.0.0.1"]) {
     const result = await fixture(t, {}, [], { databaseUrl: `postgresql://owner:reset-fixture-secret@${host}/actual_index` });
@@ -167,7 +242,7 @@ test("rendered env parsing never sources shell text and rejects malformed or red
     const result = await fixture(t, {}, ["--print-target"], { databaseUrl: url });
     assert.equal(result.status, 1, `must reject malformed or redirected target`);
     assert.equal(result.claim, previousClaim);
-    assert.deepEqual(result.calls, []);
+    assert.deepEqual(result.calls.map(call => call.args[0]), ['inspect']);
   }
 });
 

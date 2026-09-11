@@ -16,10 +16,11 @@ if [[ "$print_target" != "1" && "${INDEXER_FRESH_SCHEMA:-0}" != "1" ]]; then
   echo "Refusing cache reset: commit to INDEXER_FRESH_SCHEMA=1 on the next indexer deploy (workflow input indexer_fresh_schema=1)." >&2
   exit 1
 fi
-for required_command in docker node; do
+for required_command in docker mktemp rm rmdir; do
   command -v "$required_command" >/dev/null || { echo "Missing required command: $required_command" >&2; exit 1; }
 done
 INDEXER_ENV_FILE=${INDEXER_ENV_FILE:-/run/agent-stack-mainnet/indexer.env}
+PRODUCT_PROOF_NODE_IMAGE=${PRODUCT_PROOF_NODE_IMAGE:-node:22-bookworm-slim}
 DEPLOY_STATE_DIR=${DEPLOY_STATE_DIR:-/srv/agent-stack/.deploy-state}
 schema_state_file="$DEPLOY_STATE_DIR/indexer.database-schema.mainnet"
 
@@ -43,12 +44,40 @@ if [[ "$print_target" != "1" ]]; then
   fi
 fi
 
+# Inspect on the host: the parser container must never receive a Docker socket.
+# Only non-secret network metadata is copied; the env file stays in place.
+if [[ "$INDEXER_ENV_FILE" != /* || ! -f "$INDEXER_ENV_FILE" || ! -r "$INDEXER_ENV_FILE" ]]; then
+  echo "Refusing cache reset: expected a readable absolute indexer env file path." >&2
+  exit 1
+fi
+parse_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/indexer-cache-target.XXXXXX")"
+trap 'rm -f -- "$parse_tmp_dir/networks.jsonl"; rmdir -- "$parse_tmp_dir"' EXIT
+docker inspect --format '{{json .NetworkSettings.Networks}}' \
+  agent-postgres agent-mainnet-indexer > "$parse_tmp_dir/networks.jsonl"
+
+run_target_parser() {
+  # Same host-Node / PRODUCT_PROOF_NODE_IMAGE fallback as deploy-production.sh.
+  if command -v node >/dev/null 2>&1; then
+    node --input-type=module - "$INDEXER_ENV_FILE" "$parse_tmp_dir/networks.jsonl"
+  else
+    command -v id >/dev/null || { echo "Missing required command: id" >&2; return 1; }
+    # Match the host reader's file permissions without granting capabilities.
+    local group_id
+    local -a parser_groups=()
+    for group_id in $(id -G); do parser_groups+=(--group-add "$group_id"); done
+    docker run --rm -i --network none --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+      --user "$(id -u):$(id -g)" "${parser_groups[@]}" \
+      --mount "type=bind,source=$INDEXER_ENV_FILE,target=/input/indexer.env,readonly" \
+      --mount "type=bind,source=$parse_tmp_dir,target=/input/inspect,readonly" \
+      "$PRODUCT_PROOF_NODE_IMAGE" node --input-type=module - /input/indexer.env /input/inspect/networks.jsonl
+  fi
+}
+
 # Read, never source, the rendered env. Only validated non-secret target fields
 # leave Node: never put the DATABASE_URL/password in output, argv, or shell env.
-target="$(node --input-type=module - "$INDEXER_ENV_FILE" <<'NODE'
+target="$(run_target_parser <<'NODE'
 import { readFileSync } from 'node:fs';
 import { parseEnv } from 'node:util';
-import { execFileSync } from 'node:child_process';
 
 function refuse(message) {
   console.error(`Refusing cache reset: ${message}`);
@@ -73,8 +102,7 @@ try {
     || !/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) {
     refuse('DATABASE_URL requires a simple explicit user/dbname and a valid port.');
   }
-  const networks = execFileSync('docker', ['inspect', '--format', '{{json .NetworkSettings.Networks}}',
-    'agent-postgres', 'agent-mainnet-indexer'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  const networks = readFileSync(process.argv[3], 'utf8')
     .trim().split('\n').map(line => JSON.parse(line));
   const [postgres, indexer] = networks;
   if (networks.length !== 2 || !postgres || !indexer) refuse('cannot inspect container networks.');

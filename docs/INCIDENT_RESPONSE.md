@@ -340,8 +340,13 @@ as an automatic deploy or retention step.
    sourcing it, checks the host against `agent-postgres` addresses/aliases on a
    Docker network shared with `agent-mainnet-indexer`, and prints only host,
    container, user, dbname, port, and the fixed `ponder_sync` schema. It never
-   prints the password. The script needs Node with `node:util.parseEnv`
-   (Node 20.12+; tested on Node 22), Docker, and, for reset, flock.
+   prints the password. Host Node is **not required**: as in
+   `deploy-production.sh`, parsing uses local Node when available (20.12+),
+   otherwise Docker's `node:22-bookworm-slim` (`PRODUCT_PROOF_NODE_IMAGE`).
+   Docker inspection stays on the host. The fallback mounts the env file and
+   temporary inspect data read-only, with no Docker socket or container network;
+   only the four validated target fields return on stdout. Temporary metadata
+   is cleaned up on exit. Docker and, for reset, flock are required.
    Take and verify a backup of **that printed database** using the PostgreSQL
    backup/restore procedure; do not assume its dbname or user from a plan/doc.
    Confirm no other process is indexing against this database.
