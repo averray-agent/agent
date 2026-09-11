@@ -50,7 +50,7 @@ test("wallet approximation preserves unattributed gain and signed pool residual 
   assert.equal(BigInt(attested.splitRatio.venueEarnedBps) + BigInt(attested.splitRatio.operatorAddedBps) + BigInt(attested.splitRatio.unattributedBps), 10000n);
 });
 
-test("public pool venue earnings never exceed the adapter marked-minus-cost-basis figure", async () => {
+test("public pool venue earnings without realised events are the adapter marked-minus-cost-basis figure", async () => {
   const yieldAttributionService = new YieldAttributionService({
     poolAddress: POOL, assetAddress: ASSET, chainId: 420420419,
     stateStore: new MemoryStateStore(), chainReader: { async readHistory() { return events; } }
