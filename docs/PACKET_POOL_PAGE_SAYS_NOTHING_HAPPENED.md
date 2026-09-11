@@ -101,7 +101,7 @@ signed by 121pEreu4kTNBiyG7K32Red672dgMhkra7cLTNwK8ebEYhyv, hash
 route read Substrate evidence, so this now works:
 
 ```bash
-cd ~/repo/Polkadot/.claude/worktrees/nervous-curie-8045a3/scratchpad/opsrun && git fetch -q origin main && git checkout -q origin/main && T=$(node scripts/ops/mint-admin-jwt.mjs --profile mainnet --expires-in-days 1 --use-kms --quiet) && curl -sS -X POST https://api.averray.com/admin/deposit-pool/subsidies -H "authorization: Bearer $T" -H "content-type: application/json" -d '{"extrinsicHash":"0x272c0fb89deeb10635a8be9b19876a4a82ffe5f4f470de953c8bc5549947b052","blockNumber":20421344}'; unset T
+cd /private/tmp/claude-501/-Users-pascalkuriger-repo-Polkadot--claude-worktrees-nervous-curie-8045a3/f6f32eba-1605-4b5a-9945-76011ee2d76a/scratchpad/opsrun && git fetch -q origin main && git checkout -q origin/main && T=$(node scripts/ops/mint-admin-jwt.mjs --profile mainnet --expires-in-days 1 --use-kms --quiet) && curl -sS -X POST https://api.averray.com/admin/deposit-pool/subsidies -H "authorization: Bearer $T" -H "content-type: application/json" -d '{"extrinsicHash":"0x272c0fb89deeb10635a8be9b19876a4a82ffe5f4f470de953c8bc5549947b052","blockNumber":20421344}'; unset T
 ```
 
 Then read back, and paste me only this output:
