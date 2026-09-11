@@ -36,6 +36,10 @@ async function runHostedStackFixture({
   },
   creditConfigured = false,
   creditStatus = 200,
+  indexerHeadAgeSec = 60,
+  indexerHeadBlock = 20_521_542,
+  checkIndexerSync = "1",
+  extraEnv = {},
   credit = {
     available: true,
     chainId: 1,
@@ -347,6 +351,16 @@ async function runHostedStackFixture({
       response.end(JSON.stringify(credit));
       return;
     }
+    if (request.url === "/indexer/status") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        polkadotHubMainnet: {
+          id: 420420419,
+          block: { number: indexerHeadBlock, timestamp: Math.floor(Date.now() / 1000) - indexerHeadAgeSec }
+        }
+      }));
+      return;
+    }
     const value = fixtures.get(request.url);
     if (value === undefined) {
       response.writeHead(404);
@@ -422,7 +436,9 @@ async function runHostedStackFixture({
       ADMIN_JWT: operatorToken,
       AVERRAY_TOKEN: "",
       CREDIT_DOOR_TOKEN: creditConfigured ? "fixture-operator-token" : "",
+      INDEXER_STATUS_URL: `${baseUrl}/indexer/status`,
       CHECK_INDEXER: "0",
+      CHECK_INDEXER_SYNC: checkIndexerSync,
       CHECK_BOOTSTRAP_INSTRUMENTATION: "0",
       CHECK_BOOTSTRAP_SELF_REPORT_SENT: "0",
       CHECK_PRODUCT_PROOF_GATE: "0",
@@ -436,7 +452,8 @@ async function runHostedStackFixture({
       HOSTED_CURL_RETRY_BACKOFF_1_SEC: "0",
       HOSTED_CURL_RETRY_BACKOFF_2_SEC: "0",
       LIVE_READ_ATTEMPTS: "1",
-      TIMEOUT_SEC: timeoutSec
+      TIMEOUT_SEC: timeoutSec,
+      ...extraEnv
     };
 
     const result = await new Promise((resolve, reject) => {
@@ -596,6 +613,62 @@ test("hosted smoke rejects an earnings door that serves account data without aut
 
   assert.notEqual(result.code, 0, result.stdout);
   assert.match(result.stderr, /did not answer 401/u);
+});
+
+test("hosted smoke checks indexer sync liveness even when the indexer was not redeployed", async () => {
+  // CHECK_INDEXER=0 is what a backend-only deploy passes; the 2026-09-10
+  // wedge hid behind that skip for ~10h and surfaced only as the credit door
+  // failing with an unrelated message.
+  const result = await runHostedStackFixture({ autoVerifierOk: true, warnings: [] });
+
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /Checking indexer sync liveness/u);
+  assert.match(result.stdout, /Indexer head is \d+s old \(budget 600s\)/u);
+  assert.equal(result.requestCounts["/indexer/status"], 1);
+  assert.equal(result.requestCounts["/"], 2, "the indexer deploy checks (root, ready) stay gated by CHECK_INDEXER");
+});
+
+test("hosted smoke fails closed on a stalled indexer sync before the credit door can misreport it", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    warnings: [],
+    creditConfigured: true,
+    indexerHeadAgeSec: 36_000,
+    indexerHeadBlock: 20_501_734
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.equal(result.signal, null);
+  assert.match(result.stderr, /Indexer sync is stalled: newest indexed block 20501734 is 36\d{3}s old \(budget 600s\)/u);
+  assert.match(result.stderr, /\/health stays 200/u);
+  assert.match(result.stderr, /docker restart/u);
+  assert.match(result.stderr, /INCIDENT_RESPONSE\.md/u);
+  assert.equal(result.requestCounts["/credit"], undefined, "the stall must be named before the credit door runs");
+});
+
+test("hosted smoke honours INDEXER_MAX_STALENESS_SEC as the operator override for the sync budget", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    warnings: [],
+    indexerHeadAgeSec: 120,
+    extraEnv: { INDEXER_MAX_STALENESS_SEC: "1" }
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.match(result.stderr, /Indexer sync is stalled.*\(budget 1s\)/u);
+});
+
+test("hosted smoke can skip the sync liveness check only by explicit opt-out", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    warnings: [],
+    indexerHeadAgeSec: 36_000,
+    checkIndexerSync: "0"
+  });
+
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /CHECK_INDEXER_SYNC=0 set; skipping indexer sync liveness check/u);
+  assert.equal(result.requestCounts["/indexer/status"], undefined);
 });
 
 test("hosted smoke enforces CreditPool availability and the canonical disclosure after configuration", async () => {

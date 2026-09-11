@@ -50,8 +50,20 @@ API_METRICS_URL=${API_METRICS_URL:-https://api.averray.com/metrics}
 INDEXER_URL=${INDEXER_URL:-https://index.averray.com/}
 INDEXER_READY_URL=${INDEXER_READY_URL:-https://index.averray.com/ready}
 INDEXER_STATUS_URL=${INDEXER_STATUS_URL:-https://index.averray.com/status}
-INDEXER_MAX_STALENESS_SEC=${INDEXER_MAX_STALENESS_SEC:-1800}
+# Sync liveness runs on EVERY smoke, not only when the indexer was redeployed
+# (CHECK_INDEXER gates the deploy checks: root + /ready). A wedged Ponder sync
+# keeps /health 200 (process liveness) while /status stops advancing; since
+# #1358 the /credit door needs a current index, so the 2026-09-10 wedge failed
+# every backend-only deploy for ~10h at "CreditPool door did not return the
+# wallet's L1/L2/L3 debt fields" instead of naming the indexer. The budget
+# mirrors the backend's INDEXER_LAG_BUDGET_SECONDS so this smoke and
+# capabilityHealth.indexer agree on what "current" means;
+# INDEXER_MAX_STALENESS_SEC stays honoured as the operator override
+# (docs/INCIDENT_RESPONSE.md uses it to force a deliberate failure).
+INDEXER_LAG_BUDGET_SECONDS=${INDEXER_LAG_BUDGET_SECONDS:-600}
+INDEXER_MAX_STALENESS_SEC=${INDEXER_MAX_STALENESS_SEC:-$INDEXER_LAG_BUDGET_SECONDS}
 CHECK_INDEXER=${CHECK_INDEXER:-1}
+CHECK_INDEXER_SYNC=${CHECK_INDEXER_SYNC:-1}
 CHECK_BOOTSTRAP_INSTRUMENTATION=${CHECK_BOOTSTRAP_INSTRUMENTATION:-0}
 CHECK_BOOTSTRAP_SELF_REPORT_SENT=${CHECK_BOOTSTRAP_SELF_REPORT_SENT:-0}
 BOOTSTRAP_SELF_REPORT_EXPECTED_FROM=${BOOTSTRAP_SELF_REPORT_EXPECTED_FROM:-}
@@ -384,6 +396,29 @@ jq -e '.status == "ok"' >/dev/null <<<"$api_health_json"
 jq -e '.components.stateStore.ok == true' >/dev/null <<<"$api_health_json"
 jq -e '.components.submittedJobAutoVerifier.ok == true' >/dev/null <<<"$api_health_json"
 
+# Before any door that answers from the index (/credit below), so a stalled
+# sync is named as such rather than as a credit-door field failure.
+if enabled "$CHECK_INDEXER_SYNC"; then
+  echo "Checking indexer sync liveness"
+  if ! [[ "$INDEXER_MAX_STALENESS_SEC" =~ ^[0-9]+$ ]]; then
+    echo "INDEXER_MAX_STALENESS_SEC / INDEXER_LAG_BUDGET_SECONDS must be a non-negative integer number of seconds." >&2
+    exit 1
+  fi
+  indexer_status_json="$(fetch "$INDEXER_STATUS_URL")"
+  jq -e 'type == "object" and (keys | length) > 0' >/dev/null <<<"$indexer_status_json"
+  jq -e '[to_entries[].value.block.number] | max > 0' >/dev/null <<<"$indexer_status_json"
+  indexer_head_block="$(jq -r '[to_entries[].value.block] | max_by(.timestamp) | .number' <<<"$indexer_status_json")"
+  indexer_head_age_sec="$(jq -r '(now - ([to_entries[].value.block.timestamp] | max)) | floor | if . < 0 then 0 else . end' <<<"$indexer_status_json")"
+  if (( indexer_head_age_sec > INDEXER_MAX_STALENESS_SEC )); then
+    echo "Indexer sync is stalled: newest indexed block $indexer_head_block is ${indexer_head_age_sec}s old (budget ${INDEXER_MAX_STALENESS_SEC}s)." >&2
+    echo "Ponder's /health stays 200 in this state (process liveness only), so the compose healthcheck never restarts it. If no schema replay is in progress, restart the indexer container (docker restart agent-mainnet-indexer) and see docs/INCIDENT_RESPONSE.md \"Indexer sync stall from a provider block hole\"." >&2
+    exit 1
+  fi
+  echo "Indexer head is ${indexer_head_age_sec}s old (budget ${INDEXER_MAX_STALENESS_SEC}s)."
+else
+  echo "CHECK_INDEXER_SYNC=$CHECK_INDEXER_SYNC set; skipping indexer sync liveness check."
+fi
+
 echo "Checking browser-friendly MCP endpoint"
 mcp_info_json="$(fetch "$API_MCP_INFO_URL")"
 jq -e '
@@ -662,6 +697,8 @@ if enabled "$CHECK_METRICS_AUTH"; then
   fi
 fi
 
+# Deploy checks for a redeployed indexer (root + /ready). Sync liveness is
+# checked unconditionally above.
 if enabled "$CHECK_INDEXER"; then
   echo "Checking indexer root"
   indexer_json="$(fetch "$INDEXER_URL")"
@@ -669,19 +706,8 @@ if enabled "$CHECK_INDEXER"; then
 
   echo "Checking indexer readiness"
   fetch "$INDEXER_READY_URL" >/dev/null
-
-  echo "Checking indexer status freshness"
-  indexer_status_json="$(fetch "$INDEXER_STATUS_URL")"
-  jq -e 'type == "object" and (keys | length) > 0' >/dev/null <<<"$indexer_status_json"
-  jq -e 'to_entries[0].value.block.number > 0' >/dev/null <<<"$indexer_status_json"
-  jq -e --argjson maxAge "$INDEXER_MAX_STALENESS_SEC" '
-    to_entries
-    | map(.value.block.timestamp)
-    | max as $latest
-    | (now - $latest) <= $maxAge
-  ' >/dev/null <<<"$indexer_status_json"
 else
-  echo "CHECK_INDEXER=$CHECK_INDEXER set; skipping indexer checks."
+  echo "CHECK_INDEXER=$CHECK_INDEXER set; skipping indexer deploy checks (root, ready)."
 fi
 
 if [[ -n "$OPERATOR_TOKEN" ]]; then

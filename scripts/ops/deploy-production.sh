@@ -2448,7 +2448,7 @@ deploy() {
     local check_indexer
     check_indexer=$(resolve_smoke_check_indexer "$run_indexer" "$run_caddy")
     if [[ "$check_indexer" != "1" ]]; then
-      echo "Skipping indexer smoke checks because this deploy did not change indexer or Caddy."
+      echo "Skipping indexer deploy checks (root, ready) because this deploy did not change indexer or Caddy; sync liveness still runs."
     fi
     CHECK_INDEXER="$check_indexer" \
       CHECK_BOOTSTRAP_INSTRUMENTATION="$SMOKE_CHECK_BOOTSTRAP_INSTRUMENTATION" \
