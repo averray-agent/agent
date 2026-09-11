@@ -86,6 +86,27 @@ recorded as last-good.
 
 ## Explicit recovery controls
 
+An app-schema rotation is **not** a raw-data refetch. Ponder reuses the shared
+`ponder_sync` cache and its completed intervals: **≈5 min from cache; a cache
+reset is a full refetch**, potentially hours. A cached empty provider answer
+survives schema rotation. To repair such a hole, the operator must pair
+`scripts/ops/indexer-sync-cache-reset.sh` with a fresh-schema dispatch; see the
+[cache-reset runbook](INCIDENT_RESPONSE.md#operator-runbook-reset-raw-cache-and-use-a-fresh-app-schema).
+The script is mainnet-only, requires `INDEXER_FRESH_SCHEMA=1` and a stopped
+indexer, and drops only `ponder_sync` in the database derived from `DATABASE_URL`
+in `/run/agent-stack-mainnet/indexer.env`. Use `--print-target` first; this
+read-only mode validates the host against the Postgres container's shared
+network addresses/aliases and prints host/user/dbname/port without credentials.
+Host Node is optional: the parser falls back to `node:22-bookworm-slim`, with
+the env file and host-produced inspect metadata mounted read-only. The parser
+container gets neither a Docker socket nor network access.
+After a successful DROP, under the same deploy/schema locks, the script removes
+`/srv/agent-stack/.deploy-state/indexer.database-schema.mainnet` so the next
+indexer deploy mints a fresh schema even if it is automatic. SQL failure leaves
+that claim untouched. The script does not deploy or restart anything. Ordinary
+rotation/rollback logic is unchanged, but this reset deliberately removes the
+old schema's last-good claim; an old checkpoint must not be resumed after it.
+
 Normal source or indexed-contract configuration changes rotate automatically.
 The workflow inputs remain available for an operator-directed recovery:
 

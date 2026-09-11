@@ -229,7 +229,8 @@ plain provider fallback the indexer either wedges on the mixed answers (loud)
 or records the range as event-free (silent). Observed on mainnet 2026-09-10
 (block 20501734; see [`docs/INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md)
 "Indexer sync stall from a provider block hole"); the silent mode dropped
-three EscrowCore claim events from the index until the next replay.
+three EscrowCore claim events from the index. A cached replay does not repair
+the omission.
 
 Current mitigation:
 
@@ -243,8 +244,12 @@ Current mitigation:
   `INDEXER_STALL_BUDGET_SECONDS`) from `lagging` (old but advancing, e.g. a
   replay) and emits `indexer_stalled` at `critical`; the hosted smoke checks
   sync liveness on every run, not only when the indexer was redeployed
-- any change under `indexer/` rotates the schema, so a replay through the
-  cross-checked transport is the repair path for a suspected gap
+- explicit primary/backup URLs in the indexer templates keep the transport
+  cross-check configured independently of the Ponder compatibility alias
+- app-schema rotation replays the shared `ponder_sync` cache, including cached
+  holes (≈5 min from cache; a cache reset is a full refetch). Repair requires
+  an operator cache reset **and** a fresh app schema, forcing both providers to
+  be queried again; see the incident runbook. Expect hours for the full refetch.
 
 Follow-up:
 

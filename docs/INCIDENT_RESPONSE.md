@@ -298,13 +298,115 @@ First moves:
    checkpoint. Do this when `/status` is frozen and no schema replay is in
    progress; the hosted smoke and `indexer_stalled` name exactly that state.
 2. If events may have been skipped (a `[indexer-rpc] … omitted` line, or a job
-   whose on-chain state is ahead of the index), redeploy the indexer with a
-   schema rotation: the replay re-fetches every range through the cross-check.
-   Any change under `indexer/` rotates the schema on the next deploy; otherwise
-   pass `INDEXER_FRESH_SCHEMA=1` (see `docs/INDEXER_SCHEMA_RECOVERY.md`).
+   whose on-chain state is ahead of the index), use the cache-reset runbook
+   below. **A schema rotation alone does not repair a cached provider hole.**
 3. Report the three calls above to the provider with the block hash. Keep at
    least two providers in `deploy/indexer.env.template`; a single provider
    leaves the transport with nothing to compare against.
+
+### Cached replay versus a full refetch
+
+Ponder has two layers: `DATABASE_SCHEMA` holds the app's derived tables;
+the shared `ponder_sync` schema holds raw chain data and fetched intervals.
+A new app schema re-runs indexing functions over that cache and fetches only
+missing intervals. A provider's empty log answer can therefore remain cached
+as complete through any number of app-schema rotations. A log saying
+`Skipped fetching backfill JSON-RPC data (cache contains all required data)`
+is not evidence of a fresh provider comparison.
+
+Timing: **≈5 min from cache; a cache reset is a full refetch**, expected to take
+hours, not minutes. Neither duration is a readiness guarantee. The backup RPC
+enables cross-checking new fetches; it cannot retroactively repair cached data.
+`RPC_BACKUP_URLS`/`DWELLER_RPC_URL` are not `PONDER_*` identity keys and do not
+by themselves rotate the app schema. The current resolver also retains
+`PONDER_RPC_URL_<chainId>` as a fallback; the explicit backup is pinned
+independently of that compatibility alias.
+
+### Operator runbook: reset raw cache AND use a fresh app schema
+
+Run only after the reset PR has merged, at a quiet hour. This deliberately
+removes **all** mainnet raw chain cache, not just block 20501734. Do not run it
+as an automatic deploy or retention step.
+
+1. Confirm the deployed mainnet template has Dweller primary and
+   `RPC_BACKUP_URLS=https://eth-rpc.polkadot.io/`. On the VPS, resolve the actual
+   database target without stopping anything or changing state:
+
+   ```sh
+   /srv/agent-stack/app/scripts/ops/indexer-sync-cache-reset.sh --print-target
+   ```
+
+   This reads `DATABASE_URL` from `/run/agent-stack-mainnet/indexer.env` without
+   sourcing it, checks the host against `agent-postgres` addresses/aliases on a
+   Docker network shared with `agent-mainnet-indexer`, and prints only host,
+   container, user, dbname, port, and the fixed `ponder_sync` schema. It never
+   prints the password. Host Node is **not required**: as in
+   `deploy-production.sh`, parsing uses local Node when available (20.12+),
+   otherwise Docker's `node:22-bookworm-slim` (`PRODUCT_PROOF_NODE_IMAGE`).
+   Docker inspection stays on the host. The fallback mounts the env file and
+   temporary inspect data read-only, with no Docker socket or container network;
+   only the four validated target fields return on stdout. Temporary metadata
+   is cleaned up on exit. Docker and, for reset, flock are required.
+   Take and verify a backup of **that printed database** using the PostgreSQL
+   backup/restore procedure; do not assume its dbname or user from a plan/doc.
+   Confirm no other process is indexing against this database.
+2. On the VPS, stop the mainnet indexer, then run the operator-only script:
+
+   ```sh
+   docker stop agent-mainnet-indexer
+   INDEXER_FRESH_SCHEMA=1 /srv/agent-stack/app/scripts/ops/indexer-sync-cache-reset.sh
+   ```
+
+   The flag acknowledges the full refetch; the script does not dispatch a
+   workflow. It refuses
+   without exactly `1`, with a running/uninspectable indexer, or while the
+   production deploy/schema locks are held. It re-reads and prints the target
+   under those locks, derives psql's user/dbname/port from `DATABASE_URL`, and
+   drops only `ponder_sync` in that database through `agent-postgres`.
+   **After SQL succeeds, while still holding both locks**, it removes and
+   prints `/srv/agent-stack/.deploy-state/indexer.database-schema.mainnet`.
+   Any next indexer deploy, automatic or dispatched, must then mint a fresh
+   schema via `fresh_host_bootstrap`. App schemas, identity state, and testnet
+   claims are not deleted. **SQL failure leaves the mainnet claim untouched.**
+   A SQL error, including an already-missing cache, is a failure, not success.
+3. Leave the indexer stopped. Immediately dispatch the fresh-schema deploy:
+
+   ```sh
+   gh workflow run deploy-production.yml -R averray-agent/agent \
+     -f run_indexer=1 \
+     -f indexer_fresh_schema=1 \
+     -f wait_for_ready=0 \
+     -f health_stability_sec=15 \
+     -f smoke_check_indexer=0
+   ```
+
+   Do **not** manually restart the old container/app schema. An ordinary
+   indexer deploy between reset and dispatch is now safe: the persisted claim
+   is gone, so it cannot reuse the old app checkpoint. The explicit fresh-schema
+   workflow input is an additional safeguard, not the only protection against
+   that race. If SQL succeeds but claim removal fails, treat the reset as failed:
+   keep the indexer stopped and clear that claim before any deploy. If the
+   reset or deployment fails, inspect the failure,
+   and resume the paired recovery deliberately; do not blindly retry or treat
+   rollback to the old app schema as repaired evidence. A database backup is
+   the recovery path for the deleted cache, but restoring it restores the hole.
+4. Expect a full historical refetch from **18,647,521** through both providers.
+   While catching up, `/ready` remains staged and `/health` should be 200 once
+   the replacement starts; the `/credit` receipt graph reports `indexer_stale`.
+   Watch `/status` advance, not just container health. The existing hosted
+   sync-liveness smoke remains enabled and unchanged; a stalled head is not a
+   normal full-refetch condition.
+5. After catch-up, query `jobEvents` for job
+   `0x0620927a89b58abf91831d8a83efd5de2d78877f5b00af1cc88c7b569aae9481` and
+   confirm all three claim events at **20501734**. Capture that response plus
+   the `docker logs agent-mainnet-indexer` line
+   `[indexer-rpc] … omitted 3 log(s) … 20501734` naming Dweller. These are the
+   incident's repair evidence, not just a green readiness check. If the
+   provider has since repaired its hole, record the changed provider answers
+   explicitly rather than claiming an omission log was observed.
+
+A hole shared by both providers still escapes the comparison. The periodic
+two-provider completeness audit in `THREAT_MODEL.md` remains a follow-up.
 
 ---
 
@@ -315,7 +417,7 @@ First moves:
 | Unexpected fund movement | P1 | Pause | Pauser + owner signer |
 | `api.averray.com/health` failing | P2 | Check backend logs, roll back if recent deploy | Primary on-call |
 | `index.averray.com/ready` failing | P2 | Check indexer logs/status, roll back or widen readiness window | Primary on-call |
-| `/status` frozen while `/health` is 200 (`indexer_stalled`, smoke "Indexer sync is stalled") | P2 | Restart the indexer container; if a provider hole is logged, rotate the schema so the replay re-fetches — see §5 | Primary on-call |
+| `/status` frozen while `/health` is 200 (`indexer_stalled`, smoke "Indexer sync is stalled") | P2 | Restart for a frozen checkpoint; for a cached provider hole, pair cache reset with a fresh app schema — see §5 | Primary on-call |
 | Public site/app shell failing | P2 | Check Caddy + static mounts | Primary on-call |
 | Async XCM requests stuck in `pending` | P2 | Check watcher status, inspect `/xcm/request`, and rehearse manual finalize if needed | Primary on-call |
 | Blockchain KMS signer error or access denied | P1 | Pause if value movement is suspicious; inspect CloudTrail + backend signer logs | Primary on-call + pauser |
