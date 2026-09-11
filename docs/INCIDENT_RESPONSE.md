@@ -298,13 +298,89 @@ First moves:
    checkpoint. Do this when `/status` is frozen and no schema replay is in
    progress; the hosted smoke and `indexer_stalled` name exactly that state.
 2. If events may have been skipped (a `[indexer-rpc] … omitted` line, or a job
-   whose on-chain state is ahead of the index), redeploy the indexer with a
-   schema rotation: the replay re-fetches every range through the cross-check.
-   Any change under `indexer/` rotates the schema on the next deploy; otherwise
-   pass `INDEXER_FRESH_SCHEMA=1` (see `docs/INDEXER_SCHEMA_RECOVERY.md`).
+   whose on-chain state is ahead of the index), use the cache-reset runbook
+   below. **A schema rotation alone does not repair a cached provider hole.**
 3. Report the three calls above to the provider with the block hash. Keep at
    least two providers in `deploy/indexer.env.template`; a single provider
    leaves the transport with nothing to compare against.
+
+### Cached replay versus a full refetch
+
+Ponder has two layers: `DATABASE_SCHEMA` holds the app's derived tables;
+the shared `ponder_sync` schema holds raw chain data and fetched intervals.
+A new app schema re-runs indexing functions over that cache and fetches only
+missing intervals. A provider's empty log answer can therefore remain cached
+as complete through any number of app-schema rotations. A log saying
+`Skipped fetching backfill JSON-RPC data (cache contains all required data)`
+is not evidence of a fresh provider comparison.
+
+Timing: **≈5 min from cache; a cache reset is a full refetch**, expected to take
+hours, not minutes. Neither duration is a readiness guarantee. The backup RPC
+enables cross-checking new fetches; it cannot retroactively repair cached data.
+`RPC_BACKUP_URLS`/`DWELLER_RPC_URL` are not `PONDER_*` identity keys and do not
+by themselves rotate the app schema. The current resolver also retains
+`PONDER_RPC_URL_<chainId>` as a fallback; the explicit backup is pinned
+independently of that compatibility alias.
+
+### Operator runbook: reset raw cache AND use a fresh app schema
+
+Run only after the reset PR has merged, at a quiet hour. This deliberately
+removes **all** mainnet raw chain cache, not just block 20501734. Do not run it
+as an automatic deploy or retention step.
+
+1. Confirm the deployed mainnet template has Dweller primary and
+   `RPC_BACKUP_URLS=https://eth-rpc.polkadot.io/`. Take and verify a backup of
+   the **`averray_mainnet` database** using the PostgreSQL backup/restore
+   procedure; do not assume a backup of the testnet `agent` database covers it.
+   Confirm no other process is indexing against this database.
+2. On the VPS, stop the mainnet indexer, then run the operator-only script:
+
+   ```sh
+   docker stop agent-mainnet-indexer
+   INDEXER_FRESH_SCHEMA=1 /srv/agent-stack/app/scripts/ops/indexer-sync-cache-reset.sh
+   ```
+
+   The flag is the operator's explicit commitment that the **next deploy** uses
+   a fresh app schema; the script does not dispatch a workflow. It refuses
+   without exactly `1`, with a running/uninspectable indexer, or while the
+   production deploy/schema locks are held. It drops only `ponder_sync` in
+   `averray_mainnet` on `agent-postgres` (Postgres role `agent`) and prints the
+   target and result. App schemas and persisted deployment state remain intact.
+   A SQL error, including an already-missing cache, is a failure, not success.
+3. Leave the indexer stopped. Immediately dispatch the fresh-schema deploy:
+
+   ```sh
+   gh workflow run deploy-production.yml -R averray-agent/agent \
+     -f run_indexer=1 \
+     -f indexer_fresh_schema=1 \
+     -f wait_for_ready=0 \
+     -f health_stability_sec=15 \
+     -f smoke_check_indexer=0
+   ```
+
+   Do **not** restart the old container/app schema or allow an ordinary deploy
+   between reset and this dispatch. A reset alone is not the repair. If the
+   reset or deployment fails, keep the indexer stopped, inspect the failure,
+   and resume the paired recovery deliberately; do not blindly retry or treat
+   rollback to the old app schema as repaired evidence. A database backup is
+   the recovery path for the deleted cache, but restoring it restores the hole.
+4. Expect a full historical refetch from **18,647,521** through both providers.
+   While catching up, `/ready` remains staged and `/health` should be 200 once
+   the replacement starts; the `/credit` receipt graph reports `indexer_stale`.
+   Watch `/status` advance, not just container health. The existing hosted
+   sync-liveness smoke remains enabled and unchanged; a stalled head is not a
+   normal full-refetch condition.
+5. After catch-up, query `jobEvents` for job
+   `0x0620927a89b58abf91831d8a83efd5de2d78877f5b00af1cc88c7b569aae9481` and
+   confirm all three claim events at **20501734**. Capture that response plus
+   the `docker logs agent-mainnet-indexer` line
+   `[indexer-rpc] … omitted 3 log(s) … 20501734` naming Dweller. These are the
+   incident's repair evidence, not just a green readiness check. If the
+   provider has since repaired its hole, record the changed provider answers
+   explicitly rather than claiming an omission log was observed.
+
+A hole shared by both providers still escapes the comparison. The periodic
+two-provider completeness audit in `THREAT_MODEL.md` remains a follow-up.
 
 ---
 
@@ -315,7 +391,7 @@ First moves:
 | Unexpected fund movement | P1 | Pause | Pauser + owner signer |
 | `api.averray.com/health` failing | P2 | Check backend logs, roll back if recent deploy | Primary on-call |
 | `index.averray.com/ready` failing | P2 | Check indexer logs/status, roll back or widen readiness window | Primary on-call |
-| `/status` frozen while `/health` is 200 (`indexer_stalled`, smoke "Indexer sync is stalled") | P2 | Restart the indexer container; if a provider hole is logged, rotate the schema so the replay re-fetches — see §5 | Primary on-call |
+| `/status` frozen while `/health` is 200 (`indexer_stalled`, smoke "Indexer sync is stalled") | P2 | Restart for a frozen checkpoint; for a cached provider hole, pair cache reset with a fresh app schema — see §5 | Primary on-call |
 | Public site/app shell failing | P2 | Check Caddy + static mounts | Primary on-call |
 | Async XCM requests stuck in `pending` | P2 | Check watcher status, inspect `/xcm/request`, and rehearse manual finalize if needed | Primary on-call |
 | Blockchain KMS signer error or access denied | P1 | Pause if value movement is suspicious; inspect CloudTrail + backend signer logs | Primary on-call + pauser |

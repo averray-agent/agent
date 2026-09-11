@@ -86,6 +86,17 @@ recorded as last-good.
 
 ## Explicit recovery controls
 
+An app-schema rotation is **not** a raw-data refetch. Ponder reuses the shared
+`ponder_sync` cache and its completed intervals: **≈5 min from cache; a cache
+reset is a full refetch**, potentially hours. A cached empty provider answer
+survives schema rotation. To repair such a hole, the operator must pair
+`scripts/ops/indexer-sync-cache-reset.sh` with a fresh-schema dispatch; see the
+[cache-reset runbook](INCIDENT_RESPONSE.md#operator-runbook-reset-raw-cache-and-use-a-fresh-app-schema).
+The script is mainnet-only, requires `INDEXER_FRESH_SCHEMA=1` and a stopped
+indexer, and drops only `averray_mainnet.ponder_sync`. It does not deploy or
+restart anything. Ordinary rotations and the last-good app-schema rollback
+path remain unchanged; rollback alone does not establish that a hole is fixed.
+
 Normal source or indexed-contract configuration changes rotate automatically.
 The workflow inputs remain available for an operator-directed recovery:
 
