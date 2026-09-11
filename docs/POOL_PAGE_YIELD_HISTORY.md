@@ -1,6 +1,7 @@
 # Pool page: recorded history and attribution
 
-Implements `PACKET_POOL_PAGE_SAYS_NOTHING_HAPPENED.md` at `93fff54b`.
+Implements `PACKET_POOL_PAGE_SAYS_NOTHING_HAPPENED.md` at `93fff54b`, with
+the separate realised-attribution follow-up at `94204e7c`.
 Backend and public/operator pool presentation only. No contract, funds,
 consent, deployment, or operator-attestation action.
 
@@ -18,7 +19,8 @@ consent, deployment, or operator-attestation action.
   surplus returns. Event blocks supply UTC dates. A missing write-off event
   means no write-off date, not a fabricated date or a zero write-off.
 - The existing complete pool event reader is shared with attribution to avoid
-  a second historical log scan. Attribution calculations are unchanged.
+  a second historical log scan. The original copy PR left attribution math
+  unchanged; the follow-up below includes realised venue results.
 - A share price above principal is not proof of yield. Unattributed gains,
   operator additions, and negative venue results each get explicit copy.
   Operator additions are described as **attested against chain evidence**:
@@ -51,14 +53,49 @@ check, not proof that this PR has deployed.
 
 ## Operator step remains Pascal's
 
-No subsidy was attested and no admin credential was obtained. There is a
-pre-existing mismatch in the packet's expected post-attestation readback:
-`buildYieldAttribution` reports venue-earned as marked assets minus cost
-basis **only while principal is deployed**, otherwise zero. With the packet's
-current inputs, attesting 600000 raw alone would produce operator-added
-600000, venue-earned 0, and unattributed **-51765**, not venue-earned -51765
-and unattributed 0. Changing that accounting is outside this copy PR. The
-cycle history independently discloses the measured cost in either case.
+No subsidy was attested and no admin credential was obtained. The original
+copy PR (#1366) left venue-earned as marked assets minus cost basis only while
+principal was deployed, otherwise zero. Attestation alone therefore left the
+realised cost in unattributed. The packet corrected that expected readback and
+assigned the accounting change to a separate follow-up.
+
+## Follow-up: realised venue attribution
+
+At the snapshot block, `venueEarned` now equals:
+
+```text
+sum(VenuePrincipalReturned.returnedAssets - principalReduction)
+  - sum(VenueLossWrittenOff.assets)
+  + (venueMarkedAssets - deployedPrincipal, only while principal is deployed)
+```
+
+All cycles in the existing bounded journal contribute, not just the latest
+cycle. Returned principal is not profit. `cumulativeCapital` is unchanged:
+deposits plus operator principal minus withdrawals, excluding venue records.
+An unreadable outstanding mark still makes attribution unavailable.
+
+With the cycle-1 return and write-off events present and 600000 raw operator
+contribution attested, the fixture reads venue-earned **-51765**, operator-added
+**600000**, unattributed **0**. Without attestation, the contribution remains
+unattributed. A completed profitable cycle attributes only its returned
+surplus to venue-earned. Wallet splits keep the same signed pool-level ratio,
+rounding and explicit approximation disclaimer; this is not holding-period
+attribution. No attestation, contract call that writes state, env change or
+production action is part of this follow-up.
+
+Evidence coverage still matters: the read-only RPC check above returned no
+write-off log. If that remains true for the attribution reader, the loss stays
+unattributed even after attestation. This formula does not infer a write-off
+from NAV or substitute a contract getter for missing journal evidence. The
+cycle-history sentence can independently report the getter's write-off. The
+fixture results are not a claim that production has this complete journal or
+that Pascal has attested the contribution.
+
+The three `realised venue pin` tests cover cycle 1, profitable returns and the
+shared wallet ratio. Further regressions cover ABI-decoded logs through the
+public `/pool` route and copy, cache reuse/extension, multiple returns and
+write-offs, snapshot bounds, unchanged capital basis, missing evidence,
+offsetting gains/losses at zero NAV gain, and an unreadable live mark.
 
 ## Regression pins
 

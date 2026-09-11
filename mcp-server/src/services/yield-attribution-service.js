@@ -117,6 +117,19 @@ function splitRatio(totalGain, venueEarned, operatorAdded, unattributed) {
   };
 }
 
+function realisedVenueResult(events) {
+  let result = 0n;
+  for (const event of events) {
+    if (event.type === "VenuePrincipalReturned") {
+      // Returned principal is capital, not profit. Only excess cash is a gain.
+      result += BigInt(event.returnedAssetsRaw) - BigInt(event.principalReductionRaw);
+    } else if (event.type === "VenueLossWrittenOff") {
+      result -= BigInt(event.assetsRaw);
+    }
+  }
+  return result;
+}
+
 function walletAttribution({ wallet, liveShares, totalShares, markedAssets, events, ratio, venueEarned, operatorAdded, totalGain }) {
   let basisAssets = 0n;
   let basisShares = 0n;
@@ -231,18 +244,20 @@ export function buildYieldAttribution({ snapshot, events = [], ledgerEntries = [
   const markedAssets = bufferAssets + (deployedPrincipal > 0n ? venueMarkedAssets : 0n);
   const totalGain = markedAssets - capital.net;
   const operatorAdded = BigInt(ledger.total.raw);
-  // A transfer into the buffer is not evidence of venue performance. Only the
-  // named-block adapter mark against its cost basis can establish that figure.
-  const venueEarned = deployedPrincipal > 0n ? venueMarkedAssets - deployedPrincipal : 0n;
+  // A buffer transfer alone still proves nothing. Realised cash surplus and
+  // written-off loss come from the bounded venue journal, plus any unrealised
+  // result still carried by the named-block adapter mark against cost basis.
+  const venueEarned = realisedVenueResult(boundedEvents)
+    + (deployedPrincipal > 0n ? venueMarkedAssets - deployedPrincipal : 0n);
   const unattributed = totalGain - venueEarned - operatorAdded;
   const ratio = splitRatio(totalGain, venueEarned, operatorAdded, unattributed);
-  const exactZero = deployedPrincipal === 0n && totalGain === 0n && operatorAdded === 0n;
+  const exactZero = deployedPrincipal === 0n && totalGain === 0n && operatorAdded === 0n && venueEarned === 0n;
   const response = {
     schemaVersion: 1,
     status: exactZero ? "zero" : unattributed === 0n ? "attributed" : "partially_attributed",
     statement: exactZero
       ? "No deployed principal, operator-added assets, or cumulative NAV gain are recorded for this pool."
-      : "Cumulative marked NAV gain is separated into venue-earned, operator-added and unattributed amounts. Unattributed is the observed NAV change the pool cannot attribute to the venue mark or an attested contribution; it may be a gain or a loss.",
+      : "Cumulative marked NAV gain is separated into venue-earned, operator-added and unattributed amounts. Venue-earned includes realised cash surplus and written-off losses from the venue journal, plus the current venue mark against cost basis. Unattributed is the observed NAV change the pool cannot attribute to that evidence or an attested contribution; it may be a gain or a loss.",
     atBlock: blockNumber,
     basis: {
       model: "cumulative_marked_nav_gain",
@@ -326,8 +341,8 @@ export class EvmYieldAttributionChainReader {
           continue;
         }
         if (!decoded) continue;
-        // Reuse the complete, bounded pool journal for the public cycle history.
-        // These extra records do not change cumulativeCapital or attribution math.
+        // Reuse the bounded pool journal for cycle history and realised results.
+        // Venue records never enter the share-backed cumulativeCapital basis.
         if (["VenueDeploymentCreated", "VenuePrincipalReturned", "VenueLossWrittenOff"].includes(decoded.name)) {
           events.push({
             type: decoded.name,
