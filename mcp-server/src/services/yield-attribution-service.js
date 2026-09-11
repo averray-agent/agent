@@ -117,17 +117,20 @@ function splitRatio(totalGain, venueEarned, operatorAdded, unattributed) {
   };
 }
 
-function realisedVenueResult(events) {
+function realisedVenueResult(events, venueWrittenOffRaw) {
   let result = 0n;
+  let journalWrittenOff = 0n;
   for (const event of events) {
     if (event.type === "VenuePrincipalReturned") {
       // Returned principal is capital, not profit. Only excess cash is a gain.
       result += BigInt(event.returnedAssetsRaw) - BigInt(event.principalReductionRaw);
     } else if (event.type === "VenueLossWrittenOff") {
-      result -= BigInt(event.assetsRaw);
+      journalWrittenOff += BigInt(event.assetsRaw);
     }
   }
-  return result;
+  // The reader supplies the authoritative snapshot-block getter total.
+  // Journal-only callers retain their existing arithmetic; never count both.
+  return result - BigInt(venueWrittenOffRaw ?? journalWrittenOff);
 }
 
 function walletAttribution({ wallet, liveShares, totalShares, markedAssets, events, ratio, venueEarned, operatorAdded, totalGain }) {
@@ -216,9 +219,10 @@ function walletAttribution({ wallet, liveShares, totalShares, markedAssets, even
 
 /**
  * Pure attribution over one named-block pool snapshot, its complete pool event
- * history, and the operator-attested contribution list visible at that block.
+ * history, reconciled contract write-offs, and the operator-attested
+ * contribution list visible at that block.
  */
-export function buildYieldAttribution({ snapshot, events = [], ledgerEntries = [], wallet = undefined }) {
+export function buildYieldAttribution({ snapshot, events = [], ledgerEntries = [], wallet = undefined, venueWrittenOffRaw }) {
   const blockNumber = exactBlockNumber(snapshot.blockNumber, "snapshot.blockNumber");
   const totalShares = BigInt(snapshot.totalSupply ?? snapshot.totalShares ?? 0);
   const bufferAssets = BigInt(snapshot.bufferAssets ?? snapshot.buffer ?? 0);
@@ -244,10 +248,10 @@ export function buildYieldAttribution({ snapshot, events = [], ledgerEntries = [
   const markedAssets = bufferAssets + (deployedPrincipal > 0n ? venueMarkedAssets : 0n);
   const totalGain = markedAssets - capital.net;
   const operatorAdded = BigInt(ledger.total.raw);
-  // A buffer transfer alone still proves nothing. Realised cash surplus and
-  // written-off loss come from the bounded venue journal, plus any unrealised
-  // result still carried by the named-block adapter mark against cost basis.
-  const venueEarned = realisedVenueResult(boundedEvents)
+  // Returns come from the journal; write-offs use the contract ledger because
+  // Substrate-origin writes are absent from eth_getLogs. A buffer transfer
+  // alone still proves nothing about venue performance.
+  const venueEarned = realisedVenueResult(boundedEvents, venueWrittenOffRaw)
     + (deployedPrincipal > 0n ? venueMarkedAssets - deployedPrincipal : 0n);
   const unattributed = totalGain - venueEarned - operatorAdded;
   const ratio = splitRatio(totalGain, venueEarned, operatorAdded, unattributed);
@@ -257,7 +261,7 @@ export function buildYieldAttribution({ snapshot, events = [], ledgerEntries = [
     status: exactZero ? "zero" : unattributed === 0n ? "attributed" : "partially_attributed",
     statement: exactZero
       ? "No deployed principal, operator-added assets, or cumulative NAV gain are recorded for this pool."
-      : "Cumulative marked NAV gain is separated into venue-earned, operator-added and unattributed amounts. Venue-earned includes realised cash surplus and written-off losses from the venue journal, plus the current venue mark against cost basis. Unattributed is the observed NAV change the pool cannot attribute to that evidence or an attested contribution; it may be a gain or a loss.",
+      : "Cumulative marked NAV gain is separated into venue-earned, operator-added and unattributed amounts. Venue-earned includes realised cash surplus from the venue journal and recorded write-offs, plus the current venue mark against cost basis. Unattributed is the observed NAV change the pool cannot attribute to that evidence or an attested contribution; it may be a gain or a loss.",
     atBlock: blockNumber,
     basis: {
       model: "cumulative_marked_nav_gain",
@@ -317,12 +321,12 @@ export class EvmYieldAttributionChainReader {
     this.readPromise = undefined;
   }
 
-  async readHistory({ poolAddress, toBlock, reconcileWriteOffs = true }) {
-    const events = await this.#readEvents({ poolAddress, toBlock });
-    if (reconcileWriteOffs && Number(toBlock) >= this.deploymentBlock) {
-      await this.#reconcileWriteOffs(poolAddress, Number(toBlock), events);
-    }
-    return events;
+  async readAttributionEvidence({ poolAddress, toBlock }) {
+    const events = await this.readHistory({ poolAddress, toBlock });
+    const writtenOff = Number(toBlock) < this.deploymentBlock
+      ? 0n
+      : await this.#reconcileWriteOffs(poolAddress, Number(toBlock), events);
+    return { events, venueWrittenOffRaw: writtenOff.toString() };
   }
 
   async #reconcileWriteOffs(poolAddress, atBlock, events) {
@@ -341,23 +345,28 @@ export class EvmYieldAttributionChainReader {
       // Enumerate the contract ledger, not just IDs present in the logs: an
       // entirely omitted deployment must not turn a persisted loss into zero.
       // Re-read at the requested block even when the event journal is cached.
+      let totalWrittenOff = 0n;
       for (let id = 1n; id < next; id += 1n) {
         const writtenOff = await pool.venueWrittenOffPrincipalAssets(id, overrides);
         const logged = journal.get(id) ?? 0n;
-        if (logged !== writtenOff) {
+        if (logged > writtenOff) {
           throw new RealisedVenueUnavailableError("venue_writeoff_journal_mismatch", {
             atBlock, deploymentId: id.toString(),
             journalWrittenOffRaw: logged.toString(), contractWrittenOffRaw: writtenOff.toString()
           });
         }
+        // Substrate-origin write-offs have no Ethereum RPC log. The journal
+        // may therefore be a subset; the getter is authoritative, not additive.
+        totalWrittenOff += writtenOff;
       }
+      return totalWrittenOff;
     } catch (error) {
       if (error instanceof RealisedVenueUnavailableError) throw error;
       throw new RealisedVenueUnavailableError("venue_writeoff_ledger_unreadable", { atBlock }, error);
     }
   }
 
-  async #readEvents({ poolAddress, toBlock }) {
+  async readHistory({ poolAddress, toBlock }) {
     const normalizedPool = getAddress(poolAddress);
     const target = exactBlockNumber(toBlock, "toBlock");
     if (target < this.deploymentBlock) return [];
@@ -456,11 +465,14 @@ export class YieldAttributionService {
       return { schemaVersion: 1, status: "unavailable", reason: "yield_attribution_not_configured" };
     }
     try {
-      const [events, ledgerEntries] = await Promise.all([
-        this.chainReader.readHistory({ poolAddress: this.poolAddress, toBlock: snapshot.blockNumber }),
+      const input = { poolAddress: this.poolAddress, toBlock: snapshot.blockNumber };
+      const [{ events, venueWrittenOffRaw }, ledgerEntries] = await Promise.all([
+        typeof this.chainReader.readAttributionEvidence === "function"
+          ? this.chainReader.readAttributionEvidence(input)
+          : Promise.resolve(this.chainReader.readHistory(input)).then((events) => ({ events })),
         this.stateStore.listYieldSubsidyEntries()
       ]);
-      return buildYieldAttribution({ snapshot, events, ledgerEntries, wallet });
+      return buildYieldAttribution({ snapshot, events, ledgerEntries, wallet, venueWrittenOffRaw });
     } catch (error) {
       if (error instanceof RealisedVenueUnavailableError) {
         return {

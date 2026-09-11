@@ -13,7 +13,8 @@ const ASSET = "0x0000053900000000000000000000000001200000";
 const HASH = `0x${"ab".repeat(32)}`;
 const abi = new Interface(DEPOSIT_POOL_ABI);
 
-function fixture({ loggedLosses = [[51_765n]], ledgerLosses = [51_765n], omitDeployments = [] } = {}) {
+function fixture({ loggedLosses = [[51_765n]], ledgerLosses = [51_765n], omitDeployments = [],
+  returnedAssets = 9_928_372n, principalReduction = 9_928_372n } = {}) {
   const log = (name, args, blockNumber, index = 0) => ({
     ...abi.encodeEventLog(abi.getEvent(name), args), address: POOL, blockNumber, index, transactionHash: HASH
   });
@@ -22,10 +23,10 @@ function fixture({ loggedLosses = [[51_765n]], ledgerLosses = [51_765n], omitDep
     const id = BigInt(index + 1);
     if (omitDeployments.includes(Number(id))) return;
     logs.push(log("VenueDeploymentCreated", [id, HASH, 9_980_137n, 1_800_000_000], 10, index));
-    logs.push(log("VenuePrincipalReturned", [id, 9_928_372n, 9_928_372n], 20, index));
+    logs.push(log("VenuePrincipalReturned", [id, returnedAssets, principalReduction], 20, index));
     losses.forEach((loss, ordinal) => logs.push(log("VenueLossWrittenOff", [id, loss, 0n], 25 + ordinal, index)));
   });
-  const state = { ledgerLosses, fail: null, calls: [], queries: [] };
+  const state = { ledgerLosses, attested: true, fail: null, calls: [], queries: [] };
   const provider = {
     async call(tx) {
       assert.equal(tx.to.toLowerCase(), POOL);
@@ -53,9 +54,9 @@ function fixture({ loggedLosses = [[51_765n]], ledgerLosses = [51_765n], omitDep
   const reader = new EvmYieldAttributionChainReader(provider, { deploymentBlock: 1 });
   const service = new YieldAttributionService({
     poolAddress: POOL, assetAddress: ASSET, chainId: 420420419, chainReader: reader,
-    stateStore: { async listYieldSubsidyEntries() { return [{
+    stateStore: { async listYieldSubsidyEntries() { return state.attested ? [{
       txHash: HASH, amountRaw: "600000", blockNumber: 30, chainId: 420420419, timestamp: "2026-09-09T00:00:00.000Z"
-    }]; } }
+    }] : []; } }
   });
   const snapshot = {
     blockNumber: 40, asset: ASSET, totalSupply: 20_000_000n, totalAssets: 20_548_235n,
@@ -79,7 +80,7 @@ function assertUnavailable(result, reason = "venue_writeoff_journal_mismatch") {
   assert.equal(result.wallet, undefined, "do not manufacture a wallet ratio from incomplete realised evidence");
 }
 
-test("write-off reconciliation pin — omitted log never serves silent zero when the getter records a loss", async () => {
+test("write-off production pin — getter 51765 and journal zero yield venue-earned -51765", async () => {
   const f = fixture({ loggedLosses: [[]] });
   let body;
   const route = createDepositPoolRoutes({
@@ -90,15 +91,25 @@ test("write-off reconciliation pin — omitted log never serves silent zero when
   await route({ request: { method: "GET", headers: {} }, response: {}, pathname: "/pool", url: new URL("https://example.test/pool") });
   assert.equal(body.available, true);
   assert.equal(body.withdrawal.status, "open");
-  assertUnavailable(body.yieldAttribution);
-  assert.deepEqual(body.yieldAttribution.realisedVenueResult, {
-    status: "unavailable", reason: "venue_writeoff_journal_mismatch", atBlock: 40,
-    deploymentId: "1", journalWrittenOffRaw: "0", contractWrittenOffRaw: "51765"
-  });
-  assert.match(body.yieldAttributionText, /unavailable/u);
+  assert.equal(body.yieldAttribution.status, "attributed");
+  assert.equal(body.yieldAttribution.gain.venueEarned.raw, "-51765");
+  assert.equal(body.yieldAttribution.gain.operatorAdded.raw, "600000");
+  assert.equal(body.yieldAttribution.gain.unattributed.raw, "0");
+  assert.equal(body.yieldAttribution.basis.netShareBackedCapital.raw, "20000000");
+  assert.match(body.yieldAttributionText, /cost of 0\.051765 USDC/u);
   assert.equal(body.venueHistory.lastDeployment.writtenOff.raw, "51765", "history still shows its independently reconciled getter");
   assert.equal(body.venueHistory.lastDeployment.lastWriteOff, null, "do not invent an event date");
   assert.equal(f.state.queries.length, 1, "history and attribution still share one journal scan");
+  const rawHistory = await f.reader.readHistory({ poolAddress: POOL, toBlock: 40 });
+  assert.equal(rawHistory.filter((row) => row.type === "VenueLossWrittenOff").length, 0, "getter evidence is not a fabricated log");
+  const wallet = await f.service.getAttribution({ snapshot: { ...f.snapshot, wallet: { shares: 20_000_000n } }, wallet: WALLET });
+  assert.deepEqual(wallet.wallet.splitApproximation.poolRatio, wallet.splitRatio);
+  assert.equal(wallet.wallet.splitApproximation.venueEarned.raw, "-51765");
+  f.state.attested = false;
+  const beforeAttestation = await f.service.getAttribution({ snapshot: f.snapshot });
+  assert.equal(beforeAttestation.gain.venueEarned.raw, "-51765");
+  assert.equal(beforeAttestation.gain.operatorAdded.raw, "0");
+  assert.equal(beforeAttestation.gain.unattributed.raw, "600000");
 });
 
 test("matching split write-off logs retain cycle-1 attribution and the wallet ratio", async () => {
@@ -113,8 +124,16 @@ test("matching split write-off logs retain cycle-1 attribution and the wallet ra
   assert.equal(result.wallet.splitApproximation.venueEarned.raw, "-51765");
 });
 
-test("partial, excess and zero-getter disagreements all fail closed", async () => {
-  for (const [logged, getter] of [[30_000n, 51_765n], [60_000n, 51_765n], [51_765n, 0n]]) {
+test("partial journal uses the getter once, without double-counting the logged subset", async () => {
+  const f = fixture({ loggedLosses: [[30_000n]] });
+  const result = await f.service.getAttribution({ snapshot: f.snapshot });
+  assert.equal(result.status, "attributed");
+  assert.equal(result.gain.venueEarned.raw, "-51765");
+  assert.equal(result.gain.unattributed.raw, "0");
+});
+
+test("write-off excess pin — journal 60000 versus getter 51765 remains unavailable", async () => {
+  for (const [logged, getter] of [[60_000n, 51_765n], [51_765n, 0n]]) {
     const f = fixture({ loggedLosses: [[logged]], ledgerLosses: [getter] });
     const result = await f.service.getAttribution({ snapshot: f.snapshot });
     assertUnavailable(result);
@@ -123,16 +142,25 @@ test("partial, excess and zero-getter disagreements all fail closed", async () =
   }
 });
 
+test("returned-surplus pin — profit still comes from EVM return logs with zero getter loss", async () => {
+  const f = fixture({ loggedLosses: [[]], ledgerLosses: [0n], returnedAssets: 10_230_137n, principalReduction: 9_980_137n });
+  f.state.attested = false;
+  const result = await f.service.getAttribution({ snapshot: { ...f.snapshot, bufferAssets: 20_250_000n, totalAssets: 20_250_000n } });
+  assert.equal(result.status, "attributed");
+  assert.equal(result.gain.venueEarned.raw, "250000");
+  assert.equal(result.gain.unattributed.raw, "0");
+});
+
 test("reconciliation reads every deployment including one wholly absent from the journal", async () => {
   const f = fixture({ loggedLosses: [[51_765n], []], ledgerLosses: [51_765n, 9n], omitDeployments: [2] });
-  const result = await f.service.getAttribution({ snapshot: f.snapshot });
-  assertUnavailable(result);
-  assert.equal(result.realisedVenueResult.deploymentId, "2");
-  assert.equal(result.realisedVenueResult.contractWrittenOffRaw, "9");
+  const result = await f.service.getAttribution({ snapshot: { ...f.snapshot, bufferAssets: 20_548_226n, totalAssets: 20_548_226n } });
+  assert.equal(result.status, "attributed");
+  assert.equal(result.gain.venueEarned.raw, "-51774");
+  assert.equal(result.gain.unattributed.raw, "0");
   assert.deepEqual(f.state.calls.filter((call) => call.name === "venueWrittenOffPrincipalAssets").map((call) => call.id), ["1", "2"]);
 });
 
-test("equal aggregate write-offs cannot hide disagreement between individual deployments", async () => {
+test("equal aggregate write-offs cannot hide journal-over-getter on an individual deployment", async () => {
   const f = fixture({ loggedLosses: [[30_000n], [21_765n]], ledgerLosses: [21_765n, 30_000n] });
   const result = await f.service.getAttribution({ snapshot: f.snapshot });
   assertUnavailable(result);
@@ -142,11 +170,13 @@ test("equal aggregate write-offs cannot hide disagreement between individual dep
 test("cached journal is reconciled again at the requested block, including an older snapshot", async () => {
   const f = fixture();
   assert.equal((await f.service.getAttribution({ snapshot: f.snapshot })).status, "attributed");
-  const old = await f.reader.readHistory({ poolAddress: POOL, toBlock: 20 });
-  assert.ok(old.every((row) => row.blockNumber <= 20));
-  assert.equal(old.some((row) => row.type === "VenueLossWrittenOff"), false);
+  const old = await f.reader.readAttributionEvidence({ poolAddress: POOL, toBlock: 20 });
+  assert.ok(old.events.every((row) => row.blockNumber <= 20));
+  assert.equal(old.events.some((row) => row.type === "VenueLossWrittenOff"), false);
+  assert.equal(old.venueWrittenOffRaw, "0", "an older snapshot cannot inherit the later getter balance");
   f.state.ledgerLosses[0] = 60_000n;
-  assertUnavailable(await f.service.getAttribution({ snapshot: f.snapshot }));
+  const updated = await f.service.getAttribution({ snapshot: f.snapshot });
+  assert.equal(updated.gain.venueEarned.raw, "-60000", "getter is re-read even while the log journal stays cached");
   assert.equal(f.state.queries.length, 1);
   assert.deepEqual(f.state.calls.filter((call) => call.name === "venueWrittenOffPrincipalAssets").map((call) => call.block), [40, 20, 40]);
 });

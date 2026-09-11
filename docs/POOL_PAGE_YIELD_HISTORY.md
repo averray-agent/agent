@@ -65,30 +65,32 @@ At the snapshot block, `venueEarned` now equals:
 
 ```text
 sum(VenuePrincipalReturned.returnedAssets - principalReduction)
-  - sum(VenueLossWrittenOff.assets)
+  - sum_id(venueWrittenOffPrincipalAssets(id))
   + (venueMarkedAssets - deployedPrincipal, only while principal is deployed)
 ```
 
-All cycles in the existing bounded journal contribute, not just the latest
-cycle. Returned principal is not profit. `cumulativeCapital` is unchanged:
+Returns from all cycles in the bounded journal and write-offs from every
+contract deployment contribute, not just the latest cycle. Returned principal
+is not profit. `cumulativeCapital` is unchanged:
 deposits plus operator principal minus withdrawals, excluding venue records.
 An unreadable outstanding mark still makes attribution unavailable.
 
-With the cycle-1 return and write-off events present and 600000 raw operator
-contribution attested, the fixture reads venue-earned **-51765**, operator-added
-**600000**, unattributed **0**. Without attestation, the contribution remains
-unattributed. A completed profitable cycle attributes only its returned
+With the cycle-1 return events, getter write-off of 51765 (even with no
+write-off logs), and 600000 raw operator contribution attested, the fixture
+reads venue-earned **-51765**, operator-added **600000**, unattributed **0**.
+Without attestation, venue-earned remains **-51765** and the full contribution
+of **600000** remains unattributed. A completed profitable cycle attributes only its returned
 surplus to venue-earned. Wallet splits keep the same signed pool-level ratio,
 rounding and explicit approximation disclaimer; this is not holding-period
 attribution. No attestation, contract call that writes state, env change or
 production action is part of this follow-up.
 
-Evidence coverage still matters: the read-only RPC check above returned no
-write-off log. The original accounting follow-up (#1367) left that loss
-unattributed; the reconciliation follow-up below now makes attribution
-explicitly unavailable when journal and getter disagree. The fixture results
-are not a claim that production has a complete journal or that Pascal has
-attested the contribution.
+The [#1369 gate](https://github.com/averray-agent/agent/pull/1369#issuecomment-5633767192)
+verified that cycle 1's write-off was a treasury multisig `revive.call` from a
+Substrate origin. Its absence from `eth_getLogs` is expected on every provider,
+not a provider gap. #1367 therefore left this loss unattributed; the corrected
+reconciliation below uses the contract getter as authoritative. The fixture
+results are not a claim that Pascal has attested the contribution.
 
 The three `realised venue pin` tests cover cycle 1, profitable returns and the
 shared wallet ratio. Further regressions cover ABI-decoded logs through the
@@ -101,30 +103,42 @@ offsetting gains/losses at zero NAV gain, and an unreadable live mark.
 Before attribution, the reader enumerates deployment IDs from the contract's
 `nextVenueDeploymentId` and reads `venueWrittenOffPrincipalAssets(id)` for
 each one, all at the attribution snapshot block. This includes deployments
-entirely absent from the event journal. Each getter must equal that
-deployment's sum of `VenueLossWrittenOff.assets`; equal global totals cannot
-hide a per-deployment mismatch. This adds one count read plus one getter read
+entirely absent from the event journal. Each getter must be at least that
+deployment's sum of `VenueLossWrittenOff.assets`; the journal may be a subset
+because Substrate-origin write-offs are absent from the Ethereum RPC log view.
+Equal global totals cannot hide journal-over-getter on an individual deployment.
+This adds one count read plus one getter read
 per deployment, without adding a historical log scan. Cached journal reads
 are reconciled again at the requested block, including older snapshots.
 
-A missing, partial or excess log, or an unreadable getter, returns attribution
-`status: unavailable`, `reason: realised_venue_unavailable`, with an explicit
-`realisedVenueResult` status/reason. Mismatches identify the deployment, block,
-journal amount and getter amount. No scalar venue gain, residual or wallet
-ratio is published from that incomplete evidence. The reader does not infer
-loss from NAV or silently replace the journal with the getter.
+Missing or partial write-off logs are valid: attribution deducts the full
+getter sum exactly once, never the getter plus the journal. Return surplus
+still comes from `VenuePrincipalReturned` events. Getter totals are passed as
+separate evidence, not invented events or dates, and the raw journal cache is
+unchanged. The pure arithmetic helper retains journal-only support for callers
+without contract evidence; the production reader always supplies the getter
+total (including zero), or fails unavailable.
 
-The cycle-history reader alone opts out of this stricter check: it already
-reconciles its latest record and can show the getter's write-off with no event
+Only journal-over-getter is an inconsistent write-off amount. That case, or an
+unreadable getter, returns `status: unavailable`,
+`reason: realised_venue_unavailable`, with an explicit `realisedVenueResult`
+status/reason. Mismatches retain the deployment, block and both amounts. No
+scalar venue gain, residual or wallet ratio is published from contradictory
+or unreadable evidence. No loss is inferred from NAV.
+
+The cycle-history reader consumes the unchanged raw journal and applies the
+same getter-authoritative rule to its latest record, without inventing an event
 date. `/pool` and withdrawals remain available when attribution is not.
-The accounting formula, `cumulativeCapital`, wallet arithmetic, contracts,
-envs and operator authority are unchanged.
+`cumulativeCapital`, wallet arithmetic, contracts, envs and operator authority
+are unchanged.
 
-`write-off reconciliation pin — omitted log never serves silent zero when the
-getter records a loss` exercises ABI logs and getter calls through the public
-route. Further tests cover matching split logs, all disagreement directions,
-missing deployments, per-deployment totals, cache/block boundaries, unreadable
-getters and an empty contract ledger.
+`write-off production pin — getter 51765 and journal zero yield venue-earned
+-51765` exercises the public route before/after attestation and the wallet
+ratio. The excess pin retains journal **60000** / getter **51765** as unavailable;
+the returned-surplus pin attributes profit from EVM return logs. Further tests
+cover partial/matching logs without double counting, missing deployments,
+per-deployment totals, cache/block boundaries, unreadable getters and an empty
+contract ledger.
 
 ## Regression pins
 

@@ -31,9 +31,7 @@ export class EvmDepositPoolVenueHistoryReader {
       const [last, writtenOff, events] = await Promise.all([
         pool.venueDeployments(count, overrides),
         pool.venueWrittenOffPrincipalAssets(count, overrides),
-        // This display reconciles the latest cycle itself and may show the
-        // getter's loss without an event date. Attribution requires exact logs.
-        this.eventReader.readHistory({ poolAddress, toBlock: blockNumber, reconcileWriteOffs: false })
+        this.eventReader.readHistory({ poolAddress, toBlock: blockNumber })
       ]);
       const rows = events.filter((event) => event.blockNumber <= blockNumber && event.deploymentId === count.toString());
       const created = rows.filter((event) => event.type === "VenueDeploymentCreated");
