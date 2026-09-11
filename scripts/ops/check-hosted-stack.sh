@@ -51,6 +51,10 @@ INDEXER_URL=${INDEXER_URL:-https://index.averray.com/}
 INDEXER_READY_URL=${INDEXER_READY_URL:-https://index.averray.com/ready}
 INDEXER_STATUS_URL=${INDEXER_STATUS_URL:-https://index.averray.com/status}
 INDEXER_MAX_STALENESS_SEC=${INDEXER_MAX_STALENESS_SEC:-1800}
+INDEXER_GRAPHQL_URL=${INDEXER_GRAPHQL_URL:-https://index.averray.com/graphql}
+APP_INDEXER_GRAPHQL_URL=${APP_INDEXER_GRAPHQL_URL:-https://app.averray.com/index/graphql}
+# Optional: when set, also prove the bearer-authenticated /graphql answers 200.
+INDEXER_GRAPHQL_BEARER_TOKEN=${INDEXER_GRAPHQL_BEARER_TOKEN:-}
 CHECK_INDEXER=${CHECK_INDEXER:-1}
 CHECK_BOOTSTRAP_INSTRUMENTATION=${CHECK_BOOTSTRAP_INSTRUMENTATION:-0}
 CHECK_BOOTSTRAP_SELF_REPORT_SENT=${CHECK_BOOTSTRAP_SELF_REPORT_SENT:-0}
@@ -680,6 +684,42 @@ if enabled "$CHECK_INDEXER"; then
     | max as $latest
     | (now - $latest) <= $maxAge
   ' >/dev/null <<<"$indexer_status_json"
+
+  # /graphql is the indexer's only unbounded query surface. Caddy proxies the
+  # whole Ponder app on index.averray.com and again under app.averray.com/index/,
+  # so both doors must refuse an unauthenticated query. The index host must
+  # answer with the indexer's own 401 body (proving the process gate, not a
+  # perimeter layer); the app-side proxy only has to be not-200, because a
+  # basic-auth shell may answer 401 there before the request reaches Ponder.
+  echo "Checking indexer /graphql bearer gate"
+  graphql_query='{"query":"{ __typename }"}'
+  graphql_probe="$(curl_with_transport_retries -sS --max-time "$TIMEOUT_SEC" -w $'\n%{http_code}' \
+    -X POST -H 'content-type: application/json' --data "$graphql_query" \
+    "$INDEXER_GRAPHQL_URL")"
+  graphql_status="${graphql_probe##*$'\n'}"
+  graphql_body="${graphql_probe%$'\n'*}"
+  if [[ "$graphql_status" != "401" ]] \
+    || ! jq -e '.error == "unauthorized"' >/dev/null 2>&1 <<<"$graphql_body"; then
+    echo "Expected unauthenticated POST /graphql on the indexer host to return the indexer's 401 {\"error\":\"unauthorized\"}, got HTTP $graphql_status." >&2
+    exit 1
+  fi
+  app_graphql_status="$(curl_with_transport_retries -sS --max-time "$TIMEOUT_SEC" -o /dev/null -w '%{http_code}' \
+    -X POST -H 'content-type: application/json' --data "$graphql_query" \
+    "$APP_INDEXER_GRAPHQL_URL")"
+  if [[ "$app_graphql_status" == "200" ]]; then
+    echo "Unauthenticated POST /index/graphql on the operator app returned 200; the /index/ proxy must not expose /graphql." >&2
+    exit 1
+  fi
+  if [[ -n "$INDEXER_GRAPHQL_BEARER_TOKEN" ]]; then
+    graphql_status_with_bearer="$(curl_with_transport_retries -sS --max-time "$TIMEOUT_SEC" -o /dev/null -w '%{http_code}' \
+      -X POST -H 'content-type: application/json' --data "$graphql_query" \
+      -H "authorization: Bearer $INDEXER_GRAPHQL_BEARER_TOKEN" \
+      "$INDEXER_GRAPHQL_URL")"
+    if [[ "$graphql_status_with_bearer" != "200" ]]; then
+      echo "Expected bearer-authenticated POST /graphql to return 200, got HTTP $graphql_status_with_bearer." >&2
+      exit 1
+    fi
+  fi
 else
   echo "CHECK_INDEXER=$CHECK_INDEXER set; skipping indexer checks."
 fi

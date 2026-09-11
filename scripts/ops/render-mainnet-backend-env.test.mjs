@@ -360,8 +360,9 @@ test("generateAll: the real transform yields the mainnet essentials", () => {
   assert.match(backend, /^REDIS_URL=redis:\/\/mainnet-redis:6379$/mu);
   assert.match(backend, /^REDIS_NAMESPACE=agent-platform-mainnet$/mu);
   assert.match(backend, /^INDEXER_STATUS_URL=http:\/\/mainnet-indexer:42069\/status$/mu);
-  assert.match(backend, /^# INDEXER_GRAPHQL_BEARER_TOKEN=1Password ref for prod-indexer\/graphql-bearer-token$/mu);
-  assert.doesNotMatch(backend, /^INDEXER_GRAPHQL_BEARER_TOKEN=/mu);
+  // The /graphql bearer is live on mainnet: the backend reads its copy from
+  // mainnet-backend (its service account cannot read mainnet-indexer).
+  assert.match(backend, /^INDEXER_GRAPHQL_BEARER_TOKEN=op:\/\/mainnet-backend\/graphql-bearer-token\/password$/mu);
   assert.match(backend, /^ALERT_ENVIRONMENT=mainnet$/mu);
   assert.match(backend, /^FIRST_EXTERNAL_AGENT_ALERT_ENABLED=true$/mu);
   assert.match(backend, /^EXTERNAL_POSTING_MODE=open$/mu);
@@ -394,6 +395,7 @@ test("generateAll: the real transform yields the mainnet essentials", () => {
   );
 
   const indexer = files["deploy/indexer.mainnet.env.template"];
+  assert.match(indexer, /^GRAPHQL_BEARER_TOKEN=op:\/\/mainnet-indexer\/graphql-bearer-token\/password$/mu);
   assert.match(indexer, /^POLKADOT_CHAIN_ID=420420419$/mu);
   assert.match(indexer, /^POLKADOT_CHAIN_NAME=polkadotHubMainnet$/mu);
   assert.match(indexer, /^PONDER_START_BLOCK_TREASURY=18647521$/mu);

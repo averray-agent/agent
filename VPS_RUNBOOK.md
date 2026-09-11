@@ -142,9 +142,12 @@ What stays public:
 
 - `https://averray.com/`
 - `https://app.averray.com/api/*`
-- `https://app.averray.com/index/*`
+- `https://app.averray.com/index/*` — except `/index/graphql`, which the
+  indexer itself gates with `GRAPHQL_BEARER_TOKEN` (401 without the bearer)
 - `https://api.averray.com/`
-- `https://index.averray.com/`
+- `https://index.averray.com/` — `/`, `/health`, `/ready`, `/status`,
+  `/xcm/outcomes`, `/escrow/job-creations` stay open; `/graphql` answers 401
+  without the bearer. See `docs/GRAPHQL_BEARER_HARDENING_RUNBOOK.md`.
 
 ### Hosted smoke checks when app auth is enabled
 

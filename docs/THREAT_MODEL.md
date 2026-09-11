@@ -231,9 +231,20 @@ Current mitigation:
   ([`indexer/src/api/index.ts`](../indexer/src/api/index.ts)); the only
   remaining public read paths are `/graphql`, `/xcm/outcomes`, `/health`,
   `/ready`, and `/status`
-- `/graphql` accepts an optional `GRAPHQL_BEARER_TOKEN` Bearer gate; when the
-  env is unset a loud startup warning records that the route is intentionally
-  public
+- `/graphql` (POST queries and the GET GraphiQL playground) is gated by
+  `GRAPHQL_BEARER_TOKEN`, rendered from 1Password into the mainnet indexer env
+  and marked critical-nonempty, so a deploy whose render leaves it empty fails
+  closed instead of reopening the route. The gate lives in the indexer process,
+  so it covers both public doors Caddy exposes — `index.averray.com/graphql`
+  and the operator app's `/index/graphql` proxy. The only consumer is the
+  backend's `/credit` receipt-graph reader, which sends the same value from
+  `INDEXER_GRAPHQL_BEARER_TOKEN` over the compose network and fails closed
+  (`receiptGraph.available=false`) on a 401. When the env is unset the indexer
+  logs a loud `publicly reachable` startup warning. The hosted smoke
+  (`scripts/ops/check-hosted-stack.sh`) asserts the indexer's own 401 on the
+  index host and not-200 on the app proxy on every indexer check; activation,
+  proof, rotation, and rollback are in
+  [`docs/GRAPHQL_BEARER_HARDENING_RUNBOOK.md`](GRAPHQL_BEARER_HARDENING_RUNBOOK.md)
 - `/metrics` on `api.averray.com` is bearer-gated in production by
   `METRICS_BEARER_TOKEN`; if production is configured to require metrics auth
   and no token is present, the route fails closed instead of serving metrics.
@@ -246,14 +257,17 @@ Current mitigation:
 
 Follow-up:
 
-- set `GRAPHQL_BEARER_TOKEN` and `METRICS_BEARER_TOKEN` in production env and
-  rotate the operator app to send the bearer
+- `GRAPHQL_BEARER_TOKEN` and `METRICS_BEARER_TOKEN` are both template-rendered
+  on mainnet (see above); no browser surface sends either bearer — the operator
+  app never consumed `/graphql`, and its unused `/index/*` proxy is a candidate
+  for removal so the app host stops fronting the indexer at all
 - bump Ponder's transitive `kysely` and `drizzle-orm` to versions without
   open SQL-injection advisories (npm audit currently reports 3 high
   severity on these transitive deps)
-- consider migrating `/graphql` behind the same Caddy basic-auth layer the
-  operator app uses for `app.averray.com`, so the gate is enforced at the
-  perimeter rather than inside the indexer
+- consider additionally denying `/graphql` at the Caddy edge on both public
+  hosts (the backend reaches the indexer over the compose network, so no public
+  door is required at all), so a leaked or weak bearer cannot be exercised from
+  the internet and a refused request never reaches the Hono handler
 
 ### Authentication Token Exposure
 
@@ -440,9 +454,9 @@ Follow-up:
 - finish Package E — operator pages adopt explicit `live` / `empty` /
   `degraded` / `demo` modes with a persistent banner when
   `NEXT_PUBLIC_DEMO_MODE=true`
-- keep `/metrics` and `/graphql` gated in production by setting the bearer tokens
-  documented in `deploy/backend.env.template` and
-  `deploy/indexer.env.template`
+- keep `/metrics` and `/graphql` gated in production: both bearers are rendered
+  from 1Password by the templates in `deploy/` and marked critical-nonempty, so
+  removing either row reopens the route only through a reviewed template change
 - continue documenting `<TBD>` placeholders as work items, not as silent
   defaults
 
