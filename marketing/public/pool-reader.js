@@ -69,8 +69,14 @@
       poolHeadroom: amount(caps.poolHeadroom, "pool.caps.poolHeadroom"),
       yieldStatus: text(source.yieldStatus, "pool.yieldStatus"),
       yieldStatusText: text(source.yieldStatusText, "pool.yieldStatusText"),
+      yieldAttributionText: typeof source.yieldAttributionText === "string"
+        ? text(source.yieldAttributionText, "pool.yieldAttributionText")
+        : "Yield attribution is unavailable. Read GET /pool directly; a share price above principal is not proof of yield.",
       disclosure: text(record(source.disclosure, "pool.disclosure").statement, "pool.disclosure.statement"),
       capitalSignal: text(record(source.capitalSignal, "pool.capitalSignal").statement, "pool.capitalSignal.statement"),
+      benefitsText: typeof source.capitalSignal.benefitsText === "string"
+        ? text(source.capitalSignal.benefitsText, "pool.capitalSignal.benefitsText")
+        : "Live vesting and claim-access terms are unavailable. Read GET /pool before acting.",
       withdrawal: text(record(source.withdrawal, "pool.withdrawal").note, "pool.withdrawal.note"),
       venue: {
         status: text(venue.status, "pool.venueMark.status"),
@@ -149,13 +155,15 @@
   function renderPool(value) {
     var root = document.querySelector("[data-public-pool]");
     if (!root) return;
-    var noCurrentEarnings = value.yieldStatus === "not_yet_earning";
+    var noCurrentEarnings = ["not_yet_earning", "home_after_cycle"].includes(value.yieldStatus);
     setText(
       "[data-pool-yield-heading]",
-      noCurrentEarnings ? "A deposit today earns nothing." : "Read the current earning state before depositing."
+      noCurrentEarnings ? "No yield is being earned today." : "Read the current earning state before depositing."
     );
     setText("[data-pool-yield-state]", displayStatus(value.yieldStatus));
     setText("[data-pool-yield-text]", value.yieldStatusText);
+    setText("[data-pool-benefits]", value.benefitsText);
+    setText("[data-pool-yield-attribution]", value.yieldAttributionText);
     setText("[data-pool-risk-statement]", value.disclosure);
     setText("[data-pool-total-assets]", formatAmount(value.totalAssets, value.assetSymbol));
     setText("[data-pool-buffer]", formatAmount(value.bufferAssets, value.assetSymbol));
@@ -217,6 +225,13 @@
             : "Current pool · deposits are not open",
           host
         );
+      } else {
+        var state = item.deployedStatus.value;
+        setText("[data-pool-generation-role]",
+          "Earlier pool, closed to new deposits. Existing depositors can withdraw available shares from the buffer. "
+          + (state === "not_deployed" ? "Capital is in the buffer."
+            : state === "deployed" ? "Some capital is deployed at the venue."
+              : "The deployment state is unavailable."), host);
       }
     });
   }

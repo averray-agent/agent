@@ -16,7 +16,9 @@ import {
   markedSharePrice
 } from "../core/deposit-pool-venue-mark.js";
 import { redactProviderError } from "../core/redact-provider-error.js";
-import { depositPoolYieldStatus } from "./deposit-pool-yield-status.js";
+import { depositPoolYieldStatus, depositPoolYieldAttributionText } from "./deposit-pool-yield-status.js";
+import { EvmDepositPoolVenueHistoryReader } from "./deposit-pool-venue-history.js";
+import { formatBaseUnits } from "../core/platform-service-helpers.js";
 
 const ASSET_DECIMALS = 6;
 const SHARE_DECIMALS = 6;
@@ -187,6 +189,9 @@ export class DepositPoolDoorService {
     workerExposurePolicy,
     lockedTierService,
     yieldAttributionService,
+    venueHistoryReader,
+    deploymentBlock,
+    claimPriority,
     vestingHours = 48,
     venueMark = loadDepositPoolVenueMarkConfig({})
   } = {}) {
@@ -197,6 +202,10 @@ export class DepositPoolDoorService {
     this.workerExposurePolicy = workerExposurePolicy;
     this.lockedTierService = lockedTierService;
     this.yieldAttributionService = yieldAttributionService;
+    this.venueHistoryReader = venueHistoryReader ?? (provider ? new EvmDepositPoolVenueHistoryReader(provider, {
+      deploymentBlock, eventReader: yieldAttributionService?.chainReader
+    }) : undefined);
+    this.claimPriority = claimPriority;
     this.vestingHours = Number(vestingHours);
     this.venueMarkConfig = venueMark;
   }
@@ -489,7 +498,10 @@ export class DepositPoolDoorService {
   }
 
   async #infoFromSnapshot(snapshot, wallet) {
-    const yieldState = depositPoolYieldStatus(snapshot.deployedPrincipal);
+    const venueHistory = snapshot.venueHistory ?? await this.venueHistoryReader?.readHistory({
+      poolAddress: this.poolAddress, blockNumber: snapshot.blockNumber, deployedPrincipal: snapshot.deployedPrincipal
+    }) ?? { status: "unavailable", reason: "venue_history_not_configured" };
+    const yieldState = depositPoolYieldStatus(snapshot.deployedPrincipal, venueHistory);
     const response = {
       schemaVersion: 1,
       available: true,
@@ -515,9 +527,11 @@ export class DepositPoolDoorService {
         poolHeadroom: amount(clampAtZero(snapshot.totalAssetCap - snapshot.totalAssets))
       },
       ...yieldState,
+      venueHistory,
       disclosure: { statement: DEPOSIT_POOL_RISK_DISCLOSURE },
       capitalSignal: {
         statement: DEPOSIT_POOL_CAPITAL_SIGNAL_STATEMENT,
+        benefitsText: depositBenefitsText(this.vestingHours, this.claimPriority),
         vesting: {
           model: "linear_per_deposit_tranche",
           durationHours: this.vestingHours,
@@ -532,6 +546,7 @@ export class DepositPoolDoorService {
     if (typeof this.yieldAttributionService?.getAttribution === "function") {
       response.yieldAttribution = await this.yieldAttributionService.getAttribution({ snapshot, wallet });
     }
+    response.yieldAttributionText = depositPoolYieldAttributionText(response.yieldAttribution);
     if (wallet) {
       const capacity = await this.#capacityForWallet(wallet);
       response.wallet = {
@@ -580,6 +595,12 @@ export class DepositPoolDoorService {
       throw new Error("DepositPool door requires a positive chainId.");
     }
   }
+}
+
+function depositBenefitsText(vestingHours, priority) {
+  const capacity = `A deposit vests over ${vestingHours} hours and raises how much open work your agent may hold at once; it never buys a reward.`;
+  if (!priority?.enabled) return `${capacity} Deposit-based early claim access is not enabled.`;
+  return `${capacity} For catalogue jobs paying at least ${formatBaseUnits(priority.minRewardRaw, 6)} USDC, the first ${priority.windowSeconds / 60} minutes are open to agents listed in the directory, or those with at least ${formatBaseUnits(priority.thresholdRaw, 6)} USDC vested and no outstanding credit draw. Active commitment perks may also qualify. Then claims open to everyone; all other eligibility checks still apply.`;
 }
 
 function normalizeSnapshot(input) {

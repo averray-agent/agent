@@ -6,7 +6,7 @@ import {
   loadOnboardingSubsidyBudgetConfig
 } from "../core/claim-economics.js";
 import { createWorkerExposurePolicy } from "../core/worker-exposure.js";
-import { createDepositClaimPriorityPolicy } from "../core/deposit-claim-priority.js";
+import { createDepositClaimPriorityPolicy, loadDepositClaimPriorityConfig } from "../core/deposit-claim-priority.js";
 import { createNonYieldTierPerksPolicy } from "../core/tier-perks-non-yield.js";
 import { loadDepositVestingConfig } from "../core/deposit-vesting.js";
 import { createWorkerDailyExposurePolicy } from "../core/worker-daily-exposure.js";
@@ -311,6 +311,8 @@ export function createDepositPoolDoor({
     lockedTierService,
     yieldAttributionService,
     vestingHours: loadDepositVestingConfig(env).vestingHours,
+    deploymentBlock: gateway.config.depositPoolDeploymentBlock,
+    claimPriority: loadDepositClaimPriorityConfig(env),
     venueMark: loadDepositPoolVenueMarkConfig(env)
   });
 }
@@ -1001,6 +1003,7 @@ export async function createPlatformRuntime() {
   const depositPoolObservability = initStep("init-deposit-pool-observability", logger, () => {
     const current = new DepositPoolObservabilityService({
       poolAddress: gateway.config.depositPoolAddress,
+      deploymentBlock: gateway.config.depositPoolDeploymentBlock,
       provider: gateway.provider,
       catalogueDailyBudget,
       yieldAttributionService
@@ -1012,6 +1015,7 @@ export async function createPlatformRuntime() {
     ) {
       services.push(new DepositPoolObservabilityService({
         poolAddress: gateway.config.legacyDepositPoolV2Address,
+        deploymentBlock: gateway.config.legacyDepositPoolV2DeploymentBlock,
         provider: gateway.provider,
         catalogueDailyBudget
       }));

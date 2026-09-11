@@ -16,7 +16,7 @@ function safePages(verifyHtml) {
     "site/index.html": `${meta}<main>Outcome verification and work receipts.</main>`,
     "site/verify/index.html": `${meta}${verifyHtml}`,
     "site/proof-to-pay/index.html": `${meta}<main>Proof-gated escrow. Release on PASS only.</main>`,
-    "site/pool/index.html": `${meta}<main><div data-public-pool><h2 data-pool-yield-heading>Reading live state</h2><p data-pool-risk-statement>Reading live disclosure</p><div data-pool-cta hidden>Open depositor view</div></div><footer>Footer</footer></main>`
+    "site/pool/index.html": `${meta}<main><div data-public-pool><h2 data-pool-yield-heading>Reading live state</h2><p data-pool-yield-attribution>Reading attribution</p><p data-pool-risk-statement>Reading live disclosure</p><div data-pool-cta hidden>Open depositor view</div></div><footer>Footer</footer></main>`
   };
 }
 
@@ -24,6 +24,12 @@ test("content discipline accepts the required Verify disclosures", () => {
   assert.doesNotThrow(() => assertMarketingContentDiscipline(safePages(
     '<main><span data-verify-inconclusive>Loading live terms…</span> https://api.averray.com/.well-known/x402 https://api.averray.com/verify/profiles<section data-receipt-proof><a href="/receipts/">Open the public receipt route</a></section></main>'
   )));
+});
+
+test("pool attribution numeric-literal mutation is rejected by the built public-record gate", () => {
+  const pages = safePages('<span data-verify-inconclusive>Loading</span> https://api.averray.com/.well-known/x402 https://api.averray.com/verify/profiles<section data-receipt-proof><a href="/receipts/">Receipts</a></section>');
+  pages["site/pool/index.html"] = pages["site/pool/index.html"].replace("Reading attribution", "1.027463");
+  assert.throws(() => assertMarketingContentDiscipline(pages), /numeric pool figure is baked into markup/u);
 });
 
 test("hard-coding 5 USDC into verify.astro fails the content-discipline lint by name", async () => {

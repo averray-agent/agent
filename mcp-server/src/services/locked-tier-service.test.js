@@ -657,7 +657,7 @@ test("the /pool payload never claims active locked yield while deployed principa
     LOCKED_TIER_YIELD_ELIGIBLE_NOT_DEPLOYED_TEXT
   );
   assert.doesNotMatch(JSON.stringify(home.lockedDeposits), /NAV share active/u);
-  assert.equal(home.yieldStatus, "not_yet_earning");
+  assert.equal(home.yieldStatus, "history_unavailable");
   assert.equal(home.venueMark.status, "not_deployed");
 
   deployedPrincipal = 9_500_000n;

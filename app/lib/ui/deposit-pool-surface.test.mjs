@@ -24,6 +24,7 @@ function fixture(overrides = {}) {
     markedSharePrice: null,
     yieldStatus: "not_yet_earning",
     yieldStatusText: "API-owned yield statement.",
+    yieldAttributionText: "API-owned attribution explanation.",
     venueMark: {
       status: "not_deployed",
       depositsBlocked: false,
@@ -86,6 +87,19 @@ test("pool zero and absent values stay legible without fabricated figures", () =
   assert.equal(unavailable.available, false);
   assert.deepEqual(unavailable.facts, []);
   assert.equal(JSON.stringify(unavailable).includes("0 USDC"), false);
+});
+
+test("operator pool uses the same API-owned cycle history and attribution text as the public page", () => {
+  const original = buildDepositPoolSurface(fixture());
+  const changed = buildDepositPoolSurface(fixture({
+    yieldStatus: "home_after_cycle", yieldStatusText: "Deployment #7 returned with a cost.",
+    yieldAttributionText: "Operator added; unattributed is not yield; venue result is a cost."
+  }));
+  assert.equal(original.attribution.statement, "API-owned attribution explanation.");
+  assert.equal(changed.yield.status, "home_after_cycle");
+  assert.equal(changed.yield.statement, "Deployment #7 returned with a cost.");
+  assert.equal(changed.attribution.statement, "Operator added; unattributed is not yield; venue result is a cost.");
+  assert.equal(buildDepositPoolSurface(fixture({ yieldAttributionText: undefined })).attribution.statement, null);
 });
 
 test("the two-pool transition note can only come from API data", async () => {
