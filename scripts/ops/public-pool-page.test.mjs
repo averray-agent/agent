@@ -27,10 +27,12 @@ function poolPayload(statement = "Technical pilot. Principal at risk. No deposit
       poolHeadroom: amount("985521346")
     },
     yieldStatus: "not_yet_earning",
-    yieldStatusText: "Deposits do not currently earn yield; pool capital is home, and venue deployment is not scheduled.",
+    yieldStatusText: "Deposits do not currently earn yield. No venue deployment is recorded for this pool.",
+    yieldAttributionText: "API-owned attribution: an unattributed gain is not yield.",
     disclosure: { statement },
     capitalSignal: {
-      statement: "A time-weighted deposit is one capital-backed trust-and-capacity signal."
+      statement: "A deposit raises how much open work your agent may hold at once; it never buys a reward.",
+      benefitsText: "A deposit vests over 48 hours. Read current eligibility before claiming."
     },
     withdrawal: {
       note: "Deposited assets are not locked. You may redeem available shares from the pool buffer at any time."
@@ -105,6 +107,8 @@ function renderHarness() {
     "[data-pool-yield-state]",
     "[data-pool-yield-heading]",
     "[data-pool-yield-text]",
+    "[data-pool-benefits]",
+    "[data-pool-yield-attribution]",
     "[data-pool-risk-statement]",
     "[data-pool-total-assets]",
     "[data-pool-buffer]",
@@ -132,7 +136,7 @@ function renderHarness() {
   return { actions, document, nodes, root };
 }
 
-test("public pool page — every figure is fetched and no numeric figure is baked into markup", async () => {
+test("pool history pin 4 — every figure including share-price attribution is live, not numeric markup", async () => {
   const [page, readerSource] = await Promise.all([readFile(PAGE, "utf8"), readFile(READER, "utf8")]);
   const text = visibleSource(page);
 
@@ -142,6 +146,8 @@ test("public pool page — every figure is fetched and no numeric figure is bake
     "data-pool-total-assets",
     "data-pool-buffer",
     "data-pool-share-price",
+    "data-pool-yield-attribution",
+    "data-pool-benefits",
     "data-pool-total-cap",
     "data-pool-agent-cap",
     "data-pool-headroom",
@@ -150,6 +156,10 @@ test("public pool page — every figure is fetched and no numeric figure is bake
   assert.match(readerSource, /ENDPOINTS\.pool/u);
   assert.match(readerSource, /ENDPOINTS\.onboarding/u);
   assert.match(readerSource, /ENDPOINTS\.transparency/u);
+  assert.doesNotMatch(text, /not scheduled|being re-measured|trust-and-capacity|reward entitlement|Flex is a membership/iu);
+  assert.ok(page.indexOf("data-pool-benefits") < page.indexOf("data-pool-yield-heading"));
+  assert.match(page, /href="#membership">Read the deposit terms/u);
+  assert.match(page, /id="membership"/u);
 });
 
 test("public pool page — risk disclosure follows the served API statement under mutation", async () => {
@@ -189,8 +199,53 @@ test("public pool page — not-yet-earning truth renders above every deposit con
   assert.ok(statePosition >= 0 && statePosition < controlPosition);
   assert.match(page, /data-pool-cta hidden/u);
   reader.renderPool(reader.parsePool(poolPayload()));
-  assert.equal(h.nodes.get("[data-pool-yield-heading]").textContent, "A deposit today earns nothing.");
+  assert.equal(h.nodes.get("[data-pool-yield-heading]").textContent, "No yield is being earned today.");
   assert.equal(h.actions.hidden, false);
+});
+
+test("marketing pool consumes the same yield and attribution sentences and degrades missing fields legibly", () => {
+  const h = renderHarness();
+  const reader = loadReader(h.document);
+  const payload = poolPayload();
+  payload.yieldStatus = "home_after_cycle";
+  payload.yieldStatusText = "Mutated chain history for deployment #7.";
+  payload.yieldAttributionText = "Mutated operator-added and negative venue result.";
+  reader.renderPool(reader.parsePool(payload));
+  assert.equal(h.nodes.get("[data-pool-yield-text]").textContent, payload.yieldStatusText);
+  assert.equal(h.nodes.get("[data-pool-yield-attribution]").textContent, payload.yieldAttributionText);
+  assert.equal(h.nodes.get("[data-pool-benefits]").textContent, payload.capitalSignal.benefitsText);
+  assert.equal(h.nodes.get("[data-pool-yield-heading]").textContent, "No yield is being earned today.");
+  delete payload.yieldAttributionText;
+  delete payload.capitalSignal.benefitsText;
+  reader.renderPool(reader.parsePool(payload));
+  assert.match(h.nodes.get("[data-pool-yield-attribution]").textContent, /unavailable.*not proof of yield/u);
+  assert.match(h.nodes.get("[data-pool-benefits]").textContent, /unavailable/u);
+});
+
+test("pool history pin 5 — the legacy card follows not_deployed and never invents a venue position", async () => {
+  const page = await readFile(PAGE, "utf8");
+  const legacySource = page.match(/data-pool-generation="legacy"([\s\S]*?)<\/article>/u)?.[1];
+  assert.ok(legacySource);
+  assert.doesNotMatch(legacySource, /venue position/iu, "static fallback must not contradict the live state");
+  const role = { textContent: "" };
+  const reader = loadReader({
+    querySelector(selector) {
+      return selector === '[data-pool-generation="legacy"]' ? {
+        querySelector(key) { return key === "[data-pool-generation-role]" ? role : null; }
+      } : null;
+    }
+  });
+  const source = transparencyPayload();
+  source.depositPools.legacy.deployedStatus.value = "not_deployed";
+  reader.renderTransparency(reader.parseTransparency(source), reader.parsePool(poolPayload()));
+  assert.match(role.textContent, /closed to new deposits.*can withdraw.*Capital is in the buffer/u);
+  assert.doesNotMatch(role.textContent, /venue position/iu);
+  source.depositPools.legacy.deployedStatus.value = "deployed";
+  reader.renderTransparency(reader.parseTransparency(source), reader.parsePool(poolPayload()));
+  assert.match(role.textContent, /Some capital is deployed at the venue/u);
+  source.depositPools.legacy.deployedStatus.value = "unknown";
+  reader.renderTransparency(reader.parseTransparency(source), reader.parsePool(poolPayload()));
+  assert.match(role.textContent, /deployment state is unavailable/u);
 });
 
 test("public pool page — both pool labels and addresses come from the public record", async () => {

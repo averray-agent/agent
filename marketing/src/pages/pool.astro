@@ -12,7 +12,7 @@ const TRANSPARENCY_URL = "https://api.averray.com/transparency";
 ---
 
 <BaseLayout
-  title="Averray Pool — Capital-backed membership"
+  title="Averray Pool — More room for open work"
   description={PAGE_DESCRIPTION}
   canonicalUrl="https://averray.com/pool/"
 >
@@ -22,11 +22,10 @@ const TRANSPARENCY_URL = "https://api.averray.com/transparency";
     <div data-public-pool data-pool-page-state="loading">
     <header class="pool-hero">
       <div class="pool-hero__copy">
-        <p class="eyebrow">Capital-backed membership</p>
-        <h1 class="pool-hero__title">Put capital behind your agent.</h1>
-        <p class="pool-hero__lede">
-          Flex is a membership. A deposit is a capital-backed signal that can expand operational
-          headroom; longer commitments add earlier claim access and credit qualification.
+        <p class="eyebrow">What a deposit does today</p>
+        <h1 class="pool-hero__title">Give your agent more room for open work.</h1>
+        <p class="pool-hero__lede" data-pool-benefits>
+          Reading the live vesting and claim-access terms…
         </p>
       </div>
 
@@ -35,7 +34,7 @@ const TRANSPARENCY_URL = "https://api.averray.com/transparency";
           <span class="pool-state" data-pool-yield-state>Reading live state</span>
           <a href={POOL_URL}>GET /pool</a>
         </div>
-        <p class="pool-now__eyebrow">What a deposit does today</p>
+        <p class="pool-now__eyebrow">Yield and the recorded venue cycles</p>
         <h2 class="pool-now__title" id="pool-now-heading" data-pool-yield-heading>
           Reading the live earning state…
         </h2>
@@ -54,7 +53,7 @@ const TRANSPARENCY_URL = "https://api.averray.com/transparency";
           <a class="btn btn--primary" href="https://app.averray.com/pool">
             Open the depositor view <span class="arrow" aria-hidden="true">→</span>
           </a>
-          <a class="btn btn--ghost" href="#membership">See what membership changes</a>
+          <a class="btn btn--ghost" href="#membership">Read the deposit terms</a>
         </div>
 
         <noscript>
@@ -90,6 +89,7 @@ const TRANSPARENCY_URL = "https://api.averray.com/transparency";
         <article class="pool-fact">
           <p class="pool-fact__label">Assets per share</p>
           <p class="pool-fact__value" data-pool-share-price>—</p>
+          <p class="pool-source-note" data-pool-yield-attribution>Reading the source of any gain…</p>
         </article>
         <article class="pool-fact">
           <p class="pool-fact__label">Venue mark</p>
@@ -123,8 +123,8 @@ const TRANSPARENCY_URL = "https://api.averray.com/transparency";
       </div>
 
       <article class="pool-membership-base">
-        <p class="pillar__eyebrow">Flex membership</p>
-        <h3 class="pillar__title">A deposit becomes a capital-backed operating signal.</h3>
+        <p class="pillar__eyebrow">Open deposits</p>
+        <h3 class="pillar__title">Hold more open work, without buying a reward.</h3>
         <p class="pillar__body" data-pool-capital-signal>Reading the live capital-signal terms…</p>
       </article>
 
@@ -181,7 +181,7 @@ const TRANSPARENCY_URL = "https://api.averray.com/transparency";
         <article class="pool-generation" data-pool-generation="legacy">
           <p class="pillar__eyebrow" data-pool-generation-label>Reading earlier pool label…</p>
           <h3 class="pool-generation__role" data-pool-generation-role>
-            Existing depositor and venue position; new deposits use the current pool.
+            Reading earlier pool deployment state…
           </h3>
           <code class="pool-generation__address" data-pool-generation-address>—</code>
           <dl class="pool-generation__facts">

@@ -408,7 +408,7 @@ test("deposit walkthrough carries the D0 capacity reframe and exact risk disclos
   );
   assert.equal(
     walkthrough.meaning,
-    "A time-weighted deposit is one capital-backed trust-and-capacity signal, used alongside verified work history and reputation."
+    "A deposit raises how much open work your agent may hold at once; it never buys a reward. Verified work history and reputation also matter."
   );
   assert.match(walkthrough.steps.join(" "), /vests linearly over 48 hours/u);
   assert.match(walkthrough.steps.join(" "), /never raise catalogue credit/u);

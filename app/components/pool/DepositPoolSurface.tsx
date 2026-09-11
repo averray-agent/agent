@@ -105,6 +105,7 @@ export function DepositPoolSurface({
                 ["Cumulative NAV gain", surface.attribution.cumulativeNav],
                 ["Venue earned", surface.attribution.venueEarned],
                 ["Operator added", surface.attribution.operatorAdded],
+                ["Unattributed", surface.attribution.unattributed],
                 ["Attested entries", surface.attribution.entryCount === null ? null : String(surface.attribution.entryCount)]
               ] : undefined}
               footnote={surface.attribution?.attestation}

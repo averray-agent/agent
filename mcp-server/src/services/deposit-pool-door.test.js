@@ -26,6 +26,7 @@ function state(overrides = {}) {
     totalSupply: 10_000_000n,
     bufferAssets: 10_000_000n,
     deployedPrincipal: 0n,
+    venueHistory: { status: "available", deploymentCount: "0", completedCycleCount: "0", lastDeployment: null },
     totalAssetCap: 1_000_000_000n,
     perAgentAssetCap: 100_000_000n,
     wallet: {
