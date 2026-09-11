@@ -329,9 +329,21 @@ removes **all** mainnet raw chain cache, not just block 20501734. Do not run it
 as an automatic deploy or retention step.
 
 1. Confirm the deployed mainnet template has Dweller primary and
-   `RPC_BACKUP_URLS=https://eth-rpc.polkadot.io/`. Take and verify a backup of
-   the **`averray_mainnet` database** using the PostgreSQL backup/restore
-   procedure; do not assume a backup of the testnet `agent` database covers it.
+   `RPC_BACKUP_URLS=https://eth-rpc.polkadot.io/`. On the VPS, resolve the actual
+   database target without stopping anything or changing state:
+
+   ```sh
+   /srv/agent-stack/app/scripts/ops/indexer-sync-cache-reset.sh --print-target
+   ```
+
+   This reads `DATABASE_URL` from `/run/agent-stack-mainnet/indexer.env` without
+   sourcing it, checks the host against `agent-postgres` addresses/aliases on a
+   Docker network shared with `agent-mainnet-indexer`, and prints only host,
+   container, user, dbname, port, and the fixed `ponder_sync` schema. It never
+   prints the password. The script needs Node with `node:util.parseEnv`
+   (Node 20.12+; tested on Node 22), Docker, and, for reset, flock.
+   Take and verify a backup of **that printed database** using the PostgreSQL
+   backup/restore procedure; do not assume its dbname or user from a plan/doc.
    Confirm no other process is indexing against this database.
 2. On the VPS, stop the mainnet indexer, then run the operator-only script:
 
@@ -340,12 +352,17 @@ as an automatic deploy or retention step.
    INDEXER_FRESH_SCHEMA=1 /srv/agent-stack/app/scripts/ops/indexer-sync-cache-reset.sh
    ```
 
-   The flag is the operator's explicit commitment that the **next deploy** uses
-   a fresh app schema; the script does not dispatch a workflow. It refuses
+   The flag acknowledges the full refetch; the script does not dispatch a
+   workflow. It refuses
    without exactly `1`, with a running/uninspectable indexer, or while the
-   production deploy/schema locks are held. It drops only `ponder_sync` in
-   `averray_mainnet` on `agent-postgres` (Postgres role `agent`) and prints the
-   target and result. App schemas and persisted deployment state remain intact.
+   production deploy/schema locks are held. It re-reads and prints the target
+   under those locks, derives psql's user/dbname/port from `DATABASE_URL`, and
+   drops only `ponder_sync` in that database through `agent-postgres`.
+   **After SQL succeeds, while still holding both locks**, it removes and
+   prints `/srv/agent-stack/.deploy-state/indexer.database-schema.mainnet`.
+   Any next indexer deploy, automatic or dispatched, must then mint a fresh
+   schema via `fresh_host_bootstrap`. App schemas, identity state, and testnet
+   claims are not deleted. **SQL failure leaves the mainnet claim untouched.**
    A SQL error, including an already-missing cache, is a failure, not success.
 3. Leave the indexer stopped. Immediately dispatch the fresh-schema deploy:
 
@@ -358,9 +375,13 @@ as an automatic deploy or retention step.
      -f smoke_check_indexer=0
    ```
 
-   Do **not** restart the old container/app schema or allow an ordinary deploy
-   between reset and this dispatch. A reset alone is not the repair. If the
-   reset or deployment fails, keep the indexer stopped, inspect the failure,
+   Do **not** manually restart the old container/app schema. An ordinary
+   indexer deploy between reset and dispatch is now safe: the persisted claim
+   is gone, so it cannot reuse the old app checkpoint. The explicit fresh-schema
+   workflow input is an additional safeguard, not the only protection against
+   that race. If SQL succeeds but claim removal fails, treat the reset as failed:
+   keep the indexer stopped and clear that claim before any deploy. If the
+   reset or deployment fails, inspect the failure,
    and resume the paired recovery deliberately; do not blindly retry or treat
    rollback to the old app schema as repaired evidence. A database backup is
    the recovery path for the deleted cache, but restoring it restores the hole.

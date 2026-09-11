@@ -93,9 +93,16 @@ survives schema rotation. To repair such a hole, the operator must pair
 `scripts/ops/indexer-sync-cache-reset.sh` with a fresh-schema dispatch; see the
 [cache-reset runbook](INCIDENT_RESPONSE.md#operator-runbook-reset-raw-cache-and-use-a-fresh-app-schema).
 The script is mainnet-only, requires `INDEXER_FRESH_SCHEMA=1` and a stopped
-indexer, and drops only `averray_mainnet.ponder_sync`. It does not deploy or
-restart anything. Ordinary rotations and the last-good app-schema rollback
-path remain unchanged; rollback alone does not establish that a hole is fixed.
+indexer, and drops only `ponder_sync` in the database derived from `DATABASE_URL`
+in `/run/agent-stack-mainnet/indexer.env`. Use `--print-target` first; this
+read-only mode validates the host against the Postgres container's shared
+network addresses/aliases and prints host/user/dbname/port without credentials.
+After a successful DROP, under the same deploy/schema locks, the script removes
+`/srv/agent-stack/.deploy-state/indexer.database-schema.mainnet` so the next
+indexer deploy mints a fresh schema even if it is automatic. SQL failure leaves
+that claim untouched. The script does not deploy or restart anything. Ordinary
+rotation/rollback logic is unchanged, but this reset deliberately removes the
+old schema's last-good claim; an old checkpoint must not be resumed after it.
 
 Normal source or indexed-contract configuration changes rotate automatically.
 The workflow inputs remain available for an operator-directed recovery:
