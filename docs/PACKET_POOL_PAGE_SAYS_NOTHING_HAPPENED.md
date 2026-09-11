@@ -110,6 +110,23 @@ Then read back, and paste me only this output:
 curl -s https://api.averray.com/pool | python3 -c 'import json,sys; g=json.load(sys.stdin)["yieldAttribution"]; print({k: g["gain"][k]["raw"] for k in ("venueEarned","operatorAdded","unattributed")}, g["subsidyLedger"]["entryCount"])'
 ```
 
-Expected: operatorAdded 600000, unattributed 0, venueEarned −51765 (the cycle's
-measured cost shown as a venue result), one ledger entry. If the numbers differ,
-stop and paste them.
+Expected **with today's attribution math** (corrected 2026-09-11 — the gate of
+#1366 showed my first expectation was wrong): operatorAdded 600000,
+venueEarned 0, unattributed −51765, one ledger entry. The −51765 is the
+written-off cycle cost; the current formula only recognises a venue result
+while principal is deployed, so a realised loss lands in `unattributed`. The
+page will say "0.60 added by the operator" and "0.051765 USDC of loss is not yet
+attributed" next to the cycle sentence naming the same 0.051765. If the numbers
+differ from these, stop and paste them.
+
+## Follow-up (own PR, after #1366): realised venue results belong to the venue
+
+`yield-attribution-service.js:236` computes `venueEarned` as marked − deployed
+principal only while deployed. Fold the **realised** result from the journal
+#1366 already reads — Σ(returnedAssets − principalReduction) over
+`VenuePrincipalReturned` minus Σ `VenueLossWrittenOff` — into `venueEarned`.
+After that, attestation reads venueEarned −51765 and unattributed 0, and a
+profitable cycle's surplus is labelled venue-earned rather than "not yield".
+`cumulativeCapital` untouched. Pins: the cycle-1 numbers; a profitable-cycle
+fixture (returned > principal) shows positive venueEarned and zero
+unattributed; the wallet-level split uses the same ratio.
