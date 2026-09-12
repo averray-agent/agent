@@ -12,7 +12,7 @@ import {
 
 export const INDEXER_RPC_PROBE_RETRY_DELAYS_MS = [5_000, 15_000] as const;
 /**
- * Once one provider has answered an eth_getLogs request, how long the others
+ * Once one provider has answered a logs or full-transaction block request, how long the others
  * may still take before the cross-check proceeds without them. Below the 6s
  * Polkadot Hub block time so a consistently slow secondary cannot make the
  * realtime sync fall behind; a slow PRIMARY now costs at most this instead of
@@ -22,7 +22,6 @@ export const INDEXER_RPC_LOGS_CROSS_CHECK_GRACE_MS = 5_000;
 
 const RPC_PROBE_ATTEMPT_TIMEOUT_MS = 10_000;
 const RPC_PROBE_TRANSPORT_TIMEOUT_MS = 55_000;
-const ZERO_LOGS_BLOOM = `0x${"0".repeat(512)}`;
 const WARN_PREFIX = "[indexer-rpc]";
 
 type RpcFetchOptions = {
@@ -32,6 +31,7 @@ type RpcFetchOptions = {
   attemptTimeoutMs?: number;
   /** Provider-defect sink. Defaults to console.warn so `docker logs` carries it. */
   warn?: (message: string) => void;
+  /** Shared bounded grace for logs and full-transaction block cross-checks. */
   logsCrossCheckGraceMs?: number;
 };
 
@@ -47,7 +47,8 @@ type Provider = { url: string; transport: ProviderTransport };
  * provider's receipt store, and that store had a gap. Mixed with another
  * provider's eth_getLogs answer, Ponder rejected the pair as inconsistent and
  * retried inside one Postgres transaction until the connection was killed.
- * Failing the response here lets viem's fallback try the next provider instead.
+ * Block 20558840 repeats this with gasUsed=0: a non-zero bloom alone proves
+ * the empty list is incomplete. Failing the response excludes that provider.
  */
 export class IncompleteBlockResponseError extends BaseError {
   override name = "IncompleteBlockResponseError";
@@ -87,6 +88,22 @@ export class InconsistentLogsResponseError extends BaseError {
   }
 }
 
+/** Never combine different block identities, conflicting positions or disjoint tx sets. */
+export class InconsistentBlockResponseError extends BaseError {
+  override name = "InconsistentBlockResponseError";
+
+  constructor({ method, params, answers, reason }: {
+    method: string; params?: unknown; answers: BlockAnswer[]; reason: string;
+  }) {
+    super(`Providers disagree on ${method}: ${reason}.`, {
+      metaMessages: [
+        `Request params: ${JSON.stringify(params)}`,
+        ...answers.map((answer) => `${answer.url}: block ${answer.value?.number ?? "null"} ${answer.value?.hash ?? ""}, transaction hashes: ${[...answer.keys].join(", ")}`)
+      ]
+    });
+  }
+}
+
 type IncompleteBlockShape = {
   number?: Hex;
   hash?: Hex;
@@ -97,6 +114,9 @@ type IncompleteBlockShape = {
 
 type LogShape = { blockHash?: Hex; blockNumber?: Hex; logIndex?: Hex };
 type LogsAnswer = { url: string; value: LogShape[]; keys: Set<string> };
+type BlockTransaction = { hash: Hex; transactionIndex: Hex; blockHash?: Hex; blockNumber?: Hex };
+type FullBlockShape = IncompleteBlockShape & { hash: Hex; number: Hex; transactions: BlockTransaction[] };
+type BlockAnswer = { url: string; value: FullBlockShape | null; keys: Set<string>; positions: Map<string, string> };
 
 const defaultSleep = (delayMs: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, delayMs));
@@ -171,6 +191,11 @@ export function createIndexerRpcTransport(
         if (args.method === "eth_getLogs" && providers.length > 1) {
           return crossCheckLogs(providers, args, { warn, graceMs: logsCrossCheckGraceMs });
         }
+        if (providers.length > 1
+          && (args.method === "eth_getBlockByNumber" || args.method === "eth_getBlockByHash")
+          && Array.isArray(args.params) && args.params[1] === true) {
+          return crossCheckBlocks(providers, args, { warn, graceMs: logsCrossCheckGraceMs });
+        }
         for (let attempt = 0; ; attempt += 1) {
           try {
             return await chain.request(args);
@@ -217,12 +242,10 @@ function findIncompleteBlock(method: string, result: unknown): IncompleteBlockSh
   if (result === null || typeof result !== "object") return undefined;
   const block = result as IncompleteBlockShape;
   if (!Array.isArray(block.transactions) || block.transactions.length > 0) return undefined;
-  // Both header signals are chain-derived; either alone contradicts an empty
-  // transaction list, but requiring both keeps the guard away from any block
-  // whose logs Ponder would never need anyway (bloom zero ⇒ nothing to index).
-  const gasUsed = typeof block.gasUsed === "string" ? safeBigInt(block.gasUsed) : 0n;
-  const bloomSet = typeof block.logsBloom === "string" && block.logsBloom.toLowerCase() !== ZERO_LOGS_BLOOM;
-  return gasUsed > 0n && bloomSet ? block : undefined;
+  // A set bloom proves logs exist even when gasUsed is zero (20558840).
+  // Zero-bloom multisig revive.call blocks remain valid empty EVM responses.
+  const bloomSet = typeof block.logsBloom === "string" && safeBigInt(block.logsBloom) > 0n;
+  return bloomSet ? block : undefined;
 }
 
 function safeBigInt(value: string): bigint {
@@ -283,6 +306,91 @@ async function crossCheckLogs(
     warn(`${other.url} omitted ${missing.length} log(s) present at ${best.url} for eth_getLogs ${JSON.stringify(args.params)}: ${describeLogKeys(missing)}. Report this block hole to the provider; the index used ${best.url}'s answer.`);
   }
   return best.value;
+}
+
+/** Choose one intact provider response, never merge/reindex transaction arrays. */
+async function crossCheckBlocks(
+  providers: Provider[],
+  args: RpcRequestArgs,
+  { warn, graceMs }: { warn: (message: string) => void; graceMs: number }
+): Promise<unknown> {
+  const controller = new AbortController();
+  const settled = await settleWithGrace(
+    providers.map((provider) => provider.transport.request(args as never, { signal: controller.signal })),
+    graceMs,
+    () => controller.abort()
+  );
+  const answers: BlockAnswer[] = [];
+  let lastFailure: unknown;
+  settled.forEach((outcome, index) => {
+    const url = providers[index]!.url;
+    try {
+      if (outcome.status === "rejected") throw outcome.reason;
+      answers.push(readBlockAnswer(url, outcome.value));
+    } catch (error) {
+      lastFailure = error;
+      // The per-provider completeness guard already names the hole in its warning.
+      if (!(error instanceof IncompleteBlockResponseError)) {
+        warn(`${args.method} cross-check degraded: ${url} did not answer (${describeError(error)}); comparing the remaining providers only.`);
+      }
+    }
+  });
+  if (answers.length === 0) throw lastFailure;
+  const blocks = answers.filter((answer) => answer.value !== null);
+  if (blocks.length === 0) return null;
+
+  const identity = blocks[0]!.value!;
+  const positions = new Map<string, string>();
+  for (const answer of blocks) {
+    if (answer.value!.hash.toLowerCase() !== identity.hash.toLowerCase()
+      || BigInt(answer.value!.number) !== BigInt(identity.number)) {
+      throw new InconsistentBlockResponseError({ ...args, answers, reason: "block identities differ" });
+    }
+    for (const [hash, position] of answer.positions) {
+      if (positions.has(hash) && positions.get(hash) !== position) {
+        throw new InconsistentBlockResponseError({ ...args, answers, reason: `transaction ${hash} has conflicting indices` });
+      }
+      positions.set(hash, position);
+    }
+  }
+  const best = blocks.find((candidate) => answers.every((other) => isSuperset(candidate.keys, other.keys)));
+  if (!best) {
+    throw new InconsistentBlockResponseError({ ...args, answers, reason: "no transaction hash set contains all the others" });
+  }
+  for (const other of answers) {
+    if (other === best) continue;
+    const missing = [...best.keys].filter((hash) => !other.keys.has(hash));
+    if (other.value !== null && missing.length === 0) continue;
+    warn(`${other.url} ${other.value === null ? "returned null and " : ""}omitted ${missing.length} transaction(s) present at ${best.url} for ${args.method} block ${hexToNumber(identity.number)} (${identity.hash}): ${missing.join(", ")}. Report this block hole to the provider; the index used ${best.url}'s answer.`);
+  }
+  return best.value;
+}
+
+function readBlockAnswer(url: string, value: unknown): BlockAnswer {
+  const keys = new Set<string>();
+  const positions = new Map<string, string>();
+  if (value === null) return { url, value, keys, positions };
+  const block = value as FullBlockShape | undefined;
+  const isHash = (value: unknown): value is Hex => typeof value === "string" && /^0x[0-9a-f]{64}$/iu.test(value);
+  const isQuantity = (value: unknown): value is Hex => typeof value === "string" && /^0x[0-9a-f]+$/iu.test(value);
+  if (!block || !isHash(block.hash) || !isQuantity(block.number) || !Array.isArray(block.transactions)) {
+    throw new Error("invalid full-transaction block response");
+  }
+  const indices = new Set<string>();
+  for (const tx of block.transactions) {
+    if (!tx || !isHash(tx.hash) || !isQuantity(tx.transactionIndex)
+      || (tx.blockHash !== undefined && tx.blockHash.toLowerCase() !== block.hash.toLowerCase())
+      || (tx.blockNumber !== undefined && (!isQuantity(tx.blockNumber) || BigInt(tx.blockNumber) !== BigInt(block.number)))) {
+      throw new Error("invalid full transaction or transaction/block identity mismatch");
+    }
+    const hash = tx.hash.toLowerCase();
+    const position = BigInt(tx.transactionIndex).toString();
+    if (keys.has(hash) || indices.has(position)) throw new Error("duplicate transaction hash or index in block response");
+    keys.add(hash);
+    indices.add(position);
+    positions.set(hash, position);
+  }
+  return { url, value: block, keys, positions };
 }
 
 /**

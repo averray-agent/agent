@@ -10,6 +10,7 @@ import {
   resolveIndexerRpcUrls,
   IncompleteBlockResponseError,
   InconsistentLogsResponseError,
+  InconsistentBlockResponseError,
   INDEXER_RPC_LOGS_CROSS_CHECK_GRACE_MS,
   INDEXER_RPC_PROBE_RETRY_DELAYS_MS
 } from "../rpc-transport.ts";
@@ -289,7 +290,254 @@ test("a genuinely empty block passes the completeness guard untouched", async ()
   const block = await transport.request({ method: "eth_getBlockByNumber", params: ["0x138d4e7", true] });
 
   assert.deepEqual(block, emptyBlock);
-  assert.deepEqual(calls, ["https://first.invalid/"]);
+  assert.deepEqual(calls, ["https://first.invalid/", "https://second.invalid/"]);
+});
+
+// Raw captures from the zero-gas, non-zero-bloom incident on 2026-09-12.
+const ZERO_GAS_HOLE_BLOCK = "0x139b3f8";
+const ZERO_GAS_HOLE_HASH = "0xbe401358142dd085fd67be24e1fb33494875f2a042239c72f8ce48e94ddff259";
+const ZERO_GAS_HOLE_TX = "0x43ea28651af458ac9150cf6c04bae4820b59ef93a1a04432464abb23c1df56d8";
+type CapturedBlock = {
+  number: string; hash: string; gasUsed: string; logsBloom: string;
+  transactions: Array<{ hash: string; transactionIndex: string; blockHash: string; blockNumber: string }>;
+};
+async function zeroGasFixture(name: string): Promise<{ result: unknown }> {
+  return JSON.parse(await readFile(new URL(`./fixtures/rpc-hole-20558840/${name}.json`, import.meta.url), "utf8"));
+}
+const blockMethods = ["eth_getBlockByNumber", "eth_getBlockByHash"] as const;
+function blockParams(method: typeof blockMethods[number], fullTx = true) {
+  return [method === "eth_getBlockByNumber" ? ZERO_GAS_HOLE_BLOCK : ZERO_GAS_HOLE_HASH, fullTx] as const;
+}
+
+test("real block 20558840: full reads by number and hash select the provider whose transactions match the logs", async () => {
+  for (const method of blockMethods) for (const reverse of [false, true]) {
+    const fixture = method === "eth_getBlockByNumber" ? "block-full" : "block-by-hash";
+    const [dweller, ethRpc, dwellerLogs, ethRpcLogs] = await Promise.all([
+      zeroGasFixture(`dweller-${fixture}`), zeroGasFixture(`eth-rpc-${fixture}`),
+      zeroGasFixture("dweller-logs"), zeroGasFixture("eth-rpc-logs")
+    ]);
+    const urls = ["https://dweller.invalid", "https://eth-rpc.invalid"];
+    if (reverse) urls.reverse();
+    const warnings: string[] = [];
+    const calls: string[] = [];
+    const transport = createIndexerRpcTransport(urls, {
+      fetchImpl: async (input, init) => {
+        const body = rpcBody(init);
+        calls.push(`${body.method}:${input}`);
+        const isDweller = String(input).includes("dweller");
+        if (body.method === "eth_getLogs") return rpcResponse(init, isDweller ? dwellerLogs.result : ethRpcLogs.result);
+        assert.equal(body.method, method);
+        assert.deepEqual(body.params, blockParams(method));
+        return rpcResponse(init, isDweller ? dweller.result : ethRpc.result);
+      },
+      warn: (message) => { warnings.push(message); }
+    })({});
+    const block = await transport.request({ method, params: blockParams(method) }) as CapturedBlock;
+    const logs = await transport.request({ method: "eth_getLogs", params: [{ fromBlock: ZERO_GAS_HOLE_BLOCK, toBlock: ZERO_GAS_HOLE_BLOCK }] }) as Array<{ transactionHash: string; transactionIndex: string }>;
+    assert.deepEqual(block, ethRpc.result);
+    assert.equal(block.gasUsed, "0x0");
+    assert.notEqual(BigInt(block.logsBloom), 0n);
+    assert.equal(block.transactions.length, 1);
+    assert.equal(block.transactions[0]?.hash, ZERO_GAS_HOLE_TX);
+    assert.equal(block.transactions[0]?.transactionIndex, "0x3", "do not replace the chain index with array offset zero");
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0]?.transactionHash, block.transactions[0]?.hash);
+    assert.equal(logs[0]?.transactionIndex, block.transactions[0]?.transactionIndex);
+    assert.equal(calls.filter((call) => call.startsWith(`${method}:`)).length, 2);
+    assert.ok(warnings.some((message) => message.includes("dweller.invalid") && message.includes("20558840")));
+    assert.ok(warnings.some((message) => message.includes("omitted 1 log(s)")));
+  }
+});
+
+test("zero gas cannot hide an empty-transaction non-zero-bloom hole even with only one provider", async () => {
+  const dweller = await zeroGasFixture("dweller-block-full");
+  for (const method of blockMethods) {
+    const warnings: string[] = [];
+    const transport = createIndexerRpcTransport(["https://dweller.invalid"], {
+      fetchImpl: async (_input, init) => rpcResponse(init, dweller.result),
+      warn: (message) => { warnings.push(message); }
+    })({});
+    await assert.rejects(transport.request({ method, params: blockParams(method) }), (error) => {
+      assert.ok(error instanceof IncompleteBlockResponseError);
+      assert.match(error.message, /20558840.*gasUsed=0x0/u);
+      return true;
+    });
+    assert.equal(warnings.length, 1);
+  }
+});
+
+test("zero-bloom multisig revive.call-shaped empty EVM blocks remain accepted regardless of gasUsed", async () => {
+  const { result } = await zeroGasFixture("dweller-block-full");
+  for (const method of blockMethods) for (const gasUsed of ["0x0", "0x7191"]) {
+    // Synthetic zero-bloom variant of the captured header, not a new chain capture.
+    const empty = { ...(result as CapturedBlock), gasUsed, logsBloom: `0x${"0".repeat(512)}` };
+    const transport = createIndexerRpcTransport(["https://first.invalid", "https://second.invalid"], {
+      fetchImpl: async (_input, init) => rpcResponse(init, empty),
+      warn: (message) => assert.fail(message)
+    })({});
+    assert.deepEqual(await transport.request({ method, params: blockParams(method) }), empty);
+  }
+});
+
+test("full block cross-check chooses a non-empty transaction superset in either provider order and warns omissions", async () => {
+  const base = (await zeroGasFixture("eth-rpc-block-full")).result as CapturedBlock;
+  const extra = { ...base.transactions[0]!, hash: `0x${"b".repeat(64)}`, transactionIndex: "0x5" };
+  const full = { ...base, transactions: [...base.transactions, extra] }; // Synthetic superset.
+  for (const method of blockMethods) for (const reverse of [false, true]) {
+    const urls = ["https://subset.invalid", "https://superset.invalid"];
+    if (reverse) urls.reverse();
+    const warnings: string[] = [];
+    const transport = createIndexerRpcTransport(urls, {
+      fetchImpl: async (input, init) => rpcResponse(init, String(input).includes("subset") ? base : full),
+      warn: (message) => { warnings.push(message); }
+    })({});
+    assert.deepEqual(await transport.request({ method, params: blockParams(method) }), full);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0]!, /subset\.invalid omitted 1 transaction\(s\).*superset\.invalid/u);
+    assert.ok(warnings[0]!.includes(extra.hash));
+    assert.ok(warnings[0]!.includes("20558840"));
+  }
+});
+
+test("equal full-block hash sets keep primary ordering and original sparse indices without warnings", async () => {
+  const base = (await zeroGasFixture("eth-rpc-block-full")).result as CapturedBlock;
+  const full = { ...base, transactions: [...base.transactions, { ...base.transactions[0]!, hash: `0x${"b".repeat(64)}`, transactionIndex: "0x5" }] };
+  for (const method of blockMethods) {
+    const calls: string[] = [];
+    const transport = createIndexerRpcTransport(["https://first.invalid", "https://second.invalid"], {
+      fetchImpl: async (input, init) => {
+        calls.push(String(input));
+        return rpcResponse(init, String(input).includes("first") ? full : { ...full, transactions: [...full.transactions].reverse() });
+      }, warn: (message) => assert.fail(message)
+    })({});
+    assert.deepEqual(await transport.request({ method, params: blockParams(method) }), full);
+    assert.equal(calls.length, 2);
+  }
+});
+
+test("full block cross-check refuses incomparable hash sets, different blocks, and conflicting transaction indices", async () => {
+  const base = (await zeroGasFixture("eth-rpc-block-full")).result as CapturedBlock;
+  const tx = base.transactions[0]!;
+  const first = { ...base, transactions: [tx, { ...tx, hash: `0x${"b".repeat(64)}`, transactionIndex: "0x5" }] };
+  const hash = `0x${"d".repeat(64)}`;
+  const conflicts = [
+    { ...base, transactions: [tx, { ...tx, hash: `0x${"c".repeat(64)}`, transactionIndex: "0x6" }] },
+    { ...first, hash, transactions: first.transactions.map((tx) => ({ ...tx, blockHash: hash })) },
+    { ...first, number: "0x139b3f9", transactions: first.transactions.map((tx) => ({ ...tx, blockNumber: "0x139b3f9" })) },
+    { ...base, transactions: [{ ...tx, transactionIndex: "0x4" }] }
+  ];
+  for (const method of blockMethods) for (const second of conflicts) {
+    const transport = createIndexerRpcTransport(["https://first.invalid", "https://second.invalid"], {
+      fetchImpl: async (input, init) => rpcResponse(init, String(input).includes("first") ? first : second),
+      warn: (message) => assert.fail(message)
+    })({});
+    await assert.rejects(transport.request({ method, params: blockParams(method) }), (error) => {
+      assert.ok(error instanceof InconsistentBlockResponseError, String(error));
+      assert.ok(error.message.includes(method));
+      assert.match(error.message, /first\.invalid/u);
+      assert.match(error.message, /second\.invalid/u);
+      return true;
+    });
+  }
+});
+
+test("hash-only block requests retain ordinary fallback rather than full-transaction cross-checks", async () => {
+  const full = (await zeroGasFixture("eth-rpc-block-full")).result as CapturedBlock;
+  const hashes = { ...full, transactions: full.transactions.map((tx) => tx.hash) };
+  for (const method of blockMethods) {
+    const calls: string[] = [];
+    const transport = createIndexerRpcTransport(["https://first.invalid", "https://second.invalid"], {
+      fetchImpl: async (input, init) => { calls.push(String(input)); return rpcResponse(init, hashes); },
+      warn: (message) => assert.fail(message)
+    })({});
+    assert.deepEqual(await transport.request({ method, params: blockParams(method, false) }), hashes);
+    assert.deepEqual(calls, ["https://first.invalid/"]);
+  }
+});
+
+test("full block cross-check distinguishes a missing block from a known empty block", async () => {
+  const captured = (await zeroGasFixture("dweller-block-full")).result as CapturedBlock;
+  const empty = { ...captured, logsBloom: `0x${"0".repeat(512)}` };
+  for (const method of blockMethods) for (const second of [null, empty]) {
+    const warnings: string[] = [];
+    const transport = createIndexerRpcTransport(["https://missing.invalid", "https://second.invalid"], {
+      fetchImpl: async (input, init) => rpcResponse(init, String(input).includes("missing") ? null : second),
+      warn: (message) => { warnings.push(message); }
+    })({});
+    assert.deepEqual(await transport.request({ method, params: blockParams(method) }), second);
+    assert.equal(warnings.length, second === null ? 0 : 1);
+    if (second !== null) assert.match(warnings[0]!, /missing\.invalid returned null/u);
+  }
+});
+
+test("full block cross-check rejects malformed providers, degrades visibly on failure, and preserves all-provider errors", async () => {
+  const base = (await zeroGasFixture("eth-rpc-block-full")).result as CapturedBlock;
+  for (const method of blockMethods) for (const broken of [
+    undefined, {}, { ...base, transactions: [ZERO_GAS_HOLE_TX] },
+    { ...base, transactions: [base.transactions[0], base.transactions[0]] }
+  ]) {
+    const warnings: string[] = [];
+    const transport = createIndexerRpcTransport(["https://broken.invalid", "https://good.invalid"], {
+      fetchImpl: async (input, init) => String(input).includes("good") ? rpcResponse(init, base)
+        : broken === undefined ? new Response("unavailable", { status: 503 }) : rpcResponse(init, broken),
+      warn: (message) => { warnings.push(message); }
+    })({});
+    assert.deepEqual(await transport.request({ method, params: blockParams(method) }), base);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0]!, /cross-check degraded.*broken\.invalid/u);
+  }
+  const transport = createIndexerRpcTransport(["https://first.invalid", "https://second.invalid"], {
+    fetchImpl: async () => new Response("unavailable", { status: 503 }), warn: () => {}
+  })({});
+  await assert.rejects(transport.request({ method: "eth_getBlockByNumber", params: blockParams("eth_getBlockByNumber") }),
+    (error) => error instanceof HttpRequestError && error.status === 503);
+});
+
+for (const method of blockMethods) test(`${method} fullTx bounds the slow provider grace and aborts its request`, async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const { result: block } = await zeroGasFixture("eth-rpc-block-full");
+  const warnings: string[] = [];
+  const aborted: string[] = [];
+  const transport = createIndexerRpcTransport(["https://slow.invalid", "https://fast.invalid"], {
+    fetchImpl: async (input, init) => {
+      if (String(input).includes("slow")) {
+        init?.signal?.addEventListener("abort", () => aborted.push(String(input)), { once: true });
+        return pendingUntilAbort(init);
+      }
+      return rpcResponse(init, block);
+    }, warn: (message) => { warnings.push(message); }
+  })({ retryCount: 0, timeout: 10_000 });
+  const result = transport.request({ method, params: blockParams(method) });
+  await setImmediate();
+  assert.equal(warnings.length, 0);
+  t.mock.timers.tick(INDEXER_RPC_LOGS_CROSS_CHECK_GRACE_MS);
+  await setImmediate();
+  assert.deepEqual(await result, block);
+  assert.equal(Date.now(), INDEXER_RPC_LOGS_CROSS_CHECK_GRACE_MS);
+  assert.deepEqual(aborted, ["https://slow.invalid/"]);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0]!, /cross-check degraded.*slow\.invalid/u);
+});
+
+test("an immediate hollow-block rejection does not shorten the wait for the good provider", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const [bad, good] = await Promise.all([zeroGasFixture("dweller-block-full"), zeroGasFixture("eth-rpc-block-full")]);
+  let finish: (() => void) | undefined;
+  let done = false;
+  const transport = createIndexerRpcTransport(["https://hole.invalid", "https://good.invalid"], {
+    fetchImpl: async (input, init) => String(input).includes("hole") ? rpcResponse(init, bad.result)
+      : new Promise<Response>((resolve) => { finish = () => resolve(rpcResponse(init, good.result)); }),
+    warn: () => {}
+  })({ retryCount: 0, timeout: 10_000 });
+  const request = transport.request({ method: "eth_getBlockByNumber", params: blockParams("eth_getBlockByNumber") })
+    .then((result) => { done = true; return result; });
+  await setImmediate();
+  t.mock.timers.tick(INDEXER_RPC_LOGS_CROSS_CHECK_GRACE_MS + 1);
+  await setImmediate();
+  assert.equal(done, false, "a rejection must not start the grace clock");
+  assert.ok(finish);
+  finish();
+  assert.deepEqual(await request, good.result);
 });
 
 test("eth_getLogs is cross-checked across providers: the superset answers and the hole is named", async () => {
