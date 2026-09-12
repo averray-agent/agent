@@ -196,6 +196,9 @@ export function createIndexerRpcTransport(
           && Array.isArray(args.params) && args.params[1] === true) {
           return crossCheckBlocks(providers, args, { warn, graceMs: logsCrossCheckGraceMs });
         }
+if (providers.length > 1 && isConcreteBlockRequest(args)) {
+          return fallbackBlockOnNull(providers, args, warn);
+        }
         for (let attempt = 0; ; attempt += 1) {
           try {
             return await chain.request(args);
@@ -209,6 +212,59 @@ export function createIndexerRpcTransport(
       }) as typeof chain.request
     }, chain.value);
   };
+}
+
+function isConcreteBlockRequest(args: RpcRequestArgs): boolean {
+  if (args.method === "eth_getBlockByHash") return true;
+  return args.method === "eth_getBlockByNumber"
+    && Array.isArray(args.params) && typeof args.params[0] === "string"
+&& /^0x[0-9a-f]+$/iu.test(args.params[0]);
+}
+
+/**
+ * Ponder's reorg parent walk requests hashes without full transactions. A null
+ * is a successful JSON-RPC response, so ordinary fallback stops at a provider's
+ * missing hash lookup (20570285 on DWELLER). Treat null as a per-request
+ * fallthrough, preserving viem's error policy and the first non-null response.
+ * Only unanimous nulls prove absence; an error/timeout is not a null vote.
+ */
+async function fallbackBlockOnNull(
+  providers: Provider[],
+  args: RpcRequestArgs,
+  warn: (message: string) => void
+): Promise<unknown> {
+  const missing: string[] = [];
+  let lastFailure: unknown;
+  const missingBlock = new Error("Provider returned null for a concrete block");
+  const chain = fallback(providers.map(({ url, transport }) => () => ({
+    ...transport,
+    request: (async (request: RpcRequestArgs) => {
+      let value: unknown;
+      try {
+        value = await transport.request(request as never);
+      } catch (error) {
+        lastFailure = error;
+        throw error;
+      }
+      if (value === null) {
+        missing.push(url);
+        throw missingBlock;
+      }
+      return { url, value };
+    }) as typeof transport.request
+  })), { retryCount: 0, rank: false })({});
+
+  let answer: { url: string; value: unknown };
+  try {
+    answer = await chain.request(args as never) as typeof answer;
+  } catch (error) {
+if (missing.length === providers.length) return null;
+    throw lastFailure ?? error;
+  }
+for (const url of missing) {
+    warn(`${url} returned null for ${args.method} ${JSON.stringify(args.params)}, but ${answer.url} returned the block. Report this block hole to the provider; the index used ${answer.url}'s answer.`);
+  }
+  return answer.value;
 }
 
 /**
@@ -337,7 +393,13 @@ async function crossCheckBlocks(
   });
   if (answers.length === 0) throw lastFailure;
   const blocks = answers.filter((answer) => answer.value !== null);
-  if (blocks.length === 0) return null;
+  if (blocks.length === 0) {
+    // Concrete blocks are absent only if EVERY provider said null, not when a
+    // timeout/error removed the provider that might have the block. Tag-based
+    // cross-checks retain their existing behavior.
+if (isConcreteBlockRequest(args) && answers.length !== providers.length) throw lastFailure;
+    return null;
+  }
 
   const identity = blocks[0]!.value!;
   const positions = new Map<string, string>();
