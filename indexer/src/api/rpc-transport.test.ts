@@ -441,7 +441,7 @@ test("full block cross-check refuses incomparable hash sets, different blocks, a
   }
 });
 
-test("hash-only block requests retain ordinary fallback rather than full-transaction cross-checks", async () => {
+test("non-null hash-only block requests retain ordinary fallback rather than full-transaction cross-checks", async () => {
   const full = (await zeroGasFixture("eth-rpc-block-full")).result as CapturedBlock;
   const hashes = { ...full, transactions: full.transactions.map((tx) => tx.hash) };
   for (const method of blockMethods) {
@@ -453,6 +453,149 @@ test("hash-only block requests retain ordinary fallback rather than full-transac
     assert.deepEqual(await transport.request({ method, params: blockParams(method, false) }), hashes);
     assert.deepEqual(calls, ["https://first.invalid/"]);
   }
+});
+
+const NULL_HOLE_NUMBER = "0x139e0ad";
+const NULL_HOLE_HASH = "0x708e5e567d9df22a421a02ccd7dd9e7d6345f6848126fdd409facf2138ba8a86";
+async function nullHoleFixture(provider: string): Promise<{ result: unknown }> {
+  return JSON.parse(await readFile(new URL(`./fixtures/rpc-hole-20570285/${provider}-block-by-hash.json`, import.meta.url), "utf8"));
+}
+function nullHoleParams(method: typeof blockMethods[number], fullTx: boolean) {
+  return [method === "eth_getBlockByNumber" ? NULL_HOLE_NUMBER : NULL_HOLE_HASH, fullTx] as const;
+}
+
+test("real block 20570285: Ponder's hash-only parent walk falls through DWELLER null and names the hole", async () => {
+  const [dweller, ethRpc] = await Promise.all([nullHoleFixture("dweller"), nullHoleFixture("eth-rpc")]);
+  assert.equal(dweller.result, null);
+  assert.equal((ethRpc.result as CapturedBlock).number, NULL_HOLE_NUMBER);
+  assert.equal((ethRpc.result as CapturedBlock).hash, NULL_HOLE_HASH);
+  assert.deepEqual((ethRpc.result as CapturedBlock).transactions, []);
+  const calls: string[] = [];
+  const warnings: string[] = [];
+  const transport = createIndexerRpcTransport(["https://dweller.invalid", "https://eth-rpc.invalid"], {
+    fetchImpl: async (input, init) => {
+      calls.push(String(input));
+      assert.equal(rpcBody(init).method, "eth_getBlockByHash");
+      assert.deepEqual(rpcBody(init).params, [NULL_HOLE_HASH, false]);
+      return rpcResponse(init, String(input).includes("dweller") ? dweller.result : ethRpc.result);
+    },
+    warn: (message) => { warnings.push(message); }
+  })({});
+  assert.deepEqual(await transport.request({ method: "eth_getBlockByHash", params: [NULL_HOLE_HASH, false] }), ethRpc.result);
+  assert.deepEqual(calls, ["https://dweller.invalid/", "https://eth-rpc.invalid/"]);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0]!, /dweller\.invalid.*returned null.*eth-rpc\.invalid/u);
+  assert.ok(warnings[0]!.includes(NULL_HOLE_HASH), "the warning identifies the missing parent");
+});
+
+test("concrete block nulls consult every remaining provider until one has the block, in both transaction modes", async () => {
+  const { result: block } = await nullHoleFixture("eth-rpc");
+  // Synthetic null-by-number and fullTx variants of the captured empty block.
+  for (const method of blockMethods) for (const fullTx of [false, true]) {
+    const calls: string[] = [];
+    const warnings: string[] = [];
+    const urls = ["https://missing-first.invalid", "https://missing-second.invalid", "https://good.invalid"];
+    const transport = createIndexerRpcTransport(urls, {
+      fetchImpl: async (input, init) => {
+        calls.push(String(input));
+        assert.deepEqual(rpcBody(init).params, nullHoleParams(method, fullTx));
+        return rpcResponse(init, String(input).includes("good") ? block : null);
+      },
+      warn: (message) => { warnings.push(message); }
+    })({});
+    assert.deepEqual(await transport.request({ method, params: nullHoleParams(method, fullTx) }), block);
+    assert.deepEqual(calls, urls.map((url) => `${url}/`));
+    assert.equal(warnings.length, 2);
+    for (const provider of ["missing-first", "missing-second"]) {
+      assert.ok(warnings.some((message) => message.includes(provider) && message.includes("returned null") && message.includes("good.invalid")));
+    }
+  }
+});
+
+test("concrete blocks return null only after every configured provider returns null", async () => {
+  for (const method of blockMethods) for (const fullTx of [false, true]) for (const count of [1, 2, 3]) {
+    const urls = Array.from({ length: count }, (_, index) => `https://provider-${index}.invalid`);
+    const calls: string[] = [];
+    const transport = createIndexerRpcTransport(urls, {
+      fetchImpl: async (input, init) => { calls.push(String(input)); return rpcResponse(init, null); },
+      warn: (message) => assert.fail(message)
+    })({});
+    assert.equal(await transport.request({ method, params: nullHoleParams(method, fullTx) }), null);
+    assert.deepEqual(calls, urls.map((url) => `${url}/`));
+  }
+});
+
+test("null plus a provider error is not agreement that a concrete block is absent", async () => {
+  for (const method of blockMethods) for (const fullTx of [false, true]) for (const reverse of [false, true]) {
+    const urls = ["https://missing.invalid", "https://failed.invalid"];
+    if (reverse) urls.reverse();
+    const calls: string[] = [];
+    const transport = createIndexerRpcTransport(urls, {
+      fetchImpl: async (input, init) => {
+        calls.push(String(input));
+        return String(input).includes("missing") ? rpcResponse(init, null) : new Response("unavailable", { status: 503 });
+      },
+      warn: () => {}
+    })({});
+    await assert.rejects(transport.request({ method, params: nullHoleParams(method, fullTx) }),
+      (error) => error instanceof HttpRequestError && error.status === 503);
+    assert.deepEqual(calls, urls.map((url) => `${url}/`));
+  }
+});
+
+test("null and failed providers do not prevent a later provider from returning a concrete block", async () => {
+  const { result: block } = await nullHoleFixture("eth-rpc");
+  for (const method of blockMethods) for (const fullTx of [false, true]) {
+    const warnings: string[] = [];
+    const transport = createIndexerRpcTransport(["https://missing.invalid", "https://failed.invalid", "https://good.invalid"], {
+      fetchImpl: async (input, init) => String(input).includes("failed")
+        ? new Response("unavailable", { status: 503 })
+        : rpcResponse(init, String(input).includes("missing") ? null : block),
+      warn: (message) => { warnings.push(message); }
+    })({});
+    assert.deepEqual(await transport.request({ method, params: nullHoleParams(method, fullTx) }), block);
+    assert.ok(warnings.some((message) => message.includes("missing.invalid") && message.includes("returned null") && message.includes("good.invalid")));
+  }
+});
+
+test("tag-based block requests retain their existing null behavior in both transaction modes", async () => {
+  for (const tag of ["latest", "pending", "earliest", "safe", "finalized"]) for (const fullTx of [false, true]) {
+    const calls: string[] = [];
+    const transport = createIndexerRpcTransport(["https://missing.invalid", "https://failed.invalid"], {
+      fetchImpl: async (input, init) => {
+        calls.push(String(input));
+        assert.deepEqual(rpcBody(init).params, [tag, fullTx]);
+        return String(input).includes("missing") ? rpcResponse(init, null) : new Response("unavailable", { status: 503 });
+      },
+      warn: () => {}
+    })({});
+    assert.equal(await transport.request({ method: "eth_getBlockByNumber", params: [tag, fullTx] }), null);
+    assert.deepEqual(calls, fullTx
+      ? ["https://missing.invalid/", "https://failed.invalid/"]
+      : ["https://missing.invalid/"]);
+  }
+});
+
+test("a concrete full-block null cannot become absence when the other provider outlasts the grace", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const aborted: string[] = [];
+  const transport = createIndexerRpcTransport(["https://missing.invalid", "https://slow.invalid"], {
+    fetchImpl: async (input, init) => {
+      if (String(input).includes("missing")) return rpcResponse(init, null);
+      init?.signal?.addEventListener("abort", () => aborted.push(String(input)), { once: true });
+      return pendingUntilAbort(init);
+    },
+    warn: () => {}
+  })({});
+  const rejected = assert.rejects(
+    transport.request({ method: "eth_getBlockByHash", params: [NULL_HOLE_HASH, true] }),
+    /cross-check grace/u
+  );
+  await setImmediate();
+  t.mock.timers.tick(INDEXER_RPC_LOGS_CROSS_CHECK_GRACE_MS);
+  await setImmediate();
+  await rejected;
+  assert.deepEqual(aborted, ["https://slow.invalid/"]);
 });
 
 test("full block cross-check distinguishes a missing block from a known empty block", async () => {
