@@ -21,6 +21,12 @@ const ADDRESSES = {
 async function runHostedStackFixture({
   autoVerifierOk,
   warnings = [],
+  // Per-request response sequences. Entry N answers request N+1 (the last
+  // entry repeats); an entry may be a document or a function of the default
+  // document. This is how a deploy-time transient is staged: a degraded
+  // first read, a recovered second one.
+  healthResponses = null,
+  posterOnboardingResponses = null,
   healthTransportFailure = null,
   timeoutSec = "5",
   htmlCacheControl = "no-cache",
@@ -35,6 +41,11 @@ async function runHostedStackFixture({
     disclosure: { statement: "Technical pilot. Principal at risk. No depositor protection." }
   },
   creditConfigured = false,
+  adminStatus = {
+    maintenance: { policy: { enabled: true, risk: { defaultClaimStakeBps: 100, claimFeeBps: 50 } } },
+    xcmSettlementWatcher: { enabled: true, pendingCount: 0, running: true },
+    xcmObservationRelay: { enabled: false, running: false, lastError: null, lastSyncedAt: null }
+  },
   creditStatus = 200,
   indexerHeadAgeSec = 60,
   indexerHeadBlock = 20_521_542,
@@ -167,6 +178,7 @@ async function runHostedStackFixture({
       ]
     }],
     liveReads: {
+      asOf: new Date().toISOString(),
       protocolFeeBps: { status: "available" },
       feeRecipient: { status: "available" },
       claimBond: { status: "available" },
@@ -234,11 +246,7 @@ async function runHostedStackFixture({
     }],
     ["/onboarding", onboarding],
     ["/poster/onboarding", posterOnboarding],
-    ["/admin/status", {
-      maintenance: { policy: { enabled: true, risk: { defaultClaimStakeBps: 100, claimFeeBps: 50 } } },
-      xcmSettlementWatcher: { enabled: true, pendingCount: 0, running: true },
-      xcmObservationRelay: { enabled: false, running: false, lastError: null, lastSyncedAt: null }
-    }],
+    ["/admin/status", adminStatus],
     ["/strategies", {
       status: "retired",
       retired: true,
@@ -292,10 +300,22 @@ async function runHostedStackFixture({
     ["/redirect/app/connect", "https://averray.com/builders/#install"],
     ["/api/jobs/open", "https://api.averray.com/jobs"]
   ]);
+  const sequenced = new Map([
+    ["/health", { base: health, responses: healthResponses }],
+    ["/poster/onboarding", { base: posterOnboarding, responses: posterOnboardingResponses }]
+  ]);
   const requestCounts = new Map();
   const server = createServer((request, response) => {
     const requestCount = (requestCounts.get(request.url) ?? 0) + 1;
     requestCounts.set(request.url, requestCount);
+    const sequence = sequenced.get(request.url);
+    if (sequence?.responses) {
+      const entry = sequence.responses[Math.min(requestCount, sequence.responses.length) - 1];
+      const document = typeof entry === "function" ? entry(structuredClone(sequence.base)) : entry;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(document));
+      return;
+    }
     if (request.url === "/health" && (
       healthTransportFailure === "always_http_503"
       || (requestCount === 1 && healthTransportFailure === "http_503")
@@ -448,10 +468,11 @@ async function runHostedStackFixture({
       CHECK_SIWE_FRESH_WALLET_PROOF: "0",
       CHECK_WORKER_CANARY_PROOF: "0",
       CHECK_METRICS_AUTH: "0",
-      PRODUCT_HEALTH_EXPECTED_WARNINGS: "submitted_session_persistently_skipped",
       HOSTED_CURL_RETRY_BACKOFF_1_SEC: "0",
       HOSTED_CURL_RETRY_BACKOFF_2_SEC: "0",
       LIVE_READ_ATTEMPTS: "1",
+      TRANSIENT_RECHECK_SLEEP_SEC: "0",
+      TRANSIENT_RECHECK_MAX_SLEEP_SEC: "0",
       TIMEOUT_SEC: timeoutSec,
       ...extraEnv
     };
@@ -548,7 +569,354 @@ test("hosted smoke accepts a healthy submitted-job verifier", async () => {
 
   assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /Checking DepositPool door/u);
+  assert.match(result.stdout, /\/health warnings: none/u);
   assert.match(result.stdout, /Hosted stack smoke check passed\./u);
+});
+
+// --- Deploy-time transients ---------------------------------------------------
+//
+// Production deploys on 2026-09-11/12 (runs 34605177569, 34639123465,
+// 34694909418, 34707381954, 34711658754) died with a bare
+// "##[error]Process completed with exit code 1" right after "Checking API
+// health" or "Checking poster onboarding live facts", and the same check was
+// green minutes later. Two mechanics, both pinned below:
+//
+//   * the verifier's in-memory failure streaks reset on a backend recreate and
+//     go critical (submitted_session_persistently_skipped) at run 2, clearing a
+//     run or two later;
+//   * poster onboarding populates its fee/claim-bond/dispute-window facts only
+//     from live chain reads, which report `unavailable` while the gateway warms.
+//
+// Each gets exactly ONE bounded re-read. indexer_stalled never does.
+
+const VERIFIER_CRITICAL = Object.freeze({
+  code: "submitted_session_persistently_skipped",
+  severity: "critical",
+  message: "Submitted-job auto-verifier is unhealthy (submitted_session_persistently_skipped); persistent submitted session count: 1."
+});
+const INDEXER_STALLED_CRITICAL = Object.freeze({
+  code: "indexer_stalled",
+  severity: "critical",
+  message: "Indexer sync is stalled: the newest indexed block has not advanced for 1200s and is 1800s behind the chain."
+});
+
+function degradedVerifierHealth({
+  consecutiveRuns = 2,
+  intervalMs = 60_000,
+  state = "submitted_session_persistently_skipped",
+  nextRunAt = new Date(Date.now() + 200).toISOString(),
+  extraWarnings = []
+} = {}) {
+  return (health) => ({
+    ...health,
+    warnings: [...extraWarnings, { ...VERIFIER_CRITICAL, code: state }],
+    components: {
+      ...health.components,
+      submittedJobAutoVerifier: {
+        ok: false,
+        state,
+        staleAfterMs: 180_000,
+        enabled: true,
+        running: true,
+        mode: "live",
+        intervalMs,
+        nextRunAt,
+        lastRunFinishedAt: new Date(Date.now() - 1_000).toISOString(),
+        consecutiveSchedulerFailures: 0,
+        pendingTimeoutCount: 0,
+        persistentSubmittedFailureCount: 1,
+        persistentSubmittedFailures: [{
+          sessionId: "session-fixture",
+          jobId: "job-fixture",
+          reason: "settlement_not_ready",
+          consecutiveRuns,
+          lastSeenAt: new Date(Date.now() - 1_000).toISOString()
+        }]
+      }
+    }
+  });
+}
+
+// The document /poster/onboarding serves while the chain gateway is cold: the
+// live-derived fee, claim-bond and dispute-window facts are absent or
+// `available: false`, and `liveReads` says why (buildSnapshot in
+// mcp-server/src/core/poster-onboarding.js).
+function coldGatewayPosterOnboarding(poster, asOf = new Date().toISOString()) {
+  const { protocolFeeBps, posterFeeBps, posterFeeFloorRaw, feeRecipient, ...economics } = poster.economics;
+  const unavailable = { status: "unavailable", reason: "live_chain_read_failed" };
+  return {
+    ...poster,
+    economics: { ...economics, availability: { protocolFeeBps: unavailable, feeRecipient: unavailable } },
+    cancellation: {
+      selfServeCancel: false,
+      rescue: "operator-mediated on request, ~7 days, refunds only ever to the recorded poster",
+      plannedSelfServeCancel: "cancelOpenJob, next EscrowCore deployment window"
+    },
+    workerFacts: {
+      ...poster.workerFacts,
+      claimBond: { available: false, reason: "live_chain_read_failed" },
+      disputeWindow: {
+        available: false,
+        reason: "live_chain_read_failed",
+        remedy: poster.workerFacts.disputeWindow.remedy
+      }
+    },
+    liveReads: {
+      asOf,
+      protocolFeeBps: unavailable,
+      feeRecipient: unavailable,
+      claimBond: unavailable,
+      disputeWindow: unavailable
+    }
+  };
+}
+
+test("a failing API-health clause is named with the warnings and fields it read", async () => {
+  // consecutiveRuns 30 × 60s = 1800s: the verifier has watched this failure for
+  // half an hour, far past the post-recreate grace, so it is refused outright.
+  const result = await runHostedStackFixture({
+    autoVerifierOk: false,
+    healthResponses: [degradedVerifierHealth({ consecutiveRuns: 30 })]
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.equal(result.requestCounts["/health"], 1, "an old verifier critical must not be re-read");
+  assert.match(result.stdout, /\/health warnings: submitted_session_persistently_skipped \(critical\)/u);
+  assert.match(result.stderr, /API health: clause 'auto_verifier_ok' failed\./u);
+  assert.match(result.stderr, /asserted: \.components\.submittedJobAutoVerifier\.ok == true/u);
+  assert.match(result.stderr, /observed: \{"ok":false,"state":"submitted_session_persistently_skipped"/u);
+  assert.match(result.stderr, /"consecutiveRuns":30/u);
+  assert.match(result.stderr, /refused on clause 'auto_verifier_ok' \(warnings seen: submitted_session_persistently_skipped \(critical\)\); not a deploy-time transient, so no re-read\./u);
+});
+
+test("a young verifier critical that clears on the single re-read passes", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    healthResponses: [degradedVerifierHealth({ consecutiveRuns: 2 }), (health) => health]
+  });
+
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(result.requestCounts["/health"], 2, "exactly one re-read");
+  // The first read did fail its clause and the log must say so — the re-read
+  // is a second look, not a suppression.
+  assert.match(result.stderr, /API health: clause 'auto_verifier_ok' failed\./u);
+  assert.match(result.stdout, /younger than VERIFIER_CRITICAL_GRACE_SEC=600s \(streak 2 run\(s\) x 60000ms\)/u);
+  assert.match(result.stdout, /Re-reading \/health ONCE in 0s/u);
+  assert.match(result.stdout, /\/health warnings on re-read: none/u);
+  assert.match(result.stdout, /API health clauses passed on the re-read; the verifier critical cleared\./u);
+  assert.match(result.stdout, /Hosted stack smoke check passed\./u);
+});
+
+test("a young verifier critical that does not clear fails after exactly one re-read", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: false,
+    healthResponses: [degradedVerifierHealth({ consecutiveRuns: 2 }), degradedVerifierHealth({ consecutiveRuns: 3 })]
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.equal(result.requestCounts["/health"], 2, "one re-read, never a loop");
+  assert.match(result.stderr, /API health \(re-read\): clause 'auto_verifier_ok' failed\./u);
+  assert.match(result.stderr, /refused on clause 'auto_verifier_ok' after the single bounded re-read \(warnings seen: submitted_session_persistently_skipped \(critical\); verifier streak 3 run\(s\) x 60000ms\)\./u);
+  assert.equal(result.requestCounts["/indexer/status"], undefined, "the smoke stops at the refused clause");
+});
+
+test("the re-read waits for the verifier's next run, capped by TRANSIENT_RECHECK_MAX_SLEEP_SEC", async () => {
+  const startedAt = Date.now();
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    healthResponses: [
+      degradedVerifierHealth({ consecutiveRuns: 2, nextRunAt: new Date(Date.now() + 30_000).toISOString() }),
+      (health) => health
+    ],
+    extraEnv: { TRANSIENT_RECHECK_SLEEP_SEC: "0", TRANSIENT_RECHECK_MAX_SLEEP_SEC: "2" }
+  });
+
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  // nextRunAt is 30s out (+5s margin) but the cap is 2s: the wait is 2s, not 35s.
+  assert.match(result.stdout, /Re-reading \/health ONCE in 2s/u);
+  assert.ok(Date.now() - startedAt >= 1_900, "the smoke actually slept for the announced 2s");
+  assert.equal(result.requestCounts["/health"], 2);
+});
+
+test("indexer_stalled fails the API health check immediately, even beside a young verifier critical", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: false,
+    healthResponses: [
+      degradedVerifierHealth({ consecutiveRuns: 2, extraWarnings: [INDEXER_STALLED_CRITICAL] }),
+      (health) => health
+    ]
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.equal(result.requestCounts["/health"], 1, "indexer_stalled is never re-read");
+  assert.match(result.stdout, /\/health warnings: indexer_stalled \(critical\), submitted_session_persistently_skipped \(critical\)/u);
+  assert.match(result.stderr, /API health: clause 'indexer_not_stalled' failed\./u);
+  assert.match(result.stderr, /observed: \[\{"code":"indexer_stalled","severity":"critical"/u);
+  assert.match(result.stderr, /refused on clause 'indexer_not_stalled' .*not a deploy-time transient, so no re-read\./u);
+  assert.match(result.stderr, /docker restart agent-mainnet-indexer/u);
+  assert.match(result.stderr, /INCIDENT_RESPONSE\.md/u);
+  assert.equal(result.requestCounts["/indexer/status"], undefined, "refused before the sync-liveness step");
+});
+
+test("a pass that still carries an ungated critical is labelled, not presented as clean", async () => {
+  // blockchain_unhealthy is a cold cache for the first seconds after a
+  // recreate, so the smoke does not gate it — but a green run must still say
+  // that /health carried it (truth boundary: passed-with-degraded-capability is
+  // not the same state as passed).
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    warnings: [{ code: "blockchain_unhealthy", severity: "critical", message: "Blockchain capability is unhealthy." }]
+  });
+
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(result.requestCounts["/health"], 1);
+  assert.match(result.stdout, /\/health warnings: blockchain_unhealthy \(critical\)/u);
+  assert.match(result.stdout, /WARNING: API health passed its gated clauses while \/health still carries critical warning\(s\) this smoke does not gate: blockchain_unhealthy\./u);
+});
+
+test("indexer_stalled alone is refused at the API health step", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    warnings: [INDEXER_STALLED_CRITICAL]
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.equal(result.requestCounts["/health"], 1);
+  assert.match(result.stderr, /API health: clause 'indexer_not_stalled' failed\./u);
+  assert.equal(result.requestCounts["/indexer/status"], undefined);
+});
+
+test("a verifier critical other than persistently_skipped is refused on the first read", async () => {
+  // verification_timeout_pending is a hung verification, not post-recreate
+  // noise (docs/INCIDENT_RESPONSE.md: restart the backend), so no re-read.
+  const result = await runHostedStackFixture({
+    autoVerifierOk: false,
+    healthResponses: [
+      degradedVerifierHealth({ consecutiveRuns: 2, state: "verification_timeout_pending" }),
+      (health) => health
+    ]
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.equal(result.requestCounts["/health"], 1);
+  assert.match(result.stderr, /API health: clause 'auto_verifier_ok' failed\./u);
+  assert.match(result.stderr, /not a deploy-time transient, so no re-read\./u);
+});
+
+test("a poster-onboarding clause failing with live reads available is named and refused at once", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    posterOnboardingResponses: [
+      (poster) => ({ ...poster, economics: { ...poster.economics, feeSemantics: "worker_deducted" } }),
+      (poster) => poster
+    ]
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.equal(result.requestCounts["/poster/onboarding"], 1, "a contract regression is not re-fetched");
+  assert.match(result.stderr, /Poster onboarding: clause 'fee_semantics_poster_additive' failed\./u);
+  assert.match(result.stderr, /asserted: \.economics\.feeSemantics == "poster_additive"/u);
+  assert.match(result.stderr, /observed: "worker_deducted"/u);
+  assert.match(result.stderr, /refused on clause 'fee_semantics_poster_additive'; the document reports no unavailable live chain read \(live reads: protocolFeeBps=available, feeRecipient=available, claimBond=available, disputeWindow=available\), so this is a contract regression, not a warm-up transient — no re-fetch\./u);
+});
+
+test("poster onboarding re-fetches once while live reads are unavailable and passes when they recover", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    posterOnboardingResponses: [coldGatewayPosterOnboarding, (poster) => poster]
+  });
+
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(result.requestCounts["/poster/onboarding"], 2, "exactly one re-fetch");
+  // The first failing clause is a live-derived one and its context shows the
+  // unavailable read, so the log names the cause without a second document.
+  assert.match(result.stderr, /Poster onboarding: clause 'protocol_fee_bps_is_number' failed\./u);
+  assert.match(result.stderr, /observed: \{"protocolFeeBps":null,"availability":\{"protocolFeeBps":\{"status":"unavailable","reason":"live_chain_read_failed"\}/u);
+  assert.match(result.stdout, /clause 'protocol_fee_bps_is_number' failed on a document whose live chain reads are unavailable \(protocolFeeBps=unavailable \(live_chain_read_failed\), feeRecipient=unavailable \(live_chain_read_failed\), claimBond=unavailable \(live_chain_read_failed\), disputeWindow=unavailable \(live_chain_read_failed\); snapshot asOf \d{4}-\d{2}-\d{2}T[0-9:.]+Z\)/u);
+  assert.match(result.stdout, /so re-fetching ONCE in 0s\./u);
+  assert.match(result.stdout, /poster onboarding clauses passed on the re-fetch; the live chain reads recovered \(snapshot asOf \d{4}-\d{2}-\d{2}T[0-9:.]+Z\)\./u);
+  assert.match(result.stdout, /poster onboarding live reads available \(attempt 1\/1\)/u);
+  assert.match(result.stdout, /Hosted stack smoke check passed\./u);
+});
+
+test("poster onboarding fails after the single re-fetch when live reads stay unavailable", async () => {
+  // The backend caches the snapshot for POSTER_ONBOARDING_CACHE_MS; serving
+  // the same asOf twice is exactly what a too-short wait looks like, and the
+  // log must say so rather than let the operator believe the gateway was
+  // observed twice.
+  const cachedAsOf = "2026-09-12T20:00:00.000Z";
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    posterOnboardingResponses: [(poster) => coldGatewayPosterOnboarding(poster, cachedAsOf)]
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.equal(result.requestCounts["/poster/onboarding"], 2, "one re-fetch, never a loop");
+  assert.match(result.stdout, /snapshot asOf 2026-09-12T20:00:00\.000Z\)\. The live-derived facts cannot be present until the chain gateway has warmed up/u);
+  assert.match(result.stderr, /Poster onboarding \(re-fetch\): clause 'protocol_fee_bps_is_number' failed\./u);
+  assert.match(result.stderr, /refused on clause 'protocol_fee_bps_is_number' after the single bounded re-fetch \(live reads: protocolFeeBps=unavailable \(live_chain_read_failed\)/u);
+  assert.match(result.stderr, /Both reads carried the same snapshot \(asOf 2026-09-12T20:00:00\.000Z\)/u);
+  assert.match(result.stderr, /TRANSIENT_RECHECK_SLEEP_SEC must stay at or above the backend's POSTER_ONBOARDING_CACHE_MS/u);
+});
+
+test("the operator-token lane walks admin status and the poster/policy cross-check green", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    operatorToken: "fixture-operator-token"
+  });
+
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /Checking admin async XCM status/u);
+  assert.equal(result.requestCounts["/admin/status"], 1, "/admin/status is fetched once and reused");
+});
+
+test("an admin-status clause failure names the clause and keeps the operator-facing message", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    operatorToken: "fixture-operator-token",
+    adminStatus: {
+      maintenance: { policy: { enabled: true, risk: { defaultClaimStakeBps: 100, claimFeeBps: 50 } } },
+      xcmSettlementWatcher: { enabled: true, pendingCount: 0, running: false },
+      xcmObservationRelay: { enabled: false, running: false, lastError: null, lastSyncedAt: null }
+    }
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.match(result.stderr, /Admin status: clause 'xcm_settlement_watcher_running' failed\./u);
+  assert.match(result.stderr, /observed: \{"enabled":true,"pendingCount":0,"running":false\}/u);
+  assert.match(result.stderr, /settlement watcher loop is not alive/u);
+});
+
+test("the poster claim-bond policy cross-check names the drifted side", async () => {
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    operatorToken: "fixture-operator-token",
+    adminStatus: {
+      maintenance: { policy: { enabled: true, risk: { defaultClaimStakeBps: 250, claimFeeBps: 50 } } },
+      xcmSettlementWatcher: { enabled: true, pendingCount: 0, running: true },
+      xcmObservationRelay: { enabled: false, running: false, lastError: null, lastSyncedAt: null }
+    }
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.match(result.stderr, /Poster onboarding vs \/admin\/status: clause 'claim_bond_stake_bps_matches_policy' failed\./u);
+  assert.match(result.stderr, /observed: \{"poster":100,"policy":250\}/u);
+});
+
+test("a clause that would have thrown inside jq is reported as that clause with the observed object", async () => {
+  // A null onChain block made the old single expression throw on
+  // `ascii_downcase` (jq exit 5, one stack line, no clause name). The clause
+  // now evaluates to false and the log shows the object it read.
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    posterOnboardingResponses: [
+      (poster) => ({ ...poster, cancellation: { ...poster.cancellation, onChain: null } })
+    ]
+  });
+
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.match(result.stderr, /Poster onboarding: clause 'cancellation_contract' failed\./u);
+  assert.match(result.stderr, /observed: \{"cancellation":\{"selfServeCancel":true,"method":"cancelOpenJob\(bytes32\)","onChain":null/u);
 });
 
 test("hosted smoke owns HTML caching, canonical redirects, GET MCP, and the junk-receipt shell", async () => {
@@ -1202,4 +1570,61 @@ test("live chain reads are retried and advisory, never a hard deploy gate", asyn
 test("the advisory dump names the failing read rather than erroring", async () => {
   const script = await readFile(CHECK_SCRIPT, "utf8");
   assert.match(script, /select\(\.value \| type == "object"\)/u);
+});
+
+// Every jq assertion goes through evaluate_clauses so a red run names its
+// clause. A bare `jq -e '...' >/dev/null <<<"$something_json"` fails a deploy
+// with "exit code 1" and nothing else — the shape behind the 2026-09-11/12
+// production failures. The only `jq -e` calls left at statement start are the
+// predicate helpers that read their own `$1`, and the one `if jq -e` gate.
+test("no bare jq -e assertion is fed a document outside evaluate_clauses", async () => {
+  const script = await readFile(CHECK_SCRIPT, "utf8");
+  const bare = [...script.matchAll(/^\s*jq -e [\s\S]*?<<<"([^"]+)"/gmu)];
+  assert.ok(bare.length >= 3, "the predicate helpers still use jq -e on their argument");
+  for (const match of bare) {
+    assert.equal(match[1], "$1", `bare jq -e must only appear in a helper reading $1, found one reading ${match[1]}:\n${match[0].slice(0, 200)}`);
+  }
+  assert.doesNotMatch(script, /\| jq -e -s/u, "cross-document checks go through evaluate_clauses -s");
+  assert.match(script, /^assert_clauses\(\) \{\n  evaluate_clauses "\$@" \|\| exit 1\n\}/mu);
+});
+
+// The two re-read sites and their guard rails. The verifier re-read is keyed
+// on the streak age, not on the warning being present; indexer_stalled is
+// excluded by name so it can never ride along.
+test("deploy-time re-reads are single, bounded, and never cover indexer_stalled", async () => {
+  const script = await readFile(CHECK_SCRIPT, "utf8");
+
+  assert.match(script, /TRANSIENT_RECHECK_SLEEP_SEC=\$\{TRANSIENT_RECHECK_SLEEP_SEC:-30\}/u);
+  assert.match(script, /TRANSIENT_RECHECK_MAX_SLEEP_SEC=\$\{TRANSIENT_RECHECK_MAX_SLEEP_SEC:-90\}/u);
+  assert.match(script, /VERIFIER_CRITICAL_GRACE_SEC=\$\{VERIFIER_CRITICAL_GRACE_SEC:-600\}/u);
+
+  const transientGuard = script.slice(
+    script.indexOf("health_transient_verifier_critical() {"),
+    script.indexOf("health_recheck_delay_sec() {")
+  );
+  assert.match(transientGuard, /select\(\.code == "indexer_stalled"\)\] \| length == 0/u);
+  assert.match(transientGuard, /\$v\.state == "submitted_session_persistently_skipped"/u);
+  assert.match(transientGuard, /\(\(\$runs \| max\) \* \$v\.intervalMs \/ 1000\) <= \$graceSec/u);
+
+  // indexer_not_stalled is a hard API-health clause, ordered before the
+  // verifier clause so it is the one named when both are red.
+  const healthClauses = script.slice(
+    script.indexOf("api_health_clauses=("),
+    script.indexOf("api_health_json=\"$(fetch \"$API_HEALTH_URL\")\"")
+  );
+  assert.ok(
+    healthClauses.indexOf("indexer_not_stalled") < healthClauses.indexOf("auto_verifier_ok"),
+    "indexer_not_stalled must be evaluated before auto_verifier_ok"
+  );
+
+  // Each site re-reads exactly once: one sleep, one fetch, one re-evaluation,
+  // then exit 1 — no loop construct around either.
+  for (const [start, end] of [
+    ['echo "Checking API health"', "# Before any door that answers from the index"],
+    ['echo "Checking poster onboarding live facts"', "# Live chain reads are RETRIED, then advisory."]
+  ]) {
+    const site = script.slice(script.indexOf(start), script.indexOf(end));
+    assert.equal((site.match(/^\s*sleep /gmu) ?? []).length, 1, `${start} sleeps exactly once`);
+    assert.doesNotMatch(site, /^\s*(while|until|for)\b/mu, `${start} has no retry loop`);
+  }
 });

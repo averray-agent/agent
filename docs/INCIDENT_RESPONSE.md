@@ -228,6 +228,59 @@ tokens continue until expiry.
    ```
 3. If the bad state follows a fresh deploy, use the known-good rollback path.
 
+### Reading a red hosted smoke
+
+Every assertion in `check-hosted-stack.sh` is a named clause. A refusal
+prints, on stderr, the check, the clause, the jq expression and the fields it
+read — for example:
+
+```
+API health: clause 'indexer_not_stalled' failed.
+  asserted: [.warnings[]? | objects | select(.code == "indexer_stalled")] | length == 0
+  observed: [{"code":"indexer_stalled","severity":"critical","message":"…"}]
+API health: refused on clause 'indexer_not_stalled' (warnings seen: indexer_stalled (critical)); not a deploy-time transient, so no re-read.
+```
+
+The API-health step also prints `/health warnings: …` (every code and
+severity) on every run, so the log shows what the backend was reporting even
+when nothing was refused.
+
+Exactly two deploy-time transients get a single bounded second read; nothing
+else is retried after a document has been parsed:
+
+- **A young critical `submitted_session_persistently_skipped`.** The
+  verifier's failure streaks live in memory, a backend recreate resets them,
+  and `/health` goes critical at the second run after start while the chain
+  gateway is still cold; on 2026-09-11/12 it cleared within two more runs
+  every time. The smoke treats the streak age (`consecutiveRuns × intervalMs`)
+  as the clock: under `VERIFIER_CRITICAL_GRACE_SEC` (default 600) it waits for
+  the verifier's advertised next run — at least `TRANSIENT_RECHECK_SLEEP_SEC`
+  (30), at most `TRANSIENT_RECHECK_MAX_SLEEP_SEC` (90) — and reads `/health`
+  once more. An older streak, any other verifier state
+  (`verification_timeout_pending` needs `docker restart agent-mainnet-backend`,
+  see the health/deploy contract), or `indexer_stalled` beside it is refused on
+  the first read.
+- **Poster-onboarding live reads reporting `unavailable`.** The fee,
+  claim-bond and dispute-window facts are only populated from a successful
+  chain read, so while the gateway warms up the structural clauses cannot
+  pass. When the document itself says a live read is unavailable the smoke
+  re-fetches once after `TRANSIENT_RECHECK_SLEEP_SEC`; a clause failing on a
+  document that reports no unavailable read is a contract regression and is
+  refused at once. The backend caches the snapshot for
+  `POSTER_ONBOARDING_CACHE_MS` (30 s), which is why the default wait is 30 s:
+  if both reads carry the same `liveReads.asOf` the log says the re-fetch was
+  served the cached document and did not observe the gateway a second time.
+
+A pass that still carries a critical warning the smoke does not gate
+(`blockchain_unhealthy`, `treasury_mutations_unavailable`, locked-tier codes)
+is labelled `WARNING: API health passed its gated clauses while /health still
+carries critical warning(s) …` — read `capabilityHealth` before treating that
+deploy as clean.
+
+`indexer_stalled` is never re-read: the backend's own probe only reports it
+after the head has not moved for the stall budget, so it is real by the time
+the smoke sees it.
+
 ### Indexer sync stall from a provider block hole
 
 Seen 2026-09-10 21:37Z → 2026-09-11 08:00Z on mainnet. Recognise it by the
@@ -235,8 +288,10 @@ combination: `index.averray.com/health` **200**, `/ready` **503**, `/status`
 block timestamp not advancing, backend `/health` warning
 `indexer_stalled` (critical; `indexer_lagging` alone is also what a schema
 replay looks like — the difference is whether `/status` moves), hosted smoke
-failing at "Indexer sync is stalled" (or, before this runbook, at "CreditPool
-door did not return the wallet's L1/L2/L3 debt fields"), and indexer logs
+failing at `API health: clause 'indexer_not_stalled' failed.` or, when the
+backend probe has not caught up yet, at "Indexer sync is stalled" (or, before
+this runbook, at "CreditPool door did not return the wallet's L1/L2/L3 debt
+fields"), and indexer logs
 carrying `RpcProviderError: Inconsistent RPC response data … 'block.transactions'
 array does not contain a transaction matching that 'transactionIndex'` retried
 with growing `retry_delay`, then Postgres `terminating connection due to
