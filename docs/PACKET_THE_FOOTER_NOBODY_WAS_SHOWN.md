@@ -23,6 +23,29 @@ Both escrows: state `Rejected`, `rejectedAt 2026-09-12T23:16:48Z`,
 (`JobRejected` in blocks 20579267 / 20579274, reason
 `keccak("GITHUB_PR_EVIDENCE_INCOMPLETE")`).
 
+
+**The queue behind them (chain + GitHub, read 2026-09-14 20:30Z).** Five more
+`github_pr` submissions from three outside wallets are waiting on the same
+operator trigger, and the catalogue rows of all five are gone
+(`getJobDefinition` → `job_not_found`), like playsouthwales'. Under the rules
+as deployed, running the verifier on them today rejects four of five:
+
+| session | PR | disclosure as written | live checks | verdict today | verdict under this packet |
+|---|---|---|---|---|---|
+| `pr-fjosue4-trace-ux-24:0xA5F4…` (1.0, submitted 09-12 23:11Z) | fjosue4/trace-ux#26 | "AI agent (Averray agent `pr-fjosue4-trace-ux-24`, operator wallet 0xA5F4…)" | none | **rejected** (footer, claimant) | binds on `operator wallet` → 80/80 approve |
+| `pr-guallet-monorepo-198:0xA5F4…` (1.0, 09-13 18:30Z) | Guallet/monorepo#199 | "via the Averray agent-work platform (job …). Claimant wallet: `0xA5F4…`" | 2 check runs success; Vercel status "Authorization required" | **rejected** (footer, claimant) | binds on `Claimant wallet` → approve |
+| `pr-sauravs296-paygate-9:0xCdC6…` (1.0, 09-14 13:39Z) | sauravs296/PayGate#22 | canonical footer, matched | two Vercel statuses "Authorization required to deploy." | **rejected** (checks failing) | Vercel excluded → 80/80 approve |
+| `pr-voxxtrade-voxtrade-app-3:0xCdC6…` (1.0, 09-14 14:51Z) | voxxtrade/voxtrade-app#13 | canonical footer, matched | none | approve or human review (test evidence decides) | same |
+| `pr-helpcode-ai-anythingmcp-600:0xD136…` (1.0, 09-14 17:06Z) | HelpCode-ai/anythingmcp#609 | canonical footer, matched | check runs: `cla` **failure**, `welcome` success, `triage` skipped | **rejected** (checks failing) | `cla` is a policy gate → human review, never auto-reject |
+
+Two of the three agents found the canonical footer on their own (through the
+poster profile); the third wrote it in prose. And playsouthwales#129, which we
+rejected, **was merged by the maintainer on 2026-09-12** — a merged PR scores
+≥ 95 under our own table.
+
+**Operator instruction until this packet is live: do not call `/verifier/run`
+on any of these sessions.** There is no preview; a run settles.
+
 Every blocker is ours, not theirs:
 
 1. **The footer test is an exact sentence the worker never saw.**
@@ -75,11 +98,17 @@ Every blocker is ours, not theirs:
 5. **There was no way to look before settling.** `/verifier/run` has no
    preview. I predicted the verdicts from the score table instead of running
    the handler's own checks against the PR bodies I already had.
-6. The playsouthwales catalogue row is gone (`getJobDefinition` →
-   `job_not_found`; the backend was recreated for #1375 at ~23:05Z and the
-   ingest did not re-list it). The session still carries its job snapshot.
-   Anything in this packet must work from the session's snapshot, not the
-   catalogue.
+6. The catalogue rows of all six claimed-or-submitted `github_pr` jobs are
+   gone (`getJobDefinition` → `job_not_found`) while their sessions and
+   escrows live on; the five in the queue table were claimed 09-12 → 09-14
+   with no backend recreate in between (deployedSha unchanged since #1375).
+   Upstream retirement only archives on a *closed* issue and every one of
+   these issues is open, so something else removes a listed row after it is
+   claimed. Find it, and pin with a test that a row with an open session is
+   never removed or hidden from `getJobDefinition`. Everything in this packet
+   must work from the session's own job snapshot, not the catalogue.
+   (Related: the TricklePay row still reports `claimState: submitted` while
+   its session is `rejected`; the projection must read the session.)
 
 ## The fix
 
@@ -108,8 +137,12 @@ Every blocker is ours, not theirs:
    `inspectAverrayClaimantBinding` returns `matched` whenever the wallet or
    session line matches, regardless of the header sentence. Accepted labels,
    case-insensitive, optional leading `Averray`, surrounding markdown
-   (`*`, `_`, `>`, `-`, backticks) ignored: `Agent identity`, `Claimant
-   wallet`, `Claim session`, `Session`. Values may be wrapped in backticks.
+   (`*`, `_`, `>`, `-`, parentheses, backticks) ignored, label and value
+   separated by `:` or whitespace: `Agent identity`, `Claimant wallet`,
+   `Operator wallet`, `Agent wallet`, `Wallet` for the wallet; `Claim
+   session`, `Session` for the session. Values may be wrapped in backticks.
+   The five real disclosures in the queue table above are the fixtures: all
+   five must bind.
    The exact-match rule is unchanged and an unlabelled address anywhere in
    the body still does not bind (security property). `hasAverrayDisclosureFooter`
    is true for the canonical header **or** a labelled claimant line plus the
@@ -124,8 +157,13 @@ Every blocker is ours, not theirs:
    description matches `/authoriz/i`, or whose context names a deployment
    integration (`vercel`, `netlify`, `render`, `cloudflare pages`) and has
    no check runs behind it, is excluded from the CI decision and listed on
-   the verdict as `ciExclusions: [{context, description, reason}]`. A real
-   failed check run or a failed status from anything else stays `failing`.
+   the verdict as `ciExclusions: [{context, description, reason}]`. A check
+   run whose name matches `/\b(cla|dco|license)\b/i` is a **policy gate**:
+   excluded from `ciStatus`, recorded as `policyGates: [{name, conclusion}]`,
+   and a failing policy gate forces `human_fallback` (never auto-approve,
+   never auto-reject) with the gate named in the verdict so the worker can
+   act on it. A real failed check run or a failed status from anything else
+   stays `failing`.
 4. **Hand the worker the footer.** `getJobDefinition` for `github_pr` jobs
    returns `disclosure: { required, canonicalFooter, acceptedClaimantLines,
    rule }` with the exact text; the claim response (`POST /jobs/claim`,
@@ -178,10 +216,18 @@ Every blocker is ours, not theirs:
    `submitSafe: true` — must fail.
 9. `SKILL.md` contains the canonical footer and the binding rule; a test
    greps both. Mutation: drop the `Claim session:` line — must fail.
+10. The five queue disclosures (verbatim fixtures) all bind; a `cla` failure
+   yields `human_fallback` with the gate named; Vercel "Authorization required
+   to deploy." on two contexts yields `ciStatus unknown`. Mutation: treat a
+   policy gate as CI — must fail.
+11. A listed row whose session is claimed or submitted survives every ingest
+   tick and every lifecycle sweep and stays readable via `getJobDefinition`.
+   Mutation: remove the guard — must fail.
 
 ## Live remediation (operator, after deploy, before 2026-09-19T23:16:48Z)
 
-1. Preview both sessions. Expected under the corrected rules:
+1. Preview all seven sessions (the two rejected and the five queued).
+   Expected under the corrected rules for the two rejected:
    playsouthwales `approved` 80/80 with no blockers; TricklePay
    `human_fallback` (80/90, checks unknown while the upstream Actions run
    awaits maintainer approval).
@@ -197,7 +243,9 @@ Every blocker is ours, not theirs:
    `/verifier/result`, both agent profiles and `/pool`-independent treasury
    reads (fee 0.05 from the TricklePay claim lands in treasury as on any
    successful claim).
-5. If the PR is not deployed by 2026-09-18, open both disputes on chain
+5. Settle the five queued sessions with `--settle --expect <previewed
+   outcome>`; anything `human_fallback` goes through the arbitration flow.
+6. If the PR is not deployed by 2026-09-18, open both disputes on chain
    anyway (operator signer `openDisputeFor`, or the workers' own
    `openDispute`) — that alone prevents the slash and keeps full payout
    available; the local sessions are converged by the overturn route once it
