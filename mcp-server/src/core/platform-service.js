@@ -1,4 +1,7 @@
 import { createStateStore } from "./state-store.js";
+import { requireJobSnapshot } from "./job-snapshot.js";
+import { githubPrWorkerDefinition, isGithubPrJob } from "./github-pr-worker-contract.js";
+import { buildAverrayDisclosureFooter, buildAverrayDisclosureRequirement, inspectAverrayClaimantBinding } from "./maintainer-surface-policy.js";
 import { assertIngestedVerifierClassReward } from "./verifier-class-rewards.js";
 import { AccountMutationService } from "./account-mutation-service.js";
 import { JobCatalogService, explainEligibilityFromPreflight } from "./job-catalog-service.js";
@@ -1113,6 +1116,7 @@ export class PlatformService {
       jobStaleSweeper,
       submittedJobAutoVerifier,
       scheduler,
+      githubPrReview: await this.githubPrReview?.getStatus?.(),
       hostDiagnostics,
       providerOperations,
       onboarding: {
@@ -1167,20 +1171,35 @@ export class PlatformService {
       includePaused = false,
       includeStale = false
     } = options;
-    return restrictDesignatedJobForPublic(await this.attachClaimState(
-      this.jobCatalogService.getPublicJobDefinition(jobId, {
+    // Visibility and lifecycle describe future supply, not the definition an
+    // existing claimant agreed to. A session snapshot survives drift, retirement
+    // and reproducible catalogue rows disappearing across a restart.
+    const session = await this.stateStore.findSessionByJobId?.(jobId);
+    const definition = session?.jobSnapshot
+      ? { ...requireJobSnapshot(session).job, definitionSource: "claim_snapshot" }
+      : this.jobCatalogService.getPublicJobDefinition(jobId, {
         includeArchived,
         includePaused,
         includeStale,
         now
-      }),
+      });
+    return githubPrWorkerDefinition(restrictDesignatedJobForPublic(await this.attachClaimState(
+      definition,
       { wallet: currentWallet ?? wallet, now }
-    ));
+    )));
   }
 
-  async validateJobSubmission(jobId, submissionInput) {
-    const job = this.getJobDefinition(jobId);
+  async validateJobSubmission(jobId, submissionInput, { wallet, prBody } = {}) {
+    const session = await this.stateStore.findSessionByJobId?.(jobId);
+    const job = session?.jobSnapshot ? requireJobSnapshot(session).job : this.getJobDefinition(jobId);
     const contract = buildSubmissionValidationContract(job);
+    const claimSessionId = session?.wallet?.toLowerCase() === wallet?.toLowerCase() ? session?.sessionId : undefined;
+    const hint = buildAverrayDisclosureRequirement({ agentWallet: wallet, claimSessionId: claimSessionId ?? "<claimSessionId>" }).canonicalFooter;
+    const body = prBody ?? submissionInput?.prBody;
+    const binding = isGithubPrJob(job) && typeof body === "string"
+      ? inspectAverrayClaimantBinding(body, { claimantWallet: wallet, claimSessionId }) : undefined;
+    const disclosure = isGithubPrJob(job) ? { status: binding?.status ?? "not_checked", hint } : undefined;
+    const disclosureUnsafe = Boolean(binding && binding.status !== "matched");
     try {
       const normalized = normalizeSubmission(normalizeSubmitPayloadShape(job.outputSchemaRef, submissionInput, {
         registrations: job.schemaRegistrations
@@ -1197,7 +1216,9 @@ export class PlatformService {
       return {
         jobId,
         valid: true,
-        submitSafe: true,
+        submitSafe: !disclosureUnsafe,
+        ...(disclosure ? { disclosure } : {}),
+        ...(disclosureUnsafe ? { code: "disclosure_binding_missing" } : {}),
         ...contract,
         schemaRef: job.outputSchemaRef,
         submissionKind: normalized.kind,
@@ -1424,7 +1445,12 @@ export class PlatformService {
   }
 
   async claimJob(wallet, jobId, protocol, idempotencyKey, claimContext = undefined) {
-    return this.jobExecutionService.claimJob(wallet, jobId, protocol, idempotencyKey, claimContext);
+    const session = await this.jobExecutionService.claimJob(wallet, jobId, protocol, idempotencyKey, claimContext);
+    if (!session?.jobSnapshot || !isGithubPrJob(requireJobSnapshot(session).job)) return session;
+    return { ...session, disclosureFooter: buildAverrayDisclosureFooter({
+      agentWallet: session.wallet, claimSessionId: session.sessionId,
+      jobSpecUrl: `https://api.averray.com/jobs/definition?jobId=${encodeURIComponent(jobId)}`
+    }) };
   }
 
   async submitWork(sessionId, protocol, evidence = "submitted-via-service") {

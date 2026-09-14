@@ -205,6 +205,16 @@ export class EventListener {
       });
       const remediation = await this.internalPlatformFaultRemediation(event.sessionId, event.data.chainJobId);
       if (!remediation) {
+        const session = await this.stateStore?.findSessionByChainJobId?.(event.data.chainJobId)
+          ?? await this.stateStore?.getSession?.(event.sessionId);
+        if (session?.operatorOverturn) {
+          const { opener: _brokeredParticipant, ...data } = event.data;
+          return {
+            ...event, topic: "platform.overturn_dispute_opened", sessionId: session.sessionId,
+            wallet: session.wallet, wallets: [session.wallet],
+            data: { ...data, ...session.operatorOverturn, workerInitiated: false }
+          };
+        }
         return event;
       }
 

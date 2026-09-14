@@ -881,7 +881,7 @@ test("github_pr wizard gate rejects a claimant submitting someone else's merged 
   assert.match(verdict.detail, /claimant must match the actual claimant/iu);
 });
 
-test("github_pr wizard gate rejects a claimant line outside the Averray disclosure footer", async () => {
+test("github_pr wizard gate accepts an exact claimant line without the template header", async () => {
   const claimantWallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   const registry = new VerifierRegistry({
     githubToken: "github_pat_test",
@@ -896,10 +896,10 @@ test("github_pr wizard gate rejects a claimant line outside the Averray disclosu
     tests: "npm test passed"
   }), { claimantWallet, claimSessionId: "external-pr-session-claimant" });
 
-  assert.equal(verdict.githubLookup.claimantBinding.status, "missing");
+  assert.equal(verdict.githubLookup.claimantBinding.status, "matched");
   assert.equal(verdict.githubLookup.claimantBinding.footerPresent, false);
-  assert.equal(verdict.outcome, "rejected");
-  assert.match(verdict.detail, /disclosure must identify the actual claimant/iu);
+  assert.equal(verdict.outcome, "approved");
+  assert.ok(!verdict.blockers.some((blocker) => /claimant/iu.test(blocker)));
 });
 
 test("github_pr wizard gate escalates an unreadable live PR body to human review", async () => {

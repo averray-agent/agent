@@ -10,6 +10,10 @@ export function isApprovedSettlement(session) {
 }
 
 export function settlementOutcome(session) {
+  if (session?.operatorOverturn?.openedAt) {
+    const resolution = session.operatorOverturn.resolution;
+    return resolution ? (Number(resolution.workerPayout) > 0 ? "approved" : "rejected") : "disputed";
+  }
   const candidates = [
     session?.verificationSummary?.outcome,
     session?.verification?.outcome,

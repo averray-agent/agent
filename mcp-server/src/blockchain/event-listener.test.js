@@ -74,6 +74,24 @@ function makeListener({ gateway = {}, xcmRequest = {}, stateStore = undefined } 
   return { listener, xcmWrapperContract, events };
 }
 
+test("EventListener marks an operator overturn as platform initiated even before local transition confirms", async () => {
+  const chainJobId = `0x${"77".repeat(32)}`;
+  const escrowContract = makeContract({ address: `0x${"88".repeat(20)}`, eventTopics: { DisputeOpened: `0x${"09".repeat(32)}` } });
+  escrowContract.jobs = async () => ({ poster: ACCOUNT, worker: RECIPIENT, asset: ASSET, reward: 2n, released: 0n,
+    claimExpiry: 0n, claimStake: 0n, state: 5n });
+  const { listener, events } = makeListener({ gateway: { escrowContract }, stateStore: {
+    findSessionByChainJobId: async () => ({ sessionId: "overturn", jobId: "logical-job", wallet: RECIPIENT,
+      status: "rejected", operatorOverturn: { origin: "operator_overturn", workerInitiated: false, rationale: "Platform footer error" } })
+  } });
+  await listener.start();
+  await emit(listener, "DisputeOpened", { jobId: chainJobId, opener: RECIPIENT, disputedAt: 2n });
+  assert.equal(events[0].topic, "platform.overturn_dispute_opened");
+  assert.equal(events[0].sessionId, "overturn");
+  assert.equal(events[0].data.opener, undefined);
+  assert.equal(events[0].data.workerInitiated, false);
+  assert.equal(events[0].data.rationale, "Platform footer error");
+});
+
 test("EventListener keeps an internally brokered platform-fault dispute off public dispute events", async () => {
   const chainJobId = `0x${"77".repeat(32)}`;
   const sessionId = "session-platform-fault";

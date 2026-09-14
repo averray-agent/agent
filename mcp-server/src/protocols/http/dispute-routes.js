@@ -1,4 +1,4 @@
-import { AuthorizationError, ValidationError } from "../../core/errors.js";
+import { AuthorizationError, ConflictError, ValidationError } from "../../core/errors.js";
 import {
   ARBITRATOR_SLA_SECONDS,
   addSecondsIso,
@@ -180,6 +180,9 @@ export function createDisputeRoutes({
       status: releaseReceipt || verdictReceipt ? "resolved" : "open",
       sessionId: session.sessionId,
       chainJobId: session.chainJobId,
+      ...(session.operatorOverturn ? {
+        origin: "operator_overturn", workerInitiated: false, rationale: session.operatorOverturn.rationale
+      } : {}),
       claimant: session.wallet,
       respondent: defaultVerifierAddress ?? "0x0000000000000000000000000000000000000000",
       openedAt,
@@ -312,18 +315,46 @@ export function createDisputeRoutes({
         return true;
       }
       if (dispute.verdict || dispute.reasonCode) {
+        // Receipt may have persisted before a failed session write. An
+        // operator overturn must converge on retry, not replay a stale rejection.
+        const pending = await stateStore.getSession?.(dispute.sessionId);
+        if (pending?.operatorOverturn && pending.status === "disputed") {
+          const receipt = await stateStore.getMutationReceipt("dispute_verdict", id);
+          if (receipt?.chainStatus !== "confirmed") {
+            throw new ConflictError("Overturn arbitration has not confirmed on chain.", "overturn_resolution_unconfirmed");
+          }
+          await stateStore.upsertSession(transitionSession({
+            ...pending, operatorOverturn: { ...pending.operatorOverturn, resolution: receipt }
+          }, Number(receipt.workerPayout) > 0 ? "resolved" : "rejected", {
+            reason: receipt.reasonCode, timestamp: receipt.decidedAt,
+            metadata: { disputeId: id, verdict: receipt.verdict, workerPayout: receipt.workerPayout, origin: "operator_overturn" }
+          }));
+        }
         await respondWithMutationReceipt(response, idempotency, 200, dispute);
         return true;
       }
       const session = await service.resumeSession(dispute.sessionId);
       await assertJobSnapshotIntegrity(session, gateway);
       const decidedAt = new Date().toISOString();
-      const remainingPayout = await resolveRemainingPayout(session);
+      const liveOverturn = session.operatorOverturn && gateway?.isEnabled?.()
+        ? await gateway.getJob(session.chainJobId ?? session.jobId) : undefined;
+      const closedOverturn = Number(liveOverturn?.state) === ESCROW_JOB_STATE_CLOSED;
+      // Once hardware arbitration closes escrow, remaining reward is zero.
+      // Recover the actual payout from the cumulative released getter rather
+      // than recording that zero as the worker's arbitration payout.
+      const remainingPayout = closedOverturn
+        ? session.operatorOverturn.remainingPayout : await resolveRemainingPayout(session);
       const resolution = buildDisputeResolution({
         verdict: payload?.verdict ?? payload?.outcome,
         remainingPayout,
         workerPayout: payload?.workerPayout ?? payload?.payoutAmount
       });
+      if (closedOverturn) {
+        const paid = Number(liveOverturn.released) - Number(session.operatorOverturn.releasedBefore);
+        if (!Number.isFinite(paid) || Math.abs(paid - resolution.workerPayout) > 0.0000001) {
+          throw new ConflictError("The proposed verdict does not match the worker payout confirmed on chain.", "overturn_payout_mismatch", { confirmedWorkerPayout: paid });
+        }
+      }
       const reasoning = buildDisputeReasoningReceipt({
         id,
         dispute,
@@ -396,6 +427,9 @@ export function createDisputeRoutes({
         decidedBy: auth.wallet,
         decidedAt
       };
+      if (session.operatorOverturn && receipt.chainStatus !== "confirmed") {
+        throw new ConflictError("Overturn arbitration has not confirmed on chain.", "overturn_resolution_unconfirmed");
+      }
       await stateStore.upsertMutationReceipt?.("dispute_verdict", id, receipt);
       if (session.status === "disputed") {
         const transitioned = transitionSession(session, resolution.nextSessionStatus, {
@@ -409,7 +443,12 @@ export function createDisputeRoutes({
             txHash: receipt.txHash
           }
         });
-        await stateStore.upsertSession?.(transitioned);
+        await stateStore.upsertSession?.({
+          ...transitioned,
+          ...(session.operatorOverturn ? {
+            operatorOverturn: { ...session.operatorOverturn, resolution: receipt }
+          } : {})
+        });
       }
       eventBus?.publish({
         id: `dispute-verdict-${id}-${Date.now()}`,

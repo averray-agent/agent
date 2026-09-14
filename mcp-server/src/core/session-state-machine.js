@@ -1,4 +1,5 @@
 import { ConflictError } from "./errors.js";
+import { projectOverturnedVerification } from "./operator-overturn.js";
 
 const ALLOWED_TRANSITIONS = new Map([
   ["__new__", new Set(["claimed"])],
@@ -78,7 +79,7 @@ const STATUS_METADATA = {
 
 export function transitionSession(session, nextStatus, { reason, timestamp = new Date().toISOString(), metadata = undefined } = {}) {
   const currentStatus = session?.status ?? "__new__";
-  assertSessionCanTransition(session, nextStatus, { reason });
+  assertSessionCanTransition(session, nextStatus, { reason, metadata });
 
   const history = [...(session?.statusHistory ?? []), compact({
     from: currentStatus === "__new__" ? null : currentStatus,
@@ -106,15 +107,18 @@ export function transitionSession(session, nextStatus, { reason, timestamp = new
   });
 }
 
-export function canTransitionSession(session, nextStatus) {
+export function canTransitionSession(session, nextStatus, { metadata } = {}) {
   const currentStatus = session?.status ?? "__new__";
+  if (currentStatus === "rejected" && nextStatus === "disputed") {
+    return metadata?.origin === "operator_overturn";
+  }
   return (ALLOWED_TRANSITIONS.get(currentStatus) ?? new Set()).has(nextStatus);
 }
 
-export function assertSessionCanTransition(session, nextStatus, { reason = undefined } = {}) {
+export function assertSessionCanTransition(session, nextStatus, { reason = undefined, metadata } = {}) {
   const currentStatus = session?.status ?? "__new__";
   const allowedTransitions = getAllowedSessionTransitions(currentStatus);
-  if (allowedTransitions.includes(nextStatus)) {
+  if (canTransitionSession(session, nextStatus, { metadata })) {
     return true;
   }
   throw new ConflictError(
@@ -169,7 +173,7 @@ export function describeSessionStatus(status = "__new__") {
 
 export function buildSessionLifecycle(session = {}, verification = undefined) {
   const status = describeSessionStatus(session?.status ?? "__new__");
-  const verificationOutcome = verification?.outcome;
+  const verificationOutcome = projectOverturnedVerification(session, verification)?.outcome;
   const finalOutcome = verificationOutcome
     ? verificationOutcome
     : status.terminal

@@ -462,6 +462,8 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
 
       const githubEvidenceUnavailable = githubLookup.status !== "verified";
       const githubEvidencePartial = Object.values(githubLookup.partial ?? {}).includes("unavailable");
+      const failingPolicyGates = (githubLookup.policyGates ?? []).filter((gate) =>
+        gate.conclusion && !["success", "neutral", "skipped"].includes(gate.conclusion));
       const claimantBindingUnverified = claimantBindingRequired
         && (!claimantBindingObservable || claimantBinding?.status === "claimant_context_missing");
       const scoreAmbiguous = score < minimumScore && blockers.length === 0;
@@ -474,18 +476,19 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       // remains a rejection. Every inability to re-derive the PR against live
       // GitHub is different: it must enter human review, never reuse submitted
       // claims as sufficient evidence for an automatic payout.
-      if (!definiteInputFailure && (
+      if (failingPolicyGates.length > 0 || (!definiteInputFailure && (
         githubEvidenceUnavailable
         || githubEvidencePartial
         || claimantBindingUnverified
         || scoreAmbiguous
-      )) {
+      ))) {
         return githubPrHumanReviewEscalation({
           job,
           score,
           githubLookup,
           checks,
           signals,
+          blockers,
           evidence: {
             prUrl: prUrl || null,
             repo: parsedPr?.repo ?? null,
@@ -496,7 +499,9 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
             claimantBindingRequired,
             claimantBindingStatus: claimantBinding?.status ?? "unavailable"
           },
-          reason: githubEvidenceUnavailable
+          reason: failingPolicyGates.length > 0
+            ? "github_policy_gate_requires_review: " + failingPolicyGates.map((gate) => gate.name).join(", ")
+            : githubEvidenceUnavailable
             ? githubLookup.reason ?? "github_lookup_unavailable"
             : githubEvidencePartial
               ? "github_lookup_partial"
@@ -528,6 +533,10 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
           claimantBindingStatus: claimantBinding?.status ?? "not_required"
         },
         githubLookup,
+        blockers,
+        disclosure: claimantBinding?.disclosure,
+        ciExclusions: githubLookup.ciExclusions ?? [],
+        policyGates: githubLookup.policyGates ?? [],
         checks,
         signals,
         reputationSignals: {
@@ -581,6 +590,7 @@ function githubPrHumanReviewEscalation({
   checks,
   signals,
   evidence,
+  blockers = [],
   reason
 }) {
   return {
@@ -594,6 +604,10 @@ function githubPrHumanReviewEscalation({
     detail: `Live GitHub verification could not make a confident decision (${reason}); human review is required and the submission was not auto-approved.`,
     evidence,
     githubLookup,
+    blockers,
+    disclosure: githubLookup.claimantBinding?.disclosure,
+    ciExclusions: githubLookup.ciExclusions ?? [],
+    policyGates: githubLookup.policyGates ?? [],
     checks,
     signals,
     reputationSignals: {
@@ -703,6 +717,15 @@ async function fetchGithubPullRequestSnapshot({
       }),
       checksPassing: checkSummary.checksPassing,
       ciStatus: checkSummary.ciStatus,
+      ciExclusions: checkSummary.ciExclusions,
+      policyGates: checkSummary.policyGates,
+      pendingMaintainerApproval: checkSummary.pendingMaintainerApproval,
+      checkState: {
+        statuses: (combinedStatus?.statuses ?? []).map(({ context, state, description }) => ({ context, state, description }))
+          .sort((a, b) => String(a.context).localeCompare(String(b.context))),
+        runs: (checkRuns?.check_runs ?? []).map(({ name, status, conclusion }) => ({ name, status, conclusion }))
+          .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+      },
       reviewApproved: reviewSummary.reviewApproved,
       reviewState: reviewSummary.reviewState,
       disclosureFooterPresent: hasAverrayDisclosureFooter(body),
@@ -732,23 +755,47 @@ async function fetchGithubJson(fetchImpl, url, options) {
   return response.json();
 }
 
-function summarizeGithubChecks(combinedStatus, checkRuns) {
-  if (Array.isArray(checkRuns?.check_runs) && checkRuns.check_runs.length > 0) {
-    const terminalOk = new Set(["success", "neutral", "skipped"]);
-    const allCompleted = checkRuns.check_runs.every((run) => run.status === "completed");
-    const allOk = checkRuns.check_runs.every((run) => terminalOk.has(run.conclusion));
-    return {
-      checksPassing: allCompleted && allOk,
-      ciStatus: allCompleted ? allOk ? "passing" : "failing" : "pending"
-    };
+export function summarizeGithubChecks(combinedStatus, checkRuns) {
+  const runs = Array.isArray(checkRuns?.check_runs) ? checkRuns.check_runs : [];
+  const terminalOk = new Set(["success", "neutral", "skipped"]);
+  const ciExclusions = [];
+  const policyGates = [];
+  const decisions = [];
+  let pendingMaintainerApproval = false;
+  for (const run of runs) {
+    if (/\b(cla|dco|license)\b/iu.test(run.name ?? "")) {
+      policyGates.push({ name: run.name, conclusion: run.conclusion ?? null });
+    } else if (run.conclusion === "action_required") {
+      pendingMaintainerApproval = true;
+      ciExclusions.push({ context: run.name, description: run.output?.summary ?? "", reason: "pending_maintainer_approval" });
+    } else {
+      decisions.push(run.status !== "completed" ? "pending"
+        : terminalOk.has(run.conclusion) ? "passing" : "failing");
+    }
   }
-  if (combinedStatus?.state === "success") {
-    return { checksPassing: true, ciStatus: "passing" };
+  // Inspect individual contexts, not the aggregate state that includes excluded
+  // deployment authorization prompts. Retain legacy aggregate-only fixtures
+  // only when no individual runs/statuses were supplied.
+  const statuses = Array.isArray(combinedStatus?.statuses) ? combinedStatus.statuses
+    : runs.length === 0 && ["success", "failure", "error"].includes(combinedStatus?.state)
+      ? [{ context: "combined_status", state: combinedStatus.state }] : [];
+  for (const status of statuses) {
+    const context = String(status.context ?? "");
+    const description = String(status.description ?? "");
+    const deployment = context.match(/\b(vercel|netlify|render|cloudflare pages)\b/iu)?.[1]?.toLowerCase();
+    const hasDeploymentRun = deployment && runs.some((run) =>
+      String(run.app?.slug ?? run.name ?? "").toLowerCase().includes(deployment));
+    const reason = /authoriz/iu.test(description) ? "deployment_authorization_required"
+      : deployment && !hasDeploymentRun ? "deployment_integration_without_check_runs" : null;
+    if (reason) ciExclusions.push({ context, description, reason });
+    else decisions.push(["failure", "error"].includes(status.state) ? "failing"
+      : status.state === "success" ? "passing" : "pending");
   }
-  if (combinedStatus?.state === "failure" || combinedStatus?.state === "error") {
-    return { checksPassing: false, ciStatus: "failing" };
-  }
-  return { checksPassing: false, ciStatus: "unknown" };
+  const ciStatus = decisions.includes("failing") ? "failing"
+    : pendingMaintainerApproval ? "unknown"
+      : decisions.includes("pending") ? "pending"
+        : decisions.length > 0 ? "passing" : "unknown";
+  return { checksPassing: ciStatus === "passing", ciStatus, ciExclusions, policyGates, pendingMaintainerApproval };
 }
 
 function summarizeGithubReviews(reviews) {

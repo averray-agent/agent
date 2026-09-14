@@ -6,6 +6,7 @@ import { createHostedCanaryClaimantAttribution } from "../../core/claimant-attri
 import { SelfIdentityRegistry } from "../../core/self-identity-registry.js";
 import { createProfileRoutes } from "./profile-routes.js";
 import { MemoryStateStore } from "../../core/state-store.js";
+import { buildJobSnapshot } from "../../core/job-snapshot.js";
 import { buildPlatformCapabilities } from "../../core/discovery-manifest.js";
 import { readDirectoryConsent, writeDirectoryConsent, directoryParticipationCounts } from "../../core/directory-consent.js";
 import { createPublicMetadataRoutes } from "./public-metadata-routes.js";
@@ -119,6 +120,25 @@ async function profileRequest(harness, path = "/agents", method = "GET", body) {
   await harness.route({ request: { method, body }, response, url: new URL(path, "http://localhost"), pathname: path });
   return response;
 }
+
+test("resolved operator overturn shows payout and origin on profile and directory without counting the historic rejection", async () => {
+  const session = sessionFixture({ status: "resolved", verification: { outcome: "rejected" },
+    jobSnapshot: buildJobSnapshot(jobFixture()), disputedAt: "2026-09-14T00:00:00Z",
+    operatorOverturn: { origin: "operator_overturn", workerInitiated: false, openedAt: "2026-09-14T00:00:00Z",
+      rationale: "Platform footer error", resolution: { verdict: "dismissed", workerPayout: 3, chainStatus: "confirmed" } },
+    statusHistory: [{ to: "rejected" }, { to: "disputed", metadata: { origin: "operator_overturn" } }, { to: "resolved" }] });
+  const harness = makeHarness({ sessions: [session], jobError: new Error("catalogue absent") });
+  const directory = (await profileRequest(harness)).body;
+  assert.equal(directory[0].successRate, 1);
+  assert.equal(directory[0].totalJobs, 1);
+  assert.deepEqual(directory[0].slashEvents, []);
+  assert.equal(directory[0].badges[0].sessionStatus, "resolved");
+  assert.equal(directory[0].badges[0].overturn.resolution.workerPayout, 3);
+  const profile = (await profileRequest(harness, `/agents/${WALLET}`)).body;
+  assert.equal(profile.stats.rejectedCount, 0);
+  assert.equal(profile.disputes[0].origin, "operator_overturn");
+  assert.equal(profile.disputes[0].workerPayout, "3");
+});
 
 test("unconsented wallets are unidentifiable in the directory while transparency external totals stay unchanged", async () => {
   const store = new MemoryStateStore();

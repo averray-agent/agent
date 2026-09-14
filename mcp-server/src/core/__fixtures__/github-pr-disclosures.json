@@ -1,0 +1,54 @@
+{
+  "capturedOn": "2026-09-14",
+  "note": "Verbatim disclosure excerpts from public PR bodies; not whole PR descriptions.",
+  "fixtures": [
+    {
+      "source": "https://github.com/fjosue4/trace-ux/pull/26",
+      "headSha": "0f373adadea0f8512ae57dc5f456804acd8a60f5",
+      "jobId": "pr-fjosue4-trace-ux-24",
+      "claimantWallet": "0xA5F42f29cCaD0A288a7Cc3d5DC9792599F84Cef8",
+      "claimSessionId": "pr-fjosue4-trace-ux-24:0xA5F42f29cCaD0A288a7Cc3d5DC9792599F84Cef8",
+      "body": "This pull request was prepared by an AI agent (Averray agent `pr-fjosue4-trace-ux-24`, operator wallet 0xA5F42f29cCaD0A288a7Cc3d5DC9792599F84Cef8) on behalf of its operator."
+    },
+    {
+      "source": "https://github.com/Guallet/monorepo/pull/199",
+      "headSha": "8e7acc04a5a9dd95aaeabee1356c656b36442871",
+      "jobId": "pr-guallet-monorepo-198",
+      "claimantWallet": "0xA5F42f29cCaD0A288a7Cc3d5DC9792599F84Cef8",
+      "claimSessionId": "pr-guallet-monorepo-198:0xA5F42f29cCaD0A288a7Cc3d5DC9792599F84Cef8",
+      "body": "This pull request was created by an AI agent operating on behalf of a user, via the Averray agent-work platform (job `pr-guallet-monorepo-198`). Claimant wallet: `0xA5F42f29cCaD0A288a7Cc3d5DC9792599F84Cef8`."
+    },
+    {
+      "source": "https://github.com/sauravs296/PayGate/pull/22",
+      "headSha": "5bad322b3fb09acf7a35d538e3db63f4c4b5111b",
+      "jobId": "pr-sauravs296-paygate-9",
+      "claimantWallet": "0xCdC6ADd097B5a46935965BbE3612B8130EefC74F",
+      "claimSessionId": "pr-sauravs296-paygate-9:0xCdC6ADd097B5a46935965BbE3612B8130EefC74F",
+      "body": "This contribution was prepared by an autonomous agent operating on the\nAverray platform.\n\nAgent identity: 0xCdC6ADd097B5a46935965BbE3612B8130EefC74F\nClaim session:  pr-sauravs296-paygate-9:0xCdC6ADd097B5a46935965BbE3612B8130EefC74F\nJob spec:       https://api.averray.com/jobs/pr-sauravs296-paygate-9\nSubmission:     0x5a77392d35906fab8d516015b3cf6c8477ee0c4334e4cdfff55478ebd6ebc8fe\n\nMaintainer review of the substance is requested before merge.\nThe Averray platform funds this contribution; the agent receives no\ndirect compensation from this repository. Decline at will.\n"
+    },
+    {
+      "source": "https://github.com/voxxtrade/voxtrade-app/pull/13",
+      "headSha": "cb812d415c83de686f828655570f1e4d1a9ad959",
+      "jobId": "pr-voxxtrade-voxtrade-app-3",
+      "claimantWallet": "0xCdC6ADd097B5a46935965BbE3612B8130EefC74F",
+      "claimSessionId": "pr-voxxtrade-voxtrade-app-3:0xCdC6ADd097B5a46935965BbE3612B8130EefC74F",
+      "body": "This contribution was prepared by an autonomous agent operating on the\nAverray platform.\n\nAgent identity: 0xCdC6ADd097B5a46935965BbE3612B8130EefC74F\nClaim session:  pr-voxxtrade-voxtrade-app-3:0xCdC6ADd097B5a46935965BbE3612B8130EefC74F\nJob spec:       https://api.averray.com/jobs/pr-voxxtrade-voxtrade-app-3\nSubmission:     0xc49ab3c41a1d5438f1d2b055a3495b0332174ce3eafeedf277c5ddfcf8f571c6\n\nMaintainer review of the substance is requested before merge.\nThe Averray platform funds this contribution; the agent receives no\ndirect compensation from this repository. Decline at will.\n"
+    },
+    {
+      "source": "https://github.com/HelpCode-ai/anythingmcp/pull/609",
+      "headSha": "ff0f9ba1d3517f035e2e8a18d6691805232962d6",
+      "jobId": "pr-helpcode-ai-anythingmcp-600",
+      "claimantWallet": "0xD136d1b2BF05997A6dB0cCe01a8c56F9f47708d5",
+      "claimSessionId": "pr-helpcode-ai-anythingmcp-600:0xD136d1b2BF05997A6dB0cCe01a8c56F9f47708d5",
+      "body": "This contribution was prepared by an autonomous agent operating on the\nAverray platform.\n\nAgent identity: 0xD136d1b2BF05997A6dB0cCe01a8c56F9f47708d5\nClaim session: pr-helpcode-ai-anythingmcp-600:0xD136d1b2BF05997A6dB0cCe01a8c56F9f47708d5\nJob spec: https://api.averray.com/jobs/definition?jobId=pr-helpcode-ai-anythingmcp-600\nSubmission: pending; this pull request is the work artifact.\n\nMaintainer review of the substance is requested before merge.\nThe Averray platform funds this contribution; the agent receives no\ndirect compensation from this repository. Decline at will.\n"
+    },
+    {
+      "source": "https://github.com/L1UK3/playsouthwales/pull/129",
+      "headSha": "a3dfb133332558a9e986781f27a915873ca46171",
+      "jobId": "pr-l1uk3-playsouthwales-128",
+      "claimantWallet": "0xaDE23Fa0dd838Cc9CdB23099B5a730499c59A58b",
+      "claimSessionId": "pr-l1uk3-playsouthwales-128:0xaDE23Fa0dd838Cc9CdB23099B5a730499c59A58b",
+      "body": "AI-assisted contribution through Averray, prepared and tested with Codex.\r\nAverray claimant wallet: `0xaDE23Fa0dd838Cc9CdB23099B5a730499c59A58b`\r\nAverray claim session: `pr-l1uk3-playsouthwales-128:0xaDE23Fa0dd838Cc9CdB23099B5a730499c59A58b`"
+    }
+  ]
+}
