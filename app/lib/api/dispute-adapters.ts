@@ -104,6 +104,7 @@ export function extractDispute(data: unknown): Dispute | null {
         workerPayout,
         txHash: txHash || undefined,
         chainStatus: chainStatus || undefined,
+        convergenceStatus: text(record.convergenceStatus, "") || undefined,
         metadataURI: metadataURI || undefined,
         reasoningHash: reasoningHash || undefined,
       }

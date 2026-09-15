@@ -125,7 +125,7 @@ export function buildAgentProfile({
     const completedAt = new Date(session.updatedAt ?? Date.now()).toISOString();
 
     if (earningJob) {
-      totalRewardBase += toBaseUnits(session.operatorOverturn?.resolution?.workerPayout ?? earningJob.rewardAmount ?? 0, decimals);
+      totalRewardBase += toBaseUnits(projectOverturnedVerification(session, session.verification)?.workerPayout ?? earningJob.rewardAmount ?? 0, decimals);
     }
     categoryCounts.set(category, (categoryCounts.get(category) ?? 0) + 1);
     categoryMaxLevel.set(category, Math.max(categoryMaxLevel.get(category) ?? 0, level));
@@ -152,7 +152,7 @@ export function buildAgentProfile({
         ? {
             reward: {
               asset: earningJob.rewardAsset ?? rewardAsset,
-              amount: toBaseUnits(session.operatorOverturn?.resolution?.workerPayout ?? earningJob.rewardAmount ?? 0, decimals).toString(),
+              amount: toBaseUnits(projectOverturnedVerification(session, session.verification)?.workerPayout ?? earningJob.rewardAmount ?? 0, decimals).toString(),
               decimals
             }
           }
@@ -475,6 +475,10 @@ function buildDisputeHistory(sessions, definitionOf, getDisputeReceipts) {
     const receipts = getDisputeReceipts(session.sessionId) ?? {};
     const verdictReceipt = receipts.verdict ?? receipts.verdictReceipt;
     const releaseReceipt = receipts.release ?? receipts.releaseReceipt;
+    // A completed fallback review never opened an on-chain dispute. Its
+    // historical local `disputedAt` is not an outstanding arbitration case.
+    if (session.humanReview?.resolution && status !== "disputed" && !session.operatorOverturn
+      && !session.disputeResolution && !verdictReceipt && !releaseReceipt) continue;
     const hasDisputeMarker =
       status === "disputed" ||
       Boolean(session.disputedAt) ||
@@ -611,7 +615,7 @@ function buildSubcontractedEntry(session, job, parent, normalizedWallet) {
 }
 
 function buildProfileDispute(session, definitionOf, verdictReceipt, releaseReceipt) {
-  verdictReceipt ??= session.operatorOverturn?.resolution;
+  verdictReceipt ??= session.operatorOverturn?.resolution ?? session.disputeResolution;
   const sessionId = String(session.sessionId ?? "");
   const id = sessionId ? disputeIdForSession(sessionId) : undefined;
   const openedAt = stringOrUndefined(session.disputedAt)

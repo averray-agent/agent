@@ -12,6 +12,7 @@ export class EventListener {
     this.gateway = gateway;
     this.eventBus = eventBus;
     this.stateStore = stateStore;
+    this.disputeArbitration = options.disputeArbitration;
     this.running = false;
     this.registrations = [];
     this.routingTable = new Map();
@@ -242,7 +243,7 @@ export class EventListener {
 
     this.registerEscrow("DisputeResolved", "escrow.dispute_resolved", async ({ args, payload }) => {
       const job = await this.readJob(args.jobId);
-      return this.buildChainEvent({
+      const event = await this.buildChainEvent({
         topic: "escrow.dispute_resolved",
         args,
         payload,
@@ -251,11 +252,14 @@ export class EventListener {
         sessionId: buildSessionId(args.jobId, job.worker),
         job,
         data: {
+          escrowAddress: payload.log.address,
           workerPayout: args.workerPayout.toString(),
           reasonCode: args.reasonCode,
           metadataURI: args.metadataURI
         }
       });
+      const resolution = await this.disputeArbitration?.converge(event);
+      return resolution ? { ...event, sessionId: resolution.sessionId, data: { ...event.data, convergence: "confirmed" } } : event;
     });
 
     this.registerEscrow("AutoResolvedOnTimeout", "escrow.auto_resolved_on_timeout", async ({ args, payload }) => {
@@ -758,6 +762,9 @@ export class EventListener {
       }
     } catch (error) {
       this.publishListenerError(entry.eventName, error);
+      // Arbitration changes durable session state. Do not advance the poll
+      // cursor past a failed convergence write; replay the chunk on retry.
+      if (entry.eventName === "DisputeResolved" && this.disputeArbitration) throw error;
     }
   }
 

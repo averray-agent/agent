@@ -8,6 +8,7 @@ import { WorkerChip } from "./WorkerChip";
 import { VerticalLifecycleRail } from "./VerticalLifecycleRail";
 import { EscrowLedger } from "./EscrowLedger";
 import { PayoutTrail } from "./PayoutTrail";
+import { HumanVerdictPanel } from "./HumanVerdictPanel";
 import {
   EMPTY_TIMELINE_EVENT_FILTERS,
   isTimelineEventFilterActive,
@@ -111,6 +112,8 @@ export function SessionDrawerBody({
       <DrawerSection title="Lifecycle">
         <VerticalLifecycleRail stages={session.lifecycle} />
       </DrawerSection>
+
+      {session.humanReviewEligible ? <HumanVerdictPanel key={session.id} sessionId={session.id} /> : null}
 
       <DrawerSection
         title={

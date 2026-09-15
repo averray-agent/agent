@@ -2660,6 +2660,18 @@ export class BlockchainGateway {
     });
   }
 
+  async getArbitrationAuthority() {
+    const arbitrator = this.config.arbitratorAddress;
+    if (!arbitrator || !await this.policyContract?.arbitrators?.(arbitrator)) {
+      throw new ConflictError("The manifest arbitrator is not registered in live policy.", "arbitrator_not_registered");
+    }
+    const { chainId } = await this.provider.getNetwork();
+    if (Number(chainId) !== 420420419) {
+      throw new ConflictError("App arbitration requires Polkadot Hub mainnet.", "arbitration_wrong_chain");
+    }
+    return { arbitrator, chainId: Number(chainId) };
+  }
+
   async prepareResolveDispute(jobId, workerPayoutRaw, reasonCode, metadataURI = "") {
     return this.withGatewayError("prepareResolveDispute", async () => {
       const live = await this.readEscrowJob(jobId);

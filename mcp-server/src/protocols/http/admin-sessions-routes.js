@@ -5,10 +5,18 @@ export function createAdminSessionsRoutes({
   parseLimit,
   respond,
   service,
+  humanVerdict,
   stateStore, gateway, eventBus, readJsonBody,
 }) {
   const overturnService = new OperatorOverturnService({ stateStore, gateway, eventBus });
   return async function handleAdminSessionsRoute({ request, response, url, pathname }) {
+    if (request.method === "POST" && pathname === "/admin/sessions/human-verdict") {
+      const auth = await authMiddleware(request, url, { requireRole: "admin" });
+      const payload = await readJsonBody(request);
+      respond(response, 200, await humanVerdict.decide({ sessionId: payload?.sessionId, verdict: payload?.verdict,
+        rationale: payload?.rationale, operator: auth.wallet }));
+      return true;
+    }
     if (request.method === "POST" && pathname === "/admin/sessions/overturn") {
       const auth = await authMiddleware(request, url, { requireRole: "admin" });
       const payload = await readJsonBody(request);

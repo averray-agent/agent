@@ -14,6 +14,8 @@ import { WindowCountdown } from "./WindowCountdown";
 import { EvidenceDiff } from "./EvidenceDiff";
 import { StakeHoldPanel } from "./StakeHoldPanel";
 import { DecisionPanel } from "./DecisionPanel";
+import { ArbitrationSigningPanel } from "./ArbitrationSigningPanel";
+import type { PreparedArbitration } from "@/lib/chain/arbitration.js";
 import { DisputeTimeline } from "./DisputeTimeline";
 import type { DecisionKind, Dispute, ReleaseDestination } from "./types";
 
@@ -38,6 +40,8 @@ export function DisputeDrawerBody({
   );
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [prepared, setPrepared] = useState<PreparedArbitration | null>(null);
+  const hardware = live && dispute.arbitration.execution.mode === "out_of_band_hardware";
   const backendVerdictAvailable =
     !live || dispute.arbitration.execution.backendCanResolve;
 
@@ -52,11 +56,13 @@ export function DisputeDrawerBody({
     );
     setSubmitting(false);
     setSubmitError(null);
+    setPrepared(null);
   }, [dispute.id, dispute.resolution, dispute.state]);
 
   // If the decision changes, reset the destination to stay consistent
   // with the backend verdict settlement path.
   const handleDecision = (d: DecisionKind) => {
+    setPrepared(null);
     setDecision(d);
     if (d === "uphold" && destination !== "slash-to-treasury" && destination !== "pay-verifier") {
       setDestination("slash-to-treasury");
@@ -78,6 +84,13 @@ export function DisputeDrawerBody({
     setSubmitting(true);
     setSubmitError(null);
     try {
+      if (hardware) {
+        const preparation = await swrFetcher([`${detailKey}/prepare`, { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ verdict: decisionToVerdict(decision), rationale: rationale.trim() }) }]);
+        setPrepared(preparation as PreparedArbitration);
+        await mutate(detailKey);
+        return;
+      }
       await swrFetcher([
         `${detailKey}/verdict`,
         {
@@ -195,8 +208,9 @@ export function DisputeDrawerBody({
           destination={destination}
           onDestinationChange={setDestination}
           decision={decision}
-          disabled={!!committed || resolved}
+          disabled={hardware || !!committed || resolved}
         />
+        {hardware ? <p className="text-sm">The contract applies stake accounting. Review the worker payout in the prepared arbitration call; no separate stake-release transaction is sent by this panel.</p> : null}
       </DrawerSection>
 
       <DrawerSection title="Escalation">
@@ -272,7 +286,7 @@ export function DisputeDrawerBody({
         </DrawerSection>
       ) : (
         <DrawerSection title="Decision">
-          {live && !backendVerdictAvailable ? (
+          {live && !backendVerdictAvailable && !hardware ? (
             <div className="mb-3 rounded-[10px] border border-[color:rgba(167,97,34,0.35)] bg-[var(--avy-warn-soft)] px-4 py-3">
               <div
                 className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-warn)]"
@@ -292,12 +306,13 @@ export function DisputeDrawerBody({
             decision={decision}
             onDecision={handleDecision}
             rationale={rationale}
-            onRationaleChange={setRationale}
+            onRationaleChange={(value) => { setRationale(value); setPrepared(null); }}
             roleConfirmed={roleConfirmed}
             onRoleToggle={() => setRoleConfirmed((v) => !v)}
             destination={destination}
             onCommit={handleCommit}
-            disabled={!backendVerdictAvailable}
+            disabled={!backendVerdictAvailable && !hardware}
+            actionLabel={hardware ? "Prepare arbitration" : "Submit verdict"}
             busy={submitting}
             error={submitError}
           />
@@ -307,6 +322,7 @@ export function DisputeDrawerBody({
       <DrawerSection title="Timeline">
         <DisputeTimeline events={dispute.timeline} />
       </DrawerSection>
+      {hardware && <ArbitrationSigningPanel key={dispute.id} disputeId={dispute.id} prepared={prepared} />}
     </>
   );
 }
@@ -546,6 +562,7 @@ function ResolvedCard({ dispute }: { dispute: Dispute }) {
     workerPayout,
     txHash,
     chainStatus,
+    convergenceStatus,
     metadataURI,
     reasoningHash,
   } = dispute.resolution;
@@ -574,6 +591,7 @@ function ResolvedCard({ dispute }: { dispute: Dispute }) {
 
   return (
     <div className="flex flex-col gap-2.5 rounded-[10px] border border-[color:rgba(30,102,66,0.28)] bg-[color:rgba(30,102,66,0.05)] px-4 py-3.5">
+      {chainStatus === "confirmed" ? <p role="status">{convergenceStatus === "confirmed" ? "Resolved on chain, converged." : "Resolved on chain; local convergence pending."}</p> : null}
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <span
           className={`font-[family-name:var(--font-display)] text-[13px] font-extrabold uppercase ${

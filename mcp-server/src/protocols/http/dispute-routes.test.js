@@ -136,6 +136,7 @@ function makeHarness(overrides = {}) {
       },
     },
     stateStore: {
+      getSession: async (id) => sessions.find((session) => session.sessionId === id),
       getPlatformFaultRemediation: async (id) => platformFaultRemediations.get(id),
       getMutationReceipt: async (bucket, key) => {
         calls.push(["getMutationReceipt", { bucket, key }]);
