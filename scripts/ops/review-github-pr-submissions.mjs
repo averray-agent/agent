@@ -30,7 +30,7 @@ export async function review(options, { request, print = console.log }) {
   print(JSON.stringify(verdict, null, 2));
   if (options.mode === "preview") return 0;
   if (verdict.outcome !== options.expect) return 2;
-  print(JSON.stringify(await request("POST", "/admin/verifier/run", payload), null, 2));
+  print(JSON.stringify(await request("POST", "/admin/verifier/run", { ...payload, expectOutcome: options.expect }), null, 2));
   return 0;
 }
 

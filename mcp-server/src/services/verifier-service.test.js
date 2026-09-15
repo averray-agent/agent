@@ -16,6 +16,8 @@ import { BlockchainGateway } from "../blockchain/gateway.js";
 import { ZERO_BYTES32 } from "../blockchain/abis.js";
 import { VerificationIngestionService } from "./verification-ingestion-service.js";
 import { computeVerdictCoreCommitment } from "../core/work-receipt.js";
+import { ConflictError } from "../core/errors.js";
+import { createVerifierRoutes } from "../protocols/http/verifier-routes.js";
 
 const FIXTURE_ROOT = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -1642,6 +1644,91 @@ function makeIdempotencyHarness(onChainState) {
   };
   return { stateStore, claimed, platformService, blockchainGateway, calls, payoutReceipt };
 }
+
+test("expectOutcome rejects a fresh mismatched verdict with 409 on both run routes without writes or gateway calls", async (t) => {
+  for (const pathname of ["/verifier/run", "/admin/verifier/run"]) {
+    for (const outcome of ["rejected", "platform_fault", "disputed", "inconclusive"]) {
+      const h = makeIdempotencyHarness(3);
+      const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
+      await h.stateStore.upsertSession(submitted);
+      const before = structuredClone(await h.stateStore.getSession(submitted.sessionId));
+      const registry = new VerifierRegistry();
+      let freshOutcome = "approved";
+      const evaluate = t.mock.method(registry, "evaluate", async () => ({
+        handler: "deterministic", handlerVersion: 1, outcome: freshOutcome,
+        reasonCode: "FRESH_VERDICT", workerConsequence: "none"
+      }));
+      h.platformService.eventBus = { publish: t.mock.fn() };
+      const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway, registry);
+      const preview = await service.previewSubmission({ sessionId: submitted.sessionId });
+      assert.equal(preview.outcome, "approved");
+      freshOutcome = outcome;
+      const sideEffects = [
+        ...Object.keys(h.blockchainGateway).map((name) => t.mock.method(h.blockchainGateway, name)),
+        ...["upsertSession", "upsertVerificationResult", "upsertMutationReceipt"].map((name) => t.mock.method(h.stateStore, name)),
+        t.mock.method(h.platformService, "resumeSession"),
+        t.mock.method(h.platformService, "ingestVerification"),
+        t.mock.method(service, "prepareNonDisputeSettlement"),
+        t.mock.method(service, "reconcileBrokeredSubmitDivergence"),
+        t.mock.method(service.platformFaultRemediationService, "escalate"),
+        h.platformService.eventBus.publish
+      ];
+      const respond = t.mock.fn();
+      const route = createVerifierRoutes({ verifierService: service,
+        authMiddleware: async () => ({ wallet: submitted.wallet }), enforceLimit: async () => {}, rateLimitConfig: {},
+        readJsonBody: async () => ({ sessionId: submitted.sessionId, expectOutcome: "approved" }), respond });
+      await assert.rejects(route({ request: { method: "POST" }, response: {}, pathname, url: new URL(pathname, "http://localhost") }), (error) => {
+        assert.ok(error instanceof ConflictError);
+        assert.equal(error.statusCode, 409);
+        assert.equal(error.code, "verdict_outcome_mismatch");
+        assert.deepEqual(error.details, { expected: "approved", actual: outcome });
+        return true;
+      });
+      assert.equal(evaluate.mock.callCount(), 2, "settlement must freshly evaluate, not reuse the preview");
+      assert.equal(respond.mock.callCount(), 0, "the route must not send a success response");
+      for (const effect of sideEffects) assert.equal(effect.mock.callCount(), 0);
+      assert.deepEqual(await h.stateStore.getSession(submitted.sessionId), before);
+      assert.equal(await h.stateStore.getVerificationResult(submitted.sessionId), undefined);
+      assert.equal(h.stateStore.claimLocks.size, 0, "a mismatch must release the settlement lock");
+    }
+  }
+});
+
+test("matching expectOutcome still settles and persists through both run routes", async (t) => {
+  for (const pathname of ["/verifier/run", "/admin/verifier/run"]) {
+    const h = makeIdempotencyHarness(3);
+    const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
+    await h.stateStore.upsertSession(submitted);
+    const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway);
+    const evaluate = t.mock.method(service.registry, "evaluate");
+    const replies = [];
+    const route = createVerifierRoutes({ verifierService: service,
+      authMiddleware: async () => ({ wallet: submitted.wallet }), enforceLimit: async () => {}, rateLimitConfig: {},
+      readJsonBody: async () => ({ sessionId: submitted.sessionId, expectOutcome: "approved" }),
+      respond: (_response, status, result) => replies.push({ status, result }) });
+    await route({ request: { method: "POST" }, response: {}, pathname, url: new URL(pathname, "http://localhost") });
+    assert.equal(evaluate.mock.callCount(), 1);
+    assert.equal(replies[0].status, 200);
+    assert.equal(replies[0].result.outcome, "approved");
+    assert.equal(h.calls.settle, 1);
+    assert.equal(h.calls.recover, 0);
+    assert.equal((await h.stateStore.getSession(submitted.sessionId)).status, "resolved");
+    assert.equal((await h.stateStore.getVerificationResult(submitted.sessionId)).outcome, "approved");
+  }
+});
+
+test("matching expectOutcome does not bypass the on-chain snapshot integrity check", async () => {
+  const h = makeIdempotencyHarness(3);
+  const submitted = transitionSession(h.claimed, "submitted", { reason: "work_submitted" });
+  await h.stateStore.upsertSession(submitted);
+  h.blockchainGateway.getJob = async () => ({ state: 3, specHash: `0x${"f".repeat(64)}` });
+  const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway);
+  await assert.rejects(service.verifySubmission({ sessionId: submitted.sessionId, expectOutcome: "approved" }),
+    (error) => error.code === "job_snapshot_on_chain_spec_hash_mismatch");
+  assert.equal(h.calls.settle, 0);
+  assert.equal((await h.stateStore.getSession(submitted.sessionId)).status, "submitted");
+  assert.equal(await h.stateStore.getVerificationResult(submitted.sessionId), undefined);
+});
 
 test("verifySubmission captures progression before the chain settlement boundary", async () => {
   const h = makeIdempotencyHarness(3);

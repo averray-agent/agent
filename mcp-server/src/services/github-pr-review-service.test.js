@@ -102,7 +102,7 @@ test("changed upstream with an approved merged preview settles; baseline and unc
   assert.deepEqual(run.errors, []);
   assert.deepEqual(run.reviewed, [{ sessionId: "pr", outcome: "approved" }]);
   assert.equal(settle.mock.callCount(), 1);
-  assert.deepEqual(settle.mock.calls[0].arguments, [{ sessionId: "pr" }]);
+  assert.deepEqual(settle.mock.calls[0].arguments, [{ sessionId: "pr", expectOutcome: "approved" }]);
   assert.equal(f.writes.length, 1);
   assert.equal(f.writes[0].outcome, "approved");
   assert.equal((await f.store.getSession("pr")).status, "resolved");

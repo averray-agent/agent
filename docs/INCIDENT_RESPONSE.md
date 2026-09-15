@@ -648,14 +648,18 @@ calling the chain gateway or publishing an event. `--settle` previews first,
 prints the verdict and exits 2 without settling if the outcome differs from
 `--expect`. The human-fallback handler's outcome is `disputed`, not
 `human_fallback`. `--settle <sessionId> --expect <outcome>` is the only settling
-CLI mode (`POST /admin/verifier/run`); `--run` is rejected. Upstream state can
-change between the preview and the final live evaluation: a preview is not a
-payout guarantee. Inspect the final verdict and account receipts.
+CLI mode (`POST /admin/verifier/run`); `--run` is rejected. The settling request
+passes `--expect` as `expectOutcome`. Both `/verifier/run` and
+`/admin/verifier/run` compare it with the freshly evaluated verdict and return
+HTTP 409 `verdict_outcome_mismatch` with `{ expected, actual }` if it changed,
+before any settlement, remediation or persisted result. Inspect the mismatch
+and preview again; do not blindly retry settlement.
 
 With `GITHUB_TOKEN` configured, the review poller observes pending GitHub PRs
 every `GITHUB_PR_REVIEW_POLL_MINUTES` (operator decision, default 30). The first
 complete observation establishes a durable baseline. Later merge/check-state
-changes settle through the same verifier only when the preview is `approved`;
+changes settle through the same verifier only when the preview is `approved`,
+with server-side `expectOutcome: "approved"` guarding the fresh evaluation;
 all other outcomes update the observation receipt and leave the session
 `submitted` in the operator queue. Unchanged ticks do not settle anything.
 Unavailable/partial reads do not replace the baseline. Ambiguous verdicts need

@@ -12,7 +12,7 @@ test("settle prints the same-handler preview and exits two without a settlement 
   assert.equal(JSON.parse(printed[0]).handler, "human_fallback");
   calls.length = 0;
   assert.equal(await review({ ...options, expect: "disputed" }, { request, print: () => {} }), 0);
-  assert.deepEqual(calls.map((c) => c[2]), [{ sessionId: "session", preview: true }, { sessionId: "session" }]);
+  assert.deepEqual(calls.map((c) => c[2]), [{ sessionId: "session", preview: true }, { sessionId: "session", expectOutcome: "disputed" }]);
   assert.throws(() => parseArgs(["--settle", "session"]), /--expect/);
   assert.throws(() => parseArgs(["--list", "--preview", "session"]), /exactly one/);
 });

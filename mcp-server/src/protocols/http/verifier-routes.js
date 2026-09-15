@@ -62,7 +62,8 @@ export function createVerifierRoutes({
         ? payload.metadataURI.trim()
         : (url.searchParams.get("metadataURI") ?? "ipfs://pending-badge");
       respond(response, 200, await verifierService.verifySubmission({
-        sessionId, evidence, metadataURI, ...(payload?.preview === true ? { preview: true } : {})
+        sessionId, evidence, metadataURI, ...(payload?.preview === true ? { preview: true } : {}),
+        ...(payload?.expectOutcome !== undefined ? { expectOutcome: payload.expectOutcome } : {})
       }));
       return true;
     }

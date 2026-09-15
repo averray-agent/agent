@@ -86,7 +86,7 @@ export class GithubPrReviewService {
           && (await this.stateStore.getSession(item.sessionId))?.status === "submitted") {
           // Only an approved preview may trigger automatic settlement. Other
           // outcomes are observations, leaving the submission for an operator.
-          const verdict = await this.verifierService.verifySubmission({ sessionId: item.sessionId });
+          const verdict = await this.verifierService.verifySubmission({ sessionId: item.sessionId, expectOutcome: "approved" });
           summary.reviewed.push({ sessionId: item.sessionId, outcome: verdict.outcome });
         }
         await this.stateStore.upsertMutationReceipt("github_pr_review_observation", item.sessionId, { fingerprint, observedAt: now.toISOString() });
