@@ -557,12 +557,19 @@ test("requireAuth rejects a token whose jti has been revoked", async () => {
   );
 });
 
-test("MemoryStateStore revokeToken expires after its TTL", async () => {
+test("MemoryStateStore revokeToken expires after its TTL", async (t) => {
+  // The memory backend reads Date.now() directly (no injectable clock), so
+  // drive expiry through a mocked Date rather than a real sleep: with a 10 ms
+  // TTL and wall-clock time, a loaded full-suite run could burn the whole TTL
+  // before the first assertion and report the token as already expired.
+  t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
   const store = new MemoryStateStore();
   await store.revokeToken("jti-x", 0.01);
   assert.equal(await store.isTokenRevoked("jti-x"), true);
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(await store.isTokenRevoked("jti-x"), false);
+  t.mock.timers.tick(5);
+  assert.equal(await store.isTokenRevoked("jti-x"), true, "still revoked inside the TTL");
+  t.mock.timers.tick(15);
+  assert.equal(await store.isTokenRevoked("jti-x"), false, "expired once the TTL has elapsed");
 });
 
 test("MemoryStateStore isTokenRevoked is false for unknown jti", async () => {
