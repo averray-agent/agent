@@ -94,10 +94,12 @@ six hours of another green mainnet canary.
 - **Never the admin JWT for worker stages.** The worker identity is a dedicated,
   roleless wallet; operator credentials are used only for operator stages.
 - **One refresh chain per consumer.** Hosted Worker Canary exclusively owns
-  `op://mainnet-smoke/admin-refresh-token-worker-canary/password`. The internal
-  smoke runner exclusively owns
-  `op://mainnet-smoke/admin-refresh-token/password`. They must never share or
-  copy tokens because refresh replay revokes the chain.
+  `op://mainnet-smoke/admin-refresh-token-worker-canary/password`; the
+  production deploy owns `…/admin-refresh-token-production-deploy/password`.
+  The generic `op://mainnet-smoke/admin-refresh-token/password` item had no
+  consumer after this split and expired unused on 2026-09-15; it is retired
+  from the secrets calendar. Chains must never share or copy tokens because
+  refresh replay revokes the chain.
 - **Persist before proceeding.** Mainnet proves the 1Password service account
   can write/read before consuming, then writes and reads back the distinct
   successor before exposing the short-lived access token to any hosted check.
@@ -151,8 +153,8 @@ six hours of another green mainnet canary.
    It hashes the consumed value with `printf '%s'`; do not pipe `op read`
    directly into `shasum`, because the display newline changes the fingerprint.
 
-   This must not overwrite the internal runner's
-   `op://mainnet-smoke/admin-refresh-token/password` item.
+   This must not overwrite any other consumer's refresh item (the generic
+   `op://mainnet-smoke/admin-refresh-token/password` item is retired and unused).
 
 4. **Keep the worker claimable.** A fresh wallet's first
    `onboardingWaiverClaimCount` (3) claims are stake/fee-waived **only when the
