@@ -30,9 +30,13 @@ export class GithubPrReviewService {
         try { ({ job } = requireJobSnapshot(session)); } catch (error) { integrityError = error.code ?? error.message; }
         const mode = job?.verifierConfig?.handler ?? job?.verifierMode ?? null;
         if (AUTO_DECIDABLE_MODES.includes(mode)) continue;
-        let githubLookup;
+        let githubLookup, previewOutcome;
         if (upstream && mode === "github_pr") {
-          try { githubLookup = (await this.verifierService.previewSubmission({ sessionId: session.sessionId })).githubLookup; }
+          try {
+            const preview = await this.verifierService.previewSubmission({ sessionId: session.sessionId });
+            githubLookup = preview.githubLookup;
+            previewOutcome = preview.outcome;
+          }
           catch (error) { githubLookup = { status: "unavailable", reason: error.code ?? error.message }; }
         }
         const submittedAt = session.submittedAt ?? null;
@@ -42,7 +46,8 @@ export class GithubPrReviewService {
           wallet: session.wallet, reward: { amount: job?.rewardAmount ?? null, asset: job?.rewardAsset ?? null },
           verifierMode: mode, submittedAt, ageMs, ageHours: ageMs === null ? null : ageMs / 3_600_000,
           prUrl: githubLookup?.htmlUrl ?? submission?.prUrl ?? null,
-          upstream: githubLookup ?? { status: "not_checked" }, ...(integrityError ? { integrityError } : {}) });
+          upstream: githubLookup ?? { status: "not_checked" }, previewOutcome,
+          ...(integrityError ? { integrityError } : {}) });
       }
       if (page.length < 100) break;
     }
@@ -77,9 +82,10 @@ export class GithubPrReviewService {
         })).digest("hex");
         const previous = await this.stateStore.getMutationReceipt("github_pr_review_observation", item.sessionId);
         if (previous?.fingerprint === fingerprint) continue;
-        if (previous && (await this.stateStore.getSession(item.sessionId))?.status === "submitted") {
-          // This is the SAME handler + settlement path as an operator run, not
-          // an approval inferred from a change. Ambiguity still needs arbitration.
+        if (previous && item.previewOutcome === "approved"
+          && (await this.stateStore.getSession(item.sessionId))?.status === "submitted") {
+          // Only an approved preview may trigger automatic settlement. Other
+          // outcomes are observations, leaving the submission for an operator.
           const verdict = await this.verifierService.verifySubmission({ sessionId: item.sessionId });
           summary.reviewed.push({ sessionId: item.sessionId, outcome: verdict.outcome });
         }

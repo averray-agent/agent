@@ -647,18 +647,20 @@ node scripts/ops/review-github-pr-submissions.mjs --settle '<sessionId>' --expec
 calling the chain gateway or publishing an event. `--settle` previews first,
 prints the verdict and exits 2 without settling if the outcome differs from
 `--expect`. The human-fallback handler's outcome is `disputed`, not
-`human_fallback`. `--run <sessionId>` is the explicit one-call mutating review
-(`POST /admin/verifier/run`); prefer preview/settle. Upstream state can change
-between the preview and the final live evaluation: a preview is not a payout
-guarantee. Inspect the final verdict and account receipts.
+`human_fallback`. `--settle <sessionId> --expect <outcome>` is the only settling
+CLI mode (`POST /admin/verifier/run`); `--run` is rejected. Upstream state can
+change between the preview and the final live evaluation: a preview is not a
+payout guarantee. Inspect the final verdict and account receipts.
 
 With `GITHUB_TOKEN` configured, the review poller observes pending GitHub PRs
 every `GITHUB_PR_REVIEW_POLL_MINUTES` (operator decision, default 30). The first
 complete observation establishes a durable baseline. Later merge/check-state
-changes invoke the same verifier; unchanged ticks do not settle anything.
-Unavailable/partial reads do not replace the baseline. An ambiguous verdict
-still enters arbitration. `github_pr` remains excluded from
-`AUTO_DECIDABLE_MODES`; the initial run belongs to the operator.
+changes settle through the same verifier only when the preview is `approved`;
+all other outcomes update the observation receipt and leave the session
+`submitted` in the operator queue. Unchanged ticks do not settle anything.
+Unavailable/partial reads do not replace the baseline. Ambiguous verdicts need
+an explicit operator review before entering arbitration. `github_pr` remains
+excluded from `AUTO_DECIDABLE_MODES`; the initial run belongs to the operator.
 
 Only actual CI contributes to CI status. Deployment authorization prompts are
 listed in `ciExclusions`; Actions awaiting maintainer approval are unknown,

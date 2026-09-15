@@ -472,10 +472,12 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
         && ["missing", "mismatched"].includes(claimantBinding?.status);
       const definiteInputFailure = !checks.prUrlValid || !repoMatches || definiteClaimantFailure;
 
-      // A malformed or cross-repository submission is directly observable and
-      // remains a rejection. Every inability to re-derive the PR against live
-      // GitHub is different: it must enter human review, never reuse submitted
-      // claims as sufficient evidence for an automatic payout.
+      // Failing policy gates intentionally escalate to human review even over
+      // a definite input failure; the human still sees the submission blockers.
+      // Otherwise, a malformed or cross-repository submission is directly
+      // observable and remains a rejection. Inability to re-derive the PR
+      // against live GitHub is different: it must enter human review, never
+      // reuse submitted claims as sufficient evidence for an automatic payout.
       if (failingPolicyGates.length > 0 || (!definiteInputFailure && (
         githubEvidenceUnavailable
         || githubEvidencePartial

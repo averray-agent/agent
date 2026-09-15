@@ -7,8 +7,8 @@ export function parseArgs(argv) {
   const options = { baseUrl: "https://api.averray.com" };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
-    if (["--list", "--run", "--preview", "--settle"].includes(flag)) {
-      if (options.mode) throw new Error("Choose exactly one of --list, --run, --preview, --settle.");
+    if (["--list", "--preview", "--settle"].includes(flag)) {
+      if (options.mode) throw new Error("Choose exactly one of --list, --preview, --settle.");
       options.mode = flag.slice(2);
       if (flag !== "--list") options.sessionId = argv[++i];
     } else if (flag === "--expect") options.expect = argv[++i];
@@ -24,13 +24,12 @@ export function parseArgs(argv) {
 
 export async function review(options, { request, print = console.log }) {
   if (options.mode === "list") { print(JSON.stringify(await request("GET", "/admin/verifier/pending"), null, 2)); return 0; }
+  if (!["preview", "settle"].includes(options.mode)) throw new Error(`Unknown review mode: ${options.mode}`);
   const payload = { sessionId: options.sessionId };
-  if (["preview", "settle"].includes(options.mode)) {
-    const verdict = await request("POST", "/admin/verifier/run", { ...payload, preview: true });
-    print(JSON.stringify(verdict, null, 2));
-    if (options.mode === "preview") return 0;
-    if (verdict.outcome !== options.expect) return 2;
-  }
+  const verdict = await request("POST", "/admin/verifier/run", { ...payload, preview: true });
+  print(JSON.stringify(verdict, null, 2));
+  if (options.mode === "preview") return 0;
+  if (verdict.outcome !== options.expect) return 2;
   print(JSON.stringify(await request("POST", "/admin/verifier/run", payload), null, 2));
   return 0;
 }

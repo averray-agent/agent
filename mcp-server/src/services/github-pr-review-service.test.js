@@ -65,21 +65,74 @@ async function liveFixture() {
   return { store, upstream, verifier, writes, review: new GithubPrReviewService({ stateStore: store, verifierService: verifier, githubToken: "token" }) };
 }
 
-test("upstream change reruns the real verifier: merge approves, unchanged ticks do nothing, and failed checks never approve", async () => {
-  for (const change of ["merge", "failure"]) {
-    const f = await liveFixture();
-    await f.review.runOnce();
-    await f.review.runOnce();
-    assert.equal(f.writes.length, 0);
-    if (change === "merge") f.upstream.merged = true;
-    else f.upstream.conclusion = "failure";
-    const run = await f.review.runOnce();
+test("changed upstream with a rejected preview updates the observation without calling verifySubmission and stays submitted", async (t) => {
+  const f = await liveFixture();
+  const settle = t.mock.method(f.verifier, "verifySubmission");
+  await f.review.runOnce(new Date("2026-09-14T00:00:00Z"));
+  const before = await f.store.getMutationReceipt("github_pr_review_observation", "pr");
+  assert.equal(settle.mock.callCount(), 0);
+
+  f.upstream.conclusion = "failure";
+  assert.equal((await f.verifier.previewSubmission({ sessionId: "pr" })).outcome, "rejected");
+  const now = new Date("2026-09-14T00:30:00Z");
+  const run = await f.review.runOnce(now);
+  assert.deepEqual(run.errors, []);
+  assert.deepEqual(run.reviewed, []);
+  assert.deepEqual(run.observed, ["pr"]);
+  assert.equal(settle.mock.callCount(), 0);
+  assert.equal(f.writes.length, 0);
+  assert.equal((await f.store.getSession("pr")).status, "submitted");
+  assert.deepEqual((await f.review.pending()).items.map((item) => item.sessionId), ["pr"]);
+  const after = await f.store.getMutationReceipt("github_pr_review_observation", "pr");
+  assert.notEqual(after.fingerprint, before.fingerprint);
+  assert.equal(after.observedAt, now.toISOString());
+  assert.deepEqual((await f.review.runOnce()).observed, []);
+  assert.equal(settle.mock.callCount(), 0);
+});
+
+test("changed upstream with an approved merged preview settles; baseline and unchanged ticks do not", async (t) => {
+  const f = await liveFixture();
+  const settle = t.mock.method(f.verifier, "verifySubmission");
+  await f.review.runOnce();
+  await f.review.runOnce();
+  assert.equal(settle.mock.callCount(), 0);
+  f.upstream.merged = true;
+  assert.equal((await f.verifier.previewSubmission({ sessionId: "pr" })).outcome, "approved");
+  const run = await f.review.runOnce();
+  assert.deepEqual(run.errors, []);
+  assert.deepEqual(run.reviewed, [{ sessionId: "pr", outcome: "approved" }]);
+  assert.equal(settle.mock.callCount(), 1);
+  assert.deepEqual(settle.mock.calls[0].arguments, [{ sessionId: "pr" }]);
+  assert.equal(f.writes.length, 1);
+  assert.equal(f.writes[0].outcome, "approved");
+  assert.equal((await f.store.getSession("pr")).status, "resolved");
+  await f.review.runOnce();
+  assert.equal(settle.mock.callCount(), 1);
+});
+
+test("every other preview outcome is observation-only and leaves the session in the submitted queue", async (t) => {
+  for (const outcome of ["disputed", "platform_fault", "inconclusive", "unknown", undefined]) {
+    const store = new MemoryStateStore();
+    await add(store, "pr");
+    const githubLookup = { status: "verified", merged: true, state: "closed", headSha: "first" };
+    const verifySubmission = t.mock.fn(async () => { throw new Error("Must not settle a non-approved preview"); });
+    const review = new GithubPrReviewService({ stateStore: store, githubToken: "token", verifierService: {
+      previewSubmission: async () => ({ outcome, githubLookup }), verifySubmission
+    } });
+    await review.runOnce(new Date("2026-09-14T00:00:00Z"));
+    const before = await store.getMutationReceipt("github_pr_review_observation", "pr");
+    githubLookup.headSha = "changed";
+    const now = new Date("2026-09-14T00:30:00Z");
+    const run = await review.runOnce(now);
+    assert.equal(verifySubmission.mock.callCount(), 0, `preview: ${outcome}`);
     assert.deepEqual(run.errors, []);
-    assert.equal(f.writes.length, 1);
-    assert.equal(f.writes[0].outcome, change === "merge" ? "approved" : "rejected");
-    assert.equal((await f.store.getSession("pr")).status, change === "merge" ? "resolved" : "rejected");
-    await f.review.runOnce();
-    assert.equal(f.writes.length, 1);
+    assert.deepEqual(run.reviewed, []);
+    assert.deepEqual(run.observed, ["pr"]);
+    assert.equal((await store.getSession("pr")).status, "submitted");
+    assert.deepEqual((await review.pending()).items.map((item) => item.sessionId), ["pr"]);
+    const after = await store.getMutationReceipt("github_pr_review_observation", "pr");
+    assert.notEqual(after.fingerprint, before.fingerprint);
+    assert.equal(after.observedAt, now.toISOString());
   }
 });
 
