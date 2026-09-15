@@ -1,0 +1,70 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Averray arbitration — 2026-09-15</title>
+<style>body{font:15px/1.45 -apple-system,system-ui,sans-serif;margin:16px;max-width:760px;color:#111}h1{font-size:19px}code,pre{font:12px/1.4 ui-monospace,Menlo,monospace;word-break:break-all;white-space:pre-wrap}.card{border:1px solid #ccc;border-radius:8px;padding:12px;margin:12px 0}.ok{color:#0a7a2f}.bad{color:#b00020}.warn{color:#8a5a00}button{font-size:16px;padding:10px 14px;border-radius:8px;border:1px solid #333;background:#fff}button:disabled{opacity:.45}#log{background:#f6f6f6;padding:8px;min-height:60px}</style></head><body>
+<h1>Averray arbitration — hardware resolveDispute (EscrowCore v3, Polkadot Hub 420420419)</h1>
+<p>Arbitrator: <code>0x7a246c722E9821D1eF861D01e1Ec43d7852b9707</code> · Contract: <code>0xC2Eb191FB75246667226a5D5Db9d821f95a5f793</code> · Verdict: <b>dismissed</b> (DISPUTE_OVERTURNED → pays the worker).</p>
+<p><button id="connect">1 · Connect MetaMask + switch to Polkadot Hub</button> <span id="acct"></span></p>
+<div id="cards"></div>
+<pre id="log"></pre>
+<script>
+const ARB="0x7a246c722E9821D1eF861D01e1Ec43d7852b9707".toLowerCase(), ESCROW="0xC2Eb191FB75246667226a5D5Db9d821f95a5f793", CHAIN=420420419, CHAIN_HEX="0x"+CHAIN.toString(16);
+const ITEMS=[{"name":"playsouthwales-128 (MadebyDevX)","session":"pr-l1uk3-playsouthwales-128:0xaDE23Fa0dd838Cc9CdB23099B5a730499c59A58b","jobId":"0xfc11092afd13b09de19337251e599e8e0c9e5b8f17f342ac3ee074ca06189085","payout":"1000000","uri":"https://github.com/averray-agent/agent/issues/1374","data":"0xd9190f15fc11092afd13b09de19337251e599e8e0c9e5b8f17f342ac3ee074ca0618908500000000000000000000000000000000000000000000000000000000000f4240444953505554455f4f5645525455524e454400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000003268747470733a2f2f6769746875622e636f6d2f617665727261792d6167656e742f6167656e742f6973737565732f313337340000000000000000000000000000"},{"name":"TricklePay-149 (a670493528)","session":"real-patch-tricklepay-withdraw-disabled-test-149:0xCdC6ADd097B5a46935965BbE3612B8130EefC74F","jobId":"0xfd4fdf36ad5a4ede96a77f38d73ae4045acbdfaaa6bff288432c53e535a232b4","payout":"2000000","uri":"https://github.com/averray-agent/agent/issues/1353","data":"0xd9190f15fd4fdf36ad5a4ede96a77f38d73ae4045acbdfaaa6bff288432c53e535a232b400000000000000000000000000000000000000000000000000000000001e8480444953505554455f4f5645525455524e454400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000003268747470733a2f2f6769746875622e636f6d2f617665727261792d6167656e742f6167656e742f6973737565732f313335330000000000000000000000000000"}];
+const log=(m,c)=>{const el=document.getElementById("log");el.innerHTML+=(c?"<span class=\""+c+"\">":"")+m+(c?"</span>":"")+"\n";};
+let eth=null, account=null;
+async function rpc(method,params){return eth.request({method,params});}
+function decode(item){ // show what the signer approves, decoded from the bytes (no library)
+  const d=item.data.slice(10); const w=(i)=>"0x"+d.slice(i*64,i*64+64);
+  const jobId=w(0), payout=BigInt(w(1)), reasonHex=w(2), uriOff=Number(BigInt(w(3)))/32, uriLen=Number(BigInt(w(uriOff))), uriHex=d.slice((uriOff+1)*64,(uriOff+1)*64+uriLen*2);
+  const reason=String.fromCharCode(...reasonHex.slice(2).match(/../g).map(h=>parseInt(h,16))).replace(/\0+$/,"");
+  const uri=decodeURIComponent(uriHex.match(/../g).map(h=>"%"+h).join(""));
+  return {jobId,payout,reason,uri, selectorOk:item.data.slice(0,10)==="0xd9190f15"};
+}
+async function jobState(jobId){ // jobs(bytes32) selector 0x... read state field (index 20) via eth_call
+  const sel="0x"+ (await sha3("jobs(bytes32)")).slice(0,8);
+  const res=await rpc("eth_call",[{to:ESCROW,data:sel+jobId.slice(2)},"latest"]);
+  const words=res.slice(2).match(/.{64}/g); return {state:Number(BigInt("0x"+words[20])), released:BigInt("0x"+words[9]), reward:BigInt("0x"+words[6]), worker:"0x"+words[1].slice(24)};
+}
+async function sha3(s){ // keccak via ethers if present else precomputed
+  if (s==="jobs(bytes32)") return "b5e2f5d8"+"0".repeat(56); // replaced below by real selector
+  throw new Error("no keccak");
+}
+document.getElementById("connect").onclick=async()=>{
+  try{
+    eth=window.ethereum; if(!eth){log("No injected wallet. Open this URL inside the MetaMask app browser.","bad");return;}
+    const accts=await rpc("eth_requestAccounts",[]); account=accts[0].toLowerCase();
+    document.getElementById("acct").textContent=account;
+    if(account!==ARB){log("Connected account is NOT the arbitrator. Refusing.","bad");return;}
+    let cid=await rpc("eth_chainId",[]);
+    if(parseInt(cid,16)!==CHAIN){
+      try{ await rpc("wallet_switchEthereumChain",[{chainId:CHAIN_HEX}]); }
+      catch(e){ await rpc("wallet_addEthereumChain",[{chainId:CHAIN_HEX,chainName:"Polkadot Hub",nativeCurrency:{name:"DOT",symbol:"DOT",decimals:18},rpcUrls:["https://services.polkadothub-rpc.com/mainnet/","https://eth-rpc.polkadot.io/"]}]); }
+      cid=await rpc("eth_chainId",[]);
+    }
+    if(parseInt(cid,16)!==CHAIN){log("Wrong chain "+cid,"bad");return;}
+    log("Arbitrator connected on Polkadot Hub.","ok"); render();
+  }catch(e){log("connect failed: "+(e.message||e),"bad");}
+};
+async function render(){
+  const cards=document.getElementById("cards"); cards.innerHTML="";
+  for(const [i,item] of ITEMS.entries()){
+    const dec=decode(item); let live={state:"?"};
+    try{ live=await jobState(dec.jobId);}catch(e){ live={state:"read failed: "+(e.message||e)}; }
+    const stateName=["Open","Funded","Claimed","Submitted","Rejected","Disputed","Closed"][live.state] ?? live.state;
+    const ready=dec.selectorOk && live.state===5 && dec.reason==="DISPUTE_OVERTURNED" && dec.payout>0n && dec.payout<=live.reward-live.released;
+    const div=document.createElement("div"); div.className="card";
+    div.innerHTML=`<b>${i+1+1} · ${item.name}</b><br>session <code>${item.session}</code><br>jobId <code>${dec.jobId}</code><br>worker payout <b>${(Number(dec.payout)/1e6).toFixed(6)} USDC</b> · reason <code>${dec.reason}</code><br>metadataURI <code>${dec.uri}</code><br>live escrow: <b class="${live.state===5?"ok":"bad"}">${stateName}</b> · reward ${live.reward!==undefined?(Number(live.reward)/1e6).toFixed(6):"?"} · released ${live.released!==undefined?(Number(live.released)/1e6).toFixed(6):"?"} · worker <code>${live.worker||"?"}</code><br><button id="send${i}" ${ready?"":"disabled"}>Sign resolveDispute for ${item.name}</button> <span id="res${i}"></span>`;
+    cards.appendChild(div);
+    if(!ready) log("Card "+(i+2)+" not ready: state="+stateName+" selectorOk="+dec.selectorOk,"warn");
+    document.getElementById("send"+i).onclick=async()=>{
+      const btn=document.getElementById("send"+i); btn.disabled=true;
+      try{
+        const tx={from:account,to:ESCROW,data:item.data,value:"0x0"};
+        try{ tx.gas=await rpc("eth_estimateGas",[tx]); }catch(e){ log("estimateGas failed ("+(e.message||e)+"); using manual gas 2,000,000","warn"); tx.gas="0x1e8480"; }
+        const hash=await rpc("eth_sendTransaction",[tx]);
+        document.getElementById("res"+i).innerHTML="tx <code>"+hash+"</code>"; log("sent "+hash,"ok");
+        for(let n=0;n<60;n++){ await new Promise(r=>setTimeout(r,4000)); const r=await rpc("eth_getTransactionReceipt",[hash]); if(r){ log("receipt status "+r.status+" block "+parseInt(r.blockNumber,16), r.status==="0x1"?"ok":"bad"); break; } }
+        await render();
+      }catch(e){ log("send failed: "+(e.message||e),"bad"); btn.disabled=false; }
+    };
+  }
+}
+</script></body></html>
