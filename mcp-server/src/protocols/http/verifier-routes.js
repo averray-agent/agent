@@ -6,13 +6,18 @@ export function createVerifierRoutes({
   respond,
   verifierService,
 }) {
-  async function authenticateVerifierRun(request, url) {
-    const auth = await authMiddleware(request, url, { requireRole: "verifier" });
+  async function authenticateVerifierRun(request, url, requireRole = "verifier") {
+    const auth = await authMiddleware(request, url, { requireRole });
     await enforceLimit("verifier_run", auth.wallet, rateLimitConfig.verifierRun);
     return auth;
   }
 
   return async function handleVerifierRoute({ request, response, url, pathname }) {
+    if (request.method === "GET" && pathname === "/admin/verifier/pending") {
+      await authMiddleware(request, url, { requireRole: "admin" });
+      respond(response, 200, await verifierService.githubPrReview.pending());
+      return true;
+    }
     if (request.method === "GET" && pathname === "/verifier/handlers") {
       respond(response, 200, { handlers: verifierService.listHandlers() });
       return true;
@@ -44,8 +49,8 @@ export function createVerifierRoutes({
       return true;
     }
 
-    if (request.method === "POST" && pathname === "/verifier/run") {
-      await authenticateVerifierRun(request, url);
+    if (request.method === "POST" && ["/verifier/run", "/admin/verifier/run"].includes(pathname)) {
+      await authenticateVerifierRun(request, url, pathname.startsWith("/admin/") ? "admin" : "verifier");
       const payload = await readJsonBody(request);
       const sessionId = typeof payload?.sessionId === "string" && payload.sessionId.trim()
         ? payload.sessionId.trim()
@@ -56,7 +61,10 @@ export function createVerifierRoutes({
       const metadataURI = typeof payload?.metadataURI === "string" && payload.metadataURI.trim()
         ? payload.metadataURI.trim()
         : (url.searchParams.get("metadataURI") ?? "ipfs://pending-badge");
-      respond(response, 200, await verifierService.verifySubmission({ sessionId, evidence, metadataURI }));
+      respond(response, 200, await verifierService.verifySubmission({
+        sessionId, evidence, metadataURI, ...(payload?.preview === true ? { preview: true } : {}),
+        ...(payload?.expectOutcome !== undefined ? { expectOutcome: payload.expectOutcome } : {})
+      }));
       return true;
     }
 

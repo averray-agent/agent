@@ -598,6 +598,7 @@ const handleAdminGithubRoute = createAdminGithubRoutes({
 });
 
 const handleAdminSessionsRoute = createAdminSessionsRoutes({
+  stateStore, gateway, eventBus, readJsonBody,
   authMiddleware,
   parseLimit,
   respond,

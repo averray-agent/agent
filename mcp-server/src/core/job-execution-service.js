@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { projectOverturnedVerification } from "./operator-overturn.js";
 import {
   ConflictError,
   InvalidSubmissionShapeError,
@@ -1273,7 +1274,7 @@ export class JobExecutionService {
     return Promise.all(
       sessions.map(async (session) => ({
         ...session,
-        verification: await this.stateStore.getVerificationResult(session.sessionId) ?? undefined
+        verification: projectOverturnedVerification(session, await this.stateStore.getVerificationResult(session.sessionId) ?? undefined)
       }))
     );
   }
@@ -1283,7 +1284,7 @@ export class JobExecutionService {
     return Promise.all(
       sessions.map(async (session) => ({
         ...session,
-        verification: await this.stateStore.getVerificationResult(session.sessionId) ?? undefined
+        verification: projectOverturnedVerification(session, await this.stateStore.getVerificationResult(session.sessionId) ?? undefined)
       }))
     );
   }
@@ -1326,7 +1327,7 @@ export class JobExecutionService {
     return Promise.all(
       collected.map(async (session) => ({
         ...session,
-        verification: await this.stateStore.getVerificationResult(session.sessionId) ?? undefined
+        verification: projectOverturnedVerification(session, await this.stateStore.getVerificationResult(session.sessionId) ?? undefined)
       }))
     );
   }

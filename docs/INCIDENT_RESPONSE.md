@@ -615,3 +615,103 @@ Before calling the stack truly production-ready:
 - [ ] Rollback path has been rehearsed recently
 - [ ] A dated `incident-response-proof-v1` artifact validates with
   `check-incident-response-proof.mjs`
+
+## 11. GitHub PR review queue and platform-fault overturns
+
+`GET /admin/verifier/pending` (admin) lists every submitted non-auto session,
+including older sessions beyond the recent-session window, from its immutable
+claim snapshot. It includes age, reward, PR URL, and live upstream/CI state (or
+an explicit unavailable result). `/admin/status.githubPrReview` and the ops
+board report pending count and oldest age. `github_pr_review_overdue` is a
+**warning**, not a critical incident, after `GITHUB_PR_REVIEW_SLA_HOURS`
+(operator decision, default 48). A submitted claim's clock has stopped; its
+stake is never lost while the verdict is pending.
+
+Run these locally on the operator Mac with the existing mainnet KMS JWT
+environment and AWS signing credentials loaded securely. Required:
+`AWS_JWT_REGION`, `AWS_JWT_KEY_ID` (full ARN), `JWT_PUBLIC_KEY_PEM`, and the live
+`JWT_EXPECTED_ISSUER`, `JWT_EXPECTED_AUDIENCE`, `JWT_KID`. The mint helper uses
+the AWS default credential chain or the existing AWS_JWT credential variables.
+Do not paste credentials or tokens into commands, tickets, or logs. The review
+script mints a short-lived admin JWT via `mint-admin-jwt.mjs --use-kms`, keeps
+it in memory and does not print it. This is operator authority, not an agent
+instruction to obtain credentials or settle production work.
+
+```sh
+node scripts/ops/review-github-pr-submissions.mjs --list
+node scripts/ops/review-github-pr-submissions.mjs --preview '<sessionId>'
+node scripts/ops/review-github-pr-submissions.mjs --settle '<sessionId>' --expect approved
+```
+
+`--preview` calls the same handler without saving a verdict, changing a session,
+calling the chain gateway or publishing an event. `--settle` previews first,
+prints the verdict and exits 2 without settling if the outcome differs from
+`--expect`. The human-fallback handler's outcome is `disputed`, not
+`human_fallback`. `--settle <sessionId> --expect <outcome>` is the only settling
+CLI mode (`POST /admin/verifier/run`); `--run` is rejected. The settling request
+passes `--expect` as `expectOutcome`. Both `/verifier/run` and
+`/admin/verifier/run` compare it with the freshly evaluated verdict and return
+HTTP 409 `verdict_outcome_mismatch` with `{ expected, actual }` if it changed,
+before any settlement, remediation or persisted result. Inspect the mismatch
+and preview again; do not blindly retry settlement.
+
+With `GITHUB_TOKEN` configured, the review poller observes pending GitHub PRs
+every `GITHUB_PR_REVIEW_POLL_MINUTES` (operator decision, default 30). The first
+complete observation establishes a durable baseline. Later merge/check-state
+changes settle through the same verifier only when the preview is `approved`,
+with server-side `expectOutcome: "approved"` guarding the fresh evaluation;
+all other outcomes update the observation receipt and leave the session
+`submitted` in the operator queue. Unchanged ticks do not settle anything.
+Unavailable/partial reads do not replace the baseline. Ambiguous verdicts need
+an explicit operator review before entering arbitration. `github_pr` remains
+excluded from `AUTO_DECIDABLE_MODES`; the initial run belongs to the operator.
+
+Only actual CI contributes to CI status. Deployment authorization prompts are
+listed in `ciExclusions`; Actions awaiting maintainer approval are unknown,
+not failures. Failing CLA/DCO/license policy gates go to human review with the
+gate named. Binding requires an exact labelled claimant wallet or session,
+not a magic header sentence; `/verifier/result.disclosure` exposes the parser's
+audit. `status=blocked` documents an external dependency, is scored normally,
+and does not itself grant a payout or imply rejection.
+
+### Wrong rejection, still inside the dispute window
+
+1. Preview the session. Do not re-run settlement on a rejected escrow.
+2. An admin may call `POST /admin/sessions/overturn` with `sessionId` and a
+   substantive `rationale`. The server checks the pinned snapshot, live worker
+   and on-chain rejection/window. It brokers `openDisputeFor` only while the
+   window is open, then confirms Disputed before changing local status. A
+   refusal is `409 overturn_window_closed` with `windowEndsAt`. Existing chain
+   disputes converge locally without opening a second dispute.
+3. `/disputes` shows `origin: operator_overturn`, `workerInitiated: false`, the
+   rationale and the existing arbitration execution mode. The public event is
+   `platform.overturn_dispute_opened`; the brokered participant is not recorded
+   as a worker-initiated complaint. On mainnet the arbitrator is out-of-band
+   hardware. Follow the existing arbitrator ceremony; this route does not
+   authorize or send a payout. Ordinary verifier runs cannot settle overturns.
+4. After hardware `resolveDispute`, submit the verdict through the existing
+   `POST /disputes/:id/verdict` receipt-convergence route. The claimed payout
+   must match the live released amount. Session/profile/directory/result reflect
+   resolution and payout; `originalVerdict` and status history retain the
+   original rejection without counting it as the current outcome.
+
+For the September 12 footer incident, the operator's hard cutoff is
+**2026-09-19T23:16:48Z**. Preview both rejected sessions and the five waiting
+sessions. The operator opens the two disputes, performs hardware arbitration,
+and checks receipt convergence; implementation work does not perform these
+actions. If deployment is not complete by September 18, the packet instructs
+the operator to open both disputes on chain to stop the slash clock, then
+converge them locally after deployment. Re-read live deadlines before acting.
+
+### Claimed jobs and catalogue visibility
+
+Two catalogue paths can hide a definition independently of upstream issue
+closure: `JobCatalogService.isVisibleJob` excludes lifecycle-stale rows and
+`specHashDriftedJobs`; the hourly spec-hash sweeper populates that latter map.
+Physical deletion is not needed to produce `job_not_found`. The stale sweeper
+already skips active sessions, but the read-side visibility check did not.
+`getPublicJobDefinition` now reads the existing session's hash-validated
+snapshot before applying catalogue visibility. Ingest, lifecycle changes,
+spec-hash sweeps and a missing reproducible row cannot hide agreed claim terms.
+This does not reopen a job or relax the new-claim integrity gate. The claim-state
+projection also no longer collapses rejected/disputed sessions to submitted.

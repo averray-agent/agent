@@ -137,7 +137,8 @@ export function createMcpTools({
       type: "object",
       properties: {
         jobId: { type: "string", minLength: 1 },
-        submission: {}
+        submission: {},
+        prBody: { type: "string", description: "For github_pr: draft PR body to check disclosure against the signed-in claimant. Requires wallet sign-in." }
       },
       required: ["jobId", "submission"],
       additionalProperties: false
@@ -513,7 +514,7 @@ export function createMcpToolExecutor({
         }
         return unwrap(await invokeHttpRoute(handleJobRoute, {
           ...common,
-          body: { jobId: args.jobId, submission: args.submission },
+          body: { jobId: args.jobId, submission: args.submission, ...(typeof args.prBody === "string" ? { prBody: args.prBody } : {}) },
           method: "POST",
           path: "/jobs/validate-submission"
         }));

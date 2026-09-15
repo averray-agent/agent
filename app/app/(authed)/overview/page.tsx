@@ -293,6 +293,10 @@ export default function OverviewPage() {
       ? "event stream requires wallet sign-in"
       : `stream ${stream.state} · ${stream.events.length} recent events`;
 
+  const githubReview = asRecord(asRecord(providerOps.data)?.githubPrReview);
+  const pendingReviewCount = typeof githubReview?.count === "number" ? githubReview.count : null;
+  const oldestReviewHours = typeof githubReview?.oldestAgeMs === "number"
+    ? Math.floor(githubReview.oldestAgeMs / 3_600_000) : null;
   return (
     <>
       <MobileOverview
@@ -336,6 +340,14 @@ export default function OverviewPage() {
         meta={lifecycleMeta}
       />
       <NeedsActionList alerts={alerts} meta={alertsMeta} notice={alertsNotice} />
+      <section aria-label="Operator verification queue" className="rounded-lg border border-[var(--border)] p-4">
+        <h2 className="font-medium">Operator verification queue</h2>
+        <p>{pendingReviewCount === null ? "Queue unavailable" : `${pendingReviewCount} submitted non-automatic reviews pending`}
+          {oldestReviewHours === null ? " · oldest age not reported" : ` · oldest ${oldestReviewHours} hours`}</p>
+        <p className="text-sm">Review SLA: {typeof githubReview?.slaHours === "number" ? `${githubReview.slaHours} hours` : "not reported"}.
+          {Array.isArray(githubReview?.warnings) && githubReview.warnings.length > 0 ? " Warning: GitHub PR review overdue." : ""}
+          {" "}Use the operator review script to list and preview submissions before settling.</p>
+      </section>
       <LaneStatusGrid lanes={lanes} meta={hasLiveOverview ? "live API snapshot" : undefined} />
       <CatalogueLaneGrid
         lanes={catalogueLanes}

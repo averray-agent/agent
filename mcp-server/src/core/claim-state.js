@@ -298,7 +298,7 @@ function sessionReachedSubmission(session) {
 
 function submittedLikeState(status) {
   if (status === "submitted" || status === "disputed" || status === "rejected") {
-    return "submitted";
+    return status;
   }
   if (TERMINAL_SESSION_STATUSES.has(status)) {
     return "exhausted";

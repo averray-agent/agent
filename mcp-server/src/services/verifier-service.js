@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { projectOverturnedVerification } from "../core/operator-overturn.js";
 import { VerifierRegistry } from "./verifier-handlers.js";
 import { hashCanonicalContent } from "../core/canonical-content.js";
 import {
@@ -6,6 +8,7 @@ import {
 } from "../core/verifier-contract.js";
 import { assertSessionCanReceiveVerification } from "../core/session-state-machine.js";
 import { normalizeSubmission } from "../core/submission.js";
+import { ConflictError, NotFoundError } from "../core/errors.js";
 import { getJobSchema, validateAgainstSchema } from "../core/job-schema-registry.js";
 import { normalizeSubmitPayloadShape, validateSubmissionContract } from "../core/job-execution-service.js";
 import {
@@ -71,25 +74,45 @@ export class VerifierService {
     this.creditBookKeeper = creditBookKeeper;
   }
 
-  async verifySubmission({ sessionId, evidence = undefined, metadataURI = "ipfs://pending-badge" }) {
-    let session = await this.platformService.resumeSession(sessionId);
+  async verifySubmission({ sessionId, evidence = undefined, metadataURI = "ipfs://pending-badge", preview = false, expectOutcome = undefined }) {
+    if (preview) return this.previewSubmission({ sessionId, evidence });
+    const key = `verifier-settlement:${sessionId}`;
+    const owner = randomUUID();
+    const locked = await this.stateStore.acquireClaimLock?.(key, owner, 300);
+    if (locked === false) throw new ConflictError("This session already has a verifier run in progress.", "verification_in_progress");
+    try {
+      return await this.executeSubmissionVerification({ sessionId, evidence, metadataURI, expectOutcome });
+    } finally {
+      if (locked) await this.stateStore.releaseClaimLock?.(key, owner);
+    }
+  }
+
+  async executeSubmissionVerification({ sessionId, evidence, metadataURI, expectOutcome }) {
+    const guarded = expectOutcome !== undefined;
+    let session = guarded
+      ? await this.stateStore.getSession(sessionId)
+      : await this.platformService.resumeSession(sessionId);
+    if (!session) throw new NotFoundError("Unknown session: " + sessionId, "session_not_found");
+    if (session.operatorOverturn) throw new ConflictError("An operator overturn requires an arbitrator verdict; use preview for read-only review.", "overturn_requires_arbitration");
     assertSessionCanReceiveVerification(session);
-    // Capture the narrative boundary before any chain settlement can mint a
-    // badge or advance reputation. This read is advisory: an unavailable
-    // progression surface must never block the money path.
-    const previousProgression = await this.platformService.getWorkerProgressionSafely?.(
-      session.wallet
-    );
-    const { job, snapshot, liveJob: initialLiveJob } = await assertJobSnapshotIntegrity(
-      session,
-      this.blockchainGateway
-    );
-    let liveJob = initialLiveJob;
+    const { job, snapshot } = requireJobSnapshot(session);
+    let previousProgression, liveJob;
     const chainJobId = session.chainJobId ?? session.jobId;
-    const reconciliation = await this.reconcileBrokeredSubmitDivergence({ session, liveJob });
-    if (reconciliation.result) return reconciliation.result;
-    liveJob = reconciliation.liveJob;
-    session = reconciliation.session ?? session;
+    const prepareChainContext = async () => {
+      // Capture progression before settlement can mint a badge or advance it.
+      previousProgression = await this.platformService.getWorkerProgressionSafely?.(session.wallet);
+      ({ liveJob } = await assertJobSnapshotIntegrity(session, this.blockchainGateway));
+      const reconciliation = await this.reconcileBrokeredSubmitDivergence({ session, liveJob });
+      liveJob = reconciliation.liveJob;
+      session = reconciliation.session ?? session;
+      return reconciliation.result;
+    };
+    // Preserve the existing preflight for unguarded callers. Guarded calls
+    // evaluate locally first: reconciliation can itself write or send a tx.
+    if (!guarded) {
+      const result = await prepareChainContext();
+      if (result) return result;
+    }
     const verificationInput = this.resolveVerificationInput(session, evidence);
     const validatedVerificationInput = this.validateVerificationInput(job, verificationInput, {
       pinnedSchema: snapshot.outputSchema?.schema
@@ -99,6 +122,14 @@ export class VerifierService {
       validatedVerificationInput,
       verificationClaimantContext(session)
     );
+    if (guarded && verdict.outcome !== expectOutcome) {
+      throw new ConflictError("The freshly evaluated verdict does not match the expected outcome.",
+        "verdict_outcome_mismatch", { expected: expectOutcome, actual: verdict.outcome });
+    }
+    if (guarded) {
+      const result = await prepareChainContext();
+      if (result) return result;
+    }
     const disputeReasoningHash = hashCanonicalContent({
       handler: verdict.handler,
       handlerVersion: verdict.handlerVersion,
@@ -242,6 +273,20 @@ export class VerifierService {
       preparedVerdict: settlementPreparation?.preparedVerdict,
       receiptContext: settlementPreparation?.receiptContext
     });
+  }
+
+  async previewSubmission({ sessionId, evidence = undefined }) {
+    // Intentionally bypass resume/progression, chain reconciliation, settlement
+    // preparation and ingestion. Even a rejected session can be inspected from
+    // its own immutable job snapshot, with no catalogue or gateway dependency.
+    const session = await this.stateStore.getSession(sessionId);
+    if (!session) throw new NotFoundError("Unknown session: " + sessionId, "session_not_found");
+    const { job, snapshot } = requireJobSnapshot(session);
+    const input = this.validateVerificationInput(job, this.resolveVerificationInput(session, evidence), {
+      pinnedSchema: snapshot.outputSchema?.schema
+    });
+    const verdict = await this.registry.evaluate(job, input, verificationClaimantContext(session));
+    return { ...verdict, sessionId, preview: true };
   }
 
   async prepareNonDisputeSettlement({
@@ -652,6 +697,8 @@ export class VerifierService {
 
   async getResult(sessionId) {
     const result = await this.stateStore.getVerificationResult(sessionId);
+    const session = await this.stateStore.getSession(sessionId);
+    if (session?.operatorOverturn) return projectOverturnedVerification(session, result);
     if (result) {
       return result;
     }
@@ -661,7 +708,6 @@ export class VerifierService {
     // so a worker who just submitted sees in-progress + elapsed latency instead
     // of an indistinguishable not_found. Any other state falls through to
     // not_found (the route maps a null return to { status: "not_found" }).
-    const session = await this.stateStore.getSession(sessionId);
     if (session && (session.status === "submitted" || session.status === "disputed")) {
       return {
         status: "verifying",

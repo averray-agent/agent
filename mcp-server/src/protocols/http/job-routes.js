@@ -249,7 +249,10 @@ export function createJobRoutes({
       if (submission === undefined) {
         throw new ValidationError("submission is required.");
       }
-      respond(response, 200, await service.validateJobSubmission(jobId, submission));
+      const prBody = payload?.prBody ?? submission?.prBody;
+      const auth = typeof prBody === "string" ? await authMiddleware(request, url) : undefined;
+      respond(response, 200, await service.validateJobSubmission(jobId, submission,
+        ...(auth ? [{ wallet: auth.wallet, prBody }] : [])));
       return true;
     }
 

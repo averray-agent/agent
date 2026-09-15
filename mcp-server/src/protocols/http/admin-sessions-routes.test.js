@@ -4,6 +4,18 @@ import { createAdminSessionsRoutes } from "./admin-sessions-routes.js";
 
 const AUTH = { wallet: "0xadmin", roles: ["admin"] };
 
+test("POST /admin/sessions/overturn requires admin before reading the payload or touching chain", async () => {
+  const roles = [];
+  const route = createAdminSessionsRoutes({
+    authMiddleware: async (_r, _u, options) => { roles.push(options); throw new Error("unauthorized"); },
+    readJsonBody: () => { throw new Error("read before auth"); },
+    gateway: { isEnabled: () => { throw new Error("chain before auth"); } }
+  });
+  const pathname = "/admin/sessions/overturn";
+  await assert.rejects(route({ request: { method: "POST" }, response: {}, pathname, url: new URL(pathname, "http://localhost") }), /unauthorized/);
+  assert.deepEqual(roles, [{ requireRole: "admin" }]);
+});
+
 function makeHarness(overrides = {}) {
   const calls = [];
   const response = {};

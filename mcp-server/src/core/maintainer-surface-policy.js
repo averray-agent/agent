@@ -168,7 +168,44 @@ export function buildAverrayDisclosureFooter({
 }
 
 export function hasAverrayDisclosureFooter(text) {
-  return String(text ?? "").includes(FOOTER_HEADER) && String(text ?? "").includes("Averray platform.");
+  const disclosure = readAverrayDisclosure(text);
+  return disclosure.canonicalHeader
+    || (disclosure.labelledLines.length > 0 && /\bAverray\b/iu.test(String(text ?? "")));
+}
+
+export const AVERRAY_CLAIMANT_LABELS = Object.freeze({
+  wallet: ["Agent identity", "Claimant wallet", "Operator wallet", "Agent wallet", "Wallet"],
+  session: ["Claim session", "Session"]
+});
+
+export function buildAverrayDisclosureRequirement(options = {}) {
+  return {
+    required: true,
+    canonicalFooter: buildAverrayDisclosureFooter({ claimSessionId: "<claimSessionId>", ...options }),
+    acceptedClaimantLines: AVERRAY_CLAIMANT_LABELS,
+    rule: "Identify the actual claimant with an exact labelled wallet or claim session. Either exact match binds; an unlabelled address in prose does not. The canonical sentence is a template, not a binding requirement. Labels are case-insensitive, may start with Averray, and may use surrounding Markdown."
+  };
+}
+
+function readAverrayDisclosure(text) {
+  const value = String(text ?? "");
+  const labelledLines = [];
+  // Labels can occur inside prose/parentheses (the trace-ux and Guallet PRs).
+  // Only surrounding Markdown is stripped: underscores inside a session ID
+  // are data, and the entire value must still match the claimant exactly.
+  const pattern = /(?:^|[\s(>.,;-])[*_\x60>-]*(?:Averray[\s*_\x60]+)?(Agent[\s*_\x60]+identity|Claimant[\s*_\x60]+wallet|Operator[\s*_\x60]+wallet|Agent[\s*_\x60]+wallet|Wallet|Claim[\s*_\x60]+session|Session)[*_\x60)]*(?::|\s)[\s*_\x60(]*([^\s\x60*()>]+)/giu;
+  for (const match of value.matchAll(pattern)) {
+    const label = match[1].replace(/[*_\x60]/gu, "").replace(/\s+/gu, " ").toLowerCase();
+    labelledLines.push({
+      type: label.includes("session") ? "session" : "wallet",
+      label,
+      value: match[2].replace(/^[_]+|[_,.;]+$/gu, "")
+    });
+  }
+  return {
+    canonicalHeader: value.includes(FOOTER_HEADER) && value.includes("Averray platform."),
+    labelledLines
+  };
 }
 
 /**
@@ -183,32 +220,31 @@ export function inspectAverrayClaimantBinding(text, {
   claimSessionId = undefined
 } = {}) {
   const value = String(text ?? "");
-  const disclosedWallet = value.match(/^\s*Agent identity:\s*(0x[a-f0-9]{40})\s*$/imu)?.[1] ?? null;
-  const disclosedSessionId = value.match(/^\s*Claim session:\s*(\S+)\s*$/imu)?.[1] ?? null;
+  const disclosure = readAverrayDisclosure(value);
+  const wallets = disclosure.labelledLines.filter((line) => line.type === "wallet");
+  const sessions = disclosure.labelledLines.filter((line) => line.type === "session");
+  const disclosedWallet = wallets[0]?.value ?? null;
+  const disclosedSessionId = sessions[0]?.value ?? null;
   const expectedWallet = normalizeEvmAddress(claimantWallet);
   const expectedSessionId = typeof claimSessionId === "string" && claimSessionId.trim()
     ? claimSessionId.trim()
     : null;
   const walletMatches = Boolean(
     expectedWallet
-    && disclosedWallet
-    && normalizeEvmAddress(disclosedWallet) === expectedWallet
+    && wallets.some((line) => normalizeEvmAddress(line.value) === expectedWallet)
   );
   const sessionMatches = Boolean(
     expectedSessionId
-    && disclosedSessionId
-    && disclosedSessionId === expectedSessionId
+    && sessions.some((line) => line.value === expectedSessionId)
   );
   const expectedBindingAvailable = Boolean(expectedWallet || expectedSessionId);
-  const disclosedBindingAvailable = Boolean(disclosedWallet || disclosedSessionId);
+  const disclosedBindingAvailable = disclosure.labelledLines.length > 0;
   const footerPresent = hasAverrayDisclosureFooter(value);
 
   return {
     status: !expectedBindingAvailable
       ? "claimant_context_missing"
-      : !footerPresent
-        ? "missing"
-        : walletMatches || sessionMatches
+      : walletMatches || sessionMatches
           ? "matched"
           : disclosedBindingAvailable
             ? "mismatched"
@@ -217,7 +253,11 @@ export function inspectAverrayClaimantBinding(text, {
     disclosedSessionId,
     footerPresent,
     walletMatches,
-    sessionMatches
+    sessionMatches,
+    disclosure: {
+      ...disclosure,
+      matchedBy: [walletMatches ? "wallet" : null, sessionMatches ? "session" : null].filter(Boolean)
+    }
   };
 }
 

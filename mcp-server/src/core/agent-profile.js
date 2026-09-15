@@ -1,4 +1,5 @@
 import { ValidationError } from "./errors.js";
+import { projectOverturnedVerification } from "./operator-overturn.js";
 import { describeSessionStatus } from "./session-state-machine.js";
 import {
   DEFAULT_ESCROW_ASSET_SYMBOL,
@@ -80,7 +81,7 @@ export function buildAgentProfile({
   const approved = [];
   const rejected = [];
   for (const session of safeSessions) {
-    const outcome = session?.verification?.outcome;
+    const outcome = projectOverturnedVerification(session, session?.verification)?.outcome;
     if (outcome === "approved") {
       approved.push(session);
     } else if (outcome === "rejected") {
@@ -124,7 +125,7 @@ export function buildAgentProfile({
     const completedAt = new Date(session.updatedAt ?? Date.now()).toISOString();
 
     if (earningJob) {
-      totalRewardBase += toBaseUnits(earningJob.rewardAmount ?? 0, decimals);
+      totalRewardBase += toBaseUnits(session.operatorOverturn?.resolution?.workerPayout ?? earningJob.rewardAmount ?? 0, decimals);
     }
     categoryCounts.set(category, (categoryCounts.get(category) ?? 0) + 1);
     categoryMaxLevel.set(category, Math.max(categoryMaxLevel.get(category) ?? 0, level));
@@ -146,11 +147,12 @@ export function buildAgentProfile({
       category,
       level,
       completedAt,
+      ...(session.operatorOverturn ? { sessionStatus: session.status, overturn: session.operatorOverturn } : {}),
       ...(earningJob
         ? {
             reward: {
               asset: earningJob.rewardAsset ?? rewardAsset,
-              amount: toBaseUnits(earningJob.rewardAmount ?? 0, decimals).toString(),
+              amount: toBaseUnits(session.operatorOverturn?.resolution?.workerPayout ?? earningJob.rewardAmount ?? 0, decimals).toString(),
               decimals
             }
           }
@@ -609,6 +611,7 @@ function buildSubcontractedEntry(session, job, parent, normalizedWallet) {
 }
 
 function buildProfileDispute(session, definitionOf, verdictReceipt, releaseReceipt) {
+  verdictReceipt ??= session.operatorOverturn?.resolution;
   const sessionId = String(session.sessionId ?? "");
   const id = sessionId ? disputeIdForSession(sessionId) : undefined;
   const openedAt = stringOrUndefined(session.disputedAt)
@@ -631,6 +634,7 @@ function buildProfileDispute(session, definitionOf, verdictReceipt, releaseRecei
     ...(id ? { id } : {}),
     sessionId,
     jobId: stringOrUndefined(session.jobId) ?? "unknown-job",
+    ...(session.operatorOverturn ? { origin: "operator_overturn", workerInitiated: false, rationale: session.operatorOverturn.rationale } : {}),
     ...(stringOrUndefined(job?.title) ? { jobTitle: job.title } : {}),
     status,
     openedAt,

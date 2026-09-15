@@ -1,3 +1,4 @@
+import { GithubPrReviewService } from "./github-pr-review-service.js";
 import { PlatformService } from "../core/platform-service.js";
 import { loadVerifierClassRewards } from "../core/verifier-class-rewards.js";
 import { createStateStore } from "../core/state-store.js";
@@ -1135,6 +1136,9 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const githubPrReview = new GithubPrReviewService({ stateStore, verifierService, logger });
+  verifierService.githubPrReview = githubPrReview;
+  platformService.githubPrReview = githubPrReview;
   const externalPosterReviewEscalator = initStep("init-external-poster-review-escalator", logger, () =>
     new ExternalPosterReviewEscalatorService(
       platformService,
@@ -1205,6 +1209,7 @@ export async function createPlatformRuntime() {
   bootstrapSelfReportScheduler.start();
   jobStaleSweeper.start();
   submittedJobAutoVerifier.start();
+  githubPrReview.start();
   verificationRunFinalizer.start();
   transparencyService.start();
   externalPosterReviewEscalator.start();
@@ -1284,6 +1289,7 @@ export async function createPlatformRuntime() {
     upstreamStatusPoller,
     jobStaleSweeper,
     submittedJobAutoVerifier,
+    githubPrReview,
     firstExternalAgentAlert,
     authConfig,
     selfIdentityRegistry,

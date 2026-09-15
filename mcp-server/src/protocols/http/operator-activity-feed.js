@@ -182,6 +182,13 @@ export async function listAlerts({
     listDisputes(limit)
   ]);
   const alerts = [];
+  const review = await service.githubPrReview?.getStatus?.();
+  for (const warning of review?.warnings ?? []) {
+    alerts.push({ id: warning.code, code: warning.code, severity: "warning", tone: "warn",
+      title: "GitHub PR review overdue", ref: warning.sessionId,
+      body: `${review.githubPrCount} pending GitHub PR reviews; oldest ${Math.floor(warning.oldestAgeMs / 3_600_000)} hours. Operator review required.`,
+      ctaLabel: "Open runs ->", ctaHref: "/runs" });
+  }
   for (const dispute of disputes) {
     alerts.push({
       id: `alert-${dispute.id}`,
