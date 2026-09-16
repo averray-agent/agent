@@ -72,6 +72,8 @@ const POOL_ABI = [
   "function TOTAL_ASSET_CAP() view returns (uint256)",
   "function PER_AGENT_ASSET_CAP() view returns (uint256)",
   "function NOTICE_7_DAYS() view returns (uint256)",
+  "function NOTICE_90_DAYS() view returns (uint256)",
+  "function deployableFor(uint256) view returns (uint256)",
   "function nextRedeemRequestId() view returns (uint256)",
   "function nextVenueDeploymentId() view returns (uint256)",
   "function nextVenueRecallId() view returns (uint256)",
@@ -88,6 +90,7 @@ const POOL_ABI = [
   "event VenueDeploymentSettled(uint256 indexed deploymentId,uint8 status,uint256 settledAssets)",
   "event VenueRecallRequested(uint256 indexed recallId,uint256 indexed deploymentId,bytes32 indexed adapterRequestId,uint256 requestedAssets)",
   "event VenueRecallSettled(uint256 indexed recallId,uint256 indexed deploymentId,uint8 status,uint256 returnedAssets)",
+  "event VenueLossRealised(uint256 indexed deploymentId,uint256 assets)",
   "event VenuePrincipalReturned(uint256 indexed deploymentId,uint256 returnedAssets,uint256 principalReduction)",
 ];
 
@@ -183,6 +186,7 @@ export function resolvePoolVenuePair(manifest, poolAddress) {
   const entries = [
     ["legacyDepositPoolV2", "hydrationDepositPoolAdapterV2", "depositPoolLaneV2"],
     ["depositPoolV21", "hydrationDepositPoolAdapterV21", "depositPoolLaneV21"],
+    ["depositPoolV22", "hydrationDepositPoolAdapterV22", "depositPoolLaneV22"],
   ].filter(([poolKey]) => String(contracts[poolKey] ?? "").toLowerCase() === target.toLowerCase());
   if (entries.length !== 1) {
     throw new Error(`Pool ${target} has ${entries.length === 0 ? "no" : "ambiguous"} manifest venue pair; refusing without an explicit pool-specific entry.`);
@@ -298,6 +302,7 @@ export function assertDeployAdmission(input) {
     returnBy,
     contractMaxReturnSeconds,
     deploymentKind,
+    commitmentCapacity,
   } = input;
   if (totalAssets === 0n) throw new Error("Deposit pool is empty; refusing a yield ceremony with no assets.");
   if (assets <= 0n) throw new Error("Deployment assets must be positive.");
@@ -326,8 +331,13 @@ export function assertDeployAdmission(input) {
     if (delay > BigInt(STANDING_RETURN_WINDOW_SECONDS)) {
       throw new Error("returnBy exceeds the 7-day standing policy.");
     }
+  } else if (deploymentKind === "committed") {
+    if (contractMaxReturnSeconds !== 90 * 86400 || typeof commitmentCapacity !== "bigint") {
+      throw new Error("Committed policy requires the v2.2 live commitment-capacity read.");
+    }
+    if (assets > commitmentCapacity) throw new Error("Deployment exceeds live commitment backing or Flex floor capacity.");
   } else {
-    throw new Error(`Unknown --deployment-kind ${deploymentKind}; expected proof or standing.`);
+    throw new Error(`Unknown --deployment-kind ${deploymentKind}; expected proof, standing or committed.`);
   }
   if (delay > BigInt(contractMaxReturnSeconds)) {
     throw new Error(`returnBy exceeds the live contract maximum of ${contractMaxReturnSeconds} seconds.`);
@@ -339,14 +349,15 @@ export function assertAccountingPostcondition({
   afterPrincipalCostBasis,
   expectedPrincipalIncrease = 0n,
   emittedPrincipalReduction,
+  emittedRealisedLoss = 0n,
   afterBufferAssets,
   afterTotalAssets,
 }) {
-  const expectedAfter = beforePrincipalCostBasis + expectedPrincipalIncrease - emittedPrincipalReduction;
+  const expectedAfter = beforePrincipalCostBasis + expectedPrincipalIncrease - emittedPrincipalReduction - emittedRealisedLoss;
   if (afterPrincipalCostBasis !== expectedAfter) {
     throw new Error(
       `Postcondition failed: principal cost-basis delta is not exact; expected ${expectedAfter.toString()} after `
-      + `(${beforePrincipalCostBasis.toString()} + ${expectedPrincipalIncrease.toString()} - ${emittedPrincipalReduction.toString()}), `
+      + `(${beforePrincipalCostBasis.toString()} + ${expectedPrincipalIncrease.toString()} - ${emittedPrincipalReduction.toString()} - ${emittedRealisedLoss.toString()}), `
       + `read ${afterPrincipalCostBasis.toString()}.`,
     );
   }
@@ -807,6 +818,16 @@ async function main() {
   if (args.command === "deploy") {
     const assets = positiveBigInt(args.assets, "--assets");
     const returnBy = positiveBigInt(args.returnBy, "--return-by");
+    let commitmentCapacity;
+    let contractMaxReturnSeconds = before.notice7Days;
+    if (args.deploymentKind === "committed") {
+      if (String(deployments.contracts?.depositPoolV22 ?? "").toLowerCase() !== poolAddress.toLowerCase()) {
+        throw new Error("Committed mode requires the targeted pool's explicit v2.2 manifest identity.");
+      }
+      if (returnBy <= BigInt(latest.timestamp)) throw new Error("returnBy must be in the future at the live chain head.");
+      contractMaxReturnSeconds = Number(await pool.NOTICE_90_DAYS({ blockTag: latest.number }));
+      commitmentCapacity = BigInt(await pool.deployableFor(returnBy - BigInt(latest.timestamp), { blockTag: latest.number }));
+    }
     assertDeployAdmission({
       assets,
       totalAssets: before.totalAssets,
@@ -816,7 +837,8 @@ async function main() {
       pendingRedemptionIds: before.pendingRedemptionIds,
       blockTimestamp: BigInt(latest.timestamp),
       returnBy,
-      contractMaxReturnSeconds: before.notice7Days,
+      contractMaxReturnSeconds,
+      commitmentCapacity,
       deploymentKind: args.deploymentKind,
     });
     const observabilityUrl = buildPoolObservabilityUrl(args.observabilityUrl, poolAddress);
@@ -833,6 +855,7 @@ async function main() {
       returnByIso: new Date(Number(returnBy) * 1_000).toISOString(),
       deploymentKind: args.deploymentKind,
       predictedDeploymentId: before.nextVenueDeploymentId,
+      ...(commitmentCapacity === undefined ? {} : { commitmentCapacityRaw: commitmentCapacity, contractMaxReturnSeconds }),
       observability: {
         url: observabilityUrl,
         block: observability.block,
@@ -918,6 +941,8 @@ async function main() {
     afterPrincipalCostBasis: after.venuePrincipalCostBasis,
     expectedPrincipalIncrease: args.command === "deploy" ? BigInt(args.assets) : 0n,
     emittedPrincipalReduction: reduction,
+    emittedRealisedLoss: events.filter((event) => event.name === "VenueLossRealised")
+      .reduce((sum, event) => sum + BigInt(event.args.assets), 0n),
     afterBufferAssets: after.bufferAssets,
     afterTotalAssets: after.totalAssets,
   });

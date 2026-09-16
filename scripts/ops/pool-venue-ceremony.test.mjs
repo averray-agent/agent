@@ -260,6 +260,19 @@ test("proof tranche at exactly 50% of total assets is admitted", () => {
   assert.doesNotThrow(() => assertDeployAdmission(healthyAdmission({ assets: 5_000_000n })));
 });
 
+test("v2.2 committed mode requires live capacity, retains 50% policy, and recognises realised loss", () => {
+  const input = healthyAdmission({ deploymentKind: "committed", contractMaxReturnSeconds: 90 * 86400,
+    returnBy: 1_800_000_000n + 89n * 86400n, commitmentCapacity: 5_000_000n, assets: 5_000_000n });
+  assert.doesNotThrow(() => assertDeployAdmission(input));
+  assert.throws(() => assertDeployAdmission({ ...input, commitmentCapacity: undefined }), /live commitment/u);
+  assert.throws(() => assertDeployAdmission({ ...input, commitmentCapacity: 4_999_999n }), /backing or Flex floor/u);
+  assert.throws(() => assertDeployAdmission({ ...input, assets: 5_000_001n }), /50% deployment policy/u);
+  assert.throws(() => assertDeployAdmission({ ...input, contractMaxReturnSeconds: 7 * 86400 }), /v2.2 live/u);
+  assert.doesNotThrow(() => assertAccountingPostcondition({ beforePrincipalCostBasis: 9_980_137n,
+    afterPrincipalCostBasis: 0n, emittedPrincipalReduction: 9_928_372n, emittedRealisedLoss: 51_765n,
+    afterBufferAssets: 9_928_372n, afterTotalAssets: 9_928_372n }));
+});
+
 test("over-policy deployment is refused", () => {
   assert.throws(
     () => assertDeployAdmission(healthyAdmission({ assets: 5_000_001n })),

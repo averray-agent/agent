@@ -1,6 +1,9 @@
 import { GithubPrReviewService } from "./github-pr-review-service.js";
 import { DisputeArbitrationService } from "./dispute-arbitration-service.js";
 import { HumanVerdictService } from "./human-verdict-service.js";
+import { PoolV22CommitmentReader, poolV22Config } from "./pool-v22-commitments.js";
+import { EvmPoolV22AllocationChain } from "./pool-v22-allocation-chain.js";
+import { PoolV22LockedKeeper } from "./pool-v22-locked-keeper.js";
 import { PlatformService } from "../core/platform-service.js";
 import { loadVerifierClassRewards } from "../core/verifier-class-rewards.js";
 import { createStateStore } from "../core/state-store.js";
@@ -302,6 +305,8 @@ export function createDepositPoolDoor({
   yieldAttributionService,
   env = process.env
 } = {}) {
+  const v22 = poolV22Config(env);
+  const isV22 = v22.ceremonyComplete && gateway.config.depositPoolAddress?.toLowerCase() === v22.poolAddress.toLowerCase();
   return new DepositPoolDoorService({
     poolAddress: gateway.config.depositPoolAddress,
     chainId: authConfig.chainId,
@@ -310,6 +315,8 @@ export function createDepositPoolDoor({
     rpcUrls: [resolveHubNetwork(authConfig.chainId).rpcUrl],
     provider: gateway.provider,
     chainReader,
+    commitmentReader: isV22 ? new PoolV22CommitmentReader(gateway.provider, v22.poolAddress) : undefined,
+    ceremonyComplete: isV22,
     workerExposurePolicy,
     lockedTierService,
     yieldAttributionService,
@@ -619,6 +626,16 @@ export async function createPlatformRuntime() {
       logger
     })
   );
+  const poolV22LockedKeeper = initStep("init-pool-v22-locked-keeper", logger, () => {
+    const config = poolV22Config(process.env);
+    const chain = config.ceremonyComplete ? new EvmPoolV22AllocationChain({
+      provider: gateway.provider, signer: gateway.signer, config,
+      accountAddress: gateway.config.agentAccountAddress,
+      assetAddress: gateway.config.supportedAssets.find((a) => a.symbol === "USDC")?.address
+    }) : undefined;
+    lockedTierService.poolV22Chain = chain;
+    return new PoolV22LockedKeeper({ config, chain, lockedTierService, stateStore, logger });
+  });
   const depositClaimPriorityPolicy = initStep(
     "init-deposit-claim-priority",
     logger,
@@ -1225,6 +1242,7 @@ export async function createPlatformRuntime() {
   externalPosterReviewEscalator.start();
   firstExternalAgentAlert.start();
   idleBalanceAllocationKeeper.start();
+  poolV22LockedKeeper.start();
 
   const authMiddleware = createAuthMiddleware({
     authConfig,
@@ -1291,6 +1309,7 @@ export async function createPlatformRuntime() {
     lockedTierService,
     idleBalanceConsentService,
     idleBalanceAllocationKeeper,
+    poolV22LockedKeeper,
     creditPoolDoor,
     creditBookDoor,
     creditBookKeeper,

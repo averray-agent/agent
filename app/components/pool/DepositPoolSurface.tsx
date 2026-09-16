@@ -8,6 +8,7 @@ import { buildDepositPoolSurface } from "@/lib/ui/deposit-pool-surface.js";
 
 type SurfaceFact = { label: string; value: string | null };
 type PoolGenerationManifest = {
+  depositPoolV22?: string;
   depositPoolV21: string;
   legacyDepositPoolV2: string;
 };
@@ -96,6 +97,14 @@ export function DepositPoolSurface({
                 ] : undefined}
               />
             </section>
+
+            <StatementPanel
+              eyebrow="Commitment windows"
+              status={surface.commitments?.status}
+              statement={surface.commitments?.disclosure}
+              footnote={surface.commitments?.sharedDisclosure}
+              rows={[...(surface.commitments?.rows ?? []), ...(surface.commitments?.tiers ?? [])] as Array<[string, string | null]>}
+            />
 
             <StatementPanel
               eyebrow="Yield attribution"

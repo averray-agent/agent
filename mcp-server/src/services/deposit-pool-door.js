@@ -19,6 +19,8 @@ import { redactProviderError } from "../core/redact-provider-error.js";
 import { depositPoolYieldStatus, depositPoolYieldAttributionText } from "./deposit-pool-yield-status.js";
 import { EvmDepositPoolVenueHistoryReader } from "./deposit-pool-venue-history.js";
 import { formatBaseUnits } from "../core/platform-service-helpers.js";
+import { POOL_V22_NAV_DISCLOSURE, POOL_V22_SHARED_DISCLOSURE, POOL_V22_MIGRATION_PENDING,
+  POOL_V22_MIGRATION_READY } from "./pool-v22-commitments.js";
 
 const ASSET_DECIMALS = 6;
 const SHARE_DECIMALS = 6;
@@ -191,6 +193,8 @@ export class DepositPoolDoorService {
     yieldAttributionService,
     venueHistoryReader,
     deploymentBlock,
+    commitmentReader,
+    ceremonyComplete = false,
     claimPriority,
     vestingHours = 48,
     venueMark = loadDepositPoolVenueMarkConfig({})
@@ -206,6 +210,8 @@ export class DepositPoolDoorService {
       deploymentBlock, eventReader: yieldAttributionService?.chainReader
     }) : undefined);
     this.claimPriority = claimPriority;
+    this.commitmentReader = commitmentReader;
+    this.ceremonyComplete = ceremonyComplete;
     this.vestingHours = Number(vestingHours);
     this.venueMarkConfig = venueMark;
   }
@@ -377,6 +383,12 @@ export class DepositPoolDoorService {
 
   async #buildWithdraw(wallet, requested) {
     const snapshot = normalizeSnapshot(await this.chainReader.readSnapshot({ poolAddress: this.poolAddress, wallet }));
+    if (this.commitmentReader) {
+      const state = await this.commitmentReader.read({ wallet, blockNumber: snapshot.blockNumber, blockTimestamp: snapshot.blockTimestamp });
+      if (state.holder.committedUntil > snapshot.blockTimestamp) throw refusal("CommitmentActive", {
+        committedUntil: state.holder.committedUntil
+      });
+    }
     let shares;
     if (requested.shares !== undefined) {
       shares = requested.shares;
@@ -498,6 +510,11 @@ export class DepositPoolDoorService {
   }
 
   async #infoFromSnapshot(snapshot, wallet) {
+    let commitments = { status: "not_configured", reason: "ceremony_c_pending" };
+    if (this.commitmentReader) {
+      try { commitments = await this.commitmentReader.read({ wallet, blockNumber: snapshot.blockNumber, blockTimestamp: snapshot.blockTimestamp }); }
+      catch { commitments = { status: "unavailable", reason: "pool_v22_commitment_unreadable" }; }
+    }
     const venueHistory = snapshot.venueHistory ?? await this.venueHistoryReader?.readHistory({
       poolAddress: this.poolAddress, blockNumber: snapshot.blockNumber, deployedPrincipal: snapshot.deployedPrincipal
     }) ?? { status: "unavailable", reason: "venue_history_not_configured" };
@@ -521,6 +538,11 @@ export class DepositPoolDoorService {
       markedSharePrice: markedSharePriceOf(snapshot),
       venueMark: this.#venueMark(snapshot),
       bufferAssets: amount(snapshot.bufferAssets),
+      commitments,
+      commitmentDisclosure: POOL_V22_NAV_DISCLOSURE,
+      sharedCommitmentDisclosure: POOL_V22_SHARED_DISCLOSURE,
+      transition: { status: this.ceremonyComplete ? "v22_configured" : "ceremony_c_pending",
+        statement: this.ceremonyComplete ? POOL_V22_MIGRATION_READY : POOL_V22_MIGRATION_PENDING },
       caps: {
         totalAssetCap: amount(snapshot.totalAssetCap),
         perAgentAssetCap: amount(snapshot.perAgentAssetCap),
@@ -539,7 +561,10 @@ export class DepositPoolDoorService {
         },
         catalogueEffect: "none"
       },
-      withdrawal: { status: "open", note: DEPOSIT_POOL_WITHDRAWAL_NOTE },
+      withdrawal: { status: commitments.holder?.committedUntil > snapshot.blockTimestamp ? "committed" : "open",
+        note: this.ceremonyComplete
+          ? "Committed shares cannot exit before their on-chain commitment expires. After expiry, buffer liquidity, pool notice and venue recall determine release. No principal haircut or automatic migration."
+          : DEPOSIT_POOL_WITHDRAWAL_NOTE },
       broadcast: broadcastInstructions(this.rpcUrls),
       boundary: BOUNDARY
     };
