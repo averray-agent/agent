@@ -165,6 +165,7 @@ export interface Dispute {
     workerPayout?: number;
     txHash?: string;
     chainStatus?: string;
+    convergenceStatus?: string;
     metadataURI?: string;
     /**
      * Mirrors the top-level `reasoningHash` so the resolved-verdict

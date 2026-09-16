@@ -9,7 +9,7 @@ import {
   normalizeDisputeReleaseRequestPayload,
   normalizeDisputeVerdictRequestPayload,
 } from "../../core/dispute-resolution.js";
-import { transitionSession } from "../../core/session-state-machine.js";
+import { persistDisputeResolution } from "../../core/dispute-convergence.js";
 import {
   assertJobSnapshotIntegrity,
   requireJobSnapshot
@@ -62,6 +62,7 @@ export function createDisputeRoutes({
   respondWithMutationReceipt,
   service,
   stateStore,
+  disputeArbitration,
 }) {
   async function resolveRemainingPayout(session) {
     if (gateway?.isEnabled?.() && typeof gateway.getJob === "function") {
@@ -175,10 +176,18 @@ export function createDisputeRoutes({
       job = undefined;
     }
 
+    let live;
+    if (disputeArbitration && gateway?.isEnabled?.()) {
+      try { live = await disputeArbitration.liveState(session); }
+      catch { live = { state: null, unavailable: true }; }
+    }
+
     return withDisputeArbitration({
       id,
       status: releaseReceipt || verdictReceipt ? "resolved" : "open",
       sessionId: session.sessionId,
+      live,
+      asset: job?.rewardAsset,
       chainJobId: session.chainJobId,
       ...(session.operatorOverturn ? {
         origin: "operator_overturn", workerInitiated: false, rationale: session.operatorOverturn.rationale
@@ -206,13 +215,18 @@ export function createDisputeRoutes({
       reasonCode: verdictReceipt?.reasonCode,
       reasoningHash: verdictReceipt?.reasoningHash,
       metadataURI: verdictReceipt?.metadataURI,
+      ...(verdictReceipt ? { rationale: verdictReceipt.rationale, decidedBy: verdictReceipt.decidedBy, decidedAt: verdictReceipt.decidedAt } : {}),
       chainDisputeTxHash: verdictReceipt?.chainDisputeTxHash,
       chainDisputeBlockNumber: verdictReceipt?.chainDisputeBlockNumber,
       txHash: verdictReceipt?.txHash,
       blockNumber: verdictReceipt?.blockNumber,
       chainStatus: verdictReceipt?.chainStatus,
+      convergenceStatus: verdictReceipt?.chainStatus === "confirmed"
+        ? session.status === (Number(verdictReceipt.workerPayout) > 0 ? "resolved" : "rejected") ? "confirmed" : "pending"
+        : undefined,
       workerPayout: verdictReceipt?.workerPayout,
-      remainingPayout: verdictReceipt?.remainingPayout,
+      remainingPayout: verdictReceipt?.remainingPayout ?? live?.remainingPayout,
+      warning: verdictReceipt?.warning,
       stakedAmount: Number(session.claimStake ?? 0),
       claimFee: Number(session.claimFee ?? 0),
       totalClaimLock: Number(session.totalClaimLock ?? session.claimStake ?? 0),
@@ -268,6 +282,19 @@ export function createDisputeRoutes({
   }
 
   async function handleDisputeRoute({ request, response, url, pathname }) {
+    if (request.method === "POST" && /^\/disputes\/[^/]+\/prepare$/u.test(pathname)) {
+      const auth = await authMiddleware(request, url);
+      if (!hasRole(auth.claims, "admin") && !hasRole(auth.claims, "verifier")) {
+        throw new AuthorizationError("Requires admin or verifier role.", "missing_role");
+      }
+      const id = decodeURIComponent(pathname.slice("/disputes/".length, -"/prepare".length));
+      const dispute = await findDispute(id);
+      if (!dispute) { respond(response, 404, { status: "not_found", id }); return true; }
+      const payload = await readJsonBody(request);
+      const session = await stateStore.getSession(dispute.sessionId);
+      respond(response, 200, await disputeArbitration.prepare({ session, payload, auth }));
+      return true;
+    }
     if (request.method === "GET" && pathname === "/disputes") {
       await authMiddleware(request, url);
       respond(response, 200, await listDisputes(parseLimit(url, 100, 500)));
@@ -318,17 +345,9 @@ export function createDisputeRoutes({
         // Receipt may have persisted before a failed session write. An
         // operator overturn must converge on retry, not replay a stale rejection.
         const pending = await stateStore.getSession?.(dispute.sessionId);
-        if (pending?.operatorOverturn && pending.status === "disputed") {
+        if (pending?.status === "disputed") {
           const receipt = await stateStore.getMutationReceipt("dispute_verdict", id);
-          if (receipt?.chainStatus !== "confirmed") {
-            throw new ConflictError("Overturn arbitration has not confirmed on chain.", "overturn_resolution_unconfirmed");
-          }
-          await stateStore.upsertSession(transitionSession({
-            ...pending, operatorOverturn: { ...pending.operatorOverturn, resolution: receipt }
-          }, Number(receipt.workerPayout) > 0 ? "resolved" : "rejected", {
-            reason: receipt.reasonCode, timestamp: receipt.decidedAt,
-            metadata: { disputeId: id, verdict: receipt.verdict, workerPayout: receipt.workerPayout, origin: "operator_overturn" }
-          }));
+          await persistDisputeResolution({ stateStore, session: pending, receipt });
         }
         await respondWithMutationReceipt(response, idempotency, 200, dispute);
         return true;
@@ -402,7 +421,7 @@ export function createDisputeRoutes({
             blockNumber: undefined,
             status: undefined
           };
-      const receipt = {
+      const candidateReceipt = {
         id,
         disputeId: id,
         sessionId: dispute.sessionId,
@@ -427,29 +446,10 @@ export function createDisputeRoutes({
         decidedBy: auth.wallet,
         decidedAt
       };
-      if (session.operatorOverturn && receipt.chainStatus !== "confirmed") {
+      if (session.operatorOverturn && candidateReceipt.chainStatus !== "confirmed") {
         throw new ConflictError("Overturn arbitration has not confirmed on chain.", "overturn_resolution_unconfirmed");
       }
-      await stateStore.upsertMutationReceipt?.("dispute_verdict", id, receipt);
-      if (session.status === "disputed") {
-        const transitioned = transitionSession(session, resolution.nextSessionStatus, {
-          reason: resolution.reasonCode,
-          timestamp: decidedAt,
-          metadata: {
-            disputeId: id,
-            verdict: resolution.verdict,
-            workerPayout: resolution.workerPayout,
-            reasonCode: resolution.reasonCode,
-            txHash: receipt.txHash
-          }
-        });
-        await stateStore.upsertSession?.({
-          ...transitioned,
-          ...(session.operatorOverturn ? {
-            operatorOverturn: { ...session.operatorOverturn, resolution: receipt }
-          } : {})
-        });
-      }
+      const receipt = await persistDisputeResolution({ stateStore, session, receipt: candidateReceipt });
       eventBus?.publish({
         id: `dispute-verdict-${id}-${Date.now()}`,
         topic: "dispute.verdict_recorded",
@@ -463,7 +463,7 @@ export function createDisputeRoutes({
         blockNumber: receipt.blockNumber,
         source: "settlement",
         phase: "dispute",
-        severity: resolution.verdict === "dismissed" ? "info" : "warn",
+        severity: receipt.verdict === "dismissed" ? "info" : "warn",
         data: {
           disputeId: id,
           jobId: session.jobId,
@@ -471,9 +471,9 @@ export function createDisputeRoutes({
           openedAt: dispute.openedAt,
           windowEndsAt: dispute.windowEndsAt,
           slaSeconds: dispute.slaSeconds,
-          verdict: resolution.verdict,
-          workerPayout: resolution.workerPayout,
-          reasonCode: resolution.reasonCode,
+          verdict: receipt.verdict,
+          workerPayout: receipt.workerPayout,
+          reasonCode: receipt.reasonCode,
           reasoningHash: receipt.reasoningHash,
           metadataURI: receipt.metadataURI,
           chainDisputeTxHash: receipt.chainDisputeTxHash,
@@ -485,18 +485,8 @@ export function createDisputeRoutes({
       });
       const body = withDisputeArbitration({
         ...dispute,
+        ...receipt,
         status: "resolved",
-        verdict: resolution.verdict,
-        reasonCode: resolution.reasonCode,
-        reasoningHash: reasoning.reasoningHash,
-        metadataURI: reasoning.metadataURI,
-        chainDisputeTxHash: receipt.chainDisputeTxHash,
-        chainDisputeBlockNumber: receipt.chainDisputeBlockNumber,
-        txHash: receipt.txHash,
-        blockNumber: receipt.blockNumber,
-        chainStatus: receipt.chainStatus,
-        workerPayout: resolution.workerPayout,
-        remainingPayout,
         timeline: [
           ...dispute.timeline,
           {

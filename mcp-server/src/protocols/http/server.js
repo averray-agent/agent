@@ -103,6 +103,8 @@ import {
 
 const {
   platformService: service,
+  disputeArbitration,
+  humanVerdict,
   rewardBankHealthProvider,
   policyService,
   verifierService,
@@ -598,6 +600,7 @@ const handleAdminGithubRoute = createAdminGithubRoutes({
 });
 
 const handleAdminSessionsRoute = createAdminSessionsRoutes({
+  humanVerdict,
   stateStore, gateway, eventBus, readJsonBody,
   authMiddleware,
   parseLimit,
@@ -793,6 +796,7 @@ const {
   handleDisputeRoute,
   listDisputes,
 } = createDisputeRoutes({
+  disputeArbitration,
   authMiddleware,
   buildScopedIdempotentMutationContext,
   eventBus,

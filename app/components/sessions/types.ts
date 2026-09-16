@@ -124,6 +124,7 @@ export interface SessionRow {
 }
 
 export interface SessionDetail extends SessionRow {
+  humanReviewEligible?: boolean;
   policy: string;
   receipt?: string;
   lifecycle: SessionLifecycleStage[];

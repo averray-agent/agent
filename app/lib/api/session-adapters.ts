@@ -271,6 +271,8 @@ export function buildSessionDetails(sessionPayload: unknown, jobsPayload: unknow
         tone: "sage",
       },
       state: currentState,
+      humanReviewEligible: currentState === "disputed" && verification.handler === "human_fallback"
+        && verification.outcome === "disputed" && !session.operatorOverturn && !session.internalRemediation,
       escrow: { amount: rewardAmount, asset: rewardAsset },
       verifierMode: verifierMode(
         session.verifierMode ??

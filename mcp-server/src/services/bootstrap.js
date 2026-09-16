@@ -1,4 +1,6 @@
 import { GithubPrReviewService } from "./github-pr-review-service.js";
+import { DisputeArbitrationService } from "./dispute-arbitration-service.js";
+import { HumanVerdictService } from "./human-verdict-service.js";
 import { PlatformService } from "../core/platform-service.js";
 import { loadVerifierClassRewards } from "../core/verifier-class-rewards.js";
 import { createStateStore } from "../core/state-store.js";
@@ -883,8 +885,16 @@ export async function createPlatformRuntime() {
       }
     )
   );
+  const arbitrationContentWriter = async (record) => {
+    await contentRecoveryLog?.append?.(record);
+    await stateStore.upsertContent(record);
+  };
+  const disputeArbitration = new DisputeArbitrationService({ stateStore, gateway, eventBus,
+    persistContentRecord: arbitrationContentWriter, publicBaseUrl: process.env.PUBLIC_BASE_URL });
+  const humanVerdict = new HumanVerdictService({ stateStore, gateway, platformService, verifierService,
+    persistContentRecord: arbitrationContentWriter, publicBaseUrl: process.env.PUBLIC_BASE_URL });
   const eventListener = initStep("init-event-listener", logger, () =>
-    gateway.isEnabled() ? new EventListener(gateway, eventBus, stateStore) : undefined
+    gateway.isEnabled() ? new EventListener(gateway, eventBus, stateStore, { disputeArbitration }) : undefined
   );
   const recurringScheduler = initStep("init-recurring-scheduler", logger, () =>
     new RecurringSchedulerService(platformService, eventBus, {
@@ -1235,6 +1245,8 @@ export async function createPlatformRuntime() {
   }
   return {
     platformService,
+    disputeArbitration,
+    humanVerdict,
     workerProgressionService,
     catalogueLaneDiscipline,
     rewardBankHealthProvider,

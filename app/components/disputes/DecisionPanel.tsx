@@ -15,6 +15,7 @@ export interface DecisionPanelProps {
   disabled?: boolean;
   busy?: boolean;
   error?: string | null;
+  actionLabel?: string;
 }
 
 const DECISIONS: {
@@ -26,23 +27,23 @@ const DECISIONS: {
 }[] = [
   {
     id: "uphold",
-    label: "Uphold dispute",
-    subtitle: "confirm the contestation",
-    blurb: "Stake slashed per policy after an authorized on-chain verdict. Badge auto-suspended.",
+    label: "Uphold rejection",
+    subtitle: "no worker payout",
+    blurb: "The arbitrator confirms the rejection. The contract applies the stake policy.",
     tone: "accent",
   },
   {
     id: "reject",
-    label: "Reject dispute",
-    subtitle: "dismiss the contestation",
-    blurb: "Stake released to worker. Run resumes. Receipt carries dismissal reason.",
+    label: "Dismiss dispute",
+    subtitle: "pay the remaining reward",
+    blurb: "Pays the remaining worker reward and closes escrow. The receipt carries the dismissal reason.",
     tone: "neutral",
   },
   {
     id: "split",
     label: "Split payout",
     subtitle: "resolve with partial payout",
-    blurb: "Backend settles a split verdict with the default partial worker payout.",
+    blurb: "Uses the existing default partial worker payout. Review the amount before signing.",
     tone: "warn",
   },
 ];
@@ -59,6 +60,7 @@ export function DecisionPanel({
   disabled,
   busy,
   error,
+  actionLabel = "Submit verdict",
 }: DecisionPanelProps) {
   const rationaleOk = rationale.trim().length >= 20;
   const destinationOk = destination !== null;
@@ -166,7 +168,7 @@ export function DecisionPanel({
                   : "Confirm you hold the dispute-resolver role"
         }
       >
-        {busy ? "Submitting..." : "Submit verdict"}
+        {busy ? "Working..." : actionLabel}
       </button>
       {error ? (
         <p

@@ -242,7 +242,7 @@ function SessionsPageInner() {
                 className="font-[family-name:var(--font-display)] text-[10.5px] font-extrabold uppercase text-[var(--avy-accent)]"
                 style={{ letterSpacing: "0.14em" }}
               >
-                Session · read-only
+                Session · audit and review
               </span>
               <h2
                 className="mt-0.5 font-[family-name:var(--font-mono)] text-[18px] font-semibold leading-none text-[var(--avy-ink)]"
