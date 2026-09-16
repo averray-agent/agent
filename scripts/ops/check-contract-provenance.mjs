@@ -76,6 +76,11 @@ export const CONTRACT_ARTIFACTS = Object.freeze({
   // the AAC idle-balance aggregator. Deployed from merged main 684ab886; both
   // masked runtimes reproduce from source at their addresses.
   depositPoolV21: ["DepositPoolV2.sol", "DepositPoolV2"],
+  legacyDepositPoolV21: ["DepositPoolV2.sol", "DepositPoolV2"],
+  depositPoolV22: ["DepositPoolV22.sol", "DepositPoolV22"],
+  aacPoolAggregatorAdapterV22: ["AacPoolAggregatorAdapterV22.sol", "AacPoolAggregatorAdapterV22"],
+  depositPoolLaneV22: ["HydrationUsdcAdapterV22.sol", "HydrationUsdcAdapterV22"],
+  hydrationDepositPoolAdapterV22: ["HydrationDepositPoolAdapter.sol", "HydrationDepositPoolAdapter"],
   // Ceremony B, 2026-09-05: a separate venue pair for the v2.1 pool.
   depositPoolLaneV21: ["HydrationUsdcAdapterV22.sol", "HydrationUsdcAdapterV22"],
   hydrationDepositPoolAdapterV21: ["HydrationDepositPoolAdapter.sol", "HydrationDepositPoolAdapter"],
@@ -102,6 +107,16 @@ export const CONTRACT_ARTIFACTS = Object.freeze({
   creditPool: ["CreditPool.sol", "CreditPool"],
   creditBook: ["CreditBook.sol", "CreditBook"],
 });
+
+// Canonical pool names move only by matching an explicit generation identity;
+// an address or alias name alone must never guess a different generation's ABI.
+export function contractArtifactFor(manifest, name) {
+  if (["depositPool", "depositPoolV2"].includes(name) && manifest.contracts?.depositPoolV22
+    && manifest.contracts[name]?.toLowerCase() === manifest.contracts.depositPoolV22.toLowerCase()) {
+    return CONTRACT_ARTIFACTS.depositPoolV22;
+  }
+  return CONTRACT_ARTIFACTS[name];
+}
 
 function sha256(bytes) {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
@@ -300,6 +315,10 @@ export function validateProvenanceManifest(manifest) {
     if (!entry) {
       throw new Error(`missing contractProvenance for contracts.${name} at ${address}.`);
     }
+    if (["depositPoolV22", "aacPoolAggregatorAdapterV22", "depositPoolLaneV22", "hydrationDepositPoolAdapterV22"].includes(name)
+      && !/^0x[a-f0-9]{64}$/u.test(entry.record.creationBytecodeHash ?? "")) {
+      throw new Error(`contractProvenance for ${name} requires a creationBytecodeHash (keccak256).`);
+    }
     return { name, address, provenanceAddress: entry.address, provenance: entry.record };
   });
 
@@ -467,7 +486,7 @@ async function main() {
 
     if (args.artifacts) {
       for (const contract of validateProvenanceManifest(manifest)) {
-        const artifactDefinition = CONTRACT_ARTIFACTS[contract.name];
+        const artifactDefinition = contractArtifactFor(manifest, contract.name);
         if (!artifactDefinition) {
           throw new Error(`no artifact mapping for contracts.${contract.name}.`);
         }

@@ -66,6 +66,8 @@ COPY scripts/ops/pool-venue-ceremony.mjs ./scripts/ops/pool-venue-ceremony.mjs
 COPY scripts/ops/capture-bank-xcm-v22-staging-quote.mjs ./scripts/ops/capture-bank-xcm-v22-staging-quote.mjs
 COPY scripts/ops/pool-venue-dispatch.mjs ./scripts/ops/pool-venue-dispatch.mjs
 COPY scripts/ops/deploy-venue-pair.mjs ./scripts/ops/deploy-venue-pair.mjs
+COPY scripts/ops/ceremony-contract-evidence.mjs ./scripts/ops/ceremony-contract-evidence.mjs
+COPY scripts/ops/check-contract-provenance.mjs ./scripts/ops/check-contract-provenance.mjs
 
 # These paths are derived from deploy-venue-pair.mjs CONTRACT_ARTIFACTS and
 # held in lockstep by venue-pair-artifacts-image.test.mjs. Do not copy all of

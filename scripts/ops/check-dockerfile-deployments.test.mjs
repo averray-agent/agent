@@ -53,6 +53,8 @@ const IN_CONTAINER_OPS_SCRIPTS = [
   "scripts/ops/capture-bank-xcm-v22-staging-quote.mjs",
   "scripts/ops/pool-venue-dispatch.mjs",
   "scripts/ops/deploy-venue-pair.mjs",
+  "scripts/ops/ceremony-contract-evidence.mjs",
+  "scripts/ops/check-contract-provenance.mjs",
 ];
 
 const LITERAL_MANIFEST = /deployments\/([A-Za-z0-9._-]+\.json)/gu;
