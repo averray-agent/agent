@@ -157,6 +157,7 @@ export class WorkerExposurePolicy {
         externalRewardCeilingUsdc: capacity.externalRewardCeilingUsdc,
         vestingHours: capacity.vestingHours,
         vestingAvailable: capacity.vestingAvailable,
+        ...(capacity.vestingAvailable ? {} : { vestingUnavailableReason: capacity.vestingUnavailableReason }),
         credit: capacity.credit,
         message: eligible
           ? "The external poster-funded reward fits within this wallet's capital-backed per-job ceiling."
@@ -204,6 +205,7 @@ export class WorkerExposurePolicy {
       externalRewardCeilingUsdc: capacity.externalRewardCeilingUsdc,
       vestingHours: capacity.vestingHours,
       vestingAvailable: capacity.vestingAvailable,
+      ...(capacity.vestingAvailable ? {} : { vestingUnavailableReason: capacity.vestingUnavailableReason }),
       credit: capacity.credit,
       currentExposureUsdc: usdcAmount(current.totalUnits),
       candidateExposureUsdc: usdcAmount(candidate.totalUnits),
@@ -224,7 +226,7 @@ export class WorkerExposurePolicy {
       vesting = await this.resolveVesting(wallet);
     } catch (error) {
       this.logger.warn?.({ wallet, err: error }, "deposit_vesting.read_failed");
-      vesting = { vestedRaw: 0n, tranches: [], available: false };
+      vesting = { vestedRaw: 0n, tranches: [], available: false, error: "deposit_vesting_read_failed" };
     }
     const currentlyVestedUnits = nonNegativeRawUnits(vesting?.vestedRaw ?? 0, "vested deposit assets");
     const additionalVestedUnits = nonNegativeRawUnits(additionalVestedRaw, "projected additional vested assets");
@@ -295,6 +297,11 @@ export class WorkerExposurePolicy {
       nextConcurrentExternalRewardCeilingUsdc: usdcAmount(nextExternalRewardCeilingUnits),
       vestingHours: Number(vesting?.vestingHours ?? 48),
       vestingAvailable: vesting?.available !== false,
+      // Named so a zero can be told apart: a history still warming after a
+      // backend recreate (deposit_history_warming) is not a failed RPC read.
+      ...(vesting?.available === false
+        ? { vestingUnavailableReason: String(vesting?.error ?? "deposit_pool_vesting_read_failed") }
+        : {}),
       evaluatedAt: vesting?.evaluatedAt,
       tranches: publicVestingTranches(vesting?.tranches),
       credit,

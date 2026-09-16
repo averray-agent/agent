@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { PlatformService } from "../core/platform-service.js";
-import { addresses, checkpointData, countingProvider, creditReadFixture,
+import { CREDIT_POOL_RISK_DISCLOSURE } from "../core/credit-pool-disclosure.js";
+import { addresses, checkpointData, countingProvider, creditReadFixture, HEAD,
   indexerFetch, NOW, UNDERWRITER_TOPICS } from "./fixtures/credit-read-fixture.js";
 
 test("credit warm requests use real vesting caches and never scan underwriter topics", async () => {
@@ -115,4 +116,132 @@ test("listRecentSessionRecords throws when the store lacks listRecentSessions", 
   await assert.rejects(service.listRecentSessionRecords(250), /must implement listRecentSessions/);
   service.stateStore.listRecentSessions = async () => [];
   assert.deepEqual(await service.listRecentSessionRecords(250), []);
+});
+
+// --- Cold history after a backend recreate ----------------------------------
+// The hosted smoke's CreditPool door timed out (3 x 20 s) on the 2026-09-16
+// deploys. Every other phase of GET /credit is one bounded RPC round trip; the
+// vesting history was the unbounded one: ~1,050 sequential 2,000-block
+// eth_getLogs reads from the pools' deployment blocks, 97 s at the 150 ms per
+// read the deploy-time gateway measured, restarted from scratch by every
+// concurrent or retried request.
+
+// Mainnet on 2026-09-16: head 20,715,916; CreditPool deployed at 19,421,558;
+// DepositPool v2.1 at 19,913,549. 10,000-block chunks, 8 ranges per wave.
+const MAINNET_HEAD = 20_715_916;
+const CREDIT_POOL_DEPLOYMENT = 19_421_558;
+const DEPOSIT_POOL_DEPLOYMENT = 19_913_549;
+const CHUNK_BLOCKS = 10_000;
+const SCAN_CONCURRENCY = 8;
+const chunks = (deployment, head) => Math.ceil((head - deployment + 1) / CHUNK_BLOCKS);
+
+function rpcClockFixture({ getLogsMs, callMs, head, credit, deposit }) {
+  let now = 0;
+  let pending = [];
+  let inFlightLogs = 0;
+  const provider = countingProvider({
+    delayMs: 1, clock: () => now,
+    sleep: () => new Promise((resolve) => {
+      pending.push({ due: now + (provider.calls.at(-1)?.method === "getLogs" ? getLogsMs : callMs), resolve });
+    })
+  });
+  provider.head = head;
+  const rawGetLogs = provider.getLogs.bind(provider);
+  const stats = { maxInFlightLogs: 0 };
+  provider.getLogs = async (filter) => {
+    inFlightLogs += 1;
+    stats.maxInFlightLogs = Math.max(stats.maxInFlightLogs, inFlightLogs);
+    try { return await rawGetLogs(filter); } finally { inFlightLogs -= 1; }
+  };
+  const checkpoint = checkpointData();
+  checkpoint._meta.status.polkadotHubMainnet.block.number = head;
+  const fixture = creditReadFixture({ provider, fetchImpl: indexerFetch({ checkpoint }) });
+  fixture.gateway.config.creditPoolDeploymentBlock = credit;
+  fixture.gateway.config.depositPoolV2DeploymentBlock = deposit;
+  async function drive() {
+    provider.calls.length = 0;
+    stats.maxInFlightLogs = 0;
+    const startedAt = now;
+    let complete = false;
+    let result;
+    let failure;
+    void fixture.request().then((value) => { result = value; complete = true; },
+      (error) => { failure = error; complete = true; });
+    for (let tick = 0; tick < 100_000 && !complete; tick += 1) {
+      await new Promise(setImmediate);
+      if (complete || !pending.length) continue;
+      now = Math.min(...pending.map((entry) => entry.due));
+      const ready = pending.filter((entry) => entry.due === now);
+      pending = pending.filter((entry) => entry.due !== now);
+      ready.forEach((entry) => entry.resolve());
+    }
+    assert.equal(complete, true, "bounded RPC schedule must complete");
+    if (failure) throw failure;
+    return { result, elapsedMs: now - startedAt, getLogs: provider.calls.filter((c) => c.method === "getLogs").length,
+      calls: provider.calls.length, maxInFlightLogs: stats.maxInFlightLogs };
+  }
+  return { fixture, provider, drive };
+}
+
+test("a cold credit door with production block ranges stays inside its RPC budget and bounds its gateway calls", async (t) => {
+  const { drive, provider } = rpcClockFixture({
+    getLogsMs: 150, callMs: 50, head: MAINNET_HEAD, credit: CREDIT_POOL_DEPLOYMENT, deposit: DEPOSIT_POOL_DEPLOYMENT
+  });
+  const cold = await drive();
+  t.diagnostic(`cold /credit on a 150 ms/getLogs gateway: ${cold.elapsedMs} ms RPC clock, ${cold.getLogs} getLogs, ${cold.calls} RPC calls`);
+  assert.equal(cold.result.body.available, true);
+  assert.equal(cold.result.body.wallet.vestingAvailable, true);
+  assert.equal(cold.result.body.receiptGraph.available, true);
+  assert.equal(cold.getLogs, chunks(CREDIT_POOL_DEPLOYMENT, MAINNET_HEAD) + chunks(DEPOSIT_POOL_DEPLOYMENT, MAINNET_HEAD),
+    "exactly one getLogs per 10,000-block chunk of each pool's history");
+  assert.equal(cold.getLogs, 211);
+  assert.ok(cold.calls <= 300, `${cold.calls} RPC calls`);
+  assert.ok(cold.maxInFlightLogs <= 2 * SCAN_CONCURRENCY, `${cold.maxInFlightLogs} concurrent getLogs`);
+  assert.ok(cold.elapsedMs < 4_000, `cold read took ${cold.elapsedMs} ms of RPC time; the smoke allows 20 s wall clock`);
+
+  const warm = await drive();
+  assert.equal(warm.getLogs, 0);
+  assert.ok(warm.elapsedMs <= 300, `warm read took ${warm.elapsedMs} ms`);
+
+  provider.head += 1;
+  const extended = await drive();
+  assert.equal(extended.getLogs, 2, "one incremental range per pool");
+  assert.ok(extended.elapsedMs <= 450, `incremental read took ${extended.elapsedMs} ms`);
+});
+
+test("a history slower than the wait budget still answers /credit inside the budget with an honest vesting reason", async () => {
+  const provider = countingProvider();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const rawGetLogs = provider.getLogs.bind(provider);
+  provider.getLogs = async (filter) => { await gate; return rawGetLogs(filter); };
+  const fixture = creditReadFixture({ provider });
+  fixture.gateway.config.poolEventHistoryWaitMs = 20;
+
+  const startedAt = performance.now();
+  const degraded = await fixture.request();
+  const elapsedMs = performance.now() - startedAt;
+  assert.ok(elapsedMs < 1_000, `the door waited ${elapsedMs} ms on a gated history`);
+  assert.equal(degraded.status, 200);
+  assert.equal(degraded.body.available, true);
+  assert.equal(degraded.body.wallet.vestingAvailable, false);
+  assert.equal(degraded.body.wallet.vestingUnavailableReason, "deposit_history_warming");
+  assert.equal(degraded.body.wallet.vestedAssets.raw, "0", "an unknown history vests nothing");
+  assert.equal(degraded.body.wallet.loanable.raw, "0");
+  // Everything the hosted smoke's CreditPool clause reads is present and live.
+  assert.match(degraded.body.wallet.outstanding.raw, /^[0-9]+$/u);
+  assert.match(degraded.body.receiptGraph.wallet.cash.outstanding.raw, /^[0-9]+$/u);
+  assert.match(degraded.body.receiptGraph.wallet.posting.outstanding.raw, /^[0-9]+$/u);
+  assert.equal(degraded.body.disclosure.statement, CREDIT_POOL_RISK_DISCLOSURE);
+  assert.equal(degraded.body.block.number, HEAD);
+  assert.equal(fixture.gateway.poolEventScans.size, 2, "both history scans keep running after the door answered");
+
+  release();
+  await Promise.all(fixture.gateway.poolEventScans.values());
+  const logsAfterWarm = provider.calls.filter((c) => c.method === "getLogs").length;
+  assert.equal(logsAfterWarm, 2 * Math.ceil(HEAD / CHUNK_BLOCKS), "one scan per pool, never restarted");
+  const warmed = await fixture.request();
+  assert.equal(warmed.body.wallet.vestingAvailable, true);
+  assert.equal(warmed.body.wallet.vestingUnavailableReason, undefined);
+  assert.equal(provider.calls.filter((c) => c.method === "getLogs").length, logsAfterWarm);
 });

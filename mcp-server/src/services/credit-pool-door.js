@@ -537,6 +537,9 @@ export class CreditPoolDoorService {
         pledgedAssetValue: amount(snapshot.wallet.pledgedAssetValue),
         vestedAssets: amount(capacity.vestedAssetsRaw),
         vestingAvailable: capacity.vestingAvailable,
+        // A false above is fail-closed (vested counts as zero, borrow refuses);
+        // the reason says whether that is a warming history or a failed read.
+        ...(capacity.vestingAvailable ? {} : { vestingUnavailableReason: capacity.vestingUnavailableReason }),
         grossWalletLimit: amount(grossWalletLimit),
         loanable: amount(loanable),
         outstanding: amount(snapshot.wallet.outstandingDebt)
@@ -562,6 +565,9 @@ export class CreditPoolDoorService {
     return {
       vestedAssetsRaw: BigInt(value?.vestedAssetsRaw ?? 0).toString(),
       vestingAvailable: Boolean(value?.vestingAvailable),
+      vestingUnavailableReason: value?.vestingAvailable
+        ? undefined
+        : String(value?.vestingUnavailableReason ?? "deposit_pool_vesting_read_failed"),
       vestingHours: Number(value?.vestingHours ?? 0),
       tranches: value?.tranches ?? []
     };

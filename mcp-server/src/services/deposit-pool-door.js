@@ -588,6 +588,7 @@ export class DepositPoolDoorService {
           durationHours: capacity.vestingHours,
           withdrawalBurnOrder: "lifo",
           available: capacity.vestingAvailable,
+          ...(capacity.vestingAvailable ? {} : { reason: capacity.vestingUnavailableReason ?? "deposit_pool_vesting_read_failed" }),
           ...(capacity.evaluatedAt ? { evaluatedAt: capacity.evaluatedAt } : {}),
           tranches: capacity.tranches
         },

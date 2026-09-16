@@ -7,6 +7,10 @@ const DEFAULT_GAS_FEE_BUFFER_BPS = 2000;
 const DEFAULT_RPC_FAILOVER_STALL_MS = 250;
 const DEFAULT_RPC_REQUEST_TIMEOUT_MS = 750;
 const DEFAULT_RPC_WRITE_REQUEST_TIMEOUT_MS = 15_000;
+// Pool event history (vesting) scans: see BlockchainGateway#extendPoolEventCache.
+const DEFAULT_POOL_EVENT_LOG_CHUNK_BLOCKS = 10_000;
+const DEFAULT_POOL_EVENT_SCAN_CONCURRENCY = 8;
+const DEFAULT_POOL_EVENT_HISTORY_WAIT_MS = 6_000;
 
 function parseLegacyAssets(rawAssets) {
   if (!rawAssets) {
@@ -271,6 +275,24 @@ export function loadBlockchainConfig(env = process.env) {
       DEFAULT_RPC_WRITE_REQUEST_TIMEOUT_MS,
       { minimum: 15_000, maximum: 120_000 }
     ),
+    poolEventLogChunkBlocks: resolveBoundedInteger(
+      env.POOL_EVENT_LOG_CHUNK_BLOCKS,
+      "POOL_EVENT_LOG_CHUNK_BLOCKS",
+      DEFAULT_POOL_EVENT_LOG_CHUNK_BLOCKS,
+      { minimum: 100, maximum: 100_000, unit: "blocks" }
+    ),
+    poolEventScanConcurrency: resolveBoundedInteger(
+      env.POOL_EVENT_SCAN_CONCURRENCY,
+      "POOL_EVENT_SCAN_CONCURRENCY",
+      DEFAULT_POOL_EVENT_SCAN_CONCURRENCY,
+      { minimum: 1, maximum: 32, unit: "ranges per wave" }
+    ),
+    poolEventHistoryWaitMs: resolveBoundedMilliseconds(
+      env.POOL_EVENT_HISTORY_WAIT_MS,
+      "POOL_EVENT_HISTORY_WAIT_MS",
+      DEFAULT_POOL_EVENT_HISTORY_WAIT_MS,
+      { minimum: 100, maximum: 30_000 }
+    ),
     chainEvmFloorBlock: normalizeOptionalU32(
       env.CHAIN_EVM_FLOOR_BLOCK,
       "CHAIN_EVM_FLOOR_BLOCK"
@@ -394,12 +416,16 @@ function resolveRpcBackupUrls(env = process.env, primaryUrl = "") {
 }
 
 function resolveBoundedMilliseconds(raw, label, fallback, { minimum, maximum }) {
+  return resolveBoundedInteger(raw, label, fallback, { minimum, maximum, unit: "milliseconds" });
+}
+
+function resolveBoundedInteger(raw, label, fallback, { minimum, maximum, unit }) {
   if (raw === undefined || raw === null || String(raw).trim() === "") {
     return fallback;
   }
   const value = Number(raw);
   if (!Number.isInteger(value) || value < minimum || value > maximum) {
-    throw new ConfigError(`${label} must be an integer in [${minimum}, ${maximum}] milliseconds.`);
+    throw new ConfigError(`${label} must be an integer in [${minimum}, ${maximum}] ${unit}.`);
   }
   return value;
 }

@@ -138,7 +138,7 @@ export class WorkerProgressionService {
       source: "capital_backed_external_reward_ceiling",
       components: {
         base: capComponent(capacity.externalRewardCeilingBaseRaw, capacity.externalRewardCeilingBaseUsdc),
-        deposit: capComponent(capacity.externalRewardCeilingRaiseRaw, capacity.externalRewardCeilingRaiseUsdc)
+        deposit: depositComponent(capacity, capacity.externalRewardCeilingRaiseRaw, capacity.externalRewardCeilingRaiseUsdc)
       }
     });
     const concurrent = cap({
@@ -147,7 +147,7 @@ export class WorkerProgressionService {
       source: "worker_open_operator_exposure",
       components: {
         base: capComponent(capacity.baseOpenExposureCapRaw, capacity.baseOpenExposureCapUsdc),
-        deposit: capComponent(capacity.openExposureRaiseRaw, capacity.openExposureRaiseUsdc)
+        deposit: depositComponent(capacity, capacity.openExposureRaiseRaw, capacity.openExposureRaiseUsdc)
       }
     });
     const rolling24h = {
@@ -333,6 +333,21 @@ function cap({ raw, amount, source, components = undefined }) {
 
 function capComponent(raw, amount) {
   return { raw: asRaw(raw).toString(), amount: Number(amount) };
+}
+
+// A deposit-backed raise of zero must say whether it is a zero deposit or a
+// vesting history that could not be read (for example still warming after a
+// backend recreate). The shape is unchanged while vesting is readable.
+function depositComponent(capacity, raw, amount) {
+  return {
+    ...capComponent(raw, amount),
+    ...(capacity?.vestingAvailable === false
+      ? {
+          vestingAvailable: false,
+          vestingUnavailableReason: String(capacity?.vestingUnavailableReason ?? "deposit_pool_vesting_read_failed")
+        }
+      : {})
+  };
 }
 
 async function collectAllWalletSessions(stateStore, wallet, { pageSize = 64, maxSessions = 10_000 } = {}) {

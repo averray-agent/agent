@@ -1486,6 +1486,223 @@ test("readDepositVesting fails closed to zero when pool logs are unavailable", a
   assert.deepEqual(result.tranches, []);
 });
 
+// --- Pool event history scans (vesting) -------------------------------------
+// The hosted smoke's CreditPool door timed out on two 2026-09-16 deploys: the
+// cold history read was ~1,050 sequential 2,000-block eth_getLogs calls (97 s
+// at the 150 ms/call measured that day), restarted from the deployment block
+// on every failure and duplicated by every concurrent reader.
+
+const POOL_EVENTS_ABI = [
+  "event Deposit(address indexed caller, address indexed owner, uint256 assets, uint256 shares)",
+  "event Withdraw(address indexed caller, address indexed receiver, address indexed owner, uint256 assets, uint256 shares)"
+];
+const POOL_EVENTS_WALLET = "0x3333333333333333333333333333333333333333";
+const POOL_EVENTS_POOL = "0x4444444444444444444444444444444444444444";
+
+function poolEventsGateway({ head, chunkBlocks = 1_000, concurrency = 4, waitMs = undefined, credit = false, logger = undefined } = {}) {
+  const poolInterface = new Interface(POOL_EVENTS_ABI);
+  const gateway = new BlockchainGateway({
+    enabled: false,
+    depositPoolAddress: POOL_EVENTS_POOL,
+    depositPoolDeploymentBlock: 1_000,
+    poolEventLogChunkBlocks: chunkBlocks,
+    poolEventScanConcurrency: concurrency,
+    ...(waitMs === undefined ? {} : { poolEventHistoryWaitMs: waitMs }),
+    ...(credit ? { creditPoolAddress: "0x5555555555555555555555555555555555555555", creditPoolDeploymentBlock: 1_000 } : {})
+  }, { logger });
+  gateway.depositPoolContract = { interface: poolInterface };
+  if (credit) {
+    gateway.creditPoolContract = { interface: new Interface([
+      "event LoanOriginated(bytes32 indexed loanId, address indexed borrower, uint256 amount)",
+      "event LoanClosed(bytes32 indexed loanId)"
+    ]) };
+  }
+  const deposit = poolInterface.encodeEventLog(poolInterface.getEvent("Deposit"),
+    [POOL_EVENTS_WALLET, POOL_EVENTS_WALLET, 10_000_000n, 10_000_000n]);
+  const depositLog = { ...deposit, blockNumber: 1_500, index: 0, transactionHash: `0x${"11".repeat(32)}` };
+  const state = { ranges: [], inFlight: 0, maxInFlight: 0 };
+  gateway.provider = {
+    async getBlockNumber() { return head; },
+    async getBlock(blockNumber) { return { number: blockNumber, timestamp: 1_000 + blockNumber }; },
+    async getLogs(filter) {
+      state.ranges.push([filter.fromBlock, filter.toBlock]);
+      state.inFlight += 1;
+      state.maxInFlight = Math.max(state.maxInFlight, state.inFlight);
+      try {
+        await new Promise((resolve) => setImmediate(resolve));
+        if (state.beforeReturn) await state.beforeReturn(filter);
+      } finally {
+        state.inFlight -= 1;
+      }
+      return filter.fromBlock <= 1_500 && 1_500 <= filter.toBlock ? [depositLog] : [];
+    }
+  };
+  // 48 h after the deposit at block 1_500 (timestamp 2_500): fully vested.
+  const now = new Date((2_500 + 48 * 60 * 60) * 1_000);
+  return { gateway, state, now, poolInterface };
+}
+
+test("pool event history scans in bounded parallel waves, checkpoints each wave and resumes a failed scan from the checkpoint", async () => {
+  // 12 chunks of 1,000 blocks at concurrency 4 = 3 waves.
+  const { gateway, state, now } = poolEventsGateway({ head: 12_999 });
+  let failures = 2; // the coalesced wave, then its sequential retry
+  state.beforeReturn = async (filter) => {
+    if (filter.fromBlock === 9_000 && failures > 0) {
+      failures -= 1;
+      throw new Error("request timeout");
+    }
+  };
+
+  const first = await gateway.readDepositVesting(POOL_EVENTS_WALLET, { now });
+  assert.equal(first.available, false);
+  assert.equal(first.error, "deposit_pool_vesting_read_failed");
+  assert.equal(state.maxInFlight, 4, "a wave reads at most POOL_EVENT_SCAN_CONCURRENCY ranges at once");
+  assert.deepEqual(gateway.depositPoolVestingEventCache, {
+    headBlock: 8_999,
+    events: [{
+      type: "Deposit", owner: POOL_EVENTS_WALLET, assetsRaw: "10000000", blockNumber: 1_500, logIndex: 0,
+      txHash: `0x${"11".repeat(32)}`, blockTimestamp: 2_500
+    }]
+  }, "the two complete waves survive the failed third one");
+  // waves 1+2 (8 ranges) + wave 3 batch (4) + the sequential retry stopping at its first range (1)
+  assert.equal(state.ranges.length, 13);
+
+  const rangesBefore = state.ranges.length;
+  const second = await gateway.readDepositVesting(POOL_EVENTS_WALLET, { now });
+  assert.equal(second.available, true);
+  assert.equal(second.vestedRaw, 10_000_000n);
+  assert.deepEqual(state.ranges.slice(rangesBefore), [[9_000, 9_999], [10_000, 10_999], [11_000, 11_999], [12_000, 12_999]],
+    "the resumed scan starts at the checkpoint, not the deployment block");
+  assert.equal(gateway.depositPoolVestingEventCache.headBlock, 12_999);
+  assert.equal(gateway.poolEventScans.size, 0);
+});
+
+test("concurrent vesting readers join one in-flight history scan", async () => {
+  const { gateway, state, now } = poolEventsGateway({ head: 4_999, concurrency: 2 });
+  const [a, b, c] = await Promise.all([
+    gateway.readDepositVesting(POOL_EVENTS_WALLET, { now }),
+    gateway.readDepositVesting(POOL_EVENTS_WALLET, { now }),
+    gateway.readDepositPoolPrincipalEvents()
+  ]);
+  assert.equal(a.vestedRaw, 10_000_000n);
+  assert.equal(b.vestedRaw, 10_000_000n);
+  assert.equal(c.length, 1);
+  assert.equal(state.ranges.length, 4, "four chunks read once, not once per reader");
+  assert.equal(gateway.poolEventScans.size, 0);
+});
+
+test("a failover head one block behind the cache is served from the cache instead of rescanning", async () => {
+  const { gateway, state } = poolEventsGateway({ head: 4_999 });
+  await gateway.readDepositPoolPrincipalEvents();
+  assert.equal(state.ranges.length, 4);
+  gateway.depositPoolVestingEventCache.events.push({ type: "Deposit", owner: POOL_EVENTS_WALLET, assetsRaw: "1",
+    blockNumber: 4_999, logIndex: 0, txHash: `0x${"22".repeat(32)}`, blockTimestamp: 5_999 });
+  gateway.provider.getBlockNumber = async () => 4_998;
+  const events = await gateway.readDepositPoolPrincipalEvents();
+  assert.equal(state.ranges.length, 4, "no getLogs for a head the cache already covers");
+  assert.deepEqual(events.map((event) => event.blockNumber), [1_500], "events past the answered head are not served");
+  assert.equal(gateway.depositPoolVestingEventCache.headBlock, 4_999, "the cache keeps its newer head");
+});
+
+test("a cold history past the wait budget answers deposit_history_warming while the scan finishes in the background", async () => {
+  const infos = [];
+  const { gateway, state, now } = poolEventsGateway({
+    head: 4_999, waitMs: 20, logger: { info: (fields, message) => infos.push({ fields, message }), warn() {}, error() {} }
+  });
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  state.beforeReturn = () => gate;
+
+  const startedAt = Date.now();
+  const warming = await gateway.readDepositVesting(POOL_EVENTS_WALLET, { now });
+  assert.ok(Date.now() - startedAt < 1_000, "the reader must not wait for the gated scan");
+  assert.equal(warming.available, false);
+  assert.equal(warming.vestedRaw, 0n);
+  assert.equal(warming.error, "deposit_history_warming");
+  assert.equal(gateway.poolEventScans.size, 1, "the scan keeps running after the reader gave up");
+  assert.deepEqual(infos.map((entry) => entry.message), ["deposit_pool_vesting.history_warming"]);
+  assert.deepEqual(infos[0].fields, { wallet: POOL_EVENTS_WALLET, pool: "depositPool", scannedThroughBlock: null, headBlock: 4_999, waitMs: 20 });
+
+  release();
+  const warmed = await gateway.readDepositVesting(POOL_EVENTS_WALLET, { now, waitMs: Infinity });
+  assert.equal(warmed.available, true);
+  assert.equal(warmed.vestedRaw, 10_000_000n);
+  assert.equal(state.ranges.length, 4, "the abandoned scan was joined, never restarted");
+  assert.equal(gateway.poolEventScans.size, 0);
+});
+
+test("a coalesced wave that fails is re-read one range at a time before the scan gives up", async () => {
+  const warns = [];
+  const { gateway, state, now } = poolEventsGateway({
+    head: 4_999, logger: { info() {}, warn: (fields, message) => warns.push({ fields, message }), error() {} }
+  });
+  // A gateway that times out batched log reads but answers single ranges.
+  state.beforeReturn = async () => {
+    if (state.inFlight > 1) throw new Error("request timeout");
+  };
+  const result = await gateway.readDepositVesting(POOL_EVENTS_WALLET, { now });
+  assert.equal(result.available, true);
+  assert.equal(result.vestedRaw, 10_000_000n);
+  assert.equal(state.ranges.length, 8, "the wave of four, then the same four sequentially");
+  assert.deepEqual(warns.map((entry) => entry.message), ["pool_event_scan.wave_failed_retrying_sequentially"]);
+  assert.deepEqual(warns[0].fields, {
+    address: POOL_EVENTS_POOL, fromBlock: 1_000, toBlock: 4_999, ranges: 4, error: "request timeout"
+  });
+});
+
+test("warmPoolEventCaches starts every configured history scan at boot and logs the outcome", async () => {
+  const logs = [];
+  const logger = { info: (fields, message) => logs.push({ fields, message }), warn: (fields, message) => logs.push({ fields, message }), error() {} };
+  const { gateway, state, now } = poolEventsGateway({ head: 4_999, credit: true, logger });
+  assert.deepEqual(gateway.warmPoolEventCaches(), { started: ["depositPool", "creditPool"] });
+  // Each reader registers its scan after its eth_blockNumber read resolves.
+  for (let tick = 0; tick < 10 && gateway.poolEventScans.size < 2; tick += 1) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(gateway.poolEventScans.size, 2);
+  await Promise.all(gateway.poolEventScans.values());
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(logs.map((entry) => [entry.message, entry.fields.pool, entry.fields.events]).sort(),
+    [["pool_event_cache.warmed", "creditPool", 0], ["pool_event_cache.warmed", "depositPool", 1]]);
+  const rangesAfterWarm = state.ranges.length;
+  const vesting = await gateway.readDepositVesting(POOL_EVENTS_WALLET, { now });
+  assert.equal(vesting.available, true);
+  assert.equal(state.ranges.length, rangesAfterWarm, "a warmed cache costs the request zero getLogs");
+
+  const disabled = new BlockchainGateway({ enabled: false });
+  assert.deepEqual(disabled.warmPoolEventCaches(), { started: [], reason: "gateway_disabled" });
+});
+
+test("readCreditPosition names a warming history instead of a bare unavailable position", async () => {
+  const { gateway, state } = poolEventsGateway({ head: 4_999, waitMs: 20, credit: true });
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  state.beforeReturn = () => gate;
+  gateway.creditPoolContract = {
+    ...gateway.creditPoolContract,
+    async outstandingDebt() { return 0n; },
+    async ltvBps() { return 8_000n; }
+  };
+  gateway.depositPoolV2Contract = {
+    interface: gateway.depositPoolContract.interface,
+    async pledgedShares() { return 10_000_000n; },
+    async balanceOf() { return 10_000_000n; },
+    async convertToAssets(shares) { return shares; }
+  };
+
+  const warming = await gateway.readCreditPosition(POOL_EVENTS_WALLET);
+  assert.equal(warming.available, false);
+  assert.equal(warming.reason, "deposit_history_warming");
+  assert.equal(warming.vestedRaw, "0");
+  assert.equal(warming.loanableRaw, "0", "an unknown history fails closed: nothing is loanable against it");
+
+  release();
+  await Promise.all(gateway.poolEventScans.values());
+  const warmed = await gateway.readCreditPosition(POOL_EVENTS_WALLET);
+  assert.equal(warmed.available, true);
+  assert.equal(warmed.reason, undefined);
+  assert.equal(warmed.vestedRaw, "10000000");
+  assert.equal(warmed.loanableRaw, "8000000", "80% LTV against the vested pledge once the history is readable");
+});
+
 test("readEscrowJob detects v1 before the pre-waiver legacy layout", async () => {
   const gateway = gatewayWithDot();
   const decodeError = Object.assign(new Error("could not decode result data"), { code: "BAD_DATA" });

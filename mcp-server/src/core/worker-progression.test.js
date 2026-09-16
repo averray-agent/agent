@@ -39,6 +39,7 @@ function session(index, overrides = {}) {
 function makeService({
   sessions = [],
   vestedRaw = "0",
+  vesting = {},
   registration,
   selfIdentityRegistry,
   wallet = WALLET,
@@ -83,7 +84,8 @@ function makeService({
             nextConcurrentExternalRewardCeilingRaw: deposited > 0n ? "4000000" : "2000000",
             nextConcurrentExternalRewardCeilingUsdc: deposited > 0n ? 4 : 2,
             vestingHours: 48,
-            vestingAvailable: true
+            vestingAvailable: true,
+            ...vesting
           };
         }
       },
@@ -316,4 +318,20 @@ test("synthetic and canary wallets are excluded from every progression surface b
     service.registerCreditInterest(CANARY),
     (error) => error.code === "credit_interest_synthetic_identity_excluded"
   );
+});
+
+test("a deposit raise of zero names an unreadable vesting history instead of posing as an empty deposit", async () => {
+  const { service } = makeService({
+    vesting: { vestingAvailable: false, vestingUnavailableReason: "deposit_history_warming" }
+  });
+  const progression = await service.getProgression(WALLET);
+  const degraded = { raw: "0", amount: 0, vestingAvailable: false, vestingUnavailableReason: "deposit_history_warming" };
+  assert.deepEqual(progression.effectiveCaps.perJobMax.components.deposit, degraded);
+  assert.deepEqual(progression.effectiveCaps.concurrent.components.deposit, degraded);
+  assert.deepEqual(progression.effectiveCaps.perJobMax.components.base, { raw: "1000000", amount: 1 },
+    "the readable base component keeps its shape");
+
+  const readable = await makeService().service.getProgression(WALLET);
+  assert.deepEqual(readable.effectiveCaps.perJobMax.components.deposit, { raw: "0", amount: 0 },
+    "a readable zero deposit carries no availability marker");
 });
