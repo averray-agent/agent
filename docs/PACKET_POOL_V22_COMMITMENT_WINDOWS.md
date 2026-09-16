@@ -96,6 +96,60 @@ the perks already live. If a committed cohort exists and asks why Flex shares
 its yield, that is the trigger for share classes, and the disclosure until
 then says so plainly.
 
+## Rulings 2026-09-16 (Codex found two contradictions in the draft; both are real)
+
+**Ruling 1 — deployability is two constraints, not one formula.** The draft's
+`deployableFor(D) = bufferAssets − exitableWithin(D)` makes a Flex-only pool
+deploy nothing, because every Flex share is exitable within 7 days; v2.1
+deploys ~10 today because its floor reserves only the *largest single*
+exitable position (the high-water mark), not the sum. That policy stays.
+
+- Window ≤ 7 days (the Flex horizon): unchanged from v2.1 —
+  `deployableFor(D) = bufferAssets − bufferFloor()` with the high-water-mark
+  floor.
+- Window > 7 days: capital that genuinely cannot leave inside D, **and** the
+  Flex floor must still hold after the deployment leaves:
+  `deployableFor(D) = min( committedAssetsBeyond(now + D) − longDeployedOutstanding,
+  bufferAssets − bufferFloor() )`.
+- Invariant: every active deployment satisfies its own window's constraint
+  at creation; the Foundry invariant test covers both branches.
+- Pin 4 amended: a Flex-only pool computes `deployableFor(7d)` equal to
+  today's `maxDeployableAssets` **and** `deployableFor(30d) == 0`. New pin 4b:
+  a pool with one 90-day-committed holder and one Flex holder deploys for
+  90 days at most `min(committed, buffer − floor)`, and never leaves the Flex
+  holder's floor uncovered. Mutation: drop either branch — must fail.
+
+**Ruling 2 — the aggregator: shared commitment capped by the earliest
+consent (option b), isolated tranches deferred with a named trigger.** The
+AAC aggregator adapter holds one shared pool position for every locked
+depositor and deposits synchronously (the draft's `requestStrategyDeposit`
+wording is withdrawn). Rules:
+
+- The shared position's `committedUntil` may only be set to the **minimum
+  remaining lock term among the depositors currently in it** (V3: never
+  beyond any depositor's consent). It is re-derived, never extended past a
+  co-depositor.
+- An allocation into the shared position is refused when the depositor's
+  remaining lock is shorter than the position's current `committedUntil`
+  (their exit would be blocked by someone else's term); the amount stays
+  idle in AAC and the depositor's `/me` says why.
+- Consequence, stated on the page: a T90 depositor sharing the position with
+  a T30 depositor gets the 30-day window until the T30 lock expires or
+  isolated tranches exist. Isolated tranche holders (a new adapter per
+  tranche) are the follow-up, **triggered** the first time a T90 depositor's
+  capital is held to a shorter window by a co-depositor — that is the
+  evidence the design rule asks for.
+- The operator's R4 commitment is a direct pool holder (`0xdc1Ed106…`), not
+  the aggregator; it is unaffected.
+- Pin 8 amended: a tranche whose depositor lock ends in 20 days commits the
+  shared position to ≤ 20 days even if another depositor has 100 days;
+  adding a 7-day depositor to a 28-day-committed position is refused, not
+  shortened. Mutation: commit to the longest term — must fail.
+
+**Activation gate:** stays closed until the measurement cycle yields a rate;
+the one-round-trip-per-term projection is still built, fed by the measured
+figure, with the gate's reason reading `venue_rate_unmeasured` until then.
+
 ## Backend (same PR series, behind the contract)
 
 1. Pool door reads `commitment(holder)`, `deployableFor(7|30|90 days)`,
@@ -108,12 +162,11 @@ then says so plainly.
    gate's 0.009/9.5/7 d basis and the 0.01743 figure in the cycle-1 record
    disagree; resolve which is the venue rate before it is used) — friction
    from the two measured trips.
-3. The locked-tier keeper (V1 path) commits the aggregator's shares on chain
-   per tranche: after `requestStrategyDeposit` lands shares in the aggregator,
-   it calls `commit` for the tranche's tier with `committedUntil ≤` the
-   depositor's remaining lock term — **never beyond a depositor's consent**
-   (V3's test extends to this). V6 reconciliation compares ledger term vs
-   on-chain commitment on every lock read.
+3. The locked-tier keeper commits the aggregator's shared position on chain
+   per Ruling 2 (minimum remaining lock among its depositors; incompatible
+   allocations refused, never beyond a depositor's consent — V3's test
+   extends to this). V6 reconciliation compares ledger term vs on-chain
+   commitment on every lock read.
 4. Early exit under V5 becomes exact: an exit request on a committed lock
    waits for `committedUntil` (the chain will not release earlier), the
    pending state shows that date as the ETA, no haircut. Consent copy: the
