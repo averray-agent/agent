@@ -4243,8 +4243,11 @@ function awaitWithin(promise, waitMs, onTimeout) {
   );
   settled.catch(() => {});
   const expiry = new Promise((_, reject) => {
+    // Keep the budget timer referenced: it is cleared once the promise settles and
+    // fires within waitMs otherwise, so it never holds the process open past the
+    // budget. Unref'd, a caller waiting only on the budget lets the event loop
+    // drain and Node 22's test runner cancels the run as a pending promise.
     timer = setTimeout(() => reject(onTimeout()), waitMs);
-    timer.unref?.();
   });
   return Promise.race([settled, expiry]);
 }
