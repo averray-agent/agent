@@ -1,8 +1,6 @@
 # RUNSHEET — Ceremony C: pool v2.2 goes live (deploy · bind · migrate · commit · first 90-day window)
 
-Status: **written 2026-09-16; tooling T1–T3 landed in #1385 (gated 2026-09-16), T4 pending the real addresses.** Blocked on (a) #1383 merge ✓,
-(b) T4 (§0), (c) measurement cycle 2 recalled and
-settled (the wrapper pause in §4 must not overlap a lane operation), (d) C1 decided 2026-09-16 (pause the idle keeper at cutover). Executor: Pascal. Mirrors Ceremony A/B
+Status: **READY TO EXECUTE — pre-flight 2026-09-16 (`docs/evidence/ceremony-c-preflight-2026-09-16.md`): nothing has run, deployer at nonce 24, T1–T3 live on main d37c2eed (deployed 14:35Z), T4 follows the §1–§2 handback.** Former blockers: (a) #1383 ✓, (b) T4 is downstream of §1–§2, not upstream, (c) **superseded** — the pause rule is the driver's own (`pendingDepositAssets` and `pendingWithdrawalShares` both 0 on every wrapper-bound lane) and both read 0 with cycle 2 parked at the venue, so §4 runs D0–D1 under the 09-21 rule below, (d) C1 decided; its executable mechanism is in §5a. **T0 (new): the deployer holds 0.79 DOT and §1 costs ≈1.85 — top up 2 DOT first.** Executor: Pascal. Mirrors Ceremony A/B
 (`RUNSHEET_POOL_V21_ACTIVATION.md`, `RUNSHEET_CEREMONY_B_VENUE_BIND.md`).
 Authority: `PACKET_POOL_V22_COMMITMENT_WINDOWS.md` @ 96b7b7c7 (R1–R6, R0
 answered), `docs/POOL_V22_COMMITMENT_WINDOWS.md` (implementation, #1383).
@@ -19,6 +17,13 @@ commitment** on day 7, backend cutover, then the first
 `--deployment-kind committed` window. Outside holders are never moved.
 
 ## §0 — Tooling prerequisites (Codex, before anything below runs)
+
+- **T0 (Pascal, D0, before §1)** Send **2 DOT** from your own wallet to the
+  ceremony deployer's SS58 `14Vs8Yih5mSkHNL5ZYJPiEQejZZ2EzB8MQRR3oSr5Z4pYXrm`
+  (= `0x9Ab8531F…4239`, mapping proven by nonce 24 on both sides). Inbound,
+  so the nonce — and the predicted addresses — do not move. Expect ≈2.79 DOT
+  after; §1 spends ≈1.85 (v2.1's two CREATEs cost 0.98 + 0.81 and v2.2's
+  initcode is 16 % / 11 % larger).
 
 - **T1** `scripts/ops/deploy-venue-pair.mjs` hardcodes the v2.1 pool
   (`assertV21Pool`, `contracts.depositPoolV21`) and the strategy name
@@ -46,8 +51,11 @@ commitment** on day 7, backend cutover, then the first
   after the manifest lands.
 - **T4** Env cutover PR (templates, generated mainnet template): the pool
   address the gateway reads (`depositPool` alias), `POOL_V22_CEREMONY_COMPLETE=1`,
-  `POOL_V22_ADDRESS`, `POOL_V22_AGGREGATOR_ADDRESS`; `IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED=0`
-  (C1) with `POOL_V22_LOCKED_KEEPER_ENABLED` per the operator at cutover;
+  `POOL_V22_ADDRESS`, `POOL_V22_AGGREGATOR_ADDRESS`; **C1 as a two-step**:
+  first deploy `IDLE_BALANCE_ALLOCATION_FLOAT_TARGET_BPS=10000` with the keeper
+  still enabled and `aacPoolAggregatorAdapter` still `0x1DDcA709…` (drains the
+  v2.1 aggregator by 7-day notice, see §5a); `IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED=0`
+  only after the fulfilment; `POOL_V22_LOCKED_KEEPER_ENABLED` per the operator at cutover;
   door copy: v2.1 deposits retired (the contract has no pause), withdrawals
   unchanged, redeposit into v2.2 at leisure, R3 disclosure.
 
@@ -65,9 +73,10 @@ commitment** on day 7, backend cutover, then the first
 | day | what | who |
 |---|---|---|
 | D0 | §1 deploy pool + aggregator; §2 pair; §3 hashes on a second machine; postage; **start the 7-day notice on the operator's v2.1 shares (§5a)** | Pascal |
-| D0–D1 | §4 multisig (M1–M3 any time; M4–M6+M7 only with no lane op in flight) | Pascal, Nova + Vault |
+| D0–D1 | §4 multisig — all seven; M4/M5/M6 in one sitting (pending counters read 0 now; 09-21 rule) | Pascal, Nova + Vault |
 | D0–D2 | T3/T4 PRs merge; backend on v2.2 (§6) — deposits into v2.2 open | Codex/Claude/Pascal |
 | D7 | §5b fulfil the notice, deposit into v2.2, `commit(Notice90Days)`; §7 first committed window | Pascal |
+| D8–D9 | keeper fulfils the aggregator's exit (T4 step 1 + 7 d) → flip the keeper off (T4 step 2) | keeper / Codex |
 
 The 7-day notice is the long pole; starting it on D0 is what keeps the
 ceremony to a week.
@@ -81,7 +90,10 @@ is mandatory: the driver's old default `DepositPool` is the three-CREATE legacy 
 node scripts/ops/deploy-deposit-pool.mjs --profile mainnet --contract DepositPoolV22 --expected-deployer 0x9Ab8531FBb0948C542a31298FD61335f30064239
 ```
 
-Read: predicted addresses for the pool and the aggregator (two nonces),
+Read: predicted addresses for the pool and the aggregator — they **must** be
+`0x3A2dd08F85009474117CaFC476b6629AE04fB2A9` (nonce 24) and
+`0x1b3f9B45e0B8672A4FF95Caf67Bf4dbEa385455f` (nonce 25); anything else means
+the deployer sent a transaction since pre-flight — stop and re-read. Also read
 constructor args live-read (policy `0x226F1425…`, USDC `0x00000539…`, operator
 `0x5a6836…`, venue `0x0`, creditPool `0x903B3185…`), creation-hash for each
 artifact. Commit with `--signer-secret-ref 'op://mainnet-critical/admin-eoa-mainnet/credential' --commit`
@@ -103,9 +115,15 @@ policy `0x226F1425…`, lossReporter set.
 
 ## §3 — Second-machine hash reproduction and postage
 
-Reproduce all four creation-bytecode hashes on a second machine from the
-merged commit (`forge build` from a clean checkout; compare to §1/§2
-output). Do not sign §4 until they match.
+Reproduce all four creation-bytecode hashes from the merged commit. Claude's
+independent checkout of d37c2eed (forge 1.7.1, solc 0.8.24, optimizer 200,
+cancun) is pre-banked in the pre-flight evidence file: pool
+`0xe8cf0ee5…8d99`, aggregator `0xf38ef8c4…a730`, lane `0x997ddcce…1efe`,
+venue adapter `0xe862dde0…9a44` (full digests there). The drivers print
+`creationBytecodeHash` — compare that field, not `initCodeHash` (which carries
+constructor args). Do not sign §4 until all four match. The independent
+*toolchain* check is CI's provenance gate after T3 (`verify_contract_source=1`),
+required green before §6.
 
 Postage (plain DOT transfers on Asset Hub to the 0xEE-mapped SS58 of each
 contract): **adapter ≈1 DOT** (dispatch legs), **aggregator 0.5 DOT** (the USDC
@@ -129,6 +147,16 @@ signature:
 | M6 | `wrapper.setDispatchPaused(false)` | same session as M4 |
 | M7 | `poolV22.setVenueAdapter(adapterV22)` | **SET-ONCE for the first binding**; later changes go through the 7-day `proposeVenueAdapter` timelock |
 
+**Timing (supersedes the old blocker c).** M1–M3 touch only v2.2 and the
+registry — any time after §3. M4–M6 pause the wrapper that cycle 2's recall
+will need on 2026-09-22; the driver's rule is that both pending counters read 0
+on every bound lane before pausing, and they do today (cycle 2 is parked at
+Hydration, no leg in flight until the recall). Sign M4, M5, M6 **in one
+sitting**, and M7 in the same session. **09-21 rule:** if M6 is not
+countersigned by 2026-09-21 12:00Z, the cycle-2 recall waits for M6 — never
+run `recall` against a paused wrapper. Doing §4 now, six days before the
+recall, is safer than doing it in the same day as a settle.
+
 Eyeball rules: M3/M7 target the v2.2 address; M5 embeds the v2.2 lane; M7
 embeds the v2.2 adapter; `value 0` everywhere. Post-state reads after each
 pair: `approvedStrategies`, `registry.getStrategy`, `aggregatorAdapters`,
@@ -137,13 +165,21 @@ pair: `approvedStrategies`, `registry.getStrategy`, `aggregatorAdapters`,
 ## §5 — Operator migration and the R4 commitment
 
 **5a (D0):** `poolV21.requestRedeem(shares, self, Notice7Days)` from
-`0xdc1Ed106…` (9.908397 shares) and from the acceptance wallet
-(0.496735). This is the operator's own signature (MetaMask/Talisman, the
-existing pool app path); record request ids and `unlockAt`. The v2.1
-aggregator's 3.057059 shares (the locked cohort's money) exit by the same
-notice through the aggregator's notice-exit path, back to AAC liquid — after
-which the v2.2 keeper (C1/T4) re-allocates it into the new aggregator under
-Ruling 2.
+`0xdc1Ed1061e4a6E35aafb8f4E59B8893113d2EDeC` (9.908397 shares ≈ 10.180516)
+and from the acceptance wallet `0x60385dD643f10934E8F384aC7A04c0D798dFc936`
+(0.496735 ≈ 0.510377). This is the operator's own signature (MetaMask/Talisman,
+the existing pool app path); record request ids and `unlockAt`.
+
+The v2.1 aggregator's **3.034767** shares (≈3.118112; the locked cohort's
+money) have exactly one exit path: `requestFloatExit`/`fulfilFloatExit` are
+`onlyOperator` and only the idle-balance keeper calls them — no admin route,
+no script. **C1 mechanism (T4):** set `IDLE_BALANCE_ALLOCATION_FLOAT_TARGET_BPS=10000`
+(target = the whole position, so the keeper requests a full `Notice7Days`
+exit on its next tick and can never sweep into v2.1 again), keep
+`IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED=1` and the `aacPoolAggregatorAdapter`
+alias on `0x1DDcA709…` **until that exit is fulfilled** (D8–D9, the keeper
+fulfils it itself), then flip the keeper to 0. The money lands in AAC liquid;
+the v2.2 locked keeper re-allocates it under Ruling 2 later.
 
 **5b (D7):** `fulfilRedeem` on each request → USDC at the wallets →
 `poolV22.deposit(assets, self)` → **`poolV22.commit(Notice90Days)`** from each
