@@ -1,6 +1,6 @@
 # Ceremony C tooling — no cutover in this change
 
-Authority: `RUNSHEET_CEREMONY_C_POOL_V22.md` §0 at `4609e0f7` on
+Authority: `RUNSHEET_CEREMONY_C_POOL_V22.md` §0 at `822dd1e3` on
 `claude/packets-2026-08-12`. Pascal executes the ceremony. These drivers
 prepare or deploy contracts only when explicitly invoked by the operator;
 this implementation does not execute them, move funds, sign multisig calls,
@@ -93,22 +93,36 @@ or fabricated hash belongs in the manifest.
 ## T4 — separate, still gated cutover PR
 
 No flags or addresses change in this tooling PR. T4 needs actual deployed
-addresses, completed bindings and the operator's C1 choice. In the cutover
+addresses and completed bindings. **C1 is decided (Pascal, 2026-09-16): pause
+the old idle keeper at cutover.** In the cutover
 PR, update template source and regenerate mainnet output; configure:
 
 - the canonical `depositPool` alias read by the gateway;
 - `POOL_V22_CEREMONY_COMPLETE=1`;
 - `POOL_V22_ADDRESS` and `POOL_V22_AGGREGATOR_ADDRESS` from verified evidence;
-- an explicitly decided idle-keeper posture under C1; never silently leave
-  the existing idle keeper sending to v2.1 if the operator chose to pause it;
+- `IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED=0` in the generated mainnet
+  template and its generator override (currently `1`), as required by C1;
 - the separately controlled `POOL_V22_LOCKED_KEEPER_ENABLED` only under its
   own operator authorization, consent/registration and measured-rate gates.
 
 C1 concerns the **old idle keeper**, not permission to enable the new locked
-keeper. Keep the existing named rate refusal `venue_rate_unmeasured` until
+keeper. Idle AAC float stays in AAC: the cutover PR must make `/me` and the
+pool page say so, with tests, and stop new sweeps into
+`AAC_IDLE_DEPOSIT_POOL_V21`. Existing aggregator shares exit through the
+normal notice path; this is not permission to move outside holders. An idle
+(Flex) v2.2 aggregator and keeper re-enable require the separate follow-up
+after the first 90-day window. Do not pause the live idle keeper early merely
+to prepare the tooling.
+
+Keep the existing named rate refusal `venue_rate_unmeasured` until
 reviewed measurement evidence is available. The #1383 door copy already
 distinguishes retiring the v2.1 deposit door from pausing its immutable
 contract, preserves withdrawal/migration-at-leisure wording, and discloses
 one NAV shared pro-rata including Flex. Verify the live door, `/pool`,
 health and historical v2.1 positions after cutover; outside holders are
 never moved by this tooling.
+
+Cycle 2 must be recalled and settled before the wrapper pause in M4. The
+`PACKET_DISPATCH_RESUME_STOPS_BEFORE_SETTLEMENT.md` fix at `4eb3e5de` must
+reach the backend image by 2026-09-21, ahead of the 2026-09-22 recall; a
+green tooling PR alone is not evidence that this recovery is deployed.
