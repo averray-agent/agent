@@ -1,9 +1,14 @@
 # PACKET — Pool v2.2: the deployment window follows the commitment, so the pool can finally earn
 
-Status: **BUILD — started 2026-09-15 on the operator's word**, with six
-decisions R1–R6 below for ratification before the ceremony (Codex can start
-the contract and tests on the recommendations; nothing ships to mainnet until
-R1–R6 are answered). Authority: `MEMO_COMMITMENT_LADDER.md` (ratified
+Status: **RATIFIED 2026-09-16 (Pascal: "yes we do it all four") — BUILD.**
+R1–R6 as recommended: on-chain commitments (A), `Notice90Days` added and
+nothing longer, single NAV pro-rata to all shares (amends ladder D1), operator
+commits ≈10.4 for 90 days at migration, one migration batched with venue
+rebinding, scope A+B+C+D only. A second 7-day **measurement cycle** on v2.1
+runs in parallel (`RUNSHEET_V21_MEASUREMENT_CYCLE_2.md`) to resolve the
+4.9 %/yr vs ~19 %/yr rate ambiguity before any rate is quoted. R0 (whether
+the 0.10 T30 lock of 2026-09-14 is ours) is still a fact to confirm; it
+changes no scope. Authority: `MEMO_COMMITMENT_LADDER.md` (ratified
 2026-08-27), `MEMO_LOCKED_CAPITAL_DEPLOYMENT.md` (V1–V7 ratified 2026-08-25),
 `MEMO_POOL_V22_DEPLOYMENT_WINDOW.md` (W1–W4, open until now),
 `MEMO_POOL_V22_DESIGN.md` (A–D scope, "only what has drawn blood").
