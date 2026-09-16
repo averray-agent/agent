@@ -9,6 +9,9 @@ import { buildJobSnapshot } from "../core/job-snapshot.js";
 import { MemoryStateStore } from "../core/state-store.js";
 import { transitionSession } from "../core/session-state-machine.js";
 import { VerifierService } from "./verifier-service.js";
+import { PlatformService } from "../core/platform-service.js";
+import { WorkerExposurePolicy } from "../core/worker-exposure.js";
+import { WorkerProgressionService } from "../core/worker-progression.js";
 
 const JOBS = {
   "bench-001": { id: "bench-001", verifierMode: "benchmark", verifierConfig: { handler: "benchmark" } },
@@ -815,4 +818,138 @@ test("loadSubmittedJobAutoVerifierConfig honors env overrides", () => {
     autoModes: ["benchmark", "human_fallback"],
     requireSettlementReady: false
   });
+});
+
+// Production scan cost (2026-09-16): every 60 s tick listed 200 sessions WITH
+// wallet progression, which is one credit-pool RPC read per resolved session in
+// the window, and the verifier discarded every one of them. Reproduce the real
+// chain (PlatformService.listRecentSessions -> attachWorkerProgression ->
+// WorkerProgressionService -> WorkerExposurePolicy.capacityForWallet ->
+// blockchainGateway.readCreditPosition) and pin that the scan never pays it.
+// Settlement still captures previousProgression on its own before it moves
+// value (VerifierService prepareChainContext; pinned in verifier-service.test.js).
+async function makeScanCostHarness({ resolvedCount = 50, autoDecidableCount = 2 } = {}) {
+  const stateStore = new MemoryStateStore();
+  const wallets = [1, 2, 3, 4, 5].map((n) => `0x${String(n).repeat(40)}`);
+  const walletFor = (index) => wallets[index % wallets.length];
+  const creditReads = [];
+  const chainGateway = {
+    async readCreditPosition(wallet) {
+      creditReads.push(wallet);
+      return { available: false, reason: "credit_pool_not_configured" };
+    }
+  };
+  const platformService = new PlatformService([], new Map(), new Map(), new Map(), undefined, stateStore);
+  platformService.setWorkerProgressionService(new WorkerProgressionService({
+    stateStore,
+    getReputation: async () => ({ tier: "starter", skill: 0 }),
+    workerExposurePolicy: new WorkerExposurePolicy({
+      stateStore,
+      blockchainGateway: chainGateway,
+      gasEstimateUsdc: 0.05,
+      logger: { warn() {} }
+    }),
+    workerDailyExposurePolicy: {
+      progressionConfig: () => ({ graduationSettledJobs: 10, rolling24hRaw: "1500000", rolling24hUsdc: 1.5 })
+    }
+  }));
+  const progressionReads = [];
+  const readProgression = platformService.getWorkerProgressionSafely.bind(platformService);
+  platformService.getWorkerProgressionSafely = async (wallet, options) => {
+    progressionReads.push(wallet);
+    return readProgression(wallet, options);
+  };
+  const listingOptions = [];
+  const listRecent = platformService.listRecentSessions.bind(platformService);
+  platformService.listRecentSessions = async (limit, options) => {
+    listingOptions.push(options);
+    return listRecent(limit, options);
+  };
+  // Claim reconciliation has its own coverage; keep it inert here.
+  platformService.reconcileClaimSession = async () => ({ status: "noop" });
+
+  const jobFor = (id, handler) => ({ id, verifierMode: handler, verifierConfig: { handler } });
+  const upsert = (session, job) => stateStore.upsertSession({ ...session, jobSnapshot: buildJobSnapshot(job) });
+  // Resolved rows carry no persisted progression overlay: exactly the rows a
+  // hydrating listing reads again on every tick.
+  for (let index = 0; index < resolvedCount; index += 1) {
+    const job = jobFor(`resolved-job-${index}`, "deterministic");
+    await upsert({
+      sessionId: `resolved-${index}`,
+      jobId: job.id,
+      wallet: walletFor(index),
+      status: "resolved",
+      verificationSummary: { outcome: "approved" },
+      resolvedAt: new Date(Date.UTC(2026, 8, 1, 0, index)).toISOString()
+    }, job);
+  }
+  for (let index = 0; index < 3; index += 1) {
+    const job = jobFor(`claimed-job-${index}`, "deterministic");
+    await upsert({ sessionId: `claimed-${index}`, jobId: job.id, wallet: walletFor(index), status: "claimed" }, job);
+  }
+  for (let index = 0; index < 2; index += 1) {
+    const job = jobFor(`human-job-${index}`, "human_fallback");
+    await upsert({ sessionId: `human-${index}`, jobId: job.id, wallet: walletFor(index), status: "submitted" }, job);
+  }
+  const autoDecidableIds = [];
+  for (let index = 0; index < autoDecidableCount; index += 1) {
+    const job = jobFor(`auto-job-${index}`, index % 2 === 0 ? "deterministic" : "benchmark");
+    const sessionId = `auto-${index}`;
+    autoDecidableIds.push(sessionId);
+    await upsert({ sessionId, jobId: job.id, wallet: walletFor(index), status: "submitted" }, job);
+  }
+  const verifyCalls = [];
+  const verifierService = {
+    async verifySubmission({ sessionId }) {
+      verifyCalls.push(sessionId);
+      return { outcome: "approved", reasonCode: "OK", sessionId };
+    }
+  };
+  return {
+    platformService,
+    verifierService,
+    verifyCalls,
+    autoDecidableIds,
+    creditReads,
+    progressionReads,
+    listingOptions,
+    resolvedCount,
+    total: resolvedCount + 3 + 2 + autoDecidableCount
+  };
+}
+
+test("scan reads progression for at most the sessions it decides, never the whole window", async () => {
+  const h = await makeScanCostHarness({ resolvedCount: 50, autoDecidableCount: 2 });
+  const service = new SubmittedJobAutoVerifierService(h.platformService, h.verifierService, undefined, undefined, {
+    enabled: true,
+    scanLimit: 200,
+    logger: { info() {}, warn() {} }
+  });
+
+  const run = await service.runOnce();
+
+  assert.equal(run.scanned, h.total);
+  assert.equal(run.candidateCount, 2);
+  assert.equal(run.verifiedCount, 2);
+  assert.deepEqual([...h.verifyCalls].sort(), [...h.autoDecidableIds].sort());
+  assert.ok(
+    h.progressionReads.length <= h.autoDecidableIds.length,
+    `scan read progression for ${h.progressionReads.length} sessions; at most ${h.autoDecidableIds.length} (one per decided session) is allowed`
+  );
+  assert.ok(
+    h.creditReads.length <= h.autoDecidableIds.length,
+    `scan reached the credit pool ${h.creditReads.length} times; at most ${h.autoDecidableIds.length} is allowed`
+  );
+  assert.deepEqual(h.listingOptions, [{ progression: false }]);
+
+  // Prove the spies measure the real chain: a hydrating listing of the same
+  // window pays one credit-pool read per resolved row, which is what every
+  // tick cost before the scan opted out.
+  h.progressionReads.length = 0;
+  h.creditReads.length = 0;
+  const hydrated = await h.platformService.listRecentSessions(200);
+  assert.equal(hydrated.length, h.total);
+  assert.ok(hydrated.filter((s) => s.status === "resolved").every((s) => s.progression?.tier === "starter"));
+  assert.equal(h.progressionReads.length, h.resolvedCount);
+  assert.equal(h.creditReads.length, h.resolvedCount);
 });

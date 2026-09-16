@@ -212,7 +212,13 @@ export class SubmittedJobAutoVerifierService {
       return this.finishRun(summary);
     }
 
-    const sessions = await this.platformService.listRecentSessions?.(this.scanLimit) ?? [];
+    // Scan without wallet progression. This loop decides on status, verification,
+    // the pinned job snapshot and the verifier mode only; hydrating progression
+    // costs one credit-pool RPC read (readCreditPosition) per resolved session in
+    // the window on every tick, and nothing below reads it. Settlement captures
+    // previousProgression itself before it moves value (VerifierService
+    // prepareChainContext), so the listing does not have to carry it.
+    const sessions = await this.platformService.listRecentSessions?.(this.scanLimit, { progression: false }) ?? [];
     summary.scanned = sessions.length;
 
     // EscrowCore claim expiry is an explicit transaction, not a passive state
