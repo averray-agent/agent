@@ -6,9 +6,10 @@ nothing longer, single NAV pro-rata to all shares (amends ladder D1), operator
 commits ≈10.4 for 90 days at migration, one migration batched with venue
 rebinding, scope A+B+C+D only. A second 7-day **measurement cycle** on v2.1
 runs in parallel (`RUNSHEET_V21_MEASUREMENT_CYCLE_2.md`) to resolve the
-4.9 %/yr vs ~19 %/yr rate ambiguity before any rate is quoted. R0 (whether
-the 0.10 T30 lock of 2026-09-14 is ours) is still a fact to confirm; it
-changes no scope. Authority: `MEMO_COMMITMENT_LADDER.md` (ratified
+4.9 %/yr vs ~19 %/yr rate ambiguity before any rate is quoted. **R0 answered 2026-09-16 (Pascal): the 0.10 T30 lock of 2026-09-14 13:23Z is
+NOT ours** — the first outside commitment, the trigger the design memo named.
+Under Ruling 2 the shared position commits to that lock's remaining term
+(expires 2026-10-14T13:23Z) until it expires or isolated tranches exist. Authority: `MEMO_COMMITMENT_LADDER.md` (ratified
 2026-08-27), `MEMO_LOCKED_CAPITAL_DEPLOYMENT.md` (V1–V7 ratified 2026-08-25),
 `MEMO_POOL_V22_DEPLOYMENT_WINDOW.md` (W1–W4, open until now),
 `MEMO_POOL_V22_DESIGN.md` (A–D scope, "only what has drawn blood").
