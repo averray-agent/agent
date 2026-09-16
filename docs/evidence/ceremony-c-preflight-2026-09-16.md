@@ -56,10 +56,15 @@ KMS identity `133YGXLeo4Rf2aWc7JXUbq7rmDnTrFp7tLj7Q9xdCt4bcYcg` holds 5.24 DOT �
 
 The drivers print `creationBytecodeHash = keccak256(artifact bytecode)` and
 `initCodeHash = keccak256(tx.data)` (bytecode + constructor args). Compare the
-first; the second differs per address by construction. Honest caveat: this
-build ran on the same Mac as Pascal's, in an independent checkout. The
-independent *toolchain* reproduction is CI's provenance gate after T3
-(`verify_contract_source=1` dispatch), which must be green before §6.
+first; the second differs per address by construction.
+
+**Second toolchain, 2026-09-16:** the same commit rebuilt with Linux forge
+1.7.1 inside Docker (`ghcr.io/foundry-rs/foundry`, colima/Ubuntu 24.04,
+solc 0.8.24+commit.e11b9ed9) — all four `keccak256(bytecode.object)` digests
+**identical** to the macOS-native build above. §3's "second machine" is
+therefore already satisfied for the artifacts; what remains for Pascal is to
+confirm the drivers print these same four digests. CI's provenance gate after
+T3 (`verify_contract_source=1`) is the third, post-hoc check before §6.
 
 ## v2.1 holders (live, for §5a)
 
