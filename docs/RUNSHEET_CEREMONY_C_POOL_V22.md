@@ -1,7 +1,7 @@
 # RUNSHEET — Ceremony C: pool v2.2 goes live (deploy · bind · migrate · commit · first 90-day window)
 
-Status: **written 2026-09-16 — NOT executable yet.** Blocked on (a) #1383 merge,
-(b) four tooling items for Codex (§0), (c) measurement cycle 2 recalled and
+Status: **written 2026-09-16; tooling T1–T3 landed in #1385 (gated 2026-09-16), T4 pending the real addresses.** Blocked on (a) #1383 merge ✓,
+(b) T4 (§0), (c) measurement cycle 2 recalled and
 settled (the wrapper pause in §4 must not overlap a lane operation), (d) C1 decided 2026-09-16 (pause the idle keeper at cutover). Executor: Pascal. Mirrors Ceremony A/B
 (`RUNSHEET_POOL_V21_ACTIVATION.md`, `RUNSHEET_CEREMONY_B_VENUE_BIND.md`).
 Authority: `PACKET_POOL_V22_COMMITMENT_WINDOWS.md` @ 96b7b7c7 (R1–R6, R0
@@ -74,7 +74,8 @@ ceremony to a week.
 
 ## §1 — Deploy pool v2.2 and the locked aggregator (ceremony deployer EOA)
 
-Dry run, read, then commit — the v2.1 A1/A2 shape:
+Dry run, read, then commit — the v2.1 A1/A2 shape. (`--contract DepositPoolV22`
+is mandatory: the driver's old default `DepositPool` is the three-CREATE legacy path.)
 
 ```bash
 node scripts/ops/deploy-deposit-pool.mjs --profile mainnet --contract DepositPoolV22 --expected-deployer 0x9Ab8531FBb0948C542a31298FD61335f30064239
@@ -91,11 +92,12 @@ artifact. Commit with `--signer-secret-ref 'op://mainnet-critical/admin-eoa-main
 ## §2 — Deploy the v2.2 lane + adapter pair
 
 ```bash
-node scripts/ops/deploy-venue-pair.mjs --profile mainnet --target v22 --expected-signer 0x9Ab8531FBb0948C542a31298FD61335f30064239
+node scripts/ops/deploy-venue-pair.mjs --profile mainnet --target v22 --expected-signer 0x5a6836c6D4d293F6E5377E6c28054F4171915813
 ```
 
-then `--commit --use-kms` (or the deployer identity the driver requires — read
-its preflight). Gate: `adapter.lane()` = lane, `lane.agentAccountCore()` =
+then `--commit --use-kms`. The pair driver signs with the **KMS identity**
+(`0x5a6836…`, as Ceremony B did), so `--expected-signer` is the KMS address —
+not the admin EOA that §1 uses (#1385 review note). Gate: `adapter.lane()` = lane, `lane.agentAccountCore()` =
 adapter, **`adapter.pool()` = v2.2 (never v2.1, never legacy)**, asset USDC,
 policy `0x226F1425…`, lossReporter set.
 
