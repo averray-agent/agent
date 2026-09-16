@@ -2,8 +2,7 @@
 
 Status: **written 2026-09-16 — NOT executable yet.** Blocked on (a) #1383 merge,
 (b) four tooling items for Codex (§0), (c) measurement cycle 2 recalled and
-settled (the wrapper pause in §4 must not overlap a lane operation), (d) one
-operator decision (C1). Executor: Pascal. Mirrors Ceremony A/B
+settled (the wrapper pause in §4 must not overlap a lane operation), (d) C1 decided 2026-09-16 (pause the idle keeper at cutover). Executor: Pascal. Mirrors Ceremony A/B
 (`RUNSHEET_POOL_V21_ACTIVATION.md`, `RUNSHEET_CEREMONY_B_VENUE_BIND.md`).
 Authority: `PACKET_POOL_V22_COMMITMENT_WINDOWS.md` @ 96b7b7c7 (R1–R6, R0
 answered), `docs/POOL_V22_COMMITMENT_WINDOWS.md` (implementation, #1383).
@@ -47,20 +46,19 @@ commitment** on day 7, backend cutover, then the first
   after the manifest lands.
 - **T4** Env cutover PR (templates, generated mainnet template): the pool
   address the gateway reads (`depositPool` alias), `POOL_V22_CEREMONY_COMPLETE=1`,
-  `POOL_V22_ADDRESS`, `POOL_V22_AGGREGATOR_ADDRESS`; keeper flag per C1;
+  `POOL_V22_ADDRESS`, `POOL_V22_AGGREGATOR_ADDRESS`; `IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED=0`
+  (C1) with `POOL_V22_LOCKED_KEEPER_ENABLED` per the operator at cutover;
   door copy: v2.1 deposits retired (the contract has no pause), withdrawals
   unchanged, redeposit into v2.2 at leisure, R3 disclosure.
 
 ## Decision for the operator
 
-- **C1 — idle-balance allocations after cutover.** Today
-  `IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED=1` sweeps workers' idle AAC balances
-  into **v2.1** through the v2.1 aggregator (`AAC_IDLE_DEPOSIT_POOL_V21`).
-  #1383 built the *locked* aggregator for v2.2 only. Options: (a) keep idle
-  sweeps into v2.1 — Flex money that earns nothing there and must be migrated
-  a second time later; (b) **pause the idle keeper at cutover** (float stays
-  in AAC, disclosed) until an idle v2.2 aggregator exists. Recommend (b); the
-  idle v2.2 aggregator is a small follow-up once v2.2 has run one window.
+- **C1 — DECIDED 2026-09-16 (Pascal): pause the idle keeper at cutover.**
+  T4 sets `IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED=0`; idle AAC float stays in
+  AAC and `/me` + the pool page say so. No new sweeps into v2.1
+  (`AAC_IDLE_DEPOSIT_POOL_V21`); existing v2.1 aggregator shares exit by notice
+  in §5a. An idle (Flex) v2.2 aggregator is a separate follow-up packet after
+  the first 90-day window — one CREATE, two multisig calls, keeper re-enable.
 
 ## Timeline
 
