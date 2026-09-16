@@ -528,6 +528,26 @@ REQUEST_ID="$REQUEST_ID" \
 node scripts/ops/exercise-async-xcm-request.mjs --mode finalize --status succeeded
 ```
 
+### Pool venue ceremony: process died after the sell leg
+
+Rerun the **same** `pool-venue-dispatch.mjs stage-dispatch --commit --use-kms`
+command, with the original pool, request, deployment and staging parameters.
+When both deposit legs are recorded (bitmap `3`) but the lane is unsettled,
+the script observes the request-bound Hydration swap historically and settles;
+stage, funding and sell are not repeated. `status` prints this next action.
+
+The scan starts from the wrapper's `createdAt` with five minutes of cross-chain
+skew padding, stops at a captured head and has a three-minute / one-million-block
+budget. No matching request-bound swap means a nonzero exit and
+`swapObservation.status: not_found`; `scanned` reports the first candidate and
+last event block read (null when no block was read). Do not treat dispatched
+legs as a completed settlement or change the request to match another swap.
+Historical parent balances must also be readable for the existing fee ledger
+and position-delta checks; unavailable history refuses rather than inventing
+balances. After the lane succeeds, the operator runs the normal
+`pool-venue-ceremony.mjs settle --deployment-id <id> --use-kms --commit`.
+No recall command or contract changes are part of this recovery.
+
 ### Static surfaces
 
 If only the public site or app shell regressed:

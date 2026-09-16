@@ -4,7 +4,8 @@ import { readFileSync } from "node:fs";
 import { AbiCoder, Interface, ZeroAddress, ZeroHash, encodeBytes32String, keccak256 } from "ethers";
 import { XCM_WRAPPER_ABI } from "../../mcp-server/src/blockchain/abis.js";
 import {
-  main, dryRunStageAndFunding, dryRunStageAndRecallSell, deriveLaneRequestId, deriveLaneRecallRequestId,
+  main, runCli, recoverHistoricalDepositSwap, RECALL_HISTORY_TIMEOUT_MS, MAX_RECALL_HISTORY_BLOCKS,
+  dryRunStageAndFunding, dryRunStageAndRecallSell, deriveLaneRequestId, deriveLaneRecallRequestId,
   assertStagedDeployBinding, assertStagedRecallBinding, readStagedLaneEvent,
 } from "./pool-venue-dispatch.mjs";
 
@@ -106,15 +107,52 @@ function command(options = {}) {
   const f = fixture(options);
   let staged = options.staged ?? false;
   let settled = false;
-  let sold = false;
-  let bitmap = 0n;
+  let bitmap = options.bitmap ?? 0n;
+  let sold = bitmap === 3n;
+  const historical = sold;
+  const priorPosition = historical ? 17_457n : 0n;
+  const observedSwapAmount = historical ? SELL + 4n : SELL;
+  const eventBlocks = [];
+  const positionReads = [];
+  const observations = [];
+  const forwardScans = [];
+  let heads = 0;
+  const head = options.head ?? 110;
+  const swapBlock = options.swapBlock ?? 105;
+  const timestamp = (block) => BigInt(NOW) * 1_000n + BigInt(block - 100) * 6_000n;
+  const hydrationApi = {
+    rpc: { chain: {
+      getHeader: async () => ({ number: { toNumber: () => head + heads++ } }),
+      getBlockHash: async (block) => ({ toHex: () => `block-${block}`, toString: () => `block-${block}` }),
+    } },
+    at: async (hash) => {
+      const block = Number(String(hash).replace("block-", ""));
+      return { query: {
+        timestamp: { now: async () => timestamp(block) },
+        system: { events: async () => {
+          eventBlocks.push(block);
+          return { toHuman: () => block === swapBlock ? [{ event: {
+            section: "broadcast", method: "Swapped3", data: {
+              operationStack: [{ Xcm: [options.wrongSwapRequest ? GARBAGE : f.laneId] }], fillerType: "AAVE",
+              inputs: [{ asset: "22", amount: observedSwapAmount.toString() }],
+              outputs: [{ asset: "1003", amount: observedSwapAmount.toString() }],
+            },
+          } }] : [] };
+        } },
+        tokens: { accounts: async (account, asset) => {
+          assert.equal(account, ACCOUNT); assert.equal(asset, 22); assert.equal(block, swapBlock - 1);
+          return { free: ASSETS };
+        } },
+      } };
+    },
+  };
   const sent = [];
   const dispatched = [];
   const reverseLookups = [];
   const chainStrategyReads = [];
   const dry = dryRunApi(f, options);
   const wrapperRecord = () => ({ context: { strategyId: f.strategyId, kind: 0, account: f.venue, assets: ASSETS, nonce: 1n },
-    queuedBy: f.lane, status: settled ? 2 : 1 });
+    queuedBy: f.lane, status: settled ? 2 : 1, createdAt: options.createdAt ?? BigInt(NOW) });
   const pool = {
     operator: async () => manifest.verifier, venueAdapter: async () => f.venue,
     bufferAssets: async () => 10_000_000n, totalAssets: async () => 12_000_000n, venuePrincipalCostBasis: async () => ASSETS,
@@ -157,7 +195,8 @@ function command(options = {}) {
       assert.ok(result, `Unexpected contract ${address}`); return result;
     } },
     VenueBalanceReader: class {
-      async read(target) { return { raw: target.ledger === "substrate_system" ? 1_000_000_000n : 0n }; }
+      async read(target) { return { raw: target.ledger === "substrate_system" ? 1_000_000_000n
+        : historical ? (target.ledger === "erc20" ? priorPosition + observedSwapAmount : 49_980n) : 0n }; }
       async close() {}
     },
     fetchJson: async () => ({ available: true, pool: f.pool, reconciled: true, flows: { status: "ok" }, block: { timestamp: NOW } }),
@@ -166,8 +205,17 @@ function command(options = {}) {
     makeRuntime: () => ({
       targets: { float: "float", position: { endpoint: "mock", chainId: 222222 } },
       balanceReader: {
-        read: async (target) => ({ raw: target === "float" ? (sold ? 50_000n : ASSETS) : SELL }),
-        getSubstrateApi: async () => ({ rpc: { chain: { getHeader: async () => ({ number: { toNumber: () => 100 } }) } } }),
+        read: async (target, opts) => {
+          if (target === "float") return { raw: sold ? (historical ? 49_980n : 50_000n) : ASSETS };
+          positionReads.push(opts);
+          if (opts?.blockTag) {
+            assert.equal(opts.blockTag, swapBlock - 1);
+            if (options.unavailableBaseline) throw new Error("historical position unavailable");
+            return { raw: priorPosition };
+          }
+          return { raw: priorPosition + observedSwapAmount };
+        },
+        getSubstrateApi: async () => hydrationApi,
         getEvmProvider: () => provider, close: async () => {},
       },
       dispatcher: { dispatch: async (input) => {
@@ -176,18 +224,116 @@ function command(options = {}) {
         return { evidence: { dryRun: { fundingDeposits: [{}], wireFrames: [{ frameSource: "runtime_transformed_local_execute" }] } } };
       } },
     }),
-    waitForAaveSwap: async () => ({ amountInRaw: SELL, amountOutRaw: SELL }),
-    persistEvidence: async () => {},
+    waitForAaveSwap: async (_api, scan) => { forwardScans.push(scan); return { amountInRaw: SELL, amountOutRaw: SELL }; },
+    persistEvidence: async (_args, evidence) => { observations.push(evidence); },
     ...(options.garbagePredictor ? { deriveLaneRequestId: () => GARBAGE } : {}),
   };
-  const run = (action = "stage-dispatch", commit = false) => main([
+  const run = (action = "stage-dispatch", commit = false, cli = false) => (cli ? runCli : main)([
     action, "--profile", "mainnet", "--pool", f.pool, "--request-id", REQUEST, "--deployment-id", "1",
     "--expected-signer", manifest.verifier, "--observability-url", "http://monitor.invalid",
     "--asset-hub-ws", "wss://hub.invalid", "--hydration-ws", "wss://hydration.invalid",
     ...(commit ? ["--commit", "--use-kms"] : []),
   ], io);
-  return { f, dry, run, sent, dispatched, reverseLookups, chainStrategyReads };
+  return { f, dry, run, sent, dispatched, reverseLookups, chainStrategyReads,
+    hydrationApi, eventBlocks, positionReads, observations, forwardScans, headReads: () => heads };
 }
+
+test("bitmap 3 resume observes the historical request-bound swap and settles observed amounts without dispatch", async () => {
+  const c = command({ staged: true, bitmap: 3n });
+  assert.equal((await c.run("status")).nextAction, "rerun stage-dispatch --commit to observe and settle");
+  const result = await c.run("stage-dispatch", true);
+  assert.deepEqual(c.dispatched, []);
+  assert.deepEqual(c.forwardScans, []);
+  assert.equal(c.sent.length, 1);
+  assert.equal(c.sent[0].to, c.f.lane);
+  const settle = new Interface(["function settleRequest(bytes32,uint8,uint256,uint256,uint256,bytes32,bytes32)"])
+    .decodeFunctionData("settleRequest", c.sent[0].data);
+  assert.deepEqual([...settle].slice(0, 5), [c.f.laneId, 2n, SELL + 4n, SELL + 4n, 0n]);
+  assert.equal(result.swapObservation.status, "found");
+  assert.equal(result.hydrationSwap.blockNumber, 105);
+  assert.equal(result.hydrationSwap.requestId, c.f.laneId);
+  assert.equal(result.hydrationSwap.scan.source, "wrapper.createdAt");
+  assert.equal(result.historicalBaselines.aUsdcRaw, 17_457n, "restart-time balance is not the baseline");
+  assert.equal(result.feeLedger.sellExecutionFeeRaw, 16n);
+  assert.equal(result.postState.adapterRequest.settled, true);
+  assert.deepEqual(c.positionReads, [{ blockTag: 104 }, undefined]);
+});
+
+test("bitmap 3 same-amount swap for another request refuses settlement, reports not_found and exits nonzero", async (t) => {
+  const c = command({ staged: true, bitmap: 3n, wrongSwapRequest: true });
+  t.mock.method(console, "error", () => {});
+  const previous = process.exitCode;
+  try {
+    process.exitCode = 0;
+    await c.run("stage-dispatch", true, true);
+    assert.equal(process.exitCode, 1);
+  } finally { process.exitCode = previous; }
+  assert.deepEqual(c.sent, []);
+  assert.deepEqual(c.dispatched, []);
+  const report = c.observations.at(-1);
+  assert.equal(report.swapObservation.status, "not_found");
+  assert.deepEqual(report.swapObservation.scanned, [49, 110]);
+  assert.match(report.swapObservation.reason, /without request-bound/);
+  assert.equal(c.headReads(), 1, "never follow the advancing head");
+  assert.equal(Math.max(...c.eventBlocks), 110);
+  assert.equal(new Set(c.eventBlocks).size, c.eventBlocks.length);
+});
+
+test("deposit history includes skew padding and delayed execution, but enforces the maximum block budget", async () => {
+  for (const swapBlock of [90, 109]) {
+    const c = command({ staged: true, bitmap: 3n, swapBlock });
+    assert.equal((await c.run("stage-dispatch", true)).hydrationSwap.blockNumber, swapBlock);
+  }
+  const c = command({ staged: true, bitmap: 3n, head: MAX_RECALL_HISTORY_BLOCKS + 100 });
+  await assert.rejects(c.run("stage-dispatch", true), /scan exceeds/);
+  assert.deepEqual(c.eventBlocks, []);
+  assert.deepEqual(c.sent, []);
+  assert.equal(c.observations.at(-1).swapObservation.status, "not_found");
+});
+
+test("deposit history read budget stops a stalled event read without scanning another block", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000_000 });
+  const c = command({ staged: true, bitmap: 3n });
+  const original = c.hydrationApi.at;
+  let entered;
+  const stalled = new Promise((resolve) => { entered = resolve; });
+  c.hydrationApi.at = async (hash) => {
+    const at = await original(hash);
+    at.query.system.events = async () => { entered(); return new Promise(() => {}); };
+    return at;
+  };
+  let completed = false;
+  let failure;
+  const result = recoverHistoricalDepositSwap(c.hydrationApi, {
+    requestId: c.f.laneId, createdAt: BigInt(NOW), expectedInput: SELL,
+  }).then(() => { completed = true; }, (error) => { completed = true; failure = error; });
+  await stalled;
+  t.mock.timers.tick(RECALL_HISTORY_TIMEOUT_MS);
+  await new Promise(setImmediate);
+  assert.equal(completed, true, "the deadline must release a stalled RPC read");
+  await result;
+  assert.match(failure?.message ?? "", /exceeded its read budget/);
+  assert.equal(failure.swapObservation.status, "not_found");
+  assert.deepEqual(failure.swapObservation.scanned, [49, null]);
+  assert.deepEqual(c.eventBlocks, []);
+  assert.equal(c.headReads(), 1);
+});
+
+test("bitmap 1 resume dispatches only sell and observes forward from the sell head", async () => {
+  const c = command({ staged: true, bitmap: 1n });
+  const result = await c.run("stage-dispatch", true);
+  assert.deepEqual(c.dispatched, [{ requestId: c.f.laneId, leg: "deposit_sell" }]);
+  assert.deepEqual(c.forwardScans, [{ requestId: c.f.laneId, fromBlock: 110, expectedInput: SELL }]);
+  assert.deepEqual(c.eventBlocks, []);
+  assert.equal(result.postState.adapterRequest.settled, true);
+});
+
+test("bitmap 3 refuses unreadable historical balances instead of inventing a baseline", async () => {
+  const c = command({ staged: true, bitmap: 3n, unavailableBaseline: true });
+  await assert.rejects(c.run("stage-dispatch", true), /historical position unavailable/);
+  assert.deepEqual(c.sent, []);
+  assert.deepEqual(c.dispatched, []);
+});
 
 test("v2.1 dry run reaches funding with chain strategy; legacy-strategy mutation refuses before funding", async () => {
   const good = command();

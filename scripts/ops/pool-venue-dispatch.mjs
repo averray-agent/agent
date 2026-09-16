@@ -607,7 +607,7 @@ async function readBeforeDeadline(operation, deadlineMs) {
   }
 }
 
-export async function recoverHistoricalRecallSwap(api, { requestId, createdAt, expectedInput }) {
+async function historicalSwapRange(api, createdAt) {
   // Wrapper createdAt is seconds; Hydration timestamp.now is milliseconds.
   const createdAtMs = positiveBigInt(createdAt, "Staged recall createdAt") * 1_000n;
   const marginMs = BigInt(RECALL_HISTORY_MARGIN_SECONDS) * 1_000n;
@@ -646,18 +646,44 @@ export async function recoverHistoricalRecallSwap(api, { requestId, createdAt, e
   if (head - fromBlock + 1 > MAX_RECALL_HISTORY_BLOCKS) {
     throw new Error(`Historical recall scan exceeds ${MAX_RECALL_HISTORY_BLOCKS} blocks from staged createdAt; refusing to dispatch.`);
   }
-  const swap = await waitForAaveSwap(api, {
-    requestId, fromBlock, toBlock: head, expectedInput,
-    assetIn: 1003, assetOut: 22, attempts: 1, deadlineMs,
-  });
   return {
-    ...swap,
+    deadlineMs,
     scan: { source: "wrapper.createdAt", createdAt, safetyMarginSeconds: RECALL_HISTORY_MARGIN_SECONDS,
       fromBlock, toBlock: head, maxBlocks: MAX_RECALL_HISTORY_BLOCKS, timeoutMs: RECALL_HISTORY_TIMEOUT_MS },
   };
 }
 
-export async function waitForAaveSwap(api, { requestId, fromBlock, toBlock, expectedInput, assetIn = 22, assetOut = 1003, attempts = 30, deadlineMs }) {
+export async function recoverHistoricalRecallSwap(api, { requestId, createdAt, expectedInput }) {
+  const { deadlineMs, scan } = await historicalSwapRange(api, createdAt);
+  const swap = await waitForAaveSwap(api, {
+    requestId, fromBlock: scan.fromBlock, toBlock: scan.toBlock, expectedInput,
+    assetIn: 1003, assetOut: 22, attempts: 1, deadlineMs,
+  });
+  return { ...swap, scan };
+}
+
+export async function recoverHistoricalDepositSwap(api, { requestId, createdAt, expectedInput }) {
+  let scan;
+  let lastScanned = null;
+  try {
+    const range = await historicalSwapRange(api, createdAt);
+    scan = range.scan;
+    const swap = await waitForAaveSwap(api, {
+      requestId, fromBlock: scan.fromBlock, toBlock: scan.toBlock, expectedInput,
+      assetIn: 22, assetOut: 1003, attempts: 1, deadlineMs: range.deadlineMs,
+      onScannedBlock: (block) => { lastScanned = block; },
+    });
+    return { ...swap, scan };
+  } catch (error) {
+    error.swapObservation = {
+      status: "not_found", scanned: [scan?.fromBlock ?? null, lastScanned],
+      ...(scan ? { scan } : {}), reason: error.message,
+    };
+    throw error;
+  }
+}
+
+export async function waitForAaveSwap(api, { requestId, fromBlock, toBlock, expectedInput, assetIn = 22, assetOut = 1003, attempts = 30, deadlineMs, onScannedBlock = () => {} }) {
   const read = (operation) => readBeforeDeadline(operation, deadlineMs);
   let nextBlock = Number(fromBlock);
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -666,6 +692,7 @@ export async function waitForAaveSwap(api, { requestId, fromBlock, toBlock, expe
       const blockHash = (await read(() => api.rpc.chain.getBlockHash(nextBlock))).toHex();
       const at = await read(() => api.at(blockHash));
       const records = (await read(() => at.query.system.events())).toHuman();
+      onScannedBlock(nextBlock);
       for (const record of records) {
         const event = record?.event;
         if (String(event?.section).toLowerCase() !== "broadcast" || !/^Swapped/u.test(String(event?.method))) continue;
@@ -1447,6 +1474,9 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     };
 
     if (args.command === "status") {
+      if (!isRecall && state.wrapper.bitmap === 3n && state.lane.adapterRequest?.settled === false) {
+        common.nextAction = "rerun stage-dispatch --commit to observe and settle";
+      }
       await persistEvidence(args, common);
       console.log("\nSTATUS ONLY — no signature requested and no transaction broadcast.");
       return common;
@@ -2002,6 +2032,8 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     try {
       let remote;
       let swap;
+      let positionBeforeSell = BigInt(state.farSide.aUsdc.raw);
+      let historicalBaselines;
       const legResults = await runDepositLegPlan({
         bitmap: resumeBitmap,
         dispatchFunding: async () => {
@@ -2044,18 +2076,41 @@ export async function main(argv = process.argv.slice(2), io = {}) {
         },
       });
       if (!swap) {
-        const completed = {
-          ...plan,
-          mode: "commit",
-          receipts: {
-            stage: { status: "skipped", reason: "stageDeploy already committed" },
-            funding: legResults.deposit_funding,
-            sell: legResults.deposit_sell,
-          },
-          action: "All dispatch legs are already recorded on-chain; no transaction was repeated. Settlement requires the existing request-bound swap observation.",
-        };
-        await persistEvidence(args, completed);
-        return completed;
+        const hydrationApi = await services.balanceReader.getSubstrateApi(args.hydrationWs);
+        try {
+          swap = await recoverHistoricalDepositSwap(hydrationApi, {
+            requestId: liveLaneRequestId,
+            createdAt: stagedWrapperRecord.createdAt,
+            expectedInput: parameters.sellAmount,
+          });
+        } catch (error) {
+          const incomplete = {
+            ...plan,
+            mode: "commit",
+            receipts: {
+              stage: { status: "skipped", reason: "stageDeploy already committed" },
+              funding: legResults.deposit_funding,
+              sell: legResults.deposit_sell,
+            },
+            swapObservation: error.swapObservation,
+            action: "All dispatch legs are already recorded on-chain; no transaction was repeated. Settlement requires the existing request-bound swap observation.",
+          };
+          await persistEvidence(args, incomplete);
+          throw error; // CLI exits non-zero: dispatched is not settled.
+        }
+        // Restart-time balances already contain this swap. Reconstruct the
+        // pre-sell baselines from its parent, as the recall resume does, so
+        // the existing fee ledger and position-delta settlement remain valid.
+        const blockTag = swap.blockNumber - 1;
+        if (blockTag < 1) throw new Error("Historical deposit swap has no readable parent balance block.");
+        const deadline = Date.now() + RECALL_HISTORY_TIMEOUT_MS;
+        const preSellHash = await readBeforeDeadline(() => hydrationApi.rpc.chain.getBlockHash(blockTag), deadline);
+        const preSellApi = await readBeforeDeadline(() => hydrationApi.at(preSellHash), deadline);
+        const preSellFloat = await readBeforeDeadline(() => preSellApi.query.tokens.accounts(convertedAccountId32, 22), deadline);
+        remote = { raw: BigInt(preSellFloat.free.toString()) };
+        const preSellPosition = await readBeforeDeadline(() => services.balanceReader.read(services.targets.position, { blockTag }), deadline);
+        positionBeforeSell = BigInt(preSellPosition.raw);
+        historicalBaselines = { blockNumber: blockTag, blockHash: preSellHash.toHex(), floatRaw: remote.raw, aUsdcRaw: positionBeforeSell };
       }
       const afterPosition = await services.balanceReader.read(services.targets.position);
       const afterFloat = await services.balanceReader.read(services.targets.float);
@@ -2075,7 +2130,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
             deployedAUsdc: swap.amountOutRaw,
           });
       if (feeLedger.aUsdcMintedRaw < parameters.minimumOutput) throw new Error("Sell postcondition failed: aUSDC delta is below minimumOutput.");
-      const observedPositionDelta = afterPosition.raw - BigInt(state.farSide.aUsdc.raw);
+      const observedPositionDelta = afterPosition.raw - positionBeforeSell;
       if (observedPositionDelta < feeLedger.aUsdcMintedRaw) throw new Error("aUSDC balance moved below the request-bound swap output.");
       const preSettlementAccrualRaw = observedPositionDelta - feeLedger.aUsdcMintedRaw;
       const hydrationProvider = services.balanceReader.getEvmProvider(
@@ -2120,6 +2175,8 @@ export async function main(argv = process.argv.slice(2), io = {}) {
           settlement: { hash: settleTx.hash, blockNumber: settleReceipt.blockNumber, gasUsed: settleReceipt.gasUsed },
         },
         hydrationSwap: swap,
+        swapObservation: { status: "found", blockNumber: swap.blockNumber, requestId: liveLaneRequestId, ...(swap.scan ? { scan: swap.scan } : {}) },
+        ...(historicalBaselines ? { historicalBaselines } : {}),
         postState: { laneRequestId: liveLaneRequestId, wrapperRequest: settledWrapper, adapterRequest: settledAdapter, wrapperBitmap: await wrapper.requestDispatchBitmap(liveLaneRequestId), farSideAUsdc: afterPosition, farSideFloat: afterFloat },
         settlementProof: { hydrationBlockNumber: hydrationHead.number, hydrationBlockHash: hydrationHead.hash, settledAssetsRaw: observedPositionDelta, settledSharesRaw: observedPositionDelta, preSettlementAccrualRaw, poolSettleVenueDeploymentRunnable: true },
         feeLedger,
@@ -2134,9 +2191,13 @@ export async function main(argv = process.argv.slice(2), io = {}) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((error) => {
+export async function runCli(argv = process.argv.slice(2), io = {}) {
+  try {
+    return await main(argv, io);
+  } catch (error) {
     console.error(`pool-venue-dispatch failed: ${error?.stack ?? error?.message ?? error}`);
     process.exitCode = 1;
-  });
+  }
 }
+
+if (import.meta.url === `file://${process.argv[1]}`) runCli();
