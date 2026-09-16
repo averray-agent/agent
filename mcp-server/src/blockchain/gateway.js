@@ -78,8 +78,18 @@ const ESCROW_JOB_STATE_REJECTED = 4;
 const ESCROW_JOB_STATE_CLOSED = 6;
 const RECOVERY_LOG_CHUNK_SIZE = 50_000;
 const RECOVERY_FROM_BLOCK_SAFETY_MARGIN = 1_000;
-const DEPOSIT_POOL_EVENT_LOG_CHUNK_SIZE = 2_000;
-const CREDIT_POOL_EVENT_LOG_CHUNK_SIZE = 2_000;
+// Vesting reconstructs DepositPool/CreditPool history from eth_getLogs and the
+// cache is cold after every backend recreate. At mainnet's ~1.3M blocks since
+// the CreditPool deployment, 2,000-block chunks read one at a time were 648
+// sequential round trips (97 s at the 150 ms/getLogs measured on 2026-09-16),
+// which is why the hosted smoke's CreditPool door timed out on two deploys.
+// 10,000-block chunks match the yield-attribution reader already proven
+// against the same RPC and pool; waves of POOL_EVENT_SCAN_CONCURRENCY ranges
+// coalesce into one JSON-RPC batch each.
+const DEFAULT_POOL_EVENT_LOG_CHUNK_BLOCKS = 10_000;
+const DEFAULT_POOL_EVENT_SCAN_CONCURRENCY = 8;
+const DEFAULT_POOL_EVENT_HISTORY_WAIT_MS = 6_000;
+export const POOL_EVENT_HISTORY_WARMING_REASON = "deposit_history_warming";
 const TREASURY_STRATEGY_IDS = Object.freeze([
   encodeBytes32String("HYDRATION_USDC_V1").toLowerCase(),
   encodeBytes32String("HYDRATION_USDC_POOL_V1").toLowerCase()
@@ -178,6 +188,9 @@ export class BlockchainGateway {
     this.now = now;
     this.depositPoolVestingEventCache = undefined;
     this.creditPoolVestingEventCache = undefined;
+    // One in-flight history scan per cache; concurrent readers join it and a
+    // reader that exhausts its wait budget leaves it running in the background.
+    this.poolEventScans = new Map();
     if (!config.enabled) {
       this.provider = undefined;
       this.writeBroadcaster = undefined;
@@ -970,12 +983,13 @@ export class BlockchainGateway {
 
   async readDepositVesting(wallet, {
     now = new Date(this.now()),
-    vestingHours = DEFAULT_WORKER_DEPOSIT_VESTING_HOURS
+    vestingHours = DEFAULT_WORKER_DEPOSIT_VESTING_HOURS,
+    waitMs = undefined
   } = {}) {
     try {
       const [events, creditEvents] = await Promise.all([
-        this.readDepositPoolPrincipalEvents(),
-        this.config?.creditPoolAddress ? this.readCreditPoolLoanEvents() : []
+        this.readDepositPoolPrincipalEvents({ waitMs }),
+        this.config?.creditPoolAddress ? this.readCreditPoolLoanEvents({ waitMs }) : []
       ]);
       const migration = this.config?.depositPoolVestingMigration;
       const migratedWallet = migration?.wallet?.toLowerCase() === String(wallet).toLowerCase();
@@ -992,10 +1006,21 @@ export class BlockchainGateway {
         headBlock: this.depositPoolVestingEventCache?.headBlock
       };
     } catch (error) {
-      this.logger?.warn?.(
-        { wallet, error: redactProviderError(error) || "deposit_pool_vesting_read_failed" },
-        "deposit_pool_vesting.read_failed"
-      );
+      // A cold history still warming is expected after every backend recreate
+      // and is not a read failure: the scan continues in the background and
+      // the caller gets a named, fail-closed zero instead of an unbounded wait.
+      const warming = error?.reason === POOL_EVENT_HISTORY_WARMING_REASON;
+      if (warming) {
+        this.logger?.info?.(
+          { wallet, pool: error.pool, scannedThroughBlock: error.scannedThroughBlock, headBlock: error.headBlock, waitMs: error.waitMs },
+          "deposit_pool_vesting.history_warming"
+        );
+      } else {
+        this.logger?.warn?.(
+          { wallet, error: redactProviderError(error) || "deposit_pool_vesting_read_failed" },
+          "deposit_pool_vesting.read_failed"
+        );
+      }
       return {
         vestedRaw: 0n,
         principalRaw: 0n,
@@ -1004,12 +1029,19 @@ export class BlockchainGateway {
         tranches: [],
         available: false,
         source: "deposit_pool_events",
-        error: "deposit_pool_vesting_read_failed"
+        error: warming ? POOL_EVENT_HISTORY_WARMING_REASON : "deposit_pool_vesting_read_failed"
       };
     }
   }
 
-  async readDepositPoolPrincipalEvents() {
+  /**
+   * DepositPool Deposit/Withdraw history for vesting, complete through the
+   * current head. `waitMs` bounds how long a request waits for a cold or
+   * behind cache before it is told the history is still warming (the scan
+   * itself keeps running in the background). Omit it for the configured
+   * POOL_EVENT_HISTORY_WAIT_MS; pass Infinity to wait for completion.
+   */
+  async readDepositPoolPrincipalEvents({ waitMs = undefined } = {}) {
     const poolAddress = this.config?.depositPoolV2Address ?? this.config?.depositPoolAddress;
     const deploymentBlock = Number(
       this.config?.depositPoolV2Address
@@ -1028,25 +1060,18 @@ export class BlockchainGateway {
     if (!Number.isSafeInteger(headBlock) || headBlock < deploymentBlock) {
       throw new Error(`DepositPool event head ${headBlock} predates deployment block ${deploymentBlock}`);
     }
-    if (this.depositPoolVestingEventCache?.headBlock === headBlock) {
-      return this.depositPoolVestingEventCache.events;
-    }
+    return this.#extendPoolEventCache({
+      pool: "depositPool",
+      cacheKey: "depositPoolVestingEventCache",
+      address: poolAddress,
+      deploymentBlock,
+      headBlock,
+      waitMs,
+      decode: (logs) => this.#decodeDepositPoolPrincipalLogs(logs, poolInterface)
+    });
+  }
 
-    const canExtend = this.depositPoolVestingEventCache
-      && this.depositPoolVestingEventCache.headBlock >= deploymentBlock
-      && this.depositPoolVestingEventCache.headBlock < headBlock;
-    const fromBlock = canExtend
-      ? this.depositPoolVestingEventCache.headBlock + 1
-      : deploymentBlock;
-    const decodedEvents = canExtend
-      ? [...this.depositPoolVestingEventCache.events]
-      : [];
-    const logs = [];
-    for (let start = fromBlock; start <= headBlock; start += DEPOSIT_POOL_EVENT_LOG_CHUNK_SIZE) {
-      const end = Math.min(headBlock, start + DEPOSIT_POOL_EVENT_LOG_CHUNK_SIZE - 1);
-      logs.push(...await this.provider.getLogs({ address: poolAddress, fromBlock: start, toBlock: end }));
-    }
-
+  async #decodeDepositPoolPrincipalLogs(logs, poolInterface) {
     const principalLogs = [];
     for (const log of logs) {
       let decoded;
@@ -1067,28 +1092,11 @@ export class BlockchainGateway {
         txHash: log.transactionHash
       });
     }
-
-    const timestamps = new Map();
-    await Promise.all([...new Set(principalLogs.map((event) => event.blockNumber))].map(async (blockNumber) => {
-      const block = await this.provider.getBlock(blockNumber);
-      const timestamp = Number(block?.timestamp);
-      if (!Number.isFinite(timestamp) || timestamp < 0) {
-        throw new Error(`DepositPool event block ${blockNumber} has no readable timestamp`);
-      }
-      timestamps.set(blockNumber, timestamp);
-    }));
-    decodedEvents.push(...principalLogs.map((event) => ({
-      ...event,
-      blockTimestamp: timestamps.get(event.blockNumber)
-    })));
-    decodedEvents.sort((left, right) => (
-      left.blockNumber - right.blockNumber || left.logIndex - right.logIndex
-    ));
-    this.depositPoolVestingEventCache = { headBlock, events: decodedEvents };
-    return decodedEvents;
+    const timestamps = await this.#readEventBlockTimestamps(principalLogs, "DepositPool");
+    return principalLogs.map((event) => ({ ...event, blockTimestamp: timestamps.get(event.blockNumber) }));
   }
 
-  async readCreditPoolLoanEvents() {
+  async readCreditPoolLoanEvents({ waitMs = undefined } = {}) {
     const poolAddress = this.config?.creditPoolAddress;
     const deploymentBlock = Number(this.config?.creditPoolDeploymentBlock);
     if (!this.provider || !poolAddress || !Number.isSafeInteger(deploymentBlock) || deploymentBlock < 0) {
@@ -1102,21 +1110,20 @@ export class BlockchainGateway {
     if (!Number.isSafeInteger(headBlock) || headBlock < deploymentBlock) {
       throw new Error(`CreditPool event head ${headBlock} predates deployment block ${deploymentBlock}`);
     }
-    if (this.creditPoolVestingEventCache?.headBlock === headBlock) {
-      return this.creditPoolVestingEventCache.events;
-    }
-    const canExtend = this.creditPoolVestingEventCache
-      && this.creditPoolVestingEventCache.headBlock >= deploymentBlock
-      && this.creditPoolVestingEventCache.headBlock < headBlock;
-    const fromBlock = canExtend ? this.creditPoolVestingEventCache.headBlock + 1 : deploymentBlock;
-    const decodedEvents = canExtend ? [...this.creditPoolVestingEventCache.events] : [];
-    const logs = [];
-    for (let start = fromBlock; start <= headBlock; start += CREDIT_POOL_EVENT_LOG_CHUNK_SIZE) {
-      const end = Math.min(headBlock, start + CREDIT_POOL_EVENT_LOG_CHUNK_SIZE - 1);
-      logs.push(...await this.provider.getLogs({ address: poolAddress, fromBlock: start, toBlock: end }));
-    }
+    return this.#extendPoolEventCache({
+      pool: "creditPool",
+      cacheKey: "creditPoolVestingEventCache",
+      address: poolAddress,
+      deploymentBlock,
+      headBlock,
+      waitMs,
+      decode: (logs, priorEvents) => this.#decodeCreditPoolLoanLogs(logs, poolInterface, priorEvents)
+    });
+  }
+
+  async #decodeCreditPoolLoanLogs(logs, poolInterface, priorEvents) {
     const loanBorrowers = new Map(
-      decodedEvents
+      priorEvents
         .filter((event) => event.type === "LoanOriginated")
         .map((event) => [event.loanId, event.borrower])
     );
@@ -1142,22 +1149,161 @@ export class BlockchainGateway {
         txHash: log.transactionHash
       });
     }
+    const timestamps = await this.#readEventBlockTimestamps(relevant, "CreditPool");
+    return relevant.map((event) => ({ ...event, blockTimestamp: timestamps.get(event.blockNumber) }));
+  }
+
+  async #readEventBlockTimestamps(events, label) {
     const timestamps = new Map();
-    await Promise.all([...new Set(relevant.map((event) => event.blockNumber))].map(async (blockNumber) => {
+    await Promise.all([...new Set(events.map((event) => event.blockNumber))].map(async (blockNumber) => {
       const block = await this.provider.getBlock(blockNumber);
       const timestamp = Number(block?.timestamp);
       if (!Number.isFinite(timestamp) || timestamp < 0) {
-        throw new Error(`CreditPool event block ${blockNumber} has no readable timestamp`);
+        throw new Error(`${label} event block ${blockNumber} has no readable timestamp`);
       }
       timestamps.set(blockNumber, timestamp);
     }));
-    decodedEvents.push(...relevant.map((event) => ({
-      ...event,
-      blockTimestamp: timestamps.get(event.blockNumber)
-    })));
-    decodedEvents.sort((left, right) => left.blockNumber - right.blockNumber || left.logIndex - right.logIndex);
-    this.creditPoolVestingEventCache = { headBlock, events: decodedEvents };
-    return decodedEvents;
+    return timestamps;
+  }
+
+  /**
+   * Serve one pool's decoded event cache complete through `headBlock`,
+   * extending it first when it is cold or behind.
+   *
+   * - A single scan per cache is in flight at any time; concurrent readers
+   *   join it instead of each re-reading the same history.
+   * - The scan checkpoints the cache after every wave, so a failed or
+   *   abandoned scan resumes from the last complete range, never from the
+   *   deployment block.
+   * - A reader waits at most `waitMs` before it is told the history is still
+   *   warming (reason deposit_history_warming). The scan keeps running.
+   * - A failover runner can answer eth_blockNumber a block behind the primary:
+   *   the cache is served trimmed to that head instead of being discarded.
+   */
+  async #extendPoolEventCache({ pool, cacheKey, address, deploymentBlock, headBlock, waitMs, decode }) {
+    const serveCached = () => {
+      const cached = this[cacheKey];
+      if (!cached || cached.headBlock < headBlock) return undefined;
+      return cached.headBlock === headBlock
+        ? cached.events
+        : cached.events.filter((event) => event.blockNumber <= headBlock);
+    };
+    const ready = serveCached();
+    if (ready) return ready;
+
+    const budgetMs = waitMs ?? this.config?.poolEventHistoryWaitMs ?? DEFAULT_POOL_EVENT_HISTORY_WAIT_MS;
+    const deadline = Number.isFinite(budgetMs) ? Date.now() + budgetMs : Infinity;
+    for (;;) {
+      let scan = this.poolEventScans.get(cacheKey);
+      if (!scan) {
+        scan = this.#scanPoolEvents({ cacheKey, address, deploymentBlock, headBlock, decode })
+          .finally(() => {
+            if (this.poolEventScans.get(cacheKey) === scan) this.poolEventScans.delete(cacheKey);
+          });
+        // A reader that gives up leaves the scan running; nobody may be left
+        // to observe its rejection, which is already logged by the reader.
+        scan.catch(() => {});
+        this.poolEventScans.set(cacheKey, scan);
+      }
+      const remainingMs = deadline === Infinity ? Infinity : deadline - Date.now();
+      await awaitWithin(scan, remainingMs, () => Object.assign(
+        new Error(`${pool} event history is still warming (through block ${this[cacheKey]?.headBlock ?? "none"} of ${headBlock}).`),
+        {
+          reason: POOL_EVENT_HISTORY_WARMING_REASON,
+          pool,
+          scannedThroughBlock: this[cacheKey]?.headBlock ?? null,
+          headBlock,
+          waitMs: budgetMs
+        }
+      ));
+      const served = serveCached();
+      if (served) return served;
+      // The scan we joined targeted an older head; extend again from its
+      // checkpoint (an incremental read of the blocks minted since).
+    }
+  }
+
+  async #scanPoolEvents({ cacheKey, address, deploymentBlock, headBlock, decode }) {
+    const chunkBlocks = positiveIntegerOr(this.config?.poolEventLogChunkBlocks, DEFAULT_POOL_EVENT_LOG_CHUNK_BLOCKS);
+    const concurrency = positiveIntegerOr(this.config?.poolEventScanConcurrency, DEFAULT_POOL_EVENT_SCAN_CONCURRENCY);
+    const cached = this[cacheKey];
+    const canExtend = cached && cached.headBlock >= deploymentBlock && cached.headBlock < headBlock;
+    const events = canExtend ? [...cached.events] : [];
+    let from = canExtend ? cached.headBlock + 1 : deploymentBlock;
+    while (from <= headBlock) {
+      const ranges = [];
+      while (ranges.length < concurrency && from <= headBlock) {
+        const toBlock = Math.min(headBlock, from + chunkBlocks - 1);
+        ranges.push({ fromBlock: from, toBlock });
+        from = toBlock + 1;
+      }
+      const logs = await this.#readPoolLogWave(address, ranges);
+      events.push(...await decode(logs, events));
+      events.sort((left, right) => left.blockNumber - right.blockNumber || left.logIndex - right.logIndex);
+      this[cacheKey] = { headBlock: ranges.at(-1).toBlock, events };
+    }
+    if (!this[cacheKey] || this[cacheKey].headBlock < headBlock) this[cacheKey] = { headBlock, events };
+    return events;
+  }
+
+  async #readPoolLogWave(address, ranges) {
+    try {
+      const perRange = await Promise.all(ranges.map((range) => this.provider.getLogs({ address, ...range })));
+      return perRange.flat();
+    } catch (error) {
+      if (ranges.length === 1) throw error;
+      // JsonRpcProvider coalesces the wave into one batch, and a slow gateway
+      // can time that batch out while single-range reads still fit inside
+      // RPC_REQUEST_TIMEOUT_MS. Re-read this wave one range at a time before
+      // giving up; a genuinely dead RPC fails here too, just later.
+      this.logger?.warn?.(
+        { address, fromBlock: ranges[0].fromBlock, toBlock: ranges.at(-1).toBlock, ranges: ranges.length, error: redactProviderError(error) },
+        "pool_event_scan.wave_failed_retrying_sequentially"
+      );
+      const logs = [];
+      for (const range of ranges) logs.push(...await this.provider.getLogs({ address, ...range }));
+      return logs;
+    }
+  }
+
+  /**
+   * Start the vesting history scans at boot so the first request after a
+   * backend recreate joins a scan already under way instead of paying the
+   * whole cold read inside its own wait budget. Returns immediately; the
+   * outcome is logged.
+   */
+  warmPoolEventCaches() {
+    if (!this.provider) return { started: [], reason: "gateway_disabled" };
+    const scans = [];
+    if (this.config?.depositPoolV2Address ?? this.config?.depositPoolAddress) {
+      scans.push(["depositPool", () => this.readDepositPoolPrincipalEvents({ waitMs: Infinity })]);
+    }
+    if (this.config?.creditPoolAddress) {
+      scans.push(["creditPool", () => this.readCreditPoolLoanEvents({ waitMs: Infinity })]);
+    }
+    const started = [];
+    for (const [pool, read] of scans) {
+      const startedAt = this.now();
+      let scan;
+      try {
+        scan = read();
+      } catch (error) {
+        this.logger?.warn?.({ pool, error: redactProviderError(error) }, "pool_event_cache.warm_failed");
+        continue;
+      }
+      started.push(pool);
+      scan.then(
+        (events) => this.logger?.info?.(
+          { pool, events: events.length, durationMs: this.now() - startedAt },
+          "pool_event_cache.warmed"
+        ),
+        (error) => this.logger?.warn?.(
+          { pool, durationMs: this.now() - startedAt, error: redactProviderError(error) },
+          "pool_event_cache.warm_failed"
+        )
+      );
+    }
+    return { started };
   }
 
   async readCreditPosition(wallet) {
@@ -1183,6 +1329,9 @@ export class BlockchainGateway {
         : 0n;
       return {
         available: Boolean(vested.available),
+        // An unavailable position is fail-closed; the reason distinguishes a
+        // history still warming after a recreate from a failed vesting read.
+        ...(vested.available ? {} : { reason: String(vested.error ?? "deposit_pool_vesting_read_failed") }),
         outstandingDebtRaw: this.toRawString(outstandingDebt),
         depositedSharesRaw: this.toRawString(depositedShares),
         pledgedSharesRaw: this.toRawString(pledgedShares),
@@ -4072,4 +4221,33 @@ function createSigner(config, provider, { logger = undefined } = {}) {
     return undefined;
   }
   return new Wallet(config.signerPrivateKey, provider);
+}
+
+function positiveIntegerOr(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/**
+ * Resolve with `promise` unless `waitMs` elapses first, in which case reject
+ * with `onTimeout()`. The underlying promise is left running; a rejection it
+ * produces after the deadline is the scan owner's to log, not an unhandled one.
+ */
+function awaitWithin(promise, waitMs, onTimeout) {
+  if (!Number.isFinite(waitMs)) return promise;
+  if (waitMs <= 0) return Promise.reject(onTimeout());
+  let timer;
+  const settled = promise.then(
+    (value) => { clearTimeout(timer); return value; },
+    (error) => { clearTimeout(timer); throw error; }
+  );
+  settled.catch(() => {});
+  const expiry = new Promise((_, reject) => {
+    // Keep the budget timer referenced: it is cleared once the promise settles and
+    // fires within waitMs otherwise, so it never holds the process open past the
+    // budget. Unref'd, a caller waiting only on the budget lets the event loop
+    // drain and Node 22's test runner cancels the run as a pending promise.
+    timer = setTimeout(() => reject(onTimeout()), waitMs);
+  });
+  return Promise.race([settled, expiry]);
 }

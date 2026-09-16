@@ -517,6 +517,16 @@ export async function createPlatformRuntime() {
     describeMutationBackendStartup(mutationBackendConfig, gateway),
     "mutation_backend.configured"
   );
+  // Vesting history is rebuilt from eth_getLogs and every backend recreate
+  // starts cold. Kick the scans off now, off the request path, so the deploy's
+  // hosted smoke (and the first worker) joins a scan already under way instead
+  // of paying the whole cold read inside its own wait budget. Never blocks
+  // boot; the outcome is logged as pool_event_cache.warmed / warm_failed.
+  initStep("warm-pool-event-caches", logger, () => {
+    const warm = gateway.warmPoolEventCaches?.();
+    if (warm?.started?.length) logger.info({ pools: warm.started }, "pool_event_cache.warming");
+    return warm;
+  });
   // Refuse to boot a real on-chain broker behind permissive auth (pre-audit
   // #7). Permissive mode accepts an unauthenticated `?wallet=` and resolves
   // that wallet's roles with no signature — harmless against a disabled

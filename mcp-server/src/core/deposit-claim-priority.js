@@ -209,6 +209,9 @@ export class DepositClaimPriorityPolicy {
       thresholdRaw: this.config.thresholdRaw.toString(),
       thresholdUsdc: this.config.thresholdUsdc,
       vestingAvailable: capacity?.vestingAvailable !== false,
+      ...(capacity?.vestingAvailable === false
+        ? { vestingUnavailableReason: String(capacity?.vestingUnavailableReason ?? "deposit_pool_vesting_read_failed") }
+        : {}),
       outstandingCreditRaw: outstandingCreditRaw.toString(),
       creditPositionAvailable: creditReadSufficient,
       depositQualified,

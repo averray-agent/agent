@@ -1628,3 +1628,38 @@ test("deploy-time re-reads are single, bounded, and never cover indexer_stalled"
     assert.doesNotMatch(site, /^\s*(while|until|for)\b/mu, `${start} has no retry loop`);
   }
 });
+
+test("the CreditPool door clause passes the real door's answer while its vesting history is still warming", async () => {
+  // A backend the deploy has just recreated answers /credit before it has
+  // rebuilt the DepositPool/CreditPool event history from eth_getLogs (the
+  // 2026-09-16 smoke failures: three 20 s timeouts while that read ran). The
+  // door now answers within POOL_EVENT_HISTORY_WAIT_MS with an honest degraded
+  // payload. That payload is produced here by the door itself against a
+  // gateway whose log reads are held open, then served through this harness to
+  // the unmodified smoke script. The harness pins its own chain identity
+  // (chainId 1 and its fixture CreditPool address); every other byte is the door's.
+  const { countingProvider, creditReadFixture } = await import("../../mcp-server/src/services/fixtures/credit-read-fixture.js");
+  const provider = countingProvider();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const rawGetLogs = provider.getLogs.bind(provider);
+  provider.getLogs = async (filter) => { await gate; return rawGetLogs(filter); };
+  const fixture = creditReadFixture({ provider });
+  fixture.gateway.config.poolEventHistoryWaitMs = 20;
+  const { status, body } = await fixture.request();
+  release();
+  await Promise.all(fixture.gateway.poolEventScans.values());
+  assert.equal(status, 200);
+  assert.equal(body.wallet.vestingAvailable, false);
+  assert.equal(body.wallet.vestingUnavailableReason, "deposit_history_warming");
+
+  const result = await runHostedStackFixture({
+    autoVerifierOk: true,
+    warnings: [],
+    creditConfigured: true,
+    credit: { ...body, chainId: 1, creditPool: `0x${"55".repeat(20)}` }
+  });
+  assert.equal(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /Checking CreditPool door/u);
+  assert.equal(result.requestCounts["/credit"], 1, "the door answered the clause on its first read");
+});
