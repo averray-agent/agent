@@ -10,6 +10,7 @@ import { canonicalizeContent } from "../core/canonical-content.js";
 import { ConfigError, ConflictError, NotFoundError, ValidationError } from "../core/errors.js";
 import { decimalToBaseUnits, formatBaseUnits } from "../core/platform-service-helpers.js";
 import { NON_YIELD_TIER_PERKS_ENABLED_ENV } from "../core/tier-perks-non-yield.js";
+import { measuredVenueRate, projectTermYield, POOL_V22_RATE_STATE, POOL_V22_ROUND_TRIP_FRICTION_RAW } from "./pool-v22-economics.js";
 
 export const LOCKED_TIERS_ENABLED_ENV = "LOCKED_TIERS_ENABLED";
 export const LOCKED_TIER_PER_WALLET_CAP_USDC_ENV = "LOCKED_TIER_PER_WALLET_CAP_USDC";
@@ -20,7 +21,7 @@ export const LOCKED_TIER_COHORT_CAP_CEILING_RAW = 1_000_000_000n;
 export const CREDIT_READ_GRACE_DEFAULT_MS = 5 * 60 * 1_000;
 export const CREDIT_READ_GRACE_CEILING_MS = 15 * 60 * 1_000;
 export const LOCKED_TIER_MINIMUM_COHORT_RAW = 15_000_000n;
-export const LOCKED_TIER_CYCLE_FRICTION_RAW = 60_000n;
+export const LOCKED_TIER_CYCLE_FRICTION_RAW = POOL_V22_ROUND_TRIP_FRICTION_RAW;
 export const LOCKED_TIER_YIELD_MARGIN_MULTIPLE = 2n;
 export const LOCKED_TIER_YIELD_INACTIVE_TEXT =
   "yield inactive — pool below activation threshold.";
@@ -128,6 +129,7 @@ export function loadLockedTierConfig(env = process.env, { logger = console } = {
   }
   return Object.freeze({
     enabled,
+    onChainCommitments: env.POOL_V22_CEREMONY_COMPLETE === "1",
     tierPerksEnabled,
     perWalletCapRaw,
     perWalletCapUsdc: formatBaseUnits(perWalletCapRaw, ASSET_DECIMALS),
@@ -138,33 +140,28 @@ export function loadLockedTierConfig(env = process.env, { logger = console } = {
 }
 
 /**
- * Pure activation law. Deliberately accepts only the lock-ledger entries and
- * the observation time: there is no environment switch, operator override,
- * or caller-supplied cycle/rate.
- *
- * The projection is the ratified epoch-2 observation (0.009 USDC earned by
- * 9.5 USDC in seven days), extended over the shortest whole remaining term
- * in the active cohort. The second gate requires that projection to cover
- * twice the measured 0.060-USDC round trip.
+ * One measured round trip per shortest remaining term. No guessed rate, APY
+ * environment switch, or gate override. The operator's approved evidence
+ * record is absent until the measurement ambiguity has been resolved.
  */
-export function lockedTierActivationGate(entries, observedAt = new Date()) {
+export function lockedTierActivationGate(entries, observedAt = new Date(), { measuredRate } = {}) {
   const cohort = activationCohort(entries, observedAt);
   const lockedRaw = cohort.totalLockedRaw;
   const cycleDaysRaw = BigInt(cohort.cycleDays ?? 0);
-  const projectedCycleYieldRaw = lockedRaw * 9_000n * cycleDaysRaw
-    / (9_500_000n * 7n);
+  const rate = measuredVenueRate(measuredRate);
+  const projectedCycleYieldRaw = projectTermYield(lockedRaw, cycleDaysRaw * 86_400n, measuredRate) ?? 0n;
   const requiredProjectedYieldRaw = LOCKED_TIER_CYCLE_FRICTION_RAW
     * LOCKED_TIER_YIELD_MARGIN_MULTIPLE;
   const minimumMet = lockedRaw >= LOCKED_TIER_MINIMUM_COHORT_RAW;
   const economicsMet = projectedCycleYieldRaw >= requiredProjectedYieldRaw;
   const compositionReadable = cohort.unreadableLockIds.length === 0;
   const hasActiveLocks = cohort.activeLockCount > 0;
-  const open = compositionReadable && hasActiveLocks && minimumMet && economicsMet;
+  const open = Boolean(rate) && compositionReadable && hasActiveLocks && minimumMet && economicsMet;
   const blockers = [
     ...(compositionReadable ? [] : ["active_lock_composition_unreadable"]),
     ...(hasActiveLocks ? [] : ["no_active_locks"]),
     ...(minimumMet ? [] : ["locked_cohort_below_minimum"]),
-    ...(economicsMet ? [] : ["projected_cycle_yield_below_2x_friction"])
+    ...(!rate ? ["venue_rate_unmeasured"] : economicsMet ? [] : ["projected_cycle_yield_below_2x_friction"])
   ];
   return {
     open,
@@ -185,14 +182,16 @@ export function lockedTierActivationGate(entries, observedAt = new Date()) {
         ...(compositionReadable ? {} : { unreadableLockIds: cohort.unreadableLockIds })
       },
       projectedCycleYield: amount(projectedCycleYieldRaw),
-      basis: {
-        observedPrincipal: amount(9_500_000n),
-        observedYield: amount(9_000n),
-        observedDays: 7
-      }
+      basis: rate ? {
+        observedPrincipal: amount(rate.principalRaw),
+        observedYield: amount(rate.yieldRaw),
+        observedSeconds: rate.elapsedSeconds.toString(),
+        evidence: rate.evidence
+      } : null
     },
     friction: {
       cycleFriction: amount(LOCKED_TIER_CYCLE_FRICTION_RAW),
+      roundTripsPerTerm: 1,
       marginMultiple: Number(LOCKED_TIER_YIELD_MARGIN_MULTIPLE),
       requiredProjectedYield: amount(requiredProjectedYieldRaw)
     },
@@ -208,19 +207,29 @@ export function lockedTierActivationGate(entries, observedAt = new Date()) {
 export function lockedTierActivationState(
   entries,
   observedAt = new Date(),
-  { deployedPrincipalRaw = undefined } = {}
+  { deployedPrincipalRaw = undefined, measuredRate, positionEntries = entries } = {}
 ) {
-  const activationGate = lockedTierActivationGate(entries, observedAt);
+  const activationGate = lockedTierActivationGate(entries, observedAt, { measuredRate });
   return {
     ...activationGate,
     yieldStatusText: lockedTierYieldStatusText({
       gateOpen: activationGate.open,
-      deployedPrincipalRaw
+      deployedPrincipalRaw,
+      positionEntries
     })
   };
 }
 
-export function lockedTierYieldStatusText({ gateOpen, deployedPrincipalRaw } = {}) {
+export function lockedTierYieldStatusText({ gateOpen, deployedPrincipalRaw, positionEntries = [] } = {}) {
+  const allocated = positionEntries.filter((entry) => BigInt(entry.poolV22?.sharesRaw ?? "0") > 0n);
+  if (allocated.length) {
+    if (allocated.some((entry) => entry.poolV22.reconciliation !== "matched")) {
+      return "Locked allocation reconciliation is unavailable or mismatched; no current NAV participation is claimed. Principal remains pending reconciliation.";
+    }
+    return allocated.some((entry) => BigInt(entry.poolV22.poolSharesRaw ?? "0") > 0n)
+      ? "Locked capital holds a shared v2.2 pool position: venue gains and losses are shared pro-rata by all pool shares, including Flex. A position is not proof of current venue earnings; read /pool for deployment truth."
+      : "Locked capital is allocated to adapter float, not pool shares; it has no pool NAV share yet.";
+  }
   if (!gateOpen) return LOCKED_TIER_YIELD_INACTIVE_TEXT;
   const deployedPrincipal = observedRaw(deployedPrincipalRaw);
   if (deployedPrincipal === null) return LOCKED_TIER_YIELD_UNOBSERVED_TEXT;
@@ -314,6 +323,7 @@ export class LockedTierService {
     const globalActiveRaw = sumActive(allEntries);
     this.#assertPoolCapacity({ requested, activeRaw, globalActiveRaw, pool });
     const gate = lockedTierActivationState(activeLocks(allEntries), this.now(), {
+      measuredRate: await this.readMeasuredVenueRate(),
       deployedPrincipalRaw: pool.deployedPrincipalRaw
     });
     const issuedAt = this.now();
@@ -333,6 +343,10 @@ export class LockedTierService {
       forfeitTermsHash: forfeitTermsHashForTier(tier),
       earlyExitTerms,
       riskSentence,
+      ...(this.config.onChainCommitments && tier !== "t7" ? {
+        commitmentConsentUntil: new Date(issuedAt.getTime() + tierDefinition.termDays * DAY_MS).toISOString(),
+        onChainCommitmentTerms: "Allocation may commit principal on chain until the signed commitmentConsentUntil date. Early exit waits for that commitment, then the pool's 7-day notice and any venue recall; no principal haircut."
+      } : {}),
       publicProfileOptIn,
       fundsMovement: "none — the ledger encumbers existing AAC liquid",
       activationGate: gate,
@@ -467,6 +481,7 @@ export class LockedTierService {
         lockedAt.getTime() + Number(terms.termDays) * 24 * 60 * 60 * 1_000
       ).toISOString(),
       consentRef: termsHash,
+      ...(terms.commitmentConsentUntil ? { commitmentConsentUntil: terms.commitmentConsentUntil } : {}),
       status: "active",
       publicProfileOptIn: terms.publicProfileOptIn === true
     };
@@ -522,7 +537,8 @@ export class LockedTierService {
       status: "exiting",
       exitRequestedAt: exitRequestedAt.toISOString(),
       releaseAt: new Date(
-        exitRequestedAt.getTime() + this.vestingHours * 60 * 60 * 1_000
+        Math.max(exitRequestedAt.getTime() + this.vestingHours * 60 * 60 * 1_000,
+          Number(entry.poolV22?.committedUntil ?? 0) * 1000 + (BigInt(entry.poolV22?.sharesRaw ?? "0") > 0n ? 7 * DAY_MS : 0))
       ).toISOString(),
       forfeiture: {
         yieldShare: entry.tier === "t7" ? "not_applicable" : "current_period",
@@ -539,7 +555,9 @@ export class LockedTierService {
         tier: "flex",
         perks: "forfeited immediately",
         yieldShare: entry.tier === "t7" ? "not_applicable" : "current period forfeited",
-        principal: "returns through the normal withdrawal path after the standard vesting delay",
+        principal: BigInt(entry.poolV22?.sharesRaw ?? "0") > 0n
+          ? "waits for the on-chain commitment, then pool notice and recall; the date is an earliest ETA, not a liquidity guarantee"
+          : "returns through the normal withdrawal path after the standard vesting delay",
         releaseAt: updated.releaseAt,
         principalHaircutRaw: "0",
         penaltyFeeRaw: "0"
@@ -567,7 +585,9 @@ export class LockedTierService {
     });
     const allEntries = await this.#currentEntries();
     const activationGate = lockedTierActivationState(activeLocks(allEntries), this.now(), {
-      deployedPrincipalRaw
+      measuredRate: await this.readMeasuredVenueRate(),
+      deployedPrincipalRaw,
+      positionEntries: entries
     });
     return {
       enabledForNewLocks: this.config.enabled,
@@ -598,11 +618,27 @@ export class LockedTierService {
     return { tier: state.tier, rank: state.priorityRank, perksActive: state.perksActive };
   }
 
+  async readMeasuredVenueRate() {
+    try { return await this.stateStore.getServiceState(POOL_V22_RATE_STATE); }
+    catch { return null; }
+  }
+
+  async allocationConsentCovers(entry) {
+    if (!entry.commitmentConsentUntil || entry.tier === "t7" || entry.status !== "active") return false;
+    const consent = await this.stateStore.getContent(entry.consentRef).catch(() => null);
+    if (!consent || consent.revokedAt || consent.revoked === true
+      || consent.terms?.commitmentConsentUntil !== entry.commitmentConsentUntil
+      || !consent.terms?.onChainCommitmentTerms) return false;
+    return this.#consentCoversEntry(entry).catch(() => false);
+  }
+
   async getPoolTelemetry(walletInput = undefined, { deployedPrincipalRaw = undefined } = {}) {
     const entries = await this.#currentEntries();
     const cohort = yieldEligibleLocks(entries);
     const activationGate = lockedTierActivationState(cohort, this.now(), {
-      deployedPrincipalRaw
+      measuredRate: await this.readMeasuredVenueRate(),
+      deployedPrincipalRaw,
+      positionEntries: entries
     });
     return {
       enabledForNewLocks: this.config.enabled,
@@ -702,9 +738,47 @@ export class LockedTierService {
 
   async #currentEntries(wallet = undefined) {
     const entries = await this.stateStore.listLockedTierEntries(wallet?.toLowerCase());
+    // Reconcile on EVERY lock read. Chain unavailability never becomes release.
+    const inPool = entries.filter((e) => BigInt(e.poolV22?.sharesRaw ?? "0") > 0n);
+    if (inPool.length) {
+      try {
+        if (!this.poolV22Chain) throw new Error("commitment_reader_unavailable");
+        const snapshot = await this.poolV22Chain.snapshot(entries.map((e) => e.wallet));
+        for (const entry of inPool) {
+          const account = snapshot.accounts[entry.wallet.toLowerCase()];
+          const until = snapshot.committedUntil;
+          const consentUntil = Math.floor(Date.parse(entry.commitmentConsentUntil) / 1000);
+          const walletEntries = entries.filter((e) => e.wallet.toLowerCase() === entry.wallet.toLowerCase());
+          const expectedShares = walletEntries.reduce((sum, e) => sum + BigInt(e.poolV22?.sharesRaw ?? "0"), 0n);
+          const allocatedAssets = BigInt(snapshot.totalSharesRaw) > 0n
+            ? BigInt(entry.poolV22.sharesRaw) * BigInt(snapshot.totalAssetsRaw) / BigInt(snapshot.totalSharesRaw) : 0n;
+          const shortfall = BigInt(account.liquidRaw) + BigInt(account.strategyAllocatedRaw) < sumEncumbered(walletEntries)
+            || BigInt(account.sharesRaw) !== expectedShares;
+          const termMismatch = !Number.isFinite(consentUntil) || until > consentUntil;
+          entry.poolV22 = { ...entry.poolV22, committedUntil: until, deployedRaw: String(allocatedAssets),
+            poolSharesRaw: snapshot.poolSharesRaw,
+            idleRaw: "0", reconciliation: shortfall || termMismatch ? "mismatch" : "matched",
+            commitmentText: until > snapshot.now ? `Principal is committed on chain until ${new Date(until * 1000).toISOString()}.`
+              : "On-chain commitment has expired; pool notice and recall may still be required." };
+          if (shortfall || termMismatch) {
+            entry.status = "exiting";
+            entry.releaseAt = new Date(Math.max(snapshot.now, until) * 1000 + 7 * DAY_MS).toISOString();
+            entry.forfeiture = { perks: "immediate", yieldShare: "current_period", principalHaircutRaw: "0" };
+            await this.stateStore.upsertServiceState("pool-v22:reconciliation-alarm", {
+              ok: false, lockId: entry.id, reason: shortfall ? "locked_principal_shortfall" : "commitment_exceeds_consent"
+            });
+            await this.stateStore.upsertLockedTierEntry(entry);
+          }
+        }
+      } catch {
+        for (const entry of inPool) entry.poolV22 = { ...entry.poolV22, reconciliation: "unavailable",
+          reason: "pool_v22_commitment_unreadable", commitmentText: "On-chain commitment is unavailable; principal release is pending reconciliation." };
+      }
+    }
     const nowMs = this.now().getTime();
     const matured = [];
     for (const entry of entries) {
+      if (BigInt(entry.poolV22?.sharesRaw ?? "0") > 0n) { matured.push(entry); continue; }
       const termComplete = entry.status === "active" && Date.parse(entry.expiresAt) <= nowMs;
       const exitComplete = entry.status === "exiting" && Date.parse(entry.releaseAt) <= nowMs;
       if (!termComplete && !exitComplete) {
@@ -855,6 +929,12 @@ export class LockedTierService {
       || (tier !== "t90" && terms.publicProfileOptIn === true)
       || !Number.isFinite(issuedAt)
       || !Number.isFinite(quoteExpiresAt)
+      || (terms.commitmentConsentUntil !== undefined && (
+        !Number.isFinite(Date.parse(terms.commitmentConsentUntil))
+        || Date.parse(terms.commitmentConsentUntil) > issuedAt + Number(terms.termDays) * DAY_MS
+        || Date.parse(terms.commitmentConsentUntil) <= quoteExpiresAt
+        || terms.onChainCommitmentTerms !== "Allocation may commit principal on chain until the signed commitmentConsentUntil date. Early exit waits for that commitment, then the pool's 7-day notice and any venue recall; no principal haircut."
+      ))
       || quoteExpiresAt - issuedAt !== QUOTE_TTL_MS
       || consentNonceValue(terms.consentNonce) !== terms.consentNonce
     ) {

@@ -19,7 +19,9 @@ function sameAddress(left, right) {
 
 function poolIdentity(payload, manifest) {
   const address = evmAddress(payload?.pool);
-  const generation = sameAddress(address, manifest?.depositPoolV21)
+  const generation = sameAddress(address, manifest?.depositPoolV22)
+    ? "Live v2.2"
+    : sameAddress(address, manifest?.depositPoolV21)
     ? "Live v2.1"
     : sameAddress(address, manifest?.legacyDepositPoolV2)
       ? "Legacy v2"
@@ -75,6 +77,7 @@ export function buildDepositPoolSurface(input, poolGenerationManifest = {}) {
       reason: text(payload?.reason),
       disclosure: null,
       transition: null,
+      commitments: null,
       identity: { generation: null, address: null },
       facts: [],
       yield: null,
@@ -95,6 +98,14 @@ export function buildDepositPoolSurface(input, poolGenerationManifest = {}) {
     available: true,
     disclosure,
     transition: transitionStatement(payload),
+    commitments: {
+      status: text(payload.commitments?.status),
+      disclosure: text(payload.commitmentDisclosure),
+      sharedDisclosure: text(payload.sharedCommitmentDisclosure),
+      rows: [7, 30, 90].map((days) => [`${days}-day deployable`, amountWithUnit(payload.commitments?.deployable?.[days])]),
+      tiers: Array.isArray(payload.commitments?.tiers) ? payload.commitments.tiers.map((tier) =>
+        [`${tier.days}-day committed (conservative)`, amountWithUnit(tier.assets)]) : []
+    },
     identity: poolIdentity(payload, poolGenerationManifest),
     facts: [
       { label: "Total assets", value: amountWithUnit(payload.totalAssets) },

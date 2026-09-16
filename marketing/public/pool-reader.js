@@ -78,6 +78,9 @@
         ? text(source.capitalSignal.benefitsText, "pool.capitalSignal.benefitsText")
         : "Live vesting and claim-access terms are unavailable. Read GET /pool before acting.",
       withdrawal: text(record(source.withdrawal, "pool.withdrawal").note, "pool.withdrawal.note"),
+      commitmentDisclosure: typeof source.commitmentDisclosure === "string" ? text(source.commitmentDisclosure, "pool.commitmentDisclosure") : "Commitment disclosure unavailable; see GET /pool.",
+      sharedCommitmentDisclosure: typeof source.sharedCommitmentDisclosure === "string" ? text(source.sharedCommitmentDisclosure, "pool.sharedCommitmentDisclosure") : "Shared commitment terms unavailable; see GET /pool.",
+      migration: typeof source.transition?.statement === "string" ? text(source.transition.statement, "pool.transition.statement") : "Migration state unavailable; see GET /pool.",
       venue: {
         status: text(venue.status, "pool.venueMark.status"),
         statement: text(venue.statement, "pool.venueMark.statement"),
@@ -175,6 +178,9 @@
     setText("[data-pool-venue-statement]", value.venue.statement);
     setText("[data-pool-capital-signal]", value.capitalSignal);
     setText("[data-pool-withdrawal]", value.withdrawal);
+    setText("[data-pool-commitment-disclosure]", value.commitmentDisclosure);
+    setText("[data-pool-shared-commitment]", value.sharedCommitmentDisclosure);
+    setText("[data-pool-migration]", value.migration);
     root.dataset.poolPageState = "live";
     var actions = root.querySelector("[data-pool-cta]");
     if (actions) actions.hidden = value.venue.depositsBlocked;

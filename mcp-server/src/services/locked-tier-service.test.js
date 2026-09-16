@@ -24,6 +24,13 @@ const SIGNER = new Wallet(`0x${"11".repeat(32)}`);
 const START = new Date("2026-08-24T10:00:00.000Z");
 const USDC = "0x1111111111111111111111111111111111111111";
 const DAY_MS = 24 * 60 * 60 * 1_000;
+// Synthetic fixture ONLY: production has no approved measurement by default.
+const MEASURED_RATE = { approved: true, evidence: "test-fixture:not-a-production-rate",
+  principalRaw: "9500000", yieldRaw: "9000", elapsedSeconds: "604800" };
+const measuredGate = (entries, at, options = {}) =>
+  lockedTierActivationGate(entries, at, { ...options, measuredRate: MEASURED_RATE });
+const measuredState = (entries, at, options = {}) =>
+  lockedTierActivationState(entries, at, { ...options, measuredRate: MEASURED_RATE });
 
 function activationLock({
   idByte = "aa",
@@ -78,6 +85,7 @@ function harness({
     vestingHours: 48,
     now: () => new Date(clock)
   });
+  service.readMeasuredVenueRate = async () => MEASURED_RATE;
   return {
     service,
     stateStore,
@@ -398,7 +406,7 @@ test("per-wallet cap and existing pool cap both refuse excess lock creation", as
   );
 });
 
-test("activation-gate-t90-89-days: today's 25-USDC T90 cohort opens on its true remaining cycle", async () => {
+test("activation-gate-t90-89-days: a measured 25-USDC T90 fixture opens on its true remaining cycle", async () => {
   const h = harness();
   await seedActiveT90(h);
   h.setNow(new Date(START.getTime() + DAY_MS));
@@ -412,9 +420,10 @@ test("activation-gate-t90-89-days: today's 25-USDC T90 cohort opens on its true 
   assert.deepEqual(gate.projection.basis, {
     observedPrincipal: { raw: "9500000", decimals: 6 },
     observedYield: { raw: "9000", decimals: 6 },
-    observedDays: 7
+    observedSeconds: "604800",
+    evidence: MEASURED_RATE.evidence
   });
-  assert.equal(gate.friction.cycleFriction.raw, "60000");
+  assert.equal(gate.friction.cycleFriction.raw, "51765");
   assert.equal(gate.friction.marginMultiple, 2);
   assert.equal(gate.open, true);
   assert.deepEqual(gate.blockers, []);
@@ -422,10 +431,10 @@ test("activation-gate-t90-89-days: today's 25-USDC T90 cohort opens on its true 
 
 test("gate-open locked yield text is bound only to deployed principal", () => {
   const cohort = [activationLock()];
-  const zeroDeployed = lockedTierActivationState(cohort, START, {
+  const zeroDeployed = measuredState(cohort, START, {
     deployedPrincipalRaw: "0"
   });
-  const positiveDeployed = lockedTierActivationState(cohort, START, {
+  const positiveDeployed = measuredState(cohort, START, {
     deployedPrincipalRaw: "1"
   });
   const { yieldStatusText: zeroText, ...zeroGate } = zeroDeployed;
@@ -445,7 +454,7 @@ test("gate-open locked yield text is bound only to deployed principal", () => {
 });
 
 test("activation-gate-near-expiry: ten remaining days close the gate on cycle economics", () => {
-  const gate = lockedTierActivationGate([activationLock({ remainingDays: 10 })], START);
+  const gate = measuredGate([activationLock({ remainingDays: 10 })], START);
   assert.equal(gate.projection.cycleDays, 10);
   assert.equal(gate.projection.projectedCycleYield.raw, "33834");
   assert.equal(gate.open, false);
@@ -453,7 +462,7 @@ test("activation-gate-near-expiry: ten remaining days close the gate on cycle ec
 });
 
 test("activation-gate-short-lock: a new T30 sets the whole cohort's shorter cycle", () => {
-  const gate = lockedTierActivationGate([
+  const gate = measuredGate([
     activationLock({ idByte: "90", remainingDays: 89 }),
     activationLock({ idByte: "30", amountRaw: "5000000", remainingDays: 30 })
   ], START);
@@ -465,7 +474,7 @@ test("activation-gate-short-lock: a new T30 sets the whole cohort's shorter cycl
 });
 
 test("activation-gate-floor-independent: a long cycle cannot open a sub-15-USDC cohort", () => {
-  const gate = lockedTierActivationGate([
+  const gate = measuredGate([
     activationLock({ amountRaw: "14999999", remainingDays: 89 })
   ], START);
   assert.equal(gate.projection.cycleDays, 89);
@@ -486,7 +495,7 @@ test("activation-gate-cannot-be-config-opened: config or arguments cannot overri
   assert.equal(Object.hasOwn(config, "activationGateOpen"), false);
   assert.equal(Object.hasOwn(config, "cycleDays"), false);
   assert.equal(Object.hasOwn(config, "yieldMarginMultiple"), false);
-  const gate = lockedTierActivationGate(
+  const gate = measuredGate(
     [activationLock({ remainingDays: 10 })],
     START,
     { cycleDays: 365, yieldMarginMultiple: 1 }
@@ -499,7 +508,7 @@ test("activation-gate-cannot-be-config-opened: config or arguments cannot overri
 
 test("activation-gate-unreadable-composition: malformed active expiry fails closed by name", () => {
   const lock = activationLock({ expiresAt: "not-a-timestamp" });
-  const gate = lockedTierActivationGate([lock], START);
+  const gate = measuredGate([lock], START);
   assert.equal(gate.open, false);
   assert.equal(gate.projection.cycleDays, null);
   assert.equal(gate.projection.projectedCycleYield.raw, "0");
@@ -508,7 +517,7 @@ test("activation-gate-unreadable-composition: malformed active expiry fails clos
 });
 
 test("activation-gate-zero-active-locks: empty composition closes without NaN or division errors", () => {
-  const gate = lockedTierActivationGate([], START);
+  const gate = measuredGate([], START);
   assert.equal(gate.open, false);
   assert.equal(gate.projection.cycleDays, 0);
   assert.equal(gate.projection.projectedCycleYield.raw, "0");
