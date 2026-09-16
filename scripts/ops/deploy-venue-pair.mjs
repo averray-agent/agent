@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Deploy the mutually-bound v2.1 Hydration lane and pool adapter.
+ * Deploy a mutually-bound v2.1 or explicitly targeted v2.2 Hydration pair.
  *
  * Read-only is the default. The only write mode is:
  *   --commit --use-kms --expected-signer 0x...
@@ -23,6 +23,7 @@ import {
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertDeploymentArtifact, deploymentProvenance } from "./ceremony-contract-evidence.mjs";
 
 import {
   DEFAULT_FINALITY_CONFIRMATIONS,
@@ -39,6 +40,7 @@ import {
 
 export const VENUE_PAIR_FINALITY_CONFIRMATIONS = DEFAULT_FINALITY_CONFIRMATIONS;
 export const VENUE_PAIR_STRATEGY_NAME = "AAC_IDLE_HYDRATION_V1";
+export const V22_VENUE_PAIR_STRATEGY_NAME = "AAC_COMMITTED_HYDRATION_V22";
 export const REFERENCE_STRATEGY_NAME = "HYDRATION_USDC_POOL_V1";
 export const REFERENCE_STRATEGY_ID =
   "0x485944524154494f4e5f555344435f504f4f4c5f563100000000000000000000";
@@ -98,6 +100,7 @@ function serialize(value) {
 export function parseArgs(argv) {
   const args = {
     profile: "mainnet",
+    target: "v21",
     artifacts: "out",
     expectedSigner: undefined,
     useKms: false,
@@ -112,6 +115,7 @@ export function parseArgs(argv) {
       return value;
     };
     if (arg === "--profile") args.profile = next();
+    else if (arg === "--target") args.target = next();
     else if (arg === "--artifacts") args.artifacts = next();
     else if (arg === "--expected-signer") args.expectedSigner = next();
     else if (arg === "--use-kms") args.useKms = true;
@@ -120,6 +124,7 @@ export function parseArgs(argv) {
     else if (arg === "--help" || arg === "-h") args.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
+  if (!["v21", "v22"].includes(args.target)) throw new Error("--target must be v21 or v22.");
   if (!args.help && !args.expectedSigner) {
     throw new Error("--expected-signer is mandatory in dry-run and commit modes.");
   }
@@ -141,8 +146,8 @@ export function deriveStrategyIdentity(name = VENUE_PAIR_STRATEGY_NAME) {
   if (decodeBytes32String(referenceDerived) !== REFERENCE_STRATEGY_NAME) {
     throw new Error("Known live strategy id does not round-trip to its ASCII name.");
   }
-  if (name !== VENUE_PAIR_STRATEGY_NAME) {
-    throw new Error(`Strategy name must be exactly ${VENUE_PAIR_STRATEGY_NAME}.`);
+  if (![VENUE_PAIR_STRATEGY_NAME, V22_VENUE_PAIR_STRATEGY_NAME].includes(name)) {
+    throw new Error(`Strategy name must be exactly ${VENUE_PAIR_STRATEGY_NAME} or ${V22_VENUE_PAIR_STRATEGY_NAME}.`);
   }
   const id = encodeBytes32String(name);
   const roundTrip = decodeBytes32String(id);
@@ -160,7 +165,22 @@ export function deriveStrategyIdentity(name = VENUE_PAIR_STRATEGY_NAME) {
   };
 }
 
-export function assertManifestBindings(manifest) {
+export function resolveVenuePairTarget(manifest, target = "v21") {
+  if (!["v21", "v22"].includes(target)) throw new Error("--target must be v21 or v22.");
+  const suffix = target === "v22" ? "V22" : "V21";
+  const poolKey = `depositPool${suffix}`;
+  const pool = checkedAddress(`contracts.${poolKey}`, manifest?.contracts?.[poolKey]);
+  if (pool === ZeroAddress || sameAddress(pool, VENUE_PAIR_BINDINGS.legacyPool)
+    || (target === "v22" && sameAddress(pool, VENUE_PAIR_BINDINGS.pool))) {
+    throw new Error(`contracts.${poolKey} must name its own nonzero pool; another generation is refused.`);
+  }
+  if (target === "v21") assertV21Pool(pool);
+  return { name: target, pool, poolKey, laneKey: `depositPoolLane${suffix}`,
+    adapterKey: `hydrationDepositPoolAdapter${suffix}`,
+    strategyName: target === "v22" ? V22_VENUE_PAIR_STRATEGY_NAME : VENUE_PAIR_STRATEGY_NAME };
+}
+
+export function assertManifestBindings(manifest, target = "v21") {
   if (manifest?.profile !== "mainnet") {
     throw new Error("This venue pair is a mainnet ceremony; --profile must resolve mainnet.");
   }
@@ -168,7 +188,6 @@ export function assertManifestBindings(manifest) {
     ["contracts.treasuryPolicy", manifest?.contracts?.treasuryPolicy, VENUE_PAIR_BINDINGS.policy],
     ["contracts.token", manifest?.contracts?.token, VENUE_PAIR_BINDINGS.asset],
     ["contracts.xcmWrapper", manifest?.contracts?.xcmWrapper, VENUE_PAIR_BINDINGS.wrapper],
-    ["contracts.depositPoolV2", manifest?.contracts?.depositPoolV2, VENUE_PAIR_BINDINGS.pool],
     ["contracts.depositPoolV21", manifest?.contracts?.depositPoolV21, VENUE_PAIR_BINDINGS.pool],
     ["contracts.legacyDepositPoolV2", manifest?.contracts?.legacyDepositPoolV2, VENUE_PAIR_BINDINGS.legacyPool],
   ];
@@ -177,10 +196,7 @@ export function assertManifestBindings(manifest) {
       throw new Error(`${label} is ${actual ?? "missing"}; expected ${expected}.`);
     }
   }
-  if (sameAddress(manifest.contracts.depositPoolV2, manifest.contracts.legacyDepositPoolV2)) {
-    throw new Error("Legacy DepositPool v2 is not a permitted venue-pair target.");
-  }
-  return VENUE_PAIR_BINDINGS;
+  return { ...VENUE_PAIR_BINDINGS, ...resolveVenuePairTarget(manifest, target) };
 }
 
 export function assertV21Pool(pool) {
@@ -210,13 +226,20 @@ export async function buildVenuePairPlan({
   deployer,
   nonce,
   artifacts,
-  strategyName = VENUE_PAIR_STRATEGY_NAME,
+  target = "v21",
+  manifest,
+  strategyName,
   sourceCommit = process.env.DEPLOYED_SHA ?? "unknown",
 }) {
   const signer = checkedAddress("deployer", deployer);
   if (!Number.isSafeInteger(nonce) || nonce < 0) throw new Error("Pending deployer nonce must be a non-negative safe integer.");
-  const pool = assertV21Pool(VENUE_PAIR_BINDINGS.pool);
-  const strategy = deriveStrategyIdentity(strategyName);
+  const targetConfig = resolveVenuePairTarget(manifest ?? (target === "v21"
+    ? { contracts: { depositPoolV21: VENUE_PAIR_BINDINGS.pool } } : undefined), target);
+  const pool = targetConfig.pool;
+  if (strategyName !== undefined && strategyName !== targetConfig.strategyName) {
+    throw new Error(`Strategy name for ${target} must be ${targetConfig.strategyName}.`);
+  }
+  const strategy = deriveStrategyIdentity(targetConfig.strategyName);
   const laneAddress = getCreateAddress({ from: signer, nonce });
   const adapterAddress = getCreateAddress({ from: signer, nonce: nonce + 1 });
   const laneArgs = {
@@ -229,6 +252,8 @@ export async function buildVenuePairPlan({
   const adapterArgs = { pool, lane: laneAddress };
   const laneBytecode = artifactBytecode(artifacts.lane, "HydrationUsdcAdapterV22");
   const adapterBytecode = artifactBytecode(artifacts.adapter, "HydrationDepositPoolAdapter");
+  assertDeploymentArtifact(artifacts.lane);
+  assertDeploymentArtifact(artifacts.adapter);
   const laneFactory = new ContractFactory(
     artifacts.lane.abi,
     laneBytecode,
@@ -245,9 +270,10 @@ export async function buildVenuePairPlan({
     chain: "polkadot-hub-mainnet",
     deployer: signer,
     startNonce: nonce,
+    target: targetConfig,
     strategy,
     artifactProvenance: {
-      sourceCommit: String(sourceCommit),
+      sourceCommit: String(sourceCommit).toLowerCase(),
       lane: {
         path: `out/${CONTRACT_ARTIFACTS.lane[0]}/${CONTRACT_ARTIFACTS.lane[1]}.json`,
         creationBytecodeHash: keccak256(laneBytecode),
@@ -300,7 +326,11 @@ export function assertSelfCheckingCycle(plan) {
   if (keccak256(plan.adapter.transaction.data).toLowerCase() !== plan.adapter.initCodeHash.toLowerCase()) {
     failures.push("adapter constructor transaction");
   }
-  assertV21Pool(plan.adapter.constructorArgs.pool);
+  const target = resolveVenuePairTarget({ contracts: { [plan.target.poolKey]: plan.target.pool } }, plan.target.name);
+  if (!sameAddress(plan.adapter.constructorArgs.pool, target.pool)) failures.push("adapter.pool targeted generation");
+  if (plan.strategy.ascii !== target.strategyName || plan.strategy.id !== deriveStrategyIdentity(target.strategyName).id) {
+    failures.push("target strategy");
+  }
   if (failures.length > 0) {
     throw new Error(
       `Self-checking constructor cycle mismatch (${failures.join(", ")}); adapter deployment would revert.`,
@@ -323,6 +353,7 @@ export function publicPlan(plan) {
     chain: plan.chain,
     deployer: plan.deployer,
     startNonce: plan.startNonce,
+    target: plan.target,
     strategy: plan.strategy,
     artifactProvenance: plan.artifactProvenance,
     lane: {
@@ -392,7 +423,7 @@ export function assertPairState(plan, state) {
   assertLaneState(plan, state.lane);
   const failures = [];
   if (!sameAddress(state.adapter.lane, plan.lane.predictedAddress)) failures.push("adapter.lane");
-  if (!sameAddress(state.adapter.pool, VENUE_PAIR_BINDINGS.pool)) failures.push("adapter.pool");
+  if (!sameAddress(state.adapter.pool, plan.target.pool)) failures.push("adapter.pool");
   if (!sameAddress(state.adapter.asset, VENUE_PAIR_BINDINGS.asset)) failures.push("adapter.asset");
   if (!sameAddress(state.adapter.policy, VENUE_PAIR_BINDINGS.policy)) failures.push("adapter.policy");
   if (sameAddress(state.adapter.lossReporter, ZeroAddress)) failures.push("adapter.lossReporter");
@@ -412,6 +443,7 @@ function assertDeploymentReceipt(receipt, expectedAddress, label) {
 export async function finalizePairEvidence({
   provider,
   plan,
+  artifacts,
   laneInitialReceipt,
   adapterInitialReceipt,
   confirmImpl = confirmCanonicalPostState,
@@ -427,7 +459,9 @@ export async function finalizePairEvidence({
     readPostState: async (blockNumber) => {
       const state = await readLaneStateImpl(provider, plan, blockNumber);
       assertLaneState(plan, state);
-      return state;
+      return { ...state, provenance: deploymentProvenance({ artifact: artifacts.lane,
+        deployedCode: await provider.getCode(plan.lane.predictedAddress, blockNumber),
+        sourceCommit: plan.artifactProvenance.sourceCommit, verifiedAt: new Date().toISOString() }) };
     },
     log,
   });
@@ -439,7 +473,9 @@ export async function finalizePairEvidence({
     readPostState: async (blockNumber) => {
       const state = await readPairStateImpl(provider, plan, blockNumber);
       assertPairState(plan, state);
-      return state;
+      return { ...state, provenance: deploymentProvenance({ artifact: artifacts.adapter,
+        deployedCode: await provider.getCode(plan.adapter.predictedAddress, blockNumber),
+        sourceCommit: plan.artifactProvenance.sourceCommit, verifiedAt: new Date().toISOString() }) };
     },
     log,
   });
@@ -447,11 +483,15 @@ export async function finalizePairEvidence({
     lane: {
       txHash: laneInitialReceipt.hash,
       contractAddress: plan.lane.predictedAddress,
+      manifestKey: plan.target.laneKey,
+      provenance: laneFinality.postState.provenance,
       ...buildFinalityEvidence(laneInitialReceipt, laneFinality),
     },
     adapter: {
       txHash: adapterInitialReceipt.hash,
       contractAddress: plan.adapter.predictedAddress,
+      manifestKey: plan.target.adapterKey,
+      provenance: adapterFinality.postState.provenance,
       ...buildFinalityEvidence(adapterInitialReceipt, adapterFinality),
     },
     verifiedPostState: adapterFinality.postState,
@@ -462,6 +502,7 @@ export async function executeVenuePairDeployment({
   provider,
   signer,
   plan,
+  artifacts,
   finalizeImpl = finalizePairEvidence,
   log = console.log,
 }) {
@@ -485,7 +526,7 @@ export async function executeVenuePairDeployment({
     assertDeploymentReceipt(adapterReceipt, plan.adapter.predictedAddress, "adapter");
     log(`adapter deployed: ${plan.adapter.predictedAddress} (tx ${adapterTx.hash})`);
 
-    const evidence = await finalizeImpl({ provider, plan, laneInitialReceipt: laneReceipt, adapterInitialReceipt: adapterReceipt });
+    const evidence = await finalizeImpl({ provider, plan, artifacts, laneInitialReceipt: laneReceipt, adapterInitialReceipt: adapterReceipt });
     assertPairState(plan, evidence.verifiedPostState);
     return evidence;
   } catch (error) {
@@ -507,10 +548,10 @@ export async function runVenuePair({
   resolveSignerImpl = resolveSigner,
   log = console.log,
 }) {
-  assertManifestBindings(manifest);
+  assertManifestBindings(manifest, args.target);
   const identity = await resolveSignerImpl(args, rpcContext.provider);
   const startNonce = await rpcContext.provider.getTransactionCount(identity.address, "pending");
-  const plan = await buildVenuePairPlan({ deployer: identity.address, nonce: startNonce, artifacts });
+  const plan = await buildVenuePairPlan({ deployer: identity.address, nonce: startNonce, artifacts, manifest, target: args.target });
   log("# VENUE PAIR DEPLOYMENT PLAN");
   log(serialize(publicPlan(plan)));
   if (!args.commit) {
@@ -522,6 +563,7 @@ export async function runVenuePair({
     provider: rpcContext.provider,
     signer: identity.signer,
     plan,
+    artifacts,
     log,
   });
   log("# COMMITTED EVIDENCE");
@@ -531,7 +573,7 @@ export async function runVenuePair({
 
 function usage() {
   console.log(`Usage:
-  node scripts/ops/deploy-venue-pair.mjs --expected-signer 0x... [--profile mainnet] [--artifacts out]
+  node scripts/ops/deploy-venue-pair.mjs --expected-signer 0x... [--target v21|v22] [--profile mainnet] [--artifacts out]
   node scripts/ops/deploy-venue-pair.mjs --commit --use-kms --expected-signer 0x...
 
 Dry-run is the default. The driver deploys and verifies only; pool binding is a later cold-multisig action.`);

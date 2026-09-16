@@ -19,7 +19,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  CONTRACT_ARTIFACTS,
+  contractArtifactFor,
   checkRuntimeProvenance,
   compareMaskedRuntime,
   hexBytes,
@@ -236,16 +236,16 @@ const HELP = `check-contract-source-drift.mjs — classify immutable-masked comp
 Exit: 0 = deployed/allowlisted runtimes only, 1 = unallowlisted compiled drift,
       2 = usage/build-artifact/manifest/RPC error.`;
 
-function loadArtifacts(artifactsRoot, manifest) {
+export function loadArtifacts(artifactsRoot, manifest, readFile = readFileSync) {
   const artifacts = new Map();
   for (const contract of validateProvenanceManifest(manifest)) {
-    const definition = CONTRACT_ARTIFACTS[contract.name];
+    const definition = contractArtifactFor(manifest, contract.name);
     if (!definition) {
       throw new Error(`no artifact mapping for contracts.${contract.name}.`);
     }
     const [sourceFile, contractName] = definition;
     const path = join(artifactsRoot, sourceFile, `${contractName}.json`);
-    artifacts.set(contract.name, JSON.parse(readFileSync(path, "utf8")));
+    artifacts.set(contract.name, JSON.parse(readFile(path, "utf8")));
   }
   return artifacts;
 }

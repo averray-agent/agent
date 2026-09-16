@@ -40,6 +40,7 @@
  *   --rpc <url>        EVM RPC (default: deployments/mainnet.json rpcUrl)
  *   --profile <name>   deployment profile (default: mainnet)
  *   --artifacts <dir>  forge output dir (default: out)
+ *   --contract DepositPoolV22  two CREATEs: v2.2 pool, then locked AAC aggregator
  *   --strategy-id <s>  strategy label (default: HYDRATION_USDC_POOL_V1)
  *   --expected-deployer <address>  explicit deployer identity; always required
  *   --signer-secret-ref <op://...>  1Password key reference; required for --commit
@@ -56,6 +57,7 @@ import { join } from "node:path";
 
 import { ethers } from "ethers";
 import { loadKeyFromOp } from "./redeploy-escrowcore.mjs";
+import { runPoolV22Cli } from "./deploy-pool-v22.mjs";
 
 const DEFAULT_STRATEGY_LABEL = "HYDRATION_USDC_POOL_V1";
 const RESERVED_STRATEGY_LABEL = "HYDRATION_USDC_V1";
@@ -72,6 +74,7 @@ export function parseArgs(argv) {
     commit: false,
     profile: "mainnet",
     artifacts: "out",
+    contract: "DepositPool",
     strategyLabel: DEFAULT_STRATEGY_LABEL,
     expectedDeployer: undefined,
     signerSecretRef: undefined,
@@ -82,11 +85,14 @@ export function parseArgs(argv) {
     else if (arg === "--rpc") args.rpc = argv[++i];
     else if (arg === "--profile") args.profile = argv[++i];
     else if (arg === "--artifacts") args.artifacts = argv[++i];
+    else if (arg === "--contract") args.contract = argv[++i];
     else if (arg === "--strategy-id") args.strategyLabel = argv[++i];
     else if (arg === "--expected-deployer") args.expectedDeployer = argv[++i];
     else if (arg === "--signer-secret-ref") args.signerSecretRef = argv[++i];
     else if (arg === "--help" || arg === "-h") args.help = true;
+    else throw new Error(`Unknown argument: ${arg}`);
   }
+  if (!["DepositPool", "DepositPoolV22"].includes(args.contract)) throw new Error("--contract must be DepositPool or DepositPoolV22.");
   return args;
 }
 
@@ -250,6 +256,7 @@ async function main() {
   }
 
   const manifest = JSON.parse(readFileSync(`deployments/${args.profile}.json`, "utf8"));
+  if (args.contract === "DepositPoolV22") return runPoolV22Cli({ args, manifest, resolveDeployer: resolveCeremonyDeployer });
   const deployerIdentity = resolveCeremonyDeployer({
     expectedDeployer: args.expectedDeployer,
     signerSecretRef: args.signerSecretRef,

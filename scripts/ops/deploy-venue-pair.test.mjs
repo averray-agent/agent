@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { AbiCoder } from "ethers";
 
 import {
   REFERENCE_STRATEGY_ID,
@@ -14,6 +15,10 @@ import {
   finalizePairEvidence,
   parseArgs,
   runVenuePair,
+  assertManifestBindings,
+  assertPairState,
+  resolveVenuePairTarget,
+  V22_VENUE_PAIR_STRATEGY_NAME,
 } from "./deploy-venue-pair.mjs";
 
 const SIGNER = "0x5a6836c6D4d293F6E5377E6c28054F4171915813";
@@ -33,6 +38,7 @@ const artifacts = {
       ],
     }],
     bytecode: { object: "0x60006000" },
+    deployedBytecode: { object: "0x60006000", immutableReferences: {} },
   },
   adapter: {
     abi: [{
@@ -44,6 +50,7 @@ const artifacts = {
       ],
     }],
     bytecode: { object: "0x60016000" },
+    deployedBytecode: { object: "0x60016000", immutableReferences: {} },
   },
 };
 
@@ -70,7 +77,7 @@ function pairState(plan) {
     },
     adapter: {
       lane: plan.lane.predictedAddress,
-      pool: VENUE_PAIR_BINDINGS.pool,
+      pool: plan.target.pool,
       asset: VENUE_PAIR_BINDINGS.asset,
       policy: VENUE_PAIR_BINDINGS.policy,
       lossReporter: LOSS_REPORTER,
@@ -79,7 +86,7 @@ function pairState(plan) {
 }
 
 async function planAt(nonce = 17) {
-  return buildVenuePairPlan({ deployer: SIGNER, nonce, artifacts });
+  return buildVenuePairPlan({ deployer: SIGNER, nonce, artifacts, sourceCommit: "a".repeat(40) });
 }
 
 test("wrong nonce prediction cannot deploy or report venue-pair success", async () => {
@@ -191,8 +198,9 @@ test("committed evidence requires 12 canonical confirmations and a stable block 
   };
   const fullState = pairState(plan);
   const evidence = await finalizePairEvidence({
-    provider: {},
+    provider: { getCode: async (address) => address === plan.lane.predictedAddress ? "0x60006000" : "0x60016000" },
     plan,
+    artifacts,
     laneInitialReceipt: laneReceipt,
     adapterInitialReceipt: adapterReceipt,
     confirmImpl: async ({ initialReceipt, confirmations, readPostState }) => ({
@@ -214,6 +222,8 @@ test("committed evidence requires 12 canonical confirmations and a stable block 
   assert.equal(evidence.adapter.finality.confirmationsWaited, 12);
   assert.equal(evidence.adapter.finality.receiptReconfirmed, true);
   assert.equal(evidence.adapter.finality.postStateReconfirmed, true);
+  assert.match(evidence.adapter.provenance.runtimeCodeHash, /^sha256:/u);
+  assert.equal(evidence.adapter.manifestKey, "hydrationDepositPoolAdapterV21");
 
   const movedHash = `0x${"cc".repeat(32)}`;
   await assert.rejects(
@@ -237,4 +247,39 @@ test("committed evidence requires 12 canonical confirmations and a stable block 
       && error.message.includes(laneBlockHash)
       && error.message.includes(movedHash),
   );
+});
+
+test("T1 v22 uses only its manifest identity, committed strategy and pair keys", async () => {
+  const v22 = "0x2222222222222222222222222222222222222222";
+  const m = structuredClone(manifest);
+  m.contracts.depositPoolV22 = v22;
+  // A movable alias is deliberately still on v2.1 before cutover.
+  const plan = await buildVenuePairPlan({ deployer: SIGNER, nonce: 10, artifacts, manifest: m, target: "v22" });
+  assert.equal(plan.target.pool, v22);
+  assert.equal(plan.target.laneKey, "depositPoolLaneV22");
+  assert.equal(plan.target.adapterKey, "hydrationDepositPoolAdapterV22");
+  assert.equal(plan.strategy.ascii, "AAC_COMMITTED_HYDRATION_V22");
+  assert.equal(plan.strategy.ascii, V22_VENUE_PAIR_STRATEGY_NAME);
+  const [encodedPool] = AbiCoder.defaultAbiCoder().decode(["address", "address"],
+    `0x${plan.adapter.transaction.data.slice(artifacts.adapter.bytecode.object.length)}`);
+  assert.equal(encodedPool, v22);
+  assert.equal(assertPairState(plan, pairState(plan)), true);
+  for (const wrong of [VENUE_PAIR_BINDINGS.pool, VENUE_PAIR_BINDINGS.legacyPool]) {
+    const state = pairState(plan); state.adapter.pool = wrong;
+    assert.throws(() => assertPairState(plan, state), /adapter.pool/u);
+  }
+  m.contracts.depositPoolV2 = v22;
+  assert.equal(assertManifestBindings(m, "v22").pool, v22);
+  assert.equal(assertManifestBindings(m, "v21").pool, VENUE_PAIR_BINDINGS.pool);
+});
+
+test("T1 missing/wrong v22 fails before signer or nonce; target cannot silently fall back", async () => {
+  assert.equal(parseArgs(["--target", "v22", "--expected-signer", SIGNER]).target, "v22");
+  assert.throws(() => parseArgs(["--target", "v23", "--expected-signer", SIGNER]), /--target/u);
+  for (const value of [undefined, VENUE_PAIR_BINDINGS.pool, VENUE_PAIR_BINDINGS.legacyPool]) {
+    const m = structuredClone(manifest); m.contracts.depositPoolV22 = value;
+    assert.throws(() => resolveVenuePairTarget(m, "v22"), /depositPoolV22/u);
+    await assert.rejects(runVenuePair({ args: { target: "v22" }, manifest: m, rpcContext: {}, artifacts,
+      resolveSignerImpl: () => assert.fail("must fail before signer") }), /depositPoolV22/u);
+  }
 });

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 
 import {
   CONTRACT_ARTIFACTS,
+  contractArtifactFor,
   RESERVATION_SETTLED_INPUTS,
   RESERVATION_SETTLED_SIGNATURE,
   RESERVATION_SETTLED_TOPIC0,
@@ -20,6 +21,36 @@ const ADDRESS = "0x1111111111111111111111111111111111111111";
 const SOURCE_COMMIT = "a".repeat(40);
 const VERIFIED_AT = "2026-07-29T19:40:33.000Z";
 const CODE = "0x60010203";
+
+test("T3 v22 identities and movable pool aliases select the correct artifacts at cutover", () => {
+  const v21 = "0x2121212121212121212121212121212121212121";
+  const v22 = "0x2222222222222222222222222222222222222222";
+  const manifest = { contracts: { depositPoolV21: v21, legacyDepositPoolV21: v21,
+    depositPoolV22: v22, depositPool: v21, depositPoolV2: v21 } };
+  const oldArtifact = ["DepositPoolV2.sol", "DepositPoolV2"];
+  const nextArtifact = ["DepositPoolV22.sol", "DepositPoolV22"];
+  for (const key of ["depositPool", "depositPoolV2"]) {
+    assert.deepEqual(contractArtifactFor(manifest, key), oldArtifact);
+    manifest.contracts[key] = v22;
+    assert.deepEqual(contractArtifactFor(manifest, key), nextArtifact);
+  }
+  assert.deepEqual(contractArtifactFor(manifest, "legacyDepositPoolV21"), oldArtifact);
+  assert.deepEqual(contractArtifactFor(manifest, "depositPoolV21"), oldArtifact);
+  assert.deepEqual(CONTRACT_ARTIFACTS.depositPoolV22, nextArtifact);
+  assert.deepEqual(CONTRACT_ARTIFACTS.aacPoolAggregatorAdapterV22, ["AacPoolAggregatorAdapterV22.sol", "AacPoolAggregatorAdapterV22"]);
+  assert.deepEqual(CONTRACT_ARTIFACTS.depositPoolLaneV22, ["HydrationUsdcAdapterV22.sol", "HydrationUsdcAdapterV22"]);
+  assert.deepEqual(CONTRACT_ARTIFACTS.hydrationDepositPoolAdapterV22, ["HydrationDepositPoolAdapter.sol", "HydrationDepositPoolAdapter"]);
+});
+
+test("T3 each new v22 manifest identity requires creation provenance as well as runtime provenance", () => {
+  for (const key of ["depositPoolV22", "aacPoolAggregatorAdapterV22", "depositPoolLaneV22", "hydrationDepositPoolAdapterV22"]) {
+    const manifest = manifestFor();
+    manifest.contracts[key] = ADDRESS;
+    assert.throws(() => validateProvenanceManifest(manifest), /creationBytecodeHash/u);
+    manifest.contractProvenance[ADDRESS].creationBytecodeHash = `0x${"c".repeat(64)}`;
+    assert.ok(validateProvenanceManifest(manifest).some((c) => c.name === key));
+  }
+});
 
 function manifestFor(code = CODE) {
   return {

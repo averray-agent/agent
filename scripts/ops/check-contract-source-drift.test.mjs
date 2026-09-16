@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 import {
   checkCompiledArtifacts,
+  loadArtifacts,
   maskedArtifactRuntimeHash,
   validateKnownUnshippedContractChanges,
 } from "./check-contract-source-drift.mjs";
@@ -15,6 +16,22 @@ import {
 const ADDRESS = "0x1111111111111111111111111111111111111111";
 const SOURCE_COMMIT = "a".repeat(40);
 const VERIFIED_AT = "2026-07-29T19:40:33.000Z";
+
+test("T3 source-drift artifact loader follows v22 aliases while retaining the v21 identity", () => {
+  const old = "0x2121212121212121212121212121212121212121";
+  const next = "0x2222222222222222222222222222222222222222";
+  const record = { sourceCommit: SOURCE_COMMIT, abiHash: `sha256:${"b".repeat(64)}`,
+    runtimeCodeHash: runtimeCodeHash("0x6000"), verifiedAt: VERIFIED_AT, creationBytecodeHash: `0x${"c".repeat(64)}` };
+  const manifest = { contracts: { depositPool: next, depositPoolV2: next, depositPoolV22: next,
+    depositPoolV21: old, legacyDepositPoolV21: old }, contractProvenance: { [old]: record, [next]: record } };
+  const artifacts = loadArtifacts("out", manifest, (path) => JSON.stringify({ path }));
+  for (const key of ["depositPool", "depositPoolV2", "depositPoolV22"]) {
+    assert.match(artifacts.get(key).path, /DepositPoolV22.sol\/DepositPoolV22.json$/u);
+  }
+  for (const key of ["depositPoolV21", "legacyDepositPoolV21"]) {
+    assert.match(artifacts.get(key).path, /DepositPoolV2.sol\/DepositPoolV2.json$/u);
+  }
+});
 
 function artifact(code, immutableReferences = {}) {
   return {
