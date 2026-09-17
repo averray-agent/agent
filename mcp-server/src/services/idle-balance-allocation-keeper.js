@@ -862,6 +862,13 @@ export class IdleBalanceAllocationKeeperService {
 
   #finish(summary) {
     summary.finishedAt = this.now().toISOString();
+    const exit = summary.floatAction;
+    const previous = this.lastRun?.floatAction;
+    if (exit?.requestId && (exit.action !== previous?.action || exit.requestId !== previous?.requestId)) {
+      // The request receipt supplies the id; the next chain read supplies unlockAt.
+      // Log state transitions, not every minute spent waiting through the notice.
+      this.logger.info?.(exit, "idle_balance_allocation_keeper.float_exit");
+    }
     this.lastRun = summary;
     return summary;
   }

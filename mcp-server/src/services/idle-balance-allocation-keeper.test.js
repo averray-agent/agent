@@ -245,6 +245,14 @@ test("C1 FLOAT_TARGET_BPS=10000 requests the full v2.1 share balance once at tie
   const next = await h.keeper.runOnce(NOW);
   assert.equal(next.floatAction.action, "awaitFloatExit");
   assert.equal(next.floatAction.requestId, "7");
+  assert.equal(h.logs[0].message, "idle_balance_allocation_keeper.float_exit");
+  assert.equal(h.logs[0].entry.action, "requestFloatExit");
+  assert.equal(h.logs[0].entry.requestId, "7");
+  assert.equal(h.logs[1].entry.action, "awaitFloatExit");
+  assert.equal(h.logs[1].entry.requestId, "7");
+  assert.equal(h.logs[1].entry.unlockAt, Math.floor(NOW.getTime() / 1000) + 100);
+  await h.keeper.runOnce(NOW);
+  assert.equal(h.logs.length, 2, "unchanged waiting state must not flood operator logs");
   assert.equal(sends.length, 1, "pending exit must not be requested twice");
   // After maturity the same enabled keeper returns the shares to float, without re-entry.
   h.chain.getFloatExit = async () => ({ owner: DEPLOYED_AAC_POOL_AGGREGATOR_ADAPTER,
@@ -440,6 +448,7 @@ test("matured oversized float request fulfils then sweeps surplus and restores a
 });
 
 async function harness({ wallets = [], config = liveConfig() } = {}) {
+  const logs = [];
   const stateStore = new MemoryStateStore();
   for (const wallet of wallets) {
     await stateStore.putIdleBalanceConsent({
@@ -471,9 +480,9 @@ async function harness({ wallets = [], config = liveConfig() } = {}) {
     settlementSignerReader: async () => SETTLEMENT_SIGNER,
     now: () => NOW,
     ownerFactory: () => `keeper-test-${++id}`,
-    logger: { warn() {} }
+    logger: { warn() {}, info(entry, message) { logs.push({ entry, message }); } }
   });
-  return { keeper, stateStore, chain, consent };
+  return { keeper, stateStore, chain, consent, logs };
 }
 
 function liveConfig() {
