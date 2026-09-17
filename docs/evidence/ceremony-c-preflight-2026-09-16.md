@@ -179,3 +179,11 @@ Both postage accounts read 0 DOT at 07:20Z.
 All seven executed on the first pass; every Vault call hash matched the package. The 2026-09-16 test remark (`system.remarkWithEvent`) also shows executed in Nova's history. `poolV22.totalAssets` 0, `deployableFor(90d)` 0 until §5b.
 
 **On-chain part of Ceremony C complete.** Remaining: T3 manifest PR (Codex, now), T4 step 1 cutover PR + deploy (after T3), §5b on D7 = 2026-09-24 after 06:38Z (fulfil requests 3 + 4 → deposit into v2.2 → `commit(Notice90Days)`), §7 first committed window, T4 step 2 after the keeper fulfils the aggregator exit.
+
+## T3 + T4 step 1 DONE — 2026-09-17
+
+- **T3** #1390 merged a5e5e721 08:23Z, deployed 08:33Z; D-03 Tier 2 verified all four v2.2 contracts against live chain from the CI build.
+- **T4 step 1** #1391 merged 04c0f86c 10:13Z, deployed 10:20–10:24Z (canary green). Aliases `depositPool`/`depositPoolV2` → v2.2; `legacyDepositPoolV21` added; `POOL_V22_CEREMONY_COMPLETE=1`, `POOL_V22_ADDRESS`, `POOL_V22_AGGREGATOR_ADDRESS` set; locked keeper off; `IDLE_BALANCE_ALLOCATION_FLOAT_TARGET_BPS=10000` with the idle keeper on and the aggregator alias on v2.1.
+- **C1 step 1 took effect on the keeper's first tick:** v2.1 **request 5** — owner = v2.1 aggregator `0x1DDcA709…`, 3.034767 shares (its whole position, now locked), tier 0, **unlockAt 2026-09-24T10:22:24Z**. The keeper fulfils it itself after that; then T4 step 2 flips the keeper off.
+
+Three v2.1 exits now in flight, all unlocking on 2026-09-24: request 3 (dogfood 9.908397, 06:38Z), request 4 (acceptance 0.496735, 06:38Z), request 5 (aggregator 3.034767, 10:22Z) — total ≈14.5 shares ≈ 14.9 USDC, against a buffer of 10.24 today; cycle 2's 10.19 must be recalled and settled (09-22) before any fulfilment.

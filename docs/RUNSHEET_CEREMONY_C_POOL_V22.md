@@ -74,9 +74,9 @@ commitment** on day 7, backend cutover, then the first
 |---|---|---|
 | D0 (2026-09-17) | T0 ✓ 2 DOT; §5a notices ✓ (ids 3, 4 → D7 = 09-24 06:38Z); §1 deploy pool + aggregator; §2 pair; §3 hashes (pre-banked ✓); postage | Pascal |
 | D0 (2026-09-17) | §4 multisig ✓ all seven executed 09:27–09:45Z | Pascal, Nova + Vault |
-| D0–D2 | T3/T4 PRs merge; backend on v2.2 (§6) — deposits into v2.2 open | Codex/Claude/Pascal |
+| D0 (2026-09-17) | T3 ✓ #1390 (a5e5e721, deployed 08:33Z); T4 step 1 ✓ #1391 (04c0f86c, deployed 10:24Z) — backend on v2.2, door open; keeper requested the aggregator exit (request 5, unlock 09-24 10:22Z) | Codex/Claude/Pascal |
 | D7 | §5b fulfil the notice, deposit into v2.2, `commit(Notice90Days)`; §7 first committed window | Pascal |
-| D8–D9 | keeper fulfils the aggregator's exit (T4 step 1 + 7 d) → flip the keeper off (T4 step 2) | keeper / Codex |
+| D7 (09-24 ≥10:22Z) | keeper fulfils request 5 (aggregator exit) → T4 step 2: keeper off | keeper / Codex |
 
 The 7-day notice is the long pole; starting it on D0 is what keeps the
 ceremony to a week.
