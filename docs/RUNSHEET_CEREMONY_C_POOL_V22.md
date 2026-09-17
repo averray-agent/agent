@@ -107,6 +107,11 @@ artifact. Commit with `--signer-secret-ref 'op://mainnet-critical/admin-eoa-main
 node scripts/ops/deploy-venue-pair.mjs --profile mainnet --target v22 --expected-signer 0x5a6836c6D4d293F6E5377E6c28054F4171915813
 ```
 
+**DONE 2026-09-17 07:14Z — lane `0xd3d76AB8f4642B54C04Be8091F01Be66e91a1aa1` (tx `0xc00b40d9…`, block 20746872), venue adapter
+`0x2894667cF9A54D94695Ca168B81154aA50955722` (tx `0x525736a1…`, block 20746874); gated (evidence file §2).** It ran *inside*
+`agent-mainnet-backend` with a `docker cp`'d side profile `--profile mainnet-cc` because the KMS credentials live only there and the image's
+manifest predates §1 — see the evidence file for the exact mechanism.
+
 then `--commit --use-kms`. The pair driver signs with the **KMS identity**
 (`0x5a6836…`, as Ceremony B did), so `--expected-signer` is the KMS address —
 not the admin EOA that §1 uses (#1385 review note). Gate: `adapter.lane()` = lane, `lane.agentAccountCore()` =
@@ -126,9 +131,9 @@ constructor args). Do not sign §4 until all four match. The independent
 required green before §6.
 
 Postage (plain DOT transfers on Asset Hub to the 0xEE-mapped SS58 of each
-contract): **adapter ≈1 DOT** (dispatch legs), **aggregator 0.5 DOT** (the USDC
+contract): **adapter ≈1 DOT** → `1vCzyKBnJ19RcFxHJ7uc7M2QmhU4ESRodWoWztXQ8Yv2Xhb`, **aggregator 0.5 DOT** → `1cjBuM7izSrCqtt78xzeHvWWbxnRv4DorzyNWQNEFgLdR95` (the USDC
 precompile's `approve` requires the caller to hold DOT — the CreditBook
-lesson), pool none.
+lesson), pool and lane none.
 
 ## §4 — Multisig session (2-of-3; Nova initiates, Vault countersigns)
 

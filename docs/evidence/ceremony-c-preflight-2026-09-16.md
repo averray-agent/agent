@@ -131,3 +131,33 @@ M1–M3 calldata re-encoded independently (✓) — see the driver output banked
 
 Manifest staging for §2: branch `ceremony-c/manifest` in the ceremony worktree adds `contracts.depositPoolV22`,
 `contracts.aacPoolAggregatorAdapterV22`, deploymentBlocks and deployers (provenance entries are T3's).
+
+## §2 DONE — 2026-09-17 07:14Z (inside `agent-mainnet-backend`, side profile `/deployments/mainnet-cc.json`, KMS identity `0x5a6836…`)
+
+| contract | address | tx | block | gasUsed | fee |
+|---|---|---|---|---|---|
+| HydrationUsdcAdapterV22 (lane) | `0xd3d76AB8f4642B54C04Be8091F01Be66e91a1aa1` (KMS nonce 2764 ✓) | `0xc00b40d90545b5139ca21112da3cb3d41dd30679ce449f78657aec72f672f6c0` | 20746872 | 1 135 684 | 0.9085472 DOT |
+| HydrationDepositPoolAdapter (venue adapter) | `0x2894667cF9A54D94695Ca168B81154aA50955722` (KMS nonce 2765 ✓) | `0x525736a10fa415d136cf78604bc31904d64c096ad2baa11f93b10fcf2162e5be` | 20746874 | 1 116 558 | 0.8932464 DOT |
+
+Gate (Claude, chain reads): masked runtime == artifact for both; `lane.agentAccountCore()` = adapter, `lane.xcmWrapper()` = `0xF20b35A3…`,
+`lane.strategyId()` = `AAC_COMMITTED_HYDRATION_V22`, `lane.policy()`/`asset()` as bound; `adapter.lane()` = lane, **`adapter.pool()` = poolV22 `0x3A2dd08F…`**,
+`adapter.lossReporter()` = policy-owner multisig `0x01E6eed856e989201F4FF6346E18EAb7e46C874C`, `activeDeployRequestId` 0. Init-code hashes rebuilt independently from
+artifact + printed constructor args (✓ both). Driver provenance: lane maskedRuntimeHash `sha256:0faec68edf65d6adf5a56677904f4ac8e467b9ec0a59e5247f4184e2fcc18bad`,
+abiHash `sha256:53a7d2d0…`; adapter maskedRuntimeHash `sha256:82acc3690054051a039d2e5f5ccab8a2b6f76fe1c8c9f4704a4d6a92de6220f4`, abiHash `sha256:64e406be…`; sourceCommit d37c2eed.
+KMS signer after: nonce 2766, 3.438 DOT. The Mac dry run and the in-container dry run printed identical plans (nonce 2764 both times).
+
+**How §2 ran:** the KMS credentials (Roles Anywhere) exist only inside the backend container and the image bakes the two pair artifacts, but the
+image's `/deployments/mainnet.json` predates §1 — so the staged manifest (worktree branch `ceremony-c/manifest`) was `docker cp`'d as a **side
+profile** `/deployments/mainnet-cc.json` (driver accepts it: `profile: "mainnet"` inside the file + binding constants) and the driver ran with
+`--profile mainnet-cc`. The side file is ephemeral (gone on the next deploy) and never replaced the real manifest.
+
+### §3 postage targets (0xEE-mapped SS58, prefix 0)
+
+| contract | H160 | SS58 | postage |
+|---|---|---|---|
+| venue adapter V22 | `0x2894667cF9A54D94695Ca168B81154aA50955722` | `1vCzyKBnJ19RcFxHJ7uc7M2QmhU4ESRodWoWztXQ8Yv2Xhb` | **≈1 DOT** (dispatch legs) |
+| locked aggregator V22 | `0x1b3f9B45e0B8672A4FF95Caf67Bf4dbEa385455f` | `1cjBuM7izSrCqtt78xzeHvWWbxnRv4DorzyNWQNEFgLdR95` | **0.5 DOT** (USDC precompile `approve` needs DOT) |
+| lane V22 | `0xd3d76AB8f4642B54C04Be8091F01Be66e91a1aa1` | `15nm6ZTFutQdx7FLTeL85RBBy7vReUwJvxAcAWuEG5w7KBPf` | none |
+| pool V22 | `0x3A2dd08F85009474117CaFC476b6629AE04fB2A9` | `12KHPTGUeV8xmFH2UCfkgB8Wwb4dVw7ZAHzADBQbERB4WJ1v` | none |
+
+Both postage accounts read 0 DOT at 07:20Z.
