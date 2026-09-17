@@ -163,3 +163,19 @@ profile** `/deployments/mainnet-cc.json` (driver accepts it: `profile: "mainnet"
 Both postage accounts read 0 DOT at 07:20Z.
 
 **§3 postage DONE 2026-09-17 ≈09:50Z (head 20747179):** venue adapter `0x2894667c…` reads 1.0000 DOT, locked aggregator `0x1b3f9B45…` reads 0.5000 DOT (EVM view; chain-verified). §3 complete: hashes matched on two toolchains and by both drivers, postage in place. Next: §4 Nova session (signing package d34c01a1).
+
+## §4 DONE — 2026-09-17 09:27–09:45Z (Nova initiates, Vault countersigns; 2-of-3 `14LA8vJD8JeQ…Kc3YK`)
+
+| call | Nova time point (initiation) | call hash | post-state (chain, head 20747785) |
+|---|---|---|---|
+| M1 `policy.setApprovedStrategy(aggV22, true)` | 20747251-2 | `0xcf98228c…3ef19d` | `approvedStrategies(0x1b3f9B45…)` = true |
+| M2 `registry.registerStrategy(aggV22)` | 20747323-2 | `0xf15d1365…7d72a1` | `getStrategy(AAC_LOCKED_DEPOSIT_POOL_V22)` → adapter aggV22, asset USDC, active |
+| M3 `poolV22.setAggregatorAdapter(aggV22, true)` | 20747392-2 | `0xefced5ab…bdc08b` | `aggregatorAdapters(aggV22)` = true |
+| M4 `wrapper.setDispatchPaused(true)` | 20747523-2 | `0x0d7c57e3…d0f5ff` | paused (pre-read: all three lanes' pending counters 0) |
+| M5 `wrapper.setStrategyAdapter(AAC_COMMITTED_HYDRATION_V22, laneV22)` | 20747589-2 | `0x5ced6713…da689c` | `strategyAdapter(COMMITTED_V22)` = `0xd3d76AB8…`; `strategyAdapter(IDLE_V1)` still `0x2E01Bff9…` |
+| M6 `wrapper.setDispatchPaused(false)` | 20747672-2 | `0xdba64717…24e535` | unpaused — pause window ≈ 09:38–09:43Z (~5 min); 09-21 rule moot |
+| M7 `poolV22.setVenueAdapter(adapterV22)` (set-once) | 20747741-2 | `0xd8c5c064…724b18` | `venueAdapter()` = `0x2894667c…`, `proposedVenueAdapter()` = 0; round trip `adapter.pool()` = poolV22, `adapter.lane()` = laneV22 |
+
+All seven executed on the first pass; every Vault call hash matched the package. The 2026-09-16 test remark (`system.remarkWithEvent`) also shows executed in Nova's history. `poolV22.totalAssets` 0, `deployableFor(90d)` 0 until §5b.
+
+**On-chain part of Ceremony C complete.** Remaining: T3 manifest PR (Codex, now), T4 step 1 cutover PR + deploy (after T3), §5b on D7 = 2026-09-24 after 06:38Z (fulfil requests 3 + 4 → deposit into v2.2 → `commit(Notice90Days)`), §7 first committed window, T4 step 2 after the keeper fulfils the aggregator exit.

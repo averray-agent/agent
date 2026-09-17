@@ -73,7 +73,7 @@ commitment** on day 7, backend cutover, then the first
 | day | what | who |
 |---|---|---|
 | D0 (2026-09-17) | T0 ✓ 2 DOT; §5a notices ✓ (ids 3, 4 → D7 = 09-24 06:38Z); §1 deploy pool + aggregator; §2 pair; §3 hashes (pre-banked ✓); postage | Pascal |
-| D0–D1 | §4 multisig — all seven; M4/M5/M6 in one sitting (pending counters read 0 now; 09-21 rule) | Pascal, Nova + Vault |
+| D0 (2026-09-17) | §4 multisig ✓ all seven executed 09:27–09:45Z | Pascal, Nova + Vault |
 | D0–D2 | T3/T4 PRs merge; backend on v2.2 (§6) — deposits into v2.2 open | Codex/Claude/Pascal |
 | D7 | §5b fulfil the notice, deposit into v2.2, `commit(Notice90Days)`; §7 first committed window | Pascal |
 | D8–D9 | keeper fulfils the aggregator's exit (T4 step 1 + 7 d) → flip the keeper off (T4 step 2) | keeper / Codex |
@@ -136,6 +136,8 @@ precompile's `approve` requires the caller to hold DOT — the CreditBook
 lesson), pool and lane none.
 
 ## §4 — Multisig session (2-of-3; Nova initiates, Vault countersigns)
+
+**DONE 2026-09-17 09:27–09:45Z — all seven executed first pass, every post-state chain-verified (evidence file §4; blobs in `RUNSHEET_CEREMONY_C_SIGNING_PACKAGE.md`). Pause window ≈5 min.**
 
 Weights `refTime 20e9 / proofSize 800k / deposit 0.5 DOT`. Calls, each a
 `revive.call` built by `@polkadot/api .method.toHex()`; I gate every blob by
