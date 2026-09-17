@@ -260,7 +260,8 @@ test("mainnet carries no escrow pins post-v3-ceremony and points escrowCore at t
   // pool keys now point at deployed v2.1; only the named legacy key needs the
   // exact current-source waiver.
   // Ceremony B adds the v2.1 lane and adapter without any source-drift waiver.
-  assert.equal(contracts.length, 22);
+  // Ceremony C T3 adds four v2.2 identities, with no alias move or new waiver.
+  assert.equal(contracts.length, 26);
   // The v3 ceremony (2026-08-13) deleted both escrow pins per their own reason
   // text. The v2.1 aliases reproduce deployed source; the exact current
   // runtime is pinned only against the retired immutable v2 address.
