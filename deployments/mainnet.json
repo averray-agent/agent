@@ -35,7 +35,11 @@
     "depositPoolV21": "0x9B35A102d656Fb86d798aF81959e09961DEc28E0",
     "aacPoolAggregatorAdapter": "0x1DDcA7097c752580c6561e1bF8C673D6C1665CA5",
     "depositPoolLaneV21": "0x2E01Bff98adB023e4061044F8D1E2516151b3FB3",
-    "hydrationDepositPoolAdapterV21": "0x0e3929F1698550e66dC532beB7790663A7a3734B"
+    "hydrationDepositPoolAdapterV21": "0x0e3929F1698550e66dC532beB7790663A7a3734B",
+    "depositPoolV22": "0x3A2dd08F85009474117CaFC476b6629AE04fB2A9",
+    "aacPoolAggregatorAdapterV22": "0x1b3f9B45e0B8672A4FF95Caf67Bf4dbEa385455f",
+    "depositPoolLaneV22": "0xd3d76AB8f4642B54C04Be8091F01Be66e91a1aa1",
+    "hydrationDepositPoolAdapterV22": "0x2894667cF9A54D94695Ca168B81154aA50955722"
   },
   "contractProvenance": {
     "0x226F14252A98BD2eA140271647De20132F09AF20": {
@@ -208,6 +212,38 @@
       "abiHash": "sha256:64e406be7c2d1a3045b6fadb92d390884924b888c1e5879eeac97c787d85d698",
       "runtimeCodeHash": "sha256:0877ad55f2c108ad8373a1c1b360b811daca323bbcab63555fc04c06cd8501a1",
       "verifiedAt": "2026-09-05T09:49:05.154Z"
+    },
+    "0x3A2dd08F85009474117CaFC476b6629AE04fB2A9": {
+      "sourceCommit": "d37c2eedd2f846f9686ad2fd463569755a63d83c",
+      "creationBytecodeHash": "0xe8cf0ee571b4c64e40afb6763eecea99840cf358ba3a845492e92bb5a8ed8d99",
+      "abiHash": "sha256:5ca679f1a3faa6a4a3b24afcebf5ce076261cbe9ce054a4c1a8ed765e1421834",
+      "runtimeCodeHash": "sha256:2b582d10e6d3bb2647ef3538145023c5251e8fd8ef777f5d6a5f9ba3770c4e1d",
+      "maskedRuntimeHash": "sha256:ade555c3e1f9914aa060c0b57be21a3858ec43ebd3e41b8873aee7cd53181734",
+      "verifiedAt": "2026-09-17T06:58:53.868Z"
+    },
+    "0x1b3f9B45e0B8672A4FF95Caf67Bf4dbEa385455f": {
+      "sourceCommit": "d37c2eedd2f846f9686ad2fd463569755a63d83c",
+      "creationBytecodeHash": "0xf38ef8c4b3fa79accca86fe8b8e9cf98bc3088272e134da8f3fe47ba6c18a730",
+      "abiHash": "sha256:0cf0c795643b11a7711a0b8c7a4d09d9f9d61ca0023da832d257d2615f0fff76",
+      "runtimeCodeHash": "sha256:2495ef2b77063e8c4c5cca56f4b48a0adb3e72744862c06ad782a28d65177f7c",
+      "maskedRuntimeHash": "sha256:d8a083e0db4f8c79b23c1cdea76ce6bbcdd57e7a8c3ceaca8a6ae423e66e4f7f",
+      "verifiedAt": "2026-09-17T06:59:18.209Z"
+    },
+    "0xd3d76AB8f4642B54C04Be8091F01Be66e91a1aa1": {
+      "sourceCommit": "d37c2eedd2f846f9686ad2fd463569755a63d83c",
+      "creationBytecodeHash": "0x997ddcced2590a77dda1a555e07916e9e55231f28e130b5b26d6bc9fc10e1efe",
+      "abiHash": "sha256:53a7d2d069bb023a5c9b7eedae2dac463fb60f6512a67d3471656b817c9d217b",
+      "runtimeCodeHash": "sha256:88cc20b28b25f9279f2faef51f6dacd9a85bdbf2120c79cc0e0585602a423ae2",
+      "maskedRuntimeHash": "sha256:0faec68edf65d6adf5a56677904f4ac8e467b9ec0a59e5247f4184e2fcc18bad",
+      "verifiedAt": "2026-09-17T07:14:25.651Z"
+    },
+    "0x2894667cF9A54D94695Ca168B81154aA50955722": {
+      "sourceCommit": "d37c2eedd2f846f9686ad2fd463569755a63d83c",
+      "creationBytecodeHash": "0xe862dde09519a056c22c17d3bc8071a9b9f1f8df3eeecca4636de7a04ae49a44",
+      "abiHash": "sha256:64e406be7c2d1a3045b6fadb92d390884924b888c1e5879eeac97c787d85d698",
+      "runtimeCodeHash": "sha256:5c1a809625b111b33d25006cfe998bf8e73730b9b47127f4b6c50b61695a317a",
+      "maskedRuntimeHash": "sha256:82acc3690054051a039d2e5f5ccab8a2b6f76fe1c8c9f4704a4d6a92de6220f4",
+      "verifiedAt": "2026-09-17T07:14:25.917Z"
     }
   },
   "knownUnshippedContractChanges": {
@@ -281,7 +317,11 @@
     "depositPoolV21": 19913549,
     "aacPoolAggregatorAdapter": 19913651,
     "depositPoolLaneV21": 20272509,
-    "hydrationDepositPoolAdapterV21": 20272512
+    "hydrationDepositPoolAdapterV21": 20272512,
+    "depositPoolV22": 20746434,
+    "aacPoolAggregatorAdapterV22": 20746446,
+    "depositPoolLaneV22": 20746872,
+    "hydrationDepositPoolAdapterV22": 20746874
   },
   "runtime": {
     "auth": {
@@ -331,7 +371,11 @@
     "hydrationDepositPoolAdapter": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     "depositPool": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
     "depositPoolV21": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
-    "aacPoolAggregatorAdapter": "0x9Ab8531FBb0948C542a31298FD61335f30064239"
+    "aacPoolAggregatorAdapter": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+    "depositPoolV22": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+    "aacPoolAggregatorAdapterV22": "0x9Ab8531FBb0948C542a31298FD61335f30064239",
+    "depositPoolLaneV22": "0x5a6836c6D4d293F6E5377E6c28054F4171915813",
+    "hydrationDepositPoolAdapterV22": "0x5a6836c6D4d293F6E5377E6c28054F4171915813"
   },
   "escrowRedeployedAt": "2026-07-30T10:01:56.005Z",
   "escrowRedeployTxHashes": {

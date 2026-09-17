@@ -250,6 +250,10 @@ test("mainnet manifest covers every deployed source-controlled contract address"
       "aacPoolAggregatorAdapter",
       "depositPoolLaneV21",
       "hydrationDepositPoolAdapterV21",
+      "depositPoolV22",
+      "aacPoolAggregatorAdapterV22",
+      "depositPoolLaneV22",
+      "hydrationDepositPoolAdapterV22",
     ]
   );
   assert.equal(
@@ -308,4 +312,48 @@ test("mainnet manifest covers every deployed source-controlled contract address"
     "HydrationUsdcAdapterV22.sol",
     "HydrationUsdcAdapterV22",
   ]);
+});
+
+test("Ceremony C T3 records all four deployed identities with provenance and no unshipped waiver", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../../deployments/mainnet.json", import.meta.url), "utf8"));
+  const contracts = validateProvenanceManifest(manifest);
+  // Packet PR 1, deployed from d37c2eed; these are identities, not door aliases.
+  const eoa = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
+  const kms = "0x5a6836c6D4d293F6E5377E6c28054F4171915813";
+  for (const [name, address, block, deployer, verifiedAt, creationHash, maskedHash] of [
+    ["depositPoolV22", "0x3A2dd08F85009474117CaFC476b6629AE04fB2A9", 20746434, eoa, "2026-09-17T06:58:53.868Z",
+      "0xe8cf0ee571b4c64e40afb6763eecea99840cf358ba3a845492e92bb5a8ed8d99",
+      "sha256:ade555c3e1f9914aa060c0b57be21a3858ec43ebd3e41b8873aee7cd53181734"],
+    ["aacPoolAggregatorAdapterV22", "0x1b3f9B45e0B8672A4FF95Caf67Bf4dbEa385455f", 20746446, eoa, "2026-09-17T06:59:18.209Z",
+      "0xf38ef8c4b3fa79accca86fe8b8e9cf98bc3088272e134da8f3fe47ba6c18a730",
+      "sha256:d8a083e0db4f8c79b23c1cdea76ce6bbcdd57e7a8c3ceaca8a6ae423e66e4f7f"],
+    ["depositPoolLaneV22", "0xd3d76AB8f4642B54C04Be8091F01Be66e91a1aa1", 20746872, kms, "2026-09-17T07:14:25.651Z",
+      "0x997ddcced2590a77dda1a555e07916e9e55231f28e130b5b26d6bc9fc10e1efe",
+      "sha256:0faec68edf65d6adf5a56677904f4ac8e467b9ec0a59e5247f4184e2fcc18bad"],
+    ["hydrationDepositPoolAdapterV22", "0x2894667cF9A54D94695Ca168B81154aA50955722", 20746874, kms, "2026-09-17T07:14:25.917Z",
+      "0xe862dde09519a056c22c17d3bc8071a9b9f1f8df3eeecca4636de7a04ae49a44",
+      "sha256:82acc3690054051a039d2e5f5ccab8a2b6f76fe1c8c9f4704a4d6a92de6220f4"],
+  ]) {
+    assert.equal(manifest.contracts[name], address, name);
+    assert.equal(manifest.deploymentBlocks[name], block, name);
+    assert.equal(manifest.deployers[name], deployer, name);
+    const { provenance } = contracts.find((contract) => contract.name === name);
+    assert.equal(provenance.sourceCommit, "d37c2eedd2f846f9686ad2fd463569755a63d83c", name);
+    assert.equal(provenance.verifiedAt, verifiedAt, name);
+    assert.equal(provenance.creationBytecodeHash, creationHash, name);
+    assert.equal(provenance.maskedRuntimeHash, maskedHash, name);
+    assert.equal(manifest.knownUnshippedContractChanges[name], undefined, name);
+  }
+});
+
+test("Ceremony C T3 is not a cutover: pool and AAC aliases still name v2.1", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../../deployments/mainnet.json", import.meta.url), "utf8"));
+  for (const name of ["depositPool", "depositPoolV2", "depositPoolV21"]) {
+    assert.equal(manifest.contracts[name], "0x9B35A102d656Fb86d798aF81959e09961DEc28E0", name);
+    assert.equal(manifest.deploymentBlocks[name], 19913549, name);
+    assert.deepEqual(contractArtifactFor(manifest, name), ["DepositPoolV2.sol", "DepositPoolV2"]);
+  }
+  assert.equal(manifest.contracts.aacPoolAggregatorAdapter, "0x1DDcA7097c752580c6561e1bF8C673D6C1665CA5");
+  assert.equal(manifest.deploymentBlocks.aacPoolAggregatorAdapter, 19913651);
+  assert.equal(manifest.contracts.legacyDepositPoolV21, undefined, "legacy alias belongs to T4");
 });
