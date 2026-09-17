@@ -110,3 +110,24 @@ C1 (no new sweeps into v2.1 from the moment T4 deploys) without a new tool.
 | 4 | acceptance wallet `0x60385dD6…c936` | 0.496735 | `0x150d7729c65c1620567ccd436c7c69052e4a95d1fbf059bc6c5ae322e518ac0f` | 20745906 | 0.0158736 DOT |
 
 Both tier 0 (`Notice7Days`), `unlockAt` **2026-09-24T06:38:24Z** (= D7), `fulfilled` false; `lockedShares` now equals each balance, `availableShares` 0; `nextRedeemRequestId` 5. Fulfilment needs ≈10.69 USDC in the buffer (10.24 today, cycle 2's 10.19 returns with the 09-22 recall) — the recall must settle before D7.
+
+## §1 DONE — 2026-09-17 06:58Z (sourceCommit d37c2eed, worktree `.claude/worktrees/ceremony-c`)
+
+| contract | address | tx | block | gasUsed | fee |
+|---|---|---|---|---|---|
+| DepositPoolV22 | `0x3A2dd08F85009474117CaFC476b6629AE04fB2A9` (nonce 24 ✓) | `0x9f0a28790bf6cc45596d4004e77289623a8346ab762edb6bae8dc271ac6ea38a` | 20746434 | 1 280 997 | 1.0247976 DOT |
+| AacPoolAggregatorAdapterV22 | `0x1b3f9B45e0B8672A4FF95Caf67Bf4dbEa385455f` (nonce 25 ✓) | `0x5ac20a5c73b845340fdaea75fb9d0abe5d5358a910b68721b9d81b6e561f527a` | 20746446 | 1 023 985 | 0.819188 DOT |
+
+Total 1.844 DOT (estimate was 1.85). Deployer now nonce 26, 0.948 DOT.
+
+Gate (Claude, chain reads at ≈20746500): masked runtime == artifact for both (`compareMaskedRuntime`, immutables masked);
+`pool.operator()` = `0x5a6836…`, `pool.asset()` = USDC precompile, `pool.policy()` = `0x226F1425…`, `pool.creditPool()` = `0x903B3185…`,
+`pool.venueAdapter()` = `0x0`, `aggregatorAdapters(aggV22)` = false (M3 pending), `NOTICE_90_DAYS` 7 776 000, `VENUE_REBIND_DELAY` 604 800,
+`DEPLOYMENT_EPOCH` 86 400; `aggregator.pool()` = poolV22, `strategyId` = `AAC_LOCKED_DEPOSIT_POOL_V22`, `operator` = `0x5a6836…`.
+Driver evidence: creationBytecodeHash pool `0xe8cf0ee5…` / aggregator `0xf38ef8c4…` (= banked, = Linux build);
+maskedRuntimeHash pool `sha256:ade555c3e1f9914aa060c0b57be21a3858ec43ebd3e41b8873aee7cd53181734`, aggregator `sha256:d8a083e0db4f8c79b23c1cdea76ce6bbcdd57e7a8c3ceaca8a6ae423e66e4f7f`;
+abiHash pool `sha256:5ca679f1…`, aggregator `sha256:0cf0c795…`; 12 confirmations each, receipt + post-state reconfirmed.
+M1–M3 calldata re-encoded independently (✓) — see the driver output banked in the runsheet handback.
+
+Manifest staging for §2: branch `ceremony-c/manifest` in the ceremony worktree adds `contracts.depositPoolV22`,
+`contracts.aacPoolAggregatorAdapterV22`, deploymentBlocks and deployers (provenance entries are T3's).
