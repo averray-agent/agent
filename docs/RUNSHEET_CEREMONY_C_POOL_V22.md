@@ -167,8 +167,17 @@ pair: `approvedStrategies`, `registry.getStrategy`, `aggregatorAdapters`,
 **5a (D0):** `poolV21.requestRedeem(shares, self, Notice7Days)` from
 `0xdc1Ed1061e4a6E35aafb8f4E59B8893113d2EDeC` (9.908397 shares ≈ 10.180516)
 and from the acceptance wallet `0x60385dD643f10934E8F384aC7A04c0D798dFc936`
-(0.496735 ≈ 0.510377). This is the operator's own signature (MetaMask/Talisman,
-the existing pool app path); record request ids and `unlockAt`.
+(0.496735 ≈ 0.510377). **There is no app path** (the pool page is read-only and
+the gateway's "withdraw" templates are the AAC strategy path, not the pool):
+run `docs/evidence/scripts/pool-request-redeem.mjs` (dry run by default; `--commit`
+reads the vaulted key with `op read` inside your shell — dogfood depositor
+`op://mainnet-critical/dogfood-depositor-mainnet/password`, acceptance wallet
+`op://mainnet-critical/acceptance worker wallet/password`) — it refuses if any
+shares are locked or pledged, if a request already exists, or if the key does
+not resolve to `--expected-wallet`. Both dry runs simulated OK on 2026-09-17
+06:37Z (predicted ids 3 and 4, unlockAt ≈ 2026-09-24 06:37Z, so **D7 = 09-24**).
+Record request ids, tx hashes and `unlockAt`. `fulfilRedeem(requestId)` is
+permissionless after `unlockAt`; assets go to the request's receiver (self).
 
 The v2.1 aggregator's **3.034767** shares (≈3.118112; the locked cohort's
 money) have exactly one exit path: `requestFloatExit`/`fulfilFloatExit` are
