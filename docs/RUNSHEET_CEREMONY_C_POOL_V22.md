@@ -72,7 +72,7 @@ commitment** on day 7, backend cutover, then the first
 
 | day | what | who |
 |---|---|---|
-| D0 | §1 deploy pool + aggregator; §2 pair; §3 hashes on a second machine; postage; **start the 7-day notice on the operator's v2.1 shares (§5a)** | Pascal |
+| D0 (2026-09-17) | T0 ✓ 2 DOT; §5a notices ✓ (ids 3, 4 → D7 = 09-24 06:38Z); §1 deploy pool + aggregator; §2 pair; §3 hashes (pre-banked ✓); postage | Pascal |
 | D0–D1 | §4 multisig — all seven; M4/M5/M6 in one sitting (pending counters read 0 now; 09-21 rule) | Pascal, Nova + Vault |
 | D0–D2 | T3/T4 PRs merge; backend on v2.2 (§6) — deposits into v2.2 open | Codex/Claude/Pascal |
 | D7 | §5b fulfil the notice, deposit into v2.2, `commit(Notice90Days)`; §7 first committed window | Pascal |
@@ -176,7 +176,7 @@ reads the vaulted key with `op read` inside your shell — dogfood depositor
 shares are locked or pledged, if a request already exists, or if the key does
 not resolve to `--expected-wallet`. Both dry runs simulated OK on 2026-09-17
 06:37Z (predicted ids 3 and 4, unlockAt ≈ 2026-09-24 06:37Z, so **D7 = 09-24**).
-Record request ids, tx hashes and `unlockAt`. `fulfilRedeem(requestId)` is
+**DONE 2026-09-17 06:38:24Z — request 3 (dogfood, 9.908397, tx `0x9d58f1c6…`) and request 4 (acceptance, 0.496735, tx `0x150d7729…`), both `unlockAt` 2026-09-24T06:38:24Z; chain-verified (evidence file, D0 record).** `fulfilRedeem(requestId)` is
 permissionless after `unlockAt`; assets go to the request's receiver (self).
 
 The v2.1 aggregator's **3.034767** shares (≈3.118112; the locked cohort's

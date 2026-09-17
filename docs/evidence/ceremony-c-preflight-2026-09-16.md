@@ -97,3 +97,16 @@ keeps `KEEPER_ENABLED=1` **until that exit is fulfilled**, keeps the
 `aacPoolAggregatorAdapter` alias on `0x1DDcA709…` until then, and only after
 the fulfilment flips `IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED=0`. This honours
 C1 (no new sweeps into v2.1 from the moment T4 deploys) without a new tool.
+
+## D0 record — 2026-09-17
+
+**T0 top-up:** 2 DOT received; deployer `14Vs8Yih…` free 2.802201 (EVM view 2.792201), nonce still 24 (both views, head 20745747).
+
+**§5a notices (7-day clock started 06:38:24Z; verified from `redeemRequests` and receipts, not the script output):**
+
+| request | owner = receiver | shares | tx | block | fee |
+|---|---|---|---|---|---|
+| 3 | dogfood depositor `0xdc1Ed106…2EDeC` | 9.908397 | `0x9d58f1c607b94674366ab01febab162edf1cf299f0d84d6e3bb2bcab0fe1bd81` | 20745901 | 0.0158736 DOT |
+| 4 | acceptance wallet `0x60385dD6…c936` | 0.496735 | `0x150d7729c65c1620567ccd436c7c69052e4a95d1fbf059bc6c5ae322e518ac0f` | 20745906 | 0.0158736 DOT |
+
+Both tier 0 (`Notice7Days`), `unlockAt` **2026-09-24T06:38:24Z** (= D7), `fulfilled` false; `lockedShares` now equals each balance, `availableShares` 0; `nextRedeemRequestId` 5. Fulfilment needs ≈10.69 USDC in the buffer (10.24 today, cycle 2's 10.19 returns with the 09-22 recall) — the recall must settle before D7.
