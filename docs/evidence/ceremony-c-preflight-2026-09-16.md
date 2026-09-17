@@ -161,3 +161,5 @@ profile** `/deployments/mainnet-cc.json` (driver accepts it: `profile: "mainnet"
 | pool V22 | `0x3A2dd08F85009474117CaFC476b6629AE04fB2A9` | `12KHPTGUeV8xmFH2UCfkgB8Wwb4dVw7ZAHzADBQbERB4WJ1v` | none |
 
 Both postage accounts read 0 DOT at 07:20Z.
+
+**§3 postage DONE 2026-09-17 ≈09:50Z (head 20747179):** venue adapter `0x2894667c…` reads 1.0000 DOT, locked aggregator `0x1b3f9B45…` reads 0.5000 DOT (EVM view; chain-verified). §3 complete: hashes matched on two toolchains and by both drivers, postage in place. Next: §4 Nova session (signing package d34c01a1).
