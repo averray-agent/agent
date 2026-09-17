@@ -18,20 +18,23 @@ function envValue(source, name) {
   return match[1];
 }
 
-test("A6 manifest makes v2.1 canonical and preserves legacy v2 provenance", () => {
+test("Ceremony C A6 makes v2.2 canonical and preserves v2.1 and legacy v2 provenance", () => {
   const manifest = deploymentManifest();
   const contracts = validateProvenanceManifest(manifest);
   const waivers = validateKnownUnshippedContractChanges(manifest, contracts);
 
-  assert.equal(manifest.contracts.depositPool, V21);
-  assert.equal(manifest.contracts.depositPoolV2, V21);
+  assert.equal(manifest.contracts.depositPool, manifest.contracts.depositPoolV22);
+  assert.equal(manifest.contracts.depositPoolV2, manifest.contracts.depositPoolV22);
   assert.equal(manifest.contracts.depositPoolV21, V21);
+  assert.equal(manifest.contracts.legacyDepositPoolV21, V21);
   assert.equal(manifest.contracts.legacyDepositPoolV2, LEGACY_V2);
-  assert.equal(manifest.deploymentBlocks.depositPool, 19_913_549);
-  assert.equal(manifest.deploymentBlocks.depositPoolV2, 19_913_549);
+  assert.equal(manifest.deploymentBlocks.depositPool, 20_746_434);
+  assert.equal(manifest.deploymentBlocks.depositPoolV2, 20_746_434);
+  assert.equal(manifest.deploymentBlocks.depositPoolV21, 19_913_549);
+  assert.equal(manifest.deploymentBlocks.legacyDepositPoolV21, 19_913_549);
   assert.equal(manifest.deploymentBlocks.legacyDepositPoolV2, 19_421_397);
-  // Ceremony C T3 adds four identities without changing these A6 aliases.
-  assert.equal(contracts.length, 26);
+  assert.equal(contracts.length, 27);
+  assert.deepEqual(CONTRACT_ARTIFACTS.legacyDepositPoolV21, ["DepositPoolV2.sol", "DepositPoolV2"]);
   assert.deepEqual(CONTRACT_ARTIFACTS.legacyDepositPoolV2, ["DepositPoolV2.sol", "DepositPoolV2"]);
   assert.equal(waivers.has("depositPool"), false);
   assert.equal(waivers.has("depositPoolV2"), false);

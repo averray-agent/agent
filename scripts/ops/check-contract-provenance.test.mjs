@@ -247,6 +247,7 @@ test("mainnet manifest covers every deployed source-controlled contract address"
       "creditPool",
       "creditBook",
       "depositPoolV21",
+      "legacyDepositPoolV21",
       "aacPoolAggregatorAdapter",
       "depositPoolLaneV21",
       "hydrationDepositPoolAdapterV21",
@@ -270,8 +271,7 @@ test("mainnet manifest covers every deployed source-controlled contract address"
       "464fd8c018c5735a7f1e495c9a2eeb17c378bb0d"
     );
   }
-  // The lane and retired v2 pool compile from the L1 ceremony tree. A6 moves
-  // both canonical pool keys to v2.1 while preserving v2 under its legacy key.
+  // The lane and retired v2 pool still compile from the L1 ceremony tree.
   for (const name of [
     "depositPoolLane",
     "hydrationDepositPoolAdapter",
@@ -285,7 +285,7 @@ test("mainnet manifest covers every deployed source-controlled contract address"
       "9a6f3dffa6010ddbdc6b50617454e1632afe0b99"
     );
   }
-  for (const name of ["depositPool", "depositPoolV2", "depositPoolV21"]) {
+  for (const name of ["depositPoolV21", "legacyDepositPoolV21"]) {
     assert.equal(
       contracts.find((contract) => contract.name === name)?.provenance.sourceCommit,
       "684ab8860f8e2f3ffd76ac0587f742f5e9d517e2"
@@ -346,14 +346,21 @@ test("Ceremony C T3 records all four deployed identities with provenance and no 
   }
 });
 
-test("Ceremony C T3 is not a cutover: pool and AAC aliases still name v2.1", () => {
+test("Ceremony C T4 moves only pool aliases; v2.1 reads and the exit aggregator remain pinned", () => {
   const manifest = JSON.parse(readFileSync(new URL("../../deployments/mainnet.json", import.meta.url), "utf8"));
-  for (const name of ["depositPool", "depositPoolV2", "depositPoolV21"]) {
+  const contracts = validateProvenanceManifest(manifest);
+  for (const name of ["depositPool", "depositPoolV2"]) {
+    assert.equal(manifest.contracts[name], manifest.contracts.depositPoolV22, name);
+    assert.equal(manifest.deploymentBlocks[name], 20746434, name);
+    assert.deepEqual(contractArtifactFor(manifest, name), ["DepositPoolV22.sol", "DepositPoolV22"]);
+    assert.equal(contracts.find((contract) => contract.name === name).provenance.sourceCommit,
+      "d37c2eedd2f846f9686ad2fd463569755a63d83c");
+  }
+  for (const name of ["depositPoolV21", "legacyDepositPoolV21"]) {
     assert.equal(manifest.contracts[name], "0x9B35A102d656Fb86d798aF81959e09961DEc28E0", name);
     assert.equal(manifest.deploymentBlocks[name], 19913549, name);
     assert.deepEqual(contractArtifactFor(manifest, name), ["DepositPoolV2.sol", "DepositPoolV2"]);
   }
   assert.equal(manifest.contracts.aacPoolAggregatorAdapter, "0x1DDcA7097c752580c6561e1bF8C673D6C1665CA5");
   assert.equal(manifest.deploymentBlocks.aacPoolAggregatorAdapter, 19913651);
-  assert.equal(manifest.contracts.legacyDepositPoolV21, undefined, "legacy alias belongs to T4");
 });

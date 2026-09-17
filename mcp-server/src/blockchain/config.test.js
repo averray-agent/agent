@@ -272,7 +272,7 @@ test("loadBlockchainConfig accepts the optional Hydration adapter settlement add
   assert.equal(config.hydrationUsdcAdapterAddress, "0x631a09913b2403b18b2b659a1397916621b29b4c");
 });
 
-test("loadBlockchainConfig resolves the v2.1 cutover and preserves the legacy v2 address", () => {
+test("loadBlockchainConfig moves the door to v2.2 without changing v2.1 reads or the idle aggregator", () => {
   const mainnet = loadBlockchainConfig({
     ...baseEnv,
     RPC_URL: "https://rpc.example",
@@ -284,13 +284,13 @@ test("loadBlockchainConfig resolves the v2.1 cutover and preserves the legacy v2
     AUTH_CHAIN_ID: "420420417"
   });
 
-  // A6 (2026-08-27) moves the active door to v2.1 without orphaning v2.
-  assert.equal(mainnet.depositPoolAddress, "0x9b35a102d656fb86d798af81959e09961dec28e0");
-  assert.equal(mainnet.depositPoolV2Address, "0x9b35a102d656fb86d798af81959e09961dec28e0");
+  // Ceremony C A6 moves only the active door; both old generations stay readable.
+  assert.equal(mainnet.depositPoolAddress, "0x3a2dd08f85009474117cafc476b6629ae04fb2a9");
+  assert.equal(mainnet.depositPoolV2Address, "0x3a2dd08f85009474117cafc476b6629ae04fb2a9");
   assert.equal(mainnet.depositPoolV21Address, "0x9b35a102d656fb86d798af81959e09961dec28e0");
   assert.equal(mainnet.legacyDepositPoolV2Address, "0x6061f0accc3aa66add9508708dd2285bffac5f30");
-  assert.equal(mainnet.depositPoolDeploymentBlock, 19_913_549);
-  assert.equal(mainnet.depositPoolV2DeploymentBlock, 19_913_549);
+  assert.equal(mainnet.depositPoolDeploymentBlock, 20_746_434);
+  assert.equal(mainnet.depositPoolV2DeploymentBlock, 20_746_434);
   assert.equal(mainnet.depositPoolV21DeploymentBlock, 19_913_549);
   assert.equal(mainnet.legacyDepositPoolV2DeploymentBlock, 19_421_397);
   assert.equal(mainnet.aacPoolAggregatorAdapterAddress, "0x1ddca7097c752580c6561e1bf8c673d6c1665ca5");

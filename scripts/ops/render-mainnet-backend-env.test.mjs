@@ -345,6 +345,28 @@ test("spliceInventory: appends the block when markers are absent", () => {
 
 // --- end-to-end against the real committed testnet templates ---------------
 
+test("Ceremony C T4 renders all four POOL_V22 keys from source and preserves the v2.1 exit keeper", () => {
+  const source = readFileSync(new URL("../../deploy/backend.env.template", import.meta.url), "utf8");
+  const generated = generateAll()["deploy/backend.mainnet.env.template"];
+  for (const [key, value] of Object.entries({
+    POOL_V22_CEREMONY_COMPLETE: "1",
+    POOL_V22_LOCKED_KEEPER_ENABLED: "0",
+    POOL_V22_ADDRESS: "0x3A2dd08F85009474117CaFC476b6629AE04fB2A9",
+    POOL_V22_AGGREGATOR_ADDRESS: "0x1b3f9B45e0B8672A4FF95Caf67Bf4dbEa385455f",
+    IDLE_BALANCE_ALLOCATION_FLOAT_TARGET_BPS: "10000"
+  })) {
+    assert.match(source, new RegExp(`^${key}=${value}$`, "mu"));
+    assert.match(generated, new RegExp(`^${key}=${value}$`, "mu"));
+    // A source change must flow through, not be replaced by a renderer literal.
+    const changed = transformTemplate(source.replace(`${key}=${value}`, `${key}=source-probe`),
+      "deploy/backend.env.template");
+    assert.match(changed, new RegExp(`^${key}=source-probe$`, "mu"));
+  }
+  assert.match(generated, /^IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED=1$/mu);
+  assert.match(generated, /^IDLE_BALANCE_ALLOCATION_FLOAT_TARGET_RAW=10000000$/mu);
+  assert.deepEqual(findGeneratedDrift({ "deploy/backend.mainnet.env.template": generated }), []);
+});
+
 test("generateAll: the real transform yields the mainnet essentials", () => {
   const files = generateAll();
   const backend = files["deploy/backend.mainnet.env.template"];

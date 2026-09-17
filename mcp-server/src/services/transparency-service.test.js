@@ -193,6 +193,7 @@ function harness(overrides = {}) {
         xcmWrapperAddress: WRAPPER,
         escrowCoreAddress: ESCROW,
         depositPoolV21Address: LIVE_POOL,
+        depositPoolAddress: overrides.depositPoolAddress ?? LIVE_POOL,
         depositPoolV2Address: LIVE_POOL,
         legacyDepositPoolV2Address: LEGACY_POOL,
         supportedAssets: [{ symbol: "USDC", address: TOKEN, decimals: 6 }]
@@ -438,6 +439,18 @@ test("a held snapshot older than the smallest freshness window forces inline ass
   inlineAssemblyGate.resolve();
   const refreshed = await request;
   assert.equal(refreshed.generatedAtMs, nowMs);
+});
+
+test("T4 transparency retains v2.1 balances after the canonical alias moves and labels deposits retired", async () => {
+  const before = await harness().getSnapshot();
+  const after = await harness({ depositPoolAddress: "0x3A2dd08F85009474117CaFC476b6629AE04fB2A9" }).getSnapshot();
+  assert.equal(after.depositPools.live.label.value, "v2.1 · deposits retired");
+  assert.equal(after.depositPools.live.address.value.toLowerCase(), LIVE_POOL.toLowerCase());
+  for (const field of ["totalAssets", "bufferAssets", "deployedStatus"]) {
+    assert.deepEqual(after.depositPools.live[field], before.depositPools.live[field]);
+  }
+  assert.equal(after.depositPools.live.totalAssets.value, "10.405132");
+  assert.deepEqual(after.depositPools.legacy, before.depositPools.legacy);
 });
 
 test("transparency payload composes flow, escrow, and generation-bound treasury truth", async () => {
