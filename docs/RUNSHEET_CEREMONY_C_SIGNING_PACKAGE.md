@@ -7,9 +7,14 @@ and field-checked (dest, value 0, weights, deposit, data). Weights identical to
 Ceremony B: `refTime 20e9 / proofSize 800 000 / storageDepositLimit 0.5 DOT`
 (prefix `…000700c817a80402d430000700f2052a01…`).
 
-Signer: policy-owner multisig `0x01E6eed856e989201F4FF6346E18EAb7e46C874C`
-= `14LA8vJDLMwBmSw3o1PCXUE2Nc8jwbKk9Pcs6jsV1dc1Kc3Y`. `policy.owner()` reads
-that address (checked 09:16Z); pool v2.2's setters gate on `policy.owner()`.
+Signer: policy-owner multisig `14LA8vJD8JeQYMRd5yhiw3hxD7CK5txhfL9GSNPjzLRKc3YK`
+(2-of-3: vault `1mhf9yyY…`, nova `121pEreu…`, ledger `16UCRMPz…`; record
+`deployments/mainnet-multisig-owner.json`). Its H160 is
+`0x01E6eed856e989201F4FF6346E18EAb7e46C874C` = keccak256(accountId32)[12:],
+re-derived 2026-09-17 09:40Z, and `policy.owner()` reads exactly that; pool
+v2.2's setters gate on `policy.owner()`. Account state at 09:40Z: 6.0009 DOT
+free, no pending multisig calls (so the 09-16 test remark is either done or
+never started — M1 is low-stakes and doubles as the live test).
 Nova Spektr initiates (paste **Call data**), Vault countersigns; before the
 second signature compare the **call hash** Vault shows with the one below.
 
