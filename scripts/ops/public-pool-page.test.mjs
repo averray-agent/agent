@@ -222,6 +222,27 @@ test("marketing pool consumes the same yield and attribution sentences and degra
   assert.match(h.nodes.get("[data-pool-benefits]").textContent, /unavailable/u);
 });
 
+test("T4 pool page keeps the v2.1 position visible after cutover without calling it the current deposit pool", () => {
+  const nodes = new Map();
+  const reader = loadReader({ querySelector(selector) {
+    return selector === '[data-pool-generation="live"]' ? {
+      querySelector(key) { if (!nodes.has(key)) nodes.set(key, { textContent: "" }); return nodes.get(key); }
+    } : null;
+  } });
+  const source = transparencyPayload("v2.1 · deposits retired");
+  const pool = poolPayload();
+  pool.pool = "0x3A2dd08F85009474117CaFC476b6629AE04fB2A9";
+  reader.renderTransparency(reader.parseTransparency(source), reader.parsePool(pool));
+  assert.equal(nodes.get("[data-pool-generation-label]").textContent, "v2.1 · deposits retired");
+  assert.equal(nodes.get("[data-pool-generation-address]").textContent, source.depositPools.live.address.value);
+  assert.equal(nodes.get("[data-pool-generation-total]").textContent, "14.478654 USDC");
+  assert.match(nodes.get("[data-pool-generation-role]").textContent, /Earlier pool.*deposit door retired; withdrawals unchanged/u);
+  assert.doesNotMatch(nodes.get("[data-pool-generation-role]").textContent, /Current pool/u);
+  pool.pool = source.depositPools.live.address.value;
+  reader.renderTransparency(reader.parseTransparency(source), reader.parsePool(pool));
+  assert.equal(nodes.get("[data-pool-generation-role]").textContent, "Current pool · open to new deposits");
+});
+
 test("pool history pin 5 — the legacy card follows not_deployed and never invents a venue position", async () => {
   const page = await readFile(PAGE, "utf8");
   const legacySource = page.match(/data-pool-generation="legacy"([\s\S]*?)<\/article>/u)?.[1];

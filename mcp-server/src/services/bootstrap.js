@@ -296,6 +296,32 @@ export function createPlatformService() {
   return platformService;
 }
 
+export function createDepositPoolObservability({ gateway, catalogueDailyBudget, yieldAttributionService }) {
+  const current = new DepositPoolObservabilityService({
+    poolAddress: gateway.config.depositPoolAddress,
+    deploymentBlock: gateway.config.depositPoolDeploymentBlock,
+    provider: gateway.provider,
+    catalogueDailyBudget,
+    yieldAttributionService
+  });
+  const services = [current];
+  // Retired generations remain readable after the canonical door moves.
+  for (const [poolAddress, deploymentBlock] of [
+    [gateway.config.depositPoolV21Address, gateway.config.depositPoolV21DeploymentBlock],
+    [gateway.config.legacyDepositPoolV2Address, gateway.config.legacyDepositPoolV2DeploymentBlock]
+  ]) {
+    if (poolAddress && !services.some((service) => service.poolAddress.toLowerCase() === poolAddress.toLowerCase())) {
+      services.push(new DepositPoolObservabilityService({
+        poolAddress, deploymentBlock, provider: gateway.provider, catalogueDailyBudget
+      }));
+    }
+  }
+  return new DepositPoolObservabilitySelector({
+    defaultPoolAddress: gateway.config.depositPoolAddress,
+    services
+  });
+}
+
 export function createDepositPoolDoor({
   gateway,
   authConfig,
@@ -1038,31 +1064,9 @@ export async function createPlatformRuntime() {
       stateStore
     })
   );
-  const depositPoolObservability = initStep("init-deposit-pool-observability", logger, () => {
-    const current = new DepositPoolObservabilityService({
-      poolAddress: gateway.config.depositPoolAddress,
-      deploymentBlock: gateway.config.depositPoolDeploymentBlock,
-      provider: gateway.provider,
-      catalogueDailyBudget,
-      yieldAttributionService
-    });
-    const services = [current];
-    if (
-      gateway.config.legacyDepositPoolV2Address
-      && gateway.config.legacyDepositPoolV2Address !== gateway.config.depositPoolAddress
-    ) {
-      services.push(new DepositPoolObservabilityService({
-        poolAddress: gateway.config.legacyDepositPoolV2Address,
-        deploymentBlock: gateway.config.legacyDepositPoolV2DeploymentBlock,
-        provider: gateway.provider,
-        catalogueDailyBudget
-      }));
-    }
-    return new DepositPoolObservabilitySelector({
-      defaultPoolAddress: gateway.config.depositPoolAddress,
-      services
-    });
-  });
+  const depositPoolObservability = initStep("init-deposit-pool-observability", logger, () =>
+    createDepositPoolObservability({ gateway, catalogueDailyBudget, yieldAttributionService })
+  );
   const creditPoolObservability = initStep("init-credit-pool-observability", logger, () =>
     new CreditPoolObservabilityService({
       poolAddress: gateway.config.creditPoolAddress,

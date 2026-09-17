@@ -89,7 +89,10 @@ export class TransparencyService {
     this.depositPoolReader = depositPoolReader
       ?? (gateway?.provider ? new EvmTransparencyDepositPoolReader(gateway.provider) : undefined);
     this.depositPools = Object.freeze([
-      { key: "live", label: "Live v2.1", address: gateway?.config?.depositPoolV21Address },
+      { key: "live", label: gateway?.config?.depositPoolAddress
+          && gateway.config.depositPoolAddress.toLowerCase() !== gateway?.config?.depositPoolV21Address?.toLowerCase()
+          ? "v2.1 · deposits retired" : "Live v2.1",
+        address: gateway?.config?.depositPoolV21Address },
       { key: "legacy", label: "Legacy v2", address: gateway?.config?.legacyDepositPoolV2Address }
     ]);
     this.selfIdentityRegistry = selfIdentityRegistry instanceof SelfIdentityRegistry

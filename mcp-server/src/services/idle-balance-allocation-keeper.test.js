@@ -1,11 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Interface } from "ethers";
 
 import { MemoryStateStore } from "../core/state-store.js";
 import { createIdleBalanceConsentRoutes } from "../protocols/http/idle-balance-consent-routes.js";
 import {
   AAC_IDLE_DEPOSIT_POOL_V21,
   ALLOCATION_KEEPER_WRITE_FUNCTIONS,
+  ALLOCATION_KEEPER_ADAPTER_WRITE_ABI,
+  EvmIdleBalanceAllocationChain,
   DEPLOYED_AAC_POOL_AGGREGATOR_ADAPTER,
   DEPLOYED_DEPOSIT_POOL_V21,
   allocationKeeperWriteFunctionNames,
@@ -167,10 +170,11 @@ test("headroom arithmetic allocates 3.0 USDC from 5.0 and skips 2.4 below the 0.
   assert.deepEqual(debt.chain.calls.allocate, [{ wallet: WALLET_A, amountRaw: "2000000" }]);
 });
 
-test("keeper-enable env off causes zero chain interaction regardless of consents", async () => {
+test("KEEPER_ENABLED=0 starts no tick and causes zero chain interaction regardless of consents", async () => {
   const config = loadIdleBalanceAllocationKeeperConfig({
     IDLE_BALANCE_ALLOCATION_ROUTE_LIVE: "true",
-    IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED: "false"
+    IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED: "0",
+    IDLE_BALANCE_ALLOCATION_FLOAT_TARGET_BPS: "10000"
   });
   const defaults = loadIdleBalanceAllocationKeeperConfig({});
   assert.equal(defaults.routeLive, false);
@@ -195,10 +199,65 @@ test("keeper-enable env off causes zero chain interaction regardless of consents
     now: () => NOW
   });
 
+  keeper.schedulerLoop.runOnceAndSchedule = () => assert.fail("disabled keeper scheduled a tick");
+  keeper.start();
+  assert.equal(keeper.running, false);
   const result = await keeper.runOnce(NOW);
 
   assert.equal(result.skipped[0].reason, "allocation_keeper_disabled");
   assert.equal(chainInteractions, 0);
+});
+
+test("C1 FLOAT_TARGET_BPS=10000 requests the full v2.1 share balance once at tier 0, never sweeps", async () => {
+  const config = loadIdleBalanceAllocationKeeperConfig({
+    AUTH_CHAIN_ID: "420420419",
+    IDLE_BALANCE_ALLOCATION_ROUTE_LIVE: "1",
+    IDLE_BALANCE_ALLOCATION_KEEPER_ENABLED: "1",
+    IDLE_BALANCE_ALLOCATION_FLOAT_TARGET_BPS: "10000"
+  }, liveConfig());
+  const h = await harness({ config });
+  // Public-chain snapshot at cutover preparation: retain non-unit share NAV.
+  const poolShares = 3_034_767n;
+  const poolAssets = 3_118_112n;
+  h.chain.float = floatState({ floatRaw: 1_039_370n, totalAssetsRaw: 4_157_482n, totalSharesRaw: 4_073_522n,
+    poolSharesRaw: poolShares, poolAssetsRaw: poolAssets });
+  const evm = new EvmIdleBalanceAllocationChain({ provider: {}, signer: {}, ...liveConfig() });
+  evm.poolReader = {
+    async convertToShares(assets) { return assets * poolShares / poolAssets; },
+    async convertToAssets(shares) { return shares * poolAssets / poolShares; }
+  };
+  const iface = new Interface(ALLOCATION_KEEPER_ADAPTER_WRITE_ABI);
+  const sends = [];
+  evm.adapterWriter = {
+    interface: iface,
+    async requestFloatExit(shares, tier) {
+      sends.push({ shares, tier });
+      return { hash: `0x${"ab".repeat(32)}`, wait: async () => ({ blockNumber: 88,
+        logs: [iface.encodeEventLog(iface.getEvent("FloatExitRequested"), [7n, shares, tier])] }) };
+    }
+  };
+  h.chain.sharesForPoolAssets = evm.sharesForPoolAssets.bind(evm);
+  h.chain.requestFloatExit = evm.requestFloatExit.bind(evm);
+  const first = await h.keeper.runOnce(NOW);
+  assert.equal(first.floatAction.action, "requestFloatExit");
+  assert.equal(first.floatAction.requestId, "7");
+  assert.deepEqual(sends, [{ shares: poolShares, tier: 0 }]);
+  const next = await h.keeper.runOnce(NOW);
+  assert.equal(next.floatAction.action, "awaitFloatExit");
+  assert.equal(next.floatAction.requestId, "7");
+  assert.equal(sends.length, 1, "pending exit must not be requested twice");
+  // After maturity the same enabled keeper returns the shares to float, without re-entry.
+  h.chain.getFloatExit = async () => ({ owner: DEPLOYED_AAC_POOL_AGGREGATOR_ADAPTER,
+    receiver: DEPLOYED_AAC_POOL_AGGREGATOR_ADAPTER, unlockAt: NOW.getTime() / 1000, fulfilled: false });
+  h.chain.fulfilFloatExit = async (id) => {
+    assert.equal(id, "7");
+    h.chain.float = floatState({ floatRaw: 4_157_482n, totalAssetsRaw: 4_157_482n, totalSharesRaw: 4_073_522n });
+    return receipt(89, { requestIdRaw: id });
+  };
+  assert.equal((await h.keeper.runOnce(NOW)).floatAction.action, "fulfilFloatExit");
+  await h.keeper.runOnce(NOW);
+  assert.deepEqual(h.chain.calls.sweep, []);
+  assert.equal(sends.length, 1);
 });
 
 test("keeper write surface is structurally closed to five functions and AAC_IDLE_DEPOSIT_POOL_V21", () => {
@@ -380,7 +439,7 @@ test("matured oversized float request fulfils then sweeps surplus and restores a
   assert.equal((await h.stateStore.getServiceState("idle-balance-allocation-keeper:float")).pendingExit, null);
 });
 
-async function harness({ wallets = [] } = {}) {
+async function harness({ wallets = [], config = liveConfig() } = {}) {
   const stateStore = new MemoryStateStore();
   for (const wallet of wallets) {
     await stateStore.putIdleBalanceConsent({
@@ -404,7 +463,7 @@ async function harness({ wallets = [] } = {}) {
   };
   let id = 0;
   const keeper = new IdleBalanceAllocationKeeperService({
-    config: liveConfig(),
+    config,
     stateStore,
     consentService: consent,
     chainReader: chain,

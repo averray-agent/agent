@@ -17,7 +17,7 @@ export const POOL_V22_SHARED_DISCLOSURE =
 export const POOL_V22_MIGRATION_PENDING =
   "Ceremony C is pending. At migration the v2.1 deposit door will pause new deposits; holders may request withdrawal with 7-day notice and redeposit into v2.2 at their leisure. Outside holders in v2.1 and legacy v2 are never moved by Averray.";
 export const POOL_V22_MIGRATION_READY =
-  "The v2.2 door is configured after Ceremony C. The v2.1 deposit door is retired; holders may request withdrawal with 7-day notice and redeposit into v2.2 at their leisure. Outside holders in v2.1 and legacy v2 are never moved by Averray.";
+  "The v2.2 door is configured after Ceremony C. The v2.1 deposit door is retired; its contract has no pause. Existing v2.1 positions remain visible and withdrawals are unchanged: holders may request withdrawal with 7-day notice and redeposit into v2.2 at their leisure. Outside holders in v2.1 and legacy v2 are never moved by Averray.";
 
 export class PoolV22CommitmentReader {
   constructor(provider, poolAddress) {

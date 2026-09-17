@@ -226,9 +226,11 @@
         var isCurrent = item.address.value.toLowerCase() === pool.pool.toLowerCase();
         setText(
           "[data-pool-generation-role]",
-          isCurrent && !pool.venue.depositsBlocked
-            ? "Current pool · open to new deposits"
-            : "Current pool · deposits are not open",
+          !isCurrent
+            ? "Earlier pool · deposit door retired; withdrawals unchanged. Redeposit into the current pool at your leisure."
+            : !pool.venue.depositsBlocked
+              ? "Current pool · open to new deposits"
+              : "Current pool · deposits are not open",
           host
         );
       } else {
