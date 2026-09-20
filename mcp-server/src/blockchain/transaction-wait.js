@@ -47,20 +47,24 @@ export async function probeTransactionReceipts(tx, runners, emit, phase) {
             ? { receipt: value ? "mined" : "null", blockNumber: value?.blockNumber ?? null, status: value?.status ?? null }
             : { latestNonce: value })
         });
-        return value;
+        return { value, ok: true };
       } catch (error) {
         // Do not log provider messages, URLs with credentials, or signed bytes.
         emit("tx_wait_probe", { phase, runner: runnerLabel, kind, result: "error", code: error?.code ?? "RPC_ERROR" });
-        return null;
+        return { value: null, ok: false };
       }
     };
-    const [receipt] = await Promise.all([
+    const [receipt, nonce] = await Promise.all([
       probe(() => runner.getTransactionReceipt(tx.hash), "receipt"),
       ...(phase === "recovery" && tx.from
         ? [probe(() => runner.getTransactionCount(tx.from, "latest"), "nonce")]
         : [])
     ]);
-    return { receipt, runner: runnerLabel };
+    return {
+      receipt: receipt.value, receiptReadSucceeded: receipt.ok,
+      latestNonce: nonce?.value ?? null, nonceReadSucceeded: nonce?.ok === true,
+      runner: runnerLabel
+    };
   }));
 }
 

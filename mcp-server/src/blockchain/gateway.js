@@ -31,7 +31,7 @@ import {
 } from "./abis.js";
 import { loadBlockchainConfig } from "./config.js";
 import { KmsSigner } from "./kms-signer.js";
-import { waitForTransaction } from "./transaction-wait.js";
+import { probeTransactionReceipts, waitForTransaction } from "./transaction-wait.js";
 import { applyGasFeeBuffer } from "./fee-buffer.js";
 import {
   bindSignerToWriteBroadcaster,
@@ -4100,6 +4100,26 @@ export class BlockchainGateway {
       totalAssets: BigInt(rawTotalAssets ?? 0),
       totalShares: BigInt(rawTotalShares ?? 0)
     };
+  }
+
+  async isBrokeredTransactionDead(transaction) {
+    const { txHash, nonce } = transaction ?? {};
+    if (!/^0x[0-9a-f]{64}$/iu.test(txHash ?? "") || !Number.isSafeInteger(nonce) || nonce < 0) return false;
+    // Timeout responses intentionally contain no signer identity. Recover the
+    // original sender from its durable hash journal, not today's signer (which
+    // may have rotated). Missing evidence cannot authorize another broadcast.
+    const recorded = await this.transactionStore?.getServiceState(`brokered-tx:${txHash.toLowerCase()}`);
+    if (recorded?.nonce !== nonce || !/^0x[0-9a-f]{40}$/iu.test(recorded?.from ?? "")) return false;
+    const runners = this.writeBroadcaster?.receiptRunners ?? [];
+    if (runners.length === 0) return false;
+    const startedAt = Date.now();
+    const results = await probeTransactionReceipts({ hash: txHash, from: recorded.from }, runners, (event, fields) => {
+      this.logger?.info?.({ event, stage: "claimJob.deadCheck", txHash, nonce, ms: Date.now() - startedAt, ...fields }, event);
+    }, "recovery");
+    return results.every(({ receipt, receiptReadSucceeded, latestNonce, nonceReadSucceeded }) =>
+      receiptReadSucceeded && receipt === null && nonceReadSucceeded
+      && Number.isSafeInteger(latestNonce) && latestNonce > nonce
+    );
   }
 
   async waitForTransaction(tx, stage, jobId = undefined) {

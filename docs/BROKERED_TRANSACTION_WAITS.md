@@ -44,9 +44,28 @@ stage, txHash and nonce; claim responses also include the recoverable sessionId.
 Before the claim broadcast, `brokered-claim:<sessionId>` pins the admitted job and
 economics. A subsequent session read or claim retry can finalize the same wallet's
 landed claim from those terms without another broadcast. A still-pending claim
-refuses another send and retains its hash. Existing submit/settlement chain
-reconciliation and verifier decisions are unchanged; their transaction hashes
-are retained in the job journal too.
+refuses another send and retains its hash **while that transaction may still land**.
+If the job is no longer Open (unless already Claimed by this wallet), the pending
+intent is cleared with the ordinary `job_already_claimed` / `job_not_claimable`
+conflict. A cleared session read returns the ordinary 404, not a timeout.
+
+For an Open job, every write runner must successfully return **no receipt** and a
+latest nonce for the persisted sender **strictly greater** than the recorded
+nonce before the transaction is considered dead. An error, timeout, missing
+sender/nonce evidence, absent runners, any receipt, or any unconsumed/older nonce
+keeps it pending. The same two-second parallel probes apply. A dead transaction
+clears the intent and emits `brokered_claim_dead_by_nonce` with hash and nonce.
+A claim request then re-runs normal admission before one fresh broadcast; a
+session read never broadcasts. Clearing writes a `{cleared: true, reason, at}`
+tombstone and discards the actionable intent (there is no delete API).
+Existing submit/settlement reconciliation and verifier decisions are unchanged;
+their transaction hashes are retained in the job journal too.
+
+**H2 — retention:** `brokered-tx:*` and `brokered-job:*` records are written for
+every transaction and never expire today. This is accepted at today's volume.
+Follow-up [#1394](https://github.com/averray-agent/agent/issues/1394) tracks a
+terminal-record cap or TTL when the state store gains retention support, without
+pruning unresolved hashes or active recovery evidence.
 
 The external-posting observer recognizes a platform create only when both its
 transaction hash and poster match the `ensureJob.create` journal. This suppresses

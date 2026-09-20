@@ -331,10 +331,13 @@ export class JobExecutionService {
       const pendingTransaction = pendingClaim?.timeout ?? await this.stateStore.getServiceState?.(
         `brokered-job:${this.blockchainGateway?.toJobId?.(jobId)}:claimJob`
       );
-      if (pendingClaim?.claim && pendingTransaction?.txHash && (
+      if (pendingClaim?.claim && !pendingClaim.cleared && pendingTransaction?.txHash && (
         pendingClaim.timeout || (pendingTransaction.status !== "failed" && pendingTransaction.waitStartedAt >= pendingClaim.startedAt)
       )) {
-        return await this.convergePendingClaim(pendingClaim.claim, pendingTransaction);
+        const converged = await this.convergePendingClaim(pendingClaim.claim, pendingTransaction);
+        if (converged) return converged;
+        // A proven-dead transaction was cleared. Re-run normal admission below;
+        // its old snapshot/economics are not permission for the new claim.
       }
 
       const liveJobSession = refreshedActiveJobSession ?? await this.stateStore.findSessionByJobId(jobId);
@@ -536,7 +539,9 @@ export class JobExecutionService {
           sessionId, wallet, jobId, chainJobId, claimEconomics, jobSnapshot: claimJobSnapshot,
           workerExposure, dailyExposure, catalogueDailyBudget, job, protocol, idempotencyKey, claimantAttribution
         };
-        await this.stateStore.upsertServiceState?.(`brokered-claim:${sessionId}`, { claim, startedAt: Date.now(), timeout: null });
+        await this.stateStore.upsertServiceState?.(`brokered-claim:${sessionId}`, {
+          claim, startedAt: Date.now(), timeout: null, cleared: false, reason: null, at: null
+        });
         try {
           await this.blockchainGateway.claimJob(jobId, wallet);
         } catch (error) {
@@ -1286,14 +1291,19 @@ export class JobExecutionService {
     const existing = await this.stateStore.getSession(sessionId);
     if (existing) return existing;
     const pending = await this.stateStore.getServiceState?.(`brokered-claim:${sessionId}`);
-    if (!pending?.claim) return this.requireSession(sessionId);
+    if (!pending?.claim || pending.cleared) return this.requireSession(sessionId);
     const lockOwner = randomUUID();
     const acquired = await this.stateStore.acquireClaimLock?.(sessionId, lockOwner, this.getClaimLockTtlSeconds(pending.claim.job));
     if (acquired === false) throw new ConflictError(`Claim already in progress for ${sessionId}`, "claim_in_progress");
     try {
-      return await this.convergePendingClaim(pending.claim, pending.timeout ?? await this.stateStore.getServiceState?.(
-        `brokered-job:${pending.claim.chainJobId}:claimJob`
+      // Another request may have cleared/replaced the intent before this read
+      // acquired the lock. Never resurrect the pre-lock copy.
+      const current = await this.stateStore.getServiceState?.(`brokered-claim:${sessionId}`);
+      if (!current?.claim || current.cleared) return this.requireSession(sessionId);
+      const converged = await this.convergePendingClaim(current.claim, current.timeout ?? await this.stateStore.getServiceState?.(
+        `brokered-job:${current.claim.chainJobId}:claimJob`
       ));
+      return converged ?? this.requireSession(sessionId);
     } finally {
       await this.stateStore.releaseClaimLock?.(sessionId, lockOwner);
     }
@@ -1306,11 +1316,37 @@ export class JobExecutionService {
     if (Number(live?.state) === ESCROW_JOB_STATE_CLAIMED && walletsEqual(live.worker, claim.wallet)) {
       return this.finalizeClaim({ ...claim, chainClaimTiming: this.buildChainClaimTiming(live) });
     }
-    // A timeout is not permission to broadcast another claim, even if a lagging
-    // chain view still says Open. Keep the recorded hash available to the caller.
+    if (Number(live?.state) !== ESCROW_JOB_STATE_OPEN) {
+      const reason = Number(live?.state) === ESCROW_JOB_STATE_CLAIMED ? "job_already_claimed" : "job_not_claimable";
+      await this.clearPendingClaim(claim.sessionId, reason);
+      throw new ConflictError(
+        reason === "job_already_claimed"
+          ? `Job ${claim.jobId} is already claimed by another wallet.`
+          : `Job ${claim.jobId} is not claimable in its current on-chain state.`,
+        reason
+      );
+    }
+    if (await this.blockchainGateway.isBrokeredTransactionDead?.(transaction)) {
+      await this.clearPendingClaim(claim.sessionId, "brokered_claim_dead_by_nonce");
+      this.logger.info?.({
+        event: "brokered_claim_dead_by_nonce", jobId: claim.jobId, sessionId: claim.sessionId,
+        txHash: transaction.txHash, nonce: transaction.nonce
+      }, "brokered_claim_dead_by_nonce");
+      return undefined;
+    }
+    // Never re-broadcast while the recorded transaction may still land. A null
+    // receipt alone, an unconsumed nonce, or any runner error is not a dead tx.
     throw brokeredTransactionTimeout({
       stage: "claimJob", txHash: transaction?.txHash ?? null, nonce: transaction?.nonce ?? null,
       sessionId: claim.sessionId, jobId: claim.jobId
+    });
+  }
+
+  async clearPendingClaim(sessionId, reason) {
+    // Service-state upsert merges; explicitly discard the actionable payload as
+    // well as marking a tombstone. There is no delete/TTL API in either store.
+    await this.stateStore.upsertServiceState(`brokered-claim:${sessionId}`, {
+      cleared: true, reason, at: new Date().toISOString(), claim: null, timeout: null, startedAt: null
     });
   }
 

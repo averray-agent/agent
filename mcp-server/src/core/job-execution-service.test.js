@@ -1245,6 +1245,7 @@ test("landed-after-timeout claim converges on next session read after restart wi
     return Boolean(sessionId);
   });
   assert.equal((await stateStore.getServiceState(`brokered-claim:${sessionId}`)).timeout.txHash, txHash);
+  state = 1;
   await assert.rejects(service.claimJob(WALLET, job.id, "http", "deadline-retry"), { code: "brokered_tx_timeout" });
   assert.equal(broadcasts, 1, "still-pending is not permission to send again");
   state = 2;
