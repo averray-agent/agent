@@ -3,7 +3,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { Wallet, verifyTypedData } from "ethers";
+import { Wallet, id, verifyTypedData } from "ethers";
 
 import {
   runWorkerCanary,
@@ -24,8 +24,8 @@ import * as workerCanaryModule from "./run-worker-canary.mjs";
 
 // ── fixtures ──────────────────────────────────────────────────────────────
 const WORKER = "0x30BC468dA4E95a8FA4b3f2043c86687a57CdeE05";
-const CHAIN_JOB_ID = "0xa4b8e4ab00000000000000000000000000000000000000000000000000cb4db0";
 const JOB_ID = "worker-canary-test-1";
+const CHAIN_JOB_ID = id(JOB_ID);
 const FIXED_MS = 1_900_000_000_000;
 const REWARD_RAW = 100_000n; // 0.1 USDC, 6 decimals
 const PAYOUT_TX_HASH = `0x${"ab".repeat(32)}`;
@@ -549,6 +549,60 @@ test("a mid-loop failure archives the job and still writes sanitized stage evide
   assert.equal(doc.stages.submit.status, "failed");
   assert.equal(typeof doc.timings.submit, "number");
   assert.ok(!JSON.stringify(doc).includes("eyJsecret"), "failure evidence must redact bearer tokens");
+});
+
+test("canary artifacts distinguish landed and never-landed claim/submit failures before cleanup", async () => {
+  for (const [stage, state, expected] of [
+    ["claim", 1, "claim_not_landed"], ["claim", 2, "claim_landed"],
+    ["submit", 2, "submit_not_landed"], ["submit", 3, "submit_landed"]
+  ]) {
+    const dir = await mkdtemp(join(tmpdir(), "canary-chain-failure-"));
+    const path = join(dir, "artifact.json");
+    const operator = okOperatorClient();
+    let observed = false;
+    const reader = okChainReader({ async readEscrowJob(chainJobId) {
+      assert.equal(chainJobId, id(JOB_ID));
+      assert.ok(!operator.calls.some(([kind, route]) => kind === "request" && route === "/admin/jobs/lifecycle"));
+      observed = true;
+      return { state, worker: state === 1 ? `0x${"00".repeat(20)}` : WORKER };
+    } });
+    const worker = okWorkerClient({ [stage === "claim" ? "claimJob" : "submitWork"]: async () => { throw new Error("request deadline"); } });
+    await assert.rejects(runFull({ operatorClient: operator, workerClient: worker, chainReader: reader,
+      env: { WORKER_CANARY_EVIDENCE_FILE: path } }), /request deadline/u);
+    const doc = JSON.parse(await readFile(path, "utf8"));
+    assert.equal(observed, true);
+    assert.equal(doc.chainJobId, id(JOB_ID));
+    assert.equal(doc.failure.stage, stage);
+    assert.equal(typeof doc.failure.elapsedMs, "number");
+    assert.equal(doc.stages[stage].chainObservation.state, state);
+    assert.equal(doc.stages[stage].chainObservation.classification, expected);
+    assert.equal(doc.cleanup.jobArchived, true);
+  }
+});
+
+test("canary chain HTTP fetch has an explicit abort below the server wait bound; cleanup is unchanged", async () => {
+  const calls = [];
+  const originalTimeout = AbortSignal.timeout;
+  const budgets = [];
+  const timeoutMock = test.mock.method(AbortSignal, "timeout", (ms) => {
+    budgets.push(ms);
+    return originalTimeout(ms);
+  });
+  try {
+    const fetch = workerCanaryModule.createCanaryChainFetch(async (url, options) => { calls.push({ url, options }); });
+    for (const path of ["/jobs/claim", "/jobs/submit", "/verifier/run", "/admin/verifier/run", "/admin/jobs/lifecycle"]) {
+      await fetch(`https://api.example.test${path}`, { method: "POST" });
+    }
+    assert.deepEqual(budgets, [50_000, 50_000, 50_000, 50_000]);
+    assert.ok(calls.slice(0, 4).every(({ options }) => options.signal instanceof AbortSignal));
+    assert.equal(calls.at(-1).options.signal, undefined);
+    const abort = new AbortController();
+    abort.abort();
+    await fetch("https://api.example.test/jobs/claim", { signal: abort.signal });
+    assert.equal(calls.at(-1).options.signal.aborted, true);
+  } finally {
+    timeoutMock.mock.restore();
+  }
 });
 
 test("WORKER_CANARY_KEEP_JOB leaves the job live (no archive)", async () => {

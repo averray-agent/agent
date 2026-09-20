@@ -84,6 +84,23 @@ function makeService({
   };
 }
 
+test("own brokered creates match the broadcast journal; unrelated signer creates still warn", async () => {
+  const warnings = [];
+  const { service, store } = makeService({ logger: { warn: (record) => warnings.push(record) } });
+  const observation = {
+    jobId: EXTERNAL_JOB_ID, specHash: `0x${"b".repeat(64)}`, poster: POSTER,
+    asset: USDC, reward: "100000", opsReserve: "0", contingencyReserve: "0",
+    fundedAt: "2026-09-19T11:29:36.000Z", txHash: `0x${"c".repeat(64)}`,
+    blockNumber: "20832906", finalized: true
+  };
+  await store.upsertServiceState(`brokered-job:${EXTERNAL_JOB_ID}:ensureJob.create`, { txHash: observation.txHash, from: POSTER });
+  assert.equal((await service.reconcileFinalizedCreation(observation)).outcome, "brokered");
+  assert.equal(warnings.length, 0);
+  assert.equal((await service.reconcileFinalizedCreation({ ...observation, txHash: `0x${"d".repeat(64)}` })).outcome, "unknown");
+  assert.equal((await service.reconcileFinalizedCreation({ ...observation, poster: OTHER_POSTER })).outcome, "unknown");
+  assert.equal(warnings.length, 2);
+});
+
 function feeQuoteGateway(overrides = {}) {
   return {
     async previewProtocolFeeForAsset(_asset, rewardAmount) {

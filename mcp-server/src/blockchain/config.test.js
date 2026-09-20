@@ -12,6 +12,15 @@ const baseEnv = {
   SUPPORTED_ASSETS: "DOT:0x5555555555555555555555555555555555555555"
 };
 
+test("brokered receipt timeout defaults to 60 seconds and accepts only bounded integer overrides", () => {
+  const env = { ...baseEnv, RPC_URL: "https://rpc.example.test" };
+  assert.equal(loadBlockchainConfig(env).brokeredTxTimeoutMs, 60_000);
+  assert.equal(loadBlockchainConfig({ ...env, BROKERED_TX_TIMEOUT_MS: "45000" }).brokeredTxTimeoutMs, 45_000);
+  for (const value of ["0", "999", "120001", "NaN"]) {
+    assert.throws(() => loadBlockchainConfig({ ...env, BROKERED_TX_TIMEOUT_MS: value }), /BROKERED_TX_TIMEOUT_MS/u);
+  }
+});
+
 test("loadBlockchainConfig prefers DWELLER_RPC_URL", () => {
   const config = loadBlockchainConfig({
     ...baseEnv,

@@ -195,6 +195,10 @@ export class WriteRpcBroadcaster {
     return providerUsed;
   }
 
+  get receiptRunners() {
+    return [...this.#providers];
+  }
+
   #recordProvider(response, provider, transactionHash) {
     const key = normalizeTransactionHash(transactionHash);
     if (key) {

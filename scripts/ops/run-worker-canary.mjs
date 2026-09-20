@@ -46,13 +46,14 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Contract, FetchRequest, JsonRpcProvider, Wallet, getAddress, hexlify, randomBytes } from "ethers";
+import { Contract, FetchRequest, JsonRpcProvider, Wallet, getAddress, hexlify, id, randomBytes } from "ethers";
 
 import { AgentPlatformClient } from "../../sdk/agent-platform-client.js";
 import { DEFAULT_ESCROW_ASSET } from "../../mcp-server/src/core/assets.js";
 import { AGENT_ACCOUNT_ABI, ESCROW_CORE_ABI } from "../../mcp-server/src/blockchain/abis.js";
 import { resolveHostedWorkerLoopAuth } from "./run-hosted-worker-loop.mjs";
 import { readOpSecret } from "./get-admin-refresh-token.mjs";
+import { DEFAULT_BROKERED_TX_TIMEOUT_MS } from "../../mcp-server/src/blockchain/transaction-wait.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
@@ -107,6 +108,7 @@ export async function runWorkerCanary({
   log = console.log
 } = {}) {
   const config = parseConfig(env);
+  fetchImpl = createCanaryChainFetch(fetchImpl, env.BROKERED_TX_TIMEOUT_MS);
   const startedAt = now();
   const timings = {};
   const stages = {};
@@ -122,7 +124,8 @@ export async function runWorkerCanary({
   let chainId = null;
   let workerAddress = null;
   let sessionId = null;
-  let chainJobId = null;
+  const chainJobId = id(jobId);
+  let reader;
   let failedError = null;
   let failureStage = null;
 
@@ -160,7 +163,7 @@ export async function runWorkerCanary({
       operatorClient ?? new AgentPlatformClient({ baseUrl: config.apiBaseUrl, token: operatorAuth.token, fetchImpl });
 
     // ── chain-env gate: selected profile must match its live chain exactly ─
-    const reader = chainReader ?? buildChainReader(config);
+    reader = chainReader ?? buildChainReader(config);
     chainId = await reader.getChainId();
     assertChainEnvironment({ chainId, profile: config.profile });
 
@@ -250,8 +253,11 @@ export async function runWorkerCanary({
     stages.submit = submit.summary;
     captureTxHash(txHashes, "submit", submit.raw);
 
-    // chainJobId comes from the worker's own session record
-    chainJobId = await resolveChainJobId({ authedWorker, sessionId, claim, submit });
+    // Compute the id before any request so a failed claim is still attributable.
+    // A response must agree with the job we actually created.
+    if ((await resolveChainJobId({ authedWorker, sessionId, claim, submit })).toLowerCase() !== chainJobId) {
+      throw new Error("Canary session chainJobId does not match keccak256(jobId).");
+    }
 
     // ── STAGE 5: verify + require the persisted payout receipt ────────────
     const verify = await stage("verify", () =>
@@ -365,6 +371,26 @@ export async function runWorkerCanary({
   } catch (error) {
     failedError = error instanceof Error ? error : new Error(String(error));
     failureStage ??= "setup";
+    if (createdJobId && reader) {
+      stages[failureStage] ??= { status: "failed" };
+      // Observe before cleanup can change the job. Failure to read is itself
+      // evidence, never an assertion that a transaction failed to land.
+      try {
+        const live = await reader.readEscrowJob(chainJobId);
+        const state = Number(live.state);
+        const sameWorker = String(live.worker).toLowerCase() === String(workerAddress).toLowerCase();
+        stages[failureStage].chainObservation = {
+          chainJobId, state, worker: live.worker,
+          classification: failureStage === "claim"
+            ? (state >= 2 && sameWorker ? "claim_landed" : state === 1 ? "claim_not_landed" : "unknown")
+            : failureStage === "submit"
+              ? (state >= 3 && sameWorker ? "submit_landed" : state === 2 && sameWorker ? "submit_not_landed" : "unknown")
+              : "observed"
+        };
+      } catch (readError) {
+        stages[failureStage].chainObservation = { chainJobId, classification: "unavailable", error: sanitizeEvidenceError(readError) };
+      }
+    }
     throw error;
   } finally {
     // Best-effort cleanup if we created a job but bailed before archiving it.
@@ -385,6 +411,7 @@ export async function runWorkerCanary({
         status: "failed",
         failure: {
           stage: failureStage,
+          elapsedMs: timings[failureStage] ?? now() - startedAt,
           name: failedError.name || "Error",
           message: sanitizeEvidenceError(failedError)
         },
@@ -405,6 +432,23 @@ export async function runWorkerCanary({
       await writeCanaryEvidence({ config, evidence, log });
     }
   }
+}
+
+export function createCanaryChainFetch(fetchImpl, serverTimeout = DEFAULT_BROKERED_TX_TIMEOUT_MS) {
+  const serverTimeoutMs = Number(serverTimeout);
+  if (!Number.isInteger(serverTimeoutMs) || serverTimeoutMs < 1_000 || serverTimeoutMs > 120_000) {
+    throw new Error("BROKERED_TX_TIMEOUT_MS must be an integer from 1000 to 120000.");
+  }
+  const timeoutMs = Math.floor(serverTimeoutMs * 5 / 6);
+  return (url, options = {}) => {
+    const pathname = new URL(url).pathname;
+    if (!/\/(?:jobs\/(?:claim|submit)|(?:admin\/)?verifier\/run)$/u.test(pathname)) return fetchImpl(url, options);
+    const deadline = AbortSignal.timeout(timeoutMs);
+    return fetchImpl(url, {
+      ...options,
+      signal: options.signal ? AbortSignal.any([options.signal, deadline]) : deadline
+    });
+  };
 }
 
 // ── STAGE 1: SIWE ───────────────────────────────────────────────────────────
