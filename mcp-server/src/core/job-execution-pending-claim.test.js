@@ -145,6 +145,44 @@ test("H1: a receipt or any runner read error prevents a dead verdict", async () 
   }
 });
 
+test("H1 re-gate: null receipt with a failed nonce read stays pending with zero broadcasts", async () => {
+  const fixture = await timedOutClaim();
+  fixture.latestNonces.fill(NONCE + 1);
+  fixture.errors[1] = "nonce";
+  assert.deepEqual(fixture.receipts, [null, null]);
+  await assert.rejects(fixture.retry(), { code: "brokered_tx_timeout" });
+  assert.notEqual((await fixture.pending()).cleared, true);
+  assert.equal(fixture.freshAdmissions(), 0);
+  assert.equal(fixture.freshBroadcasts(), 0);
+  for (const index of [0, 1]) {
+    assert.equal(fixture.calls.filter((call) => call.index === index && call.kind === "receipt").length, 1);
+    assert.equal(fixture.calls.filter((call) => call.index === index && call.kind === "nonce").length, 1);
+  }
+  // Failed probes currently also return a non-numeric nonce. Pin the explicit
+  // success guard independently, so that redundancy cannot hide its removal.
+  assert.match(BlockchainGateway.prototype.isBrokeredTransactionDead.toString(),
+    /=>\s*receiptReadSucceeded\s*&&\s*receipt\s*===\s*null\s*&&\s*nonceReadSucceeded\s*&&/u,
+    "the every-runner predicate must explicitly require a successful nonce read");
+});
+
+test("H1 re-gate: hash journal must match the timeout nonce and retain its sender", async (t) => {
+  for (const [name, patch] of [
+    ["different journal nonce", { nonce: NONCE + 1 }],
+    ["missing journal sender", { from: undefined }]
+  ]) {
+    await t.test(name, async () => {
+      const fixture = await timedOutClaim();
+      fixture.latestNonces.fill(NONCE + 1);
+      await fixture.store.upsertServiceState(`brokered-tx:${HASH}`, patch);
+      await assert.rejects(fixture.retry(), { code: "brokered_tx_timeout" });
+      assert.notEqual((await fixture.pending()).cleared, true);
+      assert.equal(fixture.freshAdmissions(), 0);
+      assert.equal(fixture.freshBroadcasts(), 0);
+      assert.equal(fixture.calls.length, 0, "reject mismatched journal evidence before probing any runner");
+    });
+  }
+});
+
 test("H1: GET /session for a cleared pending record returns ordinary 404, not a 5xx", async () => {
   const fixture = await timedOutClaim();
   await fixture.store.upsertServiceState(`brokered-claim:${fixture.sessionId}`, { cleared: true, reason: "job_not_claimable", at: new Date().toISOString() });
