@@ -55,6 +55,19 @@ test("every gateway wait stage emits structured immediate receipt, block and com
   }
 });
 
+test("an immediate backup receipt names the answering runner and never enters the stalled wait", async () => {
+  const logs = [];
+  const primary = runner("primary.test");
+  const backup = runner("backup.test", async () => receipt);
+  const result = await waitForTransaction({ hash: HASH, nonce: 2779, from: FROM, provider: primary,
+    wait: () => assert.fail("already mined on backup") }, {
+    stage: "ensureOnboardingWaiverEligibility", runners: [primary, backup], logger: { info: (record) => logs.push(record) }
+  });
+  assert.equal(result, receipt);
+  assert.equal(logs.at(-1).runner, "https://backup.test");
+  assert.equal(logs.at(-1).outcome, "confirmed");
+});
+
 test("mined waiver recovers by direct reread across every runner with signer latest nonce, never rebroadcasting", async () => {
   const calls = [];
   const logs = [];

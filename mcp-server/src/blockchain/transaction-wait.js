@@ -81,6 +81,7 @@ export async function waitForTransaction(tx, {
   let blockEvents = 0;
   let lastBlockAt = startedAt;
   let outcome = "failed";
+  let receiptRunner = waitRunner;
   const onBlock = (blockNumber) => {
     blockEvents += 1;
     lastBlockAt = Date.now();
@@ -99,7 +100,9 @@ export async function waitForTransaction(tx, {
   try {
     emit("tx_wait_started");
     const immediate = await probeTransactionReceipts(tx, directRunners, emit, "immediate");
-    let receipt = immediate.find((result) => result.receipt)?.receipt;
+    const immediateReceipt = immediate.find((result) => result.receipt);
+    let receipt = immediateReceipt?.receipt;
+    if (immediateReceipt) receiptRunner = immediateReceipt.runner;
     if (!receipt) {
       try {
         const remainingMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
@@ -117,6 +120,7 @@ export async function waitForTransaction(tx, {
           throw brokeredTransactionTimeout(fields);
         }
         receipt = recovered.receipt;
+        receiptRunner = recovered.runner;
         emit("tx_wait_recovered_by_reread", { runner: recovered.runner, blockNumber: receipt.blockNumber, status: receipt.status });
       }
     }
@@ -133,6 +137,6 @@ export async function waitForTransaction(tx, {
     clearInterval(silence);
     // Event registration is async in ethers. Clean up even if it completes late.
     void subscription.then(() => tx.provider?.off?.("block", onBlock)).catch(() => {});
-    emit("tx_wait_completed", { outcome, blockEvents, silenceMs: Date.now() - lastBlockAt });
+    emit("tx_wait_completed", { outcome, runner: receiptRunner, blockEvents, silenceMs: Date.now() - lastBlockAt });
   }
 }
