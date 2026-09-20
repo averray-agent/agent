@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import test from "node:test";
+import test, { beforeEach } from "node:test";
 
 import { Wallet, parseUnits } from "ethers";
+import { parseSiweMessage } from "../auth/siwe.js";
 
 import {
   ExternalPostingService,
@@ -24,6 +25,18 @@ const ESCROW = "0x6666666666666666666666666666666666666666";
 const CHAIN_ID = 420_420_419;
 const NOW = new Date("2026-08-21T12:00:00.000Z");
 const borrower = new Wallet(`0x${"11".repeat(32)}`);
+
+beforeEach((t) => {
+  // The door uses NOW but SIWE verifies Date.now(). Keep both on the fixture
+  // clock (#1379), so its rolling 30-day consent cannot rot with the calendar.
+  t.mock.timers.enable({ apis: ["Date"], now: NOW.getTime() });
+});
+
+function assertFixtureConsentNotExpired(message) {
+  const expiration = Date.parse(parseSiweMessage(message).expirationTime);
+  assert.ok(Number.isFinite(expiration) && expiration > Date.now(),
+    "fixture-issued SIWE expiry must be after the mocked clock");
+}
 
 function jobDefinition(overrides = {}) {
   return {
@@ -235,6 +248,7 @@ function createHarness({ enabled = true, trailingNetRaw = "10000000" } = {}) {
         sweepPlan: [{ amount: "525000", nonce: "9", deadline: String(deadline) }]
       });
       const authorization = built.repaymentAuthorizations[0];
+      assertFixtureConsentNotExpired(built.consent.message);
       await creditBookDoor.storeConsent(borrower.address, {
         terms: built.terms,
         termsHash: built.termsHash,
@@ -262,6 +276,16 @@ function createHarness({ enabled = true, trailingNetRaw = "10000000" } = {}) {
     }
   };
 }
+
+test("L3 fixture SIWE expiry is guarded against the mocked clock", async (t) => {
+  assert.equal(Date.now(), NOW.getTime(), "SIWE and the injected door clock must agree");
+  const built = await createHarness().storeConsent();
+  const { issuedAt, expirationTime } = parseSiweMessage(built.consent.message);
+  assert.equal(Date.parse(issuedAt), NOW.getTime());
+  assert.equal(Date.parse(expirationTime) - Date.now(), 30 * 24 * 60 * 60 * 1_000);
+  t.mock.timers.setTime(Date.parse(expirationTime) + 1);
+  assert.throws(() => assertFixtureConsentNotExpired(built.consent.message), /fixture-issued SIWE expiry/u);
+});
 
 test("flag-off: every L3 keeper entry point refuses l3_disabled", async () => {
   const h = createHarness({ enabled: false });
