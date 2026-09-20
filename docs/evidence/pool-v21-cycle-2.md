@@ -43,6 +43,7 @@ compare whole-account readings).
 | reading | due | aUSDC (whole account) | Δ raw | annualised |
 |---|---|---|---|---|
 | t₀ | 2026-09-16 07:55:36Z | 10,211,216 | — | — |
+| day 4 (day-3 slot, taken late) | 2026-09-20 09:17:36Z (Hydration 14821890) | 10,214,220 | +3,004 | **2.647 %** (whole account, 4.057 d) |
 | day 3 | 2026-09-19 | | | |
 | day 6 (before recall) | 2026-09-22 | | | |
 
