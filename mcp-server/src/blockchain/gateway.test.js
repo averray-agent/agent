@@ -443,7 +443,9 @@ test("resolveSinglePayout returns the settle/payout tx receipt", async () => {
   const events = [];
   const gateway = new BlockchainGateway(
     { enabled: false },
-    { logger: { info(fields, event) { events.push({ fields, event }); } } }
+    { logger: { info(fields, event) {
+      if (event.startsWith("blockchain.resolve_single_payout.")) events.push({ fields, event });
+    } } }
   );
   const calls = [];
   const commitment = `0x${"44".repeat(32)}`;

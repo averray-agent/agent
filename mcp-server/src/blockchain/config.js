@@ -269,6 +269,12 @@ export function loadBlockchainConfig(env = process.env) {
       DEFAULT_RPC_REQUEST_TIMEOUT_MS,
       { minimum: 100, maximum: 30_000 }
     ),
+    brokeredTxTimeoutMs: resolveBoundedMilliseconds(
+      env.BROKERED_TX_TIMEOUT_MS,
+      "BROKERED_TX_TIMEOUT_MS",
+      60_000,
+      { minimum: 1_000, maximum: 120_000 }
+    ),
     rpcWriteRequestTimeoutMs: resolveBoundedMilliseconds(
       env.RPC_WRITE_REQUEST_TIMEOUT_MS,
       "RPC_WRITE_REQUEST_TIMEOUT_MS",

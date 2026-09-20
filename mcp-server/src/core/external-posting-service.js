@@ -781,6 +781,15 @@ export class ExternalPostingService {
       : await this.stateStore.getExternalPostingQuoteByJobId?.(observation.jobId);
     const quote = quoteSignal?.decision === "quoted" ? quoteSignal.quote : undefined;
     if (!draft && !quote) {
+      // A brokered create can be observed before the claim/session is saved.
+      // Match our durable broadcast journal, not a wallet-wide exemption: an
+      // unrelated create by the same signer must still be reported as unknown.
+      const brokered = await this.stateStore.getServiceState?.(`brokered-job:${observation.jobId}:ensureJob.create`);
+      if (brokered?.txHash?.toLowerCase() === observation.txHash
+        && brokered?.from?.toLowerCase() === observation.poster) {
+        this.logger.info?.({ event: "external_posting_brokered_job_observed", jobId: observation.jobId, txHash: observation.txHash }, "external_posting.brokered_job_observed");
+        return { outcome: "brokered", jobId: observation.jobId, projected: false };
+      }
       this.logger.warn?.(
         {
           event: "external_posting_unknown_job_observed",

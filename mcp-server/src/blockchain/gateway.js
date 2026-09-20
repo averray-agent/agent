@@ -31,6 +31,7 @@ import {
 } from "./abis.js";
 import { loadBlockchainConfig } from "./config.js";
 import { KmsSigner } from "./kms-signer.js";
+import { probeTransactionReceipts, waitForTransaction } from "./transaction-wait.js";
 import { applyGasFeeBuffer } from "./fee-buffer.js";
 import {
   bindSignerToWriteBroadcaster,
@@ -477,7 +478,7 @@ export class BlockchainGateway {
         this.provider.getBalance(recipient)
       ]);
       const tx = await this.signer.sendTransaction({ to: recipient, value });
-      const receipt = await tx.wait();
+      const receipt = await this.waitForTransaction(tx, "sendFirstWithdrawalGasGrant");
       if (Number(receipt?.status) !== 1) {
         throw new Error("First-withdrawal gas grant transaction did not succeed.");
       }
@@ -1614,11 +1615,11 @@ export class BlockchainGateway {
 
       const token = new Contract(asset.address, ERC20_MOCK_ABI, this.signer);
       const mintTx = await token.mint(signerAddress, parsedAmount);
-      await mintTx.wait();
+      await this.waitForTransaction(mintTx, "fundAccount.mint");
       const approveTx = await token.approve(this.config.agentAccountAddress, parsedAmount);
-      await approveTx.wait();
+      await this.waitForTransaction(approveTx, "fundAccount.approve");
       const depositTx = await this.accountContract.deposit(asset.address, parsedAmount);
-      await depositTx.wait();
+      await this.waitForTransaction(depositTx, "fundAccount.deposit");
       return this.getAccountSummary(wallet);
     });
   }
@@ -1659,7 +1660,7 @@ export class BlockchainGateway {
       const asset = this.requireAsset(assetSymbol);
       const baseAmount = this.toBaseUnits(amount, asset, "job reserve amount");
       const tx = await this.accountContract.reserveForJob(wallet, asset.address, baseAmount);
-      await tx.wait();
+      await this.waitForTransaction(tx, "reserveForJob");
       return this.getAccountSummary(wallet);
     });
   }
@@ -1671,7 +1672,7 @@ export class BlockchainGateway {
       const templateKey = this.toJobId(templateId);
       const baseAmount = this.toBaseUnits(amount, asset, "recurring reserve amount");
       const tx = await this.accountContract.reserveForRecurringTemplate(wallet, asset.address, templateKey, baseAmount);
-      await tx.wait();
+      await this.waitForTransaction(tx, "reserveRecurringTemplateFunding");
       return {
         wallet,
         asset: asset.symbol,
@@ -1696,7 +1697,7 @@ export class BlockchainGateway {
         templateKey,
         baseAmount
       );
-      await tx.wait();
+      await this.waitForTransaction(tx, "cancelRecurringTemplateReserve");
       return {
         wallet,
         asset: asset.symbol,
@@ -1715,7 +1716,7 @@ export class BlockchainGateway {
       const asset = this.requireAsset(assetSymbol);
       const baseAmount = this.toBaseUnits(amount, asset, "strategy allocation amount");
       const tx = await this.accountContract.allocateIdleFunds(wallet, this.normalizeStrategyId(strategyId), baseAmount);
-      await tx.wait();
+      await this.waitForTransaction(tx, "allocateIdleFunds");
       return this.getAccountSummary(wallet);
     });
   }
@@ -1727,7 +1728,7 @@ export class BlockchainGateway {
       const before = await this.getAccountSummary(wallet);
       const baseAmount = this.toBaseUnits(amount, asset, "strategy deallocation amount");
       const tx = await this.accountContract.deallocateIdleFunds(wallet, this.normalizeStrategyId(strategyId), baseAmount);
-      await tx.wait();
+      await this.waitForTransaction(tx, "deallocateIdleFunds");
       const after = await this.getAccountSummary(wallet);
       return {
         ...after,
@@ -1776,7 +1777,7 @@ export class BlockchainGateway {
         maxWeight: resolvedMaxWeight,
         nonce
       });
-      await tx.wait();
+      await this.waitForTransaction(tx, "requestStrategyDeposit");
       return {
         ...(await this.getAccountSummary(wallet)),
         requestId,
@@ -1839,7 +1840,7 @@ export class BlockchainGateway {
         maxWeight: resolvedMaxWeight,
         nonce
       });
-      await tx.wait();
+      await this.waitForTransaction(tx, "requestStrategyWithdraw");
       return {
         ...(await this.getAccountSummary(wallet)),
         requestId,
@@ -1860,7 +1861,7 @@ export class BlockchainGateway {
       await this.requireSignerWallet(wallet, "borrow");
       const baseAmount = this.toBaseUnits(amount, asset, "borrow amount");
       const tx = await this.accountContract.borrow(asset.address, baseAmount);
-      await tx.wait();
+      await this.waitForTransaction(tx, "borrow");
     });
   }
 
@@ -1871,7 +1872,7 @@ export class BlockchainGateway {
       await this.requireSignerWallet(wallet, "repay");
       const baseAmount = this.toBaseUnits(amount, asset, "repay amount");
       const tx = await this.accountContract.repay(asset.address, baseAmount);
-      await tx.wait();
+      await this.waitForTransaction(tx, "repay");
     });
   }
 
@@ -1899,7 +1900,7 @@ export class BlockchainGateway {
         deadline,
         signature
       );
-      await tx.wait();
+      await this.waitForTransaction(tx, "sendToAgent");
     });
   }
 
@@ -1923,7 +1924,7 @@ export class BlockchainGateway {
         Number(mode),
         String(termsHash)
       );
-      const receipt = await tx.wait();
+      const receipt = await this.waitForTransaction(tx, "originateCreditBookLoan");
       let loanId;
       let recipient;
       for (const log of receipt?.logs ?? []) {
@@ -1956,7 +1957,7 @@ export class BlockchainGateway {
         String(loanId),
         this.normalizeUint256(amountRaw, "amountRaw")
       );
-      const receipt = await tx.wait();
+      const receipt = await this.waitForTransaction(tx, "recordCreditBookSweep");
       return { txHash: tx.hash, blockNumber: receipt?.blockNumber, status: Number(receipt?.status ?? 0) };
     });
   }
@@ -1966,7 +1967,7 @@ export class BlockchainGateway {
       this.requireSigner("recordCreditBookRefund");
       if (!this.creditBookContract) throw new ConfigError("CreditBook is not configured.");
       const tx = await this.creditBookContract.repayFromRefund(String(loanId));
-      const receipt = await tx.wait();
+      const receipt = await this.waitForTransaction(tx, "recordCreditBookRefund");
       return { txHash: tx.hash, blockNumber: receipt?.blockNumber, status: Number(receipt?.status ?? 0) };
     });
   }
@@ -2006,7 +2007,7 @@ export class BlockchainGateway {
         normalizedDeadline,
         normalizedSignature
       );
-      const receipt = await tx.wait();
+      const receipt = await this.waitForTransaction(tx, "submitAuthorizedAgentTransfer");
       const transfer = (receipt?.logs ?? []).map((log) => {
         try {
           return this.accountContract.interface.parseLog(log);
@@ -2045,7 +2046,7 @@ export class BlockchainGateway {
       const tx = wallet && wallet.toLowerCase() !== signerAddress.toLowerCase()
         ? await escrowContract.claimJobFor(chainJobId, wallet)
         : await escrowContract.claimJob(chainJobId);
-      await tx.wait();
+      await this.waitForTransaction(tx, "claimJob", jobId);
     });
   }
 
@@ -2068,7 +2069,7 @@ export class BlockchainGateway {
       this.requireSigner("handleClaimTimeout");
       const escrowContract = await this.escrowContractForJob(jobId);
       const tx = await escrowContract.handleClaimTimeout(this.toJobId(jobId));
-      await tx.wait();
+      await this.waitForTransaction(tx, "handleClaimTimeout", jobId);
     });
   }
 
@@ -2144,11 +2145,11 @@ export class BlockchainGateway {
         });
         const token = new Contract(asset.address, ERC20_MOCK_ABI, this.signer);
         const mintTx = await token.mint(signerAddress, shortfall);
-        await mintTx.wait();
+        await this.waitForTransaction(mintTx, "ensureJob.mint", instanceJobId);
         const approveTx = await token.approve(this.config.agentAccountAddress, shortfall);
-        await approveTx.wait();
+        await this.waitForTransaction(approveTx, "ensureJob.approve", instanceJobId);
         const depositTx = await this.accountContract.deposit(asset.address, shortfall);
-        await depositTx.wait();
+        await this.waitForTransaction(depositTx, "ensureJob.deposit", instanceJobId);
       }
 
       const specHash = hashCanonicalContent(job);
@@ -2165,7 +2166,7 @@ export class BlockchainGateway {
         id(job.category),
         specHash
       );
-      await createTx.wait();
+      await this.waitForTransaction(createTx, "ensureJob.create", instanceJobId);
       await this.ensureOnboardingWaiverEligibility(
         this.toJobId(instanceJobId),
         job,
@@ -2263,7 +2264,7 @@ export class BlockchainGateway {
         String(args[7]),
         String(args[8])
       );
-      const receipt = await tx.wait();
+      const receipt = await this.waitForTransaction(tx, "createEscrowFundedExternalJob", draft.jobId);
       let fundedAt = new Date().toISOString();
       try {
         const block = await this.provider.getBlock(receipt.blockNumber);
@@ -2325,7 +2326,7 @@ export class BlockchainGateway {
       }
       throw error;
     }
-    await tx.wait();
+    await this.waitForTransaction(tx, "ensureOnboardingWaiverEligibility", chainJobId);
   }
 
   usesRecurringTemplateReserve(job) {
@@ -2346,7 +2347,7 @@ export class BlockchainGateway {
       const tx = worker && worker.toLowerCase() !== signerAddress.toLowerCase()
         ? await escrowContract.submitWorkFor(chainJobId, worker, evidenceHash)
         : await escrowContract.submitWork(chainJobId, evidenceHash);
-      await tx.wait();
+      await this.waitForTransaction(tx, "submitWork", jobId);
     });
   }
 
@@ -2408,7 +2409,7 @@ export class BlockchainGateway {
       // Return the settle/payout tx receipt (additive — mirrors openDispute /
       // resolveDispute below) so callers can surface the on-chain payout tx to
       // the worker instead of discarding it. Settlement behavior is unchanged.
-      const receipt = await tx.wait();
+      const receipt = await this.waitForTransaction(tx, "resolveSinglePayout", jobId);
       const verifiedEvent = this.extractVerifiedEvent(receipt, escrowContract, {
         jobId: this.toJobId(jobId),
         approved,
@@ -2451,7 +2452,7 @@ export class BlockchainGateway {
         metadataURI,
         commitment
       );
-      const receipt = await tx.wait();
+      const receipt = await this.waitForTransaction(tx, "resolveMilestone", jobId);
       const verifiedEvent = this.extractVerifiedEvent(receipt, escrowContract, {
         jobId: this.toJobId(jobId),
         approved,
@@ -2776,7 +2777,7 @@ export class BlockchainGateway {
       const tx = participant && participant.toLowerCase() !== signerAddress.toLowerCase()
         ? await escrowContract.openDisputeFor(chainJobId, participant)
         : await escrowContract.openDispute(chainJobId);
-      const receipt = await tx.wait();
+      const receipt = await this.waitForTransaction(tx, "openDispute", jobId);
       return {
         txHash: tx.hash,
         blockNumber: receipt?.blockNumber,
@@ -2798,7 +2799,7 @@ export class BlockchainGateway {
         this.toDisputeReasonCode(reasonCode),
         metadataURI
       );
-      const receipt = await tx.wait();
+      const receipt = await this.waitForTransaction(tx, "resolveDispute", jobId);
       const settlement = this.extractSettlementSplit(receipt, escrowContract);
       return {
         txHash: tx.hash,
@@ -2855,7 +2856,7 @@ export class BlockchainGateway {
       const tx = byWallet
         ? await this.escrowContract.discloseFor(normalizedHash, byWallet)
         : await this.escrowContract.disclose(normalizedHash);
-      const receipt = await tx.wait();
+      const receipt = await this.waitForTransaction(tx, "discloseContent");
       return {
         txHash: tx.hash,
         blockNumber: receipt?.blockNumber,
@@ -2872,7 +2873,7 @@ export class BlockchainGateway {
         return { skipped: true, reason: "already_auto_disclosed" };
       }
       const tx = await this.escrowContract.autoDisclose(normalizedHash);
-      const receipt = await tx.wait();
+      const receipt = await this.waitForTransaction(tx, "autoDiscloseContent");
       return {
         skipped: false,
         txHash: tx.hash,
@@ -3554,7 +3555,7 @@ export class BlockchainGateway {
             normalizedRemoteRef,
             normalizedFailureCode
           );
-      await tx.wait();
+      await this.waitForTransaction(tx, "finalizeXcmRequest");
       return {
         ...(await this.getXcmRequest(normalizedRequestId)),
         ...(strategyRequest
@@ -4099,6 +4100,41 @@ export class BlockchainGateway {
       totalAssets: BigInt(rawTotalAssets ?? 0),
       totalShares: BigInt(rawTotalShares ?? 0)
     };
+  }
+
+  async isBrokeredTransactionDead(transaction) {
+    const { txHash, nonce } = transaction ?? {};
+    if (!/^0x[0-9a-f]{64}$/iu.test(txHash ?? "") || !Number.isSafeInteger(nonce) || nonce < 0) return false;
+    // Timeout responses intentionally contain no signer identity. Recover the
+    // original sender from its durable hash journal, not today's signer (which
+    // may have rotated). Missing evidence cannot authorize another broadcast.
+    const recorded = await this.transactionStore?.getServiceState(`brokered-tx:${txHash.toLowerCase()}`);
+    if (recorded?.nonce !== nonce || !/^0x[0-9a-f]{40}$/iu.test(recorded?.from ?? "")) return false;
+    const runners = this.writeBroadcaster?.receiptRunners ?? [];
+    if (runners.length === 0) return false;
+    const startedAt = Date.now();
+    const results = await probeTransactionReceipts({ hash: txHash, from: recorded.from }, runners, (event, fields) => {
+      this.logger?.info?.({ event, stage: "claimJob.deadCheck", txHash, nonce, ms: Date.now() - startedAt, ...fields }, event);
+    }, "recovery");
+    return results.every(({ receipt, receiptReadSucceeded, latestNonce, nonceReadSucceeded }) =>
+      receiptReadSucceeded && receipt === null && nonceReadSucceeded
+      && Number.isSafeInteger(latestNonce) && latestNonce > nonce
+    );
+  }
+
+  async waitForTransaction(tx, stage, jobId = undefined) {
+    return waitForTransaction(tx, {
+      stage, jobId, logger: this.logger,
+      timeoutMs: this.config.brokeredTxTimeoutMs,
+      runners: this.writeBroadcaster?.receiptRunners ?? this.provider?.providerConfigs?.map(({ provider }) => provider) ?? [],
+      persist: async (record) => {
+        if (!this.transactionStore || !record.txHash) return;
+        await this.transactionStore.upsertServiceState(`brokered-tx:${record.txHash.toLowerCase()}`, record);
+        if (jobId) {
+          await this.transactionStore.upsertServiceState(`brokered-job:${this.toJobId(jobId)}:${stage}`, record);
+        }
+      }
+    });
   }
 
   async withGatewayError(operation, action) {

@@ -222,6 +222,7 @@ const reputations = new Map([
 export function createPlatformService() {
   const gateway = new BlockchainGateway();
   const stateStore = createStateStore();
+  gateway.transactionStore = stateStore;
   const subsidyConfig = loadOnboardingSubsidyBudgetConfig();
   const onboardingSubsidyBudget = createOnboardingSubsidyBudget({ stateStore, config: subsidyConfig });
   const workerExposurePolicy = createWorkerExposurePolicy({
@@ -580,6 +581,7 @@ export async function createPlatformRuntime() {
   }
   const pimlicoClient = initStep("init-pimlico-client", logger, () => new PimlicoClient());
   const stateStore = initStep("init-state-store", logger, () => createStateStore(process.env, { logger }));
+  gateway.transactionStore = stateStore;
   try {
     await repairWalletSessionIndex({ stateStore, logger });
   } catch (error) {

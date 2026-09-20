@@ -13,6 +13,7 @@ import { hashCanonicalContent } from "./canonical-content.js";
 import { WorkerExposurePolicy } from "./worker-exposure.js";
 import { WorkerDailyExposurePolicy } from "./worker-daily-exposure.js";
 import { buildJobSnapshot } from "./job-snapshot.js";
+import { waitForTransaction } from "../blockchain/transaction-wait.js";
 import {
   buildExternalSchemaRegistrationMessage,
   normalizeExternalSchemaRegistrations
@@ -1211,6 +1212,51 @@ test("claimJob converges a stranded claim: chain claim mined but local session w
   assert.equal(recovered.status, "claimed");
   assert.equal(recovered.wallet, WALLET);
   assert.equal(recovered.jobId, job.id);
+});
+
+test("landed-after-timeout claim converges on next session read after restart without a second broadcast", async () => {
+  const stateStore = new MemoryStateStore();
+  const job = makeJob();
+  const txHash = `0x${"ab".repeat(32)}`;
+  let state = 0;
+  let broadcasts = 0;
+  const gateway = {
+    isEnabled: () => true,
+    toJobId: (jobId) => `chain:${jobId}`,
+    getWorkerClaimCount: async () => 0,
+    getClaimEconomicsDecisionState: async () => ({ state, exists: state > 0, contractLayout: "current", onboardingWaiverEligible: false }),
+    previewClaimEconomics: async () => ({ claimStake: 0.3, claimFee: 0.12, claimStakeBps: 500, claimFeeBps: 200, claimNumber: 1, totalClaimLock: 0.42 }),
+    getJob: async () => state === 2
+      ? { state, worker: WALLET, claimExpiry: Math.floor(Date.now() / 1000) + 3600, specHash: buildJobSnapshot(job).specHash }
+      : { state },
+    ensureJob: async () => {},
+    ensureClaimStakeLiquidity: async () => {},
+    claimJob: async () => {
+      broadcasts++;
+      await waitForTransaction({ hash: txHash, nonce: 2780, wait: () => new Promise(() => {}) }, { stage: "claimJob", timeoutMs: 10 });
+    }
+  };
+  const service = new JobExecutionService(stateStore, gateway, () => job);
+  let sessionId;
+  await assert.rejects(service.claimJob(WALLET, job.id, "http", "deadline-claim"), (error) => {
+    assert.equal(error.code, "brokered_tx_timeout");
+    assert.equal(error.details.txHash, txHash);
+    sessionId = error.details.sessionId;
+    return Boolean(sessionId);
+  });
+  assert.equal((await stateStore.getServiceState(`brokered-claim:${sessionId}`)).timeout.txHash, txHash);
+  state = 1;
+  await assert.rejects(service.claimJob(WALLET, job.id, "http", "deadline-retry"), { code: "brokered_tx_timeout" });
+  assert.equal(broadcasts, 1, "still-pending is not permission to send again");
+  state = 2;
+  const restarted = new JobExecutionService(stateStore, gateway, () => ({ ...job, rewardAmount: 900 }));
+  const recovered = await restarted.resumeSession(sessionId);
+  assert.equal(recovered.status, "claimed");
+  assert.equal(recovered.wallet, WALLET);
+  assert.equal(recovered.totalClaimLock, 0.42, "admitted economics survive the timeout");
+  assert.equal(recovered.jobSnapshot.specHash, buildJobSnapshot(job).specHash);
+  assert.equal(broadcasts, 1);
+  assert.deepEqual(await restarted.resumeSession(sessionId), recovered);
 });
 
 test("claimJob does NOT converge when the chain job is claimed by a different worker (MAIN-002 guard)", async () => {
