@@ -67,3 +67,9 @@ on adapters stays.
 ## Handback per step
 
 Tx hash + block; Claude reads `positions(bank)` after each and records the running total here.
+
+| step | tx | block | moved | bank liquid after |
+|---|---|---|---|---|
+| 1 self wallet → bank (2026-09-21 13:0xZ, MetaMask via the local page) | `0x500c63df57c5eef4cce828718f1602a518a5fb2ba229c0cbf65479e456ba17e1` | 20915261 | 25.0 USDC (`AgentTransfer` 0x42a4b866 → 0x5a6836) | **41.075** |
+
+Note for the next time: MetaMask's send flow no longer carries hex data (phone and current desktop); the working path is a local page issuing `eth_sendTransaction` with the calldata (`.scratch/send-to-bank.html`, served on 127.0.0.1:8788).
