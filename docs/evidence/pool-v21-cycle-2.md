@@ -45,7 +45,7 @@ compare whole-account readings).
 | t₀ | 2026-09-16 07:55:36Z | 10,211,216 | — | — |
 | day 4 (day-3 slot, taken late) | 2026-09-20 09:17:36Z (Hydration 14821890) | 10,214,220 | +3,004 | **2.647 %** (whole account, 4.057 d) |
 | day 3 | 2026-09-19 | | | |
-| day 6 (before recall) | 2026-09-22 | | | |
+| day 6 (before recall) | 2026-09-21 13:50:00Z (Hydration 14868957) | 10,215,062 | +3,846 | **2.621 %** (5.246 d) |
 
 ## Recall (day 6 — 2026-09-22, before returnBy 09-23 03:50Z)
 
@@ -63,3 +63,12 @@ friction recorded here; then the subsidy attestation on `/pool`.
 2. The pool `settle --commit` reported `wait for transaction timeout` after
    broadcasting; the tx had landed (blk 20714934). Rule: read chain state
    before any retry; a retry would have reverted harmlessly but wasted gas.
+
+## Recall — 2026-09-21 (attempt 1)
+
+- `recall --assets 10215062` refused: `VenueRecallExceedsManaged(10193881, 10215062)` — the adapter manages 10,193,881; recalled the managed amount, 21,181 raw stays parked (interest + cycle-1 remainder).
+- **Recall id 2** requested: tx `0x0bcb9d4bb593ea161fa92f728632cdf739f8c79312597c323aabe55a1f95cd89`, block 20915725, 14:04:48Z, fee 0.0289792 DOT (driver reported a wait timeout; tx had landed — same pattern as the settle on 09-16).
+- `stage-recall --commit` at 14:40Z: adapter tx `0x076c3f48…` (nonce 2809), lane tx `0x8e4c91fe…` (2810), wrapper dispatch `0x4b5dea32…` (2811); lane request `0x7fa1e25d…ff1385`, adapter request `0x78db2e49…c31d`, bitmap 4.
+- Hydration block 14870297 (14:40:48Z): message processed `success: true`, fee 21,657 raw USDC(22) net, **no sell** — `Transact(router.sell)` failed silently inside a successful message. Venue aUSDC untouched (10.215135 at 16:19Z). Driver exited: `Timed out without request-bound Broadcast.Swapped evidence`.
+- Replays of the identical wire bytes via `DryRunApi`: 1 silent failure in 6, then 16/16 executed at exact par. Intermittent, block-dependent, cause not identified. Packet: `PACKET_RECALL_SELL_LEG_SILENTLY_NOT_EXECUTED.md`.
+- State at end of day: pool activeRecall 2 / activeDeployment 2, lane pendingWithdrawalShares 10,193,881, wrapper request Pending bitmap 4; all funds intact and accruing at Hydration; returnBy 09-23 03:50Z is soft for v2.1 (write-off is loss-reporter-only).
