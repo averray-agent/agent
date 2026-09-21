@@ -32,6 +32,10 @@ import {
   resolvePoolVenuePair,
 } from "./pool-venue-ceremony.mjs";
 import { extractAaveQuote } from "./capture-bank-xcm-v22-staging-quote.mjs";
+import {
+  abandonUnexecutedSell, assertNoRecallSlack, assertRecallAttemptBudget,
+  classifyRecallSell, readRecallSellObservation,
+} from "./recall-sell-unwind.mjs";
 
 const { KmsSigner } = await importCeremonyModule({
   label: "KMS signer",
@@ -125,6 +129,7 @@ const POOL_ABI = [
   "function venuePrincipalCostBasis() view returns (uint256)",
   "function venueDeployments(uint256) view returns (uint256 principalAssets,uint256 recalledPrincipalAssets,uint64 returnBy,bytes32 adapterRequestId,uint8 status)",
   "function activeVenueRecallId() view returns (uint256)",
+  "function nextVenueRecallId() view returns (uint256)",
   "function venueRecalls(uint256) view returns (uint256 deploymentId,uint256 requestedAssets,uint256 returnedAssets,bytes32 adapterRequestId,uint8 status)",
   "function settleVenueDeployment(uint256 deploymentId) returns (uint8 status,uint256 settledAssets)",
   "function settleVenueRecall(uint256 recallId) returns (uint8 status,uint256 returnedAssets)",
@@ -139,6 +144,9 @@ const LANE_ABI = [
   "function totalAssets() view returns (uint256)",
   "function totalShares() view returns (uint256)",
   "function pendingDepositAssets() view returns (uint256)",
+  "function pendingWithdrawalShares() view returns (uint256)",
+  "function requiresRemoteRecovery(bytes32) view returns (bool)",
+  "function recoveryAssetsOutstanding(bytes32) view returns (uint256)",
   "function getAdapterRequest(bytes32) view returns ((uint8 kind,uint8 status,address account,address requester,address recipient,uint256 requestedAssets,uint256 requestedShares,uint256 settledAssets,uint256 settledShares,bytes32 remoteRef,bytes32 failureCode,bool settled))",
   "function settleRequest(bytes32 requestId,uint8 status,uint256 settledAssets,uint256 settledShares,uint256 observedRemoteBalanceRaw,bytes32 remoteRef,bytes32 failureCode)",
 ];
@@ -192,6 +200,9 @@ export function parseArgs(argv) {
     else if (flag === "--fee-floor-ratio-bps") args.feeFloorRatioBps = next();
     else if (flag === "--float-headroom") args.floatHeadroom = next();
     else if (flag === "--lane-nonce") args.laneNonce = next();
+    else if (flag === "--abandon-unexecuted-sell") args.abandonUnexecutedSell = true;
+    // Compatibility refusal, not an economic knob: this pair hardcodes par.
+    else if (flag === "--min-out-slack-raw") assertNoRecallSlack(next());
     else if (flag === "--observability-url") args.observabilityUrl = next();
     else if (flag === "--expected-signer") args.expectedSigner = next();
     else if (flag === "--asset-hub-ws") args.assetHubWs = next();
@@ -607,7 +618,7 @@ async function readBeforeDeadline(operation, deadlineMs) {
   }
 }
 
-async function historicalSwapRange(api, createdAt) {
+export async function historicalSwapRange(api, createdAt) {
   // Wrapper createdAt is seconds; Hydration timestamp.now is milliseconds.
   const createdAtMs = positiveBigInt(createdAt, "Staged recall createdAt") * 1_000n;
   const marginMs = BigInt(RECALL_HISTORY_MARGIN_SECONDS) * 1_000n;
@@ -654,12 +665,17 @@ async function historicalSwapRange(api, createdAt) {
 }
 
 export async function recoverHistoricalRecallSwap(api, { requestId, createdAt, expectedInput }) {
-  const { deadlineMs, scan } = await historicalSwapRange(api, createdAt);
-  const swap = await waitForAaveSwap(api, {
-    requestId, fromBlock: scan.fromBlock, toBlock: scan.toBlock, expectedInput,
-    assetIn: 1003, assetOut: 22, attempts: 1, deadlineMs,
-  });
-  return { ...swap, scan };
+  try {
+    const { deadlineMs, scan } = await historicalSwapRange(api, createdAt);
+    const swap = await waitForAaveSwap(api, {
+      requestId, fromBlock: scan.fromBlock, toBlock: scan.toBlock, expectedInput,
+      assetIn: 1003, assetOut: 22, attempts: 1, deadlineMs,
+    });
+    return { ...swap, scan };
+  } catch (error) {
+    error.code = "recall_swap_observation_failed";
+    throw error;
+  }
 }
 
 export async function recoverHistoricalDepositSwap(api, { requestId, createdAt, expectedInput }) {
@@ -734,7 +750,9 @@ export async function waitForAaveSwap(api, { requestId, fromBlock, toBlock, expe
     if (toBlock !== undefined) break;
     await new Promise((done) => setTimeout(done, 6_000));
   }
-  throw new Error(`Timed out without request-bound Broadcast.Swapped evidence for ${requestId}.`);
+  const error = new Error(`Timed out without request-bound Broadcast.Swapped evidence for ${requestId}.`);
+  if (assetIn === 1003) error.code = "recall_swap_observation_failed";
+  throw error;
 }
 
 function usage() {
@@ -746,6 +764,8 @@ function usage() {
     "  node scripts/ops/pool-venue-dispatch.mjs cancel --profile mainnet [--pool 0x...] --request-id 0x... --recall-id 1 --observability-url URL --expected-signer 0x... [--commit --use-kms]",
     "  node scripts/ops/pool-venue-dispatch.mjs stage-dispatch --profile mainnet [--pool 0x...] --request-id 0x... --deployment-id 1 --observability-url URL --expected-signer 0x... [--max-fee-per-leg 40000] [--float-headroom 50000] [--commit --use-kms]",
     "  node scripts/ops/pool-venue-dispatch.mjs stage-recall --profile mainnet [--pool 0x...] --request-id 0x... --recall-id 1 --observability-url URL --expected-signer 0x... [--max-fee-per-leg 80000] [--fee-floor-ratio-bps 15000] [--commit --use-kms]",
+    "  stage-recall also accepts --abandon-unexecuted-sell: prove the sell did nothing, fail only the lane request, then use pool-venue-ceremony settle.",
+    "  Nonzero --min-out-slack-raw is refused: stageRecall requires minimumOutput == requestedAssets.",
     "",
     "Dry-run is the default. Writes require both --commit and --use-kms. Raw keys are never accepted.",
   ].join("\n");
@@ -1347,6 +1367,7 @@ const COMMAND_IO = {
   readDeploymentManifest, createCeremonyRpcContext, resolveSigner, Contract,
   VenueBalanceReader, fetchJson, captureParQuote, dryRunStageAndFunding,
   deriveLaneRequestId, makeRuntime, waitForAaveSwap, persistEvidence,
+  readRecallSellObservation, abandonUnexecutedSell,
 };
 
 export async function main(argv = process.argv.slice(2), io = {}) {
@@ -1354,6 +1375,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     readDeploymentManifest, createCeremonyRpcContext, resolveSigner, Contract,
     VenueBalanceReader, fetchJson, captureParQuote, dryRunStageAndFunding,
     deriveLaneRequestId, makeRuntime, waitForAaveSwap, persistEvidence,
+    readRecallSellObservation, abandonUnexecutedSell,
   } = { ...COMMAND_IO, ...io };
   const args = parseArgs(argv);
   if (args.help) return console.log(usage());
@@ -1364,6 +1386,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
   const isRecall = args.command === "stage-recall" || Boolean(args.recallId);
   if (args.command === "stage-dispatch" && !args.deploymentId) throw new Error("stage-dispatch requires --deployment-id.");
   if (args.command === "stage-recall" && !args.recallId) throw new Error("stage-recall requires --recall-id.");
+  if (args.abandonUnexecutedSell && args.command !== "stage-recall") throw new Error("--abandon-unexecuted-sell requires stage-recall.");
   if ((args.command === "status" || args.command === "cancel") && Boolean(args.deploymentId) === Boolean(args.recallId)) {
     throw new Error(`${args.command} requires exactly one of --deployment-id or --recall-id.`);
   }
@@ -1415,6 +1438,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     position: { ledger: "erc20", endpoint: args.hydrationEvmRpc, chainId: EXPECTED_HYDRATION_CHAIN_ID, account: convertedAccountId32, accountTransform: "hydration_truncate20", contract: EXPECTED_AUSDC },
     venuePostage: { ledger: "substrate_system", endpoint: args.assetHubWs, account: `${venueAddress.toLowerCase()}${"ee".repeat(12)}` },
   };
+  let diagnoseRecallFailure;
   try {
     const observability = await fetchJson(args.observabilityUrl, "deposit-pool observability");
     const stateArgs = {
@@ -1471,6 +1495,36 @@ export async function main(argv = process.argv.slice(2), io = {}) {
       signerBackend: identity.backend,
       observability: { url: args.observabilityUrl, block: observability.block, reconciled: observability.reconciled, flowsStatus: observability.flows?.status },
       state,
+    };
+
+    const observeRecallSell = async (laneRequestId) => readRecallSellObservation({
+      provider: rpc.provider, wrapperAddress, laneRequestId, fromHubBlock: adapterDeploymentBlock,
+      hydrationApi: await balanceReader.getSubstrateApi(args.hydrationWs), balanceReader,
+      positionTarget: targets.position, historyRange: historicalSwapRange,
+    });
+    const nextRecallCommand = (verdict) => {
+      const quote = (value) => `'${String(value).replaceAll("'", "'\"'\"'")}'`;
+      const base = `node scripts/ops/pool-venue-dispatch.mjs ${verdict === "unknown" ? "status" : "stage-recall"}`;
+      const flags = { profile: "mainnet", pool: poolAddress, "request-id": requestId, "recall-id": recallId,
+        "expected-signer": identity.address, "observability-url": args.observabilityUrl,
+        "asset-hub-ws": args.assetHubWs, "hydration-ws": args.hydrationWs, "hydration-evm-rpc": args.hydrationEvmRpc };
+      return `${base}${verdict === "sell_not_executed" ? " --abandon-unexecuted-sell" : ""} `
+        + Object.entries(flags).map(([key, value]) => `--${key} ${quote(value)}`).join(" ");
+    };
+    diagnoseRecallFailure = async (error) => {
+      let observation;
+      let shares = 0n;
+      try {
+        const live = await readState(stateArgs);
+        shares = BigInt(live.wrapper.request?.context?.shares ?? 0);
+        observation = await observeRecallSell(live.venue.laneRequestId);
+      } catch (readError) { observation = { errors: [readError.message], scan: { complete: false } }; }
+      const classification = classifyRecallSell(observation, shares);
+      const nextCommand = nextRecallCommand(classification.verdict);
+      const evidence = { ...common, error: error.message, sellObservation: observation, classification, nextCommand };
+      await persistEvidence(args, evidence);
+      console.error(`RECALL SELL: ${classification.verdict}. ${classification.reason}\nNEXT (read-only): ${nextCommand}`);
+      return evidence;
     };
 
     if (args.command === "status") {
@@ -1539,12 +1593,55 @@ export async function main(argv = process.argv.slice(2), io = {}) {
       return evidence;
     }
 
+    if (args.abandonUnexecutedSell) {
+      // Terminalizing an intact position does not dispatch, spend remote float,
+      // or require an unexpired dispatch deadline. It never enters the runtime.
+      const laneRequestId = normalizeBytes32(state.venue.laneRequestId, "staged laneRequestId");
+      if (laneRequestId === ZERO32) throw new Error("Abandon requires a staged lane request.");
+      const readFresh = async ({ postcondition = false } = {}) => {
+        const observation = postcondition ? undefined : await observeRecallSell(laneRequestId);
+        const blockTag = await rpc.provider.getBlockNumber();
+        const overrides = { blockTag };
+        const [wrapperRecord, bitmap, laneRequest, pendingWithdrawalShares, totalAssets, totalShares,
+          requiresRemoteRecovery, recoveryAssetsOutstanding, reverse] = await Promise.all([
+          wrapper.getRequest(laneRequestId, overrides), wrapper.requestDispatchBitmap(laneRequestId, overrides),
+          lane.getAdapterRequest(laneRequestId, overrides), lane.pendingWithdrawalShares(overrides),
+          lane.totalAssets(overrides), lane.totalShares(overrides), lane.requiresRemoteRecovery(laneRequestId, overrides),
+          lane.recoveryAssetsOutstanding(laneRequestId, overrides), venue.poolRequestForLaneRequest(laneRequestId, overrides),
+        ]);
+        assertStagedRecallBinding({ record: wrapperRecord, strategyId, laneAddress, venueAddress });
+        if (normalizeBytes32(reverse, "reverse mapping") !== requestId
+          || getAddress(laneRequest.account) !== venueAddress || getAddress(laneRequest.recipient) !== venueAddress
+          || getAddress(laneRequest.requester) !== venueAddress) throw new Error("Abandon lane request is not bound to this pool's venue recall.");
+        return { blockTag, wrapperRecord, bitmap, laneRequest, pendingWithdrawalShares,
+          totalAssets, totalShares, requiresRemoteRecovery, recoveryAssetsOutstanding, observation };
+      };
+      try {
+        const result = await abandonUnexecutedSell({ laneRequestId, laneAddress, readFresh, provider: rpc.provider,
+          signer: { address: identity.address, sendTransaction: (tx) => identity.signer.sendTransaction(tx) },
+          runners: rpc.writeBroadcaster?.receiptRunners ?? [], commit: args.commit,
+          emit: (record) => console.log(JSON.stringify(record, bigintJson)) });
+        const evidence = { ...common, unwind: result, nextCommand:
+          `node scripts/ops/pool-venue-ceremony.mjs settle --profile mainnet --pool ${poolAddress} --recall-id ${recallId} --expected-signer ${identity.address}` };
+        await persistEvidence(args, evidence);
+        console.log(`NEXT (dry-run first): ${evidence.nextCommand}`);
+        return evidence;
+      } catch (error) {
+        await persistEvidence(args, { ...common, error: error.message, unwind: error.unwindEvidence });
+        throw error;
+      }
+    }
+
+    if (args.command === "stage-recall" && !args.abandonUnexecutedSell) {
+      common.retryBudget = await assertRecallAttemptBudget(pool, recall.deploymentId, { currentRecallId: recallId, blockTag: state.block.number });
+    }
+
     if (args.command === "stage-recall") {
       const initialMargin = assertDispatchMargin({ nowSeconds: state.block.timestamp, returnBy: state.venue.request.returnBy });
       if (state.wrapper.dispatchPaused) throw new Error("Configured wrapper is administratively paused; run cancel if the six-hour margin cannot be preserved.");
       const postageRaw = assertVenuePostage(state.venue.postage);
       const maximum = assertFeeCeiling(args.maxFeePerLeg);
-      const nonce = args.laneNonce ? positiveBigInt(args.laneNonce, "--lane-nonce") : 1n;
+      const nonce = args.laneNonce ? positiveBigInt(args.laneNonce, "--lane-nonce") : recallId;
 
       // A prior commit may have staged the recall and then failed before any
       // leg dispatched (cancelUnstaged is gone once a laneRequestId exists, so
@@ -2186,6 +2283,11 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     } finally {
       await services.balanceReader.close();
     }
+  } catch (error) {
+    if (isRecall && error.code === "recall_swap_observation_failed" && diagnoseRecallFailure) {
+      error.recallEvidence = await diagnoseRecallFailure(error);
+    }
+    throw error;
   } finally {
     await balanceReader.close();
   }

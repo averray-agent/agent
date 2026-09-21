@@ -139,7 +139,7 @@ test("Foundry and unrelated build output stay outside the backend runtime stage"
   assert.match("contracts/strategies/HydrationUsdcAdapterV22.sol", rebuildMatcher);
   assert.match("foundry.toml", rebuildMatcher);
   assert.match("lib/forge-std/src/Test.sol", rebuildMatcher);
-  for (const helper of ["ceremony-contract-evidence.mjs", "check-contract-provenance.mjs"]) {
+  for (const helper of ["ceremony-contract-evidence.mjs", "check-contract-provenance.mjs", "recall-sell-unwind.mjs"]) {
     assert.ok(dockerfile.includes(`COPY scripts/ops/${helper} ./scripts/ops/${helper}`), `pair evidence helper ${helper} must ship`);
     assert.match(`scripts/ops/${helper}`, rebuildMatcher);
   }

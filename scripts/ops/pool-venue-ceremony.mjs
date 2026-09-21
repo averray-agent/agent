@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 
 import { createCeremonyRpcContext } from "./ceremony-rpc.mjs";
 import { importCeremonyModule } from "./ceremony-module-loader.mjs";
+import { assertRecallAttemptBudget } from "./recall-sell-unwind.mjs";
 
 const { KmsSigner } = await importCeremonyModule({
   label: "KMS signer",
@@ -69,6 +70,7 @@ const POOL_ABI = [
   "function bufferAssets() view returns (uint256)",
   "function bufferFloor() view returns (uint256)",
   "function venuePrincipalCostBasis() view returns (uint256)",
+  "function venueWrittenOffPrincipalAssets(uint256) view returns (uint256)",
   "function TOTAL_ASSET_CAP() view returns (uint256)",
   "function PER_AGENT_ASSET_CAP() view returns (uint256)",
   "function NOTICE_7_DAYS() view returns (uint256)",
@@ -91,6 +93,7 @@ const POOL_ABI = [
   "event VenueRecallRequested(uint256 indexed recallId,uint256 indexed deploymentId,bytes32 indexed adapterRequestId,uint256 requestedAssets)",
   "event VenueRecallSettled(uint256 indexed recallId,uint256 indexed deploymentId,uint8 status,uint256 returnedAssets)",
   "event VenueLossRealised(uint256 indexed deploymentId,uint256 assets)",
+  "event VenueLossWrittenOff(uint256 indexed deploymentId,uint256 assets,uint256 remainingPrincipalCostBasis)",
   "event VenuePrincipalReturned(uint256 indexed deploymentId,uint256 returnedAssets,uint256 principalReduction)",
 ];
 
@@ -368,6 +371,22 @@ export function assertAccountingPostcondition({
   }
 }
 
+export function assertFailedRecallPreserved({ before, after, events = [] }) {
+  if (after.venueRecall?.status !== 3 || after.venueRecall.returnedAssets !== 0n || after.activeVenueRecallId !== 0n
+    || before.activeVenueDeploymentId !== after.activeVenueDeploymentId
+    || before.venuePrincipalCostBasis !== after.venuePrincipalCostBasis
+    || before.bufferAssets !== after.bufferAssets || before.totalAssets !== after.totalAssets
+    || !before.venueDeployment || !after.venueDeployment
+    || ["id", "principalAssets", "recalledPrincipalAssets", "writtenOffPrincipalAssets", "returnBy", "adapterRequestId", "status"]
+      .some((key) => before.venueDeployment[key] !== after.venueDeployment[key])
+    || events.some((event) => ["VenuePrincipalReturned", "VenueLossRealised", "VenueLossWrittenOff"].includes(event.name))) {
+    throw new Error("Failed recall postcondition: expected zero returned, no write-off, cleared recall, and unchanged active deployment/cost basis.");
+  }
+  const costBasis = (state) => state.venueDeployment.principalAssets - state.venueDeployment.recalledPrincipalAssets
+    - state.venueDeployment.writtenOffPrincipalAssets;
+  return { deploymentId: before.venueDeployment.id, beforeRaw: costBasis(before), afterRaw: costBasis(after), unchanged: true };
+}
+
 export function assertCeremonyEffectPostcondition({ command, parameters, after, event }) {
   const eventArg = (name) => BigInt(event.args[name]);
   if (command === "deploy") {
@@ -627,7 +646,8 @@ function ceremonyStateFocus(command, parameters) {
   }
   return parameters.settlementKind === "deployment"
     ? { deploymentId: parameters.deploymentId }
-    : { recallId: parameters.recallId };
+    : { recallId: parameters.recallId, ...(parameters.failedRecall
+      ? { deploymentId: parameters.deploymentId, reconcileFailedRecall: true } : {}) };
 }
 
 async function readPoolState(pool, blockTag, focus = {}) {
@@ -682,6 +702,8 @@ async function readPoolState(pool, blockTag, focus = {}) {
       id,
       principalAssets: BigInt(row.principalAssets),
       recalledPrincipalAssets: BigInt(row.recalledPrincipalAssets),
+      ...(focus.reconcileFailedRecall
+        ? { writtenOffPrincipalAssets: BigInt(await pool.venueWrittenOffPrincipalAssets(id, overrides)) } : {}),
       returnBy: BigInt(row.returnBy),
       adapterRequestId: row.adapterRequestId,
       status: Number(row.status),
@@ -758,8 +780,10 @@ function principalReduction(events) {
     .reduce((sum, event) => sum + BigInt(event.args.principalReduction), 0n);
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+const CEREMONY_IO = { readDeploymentManifest, createCeremonyRpcContext, resolveSigner, Contract, confirmCanonicalPostState };
+export async function main(argv = process.argv.slice(2), io = {}) {
+  const { readDeploymentManifest, createCeremonyRpcContext, resolveSigner, Contract, confirmCanonicalPostState } = { ...CEREMONY_IO, ...io };
+  const args = parseArgs(argv);
   if (args.help) {
     console.log(usage());
     return;
@@ -870,6 +894,7 @@ async function main() {
       throw new Error(`Active venue deployment is ${before.activeVenueDeploymentId}, not ${deploymentId}.`);
     }
     if (before.activeVenueRecallId !== 0n) throw new Error(`Active venue recall ${before.activeVenueRecallId} already exists.`);
+    common.retryBudget = await assertRecallAttemptBudget(pool, deploymentId, { blockTag: latest.number });
     data = poolInterface.encodeFunctionData("recallVenueDeployment", [deploymentId, assets]);
     staticResult = await pool.getFunction("recallVenueDeployment").staticCall(deploymentId, assets, { from: identity.address });
     expectedEvent = "VenueRecallRequested";
@@ -889,7 +914,12 @@ async function main() {
       data = poolInterface.encodeFunctionData("settleVenueRecall", [recallId]);
       staticResult = await pool.getFunction("settleVenueRecall").staticCall(recallId, { from: identity.address });
       expectedEvent = "VenueRecallSettled";
-      parameters = { settlementKind: "recall", recallId };
+      const recall = await pool.venueRecalls(recallId, { blockTag: latest.number });
+      const deploymentId = BigInt(recall.deploymentId);
+      const failedRecall = Number(staticResult[0]) === 3;
+      if (failedRecall && BigInt(staticResult[1]) !== 0n) throw new Error("Failed recall must settle with zero returned assets.");
+      if (failedRecall) Object.assign(before, await readPoolState(pool, latest.number, { recallId, deploymentId, reconcileFailedRecall: true }));
+      parameters = { settlementKind: "recall", recallId, deploymentId, failedRecall };
     }
   }
 
@@ -912,7 +942,7 @@ async function main() {
   console.log(serialize(plan));
   if (!args.commit) {
     console.log("\nDRY RUN ONLY — no signature requested and no transaction broadcast.");
-    return;
+    return plan;
   }
 
   const tx = await identity.signer.sendTransaction({ to: poolAddress, data, value: 0n });
@@ -935,6 +965,7 @@ async function main() {
   const afterBlock = finality.block;
   const after = finality.postState;
   assertCeremonyEffectPostcondition({ command: args.command, parameters, after, event: primary });
+  const failedRecallCostBasis = parameters.failedRecall ? assertFailedRecallPreserved({ before, after, events }) : undefined;
   const reduction = principalReduction(events);
   assertAccountingPostcondition({
     beforePrincipalCostBasis: before.venuePrincipalCostBasis,
@@ -980,11 +1011,13 @@ async function main() {
       accountingReconciled: true,
       principalCostBasisReductionRaw: reduction,
       chainTimestamp: afterBlock?.timestamp ?? null,
+      ...(failedRecallCostBasis ? { failedRecallCostBasis } : {}),
     },
     finality: finalityEvidence.finality,
   };
   console.log("\n# COMMITTED EVIDENCE");
   console.log(serialize(evidence));
+  return evidence;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
