@@ -12,6 +12,7 @@ const { waitForTransaction, DEFAULT_BROKERED_TX_TIMEOUT_MS } = await importCerem
 const wrapperInterface = new Interface(XCM_WRAPPER_ABI);
 const laneInterface = new Interface(HYDRATION_USDC_ADAPTER_V22_ABI);
 export const MAX_RECALL_ATTEMPTS = 3;
+export const DEFAULT_OBSERVATION_TIMEOUT_MS = 180_000;
 export const SELL_NOT_EXECUTED = encodeBytes32String("SELL_NOT_EXECUTED");
 const ZERO32 = `0x${"00".repeat(32)}`;
 const raw = (value) => BigInt(String(value).replaceAll(",", ""));
@@ -72,6 +73,12 @@ export function collectRecallSellEvents(records, requestId, block, accountId32, 
 export function classifyRecallSell(observation, stagedShares) {
   const unknown = (reason) => ({ verdict: "unknown", reason });
   if (!observation?.scan?.complete || observation.errors?.length) return unknown("Far-side evidence is incomplete; human review required.");
+  if (observation.book?.messageCount !== 0n) return unknown("Asset Hub message book is non-empty or unavailable; messages may still be queued.");
+  const processed = observation.processed ?? [];
+  if (!processed.length || processed.some((event) => event.sibling !== 1000n || typeof event.success !== "boolean")
+    || processed.filter((event) => event.success).length !== 1 || processed.at(-1).success !== true) {
+    return unknown("No successful messageQueue.Processed from Sibling 1000 for this request.");
+  }
   const swaps = observation.swaps ?? [];
   if (swaps.length) {
     let valid = false;
@@ -92,10 +99,7 @@ export function classifyRecallSell(observation, stagedShares) {
   if (evm === undefined || substrate === undefined || BigInt(evm) !== BigInt(substrate)
     || BigInt(evm) < BigInt(stagedShares) || BigInt(stagedShares) <= 0n) return unknown("The two aToken balance views do not prove the staged position is intact.");
   if (observation.positionDebits?.length) return unknown("aUSDC moved since dispatch; stop for human review.");
-  if (observation.processed?.length !== 1 || observation.processed[0].sibling !== 1000n || observation.processed[0].success !== true) {
-    return unknown("No unique successful messageQueue.Processed from Sibling 1000 for this request.");
-  }
-  return { verdict: "sell_not_executed", reason: "Message delivered, no topic-bound swap or position debit, and both aToken views retain the staged shares." };
+  return { verdict: "sell_not_executed", reason: "Message processed, no swap or position debit in its processing blocks, empty Asset Hub book, and both aToken views retain the staged shares." };
 }
 
 async function boundedRead(operation, deadline) {
@@ -110,11 +114,12 @@ async function boundedRead(operation, deadline) {
 }
 
 // Never infer message delivery from bitmap 4. Find the exact Hub dispatch,
-// then scan every Hydration block from its timestamp (with skew margin) to a
-// captured finalized head. Partial/pruned/unreadable history is unknown.
+// then locate the topic's processing blocks. Transact executes within message
+// processing, not at an arbitrary later block. Read the WHOLE successful block
+// before stopping, then require a fresh empty Asset Hub book and intact position.
 export async function readRecallSellObservation({ provider, wrapperAddress, laneRequestId, fromHubBlock,
-  hydrationApi: api, balanceReader, positionTarget, historyRange, timeoutMs = 180_000 }) {
-  const observation = { laneRequestId, scan: { complete: false }, swaps: [], processed: [], positionDebits: [], errors: [] };
+  hydrationApi: api, balanceReader, positionTarget, historyRange, timeoutMs = DEFAULT_OBSERVATION_TIMEOUT_MS }) {
+  const observation = { laneRequestId, timeoutMs, scan: { complete: false }, swaps: [], processed: [], positionDebits: [], errors: [] };
   const deadline = Date.now() + timeoutMs;
   const read = (fn) => boundedRead(fn, deadline);
   try {
@@ -133,40 +138,54 @@ export async function readRecallSellObservation({ provider, wrapperAddress, lane
     if (!hubBlock || lower(hubBlock.hash) !== lower(logs[0].blockHash)) throw new Error("Sell dispatch block is not canonical.");
     observation.dispatch = { blockNumber: hubBlock.number, blockHash: hubBlock.hash,
       timestamp: hubBlock.timestamp, transactionHash: logs[0].transactionHash, messageHash: dispatched.args.messageHash };
-    const hash = (await read(() => api.rpc.chain.getFinalizedHead())).toHex();
-    const header = await read(() => api.rpc.chain.getHeader(hash));
+    let hash = (await read(() => api.rpc.chain.getFinalizedHead())).toHex();
+    let header = await read(() => api.rpc.chain.getHeader(hash));
     const number = header.number.toNumber();
     const { scan } = await read(() => historyRange(api, hubBlock.timestamp));
     if (scan.fromBlock > number || !hex32(hash)) throw new Error("Finalized Hydration head does not cover the sell dispatch.");
-    observation.scan = { ...scan, toBlock: number, complete: false };
-    observation.hydrationBlock = { number, hash };
+    observation.scan = { ...scan, toBlock: null, searchHead: number, timeoutMs, processingBlocks: [], complete: false };
+    for (let blockNumber = scan.fromBlock; blockNumber <= number; blockNumber++) {
+      const blockHash = (await read(() => api.rpc.chain.getBlockHash(blockNumber))).toHex();
+      const blockApi = await read(() => api.at(blockHash));
+      const records = (await read(() => blockApi.query.system.events())).toHuman();
+      const found = collectRecallSellEvents(records, laneRequestId, { blockNumber, blockHash }, positionTarget.account, api);
+      observation.scan.toBlock = blockNumber;
+      if (!found.processed.length) {
+        if (found.swaps.length) throw new Error("Topic-bound swap without its Processed event; processing proof is inconsistent.");
+        continue;
+      }
+      observation.scan.processingBlocks.push({ blockNumber, blockHash });
+      for (const key of ["swaps", "processed", "positionDebits"]) observation[key].push(...found[key]);
+      // collectRecallSellEvents reads every event, including swaps/debits AFTER
+      // Processed in this block's event array, before this early-stop decision.
+      if (found.processed.some((event) => event.sibling === 1000n && event.success === true)) {
+        observation.scan.complete = true;
+        observation.scan.stopReason = "successful_topic_processed";
+        break;
+      }
+    }
+    if (!observation.scan.complete) throw new Error("No successful Processed for the topic before the finalized search head.");
+    // Queue state and BOTH balances are current at the same finalized block,
+    // not the historical processing block and not a pre-scan cached snapshot.
+    hash = (await read(() => api.rpc.chain.getFinalizedHead())).toHex();
+    header = await read(() => api.rpc.chain.getHeader(hash));
+    const observedNumber = header.number.toNumber();
+    if (!hex32(hash) || observedNumber < observation.scan.toBlock) throw new Error("Observation head precedes message processing.");
+    observation.hydrationBlock = { number: observedNumber, hash };
     const at = await read(() => api.at(hash));
-    const [evm, substrate] = await Promise.all([
-      read(() => balanceReader.read(positionTarget, { blockTag: number })),
+    const [evm, substrate, book] = await Promise.all([
+      read(() => balanceReader.read(positionTarget, { blockTag: observedNumber })),
       // CurrenciesApi knows asset 1003 is ERC20. Tokens.accounts(1003) is NOT
       // the aToken ledger and reads zero even when the position is healthy.
       read(() => at.call.currenciesApi.freeBalance(1003, positionTarget.account)),
+      read(() => at.query.messageQueue.bookStateFor({ Sibling: 1000 })),
     ]);
+    // Polkadot JS exposes the runtime's message_count field as messageCount.
+    // Missing/changed schema must refuse, never default to an empty book.
+    observation.book = { origin: { Sibling: 1000 }, messageCount: raw(book.messageCount), blockNumber: observedNumber, blockHash: hash };
     observation.position = { evmRaw: BigInt(evm.raw), substrateRaw: raw(substrate),
       accountId32: positionTarget.account, evmAccount: positionTarget.account.slice(0, 42),
       aToken: positionTarget.contract, substrateView: "CurrenciesApi.freeBalance(1003, accountId32)" };
-    let next = scan.fromBlock;
-    let scanFailed = false;
-    const scans = await Promise.allSettled(Array.from({ length: 12 }, async () => {
-      try {
-        while (!scanFailed && next <= number) {
-          const blockNumber = next++;
-          const blockHash = (await read(() => api.rpc.chain.getBlockHash(blockNumber))).toHex();
-          const blockApi = await read(() => api.at(blockHash));
-          const records = (await read(() => blockApi.query.system.events())).toHuman();
-          const found = collectRecallSellEvents(records, laneRequestId, { blockNumber, blockHash }, positionTarget.account, api);
-          for (const key of ["swaps", "processed", "positionDebits"]) observation[key].push(...found[key]);
-        }
-      } catch (error) { scanFailed = true; throw error; }
-    }));
-    const failed = scans.find((result) => result.status === "rejected");
-    if (failed) throw failed.reason;
-    observation.scan.complete = true;
   } catch (error) {
     observation.errors.push(String(error.message));
   }

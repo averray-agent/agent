@@ -35,6 +35,7 @@ import { extractAaveQuote } from "./capture-bank-xcm-v22-staging-quote.mjs";
 import {
   abandonUnexecutedSell, assertNoRecallSlack, assertRecallAttemptBudget,
   classifyRecallSell, readRecallSellObservation,
+  DEFAULT_OBSERVATION_TIMEOUT_MS,
 } from "./recall-sell-unwind.mjs";
 
 const { KmsSigner } = await importCeremonyModule({
@@ -174,6 +175,7 @@ export function parseArgs(argv) {
     floatHeadroom: DEFAULT_FLOAT_HEADROOM_RAW.toString(),
     laneNonce: undefined,
     observabilityUrl: undefined,
+    observationTimeoutMs: DEFAULT_OBSERVATION_TIMEOUT_MS,
     expectedSigner: undefined,
     assetHubWs: process.env.BANK_XCM_ASSET_HUB_SUBSTRATE_RPC_URL,
     hydrationWs: process.env.BANK_XCM_HYDRATION_SUBSTRATE_RPC_URL,
@@ -201,6 +203,15 @@ export function parseArgs(argv) {
     else if (flag === "--float-headroom") args.floatHeadroom = next();
     else if (flag === "--lane-nonce") args.laneNonce = next();
     else if (flag === "--abandon-unexecuted-sell") args.abandonUnexecutedSell = true;
+    else if (flag === "--observation-timeout-ms") {
+      const value = next();
+      if (!/^\d+$/u.test(value) || Number(value) < 1 || Number(value) > 2_147_483_647) throw new Error("--observation-timeout-ms must be an integer from 1 to 2147483647.");
+      args.observationTimeoutMs = Number(value);
+    }
+    else if (flag === "--dispatch-margin-seconds") {
+      if (command !== "stage-recall") throw new Error("--dispatch-margin-seconds is only allowed for stage-recall.");
+      args.dispatchMarginSeconds = recallDispatchMargin(next());
+    }
     // Compatibility refusal, not an economic knob: this pair hardcodes par.
     else if (flag === "--min-out-slack-raw") assertNoRecallSlack(next());
     else if (flag === "--observability-url") args.observabilityUrl = next();
@@ -275,11 +286,19 @@ export function assertFeeCeiling(value) {
   return fee;
 }
 
-export function assertDispatchMargin({ nowSeconds, returnBy }) {
+export function recallDispatchMargin(value = MIN_DISPATCH_MARGIN_SECONDS) {
+  if (!/^\d+$/u.test(String(value)) || !Number.isSafeInteger(Number(value)) || Number(value) < 3600) {
+    throw new Error("--dispatch-margin-seconds must be an integer of at least 3600 seconds.");
+  }
+  return Number(value);
+}
+
+export function assertDispatchMargin({ nowSeconds, returnBy, minimumMarginSeconds = MIN_DISPATCH_MARGIN_SECONDS }) {
+  const required = recallDispatchMargin(minimumMarginSeconds);
   const margin = BigInt(returnBy) - BigInt(nowSeconds);
-  if (margin < BigInt(MIN_DISPATCH_MARGIN_SECONDS)) {
+  if (margin < BigInt(required)) {
     throw new Error(
-      `Only ${margin} seconds remain before returnBy; stage-dispatch requires at least ${MIN_DISPATCH_MARGIN_SECONDS}. Run cancel instead.`,
+      `Only ${margin} seconds remain before returnBy; staging requires at least ${required}. Run cancel instead.`,
     );
   }
   return margin;
@@ -766,6 +785,8 @@ function usage() {
     "  node scripts/ops/pool-venue-dispatch.mjs stage-recall --profile mainnet [--pool 0x...] --request-id 0x... --recall-id 1 --observability-url URL --expected-signer 0x... [--max-fee-per-leg 80000] [--fee-floor-ratio-bps 15000] [--commit --use-kms]",
     "  stage-recall also accepts --abandon-unexecuted-sell: prove the sell did nothing, fail only the lane request, then use pool-venue-ceremony settle.",
     "  Nonzero --min-out-slack-raw is refused: stageRecall requires minimumOutput == requestedAssets.",
+    "  --observation-timeout-ms defaults to 180000; incomplete proof still refuses abandonment.",
+    "  stage-recall alone accepts --dispatch-margin-seconds (minimum 3600, default 21600); overrides are recorded.",
     "",
     "Dry-run is the default. Writes require both --commit and --use-kms. Raw keys are never accepted.",
   ].join("\n");
@@ -1493,6 +1514,11 @@ export async function main(argv = process.argv.slice(2), io = {}) {
       addresses: { pool: poolAddress, venueAdapter: venueAddress, poolLane: laneAddress, wrapper: wrapperAddress, operatingLaneExcluded: operatingLane, convertedAccountId32 },
       signer: identity.address,
       signerBackend: identity.backend,
+      ...(args.command === "stage-recall" ? {
+        observationTimeoutMs: args.observationTimeoutMs,
+        dispatchMargin: { seconds: recallDispatchMargin(args.dispatchMarginSeconds),
+          defaultSeconds: MIN_DISPATCH_MARGIN_SECONDS, override: args.dispatchMarginSeconds !== undefined },
+      } : {}),
       observability: { url: args.observabilityUrl, block: observability.block, reconciled: observability.reconciled, flowsStatus: observability.flows?.status },
       state,
     };
@@ -1500,7 +1526,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     const observeRecallSell = async (laneRequestId) => readRecallSellObservation({
       provider: rpc.provider, wrapperAddress, laneRequestId, fromHubBlock: adapterDeploymentBlock,
       hydrationApi: await balanceReader.getSubstrateApi(args.hydrationWs), balanceReader,
-      positionTarget: targets.position, historyRange: historicalSwapRange,
+      positionTarget: targets.position, historyRange: historicalSwapRange, timeoutMs: args.observationTimeoutMs,
     });
     const nextRecallCommand = (verdict) => {
       const quote = (value) => `'${String(value).replaceAll("'", "'\"'\"'")}'`;
@@ -1508,6 +1534,8 @@ export async function main(argv = process.argv.slice(2), io = {}) {
       const flags = { profile: "mainnet", pool: poolAddress, "request-id": requestId, "recall-id": recallId,
         "expected-signer": identity.address, "observability-url": args.observabilityUrl,
         "asset-hub-ws": args.assetHubWs, "hydration-ws": args.hydrationWs, "hydration-evm-rpc": args.hydrationEvmRpc };
+      flags["observation-timeout-ms"] = args.observationTimeoutMs;
+      if (verdict !== "unknown" && args.dispatchMarginSeconds !== undefined) flags["dispatch-margin-seconds"] = args.dispatchMarginSeconds;
       return `${base}${verdict === "sell_not_executed" ? " --abandon-unexecuted-sell" : ""} `
         + Object.entries(flags).map(([key, value]) => `--${key} ${quote(value)}`).join(" ");
     };
@@ -1637,7 +1665,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
     }
 
     if (args.command === "stage-recall") {
-      const initialMargin = assertDispatchMargin({ nowSeconds: state.block.timestamp, returnBy: state.venue.request.returnBy });
+      const initialMargin = assertDispatchMargin({ nowSeconds: state.block.timestamp, returnBy: state.venue.request.returnBy, minimumMarginSeconds: args.dispatchMarginSeconds });
       if (state.wrapper.dispatchPaused) throw new Error("Configured wrapper is administratively paused; run cancel if the six-hour margin cannot be preserved.");
       const postageRaw = assertVenuePostage(state.venue.postage);
       const maximum = assertFeeCeiling(args.maxFeePerLeg);
@@ -1743,7 +1771,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
       const plan = {
         ...common,
         resumed: isResume,
-        timing: { returnBy: state.venue.request.returnBy, marginSeconds: initialMargin, minimumMarginSeconds: MIN_DISPATCH_MARGIN_SECONDS },
+        timing: { returnBy: state.venue.request.returnBy, marginSeconds: initialMargin, minimumMarginSeconds: recallDispatchMargin(args.dispatchMarginSeconds) },
         postage: { raw: postageRaw, minimumRaw: MIN_VENUE_POSTAGE_PLANCK, liveState: true },
         staging: isResume ? {
           resumedLaneRequestId: stagedLaneRequestId,
@@ -1792,7 +1820,7 @@ export async function main(argv = process.argv.slice(2), io = {}) {
         recall: commitState.pool.recall,
         venueRequest: commitState.venue.request,
       });
-      const commitMargin = assertDispatchMargin({ nowSeconds: commitState.block.timestamp, returnBy: commitState.venue.request.returnBy });
+      const commitMargin = assertDispatchMargin({ nowSeconds: commitState.block.timestamp, returnBy: commitState.venue.request.returnBy, minimumMarginSeconds: args.dispatchMarginSeconds });
       assertVenuePostage(commitState.venue.postage);
 
       const token = new Contract(manifest.contracts.token, ERC20_ABI, rpc.provider);

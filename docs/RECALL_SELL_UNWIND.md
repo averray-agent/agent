@@ -11,15 +11,26 @@ are performed by tests or by the default CLI mode.
 A withdraw-sell timeout now records far-side evidence before failing. The
 reader finds the request's unique canonical Hub `RequestLegDispatched` (leg 2),
 uses its timestamp with the existing five-minute skew allowance to bound the
-Hydration scan, and scans through a captured finalized Hydration head. All
-blocks must be readable. Missing, pruned, contradictory or malformed evidence
-is `unknown`, not proof that the sell failed. The scan has a 180-second read
-budget; exhausting it does not authorize a write.
+Hydration scan, and scans forward only until the first successful
+`messageQueue.Processed` for the topic. It reads that entire block before
+stopping: a Transact executes during its message's processing, not later.
+Swaps and venue aUSDC debits in every matching processing block (including
+earlier unsuccessful processing) are retained. There is no scan to today's head
+after a successful Processed has been found. Missing/pruned processing history
+or contradictory evidence is still `unknown`.
+
+After finding the processing block, the reader captures a fresh finalized head
+and reads **both position balances and `messageQueue.bookStateFor({Sibling:1000})`
+at that block**. The runtime's `message_count` is Polkadot JS `messageCount`;
+it must be zero. A non-empty or unreadable book means `unknown`, never permission
+to abandon. The budget defaults to 180 seconds; `--observation-timeout-ms`
+accepts a positive integer (for example `900000`) and is recorded in evidence.
+Exhausting any budget does not authorize a write.
 
 | Verdict | Evidence | Next action printed (read-only) |
 | --- | --- | --- |
 | `sell_executed_unobserved` | One topic-bound, exact-par AAVE 1003→22 swap within the existing accrual ceiling | Resume `stage-recall`; its normal guards still apply |
-| `sell_not_executed` | No topic-bound swap or aUSDC debit, exact-topic successful `Processed` from Sibling 1000, intact position in both balance views | Preview `stage-recall --abandon-unexecuted-sell` |
+| `sell_not_executed` | No topic-bound swap or aUSDC debit in processing blocks, exact-topic successful `Processed` from Sibling 1000, empty Asset Hub book, intact position in both balance views | Preview `stage-recall --abandon-unexecuted-sell` |
 | `unknown` | Anything else | `status`, then human review; no abandon |
 
 The `messageQueue.Processed.id` must equal this lane request's XCM topic. A
@@ -120,10 +131,15 @@ Step 3 creates a request; it does **not** stage or dispatch XCM. Follow the
 existing gated `stage-recall` procedure with the new IDs. The default lane
 nonce now follows the recall ID, so an equal-sized retry gets a fresh wrapper
 identity. All existing quote, fee, postage, pause and deadline guards remain.
-In particular, staging still requires the six-hour margin before the original
-deployment `returnBy` (cycle 2: **2026-09-23T03:50:06Z**, margin ends
-**2026-09-22T21:50:06Z**). After that, stop for human review; this patch does
-not extend a contract deadline. Abandon and Failed settlement remain usable.
+The default staging margin remains six hours before the original deployment
+`returnBy` (cycle 2: **2026-09-23T03:50:06Z**, default margin ends
+**2026-09-22T21:50:06Z**). The ratified urgent follow-up permits an explicit
+`stage-recall --dispatch-margin-seconds 3600` override, but never less than one
+hour. The effective/default margin and override flag are logged in the run
+record, and both preflight and commit recheck it. Deposit staging cannot use
+this flag. With 3600, cycle 2's staging cutoff is **2026-09-23T02:50:06Z**;
+the contract deadline itself is unchanged. Abandon and Failed settlement
+remain usable afterwards; no override bypasses a contract deadline.
 
 ## Retry economics and design constraints
 
