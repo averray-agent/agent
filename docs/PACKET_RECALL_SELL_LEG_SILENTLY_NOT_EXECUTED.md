@@ -61,6 +61,33 @@ Truthful: nothing came home, nothing is in flight, the position is intact.
 
 Out of scope: any contract change (the wrapper's idempotent `dispatchLeg` is a design choice; note it for v2.2's adapter follow-up), the deposit direction, the measurement itself.
 
+## Rulings — 2026-09-22 (Codex verified both against provenance at Hub block 20921367)
+
+**Ruling A — D2 passes `observedRemoteBalanceRaw = 0`.** Verified in the deployed
+lane: the Withdraw + non-Succeeded branch calls
+`_recordTerminalAccounting(requestId, requestedShares, observedRemoteBalanceRaw)`
+and leaves `totalShares`/`totalAssets` untouched, so the aUSDC is still the live
+position on the books. The recovery slot means "assets that left the position
+and are stranded remotely"; nothing left. Passing the intact balance would
+double-count it and set `requiresRemoteRecovery`, which the venue adapter masks
+as Pending (`HydrationDepositPoolAdapter` status masking) and the pool could
+never settle. **Gate before passing 0:** the driver reads the venue aUSDC
+(EVM `balanceOf` of the aToken for the venue's H160, plus the Substrate view)
+and refuses unless it is ≥ the staged shares, and unless no `Swapped3` for the
+topic exists since the dispatch block — if anything moved, 0 would be a lie and
+the tool stops for a human. The observed balance and the Hydration block hash of
+that observation go into the run record and into `remoteRef`; `failureCode` =
+`SELL_NOT_EXECUTED`. D3 then settles the pool recall with 0 returned.
+
+**Ruling B — no minimum-output slack for this adapter.** `stageRecall` requires
+`parameters.minimumOutput == request.requestedAssets` (contract invariant of the
+pair; the v2.2 pair is the same artifact). `--min-out-slack-raw` is dropped:
+refuse any nonzero value with an error that names the contract rule. The
+replays proved the minimum was never the cause; nothing is lost. Note it in the
+doc as a design constraint for a future adapter revision only.
+
+D1, D3 (with the 0-returned settle), D4's retry cap of 3, and D5 stand.
+
 ## 6. Handback
 
 PR, CI, test names, and the exact three commands for the operator in order:
