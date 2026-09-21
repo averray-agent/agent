@@ -84,7 +84,7 @@ async function fixture(t, { liveAdapters = {} } = {}) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   await mkdir(resolve(directory, "scripts/ops"), { recursive: true });
   await mkdir(resolve(directory, "deployments"));
-  for (const file of ["pool-venue-ceremony.mjs", "ceremony-rpc.mjs", "ceremony-module-loader.mjs"]) {
+  for (const file of ["pool-venue-ceremony.mjs", "ceremony-rpc.mjs", "ceremony-module-loader.mjs", "recall-sell-unwind.mjs"]) {
     await copyFile(resolve(root, "scripts/ops", file), resolve(directory, "scripts/ops", file));
   }
   for (const path of ["node_modules", "mcp-server"]) await symlink(resolve(root, path), resolve(directory, path), "dir");
