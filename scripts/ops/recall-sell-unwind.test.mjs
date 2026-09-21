@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { Interface, encodeBytes32String } from "ethers";
 import { XCM_WRAPPER_ABI, HYDRATION_USDC_ADAPTER_V22_ABI } from "../../mcp-server/src/blockchain/abis.js";
 import { waitForTransaction } from "../../mcp-server/src/blockchain/transaction-wait.js";
-import { parseArgs, main as dispatchMain, waitForAaveSwap } from "./pool-venue-dispatch.mjs";
+import { parseArgs, main as dispatchMain, waitForAaveSwap, assertDispatchMargin } from "./pool-venue-dispatch.mjs";
 import { assertFailedRecallPreserved, main as ceremonyMain } from "./pool-venue-ceremony.mjs";
 import {
   SELL_NOT_EXECUTED, MAX_RECALL_ATTEMPTS, abandonUnexecutedSell,
@@ -29,22 +29,29 @@ const swapped = (id = REQUEST) => ({ event: { section: "broadcast", method: "Swa
   inputs: [{ asset: "1003", amount: SHARES.toString() }], outputs: [{ asset: "22", amount: SHARES.toString() }],
 } } });
 
-function observationReader({ records = [processed()], evmRaw = BALANCE, substrateRaw = BALANCE, unreadableBlock } = {}) {
+function observationReader({ records = [processed()], evmRaw = BALANCE, substrateRaw = BALANCE, unreadableBlock,
+  head = 3, messageCount = 0n, bookError = false, recordsByBlock } = {}) {
   const calls = [];
-  const blockHash = (number) => number === 3 ? HASH : `0x${String(number).padStart(64, "0")}`;
+  const blockHash = (number) => number === head ? HASH : `0x${String(number).padStart(64, "0")}`;
   const api = {
     createType: (_type, value) => ({ toHex: () => value }),
     rpc: { chain: { getFinalizedHead: async () => ({ toHex: () => HASH }),
-      getHeader: async (hash) => { assert.equal(hash, HASH); return { number: { toNumber: () => 3 } }; },
+      getHeader: async (hash) => { assert.equal(hash, HASH); return { number: { toNumber: () => head } }; },
       getBlockHash: async (number) => ({ toHex: () => blockHash(number) }) } },
     at: async (hash) => ({
       call: { currenciesApi: { freeBalance: async (asset, account) => {
         calls.push(["substrate", hash, asset, account]); return substrateRaw;
       } } },
-      query: { system: { events: async () => {
+      query: { messageQueue: { bookStateFor: async (origin) => {
+        calls.push(["book", hash, origin]);
+        if (bookError) throw new Error("message queue read unavailable");
+        return { messageCount };
+      } }, system: { events: async () => {
         calls.push(["events", hash]);
         if (hash === blockHash(unreadableBlock)) throw new Error("pruned history");
-        return { toHuman: () => hash === blockHash(2) ? records : [] };
+        return { toHuman: () => recordsByBlock
+          ? (Object.entries(recordsByBlock).find(([number]) => hash === blockHash(Number(number)))?.[1] ?? [])
+          : hash === blockHash(2) ? records : [] };
       } } },
     }),
   };
@@ -58,12 +65,13 @@ function observationReader({ records = [processed()], evmRaw = BALANCE, substrat
     },
   };
   const positionTarget = { account: ACCOUNT, contract: "0x2ec4884088d84e5c2970a034732e5209b0acfa93" };
-  const read = () => readRecallSellObservation({ provider, wrapperAddress: WRAPPER, laneRequestId: REQUEST,
+  const read = (options = {}) => readRecallSellObservation({ provider, wrapperAddress: WRAPPER, laneRequestId: REQUEST,
     fromHubBlock: 100, hydrationApi: api, positionTarget,
     balanceReader: { read: async (target, options) => {
       calls.push(["evm", target, options]); return { raw: evmRaw };
     } },
-    historyRange: async (_api, timestamp) => { assert.equal(timestamp, 2_000_000_000); return { scan: { fromBlock: 1, toBlock: 4 } }; },
+    historyRange: async (_api, timestamp) => { assert.equal(timestamp, 2_000_000_000); return { scan: { fromBlock: 1, toBlock: head + 1 } }; },
+    ...options,
   });
   return { read, calls, provider, api };
 }
@@ -72,8 +80,8 @@ test("D1: complete far-side fixtures classify executed-unobserved, not-executed,
   const intact = observationReader();
   const observation = await intact.read();
   assert.equal(classifyRecallSell(observation, SHARES).verdict, "sell_not_executed");
-  assert.equal(observation.scan.toBlock, 3, "scan clamps to captured finalized head");
-  assert.equal(intact.calls.filter(([kind]) => kind === "events").length, 3);
+  assert.equal(observation.scan.toBlock, 2, "scan stops at the successful processing block");
+  assert.equal(intact.calls.filter(([kind]) => kind === "events").length, 2);
   assert.deepEqual(intact.calls.find(([kind]) => kind === "substrate"), ["substrate", HASH, 1003, ACCOUNT]);
   assert.deepEqual(intact.calls.find(([kind]) => kind === "evm")[2], { blockTag: 3 });
   const executed = await observationReader({ records: [processed(), swapped()], evmRaw: 21_206n, substrateRaw: 21_206n }).read();
@@ -87,6 +95,42 @@ test("D1: complete far-side fixtures classify executed-unobserved, not-executed,
     { records: [processed(), { event: { section: "tokens", method: "Withdrawn", data: { currencyId: "1003", who: ACCOUNT, amount: "1" } } }] },
   ]) assert.equal(classifyRecallSell(await observationReader(options).read(), SHARES).verdict, "unknown");
   assert.equal(classifyRecallSell(await observationReader({ records: [processed(), swapped(TX)] }).read(), SHARES).verdict, "sell_not_executed", "unrelated swap is not request evidence");
+});
+
+test("processing proof: Processed plus same-block swap after it is executed-unobserved", async () => {
+  const f = observationReader({ records: [processed(), swapped()], head: 10_500, unreadableBlock: 3 });
+  const result = await f.read();
+  assert.equal(classifyRecallSell(result, SHARES).verdict, "sell_executed_unobserved");
+  assert.equal(result.scan.toBlock, 2);
+  assert.equal(result.swaps.length, 1);
+  assert.equal(f.calls.filter(([kind]) => kind === "events").length, 2, "never scan the 10k-block tail");
+});
+
+test("processing proof: Processed without swap plus empty book and intact position is not-executed", async () => {
+  const f = observationReader({ head: 10_500, unreadableBlock: 3 });
+  const result = await f.read({ timeoutMs: 900_000 });
+  assert.equal(classifyRecallSell(result, SHARES).verdict, "sell_not_executed");
+  assert.equal(result.timeoutMs, 900_000);
+  assert.equal(result.scan.stopReason, "successful_topic_processed");
+  assert.deepEqual(result.scan.processingBlocks.map((block) => block.blockNumber), [2]);
+  assert.deepEqual(f.calls.find(([kind]) => kind === "book"), ["book", HASH, { Sibling: 1000 }]);
+  assert.ok(f.calls.findIndex(([kind]) => kind === "book") > f.calls.findLastIndex(([kind]) => kind === "events"));
+  assert.deepEqual(f.calls.find(([kind]) => kind === "evm")[2], { blockTag: 10_500 });
+});
+
+test("processing proof: non-empty, unavailable, or malformed book is unknown", async () => {
+  for (const options of [{ messageCount: 1n }, { bookError: true }, { messageCount: "wrong-shape" }]) {
+    const result = await observationReader(options).read();
+    assert.equal(classifyRecallSell(result, SHARES).verdict, "unknown");
+  }
+});
+
+test("processing proof: earlier failed processing blocks also retain movement evidence", async () => {
+  const failed = processed(); failed.event.data.success = false;
+  const debit = { event: { section: "tokens", method: "Withdrawn", data: { currencyId: "1003", who: ACCOUNT, amount: "1" } } };
+  const result = await observationReader({ recordsByBlock: { 1: [failed, debit], 2: [processed()] } }).read();
+  assert.equal(classifyRecallSell(result, SHARES).verdict, "unknown");
+  assert.deepEqual(result.scan.processingBlocks.map((block) => block.blockNumber), [1, 2]);
 });
 
 async function abandonFixture() {
@@ -145,6 +189,7 @@ test("D2: every abandonment gate refuses before simulation or broadcast", async 
     "Substrate view disagrees": (b) => { b.observation.position.substrateRaw--; },
     "topic-bound Swapped3": (b) => { b.observation.swaps = [{ data: swapped().event.data }]; },
     "no Processed": (b) => { b.observation.processed = []; },
+    "non-empty book": (b) => { b.observation.book.messageCount = 1n; },
     "wrong sibling": (b) => { b.observation.processed[0].sibling = 2000n; },
     "Processed unsuccessful": (b) => { b.observation.processed[0].success = false; },
     "incomplete history": (b) => { b.observation.scan.complete = false; },
@@ -226,7 +271,7 @@ const ZERO32 = `0x${"00".repeat(32)}`;
 const NOW = 2_000_000_000;
 const STRATEGY = encodeBytes32String("AAC_IDLE_HYDRATION_V1");
 
-async function commandFixture({ expired = false, attempts = 1, liveFailure = false, observation: suppliedObservation } = {}) {
+async function commandFixture({ expired = false, attempts = 1, liveFailure = false, remaining = 100000, observation: suppliedObservation } = {}) {
   const observation = suppliedObservation ?? await observationReader().read();
   let settled = false;
   let poolSettled = false;
@@ -250,7 +295,7 @@ async function commandFixture({ expired = false, attempts = 1, liveFailure = fal
   const venue = {
     pool: async () => POOL, lane: async () => LANE, activeDeployRequestId: async () => ZERO32,
     activeRecallRequestId: async () => POOL_REQUEST, reservedDeployAssets: async () => 0n,
-    getRequest: async () => ({ kind: 1, status: 1, requestedAssets: SHARES, returnBy: BigInt(NOW + (expired ? -1 : 100000)), claimed: false }),
+    getRequest: async () => ({ kind: 1, status: 1, requestedAssets: SHARES, returnBy: BigInt(NOW + (expired ? -1 : remaining)), claimed: false }),
     poolRequestForLaneRequest: async () => POOL_REQUEST,
   };
   const lane = {
@@ -298,7 +343,7 @@ async function commandFixture({ expired = false, attempts = 1, liveFailure = fal
       async close() {}
     },
     fetchJson: async () => ({ available: true, pool: POOL, reconciled: true, flows: { status: "ok" }, block: { timestamp: NOW } }),
-    readRecallSellObservation: async () => { calls.push("fresh-observation"); return observation; },
+    readRecallSellObservation: async (options) => { calls.push("fresh-observation", { observationTimeoutMs: options.timeoutMs }); return observation; },
     captureParQuote: async () => ({ quote: { fillerType: "AAVE", assetIn: 1003, assetOut: 22, amountInRaw: SHARES, amountOutRaw: SHARES } }),
     waitForAaveSwap: (api, options) => waitForAaveSwap(api, { ...options, attempts: 0 }),
     persistEvidence: async (_args, record) => { evidence.push(record); },
@@ -313,10 +358,10 @@ async function commandFixture({ expired = false, attempts = 1, liveFailure = fal
       postState: await readPostState(124), confirmations: 12, receiptChecks: 1, reorgs: 0 }),
   };
   const common = ["--profile", "mainnet", "--pool", POOL, "--expected-signer", manifest.verifier];
-  const run = (abandon = true, commit = false) => dispatchMain(["stage-recall", ...common, "--request-id", POOL_REQUEST,
+  const run = (abandon = true, commit = false, extra = []) => dispatchMain(["stage-recall", ...common, "--request-id", POOL_REQUEST,
     "--recall-id", "2", "--observability-url", "http://fixture.invalid", "--asset-hub-ws", "wss://fixture.invalid",
     "--hydration-ws", "wss://fixture.invalid", ...(abandon ? ["--abandon-unexecuted-sell"] : []),
-    ...(commit ? ["--commit", "--use-kms"] : [])], io);
+    ...(commit ? ["--commit", "--use-kms"] : []), ...extra], io);
   const settle = () => ceremonyMain(["settle", ...common, "--recall-id", "2", "--commit", "--use-kms"], io);
   const recall = () => ceremonyMain(["recall", ...common, "--deployment-id", "2", "--assets", String(SHARES), "--commit", "--use-kms"], io);
   return { run, settle, recall, pool, lane, wrapper, sent, evidence, calls, observation, clearPoolRecall: () => { poolSettled = true; } };
@@ -379,4 +424,37 @@ test("D4 CLI: both recall creation and staging enforce the chain-derived cap bef
   await assert.rejects(stage.run(false, true), /recall_retry_cap/u); assert.equal(stage.sent.length, 0);
   const create = await commandFixture({ attempts: 3 }); create.clearPoolRecall();
   await assert.rejects(create.recall(), /recall_retry_cap/u); assert.equal(create.sent.length, 0);
+});
+
+test("CLI observation timeout defaults to 180000 and the override reaches the reader and record", async (t) => {
+  t.mock.method(console, "log", () => {});
+  assert.equal(parseArgs(["stage-recall"]).observationTimeoutMs, 180_000);
+  for (const value of ["0", "-1", "NaN", "1.5", "2147483648"]) {
+    assert.throws(() => parseArgs(["stage-recall", "--observation-timeout-ms", value]), /observation-timeout-ms/u);
+  }
+  const c = await commandFixture();
+  const result = await c.run(true, false, ["--observation-timeout-ms", "900000"]);
+  assert.equal(result.observationTimeoutMs, 900_000);
+  assert.ok(c.calls.some((call) => call?.observationTimeoutMs === 900_000));
+});
+
+test("recall margin override below 3600 is refused; default remains six hours and deploy cannot override", () => {
+  for (const value of ["3599", "0", "-1", "3600.5", "NaN"]) {
+    assert.throws(() => parseArgs(["stage-recall", "--dispatch-margin-seconds", value]), /at least 3600/u);
+  }
+  assert.throws(() => parseArgs(["stage-dispatch", "--dispatch-margin-seconds", "3600"]), /only allowed for stage-recall/u);
+  assert.throws(() => assertDispatchMargin({ nowSeconds: NOW, returnBy: NOW + 7200 }), /21600/u);
+  assert.equal(assertDispatchMargin({ nowSeconds: NOW, returnBy: NOW + 3600, minimumMarginSeconds: 3600 }), 3600n);
+  assert.throws(() => assertDispatchMargin({ nowSeconds: NOW, returnBy: NOW + 3599, minimumMarginSeconds: 3600 }), /at least 3600/u);
+});
+
+test("CLI recall margin override is used at preflight and commit and recorded", async (t) => {
+  t.mock.method(console, "log", () => {}); t.mock.method(console, "error", () => {});
+  const defaults = await commandFixture({ liveFailure: true, remaining: 7200 });
+  await assert.rejects(defaults.run(false, true), /21600/u);
+  assert.ok(!defaults.calls.includes("withdraw_sell"));
+  const overridden = await commandFixture({ liveFailure: true, remaining: 7200 });
+  await assert.rejects(overridden.run(false, true, ["--dispatch-margin-seconds", "3600"]), (error) => error.code === "recall_swap_observation_failed");
+  assert.ok(overridden.calls.includes("withdraw_sell"), "both preflight and commit admitted the explicit margin");
+  assert.deepEqual(overridden.evidence.at(-1).dispatchMargin, { seconds: 3600, defaultSeconds: 21600, override: true });
 });
