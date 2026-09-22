@@ -46,9 +46,10 @@ test("buildBadgeMetadata produces a schema-valid document", () => {
   ]);
 });
 
-test("buildBadgeMetadata uses publicBaseUrl when supplied", () => {
-  const doc = buildBadgeMetadata({ ...validInput(), publicBaseUrl: "https://app.example.com/" });
-  assert.equal(doc.external_url, `https://app.example.com/agents/${validInput().worker}`);
+test("buildBadgeMetadata keeps external_url on the human site when PUBLIC_BASE_URL is the API", () => {
+  const doc = buildBadgeMetadata({ ...validInput(), publicBaseUrl: "https://api.averray.com/" });
+  assert.equal(doc.external_url, buildBadgeMetadata(validInput()).external_url);
+  assert.equal(doc.external_url, `https://averray.com/agents/${validInput().worker}`);
 });
 
 test("buildBadgeMetadata adds image + metadataURI when provided", () => {
@@ -186,6 +187,7 @@ test("buildBadgeFromSession produces a valid v1 document", () => {
     doc.averray.metadataURI,
     "https://api.averray.com/badges/session-0x1234-starter-coding-001-1700000000000"
   );
+  assert.equal(doc.external_url, `https://averray.com/agents/${approvedSessionFixture().session.wallet}`);
   assert.equal(doc.averray.verifierMode, "benchmark");
   assert.deepEqual(doc.signers, [
     {

@@ -7,6 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { parseEnv } from "node:util";
 import {
   DEFAULT_CATALOGUE_LANE_REGISTRY,
   loadCatalogueLaneRegistry,
@@ -433,6 +434,22 @@ test("generateAll: the real transform yields the mainnet essentials", () => {
   );
   // no testnet RPC anywhere in the rendered mainnet templates
   assert.ok(!indexer.includes("eth-rpc-testnet.polkadot.io"));
+});
+
+test("rendered mainnet template sets PUBLIC_BASE_URL to the HTTPS API origin shared with testnet", () => {
+  const path = "deploy/backend.mainnet.env.template";
+  const rendered = generateAll()[path];
+  const source = readFileSync(new URL("../../deploy/backend.env.template", import.meta.url), "utf8");
+  for (const template of [source, rendered, readFileSync(new URL(`../../${path}`, import.meta.url), "utf8")]) {
+    const env = parseEnv(template);
+    assert.ok(env.PUBLIC_BASE_URL, "PUBLIC_BASE_URL must be explicitly set in the source and rendered templates");
+    const url = new URL(env.PUBLIC_BASE_URL);
+    assert.equal(url.protocol, "https:");
+    assert.equal(env.PUBLIC_BASE_URL, url.origin, "resource base must be an origin, not a path");
+    assert.equal(url.origin, "https://api.averray.com");
+    assert.equal(url.origin, env.X402_PUBLIC_ORIGIN);
+    assert.equal(url.host, env.AUTH_DOMAIN, "both profiles already use this API host for consent");
+  }
 });
 
 test("generator --check drift detector still reports a genuinely stale template", () => {

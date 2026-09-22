@@ -25,6 +25,35 @@ that either dispute has been signed or paid.
   `TreasuryPolicy.arbitrators(address)` live and requires chain **420420419**.
   The backend never receives the arbitrator's private key (credentials plan F6).
 
+## Public resource origin
+
+`deploy/backend.env.template` sets `PUBLIC_BASE_URL=https://api.averray.com`;
+`scripts/ops/render-mainnet-backend-env.mjs` carries it into the generated
+mainnet template. Both profiles already use this origin for `X402_PUBLIC_ORIGIN`
+and this host for `AUTH_DOMAIN`; this is not a testnet host migration. No new
+secret is required. Without it, public reasoning produces a `urn:` URI and both
+arbitration preparation and the human-verdict service refuse to proceed.
+
+Consumer audit (the API vhost in `deploy/Caddyfile.averray` proxies these paths
+to the backend; the route handlers serve the resources):
+
+| Consumer | API path / handling |
+| --- | --- |
+| `publicContentUri`: arbitration, human verdicts, dispute/content routes, platform-fault remediation | `/content/:hash` in `content-routes.js`; existing publication/access controls remain unchanged. |
+| Agent profile and worker progression `badgeUrl`; badge metadata self-reference | `/badges/:sessionId` in `badge-routes.js`. |
+| Run receipt `canonicalUrl` | `/badges/:sessionId/run` in `badge-routes.js`. |
+| Share `apiUrl` | `/shares/:token` in `share-routes.js`; the operator-app `appPath` is unchanged. |
+| Poster onboarding | `/schemas/jobs`, `/schemas/jobs/:name.json`, `/jobs/preflight` in schema/job routes; already defaulted to this origin. |
+| Public metadata / discovery | `/llms.txt`, discovery endpoint URLs and `/.well-known/badge-receipt-jwks.json`, served by public-metadata/badge routes. |
+| Verify shelf receipt URL | `/receipts/:hash` in `badge-routes.js`; work receipts from job ingestion still use `PUBLIC_SITE_URL` (default `https://averray.com`). |
+| Locked-tier, idle-allocation and credit-book consent URIs | `/locked-deposits/consent`, `/account/idle-allocation/consent`, `/credit/consent` in the corresponding routes; unchanged from the `https://${AUTH_DOMAIN}` fallback. |
+| Verify payment origin fallback | Explicit `X402_PUBLIC_ORIGIN` continues to take precedence. |
+
+Badge `external_url` is deliberately **not** an API resource: it remains
+`https://averray.com/agents/:wallet`, the public human profile shell, while
+`averray.metadataURI` points to the API badge JSON. Setting `PUBLIC_BASE_URL`
+must never turn that human link into `/agents/:wallet` JSON on the API host.
+
 ## Resolve a chain dispute
 
 1. Open Disputes and select `dispute-99bd8759536d` (playsouthwales).
