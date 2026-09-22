@@ -72,3 +72,23 @@ friction recorded here; then the subsidy attestation on `/pool`.
 - Hydration block 14870297 (14:40:48Z): message processed `success: true`, fee 21,657 raw USDC(22) net, **no sell** — `Transact(router.sell)` failed silently inside a successful message. Venue aUSDC untouched (10.215135 at 16:19Z). Driver exited: `Timed out without request-bound Broadcast.Swapped evidence`.
 - Replays of the identical wire bytes via `DryRunApi`: 1 silent failure in 6, then 16/16 executed at exact par. Intermittent, block-dependent, cause not identified. Packet: `PACKET_RECALL_SELL_LEG_SILENTLY_NOT_EXECUTED.md`.
 - State at end of day: pool activeRecall 2 / activeDeployment 2, lane pendingWithdrawalShares 10,193,881, wrapper request Pending bitmap 4; all funds intact and accruing at Hydration; returnBy 09-23 03:50Z is soft for v2.1 (write-off is loss-reporter-only).
+
+## Recall attempt 2 — 2026-09-22, COMPLETE
+
+Unwind of attempt 1 (after #1397/#1398 deployed): lane `settleRequest(Failed, 0, 0, 0, blockHash, SELL_NOT_EXECUTED)` tx `0xe7ffd69fb48355dc6c658ae99b49699580e56c8bd26311deeff17afdc3df3113` (block 20929916, 22:47Z 09-21); pool `settleVenueRecall(2)` tx `0x04a774f083abbcbdebe58e8c8a5d59d14e795b13fc1ffa903be5dd4745782dfc` (block 20938978, 04:20Z) — 0 returned, cost basis unchanged 10,243,759 before/after.
+
+Fresh recall **id 3** (`0x49bd2661…`, block 20939257, 04:31Z), adapter request `0xd559d58c…701a`; adapter stage `0xdf919605…` (block 20942041, 06:15Z) → lane request `0xdedbff35…0943`. The SSH session dropped before the wrapper dispatch, leaving bitmap 0; the driver's resume path (bitmap 0 → both legs pending) carried it.
+
+**Blocker found and worked around:** the ops scripts read `deployments/mainnet.json`, whose `rpcUrl` is `services.polkadothub-rpc.com`. That endpoint serves **null receipts and empty `eth_getLogs`** for recent blocks (verified: block 20942041 receipt NULL and 0 logs there, 4 logs and the `LaneRequestStaged` event on `eth-rpc.polkadot.io` at the same block). `findLaneRequestId` therefore returned zero, the driver took the fresh-stage path and refused with "Lane request bridge is already occupied". Fix used: a shadow `/app/deployments/mainnet.json` inside the container with the endpoints swapped (ops scripts only; the backend reads `/deployments/mainnet.json`; gone on the next deploy). **This needs a packet — the indexer provider hole class, now hitting the ceremony drivers.**
+
+Resume commit (tmux, 12:5xZ): both legs dispatched, bitmap 12.
+
+| item | raw | note |
+|---|---|---|
+| aUSDC burned | 10,193,881 | par sell, `exitAccrualRaw` 0 |
+| sell execution fee | 19,882 | Hydration side |
+| home execution + delivery fee | 1,686 | |
+| **arrived home** | **10,192,195** | on the venue adapter |
+| pool settle (recall 3) | status 2, returned 10,192,195 | buffer 10.243760 → **20.435955**, costBasis → **0.051564**, activeRecall 0 |
+
+**Cycle-2 economics:** deployed 10,243,759 · entry friction 49,878 · venue earnings +3,846 over 5.25 d (**2.62 % annualised**) · exit friction 21,568 · **round-trip friction 71,446 raw (0.0714 USDC)**, vs 0.051490 measured on 2026-09-03. Share price after settlement **1.027463**. Deployment 2 remains active with a residual cost basis of 0.051564 (the parked interest + cycle-1 remainder at the venue: 0.021819 aUSDC + the 1.52 USDC float).
