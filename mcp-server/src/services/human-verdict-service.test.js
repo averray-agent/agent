@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { parseEnv } from "node:util";
 import { HumanVerdictService } from "./human-verdict-service.js";
 import { VerifierService } from "./verifier-service.js";
 import { VerificationIngestionService } from "./verification-ingestion-service.js";
@@ -13,7 +15,7 @@ const wallet = `0x${"aa".repeat(20)}`, operator = `0x${"bb".repeat(20)}`;
 const rationale = "Reviewed the submitted work against the pinned requirements.";
 const original = { handler: "human_fallback", handlerVersion: 1, outcome: "disputed", reasonCode: "HUMAN_REVIEW_REQUIRED" };
 
-async function fixture() {
+async function fixture(options = {}) {
   const store = new MemoryStateStore(), calls = [], events = [];
   const job = { id: "curated-review-job", rewardAsset: "USDC", rewardAmount: 2, poster: operator, claimTtlSeconds: 3600,
     verifierMode: "human_fallback", verifierConfig: { handler: "human_fallback", version: 1 } };
@@ -44,10 +46,25 @@ async function fixture() {
     ingestVerification: (...args) => ingestion.ingest(...args), getWorkerProgressionSafely: async () => ({ tier: "starter" }) };
   const verifier = new VerifierService(platform, store, gateway);
   const service = new HumanVerdictService({ stateStore: store, gateway, platformService: platform, verifierService: verifier,
-    persistContentRecord: (record) => store.upsertContent(record), publicBaseUrl: "https://api.example.test" });
+    persistContentRecord: (record) => store.upsertContent(record), publicBaseUrl: "https://api.example.test", ...options });
   const decide = (verdict = "approve") => service.decide({ sessionId: session.sessionId, verdict, rationale, operator });
   return { store, session, live, calls, gateway, verifier, service, decide, platform, events };
 }
+
+test("human verdict under rendered mainnet env publishes the API rationale URI before settlement", async () => {
+  const env = parseEnv(readFileSync(new URL("../../../deploy/backend.mainnet.env.template", import.meta.url), "utf8"));
+  const f = await fixture({ publicBaseUrl: env.PUBLIC_BASE_URL });
+  const settle = f.gateway.resolveSinglePayout;
+  f.gateway.resolveSinglePayout = async (...args) => {
+    assert.match(args[3], /^https:\/\/api\.averray\.com\/content\/0x[0-9a-f]{64}$/u);
+    const hash = new URL(args[3]).pathname.slice("/content/".length);
+    assert.equal(resolveContentAccess(await f.store.getContent(hash)).public, true);
+    return settle(...args);
+  };
+  await f.decide();
+  assert.equal(f.calls.length, 1);
+  assert.equal((await f.store.getSession(f.session.sessionId)).status, "resolved");
+});
 
 test("arbitration pin 5: human approve uses normal verifier settlement and receipts; reject stays Rejected, without opening arbitration", async () => {
   for (const verdict of ["approve", "reject"]) {

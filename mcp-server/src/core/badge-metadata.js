@@ -75,7 +75,6 @@ const DESCRIPTION_MAX = 1024;
  * @param {string} [input.metadataURI]        Self-reference (optional)
  * @param {string} [input.image]              Badge image URL (optional)
  * @param {string} [input.externalUrl]        Profile page URL override
- * @param {string} [input.publicBaseUrl]      Falls back to external_url = <base>/agents/<worker>
  * @param {object} [input.lineage]            Optional sub-contracting lineage:
  *                                            { parent?: { sessionId, jobId, wallet },
  *                                              children?: { count, jobIds?, sessionIds? } }
@@ -102,7 +101,6 @@ export function buildBadgeMetadata(input) {
     metadataURI,
     image,
     externalUrl,
-    publicBaseUrl,
     lineage
   } = input;
 
@@ -113,9 +111,8 @@ export function buildBadgeMetadata(input) {
   const doc = {
     name: `Averray Agent Badge — ${canonicalCategory} tier ${lvl}`,
     description: `Non-transferable proof that wallet ${worker} successfully completed the ${jobId} job on Averray.`,
-    external_url:
-      externalUrl ||
-      (publicBaseUrl ? `${stripTrailingSlash(publicBaseUrl)}/agents/${worker}` : `https://averray.com/agents/${worker}`),
+    // This is the human profile page; PUBLIC_BASE_URL addresses JSON resources.
+    external_url: externalUrl || `https://averray.com/agents/${worker}`,
     attributes: [
       { trait_type: "Category", value: canonicalCategory },
       { trait_type: "Level", value: lvl },
@@ -616,7 +613,6 @@ export function buildBadgeFromSession({ session, job = undefined, verification, 
     signers: buildBadgeSigners({ session, verification, context }),
     metadataURI: selfUrl,
     image: context.image,
-    publicBaseUrl,
     lineage: context.lineage
   });
 }

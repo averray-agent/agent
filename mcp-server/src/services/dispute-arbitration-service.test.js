@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { parseEnv } from "node:util";
 import { Interface, encodeBytes32String, id as selectorHash } from "ethers";
 import { DisputeArbitrationService } from "./dispute-arbitration-service.js";
 import { BlockchainGateway } from "../blockchain/gateway.js";
@@ -19,7 +21,7 @@ const iface = new Interface([
 ]);
 const rationale = "Platform fault, see #1374. Worker should receive the remaining reward.";
 
-async function fixture() {
+async function fixture(options = {}) {
   const store = new MemoryStateStore(), events = [], sends = [];
   const job = { id: "removed-job", rewardAsset: "USDC", rewardAmount: 2 };
   const session = await store.upsertSession({ sessionId: "arbitration-session", jobId: job.id,
@@ -38,10 +40,25 @@ async function fixture() {
     resolveDispute: async (...args) => { sends.push(args); throw new Error("NO backend arbitration"); },
     getTreasuryPolicyStatus: async () => ({ signerIsArbitrator: false }) });
   const service = new DisputeArbitrationService({ stateStore: store, gateway, eventBus: { publish: (event) => events.push(event) },
-    persistContentRecord: (record) => store.upsertContent(record), publicBaseUrl: "https://api.example.test" });
+    persistContentRecord: (record) => store.upsertContent(record), publicBaseUrl: "https://api.example.test", ...options });
   const prepare = (payload = { verdict: "dismissed", rationale }) => service.prepare({ session, payload, auth: { wallet: arbitrator } });
   return { store, session, gateway, live, events, sends, service, prepare };
 }
+
+test("arbitration prepare under rendered mainnet env publishes an API content URI readable before signing", async () => {
+  const env = parseEnv(readFileSync(new URL("../../../deploy/backend.mainnet.env.template", import.meta.url), "utf8"));
+  const f = await fixture({ publicBaseUrl: env.PUBLIC_BASE_URL });
+  const prepared = await f.prepare();
+  assert.match(prepared.decoded.metadataURI, /^https:\/\/api\.averray\.com\/content\/0x[0-9a-f]{64}$/u);
+  const url = new URL(prepared.decoded.metadataURI), response = {};
+  const route = createContentRoutes({ stateStore: f.store,
+    authMiddleware: async () => { throw new AuthenticationError("No login"); },
+    respond: (res, status, body) => Object.assign(res, { status, body }) });
+  assert.equal(await route({ request: { method: "GET" }, response, pathname: url.pathname, url }), true);
+  assert.equal(response.status, 200);
+  assert.match(JSON.stringify(response.body), /Platform fault/);
+  assert.equal(f.sends.length, 0);
+});
 
 test("arbitration pin 1: prepared calldata is byte-exact, bytes32 text (never keccak), and public before signing", async () => {
   const f = await fixture();
