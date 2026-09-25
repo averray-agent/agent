@@ -2,7 +2,7 @@
 
 Status: **ready for Codex, 2026-09-25.** Source: the QA team's morning sweep of live
 build `af2a0905` (#1399). Claude re-verified every item below against the live API,
-the chain and origin/main; the evidence is quoted. Do this after the preflight
+the chain and origin/main; the evidence is quoted. Do this after the backend
 hotfix and `PACKET_BACKEND_READ_PRESSURE.md`. Order below = priority.
 
 ## PR 1 — retire the leftover demo job that publishes its answers
