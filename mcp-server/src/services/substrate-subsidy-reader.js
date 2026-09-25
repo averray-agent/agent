@@ -53,12 +53,12 @@ export class SubstrateSubsidyReader {
   async #readBlock({ extrinsicHash, blockNumber, poolAddress }) {
     const api = await this.balanceReader.getSubstrateApi(this.endpoint);
     const [hash, finalizedHash] = await Promise.all([
-      api.rpc.chain.getBlockHash(blockNumber), api.rpc.chain.getFinalizedHead()
+      Promise.resolve().then(() => api.rpc.chain.getBlockHash(blockNumber)), Promise.resolve().then(() => api.rpc.chain.getFinalizedHead())
     ]);
     const blockHash = String(hash).toLowerCase();
     if (!HASH.test(blockHash)) throw refused("unreadable", "The block hash is unreadable.");
     const [signedBlock, finalized] = await Promise.all([
-      api.rpc.chain.getBlock(blockHash), api.rpc.chain.getHeader(finalizedHash)
+      Promise.resolve().then(() => api.rpc.chain.getBlock(blockHash)), Promise.resolve().then(() => api.rpc.chain.getHeader(finalizedHash))
     ]);
     const block = signedBlock.block;
     if (Number(block.header.number) !== blockNumber) throw refused("block_mismatch", "The returned block does not match the requested block number.");
@@ -69,7 +69,7 @@ export class SubstrateSubsidyReader {
     const extrinsicIndex = block.extrinsics.findIndex((extrinsic) => String(extrinsic.hash).toLowerCase() === extrinsicHash);
     if (extrinsicIndex < 0) throw refused("not_found", "The named extrinsic is absent from the supplied block.");
     const at = await api.at(blockHash);
-    const [events, timestamp] = await Promise.all([at.query.system.events(), at.query.timestamp.now()]);
+    const [events, timestamp] = await Promise.all([Promise.resolve().then(() => at.query.system.events()), Promise.resolve().then(() => at.query.timestamp.now())]);
     const scoped = Array.from(events, (record, eventIndex) => ({ record, eventIndex }))
       .filter(({ record }) => record.phase.isApplyExtrinsic === true && Number(record.phase.asApplyExtrinsic) === extrinsicIndex);
     const isEvent = ({ record }, section, method) => record.event.section === section && record.event.method === method;

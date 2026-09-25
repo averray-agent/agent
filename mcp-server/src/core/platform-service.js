@@ -755,7 +755,7 @@ export class PlatformService {
       firstWithdrawalGasGrants
     ] = await Promise.all([
       getTreasuryPolicyStatusSafely(this.blockchainGateway),
-      this.jobCatalogService.getRecurringTemplateStatus(),
+      Promise.resolve().then(() => this.jobCatalogService.getRecurringTemplateStatus()),
       this.recurringScheduler?.getStatus?.() ?? { enabled: false, running: false, templates: [] },
       this.githubIssueIngestionScheduler?.getStatus?.() ?? {
         enabled: false,
@@ -1261,11 +1261,11 @@ export class PlatformService {
   }
 
   async preflightJob(wallet, jobId) {
+    const rawJob = this.getJobDefinition(jobId);
     const [preflight, job] = await Promise.all([
       this.jobCatalogService.preflightJob(wallet, jobId),
-      this.attachClaimState(this.getJobDefinition(jobId), { wallet })
+      this.attachClaimState(rawJob, { wallet })
     ]);
-    const rawJob = this.getJobDefinition(jobId);
     const sourcePayment = await this.jobExecutionService.assessPaidSourceClaim(rawJob, wallet);
     const designation = evaluateDesignatedClaimant(rawJob, wallet);
     const claimStateEligible = designation.applies

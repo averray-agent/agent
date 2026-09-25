@@ -677,10 +677,10 @@ export class BlockchainGateway {
     const at = { blockTag };
     const adapterContract = new Contract(adapter, STRATEGY_ADAPTER_ABI, this.provider);
     const [adapterStrategyId, asset, riskLabel, approved] = await Promise.all([
-      adapterContract.strategyId(at),
-      adapterContract.asset(at),
-      adapterContract.riskLabel(at),
-      this.policyContract.approvedStrategies(adapter, at)
+      Promise.resolve().then(() => adapterContract.strategyId(at)),
+      Promise.resolve().then(() => adapterContract.asset(at)),
+      Promise.resolve().then(() => adapterContract.riskLabel(at)),
+      Promise.resolve().then(() => this.policyContract.approvedStrategies(adapter, at))
     ]);
     if (String(adapterStrategyId).toLowerCase() !== strategyId) {
       throw new Error(`Wrapper strategy ${strategyId} points to an adapter with a different strategyId`);

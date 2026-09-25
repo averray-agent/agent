@@ -69,8 +69,8 @@ after(() => {
   for (const child of liveChildren) child.kill("SIGKILL");
 });
 
-async function startServer(port, envOverrides = {}) {
-  const child = spawn(process.execPath, [serverPath], {
+async function startServer(port, envOverrides = {}, execArgv = []) {
+  const child = spawn(process.execPath, [...execArgv, serverPath], {
     env: {
       ...process.env,
       PORT: String(port),
@@ -110,13 +110,14 @@ async function startServer(port, envOverrides = {}) {
     // surface as 51 identical "server exited before listening" lines with the
     // actual ConfigError discarded, which is a long way to walk to find a typo.
     // stdout stays ignored — the health poll below is the readiness signal.
-    stdio: ["ignore", "ignore", "pipe"],
+    stdio: ["ignore", "ignore", "pipe", "ipc"],
     detached: false
   });
   liveChildren.add(child);
   child.once("exit", () => liveChildren.delete(child));
 
   let stderr = "";
+  child.readStderr = () => stderr;
   child.stderr?.setEncoding("utf8");
   child.stderr?.on("data", (chunk) => {
     // Bounded: a crash loop must not accumulate output without limit.
@@ -174,6 +175,66 @@ function stop(child) {
 function issueToken(wallet, { roles = [], ...claims } = {}) {
   return signToken({ sub: wallet, roles, ...claims }, { secret: LONG_SECRET, expiresInSeconds: 60 }).token;
 }
+
+function processProbe(child, command) {
+  return new Promise((resolveProbe, reject) => {
+    const onExit = (code, signal) => { cleanup(); reject(new Error(`probe process exited: ${code ?? signal}: ${child.readStderr()}`)); };
+    const onMessage = (message) => { if (message.command === command) { cleanup(); resolveProbe(message); } };
+    const cleanup = () => { child.off("message", onMessage); child.off("exit", onExit); };
+    child.on("message", onMessage);
+    child.once("exit", onExit);
+    child.send({ command });
+  });
+}
+
+test("http smoke: unavailable preflight is a handled 404 after the event loop drains", SMOKE_TEST_OPTIONS, async () => {
+  const port = 19_000 + Math.floor(Math.random() * 1_000);
+  const child = await startServer(port, {}, ["--unhandled-rejections=throw", "--import", resolve(moduleDir, "fixtures/process-rejection-probe.mjs")]);
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const response = await fetch(`${base}/jobs/preflight?jobId=missing-fixture-job`, {
+      headers: { authorization: `Bearer ${issueToken(STRANGER_WALLET)}` }
+    });
+    assert.equal(response.status, 404);
+    const body = await response.json();
+    assert.equal(body.error, "job_not_found");
+    const probe = await processProbe(child, "drain");
+    assert.deepEqual(probe.observed, [], "request must not emit an unhandledRejection");
+    assert.equal((await fetch(`${base}/health`)).status, 200);
+  } finally { await stop(child); }
+});
+
+test("http smoke: process rejection is logged, metered and warned while the next request succeeds", SMOKE_TEST_OPTIONS, async () => {
+  const port = 19_000 + Math.floor(Math.random() * 1_000);
+  const child = await startServer(port, { LOG_LEVEL: "error", METRICS_AUTH_REQUIRED: "0" },
+    ["--unhandled-rejections=throw", "--import", resolve(moduleDir, "fixtures/process-rejection-probe.mjs")]);
+  try {
+    const before = Date.now();
+    const probe = await processProbe(child, "reject");
+    assert.equal(probe.listenerCount, 1);
+    assert.equal(probe.uncaughtExceptionListeners, 0);
+    const base = `http://127.0.0.1:${port}`;
+    const response = await fetch(`${base}/health`);
+    assert.equal(response.status, 200);
+    const health = await response.json();
+    const warning = health.warnings.find((entry) => entry.code === "process_unhandled_rejection");
+    assert.equal(warning.severity, "critical");
+    assert.equal(warning.count, 1);
+    assert.equal(warning.lastMessage, "contained probe failure");
+    assert.ok(Date.parse(warning.lastAt) >= before);
+    const metrics = await (await fetch(`${base}/metrics`)).text();
+    assert.match(metrics, /^process_unhandled_rejections_total 1$/mu);
+    const records = child.readStderr().split("\n").filter(Boolean).map((line) => {
+      try { return JSON.parse(line); } catch { return {}; }
+    }).filter((entry) => entry.msg === "process.unhandled_rejection");
+    assert.equal(records.length, 1);
+    assert.equal(records[0].level, "error");
+    assert.equal(records[0].err.name, "Error");
+    assert.equal(records[0].err.message, "contained probe failure");
+    assert.equal(records[0].err.code, "PROBE_FAILURE");
+    assert.match(records[0].err.stack, /Error: contained probe failure/u);
+  } finally { await stop(child); }
+});
 
 async function consentDirectory(base, wallet, currentActivityOptIn = false) {
   const response = await fetch(`${base}/agents/consent`, {
