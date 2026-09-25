@@ -6,13 +6,11 @@ export function createProcessRejectionMonitor({ logger, metrics, now = Date.now 
   counter.inc({}, 0);
   let count = 0;
   let lastAtMs;
-  let lastMessage;
 
   function onUnhandledRejection(reason) {
     const err = serializeRejection(reason);
     count += 1;
     lastAtMs = now();
-    lastMessage = err.message;
     // Keep diagnostics independent: a broken sink must not disable the warning.
     try { counter.inc(); } catch { /* The in-memory health warning remains. */ }
     try { logger.error({ err }, "process.unhandled_rejection"); } catch {
@@ -28,8 +26,7 @@ export function createProcessRejectionMonitor({ logger, metrics, now = Date.now 
       severity: "critical",
       message: "The HTTP process observed an unhandled promise rejection within the last 24 hours.",
       count,
-      lastAt: new Date(lastAtMs).toISOString(),
-      lastMessage
+      lastAt: new Date(lastAtMs).toISOString()
     }];
   }
   return { onUnhandledRejection, getWarnings };

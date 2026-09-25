@@ -220,7 +220,8 @@ test("http smoke: process rejection is logged, metered and warned while the next
     const warning = health.warnings.find((entry) => entry.code === "process_unhandled_rejection");
     assert.equal(warning.severity, "critical");
     assert.equal(warning.count, 1);
-    assert.equal(warning.lastMessage, "contained probe failure");
+    assert.equal(Object.hasOwn(warning, "lastMessage"), false);
+    assert.doesNotMatch(JSON.stringify(health), /contained probe failure|PROBE_FAILURE/u);
     assert.ok(Date.parse(warning.lastAt) >= before);
     const metrics = await (await fetch(`${base}/metrics`)).text();
     assert.match(metrics, /^process_unhandled_rejections_total 1$/mu);
