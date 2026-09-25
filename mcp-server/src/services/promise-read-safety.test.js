@@ -76,7 +76,12 @@ for (const [name, configure, run] of [
     (f) => f.runtime.readFundingTransferFee({ requestId: HASH })],
   ["message dry-run runtime API", (f) => { f.hub.rpc.chain.getHeader = f.rejectRead; delete f.hub.call.dryRunApi; },
     (f) => f.runtime.dryRunMessage({ requestId: HASH, leg: 2, feeAmount: 1n })],
-  ["queued event timestamp API", (f) => { f.hub.rpc.chain.getHeader = f.rejectRead; delete f.at.query.timestamp; },
+  ["queued event timestamp API", (f) => {
+    f.hub.rpc.chain.getHeader = f.rejectRead; delete f.at.query.timestamp;
+    f.runtime.wrapperInterface = { parseLog: () => ({ name: "RequestQueued", args: { requestId: HASH } }) };
+    f.at.query.system.events = async () => [{ phase: { isApplyExtrinsic: true, asApplyExtrinsic: 0 },
+      event: { section: "revive", method: "ContractEmitted", data: [ADDRESS, "0x", []] } }];
+  },
     (f) => f.runtime.readRequestQueuedEventsAtHash(f.hub, HASH)],
   ["stamped token balance API", (f) => { f.at.query.timestamp.now = f.rejectRead; delete f.at.query.tokens; },
     (f) => f.runtime.readStampedBalance(target)],

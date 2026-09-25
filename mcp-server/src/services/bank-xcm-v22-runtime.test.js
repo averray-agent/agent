@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { blake2AsHex } from "@polkadot/util-crypto";
 import { Interface, getBytes } from "ethers";
 
 import {
@@ -19,7 +21,8 @@ const USDC = "0x0000053900000000000000000000000001200000";
 const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const REQUEST_ID = `0x${"44".repeat(32)}`;
 const BLOCK_HASH = `0x${"55".repeat(32)}`;
-const TX_HASH = `0x${"66".repeat(32)}`;
+const TX_HASH = blake2AsHex("0x66", 256);
+const recallFixture = JSON.parse(readFileSync(new URL("./fixtures/bank-request-queued-20942041.json", import.meta.url), "utf8"));
 const STAGING_BLOCK = 19_064_055;
 const STRATEGY_ID = `0x${"77".repeat(32)}`;
 const ACCOUNT = "0x8888888888888888888888888888888888888888";
@@ -191,14 +194,12 @@ function makeRuntime({
           assert.equal(blockNumber, STAGING_BLOCK);
           return hexCodec(BLOCK_HASH);
         },
-        async getBlock(blockHash) {
-          assert.equal(blockHash, BLOCK_HASH);
-          return {
-            block: {
-              extrinsics: [hexExtrinsic("11"), hexExtrinsic("22"), hexExtrinsic("66")]
-            }
-          };
-        }
+        getBlock: Object.assign(() => { throw new Error("undecodable GeneralExtrinsic"); }, {
+          async raw(blockHash) {
+            assert.equal(blockHash, BLOCK_HASH);
+            return { block: { extrinsics: ["0x11", "0x22", "0x66"] } };
+          }
+        })
       }
     },
     query: { system: { events: eventsQuery } },
@@ -375,6 +376,7 @@ test("enabled runtime reports staging readiness only with both observer and Subs
     chainEventIngestionError: undefined,
     substrateEventWatchRunning: true,
     substrateEventIngestionError: undefined,
+    substrateEventFailedBlockHashes: [],
     readyForStaging: true
   });
   assert.ok(runtime.createDispatcher());
@@ -462,6 +464,85 @@ test("Substrate event ingestion fails staging readiness honestly when block prov
   const status = await runtime.getStatus();
   assert.equal(status.readyForStaging, false);
   assert.match(status.substrateEventIngestionError, /authoritative block hash/u);
+});
+
+test("bank watch ignores undecodable blocks without a RequestQueued from its own wrapper", async () => {
+  const { runtime, api } = makeRuntime();
+  let fetches = 0;
+  const rejectBlock = () => { fetches += 1; throw new Error("undecodable extrinsic"); };
+  api.rpc.chain.getBlock = Object.assign(rejectBlock, { raw: rejectBlock });
+  const foreign = requestQueuedRecords();
+  for (const record of foreign) record.event.data[0] = stringCodec(ADAPTER);
+  await runtime.start();
+  for (const records of [[], foreign]) {
+    records.createdAtHash = hexCodec(BLOCK_HASH);
+    await runtime.enqueueSubstrateEvents(api, records);
+  }
+  assert.equal(fetches, 0);
+  assert.equal((await runtime.getStatus()).readyForStaging, true);
+});
+
+test("bank watch raw hash equals the historical typed cycle-2 recall hash at block 20942041", async () => {
+  const { runtime, api } = makeRuntime();
+  runtime.wrapperAddress = recallFixture.wrapper;
+  const records = recallFixture.eventRecords.map((record) => ({
+    phase: { isApplyExtrinsic: true, asApplyExtrinsic: record.extrinsicIndex },
+    event: { section: "revive", method: "ContractEmitted", data: [record.contract, record.data, record.topics] }
+  }));
+  api.at = async () => ({ query: { timestamp: { now: async () => 1_790_057_700_000n } } });
+  api.rpc.chain.getHeader = async () => ({ number: { toNumber: () => recallFixture.number } });
+  let rawFetches = 0;
+  api.rpc.chain.getBlock.raw = async (hash) => {
+    assert.equal(hash, recallFixture.hash);
+    rawFetches += 1;
+    const extrinsics = Array(recallFixture.index + 1).fill("0xff"); // unrelated, deliberately undecodable
+    extrinsics[recallFixture.index] = recallFixture.bytes;
+    return { block: { extrinsics } };
+  };
+  const events = await runtime.readRequestQueuedEventsAtHash(api, recallFixture.hash, records);
+  assert.equal(rawFetches, 1);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].data.requestId, recallFixture.requestId);
+  assert.equal(events[0].txHash, recallFixture.typedHash);
+  assert.equal(events[0].txHash, "0x162278de9685ddfc24936307eb32761580bdc02072beee6de51eea2b7e5f874e");
+});
+
+test("bank watch retries failed blocks and reopens staging only after every failure ingests", async (t) => {
+  const { runtime, api, published } = makeRuntime();
+  await runtime.start();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const other = `0x${"aa".repeat(32)}`;
+  const healthy = `0x${"bb".repeat(32)}`;
+  const failing = new Set([BLOCK_HASH, other]);
+  const reads = [];
+  runtime.readRequestQueuedEventsAtHash = async (_api, hash) => {
+    reads.push(hash);
+    if (failing.has(hash)) throw new Error(`unavailable ${hash}`);
+    return [{ id: hash }];
+  };
+  for (const hash of [BLOCK_HASH, other, healthy]) {
+    const records = [];
+    records.createdAtHash = hexCodec(hash);
+    await runtime.enqueueSubstrateEvents(api, records);
+  }
+  let status = await runtime.getStatus();
+  assert.equal(status.readyForStaging, false, "a later healthy block must not erase earlier failures");
+  assert.deepEqual(status.substrateEventFailedBlockHashes, [BLOCK_HASH, other]);
+  failing.delete(BLOCK_HASH);
+  t.mock.timers.tick(1);
+  await runtime.flushSubstrateEventIngestion();
+  status = await runtime.getStatus();
+  assert.equal(status.readyForStaging, false);
+  assert.deepEqual(status.substrateEventFailedBlockHashes, [other]);
+  failing.delete(other);
+  t.mock.timers.tick(1);
+  await runtime.flushSubstrateEventIngestion();
+  status = await runtime.getStatus();
+  assert.equal(status.readyForStaging, true);
+  assert.equal(status.substrateEventIngestionError, undefined);
+  assert.deepEqual(status.substrateEventFailedBlockHashes, []);
+  assert.deepEqual(reads, [BLOCK_HASH, other, healthy, BLOCK_HASH, other, other]);
+  assert.deepEqual(published.map(event => event.id), [healthy, BLOCK_HASH, other]);
 });
 
 test("funding quote passes the live three-argument delivery API and keeps DOT delivery separate from USDC headroom", async () => {
@@ -834,8 +915,4 @@ function hexCodec(value) {
 
 function stringCodec(value) {
   return { toString: () => value };
-}
-
-function hexExtrinsic(byte) {
-  return { hash: hexCodec(`0x${byte.repeat(32)}`) };
 }
