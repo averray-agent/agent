@@ -16,11 +16,12 @@ test("process rejection warning expires 24 hours after the most recent occurrenc
   monitor.onUnhandledRejection("second");
   now += 1;
   assert.equal(monitor.getWarnings()[0].count, 2);
-  assert.equal(monitor.getWarnings()[0].lastMessage, "second");
+  assert.equal(Object.hasOwn(monitor.getWarnings()[0], "lastMessage"), false);
   assert.equal(monitor.getWarnings()[0].lastAt, "2026-09-25T23:59:59.999Z");
   now += PROCESS_REJECTION_WARNING_MS - 1;
   assert.deepEqual(monitor.getWarnings(), []);
   assert.equal(logs.length, 2);
+  assert.equal(logs[1].err.message, "second");
   assert.match(metrics.serialize(), /^process_unhandled_rejections_total 2$/mu);
 });
 
@@ -39,8 +40,9 @@ test("process rejection retains its warning and metric if the error log sink fai
   const metrics = new MetricRegistry();
   const monitor = createProcessRejectionMonitor({ metrics, logger: { error() { throw new Error("sink unavailable"); } } });
   assert.doesNotThrow(() => monitor.onUnhandledRejection(new Error("reported failure")));
-  assert.equal(monitor.getWarnings()[0].lastMessage, "reported failure");
+  assert.equal(Object.hasOwn(monitor.getWarnings()[0], "lastMessage"), false);
   assert.equal(output.length, 1);
   assert.equal(output[0].msg, "process.unhandled_rejection");
+  assert.equal(output[0].err.message, "reported failure");
   assert.match(metrics.serialize(), /^process_unhandled_rejections_total 1$/mu);
 });
