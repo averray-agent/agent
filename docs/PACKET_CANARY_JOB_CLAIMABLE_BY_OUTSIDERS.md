@@ -70,8 +70,12 @@ signal disagrees — and:
 - Claimed and past `claimExpiry` → `handleClaimTimeout`, then cancel as above;
 - anything else → leave it and log why.
 Idempotent, logs `canary_job_cancelled {jobId, chainJobId, refundRaw, txHash}`.
-Refunds land in the reward bank. Its first run must cancel `0x8e24acd9…` and
-`0x26658513…` — put those two in the handback.
+Refunds land in the reward bank. Its first run must cancel `0x8e24acd9…`,
+`0x26658513…` and a third one stranded since this packet was written:
+`0xba5ee7e6083e2a804cbd83ff0bb936cb54b396fe8d1b8b9ad78db2360fb14712` (scheduled
+run 35858180293, 2026-09-23: the canary aborted at 12:05:59Z, the claim by its
+wallet `0xBB26282c…` landed at 12:06:00Z, our signer's claim reconciliation
+reopened it at 13:06:48Z, tx `0xd84d176d…`). Put all three in the handback.
 
 **D4 — cleanup retries.** `archiveCanaryJob` retries with backoff (≈5 attempts
 over ≈2 min) and records the final outcome in the artifact. After D1 a failed
