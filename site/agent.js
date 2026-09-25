@@ -65,6 +65,28 @@ function renderEconomicAmount(profile) {
   );
 }
 
+// stats.totalEarned sums only approved jobs whose reward is on record; older
+// sessions without a claim-time job snapshot are omitted and flagged
+// `incomplete`. Printing that partial sum as the total showed "0 USDC" for a
+// wallet whose case study earned 0.40 USDC, so an incomplete total reads as a
+// lower bound, or as "Not on record" when nothing could be counted.
+function renderTotalEarned(totalEarned) {
+  const element = byId("profile-total-earned");
+  if (!element) return;
+  const formatted = formatAmountFromBase(totalEarned);
+  const omitted = Number(totalEarned?.omittedApprovedCount ?? 0);
+  if (totalEarned?.incomplete !== true || !(omitted > 0)) {
+    element.textContent = formatted;
+    return;
+  }
+  const included = Number(totalEarned?.includedApprovedCount ?? 0);
+  element.textContent = included > 0 ? `≥ ${formatted}` : "Not on record";
+  element.setAttribute(
+    "title",
+    `${omitted} approved job${omitted === 1 ? "" : "s"} without a reward amount on record ${omitted === 1 ? "is" : "are"} not counted`
+  );
+}
+
 function formatIso(value) {
   if (!value) return "—";
   const date = new Date(value);
@@ -865,7 +887,7 @@ async function bootProfile() {
     setText("profile-approved", String(profile.stats?.approvedCount ?? 0));
     setText("profile-rejected", String(profile.stats?.rejectedCount ?? 0));
     setText("profile-completion-rate", profile.stats?.completionRate == null ? "—" : `${Math.round(profile.stats.completionRate * 100)}%`);
-    setText("profile-total-earned", formatAmountFromBase(profile.stats?.totalEarned));
+    renderTotalEarned(profile.stats?.totalEarned);
     setText("profile-active-since", formatIso(profile.stats?.activeSince));
     setText("profile-last-active", formatIso(profile.stats?.lastActive));
     setText(
