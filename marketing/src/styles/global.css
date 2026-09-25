@@ -934,16 +934,21 @@ section.section { scroll-margin-top: 100px; }
   margin: 18px 0 0;
 }
 
+/* minmax(0, 1fr), not 1fr: a bare 1fr track never shrinks below its longest
+   unbreakable content. The full profile endpoint (70 mono characters) widened
+   its column past the strip at every width (499px at 1280, 499px inside a
+   375px phone), and the strip's overflow clip cut the card off. */
 .receipts-grid {
   margin-top: 40px;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
-@media (max-width: 960px) { .receipts-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 560px) { .receipts-grid { grid-template-columns: 1fr; } }
+@media (max-width: 960px) { .receipts-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .receipts-grid { grid-template-columns: minmax(0, 1fr); } }
 
 .receipt-card {
+  min-width: 0;
   padding: 18px;
   border: 1px solid rgba(245, 243, 238, 0.10);
   background: rgba(245, 243, 238, 0.03);
@@ -968,16 +973,22 @@ section.section { scroll-margin-top: 100px; }
   color: #f5f3ee;
   margin: 0;
 }
+/* Block, not flex: as an anonymous flex item the endpoint text kept an
+   automatic min-width and could not wrap. The full path stays visible (it is
+   copy-typed, never shortened), so it wraps anywhere instead. */
 .receipt-card__endpoint {
   font-family: var(--font-mono); font-size: 11.5px;
   color: rgba(245, 243, 238, 0.55);
-  display: flex; align-items: center; gap: 6px;
+  display: block;
+  overflow-wrap: anywhere;
   margin-top: 4px;
   padding-top: 10px;
   border-top: 1px dashed rgba(245, 243, 238, 0.10);
 }
 .receipt-card__endpoint::after {
   content: "↗"; color: #9bd7b5;
+  display: inline-block;
+  margin-left: 6px;
   transition: transform var(--dur) var(--ease);
 }
 .receipt-card:hover .receipt-card__endpoint::after { transform: translate(2px, -2px); }
@@ -2132,4 +2143,147 @@ section.section { scroll-margin-top: 100px; }
 @media (max-width: 520px) {
   .pool-facts { grid-template-columns: 1fr; }
   .pool-now__status { align-items: flex-start; flex-direction: column; }
+}
+
+/* ==========================================
+   12. PHONES (≤ 560px)
+   The desktop layout stacked into one column read as ~12 phone screens:
+   a two-row pinned header, three ragged hero buttons, a 630px console and
+   1,700px of feature cards. The shared rules below (header, dark strip) fix
+   every page; everything scoped to .page--home is the homepage only.
+   ========================================== */
+
+/* Open menu: the bars become a close mark (the toggle only shows ≤ 820px). */
+.nav__toggle-bars,
+.nav__toggle-bars::before,
+.nav__toggle-bars::after {
+  transition: transform var(--dur) var(--ease), background var(--dur) var(--ease), top var(--dur) var(--ease);
+}
+.nav--collapsible[data-open="true"] .nav__toggle-bars { background: transparent; }
+.nav--collapsible[data-open="true"] .nav__toggle-bars::before { top: 0; transform: rotate(45deg); }
+.nav--collapsible[data-open="true"] .nav__toggle-bars::after { top: 0; transform: rotate(-45deg); }
+
+@media (max-width: 560px) {
+  /* One-row header: brand + menu. The operator-app button no longer fits
+     beside them and wrapped onto a second pinned row (~125px of every
+     screen); it now closes the open menu panel instead. CSS only, so the nav
+     keeps its single absolute link. Without JS the nav is not collapsible and
+     the button stays in the bar. */
+  .page { padding-top: 12px; }
+  .nav { top: 10px; padding: 8px 8px 8px 14px; }
+  .nav--collapsible:not([data-open="true"]) .nav__cta { display: none; }
+  .nav--collapsible[data-open="true"] .nav__cta {
+    order: 4;
+    flex-basis: 100%;
+    justify-content: center;
+    height: 46px;
+    margin-top: 6px;
+    font-size: 13px;
+  }
+
+  /* Dark "receipts" strip: 48px side padding left a ~240px text column. */
+  .receipts-strip { padding: 32px 20px 22px; border-radius: 16px; }
+  .receipts-strip__title { font-size: 28px; }
+  .receipts-grid { margin-top: 24px; }
+  .receipt-card { padding: 16px; }
+
+  /* ---------- homepage ---------- */
+  .page--home { --section-gap: 60px; }
+  .page--home section.section { scroll-margin-top: 80px; }
+  .page--home .section__head { margin-bottom: 20px; gap: 12px; }
+  .page--home .section__title { font-size: 28px; }
+  .page--home .section__aside { font-size: 15px; line-height: 1.55; }
+
+  /* Hero: equal full-width doors, each access note centred under its door. */
+  .page--home .hero { margin-top: 18px; gap: 24px; }
+  .page--home .hero__left { padding-top: 6px; padding-bottom: 0; }
+  .page--home .hero__title { margin: 10px 0 12px; }
+  .page--home .hero__subhead { font-size: 21px; margin-bottom: 14px; }
+  .page--home .hero__lede { font-size: 16px; line-height: 1.55; margin-bottom: 22px; }
+  .page--home .hero__ctas { flex-direction: column; align-items: stretch; gap: 12px; }
+  .page--home .hero__ctas .door-entry { display: flex; width: 100%; align-items: stretch; }
+  .page--home .hero__ctas .btn { width: 100%; height: 50px; justify-content: center; }
+  .page--home .hero__ctas .door-expectation { align-self: center; }
+  .page--home .hero__notes { margin-top: 18px; }
+  .page--home .hero__meta { margin-top: 20px; padding-top: 16px; gap: 8px 18px; }
+
+  /* Scripted console: a fixed, shorter feed (no layout shift as rows
+     arrive); the SCRIPTED tag and notice stay exactly as they are. */
+  .page--home .console { min-height: 0; }
+  .page--home .console__dots { display: none; }
+  .page--home .console__bar { padding: 10px 14px; gap: 10px; }
+  .page--home .console__notice { padding: 9px 16px; }
+  .page--home .lifecycle { padding: 14px 16px 12px; }
+  .page--home .stream {
+    height: 232px; min-height: 232px; max-height: 232px;
+    padding: 12px 16px 14px;
+    font-size: 12px;
+  }
+  .page--home .ev { grid-template-columns: 58px minmax(0, 1fr); column-gap: 10px; }
+  .page--home .ev__body { overflow-wrap: anywhere; }
+  .page--home .receipt__head { gap: 8px; }
+  .page--home .receipt__pill { white-space: nowrap; flex: none; }
+
+  /* Proof dock: show the whole endpoint rather than an ellipsis. */
+  .page--home .proof-dock { margin-top: 20px; gap: 8px; }
+  .page--home .proof { padding: 12px 14px; }
+  .page--home .proof__endpoint { display: block; white-space: normal; overflow-wrap: anywhere; font-size: 12.5px; }
+  .page--home .proof__endpoint::after { display: inline-block; margin-left: 6px; }
+
+  .page--home .story__title { font-size: 32px; }
+  .page--home .story__prose p { font-size: 16px; }
+
+  /* Six primitives: a swipe row one card tall instead of six stacked cards.
+     The next card peeks in from the edge as the affordance. */
+  .page--home #features .pillars {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: 84%;
+    gap: 12px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: var(--page-pad);
+    margin-inline: calc(-1 * var(--page-pad));
+    padding: 2px var(--page-pad) 10px;
+    scrollbar-width: none;
+  }
+  .page--home #features .pillars::-webkit-scrollbar { display: none; }
+  .page--home #features .pillar { scroll-snap-align: start; }
+  .page--home .swipe-hint { display: block; }
+
+  .page--home .pillar { padding: 20px 18px 18px; gap: 8px; }
+  .page--home .pillar__title { font-size: 19px; }
+
+  /* Lifecycle: number beside the step instead of above it. */
+  .page--home .lc-strip { padding: 26px 20px 22px; }
+  .page--home .lc-grid { margin-top: 20px; }
+  .page--home .lc { display: grid; grid-template-columns: 36px minmax(0, 1fr); column-gap: 14px; }
+  .page--home .lc > :not(.lc__marker) { grid-column: 2; }
+  .page--home .lc__marker { grid-row: 1 / span 3; }
+  .page--home .lc__title { margin: 6px 0 4px; font-size: 18px; }
+  .page--home .lc + .lc { padding-top: 16px; }
+
+  .page--home .aud { padding: 22px 20px 20px; gap: 10px; }
+  .page--home .aud__who { font-size: 24px; }
+  .page--home .aud__claim { font-size: 15px; }
+
+  .page--home .capital__title { font-size: 28px; }
+  .page--home .capital__list li { padding: 16px 16px 16px 50px; }
+  .page--home .capital__list li::before { left: 16px; top: 17px; }
+
+  .page--home .final { padding: 30px 20px; gap: 22px; border-radius: 16px; }
+  .page--home .final__title { font-size: 28px; }
+  .page--home .final__ctas { flex-direction: column; align-items: stretch; }
+  .page--home .final__ctas .btn { width: 100%; justify-content: center; }
+}
+
+/* Swipe hint for the primitives row; only the phone layout scrolls sideways. */
+.swipe-hint {
+  display: none;
+  margin: -6px 0 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--avy-muted);
 }
