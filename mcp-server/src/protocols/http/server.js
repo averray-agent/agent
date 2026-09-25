@@ -8,6 +8,7 @@ import {
 import { extractClientKey } from "../../auth/rate-limit.js";
 import { hasRole } from "../../auth/config.js";
 import { resolveRequestId } from "../../core/logger.js";
+import { createProcessRejectionMonitor } from "../../core/process-rejection-monitor.js";
 import { getAddress, keccak256, toUtf8Bytes } from "ethers";
 import { buildAgentProfile } from "../../core/agent-profile.js";
 import { buildBadgeFromSession } from "../../core/badge-metadata.js";
@@ -149,6 +150,11 @@ const {
   observability,
   badgeReceiptSigner
 } = await createPlatformRuntime();
+
+const processRejections = createProcessRejectionMonitor({ logger, metrics });
+// Contain promise failures without dropping unrelated requests and observers.
+// Synchronous uncaught exceptions retain Node's default fatal behavior.
+process.on("unhandledRejection", processRejections.onUnhandledRejection);
 
 // Label the state-store gauge once at boot for Prometheus discovery.
 metrics.gauge("state_store_backend", "1 when state store backend matches the label.", ["backend"]).set(
@@ -993,6 +999,7 @@ const handleOperationalRoute = createOperationalRoutes({
   eventBus,
   gateway,
   getRewardBankHealth: rewardBankHealthProvider,
+  getProcessWarnings: processRejections.getWarnings,
   indexerHealthProbe,
   metrics,
   metricsAuthRequired,

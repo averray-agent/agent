@@ -69,6 +69,7 @@ export function createOperationalRoutes({
   eventBus,
   gateway,
   getRewardBankHealth,
+  getProcessWarnings = () => [],
   indexerHealthProbe,
   metrics,
   metricsAuthRequired,
@@ -157,7 +158,8 @@ export function createOperationalRoutes({
         ...buildCapabilityWarnings(capabilityHealth),
         ...buildOnboardingInventoryWarnings(productHealth.onboarding),
         ...buildSubmittedJobAutoVerifierWarnings(submittedJobAutoVerifierHealth),
-        ...buildLockedTierWarnings(lockedTierHealth)
+        ...buildLockedTierWarnings(lockedTierHealth),
+        ...getProcessWarnings()
       ];
       await recordCapabilityWarningTransitions({
         stateStore,

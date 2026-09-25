@@ -245,7 +245,7 @@ export function createPublicMetadataRoutes({
         posterOnboardingService.getWorkerDoorOnboarding(),
         posterOnboardingService.getExternalBountiesOnboarding(),
         lockedTierService?.getCapability?.() ?? Promise.resolve(undefined),
-        idleBalanceConsentService?.getCapability?.() ?? Promise.resolve(undefined)
+        Promise.resolve().then(() => idleBalanceConsentService?.getCapability?.())
       ]);
       const capabilities = service.getPlatformCapabilities({ chainId: authConfig?.chainId });
       respond(

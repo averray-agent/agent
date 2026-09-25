@@ -269,9 +269,9 @@ export class BankXcmV22Runtime {
     const preview = await this.previewLeg(requestId, leg, 1n);
     const api = await this.getHydrationApi();
     const [header, timestamp, weight] = await Promise.all([
-      api.rpc.chain.getHeader(),
-      api.query.timestamp.now(),
-      api.call.xcmPaymentApi.queryXcmWeight(preview.message),
+      Promise.resolve().then(() => api.rpc.chain.getHeader()),
+      Promise.resolve().then(() => api.query.timestamp.now()),
+      Promise.resolve().then(() => api.call.xcmPaymentApi.queryXcmWeight(preview.message)),
     ]);
     if (!weight?.isOk) throw new ValidationError("Hydration could not weigh the exact Bank XCM message.");
     const feeAssetId = extractWithdrawAssetId(api, preview.message);
@@ -312,15 +312,15 @@ export class BankXcmV22Runtime {
       hydrationWeight,
       hydrationDryRun,
     ] = await Promise.all([
-      assetHub.rpc.chain.getHeader(),
-      assetHub.query.timestamp.now(),
-      hydration.rpc.chain.getHeader(),
-      hydration.query.timestamp.now(),
-      hydration.call.xcmPaymentApi.queryXcmWeight(wireMessage),
-      hydration.call.dryRunApi.dryRunXcm(
+      Promise.resolve().then(() => assetHub.rpc.chain.getHeader()),
+      Promise.resolve().then(() => assetHub.query.timestamp.now()),
+      Promise.resolve().then(() => hydration.rpc.chain.getHeader()),
+      Promise.resolve().then(() => hydration.query.timestamp.now()),
+      Promise.resolve().then(() => hydration.call.xcmPaymentApi.queryXcmWeight(wireMessage)),
+      Promise.resolve().then(() => hydration.call.dryRunApi.dryRunXcm(
         siblingOrigin(ASSET_HUB_PARA_ID),
         wireMessage
-      ),
+      )),
     ]);
     if (!hydrationWeight?.isOk) {
       throw new ValidationError("Hydration could not weigh the exact withdraw-home message.");
@@ -435,9 +435,9 @@ export class BankXcmV22Runtime {
       encoded
     );
     const [assetHubHeader, assetHubTimestamp, assetHubDryRun] = await Promise.all([
-      assetHub.rpc.chain.getHeader(),
-      assetHub.query.timestamp.now(),
-      assetHub.call.dryRunApi.dryRunCall({ system: { signed: operatorAccount } }, runtimeCall, 5),
+      Promise.resolve().then(() => assetHub.rpc.chain.getHeader()),
+      Promise.resolve().then(() => assetHub.query.timestamp.now()),
+      Promise.resolve().then(() => assetHub.call.dryRunApi.dryRunCall({ system: { signed: operatorAccount } }, runtimeCall, 5)),
     ]);
     const hubJson = assetHubDryRun.toJSON();
     assertDryRunCallComplete(hubJson, "Asset Hub funding wrapper call");
@@ -447,14 +447,14 @@ export class BankXcmV22Runtime {
     }
     const exact = forwarded[0];
     const [hydrationHeader, hydrationTimestamp, deliveryFees, weight] = await Promise.all([
-      hydration.rpc.chain.getHeader(),
-      hydration.query.timestamp.now(),
-      assetHub.call.xcmPaymentApi.queryDeliveryFees(
+      Promise.resolve().then(() => hydration.rpc.chain.getHeader()),
+      Promise.resolve().then(() => hydration.query.timestamp.now()),
+      Promise.resolve().then(() => assetHub.call.xcmPaymentApi.queryDeliveryFees(
         exact.destination,
         exact.message,
         NATIVE_DOT_DELIVERY_ASSET
-      ),
-      hydration.call.xcmPaymentApi.queryXcmWeight(exact.message),
+      )),
+      Promise.resolve().then(() => hydration.call.xcmPaymentApi.queryXcmWeight(exact.message)),
     ]);
     if (!deliveryFees?.isOk) {
       throw new ValidationError("Asset Hub could not quote the exact forwarded message in native DOT.");
@@ -511,8 +511,8 @@ export class BankXcmV22Runtime {
       encoded
     );
     const [assetHubHeader, assetHubDryRun] = await Promise.all([
-      assetHub.rpc.chain.getHeader(),
-      assetHub.call.dryRunApi.dryRunCall({ system: { signed: operatorAccount } }, runtimeCall, 5),
+      Promise.resolve().then(() => assetHub.rpc.chain.getHeader()),
+      Promise.resolve().then(() => assetHub.call.dryRunApi.dryRunCall({ system: { signed: operatorAccount } }, runtimeCall, 5)),
     ]);
     const hubJson = assetHubDryRun.toJSON();
     assertDryRunCallComplete(hubJson, "Asset Hub wrapper call");
@@ -711,10 +711,10 @@ export class BankXcmV22Runtime {
   async readRequestQueuedEventsAtHash(api, blockHash, records = undefined) {
     const at = await api.at(blockHash);
     const [header, signedBlock, timestamp, eventRecords] = await Promise.all([
-      api.rpc.chain.getHeader(blockHash),
-      api.rpc.chain.getBlock(blockHash),
-      at.query.timestamp.now(),
-      records === undefined ? at.query.system.events() : records,
+      Promise.resolve().then(() => api.rpc.chain.getHeader(blockHash)),
+      Promise.resolve().then(() => api.rpc.chain.getBlock(blockHash)),
+      Promise.resolve().then(() => at.query.timestamp.now()),
+      Promise.resolve().then(() => records === undefined ? at.query.system.events() : records),
     ]);
     const decoded = decodeWrapperReviveEvents(
       eventRecords,
@@ -810,12 +810,12 @@ export class BankXcmV22Runtime {
       );
       const blockNumber = await provider.getBlockNumber();
       const [block, raw] = await Promise.all([
-        provider.getBlock(blockNumber),
-        new Contract(
+        Promise.resolve().then(() => provider.getBlock(blockNumber)),
+        Promise.resolve().then(() => new Contract(
           normalized.contract,
           ["function balanceOf(address account) view returns (uint256)"],
           provider
-        ).balanceOf(normalized.evmAccount, { blockTag: blockNumber }),
+        ).balanceOf(normalized.evmAccount, { blockTag: blockNumber })),
       ]);
       return {
         raw: BigInt(raw),
@@ -830,8 +830,8 @@ export class BankXcmV22Runtime {
     const hash = header.hash.toHex();
     const at = await api.at(hash);
     const [timestamp, record] = await Promise.all([
-      at.query.timestamp.now(),
-      at.query.tokens.accounts(normalized.account, normalized.assetId),
+      Promise.resolve().then(() => at.query.timestamp.now()),
+      Promise.resolve().then(() => at.query.tokens.accounts(normalized.account, normalized.assetId)),
     ]);
     const json = record.toJSON();
     return {
