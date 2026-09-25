@@ -213,7 +213,7 @@ test("friendly agent paths resolve every profile asset from the site root", () =
   assert.deepEqual(scripts, [
     "/site.js?v=20260821",
     "/reader-fetch.js?v=20260823",
-    "/agent.js?v=20260825"
+    "/agent.js?v=20260925"
   ]);
   assert.equal(new URL(stylesheet, friendlyUrl).pathname, "/styles.css");
   assert.equal(new URL(scripts[1], friendlyUrl).pathname, "/reader-fetch.js");
@@ -230,4 +230,37 @@ test("friendly agent paths resolve every profile asset from the site root", () =
 test("agent profile reader has no bespoke fetch path", () => {
   assert.match(agentSource, /AverrayReaderFetch\.readJsonWithRetry/u);
   assert.doesNotMatch(agentSource, /(?:^|[^.\w])fetch\s*\(/mu);
+});
+
+test("an incomplete earned total never reads as the full total", async () => {
+  const withEarned = (totalEarned) => ({
+    ...profileFixture,
+    stats: { ...profileFixture.stats, totalEarned: { ...profileFixture.stats.totalEarned, ...totalEarned } }
+  });
+
+  // Nothing countable: the blind-agent case-study wallet (0.40 USDC paid, but
+  // its 2026-08-02 session predates claim-time job snapshots).
+  const none = await renderFixture(withEarned({
+    amount: "0", incomplete: true, includedApprovedCount: 0, omittedApprovedCount: 1
+  }));
+  assert.equal(none.get("profile-total-earned").textContent, "Not on record");
+  assert.equal(
+    none.get("profile-total-earned").attributes.get("title"),
+    "1 approved job without a reward amount on record is not counted"
+  );
+
+  // Partly countable: a lower bound, never the bare partial sum.
+  const partial = await renderFixture(withEarned({
+    amount: "12500000", incomplete: true, includedApprovedCount: 3, omittedApprovedCount: 2
+  }));
+  assert.equal(partial.get("profile-total-earned").textContent, "≥ 12.5 USDC");
+  assert.equal(
+    partial.get("profile-total-earned").attributes.get("title"),
+    "2 approved jobs without a reward amount on record are not counted"
+  );
+
+  // Complete totals render exactly as before.
+  const complete = await renderFixture(profileFixture);
+  assert.equal(complete.get("profile-total-earned").textContent, "0.4 USDC");
+  assert.equal(complete.get("profile-total-earned").attributes.get("title"), undefined);
 });
