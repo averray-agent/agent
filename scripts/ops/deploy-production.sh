@@ -2313,6 +2313,12 @@ deploy() {
   # (see wait_for_app's 401-pass rationale in redeploy-frontend.sh); Caddy
   # serves frontend/ from the same checkout bind mount, so for this failure
   # class disk state IS what gets served.
+  #
+  # deployments/ is part of the app's build input: app/app/pool/page.tsx
+  # imports deployments/mainnet.json at build time to label pool generations.
+  # Without it in the gate, the 2026-09-17 v2.2 manifest change (#1390/#1391,
+  # no app/ edit) never rebuilt the app, which kept telling every visitor
+  # "Pool generation unavailable".
   local frontend_reason=""
   case "$RUN_FRONTEND" in
     0|false|no)
@@ -2322,7 +2328,7 @@ deploy() {
       frontend_reason="forced by RUN_FRONTEND=$RUN_FRONTEND"
       ;;
     auto)
-      if component_changed_matches frontend '^(app/|frontend/|scripts/sync-operator-frontend\.mjs|scripts/ops/redeploy-frontend\.sh|scripts/ops/deploy-production\.sh|package(-lock)?\.json)'; then
+      if component_changed_matches frontend '^(app/|frontend/|deployments/|scripts/sync-operator-frontend\.mjs|scripts/ops/redeploy-frontend\.sh|scripts/ops/deploy-production\.sh|package(-lock)?\.json)'; then
         frontend_reason="code path changed"
       else
         frontend_reason=$(frontend_tree_drift_reason || true)

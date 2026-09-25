@@ -809,6 +809,45 @@ test("frontend staleness detector seeds on first deploy and skips while frontend
   );
 });
 
+test("frontend path gate rebuilds the app when a deployment manifest changes", async () => {
+  // app/app/pool/page.tsx imports deployments/mainnet.json at build time. A
+  // manifest-only range (the 2026-09-17 v2.2 cutover) must rebuild the app,
+  // even though no app/ file changed and frontend/ still matches its hash.
+  const { appRoot, stackRoot, fakeBin, stateDir, deployLog, baseSha, nextSha, root } =
+    await makeFrontendFixture();
+  const env = (overrides) => ({
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    STACK_ROOT: stackRoot,
+    COMPOSE_FILE: join(stackRoot, "docker-compose.yml"),
+    DEPLOY_LOCK_FILE: join(root, "deploy.lock"),
+    DEPLOY_STATE_DIR: stateDir,
+    DEPLOY_LOG: deployLog,
+    RUN_BACKEND: "0",
+    RUN_INDEXER: "0",
+    RUN_SITE: "0",
+    RUN_CADDY: "0",
+    RUN_SMOKE: "0",
+    ...overrides
+  });
+
+  const seed = runDeploy(appRoot, env({ DEPLOY_OLD_SHA: baseSha, DEPLOY_NEW_SHA: nextSha }));
+  assert.equal(seed.status, 0, seed.stderr);
+
+  await mkdir(join(appRoot, "deployments"), { recursive: true });
+  await writeFile(join(appRoot, "deployments/mainnet.json"), '{"contracts":{"depositPoolV22":"0x3A2d"}}\n');
+  // Stage only the manifest: the seed build left frontend/ output on disk, and
+  // committing it would make the range match frontend/ instead.
+  git(appRoot, "add", "deployments/mainnet.json");
+  git(appRoot, "commit", "-m", "manifest-only change");
+  const manifestSha = revParse(appRoot, "HEAD");
+
+  await writeFile(deployLog, "");
+  const deploy = runDeploy(appRoot, env({ DEPLOY_OLD_SHA: nextSha, DEPLOY_NEW_SHA: manifestSha }));
+  assert.equal(deploy.status, 0, deploy.stderr);
+  assert.match(deploy.stdout, /Deploying operator frontend \(reason: code path changed\)/u);
+  assert.match(await readFile(deployLog, "utf8"), /^frontend$/m);
+});
+
 test("frontend staleness detector force-rebuilds after an un-popped stash reverts the build output", async () => {
   const { appRoot, stackRoot, fakeBin, stateDir, deployLog, baseSha, nextSha, root } =
     await makeFrontendFixture();
