@@ -16,6 +16,7 @@ import { GithubIssueIngestionScheduler } from "../services/github-issue-ingestio
 import { toPlatformJob } from "../jobs/ingest-github-issues.js";
 import { upsertScheduledIngestedJob } from "../services/ingested-job-upsert.js";
 import { createJobsFromImportResult } from "../protocols/http/admin-job-import-routes.js";
+import { hashCanonicalContent } from "./canonical-content.js";
 
 function durableCatalogue(store = new MemoryStateStore()) {
   return new PlatformService(structuredClone(BOOTSTRAP_JOBS), new Map(), new Map(), new Map(), undefined, store);
@@ -38,23 +39,24 @@ test("catalogue retirement tombstone survives restart and an ingest tick redisco
   const service = durableCatalogue(store);
   const input = toPlatformJob(DURABLE_ISSUE);
   await upsertScheduledIngestedJob(service, input);
-  assert.equal((await store.listCatalogueMutations()).length, 0);
+  assert.equal((await store.listCatalogueMutations()).length, 1);
   await service.updateJobLifecycle(input.id, { action: "archive", reason: "upstream_closed:completed" });
-  assert.equal((await store.listCatalogueMutations())[0].definition, undefined);
+  assert.equal((await store.listCatalogueMutations())[0].definition.lifecycle.status, "archived");
   const restarted = durableCatalogue(store);
   await restarted.hydrateCatalogue();
   const summary = await durableIngest(restarted).runOnce();
   assert.equal(summary.createdCount, 0);
-  assert.equal(summary.skipped[0].reason, "catalogue_job_retired");
+  await assert.rejects(upsertScheduledIngestedJob(restarted, input), { code: "catalogue_job_retired" });
   assert.deepEqual(summary.errors, []);
   assert.equal(restarted.listJobs().some(({ id }) => id === input.id), false);
   await assert.rejects(upsertScheduledIngestedJob(restarted, { ...input, id: "new-id-same-upstream" }),
     { code: "catalogue_job_retired" });
   await restarted.updateJobLifecycle(input.id, { action: "reopen" });
-  assert.equal((await durableIngest(restarted).runOnce()).createdCount, 1);
+  assert.equal((await durableIngest(restarted).runOnce()).createdCount, 0);
+  assert.equal(restarted.listJobs().some(({ id }) => id === input.id), true);
 });
 
-test("hydration plus normal ingest has one row per job and does not persist scheduled definitions", async () => {
+test("hydration keeps ingested definitions and the scheduler posts nothing twice after restart", async () => {
   const store = new MemoryStateStore();
   const first = durableCatalogue(store);
   const operator = { ...BASE_JOB, id: "operator-import" };
@@ -63,12 +65,67 @@ test("hydration plus normal ingest has one row per job and does not persist sche
   const second = durableCatalogue(store);
   await second.hydrateCatalogue();
   await second.hydrateCatalogue();
-  await durableIngest(second).runOnce();
-  await durableIngest(second).runOnce();
+  assert.equal((await durableIngest(second).runOnce()).createdCount, 0);
+  assert.equal((await durableIngest(second).runOnce()).createdCount, 0);
   const ids = second.jobs.map(({ id }) => id);
   assert.equal(new Set(ids).size, ids.length);
   assert.equal(ids.filter((id) => id === toPlatformJob(DURABLE_ISSUE).id).length, 1);
-  assert.deepEqual((await store.listCatalogueMutations()).map(({ jobId }) => jobId), [operator.id]);
+  assert.deepEqual(new Set((await store.listCatalogueMutations()).map(({ jobId }) => jobId)),
+    new Set([operator.id, toPlatformJob(DURABLE_ISSUE).id]));
+});
+
+test("restart restores every ingested id and exact spec hash without re-normalizing", async () => {
+  const store = new MemoryStateStore();
+  const first = durableCatalogue(store);
+  const inputs = [42, 43, 44].map(number => toPlatformJob({ ...DURABLE_ISSUE, number }));
+  for (const input of inputs) await first.upsertIngestedJob(input);
+  const expected = inputs.map(({ id }) => first.getJobDefinition(id));
+  const second = durableCatalogue(store);
+  second.jobCatalogService.normalizeJobInput = () => { throw new Error("hydration must not normalize immutable terms"); };
+  await second.hydrateCatalogue();
+  for (const definition of expected) {
+    assert.deepEqual(second.getJobDefinition(definition.id), definition);
+    assert.equal(hashCanonicalContent(second.getJobDefinition(definition.id)), hashCanonicalContent(definition));
+  }
+});
+
+test("hydrated ingested definition still refuses chain spec drift without replacing the durable snapshot", async () => {
+  const store = new MemoryStateStore();
+  const first = durableCatalogue(store);
+  const input = toPlatformJob(DURABLE_ISSUE);
+  await first.upsertIngestedJob(input);
+  const definition = first.getJobDefinition(input.id);
+  const second = durableCatalogue(store);
+  await second.hydrateCatalogue();
+  second.blockchainGateway = { isEnabled: () => true,
+    getJob: async () => ({ state: 1, specHash: hashCanonicalContent(definition) }) };
+  await assert.rejects(second.upsertIngestedJob({ ...input, description: "Changed immutable terms" }),
+    { code: "ingest_refused_spec_hash_mismatch" });
+  const third = durableCatalogue(store);
+  await third.hydrateCatalogue();
+  assert.deepEqual(third.getJobDefinition(input.id), definition);
+});
+
+test("ingested write failure rolls back the listing instead of acknowledging a volatile job", async () => {
+  const store = new MemoryStateStore();
+  const service = durableCatalogue(store);
+  store.putCatalogueMutation = async () => { throw new Error("store unavailable"); };
+  const input = toPlatformJob(DURABLE_ISSUE);
+  await assert.rejects(service.upsertIngestedJob(input), /store unavailable/u);
+  assert.throws(() => service.getJobDefinition(input.id), { code: "job_not_found" });
+});
+
+test("pending ingestion prefund status survives hydration without funding again", async () => {
+  const store = new MemoryStateStore();
+  const service = durableCatalogue(store);
+  service.prefundIngestedJobs = true;
+  service.blockchainGateway = { isEnabled: () => true, getJob: async () => ({ state: 0 }),
+    ensureJob: async () => { throw new Error("funding unavailable"); } };
+  const input = toPlatformJob(DURABLE_ISSUE);
+  await service.createIngestedJob(input);
+  const second = durableCatalogue(store);
+  await second.hydrateCatalogue();
+  assert.equal(second.getJobDefinition(input.id).funding.state, "pending");
 });
 
 test("operator updates and lifecycle overrides persist while failed writes are not acknowledged", async () => {

@@ -1,8 +1,9 @@
 import { ConflictError } from "./errors.js";
 
 // Single-backend write-through journal, like the policy/overlay stores. Seed
-// and scheduled definitions are reproducible; only operator definitions and
-// lifecycle overrides are durable. No hydration call touches funding rails.
+// definitions are reproducible; ingested search results are not. Persist their
+// exact listed terms alongside operator definitions and lifecycle overrides.
+// No hydration call touches funding rails.
 export class CatalogueMutations {
   constructor(catalogue, stateStore) {
     this.catalogue = catalogue;
@@ -19,7 +20,7 @@ export class CatalogueMutations {
       }
       this.records.set(record.jobId, record);
       if (record.definition) {
-        if (record.origin !== "operator" || record.definition.id !== record.jobId) {
+        if (!["operator", "ingest"].includes(record.origin) || record.definition.id !== record.jobId) {
           throw new Error("invalid_operator_catalogue_definition");
         }
         // Already-normalized definitions must not be normalized a second time:
@@ -29,7 +30,8 @@ export class CatalogueMutations {
       const job = this.catalogue.jobs.find(({ id }) => id === record.jobId);
       if (job && record.lifecycle) job.lifecycle = structuredClone(record.lifecycle);
     }
-    return { operatorDefinitions: records.filter(({ definition }) => definition).length,
+    return { operatorDefinitions: records.filter(({ definition, origin }) => definition && origin === "operator").length,
+      ingestedDefinitions: records.filter(({ definition, origin }) => definition && origin === "ingest").length,
       lifecycleOverrides: records.filter(({ lifecycle }) => lifecycle).length,
       tombstones: records.filter(isRetired).length };
   }
@@ -67,13 +69,23 @@ export class CatalogueMutations {
       const before = this.catalogue.jobs.find(({ id }) => id === definition.id);
       const job = this.catalogue.upsertJob(definition);
       try {
-        if (this.records.get(job.id)?.origin === "operator") await this.write(this.operatorRecord(job));
+        await this.write({ ...this.operatorRecord(job), origin: this.records.get(job.id)?.origin ?? "ingest" });
         return job;
       } catch (error) {
         if (before) this.catalogue.restoreJob(before);
         else this.catalogue.removeJob(job.id);
         throw error;
       }
+    });
+  }
+
+  persistIngestedState(job) {
+    return this.serialize(async () => {
+      // Do not overwrite a newer definition or a concurrent lifecycle override.
+      if (this.catalogue.jobs.find(({ id }) => id === job.id) !== job) return;
+      const previous = this.records.get(job.id);
+      await this.write({ ...this.operatorRecord(job), origin: previous?.origin ?? "ingest",
+        ...(previous?.lifecycle ? { lifecycle: structuredClone(previous.lifecycle) } : {}) });
     });
   }
 

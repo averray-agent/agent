@@ -268,9 +268,11 @@ export class CatalogueLaneDiscipline {
     const records = pruneRecords(state.records, evaluatedAt);
     const existing = records.find((record) => record.jobId === String(job.id));
     const candidate = candidateRecord(job, lane.id, evaluatedAt, this.expectedBrokeredGasRaw, origin);
-    const active = records.filter((record) => withinWindow(record.postedAt, evaluatedAt, DAY_MS));
+    const active = await this.#chargeableRecords(
+      records.filter((record) => withinWindow(record.postedAt, evaluatedAt, DAY_MS)), evaluatedAt);
     const usedRaw = sumRaw(active.filter((record) => record.lane === lane.id));
-    const candidateRaw = existing ? 0n : BigInt(candidate.totalRaw);
+    const candidateRaw = existing && (active.includes(existing) || !withinWindow(existing.postedAt, evaluatedAt, DAY_MS))
+      ? 0n : BigInt(candidate.totalRaw);
     const projectedRaw = usedRaw + candidateRaw;
 
     if (projectedRaw > lane.dailyCapRaw) {
@@ -362,6 +364,8 @@ export class CatalogueLaneDiscipline {
     const evaluatedAt = asDate(now);
     const state = await this.#readState();
     const records = pruneRecords(state.records, evaluatedAt);
+    const chargeable = await this.#chargeableRecords(
+      records.filter((record) => withinWindow(record.postedAt, evaluatedAt, DAY_MS)), evaluatedAt);
     const sessions = await collectSessions(this.stateStore);
     const claimantMetrics = buildClaimantMetrics(
       sessions,
@@ -381,7 +385,7 @@ export class CatalogueLaneDiscipline {
         const active = records.filter(
           (record) => record.lane === lane.id && withinWindow(record.postedAt, evaluatedAt, DAY_MS)
         );
-        const usedRaw = sumRaw(active);
+        const usedRaw = sumRaw(chargeable.filter((record) => record.lane === lane.id));
         const remainingRaw = lane.dailyCapRaw > usedRaw ? lane.dailyCapRaw - usedRaw : 0n;
         const metrics = claimantMetrics.get(lane.id);
         return {
@@ -410,6 +414,21 @@ export class CatalogueLaneDiscipline {
   async #readState() {
     const stored = await this.stateStore.getServiceState(CATALOGUE_LANE_STATE_SCOPE);
     return stored && typeof stored === "object" ? stored : { records: [] };
+  }
+
+  async #chargeableRecords(records, evaluatedAt) {
+    if (!this.listCatalogJobs || records.length === 0) return records;
+    try {
+      const jobs = await this.listCatalogJobs({ includeArchived: true, includePaused: true,
+        includeStale: true, now: evaluatedAt });
+      if (!Array.isArray(jobs)) throw new Error("catalogue lane spend source returned a non-array result");
+      const serving = new Set(jobs.filter(isServingCatalogJob).map((job) => String(job.id)));
+      const claimed = await collectClaimedJobIdsSince(this.stateStore, evaluatedAt.getTime() - DAY_MS);
+      return records.filter((record) => serving.has(String(record.jobId)) || claimed.has(String(record.jobId)));
+    } catch (error) {
+      this.logger.warn?.({ err: error, recordCount: records.length }, "catalogue_lane_budget.catalog_read_failed");
+      return records;
+    }
   }
 
   async #unclaimedBacklog(records, laneId, evaluatedAt) {

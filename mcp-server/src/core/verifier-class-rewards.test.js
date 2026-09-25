@@ -76,10 +76,15 @@ test("class prices are operator tunable, validated and complete", () => {
 test("github class pricing preserves the oss lane cap at fifteen USDC", async () => {
   const registry = validateCatalogueLaneRegistry(DEFAULT_CATALOGUE_LANE_REGISTRY);
   assert.equal(registry.get("oss-anchored").dailyCapRaw, 15000000n);
-  const discipline = new CatalogueLaneDiscipline({ registry, stateStore: new MemoryStateStore(), gasEstimateUsdc: 0, listCatalogJobs: () => [] });
+  const store = new MemoryStateStore();
+  const discipline = new CatalogueLaneDiscipline({ registry, stateStore: store, gasEstimateUsdc: 0, listCatalogJobs: () => [] });
   let count = 0;
   for (let i = 0; i < 15; i++) {
-    await discipline.post({ id: "pr-" + i, lane: "oss-anchored", rewardAmount: verifierClassReward("github_pr"), rewardAsset: "USDC" }, () => { count++; });
+    await discipline.post({ id: "pr-" + i, lane: "oss-anchored", rewardAmount: verifierClassReward("github_pr"), rewardAsset: "USDC" }, async () => {
+      count++;
+      // Claimed jobs are real spend even after leaving the serving catalogue.
+      await store.upsertSession({ sessionId: "claim-" + i, jobId: "pr-" + i, status: "claimed", claimedAt: new Date().toISOString() });
+    });
   }
   await assert.rejects(discipline.post({ id: "pr-16", lane: "oss-anchored", rewardAmount: 1, rewardAsset: "USDC" }, () => { count++; }), { code: "lane_budget_exhausted" });
   assert.equal(count, 15);

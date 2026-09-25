@@ -515,6 +515,7 @@ export class PlatformService {
       };
       this.publishIngestionPrefundEvent(created, "pending", error);
     }
+    await this.catalogueMutations.persistIngestedState(created);
     return created;
   }
 
