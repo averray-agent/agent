@@ -1,4 +1,5 @@
 import { Contract, Interface, getAddress, getBytes, hexlify } from "ethers";
+import { blake2AsHex } from "@polkadot/util-crypto";
 
 import { ConfigError, ValidationError } from "../core/errors.js";
 import { XCM_WRAPPER_ABI } from "../blockchain/abis.js";
@@ -98,6 +99,9 @@ export class BankXcmV22Runtime {
     this.eventWatchSleep = eventWatchSleep;
     this.substrateEventWatchRunning = false;
     this.substrateEventIngestionError = undefined;
+    this.substrateEventFailedBlocks = new Map();
+    this.substrateEventProvenanceError = undefined;
+    this.substrateEventRetryTimer = undefined;
     this.substrateEventUnsubscribe = undefined;
     this.substrateEventTail = Promise.resolve();
     this.substrateEventStartPromise = undefined;
@@ -135,7 +139,7 @@ export class BankXcmV22Runtime {
           "Asset Hub system.events subscription"
         );
         this.substrateEventWatchRunning = true;
-        this.substrateEventIngestionError = undefined;
+        this.refreshSubstrateEventIngestionError();
         this.logger.info?.(
           { attempt, endpoint: this.assetHubSubstrateEndpoint },
           "bank_xcm_v22_runtime.substrate_event_watch_started"
@@ -163,22 +167,50 @@ export class BankXcmV22Runtime {
   }
 
   enqueueSubstrateEvents(api, records) {
-    const next = this.substrateEventTail.then(async () => {
-      const blockHash = records?.createdAtHash?.toHex?.();
-      if (!blockHash) {
-        throw new ValidationError("Asset Hub system.events subscription omitted its authoritative block hash.");
+    this.substrateEventTail = this.substrateEventTail.then(async () => {
+      let blockHash;
+      try {
+        blockHash = records?.createdAtHash?.toHex?.();
+        if (!REQUEST_ID_RE.test(blockHash ?? "")) {
+          throw new ValidationError("Asset Hub system.events subscription omitted its authoritative block hash.");
+        }
+        const events = await this.readRequestQueuedEventsAtHash(api, blockHash, records);
+        for (const event of events) this.eventBus.publish(event);
+        this.substrateEventFailedBlocks.delete(blockHash);
+      } catch (error) {
+        const message = error?.message ?? String(error);
+        if (REQUEST_ID_RE.test(blockHash ?? "")) {
+          this.substrateEventFailedBlocks.set(blockHash, { api, records, message });
+        } else {
+          // Without provenance there is no safe block to retry. Keep staging closed.
+          this.substrateEventProvenanceError = message;
+        }
+        this.logger.error?.({ blockHash, error: message }, "bank_xcm_v22_runtime.substrate_event_ingestion_failed");
       }
-      const events = await this.readRequestQueuedEventsAtHash(api, blockHash, records);
-      for (const event of events) this.eventBus.publish(event);
-    });
-    this.substrateEventTail = next.catch((error) => {
-      this.substrateEventIngestionError = error?.message ?? String(error);
-      this.logger.error?.(
-        { error: this.substrateEventIngestionError },
-        "bank_xcm_v22_runtime.substrate_event_ingestion_failed"
-      );
+      this.refreshSubstrateEventIngestionError();
+      this.scheduleSubstrateEventRetry();
     });
     return this.substrateEventTail;
+  }
+
+  refreshSubstrateEventIngestionError() {
+    this.substrateEventIngestionError = this.substrateEventProvenanceError
+      ?? this.substrateEventFailedBlocks.values().next().value?.message;
+  }
+
+  scheduleSubstrateEventRetry() {
+    if (!this.substrateEventFailedBlocks.size) {
+      clearTimeout(this.substrateEventRetryTimer);
+      this.substrateEventRetryTimer = undefined;
+    } else if (!this.substrateEventRetryTimer) {
+      this.substrateEventRetryTimer = setTimeout(() => {
+        this.substrateEventRetryTimer = undefined;
+        for (const { api, records } of this.substrateEventFailedBlocks.values()) {
+          this.enqueueSubstrateEvents(api, records);
+        }
+      }, this.eventWatchRetryBaseMs);
+      this.substrateEventRetryTimer.unref?.();
+    }
   }
 
   async flushSubstrateEventIngestion() {
@@ -217,6 +249,7 @@ export class BankXcmV22Runtime {
       chainEventIngestionError: observer.chainEventIngestionError,
       substrateEventWatchRunning: this.substrateEventWatchRunning,
       substrateEventIngestionError: this.substrateEventIngestionError,
+      substrateEventFailedBlockHashes: [...this.substrateEventFailedBlocks.keys()],
       readyForStaging: observer.enabled === true
         && observer.running === true
         && observer.chainEventWatchEnabled === true
@@ -709,18 +742,25 @@ export class BankXcmV22Runtime {
   }
 
   async readRequestQueuedEventsAtHash(api, blockHash, records = undefined) {
-    const at = await api.at(blockHash);
-    const [header, signedBlock, timestamp, eventRecords] = await Promise.all([
-      Promise.resolve().then(() => api.rpc.chain.getHeader(blockHash)),
-      Promise.resolve().then(() => api.rpc.chain.getBlock(blockHash)),
-      Promise.resolve().then(() => at.query.timestamp.now()),
-      Promise.resolve().then(() => records === undefined ? at.query.system.events() : records),
-    ]);
+    let at;
+    if (records === undefined) {
+      at = await api.at(blockHash);
+      records = await at.query.system.events();
+    }
     const decoded = decodeWrapperReviveEvents(
-      eventRecords,
+      records,
       this.wrapperAddress,
       this.wrapperInterface
     );
+    const queued = decoded.filter((entry) => entry.name === "RequestQueued");
+    if (!queued.length) return [];
+    at ??= await api.at(blockHash);
+    const [header, rawBlock, timestamp] = await Promise.all([
+      Promise.resolve().then(() => api.rpc.chain.getHeader(blockHash)),
+      // .raw bypasses SignedBlock/GeneralExtrinsic decoding, including unrelated extrinsics.
+      Promise.resolve().then(() => api.rpc.chain.getBlock.raw(blockHash)),
+      Promise.resolve().then(() => at.query.timestamp.now()),
+    ]);
     const parametersByRequest = new Map(
       decoded
         .filter((entry) => entry.name === "RequestParametersStored")
@@ -728,8 +768,7 @@ export class BankXcmV22Runtime {
     );
     const blockNumber = header.number.toNumber();
     const timestampIso = new Date(timestampSeconds(timestamp) * 1_000).toISOString();
-    return decoded
-      .filter((entry) => entry.name === "RequestQueued")
+    return queued
       .map((entry) => {
         const requestId = entry.args.requestId.toLowerCase();
         const parameters = parametersByRequest.get(requestId);
@@ -738,15 +777,15 @@ export class BankXcmV22Runtime {
             `RequestQueued ${requestId} has no same-extrinsic RequestParametersStored evidence.`
           );
         }
-        const extrinsic = signedBlock.block.extrinsics[entry.extrinsicIndex];
-        if (!extrinsic?.hash?.toHex) {
+        const extrinsic = rawBlock?.block?.extrinsics?.[entry.extrinsicIndex];
+        if (typeof extrinsic !== "string" || !/^0x(?:[a-fA-F0-9]{2})+$/u.test(extrinsic)) {
           throw new ValidationError(`RequestQueued ${requestId} has no authoritative extrinsic hash.`);
         }
         return {
           id: `xcm.request_queued-substrate-${blockHash}-${entry.eventIndex}`,
           topic: "xcm.request_queued",
           timestamp: timestampIso,
-          txHash: extrinsic.hash.toHex(),
+          txHash: blake2AsHex(extrinsic, 256),
           blockNumber,
           data: {
             requestId,
