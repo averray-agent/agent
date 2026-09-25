@@ -2187,6 +2187,19 @@ section.section { scroll-margin-top: 100px; }
   .receipts-grid { margin-top: 24px; }
   .receipt-card { padding: 16px; }
 
+  /* Page heroes (/verify, /proof-to-pay, /agents, /builders, …): the same
+     ragged stack of shrink-wrapped buttons the homepage had. Equal
+     full-width doors; height grows if a long label has to wrap. */
+  .page-hero__ctas { flex-direction: column; align-items: stretch; gap: 12px; }
+  .page-hero__ctas > .btn {
+    width: 100%;
+    height: auto;
+    min-height: 50px;
+    padding-block: 12px;
+    justify-content: center;
+    text-align: center;
+  }
+
   /* ---------- homepage ---------- */
   .page--home { --section-gap: 60px; }
   .page--home section.section { scroll-margin-top: 80px; }
