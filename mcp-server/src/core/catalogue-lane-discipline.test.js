@@ -183,6 +183,31 @@ test("lane budget allows the exact cap, refuses the next post, and leaves anothe
   );
 });
 
+for (const mode of ["gone unclaimed", "gone claimed", "catalogue unreadable", "still serving"]) {
+  test(`lane spend after listing loss: ${mode}`, async () => {
+    const sessions = [];
+    const listed = [];
+    let unreadable = false;
+    const discipline = new CatalogueLaneDiscipline({ stateStore: stateStore(sessions), registry: registry(),
+      gasEstimateUsdc: 0, now: () => NOW, logger: { info() {}, warn() {} },
+      listCatalogJobs: async () => { if (unreadable) throw new Error("catalogue unavailable"); return listed; } });
+    await discipline.post(job("first", "liveness", 1), async () => listed.push({ id: "first", claimable: true }));
+    if (mode !== "still serving") listed.length = 0;
+    if (mode === "gone claimed") sessions.push(claimSession("first", NOW.toISOString()));
+    unreadable = mode === "catalogue unreadable";
+    const next = () => discipline.post(job("second"), async () => listed.push({ id: "second", claimable: true }));
+    if (mode === "gone unclaimed") {
+      assert.equal((await discipline.getBoardSnapshot()).lanes[0].exposure24h.usedRaw, "0");
+      await next();
+      // Restoring the old id must not evade the budget via the ledger's dedupe.
+      await assert.rejects(discipline.post(job("first", "liveness", 1), async () => {}), { code: LANE_BUDGET_EXHAUSTED });
+    } else {
+      assert.equal((await discipline.getBoardSnapshot()).lanes[0].exposure24h.usedRaw, "1000000");
+      await assert.rejects(next(), { code: LANE_BUDGET_EXHAUSTED });
+    }
+  });
+}
+
 test("posted exposure persists across service recreation and includes expected brokered gas", async () => {
   const store = stateStore();
   const first = new CatalogueLaneDiscipline({
