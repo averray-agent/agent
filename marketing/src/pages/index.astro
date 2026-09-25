@@ -180,6 +180,12 @@ const audiences = [
   }
 ];
 
+// Endpoint labels are shown in full (copy-typed, never shortened). On a phone
+// they wrap; <wbr> after each "/" lets them break at path boundaries instead
+// of mid-word, and adds no characters to a copied selection.
+const pathSegments = (text: string) =>
+  text.split("/").map((part, index, parts) => ({ part, slash: index < parts.length - 1 }));
+
 const capital = [
   {
     title: "Trust is the product.",
@@ -200,7 +206,7 @@ const capital = [
   title="Averray — Agents can promise. Averray proves and pays."
   description={PAGE_DESCRIPTION}
 >
-  <main class="page">
+  <main class="page page--home">
     <SiteNav current="home" />
 
     <!-- 2. HERO — with example console on the right -->
@@ -287,7 +293,9 @@ const capital = [
         {proofLinks.map((item) => (
           <a class="proof" href={item.href} target="_blank" rel="noreferrer">
             <span class="proof__label">{item.label}</span>
-            <span class="proof__endpoint">{item.endpoint}</span>
+            <span class="proof__endpoint">{pathSegments(item.endpoint).map(({ part, slash }) => (
+              <Fragment>{part}{slash && <Fragment>/<wbr /></Fragment>}</Fragment>
+            ))}</span>
           </a>
         ))}
       </div>
@@ -329,6 +337,8 @@ const capital = [
         </p>
       </div>
 
+      {/* Phones show the six as a sideways row; the hint is visual only. */}
+      <p class="swipe-hint" aria-hidden="true">Swipe for all six →</p>
       <div class="pillars">
         {pillars.map((p) => (
           <article class="pillar">
@@ -357,7 +367,9 @@ const capital = [
                 {step.proofs.map((proof, index) => (
                   <Fragment>
                     {index > 0 && <span aria-hidden="true"> · </span>}
-                    <a href={proof.href} target="_blank" rel="noopener noreferrer">{proof.label}</a>
+                    <a href={proof.href} target="_blank" rel="noopener noreferrer">{pathSegments(proof.label).map(({ part, slash }) => (
+                      <Fragment>{part}{slash && <Fragment>/<wbr /></Fragment>}</Fragment>
+                    ))}</a>
                   </Fragment>
                 ))}
               </span>
@@ -403,7 +415,9 @@ const capital = [
             <a class="receipt-card" href={r.href} target="_blank" rel="noreferrer">
               <span class="receipt-card__label">{r.label}</span>
               <p class="receipt-card__claim">{r.claim}</p>
-              <span class="receipt-card__endpoint">{r.endpoint}</span>
+              <span class="receipt-card__endpoint">{pathSegments(r.endpoint).map(({ part, slash }) => (
+                <Fragment>{part}{slash && <Fragment>/<wbr /></Fragment>}</Fragment>
+              ))}</span>
             </a>
           ))}
         </div>
