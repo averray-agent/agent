@@ -3,6 +3,7 @@ import { id } from "ethers";
 import test from "node:test";
 import { JOBS_SELECTOR, SLA_SELECTOR, DISPUTE_OPENED_TOPIC, EXPECTED_SLA_SECONDS,
   MAINNET_CHAIN_ID, decodeJob, readDisputeLogs, readArbitrationChain } from "./escrow-chain-lib.mjs";
+import { runReminders, stateKey } from "./arbitration-deadlines.mjs";
 
 const word = (value) => BigInt(value).toString(16).padStart(64, "0");
 const jobId = `0x${"11".repeat(32)}`;
@@ -80,12 +81,63 @@ test("arbitration chain confirms closed state and reads the SLA on both escrows"
   assert.equal(invalid.unknown, true);
   assert.ok(invalid.failureCount > 0);
 });
-test("arbitration chain reads both providers and keeps an open state from either", async () => {
+test("arbitration chain reads both providers and gives a confirmed closed state precedence", async () => {
   const f = fixture();
   const base = f.read;
   f.read = (url, method, params) => url === manifest.rpcUrl && method === "eth_call" && params[0].data.startsWith(JOBS_SELECTOR)
     ? encoded(6) : base(url, method, params);
   const result = await readArbitrationChain(manifest, f);
-  assert.equal(result.jobs.length, 1);
+  assert.equal(result.jobs.length, 0);
+  assert.equal(result.closed.length, 1);
+  assert.equal(result.unknown, false);
   assert.equal(result.parityWarnings[0].kind, "state_parity");
+});
+
+test("arbitration chain sends unknown status when a listed job cannot be read from either provider", async () => {
+  const unavailableId = `0x${"44".repeat(32)}`;
+  const f = fixture();
+  const base = f.read;
+  f.read = (url, method, params) => {
+    if (method === "eth_getLogs" && params[0].address === escrow) {
+      return [event, { ...event, topics: [DISPUTE_OPENED_TOPIC, unavailableId] }];
+    }
+    if (method === "eth_call" && params[0].data === JOBS_SELECTOR + unavailableId.slice(2)) {
+      throw new Error("job read unavailable");
+    }
+    return base(url, method, params);
+  };
+  const chain = await readArbitrationChain(manifest, f);
+  assert.equal(chain.unknown, true);
+  assert.equal(chain.failureCount, 2);
+  assert.equal(chain.jobs.length, 1);
+  const pushes = [];
+  await runReminders({ chain, now: Date.parse("2026-01-13T01:00:00Z") / 1000,
+    deliver: async (push) => pushes.push(push) });
+  assert.equal(pushes.length, 1);
+  assert.equal(pushes[0].priority, 5);
+  assert.match(pushes[0].body, /Deadline status unknown: chain read failed/);
+});
+
+test("arbitration chain removes non-disputed jobs with one successful provider read", async () => {
+  for (const state of [0, 1, 2, 3, 4, 6, 7]) {
+    const f = fixture({ state });
+    const base = f.read;
+    f.read = (url, method, params) => {
+      if (url === manifest.rpcUrl && method === "eth_call" && params[0].data.startsWith(JOBS_SELECTOR)) {
+        throw new Error("job read unavailable");
+      }
+      return base(url, method, params);
+    };
+    const chain = await readArbitrationChain(manifest, f);
+    assert.equal(chain.jobs.length, 0);
+    assert.equal(chain.closed.length, 1, `state ${state}`);
+    assert.equal(chain.unknown, false, `state ${state}`);
+    assert.equal(chain.failureCount, 1);
+    const pushes = [];
+    const result = await runReminders({ chain, now: Date.parse("2026-01-13T01:00:00Z") / 1000,
+      state: { [stateKey({ escrow, jobId })]: { tier: "opened", sentAt: "2026-01-12T12:00:00Z" } },
+      deliver: async (push) => pushes.push(push) });
+    assert.equal(pushes.length, 0);
+    assert.deepEqual(result.state, {});
+  }
 });

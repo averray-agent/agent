@@ -93,12 +93,13 @@ export async function readArbitrationChain(manifest, { read = rpcRead } = {}) {
     failureCount += reads.length - values.length;
     if (values.length === 0) { unknown = true; return; }
     const open = values.filter(({ state }) => state === 5);
-    if (open.length) {
-      if (open.some(({ disputedAt }) => disputedAt === 0)) { unknown = true; failureCount++; return; }
-      if (values.some(({ state }) => state !== 5)) parityWarnings.push({ ...candidate, kind: "state_parity" });
-      jobs.push({ ...candidate, disputedAt: Math.min(...open.map(({ disputedAt }) => disputedAt)) });
-    } else if (values.length === urls.length) closed.push(candidate);
-    else unknown = true;
+    if (open.length < values.length) {
+      if (open.length) parityWarnings.push({ ...candidate, kind: "state_parity" });
+      closed.push(candidate);
+      return;
+    }
+    if (open.some(({ disputedAt }) => disputedAt === 0)) { unknown = true; failureCount++; return; }
+    jobs.push({ ...candidate, disputedAt: Math.min(...open.map(({ disputedAt }) => disputedAt)) });
   }));
   jobs.sort((a, b) => a.disputedAt - b.disputedAt || a.jobId.localeCompare(b.jobId));
   return { jobs, closed, parityWarnings, unknown, failureCount };
