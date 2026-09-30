@@ -6,7 +6,7 @@ import { EvmPoolV22AllocationChain } from "./pool-v22-allocation-chain.js";
 import { PoolV22LockedKeeper } from "./pool-v22-locked-keeper.js";
 import { PlatformService } from "../core/platform-service.js";
 import { loadVerifierClassRewards } from "../core/verifier-class-rewards.js";
-import { createStateStore } from "../core/state-store.js";
+import { createStateStore, waitForStateStoreAtBoot } from "../core/state-store.js";
 import {
   createOnboardingSubsidyBudget,
   loadOnboardingSubsidyBudgetConfig
@@ -580,7 +580,8 @@ export async function createPlatformRuntime() {
     throw error;
   }
   const pimlicoClient = initStep("init-pimlico-client", logger, () => new PimlicoClient());
-  const stateStore = initStep("init-state-store", logger, () => createStateStore(process.env, { logger }));
+  const stateStore = initStep("init-state-store", logger, () => createStateStore(process.env, { logger, metrics }));
+  await waitForStateStoreAtBoot(stateStore, { logger });
   gateway.transactionStore = stateStore;
   try {
     await repairWalletSessionIndex({ stateStore, logger });
