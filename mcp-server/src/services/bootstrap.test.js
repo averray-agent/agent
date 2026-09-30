@@ -5,7 +5,7 @@ import { loadAuthConfig } from "../auth/config.js";
 import { loadBlockchainConfig } from "../blockchain/config.js";
 import { BOOTSTRAP_JOBS } from "./bootstrap-jobs.js";
 import { createCreditPoolDoor, createDepositPoolDoor, createDepositPoolObservability,
-  createIdleBalanceConsentService, createEarningsDoor } from "./bootstrap.js";
+  createIdleBalanceConsentService, createEarningsDoor, loadRateLimitConfig } from "./bootstrap.js";
 import { createIdleBalanceAllocationKeeper } from "./idle-balance-allocation-keeper.js";
 import { generateAll } from "../../../scripts/ops/render-mainnet-backend-env.mjs";
 import { POOL_V22_MIGRATION_READY, POOL_V22_NAV_DISCLOSURE, poolV22Config } from "./pool-v22-commitments.js";
@@ -17,6 +17,12 @@ const POOL_ASSET = "0x0000053900000000000000000000000001200000";
 const CREDIT_POOL = "0x903B318586A3772c99185000676f4AC356DD6E4B";
 const CREDIT_POOL_DEPOSIT_POOL_BINDING = "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30";
 const CANONICAL_DEPOSIT_POOL = "0x9B35A102d656Fb86d798aF81959e09961DEc28E0";
+
+test("content write limits default to thirty requests per hour", () => {
+  assert.deepEqual(loadRateLimitConfig({}).contentWrites, { limit: 30, windowSeconds: 3600 });
+  assert.deepEqual(loadRateLimitConfig({ RATE_LIMIT_CONTENT_WRITES_LIMIT: "15", RATE_LIMIT_CONTENT_WRITES_WINDOW_SECONDS: "600" }).contentWrites,
+    { limit: 15, windowSeconds: 600 });
+});
 
 function cutoverEnv() {
   return { ...Object.fromEntries(generateAll()["deploy/backend.mainnet.env.template"].split("\n")

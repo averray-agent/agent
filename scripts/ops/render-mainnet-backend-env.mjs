@@ -88,6 +88,8 @@ export const LITERAL_OVERRIDES = {
   USDC_LIQUIDITY_ACCOUNTS_JSON: "[]",
   REDIS_URL: "redis://mainnet-redis:6379",
   REDIS_NAMESPACE: "agent-platform-mainnet",
+  RATE_LIMIT_CONTENT_WRITES_LIMIT: "30",
+  RATE_LIMIT_CONTENT_WRITES_WINDOW_SECONDS: "3600",
   INDEXER_STATUS_URL: "http://mainnet-indexer:42069/status",
   // Stable operator smoke identity. Fresh mainnet canary workers cannot be
   // listed here and use the short-lived server-signed marker instead.
