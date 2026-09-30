@@ -325,18 +325,27 @@ export function validateProvenanceManifest(manifest) {
   return contracts;
 }
 
+class RpcFailure extends Error {}
+
 async function rpc(fetchImpl, rpcUrl, method, params = []) {
-  const response = await fetchImpl(rpcUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  if (!response.ok) throw new Error(`${method} returned HTTP ${response.status}.`);
-  const payload = await response.json();
-  if (payload.error) {
-    throw new Error(`${method} failed: ${payload.error.message ?? JSON.stringify(payload.error)}.`);
+  try {
+    const response = await fetchImpl(rpcUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) throw new RpcFailure(`${method} returned HTTP ${response.status}.`);
+    const payload = await response.json();
+    if (payload?.error || payload?.result === undefined) {
+      throw new RpcFailure(`${method} returned an RPC error or missing result.`);
+    }
+    return payload.result;
+  } catch (error) {
+    if (error instanceof RpcFailure) throw error;
+    // Provider errors may contain URL credentials; retain only the method.
+    throw new RpcFailure(`${method} request failed.`);
   }
-  return payload.result;
 }
 
 export async function checkRuntimeProvenance({
@@ -347,41 +356,58 @@ export async function checkRuntimeProvenance({
 }) {
   const expectedChainId = EXPECTED_CHAIN_IDS[profile];
   if (expectedChainId === undefined) throw new Error(`unknown deployment profile: ${profile}.`);
-  const url = rpcUrl ?? manifest?.rpcUrl;
-  if (typeof url !== "string" || url.length === 0) throw new Error("missing RPC URL.");
+  const urls = rpcUrl !== undefined ? [rpcUrl] : [manifest?.rpcUrl, ...(manifest?.rpcBackupUrls ?? [])];
+  if (urls.some((url) => typeof url !== "string" || url.length === 0)) throw new Error("missing RPC URL.");
+  const hosts = urls.map((url) => new URL(url).hostname);
   const contracts = validateProvenanceManifest(manifest);
+  let lastFailure;
 
-  const chainIdHex = await rpc(fetchImpl, url, "eth_chainId");
-  const chainId = Number(BigInt(chainIdHex));
-  if (chainId !== expectedChainId) {
-    throw new Error(`RPC chainId ${chainId} does not match ${profile} chainId ${expectedChainId}.`);
+  for (const [index, url] of urls.entries()) {
+    try {
+      const chainIdHex = await rpc(fetchImpl, url, "eth_chainId");
+      if (typeof chainIdHex !== "string" || !/^0x[0-9a-f]+$/iu.test(chainIdHex)) {
+        throw new RpcFailure("RPC chainId is malformed.");
+      }
+      const chainId = Number(BigInt(chainIdHex));
+      if (chainId !== expectedChainId) {
+        throw new RpcFailure(`RPC chainId ${chainId} does not match ${profile} chainId ${expectedChainId}.`);
+      }
+
+      const checks = [];
+      const chainCode = new Map();
+      for (const contract of contracts) {
+        const code = await rpc(fetchImpl, url, "eth_getCode", [contract.address, "latest"]);
+        const bytes = hexBytes(code, `eth_getCode(${contract.address})`);
+        const actual = runtimeCodeHash(code);
+        chainCode.set(contract.name, code);
+        const ok = bytes.length > 0 && actual === contract.provenance.runtimeCodeHash;
+        checks.push({
+          name: contract.name,
+          address: contract.address,
+          expected: contract.provenance.runtimeCodeHash,
+          actual,
+          codeBytes: bytes.length,
+          ok,
+        });
+        // An observed mismatch is authoritative, including before a later read.
+        if (!ok) break;
+      }
+
+      return {
+        ok: checks.every((check) => check.ok),
+        profile,
+        rpcUrl: url,
+        rpcHost: hosts[index],
+        chainId,
+        checks,
+        chainCode,
+      };
+    } catch (error) {
+      if (!(error instanceof RpcFailure)) throw error;
+      lastFailure = error;
+    }
   }
-
-  const checks = [];
-  const chainCode = new Map();
-  for (const contract of contracts) {
-    const code = await rpc(fetchImpl, url, "eth_getCode", [contract.address, "latest"]);
-    const bytes = hexBytes(code, `eth_getCode(${contract.address})`);
-    const actual = runtimeCodeHash(code);
-    chainCode.set(contract.name, code);
-    checks.push({
-      name: contract.name,
-      address: contract.address,
-      expected: contract.provenance.runtimeCodeHash,
-      actual,
-      codeBytes: bytes.length,
-      ok: bytes.length > 0 && actual === contract.provenance.runtimeCodeHash,
-    });
-  }
-
-  return {
-    ok: checks.every((check) => check.ok),
-    profile,
-    rpcUrl: url,
-    chainId,
-    checks,
-    chainCode,
-  };
+  throw new Error(`All ${urls.length} RPC endpoints failed. ${lastFailure.message}`);
 }
 
 export function checkArtifactProvenance({ name, artifact, deployedCode, provenance }) {
@@ -484,7 +510,7 @@ async function main() {
     });
     const sourceChecks = [];
 
-    if (args.artifacts) {
+    if (args.artifacts && runtime.ok) {
       for (const contract of validateProvenanceManifest(manifest)) {
         const artifactDefinition = contractArtifactFor(manifest, contract.name);
         if (!artifactDefinition) {
@@ -511,7 +537,7 @@ async function main() {
           {
             ok,
             profile: runtime.profile,
-            rpcUrl: runtime.rpcUrl,
+            rpcHost: runtime.rpcHost,
             chainId: runtime.chainId,
             runtimeChecks: runtime.checks,
             sourceChecks,
@@ -521,7 +547,7 @@ async function main() {
         )
       );
     } else {
-      console.log(`Contract provenance: ${runtime.profile} chainId ${runtime.chainId}`);
+      console.log(`Contract provenance: ${runtime.profile} chainId ${runtime.chainId}; RPC host: ${runtime.rpcHost}`);
       for (const check of runtime.checks) {
         console.log(
           `  [${check.ok ? "ok" : "FAIL"}] ${check.name} ${check.address}: ${check.codeBytes} bytes, ${check.actual}`
