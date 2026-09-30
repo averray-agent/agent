@@ -4,7 +4,7 @@ import test from "node:test";
 import { loadAuthConfig } from "../auth/config.js";
 import { loadBlockchainConfig } from "../blockchain/config.js";
 import { BOOTSTRAP_JOBS } from "./bootstrap-jobs.js";
-import { createCreditPoolDoor, createDepositPoolDoor, createDepositPoolObservability,
+import { loadRateLimitConfig, createCreditPoolDoor, createDepositPoolDoor, createDepositPoolObservability,
   createIdleBalanceConsentService, createEarningsDoor } from "./bootstrap.js";
 import { createIdleBalanceAllocationKeeper } from "./idle-balance-allocation-keeper.js";
 import { generateAll } from "../../../scripts/ops/render-mainnet-backend-env.mjs";
@@ -17,6 +17,21 @@ const POOL_ASSET = "0x0000053900000000000000000000000001200000";
 const CREDIT_POOL = "0x903B318586A3772c99185000676f4AC356DD6E4B";
 const CREDIT_POOL_DEPOSIT_POOL_BINDING = "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30";
 const CANONICAL_DEPOSIT_POOL = "0x9B35A102d656Fb86d798aF81959e09961DEc28E0";
+
+test("MCP request limits have independent defaults and accept configured values", () => {
+  const defaults = loadRateLimitConfig({});
+  assert.deepEqual(defaults.mcpRequests, { limit: 120, windowSeconds: 60 });
+  assert.deepEqual(defaults.mcpAnonymous, { limit: 60, windowSeconds: 60 });
+  assert.deepEqual(defaults.mcpAuthenticated, { limit: 300, windowSeconds: 60 });
+  assert.deepEqual(loadRateLimitConfig({
+    RATE_LIMIT_MCP_REQUESTS_LIMIT: "42",
+    RATE_LIMIT_MCP_REQUESTS_WINDOW_SECONDS: "90"
+  }).mcpRequests, { limit: 42, windowSeconds: 90 });
+  assert.deepEqual(loadRateLimitConfig({
+    RATE_LIMIT_MCP_REQUESTS_LIMIT: "0",
+    RATE_LIMIT_MCP_REQUESTS_WINDOW_SECONDS: "invalid"
+  }).mcpRequests, defaults.mcpRequests);
+});
 
 function cutoverEnv() {
   return { ...Object.fromEntries(generateAll()["deploy/backend.mainnet.env.template"].split("\n")
