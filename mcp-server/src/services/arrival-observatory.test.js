@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 
 import {
@@ -14,6 +15,9 @@ import {
   stageRank
 } from "./arrival-observatory.js";
 import * as arrivalModule from "./arrival-observatory.js";
+import { MemoryStateStore, RedisStateStore } from "../core/state-store.js";
+import { metricPathLabel } from "../protocols/http/http-helpers.js";
+import { MCP_TOOLS } from "../protocols/mcp/tools.js";
 
 function harness({
   failStore = false,
@@ -177,15 +181,15 @@ test("declared clients and anonymous callers are counted apart", async () => {
   assert.equal(snapshot.distinct.anonymous, 1);
 });
 
-// The snapshot is served from a PUBLIC monitor route, so an address must never
-// reach it. Only a salted digest is retained, and only to tell callers apart.
+// Anonymous callers contribute aggregate counts without public client rows.
 test("raw IP addresses are never retained", async () => {
   const { observatory, state } = harness();
   await observatory.recordReach({ ip: "203.0.113.77" });
   const snapshot = await observatory.getSnapshot();
   const serialized = JSON.stringify(snapshot) + JSON.stringify([...state.values()]);
   assert.doesNotMatch(serialized, /203\.0\.113\.77/u);
-  assert.match(snapshot.clients[0].key, /^anon:[0-9a-f]{12}$/u);
+  assert.deepEqual(snapshot.clients, []);
+  assert.match([...observatory.clients.keys()][0], /^anon:[0-9a-f]{12}$/u);
 });
 
 // A self-declared client name is attacker-controlled and unbounded. If it ever
@@ -881,4 +885,142 @@ test("an explicit self mark wins over an ambiguous one", async () => {
   assert.equal(snapshot.funnelExternal.browsed, 0);
   assert.equal(snapshot.clients[0].self, true);
   assert.equal(snapshot.clients[0].ambiguous, false);
+});
+
+
+test("entry tool counters stay within 64 keys and 128 characters", async () => {
+  const observatory = new ArrivalObservatory({ stateStore: new MemoryStateStore() });
+  for (let index = 0; index < 1_000; index += 1) {
+    await observatory.recordTool({ tool: `tool-${randomUUID()}`, clientInfo: CLAUDE });
+  }
+  await observatory.recordTool({ tool: "x".repeat(129), clientInfo: CLAUDE });
+  await observatory.recordTool({ tool: "__proto__", clientInfo: CLAUDE });
+  const tools = (await observatory.getSnapshot()).clients[0].tools;
+  assert.equal(Object.keys(tools).length, 64);
+  assert.ok(Object.keys(tools).every((key) => key.length <= 128));
+  assert.ok(tools.other > 0);
+  assert.equal(Object.values(tools).reduce((sum, count) => sum + count, 0), 1_002);
+});
+
+test("HTTP arrivals retain only metric path labels for 1,000 distinct reads", async () => {
+  const observatory = new ArrivalObservatory({ stateStore: new MemoryStateStore() });
+  const paths = ["/jobs", "/jobs/preflight", "/agents/wallet-a", "/content/hash-a", "/disputes/1/verdict"];
+  for (let index = 0; index < 1_000; index += 1) paths.push(`/request-${randomUUID()}`);
+  for (const pathname of paths) {
+    await observatory.recordHttp({ method: "GET", pathname, clientInfo: CLAUDE });
+  }
+  const snapshot = await observatory.getSnapshot();
+  const tools = snapshot.httpClients[0].tools;
+  assert.deepEqual(new Set(Object.keys(tools)), new Set(paths.map(metricPathLabel)));
+  assert.equal(tools.other, 1_000);
+  assert.equal(snapshot.funnelHttp.browsed, 1);
+  assert.equal(snapshot.funnelHttp.evaluated, 1);
+});
+
+test("public arrival rows omit anonymous keys and IP hash fields while preserving counts", async () => {
+  const stateStore = new MemoryStateStore();
+  await stateStore.upsertServiceState(STATE_SCOPE, {
+    prospectiveCollectionSinceMs: 1_000,
+    clients: [{
+      key: "client:declared@1", name: "declared", version: "1", ipHash: "legacy-hash",
+      furthestStage: "browsed", calls: 2, tools: { listJobs: 2 },
+      attributionSources: { siwe_wallet: 0, client_name: 2, ip_only: 0 }
+    }]
+  });
+  const observatory = new ArrivalObservatory({ stateStore });
+  await observatory.recordReach({ ip: "192.0.2.1" });
+  await observatory.recordHttp({ method: "GET", pathname: "/jobs", ip: "192.0.2.2" });
+  const snapshot = await observatory.getSnapshot();
+  observatory.clients.get("client:declared@1").ipHash = "legacy-hash";
+  const serialized = JSON.stringify(await observatory.getSnapshot());
+  assert.doesNotMatch(serialized, /anon:|"ipHash"/u);
+  assert.equal(snapshot.clients.length, 1);
+  assert.equal(snapshot.httpClients.length, 0);
+  assert.equal(snapshot.distinct.anonymous, 1);
+  assert.equal(snapshot.distinctAgents.total, 3);
+  assert.equal(snapshot.distinctAgents.inferred, 2);
+  assert.equal(snapshot.funnel.reached, 1);
+  assert.equal(snapshot.funnelHttp.browsed, 1);
+});
+
+test("observatories share a persisted random salt on one Redis store", async () => {
+  const values = new Map();
+  const writes = [];
+  const store = new RedisStateStore("redis://unused", "arrival-test");
+  store.connect = async () => {};
+  store.client = {
+    async set(key, value, options) {
+      writes.push({ key, options });
+      if (options?.NX && values.has(key)) return null;
+      values.set(key, value);
+      return "OK";
+    },
+    async get(key) { return values.get(key); }
+  };
+  const first = new ArrivalObservatory({ stateStore: store });
+  const second = new ArrivalObservatory({ stateStore: store });
+  await Promise.all([first.ensureLoaded(), second.ensureLoaded()]);
+  assert.match(first.hashSalt, /^[0-9a-f]{64}$/u);
+  assert.equal(first.hashSalt, second.hashSalt);
+  assert.equal(first.hashIp("192.0.2.1"), second.hashIp("192.0.2.1"));
+  const saltKey = "arrival-test:service-value:arrival-observatory:hash-salt";
+  assert.equal(values.get(saltKey), first.hashSalt);
+  assert.equal(writes.filter(({ key, options }) => key === saltKey && options?.NX === true).length, 2);
+  assert.ok(!JSON.stringify(await first.getSnapshot()).includes(first.hashSalt));
+});
+
+test("an explicit arrival salt takes precedence over the stored value", async () => {
+  const store = new MemoryStateStore();
+  const first = new ArrivalObservatory({ stateStore: store });
+  await first.ensureLoaded();
+  const configured = new ArrivalObservatory({ stateStore: store, hashSalt: "configured-test-salt" });
+  await configured.ensureLoaded();
+  assert.equal(configured.hashSalt, "configured-test-salt");
+  assert.notEqual(first.hashSalt, configured.hashSalt);
+});
+
+test("loaded arrival counters normalize 5,000 stored keys before the next flush", async () => {
+  const store = new MemoryStateStore();
+  const tools = { listJobs: 3 };
+  const paths = { "GET /jobs": 4, "GET /content/entry-one": 2 };
+  for (let index = 0; index < 5_000; index += 1) {
+    tools[`stored-${index}`] = 1;
+    paths[`GET /stored-${index}`] = 1;
+  }
+  const base = { name: "stored", version: "1", calls: 5_003, firstSeenMs: 1, lastSeenMs: 2, furthestStage: "browsed" };
+  await store.upsertServiceState(STATE_SCOPE, {
+    prospectiveCollectionSinceMs: 1_000,
+    clients: [{ ...base, key: "client:stored@1", tools }],
+    httpClients: [{ ...base, key: "client:stored@1", era: "http", tools: paths }]
+  });
+  const observatory = new ArrivalObservatory({ stateStore: store });
+  assert.equal(await observatory.ensureLoaded(), true);
+  await observatory.maybeFlush(true);
+  const stored = await store.getServiceState(STATE_SCOPE);
+  assert.ok(Object.keys(stored.clients[0].tools).length <= 64);
+  assert.ok(Object.keys(stored.httpClients[0].tools).length <= 64);
+  assert.deepEqual(stored.clients[0].tools, { listJobs: 3, unknown_tool: 5_000 });
+  assert.deepEqual(stored.httpClients[0].tools, { "/jobs": 4, "/content/:hash": 2, other: 5_000 });
+});
+
+test("default arrival flushes write dirty state at most once every 30 seconds", async () => {
+  const store = new MemoryStateStore();
+  let nowMs = 100_000;
+  let writes = 0;
+  const upsert = store.upsertServiceState.bind(store);
+  store.upsertServiceState = async (...args) => { writes += 1; return upsert(...args); };
+  const observatory = new ArrivalObservatory({ stateStore: store, now: () => nowMs });
+  await observatory.ensureLoaded();
+  writes = 0;
+  await observatory.recordReach({ clientInfo: CLAUDE });
+  assert.equal(writes, 1);
+  nowMs += 29_999;
+  await observatory.recordReach({ clientInfo: CLAUDE });
+  assert.equal(writes, 1);
+  nowMs += 1;
+  await observatory.maybeFlush();
+  assert.equal(writes, 2);
+  nowMs += 30_000;
+  await observatory.maybeFlush();
+  assert.equal(writes, 2);
 });

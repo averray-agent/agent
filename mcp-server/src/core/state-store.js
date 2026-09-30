@@ -371,6 +371,7 @@ export class MemoryStateStore {
     this.xcmObservations = new Map();
     this.xcmBalanceWatches = new Map();
     this.serviceStates = new Map();
+    this.serviceValues = new Map();
     this.content = new Map();
     this.fundedJobs = new Map();
     this.capabilityGrants = new Map();
@@ -1445,6 +1446,12 @@ export class MemoryStateStore {
       limit,
       offset: 0
     }).map((entry) => cloneJsonRecord(entry));
+  }
+
+  async getOrCreateServiceValue(scope, name, value) {
+    const key = `${scope}:${name}`;
+    if (!this.serviceValues.has(key)) this.serviceValues.set(key, String(value));
+    return this.serviceValues.get(key);
   }
 
   async getServiceState(scope) {
@@ -3094,6 +3101,15 @@ export class RedisStateStore {
   async getXcmBalanceWatchByStorageId(storageId) {
     const raw = await this.client.get(this.key("xcm-balance-watch", String(storageId ?? "")));
     return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async getOrCreateServiceValue(scope, name, value) {
+    await this.connect();
+    const key = this.key("service-value", `${scope}:${name}`);
+    await this.client.set(key, String(value), { NX: true });
+    const stored = await this.client.get(key);
+    if (typeof stored !== "string" || !stored) throw new ExternalServiceError("Service value could not be read.");
+    return stored;
   }
 
   async getServiceState(scope) {

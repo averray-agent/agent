@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createArrivalRoutes } from "./arrival-routes.js";
+import { respond } from "./http-helpers.js";
 
 test("GET /monitor/arrivals serves the funnel without a session", async () => {
   const calls = [];
@@ -62,4 +63,58 @@ test("POST /admin/arrivals/canary-marker mints an admin-authorized wallet-bound 
     wallet: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     expiresAt: "2030-01-01T00:00:00.000Z"
   }, { "cache-control": "no-store" }]);
+});
+
+
+test("arrival reads share one compact snapshot for 10 seconds", async () => {
+  let nowMs = 1_000;
+  let builds = 0;
+  const route = createArrivalRoutes({
+    respond,
+    now: () => nowMs,
+    arrivalObservatory: {
+      async getSnapshot() {
+        builds += 1;
+        await Promise.resolve();
+        return { schemaVersion: "averray.arrivals.v1", funnel: { reached: builds } };
+      }
+    }
+  });
+  const read = async () => {
+    let body;
+    const response = { writeHead() {}, end(value) { body = value; } };
+    await route({ request: { method: "GET" }, response, pathname: "/monitor/arrivals" });
+    return body;
+  };
+  const [first, second] = await Promise.all([read(), read()]);
+  assert.equal(builds, 1);
+  assert.equal(first, second);
+  assert.equal(first, '{"schemaVersion":"averray.arrivals.v1","funnel":{"reached":1}}');
+  assert.doesNotMatch(first, /\n|  /u);
+  nowMs += 9_999;
+  assert.equal(await read(), first);
+  assert.equal(builds, 1);
+  nowMs += 1;
+  const [third, fourth] = await Promise.all([read(), read()]);
+  assert.equal(builds, 2);
+  assert.equal(third, fourth);
+  assert.equal(JSON.parse(third).funnel.reached, 2);
+});
+
+test("a failed arrival snapshot build can be retried", async () => {
+  let builds = 0;
+  const route = createArrivalRoutes({
+    respond: () => {},
+    arrivalObservatory: {
+      async getSnapshot() {
+        builds += 1;
+        if (builds === 1) throw new Error("snapshot unavailable");
+        return { funnel: { reached: 1 } };
+      }
+    }
+  });
+  const request = { request: { method: "GET" }, response: {}, pathname: "/monitor/arrivals" };
+  await assert.rejects(route(request), /snapshot unavailable/u);
+  assert.equal(await route(request), true);
+  assert.equal(builds, 2);
 });

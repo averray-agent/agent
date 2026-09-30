@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { randomUUID } from "node:crypto";
+import { ArrivalObservatory } from "../../services/arrival-observatory.js";
+import { MemoryStateStore } from "../../core/state-store.js";
+import { MCP_TOOLS } from "./tools.js";
 
 import { AuthenticationError } from "../../core/errors.js";
 import { respond } from "../http/http-helpers.js";
@@ -570,4 +574,22 @@ test("authenticated MCP calls link the wallet stamped by auth middleware before 
     wallet,
     clientInfo: { name: "modern-test", version: "1.0.0" }
   }]);
+});
+
+
+test("1,000 unregistered tool calls record only the unknown tool label", async () => {
+  const arrivals = new ArrivalObservatory({ stateStore: new MemoryStateStore() });
+  const { handler } = createHarness({ arrivals });
+  for (let index = 0; index < 1_000; index += 1) {
+    const name = `tool-${randomUUID()}`;
+    const result = await call(handler, modernRequest("tools/call", { name, arguments: {} }), modernHeaders("tools/call", name));
+    assert.equal(result.statusCode, 400);
+  }
+  await call(handler, modernRequest("tools/call", { name: "listJobs", arguments: {} }), modernHeaders("tools/call", "listJobs"));
+  const snapshot = await arrivals.getSnapshot();
+  const tools = snapshot.clients[0].tools;
+  const registeredNames = new Set(MCP_TOOLS.map(({ name }) => name));
+  assert.ok(Object.keys(tools).length <= 64);
+  assert.ok(Object.keys(tools).every((name) => registeredNames.has(name) || name === "unknown_tool" || name === "other"));
+  assert.deepEqual(tools, { unknown_tool: 1_000, listJobs: 1 });
 });

@@ -2,8 +2,8 @@
  * GET /monitor/arrivals — what has reached the MCP front door.
  *
  * Public, following /monitor/bank-feed. That is the reason the observatory
- * hashes IP addresses rather than storing them: everything here is
- * world-readable, so it holds only self-declared client identity and counts.
+ * keeps anonymous activity in aggregate counts only, alongside declared
+ * client identity and measured wallet rows.
  *
  * The ops monitor polls this to render the arrival funnel.
  */
@@ -14,8 +14,22 @@ export function createArrivalRoutes({
   authMiddleware,
   enforceLimit,
   rateLimitConfig,
-  readJsonBody
+  readJsonBody,
+  now = () => Date.now()
 }) {
+  let cachedSnapshot;
+  let cachedUntilMs = 0;
+  let snapshotPromise;
+  const getPublicSnapshot = async () => {
+    if (cachedSnapshot && now() < cachedUntilMs) return cachedSnapshot;
+    snapshotPromise ??= Promise.resolve().then(async () => {
+      const snapshot = await arrivalObservatory.getSnapshot();
+      cachedSnapshot = snapshot;
+      cachedUntilMs = now() + 10_000;
+      return snapshot;
+    }).finally(() => { snapshotPromise = undefined; });
+    return snapshotPromise;
+  };
   return async function handleArrivalRoute({ request, response, url, pathname }) {
     if (request.method === "POST" && pathname === "/admin/arrivals/canary-marker") {
       const auth = await authMiddleware(request, url, { requireRole: "admin" });
@@ -28,9 +42,9 @@ export function createArrivalRoutes({
 
     if (request.method !== "GET" || pathname !== "/monitor/arrivals") return false;
 
-    respond(response, 200, await arrivalObservatory.getSnapshot(), {
+    respond(response, 200, await getPublicSnapshot(), {
       "cache-control": "public, max-age=10"
-    });
+    }, { compact: true });
     return true;
   };
 }

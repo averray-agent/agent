@@ -926,7 +926,7 @@ const arrivalObservatory = new ArrivalObservatory({
   platformService: service,
   metrics,
   identityRegistry: selfIdentityRegistry,
-  hashSalt: process.env.ARRIVAL_HASH_SALT || process.env.AUTH_JWT_SECRETS || "averray-arrivals",
+  hashSalt: process.env.ARRIVAL_HASH_SALT,
   verifyCanaryMarker: arrivalCanaryMarkers.verify
 });
 
