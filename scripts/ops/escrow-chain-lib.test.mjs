@@ -82,15 +82,13 @@ test("arbitration chain confirms closed state and reads the SLA on both escrows"
   assert.ok(invalid.failureCount > 0);
 });
 test("arbitration chain reads both providers and gives a confirmed closed state precedence", async () => {
-  const f = fixture();
-  const base = f.read;
-  f.read = (url, method, params) => url === manifest.rpcUrl && method === "eth_call" && params[0].data.startsWith(JOBS_SELECTOR)
-    ? encoded(6) : base(url, method, params);
-  const result = await readArbitrationChain(manifest, f);
-  assert.equal(result.jobs.length, 0);
-  assert.equal(result.closed.length, 1);
-  assert.equal(result.unknown, false);
-  assert.equal(result.parityWarnings[0].kind, "state_parity");
+  for (const states of [[5, 6], [6, 5], [5, 7], [7, 5]]) {
+    const result = await readArbitrationChain(manifest, stateReadFixture(...states));
+    assert.equal(result.jobs.length, 0);
+    assert.equal(result.closed.length, 1);
+    assert.equal(result.unknown, false);
+    assert.equal(result.parityWarnings[0].kind, "state_parity");
+  }
 });
 
 test("arbitration chain sends unknown status when a listed job cannot be read from either provider", async () => {
@@ -108,7 +106,7 @@ test("arbitration chain sends unknown status when a listed job cannot be read fr
   };
   const chain = await readArbitrationChain(manifest, f);
   assert.equal(chain.unknown, true);
-  assert.equal(chain.failureCount, 2);
+  assert.equal(chain.failureCount, 3);
   assert.equal(chain.jobs.length, 1);
   const pushes = [];
   await runReminders({ chain, now: Date.parse("2026-01-13T01:00:00Z") / 1000,
@@ -118,8 +116,8 @@ test("arbitration chain sends unknown status when a listed job cannot be read fr
   assert.match(pushes[0].body, /Deadline status unknown: chain read failed/);
 });
 
-test("arbitration chain removes non-disputed jobs with one successful provider read", async () => {
-  for (const state of [0, 1, 2, 3, 4, 6, 7]) {
+test("arbitration chain removes final jobs with one successful provider read", async () => {
+  for (const state of [6, 7]) {
     const f = fixture({ state });
     const base = f.read;
     f.read = (url, method, params) => {
@@ -141,3 +139,55 @@ test("arbitration chain removes non-disputed jobs with one successful provider r
     assert.deepEqual(result.state, {});
   }
 });
+
+function stateReadFixture(primaryState, backupState) {
+  const f = fixture();
+  const base = f.read;
+  f.read = (url, method, params) => {
+    if (method === "eth_call" && params[0].data.startsWith(JOBS_SELECTOR)) {
+      const state = url === manifest.rpcUrl ? primaryState : backupState;
+      if (state === "unavailable") throw new Error("job read unavailable");
+      return encoded(state);
+    }
+    return base(url, method, params);
+  };
+  return f;
+}
+
+for (const state of [1, 2, 3, 4]) {
+  test(`arbitration chain keeps state 5 open beside state ${state}`, async () => {
+    for (const states of [[5, state], [state, 5]]) {
+      const chain = await readArbitrationChain(manifest, stateReadFixture(...states));
+      assert.equal(chain.jobs.length, 1);
+      assert.equal(chain.closed.length, 0);
+      assert.equal(chain.unknown, false);
+      assert.equal(chain.failureCount, 0);
+      assert.equal(chain.parityWarnings.length, 1);
+      assert.equal(chain.parityWarnings[0].kind, "state_parity");
+    }
+  });
+}
+
+test("arbitration chain keeps state 5 open beside an unavailable provider", async () => {
+  const chain = await readArbitrationChain(manifest, stateReadFixture(5, "unavailable"));
+  assert.equal(chain.jobs.length, 1);
+  assert.equal(chain.closed.length, 0);
+  assert.equal(chain.unknown, false);
+  assert.equal(chain.failureCount, 1);
+});
+
+for (const states of [[4, "unavailable"], [4, 4], [0, 0], [1, 2], [3, 4]]) {
+  test(`arbitration chain reports states ${states.join(" and ")} as unknown`, async () => {
+    const chain = await readArbitrationChain(manifest, stateReadFixture(...states));
+    assert.equal(chain.jobs.length, 0);
+    assert.equal(chain.closed.length, 0);
+    assert.equal(chain.unknown, true);
+    assert.equal(chain.failureCount, states.includes("unavailable") ? 2 : 1);
+    const pushes = [];
+    await runReminders({ chain, now: Date.parse("2026-01-13T01:00:00Z") / 1000,
+      deliver: async (push) => pushes.push(push) });
+    assert.equal(pushes.length, 1);
+    assert.equal(pushes[0].priority, 5);
+    assert.match(pushes[0].body, /Deadline status unknown: chain read failed/);
+  });
+}

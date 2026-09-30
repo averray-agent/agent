@@ -91,13 +91,14 @@ export async function readArbitrationChain(manifest, { read = rpcRead } = {}) {
     ]))));
     const values = reads.filter((result) => result.status === "fulfilled").map((result) => result.value);
     failureCount += reads.length - values.length;
-    if (values.length === 0) { unknown = true; return; }
     const open = values.filter(({ state }) => state === 5);
-    if (open.length < values.length) {
+    if (values.some(({ state }) => state === 6 || state === 7)) {
       if (open.length) parityWarnings.push({ ...candidate, kind: "state_parity" });
       closed.push(candidate);
       return;
     }
+    if (!open.length) { unknown = true; failureCount++; return; }
+    if (values.some(({ state }) => state >= 1 && state <= 4)) parityWarnings.push({ ...candidate, kind: "state_parity" });
     if (open.some(({ disputedAt }) => disputedAt === 0)) { unknown = true; failureCount++; return; }
     jobs.push({ ...candidate, disputedAt: Math.min(...open.map(({ disputedAt }) => disputedAt)) });
   }));
