@@ -87,6 +87,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Open or update the incident issue
+        id: incident_open
         if: inputs.drill != true && steps.probe.outputs.failing == 'yes'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -98,12 +99,17 @@ jobs:
             --search "\"$ISSUE_TITLE\" in:title" --json number --jq '.[0].number // empty')"
           body="$(printf 'Public surfaces did not respond from GitHub-hosted runners (off-VPS).\n\n%s\nRun: %s\n\nThe VPS hosts the API, operator app, site, and Hermes — so an unreachable host means the internal board cannot report this. Check the OVH panel for server state and their status page for a regional incident.\n' "$DETAIL" "$RUN_URL")"
           if [ -n "$existing" ]; then
+            echo "number=$existing" >> "$GITHUB_OUTPUT"
             gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
           else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body "$body"
+            created="$(gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body "$body")"
+            existing="${created##*/}"
+            [[ "$existing" =~ ^[0-9]+$ ]]
+            echo "number=$existing" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Close the incident issue on recovery
+        id: incident_close
         if: inputs.drill != true && steps.probe.outputs.failing == 'no'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -113,6 +119,7 @@ jobs:
           existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
             --search "\"$ISSUE_TITLE\" in:title" --json number --jq '.[0].number // empty')"
           if [ -n "$existing" ]; then
+            echo "number=$existing" >> "$GITHUB_OUTPUT"
             gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" \
               --body "All public surfaces responding again. Recovery observed at $RUN_URL"
             gh issue close "$existing" --repo "$GITHUB_REPOSITORY"
@@ -122,9 +129,13 @@ jobs:
         if: always() && inputs.drill != true && steps.probe.outputs.failing == 'yes'
         env:
           GH_TOKEN: ${{ github.token }}
+          INCIDENT_NUMBER: ${{ steps.incident_open.outputs.number }}
         run: |
-          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
-            --search "\"$ISSUE_TITLE\" in:title" --json number --jq '.[0].number // empty')"
+          existing="$INCIDENT_NUMBER"
+          if [ -z "$existing" ]; then
+            existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+              --search "\"$ISSUE_TITLE\" in:title" --json number --jq '.[0].number // empty')"
+          fi
           if [ -n "$existing" ]; then
             gh issue edit "$existing" --repo "$GITHUB_REPOSITORY" --add-assignee depre-dev || echo "::warning::assign failed"
           fi
@@ -137,6 +148,7 @@ jobs:
           PHONE_PUSH_URL: ${{ secrets.PHONE_PUSH_URL }}
           DRILL: ${{ inputs.drill || false }}
           FAILING: ${{ steps.probe.outputs.failing }}
+          INCIDENT_NUMBER: ${{ steps.incident_open.outputs.number || steps.incident_close.outputs.number }}
           SINCE: ${{ steps.observation.outputs.since }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -147,8 +159,13 @@ jobs:
             printf 'On your Mac: [DRILL] all-clear. Public surfaces answering HTTP 200 again (not a health verdict).\n' | bash scripts/ops/phone-push.sh "[DRILL] all-clear" 3 white_check_mark "$RUN_URL"
             exit 0
           fi
-          number="$(gh issue list --repo "$GITHUB_REPOSITORY" --state all \
-            --search "\"$ISSUE_TITLE\" in:title" --json number --jq '.[0].number // empty')"
+          number="$INCIDENT_NUMBER"
+          if [ -z "$number" ]; then
+            state="closed"
+            if [ "$FAILING" = "yes" ]; then state="open"; fi
+            number="$(gh issue list --repo "$GITHUB_REPOSITORY" --state "$state" \
+              --search "\"$ISSUE_TITLE\" in:title" --json number --jq 'sort_by(.number) | last | .number // empty')"
+          fi
           if [ -z "$number" ]; then
             if [ "$FAILING" = "yes" ]; then
               printf 'On your Mac: public endpoint checks failed. Check the workflow run.\n' | bash scripts/ops/phone-push.sh "Averray public checks" 5 warning "$RUN_URL"
