@@ -51,7 +51,8 @@ test("watchdog keeps issue handling separate from always-run phone delivery", ()
   assert.match(open + close, /inputs\.drill != true/g);
   assert.match(page, /\[DRILL\] page/);
   assert.match(page, /\[DRILL\] all-clear/);
-  const drill = page.slice(page.indexOf('if [ "$DRILL" = "true" ]'), page.indexOf("exit 0"));
+  const drill = page.slice(page.indexOf('if [ "$DRILL" = "true" ]'), page.indexOf('number="'));
+  assert.match(drill, /\[DRILL\] page/);
   assert.doesNotMatch(drill, /gh issue/);
   assert.match(workflow, /workflow_dispatch:\n    inputs:\n      drill:/);
   assert.match(workflow, /best-effort/);
