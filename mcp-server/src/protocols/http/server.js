@@ -875,12 +875,15 @@ const handlePublicMetadataRoute = createPublicMetadataRoutes({
 });
 
 const handleContentRoute = createContentRoutes({
+  appendContentRecord: (record) => contentRecoveryLog?.append?.(record),
   authMiddleware,
-  gateway,
+  enforceLimit,
+  escrowAddress: gateway.config.escrowCoreAddress,
   hasRole,
-  logger,
+  metrics,
   persistContentRecord,
   publicBaseUrl: process.env.PUBLIC_BASE_URL,
+  rateLimitConfig,
   readJsonBody,
   respond,
   stateStore,

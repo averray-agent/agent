@@ -1,4 +1,4 @@
-import { AuthenticationError, AuthorizationError } from "../../core/errors.js";
+import { AppError, AuthenticationError, AuthorizationError, ConflictError } from "../../core/errors.js";
 import { publicContentUri as buildPublicContentUri } from "../../core/dispute-resolution.js";
 import {
   assertContentHashMatches,
@@ -9,16 +9,21 @@ import {
   publicContentHeaders,
   requireContentAccess,
   resolveContentAccess,
-  shouldAutoDiscloseContent,
 } from "../../core/content-addressed-store.js";
 
+const CONTENT_QUOTA_BYTES = 1024 * 1024;
+const CONTENT_QUOTA_WINDOW_SECONDS = 24 * 60 * 60;
+
 export function createContentRoutes({
+  appendContentRecord,
   authMiddleware,
-  gateway,
+  enforceLimit,
+  escrowAddress = "",
   hasRole,
-  logger,
+  metrics,
   persistContentRecord,
   publicBaseUrl,
+  rateLimitConfig,
   readJsonBody,
   respond,
   stateStore,
@@ -39,40 +44,30 @@ export function createContentRoutes({
     return buildPublicContentUri(hash, { publicBaseUrl });
   }
 
-  async function emitDisclosureEvent(hash, byWallet) {
-    if (!gateway?.isEnabled?.() || typeof gateway.discloseContent !== "function") {
-      return { emitted: false, reason: "blockchain_disabled" };
-    }
-    try {
-      return { emitted: true, ...(await gateway.discloseContent(hash, byWallet)) };
-    } catch (error) {
-      logger.warn?.({ err: error, hash, byWallet }, "content.disclosure_event_failed");
-      return { emitted: false, reason: "chain_write_failed", error: error?.message ?? "unknown_error" };
-    }
+  function countWrite(outcome) {
+    metrics?.counter("content_writes_total", "Content write outcomes", ["outcome"]).inc({ outcome });
   }
 
-  async function maybeEmitAutoDisclosureEvent(record, { now = new Date() } = {}) {
-    if (!shouldAutoDiscloseContent(record, { now })) {
-      return { emitted: false, reason: "not_auto_public" };
+  function respondExisting(response, existing, auth) {
+    countWrite("exists");
+    if (!walletsMatch(existing.ownerWallet, auth.wallet)) {
+      throw new ConflictError("Content already exists.", "content_exists");
     }
-    if (!gateway?.isEnabled?.() || typeof gateway.autoDiscloseContent !== "function") {
-      return { emitted: false, reason: "blockchain_disabled" };
-    }
-    try {
-      const result = await gateway.autoDiscloseContent(record.hash);
-      return {
-        emitted: !result?.skipped,
-        ...result
-      };
-    } catch (error) {
-      logger.warn?.({ err: error, hash: record.hash }, "content.auto_disclosure_event_failed");
-      return { emitted: false, reason: "chain_write_failed", error: error?.message ?? "unknown_error" };
-    }
+    respond(response, 200, {
+      ...contentResponse(existing, resolveContentAccess(existing, auth)),
+      contentURI: publicContentUri(existing.hash)
+    });
   }
 
   return async function handleContentRoute({ request, response, url, pathname }) {
     if (request.method === "POST" && pathname === "/content") {
       const auth = await authMiddleware(request, url);
+      try {
+        await enforceLimit("content_writes", auth.wallet, rateLimitConfig.contentWrites);
+      } catch (error) {
+        if (error?.code === "rate_limited") countWrite("rate_limited");
+        throw error;
+      }
       const payload = await readJsonBody(request);
       const ownerWallet = typeof payload?.ownerWallet === "string" && payload.ownerWallet.trim()
         ? payload.ownerWallet.trim()
@@ -91,7 +86,35 @@ export function createContentRoutes({
       if (payload?.hash !== undefined) {
         assertContentHashMatches({ hash: payload.hash, payload: payload.payload });
       }
-      await persistContentRecord(record);
+      const existing = await stateStore.getContent(record.hash);
+      if (existing) {
+        respondExisting(response, existing, auth);
+        return true;
+      }
+      if (!hasRole(auth.claims, "admin")) {
+        const quota = await stateStore.consumeWalletQuota(
+          "content_bytes", auth.wallet, Buffer.byteLength(JSON.stringify(record)), CONTENT_QUOTA_WINDOW_SECONDS
+        );
+        if (quota.usedBytes > CONTENT_QUOTA_BYTES) {
+          countWrite("quota_exceeded");
+          throw new AppError("Content byte quota exceeded. Retry after the window resets.", {
+            code: "content_quota_exceeded",
+            statusCode: 429,
+            details: {
+              limitBytes: CONTENT_QUOTA_BYTES,
+              resetAt: new Date(quota.resetAt).toISOString(),
+              retryAfterSeconds: Math.max(1, Math.ceil((quota.resetAt - Date.now()) / 1000))
+            }
+          });
+        }
+      }
+      const result = await stateStore.createContentIfAbsent(record);
+      if (!result.created) {
+        respondExisting(response, result.record, auth);
+        return true;
+      }
+      await appendContentRecord?.(record);
+      countWrite("created");
       const access = resolveContentAccess(record, auth);
       respond(response, 201, {
         ...contentResponse(record, access),
@@ -111,12 +134,11 @@ export function createContentRoutes({
       if (!walletsMatch(record.ownerWallet, auth.wallet) && !hasRole(auth.claims, "admin")) {
         throw new AuthorizationError("Only the owner wallet or an admin can publish this content.", "content_publish_forbidden");
       }
-      const wasPublished = Boolean(record.publishedAt);
       const published = publishContentRecord(record);
       await persistContentRecord(published);
-      const disclosureEvent = wasPublished
-        ? { emitted: false, reason: "already_published" }
-        : await emitDisclosureEvent(published.hash, auth.wallet);
+      const disclosureEvent = {
+        emitted: false, reason: "self_disclosure", contract: escrowAddress, method: "disclose(bytes32)"
+      };
       const access = resolveContentAccess(published, auth);
       respond(response, 200, {
         ...contentResponse(published, access),
@@ -135,9 +157,7 @@ export function createContentRoutes({
       }
       const auth = await optionalAuth(request, url);
       const access = requireContentAccess(record, auth);
-      const autoDisclosureEvent = access.public
-        ? await maybeEmitAutoDisclosureEvent(record)
-        : { emitted: false, reason: "private" };
+      const autoDisclosureEvent = { emitted: false, reason: "reads_never_write" };
       respond(response, 200, {
         ...contentResponse(record, access),
         autoDisclosureEvent

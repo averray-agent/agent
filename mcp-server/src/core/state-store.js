@@ -142,6 +142,18 @@ local ttl = redis.call("pttl", KEYS[1])
 return {current, ttl}
 `;
 
+const CONSUME_WALLET_QUOTA_SCRIPT = `
+local used = redis.call("incrby", KEYS[1], ARGV[1])
+redis.call("expire", KEYS[1], ARGV[2], "NX")
+return {used, redis.call("ttl", KEYS[1])}
+`;
+
+function validateWalletQuota(amount, windowSeconds) {
+  if (!Number.isSafeInteger(amount) || amount < 0 || !Number.isSafeInteger(windowSeconds) || windowSeconds <= 0) {
+    throw new ValidationError("Wallet quota requires non-negative integer bytes and a positive integer window.");
+  }
+}
+
 // The approved receipt dominates every other final outcome for a job. Within
 // the same outcome class, the most recent final receipt wins. Keeping this
 // comparison in Redis makes concurrent receipt writers deterministic.
@@ -353,6 +365,7 @@ export class MemoryStateStore {
     this.claimLocks = new Map();
     this.nonces = new Map();
     this.rateLimits = new Map();
+    this.walletQuotas = new Map();
     this.dailyBudgets = new Map();
     this.mutationReceipts = new Map();
     this.xcmObservations = new Map();
@@ -884,6 +897,19 @@ export class MemoryStateStore {
     };
   }
 
+  async consumeWalletQuota(bucket, wallet, amount, windowSeconds) {
+    validateWalletQuota(amount, windowSeconds);
+    const key = `${bucket}:${normalizeWalletKey(wallet)}`;
+    const now = Date.now();
+    for (const [expiredKey, entry] of this.walletQuotas) {
+      if (entry.resetAt <= now) this.walletQuotas.delete(expiredKey);
+    }
+    const entry = this.walletQuotas.get(key) ?? { usedBytes: 0, resetAt: now + windowSeconds * 1000 };
+    entry.usedBytes += amount;
+    this.walletQuotas.set(key, entry);
+    return { ...entry };
+  }
+
   async getMutationReceipt(bucket, key) {
     return this.mutationReceipts.get(`${bucket}:${key}`);
   }
@@ -1047,6 +1073,15 @@ export class MemoryStateStore {
     const key = normalizeContentHash(record?.hash);
     this.content.set(key, record);
     return record;
+  }
+
+  async createContentIfAbsent(record) {
+    const key = normalizeContentHash(record?.hash);
+    if (this.content.has(key)) {
+      return { created: false, record: cloneJsonRecord(this.content.get(key)) };
+    }
+    this.content.set(key, cloneJsonRecord(record));
+    return { created: true, record: cloneJsonRecord(record) };
   }
 
   async listLockedTierEntries(wallet = undefined) {
@@ -2123,6 +2158,17 @@ export class RedisStateStore {
     };
   }
 
+  async consumeWalletQuota(bucket, wallet, amount, windowSeconds) {
+    validateWalletQuota(amount, windowSeconds);
+    await this.connect();
+    const reply = await this.client.eval(CONSUME_WALLET_QUOTA_SCRIPT, {
+      keys: [this.key(`quota:${bucket}`, normalizeWalletKey(wallet))],
+      arguments: [String(amount), String(windowSeconds)]
+    });
+    const [usedBytes, ttlSeconds] = reply.map(Number);
+    return { usedBytes, resetAt: Date.now() + Math.max(0, ttlSeconds) * 1000 };
+  }
+
   async getMutationReceipt(bucket, key) {
     await this.connect();
     const raw = await this.client.get(this.key("mutation-receipt", `${bucket}:${key}`));
@@ -2402,6 +2448,15 @@ export class RedisStateStore {
     const key = normalizeContentHash(record?.hash);
     await this.client.set(this.key("content", key), JSON.stringify(record));
     return record;
+  }
+
+  async createContentIfAbsent(record) {
+    await this.connect();
+    const key = this.key("content", normalizeContentHash(record?.hash));
+    const created = await this.client.set(key, JSON.stringify(record), { NX: true });
+    if (created) return { created: true, record };
+    const existing = await this.client.get(key);
+    return { created: false, record: JSON.parse(existing) };
   }
 
   async listLockedTierEntries(wallet = undefined) {

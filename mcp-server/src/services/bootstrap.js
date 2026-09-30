@@ -1430,7 +1430,7 @@ export function assertSafeAuthBrokeringPosture({ authConfig, gateway, env = proc
   );
 }
 
-function loadRateLimitConfig(env = process.env) {
+export function loadRateLimitConfig(env = process.env) {
   return {
     authNonce: buildLimit(env, "RATE_LIMIT_AUTH_NONCE", { limit: 10, windowSeconds: 60 }),
     authVerify: buildLimit(env, "RATE_LIMIT_AUTH_VERIFY", { limit: 10, windowSeconds: 60 }),
@@ -1453,6 +1453,7 @@ function loadRateLimitConfig(env = process.env) {
     // noisy review UI cannot exhaust the poster's draft-creation allowance.
     externalReviews: buildLimit(env, "RATE_LIMIT_EXTERNAL_REVIEWS", { limit: 30, windowSeconds: 60 }),
     verifierRun: buildLimit(env, "RATE_LIMIT_VERIFIER_RUN", { limit: 120, windowSeconds: 60 }),
+    contentWrites: buildLimit(env, "RATE_LIMIT_CONTENT_WRITES", { limit: 30, windowSeconds: 3600 }),
     events: buildLimit(env, "RATE_LIMIT_EVENTS", { limit: 30, windowSeconds: 60 })
   };
 }

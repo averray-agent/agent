@@ -1528,14 +1528,14 @@ test("http smoke: /disputes exposes human-review sessions and records verdict/re
     assert.equal(published.status, 200);
     const publishedBody = await published.json();
     assert.equal(publishedBody.visibility, "public");
-    assert.deepEqual(publishedBody.disclosureEvent, { emitted: false, reason: "blockchain_disabled" });
+    assert.deepEqual(publishedBody.disclosureEvent, { emitted: false, reason: "self_disclosure", contract: "", method: "disclose(bytes32)" });
     assert.match(publishedBody.publishedAt, /^\d{4}-\d{2}-\d{2}T/u);
 
     const publicContent = await fetch(`${base}/content/${encodeURIComponent(verdictBody.reasoningHash)}`);
     assert.equal(publicContent.status, 200);
     const publicContentBody = await publicContent.json();
     assert.equal(publicContentBody.visibility, "public");
-    assert.deepEqual(publicContentBody.autoDisclosureEvent, { emitted: false, reason: "not_auto_public" });
+    assert.deepEqual(publicContentBody.autoDisclosureEvent, { emitted: false, reason: "reads_never_write" });
 
     const release = await fetch(`${base}/disputes/${encodeURIComponent(dispute.id)}/release`, {
       method: "POST",
