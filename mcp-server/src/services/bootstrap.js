@@ -1444,6 +1444,7 @@ export function loadRateLimitConfig(env = process.env) {
     // tokens are charged to the anonymous/IP bucket so they cannot bypass it.
     mcpAnonymous: buildLimit(env, "RATE_LIMIT_MCP_ANONYMOUS", { limit: 60, windowSeconds: 60 }),
     mcpAuthenticated: buildLimit(env, "RATE_LIMIT_MCP_AUTHENTICATED", { limit: 300, windowSeconds: 60 }),
+    mcpRequests: buildLimit(env, "RATE_LIMIT_MCP_REQUESTS", { limit: 120, windowSeconds: 60 }),
     adminJobs: buildLimit(env, "RATE_LIMIT_ADMIN_JOBS", { limit: 60, windowSeconds: 60 }),
     // Draft validation does schema + policy work per request; the open-draft
     // cap and reward floor only bound stored state, so create + status-poll

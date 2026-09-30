@@ -95,6 +95,8 @@ const HEADER_MISMATCH = -32020;
 const UNSUPPORTED_PROTOCOL_VERSION = -32022;
 const TOOL_LIST_TTL_MS = 300_000;
 const DEFAULT_LEGACY_SESSION_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_LEGACY_SESSION_MAX = 5_000;
+const DEFAULT_MCP_REQUEST_LIMIT = Object.freeze({ limit: 120, windowSeconds: 60 });
 
 export class UnsupportedProtocolVersionError extends Error {
   constructor(requested, supported = SUPPORTED_MCP_VERSIONS) {
@@ -127,7 +129,11 @@ export function createMcpRoute({
   clientIp,
   enforceLimit,
   executeTool,
+  legacySessionMax = DEFAULT_LEGACY_SESSION_MAX,
   legacySessionTtlMs = DEFAULT_LEGACY_SESSION_TTL_MS,
+  legacySessions = new Map(),
+  logger,
+  metrics,
   now = () => Date.now(),
   randomUUIDImpl = randomUUID,
   rateLimitConfig,
@@ -136,7 +142,14 @@ export function createMcpRoute({
   serverInfo = MCP_SERVER_INFO,
   tools = MCP_TOOLS
 }) {
-  const legacySessions = new Map();
+  if (!Number.isSafeInteger(legacySessionMax) || legacySessionMax <= 0) {
+    throw new RangeError("legacySessionMax must be a positive safe integer.");
+  }
+  const sessionGauge = metrics?.gauge("mcp_legacy_sessions", "Retained legacy MCP sessions.");
+  const sessionEvictions = metrics?.counter("mcp_legacy_sessions_evicted_total", "Legacy MCP sessions evicted at capacity.");
+  const toolCalls = metrics?.counter("mcp_tool_calls_total", "MCP tool call outcomes.", ["tool", "outcome"]);
+  sessionGauge?.set({}, legacySessions.size);
+  sessionEvictions?.inc({}, 0);
 
   return async function handleMcpRoute({ request, response, pathname }) {
     if ((request.method === "GET" || request.method === "HEAD") && pathname === "/mcp") {
@@ -173,8 +186,13 @@ export function createMcpRoute({
       return true;
     }
 
+    if (message.method === "initialize" || !hasBearerToken(request)) {
+      await enforceLimit("mcp_requests_anonymous", clientIp(request), rateLimitConfig?.mcpRequests ?? DEFAULT_MCP_REQUEST_LIMIT);
+    }
+
     if (message.method === "initialize") {
       handleLegacyInitialize({
+        legacySessionMax,
         legacySessions,
         legacySessionTtlMs,
         message,
@@ -183,6 +201,8 @@ export function createMcpRoute({
         request,
         respond,
         response,
+        sessionEvictions,
+        sessionGauge,
         serverInfo
       });
       // A legacy handshake never reaches dispatchRequest, so it is recorded
@@ -205,6 +225,7 @@ export function createMcpRoute({
         clientIp,
         enforceLimit,
         executeTool,
+        logger,
         message,
         meta,
         rateLimitConfig,
@@ -212,6 +233,7 @@ export function createMcpRoute({
         respond,
         response,
         serverInfo,
+        toolCalls,
         tools
       });
       return true;
@@ -225,13 +247,16 @@ export function createMcpRoute({
         enforceLimit,
         executeTool,
         legacySessions,
+        logger,
         message,
         now,
         rateLimitConfig,
         request,
         respond,
         response,
+        sessionGauge,
         serverInfo,
+        toolCalls,
         tools
       });
       return true;
@@ -262,6 +287,7 @@ export function createMcpRoute({
 }
 
 function handleLegacyInitialize({
+  legacySessionMax,
   legacySessions,
   legacySessionTtlMs,
   message,
@@ -270,6 +296,8 @@ function handleLegacyInitialize({
   request,
   respond,
   response,
+  sessionEvictions,
+  sessionGauge,
   serverInfo
 }) {
   const requested = message.params?.protocolVersion;
@@ -296,14 +324,22 @@ function handleLegacyInitialize({
 
   pruneExpiredSessions(legacySessions, now());
   const sessionId = randomUUIDImpl();
+  while (legacySessions.size >= legacySessionMax) {
+    legacySessions.delete(legacySessions.keys().next().value);
+    sessionEvictions?.inc();
+  }
   legacySessions.set(sessionId, {
-    clientCapabilities: message.params.capabilities,
-    clientInfo: message.params.clientInfo,
+    clientCapabilities: {},
+    clientInfo: {
+      name: message.params.clientInfo.name.slice(0, 128),
+      version: message.params.clientInfo.version.slice(0, 128)
+    },
     expiresAt: now() + legacySessionTtlMs,
     initialized: false,
     protocolVersion: LEGACY_MCP_VERSION,
     ttlMs: legacySessionTtlMs
   });
+  sessionGauge?.set({}, legacySessions.size);
   sendResult(response, respond, 200, message.id, {
     protocolVersion: LEGACY_MCP_VERSION,
     capabilities: SERVER_CAPABILITIES,
@@ -322,19 +358,23 @@ async function handleLegacyRequest({
   enforceLimit,
   executeTool,
   legacySessions,
+  logger,
   message,
   now,
   rateLimitConfig,
   request,
   respond,
   response,
+  sessionGauge,
   serverInfo,
+  toolCalls,
   tools
 }) {
   const sessionId = request.headers?.["mcp-session-id"];
   const session = legacySessions.get(sessionId);
   if (!session || session.expiresAt <= now()) {
     legacySessions.delete(sessionId);
+    sessionGauge?.set({}, legacySessions.size);
     sendError(response, respond, 404, message.id ?? null, -32001, "MCP session not found or expired.");
     return;
   }
@@ -378,12 +418,14 @@ async function handleLegacyRequest({
     enforceLimit,
     era: "legacy",
     executeTool,
+    logger,
     message,
     rateLimitConfig,
     request,
     respond,
     response,
     serverInfo,
+    toolCalls,
     tools
   });
 }
@@ -394,6 +436,7 @@ async function handleModernRequest({
   clientIp,
   enforceLimit,
   executeTool,
+  logger,
   message,
   meta,
   rateLimitConfig,
@@ -401,6 +444,7 @@ async function handleModernRequest({
   respond,
   response,
   serverInfo,
+  toolCalls,
   tools
 }) {
   const bodyVersion = meta[PROTOCOL_VERSION_META_KEY];
@@ -473,12 +517,14 @@ async function handleModernRequest({
     enforceLimit,
     era: "modern",
     executeTool,
+    logger,
     message,
     rateLimitConfig,
     request,
     respond,
     response,
     serverInfo,
+    toolCalls,
     tools
   });
 }
@@ -491,12 +537,14 @@ async function dispatchRequest({
   enforceLimit,
   era,
   executeTool,
+  logger,
   message,
   rateLimitConfig,
   request,
   respond,
   response,
   serverInfo,
+  toolCalls,
   tools
 }) {
   // Both eras funnel through here, so this is the single place that sees
@@ -580,6 +628,7 @@ async function dispatchRequest({
           clientInfo
         });
       }
+      recordToolOutcome({ toolName, outcome: "success", toolCalls });
       sendResult(
         response,
         respond,
@@ -590,6 +639,7 @@ async function dispatchRequest({
       );
     } catch (error) {
       const normalized = normalizeError(error);
+      recordToolOutcome({ toolName, outcome: "error", code: normalized.code, logger, toolCalls });
       sendResult(
         response,
         respond,
@@ -612,7 +662,7 @@ async function enforceToolRateLimit({
   rateLimitConfig,
   request
 }) {
-  const hasBearer = /^Bearer\s+\S+/iu.test(String(request.headers?.authorization ?? ""));
+  const hasBearer = hasBearerToken(request);
   let auth;
   let authError;
   if (hasBearer) {
@@ -631,6 +681,25 @@ async function enforceToolRateLimit({
     await enforceLimit("mcp_tools_anonymous", clientIp(request), rateLimitConfig.mcpAnonymous);
   }
   if (authError) throw authError;
+}
+
+function hasBearerToken(request) {
+  return /^Bearer\s+\S+/iu.test(String(request.headers?.authorization ?? ""));
+}
+
+function recordToolOutcome({ toolName, outcome, code, logger, toolCalls }) {
+  try {
+    toolCalls?.inc({ tool: toolName, outcome });
+  } catch {
+    // Recording an outcome must not change the tool response.
+  }
+  if (outcome === "error") {
+    try {
+      logger?.warn?.({ tool: toolName, code }, "mcp.tool_error");
+    } catch {
+      // Logging an outcome must not change the tool response.
+    }
+  }
 }
 
 function toolResult(payload, { era, serverInfo }) {

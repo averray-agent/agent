@@ -5,7 +5,10 @@ import { ArrivalObservatory } from "../../services/arrival-observatory.js";
 import { MemoryStateStore } from "../../core/state-store.js";
 import { MCP_TOOLS } from "./tools.js";
 
-import { AuthenticationError } from "../../core/errors.js";
+import { createRateLimiter } from "../../auth/rate-limit.js";
+import { AuthenticationError, RateLimitError } from "../../core/errors.js";
+import { MetricRegistry } from "../../core/metrics.js";
+import { MemoryStateStore as RateLimitStateStore } from "../../core/state-store.js";
 import { respond } from "../http/http-helpers.js";
 import {
   createMcpRoute,
@@ -24,26 +27,35 @@ const META_CLIENT = "io.modelcontextprotocol/clientInfo";
 
 function createHarness(overrides = {}) {
   const limitCalls = [];
+  const legacySessions = overrides.legacySessions ?? new Map();
+  const metrics = overrides.metrics ?? new MetricRegistry();
   const handler = createMcpRoute({
     arrivals: overrides.arrivals,
     authMiddleware: overrides.authMiddleware ?? (async () => ({ wallet: "0xauthed" })),
     clientIp: () => "198.51.100.8",
     enforceLimit: async (bucket, key, config) => {
       limitCalls.push({ bucket, key, config });
+      await overrides.enforceLimit?.(bucket, key, config);
     },
     executeTool: overrides.executeTool ?? (async (name) => ({ name, jobs: [{ id: "job-1" }] })),
     legacySessionTtlMs: overrides.legacySessionTtlMs ?? 60_000,
+    legacySessionMax: overrides.legacySessionMax,
+    legacySessions,
+    logger: overrides.logger,
+    metrics,
     now: overrides.now ?? (() => 1_000_000),
-    randomUUIDImpl: () => "legacy-session-1",
+    randomUUIDImpl: overrides.randomUUIDImpl ?? (() => "legacy-session-1"),
     rateLimitConfig: {
+      mcpRequests: { limit: 120, windowSeconds: 60 },
       mcpAnonymous: { limit: 10, windowSeconds: 60 },
-      mcpAuthenticated: { limit: 20, windowSeconds: 60 }
+      mcpAuthenticated: { limit: 20, windowSeconds: 60 },
+      ...overrides.rateLimitConfig
     },
     readJsonBody: async (request) => request.body,
     respond,
     ...(overrides.tools ? { tools: overrides.tools } : {})
   });
-  return { handler, limitCalls };
+  return { handler, legacySessions, limitCalls, metrics };
 }
 
 async function call(handler, body, headers = {}) {
@@ -299,6 +311,15 @@ test("initialize selects an expiring 2025-11-25 session on the same endpoint", a
   assert.equal(ready.statusCode, 202);
   assert.equal(ready.body, undefined);
 
+  const listed = await call(handler, {
+    jsonrpc: "2.0",
+    id: "list-1",
+    method: "tools/list",
+    params: {}
+  }, sessionHeaders);
+  assert.equal(listed.statusCode, 200);
+  assert.ok(listed.body.result.tools.some((tool) => tool.name === "listJobs"));
+
   const listJobs = await call(handler, {
     jsonrpc: "2.0",
     id: "call-1",
@@ -462,9 +483,194 @@ test("anonymous and authenticated tool calls consume separate rate-limit buckets
   });
 
   assert.deepEqual(limitCalls.map(({ bucket, key }) => ({ bucket, key })), [
+    { bucket: "mcp_requests_anonymous", key: "198.51.100.8" },
     { bucket: "mcp_tools_anonymous", key: "198.51.100.8" },
     { bucket: "mcp_tools_authenticated", key: "0xabc" }
   ]);
+});
+
+function legacyInitialize(id = 1, params = {}) {
+  return {
+    jsonrpc: "2.0",
+    id,
+    method: "initialize",
+    params: {
+      protocolVersion: LEGACY_MCP_VERSION,
+      capabilities: {},
+      clientInfo: { name: "legacy-test", version: "1.0.0" },
+      ...params
+    }
+  };
+}
+
+test("anonymous initialize requests obey the configured per-IP request budget", async () => {
+  let sessionCount = 0;
+  const limit = 120;
+  const stateStore = new RateLimitStateStore();
+  const { handler, legacySessions, limitCalls } = createHarness({
+    enforceLimit: createRateLimiter({ stateStore, logger: { warn() {} } }),
+    randomUUIDImpl: () => `legacy-session-${++sessionCount}`,
+    rateLimitConfig: { mcpRequests: { limit, windowSeconds: 60 } }
+  });
+  let accepted = 0;
+  let refused = 0;
+  for (let i = 0; i < 10_000; i += 1) {
+    try {
+      const result = await call(handler, legacyInitialize(i));
+      assert.equal(result.statusCode, 200);
+      accepted += 1;
+    } catch (error) {
+      assert.ok(error instanceof RateLimitError);
+      assert.equal(error.statusCode, 429);
+      assert.equal(error.code, "rate_limited");
+      assert.equal(error.details.bucket, "mcp_requests_anonymous");
+      assert.equal(error.details.limit, limit);
+      assert.equal(error.details.remaining, 0);
+      assert.ok(error.details.retryAfterSeconds >= 1);
+      refused += 1;
+    }
+  }
+  assert.equal(accepted, limit);
+  assert.equal(refused, 10_000 - limit);
+  assert.equal(sessionCount, limit);
+  assert.equal(legacySessions.size, limit);
+  assert.equal(limitCalls.length, 10_000);
+  assert.ok(limitCalls.every(({ bucket, key }) => bucket === "mcp_requests_anonymous" && key === "198.51.100.8"));
+});
+
+test("legacy initialize requests with a bearer header consume the per-IP request budget", async () => {
+  let sessionCount = 0;
+  const { handler, legacySessions, limitCalls } = createHarness({
+    authMiddleware: async () => { throw new Error("initialize does not authenticate a bearer header"); },
+    enforceLimit: createRateLimiter({ stateStore: new RateLimitStateStore(), logger: { warn() {} } }),
+    randomUUIDImpl: () => `legacy-session-${++sessionCount}`,
+    rateLimitConfig: { mcpRequests: { limit: 2, windowSeconds: 60 } }
+  });
+  const headers = { authorization: "Bearer synthetic-client-token" };
+  for (let id = 0; id < 2; id += 1) {
+    const result = await call(handler, legacyInitialize(id), headers);
+    assert.equal(result.statusCode, 200);
+  }
+  await assert.rejects(() => call(handler, legacyInitialize(3), headers), (error) => {
+    assert.ok(error instanceof RateLimitError);
+    assert.equal(error.statusCode, 429);
+    assert.equal(error.code, "rate_limited");
+    assert.equal(error.details.bucket, "mcp_requests_anonymous");
+    assert.equal(error.details.limit, 2);
+    return true;
+  });
+  assert.equal(sessionCount, 2);
+  assert.equal(legacySessions.size, 2);
+  assert.equal(limitCalls.length, 3);
+  assert.ok(limitCalls.every(({ bucket, key }) => bucket === "mcp_requests_anonymous" && key === "198.51.100.8"));
+});
+
+test("anonymous MCP methods share a request budget before session activity", async () => {
+  const { handler, legacySessions } = createHarness({
+    enforceLimit: createRateLimiter({ stateStore: new RateLimitStateStore(), logger: { warn() {} } }),
+    rateLimitConfig: { mcpRequests: { limit: 2, windowSeconds: 60 } }
+  });
+  await call(handler, modernRequest("server/discover"), modernHeaders("server/discover"));
+  await call(handler, modernRequest("tools/list"), modernHeaders("tools/list"));
+  await assert.rejects(() => call(handler, legacyInitialize()), RateLimitError);
+  assert.equal(legacySessions.size, 0);
+});
+
+test("legacy sessions retain a compact copy of client metadata", async () => {
+  const { handler, legacySessions } = createHarness();
+  const capabilities = { metadata: "x".repeat(60 * 1024), roots: { listChanged: true } };
+  const clientInfo = { name: "n".repeat(256), version: "v".repeat(256), metadata: capabilities };
+  const result = await call(handler, legacyInitialize(1, { capabilities, clientInfo, extra: capabilities }));
+  assert.equal(result.statusCode, 200);
+  const session = legacySessions.get(result.headers["mcp-session-id"]);
+  assert.ok(Buffer.byteLength(JSON.stringify(session)) < 1024);
+  assert.deepEqual(session.clientCapabilities, {});
+  assert.deepEqual(session.clientInfo, { name: "n".repeat(128), version: "v".repeat(128) });
+  assert.equal(session.protocolVersion, LEGACY_MCP_VERSION);
+  clientInfo.name = "updated";
+  capabilities.metadata = "updated";
+  assert.equal(session.clientInfo.name, "n".repeat(128));
+  assert.deepEqual(session.clientCapabilities, {});
+});
+
+test("legacy sessions keep the newest 5000 entries and count oldest-first evictions", async () => {
+  let sequence = 0;
+  const { handler, legacySessions, metrics } = createHarness({
+    randomUUIDImpl: () => `legacy-session-${++sequence}`
+  });
+  for (let i = 0; i < 6_000; i += 1) {
+    const result = await call(handler, legacyInitialize(i));
+    assert.equal(result.statusCode, 200);
+  }
+  assert.equal(legacySessions.size, 5_000);
+  assert.equal(legacySessions.has("legacy-session-1"), false);
+  assert.equal(legacySessions.has("legacy-session-1000"), false);
+  assert.equal(legacySessions.has("legacy-session-1001"), true);
+  assert.equal(legacySessions.has("legacy-session-6000"), true);
+  const oldest = await call(handler, { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, {
+    "mcp-session-id": "legacy-session-1"
+  });
+  assert.equal(oldest.statusCode, 404);
+  assert.equal(oldest.body.error.code, -32001);
+  const headers = { "mcp-session-id": "legacy-session-6000" };
+  const ready = await call(handler, { jsonrpc: "2.0", method: "notifications/initialized", params: {} }, headers);
+  assert.equal(ready.statusCode, 202);
+  const newest = await call(handler, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, headers);
+  assert.equal(newest.statusCode, 200);
+  assert.match(metrics.serialize(), /^mcp_legacy_sessions 5000$/mu);
+  assert.match(metrics.serialize(), /^mcp_legacy_sessions_evicted_total 1000$/mu);
+});
+
+test("legacy session capacity is configurable and expired entries update the gauge", async () => {
+  let sequence = 0;
+  let time = 10_000;
+  const { handler, legacySessions, metrics } = createHarness({
+    legacySessionMax: 2,
+    legacySessionTtlMs: 50,
+    now: () => time,
+    randomUUIDImpl: () => `legacy-session-${++sequence}`
+  });
+  for (let i = 0; i < 3; i += 1) await call(handler, legacyInitialize(i));
+  assert.equal(legacySessions.size, 2);
+  assert.equal(legacySessions.has("legacy-session-1"), false);
+  assert.match(metrics.serialize(), /^mcp_legacy_sessions 2$/mu);
+  time += 51;
+  const expired = await call(handler, { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, {
+    "mcp-session-id": "legacy-session-2"
+  });
+  assert.equal(expired.statusCode, 404);
+  assert.match(metrics.serialize(), /^mcp_legacy_sessions 1$/mu);
+  await call(handler, legacyInitialize(4));
+  assert.equal(legacySessions.size, 1);
+  assert.match(metrics.serialize(), /^mcp_legacy_sessions 1$/mu);
+  assert.match(metrics.serialize(), /^mcp_legacy_sessions_evicted_total 1$/mu);
+  for (const legacySessionMax of [0, -1, 1.5, Infinity, NaN]) {
+    assert.throws(() => createHarness({ legacySessionMax }), /legacySessionMax must be a positive safe integer/u);
+  }
+});
+
+test("tool failures are logged once and counted without request arguments", async () => {
+  const logged = [];
+  const { handler, metrics } = createHarness({
+    executeTool: async () => { throw new Error("tool unavailable"); },
+    logger: { warn(fields, message) { logged.push({ fields, message }); } }
+  });
+  const result = await call(handler, modernRequest("tools/call", { name: "listJobs", arguments: {} }),
+    modernHeaders("tools/call", "listJobs"));
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.result.isError, true);
+  assert.equal(result.body.result.structuredContent.error, "internal_error");
+  assert.deepEqual(logged, [{ fields: { tool: "listJobs", code: "internal_error" }, message: "mcp.tool_error" }]);
+  assert.match(metrics.serialize(), /^mcp_tool_calls_total\{tool="listJobs",outcome="error"\} 1$/mu);
+  assert.doesNotMatch(metrics.serialize(), /outcome="success"/u);
+});
+
+test("successful tool calls count a success outcome", async () => {
+  const { handler, metrics } = createHarness();
+  const result = await call(handler, modernRequest("tools/call", { name: "listJobs", arguments: {} }),
+    modernHeaders("tools/call", "listJobs"));
+  assert.equal(result.body.result.isError, false);
+  assert.match(metrics.serialize(), /^mcp_tool_calls_total\{tool="listJobs",outcome="success"\} 1$/mu);
 });
 
 test("the front door records who arrived and how far they got", async () => {

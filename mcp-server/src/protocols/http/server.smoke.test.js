@@ -2405,6 +2405,52 @@ function findRecurringTemplate(status, templateId) {
   return template;
 }
 
+test("http smoke: MCP request budgets return retry headers and expose session and tool metrics", SMOKE_TEST_OPTIONS, async () => {
+  await runWithServerEnv({ RATE_LIMIT_MCP_REQUESTS_LIMIT: "4", RATE_LIMIT_MCP_REQUESTS_WINDOW_SECONDS: "60" }, async (base) => {
+    const initialize = {
+      jsonrpc: "2.0",
+      id: "session-metrics",
+      method: "initialize",
+      params: {
+        protocolVersion: LEGACY_MCP_VERSION,
+        capabilities: {},
+        clientInfo: { name: "legacy-metrics-test", version: "1.0.0" }
+      }
+    };
+    const post = (body, headers = {}) => fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body)
+    });
+    const initialized = await post(initialize);
+    assert.equal(initialized.status, 200);
+    const sessionHeaders = { "mcp-session-id": initialized.headers.get("mcp-session-id") };
+    const ready = await post({ jsonrpc: "2.0", method: "notifications/initialized", params: {} }, sessionHeaders);
+    assert.equal(ready.status, 202);
+    const listed = await post({ jsonrpc: "2.0", id: "list", method: "tools/list", params: {} }, sessionHeaders);
+    assert.equal(listed.status, 200);
+    const called = await post({
+      jsonrpc: "2.0", id: "call", method: "tools/call", params: { name: "listJobs", arguments: {} }
+    }, sessionHeaders);
+    assert.equal(called.status, 200);
+    assert.equal((await called.json()).result.isError, false);
+    const refused = await post(initialize);
+    assert.equal(refused.status, 429);
+    assert.ok(Number(refused.headers.get("retry-after")) >= 1);
+    const error = await refused.json();
+    assert.equal(error.error, "rate_limited");
+    assert.equal(error.details.bucket, "mcp_requests_anonymous");
+    assert.equal(error.details.limit, 4);
+    const metricsResponse = await fetch(`${base}/metrics`);
+    assert.equal(metricsResponse.status, 200);
+    const metricsText = await metricsResponse.text();
+    assert.match(metricsText, /^mcp_legacy_sessions 1$/mu);
+    assert.match(metricsText, /^mcp_legacy_sessions_evicted_total 0$/mu);
+    assert.match(metricsText, /^mcp_tool_calls_total\{tool="listJobs",outcome="success"\} 1$/mu);
+    assert.match(metricsText, /^rate_limit_rejections_total\{bucket="mcp_requests_anonymous"\} 1$/mu);
+  });
+});
+
 test("http smoke: /metrics emits Prometheus text format with baseline series", SMOKE_TEST_OPTIONS, async () => {
   await runWithServer(async (base) => {
     // Warm the metrics: one unauthenticated admin call to populate counters.

@@ -78,6 +78,8 @@ export const LITERAL_OVERRIDES = {
   RPC_FAILOVER_STALL_MS: "250",
   RPC_REQUEST_TIMEOUT_MS: "750",
   RPC_WRITE_REQUEST_TIMEOUT_MS: "15000",
+  RATE_LIMIT_MCP_REQUESTS_LIMIT: "120",
+  RATE_LIMIT_MCP_REQUESTS_WINDOW_SECONDS: "60",
   USDC_LIQUIDITY_CHAIN: "mainnet",
   INGESTION_PREFUND_ENABLED: "false",
   // Ceremony A is verified: consent and the production allocation keeper are

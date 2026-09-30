@@ -259,3 +259,18 @@ test("bootstrap wires the rendered mainnet AUTH_CHAIN_ID into the configured Dep
   assert.equal(info.disclosure.statement, "Technical pilot. Principal at risk. No depositor protection.");
   assert.deepEqual(info.broadcast.rpcUrls, ["https://eth-rpc.polkadot.io"]);
 });
+
+test("MCP request limits have independent defaults and accept configured values", () => {
+  const defaults = loadRateLimitConfig({});
+  assert.deepEqual(defaults.mcpRequests, { limit: 120, windowSeconds: 60 });
+  assert.deepEqual(defaults.mcpAnonymous, { limit: 60, windowSeconds: 60 });
+  assert.deepEqual(defaults.mcpAuthenticated, { limit: 300, windowSeconds: 60 });
+  assert.deepEqual(loadRateLimitConfig({
+    RATE_LIMIT_MCP_REQUESTS_LIMIT: "42",
+    RATE_LIMIT_MCP_REQUESTS_WINDOW_SECONDS: "90"
+  }).mcpRequests, { limit: 42, windowSeconds: 90 });
+  assert.deepEqual(loadRateLimitConfig({
+    RATE_LIMIT_MCP_REQUESTS_LIMIT: "0",
+    RATE_LIMIT_MCP_REQUESTS_WINDOW_SECONDS: "invalid"
+  }).mcpRequests, defaults.mcpRequests);
+});

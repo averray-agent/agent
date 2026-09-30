@@ -960,6 +960,8 @@ const handleMcpRoute = createMcpRoute({
   clientIp,
   enforceLimit,
   executeTool: executeMcpTool,
+  logger,
+  metrics,
   rateLimitConfig,
   readJsonBody,
   respond,
