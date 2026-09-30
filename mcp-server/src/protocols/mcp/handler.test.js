@@ -4,7 +4,7 @@ import test from "node:test";
 import { createRateLimiter } from "../../auth/rate-limit.js";
 import { AuthenticationError, RateLimitError } from "../../core/errors.js";
 import { MetricRegistry } from "../../core/metrics.js";
-import { MemoryStateStore } from "../../core/state-store.js";
+import { MemoryStateStore as RateLimitStateStore } from "../../core/state-store.js";
 import { respond } from "../http/http-helpers.js";
 import {
   createMcpRoute,
@@ -502,7 +502,7 @@ function legacyInitialize(id = 1, params = {}) {
 test("anonymous initialize requests obey the configured per-IP request budget", async () => {
   let sessionCount = 0;
   const limit = 120;
-  const stateStore = new MemoryStateStore();
+  const stateStore = new RateLimitStateStore();
   const { handler, legacySessions, limitCalls } = createHarness({
     enforceLimit: createRateLimiter({ stateStore, logger: { warn() {} } }),
     randomUUIDImpl: () => `legacy-session-${++sessionCount}`,
@@ -538,7 +538,7 @@ test("legacy initialize requests with a bearer header consume the per-IP request
   let sessionCount = 0;
   const { handler, legacySessions, limitCalls } = createHarness({
     authMiddleware: async () => { throw new Error("initialize does not authenticate a bearer header"); },
-    enforceLimit: createRateLimiter({ stateStore: new MemoryStateStore(), logger: { warn() {} } }),
+    enforceLimit: createRateLimiter({ stateStore: new RateLimitStateStore(), logger: { warn() {} } }),
     randomUUIDImpl: () => `legacy-session-${++sessionCount}`,
     rateLimitConfig: { mcpRequests: { limit: 2, windowSeconds: 60 } }
   });
@@ -563,7 +563,7 @@ test("legacy initialize requests with a bearer header consume the per-IP request
 
 test("anonymous MCP methods share a request budget before session activity", async () => {
   const { handler, legacySessions } = createHarness({
-    enforceLimit: createRateLimiter({ stateStore: new MemoryStateStore(), logger: { warn() {} } }),
+    enforceLimit: createRateLimiter({ stateStore: new RateLimitStateStore(), logger: { warn() {} } }),
     rateLimitConfig: { mcpRequests: { limit: 2, windowSeconds: 60 } }
   });
   await call(handler, modernRequest("server/discover"), modernHeaders("server/discover"));
