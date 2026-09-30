@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import { ARRIVAL_CANARY_MARKER_TOKEN_KIND } from "../auth/token-kinds.js";
 import {
@@ -15,6 +15,8 @@ import {
   stageRank
 } from "./arrival-stage-map.js";
 import { buildArrivalOperatorView } from "./arrival-operator-view.js";
+import { metricPathLabel } from "../protocols/http/http-helpers.js";
+import { MCP_TOOLS } from "../protocols/mcp/tools.js";
 
 export { ARRIVAL_STAGES, stageRank } from "./arrival-stage-map.js";
 
@@ -41,7 +43,10 @@ export const ARRIVAL_SOFTWARE_CLASSES = Object.freeze([
 ]);
 const STATE_SCOPE = "arrival-observatory";
 const DEFAULT_MAX_CLIENTS = 200;
-const DEFAULT_FLUSH_INTERVAL_MS = 10_000;
+const DEFAULT_FLUSH_INTERVAL_MS = 30_000;
+const MAX_ENTRY_KEYS = 64;
+const MAX_ENTRY_KEY_LENGTH = 128;
+const REGISTERED_TOOL_NAMES = new Set(MCP_TOOLS.map((tool) => tool.name));
 const DEFAULT_LOAD_RETRY_INTERVAL_MS = 10_000;
 const HOUR_MS = 60 * 60 * 1_000;
 const PROSPECTIVE_ARRIVAL_RETENTION_MS = PROSPECTIVE_ARRIVAL_RETENTION_DAYS * 24 * HOUR_MS;
@@ -139,12 +144,9 @@ const HTTP_MACHINE_PATHS = new Set([
  * not willing to retain, and it decays anyway across DHCP, VPN and travel, so
  * "ours" would silently drift back into external.
  *
- * The retention objection is decisive on its own. Today an address is hashed
- * ONLY to tell one anonymous caller from another, and is never joined to an
- * identity. Attaching a network fingerprint to a declared name would publish a
- * stable pseudonymous identifier on a world-readable route — and with the
- * default salt the digest is enumerable over the whole IPv4 space, so it is a
- * pseudonym only against someone unwilling to spend the CPU.
+ * Anonymous address hashes remain internal and contribute only aggregate
+ * counts to the public view. Declared client names remain independent of those
+ * hashes, so the public view does not join network activity to client hints.
  *
  * A name list retains nothing new, is auditable and reversible, and states the
  * true epistemic position: this name is not attributable, so we will not
@@ -173,9 +175,9 @@ const HTTP_MACHINE_PATHS = new Set([
  *      and flushed on a debounce, so a busy client costs no extra I/O.
  *   3. It must not retain personal data. `clientInfo` is self-declared by the
  *      caller and kept verbatim; IP addresses are salted-hashed to a short
- *      prefix used only to tell one anonymous caller from another. The
- *      snapshot is served from a public monitor route, so there is nothing
- *      here that could not already be published.
+ *      prefix used internally to tell anonymous callers apart. The public
+ *      snapshot contains aggregate anonymous counts, declared clients, and
+ *      measured wallet rows.
  */
 export class ArrivalObservatory {
   constructor({
@@ -183,7 +185,7 @@ export class ArrivalObservatory {
     platformService,
     metrics,
     now = () => Date.now(),
-    hashSalt = "averray-arrivals",
+    hashSalt,
     identityRegistry,
     selfClients = resolveSelfClients(),
     selfWallets = resolveSelfWallets(),
@@ -197,7 +199,8 @@ export class ArrivalObservatory {
     this.platformService = platformService;
     this.metrics = metrics;
     this.now = now;
-    this.hashSalt = String(hashSalt);
+    this.explicitHashSalt = typeof hashSalt === "string" && hashSalt.length > 0;
+    this.hashSalt = this.explicitHashSalt ? hashSalt : randomBytes(32).toString("hex");
     this.identityRegistry = identityRegistry instanceof SelfIdentityRegistry
       ? identityRegistry
       : new SelfIdentityRegistry({ selfClients, operatorWallets: selfWallets, ambiguousClients });
@@ -263,7 +266,10 @@ export class ArrivalObservatory {
   async recordTool({ tool, era, clientInfo, ip } = {}) {
     const surface = mcpToolSurface(tool);
     if (surface) await this.recordPreAuthAggregate({ surface, clientInfo });
-    await this.record({ stage: TOOL_STAGE[tool] ?? "reached", era, clientInfo, ip, tool });
+    await this.record({
+      stage: Object.hasOwn(TOOL_STAGE, tool) ? TOOL_STAGE[tool] : "reached",
+      era, clientInfo, ip, tool
+    });
   }
 
   /** A REST request. Machine/discovery polling is intentionally excluded. */
@@ -305,7 +311,7 @@ export class ArrivalObservatory {
       ip,
       wallet,
       canaryMarkerValid,
-      tool: route,
+      tool: metricPathLabel(normalizedPath),
       door: "http"
     });
   }
@@ -414,7 +420,7 @@ export class ArrivalObservatory {
       entry.self = actor === "self";
       entry.ambiguous = actor === "ambiguous";
       if (era) entry.era = era;
-      if (tool) entry.tools[tool] = (entry.tools[tool] ?? 0) + 1;
+      if (tool) incrementBoundedKey(entry.tools, tool);
       if (stageRank(stage) > stageRank(entry.furthestStage)) {
         entry.furthestStage = stage;
       }
@@ -461,20 +467,23 @@ export class ArrivalObservatory {
       // is unreadable that is a claim we have not earned, so the snapshot names
       // the instrument failure instead of quietly serving in-memory counts.
       if (!(await this.ensureLoaded())) return this.unavailableSnapshot();
-      const clients = [...this.clients.values()]
+      const allClients = [...this.clients.values()]
         .sort((left, right) => right.lastSeenMs - left.lastSeenMs)
         .map((entry) => this.markEntry(entry));
-      const httpClients = [...this.httpClients.values()]
+      const allHttpClients = [...this.httpClients.values()]
         .sort((left, right) => right.lastSeenMs - left.lastSeenMs)
         .map((entry) => this.markEntry(entry));
-      const agents = this.mergeAgents([...clients, ...httpClients]);
+      const clients = allClients.filter(isPublicEntry);
+      const httpClients = allHttpClients.filter(isPublicEntry);
+      const allAgents = this.mergeAgents([...allClients, ...allHttpClients]);
+      const agents = allAgents.filter(isPublicEntry);
       let operatorView;
       try {
         operatorView = await buildArrivalOperatorView({
           nowMs: this.now(),
           identityRegistry: this.identityRegistry,
-          clients,
-          httpClients,
+          clients: allClients,
+          httpClients: allHttpClients,
           totals: this.totals,
           actorTotals: {
             outsider: this.totalsExternal,
@@ -534,23 +543,23 @@ export class ArrivalObservatory {
           note: HTTP_ARRIVAL_CUTOVER_NOTE
         },
         distinct: {
-          declared: clients.filter((entry) => entry.name).length,
-          anonymous: clients.filter((entry) => !entry.name).length,
-          self: clients.filter((entry) => entry.self).length,
-          ambiguous: clients.filter((entry) => entry.ambiguous).length,
-          furthest: furthestStageAcross(clients),
+          declared: allClients.filter((entry) => entry.name).length,
+          anonymous: allClients.filter((entry) => !entry.name).length,
+          self: allClients.filter((entry) => entry.self).length,
+          ambiguous: allClients.filter((entry) => entry.ambiguous).length,
+          furthest: furthestStageAcross(allClients),
           // The number that answers "has an OUTSIDER looked?" — neither our own
           // probes nor a client name we also present may move it.
           furthestExternal: furthestStageAcross(
-            clients.filter((entry) => !entry.self && !entry.ambiguous)
+            allClients.filter((entry) => !entry.self && !entry.ambiguous)
           ),
           // Reported alongside, so narrowing the claim does not discard the
           // signal: this may well have been an outsider, and we cannot say.
-          furthestAmbiguous: furthestStageAcross(clients.filter((entry) => entry.ambiguous))
+          furthestAmbiguous: furthestStageAcross(allClients.filter((entry) => entry.ambiguous))
         },
         clients,
         httpClients,
-        distinctAgents: buildDistinct(agents),
+        distinctAgents: buildDistinct(allAgents),
         agents,
         operatorView
       };
@@ -680,7 +689,7 @@ export class ArrivalObservatory {
    * client list would disagree with the `distinct` counts derived from them.
    */
   markEntry(entry) {
-    const { markerAttribution, ...publicEntry } = entry;
+    const { markerAttribution, ipHash: _ipHash, ...publicEntry } = entry;
     const wallet = entry.wallet ?? walletFromKey(this.clientWalletLinks.get(entry.key));
     const actor = this.classifyActor(
       entry.name ? { name: entry.name } : null,
@@ -756,7 +765,7 @@ export class ArrivalObservatory {
         current.furthestStage = entry.furthestStage;
       }
       for (const [tool, count] of Object.entries(entry.tools ?? {})) {
-        current.tools[tool] = (current.tools[tool] ?? 0) + count;
+        incrementBoundedKey(current.tools, tool, count);
       }
       for (const source of ATTRIBUTION_SOURCES) {
         current.attributionSources[source] += Number(entry.attributionSources?.[source] ?? 0);
@@ -801,6 +810,9 @@ export class ArrivalObservatory {
   async loadState() {
     try {
       const stored = await this.stateStore?.getServiceState?.(STATE_SCOPE);
+      if (!this.explicitHashSalt && this.stateStore?.getOrCreateServiceValue) {
+        this.hashSalt = await this.stateStore.getOrCreateServiceValue(STATE_SCOPE, "hash-salt", this.hashSalt);
+      }
       const persistedCollectionSinceMs = finiteMs(stored?.prospectiveCollectionSinceMs);
       if (persistedCollectionSinceMs !== undefined) {
         this.prospectiveCollectionSinceMs = persistedCollectionSinceMs;
@@ -832,12 +844,17 @@ export class ArrivalObservatory {
       restoreAttributionTotals(this.attributionSourceTotals, stored?.attributionSourceTotals);
       restoreAttributionTotals(this.httpAttributionSourceTotals, stored?.httpAttributionSourceTotals);
       for (const entry of Array.isArray(stored?.clients) ? stored.clients : []) {
-        if (typeof entry?.key === "string") this.clients.set(entry.key, entry);
+        const normalized = normalizeStoredEntry(entry, "mcp");
+        if (normalized) this.clients.set(normalized.key, normalized);
       }
       for (const entry of Array.isArray(stored?.httpClients) ? stored.httpClients : []) {
-        if (typeof entry?.key === "string") this.httpClients.set(entry.key, entry);
+        const normalized = normalizeStoredEntry(entry, "http");
+        if (normalized) this.httpClients.set(normalized.key, normalized);
       }
-      for (const [client, wallet] of Object.entries(stored?.clientWalletLinks ?? {})) {
+      this.evictOverflow();
+      this.evictOverflow(this.httpClients);
+      this.dirty = Boolean(stored);
+      for (const [client, wallet] of Object.entries(stored?.clientWalletLinks ?? {}).slice(0, this.maxClients * 2)) {
         if (client.startsWith("client:") && wallet.startsWith("wallet:")) {
           this.clientWalletLinks.set(client, wallet);
         }
@@ -870,25 +887,30 @@ export class ArrivalObservatory {
     if (!force && nowMs - this.lastFlushMs < this.flushIntervalMs) return;
     this.lastFlushMs = nowMs;
     this.dirty = false;
-    await this.stateStore?.upsertServiceState?.(STATE_SCOPE, {
-      observingSinceMs: this.startedAtMs,
-      totals: { ...this.totals },
-      totalsExternal: { ...this.totalsExternal },
-      totalsSelf: { ...this.totalsSelf },
-      totalsAmbiguous: { ...this.totalsAmbiguous },
-      clients: [...this.clients.values()],
-      httpObservingSinceMs: this.httpObservingSinceMs,
-      httpTotals: { ...this.httpTotals },
-      httpTotalsExternal: { ...this.httpTotalsExternal },
-      httpTotalsSelf: { ...this.httpTotalsSelf },
-      httpTotalsAmbiguous: { ...this.httpTotalsAmbiguous },
-      attributionSourceTotals: { ...this.attributionSourceTotals },
-      httpAttributionSourceTotals: { ...this.httpAttributionSourceTotals },
-      httpClients: [...this.httpClients.values()],
-      clientWalletLinks: Object.fromEntries(this.clientWalletLinks),
-      prospectiveCollectionSinceMs: this.prospectiveCollectionSinceMs,
-      preAuthHourlyBuckets: serializePreAuthBuckets(this.preAuthHourlyBuckets)
-    });
+    try {
+      await this.stateStore?.upsertServiceState?.(STATE_SCOPE, {
+        observingSinceMs: this.startedAtMs,
+        totals: { ...this.totals },
+        totalsExternal: { ...this.totalsExternal },
+        totalsSelf: { ...this.totalsSelf },
+        totalsAmbiguous: { ...this.totalsAmbiguous },
+        clients: [...this.clients.values()],
+        httpObservingSinceMs: this.httpObservingSinceMs,
+        httpTotals: { ...this.httpTotals },
+        httpTotalsExternal: { ...this.httpTotalsExternal },
+        httpTotalsSelf: { ...this.httpTotalsSelf },
+        httpTotalsAmbiguous: { ...this.httpTotalsAmbiguous },
+        attributionSourceTotals: { ...this.attributionSourceTotals },
+        httpAttributionSourceTotals: { ...this.httpAttributionSourceTotals },
+        httpClients: [...this.httpClients.values()],
+        clientWalletLinks: Object.fromEntries(this.clientWalletLinks),
+        prospectiveCollectionSinceMs: this.prospectiveCollectionSinceMs,
+        preAuthHourlyBuckets: serializePreAuthBuckets(this.preAuthHourlyBuckets)
+      });
+    } catch (error) {
+      this.dirty = true;
+      throw error;
+    }
   }
 
   evictOverflow(entries = this.clients) {
@@ -975,11 +997,59 @@ export function createArrivalCanaryMarkerService({
   };
 }
 
-/**
- * The configured names PLUS the built-in defaults — an operator can add names
- * that turn out to be shared, but cannot accidentally un-know the one we
- * already learned the hard way.
- */
+function isPublicEntry(entry) {
+  return !entry.key.startsWith("anon:");
+}
+
+function incrementBoundedKey(target, key, count = 1) {
+  const safeKey = typeof key === "string" && key.length > 0 && key.length <= MAX_ENTRY_KEY_LENGTH
+    && !["__proto__", "constructor", "prototype"].includes(key) ? key : "other";
+  const keys = Object.keys(target);
+  const label = Object.hasOwn(target, safeKey) || keys.length < MAX_ENTRY_KEYS - 1 ? safeKey : "other";
+  target[label] = (Number(target[label]) || 0) + count;
+}
+
+function normalizeStoredEntry(entry, door) {
+  if (typeof entry?.key !== "string") return undefined;
+  const wallet = normalizeWallet(entry.wallet ?? walletFromKey(entry.key));
+  const identity = normalizeClientInfo(entry);
+  const key = wallet ? walletKey(wallet) : identity ? clientKey(identity)
+    : /^anon:[0-9a-f]{12}$/u.test(entry.key) ? entry.key : undefined;
+  if (!key) return undefined;
+  const tools = {};
+  for (const [rawKey, rawCount] of Object.entries(entry.tools ?? {})) {
+    const count = Number(rawCount);
+    if (!Number.isSafeInteger(count) || count <= 0) continue;
+    let label;
+    if (door === "http") {
+      const pathname = rawKey.replace(/^[A-Z]+ /u, "");
+      label = pathname === "other" ? "other" : metricPathLabel(pathname);
+    } else {
+      label = REGISTERED_TOOL_NAMES.has(rawKey) || rawKey === "unknown_tool" || rawKey === "other"
+        ? rawKey : "unknown_tool";
+    }
+    incrementBoundedKey(tools, label, count);
+  }
+  const sources = emptyAttributionTotals();
+  restoreAttributionTotals(sources, entry.attributionSources);
+  return {
+    key,
+    wallet,
+    name: wallet ? null : identity?.name ?? null,
+    version: wallet ? null : identity?.version ?? null,
+    era: door === "http" ? "http" : entry.era === "modern" ? "modern" : "legacy",
+    self: entry.self === true,
+    ambiguous: entry.ambiguous === true,
+    firstSeenMs: finiteMs(entry.firstSeenMs) ?? 0,
+    lastSeenMs: finiteMs(entry.lastSeenMs) ?? 0,
+    furthestStage: ARRIVAL_STAGES.includes(entry.furthestStage) ? entry.furthestStage : "reached",
+    calls: Number.isSafeInteger(entry.calls) && entry.calls >= 0 ? entry.calls : 0,
+    tools,
+    attributionSources: sources,
+    markerAttribution: ["valid", "invalid"].includes(entry.markerAttribution) ? entry.markerAttribution : null
+  };
+}
+
 function emptyTotals() {
   return Object.fromEntries(ARRIVAL_STAGES.map((stage) => [stage, 0]));
 }

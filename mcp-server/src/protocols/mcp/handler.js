@@ -503,7 +503,8 @@ async function dispatchRequest({
   // every dispatched method. Recorded BEFORE any validation or rate limit, so
   // a caller that is refused still counts as having arrived.
   await recordArrival(arrivals, message.method === "tools/call" ? "recordTool" : "recordReach", {
-    tool: message.params?.name,
+    tool: typeof message.params?.name === "string" && getMcpTool(message.params.name, tools)
+      ? message.params.name : "unknown_tool",
     method: message.method,
     era,
     clientInfo,
