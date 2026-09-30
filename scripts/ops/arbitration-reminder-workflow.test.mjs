@@ -32,7 +32,10 @@ test("arbitration reminder workflow requires configured phone delivery", () => {
   assert.doesNotMatch(result.stdout + result.stderr, /https:\/\/ntfy/);
 });
 test("arbitration reminder phone text stays in its dedicated formatter", () => {
-  for (const path of ["./arbitration-deadlines.mjs", "./escrow-chain-lib.mjs", "../../.github/workflows/arbitration-deadline-reminders.yml"]) {
-    assert.doesNotMatch(readFileSync(new URL(path, import.meta.url), "utf8"), /half pay|anyone can close/);
+  const privatePhonePhrases = new RegExp([["half", "pay"], ["anyone", "can", "close"]]
+    .map((words) => words.join(" ")).join("|"));
+  for (const path of ["./arbitration-deadlines.mjs", "./escrow-chain-lib.mjs", "./arbitration-reminder-workflow.test.mjs",
+    "../../.github/workflows/arbitration-deadline-reminders.yml"]) {
+    assert.doesNotMatch(readFileSync(new URL(path, import.meta.url), "utf8"), privatePhonePhrases);
   }
 });
