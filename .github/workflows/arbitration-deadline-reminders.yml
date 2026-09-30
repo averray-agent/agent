@@ -1,0 +1,82 @@
+name: Arbitration deadline reminders
+
+on:
+  schedule:
+    - cron: "7 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      drill:
+        description: Send a test notification without reading or updating delivery state
+        type: boolean
+        default: false
+      simulate_now:
+        description: Optional UTC time for a drill
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: arbitration-deadline-reminders
+  cancel-in-progress: false
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+
+      - name: Restore delivery observations
+        if: inputs.drill != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p state
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow arbitration-deadline-reminders.yml \
+            --limit 100 --json databaseId --jq '.[].databaseId' > "$RUNNER_TEMP/reminder-runs.txt"
+          while read -r run; do
+            if [ "$run" = "$GITHUB_RUN_ID" ]; then continue; fi
+            count="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts" \
+              --jq '[.artifacts[] | select(.name == "arbitration-reminder-state" and .expired == false)] | length')"
+            if [ "$count" -gt 0 ]; then
+              if gh run download "$run" --repo "$GITHUB_REPOSITORY" --name arbitration-reminder-state --dir state >/dev/null 2>&1; then
+                break
+              fi
+              echo "::warning::Delivery observations could not be restored from one earlier run"
+            fi
+          done < "$RUNNER_TEMP/reminder-runs.txt"
+
+      - name: Read chain and deliver reminders
+        env:
+          PHONE_PUSH_URL: ${{ secrets.PHONE_PUSH_URL }}
+          DRILL: ${{ inputs.drill || false }}
+          SIMULATE_NOW: ${{ inputs.simulate_now }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PHONE_PUSH_URL" ]; then
+            echo "::error::phone push not configured or undeliverable"
+            exit 1
+          fi
+          args=(--state-file state/state.json --run-url "$RUN_URL")
+          if [ "$DRILL" = "true" ]; then
+            args+=(--drill)
+            if [ -n "$SIMULATE_NOW" ]; then args+=(--simulate-now "$SIMULATE_NOW"); fi
+          fi
+          node scripts/ops/arbitration-deadlines.mjs "${args[@]}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save delivery observations
+        if: always() && inputs.drill != true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: arbitration-reminder-state
+          path: state/state.json
+          retention-days: 90
+          if-no-files-found: warn
