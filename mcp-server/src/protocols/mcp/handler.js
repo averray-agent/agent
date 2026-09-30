@@ -186,7 +186,7 @@ export function createMcpRoute({
       return true;
     }
 
-    if (!hasBearerToken(request)) {
+    if (message.method === "initialize" || !hasBearerToken(request)) {
       await enforceLimit("mcp_requests_anonymous", clientIp(request), rateLimitConfig?.mcpRequests ?? DEFAULT_MCP_REQUEST_LIMIT);
     }
 

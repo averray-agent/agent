@@ -534,6 +534,33 @@ test("anonymous initialize requests obey the configured per-IP request budget", 
   assert.ok(limitCalls.every(({ bucket, key }) => bucket === "mcp_requests_anonymous" && key === "198.51.100.8"));
 });
 
+test("legacy initialize requests with a bearer header consume the per-IP request budget", async () => {
+  let sessionCount = 0;
+  const { handler, legacySessions, limitCalls } = createHarness({
+    authMiddleware: async () => { throw new Error("initialize does not authenticate a bearer header"); },
+    enforceLimit: createRateLimiter({ stateStore: new MemoryStateStore(), logger: { warn() {} } }),
+    randomUUIDImpl: () => `legacy-session-${++sessionCount}`,
+    rateLimitConfig: { mcpRequests: { limit: 2, windowSeconds: 60 } }
+  });
+  const headers = { authorization: "Bearer synthetic-client-token" };
+  for (let id = 0; id < 2; id += 1) {
+    const result = await call(handler, legacyInitialize(id), headers);
+    assert.equal(result.statusCode, 200);
+  }
+  await assert.rejects(() => call(handler, legacyInitialize(3), headers), (error) => {
+    assert.ok(error instanceof RateLimitError);
+    assert.equal(error.statusCode, 429);
+    assert.equal(error.code, "rate_limited");
+    assert.equal(error.details.bucket, "mcp_requests_anonymous");
+    assert.equal(error.details.limit, 2);
+    return true;
+  });
+  assert.equal(sessionCount, 2);
+  assert.equal(legacySessions.size, 2);
+  assert.equal(limitCalls.length, 3);
+  assert.ok(limitCalls.every(({ bucket, key }) => bucket === "mcp_requests_anonymous" && key === "198.51.100.8"));
+});
+
 test("anonymous MCP methods share a request budget before session activity", async () => {
   const { handler, legacySessions } = createHarness({
     enforceLimit: createRateLimiter({ stateStore: new MemoryStateStore(), logger: { warn() {} } }),
