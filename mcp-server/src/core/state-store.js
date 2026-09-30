@@ -1496,11 +1496,53 @@ export class MemoryStateStore {
 }
 
 export class RedisStateStore {
-  constructor(redisUrl, namespace = "agent-platform") {
+  constructor(redisUrl, namespace = "agent-platform", { logger = console, metrics } = {}) {
     this.redisUrl = redisUrl;
     this.namespace = namespace;
-    this.client = createClient({ url: redisUrl });
+    this.logger = logger;
+    this.redisErrorLogTimes = new Map();
+    this.redisErrors = metrics?.counter?.("state_store_redis_errors_total", "Redis connection errors.", ["code"]);
+    this.redisReady = metrics?.gauge?.("state_store_redis_ready", "Redis client readiness.");
+    this.redisReconnects = metrics?.counter?.("state_store_redis_reconnects_total", "Redis reconnect observations.");
+    this.redisReady?.set({}, 0);
+    this.client = createClient({
+      url: redisUrl,
+      disableOfflineQueue: true,
+      socket: {
+        connectTimeout: 3000,
+        reconnectStrategy: (retries) => Math.min(5000, 100 * 2 ** Math.min(retries, 6) + Math.floor(Math.random() * 100))
+      }
+    });
+    this.client.on("error", (error) => {
+      this.redisReady?.set({}, Number(this.client.isReady));
+      const code = /^[A-Z_\d]{1,64}$/u.test(String(error?.code ?? "")) ? String(error.code) : "redis_error";
+      this.redisErrors?.inc({ code });
+      const now = Date.now();
+      if (now - (this.redisErrorLogTimes.get(code) ?? -Infinity) < 10_000) return;
+      this.redisErrorLogTimes.set(code, now);
+      this.logger.warn?.({ code, message: this.safeRedisErrorMessage(error) }, "state_store.redis_error");
+    });
+    this.client.on("ready", () => {
+      this.redisReady?.set({}, 1);
+      this.logger.info?.({}, "state_store.redis_ready");
+    });
+    for (const event of ["end", "reconnecting"]) this.client.on(event, () => {
+      this.redisReady?.set({}, 0);
+      this.redisReconnects?.inc();
+      if (event === "end") this.connectionPromise = undefined;
+    });
     this.connectionPromise = undefined;
+  }
+
+  safeRedisErrorMessage(error) {
+    let message = String(error?.message ?? "redis_error").replaceAll(this.redisUrl, "[redis]");
+    try {
+      const url = new URL(this.redisUrl);
+      for (const credential of [url.password, decodeURIComponent(url.password), url.username, decodeURIComponent(url.username)]) {
+        if (credential) message = message.replaceAll(credential, "[redacted]");
+      }
+    } catch { return "redis_error"; }
+    return message.replace(/rediss?:\/\/\S+/gu, "[redis]");
   }
 
   async putCatalogueMutation(record) {
@@ -3089,9 +3131,14 @@ export class RedisStateStore {
   }
 
   async healthCheck() {
+    let timer;
     try {
-      await this.connect();
-      const reply = await this.client.ping();
+      const reply = await Promise.race([
+        (async () => { await this.connect(); return this.client.ping(); })(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new ExternalServiceError("Redis health probe timed out.", "redis_timeout")), 1500);
+        })
+      ]);
       return {
         ok: reply === "PONG",
         backend: "redis",
@@ -3102,14 +3149,29 @@ export class RedisStateStore {
         ok: false,
         backend: "redis",
         mode: "durable",
-        error: new ExternalServiceError(`Redis health check failed: ${error?.message ?? "unknown_error"}`).message
+        reason: error?.code === "redis_timeout" ? "redis_timeout" : "redis_unavailable"
       };
+    } finally {
+      clearTimeout(timer);
     }
   }
 
   async connect() {
+    if (this.client.isOpen && !this.client.isReady) {
+      throw new ExternalServiceError("Redis is temporarily unavailable.", "state_store_unavailable");
+    }
     if (!this.connectionPromise) {
-      this.connectionPromise = this.client.connect();
+      if (this.client.isReady) return;
+      let timer;
+      this.connectionPromise = Promise.race([
+        this.client.connect(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new ExternalServiceError("Redis is temporarily unavailable.", "state_store_unavailable")), 750);
+        })
+      ]).catch(() => {
+        this.connectionPromise = undefined;
+        throw new ExternalServiceError("Redis is temporarily unavailable.", "state_store_unavailable");
+      }).finally(() => clearTimeout(timer));
     }
     await this.connectionPromise;
   }
@@ -3117,6 +3179,33 @@ export class RedisStateStore {
   key(kind, id) {
     return `${this.namespace}:${kind}:${id}`;
   }
+}
+
+export async function waitForStateStoreAtBoot(stateStore, { logger = console, timeoutMs = 60_000,
+  now = Date.now, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
+  if (typeof stateStore.connect !== "function") return;
+  const deadline = now() + timeoutMs;
+  let attempt = 0;
+  while (now() < deadline) {
+    let timer;
+    try {
+      await Promise.race([
+        stateStore.connect(),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("startup deadline reached")), deadline - now()); })
+      ]);
+      return;
+    }
+    catch {
+      logger.warn?.({ attempt: ++attempt }, "state_store.waiting_for_redis");
+      const remaining = deadline - now();
+      if (remaining <= 0) break;
+      await sleep(Math.min(remaining, 5000, 100 * 2 ** Math.min(attempt - 1, 6)));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  logger.error?.({}, "state_store.redis_unreachable_at_boot");
+  throw new ExternalServiceError("Redis is unavailable at startup.", "state_store_unavailable");
 }
 
 function normalizeReceiptIndexId(value) {
@@ -3149,9 +3238,9 @@ function shouldReplaceWorkReceiptJobIndex(current, candidate) {
   return candidate.receiptId > current.receiptId;
 }
 
-export function createStateStore(env = process.env, { logger = console } = {}) {
+export function createStateStore(env = process.env, { logger = console, metrics } = {}) {
   if (env.REDIS_URL) {
-    return new RedisStateStore(env.REDIS_URL, env.REDIS_NAMESPACE ?? "agent-platform");
+    return new RedisStateStore(env.REDIS_URL, env.REDIS_NAMESPACE ?? "agent-platform", { logger, metrics });
   }
 
   // A missing REDIS_URL in production means every restart wipes sessions,

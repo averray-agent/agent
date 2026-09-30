@@ -2,7 +2,7 @@ import { createStateStore } from "../core/state-store.js";
 import { loadWitnessRunnerConfig, WitnessRunnerService } from "./witness-runner-service.js";
 
 const config = loadWitnessRunnerConfig(process.env);
-const stateStore = createStateStore(process.env);
+const stateStore = createStateStore(process.env, { logger: console });
 const service = new WitnessRunnerService({ stateStore, ...config, logger: console });
 
 const availability = await service.inspectAvailability();
