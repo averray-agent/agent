@@ -1,4 +1,8 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -363,4 +367,104 @@ test("Ceremony C T4 moves only pool aliases; v2.1 reads and the exit aggregator 
   }
   assert.equal(manifest.contracts.aacPoolAggregatorAdapter, "0x1DDcA7097c752580c6561e1bF8C673D6C1665CA5");
   assert.equal(manifest.deploymentBlocks.aacPoolAggregatorAdapter, 19913651);
+});
+
+
+const runFile = promisify(execFile);
+const PRIMARY = "https://primary.invalid/private-path?key=fixture-primary";
+const BACKUP = "https://backup.invalid/private-path?key=fixture-backup";
+
+async function runRpcCli(t, providers, args = []) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "provenance-rpcs-")));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "scripts", "ops"), { recursive: true });
+  mkdirSync(join(root, "deployments"));
+  const script = join(root, "scripts", "ops", "check-contract-provenance.mjs");
+  writeFileSync(script, readFileSync(new URL("./check-contract-provenance.mjs", import.meta.url)));
+  writeFileSync(join(root, "deployments", "mainnet.json"), JSON.stringify({
+    ...manifestFor(), rpcUrl: PRIMARY, rpcBackupUrls: [BACKUP],
+  }));
+  const preload = join(root, "mock-rpc.mjs");
+  writeFileSync(preload, `
+    const providers = ${JSON.stringify(providers)};
+    const calls = [];
+    globalThis.fetch = async (url, init) => {
+      const { method } = JSON.parse(init.body);
+      calls.push([url, method]);
+      const provider = providers[url];
+      if (!provider || provider.failure === "fetch") throw new Error("fixture fetch failure");
+      if (provider.failure === "timeout") throw new DOMException("fixture timeout", "TimeoutError");
+      if (provider.failure === "http") return { ok: false, status: 503 };
+      if (provider.failure === "rpc" || (provider.failure === "code" && method === "eth_getCode")) {
+        return { ok: true, json: async () => ({ error: { code: -32000, message: "fixture RPC failure" } }) };
+      }
+      return { ok: true, json: async () => ({
+        result: method === "eth_chainId" ? (provider.chainId ?? "0x190f1b43") : (provider.code ?? "${CODE}"),
+      }) };
+    };
+    process.on("exit", () => {
+      process.stderr.write("RPC_CALLS=" + JSON.stringify(calls) + "\\n");
+    });
+  `);
+  let result;
+  try {
+    result = { ...(await runFile(process.execPath, ["--import", preload, script, ...args])), code: 0 };
+  } catch (error) {
+    result = error;
+  }
+  const line = result.stderr.match(/RPC_CALLS=(.*)/u)?.[1];
+  assert.ok(line, result.stderr);
+  result.calls = JSON.parse(line);
+  return result;
+}
+
+for (const failure of ["fetch", "http", "rpc", "timeout", "code", "chain"]) {
+  test(`provenance CLI uses the matching backup after primary ${failure} failure`, async (t) => {
+    const primary = failure === "chain" ? { chainId: "0x1" } : { failure };
+    const result = await runRpcCli(t, { [PRIMARY]: primary, [BACKUP]: {} });
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /RPC host: backup\.invalid/u);
+    assert.doesNotMatch(result.stdout + result.stderr.replace(/RPC_CALLS=.*/u, ""), /primary\.invalid|private-path|fixture-backup|https:\/\//u);
+    assert.equal(result.calls.at(-1)[0], BACKUP);
+  });
+}
+
+test("provenance CLI keeps primary runtime drift authoritative", async (t) => {
+  const result = await runRpcCli(t, { [PRIMARY]: { code: "0x60010204" }, [BACKUP]: {} });
+  assert.equal(result.code, 1, result.stderr);
+  assert.match(result.stdout, /RPC host: primary\.invalid/u);
+  assert.ok(result.calls.every(([url]) => url === PRIMARY));
+});
+
+test("provenance CLI exits 2 only after all configured RPCs fail", async (t) => {
+  const result = await runRpcCli(t, { [PRIMARY]: { failure: "fetch" }, [BACKUP]: { failure: "rpc" } });
+  assert.equal(result.code, 2, result.stderr);
+  assert.deepEqual(result.calls.map(([url]) => url), [PRIMARY, BACKUP]);
+  assert.doesNotMatch(result.stdout + result.stderr.replace(/RPC_CALLS=.*/u, ""), /primary\.invalid|backup\.invalid|private-path/u);
+});
+
+test("provenance CLI confines an explicit RPC override to that URL", async (t) => {
+  const result = await runRpcCli(t, { [PRIMARY]: { failure: "fetch" }, [BACKUP]: {} }, ["--rpc", PRIMARY]);
+  assert.equal(result.code, 2, result.stderr);
+  assert.deepEqual(result.calls.map(([url]) => url), [PRIMARY]);
+});
+
+test("provenance JSON evidence names only the answering RPC host", async (t) => {
+  const result = await runRpcCli(t, { [PRIMARY]: { failure: "fetch" }, [BACKUP]: {} }, ["--json"]);
+  assert.equal(result.code, 0, result.stderr);
+  const evidence = JSON.parse(result.stdout);
+  assert.equal(evidence.rpcHost, "backup.invalid");
+  assert.equal(evidence.rpcUrl, undefined);
+});
+
+test("provenance RPC requests use a 15 second abort deadline", async (t) => {
+  const durations = [];
+  const timeout = AbortSignal.timeout.bind(AbortSignal);
+  t.mock.method(AbortSignal, "timeout", (duration) => { durations.push(duration); return timeout(duration); });
+  const fetchImpl = async (url, init) => {
+    assert.ok(init.signal instanceof AbortSignal);
+    return mockRpc()(url, init);
+  };
+  await checkRuntimeProvenance({ manifest: manifestFor(), fetchImpl });
+  assert.deepEqual(durations, [15_000, 15_000]);
 });
