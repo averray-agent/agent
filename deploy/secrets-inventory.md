@@ -146,6 +146,12 @@ needed inside GitHub Actions runners.
 | `APP_BASIC_AUTH_USER`            | `op://prod-ci/app-basic-auth-hash/username`                               | 2.2        | Basic-auth username for Caddy on app.averray.com. Not strictly a secret but lives with the hash for atomic rotation.                  |
 | `APP_BASIC_AUTH_PASSWORD_HASH`   | `op://prod-ci/app-basic-auth-hash/credential`                             | 2.2        | bcrypt hash injected into Caddyfile. **Raw password lives only in `op://prod-critical/app-basic-auth/password`** (human-only). Different bcrypt salt each generation, so this hash will NOT byte-match any other hash of the same password. Item created during PR 2.2 operator setup. |
 
+## Repository phone delivery
+
+| Env var | Storage | Purpose |
+| ------- | ------- | ------- |
+| `PHONE_PUSH_URL` | Repository-level GitHub Actions secret; matching item in the prod-ci vault | Full ntfy topic URL for off-box phone notifications. Subscribe with the ntfy app before enabling delivery. An optional write token stays in the URL. No production environment gate or runtime template is required. |
+
 ## Smoke-test secrets
 
 Loaded by `1password/load-secrets-action` using the `op-token-prod-smoke-tests`
