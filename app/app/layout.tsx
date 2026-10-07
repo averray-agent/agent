@@ -23,6 +23,7 @@ const spaceGrotesk = localFont({
 });
 
 export const metadata: Metadata = {
+  icons: { icon: "/favicon.svg" },
   title: "Averray · Operator control room",
   description:
     "Trust infrastructure for software agents. Claims, verification, treasury posture, and activity in one signed-in workspace.",
@@ -36,6 +37,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${manrope.variable} ${spaceGrotesk.variable}`}>
       <body className="bg-[var(--bg)] text-[var(--ink)] font-[family-name:var(--font-body)]">
+        <noscript><p className="p-4">The app needs JavaScript for live data and wallet actions. Read the <a className="underline" href="https://api.averray.com/">public API</a> or visit the <a className="underline" href="https://averray.com/">public site</a>.</p></noscript>
         <AppPerformanceObserver />
         {children}
         <Toaster />

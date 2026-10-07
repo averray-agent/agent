@@ -10,9 +10,10 @@ const REPO_ROOT = new URL("../../", import.meta.url);
 const PAGES_ROOT = new URL("marketing/src/pages/", REPO_ROOT);
 const FOOTER = new URL("marketing/src/components/SiteFooter.astro", REPO_ROOT);
 
-// A route may be excluded only by naming it here and explaining why. There are
-// deliberately no exclusions today: every public marketing page is a door.
-export const INTENTIONALLY_UNLINKED_ROUTES = Object.freeze([]);
+// A route may be excluded only by naming it here and explaining why. There is
+// no navigation link to the error document: Caddy serves it for missing URLs.
+// Every ordinary public page remains a discoverable door.
+export const INTENTIONALLY_UNLINKED_ROUTES = Object.freeze(["/404/"]);
 
 function normalizeRoute(href) {
   const path = href.split(/[?#]/u, 1)[0] || "/";
