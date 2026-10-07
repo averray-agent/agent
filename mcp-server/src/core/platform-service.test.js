@@ -1422,6 +1422,33 @@ test("designated agreements are restricted and excluded from every open inventor
   assert.deepEqual(await service.recommendJobs(WALLET), []);
 });
 
+test("external definition rereads a cached open job after escrow closes; listings batch once", async () => {
+  const escrowCoreAddress = "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793";
+  let state = 1;
+  let reads = 0;
+  const gateway = {
+    config: { escrowCoreAddress },
+    isEnabled: () => true,
+    async getJobs(ids) {
+      reads += 1;
+      return ids.map(() => ({ status: "fulfilled", value: { state, escrowAddress: escrowCoreAddress } }));
+    }
+  };
+  const service = makePlatformService(gateway, undefined, new MemoryStateStore(), undefined, undefined, undefined, undefined, {
+    source: { type: "external" }, funding: { source: "external_escrow", state: "funded" }, requiresSponsoredGas: false
+  });
+  const initial = await service.getPublicJobDefinition("parent-job-001");
+  assert.equal(initial.claimState, "open");
+  state = 6; // EscrowCore.JobState.Closed.
+  const closed = await service.getPublicJobDefinition("parent-job-001");
+  assert.equal(closed.claimable, false);
+  assert.equal(closed.claimState, "unclaimable");
+  assert.equal(closed.reason, "external_posting_not_open_on_chain");
+  assert.equal(reads, 2);
+  await service.listJobsWithSessions();
+  assert.equal(reads, 3, "one bulk read, no per-row duplicate RPC");
+});
+
 test("legacy external posting is visibly unclaimable and excluded from claimable inventory", async () => {
   const currentEscrow = "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793";
   const legacyEscrow = "0x590EbE304E0C7672e2abF3161177D2B94a2aC3fC";

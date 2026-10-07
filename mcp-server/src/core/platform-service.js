@@ -259,7 +259,8 @@ export class PlatformService {
       jobs.map((job) => this.attachClaimState(job, {
         wallet: currentWallet ?? wallet,
         rewardBank,
-        now
+        now,
+        externalClaimabilityRefreshed: true
       }))
     );
     return includeDesignatedClaimants
@@ -1497,7 +1498,7 @@ export class PlatformService {
     if (
       isExternalJob(job)
       && this.blockchainGateway?.isEnabled?.()
-      && !this.externalPostingClaimability.has(job.id)
+&& (!options.externalClaimabilityRefreshed || !this.externalPostingClaimability.has(job.id))
     ) {
       await this.refreshExternalPostingClaimability([job]);
     }

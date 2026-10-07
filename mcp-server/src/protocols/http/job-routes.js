@@ -6,7 +6,7 @@ import {
   decorateJobEstimatePresentation,
   decorateJobPresentation
 } from "../../core/verdict-presentation.js";
-import { buildPublicJobsResponse } from "./jobs-response.js";
+import { buildPublicJobsPage } from "./jobs-response.js";
 
 export function createJobRoutes({
   authMiddleware,
@@ -47,7 +47,19 @@ export function createJobRoutes({
 
     if (request.method === "GET" && pathname === "/jobs") {
       const secured = await listPublicJobs(url.searchParams.get("wallet") ?? undefined);
-      respond(response, 200, buildPublicJobsResponse(secured, url.searchParams));
+      const page = buildPublicJobsPage(secured, url.searchParams);
+      const etag = `W/"${createHash("sha256").update(JSON.stringify(page)).digest("hex")}"`;
+      const headers = { etag, "cache-control": "public, max-age=0, must-revalidate" };
+      if (page.nextCursor) {
+        const next = new URL(url);
+        next.searchParams.delete("offset");
+        next.searchParams.set("cursor", page.nextCursor);
+        if (Array.isArray(page.body)) next.searchParams.set("format", "full");
+        headers.link = `<${next.pathname}${next.search}>; rel="next"`;
+      }
+      const matches = String(request.headers?.["if-none-match"] ?? "").split(",")
+        .some((value) => value.trim() === "*" || value.trim().replace(/^W\//u, "") === etag.replace(/^W\//u, ""));
+respond(response, matches ? 304 : 200, matches ? undefined : page.body, headers);
       return true;
     }
 
@@ -327,3 +339,4 @@ async function resolveClaimantAttribution({ marker, verifyCanaryMarker, wallet }
 function isTruthyFlag(value) {
   return ["1", "true", "yes"].includes(String(value ?? "").trim().toLowerCase());
 }
+import { createHash } from "node:crypto";
