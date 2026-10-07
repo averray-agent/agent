@@ -116,6 +116,30 @@ function makeHarness(overrides = {}) {
   return { calls, response, route };
 }
 
+test("GET /health exposes overdue GitHub review and upstream health without changing API liveness", async () => {
+  const githubUpstream = { ok: false, lastSuccessAt: "2026-10-06T12:00:00Z", lastError: "github_api_401" };
+  const warning = { code: "github_pr_review_overdue", severity: "warning", oldestAgeMs: 49 * 3_600_000 };
+  const { route, response } = makeHarness({ service: { githubPrReview: {
+    getStatus: async () => ({ githubUpstream, warnings: [warning] })
+  } } });
+  await route({ request: { method: "GET" }, response, pathname: "/health" });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body.serviceHealth.components.githubUpstream, githubUpstream);
+  assert.deepEqual(response.body.warnings.find((item) => item.code === warning.code), warning);
+  assert.equal(response.body.settlement.awaitingHumanReview, 0);
+});
+
+test("GET /health fails closed and redacts a throwing GitHub poller status read", async () => {
+  const { route, response } = makeHarness({ service: { githubPrReview: {
+    getStatus: () => { throw new Error("private upstream details"); }
+  } } });
+  await route({ request: { method: "GET" }, response, pathname: "/health" });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body.serviceHealth.components.githubUpstream,
+    { ok: false, lastSuccessAt: null, lastError: "github_status_unavailable" });
+  assert.doesNotMatch(JSON.stringify(response.body), /private upstream details/u);
+});
+
 test("operational routes ignore unrelated paths", async () => {
   const { calls, response, route } = makeHarness();
 

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { disputeIdForSession } from "./dispute-resolution.js";
+import { requireJobSnapshot } from "./job-snapshot.js";
 import { resolveOnboardingInventoryHealth } from "./onboarding-inventory.js";
 
 /**
@@ -128,7 +129,8 @@ const deploymentManifestCache = new Map();
 export function resolveServiceHealth({
   stateStoreHealth,
   authConfig,
-  submittedJobAutoVerifierHealth = undefined
+  submittedJobAutoVerifierHealth = undefined,
+  githubUpstreamHealth = undefined
 }) {
   const stateStoreOk = Boolean(stateStoreHealth?.ok);
   const jwtBackend = authConfig?.jwtBackend ?? "kms";
@@ -160,7 +162,8 @@ export function resolveServiceHealth({
       },
       ...(submittedJobAutoVerifierHealth === undefined
         ? {}
-        : { submittedJobAutoVerifier: submittedJobAutoVerifierHealth })
+        : { submittedJobAutoVerifier: submittedJobAutoVerifierHealth }),
+      ...(githubUpstreamHealth === undefined ? {} : { githubUpstream: githubUpstreamHealth })
     }
   };
 }
@@ -865,6 +868,7 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
     zeroPaySettled24h: 0,
     claimedNotSubmitted: 0,
     submittedNotSettled: 0,
+    awaitingHumanReview: 0,
     stuck: 0,
     failed24h: 0,
     asOf,
@@ -887,6 +891,7 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
     let zeroPaySettled24h = 0;
     let claimedNotSubmitted = 0;
     let submittedNotSettled = 0;
+    let awaitingHumanReview = 0;
     let stuck = 0;
     let failed24h = 0;
     const seenFailures = new Set();
@@ -915,7 +920,9 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
       if (SUBMITTED_NOT_SETTLED_SESSION_STATUSES.has(session?.status) && session?.submittedAt) {
         submittedNotSettled += 1;
       }
-      if (isSubmittedStuck(session, nowMs, stuckAfterMs)) {
+      if (await isAwaitingHumanReview(session, stateStore)) {
+        awaitingHumanReview += 1;
+      } else if (isSubmittedStuck(session, nowMs, stuckAfterMs)) {
         stuck += 1;
       }
       if (isSubmitExecutionFailureWithinWindow(session, cutoffMs)) {
@@ -954,6 +961,7 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
       zeroPaySettled24h,
       claimedNotSubmitted,
       submittedNotSettled,
+      awaitingHumanReview,
       stuck,
       failed24h,
       asOf,
@@ -1051,6 +1059,22 @@ function isSettledWithinWindow(session, cutoffMs) {
 function isTimestampWithinWindow(value, cutoffMs) {
   const timestamp = timestampMs(value);
   return Number.isFinite(timestamp) && timestamp >= cutoffMs;
+}
+
+async function isAwaitingHumanReview(session, stateStore) {
+  if (session?.status !== "submitted" || !session.submittedAt) return false;
+  try {
+    const { job } = requireJobSnapshot(session);
+    const mode = job.verifierConfig?.handler ?? job.verifierMode;
+    if (mode === "human_fallback") return true;
+    if (mode !== "github_pr") return false;
+    const observation = await stateStore.getMutationReceipt?.("github_pr_review_observation", session.sessionId);
+    // A known approval awaiting execution is not a human-review backlog item.
+    return observation?.previewOutcome !== "approved";
+  } catch {
+    // Integrity/storage failures must not hide a stuck settlement as normal review.
+    return false;
+  }
 }
 
 function isSubmittedStuck(session, nowMs, stuckAfterMs) {

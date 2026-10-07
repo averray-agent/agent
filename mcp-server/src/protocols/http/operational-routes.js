@@ -113,7 +113,8 @@ export function createOperationalRoutes({
         indexerProbe,
         externalPostingWatcherStatus,
         submittedJobAutoVerifierHealth,
-        lockedTierHealth
+        lockedTierHealth,
+        githubPrReviewStatus
       ] = await Promise.all([
         stateStore.healthCheck?.() ?? { ok: true, backend: stateStore.constructor.name },
         getCachedBlockchainHealth(),
@@ -130,7 +131,10 @@ export function createOperationalRoutes({
           ok: false,
           code: "locked_tier_health_unavailable",
           message: "Locked-deposit health state is unreadable."
-        })) ?? { ok: true, state: "not_configured" }
+        })) ?? { ok: true, state: "not_configured" },
+        Promise.resolve().then(() => service?.githubPrReview?.getStatus?.()).catch(() => ({
+          githubUpstream: { ok: false, lastSuccessAt: null, lastError: "github_status_unavailable" }
+        }))
       ]);
       const mutationBackendStatus = await getMutationBackendStatus({
         gateway,
@@ -142,7 +146,9 @@ export function createOperationalRoutes({
       const serviceHealth = resolveServiceHealth({
         stateStoreHealth: storeHealth,
         authConfig,
-        submittedJobAutoVerifierHealth
+        submittedJobAutoVerifierHealth,
+        githubUpstreamHealth: githubPrReviewStatus?.githubUpstream
+          ?? { ok: false, lastSuccessAt: null, lastError: "github_not_configured" }
       });
       const capabilityHealth = resolveCapabilityHealth({
         blockchainHealth: chainHealth,
@@ -159,6 +165,7 @@ export function createOperationalRoutes({
         ...buildOnboardingInventoryWarnings(productHealth.onboarding),
         ...buildSubmittedJobAutoVerifierWarnings(submittedJobAutoVerifierHealth),
         ...buildLockedTierWarnings(lockedTierHealth),
+        ...(githubPrReviewStatus?.warnings ?? []),
         ...getProcessWarnings()
       ];
       await recordCapabilityWarningTransitions({

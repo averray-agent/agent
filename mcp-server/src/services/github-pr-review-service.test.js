@@ -67,12 +67,13 @@ async function liveFixture() {
 
 test("changed upstream with a rejected preview updates the observation without calling verifySubmission and stays submitted", async (t) => {
   const f = await liveFixture();
+  f.upstream.conclusion = "failure";
   const settle = t.mock.method(f.verifier, "verifySubmission");
   await f.review.runOnce(new Date("2026-09-14T00:00:00Z"));
   const before = await f.store.getMutationReceipt("github_pr_review_observation", "pr");
   assert.equal(settle.mock.callCount(), 0);
 
-  f.upstream.conclusion = "failure";
+  f.upstream.sha = "changed-rejected-head";
   assert.equal((await f.verifier.previewSubmission({ sessionId: "pr" })).outcome, "rejected");
   const now = new Date("2026-09-14T00:30:00Z");
   const run = await f.review.runOnce(now);
@@ -90,8 +91,9 @@ test("changed upstream with a rejected preview updates the observation without c
   assert.equal(settle.mock.callCount(), 0);
 });
 
-test("changed upstream with an approved merged preview settles; baseline and unchanged ticks do not", async (t) => {
+test("changed upstream with an approved merged preview settles; non-approved baseline and unchanged ticks do not", async (t) => {
   const f = await liveFixture();
+  f.upstream.conclusion = "failure";
   const settle = t.mock.method(f.verifier, "verifySubmission");
   await f.review.runOnce();
   await f.review.runOnce();
@@ -108,6 +110,110 @@ test("changed upstream with an approved merged preview settles; baseline and unc
   assert.equal((await f.store.getSession("pr")).status, "resolved");
   await f.review.runOnce();
   assert.equal(settle.mock.callCount(), 1);
+});
+
+test("first observation of an approved merged PR settles once with the server-side outcome guard", async (t) => {
+  const f = await liveFixture();
+  f.upstream.merged = true;
+  const settle = t.mock.method(f.verifier, "verifySubmission");
+  const now = new Date("2026-10-07T18:30:00Z");
+  const run = await f.review.runOnce(now);
+  assert.deepEqual(run.errors, []);
+  assert.deepEqual(run.reviewed, [{ sessionId: "pr", outcome: "approved" }]);
+  assert.deepEqual(settle.mock.calls[0].arguments, [{ sessionId: "pr", expectOutcome: "approved" }]);
+  assert.equal((await f.store.getSession("pr")).status, "resolved");
+  assert.equal((await f.store.getMutationReceipt("github_pr_review_observation", "pr")).previewOutcome, "approved");
+  await f.review.runOnce(now);
+  assert.equal(settle.mock.callCount(), 1);
+});
+
+test("an unchanged approved fingerprint retries failed settlement and also recovers a legacy observation receipt", async (t) => {
+  for (const legacy of [false, true]) {
+    const f = await liveFixture();
+    f.upstream.merged = true;
+    const original = f.verifier.verifySubmission.bind(f.verifier);
+    let calls = 0;
+    t.mock.method(f.verifier, "verifySubmission", async (args) => {
+      calls += 1;
+      assert.equal(args.expectOutcome, "approved");
+      if (calls === 1) throw new Error("settlement temporarily unavailable");
+      return original(args);
+    });
+    const first = await f.review.runOnce();
+    assert.equal(first.errors.length, 1);
+    assert.equal((await f.store.getSession("pr")).status, "submitted");
+    const receipt = await f.store.getMutationReceipt("github_pr_review_observation", "pr");
+    assert.equal(receipt.previewOutcome, "approved");
+    if (legacy) {
+      delete receipt.previewOutcome;
+      await f.store.upsertMutationReceipt("github_pr_review_observation", "pr", receipt);
+    }
+    const second = await f.review.runOnce();
+    assert.deepEqual(second.errors, []);
+    assert.deepEqual(second.reviewed, [{ sessionId: "pr", outcome: "approved" }]);
+    assert.equal(calls, 2);
+    assert.equal(f.writes.length, 1);
+    assert.equal((await f.store.getSession("pr")).status, "resolved");
+  }
+});
+
+test("poller GitHub health reports unavailable, partial, recovered and stale reads without raw error text", async (t) => {
+  const store = new MemoryStateStore();
+  await add(store, "pr");
+  let lookup = { status: "unavailable", reason: "github_api_401" };
+  const verifySubmission = t.mock.fn();
+  const review = new GithubPrReviewService({ stateStore: store, githubToken: "token", intervalMs: 60_000,
+    verifierService: { previewSubmission: async () => ({ outcome: "rejected", githubLookup: lookup }), verifySubmission } });
+  const now = new Date("2026-10-07T18:30:00Z");
+  assert.deepEqual((await review.getStatus(now)).githubUpstream,
+    { ok: false, lastSuccessAt: null, lastError: "github_not_checked" });
+  await review.runOnce(now);
+  assert.deepEqual((await review.getStatus(now)).githubUpstream,
+    { ok: false, lastSuccessAt: null, lastError: "github_api_401" });
+  lookup = { status: "unavailable", reason: "private token and request details must stay out of health" };
+  await review.runOnce(now);
+  assert.equal((await review.getStatus(now)).githubUpstream.lastError, "github_lookup_unavailable");
+  lookup = { status: "verified", partial: { reviews: "unavailable" } };
+  await review.runOnce(now);
+  assert.equal((await review.getStatus(now)).githubUpstream.lastError, "github_lookup_partial");
+  lookup = { status: "verified", merged: false, headSha: "healthy" };
+  await review.runOnce(now);
+  assert.deepEqual((await review.getStatus(now)).githubUpstream,
+    { ok: true, lastSuccessAt: now.toISOString(), lastError: null });
+  assert.deepEqual((await review.getStatus(new Date(+now + 120_001))).githubUpstream,
+    { ok: false, lastSuccessAt: now.toISOString(), lastError: "github_read_stale" });
+  assert.equal(verifySubmission.mock.callCount(), 0);
+});
+
+test("approved preview cannot settle partial upstream evidence or a session that left submitted", async (t) => {
+  for (const partial of [true, false]) {
+    const store = new MemoryStateStore();
+    await add(store, "pr");
+    const verifySubmission = t.mock.fn();
+    const review = new GithubPrReviewService({ stateStore: store, githubToken: "token", verifierService: {
+      previewSubmission: async () => {
+        if (!partial) await store.upsertSession({ ...await store.getSession("pr"), status: "resolved" });
+        return { outcome: "approved", githubLookup: { status: "verified", merged: true,
+          partial: { reviews: partial ? "unavailable" : "available" } } };
+      }, verifySubmission
+    } });
+    await review.runOnce();
+    assert.equal(verifySubmission.mock.callCount(), 0);
+  }
+});
+
+test("one healthy GitHub item cannot hide another failed read in the same poll", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "a-unavailable");
+  await add(store, "z-healthy");
+  const review = new GithubPrReviewService({ stateStore: store, githubToken: "token", verifierService: {
+    previewSubmission: async ({ sessionId }) => ({ outcome: "rejected", githubLookup: sessionId === "z-healthy"
+      ? { status: "verified", headSha: "good" } : { status: "unavailable", reason: "github_api_403" } })
+  } });
+  const now = new Date("2026-10-07T18:30:00Z");
+  await review.runOnce(now);
+  assert.deepEqual((await review.getStatus(now)).githubUpstream,
+    { ok: false, lastSuccessAt: now.toISOString(), lastError: "github_api_403" });
 });
 
 test("every other preview outcome is observation-only and leaves the session in the submitted queue", async (t) => {
