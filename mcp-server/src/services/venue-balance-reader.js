@@ -23,16 +23,18 @@ export class VenueBalanceReader {
   constructor({
     polkadotApiLoader = loadPolkadotApi,
     substrateApiFactory = createSubstrateApi,
-    evmProviderFactory = createEvmProvider
+    evmProviderFactory = createEvmProvider,
+    substrateTimeoutMs = 10_000
   } = {}) {
     this.polkadotApiLoader = polkadotApiLoader;
     this.substrateApiFactory = substrateApiFactory;
     this.evmProviderFactory = evmProviderFactory;
+    this.substrateTimeoutMs = substrateTimeoutMs;
     this.substrateApis = new Map();
     this.evmProviders = new Map();
   }
 
-  async read(target, { blockTag = undefined } = {}) {
+  async read(target, { blockTag = undefined, provider: sharedProvider } = {}) {
     const normalized = normalizeVenueBalanceTarget(target);
     if (blockTag !== undefined && (
       normalized.ledger !== "erc20"
@@ -43,7 +45,8 @@ export class VenueBalanceReader {
     }
     if (normalized.ledger === "substrate_tokens") {
       const api = await this.getSubstrateApi(normalized.endpoint);
-      const record = await api.query.tokens.accounts(normalized.account, normalized.assetId);
+      const record = await this.readSubstrate(normalized.endpoint, api,
+        () => api.query.tokens.accounts(normalized.account, normalized.assetId));
       const json = record?.toJSON?.() ?? record;
       return {
         raw: BigInt(json?.free ?? 0),
@@ -54,7 +57,8 @@ export class VenueBalanceReader {
 
     if (normalized.ledger === "substrate_system") {
       const api = await this.getSubstrateApi(normalized.endpoint);
-      const record = await api.query.system.account(normalized.account);
+      const record = await this.readSubstrate(normalized.endpoint, api,
+        () => api.query.system.account(normalized.account));
       const json = record?.toJSON?.() ?? record;
       return {
         raw: BigInt(json?.data?.free ?? json?.free ?? 0),
@@ -63,7 +67,7 @@ export class VenueBalanceReader {
       };
     }
 
-    const provider = this.getEvmProvider(
+    const provider = sharedProvider ?? this.getEvmProvider(
       normalized.endpoint,
       normalized.chainId,
       normalized.rpcUrls
@@ -85,11 +89,26 @@ export class VenueBalanceReader {
       // Keep this dependency outside backend startup. A rejected import stays
       // attached to the read promise so the observer records the exact error,
       // retries it as a visible Pending, and eventually emits Failed.
-      pending = this.polkadotApiLoader()
-        .then((polkadotApi) => this.substrateApiFactory(endpoint, polkadotApi));
+      pending = Promise.resolve().then(() => this.polkadotApiLoader())
+        .then((polkadotApi) => this.substrateApiFactory(endpoint, polkadotApi, this.substrateTimeoutMs));
       this.substrateApis.set(endpoint, pending);
     }
-    return pending;
+    try {
+      return await boundedSubstrateRead(pending, this.substrateTimeoutMs, "connect");
+    } catch (error) {
+      if (this.substrateApis.get(endpoint) === pending) this.resetSubstrateApi(endpoint);
+      throw error;
+    }
+  }
+
+  async readSubstrate(endpoint, api, loader) {
+    try {
+      if (api.isConnected === false) throw new Error("venue_substrate_disconnected");
+      return await boundedSubstrateRead(Promise.resolve().then(loader), this.substrateTimeoutMs, "query");
+    } catch (error) {
+      this.resetSubstrateApi(endpoint);
+      throw error;
+    }
   }
 
   resetSubstrateApi(endpoint) {
@@ -117,11 +136,7 @@ export class VenueBalanceReader {
   }
 
   async close() {
-    const apis = await Promise.allSettled([...this.substrateApis.values()]);
-    await Promise.allSettled(apis
-      .filter((entry) => entry.status === "fulfilled")
-      .map((entry) => entry.value?.disconnect?.()));
-    this.substrateApis.clear();
+    for (const endpoint of this.substrateApis.keys()) this.resetSubstrateApi(endpoint);
     this.evmProviders.clear();
   }
 }
@@ -235,11 +250,31 @@ function loadPolkadotApi() {
   return import("@polkadot/api");
 }
 
-function createSubstrateApi(endpoint, { ApiPromise, HttpProvider, WsProvider }) {
+async function createSubstrateApi(endpoint, { ApiPromise, HttpProvider, WsProvider }, timeoutMs) {
   const provider = endpoint.startsWith("http")
     ? new HttpProvider(endpoint)
     : new WsProvider(endpoint, 5_000);
-  return ApiPromise.create({ provider, noInitWarn: true });
+  const pending = ApiPromise.create({ provider, noInitWarn: true });
+  try {
+    return await boundedSubstrateRead(pending, timeoutMs, "connect");
+  } catch (error) {
+    // Stop the socket's automatic reconnect loop even if API initialization
+    // never resolves. Also close an API that completes after the deadline.
+    void Promise.resolve().then(() => provider.disconnect()).catch(() => {});
+    void pending.then((api) => api.disconnect()).catch(() => {});
+    throw error;
+  }
+}
+
+async function boundedSubstrateRead(pending, timeoutMs, stage) {
+  let timer;
+  try {
+    return await Promise.race([pending, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`venue_substrate_${stage}_timeout after ${timeoutMs}ms`)), timeoutMs);
+    })]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function createEvmProvider(_endpoint, _chainId, rpcUrls) {
