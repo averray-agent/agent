@@ -29,7 +29,7 @@ import {
 } from "../../mcp-server/src/payments/adapters/cdp/settlement-adapter.js";
 
 const BASE_RPC = process.env.BASE_RPC_URL ?? "https://mainnet.base.org";
-const HUB_RPC = process.env.RPC_URL ?? "https://services.polkadothub-rpc.com/mainnet/";
+const HUB_RPC = process.env.RPC_URL ?? "https://eth-rpc.polkadot.io/";
 const HUB_USDC = "0x0000053900000000000000000000000001200000";
 const AGENT_ACCOUNT_CORE = "0xB1350932bf85E7ffd0599E9a3CC7b55718D89E57";
 const ERC20 = [

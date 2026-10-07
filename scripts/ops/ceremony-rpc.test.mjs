@@ -29,17 +29,17 @@ function chainIdResult(chainId = POLKADOT_HUB_MAINNET_CHAIN_ID) {
   return `0x${chainId.toString(16)}`;
 }
 
-test("mainnet manifest promotes the official RPC and retains the demoted endpoint as backup", async () => {
+test("mainnet manifest uses Parity first and Blockscout as the last backup", async () => {
   const manifest = JSON.parse(
     await readFile(new URL("../../deployments/mainnet.json", import.meta.url), "utf8")
   );
   assert.equal(
     manifest.rpcUrl,
-    "https://services.polkadothub-rpc.com/mainnet/"
+    "https://eth-rpc.polkadot.io/"
   );
   assert.deepEqual(
     manifest.rpcBackupUrls,
-    ["https://eth-rpc.polkadot.io/"]
+    ["https://blockscout.polkadot.io/api/eth-rpc"]
   );
   assert.equal(manifest.deploymentBlocks.escrowCore, 18_647_902);
 });

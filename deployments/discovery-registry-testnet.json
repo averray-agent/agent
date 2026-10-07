@@ -2,7 +2,10 @@
   "profile": "testnet",
   "network": "Polkadot Hub TestNet",
   "chainId": 420420417,
-  "rpcUrl": "https://services.polkadothub-rpc.com/testnet",
+  "rpcUrl": "https://eth-rpc-testnet.polkadot.io/",
+  "rpcBackupUrls": [
+    "https://blockscout-testnet.polkadot.io/api/eth-rpc"
+  ],
   "contract": "DiscoveryRegistry",
   "address": "0x9B1aDD0Dcd0AF57d8549307C27fc24555F8E293d",
   "publisher": "0xFd2EAE2043243fDdD2721C0b42aF1b8284Fd6519",
