@@ -198,15 +198,16 @@ test("RPC_URL and RPC_BACKUP_URLS share backend ordering while existing aliases 
   assert.match(config, /rpc: createIndexerRpcTransport\(rpcUrls\)/u);
 });
 
-test("production template explicitly cross-checks Dweller against the public backup", async () => {
+test("production template stays single-provider until Track 2 and excludes budgeted Blockscout", async () => {
   const template = await readFile(new URL("../../../deploy/indexer.mainnet.env.template", import.meta.url), "utf8");
   const env = Object.fromEntries([...template.matchAll(/^([A-Z][A-Z0-9_]*)=(.*)$/gmu)]
     .map((match) => [match[1], match[2]]));
-  const expected = ["https://services.polkadothub-rpc.com/mainnet/", "https://eth-rpc.polkadot.io/"];
-  assert.equal(env.RPC_BACKUP_URLS, expected[1], "backup must be explicit, not dependent on the PONDER alias");
+  const expected = ["https://eth-rpc.polkadot.io/"];
+  assert.equal(env.DWELLER_RPC_URL, expected[0]);
+  assert.equal(env.RPC_BACKUP_URLS, "", "Blockscout cannot fund indexer cross-checks; wait for Track 2");
   assert.deepEqual(resolveIndexerRpcUrls(420420419, env), expected);
   delete env.PONDER_RPC_URL_420420419;
-  assert.deepEqual(resolveIndexerRpcUrls(420420419, env), expected, "explicit backup survives removal of the compatibility alias");
+  assert.deepEqual(resolveIndexerRpcUrls(420420419, env), expected, "primary survives removal of the compatibility alias");
 });
 
 // 2026-09-10 mainnet incident: services.polkadothub-rpc.com served block
