@@ -10,6 +10,8 @@ export function WalletSessionNotice() {
   const auth = useAuth();
   const wallet = useWalletConnection();
   const siweExpired = auth.lastReason === "siwe_expired" || auth.lastReason === "token_refresh_rejected";
+  // A wallet-provider pairing alone is not a prior Averray sign-in.
+  if (!auth.authenticated && !auth.lastReason) return null;
 
   if (siweExpired) {
     return (

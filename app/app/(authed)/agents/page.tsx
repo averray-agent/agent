@@ -19,6 +19,7 @@ import { matchesAgentStatusFilter } from "@/lib/api/agent-roster-truth.js";
 import { useAgent, useAgents } from "@/lib/api/hooks";
 import { freshnessFromRequests } from "@/components/shell/DataFreshnessPill";
 import { MobileAgentCards } from "@/components/agents/MobileAgentCards";
+import { profileReadFailure } from "@/lib/agents/profile-read-state.js";
 
 export default function AgentsPage() {
   const agentsRequest = useAgents();
@@ -41,6 +42,7 @@ export default function AgentsPage() {
     : null;
   const agentDetail = useAgent(drawerOpen && openAgentFromList ? openAgentFromList.walletFull : null);
   const openAgent = extractAgent(agentDetail.data) ?? openAgentFromList;
+  const profileFailure = profileReadFailure(agentDetail.error);
 
   const filtered = useMemo(() => {
     const q = filter.query.trim().toLowerCase();
@@ -212,7 +214,14 @@ export default function AgentsPage() {
           ) : null
         }
       >
-        {openAgent ? <AgentDrawerBody agent={openAgent} /> : null}
+        {profileFailure ? (
+          <div role="status" className="space-y-3 p-4 text-sm">
+            <p>{profileFailure.message}</p>
+            {profileFailure.kind === "unavailable" ? (
+              <button type="button" className="underline" onClick={() => void agentDetail.mutate()}>Retry profile</button>
+            ) : null}
+          </div>
+        ) : openAgent ? <AgentDrawerBody agent={openAgent} /> : null}
       </DetailDrawer>
 
       <AgentComparisonDialog

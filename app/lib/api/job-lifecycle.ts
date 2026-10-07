@@ -137,6 +137,8 @@ export function classifyJobRow(job: Record<string, unknown>): JobRowClassificati
   const status = text(lifecycle?.status) || text(job.status);
   const state = text(lifecycle?.state) || text(job.state) || status || "open";
   const effectiveState = text(job.effectiveState);
+  const liveState = text(asRecord(job.claimStatus)?.claimState) || text(job.claimState);
+  const liveClosed = ["closed", "cancelled", "unclaimable", "submitted", "claimed", "disputed", "exhausted"].includes(liveState);
   // An exhausted job (recurring reserve spent) is not open work even
   // when its raw status still reads "open" — counting it inflated the
   // OPEN bucket past what agents can actually claim.
@@ -147,6 +149,7 @@ export function classifyJobRow(job: Record<string, unknown>): JobRowClassificati
   return {
     exhausted,
     open:
+      !liveClosed &&
       !exhausted &&
       !restricted &&
       (status === "open" ||
@@ -156,6 +159,7 @@ export function classifyJobRow(job: Record<string, unknown>): JobRowClassificati
         effectiveState === "claimable"),
     // Note this is a SUBSET of `open`, not a sibling bucket.
     claimable:
+      !liveClosed &&
       !exhausted &&
       !restricted &&
       (job.claimable === true ||

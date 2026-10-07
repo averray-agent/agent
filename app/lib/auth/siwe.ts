@@ -62,18 +62,20 @@ export async function signIn(kind?: WalletProviderKind): Promise<AuthSession> {
 
 export async function signOut(): Promise<void> {
   const token = getStoredToken();
+  // Notify every header immediately, even if the logout endpoint is offline.
+  clearSession();
+  setClientToken(undefined);
   if (token) {
     try {
       await fetch(apiUrl("/auth/logout"), {
         method: "POST",
         headers: { authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(5_000),
       });
     } catch {
       // best-effort: clear locally regardless
     }
   }
-  clearSession();
-  setClientToken(undefined);
 }
 
 export type RefreshOutcome =
