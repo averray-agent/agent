@@ -15,7 +15,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
-import { parseArgs } from "./fund-signer-usdc-deposit.mjs";
+import { parseArgs, selectRpcUrl } from "./fund-signer-usdc-deposit.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const scriptPath = resolve(here, "fund-signer-usdc-deposit.mjs");
@@ -148,3 +148,92 @@ test("CLI: --help prints both signer backends and SIGNER_ADDRESS_OVERRIDE", () =
   assert.match(result.stdout, /SIGNER_ADDRESS_OVERRIDE/u);
   assert.match(result.stdout, /--expected-signer/u);
 });
+
+// ── RPC selection ──────────────────────────────────────────────────────
+// The manifest primary can be unreachable (DNS gone, provider down). The
+// script must then use a backup instead of retrying the dead endpoint until
+// the workflow timeout cancels it.
+
+const MANIFEST = { rpcUrl: "https://primary.test/", rpcBackupUrls: ["https://backup.test/"] };
+const chainReply = (hex) => ({ ok: true, json: async () => ({ jsonrpc: "2.0", id: 1, result: hex }) });
+const fetchBy = (table) => async (url, init) => {
+  const handler = table[url];
+  if (!handler) throw new Error(`unexpected url ${url}`);
+  return handler(init);
+};
+
+test("selectRpcUrl: the primary wins when it answers with the right chain id", async () => {
+  const calls = [];
+  const chosen = await selectRpcUrl(MANIFEST, { profile: "mainnet", fetchImpl: fetchBy({
+    "https://primary.test/": async () => { calls.push("primary"); return chainReply("0x190f1b43"); },
+    "https://backup.test/": async () => { calls.push("backup"); return chainReply("0x190f1b43"); }
+  }) });
+  assert.equal(chosen.host, "primary.test");
+  assert.equal(chosen.role, "primary");
+  assert.equal(chosen.chainId, 420420419);
+  assert.deepEqual(calls, ["primary"]);
+});
+
+test("selectRpcUrl: a primary that cannot be reached falls through to the backup", async () => {
+  const chosen = await selectRpcUrl(MANIFEST, { profile: "mainnet", fetchImpl: fetchBy({
+    "https://primary.test/": async () => { throw new TypeError("fetch failed"); },
+    "https://backup.test/": async () => chainReply("0x190f1b43")
+  }) });
+  assert.equal(chosen.host, "backup.test");
+  assert.equal(chosen.role, "backup");
+});
+
+test("selectRpcUrl: a primary on the wrong chain is skipped, not trusted", async () => {
+  const chosen = await selectRpcUrl(MANIFEST, { profile: "mainnet", fetchImpl: fetchBy({
+    "https://primary.test/": async () => chainReply("0x190f1b41"),
+    "https://backup.test/": async () => chainReply("0x190f1b43")
+  }) });
+  assert.equal(chosen.host, "backup.test");
+});
+
+test("selectRpcUrl: a primary that never answers is abandoned at the deadline", async () => {
+  // AbortSignal.timeout() uses an unref'd timer. A real fetch keeps the loop
+  // alive while it waits; this stub does not, so hold the loop open ourselves.
+  const keepAlive = setInterval(() => {}, 10);
+  let deadlineSeen = false;
+  try {
+    const chosen = await selectRpcUrl(MANIFEST, { profile: "mainnet", timeoutMs: 50, fetchImpl: fetchBy({
+      "https://primary.test/": (init) => new Promise((_, reject) => {
+        deadlineSeen = init.signal instanceof AbortSignal;
+        init.signal?.addEventListener("abort", () => reject(init.signal.reason));
+        setTimeout(() => reject(new Error("stub gave up: no deadline was passed")), 500).unref();
+      }),
+      "https://backup.test/": async () => chainReply("0x190f1b43")
+    }) });
+    assert.equal(chosen.host, "backup.test");
+    assert.equal(deadlineSeen, true, "the request must carry an abort deadline");
+  } finally {
+    clearInterval(keepAlive);
+  }
+});
+
+test("selectRpcUrl: when every endpoint fails it throws and names each host", async () => {
+  await assert.rejects(
+    selectRpcUrl(MANIFEST, { profile: "mainnet", fetchImpl: fetchBy({
+      "https://primary.test/": async () => { throw new TypeError("fetch failed"); },
+      "https://backup.test/": async () => ({ ok: false, status: 503, json: async () => ({}) })
+    }) }),
+    /No RPC endpoint answered for mainnet: primary\.test: fetch failed; backup\.test: HTTP 503/u
+  );
+});
+
+test("selectRpcUrl: an unknown profile is refused before any request", async () => {
+  let called = false;
+  await assert.rejects(
+    selectRpcUrl(MANIFEST, { profile: "devnet", fetchImpl: async () => { called = true; return chainReply("0x1"); } }),
+    /unknown deployment profile: devnet/u
+  );
+  assert.equal(called, false);
+});
+
+test("script: the provider is built with a fixed chain id, never a bare JsonRpcProvider(url)", async () => {
+  const source = await import("node:fs/promises").then((fs) => fs.readFile(scriptPath, "utf8"));
+  assert.match(source, /new JsonRpcProvider\(rpc\.url, rpc\.chainId, \{ staticNetwork: true \}\)/u);
+  assert.doesNotMatch(source, /new JsonRpcProvider\(rpcUrl\)/u);
+});
+

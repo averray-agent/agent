@@ -96,6 +96,51 @@ const AGENT_ACCOUNT_DEPOSIT_ABI = [
   "function positions(address account, address asset) view returns (uint256 liquid, uint256 reserved, uint256 strategyAllocated, uint256 collateralLocked, uint256 jobStakeLocked, uint256 debtOutstanding)"
 ];
 
+export const EXPECTED_CHAIN_IDS = Object.freeze({ mainnet: 420420419, testnet: 420420417 });
+
+/**
+ * Pick the first manifest RPC endpoint that answers `eth_chainId` with the
+ * profile's chain id: the primary first, then `rpcBackupUrls` in order.
+ *
+ * A bare `new JsonRpcProvider(url)` retries network detection forever when
+ * its endpoint is unreachable, so a dead primary turned the dry-run into a
+ * 15-minute hang. This probe fails over on transport errors, HTTP errors,
+ * RPC errors, a 15 s timeout, or a chain-id mismatch, and throws only when
+ * every endpoint failed. The caller then constructs the provider with the
+ * confirmed chain id and `staticNetwork: true`, so it never loops.
+ */
+export async function selectRpcUrl(deployments, { profile, fetchImpl = fetch, timeoutMs = 15_000 } = {}) {
+  const expected = EXPECTED_CHAIN_IDS[profile];
+  if (expected === undefined) throw new Error(`unknown deployment profile: ${profile}.`);
+  const urls = [deployments?.rpcUrl, ...(deployments?.rpcBackupUrls ?? [])]
+    .filter((url) => typeof url === "string" && url.length > 0);
+  if (urls.length === 0) throw new Error("deployments manifest has no RPC URL.");
+  const failures = [];
+  for (const [index, url] of urls.entries()) {
+    const host = new URL(url).host;
+    try {
+      const response = await fetchImpl(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }),
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      if (payload?.error || typeof payload?.result !== "string") {
+        throw new Error("eth_chainId returned an error or no result");
+      }
+      const chainId = Number(BigInt(payload.result));
+      if (chainId !== expected) throw new Error(`chain id ${chainId}, expected ${expected}`);
+      return { url, host, chainId, index, role: index === 0 ? "primary" : "backup" };
+    } catch (error) {
+      const reason = error?.name === "TimeoutError" ? `timed out after ${timeoutMs} ms` : (error?.message ?? "request failed");
+      failures.push(`${host}: ${reason}`);
+    }
+  }
+  throw new Error(`No RPC endpoint answered for ${profile}: ${failures.join("; ")}`);
+}
+
 export function parseArgs(argv) {
   // NO default profile, deliberately.
   //
@@ -206,11 +251,13 @@ async function main() {
   const deploymentsPath = resolve(repoRoot, "deployments", `${args.profile}.json`);
   const deployments = JSON.parse(await readFile(deploymentsPath, "utf8"));
 
-  const rpcUrl = deployments.rpcUrl;
   const usdcAddress = deployments.contracts.token;
   const agentAccountAddress = deployments.contracts.agentAccountCore;
 
-  const provider = new JsonRpcProvider(rpcUrl);
+  // The provider is attached after the identity gates below, so a refused
+  // signer never costs a chain round-trip (see selectRpcUrl).
+  let provider = null;
+  let rpc = null;
 
   // Resolve the signer address. Precedence:
   //   1. --use-kms  -> kms:GetPublicKey via KmsSigner (Phase 3 path).
@@ -285,9 +332,20 @@ async function main() {
     ? (args.useKms ? "dry-run (kms-aware)" : "dry-run")
     : (args.useKms ? "commit (kms)" : "commit");
 
+  try {
+    rpc = await selectRpcUrl(deployments, { profile: args.profile });
+  } catch (error) {
+    console.error(error?.message ?? String(error));
+    process.exitCode = 1;
+    return;
+  }
+  provider = new JsonRpcProvider(rpc.url, rpc.chainId, { staticNetwork: true });
+  if (kmsSigner) kmsSigner = kmsSigner.connect(provider);
+  if (wallet) wallet = wallet.connect(provider);
+
   console.log(`# fund-signer-usdc-deposit`);
   console.log(`profile:           ${args.profile}`);
-  console.log(`rpc:               ${rpcUrl}`);
+  console.log(`rpc:               ${rpc.host} (${rpc.role}, chain ${rpc.chainId})`);
   console.log(`usdc:              ${usdcAddress}`);
   console.log(`agentAccountCore:  ${agentAccountAddress}`);
   console.log(`signer:            ${signerAddress}`);
