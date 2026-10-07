@@ -58,7 +58,7 @@ test("presentAssetContext reads Verify billing identity from the x402 configurat
   assert.equal(presentAssetContext(PRESENTATION_LANES.settlement, "DOT"), undefined);
 });
 
-test("receipt and Verify-run decoration is additive and never rewrites canonical outcomes", () => {
+test("receipt envelope separates unsigned presentation from the untouched signed document", () => {
   const stored = {
     verdict: { outcome: "approved", reasonCode: "DETERMINISTIC_MATCH" },
     intent: {
@@ -70,10 +70,12 @@ test("receipt and Verify-run decoration is additive and never rewrites canonical
   const before = structuredClone(stored);
   const served = decorateReceiptPresentation(stored, { env: VERIFY_ENV });
   assert.deepEqual(stored, before);
-  assert.equal(served.verdict.outcome, "approved");
-  assert.equal(served.result, "PASS");
-  assert.equal(served.buyer, stored.intent.poster);
-  assert.equal(served.assetContext.chainName, "Base");
+  assert.equal(served.schemaVersion, "averray.receipt-envelope.v1");
+  assert.deepEqual(served.document, stored);
+  assert.equal(served.document.verdict.outcome, "approved");
+  assert.equal(served.unsignedPresentation.result, "PASS");
+  assert.equal(served.unsignedPresentation.buyer, stored.intent.poster);
+  assert.equal(served.unsignedPresentation.assetContext.chainName, "Base");
   assert.equal(Object.hasOwn(stored, "result"), false);
   assert.equal(Object.hasOwn(stored, "buyer"), false);
 
@@ -98,8 +100,8 @@ test("buyer is a serve-time alias of the funding poster in both job and Verify l
     verdict: { outcome: "rejected" }
   };
 
-  assert.equal(decorateReceiptPresentation(jobDocument).buyer, jobPoster);
-  assert.equal(decorateReceiptPresentation(verifyDocument, { env: VERIFY_ENV }).buyer, verifyCustomer);
+  assert.equal(decorateReceiptPresentation(jobDocument).unsignedPresentation.buyer, jobPoster);
+  assert.equal(decorateReceiptPresentation(verifyDocument, { env: VERIFY_ENV }).unsignedPresentation.buyer, verifyCustomer);
   assert.equal(Object.hasOwn(jobDocument, "buyer"), false);
   assert.equal(Object.hasOwn(verifyDocument, "buyer"), false);
 });

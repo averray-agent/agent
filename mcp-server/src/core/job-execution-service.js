@@ -52,6 +52,7 @@ import { normalizeClaimantAttribution } from "./claimant-attribution.js";
 import {
   captureClaimJobSnapshot,
   inspectClaimJobDefinitionIntegrity,
+  claimSpecSource,
   requireClaimJobDefinitionIntegrity
 } from "./claim-job-integrity.js";
 import { cloneJsonRecord } from "./state-store-records.js";
@@ -401,9 +402,7 @@ export class JobExecutionService {
       );
       const claimJobSnapshot = {
         ...claimIntegrity.snapshot,
-        specSource: claimIntegrity.decision.status === "matching"
-          ? "chain_verified"
-          : "chain_unavailable_fail_open"
+        specSource: claimSpecSource(claimIntegrity.decision)
       };
       if (this.blockchainGateway?.isEnabled()) {
         const live = claimIntegrity.liveJob ?? await this.blockchainGateway.getJob(chainJobId);

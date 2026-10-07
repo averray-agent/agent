@@ -7,7 +7,7 @@ import { hashWorkReceiptContent } from "../../mcp-server/src/core/work-receipt.j
 
 const REPO_ROOT = new URL("../../", import.meta.url);
 
-test("public receipt reader renders the live-shaped synthetic Hub settlement label", async () => {
+for (const enveloped of [false, true]) test(`public receipt reader renders Hub settlement from ${enveloped ? "an unsigned envelope projection" : "a legacy response"}`, async () => {
   const [source, fixture] = await Promise.all([
     readFile(new URL("marketing/public/receipt-reader.js", REPO_ROOT), "utf8"),
     readFile(new URL("marketing/fixtures/decorated-work-receipt-synthetic.json", REPO_ROOT), "utf8").then(JSON.parse)
@@ -33,7 +33,11 @@ test("public receipt reader renders the live-shaped synthetic Hub settlement lab
     },
     window: {
       location: { pathname: `/receipts/${fixture.receiptId}` },
-      AverrayReaderFetch: { readJsonWithRetry: async () => fixture }
+      AverrayReaderFetch: { readJsonWithRetry: async () => enveloped ? {
+        schemaVersion: "averray.receipt-envelope.v1",
+        document: canonicalFixture,
+        unsignedPresentation: { result: fixture.result, assetContext: fixture.assetContext }
+      } : fixture }
     }
   }, { filename: "receipt-reader.js" });
 
@@ -43,4 +47,5 @@ test("public receipt reader renders the live-shaped synthetic Hub settlement lab
   }
   assert.equal(assetLine.hidden, false);
   assert.equal(assetLine.textContent, "Settled in Hub USDC · Polkadot Hub (eip155:420420419) · asset 1337");
+  if (enveloped) assert.deepEqual(JSON.parse(elements.get("[data-receipt-json]").textContent), canonicalFixture);
 });

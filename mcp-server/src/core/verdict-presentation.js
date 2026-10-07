@@ -80,8 +80,9 @@ export function receiptPresentationFields(document, options = {}) {
 
 export function decorateReceiptPresentation(document, options = {}) {
   return {
-    ...document,
-    ...receiptPresentationFields(document, options)
+    schemaVersion: "averray.receipt-envelope.v1",
+    document,
+    unsignedPresentation: receiptPresentationFields(document, options)
   };
 }
 

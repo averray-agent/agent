@@ -307,8 +307,8 @@ function buildIntent({ session, job, profile, version, poster, context }) {
   const snapshot = session?.jobSnapshot;
   const specHash = bytes32(snapshot?.specHash);
   if (!specHash) throw new ValidationError("Work receipt intent requires the claim-time specHash.");
-  const specSource = snapshot?.specSource ?? "chain_unavailable_fail_open";
-  if (!["chain_verified", "chain_unavailable_fail_open"].includes(specSource)) {
+  const specSource = snapshot?.specSource ?? "claim_snapshot_unverified";
+  if (!["chain_verified", "chain_unavailable_fail_open", "claim_snapshot_unverified", "chain_backend_disabled", "chain_read_not_attempted", "chain_uncommitted"].includes(specSource)) {
     throw new ValidationError(`Work receipt has invalid specSource ${JSON.stringify(specSource)}.`);
   }
   const deadline = firstIso(

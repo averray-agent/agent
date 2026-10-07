@@ -180,6 +180,8 @@ test("A2 arrival payload: GET / identifies Averray and points to site, docs, and
       canonicalPath: "/receipts/:receiptId",
       publicPage: "https://averray.com/receipts/:receiptId",
       schema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/work-receipt-v1.json",
+      responseSchema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/receipt-envelope-v1.json",
+      signedDocumentPath: "document",
       canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/work-receipt-v1.md#content-address-and-signature"
     }
   });

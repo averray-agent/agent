@@ -49,7 +49,11 @@
 
   window.AverrayReaderFetch.readJsonWithRetry(endpoint, {
     headers: { accept: "application/json" }
-  }).then(async (receipt) => {
+  }).then(async (response) => {
+    const enveloped = response?.schemaVersion === "averray.receipt-envelope.v1";
+    const receipt = enveloped ? response.document : response;
+    if (!receipt || typeof receipt !== "object") throw new Error("Receipt document missing");
+    const presentation = enveloped ? response.unsignedPresentation : response;
     const provider = read(receipt, "execution.provider");
     let providerClass = "unknown";
     if (/^0x[a-fA-F0-9]{40}$/u.test(String(provider ?? ""))) {
@@ -75,7 +79,7 @@
     if (providerClassElement) providerClassElement.textContent = providerClass;
     const assetContextElement = document.querySelector("[data-asset-context]");
     if (assetContextElement) {
-      const line = assetContextLine(receipt);
+      const line = assetContextLine({ ...presentation, settlement: receipt.settlement });
       assetContextElement.textContent = line;
       assetContextElement.hidden = !line;
     }
