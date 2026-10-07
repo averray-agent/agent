@@ -360,7 +360,7 @@ export function createMcpTools({
       required: ["wallet"],
       additionalProperties: false
     },
-    readOnly: true,
+    readOnly: false,
     destructive: false
   }),
   tool({

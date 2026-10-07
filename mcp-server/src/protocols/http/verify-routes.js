@@ -12,6 +12,10 @@ export function createVerifyRoutes({
   trustProxy = false
 }) {
   return async function handleVerifyRoute({ request, response, pathname }) {
+    if (request.method === "GET" && pathname === "/verify/runs") {
+      respond(response, 405, { error: "method_not_allowed", message: "Create a Verify run with POST /verify/runs." }, { allow: "POST" });
+      return true;
+    }
     if (request.method === "GET" && pathname === "/verify/profiles") {
       respond(response, 200, { profiles: verificationRunService.listProfiles() }, {
         "cache-control": "public, max-age=300"

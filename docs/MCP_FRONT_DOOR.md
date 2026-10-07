@@ -61,9 +61,18 @@ scope; calling them anonymously returns an explicit `isError` tool result.
 | `claimJob` | `jobs:claim` |
 | `submitWork` | `jobs:submit` |
 
-Unsupported versions return HTTP 400 with JSON-RPC code `-32022` and a data
-object containing `supported` and `requested`. Modern header/body mismatches
-return HTTP 400 with code `-32020`.
+Initialization preserves an offered supported version, or offers the newest
+supported version when the offer is unknown. The returned session binds that
+selection; subsequent explicit version mismatches are still refused. Stateless
+clients negotiate through `server/discover`: an unknown dated version receives
+the newest supported version in the result and `MCP-Protocol-Version` header.
+Use that selected version before tool calls; an unknown version never silently
+executes a tool. Modern header/body mismatches still return HTTP 400 with code
+`-32020`. Malformed versions are invalid parameters, not a negotiation.
+
+`ping` returns an empty JSON-RPC result without authentication or tool execution,
+including before initialization. It retains origin and request-budget checks.
+`fetchAuthNonce` is public but not read-only: it creates authentication state.
 
 For a reproducible local two-client transcript, run:
 

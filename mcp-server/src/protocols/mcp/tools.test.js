@@ -348,7 +348,7 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
     assert.equal(byName[name].annotations.readOnlyHint, true, name);
     assert.equal(byName[name].annotations.idempotentHint, true, name);
   }
-  assert.equal(byName.fetchAuthNonce.annotations.readOnlyHint, true);
+  assert.equal(byName.fetchAuthNonce.annotations.readOnlyHint, false);
   assert.equal(byName.draftJob.annotations.readOnlyHint, false);
   assert.equal(byName.draftJob.annotations.idempotentHint, false);
   assert.equal(byName.buildWithdrawTransactions.annotations.readOnlyHint, false);

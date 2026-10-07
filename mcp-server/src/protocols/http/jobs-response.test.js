@@ -187,6 +187,7 @@ test("public jobs response filters and compacts agent-friendly queries", () => {
   );
 
   assert.equal(response.compact, true);
+  assert.equal(response.jobs[0].fundingState, "not_checked");
   assert.equal(response.count, 1);
   assert.equal(response.total, 1);
   assert.equal(response.limit, 25);

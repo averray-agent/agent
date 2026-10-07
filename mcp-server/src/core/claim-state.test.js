@@ -94,7 +94,7 @@ test("a job with no funding field stays claimable when no chain reward-bank sign
   const status = summarizeJobClaimState({ job: OPEN_JOB, wallet: WALLET });
   assert.equal(status.claimable, true);
   assert.equal(status.reason, "claimable");
-  assert.equal(status.fundingState, undefined);
+  assert.equal(status.fundingState, "not_checked");
 });
 
 test("lazy-funded mainnet job is not advertised claimable when the reward bank is below its reward", () => {
@@ -136,7 +136,7 @@ test("lazy-funded mainnet job remains claimable when the reward bank covers rewa
   assert.equal(status.claimable, true);
   assert.equal(status.currentWalletCanClaim, true);
   assert.equal(status.reason, "claimable");
-  assert.equal(status.fundingState, undefined);
+  assert.equal(status.fundingState, "available");
 });
 
 test("lazy-funded mainnet job reports unverified when reward-bank evidence is stale", () => {
@@ -185,7 +185,7 @@ test("the gate is scoped to ingestion_prefund — recurring reserve jobs stay cl
     wallet: WALLET
   });
   assert.equal(status.claimable, true);
-  assert.equal(status.fundingState, undefined);
+  assert.equal(status.fundingState, "not_checked");
 });
 
 test("expired claim on an unfunded prefund job never re-advertises as claimable", () => {

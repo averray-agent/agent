@@ -146,7 +146,7 @@ function toCompactJobRow(job) {
     effectiveState: job.effectiveState ?? (claimable ? "claimable" : job.claimState ?? state),
     claimable,
     currentWalletCanClaim: job.currentWalletCanClaim ?? null,
-    fundingState: job.fundingState ?? null,
+    fundingState: job.fundingState ?? "not_checked",
     reason: job.reason ?? null,
     ...(job.escrowGeneration ? { escrowGeneration: job.escrowGeneration } : {}),
     ...(job.legacyPostingUnclaimable === true ? { legacyPostingUnclaimable: true } : {}),

@@ -187,6 +187,28 @@ function processProbe(child, command) {
   });
 }
 
+test("http smoke: JSON HEAD follows GET headers and auth without response bodies", SMOKE_TEST_OPTIONS, async () => {
+  const port = 19_000 + Math.floor(Math.random() * 1_000);
+  const child = await startServer(port);
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    for (const path of ["/", "/openapi.json", "/verify/profiles", "/verify/runs", "/receipts"]) {
+      const get = await fetch(`${base}${path}`);
+      const head = await fetch(`${base}${path}`, { method: "HEAD" });
+      assert.equal(head.status, get.status, path);
+      for (const header of ["content-type", "content-length", "cache-control", "allow"]) {
+        assert.equal(head.headers.get(header), get.headers.get(header), `${path}: ${header}`);
+      }
+      assert.equal(await head.text(), "");
+      await get.text();
+    }
+    const headers = { authorization: `Bearer ${issueToken(STRANGER_WALLET)}` };
+    assert.equal((await fetch(`${base}/receipts`, { method: "HEAD", headers })).status, 200);
+    const metrics = await (await fetch(`${base}/metrics`)).text();
+    assert.match(metrics, /http_requests_total\{[^\n]*method="HEAD"/u);
+  } finally { await stop(child); }
+});
+
 test("http smoke: unavailable preflight is a handled 404 after the event loop drains", SMOKE_TEST_OPTIONS, async () => {
   const port = 19_000 + Math.floor(Math.random() * 1_000);
   const child = await startServer(port, {}, ["--unhandled-rejections=throw", "--import", resolve(moduleDir, "fixtures/process-rejection-probe.mjs")]);

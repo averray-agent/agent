@@ -1708,6 +1708,17 @@
       }
     },
     "/verify/runs": {
+      "get": {
+        "tags": ["Verify"],
+        "operationId": "verifyRunCreationMethod",
+        "summary": "Discover the required method for creating a Verify run",
+        "responses": {
+          "405": {
+            "description": "Run creation requires POST; GET never creates or bills a run.",
+            "headers": { "Allow": { "schema": { "type": "string", "const": "POST" } } }
+          }
+        }
+      },
       "post": {
         "tags": [
           "Verify"
@@ -4034,6 +4045,7 @@
               "claimed",
               "expired",
               "submitted",
+              "disputed",
               "exhausted"
             ]
           },
@@ -4047,11 +4059,17 @@
               "claimed",
               "expired",
               "submitted",
+              "disputed",
               "exhausted"
             ]
           },
           "claimable": {
             "type": "boolean"
+          },
+          "fundingState": {
+            "type": "string",
+            "enum": ["funded", "available", "pending", "unverified", "not_checked"],
+            "description": "Funded is recorded prefunding; available is current shared reward-bank headroom, not an earmark. not_checked asserts no funding evidence."
           },
           "currentWalletCanClaim": {
             "type": [
