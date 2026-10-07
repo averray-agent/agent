@@ -88,11 +88,18 @@ export class TransparencyService {
     this.venueBalanceReader = venueBalanceReader;
     this.depositPoolReader = depositPoolReader
       ?? (gateway?.provider ? new EvmTransparencyDepositPoolReader(gateway.provider) : undefined);
+    const pools = gateway?.config ?? {};
+    const currentPool = pools.depositPoolAddress;
+    const isCurrent = (address) => Boolean(address && currentPool && address.toLowerCase() === currentPool.toLowerCase());
+    const currentLabel = isCurrent(pools.depositPoolV22Address) ? "Live v2.2"
+      : isCurrent(pools.depositPoolV21Address) ? "Live v2.1"
+        : isCurrent(pools.legacyDepositPoolV2Address) ? "Live v2"
+          : "Current pool · generation unrecognized";
     this.depositPools = Object.freeze([
-      { key: "live", label: gateway?.config?.depositPoolAddress
-          && gateway.config.depositPoolAddress.toLowerCase() !== gateway?.config?.depositPoolV21Address?.toLowerCase()
-          ? "v2.1 · deposits retired" : "Live v2.1",
-        address: gateway?.config?.depositPoolV21Address },
+      { key: "live", label: currentLabel, address: currentPool },
+      ...(pools.depositPoolV21Address && !isCurrent(pools.depositPoolV21Address)
+        ? [{ key: "retiredV21", label: "v2.1 · deposits retired", address: pools.depositPoolV21Address }]
+        : []),
       { key: "legacy", label: "Legacy v2", address: gateway?.config?.legacyDepositPoolV2Address }
     ]);
     this.selfIdentityRegistry = selfIdentityRegistry instanceof SelfIdentityRegistry

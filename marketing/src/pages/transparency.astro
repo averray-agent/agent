@@ -74,6 +74,7 @@ const PAGE_DESCRIPTION =
       <div class="record-grid record-grid--2">
         <div class="read">
           <span class="read__label" data-read="depositPools.live.label" data-inline><span data-value>—</span></span>
+          <p class="read__src" data-read="depositPools.live.address" data-inline><span data-value>Current pool address not loaded</span></p>
           <p class="read__value read__value--sm" data-read="depositPools.live.totalAssets" data-inline>
             <span data-value>—</span><span class="read__unit" data-unit></span>
           </p>
@@ -90,6 +91,14 @@ const PAGE_DESCRIPTION =
               <p class="read__src" data-source></p>
             </div>
           </div>
+        </div>
+        <div class="read">
+          <span class="read__label" data-read="depositPools.retiredV21.label" data-inline><span data-value>Retired pool not loaded</span></span>
+          <p class="read__value read__value--sm" data-read="depositPools.retiredV21.totalAssets" data-inline>
+            <span data-value>Not loaded</span><span class="read__unit" data-unit></span>
+          </p>
+          <p class="read__src">Retired deposit door; withdrawals unchanged. Historical address and full state: <a href="https://api.averray.com/transparency">public API</a>.</p>
+          <p class="read__src" data-read="depositPools.retiredV21.deployedStatus" data-inline><span data-value>Deployment not loaded</span></p>
         </div>
         <div class="read">
           <span class="read__label" data-read="depositPools.legacy.label" data-inline><span data-value>—</span></span>
@@ -153,26 +162,11 @@ const PAGE_DESCRIPTION =
       </div>
       <div class="panel">
         <p class="panel__prose">
-          These readings are one instrument. The interest is not wired to a display of its own —
-          if the cost cannot be read, the interest does not show either.
+          These are historical deposits and the current position balance, not a profit or loss
+          calculation. Recalls and withdrawals can reduce the position without a loss.
+          Their difference is not a realized write-off or earned yield; this page does not
+          present it as either. Read the dated transaction evidence in the public API.
         </p>
-        <div class="panel__inner">
-          <div class="cell" data-read="treasury.position.growth">
-            <span class="read__label">Realized write-off (venue loss)</span>
-            <p class="read__value read__value--sm read__neg"><span data-value>—</span></p>
-            <p class="read__src" data-source></p>
-          </div>
-          <div class="cell" data-read="treasury.position.frictionPaid">
-            <span class="read__label">Cost to open it</span>
-            <p class="read__value read__value--sm read__neg"><span data-value>—</span></p>
-            <p class="read__src" data-source></p>
-          </div>
-          <div class="cell cell--warn" data-read="treasury.position.netVsCommitted">
-            <span class="read__label">Net against committed</span>
-            <p class="read__value read__value--sm"><span data-value>—</span></p>
-            <p class="read__src" data-source></p>
-          </div>
-        </div>
 
         <!-- The adapter books genuinely cannot split principal from accrued
              yield before settlement. The payload publishes both as unknown

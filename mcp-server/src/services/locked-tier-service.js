@@ -24,7 +24,7 @@ export const LOCKED_TIER_MINIMUM_COHORT_RAW = 15_000_000n;
 export const LOCKED_TIER_CYCLE_FRICTION_RAW = POOL_V22_ROUND_TRIP_FRICTION_RAW;
 export const LOCKED_TIER_YIELD_MARGIN_MULTIPLE = 2n;
 export const LOCKED_TIER_YIELD_INACTIVE_TEXT =
-  "yield inactive — pool below activation threshold.";
+  "yield inactive — activation gate closed; read the listed blockers.";
 export const LOCKED_TIER_YIELD_ELIGIBLE_NOT_DEPLOYED_TEXT =
   "NAV share eligible, not deployed — the locked cohort satisfies the automatic activation gate, but no pool principal is deployed to a venue.";
 // Deliberately does NOT say "NAV share active". The locked cohort holds no pool
@@ -214,13 +214,14 @@ export function lockedTierActivationState(
     ...activationGate,
     yieldStatusText: lockedTierYieldStatusText({
       gateOpen: activationGate.open,
+      blockers: activationGate.blockers,
       deployedPrincipalRaw,
       positionEntries
     })
   };
 }
 
-export function lockedTierYieldStatusText({ gateOpen, deployedPrincipalRaw, positionEntries = [] } = {}) {
+export function lockedTierYieldStatusText({ gateOpen, blockers = [], deployedPrincipalRaw, positionEntries = [] } = {}) {
   const allocated = positionEntries.filter((entry) => BigInt(entry.poolV22?.sharesRaw ?? "0") > 0n);
   if (allocated.length) {
     if (allocated.some((entry) => entry.poolV22.reconciliation !== "matched")) {
@@ -230,7 +231,18 @@ export function lockedTierYieldStatusText({ gateOpen, deployedPrincipalRaw, posi
       ? "Locked capital holds a shared v2.2 pool position: venue gains and losses are shared pro-rata by all pool shares, including Flex. A position is not proof of current venue earnings; read /pool for deployment truth."
       : "Locked capital is allocated to adapter float, not pool shares; it has no pool NAV share yet.";
   }
-  if (!gateOpen) return LOCKED_TIER_YIELD_INACTIVE_TEXT;
+  if (!gateOpen) {
+    const reasons = {
+      venue_rate_unmeasured: "measured venue evidence is not available",
+      locked_cohort_below_minimum: "locked principal is below the activation minimum",
+      no_active_locks: "there are no active locks",
+      active_lock_composition_unreadable: "the active lock composition is unreadable",
+      projected_cycle_yield_below_2x_friction: "measured cycle economics do not cover the required friction margin"
+    };
+    return blockers.length
+      ? `yield inactive — ${blockers.map((code) => `${code}: ${reasons[code] ?? "activation requirement not met"}`).join("; ")}.`
+      : LOCKED_TIER_YIELD_INACTIVE_TEXT;
+  }
   const deployedPrincipal = observedRaw(deployedPrincipalRaw);
   if (deployedPrincipal === null) return LOCKED_TIER_YIELD_UNOBSERVED_TEXT;
   return deployedPrincipal > 0n

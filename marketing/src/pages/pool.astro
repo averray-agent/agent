@@ -44,6 +44,8 @@ const TRANSPARENCY_URL = "https://api.averray.com/transparency";
         <p class="pool-now__body" data-pool-yield-text>
           The deposit control stays closed until this state is visible.
         </p>
+        <p class="pool-source-note" data-pool-activation>Locked activation status not loaded; see GET /pool.</p>
+        <p class="pool-source-note">Current pool: <code data-pool-address>Not loaded</code></p>
 
         <div class="pool-risk" data-pool-risk>
           <p class="pool-risk__label">Risk disclosure · served by the API</p>
@@ -56,8 +58,8 @@ const TRANSPARENCY_URL = "https://api.averray.com/transparency";
           <a class="btn btn--primary" href="https://app.averray.com/pool">
             Open the depositor view <span class="arrow" aria-hidden="true">→</span>
           </a>
-          <a class="btn btn--ghost" href="#membership">Read the deposit terms</a>
         </div>
+        <a class="btn btn--ghost" href="#membership">Read the deposit terms</a>
 
         <noscript>
           <p class="pool-now__body">
@@ -166,7 +168,7 @@ const TRANSPARENCY_URL = "https://api.averray.com/transparency";
           <h2 class="section__title" id="pool-generations-heading">New deposits and the earlier position are separate.</h2>
         </div>
         <p class="section__aside">
-          Labels, addresses, balances, and deployment state come from the public record.
+          Labels, balances, and deployment state come from the public record. The address above identifies the current deposit door; historical addresses remain in the API.
         </p>
       </div>
 
@@ -174,11 +176,19 @@ const TRANSPARENCY_URL = "https://api.averray.com/transparency";
         <article class="pool-generation" data-pool-generation="live">
           <p class="pillar__eyebrow" data-pool-generation-label>Reading pool label…</p>
           <h3 class="pool-generation__role" data-pool-generation-role>Reading deposit status…</h3>
-          <code class="pool-generation__address" data-pool-generation-address>—</code>
           <dl class="pool-generation__facts">
             <div><dt>Total assets</dt><dd data-pool-generation-total>—</dd></div>
             <div><dt>Buffer</dt><dd data-pool-generation-buffer>—</dd></div>
             <div><dt>Venue deployment</dt><dd data-pool-generation-deployment>—</dd></div>
+          </dl>
+        </article>
+        <article class="pool-generation" data-pool-generation="retiredV21" hidden>
+          <p class="pillar__eyebrow" data-pool-generation-label>Earlier pool label not loaded</p>
+          <h3 class="pool-generation__role" data-pool-generation-role>Earlier deposit terms not loaded</h3>
+          <dl class="pool-generation__facts">
+            <div><dt>Total assets</dt><dd data-pool-generation-total>Not loaded</dd></div>
+            <div><dt>Buffer</dt><dd data-pool-generation-buffer>Not loaded</dd></div>
+            <div><dt>Venue deployment</dt><dd data-pool-generation-deployment>Not loaded</dd></div>
           </dl>
         </article>
         <article class="pool-generation" data-pool-generation="legacy">
@@ -186,7 +196,6 @@ const TRANSPARENCY_URL = "https://api.averray.com/transparency";
           <h3 class="pool-generation__role" data-pool-generation-role>
             Reading earlier pool deployment state…
           </h3>
-          <code class="pool-generation__address" data-pool-generation-address>—</code>
           <dl class="pool-generation__facts">
             <div><dt>Total assets</dt><dd data-pool-generation-total>—</dd></div>
             <div><dt>Buffer</dt><dd data-pool-generation-buffer>—</dd></div>
@@ -195,7 +204,7 @@ const TRANSPARENCY_URL = "https://api.averray.com/transparency";
         </article>
       </div>
       <p class="pool-source-note">
-        Read both pool records directly at <a href={TRANSPARENCY_URL}>GET /transparency</a>.
+        Read current and historical pool records directly at <a href={TRANSPARENCY_URL}>GET /transparency</a>.
       </p>
     </section>
     </div>
@@ -203,5 +212,5 @@ const TRANSPARENCY_URL = "https://api.averray.com/transparency";
     <SiteFooter />
   </main>
   <script is:inline src="/reader-fetch.js"></script>
-  <script is:inline src="/pool-reader.js"></script>
+  <script is:inline src="/pool-reader.js?v=20261007"></script>
 </BaseLayout>
