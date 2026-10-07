@@ -1,0 +1,119 @@
+name: Hosted Workload Identity Proof
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: hosted-workload-identity-proof
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Validate broker prerequisites
+        id: preflight
+        shell: bash
+        env:
+          OP_WORKLOAD_ID: ${{ vars.OP_WORKLOAD_ID }}
+          OP_ENVIRONMENT_ID: ${{ vars.OP_ENVIRONMENT_ID }}
+          OP_INTEGRATION_KEY: ${{ secrets.OP_INTEGRATION_KEY }}
+        run: |
+          set -euo pipefail
+          set +x
+          missing=0
+          for name in OP_WORKLOAD_ID OP_ENVIRONMENT_ID OP_INTEGRATION_KEY; do
+            if [ -z "${!name:-}" ]; then
+              printf '::error::Missing %s\n' "$name" >&2
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Load brokered SSH key
+        id: load
+        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+        with:
+          export-env: false
+        env:
+          OP_WORKLOAD_ID: ${{ vars.OP_WORKLOAD_ID }}
+          OP_ENVIRONMENT_ID: ${{ vars.OP_ENVIRONMENT_ID }}
+          OP_INTEGRATION_KEY: ${{ secrets.OP_INTEGRATION_KEY }}
+
+      - name: Validate SSH key shape and configure SSH
+        id: key
+        shell: bash
+        env:
+          VPS_SSH_KEY: ${{ steps.load.outputs.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          set +x
+          if [ -z "${VPS_SSH_KEY:-}" ]; then
+            echo '::error::VPS_SSH_KEY is empty after load step' >&2
+            exit 1
+          fi
+          # Same OpenSSH/PEM shape check as deploy-production.yml.
+          case "$VPS_SSH_KEY" in
+            -----BEGIN*PRIVATE\ KEY-----*) ;;
+            *)
+              echo '::error::VPS_SSH_KEY does not look like an OpenSSH/PEM private key' >&2
+              exit 1
+              ;;
+          esac
+          umask 077
+          printf '%s\n' "$VPS_SSH_KEY" > "$RUNNER_TEMP/workload-identity.key"
+          chmod 600 "$RUNNER_TEMP/workload-identity.key"
+
+      - name: Prove brokered SSH access
+        id: ssh
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          set -euo pipefail
+          set +x
+          if [ -z "${VPS_HOST:-}" ]; then
+            echo '::error::Missing VPS_HOST' >&2
+            exit 1
+          fi
+          ssh -i "$RUNNER_TEMP/workload-identity.key" \
+            -o IdentitiesOnly=yes -o ConnectTimeout=20 \
+            -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+            "ubuntu@$VPS_HOST" 'echo workload-identity-ok'
+
+      - name: Remove runner key
+        id: cleanup
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f -- "$RUNNER_TEMP/workload-identity.key"
+
+      - name: Summarize drill
+        if: always()
+        shell: bash
+        env:
+          PREFLIGHT: ${{ steps.preflight.outcome }}
+          LOAD: ${{ steps.load.outcome }}
+          KEY: ${{ steps.key.outcome }}
+          SSH: ${{ steps.ssh.outcome }}
+          CLEANUP: ${{ steps.cleanup.outcome }}
+        run: |
+          set -euo pipefail
+          set +x
+          for step in PREFLIGHT LOAD KEY SSH CLEANUP; do
+            result=fail
+            if [ "${!step:-}" = success ]; then
+              result=pass
+            fi
+            printf '%s: %s\n' "$step" "$result" >> "$GITHUB_STEP_SUMMARY"
+          done
