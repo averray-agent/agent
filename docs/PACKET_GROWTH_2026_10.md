@@ -10,6 +10,10 @@
 - **Verify price** stays 5 USDC until Pascal decides otherwise (row X5 is a one-constant change: `VERIFY_PROFILE_PRICE` in `mcp-server/src/services/verification-profile-registry.js:5-6`).
 - **ERC-8004:** the August trigger stands — spike (E1) and payload builder (E2) now, publishing (E3) only when Verify has paying consumers. **dotUSD:** spike (D1) only; D2/D3 wait for a poster who asks. **Human checkout:** Path A spike (H1) last.
 
+## Standing rule for every PR in this programme (learned 2026-10-08, twice)
+
+A PR that changes a response shape, a default, an enum or a protocol rule must, in the same PR, (1) list every in-repo consumer of that surface (`app/lib/api/hooks.ts` and `app/**`, `sdk/`, `packages/`, `scripts/ops/*`, `scripts/*.mjs`, `.github/workflows/*`, `mcp-server/src/protocols/mcp/tools.js`, `discovery/*`, `marketing/public/*reader*.js`) with what each one does with it, (2) **update the consumers' test fixtures to the new shape** — a fixture that still pins the old shape makes the suite green while the consumer breaks (five of eight handbacks on 2026-10-08 were exactly this), and (3) carry a test that fails when a consumer is fed the old shape. Claude's gate runs the sweep regardless; the PR should arrive having done it.
+
 ## Preconditions (this week, in this order)
 
 | | What | Who |
