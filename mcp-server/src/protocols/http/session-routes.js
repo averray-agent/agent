@@ -1,11 +1,14 @@
 import { normalizeError } from "../../core/errors.js";
+import { redactPublicGraderFields } from "../../core/public-grader-redaction.js";
 
 export function createSessionRoutes({
   authMiddleware,
   ensureSessionOwnership,
-  respond,
+  respond: respondRaw,
   service,
 }) {
+  const respond = (response, status, body, headers) =>
+    respondRaw(response, status, redactPublicGraderFields(body), headers);
   return async function handleSessionRoute({ request, response, url, pathname }) {
     if (request.method === "GET" && pathname === "/session/state-machine") {
       respond(
