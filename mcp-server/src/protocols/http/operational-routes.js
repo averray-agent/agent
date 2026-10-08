@@ -141,8 +141,8 @@ export function createOperationalRoutes({
         })) ?? { ok: true, state: "not_configured" },
         getGithubPrReviewHealth(),
         Promise.resolve().then(credentialsHealth).catch(() => ({
-          rolesAnywhere: { notAfter: null, ok: false }, badgeReceiptSigner: { kid: null, ok: false },
-          kms: { ok: false, lastSignAt: null }
+          rolesAnywhere: { notAfter: null, ok: false, reason: "credential_health_unavailable" }, badgeReceiptSigner: { kid: null, ok: false, reason: "credential_health_unavailable" },
+          kms: { ok: false, lastSignAt: null, reason: "credential_health_unavailable" }
         }))
       ]);
       const mutationBackendStatus = await getMutationBackendStatus({

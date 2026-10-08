@@ -37,6 +37,6 @@ test("credential health reads all configured public certs, uses earliest expiry,
 test("missing/malformed credential files and never-used signers report unknown/unhealthy without paths or error text", async () => {
   const get = createCredentialsHealthProvider({ env: { AWS_CONFIG_FILE: "/private/config" },
     read: async () => { throw new Error("secret-path-fixture"); } });
-  assert.deepEqual(await get(), { rolesAnywhere: { notAfter: null, ok: false },
-    badgeReceiptSigner: { kid: null, ok: false }, kms: { ok: false, lastSignAt: null } });
+  assert.deepEqual(await get(), { rolesAnywhere: { notAfter: null, ok: false, reason: "certificate_unavailable" },
+    badgeReceiptSigner: { kid: null, ok: false, reason: "signer_unconfigured" }, kms: { ok: false, lastSignAt: null, reason: "signer_unconfigured" } });
 });

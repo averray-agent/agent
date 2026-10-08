@@ -10,17 +10,23 @@ land, what id do I quote" from the workflow YAML.
 
 For monitor and Hermes consumers, HTTP 200 with `status: "degraded"` and
 `serviceHealth.ok: true` means a serving API with warnings, not an outage.
-An overdue GitHub review sets that status and supplies the full overdue
-`sessionIds` list and `count`; `settlement.overdueReview` counts human-review
-sessions older than the configured SLA. Do not convert this review backlog
-into a process-down alert or a deploy rollback. HTTP 503 remains the
-non-serving contract. Existing critical correctness gates remain independent.
+An overdue GitHub review sets that status and supplies an exact `count` with
+at most 50 sampled `sessionIds`. `settlement.overdueReview` counts past-SLA
+closed-unmerged submissions awaiting rejection and merged approvals not yet
+settled. `settlement.waitingForMerge` counts open upstream PRs; it is
+informational and never degrades health. Missing upstream evidence is not
+guessed to be a closed PR. Do not turn review backlog into a process-down
+alert or rollback. HTTP 503 also carries `status: "degraded"`: consumers must
+key on HTTP status / `serviceHealth.ok`, not the status string alone. Existing
+critical correctness gates remain independent. G0 enforces merged-only
+approvals on the operator route as well as the poller.
 
 `serviceHealth.components.credentials` reports the earliest Roles Anywhere
 certificate expiry across all three configured signer profiles, the badge
 receipt key id and last signing result, and the blockchain KMS signer's last
-successful signing time/result. Missing certificate evidence and signers not
-yet used are not reported healthy. These are local observations, not active
+successful signing time/result. Every `ok:false` includes a fixed reason;
+signers not used since boot report `state:"unused"`, not a failure. Missing
+certificate evidence remains unavailable. These are local observations, not active
 AWS probes; no signature or transaction is created by a health request.
 After a signer failure the last successful time remains visible but `ok`
 is false. Certificate reads are cached for 60 seconds. Private keys, profile

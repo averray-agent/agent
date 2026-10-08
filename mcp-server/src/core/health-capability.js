@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { githubReviewDisposition } from "./github-review-disposition.js";
 
 import { disputeIdForSession } from "./dispute-resolution.js";
 import { requireJobSnapshot } from "./job-snapshot.js";
@@ -887,6 +888,7 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs, r
     claimedNotSubmitted: 0,
     submittedNotSettled: 0,
     awaitingHumanReview: 0,
+    waitingForMerge: 0,
     overdueReview: 0,
     stuck: 0,
     failed24h: 0,
@@ -921,6 +923,7 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs, r
     let claimedNotSubmitted = 0;
     let submittedNotSettled = 0;
     let awaitingHumanReview = 0;
+    let waitingForMerge = 0;
     let overdueReview = 0;
     const configuredSlaHours = Number(reviewSlaHours);
     const reviewSlaMs = (Number.isFinite(configuredSlaHours) && configuredSlaHours > 0 ? configuredSlaHours : 48) * 3_600_000;
@@ -952,9 +955,12 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs, r
       if (SUBMITTED_NOT_SETTLED_SESSION_STATUSES.has(session?.status) && session?.submittedAt) {
         submittedNotSettled += 1;
       }
-      if (await isAwaitingHumanReview(session, stateStore)) {
+      const reviewDisposition = await submittedReviewDisposition(session, stateStore);
+      if (reviewDisposition === "waiting_for_merge") {
+        waitingForMerge += 1;
+      } else if (reviewDisposition) {
         awaitingHumanReview += 1;
-        if (nowMs - Date.parse(session.submittedAt) > reviewSlaMs) overdueReview++;
+        if (reviewDisposition === "operator_review" && nowMs - Date.parse(session.submittedAt) > reviewSlaMs) overdueReview++;
       } else if (isSubmittedStuck(session, nowMs, stuckAfterMs)) {
         stuck += 1;
       }
@@ -995,6 +1001,7 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs, r
       claimedNotSubmitted,
       submittedNotSettled,
       awaitingHumanReview,
+      waitingForMerge,
       overdueReview,
       stuck,
       failed24h,
@@ -1095,16 +1102,15 @@ function isTimestampWithinWindow(value, cutoffMs) {
   return Number.isFinite(timestamp) && timestamp >= cutoffMs;
 }
 
-async function isAwaitingHumanReview(session, stateStore) {
+async function submittedReviewDisposition(session, stateStore) {
   if (session?.status !== "submitted" || !session.submittedAt) return false;
   try {
     const { job } = requireJobSnapshot(session);
     const mode = job.verifierConfig?.handler ?? job.verifierMode;
-    if (mode === "human_fallback") return true;
+    if (mode === "human_fallback") return "human_review";
     if (mode !== "github_pr") return false;
     const observation = await stateStore.getMutationReceipt?.("github_pr_review_observation", session.sessionId);
-    // Only a merged approval is eligible for automatic execution.
-    return observation?.previewOutcome !== "approved" || observation?.merged !== true;
+    return githubReviewDisposition(observation);
   } catch {
     // Integrity/storage failures must not hide a stuck settlement as normal review.
     return false;

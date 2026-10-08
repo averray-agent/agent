@@ -129,7 +129,7 @@ export class KmsBadgeReceiptSigner {
   #jwks;
   #now;
   #initialized = false;
-  #lastSignOk = false;
+  #lastSignOk;
 
   constructor(config, { kmsClient, credentialsProvider, now } = {}) {
     if (!config) throw new ConfigError("KmsBadgeReceiptSigner requires configuration");
@@ -220,7 +220,10 @@ export class KmsBadgeReceiptSigner {
     }
   }
 
-  getHealth() { return { kid: this.#config.kid, ok: this.#initialized && this.#lastSignOk }; }
+  getHealth() {
+    return this.#lastSignOk === undefined ? { kid: this.#config.kid, state: "unused" }
+      : { kid: this.#config.kid, ok: this.#lastSignOk, ...(!this.#lastSignOk ? { reason: "badge_sign_failed" } : {}) };
+  }
 
   async #signDocumentUnchecked(document) {
     if (!this.#initialized) throw new Error("KmsBadgeReceiptSigner is not initialized");

@@ -31,10 +31,15 @@ export function createCredentialsHealthProvider({ gateway, badgeReceiptSigner, e
     }
     const complete = certificates.length === profiles.length;
     const notAfter = complete ? new Date(Math.min(...certificates.map((cert) => cert.until))).toISOString() : null;
+    const valid = complete && certificates.every((cert) => cert.from <= +now() && +now() < cert.until);
     return {
-      rolesAnywhere: { notAfter, ok: complete && certificates.every((cert) => cert.from <= +now() && +now() < cert.until) },
-      badgeReceiptSigner: badgeReceiptSigner?.getHealth?.() ?? { kid: null, ok: false },
-      kms: gateway?.signer?.getHealth?.() ?? { ok: false, lastSignAt: null }
+      rolesAnywhere: { notAfter, ok: valid, ...(!valid ? { reason: complete ? "certificate_expired_or_not_yet_valid" : "certificate_unavailable" } : {}) },
+      badgeReceiptSigner: withReason(badgeReceiptSigner?.getHealth?.() ?? { kid: null, ok: false, reason: "signer_unconfigured" }),
+      kms: withReason(gateway?.signer?.getHealth?.() ?? { ok: false, lastSignAt: null, reason: "signer_unconfigured" })
     };
   };
+}
+
+function withReason(health) {
+  return health.ok === false && !health.reason ? { ...health, reason: "last_sign_failed" } : health;
 }

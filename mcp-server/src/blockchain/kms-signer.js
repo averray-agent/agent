@@ -135,7 +135,7 @@ export class KmsSigner extends AbstractSigner {
     this.#credentialsProvider = credentialsProvider ?? null;
     this.#keyId = keyId;
     this.#logger = logger ?? null;
-    this.#health = health ?? { ok: false, lastSignAt: null };
+    this.#health = health ?? { state: "unused", lastSignAt: null };
   }
 
   getHealth() { return { ...this.#health }; }
@@ -313,9 +313,13 @@ export class KmsSigner extends AbstractSigner {
     try {
       const signature = await this.#signDigestUnchecked(digestBytes);
       Object.assign(this.#health, { ok: true, lastSignAt: new Date().toISOString() });
+      delete this.#health.state;
+      delete this.#health.reason;
       return signature;
     } catch (error) {
       this.#health.ok = false;
+      this.#health.reason = "kms_sign_failed";
+      delete this.#health.state;
       throw error;
     }
   }

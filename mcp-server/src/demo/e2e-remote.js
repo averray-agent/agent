@@ -37,7 +37,7 @@ async function main() {
   console.log(`Base URL: ${baseUrl}`);
 
   const health = await readJson(baseUrl, "/health");
-  assert(health.status === "ok", `Expected healthy API, got ${health.status}`);
+  assert(health.serviceHealth?.ok === true, `Expected serving API, got ${health.status}`);
   const authMode = health.auth?.mode ?? "unknown";
   console.log(`Auth mode: ${authMode}`);
 

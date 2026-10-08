@@ -64,12 +64,12 @@ test("badge credential health is not healthy until a successful sign and fails c
   const { config, kmsClient } = makeFixture();
   const signer = new KmsBadgeReceiptSigner(config, { kmsClient });
   await signer.initialize();
-  assert.deepEqual(signer.getHealth(), { kid: "badge-1", ok: false });
+  assert.deepEqual(signer.getHealth(), { kid: "badge-1", state: "unused" });
   await signer.signDocument({ name: "fixture" });
   assert.deepEqual(signer.getHealth(), { kid: "badge-1", ok: true });
   kmsClient.send = async () => { throw new Error("private fixture failure"); };
   await assert.rejects(signer.signDocument({ name: "fixture" }));
-  assert.deepEqual(signer.getHealth(), { kid: "badge-1", ok: false });
+  assert.deepEqual(signer.getHealth(), { kid: "badge-1", ok: false, reason: "badge_sign_failed" });
 });
 
 test("detached ES256 badge signature verifies against the published JWKS and mutation fails", async () => {
