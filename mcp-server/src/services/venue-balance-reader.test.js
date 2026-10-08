@@ -1,0 +1,134 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { VenueBalanceReader } from "./venue-balance-reader.js";
+import { BankLaneFeedService } from "./bank-lane-feed.js";
+
+const target = { ledger: "substrate_tokens", endpoint: "wss://venue.example", account: `0x${"11".repeat(32)}`, assetId: 22 };
+const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+
+test("float connect is bounded, reports its reason, and closes a late API before retry", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let resolve;
+  let disconnected = 0;
+  let attempts = 0;
+  const good = { query: { tokens: { accounts: async () => ({ free: "42" }) } }, disconnect() { disconnected++; } };
+  const reader = new VenueBalanceReader({ substrateTimeoutMs: 100,
+    polkadotApiLoader: async () => ({}),
+    substrateApiFactory: () => ++attempts === 1 ? new Promise((done) => { resolve = done; }) : good });
+  const refused = assert.rejects(reader.read(target), /venue_substrate_connect_timeout after 100ms/);
+  await nextTurn();
+  t.mock.timers.tick(100);
+  await refused;
+  assert.equal(reader.substrateApis.size, 0);
+  resolve(good);
+  await nextTurn();
+  assert.equal(disconnected, 1);
+  assert.equal((await reader.read(target)).raw, 42n);
+  await reader.close();
+});
+
+test("float query timeout and disconnected socket are explicit failures, not zero balances", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const api = { isConnected: true, query: { tokens: { accounts: () => new Promise(() => {}) } }, disconnect() {} };
+  const reader = new VenueBalanceReader({ substrateTimeoutMs: 100, polkadotApiLoader: async () => ({}), substrateApiFactory: async () => api });
+  const refused = assert.rejects(reader.read(target), /venue_substrate_query_timeout/);
+  await nextTurn();
+  t.mock.timers.tick(100);
+  await refused;
+  assert.equal(reader.substrateApis.size, 0);
+  api.isConnected = false;
+  await assert.rejects(reader.read(target), /venue_substrate_disconnected/);
+  assert.equal(reader.substrateApis.size, 0);
+});
+
+test("an old failed query cannot evict or disconnect a replacement API", async () => {
+  const reader = new VenueBalanceReader();
+  let rejectOld;
+  const old = { disconnect() {} };
+  let disconnected = 0;
+  const fresh = { disconnect() { disconnected++; } };
+  const pending = Promise.resolve(old);
+  reader.substrateApis.set(target.endpoint, pending);
+  const failed = assert.rejects(reader.readSubstrate(target.endpoint, old,
+    () => new Promise((_, reject) => { rejectOld = reject; }), pending), /old query failed/);
+  await nextTurn();
+  const replacement = Promise.resolve(fresh);
+  reader.substrateApis.set(target.endpoint, replacement);
+  rejectOld(new Error("old query failed"));
+  await failed;
+  await nextTurn();
+  assert.equal(reader.substrateApis.get(target.endpoint), replacement);
+  assert.equal(disconnected, 0);
+  await reader.close();
+});
+
+test("late P1 resolution after B times out cannot let A's failure evict C's P2", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const endpoint = new URL(target.endpoint).toString();
+  let resolveP1, resolveP2;
+  let attempts = 0;
+  let freshDisconnects = 0;
+  const old = { query: { tokens: { accounts: async () => { throw new Error("old query failed"); } } },
+    disconnect() {} };
+  const fresh = { query: { tokens: { accounts: async () => ({ free: "42" }) } },
+    disconnect() { freshDisconnects++; } };
+  const reader = new VenueBalanceReader({ substrateTimeoutMs: 300,
+    polkadotApiLoader: async () => ({}),
+    substrateApiFactory: () => ++attempts === 1
+      ? new Promise((resolve) => { resolveP1 = resolve; })
+      : new Promise((resolve) => { resolveP2 = resolve; }) });
+  const a = assert.rejects(reader.read(target), /old query failed/);
+  await nextTurn();
+  const p1 = reader.substrateApis.get(endpoint);
+  reader.substrateTimeoutMs = 100;
+  const b = assert.rejects(reader.read(target), /venue_substrate_connect_timeout/);
+  await nextTurn();
+  t.mock.timers.tick(100);
+  await b;
+  reader.substrateTimeoutMs = 300;
+  const c = reader.read(target);
+  await nextTurn();
+  const p2 = reader.substrateApis.get(endpoint);
+  assert.ok(p1);
+  assert.ok(p2);
+  assert.notEqual(p1, p2);
+  assert.equal(attempts, 2);
+  resolveP1(old);
+  await a;
+  assert.equal(reader.substrateApis.get(endpoint), p2);
+  resolveP2(fresh);
+  assert.equal((await c).raw, 42n);
+  await nextTurn();
+  assert.equal(freshDisconnects, 0);
+  assert.equal((await reader.read(target)).raw, 42n);
+  assert.equal(attempts, 2);
+  await reader.close();
+});
+
+test("default WS factory stops reconnecting when initialization hangs", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let disconnected = 0;
+  class WsProvider { disconnect() { disconnected++; } }
+  const reader = new VenueBalanceReader({ substrateTimeoutMs: 100, polkadotApiLoader: async () => ({
+    WsProvider, ApiPromise: { create: () => new Promise(() => {}) }
+  }) });
+  const refused = assert.rejects(reader.read(target), /venue_substrate_connect_timeout/);
+  await nextTurn();
+  t.mock.timers.tick(100);
+  await refused;
+  await nextTurn();
+  assert.equal(disconnected, 1);
+  await reader.close();
+});
+
+test("float timeout is exposed as an unknown bank reading with the connection reason", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const reader = new VenueBalanceReader({ substrateTimeoutMs: 100, polkadotApiLoader: () => new Promise(() => {}) });
+  const feed = new BankLaneFeedService({}, reader);
+  const pending = feed.readBalance(target);
+  await nextTurn();
+  t.mock.timers.tick(100);
+  const reading = await pending;
+  assert.equal(reading.raw, null);
+  assert.match(reading.lastError, /venue_substrate_connect_timeout after 100ms/);
+});

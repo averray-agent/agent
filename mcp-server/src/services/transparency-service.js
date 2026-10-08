@@ -10,6 +10,7 @@ import { SelfIdentityRegistry } from "../core/self-identity-registry.js";
 import { directoryParticipationCounts } from "../core/directory-consent.js";
 import { deriveH160FromAccountId32 } from "../core/wallet-identity.js";
 import { DEPOSIT_POOL_ABI } from "../blockchain/abis.js";
+import { readWithRpcSources } from "../blockchain/rpc-provider.js";
 import { buildRetainedWorkerMetrics } from "../core/retained-workers.js";
 
 export const TRANSPARENCY_SCHEMA_VERSION = "averray.transparency.v1";
@@ -578,7 +579,7 @@ export class TransparencyService {
     const [balance, obligations] = await Promise.all([
       this.safeRawRead({
         source: `eth_call balanceOf ${shortAddress(token?.address)} @ asset-hub`,
-        proof: `${safeEndpoint(this.gateway?.config?.rpcUrl)} token ${token?.address ?? "unknown"} account ${escrowAddress ?? "unknown"}`,
+        proof: `gateway RPC token ${token?.address ?? "unknown"} account ${escrowAddress ?? "unknown"}`,
         loader: async () => {
           const result = await this.venueBalanceReader.read({
             ledger: "erc20",
@@ -586,13 +587,13 @@ export class TransparencyService {
             chainId: this.gateway.config.chainId,
             account: escrowAddress,
             contract: token.address
-          });
+          }, { provider: this.gateway.provider });
           return { raw: result.raw, readAtMs: Date.parse(result.asOf) };
         }
       }),
       this.safeRawRead({
         source: `EscrowCore.jobs active obligations @ ${escrowAddress ?? "unknown"}`,
-        proof: `${safeEndpoint(this.gateway?.config?.rpcUrl)} ${escrowAddress ?? "unknown"}`,
+        proof: `gateway RPC ${escrowAddress ?? "unknown"}`,
         loader: async () => {
           const jobs = this.platformService.listJobs({ includePaused: true, includeArchived: true, includeStale: true });
           const unique = new Map(jobs.map((job) => [job.id, job]));
@@ -616,7 +617,7 @@ export class TransparencyService {
     const identity = this.treasuryIdentity;
     const protocolFee = await this.safeValueRead({
       source: `EscrowCore.treasuryAccount() | wrapper ${wrapper ?? "unknown"}`,
-      proof: `${safeEndpoint(this.gateway?.config?.rpcUrl)} ${this.gateway?.config?.escrowCoreAddress ?? "unknown"}`,
+      proof: `gateway RPC ${this.gateway?.config?.escrowCoreAddress ?? "unknown"}`,
       loader: async () => ({ value: (await this.gateway.getProtocolFeeConfig()).treasuryAccount, readAtMs: this.now() })
     });
     const evmLens = protocolFee.value && identity?.evmLens && sameAddress(protocolFee.value, identity.evmLens)
@@ -629,7 +630,7 @@ export class TransparencyService {
     const common = {
       readAtMs: protocolFee.readAtMs,
       source: `native multisig EVM lens; eth_call balanceOf ${shortAddress(token?.address)} @ asset-hub | wrapper ${wrapper ?? "unknown"}`,
-      proof: `${safeEndpoint(this.gateway?.config?.rpcUrl)} native ${identity?.nativeAccountId32 ?? "unknown"} -> EVM ${evmLens ?? "unknown"}`
+      proof: `gateway RPC native ${identity?.nativeAccountId32 ?? "unknown"} -> EVM ${evmLens ?? "unknown"}`
     };
     if (!evmLens || !mappingValid) {
       return {
@@ -649,7 +650,7 @@ export class TransparencyService {
           chainId: this.gateway.config.chainId,
           account: evmLens,
           contract: token.address
-        });
+        }, { provider: this.gateway.provider });
         return { raw: result.raw, readAtMs: Date.parse(result.asOf) };
       }
     });
@@ -804,7 +805,7 @@ export class TransparencyService {
   async readChainHead() {
     return await this.safeValueRead({
       source: "blockchain gateway head",
-      proof: `${safeEndpoint(this.gateway?.config?.rpcUrl)} eth_blockNumber`,
+      proof: "gateway RPC eth_blockNumber",
       loader: async () => {
         const health = await this.gateway?.healthCheck();
         const blockNumber = Number(health?.blockNumber);
@@ -853,8 +854,8 @@ export class TransparencyService {
         }];
       }
       try {
-        const reading = await this.depositPoolReader.read(address);
-        const proof = `eth_call at block ${reading.blockNumber} against ${getAddress(address)}`;
+        const { result: reading, rpcSources } = await readWithRpcSources(() => this.depositPoolReader.read(address));
+        const proof = `${rpcSourceProof(rpcSources)} eth_call at block ${reading.blockNumber} against ${getAddress(address)}`;
         const base = { readAtMs: this.now(), source: "DepositPool state at one named block", proof };
         const deployedPrincipal = BigInt(reading.deployedPrincipal);
         return [key, {
@@ -890,8 +891,8 @@ export class TransparencyService {
 
   async safeRawRead({ source, proof, loader }) {
     try {
-      const result = await loader();
-      return { raw: BigInt(result.raw), readAtMs: normalizeReadAt(result.readAtMs, this.now()), source, proof };
+      const { result, rpcSources } = await readWithRpcSources(loader);
+      return { raw: BigInt(result.raw), readAtMs: normalizeReadAt(result.readAtMs, this.now()), source, proof: proof.replace("gateway RPC", rpcSourceProof(rpcSources)) };
     } catch (error) {
       return { raw: null, readAtMs: this.now(), source, proof: `${proof}; ${redactProviderError(error) || "read_failed"}` };
     }
@@ -899,12 +900,16 @@ export class TransparencyService {
 
   async safeValueRead({ source, proof, loader }) {
     try {
-      const result = await loader();
-      return { value: result.value ?? null, readAtMs: normalizeReadAt(result.readAtMs, this.now()), source, proof };
+      const { result, rpcSources } = await readWithRpcSources(loader);
+      return { value: result.value ?? null, readAtMs: normalizeReadAt(result.readAtMs, this.now()), source, proof: proof.replace("gateway RPC", rpcSourceProof(rpcSources)) };
     } catch (error) {
       return { value: null, readAtMs: this.now(), source, proof: `${proof}; ${redactProviderError(error) || "read_failed"}` };
     }
   }
+}
+
+function rpcSourceProof(sources) {
+  return sources.length ? `responding RPCs ${sources.join(", ")}` : "gateway RPC (cached or unobserved transport source)";
 }
 
 export function deriveFieldStatus({ value, readAtMs }, { nowMs, freshnessWindowMs }) {

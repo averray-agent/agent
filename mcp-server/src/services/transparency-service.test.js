@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
 import test from "node:test";
 
 import { createHostedCanaryClaimantAttribution } from "../core/claimant-attribution.js";
 import { SelfIdentityRegistry } from "../core/self-identity-registry.js";
+import { createRpcProvider, readWithRpcSources } from "../blockchain/rpc-provider.js";
+import { VenueBalanceReader } from "./venue-balance-reader.js";
 import {
   TransparencyService,
   aggregateRawReadings,
@@ -295,6 +298,39 @@ function harness(overrides = {}) {
   const service = new TransparencyService(options);
   return service;
 }
+
+test("transparency escrow and treasury use the shared fallback and name the answering backup", async (t) => {
+  const primary = createServer((_, res) => { res.writeHead(503); res.end(); });
+  const backup = createServer(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    const payload = JSON.parse(body);
+    const answer = ({ id, method }) => ({ jsonrpc: "2.0", id, result:
+      method === "eth_chainId" ? "0x190f1b43" : method === "eth_blockNumber" ? "0x123" : `0x${(1234567n).toString(16).padStart(64, "0")}` });
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(Array.isArray(payload) ? payload.map(answer) : answer(payload)));
+  });
+  for (const server of [primary, backup]) {
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    t.after(() => new Promise((resolve) => server.close(resolve)));
+  }
+  const url = (server) => `http://127.0.0.1:${server.address().port}`;
+  const provider = createRpcProvider({ rpcUrls: [url(primary), url(backup)], rpcFailoverStallMs: 10, rpcRequestTimeoutMs: 100 });
+  t.after(() => provider.destroy());
+  const service = harness();
+  service.gateway.provider = provider;
+  service.gateway.config.rpcUrl = url(primary);
+  service.venueBalanceReader = new VenueBalanceReader({ evmProviderFactory() { throw new Error("must reuse gateway provider"); } });
+  const [escrow, treasury] = await Promise.all([service.readEscrow(), service.readTreasuryBalance()]);
+  for (const balance of [escrow.balance, treasury]) {
+    assert.equal(balance.raw, 1234567n);
+    assert.ok(balance.proof.includes(url(backup)), balance.proof);
+    assert.ok(!balance.proof.includes(url(primary)), balance.proof);
+  }
+  // Transport caches must not be presented as a new response from the primary.
+  const cached = await readWithRpcSources(() => Promise.resolve(123));
+  assert.deepEqual(cached.rpcSources, []);
+});
 
 test("field status is derived from evidence time and unknown never becomes zero", () => {
   assert.equal(deriveFieldStatus({ value: 1, readAtMs: 1_000 }, { nowMs: 1_500, freshnessWindowMs: 1_000 }), "fresh");
