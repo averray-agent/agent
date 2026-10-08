@@ -3,6 +3,7 @@ import { readFile, access } from "node:fs/promises";
 import test from "node:test";
 import { buildDiscoveryManifest } from "./discovery-manifest.js";
 import { MCP_TOOLS } from "../protocols/mcp/tools.js";
+import { CONNECTED_ONLY_TOOLS } from "./discovery-manifest.js";
 import { DISCOVERY_ALIAS_PATHS } from "./discovery-aliases.js";
 import { publicOpenApiErrors } from "./public-openapi-contract.js";
 import { createPublicMetadataRoutes } from "../protocols/http/public-metadata-routes.js";
@@ -36,7 +37,7 @@ function harness() {
   };
 }
 
-test("discovery aliases expose exactly the served MCP registry including protected tools", async () => {
+test("discovery aliases expose the directory-safe subset of the served MCP registry", async () => {
   const h = harness();
   for (const path of DISCOVERY_ALIAS_PATHS) {
     for (const marker of ["first request", "changed manifest"]) {
@@ -48,7 +49,7 @@ test("discovery aliases expose exactly the served MCP registry including protect
       assert.equal(response.json.discoveryMode, "directory-safe");
       assert.deepEqual(response.json.capabilities, h.manifest().tools);
       assert.deepEqual(response.json.capabilities.map(({ name }) => name).sort(),
-        MCP_TOOLS.map(({ name }) => name).sort());
+        MCP_TOOLS.filter(({ name }) => !CONNECTED_ONLY_TOOLS.has(name)).map(({ name }) => name).sort());
     }
     assert.equal((await h.get(path, "POST")).handled, false);
   }

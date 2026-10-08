@@ -120,6 +120,7 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.equal(manifest.schemas.jobSchemasIndex, "https://api.example.com/schemas/jobs");
   assert.equal(manifest.schemas.jobSchemaPathTemplate, "https://api.example.com/schemas/jobs/<name>.json");
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/schemas/jobs"));
+  assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.method === "GET" && entry.path === "/verifier/result"));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/session/state-machine"));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/verify/profiles"));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/.well-known/x402"));
@@ -292,8 +293,8 @@ test("mainnet chainId renders the mainnet chain block on every network-dependent
   const serialized = JSON.stringify(manifest);
   assert.ok(!serialized.includes(String(POLKADOT_HUB_TESTNET_CHAIN_ID)));
   assert.ok(!/testnet/iu.test(serialized));
-  assert.ok(!/faucetUrl|https?:[^" ]*faucet/iu.test(serialized));
-  assert.match(serialized, /not a standing faucet/u);
+  assert.equal(serialized.split("not a standing faucet").length - 1, 1);
+  assert.ok(!/faucet/iu.test(serialized.replace("not a standing faucet", "")));
   assert.ok(!serialized.includes('"PAS"'));
 });
 

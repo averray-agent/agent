@@ -6,6 +6,7 @@ import { ROUTE_CAPABILITY_RULES } from "../auth/capabilities.js";
 import { buildAgentSurfaceParity } from "./agent-surface-parity.js";
 import {
   DISCOVERY_TOOLS,
+  CONNECTED_ONLY_TOOLS,
   buildDiscoveryManifest
 } from "./discovery-manifest.js";
 import { MCP_TOOLS } from "../protocols/mcp/tools.js";
@@ -13,20 +14,29 @@ import { buildProductionDiscoveryManifestContent } from "../../../scripts/ops/di
 
 const REPO_ROOT = new URL("../../../", import.meta.url);
 
-test("MCP and every discovery mirror have exactly one served tool catalogue", async () => {
+test("MCP and every directory mirror share one registry with an explicit connected-only boundary", async () => {
   const names = (tools) => tools.map(({ name }) => name).sort();
-  const expected = names(MCP_TOOLS);
+  assert.deepEqual([...CONNECTED_ONLY_TOOLS].sort(), ["fetchAuthNonce", "verifySiwe", "refreshAuthToken", "claimJob", "submitWork", "createLockedDeposit", "requestLockedDepositExit"].sort());
+  const expected = names(MCP_TOOLS.filter(({ name }) => !CONNECTED_ONLY_TOOLS.has(name)));
+  assert.deepEqual([...expected, ...CONNECTED_ONLY_TOOLS].sort(), names(MCP_TOOLS));
+  for (const name of CONNECTED_ONLY_TOOLS) {
+    assert.ok(MCP_TOOLS.some((tool) => tool.name === name), name);
+    assert.ok(!expected.includes(name), name);
+  }
+  for (const name of ["draftJob", "buildPostJobTransactions"]) assert.ok(expected.includes(name));
   assert.equal(new Set(expected).size, expected.length);
   assert.deepEqual(names(DISCOVERY_TOOLS), expected);
   assert.deepEqual(names(buildDiscoveryManifest().tools), expected);
   for (const path of ["discovery/agent-tools.json", "discovery/.well-known/agent-tools.json", "site/.well-known/agent-tools.json"]) {
     const manifest = JSON.parse(await readFile(new URL(path, REPO_ROOT), "utf8"));
     assert.deepEqual(names(manifest.tools), expected, path);
-    for (const tool of MCP_TOOLS) {
+    assert.equal(await readFile(new URL(path, REPO_ROOT), "utf8"), buildProductionDiscoveryManifestContent(), path);
+    for (const tool of MCP_TOOLS.filter(({ name }) => !CONNECTED_ONLY_TOOLS.has(name))) {
       const advertised = manifest.tools.find((entry) => entry.name === tool.name);
       assert.deepEqual(advertised.inputSchema, tool.inputSchema, tool.name);
       assert.deepEqual(advertised._meta, tool._meta, tool.name);
       assert.deepEqual(advertised.annotations, tool.annotations, tool.name);
+      assert.equal(advertised.surface, "mcp");
     }
   }
 });

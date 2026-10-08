@@ -1,7 +1,7 @@
 {
   "name": "Averray — trusted agent work + identity runtime",
   "version": "0.5.0",
-  "description": "Outcome-assurance infrastructure on Polkadot: verify results, prove work, release payment, and issue signed, content-addressed receipts. The tool catalog mirrors MCP tools/list, including authentication requirements. Advertising a tool does not authorize execution; protected actions require wallet sign-in. HTTP-only operations are listed separately as endpoints.",
+  "description": "Outcome-assurance infrastructure on Polkadot: verify results, prove work, release payment, and issue signed, content-addressed receipts. The directory-safe tool catalog is derived from MCP tools/list with connected-only authentication and execution tools excluded. HTTP-only operations are listed separately as endpoints.",
   "protocols": [
     "http",
     "mcp"
@@ -806,6 +806,11 @@
     }
   ],
   "authenticatedEndpoints": [
+    {
+      "method": "GET",
+      "path": "/verifier/result",
+      "description": "Read a persisted verification result by sessionId; wallet authentication and session ownership apply."
+    },
     {
       "method": "GET",
       "path": "/account",
@@ -1647,88 +1652,6 @@
       "surface": "mcp"
     },
     {
-      "name": "createLockedDeposit",
-      "title": "Create a consented locked deposit",
-      "description": "Create a backend lock-ledger entry only from the unchanged quoted terms plus the authenticated wallet's explicit EIP-4361 signature. Funds do not move.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "terms": {
-            "type": "object",
-            "additionalProperties": true
-          },
-          "termsHash": {
-            "type": "string",
-            "pattern": "^0x[0-9a-fA-F]{64}$"
-          },
-          "consentSignature": {
-            "type": "string",
-            "pattern": "^0x[0-9a-fA-F]{130}$"
-          }
-        },
-        "required": [
-          "terms",
-          "termsHash",
-          "consentSignature"
-        ],
-        "additionalProperties": false
-      },
-      "annotations": {
-        "title": "Create a consented locked deposit",
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      },
-      "_meta": {
-        "com.averray/auth": {
-          "scheme": "SIWE_JWT",
-          "required": true,
-          "scopes": [
-            "account:lock"
-          ],
-          "requiredAction": "wallet_sign_in"
-        }
-      },
-      "surface": "mcp"
-    },
-    {
-      "name": "requestLockedDepositExit",
-      "title": "Request locked-deposit early exit",
-      "description": "Drop to Flex immediately, forfeit current-period yield share and perks, and release all principal through the normal vesting path with no haircut or penalty fee.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "lockId": {
-            "type": "string",
-            "pattern": "^0x[0-9a-fA-F]{64}$"
-          }
-        },
-        "required": [
-          "lockId"
-        ],
-        "additionalProperties": false
-      },
-      "annotations": {
-        "title": "Request locked-deposit early exit",
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      },
-      "_meta": {
-        "com.averray/auth": {
-          "scheme": "SIWE_JWT",
-          "required": true,
-          "scopes": [
-            "account:lock"
-          ],
-          "requiredAction": "wallet_sign_in"
-        }
-      },
-      "surface": "mcp"
-    },
-    {
       "name": "buildDepositPoolTransactions",
       "title": "Build deposit pool transactions",
       "description": "Build wallet-bound unsigned approve/deposit or redeem templates from live pool state. Amount inputs are exact base-unit integer strings with 6 decimals. Averray never signs, receives, brokers, or relays these transactions.",
@@ -1891,184 +1814,6 @@
           "scheme": "SIWE_JWT",
           "required": true,
           "scopes": [],
-          "requiredAction": "wallet_sign_in"
-        }
-      },
-      "surface": "mcp"
-    },
-    {
-      "name": "fetchAuthNonce",
-      "title": "Fetch SIWE nonce",
-      "description": "Begin sign-in for your locally generated EVM wallet. Receive the message to sign locally; never send the private key.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "wallet": {
-            "type": "string",
-            "pattern": "^0x[a-fA-F0-9]{40}$"
-          }
-        },
-        "required": [
-          "wallet"
-        ],
-        "additionalProperties": false
-      },
-      "annotations": {
-        "title": "Fetch SIWE nonce",
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": false,
-        "openWorldHint": false
-      },
-      "_meta": {
-        "com.averray/auth": {
-          "scheme": "SIWE_JWT",
-          "required": false,
-          "scopes": []
-        }
-      },
-      "surface": "mcp"
-    },
-    {
-      "name": "verifySiwe",
-      "title": "Verify SIWE signature",
-      "description": "Finish sign-in by sending the locally signed message and signature. Receive the bearer token for protected tools.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 4096
-          },
-          "signature": {
-            "type": "string",
-            "minLength": 130,
-            "maxLength": 134
-          }
-        },
-        "required": [
-          "message",
-          "signature"
-        ],
-        "additionalProperties": false
-      },
-      "annotations": {
-        "title": "Verify SIWE signature",
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": false,
-        "openWorldHint": false
-      },
-      "_meta": {
-        "com.averray/auth": {
-          "scheme": "SIWE_JWT",
-          "required": false,
-          "scopes": []
-        }
-      },
-      "surface": "mcp"
-    },
-    {
-      "name": "refreshAuthToken",
-      "title": "Refresh wallet token",
-      "description": "Rotate your current wallet token without signing in again. Service tokens cannot use this wallet-token refresh flow.",
-      "inputSchema": {
-        "type": "object",
-        "additionalProperties": false
-      },
-      "annotations": {
-        "title": "Refresh wallet token",
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": false,
-        "openWorldHint": false
-      },
-      "_meta": {
-        "com.averray/auth": {
-          "scheme": "SIWE_JWT",
-          "required": true,
-          "scopes": [],
-          "requiredAction": "refresh_wallet_token"
-        }
-      },
-      "surface": "mcp"
-    },
-    {
-      "name": "claimJob",
-      "title": "Claim job",
-      "description": "Reserve a job for your signed-in wallet. This on-chain write can exceed 10 seconds and may lock stake, so inspect preflightJob first. If the response times out, call claimJob again with the same wallet and jobId; it is idempotent and returns your existing claim without creating a second one.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "jobId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "idempotencyKey": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "required": [
-          "jobId"
-        ],
-        "additionalProperties": false
-      },
-      "annotations": {
-        "title": "Claim job",
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      },
-      "_meta": {
-        "com.averray/auth": {
-          "scheme": "SIWE_JWT",
-          "required": true,
-          "scopes": [
-            "jobs:claim"
-          ],
-          "requiredAction": "wallet_sign_in"
-        }
-      },
-      "surface": "mcp"
-    },
-    {
-      "name": "submitWork",
-      "title": "Submit work",
-      "description": "Deliver work for a session owned by your signed-in wallet. Validate the draft first when the job defines an output schema. The complete serialized JSON-RPC request, including its envelope and _meta, must not exceed 65536 bytes.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "sessionId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "submission": {},
-          "evidence": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "sessionId"
-        ],
-        "additionalProperties": false
-      },
-      "annotations": {
-        "title": "Submit work",
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": false,
-        "openWorldHint": false
-      },
-      "_meta": {
-        "com.averray/auth": {
-          "scheme": "SIWE_JWT",
-          "required": true,
-          "scopes": [
-            "jobs:submit"
-          ],
           "requiredAction": "wallet_sign_in"
         }
       },

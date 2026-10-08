@@ -115,6 +115,7 @@ const DISCOVERY_PUBLIC_ENDPOINTS = withDefaultGetMethod([
 ]);
 
 const DISCOVERY_AUTHENTICATED_ENDPOINTS = withDefaultGetMethod([
+  { path: "/verifier/result", description: "Read a persisted verification result by sessionId; wallet authentication and session ownership apply." },
   {
     path: "/account",
     description:
@@ -569,10 +570,19 @@ const HTTP_ACTION_REQUIREMENTS = [
   }
 ];
 
-// Public metadata is not permission to execute a tool. Share the served MCP
-// registry, including its authentication metadata, instead of a second list
-// of HTTP pseudo-tools and a hand-maintained connected-only exception list.
-export const DISCOVERY_TOOLS = Object.freeze(MCP_TOOLS.map((entry) => Object.freeze({
+// One served registry; this explicit directory boundary excludes authentication
+// exchanges and state-changing execution. Drafts/unsigned transaction builders
+// remain directory-safe: neither broadcasts nor claims or commits funds.
+export const CONNECTED_ONLY_TOOLS = new Set([
+  "fetchAuthNonce", // Starts the connected wallet sign-in exchange.
+  "verifySiwe", // Exchanges a wallet signature for an authenticated session.
+  "refreshAuthToken", // Rotates connected-session credentials.
+  "claimJob", // Commits the worker to a job.
+  "submitWork", // Submits work into settlement.
+  "createLockedDeposit", // Commits capital to a locked position.
+  "requestLockedDepositExit" // Mutates a locked position's exit request.
+]);
+export const DISCOVERY_TOOLS = Object.freeze(MCP_TOOLS.filter((entry) => !CONNECTED_ONLY_TOOLS.has(entry.name)).map((entry) => Object.freeze({
   ...entry,
   surface: "mcp"
 })));
@@ -581,7 +591,7 @@ const buildBaseManifest = (network) => ({
   name: "Averray — trusted agent work + identity runtime",
   version: "0.5.0",
   description:
-    "Outcome-assurance infrastructure on Polkadot: verify results, prove work, release payment, and issue signed, content-addressed receipts. The tool catalog mirrors MCP tools/list, including authentication requirements. Advertising a tool does not authorize execution; protected actions require wallet sign-in. HTTP-only operations are listed separately as endpoints.",
+    "Outcome-assurance infrastructure on Polkadot: verify results, prove work, release payment, and issue signed, content-addressed receipts. The directory-safe tool catalog is derived from MCP tools/list with connected-only authentication and execution tools excluded. HTTP-only operations are listed separately as endpoints.",
   protocols: ["http", "mcp"],
   discoveryMode: "directory-safe",
   products: {
