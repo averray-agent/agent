@@ -573,7 +573,7 @@ const DISCOVERY_TOOL_DEFINITIONS = [
   { name: "getPlatformCapabilities", description: "Capability + endpoint manifest for this deployment." },
   {
     name: "listJobs",
-    description: "All active jobs with listing time, any priority window, and optional since freshness metadata (ISO 8601 or epoch milliseconds)."
+    description: "Claimable jobs by default through MCP, paginated at 50. Follow cursor and use include for additional states. HTTP /jobs with no parameters remains the complete legacy array. since adds freshness counts, not a complete-page guarantee."
   },
   { name: "getJobDefinition", description: "One job by id." },
   // The buyer half of the loop has to be findable, not just the worker half.

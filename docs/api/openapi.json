@@ -444,7 +444,7 @@
         ],
         "operationId": "listJobs",
         "summary": "List available jobs",
-        "description": "Returns all currently available platform jobs. With no query parameters this preserves the legacy full-array response. Query parameters enable an agent-friendly compact, filtered, paginated envelope; use /jobs/definition for the full payload of one job.",
+        "description": "With no query parameters returns the complete legacy array. Query views paginate at 50 by default (maximum 100), sorted by id. Use state=claimable for only open claimable jobs (the MCP listJobs default); include=submitted,exhausted adds those states. format=full preserves the array shape for paginated views. Follow Link rel=next or nextCursor. Cursors are bound to filters and wallet. ETag supports If-None-Match / 304 revalidation.",
         "parameters": [
           {
             "name": "source",
@@ -498,19 +498,19 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Maximum compact rows to return when using agent-friendly query parameters.",
+            "description": "Maximum rows to return in either response format.",
             "schema": {
               "type": "integer",
               "minimum": 1,
               "maximum": 100,
-              "default": 25
+              "default": 50
             }
           },
           {
             "name": "offset",
             "in": "query",
             "required": false,
-            "description": "Zero-based compact row offset for pagination.",
+            "description": "Legacy zero-based offset; cannot be combined with cursor.",
             "schema": {
               "type": "integer",
               "minimum": 0,
@@ -518,10 +518,22 @@
             }
           },
           {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque nextCursor from the previous page. Preserve filters and wallet; do not combine with offset.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "description": "Comma-separated additional claim states, for example submitted,exhausted. Adds to the claimable view; bare /jobs remains the complete legacy array.",
+            "schema": { "type": "string" }
+          },
+          {
             "name": "format",
             "in": "query",
             "required": false,
-            "description": "Set to full to force the legacy full-array response even when query parameters are present.",
+            "description": "Set to full for an array. Full arrays and compact envelopes use the same filtering and pagination.",
             "schema": {
               "type": "string",
               "enum": [
@@ -4148,6 +4160,9 @@
               "integer",
               "null"
             ]
+          },
+          "nextCursor": {
+            "type": ["string", "null"]
           },
           "filters": {
             "type": "object",
