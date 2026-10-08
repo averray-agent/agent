@@ -98,6 +98,30 @@ test("compact board preserves complete Markdown criteria and fallback descriptio
   }
 });
 
+test("compact jobs bound both Markdown fields at complete blocks within 1000 characters", () => {
+  const prefix = "## Task\n\nA **complete** [link](https://example.test).";
+  for (const tail of [
+    "```js\ninside\n\n" + "x".repeat(2_000) + "\n```",
+    "~~~\ninside\n\n" + "x".repeat(2_000) + "\n~~~",
+    "[long label " + "x".repeat(2_000) + "](https://example.test)",
+    "**" + "x".repeat(2_000) + "**",
+    "`" + "x".repeat(2_000) + "`"
+  ]) {
+    const row = buildPublicJobsResponse([{ ...JOBS[0], description: prefix + "\n\n" + tail,
+      acceptanceCriteria: [prefix + "\n\n" + tail] }], new URLSearchParams("limit=1")).jobs[0];
+    assert.equal(row.summary, prefix);
+    assert.equal(row.successCriteria, prefix);
+    assert.ok(row.summary.length <= 1_000 && row.successCriteria.length <= 1_000);
+    assert.ok(Buffer.byteLength(JSON.stringify(row)) < 3_000, "compact row transport budget");
+    const huge = buildPublicJobsResponse([{ ...JOBS[0], description: tail, acceptanceCriteria: [tail] }], new URLSearchParams("limit=1")).jobs[0];
+    assert.equal(huge.summary, "");
+    assert.equal(huge.successCriteria, "");
+  }
+  const fenced = "```js\ninside\n\ncode\n```";
+  const row = buildPublicJobsResponse([{ ...JOBS[0], description: fenced + "\n\n" + "x".repeat(2_000) }], new URLSearchParams("limit=1")).jobs[0];
+  assert.equal(row.summary, fenced, "a complete fenced block is retained");
+});
+
 test("legacy board stays complete; explicit claimable requires evidence and include opts into additional states", () => {
   const rows = [
     { id: "open", claimState: "open", claimable: true },

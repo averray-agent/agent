@@ -284,16 +284,33 @@ function buildWikipediaPinnedRevisionUrl(source) {
 }
 
 function summarizeJob(job) {
-  // Keep complete Markdown (including line boundaries). The app renders it to
-  // plain text before shortening the card lead; slicing here can split syntax.
-  return String(job.description ?? "").trim();
+  return compactMarkdown(job.description);
 }
 
 function summarizeSuccessCriteria(job) {
   const criterion = Array.isArray(job.acceptanceCriteria)
     ? job.acceptanceCriteria.find((value) => String(value ?? "").trim())
     : undefined;
-  return String(criterion ?? "").trim();
+  return compactMarkdown(criterion);
+}
+
+// Transport budget, not a Markdown renderer. Only retain complete blocks;
+// a first block larger than the budget leaves the app's fallback copy in place.
+function compactMarkdown(value) {
+  const markdown = String(value ?? "").trim();
+  const limit = 1_000;
+  if (markdown.length <= limit) return markdown;
+  let fence = null, offset = 0, boundary = 0;
+  for (const line of markdown.split("\n")) {
+    if (offset + line.length > limit) break;
+    const marker = line.match(/^\s*(?:>\s*)*(?:[-+*]\s+|\d+[.)]\s+)?(`{3,}|~{3,})(.*)$/u);
+    if (marker) {
+      if (!fence) fence = marker[1];
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+    } else if (!fence && !line.trim()) boundary = offset;
+    offset += line.length + 1;
+  }
+  return markdown.slice(0, boundary).trimEnd();
 }
 
 function sourceCandidates(job) {
