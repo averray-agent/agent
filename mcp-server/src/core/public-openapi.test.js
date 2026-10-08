@@ -15,6 +15,19 @@ test("public OpenAPI drift guard covers every public discovery operation or name
   assert.deepEqual(publicOpenApiErrors(await readDocument()), []);
 });
 
+test("public claim schema includes disputes and explicit funding evidence, and Verify GET advertises POST", async () => {
+  const document = await readDocument();
+  const claim = document.components.schemas.JobClaimStatus.properties;
+  for (const state of ["disputed", "rejected", "restricted"]) {
+    assert.ok(claim.claimState.enum.includes(state));
+    assert.ok(claim.effectiveState.enum.includes(state));
+  }
+  for (const state of ["funded", "available", "pending", "unverified", "not_checked"]) {
+    assert.ok(claim.fundingState.enum.includes(state));
+  }
+  assert.equal(document.paths["/verify/runs"].get.responses["405"].headers.Allow.schema.const, "POST");
+});
+
 test("published OpenAPI excludes admin paths, testnet chain ids and localhost servers", async () => {
   const document = await readDocument();
   assert.equal(Object.keys(document.paths).some((path) => path.startsWith("/admin/")), false);

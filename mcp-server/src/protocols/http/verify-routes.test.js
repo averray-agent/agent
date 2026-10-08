@@ -40,6 +40,14 @@ function harness({ createRun, getRun, payload, profiles = new VerificationProfil
   return { calls, response, route };
 }
 
+test("GET /verify/runs names POST as the only creation method and never creates a run", async () => {
+  const { response, route, calls } = harness();
+  assert.equal(await route({ request: { method: "GET" }, response, pathname: "/verify/runs" }), true);
+  assert.equal(response.statusCode, 405);
+  assert.equal(response.headers.allow, "POST");
+  assert.deepEqual(calls, []);
+});
+
 test("GET /verify/profiles is public, cacheable, and leads with the URL-only MCP profile", async () => {
   const { response, route } = harness();
   assert.equal(await route({ request: { method: "GET" }, response, pathname: "/verify/profiles" }), true);

@@ -8,7 +8,7 @@ test("loadHttpConfig uses safe defaults when env is empty", () => {
   assert.equal(config.maxBodyBytes, 64 * 1024);
   assert.equal(config.allowedOrigins.size, 0);
   assert.equal(config.allowAllOrigins, false);
-  assert.equal(config.allowedMethods, "GET, POST, OPTIONS");
+  assert.equal(config.allowedMethods, "GET, HEAD, POST, OPTIONS");
   assert.match(config.allowedHeaders, /mcp-protocol-version/u);
   assert.match(config.allowedHeaders, /mcp-method/u);
   assert.match(config.allowedHeaders, /mcp-name/u);

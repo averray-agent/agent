@@ -61,9 +61,20 @@ scope; calling them anonymously returns an explicit `isError` tool result.
 | `claimJob` | `jobs:claim` |
 | `submitWork` | `jobs:submit` |
 
-Unsupported versions return HTTP 400 with JSON-RPC code `-32022` and a data
-object containing `supported` and `requested`. Modern header/body mismatches
-return HTTP 400 with code `-32020`.
+Initialization always selects our newest legacy version, 2025-11-25, even
+when offered 2026-07-28, because initialize has legacy semantics.
+The returned session binds the selection and explicit mismatches are refused.
+On the stateless path, unknown versions return HTTP 400 with
+`-32022 UnsupportedProtocolVersionError` and `data: {supported, requested}`.
+Clients select a supported version and retry; no tool executes on an unknown
+version. `server/discover` remains a server extension for supported modern
+requests, not a replacement for the version error contract. Header/body
+mismatches return `-32020`; malformed versions are invalid parameters.
+
+`ping` is legacy-only (removed in 2026-07-28). It returns an empty result
+without tool execution, including before legacy initialization, and retains
+origin and request-budget checks. Modern requests receive method-not-found.
+`fetchAuthNonce` is public but not read-only: it creates authentication state.
 
 For a reproducible local two-client transcript, run:
 

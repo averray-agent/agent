@@ -2,8 +2,10 @@ import { ValidationError } from "../../core/errors.js";
 
 export function respond(response, statusCode, payload, extraHeaders = {}, options = {}) {
   const headers = buildResponseHeaders(response, "application/json", extraHeaders);
+  const body = JSON.stringify(payload, exactJsonReplacer, options.compact ? undefined : 2);
+  if (body !== undefined && statusCode !== 204 && statusCode !== 304) headers["content-length"] = Buffer.byteLength(body);
   response.writeHead(statusCode, headers);
-  response.end(options.headOnly ? undefined : JSON.stringify(payload, exactJsonReplacer, options.compact ? undefined : 2));
+  response.end(options.headOnly || response._headOnly ? undefined : body);
 }
 
 function exactJsonReplacer(_key, value) {
@@ -13,7 +15,7 @@ function exactJsonReplacer(_key, value) {
 export function respondText(response, statusCode, payload, extraHeaders = {}) {
   const headers = buildResponseHeaders(response, "text/plain; charset=utf-8", extraHeaders);
   response.writeHead(statusCode, headers);
-  response.end(String(payload));
+  response.end(response._headOnly ? undefined : String(payload));
 }
 
 function buildResponseHeaders(response, contentType, extraHeaders) {

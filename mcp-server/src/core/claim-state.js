@@ -77,7 +77,7 @@ export function summarizeJobClaimState({
   const lazyFundingPending = lazyFundingState === "pending";
   const lazyFundingUnverified = lazyFundingState === "unverified";
   const effectiveFundingState = fundingState
-    ?? (lazyFundingPending ? "pending" : lazyFundingUnverified ? "unverified" : undefined);
+    ?? lazyFundingState ?? "not_checked";
   const fundingBlocked = prefundingPending || lazyFundingPending || lazyFundingUnverified;
   const fundingReason = prefundingPending || lazyFundingPending
     ? "reward_funding_pending"
@@ -158,7 +158,7 @@ export function summarizeJobClaimState({
       effectiveState: "claimed",
       claimable: false,
       currentWalletCanClaim: normalizedWallet ? false : null,
-      fundingState,
+      fundingState: effectiveFundingState,
       reason: walletMatchesClaim ? "already_claimed_by_current_wallet" : "claimed_by_other_wallet",
       retryLimit,
       claimAttemptCount,
@@ -178,7 +178,7 @@ export function summarizeJobClaimState({
     effectiveState: claimState,
     claimable: false,
     currentWalletCanClaim: normalizedWallet ? false : null,
-    fundingState,
+    fundingState: effectiveFundingState,
     reason: claimState === "exhausted" ? "job_session_completed" : `session_${claimState}`,
     retryLimit,
     claimAttemptCount,
@@ -243,7 +243,7 @@ export function claimStatusFields(claimStatus) {
     effectiveState: claimStatus.effectiveState ?? claimStatus.claimState,
     claimable: claimStatus.claimable,
     currentWalletCanClaim: claimStatus.currentWalletCanClaim,
-    fundingState: claimStatus.fundingState ?? null,
+    fundingState: claimStatus.fundingState ?? "not_checked",
     reason: claimStatus.reason,
     retryLimit: claimStatus.retryLimit,
     claimAttemptCount: claimStatus.claimAttemptCount ?? null,

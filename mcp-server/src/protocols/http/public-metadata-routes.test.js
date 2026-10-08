@@ -153,6 +153,8 @@ test("A2 arrival payload: GET / identifies Averray and points to site, docs, and
   assert.ok(response.body.endpoints.includes("/poster/jobs"));
   assert.ok(response.body.endpoints.includes("/llms.txt"));
   assert.ok(response.body.endpoints.includes("/.well-known/x402"));
+  assert.ok(response.body.endpoints.includes("/verify/runs"));
+  assert.ok(response.body.endpoints.includes("/verify/profiles"));
   assert.ok(response.body.endpoints.includes("/jobs/x402"));
   assert.ok(response.body.endpoints.includes("/.well-known/badge-receipt-jwks.json"));
   assert.ok(response.body.endpoints.every((endpoint) => !endpoint.includes("/jobs/draft")));

@@ -1018,6 +1018,7 @@ const handleOperationalRoute = createOperationalRoutes({
 });
 
 const server = createServer(async (request, response) => {
+  const wireMethod = request.method;
   const url = new URL(request.url ?? "/", "http://localhost");
   const pathname = url.pathname.replace(/\/+$/, "") || "/";
   const requestId = resolveRequestId(request);
@@ -1033,17 +1034,17 @@ const server = createServer(async (request, response) => {
     const durationMs = Number((process.hrtime.bigint() - startedAt) / 1_000_000n);
     const pathLabel = metricPathLabel(pathname);
     metrics.counter("http_requests_total").inc({
-      method: request.method ?? "UNKNOWN",
+      method: wireMethod ?? "UNKNOWN",
       path: pathLabel,
       status: String(response.statusCode ?? 0)
     });
     metrics.histogram("http_request_duration_ms").observe(
-      { method: request.method ?? "UNKNOWN", path: pathLabel },
+      { method: wireMethod ?? "UNKNOWN", path: pathLabel },
       durationMs
     );
     requestLogger.info(
       {
-        method: request.method,
+        method: wireMethod,
         path: pathname,
         status: response.statusCode,
         durationMs,
@@ -1053,7 +1054,7 @@ const server = createServer(async (request, response) => {
       "http.response"
     );
     void arrivalObservatory.recordHttp({
-      method: request.method,
+      method: wireMethod,
       pathname,
       clientInfo: extractHttpClientInfo(request),
       ip: clientIp(request),
@@ -1075,6 +1076,14 @@ const server = createServer(async (request, response) => {
 
     if (await handleMcpRoute({ request, response, pathname })) {
       return;
+    }
+
+    // Dispatch HEAD through exactly the GET/auth path. ServerResponse was
+    // constructed with the original HEAD request and suppresses body bytes;
+    // the explicit flag also covers our JSON/text responders and test doubles.
+    if (wireMethod === "HEAD" && pathname !== "/events") {
+      request.method = "GET";
+      response._headOnly = true;
     }
 
     if (await handlePublicMetadataRoute({ request, response, pathname })) {
@@ -1280,7 +1289,7 @@ const server = createServer(async (request, response) => {
     const logLevel = (normalized.statusCode ?? 500) >= 500 ? "error" : "warn";
     requestLogger[logLevel](
       {
-        method: request.method,
+        method: wireMethod,
         path: pathname,
         status: normalized.statusCode ?? 500,
         code: normalized.code,
@@ -1295,7 +1304,7 @@ const server = createServer(async (request, response) => {
       // 5xx only — we deliberately don't ship 4xx noise to Sentry.
       observability.captureException(error instanceof Error ? error : new Error(String(error)), {
         requestId,
-        method: request.method,
+        method: wireMethod,
         path: pathname,
         status: normalized.statusCode ?? 500,
         code: normalized.code
