@@ -3,8 +3,34 @@ import test from "node:test";
 import { createAdminStatusRoutes } from "./admin-status-routes.js";
 import { PlatformService } from "../../core/platform-service.js";
 import { MemoryStateStore } from "../../core/state-store.js";
+import { GithubPrReviewService } from "../../services/github-pr-review-service.js";
 
 const AUTH = { wallet: "0xadmin", roles: ["admin"] };
+
+test("GET /admin/status exposes the persisted last run and last 20 GitHub poll summaries", async () => {
+  const store = new MemoryStateStore();
+  const review = new GithubPrReviewService({ stateStore: store, githubToken: "", logger: { info() {} } });
+  for (let n = 0; n < 22; n++) await review.runOnce(new Date(10_000 + n));
+  const service = new PlatformService([], new Map(), new Map(), new Map(), undefined, store);
+  service.githubPrReview = new GithubPrReviewService({ stateStore: store, githubToken: "" });
+  const response = {};
+  let authenticated = false;
+  const route = createAdminStatusRoutes({ service,
+    authMiddleware: async (_request, _url, options) => {
+      assert.deepEqual(options.requireCapabilities, ["admin:status", "ops:view"]);
+      authenticated = true;
+      return AUTH;
+    },
+    respond: (res, status, body) => { assert.ok(authenticated); Object.assign(res, { status, body }); }
+  });
+  await route({ request: { method: "GET" }, response,
+    url: new URL("http://localhost/admin/status"), pathname: "/admin/status" });
+  assert.equal(response.status, 200);
+  const status = response.body.githubPrReview;
+  assert.equal(status.recentRuns.length, 20);
+  assert.deepEqual(status.lastRun, status.recentRuns[0]);
+  assert.equal(status.lastRun.startedAt, new Date(10021).toISOString());
+});
 
 function makeHarness(overrides = {}) {
   const calls = [];

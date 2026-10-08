@@ -32,14 +32,17 @@ export class GithubPrReviewService {
         try { ({ job } = requireJobSnapshot(session)); } catch (error) { integrityError = error.code ?? error.message; }
         const mode = job?.verifierConfig?.handler ?? job?.verifierMode ?? null;
         if (AUTO_DECIDABLE_MODES.includes(mode)) continue;
-        let githubLookup, previewOutcome;
+        let githubLookup, previewOutcome, previewError = false;
         if (upstream && mode === "github_pr") {
           try {
             const preview = await this.verifierService.previewSubmission({ sessionId: session.sessionId });
             githubLookup = preview.githubLookup;
             previewOutcome = preview.outcome;
           }
-          catch (error) { githubLookup = { status: "unavailable", reason: error.code ?? error.message }; }
+          catch (error) {
+            previewError = true;
+            githubLookup = { status: "unavailable", reason: error.code ?? error.message };
+          }
         }
         const submittedAt = session.submittedAt ?? null;
         const ageMs = submittedAt && Number.isFinite(Date.parse(submittedAt)) ? Math.max(0, now - Date.parse(submittedAt)) : null;
@@ -48,7 +51,7 @@ export class GithubPrReviewService {
           wallet: session.wallet, reward: { amount: job?.rewardAmount ?? null, asset: job?.rewardAsset ?? null },
           verifierMode: mode, submittedAt, ageMs, ageHours: ageMs === null ? null : ageMs / 3_600_000,
           prUrl: githubLookup?.htmlUrl ?? submission?.prUrl ?? null,
-          upstream: githubLookup ?? { status: "not_checked" }, previewOutcome,
+          upstream: githubLookup ?? { status: "not_checked" }, previewOutcome, previewError,
           ...(integrityError ? { integrityError } : {}) });
       }
       if (page.length < 100) break;
@@ -58,6 +61,7 @@ export class GithubPrReviewService {
   }
 
   async getStatus(now = new Date()) {
+    await this.loadRunHistory();
     const queue = await this.pending({ now, upstream: false });
     const github = queue.items.filter((item) => item.verifierMode === "github_pr");
     const oldestGithubAgeMs = github[0]?.ageMs ?? null;
@@ -65,14 +69,27 @@ export class GithubPrReviewService {
       count: queue.count, oldestAgeMs: queue.oldestAgeMs, githubPrCount: github.length,
       githubUpstream: this.getUpstreamHealth(now, github.length),
       oldestGithubAgeMs, slaHours: this.slaHours,
-      warnings: oldestGithubAgeMs > this.slaHours * 3_600_000 ? [{
+      warnings: [...(oldestGithubAgeMs > this.slaHours * 3_600_000 ? [{
         code: "github_pr_review_overdue", severity: "warning", oldestAgeMs: oldestGithubAgeMs,
         sessionId: github[0].sessionId, message: "GitHub PR review is overdue; operator review required."
-      }] : [], ...this.schedulerLoop.getStatus(now) };
+      }] : []), ...this.runWarnings()],
+      ...this.schedulerLoop.getStatus(now), lastRun: this.lastRun, recentRuns: this.recentRuns };
   }
 
   async runOnce(now = new Date()) {
-    const summary = { startedAt: now.toISOString(), reviewed: [], observed: [], errors: [] };
+    const summary = { startedAt: now.toISOString(), reviewed: [], observed: [], skipped: [], errors: [] };
+    try {
+      await this.loadRunHistory();
+      return await this.reviewQueue(now, summary);
+    } catch (error) {
+      summary.errors.push({ code: error.code ?? "github_pr_review_run_failed", message: error.message });
+      throw error;
+    } finally {
+      await this.recordRun(summary);
+    }
+  }
+
+  async reviewQueue(now, summary) {
     if (!this.enabled) return summary;
     const queue = await this.pending({ now });
     const githubItems = queue.items.filter((entry) => entry.verifierMode === "github_pr");
@@ -91,18 +108,28 @@ export class GithubPrReviewService {
     for (const item of githubItems) {
       try {
         const upstream = item.upstream;
-        if (!completeGithubRead(upstream)) continue;
+        if (!completeGithubRead(upstream)) {
+          const unavailable = Object.entries(upstream.partial ?? {})
+            .filter(([, value]) => value === "unavailable").map(([endpoint]) => endpoint);
+          summary.skipped.push({ sessionId: item.sessionId, reason: item.previewError
+            ? "preview_error" : "upstream_unavailable:" + (unavailable.join(",") || publicGithubError(upstream)) });
+          continue;
+        }
         const fingerprint = createHash("sha256").update(JSON.stringify({
           merged: upstream.merged, state: upstream.state, headSha: upstream.headSha,
           checks: upstream.checkState ?? { ciStatus: upstream.ciStatus, policyGates: upstream.policyGates, ciExclusions: upstream.ciExclusions }
         })).digest("hex");
         const previous = await this.stateStore.getMutationReceipt("github_pr_review_observation", item.sessionId);
+        let observation = { ...previous,
+          previousFingerprint: previous?.previousFingerprint ?? previous?.fingerprint ?? null,
+          previousObservedAt: previous?.previousObservedAt ?? previous?.observedAt ?? null };
         // Dedupe observations, not admission to settlement: a first observation
         // (or an old receipt written before this fix) may already be approved.
         if (previous?.fingerprint !== fingerprint || previous?.previewOutcome !== item.previewOutcome || previous?.merged !== (upstream.merged === true)) {
-          await this.stateStore.upsertMutationReceipt("github_pr_review_observation", item.sessionId, {
-            fingerprint, previewOutcome: item.previewOutcome, merged: upstream.merged === true, observedAt: now.toISOString()
-          });
+          observation = { ...previous, fingerprint, previewOutcome: item.previewOutcome,
+            merged: upstream.merged === true, observedAt: now.toISOString(),
+            previousFingerprint: previous?.fingerprint ?? null, previousObservedAt: previous?.observedAt ?? null };
+          await this.stateStore.upsertMutationReceipt("github_pr_review_observation", item.sessionId, observation);
           summary.observed.push(item.sessionId);
         }
         if (upstream.merged === true && item.previewOutcome === "approved"
@@ -111,11 +138,62 @@ export class GithubPrReviewService {
           // Open green PRs and every other outcome stay with the operator.
           const verdict = await this.verifierService.verifySubmission({ sessionId: item.sessionId, expectOutcome: "approved" });
           summary.reviewed.push({ sessionId: item.sessionId, outcome: verdict.outcome });
+          await this.stateStore.upsertMutationReceipt("github_pr_review_observation", item.sessionId, {
+            ...observation, settledAt: new Date().toISOString()
+          });
+        } else {
+          summary.skipped.push({ sessionId: item.sessionId, reason: upstream.merged !== true ? "not_merged"
+            : item.previewOutcome !== "approved" ? "preview_not_approved" : "session_not_submitted" });
         }
-      } catch (error) { summary.errors.push({ sessionId: item.sessionId, message: error.message }); }
+      } catch (error) {
+        summary.errors.push({ sessionId: item.sessionId, message: error.message });
+        summary.skipped.push({ sessionId: item.sessionId, reason: "review_error" });
+      }
     }
-    this.lastRun = { ...summary, finishedAt: new Date().toISOString() };
-    return this.lastRun;
+    return summary;
+  }
+
+  async loadRunHistory() {
+    if (!this.historyPromise) {
+      this.historyPromise = Promise.resolve().then(async () => {
+        const history = await this.stateStore.getMutationReceipt?.("github_pr_review_runs", "recent");
+        this.recentRuns = (history?.runs ?? []).slice(0, 20);
+        this.lastRun = this.recentRuns[0];
+      }).catch((error) => { this.historyPromise = undefined; throw error; });
+    }
+    return this.historyPromise;
+  }
+
+  async recordRun(summary) {
+    summary.finishedAt = new Date().toISOString();
+    summary.counts = { observed: summary.observed.length, reviewed: summary.reviewed.length,
+      skipped: summary.skipped.length, errors: summary.errors.length,
+      upstreamUnavailable: summary.skipped.filter((item) => item.reason.startsWith("upstream_unavailable:")).length,
+      previewErrors: summary.skipped.filter((item) => item.reason === "preview_error").length };
+    summary.consecutiveUpstreamUnavailableRuns = summary.counts.upstreamUnavailable > 0
+      ? (this.lastRun?.consecutiveUpstreamUnavailableRuns ?? 0) + 1 : 0;
+    summary.consecutivePreviewErrorRuns = summary.counts.previewErrors > 0
+      ? (this.lastRun?.consecutivePreviewErrorRuns ?? 0) + 1 : 0;
+    this.lastRun = summary;
+    this.recentRuns = [summary, ...(this.recentRuns ?? [])].slice(0, 20);
+    try {
+      await this.stateStore.upsertMutationReceipt?.("github_pr_review_runs", "recent", { runs: this.recentRuns });
+    } catch (error) {
+      summary.errors.push({ code: "github_pr_review_history_write_failed", message: error.message });
+      summary.counts.errors = summary.errors.length;
+    } finally {
+      this.logger.info?.({ ...summary }, "github_pr_review.run");
+    }
+  }
+
+  runWarnings() {
+    const run = this.lastRun;
+    return run && (run.consecutiveUpstreamUnavailableRuns > 2 || run.consecutivePreviewErrorRuns > 2) ? [{
+      code: "github_pr_review_read_failures", severity: "warning",
+      upstreamUnavailableCount: run.counts.upstreamUnavailable, previewErrorCount: run.counts.previewErrors,
+      consecutiveUpstreamUnavailableRuns: run.consecutiveUpstreamUnavailableRuns,
+      consecutivePreviewErrorRuns: run.consecutivePreviewErrorRuns
+    }] : [];
   }
 
   getUpstreamHealth(now = new Date(), pendingCount) {

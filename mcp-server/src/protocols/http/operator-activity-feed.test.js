@@ -10,6 +10,18 @@ import {
 
 const NOW = new Date("2026-06-06T12:00:00.000Z").getTime();
 
+test("GitHub read-failure alerts report failure counts, not a fabricated overdue age", async () => {
+  const alerts = await listAlerts({ listDisputes: async () => [], listPolicies: () => [], service: {
+    listRecentSessions: async () => [],
+    githubPrReview: { getStatus: async () => ({ warnings: [{
+      code: "github_pr_review_read_failures", upstreamUnavailableCount: 2, previewErrorCount: 3
+    }] }) }
+  } });
+  assert.equal(alerts[0].title, "GitHub PR review reads failing");
+  assert.match(alerts[0].body, /2 upstream reads unavailable; 3 preview errors/u);
+  assert.doesNotMatch(alerts[0].body, /NaN|undefined/u);
+});
+
 test("compactWallet preserves short values and compacts long wallets", () => {
   assert.equal(compactWallet(""), "system");
   assert.equal(compactWallet("0xabc"), "0xabc");

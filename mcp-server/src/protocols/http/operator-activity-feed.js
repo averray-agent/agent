@@ -184,6 +184,13 @@ export async function listAlerts({
   const alerts = [];
   const review = await service.githubPrReview?.getStatus?.();
   for (const warning of review?.warnings ?? []) {
+    if (warning.code === "github_pr_review_read_failures") {
+      alerts.push({ id: warning.code, code: warning.code, severity: "warning", tone: "warn",
+        title: "GitHub PR review reads failing",
+        body: `${warning.upstreamUnavailableCount} upstream reads unavailable; ${warning.previewErrorCount} preview errors in the last poll. Operator investigation required.`,
+        ctaLabel: "Open runs ->", ctaHref: "/runs" });
+      continue;
+    }
     alerts.push({ id: warning.code, code: warning.code, severity: "warning", tone: "warn",
       title: "GitHub PR review overdue", ref: warning.sessionId,
       body: `${review.githubPrCount} pending GitHub PR reviews; oldest ${Math.floor(warning.oldestAgeMs / 3_600_000)} hours. Operator review required.`,
