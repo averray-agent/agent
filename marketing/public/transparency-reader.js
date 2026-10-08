@@ -182,6 +182,8 @@
   }
 
   function render(payload) {
+    var retired = document.querySelector("[data-retired-v21]");
+    if (retired) retired.hidden = !payload.depositPools?.retiredV21;
     var head = resolvePath(payload, "chain.head");
     var headValue = isUnknown(head) ? null : head.value;
     if (headValue != null) {

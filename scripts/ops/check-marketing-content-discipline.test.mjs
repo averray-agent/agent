@@ -5,6 +5,7 @@ import { runInNewContext } from "node:vm";
 
 import {
   MarketingContentDisciplineError,
+  assertPoolRecordTruth,
   assertMarketingContentDiscipline
 } from "./check-marketing-content-discipline.mjs";
 
@@ -13,12 +14,32 @@ const REPO_ROOT = new URL("../../", import.meta.url);
 function safePages(verifyHtml) {
   const meta = '<meta name="description" content="proof"><meta property="og:title" content="Averray"><meta name="twitter:card" content="summary">';
   return {
+    "site/transparency/index.html": `${meta}<main>Live ledger; figures not loaded.</main>`,
     "site/index.html": `${meta}<main>Outcome verification and work receipts.</main>`,
     "site/verify/index.html": `${meta}${verifyHtml}`,
     "site/proof-to-pay/index.html": `${meta}<main>Proof-gated escrow. Release on PASS only.</main>`,
     "site/pool/index.html": `${meta}<main><div data-public-pool><h2 data-pool-yield-heading>Reading live state</h2><p data-pool-yield-attribution>Reading attribution</p><p data-pool-risk-statement>Reading live disclosure</p><div data-pool-cta hidden>Open depositor view</div></div><footer>Footer</footer></main>`
   };
 }
+
+test("whole built Pool and Record pages reject baked amounts and any pool address anywhere", () => {
+  for (const path of ["site/transparency/index.html", "site/pool/index.html"]) {
+    const pages = { "site/transparency/index.html": "<main>Record</main>", "site/pool/index.html": "<main>Pool</main>" };
+    assert.doesNotThrow(() => assertPoolRecordTruth(pages));
+    pages[path] += '<footer>1.25 <b>USDC</b></footer>';
+    assert.throws(() => assertPoolRecordTruth(pages), /baked amount in whole page/);
+    pages[path] = "<main>0x" + "11".repeat(20) + "</main>";
+    assert.throws(() => assertPoolRecordTruth(pages), /baked pool address in whole page/);
+    pages[path] += "<footer>0x" + "22".repeat(20) + "</footer>";
+    assert.throws(() => assertPoolRecordTruth(pages), /baked pool address in whole page/);
+  }
+});
+
+test("Record participates in the baked-amount marketing loop", () => {
+  const pages = safePages('<span data-verify-inconclusive></span>');
+  pages["site/transparency/index.html"] += "<footer>2 DOT</footer>";
+  assert.throws(() => assertMarketingContentDiscipline(pages), /site\/transparency\/index.html: baked amount/);
+});
 
 test("content discipline accepts the required Verify disclosures", () => {
   assert.doesNotThrow(() => assertMarketingContentDiscipline(safePages(

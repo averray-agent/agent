@@ -297,6 +297,7 @@ test("loadBlockchainConfig moves the door to v2.2 without changing v2.1 reads or
   assert.equal(mainnet.depositPoolAddress, "0x3a2dd08f85009474117cafc476b6629ae04fb2a9");
   assert.equal(mainnet.depositPoolV2Address, "0x3a2dd08f85009474117cafc476b6629ae04fb2a9");
   assert.equal(mainnet.depositPoolV21Address, "0x9b35a102d656fb86d798af81959e09961dec28e0");
+  assert.equal(mainnet.depositPoolV22Address, "0x3a2dd08f85009474117cafc476b6629ae04fb2a9");
   assert.equal(mainnet.legacyDepositPoolV2Address, "0x6061f0accc3aa66add9508708dd2285bffac5f30");
   assert.equal(mainnet.depositPoolDeploymentBlock, 20_746_434);
   assert.equal(mainnet.depositPoolV2DeploymentBlock, 20_746_434);
@@ -308,6 +309,7 @@ test("loadBlockchainConfig moves the door to v2.2 without changing v2.1 reads or
   assert.equal(testnet.depositPoolAddress, "");
   assert.equal(testnet.depositPoolV2Address, "");
   assert.equal(testnet.depositPoolV21Address, "");
+  assert.equal(testnet.depositPoolV22Address, "");
   assert.equal(testnet.legacyDepositPoolV2Address, "");
   assert.equal(testnet.depositPoolDeploymentBlock, undefined);
   assert.equal(testnet.legacyDepositPoolV2DeploymentBlock, undefined);

@@ -24,6 +24,7 @@ const TREASURY_ID = "0x93511e8deef3e7ec69cc1f18a573176da9870a0fb474ab2e0c18d88a5
 const CONVERTED = "0x48df881b65e682f05ac24dc8f668a8938225e973f6ebfce08cd5a3835491e7f3";
 const AUSDC = "0x2ec4884088d84e5c2970a034732e5209b0acfa93";
 const LIVE_POOL = "0x9B35A102d656Fb86d798aF81959e09961DEc28E0";
+const V22_POOL = "0x3A2dd08F85009474117CaFC476b6629AE04fB2A9";
 const LEGACY_POOL = "0x6061f0aCcC3AA66AdD9508708dd2285bFFAC5F30";
 const NOW = Date.parse("2026-08-06T12:00:00.000Z");
 const OPERATOR_POSTER = "0x1111111111111111111111111111111111111111";
@@ -193,6 +194,7 @@ function harness(overrides = {}) {
         xcmWrapperAddress: WRAPPER,
         escrowCoreAddress: ESCROW,
         depositPoolV21Address: LIVE_POOL,
+        depositPoolV22Address: V22_POOL,
         depositPoolAddress: overrides.depositPoolAddress ?? LIVE_POOL,
         depositPoolV2Address: LIVE_POOL,
         legacyDepositPoolV2Address: LEGACY_POOL,
@@ -238,6 +240,9 @@ function harness(overrides = {}) {
     },
     depositPoolReader: overrides.depositPoolReader ?? {
       async read(address) {
+        if (String(address).toLowerCase() === V22_POOL.toLowerCase()) {
+          return { blockNumber: 9_218_453, totalAssets: 25_100_000n, bufferAssets: 25_100_000n, deployedPrincipal: 0n };
+        }
         if (String(address).toLowerCase() === LIVE_POOL.toLowerCase()) {
           return { blockNumber: 9_218_453, totalAssets: 10_405_132n, bufferAssets: 10_405_132n, deployedPrincipal: 0n };
         }
@@ -444,13 +449,26 @@ test("a held snapshot older than the smallest freshness window forces inline ass
 test("T4 transparency retains v2.1 balances after the canonical alias moves and labels deposits retired", async () => {
   const before = await harness().getSnapshot();
   const after = await harness({ depositPoolAddress: "0x3A2dd08F85009474117CaFC476b6629AE04fB2A9" }).getSnapshot();
-  assert.equal(after.depositPools.live.label.value, "v2.1 · deposits retired");
-  assert.equal(after.depositPools.live.address.value.toLowerCase(), LIVE_POOL.toLowerCase());
+  assert.equal(after.depositPools.live.label.value, "Live v2.2");
+  assert.equal(after.depositPools.live.address.value.toLowerCase(), V22_POOL.toLowerCase());
+  assert.equal(after.depositPools.live.totalAssets.value, "25.1");
+  assert.equal(after.depositPools.retiredV21.label.value, "v2.1 · deposits retired");
+  assert.equal(after.depositPools.retiredV21.address.value.toLowerCase(), LIVE_POOL.toLowerCase());
   for (const field of ["totalAssets", "bufferAssets", "deployedStatus"]) {
-    assert.deepEqual(after.depositPools.live[field], before.depositPools.live[field]);
+    assert.deepEqual(after.depositPools.retiredV21[field], before.depositPools.live[field]);
   }
-  assert.equal(after.depositPools.live.totalAssets.value, "10.405132");
+  assert.equal(after.depositPools.retiredV21.totalAssets.value, "10.405132");
   assert.deepEqual(after.depositPools.legacy, before.depositPools.legacy);
+});
+
+test("current pool generation follows the configured address and never guesses an unknown alias", async () => {
+  const before = await harness().getSnapshot();
+  assert.equal(before.depositPools.live.label.value, "Live v2.1");
+  assert.equal(before.depositPools.retiredV21, undefined);
+  const unknown = await harness({ depositPoolAddress: "0x1111111111111111111111111111111111111111" }).getSnapshot();
+  assert.equal(unknown.depositPools.live.label.value, "Current pool · generation unrecognized");
+  assert.equal(unknown.depositPools.live.totalAssets.status, "unknown");
+  assert.equal(unknown.depositPools.retiredV21.totalAssets.value, "10.405132");
 });
 
 test("transparency payload composes flow, escrow, and generation-bound treasury truth", async () => {
