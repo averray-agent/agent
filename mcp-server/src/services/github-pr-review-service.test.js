@@ -313,6 +313,7 @@ test("admin run authenticates as admin and persists the same handler verdict as 
   const outcomes = [];
   for (const pathname of ["/admin/verifier/run", "/verifier/run"]) {
     const f = await liveFixture();
+    f.upstream.merged = true;
     const auth = [], replies = [];
     const route = createVerifierRoutes({ verifierService: f.verifier,
       authMiddleware: async (_r, _u, o) => { auth.push(o); return { wallet }; },

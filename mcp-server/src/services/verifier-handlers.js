@@ -464,7 +464,8 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       }
 
       const githubEvidenceUnavailable = githubLookup.status !== "verified";
-      const githubEvidencePartial = Object.values(githubLookup.partial ?? {}).includes("unavailable");
+      const githubEvidencePartial = !["open", "closed"].includes(githubLookup.state)
+        || Object.values(githubLookup.partial ?? {}).includes("unavailable");
       const failingPolicyGates = (githubLookup.policyGates ?? []).filter((gate) =>
         gate.conclusion && !["success", "neutral", "skipped"].includes(gate.conclusion));
       const claimantBindingUnverified = claimantBindingRequired
@@ -712,7 +713,7 @@ async function fetchGithubPullRequestSnapshot({
       pullNumber: parsedPr.pullNumber,
       title,
       state: typeof pr?.state === "string" ? pr.state : "unknown",
-      merged: Boolean(pr?.merged),
+      merged: Boolean(pr?.merged || pr?.merged_at),
       headSha: headSha || null,
       issueReferenced: referencesIssue({
         structured: {},

@@ -89,8 +89,11 @@ export class VerifierService {
 
   async executeSubmissionVerification({ sessionId, evidence, metadataURI, expectOutcome }) {
     const guarded = expectOutcome !== undefined;
-    let session = guarded
-      ? await this.stateStore.getSession(sessionId)
+    const storedSession = await this.stateStore.getSession(sessionId);
+    const definition = storedSession?.jobSnapshot?.definition;
+    const githubPr = (definition?.verifierConfig?.handler ?? definition?.verifierMode) === "github_pr";
+    let session = guarded || githubPr
+      ? storedSession
       : await this.platformService.resumeSession(sessionId);
     if (!session) throw new NotFoundError("Unknown session: " + sessionId, "session_not_found");
     if (session.operatorOverturn) throw new ConflictError("An operator overturn requires an arbitrator verdict; use preview for read-only review.", "overturn_requires_arbitration");
@@ -107,9 +110,9 @@ export class VerifierService {
       session = reconciliation.session ?? session;
       return reconciliation.result;
     };
-    // Preserve the existing preflight for unguarded callers. Guarded calls
-    // evaluate locally first: reconciliation can itself write or send a tx.
-    if (!guarded) {
+    // Outcome-guarded and GitHub calls evaluate first: reconciliation can write
+    // or send a tx, so even an unguarded operator call must pass the merge gate.
+    if (!guarded && !githubPr) {
       const result = await prepareChainContext();
       if (result) return result;
     }
@@ -126,7 +129,15 @@ export class VerifierService {
       throw new ConflictError("The freshly evaluated verdict does not match the expected outcome.",
         "verdict_outcome_mismatch", { expected: expectOutcome, actual: verdict.outcome });
     }
-    if (guarded) {
+    // An open green preview is useful evidence, not permission to pay before merge.
+    if (githubPr && verdict.outcome === "approved" && (
+      verdict.githubLookup?.status !== "verified" || verdict.githubLookup.merged !== true
+      || !["open", "closed"].includes(verdict.githubLookup.state)
+      || Object.values(verdict.githubLookup.partial ?? {}).includes("unavailable")
+    )) {
+      throw new ConflictError("An upstream-verified merge is required before approving this GitHub PR.", "merge_required");
+    }
+    if (guarded || githubPr) {
       const result = await prepareChainContext();
       if (result) return result;
     }
