@@ -669,6 +669,25 @@ test("flow reader uses O(1)-ish batch joins for N synthetic settled items", asyn
   );
 });
 
+test("transparency reports distinct GitHub authors beside wallets and states incomplete attribution", async () => {
+  const service = harness();
+  const sessions = [1, 2, 3].map((id) => ({
+    sessionId: String(id), status: "submitted", wallet: "0x" + String(id).repeat(40),
+    jobSnapshot: { definition: { verifierMode: "github_pr" } }
+  }));
+  service.stateStore.listRecentSessions = async () => sessions;
+  service.stateStore.getMutationReceipt = async (_bucket, id) => id === "3" ? null : ({
+    githubLookup: { status: "verified", author: { login: "one-author" },
+      claimantBinding: { status: "matched", walletMatches: true } }
+  });
+  const flow = service.buildFlow(await service.readFlow(), NOW);
+  assert.equal(flow.githubAuthors.distinctAuthors, 1);
+  assert.equal(flow.githubAuthors.distinctWallets, 3);
+  assert.equal(flow.githubAuthors.unattributedSessions, 1);
+  assert.match(flow.githubAuthors.label, /not unique humans/u);
+  assert.equal(flow.githubAuthors.authors, undefined, "public transparency is aggregate-only");
+});
+
 test("transparency settlement flow uses the shared registry for ours, outsiders, and unknown", async () => {
   const external = "0x1111111111111111111111111111111111111111";
   const acceptance = "0x2222222222222222222222222222222222222222";

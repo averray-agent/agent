@@ -711,6 +711,7 @@ async function fetchGithubPullRequestSnapshot({
       htmlUrl,
       repo: parsedPr.repo,
       pullNumber: parsedPr.pullNumber,
+      author: typeof pr?.user?.login === "string" ? { login: pr.user.login } : null,
       title,
       state: typeof pr?.state === "string" ? pr.state : "unknown",
       merged: Boolean(pr?.merged || pr?.merged_at),

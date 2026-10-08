@@ -166,6 +166,17 @@ test("GET /health is not degraded for an old open PR but is degraded for closed-
   }
 });
 
+test("GET /health exposes author concentration without disclosing author-wallet rows", async () => {
+  const warning = { code: "github_author_concentration", severity: "warning", openClaims: 14, totalOpenClaims: 16, distinctWallets: 14 };
+  const { route, response } = makeHarness({ service: { getGithubAuthors: async () => ({
+    authors: [{ author: "private-admin-row" }], warnings: [warning]
+  }) } });
+  await route({ request: { method: "GET" }, response, pathname: "/health" });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body.warnings.find((item) => item.code === warning.code), warning);
+  assert.doesNotMatch(JSON.stringify(response.body), /private-admin-row/u);
+});
+
 test("GET /health exposes overdue GitHub review and upstream health without changing API liveness", async () => {
   const githubUpstream = { ok: false, lastSuccessAt: "2026-10-06T12:00:00Z", lastError: "github_api_401" };
   const warning = { code: "github_pr_review_overdue", severity: "warning", oldestAgeMs: 49 * 3_600_000 };

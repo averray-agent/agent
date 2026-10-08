@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { githubReviewDisposition } from "../core/github-review-disposition.js";
+import { boundGithubAuthor } from "./github-author-visibility.js";
 import { requireJobSnapshot } from "../core/job-snapshot.js";
 import { AUTO_DECIDABLE_MODES } from "./submitted-job-auto-verifier.js";
 import { GuardedSchedulerLoop, summaryErrorsOutcome } from "./guarded-scheduler-loop.js";
@@ -122,6 +123,13 @@ export class GithubPrReviewService {
           summary.skipped.push({ sessionId: item.sessionId, reason: item.previewError
             ? "preview_error" : "upstream_unavailable:" + (unavailable.join(",") || publicGithubError(upstream)) });
           continue;
+        }
+        if (boundGithubAuthor(upstream)) {
+          await this.stateStore.upsertMutationReceipt("github_pr_author", item.sessionId, {
+            githubLookup: { status: upstream.status, author: upstream.author,
+              claimantBinding: upstream.claimantBinding, merged: upstream.merged === true },
+            previewOutcome: item.previewOutcome, observedAt: now.toISOString()
+          });
         }
         const fingerprint = createHash("sha256").update(JSON.stringify({
           merged: upstream.merged, state: upstream.state, headSha: upstream.headSha,
