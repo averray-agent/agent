@@ -35,26 +35,6 @@ class LabeledJsonRpcProvider extends JsonRpcProvider {
     return result;
   }
 }
-// With quorum one ethers may accept a transport error before consulting the
-// next call runner. Retry read-only calls on transport failures, never an EVM
-// revert and never a write. Child _perform retains per-read source attribution.
-class ReadFailoverProvider extends FallbackProvider {
-  async _perform(request) {
-    try { return await super._perform(request); }
-    catch (error) {
-      if (request.method !== "call" || !["SERVER_ERROR", "NETWORK_ERROR", "TIMEOUT"].includes(error?.code)) throw error;
-      let lastError = error;
-      for (const { provider } of this.providerConfigs) {
-        try { return await provider._perform(request); }
-        catch (nextError) {
-          if (!["SERVER_ERROR", "NETWORK_ERROR", "TIMEOUT"].includes(nextError?.code)) throw nextError;
-          lastError = nextError;
-        }
-      }
-      throw lastError;
-    }
-  }
-}
 const RETRYABLE_BROADCAST_ERROR_CODES = new Set([
   "NETWORK_ERROR",
   "SERVER_ERROR",
@@ -86,7 +66,7 @@ export function createRpcProvider(config) {
     config?.rpcFailoverStallMs,
     DEFAULT_RPC_FAILOVER_STALL_MS
   );
-  return new ReadFailoverProvider(
+  return new FallbackProvider(
     providers.map((provider, index) => ({
       provider,
       priority: index + 1,

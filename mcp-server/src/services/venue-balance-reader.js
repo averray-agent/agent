@@ -44,9 +44,9 @@ export class VenueBalanceReader {
       throw new ValidationError("Historical balance reads require an ERC-20 target and a positive blockTag.");
     }
     if (normalized.ledger === "substrate_tokens") {
-      const api = await this.getSubstrateApi(normalized.endpoint);
+      const { api, pending } = await this.getSubstrateConnection(normalized.endpoint);
       const record = await this.readSubstrate(normalized.endpoint, api,
-        () => api.query.tokens.accounts(normalized.account, normalized.assetId));
+        () => api.query.tokens.accounts(normalized.account, normalized.assetId), pending);
       const json = record?.toJSON?.() ?? record;
       return {
         raw: BigInt(json?.free ?? 0),
@@ -56,9 +56,9 @@ export class VenueBalanceReader {
     }
 
     if (normalized.ledger === "substrate_system") {
-      const api = await this.getSubstrateApi(normalized.endpoint);
+      const { api, pending } = await this.getSubstrateConnection(normalized.endpoint);
       const record = await this.readSubstrate(normalized.endpoint, api,
-        () => api.query.system.account(normalized.account));
+        () => api.query.system.account(normalized.account), pending);
       const json = record?.toJSON?.() ?? record;
       return {
         raw: BigInt(json?.data?.free ?? json?.free ?? 0),
@@ -84,6 +84,10 @@ export class VenueBalanceReader {
   }
 
   async getSubstrateApi(endpoint) {
+    return (await this.getSubstrateConnection(endpoint)).api;
+  }
+
+  async getSubstrateConnection(endpoint) {
     let pending = this.substrateApis.get(endpoint);
     if (!pending) {
       // Keep this dependency outside backend startup. A rejected import stays
@@ -94,15 +98,17 @@ export class VenueBalanceReader {
       this.substrateApis.set(endpoint, pending);
     }
     try {
-      return await boundedSubstrateRead(pending, this.substrateTimeoutMs, "connect");
+      const api = await boundedSubstrateRead(pending, this.substrateTimeoutMs, "connect");
+      return { api, pending };
     } catch (error) {
       if (this.substrateApis.get(endpoint) === pending) this.resetSubstrateApi(endpoint);
       throw error;
     }
   }
 
-  async readSubstrate(endpoint, api, loader) {
-    const pending = this.substrateApis.get(endpoint);
+  async readSubstrate(endpoint, api, loader, pending) {
+    // Carry the connection's identity through the await: another reader may
+    // have timed it out and installed a replacement before this read resumes.
     try {
       if (api.isConnected === false) throw new Error("venue_substrate_disconnected");
       return await boundedSubstrateRead(Promise.resolve().then(loader), this.substrateTimeoutMs, "query");

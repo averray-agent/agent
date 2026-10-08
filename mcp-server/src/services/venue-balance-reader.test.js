@@ -47,9 +47,10 @@ test("an old failed query cannot evict or disconnect a replacement API", async (
   const old = { disconnect() {} };
   let disconnected = 0;
   const fresh = { disconnect() { disconnected++; } };
-  reader.substrateApis.set(target.endpoint, Promise.resolve(old));
+  const pending = Promise.resolve(old);
+  reader.substrateApis.set(target.endpoint, pending);
   const failed = assert.rejects(reader.readSubstrate(target.endpoint, old,
-    () => new Promise((_, reject) => { rejectOld = reject; })), /old query failed/);
+    () => new Promise((_, reject) => { rejectOld = reject; }), pending), /old query failed/);
   await nextTurn();
   const replacement = Promise.resolve(fresh);
   reader.substrateApis.set(target.endpoint, replacement);
@@ -58,6 +59,49 @@ test("an old failed query cannot evict or disconnect a replacement API", async (
   await nextTurn();
   assert.equal(reader.substrateApis.get(target.endpoint), replacement);
   assert.equal(disconnected, 0);
+  await reader.close();
+});
+
+test("late P1 resolution after B times out cannot let A's failure evict C's P2", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const endpoint = new URL(target.endpoint).toString();
+  let resolveP1, resolveP2;
+  let attempts = 0;
+  let freshDisconnects = 0;
+  const old = { query: { tokens: { accounts: async () => { throw new Error("old query failed"); } } },
+    disconnect() {} };
+  const fresh = { query: { tokens: { accounts: async () => ({ free: "42" }) } },
+    disconnect() { freshDisconnects++; } };
+  const reader = new VenueBalanceReader({ substrateTimeoutMs: 300,
+    polkadotApiLoader: async () => ({}),
+    substrateApiFactory: () => ++attempts === 1
+      ? new Promise((resolve) => { resolveP1 = resolve; })
+      : new Promise((resolve) => { resolveP2 = resolve; }) });
+  const a = assert.rejects(reader.read(target), /old query failed/);
+  await nextTurn();
+  const p1 = reader.substrateApis.get(endpoint);
+  reader.substrateTimeoutMs = 100;
+  const b = assert.rejects(reader.read(target), /venue_substrate_connect_timeout/);
+  await nextTurn();
+  t.mock.timers.tick(100);
+  await b;
+  reader.substrateTimeoutMs = 300;
+  const c = reader.read(target);
+  await nextTurn();
+  const p2 = reader.substrateApis.get(endpoint);
+  assert.ok(p1);
+  assert.ok(p2);
+  assert.notEqual(p1, p2);
+  assert.equal(attempts, 2);
+  resolveP1(old);
+  await a;
+  assert.equal(reader.substrateApis.get(endpoint), p2);
+  resolveP2(fresh);
+  assert.equal((await c).raw, 42n);
+  await nextTurn();
+  assert.equal(freshDisconnects, 0);
+  assert.equal((await reader.read(target)).raw, 42n);
+  assert.equal(attempts, 2);
   await reader.close();
 });
 

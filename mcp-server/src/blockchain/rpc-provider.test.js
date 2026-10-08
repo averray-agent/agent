@@ -9,7 +9,6 @@ import {
   createRpcProvider,
   createWriteRpcBroadcaster,
   describeRpcProvider,
-  readWithRpcSources,
   WriteRpcBroadcaster
 } from "./rpc-provider.js";
 
@@ -43,56 +42,6 @@ test("createRpcProvider keeps the primary first and configures ordered failovers
     );
   } finally {
     await provider.destroy();
-  }
-});
-
-test("readWithRpcSources excludes a primary that answers head but fails the contract call", async () => {
-  let primaryCalls = 0;
-  let backupCalls = 0;
-  let failureCode = "SERVER_ERROR";
-  const server = (primary) => createServer((request, response) => {
-    let body = "";
-    request.on("data", (chunk) => { body += chunk; });
-    request.on("end", () => {
-      const payload = JSON.parse(body);
-      const reply = (entry) => {
-        if (!primary && entry.method === "eth_call") backupCalls++;
-        return { jsonrpc: "2.0", id: entry.id, result: entry.method === "eth_chainId" ? "0x190f1b43"
-          : entry.method === "eth_blockNumber" ? "0x7b" : "0x" + "00".repeat(31) + "2a" };
-      };
-      response.setHeader("content-type", "application/json");
-      response.end(JSON.stringify(Array.isArray(payload) ? payload.map(reply) : reply(payload)));
-    });
-  });
-  const primary = server(true), backup = server(false);
-  await listen(primary); await listen(backup);
-  const provider = createRpcProvider({ rpcUrls: [serverUrl(primary), serverUrl(backup)], rpcFailoverStallMs: 25 });
-  const primaryChild = provider.providerConfigs[0].provider;
-  const perform = primaryChild._perform.bind(primaryChild);
-  primaryChild._perform = async (request) => {
-    if (request.method === "call") {
-      primaryCalls++;
-      throw Object.assign(new Error("call failed"), { code: failureCode });
-    }
-    return perform(request);
-  };
-  try {
-    const read = await readWithRpcSources(async () => {
-      assert.equal(await provider.getBlockNumber(), 123);
-      return provider.call({ to: "0x" + "11".repeat(20), data: "0x12345678" });
-    });
-    assert.equal(BigInt(read.result), 42n);
-    assert.ok(primaryCalls > 0);
-    assert.deepEqual(read.rpcSources, [new URL(serverUrl(backup)).origin]);
-    const readsBeforeRevert = backupCalls;
-    failureCode = "CALL_EXCEPTION";
-    await assert.rejects(provider.call({ to: "0x" + "11".repeat(20), data: "0x87654321" }),
-      (error) => error.code === "CALL_EXCEPTION");
-    assert.equal(backupCalls, readsBeforeRevert, "an EVM revert is not retried as a transport failure");
-  } finally {
-    for (const { provider: child } of provider.providerConfigs) child.destroy();
-    provider.destroy();
-    await close(primary); await close(backup);
   }
 });
 
