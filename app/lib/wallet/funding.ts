@@ -42,7 +42,6 @@ const MAINNET_ADD_CHAIN = {
   chainName: "Polkadot Hub",
   nativeCurrency: { name: "DOT", symbol: "DOT", decimals: 18 },
   rpcUrls: [
-    "https://services.polkadothub-rpc.com/mainnet/",
     "https://eth-rpc.polkadot.io/",
   ],
 };

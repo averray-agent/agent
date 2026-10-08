@@ -28,7 +28,7 @@ import {
 } from "./simulate-creditpool-l1-migration.mjs";
 
 const EXPECTED_CHAIN = 420420419n;
-const RPCS = ["https://services.polkadothub-rpc.com/mainnet/", "https://eth-rpc.polkadot.io/"];
+const RPCS = ["https://eth-rpc.polkadot.io/"];
 
 function parseArgs(argv) {
   const args = { phase: undefined, commit: false, profile: undefined };

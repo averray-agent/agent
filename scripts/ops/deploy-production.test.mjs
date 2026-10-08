@@ -2611,7 +2611,7 @@ test("DWELLER provider addition leaves the actual Ponder config identity and mai
       encoding: "utf8",
     }).trim());
   }
-  assert.match(mainnet, /^DWELLER_RPC_URL=https:\/\/services.polkadothub-rpc.com\/mainnet\/$/mu);
+  assert.match(mainnet, /^DWELLER_RPC_URL=https:\/\/eth-rpc.polkadot.io\/$/mu);
   assert.equal(identities[0], identities[1]);
 });
 

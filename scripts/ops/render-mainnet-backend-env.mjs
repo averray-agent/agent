@@ -17,7 +17,7 @@
  *
  * The delta rules (documented, so a reviewer can audit the diff):
  *   • identity literals → mainnet: AUTH_CHAIN_ID=420420419, backend RPC primary
- *     → the official services.polkadothub-rpc.com endpoint, legacy endpoint as failover
+ *     → eth-rpc.polkadot.io, Blockscout as the backend-only last backup
  *   • every op://prod-* → op://mainnet-* (and the "-testnet" item slug → "-mainnet")
  *   • REMOVE (not blank): AUTH_JWT_SECRETS (HMAC retired), ARBITRATOR_SIGNER_PRIVATE_KEY
  *     (arbitrator is keyless on mainnet — the 3 coupled backend edits are Codex-owned)
@@ -49,7 +49,7 @@ export const REPO_ROOT = join(__dirname, "..", "..");
 
 export const MAINNET_RPC = "https://eth-rpc.polkadot.io/";
 export const TESTNET_RPC = "https://eth-rpc-testnet.polkadot.io/";
-export const MAINNET_BACKEND_RPC = "https://services.polkadothub-rpc.com/mainnet/";
+export const MAINNET_BACKEND_RPC = MAINNET_RPC;
 export const MAINNET_CHAIN_ID = "420420419";
 export const TESTNET_CHAIN_ID = "420420417";
 
@@ -74,7 +74,7 @@ export const LITERAL_OVERRIDES = {
   RPC_URL: MAINNET_BACKEND_RPC,
   DWELLER_RPC_URL: MAINNET_BACKEND_RPC,
   POLKADOT_RPC_URL: MAINNET_BACKEND_RPC,
-  RPC_BACKUP_URLS: MAINNET_RPC,
+  RPC_BACKUP_URLS: "https://blockscout.polkadot.io/api/eth-rpc",
   RPC_FAILOVER_STALL_MS: "250",
   RPC_REQUEST_TIMEOUT_MS: "750",
   RPC_WRITE_REQUEST_TIMEOUT_MS: "15000",
@@ -380,7 +380,7 @@ export function repointOpRef(value) {
 const DROP = Symbol("drop-line");
 
 /** Transform a single template line. Returns the new line, or DROP to remove it. */
-export function transformLine(line, manifestOverrides = {}) {
+export function transformLine(line, manifestOverrides = {}, literalOverrides = LITERAL_OVERRIDES) {
   const m = line.match(/^([A-Z][A-Z0-9_]*)\s*=\s*(.*)$/);
   if (!m) return line; // comment / blank / non-assignment — keep verbatim
   let [, key, value] = m;
@@ -390,7 +390,7 @@ export function transformLine(line, manifestOverrides = {}) {
     return `PONDER_RPC_URL_${MAINNET_CHAIN_ID}=${MAINNET_RPC}`;
   }
   if (REMOVE_KEYS.has(key)) return DROP;
-  if (Object.prototype.hasOwnProperty.call(LITERAL_OVERRIDES, key)) return `${key}=${LITERAL_OVERRIDES[key]}`;
+  if (Object.prototype.hasOwnProperty.call(literalOverrides, key)) return `${key}=${literalOverrides[key]}`;
   if (Object.prototype.hasOwnProperty.call(TODO_KEYS, key)) {
     return Object.prototype.hasOwnProperty.call(manifestOverrides, key)
       ? `${key}=${manifestOverrides[key]}`
@@ -402,10 +402,10 @@ export function transformLine(line, manifestOverrides = {}) {
 }
 
 /** Transform a whole template body. */
-export function transformTemplate(source, sourcePath, { additions = [], manifestOverrides = {} } = {}) {
+export function transformTemplate(source, sourcePath, { additions = [], manifestOverrides = {}, literalOverrides = LITERAL_OVERRIDES } = {}) {
   const out = [...HEADER(sourcePath)];
   for (const line of source.split("\n")) {
-    const t = transformLine(line, manifestOverrides);
+    const t = transformLine(line, manifestOverrides, literalOverrides);
     if (t !== DROP) out.push(t);
   }
   if (additions.length) out.push(...additions);
@@ -465,6 +465,8 @@ const OUTPUTS = [
   {
     src: "deploy/indexer.env.template",
     out: "deploy/indexer.mainnet.env.template",
+    // Cross-checks query every provider: never spend Blockscout's limited budget.
+    literalOverrides: { ...LITERAL_OVERRIDES, RPC_BACKUP_URLS: "" },
     additions: (manifestOverrides) => [
       "",
       "# ── Mainnet chain identity + optional registry (generated) ───────────────",
@@ -484,10 +486,11 @@ export function generateAll(readFile = (p) => readFileSync(join(REPO_ROOT, p), "
   const allRefs = [];
   const manifest = JSON.parse(readFile(DEPLOYMENT));
   const manifestOverrides = buildManifestOverrides(manifest);
-  for (const { src, out, additions } of OUTPUTS) {
+  for (const { src, out, additions, literalOverrides } of OUTPUTS) {
     const rendered = transformTemplate(readFile(src), src, {
       additions: additions(manifestOverrides),
       manifestOverrides,
+      literalOverrides,
     });
     files[out] = rendered;
     allRefs.push(...collectOpRefs(rendered));
