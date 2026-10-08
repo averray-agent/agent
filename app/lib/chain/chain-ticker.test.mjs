@@ -6,7 +6,7 @@ import ts from "typescript";
 
 test("review backlog does not degrade a fresh healthy chain chip", () => {
   const exports = {};
-  vm.runInNewContext(ts.transpileModule(readFileSync(new URL("./chain-ticker.ts", import.meta.url), "utf8"), {
+  vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../chain-ticker.ts", import.meta.url), "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
   }).outputText, { exports });
   const nowMs = Date.parse("2026-10-08T12:00:00Z");
