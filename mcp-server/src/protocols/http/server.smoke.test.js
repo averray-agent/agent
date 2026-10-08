@@ -203,6 +203,9 @@ test("http smoke: JSON HEAD follows GET headers and auth without response bodies
       await get.text();
     }
     const headers = { authorization: `Bearer ${issueToken(STRANGER_WALLET)}` };
+    const events = await fetch(`${base}/events`, { method: "HEAD", headers, signal: AbortSignal.timeout(2000) });
+    assert.equal(events.status, 404);
+    assert.equal(await events.text(), "");
     assert.equal((await fetch(`${base}/receipts`, { method: "HEAD", headers })).status, 200);
     const metrics = await (await fetch(`${base}/metrics`)).text();
     assert.match(metrics, /http_requests_total\{[^\n]*method="HEAD"/u);

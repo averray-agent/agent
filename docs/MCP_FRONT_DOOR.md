@@ -61,17 +61,19 @@ scope; calling them anonymously returns an explicit `isError` tool result.
 | `claimJob` | `jobs:claim` |
 | `submitWork` | `jobs:submit` |
 
-Initialization preserves an offered supported version, or offers the newest
-supported version when the offer is unknown. The returned session binds that
-selection; subsequent explicit version mismatches are still refused. Stateless
-clients negotiate through `server/discover`: an unknown dated version receives
-the newest supported version in the result and `MCP-Protocol-Version` header.
-Use that selected version before tool calls; an unknown version never silently
-executes a tool. Modern header/body mismatches still return HTTP 400 with code
-`-32020`. Malformed versions are invalid parameters, not a negotiation.
+Initialization preserves an offered supported version; an unknown offer selects
+our newest legacy version, 2025-11-25, because initialize has legacy semantics.
+The returned session binds the selection and explicit mismatches are refused.
+On the stateless path, unknown versions return HTTP 400 with
+`-32022 UnsupportedProtocolVersionError` and `data: {supported, requested}`.
+Clients select a supported version and retry; no tool executes on an unknown
+version. `server/discover` remains a server extension for supported modern
+requests, not a replacement for the version error contract. Header/body
+mismatches return `-32020`; malformed versions are invalid parameters.
 
-`ping` returns an empty JSON-RPC result without authentication or tool execution,
-including before initialization. It retains origin and request-budget checks.
+`ping` is legacy-only (removed in 2026-07-28). It returns an empty result
+without tool execution, including before legacy initialization, and retains
+origin and request-budget checks. Modern requests receive method-not-found.
 `fetchAuthNonce` is public but not read-only: it creates authentication state.
 
 For a reproducible local two-client transcript, run:

@@ -18,8 +18,10 @@ test("public OpenAPI drift guard covers every public discovery operation or name
 test("public claim schema includes disputes and explicit funding evidence, and Verify GET advertises POST", async () => {
   const document = await readDocument();
   const claim = document.components.schemas.JobClaimStatus.properties;
-  assert.ok(claim.claimState.enum.includes("disputed"));
-  assert.ok(claim.effectiveState.enum.includes("disputed"));
+  for (const state of ["disputed", "rejected", "restricted"]) {
+    assert.ok(claim.claimState.enum.includes(state));
+    assert.ok(claim.effectiveState.enum.includes(state));
+  }
   for (const state of ["funded", "available", "pending", "unverified", "not_checked"]) {
     assert.ok(claim.fundingState.enum.includes(state));
   }

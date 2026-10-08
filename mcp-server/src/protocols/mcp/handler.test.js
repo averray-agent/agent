@@ -265,17 +265,17 @@ test("modern requests require matching Streamable HTTP headers", async () => {
   assert.equal(mismatched.body.error.code, -32020);
 });
 
-test("modern ping is a liveness response without tool execution or authentication", async () => {
+test("ping is legacy-only and never executes or authenticates a tool", async () => {
   const { handler } = createHarness({ executeTool() { throw new Error("must not execute"); }, authMiddleware() { throw new Error("must not authenticate"); } });
   const result = await call(handler, modernRequest("ping"), modernHeaders("ping"));
-  assert.equal(result.statusCode, 200);
-  assert.deepEqual(result.body.result, {});
+  assert.equal(result.body.error.code, -32601);
   const bare = await call(handler, { jsonrpc: "2.0", id: "liveness", method: "ping" });
   assert.equal(bare.statusCode, 200);
   assert.deepEqual(bare.body.result, {});
+  assert.equal(bare.headers["mcp-protocol-version"], LEGACY_MCP_VERSION);
 });
 
-test("a future modern version negotiates down to the newest supported protocol", async () => {
+test("unsupported modern version returns -32022 and echoes the version", async () => {
   const { handler } = createHarness();
   const requested = "2027-01-01";
   const result = await call(
@@ -284,14 +284,16 @@ test("a future modern version negotiates down to the newest supported protocol",
     modernHeaders("server/discover", undefined, requested)
   );
 
-  assert.equal(result.statusCode, 200);
-  assert.equal(result.headers["mcp-protocol-version"], MODERN_MCP_VERSION);
-  assert.equal(result.body.result.protocolVersion, MODERN_MCP_VERSION);
-  assert.deepEqual(result.body.result.supportedVersions, [...SUPPORTED_MCP_VERSIONS]);
-  const refused = await call(handler, modernRequest("tools/call", { name: "claimJob", arguments: {} }, requested), modernHeaders("tools/call", "claimJob", requested));
-  assert.equal(refused.statusCode, 400);
-  assert.equal(refused.body.error.data.protocolVersion, MODERN_MCP_VERSION);
-  assert.match(refused.body.error.message, /Negotiate/u);
+  assert.equal(result.statusCode, 400);
+  assert.equal(result.body.error.code, -32022);
+  assert.deepEqual(result.body.error.data, { supported: [...SUPPORTED_MCP_VERSIONS], requested });
+  for (const method of ["tools/call", "tools/list"]) {
+    const refused = await call(handler, modernRequest(method, { name: "claimJob", arguments: {} }, requested),
+      modernHeaders(method, method === "tools/call" ? "claimJob" : undefined, requested));
+    assert.equal(refused.statusCode, 400);
+    assert.equal(refused.body.error.code, -32022);
+    assert.deepEqual(refused.body.error.data, { supported: [...SUPPORTED_MCP_VERSIONS], requested });
+  }
 });
 
 test("initialize selects an expiring 2025-11-25 session on the same endpoint", async () => {
@@ -397,7 +399,7 @@ test("an initialized legacy session accepts a missing version header but refuses
   assert.match(mismatched.body.error.message, /does not match the session version/u);
 });
 
-test("unsupported initialize offers the newest protocol and binds the negotiated session", async () => {
+test("unsupported initialize offers the newest legacy protocol and binds the negotiated session", async () => {
   const { handler } = createHarness();
   const result = await call(handler, {
     jsonrpc: "2.0",
@@ -411,13 +413,13 @@ test("unsupported initialize offers the newest protocol and binds the negotiated
   });
 
   assert.equal(result.statusCode, 200);
-  assert.equal(result.body.result.protocolVersion, MODERN_MCP_VERSION);
-  const headers = { "mcp-session-id": result.headers["mcp-session-id"], "mcp-protocol-version": MODERN_MCP_VERSION };
+  assert.equal(result.body.result.protocolVersion, LEGACY_MCP_VERSION);
+  const headers = { "mcp-session-id": result.headers["mcp-session-id"], "mcp-protocol-version": LEGACY_MCP_VERSION };
   await call(handler, { jsonrpc: "2.0", method: "notifications/initialized" }, headers);
   const ping = await call(handler, { jsonrpc: "2.0", id: 2, method: "ping" }, headers);
   assert.equal(ping.statusCode, 200);
   assert.deepEqual(ping.body.result, {});
-  assert.equal(ping.headers["mcp-protocol-version"], MODERN_MCP_VERSION);
+  assert.equal(ping.headers["mcp-protocol-version"], LEGACY_MCP_VERSION);
 });
 
 test("all callers see protected tools and an anonymous protected call is a clean auth error", async () => {

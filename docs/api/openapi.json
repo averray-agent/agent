@@ -4046,6 +4046,8 @@
               "expired",
               "submitted",
               "disputed",
+              "rejected",
+              "restricted",
               "exhausted"
             ]
           },
@@ -4060,6 +4062,8 @@
               "expired",
               "submitted",
               "disputed",
+              "rejected",
+              "restricted",
               "exhausted"
             ]
           },
