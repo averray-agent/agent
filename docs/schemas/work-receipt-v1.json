@@ -67,7 +67,7 @@
       "required": ["specHash", "specSource", "successPolicy", "valueAtRisk", "deadline", "poster", "posterClass"],
       "properties": {
         "specHash": { "$ref": "#/$defs/bytes32" },
-        "specSource": { "enum": ["chain_verified", "chain_unavailable_fail_open", "claim_snapshot_unverified", "chain_backend_disabled", "chain_read_not_attempted", "chain_uncommitted"] },
+        "specSource": { "enum": ["chain_verified", "chain_unavailable_fail_open", "claim_snapshot_unverified", "chain_backend_disabled", "chain_read_not_attempted", "chain_uncommitted", "verify_request"] },
         "successPolicy": { "$ref": "#/$defs/policy" },
         "valueAtRisk": { "$ref": "#/$defs/amount" },
         "deadline": { "type": "string", "format": "date-time" },
