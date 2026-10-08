@@ -108,16 +108,14 @@ export function writeSession(session: AuthSession): void {
 
 export function clearSession(reason?: string): void {
   if (!hasWindow()) return;
-  visitReason = reason;
+  // A failed refresh cannot invent an expired sign-in for a fresh visitor.
+  const hadSession = Boolean(localStorage.getItem(TOKEN_KEY));
+  visitReason = hadSession ? reason : undefined;
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(WALLET_KEY);
   localStorage.removeItem(EXPIRES_KEY);
   localStorage.removeItem(ROLES_KEY);
-  if (reason) {
-    localStorage.setItem(REAUTH_REASON_KEY, reason);
-  } else {
-    localStorage.removeItem(REAUTH_REASON_KEY);
-  }
+  localStorage.removeItem(REAUTH_REASON_KEY);
   notify();
 }
 

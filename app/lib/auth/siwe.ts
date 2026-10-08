@@ -105,6 +105,10 @@ export async function refreshAuthToken(): Promise<RefreshOutcome> {
     return { ok: false, reason: "network" };
   }
 
+  // Sign-out or another tab's sign-in may finish while refresh is in flight.
+  // Its response belongs to the old session and must not clear/revive a new one.
+  if (getStoredToken() !== token) return { ok: false, reason: "no_session" };
+
   // Backend may not be deployed yet — fall through silently. The existing
   // session keeps working; the operator will re-SIWE once it expires.
   if (response.status === 404 || response.status === 405) {
@@ -131,6 +135,7 @@ export async function refreshAuthToken(): Promise<RefreshOutcome> {
     expiresAt?: string;
     roles?: unknown;
   };
+  if (getStoredToken() !== token) return { ok: false, reason: "no_session" };
   if (!payload.token || !payload.expiresAt || !payload.wallet) {
     return { ok: false, reason: "shape" };
   }

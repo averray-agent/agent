@@ -29,6 +29,9 @@ test("session notice ignores an earlier visit's expiry but reports a stored expi
   const fresh = storeFixture({ "averray:auth-last-reason": "siwe_expired" });
   assert.equal(fresh.getAuthSnapshot().lastReason, undefined);
   fresh.clearSession("token_refresh_rejected");
+  assert.equal(fresh.getAuthSnapshot().lastReason, undefined);
+  fresh.writeSession({ token: "fixture", wallet: "wallet", expiresAt: "2099-01-01T00:00:00Z", roles: [] });
+  fresh.clearSession("token_refresh_rejected");
   assert.equal(fresh.getAuthSnapshot().lastReason, "token_refresh_rejected");
   const expired = storeFixture({ "averray:auth-token": "fixture", "averray:auth-wallet": "wallet", "averray:auth-expires-at": "2000-01-01T00:00:00Z" });
   assert.equal(expired.getAuthSnapshot().lastReason, "siwe_expired");
