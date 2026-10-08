@@ -26,6 +26,13 @@ One drill workflow that proves the broker end to end without touching production
    - Confirm afterwards with `gh secret list --env production --repo averray-agent/agent` and `gh secret list --repo averray-agent/agent` (the latter must not show a repo-scoped `OP_INTEGRATION_KEY`).
 4. Nothing is revoked at this stage.
 
+## Learned from the first two drills (2026-10-08)
+
+- Run 37745935236: broker handshake succeeded ("Authenticated with Workload Identity") — the pilot's core claim is proven: no service-account token anywhere, GitHub's OIDC token exchanged for access. The job then failed because the Environment variable held the literal text `op://prod-ci/vps-ssh-key/private key`: **Environments store dotenv-style literal values and do not resolve `op://` references.**
+- Run 37747099823: with the key text pasted into the variable the prefix check passed but `ssh` failed with `Load key: error in libcrypto` — a **multi-line value does not survive the Environment → action → step-output path intact**. Rule for this pilot and every follow-up: multi-line secrets go into an Environment **base64-encoded on one line**, and the workflow decodes them.
+
+PR 1 is therefore amended: the Environment variable is `VPS_SSH_KEY_B64` (single line, `base64` of the private key, produced by `op read 'op://prod-ci/vps-ssh-key/private key' | base64 | tr -d '\n'`); the workflow decodes it with `base64 -d` into the 0600 file, runs the same shape check on the DECODED bytes, and on failure prints only non-secret diagnostics (byte length, line count, whether the first five characters are `-----`). The `vps-ssh-key` calendar entry gains a note that the key now has two homes (the `prod-ci` item and the Environment) and both rotate together.
+
 ## Codex items
 
 **PR 1: `hosted-workload-identity-proof.yml` (drill, dispatch-only).**
