@@ -21,7 +21,7 @@ import { ethers } from "ethers";
 import { buildDeploymentPlan } from "./simulate-creditpool-l1-migration.mjs";
 
 const EXPECTED_CHAIN = 420420419n;
-const RPC = "https://services.polkadothub-rpc.com/mainnet/";
+const RPC = "https://eth-rpc.polkadot.io/";
 const DEPLOYER = "0x9Ab8531FBb0948C542a31298FD61335f30064239";
 const START_NONCE = 15;
 const RESUME_NONCE = 18;

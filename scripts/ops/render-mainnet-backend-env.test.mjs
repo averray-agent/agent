@@ -403,10 +403,14 @@ test("RPC configuration keeps manifests, testnet, ops defaults and wallet chain 
   }
   assert.equal(testnet.RPC_BACKUP_URLS, "https://blockscout-testnet.polkadot.io/api/eth-rpc");
   assert.equal(parseEnv(read("deploy/indexer.env.template")).DWELLER_RPC_URL, "https://eth-rpc-testnet.polkadot.io/");
-  for (const script of ["check-x402-inventory.mjs", "check-x402-ramp-readiness.mjs"]) {
+  for (const script of ["check-x402-inventory.mjs", "check-x402-ramp-readiness.mjs", "run-adversarial-poster.mjs"]) {
     assert.ok(read(`scripts/ops/${script}`).includes('process.env.RPC_URL ?? "https://eth-rpc.polkadot.io/"'));
   }
   const preflight = read("scripts/ops/preflight-mainnet-sidecar.sh");
+  for (const script of ["deploy-creditpool-l1-mainnet.mjs", "resume-creditpool-deploy.mjs"]) {
+    assert.doesNotMatch(read(`scripts/ops/${script}`), /services\.polkadothub-rpc\.com/u);
+    assert.ok(read(`scripts/ops/${script}`).includes("https://eth-rpc.polkadot.io/"));
+  }
   assert.ok(preflight.includes('require_env_value "$BACKEND_ENV" RPC_URL https://eth-rpc.polkadot.io/'));
   assert.ok(preflight.includes('require_env_value "$BACKEND_ENV" RPC_BACKUP_URLS https://blockscout.polkadot.io/api/eth-rpc'));
   const wallet = read("app/lib/wallet/funding.ts");
