@@ -4,6 +4,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils/cn";
+import { flattenMarkdownLead } from "@/lib/ui/markdown-lead.js";
+
+const leadPlugins = [flattenMarkdownLead];
 
 /**
  * Renders a GitHub issue body as markdown. Tailored to the noise we see
@@ -25,14 +28,18 @@ import { cn } from "@/lib/utils/cn";
 export function IssueMarkdown({
   children,
   className,
+  lead = false,
 }: {
   children: string;
   className?: string;
+  lead?: boolean;
 }) {
   return (
-    <div className={cn("avy-md", className)}>
+    <div className={cn("avy-md", className)} data-job-lead={lead || undefined}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={lead ? leadPlugins : undefined}
+        skipHtml
         components={{
           // Drop shields.io / img.shields.io badges — they're pure
           // decoration and their fixed pixel widths blow out narrow
@@ -149,6 +156,7 @@ export function IssueMarkdown({
 export type IssueMarkdownProps = {
   children: string;
   className?: string;
+  lead?: boolean;
 };
 
 // Utility for tests / debugging — strips the markdown of known-noisy

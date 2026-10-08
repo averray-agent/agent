@@ -191,7 +191,7 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
         <div>
           <p className="eyebrow">{definition.category || "Paid task"} · Claim tier: {definition.tier || "open"}</p>
           <h1 className="mt-3 max-w-4xl text-3xl font-semibold tracking-tight sm:text-5xl">{definition.title || jobId}</h1>
-          <IssueMarkdown className="mt-4 max-w-3xl text-base leading-relaxed text-[var(--muted)]">{definition.description || listing?.summary || "Read the instructions and exact success criteria below."}</IssueMarkdown>
+          <IssueMarkdown lead className="mt-4 max-w-3xl text-base leading-relaxed text-[var(--muted)]">{definition.description || listing?.summary || "Read the instructions and exact success criteria below."}</IssueMarkdown>
         </div>
         <div className="rounded-[var(--radius)] border border-[var(--line)] bg-[var(--paper-solid)] p-4 text-sm">
           <p className="eyebrow">Verification depth</p>
@@ -199,6 +199,12 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
         </div>
       </section>
 
+      {definition.description ? (
+        <section aria-label="Full task description" className="rounded-[var(--radius)] border border-[var(--line)] bg-[var(--paper-solid)] p-6">
+          <h2 className="eyebrow">Full task description</h2>
+          <IssueMarkdown className="mt-4">{definition.description}</IssueMarkdown>
+        </section>
+      ) : null}
       <div className="grid gap-4 lg:grid-cols-2">
         <DefinitionList title="Instructions" items={instructions} empty="No extra instructions were supplied beyond the task definition." />
         <DefinitionList title="Success criteria" items={criteria} empty="No success criteria are readable. Claiming should remain disabled until the definition is corrected." />

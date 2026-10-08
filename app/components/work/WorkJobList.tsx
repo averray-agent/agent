@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Clock3, Fuel, ShieldCheck, WalletCards } from "lucide-react";
+import { IssueMarkdown } from "@/components/runs/IssueMarkdown";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -146,9 +147,9 @@ function WorkJobCard({ job, isNew, nowMs }: { job: HumanJobListing; isNew: boole
           </div>
           <strong className="shrink-0 font-[family-name:var(--font-display)] text-lg text-[var(--accent)]">{reward}</strong>
         </div>
-        <p className="text-sm leading-relaxed text-[var(--muted)]">
+        <IssueMarkdown lead className="text-sm leading-relaxed text-[var(--muted)]">
           {job.successCriteria || job.summary || "Open the task to read the exact success criteria."}
-        </p>
+        </IssueMarkdown>
         {priority ? (
           <div className="rounded-[var(--radius-sm)] border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-xs leading-relaxed text-[var(--muted)]">
             <p><span className="font-semibold text-[var(--ink)]">Priority window</span> · {priority.countdown}</p>

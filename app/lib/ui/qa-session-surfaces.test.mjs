@@ -9,6 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { publicReceiptUrl } from "./public-receipt-url.js";
+import { flattenMarkdownLead } from "./markdown-lead.js";
 
 const root = new URL("../../", import.meta.url);
 const require = createRequire(new URL("../../package.json", import.meta.url));
@@ -74,6 +75,7 @@ test("job terms render GFM without executable HTML, unsafe URLs or remote images
   const { IssueMarkdown } = load("components/runs/IssueMarkdown.tsx", {
     "react-markdown": { default: ReactMarkdown },
     "remark-gfm": { default: remarkGfm },
+    "@/lib/ui/markdown-lead.js": { flattenMarkdownLead },
     "@/lib/utils/cn": { cn: (...parts) => parts.filter(Boolean).join(" ") }
   });
   const html = renderToStaticMarkup(React.createElement(IssueMarkdown, null,
