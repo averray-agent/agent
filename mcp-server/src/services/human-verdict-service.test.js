@@ -51,6 +51,45 @@ async function fixture(options = {}) {
   return { store, session, live, calls, gateway, verifier, service, decide, platform, events };
 }
 
+async function githubFixture(lookup) {
+  const f = await fixture();
+  const job = { ...f.session.jobSnapshot.definition, verifierMode: "github_pr", verifierConfig: { handler: "github_pr", version: 1 } };
+  f.session = { ...f.session, jobSnapshot: buildJobSnapshot(job),
+    submission: { kind: "json", json: { merged: true, githubLookup: { status: "verified", state: "closed", merged: true } } } };
+  await f.store.upsertSession(f.session);
+  f.live.specHash = f.session.jobSnapshot.specHash;
+  f.verifier.registry.evaluate = async () => ({ handler: "github_pr", outcome: "approved", githubLookup: lookup });
+  return f;
+}
+
+test("human GitHub approval requires a fresh verified merge before content or session writes, never claimant fallback", async (t) => {
+  for (const lookup of [undefined, { status: "unavailable" },
+    ...[false, undefined, null, "true", 1].map((merged) => ({ status: "verified", state: "closed", merged })),
+    { status: "verified", state: "unknown", merged: true },
+    { status: "verified", state: "closed", merged: true, partial: { checks: "unavailable" } }]) {
+    const f = await githubFixture(lookup);
+    const before = structuredClone(await f.store.getSession(f.session.sessionId));
+    const preview = t.mock.method(f.verifier, "previewSubmission");
+    const writes = [t.mock.method(f.service, "persistContentRecord"), t.mock.method(f.store, "upsertSession"), t.mock.method(f.store, "upsertVerificationResult")];
+    await assert.rejects(f.decide(), (error) => error.code === "merge_required" && error.statusCode === 409);
+    assert.equal(preview.mock.callCount(), 1);
+    for (const write of writes) assert.equal(write.mock.callCount(), 0);
+    assert.equal(f.calls.length, 0);
+    assert.deepEqual(await f.store.getSession(f.session.sessionId), before);
+  }
+});
+
+test("human GitHub approval accepts a fresh merged read; closed-unmerged rejection remains allowed", async (t) => {
+  for (const verdict of ["approve", "reject"]) {
+    const f = await githubFixture({ status: "verified", state: "closed", merged: verdict === "approve" });
+    const preview = t.mock.method(f.verifier, "previewSubmission");
+    await f.decide(verdict);
+    assert.equal(preview.mock.callCount(), verdict === "approve" ? 1 : 0);
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.calls[0][1], verdict === "approve");
+  }
+});
+
 test("human verdict under rendered mainnet env publishes the API rationale URI before settlement", async () => {
   const env = parseEnv(readFileSync(new URL("../../../deploy/backend.mainnet.env.template", import.meta.url), "utf8"));
   const f = await fixture({ publicBaseUrl: env.PUBLIC_BASE_URL });

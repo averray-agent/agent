@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { hasVerifiedGithubMerge } from "../core/github-merge-policy.js";
 import { projectOverturnedVerification } from "../core/operator-overturn.js";
 import { VerifierRegistry } from "./verifier-handlers.js";
 import { hashCanonicalContent } from "../core/canonical-content.js";
@@ -130,11 +131,7 @@ export class VerifierService {
         "verdict_outcome_mismatch", { expected: expectOutcome, actual: verdict.outcome });
     }
     // An open green preview is useful evidence, not permission to pay before merge.
-    if (githubPr && verdict.outcome === "approved" && (
-      verdict.githubLookup?.status !== "verified" || verdict.githubLookup.merged !== true
-      || !["open", "closed"].includes(verdict.githubLookup.state)
-      || Object.values(verdict.githubLookup.partial ?? {}).includes("unavailable")
-    )) {
+    if (githubPr && verdict.outcome === "approved" && !hasVerifiedGithubMerge(verdict.githubLookup)) {
       throw new ConflictError("An upstream-verified merge is required before approving this GitHub PR.", "merge_required");
     }
     if (guarded || githubPr) {
@@ -297,6 +294,11 @@ export class VerifierService {
       pinnedSchema: snapshot.outputSchema?.schema
     });
     const verdict = await this.registry.evaluate(job, input, verificationClaimantContext(session));
+    // Settlement advice only: do not change the computed outcome or handler's
+    // blockers, since the poller must still observe an open green approval.
+    if ((job.verifierConfig?.handler ?? job.verifierMode) === "github_pr" && verdict.githubLookup?.merged !== true) {
+      return { ...verdict, blockers: [...new Set([...(verdict.blockers ?? []), "upstream PR not merged"])], sessionId, preview: true };
+    }
     return { ...verdict, sessionId, preview: true };
   }
 

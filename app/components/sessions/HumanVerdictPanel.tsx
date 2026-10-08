@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useSWRConfig } from "swr";
 import { useAuth } from "@/lib/auth/use-auth";
-import { swrFetcher } from "@/lib/api/client";
+import { extractApiErrorMessage, swrFetcher } from "@/lib/api/client";
 import { DrawerSection } from "@/components/shell/DetailDrawer";
 
 export function HumanVerdictPanel({ sessionId }: { sessionId: string }) {
@@ -26,7 +26,7 @@ export function HumanVerdictPanel({ sessionId }: { sessionId: string }) {
       setMessage("Human verdict confirmed. Refreshing the session receipt.");
       await mutate((key) => typeof key === "string" && (key.startsWith("/admin/sessions") || key.startsWith("/session") || key.startsWith("/agents")));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Human verdict failed. Check the session before retrying.");
+      setMessage(extractApiErrorMessage(error) ?? (error instanceof Error ? error.message : "Human verdict failed. Check the session before retrying."));
     } finally { setBusy(false); }
   }
 

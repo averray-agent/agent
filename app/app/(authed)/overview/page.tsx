@@ -294,7 +294,8 @@ export default function OverviewPage() {
       : `stream ${stream.state} · ${stream.events.length} recent events`;
 
   const githubReview = asRecord(asRecord(providerOps.data)?.githubPrReview);
-  const pendingReviewCount = typeof githubReview?.count === "number" ? githubReview.count : null;
+  const waitingForMerge = typeof githubReview?.waitingForMerge === "number" ? githubReview.waitingForMerge : null;
+  const overdueReview = typeof githubReview?.overdueReview === "number" ? githubReview.overdueReview : null;
   const oldestReviewHours = typeof githubReview?.oldestAgeMs === "number"
     ? Math.floor(githubReview.oldestAgeMs / 3_600_000) : null;
   return (
@@ -342,7 +343,8 @@ export default function OverviewPage() {
       <NeedsActionList alerts={alerts} meta={alertsMeta} notice={alertsNotice} />
       <section aria-label="Operator verification queue" className="rounded-lg border border-[var(--border)] p-4">
         <h2 className="font-medium">Operator verification queue</h2>
-        <p>{pendingReviewCount === null ? "Queue unavailable" : `${pendingReviewCount} submitted non-automatic reviews pending`}
+        <p>{waitingForMerge === null ? "Waiting for merge: unavailable" : `${waitingForMerge} waiting for merge`}
+          {" · "}{overdueReview === null ? "Overdue review: unavailable" : `${overdueReview} overdue review`}
           {oldestReviewHours === null ? " · oldest age not reported" : ` · oldest ${oldestReviewHours} hours`}</p>
         <p className="text-sm">Review SLA: {typeof githubReview?.slaHours === "number" ? `${githubReview.slaHours} hours` : "not reported"}.
           {Array.isArray(githubReview?.warnings) && githubReview.warnings.length > 0 ? " Warning: GitHub PR review overdue." : ""}

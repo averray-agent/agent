@@ -34,6 +34,26 @@ export async function review(options, { request, print = console.log }) {
   return 0;
 }
 
+export function createReviewRequest({ baseUrl, token, fetchImpl = fetch }) {
+  return async (method, path, payload) => {
+    const response = await fetchImpl(new URL(path, baseUrl), { method,
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      ...(payload ? { body: JSON.stringify(payload) } : {}), signal: AbortSignal.timeout(180_000), redirect: "error" });
+    const body = await response.json();
+    if (!response.ok) {
+      const error = new Error(`Review request failed (HTTP ${response.status})`);
+      if (response.status === 409) error.conflictBody = body;
+      throw error;
+    }
+    return body;
+  };
+}
+
+export function reportReviewError(error, print = console.error) {
+  if (error.conflictBody) print(`HTTP 409: ${JSON.stringify(error.conflictBody)}`);
+  else print("Review failed. Check KMS configuration, authentication and the backend; no token is logged. Do not retry settlement without checking the session.");
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   // Reuse the established KMS mint helper, never print or persist the token.
@@ -43,16 +63,9 @@ async function main() {
   ], { env: process.env, maxBuffer: 64 * 1024 });
   const token = stdout.trim();
   if (!token || /\s/u.test(token)) throw new Error("KMS mint did not return a single token.");
-  process.exitCode = await review(options, { request: async (method, path, payload) => {
-    const response = await fetch(new URL(path, options.baseUrl), { method,
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      ...(payload ? { body: JSON.stringify(payload) } : {}), signal: AbortSignal.timeout(180_000), redirect: "error" });
-    const body = await response.json();
-    if (!response.ok) throw new Error(`Review request failed (HTTP ${response.status}): ${body.code ?? body.error ?? "see operator logs"}`);
-    return body;
-  } });
+  process.exitCode = await review(options, { request: createReviewRequest({ baseUrl: options.baseUrl, token }) });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch(() => { console.error("Review failed. Check KMS configuration, authentication and the backend; no token is logged. Do not retry settlement without checking the session."); process.exitCode = 1; });
+  main().catch((error) => { reportReviewError(error); process.exitCode = 1; });
 }
