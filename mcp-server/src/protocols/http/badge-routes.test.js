@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import Ajv from "ajv/dist/2020.js";
 import { generateKeyPairSync, sign, webcrypto } from "node:crypto";
 import { canonicalBadgeReceiptBytes, verifyBadgeReceiptSignature } from "../../core/badge-receipt-signing.js";
 import { verifyReceiptSignature } from "../../../../app/lib/ui/receipt-signature-verification.js";
 import { NotFoundError, ValidationError } from "../../core/errors.js";
 import { MemoryStateStore } from "../../core/state-store.js";
-import { createBadgeRoutes, createListBadgeReceipts } from "./badge-routes.js";
+import { createBadgeRoutes, createListBadgeReceipts as createLister } from "./badge-routes.js";
 import { hashWorkReceiptContent } from "../../core/work-receipt.js";
 
 const SESSION = { sessionId: "session-1", jobId: "job-1" };
@@ -79,6 +81,13 @@ function addressedWorkReceipt({ sessionId, jobId, outcome = "approved", marker =
   return { ...content, receiptId: hashWorkReceiptContent(content) };
 }
 
+function createListBadgeReceipts(options) {
+  return createLister({ ...options, stateStore: {
+    listRecentSessions: (limit, offset) => options.service.listRecentSessions(limit, { progression: false, offset }),
+    ...options.stateStore
+  } });
+}
+
 function makeHarness(overrides = {}) {
   const calls = [];
   const response = {};
@@ -95,10 +104,10 @@ function makeHarness(overrides = {}) {
       calls.push(["deriveBadgeLineage", { session, job }]);
       return overrides.lineage ?? { parent: { sessionId: "parent-1" } };
     },
-    listBadgeReceipts: async (limit) => {
+    listBadgeReceipts: overrides.listBadgeReceipts ?? (async (limit) => {
       calls.push(["listBadgeReceipts", limit]);
-      return overrides.receipts ?? RECEIPTS;
-    },
+      return overrides.receipts ?? { items: RECEIPTS, limit: limit.limit, nextCursor: null };
+    }),
     parseLimit: (url, fallback, max) => {
       calls.push(["parseLimit", { fallback, max }]);
       return Number(url.searchParams.get("limit") ?? fallback);
@@ -189,16 +198,16 @@ test("GET /badges parses limit and returns cached receipts", async () => {
 
   assert.equal(handled, true);
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.body, RECEIPTS);
-  assert.deepEqual(response.body[0].signers.map((signer) => signer.role), ["operator", "verifier", "worker"]);
-  assert.ok(response.body[0].signers.every((signer) => signer.at && !/^0x0{40}$/u.test(signer.wallet)));
+  assert.deepEqual(response.body, { items: RECEIPTS, limit: 17, nextCursor: null });
+  assert.deepEqual(response.body.items[0].signers.map((signer) => signer.role), ["operator", "verifier", "worker"]);
+  assert.ok(response.body.items[0].signers.every((signer) => signer.at && !/^0x0{40}$/u.test(signer.wallet)));
   assert.deepEqual(calls, [
-    ["parseLimit", { fallback: 100, max: 500 }],
-    ["listBadgeReceipts", 17],
+    ["parseLimit", { fallback: 50, max: 500 }],
+    ["listBadgeReceipts", { limit: 17, cursor: null }],
     ["respond", {
       statusCode: 200,
-      body: RECEIPTS,
-      headers: { "cache-control": "public, max-age=30" },
+      body: { items: RECEIPTS, limit: 17, nextCursor: null },
+      headers: response.headers,
     }],
   ]);
 });
@@ -575,7 +584,7 @@ test("GET /receipts returns not_found after exact, session, and job alias misses
   assert.deepEqual(response.body, { status: "not_found", kind: "work", id: "session-1" });
 });
 
-test("listBadgeReceipts exposes a persisted signature on the row and nested document", async () => {
+test("listBadgeReceipts keeps the persisted signature only on the canonical document", async () => {
   const signature = { alg: "ES256", kid: "badge-1", sig: "protected..signature", signedAt: "2026-07-11T00:00:00.000Z" };
   const signedBadge = { ...STORED_BADGE, signature };
   const listBadgeReceipts = createListBadgeReceipts({
@@ -586,9 +595,9 @@ test("listBadgeReceipts exposes a persisted signature on the row and nested docu
     verifierService: { getResult: async () => VERIFICATION }
   });
 
-  const [receipt] = await listBadgeReceipts(100);
-  assert.deepEqual(receipt.signature, signature);
-  assert.deepEqual(receipt.badge.signature, signature);
+  const { items: [receipt] } = await listBadgeReceipts({ limit: 100 });
+  assert.equal(Object.hasOwn(receipt, "signature"), false);
+  assert.deepEqual(receipt.document.signature, signature);
 });
 
 test("listBadgeReceipts emits run and badge rows for an approved session", async () => {
@@ -609,14 +618,14 @@ test("listBadgeReceipts emits run and badge rows for an approved session", async
     verifierService: { getResult: async () => VERIFICATION }
   });
 
-  const receipts = await listBadgeReceipts(100);
-  assert.deepEqual(receipts.map((receipt) => receipt.kind), ["run", "badge"]);
-  assert.equal(receipts[0].verdict, "approved");
-  assert.equal(receipts[0].result, "PASS");
-  assert.equal(receipts[0].assetContext.chainName, "Polkadot Hub");
-  assert.equal(Object.hasOwn(receipts[0].runReceipt, "result"), false, "signed receipt remains canonical");
-  assert.deepEqual(receipts[0].signature, runSignature);
-  assert.deepEqual(receipts[1].signature, badgeSignature);
+  const { items: receipts } = await listBadgeReceipts({ limit: 100 });
+  assert.deepEqual(receipts.map((receipt) => receipt.unsignedPresentation.kind), ["run", "badge"]);
+  assert.equal(receipts[0].unsignedPresentation.verdict, "approved");
+  assert.equal(receipts[0].unsignedPresentation.result, "PASS");
+  assert.equal(receipts[0].unsignedPresentation.assetContext.chainName, "Polkadot Hub");
+  assert.equal(Object.hasOwn(receipts[0].document, "result"), false, "signed receipt remains canonical");
+  assert.deepEqual(receipts[0].document.signature, runSignature);
+  assert.deepEqual(receipts[1].document.signature, badgeSignature);
 });
 
 test("listBadgeReceipts emits only a run row for a rejected session", async () => {
@@ -634,10 +643,10 @@ test("listBadgeReceipts emits only a run row for a rejected session", async () =
     verifierService: { getResult: async () => ({ outcome: "rejected" }) }
   });
 
-  const receipts = await listBadgeReceipts(100);
-  assert.deepEqual(receipts.map((receipt) => receipt.kind), ["run"]);
-  assert.equal(receipts[0].verdict, "rejected");
-  assert.equal(receipts[0].result, "FAIL");
+  const { items: receipts } = await listBadgeReceipts({ limit: 100 });
+  assert.deepEqual(receipts.map((receipt) => receipt.unsignedPresentation.kind), ["run"]);
+  assert.equal(receipts[0].unsignedPresentation.verdict, "rejected");
+  assert.equal(receipts[0].unsignedPresentation.result, "FAIL");
 });
 
 test("listBadgeReceipts includes a stored badge without looking up its pruned job", async () => {
@@ -660,10 +669,10 @@ test("listBadgeReceipts includes a stored badge without looking up its pruned jo
     verifierService: { getResult: async () => VERIFICATION }
   });
 
-  const receipts = await listBadgeReceipts(100);
+  const { items: receipts } = await listBadgeReceipts({ limit: 100 });
   assert.equal(receipts.length, 1);
-  assert.equal(receipts[0].sessionId, "session-pruned");
-  assert.deepEqual(receipts[0].badge, STORED_BADGE);
+  assert.equal(receipts[0].unsignedPresentation.sessionId, "session-pruned");
+  assert.deepEqual(receipts[0].document, STORED_BADGE);
   assert.equal(jobLookups, 0);
 });
 
@@ -699,6 +708,83 @@ test("listBadgeReceipts isolates a row whose job lookup cannot be rebuilt", asyn
     verifierService: { getResult: async () => VERIFICATION }
   });
 
-  const receipts = await listBadgeReceipts(100);
-  assert.deepEqual(receipts.map((receipt) => receipt.sessionId), ["session-live"]);
+  const { items: receipts } = await listBadgeReceipts({ limit: 100 });
+  assert.deepEqual(receipts.map((receipt) => receipt.unsignedPresentation.sessionId), ["session-live"]);
+});
+
+test("served list-item schema and signatures verify; mixed-kind cursor pages return 400 rows exactly once and ETag changes", async () => {
+  const schema = JSON.parse(readFileSync(new URL("../../../../docs/schemas/badge-list-item-v1.json", import.meta.url), "utf8"));
+  const validateItem = new Ajv().compile(schema);
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const jwk = { ...publicKey.export({ format: "jwk" }), alg: "ES256", kid: "badge-1" };
+  function signed(document) {
+    const signedAt = "2026-10-08T12:00:00.000Z";
+    const header = { alg: "ES256", kid: jwk.kid, signedAt, typ: "averray-badge-receipt+jws" };
+    const protectedPart = Buffer.from(JSON.stringify(header)).toString("base64url");
+    const input = `${protectedPart}.${canonicalBadgeReceiptBytes(document).toString("base64url")}`;
+    const sig = sign("sha256", Buffer.from(input), { key: privateKey, dsaEncoding: "ieee-p1363" }).toString("base64url");
+    return { ...document, signature: { alg: "ES256", kid: jwk.kid, signedAt, sig: `${protectedPart}..${sig}` } };
+  }
+  const sessions = Array.from({ length: 200 }, (_, i) => ({ sessionId: `fixture-${i}`, jobId: `job-${i}` }));
+  const badges = new Map(sessions.map((session) => [session.sessionId, signed({
+    ...STORED_BADGE, averray: { ...STORED_BADGE.averray, ...session }
+  })]));
+  const runs = new Map(sessions.map((session) => [session.sessionId, signed({ ...STORED_RUN_RECEIPT, ...session })]));
+  const stateStore = {
+    listRecentSessions: async (limit, offset) => sessions.slice(offset, offset + limit),
+    getBadgeDocument: async (id) => badges.get(id),
+    getRunReceiptDocument: async (id) => runs.get(id)
+  };
+  const list = createLister({ stateStore, service: {}, verifierService: {} });
+  const h = makeHarness({ listBadgeReceipts: list });
+  async function get(query = "", headers = {}) {
+    const response = {};
+    await h.route({ request: { method: "GET", headers }, response,
+      url: new URL(`http://localhost/badges${query}`), pathname: "/badges" });
+    return response;
+  }
+  const first = await get();
+  assert.equal(first.body.items.length, 50);
+  assert.equal(first.body.limit, 50);
+  assert.equal((await get("", { "if-none-match": first.headers.etag })).statusCode, 304);
+  assert.match(first.headers.link, /rel="next"/u);
+  let cursor;
+  const seen = new Set();
+  const boundaryKinds = new Set();
+  let badgeCount = 0;
+  do {
+    // Every session has BOTH rows; odd pages alternate badge/run boundaries.
+    const limit = cursor ? 17 : 1;
+    const response = await get(`?limit=${limit}${cursor ? `&cursor=${cursor}` : ""}`);
+    assert.equal(response.statusCode, 200);
+    assert.ok(response.body.items.length <= limit);
+    for (const item of response.body.items) {
+      assert.deepEqual(Object.keys(item).sort(), ["document", "schemaVersion", "unsignedPresentation"]);
+      assert.equal(validateItem(item), true, JSON.stringify(validateItem.errors));
+      assert.equal(verifyBadgeReceiptSignature(item.document, jwk), true, "signed document verifies exactly as served");
+      assert.equal(Object.hasOwn(item.document, "result"), false);
+      const identity = `${item.unsignedPresentation.sessionId}:${item.unsignedPresentation.kind}`;
+      assert.equal(seen.has(identity), false, identity);
+      seen.add(identity);
+      if (item.unsignedPresentation.kind === "badge") badgeCount++;
+    }
+    cursor = response.body.nextCursor;
+    if (cursor) {
+      const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString());
+      const last = response.body.items.at(-1).unsignedPresentation;
+      assert.equal(decoded.sessionId, last.sessionId);
+      assert.equal(decoded.kind, last.kind);
+      boundaryKinds.add(decoded.kind);
+    }
+  } while (cursor);
+  assert.equal(badgeCount, 200);
+  assert.equal(seen.size, 400);
+  assert.deepEqual([...boundaryKinds].sort(), ["badge", "run"]);
+  badges.set(sessions[0].sessionId, signed({ ...badges.get(sessions[0].sessionId), name: "newest row changed", signature: undefined }));
+  const changed = await get("", { "if-none-match": first.headers.etag });
+  assert.equal(changed.statusCode, 200);
+  assert.notEqual(changed.headers.etag, first.headers.etag);
+  await assert.rejects(get("?cursor=broken"), { code: "invalid_request", statusCode: 400 });
+  const missing = Buffer.from(JSON.stringify({ v: 1, sessionId: "deleted", kind: "badge" })).toString("base64url");
+  await assert.rejects(get(`?cursor=${missing}`), { code: "invalid_request", statusCode: 400 });
 });

@@ -54,6 +54,16 @@ test("listAgents explicitly opts operator consumers into synthetic canaries", as
   );
 });
 
+test("listBadges sends limit and cursor and returns receipt envelopes unchanged", async () => {
+  const page = { items: [{ schemaVersion: "averray.badge-list-item.v1", document: { signature: {} },
+    unsignedPresentation: { kind: "badge" } }], limit: 17, nextCursor: "next" };
+  let requested;
+  const client = new AgentPlatformClient({ baseUrl: "https://api.example.test",
+    fetchImpl: async (url) => { requested = url; return jsonResponse(page); } });
+  assert.deepEqual(await client.listBadges({ limit: 17, cursor: "opaque/value" }), page);
+  assert.equal(requested, "https://api.example.test/badges?limit=17&cursor=opaque%2Fvalue");
+});
+
 test("authenticated helpers send bearer token and compact JSON bodies", async () => {
   const calls = [];
   const client = new AgentPlatformClient({

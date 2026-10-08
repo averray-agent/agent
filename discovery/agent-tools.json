@@ -747,7 +747,7 @@
     {
       "method": "GET",
       "path": "/badges",
-      "description": "Recent public badge receipts for completed sessions."
+      "description": "Recent badge/run documents in averray.badge-list-item.v1 wrappers; default 50 rows, follow nextCursor for all. Verify document only; unsignedPresentation is not signed."
     },
     {
       "method": "GET",

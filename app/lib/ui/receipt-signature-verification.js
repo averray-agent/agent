@@ -21,8 +21,8 @@ export async function verifyReceiptSignature({
   cryptoImpl = globalThis.crypto,
   jwksUrl = resolveReceiptJwksUrl(),
 } = {}) {
-  if (isPlainObject(document) && String(document.schemaVersion ?? "").includes("receipt-envelope")) {
-    if (document.schemaVersion !== "averray.receipt-envelope.v1" || !isPlainObject(document.document)) {
+  if (isPlainObject(document) && /receipt-envelope|badge-list-item/u.test(String(document.schemaVersion ?? ""))) {
+    if (!["averray.receipt-envelope.v1", "averray.badge-list-item.v1"].includes(document.schemaVersion) || !isPlainObject(document.document)) {
       return failed("Receipt envelope has an unsupported version or missing signed document.");
     }
     // Presentation is explicitly unsigned. Never merge it into the signed
@@ -136,6 +136,8 @@ export async function verifyReceiptSignature({
  * @returns {Record<string, unknown> | null}
  */
 export function selectCanonicalReceiptDocument({ kind, listRow, detailDocument }) {
+  if (isPlainObject(listRow) && ["averray.receipt-envelope.v1", "averray.badge-list-item.v1"].includes(listRow.schemaVersion)
+    && isPlainObject(listRow.document)) return listRow.document;
   if (kind === "run" && isPlainObject(listRow) && isPlainObject(listRow.runReceipt)) {
     return listRow.runReceipt;
   }

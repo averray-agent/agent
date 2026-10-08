@@ -59,6 +59,15 @@ test("receipt envelopes verify only the nested document and refuse malformed ver
   assert.equal((await verify({ ...envelope, document: { ...fixture.document, jobId: "tampered" } }, fixture.jwk)).state, "failed");
 });
 
+test("badge list item has its own schema identity and verifies only its document", async () => {
+  const fixture = await signedFixture(badgeDocument());
+  const item = { schemaVersion: "averray.badge-list-item.v1", document: fixture.document,
+    unsignedPresentation: { kind: "badge", sessionId: "fixture", issuedAt: SIGNED_AT } };
+  assert.equal((await verify(item, fixture.jwk)).state, "verified");
+  assert.equal(selectCanonicalReceiptDocument({ kind: "badge", listRow: item }), fixture.document);
+  assert.equal((await verify({ ...item, schemaVersion: "averray.badge-list-item.v99" }, fixture.jwk)).state, "failed");
+});
+
 test("protected signedAt mismatch is a failed alarm state", async () => {
   const fixture = await signedFixture(runDocument());
   const document = {

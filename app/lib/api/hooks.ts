@@ -88,7 +88,11 @@ export const useAdminSessions = () =>
 export const useAgents = () => useApi("/agents?includeSynthetic=true");
 export const useAgent = (wallet: string | null) =>
   useApi(wallet ? `/agents/${encodeURIComponent(wallet)}` : null);
-export const useBadges = () => useBoundedApi("/badges", { shouldRetryOnError: shouldRetryApiError });
+type BadgePage = { items: unknown[]; nextCursor: string | null };
+export const useBadges = (cursor: string | null = null) => useBoundedApi<BadgePage>(
+  `/badges?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+  { shouldRetryOnError: shouldRetryApiError }
+);
 export const useBadge = (sessionId: string | null) =>
   useApi(sessionId ? `/badges/${encodeURIComponent(sessionId)}` : null);
 export const useReceiptDetail = (sessionId: string | null, kind: "run" | "badge" | null) =>

@@ -115,7 +115,9 @@ function rowPolicyRefs(row) {
     row.listRow && typeof row.listRow === "object" && !Array.isArray(row.listRow)
       ? /** @type {Record<string, unknown>} */ (row.listRow)
       : null;
-  for (const source of [row.policyTags, listRow?.policyTags]) {
+  const presentation = listRow?.unsignedPresentation;
+  const document = listRow?.document;
+  for (const source of [row.policyTags, listRow?.policyTags, presentation?.policyTags, document?.verdict?.policyTags]) {
     if (!Array.isArray(source)) continue;
     for (const tag of source) {
       if (typeof tag === "string" && tag) refs.push(tag);

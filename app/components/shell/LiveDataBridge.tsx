@@ -32,6 +32,8 @@ const INVALIDATE_BY_TOPIC: Partial<Record<EventTopic, string[]>> = {
   gap: ["/jobs", "/sessions", "/badges", "/agents", "/disputes", "/audit", "/alerts"],
 };
 
+export const isBadgeCacheKey = (key: unknown): boolean => typeof key === "string" && key.startsWith("/badges");
+
 export function LiveDataBridge() {
   const auth = useAuth();
 
@@ -49,12 +51,12 @@ export function LiveDataBridge() {
       onEvent: ({ topic, data, id }) => {
         recordStreamEvent({ topic, data, id });
         for (const key of INVALIDATE_BY_TOPIC[topic] ?? []) {
-          mutate(key);
+          mutate(key === "/badges" ? isBadgeCacheKey : key);
         }
       },
       onGap: () => {
         for (const key of INVALIDATE_BY_TOPIC.gap ?? []) {
-          mutate(key);
+          mutate(key === "/badges" ? isBadgeCacheKey : key);
         }
       },
     });
