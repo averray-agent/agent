@@ -16,12 +16,24 @@ const REPO_ROOT = new URL("../../", import.meta.url);
 const NAV = new URL("marketing/src/components/SiteNav.astro", REPO_ROOT);
 const FOOTER = new URL("marketing/src/components/SiteFooter.astro", REPO_ROOT);
 
+async function pageSource(page) {
+  const source = await readFile(page.url, "utf8");
+  // Receipt pages delegate their complete shell to the shared component.
+  return source.includes("<ReceiptPage")
+    ? source + await readFile(new URL("marketing/src/components/ReceiptPage.astro", REPO_ROOT), "utf8")
+    : source;
+}
+
 test("site navigation — every marketing page is reachable and an added unlinked page fails", async () => {
   const result = await checkMarketingReachability();
   const pages = await marketingPageInventory();
 
   assert.equal(result.routes.length, pages.length);
-  assert.deepEqual(INTENTIONALLY_UNLINKED_ROUTES, ["/404/"]);
+  assert.deepEqual(INTENTIONALLY_UNLINKED_ROUTES, [
+    "/404/",
+    "/receipts/0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1/",
+    "/receipts/0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0/"
+  ]);
 
   const fixtureDirectory = await mkdtemp(join(tmpdir(), "averray-site-navigation-"));
   try {
@@ -53,7 +65,7 @@ test("site navigation — the shared keyboard-reachable nav renders on every pag
 
   assert.match(layout, /<SiteNav current=\{current\} \/>/u);
   for (const page of pages) {
-    const source = await readFile(page.url, "utf8");
+    const source = await pageSource(page);
     assert.match(source, /<(?:SiteNav|PageLayout)\b/u, `${page.route} must render the shared navigation`);
     assert.match(source, /<(?:SiteFooter|PageLayout)\b/u, `${page.route} must render the shared footer`);
   }
@@ -83,7 +95,7 @@ test("site navigation — the current page is rendered without a self-link", asy
   for (const page of pages) {
     const key = expectedCurrent.get(page.route);
     if (!key) continue;
-    const source = await readFile(page.url, "utf8");
+    const source = await pageSource(page);
     assert.ok(source.includes(`current="${key}"`), `${page.route} must identify itself as ${key}`);
   }
 });

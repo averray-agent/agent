@@ -30,6 +30,8 @@ const generatedNestedFiles = [
   "imprint/index.html",
   "transparency/index.html",
   "receipts/index.html",
+  "receipts/0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1/index.html",
+  "receipts/0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0/index.html",
   "verify/index.html",
   "proof-to-pay/index.html",
   "pool/index.html",

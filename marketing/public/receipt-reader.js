@@ -46,6 +46,8 @@
     rawLink.href = endpoint;
     rawLink.textContent = endpoint.replace(/^https:\/\//u, "");
   }
+  const rawLinkContainer = document.querySelector("[data-receipt-raw-link]");
+  if (rawLinkContainer) rawLinkContainer.hidden = false;
 
   window.AverrayReaderFetch.readJsonWithRetry(endpoint, {
     headers: { accept: "application/json" }
