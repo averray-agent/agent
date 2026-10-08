@@ -83,6 +83,21 @@ const JOBS = [
   }
 ].map((job) => ({ ...job, claimState: "open", claimable: true }));
 
+test("compact board preserves complete Markdown criteria and fallback description for render-then-truncate", () => {
+  for (const markdown of [
+    "a".repeat(174) + " **Important**: retain the whole condition.",
+    "## Success\n\n" + "a".repeat(170) + "\n- [ ] Preserve this complete checklist item.\n- [x] And its sibling.",
+    "a".repeat(169) + " [evidence](https://example.test/complete-link)"
+  ]) {
+    for (const criteria of [undefined, ["", "  " + markdown + "  ", "Second criterion"]]) {
+      const job = { ...JOBS[0], description: "  " + markdown + "  ", acceptanceCriteria: criteria };
+      const response = buildPublicJobsResponse([job], new URLSearchParams("limit=1"));
+      assert.equal(response.jobs[0].summary, markdown);
+      assert.equal(response.jobs[0].successCriteria, criteria ? markdown : "");
+    }
+  }
+});
+
 test("legacy board stays complete; explicit claimable requires evidence and include opts into additional states", () => {
   const rows = [
     { id: "open", claimState: "open", claimable: true },

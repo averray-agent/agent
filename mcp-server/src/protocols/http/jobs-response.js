@@ -284,22 +284,16 @@ function buildWikipediaPinnedRevisionUrl(source) {
 }
 
 function summarizeJob(job) {
-  const description = String(job.description ?? "").replace(/\s+/gu, " ").trim();
-  if (!description) {
-    return "";
-  }
-  return description.length > 180 ? `${description.slice(0, 177)}...` : description;
+  // Keep complete Markdown (including line boundaries). The app renders it to
+  // plain text before shortening the card lead; slicing here can split syntax.
+  return String(job.description ?? "").trim();
 }
 
 function summarizeSuccessCriteria(job) {
   const criterion = Array.isArray(job.acceptanceCriteria)
     ? job.acceptanceCriteria.find((value) => String(value ?? "").trim())
     : undefined;
-  const text = String(criterion ?? "").replace(/\s+/gu, " ").trim();
-  if (!text) {
-    return "";
-  }
-  return text.length > 180 ? `${text.slice(0, 177)}...` : text;
+  return String(criterion ?? "").trim();
 }
 
 function sourceCandidates(job) {
