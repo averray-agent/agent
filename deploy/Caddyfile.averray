@@ -141,6 +141,8 @@ averray.com {
   rewrite @workReceipt /receipts/index.html
 
   handle_errors 404 {
+    import security_headers
+    header Cache-Control "no-cache"
     rewrite * /404.html
     file_server
   }
@@ -239,6 +241,8 @@ app.averray.com {
 
   root * /srv/frontend
   handle_errors 404 {
+    import security_headers
+    header Cache-Control "no-cache"
     rewrite * /404.html
     file_server
   }

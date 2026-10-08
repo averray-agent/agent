@@ -46,6 +46,12 @@ test("sitemap enumerates every static public page and omits the error page", asy
   assert.ok(!xml.includes("/404"));
 });
 
+test("app sitemap pins all public doors and excludes the share template", async () => {
+  const source = (await read("app/app/sitemap.ts")).replace(/^import type.*\n/m, "").replace(": MetadataRoute.Sitemap", "");
+  const { default: sitemap } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
+  assert.deepEqual(sitemap().map((entry) => entry.url), ["/", "/work/", "/work-withdraw/", "/pool/", "/sign-in/"].map((path) => "https://app.averray.com" + path));
+});
+
 test("static live placeholders and glued copy are replaced without baking numbers", async () => {
   for (const name of ["pool", "transparency", "verify", "index"]) {
     const source = await read(`marketing/src/pages/${name}.astro`);
@@ -103,7 +109,7 @@ test("real Caddy returns branded 404 bodies on both site and app, never 200", {
     const req = get(`http://127.0.0.1:${port}/definitely-not-a-page`, { headers: { host } }, (response) => {
       let body = "";
       response.on("data", (chunk) => { body += chunk; });
-      response.on("end", () => resolve({ status: response.statusCode, body }));
+      response.on("end", () => resolve({ status: response.statusCode, body, headers: response.headers }));
     });
     req.setTimeout(2000, () => req.destroy(new Error("edge timeout")));
     req.on("error", reject);
@@ -117,6 +123,8 @@ test("real Caddy returns branded 404 bodies on both site and app, never 200", {
   for (const host of ["averray.com", "app.averray.com"]) {
     const response = await request(host);
     assert.equal(response.status, 404, host);
+    assert.match(response.headers["strict-transport-security"], /max-age=31536000/);
+    assert.equal(response.headers["cache-control"], "no-cache");
     assert.match(response.body, /Averray.*This page is not here/);
   }
 });
