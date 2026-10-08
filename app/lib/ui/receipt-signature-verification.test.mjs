@@ -50,6 +50,15 @@ test("run receipts render verified, failed after mutation, and unsigned legacy s
   assert.deepEqual(await verify(runDocument(), fixture.jwk), { state: "unsigned" });
 });
 
+test("receipt envelopes verify only the nested document and refuse malformed versions", async () => {
+  const fixture = await signedFixture(runDocument());
+  const envelope = { schemaVersion: "averray.receipt-envelope.v1", document: fixture.document, unsignedPresentation: { result: "PASS" } };
+  assert.equal((await verify(envelope, fixture.jwk)).state, "verified");
+  assert.equal((await verify({ ...envelope, document: null }, fixture.jwk)).state, "failed");
+  assert.equal((await verify({ ...envelope, schemaVersion: "averray.receipt-envelope.v99" }, fixture.jwk)).state, "failed");
+  assert.equal((await verify({ ...envelope, document: { ...fixture.document, jobId: "tampered" } }, fixture.jwk)).state, "failed");
+});
+
 test("protected signedAt mismatch is a failed alarm state", async () => {
   const fixture = await signedFixture(runDocument());
   const document = {

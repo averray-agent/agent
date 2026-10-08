@@ -72,7 +72,8 @@ export function formatReceiptBindingVerdict(result, { fixture = false } = {}) {
 }
 
 export async function runReceiptBindingCli(argv = process.argv.slice(2), {
-  fetchImpl = globalThis.fetch
+  fetchImpl = globalThis.fetch,
+  providerFactory = (url) => new JsonRpcProvider(url)
 } = {}) {
   const args = parseArgs(argv);
   if (args.fixture) {
@@ -94,18 +95,21 @@ export async function runReceiptBindingCli(argv = process.argv.slice(2), {
   if (!response.ok) {
     throw new Error(`Receipt fetch failed with HTTP ${response.status}.`);
   }
-  const receipt = await response.json();
+  const body = await response.json();
+  const receipt = body.schemaVersion === "averray.receipt-envelope.v1" ? body.document : body;
   if (!receipt?.chainBinding?.verifiedTxHash) {
     throw new Error("Receipt has no chainBinding; legacy receipts are not replayable by this proof.");
   }
-  const provider = new JsonRpcProvider(args.rpcUrl ?? process.env.RPC_URL ?? deployment.rpcUrl);
-  const transactionReceipt = await provider.getTransactionReceipt(receipt.chainBinding.verifiedTxHash);
-  const result = await verifyReceiptBinding({
-    receipt,
-    transactionReceipt,
-    escrowAddress: args.escrow ?? deployment.contracts.escrowCore
-  });
-  return formatReceiptBindingVerdict(result);
+  const provider = providerFactory(args.rpcUrl ?? process.env.RPC_URL ?? deployment.rpcUrl);
+  try {
+    const transactionReceipt = await provider.getTransactionReceipt(receipt.chainBinding.verifiedTxHash);
+    const result = await verifyReceiptBinding({
+      receipt,
+      transactionReceipt,
+      escrowAddress: args.escrow ?? deployment.contracts.escrowCore
+    });
+    return formatReceiptBindingVerdict(result);
+  } finally { await provider.destroy?.(); }
 }
 
 function parseArgs(argv) {

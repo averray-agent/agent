@@ -17,6 +17,35 @@ test("public replay fixture reproduces the receipt-keyed Verified event", async 
   );
 });
 
+test("fetch path verifies both flat and enveloped receipts without trusting unsigned presentation", async () => {
+  const fixture = JSON.parse(await readFile(fixtureUrl, "utf8"));
+  for (const envelope of [false, true]) {
+    let destroyed = false;
+    const line = await runReceiptBindingCli([fixture.receipt.receiptId, "--escrow", fixture.escrowAddress], {
+      fetchImpl: async (url) => {
+        assert.ok(url.endsWith("/receipts/" + fixture.receipt.receiptId));
+        return Response.json(envelope ? { schemaVersion: "averray.receipt-envelope.v1", document: fixture.receipt,
+          unsignedPresentation: { chainBinding: { verifiedTxHash: "untrusted" } } } : fixture.receipt);
+      },
+      providerFactory: () => ({
+        getTransactionReceipt: async (hash) => {
+          assert.equal(hash, fixture.receipt.chainBinding.verifiedTxHash);
+          return fixture.transactionReceipt;
+        }, destroy() { destroyed = true; }
+      })
+    });
+    assert.match(line, /^PASS receipt-keyed/);
+    assert.equal(destroyed, true);
+  }
+});
+
+test("hosted receipt selector unwraps documents and schema permits Verify provenance", async () => {
+  const workflow = await readFile(new URL("../../.github/workflows/hosted-receipt-binding-proof.yml", import.meta.url), "utf8");
+  assert.ok(workflow.includes("(.document // .) | select(.chainBinding != null) | .receiptId"));
+  const schema = JSON.parse(await readFile(new URL("../../docs/schemas/work-receipt-v1.json", import.meta.url), "utf8"));
+  assert.ok(schema.properties.intent.properties.specSource.enum.includes("verify_request"));
+});
+
 test("public replay fails closed when receipt content no longer matches its commitment", async () => {
   const fixture = JSON.parse(await readFile(fixtureUrl, "utf8"));
   fixture.receipt.verdict.reasonCode = "MUTATED";

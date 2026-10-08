@@ -3,11 +3,23 @@ import assert from "node:assert/strict";
 
 import {
   inspectClaimJobDefinitionIntegrity,
+  claimSpecSource,
   JOB_DEFINITION_CHAIN_MISMATCH_REASON,
   JOB_DEFINITION_CHAIN_READ_UNAVAILABLE_REASON
 } from "./claim-job-integrity.js";
 import { buildJobSnapshot } from "./job-snapshot.js";
 import { MemoryStateStore } from "./state-store.js";
+
+test("claim spec provenance distinguishes unattempted reads, absent commitments and actual read failures", () => {
+  for (const [decision, source] of [
+    [{ status: "matching" }, "chain_verified"],
+    [{ reason: "chain_backend_disabled" }, "chain_backend_disabled"],
+    [{ status: "uncommitted" }, "chain_uncommitted"],
+    [{ sourceCode: "job_snapshot_chain_read_unavailable" }, "chain_read_not_attempted"],
+    [{ sourceCode: "job_snapshot_chain_read_failed" }, "chain_unavailable_fail_open"],
+    [{}, "claim_snapshot_unverified"]
+  ]) assert.equal(claimSpecSource(decision), source);
+});
 
 function job(overrides = {}) {
   return {
@@ -82,7 +94,7 @@ test("claim integrity permits creation only when the chain job does not exist", 
   assert.equal(inspected.decision.status, "uncommitted");
   assert.equal(
     inspected.decision.message,
-    "This job is served fail-open pending its chain commitment. If claimed now, the resulting receipt will carry chain_unavailable_fail_open."
+    "This job is served fail-open pending its chain commitment. If claimed now, the resulting receipt will carry chain_uncommitted."
   );
   assert.equal(inspected.liveJob.state, 0);
 });

@@ -2579,12 +2579,18 @@
         ],
         "responses": {
           "200": {
-            "description": "Read a content-addressed receipt",
+            "description": "Receipt response envelope. Verify document only; unsignedPresentation is not signed.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true
+                  "required": ["schemaVersion", "document", "unsignedPresentation"],
+                  "properties": {
+                    "schemaVersion": { "const": "averray.receipt-envelope.v1" },
+                    "document": { "type": "object", "description": "Unchanged content-addressed signed receipt." },
+                    "unsignedPresentation": { "type": "object", "description": "Unsigned display aliases; not covered by document.signature." }
+                  },
+                  "additionalProperties": false
                 }
               }
             }

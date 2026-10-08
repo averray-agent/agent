@@ -5,6 +5,15 @@ import { assertJobSnapshotIntegrity, buildJobSnapshot } from "./job-snapshot.js"
 export const JOB_DEFINITION_CHAIN_MISMATCH_REASON = "job_definition_chain_mismatch";
 export const JOB_DEFINITION_CHAIN_READ_UNAVAILABLE_REASON = "job_definition_chain_read_unavailable";
 
+export function claimSpecSource(decision) {
+  if (decision?.status === "matching") return "chain_verified";
+  if (decision?.reason === "chain_backend_disabled") return "chain_backend_disabled";
+  if (decision?.status === "uncommitted") return "chain_uncommitted";
+  if (decision?.sourceCode === "job_snapshot_chain_read_unavailable") return "chain_read_not_attempted";
+  if (decision?.sourceCode === "job_snapshot_chain_read_failed") return "chain_unavailable_fail_open";
+  return "claim_snapshot_unverified";
+}
+
 export async function captureClaimJobSnapshot({ job, claimEconomics, stateStore }) {
   if (!isExternalJob(job)) {
     return buildJobSnapshot(job, { claimEconomics });
@@ -68,7 +77,7 @@ export async function inspectClaimJobDefinitionIntegrity({
         status: "uncommitted",
         reason: "job_definition_not_committed",
         specHash: snapshot.specHash,
-        message: "This job is served fail-open pending its chain commitment. If claimed now, the resulting receipt will carry chain_unavailable_fail_open."
+        message: "This job is served fail-open pending its chain commitment. If claimed now, the resulting receipt will carry chain_uncommitted."
       }
     };
   }

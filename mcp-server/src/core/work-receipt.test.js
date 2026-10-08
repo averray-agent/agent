@@ -245,16 +245,26 @@ test("platform fault is inconclusive, never settles, and cannot blame the worker
   assert.throws(() => buildWorkReceipt(mutation), /platform_fault.*workerConsequence none/u);
 });
 
+test("missing claim provenance never invents a failed chain read", () => {
+  const fixture = input({ outcome: "rejected" });
+  delete fixture.session.jobSnapshot.specSource;
+  assert.equal(buildWorkReceipt(fixture).intent.specSource, "claim_snapshot_unverified");
+  for (const source of ["chain_backend_disabled", "chain_read_not_attempted", "chain_uncommitted"]) {
+    fixture.session.jobSnapshot.specSource = source;
+    assert.equal(buildWorkReceipt(fixture).intent.specSource, source);
+  }
+});
+
 test("consumer PASS is equivalent to job settlement and PLATFORM_FAULT never settles", () => {
   for (const outcome of ["approved", "rejected", "inconclusive", "platform_fault"]) {
     const receipt = buildWorkReceipt(input({ outcome }));
     const presented = decorateReceiptPresentation(receipt);
     assert.equal(
-      presented.result === "PASS",
+      presented.unsignedPresentation.result === "PASS",
       Object.hasOwn(receipt, "settlement"),
       `${outcome} must preserve the settlement/result equivalence`
     );
-    if (presented.result === "PLATFORM_FAULT") {
+    if (presented.unsignedPresentation.result === "PLATFORM_FAULT") {
       assert.equal(Object.hasOwn(receipt, "settlement"), false);
     }
   }
