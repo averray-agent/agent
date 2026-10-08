@@ -21,7 +21,8 @@ function makeHarness(overrides = {}) {
   const service = {
     listJobsWithSessions: async (filters) => {
       calls.push(["listJobsWithSessions", filters]);
-      return overrides.jobs ?? [{ id: "job-1", title: "Job 1", lifecycle: { state: "open" } }];
+      return (overrides.jobs ?? [{ id: "job-1", title: "Job 1", lifecycle: { state: "open" } }])
+        .map((job) => ({ claimState: "open", claimable: true, ...job }));
     },
     getPublicJobDefinition: async (jobId, options) => {
       calls.push(["getPublicJobDefinition", { jobId, options }]);
@@ -113,6 +114,30 @@ function invoke(route, { method = "GET", path, response = {}, headers = {} }) {
     pathname: path.split("?")[0],
   });
 }
+
+test("jobs ETag revalidates live state and cursor Link preserves the full-array format", async () => {
+  const jobs = Array.from({ length: 51 }, (_, n) => ({ id: String(n).padStart(3, "0"), claimState: "open", claimable: true }));
+  const { route } = makeHarness({ jobs });
+  const first = {};
+  await invoke(route, { path: "/jobs?state=claimable&format=full", response: first });
+  assert.equal(first.body.length, 50);
+  assert.match(first.headers.link, /format=full/);
+  const second = {};
+  await invoke(route, { path: first.headers.link.match(/^<([^>]+)>/)[1], response: second });
+  assert.deepEqual(second.body.map((row) => row.id), ["050"]);
+  const cached = {};
+  await invoke(route, { path: "/jobs?state=claimable&format=full", headers: { "if-none-match": first.headers.etag }, response: cached });
+  assert.equal(cached.statusCode, 304);
+  assert.equal(cached.body, undefined);
+  assert.equal(cached.headers.etag, first.headers.etag);
+  jobs[0].claimState = "submitted";
+  jobs[0].claimable = false;
+  const changed = {};
+  await invoke(route, { path: "/jobs?state=claimable&format=full", headers: { "if-none-match": first.headers.etag }, response: changed });
+  assert.equal(changed.statusCode, 200);
+  assert.notEqual(changed.headers.etag, first.headers.etag);
+  assert.equal(changed.body.some((row) => row.id === "000"), false);
+});
 
 test("job routes ignore unrelated paths", async () => {
   const { calls, response, route } = makeHarness();
@@ -219,9 +244,11 @@ test("GET /jobs lists live session-joined jobs and preserves response builder sh
   assert.equal(response.statusCode, 200);
   assert.deepEqual(calls.slice(0, 2), [
     ["listJobsWithSessions", { wallet: "0xabc" }],
-    ["respond", { statusCode: 200, body: response.body, headers: {} }],
+    ["respond", { statusCode: 200, body: response.body, headers: response.headers }],
   ]);
   assert.deepEqual(response.body, [{
+    claimState: "open",
+    claimable: true,
     id: "job-1",
     title: "Job 1",
     lifecycle: { state: "open" },

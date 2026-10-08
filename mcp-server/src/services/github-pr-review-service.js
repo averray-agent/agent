@@ -9,6 +9,8 @@ export class GithubPrReviewService {
     intervalMs = positive(process.env.GITHUB_PR_REVIEW_POLL_MINUTES, 30) * 60_000, logger = console }) {
     Object.assign(this, { stateStore, verifierService, slaHours, intervalMs, logger });
     this.enabled = Boolean(githubToken?.trim());
+    this.githubUpstream = { ok: false, lastSuccessAt: null,
+      lastError: this.enabled ? "github_not_checked" : "github_token_unconfigured" };
     this.running = false;
     this.schedulerLoop = new GuardedSchedulerLoop({ host: this, name: "github-pr-review", intervalMs,
       runTimeoutMs: Math.max(intervalMs, 180_000), runOnce: (now) => this.runOnce(now),
@@ -61,6 +63,7 @@ export class GithubPrReviewService {
     const oldestGithubAgeMs = github[0]?.ageMs ?? null;
     return { enabled: this.enabled, running: this.running, intervalMs: this.intervalMs,
       count: queue.count, oldestAgeMs: queue.oldestAgeMs, githubPrCount: github.length,
+      githubUpstream: this.getUpstreamHealth(now, github.length),
       oldestGithubAgeMs, slaHours: this.slaHours,
       warnings: oldestGithubAgeMs > this.slaHours * 3_600_000 ? [{
         code: "github_pr_review_overdue", severity: "warning", oldestAgeMs: oldestGithubAgeMs,
@@ -72,29 +75,59 @@ export class GithubPrReviewService {
     const summary = { startedAt: now.toISOString(), reviewed: [], observed: [], errors: [] };
     if (!this.enabled) return summary;
     const queue = await this.pending({ now });
-    for (const item of queue.items.filter((entry) => entry.verifierMode === "github_pr")) {
+    const githubItems = queue.items.filter((entry) => entry.verifierMode === "github_pr");
+    const failedRead = githubItems.find((item) => !completeGithubRead(item.upstream));
+    if (githubItems.some((item) => completeGithubRead(item.upstream))) {
+      this.githubUpstream.lastSuccessAt = now.toISOString();
+    }
+    if (githubItems.length) {
+      delete this.githubUpstream.state;
+      this.githubUpstream.ok = !failedRead;
+      // Public health gets fixed reason codes, never arbitrary upstream error text.
+      this.githubUpstream.lastError = failedRead ? publicGithubError(failedRead.upstream) : null;
+    } else {
+      this.githubUpstream = { ...this.githubUpstream, ok: true, state: "idle", lastError: null };
+    }
+    for (const item of githubItems) {
       try {
         const upstream = item.upstream;
-        if (upstream.status !== "verified" || Object.values(upstream.partial ?? {}).includes("unavailable")) continue;
+        if (!completeGithubRead(upstream)) continue;
         const fingerprint = createHash("sha256").update(JSON.stringify({
           merged: upstream.merged, state: upstream.state, headSha: upstream.headSha,
           checks: upstream.checkState ?? { ciStatus: upstream.ciStatus, policyGates: upstream.policyGates, ciExclusions: upstream.ciExclusions }
         })).digest("hex");
         const previous = await this.stateStore.getMutationReceipt("github_pr_review_observation", item.sessionId);
-        if (previous?.fingerprint === fingerprint) continue;
-        if (previous && item.previewOutcome === "approved"
+        // Dedupe observations, not admission to settlement: a first observation
+        // (or an old receipt written before this fix) may already be approved.
+        if (previous?.fingerprint !== fingerprint || previous?.previewOutcome !== item.previewOutcome || previous?.merged !== (upstream.merged === true)) {
+          await this.stateStore.upsertMutationReceipt("github_pr_review_observation", item.sessionId, {
+            fingerprint, previewOutcome: item.previewOutcome, merged: upstream.merged === true, observedAt: now.toISOString()
+          });
+          summary.observed.push(item.sessionId);
+        }
+        if (upstream.merged === true && item.previewOutcome === "approved"
           && (await this.stateStore.getSession(item.sessionId))?.status === "submitted") {
-          // Only an approved preview may trigger automatic settlement. Other
-          // outcomes are observations, leaving the submission for an operator.
+          // Pascal's Option 1: only merged + approved may auto-settle.
+          // Open green PRs and every other outcome stay with the operator.
           const verdict = await this.verifierService.verifySubmission({ sessionId: item.sessionId, expectOutcome: "approved" });
           summary.reviewed.push({ sessionId: item.sessionId, outcome: verdict.outcome });
         }
-        await this.stateStore.upsertMutationReceipt("github_pr_review_observation", item.sessionId, { fingerprint, observedAt: now.toISOString() });
-        summary.observed.push(item.sessionId);
       } catch (error) { summary.errors.push({ sessionId: item.sessionId, message: error.message }); }
     }
     this.lastRun = { ...summary, finishedAt: new Date().toISOString() };
     return this.lastRun;
+  }
+
+  getUpstreamHealth(now = new Date(), pendingCount) {
+    const health = { ...this.githubUpstream };
+    if (this.lastRun && pendingCount === 0) return { ...health, ok: true, state: "idle", lastError: null };
+    if (health.state === "idle" && pendingCount > 0) {
+      return { ...health, ok: false, state: "pending", lastError: "github_pending_first_poll" };
+    }
+    if (health.ok && health.state !== "idle" && now - Date.parse(health.lastSuccessAt) > this.intervalMs * 2) {
+      return { ...health, ok: false, lastError: "github_read_stale" };
+    }
+    return health;
   }
 
   start() {
@@ -106,3 +139,13 @@ export class GithubPrReviewService {
 }
 
 function positive(value, fallback) { const n = Number(value); return Number.isFinite(n) && n > 0 ? n : fallback; }
+
+function completeGithubRead(upstream) {
+  return upstream?.status === "verified" && !Object.values(upstream.partial ?? {}).includes("unavailable");
+}
+
+function publicGithubError(upstream) {
+  if (upstream?.status === "verified") return "github_lookup_partial";
+  return /^github_api_(?:[1-5]\d{2}|error)$/u.test(upstream?.reason ?? "")
+    ? upstream.reason : "github_lookup_unavailable";
+}

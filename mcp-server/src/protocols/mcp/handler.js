@@ -78,7 +78,7 @@ export const MCP_BROWSER_INFO = Object.freeze({
 // any origin while the SIWE bearer checks remain in-protocol.
 export const MCP_CORS_HEADERS = Object.freeze({
   "access-control-allow-origin": "*",
-  "access-control-allow-methods": "POST, GET, OPTIONS",
+  "access-control-allow-methods": "POST, GET, HEAD, OPTIONS",
   "access-control-allow-headers": "Mcp-Session-Id, Mcp-Method, Mcp-Name, Mcp-Protocol-Version, Content-Type, Authorization",
   "access-control-expose-headers": "Mcp-Session-Id",
   "access-control-max-age": "86400"
@@ -188,6 +188,18 @@ export function createMcpRoute({
 
     if (message.method === "initialize" || !hasBearerToken(request)) {
       await enforceLimit("mcp_requests_anonymous", clientIp(request), rateLimitConfig?.mcpRequests ?? DEFAULT_MCP_REQUEST_LIMIT);
+    }
+
+    // Ping is also useful before a handshake. It has no tool or wallet side
+    // effects and still passes origin and anonymous request-budget checks.
+    if (message.method === "ping" && !requestMeta(message) && !request.headers?.["mcp-session-id"]
+      && (!request.headers?.["mcp-protocol-version"] || request.headers["mcp-protocol-version"] === LEGACY_MCP_VERSION)) {
+      if (!Object.hasOwn(message, "id")) {
+        sendError(response, respond, 400, null, -32600, "ping requires a JSON-RPC id.");
+      } else {
+        sendResult(response, respond, 200, message.id, {}, { "mcp-protocol-version": LEGACY_MCP_VERSION });
+      }
+      return true;
     }
 
     if (message.method === "initialize") {
@@ -301,10 +313,14 @@ function handleLegacyInitialize({
   serverInfo
 }) {
   const requested = message.params?.protocolVersion;
-  if (requested !== LEGACY_MCP_VERSION) {
-    sendUnsupportedVersion(response, respond, message.id, requested);
+  if (typeof requested !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(requested)) {
+    sendError(response, respond, 400, message.id, -32602, "initialize requires a dated protocolVersion.");
     return;
   }
+  // Initialize is legacy semantics: every offer selects our newest legacy version.
+  // The client can accept it or disconnect. Bind subsequent session reads to
+  // this selected version, never to the unsupported offer.
+  const selectedVersion = LEGACY_MCP_VERSION;
   const headerVersion = request.headers?.["mcp-protocol-version"];
   if (headerVersion && headerVersion !== requested) {
     sendError(
@@ -336,17 +352,17 @@ function handleLegacyInitialize({
     },
     expiresAt: now() + legacySessionTtlMs,
     initialized: false,
-    protocolVersion: LEGACY_MCP_VERSION,
+    protocolVersion: selectedVersion,
     ttlMs: legacySessionTtlMs
   });
   sessionGauge?.set({}, legacySessions.size);
   sendResult(response, respond, 200, message.id, {
-    protocolVersion: LEGACY_MCP_VERSION,
+    protocolVersion: selectedVersion,
     capabilities: SERVER_CAPABILITIES,
     serverInfo,
     instructions: serverInstructions()
   }, {
-    "mcp-protocol-version": LEGACY_MCP_VERSION,
+    "mcp-protocol-version": selectedVersion,
     "mcp-session-id": sessionId
   });
 }
@@ -464,7 +480,15 @@ async function handleModernRequest({
     );
     return;
   }
-  if (!SUPPORTED_MCP_VERSIONS.includes(bodyVersion) || bodyVersion !== MODERN_MCP_VERSION) {
+  if (typeof bodyVersion !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(bodyVersion)) {
+    sendError(response, respond, 400, message.id, -32602, "A dated protocolVersion is required.");
+    return;
+  }
+  if (bodyVersion === LEGACY_MCP_VERSION) {
+    sendError(response, respond, 400, message.id, -32600, "Use initialize for the session-based protocol.");
+    return;
+  }
+  if (bodyVersion !== MODERN_MCP_VERSION) {
     sendUnsupportedVersion(response, respond, message.id, bodyVersion);
     return;
   }
@@ -567,9 +591,14 @@ async function dispatchRequest({
   const resultHeaders = {
     "mcp-protocol-version": era === "modern" ? MODERN_MCP_VERSION : LEGACY_MCP_VERSION
   };
+  if (message.method === "ping" && era === "legacy") {
+    sendResult(response, respond, 200, message.id, {}, resultHeaders);
+    return;
+  }
   if (message.method === "server/discover" && era === "modern") {
     sendResult(response, respond, 200, message.id, modernResult({
       supportedVersions: [...SUPPORTED_MCP_VERSIONS],
+      protocolVersion: MODERN_MCP_VERSION,
       capabilities: SERVER_CAPABILITIES,
       instructions: serverInstructions(),
       ttlMs: TOOL_LIST_TTL_MS,

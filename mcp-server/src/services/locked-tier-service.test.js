@@ -10,7 +10,6 @@ import {
   LOCKED_TIER_RISK_SENTENCE,
   LOCKED_TIER_YIELD_POOL_DEPLOYED_TEXT,
   LOCKED_TIER_YIELD_ELIGIBLE_NOT_DEPLOYED_TEXT,
-  LOCKED_TIER_YIELD_INACTIVE_TEXT,
   NON_YIELD_TIER_EARLY_EXIT_TERMS,
   NON_YIELD_TIER_RISK_SENTENCE,
   LockedTierService,
@@ -180,7 +179,7 @@ test("quote discloses exact L4 exit terms, current NAV, gate state, and risk bef
   }, { poolInfo: h.poolInfo });
   assert.equal(quote.tierTerms.earlyExit, LOCKED_TIER_EARLY_EXIT_TERMS);
   assert.equal(quote.activationGate.status, "closed");
-  assert.equal(quote.activationGate.yieldStatusText, LOCKED_TIER_YIELD_INACTIVE_TEXT);
+  for (const blocker of quote.activationGate.blockers) assert.ok(quote.activationGate.yieldStatusText.includes(blocker));
   assert.equal(quote.nav.sharePrice.assetsPerShare.raw, "1000000");
   assert.equal(quote.riskSentence, LOCKED_TIER_RISK_SENTENCE);
   assert.equal(quote.consent.required, true);
@@ -427,6 +426,16 @@ test("activation-gate-t90-89-days: a measured 25-USDC T90 fixture opens on its t
   assert.equal(gate.friction.marginMultiple, 2);
   assert.equal(gate.open, true);
   assert.deepEqual(gate.blockers, []);
+});
+
+test("above-minimum unmeasured cohort names venue_rate_unmeasured, not a principal threshold", () => {
+  const gate = lockedTierActivationState([activationLock({ amountRaw: "25100000" })], START, { deployedPrincipalRaw: "0" });
+  assert.deepEqual(gate.blockers, ["venue_rate_unmeasured"]);
+  assert.match(gate.yieldStatusText, /venue_rate_unmeasured/);
+  assert.doesNotMatch(gate.yieldStatusText, /below.*threshold|below.*minimum/);
+  const below = lockedTierActivationState([activationLock({ amountRaw: "1000000" })], START);
+  assert.match(below.yieldStatusText, /locked_cohort_below_minimum/);
+  assert.match(below.yieldStatusText, /venue_rate_unmeasured/);
 });
 
 test("gate-open locked yield text is bound only to deployed principal", () => {

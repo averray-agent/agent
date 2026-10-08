@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildPublicJobsResponse } from "./jobs-response.js";
+import { buildPublicJobsResponse, buildPublicJobsPage } from "./jobs-response.js";
 
 const JOBS = [
   {
@@ -81,7 +81,43 @@ const JOBS = [
       provider: "averray"
     }
   }
-];
+].map((job) => ({ ...job, claimState: "open", claimable: true }));
+
+test("legacy board stays complete; explicit claimable requires evidence and include opts into additional states", () => {
+  const rows = [
+    { id: "open", claimState: "open", claimable: true },
+    { id: "submitted", claimState: "submitted", claimable: false, lifecycle: { state: "open" } },
+    { id: "exhausted", claimState: "exhausted", claimable: false },
+    { id: "closed", claimState: "closed", claimable: false },
+    { id: "unverified", lifecycle: { state: "open" } },
+    { id: "blocked", claimState: "open", claimable: false },
+    { id: "nested", claimState: "open", claimable: true, claimStatus: { claimState: "closed" } }
+  ];
+  assert.deepEqual(buildPublicJobsResponse(rows, new URLSearchParams()).map((row) => row.id), rows.map((row) => row.id));
+  assert.deepEqual(buildPublicJobsResponse(rows, new URLSearchParams("state=claimable")).jobs.map((row) => row.id), ["open"]);
+  assert.deepEqual(buildPublicJobsResponse(rows, new URLSearchParams("include=submitted,exhausted")).jobs.map((row) => row.id), ["exhausted", "open", "submitted"]);
+  assert.equal(buildPublicJobsResponse(rows, new URLSearchParams("format=full")).length, rows.length);
+  assert.deepEqual(buildPublicJobsResponse(rows, new URLSearchParams("state=claimable&include=submitted,exhausted")).jobs.map((row) => row.id), ["exhausted", "open", "submitted"]);
+  assert.throws(() => buildPublicJobsResponse(rows, new URLSearchParams("include=nonsense")), (error) => error.statusCode === 400);
+});
+
+test("board cursor defaults to fifty and survives deletions without repeats or omissions", () => {
+  const rows = Array.from({ length: 57 }, (_, n) => ({ id: String(n).padStart(3, "0"), claimState: "open", claimable: true }));
+  assert.equal(buildPublicJobsPage(rows).body.length, 57);
+  const first = buildPublicJobsPage(rows, new URLSearchParams("format=compact"));
+  assert.equal(first.body.jobs.length, 50);
+  assert.ok(first.nextCursor);
+  const next = buildPublicJobsPage(rows.slice(10), new URLSearchParams({ cursor: first.nextCursor }));
+  assert.deepEqual(next.body.jobs.map((row) => row.id), rows.slice(50).map((row) => row.id));
+  assert.equal(next.nextCursor, null);
+  const limited = buildPublicJobsPage(rows, new URLSearchParams({ cursor: first.nextCursor, limit: "2" }));
+  assert.equal(limited.body.jobs.length, 2);
+  assert.deepEqual(limited.body.jobs.map((row) => row.id), ["050", "051"]);
+  assert.throws(() => buildPublicJobsPage(rows, new URLSearchParams({ cursor: first.nextCursor, include: "submitted" })), /Invalid jobs cursor/);
+  assert.throws(() => buildPublicJobsPage(rows, new URLSearchParams({ cursor: first.nextCursor, offset: "0" })), /Invalid jobs cursor/);
+  assert.throws(() => buildPublicJobsPage(rows, new URLSearchParams({ cursor: "garbage" })), /Invalid jobs cursor/);
+  assert.equal(buildPublicJobsPage(rows, new URLSearchParams({ limit: "0.1" })).body.jobs.length, 1);
+});
 
 test("public jobs response keeps bare array for legacy callers", () => {
   const response = buildPublicJobsResponse(JOBS, new URLSearchParams());
@@ -136,7 +172,7 @@ test("compact listing carries the legacy-unclaimable truth boundary", () => {
       escrowGeneration: "legacy",
       legacyPostingUnclaimable: true
     }],
-    new URLSearchParams("source=external")
+    new URLSearchParams("source=external&include=unclaimable")
   );
 
   assert.equal(response.jobs[0].claimable, false);
@@ -187,6 +223,7 @@ test("public jobs response filters and compacts agent-friendly queries", () => {
   );
 
   assert.equal(response.compact, true);
+  assert.equal(response.jobs[0].fundingState, "not_checked");
   assert.equal(response.count, 1);
   assert.equal(response.total, 1);
   assert.equal(response.limit, 25);
@@ -385,7 +422,8 @@ test("public jobs response supports category filters and pagination", () => {
 test("public jobs response allows explicit full format with query params", () => {
   const response = buildPublicJobsResponse(JOBS, new URLSearchParams("source=wikipedia&format=full"));
 
-  assert.equal(response.length, JOBS.length, "full format keeps the unfiltered legacy listing");
+  assert.equal(response.length, 1, "full format preserves shape, not a filter bypass");
+  assert.equal(response[0].id, JOBS[1].id);
   assert.ok(response.every((job) => Object.hasOwn(job, "listedAt")));
 });
 
@@ -399,7 +437,7 @@ test("compact rows expose the human-work listing fields without changing the cat
   });
 
   const response = buildPublicJobsResponse(
-    [normalized],
+    [{ ...normalized, claimState: "open", claimable: true }],
     new URLSearchParams("limit=25")
   );
 
@@ -450,7 +488,7 @@ test("a normalized job carries its settlement expectation into the public listin
 
   assert.equal(normalized.verifierMode, "human_fallback", "the normalizer must keep the mode");
 
-  const body = buildPublicJobsResponse([normalized], new URLSearchParams({ format: "compact" }));
+  const body = buildPublicJobsResponse([{ ...normalized, claimState: "open", claimable: true }], new URLSearchParams({ format: "compact" }));
   const row = body.jobs[0];
 
   assert.ok(row.settlement, "the listing must carry a settlement block");

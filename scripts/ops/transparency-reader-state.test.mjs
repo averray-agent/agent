@@ -1,11 +1,27 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 
 const READER = new URL("../../marketing/public/transparency-reader.js", import.meta.url);
 const PAGE = new URL("../../marketing/src/pages/transparency.astro", import.meta.url);
 const SYNC = new URL("../sync-marketing-site.mjs", import.meta.url);
 const DEPLOY = new URL("./deploy-production.sh", import.meta.url);
+
+test("Record hides an absent retiredV21 card and restores it when present", async () => {
+  const card = { hidden: true };
+  const window = { matchMedia: () => ({ matches: false }) };
+  const document = { querySelector: (selector) => selector === "[data-retired-v21]" ? card : null, querySelectorAll: () => [] };
+  const source = (await readFile(READER, "utf8")).replace('  var placeholder = document.querySelector', '  window.testRender = render; return;\n  var placeholder = document.querySelector');
+  runInNewContext(source, { window, document });
+  window.testRender({ depositPools: {} });
+  assert.equal(card.hidden, true);
+  window.testRender({ depositPools: { retiredV21: {} } });
+  assert.equal(card.hidden, false);
+  window.testRender({ depositPools: {} });
+  assert.equal(card.hidden, true);
+  assert.match(await readFile(PAGE, "utf8"), /data-retired-v21 hidden/);
+});
 
 test("transparency reader shows loading before its first fetch and clears it on render", async () => {
   const source = await readFile(READER, "utf8");

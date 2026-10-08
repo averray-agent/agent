@@ -22,6 +22,9 @@ const ROOT_ENDPOINTS = [
   ...DISCOVERY_ALIAS_PATHS,
   "/openapi.json",
   "/.well-known/x402",
+  "/verify/profiles",
+  "/verify/runs",
+  "/verify/runs/:runId",
   "/llms.txt",
   "/onboarding",
   "/poster/onboarding",
@@ -211,6 +214,8 @@ export function createPublicMetadataRoutes({
             canonicalPath: "/receipts/:receiptId",
             publicPage: `${SITE_URL}/receipts/:receiptId`,
             schema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/work-receipt-v1.json",
+            responseSchema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/receipt-envelope-v1.json",
+            signedDocumentPath: "document",
             canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/work-receipt-v1.md#content-address-and-signature"
           }
         },

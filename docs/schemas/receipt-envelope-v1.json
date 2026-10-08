@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/receipt-envelope-v1.json",
+  "title": "Averray Receipt Response Envelope v1",
+  "description": "Only document is signed and content-addressed. unsignedPresentation is an unsigned display projection, never an attestation.",
+  "type": "object",
+  "required": ["schemaVersion", "document", "unsignedPresentation"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "averray.receipt-envelope.v1" },
+    "document": { "$ref": "work-receipt-v1.json" },
+    "unsignedPresentation": {
+      "type": "object",
+      "description": "Not covered by document.signature. Derive authoritative outcome and buyer from document.verdict and document.intent.",
+      "additionalProperties": false,
+      "properties": {
+        "result": { "enum": ["PASS", "FAIL", "INCONCLUSIVE", "PLATFORM_FAULT"] },
+        "buyer": { "type": "string" },
+        "assetContext": { "type": "object" }
+      }
+    }
+  }
+}

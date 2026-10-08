@@ -21,6 +21,14 @@ export async function verifyReceiptSignature({
   cryptoImpl = globalThis.crypto,
   jwksUrl = resolveReceiptJwksUrl(),
 } = {}) {
+  if (isPlainObject(document) && String(document.schemaVersion ?? "").includes("receipt-envelope")) {
+    if (document.schemaVersion !== "averray.receipt-envelope.v1" || !isPlainObject(document.document)) {
+      return failed("Receipt envelope has an unsupported version or missing signed document.");
+    }
+    // Presentation is explicitly unsigned. Never merge it into the signed
+    // document or describe its values as covered by this verification.
+    document = document.document;
+  }
   if (!isPlainObject(document)) {
     return failed("Canonical receipt document is unavailable.");
   }

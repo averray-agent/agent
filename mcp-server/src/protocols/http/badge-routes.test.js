@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { generateKeyPairSync, sign, webcrypto } from "node:crypto";
+import { canonicalBadgeReceiptBytes, verifyBadgeReceiptSignature } from "../../core/badge-receipt-signing.js";
+import { verifyReceiptSignature } from "../../../../app/lib/ui/receipt-signature-verification.js";
 import { NotFoundError, ValidationError } from "../../core/errors.js";
 import { MemoryStateStore } from "../../core/state-store.js";
 import { createBadgeRoutes, createListBadgeReceipts } from "./badge-routes.js";
@@ -429,21 +432,61 @@ test("GET /receipts preserves stored receipt bytes and decorates only after cont
   assert.equal(JSON.stringify(workReceipt), storedBytes, "serve-time decoration must not mutate storage");
   assert.equal(hashWorkReceiptContent(workReceipt), receiptId, "pre-existing stored receipt must reproduce its hash");
   assert.deepEqual(response.body, {
-    ...workReceipt,
-    result: "PASS",
-    buyer: workReceipt.intent.poster,
-    assetContext: {
-      symbol: "USDC",
-      chain: "eip155:420420419",
-      chainName: "Polkadot Hub",
-      assetId: 1337,
-      token: "0x0000053900000000000000000000000001200000"
+    schemaVersion: "averray.receipt-envelope.v1",
+    document: workReceipt,
+    unsignedPresentation: {
+      result: "PASS",
+      buyer: workReceipt.intent.poster,
+      assetContext: {
+        symbol: "USDC",
+        chain: "eip155:420420419",
+        chainName: "Polkadot Hub",
+        assetId: 1337,
+        token: "0x0000053900000000000000000000000001200000"
+      }
     }
   });
-  const { result: _result, assetContext: _assetContext, buyer: _buyer, ...servedCanonical } = response.body;
+  const servedCanonical = response.body.document;
   assert.deepEqual(servedCanonical, workReceipt, "served receipt differs from storage only by presentation fields");
   assert.equal(response.headers["cache-control"], "public, max-age=31536000, immutable");
   assert.deepEqual(calls.map(([name]) => name), ["getWorkReceiptDocument", "respond"]);
+});
+
+test("served badge and receipt envelope verify end to end against the published JWKS", async () => {
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const jwk = { ...publicKey.export({ format: "jwk" }), alg: "ES256", kid: "badge-1", use: "sig" };
+  const signedAt = "2026-10-07T12:00:00.000Z";
+  function signed(document) {
+    const header = { alg: "ES256", kid: "badge-1", signedAt, typ: "averray-badge-receipt+jws" };
+    const protectedPart = Buffer.from(JSON.stringify(header)).toString("base64url");
+    const input = `${protectedPart}.${canonicalBadgeReceiptBytes(document).toString("base64url")}`;
+    const signature = sign("sha256", Buffer.from(input), { key: privateKey, dsaEncoding: "ieee-p1363" }).toString("base64url");
+    return { ...document, signature: { alg: "ES256", kid: "badge-1", signedAt, sig: `${protectedPart}..${signature}` } };
+  }
+  const receipt = signed(addressedWorkReceipt({ sessionId: "signed-session", jobId: "signed-job" }));
+  const badge = signed(BADGE);
+  const h = makeHarness({ stateStore: { getWorkReceiptDocument: async () => receipt, getBadgeDocument: async () => badge },
+    badgeReceiptSigner: { getJwks: () => ({ keys: [jwk] }) } });
+  async function get(path) {
+    const response = {};
+    await h.route({ request: { method: "GET" }, response, url: new URL(`http://localhost${path}`), pathname: path });
+    assert.equal(response.statusCode, 200);
+    return JSON.parse(JSON.stringify(response.body));
+  }
+  const jwks = await get("/.well-known/badge-receipt-jwks.json");
+  const servedBadge = await get("/badges/signed-session");
+  assert.equal(verifyBadgeReceiptSignature(servedBadge, jwks.keys[0]), true);
+  const served = await get(`/receipts/${receipt.receiptId}`);
+  assert.equal(served.schemaVersion, "averray.receipt-envelope.v1");
+  assert.deepEqual(served.document, receipt);
+  assert.equal(verifyBadgeReceiptSignature(served.document, jwks.keys[0]), true);
+  const verify = (document) => verifyReceiptSignature({ document, cryptoImpl: webcrypto,
+    fetchImpl: async () => ({ ok: true, json: async () => jwks }) });
+  assert.equal((await verify(served)).state, "verified");
+  served.unsignedPresentation.result = "FAIL";
+  assert.equal((await verify(served)).state, "verified", "presentation is explicitly outside the signature");
+  served.document.verdict.outcome = "rejected";
+  assert.equal((await verify(served)).state, "failed", "signed verdict mutations must fail");
 });
 
 test("GET /receipts resolution order keeps exact receipt ids ahead of 0x-shaped job aliases", async () => {
@@ -466,8 +509,8 @@ test("GET /receipts resolution order keeps exact receipt ids ahead of 0x-shaped 
   });
 
   assert.equal(response.statusCode, 200);
-  assert.equal(response.body.receiptId, exact.receiptId);
-  assert.equal(response.body.marker, "exact");
+  assert.equal(response.body.document.receiptId, exact.receiptId);
+  assert.equal(response.body.document.marker, "exact");
 });
 
 test("GET /receipts session alias redirects once and the canonical fetch returns the immutable receipt", async () => {
@@ -497,8 +540,8 @@ test("GET /receipts session alias redirects once and the canonical fetch returns
     pathname: first.response.headers.location
   });
   assert.equal(second.response.statusCode, 200);
-  assert.equal(second.response.body.receiptId, document.receiptId);
-  assert.equal(second.response.body.marker, "session-round-trip");
+  assert.equal(second.response.body.document.receiptId, document.receiptId);
+  assert.equal(second.response.body.document.marker, "session-round-trip");
 });
 
 test("GET /receipts job alias redirects to the selected canonical receipt", async () => {

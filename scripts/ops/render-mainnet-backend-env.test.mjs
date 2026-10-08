@@ -108,12 +108,12 @@ test("repointOpRef: leaves a non-op value untouched", () => {
 test("transformLine: identity literals flip to mainnet", () => {
   assert.equal(transformLine("AUTH_CHAIN_ID=420420417"), `AUTH_CHAIN_ID=${MAINNET_CHAIN_ID}`);
   assert.equal(
-    transformLine("RPC_URL=https://services.polkadothub-rpc.com/testnet/"),
+    transformLine("RPC_URL=https://eth-rpc-testnet.polkadot.io/"),
     `RPC_URL=${MAINNET_BACKEND_RPC}`
   );
   assert.equal(
-    transformLine("RPC_BACKUP_URLS=https://eth-rpc-testnet.polkadot.io/"),
-    `RPC_BACKUP_URLS=${MAINNET_RPC}`
+    transformLine("RPC_BACKUP_URLS=https://blockscout-testnet.polkadot.io/api/eth-rpc"),
+    "RPC_BACKUP_URLS=https://blockscout.polkadot.io/api/eth-rpc"
   );
   assert.equal(transformLine("USDC_LIQUIDITY_CHAIN=testnet"), "USDC_LIQUIDITY_CHAIN=mainnet");
   assert.equal(transformLine("INGESTION_PREFUND_ENABLED=true"), "INGESTION_PREFUND_ENABLED=false");
@@ -368,12 +368,62 @@ test("Ceremony C T4 renders all four POOL_V22 keys from source and preserves the
   assert.deepEqual(findGeneratedDrift({ "deploy/backend.mainnet.env.template": generated }), []);
 });
 
+test("RPC retirement: rendered backend excludes OpsLayer and indexer excludes budgeted Blockscout", () => {
+  const files = generateAll();
+  for (const backend of [files["deploy/backend.mainnet.env.template"],
+    readFileSync(new URL("../../deploy/backend.mainnet.env.template", import.meta.url), "utf8")]) {
+    assert.doesNotMatch(backend, /polkadothub-rpc\.com/iu);
+    const env = parseEnv(backend);
+    for (const key of ["RPC_URL", "DWELLER_RPC_URL", "POLKADOT_RPC_URL"]) {
+      assert.equal(env[key], "https://eth-rpc.polkadot.io/");
+    }
+    assert.equal(env.RPC_BACKUP_URLS, "https://blockscout.polkadot.io/api/eth-rpc");
+  }
+  for (const indexer of [files["deploy/indexer.mainnet.env.template"],
+    ...["indexer.mainnet.env.template", "indexer.env.template"].map((name) =>
+      readFileSync(new URL(`../../deploy/${name}`, import.meta.url), "utf8"))]) {
+    const env = parseEnv(indexer);
+    assert.equal(typeof env.RPC_BACKUP_URLS, "string");
+    assert.doesNotMatch(env.RPC_BACKUP_URLS, /blockscout/iu);
+    assert.equal(env.RPC_BACKUP_URLS, "", "single-provider until Track 2, no duplicate primary");
+    assert.doesNotMatch(env.DWELLER_RPC_URL, /polkadothub-rpc\.com/iu);
+  }
+});
+
+test("RPC configuration keeps manifests, testnet, ops defaults and wallet chain registration on live primaries", () => {
+  const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
+  for (const [name, suffix] of [["mainnet", ""], ["testnet", "-testnet"], ["discovery-registry-testnet", "-testnet"]]) {
+    const manifest = JSON.parse(read(`deployments/${name}.json`));
+    assert.equal(manifest.rpcUrl, `https://eth-rpc${suffix}.polkadot.io/`);
+    assert.deepEqual(manifest.rpcBackupUrls, [`https://blockscout${suffix}.polkadot.io/api/eth-rpc`]);
+  }
+  const testnet = parseEnv(read("deploy/backend.env.template"));
+  for (const key of ["RPC_URL", "DWELLER_RPC_URL", "POLKADOT_RPC_URL"]) {
+    assert.equal(testnet[key], "https://eth-rpc-testnet.polkadot.io/");
+  }
+  assert.equal(testnet.RPC_BACKUP_URLS, "https://blockscout-testnet.polkadot.io/api/eth-rpc");
+  assert.equal(parseEnv(read("deploy/indexer.env.template")).DWELLER_RPC_URL, "https://eth-rpc-testnet.polkadot.io/");
+  for (const script of ["check-x402-inventory.mjs", "check-x402-ramp-readiness.mjs", "run-adversarial-poster.mjs"]) {
+    assert.ok(read(`scripts/ops/${script}`).includes('process.env.RPC_URL ?? "https://eth-rpc.polkadot.io/"'));
+  }
+  const preflight = read("scripts/ops/preflight-mainnet-sidecar.sh");
+  for (const script of ["deploy-creditpool-l1-mainnet.mjs", "resume-creditpool-deploy.mjs"]) {
+    assert.doesNotMatch(read(`scripts/ops/${script}`), /services\.polkadothub-rpc\.com/u);
+    assert.ok(read(`scripts/ops/${script}`).includes("https://eth-rpc.polkadot.io/"));
+  }
+  assert.ok(preflight.includes('require_env_value "$BACKEND_ENV" RPC_URL https://eth-rpc.polkadot.io/'));
+  assert.ok(preflight.includes('require_env_value "$BACKEND_ENV" RPC_BACKUP_URLS https://blockscout.polkadot.io/api/eth-rpc'));
+  const wallet = read("app/lib/wallet/funding.ts");
+  assert.match(wallet, /rpcUrls:\s*\[\s*"https:\/\/eth-rpc\.polkadot\.io\/"/u);
+  assert.doesNotMatch(wallet, /polkadothub-rpc\.com|blockscout/iu);
+});
+
 test("generateAll: the real transform yields the mainnet essentials", () => {
   const files = generateAll();
   const backend = files["deploy/backend.mainnet.env.template"];
   assert.match(backend, /AUTH_CHAIN_ID=420420419/u);
   assert.ok(backend.includes(`RPC_URL=${MAINNET_BACKEND_RPC}`));
-  assert.ok(backend.includes(`RPC_BACKUP_URLS=${MAINNET_RPC}`));
+  assert.ok(backend.includes("RPC_BACKUP_URLS=https://blockscout.polkadot.io/api/eth-rpc"));
   assert.match(backend, /^RPC_WRITE_REQUEST_TIMEOUT_MS=15000$/mu);
   assert.match(backend, /^CHAIN_EVM_FLOOR_BLOCK=19414957$/mu);
   assert.match(backend, /^SHARE_URL_SECRET=op:\/\/mainnet-backend\/share-url-secret\/password$/mu);

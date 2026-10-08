@@ -1,4 +1,5 @@
 import test from "node:test";
+import { buildJobSnapshot } from "./job-snapshot.js";
 import assert from "node:assert/strict";
 
 import {
@@ -525,12 +526,36 @@ test("buildProductHealthSnapshot reports reward bank and Redis settlement counte
     zeroPaySettled24h: 1,
     claimedNotSubmitted: 2,
     submittedNotSettled: 2,
+    awaitingHumanReview: 0,
     stuck: 1,
     failed24h: 2,
     asOf: "2026-07-05T12:00:00.000Z",
     source: "backend_state_store",
     readable: true
   });
+});
+
+test("settlement health splits human review from stuck without hiding approved or unreadable submissions", async () => {
+  const session = (id, mode, status = "submitted") => ({ sessionId: id, jobId: id, status,
+    submittedAt: "2026-10-01T00:00:00Z", jobSnapshot: buildJobSnapshot({ id, verifierMode: mode }) });
+  const missing = session("missing", "github_pr");
+  delete missing.jobSnapshot;
+  const snapshot = await buildProductHealthSnapshot({
+    gateway: { isEnabled: () => false }, now: new Date("2026-10-07T18:30:00Z"),
+    stateStore: {
+      listRecentSessions: async () => [session("waiting-pr", "github_pr"), session("human", "human_fallback"),
+        session("approved-pr", "github_pr"), session("auto", "deterministic"), missing,
+        session("unreadable", "github_pr"), session("resolved", "github_pr", "resolved")],
+      getMutationReceipt: async (bucket, id) => {
+        if (bucket !== "github_pr_review_observation") return undefined;
+        if (id === "unreadable") throw new Error("read unavailable");
+        return id === "approved-pr" ? { previewOutcome: "approved", merged: true } : undefined;
+      }
+    }
+  });
+  assert.equal(snapshot.settlement.submittedNotSettled, 6);
+  assert.equal(snapshot.settlement.awaitingHumanReview, 2);
+  assert.equal(snapshot.settlement.stuck, 4);
 });
 
 test("settlement health partitions resolved, rejected, and closed terminals by payout expectation", async () => {

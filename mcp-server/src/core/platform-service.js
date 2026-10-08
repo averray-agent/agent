@@ -259,7 +259,8 @@ export class PlatformService {
       jobs.map((job) => this.attachClaimState(job, {
         wallet: currentWallet ?? wallet,
         rewardBank,
-        now
+        now,
+        externalClaimabilityRefreshed: true
       }))
     );
     return includeDesignatedClaimants
@@ -1497,7 +1498,9 @@ export class PlatformService {
     if (
       isExternalJob(job)
       && this.blockchainGateway?.isEnabled?.()
-      && !this.externalPostingClaimability.has(job.id)
+      && (!this.externalPostingClaimability.has(job.id)
+        || (!options.externalClaimabilityRefreshed
+          && Date.now() - (this.externalPostingClaimability.get(job.id).observedAtMs ?? 0) >= 30_000))
     ) {
       await this.refreshExternalPostingClaimability([job]);
     }
@@ -1515,7 +1518,7 @@ export class PlatformService {
     });
     if (replace) this.externalPostingClaimability = new Map();
     for (const [jobId, observation] of sweep.observations) {
-      this.externalPostingClaimability.set(jobId, observation);
+      this.externalPostingClaimability.set(jobId, { ...observation, observedAtMs: Date.now() });
     }
     this.externalPostingClaimabilitySweep = {
       candidateCount: sweep.candidateCount,

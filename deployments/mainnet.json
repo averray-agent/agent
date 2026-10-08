@@ -1,8 +1,8 @@
 {
   "profile": "mainnet",
-  "rpcUrl": "https://services.polkadothub-rpc.com/mainnet/",
+  "rpcUrl": "https://eth-rpc.polkadot.io/",
   "rpcBackupUrls": [
-    "https://eth-rpc.polkadot.io/"
+    "https://blockscout.polkadot.io/api/eth-rpc"
   ],
   "deployedAt": "2026-07-25T13:18:47Z",
   "deployer": "0x08406B2bCE5592A534141767ffe4e5B9DC6c22D1",

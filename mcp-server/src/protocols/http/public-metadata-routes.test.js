@@ -153,6 +153,8 @@ test("A2 arrival payload: GET / identifies Averray and points to site, docs, and
   assert.ok(response.body.endpoints.includes("/poster/jobs"));
   assert.ok(response.body.endpoints.includes("/llms.txt"));
   assert.ok(response.body.endpoints.includes("/.well-known/x402"));
+  assert.ok(response.body.endpoints.includes("/verify/runs"));
+  assert.ok(response.body.endpoints.includes("/verify/profiles"));
   assert.ok(response.body.endpoints.includes("/jobs/x402"));
   assert.ok(response.body.endpoints.includes("/.well-known/badge-receipt-jwks.json"));
   assert.ok(response.body.endpoints.every((endpoint) => !endpoint.includes("/jobs/draft")));
@@ -180,6 +182,8 @@ test("A2 arrival payload: GET / identifies Averray and points to site, docs, and
       canonicalPath: "/receipts/:receiptId",
       publicPage: "https://averray.com/receipts/:receiptId",
       schema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/work-receipt-v1.json",
+      responseSchema: "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/receipt-envelope-v1.json",
+      signedDocumentPath: "document",
       canonicalizationDocs: "https://github.com/averray-agent/agent/blob/main/docs/schemas/work-receipt-v1.md#content-address-and-signature"
     }
   });

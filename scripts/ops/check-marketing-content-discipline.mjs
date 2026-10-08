@@ -22,6 +22,16 @@ const FORBIDDEN_TERMS = Object.freeze([
 ]);
 
 const BAKED_AMOUNT = /\b[0-9]+(?:\.[0-9]+)?\s?(?:USDC|DOT)\b/iu;
+const AMOUNT_PAGES = ["site/verify/index.html", "site/proof-to-pay/index.html", "site/pool/index.html", "site/transparency/index.html"];
+
+export function assertPoolRecordTruth(pages) {
+  for (const path of ["site/transparency/index.html", "site/pool/index.html"]) {
+    if (typeof pages[path] !== "string") fail(`${path}: built page is missing`);
+    const text = pages[path].replace(/<[^>]*>/gu, " ").replace(/&(?:nbsp|#160|#xA0);/giu, " ");
+    if (/\d+(?:\.\d+)?\s*(?:USDC|DOT)\b/iu.test(text)) fail(`${path}: baked amount in whole page`);
+    if ((text.match(/0x[a-fA-F0-9]{40}\b/gu) ?? []).length > 0) fail(`${path}: baked pool address in whole page`);
+  }
+}
 
 export class MarketingContentDisciplineError extends Error {
   constructor(message) {
@@ -48,10 +58,13 @@ export function assertMarketingContentDiscipline(pages) {
     }
   }
 
-  for (const relativePath of ["site/verify/index.html", "site/proof-to-pay/index.html", "site/pool/index.html"]) {
+  for (const relativePath of AMOUNT_PAGES) {
+    if (typeof pages[relativePath] !== "string") fail(`${relativePath}: built page is missing`);
     const amount = pages[relativePath].match(BAKED_AMOUNT);
     if (amount) fail(`${relativePath}: baked amount "${amount[0]}" is forbidden`);
   }
+
+  assertPoolRecordTruth(pages);
 
   const verify = pages["site/verify/index.html"];
   if (!/data-verify-inconclusive(?:\s|>|=)/iu.test(verify)) {
@@ -105,7 +118,7 @@ export function assertMarketingContentDiscipline(pages) {
 }
 
 export async function checkBuiltMarketingContent() {
-  const pages = Object.fromEntries(await Promise.all(MARKETING_CONTENT_FILES.map(async (relativePath) => [
+  const pages = Object.fromEntries(await Promise.all([...new Set([...MARKETING_CONTENT_FILES, ...AMOUNT_PAGES])].map(async (relativePath) => [
     relativePath,
     await readFile(resolve(REPO_ROOT, relativePath), "utf8")
   ])));

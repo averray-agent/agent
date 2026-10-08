@@ -107,6 +107,8 @@ function renderHarness() {
     "[data-pool-yield-state]",
     "[data-pool-yield-heading]",
     "[data-pool-yield-text]",
+    "[data-pool-activation]",
+    "[data-pool-address]",
     "[data-pool-benefits]",
     "[data-pool-yield-attribution]",
     "[data-pool-risk-statement]",
@@ -225,22 +227,62 @@ test("marketing pool consumes the same yield and attribution sentences and degra
 test("T4 pool page keeps the v2.1 position visible after cutover without calling it the current deposit pool", () => {
   const nodes = new Map();
   const reader = loadReader({ querySelector(selector) {
+    return selector === '[data-pool-generation="retiredV21"]' ? {
+      querySelector(key) { if (!nodes.has(key)) nodes.set(key, { textContent: "" }); return nodes.get(key); }
+    } : null;
+  } });
+  const source = transparencyPayload();
+  source.depositPools.retiredV21 = { ...structuredClone(source.depositPools.live), label: publicField("v2.1 · deposits retired", "pool generation") };
+  const pool = poolPayload();
+  pool.pool = "0x3A2dd08F85009474117CaFC476b6629AE04fB2A9";
+  source.depositPools.live.address.value = pool.pool;
+  reader.renderTransparency(reader.parseTransparency(source), reader.parsePool(pool));
+  assert.equal(nodes.get("[data-pool-generation-label]").textContent, "v2.1 · deposits retired");
+  assert.equal(nodes.has("[data-pool-generation-address]"), false, "only the current door address is printed");
+  assert.equal(nodes.get("[data-pool-generation-total]").textContent, "14.478654 USDC");
+  assert.match(nodes.get("[data-pool-generation-role]").textContent, /Earlier pool.*deposits retired; withdrawals unchanged/u);
+  assert.doesNotMatch(nodes.get("[data-pool-generation-role]").textContent, /Current pool/u);
+  pool.pool = "0x3333333333333333333333333333333333333333";
+  assert.throws(() => reader.renderTransparency(reader.parseTransparency(source), reader.parsePool(pool)), /address disagrees/);
+});
+
+test("live card describes both served deposit-block branches", () => {
+  const nodes = new Map();
+  const reader = loadReader({ querySelector(selector) {
     return selector === '[data-pool-generation="live"]' ? {
       querySelector(key) { if (!nodes.has(key)) nodes.set(key, { textContent: "" }); return nodes.get(key); }
     } : null;
   } });
-  const source = transparencyPayload("v2.1 · deposits retired");
-  const pool = poolPayload();
-  pool.pool = "0x3A2dd08F85009474117CaFC476b6629AE04fB2A9";
-  reader.renderTransparency(reader.parseTransparency(source), reader.parsePool(pool));
-  assert.equal(nodes.get("[data-pool-generation-label]").textContent, "v2.1 · deposits retired");
-  assert.equal(nodes.get("[data-pool-generation-address]").textContent, source.depositPools.live.address.value);
-  assert.equal(nodes.get("[data-pool-generation-total]").textContent, "14.478654 USDC");
-  assert.match(nodes.get("[data-pool-generation-role]").textContent, /Earlier pool.*deposit door retired; withdrawals unchanged/u);
-  assert.doesNotMatch(nodes.get("[data-pool-generation-role]").textContent, /Current pool/u);
-  pool.pool = source.depositPools.live.address.value;
-  reader.renderTransparency(reader.parseTransparency(source), reader.parsePool(pool));
-  assert.equal(nodes.get("[data-pool-generation-role]").textContent, "Current pool · open to new deposits");
+  for (const blocked of [false, true]) {
+    const pool = poolPayload();
+    pool.venueMark.depositsBlocked = blocked;
+    reader.renderTransparency(reader.parseTransparency(transparencyPayload()), reader.parsePool(pool));
+    assert.equal(nodes.get("[data-pool-generation-role]").textContent,
+      blocked ? "Current pool · deposits are not open" : "Current pool · open to new deposits");
+  }
+});
+
+test("pool prints one current address and the served activation blocker; terms link is never gated", async () => {
+  const page = await readFile(PAGE, "utf8");
+  const recordPage = await readFile(new URL("marketing/src/pages/transparency.astro", REPO_ROOT), "utf8");
+  assert.equal((page.match(/data-pool-address/g) ?? []).length, 1);
+  assert.doesNotMatch(page, /data-pool-generation-address/);
+  assert.equal((recordPage.match(/data-read="depositPools\.[^.]+\.address"/g) ?? []).length, 1);
+  assert.match(recordPage, /depositPools.live.address/);
+  assert.doesNotMatch(recordPage, /data-read="treasury.position.(?:growth|netVsCommitted)"/);
+  assert.match(recordPage, /Recalls and withdrawals can reduce the position without a loss/);
+  const actions = page.match(/<div[^>]+data-pool-cta[^>]*>([\s\S]*?)<\/div>/)[1];
+  assert.doesNotMatch(actions, /Read the deposit terms/);
+  assert.match(page, /href="#membership">Read the deposit terms/);
+  assert.doesNotMatch(page.match(/<a[^>]*href="#membership"[^>]*>/)[0], /\bhidden\b/);
+  assert.match(page, /id="membership"/);
+  const h = renderHarness();
+  const reader = loadReader(h.document);
+  const payload = poolPayload();
+  payload.lockedDeposits = { yieldStatusText: "yield inactive — venue_rate_unmeasured: measured venue evidence is not available." };
+  reader.renderPool(reader.parsePool(payload));
+  assert.equal(h.nodes.get("[data-pool-address]").textContent, payload.pool);
+  assert.equal(h.nodes.get("[data-pool-activation]").textContent, payload.lockedDeposits.yieldStatusText);
 });
 
 test("pool history pin 5 — the legacy card follows not_deployed and never invents a venue position", async () => {

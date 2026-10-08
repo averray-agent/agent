@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { ValidationError } from "../../core/errors.js";
 import { buildSettlementExpectation } from "../../core/settlement-expectation.js";
 import { schemaRefToJobSchemaPath } from "../../core/job-schema-registry.js";
 import {
@@ -5,7 +7,7 @@ import {
   isRealWaiverEligibleJob
 } from "../../core/onboarding-inventory.js";
 
-const DEFAULT_AGENT_LIMIT = 25;
+const DEFAULT_AGENT_LIMIT = 50;
 const MAX_AGENT_LIMIT = 100;
 
 const SOURCE_LABELS = new Map([
@@ -38,25 +40,55 @@ const SOURCE_ALIASES = new Map([
 ]);
 
 export function buildPublicJobsResponse(jobs, searchParams) {
-  const listedJobs = jobs.map(withListedAt);
-  if (!usesAgentFriendlyQuery(searchParams)) {
-    return listedJobs;
-  }
+  return buildPublicJobsPage(jobs, searchParams).body;
+}
 
+export function buildPublicJobsPage(jobs, searchParams = new URLSearchParams()) {
+  const listedJobs = jobs.map(withListedAt);
+  // Preserve the complete legacy array for existing app and ops consumers.
+  if ([...searchParams.keys()].length === 0) {
+    return { body: listedJobs, nextCursor: null, limit: listedJobs.length };
+  }
   const limit = parseLimit(searchParams.get("limit"), DEFAULT_AGENT_LIMIT, MAX_AGENT_LIMIT);
-  const offset = parseOffset(searchParams.get("offset"));
   const filters = parseJobFilters(searchParams);
-  const filteredJobs = listedJobs.filter((job) => matchesFilters(job, filters));
+  const included = [...new Set(String(searchParams.get("include") ?? "").split(",").map(normalizeToken).filter(Boolean))].sort();
+  const allowed = new Set(["submitted", "exhausted", "claimed", "disputed", "expired", "closed", "cancelled", "unclaimable", "restricted", "paused", "stale"]);
+  if (included.some((state) => !allowed.has(state))) throw new ValidationError("Unknown jobs include state.");
+  const context = createHash("sha256").update(JSON.stringify({ filters, included, wallet: searchParams.get("wallet") })).digest("hex");
+  const filteredJobs = listedJobs.filter((job) => {
+    const { state } = effectiveJobState(job);
+    if (included.includes(state) && (!filters.state || filters.state === "claimable")) {
+      return matchesFilters(job, { ...filters, state: undefined });
+    }
+    if (!matchesFilters(job, filters)) return false;
+    if (filters.state || !included.length) return true;
+    return state === "open" && job.claimable === true;
+  }).sort((a, b) => String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
+  let offset = parseOffset(searchParams.get("offset"));
+  if (searchParams.has("cursor")) {
+    try {
+      const cursor = JSON.parse(Buffer.from(searchParams.get("cursor"), "base64url").toString("utf8"));
+      if (searchParams.has("offset") || cursor.v !== 1 || typeof cursor.after !== "string" || cursor.context !== context) throw new Error();
+      offset = filteredJobs.findIndex((job) => String(job.id) > cursor.after);
+      if (offset < 0) offset = filteredJobs.length;
+    } catch {
+      throw new ValidationError("Invalid jobs cursor for these filters.");
+    }
+  }
   const page = filteredJobs.slice(offset, offset + limit);
+  const nextCursor = offset + page.length < filteredJobs.length
+    ? Buffer.from(JSON.stringify({ v: 1, after: String(page.at(-1).id), context })).toString("base64url")
+    : null;
   const since = parseSince(searchParams.get("since"));
 
-  return {
+  const body = !usesAgentFriendlyQuery(searchParams) ? page : {
     jobs: page.map(toCompactJobRow),
     count: page.length,
     total: filteredJobs.length,
     limit,
     offset,
     nextOffset: offset + limit < filteredJobs.length ? offset + limit : null,
+    nextCursor,
     filters,
     inventory: {
       claimableJobs: listedJobs.filter((job) => job.claimable === true).length,
@@ -71,6 +103,7 @@ export function buildPublicJobsResponse(jobs, searchParams) {
     },
     compact: true
   };
+  return { body, nextCursor, limit };
 }
 
 function withListedAt(job) {
@@ -121,6 +154,7 @@ function matchesFilters(job, filters) {
   }
   if (filters.state) {
     const { state, status, effectiveState } = effectiveJobState(job);
+    if (filters.state === "claimable") return ["open", "expired"].includes(state) && effectiveState === "claimable" && job.claimable === true;
     const wantsClaimable = ["open", "available", "claimable"].includes(filters.state);
     if (wantsClaimable && effectiveState === "claimable") {
       return true;
@@ -135,7 +169,7 @@ function matchesFilters(job, filters) {
 function toCompactJobRow(job) {
   const lifecycle = job.lifecycle ?? {};
   const { state } = effectiveJobState(job);
-  const claimable = job.claimable ?? state === "open";
+  const claimable = job.claimable === true;
   const sourceDetails = compactSourceDetails(job);
   const settlement = buildSettlementExpectation(job.verifierMode);
   return {
@@ -146,7 +180,7 @@ function toCompactJobRow(job) {
     effectiveState: job.effectiveState ?? (claimable ? "claimable" : job.claimState ?? state),
     claimable,
     currentWalletCanClaim: job.currentWalletCanClaim ?? null,
-    fundingState: job.fundingState ?? null,
+    fundingState: job.fundingState ?? "not_checked",
     reason: job.reason ?? null,
     ...(job.escrowGeneration ? { escrowGeneration: job.escrowGeneration } : {}),
     ...(job.legacyPostingUnclaimable === true ? { legacyPostingUnclaimable: true } : {}),
@@ -200,7 +234,7 @@ function toCompactJobRow(job) {
 
 function effectiveJobState(job) {
   const lifecycle = job.lifecycle ?? {};
-  const state = normalizeToken(job.claimState ?? job.state ?? lifecycle.state ?? lifecycle.status ?? "open");
+  const state = normalizeToken(job.claimStatus?.claimState ?? job.claimState ?? job.state ?? lifecycle.state ?? lifecycle.status);
   const status = normalizeToken(job.claimStatus?.claimState ?? job.state ?? state);
   const effectiveState = normalizeToken(job.effectiveState ?? (job.claimable ? "claimable" : state));
   return { state, status, effectiveState };
@@ -305,7 +339,7 @@ function parseLimit(value, fallback, max) {
   if (!Number.isFinite(raw) || raw <= 0) {
     return fallback;
   }
-  return Math.min(Math.trunc(raw), max);
+  return Math.max(1, Math.min(Math.trunc(raw), max));
 }
 
 function parseOffset(value) {

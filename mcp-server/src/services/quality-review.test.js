@@ -90,7 +90,7 @@ test("quality pin: configured weight reaches off-chain wallet quality while sess
   }
   const unchanged = {};
   await receipts({ request: { method: "GET" }, response: unchanged, pathname: `/receipts/${original.receiptId}` });
-  assert.equal(unchanged.body.review.score, undefined, "exact content IDs remain immutable");
+  assert.equal(unchanged.body.document.review.score, undefined, "exact content IDs remain immutable");
   assert.equal((await h.quality.listPending()).pending.length, 0);
   assert.deepEqual(await h.service.recordQualityReview({ sessionId: session.sessionId, qualityScore: 5, note: "Verified the actual artifact.", reviewer: ADMIN }), reviewed);
   await assert.rejects(h.service.recordQualityReview({ sessionId: session.sessionId, qualityScore: 4, note: "changed", reviewer: ADMIN }), { code: "quality_review_already_recorded" });

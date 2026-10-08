@@ -143,7 +143,8 @@ test("QA3-A marketing wayfinding names real doors, live reads, and outbound proo
   assert.match(agents, /Starter jobs are deliberately small; rewards and caps rise with settled history\./u);
   assert.match(transparency, /deliberately small pilot treasury/u);
   assert.match(transparency, /every figure is the live ledger, unedited/iu);
-  assert.match(transparency, /realized write-off \(venue loss\)/iu);
+  assert.doesNotMatch(transparency, /Realized write-off \(venue loss\)/u);
+  assert.match(transparency, /Their difference is not a realized write-off or earned yield/u);
 
   for (const label of [
     "case study (GitHub)",

@@ -355,6 +355,10 @@ export function loadBlockchainConfig(env = process.env) {
       deploymentManifest?.contracts?.depositPoolV21,
       "deployments/<profile>.json#contracts.depositPoolV21"
     ),
+    depositPoolV22Address: normalizeOptionalAddress(
+      deploymentManifest?.contracts?.depositPoolV22,
+      "deployments/<profile>.json#contracts.depositPoolV22"
+    ),
     depositPoolV21DeploymentBlock: normalizeOptionalU32(
       deploymentManifest?.deploymentBlocks?.depositPoolV21,
       "deployments/<profile>.json#deploymentBlocks.depositPoolV21"

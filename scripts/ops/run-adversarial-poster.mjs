@@ -37,7 +37,7 @@ import { Contract, Interface, JsonRpcProvider, Wallet } from "ethers";
 const execFileAsync = promisify(execFile);
 
 const API = (process.env.API_URL ?? "https://api.averray.com").replace(/\/+$/, "");
-const RPC = process.env.RPC_URL ?? "https://services.polkadothub-rpc.com/mainnet/";
+const RPC = process.env.RPC_URL ?? "https://eth-rpc.polkadot.io/";
 const ERC20 = ["function approve(address spender, uint256 amount) returns (bool)",
                "function allowance(address owner, address spender) view returns (uint256)",
                "function balanceOf(address account) view returns (uint256)"];

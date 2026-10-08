@@ -265,6 +265,8 @@ export class AgentPlatformClient {
     format = undefined,
     limit = undefined,
     offset = undefined,
+    cursor = undefined,
+    include = undefined,
     since = undefined
   } = {}) {
     const params = new URLSearchParams();
@@ -275,6 +277,8 @@ export class AgentPlatformClient {
     if (format) params.set("format", format);
     if (limit !== undefined) params.set("limit", String(limit));
     if (offset !== undefined) params.set("offset", String(offset));
+    if (cursor !== undefined) params.set("cursor", cursor);
+    if (include !== undefined) params.set("include", include);
     if (since !== undefined) params.set("since", String(since));
     return this.request(`/jobs${params.size ? `?${params.toString()}` : ""}`);
   }

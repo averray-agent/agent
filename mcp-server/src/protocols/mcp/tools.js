@@ -96,12 +96,14 @@ export function createMcpTools({
         wallet: { type: "string", description: "Optional wallet used to project wallet-specific claimability." },
         format: { type: "string", enum: ["compact", "full"] },
         limit: { type: "integer", minimum: 1, maximum: 100 },
+        cursor: { type: "string", description: "Opaque nextCursor from the preceding page with the same filters and wallet." },
+        include: { type: "string", description: "Comma-separated additional claim states, such as submitted,exhausted." },
         offset: { type: "integer", minimum: 0 },
         source: { type: "string" },
         category: { type: "string" },
         state: { type: "string" },
         since: {
-          description: "Optional prior visit time as ISO 8601 or epoch milliseconds. The listing stays complete; meta.newSince counts rows listed strictly after it.",
+          description: "Optional prior visit time as ISO 8601 or epoch milliseconds. Results are paginated (50 by default); meta.newSince counts matching rows listed strictly after it. Follow nextCursor for the remaining rows.",
           oneOf: [
             { type: "string" },
             { type: "integer", minimum: 0 }
@@ -360,7 +362,7 @@ export function createMcpTools({
       required: ["wallet"],
       additionalProperties: false
     },
-    readOnly: true,
+    readOnly: false,
     destructive: false
   }),
   tool({
@@ -498,7 +500,7 @@ export function createMcpToolExecutor({
         return unwrap(await invokeHttpRoute(handleJobRoute, {
           ...common,
           method: "GET",
-          path: `/jobs${buildQuery(args)}`
+          path: `/jobs${buildQuery({ ...args, state: args.state || "claimable" })}`
         }));
       case "getJobDefinition":
         requireString(args.jobId, "jobId");

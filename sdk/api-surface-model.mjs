@@ -481,6 +481,7 @@ export interface JobsListResponse extends ApiEnvelope {
   limit?: number;
   offset?: number;
   nextOffset?: number | null;
+  nextCursor?: string | null;
   compact?: boolean;
   meta?: { newSince: number };
 }
@@ -493,6 +494,8 @@ export interface ListJobsOptions {
   format?: string;
   limit?: number;
   offset?: number;
+  cursor?: string;
+  include?: string;
   since?: ISODateTime | number;
 }
 

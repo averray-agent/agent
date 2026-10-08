@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   AbstractSigner,
   FallbackProvider,
@@ -14,6 +15,26 @@ const MINIMUM_RPC_WRITE_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_RPC_BATCH_MAX_COUNT = 64;
 const MAX_PROVIDER_HISTORY = 256;
 const RPC_PROVIDER_LABEL = Symbol("averray.rpcProviderLabel");
+const readSources = new AsyncLocalStorage();
+
+// Per-read provenance, not a global "last provider" (concurrent reads can use
+// different runners). Cached reads may have no observable transport response.
+export async function readWithRpcSources(loader) {
+  const sources = { calls: new Set(), heads: new Set() };
+  const result = await readSources.run(sources, loader);
+  return { result, rpcSources: [...(sources.calls.size ? sources.calls : sources.heads)].sort() };
+}
+
+class LabeledJsonRpcProvider extends JsonRpcProvider {
+  async _perform(request) {
+    const result = await super._perform(request);
+    if (request.method === "call" || request.method === "getBlockNumber") {
+      const sources = readSources.getStore();
+      sources?.[request.method === "call" ? "calls" : "heads"].add(describeRpcProvider(this));
+    }
+    return result;
+  }
+}
 const RETRYABLE_BROADCAST_ERROR_CODES = new Set([
   "NETWORK_ERROR",
   "SERVER_ERROR",
@@ -116,7 +137,7 @@ export function describeRpcProvider(provider) {
 function createLabeledJsonRpcProvider(url, requestTimeoutMs) {
   const request = new FetchRequest(url);
   request.timeout = requestTimeoutMs;
-  const provider = new JsonRpcProvider(request, undefined, {
+  const provider = new LabeledJsonRpcProvider(request, undefined, {
     batchMaxCount: DEFAULT_RPC_BATCH_MAX_COUNT
   });
   Object.defineProperty(provider, RPC_PROVIDER_LABEL, {

@@ -69,6 +69,9 @@
       poolHeadroom: amount(caps.poolHeadroom, "pool.caps.poolHeadroom"),
       yieldStatus: text(source.yieldStatus, "pool.yieldStatus"),
       yieldStatusText: text(source.yieldStatusText, "pool.yieldStatusText"),
+      activationText: source.lockedDeposits?.yieldStatusText
+        ? text(source.lockedDeposits.yieldStatusText, "pool.lockedDeposits.yieldStatusText")
+        : "Locked activation status is unavailable; see GET /pool.",
       yieldAttributionText: typeof source.yieldAttributionText === "string"
         ? text(source.yieldAttributionText, "pool.yieldAttributionText")
         : "Yield attribution is unavailable. Read GET /pool directly; a share price above principal is not proof of yield.",
@@ -133,7 +136,9 @@
     var legacy = generation("legacy");
     address(live.address.value, "live.address.value");
     address(legacy.address.value, "legacy.address.value");
-    return { live: live, legacy: legacy };
+    var retiredV21 = pools.retiredV21 ? generation("retiredV21") : null;
+    if (retiredV21) address(retiredV21.address.value, "retiredV21.address.value");
+    return { live: live, legacy: legacy, retiredV21: retiredV21 };
   }
 
   function formatAmount(value, unit) {
@@ -165,6 +170,8 @@
     );
     setText("[data-pool-yield-state]", displayStatus(value.yieldStatus));
     setText("[data-pool-yield-text]", value.yieldStatusText);
+    setText("[data-pool-activation]", value.activationText);
+    setText("[data-pool-address]", value.pool);
     setText("[data-pool-benefits]", value.benefitsText);
     setText("[data-pool-yield-attribution]", value.yieldAttributionText);
     setText("[data-pool-risk-statement]", value.disclosure);
@@ -213,26 +220,29 @@
   }
 
   function renderTransparency(value, pool) {
-    ["live", "legacy"].forEach(function (name) {
+if (value.live.address.value.toLowerCase() !== pool.pool.toLowerCase()) {
+      throw new Error("Current pool record address disagrees with GET /pool; generation balances are unavailable.");
+    }
+    ["live", "retiredV21", "legacy"].forEach(function (name) {
       var item = value[name];
       var host = document.querySelector('[data-pool-generation="' + name + '"]');
       if (!host) return;
+      host.hidden = !item;
+      if (!item) return;
       setText("[data-pool-generation-label]", item.label.value, host);
-      setText("[data-pool-generation-address]", item.address.value, host);
       setText("[data-pool-generation-total]", item.totalAssets.value + " " + item.totalAssets.unit, host);
       setText("[data-pool-generation-buffer]", item.bufferAssets.value + " " + item.bufferAssets.unit, host);
       setText("[data-pool-generation-deployment]", displayStatus(item.deployedStatus.value), host);
       if (name === "live") {
-        var isCurrent = item.address.value.toLowerCase() === pool.pool.toLowerCase();
         setText(
           "[data-pool-generation-role]",
-          !isCurrent
-            ? "Earlier pool · deposit door retired; withdrawals unchanged. Redeposit into the current pool at your leisure."
-            : !pool.venue.depositsBlocked
+          !pool.venue.depositsBlocked
               ? "Current pool · open to new deposits"
               : "Current pool · deposits are not open",
           host
         );
+      } else if (name === "retiredV21") {
+        setText("[data-pool-generation-role]", "Earlier pool · deposits retired; withdrawals unchanged. Redeposit into the current pool at your leisure.", host);
       } else {
         var state = item.deployedStatus.value;
         setText("[data-pool-generation-role]",

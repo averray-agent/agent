@@ -212,6 +212,19 @@ test("listSessions builds optional query string without empty params", async () 
   );
 });
 
+test("job cursor and include are sent unchanged", async () => {
+  const client = new AgentPlatformClient({
+    baseUrl: "https://api.example.test",
+    fetchImpl: async (url) => {
+      const parsed = new URL(url);
+      assert.equal(parsed.searchParams.get("cursor"), "opaque-cursor");
+      assert.equal(parsed.searchParams.get("include"), "submitted,exhausted");
+      return jsonResponse({ jobs: [], nextCursor: null });
+    }
+  });
+  await client.listJobs({ cursor: "opaque-cursor", include: "submitted,exhausted" });
+});
+
 test("job helpers build compact filters, mutation bodies, and admin timeline URLs", async () => {
   const calls = [];
   const client = new AgentPlatformClient({

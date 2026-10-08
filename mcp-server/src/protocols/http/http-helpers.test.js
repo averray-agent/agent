@@ -121,6 +121,17 @@ test("respond adds JSON, CORS, and request id headers", () => {
   assert.deepEqual(JSON.parse(response.body), { ok: true });
 });
 
+test("JSON HEAD has GET headers and length but no body", () => {
+  const response = () => ({ writeHead(status, headers) { this.status = status; this.headers = headers; }, end(body) { this.body = body; } });
+  const get = response();
+  const head = { ...response(), _headOnly: true };
+  respond(get, 200, { message: "café" });
+  respond(head, 200, { message: "café" });
+  assert.deepEqual(head.headers, get.headers);
+  assert.equal(get.headers["content-length"], Buffer.byteLength(get.body));
+  assert.equal(head.body, undefined);
+});
+
 test("respondText sends plain UTF-8 text with CORS and request id headers", () => {
   const response = {
     _requestId: "req-llms",

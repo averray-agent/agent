@@ -38,7 +38,7 @@ jobs:
           while IFS= read -r job_id; do
             [ -n "$job_id" ] || continue
             document="$(curl -fsSL "https://api.averray.com/receipts/${job_id}" || true)"
-            candidate="$(jq -r 'select(.chainBinding != null) | .receiptId // empty' <<< "$document")"
+            candidate="$(jq -r '(.document // .) | select(.chainBinding != null) | .receiptId // empty' <<< "$document")"
             if [ -n "$candidate" ]; then
               receipt_id="$candidate"
               break

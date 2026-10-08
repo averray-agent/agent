@@ -444,7 +444,7 @@
         ],
         "operationId": "listJobs",
         "summary": "List available jobs",
-        "description": "Returns all currently available platform jobs. With no query parameters this preserves the legacy full-array response. Query parameters enable an agent-friendly compact, filtered, paginated envelope; use /jobs/definition for the full payload of one job.",
+        "description": "With no query parameters returns the complete legacy array. Query views paginate at 50 by default (maximum 100), sorted by id. Use state=claimable for only open claimable jobs (the MCP listJobs default); include=submitted,exhausted adds those states. format=full preserves the array shape for paginated views. Follow Link rel=next or nextCursor. Cursors are bound to filters and wallet. ETag supports If-None-Match / 304 revalidation.",
         "parameters": [
           {
             "name": "source",
@@ -498,19 +498,19 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Maximum compact rows to return when using agent-friendly query parameters.",
+            "description": "Maximum rows to return in either response format.",
             "schema": {
               "type": "integer",
               "minimum": 1,
               "maximum": 100,
-              "default": 25
+              "default": 50
             }
           },
           {
             "name": "offset",
             "in": "query",
             "required": false,
-            "description": "Zero-based compact row offset for pagination.",
+            "description": "Legacy zero-based offset; cannot be combined with cursor.",
             "schema": {
               "type": "integer",
               "minimum": 0,
@@ -518,10 +518,22 @@
             }
           },
           {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque nextCursor from the previous page. Preserve filters and wallet; do not combine with offset.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "description": "Comma-separated additional claim states, for example submitted,exhausted. Adds to the claimable view; bare /jobs remains the complete legacy array.",
+            "schema": { "type": "string" }
+          },
+          {
             "name": "format",
             "in": "query",
             "required": false,
-            "description": "Set to full to force the legacy full-array response even when query parameters are present.",
+            "description": "Set to full for an array. Full arrays and compact envelopes use the same filtering and pagination.",
             "schema": {
               "type": "string",
               "enum": [
@@ -1708,6 +1720,17 @@
       }
     },
     "/verify/runs": {
+      "get": {
+        "tags": ["Verify"],
+        "operationId": "verifyRunCreationMethod",
+        "summary": "Discover the required method for creating a Verify run",
+        "responses": {
+          "405": {
+            "description": "Run creation requires POST; GET never creates or bills a run.",
+            "headers": { "Allow": { "schema": { "type": "string", "const": "POST" } } }
+          }
+        }
+      },
       "post": {
         "tags": [
           "Verify"
@@ -2579,12 +2602,18 @@
         ],
         "responses": {
           "200": {
-            "description": "Read a content-addressed receipt",
+            "description": "Receipt response envelope. Verify document only; unsignedPresentation is not signed.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true
+                  "required": ["schemaVersion", "document", "unsignedPresentation"],
+                  "properties": {
+                    "schemaVersion": { "const": "averray.receipt-envelope.v1" },
+                    "document": { "type": "object", "description": "Unchanged content-addressed signed receipt." },
+                    "unsignedPresentation": { "type": "object", "description": "Unsigned display aliases; not covered by document.signature." }
+                  },
+                  "additionalProperties": false
                 }
               }
             }
@@ -4034,6 +4063,9 @@
               "claimed",
               "expired",
               "submitted",
+              "disputed",
+              "rejected",
+              "restricted",
               "exhausted"
             ]
           },
@@ -4047,11 +4079,19 @@
               "claimed",
               "expired",
               "submitted",
+              "disputed",
+              "rejected",
+              "restricted",
               "exhausted"
             ]
           },
           "claimable": {
             "type": "boolean"
+          },
+          "fundingState": {
+            "type": "string",
+            "enum": ["funded", "available", "pending", "unverified", "not_checked"],
+            "description": "Funded is recorded prefunding; available is current shared reward-bank headroom, not an earmark. not_checked asserts no funding evidence."
           },
           "currentWalletCanClaim": {
             "type": [
@@ -4142,6 +4182,9 @@
               "integer",
               "null"
             ]
+          },
+          "nextCursor": {
+            "type": ["string", "null"]
           },
           "filters": {
             "type": "object",

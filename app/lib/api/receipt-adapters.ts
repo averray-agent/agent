@@ -12,6 +12,7 @@ import {
   selectCanonicalReceiptDocument,
 } from "@/lib/ui/receipt-signature-verification";
 import { formatReceiptAssetLine } from "@/lib/ui/receipt-asset-context";
+import { publicReceiptUrl } from "@/lib/ui/public-receipt-url.js";
 
 export type ReceiptRowWithMeta = ReceiptRow & {
   sessionId: string;
@@ -152,7 +153,7 @@ export function buildReceiptDrawer(
     })),
     evidenceJson,
     evidenceMeta: `${sizeOf(raw)} · ${receiptHasSignature(raw) ? "application/jose+json" : "application/json"}`,
-    evidenceRawHref: evidencePath,
+    evidenceRawHref: publicReceiptUrl(evidencePath),
     ...(assetLine ? { assetLine } : {}),
     links: [
       { role: "Origin run", ref: text(averray?.jobId, row.subject) },

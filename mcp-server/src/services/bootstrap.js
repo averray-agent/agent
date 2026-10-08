@@ -1471,7 +1471,7 @@ export function loadHttpConfig(env = process.env) {
     maxBodyBytes,
     allowedOrigins: new Set(allowedOrigins),
     allowAllOrigins,
-    allowedMethods: "GET, POST, OPTIONS",
+    allowedMethods: "GET, HEAD, POST, OPTIONS",
     allowedHeaders: "authorization, content-type, last-event-id, mcp-method, mcp-name, mcp-protocol-version, mcp-session-id, payment-signature, sign-in-with-x, verification-target-authorization, x-payment, x-request-id",
     exposedHeaders: "mcp-protocol-version, mcp-session-id, payment-required, payment-response, retry-after, x-payment-required, x-payment-response, x-request-id",
     maxAgeSeconds: parsePositiveInt(env.CORS_MAX_AGE_SECONDS, 600)

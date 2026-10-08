@@ -23,16 +23,18 @@ export class VenueBalanceReader {
   constructor({
     polkadotApiLoader = loadPolkadotApi,
     substrateApiFactory = createSubstrateApi,
-    evmProviderFactory = createEvmProvider
+    evmProviderFactory = createEvmProvider,
+    substrateTimeoutMs = 10_000
   } = {}) {
     this.polkadotApiLoader = polkadotApiLoader;
     this.substrateApiFactory = substrateApiFactory;
     this.evmProviderFactory = evmProviderFactory;
+    this.substrateTimeoutMs = substrateTimeoutMs;
     this.substrateApis = new Map();
     this.evmProviders = new Map();
   }
 
-  async read(target, { blockTag = undefined } = {}) {
+  async read(target, { blockTag = undefined, provider: sharedProvider } = {}) {
     const normalized = normalizeVenueBalanceTarget(target);
     if (blockTag !== undefined && (
       normalized.ledger !== "erc20"
@@ -42,8 +44,9 @@ export class VenueBalanceReader {
       throw new ValidationError("Historical balance reads require an ERC-20 target and a positive blockTag.");
     }
     if (normalized.ledger === "substrate_tokens") {
-      const api = await this.getSubstrateApi(normalized.endpoint);
-      const record = await api.query.tokens.accounts(normalized.account, normalized.assetId);
+      const { api, pending } = await this.getSubstrateConnection(normalized.endpoint);
+      const record = await this.readSubstrate(normalized.endpoint, api,
+        () => api.query.tokens.accounts(normalized.account, normalized.assetId), pending);
       const json = record?.toJSON?.() ?? record;
       return {
         raw: BigInt(json?.free ?? 0),
@@ -53,8 +56,9 @@ export class VenueBalanceReader {
     }
 
     if (normalized.ledger === "substrate_system") {
-      const api = await this.getSubstrateApi(normalized.endpoint);
-      const record = await api.query.system.account(normalized.account);
+      const { api, pending } = await this.getSubstrateConnection(normalized.endpoint);
+      const record = await this.readSubstrate(normalized.endpoint, api,
+        () => api.query.system.account(normalized.account), pending);
       const json = record?.toJSON?.() ?? record;
       return {
         raw: BigInt(json?.data?.free ?? json?.free ?? 0),
@@ -63,7 +67,7 @@ export class VenueBalanceReader {
       };
     }
 
-    const provider = this.getEvmProvider(
+    const provider = sharedProvider ?? this.getEvmProvider(
       normalized.endpoint,
       normalized.chainId,
       normalized.rpcUrls
@@ -80,16 +84,38 @@ export class VenueBalanceReader {
   }
 
   async getSubstrateApi(endpoint) {
+    return (await this.getSubstrateConnection(endpoint)).api;
+  }
+
+  async getSubstrateConnection(endpoint) {
     let pending = this.substrateApis.get(endpoint);
     if (!pending) {
       // Keep this dependency outside backend startup. A rejected import stays
       // attached to the read promise so the observer records the exact error,
       // retries it as a visible Pending, and eventually emits Failed.
-      pending = this.polkadotApiLoader()
-        .then((polkadotApi) => this.substrateApiFactory(endpoint, polkadotApi));
+      pending = Promise.resolve().then(() => this.polkadotApiLoader())
+        .then((polkadotApi) => this.substrateApiFactory(endpoint, polkadotApi, this.substrateTimeoutMs));
       this.substrateApis.set(endpoint, pending);
     }
-    return pending;
+    try {
+      const api = await boundedSubstrateRead(pending, this.substrateTimeoutMs, "connect");
+      return { api, pending };
+    } catch (error) {
+      if (this.substrateApis.get(endpoint) === pending) this.resetSubstrateApi(endpoint);
+      throw error;
+    }
+  }
+
+  async readSubstrate(endpoint, api, loader, pending) {
+    // Carry the connection's identity through the await: another reader may
+    // have timed it out and installed a replacement before this read resumes.
+    try {
+      if (api.isConnected === false) throw new Error("venue_substrate_disconnected");
+      return await boundedSubstrateRead(Promise.resolve().then(loader), this.substrateTimeoutMs, "query");
+    } catch (error) {
+      if (this.substrateApis.get(endpoint) === pending) this.resetSubstrateApi(endpoint);
+      throw error;
+    }
   }
 
   resetSubstrateApi(endpoint) {
@@ -117,11 +143,7 @@ export class VenueBalanceReader {
   }
 
   async close() {
-    const apis = await Promise.allSettled([...this.substrateApis.values()]);
-    await Promise.allSettled(apis
-      .filter((entry) => entry.status === "fulfilled")
-      .map((entry) => entry.value?.disconnect?.()));
-    this.substrateApis.clear();
+    for (const endpoint of this.substrateApis.keys()) this.resetSubstrateApi(endpoint);
     this.evmProviders.clear();
   }
 }
@@ -235,11 +257,31 @@ function loadPolkadotApi() {
   return import("@polkadot/api");
 }
 
-function createSubstrateApi(endpoint, { ApiPromise, HttpProvider, WsProvider }) {
+async function createSubstrateApi(endpoint, { ApiPromise, HttpProvider, WsProvider }, timeoutMs) {
   const provider = endpoint.startsWith("http")
     ? new HttpProvider(endpoint)
     : new WsProvider(endpoint, 5_000);
-  return ApiPromise.create({ provider, noInitWarn: true });
+  const pending = ApiPromise.create({ provider, noInitWarn: true });
+  try {
+    return await boundedSubstrateRead(pending, timeoutMs, "connect");
+  } catch (error) {
+    // Stop the socket's automatic reconnect loop even if API initialization
+    // never resolves. Also close an API that completes after the deadline.
+    void Promise.resolve().then(() => provider.disconnect()).catch(() => {});
+    void pending.then((api) => api.disconnect()).catch(() => {});
+    throw error;
+  }
+}
+
+async function boundedSubstrateRead(pending, timeoutMs, stage) {
+  let timer;
+  try {
+    return await Promise.race([pending, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`venue_substrate_${stage}_timeout after ${timeoutMs}ms`)), timeoutMs);
+    })]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function createEvmProvider(_endpoint, _chainId, rpcUrls) {

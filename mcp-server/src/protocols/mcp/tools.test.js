@@ -348,7 +348,7 @@ test("tool annotations match read, routine-auth, and gated-action semantics", ()
     assert.equal(byName[name].annotations.readOnlyHint, true, name);
     assert.equal(byName[name].annotations.idempotentHint, true, name);
   }
-  assert.equal(byName.fetchAuthNonce.annotations.readOnlyHint, true);
+  assert.equal(byName.fetchAuthNonce.annotations.readOnlyHint, false);
   assert.equal(byName.draftJob.annotations.readOnlyHint, false);
   assert.equal(byName.draftJob.annotations.idempotentHint, false);
   assert.equal(byName.buildWithdrawTransactions.annotations.readOnlyHint, false);
@@ -567,6 +567,28 @@ test("MCP account deposit surface accepts no signing, custody, or relay material
     /private.?key|mnemonic|signature|signed.?transaction|raw.?transaction|broadcast|relay/iu
   );
   assert.equal(tool.inputSchema.properties.amount.pattern, "^[1-9][0-9]*$");
+});
+
+test("listJobs defaults to claimable and forwards cursor/include through its served schema", async () => {
+  const tool = MCP_TOOLS.find((entry) => entry.name === "listJobs");
+  assert.equal(tool.inputSchema.properties.cursor.type, "string");
+  assert.equal(tool.inputSchema.properties.include.type, "string");
+  let query;
+  const execute = createMcpToolExecutor({
+    handleJobRoute: async ({ url, response }) => {
+      query = url.searchParams;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ jobs: [] }));
+      return true;
+    }
+  });
+  await execute("listJobs", { cursor: "opaque", include: "submitted", limit: 2 }, { request: { headers: {} } });
+  assert.equal(query.get("state"), "claimable");
+  assert.equal(query.get("cursor"), "opaque");
+  assert.equal(query.get("include"), "submitted");
+  assert.equal(query.get("limit"), "2");
+  await execute("listJobs", { state: "exhausted" }, { request: { headers: {} } });
+  assert.equal(query.get("state"), "exhausted");
 });
 
 test("listJobs returns the same value through MCP and its HTTP route", async () => {

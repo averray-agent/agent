@@ -1,4 +1,5 @@
 "use client";
+import { IssueMarkdown } from "@/components/runs/IssueMarkdown";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, CheckCircle2, Copy, ExternalLink } from "lucide-react";
@@ -190,7 +191,7 @@ export function WorkJobDetail({ jobId }: { jobId: string }) {
         <div>
           <p className="eyebrow">{definition.category || "Paid task"} · Claim tier: {definition.tier || "open"}</p>
           <h1 className="mt-3 max-w-4xl text-3xl font-semibold tracking-tight sm:text-5xl">{definition.title || jobId}</h1>
-          <p className="mt-4 max-w-3xl text-base leading-relaxed text-[var(--muted)]">{definition.description || listing?.summary || "Read the instructions and exact success criteria below."}</p>
+          <IssueMarkdown className="mt-4 max-w-3xl text-base leading-relaxed text-[var(--muted)]">{definition.description || listing?.summary || "Read the instructions and exact success criteria below."}</IssueMarkdown>
         </div>
         <div className="rounded-[var(--radius)] border border-[var(--line)] bg-[var(--paper-solid)] p-4 text-sm">
           <p className="eyebrow">Verification depth</p>
@@ -258,7 +259,7 @@ function DefinitionList({ title, items, empty }: { title: string; items: string[
         {items.length ? (
           <ol className="mt-4 grid gap-3 text-sm leading-relaxed">
             {items.map((item, index) => (
-              <li key={`${index}-${item}`} className="flex gap-3"><span className="font-mono text-xs text-[var(--accent)]">{String(index + 1).padStart(2, "0")}</span><span>{item}</span></li>
+              <li key={`${index}-${item}`} className="flex gap-3"><span className="font-mono text-xs text-[var(--accent)]">{String(index + 1).padStart(2, "0")}</span><IssueMarkdown>{item}</IssueMarkdown></li>
             ))}
           </ol>
         ) : <p className="mt-4 text-sm text-[var(--muted)]">{empty}</p>}

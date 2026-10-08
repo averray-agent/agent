@@ -6,7 +6,9 @@ evidence, explicit worker consequence, and a fully reconcilable settlement.
 It makes no claim about work outside that run and does not itself award
 reputation.
 
-Canonical JSON is served at `GET /receipts/:receiptId`. The permanent
+`GET /receipts/:receiptId` serves an `averray.receipt-envelope.v1` response:
+`document` is the unchanged canonical, signed receipt; `unsignedPresentation`
+contains display aliases outside the signed document. The permanent
 `GET /badges/:sessionId/run` alias resolves to the work receipt for newly
 emitted or successfully backfilled sessions. The public reader is
 `https://averray.com/receipts/:receiptId`.
@@ -44,7 +46,12 @@ and avoids presenting the poster fee as a worker deduction.
 Historical rows are backfilled only when the persisted claim snapshot and
 verification evidence are sufficient. Missing evidence is reported and never
 invented. A historical snapshot without recorded claim-time chain-read
-provenance is conservatively marked `chain_unavailable_fail_open`.
+provenance is marked `claim_snapshot_unverified`, not an invented failed read.
+New claims distinguish `chain_backend_disabled`, `chain_read_not_attempted`
+(no reader), and `chain_uncommitted` (the read found no committed job).
+`chain_unavailable_fail_open` denotes an attempted chain read that failed;
+`chain_verified` denotes a matching commitment. Previously issued receipts
+and pinned verdict cores are not rewritten.
 
 The normative JSON shape is [`work-receipt-v1.json`](work-receipt-v1.json).
 
@@ -63,11 +70,18 @@ document.
 
 ## Presentation aliases
 
-Decorated API responses expose `buyer` as the consumer-facing alias of
+The response envelope's `unsignedPresentation` exposes `buyer` as the consumer-facing alias of
 `intent.poster`. For job receipts that is the funding poster; for standalone
 Verify receipts it is the paying customer. `buyer` is computed only while
 serving the document: it is not a stored v1 field and does not alter the
-content address or signature.
+content address or signature. `result` and `assetContext` are also unsigned.
+Do not merge these fields into `document` before signature verification.
+Verify exactly `document` using the existing procedure (exclude only its root
+`signature`); success authenticates that document, never the presentation.
+The normative response shape is [`receipt-envelope-v1.json`](receipt-envelope-v1.json).
+Badge endpoints remain bare signed documents. Clients should accept both
+bare documents and the explicit v1 envelope during rollout; an unknown
+envelope version must not be silently treated as an unsigned receipt.
 
 ## Commitment (verdict core)
 
