@@ -9,9 +9,145 @@ import { transitionSession } from "../core/session-state-machine.js";
 import { normalizeSubmission } from "../core/submission.js";
 import { createVerifierRoutes } from "../protocols/http/verifier-routes.js";
 import { createProductHealthSnapshotProvider } from "../core/health-capability.js";
+import { createLogger } from "../core/logger.js";
 
 const wallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const submittedAt = "2026-09-12T00:00:00Z";
+
+test("every poll logs structured counts and skip reasons; settlement retains the prior observation", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-08T12:00:00Z") });
+  const f = await liveFixture();
+  const logs = [];
+  f.review.logger = createLogger({ sink: (level, record) => logs.push({ level, record }) });
+  await f.review.runOnce();
+  const before = await f.store.getMutationReceipt("github_pr_review_observation", "pr");
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].level, "info");
+  assert.equal(logs[0].record.msg, "github_pr_review.run");
+  assert.deepEqual(logs[0].record.counts, {
+    observed: 1, reviewed: 0, skipped: 1, errors: 0, upstreamUnavailable: 0, previewErrors: 0
+  });
+  assert.deepEqual(logs[0].record.skipReasons, { not_merged: 1 });
+  assert.deepEqual(logs[0].record.samples[0], { sessionId: "pr", reason: "not_merged" });
+  t.mock.timers.tick(60_000);
+  f.upstream.merged = true;
+  await f.review.runOnce();
+  assert.equal(logs.length, 2);
+  assert.equal(logs[1].record.counts.reviewed, 1);
+  assert.equal(logs[1].record.counts.skipped, 0);
+  const after = await f.store.getMutationReceipt("github_pr_review_observation", "pr");
+  assert.equal(after.previousFingerprint, before.fingerprint);
+  assert.equal(after.previousObservedAt, before.observedAt);
+  assert.equal(after.settledAt, new Date().toISOString());
+  assert.notEqual(after.fingerprint, before.fingerprint);
+});
+
+test("three consecutive unavailable reads or preview errors warn with counts and recover cleanly", async () => {
+  const store = new MemoryStateStore();
+  for (const id of ["unavailable", "preview-error"]) await add(store, id);
+  let healthy = false;
+  const review = new GithubPrReviewService({ stateStore: store, githubToken: "token", logger: { info() {} },
+    verifierService: { previewSubmission: async ({ sessionId }) => {
+      if (!healthy && sessionId === "preview-error") throw new Error("private-token-sentinel");
+      return { outcome: "approved", githubLookup: healthy
+        ? { status: "verified", merged: false, headSha: "good" }
+        : { status: "verified", partial: { reviews: "unavailable" } } };
+    } } });
+  const now = new Date("2026-09-12T01:00:00Z");
+  for (let n = 1; n <= 3; n++) {
+    const run = await review.runOnce(now);
+    assert.equal(run.counts.upstreamUnavailable, 1);
+    assert.equal(run.counts.previewErrors, 1);
+    assert.deepEqual(run.skipped, [
+      { sessionId: "preview-error", reason: "preview_error" },
+      { sessionId: "unavailable", reason: "upstream_unavailable:reviews" }
+    ]);
+    const status = await review.getStatus(now);
+    assert.equal(status.warnings.length, n > 2 ? 1 : 0);
+    if (n > 2) assert.deepEqual(status.warnings[0], {
+      code: "github_pr_review_read_failures", severity: "warning",
+      message: "GitHub PR review reads failed repeatedly; inspect poller logs and upstream access.",
+      upstreamUnavailableCount: 1, previewErrorCount: 1,
+      consecutiveUpstreamUnavailableRuns: 3, consecutivePreviewErrorRuns: 3
+    });
+    assert.ok(!JSON.stringify(status.warnings).includes("private-token-sentinel"));
+  }
+  const restarted = new GithubPrReviewService({ stateStore: store, githubToken: "token" });
+  assert.equal((await restarted.getStatus(now)).warnings[0].previewErrorCount, 1);
+  healthy = true;
+  await review.runOnce(now);
+  assert.deepEqual((await review.getStatus(now)).warnings, []);
+});
+
+test("disabled and failed queue walks each log one run, with bounded persisted history", async () => {
+  const store = new MemoryStateStore();
+  const logs = [];
+  const review = new GithubPrReviewService({ stateStore: store, githubToken: "", logger: {
+    info: (summary, event) => logs.push({ summary, event })
+  } });
+  for (let n = 0; n < 21; n++) await review.runOnce(new Date(1_000 + n));
+  assert.equal(logs.length, 21);
+  assert.ok(logs.every((entry) => entry.event === "github_pr_review.run"));
+  assert.equal((await store.getMutationReceipt("github_pr_review_runs", "recent")).runs.length, 20,
+    "history is bounded on write, not merely truncated while reading");
+  const restarted = new GithubPrReviewService({ stateStore: store, githubToken: "" });
+  const status = await restarted.getStatus();
+  assert.equal(status.recentRuns.length, 20);
+  assert.equal(status.lastRun.startedAt, new Date(1020).toISOString());
+  assert.equal(status.recentRuns.at(-1).startedAt, new Date(1001).toISOString());
+  review.enabled = true;
+  store.listRecentSessions = async () => { throw new Error("store unavailable"); };
+  await assert.rejects(review.runOnce(), /store unavailable/);
+  assert.equal(logs.length, 22);
+  assert.equal(logs.at(-1).summary.counts.errors, 1);
+});
+
+test("brokered_submit_retry_pending is deferred, never counted or stamped as settled", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "pr");
+  const review = new GithubPrReviewService({ stateStore: store, githubToken: "token", logger: { info() {} },
+    verifierService: {
+      previewSubmission: async () => ({ outcome: "approved", githubLookup: { status: "verified", merged: true } }),
+      verifySubmission: async () => ({ outcome: "brokered_submit_retry_pending", reasonCode: "brokered_submit_retry_pending" })
+    } });
+  const run = await review.runOnce();
+  assert.equal(run.counts.reviewed, 0);
+  assert.deepEqual(run.reviewed, []);
+  assert.deepEqual(run.skipped, [{ sessionId: "pr", reason: "settlement_deferred:brokered_submit_retry_pending" }]);
+  assert.equal((await store.getSession("pr")).status, "submitted");
+  assert.equal((await store.getMutationReceipt("github_pr_review_observation", "pr")).settledAt, undefined);
+});
+
+test("run evidence counts every skip, samples at most 25 IDs, and persists counts only", async () => {
+  const store = new MemoryStateStore();
+  for (let n = 0; n < 150; n++) await add(store, `pr-${n}`);
+  const logs = [];
+  const review = new GithubPrReviewService({ stateStore: store, githubToken: "token", logger: { info: (record) => logs.push(record) },
+    verifierService: { previewSubmission: async () => ({ outcome: "approved", githubLookup: { status: "verified", merged: false } }) } });
+  const run = await review.runOnce();
+  assert.deepEqual(run.skipReasons, { not_merged: 150 });
+  assert.equal(logs[0].samples.length, 25);
+  assert.equal(logs[0].counts.skipped, 150);
+  assert.equal(logs[0].skipped, undefined);
+  assert.equal(logs[0].observed, undefined);
+  const history = await store.getMutationReceipt("github_pr_review_runs", "recent");
+  assert.deepEqual(history.runs[0].skipReasons, { not_merged: 150 });
+  assert.doesNotMatch(JSON.stringify(history), /pr-\d|sessionId|samples|message/);
+});
+
+test("upstream-unavailable fallback never emits arbitrary upstream reason and errors have bounded messages and codes", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "pr");
+  const review = new GithubPrReviewService({ stateStore: store, githubToken: "token", logger: { info() {} },
+    verifierService: { previewSubmission: async () => ({ githubLookup: { status: "unavailable", reason: "private-sentinel" } }) } });
+  const run = await review.runOnce();
+  assert.deepEqual(run.skipped, [{ sessionId: "pr", reason: "upstream_unavailable:github_lookup_unavailable" }]);
+  assert.doesNotMatch(JSON.stringify(run), /private-sentinel/);
+  review.verifierService.previewSubmission = async () => ({ outcome: "approved", githubLookup: { status: "verified", merged: true } });
+  review.verifierService.verifySubmission = async () => { throw new Error("x".repeat(500)); };
+  const failed = await review.runOnce();
+  assert.deepEqual(failed.errors, [{ sessionId: "pr", code: "github_pr_review_failed", message: "x".repeat(256) }]);
+});
 async function add(store, id, mode = "github_pr", status = "submitted") {
   const job = { id, title: id, rewardAmount: 1, rewardAsset: "USDC", verifierMode: mode,
     source: { type: "github_issue", repo: "owner/repo", issueNumber: 1 },

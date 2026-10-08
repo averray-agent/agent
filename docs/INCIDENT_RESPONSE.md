@@ -647,6 +647,13 @@ board report pending count and oldest age. `github_pr_review_overdue` is a
 (operator decision, default 48). A submitted claim's clock has stopped; its
 stake is never lost while the verdict is pending.
 
+`github_pr_review_read_failures` warns after more than two consecutive poll runs
+with unavailable upstream reads or preview failures. Inspect `github_pr_review.run`
+logs and GitHub access; the warning contains a fixed message and counts, not raw
+upstream errors. Logs include skip-reason counts and at most 25 sampled IDs;
+persisted history retains only counts/timestamps for the latest 20 runs. Deferred
+brokered submissions remain submitted and are not reported as settled.
+
 Run these locally on the operator Mac with the existing mainnet KMS JWT
 environment and AWS signing credentials loaded securely. Required:
 `AWS_JWT_REGION`, `AWS_JWT_KEY_ID` (full ARN), `JWT_PUBLIC_KEY_PEM`, and the live
