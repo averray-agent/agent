@@ -10,14 +10,14 @@ import { redactPublicGraderFields } from "../../core/public-grader-redaction.js"
 
 const sentinel = "GRADER_PRIVATE_FIXTURE_DO_NOT_SERVE";
 function fixture() {
-  const grader = { expectedOutputs: [sentinel], rubric: { secret: sentinel }, answerKey: sentinel, benchmarkInputs: [sentinel] };
+  const grader = { expectedOutputs: [sentinel], rubric: { secret: sentinel }, answerKey: sentinel, benchmarkInputs: [sentinel], requiredKeywords: [sentinel], minimumMatches: 7 };
   const job = { id: "curated-job", title: "Public work", claimable: true, claimState: "open",
-    postingRoute: "curated", source: { type: "github_issue", repo: "owner/repo" },
-    description: "Public instructions", ...grader,
-    verifierConfig: { handler: "deterministic", ...grader, nested: [{ ...grader, publicLabel: "kept" }] } };
+    provenance: { postingRoute: "curated" }, source: { type: "github_issue", repo: "owner/repo" },
+    description: "Public instructions", input: { rubric: "Public review-input rubric" },
+    verifierConfig: { handler: "benchmark", version: "1", anchorEvidence: "https://example.com/evidence", ...grader, nested: [{ ...grader, publicLabel: "kept" }] } };
   const session = { sessionId: "session-1", jobSnapshot: { definition: job } };
   const service = {
-    listJobsWithSessions: async () => [job, { id: "ingested", postingRoute: "ingested", source: { type: "github_issue" } }],
+    listJobsWithSessions: async () => [job, { id: "ingested", provenance: { postingRoute: "ingested" }, source: { type: "github_issue" } }],
     getPublicJobDefinition: async () => job, getJobLifecycleSummary: () => ({}),
     claimJob: async () => session, listSessionHistory: async () => [session],
     preflightJob: async () => ({ job })
@@ -31,10 +31,10 @@ function fixture() {
 function assertRedacted(value, label) {
   const json = JSON.stringify(value);
   assert.doesNotMatch(json, new RegExp(sentinel, "u"), label);
-  for (const key of ["expectedOutputs", "rubric", "answerKey", "benchmarkInputs"]) assert.ok(!json.includes('"'+key+'"'), label + ": " + key);
+  for (const key of ["expectedOutputs", "answerKey", "benchmarkInputs", "requiredKeywords", "minimumMatches"]) assert.ok(!json.includes('"'+key+'"'), label + ": " + key);
 }
 
-test("all five HTTP and MCP public job surfaces redact every nested grader field; admin keeps originals", async () => {
+test("all five HTTP and MCP public job surfaces allow only public benchmark config; admin keeps originals", async () => {
   const f = fixture(), before = JSON.stringify(f.job);
   for (const path of ["/jobs", "/jobs/curated-job", "/jobs/definition?jobId=curated-job", "/jobs?limit=1",
     "/jobs?format=full", "/jobs/definition?jobId=curated-job&includeArchived=1"]) {
@@ -53,7 +53,8 @@ test("all five HTTP and MCP public job surfaces redact every nested grader field
   assert.equal(JSON.stringify(f.job), before, "verification definition is not mutated by public serialization");
   const definition = await invokeHttpRoute(f.route, { method: "GET", path: "/jobs/definition?jobId=curated-job" });
   assert.equal(definition.body.description, "Public instructions");
-  assert.deepEqual(definition.body.verifierConfig.nested, [{ publicLabel: "kept" }]);
+  assert.deepEqual(definition.body.verifierConfig, { handler: "benchmark", version: "1", anchorEvidence: "https://example.com/evidence" });
+  assert.equal(definition.body.input.rubric, "Public review-input rubric");
 });
 
 test("claim/preflight and resumed session snapshots cannot bypass the public job redaction", async () => {
@@ -75,8 +76,22 @@ test("public ETags cover only the redacted representation, including null-protot
   const second = await invokeHttpRoute(f.route, { method: "GET", path: "/jobs" });
   assert.equal(first.headers.etag, second.headers.etag, "private grader changes must not change a public cache validator");
   assert.deepEqual(redactPublicGraderFields(Object.assign(Object.create(null), {
-    expectedOutputs: [sentinel], title: "public"
-  })), { title: "public" });
+    verifierConfig: { handler: "benchmark", expectedOutputs: [sentinel] }, input: { rubric: "public" }
+  })), { verifierConfig: { handler: "benchmark" }, input: { rubric: "public" } });
+});
+
+test("verifier config allowlists are handler-specific and fail closed for new fields and handlers", () => {
+  const publicFields = {
+    deterministic: { matchMode: "exact" }, benchmark: { anchorEvidence: "https://example.com" },
+    human_fallback: { autoApprove: false, escalationMessage: "Review required" },
+    github_pr: { minimumScore: 3, requireIssueReference: true, requireTestEvidence: true, acceptMergedAsApproved: true, requireClaimantBinding: true },
+    future_handler: {}
+  };
+  const allFields = Object.assign({}, ...Object.values(publicFields));
+  for (const [handler, fields] of Object.entries(publicFields)) {
+    assert.deepEqual(redactPublicGraderFields({ verifierConfig: { handler, version: "v1", ...allFields, futureSecret: sentinel } }),
+      { verifierConfig: { handler, version: "v1", ...fields } });
+  }
 });
 
 test("source=curated matches postingRoute even when the source is a GitHub issue", async () => {

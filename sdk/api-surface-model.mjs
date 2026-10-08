@@ -426,14 +426,12 @@ export interface PublicVerifierConfig extends ApiEnvelope {
   rubric?: never;
   answerKey?: never;
   benchmarkInputs?: never;
+  requiredKeywords?: never;
+  minimumMatches?: never;
 }
 
 export interface JobDefinition extends ApiEnvelope {
   verifierConfig?: PublicVerifierConfig;
-  expectedOutputs?: never;
-  rubric?: never;
-  answerKey?: never;
-  benchmarkInputs?: never;
   id: JobId;
   title?: string;
   category?: string;
@@ -463,10 +461,6 @@ export interface JobDefinition extends ApiEnvelope {
 
 export interface JobSummary extends ApiEnvelope {
   verifierConfig?: PublicVerifierConfig;
-  expectedOutputs?: never;
-  rubric?: never;
-  answerKey?: never;
-  benchmarkInputs?: never;
   id: JobId;
   listedAt?: ISODateTime | null;
   title?: string;

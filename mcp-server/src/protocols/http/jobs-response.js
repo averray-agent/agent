@@ -305,7 +305,7 @@ function summarizeSuccessCriteria(job) {
 function sourceCandidates(job) {
   const source = job.source ?? {};
   return new Set([
-    normalizeToken(job.postingRoute),
+    normalizeToken(job.provenance?.postingRoute),
     publicSourceLabel(job),
     normalizeSourceFilter(source.type),
     normalizeSourceFilter(source.provider),

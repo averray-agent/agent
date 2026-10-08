@@ -26,8 +26,9 @@ const client = new AgentPlatformClient({
 const publicDefinition: JobDefinition = { id: "public", verifierConfig: { handler: "deterministic" } };
 // @ts-expect-error Grader answers are not part of worker-visible configuration.
 publicDefinition.verifierConfig = { expectedOutputs: ["private"] };
-// @ts-expect-error Top-level grader fields are also server-only.
-publicDefinition.answerKey = "private";
+// @ts-expect-error Benchmark comparisons are server-only.
+publicDefinition.verifierConfig = { requiredKeywords: ["private"] };
+publicDefinition.input = { rubric: "Public review instructions" };
 
 const jobs: JobsListResponse = await client.listClaimableJobs({ source: "wikipedia", limit: 5 });
 const firstJobId: string | undefined = jobs.jobs[0]?.id;
