@@ -246,6 +246,22 @@ test("T4 pool page keeps the v2.1 position visible after cutover without calling
   assert.throws(() => reader.renderTransparency(reader.parseTransparency(source), reader.parsePool(pool)), /address disagrees/);
 });
 
+test("live card describes both served deposit-block branches", () => {
+  const nodes = new Map();
+  const reader = loadReader({ querySelector(selector) {
+    return selector === '[data-pool-generation="live"]' ? {
+      querySelector(key) { if (!nodes.has(key)) nodes.set(key, { textContent: "" }); return nodes.get(key); }
+    } : null;
+  } });
+  for (const blocked of [false, true]) {
+    const pool = poolPayload();
+    pool.venueMark.depositsBlocked = blocked;
+    reader.renderTransparency(reader.parseTransparency(transparencyPayload()), reader.parsePool(pool));
+    assert.equal(nodes.get("[data-pool-generation-role]").textContent,
+      blocked ? "Current pool · deposits are not open" : "Current pool · open to new deposits");
+  }
+});
+
 test("pool prints one current address and the served activation blocker; terms link is never gated", async () => {
   const page = await readFile(PAGE, "utf8");
   const recordPage = await readFile(new URL("marketing/src/pages/transparency.astro", REPO_ROOT), "utf8");
