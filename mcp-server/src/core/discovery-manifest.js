@@ -110,12 +110,12 @@ const DISCOVERY_PUBLIC_ENDPOINTS = withDefaultGetMethod([
   { path: "/agents/:wallet", description: "Averray Agent Profile v1 - aggregate reputation, stats, earned badges." },
   { path: "/shares/:token", description: "Public signed read-only snapshot resolver for share URLs." },
   { path: "/verifier/handlers", description: "List of supported verifier modes." },
+  { path: "/verifier/result", description: "Unauthenticated persisted session-verification read by sessionId; returns {status:\"not_found\"} when absent. Standalone Verify buyers use /verify/runs/{runId}." },
   { path: "/gas/health", description: "Pimlico ERC-4337 gas-sponsor (paymaster) health. Distinct from starter-tier gas: starter jobs are claimed and settled on-chain by the backend signer, so they earn from zero even when this paymaster reads 'disabled'." },
   { path: "/gas/capabilities", description: "Available ERC-4337 sponsorship features." }
 ]);
 
 const DISCOVERY_AUTHENTICATED_ENDPOINTS = withDefaultGetMethod([
-  { path: "/verifier/result", description: "Read a persisted verification result by sessionId; wallet authentication and session ownership apply." },
   {
     path: "/account",
     description:
@@ -723,7 +723,7 @@ const buildBaseManifest = (network) => ({
     operatorApp: DEFAULT_OPERATOR_APP_URL,
     authEntrypoints: ["/auth/nonce", "/auth/verify", "/auth/refresh", "/auth/logout"],
     note:
-      "Mutating and financial actions exist on authenticated HTTP and operator-app surfaces but are intentionally excluded from this directory-safe manifest until the trust, policy, and audit posture are ready for broader distribution."
+      "Auth exchanges and state-changing execution tools are excluded from the directory tool list. Drafts and unsigned transaction builders are listed, including draftJob, buildPostJobTransactions, buildAccountDepositTransactions and buildWithdrawTransactions; builders do not broadcast. requestGasGrant is an explicit exception: it triggers a lifetime-once 0.03 DOT grant. Authenticated HTTP and the operator app expose the execution paths."
   }
 });
 

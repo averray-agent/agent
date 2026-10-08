@@ -120,7 +120,14 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.equal(manifest.schemas.jobSchemasIndex, "https://api.example.com/schemas/jobs");
   assert.equal(manifest.schemas.jobSchemaPathTemplate, "https://api.example.com/schemas/jobs/<name>.json");
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/schemas/jobs"));
-  assert.ok(manifest.authenticatedEndpoints.some((entry) => entry.method === "GET" && entry.path === "/verifier/result"));
+  const resultRead = manifest.publicEndpoints.find((entry) => entry.method === "GET" && entry.path === "/verifier/result");
+  assert.match(resultRead?.description, /Unauthenticated.*sessionId.*not_found.*\/verify\/runs\/\{runId\}/);
+  assert.ok(!manifest.authenticatedEndpoints.some((entry) => entry.path === "/verifier/result"));
+  assert.match(manifest.executionSurfaces.note, /Auth exchanges and state-changing execution tools are excluded/);
+  for (const name of ["draftJob", "buildAccountDepositTransactions", "buildWithdrawTransactions"]) {
+    assert.ok(manifest.executionSurfaces.note.includes(name));
+  }
+  assert.match(manifest.executionSurfaces.note, /requestGasGrant.*lifetime-once 0\.03 DOT grant/);
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/session/state-machine"));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/verify/profiles"));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/.well-known/x402"));

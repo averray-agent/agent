@@ -6,7 +6,8 @@ import { HTTP_METRIC_PATHS } from "../protocols/http/http-helpers.js";
 // there but bearer-gated in production, and must not enter this public spec.
 export const PUBLIC_OPENAPI_EXCLUSIONS = Object.freeze({
   "GET /metrics": "Private production telemetry; requires the metrics bearer, not a public API contract.",
-  "GET /verifier/handlers": "Session-settlement verifier internals; standalone buyers use /verify/profiles."
+  "GET /verifier/handlers": "Session-settlement verifier internals; standalone buyers use /verify/profiles.",
+  "GET /verifier/result": "Unauthenticated sessionId read with not_found fallback, outside this standalone buyer contract; buyers use /verify/runs/{runId}."
 });
 
 // http-helpers' list is often mistaken for the public allowlist. Check it too,
