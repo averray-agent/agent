@@ -444,8 +444,10 @@
         ],
         "operationId": "listJobs",
         "summary": "List available jobs",
-        "description": "With no query parameters returns the complete legacy array. Query views paginate at 50 by default (maximum 100), sorted by id. Use state=claimable for only open claimable jobs (the MCP listJobs default); include=submitted,exhausted adds those states. format=full preserves the array shape for paginated views. Follow Link rel=next or nextCursor. Cursors are bound to filters and wallet. ETag supports If-None-Match / 304 revalidation.",
+        "description": "With no query parameters returns the complete legacy array. Query views paginate at 50 by default (maximum 100), sorted by id. Use state=claimable for only open claimable jobs (the MCP listJobs default); include=submitted,exhausted adds those states. format=full preserves the array shape for paginated views. Follow Link rel=next or nextCursor. Cursors are bound to filters and wallet. ETag supports If-None-Match / 304 revalidation. Unknown query parameters return 400 with the full supported set.",
         "parameters": [
+          { "name": "wallet", "in": "query", "description": "Optional wallet for claimability projection.", "schema": { "type": "string" } },
+          { "name": "shape", "in": "query", "description": "Legacy alias for format.", "schema": { "type": "string", "enum": ["compact", "full"] } },
           {
             "name": "source",
             "in": "query",
@@ -4066,6 +4068,12 @@
               "disputed",
               "rejected",
               "restricted",
+              "unclaimable",
+              "closed",
+              "cancelled",
+              "paused",
+              "archived",
+              "stale",
               "exhausted"
             ]
           },
@@ -4082,6 +4090,12 @@
               "disputed",
               "rejected",
               "restricted",
+              "unclaimable",
+              "closed",
+              "cancelled",
+              "paused",
+              "archived",
+              "stale",
               "exhausted"
             ]
           },
@@ -4090,8 +4104,8 @@
           },
           "fundingState": {
             "type": "string",
-            "enum": ["funded", "available", "pending", "unverified", "not_checked"],
-            "description": "Funded is recorded prefunding; available is current shared reward-bank headroom, not an earmark. not_checked asserts no funding evidence."
+            "enum": ["funded", "available", "unavailable", "pending", "unverified", "not_checked"],
+            "description": "Funded is recorded prefunding; available is current shared reward-bank headroom for a claimable job, not an earmark. Unavailable means funds are not available for a new claim. not_checked asserts no funding evidence."
           },
           "currentWalletCanClaim": {
             "type": [

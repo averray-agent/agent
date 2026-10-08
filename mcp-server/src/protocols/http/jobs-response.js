@@ -9,6 +9,16 @@ import {
 
 const DEFAULT_AGENT_LIMIT = 50;
 const MAX_AGENT_LIMIT = 100;
+export const PUBLIC_JOBS_QUERY_PARAMETERS = Object.freeze([
+  "wallet", "limit", "offset", "cursor", "source", "category", "state", "include", "format", "shape", "since"
+]);
+
+export function validatePublicJobsQuery(searchParams) {
+  const unknown = [...searchParams.keys()].filter((key) => !PUBLIC_JOBS_QUERY_PARAMETERS.includes(key));
+  if (unknown.length) throw new ValidationError("Unknown jobs query parameters.", {
+    unknown: [...new Set(unknown)], supported: PUBLIC_JOBS_QUERY_PARAMETERS
+  });
+}
 
 const SOURCE_LABELS = new Map([
   ["external", "external"],
@@ -44,6 +54,7 @@ export function buildPublicJobsResponse(jobs, searchParams) {
 }
 
 export function buildPublicJobsPage(jobs, searchParams = new URLSearchParams()) {
+  validatePublicJobsQuery(searchParams);
   const listedJobs = jobs.map(withListedAt);
   // Preserve the complete legacy array for existing app and ops consumers.
   if ([...searchParams.keys()].length === 0) {
@@ -181,6 +192,7 @@ function toCompactJobRow(job) {
     claimable,
     currentWalletCanClaim: job.currentWalletCanClaim ?? null,
     fundingState: job.fundingState ?? "not_checked",
+    listingStatus: job.listingStatus ?? (claimable ? "listed" : "not_claimable"),
     reason: job.reason ?? null,
     ...(job.escrowGeneration ? { escrowGeneration: job.escrowGeneration } : {}),
     ...(job.legacyPostingUnclaimable === true ? { legacyPostingUnclaimable: true } : {}),

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { id } from "ethers";
 import test from "node:test";
 
 import { AuthenticationError, ValidationError } from "../../core/errors.js";
@@ -391,6 +392,27 @@ test("GET /jobs/:id returns the generic 404 shape for a nonexistent job", async 
   assert.equal(await invoke(route, { path: "/jobs/missing-job", response }), true);
   assert.equal(response.statusCode, 404);
   assert.deepEqual(response.body, { error: "not_found" });
+});
+
+test("GET /jobs/:id accepts the on-chain hash and scopes the service read to that identity", async () => {
+  const { route, response, calls } = makeHarness({ jobs: [{ id: "logical-job", claimable: true }] });
+  const hash = id("logical-job");
+  await invoke(route, { path: `/jobs/${hash}`, response });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.id, "logical-job");
+  assert.ok(calls.some(([name, options]) => name === "listJobsWithSessions" && options.jobId === hash));
+});
+
+test("unknown public jobs queries fail with the supported set before any reads", async () => {
+  const { route, response, calls } = makeHarness();
+  await assert.rejects(invoke(route, { path: "/jobs?surprise=1", response }), (error) => {
+    assert.equal(error.statusCode, 400);
+    assert.deepEqual(error.details.unknown, ["surprise"]);
+    assert.ok(error.details.supported.includes("state"));
+    assert.ok(error.details.supported.includes("cursor"));
+    return true;
+  });
+  assert.equal(calls.length, 0);
 });
 
 test("GET /jobs/:id keeps an existing but non-public job indistinguishable from nonexistent", async () => {

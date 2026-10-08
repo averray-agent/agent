@@ -7,7 +7,8 @@ import {
   decorateJobEstimatePresentation,
   decorateJobPresentation
 } from "../../core/verdict-presentation.js";
-import { buildPublicJobsPage } from "./jobs-response.js";
+import { buildPublicJobsPage, validatePublicJobsQuery } from "./jobs-response.js";
+import { matchesPublicJobId } from "../../core/public-job-identity.js";
 
 export function createJobRoutes({
   authMiddleware,
@@ -25,8 +26,8 @@ export function createJobRoutes({
 }) {
   const respond = (response, status, body, headers) =>
     respondRaw(response, status, redactPublicGraderFields(body), headers);
-  async function listPublicJobs(wallet) {
-    const jobs = await service.listJobsWithSessions({ wallet });
+  async function listPublicJobs(wallet, jobId) {
+    const jobs = await service.listJobsWithSessions({ wallet, ...(jobId ? { jobId } : {}) });
     const projected = externalPostingService?.filterExternalCatalogProjection
       ? await externalPostingService.filterExternalCatalogProjection(jobs)
       : jobs;
@@ -49,6 +50,7 @@ export function createJobRoutes({
     }
 
     if (request.method === "GET" && pathname === "/jobs") {
+      validatePublicJobsQuery(url.searchParams);
       const secured = await listPublicJobs(url.searchParams.get("wallet") ?? undefined);
       const page = redactPublicGraderFields(buildPublicJobsPage(secured, url.searchParams));
       const etag = `W/"${createHash("sha256").update(JSON.stringify(page)).digest("hex")}"`;
@@ -196,9 +198,9 @@ respond(response, matches ? 304 : 200, matches ? undefined : page.body, headers)
         jobId = "";
       }
       const jobs = jobId
-        ? await listPublicJobs(url.searchParams.get("wallet") ?? undefined)
+        ? await listPublicJobs(url.searchParams.get("wallet") ?? undefined, jobId)
         : [];
-      const job = jobs.find((candidate) => candidate.id === jobId);
+      const job = jobs.find((candidate) => matchesPublicJobId(candidate, jobId));
       if (!job) {
         respond(response, 404, { error: "not_found" });
         return true;

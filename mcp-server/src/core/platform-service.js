@@ -1,4 +1,5 @@
 import { createStateStore } from "./state-store.js";
+import { matchesPublicJobId } from "./public-job-identity.js";
 import { requireJobSnapshot } from "./job-snapshot.js";
 import { githubPrWorkerDefinition, isGithubPrJob } from "./github-pr-worker-contract.js";
 import { buildAverrayDisclosureFooter, buildAverrayDisclosureRequirement, inspectAverrayClaimantBinding } from "./maintainer-surface-policy.js";
@@ -80,6 +81,7 @@ import {
 import { buildEligibilityProgression } from "./worker-progression.js";
 import {
   projectExternalPostingClaimability,
+  externalPostingObservation,
   sweepExternalPostingClaimability
 } from "./external-posting-claimability.js";
 
@@ -144,6 +146,8 @@ export class PlatformService {
     this.rewardBankHealthProvider = undefined;
     this.firstWithdrawalGasGrantStatusProvider = undefined;
     this.externalPostingClaimability = new Map();
+    this.listingEvidence = new Map();
+    this.externalPostingRefreshes = new Map();
     this.externalPostingClaimabilitySweep = {
       candidateCount: 0,
       legacyUnclaimableCount: 0
@@ -245,13 +249,15 @@ export class PlatformService {
   async listJobsWithSessions(options = {}) {
     const {
       wallet,
+      jobId,
       currentWallet,
       now = new Date(),
       includeDesignatedClaimants = false,
       ...catalogOptions
     } = options;
-    const jobs = this.jobCatalogService.listJobs({ ...catalogOptions, now });
-    await this.refreshExternalPostingClaimability(jobs, { replace: true });
+    const jobs = this.jobCatalogService.listJobs({ ...catalogOptions, now })
+      .filter((job) => !jobId || matchesPublicJobId(job, jobId));
+    await this.refreshExternalPostingClaimability(jobs, { replace: !jobId });
     const rewardBank = jobs.length > 0
       ? await this.resolveRewardBankHealthForClaimability(now)
       : undefined;
@@ -291,7 +297,8 @@ export class PlatformService {
       && this.blockchainGateway?.isEnabled?.()
       && (!external || !draft?.specHash || !draft?.wallet)
     ) {
-      liveJob = await this.blockchainGateway.getJob(job.id).catch(() => undefined);
+      liveJob = this.externalPostingClaimability.get(job.id)?.liveJob
+        ?? await this.readListingEvidence(job.id);
     }
 
     const posterAddress = firstRecordedAddress(
@@ -319,7 +326,7 @@ export class PlatformService {
     return {
       ...job,
       ...(verificationDepth ? { verificationDepth } : {}),
-      listingStatus: "listed",
+      listingStatus: job.claimable === false ? "not_claimable" : "listed",
       contentTrust: external ? "external-unreviewed" : "operator-curated",
       provenance: {
         posterAddress,
@@ -1493,7 +1500,9 @@ export class PlatformService {
     });
     const attached = {
       ...job,
-      ...claimStatusFields(claimStatus)
+      ...claimStatusFields(claimStatus),
+      ...(refreshedSession?.status === "resolved"
+        ? { lifecycle: { ...job.lifecycle, state: "closed", status: "closed" } } : {})
     };
     if (
       isExternalJob(job)
@@ -1512,19 +1521,59 @@ export class PlatformService {
   }
 
   async refreshExternalPostingClaimability(jobs, { replace = false } = {}) {
-    const sweep = await sweepExternalPostingClaimability({
-      jobs,
-      blockchainGateway: this.blockchainGateway
-    });
-    if (replace) this.externalPostingClaimability = new Map();
-    for (const [jobId, observation] of sweep.observations) {
-      this.externalPostingClaimability.set(jobId, { ...observation, observedAtMs: Date.now() });
+    if (replace) {
+      const ids = new Set(jobs.map((job) => job.id));
+      for (const key of this.externalPostingClaimability.keys()) if (!ids.has(key)) this.externalPostingClaimability.delete(key);
+      for (const key of this.listingEvidence.keys()) if (!ids.has(key)) this.listingEvidence.delete(key);
     }
+    const external = jobs.filter(isExternalJob);
+    const stale = external.filter((job) => {
+      const cached = this.externalPostingClaimability.get(job.id);
+      return !this.externalPostingRefreshes.has(job.id)
+        && (!cached || Date.now() - cached.observedAtMs >= 30_000);
+    });
+    if (stale.length) {
+      const before = new Map(stale.map((job) => [job.id, this.externalPostingClaimability.get(job.id)]));
+      const pending = sweepExternalPostingClaimability({ jobs: stale, blockchainGateway: this.blockchainGateway })
+        .then((sweep) => {
+          for (const [jobId, observation] of sweep.observations) {
+            // Never overwrite newer event evidence with a late read.
+            if (this.externalPostingClaimability.get(jobId) === before.get(jobId))
+              this.externalPostingClaimability.set(jobId, { ...observation, observedAtMs: Date.now() });
+          }
+        }).finally(() => {
+          for (const job of stale) if (this.externalPostingRefreshes.get(job.id) === pending)
+            this.externalPostingRefreshes.delete(job.id);
+        });
+      for (const job of stale) this.externalPostingRefreshes.set(job.id, pending);
+    }
+    await Promise.all([...new Set(external.map((job) => this.externalPostingRefreshes.get(job.id)).filter(Boolean))]);
     this.externalPostingClaimabilitySweep = {
-      candidateCount: sweep.candidateCount,
-      legacyUnclaimableCount: sweep.legacyUnclaimableCount
+      candidateCount: this.externalPostingClaimability.size,
+      legacyUnclaimableCount: [...this.externalPostingClaimability.values()].filter((row) => row.legacyPostingUnclaimable
+        || row.reason === "legacy_posting_unclaimable").length
     };
     return this.getExternalPostingClaimabilitySweep();
+  }
+
+  async readListingEvidence(jobId) {
+    let entry = this.listingEvidence.get(jobId);
+    if (!entry || Date.now() - entry.at >= 30_000) {
+      entry = { at: Date.now(), value: Promise.resolve().then(() => this.blockchainGateway.getJob(jobId)).catch(() => undefined) };
+      this.listingEvidence.set(jobId, entry);
+    }
+    return entry.value;
+  }
+
+  observeEscrowJob({ chainJobId, job, escrowAddress }) {
+    for (const definition of this.jobCatalogService.listJobs()) {
+      if (!isExternalJob(definition) || !matchesPublicJobId(definition, chainJobId)) continue;
+      this.externalPostingClaimability.set(definition.id, {
+        ...externalPostingObservation(this.blockchainGateway, { ...job, escrowAddress }),
+        observedAtMs: Date.now()
+      });
+      this.listingEvidence.delete(definition.id);
+    }
   }
 
   async listSessionHistory({ wallet = undefined, limit = 10, jobId = undefined, progression = true } = {}) {

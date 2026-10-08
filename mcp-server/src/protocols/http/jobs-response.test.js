@@ -1,7 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
-import { buildPublicJobsResponse, buildPublicJobsPage } from "./jobs-response.js";
+import { buildPublicJobsResponse, buildPublicJobsPage, PUBLIC_JOBS_QUERY_PARAMETERS } from "./jobs-response.js";
+
+test("OpenAPI declares exactly the supported jobs query set and terminal claim states", () => {
+  const spec = JSON.parse(readFileSync(new URL("../../../../docs/api/openapi.json", import.meta.url), "utf8"));
+  assert.deepEqual(spec.paths["/jobs"].get.parameters.map(({ name }) => name).sort(), [...PUBLIC_JOBS_QUERY_PARAMETERS].sort());
+  const properties = spec.components.schemas.JobClaimStatus.properties;
+  for (const state of ["unclaimable", "closed", "cancelled", "paused", "archived", "stale"]) {
+    assert.ok(properties.claimState.enum.includes(state));
+    assert.ok(properties.effectiveState.enum.includes(state));
+  }
+  assert.ok(properties.fundingState.enum.includes("unavailable"));
+});
 
 const JOBS = [
   {
@@ -242,6 +254,7 @@ test("public jobs response filters and compacts agent-friendly queries", () => {
     "claimable",
     "currentWalletCanClaim",
     "fundingState",
+    "listingStatus",
     "reason",
     "claimedBy",
     "claimedAt",

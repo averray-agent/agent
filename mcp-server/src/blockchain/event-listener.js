@@ -13,6 +13,7 @@ export class EventListener {
     this.eventBus = eventBus;
     this.stateStore = stateStore;
     this.disputeArbitration = options.disputeArbitration;
+    this.onEscrowJobObserved = options.onEscrowJobObserved;
     this.running = false;
     this.registrations = [];
     this.routingTable = new Map();
@@ -165,6 +166,12 @@ export class EventListener {
         sessionId: buildSessionId(args.jobId, job.worker),
         job
       });
+    });
+
+    this.registerEscrow("Verified", "escrow.verified", async ({ args, payload }) => {
+      const job = await this.readJob(args.jobId);
+      return this.buildChainEvent({ topic: "escrow.verified", args, payload,
+        wallet: job.worker, wallets: [job.poster, job.worker], job });
     });
 
     this.registerEscrow("JobClosed", "escrow.job_closed", async ({ args, payload }) => {
@@ -809,6 +816,11 @@ export class EventListener {
     const blockNumberRaw = rawIntegerString(payload.log.blockNumber);
     const timestamp = await this.getBlockTimestamp(blockNumber);
     const chainJobId = args.jobId ? normalizeJobId(args.jobId) : undefined;
+    if (chainJobId && job) await this.onEscrowJobObserved?.({
+      chainJobId,
+      job: topic === "escrow.job_closed" ? { ...job, state: 6 } : job,
+      escrowAddress: payload.log.address ?? this.gateway.escrowContract?.target
+    });
     const mappedSession = chainJobId ? await this.stateStore?.findSessionByChainJobId?.(chainJobId) : undefined;
     const logicalJobId = mappedSession?.jobId ?? chainJobId;
     const resolvedSessionId = sessionId ?? mappedSession?.sessionId ?? buildSessionId(logicalJobId, job?.worker);
