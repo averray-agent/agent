@@ -31,11 +31,13 @@ published at `/.well-known/badge-receipt-jwks.json`. An absent `signature`
 means the stored document is unsigned; consumers must not treat absence as a
 verification failure or invent a signature for legacy data.
 
-`GET /badges` is an index of receipt summaries. A list row may repeat the
-per-session document's `signature` for discovery, but that detached JWS signs
-the canonical document returned by `GET /badges/:sessionId`—it does **not**
-sign the list-row wrapper. Verifiers must fetch the row's per-session URL and
-canonicalize that document before checking the repeated signature.
+`GET /badges` returns `{items, limit, nextCursor}`, default 50 rows (formerly
+100 sessions, potentially two rows per session). Follow every cursor for the
+complete list. Each item uses [averray.badge-list-item.v1](badge-list-item-v1.json):
+verify the exact nested `document`, never the unsigned display fields under
+`unsignedPresentation`. The wrapper never repeats a top-level signature.
+The distinct `averray.receipt-envelope.v1` schema is for content-addressed work
+receipt responses, not this index of badges and legacy run receipts.
 
 ### Exact canonicalization and signing bytes
 

@@ -170,11 +170,13 @@ test("a required receipt missing its whole chain counts against the rate", () =>
   assert.equal(state.status, "below");
 });
 
-test("run receipts match a mandate through policyTags on the raw list row", () => {
+test("run receipts match a mandate through a non-first policy tag in the list envelope", () => {
   const runRow = {
     policy: "reputation/tier-1",
     signers: [signer()],
-    listRow: { policyTags: ["claim/deps-sec-only@v4"] },
+    listRow: { schemaVersion: "averray.badge-list-item.v1",
+      document: { verdict: { policyTags: ["reputation/tier-1", "claim/deps-sec-only@v4"] } },
+      unsignedPresentation: { policyTags: ["reputation/tier-1", "claim/deps-sec-only@v4"] } },
   };
   const state = coSignKpiState([runRow], [depsClaimPolicy]);
   assert.equal(state.status, "below");

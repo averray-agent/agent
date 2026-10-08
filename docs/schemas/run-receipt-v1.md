@@ -9,10 +9,12 @@ Canonical documents are public at:
 
 `GET /badges/:sessionId/run`
 
-The `/badges` index exposes these documents as `kind: "run"` rows. A list-row
-`signature` is discovery metadata copied from the canonical run document. It
-does **not** sign the list-row wrapper. Verifiers must fetch `canonicalUrl` (or
-construct `/badges/:sessionId/run`) and verify that canonical document.
+The `/badges` index paginates 50 rows by default using `nextCursor`. Each
+[averray.badge-list-item.v1](badge-list-item-v1.json) item embeds the exact
+canonical `document`; verify that document alone. Display aliases, including
+`kind: "run"` and all policy tags, live under `unsignedPresentation` and are
+not signed. The wrapper never repeats a top-level signature. Per-session
+`/badges/:sessionId/run` remains available.
 
 ## Attestation boundary
 

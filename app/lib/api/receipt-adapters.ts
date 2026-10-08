@@ -76,7 +76,7 @@ export function extractReceiptRow(data: unknown): ReceiptRowWithMeta | null {
   const envelope = data as Record<string, unknown>;
   const document = objectField(envelope, "document");
   const presentation = objectField(envelope, "unsignedPresentation");
-  const record = envelope.schemaVersion === "averray.receipt-envelope.v1" && document
+  const record = ["averray.badge-list-item.v1", "averray.receipt-envelope.v1"].includes(String(envelope.schemaVersion)) && document
     ? { ...presentation, [presentation?.kind === "badge" ? "badge" : "runReceipt"]: document }
     : envelope;
   if (isUiReceiptRow(record)) return normalizeUiRow(record as unknown as ReceiptRowWithMeta);
@@ -88,7 +88,7 @@ export function extractReceiptRow(data: unknown): ReceiptRowWithMeta | null {
   const sessionId = text(record.sessionId, text(averray?.sessionId, ""));
   if (!sessionId) return null;
 
-  const issuedAtIso = text(record.issuedAt, text(averray?.completedAt, ""));
+  const issuedAtIso = text(record.issuedAt, text(averray?.completedAt, text(objectField(runReceipt, "timestamps")?.verifiedAt, "")));
   const kind = receiptKind(record.kind, badge ? "badge" : "run");
   const jobId = text(record.jobId, text(averray?.jobId, sessionId));
   const category = text(averray?.category, "");

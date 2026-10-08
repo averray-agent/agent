@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import Ajv from "ajv/dist/2020.js";
 import { generateKeyPairSync, sign, webcrypto } from "node:crypto";
 import { canonicalBadgeReceiptBytes, verifyBadgeReceiptSignature } from "../../core/badge-receipt-signing.js";
 import { verifyReceiptSignature } from "../../../../app/lib/ui/receipt-signature-verification.js";
@@ -710,7 +712,9 @@ test("listBadgeReceipts isolates a row whose job lookup cannot be rebuilt", asyn
   assert.deepEqual(receipts.map((receipt) => receipt.unsignedPresentation.sessionId), ["session-live"]);
 });
 
-test("served badge envelopes verify and cursor pages return 200 badges exactly once", async () => {
+test("served list-item schema and signatures verify; mixed-kind cursor pages return 400 rows exactly once and ETag changes", async () => {
+  const schema = JSON.parse(readFileSync(new URL("../../../../docs/schemas/badge-list-item-v1.json", import.meta.url), "utf8"));
+  const validateItem = new Ajv().compile(schema);
   const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
   const jwk = { ...publicKey.export({ format: "jwk" }), alg: "ES256", kid: "badge-1" };
   function signed(document) {
@@ -725,11 +729,11 @@ test("served badge envelopes verify and cursor pages return 200 badges exactly o
   const badges = new Map(sessions.map((session) => [session.sessionId, signed({
     ...STORED_BADGE, averray: { ...STORED_BADGE.averray, ...session }
   })]));
-  const run = signed({ ...STORED_RUN_RECEIPT, sessionId: sessions[0].sessionId });
+  const runs = new Map(sessions.map((session) => [session.sessionId, signed({ ...STORED_RUN_RECEIPT, ...session })]));
   const stateStore = {
     listRecentSessions: async (limit, offset) => sessions.slice(offset, offset + limit),
     getBadgeDocument: async (id) => badges.get(id),
-    getRunReceiptDocument: async (id) => id === sessions[0].sessionId ? run : undefined
+    getRunReceiptDocument: async (id) => runs.get(id)
   };
   const list = createLister({ stateStore, service: {}, verifierService: {} });
   const h = makeHarness({ listBadgeReceipts: list });
@@ -746,15 +750,17 @@ test("served badge envelopes verify and cursor pages return 200 badges exactly o
   assert.match(first.headers.link, /rel="next"/u);
   let cursor;
   const seen = new Set();
+  const boundaryKinds = new Set();
   let badgeCount = 0;
   do {
-    // First page ends between one session's run and badge.
+    // Every session has BOTH rows; odd pages alternate badge/run boundaries.
     const limit = cursor ? 17 : 1;
     const response = await get(`?limit=${limit}${cursor ? `&cursor=${cursor}` : ""}`);
     assert.equal(response.statusCode, 200);
     assert.ok(response.body.items.length <= limit);
     for (const item of response.body.items) {
       assert.deepEqual(Object.keys(item).sort(), ["document", "schemaVersion", "unsignedPresentation"]);
+      assert.equal(validateItem(item), true, JSON.stringify(validateItem.errors));
       assert.equal(verifyBadgeReceiptSignature(item.document, jwk), true, "signed document verifies exactly as served");
       assert.equal(Object.hasOwn(item.document, "result"), false);
       const identity = `${item.unsignedPresentation.sessionId}:${item.unsignedPresentation.kind}`;
@@ -763,9 +769,21 @@ test("served badge envelopes verify and cursor pages return 200 badges exactly o
       if (item.unsignedPresentation.kind === "badge") badgeCount++;
     }
     cursor = response.body.nextCursor;
+    if (cursor) {
+      const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString());
+      const last = response.body.items.at(-1).unsignedPresentation;
+      assert.equal(decoded.sessionId, last.sessionId);
+      assert.equal(decoded.kind, last.kind);
+      boundaryKinds.add(decoded.kind);
+    }
   } while (cursor);
   assert.equal(badgeCount, 200);
-  assert.equal(seen.size, 201);
+  assert.equal(seen.size, 400);
+  assert.deepEqual([...boundaryKinds].sort(), ["badge", "run"]);
+  badges.set(sessions[0].sessionId, signed({ ...badges.get(sessions[0].sessionId), name: "newest row changed", signature: undefined }));
+  const changed = await get("", { "if-none-match": first.headers.etag });
+  assert.equal(changed.statusCode, 200);
+  assert.notEqual(changed.headers.etag, first.headers.etag);
   await assert.rejects(get("?cursor=broken"), { code: "invalid_request", statusCode: 400 });
   const missing = Buffer.from(JSON.stringify({ v: 1, sessionId: "deleted", kind: "badge" })).toString("base64url");
   await assert.rejects(get(`?cursor=${missing}`), { code: "invalid_request", statusCode: 400 });

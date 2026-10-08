@@ -75,7 +75,7 @@ export function createListBadgeReceipts({
         const receipts = await rowsForSessions([session]);
         for (const row of receipts) {
           if (!found) {
-            if (row.kind === after.kind) found = true;
+            if (row.sessionId === after.sessionId && row.kind === after.kind) found = true;
             continue;
           }
           rows.push(row);
@@ -104,7 +104,7 @@ function badgePage(rows, limit) {
   const last = visible.at(-1);
   return {
     items: visible.map(({ badge, runReceipt, ...unsignedPresentation }) => ({
-      schemaVersion: "averray.receipt-envelope.v1",
+      schemaVersion: "averray.badge-list-item.v1",
       document: badge ?? runReceipt,
       unsignedPresentation
     })),

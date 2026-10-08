@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/badge-list-item-v1.json",
+  "title": "Averray Badge List Item v1",
+  "description": "A discovery wrapper for an exact stored badge or run document, including legacy documents. Validate the wrapper with this schema, then validate the canonical document against its own versioned schema and verify only document.signature. No signature or content-address claim applies to unsignedPresentation.",
+  "type": "object",
+  "required": ["schemaVersion", "document", "unsignedPresentation"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "averray.badge-list-item.v1" },
+    "document": { "type": "object", "additionalProperties": true },
+    "unsignedPresentation": {
+      "type": "object",
+      "required": ["sessionId", "kind"],
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["run", "badge"] },
+        "issuedAt": { "type": "string" },
+        "policyTags": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    }
+  }
+}

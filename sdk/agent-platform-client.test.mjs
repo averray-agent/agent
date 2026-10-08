@@ -55,7 +55,7 @@ test("listAgents explicitly opts operator consumers into synthetic canaries", as
 });
 
 test("listBadges sends limit and cursor and returns receipt envelopes unchanged", async () => {
-  const page = { items: [{ schemaVersion: "averray.receipt-envelope.v1", document: { signature: {} },
+  const page = { items: [{ schemaVersion: "averray.badge-list-item.v1", document: { signature: {} },
     unsignedPresentation: { kind: "badge" } }], limit: 17, nextCursor: "next" };
   let requested;
   const client = new AgentPlatformClient({ baseUrl: "https://api.example.test",

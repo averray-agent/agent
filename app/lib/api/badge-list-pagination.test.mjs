@@ -30,7 +30,7 @@ test("receipt list envelopes supply rows and preserve the canonical signed docum
   for (const kind of ["run", "badge"]) {
     const document = { sessionId: "session-1", jobId: "job-1", signature: { kid: "badge-1" },
       signers: [], averray: { sessionId: "session-1" } };
-    const envelope = { schemaVersion: "averray.receipt-envelope.v1", document,
+    const envelope = { schemaVersion: "averray.badge-list-item.v1", document,
       unsignedPresentation: { kind, sessionId: "session-1", jobId: "job-1",
         issuedAt: "2026-10-08T12:00:00Z", result: "PASS" } };
     const [row] = adapters.extractReceiptRows({ items: [envelope], limit: 50, nextCursor: "more" });
@@ -40,6 +40,43 @@ test("receipt list envelopes supply rows and preserve the canonical signed docum
     const drawer = adapters.buildReceiptDrawer(row, null);
     assert.equal(drawer.canonicalDocument, document);
     assert.equal(Object.hasOwn(drawer.canonicalDocument, "result"), false);
+  }
+});
+
+test("overview latest receipt label reads timestamps through the envelope adapter", () => {
+  const page = read("../../app/(authed)/overview/page.tsx");
+  const source = page.slice(page.indexOf("function latestReceiptLabel("), page.indexOf("function extractRows("));
+  const { latestReceiptLabel } = compile('import { extractReceiptRows } from "./adapter";\nexport ' + source, {
+    "./adapter": adapters
+  });
+  for (const kind of ["run", "badge"]) {
+    const document = kind === "run" ? { timestamps: { verifiedAt: "2026-10-08T13:45:00Z" } }
+      : { averray: { sessionId: "fixture", completedAt: "2026-10-08T13:45:00Z" } };
+    const items = [{ schemaVersion: "averray.badge-list-item.v1", document, unsignedPresentation: { kind, sessionId: "fixture" } }];
+    assert.equal(latestReceiptLabel({ items }, false), "13:45 UTC");
+  }
+  assert.match(page, /import \{ extractReceiptRows \} from "@\/lib\/api\/receipt-adapters"/u);
+});
+
+test("live receipt events invalidate every paginated badge SWR key and the overview", () => {
+  let events;
+  const keys = [];
+  const { LiveDataBridge } = compile(read("../../components/shell/LiveDataBridge.tsx"), {
+    react: { useEffect: (effect) => effect() },
+    swr: { mutate: (key) => keys.push(key) },
+    "@/lib/events/stream": { startEventStream: (options) => { events = options; return () => {}; } },
+    "@/lib/events/stream-status": { resetStream() {}, reportStreamState() {}, recordStreamEvent() {} },
+    "@/lib/auth/use-auth": { useAuth: () => ({ authenticated: true, wallet: "fixture" }) }
+  });
+  LiveDataBridge();
+  for (const topic of ["verification.resolved", "escrow.job_closed", "reputation.badge_minted", "gap"]) {
+    keys.length = 0;
+    if (topic === "gap") events.onGap(); else events.onEvent({ topic });
+    const predicate = keys.find((key) => typeof key === "function");
+    assert.ok(predicate, topic);
+    for (const key of ["/badges", "/badges?limit=50", "/badges?limit=50&cursor=next"]) assert.equal(predicate(key), true, topic);
+    assert.equal(predicate("/jobs"), false);
+    assert.equal(predicate(undefined), false);
   }
 });
 

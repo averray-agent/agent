@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useSyncExternalStore } from "react";
+import { extractReceiptRows } from "@/lib/api/receipt-adapters";
 import {
   OverviewTopbar,
   type CapabilityWarning,
@@ -461,12 +462,9 @@ function isSameUtcDate(value: unknown, today: string): boolean {
 }
 
 function latestReceiptLabel(data: unknown, isLoading: boolean): string {
-  const rows = extractRows(data, ["badges", "receipts", "items", "data"]);
+  const rows = extractReceiptRows(data);
   const latest = rows
-    .map((row) => {
-      const averray = asRecord(asRecord(row.badge)?.averray) ?? asRecord(row.averray);
-      return text(row.issuedAt, "") || text(averray?.completedAt, "");
-    })
+    .map((row) => row.issuedAtIso)
     .map((date) => Date.parse(date))
     .filter(Number.isFinite)
     .sort((a, b) => b - a)[0];

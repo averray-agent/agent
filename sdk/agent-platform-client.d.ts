@@ -124,14 +124,14 @@ export interface BadgeResponse extends ApiEnvelope {
   attributes?: ApiEnvelope[];
 }
 
-export interface ReceiptEnvelope {
-  schemaVersion: "averray.receipt-envelope.v1";
+export interface BadgeListItem {
+  schemaVersion: "averray.badge-list-item.v1";
   document: BadgeResponse;
   unsignedPresentation: ApiEnvelope;
 }
 
 export interface BadgeListResponse {
-  items: ReceiptEnvelope[];
+  items: BadgeListItem[];
   limit: number;
   nextCursor: string | null;
 }

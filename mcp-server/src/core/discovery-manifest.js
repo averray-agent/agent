@@ -100,7 +100,7 @@ const DISCOVERY_PUBLIC_ENDPOINTS = withDefaultGetMethod([
   { path: "/session/state-machine", description: "Canonical session lifecycle graph for builders and operators." },
   { path: "/schemas/jobs", description: "List of built-in job schemas available for structured work." },
   { path: "/schemas/jobs/:name.json", description: "Canonical JSON schema for one built-in job schema." },
-  { path: "/badges", description: "Recent public badge receipts for completed sessions." },
+  { path: "/badges", description: "Recent badge/run documents in averray.badge-list-item.v1 wrappers; default 50 rows, follow nextCursor for all. Verify document only; unsignedPresentation is not signed." },
   { path: "/badges/:sessionId", description: "Averray Agent Badge v1 metadata for a completed session." },
   { path: "/receipts/:receiptId", description: "Immutable Averray Work Receipt v1 JSON addressed by its canonical content hash." },
   { path: "/verify/profiles", description: "Published immutable verification profiles, pinned versions, limits, success criteria, and flat Base USDC pricing." },
