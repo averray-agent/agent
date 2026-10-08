@@ -36,6 +36,16 @@ The transparency reader's "no read" (QA #2) is diagnosed separately in the QA pa
 
 **Local checks:** `npm --workspace mcp-server test`, `npm run typecheck:indexer`, `npm run test:ops`, `npm run typecheck:app`.
 
+## Track 1b — Codex PR A2: the gateway's read provider must actually fail over (separate PR, after PR A)
+
+Found while gating #1428 (2026-10-08). ethers v6 `FallbackProvider` with quorum 1 counts a child's *fast* error (`SERVER_ERROR` 503/429, `NETWORK_ERROR`, `TIMEOUT`) as a quorum-meeting result and throws before consulting the backup; only a blackholed or NXDOMAIN primary (excluded at the initial network sync) fails over today. So "never says no read while a backup answers" holds for the dead host we have, not for a primary that answers 503.
+
+A first attempt at a `ReadFailoverProvider` (retry `call` across children on those error codes) did not deliver, for three reasons that the fix must address, each with a test that fails the primary at the TRANSPORT layer (a local HTTP server answering 5xx / closing the socket), never by mocking `_perform`:
+1. `AbstractProvider.call()` runs `getNetwork()` → `_detectNetwork()` → `_perform({method:"chainId"})` on every call; children re-send `eth_chainId` batched with `eth_call`, the chainId read fails first and is rethrown because its method is not `call`. Give children `staticNetwork` (the chain id is fixed per manifest; `selectRpcUrl` already verifies it) and/or include `chainId` in the retry set.
+2. Node transport errors arrive unwrapped: `ECONNREFUSED`/`ECONNRESET` have no ethers `code`, and `fetch failed` is code-less; reuse the file's existing `isRetryableBroadcastError` message-fragment matcher instead of an error-code allow-list.
+3. The retry loop must skip the config that just failed (it re-hit the primary first, +≤750 ms per failover) and must not abort on the first code-less error before reaching the backup.
+Tests: primary healthy at sync then 503 on `eth_call` → backup answers and the proof label names the backup host (this is also the "answering host, not attempted host" test from the transparency row); primary port closed mid-life → backup answers; `CALL_EXCEPTION` (a revert) is NOT retried. Drill: record the label before the await → RED.
+
 ## Track 2 — the Dwellir-fed adapter (pilot with an exit condition)
 
 ### Operator items (Pascal)
