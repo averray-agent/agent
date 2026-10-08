@@ -4,7 +4,8 @@ const GRADER_ONLY_FIELDS = new Set(["expectedOutputs", "rubric", "answerKey", "b
 // claim snapshot used for verification. Arrays/nested configs are covered too.
 export function redactPublicGraderFields(value) {
   if (Array.isArray(value)) return value.map(redactPublicGraderFields);
-  if (!value || typeof value !== "object" || Object.getPrototypeOf(value) !== Object.prototype) return value;
+  if (!value || typeof value !== "object"
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return value;
   return Object.fromEntries(Object.entries(value)
     .filter(([key]) => !GRADER_ONLY_FIELDS.has(key))
     .map(([key, entry]) => [key, redactPublicGraderFields(entry)]));

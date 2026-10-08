@@ -50,7 +50,7 @@ export function createJobRoutes({
 
     if (request.method === "GET" && pathname === "/jobs") {
       const secured = await listPublicJobs(url.searchParams.get("wallet") ?? undefined);
-      const page = buildPublicJobsPage(secured, url.searchParams);
+      const page = redactPublicGraderFields(buildPublicJobsPage(secured, url.searchParams));
       const etag = `W/"${createHash("sha256").update(JSON.stringify(page)).digest("hex")}"`;
       const headers = { etag, "cache-control": "public, max-age=0, must-revalidate" };
       if (page.nextCursor) {

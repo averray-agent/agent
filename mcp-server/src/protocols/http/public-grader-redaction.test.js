@@ -6,6 +6,7 @@ import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
 import { respond } from "./http-helpers.js";
 import { createMcpToolExecutor } from "../mcp/tools.js";
 import { invokeHttpRoute } from "../mcp/route-adapter.js";
+import { redactPublicGraderFields } from "../../core/public-grader-redaction.js";
 
 const sentinel = "GRADER_PRIVATE_FIXTURE_DO_NOT_SERVE";
 function fixture() {
@@ -65,6 +66,17 @@ test("claim/preflight and resumed session snapshots cannot bypass the public job
     assert.equal(result.statusCode, 200);
     assertRedacted(result.body, path);
   }
+});
+
+test("public ETags cover only the redacted representation, including null-prototype JSON records", async () => {
+  const f = fixture();
+  const first = await invokeHttpRoute(f.route, { method: "GET", path: "/jobs" });
+  f.job.verifierConfig.expectedOutputs = ["different-private-answer"];
+  const second = await invokeHttpRoute(f.route, { method: "GET", path: "/jobs" });
+  assert.equal(first.headers.etag, second.headers.etag, "private grader changes must not change a public cache validator");
+  assert.deepEqual(redactPublicGraderFields(Object.assign(Object.create(null), {
+    expectedOutputs: [sentinel], title: "public"
+  })), { title: "public" });
 });
 
 test("source=curated matches postingRoute even when the source is a GitHub issue", async () => {
