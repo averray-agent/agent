@@ -33,6 +33,7 @@ test("one PR author across fourteen wallets is one author; concentration is stri
     awaitingHumanReview: 14, settled7d: 0, settled30d: 0, distinctWallets: 14,
     usdcPaid: { raw: "0", amount: "0", missingPayoutEvidence: 0 } });
   assert.equal(result.warnings[0].code, "github_author_concentration");
+  assert.deepEqual(Object.keys(result.warnings[0]).sort(), ["code", "severity", "openClaims", "totalOpenClaims", "distinctWallets"].sort());
   for (let i = 17; i <= 28; i++) await add(store, i, null, "claimed");
   result = await readGithubAuthors(store, { now });
   assert.equal(result.openClaims, 28);
@@ -57,6 +58,25 @@ test("settled windows and USDC totals use receipt evidence, not rewards; merged 
   result = await readGithubAuthors(store, { now });
   assert.equal(result.authors[0].usdcPaid.amount, null);
   assert.equal(result.authors[0].usdcPaid.missingPayoutEvidence, 1);
+});
+
+test("concentration needs at least three open claims and does not leak an author", async () => {
+  const store = new MemoryStateStore();
+  for (let id = 1; id <= 3; id++) {
+    await add(store, id, "private-author");
+    const result = await readGithubAuthors(store, { now });
+    assert.equal(result.warnings.length, id >= 3 ? 1 : 0);
+    assert.ok(!JSON.stringify(result.warnings).includes("private-author"));
+  }
+});
+
+test("unavailable settlement lookup cannot shadow a bound observation; bound settlement wins", async () => {
+  const store = new MemoryStateStore();
+  await add(store, 1, "observed");
+  await store.upsertVerificationResult("1", { githubLookup: lookup("unavailable", { status: "unavailable" }) });
+  assert.equal((await readGithubAuthors(store, { now })).authors[0].author, "observed");
+  await store.upsertVerificationResult("1", { githubLookup: lookup("settled") });
+  assert.equal((await readGithubAuthors(store, { now })).authors[0].author, "settled");
 });
 
 test("unverified or unbound authors are unknown; settlement verification author is retained without an observation", async () => {

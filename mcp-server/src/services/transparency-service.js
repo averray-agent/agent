@@ -407,7 +407,16 @@ export class TransparencyService {
         total: countField(flow.windows.last24h.jobs)
       },
       settledToExternalWallets24h: countField(flow.workers.outsiders),
-      githubAuthors: flow.githubAuthors ?? { distinctAuthors: null, distinctWallets: null, reason: "author_evidence_unavailable" },
+      githubAuthors: {
+        label: flow.githubAuthors?.label ?? "GitHub accounts with a verified claimant footer, not unique humans; wallets include unattributed sessions.",
+        ...Object.fromEntries(Object.entries({ distinctAuthors: "authors", distinctWallets: "wallets", unattributedSessions: "sessions" })
+          .map(([name, unit]) => [name, countField({
+            value: flow.githubAuthors?.[name] ?? null, unit,
+            readAtMs: Date.parse(flow.githubAuthors?.asOf ?? ""),
+            source: flow.githubAuthors?.source ?? "backend_state_store",
+            proof: "retained github_pr sessions; author attribution requires verified GitHub author and matched claimant footer binding; unattributed sessions retained"
+          })]))
+      },
       ...Object.fromEntries(["retainedExternalWorkers30d", "externalRewardOutlay30d", "costPerRetainedExternalWorker30d"]
         .map((name) => [name, countField(flow.retained?.[name] ?? {
           value: null, unit: name === "retainedExternalWorkers30d" ? "wallets" : "USDC",

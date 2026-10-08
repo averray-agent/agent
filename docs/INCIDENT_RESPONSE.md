@@ -654,6 +654,13 @@ upstream errors. Logs include skip-reason counts and at most 25 sampled IDs;
 persisted history retains only counts/timestamps for the latest 20 runs. Deferred
 brokered submissions remain submitted and are not reported as settled.
 
+`github_author_concentration` is advisory: one verified, footer-bound GitHub
+author holds at least three open claims and more than half of all open claims.
+It never blocks claims or changes payment. The public warning exposes only
+`code`, `severity`, `openClaims`, `totalOpenClaims`, and `distinctWallets`;
+author identities are available only on the authenticated operator surface.
+Unknown author evidence remains unattributed, not inferred from wallet count.
+
 Run these locally on the operator Mac with the existing mainnet KMS JWT
 environment and AWS signing credentials loaded securely. Required:
 `AWS_JWT_REGION`, `AWS_JWT_KEY_ID` (full ARN), `JWT_PUBLIC_KEY_PEM`, and the live

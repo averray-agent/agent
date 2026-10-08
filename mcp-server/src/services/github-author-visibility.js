@@ -39,8 +39,8 @@ export async function readGithubAuthors(stateStore, { now = new Date(), sessions
       stateStore.getVerificationResult?.(session.sessionId),
       stateStore.getMutationReceipt?.("github_pr_author", session.sessionId)
     ]);
-    const lookup = verification?.githubLookup ?? observation?.githubLookup;
-    const author = boundGithubAuthor(lookup);
+    const author = boundGithubAuthor(verification?.githubLookup) ?? boundGithubAuthor(observation?.githubLookup);
+    const lookup = boundGithubAuthor(verification?.githubLookup) ? verification.githubLookup : observation?.githubLookup;
     if (!author) {
       unattributedSessions++;
       if (open) unattributedClaims++;
@@ -80,8 +80,8 @@ export async function readGithubAuthors(stateStore, { now = new Date(), sessions
     openClaimStatuses: [...openStatuses], paidWindow: "retained history; confirmed worker USDC payout only",
     githubSessions, distinctAuthors: rows.length, distinctWallets: wallets.size,
     openClaims, unattributedClaims, unattributedSessions, authors: rows,
-    warnings: rows.filter((row) => row.openClaims > openClaims / 2).map((row) => ({
-      code: "github_author_concentration", severity: "warning", openClaims: row.openClaims,
+    warnings: rows.filter((row) => row.openClaims >= 3 && row.openClaims > openClaims / 2).map((row) => ({
+code: "github_author_concentration", severity: "warning", openClaims: row.openClaims,
       totalOpenClaims: openClaims, distinctWallets: row.distinctWallets
     }))
   };

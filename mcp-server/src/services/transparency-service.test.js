@@ -681,9 +681,16 @@ test("transparency reports distinct GitHub authors beside wallets and states inc
       claimantBinding: { status: "matched", walletMatches: true } }
   });
   const flow = service.buildFlow(await service.readFlow(), NOW);
-  assert.equal(flow.githubAuthors.distinctAuthors, 1);
-  assert.equal(flow.githubAuthors.distinctWallets, 3);
-  assert.equal(flow.githubAuthors.unattributedSessions, 1);
+  for (const [name, value, unit] of [["distinctAuthors", 1, "authors"], ["distinctWallets", 3, "wallets"], ["unattributedSessions", 1, "sessions"]]) {
+    const field = flow.githubAuthors[name];
+    assert.deepEqual(Object.keys(field).sort(), ["proof", "readAtMs", "source", "status", "unit", "value"]);
+    assert.equal(field.value, value);
+    assert.equal(field.unit, unit);
+    assert.equal(field.readAtMs, NOW);
+    assert.equal(field.status, "fresh");
+    assert.match(field.source, /retained sessions/u);
+    assert.match(field.proof, /matched claimant footer binding/u);
+  }
   assert.match(flow.githubAuthors.label, /not unique humans/u);
   assert.equal(flow.githubAuthors.authors, undefined, "public transparency is aggregate-only");
 });
