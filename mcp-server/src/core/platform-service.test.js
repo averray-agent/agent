@@ -1180,6 +1180,19 @@ test("createSubJob rejects grandchild delegation by default depth policy", async
   );
 });
 
+test("curated resolved session projects closed without mutating catalogue lifecycle", async () => {
+  const store = new MemoryStateStore();
+  const service = makePlatformService(undefined, undefined, store);
+  const definition = service.getJobDefinition("parent-job-001");
+  await store.upsertSession({ sessionId: "curated-resolved", jobId: definition.id, wallet: WALLET,
+    status: "resolved", updatedAt: new Date().toISOString(), jobSnapshot: buildJobSnapshot(definition) });
+  const [row] = await service.listJobsWithSessions();
+  assert.equal(row.lifecycle.state, "closed");
+  assert.equal(row.lifecycle.status, "closed");
+  assert.equal(row.claimable, false);
+  assert.equal(service.getJobDefinition(definition.id).lifecycle.state, "open");
+});
+
 test("listJobsWithSessions joins active session state onto job rows", async () => {
   const service = makePlatformService();
 

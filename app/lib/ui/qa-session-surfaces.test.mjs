@@ -114,3 +114,25 @@ test("live closed external state wins over catalogue open in app counts", () => 
   assert.equal(result.open, false);
   assert.equal(result.claimable, false);
 });
+
+test("every lifecycle enum has defined actions and labels; terminal rows stay visible and in terminal buckets", () => {
+  const lifecycle = load("lib/api/job-lifecycle.ts");
+  const states = [...read("lib/api/job-lifecycle.ts").match(/export type JobLifecycleState =([\s\S]*?);/)[1].matchAll(/"([a-z]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(states.sort(), ["archived", "cancelled", "closed", "open", "paused", "stale"]);
+  for (const state of states) {
+    assert.ok(Array.isArray(lifecycle.availableActions(state)), state);
+    assert.ok(lifecycle.formatLifecycleLabel(state), state);
+  }
+  for (const state of ["closed", "cancelled"]) {
+    const row = { lifecycle: { state, status: state }, claimable: false };
+    assert.equal(lifecycle.buildJobLifecycle(row.lifecycle).state, state);
+    assert.equal(lifecycle.availableActions(state).length, 0);
+    assert.equal(lifecycle.visibleInDefaultRuns(row.lifecycle), true);
+    const classified = lifecycle.classifyJobRow(row);
+    assert.equal(classified[state], true);
+    assert.equal(classified.open, false);
+    assert.equal(classified.claimable, false);
+  }
+  assert.match(read("app/(authed)/runs/page.tsx"), /\(r\) => visibleInDefaultRuns\(r.lifecycle\)/);
+  assert.match(read("components/runs/RunQueueTable.tsx"), /\["archived", "closed", "cancelled"\]\.includes\(state\)/);
+});

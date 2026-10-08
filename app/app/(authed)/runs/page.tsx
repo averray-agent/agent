@@ -40,7 +40,7 @@ import {
   runsQueueLiveStatus,
   runsRowsPresence,
 } from "@/lib/api/runs-feed-status";
-import { extractAdminJobs } from "@/lib/api/job-lifecycle";
+import { extractAdminJobs, visibleInDefaultRuns } from "@/lib/api/job-lifecycle";
 import { extractApiErrorMessage, swrFetcher } from "@/lib/api/client";
 import { runClaimJob } from "@/lib/api/claim-job";
 import { mutate } from "swr";
@@ -210,7 +210,7 @@ function RunsPageInner() {
     // the full lifecycle picture (or to reopen something they paused).
     if (!showClosed) {
       next = next.filter(
-        (r) => !r.lifecycle || r.lifecycle.state === "open"
+        (r) => visibleInDefaultRuns(r.lifecycle)
       );
     }
     if (activeFilter !== "all") {
@@ -223,7 +223,7 @@ function RunsPageInner() {
   }, [activeFilter, activeSource, rows, showClosed]);
 
   const closedRowCount = rows.filter(
-    (r) => r.lifecycle && r.lifecycle.state !== "open"
+    (r) => !visibleInDefaultRuns(r.lifecycle)
   ).length;
   const lifecycleToggle = hiddenLifecycleCopy(
     adminPresence,

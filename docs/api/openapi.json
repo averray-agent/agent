@@ -638,6 +638,15 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Invalid jobs query, including unknown query parameters. Unknown-parameter errors include details.unknown and details.supported.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "example": { "error": "validation_error", "message": "Unknown jobs query parameters.", "details": { "unknown": ["typo"], "supported": ["wallet", "limit", "offset", "cursor", "source", "category", "state", "include", "format", "shape", "since"] } }
+              }
+            }
           }
         }
       }
@@ -4243,6 +4252,7 @@
           "definitionUrl"
         ],
         "properties": {
+          "listingStatus": { "type": "string", "enum": ["listed", "not_claimable"] },
           "id": {
             "type": "string"
           },
@@ -4523,7 +4533,9 @@
             "enum": [
               "open",
               "paused",
-              "archived"
+              "archived",
+              "closed",
+              "cancelled"
             ]
           },
           "state": {
@@ -4532,7 +4544,9 @@
               "open",
               "stale",
               "paused",
-              "archived"
+              "archived",
+              "closed",
+              "cancelled"
             ]
           },
           "createdAt": {
