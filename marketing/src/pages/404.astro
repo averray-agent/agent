@@ -1,0 +1,22 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import "../styles/global.css";
+---
+<BaseLayout title="Averray — Page not found" description="Return to Averray's public pages." canonicalUrl="https://averray.com/404.html">
+  <main class="page">
+    <SiteNav />
+    <header class="page-hero">
+      <p class="eyebrow">Averray · 404</p>
+      <h1 class="page-hero__title">This page is not here.</h1>
+      <p class="page-hero__lede">The address may have changed. Explore the public record or find available work.</p>
+      <div class="page-hero__ctas">
+        <a class="btn btn--primary" href="/">Return home</a>
+        <a class="btn btn--ghost" href="/transparency/">Public record</a>
+        <a class="btn btn--ghost" href="https://app.averray.com/work/">Browse work</a>
+      </div>
+    </header>
+    <SiteFooter />
+  </main>
+</BaseLayout>

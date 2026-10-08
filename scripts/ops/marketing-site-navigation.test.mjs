@@ -21,7 +21,7 @@ test("site navigation — every marketing page is reachable and an added unlinke
   const pages = await marketingPageInventory();
 
   assert.equal(result.routes.length, pages.length);
-  assert.deepEqual(INTENTIONALLY_UNLINKED_ROUTES, []);
+  assert.deepEqual(INTENTIONALLY_UNLINKED_ROUTES, ["/404/"]);
 
   const fixtureDirectory = await mkdtemp(join(tmpdir(), "averray-site-navigation-"));
   try {

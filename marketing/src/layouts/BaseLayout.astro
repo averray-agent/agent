@@ -34,6 +34,7 @@ const structuredData = {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonicalUrl} />
@@ -54,6 +55,7 @@ const structuredData = {
     <script type="application/ld+json" set:html={JSON.stringify(structuredData)} />
   </head>
   <body>
+    <noscript><p class="section__aside">Live readings require JavaScript. Values below are not loaded; inspect the <a href="https://api.averray.com/">public API</a> for current data.</p></noscript>
     <slot />
   </body>
 </html>
