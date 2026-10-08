@@ -422,6 +422,28 @@ test("unsupported initialize offers the newest legacy protocol and binds the neg
   assert.equal(ping.headers["mcp-protocol-version"], LEGACY_MCP_VERSION);
 });
 
+test("initialize with 2026-07-28 creates a legacy session with consistent response headers", async () => {
+  const { handler, legacySessions } = createHarness();
+  const initialized = await call(handler, {
+    jsonrpc: "2.0", id: 1, method: "initialize",
+    params: { protocolVersion: MODERN_MCP_VERSION, capabilities: {},
+      clientInfo: { name: "modern-offer", version: "1.0.0" } }
+  }, { "mcp-protocol-version": MODERN_MCP_VERSION });
+  assert.equal(initialized.statusCode, 200);
+  assert.equal(initialized.body.result.protocolVersion, LEGACY_MCP_VERSION);
+  assert.equal(initialized.headers["mcp-protocol-version"], LEGACY_MCP_VERSION);
+  const sessionId = initialized.headers["mcp-session-id"];
+  assert.equal(legacySessions.get(sessionId).protocolVersion, LEGACY_MCP_VERSION);
+  const headers = { "mcp-session-id": sessionId, "mcp-protocol-version": LEGACY_MCP_VERSION };
+  await call(handler, { jsonrpc: "2.0", method: "notifications/initialized" }, headers);
+  for (const method of ["ping", "tools/list"]) {
+    const response = await call(handler, { jsonrpc: "2.0", id: 2, method }, headers);
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.headers["mcp-protocol-version"], LEGACY_MCP_VERSION);
+    assert.equal(response.body.result.resultType, undefined);
+  }
+});
+
 test("all callers see protected tools and an anonymous protected call is a clean auth error", async () => {
   const { handler } = createHarness({
     executeTool: async (name) => {

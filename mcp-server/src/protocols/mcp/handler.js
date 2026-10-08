@@ -317,10 +317,10 @@ function handleLegacyInitialize({
     sendError(response, respond, 400, message.id, -32602, "initialize requires a dated protocolVersion.");
     return;
   }
-  // Initialize is legacy semantics: unknown offers select our newest legacy version.
+  // Initialize is legacy semantics: every offer selects our newest legacy version.
   // The client can accept it or disconnect. Bind subsequent session reads to
   // this selected version, never to the unsupported offer.
-  const selectedVersion = SUPPORTED_MCP_VERSIONS.includes(requested) ? requested : LEGACY_MCP_VERSION;
+  const selectedVersion = LEGACY_MCP_VERSION;
   const headerVersion = request.headers?.["mcp-protocol-version"];
   if (headerVersion && headerVersion !== requested) {
     sendError(

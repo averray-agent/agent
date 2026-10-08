@@ -61,8 +61,8 @@ scope; calling them anonymously returns an explicit `isError` tool result.
 | `claimJob` | `jobs:claim` |
 | `submitWork` | `jobs:submit` |
 
-Initialization preserves an offered supported version; an unknown offer selects
-our newest legacy version, 2025-11-25, because initialize has legacy semantics.
+Initialization always selects our newest legacy version, 2025-11-25, even
+when offered 2026-07-28, because initialize has legacy semantics.
 The returned session binds the selection and explicit mismatches are refused.
 On the stateless path, unknown versions return HTTP 400 with
 `-32022 UnsupportedProtocolVersionError` and `data: {supported, requested}`.
