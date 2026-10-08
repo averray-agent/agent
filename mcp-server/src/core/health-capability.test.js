@@ -549,7 +549,7 @@ test("settlement health splits human review from stuck without hiding approved o
       getMutationReceipt: async (bucket, id) => {
         if (bucket !== "github_pr_review_observation") return undefined;
         if (id === "unreadable") throw new Error("read unavailable");
-        return id === "approved-pr" ? { previewOutcome: "approved" } : undefined;
+        return id === "approved-pr" ? { previewOutcome: "approved", merged: true } : undefined;
       }
     }
   });

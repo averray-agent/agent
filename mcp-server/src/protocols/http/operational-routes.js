@@ -6,6 +6,7 @@ import {
   createNonBlockingBlockchainHealthProvider,
   createNonBlockingRewardBankHealthProvider,
   createProductHealthSnapshotProvider,
+  createGithubPrReviewHealthProvider,
   createRewardBankHealthProvider,
   resolveCapabilityHealth,
   resolveServiceHealth
@@ -82,6 +83,7 @@ export function createOperationalRoutes({
   stateStore
 }) {
   const financialMetrics = createVerifyRevenueMetrics({ stateStore });
+  const getGithubPrReviewHealth = createGithubPrReviewHealthProvider({ service: service?.githubPrReview });
   const getLiveRewardBankHealth = getRewardBankHealth ?? createRewardBankHealthProvider({
     gateway
   });
@@ -132,9 +134,7 @@ export function createOperationalRoutes({
           code: "locked_tier_health_unavailable",
           message: "Locked-deposit health state is unreadable."
         })) ?? { ok: true, state: "not_configured" },
-        Promise.resolve().then(() => service?.githubPrReview?.getStatus?.()).catch(() => ({
-          githubUpstream: { ok: false, lastSuccessAt: null, lastError: "github_status_unavailable" }
-        }))
+        getGithubPrReviewHealth()
       ]);
       const mutationBackendStatus = await getMutationBackendStatus({
         gateway,

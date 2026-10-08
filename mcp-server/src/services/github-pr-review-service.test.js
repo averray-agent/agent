@@ -8,6 +8,7 @@ import { VerifierRegistry } from "./verifier-handlers.js";
 import { transitionSession } from "../core/session-state-machine.js";
 import { normalizeSubmission } from "../core/submission.js";
 import { createVerifierRoutes } from "../protocols/http/verifier-routes.js";
+import { createProductHealthSnapshotProvider } from "../core/health-capability.js";
 
 const wallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const submittedAt = "2026-09-12T00:00:00Z";
@@ -19,6 +20,20 @@ async function add(store, id, mode = "github_pr", status = "submitted") {
     jobSnapshot: buildJobSnapshot(job), submission: normalizeSubmission({ prUrl: "https://github.com/owner/repo/pull/2",
       summary: "Fix issue #1", tests: "Local test passed" }) });
 }
+
+test("empty GitHub poll is explicitly idle while never-run remains not checked", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "human", "human_fallback");
+  const review = new GithubPrReviewService({ stateStore: store, githubToken: "token" });
+  const now = new Date("2026-10-08T12:00:00Z");
+  assert.equal((await review.getStatus(now)).githubUpstream.lastError, "github_not_checked");
+  await review.runOnce(now);
+  assert.deepEqual((await review.getStatus(new Date(+now + 86400_000))).githubUpstream,
+    { ok: true, state: "idle", lastSuccessAt: null, lastError: null });
+  await add(store, "new-pr");
+  assert.equal((await review.getStatus(now)).githubUpstream.state, "pending");
+  assert.equal((await review.getStatus(now)).githubUpstream.ok, false);
+});
 
 test("pending is exactly all submitted non-auto sessions, including sessions older than the first page; SLA is warning only", async () => {
   const store = new MemoryStateStore();
@@ -112,10 +127,38 @@ test("changed upstream with an approved merged preview settles; non-approved bas
   assert.equal(settle.mock.callCount(), 1);
 });
 
+test("open green approved PR is observation-only and counted as awaiting human review", async (t) => {
+  const f = await liveFixture();
+  const settle = t.mock.method(f.verifier, "verifySubmission");
+  assert.equal((await f.verifier.previewSubmission({ sessionId: "pr" })).outcome, "approved");
+  await f.review.runOnce();
+  assert.equal(settle.mock.callCount(), 0);
+  assert.equal((await f.store.getSession("pr")).status, "submitted");
+  const observation = await f.store.getMutationReceipt("github_pr_review_observation", "pr");
+  assert.equal(observation.previewOutcome, "approved");
+  assert.equal(observation.merged, false);
+  const snapshot = await createProductHealthSnapshotProvider({ stateStore: f.store, getRewardBankHealth: async () => ({}) })();
+  assert.equal(snapshot.settlement.awaitingHumanReview, 1);
+  assert.equal(snapshot.settlement.stuck, 0);
+});
+
+test("merged non-approved PR records observation and never settles", async (t) => {
+  const f = await liveFixture();
+  const settle = t.mock.method(f.verifier, "verifySubmission");
+  t.mock.method(f.verifier, "previewSubmission", async () => ({ outcome: "rejected",
+    githubLookup: { status: "verified", merged: true, headSha: "merged-rejected" } }));
+  const run = await f.review.runOnce();
+  assert.deepEqual(run.observed, ["pr"]);
+  assert.equal(settle.mock.callCount(), 0);
+  assert.equal((await f.store.getMutationReceipt("github_pr_review_observation", "pr")).previewOutcome, "rejected");
+  assert.equal((await f.store.getSession("pr")).status, "submitted");
+});
+
 test("first observation of an approved merged PR settles once with the server-side outcome guard", async (t) => {
   const f = await liveFixture();
   f.upstream.merged = true;
   const settle = t.mock.method(f.verifier, "verifySubmission");
+  const pendingBeforeSettlement = await f.review.pending();
   const now = new Date("2026-10-07T18:30:00Z");
   const run = await f.review.runOnce(now);
   assert.deepEqual(run.errors, []);
@@ -123,6 +166,11 @@ test("first observation of an approved merged PR settles once with the server-si
   assert.deepEqual(settle.mock.calls[0].arguments, [{ sessionId: "pr", expectOutcome: "approved" }]);
   assert.equal((await f.store.getSession("pr")).status, "resolved");
   assert.equal((await f.store.getMutationReceipt("github_pr_review_observation", "pr")).previewOutcome, "approved");
+  await f.review.runOnce(now);
+  assert.equal(settle.mock.callCount(), 1);
+  // Receipt loss and even a stale queue snapshot cannot pay a resolved session again.
+  t.mock.method(f.store, "getMutationReceipt", async () => undefined);
+  t.mock.method(f.review, "pending", async () => pendingBeforeSettlement);
   await f.review.runOnce(now);
   assert.equal(settle.mock.callCount(), 1);
 });

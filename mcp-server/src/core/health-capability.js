@@ -373,6 +373,23 @@ export function buildCapabilityWarnings(capabilityHealth) {
   return warnings;
 }
 
+// A status walk is single-flight and cached just like the product snapshot.
+// Keep this at the public health boundary; operator reads remain fresh.
+export function createGithubPrReviewHealthProvider({ service, now = () => new Date(), cacheMs = DEFAULT_PRODUCT_HEALTH_CACHE_MS } = {}) {
+  let cached;
+  let refreshPromise;
+  return async () => {
+    const nowMs = now().getTime();
+    if (cached && cached.expiresAtMs > nowMs) return cached.value;
+    if (refreshPromise) return refreshPromise;
+    refreshPromise = Promise.resolve().then(() => service?.getStatus?.())
+      .catch(() => ({ githubUpstream: { ok: false, lastSuccessAt: null, lastError: "github_status_unavailable" } }))
+      .then((value) => { cached = { value, expiresAtMs: nowMs + cacheMs }; return value; })
+      .finally(() => { refreshPromise = undefined; });
+    return refreshPromise;
+  };
+}
+
 export function createProductHealthSnapshotProvider({
   gateway,
   service,
@@ -1069,8 +1086,8 @@ async function isAwaitingHumanReview(session, stateStore) {
     if (mode === "human_fallback") return true;
     if (mode !== "github_pr") return false;
     const observation = await stateStore.getMutationReceipt?.("github_pr_review_observation", session.sessionId);
-    // A known approval awaiting execution is not a human-review backlog item.
-    return observation?.previewOutcome !== "approved";
+    // Only a merged approval is eligible for automatic execution.
+    return observation?.previewOutcome !== "approved" || observation?.merged !== true;
   } catch {
     // Integrity/storage failures must not hide a stuck settlement as normal review.
     return false;

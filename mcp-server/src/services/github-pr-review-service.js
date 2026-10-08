@@ -63,7 +63,7 @@ export class GithubPrReviewService {
     const oldestGithubAgeMs = github[0]?.ageMs ?? null;
     return { enabled: this.enabled, running: this.running, intervalMs: this.intervalMs,
       count: queue.count, oldestAgeMs: queue.oldestAgeMs, githubPrCount: github.length,
-      githubUpstream: this.getUpstreamHealth(now),
+      githubUpstream: this.getUpstreamHealth(now, github.length),
       oldestGithubAgeMs, slaHours: this.slaHours,
       warnings: oldestGithubAgeMs > this.slaHours * 3_600_000 ? [{
         code: "github_pr_review_overdue", severity: "warning", oldestAgeMs: oldestGithubAgeMs,
@@ -81,9 +81,12 @@ export class GithubPrReviewService {
       this.githubUpstream.lastSuccessAt = now.toISOString();
     }
     if (githubItems.length) {
+      delete this.githubUpstream.state;
       this.githubUpstream.ok = !failedRead;
       // Public health gets fixed reason codes, never arbitrary upstream error text.
       this.githubUpstream.lastError = failedRead ? publicGithubError(failedRead.upstream) : null;
+    } else {
+      this.githubUpstream = { ...this.githubUpstream, ok: true, state: "idle", lastError: null };
     }
     for (const item of githubItems) {
       try {
@@ -96,16 +99,16 @@ export class GithubPrReviewService {
         const previous = await this.stateStore.getMutationReceipt("github_pr_review_observation", item.sessionId);
         // Dedupe observations, not admission to settlement: a first observation
         // (or an old receipt written before this fix) may already be approved.
-        if (previous?.fingerprint !== fingerprint || previous?.previewOutcome !== item.previewOutcome) {
+        if (previous?.fingerprint !== fingerprint || previous?.previewOutcome !== item.previewOutcome || previous?.merged !== (upstream.merged === true)) {
           await this.stateStore.upsertMutationReceipt("github_pr_review_observation", item.sessionId, {
-            fingerprint, previewOutcome: item.previewOutcome, observedAt: now.toISOString()
+            fingerprint, previewOutcome: item.previewOutcome, merged: upstream.merged === true, observedAt: now.toISOString()
           });
           summary.observed.push(item.sessionId);
         }
-        if (item.previewOutcome === "approved"
+        if (upstream.merged === true && item.previewOutcome === "approved"
           && (await this.stateStore.getSession(item.sessionId))?.status === "submitted") {
-          // Only an approved preview may trigger automatic settlement. Other
-          // outcomes are observations, leaving the submission for an operator.
+          // Pascal's Option 1: only merged + approved may auto-settle.
+          // Open green PRs and every other outcome stay with the operator.
           const verdict = await this.verifierService.verifySubmission({ sessionId: item.sessionId, expectOutcome: "approved" });
           summary.reviewed.push({ sessionId: item.sessionId, outcome: verdict.outcome });
         }
@@ -115,9 +118,13 @@ export class GithubPrReviewService {
     return this.lastRun;
   }
 
-  getUpstreamHealth(now = new Date()) {
+  getUpstreamHealth(now = new Date(), pendingCount) {
     const health = { ...this.githubUpstream };
-    if (health.ok && now - Date.parse(health.lastSuccessAt) > this.intervalMs * 2) {
+    if (this.lastRun && pendingCount === 0) return { ...health, ok: true, state: "idle", lastError: null };
+    if (health.state === "idle" && pendingCount > 0) {
+      return { ...health, ok: false, state: "pending", lastError: "github_not_checked" };
+    }
+    if (health.ok && health.state !== "idle" && now - Date.parse(health.lastSuccessAt) > this.intervalMs * 2) {
       return { ...health, ok: false, lastError: "github_read_stale" };
     }
     return health;

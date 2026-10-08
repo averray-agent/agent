@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { createOperationalRoutes, resolveMetricsAuthConfig } from "./operational-routes.js";
+import { GithubPrReviewService } from "../../services/github-pr-review-service.js";
 
 const AUTH_CONFIG = {
   mode: "strict",
@@ -127,6 +128,23 @@ test("GET /health exposes overdue GitHub review and upstream health without chan
   assert.deepEqual(response.body.serviceHealth.components.githubUpstream, githubUpstream);
   assert.deepEqual(response.body.warnings.find((item) => item.code === warning.code), warning);
   assert.equal(response.body.settlement.awaitingHumanReview, 0);
+});
+
+test("GET /health caches the GitHub pending walk for 60 seconds, including concurrent calls", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-08T12:00:00Z") });
+  const review = new GithubPrReviewService({ stateStore: { listRecentSessions: async () => [] }, githubToken: "token" });
+  const walk = t.mock.method(review, "pending");
+  const { route } = makeHarness({ service: { githubPrReview: review } });
+  const read = () => route({ request: { method: "GET" }, response: makeResponse(), pathname: "/health" });
+  await Promise.all([read(), read()]);
+  await read();
+  assert.equal(walk.mock.callCount(), 1);
+  t.mock.timers.tick(59_999);
+  await read();
+  assert.equal(walk.mock.callCount(), 1);
+  t.mock.timers.tick(1);
+  await read();
+  assert.equal(walk.mock.callCount(), 2);
 });
 
 test("GET /health fails closed and redacts a throwing GitHub poller status read", async () => {
