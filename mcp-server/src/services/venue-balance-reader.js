@@ -102,11 +102,12 @@ export class VenueBalanceReader {
   }
 
   async readSubstrate(endpoint, api, loader) {
+    const pending = this.substrateApis.get(endpoint);
     try {
       if (api.isConnected === false) throw new Error("venue_substrate_disconnected");
       return await boundedSubstrateRead(Promise.resolve().then(loader), this.substrateTimeoutMs, "query");
     } catch (error) {
-      this.resetSubstrateApi(endpoint);
+      if (this.substrateApis.get(endpoint) === pending) this.resetSubstrateApi(endpoint);
       throw error;
     }
   }

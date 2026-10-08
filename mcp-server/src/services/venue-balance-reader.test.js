@@ -41,6 +41,26 @@ test("float query timeout and disconnected socket are explicit failures, not zer
   assert.equal(reader.substrateApis.size, 0);
 });
 
+test("an old failed query cannot evict or disconnect a replacement API", async () => {
+  const reader = new VenueBalanceReader();
+  let rejectOld;
+  const old = { disconnect() {} };
+  let disconnected = 0;
+  const fresh = { disconnect() { disconnected++; } };
+  reader.substrateApis.set(target.endpoint, Promise.resolve(old));
+  const failed = assert.rejects(reader.readSubstrate(target.endpoint, old,
+    () => new Promise((_, reject) => { rejectOld = reject; })), /old query failed/);
+  await nextTurn();
+  const replacement = Promise.resolve(fresh);
+  reader.substrateApis.set(target.endpoint, replacement);
+  rejectOld(new Error("old query failed"));
+  await failed;
+  await nextTurn();
+  assert.equal(reader.substrateApis.get(target.endpoint), replacement);
+  assert.equal(disconnected, 0);
+  await reader.close();
+});
+
 test("default WS factory stops reconnecting when initialization hangs", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let disconnected = 0;
