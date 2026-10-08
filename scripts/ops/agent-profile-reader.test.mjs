@@ -7,12 +7,13 @@ const REPO_ROOT = new URL("../../", import.meta.url);
 const TESTER_WALLET = "0x97450bf69cb4aeb0b33db3ae51ac2d18224d4b5c";
 const PROFILE_URL = `https://api.averray.com/agents/${TESTER_WALLET}`;
 
+
 const [agentSource, helperSource, profileFixture, syntheticProfileFixture, profileHtml] = await Promise.all([
-  readFile(new URL("site/agent.js", REPO_ROOT), "utf8"),
+  readFile(new URL("marketing/public/agent.js", REPO_ROOT), "utf8"),
   readFile(new URL("marketing/public/reader-fetch.js", REPO_ROOT), "utf8"),
   readFile(new URL(`marketing/fixtures/agent-profile-${TESTER_WALLET}.json`, REPO_ROOT), "utf8").then(JSON.parse),
   readFile(new URL("marketing/fixtures/agent-profile-synthetic.json", REPO_ROOT), "utf8").then(JSON.parse),
-  readFile(new URL("site/agent.html", REPO_ROOT), "utf8")
+  readFile(new URL("marketing/public/agent.html", REPO_ROOT), "utf8")
 ]);
 
 const ELEMENT_IDS = [
@@ -97,6 +98,23 @@ async function waitFor(predicate, message) {
   }
   assert.fail(message);
 }
+test("unlisted profile is distinguished from HTTP and network failures", async () => {
+  for (const [status, error, expected] of [
+    [404, "agent_not_found", "not listed in the public agent directory"],
+    [404, "not_found", "Profile data could not be loaded"],
+    [503, "agent_not_found", "Profile data could not be loaded"]
+  ]) {
+    const { context, elements } = createHarness({
+      fetch: async () => ({ ok: false, status, json: async () => ({ error }) })
+    });
+    vm.runInContext(helperSource, context);
+    vm.runInContext(agentSource, context);
+    await waitFor(() => elements.get("profile-loading").innerHTML.includes(expected), expected);
+    assert.equal(elements.get("profile-content").hidden, true);
+  }
+  const sync = await readFile(new URL("scripts/sync-marketing-site.mjs", REPO_ROOT), "utf8");
+  assert.match(sync, /generatedEntries = \[[^;]*"agent.js"/);
+});
 
 async function renderFixture(profile) {
   const { context, elements } = createHarness();
@@ -212,8 +230,8 @@ test("friendly agent paths resolve every profile asset from the site root", () =
 
   assert.deepEqual(scripts, [
     "/site.js?v=20260821",
-    "/reader-fetch.js?v=20260823",
-    "/agent.js?v=20260925"
+    "/reader-fetch.js?v=20261007",
+    "/agent.js?v=20261007"
   ]);
   assert.equal(new URL(stylesheet, friendlyUrl).pathname, "/styles.css");
   assert.equal(new URL(scripts[1], friendlyUrl).pathname, "/reader-fetch.js");

@@ -35,6 +35,8 @@ export interface AuthSnapshot {
 type Listener = (snapshot: AuthSnapshot) => void;
 
 const listeners = new Set<Listener>();
+// A reason left by an earlier visit is not evidence of a session this visit.
+let visitReason: string | undefined;
 
 function hasWindow(): boolean {
   return typeof window !== "undefined" && typeof localStorage !== "undefined";
@@ -84,7 +86,7 @@ export function getAuthSnapshot(): AuthSnapshot {
     expiresAt: session?.expiresAt,
     roles: session?.roles ?? [],
     lastReason: hasWindow()
-      ? localStorage.getItem(REAUTH_REASON_KEY) ?? (storedSessionExpired() ? "siwe_expired" : undefined)
+      ? visitReason ?? (storedSessionExpired() ? "siwe_expired" : undefined)
       : undefined,
   };
 }
@@ -95,6 +97,7 @@ export function getStoredToken(): string | undefined {
 
 export function writeSession(session: AuthSession): void {
   if (!hasWindow()) return;
+  visitReason = undefined;
   localStorage.setItem(TOKEN_KEY, session.token);
   localStorage.setItem(WALLET_KEY, session.wallet);
   localStorage.setItem(EXPIRES_KEY, session.expiresAt);
@@ -105,6 +108,7 @@ export function writeSession(session: AuthSession): void {
 
 export function clearSession(reason?: string): void {
   if (!hasWindow()) return;
+  visitReason = reason;
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(WALLET_KEY);
   localStorage.removeItem(EXPIRES_KEY);

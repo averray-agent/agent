@@ -22,6 +22,10 @@
         if (!response.ok) {
           var responseError = new Error("HTTP " + response.status);
           responseError.status = response.status;
+          try {
+            var failure = await response.json();
+            responseError.code = typeof failure.error === "string" ? failure.error : failure.code;
+          } catch { /* A non-JSON error is still a fetch failure, not an unlisted profile. */ }
           throw responseError;
         }
         return await response.json();
