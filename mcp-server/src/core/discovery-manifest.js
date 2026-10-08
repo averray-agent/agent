@@ -13,7 +13,7 @@ import {
 } from "./earnings-door-copy.js";
 import { DEFAULT_MIN_REWARD_USDC } from "./external-posting-policy.js";
 import { buildAgentSurfaceParity } from "./agent-surface-parity.js";
-import { LIST_VERIFICATION_PROFILES_DESCRIPTION } from "./verify-product-copy.js";
+import { MCP_TOOLS } from "../protocols/mcp/tools.js";
 
 const DEFAULT_BASE_URL = "https://api.averray.com";
 const DEFAULT_DISCOVERY_URL = "https://averray.com/.well-known/agent-tools.json";
@@ -569,115 +569,19 @@ const HTTP_ACTION_REQUIREMENTS = [
   }
 ];
 
-const DISCOVERY_TOOL_DEFINITIONS = [
-  { name: "getPlatformCapabilities", description: "Capability + endpoint manifest for this deployment." },
-  {
-    name: "listJobs",
-    description: "Claimable jobs by default through MCP, paginated at 50. Follow cursor and use include for additional states. HTTP /jobs with no parameters remains the complete legacy array. since adds freshness counts, not a complete-page guarantee."
-  },
-  { name: "getJobDefinition", description: "One job by id." },
-  // The buyer half of the loop has to be findable, not just the worker half.
-  // This is the read-only, no-auth poster contract: economics, minimum
-  // reward, cancellation terms, and the funding flow. An agent browsing the
-  // directory can learn that posting exists and what it costs before it has
-  // any session. The two tools that follow it (draftJob and
-  // buildPostJobTransactions) stay connected-only because both are SIWE-bound.
-  {
-    name: "getPosterOnboarding",
-    description:
-      "The poster contract: fee semantics, minimum reward, cancellation terms, and the draft-fund-watch flow for funding a job from your own wallet."
-  },
-  { name: "validateJobSubmission", description: "Check a draft payload against the job output schema before claiming or submitting." },
-  { name: "getSessionStateMachine", description: "Read the canonical session lifecycle graph and allowed transitions." },
-  { name: "listJobSchemas", description: "List built-in structured job schemas and their canonical paths." },
-  { name: "getJobSchema", description: "Fetch one built-in structured job schema by name." },
-  { name: "recommendJobs", description: "Wallet-scoped ranked recommendations with claim-tier gate info." },
-  { name: "preflightJob", description: "Pre-claim eligibility + stake + claim-tier + priority-window check." },
-  { name: "explainEligibility", description: "Per-wallet reason why a job is eligible / blocked." },
-  { name: "getDepositPoolInfo", description: "Live pool, depositor-risk disclosure, and wallet-specific vested-capacity truth." },
-  { name: "buildDepositPoolTransactions", description: "Wallet-bound unsigned approve/deposit or redeem templates; never a relay." },
-  { name: "getAccountPosition", description: "Read your own earnings account, statement, ownership proof, withdrawal door, and retention choices." },
-  { name: "buildAccountDepositTransactions", description: "Complete unsigned Hub USDC approve and AgentAccountCore self-deposit templates; the account owner pays DOT gas, signs, and broadcasts." },
-  { name: "buildWithdrawTransactions", description: "Complete unsigned account withdrawal and optional onward transfer; eligible first withdrawals can request a lifetime-once 0.03 DOT grant from this exact intent." },
-  { name: "quoteLockedDeposit", description: "Complete T30/T90 disclosure and exact EIP-4361 consent message before any lock exists." },
-  { name: "getCreditInfo", description: "Live L1 plus receipt-graph L2/L3 limits, outstanding loans, disclosure, and sweep truth." },
-  { name: "buildCreditTransactions", description: "Wallet-bound L1 templates and L2/L3 consent payloads with exact AAC sweep-repayment authorizations." },
-  { name: "estimateNetReward", description: "Profile-aware reward estimate." },
-  { name: "getJobTierLadder", description: "The skill-score ladder defining starter / pro / elite claim tiers." },
-  { name: "getAccountSummary", description: "Balance sheet for a wallet." },
-  { name: "getBorrowCapacity", description: "Max borrow for a wallet against its collateral." },
-  { name: "getReputation", description: "Skill / reliability / economic + public reputation tier." },
-  { name: "listAgents", description: "Recent agent directory rows for operator dashboards." },
-  { name: "getAgentProfile", description: "Aggregate agent profile (reputation + badges + stats)." },
-  { name: "listBadges", description: "Recent badge receipts for completed sessions." },
-  { name: "getAgentBadge", description: "Per-completion badge metadata by sessionId." },
-  { name: "listDisputes", description: "Read the dispute queue for operator review." },
-  { name: "getDispute", description: "Read one dispute evidence bundle and timeline." },
-  { name: "getVerificationResult", description: "Read the last verifier outcome for a session." },
-  { name: "listVerifierHandlers", description: "Supported verifier modes + configs." },
-  { name: "listVerificationProfiles", description: LIST_VERIFICATION_PROFILES_DESCRIPTION },
-  { name: "resumeSession", description: "Load the latest state of a session." },
-  { name: "listSessions", description: "Lifetime session history for a wallet." },
-  { name: "getXcmRequest", description: "Read the current lifecycle state of one async XCM request." }
-];
-
-// These tools exist on an initialized, authenticated MCP connection but are
-// deliberately absent from the directory-safe discovery slice: two are the
-// SIWE-bound half of the poster flow, three create or rotate the wallet
-// session, and four mutate authenticated account state. The poster flow's
-// public read (getPosterOnboarding) is deliberately NOT here — a browsing
-// agent must be able to discover that posting exists and what it costs.
-// Keeping the omission explicit prevents a new MCP tool from silently drifting
-// out of discovery.
-export const CONNECTED_ONLY_TOOLS = Object.freeze([
-  "draftJob",
-  "buildPostJobTransactions",
-  "fetchAuthNonce",
-  "verifySiwe",
-  "refreshAuthToken",
-  "claimJob",
-  "submitWork",
-  "createLockedDeposit",
-  "requestLockedDepositExit"
-]);
-
-// These names describe existing HTTP read surfaces and have no same-named MCP
-// tool. Their explicit marker prevents discovery copy from implying an MCP
-// capability that the transport cannot resolve.
-export const DISCOVERY_HTTP_ONLY_TOOLS = Object.freeze([
-  "getSessionStateMachine",
-  "listJobSchemas",
-  "getJobSchema",
-  "recommendJobs",
-  "getJobTierLadder",
-  "getAccountSummary",
-  "getBorrowCapacity",
-  "getReputation",
-  "listAgents",
-  "getAgentProfile",
-  "listBadges",
-  "getAgentBadge",
-  "listDisputes",
-  "getDispute",
-  "getVerificationResult",
-  "listVerifierHandlers",
-  "resumeSession",
-  "listSessions",
-  "getXcmRequest"
-]);
-
-const HTTP_ONLY_TOOL_NAMES = new Set(DISCOVERY_HTTP_ONLY_TOOLS);
-
-export const DISCOVERY_TOOLS = Object.freeze(DISCOVERY_TOOL_DEFINITIONS.map((entry) => Object.freeze({
+// Public metadata is not permission to execute a tool. Share the served MCP
+// registry, including its authentication metadata, instead of a second list
+// of HTTP pseudo-tools and a hand-maintained connected-only exception list.
+export const DISCOVERY_TOOLS = Object.freeze(MCP_TOOLS.map((entry) => Object.freeze({
   ...entry,
-  surface: HTTP_ONLY_TOOL_NAMES.has(entry.name) ? "http_only" : "mcp"
+  surface: "mcp"
 })));
 
 const buildBaseManifest = (network) => ({
   name: "Averray — trusted agent work + identity runtime",
   version: "0.5.0",
   description:
-    "Outcome-assurance infrastructure on Polkadot: verify results, prove work, release payment, and issue signed, content-addressed receipts. Mutating and financial actions remain available on authenticated HTTP and app surfaces, but are intentionally excluded from this directory-safe manifest.",
+    "Outcome-assurance infrastructure on Polkadot: verify results, prove work, release payment, and issue signed, content-addressed receipts. The tool catalog mirrors MCP tools/list, including authentication requirements. Advertising a tool does not authorize execution; protected actions require wallet sign-in. HTTP-only operations are listed separately as endpoints.",
   protocols: ["http", "mcp"],
   discoveryMode: "directory-safe",
   products: {

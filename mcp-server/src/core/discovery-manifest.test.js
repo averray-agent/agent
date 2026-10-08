@@ -128,9 +128,9 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   )));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/verify/runs"));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/verify/runs/:runId"));
-  assert.ok(manifest.tools.some((tool) => tool.name === "listJobSchemas"));
+  assert.ok(manifest.publicEndpoints.some((endpoint) => endpoint.path === "/schemas/jobs"));
   assert.ok(manifest.tools.some((tool) => tool.name === "listVerificationProfiles"));
-  assert.ok(manifest.tools.some((tool) => tool.name === "getSessionStateMachine"));
+  assert.ok(manifest.publicEndpoints.some((endpoint) => endpoint.path === "/session/state-machine"));
   assert.equal(manifest.auth.schemeId, "SIWE_JWT");
   assert.deepEqual(manifest.auth.supportedWalletModes, ["evm-siwe", "substrate-native"]);
   assert.deepEqual(manifest.auth.plannedWalletModes, []);
@@ -287,11 +287,13 @@ test("mainnet chainId renders the mainnet chain block on every network-dependent
   )));
 
   // Anti-desync guard: nothing in the mainnet manifest may still reference the
-  // testnet chain, its currency, or a faucet — however the wording evolves.
+  // testnet chain, currency, or faucet URL. MCP's withdrawal input explicitly
+  // says its eligibility-bound grant is not a standing faucet.
   const serialized = JSON.stringify(manifest);
   assert.ok(!serialized.includes(String(POLKADOT_HUB_TESTNET_CHAIN_ID)));
   assert.ok(!/testnet/iu.test(serialized));
-  assert.ok(!/faucet/iu.test(serialized));
+  assert.ok(!/faucetUrl|https?:[^" ]*faucet/iu.test(serialized));
+  assert.match(serialized, /not a standing faucet/u);
   assert.ok(!serialized.includes('"PAS"'));
 });
 

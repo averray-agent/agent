@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile, access } from "node:fs/promises";
 import test from "node:test";
-import { buildDiscoveryManifest, CONNECTED_ONLY_TOOLS } from "./discovery-manifest.js";
+import { buildDiscoveryManifest } from "./discovery-manifest.js";
+import { MCP_TOOLS } from "../protocols/mcp/tools.js";
 import { DISCOVERY_ALIAS_PATHS } from "./discovery-aliases.js";
 import { publicOpenApiErrors } from "./public-openapi-contract.js";
 import { createPublicMetadataRoutes } from "../protocols/http/public-metadata-routes.js";
@@ -35,7 +36,7 @@ function harness() {
   };
 }
 
-test("discovery aliases expose exactly the request-time directory-safe tools and no connected-only tools", async () => {
+test("discovery aliases expose exactly the served MCP registry including protected tools", async () => {
   const h = harness();
   for (const path of DISCOVERY_ALIAS_PATHS) {
     for (const marker of ["first request", "changed manifest"]) {
@@ -46,11 +47,8 @@ test("discovery aliases expose exactly the request-time directory-safe tools and
       assert.equal(response.json.name, marker);
       assert.equal(response.json.discoveryMode, "directory-safe");
       assert.deepEqual(response.json.capabilities, h.manifest().tools);
-      const serializedBody = JSON.stringify(response.json);
-      for (const name of CONNECTED_ONLY_TOOLS) {
-        assert.ok(!response.json.capabilities.some((tool) => tool.name === name), `${path}: ${name}`);
-        assert.equal(serializedBody.includes(name), false, `${path}: serialized body contains connected-only name ${name}`);
-      }
+      assert.deepEqual(response.json.capabilities.map(({ name }) => name).sort(),
+        MCP_TOOLS.map(({ name }) => name).sort());
     }
     assert.equal((await h.get(path, "POST")).handled, false);
   }

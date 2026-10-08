@@ -5,8 +5,6 @@ import test from "node:test";
 import { ROUTE_CAPABILITY_RULES } from "../auth/capabilities.js";
 import { buildAgentSurfaceParity } from "./agent-surface-parity.js";
 import {
-  CONNECTED_ONLY_TOOLS,
-  DISCOVERY_HTTP_ONLY_TOOLS,
   DISCOVERY_TOOLS,
   buildDiscoveryManifest
 } from "./discovery-manifest.js";
@@ -15,33 +13,20 @@ import { buildProductionDiscoveryManifestContent } from "../../../scripts/ops/di
 
 const REPO_ROOT = new URL("../../../", import.meta.url);
 
-test("MCP and discovery tool catalogues agree except for the explicit connected-only boundary", () => {
-  const mcpNames = new Set(MCP_TOOLS.map(({ name }) => name));
-  const discoveryNames = new Set(DISCOVERY_TOOLS.map(({ name }) => name));
-  const connectedOnlyNames = new Set(CONNECTED_ONLY_TOOLS);
-  const httpOnlyNames = new Set(DISCOVERY_HTTP_ONLY_TOOLS);
-
-  assert.equal(connectedOnlyNames.size, CONNECTED_ONLY_TOOLS.length, "CONNECTED_ONLY_TOOLS contains duplicates");
-  assert.equal(httpOnlyNames.size, DISCOVERY_HTTP_ONLY_TOOLS.length, "DISCOVERY_HTTP_ONLY_TOOLS contains duplicates");
-
-  for (const name of mcpNames) {
-    assert.ok(
-      discoveryNames.has(name) || connectedOnlyNames.has(name),
-      `MCP tool ${name} must be discoverable or explicitly connected-only`
-    );
-  }
-  for (const name of connectedOnlyNames) {
-    assert.ok(mcpNames.has(name), `connected-only tool ${name} must resolve to a real MCP tool`);
-    assert.equal(discoveryNames.has(name), false, `connected-only tool ${name} must stay outside directory-safe discovery`);
-  }
-  for (const tool of DISCOVERY_TOOLS) {
-    assert.ok(["mcp", "http_only"].includes(tool.surface), `${tool.name} must declare its transport surface`);
-    if (tool.surface === "mcp") {
-      assert.ok(mcpNames.has(tool.name), `advertised MCP tool ${tool.name} does not resolve`);
-      assert.equal(httpOnlyNames.has(tool.name), false);
-    } else {
-      assert.ok(httpOnlyNames.has(tool.name), `HTTP-only tool ${tool.name} is missing from the explicit declaration`);
-      assert.equal(mcpNames.has(tool.name), false, `HTTP-only tool ${tool.name} unexpectedly resolves through MCP`);
+test("MCP and every discovery mirror have exactly one served tool catalogue", async () => {
+  const names = (tools) => tools.map(({ name }) => name).sort();
+  const expected = names(MCP_TOOLS);
+  assert.equal(new Set(expected).size, expected.length);
+  assert.deepEqual(names(DISCOVERY_TOOLS), expected);
+  assert.deepEqual(names(buildDiscoveryManifest().tools), expected);
+  for (const path of ["discovery/agent-tools.json", "discovery/.well-known/agent-tools.json", "site/.well-known/agent-tools.json"]) {
+    const manifest = JSON.parse(await readFile(new URL(path, REPO_ROOT), "utf8"));
+    assert.deepEqual(names(manifest.tools), expected, path);
+    for (const tool of MCP_TOOLS) {
+      const advertised = manifest.tools.find((entry) => entry.name === tool.name);
+      assert.deepEqual(advertised.inputSchema, tool.inputSchema, tool.name);
+      assert.deepEqual(advertised._meta, tool._meta, tool.name);
+      assert.deepEqual(advertised.annotations, tool.annotations, tool.name);
     }
   }
 });
