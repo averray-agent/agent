@@ -65,12 +65,14 @@ export class GithubPrReviewService {
     const queue = await this.pending({ now, upstream: false });
     const github = queue.items.filter((item) => item.verifierMode === "github_pr");
     const oldestGithubAgeMs = github[0]?.ageMs ?? null;
+    const overdue = github.filter((item) => item.ageMs > this.slaHours * 3_600_000);
     return { enabled: this.enabled, running: this.running, intervalMs: this.intervalMs,
       count: queue.count, oldestAgeMs: queue.oldestAgeMs, githubPrCount: github.length,
       githubUpstream: this.getUpstreamHealth(now, github.length),
       oldestGithubAgeMs, slaHours: this.slaHours,
       warnings: [...(oldestGithubAgeMs > this.slaHours * 3_600_000 ? [{
         code: "github_pr_review_overdue", severity: "warning", oldestAgeMs: oldestGithubAgeMs,
+        count: overdue.length, sessionIds: overdue.map((item) => item.sessionId),
         sessionId: github[0].sessionId, message: "GitHub PR review is overdue; operator review required."
       }] : []), ...this.runWarnings()],
       ...this.schedulerLoop.getStatus(now), lastRun: this.lastRun, recentRuns: this.recentRuns };

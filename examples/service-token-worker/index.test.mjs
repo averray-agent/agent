@@ -15,6 +15,13 @@ import {
 const wallet = "0x1234567890123456789012345678901234567890";
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 
+test("degraded health is a serving API with warnings, not an outage", () => {
+  const summary = buildWorkerSummary({ wallet, health: { status: "degraded", serviceHealth: { ok: true } } });
+  assert.equal(summary.health.ok, true);
+  assert.equal(summary.health.status, "degraded");
+  assert.equal(buildWorkerSummary({ wallet, health: { status: "degraded", serviceHealth: { ok: false } } }).health.ok, false);
+});
+
 test("every capability in every worker bundle is a real platform capability", () => {
   const known = listAllKnownCapabilities();
   for (const [bundleName, capabilities] of Object.entries(WORKER_CAPABILITY_BUNDLES)) {

@@ -404,7 +404,7 @@ describe_verifier_streak() {
 # after a recreate and gating it here would be a new flake, not a fix.
 health_transient_verifier_critical() {
   jq -e --argjson graceSec "$VERIFIER_CRITICAL_GRACE_SEC" '
-    (.status == "ok")
+    ((.status == "ok") or (.status == "degraded" and .serviceHealth.ok == true))
     and (.components.stateStore.ok == true)
     and ([.warnings[]? | objects | select(.code == "indexer_stalled")] | length == 0)
     and (.components.submittedJobAutoVerifier as $v
@@ -607,7 +607,7 @@ echo "Checking API health"
 # health_transient_verifier_critical).
 api_health_clauses=(
   status_ok
-    '.status == "ok"'
+    '(.status == "ok") or (.status == "degraded" and .serviceHealth.ok == true)'
     '{status, serviceHealth}'
   state_store_ok
     '.components.stateStore.ok == true'

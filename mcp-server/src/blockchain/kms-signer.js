@@ -121,7 +121,8 @@ export class KmsSigner extends AbstractSigner {
    *   and falls through to the SDK's default credential chain (env vars,
    *   shared config, etc.), preserving pre-5a behavior.
    */
-  constructor({ kmsClient, region, keyId, provider, logger, credentialsProvider }) {
+  #health;
+  constructor({ kmsClient, region, keyId, provider, logger, credentialsProvider, health }) {
     super(provider ?? null);
     if (!keyId || typeof keyId !== "string") {
       throw new Error("KmsSigner: keyId is required (KMS key id, ARN, or alias)");
@@ -134,7 +135,10 @@ export class KmsSigner extends AbstractSigner {
     this.#credentialsProvider = credentialsProvider ?? null;
     this.#keyId = keyId;
     this.#logger = logger ?? null;
+    this.#health = health ?? { ok: false, lastSignAt: null };
   }
+
+  getHealth() { return { ...this.#health }; }
 
   async #getClient() {
     if (this.#kmsClient) return this.#kmsClient;
@@ -197,6 +201,7 @@ export class KmsSigner extends AbstractSigner {
       provider,
       logger: this.#logger,
       credentialsProvider: this.#credentialsProvider ?? undefined,
+      health: this.#health,
     });
   }
 
@@ -305,6 +310,17 @@ export class KmsSigner extends AbstractSigner {
    * @returns {Promise<import("ethers").Signature>}
    */
   async #signDigest(digestBytes) {
+    try {
+      const signature = await this.#signDigestUnchecked(digestBytes);
+      Object.assign(this.#health, { ok: true, lastSignAt: new Date().toISOString() });
+      return signature;
+    } catch (error) {
+      this.#health.ok = false;
+      throw error;
+    }
+  }
+
+  async #signDigestUnchecked(digestBytes) {
     if (!(digestBytes instanceof Uint8Array) || digestBytes.length !== 32) {
       throw new Error("KmsSigner.#signDigest: expected 32-byte Uint8Array digest");
     }

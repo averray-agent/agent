@@ -107,6 +107,7 @@ function makeHarness(overrides = {}) {
       res.headers = headers;
     },
     service,
+    getCredentialsHealth: overrides.getCredentialsHealth,
     stateStore: overrides.stateStore ?? {
       constructor: { name: "MemoryStateStore" },
       healthCheck: async () => {
@@ -118,6 +119,15 @@ function makeHarness(overrides = {}) {
   return { calls, response, route, service };
 }
 
+test("GET /health exposes credential freshness without making an unavailable signer a 503", async () => {
+  const credentials = { rolesAnywhere: { ok: false, notAfter: "2026-10-08T00:00:00Z" },
+    badgeReceiptSigner: { ok: true, kid: "badge-1" }, kms: { ok: false, lastSignAt: null } };
+  const { route, response } = makeHarness({ getCredentialsHealth: async () => credentials });
+  await route({ request: { method: "GET" }, response, pathname: "/health" });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body.serviceHealth.components.credentials, credentials);
+});
+
 test("GET /health exposes overdue GitHub review and upstream health without changing API liveness", async () => {
   const githubUpstream = { ok: false, lastSuccessAt: "2026-10-06T12:00:00Z", lastError: "github_api_401" };
   const warning = { code: "github_pr_review_overdue", severity: "warning", oldestAgeMs: 49 * 3_600_000 };
@@ -126,6 +136,7 @@ test("GET /health exposes overdue GitHub review and upstream health without chan
   } } });
   await route({ request: { method: "GET" }, response, pathname: "/health" });
   assert.equal(response.statusCode, 200);
+  assert.equal(response.body.status, "degraded");
   assert.deepEqual(response.body.serviceHealth.components.githubUpstream, githubUpstream);
   assert.deepEqual(response.body.warnings.find((item) => item.code === warning.code), warning);
   assert.equal(response.body.settlement.awaitingHumanReview, 0);

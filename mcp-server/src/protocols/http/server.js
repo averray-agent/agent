@@ -998,6 +998,7 @@ const handlePaymentRoute = createPaymentRoutes({
 });
 
 const handleOperationalRoute = createOperationalRoutes({
+  badgeReceiptSigner,
   authConfig,
   externalPostingMode: externalPostingService.config.mode,
   externalPostingWatcher,

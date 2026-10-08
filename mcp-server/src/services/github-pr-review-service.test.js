@@ -157,6 +157,19 @@ async function add(store, id, mode = "github_pr", status = "submitted") {
       summary: "Fix issue #1", tests: "Local test passed" }) });
 }
 
+test("overdue warning lists every overdue GitHub session beyond the first page", async () => {
+  const store = new MemoryStateStore();
+  for (let i = 0; i < 103; i++) await add(store, "overdue-" + i);
+  await add(store, "human", "human_fallback");
+  const service = new GithubPrReviewService({ stateStore: store, githubToken: "fixture" });
+  const status = await service.getStatus(new Date("2026-10-08T12:00:00Z"));
+  const warning = status.warnings.find((item) => item.code === "github_pr_review_overdue");
+  assert.equal(warning.count, 103);
+  assert.equal(new Set(warning.sessionIds).size, 103);
+  assert.ok(warning.sessionIds.includes("overdue-102"));
+  assert.ok(!warning.sessionIds.includes("human"));
+});
+
 test("empty GitHub poll is explicitly idle while never-run remains not checked", async () => {
   const store = new MemoryStateStore();
   await add(store, "human", "human_fallback");
@@ -191,6 +204,8 @@ test("pending is exactly all submitted non-auto sessions, including sessions old
   const overdue = await service.getStatus(new Date(+now + 60_000));
   assert.equal(overdue.warnings[0].code, "github_pr_review_overdue");
   assert.equal(overdue.warnings[0].severity, "warning");
+  assert.equal(overdue.warnings[0].count, 1);
+  assert.deepEqual(overdue.warnings[0].sessionIds, ["old-pr"]);
   assert.equal(overdue.oldestAgeMs, 48 * 3_600_000 + 60_000);
 });
 

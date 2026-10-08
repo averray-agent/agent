@@ -679,6 +679,7 @@ export async function buildProductHealthSnapshot({
       stateStore,
       now,
       limit: settlementSessionLimit,
+      reviewSlaHours: env.GITHUB_PR_REVIEW_SLA_HOURS,
       stuckAfterMs: settlementStuckAfterMs
     })
   ]);
@@ -875,7 +876,7 @@ function rewardBankReadingAgeMs(reading, nowMs) {
     : Number.POSITIVE_INFINITY;
 }
 
-async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs }) {
+async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs, reviewSlaHours }) {
   const asOf = now.toISOString();
   const fallback = {
     claimed24h: 0,
@@ -886,6 +887,7 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
     claimedNotSubmitted: 0,
     submittedNotSettled: 0,
     awaitingHumanReview: 0,
+    overdueReview: 0,
     stuck: 0,
     failed24h: 0,
     asOf,
@@ -898,7 +900,17 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
   }
 
   try {
-    const sessions = await stateStore.listRecentSessions(limit);
+    const sessions = [], seenSessions = new Set();
+    for (let offset = 0; ; offset += limit) {
+      const page = await stateStore.listRecentSessions(limit, offset);
+      let added = 0;
+      for (const session of Array.isArray(page) ? page : []) {
+        const key = session.sessionId ?? JSON.stringify(session);
+        if (seenSessions.has(key)) continue;
+        seenSessions.add(key); sessions.push(session); added++;
+      }
+      if (!Array.isArray(page) || page.length < limit || added === 0) break;
+    }
     const nowMs = now.getTime();
     const cutoffMs = nowMs - 24 * 60 * 60 * 1000;
     let claimed24h = 0;
@@ -909,6 +921,9 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
     let claimedNotSubmitted = 0;
     let submittedNotSettled = 0;
     let awaitingHumanReview = 0;
+    let overdueReview = 0;
+    const configuredSlaHours = Number(reviewSlaHours);
+    const reviewSlaMs = (Number.isFinite(configuredSlaHours) && configuredSlaHours > 0 ? configuredSlaHours : 48) * 3_600_000;
     let stuck = 0;
     let failed24h = 0;
     const seenFailures = new Set();
@@ -939,6 +954,7 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
       }
       if (await isAwaitingHumanReview(session, stateStore)) {
         awaitingHumanReview += 1;
+        if (nowMs - Date.parse(session.submittedAt) > reviewSlaMs) overdueReview++;
       } else if (isSubmittedStuck(session, nowMs, stuckAfterMs)) {
         stuck += 1;
       }
@@ -979,6 +995,7 @@ async function resolveSettlementHealth({ stateStore, now, limit, stuckAfterMs })
       claimedNotSubmitted,
       submittedNotSettled,
       awaitingHumanReview,
+      overdueReview,
       stuck,
       failed24h,
       asOf,

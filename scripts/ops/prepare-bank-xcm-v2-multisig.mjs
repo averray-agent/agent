@@ -319,7 +319,7 @@ export function assertRuntimeFlowDisabled({ health, wrapper, adapter, template }
     throw new Error("backend mainnet template does not keep BANK_XCM_FLOW_ENABLED=false.");
   }
   if (
-    health?.status !== "ok" ||
+    !(health?.status === "ok" || (health?.status === "degraded" && health?.serviceHealth?.ok === true)) ||
     Number(health?.auth?.chainId) !== BANK_XCM_V2.chainId ||
     getAddress(health?.addresses?.xcmWrapper) !== getAddress(wrapper) ||
     getAddress(health?.addresses?.hydrationUsdcAdapter) !== getAddress(adapter) ||

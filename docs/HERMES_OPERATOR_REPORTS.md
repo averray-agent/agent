@@ -6,6 +6,26 @@ behavior. It exists so a future incident-response or compliance pass
 does not have to re-derive "what did Hermes do, where did the evidence
 land, what id do I quote" from the workflow YAML.
 
+## API health: serving versus degraded
+
+For monitor and Hermes consumers, HTTP 200 with `status: "degraded"` and
+`serviceHealth.ok: true` means a serving API with warnings, not an outage.
+An overdue GitHub review sets that status and supplies the full overdue
+`sessionIds` list and `count`; `settlement.overdueReview` counts human-review
+sessions older than the configured SLA. Do not convert this review backlog
+into a process-down alert or a deploy rollback. HTTP 503 remains the
+non-serving contract. Existing critical correctness gates remain independent.
+
+`serviceHealth.components.credentials` reports the earliest Roles Anywhere
+certificate expiry across all three configured signer profiles, the badge
+receipt key id and last signing result, and the blockchain KMS signer's last
+successful signing time/result. Missing certificate evidence and signers not
+yet used are not reported healthy. These are local observations, not active
+AWS probes; no signature or transaction is created by a health request.
+After a signer failure the last successful time remains visible but `ok`
+is false. Certificate reads are cached for 60 seconds. Private keys, profile
+commands, paths and raw errors are not exposed.
+
 ## What Hermes is, from this repo's perspective
 
 Hermes is an operator-side agent that lives in the

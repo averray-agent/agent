@@ -527,12 +527,27 @@ test("buildProductHealthSnapshot reports reward bank and Redis settlement counte
     claimedNotSubmitted: 2,
     submittedNotSettled: 2,
     awaitingHumanReview: 0,
+    overdueReview: 0,
     stuck: 1,
     failed24h: 2,
     asOf: "2026-07-05T12:00:00.000Z",
     source: "backend_state_store",
     readable: true
   });
+});
+
+test("overdueReview counts all human-review sessions across pages at the configured SLA, not automatic candidates", async () => {
+  const sessions = [1, 25, 26, 27].map((age, index) => ({ sessionId: String(index), jobId: String(index), status: "submitted",
+    submittedAt: new Date(Date.parse("2026-10-08T12:00:00Z") - age * 3_600_000).toISOString(),
+    jobSnapshot: buildJobSnapshot({ id: String(index), verifierMode: "github_pr" }) }));
+  const snapshot = await buildProductHealthSnapshot({ gateway: { isEnabled: () => false },
+    env: { GITHUB_PR_REVIEW_SLA_HOURS: "24" }, now: new Date("2026-10-08T12:00:00Z"), settlementSessionLimit: 2,
+    stateStore: { listRecentSessions: async (limit, offset) => sessions.slice(offset, offset + limit),
+      getMutationReceipt: async (bucket, id) => bucket === "github_pr_review_observation" && id === "3"
+        ? { previewOutcome: "approved", merged: true } : undefined }
+  });
+  assert.equal(snapshot.settlement.awaitingHumanReview, 3);
+  assert.equal(snapshot.settlement.overdueReview, 2);
 });
 
 test("settlement health splits human review from stuck without hiding approved or unreadable submissions", async () => {
@@ -555,6 +570,7 @@ test("settlement health splits human review from stuck without hiding approved o
   });
   assert.equal(snapshot.settlement.submittedNotSettled, 6);
   assert.equal(snapshot.settlement.awaitingHumanReview, 2);
+  assert.equal(snapshot.settlement.overdueReview, 2);
   assert.equal(snapshot.settlement.stuck, 4);
 });
 
