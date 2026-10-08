@@ -53,25 +53,38 @@ jobs:
         id: key
         shell: bash
         env:
-          VPS_SSH_KEY: ${{ steps.load.outputs.VPS_SSH_KEY }}
+          VPS_SSH_KEY_B64: ${{ steps.load.outputs.VPS_SSH_KEY_B64 }}
         run: |
           set -euo pipefail
           set +x
-          if [ -z "${VPS_SSH_KEY:-}" ]; then
-            echo '::error::VPS_SSH_KEY is empty after load step' >&2
+          if [ -z "${VPS_SSH_KEY_B64:-}" ]; then
+            echo '::error::VPS_SSH_KEY_B64 is empty after load step' >&2
             exit 1
           fi
+          umask 077
+          key_path="$RUNNER_TEMP/workload-identity.key"
+          : > "$key_path"
+          chmod 600 "$key_path"
+          if ! printf '%s' "$VPS_SSH_KEY_B64" | base64 -d > "$key_path" 2>/dev/null; then
+            echo '::error::VPS_SSH_KEY_B64 is not valid base64' >&2
+            exit 1
+          fi
+          # Check decoded bytes, never the Environment's single-line encoding.
           # Same OpenSSH/PEM shape check as deploy-production.yml.
-          case "$VPS_SSH_KEY" in
+          first_line=
+          IFS= read -r first_line < "$key_path" || true
+          case "$first_line" in
             -----BEGIN*PRIVATE\ KEY-----*) ;;
             *)
-              echo '::error::VPS_SSH_KEY does not look like an OpenSSH/PEM private key' >&2
+              decoded_bytes=$(wc -c < "$key_path" | tr -d '[:space:]')
+              decoded_lines=$(wc -l < "$key_path" | tr -d '[:space:]')
+              prefix_dashes=false
+              case "$first_line" in -----*) prefix_dashes=true ;; esac
+              printf '::error::Decoded SSH key shape invalid (bytes=%s, lines=%s, prefix_dashes=%s)\n' \
+                "$decoded_bytes" "$decoded_lines" "$prefix_dashes" >&2
               exit 1
               ;;
           esac
-          umask 077
-          printf '%s\n' "$VPS_SSH_KEY" > "$RUNNER_TEMP/workload-identity.key"
-          chmod 600 "$RUNNER_TEMP/workload-identity.key"
 
       - name: Prove brokered SSH access
         id: ssh
