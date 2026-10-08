@@ -40,13 +40,17 @@ test("only the two published receipt examples have static pages with real no-JS 
     assert.equal(document.querySelector('[data-field="receiptId"]').textContent, id);
     assert.match(document.querySelector('[data-field="execution.provider"]').parentElement.textContent, /Provider\s+\(unknown/);
     assert.doesNotMatch(document.body.textContent, /\{receiptId\}/);
+    assert.match(document.querySelector(".record-sub").textContent, /content-addressed receipt/u);
+    assert.doesNotMatch(document.querySelector(".record-sub").textContent, /signed/iu);
+    assert.equal(document.querySelector('link[rel="canonical"]').href, "https://averray.com/receipts/" + id + "/");
+    assert.equal(document.querySelector("[data-receipt-signature]").textContent, "Signature not checked.");
   }
 });
 
 test("generic receipt shell has append-id guidance and no dead raw JSON link", async () => {
   const document = new JSDOM(await read("marketing/dist/receipts/index.html")).window.document;
   for (const id of ids) {
-    const link = document.querySelector('a[href="/receipts/' + id + '"]');
+    const link = document.querySelector('a[href="/receipts/' + id + '/"]');
     assert.ok(link, "published example reachable from index");
     for (let node = link; node; node = node.parentElement) assert.notEqual(node.hidden, true);
   }

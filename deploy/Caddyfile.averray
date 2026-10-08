@@ -138,6 +138,8 @@ averray.com {
   rewrite @agentProfile /agent.html?wallet={re.agentProfile.1}
 
   @workReceipt path /receipts/*
+  @receiptCanonical path_regexp receiptCanonical ^/receipts/(0x[a-fA-F0-9]{64})$
+  redir @receiptCanonical /receipts/{re.receiptCanonical.1}/ 308
   # Published examples have real no-JS pages; other IDs use the live reader.
   route @workReceipt {
     try_files {path}/index.html {path} /receipts/index.html

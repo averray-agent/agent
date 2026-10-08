@@ -90,5 +90,7 @@
     status.hidden = true;
     receiptRoot.hidden = false;
     root.dataset.receiptState = "ready";
+    window.AverrayReceiptDocument = receipt;
+    if (typeof window.dispatchEvent === "function") window.dispatchEvent(new window.Event("averray:receipt-ready"));
   }).catch((error) => fail(error && error.status === 404 ? "no receipt found for this id" : "Receipt is temporarily unavailable."));
 })();

@@ -21,12 +21,13 @@ const VERIFY_RECEIPT = "0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8
     <div class="record-lede">
       <span class="eyebrow">Work receipt</span>
       <h1 class="record-title">One run, from agreement to outcome.</h1>
-      <p class="record-sub">This page reads an immutable, signed receipt from the Averray API. It attests only the single run shown here.</p>
+      <p class="record-sub">This page reads a content-addressed receipt from the Averray API. It describes only the single run shown here.</p>
     </div>
 
     <section class="record-section" aria-live="polite">
       <div class="panel" data-receipt-state="loading">
         <p data-receipt-status>Receipt not loaded.</p>
+        <p data-receipt-signature>Signature not checked.</p>
         <p data-receipt-raw-link hidden={!receiptId}>
           raw JSON: {" "}<a data-receipt-raw-url href={rawUrl}>{rawUrl?.replace("https://", "")}</a>
         </p>
@@ -38,8 +39,8 @@ const VERIFY_RECEIPT = "0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8
         <div data-receipt-guidance hidden={Boolean(receiptId)}>
           <p>
             Published examples:
-            <a href={`/receipts/${SETTLED_WORK_RECEIPT}`}>settled work receipt</a>
-            · <a href={`/receipts/${VERIFY_RECEIPT}`}>verification receipt</a>
+            <a href={`/receipts/${SETTLED_WORK_RECEIPT}/`}>settled work receipt</a>
+            · <a href={`/receipts/${VERIFY_RECEIPT}/`}>verification receipt</a>
             · <a href="/transparency/">transparency</a>
           </p>
         </div>
@@ -71,4 +72,8 @@ const VERIFY_RECEIPT = "0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8
   </main>
   <script src="/reader-fetch.js?v=20260823" is:inline></script>
   <script src="/receipt-reader.js?v=20261008" is:inline></script>
+  <script>
+    import { watchReceiptSignature } from "../receipt-signature.mjs";
+    watchReceiptSignature(window);
+  </script>
 </BaseLayout>

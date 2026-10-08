@@ -133,10 +133,11 @@ test("real Caddy returns branded 404 bodies on both site and app, never 200", {
   }
   for (const suffix of ["", "/"]) {
     const response = await request("averray.com", "/receipts/" + publishedId + suffix);
-    assert.equal(response.status, 200);
-    assert.equal(response.body, "published receipt " + publishedId);
+    assert.equal(response.status, suffix ? 200 : 308);
+    if (suffix) assert.equal(response.body, "published receipt " + publishedId);
+    else assert.equal(response.headers.location, "/receipts/" + publishedId + "/");
   }
-  for (const path of ["/receipts/", "/receipts/0x" + "9".repeat(64)]) {
+  for (const path of ["/receipts/", "/receipts/0x" + "9".repeat(64) + "/"]) {
     const response = await request("averray.com", path);
     assert.equal(response.status, 200);
     assert.equal(response.body, "generic receipt shell");
