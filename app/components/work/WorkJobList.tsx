@@ -1,8 +1,8 @@
 "use client";
-import { IssueMarkdown } from "@/components/runs/IssueMarkdown";
 
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Clock3, Fuel, ShieldCheck, WalletCards } from "lucide-react";
+import { IssueMarkdown } from "@/components/runs/IssueMarkdown";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";

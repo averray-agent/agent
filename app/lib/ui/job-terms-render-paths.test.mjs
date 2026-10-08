@@ -75,6 +75,32 @@ test("client-navigation summaries reuse the same GFM lead and keep full terms se
   assert.match(read("components/work/WorkJobDetail.tsx"), /<IssueMarkdown>\{item\}<\/IssueMarkdown>/u);
 });
 
+test("claimed session JobNotes renders instruction and success-criteria GFM without raw HTML", () => {
+  const { WorkSessionWorkspace } = load("components/work/WorkSessionWorkspace.tsx", {
+    "@/components/runs/IssueMarkdown": { IssueMarkdown },
+    "lucide-react": { ArrowLeft: () => null, Clock3: () => null },
+    "@/components/ui/badge": { Badge: box },
+    "@/components/ui/card": { Card: box, CardContent: box },
+    "@/components/ui/skeleton": { Skeleton: box },
+    "@/lib/api/hooks": {
+      useSession: () => ({ data: { sessionId: "claimed", jobId: job.id, status: "claimed" } }),
+      useJobDefinition: () => ({ data: { ...job, agentInstructions: [description] } }),
+      useBoundedApi: () => ({ data: {} })
+    },
+    "@/lib/api/client": {}, "@/lib/auth/use-auth": { useAuth: () => ({ authenticated: true }) },
+    "@/components/auth/WalletSignInFlow": { WalletSignInFlow: () => null },
+    "@/lib/work/human-work.js": work,
+    "./SchemaGuidedEditor": { SchemaGuidedEditor: () => null },
+    "./VerificationWatchPanel": { VerificationWatchPanel: () => null },
+    "./types": load("components/work/types.ts")
+  });
+  const html = renderToStaticMarkup(React.createElement(WorkSessionWorkspace, { sessionId: "claimed" }));
+  assert.match(html, /<strong[^>]*>Preserve<\/strong>/u);
+  assert.match(html, /<table/u);
+  assert.match(html, /type="checkbox"[^>]*checked/u);
+  assert.doesNotMatch(html, /\*\*Preserve\*\*|- \[x\]|<script|unsafe\(\)/u);
+});
+
 test("built static export and pretty-job route use the shared detail shell without raw Markdown", {
   skip: process.env.ASSERT_APP_EXPORT !== "1" ? "run after build:frontend with ASSERT_APP_EXPORT=1" : false
 }, () => {

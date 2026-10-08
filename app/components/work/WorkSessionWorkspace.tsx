@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ArrowLeft, Clock3 } from "lucide-react";
+import { IssueMarkdown } from "@/components/runs/IssueMarkdown";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -123,7 +124,7 @@ export function WorkSessionWorkspace({ sessionId }: { sessionId: string }) {
 
 function JobNotes({ title, items }: { title: string; items: string[] }) {
   return (
-    <Card><CardContent className="py-6"><p className="eyebrow">{title}</p>{items.length ? <ul className="mt-4 grid gap-2 text-sm leading-relaxed">{items.map((item, index) => <li className="flex gap-3" key={`${index}-${item}`}><span className="font-mono text-xs text-[var(--accent)]">{String(index + 1).padStart(2, "0")}</span>{item}</li>)}</ul> : <p className="mt-4 text-sm text-[var(--muted)]">No additional {title.toLowerCase()} were supplied.</p>}</CardContent></Card>
+    <Card><CardContent className="py-6"><p className="eyebrow">{title}</p>{items.length ? <ul className="mt-4 grid gap-2 text-sm leading-relaxed">{items.map((item, index) => <li className="flex gap-3" key={`${index}-${item}`}><span className="font-mono text-xs text-[var(--accent)]">{String(index + 1).padStart(2, "0")}</span><IssueMarkdown>{item}</IssueMarkdown></li>)}</ul> : <p className="mt-4 text-sm text-[var(--muted)]">No additional {title.toLowerCase()} were supplied.</p>}</CardContent></Card>
   );
 }
 
