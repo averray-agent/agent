@@ -115,6 +115,18 @@ export interface BadgeResponse extends ApiEnvelope {
   attributes?: ApiEnvelope[];
 }
 
+export interface ReceiptEnvelope {
+  schemaVersion: "averray.receipt-envelope.v1";
+  document: BadgeResponse;
+  unsignedPresentation: ApiEnvelope;
+}
+
+export interface BadgeListResponse {
+  items: ReceiptEnvelope[];
+  limit: number;
+  nextCursor: string | null;
+}
+
 export interface AlertListResponse extends ApiEnvelope {
   alerts?: ApiEnvelope[];
   count?: number;
@@ -961,7 +973,7 @@ export class AgentPlatformClient {
   getAgentProfile(wallet: WalletAddress): Promise<AgentProfile>;
   listAgents(options?: { limit?: number; includeSynthetic?: boolean }): Promise<AgentListResponse>;
   getAgentBadge(sessionId: SessionId): Promise<BadgeResponse>;
-  listBadges(options?: { limit?: number }): Promise<BadgeResponse[] | ApiEnvelope>;
+  listBadges(options?: { limit?: number; cursor?: string }): Promise<BadgeListResponse>;
   listAlerts(options?: { limit?: number }): Promise<AlertListResponse>;
   listAuditEvents(options?: { limit?: number }): Promise<AuditEventListResponse>;
   listPolicies(): Promise<PolicyListResponse>;

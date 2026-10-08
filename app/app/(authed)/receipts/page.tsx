@@ -141,7 +141,8 @@ const SHAPES: ShapeEntry[] = [
 ];
 
 export default function ReceiptsPage() {
-  const badgesRequest = useBadges();
+  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const badgesRequest = useBadges(cursors.at(-1) ?? null);
   const [secondaryFeedsEnabled, setSecondaryFeedsEnabled] = useState(false);
   // The co-sign KPI reads the active-policy set: with no co-sign mandate in
   // force it must render neutral "not required", never a below-target alarm.
@@ -235,6 +236,17 @@ export default function ReceiptsPage() {
 
   return (
     <div className="flex w-full max-w-[1100px] flex-col gap-5">
+      <nav aria-label="Receipt pages" className="flex flex-wrap items-center gap-4 text-sm">
+        <span>Page {cursors.length} · {rows.length} receipts. Counts and exports cover this page.</span>
+        <button type="button" disabled={cursors.length === 1 || badgesRequest.isLoading}
+          onClick={() => { setCursors((pages) => pages.slice(0, -1)); setDrawerOpen(false); }}>Previous</button>
+        <button type="button" disabled={!badgesRequest.data?.nextCursor || badgesRequest.isLoading}
+          onClick={() => {
+            const next = badgesRequest.data?.nextCursor;
+            if (next) setCursors((pages) => [...pages, next]);
+            setDrawerOpen(false);
+          }}>Next</button>
+      </nav>
       <MobileReceiptsList
         rows={rows}
         selectedId={selectedId}

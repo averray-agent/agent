@@ -2648,18 +2648,28 @@
         ],
         "operationId": "listBadges",
         "summary": "List recent public badge receipts",
-        "description": "Recent completed-session receipt metadata.",
+        "description": "Cursor-paginated receipt envelopes. Verify each document alone; unsignedPresentation is display metadata, not signed content. Cursor order is recent sessions, run before badge. A stale cursor requires restarting the list. ETag supports If-None-Match.",
         "security": [],
         "parameters": [
           {
             "name": "limit",
             "in": "query",
             "required": false,
-            "description": "Maximum 500.",
+            "description": "Receipt rows per page, default 50, maximum 500.",
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 500
+              "maximum": 500,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque nextCursor from the previous page.",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -2669,15 +2679,30 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": true
+                  "type": "object",
+                  "required": ["items", "limit", "nextCursor"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["schemaVersion", "document", "unsignedPresentation"],
+                        "properties": {
+                          "schemaVersion": { "const": "averray.receipt-envelope.v1" },
+                          "document": { "type": "object", "additionalProperties": true },
+                          "unsignedPresentation": { "type": "object", "additionalProperties": true }
+                        }
+                      }
+                    },
+                    "limit": { "type": "integer" },
+                    "nextCursor": { "type": ["string", "null"] }
                   }
                 }
               }
             }
-          }
+          },
+          "304": { "description": "Page unchanged (If-None-Match)." },
+          "400": { "description": "Invalid or stale cursor." }
         }
       }
     },

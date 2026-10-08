@@ -1253,7 +1253,8 @@ test("http smoke: /badges/:sessionId returns schema-compliant JSON for approved 
     assert.equal(listResponse.status, 200);
     const receipts = await listResponse.json();
     assert.deepEqual(
-      receipts.filter((receipt) => receipt.sessionId === sessionId).map((receipt) => receipt.kind).sort(),
+      receipts.items.filter((receipt) => receipt.unsignedPresentation.sessionId === sessionId)
+        .map((receipt) => receipt.unsignedPresentation.kind).sort(),
       ["badge", "run"]
     );
   });

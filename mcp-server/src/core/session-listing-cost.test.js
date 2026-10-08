@@ -76,7 +76,7 @@ function decoratedFixture() {
   const store = new MemoryStateStore();
   const sessions = makeSessions();
   const pages = [];
-  store.listRecentSessions = async () => sessions;
+  store.listRecentSessions = async (limit = 250, offset = 0) => sessions.slice(offset, offset + limit);
   store.listSessionsByWallet = async (wallet, limit, offset = 0) => {
     pages.push({ wallet, offset });
     return sessions.filter((s) => s.wallet === wallet).slice(offset, offset + limit);
@@ -111,7 +111,7 @@ test("decorated listing collects wallet history three times for 250 sessions of 
   assert.equal(pages.filter(({ offset }) => offset === 0).length, 6, "the next request must re-read");
 });
 
-test("badges and activity feeds skip progression but retain verification enrichment", async () => {
+test("activity feeds retain verification enrichment and badge pages read raw session metadata only", async () => {
   const { service, store } = decoratedFixture();
   const options = [];
   const original = service.listRecentSessions.bind(service);
@@ -130,6 +130,15 @@ test("badges and activity feeds skip progression but retain verification enrichm
   const badges = createListBadgeReceipts({ service, stateStore: store,
     verifierService: { getResult: async () => undefined }, buildBadgeFromSession: () => { throw new Error("no badge fixture"); }
   });
-  await badges(250);
-  assert.deepEqual(options, Array.from({ length: 4 }, () => ({ progression: false })));
+  const beforeBadges = options.length;
+  const pages = [];
+  const recent = store.listRecentSessions.bind(store);
+  store.listRecentSessions = async (limit, offset) => {
+    pages.push({ limit, offset });
+    return recent(limit, offset);
+  };
+  assert.deepEqual((await badges({ limit: 250 })).items, []);
+  assert.equal(options.length, beforeBadges, "badges do not enrich sessions or reread verifier results");
+  assert.deepEqual(pages, [0, 100, 200].map((offset) => ({ limit: 100, offset })));
+  assert.deepEqual(options, Array.from({ length: 3 }, () => ({ progression: false })));
 });

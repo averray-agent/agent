@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { ValidationError, normalizeError } from "../../core/errors.js";
 import { buildBadgeSigners } from "../../core/badge-metadata.js";
 import { BADGE_RECEIPT_JWKS_PATH } from "../../core/badge-receipt-signing.js";
@@ -18,8 +19,7 @@ export function createListBadgeReceipts({
   verifierAddress,
   verifierService
 }) {
-  return async function listBadgeReceipts(limit = 100) {
-    const sessions = await service.listRecentSessions(limit, { progression: false });
+  async function rowsForSessions(sessions) {
     const receipts = [];
     for (const session of sessions) {
       try {
@@ -60,6 +60,58 @@ export function createListBadgeReceipts({
       }
     }
     return receipts;
+  }
+
+  return async function listBadgeReceipts({ limit = 50, cursor } = {}) {
+    const after = decodeBadgeCursor(cursor);
+    const rows = [];
+    let found = !after;
+    // Page session metadata without enriching it or rereading old receipts.
+    // The cursor names a row (session + kind), not a shifting array offset.
+    for (let offset = 0; ; offset += 100) {
+      const sessions = await stateStore.listRecentSessions(100, offset);
+      for (const session of sessions) {
+        if (!found && session.sessionId !== after.sessionId) continue;
+        const receipts = await rowsForSessions([session]);
+        for (const row of receipts) {
+          if (!found) {
+            if (row.kind === after.kind) found = true;
+            continue;
+          }
+          rows.push(row);
+          if (rows.length > limit) return badgePage(rows, limit);
+        }
+      }
+      if (sessions.length < 100) break;
+    }
+    if (!found) throw new ValidationError("Badge cursor is no longer available; restart the listing.", "invalid_cursor");
+    return badgePage(rows, limit);
+  };
+}
+
+function decodeBadgeCursor(cursor) {
+  if (!cursor) return null;
+  try {
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+    if (value.v === 1 && typeof value.sessionId === "string" && value.sessionId.length
+      && ["run", "badge"].includes(value.kind)) return value;
+  } catch { /* Return a named client error, never an opaque parser failure. */ }
+  throw new ValidationError("Invalid badge cursor.", "invalid_cursor");
+}
+
+function badgePage(rows, limit) {
+  const visible = rows.slice(0, limit);
+  const last = visible.at(-1);
+  return {
+    items: visible.map(({ badge, runReceipt, ...unsignedPresentation }) => ({
+      schemaVersion: "averray.receipt-envelope.v1",
+      document: badge ?? runReceipt,
+      unsignedPresentation
+    })),
+    limit,
+    nextCursor: rows.length > limit
+      ? Buffer.from(JSON.stringify({ v: 1, sessionId: last.sessionId, kind: last.kind })).toString("base64url")
+      : null
   };
 }
 
@@ -77,7 +129,6 @@ function buildBadgeReceipt(badge, { session, verification, context } = {}) {
     signers,
     evidenceHash: averray.evidenceHash,
     blockRef: averray.chainJobId,
-    ...(badge.signature ? { signature: badge.signature } : {}),
     badge
   };
 }
@@ -101,7 +152,6 @@ function buildRunReceiptRow(document, { session } = {}) {
     blockRef: document.chainJobId,
     canonicalUrl: document.canonicalUrl,
     ...receiptPresentationFields(document),
-    ...(document.signature ? { signature: document.signature } : {}),
     runReceipt: document
   };
 }
@@ -135,9 +185,17 @@ export function createBadgeRoutes({
     }
 
     if (request.method === "GET" && pathname === "/badges") {
-      respond(response, 200, await listBadgeReceipts(parseLimit(url, 100, 500)), {
-        "cache-control": "public, max-age=30"
-      });
+      const page = await listBadgeReceipts({ limit: parseLimit(url, 50, 500), cursor: url.searchParams.get("cursor") });
+      const etag = `W/"${createHash("sha256").update(JSON.stringify(page)).digest("hex")}"`;
+      const headers = { etag, "cache-control": "public, max-age=0, must-revalidate" };
+      if (page.nextCursor) {
+        const next = new URL(url);
+        next.searchParams.set("cursor", page.nextCursor);
+        headers.link = `<${next.pathname}${next.search}>; rel="next"`;
+      }
+      const matches = String(request.headers?.["if-none-match"] ?? "").split(",")
+        .some((value) => value.trim() === "*" || value.trim().replace(/^W\//u, "") === etag.replace(/^W\//u, ""));
+      respond(response, matches ? 304 : 200, matches ? undefined : page, headers);
       return true;
     }
 

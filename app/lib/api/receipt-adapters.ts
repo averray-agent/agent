@@ -73,7 +73,12 @@ export function extractReceiptRows(data: unknown): ReceiptRowWithMeta[] {
 
 export function extractReceiptRow(data: unknown): ReceiptRowWithMeta | null {
   if (!data || typeof data !== "object") return null;
-  const record = data as Record<string, unknown>;
+  const envelope = data as Record<string, unknown>;
+  const document = objectField(envelope, "document");
+  const presentation = objectField(envelope, "unsignedPresentation");
+  const record = envelope.schemaVersion === "averray.receipt-envelope.v1" && document
+    ? { ...presentation, [presentation?.kind === "badge" ? "badge" : "runReceipt"]: document }
+    : envelope;
   if (isUiReceiptRow(record)) return normalizeUiRow(record as unknown as ReceiptRowWithMeta);
 
   const badge = objectField(record, "badge");
@@ -107,7 +112,7 @@ export function extractReceiptRow(data: unknown): ReceiptRowWithMeta | null {
     evidenceHash: evidenceHash || undefined,
     chainJobId: chainJobId || undefined,
     badge: receiptDocument ?? undefined,
-    listRow: record,
+    listRow: envelope,
   };
 }
 
@@ -136,7 +141,8 @@ export function buildReceiptDrawer(
     ? `/badges/${encodeURIComponent(row.sessionId)}/run`
     : `/badges/${encodeURIComponent(row.sessionId)}`;
   const evidenceJson = `// ${row.kind} receipt JSON — served by ${evidencePath}\n${JSON.stringify(raw, null, 2)}`;
-  const listRow = objectValue(row.listRow);
+  const storedListRow = objectValue(row.listRow);
+  const listRow = objectField(storedListRow, "unsignedPresentation") ?? storedListRow;
   const assetLine = formatReceiptAssetLine({
     assetContext: listRow?.assetContext,
     result: listRow?.result,

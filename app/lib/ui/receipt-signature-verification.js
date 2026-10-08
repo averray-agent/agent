@@ -136,6 +136,8 @@ export async function verifyReceiptSignature({
  * @returns {Record<string, unknown> | null}
  */
 export function selectCanonicalReceiptDocument({ kind, listRow, detailDocument }) {
+  if (isPlainObject(listRow) && listRow.schemaVersion === "averray.receipt-envelope.v1"
+    && isPlainObject(listRow.document)) return listRow.document;
   if (kind === "run" && isPlainObject(listRow) && isPlainObject(listRow.runReceipt)) {
     return listRow.runReceipt;
   }
