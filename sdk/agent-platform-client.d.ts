@@ -811,7 +811,20 @@ export interface PriorityQualification extends ApiEnvelope {
   qualifies?: boolean;
 }
 
+/** Worker-visible configuration. Grader answers are server-only. */
+export interface PublicVerifierConfig extends ApiEnvelope {
+  handler?: string;
+  version?: number;
+  expectedOutputs?: never;
+  rubric?: never;
+  answerKey?: never;
+  benchmarkInputs?: never;
+  requiredKeywords?: never;
+  minimumMatches?: never;
+}
+
 export interface JobDefinition extends ApiEnvelope {
+  verifierConfig?: PublicVerifierConfig;
   id: JobId;
   title?: string;
   category?: string;
@@ -840,6 +853,7 @@ export interface JobDefinition extends ApiEnvelope {
 }
 
 export interface JobSummary extends ApiEnvelope {
+  verifierConfig?: PublicVerifierConfig;
   id: JobId;
   listedAt?: ISODateTime | null;
   title?: string;

@@ -1,4 +1,5 @@
 import { ValidationError } from "../../core/errors.js";
+import { redactPublicGraderFields } from "../../core/public-grader-redaction.js";
 import { TIER_REQUIREMENTS } from "../../core/job-catalog-service.js";
 import { createHostedCanaryClaimantAttribution } from "../../core/claimant-attribution.js";
 import { ARRIVAL_CANARY_MARKER_HEADER } from "../../services/arrival-observatory.js";
@@ -18,10 +19,12 @@ export function createJobRoutes({
   protocol = "http",
   rateLimitConfig,
   readJsonBody,
-  respond,
+  respond: respondRaw,
   service,
   verifyCanaryMarker,
 }) {
+  const respond = (response, status, body, headers) =>
+    respondRaw(response, status, redactPublicGraderFields(body), headers);
   async function listPublicJobs(wallet) {
     const jobs = await service.listJobsWithSessions({ wallet });
     const projected = externalPostingService?.filterExternalCatalogProjection
@@ -47,7 +50,7 @@ export function createJobRoutes({
 
     if (request.method === "GET" && pathname === "/jobs") {
       const secured = await listPublicJobs(url.searchParams.get("wallet") ?? undefined);
-      const page = buildPublicJobsPage(secured, url.searchParams);
+      const page = redactPublicGraderFields(buildPublicJobsPage(secured, url.searchParams));
       const etag = `W/"${createHash("sha256").update(JSON.stringify(page)).digest("hex")}"`;
       const headers = { etag, "cache-control": "public, max-age=0, must-revalidate" };
       if (page.nextCursor) {
