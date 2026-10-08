@@ -22,15 +22,16 @@ function safePages(verifyHtml) {
   };
 }
 
-test("whole built Pool and Record pages reject baked amounts and a second address anywhere", () => {
+test("whole built Pool and Record pages reject baked amounts and any pool address anywhere", () => {
   for (const path of ["site/transparency/index.html", "site/pool/index.html"]) {
     const pages = { "site/transparency/index.html": "<main>Record</main>", "site/pool/index.html": "<main>Pool</main>" };
+    assert.doesNotThrow(() => assertPoolRecordTruth(pages));
     pages[path] += '<footer>1.25 <b>USDC</b></footer>';
     assert.throws(() => assertPoolRecordTruth(pages), /baked amount in whole page/);
     pages[path] = "<main>0x" + "11".repeat(20) + "</main>";
-    assert.doesNotThrow(() => assertPoolRecordTruth(pages));
+    assert.throws(() => assertPoolRecordTruth(pages), /baked pool address in whole page/);
     pages[path] += "<footer>0x" + "22".repeat(20) + "</footer>";
-    assert.throws(() => assertPoolRecordTruth(pages), /second pool address/);
+    assert.throws(() => assertPoolRecordTruth(pages), /baked pool address in whole page/);
   }
 });
 

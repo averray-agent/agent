@@ -29,7 +29,7 @@ export function assertPoolRecordTruth(pages) {
     if (typeof pages[path] !== "string") fail(`${path}: built page is missing`);
     const text = pages[path].replace(/<[^>]*>/gu, " ").replace(/&(?:nbsp|#160|#xA0);/giu, " ");
     if (/\d+(?:\.\d+)?\s*(?:USDC|DOT)\b/iu.test(text)) fail(`${path}: baked amount in whole page`);
-    if ((text.match(/0x[a-fA-F0-9]{40}\b/gu) ?? []).length > 1) fail(`${path}: second pool address in whole page`);
+    if ((text.match(/0x[a-fA-F0-9]{40}\b/gu) ?? []).length > 0) fail(`${path}: baked pool address in whole page`);
   }
 }
 
