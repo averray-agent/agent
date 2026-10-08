@@ -447,6 +447,9 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       if (githubVerified && githubLookup.ciStatus === "failing" && !mergedAccepted) {
         blockers.push("live GitHub checks must pass");
       }
+      if (githubVerified && githubLookup.state === "closed" && !githubLookup.merged) {
+        blockers.push("pull request was closed without merge");
+      }
       if (disclosureRequired && disclosureFooterObservable && !disclosureFooterPresent) {
         blockers.push("Averray disclosure footer");
       }

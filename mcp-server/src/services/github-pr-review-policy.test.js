@@ -70,6 +70,45 @@ test("five real queued disclosures bind; a failing CLA goes to human review, nev
   }
 });
 
+test("closed unmerged green PR is rejected in preview regardless of merged-approval policy; merged and open PRs are unchanged", async () => {
+  for (const acceptMergedAsApproved of [true, false]) {
+    for (const [state, merged] of [["closed", false], ["closed", true], ["open", false]]) {
+      const wallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      const store = new MemoryStateStore();
+      const job = { id: "closed-pr", category: "coding", verifierMode: "github_pr",
+        source: { type: "github_issue", repo: "owner/repo", issueNumber: 42 },
+        verifierConfig: { handler: "github_pr", version: 1, minimumScore: 80,
+          requireClaimantBinding: true, acceptMergedAsApproved } };
+      const registry = new VerifierRegistry({ githubToken: "fixture-token", fetchImpl: async (url) => {
+        if (url.endsWith("/status")) return Response.json({ state: "success", statuses: [] });
+        if (url.endsWith("/check-runs")) return Response.json({ check_runs: [
+          { name: "tests", status: "completed", conclusion: "success" }
+        ] });
+        if (url.endsWith("/reviews")) return Response.json([{ state: "APPROVED" }]);
+        return Response.json({ state, merged, title: "Fix #42",
+          body: "Closes #42. Averray claimant wallet: " + wallet,
+          html_url: "https://github.com/owner/repo/pull/43", head: { sha: "green-head" } });
+      } });
+      const session = { sessionId: "closed-pr-session", jobId: job.id, wallet, status: "submitted",
+        jobSnapshot: buildJobSnapshot(job), submission: normalizeSubmission({
+          prUrl: "https://github.com/owner/repo/pull/43", summary: "Fix #42", tests: "Tests passed"
+        }) };
+      await store.upsertSession(session);
+      const before = await store.getSession(session.sessionId);
+      const service = new VerifierService({}, store, undefined, registry);
+      const verdict = await service.previewSubmission({ sessionId: session.sessionId });
+      assert.equal(verdict.githubLookup.status, "verified");
+      assert.equal(verdict.githubLookup.ciStatus, "passing");
+      assert.equal(verdict.githubLookup.claimantBinding.status, "matched");
+      const closedUnmerged = state === "closed" && !merged;
+      assert.equal(verdict.outcome, closedUnmerged ? "rejected" : "approved");
+      assert.equal(verdict.blockers.includes("pull request was closed without merge"), closedUnmerged);
+      assert.deepEqual(await store.getSession(session.sessionId), before);
+      assert.equal(await store.getVerificationResult(session.sessionId), undefined);
+    }
+  }
+});
+
 test("preview evaluates the same handler from a rejected session snapshot without any persistence, gateway call or event", async () => {
   const store = new MemoryStateStore();
   const job = { id: "preview-job", verifierMode: "deterministic",
