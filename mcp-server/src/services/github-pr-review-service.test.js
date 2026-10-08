@@ -33,6 +33,7 @@ test("empty GitHub poll is explicitly idle while never-run remains not checked",
   await add(store, "new-pr");
   assert.equal((await review.getStatus(now)).githubUpstream.state, "pending");
   assert.equal((await review.getStatus(now)).githubUpstream.ok, false);
+  assert.equal((await review.getStatus(now)).githubUpstream.lastError, "github_pending_first_poll");
 });
 
 test("pending is exactly all submitted non-auto sessions, including sessions older than the first page; SLA is warning only", async () => {
@@ -140,6 +141,24 @@ test("open green approved PR is observation-only and counted as awaiting human r
   const snapshot = await createProductHealthSnapshotProvider({ stateStore: f.store, getRewardBankHealth: async () => ({}) })();
   assert.equal(snapshot.settlement.awaitingHumanReview, 1);
   assert.equal(snapshot.settlement.stuck, 0);
+});
+
+test("only literal merged true permits an approved complete preview to settle", async (t) => {
+  for (const merged of [undefined, null, "true", 1]) {
+    const f = await liveFixture();
+    const settle = t.mock.method(f.verifier, "verifySubmission");
+    t.mock.method(f.verifier, "previewSubmission", async () => ({ outcome: "approved",
+      githubLookup: { status: "verified", complete: true, merged, headSha: "green-head" } }));
+    const run = await f.review.runOnce();
+    assert.deepEqual(run.errors, []);
+    assert.deepEqual(run.reviewed, []);
+    assert.deepEqual(run.observed, ["pr"]);
+    assert.equal(settle.mock.callCount(), 0);
+    assert.equal((await f.store.getSession("pr")).status, "submitted");
+    const receipt = await f.store.getMutationReceipt("github_pr_review_observation", "pr");
+    assert.equal(receipt.previewOutcome, "approved");
+    assert.equal(receipt.merged, false);
+  }
 });
 
 test("merged non-approved PR records observation and never settles", async (t) => {

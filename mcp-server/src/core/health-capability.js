@@ -375,14 +375,14 @@ export function buildCapabilityWarnings(capabilityHealth) {
 
 // A status walk is single-flight and cached just like the product snapshot.
 // Keep this at the public health boundary; operator reads remain fresh.
-export function createGithubPrReviewHealthProvider({ service, now = () => new Date(), cacheMs = DEFAULT_PRODUCT_HEALTH_CACHE_MS } = {}) {
+export function createGithubPrReviewHealthProvider({ service, getService = () => service, now = () => new Date(), cacheMs = DEFAULT_PRODUCT_HEALTH_CACHE_MS } = {}) {
   let cached;
   let refreshPromise;
   return async () => {
     const nowMs = now().getTime();
     if (cached && cached.expiresAtMs > nowMs) return cached.value;
     if (refreshPromise) return refreshPromise;
-    refreshPromise = Promise.resolve().then(() => service?.getStatus?.())
+    refreshPromise = Promise.resolve().then(() => getService()?.getStatus?.())
       .catch(() => ({ githubUpstream: { ok: false, lastSuccessAt: null, lastError: "github_status_unavailable" } }))
       .then((value) => { cached = { value, expiresAtMs: nowMs + cacheMs }; return value; })
       .finally(() => { refreshPromise = undefined; });

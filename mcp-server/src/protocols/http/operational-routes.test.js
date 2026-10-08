@@ -61,6 +61,7 @@ function makeHarness(overrides = {}) {
       }
     }
   };
+  const service = { ...defaultService, ...(overrides.service ?? {}) };
   const route = createOperationalRoutes({
     authConfig: overrides.authConfig ?? AUTH_CONFIG,
     deployedSha: overrides.deployedSha,
@@ -105,7 +106,7 @@ function makeHarness(overrides = {}) {
       res.body = body;
       res.headers = headers;
     },
-    service: { ...defaultService, ...(overrides.service ?? {}) },
+    service,
     stateStore: overrides.stateStore ?? {
       constructor: { name: "MemoryStateStore" },
       healthCheck: async () => {
@@ -114,7 +115,7 @@ function makeHarness(overrides = {}) {
       }
     }
   });
-  return { calls, response, route };
+  return { calls, response, route, service };
 }
 
 test("GET /health exposes overdue GitHub review and upstream health without changing API liveness", async () => {
@@ -156,6 +157,19 @@ test("GET /health fails closed and redacts a throwing GitHub poller status read"
   assert.deepEqual(response.body.serviceHealth.components.githubUpstream,
     { ok: false, lastSuccessAt: null, lastError: "github_status_unavailable" });
   assert.doesNotMatch(JSON.stringify(response.body), /private upstream details/u);
+});
+
+test("GET /health resolves a late-installed GitHub review service on cache refresh", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-08T12:00:00Z") });
+  const { route, response, service } = makeHarness();
+  await route({ request: { method: "GET" }, response, pathname: "/health" });
+  const githubUpstream = { ok: true, state: "idle", lastError: null, lastSuccessAt: null };
+  let reads = 0;
+  service.githubPrReview = { getStatus: async () => { reads++; return { githubUpstream }; } };
+  t.mock.timers.tick(60_000);
+  await route({ request: { method: "GET" }, response, pathname: "/health" });
+  assert.equal(reads, 1);
+  assert.deepEqual(response.body.serviceHealth.components.githubUpstream, githubUpstream);
 });
 
 test("operational routes ignore unrelated paths", async () => {

@@ -83,7 +83,7 @@ export function createOperationalRoutes({
   stateStore
 }) {
   const financialMetrics = createVerifyRevenueMetrics({ stateStore });
-  const getGithubPrReviewHealth = createGithubPrReviewHealthProvider({ service: service?.githubPrReview });
+  const getGithubPrReviewHealth = createGithubPrReviewHealthProvider({ getService: () => service?.githubPrReview });
   const getLiveRewardBankHealth = getRewardBankHealth ?? createRewardBankHealthProvider({
     gateway
   });

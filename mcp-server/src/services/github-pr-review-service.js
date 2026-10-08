@@ -122,7 +122,7 @@ export class GithubPrReviewService {
     const health = { ...this.githubUpstream };
     if (this.lastRun && pendingCount === 0) return { ...health, ok: true, state: "idle", lastError: null };
     if (health.state === "idle" && pendingCount > 0) {
-      return { ...health, ok: false, state: "pending", lastError: "github_not_checked" };
+      return { ...health, ok: false, state: "pending", lastError: "github_pending_first_poll" };
     }
     if (health.ok && health.state !== "idle" && now - Date.parse(health.lastSuccessAt) > this.intervalMs * 2) {
       return { ...health, ok: false, lastError: "github_read_stale" };
