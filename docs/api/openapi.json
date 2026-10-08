@@ -444,7 +444,7 @@
         ],
         "operationId": "listJobs",
         "summary": "List available jobs",
-        "description": "By default returns only open, claimable jobs, sorted by id, in pages of 50 (maximum 100). Include additional states explicitly with include=submitted,exhausted or a state filter. No query parameters (or format=full) preserves the array shape, not an unbounded listing. Follow the Link rel=next header or the compact envelope nextCursor. Cursors are bound to filters and wallet. ETag supports If-None-Match / 304 revalidation. Use /jobs/definition for one full job.",
+        "description": "With no query parameters returns the complete legacy array. Query views paginate at 50 by default (maximum 100), sorted by id. Use state=claimable for only open claimable jobs (the MCP listJobs default); include=submitted,exhausted adds those states. format=full preserves the array shape for paginated views. Follow Link rel=next or nextCursor. Cursors are bound to filters and wallet. ETag supports If-None-Match / 304 revalidation.",
         "parameters": [
           {
             "name": "source",
@@ -526,7 +526,7 @@
           {
             "name": "include",
             "in": "query",
-            "description": "Comma-separated additional claim states, for example submitted,exhausted. The default contains only open claimable jobs.",
+            "description": "Comma-separated additional claim states, for example submitted,exhausted. Adds to the claimable view; bare /jobs remains the complete legacy array.",
             "schema": { "type": "string" }
           },
           {

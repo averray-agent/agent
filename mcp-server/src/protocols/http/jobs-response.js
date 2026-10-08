@@ -45,6 +45,10 @@ export function buildPublicJobsResponse(jobs, searchParams) {
 
 export function buildPublicJobsPage(jobs, searchParams = new URLSearchParams()) {
   const listedJobs = jobs.map(withListedAt);
+  // Preserve the complete legacy array for existing app and ops consumers.
+  if ([...searchParams.keys()].length === 0) {
+    return { body: listedJobs, nextCursor: null, limit: listedJobs.length };
+  }
   const limit = parseLimit(searchParams.get("limit"), DEFAULT_AGENT_LIMIT, MAX_AGENT_LIMIT);
   const filters = parseJobFilters(searchParams);
   const included = [...new Set(String(searchParams.get("include") ?? "").split(",").map(normalizeToken).filter(Boolean))].sort();
@@ -52,10 +56,13 @@ export function buildPublicJobsPage(jobs, searchParams = new URLSearchParams()) 
   if (included.some((state) => !allowed.has(state))) throw new ValidationError("Unknown jobs include state.");
   const context = createHash("sha256").update(JSON.stringify({ filters, included, wallet: searchParams.get("wallet") })).digest("hex");
   const filteredJobs = listedJobs.filter((job) => {
-    if (!matchesFilters(job, filters)) return false;
-    if (filters.state) return true; // An explicit legacy state filter is also an opt-in.
     const { state } = effectiveJobState(job);
-return (state === "open" && job.claimable === true) || included.includes(state);
+    if (included.includes(state) && (!filters.state || filters.state === "claimable")) {
+      return matchesFilters(job, { ...filters, state: undefined });
+    }
+    if (!matchesFilters(job, filters)) return false;
+    if (filters.state || !included.length) return true;
+    return state === "open" && job.claimable === true;
   }).sort((a, b) => String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
   let offset = parseOffset(searchParams.get("offset"));
   if (searchParams.has("cursor")) {
@@ -147,6 +154,7 @@ function matchesFilters(job, filters) {
   }
   if (filters.state) {
     const { state, status, effectiveState } = effectiveJobState(job);
+    if (filters.state === "claimable") return ["open", "expired"].includes(state) && effectiveState === "claimable" && job.claimable === true;
     const wantsClaimable = ["open", "available", "claimable"].includes(filters.state);
     if (wantsClaimable && effectiveState === "claimable") {
       return true;

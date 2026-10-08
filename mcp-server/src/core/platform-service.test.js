@@ -1422,7 +1422,8 @@ test("designated agreements are restricted and excluded from every open inventor
   assert.deepEqual(await service.recommendJobs(WALLET), []);
 });
 
-test("external definition rereads a cached open job after escrow closes; listings batch once", async () => {
+test("external definition caches reads for 30 seconds then sees closure; listings batch once", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-08T12:00:00Z") });
   const escrowCoreAddress = "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793";
   let state = 1;
   let reads = 0;
@@ -1440,6 +1441,10 @@ test("external definition rereads a cached open job after escrow closes; listing
   const initial = await service.getPublicJobDefinition("parent-job-001");
   assert.equal(initial.claimState, "open");
   state = 6; // EscrowCore.JobState.Closed.
+  t.mock.timers.tick(29_999);
+  assert.equal((await service.getPublicJobDefinition("parent-job-001")).claimState, "open");
+  assert.equal(reads, 1);
+  t.mock.timers.tick(1);
   const closed = await service.getPublicJobDefinition("parent-job-001");
   assert.equal(closed.claimable, false);
   assert.equal(closed.claimState, "unclaimable");

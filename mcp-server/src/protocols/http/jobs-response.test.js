@@ -83,7 +83,7 @@ const JOBS = [
   }
 ].map((job) => ({ ...job, claimState: "open", claimable: true }));
 
-test("default board requires open claimable evidence; include opts into submitted and exhausted", () => {
+test("legacy board stays complete; explicit claimable requires evidence and include opts into additional states", () => {
   const rows = [
     { id: "open", claimState: "open", claimable: true },
     { id: "submitted", claimState: "submitted", claimable: false, lifecycle: { state: "open" } },
@@ -93,19 +93,26 @@ test("default board requires open claimable evidence; include opts into submitte
     { id: "blocked", claimState: "open", claimable: false },
     { id: "nested", claimState: "open", claimable: true, claimStatus: { claimState: "closed" } }
   ];
-  assert.deepEqual(buildPublicJobsResponse(rows, new URLSearchParams()).map((row) => row.id), ["open"]);
+  assert.deepEqual(buildPublicJobsResponse(rows, new URLSearchParams()).map((row) => row.id), rows.map((row) => row.id));
+  assert.deepEqual(buildPublicJobsResponse(rows, new URLSearchParams("state=claimable")).jobs.map((row) => row.id), ["open"]);
   assert.deepEqual(buildPublicJobsResponse(rows, new URLSearchParams("include=submitted,exhausted")).jobs.map((row) => row.id), ["exhausted", "open", "submitted"]);
-  assert.deepEqual(buildPublicJobsResponse(rows, new URLSearchParams("format=full")).map((row) => row.id), ["open"]);
+  assert.equal(buildPublicJobsResponse(rows, new URLSearchParams("format=full")).length, rows.length);
+  assert.deepEqual(buildPublicJobsResponse(rows, new URLSearchParams("state=claimable&include=submitted,exhausted")).jobs.map((row) => row.id), ["exhausted", "open", "submitted"]);
+  assert.throws(() => buildPublicJobsResponse(rows, new URLSearchParams("include=nonsense")), (error) => error.statusCode === 400);
 });
 
 test("board cursor defaults to fifty and survives deletions without repeats or omissions", () => {
   const rows = Array.from({ length: 57 }, (_, n) => ({ id: String(n).padStart(3, "0"), claimState: "open", claimable: true }));
-  const first = buildPublicJobsPage(rows, new URLSearchParams());
-  assert.equal(first.body.length, 50);
+  assert.equal(buildPublicJobsPage(rows).body.length, 57);
+  const first = buildPublicJobsPage(rows, new URLSearchParams("format=compact"));
+  assert.equal(first.body.jobs.length, 50);
   assert.ok(first.nextCursor);
   const next = buildPublicJobsPage(rows.slice(10), new URLSearchParams({ cursor: first.nextCursor }));
   assert.deepEqual(next.body.jobs.map((row) => row.id), rows.slice(50).map((row) => row.id));
   assert.equal(next.nextCursor, null);
+  const limited = buildPublicJobsPage(rows, new URLSearchParams({ cursor: first.nextCursor, limit: "2" }));
+  assert.equal(limited.body.jobs.length, 2);
+  assert.deepEqual(limited.body.jobs.map((row) => row.id), ["050", "051"]);
   assert.throws(() => buildPublicJobsPage(rows, new URLSearchParams({ cursor: first.nextCursor, include: "submitted" })), /Invalid jobs cursor/);
   assert.throws(() => buildPublicJobsPage(rows, new URLSearchParams({ cursor: first.nextCursor, offset: "0" })), /Invalid jobs cursor/);
   assert.throws(() => buildPublicJobsPage(rows, new URLSearchParams({ cursor: "garbage" })), /Invalid jobs cursor/);
