@@ -27,7 +27,8 @@ test("every poll logs structured counts and skip reasons; settlement retains the
   assert.deepEqual(logs[0].record.counts, {
     observed: 1, reviewed: 0, skipped: 1, errors: 0, upstreamUnavailable: 0, previewErrors: 0
   });
-  assert.deepEqual(logs[0].record.skipped, [{ sessionId: "pr", reason: "not_merged" }]);
+  assert.deepEqual(logs[0].record.skipReasons, { not_merged: 1 });
+  assert.deepEqual(logs[0].record.samples[0], { sessionId: "pr", reason: "not_merged" });
   t.mock.timers.tick(60_000);
   f.upstream.merged = true;
   await f.review.runOnce();
@@ -65,6 +66,7 @@ test("three consecutive unavailable reads or preview errors warn with counts and
     assert.equal(status.warnings.length, n > 2 ? 1 : 0);
     if (n > 2) assert.deepEqual(status.warnings[0], {
       code: "github_pr_review_read_failures", severity: "warning",
+      message: "GitHub PR review reads failed repeatedly; inspect poller logs and upstream access.",
       upstreamUnavailableCount: 1, previewErrorCount: 1,
       consecutiveUpstreamUnavailableRuns: 3, consecutivePreviewErrorRuns: 3
     });
@@ -86,6 +88,8 @@ test("disabled and failed queue walks each log one run, with bounded persisted h
   for (let n = 0; n < 21; n++) await review.runOnce(new Date(1_000 + n));
   assert.equal(logs.length, 21);
   assert.ok(logs.every((entry) => entry.event === "github_pr_review.run"));
+  assert.equal((await store.getMutationReceipt("github_pr_review_runs", "recent")).runs.length, 20,
+    "history is bounded on write, not merely truncated while reading");
   const restarted = new GithubPrReviewService({ stateStore: store, githubToken: "" });
   const status = await restarted.getStatus();
   assert.equal(status.recentRuns.length, 20);
@@ -96,6 +100,53 @@ test("disabled and failed queue walks each log one run, with bounded persisted h
   await assert.rejects(review.runOnce(), /store unavailable/);
   assert.equal(logs.length, 22);
   assert.equal(logs.at(-1).summary.counts.errors, 1);
+});
+
+test("brokered_submit_retry_pending is deferred, never counted or stamped as settled", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "pr");
+  const review = new GithubPrReviewService({ stateStore: store, githubToken: "token", logger: { info() {} },
+    verifierService: {
+      previewSubmission: async () => ({ outcome: "approved", githubLookup: { status: "verified", merged: true } }),
+      verifySubmission: async () => ({ outcome: "brokered_submit_retry_pending", reasonCode: "brokered_submit_retry_pending" })
+    } });
+  const run = await review.runOnce();
+  assert.equal(run.counts.reviewed, 0);
+  assert.deepEqual(run.reviewed, []);
+  assert.deepEqual(run.skipped, [{ sessionId: "pr", reason: "settlement_deferred:brokered_submit_retry_pending" }]);
+  assert.equal((await store.getSession("pr")).status, "submitted");
+  assert.equal((await store.getMutationReceipt("github_pr_review_observation", "pr")).settledAt, undefined);
+});
+
+test("run evidence counts every skip, samples at most 25 IDs, and persists counts only", async () => {
+  const store = new MemoryStateStore();
+  for (let n = 0; n < 150; n++) await add(store, `pr-${n}`);
+  const logs = [];
+  const review = new GithubPrReviewService({ stateStore: store, githubToken: "token", logger: { info: (record) => logs.push(record) },
+    verifierService: { previewSubmission: async () => ({ outcome: "approved", githubLookup: { status: "verified", merged: false } }) } });
+  const run = await review.runOnce();
+  assert.deepEqual(run.skipReasons, { not_merged: 150 });
+  assert.equal(logs[0].samples.length, 25);
+  assert.equal(logs[0].counts.skipped, 150);
+  assert.equal(logs[0].skipped, undefined);
+  assert.equal(logs[0].observed, undefined);
+  const history = await store.getMutationReceipt("github_pr_review_runs", "recent");
+  assert.deepEqual(history.runs[0].skipReasons, { not_merged: 150 });
+  assert.doesNotMatch(JSON.stringify(history), /pr-\d|sessionId|samples|message/);
+});
+
+test("upstream-unavailable fallback never emits arbitrary upstream reason and errors have bounded messages and codes", async () => {
+  const store = new MemoryStateStore();
+  await add(store, "pr");
+  const review = new GithubPrReviewService({ stateStore: store, githubToken: "token", logger: { info() {} },
+    verifierService: { previewSubmission: async () => ({ githubLookup: { status: "unavailable", reason: "private-sentinel" } }) } });
+  const run = await review.runOnce();
+  assert.deepEqual(run.skipped, [{ sessionId: "pr", reason: "upstream_unavailable:github_lookup_unavailable" }]);
+  assert.doesNotMatch(JSON.stringify(run), /private-sentinel/);
+  review.verifierService.previewSubmission = async () => ({ outcome: "approved", githubLookup: { status: "verified", merged: true } });
+  review.verifierService.verifySubmission = async () => { throw new Error("x".repeat(500)); };
+  const failed = await review.runOnce();
+  assert.deepEqual(failed.errors, [{ sessionId: "pr", code: "github_pr_review_failed", message: "x".repeat(256) }]);
 });
 async function add(store, id, mode = "github_pr", status = "submitted") {
   const job = { id, title: id, rewardAmount: 1, rewardAsset: "USDC", verifierMode: mode,
