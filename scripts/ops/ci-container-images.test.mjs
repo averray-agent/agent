@@ -64,9 +64,13 @@ test("CI remote images, including smoke Compose and Dockerfile bases, never pull
   }
   for (const file of dockerfiles) {
     const stages = new Set();
-    for (const [, image, stage] of (await read(file)).matchAll(/^FROM\s+(\S+)(?:\s+AS\s+(\S+))?/gimu)) {
+    const source = await read(file);
+    for (const [, image, stage] of source.matchAll(/^FROM\s+(\S+)(?:\s+AS\s+(\S+))?/gimu)) {
       if (!stages.has(image) && image !== "scratch") { assertRemoteImage(image); images++; }
       if (stage) stages.add(stage);
+    }
+    for (const [, image] of source.matchAll(/^COPY\s+--from=(\S+)/gimu)) {
+      if (!stages.has(image) && !/^\d+$/u.test(image)) { assertRemoteImage(image); images++; }
     }
   }
   assert.equal(composeFiles.size, 2, "both CI smoke stacks must be audited");
