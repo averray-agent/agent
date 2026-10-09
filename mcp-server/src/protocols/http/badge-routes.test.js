@@ -123,6 +123,73 @@ test("V3b one-item query filters canonical fields and sorts signed verifiedAt ac
   assert.deepEqual((await get()).body.items, []);
 });
 
+test("V3c all filter keys share one base scan and expired snapshots are swept", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let scans = 0;
+  let reads = 0;
+  const handlers = ["github_pr", "human_review", "witness"];
+  const list = createLister({ now: () => 0, stateStore: {
+    listRecentSessions: async () => { scans++; return handlers.map((sessionId) => ({ sessionId })); },
+    getRunReceiptDocument: async (sessionId) => {
+      reads++;
+      return { ...STORED_RUN_RECEIPT, sessionId, verifier: { handler: sessionId }, verdict: { outcome: "approved" } };
+    }
+  } });
+  const pages = await Promise.all(handlers.map((handler) => list({ handler })));
+  assert.deepEqual(pages.map((page) => page.items[0].document.verifier.handler), handlers);
+  for (const handler of handlers) assert.ok(BADGE_FILTER_VALUES.handler.includes(handler));
+  await list({ outcome: "approved", sort: "verifiedAt:desc" });
+  await list({ settled: "true" });
+  assert.equal(scans, 1, "all normalised filter sets share one scan");
+  assert.equal(reads, handlers.length, "retain one base list, not a list per filter");
+  t.mock.timers.tick(45_000);
+  await list({ handler: "github_pr" });
+  assert.equal(scans, 2, "expiry releases the snapshot even without advancing the injected clock");
+});
+
+for (const stuckRead of ["listRecentSessions", "getRunReceiptDocument", "getSession"]) {
+  test(`V3c hung ${stuckRead} returns 503 at the deadline and next request retries`, { timeout: 2000 }, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let hung = true;
+    let scans = 0;
+    let releaseOld;
+    const pending = new Promise((resolve) => { releaseOld = resolve; });
+    const document = { ...STORED_RUN_RECEIPT, receiptId: "0x" + "a".repeat(64),
+      verifier: { handler: "github_pr" } };
+    const store = {
+      listRecentSessions: async () => { scans++; return [SESSION]; },
+      getRunReceiptDocument: async () => document,
+      getSession: async () => ({})
+    };
+    const original = store[stuckRead];
+    store[stuckRead] = (...args) => hung ? pending : original(...args);
+    const h = makeHarness({ listBadgeReceipts: createLister({ stateStore: store }) });
+    const get = async () => {
+      const response = {};
+      await h.route({ request: { method: "GET" }, response, pathname: "/badges",
+        url: new URL("http://localhost/badges?handler=github_pr") });
+      return response;
+    };
+    let failure;
+    const result = get().catch((error) => { failure = error; });
+    // Reach each nested read before advancing the mocked timer.
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(10_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(failure?.statusCode, 503, "hung scan must settle by its deadline");
+    assert.equal(failure.code, "badges_list_scan_timeout");
+    assert.deepEqual(failure.details, { reason: "receipt_store_read_deadline" });
+    await result;
+    hung = false;
+    assert.equal((await get()).statusCode, 200);
+    const scansAfterRetry = scans;
+    releaseOld(stuckRead === "listRecentSessions" ? [] : undefined);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal((await get()).body.items.length, 1, "late old scan cannot erase the replacement");
+    assert.equal(scans, scansAfterRetry, "retry snapshot is still cached");
+  });
+}
+
 test("V3b unknown filter values and names are 400 with the supported set", async () => {
   const h = makeHarness();
   for (const [key, supported] of Object.entries(BADGE_FILTER_VALUES)) {
