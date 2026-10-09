@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { hashCanonicalContent } from "../core/canonical-content.js";
-import { AppError, NotFoundError, ValidationError } from "../core/errors.js";
+import { AppError, ConflictError, NotFoundError, ValidationError } from "../core/errors.js";
 import { validateAgainstSchemaAll } from "../core/job-schema-validation.js";
 import { buildVerifyReceipt } from "../core/work-receipt.js";
 import { VerifierRegistry } from "./verifier-handlers.js";
@@ -107,7 +107,7 @@ export class VerificationRunService {
       : hashCanonicalContent(paymentProof);
     if (paymentKey) {
       const existing = await this.stateStore.getVerificationRunByPaymentId(paymentKey);
-      if (existing) return existing;
+      if (existing) return requireMatchingVerificationReplay(existing, requestHash);
     }
 
     const authorization = await this.paymentGate.authorize({
@@ -115,9 +115,11 @@ export class VerificationRunService {
       price: profile.price,
       profile: profile.ref,
       profileLimits: profile.limits,
-      requestHash
+      requestHash,
+      findExistingRun: (authorizationId) => this.stateStore.getVerificationRunByAuthorizationId(authorizationId)
     });
     assertPaymentAuthorization(authorization, profile);
+    if (authorization.existingRun) return requireMatchingVerificationReplay(authorization.existingRun, requestHash);
     const runId = `verify-${this.randomUUIDImpl()}`;
     const submittedAt = this.now().toISOString();
     const queued = {
@@ -125,6 +127,7 @@ export class VerificationRunService {
       profile: profile.name,
       profileVersion: profile.version,
       profileRef: profile.ref,
+      requestHash,
       customer: authorization.customer.toLowerCase(),
       target: structuredClone(target),
       inputs: structuredClone(inputs),
@@ -363,6 +366,16 @@ function assertPaymentAuthorization(authorization, profile) {
     || String(authorization.network) !== String(profile.price.network)) {
     throw new ValidationError("Verification payment authorization does not match the pinned profile price.");
   }
+}
+
+function requireMatchingVerificationReplay(run, requestHash) {
+  const originalHash = run.requestHash ?? hashCanonicalContent({
+    profile: run.profileRef, target: run.target, inputs: run.inputs
+  });
+  if (originalHash !== requestHash) {
+    throw new ConflictError("Payment authorization is already reserved for another request.", "payment_authorization_in_use");
+  }
+  return run;
 }
 
 function inconclusiveVerdict(reason, detail) {

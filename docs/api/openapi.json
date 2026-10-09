@@ -1834,6 +1834,16 @@
               }
             }
           },
+          "409": {
+            "description": "payment_authorization_in_use: this Base USDC payer/nonce already belongs to a different request. Same-request replays return the existing run; a proof cannot reserve another run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Run intake rate limit.",
             "content": {

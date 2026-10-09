@@ -15,6 +15,14 @@ wallet is needed. Worker claim/submit/list tools are separate and remain free.
 
 ## 1. Discover the resource and read its price live
 
+Each Base USDC authorization (payer and nonce) can reserve only one Verify run,
+across HTTP and MCP. Replaying the same request returns that run, including after
+completion; reusing the authorization for a different request returns HTTP 409
+`payment_authorization_in_use`. Changing the proof's encoding or unsigned request
+binding does not create another allowance. Use a fresh nonce for a new purchase.
+Reservations never expire or release, even for an unbilled run; a fresh
+authorization is required to retry work, rather than to retrieve its prior result.
+
 ```sh
 API=https://api.averray.com
 curl --fail --silent --show-error "$API/.well-known/x402" > discovery.json

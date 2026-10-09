@@ -1,5 +1,5 @@
 import { createClient } from "redis";
-import { ExternalServiceError, ValidationError } from "./errors.js";
+import { ConflictError, ExternalServiceError, ValidationError } from "./errors.js";
 import { listEventLogFromRecords } from "./event-log-query.js";
 import {
   cloneJsonRecord,
@@ -89,6 +89,12 @@ function sessionWalletIndexKey(session) {
 
 function verificationRunLockId(runId) {
   return `verification-run:${String(runId)}`;
+}
+
+function assertVerificationReservationMatches(existing, requested) {
+  if (!existing || existing.requestHash !== requested.requestHash) {
+    throw new ConflictError("Payment authorization is already reserved for another request.", "payment_authorization_in_use");
+  }
 }
 
 const RELEASE_CLAIM_LOCK_SCRIPT = `
@@ -256,10 +262,16 @@ return {1, 0, ARGV[2], tostring(walletTotal), ARGV[3]}
 `;
 
 const RESERVE_VERIFICATION_RUN_SCRIPT = `
+local authorizationOwner = redis.call("get", KEYS[6])
+if authorizationOwner then
+  return {0, authorizationOwner}
+end
 local existing = redis.call("get", KEYS[1])
 if existing then
+  redis.call("set", KEYS[6], existing, "NX")
   return {0, existing}
 end
+redis.call("set", KEYS[6], ARGV[1], "NX")
 redis.call("set", KEYS[1], ARGV[1])
 redis.call("set", KEYS[2], ARGV[2])
 if ARGV[3] ~= "" then
@@ -361,6 +373,7 @@ export class MemoryStateStore {
     this.jobWorkReceiptIndexes = new Map();
     this.verificationRuns = new Map();
     this.verificationPaymentRuns = new Map();
+    this.verificationAuthorizationRuns = new Map();
     this.verificationRunAuthorizations = new Map();
     this.claimLocks = new Map();
     this.nonces = new Map();
@@ -639,17 +652,32 @@ export class MemoryStateStore {
 
   async reserveVerificationRun(run, { paymentId, authorization } = {}) {
     const key = String(paymentId ?? "");
-    const existingRunId = this.verificationPaymentRuns.get(key);
+    const authorizationId = String(authorization?.id ?? key);
+    const existingRunId = this.verificationAuthorizationRuns.get(authorizationId)
+      ?? this.verificationPaymentRuns.get(key);
     if (existingRunId) {
-      return { created: false, run: await this.getVerificationRun(existingRunId) };
+      const existing = await this.getVerificationRun(existingRunId);
+      assertVerificationReservationMatches(existing, run);
+      this.verificationAuthorizationRuns.set(authorizationId, existingRunId);
+      return { created: false, run: existing };
     }
     const stored = cloneJsonRecord(run);
+    // No await before both indexes and the run exist; reservations never expire.
+    this.verificationAuthorizationRuns.set(authorizationId, stored.runId);
     this.verificationPaymentRuns.set(key, stored.runId);
     this.verificationRuns.set(stored.runId, stored);
     if (authorization) {
       this.verificationRunAuthorizations.set(stored.runId, cloneJsonRecord(authorization));
     }
     return { created: true, run: cloneJsonRecord(stored) };
+  }
+
+  async getVerificationRunByAuthorizationId(authorizationId) {
+    const runId = this.verificationAuthorizationRuns.get(String(authorizationId));
+    if (!runId) return undefined;
+    const run = await this.getVerificationRun(runId);
+    if (!run) throw new ConflictError("Payment authorization is already reserved.", "payment_authorization_in_use");
+    return run;
   }
 
   async getVerificationRunAuthorization(runId) {
@@ -1898,7 +1926,8 @@ export class RedisStateStore {
         this.key("verification-run", String(run.runId)),
         this.key("verification-run-authorization", String(run.runId)),
         this.key("verification-runs", "queued"),
-        this.key("verification-runs", "active")
+        this.key("verification-runs", "active"),
+        this.key("verification-authorization", String(authorization?.id ?? paymentId ?? ""))
       ],
       arguments: [
         String(run.runId),
@@ -1908,10 +1937,21 @@ export class RedisStateStore {
       ]
     });
     const [createdRaw, runId] = Array.isArray(reply) ? reply : [0, undefined];
+    const stored = await this.getVerificationRun(runId);
+    if (Number(createdRaw) !== 1) assertVerificationReservationMatches(stored, run);
     return {
       created: Number(createdRaw) === 1,
-      run: await this.getVerificationRun(runId)
+      run: stored
     };
+  }
+
+  async getVerificationRunByAuthorizationId(authorizationId) {
+    await this.connect();
+    const runId = await this.client.get(this.key("verification-authorization", String(authorizationId)));
+    if (!runId) return undefined;
+    const run = await this.getVerificationRun(runId);
+    if (!run) throw new ConflictError("Payment authorization is already reserved.", "payment_authorization_in_use");
+    return run;
   }
 
   async getVerificationRunAuthorization(runId) {

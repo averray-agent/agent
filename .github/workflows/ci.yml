@@ -139,6 +139,18 @@ jobs:
       - name: Backend local suite (unit + HTTP smoke)
         run: npm test --workspace mcp-server
 
+      - name: Verify authorization reservation against real Redis
+        run: |
+          set -euo pipefail
+          redis_id=$(docker run -d --rm -p 127.0.0.1:16381:6379 redis:7-alpine)
+          trap 'docker stop "$redis_id" >/dev/null' EXIT
+          for attempt in 1 2 3 4 5; do
+            docker exec "$redis_id" redis-cli ping >/dev/null && break
+            sleep 1
+          done
+          VERIFY_RESERVATION_TEST_REDIS_URL=redis://127.0.0.1:16381 \
+            node --test mcp-server/src/services/verify-authorization-reservation.test.js
+
       - name: MCP npm shim tests and dry pack proof
         run: |
           npm run test:mcp-package

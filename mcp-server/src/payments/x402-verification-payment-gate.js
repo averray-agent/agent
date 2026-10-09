@@ -160,7 +160,7 @@ export class X402VerificationPaymentGate {
     this.domainPromise = undefined;
   }
 
-  async authorize({ paymentProof, price, profile, profileLimits, requestHash } = {}) {
+  async authorize({ paymentProof, price, profile, profileLimits, requestHash, findExistingRun } = {}) {
     const domain = await this.eip712Domain();
     const requirements = this.paymentRequirements({ domain, price, profile, profileLimits, requestHash });
     if (!String(paymentProof ?? "").trim()) {
@@ -188,6 +188,48 @@ export class X402VerificationPaymentGate {
       );
     }
 
+    let recovered;
+    try {
+      recovered = getAddress(verifyTypedData(
+        domain,
+        TRANSFER_WITH_AUTHORIZATION_TYPES,
+        authorization,
+        signature
+      ));
+    } catch {
+      throw paymentRefusal(
+        "The transferWithAuthorization signature is invalid for the token's live EIP-712 name and domain. No money moved; request fresh terms and sign them unchanged.",
+        "payment_signature_invalid"
+      );
+    }
+    if (recovered !== authorization.from) {
+      throw paymentRefusal(
+        "The transferWithAuthorization signature does not match the stated payer. No money moved; sign with the payer wallet.",
+        "payment_payer_mismatch"
+      );
+    }
+
+    const verified = {
+      id: hashCanonicalContent({
+        network: this.config.network,
+        asset: this.config.asset,
+        payer: authorization.from.toLowerCase(),
+        nonce: authorization.nonce.toLowerCase()
+      }),
+      customer: authorization.from.toLowerCase(),
+      amountRaw: requirements.amount,
+      asset: String(price.asset),
+      network: this.config.network,
+      paymentProof: String(paymentProof),
+      requirements,
+      authorization,
+      signature
+    };
+    // Only a cryptographically verified proof can look up an existing owner.
+    // Replays do not need a still-unused nonce or a fresh execution window.
+    const existingRun = await findExistingRun?.(verified.id);
+    if (existingRun) return Object.freeze({ ...verified, existingRun });
+
     const nowSeconds = BigInt(Math.floor(this.currentTime().getTime() / 1000));
     if (authorization.validAfter >= nowSeconds) {
       throw paymentRefusal(
@@ -210,27 +252,6 @@ export class X402VerificationPaymentGate {
       );
     }
 
-    let recovered;
-    try {
-      recovered = getAddress(verifyTypedData(
-        domain,
-        TRANSFER_WITH_AUTHORIZATION_TYPES,
-        authorization,
-        signature
-      ));
-    } catch {
-      throw paymentRefusal(
-        "The transferWithAuthorization signature is invalid for the token's live EIP-712 name and domain. No money moved; request fresh terms and sign them unchanged.",
-        "payment_signature_invalid"
-      );
-    }
-    if (recovered !== authorization.from) {
-      throw paymentRefusal(
-        "The transferWithAuthorization signature does not match the stated payer. No money moved; sign with the payer wallet.",
-        "payment_payer_mismatch"
-      );
-    }
-
     let used;
     try {
       used = await this.token.authorizationState(authorization.from, authorization.nonce);
@@ -247,22 +268,7 @@ export class X402VerificationPaymentGate {
       );
     }
 
-    return Object.freeze({
-      id: hashCanonicalContent({
-        network: this.config.network,
-        asset: this.config.asset,
-        payer: authorization.from.toLowerCase(),
-        nonce: authorization.nonce.toLowerCase()
-      }),
-      customer: authorization.from.toLowerCase(),
-      amountRaw: requirements.amount,
-      asset: String(price.asset),
-      network: this.config.network,
-      paymentProof: String(paymentProof),
-      requirements,
-      authorization,
-      signature
-    });
+    return Object.freeze(verified);
   }
 
   async capture({ authorization }) {
