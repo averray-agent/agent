@@ -61,9 +61,23 @@ test("tagged board cards distinguish the served Averray reward from an upstream 
 });
 
 test("untagged titles stay unchanged and unavailable reward evidence never becomes a baked payout", () => {
-  for (const title of ["Fix bounty formatting", "Regular task", undefined]) assert.equal(bountyDisclosure(title, 3, "USDC"), null);
+  for (const title of ["Fix bounty formatting", "Regular task", undefined]) assert.equal(bountyDisclosure(title, 3, "USDC", "github_pr"), null);
   for (const amount of [null, undefined, "", NaN, -1]) {
-    assert.equal(bountyDisclosure("bounty: task", amount, "USDC"), "Averray reward unavailable; any upstream bounty is the maintainer's.");
+    assert.equal(bountyDisclosure("bounty: task", amount, "USDC", "github_pr"), "Averray reward unavailable; any upstream bounty is the maintainer's.");
   }
-  assert.equal(bountyDisclosure("bounty: task", 7, undefined), "Averray reward unavailable; any upstream bounty is the maintainer's.");
+  assert.equal(bountyDisclosure("bounty: task", 7, undefined, "github_pr"), "Averray reward unavailable; any upstream bounty is the maintainer's.");
+});
+
+test("B1b only github_pr jobs promise payment on merge on all three board surfaces", () => {
+  for (const verifierMode of ["github_pr", "benchmark", "deterministic", "human", undefined, null, "GITHUB_PR"]) {
+    const job = { id: "bounty-mode", title: "[$30 BOUNTY] fix", verifierMode,
+      rewardAmount: 7.25, rewardAsset: "USDC", state: "open" };
+    const [recommendation] = adapters.buildRecommendationCards([{ jobId: job.id }], [job]);
+    const [row] = adapters.buildRunRows([job]);
+    for (const text of [
+      renderedText(WorkJobCard, { job: { ...job, reward: { amount: 7.25, asset: "USDC" } }, nowMs: null, isNew: false }),
+      renderedText(JobCard, { job: recommendation, onClaim() {} }),
+      renderedText(RunRowCard, { row, selected: false, onSelect() {} })
+    ]) assert.equal(text.includes("Averray pays 7.25 USDC on merge"), verifierMode === "github_pr", String(verifierMode));
+  }
 });

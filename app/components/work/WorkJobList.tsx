@@ -133,7 +133,7 @@ export function WorkJobList() {
 
 function WorkJobCard({ job, isNew, nowMs }: { job: HumanJobListing; isNew: boolean; nowMs: number | null }) {
   const reward = formatAmount(job.reward?.amount ?? undefined, job.reward?.asset ?? "");
-  const bountyCopy = bountyDisclosure(job.title, job.reward?.amount, job.reward?.asset);
+  const bountyCopy = bountyDisclosure(job.title, job.reward?.amount, job.reward?.asset, job.verifierMode);
   const priority = nowMs === null ? null : priorityWindowDisplay(job.priorityWindow, nowMs);
   return (
     <Card className="group flex h-full flex-col transition-transform hover:-translate-y-0.5 hover:border-[var(--line-strong)]">

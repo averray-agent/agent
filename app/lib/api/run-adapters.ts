@@ -583,7 +583,7 @@ export function buildRunRows(payload: unknown): RunRow[] {
       id,
       sessionId: text(job.sessionId),
       title,
-      bountyDisclosure: bountyDisclosure(job.title, job.rewardAmount, job.rewardAsset),
+      bountyDisclosure: bountyDisclosure(job.title, job.rewardAmount, job.rewardAsset, job.verifierMode),
       jobMeta,
       ...(source ? { source } : {}),
       ...(lifecycle ? { lifecycle } : {}),
@@ -738,7 +738,7 @@ export function buildRecommendationCards(
     return {
       id,
       title: text(job.title, text(job.description, titleFromId(id))),
-      bountyDisclosure: bountyDisclosure(job.title, job.rewardAmount, job.rewardAsset),
+      bountyDisclosure: bountyDisclosure(job.title, job.rewardAmount, job.rewardAsset, job.verifierMode),
       jobMeta,
       category,
       ...(source ? { source } : {}),
