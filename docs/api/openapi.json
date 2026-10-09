@@ -1748,7 +1748,7 @@
         ],
         "operationId": "createVerificationRun",
         "summary": "Create a standalone verification run",
-        "description": "Send a valid profile/version/target/inputs body without payment to obtain the request-bound 402 challenge. Retry the identical body with PAYMENT-SIGNATURE containing the signed accepts[0] requirements. Payment is Base USDC only; no worker SIWE session is needed. 200 may mean queued, not complete. Poll the public run URL. Approved/rejected runs capture the fee; inconclusive and platform_fault runs are never billed.",
+        "description": "Send a valid profile/version/target/inputs body without payment to obtain the request-bound 402 challenge. An unpaid POST with no body or an empty JSON object returns the published URL-only MCP example's discovery challenge without creating or reserving a run. Non-empty invalid bodies and empty bodies with payment proof remain 400. Before purchasing, supply your actual input and obtain its fresh challenge; retry that identical body with PAYMENT-SIGNATURE containing the signed accepts[0] requirements. Payment is Base USDC only; no worker SIWE session is needed. 200 may mean queued, not complete. Poll the public run URL. Approved/rejected runs capture the fee; inconclusive and platform_fault runs are never billed.",
         "security": [],
         "parameters": [
           {
@@ -1771,11 +1771,15 @@
           }
         ],
         "requestBody": {
-          "required": true,
+          "required": false,
+          "description": "A complete VerifyRunRequest is required to create a run. An absent body or empty object is accepted only without payment, for a discovery-only 402.",
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/VerifyRunRequest"
+                "oneOf": [
+                  { "$ref": "#/components/schemas/VerifyRunRequest" },
+                  { "type": "object", "maxProperties": 0, "additionalProperties": false }
+                ]
               }
             }
           }
@@ -1802,7 +1806,7 @@
             }
           },
           "402": {
-            "description": "Exact request-bound Base payment requirements; use accepts[0] unchanged.",
+            "description": "Base payment requirements with PAYMENT-REQUIRED. Complete valid input yields a request-bound challenge; absent/empty unpaid input yields the published example's discovery challenge. Obtain a fresh challenge for actual input before paying.",
             "content": {
               "application/json": {
                 "schema": {

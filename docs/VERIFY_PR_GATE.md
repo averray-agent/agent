@@ -74,8 +74,13 @@ test "$status" = 402
 jq '.accepts[0]' challenge.json
 ```
 
-A well-formed unpaid request returns **402** and `PAYMENT-REQUIRED`. A malformed
-body returns **400**, not a payment challenge. Do not sign after a 400.
+A well-formed unpaid request returns **402** and `PAYMENT-REQUIRED`. An unpaid
+POST with no body or `{}` also returns a discovery challenge for the published
+URL-only MCP worked example, without creating or reserving a run. Non-empty
+invalid bodies, and empty bodies carrying payment proof, return **400**.
+Do not purchase using the empty-body discovery quote: provide your actual
+profile/version/target/inputs and obtain its fresh request-bound challenge.
+Do not sign after a 400.
 Discovery's requirements are bound to the published examples. For your edited
 request, use this fresh `accepts[0]` unchanged, including `extra.profile` and
 `extra.requestHash`; do not sign the example's stale requirements.

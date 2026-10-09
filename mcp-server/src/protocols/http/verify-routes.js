@@ -55,6 +55,10 @@ export function createVerifyRoutes({
       );
       let run;
       try {
+        if (!paymentProof && payload && typeof payload === "object"
+          && !Array.isArray(payload) && Object.keys(payload).length === 0) {
+          await verificationRunService.requireDiscoveryPayment();
+        }
         run = await verificationRunService.createRun({
           profile: payload?.profile,
           profileVersion: payload?.profileVersion,

@@ -81,6 +81,7 @@ async function callMcp(mcp, name, args, meta = {}) {
 
 test("X1 quote equals unpaid HTTP, strips all inherited payment paths, and creates no run", async () => {
   const h = harness();
+  h.service.requireDiscoveryPayment = async () => assert.fail("MCP quote must retain its real request body");
   const direct = await invokeHttpRoute(h.route, { method: "POST", path: "/verify/runs", body: request, sourceRequest: context.request });
   assert.equal(direct.statusCode, 402);
   const paid = await proof(direct.body);
