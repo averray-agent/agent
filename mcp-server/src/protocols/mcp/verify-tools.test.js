@@ -218,6 +218,12 @@ for (const transport of ["http", "mcp"]) {
       const decisive = ["approved", "rejected"].includes(outcome);
       assert.equal(completed.body.billing.status, decisive ? "captured" : "not_captured");
       assert.equal(completed.body.billingRule, VERIFY_BILLING_RULE);
+      if (outcome === "capture_failure") {
+        assert.equal(completed.body.verdict.outcome, "inconclusive");
+        assert.equal(completed.body.verdict.reasonCode, "runner_fault");
+        assert.equal(completed.body.verdict.reason, "runner_fault");
+        assert.match(completed.body.verdict.detail, /Payment capture failed.*capture fixture failed/u);
+      }
       assert.equal(captured, decisive ? 1 : 0);
       assert.equal(attempts, decisive || outcome === "capture_failure" ? 1 : 0);
       if (!decisive) assert.equal(completed.headers["payment-response"], undefined);

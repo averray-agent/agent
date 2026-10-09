@@ -94,6 +94,8 @@ test("static Verify inconclusive-run wording is rejected in favor of discovery r
 
 test("Verify pricing parses resources[0].accepts[0] and rejects schema drift", async () => {
   const source = await readFile(new URL("marketing/public/verify-reader.js", REPO_ROOT), "utf8");
+  assert.match(source, /inconclusive\.textContent\s*=\s*terms\.billingRule\s*;/u);
+  assert.doesNotMatch(source, /Inconclusive runs/u, "billing copy must come from live discovery");
   const context = { window: {} };
   runInNewContext(source, context);
   const reader = context.window.AverrayVerifyDiscovery;
