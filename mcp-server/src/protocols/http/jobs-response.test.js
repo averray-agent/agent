@@ -122,6 +122,16 @@ test("compact jobs bound both Markdown fields at complete blocks within 1000 cha
   assert.equal(row.summary, fenced, "a complete fenced block is retained");
 });
 
+test("compact Markdown normalizes CRLF and CR before a fence straddling the cap", () => {
+  for (const newline of ["\r\n", "\r"]) {
+    const markdown = ["Keep this complete lead.", "", "```js", "doNotLeakCode();", "", "x".repeat(1_100), "```"].join(newline);
+    const row = buildPublicJobsResponse([{ ...JOBS[0], description: markdown, acceptanceCriteria: [markdown] }], new URLSearchParams("limit=1")).jobs[0];
+    assert.equal(row.summary, "Keep this complete lead.");
+    assert.equal(row.successCriteria, "Keep this complete lead.");
+    assert.doesNotMatch(row.summary + row.successCriteria, /doNotLeakCode|```|\r/u);
+  }
+});
+
 test("legacy board stays complete; explicit claimable requires evidence and include opts into additional states", () => {
   const rows = [
     { id: "open", claimState: "open", claimable: true },

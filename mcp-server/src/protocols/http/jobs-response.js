@@ -297,7 +297,7 @@ function summarizeSuccessCriteria(job) {
 // Transport budget, not a Markdown renderer. Only retain complete blocks;
 // a first block larger than the budget leaves the app's fallback copy in place.
 function compactMarkdown(value) {
-  const markdown = String(value ?? "").trim();
+  const markdown = String(value ?? "").replace(/\r\n?/gu, "\n").trim();
   const limit = 1_000;
   if (markdown.length <= limit) return markdown;
   let fence = null, offset = 0, boundary = 0;
