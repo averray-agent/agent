@@ -130,7 +130,7 @@ test("Foundry and unrelated build output stay outside the backend runtime stage"
   assert.match(builder, /^COPY foundry\.toml \.\/foundry\.toml$/mu);
   assert.match(builder, /^COPY lib\/forge-std \.\/lib\/forge-std$/mu);
   assert.match(builder, /forge build[\s\S]*HydrationUsdcAdapterV22\.sol[\s\S]*HydrationDepositPoolAdapter\.sol/u);
-  assert.match(runtime, /^node:22-bookworm-slim$/mu);
+  assert.match(runtime, /^public\.ecr\.aws\/docker\/library\/node:22-bookworm-slim$/mu);
   assert.doesNotMatch(runtime, /apt-get install[^\n]*foundry|\bforge build\b/u);
   assert.equal(shippedArtifactCopies().size, 2, "runtime must receive only the two driver artifacts");
   assert.doesNotMatch(dockerfile, /COPY\s+--from=venue-pair-artifacts\s+\/build\/out\s/u);

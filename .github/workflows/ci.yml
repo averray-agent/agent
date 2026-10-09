@@ -142,7 +142,8 @@ jobs:
       - name: Verify authorization reservation against real Redis
         run: |
           set -euo pipefail
-          redis_id=$(docker run -d --rm -p 127.0.0.1:16381:6379 redis:7-alpine)
+          bash scripts/ops/pull-ci-image.sh public.ecr.aws/docker/library/redis:7-alpine
+          redis_id=$(docker run --pull=never -d --rm -p 127.0.0.1:16381:6379 public.ecr.aws/docker/library/redis:7-alpine)
           trap 'docker stop "$redis_id" >/dev/null' EXIT
           for attempt in 1 2 3 4 5; do
             docker exec "$redis_id" redis-cli ping >/dev/null && break
@@ -159,7 +160,8 @@ jobs:
       - name: Provision pinned Caddy for discovery host parity proof
         run: |
           set -euo pipefail
-          container=$(docker create caddy:2.11.2-alpine)
+          bash scripts/ops/pull-ci-image.sh public.ecr.aws/docker/library/caddy:2.11.2-alpine
+          container=$(docker create --pull=never public.ecr.aws/docker/library/caddy:2.11.2-alpine)
           trap 'docker rm "$container" >/dev/null' EXIT
           docker cp "$container:/usr/bin/caddy" "$RUNNER_TEMP/caddy-discovery-proof"
           chmod +x "$RUNNER_TEMP/caddy-discovery-proof"
