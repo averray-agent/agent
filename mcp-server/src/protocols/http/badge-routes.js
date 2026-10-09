@@ -3,10 +3,43 @@ import { ValidationError, normalizeError } from "../../core/errors.js";
 import { buildBadgeSigners } from "../../core/badge-metadata.js";
 import { BADGE_RECEIPT_JWKS_PATH } from "../../core/badge-receipt-signing.js";
 import { assertWorkReceiptContentAddress } from "../../core/work-receipt.js";
+import { VerificationProfileRegistry } from "../../services/verification-profile-registry.js";
 import {
   decorateReceiptPresentation,
   receiptPresentationFields
 } from "../../core/verdict-presentation.js";
+
+export const BADGE_FILTER_VALUES = Object.freeze({
+  handler: [...new Set(["github_pr", ...new VerificationProfileRegistry().list().map((profile) => profile.handler)])],
+  outcome: ["approved", "rejected"],
+  settled: ["true"],
+  sort: ["verifiedAt:desc"]
+});
+
+function badgeFilters(url) {
+  const supported = ["limit", "cursor", ...Object.keys(BADGE_FILTER_VALUES)];
+  const unknown = [...url.searchParams.keys()].filter((key) => !supported.includes(key));
+  if (unknown.length) throw new ValidationError("Unsupported badge query parameters.", { unknown, supported });
+  const filters = {};
+  for (const [key, values] of Object.entries(BADGE_FILTER_VALUES)) {
+    if (!url.searchParams.has(key)) continue;
+    const value = url.searchParams.get(key);
+    if (!values.includes(value) || url.searchParams.getAll(key).length !== 1) {
+      throw new ValidationError(`Unsupported badge ${key}.`, { parameter: key, unknown: value, supported: values });
+    }
+    filters[key] = value;
+  }
+  return filters;
+}
+
+function matchesBadgeFilters(row, filters) {
+  const document = row.runReceipt ?? row.badge;
+  if (filters.handler && (document.verifier?.profile ?? document.verifier?.handler) !== filters.handler) return false;
+  if (filters.outcome && document.verdict?.outcome !== filters.outcome) return false;
+  if (filters.settled && !/^0x[0-9a-f]{64}$/iu.test(document.settlement?.settlementTx ?? "")) return false;
+  if (filters.sort && !Number.isFinite(Date.parse(document.timestamps?.verifiedAt))) return false;
+  return true;
+}
 
 export function createListBadgeReceipts({
   buildBadgeFromSession,
@@ -19,7 +52,7 @@ export function createListBadgeReceipts({
   verifierAddress,
   verifierService
 }) {
-  async function rowsForSessions(sessions) {
+  async function rowsForSessions(sessions, runOnly = false) {
     const receipts = [];
     for (const session of sessions) {
       try {
@@ -29,6 +62,9 @@ export function createListBadgeReceipts({
         // Run and badge rows are isolated: one malformed document must not
         // suppress the other receipt for an approved session.
       }
+
+      // Filtered work-receipt reads do not rebuild badges or call live verifiers.
+      if (runOnly) continue;
 
       try {
         const storedBadge = await stateStore.getBadgeDocument?.(session.sessionId);
@@ -62,9 +98,22 @@ export function createListBadgeReceipts({
     return receipts;
   }
 
-  return async function listBadgeReceipts({ limit = 50, cursor } = {}) {
+  return async function listBadgeReceipts({ limit = 50, cursor, ...filters } = {}) {
     const after = decodeBadgeCursor(cursor);
     const rows = [];
+    const filtered = Object.keys(filters).length > 0;
+    if (filters.sort) {
+      for (let offset = 0; ; offset += 100) {
+        const sessions = await stateStore.listRecentSessions(100, offset);
+        rows.push(...(await rowsForSessions(sessions, true)).filter((row) => matchesBadgeFilters(row, filters)));
+        if (sessions.length < 100) break;
+      }
+      rows.sort((a, b) => Date.parse(b.runReceipt.timestamps.verifiedAt) - Date.parse(a.runReceipt.timestamps.verifiedAt)
+        || a.sessionId.localeCompare(b.sessionId) || a.kind.localeCompare(b.kind));
+      const index = after ? rows.findIndex((row) => row.sessionId === after.sessionId && row.kind === after.kind) : -1;
+      if (after && index === -1) throw new ValidationError("Badge cursor is no longer available; restart the listing.", "invalid_cursor");
+      return badgePage(rows.slice(index + 1), limit);
+    }
     let found = !after;
     // Page session metadata without enriching it or rereading old receipts.
     // The cursor names a row (session + kind), not a shifting array offset.
@@ -72,7 +121,7 @@ export function createListBadgeReceipts({
       const sessions = await stateStore.listRecentSessions(100, offset);
       for (const session of sessions) {
         if (!found && session.sessionId !== after.sessionId) continue;
-        const receipts = await rowsForSessions([session]);
+        const receipts = (await rowsForSessions([session], filtered)).filter((row) => matchesBadgeFilters(row, filters));
         for (const row of receipts) {
           if (!found) {
             if (row.sessionId === after.sessionId && row.kind === after.kind) found = true;
@@ -185,7 +234,8 @@ export function createBadgeRoutes({
     }
 
     if (request.method === "GET" && pathname === "/badges") {
-      const page = await listBadgeReceipts({ limit: parseLimit(url, 50, 500), cursor: url.searchParams.get("cursor") });
+      const filters = badgeFilters(url);
+      const page = await listBadgeReceipts({ limit: parseLimit(url, 50, 500), cursor: url.searchParams.get("cursor"), ...filters });
       const etag = `W/"${createHash("sha256").update(JSON.stringify(page)).digest("hex")}"`;
       const headers = { etag, "cache-control": "public, max-age=0, must-revalidate" };
       if (page.nextCursor) {

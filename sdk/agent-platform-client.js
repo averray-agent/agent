@@ -131,10 +131,13 @@ export class AgentPlatformClient {
     return this.request(`/badges/${encodeURIComponent(sessionId)}`);
   }
 
-  async listBadges({ limit = undefined, cursor = undefined } = {}) {
+  async listBadges({ limit = undefined, cursor = undefined, handler, outcome, settled, sort } = {}) {
     const params = new URLSearchParams();
     if (limit !== undefined) params.set("limit", String(limit));
     if (cursor !== undefined) params.set("cursor", cursor);
+    for (const [key, value] of Object.entries({ handler, outcome, settled, sort })) {
+      if (value !== undefined) params.set(key, String(value));
+    }
     return this.request(`/badges${params.size ? `?${params.toString()}` : ""}`);
   }
 

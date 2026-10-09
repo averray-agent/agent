@@ -2659,7 +2659,7 @@
         ],
         "operationId": "listBadges",
         "summary": "List recent public badge receipts",
-        "description": "Cursor-paginated averray.badge-list-item.v1 wrappers, default 50 rows (formerly 100 sessions). Follow nextCursor for the complete list. Verify each document alone; unsignedPresentation is not signed. Cursor identity is sessionId plus kind; order is recent sessions, run before badge. A stale cursor requires restarting. Wrapper schema: https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/badge-list-item-v1.json. ETag supports If-None-Match.",
+        "description": "Cursor-paginated averray.badge-list-item.v1 wrappers, default 50 rows (formerly 100 sessions). Follow nextCursor for the complete list, preserving filters. Verify each document alone; unsignedPresentation is not signed. Cursor identity is sessionId plus kind; default order is recent sessions, run before badge. Optional handler/outcome/settled filters read canonical run-receipt fields; sort=verifiedAt:desc orders by document.timestamps.verifiedAt, never unsigned issuedAt, excluding missing dates. A stale cursor requires restarting. Wrapper schema: https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/badge-list-item-v1.json. ETag supports If-None-Match.",
         "security": [],
         "parameters": [
           {
@@ -2682,6 +2682,26 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "handler", "in": "query", "required": false,
+            "description": "Canonical receipt verifier handler: GitHub PR or a published Verify profile handler.",
+            "schema": { "type": "string", "enum": ["github_pr", "deterministic"] }
+          },
+          {
+            "name": "outcome", "in": "query", "required": false,
+            "description": "Canonical verdict outcome.",
+            "schema": { "type": "string", "enum": ["approved", "rejected"] }
+          },
+          {
+            "name": "settled", "in": "query", "required": false,
+            "description": "Require a canonical settlement.settlementTx transaction hash.",
+            "schema": { "type": "string", "enum": ["true"] }
+          },
+          {
+            "name": "sort", "in": "query", "required": false,
+            "description": "Descending canonical document.timestamps.verifiedAt; deterministic sessionId/kind tie-break.",
+            "schema": { "type": "string", "enum": ["verifiedAt:desc"] }
           }
         ],
         "responses": {
@@ -2724,7 +2744,7 @@
             }
           },
           "304": { "description": "Page unchanged (If-None-Match)." },
-          "400": { "description": "Invalid or stale cursor." }
+          "400": { "description": "Invalid/stale cursor or unsupported query name/value. Filter errors include details.unknown and details.supported." }
         }
       }
     },

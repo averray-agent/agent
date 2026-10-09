@@ -7,7 +7,7 @@ import { canonicalBadgeReceiptBytes, verifyBadgeReceiptSignature } from "../../c
 import { verifyReceiptSignature } from "../../../../app/lib/ui/receipt-signature-verification.js";
 import { NotFoundError, ValidationError } from "../../core/errors.js";
 import { MemoryStateStore } from "../../core/state-store.js";
-import { createBadgeRoutes, createListBadgeReceipts as createLister } from "./badge-routes.js";
+import { BADGE_FILTER_VALUES, createBadgeRoutes, createListBadgeReceipts as createLister } from "./badge-routes.js";
 import { hashWorkReceiptContent } from "../../core/work-receipt.js";
 
 const SESSION = { sessionId: "session-1", jobId: "job-1" };
@@ -62,6 +62,84 @@ const STORED_RUN_RECEIPT = {
   signers: SIGNERS,
   canonicalUrl: "https://api.averray.com/badges/session-pruned/run"
 };
+
+test("V3b one-item query filters canonical fields and sorts signed verifiedAt across session pages", async () => {
+  const sessions = Array.from({ length: 120 }, (_, i) => ({ sessionId: `s-${i}`, updatedAt: "2099-01-01T00:00:00Z" }));
+  const runs = new Map(sessions.map((session) => [session.sessionId, {
+    ...STORED_RUN_RECEIPT, ...session,
+    verifier: { handler: "deterministic" }, verdict: { outcome: "approved" },
+    settlement: { settlementTx: "0x" + "a".repeat(64) },
+    timestamps: { verifiedAt: "2026-10-09T15:00:00Z" }
+  }]));
+  const github = (id, date, changes = {}) => runs.set(id, { ...runs.get(id),
+    verifier: { handler: "github_pr" }, timestamps: { verifiedAt: date }, ...changes });
+  github("s-0", "2026-10-09T12:00:00Z"); // Legacy session order would select this.
+  github("s-1", "2026-10-09T16:00:00Z", { verdict: { outcome: "rejected" } });
+  github("s-2", "2026-10-09T16:00:00Z", { settlement: {} });
+  github("s-3", undefined); // Plausible recent unsigned updatedAt must not count.
+  github("s-119", "2026-10-09T14:00:00Z");
+  let badgeReads = 0;
+  const list = createLister({
+    stateStore: {
+      listRecentSessions: async (limit, offset) => sessions.slice(offset, offset + limit),
+      getRunReceiptDocument: async (id) => runs.get(id),
+      getBadgeDocument: async () => { badgeReads++; }
+    }, service: {}, verifierService: {}
+  });
+  const h = makeHarness({ listBadgeReceipts: list });
+  const query = "?handler=github_pr&outcome=approved&settled=true&sort=verifiedAt:desc&limit=1";
+  async function get(suffix = "", headers = {}) {
+    const response = {};
+    await h.route({ request: { method: "GET", headers }, response, pathname: "/badges",
+      url: new URL("http://localhost/badges" + query + suffix) });
+    return response;
+  }
+  const first = await get();
+  assert.equal(first.body.items.length, 1);
+  assert.equal(first.body.items[0].document.sessionId, "s-119");
+  assert.deepEqual(first.body.items[0].document, runs.get("s-119"), "signed document is not rewritten");
+  assert.equal(first.body.items[0].schemaVersion, "averray.badge-list-item.v1");
+  assert.ok(Buffer.byteLength(JSON.stringify(first.body)) < 50_000);
+  assert.equal(badgeReads, 0, "filtered reads must not rebuild badge rows");
+  assert.match(first.headers.link, /handler=github_pr/u);
+  const next = await get("&cursor=" + encodeURIComponent(first.body.nextCursor));
+  assert.equal(next.body.items[0].document.sessionId, "s-0");
+  assert.equal(next.body.nextCursor, null);
+  assert.equal((await get("", { "if-none-match": first.headers.etag })).statusCode, 304);
+  github("s-119", "2026-10-09T14:01:00Z");
+  assert.equal((await get("", { "if-none-match": first.headers.etag })).statusCode, 200);
+  runs.clear();
+  assert.deepEqual((await get()).body.items, []);
+});
+
+test("V3b unknown filter values and names are 400 with the supported set", async () => {
+  const h = makeHarness();
+  for (const [key, supported] of Object.entries(BADGE_FILTER_VALUES)) {
+    await assert.rejects(h.route({ request: { method: "GET" }, response: {}, pathname: "/badges",
+      url: new URL(`http://localhost/badges?${key}=typo`) }), (error) => {
+      assert.equal(error.statusCode, 400);
+      assert.equal(error.details.parameter, key);
+      assert.deepEqual(error.details.supported, supported);
+      return true;
+    });
+    for (const value of supported) {
+      await h.route({ request: { method: "GET" }, response: {}, pathname: "/badges",
+        url: new URL(`http://localhost/badges?${key}=${encodeURIComponent(value)}`) });
+      assert.equal(h.calls.findLast(([name]) => name === "listBadgeReceipts")[1][key], value);
+    }
+  }
+  await assert.rejects(h.route({ request: { method: "GET" }, response: {}, pathname: "/badges",
+    url: new URL("http://localhost/badges?typo=true") }), (error) => {
+    assert.equal(error.statusCode, 400);
+    assert.deepEqual(error.details.unknown, ["typo"]);
+    assert.deepEqual(error.details.supported, ["limit", "cursor", ...Object.keys(BADGE_FILTER_VALUES)]);
+    return true;
+  });
+  const schema = JSON.parse(readFileSync(new URL("../../../../docs/api/openapi.json", import.meta.url), "utf8"));
+  for (const [key, values] of Object.entries(BADGE_FILTER_VALUES)) {
+    assert.deepEqual(schema.paths["/badges"].get.parameters.find((p) => p.name === key).schema.enum, values);
+  }
+});
 
 function addressedWorkReceipt({ sessionId, jobId, outcome = "approved", marker = "fixture" }) {
   const content = {
