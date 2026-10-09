@@ -66,6 +66,14 @@ test("job lead is rendered then flattened in static HTML, signed-out and signed-
   }
 });
 
+test("truthy HTML-only description uses fallback copy when the rendered lead is empty", () => {
+  for (const body of ["<div>hidden HTML-only block</div>", "<script>unsafe()</script>", "![only image](https://example.test/image.png)"]) {
+    const html = renderToStaticMarkup(React.createElement(IssueMarkdown, { lead: true }, body));
+    assert.match(html, /Open the task to read the exact success criteria\./u);
+    assert.doesNotMatch(html, /hidden|unsafe|<script/u);
+  }
+});
+
 test("client-navigation summaries reuse the same GFM lead and keep full terms separate", () => {
   const first = renderToStaticMarkup(React.createElement(IssueMarkdown, { lead: true }, description));
   const next = renderToStaticMarkup(React.createElement(IssueMarkdown, { lead: true }, "## Next\n\n~~old~~ **new**"));

@@ -11,7 +11,7 @@ export function flattenMarkdownLead() {
       const value = (node.children ?? []).map(text).join("");
       return blocks.has(node.tagName) ? value + " " : value;
     }
-    const plain = text(tree).replace(/\s+/gu, " ").trim();
+    const plain = text(tree).replace(/\s+/gu, " ").trim() || "Open the task to read the exact success criteria.";
     const excerpt = plain.length > 240 ? plain.slice(0, 237).trimEnd() + "…" : plain;
     tree.children = [{ type: "text", value: excerpt }];
   };

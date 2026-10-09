@@ -118,6 +118,55 @@ const JOBS = [
   }
 ].map((job) => ({ ...job, claimState: "open", claimable: true }));
 
+test("compact board preserves complete Markdown criteria and fallback description for render-then-truncate", () => {
+  for (const markdown of [
+    "a".repeat(174) + " **Important**: retain the whole condition.",
+    "## Success\n\n" + "a".repeat(170) + "\n- [ ] Preserve this complete checklist item.\n- [x] And its sibling.",
+    "a".repeat(169) + " [evidence](https://example.test/complete-link)"
+  ]) {
+    for (const criteria of [undefined, ["", "  " + markdown + "  ", "Second criterion"]]) {
+      const job = { ...JOBS[0], description: "  " + markdown + "  ", acceptanceCriteria: criteria };
+      const response = buildPublicJobsResponse([job], new URLSearchParams("limit=1"));
+      assert.equal(response.jobs[0].summary, markdown);
+      assert.equal(response.jobs[0].successCriteria, criteria ? markdown : "");
+    }
+  }
+});
+
+test("compact jobs bound both Markdown fields at complete blocks within 1000 characters", () => {
+  const prefix = "## Task\n\nA **complete** [link](https://example.test).";
+  for (const tail of [
+    "```js\ninside\n\n" + "x".repeat(2_000) + "\n```",
+    "~~~\ninside\n\n" + "x".repeat(2_000) + "\n~~~",
+    "[long label " + "x".repeat(2_000) + "](https://example.test)",
+    "**" + "x".repeat(2_000) + "**",
+    "`" + "x".repeat(2_000) + "`"
+  ]) {
+    const row = buildPublicJobsResponse([{ ...JOBS[0], description: prefix + "\n\n" + tail,
+      acceptanceCriteria: [prefix + "\n\n" + tail] }], new URLSearchParams("limit=1")).jobs[0];
+    assert.equal(row.summary, prefix);
+    assert.equal(row.successCriteria, prefix);
+    assert.ok(row.summary.length <= 1_000 && row.successCriteria.length <= 1_000);
+    assert.ok(Buffer.byteLength(JSON.stringify(row)) < 3_000, "compact row transport budget");
+    const huge = buildPublicJobsResponse([{ ...JOBS[0], description: tail, acceptanceCriteria: [tail] }], new URLSearchParams("limit=1")).jobs[0];
+    assert.equal(huge.summary, "");
+    assert.equal(huge.successCriteria, "");
+  }
+  const fenced = "```js\ninside\n\ncode\n```";
+  const row = buildPublicJobsResponse([{ ...JOBS[0], description: fenced + "\n\n" + "x".repeat(2_000) }], new URLSearchParams("limit=1")).jobs[0];
+  assert.equal(row.summary, fenced, "a complete fenced block is retained");
+});
+
+test("compact Markdown normalizes CRLF and CR before a fence straddling the cap", () => {
+  for (const newline of ["\r\n", "\r"]) {
+    const markdown = ["Keep this complete lead.", "", "```js", "doNotLeakCode();", "", "x".repeat(1_100), "```"].join(newline);
+    const row = buildPublicJobsResponse([{ ...JOBS[0], description: markdown, acceptanceCriteria: [markdown] }], new URLSearchParams("limit=1")).jobs[0];
+    assert.equal(row.summary, "Keep this complete lead.");
+    assert.equal(row.successCriteria, "Keep this complete lead.");
+    assert.doesNotMatch(row.summary + row.successCriteria, /doNotLeakCode|```|\r/u);
+  }
+});
+
 test("legacy board stays complete; explicit claimable requires evidence and include opts into additional states", () => {
   const rows = [
     { id: "open", claimState: "open", claimable: true },
