@@ -87,6 +87,80 @@ Keep accepted-listing URLs separate from submission URLs. Record acceptance only
 after the public entry resolves and points at the Averray API. No runtime,
 settlement, environment, or VPS changes are part of this checkpoint.
 
+### X4b post-deploy proof and x402scan acceptance — 2026-10-09
+
+The earlier x402scan rejection above is superseded. After
+[#1468](https://github.com/averray-agent/agent/pull/1468) merged as `d6c39e94`,
+[deployment 37978698195](https://github.com/averray-agent/agent/actions/runs/37978698195)
+completed successfully. Its serving-SHA proof and public `/health` both identify
+`313ad574b48b0d018cc2473e6ffb514a711fa8c1`, which includes that merge and #1467.
+
+Unpaid live POST probes to `https://api.averray.com/verify/runs` at
+**2026-10-09T19:18:22Z** passed:
+
+| Input | HTTP | PAYMENT-REQUIRED | Result |
+|---|---|---|---|
+| No body | 402 | Present | x402 v2, `eip155:8453`, `billing.status: not_captured` |
+| `{}` | 402 | Present | x402 v2, `eip155:8453`, `billing.status: not_captured` |
+| `{"profile":1}` | 400 | Absent | `invalid_request`: `verifyRequest.profile must be a string` |
+
+For both 402 responses, decoding the base64 PAYMENT-REQUIRED header produced
+exactly the response JSON. No payment proof was supplied or paid run started.
+These are scoped discovery checks, not a claim that all platform health warnings
+are clear (`/health` reported `degraded` during the subsequent serving-SHA read).
+
+At approximately **19:19Z**, retried the
+[x402scan registration form](https://www.x402scan.com/resources/register) with
+`https://api.averray.com/verify/runs`, selecting **This URL only**. **Accepted**:
+the exact result was `Successfully registered 1 of 1 resources`, with the
+confirmation heading `You're registered!`.
+
+Accepted public listing:
+<https://www.x402scan.com/server/8481667c-d282-4e14-ac75-41ab7d946645>.
+Opened it and verified that it lists one resource, `POST /verify/runs v2`, under
+Averray and links to `api.averray.com`. No optional feedback signup, paid endpoint
+test, payment, or other directory submission was performed.
+
+### Official MCP registry publication — 2026-10-09
+
+The earlier 1.0.0/expired-login checkpoint above is historical. After the gate
+and merge of [#1467](https://github.com/averray-agent/agent/pull/1467), Pascal
+published `com.averray/mcp` **1.1.0** from `origin/main`'s `server.json` at
+**2026-10-09T19:07:49Z**. The clean merged tree was
+`313ad574b48b0d018cc2473e6ffb514a711fa8c1`; no further version bump was needed.
+
+Pascal reported successful publication. Independent public read-back at 19:09Z
+confirmed both [`versions/latest`](https://registry.modelcontextprotocol.io/v0.1/servers/com.averray%2Fmcp/versions/latest)
+and [`versions/1.1.0`](https://registry.modelcontextprotocol.io/v0.1/servers/com.averray%2Fmcp/versions/1.1.0)
+returned HTTP 200 with:
+
+```json
+{
+  "version": "1.1.0",
+  "description": "Paid agent work and paid verification, settled in USDC. Verified outcomes get signed receipts.",
+  "remotes": [{"type": "streamable-http", "url": "https://api.averray.com/mcp"}],
+  "official": {
+    "status": "active",
+    "isLatest": true,
+    "publishedAt": "2026-10-09T19:07:49.243456Z"
+  }
+}
+```
+
+This is a selected-field read-back, with `official` taken from
+`_meta["io.modelcontextprotocol.registry/official"]`, not the publisher's raw
+stdout. Version **1.0.0** still returns HTTP 200, `status: active`,
+`isLatest: false`. Description and remote match the gated memo table.
+
+**Authenticate and publish in one step.** Pascal used DNS login followed
+immediately by `mcp-publisher publish server.json` in the same command. Registry
+JWTs expire within minutes: the separate attempt at 19:06:33Z returned HTTP 401,
+`Invalid or expired Registry JWT token`, with detail
+`failed to parse token: token has invalid claims: token is expired`.
+DNS authentication covers `com.averray`; the earlier GitHub login does not.
+Do not display keys/tokens, change ownership proofs, or republish this immutable
+version. A registry refresh does not prove downstream directories have re-crawled.
+
 ## Step 1 — Coinbase Developer Platform credentials · *Pascal*
 
 The facilitator settles the payment on Base and sponsors the gas. We start on CDP for reach
