@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { TypedDataEncoder } from "ethers";
 
 import { VerificationProfileRegistry } from "../../services/verification-profile-registry.js";
+import { VerificationRunService } from "../../services/verification-run-service.js";
+import { MemoryStateStore } from "../../core/state-store.js";
+import { X402VerificationPaymentGate } from "../../payments/x402-verification-payment-gate.js";
+import { readJsonBody, respond } from "./http-helpers.js";
+import { invokeHttpRoute } from "../mcp/route-adapter.js";
 import { createVerifyRoutes } from "./verify-routes.js";
 import { VERIFY_BILLING_RULE } from "../../core/verify-product-copy.js";
 
@@ -9,6 +15,77 @@ const PRESENTATION_ENV = {
   X402_PAYMENT_NETWORK: "eip155:8453",
   X402_PAYMENT_ASSET_ADDRESS: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 };
+
+function discoveryHarness() {
+  const calls = { reserve: 0, capture: 0, authorize: 0 };
+  const store = new MemoryStateStore();
+  store.reserveVerificationRun = async () => { calls.reserve++; throw new Error("unexpected reservation"); };
+  const domain = { name: "USD Coin", version: "2", chainId: 8453, verifyingContract: PRESENTATION_ENV.X402_PAYMENT_ASSET_ADDRESS };
+  const gate = new X402VerificationPaymentGate({
+    config: { enabled: true, network: "eip155:8453", chainId: 8453,
+      asset: domain.verifyingContract, payTo: "0x1111111111111111111111111111111111111111",
+      assetEip712Name: domain.name, assetEip712Version: domain.version,
+      publicOrigin: "https://api.averray.com", captureMarginSeconds: 600 },
+    provider: { getNetwork: async () => ({ chainId: 8453n }) },
+    tokenContract: { name: async () => domain.name, DOMAIN_SEPARATOR: async () => TypedDataEncoder.hashDomain(domain) },
+    captureTokenContract: { transferWithAuthorization: async () => { calls.capture++; throw new Error("unexpected capture"); } }
+  });
+  const authorize = gate.authorize.bind(gate);
+  gate.authorize = async (input) => { calls.authorize++; return authorize(input); };
+  const profiles = new VerificationProfileRegistry();
+  const service = new VerificationRunService({ stateStore: store, profileRegistry: profiles, paymentGate: gate });
+  const route = createVerifyRoutes({ enforceLimit: async () => {}, rateLimitConfig: { verifierRun: {} },
+    readJsonBody, respond, verificationRunService: service });
+  return { calls, store, service, gate, profiles,
+    post: (body, headers = {}) => invokeHttpRoute(route, { method: "POST", path: "/verify/runs", body, headers }) };
+}
+
+for (const [label, body] of [["no body", undefined], ["empty object", {}]]) {
+  test(`X4b ${label} returns the published-example 402 without creating or reserving a run`, async () => {
+    const h = discoveryHarness();
+    const actual = await h.post(body);
+    const example = h.profiles.get("mcp-failure-semantics-v1", 1).workedExample.request;
+    const valid = await h.post(example);
+    assert.equal(actual.statusCode, 402);
+    assert.deepEqual(actual.body, valid.body);
+    assert.equal(actual.body.x402Version, 2);
+    assert.equal(actual.body.accepts[0].network, "eip155:8453");
+    assert.equal(actual.body.accepts[0].amount, h.profiles.get(example.profile, 1).price.amountRaw);
+    assert.equal(actual.body.billingRule, VERIFY_BILLING_RULE);
+    assert.equal(actual.body.billing.status, "not_captured");
+    assert.deepEqual(JSON.parse(Buffer.from(actual.headers["payment-required"], "base64")), actual.body);
+    assert.equal(h.calls.reserve, 0);
+    assert.equal(h.calls.capture, 0);
+    assert.deepEqual(await h.store.listActiveVerificationRuns(100), []);
+  });
+}
+
+test("X4b non-empty invalid bodies and non-object JSON remain 400 before payment intake", async () => {
+  const h = discoveryHarness();
+  for (const body of [{ profile: 1 }, { unrelated: true }, [], null, "", 0]) {
+    await assert.rejects(h.post(body), { statusCode: 400, code: "invalid_request" });
+  }
+  assert.deepEqual(h.calls, { reserve: 0, capture: 0, authorize: 0 });
+});
+
+test("X4b proof plus empty body remains 400 for every payment-header alias, with no run or capture", async () => {
+  const h = discoveryHarness();
+  for (const header of ["payment-signature", "x-payment", "verification-payment"]) {
+    for (const body of [undefined, {}]) {
+      await assert.rejects(h.post(body, { [header]: "proof" }), { statusCode: 400, code: "invalid_request" });
+    }
+  }
+  assert.deepEqual(h.calls, { reserve: 0, capture: 0, authorize: 0 });
+  assert.deepEqual(await h.store.listActiveVerificationRuns(100), []);
+});
+
+test("X4b discovery fails closed if a custom gate accepts absent payment", async () => {
+  const h = discoveryHarness();
+  h.gate.authorize = async () => ({ id: "unexpected-authorization" });
+  await assert.rejects(h.post({}), { statusCode: 503, code: "verification_discovery_unavailable" });
+  assert.equal(h.calls.reserve, 0);
+  assert.equal(h.calls.capture, 0);
+});
 
 function harness({ createRun, getRun, payload, profiles = new VerificationProfileRegistry().list() } = {}) {
   const calls = [];

@@ -59,6 +59,24 @@ export class VerificationRunService {
     return this.profileRegistry.list();
   }
 
+  async requireDiscoveryPayment() {
+    // Discovery has no executable input. Quote the published URL-only example
+    // through the same gate, without ever entering createRun/reservation.
+    const [name, version] = MCP_FAILURE_SEMANTICS_PROFILE_REF.split("@");
+    const profile = this.profileRegistry.get(name, Number(version));
+    const { target, inputs } = profile.workedExample.request;
+    await this.paymentGate.authorize({
+      price: profile.price,
+      profile: profile.ref,
+      profileLimits: profile.limits,
+      requestHash: hashCanonicalContent({ profile: profile.ref, target, inputs })
+    });
+    // A demo/custom gate accepting an absent proof must not create a run either.
+    throw new AppError("Verify discovery requires a payment challenge; no run was created.", {
+      code: "verification_discovery_unavailable", statusCode: 503
+    });
+  }
+
   async getRun(runId) {
     const normalized = String(runId ?? "").trim();
     if (!normalized) throw new ValidationError("runId is required.");
