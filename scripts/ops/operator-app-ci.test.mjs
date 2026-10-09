@@ -9,7 +9,8 @@ test("Operator app CI runs app unit tests on Node 22 without bypassing failures"
   const step = job.steps.find((entry) => entry.run === "npm run test:app");
   assert.ok(step);
   assert.equal(step.if, undefined);
-  assert.notEqual(step["continue-on-error"], true);
+  assert.equal(step["continue-on-error"], undefined);
+  assert.ok(workflow.jobs["ci-complete"].needs.includes("frontend"));
   assert.notEqual(job["continue-on-error"], true);
   assert.ok(job.steps.some((entry) => entry.with?.["node-version"] === "22"));
   assert.ok(job.steps.indexOf(step) < job.steps.findIndex((entry) => entry.run === "npm run build:frontend"));
