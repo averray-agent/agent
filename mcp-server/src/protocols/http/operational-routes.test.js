@@ -78,6 +78,7 @@ function makeHarness(overrides = {}) {
   };
   const service = { ...defaultService, ...(overrides.service ?? {}) };
   const route = createOperationalRoutes({
+    verificationRunService: overrides.verificationRunService,
     authConfig: overrides.authConfig ?? AUTH_CONFIG,
     deployedSha: overrides.deployedSha,
     externalPostingMode: overrides.externalPostingMode,
@@ -142,6 +143,13 @@ test("GET /health exposes credential freshness without making an unavailable sig
   await route({ request: { method: "GET" }, response, pathname: "/health" });
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.body.serviceHealth.components.credentials, credentials);
+});
+
+test("GET /health exposes only a counted legacy capture warning", async () => {
+  const warning = { code: "verify_capture_legacy_unresolved", severity: "warning", count: 2 };
+  const h = makeHarness({ verificationRunService: { getCaptureWarnings: async () => [warning] } });
+  await h.route({ request: { method: "GET" }, response: h.response, pathname: "/health" });
+  assert.deepEqual(h.response.body.warnings.filter((w) => w.code === warning.code), [warning]);
 });
 
 test("GET /health never signs or calls KMS and unused signers are not failures", async (t) => {

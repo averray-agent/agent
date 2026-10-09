@@ -4809,6 +4809,7 @@
                 "type": "string",
                 "enum": [
                   "authorized",
+                  "capturing",
                   "captured",
                   "not_captured"
                 ]

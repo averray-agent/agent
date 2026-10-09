@@ -252,7 +252,7 @@ for (const transport of ["http", "mcp"]) {
       const h = harness();
       let attempts = 0;
       let captured = 0;
-      h.gate.reconcileCapture = async () => ({ status: "failed" }); // Proven reverted capture fixture.
+      h.gate.reconcileCapture = async () => ({ status: "expired" }); // Proven unused expiry fixture.
       h.gate.capture = async () => {
         attempts++;
         if (outcome === "capture_failure") throw new Error("capture fixture failed");
@@ -291,9 +291,9 @@ for (const transport of ["http", "mcp"]) {
       assert.equal(completed.body.billingRule, VERIFY_BILLING_RULE);
       if (outcome === "capture_failure") {
         assert.equal(completed.body.verdict.outcome, "inconclusive");
-        assert.equal(completed.body.verdict.reasonCode, "runner_fault");
-        assert.equal(completed.body.verdict.reason, "runner_fault");
-        assert.match(completed.body.verdict.detail, /Payment transaction reverted/u);
+        assert.equal(completed.body.verdict.reasonCode, "payment_authorization_expired");
+        assert.equal(completed.body.verdict.reason, "payment_authorization_expired");
+        assert.match(completed.body.verdict.detail, /Payment authorization expired unused/u);
       }
       assert.equal(captured, decisive ? 1 : 0);
       assert.equal(attempts, decisive || outcome === "capture_failure" ? 1 : 0);

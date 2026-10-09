@@ -67,7 +67,7 @@ function paymentGate() {
     },
     async prepareCapture() { return {}; },
     async reconcileCapture() {
-      return { status: "failed" };
+      return { status: "expired" };
     }
   };
 }
@@ -92,10 +92,11 @@ test("X1d an unresolved capture does not block the next run in the finalizer tic
   assert.equal((await context.service.getRun(first.runId)).status, "executed");
   assert.equal((await context.service.getRun(first.runId)).billing.status, "capturing");
   assert.equal(gate.calls.release, 0);
-  assert.equal(logs.length, 1);
-  assert.equal(logs[0][0].runId, first.runId);
-  assert.equal(logs[0][0].errorCode, "RPC_UNAVAILABLE");
-  assert.equal(logs[0][1], "verification_run.finalization_retry");
+  assert.equal(logs.length, 2);
+  assert.equal(logs[0][1], "verification_run.capture_error");
+  assert.equal(logs[1][0].runId, first.runId);
+  assert.equal(logs[1][0].errorCode, "RPC_UNAVAILABLE");
+  assert.equal(logs[1][1], "verification_run.finalization_retry");
 });
 
 function harness({ runnerResult, runnerError, runner: runnerOverride, gate = paymentGate(), ids = ["one", "two"], profileRegistry = new VerificationProfileRegistry(), verifierRegistry, clock = { now: new Date("2026-08-18T12:00:00.000Z") } } = {}) {
@@ -425,7 +426,7 @@ test("payment gates work and a replayed proof cannot buy a second run", async ()
   assert.equal(context.gate.calls.capture, 1);
 });
 
-test("capture failure degrades a decisive result to inconclusive, bills nothing, and releases", async () => {
+test("proven unused expiry after a capture failure is inconclusive, bills nothing, and releases", async () => {
   const gate = paymentGate();
   gate.capture = async () => {
     gate.calls.capture += 1;
@@ -436,8 +437,8 @@ test("capture failure degrades a decisive result to inconclusive, bills nothing,
   const run = await executeAndFinalize(context);
 
   assert.equal(run.verdict.outcome, "inconclusive");
-  assert.equal(run.verdict.reason, "runner_fault");
-  assert.match(run.verdict.detail, /transaction reverted/u);
+  assert.equal(run.verdict.reason, "payment_authorization_expired");
+  assert.match(run.verdict.detail, /expired unused/u);
   assert.equal(run.billing.status, "not_captured");
   assert.equal(gate.calls.capture, 1);
   assert.equal(gate.calls.release, 1);

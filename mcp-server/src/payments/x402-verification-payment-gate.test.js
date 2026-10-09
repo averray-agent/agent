@@ -87,7 +87,7 @@ function harness({ nonceUsed = false, tokenName = "USD Coin", domainFailures = 0
   };
   const gate = new X402VerificationPaymentGate({
     config: config(),
-    provider: { async getNetwork() { return { chainId: 8453n }; } },
+    provider: { async getNetwork() { return { chainId: 8453n }; }, async getBlockNumber() { return 100; } },
     tokenContract,
     captureTokenContract,
     now: () => NOW
@@ -150,6 +150,7 @@ test("authorize verifies EIP-3009 offline and capture alone submits transferWith
   assert.equal(calls.capture, 0, "offline authorization must not submit a Base transaction");
 
   const captured = await gate.capture({ authorization });
+  assert.equal(authorization.authorizedAtBlock, 100);
   assert.equal(captured.transactionHash, TX);
   assert.equal(calls.capture, 1);
   assert.equal(calls.wait, 1);

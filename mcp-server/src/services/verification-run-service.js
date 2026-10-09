@@ -155,7 +155,21 @@ export class VerificationRunService {
   }
 
   async finalizeAvailableRuns({ limit = 100 } = {}) {
-    const active = await this.stateStore.listActiveVerificationRuns(limit);
+    const active = [];
+    // Select before mutating the active index: completing a row must not shift
+    // paging offsets. Not-due captures do not consume the batch or issue RPC.
+    for (let offset = 0; active.length < limit; offset += 100) {
+      const page = await this.stateStore.listActiveVerificationRuns(100, { offset });
+      for (const run of page) {
+        try {
+          if (this.executionReadyForFinalization(run)) active.push(run);
+        } catch (error) {
+          this.logger.warn?.({ runId: run.runId, errorName: error?.name, errorCode: error?.code }, "verification_run.finalization_retry");
+        }
+        if (active.length >= limit) break;
+      }
+      if (page.length < 100) break;
+    }
     const finalized = [];
     for (const candidate of active) {
       try {
@@ -181,6 +195,9 @@ export class VerificationRunService {
       } catch (error) {
         // Retain unfinished state for the next tick; never log payment proofs.
         this.logger.warn?.({ runId: candidate.runId, errorName: error?.name, errorCode: error?.code }, "verification_run.finalization_retry");
+        await this.stateStore.getVerificationRun(candidate.runId).then((pending) =>
+          pending?.billing?.status === "capturing" ? this.deferCapture(pending) : undefined
+        ).catch(() => undefined);
       }
     }
     return finalized;
@@ -188,6 +205,7 @@ export class VerificationRunService {
 
   executionReadyForFinalization(run) {
     if (!run || run.status === COMPLETE) return false;
+    if (Date.parse(run.billing?.nextCaptureAttemptAt) > this.now().getTime()) return false;
     if (run.status === "executed") return true;
     if (!new Set(["queued", "running"]).has(run.status)) return false;
     const profile = this.profileRegistry.get(run.profile, run.profileVersion);
@@ -198,6 +216,7 @@ export class VerificationRunService {
   }
 
   async finalizeExecution({ authorization, profile, run, execution }) {
+    if (Date.parse(run.billing?.nextCaptureAttemptAt) > this.now().getTime()) return publicRun(run);
     const alreadyCaptured = run.billing?.status === "captured";
     const capturing = run.billing?.status === "capturing";
     if ((alreadyCaptured || capturing) && !["approved", "rejected"].includes(run.verdict?.outcome)) {
@@ -262,19 +281,21 @@ export class VerificationRunService {
               await this.stateStore.updateVerificationRun(run.runId, run);
             }
           }), status: "captured" };
-        } catch {
+        } catch (error) {
+          this.logger.warn?.({ runId: run.runId, errorName: error?.name, errorCode: error?.code }, "verification_run.capture_error");
           capture = await this.reconcileCapture(run, authorization);
         }
       }
-      if (!["captured", "cancelled", "failed"].includes(capture.status)) {
+      if (!["captured", "cancelled", "expired"].includes(capture.status)) {
         if (capture.status !== "unavailable") this.logger.warn?.({ runId: run.runId, status: capture.status }, "verification_run.capture_pending");
+        await this.deferCapture(run);
         return publicRun(run);
       }
       if (capture.status !== "captured") {
-        const reason = capture.status === "cancelled" ? "payment_cancelled_by_payer" : "runner_fault";
+        const reason = capture.status === "cancelled" ? "payment_cancelled_by_payer" : "payment_authorization_expired";
         await safeRelease(this.paymentGate, { authorization, runId: run.runId, reason });
         execution = { status: "inconclusive", reason,
-          detail: capture.status === "cancelled" ? "Payment cancelled by payer." : "Payment transaction reverted; no fee was recorded." };
+          detail: capture.status === "cancelled" ? "Payment cancelled by payer." : "Payment authorization expired unused; no fee was recorded." };
         verdict = inconclusiveVerdict(reason, execution.detail);
         billing = notBilled(profile);
       } else {
@@ -336,13 +357,41 @@ export class VerificationRunService {
   }
 
   async reconcileCapture(run, authorization) {
+    if (authorization?.authorization && !Number.isSafeInteger(authorization.authorizedAtBlock)
+      && !run.billing.legacyCaptureUnresolved) {
+      run.billing.legacyCaptureUnresolved = true;
+      await this.stateStore.updateVerificationRun(run.runId, run);
+    }
     const result = await this.paymentGate.reconcileCapture({ authorization, ...run.billing });
+    if (result.captureScanNextBlock !== undefined) run.billing.captureScanNextBlock = result.captureScanNextBlock;
+    if (result.legacy) run.billing.legacyCaptureUnresolved = true;
     if (result.status === "unavailable" && !run.billing.reconciliationUnavailableLogged) {
       this.logger.warn?.({ runId: run.runId, errorCode: "capture_reconciliation_unavailable" }, "verification_run.capture_reconciliation_unavailable");
       run.billing.reconciliationUnavailableLogged = true;
       await this.stateStore.updateVerificationRun(run.runId, run);
     }
     return result;
+  }
+
+  async deferCapture(run) {
+    const attempts = (run.billing.captureAttempts ?? 0) + 1;
+    const delayMs = Math.min(300_000, 5_000 * 2 ** Math.min(attempts - 1, 6));
+    run.billing = { ...run.billing, captureAttempts: attempts,
+      nextCaptureAttemptAt: new Date(this.now().getTime() + delayMs).toISOString() };
+    await this.stateStore.updateVerificationRun(run.runId, run);
+  }
+
+  async getCaptureWarnings() {
+    if (this.captureWarningsCache?.expiresAt > this.now().getTime()) return this.captureWarningsCache.warnings;
+    let count = 0;
+    for (let offset = 0; ; offset += 100) {
+      const page = await this.stateStore.listActiveVerificationRuns(100, { offset });
+      count += page.filter((run) => run.billing?.legacyCaptureUnresolved).length;
+      if (page.length < 100) break;
+    }
+    const warnings = count ? [{ code: "verify_capture_legacy_unresolved", severity: "warning", count }] : [];
+    this.captureWarningsCache = { warnings, expiresAt: this.now().getTime() + 30_000 };
+    return warnings;
   }
 
   async evaluatePinnedProfile({ execution, profile, run }) {
@@ -443,7 +492,7 @@ function requireMatchingVerificationReplay(run, requestHash) {
 }
 
 function inconclusiveVerdict(reason, detail) {
-  const normalized = reason === "payment_cancelled_by_payer" || VERIFY_INCONCLUSIVE_REASONS.includes(reason) ? reason : "runner_fault";
+  const normalized = ["payment_cancelled_by_payer", "payment_authorization_expired"].includes(reason) || VERIFY_INCONCLUSIVE_REASONS.includes(reason) ? reason : "runner_fault";
   return {
     handler: "deterministic",
     handlerVersion: 1,

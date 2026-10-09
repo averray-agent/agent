@@ -155,8 +155,9 @@ decisive and billable too. Inspect the named checks and evidence before acting.
 
 The billing rule `inconclusive_not_billed` comes from each profile's
 `price.billingRule` at `/verify/profiles`, **not the 402 body**. Inconclusive or
-platform-fault results do not charge. A proven reverted capture or payer
-cancellation is inconclusive and not billed, not a successful purchase.
+platform-fault results do not charge. A proven unused expired authorization or
+payer cancellation is inconclusive and not billed, not a successful purchase.
+A reverted transaction alone does not prove non-payment.
 An uncertain capture remains pending (`billing.status: capturing`), with no
 public verdict until reconciled; a network error does not establish non-payment.
 Distinguish these from an artifact rejection. Do not retry automatically with a

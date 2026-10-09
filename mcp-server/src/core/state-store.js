@@ -703,11 +703,11 @@ export class MemoryStateStore {
     return cloneJsonRecord(this.verificationRunAuthorizations.get(String(runId)));
   }
 
-  async listActiveVerificationRuns(limit = 100) {
+  async listActiveVerificationRuns(limit = 100, { offset = 0 } = {}) {
     return [...this.verificationRuns.values()]
       .filter((run) => run.status !== "complete")
       .sort((left, right) => String(left.submittedAt ?? "").localeCompare(String(right.submittedAt ?? "")))
-      .slice(0, Math.max(0, Number(limit)))
+      .slice(offset, offset + Math.max(0, Number(limit)))
       .map((run) => cloneJsonRecord(run));
   }
 
@@ -1981,11 +1981,11 @@ export class RedisStateStore {
     return raw ? JSON.parse(raw) : undefined;
   }
 
-  async listActiveVerificationRuns(limit = 100) {
+  async listActiveVerificationRuns(limit = 100, { offset = 0 } = {}) {
     await this.connect();
     const normalizedLimit = Math.max(0, Number(limit));
     if (normalizedLimit === 0) return [];
-    const runIds = await this.client.zRange(this.key("verification-runs", "active"), 0, normalizedLimit - 1);
+    const runIds = await this.client.zRange(this.key("verification-runs", "active"), offset, offset + normalizedLimit - 1);
     const runs = await Promise.all(runIds.map((runId) => this.getVerificationRun(runId)));
     return runs.filter(Boolean);
   }

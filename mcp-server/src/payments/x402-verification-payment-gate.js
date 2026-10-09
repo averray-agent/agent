@@ -264,6 +264,9 @@ export class X402VerificationPaymentGate {
       );
     }
 
+    // Capture the lower bound before the nonce read, so a cancellation during
+    // execution (or between these reads) cannot fall outside reconciliation.
+    const authorizedAtBlock = await this.provider.getBlockNumber();
     let used;
     try {
       used = await this.token.authorizationState(authorization.from, authorization.nonce);
@@ -298,7 +301,7 @@ export class X402VerificationPaymentGate {
       );
     }
 
-    return Object.freeze(verified);
+    return Object.freeze({ ...verified, authorizedAtBlock });
   }
 
   async prepareCapture() {
@@ -332,28 +335,58 @@ export class X402VerificationPaymentGate {
     };
   }
 
-  async reconcileCapture({ authorization, pendingTransactionHash, fromBlock }) {
+  async reconcileCapture({ authorization, pendingTransactionHash, fromBlock, captureScanNextBlock }) {
+    let pendingKnown = false;
     if (pendingTransactionHash) {
       const receipt = await this.provider.getTransactionReceipt(pendingTransactionHash);
-      if (!receipt) return { status: "pending" };
-      if (Number(receipt.status) === 1) {
+      pendingKnown = !receipt;
+      if (receipt && Number(receipt.status) === 1) {
         return { status: "captured", transactionHash: pendingTransactionHash, proof: "reconciled_from_chain" };
       }
-      if (Number(receipt.status) === 0) return { status: "failed" };
-      throw Object.assign(new Error("Base receipt status unavailable."), { code: "capture_receipt_unavailable" });
+      // A reverted duplicate says nothing about the earlier authorization
+      // transfer. Reconcile the nonce/events before making any money statement.
+      if (receipt && Number(receipt.status) !== 0) {
+        throw Object.assign(new Error("Base receipt status unavailable."), { code: "capture_receipt_unavailable" });
+      }
     }
     const proof = authorization.authorization;
-    const toBlock = await this.provider.getBlockNumber();
-    // Bound every scan by its persisted pre-broadcast checkpoint, not genesis.
-    // Refuse an incomplete range rather than infer that a payment did not occur.
-    if (!Number.isSafeInteger(fromBlock) || fromBlock < 0 || toBlock < fromBlock || toBlock - fromBlock > 10_000) {
+    const legacy = !Number.isSafeInteger(authorization.authorizedAtBlock);
+    const firstBlock = legacy ? fromBlock : authorization.authorizedAtBlock;
+    const latest = await this.provider.getBlock("latest");
+    if (!latest || !Number.isSafeInteger(latest.number) || !Number.isSafeInteger(latest.timestamp)) {
+      throw Object.assign(new Error("Base block unavailable."), { code: "capture_block_unavailable" });
+    }
+    const used = await this.token.authorizationState(proof.from, proof.nonce, { blockTag: latest.number });
+    if (typeof used !== "boolean") throw new Error("Base authorization state is unavailable.");
+    if (!Number.isSafeInteger(firstBlock) || firstBlock < 0 || latest.number < firstBlock) {
       throw Object.assign(new Error("Capture reconciliation range unavailable."), { code: "capture_range_unavailable" });
     }
+    const expired = BigInt(latest.timestamp) > BigInt(proof.validBefore);
+    let toBlock = latest.number;
+    if (expired) {
+      // Find the final block in the authorization's validity window. A late
+      // finalizer never extends a payment scan arbitrarily towards today's head.
+      let low = firstBlock;
+      let high = latest.number;
+      toBlock = firstBlock - 1;
+      while (low <= high) {
+        const middle = Math.floor((low + high) / 2);
+        const block = await this.provider.getBlock(middle);
+        if (!block || !Number.isSafeInteger(block.timestamp)) throw new Error("Base historical block unavailable.");
+        if (BigInt(block.timestamp) <= BigInt(proof.validBefore)) {
+          toBlock = middle; low = middle + 1;
+        } else high = middle - 1;
+      }
+    }
+    // Persist progress between bounded chunks instead of wedging forever on
+    // an old/large authorization window. Re-read the boundary on the next pass.
+    const scanFrom = Math.max(firstBlock, captureScanNextBlock ?? firstBlock);
+    const scanEnd = Math.min(toBlock, scanFrom + 9_999);
     const abi = new Interface(TOKEN_ABI);
     const events = [];
-    for (let start = fromBlock; start <= toBlock; start += 1_000) {
+    for (let start = scanFrom; start <= scanEnd; start += 1_000) {
       events.push(...await this.provider.getLogs({
-        address: this.config.asset, fromBlock: start, toBlock: Math.min(toBlock, start + 999),
+        address: this.config.asset, fromBlock: start, toBlock: Math.min(scanEnd, start + 999),
         topics: [
           [abi.getEvent("AuthorizationUsed").topicHash, abi.getEvent("AuthorizationCanceled").topicHash],
           abi.encodeFilterTopics("AuthorizationUsed", [proof.from, proof.nonce])[1], proof.nonce
@@ -374,16 +407,17 @@ export class X402VerificationPaymentGate {
         const decoded = abi.parseLog(log);
         return decoded?.name === "Transfer"
           && decoded.args.from.toLowerCase() === proof.from.toLowerCase()
-          && decoded.args.to.toLowerCase() === proof.to.toLowerCase()
-          && decoded.args.value === BigInt(proof.value);
+          && decoded.args.to.toLowerCase() === this.config.payTo.toLowerCase()
+          && decoded.args.value >= BigInt(proof.value);
       });
       if (transfer) return { status: "captured", transactionHash: event.transactionHash, proof: "reconciled_from_chain" };
       return { status: "pending" };
     }
-    const used = await this.token.authorizationState(proof.from, proof.nonce);
-    if (typeof used !== "boolean") throw new Error("Base authorization state is unavailable.");
-    // A used nonce alone proves neither transfer nor capture (cancellation uses it too).
-    return { status: used ? "pending" : "open" };
+    if (scanEnd < toBlock) return { status: "pending", captureScanNextBlock: scanEnd + 1, legacy };
+    if (expired && !used && !legacy) return { status: "expired" };
+    // Never infer no payment across the unobserved pre-checkpoint legacy gap.
+    return { status: used || expired || pendingKnown ? "pending" : "open", legacy,
+      captureScanNextBlock: used ? firstBlock : Math.max(firstBlock, toBlock) };
   }
 
   async release() {

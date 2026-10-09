@@ -74,6 +74,7 @@ export function createOperationalRoutes({
   gateway,
   getRewardBankHealth,
   getProcessWarnings = () => [],
+  verificationRunService,
   indexerHealthProbe,
   metrics,
   metricsAuthRequired,
@@ -186,7 +187,8 @@ export function createOperationalRoutes({
           severity: "warning",
           count: service.receiptSignatureBackfill.verify.missing
         }] : []),
-        ...getProcessWarnings()
+        ...getProcessWarnings(),
+        ...(await verificationRunService?.getCaptureWarnings?.() ?? [])
       ];
       await recordCapabilityWarningTransitions({
         stateStore,
