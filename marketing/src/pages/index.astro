@@ -2,6 +2,7 @@
 import BaseLayout from "../layouts/BaseLayout.astro";
 import SiteNav from "../components/SiteNav.astro";
 import SiteFooter from "../components/SiteFooter.astro";
+import LatestReceipt from "../components/LatestReceipt.astro";
 import "../styles/global.css";
 
 // Full canonical example wallet — used wherever the homepage links out
@@ -286,6 +287,7 @@ const capital = [
     </section>
 
     <!-- 3. PROOF DOCK -->
+    <LatestReceipt />
     <section aria-label="Proof dock">
       <div class="proof-dock">
         {proofLinks.map((item) => (
