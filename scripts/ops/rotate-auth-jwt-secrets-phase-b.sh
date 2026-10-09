@@ -309,7 +309,7 @@ bold "[10/11] Verifying /health …"
 HEALTH=$(curl -fsS --max-time 10 "$HEALTH_URL")
 if printf '%s' "$HEALTH" | node -e '
     const x = JSON.parse(require("fs").readFileSync(0, "utf8"));
-    if (x.status === "ok" && x.components?.blockchain?.ok && x.components?.stateStore?.ok) {
+    if ((x.status === "ok" || (x.status === "degraded" && x.serviceHealth?.ok === true)) && x.components?.blockchain?.ok && x.components?.stateStore?.ok) {
       process.exit(0);
     }
     process.exit(1);

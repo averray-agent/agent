@@ -59,6 +59,7 @@ function pickNumber(value: unknown): number | undefined {
 /** Shape we read out of the /health payload — intentionally loose (the hook types it `unknown`). */
 interface HealthLike {
   status?: unknown;
+  serviceHealth?: { ok?: boolean };
   auth?: { chainId?: unknown } | null;
   components?: { blockchain?: { ok?: unknown; blockNumber?: unknown; asOf?: unknown } | null } | null;
 }
@@ -97,13 +98,13 @@ export function deriveChainTicker(input: {
   const ageSeconds = haveAsOf ? Math.max(0, (nowMs - asOfMs) / 1000) : Number.POSITIVE_INFINITY;
 
   const blockchainOk = bc?.ok !== false;
-  const statusOk = health.status === "ok";
+  const statusOk = health.serviceHealth?.ok ?? health.status === "ok";
   const stale = pollError || !haveAsOf || ageSeconds > CHAIN_TICKER_STALE_SECONDS;
 
   let tone: ChainTickerTone;
   if (!blockchainOk) tone = "degraded"; // backend itself says its chain component is unhealthy
   else if (stale) tone = "degraded"; // read too old / poll failing → not confidently live
-  else if (!statusOk) tone = "degraded"; // overall product degraded
+  else if (!statusOk) tone = "degraded"; // API unavailable, not an informational review backlog
   else tone = "ok";
 
   const heightLabel = `#${NUM.format(Math.floor(height))}`;

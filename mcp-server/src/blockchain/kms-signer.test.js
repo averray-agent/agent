@@ -25,6 +25,7 @@ import {
 } from "ethers";
 
 import { KmsSigner } from "./kms-signer.js";
+import { bindSignerToWriteBroadcaster } from "./rpc-provider.js";
 import {
   parseDerEcdsaSignature,
   normalizeSignatureS,
@@ -138,6 +139,20 @@ function collectingLogger() {
 // ───────────────────────────────────────────────────────────────────
 // Tests
 // ───────────────────────────────────────────────────────────────────
+
+test("KMS health records only successful signs, shares state across connect and retains the last success after failure", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-08T12:00:00Z") });
+  const kms = new FakeKMSClient();
+  const signer = new KmsSigner({ kmsClient: kms, keyId: "test-key" });
+  assert.deepEqual(signer.getHealth(), { state: "unused", lastSignAt: null });
+  const connected = bindSignerToWriteBroadcaster(signer, null, {});
+  await connected.signMessage("health fixture");
+  assert.deepEqual(signer.getHealth(), { ok: true, lastSignAt: "2026-10-08T12:00:00.000Z" });
+  assert.deepEqual(connected.getHealth(), signer.getHealth(), "gateway write signer forwards the shared health");
+  kms.failNextSign = true;
+  await assert.rejects(connected.signMessage("failure fixture"));
+  assert.deepEqual(signer.getHealth(), { ok: false, reason: "kms_sign_failed", lastSignAt: "2026-10-08T12:00:00.000Z" });
+});
 
 test("KmsSigner.getAddress returns the cached EVM address derived from KMS public key", async () => {
   const kms = new FakeKMSClient();

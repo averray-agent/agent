@@ -157,6 +157,23 @@ async function add(store, id, mode = "github_pr", status = "submitted") {
       summary: "Fix issue #1", tests: "Local test passed" }) });
 }
 
+test("overdue warning counts beyond the first page but samples at most 50 IDs", async () => {
+  const store = new MemoryStateStore();
+  for (let i = 0; i < 103; i++) {
+    await add(store, "overdue-" + i);
+    await store.upsertMutationReceipt("github_pr_review_observation", "overdue-" + i,
+      { previewOutcome: "rejected", merged: false, upstreamState: "closed" });
+  }
+  await add(store, "human", "human_fallback");
+  const service = new GithubPrReviewService({ stateStore: store, githubToken: "fixture" });
+  const status = await service.getStatus(new Date("2026-10-08T12:00:00Z"));
+  const warning = status.warnings.find((item) => item.code === "github_pr_review_overdue");
+  assert.equal(warning.count, 103);
+  assert.equal(new Set(warning.sessionIds).size, 50);
+  assert.ok(warning.sessionIds.includes("overdue-102"));
+  assert.ok(!warning.sessionIds.includes("human"));
+});
+
 test("empty GitHub poll is explicitly idle while never-run remains not checked", async () => {
   const store = new MemoryStateStore();
   await add(store, "human", "human_fallback");
@@ -175,6 +192,7 @@ test("empty GitHub poll is explicitly idle while never-run remains not checked",
 test("pending is exactly all submitted non-auto sessions, including sessions older than the first page; SLA is warning only", async () => {
   const store = new MemoryStateStore();
   await add(store, "old-pr");
+  await store.upsertMutationReceipt("github_pr_review_observation", "old-pr", { upstreamState: "closed", merged: false, previewOutcome: "rejected" });
   await add(store, "human", "human_fallback");
   for (let i = 0; i < 120; i++) await add(store, `auto-${i}`, i % 2 ? "deterministic" : "benchmark");
   for (const status of ["claimed", "rejected", "resolved", "disputed"]) await add(store, status, "github_pr", status);
@@ -191,6 +209,8 @@ test("pending is exactly all submitted non-auto sessions, including sessions old
   const overdue = await service.getStatus(new Date(+now + 60_000));
   assert.equal(overdue.warnings[0].code, "github_pr_review_overdue");
   assert.equal(overdue.warnings[0].severity, "warning");
+  assert.equal(overdue.warnings[0].count, 1);
+  assert.deepEqual(overdue.warnings[0].sessionIds, ["old-pr"]);
   assert.equal(overdue.oldestAgeMs, 48 * 3_600_000 + 60_000);
 });
 
@@ -264,7 +284,7 @@ test("changed upstream with an approved merged preview settles; non-approved bas
   assert.equal(settle.mock.callCount(), 1);
 });
 
-test("open green approved PR is observation-only and counted as awaiting human review", async (t) => {
+test("open green approved PR is observation-only and counted as waiting for merge", async (t) => {
   const f = await liveFixture();
   const settle = t.mock.method(f.verifier, "verifySubmission");
   assert.equal((await f.verifier.previewSubmission({ sessionId: "pr" })).outcome, "approved");
@@ -275,7 +295,9 @@ test("open green approved PR is observation-only and counted as awaiting human r
   assert.equal(observation.previewOutcome, "approved");
   assert.equal(observation.merged, false);
   const snapshot = await createProductHealthSnapshotProvider({ stateStore: f.store, getRewardBankHealth: async () => ({}) })();
-  assert.equal(snapshot.settlement.awaitingHumanReview, 1);
+  assert.equal(snapshot.settlement.waitingForMerge, 1);
+  assert.equal(snapshot.settlement.awaitingHumanReview, 0);
+  assert.equal(snapshot.settlement.overdueReview, 0);
   assert.equal(snapshot.settlement.stuck, 0);
 });
 

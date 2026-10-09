@@ -127,7 +127,7 @@ export function buildWorkerSummary({ apiUrl, wallet, health, profile }) {
     apiUrl,
     wallet: String(profile?.wallet ?? wallet).toLowerCase(),
     health: {
-      ok: Boolean(health?.ok ?? health?.status === "ok"),
+      ok: Boolean(health?.serviceHealth?.ok ?? health?.ok ?? health?.status === "ok"),
       status: health?.status
     },
     profile: {

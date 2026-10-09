@@ -14,6 +14,7 @@ import {
 import { buildOnboardingInventoryWarnings } from "../../core/onboarding-inventory.js";
 import { recordCapabilityWarningTransitions } from "../../services/overnight-ledger.js";
 import { createVerifyRevenueMetrics } from "../../services/verify-revenue-metrics.js";
+import { createCredentialsHealthProvider } from "../../services/credentials-health.js";
 
 function bearerTokenMatches(header, expectedToken) {
   const prefix = "Bearer ";
@@ -63,6 +64,8 @@ export function resolveMetricsAuthConfig(env = process.env) {
 }
 
 export function createOperationalRoutes({
+  badgeReceiptSigner,
+  getCredentialsHealth,
   authConfig,
   deployedSha = process.env.DEPLOYED_SHA?.trim() || "unknown",
   externalPostingMode = "closed",
@@ -83,6 +86,7 @@ export function createOperationalRoutes({
   stateStore
 }) {
   const financialMetrics = createVerifyRevenueMetrics({ stateStore });
+  const credentialsHealth = getCredentialsHealth ?? createCredentialsHealthProvider({ gateway, badgeReceiptSigner });
   const getGithubPrReviewHealth = createGithubPrReviewHealthProvider({ getService: () => service?.githubPrReview });
   const getLiveRewardBankHealth = getRewardBankHealth ?? createRewardBankHealthProvider({
     gateway
@@ -116,7 +120,8 @@ export function createOperationalRoutes({
         externalPostingWatcherStatus,
         submittedJobAutoVerifierHealth,
         lockedTierHealth,
-        githubPrReviewStatus
+        githubPrReviewStatus,
+        credentials
       ] = await Promise.all([
         stateStore.healthCheck?.() ?? { ok: true, backend: stateStore.constructor.name },
         getCachedBlockchainHealth(),
@@ -134,7 +139,11 @@ export function createOperationalRoutes({
           code: "locked_tier_health_unavailable",
           message: "Locked-deposit health state is unreadable."
         })) ?? { ok: true, state: "not_configured" },
-        getGithubPrReviewHealth()
+        getGithubPrReviewHealth(),
+        Promise.resolve().then(credentialsHealth).catch(() => ({
+          rolesAnywhere: { notAfter: null, ok: false, reason: "credential_health_unavailable" }, badgeReceiptSigner: { kid: null, ok: false, reason: "credential_health_unavailable" },
+          kms: { ok: false, lastSignAt: null, reason: "credential_health_unavailable" }
+        }))
       ]);
       const mutationBackendStatus = await getMutationBackendStatus({
         gateway,
@@ -159,6 +168,7 @@ export function createOperationalRoutes({
         externalPostingMode,
         externalPostingWatcherStatus
       });
+      serviceHealth.components.credentials = credentials;
       const productHealth = await getProductHealthSnapshot();
       const warnings = [
         ...buildCapabilityWarnings(capabilityHealth),
@@ -175,7 +185,7 @@ export function createOperationalRoutes({
       }).catch(() => undefined);
 
       respond(response, serviceHealth.ok ? 200 : 503, {
-        status: serviceHealth.ok ? "ok" : "degraded",
+        status: serviceHealth.ok && !warnings.some((warning) => warning.code === "github_pr_review_overdue") ? "ok" : "degraded",
         deployedSha,
         auth: { mode: authConfig.mode, domain: authConfig.domain, chainId: authConfig.chainId },
         serviceHealth,

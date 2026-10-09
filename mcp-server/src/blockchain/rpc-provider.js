@@ -247,6 +247,7 @@ function normalizeTransactionHash(value) {
 
 class PatientWriteSigner extends AbstractSigner {
   #signer;
+  getHealth() { return this.#signer.getHealth?.() ?? { ok: false, lastSignAt: null }; }
   #broadcaster;
 
   constructor(signer, readProvider, broadcaster) {

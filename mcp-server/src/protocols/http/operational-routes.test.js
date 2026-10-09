@@ -4,6 +4,9 @@ import test from "node:test";
 
 import { createOperationalRoutes, resolveMetricsAuthConfig } from "./operational-routes.js";
 import { GithubPrReviewService } from "../../services/github-pr-review-service.js";
+import { KmsSigner } from "../../blockchain/kms-signer.js";
+import { MemoryStateStore } from "../../core/state-store.js";
+import { buildJobSnapshot } from "../../core/job-snapshot.js";
 
 const AUTH_CONFIG = {
   mode: "strict",
@@ -107,6 +110,8 @@ function makeHarness(overrides = {}) {
       res.headers = headers;
     },
     service,
+    getCredentialsHealth: overrides.getCredentialsHealth,
+    badgeReceiptSigner: overrides.badgeReceiptSigner,
     stateStore: overrides.stateStore ?? {
       constructor: { name: "MemoryStateStore" },
       healthCheck: async () => {
@@ -118,6 +123,49 @@ function makeHarness(overrides = {}) {
   return { calls, response, route, service };
 }
 
+test("GET /health exposes credential freshness without making an unavailable signer a 503", async () => {
+  const credentials = { rolesAnywhere: { ok: false, reason: "certificate_expired_or_not_yet_valid", notAfter: "2026-10-08T00:00:00Z" },
+    badgeReceiptSigner: { ok: true, kid: "badge-1" }, kms: { state: "unused", lastSignAt: null } };
+  const { route, response } = makeHarness({ getCredentialsHealth: async () => credentials });
+  await route({ request: { method: "GET" }, response, pathname: "/health" });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body.serviceHealth.components.credentials, credentials);
+});
+
+test("GET /health never signs or calls KMS and unused signers are not failures", async (t) => {
+  const send = t.mock.fn(async () => { throw new Error("health must not probe KMS"); });
+  const signer = new KmsSigner({ keyId: "fixture-key", kmsClient: { send } });
+  const signMessage = t.mock.method(signer, "signMessage");
+  const signTransaction = t.mock.method(signer, "signTransaction");
+  const signDocument = t.mock.fn(async () => { throw new Error("health must not sign a badge"); });
+  const { route, response } = makeHarness({ gateway: { signer, isEnabled: () => false,
+    healthCheck: async () => ({ ok: true, enabled: false }) },
+    badgeReceiptSigner: { signDocument, getHealth: () => ({ kid: "fixture", state: "unused" }) } });
+  for (let n = 0; n < 2; n++) await route({ request: { method: "GET" }, response, pathname: "/health" });
+  for (const spy of [send, signMessage, signTransaction, signDocument]) assert.equal(spy.mock.callCount(), 0);
+  assert.equal(response.body.serviceHealth.components.credentials.kms.state, "unused");
+  assert.notEqual(response.body.serviceHealth.components.credentials.kms.ok, false);
+  for (const value of Object.values(response.body.serviceHealth.components.credentials)) if (value.ok === false) assert.ok(value.reason);
+});
+
+test("GET /health is not degraded for an old open PR but is degraded for closed-unmerged or stalled merged approval", async () => {
+  for (const [upstreamState, merged, previewOutcome, overdue] of [
+    ["open", false, "approved", false], ["closed", false, "rejected", true], ["closed", true, "approved", true]
+  ]) {
+    const store = new MemoryStateStore();
+    await store.upsertSession({ sessionId: "pr", jobId: "pr", status: "submitted", submittedAt: "2026-09-01T00:00:00Z",
+      jobSnapshot: buildJobSnapshot({ id: "pr", verifierMode: "github_pr" }) });
+    await store.upsertMutationReceipt("github_pr_review_observation", "pr", { upstreamState, merged, previewOutcome });
+    const review = new GithubPrReviewService({ stateStore: store, githubToken: "fixture" });
+    const { route, response } = makeHarness({ stateStore: store, service: { githubPrReview: review } });
+    await route({ request: { method: "GET" }, response, pathname: "/health" });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.status, overdue ? "degraded" : "ok");
+    assert.equal(response.body.settlement.waitingForMerge, overdue ? 0 : 1);
+    assert.equal(response.body.settlement.overdueReview, overdue ? 1 : 0);
+  }
+});
+
 test("GET /health exposes overdue GitHub review and upstream health without changing API liveness", async () => {
   const githubUpstream = { ok: false, lastSuccessAt: "2026-10-06T12:00:00Z", lastError: "github_api_401" };
   const warning = { code: "github_pr_review_overdue", severity: "warning", oldestAgeMs: 49 * 3_600_000 };
@@ -126,6 +174,7 @@ test("GET /health exposes overdue GitHub review and upstream health without chan
   } } });
   await route({ request: { method: "GET" }, response, pathname: "/health" });
   assert.equal(response.statusCode, 200);
+  assert.equal(response.body.status, "degraded");
   assert.deepEqual(response.body.serviceHealth.components.githubUpstream, githubUpstream);
   assert.deepEqual(response.body.warnings.find((item) => item.code === warning.code), warning);
   assert.equal(response.body.settlement.awaitingHumanReview, 0);

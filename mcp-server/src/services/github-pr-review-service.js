@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { githubReviewDisposition } from "../core/github-review-disposition.js";
 import { requireJobSnapshot } from "../core/job-snapshot.js";
 import { AUTO_DECIDABLE_MODES } from "./submitted-job-auto-verifier.js";
 import { GuardedSchedulerLoop, summaryErrorsOutcome } from "./guarded-scheduler-loop.js";
@@ -65,13 +66,20 @@ export class GithubPrReviewService {
     const queue = await this.pending({ now, upstream: false });
     const github = queue.items.filter((item) => item.verifierMode === "github_pr");
     const oldestGithubAgeMs = github[0]?.ageMs ?? null;
+    const classified = await Promise.all(github.map(async (item) => ({ ...item,
+      disposition: githubReviewDisposition(await this.stateStore.getMutationReceipt?.("github_pr_review_observation", item.sessionId))
+    })));
+    const overdue = classified.filter((item) => item.disposition === "operator_review" && item.ageMs > this.slaHours * 3_600_000);
     return { enabled: this.enabled, running: this.running, intervalMs: this.intervalMs,
       count: queue.count, oldestAgeMs: queue.oldestAgeMs, githubPrCount: github.length,
       githubUpstream: this.getUpstreamHealth(now, github.length),
       oldestGithubAgeMs, slaHours: this.slaHours,
-      warnings: [...(oldestGithubAgeMs > this.slaHours * 3_600_000 ? [{
-        code: "github_pr_review_overdue", severity: "warning", oldestAgeMs: oldestGithubAgeMs,
-        sessionId: github[0].sessionId, message: "GitHub PR review is overdue; operator review required."
+      waitingForMerge: classified.filter((item) => item.disposition === "waiting_for_merge").length,
+      overdueReview: overdue.length,
+      warnings: [...(overdue.length > 0 ? [{
+        code: "github_pr_review_overdue", severity: "warning", oldestAgeMs: overdue[0].ageMs,
+        count: overdue.length, sessionIds: overdue.slice(0, 50).map((item) => item.sessionId),
+        sessionId: overdue[0].sessionId, message: "GitHub PR review is overdue; operator review required."
       }] : []), ...this.runWarnings()],
       ...this.schedulerLoop.getStatus(now), lastRun: this.lastRun, recentRuns: this.recentRuns };
   }
@@ -125,9 +133,9 @@ export class GithubPrReviewService {
           previousObservedAt: previous?.previousObservedAt ?? previous?.observedAt ?? null };
         // Dedupe observations, not admission to settlement: a first observation
         // (or an old receipt written before this fix) may already be approved.
-        if (previous?.fingerprint !== fingerprint || previous?.previewOutcome !== item.previewOutcome || previous?.merged !== (upstream.merged === true)) {
+        if (previous?.fingerprint !== fingerprint || previous?.previewOutcome !== item.previewOutcome || previous?.merged !== (upstream.merged === true) || previous?.upstreamState !== upstream.state) {
           observation = { ...previous, fingerprint, previewOutcome: item.previewOutcome,
-            merged: upstream.merged === true, observedAt: now.toISOString(),
+            merged: upstream.merged === true, upstreamState: upstream.state, observedAt: now.toISOString(),
             previousFingerprint: previous?.fingerprint ?? null, previousObservedAt: previous?.observedAt ?? null };
           await this.stateStore.upsertMutationReceipt("github_pr_review_observation", item.sessionId, observation);
           summary.observed.push(item.sessionId);

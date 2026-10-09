@@ -758,6 +758,15 @@ test("indexer_stalled fails the API health check immediately, even beside a youn
   assert.equal(result.requestCounts["/indexer/status"], undefined, "refused before the sync-liveness step");
 });
 
+test("overdue review degrades public status but remains HTTP-serving health for the hosted deploy gate", async () => {
+  const result = await runHostedStackFixture({ autoVerifierOk: true, healthResponses: [(health) => ({
+    ...health, status: "degraded", serviceHealth: { ok: true },
+    warnings: [{ code: "github_pr_review_overdue", severity: "warning", count: 2, sessionIds: ["old-a", "old-b"] }]
+  })] });
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /github_pr_review_overdue/u);
+});
+
 test("a pass that still carries an ungated critical is labelled, not presented as clean", async () => {
   // blockchain_unhealthy is a cold cache for the first seconds after a
   // recreate, so the smoke does not gate it — but a green run must still say
