@@ -847,6 +847,7 @@ export async function createPlatformRuntime() {
       stateStore,
       logger,
       paymentGate: verificationPaymentGate,
+      badgeReceiptSigner,
       authConfig,
       selfIdentityRegistry
     })

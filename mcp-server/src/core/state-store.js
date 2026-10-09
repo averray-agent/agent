@@ -608,6 +608,19 @@ export class MemoryStateStore {
     };
   }
 
+  async setWorkReceiptDocumentSignature(receiptId, signature, sessionId) {
+    const id = normalizeReceiptIndexId(receiptId);
+    const existing = this.workReceiptDocuments.get(id);
+    if (!existing) return undefined;
+    const document = existing.signature ? existing : { ...existing, signature: cloneJsonRecord(signature) };
+    this.workReceiptDocuments.set(id, document);
+    const sessionKey = normalizeReceiptIndexId(sessionId);
+    if (this.sessionWorkReceiptDocuments.get(sessionKey)?.receiptId === existing.receiptId) {
+      this.sessionWorkReceiptDocuments.set(sessionKey, document);
+    }
+    return cloneJsonRecord(document);
+  }
+
   async getVerificationRun(runId) {
     return cloneJsonRecord(this.verificationRuns.get(String(runId)));
   }
@@ -1828,6 +1841,31 @@ export class RedisStateStore {
       documents: rawDocuments.filter(Boolean).map((raw) => JSON.parse(raw)),
       nextCursor: String(page.cursor ?? "0")
     };
+  }
+
+  async setWorkReceiptDocumentSignature(receiptId, signature, sessionId) {
+    await this.connect();
+    const key = this.key("work-receipt", normalizeReceiptIndexId(receiptId));
+    const sessionKey = this.key("work-receipt-session", normalizeReceiptIndexId(sessionId));
+    const raw = await this.client.get(key);
+    if (!raw) return undefined;
+    const existing = JSON.parse(raw);
+    const signed = existing.signature ? raw : JSON.stringify({ ...existing, signature });
+    // CAS the serialized document, never cjson-encode signed content: Lua
+    // re-encoding can change empty arrays into objects and invalidate the JWS.
+    const result = await this.client.eval(
+      `local current = redis.call('GET', KEYS[1])
+       if not current then return false end
+       if current ~= ARGV[1] then return current end
+       redis.call('SET', KEYS[1], ARGV[2])
+       local indexed = redis.call('GET', KEYS[2])
+       if indexed and cjson.decode(indexed).receiptId == ARGV[3] then
+         redis.call('SET', KEYS[2], ARGV[2])
+       end
+       return ARGV[2]`,
+      { keys: [key, sessionKey], arguments: [raw, signed, existing.receiptId] }
+    );
+    return result ? JSON.parse(result) : undefined;
   }
 
   async getVerificationRun(runId) {

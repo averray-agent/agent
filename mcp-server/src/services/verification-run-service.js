@@ -26,6 +26,7 @@ export class VerificationRunService {
     stateStore,
     profileRegistry,
     paymentGate = new UnavailableVerificationPaymentGate(),
+    badgeReceiptSigner,
     executionDispatcher = undefined,
     verifierRegistry = new VerifierRegistry(),
     now = () => new Date(),
@@ -42,6 +43,7 @@ export class VerificationRunService {
     this.stateStore = stateStore;
     this.profileRegistry = profileRegistry;
     this.paymentGate = paymentGate;
+    this.badgeReceiptSigner = badgeReceiptSigner;
     this.executionDispatcher = executionDispatcher;
     this.verifierRegistry = verifierRegistry;
     this.now = now;
@@ -239,7 +241,9 @@ export class VerificationRunService {
         selfIdentityRegistry: this.selfIdentityRegistry
       }
     });
-    await this.stateStore.putWorkReceiptDocument(run.runId, receipt);
+    const document = this.badgeReceiptSigner
+      ? { ...receipt, signature: await this.badgeReceiptSigner.signDocument(receipt) } : receipt;
+    await this.stateStore.putWorkReceiptDocument(run.runId, document);
     const persisted = {
       ...completed,
       receiptId: receipt.receiptId,

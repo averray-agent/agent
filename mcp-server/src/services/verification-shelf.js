@@ -12,6 +12,7 @@ import { VerificationRunService } from "./verification-run-service.js";
 export async function createVerificationShelf({
   stateStore,
   paymentGate,
+  badgeReceiptSigner,
   authConfig,
   selfIdentityRegistry,
   publicReceiptBaseUrl = process.env.PUBLIC_BASE_URL,
@@ -57,6 +58,7 @@ export async function createVerificationShelf({
     stateStore,
     profileRegistry: verificationProfileRegistry,
     paymentGate,
+    badgeReceiptSigner,
     executionDispatcher,
     selfIdentityRegistry,
     publicReceiptBaseUrl,
