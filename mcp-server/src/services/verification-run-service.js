@@ -26,6 +26,7 @@ export class VerificationRunService {
     stateStore,
     profileRegistry,
     paymentGate = new UnavailableVerificationPaymentGate(),
+    badgeReceiptSigner,
     executionDispatcher = undefined,
     verifierRegistry = new VerifierRegistry(),
     now = () => new Date(),
@@ -42,6 +43,7 @@ export class VerificationRunService {
     this.stateStore = stateStore;
     this.profileRegistry = profileRegistry;
     this.paymentGate = paymentGate;
+    this.badgeReceiptSigner = badgeReceiptSigner;
     this.executionDispatcher = executionDispatcher;
     this.verifierRegistry = verifierRegistry;
     this.now = now;
@@ -167,9 +169,13 @@ export class VerificationRunService {
   }
 
   async finalizeExecution({ authorization, profile, run, execution }) {
+    const alreadyCaptured = run.billing?.status === "captured";
     let verdict;
     try {
-      if (!authorization) {
+      if (alreadyCaptured) {
+        verdict = run.verdict;
+        execution = run.execution;
+      } else if (!authorization) {
         execution = {
           status: "inconclusive",
           reason: "runner_fault",
@@ -193,7 +199,12 @@ export class VerificationRunService {
     }
 
     let billing;
-    if (verdict.outcome === "approved" || verdict.outcome === "rejected") {
+    if (alreadyCaptured) {
+      if (!["approved", "rejected"].includes(verdict?.outcome)) {
+        throw new Error("Captured Verify run is missing its decisive verdict checkpoint.");
+      }
+      billing = run.billing;
+    } else if (verdict.outcome === "approved" || verdict.outcome === "rejected") {
       try {
         const captured = await this.paymentGate.capture({ authorization, runId: run.runId, verdict });
         billing = {
@@ -220,6 +231,15 @@ export class VerificationRunService {
       billing = notBilled(profile);
     }
 
+    if (billing.status === "captured" && !alreadyCaptured) {
+      // A receipt-signing/storage retry must neither capture again nor re-evaluate
+      // a verdict whose payment has already succeeded. Keep it finalizable.
+      // Persist outside the capture catch: a store error is not a capture failure.
+      await this.stateStore.updateVerificationRun(run.runId, {
+        ...run, status: "executed", billing, verdict, execution
+      });
+    }
+
     const completedAt = this.now().toISOString();
     const completed = {
       ...run,
@@ -239,7 +259,9 @@ export class VerificationRunService {
         selfIdentityRegistry: this.selfIdentityRegistry
       }
     });
-    await this.stateStore.putWorkReceiptDocument(run.runId, receipt);
+    const document = this.badgeReceiptSigner
+      ? { ...receipt, signature: await this.badgeReceiptSigner.signDocument(receipt) } : receipt;
+    await this.stateStore.putWorkReceiptDocument(run.runId, document);
     const persisted = {
       ...completed,
       receiptId: receipt.receiptId,

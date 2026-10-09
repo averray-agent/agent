@@ -9,7 +9,9 @@ import { watchReceiptSignature, receiptSignatureLabel } from "../../marketing/sr
 const reader = readFileSync(new URL("../../marketing/public/receipt-reader.js", import.meta.url), "utf8");
 const page = readFileSync(new URL("../../marketing/src/components/ReceiptPage.astro", import.meta.url), "utf8");
 const id = "0x" + "8".repeat(64);
-const unsigned = { receiptId: id, verdict: { outcome: "approved" } };
+const unsigned = { schemaVersion: "averray.work-receipt.v1", receiptType: "work_outcome",
+  receiptId: id, canonicalUrl: "https://averray.com/receipts/" + id,
+  intent: { specSource: "verify_request" }, verdict: { outcome: "approved" } };
 
 async function signedFixture() {
   const keys = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);

@@ -816,7 +816,7 @@ export async function createPlatformRuntime() {
   }
   if (badgeReceiptSigner) {
     try {
-      await backfillBadgeReceiptSignatures({ stateStore, signer: badgeReceiptSigner, logger });
+      platformService.receiptSignatureBackfill = await backfillBadgeReceiptSignatures({ stateStore, signer: badgeReceiptSigner, logger });
     } catch (error) {
       logger.error(
         { step: "backfill-badge-receipt-signatures", err: error instanceof Error ? error : new Error(String(error)) },
@@ -847,6 +847,7 @@ export async function createPlatformRuntime() {
       stateStore,
       logger,
       paymentGate: verificationPaymentGate,
+      badgeReceiptSigner,
       authConfig,
       selfIdentityRegistry
     })
