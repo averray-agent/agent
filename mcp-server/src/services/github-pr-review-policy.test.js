@@ -72,7 +72,8 @@ test("five real queued disclosures bind; a failing CLA goes to human review, nev
 
 test("closed unmerged green PR is rejected in preview regardless of merged-approval policy; merged and open PRs are unchanged", async () => {
   for (const acceptMergedAsApproved of [true, false]) {
-    for (const [state, merged] of [["closed", false], ["closed", true], ["open", false]]) {
+    for (const [state, merged, merged_at] of [["closed", false], ["closed", true], ["open", false],
+      ["unknown", false], [undefined, false], ["closed", false, "2026-10-08T12:00:00Z"]]) {
       const wallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
       const store = new MemoryStateStore();
       const job = { id: "closed-pr", category: "coding", verifierMode: "github_pr",
@@ -85,7 +86,7 @@ test("closed unmerged green PR is rejected in preview regardless of merged-appro
           { name: "tests", status: "completed", conclusion: "success" }
         ] });
         if (url.endsWith("/reviews")) return Response.json([{ state: "APPROVED" }]);
-        return Response.json({ state, merged, title: "Fix #42",
+        return Response.json({ state, merged, merged_at, title: "Fix #42",
           body: "Closes #42. Averray claimant wallet: " + wallet,
           html_url: "https://github.com/owner/repo/pull/43", head: { sha: "green-head" } });
       } });
@@ -100,8 +101,9 @@ test("closed unmerged green PR is rejected in preview regardless of merged-appro
       assert.equal(verdict.githubLookup.status, "verified");
       assert.equal(verdict.githubLookup.ciStatus, "passing");
       assert.equal(verdict.githubLookup.claimantBinding.status, "matched");
-      const closedUnmerged = state === "closed" && !merged;
-      assert.equal(verdict.outcome, closedUnmerged ? "rejected" : "approved");
+      const closedUnmerged = state === "closed" && !(merged || merged_at);
+      assert.equal(verdict.githubLookup.merged, Boolean(merged || merged_at));
+      assert.equal(verdict.outcome, !["open", "closed"].includes(state) ? "disputed" : closedUnmerged ? "rejected" : "approved");
       assert.equal(verdict.blockers.includes("pull request was closed without merge"), closedUnmerged);
       assert.deepEqual(await store.getSession(session.sessionId), before);
       assert.equal(await store.getVerificationResult(session.sessionId), undefined);

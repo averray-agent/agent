@@ -682,6 +682,15 @@ HTTP 409 `verdict_outcome_mismatch` with `{ expected, actual }` if it changed,
 before any settlement, remediation or persisted result. Inspect the mismatch
 and preview again; do not blindly retry settlement.
 
+HTTP 409 `merge_required` means an approval lacks a fresh, complete GitHub read
+with a verified merge. Both verifier execution and human-verdict approval refuse
+before publishing rationale or persisting a decision. Claim-time/submitted merge
+claims are not a fallback. Preview keeps its computed outcome but adds
+`upstream PR not merged` to the preview blockers. Rejection remains available;
+use preview → `--settle ... --expect rejected` when that is the fresh verdict.
+The review CLI prints the server's 409 body; inspect it rather than retrying a
+payment. The overview separates waiting-for-merge from overdue operator review.
+
 With `GITHUB_TOKEN` configured, the review poller observes pending GitHub PRs
 every `GITHUB_PR_REVIEW_POLL_MINUTES` (operator decision, default 30). The first
 complete observation establishes a durable baseline. Later merge/check-state

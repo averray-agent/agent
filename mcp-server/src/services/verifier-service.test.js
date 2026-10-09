@@ -1694,6 +1694,99 @@ test("expectOutcome rejects a fresh mismatched verdict with 409 on both run rout
   }
 });
 
+test("both run routes refuse unmerged GitHub approval before any writes, even without expectOutcome", async (t) => {
+  for (const pathname of ["/verifier/run", "/admin/verifier/run"]) {
+    for (const expectOutcome of [undefined, "approved"]) {
+      for (const merged of [false, undefined]) {
+      const h = makeIdempotencyHarness(3);
+      const job = { ...h.claimed.jobSnapshot.definition, verifierMode: "github_pr",
+        verifierConfig: { handler: "github_pr", version: 1 } };
+      const submitted = { ...transitionSession(h.claimed, "submitted"), jobSnapshot: buildJobSnapshot(job) };
+      await h.stateStore.upsertSession(submitted);
+      const before = structuredClone(await h.stateStore.getSession(submitted.sessionId));
+      const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway);
+      t.mock.method(service.registry, "evaluate", async () => ({ handler: "github_pr", outcome: "approved",
+        githubLookup: { status: "verified", state: "open", merged } }));
+      const effects = [
+        ...Object.keys(h.blockchainGateway).map((name) => t.mock.method(h.blockchainGateway, name)),
+        ...["upsertSession", "upsertVerificationResult", "upsertMutationReceipt"].map((name) => t.mock.method(h.stateStore, name)),
+        t.mock.method(h.platformService, "resumeSession"), t.mock.method(h.platformService, "ingestVerification")
+      ];
+      const route = createVerifierRoutes({ verifierService: service,
+        authMiddleware: async () => ({ wallet: submitted.wallet }), enforceLimit: async () => {}, rateLimitConfig: {},
+        readJsonBody: async () => ({ sessionId: submitted.sessionId, expectOutcome }), respond: () => assert.fail("must refuse") });
+      await assert.rejects(route({ request: { method: "POST" }, response: {}, pathname, url: new URL(pathname, "http://localhost") }),
+        (error) => error.statusCode === 409 && error.code === "merge_required");
+      for (const effect of effects) assert.equal(effect.mock.callCount(), 0);
+      assert.deepEqual(await h.stateStore.getSession(submitted.sessionId), before);
+      assert.equal(await h.stateStore.getVerificationResult(submitted.sessionId), undefined);
+      }
+    }
+  }
+});
+
+test("GitHub approval uses the live read, not a claimant's merged flag", async () => {
+  const h = makeIdempotencyHarness(3);
+  h.claimed.jobSnapshot = buildJobSnapshot({ ...h.claimed.jobSnapshot.definition, outputSchemaRef: undefined,
+    source: { type: "github_issue", repo: "example/project", issueNumber: 42 },
+    verifierMode: "github_pr", verifierConfig: { handler: "github_pr", version: 1 } });
+  h.claimed.submission = normalizeSubmission({ prUrl: "https://github.com/example/project/pull/77",
+    merged: true, summary: "Closes #42", tests: "npm test passed", issueNumber: 42 });
+  await h.stateStore.upsertSession(transitionSession(h.claimed, "submitted"));
+  let reads = 0;
+  const fetchImpl = liveGithubPrFetch({ merged: false });
+  const registry = new VerifierRegistry({ githubToken: "github_pat_test", fetchImpl: (...args) => { reads++; return fetchImpl(...args); } });
+  const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway, registry);
+  const preview = await service.previewSubmission({ sessionId: h.claimed.sessionId });
+  assert.equal(preview.outcome, "approved", JSON.stringify(preview));
+  assert.equal(preview.githubLookup.merged, false);
+  const previewReads = reads;
+  await assert.rejects(service.verifySubmission({ sessionId: h.claimed.sessionId, expectOutcome: "approved" }), { code: "merge_required" });
+  assert.ok(reads > previewReads, "settlement freshly reads upstream again");
+  assert.equal(h.calls.settle, 0);
+  assert.equal((await h.stateStore.getSession(h.claimed.sessionId)).status, "submitted");
+});
+
+test("GitHub preview adds merge advice without changing the approved verdict or handler blockers", async (t) => {
+  const h = makeIdempotencyHarness(3);
+  h.claimed.jobSnapshot = buildJobSnapshot({ ...h.claimed.jobSnapshot.definition, verifierConfig: { handler: "github_pr", version: 1 } });
+  await h.stateStore.upsertSession(transitionSession(h.claimed, "submitted"));
+  const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway);
+  const verdict = { handler: "github_pr", outcome: "approved", blockers: [], githubLookup: { status: "verified", state: "open", merged: false } };
+  t.mock.method(service.registry, "evaluate", async () => verdict);
+  const preview = await service.previewSubmission({ sessionId: h.claimed.sessionId });
+  assert.equal(preview.outcome, "approved");
+  assert.deepEqual(preview.blockers, ["upstream PR not merged"]);
+  assert.deepEqual(verdict.blockers, []);
+  assert.equal(h.calls.settle, 0);
+});
+
+test("closed-unmerged GitHub rejection with expectOutcome rejected remains allowed", async (t) => {
+  const h = makeIdempotencyHarness(3);
+  h.claimed.jobSnapshot = buildJobSnapshot({ ...h.claimed.jobSnapshot.definition, verifierConfig: { handler: "github_pr", version: 1 } });
+  await h.stateStore.upsertSession(transitionSession(h.claimed, "submitted"));
+  const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway);
+  t.mock.method(service.registry, "evaluate", async () => ({ handler: "github_pr", handlerVersion: 1, outcome: "rejected", reasonCode: "GITHUB_PR_CLOSED",
+    githubLookup: { status: "verified", state: "closed", merged: false } }));
+  await service.verifySubmission({ sessionId: h.claimed.sessionId, expectOutcome: "rejected" });
+  assert.equal(h.calls.settle, 1);
+  assert.equal((await h.stateStore.getSession(h.claimed.sessionId)).status, "rejected");
+});
+
+test("verified merged GitHub approval settles once through the guarded operator path", async (t) => {
+  const h = makeIdempotencyHarness(3);
+  const job = { ...h.claimed.jobSnapshot.definition, verifierMode: "github_pr", verifierConfig: { handler: "github_pr", version: 1 } };
+  h.claimed.jobSnapshot = buildJobSnapshot(job);
+  const submitted = transitionSession(h.claimed, "submitted");
+  await h.stateStore.upsertSession(submitted);
+  const service = new VerifierService(h.platformService, h.stateStore, h.blockchainGateway);
+  t.mock.method(service.registry, "evaluate", async () => ({ handler: "github_pr", handlerVersion: 1,
+    outcome: "approved", reasonCode: "GITHUB_PR_APPROVED", githubLookup: { status: "verified", state: "closed", merged: true } }));
+  await service.verifySubmission({ sessionId: submitted.sessionId, expectOutcome: "approved" });
+  assert.equal(h.calls.settle, 1);
+  assert.equal((await h.stateStore.getSession(submitted.sessionId)).status, "resolved");
+});
+
 test("matching expectOutcome still settles and persists through both run routes", async (t) => {
   for (const pathname of ["/verifier/run", "/admin/verifier/run"]) {
     const h = makeIdempotencyHarness(3);

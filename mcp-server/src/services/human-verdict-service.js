@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { hasVerifiedGithubMerge } from "../core/github-merge-policy.js";
 import { ConflictError, NotFoundError, ValidationError } from "../core/errors.js";
 import { assertJobSnapshotIntegrity } from "../core/job-snapshot.js";
 import { buildContentRecord } from "../core/content-addressed-store.js";
@@ -40,6 +41,14 @@ export class HumanVerdictService {
         throw new ConflictError("Human review requires a Submitted escrow; Disputed belongs to the arbitrator.", "human_verdict_escrow_not_submitted", { state: Number(liveJob.state) });
       }
       if (liveJob.worker?.toLowerCase() !== session.wallet.toLowerCase()) throw new ConflictError("Escrow worker mismatch.", "human_verdict_worker_mismatch");
+      if (approved && (job.verifierConfig?.handler ?? job.verifierMode) === "github_pr") {
+        // A stored observation or claimant-supplied merge claim is not authority
+        // to pay. Re-evaluate live before publishing rationale or any session write.
+        const preview = await this.verifierService.previewSubmission({ sessionId });
+        if (!hasVerifiedGithubMerge(preview.githubLookup)) {
+          throw new ConflictError("An upstream-verified merge is required before approving this GitHub PR.", "merge_required");
+        }
+      }
       if (!review) {
         const decidedAt = new Date().toISOString();
         const content = buildContentRecord({ payload: { sessionId, verdict, rationale, decidedBy: operator, decidedAt },

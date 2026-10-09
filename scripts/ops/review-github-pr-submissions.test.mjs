@@ -1,6 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseArgs, review } from "./review-github-pr-submissions.mjs";
+import { parseArgs, review, createReviewRequest, reportReviewError } from "./review-github-pr-submissions.mjs";
+
+test("operator review prints the server 409 body without request credentials", async () => {
+  const body = { code: "merge_required", message: "GitHub PR must be merged before approval." };
+  const request = createReviewRequest({ baseUrl: "https://api.example.test", token: "fixture-credential",
+    fetchImpl: async () => ({ ok: false, status: 409, json: async () => body }) });
+  const printed = [];
+  await request("POST", "/admin/verifier/run", {}).catch((error) => reportReviewError(error, (line) => printed.push(line)));
+  assert.equal(printed.length, 1);
+  assert.equal(printed[0], `HTTP 409: ${JSON.stringify(body)}`);
+  assert.doesNotMatch(printed[0], /fixture-credential/u);
+  reportReviewError(new Error("fixture-credential"), (line) => assert.doesNotMatch(line, /fixture-credential/u));
+});
 
 test("settle prints the same-handler preview and exits two without a settlement call on an outcome mismatch", async () => {
   const calls = [], printed = [];
