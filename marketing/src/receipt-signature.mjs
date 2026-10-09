@@ -13,10 +13,19 @@ export function watchReceiptSignature(window) {
     const result = await verifyReceiptSignature({ document,
       fetchImpl: window.fetch?.bind(window), cryptoImpl: window.crypto,
       jwksUrl: "https://api.averray.com/.well-known/badge-receipt-jwks.json"
-    }).catch(() => ({ state: "failed" }));
+    }).catch(() => ({ state: "unavailable" }));
     if (current !== revision) return;
-    label.textContent = result.state === "verified" ? "Signed by badge-1 (ES256)" : "Not signed";
+    label.textContent = receiptSignatureLabel(result);
   }
   window.addEventListener("averray:receipt-ready", refresh);
   return refresh();
+}
+
+export function receiptSignatureLabel(result) {
+  switch (result.state) {
+    case "verified": return `Signed by ${result.kid} (${result.alg})`;
+    case "unsigned": return "Not signed";
+    case "failed": return "Signature invalid";
+    default: return "Signature not checked (verification unavailable)";
+  }
 }
