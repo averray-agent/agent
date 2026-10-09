@@ -12,12 +12,24 @@ import { LIST_VERIFICATION_PROFILES_DESCRIPTION } from "../../core/verify-produc
 import { readJsonBody, respond } from "../http/http-helpers.js";
 import {
   createMcpToolExecutor,
+  buildMcpWelcome,
   createMcpTools,
   DEFAULT_MCP_MAX_REQUEST_BODY_BYTES,
   MCP_TOOLS,
   MCP_WELCOME_TOKEN_BUDGET
 } from "./tools.js";
 import { invokeHttpRoute } from "./route-adapter.js";
+import { readFileSync } from "node:fs";
+
+test("V2: merged-only rule is present in tools/list, welcome and both agent-facing pages", () => {
+  const rule = "GitHub PR jobs settle only when the upstream PR is merged and the verifier approves; a PR closed without merge is rejected.";
+  assert.ok(MCP_TOOLS.find(({ name }) => name === "listJobs").description.includes(rule));
+  assert.equal(buildMcpWelcome({}).githubPrSettlementRule, rule);
+  for (const page of ["agents", "builders"]) {
+    const source = readFileSync(new URL(`../../../../marketing/src/pages/${page}.astro`, import.meta.url), "utf8");
+    assert.ok(source.includes(rule), `${page} must publish the same rule`);
+  }
+});
 
 function makeJobRoute(service, protocol = "http") {
   return createJobRoutes({
