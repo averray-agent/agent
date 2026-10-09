@@ -1,7 +1,42 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
-import { buildPublicJobsResponse, buildPublicJobsPage } from "./jobs-response.js";
+import { buildPublicJobsResponse, buildPublicJobsPage, PUBLIC_JOBS_QUERY_PARAMETERS } from "./jobs-response.js";
+import { AgentPlatformClient } from "../../../../sdk/agent-platform-client.js";
+import { MCP_TOOLS } from "../mcp/tools.js";
+
+test("OpenAPI declares exactly the supported jobs query set and terminal claim states", () => {
+  const spec = JSON.parse(readFileSync(new URL("../../../../docs/api/openapi.json", import.meta.url), "utf8"));
+  assert.deepEqual(spec.paths["/jobs"].get.parameters.map(({ name }) => name).sort(), [...PUBLIC_JOBS_QUERY_PARAMETERS].sort());
+  const properties = spec.components.schemas.JobClaimStatus.properties;
+  for (const state of ["unclaimable", "closed", "cancelled", "paused", "archived", "stale"]) {
+    assert.ok(properties.claimState.enum.includes(state));
+    assert.ok(properties.effectiveState.enum.includes(state));
+  }
+  assert.ok(properties.fundingState.enum.includes("unavailable"));
+  for (const field of ["state", "status"]) {
+    for (const state of ["closed", "cancelled"]) assert.ok(spec.components.schemas.JobLifecycle.properties[field].enum.includes(state));
+  }
+  assert.deepEqual(spec.components.schemas.CompactJobRow.properties.listingStatus.enum, ["listed", "not_claimable"]);
+  assert.ok(spec.paths["/jobs"].get.responses["400"]);
+  assert.deepEqual(spec.paths["/jobs"].get.responses["400"].content["application/json"].example.details.supported, [...PUBLIC_JOBS_QUERY_PARAMETERS]);
+});
+
+test("public query allowlist covers every SDK, app hooks and MCP listJobs parameter plus the legacy shape alias", () => {
+  const hooks = readFileSync(new URL("../../../../app/lib/api/hooks.ts", import.meta.url), "utf8");
+  const hookQueries = [...hooks.matchAll(/[`"]\/jobs\?([^`"]+)/g)].map((match) => "?" + match[1]);
+  const table = [
+    ["SDK listJobs", [...AgentPlatformClient.prototype.listJobs.toString().matchAll(/params\.set\("([a-z]+)"/g)].map((m) => m[1])],
+    ["app hooks", hookQueries.flatMap((query) => [...query.matchAll(/[?&]([a-z]+)=/g)].map((m) => m[1]))],
+    ["MCP listJobs", Object.keys(MCP_TOOLS.find((tool) => tool.name === "listJobs").inputSchema.properties)],
+    ["legacy shape", ["shape"]]
+  ];
+  for (const [consumer, parameters] of table) {
+    assert.ok(parameters.length, `${consumer}: parameter extraction must not silently go empty`);
+    for (const parameter of parameters) assert.ok(PUBLIC_JOBS_QUERY_PARAMETERS.includes(parameter), `${consumer}: ${parameter}`);
+  }
+});
 
 const JOBS = [
   {
@@ -242,6 +277,7 @@ test("public jobs response filters and compacts agent-friendly queries", () => {
     "claimable",
     "currentWalletCanClaim",
     "fundingState",
+    "listingStatus",
     "reason",
     "claimedBy",
     "claimedAt",

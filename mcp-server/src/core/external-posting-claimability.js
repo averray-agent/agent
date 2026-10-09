@@ -23,16 +23,21 @@ export function projectExternalPostingClaimability(job, observation) {
   if (!observation.blocksClaim) return base;
 
   const blocked = {
-    claimState: "unclaimable",
-    state: "unclaimable",
-    effectiveState: "unclaimable",
+    claimState: observation.chainState ?? "unclaimable",
+    state: observation.chainState ?? "unclaimable",
+    effectiveState: observation.chainState ?? "unclaimable",
     claimable: false,
     currentWalletCanClaim: false,
-    reason: observation.reason
+    reason: observation.reason,
+    fundingState: "unavailable",
+    listingStatus: "not_claimable"
   };
   return {
     ...base,
     ...blocked,
+    ...(["closed", "cancelled"].includes(observation.chainState)
+      ? { lifecycle: { ...base.lifecycle, state: observation.chainState, status: observation.chainState } }
+      : {}),
     claimStatus: {
       ...base.claimStatus,
       ...blocked
@@ -79,40 +84,46 @@ export async function sweepExternalPostingClaimability({ jobs, blockchainGateway
       continue;
     }
     const liveJob = read.value;
-    const escrowGeneration = resolveExternalEscrowGeneration(blockchainGateway, liveJob);
-    if (Number(liveJob?.state) !== 1) {
-      observations.set(job.id, {
-        escrowGeneration,
-        blocksClaim: true,
-        reason: "external_posting_not_open_on_chain"
-      });
-      continue;
-    }
-    if (escrowGeneration === "legacy") {
-      legacyUnclaimableCount += 1;
-      observations.set(job.id, {
-        escrowGeneration,
-        blocksClaim: true,
-        reason: LEGACY_POSTING_UNCLAIMABLE,
-        escrowAddress: liveJob.escrowAddress
-      });
-      continue;
-    }
-    if (escrowGeneration !== "current") {
-      observations.set(job.id, {
-        escrowGeneration,
-        blocksClaim: true,
-        reason: EXTERNAL_POSTING_ESCROW_UNVERIFIED,
-        escrowAddress: liveJob?.escrowAddress
-      });
-      continue;
-    }
-    observations.set(job.id, {
-      escrowGeneration,
-      blocksClaim: false,
-      escrowAddress: liveJob.escrowAddress
-    });
+    observations.set(job.id, externalPostingObservation(blockchainGateway, liveJob));
+    if (observations.get(job.id).reason === LEGACY_POSTING_UNCLAIMABLE) legacyUnclaimableCount++;
   }
 
   return { candidateCount: candidates.length, legacyUnclaimableCount, observations };
+}
+
+export function externalPostingObservation(blockchainGateway, liveJob) {
+  const escrowGeneration = resolveExternalEscrowGeneration(blockchainGateway, liveJob);
+  if (Number(liveJob?.state) !== 1) {
+    return {
+      escrowGeneration,
+      blocksClaim: true,
+      chainState: ({ 2: "claimed", 3: "submitted", 4: "rejected", 5: "disputed", 6: "closed", 7: "cancelled" })[Number(liveJob?.state)],
+      reason: "external_posting_not_open_on_chain",
+      liveJob
+    };
+  }
+  if (escrowGeneration === "legacy") {
+    return {
+      escrowGeneration,
+      blocksClaim: true,
+      reason: LEGACY_POSTING_UNCLAIMABLE,
+      escrowAddress: liveJob.escrowAddress,
+      liveJob
+    };
+  }
+  if (escrowGeneration !== "current") {
+    return {
+      escrowGeneration,
+      blocksClaim: true,
+      reason: EXTERNAL_POSTING_ESCROW_UNVERIFIED,
+      escrowAddress: liveJob?.escrowAddress,
+      liveJob
+    };
+  }
+  return {
+    escrowGeneration,
+    blocksClaim: false,
+    escrowAddress: liveJob.escrowAddress,
+    liveJob
+  };
 }

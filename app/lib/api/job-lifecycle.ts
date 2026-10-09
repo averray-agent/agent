@@ -8,7 +8,7 @@
  * public `/jobs` feed filters out.
  */
 
-export type JobLifecycleStatus = "open" | "paused" | "archived";
+export type JobLifecycleStatus = "open" | "paused" | "archived" | "closed" | "cancelled";
 /**
  * Computed state derived from status + age. "stale" means the job is
  * status: open but past its automatic stale-after window. "open" means
@@ -19,7 +19,9 @@ export type JobLifecycleState =
   | "open"
   | "stale"
   | "paused"
-  | "archived";
+  | "archived"
+  | "closed"
+  | "cancelled";
 
 export type JobLifecycleAction =
   | "pause"
@@ -124,6 +126,8 @@ export function buildJobLifecycleSummary(payload: unknown): JobLifecycleSummary 
  * those jobs were exhausted.
  */
 export interface JobRowClassification {
+  closed: boolean;
+  cancelled: boolean;
   exhausted: boolean;
   open: boolean;
   claimable: boolean;
@@ -138,7 +142,9 @@ export function classifyJobRow(job: Record<string, unknown>): JobRowClassificati
   const state = text(lifecycle?.state) || text(job.state) || status || "open";
   const effectiveState = text(job.effectiveState);
   const liveState = text(asRecord(job.claimStatus)?.claimState) || text(job.claimState);
-  const liveClosed = ["closed", "cancelled", "unclaimable", "submitted", "claimed", "disputed", "exhausted"].includes(liveState);
+  const closed = state === "closed" || liveState === "closed";
+  const cancelled = state === "cancelled" || liveState === "cancelled";
+  const liveClosed = closed || cancelled || ["unclaimable", "submitted", "claimed", "disputed", "exhausted"].includes(liveState);
   // An exhausted job (recurring reserve spent) is not open work even
   // when its raw status still reads "open" — counting it inflated the
   // OPEN bucket past what agents can actually claim.
@@ -147,6 +153,8 @@ export function classifyJobRow(job: Record<string, unknown>): JobRowClassificati
   const restricted = state === "restricted" || effectiveState === "restricted";
 
   return {
+    closed,
+    cancelled,
     exhausted,
     open:
       !liveClosed &&
@@ -261,6 +269,10 @@ export function formatLifecycleLabel(state: JobLifecycleState): string {
       return "Paused";
     case "archived":
       return "Archived";
+    case "closed":
+      return "Closed";
+    case "cancelled":
+      return "Cancelled";
   }
 }
 
@@ -279,6 +291,10 @@ export function availableActions(state: JobLifecycleState): JobLifecycleAction[]
       return ["reopen", "archive"];
     case "archived":
       return ["reopen"];
+    case "closed":
+    case "cancelled":
+      // Chain-terminal jobs cannot be reopened through catalogue lifecycle controls.
+      return [];
   }
 }
 
@@ -306,11 +322,16 @@ function text(value: unknown): string | "" {
 }
 
 function isStatus(value: unknown): value is JobLifecycleStatus {
-  return value === "open" || value === "paused" || value === "archived";
+  return value === "open" || value === "paused" || value === "archived" || value === "closed" || value === "cancelled";
 }
 
 function isState(value: unknown): value is JobLifecycleState {
-  return value === "open" || value === "stale" || value === "paused" || value === "archived";
+  return value === "stale" || isStatus(value);
+}
+
+/** Completed work stays visible by default; the toggle hides only catalogue restrictions. */
+export function visibleInDefaultRuns(lifecycle?: JobLifecycle): boolean {
+  return !lifecycle || ["open", "closed", "cancelled"].includes(lifecycle.state);
 }
 
 /**

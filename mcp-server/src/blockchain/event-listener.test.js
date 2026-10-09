@@ -153,6 +153,26 @@ async function emit(listener, eventName, args, log = {}) {
   await listener.dispatch(eventName, args, { ...DEFAULT_LOG, ...log });
 }
 
+test("escrow poller reconciles Verified and JobClosed observations into the board", async () => {
+  const escrowAddress = `0x${"88".repeat(20)}`;
+  const escrowContract = makeContract({ address: escrowAddress,
+    eventTopics: { Verified: `0x${"09".repeat(32)}`, JobClosed: `0x${"10".repeat(32)}` } });
+  escrowContract.jobs = async () => ({ poster: ACCOUNT, worker: RECIPIENT, state: 6n });
+  const { listener } = makeListener({ gateway: { escrowContract } });
+  const observations = [];
+  listener.onEscrowJobObserved = (observation) => observations.push(observation);
+  await listener.start();
+  await emit(listener, "Verified", { jobId: REQUEST_ID, approved: true });
+  await emit(listener, "JobClosed", { jobId: REQUEST_ID, worker: RECIPIENT });
+  await listener.stop();
+  assert.equal(observations.length, 2);
+  for (const observation of observations) {
+    assert.equal(observation.chainJobId, REQUEST_ID);
+    assert.equal(observation.escrowAddress, escrowAddress);
+    assert.equal(observation.job.state, 6);
+  }
+});
+
 test("EventListener preserves unsafe XCM queued nonce as raw string", async () => {
   const { listener, xcmWrapperContract, events } = makeListener();
   await listener.start();

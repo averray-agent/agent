@@ -403,7 +403,7 @@ function LifecyclePill({ state }: { state: JobLifecycleState }) {
           "bg-[var(--avy-warn-soft)] text-[var(--avy-warn)]",
         state === "paused" &&
           "bg-[color:rgba(17,19,21,0.06)] text-[var(--avy-muted)]",
-        state === "archived" &&
+        ["archived", "closed", "cancelled"].includes(state) &&
           "bg-[color:rgba(17,19,21,0.06)] text-[var(--avy-muted)]",
         state === "open" && "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]"
       )}

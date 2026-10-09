@@ -1,7 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { claimExpiresAt, countClaimAttempts, isExpiredClaim, summarizeJobClaimState } from "./claim-state.js";
+import { claimExpiresAt, claimStatusFields, countClaimAttempts, isExpiredClaim, summarizeJobClaimState } from "./claim-state.js";
+
+test("available funding is advertised only for claimable jobs at both projection levels", () => {
+  for (const state of ["claimed", "submitted", "exhausted", "closed"]) {
+    const row = claimStatusFields({ claimState: state, claimable: false, fundingState: "available" });
+    assert.equal(row.fundingState, "unavailable");
+    assert.equal(row.claimStatus.fundingState, "unavailable");
+  }
+  assert.equal(claimStatusFields({ claimable: true, fundingState: "available" }).fundingState, "available");
+});
 
 const CLAIMED_SESSION = {
   sessionId: "job-001:0xabc",

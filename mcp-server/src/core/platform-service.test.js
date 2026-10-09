@@ -1180,6 +1180,19 @@ test("createSubJob rejects grandchild delegation by default depth policy", async
   );
 });
 
+test("curated resolved session projects closed without mutating catalogue lifecycle", async () => {
+  const store = new MemoryStateStore();
+  const service = makePlatformService(undefined, undefined, store);
+  const definition = service.getJobDefinition("parent-job-001");
+  await store.upsertSession({ sessionId: "curated-resolved", jobId: definition.id, wallet: WALLET,
+    status: "resolved", updatedAt: new Date().toISOString(), jobSnapshot: buildJobSnapshot(definition) });
+  const [row] = await service.listJobsWithSessions();
+  assert.equal(row.lifecycle.state, "closed");
+  assert.equal(row.lifecycle.status, "closed");
+  assert.equal(row.claimable, false);
+  assert.equal(service.getJobDefinition(definition.id).lifecycle.state, "open");
+});
+
 test("listJobsWithSessions joins active session state onto job rows", async () => {
   const service = makePlatformService();
 
@@ -1447,11 +1460,97 @@ test("external definition caches reads for 30 seconds then sees closure; listing
   t.mock.timers.tick(1);
   const closed = await service.getPublicJobDefinition("parent-job-001");
   assert.equal(closed.claimable, false);
-  assert.equal(closed.claimState, "unclaimable");
+  assert.equal(closed.claimState, "closed");
+  assert.equal(closed.lifecycle.state, "closed");
+  assert.equal(closed.fundingState, "unavailable");
   assert.equal(closed.reason, "external_posting_not_open_on_chain");
   assert.equal(reads, 2);
   await service.listJobsWithSessions();
-  assert.equal(reads, 3, "one bulk read, no per-row duplicate RPC");
+  assert.equal(reads, 2, "board reads honor the same observation TTL");
+  t.mock.timers.tick(30_000);
+  await service.listJobsWithSessions();
+  assert.equal(reads, 3, "expired observations refresh in one batch");
+});
+
+test("detail listing narrows before chain reads, shares its TTL and follows immediate escrow observations", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-08T12:00:00Z") });
+  const escrowAddress = "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793";
+  const reads = [];
+  const service = makePlatformService({
+    isEnabled: () => true, config: { escrowCoreAddress: escrowAddress },
+    async getJobs(ids) {
+      reads.push(ids);
+      return ids.map(() => ({ status: "fulfilled", value: { state: 1, escrowAddress } }));
+    }
+  }, undefined, new MemoryStateStore(), undefined, undefined, undefined, undefined, {
+    source: { type: "external" }, funding: { source: "external_escrow", state: "funded" }, requiresSponsoredGas: false
+  });
+  service.jobCatalogService.listJobs = () => Array.from({ length: 200 }, (_, i) => makeParentJob({
+    id: i ? `other-${i}` : "parent-job-001", source: { type: "external" }
+  }));
+  for (let i = 0; i < 3; i++) {
+    const rows = await service.listJobsWithSessions({ jobId: id("parent-job-001") });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, "parent-job-001");
+  }
+  assert.deepEqual(reads, [["parent-job-001"]], "not 200 unrelated chain reads for a detail");
+  service.observeEscrowJob({ chainJobId: id("parent-job-001"), escrowAddress, job: { state: 6 } });
+  const [closed] = await service.listJobsWithSessions({ jobId: "parent-job-001" });
+  assert.equal(closed.lifecycle.state, "closed");
+  assert.equal(closed.claimable, false);
+  assert.equal((await service.addListingSecurityMetadata(closed)).listingStatus, "not_claimable");
+  assert.equal(reads.length, 1, "event evidence updates the warm cache immediately");
+});
+
+test("late open read cannot overwrite a closed escrow observation", async () => {
+  let finish;
+  const escrowAddress = "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793";
+  const service = makePlatformService({
+    isEnabled: () => true, config: { escrowCoreAddress: escrowAddress },
+    getJobs: () => new Promise((resolve) => { finish = resolve; })
+  }, undefined, new MemoryStateStore(), undefined, undefined, undefined, undefined, { source: { type: "external" } });
+  const pending = service.listJobsWithSessions();
+  service.observeEscrowJob({ chainJobId: id("parent-job-001"), escrowAddress, job: { state: 6 } });
+  finish([{ status: "fulfilled", value: { state: 1, escrowAddress } }]);
+  assert.equal((await pending)[0].lifecycle.state, "closed");
+});
+
+test("detail latency probe distinguishes cold and warm observation reads", async (t) => {
+  const escrowAddress = "0xC2Eb191FB75246667226a5D5Db9d821f95a5f793";
+  let reads = 0;
+  const service = makePlatformService({
+    isEnabled: () => true, config: { escrowCoreAddress: escrowAddress },
+    async getJobs(ids) {
+      reads++;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return ids.map(() => ({ status: "fulfilled", value: { state: 1, escrowAddress } }));
+    }
+  }, undefined, new MemoryStateStore(), undefined, undefined, undefined, undefined, { source: { type: "external" } });
+  const measure = async () => {
+    const start = performance.now();
+    await service.addListingSecurityMetadata(await service.listJobsWithSessions({ jobId: "parent-job-001" }));
+    return performance.now() - start;
+  };
+  const cold = [];
+  for (let i = 0; i < 5; i++) {
+    service.externalPostingClaimability.clear();
+    cold.push(await measure());
+  }
+  const warm = [];
+  for (let i = 0; i < 5; i++) warm.push(await measure());
+  assert.equal(reads, 5, "five warm details cause zero additional chain reads");
+  const median = (values) => values.sort((a, b) => a - b)[2].toFixed(2);
+  t.diagnostic(`Local synthetic 20ms RPC: cold median ${median(cold)}ms; warm median ${median(warm)}ms; warm RPC reads 0.`);
+});
+
+test("submitted and exhausted jobs advertise neither listed supply nor available funding", async () => {
+  const service = makePlatformService();
+  for (const claimState of ["submitted", "exhausted"]) {
+    const projected = await service.addListingSecurityMetadata({
+      ...service.getJobDefinition("parent-job-001"), claimState, claimable: false, fundingState: "unavailable"
+    });
+    assert.equal(projected.listingStatus, "not_claimable");
+  }
 });
 
 test("legacy external posting is visibly unclaimable and excluded from claimable inventory", async () => {

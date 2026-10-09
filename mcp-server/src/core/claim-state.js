@@ -232,9 +232,12 @@ function resolveLazyRewardFundingState(job, rewardBank) {
 }
 
 export function claimStatusFields(claimStatus) {
+  const fundingState = claimStatus.claimable !== true && claimStatus.fundingState === "available"
+    ? "unavailable" : claimStatus.fundingState ?? "not_checked";
   return {
     claimStatus: {
       ...claimStatus,
+      fundingState,
       state: claimStatus.state ?? claimStatus.claimState,
       claimabilitySource: "claimStatus",
       lifecycleStatusMeaning: "content/job lifecycle; check claimStatus.claimable and claimStatus.reason before claiming"
@@ -243,7 +246,7 @@ export function claimStatusFields(claimStatus) {
     effectiveState: claimStatus.effectiveState ?? claimStatus.claimState,
     claimable: claimStatus.claimable,
     currentWalletCanClaim: claimStatus.currentWalletCanClaim,
-    fundingState: claimStatus.fundingState ?? "not_checked",
+    fundingState,
     reason: claimStatus.reason,
     retryLimit: claimStatus.retryLimit,
     claimAttemptCount: claimStatus.claimAttemptCount ?? null,

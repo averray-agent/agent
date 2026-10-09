@@ -950,7 +950,10 @@ export async function createPlatformRuntime() {
   const humanVerdict = new HumanVerdictService({ stateStore, gateway, platformService, verifierService,
     persistContentRecord: arbitrationContentWriter, publicBaseUrl: process.env.PUBLIC_BASE_URL });
   const eventListener = initStep("init-event-listener", logger, () =>
-    gateway.isEnabled() ? new EventListener(gateway, eventBus, stateStore, { disputeArbitration }) : undefined
+    gateway.isEnabled() ? new EventListener(gateway, eventBus, stateStore, {
+      disputeArbitration,
+      onEscrowJobObserved: (observation) => platformService.observeEscrowJob(observation)
+    }) : undefined
   );
   const recurringScheduler = initStep("init-recurring-scheduler", logger, () =>
     new RecurringSchedulerService(platformService, eventBus, {

@@ -79,7 +79,7 @@ export function LifecycleActionBar({ jobId, lifecycle }: LifecycleActionBarProps
             "bg-[var(--avy-accent-soft)] text-[var(--avy-accent)]",
           lifecycle.state === "stale" &&
             "bg-[var(--avy-warn-soft)] text-[var(--avy-warn)]",
-          (lifecycle.state === "paused" || lifecycle.state === "archived") &&
+          (["paused", "archived", "closed", "cancelled"].includes(lifecycle.state)) &&
             "bg-[color:rgba(17,19,21,0.06)] text-[var(--avy-muted)]"
         )}
         style={{ letterSpacing: "0.1em" }}
