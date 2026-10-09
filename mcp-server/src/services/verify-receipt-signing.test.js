@@ -3,11 +3,11 @@ import test from "node:test";
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { p256 } from "@noble/curves/nist.js";
-import { Signature } from "ethers";
+import { Interface, Signature } from "ethers";
 import { X402VerificationPaymentGate } from "../payments/x402-verification-payment-gate.js";
 import { MemoryStateStore, RedisStateStore } from "../core/state-store.js";
 import { canonicalBadgeReceiptBytes, KmsBadgeReceiptSigner, verifyBadgeReceiptSignature } from "../core/badge-receipt-signing.js";
-import { VerificationRunService } from "./verification-run-service.js";
+import { UnavailableVerificationPaymentGate, VerificationRunService } from "./verification-run-service.js";
 import { VerificationProfileRegistry } from "./verification-profile-registry.js";
 import { createVerificationShelf } from "./verification-shelf.js";
 import { backfillBadgeReceiptSignatures } from "./badge-receipt-backfill.js";
@@ -159,64 +159,197 @@ for (const authorizationAvailable of [true, false]) {
   });
 }
 
-for (const failure of ["checkpoint", "wait"]) {
-  test(`X1d confirmed capture survives ${failure} failure without an unbilled receipt`, async () => {
-    const f = await signingFixture();
-    const store = new MemoryStateStore();
-    const profiles = new VerificationProfileRegistry();
-    let used = false;
-    let transfers = 0;
-    let probes = 0;
-    let releases = 0;
-    const proof = { from: "0x" + "1".repeat(40), to: "0x" + "2".repeat(40), value: "5000000", validAfter: "0", validBefore: "9999999999", nonce: "0x" + "3".repeat(64) };
-    const gate = new X402VerificationPaymentGate({ config: { enabled: true, network: "eip155:8453" }, provider: {},
-      tokenContract: { authorizationState: async (from, nonce) => {
-        assert.equal(from, proof.from); assert.equal(nonce, proof.nonce); probes++; return used;
-      } },
-      captureTokenContract: { transferWithAuthorization: async () => {
-        if (used) throw new Error("authorization already used");
-        used = true; transfers++;
-        return { hash: "0x" + "a".repeat(64), wait: async () => {
-          if (failure === "wait") throw new Error("receipt transport lost after confirmation");
-          return { status: 1 };
-        } };
-      } }
-    });
-    gate.release = async () => { releases++; };
-    const authorization = { id: "paid", customer: proof.from, authorization: proof,
-      signature: Signature.from({ r: "0x" + "1".repeat(64), s: "0x" + "2".repeat(64), v: 27 }).serialized };
-    const service = new VerificationRunService({ stateStore: store, profileRegistry: profiles, paymentGate: gate, badgeReceiptSigner: f.signer });
-    const verdict = { outcome: "approved", reasonCode: "PASS", reason: "decisive result" };
-    service.evaluatePinnedProfile = async () => verdict;
-    const run = { runId: "confirmed-" + failure, status: "executed", profile: "mcp-failure-semantics-v1", profileVersion: 1,
-      customer: proof.from, target: { endpoint: "https://example.test", transport: "streamable_http" }, inputs: {},
-      execution: { status: "decidable" }, billing: { status: "authorized" } };
-    await store.reserveVerificationRun(run, { paymentId: run.runId, authorization });
-    const profile = profiles.get(run.profile, 1);
-    const update = store.updateVerificationRun.bind(store);
+const captureAbi = new Interface([
+  "event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)",
+  "event AuthorizationCanceled(address indexed authorizer, bytes32 indexed nonce)",
+  "event Transfer(address indexed from, address indexed to, uint256 value)"
+]);
+async function captureFixture({ waitFails = false, noHash = false } = {}) {
+  const f = await signingFixture();
+  const store = new MemoryStateStore();
+  const profiles = new VerificationProfileRegistry();
+  const hash = "0x" + "a".repeat(64);
+  const asset = "0x" + "5".repeat(40);
+  const proof = { from: "0x" + "1".repeat(40), to: "0x" + "2".repeat(40), value: "5000000",
+    validAfter: "0", validBefore: "9999999999", nonce: "0x" + "3".repeat(64) };
+  const state = { used: false, transfers: 0, releases: 0, evaluations: 0, receipt: null, events: [], logs: [], waitFails, noHash };
+  const event = (name, values) => ({ ...captureAbi.encodeEventLog(captureAbi.getEvent(name), values),
+    address: asset, transactionHash: hash });
+  const transfer = () => event("Transfer", [proof.from, proof.to, proof.value]);
+  const used = () => event("AuthorizationUsed", [proof.from, proof.nonce]);
+  const provider = {
+    getBlockNumber: async () => 101,
+    getLogs: async (filter) => {
+      assert.equal(filter.fromBlock, 101); assert.equal(filter.toBlock, 101);
+      if (state.readError) throw state.readError;
+      return state.events;
+    },
+    getTransactionReceipt: async (tx) => {
+      assert.equal(tx, hash);
+      if (state.readError) throw state.readError;
+      return state.receipt;
+    }
+  };
+  const gate = new X402VerificationPaymentGate({ config: { enabled: true, asset, network: "eip155:8453" }, provider,
+    tokenContract: { authorizationState: async () => state.used },
+    captureTokenContract: { transferWithAuthorization: async () => {
+      const checkpoint = await store.getVerificationRun("capture-test");
+      assert.equal(checkpoint.billing.status, "capturing");
+      assert.equal(checkpoint.billing.fromBlock, 101);
+      assert.deepEqual(checkpoint.verdict, verdict);
+      if (state.used) throw new Error("authorization already used");
+      state.used = true; state.transfers++;
+      state.events = [used()];
+      state.receipt = { status: 1, logs: [used(), transfer()] };
+      if (state.noHash) throw new Error("broadcast response lost");
+      return { hash, wait: async () => {
+        assert.equal((await store.getVerificationRun("capture-test")).billing.pendingTransactionHash, hash);
+        if (state.waitFails) throw new Error("wait failed");
+        return state.receipt;
+      } };
+    } }
+  });
+  gate.release = async () => { state.releases++; };
+  const authorization = { id: "paid", customer: proof.from, authorization: proof,
+    signature: Signature.from({ r: "0x" + "1".repeat(64), s: "0x" + "2".repeat(64), v: 27 }).serialized };
+  const service = new VerificationRunService({ stateStore: store, profileRegistry: profiles, paymentGate: gate,
+    badgeReceiptSigner: f.signer, logger: { warn: (...args) => state.logs.push(args) } });
+  const verdict = { outcome: "approved", reasonCode: "PASS", reason: "original decisive result" };
+  service.evaluatePinnedProfile = async () => {
+    state.evaluations++;
+    return state.evaluations === 1 ? verdict : { outcome: "rejected", reasonCode: "FAIL" };
+  };
+  const run = { runId: "capture-test", status: "executed", profile: "mcp-failure-semantics-v1", profileVersion: 1,
+    customer: proof.from, target: { endpoint: "https://example.test", transport: "streamable_http" }, inputs: {},
+    execution: { status: "decidable" }, billing: { status: "authorized" } };
+  await store.reserveVerificationRun(run, { paymentId: run.runId, authorization });
+  const finalize = async () => service.finalizeExecution({ run: await store.getVerificationRun(run.runId),
+    profile: profiles.get(run.profile, 1), authorization, execution: run.execution });
+  const checkpoint = async () => store.updateVerificationRun(run.runId, { ...run, verdict,
+    billing: { status: "capturing", capturePrepared: true, fromBlock: 101 } });
+  return { ...f, store, service, state, event, used, transfer, proof, hash, verdict, gate, finalize, checkpoint };
+}
+
+for (const failure of ["checkpoint", "wait", "broadcast-response"]) {
+  test(`X1d confirmed transfer survives ${failure}, preserving original verdict and transaction hash`, async () => {
+    const f = await captureFixture({ waitFails: failure === "wait", noHash: failure === "broadcast-response" });
+    const update = f.store.updateVerificationRun.bind(f.store);
     let failCheckpoint = failure === "checkpoint";
-    store.updateVerificationRun = async (id, next) => {
-      if (failCheckpoint && next.billing?.status === "captured") {
+    f.store.updateVerificationRun = async (id, next) => {
+      if (failCheckpoint && next.billing.status === "captured") {
         failCheckpoint = false; throw new Error("checkpoint unavailable");
       }
       return update(id, next);
     };
     if (failure === "checkpoint") {
-      await assert.rejects(service.finalizeExecution({ run, profile, authorization, execution: run.execution }), /checkpoint unavailable/);
-      assert.equal((await store.getVerificationRun(run.runId)).billing.status, "authorized");
+      await assert.rejects(f.finalize(), /checkpoint unavailable/);
+      assert.equal((await f.store.getVerificationRun("capture-test")).billing.status, "capturing");
     }
-    const completed = await service.finalizeExecution({ run: await store.getVerificationRun(run.runId), profile, authorization, execution: run.execution });
-    assert.equal(transfers, 1);
-    assert.equal(probes, 1, "recovery must read the live Base authorization state");
-    assert.equal(releases, 0);
+    const completed = await f.finalize();
+    assert.equal(f.state.transfers, 1);
+    assert.equal(f.state.evaluations, 1);
+    assert.equal(f.state.releases, 0);
     assert.equal(completed.billing.status, "captured");
-    assert.deepEqual(completed.verdict, verdict);
-    const receipt = await store.getWorkReceiptDocument(completed.receiptId);
+    assert.equal(completed.billing.transactionHash, f.hash);
+    assert.equal(completed.billing.proof, "reconciled_from_chain");
+    assert.deepEqual(completed.verdict, f.verdict);
+    const receipt = await f.store.getWorkReceiptDocument(completed.receiptId);
     assert.equal(receipt.verdict.outcome, "approved");
     assert.equal(receipt.intent.valueAtRisk.amountRaw, "5000000");
     assert.equal(verifyBadgeReceiptSignature(receipt, f.jwk), true);
   });
 }
+
+test("X1d cancellation consumes nonce but never delivers a decisive paid verdict", async () => {
+  const f = await captureFixture();
+  await f.checkpoint();
+  f.state.used = true;
+  f.state.events = [f.event("AuthorizationCanceled", [f.proof.from, f.proof.nonce])];
+  const result = await f.finalize();
+  assert.equal(result.verdict.outcome, "inconclusive");
+  assert.equal(result.verdict.reason, "payment_cancelled_by_payer");
+  assert.equal(result.billing.status, "not_captured");
+  assert.equal(f.state.transfers, 0);
+  assert.equal(f.state.evaluations, 0);
+});
+
+for (const shape of ["null-receipt", "used-no-events", "wrong-transfer", "read-error"]) {
+  test(`X1d ${shape} remains retryable without publishing a verdict or releasing payment`, async () => {
+    const f = await captureFixture();
+    await f.checkpoint();
+    f.state.used = true;
+    if (shape === "null-receipt") {
+      const run = await f.store.getVerificationRun("capture-test");
+      await f.store.updateVerificationRun(run.runId, { ...run, billing: { ...run.billing, pendingTransactionHash: f.hash } });
+    }
+    if (shape === "wrong-transfer") {
+      f.state.events = [f.used()];
+      f.state.receipt = { status: 1, logs: [f.event("Transfer", [f.proof.from, f.proof.to, "1"])] };
+    }
+    if (shape === "read-error") f.state.readError = Object.assign(new Error("RPC failed"), { code: "RPC_UNAVAILABLE" });
+    assert.deepEqual(await f.service.finalizeAvailableRuns(), []);
+    const persisted = await f.store.getVerificationRun("capture-test");
+    assert.equal(persisted.billing.status, "capturing");
+    assert.deepEqual(persisted.verdict, f.verdict);
+    const visible = await f.service.getRun("capture-test");
+    assert.equal(visible.verdict, undefined);
+    assert.equal(visible.execution, undefined);
+    assert.equal(await f.store.getWorkReceiptDocument("capture-test"), undefined);
+    assert.equal(f.state.transfers, 0);
+    assert.equal(f.state.releases, 0);
+    if (shape === "read-error") assert.deepEqual(f.state.logs[0][0], { runId: "capture-test", errorName: "Error", errorCode: "RPC_UNAVAILABLE" });
+  });
+}
+
+test("X1d known reverted transaction is unbilled; an unused authorization can retry normally", async () => {
+  const f = await captureFixture();
+  await f.checkpoint();
+  f.state.receipt = { status: 0 };
+  const run = await f.store.getVerificationRun("capture-test");
+  await f.store.updateVerificationRun(run.runId, { ...run, billing: { ...run.billing, pendingTransactionHash: f.hash } });
+  assert.equal((await f.finalize()).billing.status, "not_captured");
+  assert.equal(f.state.transfers, 0);
+  const fresh = await captureFixture();
+  await fresh.checkpoint();
+  const paid = await fresh.finalize();
+  assert.equal(paid.billing.status, "captured");
+  assert.equal(fresh.state.transfers, 1);
+  assert.equal(fresh.state.evaluations, 0);
+});
+
+test("X1d wait failure persists the broadcast hash while the receipt is still pending", async () => {
+  const f = await captureFixture({ waitFails: true });
+  f.gate.provider.getTransactionReceipt = async () => null;
+  await f.finalize();
+  const pending = await f.store.getVerificationRun("capture-test");
+  assert.equal(pending.billing.status, "capturing");
+  assert.equal(pending.billing.pendingTransactionHash, f.hash);
+  assert.equal(f.state.releases, 0);
+  assert.equal(f.state.transfers, 1);
+});
+
+test("X1d unavailable reconciliation logs once per run and remains retryable", async () => {
+  const f = await captureFixture();
+  await f.checkpoint();
+  f.service.paymentGate = new UnavailableVerificationPaymentGate();
+  for (let i = 0; i < 2; i++) assert.deepEqual(await f.service.finalizeAvailableRuns(), []);
+  assert.equal(f.state.logs.length, 1);
+  assert.equal(f.state.logs[0][0].errorCode, "capture_reconciliation_unavailable");
+  assert.equal((await f.store.getVerificationRun("capture-test")).billing.status, "capturing");
+});
+
+test("X1d missing or oversized scan bounds never imply non-payment", async () => {
+  for (const fromBlock of [undefined, -1, 102, 0]) {
+    const f = await captureFixture();
+    await f.checkpoint();
+    const run = await f.store.getVerificationRun("capture-test");
+    await f.store.updateVerificationRun(run.runId, { ...run, billing: { ...run.billing, fromBlock } });
+    if (fromBlock === 0) f.gate.provider.getBlockNumber = async () => 10_001;
+    await assert.rejects(f.finalize(), { code: "capture_range_unavailable" });
+    assert.equal(f.state.transfers, 0);
+    assert.equal(f.state.releases, 0);
+  }
+});
 
 test("X1b shelf receives the same bootstrap badge signer", async () => {
   const f = await signingFixture();

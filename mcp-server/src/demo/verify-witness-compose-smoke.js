@@ -51,6 +51,8 @@ const paymentGate = {
     calls.capture += 1;
     return { transactionHash: `0x${"4".repeat(64)}` };
   },
+  async prepareCapture() { return {}; },
+  async reconcileCapture() { return { status: "unavailable" }; },
   async release() {
     calls.release += 1;
   }

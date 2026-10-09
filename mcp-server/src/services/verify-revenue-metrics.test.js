@@ -31,8 +31,10 @@ test("inconclusive Verify runs never increase billed volume; approved and reject
     row.billing.status = status;
     assert.equal(total([...decisive, row]), 10_000_000n);
   }
-  // X1d can confirm a consumed nonce without recovering the transaction hash.
-  // These proof-keyed counters must not invent a transaction/deduplication key.
+  const reconciled = capture(5);
+  reconciled.billing.proof = "reconciled_from_chain";
+  assert.equal(total([...decisive, reconciled]), 15_000_000n);
+  // A corrupt hashless capture is still not proof of revenue.
   const reconciledWithoutHash = capture(5);
   delete reconciledWithoutHash.billing.transactionHash;
   assert.equal(total([...decisive, reconciledWithoutHash]), 10_000_000n);

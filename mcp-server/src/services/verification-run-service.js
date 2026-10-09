@@ -84,7 +84,7 @@ export class VerificationRunService {
     if (!normalized) throw new ValidationError("runId is required.");
     const run = await this.stateStore.getVerificationRun(normalized);
     if (!run) throw new NotFoundError(`Verification run ${normalized} was not found.`, "verification_run_not_found");
-    return run;
+    return publicRun(run);
   }
 
   async createRun({
@@ -109,7 +109,7 @@ export class VerificationRunService {
       : hashCanonicalContent(paymentProof);
     if (paymentKey) {
       const existing = await this.stateStore.getVerificationRunByPaymentId(paymentKey);
-      if (existing) return requireMatchingVerificationReplay(existing, requestHash);
+      if (existing) return publicRun(requireMatchingVerificationReplay(existing, requestHash));
     }
 
     const authorization = await this.paymentGate.authorize({
@@ -121,7 +121,7 @@ export class VerificationRunService {
       findExistingRun: (authorizationId) => this.stateStore.getVerificationRunByAuthorizationId(authorizationId)
     });
     assertPaymentAuthorization(authorization, profile);
-    if (authorization.existingRun) return requireMatchingVerificationReplay(authorization.existingRun, requestHash);
+    if (authorization.existingRun) return publicRun(requireMatchingVerificationReplay(authorization.existingRun, requestHash));
     const runId = `verify-${this.randomUUIDImpl()}`;
     const submittedAt = this.now().toISOString();
     const queued = {
@@ -149,9 +149,9 @@ export class VerificationRunService {
         profile,
         ephemeralCredential
       });
-      return await this.stateStore.getVerificationRun(reservation.run.runId) ?? reservation.run;
+      return publicRun(await this.stateStore.getVerificationRun(reservation.run.runId) ?? reservation.run);
     }
-    return reservation.run;
+    return publicRun(reservation.run);
   }
 
   async finalizeAvailableRuns({ limit = 100 } = {}) {
@@ -173,13 +173,14 @@ export class VerificationRunService {
           const execution = current.status === "executed"
             ? current.execution
             : runnerTimeoutExecution(current.status);
-          finalized.push(await this.finalizeExecution({ authorization, profile, run: current, execution }));
+          const completed = await this.finalizeExecution({ authorization, profile, run: current, execution });
+          if (completed.status === COMPLETE) finalized.push(completed);
         } finally {
           await this.stateStore.releaseClaimLock(lockId, this.finalizerId);
         }
-      } catch {
+      } catch (error) {
         // Retain unfinished state for the next tick; never log payment proofs.
-        this.logger.warn?.({ runId: candidate.runId }, "verification_run.finalization_retry");
+        this.logger.warn?.({ runId: candidate.runId, errorName: error?.name, errorCode: error?.code }, "verification_run.finalization_retry");
       }
     }
     return finalized;
@@ -198,9 +199,13 @@ export class VerificationRunService {
 
   async finalizeExecution({ authorization, profile, run, execution }) {
     const alreadyCaptured = run.billing?.status === "captured";
+    const capturing = run.billing?.status === "capturing";
+    if ((alreadyCaptured || capturing) && !["approved", "rejected"].includes(run.verdict?.outcome)) {
+      throw Object.assign(new Error("Capture is missing its original decisive verdict."), { code: "capture_checkpoint_unavailable" });
+    }
     let verdict;
     try {
-      if (alreadyCaptured) {
+      if (alreadyCaptured || capturing) {
         verdict = run.verdict;
         execution = run.execution;
       } else if (!authorization) {
@@ -233,32 +238,59 @@ export class VerificationRunService {
       }
       billing = run.billing;
     } else if (verdict.outcome === "approved" || verdict.outcome === "rejected") {
-      let captured;
-      try {
-        captured = await this.paymentGate.capture({ authorization, runId: run.runId, verdict });
-      } catch (error) {
-        // A successful transfer may outlive a failed wait/checkpoint. Unknown
-        // chain state throws and leaves the run retryable, never falsely unbilled.
-        if (!(await this.paymentGate.isCaptured({ authorization }))) {
-          await safeRelease(this.paymentGate, { authorization, runId: run.runId, reason: "runner_fault" });
-          execution = {
-            ...execution,
-            status: "inconclusive",
-            reason: "runner_fault",
-            detail: `Payment capture failed; no fee was recorded: ${error?.message ?? String(error)}`
-          };
-          verdict = inconclusiveVerdict("runner_fault", execution.detail);
-          billing = notBilled(profile);
+      if (!capturing) {
+        run = { ...run, status: "executed", verdict, execution,
+          billing: { ...run.billing, status: "capturing" } };
+        await this.stateStore.updateVerificationRun(run.runId, run);
+      }
+      // Persist the scan boundary before any broadcast. A failed boundary read
+      // leaves the original verdict checkpoint intact for the next tick.
+      if (!run.billing.capturePrepared) {
+        const checkpoint = await this.paymentGate.prepareCapture?.() ?? {};
+        run = { ...run, billing: { ...run.billing, ...checkpoint, capturePrepared: true } };
+        await this.stateStore.updateVerificationRun(run.runId, run);
+      }
+      let capture = capturing
+        ? await this.reconcileCapture(run, authorization)
+        : { status: "open" };
+      if (capture.status === "open") {
+        try {
+          capture = { ...await this.paymentGate.capture({
+            authorization, runId: run.runId, verdict,
+            onBroadcast: async (transactionHash) => {
+              run = { ...run, billing: { ...run.billing, pendingTransactionHash: transactionHash } };
+              await this.stateStore.updateVerificationRun(run.runId, run);
+            }
+          }), status: "captured" };
+        } catch {
+          capture = await this.reconcileCapture(run, authorization);
         }
       }
-      billing ??= {
-        status: "captured",
-        amount: profile.price.amount,
-        amountRaw: profile.price.amountRaw,
-        asset: profile.price.asset,
-        network: profile.price.network,
-        ...(captured?.transactionHash ? { transactionHash: captured.transactionHash } : {})
-      };
+      if (!["captured", "cancelled", "failed"].includes(capture.status)) {
+        if (capture.status !== "unavailable") this.logger.warn?.({ runId: run.runId, status: capture.status }, "verification_run.capture_pending");
+        return publicRun(run);
+      }
+      if (capture.status !== "captured") {
+        const reason = capture.status === "cancelled" ? "payment_cancelled_by_payer" : "runner_fault";
+        await safeRelease(this.paymentGate, { authorization, runId: run.runId, reason });
+        execution = { status: "inconclusive", reason,
+          detail: capture.status === "cancelled" ? "Payment cancelled by payer." : "Payment transaction reverted; no fee was recorded." };
+        verdict = inconclusiveVerdict(reason, execution.detail);
+        billing = notBilled(profile);
+      } else {
+        if (!/^0x[0-9a-f]{64}$/iu.test(capture.transactionHash ?? "")) {
+          throw Object.assign(new Error("Capture is missing transaction proof."), { code: "capture_hash_unavailable" });
+        }
+        billing = {
+          status: "captured",
+          amount: profile.price.amount,
+          amountRaw: profile.price.amountRaw,
+          asset: profile.price.asset,
+          network: profile.price.network,
+          transactionHash: capture.transactionHash,
+          ...(capture.proof ? { proof: capture.proof } : {})
+        };
+      }
     } else {
       await safeRelease(this.paymentGate, { authorization, runId: run.runId, reason: verdict.reason });
       billing = notBilled(profile);
@@ -303,6 +335,16 @@ export class VerificationRunService {
     return this.stateStore.updateVerificationRun(run.runId, persisted);
   }
 
+  async reconcileCapture(run, authorization) {
+    const result = await this.paymentGate.reconcileCapture({ authorization, ...run.billing });
+    if (result.status === "unavailable" && !run.billing.reconciliationUnavailableLogged) {
+      this.logger.warn?.({ runId: run.runId, errorCode: "capture_reconciliation_unavailable" }, "verification_run.capture_reconciliation_unavailable");
+      run.billing.reconciliationUnavailableLogged = true;
+      await this.stateStore.updateVerificationRun(run.runId, run);
+    }
+    return result;
+  }
+
   async evaluatePinnedProfile({ execution, profile, run }) {
     const metadata = this.verifierRegistry.listHandlerMetadata()
       .find((handler) => handler.id === profile.handler);
@@ -339,6 +381,10 @@ export function validateVerificationRunRequest(request, profileRegistry) {
 }
 
 export class UnavailableVerificationPaymentGate {
+  async prepareCapture() { return {}; }
+
+  async reconcileCapture() { return { status: "unavailable" }; }
+
   async authorize({ price, profile }) {
     throw new AppError(
       "Standalone Verify payment intake is not enabled yet. No verification work ran and no payment moved.",
@@ -361,6 +407,12 @@ export class UnavailableVerificationPaymentGate {
   }
 
   async release() {}
+}
+
+function publicRun(run) {
+  if (run?.billing?.status !== "capturing") return run;
+  const { verdict, execution, ...pending } = run;
+  return pending;
 }
 
 function assertPaymentAuthorization(authorization, profile) {
@@ -391,7 +443,7 @@ function requireMatchingVerificationReplay(run, requestHash) {
 }
 
 function inconclusiveVerdict(reason, detail) {
-  const normalized = VERIFY_INCONCLUSIVE_REASONS.includes(reason) ? reason : "runner_fault";
+  const normalized = reason === "payment_cancelled_by_payer" || VERIFY_INCONCLUSIVE_REASONS.includes(reason) ? reason : "runner_fault";
   return {
     handler: "deterministic",
     handlerVersion: 1,

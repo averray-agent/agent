@@ -1,5 +1,6 @@
 import {
   Contract,
+  Interface,
   JsonRpcProvider,
   Signature,
   TypedDataEncoder,
@@ -50,6 +51,9 @@ const BYTES32_RE = /^0x[a-fA-F0-9]{64}$/u;
 const SIGNATURE_RE = /^0x[a-fA-F0-9]{130}$/u;
 const UINT_RE = /^\d+$/u;
 const TOKEN_ABI = [
+  "event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)",
+  "event AuthorizationCanceled(address indexed authorizer, bytes32 indexed nonce)",
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
   "function name() view returns (string)",
   "function DOMAIN_SEPARATOR() view returns (bytes32)",
   "function authorizationState(address authorizer, bytes32 nonce) view returns (bool)",
@@ -297,7 +301,11 @@ export class X402VerificationPaymentGate {
     return Object.freeze(verified);
   }
 
-  async capture({ authorization }) {
+  async prepareCapture() {
+    return { fromBlock: await this.provider.getBlockNumber() };
+  }
+
+  async capture({ authorization, onBroadcast }) {
     const proof = authorization.authorization;
     const signature = Signature.from(authorization.signature);
     const transaction = await this.captureToken.transferWithAuthorization(
@@ -311,6 +319,7 @@ export class X402VerificationPaymentGate {
       signature.r,
       signature.s
     );
+    await onBroadcast?.(String(transaction.hash));
     const receipt = await transaction.wait();
     if (!receipt || Number(receipt.status) !== 1) {
       throw new Error("Base transferWithAuthorization was not confirmed successfully.");
@@ -323,11 +332,58 @@ export class X402VerificationPaymentGate {
     };
   }
 
-  async isCaptured({ authorization }) {
+  async reconcileCapture({ authorization, pendingTransactionHash, fromBlock }) {
+    if (pendingTransactionHash) {
+      const receipt = await this.provider.getTransactionReceipt(pendingTransactionHash);
+      if (!receipt) return { status: "pending" };
+      if (Number(receipt.status) === 1) {
+        return { status: "captured", transactionHash: pendingTransactionHash, proof: "reconciled_from_chain" };
+      }
+      if (Number(receipt.status) === 0) return { status: "failed" };
+      throw Object.assign(new Error("Base receipt status unavailable."), { code: "capture_receipt_unavailable" });
+    }
     const proof = authorization.authorization;
+    const toBlock = await this.provider.getBlockNumber();
+    // Bound every scan by its persisted pre-broadcast checkpoint, not genesis.
+    // Refuse an incomplete range rather than infer that a payment did not occur.
+    if (!Number.isSafeInteger(fromBlock) || fromBlock < 0 || toBlock < fromBlock || toBlock - fromBlock > 10_000) {
+      throw Object.assign(new Error("Capture reconciliation range unavailable."), { code: "capture_range_unavailable" });
+    }
+    const abi = new Interface(TOKEN_ABI);
+    const events = [];
+    for (let start = fromBlock; start <= toBlock; start += 1_000) {
+      events.push(...await this.provider.getLogs({
+        address: this.config.asset, fromBlock: start, toBlock: Math.min(toBlock, start + 999),
+        topics: [
+          [abi.getEvent("AuthorizationUsed").topicHash, abi.getEvent("AuthorizationCanceled").topicHash],
+          abi.encodeFilterTopics("AuthorizationUsed", [proof.from, proof.nonce])[1], proof.nonce
+        ]
+      }));
+    }
+    for (const event of events) {
+      if (event.removed || event.address.toLowerCase() !== this.config.asset.toLowerCase()) continue;
+      const parsed = abi.parseLog(event);
+      if (!parsed || parsed.args.authorizer.toLowerCase() !== proof.from.toLowerCase()
+        || parsed.args.nonce.toLowerCase() !== proof.nonce.toLowerCase()) continue;
+      if (parsed.name === "AuthorizationCanceled") return { status: "cancelled" };
+      const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+      if (!receipt || Number(receipt.status) !== 1) return { status: "pending" };
+      const transfer = receipt.logs.some((log) => {
+        if (log.address.toLowerCase() !== this.config.asset.toLowerCase()) return false;
+        if (log.topics[0] !== abi.getEvent("Transfer").topicHash) return false;
+        const decoded = abi.parseLog(log);
+        return decoded?.name === "Transfer"
+          && decoded.args.from.toLowerCase() === proof.from.toLowerCase()
+          && decoded.args.to.toLowerCase() === proof.to.toLowerCase()
+          && decoded.args.value === BigInt(proof.value);
+      });
+      if (transfer) return { status: "captured", transactionHash: event.transactionHash, proof: "reconciled_from_chain" };
+      return { status: "pending" };
+    }
     const used = await this.token.authorizationState(proof.from, proof.nonce);
     if (typeof used !== "boolean") throw new Error("Base authorization state is unavailable.");
-    return used;
+    // A used nonce alone proves neither transfer nor capture (cancellation uses it too).
+    return { status: used ? "pending" : "open" };
   }
 
   async release() {

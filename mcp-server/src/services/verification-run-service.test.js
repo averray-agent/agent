@@ -65,8 +65,9 @@ function paymentGate() {
     async release() {
       calls.release += 1;
     },
-    async isCaptured() {
-      return false;
+    async prepareCapture() { return {}; },
+    async reconcileCapture() {
+      return { status: "failed" };
     }
   };
 }
@@ -78,7 +79,7 @@ test("X1d an unresolved capture does not block the next run in the finalizer tic
     if (input.authorization.id.endsWith("first")) throw new Error("capture unavailable");
     return capture(input);
   };
-  gate.isCaptured = async () => { throw new Error("Base read unavailable"); };
+  gate.reconcileCapture = async () => { throw Object.assign(new Error("Base read unavailable"), { code: "RPC_UNAVAILABLE" }); };
   const context = harness({ gate });
   const logs = [];
   context.service.logger = { warn: (...args) => logs.push(args) };
@@ -89,10 +90,11 @@ test("X1d an unresolved capture does not block the next run in the finalizer tic
   const completed = await context.service.finalizeAvailableRuns();
   assert.deepEqual(completed.map((run) => run.runId), [second.runId]);
   assert.equal((await context.service.getRun(first.runId)).status, "executed");
-  assert.equal((await context.service.getRun(first.runId)).billing.status, "authorized");
+  assert.equal((await context.service.getRun(first.runId)).billing.status, "capturing");
   assert.equal(gate.calls.release, 0);
   assert.equal(logs.length, 1);
   assert.equal(logs[0][0].runId, first.runId);
+  assert.equal(logs[0][0].errorCode, "RPC_UNAVAILABLE");
   assert.equal(logs[0][1], "verification_run.finalization_retry");
 });
 
@@ -435,7 +437,7 @@ test("capture failure degrades a decisive result to inconclusive, bills nothing,
 
   assert.equal(run.verdict.outcome, "inconclusive");
   assert.equal(run.verdict.reason, "runner_fault");
-  assert.match(run.verdict.detail, /Base capture unavailable/u);
+  assert.match(run.verdict.detail, /transaction reverted/u);
   assert.equal(run.billing.status, "not_captured");
   assert.equal(gate.calls.capture, 1);
   assert.equal(gate.calls.release, 1);
