@@ -169,9 +169,13 @@ export class VerificationRunService {
   }
 
   async finalizeExecution({ authorization, profile, run, execution }) {
+    const alreadyCaptured = run.billing?.status === "captured";
     let verdict;
     try {
-      if (!authorization) {
+      if (alreadyCaptured) {
+        verdict = run.verdict;
+        execution = run.execution;
+      } else if (!authorization) {
         execution = {
           status: "inconclusive",
           reason: "runner_fault",
@@ -195,7 +199,12 @@ export class VerificationRunService {
     }
 
     let billing;
-    if (verdict.outcome === "approved" || verdict.outcome === "rejected") {
+    if (alreadyCaptured) {
+      if (!["approved", "rejected"].includes(verdict?.outcome)) {
+        throw new Error("Captured Verify run is missing its decisive verdict checkpoint.");
+      }
+      billing = run.billing;
+    } else if (verdict.outcome === "approved" || verdict.outcome === "rejected") {
       try {
         const captured = await this.paymentGate.capture({ authorization, runId: run.runId, verdict });
         billing = {
@@ -220,6 +229,15 @@ export class VerificationRunService {
     } else {
       await safeRelease(this.paymentGate, { authorization, runId: run.runId, reason: verdict.reason });
       billing = notBilled(profile);
+    }
+
+    if (billing.status === "captured" && !alreadyCaptured) {
+      // A receipt-signing/storage retry must neither capture again nor re-evaluate
+      // a verdict whose payment has already succeeded. Keep it finalizable.
+      // Persist outside the capture catch: a store error is not a capture failure.
+      await this.stateStore.updateVerificationRun(run.runId, {
+        ...run, status: "executed", billing, verdict, execution
+      });
     }
 
     const completedAt = this.now().toISOString();

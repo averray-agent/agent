@@ -181,6 +181,11 @@ export function createOperationalRoutes({
         ...buildLockedTierWarnings(lockedTierHealth),
         ...(githubPrReviewStatus?.warnings ?? []),
         ...(githubAuthors?.warnings ?? []),
+        ...(service.receiptSignatureBackfill?.verify?.missing > 0 ? [{
+          code: "verify_receipt_backfill_missing",
+          severity: "warning",
+          count: service.receiptSignatureBackfill.verify.missing
+        }] : []),
         ...getProcessWarnings()
       ];
       await recordCapabilityWarningTransitions({

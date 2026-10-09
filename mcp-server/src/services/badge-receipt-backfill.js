@@ -38,7 +38,7 @@ export async function backfillBadgeReceiptSignatures({ stateStore, signer, logge
 }
 
 export async function backfillVerifyReceiptSignatures({ stateStore, signer, pageSize = 100 }) {
-  const result = { scanned: 0, signed: 0, alreadySigned: 0 };
+  const result = { scanned: 0, signed: 0, alreadySigned: 0, missing: 0 };
   let cursor = "0";
   do {
     const page = await stateStore.scanVerificationRuns({ cursor, limit: pageSize });
@@ -46,7 +46,8 @@ export async function backfillVerifyReceiptSignatures({ stateStore, signer, page
       if (!run.receiptId) continue;
       const document = await stateStore.getWorkReceiptDocument(run.receiptId);
       if (!document || document.intent?.specSource !== "verify_request") {
-        throw new Error(`Verify run ${run.runId} has no matching work receipt; refusing startup.`);
+        result.missing++;
+        continue;
       }
       result.scanned++;
       if (document.signature) {

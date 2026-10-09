@@ -16,6 +16,18 @@ const AUTH_CONFIG = {
   secrets: ["test-secret"]
 };
 
+test("GET /health warns about missing Verify backfill receipts without leaking identifiers or failing startup health", async () => {
+  for (const missing of [2, 0]) {
+    const { route, response } = makeHarness({ service: {
+      receiptSignatureBackfill: { verify: { scanned: 1, signed: 1, alreadySigned: 0, missing } }
+    } });
+    await route({ request: { method: "GET" }, response, pathname: "/health" });
+    assert.equal(response.statusCode, 200);
+    const warning = response.body.warnings.find((item) => item.code === "verify_receipt_backfill_missing");
+    assert.deepEqual(warning, missing ? { code: "verify_receipt_backfill_missing", severity: "warning", count: 2 } : undefined);
+  }
+});
+
 function makeResponse() {
   return {
     _corsHeaders: { "access-control-allow-origin": "https://app.averray.test" },

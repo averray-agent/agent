@@ -28,7 +28,7 @@ test("backfill signs every stored unsigned badge and preserves already signed do
     },
   });
 
-  assert.deepEqual(result, { scanned: 3, signed: 2, alreadySigned: 1, verify: { scanned: 0, signed: 0, alreadySigned: 0 } });
+  assert.deepEqual(result, { scanned: 3, signed: 2, alreadySigned: 1, verify: { scanned: 0, signed: 0, alreadySigned: 0, missing: 0 } });
   assert.deepEqual(calls.sort(), ["session-1", "session-2"]);
   assert.equal((await stateStore.getBadgeDocument("session-1")).signature.kid, "badge-1");
   assert.deepEqual((await stateStore.getBadgeDocument("session-3")).signature, existingSignature);

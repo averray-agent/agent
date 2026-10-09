@@ -63,7 +63,7 @@ test("X1b startup backfill pages Verify runs, preserves bytes and aliases, and i
   const originals = [];
   for (const suffix of ["1", "2", "3"]) originals.push(await receiptFixture({ store, suffix }));
   const first = await backfillBadgeReceiptSignatures({ stateStore: store, signer: f.signer, pageSize: 2, logger: {} });
-  assert.deepEqual(first.verify, { scanned: 3, signed: 3, alreadySigned: 0 });
+  assert.deepEqual(first.verify, { scanned: 3, signed: 3, alreadySigned: 0, missing: 0 });
   for (const { run, document } of originals) {
     const stored = await store.getWorkReceiptDocument(run.receiptId);
     assert.equal(verifyBadgeReceiptSignature(stored, f.jwk), true);
@@ -72,7 +72,7 @@ test("X1b startup backfill pages Verify runs, preserves bytes and aliases, and i
     assert.deepEqual(await store.getRunReceiptDocument(run.runId), stored);
   }
   const second = await backfillBadgeReceiptSignatures({ stateStore: store, signer: f.signer, pageSize: 2, logger: {} });
-  assert.deepEqual(second.verify, { scanned: 3, signed: 0, alreadySigned: 3 });
+  assert.deepEqual(second.verify, { scanned: 3, signed: 0, alreadySigned: 3, missing: 0 });
   assert.equal(f.signs(), 3);
   store.workReceiptDocuments.get(originals[0].run.receiptId).verdict.reasonCode = "tampered";
   await assert.rejects(backfillBadgeReceiptSignatures({ stateStore: store, signer: f.signer, logger: {} }), /invalid signature/);
@@ -84,12 +84,84 @@ test("X1b signer failures never persist an unsigned Verify receipt", async () =>
   assert.deepEqual((await store.scanWorkReceiptDocuments()).documents, []);
 });
 
+test("X1b backfill counts dangling and non-Verify receipts as missing and continues paging", async () => {
+  const f = await signingFixture();
+  const store = new MemoryStateStore();
+  for (const [id, receiptId] of [["missing", "absent"], ["other-lane", "badge-doc"]]) {
+    await store.reserveVerificationRun({ runId: id, status: "complete", receiptId }, { paymentId: id, authorization: {} });
+  }
+  await store.putWorkReceiptDocument("other-lane", { receiptId: "badge-doc", intent: { specSource: "job" } });
+  const valid = await receiptFixture({ store, suffix: "valid" });
+  const result = await backfillBadgeReceiptSignatures({ stateStore: store, signer: f.signer, pageSize: 1, logger: {} });
+  assert.deepEqual(result.verify, { scanned: 1, signed: 1, alreadySigned: 0, missing: 2 });
+  assert.equal(verifyBadgeReceiptSignature(await store.getWorkReceiptDocument(valid.run.receiptId), f.jwk), true);
+  assert.equal((await store.getWorkReceiptDocument("badge-doc")).signature, undefined);
+});
+
+for (const authorizationAvailable of [true, false]) {
+  test(`X1b signing retry preserves captured billing and the decisive verdict without recapture (authorization ${authorizationAvailable ? "retained" : "missing"})`, async () => {
+    const f = await signingFixture();
+    const store = new MemoryStateStore();
+    const profiles = new VerificationProfileRegistry();
+    let captures = 0;
+    let evaluations = 0;
+    let signs = 0;
+    const service = new VerificationRunService({ stateStore: store, profileRegistry: profiles,
+      badgeReceiptSigner: { signDocument: async (document) => {
+        if (++signs === 1) throw new Error("KMS unavailable after capture");
+        return f.signer.signDocument(document);
+      } },
+      paymentGate: {
+        capture: async () => { captures++; return { transactionHash: "0x" + "a".repeat(64) }; },
+        release: async () => assert.fail("a captured payment must never be released")
+      }
+    });
+    const originalVerdict = { outcome: "approved", reason: "original decisive verdict", reasonCode: "PASS" };
+    service.evaluatePinnedProfile = async () => {
+      evaluations++;
+      return originalVerdict;
+    };
+    const run = { runId: "paid-signing-retry", status: "executed", profile: "mcp-failure-semantics-v1", profileVersion: 1,
+      customer: "0x" + "1".repeat(40), target: { endpoint: "https://example.test", transport: "streamable_http" }, inputs: {},
+      execution: { status: "decidable" }
+    };
+    const authorization = { id: "paid" };
+    await store.reserveVerificationRun(run, { paymentId: "paid", authorization });
+    const profile = profiles.get(run.profile, 1);
+    await assert.rejects(service.finalizeExecution({ run, profile, authorization, execution: run.execution }), /KMS unavailable/);
+    const checkpoint = await store.getVerificationRun(run.runId);
+    assert.equal(checkpoint.status, "executed");
+    assert.equal(checkpoint.billing?.status, "captured");
+    assert.deepEqual(checkpoint.verdict, originalVerdict);
+    assert.deepEqual((await store.scanWorkReceiptDocuments()).documents, []);
+    // Even losing authorization/evaluator availability cannot rewrite an already paid result.
+    service.evaluatePinnedProfile = async () => {
+      evaluations++;
+      return { outcome: "rejected", reason: "a new verdict must not replace the captured result", reasonCode: "FAIL" };
+    };
+    const completed = await service.finalizeExecution({ run: checkpoint, profile,
+      authorization: authorizationAvailable ? authorization : null, execution: checkpoint.execution });
+    assert.equal(captures, 1);
+    assert.equal(evaluations, 1);
+    assert.equal(signs, 2);
+    assert.equal(completed.status, "complete");
+    assert.deepEqual(completed.billing, checkpoint.billing);
+    assert.deepEqual(completed.verdict, originalVerdict);
+    const receipt = await store.getWorkReceiptDocument(completed.receiptId);
+    assert.equal(verifyBadgeReceiptSignature(receipt, f.jwk), true);
+    assert.equal(receipt.verdict.outcome, "approved");
+    assert.equal(receipt.intent.valueAtRisk.amountRaw, checkpoint.billing.amountRaw);
+    assert.equal(receipt.verdict.reason, originalVerdict.reason);
+  });
+}
+
 test("X1b shelf receives the same bootstrap badge signer", async () => {
   const f = await signingFixture();
   const shelf = await createVerificationShelf({ stateStore: new MemoryStateStore(), badgeReceiptSigner: f.signer, env: {}, logger: {} });
   assert.equal(shelf.verificationRunService.badgeReceiptSigner, f.signer);
   const bootstrap = readFileSync(new URL("./bootstrap.js", import.meta.url), "utf8");
   assert.match(bootstrap, /createVerificationShelf\(\{[\s\S]*?paymentGate: verificationPaymentGate,\s*badgeReceiptSigner,/u);
+  assert.match(bootstrap, /platformService\.receiptSignatureBackfill = await backfillBadgeReceiptSignatures/u);
 });
 
 test("X1b Redis signature CAS preserves serialized arrays and updates the run alias without replacing a signature", async () => {
