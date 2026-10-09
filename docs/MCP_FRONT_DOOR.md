@@ -49,6 +49,9 @@ scope; calling them anonymously returns an explicit `isError` tool result.
 | Tool | Authentication |
 |---|---|
 | `getPlatformCapabilities` | public |
+| `quoteVerificationRun` | public, free quote; never creates a run |
+| `startVerificationRun` | no SIWE token; x402 payment proof via canonical `_meta["x402/payment"]` or compatibility `paymentSignature` argument; connected-only discovery |
+| `getVerificationRun` | public, free poll by run ID |
 | `listJobs` | public |
 | `getJobDefinition` | public |
 | `validateJobSubmission` | public |
