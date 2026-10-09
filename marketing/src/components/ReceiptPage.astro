@@ -2,6 +2,7 @@
 import BaseLayout from "../layouts/BaseLayout.astro";
 import SiteNav from "../components/SiteNav.astro";
 import SiteFooter from "../components/SiteFooter.astro";
+import LatestReceipt from "./LatestReceipt.astro";
 import "../styles/global.css";
 
 const { receiptId } = Astro.props;
@@ -24,6 +25,7 @@ const VERIFY_RECEIPT = "0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8
       <p class="record-sub">This page reads a content-addressed receipt from the Averray API. It describes only the single run shown here.</p>
     </div>
 
+    {!receiptId && <LatestReceipt />}
     <section class="record-section" aria-live="polite">
       <div class="panel" data-receipt-state="loading">
         <p data-receipt-status>Receipt not loaded.</p>
