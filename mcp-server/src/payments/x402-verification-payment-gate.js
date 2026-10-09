@@ -160,7 +160,7 @@ export class X402VerificationPaymentGate {
     this.domainPromise = undefined;
   }
 
-  async authorize({ paymentProof, price, profile, profileLimits, requestHash } = {}) {
+  async authorize({ paymentProof, price, profile, profileLimits, requestHash, findExistingRun } = {}) {
     const domain = await this.eip712Domain();
     const requirements = this.paymentRequirements({ domain, price, profile, profileLimits, requestHash });
     if (!String(paymentProof ?? "").trim()) {
@@ -188,28 +188,6 @@ export class X402VerificationPaymentGate {
       );
     }
 
-    const nowSeconds = BigInt(Math.floor(this.currentTime().getTime() / 1000));
-    if (authorization.validAfter >= nowSeconds) {
-      throw paymentRefusal(
-        "The payment authorization is not valid yet. No money moved; sign a fresh authorization whose validAfter has passed.",
-        "payment_authorization_not_yet_valid"
-      );
-    }
-    const timeoutSeconds = timeoutSecondsFor(profileLimits);
-    const requiredValidBefore = nowSeconds + BigInt(timeoutSeconds + this.config.captureMarginSeconds);
-    if (authorization.validBefore < requiredValidBefore) {
-      throw new PaymentVerificationError(
-        `The payment authorization expires too soon. validBefore must cover the ${timeoutSeconds}-second profile timeout plus a ${this.config.captureMarginSeconds}-second capture margin. No work ran and no money moved; sign a fresh authorization.`,
-        "payment_authorization_expiry_margin_insufficient",
-        {
-          action: "sign_fresh_authorization_with_longer_validity",
-          customerFunds: "unchanged",
-          requiredValidBefore: requiredValidBefore.toString(),
-          observedValidBefore: authorization.validBefore.toString()
-        }
-      );
-    }
-
     let recovered;
     try {
       recovered = getAddress(verifyTypedData(
@@ -231,6 +209,56 @@ export class X402VerificationPaymentGate {
       );
     }
 
+    const nowSeconds = BigInt(Math.floor(this.currentTime().getTime() / 1000));
+    if (authorization.validBefore > nowSeconds + BigInt(requirements.maxTimeoutSeconds + 300)) {
+      throw paymentRefusal(
+        "The payment authorization window is too long. Sign a fresh authorization with validBefore no later than now + maxTimeoutSeconds + 300 seconds.",
+        "payment_authorization_window_too_long"
+      );
+    }
+
+    const verified = {
+      id: hashCanonicalContent({
+        network: this.config.network,
+        asset: this.config.asset,
+        payer: authorization.from.toLowerCase(),
+        nonce: authorization.nonce.toLowerCase()
+      }),
+      customer: authorization.from.toLowerCase(),
+      amountRaw: requirements.amount,
+      asset: String(price.asset),
+      network: this.config.network,
+      paymentProof: String(paymentProof),
+      requirements,
+      authorization,
+      signature
+    };
+    // Only a cryptographically verified proof can look up an existing owner.
+    // Replays do not need a still-unused nonce or a fresh execution window.
+    const existingRun = await findExistingRun?.(verified.id);
+    if (existingRun) return Object.freeze({ ...verified, existingRun });
+
+    if (authorization.validAfter >= nowSeconds) {
+      throw paymentRefusal(
+        "The payment authorization is not valid yet. No money moved; sign a fresh authorization whose validAfter has passed.",
+        "payment_authorization_not_yet_valid"
+      );
+    }
+    const timeoutSeconds = timeoutSecondsFor(profileLimits);
+    const requiredValidBefore = nowSeconds + BigInt(timeoutSeconds + this.config.captureMarginSeconds);
+    if (authorization.validBefore < requiredValidBefore) {
+      throw new PaymentVerificationError(
+        `The payment authorization expires too soon. validBefore must cover the ${timeoutSeconds}-second profile timeout plus a ${this.config.captureMarginSeconds}-second capture margin. No work ran and no money moved; sign a fresh authorization.`,
+        "payment_authorization_expiry_margin_insufficient",
+        {
+          action: "sign_fresh_authorization_with_longer_validity",
+          customerFunds: "unchanged",
+          requiredValidBefore: requiredValidBefore.toString(),
+          observedValidBefore: authorization.validBefore.toString()
+        }
+      );
+    }
+
     let used;
     try {
       used = await this.token.authorizationState(authorization.from, authorization.nonce);
@@ -247,22 +275,7 @@ export class X402VerificationPaymentGate {
       );
     }
 
-    return Object.freeze({
-      id: hashCanonicalContent({
-        network: this.config.network,
-        asset: this.config.asset,
-        payer: authorization.from.toLowerCase(),
-        nonce: authorization.nonce.toLowerCase()
-      }),
-      customer: authorization.from.toLowerCase(),
-      amountRaw: requirements.amount,
-      asset: String(price.asset),
-      network: this.config.network,
-      paymentProof: String(paymentProof),
-      requirements,
-      authorization,
-      signature
-    });
+    return Object.freeze(verified);
   }
 
   async capture({ authorization }) {

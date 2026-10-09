@@ -104,6 +104,33 @@ test("X1c connected and directory MCP tool descriptions keep x402 on Base only",
   assertBaseOnlyX402Surface(MCP_TOOLS.map((tool) => tool.description));
 });
 
+test("X1e HTTP and MCP share authorization ownership across differently wrapped proofs", async () => {
+  const h = harness();
+  const quote = await h.execute("quoteVerificationRun", request, context);
+  const paid = await proof(quote);
+  const started = await invokeHttpRoute(h.route, { method: "POST", path: "/verify/runs", body: request,
+    headers: { "payment-signature": paid.header } });
+  assert.equal(started.statusCode, 200);
+  assert.equal(started.body.requestHash, undefined, "reservation binding stays private");
+  const replay = await h.execute("startVerificationRun", { ...request,
+    paymentSignature: Buffer.from(JSON.stringify(paid.payload, null, 2)).toString("base64") }, context);
+  assert.equal(replay.runId, started.body.runId);
+  const changed = { ...request, target: { ...request.target, endpoint: "https://other.example/mcp" } };
+  const otherQuote = await h.execute("quoteVerificationRun", changed, context);
+  const rewrapped = { ...paid.payload, accepted: otherQuote.accepts[0] };
+  const response = await callMcp(h.mcp, "startVerificationRun", changed, { "x402/payment": rewrapped });
+  assert.equal(response.body.result.isError, true);
+  assert.match(JSON.stringify(response.body), /payment_authorization_in_use/u);
+  await assert.rejects(invokeHttpRoute(h.route, { method: "POST", path: "/verify/runs", body: changed,
+    headers: { "payment-signature": Buffer.from(JSON.stringify(rewrapped)).toString("base64") } }),
+  { statusCode: 409, code: "payment_authorization_in_use", details: { action: "sign_fresh_authorization" } });
+  assert.ok(!JSON.stringify(response.body).includes(started.body.runId), "conflict must not reveal the owner");
+  assert.ok(!JSON.stringify(response.body).includes("customerFunds"), "owner may still capture");
+  assert.equal((await h.store.listActiveVerificationRuns()).length, 1);
+  assert.equal(h.calls.captures, 0);
+  assert.equal((await h.execute("getVerificationRun", { runId: replay.runId }, context)).requestHash, undefined);
+});
+
 for (const transport of ["argument", "meta"]) {
   test(`X1 ${transport}: paid start forwards proof, poll matches HTTP, inconclusive never captures or leaks proof`, async () => {
     const h = harness();

@@ -1,5 +1,5 @@
 import { createClient } from "redis";
-import { ExternalServiceError, ValidationError } from "./errors.js";
+import { ConflictError, ExternalServiceError, ValidationError } from "./errors.js";
 import { listEventLogFromRecords } from "./event-log-query.js";
 import {
   cloneJsonRecord,
@@ -89,6 +89,17 @@ function sessionWalletIndexKey(session) {
 
 function verificationRunLockId(runId) {
   return `verification-run:${String(runId)}`;
+}
+
+function assertVerificationReservationMatches(existing, requested) {
+  if (!existing || existing.requestHash !== requested.requestHash) {
+    throw new ConflictError("Payment authorization is already reserved. For a new purchase, sign a fresh authorization with a new nonce.", "payment_authorization_in_use", { action: "sign_fresh_authorization" });
+  }
+}
+
+function verificationReservationTtl(value) {
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error("Verification reservation TTL must be a positive integer.");
+  return value;
 }
 
 const RELEASE_CLAIM_LOCK_SCRIPT = `
@@ -256,11 +267,19 @@ return {1, 0, ARGV[2], tostring(walletTotal), ARGV[3]}
 `;
 
 const RESERVE_VERIFICATION_RUN_SCRIPT = `
+local authorizationOwner = redis.call("get", KEYS[6])
+if authorizationOwner then
+  return {0, authorizationOwner}
+end
 local existing = redis.call("get", KEYS[1])
 if existing then
+  local ttl = redis.call("ttl", KEYS[1])
+  if ttl <= 0 then ttl = tonumber(ARGV[5]) end
+  redis.call("set", KEYS[6], existing, "NX", "EX", math.min(ttl, tonumber(ARGV[5])))
   return {0, existing}
 end
-redis.call("set", KEYS[1], ARGV[1])
+redis.call("set", KEYS[6], ARGV[1], "NX", "EX", ARGV[5])
+redis.call("set", KEYS[1], ARGV[1], "EX", ARGV[5])
 redis.call("set", KEYS[2], ARGV[2])
 if ARGV[3] ~= "" then
   redis.call("set", KEYS[3], ARGV[3])
@@ -361,6 +380,7 @@ export class MemoryStateStore {
     this.jobWorkReceiptIndexes = new Map();
     this.verificationRuns = new Map();
     this.verificationPaymentRuns = new Map();
+    this.verificationAuthorizationRuns = new Map();
     this.verificationRunAuthorizations = new Map();
     this.claimLocks = new Map();
     this.nonces = new Map();
@@ -633,23 +653,50 @@ export class MemoryStateStore {
   }
 
   async getVerificationRunByPaymentId(paymentId) {
-    const runId = this.verificationPaymentRuns.get(String(paymentId));
+    this.expireVerificationReservations();
+    const runId = this.verificationPaymentRuns.get(String(paymentId))?.runId;
     return runId ? this.getVerificationRun(runId) : undefined;
   }
 
-  async reserveVerificationRun(run, { paymentId, authorization } = {}) {
+  expireVerificationReservations() {
+    const now = Date.now();
+    for (const index of [this.verificationPaymentRuns, this.verificationAuthorizationRuns]) {
+      for (const [key, entry] of index) if (entry.expiresAt <= now) index.delete(key);
+    }
+  }
+
+  async reserveVerificationRun(run, { paymentId, authorization, reservationTtlSeconds = 86400 } = {}) {
+    const expiresAt = Date.now() + verificationReservationTtl(reservationTtlSeconds) * 1000;
+    this.expireVerificationReservations();
     const key = String(paymentId ?? "");
-    const existingRunId = this.verificationPaymentRuns.get(key);
-    if (existingRunId) {
-      return { created: false, run: await this.getVerificationRun(existingRunId) };
+    const authorizationId = String(authorization?.id ?? key);
+    const existingEntry = this.verificationAuthorizationRuns.get(authorizationId)
+      ?? this.verificationPaymentRuns.get(key);
+    if (existingEntry) {
+      const existing = await this.getVerificationRun(existingEntry.runId);
+      assertVerificationReservationMatches(existing, run);
+      this.verificationAuthorizationRuns.set(authorizationId, existingEntry);
+      return { created: false, run: existing };
     }
     const stored = cloneJsonRecord(run);
-    this.verificationPaymentRuns.set(key, stored.runId);
+    // No await before both indexes and the run exist. Completion does not release them.
+    const entry = { runId: stored.runId, expiresAt };
+    this.verificationAuthorizationRuns.set(authorizationId, entry);
+    this.verificationPaymentRuns.set(key, entry);
     this.verificationRuns.set(stored.runId, stored);
     if (authorization) {
       this.verificationRunAuthorizations.set(stored.runId, cloneJsonRecord(authorization));
     }
     return { created: true, run: cloneJsonRecord(stored) };
+  }
+
+  async getVerificationRunByAuthorizationId(authorizationId) {
+    this.expireVerificationReservations();
+    const runId = this.verificationAuthorizationRuns.get(String(authorizationId))?.runId;
+    if (!runId) return undefined;
+    const run = await this.getVerificationRun(runId);
+    if (!run) assertVerificationReservationMatches(undefined, undefined);
+    return run;
   }
 
   async getVerificationRunAuthorization(runId) {
@@ -1890,7 +1937,8 @@ export class RedisStateStore {
     return runId ? this.getVerificationRun(runId) : undefined;
   }
 
-  async reserveVerificationRun(run, { paymentId, authorization } = {}) {
+  async reserveVerificationRun(run, { paymentId, authorization, reservationTtlSeconds = 86400 } = {}) {
+    const ttl = verificationReservationTtl(reservationTtlSeconds);
     await this.connect();
     const reply = await this.client.eval(RESERVE_VERIFICATION_RUN_SCRIPT, {
       keys: [
@@ -1898,20 +1946,33 @@ export class RedisStateStore {
         this.key("verification-run", String(run.runId)),
         this.key("verification-run-authorization", String(run.runId)),
         this.key("verification-runs", "queued"),
-        this.key("verification-runs", "active")
+        this.key("verification-runs", "active"),
+        this.key("verification-authorization", String(authorization?.id ?? paymentId ?? ""))
       ],
       arguments: [
         String(run.runId),
         JSON.stringify(run),
         authorization ? JSON.stringify(authorization) : "",
-        String(timestampScore(run.submittedAt))
+        String(timestampScore(run.submittedAt)),
+        String(ttl)
       ]
     });
     const [createdRaw, runId] = Array.isArray(reply) ? reply : [0, undefined];
+    const stored = await this.getVerificationRun(runId);
+    if (Number(createdRaw) !== 1) assertVerificationReservationMatches(stored, run);
     return {
       created: Number(createdRaw) === 1,
-      run: await this.getVerificationRun(runId)
+      run: stored
     };
+  }
+
+  async getVerificationRunByAuthorizationId(authorizationId) {
+    await this.connect();
+    const runId = await this.client.get(this.key("verification-authorization", String(authorizationId)));
+    if (!runId) return undefined;
+    const run = await this.getVerificationRun(runId);
+    if (!run) assertVerificationReservationMatches(undefined, undefined);
+    return run;
   }
 
   async getVerificationRunAuthorization(runId) {

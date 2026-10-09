@@ -1806,7 +1806,7 @@
             }
           },
           "402": {
-            "description": "Base payment requirements with PAYMENT-REQUIRED. Complete valid input yields a request-bound challenge; absent/empty unpaid input yields the published example's discovery challenge. Obtain a fresh challenge for actual input before paying.",
+            "description": "Base payment requirements with PAYMENT-REQUIRED. Complete valid input yields a request-bound challenge; absent/empty unpaid input yields the published example's discovery challenge. Obtain a fresh challenge for actual input before paying. Admission refuses validBefore > now + maxTimeoutSeconds + 300 with payment_authorization_window_too_long and details.action sign_fresh_authorization.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1826,6 +1826,16 @@
           },
           "404": {
             "description": "Unknown profile/version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "payment_authorization_in_use: this Base USDC payer/nonce is already reserved. For a new purchase, sign a fresh authorization with a new nonce (details.action: sign_fresh_authorization). Does not reveal the owning runId or claim customerFunds unchanged: the owning run may still capture. Same-request replays return the existing run while the reservation remains, through validBefore + 24 hours.",
             "content": {
               "application/json": {
                 "schema": {

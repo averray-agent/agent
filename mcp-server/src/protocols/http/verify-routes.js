@@ -102,7 +102,8 @@ export function createVerifyRoutes({
   };
 }
 
-function decorateQueuedRun(run) {
+function decorateQueuedRun(internalRun) {
+  const { requestHash: _requestHash, ...run } = internalRun;
   if (run?.status !== "queued") return run;
   return {
     ...run,
