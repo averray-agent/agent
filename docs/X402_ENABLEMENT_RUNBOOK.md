@@ -35,6 +35,58 @@ actual accepted URLs; none is claimed here. Gate X4 on the deployed listing
 returning 200 and matching the built document. The static file and public Verify
 page are both included in the deploy's served-versus-built parity check.
 
+### X4 submission checkpoint — 2026-10-09
+
+**Incomplete; no accepted directory listing is claimed.** At 17:06Z the
+[static listing](https://averray.com/verify-listing.json) returned 200 and named
+`https://api.averray.com/verify/runs`. An unpaid POST with the request below
+returned 402 with Base (`eip155:8453`) requirements and `billing.status:
+not_captured`. No payment signature was supplied and no paid run was started.
+
+```json
+{"profile":"mcp-failure-semantics-v1","profileVersion":1,"target":{"endpoint":"https://api.averray.com/mcp","transport":"streamable_http"},"inputs":{}}
+```
+
+| Destination | Observed status / next action | Accepted URL |
+|---|---|---|
+| [x402scan registration](https://www.x402scan.com/resources/register) | Endpoint-only submission of `https://api.averray.com/verify/runs` failed: `Expected 402 response`. The UI supplies no example-body field. The documented POST above answers 402; resolve method/body compatibility with the directory before retrying. | None |
+| [x402-list submission](https://x402-list.com/submit) | Submitted via `POST https://x402-list.com/api/v1/submit` on 2026-10-09 at approximately 17:48Z. HTTP 201, status `pending`, submission ID `8c7b64ea-c864-4ad2-bf82-7b6472b141b1`; automatic probe found one endpoint with no errors. Manual approval remains outstanding. | None yet |
+| [Onyx Bazaar](https://onyx-actions.onrender.com/bazaar) | Returned 200 at 17:12Z; page identifies CDP discovery as its source. No manual submission control was found on that page. Ask for a supported manual intake path; do not migrate self-capture to CDP merely to obtain a listing. | None |
+| [gold-402 submission PR #314](https://github.com/Haustorium12/gold-402/pull/314) | Draft at `8deac17`, adding one factual Averray Verify entry to `directory/apis.md`, with the exact POST example in the body. Awaiting Averray's copy gate and upstream review. | None yet |
+| [Official MCP registry](https://registry.modelcontextprotocol.io/v0.1/servers/com.averray%2Fmcp/versions/latest) | Still version `1.0.0`, remote `https://api.averray.com/mcp`. Publishing the repository's `server.json` (`1.1.0`) was refused with 401: expired Registry JWT. Operator authentication renewal is required; no credentials were displayed or changed. | Existing entry only; refresh not completed |
+
+The x402-list submission used these fields (contact explicitly approved by Pascal):
+
+- Service: `Averray Verify`; contact: `ops@averray.com` (monitored Workspace alias).
+- Base URL: `https://api.averray.com`; website: `https://averray.com/verify/`.
+- Category: `Verification`; endpoints: `["POST /verify/runs"]`.
+- `example_request_body`: the JSON above, also saved by the directory for its probes.
+- Description: "Paid, bounded verification of a candidate result with a signed,
+  content-addressed receipt. USDC on Base; capture follows an approved or rejected
+  verdict. Inconclusive runs are not billed."
+- Notes: links to the static listing, live requirements, profiles, source repo,
+  public MCP endpoint and its three buyer tools; asynchronous polling and
+  self-capture explained. No paid delivery test claimed.
+
+Directory response (Data: [x402-list.com](https://x402-list.com/api), CC BY 4.0):
+
+```json
+{"submission_id":"8c7b64ea-c864-4ad2-bf82-7b6472b141b1","status":"pending","probe_result":{"endpoints_found":1,"errors":[]}}
+```
+
+Do not resubmit the x402-list entry while it is pending: its confirmation identifies
+this submission, not a public listing URL. Await the review outcome at the approved
+contact. No fee was requested or paid. The gold-402 entry links the API directly,
+with profile, requirements, static-listing and repository links; its PR also states
+that only the unpaid 402 probe was exercised. No changes to third-party default
+branches were made.
+
+References: [x402scan discovery/probing contract](https://github.com/Merit-Systems/x402scan/blob/main/docs/DISCOVERY.md),
+[x402-list submission API](https://x402-list.com/api).
+Keep accepted-listing URLs separate from submission URLs. Record acceptance only
+after the public entry resolves and points at the Averray API. No runtime,
+settlement, environment, or VPS changes are part of this checkpoint.
+
 ## Step 1 — Coinbase Developer Platform credentials · *Pascal*
 
 The facilitator settles the payment on Base and sponsors the gas. We start on CDP for reach
