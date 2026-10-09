@@ -414,7 +414,9 @@ export class TransparencyService {
             value: flow.githubAuthors?.[name] ?? null, unit,
             readAtMs: Date.parse(flow.githubAuthors?.asOf ?? ""),
             source: flow.githubAuthors?.source ?? "backend_state_store",
-            proof: "retained github_pr sessions; author attribution requires verified GitHub author and matched claimant footer binding; unattributed sessions retained"
+            proof: flow.githubAuthors
+              ? "retained github_pr sessions; author attribution requires verified GitHub author and matched claimant footer binding; unattributed sessions retained"
+              : "github_author_read_unavailable"
           })]))
       },
       ...Object.fromEntries(["retainedExternalWorkers30d", "externalRewardOutlay30d", "costPerRetainedExternalWorker30d"]

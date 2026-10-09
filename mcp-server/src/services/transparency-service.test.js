@@ -695,6 +695,18 @@ test("transparency reports distinct GitHub authors beside wallets and states inc
   assert.equal(flow.githubAuthors.authors, undefined, "public transparency is aggregate-only");
 });
 
+test("failed session read exposes unavailable author proof and unknown count fields", async () => {
+  const service = harness();
+  service.stateStore.listRecentSessions = async () => { throw new Error("session read failed"); };
+  const flow = service.buildFlow(await service.readFlow(), NOW);
+  for (const name of ["distinctAuthors", "distinctWallets", "unattributedSessions"]) {
+    assert.equal(flow.githubAuthors[name].proof, "github_author_read_unavailable");
+    assert.equal(flow.githubAuthors[name].value, null);
+    assert.equal(flow.githubAuthors[name].readAtMs, null);
+    assert.equal(flow.githubAuthors[name].status, "unknown");
+  }
+});
+
 test("transparency settlement flow uses the shared registry for ours, outsiders, and unknown", async () => {
   const external = "0x1111111111111111111111111111111111111111";
   const acceptance = "0x2222222222222222222222222222222222222222";

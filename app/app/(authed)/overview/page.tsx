@@ -373,7 +373,7 @@ export default function OverviewPage() {
           {" · "}{overdueReview === null ? "Overdue review: unavailable" : `${overdueReview} overdue review`}
           {oldestReviewHours === null ? " · oldest age not reported" : ` · oldest ${oldestReviewHours} hours`}</p>
         <p className="text-sm">Review SLA: {typeof githubReview?.slaHours === "number" ? `${githubReview.slaHours} hours` : "not reported"}.
-          {Array.isArray(githubReview?.warnings) && githubReview.warnings.length > 0 ? " Warning: GitHub PR review overdue." : ""}
+          {Array.isArray(githubReview?.warnings) && githubReview.warnings.some((warning) => warning?.code === "github_pr_review_overdue") ? " Warning: GitHub PR review overdue." : ""}
           {" "}Use the operator review script to list and preview submissions before settling.</p>
       </section>
       <LaneStatusGrid lanes={lanes} meta={hasLiveOverview ? "live API snapshot" : undefined} />

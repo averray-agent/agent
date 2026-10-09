@@ -121,7 +121,7 @@ export function extractApiErrorMessage(err: unknown): string | undefined {
   const body = err.body;
   if (body && typeof body === "object" && !Array.isArray(body)) {
     const record = body as Record<string, unknown>;
-    const code = typeof record.code === "string" ? record.code : undefined;
+    const code = typeof record.code === "string" ? record.code : typeof record.error === "string" ? record.error : undefined;
     const message =
       typeof record.message === "string" ? record.message : undefined;
     const expected =

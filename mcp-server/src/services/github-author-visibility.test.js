@@ -110,6 +110,20 @@ test("author visibility pages retained sessions once per 60-second window and re
   assert.equal(status.githubAuthors.distinctWallets, 101);
 });
 
+test("author scan fails closed at the 10000-session paging bound instead of publishing partial counts", async () => {
+  let calls = 0;
+  const store = { listRecentSessions: async (limit, offset) => {
+    assert.equal(limit, 100);
+    assert.equal(offset, calls * 100);
+    calls++;
+    if (calls > 100) throw new Error("unbounded scan");
+    return Array.from({ length: limit }, (_, i) => ({ sessionId: String(offset + i) }));
+  }, getVerificationResult: () => assert.fail("must not attribute an incomplete scan") };
+  await assert.rejects(readGithubAuthors(store, { now }), /exceeded the 10000 record bound/u);
+  assert.equal(calls, 100);
+  await assert.rejects(readGithubAuthors({ listRecentSessions: async () => ({}) }, { now }), /non-array page/u);
+});
+
 test("operator board presents author counts, windows, payout uncertainty and coverage outside desktop-only layout", () => {
   const page = readFileSync(new URL("../../../app/app/(authed)/overview/page.tsx", import.meta.url), "utf8");
   for (const field of ["distinctAuthors", "distinctWallets", "unattributedClaims", "openClaims", "submitted",

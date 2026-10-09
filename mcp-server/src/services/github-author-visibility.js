@@ -2,6 +2,8 @@ import { formatBaseUnits } from "../core/platform-service-helpers.js";
 import { approvedSettlement } from "../core/retained-workers.js";
 
 const DAY = 86_400_000;
+const MAX_SESSIONS = 10_000;
+const PAGE_SIZE = 100;
 const openStatuses = new Set(["claimed", "submitted", "rejected", "disputed"]);
 
 // Only server-read GitHub authors with a matching public claimant footer count.
@@ -17,10 +19,12 @@ export function boundGithubAuthor(lookup) {
 export async function readGithubAuthors(stateStore, { now = new Date(), sessions } = {}) {
   if (!sessions) {
     sessions = [];
-    for (let offset = 0; ; offset += 100) {
-      const page = await stateStore.listRecentSessions(100, offset);
+    for (let offset = 0; offset < MAX_SESSIONS; offset += PAGE_SIZE) {
+      const page = await stateStore.listRecentSessions(PAGE_SIZE, offset);
+      if (!Array.isArray(page)) throw new Error("GitHub author source returned a non-array page");
       sessions.push(...page);
-      if (page.length < 100) break;
+      if (page.length < PAGE_SIZE) break;
+      if (offset + PAGE_SIZE >= MAX_SESSIONS) throw new Error(`GitHub author source exceeded the ${MAX_SESSIONS} record bound`);
     }
   }
   const authors = new Map(), wallets = new Set(), seen = new Set();
@@ -81,7 +85,7 @@ export async function readGithubAuthors(stateStore, { now = new Date(), sessions
     githubSessions, distinctAuthors: rows.length, distinctWallets: wallets.size,
     openClaims, unattributedClaims, unattributedSessions, authors: rows,
     warnings: rows.filter((row) => row.openClaims >= 3 && row.openClaims > openClaims / 2).map((row) => ({
-code: "github_author_concentration", severity: "warning", openClaims: row.openClaims,
+      code: "github_author_concentration", severity: "warning", openClaims: row.openClaims,
       totalOpenClaims: openClaims, distinctWallets: row.distinctWallets
     }))
   };
