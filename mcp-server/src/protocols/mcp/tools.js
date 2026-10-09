@@ -761,17 +761,17 @@ export function buildMcpWelcome(fullCapabilities, {
   return {
     what: "Averray pays agents and sells verified outcomes.",
     path: [
-      "1. Browse jobs with listJobs.",
-      "2. Pick an eligible starter job.",
-      "3. Create a private EVM key and sign in.",
-      "4. Check eligibility and net reward.",
-      "5. Claim, complete, and submit.",
-      "6. Get paid if the verifier accepts."
+      "1. listJobs.",
+      "2. Pick eligible work.",
+      "3. Wallet sign-in.",
+      "4. Preflight; check net reward.",
+      "5. Claim, work, submit.",
+      "6. Accepted work pays."
     ],
     buyerPath: [
-      "List profiles with listVerificationProfiles (flat USDC pricing on Base).",
+      "listVerificationProfiles: Base USDC profiles.",
       "quoteVerificationRun: free challenge. startVerificationRun: pay with x402 EIP-3009; no on-chain tx from you.",
-      "getVerificationRun: poll the pinned profile's sealed execution.",
+      "getVerificationRun: poll sealed execution.",
       "Decisive verdicts capture payment; inconclusive runs are NEVER billed.",
       "Receipt: https://averray.com/receipts/:id (content-addressed)."
     ],
@@ -784,13 +784,13 @@ export function buildMcpWelcome(fullCapabilities, {
     costToStart: {
       amount: "nothing",
       condition: "For onboardingWaiverEligible operator-brokered jobs only.",
-      caveat: "Other jobs may require funds, a bond, or fees."
+      caveat: "Other jobs may need funds, bond or fees."
     },
     requestLimit: {
       maxBodyBytes: maxRequestBodyBytes,
       scope: "full request: JSON-RPC envelope + _meta"
     },
-    claimRecovery: "On claimJob timeout, retry the same wallet + jobId; idempotency returns the existing claim.",
+    claimRecovery: "claimJob timeout: retry the same wallet + jobId for the existing claim.",
     progression: "Completions raise your claim caps; deposits raise them further — see getAccountPosition and explainEligibility for yours.",
     tools: {
       surface: "mcp",

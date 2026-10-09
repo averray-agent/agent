@@ -8,7 +8,7 @@ import { X402VerificationPaymentGate } from "../../payments/x402-verification-pa
 import { createVerifyRoutes } from "../http/verify-routes.js";
 import { readJsonBody, respond } from "../http/http-helpers.js";
 import { invokeHttpRoute } from "./route-adapter.js";
-import { buildMcpWelcome, createMcpToolExecutor, MCP_TOOLS } from "./tools.js";
+import { buildMcpWelcome, createMcpToolExecutor, MCP_TOOLS, MCP_WELCOME_TOKEN_BUDGET } from "./tools.js";
 import { createMcpRoute, MODERN_MCP_VERSION } from "./handler.js";
 import { DISCOVERY_TOOLS, CONNECTED_ONLY_TOOLS } from "../../core/discovery-manifest.js";
 import { ACCOUNT_ACTION_PARITY_MAPPINGS } from "../../core/agent-surface-parity.js";
@@ -154,6 +154,10 @@ test("X1 discovery, parity and welcome enumerate the real buyer path without a b
     assert.equal(DISCOVERY_TOOLS.some((tool) => tool.name === name), name !== "startVerificationRun");
   }
   assert.ok(CONNECTED_ONLY_TOOLS.has("startVerificationRun"));
+  const welcome = buildMcpWelcome({ discoveryUrl: "https://averray.com/.well-known/agent-tools.json" });
+  // V2 merges first. Reserve its exact rule even while this draft is based on main.
+  welcome.githubPrSettlementRule = "GitHub PR jobs settle only when the upstream PR is merged and the verifier approves; a PR closed without merge is rejected.";
+  assert.ok(Math.ceil(Buffer.byteLength(JSON.stringify(welcome)) / 3) <= MCP_WELCOME_TOKEN_BUDGET);
 });
 
 test("X1 conflicting transports and malformed metadata are rejected without echoing proof", async () => {
