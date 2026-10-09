@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
+import { JSDOM } from "jsdom";
 
 const READER = new URL("../../marketing/public/transparency-reader.js", import.meta.url);
 const PAGE = new URL("../../marketing/src/pages/transparency.astro", import.meta.url);
@@ -53,8 +54,38 @@ test("the Record separates job origin from registry-classified claimant ownershi
   assert.match(source, />Externally posted <b data-value>/u);
   assert.doesNotMatch(source, />External agents <b data-value>/u);
   assert.match(source, /data-read="flow\.settledToExternalWallets24h"/u);
-  assert.match(source, />Settled to external wallets \(24h\)</u);
+  assert.match(source, />Jobs settled to external wallets \(24h\)</u);
   assert.match(source, /shared\s+self-identity registry/u);
+});
+
+test("M1 reader renders typed authors beside wallets, preserves job units, and refuses the old or missing shape", async () => {
+  const page = await readFile(PAGE, "utf8");
+  assert.match(page, /Five payouts to unmerged pull requests on 2026-10-08 predate the merged-only rule \(live since 2026-10-08 07:21Z\)\./u);
+  assert.match(page, /Authors are GitHub accounts bound to a claim, not verified people\./u);
+  assert.match(page, /transparency-reader\.js\?v=20261009/u);
+  const dom = new JSDOM(page.replace(/^---[\s\S]*?---/u, ""), { runScripts: "outside-only" });
+  const { window } = dom;
+  window.matchMedia = () => ({ matches: true });
+  const source = (await readFile(READER, "utf8")).replace('  var placeholder = document.querySelector', '  window.testRender = render; return;\n  var placeholder = document.querySelector');
+  window.eval(source);
+  const field = (value, unit, proof = "bound fixture evidence") => ({ value, unit, readAtMs: Date.now(), status: value === null ? "unknown" : "fresh", source: "fixture", proof });
+  const payload = { flow: {
+    settledToExternalWallets24h: field(13, "jobs"), externalWallets24h: field(9, "wallets"),
+    externalAuthors24h: { ...field(1, "authors"), unattributed: field(3, "jobs") },
+    githubAuthors: { distinctAuthors: field(1, "authors"), distinctWallets: field(9, "wallets"), unattributedSessions: field(3, "sessions") }
+  } };
+  const text = (path, selector = "[data-value]") => window.document.querySelector(`[data-read="${path}"] ${selector}`).textContent;
+  window.testRender(payload);
+  for (const [path, expected] of [["flow.externalWallets24h", "9"], ["flow.externalAuthors24h", "1"],
+    ["flow.externalAuthors24h.unattributed", "3"], ["flow.githubAuthors.distinctAuthors", "1"], ["flow.githubAuthors.distinctWallets", "9"], ["flow.settledToExternalWallets24h", "13"]]) assert.equal(text(path), expected);
+  assert.equal(text("flow.settledToExternalWallets24h", "[data-unit]"), "jobs");
+  window.testRender({ flow: { externalWallets24h: 9, externalAuthors24h: 1, githubAuthors: { distinctAuthors: 1 } } });
+  assert.equal(text("flow.externalAuthors24h"), "no read", "old flat counts cannot masquerade as evidence-backed fields");
+  assert.equal(text("flow.externalWallets24h"), "no read");
+  window.testRender({ flow: { externalAuthors24h: field(null, "authors", "github_author_evidence_missing") } });
+  assert.equal(text("flow.externalAuthors24h"), "no read");
+  assert.equal(text("flow.externalAuthors24h", "[data-source]"), "github_author_evidence_missing");
+  dom.window.close();
 });
 
 test("deposit-pool transparency contains two live-read lanes and no baked figure", async () => {

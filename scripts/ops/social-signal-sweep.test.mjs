@@ -38,7 +38,10 @@ function snapshot({ settled = 4, external = 0, settledStatus = "fresh", external
         external: field(external, externalStatus),
         unclassified: field(0)
       },
-      settledToExternalWallets24h: field(external, externalStatus)
+      settledToExternalWallets24h: { ...field(external, externalStatus), unit: "jobs" },
+      externalWallets24h: { ...field(external, externalStatus), unit: "wallets" },
+      externalAuthors24h: { ...field(null, "unknown"), unit: "authors", proof: "github_author_evidence_missing",
+        unattributed: { ...field(external, externalStatus), unit: "jobs" } }
     }
   };
 }

@@ -214,12 +214,36 @@ const PAGE_DESCRIPTION =
           <p class="read__src"><span data-read="flow.jobsSettled.allTime" data-inline><span data-value>Not loaded</span></span> jobs settled</p>
         </div>
         <div class="read read--flat" data-read="flow.settledToExternalWallets24h">
-          <span class="read__label">Settled to external wallets (24h)</span>
+          <span class="read__label">Jobs settled to external wallets (24h)</span>
           <p class="read__value read__value--sm"><span data-value>Not loaded</span><span class="read__unit" data-unit></span></p>
           <p class="read__src" data-source></p>
           <div class="read__foot"><span data-block></span><span data-age></span></div>
         </div>
       </div>
+      <p class="panel__prose">Five payouts to unmerged pull requests on 2026-10-08 predate the merged-only rule (live since 2026-10-08 07:21Z).</p>
+      <div class="record-grid record-grid--4">
+        <div class="read read--flat" data-read="flow.externalWallets24h">
+          <span class="read__label">External wallets · 24 h</span>
+          <p class="read__value read__value--sm"><span data-value>Not loaded</span><span class="read__unit" data-unit></span></p>
+          <p class="read__src" data-source></p>
+        </div>
+        <div class="read read--flat" data-read="flow.externalAuthors24h">
+          <span class="read__label">External GitHub authors · 24 h</span>
+          <p class="read__value read__value--sm"><span data-value>Not loaded</span><span class="read__unit" data-unit></span></p>
+          <p class="read__src" data-source></p>
+        </div>
+        <div class="read read--flat" data-read="flow.externalAuthors24h.unattributed">
+          <span class="read__label">Settled external jobs without author attribution · 24 h</span>
+          <p class="read__value read__value--sm"><span data-value>Not loaded</span><span class="read__unit" data-unit></span></p>
+          <p class="read__src" data-source></p>
+        </div>
+      </div>
+      <p class="panel__prose">Authors are GitHub accounts bound to a claim, not verified people.</p>
+      <p class="panel__prose">Retained GitHub claim history:
+        <span data-read="flow.githubAuthors.distinctAuthors" data-inline><span data-value>Not loaded</span></span> GitHub authors,
+        <span data-read="flow.githubAuthors.distinctWallets" data-inline><span data-value>Not loaded</span></span> wallets.
+        <span data-read="flow.githubAuthors.unattributedSessions" data-inline><span data-value>Not loaded</span></span> sessions without author attribution.
+      </p>
     </section>
 
     <!-- ============ COMPOSITION — the honest one ============ -->
@@ -231,7 +255,7 @@ const PAGE_DESCRIPTION =
         <p class="panel__prose">
           This is the same last-24-hour work split by job origin: platform verification,
           ingested catalogue work, externally posted work, or unclassified. It does not classify
-          claimants; the external-wallet settlement counter above does that through the shared
+          claimants; the job counts and distinct external-wallet counter above do that through the shared
           self-identity registry.
         </p>
         <div class="comp" data-comp hidden>
@@ -328,5 +352,5 @@ const PAGE_DESCRIPTION =
   </main>
 
   <script is:inline src="/reader-fetch.js?v=20260823"></script>
-  <script is:inline src="/transparency-reader.js?v=20261008"></script>
+  <script is:inline src="/transparency-reader.js?v=20261009"></script>
 </BaseLayout>

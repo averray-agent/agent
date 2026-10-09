@@ -28,7 +28,10 @@ const ISSUE = { number: 1036, title: "Merged: …", body: ISSUE_BODY };
 const SNAPSHOT = {
   flow: {
     jobsSettled: { allTime: { value: 254, status: "fresh" } },
-    settledToExternalWallets24h: { value: 0, status: "fresh" }
+    settledToExternalWallets24h: { value: 0, unit: "jobs", status: "fresh" },
+    externalWallets24h: { value: 0, unit: "wallets", status: "fresh" },
+    externalAuthors24h: { value: null, unit: "authors", status: "unknown", proof: "github_author_evidence_missing",
+      unattributed: { value: null, unit: "jobs", status: "unknown", proof: "github_author_read_unavailable" } }
   }
 };
 

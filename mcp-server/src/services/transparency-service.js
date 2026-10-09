@@ -407,6 +407,17 @@ export class TransparencyService {
         total: countField(flow.windows.last24h.jobs)
       },
       settledToExternalWallets24h: countField(flow.workers.outsiders),
+      externalWallets24h: countField(flow.externalWallets24h ?? {
+        value: null, unit: "wallets", readAtMs: null, source: "backend_state_store", proof: "external_wallet_read_unavailable"
+      }),
+      externalAuthors24h: {
+        ...countField(flow.externalAuthors24h ?? {
+          value: null, unit: "authors", readAtMs: null, source: "backend_state_store", proof: "github_author_read_unavailable"
+        }),
+        unattributed: countField(flow.externalAuthors24h?.unattributed ?? {
+          value: null, unit: "jobs", readAtMs: null, source: "backend_state_store", proof: "github_author_read_unavailable"
+        })
+      },
       githubAuthors: {
         label: flow.githubAuthors?.label ?? "GitHub accounts with a verified claimant footer, not unique humans; wallets include unattributed sessions.",
         ...Object.fromEntries(Object.entries({ distinctAuthors: "authors", distinctWallets: "wallets", unattributedSessions: "sessions" })
@@ -512,6 +523,7 @@ export class TransparencyService {
         }
       ]));
       const workerCounts = { outsiders: 0, ours: 0, unknown: 0 };
+      const externalSessions = [];
       for (const session of last24h) {
         const wallet = String(session?.wallet ?? "").trim();
         if (!wallet) {
@@ -520,7 +532,10 @@ export class TransparencyService {
         }
         const identity = this.selfIdentityRegistry.classify({ wallet, session });
         if (identity.actor === "self") workerCounts.ours += 1;
-        else if (identity.actor === "external") workerCounts.outsiders += 1;
+        else if (identity.actor === "external") {
+          workerCounts.outsiders += 1;
+          externalSessions.push(session);
+        }
         else workerCounts.unknown += 1;
       }
       const workers = Object.fromEntries(Object.entries(workerCounts).map(([name, value]) => [
@@ -533,6 +548,25 @@ export class TransparencyService {
           proof: "session.wallet + durable claimantAttribution + configured operator identity registry"
         }
       ]));
+      const externalWallets24h = {
+        value: workerCounts.unknown ? null : new Set(externalSessions.map((session) => session.wallet.toLowerCase())).size,
+        unit: "wallets", readAtMs, source: "settled jobs in last 24h + shared self-identity registry",
+        proof: workerCounts.unknown ? "claimant_identity_unavailable" : "distinct external session.wallet, case-insensitive; not a job count"
+      };
+      const externalAuthors = await readGithubAuthors(this.stateStore, { sessions: externalSessions, now: new Date(nowMs) }).catch(() => null);
+      const unattributed = externalAuthors
+        ? externalSessions.length - externalAuthors.githubSessions + externalAuthors.unattributedSessions : null;
+      const authorEvidenceMissing = workerCounts.unknown || !externalAuthors || (externalAuthors.githubSessions > 0 && externalAuthors.distinctAuthors === 0);
+      const externalAuthors24h = {
+        value: authorEvidenceMissing ? null : externalAuthors.distinctAuthors,
+        unit: "authors", readAtMs, source: "settled external github_pr jobs in last 24h + verified claimant-footer binding",
+        proof: workerCounts.unknown ? "claimant_identity_unavailable" : !externalAuthors ? "github_author_read_unavailable"
+          : authorEvidenceMissing ? "github_author_evidence_missing"
+          : `distinct verified GitHub authors bound to claims; ${unattributed} settled external jobs unattributed`,
+        unattributed: { value: workerCounts.unknown ? null : unattributed, unit: "jobs", readAtMs,
+          source: "settled external jobs in last 24h without verified GitHub author + matched claimant footer",
+          proof: workerCounts.unknown ? "claimant_identity_unavailable" : externalAuthors ? "includes non-GitHub jobs and missing/unbound author evidence" : "github_author_read_unavailable" }
+      };
       const posterFees = summarizePosterFees(
         settledByJob,
         chainJobs,
@@ -553,14 +587,14 @@ export class TransparencyService {
           source: "backend_state_store claim-time snapshots + approved payout receipts + claimant identity",
           proof: `trailing 30d; >=2 distinct source keys per external claimant; ${metrics.costPerRetainedExternalWorker30d.reason ?? "complete"}`
         }]));
-      const authors = await readGithubAuthors(this.stateStore, { sessions, now: new Date(nowMs) });
-      const githubAuthors = {
+      const authors = await readGithubAuthors(this.stateStore, { sessions, now: new Date(nowMs) }).catch(() => null);
+      const githubAuthors = authors ? {
         distinctAuthors: authors.distinctAuthors, distinctWallets: authors.distinctWallets,
         unattributedSessions: authors.unattributedSessions, githubSessions: authors.githubSessions,
         source: authors.source, asOf: authors.asOf,
         label: "GitHub accounts with a verified claimant footer, not unique humans; wallets include unattributed sessions."
-      };
-      return { windows, composition, workers, posterFees, participation, retained, githubAuthors };
+      } : undefined;
+      return { windows, composition, workers, posterFees, participation, retained, githubAuthors, externalWallets24h, externalAuthors24h };
     } catch (error) {
       const unknown = { value: null, raw: null, readAtMs, source, proof: redactProviderError(error) || "flow_read_failed" };
       return {
