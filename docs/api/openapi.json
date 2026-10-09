@@ -1806,7 +1806,7 @@
             }
           },
           "402": {
-            "description": "Base payment requirements with PAYMENT-REQUIRED. Complete valid input yields a request-bound challenge; absent/empty unpaid input yields the published example's discovery challenge. Obtain a fresh challenge for actual input before paying. Admission refuses validBefore > now + maxTimeoutSeconds + 300 with payment_authorization_window_too_long and details.action sign_fresh_authorization.",
+            "description": "Base payment requirements with PAYMENT-REQUIRED. Complete valid input yields a request-bound challenge; absent/empty unpaid input yields the published example's discovery challenge. Obtain a fresh challenge for actual input before paying. Admission refuses validBefore > now + maxTimeoutSeconds + 300 with payment_authorization_window_too_long and details.action sign_fresh_authorization. A signed payer with Base USDC balance below the authorized amount receives payment_insufficient_balance with details.action fund_wallet_or_sign_fresh_authorization; no run or reservation is created.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1855,7 +1855,7 @@
             }
           },
           "503": {
-            "description": "Payment or execution capability unavailable.",
+            "description": "Payment or execution capability unavailable. payment_balance_unavailable means the Base USDC balance read failed: details.reason base_balance_read_failed, details.action retry_when_base_reads_recover. No run or reservation is created; a failed read never admits work.",
             "content": {
               "application/json": {
                 "schema": {

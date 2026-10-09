@@ -10,7 +10,7 @@ import {
 } from "ethers";
 
 import { hashCanonicalContent } from "../core/canonical-content.js";
-import { ConfigError } from "../core/errors.js";
+import { AppError, ConfigError } from "../core/errors.js";
 import { KmsSigner } from "../blockchain/kms-signer.js";
 import {
   buildKmsCredentialsProvider,
@@ -53,6 +53,7 @@ const TOKEN_ABI = [
   "function name() view returns (string)",
   "function DOMAIN_SEPARATOR() view returns (bytes32)",
   "function authorizationState(address authorizer, bytes32 nonce) view returns (bool)",
+  "function balanceOf(address account) view returns (uint256)",
   "function transferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce,uint8 v,bytes32 r,bytes32 s)"
 ];
 const TRANSFER_WITH_AUTHORIZATION_TYPES = Object.freeze({
@@ -272,6 +273,24 @@ export class X402VerificationPaymentGate {
       throw paymentRefusal(
         "This EIP-3009 authorization nonce is already used. No work ran; sign a fresh authorization.",
         "payment_authorization_used"
+      );
+    }
+
+    let balance;
+    try {
+      balance = exactUint(await this.token.balanceOf(authorization.from), "payer balance");
+    } catch {
+      throw new AppError(
+        "Averray could not read the payer's Base USDC balance. No work ran and no payment was captured; retry when Base reads recover.",
+        { name: "PaymentVerificationError", code: "payment_balance_unavailable", statusCode: 503,
+          details: { reason: "base_balance_read_failed", action: "retry_when_base_reads_recover", customerFunds: "unchanged" } }
+      );
+    }
+    if (balance < authorization.value) {
+      throw new PaymentVerificationError(
+        "The payer has insufficient Base USDC for this verification. Fund the wallet or sign a fresh authorization; no work ran and no payment was captured.",
+        "payment_insufficient_balance",
+        { action: "fund_wallet_or_sign_fresh_authorization", customerFunds: "unchanged" }
       );
     }
 

@@ -24,8 +24,8 @@ const request = {
 };
 const context = { request: { headers: {}, socket: { remoteAddress: "192.0.2.10" } } };
 
-function harness() {
-  const calls = { limits: [], captures: 0, logs: [] };
+function harness({ balance = 5_000_000n, balanceError } = {}) {
+  const calls = { limits: [], captures: 0, logs: [], balances: [] };
   const store = new MemoryStateStore();
   const gate = new X402VerificationPaymentGate({
     config: { enabled: true, mode: "enabled", network: "eip155:8453", chainId: 8453,
@@ -33,7 +33,8 @@ function harness() {
       assetEip712Name: domain.name, assetEip712Version: domain.version,
       publicOrigin: "https://api.averray.com", captureMarginSeconds: 600 },
     provider: { getNetwork: async () => ({ chainId: 8453n }) },
-    tokenContract: { name: async () => domain.name, DOMAIN_SEPARATOR: async () => TypedDataEncoder.hashDomain(domain), authorizationState: async () => false },
+    tokenContract: { name: async () => domain.name, DOMAIN_SEPARATOR: async () => TypedDataEncoder.hashDomain(domain), authorizationState: async () => false,
+      balanceOf: async (payer) => { calls.balances.push(payer); if (balanceError) throw balanceError; return balance; } },
     captureTokenContract: { transferWithAuthorization: async () => { calls.captures++; throw new Error("unexpected capture"); } },
     now: () => NOW
   });
@@ -103,6 +104,40 @@ test("X1 quote equals unpaid HTTP, strips all inherited payment paths, and creat
 test("X1c connected and directory MCP tool descriptions keep x402 on Base only", () => {
   assertBaseOnlyX402Surface(MCP_TOOLS.map((tool) => tool.description));
 });
+
+for (const scenario of ["insufficient", "unavailable"]) {
+  test(`X1f HTTP and MCP start preserve the ${scenario} balance refusal without a run`, async () => {
+    const h = harness({ balance: 0n, balanceError: scenario === "unavailable" ? new Error("private RPC detail") : undefined });
+    const quote = await h.execute("quoteVerificationRun", request, context);
+    const paid = await proof(quote);
+    assert.equal(h.calls.balances.length, 0, "free quote does not read a payer balance");
+    const code = scenario === "insufficient" ? "payment_insufficient_balance" : "payment_balance_unavailable";
+    const statusCode = scenario === "insufficient" ? 402 : 503;
+    const action = scenario === "insufficient" ? "fund_wallet_or_sign_fresh_authorization" : "retry_when_base_reads_recover";
+    for (const start of [
+      () => invokeHttpRoute(h.route, { method: "POST", path: "/verify/runs", body: request, headers: { "payment-signature": paid.header } }),
+      () => h.execute("startVerificationRun", { ...request, paymentSignature: paid.header }, context)
+    ]) {
+      await assert.rejects(start(), (error) => {
+        assert.equal(error.statusCode, statusCode);
+        assert.equal(error.code, code);
+        assert.equal(error.details.action, action);
+        return true;
+      });
+    }
+    const response = await callMcp(h.mcp, "startVerificationRun", request, { "x402/payment": paid.payload });
+    assert.equal(response.body.result.isError, true);
+    assert.match(JSON.stringify(response.body), new RegExp(code, "u"));
+    assert.match(JSON.stringify(response.body), new RegExp(action, "u"));
+    assert.ok(!JSON.stringify(response.body).includes(paid.signature));
+    assert.ok(!JSON.stringify(response.body).includes("private RPC detail"));
+    assert.equal(h.calls.balances.length, 3);
+    assert.equal(h.calls.captures, 0);
+    assert.equal(h.store.verificationRuns.size, 0);
+    assert.equal(h.store.verificationAuthorizationRuns.size, 0);
+    assert.equal(h.store.verificationPaymentRuns.size, 0);
+  });
+}
 
 test("X1e HTTP and MCP share authorization ownership across differently wrapped proofs", async () => {
   const h = harness();

@@ -27,9 +27,9 @@ async function fixture(t, backend) {
   const profile = profiles.get("mcp-failure-semantics-v1", 1);
   const domain = { name: "USD Coin", version: "2", chainId: 8453,
     verifyingContract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" };
-  const clock = { now: new Date("2026-10-09T20:00:00Z"), used: false };
+  const clock = { now: new Date("2026-10-09T20:00:00Z"), used: false, balance: BigInt(profile.price.amountRaw) };
   const seconds = Math.floor(clock.now.getTime() / 1000);
-  const calls = { starts: 0, captures: 0, nonceReads: 0 };
+  const calls = { starts: 0, captures: 0, nonceReads: 0, balances: [] };
   const gate = new X402VerificationPaymentGate({
     config: { enabled: true, network: "eip155:8453", chainId: 8453,
       asset: domain.verifyingContract.toLowerCase(), payTo: "0x1111111111111111111111111111111111111111",
@@ -37,6 +37,7 @@ async function fixture(t, backend) {
       publicOrigin: "https://api.averray.com", captureMarginSeconds: 600 },
     provider: { getNetwork: async () => ({ chainId: 8453n }) },
     tokenContract: { name: async () => domain.name, DOMAIN_SEPARATOR: async () => TypedDataEncoder.hashDomain(domain),
+      balanceOf: async (payer) => { calls.balances.push(payer); if (clock.balanceError) throw clock.balanceError; return clock.balance; },
       authorizationState: async () => { calls.nonceReads++; return clock.used; } },
     captureTokenContract: { transferWithAuthorization: async () => { calls.captures++; throw new Error("unexpected capture"); } },
     now: () => clock.now
@@ -107,12 +108,15 @@ for (const backend of ["Memory", "Redis"]) {
       const run = await h.service.createRun(await h.request());
       await h.store.updateVerificationRun(run.runId, { ...run, status: "complete", billing: { status } });
       h.clock.used = status === "captured";
+      h.clock.balance = 0n;
+      h.clock.balanceError = new Error("replay must not need a fresh balance read");
       h.clock.now = new Date("2026-10-10T20:00:00Z");
       const nonceReads = h.calls.nonceReads;
       const replay = await h.service.createRun(await h.request(undefined, undefined, true));
       assert.equal(replay.runId, run.runId);
       assert.equal(replay.status, "complete");
       assert.equal(h.calls.nonceReads, nonceReads, "expired/used replay is a lookup, not fresh admission");
+      assert.equal(h.calls.balances.length, 1, "only the original admission reads the balance");
       await assert.rejects(h.service.createRun(await h.request("https://two.example/mcp")),
         { statusCode: 409, code: "payment_authorization_in_use" });
       assert.equal(h.calls.starts, 1);
@@ -215,4 +219,31 @@ for (const backend of ["Memory", "Redis"]) {
     assert.notEqual(a.runId, b.runId);
     assert.equal(h.calls.starts, 2);
   });
+
+  for (const scenario of ["insufficient", "unavailable"]) {
+    test(`X1f ${backend}: ${scenario} balance creates no run and no reservation key`, options, async (t) => {
+      const h = await fixture(t, backend);
+      h.clock.balance = 0n;
+      if (scenario === "unavailable") h.clock.balanceError = new Error("Base read failed");
+      let reservations = 0;
+      const reserve = h.store.reserveVerificationRun.bind(h.store);
+      h.store.reserveVerificationRun = async (...args) => { reservations++; return reserve(...args); };
+      await assert.rejects(h.service.createRun(await h.request()), {
+        statusCode: scenario === "insufficient" ? 402 : 503,
+        code: scenario === "insufficient" ? "payment_insufficient_balance" : "payment_balance_unavailable"
+      });
+      assert.deepEqual(h.calls.balances, [h.wallet.address]);
+      assert.equal(reservations, 0);
+      assert.equal(h.calls.starts, 0);
+      assert.equal(h.calls.captures, 0);
+      assert.deepEqual(await h.store.listActiveVerificationRuns(), []);
+      if (backend === "Redis") {
+        assert.deepEqual(await h.store.client.keys(`${h.store.namespace}:verification-*`), []);
+      } else {
+        assert.equal(h.store.verificationPaymentRuns.size, 0);
+        assert.equal(h.store.verificationAuthorizationRuns.size, 0);
+        assert.equal(h.store.verificationRuns.size, 0);
+      }
+    });
+  }
 }
