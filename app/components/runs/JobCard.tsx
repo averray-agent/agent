@@ -16,6 +16,7 @@ import {
 export interface JobCardData {
   id: string;
   title: string;
+  bountyDisclosure?: string | null;
   jobMeta: string;
   /**
    * Short category label (e.g. "docs", "coding", "testing"). For GitHub
@@ -59,6 +60,7 @@ export function JobCard({
           "border-[color:rgba(30,102,66,0.35)] bg-gradient-to-b from-[rgba(214,234,223,0.5)] from-0% to-[#fffdf7] to-40%"
       )}
     >
+      {job.bountyDisclosure ? <p className="text-xs text-[var(--avy-muted)]">{job.bountyDisclosure}</p> : null}
       <header className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <h4
