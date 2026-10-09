@@ -11,6 +11,7 @@ import type {
 } from "@/components/runs/types";
 import { buildJobLifecycle } from "@/lib/api/job-lifecycle";
 import { buildClaimSummary } from "@/lib/api/claim-status";
+import { bountyDisclosure } from "@/lib/work/bounty-copy.js";
 
 type RawRecord = Record<string, unknown>;
 
@@ -582,6 +583,7 @@ export function buildRunRows(payload: unknown): RunRow[] {
       id,
       sessionId: text(job.sessionId),
       title,
+      bountyDisclosure: bountyDisclosure(job.title, job.rewardAmount, job.rewardAsset),
       jobMeta,
       ...(source ? { source } : {}),
       ...(lifecycle ? { lifecycle } : {}),
@@ -736,6 +738,7 @@ export function buildRecommendationCards(
     return {
       id,
       title: text(job.title, text(job.description, titleFromId(id))),
+      bountyDisclosure: bountyDisclosure(job.title, job.rewardAmount, job.rewardAsset),
       jobMeta,
       category,
       ...(source ? { source } : {}),

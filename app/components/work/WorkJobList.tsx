@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useHumanWorkJobs } from "@/lib/api/hooks";
 import { formatAmount } from "@/lib/format";
+import { bountyDisclosure } from "@/lib/work/bounty-copy.js";
 import {
   WORK_LAST_VISIT_STORAGE_KEY,
   filterHumanWorkListings,
@@ -132,6 +133,7 @@ export function WorkJobList() {
 
 function WorkJobCard({ job, isNew, nowMs }: { job: HumanJobListing; isNew: boolean; nowMs: number | null }) {
   const reward = formatAmount(job.reward?.amount ?? undefined, job.reward?.asset ?? "");
+  const bountyCopy = bountyDisclosure(job.title, job.reward?.amount, job.reward?.asset);
   const priority = nowMs === null ? null : priorityWindowDisplay(job.priorityWindow, nowMs);
   return (
     <Card className="group flex h-full flex-col transition-transform hover:-translate-y-0.5 hover:border-[var(--line-strong)]">
@@ -147,6 +149,7 @@ function WorkJobCard({ job, isNew, nowMs }: { job: HumanJobListing; isNew: boole
           </div>
           <strong className="shrink-0 font-[family-name:var(--font-display)] text-lg text-[var(--accent)]">{reward}</strong>
         </div>
+        {bountyCopy ? <p className="text-sm text-[var(--muted)]">{bountyCopy}</p> : null}
         <IssueMarkdown lead className="text-sm leading-relaxed text-[var(--muted)]">
           {job.successCriteria || job.summary || "Open the task to read the exact success criteria."}
         </IssueMarkdown>

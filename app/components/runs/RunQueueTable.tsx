@@ -24,6 +24,7 @@ export interface RunRow {
   sessionId?: string;
   jobMeta: string;
   title: string;
+  bountyDisclosure?: string | null;
   /**
    * Optional provenance. Present on GitHub-ingested jobs so the row can
    * show the source badge + `owner/repo #123` inline instead of just the
@@ -239,6 +240,7 @@ function RunRowCard({
             >
               {row.title}
             </div>
+            {row.bountyDisclosure ? <p className="mt-1 text-xs text-[var(--avy-muted)]">{row.bountyDisclosure}</p> : null}
             <div
               className="mt-0.5 flex min-w-0 items-center gap-1.5 font-[family-name:var(--font-mono)] text-[11px] font-normal text-[var(--avy-muted)]"
               style={{ letterSpacing: 0 }}
