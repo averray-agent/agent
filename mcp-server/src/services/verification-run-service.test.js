@@ -64,9 +64,37 @@ function paymentGate() {
     },
     async release() {
       calls.release += 1;
+    },
+    async isCaptured() {
+      return false;
     }
   };
 }
+
+test("X1d an unresolved capture does not block the next run in the finalizer tick", async () => {
+  const gate = paymentGate();
+  const capture = gate.capture.bind(gate);
+  gate.capture = async (input) => {
+    if (input.authorization.id.endsWith("first")) throw new Error("capture unavailable");
+    return capture(input);
+  };
+  gate.isCaptured = async () => { throw new Error("Base read unavailable"); };
+  const context = harness({ gate });
+  const logs = [];
+  context.service.logger = { warn: (...args) => logs.push(args) };
+  context.service.evaluatePinnedProfile = async () => ({ outcome: "approved", reasonCode: "PASS" });
+  const first = await context.service.createRun(request("first"));
+  const second = await context.service.createRun(request("second"));
+  for (const run of [first, second]) await context.stateStore.updateVerificationRun(run.runId, { ...run, status: "executed", execution: { status: "decidable" } });
+  const completed = await context.service.finalizeAvailableRuns();
+  assert.deepEqual(completed.map((run) => run.runId), [second.runId]);
+  assert.equal((await context.service.getRun(first.runId)).status, "executed");
+  assert.equal((await context.service.getRun(first.runId)).billing.status, "authorized");
+  assert.equal(gate.calls.release, 0);
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0][0].runId, first.runId);
+  assert.equal(logs[0][1], "verification_run.finalization_retry");
+});
 
 function harness({ runnerResult, runnerError, runner: runnerOverride, gate = paymentGate(), ids = ["one", "two"], profileRegistry = new VerificationProfileRegistry(), verifierRegistry, clock = { now: new Date("2026-08-18T12:00:00.000Z") } } = {}) {
   const runnerCalls = [];

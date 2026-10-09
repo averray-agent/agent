@@ -323,6 +323,13 @@ export class X402VerificationPaymentGate {
     };
   }
 
+  async isCaptured({ authorization }) {
+    const proof = authorization.authorization;
+    const used = await this.token.authorizationState(proof.from, proof.nonce);
+    if (typeof used !== "boolean") throw new Error("Base authorization state is unavailable.");
+    return used;
+  }
+
   async release() {
     return { submitted: false };
   }

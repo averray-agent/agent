@@ -31,9 +31,11 @@ test("inconclusive Verify runs never increase billed volume; approved and reject
     row.billing.status = status;
     assert.equal(total([...decisive, row]), 10_000_000n);
   }
-  const unconfirmed = capture(5);
-  delete unconfirmed.billing.transactionHash;
-  assert.equal(total([...decisive, unconfirmed]), 10_000_000n);
+  // X1d can confirm a consumed nonce without recovering the transaction hash.
+  // These proof-keyed counters must not invent a transaction/deduplication key.
+  const reconciledWithoutHash = capture(5);
+  delete reconciledWithoutHash.billing.transactionHash;
+  assert.equal(total([...decisive, reconciledWithoutHash]), 10_000_000n);
   assert.equal(total([...decisive, ...decisive]), 10_000_000n, "repeated scrapes/SCAN duplicates must not double count");
 });
 

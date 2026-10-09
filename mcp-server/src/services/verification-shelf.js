@@ -62,6 +62,7 @@ export async function createVerificationShelf({
     executionDispatcher,
     selfIdentityRegistry,
     publicReceiptBaseUrl,
+    logger,
     runnerTimeoutMarginMs: config.runnerTimeoutMarginMs
   });
   const verificationRunFinalizer = new VerificationRunFinalizerService({

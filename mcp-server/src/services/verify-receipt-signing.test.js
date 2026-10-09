@@ -3,6 +3,8 @@ import test from "node:test";
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { p256 } from "@noble/curves/nist.js";
+import { Signature } from "ethers";
+import { X402VerificationPaymentGate } from "../payments/x402-verification-payment-gate.js";
 import { MemoryStateStore, RedisStateStore } from "../core/state-store.js";
 import { canonicalBadgeReceiptBytes, KmsBadgeReceiptSigner, verifyBadgeReceiptSignature } from "../core/badge-receipt-signing.js";
 import { VerificationRunService } from "./verification-run-service.js";
@@ -106,6 +108,7 @@ for (const authorizationAvailable of [true, false]) {
     let captures = 0;
     let evaluations = 0;
     let signs = 0;
+    let releases = 0;
     const service = new VerificationRunService({ stateStore: store, profileRegistry: profiles,
       badgeReceiptSigner: { signDocument: async (document) => {
         if (++signs === 1) throw new Error("KMS unavailable after capture");
@@ -113,7 +116,7 @@ for (const authorizationAvailable of [true, false]) {
       } },
       paymentGate: {
         capture: async () => { captures++; return { transactionHash: "0x" + "a".repeat(64) }; },
-        release: async () => assert.fail("a captured payment must never be released")
+        release: async () => { releases++; }
       }
     });
     const originalVerdict = { outcome: "approved", reason: "original decisive verdict", reasonCode: "PASS" };
@@ -144,6 +147,7 @@ for (const authorizationAvailable of [true, false]) {
     assert.equal(captures, 1);
     assert.equal(evaluations, 1);
     assert.equal(signs, 2);
+    assert.equal(releases, 0, "safeRelease must not swallow the assertion");
     assert.equal(completed.status, "complete");
     assert.deepEqual(completed.billing, checkpoint.billing);
     assert.deepEqual(completed.verdict, originalVerdict);
@@ -152,6 +156,65 @@ for (const authorizationAvailable of [true, false]) {
     assert.equal(receipt.verdict.outcome, "approved");
     assert.equal(receipt.intent.valueAtRisk.amountRaw, checkpoint.billing.amountRaw);
     assert.equal(receipt.verdict.reason, originalVerdict.reason);
+  });
+}
+
+for (const failure of ["checkpoint", "wait"]) {
+  test(`X1d confirmed capture survives ${failure} failure without an unbilled receipt`, async () => {
+    const f = await signingFixture();
+    const store = new MemoryStateStore();
+    const profiles = new VerificationProfileRegistry();
+    let used = false;
+    let transfers = 0;
+    let probes = 0;
+    let releases = 0;
+    const proof = { from: "0x" + "1".repeat(40), to: "0x" + "2".repeat(40), value: "5000000", validAfter: "0", validBefore: "9999999999", nonce: "0x" + "3".repeat(64) };
+    const gate = new X402VerificationPaymentGate({ config: { enabled: true, network: "eip155:8453" }, provider: {},
+      tokenContract: { authorizationState: async (from, nonce) => {
+        assert.equal(from, proof.from); assert.equal(nonce, proof.nonce); probes++; return used;
+      } },
+      captureTokenContract: { transferWithAuthorization: async () => {
+        if (used) throw new Error("authorization already used");
+        used = true; transfers++;
+        return { hash: "0x" + "a".repeat(64), wait: async () => {
+          if (failure === "wait") throw new Error("receipt transport lost after confirmation");
+          return { status: 1 };
+        } };
+      } }
+    });
+    gate.release = async () => { releases++; };
+    const authorization = { id: "paid", customer: proof.from, authorization: proof,
+      signature: Signature.from({ r: "0x" + "1".repeat(64), s: "0x" + "2".repeat(64), v: 27 }).serialized };
+    const service = new VerificationRunService({ stateStore: store, profileRegistry: profiles, paymentGate: gate, badgeReceiptSigner: f.signer });
+    const verdict = { outcome: "approved", reasonCode: "PASS", reason: "decisive result" };
+    service.evaluatePinnedProfile = async () => verdict;
+    const run = { runId: "confirmed-" + failure, status: "executed", profile: "mcp-failure-semantics-v1", profileVersion: 1,
+      customer: proof.from, target: { endpoint: "https://example.test", transport: "streamable_http" }, inputs: {},
+      execution: { status: "decidable" }, billing: { status: "authorized" } };
+    await store.reserveVerificationRun(run, { paymentId: run.runId, authorization });
+    const profile = profiles.get(run.profile, 1);
+    const update = store.updateVerificationRun.bind(store);
+    let failCheckpoint = failure === "checkpoint";
+    store.updateVerificationRun = async (id, next) => {
+      if (failCheckpoint && next.billing?.status === "captured") {
+        failCheckpoint = false; throw new Error("checkpoint unavailable");
+      }
+      return update(id, next);
+    };
+    if (failure === "checkpoint") {
+      await assert.rejects(service.finalizeExecution({ run, profile, authorization, execution: run.execution }), /checkpoint unavailable/);
+      assert.equal((await store.getVerificationRun(run.runId)).billing.status, "authorized");
+    }
+    const completed = await service.finalizeExecution({ run: await store.getVerificationRun(run.runId), profile, authorization, execution: run.execution });
+    assert.equal(transfers, 1);
+    assert.equal(probes, 1, "recovery must read the live Base authorization state");
+    assert.equal(releases, 0);
+    assert.equal(completed.billing.status, "captured");
+    assert.deepEqual(completed.verdict, verdict);
+    const receipt = await store.getWorkReceiptDocument(completed.receiptId);
+    assert.equal(receipt.verdict.outcome, "approved");
+    assert.equal(receipt.intent.valueAtRisk.amountRaw, "5000000");
+    assert.equal(verifyBadgeReceiptSignature(receipt, f.jwk), true);
   });
 }
 

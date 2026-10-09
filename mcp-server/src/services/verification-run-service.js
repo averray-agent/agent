@@ -34,6 +34,7 @@ export class VerificationRunService {
     publicReceiptBaseUrl = undefined,
     selfIdentityRegistry = undefined,
     runnerTimeoutMarginMs = 30_000,
+    logger = console,
     finalizerLockSeconds = 30,
     finalizerId = `verification-finalizer:${randomUUID()}`
   } = {}) {
@@ -53,6 +54,7 @@ export class VerificationRunService {
     this.runnerTimeoutMarginMs = positiveInteger(runnerTimeoutMarginMs, "runnerTimeoutMarginMs");
     this.finalizerLockSeconds = positiveInteger(finalizerLockSeconds, "finalizerLockSeconds");
     this.finalizerId = String(finalizerId);
+    this.logger = logger;
   }
 
   listProfiles() {
@@ -156,25 +158,28 @@ export class VerificationRunService {
     const active = await this.stateStore.listActiveVerificationRuns(limit);
     const finalized = [];
     for (const candidate of active) {
-      if (!this.executionReadyForFinalization(candidate)) continue;
-      const lockId = verificationRunLockId(candidate.runId);
-      const acquired = await this.stateStore.acquireClaimLock(
-        lockId,
-        this.finalizerId,
-        this.finalizerLockSeconds
-      );
-      if (!acquired) continue;
       try {
-        const current = await this.stateStore.getVerificationRun(candidate.runId);
-        if (!this.executionReadyForFinalization(current)) continue;
-        const profile = this.profileRegistry.get(current.profile, current.profileVersion);
-        const authorization = await this.stateStore.getVerificationRunAuthorization(current.runId);
-        const execution = current.status === "executed"
-          ? current.execution
-          : runnerTimeoutExecution(current.status);
-        finalized.push(await this.finalizeExecution({ authorization, profile, run: current, execution }));
-      } finally {
-        await this.stateStore.releaseClaimLock(lockId, this.finalizerId);
+        if (!this.executionReadyForFinalization(candidate)) continue;
+        const lockId = verificationRunLockId(candidate.runId);
+        const acquired = await this.stateStore.acquireClaimLock(
+          lockId, this.finalizerId, this.finalizerLockSeconds
+        );
+        if (!acquired) continue;
+        try {
+          const current = await this.stateStore.getVerificationRun(candidate.runId);
+          if (!this.executionReadyForFinalization(current)) continue;
+          const profile = this.profileRegistry.get(current.profile, current.profileVersion);
+          const authorization = await this.stateStore.getVerificationRunAuthorization(current.runId);
+          const execution = current.status === "executed"
+            ? current.execution
+            : runnerTimeoutExecution(current.status);
+          finalized.push(await this.finalizeExecution({ authorization, profile, run: current, execution }));
+        } finally {
+          await this.stateStore.releaseClaimLock(lockId, this.finalizerId);
+        }
+      } catch {
+        // Retain unfinished state for the next tick; never log payment proofs.
+        this.logger.warn?.({ runId: candidate.runId }, "verification_run.finalization_retry");
       }
     }
     return finalized;
@@ -228,27 +233,32 @@ export class VerificationRunService {
       }
       billing = run.billing;
     } else if (verdict.outcome === "approved" || verdict.outcome === "rejected") {
+      let captured;
       try {
-        const captured = await this.paymentGate.capture({ authorization, runId: run.runId, verdict });
-        billing = {
-          status: "captured",
-          amount: profile.price.amount,
-          amountRaw: profile.price.amountRaw,
-          asset: profile.price.asset,
-          network: profile.price.network,
-          ...(captured?.transactionHash ? { transactionHash: captured.transactionHash } : {})
-        };
+        captured = await this.paymentGate.capture({ authorization, runId: run.runId, verdict });
       } catch (error) {
-        await safeRelease(this.paymentGate, { authorization, runId: run.runId, reason: "runner_fault" });
-        execution = {
-          ...execution,
-          status: "inconclusive",
-          reason: "runner_fault",
-          detail: `Payment capture failed; no fee was recorded: ${error?.message ?? String(error)}`
-        };
-        verdict = inconclusiveVerdict("runner_fault", execution.detail);
-        billing = notBilled(profile);
+        // A successful transfer may outlive a failed wait/checkpoint. Unknown
+        // chain state throws and leaves the run retryable, never falsely unbilled.
+        if (!(await this.paymentGate.isCaptured({ authorization }))) {
+          await safeRelease(this.paymentGate, { authorization, runId: run.runId, reason: "runner_fault" });
+          execution = {
+            ...execution,
+            status: "inconclusive",
+            reason: "runner_fault",
+            detail: `Payment capture failed; no fee was recorded: ${error?.message ?? String(error)}`
+          };
+          verdict = inconclusiveVerdict("runner_fault", execution.detail);
+          billing = notBilled(profile);
+        }
       }
+      billing ??= {
+        status: "captured",
+        amount: profile.price.amount,
+        amountRaw: profile.price.amountRaw,
+        asset: profile.price.asset,
+        network: profile.price.network,
+        ...(captured?.transactionHash ? { transactionHash: captured.transactionHash } : {})
+      };
     } else {
       await safeRelease(this.paymentGate, { authorization, runId: run.runId, reason: verdict.reason });
       billing = notBilled(profile);
