@@ -669,6 +669,57 @@ test("flow reader uses O(1)-ish batch joins for N synthetic settled items", asyn
   );
 });
 
+test("M1: thirteen external settled jobs are nine wallets, one bound author and three unattributed jobs", async () => {
+  const service = harness();
+  const sessions = Array.from({ length: 13 }, (_, n) => ({ sessionId: String(n), jobId: `m1-${n}`,
+    wallet: "0x" + ((n % 9) + 1).toString(16).padStart(40, "0"), status: "resolved",
+    resolvedAt: new Date(NOW - 60_000).toISOString(), payoutTx: settlementReceipt(String(n), "1000000"),
+    jobSnapshot: { definition: { verifierMode: "github_pr" } }
+  }));
+  service.stateStore.listRecentSessions = async (limit, offset) => sessions.slice(offset, offset + limit);
+  service.stateStore.getMutationReceipt = async (_kind, id) => Number(id) < 10 ? ({ githubLookup: {
+    status: "verified", author: { login: Number(id) % 2 ? "One-Author" : "one-author" }, claimantBinding: { status: "matched", walletMatches: true }
+  } }) : null;
+  let flow = service.buildFlow(await service.readFlow(), NOW);
+  assert.equal(flow.settledToExternalWallets24h.value, 13);
+  assert.equal(flow.workers24h.outsiders.value, 13);
+  assert.equal(flow.workers24h.outsiders.unit, "jobs");
+  assert.equal(flow.externalWallets24h.value, 9);
+  assert.equal(flow.externalWallets24h.unit, "wallets");
+  assert.equal(flow.externalAuthors24h.value, 1);
+  assert.equal(flow.externalAuthors24h.unit, "authors");
+  assert.equal(flow.externalAuthors24h.unattributed.value, 3);
+  assert.equal(flow.externalAuthors24h.unattributed.unit, "jobs");
+  assert.equal(flow.githubAuthors.distinctAuthors.value, 1);
+  for (const field of [flow.externalWallets24h, flow.externalAuthors24h, flow.externalAuthors24h.unattributed]) {
+    assert.equal(field.status, "fresh"); assert.equal(field.readAtMs, NOW);
+    assert.ok(field.source && field.proof);
+  }
+  service.stateStore.getMutationReceipt = async () => null;
+  flow = service.buildFlow(await service.readFlow(), NOW);
+  assert.equal(flow.externalAuthors24h.value, null, "missing author evidence is not zero authors");
+  assert.equal(flow.externalAuthors24h.status, "unknown");
+  assert.equal(flow.externalAuthors24h.proof, "github_author_evidence_missing");
+  assert.equal(flow.externalAuthors24h.unattributed.value, 13);
+  assert.equal(flow.externalWallets24h.value, 9);
+  service.stateStore.getMutationReceipt = async () => { throw new Error("evidence read failed"); };
+  flow = service.buildFlow(await service.readFlow(), NOW);
+  assert.equal(flow.externalAuthors24h.value, null);
+  assert.equal(flow.externalAuthors24h.unattributed.value, null);
+  assert.equal(flow.externalAuthors24h.proof, "github_author_read_unavailable");
+  assert.equal(flow.externalWallets24h.value, 9);
+  assert.equal(flow.settledToExternalWallets24h.value, 13);
+});
+
+test("M1: failed session reads never publish zero distinct counts", async () => {
+  const service = harness();
+  service.stateStore.listRecentSessions = async () => { throw new Error("unavailable"); };
+  const flow = service.buildFlow(await service.readFlow(), NOW);
+  for (const field of [flow.externalWallets24h, flow.externalAuthors24h, flow.externalAuthors24h.unattributed]) {
+    assert.equal(field.value, null); assert.equal(field.status, "unknown"); assert.match(field.proof, /unavailable/u);
+  }
+});
+
 test("transparency reports distinct GitHub authors beside wallets and states incomplete attribution", async () => {
   const service = harness();
   const sessions = [1, 2, 3].map((id) => ({
