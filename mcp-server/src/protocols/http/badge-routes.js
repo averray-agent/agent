@@ -1,12 +1,54 @@
 import { createHash } from "node:crypto";
-import { ValidationError, normalizeError } from "../../core/errors.js";
+import { AppError, ValidationError, normalizeError } from "../../core/errors.js";
+import { extractClientKey } from "../../auth/rate-limit.js";
 import { buildBadgeSigners } from "../../core/badge-metadata.js";
 import { BADGE_RECEIPT_JWKS_PATH } from "../../core/badge-receipt-signing.js";
 import { assertWorkReceiptContentAddress } from "../../core/work-receipt.js";
+import { RECEIPT_VERIFIER_HANDLERS } from "../../core/receipt-verifier-handlers.js";
 import {
   decorateReceiptPresentation,
   receiptPresentationFields
 } from "../../core/verdict-presentation.js";
+
+export const BADGE_FILTER_VALUES = Object.freeze({
+  handler: RECEIPT_VERIFIER_HANDLERS,
+  outcome: ["approved", "rejected"],
+  settled: ["true"],
+  sort: ["verifiedAt:desc"]
+});
+const FILTER_TTL_MS = 45_000;
+const filterKey = (filters) => createHash("sha256").update(JSON.stringify(
+  Object.fromEntries(Object.keys(BADGE_FILTER_VALUES).filter((key) => filters[key] !== undefined).map((key) => [key, filters[key]]))
+)).digest("hex");
+const DEFAULT_FILTER_KEY = filterKey({});
+const invalidCursor = () => new AppError("Invalid or stale badge cursor; restart with the same filters.", {
+  name: "InvalidCursorError", code: "invalid_cursor", statusCode: 400
+});
+
+function badgeFilters(url) {
+  const supported = ["limit", "cursor", ...Object.keys(BADGE_FILTER_VALUES)];
+  const unknown = [...url.searchParams.keys()].filter((key) => !supported.includes(key));
+  if (unknown.length) throw new ValidationError("Unsupported badge query parameters.", { unknown, supported });
+  const filters = {};
+  for (const [key, values] of Object.entries(BADGE_FILTER_VALUES)) {
+    if (!url.searchParams.has(key)) continue;
+    const value = url.searchParams.get(key);
+    if (!values.includes(value) || url.searchParams.getAll(key).length !== 1) {
+      throw new ValidationError(`Unsupported badge ${key}.`, { parameter: key, unknown: value, supported: values });
+    }
+    filters[key] = value;
+  }
+  return filters;
+}
+
+function matchesBadgeFilters(row, filters) {
+  const document = row.runReceipt ?? row.badge;
+  if (filters.handler && document.verifier?.handler !== filters.handler) return false;
+  if (filters.outcome && document.verdict?.outcome !== filters.outcome) return false;
+  if (filters.settled && !/^0x[0-9a-f]{64}$/iu.test(document.settlement?.settlementTx ?? "")) return false;
+  if (filters.sort && !Number.isFinite(Date.parse(document.timestamps?.verifiedAt))) return false;
+  return true;
+}
 
 export function createListBadgeReceipts({
   buildBadgeFromSession,
@@ -17,9 +59,11 @@ export function createListBadgeReceipts({
   service,
   stateStore,
   verifierAddress,
-  verifierService
+  verifierService,
+  now = Date.now
 }) {
-  async function rowsForSessions(sessions) {
+  const memo = new Map();
+  async function rowsForSessions(sessions, runOnly = false) {
     const receipts = [];
     for (const session of sessions) {
       try {
@@ -29,6 +73,9 @@ export function createListBadgeReceipts({
         // Run and badge rows are isolated: one malformed document must not
         // suppress the other receipt for an approved session.
       }
+
+      // Filtered work-receipt reads do not rebuild badges or call live verifiers.
+      if (runOnly) continue;
 
       try {
         const storedBadge = await stateStore.getBadgeDocument?.(session.sessionId);
@@ -62,9 +109,39 @@ export function createListBadgeReceipts({
     return receipts;
   }
 
-  return async function listBadgeReceipts({ limit = 50, cursor } = {}) {
-    const after = decodeBadgeCursor(cursor);
+  return async function listBadgeReceipts({ limit = 50, cursor, ...filters } = {}) {
+    const queryKey = filterKey(filters);
+    const after = decodeBadgeCursor(cursor, queryKey);
     const rows = [];
+    const filtered = Object.keys(filters).length > 0;
+    if (filtered) {
+      let entry = memo.get(queryKey);
+      if (!entry || entry.expiresAt <= now()) {
+        // The filter vocabulary is finite; limits/cursors/cache-busters cannot
+        // create arbitrary keys. Concurrent requests share the same pending scan.
+        entry = { expiresAt: Infinity };
+        entry.promise = (async () => {
+          const matches = [];
+          for (let offset = 0; ; offset += 100) {
+            const sessions = await stateStore.listRecentSessions(100, offset);
+            matches.push(...(await rowsForSessions(sessions, true)).filter((row) => matchesBadgeFilters(row, filters)));
+            if (sessions.length < 100) break;
+          }
+          if (filters.sort) matches.sort((a, b) => Date.parse(b.runReceipt.timestamps.verifiedAt) - Date.parse(a.runReceipt.timestamps.verifiedAt)
+            || a.sessionId.localeCompare(b.sessionId) || a.kind.localeCompare(b.kind));
+          entry.expiresAt = now() + FILTER_TTL_MS;
+          return matches;
+        })().catch((error) => {
+          if (memo.get(queryKey) === entry) memo.delete(queryKey);
+          throw error;
+        });
+        memo.set(queryKey, entry);
+      }
+      const matches = await entry.promise;
+      const index = after ? matches.findIndex((row) => row.sessionId === after.sessionId && row.kind === after.kind) : -1;
+      if (after && index === -1) throw invalidCursor();
+      return badgePage(matches.slice(index + 1), limit, queryKey);
+    }
     let found = !after;
     // Page session metadata without enriching it or rereading old receipts.
     // The cursor names a row (session + kind), not a shifting array offset.
@@ -72,34 +149,35 @@ export function createListBadgeReceipts({
       const sessions = await stateStore.listRecentSessions(100, offset);
       for (const session of sessions) {
         if (!found && session.sessionId !== after.sessionId) continue;
-        const receipts = await rowsForSessions([session]);
+        const receipts = (await rowsForSessions([session], filtered)).filter((row) => matchesBadgeFilters(row, filters));
         for (const row of receipts) {
           if (!found) {
             if (row.sessionId === after.sessionId && row.kind === after.kind) found = true;
             continue;
           }
           rows.push(row);
-          if (rows.length > limit) return badgePage(rows, limit);
+          if (rows.length > limit) return badgePage(rows, limit, queryKey);
         }
       }
       if (sessions.length < 100) break;
     }
-    if (!found) throw new ValidationError("Badge cursor is no longer available; restart the listing.", "invalid_cursor");
-    return badgePage(rows, limit);
+    if (!found) throw invalidCursor();
+    return badgePage(rows, limit, queryKey);
   };
 }
 
-function decodeBadgeCursor(cursor) {
+function decodeBadgeCursor(cursor, queryKey) {
   if (!cursor) return null;
   try {
     const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
-    if (value.v === 1 && typeof value.sessionId === "string" && value.sessionId.length
+    const matchesQuery = value.v === 2 ? value.queryKey === queryKey : value.v === 1 && queryKey === DEFAULT_FILTER_KEY;
+    if (matchesQuery && typeof value.sessionId === "string" && value.sessionId.length
       && ["run", "badge"].includes(value.kind)) return value;
   } catch { /* Return a named client error, never an opaque parser failure. */ }
-  throw new ValidationError("Invalid badge cursor.", "invalid_cursor");
+  throw invalidCursor();
 }
 
-function badgePage(rows, limit) {
+function badgePage(rows, limit, queryKey) {
   const visible = rows.slice(0, limit);
   const last = visible.at(-1);
   return {
@@ -110,7 +188,7 @@ function badgePage(rows, limit) {
     })),
     limit,
     nextCursor: rows.length > limit
-      ? Buffer.from(JSON.stringify({ v: 1, sessionId: last.sessionId, kind: last.kind })).toString("base64url")
+      ? Buffer.from(JSON.stringify({ v: 2, sessionId: last.sessionId, kind: last.kind, queryKey })).toString("base64url")
       : null
   };
 }
@@ -162,6 +240,9 @@ async function signBadgeDocument(badge, signer) {
 }
 
 export function createBadgeRoutes({
+  enforceLimit,
+  rateLimitConfig,
+  trustProxy = false,
   badgeReceiptSigner,
   buildBadgeFromSession,
   deriveBadgeLineage,
@@ -185,9 +266,11 @@ export function createBadgeRoutes({
     }
 
     if (request.method === "GET" && pathname === "/badges") {
-      const page = await listBadgeReceipts({ limit: parseLimit(url, 50, 500), cursor: url.searchParams.get("cursor") });
+      await enforceLimit("badges_list", extractClientKey(request, { trustProxy }), rateLimitConfig.badgesList);
+      const filters = badgeFilters(url);
+      const page = await listBadgeReceipts({ limit: parseLimit(url, 50, 500), cursor: url.searchParams.get("cursor"), ...filters });
       const etag = `W/"${createHash("sha256").update(JSON.stringify(page)).digest("hex")}"`;
-      const headers = { etag, "cache-control": "public, max-age=0, must-revalidate" };
+      const headers = { etag, "cache-control": `public, max-age=${Object.keys(filters).length ? FILTER_TTL_MS / 1000 : 0}, must-revalidate` };
       if (page.nextCursor) {
         const next = new URL(url);
         next.searchParams.set("cursor", page.nextCursor);

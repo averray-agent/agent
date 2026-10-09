@@ -5,9 +5,10 @@ import Ajv from "ajv/dist/2020.js";
 import { generateKeyPairSync, sign, webcrypto } from "node:crypto";
 import { canonicalBadgeReceiptBytes, verifyBadgeReceiptSignature } from "../../core/badge-receipt-signing.js";
 import { verifyReceiptSignature } from "../../../../app/lib/ui/receipt-signature-verification.js";
-import { NotFoundError, ValidationError } from "../../core/errors.js";
+import { NotFoundError, ValidationError, RateLimitError } from "../../core/errors.js";
+import { VerifierRegistry } from "../../services/verifier-handlers.js";
 import { MemoryStateStore } from "../../core/state-store.js";
-import { createBadgeRoutes, createListBadgeReceipts as createLister } from "./badge-routes.js";
+import { BADGE_FILTER_VALUES, createBadgeRoutes, createListBadgeReceipts as createLister } from "./badge-routes.js";
 import { hashWorkReceiptContent } from "../../core/work-receipt.js";
 
 const SESSION = { sessionId: "session-1", jobId: "job-1" };
@@ -63,6 +64,94 @@ const STORED_RUN_RECEIPT = {
   canonicalUrl: "https://api.averray.com/badges/session-pruned/run"
 };
 
+test("V3b one-item query filters canonical fields and sorts signed verifiedAt across session pages", async () => {
+  const sessions = Array.from({ length: 120 }, (_, i) => ({ sessionId: `s-${i}`, updatedAt: "2099-01-01T00:00:00Z" }));
+  const runs = new Map(sessions.map((session) => [session.sessionId, {
+    ...STORED_RUN_RECEIPT, ...session,
+    verifier: { handler: "deterministic" }, verdict: { outcome: "approved" },
+    settlement: { settlementTx: "0x" + "a".repeat(64) },
+    timestamps: { verifiedAt: "2026-10-09T15:00:00Z" }
+  }]));
+  const github = (id, date, changes = {}) => runs.set(id, { ...runs.get(id),
+    verifier: { handler: "github_pr" }, timestamps: { verifiedAt: date }, ...changes });
+  github("s-0", "2026-10-09T12:00:00Z"); // Legacy session order would select this.
+  github("s-1", "2026-10-09T16:00:00Z", { verdict: { outcome: "rejected" } });
+  github("s-2", "2026-10-09T16:00:00Z", { settlement: {} });
+  github("s-3", undefined); // Plausible recent unsigned updatedAt must not count.
+  github("s-119", "2026-10-09T14:00:00Z");
+  let badgeReads = 0;
+  let sessionPages = 0;
+  let clock = 0;
+  const list = createLister({
+    now: () => clock,
+    stateStore: {
+      listRecentSessions: async (limit, offset) => { sessionPages++; return sessions.slice(offset, offset + limit); },
+      getRunReceiptDocument: async (id) => runs.get(id),
+      getBadgeDocument: async () => { badgeReads++; }
+    }, service: {}, verifierService: {}
+  });
+  const h = makeHarness({ listBadgeReceipts: list });
+  const query = "?handler=github_pr&outcome=approved&settled=true&sort=verifiedAt:desc&limit=1";
+  async function get(suffix = "", headers = {}) {
+    const response = {};
+    await h.route({ request: { method: "GET", headers }, response, pathname: "/badges",
+      url: new URL("http://localhost/badges" + query + suffix) });
+    return response;
+  }
+  const [first, concurrent] = await Promise.all([get(), get()]);
+  assert.equal(concurrent.headers.etag, first.headers.etag);
+  assert.equal(sessionPages, 2, "concurrent requests share one two-page scan");
+  assert.equal(first.headers["cache-control"], "public, max-age=45, must-revalidate");
+  assert.equal(first.body.items.length, 1);
+  assert.equal(first.body.items[0].document.sessionId, "s-119");
+  assert.deepEqual(first.body.items[0].document, runs.get("s-119"), "signed document is not rewritten");
+  assert.equal(first.body.items[0].schemaVersion, "averray.badge-list-item.v1");
+  assert.ok(Buffer.byteLength(JSON.stringify(first.body)) < 50_000);
+  assert.equal(badgeReads, 0, "filtered reads must not rebuild badge rows");
+  assert.match(first.headers.link, /handler=github_pr/u);
+  const next = await get("&cursor=" + encodeURIComponent(first.body.nextCursor));
+  assert.equal(next.body.items[0].document.sessionId, "s-0");
+  assert.equal(next.body.nextCursor, null);
+  assert.equal((await get("", { "if-none-match": first.headers.etag })).statusCode, 304);
+  assert.equal(sessionPages, 2, "cursor/limit/304 requests use the same memo, not another scan");
+  github("s-119", "2026-10-09T14:01:00Z");
+  assert.equal((await get("", { "if-none-match": first.headers.etag })).statusCode, 304);
+  clock += 45_001;
+  assert.equal((await get("", { "if-none-match": first.headers.etag })).statusCode, 200);
+  runs.clear();
+  clock += 45_001;
+  assert.deepEqual((await get()).body.items, []);
+});
+
+test("V3b unknown filter values and names are 400 with the supported set", async () => {
+  const h = makeHarness();
+  for (const [key, supported] of Object.entries(BADGE_FILTER_VALUES)) {
+    await assert.rejects(h.route({ request: { method: "GET" }, response: {}, pathname: "/badges",
+      url: new URL(`http://localhost/badges?${key}=typo`) }), (error) => {
+      assert.equal(error.statusCode, 400);
+      assert.equal(error.details.parameter, key);
+      assert.deepEqual(error.details.supported, supported);
+      return true;
+    });
+    for (const value of supported) {
+      await h.route({ request: { method: "GET" }, response: {}, pathname: "/badges",
+        url: new URL(`http://localhost/badges?${key}=${encodeURIComponent(value)}`) });
+      assert.equal(h.calls.findLast(([name]) => name === "listBadgeReceipts")[1][key], value);
+    }
+  }
+  await assert.rejects(h.route({ request: { method: "GET" }, response: {}, pathname: "/badges",
+    url: new URL("http://localhost/badges?typo=true") }), (error) => {
+    assert.equal(error.statusCode, 400);
+    assert.deepEqual(error.details.unknown, ["typo"]);
+    assert.deepEqual(error.details.supported, ["limit", "cursor", ...Object.keys(BADGE_FILTER_VALUES)]);
+    return true;
+  });
+  const schema = JSON.parse(readFileSync(new URL("../../../../docs/api/openapi.json", import.meta.url), "utf8"));
+  for (const [key, values] of Object.entries(BADGE_FILTER_VALUES)) {
+    assert.deepEqual(schema.paths["/badges"].get.parameters.find((p) => p.name === key).schema.enum, values);
+  }
+});
+
 function addressedWorkReceipt({ sessionId, jobId, outcome = "approved", marker = "fixture" }) {
   const content = {
     schemaVersion: "averray.work-receipt.v1",
@@ -92,6 +181,9 @@ function makeHarness(overrides = {}) {
   const calls = [];
   const response = {};
   const route = createBadgeRoutes({
+    enforceLimit: overrides.enforceLimit ?? (async (...args) => { calls.push(["enforceLimit", ...args]); }),
+    rateLimitConfig: { badgesList: { limit: 60, windowSeconds: 60 } },
+    trustProxy: true,
     badgeReceiptSigner: overrides.badgeReceiptSigner,
     buildBadgeFromSession: (input) => {
       calls.push(["buildBadgeFromSession", input]);
@@ -202,6 +294,7 @@ test("GET /badges parses limit and returns cached receipts", async () => {
   assert.deepEqual(response.body.items[0].signers.map((signer) => signer.role), ["operator", "verifier", "worker"]);
   assert.ok(response.body.items[0].signers.every((signer) => signer.at && !/^0x0{40}$/u.test(signer.wallet)));
   assert.deepEqual(calls, [
+    ["enforceLimit", "badges_list", "unknown", { limit: 60, windowSeconds: 60 }],
     ["parseLimit", { fallback: 50, max: 500 }],
     ["listBadgeReceipts", { limit: 17, cursor: null }],
     ["respond", {
@@ -784,7 +877,61 @@ test("served list-item schema and signatures verify; mixed-kind cursor pages ret
   const changed = await get("", { "if-none-match": first.headers.etag });
   assert.equal(changed.statusCode, 200);
   assert.notEqual(changed.headers.etag, first.headers.etag);
-  await assert.rejects(get("?cursor=broken"), { code: "invalid_request", statusCode: 400 });
+  await assert.rejects(get("?cursor=broken"), { code: "invalid_cursor", statusCode: 400 });
   const missing = Buffer.from(JSON.stringify({ v: 1, sessionId: "deleted", kind: "badge" })).toString("base64url");
-  await assert.rejects(get(`?cursor=${missing}`), { code: "invalid_request", statusCode: 400 });
+  await assert.rejects(get(`?cursor=${missing}`), { code: "invalid_cursor", statusCode: 400 });
+});
+
+test("V3b unsorted filters apply before limit, match handler rather than profile, and require a hash", async () => {
+  let reads = 0;
+  const sessions = Array.from({ length: 150 }, (_, i) => ({ sessionId: "deep-" + i }));
+  const list = createLister({ stateStore: {
+    listRecentSessions: async (limit, offset) => { reads++; return sessions.slice(offset, offset + limit); },
+    getRunReceiptDocument: async (id) => ({ ...STORED_RUN_RECEIPT, sessionId: id,
+      verifier: { handler: "github_pr", profile: "custom-profile@1" }, verdict: { outcome: "approved" },
+      settlement: { settlementTx: id === "deep-149" ? "0x" + "a".repeat(64) : "not-a-hash" } })
+  } });
+  const page = await list({ handler: "github_pr", settled: "true", limit: 1 });
+  assert.equal(page.items.length, 1);
+  assert.equal(page.items[0].document.sessionId, "deep-149");
+  assert.equal(reads, 2);
+  assert.deepEqual(await list({ settled: "true", handler: "github_pr", limit: 1 }), page);
+  assert.equal(reads, 2, "normalised filter order reuses the memo");
+  assert.ok(BADGE_FILTER_VALUES.handler.includes("poster_review"));
+  for (const handler of new VerifierRegistry().listHandlers()) assert.ok(BADGE_FILTER_VALUES.handler.includes(handler));
+});
+
+test("V3b cursors bind the full query including the unfiltered default", async () => {
+  const sessions = [{ sessionId: "a" }, { sessionId: "b" }];
+  const list = createLister({ stateStore: {
+    listRecentSessions: async () => sessions,
+    getRunReceiptDocument: async (id) => ({ ...STORED_RUN_RECEIPT, sessionId: id,
+      verifier: { handler: "github_pr" }, verdict: { outcome: "approved" },
+      settlement: { settlementTx: "0x" + "a".repeat(64) } })
+  } });
+  const unfiltered = await list({ limit: 1 });
+  await assert.rejects(list({ limit: 1, cursor: unfiltered.nextCursor, sort: "verifiedAt:desc" }), { code: "invalid_cursor", statusCode: 400 });
+  const filtered = await list({ limit: 1, handler: "github_pr", outcome: "approved" });
+  for (const options of [{}, { handler: "github_pr", outcome: "rejected" }, { handler: "benchmark", outcome: "approved" },
+    { handler: "github_pr", outcome: "approved", sort: "verifiedAt:desc" }]) {
+    await assert.rejects(list({ limit: 1, cursor: filtered.nextCursor, ...options }), { code: "invalid_cursor", statusCode: 400 });
+  }
+  const legacy = Buffer.from(JSON.stringify({ v: 1, sessionId: "a", kind: "run" })).toString("base64url");
+  await assert.rejects(list({ cursor: legacy, sort: "verifiedAt:desc" }), { code: "invalid_cursor", statusCode: 400 });
+});
+
+test("V3b badges_list limit runs before scanning and uses the trusted client key", async () => {
+  let scans = 0;
+  const h = makeHarness({ listBadgeReceipts: async () => { scans++; return {}; },
+    enforceLimit: async (bucket, key, limits) => {
+      assert.equal(bucket, "badges_list");
+      assert.equal(key, "192.0.2.1");
+      assert.deepEqual(limits, { limit: 60, windowSeconds: 60 });
+      throw new RateLimitError("fixture limit");
+    } });
+  await assert.rejects(h.route({ request: { method: "GET", headers: { "x-forwarded-for": "forged, 192.0.2.1" } },
+    response: {}, url: new URL("http://localhost/badges?handler=github_pr"), pathname: "/badges" }), { statusCode: 429 });
+  assert.equal(scans, 0);
+  const ordinary = makeHarness();
+  await assert.rejects(ordinary.route({ request: { method: "GET" }, response: {}, url: new URL("http://localhost/badges?_=123"), pathname: "/badges" }), { statusCode: 400 });
 });

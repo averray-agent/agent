@@ -785,6 +785,9 @@ const handlePolicyRoute = createPolicyRoutes({
 });
 
 const handleBadgeRoute = createBadgeRoutes({
+  enforceLimit,
+  rateLimitConfig,
+  trustProxy,
   badgeReceiptSigner,
   buildBadgeFromSession,
   deriveBadgeLineage,

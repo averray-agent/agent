@@ -64,6 +64,18 @@ test("listBadges sends limit and cursor and returns receipt envelopes unchanged"
   assert.equal(requested, "https://api.example.test/badges?limit=17&cursor=opaque%2Fvalue");
 });
 
+test("listBadges sends V3b optional filters and preserves the canonical document wrapper", async () => {
+  const page = { items: [{ schemaVersion: "averray.badge-list-item.v1",
+    document: { verifier: { handler: "github_pr" }, verdict: { outcome: "approved" },
+      settlement: { settlementTx: "0x" + "a".repeat(64) }, timestamps: { verifiedAt: "2026-10-09T14:00:00Z" } },
+    unsignedPresentation: { kind: "run" } }], limit: 1, nextCursor: null };
+  let requested;
+  const client = new AgentPlatformClient({ baseUrl: "https://api.example.test",
+    fetchImpl: async (url) => { requested = url; return jsonResponse(page); } });
+  assert.deepEqual(await client.listBadges({ limit: 1, handler: "github_pr", outcome: "approved", settled: true, sort: "verifiedAt:desc" }), page);
+  assert.equal(requested, "https://api.example.test/badges?limit=1&handler=github_pr&outcome=approved&settled=true&sort=verifiedAt%3Adesc");
+});
+
 test("authenticated helpers send bearer token and compact JSON bodies", async () => {
   const calls = [];
   const client = new AgentPlatformClient({
