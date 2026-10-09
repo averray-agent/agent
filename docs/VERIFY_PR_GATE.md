@@ -18,10 +18,18 @@ wallet is needed. Worker claim/submit/list tools are separate and remain free.
 Each Base USDC authorization (payer and nonce) can reserve only one Verify run,
 across HTTP and MCP. Replaying the same request returns that run, including after
 completion; reusing the authorization for a different request returns HTTP 409
-`payment_authorization_in_use`. Changing the proof's encoding or unsigned request
-binding does not create another allowance. Use a fresh nonce for a new purchase.
-Reservations never expire or release, even for an unbilled run; a fresh
-authorization is required to retry work, rather than to retrieve its prior result.
+`payment_authorization_in_use`, with `details.action: "sign_fresh_authorization"`.
+For a new purchase, sign a fresh authorization with a new nonce. Changing the
+proof's encoding or unsigned request binding does not create another allowance.
+The conflict does not reveal the owning run or assert that funds are unchanged:
+that run may still capture its payment.
+
+Admission rejects `validBefore > now + maxTimeoutSeconds + 300` with HTTP 402
+`payment_authorization_window_too_long`. Both authorization and payment-proof
+reservations expire at `validBefore + 24 hours`; completion does not release them,
+and replay does not extend them. After expiry, an old proof cannot admit new work:
+its authorization no longer meets the validity margin. Stored run history remains
+available by run ID; use a fresh authorization to buy new work.
 
 ```sh
 API=https://api.averray.com

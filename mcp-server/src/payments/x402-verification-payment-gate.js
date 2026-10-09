@@ -209,6 +209,14 @@ export class X402VerificationPaymentGate {
       );
     }
 
+    const nowSeconds = BigInt(Math.floor(this.currentTime().getTime() / 1000));
+    if (authorization.validBefore > nowSeconds + BigInt(requirements.maxTimeoutSeconds + 300)) {
+      throw paymentRefusal(
+        "The payment authorization window is too long. Sign a fresh authorization with validBefore no later than now + maxTimeoutSeconds + 300 seconds.",
+        "payment_authorization_window_too_long"
+      );
+    }
+
     const verified = {
       id: hashCanonicalContent({
         network: this.config.network,
@@ -230,7 +238,6 @@ export class X402VerificationPaymentGate {
     const existingRun = await findExistingRun?.(verified.id);
     if (existingRun) return Object.freeze({ ...verified, existingRun });
 
-    const nowSeconds = BigInt(Math.floor(this.currentTime().getTime() / 1000));
     if (authorization.validAfter >= nowSeconds) {
       throw paymentRefusal(
         "The payment authorization is not valid yet. No money moved; sign a fresh authorization whose validAfter has passed.",

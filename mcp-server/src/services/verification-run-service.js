@@ -137,7 +137,9 @@ export class VerificationRunService {
     };
     const reservation = await this.stateStore.reserveVerificationRun(queued, {
       paymentId: paymentKey ?? hashCanonicalContent(authorization.id),
-      authorization: persistableAuthorization(authorization)
+      authorization: persistableAuthorization(authorization),
+      reservationTtlSeconds: authorization.authorization?.validBefore === undefined ? 86400
+        : Number(BigInt(authorization.authorization.validBefore) - BigInt(Math.floor(this.now().getTime() / 1000))) + 86400
     });
     if (reservation.created && this.executionDispatcher?.supports?.(profile.ref)) {
       await this.executionDispatcher.start({
@@ -373,7 +375,7 @@ function requireMatchingVerificationReplay(run, requestHash) {
     profile: run.profileRef, target: run.target, inputs: run.inputs
   });
   if (originalHash !== requestHash) {
-    throw new ConflictError("Payment authorization is already reserved for another request.", "payment_authorization_in_use");
+    throw new ConflictError("Payment authorization is already reserved. For a new purchase, sign a fresh authorization with a new nonce.", "payment_authorization_in_use", { action: "sign_fresh_authorization" });
   }
   return run;
 }

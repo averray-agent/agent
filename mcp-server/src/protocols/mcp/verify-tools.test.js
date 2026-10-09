@@ -123,7 +123,9 @@ test("X1e HTTP and MCP share authorization ownership across differently wrapped 
   assert.match(JSON.stringify(response.body), /payment_authorization_in_use/u);
   await assert.rejects(invokeHttpRoute(h.route, { method: "POST", path: "/verify/runs", body: changed,
     headers: { "payment-signature": Buffer.from(JSON.stringify(rewrapped)).toString("base64") } }),
-  { statusCode: 409, code: "payment_authorization_in_use" });
+  { statusCode: 409, code: "payment_authorization_in_use", details: { action: "sign_fresh_authorization" } });
+  assert.ok(!JSON.stringify(response.body).includes(started.body.runId), "conflict must not reveal the owner");
+  assert.ok(!JSON.stringify(response.body).includes("customerFunds"), "owner may still capture");
   assert.equal((await h.store.listActiveVerificationRuns()).length, 1);
   assert.equal(h.calls.captures, 0);
   assert.equal((await h.execute("getVerificationRun", { runId: replay.runId }, context)).requestHash, undefined);

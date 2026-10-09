@@ -56,7 +56,7 @@ async function fixture(t, backend) {
       payload: { authorization, signature } }, null, pretty ? 2 : undefined)).toString("base64");
     return input;
   }
-  return { store, service, request, clock, calls };
+  return { store, service, request, clock, calls, wallet, domain };
 }
 
 for (const backend of ["Memory", "Redis"]) {
@@ -82,6 +82,8 @@ for (const backend of ["Memory", "Redis"]) {
     const rejected = results.find((r) => r.status === "rejected");
     assert.equal(rejected.reason.code, "payment_authorization_in_use");
     assert.equal(rejected.reason.statusCode, 409);
+    assert.deepEqual(rejected.reason.details, { action: "sign_fresh_authorization" });
+    assert.match(rejected.reason.message, /fresh authorization with a new nonce/u);
     assert.equal((await h.store.listActiveVerificationRuns()).length, 1);
     assert.equal(h.calls.starts, 1);
     assert.equal(h.calls.captures, 0);
@@ -100,7 +102,7 @@ for (const backend of ["Memory", "Redis"]) {
   });
 
   for (const status of ["captured", "not_captured"]) {
-    test(`X1e ${backend}: ${status} completion never releases the authorization reservation`, options, async (t) => {
+    test(`X1e ${backend}: ${status} completion retains the reservation through the expiry grace period`, options, async (t) => {
       const h = await fixture(t, backend);
       const run = await h.service.createRun(await h.request());
       await h.store.updateVerificationRun(run.runId, { ...run, status: "complete", billing: { status } });
@@ -116,6 +118,95 @@ for (const backend of ["Memory", "Redis"]) {
       assert.equal(h.calls.starts, 1);
     });
   }
+
+  test(`X1e ${backend}: normalized decoded authorizations share one key across address, nonce and proof encodings`, options, async (t) => {
+    const h = await fixture(t, backend);
+    const input = await h.request();
+    const decoded = JSON.parse(Buffer.from(input.paymentProof, "base64"));
+    const keys = [];
+    const getOwner = h.store.getVerificationRunByAuthorizationId.bind(h.store);
+    h.store.getVerificationRunByAuthorizationId = async (id) => { keys.push(id); return getOwner(id); };
+    const first = await h.service.createRun(input);
+    for (const from of [h.wallet.address.toLowerCase(), `0x${h.wallet.address.slice(2).toUpperCase()}`, h.wallet.address]) {
+      for (const encoding of ["base64", "base64url"]) {
+        const variant = structuredClone(decoded);
+        variant.payload.authorization.from = from;
+        variant.payload.authorization.nonce = `0x${variant.payload.authorization.nonce.slice(2).toUpperCase()}`;
+        const paymentProof = Buffer.from(JSON.stringify(variant, null, 2)).toString(encoding);
+        assert.equal((await h.service.createRun({ ...input, paymentProof })).runId, first.runId);
+      }
+    }
+    assert.equal(keys.length, 7, "each rewrapped proof reaches the verified owner lookup");
+    assert.equal(new Set(keys).size, 1);
+    assert.equal(h.calls.starts, 1);
+  });
+
+  test(`X1e ${backend}: forged signature cannot look up or read a reserved authorization owner`, options, async (t) => {
+    const h = await fixture(t, backend);
+    const input = await h.request();
+    const owner = await h.service.createRun(input);
+    const decoded = JSON.parse(Buffer.from(input.paymentProof, "base64"));
+    decoded.payload.signature = await Wallet.createRandom().signTypedData(h.domain, TYPES, decoded.payload.authorization);
+    let ownerLookups = 0;
+    let runReads = 0;
+    const lookup = h.store.getVerificationRunByAuthorizationId.bind(h.store);
+    const read = h.store.getVerificationRun.bind(h.store);
+    h.store.getVerificationRunByAuthorizationId = async (id) => { ownerLookups++; return lookup(id); };
+    h.store.getVerificationRun = async (id) => { runReads++; return read(id); };
+    await assert.rejects(h.service.createRun({ ...input, paymentProof: Buffer.from(JSON.stringify(decoded)).toString("base64") }), (error) => {
+      assert.equal(error.statusCode, 402);
+      assert.equal(error.code, "payment_payer_mismatch");
+      assert.ok(!JSON.stringify(error).includes(owner.runId));
+      return true;
+    });
+    assert.equal(ownerLookups, 0);
+    assert.equal(runReads, 0);
+    assert.equal(h.calls.starts, 1);
+  });
+
+  test(`X1e ${backend}: far-future validBefore is refused without a reservation`, options, async (t) => {
+    const h = await fixture(t, backend);
+    const input = await h.request();
+    const decoded = JSON.parse(Buffer.from(input.paymentProof, "base64"));
+    decoded.payload.authorization.validBefore = String(Math.floor(h.clock.now.getTime() / 1000) + decoded.accepted.maxTimeoutSeconds + 301);
+    decoded.payload.signature = await h.wallet.signTypedData(h.domain, TYPES, decoded.payload.authorization);
+    await assert.rejects(h.service.createRun({ ...input, paymentProof: Buffer.from(JSON.stringify(decoded)).toString("base64") }),
+      { statusCode: 402, code: "payment_authorization_window_too_long", details: { action: "sign_fresh_authorization", customerFunds: "unchanged" } });
+    assert.equal((await h.store.listActiveVerificationRuns()).length, 0);
+    assert.equal(h.calls.starts, 0);
+    assert.equal(h.calls.nonceReads, 0);
+  });
+
+  test(`X1e ${backend}: authorization and payment indexes expire after validBefore plus 24 hours without replay extension`, options, async (t) => {
+    const h = await fixture(t, backend);
+    const input = await h.request();
+    const run = await h.service.createRun(input);
+    const authorization = await h.store.getVerificationRunAuthorization(run.runId);
+    const paymentId = hashCanonicalContent(input.paymentProof);
+    const maximumTtl = Number(authorization.authorization.validBefore) - Math.floor(h.clock.now.getTime() / 1000) + 86400;
+    const remaining = async () => backend === "Redis"
+      ? Promise.all([h.store.client.ttl(h.store.key("verification-authorization", authorization.id)), h.store.client.ttl(h.store.key("verification-payment", paymentId))])
+      : [h.store.verificationAuthorizationRuns.get(authorization.id), h.store.verificationPaymentRuns.get(paymentId)]
+        .map((entry) => (entry.expiresAt - Date.now()) / 1000);
+    const before = await remaining();
+    for (const ttl of before) assert.ok(ttl > maximumTtl - 5 && ttl <= maximumTtl, `bounded TTL: ${ttl}`);
+    await h.service.createRun(await h.request(undefined, undefined, true));
+    const after = await remaining();
+    after.forEach((ttl, i) => assert.ok(ttl <= before[i], "replay must not extend retention"));
+
+    // Exercise real expiration independently of the day-long production window.
+    await h.store.reserveVerificationRun({ ...run, runId: "short-lived", requestHash: "short" },
+      { paymentId: "short-proof", authorization: { id: "short-auth" }, reservationTtlSeconds: 1 });
+    if (backend === "Memory") {
+      t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+      t.mock.timers.tick(1100);
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+    }
+    assert.equal(await h.store.getVerificationRunByPaymentId("short-proof"), undefined);
+    assert.equal(await h.store.getVerificationRunByAuthorizationId("short-auth"), undefined);
+    assert.equal((await h.store.getVerificationRun("short-lived")).runId, "short-lived", "run history is retained");
+  });
 
   test(`X1e ${backend}: distinct nonces remain independent`, options, async (t) => {
     const h = await fixture(t, backend);
