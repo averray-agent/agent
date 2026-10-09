@@ -2,7 +2,7 @@ name: averray-verify-runner-smoke
 
 services:
   verify-smoke-redis:
-    image: redis:7-alpine
+    image: public.ecr.aws/docker/library/redis:7-alpine
     command: ["redis-server", "--save", ""]
     networks: [verify-smoke-internal]
     healthcheck:

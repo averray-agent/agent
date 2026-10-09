@@ -1,12 +1,12 @@
 # The Harness lock requires Python 3.12. Copy its runtime from the official
 # image pinned by patch release and multi-platform manifest digest; uv is never
 # allowed to download an interpreter while repository dependencies have egress.
-FROM python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c AS witness-python
+FROM public.ecr.aws/docker/library/python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c AS witness-python
 
 # Phase-1 materialization image for the Averray Witness. This image is distinct
 # from the solver image by design: the Witness never receives worker identity,
 # wallet, model, claim, submission, or settlement capabilities.
-FROM node:22-bookworm-slim
+FROM public.ecr.aws/docker/library/node:22-bookworm-slim
 
 COPY --from=witness-python /usr/local/ /usr/local/
 
