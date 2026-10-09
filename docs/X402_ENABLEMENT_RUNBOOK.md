@@ -11,6 +11,30 @@ boring.
 
 ---
 
+## Verify directory handoff (growth X3, 2026-10-09)
+
+This section is for the **standalone Verify product**, not the poster ramp below.
+X3 chooses the packet's static-listing path: Verify keeps its existing self-capture
+payment gate, with capture only after an approved or rejected verdict. Directory
+discovery must not cause payment capture before execution or turn an inconclusive
+run into a billed one.
+
+After this PR is deployed, the generated static handoff is
+`https://averray.com/verify-listing.json` (`averray.verify-directory-listing.v1`).
+It names the public POST resource, Base payment rail, free quote/profile/poll
+doors and real MCP buyer tools. It carries **no amount, payTo, authorization or
+payment proof**. Current prices and recipient requirements remain in
+`https://api.averray.com/.well-known/x402`; a buyer must request a fresh 402 for
+its exact input and sign that challenge, not this listing.
+
+The listing is not a Bazaar registration and does not assert automatic discovery
+by any third party (`automaticBazaarRegistration: false`). No facilitator or
+settlement-adapter migration is included. X4 submissions to x402scan,
+x402-list.com, Onyx Bazaar and gold-402 must be recorded separately with their
+actual accepted URLs; none is claimed here. Gate X4 on the deployed listing
+returning 200 and matching the built document. The static file and public Verify
+page are both included in the deploy's served-versus-built parity check.
+
 ## Step 1 — Coinbase Developer Platform credentials · *Pascal*
 
 The facilitator settles the payment on Base and sponsors the gas. We start on CDP for reach

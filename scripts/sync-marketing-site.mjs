@@ -14,7 +14,7 @@ const siteDir = path.join(repoRoot, "site");
 // directory, so stale content-hashed assets get pruned.
 // `fonts` carries the self-hosted webfonts from marketing/public/fonts —
 // standalone site/ pages (agent.html, schema docs) reference them too.
-const generatedEntries = ["index.html", "404.html", "favicon.svg", "robots.txt", "sitemap.xml", "_astro", "console-stream.js", "reader-fetch.js", "agent.js", "agent.html", "receipt-reader.js", "trust-providers.js", "transparency-reader.js", "verify-reader.js", "pool-reader.js", "fonts", "polkadot-mark.svg"];
+const generatedEntries = ["index.html", "404.html", "favicon.svg", "robots.txt", "sitemap.xml", "_astro", "console-stream.js", "reader-fetch.js", "agent.js", "agent.html", "receipt-reader.js", "trust-providers.js", "transparency-reader.js", "verify-reader.js", "verify-listing.json", "pool-reader.js", "fonts", "polkadot-mark.svg"];
 
 // These nested files are generated too, but they live in directories that also
 // hold hand-authored files — schema reference docs, badge SVGs, and potentially

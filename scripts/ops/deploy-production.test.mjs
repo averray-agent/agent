@@ -691,6 +691,7 @@ test("deploy rebuilds and verifies the public site even when no site paths chang
   assert.match(run.stdout, /Served .*\/transparency-reader\.js matches built site\/transparency-reader\.js/u);
   assert.match(run.stdout, /Served .*\/verify\/ matches built site\/verify\/index\.html/u);
   assert.match(run.stdout, /Served .*\/why-two-chains\/ matches built site\/why-two-chains\/index\.html/u);
+  assert.match(run.stdout, /Served .*\/verify-listing\.json matches built site\/verify-listing\.json/u);
   assert.match(run.stdout, /Served .*\/proof-to-pay\/ matches built site\/proof-to-pay\/index\.html/u);
   assert.match(run.stdout, /Served .*\/pool\/ matches built site\/pool\/index\.html/u);
   assert.match(run.stdout, /Served .*\/pool-reader\.js matches built site\/pool-reader\.js/u);
@@ -2132,6 +2133,7 @@ async function makeSiteFixture() {
     "  */verify/) name=verify/index.html ;;",
     "  */why-two-chains/) name=why-two-chains/index.html ;;",
     "  */verify-reader.js) name=verify-reader.js ;;",
+    "  */verify-listing.json) name=verify-listing.json ;;",
     "  */proof-to-pay/) name=proof-to-pay/index.html ;;",
     "  */pool/) name=pool/index.html ;;",
     "  */pool-reader.js) name=pool-reader.js ;;",
@@ -2156,6 +2158,7 @@ async function makeSiteFixture() {
   await writeFile(join(appRoot, "site/verify/index.html"), "<title>Averray Verify</title> fresh build\n");
   await writeFile(join(appRoot, "site/why-two-chains/index.html"), "<title>Why two chains</title> fresh build\n");
   await writeFile(join(appRoot, "site/verify-reader.js"), "// fresh verify reader\n");
+  await writeFile(join(appRoot, "site/verify-listing.json"), '{"schemaVersion":"averray.verify-directory-listing.v1"}\n');
   await writeFile(join(appRoot, "site/proof-to-pay/index.html"), "<title>Proof-to-Pay</title> fresh build\n");
   await writeFile(join(appRoot, "site/pool/index.html"), "<title>Pool</title> fresh build\n");
   await writeFile(join(appRoot, "site/pool-reader.js"), "// fresh pool reader\n");
