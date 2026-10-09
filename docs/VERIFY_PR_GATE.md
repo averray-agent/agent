@@ -31,6 +31,15 @@ and replay does not extend them. After expiry, an old proof cannot admit new wor
 its authorization no longer meets the validity margin. Stored run history remains
 available by run ID; use a fresh authorization to buy new work.
 
+Before reserving new work, admission verifies the signature and reads the payer's
+Base USDC balance. A balance below the authorized amount returns HTTP 402
+`payment_insufficient_balance` with `details.action:
+"fund_wallet_or_sign_fresh_authorization"`. A failed balance read returns HTTP 503
+`payment_balance_unavailable` with `details.reason: "base_balance_read_failed"`;
+retry when Base reads recover. Neither refusal creates a run or reservation.
+MCP `startVerificationRun` carries the same codes and guidance. This is an
+admission check, not escrow: the balance can still change before capture.
+
 ```sh
 API=https://api.averray.com
 curl --fail --silent --show-error "$API/.well-known/x402" > discovery.json

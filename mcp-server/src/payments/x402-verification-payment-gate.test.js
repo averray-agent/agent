@@ -51,9 +51,14 @@ function domain(name = "USD Coin") {
   return { name, version: "2", chainId: 8453, verifyingContract: ASSET };
 }
 
-function harness({ nonceUsed = false, tokenName = "USD Coin", domainFailures = 0 } = {}) {
-  const calls = { authorizationState: 0, capture: 0, wait: 0 };
+function harness({ nonceUsed = false, tokenName = "USD Coin", domainFailures = 0, balance = 5_000_000n, balanceError } = {}) {
+  const calls = { authorizationState: 0, capture: 0, wait: 0, balances: [] };
   const tokenContract = {
+    async balanceOf(payer) {
+      calls.balances.push(payer);
+      if (balanceError) throw balanceError;
+      return balance;
+    },
     async name() { return tokenName; },
     async DOMAIN_SEPARATOR() {
       if (domainFailures > 0) {
@@ -151,6 +156,45 @@ test("authorize verifies EIP-3009 offline and capture alone submits transferWith
   assert.equal(calls.captureArgs[0], authorization.authorization.from);
   assert.equal(String(calls.captureArgs[1]).toLowerCase(), PAY_TO.toLowerCase());
   assert.equal(calls.captureArgs[2], 5_000_000n);
+  assert.deepEqual(calls.balances, [authorization.authorization.from]);
+});
+
+test("X1f admission requires Base USDC balance at least the amount, including exact equality", async () => {
+  for (const balance of [0n, 4_999_999n, 5_000_000n, 5_000_001n]) {
+    const { gate, calls } = harness({ balance });
+    const { paymentProof } = await signedPayment(gate);
+    if (balance < 5_000_000n) {
+      await assert.rejects(authorize(gate, paymentProof), { statusCode: 402, code: "payment_insufficient_balance",
+        details: { action: "fund_wallet_or_sign_fresh_authorization", customerFunds: "unchanged" } });
+    } else {
+      assert.equal((await authorize(gate, paymentProof)).amountRaw, "5000000");
+    }
+    assert.equal(calls.balances.length, 1);
+    assert.equal(calls.capture, 0);
+  }
+});
+
+test("X1f admission fails closed on an unreadable Base USDC balance", async () => {
+  const { gate, calls } = harness({ balanceError: new Error("private RPC diagnostic") });
+  const { paymentProof } = await signedPayment(gate);
+  await assert.rejects(authorize(gate, paymentProof), (error) => {
+    assert.equal(error.statusCode, 503);
+    assert.equal(error.code, "payment_balance_unavailable");
+    assert.equal(error.details.reason, "base_balance_read_failed");
+    assert.ok(!JSON.stringify(error).includes("private RPC diagnostic"));
+    return true;
+  });
+  assert.equal(calls.balances.length, 1);
+  assert.equal(calls.capture, 0);
+});
+
+test("X1f verifies the signature before reading the payer balance", async () => {
+  const { gate, calls } = harness();
+  const { paymentProof } = await signedPayment(gate);
+  const payload = JSON.parse(Buffer.from(paymentProof, "base64"));
+  payload.payload.signature = await Wallet.createRandom().signTypedData(domain(), TYPES, payload.payload.authorization);
+  await assert.rejects(authorize(gate, Buffer.from(JSON.stringify(payload)).toString("base64")), { code: "payment_payer_mismatch" });
+  assert.equal(calls.balances.length, 0);
 });
 
 test("authorization expiring inside timeout plus capture margin is refused before work", async () => {
