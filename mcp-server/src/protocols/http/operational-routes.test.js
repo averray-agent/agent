@@ -152,6 +152,23 @@ test("GET /health exposes counted legacy and overdue non-legacy capture warnings
   assert.deepEqual(h.response.body.warnings.filter((w) => w.code.startsWith("verify_capture_")), warnings);
 });
 
+test("GET /health stays structured with a warning when capture status reads fail", async () => {
+  for (const getCaptureWarnings of [
+    async () => { throw new Error("Redis capture read failed: private details"); },
+    () => { throw new SyntaxError("Corrupt capture JSON: private details"); }
+  ]) {
+    const h = makeHarness({ verificationRunService: { getCaptureWarnings } });
+    await h.route({ request: { method: "GET" }, response: h.response, pathname: "/health" });
+    assert.equal(h.response.statusCode, 200);
+    assert.equal(h.response.body.serviceHealth.ok, true);
+    assert.ok(h.response.body.capabilityHealth);
+    assert.deepEqual(h.response.body.warnings.filter((w) => w.code.startsWith("verify_capture_")), [
+      { code: "verify_capture_status_unavailable", severity: "warning" }
+    ]);
+    assert.doesNotMatch(JSON.stringify(h.response.body), /private details|Redis capture read failed|Corrupt capture JSON/u);
+  }
+});
+
 test("GET /health never signs or calls KMS and unused signers are not failures", async (t) => {
   const send = t.mock.fn(async () => { throw new Error("health must not probe KMS"); });
   const signer = new KmsSigner({ keyId: "fixture-key", kmsClient: { send } });

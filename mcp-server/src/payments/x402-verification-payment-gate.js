@@ -29,6 +29,7 @@ export const VERIFY_X402_NETWORK = "eip155:8453";
 export const VERIFY_X402_CHAIN_ID = 8453;
 export const VERIFY_X402_CHAIN_NAME = "Base";
 export const VERIFY_X402_CAPTURE_MARGIN_SECONDS = 10 * 60;
+const CAPTURE_WAIT_TIMEOUT_MS = 60_000;
 
 /**
  * Read the public asset identity from the same environment binding used by
@@ -332,7 +333,8 @@ export class X402VerificationPaymentGate {
       signature.s
     );
     await onBroadcast?.(String(transaction.hash));
-    const receipt = await transaction.wait();
+    // A dropped transaction must return control to persisted reconciliation.
+    const receipt = await transaction.wait(1, CAPTURE_WAIT_TIMEOUT_MS);
     if (!receipt || Number(receipt.status) !== 1) {
       throw new Error("Base transferWithAuthorization was not confirmed successfully.");
     }

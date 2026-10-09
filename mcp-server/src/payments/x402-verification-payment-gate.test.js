@@ -198,6 +198,27 @@ test("X1f verifies the signature before reading the payer balance", async () => 
   assert.equal(calls.balances.length, 0);
 });
 
+test("capture bounds confirmation waiting after recording the broadcast hash", async () => {
+  const { gate } = harness();
+  const { paymentProof } = await signedPayment(gate);
+  const authorization = await authorize(gate, paymentProof);
+  let recordedHash;
+  let waits = 0;
+  gate.captureToken.transferWithAuthorization = async () => ({
+    hash: TX,
+    wait: async (...args) => {
+      waits++;
+      assert.deepEqual(args, [1, 60_000]);
+      assert.equal(recordedHash, TX, "persist the hash before waiting, so the next tick reconciles it");
+      throw Object.assign(new Error("transaction wait timed out"), { code: "TIMEOUT" });
+    }
+  });
+  await assert.rejects(gate.capture({ authorization, onBroadcast: async (hash) => { recordedHash = hash; } }),
+    (error) => error.code === "TIMEOUT");
+  assert.equal(waits, 1);
+  assert.equal(recordedHash, TX);
+});
+
 test("authorization expiring inside timeout plus capture margin is refused before work", async () => {
   const { calls, gate } = harness();
   const { paymentProof } = await signedPayment(gate, {

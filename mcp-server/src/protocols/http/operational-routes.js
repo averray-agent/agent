@@ -188,7 +188,8 @@ export function createOperationalRoutes({
           count: service.receiptSignatureBackfill.verify.missing
         }] : []),
         ...getProcessWarnings(),
-        ...(await verificationRunService?.getCaptureWarnings?.() ?? [])
+        ...(await Promise.resolve().then(() => verificationRunService?.getCaptureWarnings?.() ?? [])
+          .catch(() => [{ code: "verify_capture_status_unavailable", severity: "warning" }]))
       ];
       await recordCapabilityWarningTransitions({
         stateStore,

@@ -531,6 +531,20 @@ test("X1d AuthorizationUsed requires Transfer to payTo; greater transferred valu
   }
 });
 
+test("X1d M7c Transfer to payTo from a different sender is not this run's payment", async () => {
+  const f = await captureFixture();
+  await f.checkpoint();
+  f.state.used = true;
+  f.state.events = [f.used()];
+  f.state.receipt = { status: 1, logs: [f.event("Transfer", ["0x" + "9".repeat(40), f.proof.to, f.proof.value])] };
+  const done = await f.finalize();
+  assert.equal(done.status, "complete");
+  assert.equal(done.billing.status, "not_captured");
+  assert.equal(done.verdict.outcome, "inconclusive");
+  assert.equal(done.verdict.reason, "payment_authorization_used_elsewhere");
+  assert.equal(f.state.transfers, 0);
+});
+
 test("X1d P6 cancellation after validBefore is terminal, unbilled and has no decisive verdict", async () => {
   const f = await captureFixture();
   f.proof.validBefore = "1015";
@@ -681,6 +695,10 @@ test("X1d real Redis excludes parked captures before fetching records and limits
   const first = await store.listActiveVerificationRuns(1, { dueBefore: now });
   const second = await store.listActiveVerificationRuns(1, { dueBefore: now, offset: 1 });
   assert.deepEqual([first[0]?.runId, second[0]?.runId], ["run-101", "run-102"]);
+  assert.deepEqual(await store.listActiveVerificationRuns(1, { dueBefore: now, offset: 2 }), [],
+    "paging past all due runs must not return a parked capture");
+  assert.deepEqual(await store.listActiveVerificationRuns(100, { dueBefore: now, offset: 2 }), [],
+    "a larger exhausted page must also exclude every not-due run");
   assert.equal(reads, 2, "103 parked/active records must not cause 103 GETs per tick");
 });
 
