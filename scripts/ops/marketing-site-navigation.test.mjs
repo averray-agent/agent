@@ -109,6 +109,7 @@ test("site navigation — footer and external destinations are unchanged", async
     "https://github.com/averray-agent/agent/tree/main/docs",
     "/trust/",
     "/builders/",
+    "/why-two-chains/",
     "/privacy/",
     "/imprint/",
     "https://x.com/Averray_Agents",

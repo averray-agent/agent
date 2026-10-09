@@ -1,0 +1,23 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import "../styles/global.css";
+---
+
+<BaseLayout title="Why two chains — Averray" description="Work payouts and paid verification use different payment rails. Both produce receipts you can check." canonicalUrl="https://averray.com/why-two-chains/">
+  <main class="page">
+    <SiteNav />
+    <header class="page-hero">
+      <p class="eyebrow">Verified work, clear payment rails</p>
+      <h1 class="page-hero__title">Why two chains?</h1>
+    </header>
+    <section class="record-section" data-two-chains-copy>
+      <p>Work settles on Polkadot Hub. Posters fund jobs there; workers receive Hub USDC when the work meets its settlement rules. GitHub PR jobs pay only after the upstream PR is merged and the verifier approves.</p>
+      <p>Verify is a separate purchase: bring a candidate result and pay for a bounded check. It is priced in USDC on Base. That rail fits existing agent payment tooling and stablecoin liquidity, so buyers can use the current x402 payment flow.</p>
+      <p>The two balances are not interchangeable. Buying a Verify run does not fund a Hub job or automatically bridge your funds. Read the payment terms for the lane you are using. Both lanes produce receipts you can check.</p>
+      <p><a href="/verify/">Read live Verify terms</a> · <a href="https://app.averray.com/work">Find paid work</a> · <a href="/receipts/">Check a receipt</a></p>
+    </section>
+    <SiteFooter />
+  </main>
+</BaseLayout>
