@@ -574,6 +574,7 @@ const HTTP_ACTION_REQUIREMENTS = [
 // exchanges and state-changing execution. Drafts/unsigned transaction builders
 // remain directory-safe: neither broadcasts nor claims or commits funds.
 export const CONNECTED_ONLY_TOOLS = new Set([
+  "startVerificationRun", // Authorizes a paid Verify run.
   "fetchAuthNonce", // Starts the connected wallet sign-in exchange.
   "verifySiwe", // Exchanges a wallet signature for an authenticated session.
   "refreshAuthToken", // Rotates connected-session credentials.

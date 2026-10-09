@@ -13,6 +13,9 @@ export const APP_SESSION_ADOPTION_STATEMENT =
 // Conversely, a new registry entry has no guessed human meaning and therefore
 // cannot silently create a wrong parity row.
 export const ACCOUNT_ACTION_PARITY_MAPPINGS = Object.freeze([
+  mapping("buy a verification run", {
+    mcpTools: ["listVerificationProfiles", "quoteVerificationRun", "startVerificationRun", "getVerificationRun"]
+  }),
   mapping("see available balance", {
     mcpTools: ["getAccountPosition"],
     httpRoutes: [route("GET", "/account")]
@@ -79,9 +82,6 @@ export const UNMAPPED_BY_DESIGN = Object.freeze({
     ]),
     ...unmappedTools("discovery metadata: describes the surface rather than acting on an account", [
       "getPlatformCapabilities"
-    ]),
-    ...unmappedTools("job-authoring catalogue consumed while drafting a job, not an account action", [
-      "listVerificationProfiles"
     ])
   ]),
   httpRoutes: Object.freeze([

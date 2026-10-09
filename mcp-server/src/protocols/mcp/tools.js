@@ -1,5 +1,6 @@
 import { ValidationError } from "../../core/errors.js";
-import { LIST_VERIFICATION_PROFILES_DESCRIPTION } from "../../core/verify-product-copy.js";
+import { PaymentVerificationError } from "../../payments/payment-errors.js";
+import { LIST_VERIFICATION_PROFILES_DESCRIPTION, VERIFY_TOOL_PAYMENT_DESCRIPTION } from "../../core/verify-product-copy.js";
 import { invokeHttpRoute } from "./route-adapter.js";
 
 const AUTH_META_KEY = "com.averray/auth";
@@ -83,6 +84,30 @@ export function createMcpTools({
     title: "List verification profiles",
     description: LIST_VERIFICATION_PROFILES_DESCRIPTION,
     inputSchema: noArgumentsSchema,
+    readOnly: true,
+    idempotent: true
+  }),
+  tool({
+    name: "quoteVerificationRun",
+    title: "Quote a verification run",
+    description: "Get the unpaid HTTP 402 challenge as a normal result; never creates a run or moves funds. " + VERIFY_TOOL_PAYMENT_DESCRIPTION,
+    inputSchema: verificationRunSchema(),
+    readOnly: true,
+    idempotent: true
+  }),
+  tool({
+    name: "startVerificationRun",
+    title: "Start a verification run",
+    description: "Buy a run using canonical params._meta['x402/payment'] (PaymentPayload object), or the paymentSignature base64 argument. Do not send both. Returns asyncStatus while queued; poll getVerificationRun. " + VERIFY_TOOL_PAYMENT_DESCRIPTION,
+    inputSchema: verificationRunSchema({ paid: true }),
+    readOnly: false,
+    idempotent: true
+  }),
+  tool({
+    name: "getVerificationRun",
+    title: "Get a verification run",
+    description: "Read a run and its billing state for free by runId; matches GET /verify/runs/{runId}. " + VERIFY_TOOL_PAYMENT_DESCRIPTION,
+    inputSchema: { type: "object", properties: { runId: { type: "string", minLength: 1 } }, required: ["runId"], additionalProperties: false },
     readOnly: true,
     idempotent: true
   }),
@@ -448,7 +473,7 @@ export function createMcpToolExecutor({
   maxRequestBodyBytes = DEFAULT_MCP_MAX_REQUEST_BODY_BYTES,
   tools = createMcpTools({ maxRequestBodyBytes })
 }) {
-  return async function executeMcpTool(name, rawArguments, { request }) {
+  return async function executeMcpTool(name, rawArguments, { request, meta } = {}) {
     const args = normalizeArguments(rawArguments);
     const headers = request.headers ?? {};
     const common = { headers, sourceRequest: request };
@@ -495,6 +520,33 @@ export function createMcpToolExecutor({
           ...common,
           method: "GET",
           path: "/verify/profiles"
+        }));
+      case "quoteVerificationRun":
+      case "startVerificationRun": {
+        // Never inherit a payment header into a quote (including HTTP aliases).
+        const verifyHeaders = Object.fromEntries(Object.entries(headers).filter(([key]) =>
+          !["payment-signature", "x-payment", "verification-payment"].includes(key.toLowerCase())));
+        if (name === "startVerificationRun") {
+          const payment = verificationPaymentHeader(args.paymentSignature, meta?.["x402/payment"]);
+          if (payment) verifyHeaders["payment-signature"] = payment;
+        }
+        const result = await invokeHttpRoute(handleVerifyRoute, {
+          ...common, headers: verifyHeaders, method: "POST", path: "/verify/runs",
+          body: { profile: args.profile, profileVersion: args.profileVersion, target: args.target, inputs: args.inputs }
+        });
+        if (result.statusCode === 402 && result.body?.x402Version && Array.isArray(result.body.accepts)) {
+          if (name === "quoteVerificationRun") return { ...result.body, ranWork: false, customerFunds: "unchanged" };
+          throw new PaymentVerificationError("Payment required.", "verification_payment_required", { paymentRequired: result.body });
+        }
+        if (name === "quoteVerificationRun" && result.statusCode < 400) {
+          throw new ValidationError("Quote route violated the no-payment/no-run contract.");
+        }
+        return unwrap(result);
+      }
+      case "getVerificationRun":
+        requireString(args.runId, "runId");
+        return unwrap(await invokeHttpRoute(handleVerifyRoute, {
+          ...common, method: "GET", path: `/verify/runs/${encodeURIComponent(args.runId)}`
         }));
       case "listJobs":
         return unwrap(await invokeHttpRoute(handleJobRoute, {
@@ -718,10 +770,10 @@ export function buildMcpWelcome(fullCapabilities, {
     ],
     buyerPath: [
       "List profiles with listVerificationProfiles (flat USDC pricing on Base).",
-      "Submit a run over MCP or HTTP; pay the x402 challenge (EIP-3009 authorization — no on-chain tx from you).",
-      "A sealed runner executes the pinned profile.",
+      "quoteVerificationRun: free challenge. startVerificationRun: pay with x402 EIP-3009; no on-chain tx from you.",
+      "getVerificationRun: poll the pinned profile's sealed execution.",
       "Decisive verdicts capture payment; inconclusive runs are NEVER billed.",
-      "Every run returns a signed, content-addressed receipt at https://averray.com/receipts/:id."
+      "Receipt: https://averray.com/receipts/:id (content-addressed)."
     ],
     proofToPay: {
       summary: "Escrow for work you commission from a counterparty you already chose; funds release on PASS only.",
@@ -750,6 +802,33 @@ export function buildMcpWelcome(fullCapabilities, {
       discovery: fullCapabilities?.discoveryUrl
     }
   };
+}
+
+function verificationRunSchema({ paid = false } = {}) {
+  return {
+    type: "object",
+    properties: {
+      profile: { type: "string", minLength: 1 },
+      profileVersion: { type: "integer", minimum: 1 },
+      target: { type: "object", description: "Profile target from /verify/profiles workedExample.request." },
+      inputs: { type: "object", description: "Profile inputs from /verify/profiles workedExample.request." },
+      ...(paid ? { paymentSignature: { type: "string", minLength: 1, description: "Base64 PaymentPayload; canonical MCP clients instead use params._meta['x402/payment']." } } : {})
+    },
+    required: ["profile", "profileVersion", "target", "inputs"],
+    additionalProperties: false
+  };
+}
+
+function verificationPaymentHeader(argument, metadata) {
+  if (argument !== undefined && metadata !== undefined) throw new ValidationError("Provide one payment transport, not both.");
+  if (metadata !== undefined) {
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+      throw new ValidationError("x402/payment must be a PaymentPayload object.");
+    }
+    return Buffer.from(JSON.stringify(metadata), "utf8").toString("base64");
+  }
+  if (argument !== undefined) requireString(argument, "paymentSignature");
+  return argument;
 }
 
 function jobIdSchema() {

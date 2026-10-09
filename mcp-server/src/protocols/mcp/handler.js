@@ -650,7 +650,7 @@ async function dispatchRequest({
           clientInfo
         });
       }
-      const payload = await executeTool(toolName, message.params?.arguments, { request });
+      const payload = await executeTool(toolName, message.params?.arguments, { request, meta: requestMeta(message) });
       if (toolName === "verifySiwe" && payload?.wallet) {
         await recordArrival(arrivals, "linkWallet", {
           wallet: payload.wallet,
@@ -674,7 +674,9 @@ async function dispatchRequest({
         respond,
         200,
         message.id,
-        toolErrorResult(normalized, { era, serverInfo }),
+        toolName === "startVerificationRun" && normalized.statusCode === 402 && normalized.details?.paymentRequired
+          ? { ...toolResult(normalized.details.paymentRequired, { era, serverInfo }), isError: true }
+          : toolErrorResult(normalized, { era, serverInfo }),
         resultHeaders
       );
     }
