@@ -711,6 +711,21 @@ test("M1: thirteen external settled jobs are nine wallets, one bound author and 
   assert.equal(flow.settledToExternalWallets24h.value, 13);
 });
 
+test("M1: non-GitHub external settlements have a known zero GitHub author count", async () => {
+  const service = harness();
+  const sessions = [1, 2, 3].map((id) => ({
+    sessionId: String(id), jobId: `non-github-${id}`, wallet: "0x" + String(id).repeat(40),
+    status: "resolved", resolvedAt: new Date(NOW - 60_000).toISOString(),
+    payoutTx: settlementReceipt(String(id), "1000000"),
+    jobSnapshot: { definition: { verifierMode: "deterministic" } }
+  }));
+  service.stateStore.listRecentSessions = async (limit, offset) => sessions.slice(offset, offset + limit);
+  const flow = service.buildFlow(await service.readFlow(), NOW);
+  assert.equal(flow.settledToExternalWallets24h.value, 3);
+  assert.equal(flow.externalAuthors24h.value, 0);
+  assert.equal(flow.externalAuthors24h.status, "fresh");
+});
+
 test("M1: failed session reads never publish zero distinct counts", async () => {
   const service = harness();
   service.stateStore.listRecentSessions = async () => { throw new Error("unavailable"); };

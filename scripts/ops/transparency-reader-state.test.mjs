@@ -60,7 +60,7 @@ test("the Record separates job origin from registry-classified claimant ownershi
 
 test("M1 reader renders typed authors beside wallets, preserves job units, and refuses the old or missing shape", async () => {
   const page = await readFile(PAGE, "utf8");
-  assert.match(page, /Five payouts on 2026-10-08 predate the merged-only rule \(live since 2026-10-08 07:21Z\)\./u);
+  assert.match(page, /Five payouts to unmerged pull requests on 2026-10-08 predate the merged-only rule \(live since 2026-10-08 07:21Z\)\./u);
   assert.match(page, /Authors are GitHub accounts bound to a claim, not verified people\./u);
   assert.match(page, /transparency-reader\.js\?v=20261009/u);
   const dom = new JSDOM(page.replace(/^---[\s\S]*?---/u, ""), { runScripts: "outside-only" });

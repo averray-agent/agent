@@ -556,7 +556,7 @@ export class TransparencyService {
       const externalAuthors = await readGithubAuthors(this.stateStore, { sessions: externalSessions, now: new Date(nowMs) }).catch(() => null);
       const unattributed = externalAuthors
         ? externalSessions.length - externalAuthors.githubSessions + externalAuthors.unattributedSessions : null;
-      const authorEvidenceMissing = workerCounts.unknown || !externalAuthors || (externalSessions.length > 0 && externalAuthors.distinctAuthors === 0);
+      const authorEvidenceMissing = workerCounts.unknown || !externalAuthors || (externalAuthors.githubSessions > 0 && externalAuthors.distinctAuthors === 0);
       const externalAuthors24h = {
         value: authorEvidenceMissing ? null : externalAuthors.distinctAuthors,
         unit: "authors", readAtMs, source: "settled external github_pr jobs in last 24h + verified claimant-footer binding",
