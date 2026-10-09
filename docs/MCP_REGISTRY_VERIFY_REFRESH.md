@@ -1,8 +1,10 @@
 # MCP registry refresh: Verify buyer tools and merged-only work
 
-Decision recorded 2026-10-09 for X4. **Draft; publication waits for Pascal's
-confirmation that workstation authentication has been renewed.** No registry
-write or login change is part of this PR.
+Decision recorded 2026-10-09 for X4. **Draft; publication waits for this PR's
+gate.** Pascal confirmed renewed DNS-key authentication for `com.averray`, with
+the publisher's Ed25519 proof matching the `averray.com` TXT record. GitHub
+authentication does not cover this namespace. No registry write or login change
+is part of this PR.
 
 ## Version decision
 
@@ -49,9 +51,10 @@ downstream directory has re-crawled the live tools.
 
 ## Publication and verification gate
 
-1. Wait for Pascal's explicit login-complete confirmation. Never request or
-   print a registry token. The earlier publish attempt returned 401 (expired
-   Registry JWT); do not retry until confirmation.
+1. Authentication prerequisite: Pascal's DNS login-complete confirmation was
+   received on 2026-10-09. Never request or print a key or registry token.
+   The earlier publish attempt returned 401 (expired Registry JWT); that failed
+   attempt is not a publication. **Do not publish until this PR is gated.**
 2. Check the latest entry and whether 1.1.0 already exists. After this draft is
    gated, run `mcp-publisher publish server.json` from the reviewed checkout.
    If namespace authorization fails, stop and report it; do not rename the
