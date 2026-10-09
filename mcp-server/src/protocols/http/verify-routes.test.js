@@ -60,6 +60,18 @@ test("GET /verify/profiles is public, cacheable, and leads with the URL-only MCP
   assert.equal(response.headers["cache-control"], "public, max-age=300");
 });
 
+test("POST /verify/runs calls the verify_runs rate limiter for unpaid and paid requests", async () => {
+  const { calls, response, route } = harness();
+  for (const headers of [{}, { "payment-signature": "proof" }]) {
+    await route({ request: { method: "POST", headers, socket: { remoteAddress: "127.0.0.1" } }, response, pathname: "/verify/runs" });
+  }
+  const limits = calls.filter(([name]) => name === "limit").map(([, ...args]) => args);
+  assert.equal(limits.length, 2);
+  assert.equal(limits[1][0], "verify_runs");
+  assert.deepEqual(limits[0], limits[1]);
+  assert.deepEqual(calls.map(([name]) => name), ["limit", "createRun", "limit", "createRun"]);
+});
+
 test("POST /verify/runs forwards a scoped target token only through the ephemeral header seam", async () => {
   const { calls, response, route } = harness({
     payload: {

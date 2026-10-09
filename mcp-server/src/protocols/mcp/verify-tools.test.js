@@ -14,6 +14,7 @@ import { DISCOVERY_TOOLS, CONNECTED_ONLY_TOOLS } from "../../core/discovery-mani
 import { ACCOUNT_ACTION_PARITY_MAPPINGS } from "../../core/agent-surface-parity.js";
 import { MetricRegistry } from "../../core/metrics.js";
 import { VERIFY_BILLING_RULE } from "../../core/verify-product-copy.js";
+import { assertBaseOnlyX402Surface } from "../../payments/x402-discovery.js";
 
 const NOW = new Date("2026-10-09T12:00:00Z");
 const domain = { name: "USD Coin", version: "2", chainId: 8453, verifyingContract: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" };
@@ -93,7 +94,13 @@ test("X1 quote equals unpaid HTTP, strips all inherited payment paths, and creat
   assert.equal(customerFunds, "unchanged");
   assert.deepEqual(await h.store.listActiveVerificationRuns(100), []);
   assert.equal(h.calls.captures, 0);
+  assert.equal(h.calls.limits.length, 2);
+  assert.equal(h.calls.limits[1][0], "verify_runs");
   assert.deepEqual(h.calls.limits[0], h.calls.limits[1], "same HTTP rate-limit bucket, key and config");
+});
+
+test("X1c connected and directory MCP tool descriptions keep x402 on Base only", () => {
+  assertBaseOnlyX402Surface(MCP_TOOLS.map((tool) => tool.description));
 });
 
 for (const transport of ["argument", "meta"]) {
