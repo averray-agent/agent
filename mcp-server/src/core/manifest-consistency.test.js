@@ -16,7 +16,7 @@ const REPO_ROOT = new URL("../../../", import.meta.url);
 
 test("MCP and every directory mirror share one registry with an explicit connected-only boundary", async () => {
   const names = (tools) => tools.map(({ name }) => name).sort();
-  assert.deepEqual([...CONNECTED_ONLY_TOOLS].sort(), ["fetchAuthNonce", "verifySiwe", "refreshAuthToken", "claimJob", "submitWork", "createLockedDeposit", "requestLockedDepositExit"].sort());
+  assert.deepEqual([...CONNECTED_ONLY_TOOLS].sort(), ["fetchAuthNonce", "verifySiwe", "refreshAuthToken", "claimJob", "submitWork", "createLockedDeposit", "requestLockedDepositExit", "startVerificationRun"].sort());
   const expected = names(MCP_TOOLS.filter(({ name }) => !CONNECTED_ONLY_TOOLS.has(name)));
   assert.deepEqual([...expected, ...CONNECTED_ONLY_TOOLS].sort(), names(MCP_TOOLS));
   for (const name of CONNECTED_ONLY_TOOLS) {

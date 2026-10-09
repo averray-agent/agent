@@ -387,10 +387,11 @@ test("buildPlatformCapabilities serves the complete account parity section", () 
   const parity = buildPlatformCapabilities().onboarding.agentSurfaceParity;
 
   assert.equal(parity.heading, "Use the agent surface for account work");
-  assert.equal(parity.actions.length, 12);
+  assert.equal(parity.actions.length, 13);
   assert.deepEqual(
     parity.actions.map(({ humanAction }) => humanAction),
     [
+      "buy a verification run",
       "see available balance",
       "add funds",
       "withdraw",

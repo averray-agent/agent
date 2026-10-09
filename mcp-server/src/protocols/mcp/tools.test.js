@@ -274,8 +274,10 @@ test("every tool advertised by the MCP welcome resolves through this surface", a
       return true;
     },
     handlePublicMetadataRoute: makePublicRoute({ discoveryUrl: "https://example.test/agent-tools.json" }),
-    handleVerifyRoute: async ({ response, pathname }) => {
-      respond(response, 200, { pathname, profiles: [] });
+    handleVerifyRoute: async ({ request, response, pathname }) => {
+      if (request.method === "POST" && !request.headers["payment-signature"]) {
+        respond(response, 402, { x402Version: 2, resource: { url: pathname }, accepts: [] });
+      } else respond(response, 200, { pathname, profiles: [] });
       return true;
     }
   });
@@ -289,6 +291,9 @@ test("every tool advertised by the MCP welcome resolves through this surface", a
     draftJob: { definition: { rewardAmount: "1" } },
     buildPostJobTransactions: { draftId: "draft-1" },
     listVerificationProfiles: {},
+    quoteVerificationRun: { profile: "mcp-failure-semantics-v1", profileVersion: 1, target: {}, inputs: {} },
+    startVerificationRun: { profile: "mcp-failure-semantics-v1", profileVersion: 1, target: {}, inputs: {}, paymentSignature: "test-proof" },
+    getVerificationRun: { runId: "verify-1" },
     listJobs: {},
     getJobDefinition: { jobId: "job-1" },
     validateJobSubmission: { jobId: "job-1", submission: {} },

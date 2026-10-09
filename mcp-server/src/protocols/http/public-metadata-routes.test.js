@@ -294,7 +294,7 @@ test("GET /onboarding serves the derived account parity section without an app-s
     pathname: "/onboarding"
   }), true);
   const parity = response.body.onboarding.agentSurfaceParity;
-  assert.equal(parity.actions.length, 12);
+  assert.equal(parity.actions.length, 13);
   assert.ok(parity.actions.some((action) => (
     action.agentSurface.httpRoutes?.includes("GET /reputation")
   )));
