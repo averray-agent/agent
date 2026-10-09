@@ -148,6 +148,22 @@ permissions:
   contents: read
 
 jobs:
+  report-ci-blocked-deploy:
+    name: Report deployment blocked by main CI
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion != 'success'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Report skipped deployment
+        env:
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+          CI_RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          printf '::error::Production deployment skipped: CI on main concluded %s for %s. See %s\n' "$CI_CONCLUSION" "$CI_SHA" "$CI_RUN_URL"
+          printf 'Production deployment skipped: CI on main concluded **%s** for `%s`. [CI run](%s).\n' "$CI_CONCLUSION" "$CI_SHA" "$CI_RUN_URL" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
   deploy:
     name: Deploy VPS production
     runs-on: ubuntu-latest
