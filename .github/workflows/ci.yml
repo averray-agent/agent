@@ -218,6 +218,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck:app
 
+      - name: Operator app unit tests
+        run: npm run test:app
+
       - name: Build static operator export
         run: npm run build:frontend
 
