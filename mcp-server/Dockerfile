@@ -20,7 +20,7 @@ RUN forge build \
   contracts/strategies/HydrationDepositPoolAdapter.sol \
   --skip test
 
-FROM node:22-bookworm-slim
+FROM public.ecr.aws/docker/library/node:22-bookworm-slim
 
 ARG DEPLOYED_SHA
 
