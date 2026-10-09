@@ -4733,7 +4733,8 @@
           "profile",
           "profileVersion",
           "status",
-          "billing"
+          "billing",
+          "billingRule"
         ],
         "properties": {
           "runId": {
@@ -4761,15 +4762,20 @@
             "type": "string",
             "format": "date-time"
           },
+          "billingRule": {
+            "type": "string",
+            "description": "Live Verify billing rule, also advertised at resources[0].billingRule in x402 discovery."
+          },
           "billing": {
             "type": "object",
+            "required": ["status"],
             "properties": {
               "status": {
                 "type": "string",
                 "enum": [
                   "authorized",
                   "captured",
-                  "not_billed"
+                  "not_captured"
                 ]
               },
               "amountRaw": {

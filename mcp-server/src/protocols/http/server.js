@@ -78,6 +78,7 @@ import { createTransparencyRoutes } from "./transparency-routes.js";
 import { createUsdcLiquidityRoutes } from "./usdc-liquidity-routes.js";
 import { createVerifierRoutes } from "./verifier-routes.js";
 import { createVerifyRoutes } from "./verify-routes.js";
+import { withVerifyBilling } from "../../core/verify-product-copy.js";
 import { createWorkerRoutes } from "./worker-routes.js";
 import { createXcmRequestRoutes } from "./xcm-request-routes.js";
 import { createMcpRoute, MCP_CORS_HEADERS } from "../mcp/handler.js";
@@ -1323,7 +1324,7 @@ const server = createServer(async (request, response) => {
     return respond(
       response,
       normalized.statusCode ?? 500,
-      errorPayload,
+      pathname === "/verify" || pathname.startsWith("/verify/") ? withVerifyBilling(errorPayload) : errorPayload,
       extraHeaders
     );
   }

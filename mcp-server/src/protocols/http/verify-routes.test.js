@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { VerificationProfileRegistry } from "../../services/verification-profile-registry.js";
 import { createVerifyRoutes } from "./verify-routes.js";
+import { VERIFY_BILLING_RULE } from "../../core/verify-product-copy.js";
 
 const PRESENTATION_ENV = {
   X402_PAYMENT_NETWORK: "eip155:8453",
@@ -133,6 +134,8 @@ test("queued Verify response names the poll route and PASS settlement timing", a
 test("POST /verify/runs returns the x402 challenge before work when unpaid", async () => {
   const paymentRequired = {
     x402Version: 2,
+    billing: { status: "not_captured" },
+    billingRule: VERIFY_BILLING_RULE,
     accepts: [{ scheme: "exact", amount: "5000000", network: "eip155:8453" }]
   };
   const encoded = Buffer.from(JSON.stringify(paymentRequired)).toString("base64");
@@ -167,6 +170,7 @@ test("GET /verify/runs/:runId is public and polls by opaque run id", async () =>
   assert.deepEqual(response.body, {
     runId: "verify-1",
     status: "complete",
+    billingRule: VERIFY_BILLING_RULE,
     verdict: { outcome: "approved", reasonCode: "DETERMINISTIC_MATCH" },
     billing: { status: "captured", amountRaw: "5000000", asset: "USDC" },
     result: "PASS",

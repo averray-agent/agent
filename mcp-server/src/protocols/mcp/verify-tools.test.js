@@ -13,6 +13,7 @@ import { createMcpRoute, MODERN_MCP_VERSION } from "./handler.js";
 import { DISCOVERY_TOOLS, CONNECTED_ONLY_TOOLS } from "../../core/discovery-manifest.js";
 import { ACCOUNT_ACTION_PARITY_MAPPINGS } from "../../core/agent-surface-parity.js";
 import { MetricRegistry } from "../../core/metrics.js";
+import { VERIFY_BILLING_RULE } from "../../core/verify-product-copy.js";
 
 const NOW = new Date("2026-10-09T12:00:00Z");
 const domain = { name: "USD Coin", version: "2", chainId: 8453, verifyingContract: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" };
@@ -116,7 +117,7 @@ for (const transport of ["argument", "meta"]) {
     const polled = await h.execute("getVerificationRun", { runId: run.runId }, context);
     const http = await invokeHttpRoute(h.route, { method: "GET", path: `/verify/runs/${run.runId}` });
     assert.deepEqual(polled, http.body);
-    assert.equal(polled.billing.status, "not_billed"); // X2 standardizes the public status.
+    assert.equal(polled.billing.status, "not_captured");
     assert.equal(h.calls.captures, 0);
     assert.equal(http.headers["payment-response"], undefined);
     for (const text of [JSON.stringify(result), JSON.stringify(polled), JSON.stringify(h.calls.logs)]) {
@@ -168,7 +169,77 @@ test("X1 conflicting transports and malformed metadata are rejected without echo
   ]) {
     const response = await callMcp(h.mcp, "startVerificationRun", args, meta);
     assert.equal(response.body.result.isError, true);
+    assert.equal(response.body.result.structuredContent.billing.status, "not_captured");
+    assert.equal(response.body.result.structuredContent.billingRule, VERIFY_BILLING_RULE);
     assert.doesNotMatch(JSON.stringify(response), /secret/u);
   }
   assert.deepEqual(await h.store.listActiveVerificationRuns(100), []);
+});
+
+for (const transport of ["http", "mcp"]) {
+  for (const outcome of ["approved", "rejected", "inconclusive", "platform_fault", "capture_failure"]) {
+    test(`X2 ${transport}: ${outcome} billing contract is explicit and capture follows a decisive verdict only`, async () => {
+      const h = harness();
+      let attempts = 0;
+      let captured = 0;
+      h.gate.capture = async () => {
+        attempts++;
+        if (outcome === "capture_failure") throw new Error("capture fixture failed");
+        captured++;
+        return { transactionHash: "0x" + "a".repeat(64) };
+      };
+      h.service.evaluatePinnedProfile = async () => ({
+        outcome: outcome === "capture_failure" ? "approved" : outcome,
+        reasonCode: "FIXTURE", reason: "fixture", workerConsequence: "none"
+      });
+      const challenge = await h.execute("quoteVerificationRun", request, context);
+      assert.equal(challenge.billing.status, "not_captured");
+      assert.equal(challenge.billingRule, VERIFY_BILLING_RULE);
+      const paid = await proof(challenge);
+      async function start() {
+        if (transport === "http") return invokeHttpRoute(h.route, {
+          method: "POST", path: "/verify/runs", body: request, headers: { "payment-signature": paid.header }
+        });
+        const response = await callMcp(h.mcp, "startVerificationRun", request, { "x402/payment": paid.payload });
+        assert.equal(response.body.result.isError, false);
+        return { body: response.body.result.structuredContent, headers: response.headers };
+      }
+      const queued = await start();
+      assert.equal(queued.body.billing.status, "authorized");
+      assert.equal(queued.body.billingRule, VERIFY_BILLING_RULE);
+      assert.equal(captured, 0);
+      const run = await h.service.getRun(queued.body.runId);
+      await h.service.finalizeExecution({
+        run, profile: h.service.profileRegistry.get(request.profile, 1),
+        authorization: await h.store.getVerificationRunAuthorization(run.runId),
+        execution: { status: ["inconclusive", "platform_fault"].includes(outcome) ? outcome : "decidable", reason: "runner_fault", detail: "fixture" }
+      });
+      const completed = await start(); // Replay returns the same completed run, never re-captures.
+      const decisive = ["approved", "rejected"].includes(outcome);
+      assert.equal(completed.body.billing.status, decisive ? "captured" : "not_captured");
+      assert.equal(completed.body.billingRule, VERIFY_BILLING_RULE);
+      if (outcome === "capture_failure") {
+        assert.equal(completed.body.verdict.outcome, "inconclusive");
+        assert.equal(completed.body.verdict.reasonCode, "runner_fault");
+        assert.equal(completed.body.verdict.reason, "runner_fault");
+        assert.match(completed.body.verdict.detail, /Payment capture failed.*capture fixture failed/u);
+      }
+      assert.equal(captured, decisive ? 1 : 0);
+      assert.equal(attempts, decisive || outcome === "capture_failure" ? 1 : 0);
+      if (!decisive) assert.equal(completed.headers["payment-response"], undefined);
+      if (decisive && transport === "http") assert.ok(completed.headers["payment-response"]);
+      const polled = await h.execute("getVerificationRun", { runId: run.runId }, context);
+      assert.deepEqual(polled, completed.body);
+    });
+  }
+}
+
+test("X2 historical not_billed run is projected as not_captured without rewriting persisted data", async () => {
+  const h = harness();
+  const legacy = { runId: "legacy", status: "complete", billing: { status: "not_billed", amountRaw: "0" } };
+  await h.store.reserveVerificationRun(legacy, { paymentId: "legacy", authorization: {} });
+  const response = await h.execute("getVerificationRun", { runId: "legacy" }, context);
+  assert.equal(response.billing.status, "not_captured");
+  assert.equal(response.billingRule, VERIFY_BILLING_RULE);
+  assert.equal((await h.store.getVerificationRun("legacy")).billing.status, "not_billed");
 });

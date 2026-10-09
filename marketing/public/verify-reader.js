@@ -8,7 +8,6 @@
   var BASE_NETWORK = "eip155:8453";
   var USDC_DECIMALS = 6;
   var FALLBACK = "Live pricing could not be loaded.";
-  var INCONCLUSIVE_SENTENCE_START = "Inconclusive runs ";
 
   function isRecord(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -28,15 +27,6 @@
     return fraction ? whole + "." + fraction : whole;
   }
 
-  function findSentence(description, sentenceStart, field) {
-    var sentences = requiredString(description, field).match(/[^.!?]+[.!?]+|[^.!?]+$/gu) || [];
-    var sentence = sentences.map(function (value) { return value.trim(); }).find(function (value) {
-      return value.startsWith(sentenceStart);
-    });
-    if (!sentence) throw new Error(field + " is missing the required sentence");
-    return sentence;
-  }
-
   function parseDiscovery(payload) {
     if (!isRecord(payload) || payload.x402Version === undefined) {
       throw new Error("x402 discovery document is malformed");
@@ -49,11 +39,7 @@
     if (!isRecord(resource) || requiredString(resource.resource, "resources[0].resource") !== VERIFY_RUNS_ENDPOINT) {
       throw new Error("Verify run resource is missing");
     }
-    var inconclusiveRuns = findSentence(
-      resource.description,
-      INCONCLUSIVE_SENTENCE_START,
-      "resources[0].description"
-    );
+    var billingRule = requiredString(resource.billingRule, "resources[0].billingRule");
     if (!Array.isArray(resource.accepts) || resource.accepts.length === 0 || !isRecord(resource.accepts[0])) {
       throw new Error("resources[0].accepts[0] is missing");
     }
@@ -77,7 +63,7 @@
       amount: isBaseUsdc ? formatUnits(amountRaw, USDC_DECIMALS) : amountRaw + " base units",
       asset: asset,
       assetLabel: isBaseUsdc ? "USDC" : asset,
-      inconclusiveRuns: inconclusiveRuns,
+      billingRule: billingRule,
       network: network,
       networkLabel: network === BASE_NETWORK ? "Base" : network,
       payTo: payTo,
@@ -115,7 +101,7 @@
       });
       var terms = parseDiscovery(payload);
 
-      inconclusive.textContent = terms.inconclusiveRuns;
+      inconclusive.textContent = terms.billingRule;
       root.querySelector("[data-verify-price]").textContent = terms.amount + " " + terms.assetLabel;
       root.querySelector("[data-verify-protocol]").textContent = terms.scheme + " payment · x402 version " + terms.x402Version;
       root.querySelector("[data-verify-asset-label]").textContent = terms.assetLabel;

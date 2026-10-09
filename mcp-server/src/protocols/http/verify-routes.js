@@ -1,16 +1,18 @@
 import { extractClientKey } from "../../auth/rate-limit.js";
 import { decorateVerificationRunPresentation } from "../../core/verdict-presentation.js";
 import { paymentResponseHeaders } from "../../payments/x402-payment-primitives.js";
+import { withVerifyBilling } from "../../core/verify-product-copy.js";
 
 export function createVerifyRoutes({
   enforceLimit,
   rateLimitConfig,
   readJsonBody,
-  respond,
+  respond: sendResponse,
   verificationRunService,
   presentationEnv = process.env,
   trustProxy = false
 }) {
+  const respond = (response, status, body, headers) => sendResponse(response, status, withVerifyBilling(body), headers);
   return async function handleVerifyRoute({ request, response, pathname }) {
     if (request.method === "GET" && pathname === "/verify/runs") {
       respond(response, 405, { error: "method_not_allowed", message: "Create a Verify run with POST /verify/runs." }, { allow: "POST" });

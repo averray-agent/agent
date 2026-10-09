@@ -94,6 +94,8 @@ test("static Verify inconclusive-run wording is rejected in favor of discovery r
 
 test("Verify pricing parses resources[0].accepts[0] and rejects schema drift", async () => {
   const source = await readFile(new URL("marketing/public/verify-reader.js", REPO_ROOT), "utf8");
+  assert.match(source, /inconclusive\.textContent\s*=\s*terms\.billingRule\s*;/u);
+  assert.doesNotMatch(source, /Inconclusive runs/u, "billing copy must come from live discovery");
   const context = { window: {} };
   runInNewContext(source, context);
   const reader = context.window.AverrayVerifyDiscovery;
@@ -102,6 +104,7 @@ test("Verify pricing parses resources[0].accepts[0] and rejects schema drift", a
     resources: [{
       resource: "https://api.averray.com/verify/runs",
       description: "Run a pinned Averray verification profile. Inconclusive runs are never charged.",
+      billingRule: "No verdict, no charge. Inconclusive runs are not billed.",
       accepts: [{
         scheme: "exact",
         network: "eip155:8453",
@@ -115,10 +118,16 @@ test("Verify pricing parses resources[0].accepts[0] and rejects schema drift", a
   const terms = reader.parseDiscovery(valid);
   assert.equal(terms.amount, "5");
   assert.equal(terms.assetLabel, "USDC");
-  assert.equal(terms.inconclusiveRuns, "Inconclusive runs are never charged.");
+  assert.equal(terms.billingRule, valid.resources[0].billingRule);
   assert.equal(terms.networkLabel, "Base");
   assert.equal(terms.payTo, valid.resources[0].accepts[0].payTo);
   assert.equal(reader.FALLBACK, "Live pricing could not be loaded.");
+  const legacy = structuredClone(valid);
+  delete legacy.resources[0].billingRule;
+  assert.throws(() => reader.parseDiscovery(legacy), /billingRule/u, "old description-only shape must degrade, not invent billing terms");
+  const changed = structuredClone(valid);
+  changed.resources[0].billingRule = "Fixture live billing rule.";
+  assert.equal(reader.parseDiscovery(changed).billingRule, "Fixture live billing rule.");
 
   for (const malformed of [
     {},

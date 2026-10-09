@@ -353,7 +353,7 @@ function platformFaultVerdict(reason, detail) {
 
 function notBilled(profile) {
   return {
-    status: "not_billed",
+    status: "not_captured",
     reason: "inconclusive",
     amount: "0",
     amountRaw: "0",

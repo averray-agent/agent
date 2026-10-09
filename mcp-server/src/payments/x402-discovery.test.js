@@ -5,6 +5,7 @@ import test from "node:test";
 import { TypedDataEncoder } from "ethers";
 
 import { hashCanonicalContent } from "../core/canonical-content.js";
+import { VERIFY_BILLING_RULE } from "../core/verify-product-copy.js";
 import { VerificationProfileRegistry } from "../services/verification-profile-registry.js";
 import { CdpSettlementAdapter } from "./adapters/cdp/settlement-adapter.js";
 import {
@@ -101,6 +102,8 @@ test("x402 copy lock refuses Hub payment requirements and Hub-paired description
     profiles: new VerificationProfileRegistry().list()
   });
   assert.doesNotThrow(() => assertBaseOnlyX402Surface(document));
+  assert.equal(document.resources[0].billingRule, VERIFY_BILLING_RULE);
+  assert.equal(document.resources[0].inputContract.completion.inconclusive, "not_captured");
 
   const wrongNetwork = structuredClone(document);
   wrongNetwork.resources[0].accepts[0].network = "eip155:420420419";
@@ -164,7 +167,7 @@ test("POST /jobs/x402 refuses a non-Base payment with a named network reason", a
   assert.equal(fetchCalls, 0);
 });
 
-test("the existing Verify 402 envelope remains byte-identical", async () => {
+test("Verify 402 keeps its payment requirements and publishes the billing contract", async () => {
   const gate = makeGate();
   const profile = new VerificationProfileRegistry().get("git-patch-tests-v1", 1);
   const challenge = await liveChallenge(gate, profile);
@@ -177,6 +180,8 @@ test("the existing Verify 402 envelope remains byte-identical", async () => {
 
   assert.deepEqual(challenge, {
     x402Version: 2,
+    billing: { status: "not_captured" },
+    billingRule: VERIFY_BILLING_RULE,
     error: "Payment required to run this Averray verification profile.",
     resource: {
       url: "https://api.averray.com/verify/runs",

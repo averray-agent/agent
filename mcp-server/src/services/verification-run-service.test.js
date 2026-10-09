@@ -258,7 +258,7 @@ test("inconclusive is never billed and never presents as an artifact failure", a
   assert.equal(run.verdict.outcome, "inconclusive");
   assert.equal(run.verdict.reason, "flaky");
   assert.notEqual(run.verdict.outcome, "rejected");
-  assert.equal(run.billing.status, "not_billed");
+  assert.equal(run.billing.status, "not_captured");
   assert.equal(context.gate.calls.capture, 0);
   assert.equal(context.gate.calls.release, 1);
   assert.equal(receipt.intent.valueAtRisk.amountRaw, "0");
@@ -276,7 +276,7 @@ test("MCP target, TLS, and auth inability outcomes are never billed or converted
     const run = await executeAndFinalize(context);
     assert.equal(run.verdict.outcome, "inconclusive");
     assert.notEqual(run.verdict.outcome, "rejected");
-    assert.equal(run.billing.status, "not_billed");
+    assert.equal(run.billing.status, "not_captured");
     assert.equal(context.gate.calls.capture, 0);
     assert.equal(context.gate.calls.release, 1);
   }
@@ -293,7 +293,7 @@ test("MCP egress boundary faults are platform_fault and never billed", async () 
   await context.service.createRun(mcpRequest("egress-fault-proof"));
   const run = await executeAndFinalize(context);
   assert.equal(run.verdict.outcome, "platform_fault");
-  assert.equal(run.billing.status, "not_billed");
+  assert.equal(run.billing.status, "not_captured");
   assert.equal(context.gate.calls.capture, 0);
 });
 
@@ -322,7 +322,7 @@ test("a broken runner is classified as inconclusive runner_fault, never fail", a
   assert.equal(run.verdict.outcome, "inconclusive");
   assert.equal(run.verdict.reason, "runner_fault");
   assert.match(run.verdict.detail, /runner exploded/u);
-  assert.equal(run.billing.status, "not_billed");
+  assert.equal(run.billing.status, "not_captured");
   assert.equal(context.gate.calls.capture, 0);
 });
 
@@ -341,7 +341,7 @@ test("an absent runner ages a queued request to runner_fault without billing or 
   assert.equal(timedOut.verdict.reason, "runner_fault");
   assert.match(timedOut.verdict.detail, /No isolated verification runner claimed/u);
   assert.doesNotMatch(timedOut.verdict.detail, /evidence/u);
-  assert.equal(timedOut.billing.status, "not_billed");
+  assert.equal(timedOut.billing.status, "not_captured");
   assert.equal(timeout.gate.calls.capture, 0);
   assert.equal((await timeout.service.getRun(queued.runId)).status, "complete");
 });
@@ -364,7 +364,7 @@ test("a wedged claimed run ages out independently of its runner lease and reject
   const completed = await context.service.getRun(queued.runId);
   assert.equal(completed.status, "complete");
   assert.equal(completed.verdict.reason, "runner_fault");
-  assert.equal(completed.billing.status, "not_billed");
+  assert.equal(completed.billing.status, "not_captured");
   assert.equal(context.gate.calls.capture, 0);
   assert.equal(await context.stateStore.storeVerificationRunExecution(queued.runId, {
     owner: "wedged-runner",
@@ -408,7 +408,7 @@ test("capture failure degrades a decisive result to inconclusive, bills nothing,
   assert.equal(run.verdict.outcome, "inconclusive");
   assert.equal(run.verdict.reason, "runner_fault");
   assert.match(run.verdict.detail, /Base capture unavailable/u);
-  assert.equal(run.billing.status, "not_billed");
+  assert.equal(run.billing.status, "not_captured");
   assert.equal(gate.calls.capture, 1);
   assert.equal(gate.calls.release, 1);
 });

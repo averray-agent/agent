@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { normalizeError } from "../../core/errors.js";
+import { withVerifyBilling } from "../../core/verify-product-copy.js";
 import { getMcpTool, MCP_TOOLS } from "./tools.js";
 
 export const MODERN_MCP_VERSION = "2026-07-28";
@@ -676,7 +677,7 @@ async function dispatchRequest({
         message.id,
         toolName === "startVerificationRun" && normalized.statusCode === 402 && normalized.details?.paymentRequired
           ? { ...toolResult(normalized.details.paymentRequired, { era, serverInfo }), isError: true }
-          : toolErrorResult(normalized, { era, serverInfo }),
+          : toolErrorResult(normalized, { era, serverInfo, verify: ["quoteVerificationRun", "startVerificationRun", "getVerificationRun", "listVerificationProfiles"].includes(toolName) }),
         resultHeaders
       );
     }
@@ -742,12 +743,13 @@ function toolResult(payload, { era, serverInfo }) {
   return era === "modern" ? modernResult(result, serverInfo) : result;
 }
 
-function toolErrorResult(error, { era, serverInfo }) {
-  const payload = {
+function toolErrorResult(error, { era, serverInfo, verify = false }) {
+  const errorBody = {
     error: error.code ?? "internal_error",
     message: error.message ?? "internal_error",
     ...(error.details === undefined ? {} : { details: error.details })
   };
+  const payload = verify ? withVerifyBilling(errorBody) : errorBody;
   const result = {
     content: [{ type: "text", text: JSON.stringify(payload) }],
     structuredContent: payload,
