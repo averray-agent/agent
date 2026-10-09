@@ -20,6 +20,7 @@ test("badge receipts render verified, failed after mutation, and unsigned legacy
   assert.deepEqual(await verify(fixture.document, fixture.jwk), {
     state: "verified",
     kid: BADGE_RECEIPT_KID,
+    alg: "ES256",
     signedAt: SIGNED_AT,
   });
   assert.deepEqual(
@@ -38,6 +39,7 @@ test("run receipts render verified, failed after mutation, and unsigned legacy s
   assert.deepEqual(await verify(fixture.document, fixture.jwk), {
     state: "verified",
     kid: BADGE_RECEIPT_KID,
+    alg: "ES256",
     signedAt: SIGNED_AT,
   });
   assert.deepEqual(

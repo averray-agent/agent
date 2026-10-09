@@ -2132,6 +2132,7 @@ async function makeSiteFixture() {
     "  */proof-to-pay/) name=proof-to-pay/index.html ;;",
     "  */pool/) name=pool/index.html ;;",
     "  */pool-reader.js) name=pool-reader.js ;;",
+    "  */receipts/*) name=receipts/${url#*/receipts/}index.html ;;",
     "esac",
     "if [[ -n \"$out\" && -n \"${FAKE_SERVED_DIR:-}\" ]]; then",
     "  cp \"$FAKE_SERVED_DIR/$name\" \"$out\"",
@@ -2154,6 +2155,10 @@ async function makeSiteFixture() {
   await writeFile(join(appRoot, "site/proof-to-pay/index.html"), "<title>Proof-to-Pay</title> fresh build\n");
   await writeFile(join(appRoot, "site/pool/index.html"), "<title>Pool</title> fresh build\n");
   await writeFile(join(appRoot, "site/pool-reader.js"), "// fresh pool reader\n");
+  for (const id of ["", "0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1/", "0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0/"]) {
+    await mkdir(join(appRoot, "site/receipts", id), { recursive: true });
+    await writeFile(join(appRoot, "site/receipts", id, "index.html"), "<title>Receipt</title> " + id);
+  }
   git(appRoot, "add", ".");
   git(appRoot, "commit", "-m", "base");
   const baseSha = revParse(appRoot, "HEAD");

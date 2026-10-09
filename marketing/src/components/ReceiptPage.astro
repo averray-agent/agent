@@ -1,0 +1,79 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import SiteNav from "../components/SiteNav.astro";
+import SiteFooter from "../components/SiteFooter.astro";
+import "../styles/global.css";
+
+const { receiptId } = Astro.props;
+const rawUrl = receiptId ? `https://api.averray.com/receipts/${receiptId}` : undefined;
+
+const SETTLED_WORK_RECEIPT = "0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1";
+const VERIFY_RECEIPT = "0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0";
+---
+
+<BaseLayout
+  title="Averray — Work receipt"
+  description="A content-addressed record of one work run: intent, execution, verdict, and settlement."
+  canonicalUrl={`https://averray.com/receipts/${receiptId ? `${receiptId}/` : ""}`}
+>
+  <main class="page">
+    <SiteNav current="receipts" />
+    <div class="record-lede">
+      <span class="eyebrow">Work receipt</span>
+      <h1 class="record-title">One run, from agreement to outcome.</h1>
+      <p class="record-sub">This page reads a content-addressed receipt from the Averray API. It describes only the single run shown here.</p>
+    </div>
+
+    <section class="record-section" aria-live="polite">
+      <div class="panel" data-receipt-state="loading">
+        <p data-receipt-status>Receipt not loaded.</p>
+        <p data-receipt-signature>Signature not checked.</p>
+        <p data-receipt-raw-link hidden={!receiptId}>
+          raw JSON: {" "}<a data-receipt-raw-url href={rawUrl}>{rawUrl?.replace("https://", "")}</a>
+        </p>
+        <noscript>
+          {receiptId
+            ? <p>Loading the receipt requires JavaScript · raw JSON: {" "}<a href={rawUrl}>{rawUrl?.replace("https://", "")}</a></p>
+            : <p>Loading a receipt requires JavaScript; append the receipt id to api.averray.com/receipts/ to read its raw JSON.</p>}
+        </noscript>
+        <div data-receipt-guidance hidden={Boolean(receiptId)}>
+          <p>
+            Published examples:
+            <a href={`/receipts/${SETTLED_WORK_RECEIPT}/`}>settled work receipt</a>
+            · <a href={`/receipts/${VERIFY_RECEIPT}/`}>verification receipt</a>
+            · <a href="/transparency/">transparency</a>
+          </p>
+        </div>
+        <div data-receipt hidden>
+          <p id="receipt" class="record-anchor"><strong>Receipt</strong> <code data-field="receiptId">{receiptId}</code></p>
+          <p id="outcome" class="record-anchor"><strong>Outcome</strong> <span data-field="verdict.outcome"></span> · <span data-field="verdict.reasonCode"></span></p>
+          <p data-asset-context hidden></p>
+          <p>
+            <strong>Provider</strong> <code data-field="execution.provider"></code>{" "}
+            (<span data-provider-class>unknown</span> · <span data-provider-class-authority>shared self-identity registry</span>)
+          </p>
+          <p><strong>Job</strong> <span data-field="jobId"></span></p>
+          <p><strong>Specification</strong> <code data-field="intent.specHash"></code> (<span data-field="intent.specSource"></span>)</p>
+          <p><strong>Success policy</strong> <span data-field="intent.successPolicy.profile"></span> v<span data-field="intent.successPolicy.version"></span></p>
+          <p><strong>Artifact</strong> <code data-field="execution.artifactHash"></code></p>
+          <p><strong>Verified</strong> <time data-field="timestamps.verifiedAt"></time></p>
+          <div data-settlement hidden>
+            <p><strong>Worker reward</strong> <span data-field="settlement.rewardAmount"></span> <span data-field="settlement.assetSymbol"></span>: <span data-field="settlement.workerAmount"></span> paid; <span data-field="settlement.gasRetentionAmount"></span> retained.</p>
+            <p><strong>Poster total</strong> <span data-field="settlement.posterTotalAmount"></span> <span data-field="settlement.assetSymbol"></span>, including <span data-field="settlement.protocolFeeAmount"></span> protocol fee.</p>
+          </div>
+          <details>
+            <summary>Canonical JSON</summary>
+            <pre data-receipt-json></pre>
+          </details>
+        </div>
+      </div>
+    </section>
+    <SiteFooter />
+  </main>
+  <script src="/reader-fetch.js?v=20260823" is:inline></script>
+  <script src="/receipt-reader.js?v=20261008" is:inline></script>
+  <script>
+    import { watchReceiptSignature } from "../receipt-signature.mjs";
+    watchReceiptSignature(window);
+  </script>
+</BaseLayout>

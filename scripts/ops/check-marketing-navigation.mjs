@@ -13,7 +13,13 @@ const FOOTER = new URL("marketing/src/components/SiteFooter.astro", REPO_ROOT);
 // A route may be excluded only by naming it here and explaining why. There is
 // no navigation link to the error document: Caddy serves it for missing URLs.
 // Every ordinary public page remains a discoverable door.
-export const INTENTIONALLY_UNLINKED_ROUTES = Object.freeze(["/404/"]);
+export const INTENTIONALLY_UNLINKED_ROUTES = Object.freeze([
+  "/404/",
+  // Receipt detail pages are linked from the Receipts index, not the global
+  // menu. public-receipt-pages.test.mjs pins their actual built links.
+  "/receipts/0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1/",
+  "/receipts/0x8a99c2e19b75a7e3b19e1aefb4448be162e89480d953c20ad813b8dda12797c0/"
+]);
 
 function normalizeRoute(href) {
   const path = href.split(/[?#]/u, 1)[0] || "/";

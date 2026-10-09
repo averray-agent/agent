@@ -58,8 +58,8 @@ test("static live placeholders and glued copy are replaced without baking number
     assert.doesNotMatch(source, />—<|Reading[^<]*…/);
     assert.match(source, /[Nn]ot loaded|See live pricing/);
   }
-  for (const name of ["receipts", "trust"]) {
-    assert.match(await read(`marketing/src/pages/${name}.astro`), /raw JSON: \{" "\}/);
+  for (const path of ["marketing/src/components/ReceiptPage.astro", "marketing/src/pages/trust.astro"]) {
+    assert.match(await read(path), /raw JSON: \{" "\}/);
   }
   assert.match(await read("marketing/src/pages/pool.astro"), /GET \/pool<\/a>\{" "\}/);
 });
@@ -75,6 +75,10 @@ test("real Caddy returns branded 404 bodies on both site and app, never 200", {
     await mkdir(join(dir, area));
     await writeFile(join(dir, area, "404.html"), `<!doctype html><title>Averray · 404</title><h1>Averray ${area}: This page is not here.</h1>`);
   }
+  const publishedId = "0xe302d62bef7f96686bba5db4cfc44fc5743b5464706f2acbc0e6350929a62ce1";
+  await mkdir(join(dir, "site", "receipts", publishedId), { recursive: true });
+  await writeFile(join(dir, "site", "receipts", "index.html"), "generic receipt shell");
+  await writeFile(join(dir, "site", "receipts", publishedId, "index.html"), "published receipt " + publishedId);
   const path = join(dir, "Caddyfile");
   await writeFile(path, await read("deploy/Caddyfile.averray"));
   const { stdout } = await promisify(execFile)(caddy, ["adapt", "--config", path, "--adapter", "caddyfile"]);
@@ -105,8 +109,8 @@ test("real Caddy returns branded 404 bodies on both site and app, never 200", {
   child.stderr.on("data", (chunk) => { logs += chunk; });
   const exited = once(child, "exit");
   t.after(async () => { if (child.exitCode === null) child.kill("SIGTERM"); await exited; });
-  const request = (host) => new Promise((resolve, reject) => {
-    const req = get(`http://127.0.0.1:${port}/definitely-not-a-page`, { headers: { host } }, (response) => {
+  const request = (host, path = "/definitely-not-a-page") => new Promise((resolve, reject) => {
+    const req = get(`http://127.0.0.1:${port}${path}`, { headers: { host } }, (response) => {
       let body = "";
       response.on("data", (chunk) => { body += chunk; });
       response.on("end", () => resolve({ status: response.statusCode, body, headers: response.headers }));
@@ -126,5 +130,16 @@ test("real Caddy returns branded 404 bodies on both site and app, never 200", {
     assert.match(response.headers["strict-transport-security"], /max-age=31536000/);
     assert.equal(response.headers["cache-control"], "no-cache");
     assert.match(response.body, /Averray.*This page is not here/);
+  }
+  for (const suffix of ["", "/"]) {
+    const response = await request("averray.com", "/receipts/" + publishedId + suffix);
+    assert.equal(response.status, suffix ? 200 : 308);
+    if (suffix) assert.equal(response.body, "published receipt " + publishedId);
+    else assert.equal(response.headers.location, "/receipts/" + publishedId + "/");
+  }
+  for (const path of ["/receipts/", "/receipts/0x" + "9".repeat(64) + "/"]) {
+    const response = await request("averray.com", path);
+    assert.equal(response.status, 200);
+    assert.equal(response.body, "generic receipt shell");
   }
 });

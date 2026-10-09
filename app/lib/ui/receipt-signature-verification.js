@@ -4,7 +4,7 @@ export const BADGE_RECEIPT_JWKS_PATH = "/.well-known/badge-receipt-jwks.json";
 export const BADGE_RECEIPT_KID = "badge-1";
 export const BADGE_RECEIPT_TYP = "averray-badge-receipt+jws";
 
-/** @typedef {{state: "verified", kid: string, signedAt: string} | {state: "unsigned"} | {state: "failed" | "unavailable", error: string}} ReceiptVerificationResult */
+/** @typedef {{state: "verified", kid: string, alg: string, signedAt: string} | {state: "unsigned"} | {state: "failed" | "unavailable", error: string}} ReceiptVerificationResult */
 
 /**
  * Verify an immutable badge/run receipt locally with WebCrypto.
@@ -120,7 +120,7 @@ export async function verifyReceiptSignature({
       signingInput
     );
     return valid
-      ? { state: "verified", kid, signedAt }
+      ? { state: "verified", kid, alg, signedAt }
       : failed("Signature does not match the canonical receipt document.");
   } catch {
     return failed("Browser ES256 verification rejected the receipt signature.");

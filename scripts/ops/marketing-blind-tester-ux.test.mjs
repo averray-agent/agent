@@ -8,7 +8,7 @@ const REPO_ROOT = new URL("../../", import.meta.url);
 test("blind-tester marketing copy exposes copyable proof links and honest loading shells", async () => {
   const [home, receipts, verify, trust, footer, profile] = await Promise.all([
     readFile(new URL("marketing/src/pages/index.astro", REPO_ROOT), "utf8"),
-    readFile(new URL("marketing/src/pages/receipts.astro", REPO_ROOT), "utf8"),
+    readFile(new URL("marketing/src/components/ReceiptPage.astro", REPO_ROOT), "utf8"),
     readFile(new URL("marketing/src/pages/verify.astro", REPO_ROOT), "utf8"),
     readFile(new URL("marketing/src/pages/trust.astro", REPO_ROOT), "utf8"),
     readFile(new URL("marketing/src/components/SiteFooter.astro", REPO_ROOT), "utf8"),
@@ -220,13 +220,13 @@ test("Caddy revalidates HTML, preserves versioned-asset caching, and rewrites ev
   assert.match(caddy, /@versionedAssets \{[\s\S]*path \*\.css \*\.js[\s\S]*query v=\*[\s\S]*\}/u);
   assert.match(caddy, /header @versionedAssets Cache-Control "public, max-age=31536000, immutable"/u);
   assert.match(caddy, /Cache-Control "no-cache"[\s\S]*match header Content-Type text\/html\*/u);
-  assert.match(caddy, /@workReceipt path \/receipts\/\*[\s\S]*rewrite @workReceipt \/receipts\/index\.html/u);
+  assert.match(caddy, /@workReceipt path \/receipts\/\*[\s\S]*route @workReceipt \{\s*try_files \{path\}\/index\.html \{path\} \/receipts\/index\.html/u);
 });
 
 test("receipt shell distinguishes a missing id from an unknown id and keeps recovery links", async () => {
   const [reader, shell] = await Promise.all([
     readFile(new URL("marketing/public/receipt-reader.js", REPO_ROOT), "utf8"),
-    readFile(new URL("marketing/src/pages/receipts.astro", REPO_ROOT), "utf8")
+    readFile(new URL("marketing/src/components/ReceiptPage.astro", REPO_ROOT), "utf8")
   ]);
 
   function evaluate(pathname) {
