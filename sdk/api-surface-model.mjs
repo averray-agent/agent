@@ -1,3 +1,5 @@
+import { RECEIPT_VERIFIER_HANDLERS } from "../mcp-server/src/core/receipt-verifier-handlers.js";
+
 export const API_DECLARATIONS = String.raw`
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
@@ -987,7 +989,7 @@ export class AgentPlatformClient {
   getAgentProfile(wallet: WalletAddress): Promise<AgentProfile>;
   listAgents(options?: { limit?: number; includeSynthetic?: boolean }): Promise<AgentListResponse>;
   getAgentBadge(sessionId: SessionId): Promise<BadgeResponse>;
-  listBadges(options?: { limit?: number; cursor?: string; handler?: "github_pr" | "deterministic"; outcome?: "approved" | "rejected"; settled?: true; sort?: "verifiedAt:desc" }): Promise<BadgeListResponse>;
+  listBadges(options?: { limit?: number; cursor?: string; handler?: ${RECEIPT_VERIFIER_HANDLERS.map((value) => JSON.stringify(value)).join(" | ")}; outcome?: "approved" | "rejected"; settled?: true; sort?: "verifiedAt:desc" }): Promise<BadgeListResponse>;
   listAlerts(options?: { limit?: number }): Promise<AlertListResponse>;
   listAuditEvents(options?: { limit?: number }): Promise<AuditEventListResponse>;
   listPolicies(): Promise<PolicyListResponse>;

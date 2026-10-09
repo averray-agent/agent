@@ -2659,7 +2659,7 @@
         ],
         "operationId": "listBadges",
         "summary": "List recent public badge receipts",
-        "description": "Cursor-paginated averray.badge-list-item.v1 wrappers, default 50 rows (formerly 100 sessions). Follow nextCursor for the complete list, preserving filters. Verify each document alone; unsignedPresentation is not signed. Cursor identity is sessionId plus kind; default order is recent sessions, run before badge. Optional handler/outcome/settled filters read canonical run-receipt fields; sort=verifiedAt:desc orders by document.timestamps.verifiedAt, never unsigned issuedAt, excluding missing dates. A stale cursor requires restarting. Wrapper schema: https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/badge-list-item-v1.json. ETag supports If-None-Match.",
+        "description": "Cursor-paginated averray.badge-list-item.v1 wrappers, default 50 rows (formerly 100 sessions). Follow nextCursor preserving filters and sort; cursors bind that query plus sessionId/kind. Default order is recent sessions, run before badge. Verify each document alone; unsignedPresentation is not signed. Optional filters read document.verifier.handler, verdict.outcome and settlement.settlementTx. sort=verifiedAt:desc orders by document.timestamps.verifiedAt, never unsigned issuedAt, excluding missing dates. Filtered/sorted row lists share a 45-second in-process memo; ETag/304 reads reuse it, with public max-age=45. A stale or cross-query cursor requires restarting. All list reads use the badges_list rate-limit bucket (default 60 per minute per client). Unknown query names, including _, return 400. Wrapper schema: https://raw.githubusercontent.com/averray-agent/agent/main/docs/schemas/badge-list-item-v1.json.",
         "security": [],
         "parameters": [
           {
@@ -2686,7 +2686,7 @@
           {
             "name": "handler", "in": "query", "required": false,
             "description": "Canonical receipt verifier handler: GitHub PR or a published Verify profile handler.",
-            "schema": { "type": "string", "enum": ["github_pr", "deterministic"] }
+            "schema": { "type": "string", "enum": ["benchmark", "deterministic", "github_pr", "human_fallback", "poster_review"] }
           },
           {
             "name": "outcome", "in": "query", "required": false,
@@ -2744,7 +2744,8 @@
             }
           },
           "304": { "description": "Page unchanged (If-None-Match)." },
-          "400": { "description": "Invalid/stale cursor or unsupported query name/value. Filter errors include details.unknown and details.supported." }
+          "400": { "description": "Invalid/stale cursor or cursor reused with different filters/sort (invalid_cursor); unsupported query name/value (including cache-busters such as _). Filter errors include details.unknown and details.supported." },
+          "429": { "description": "badges_list request limit exceeded." }
         }
       }
     },

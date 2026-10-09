@@ -1459,6 +1459,7 @@ export function loadRateLimitConfig(env = process.env) {
     // noisy review UI cannot exhaust the poster's draft-creation allowance.
     externalReviews: buildLimit(env, "RATE_LIMIT_EXTERNAL_REVIEWS", { limit: 30, windowSeconds: 60 }),
     verifierRun: buildLimit(env, "RATE_LIMIT_VERIFIER_RUN", { limit: 120, windowSeconds: 60 }),
+    badgesList: buildLimit(env, "RATE_LIMIT_BADGES_LIST", { limit: 60, windowSeconds: 60 }),
     contentWrites: buildLimit(env, "RATE_LIMIT_CONTENT_WRITES", { limit: 30, windowSeconds: 3600 }),
     events: buildLimit(env, "RATE_LIMIT_EVENTS", { limit: 30, windowSeconds: 60 })
   };

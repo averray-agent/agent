@@ -24,6 +24,10 @@ test("content write limits default to thirty requests per hour", () => {
     { limit: 15, windowSeconds: 600 });
 });
 
+test("public badges listing has a separate bounded request budget", () => {
+  assert.deepEqual(loadRateLimitConfig({}).badgesList, { limit: 60, windowSeconds: 60 });
+});
+
 function cutoverEnv() {
   return { ...Object.fromEntries(generateAll()["deploy/backend.mainnet.env.template"].split("\n")
     .filter((line) => /^[A-Z][A-Z0-9_]*=/u.test(line))

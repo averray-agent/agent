@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { POSTER_REVIEW_HANDLER } from "../core/receipt-verifier-handlers.js";
 import { hasVerifiedGithubMerge } from "../core/github-merge-policy.js";
 import { projectOverturnedVerification } from "../core/operator-overturn.js";
 import { VerifierRegistry } from "./verifier-handlers.js";
@@ -44,7 +45,7 @@ const ESCROW_JOB_STATE_LABELS = Object.freeze([
   "closed"
 ]);
 
-export const POSTER_REVIEW_HANDLER = "poster_review";
+export { POSTER_REVIEW_HANDLER };
 export const POSTER_REVIEW_HANDLER_VERSION = 1;
 
 export class VerifierService {
