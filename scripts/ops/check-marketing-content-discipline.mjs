@@ -8,6 +8,7 @@ export const MARKETING_CONTENT_FILES = Object.freeze([
   "site/index.html",
   "site/verify/index.html",
   "site/proof-to-pay/index.html",
+  "site/why-two-chains/index.html",
   "site/pool/index.html"
 ]);
 
@@ -22,7 +23,7 @@ const FORBIDDEN_TERMS = Object.freeze([
 ]);
 
 const BAKED_AMOUNT = /\b[0-9]+(?:\.[0-9]+)?\s?(?:USDC|DOT)\b/iu;
-const AMOUNT_PAGES = ["site/verify/index.html", "site/proof-to-pay/index.html", "site/pool/index.html", "site/transparency/index.html"];
+const AMOUNT_PAGES = ["site/verify/index.html", "site/proof-to-pay/index.html", "site/why-two-chains/index.html", "site/pool/index.html", "site/transparency/index.html"];
 
 export function assertPoolRecordTruth(pages) {
   for (const path of ["site/transparency/index.html", "site/pool/index.html"]) {

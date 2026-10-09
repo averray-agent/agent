@@ -690,6 +690,7 @@ test("deploy rebuilds and verifies the public site even when no site paths chang
   assert.match(run.stdout, /Served .*\/transparency\/ matches built site\/transparency\/index\.html/u);
   assert.match(run.stdout, /Served .*\/transparency-reader\.js matches built site\/transparency-reader\.js/u);
   assert.match(run.stdout, /Served .*\/verify\/ matches built site\/verify\/index\.html/u);
+  assert.match(run.stdout, /Served .*\/why-two-chains\/ matches built site\/why-two-chains\/index\.html/u);
   assert.match(run.stdout, /Served .*\/proof-to-pay\/ matches built site\/proof-to-pay\/index\.html/u);
   assert.match(run.stdout, /Served .*\/pool\/ matches built site\/pool\/index\.html/u);
   assert.match(run.stdout, /Served .*\/pool-reader\.js matches built site\/pool-reader\.js/u);
@@ -2093,6 +2094,7 @@ async function makeSiteFixture() {
   await mkdir(join(appRoot, "site"), { recursive: true });
   await mkdir(join(appRoot, "site/transparency"), { recursive: true });
   await mkdir(join(appRoot, "site/verify"), { recursive: true });
+  await mkdir(join(appRoot, "site/why-two-chains"), { recursive: true });
   await mkdir(join(appRoot, "site/proof-to-pay"), { recursive: true });
   await mkdir(join(appRoot, "site/pool"), { recursive: true });
   await mkdir(stackRoot, { recursive: true });
@@ -2128,6 +2130,7 @@ async function makeSiteFixture() {
     "  */transparency/) name=transparency/index.html ;;",
     "  */transparency-reader.js) name=transparency-reader.js ;;",
     "  */verify/) name=verify/index.html ;;",
+    "  */why-two-chains/) name=why-two-chains/index.html ;;",
     "  */verify-reader.js) name=verify-reader.js ;;",
     "  */proof-to-pay/) name=proof-to-pay/index.html ;;",
     "  */pool/) name=pool/index.html ;;",
@@ -2151,6 +2154,7 @@ async function makeSiteFixture() {
   await writeFile(join(appRoot, "site/transparency/index.html"), "<title>Transparency</title> fresh build\n");
   await writeFile(join(appRoot, "site/transparency-reader.js"), "// fresh transparency reader\n");
   await writeFile(join(appRoot, "site/verify/index.html"), "<title>Averray Verify</title> fresh build\n");
+  await writeFile(join(appRoot, "site/why-two-chains/index.html"), "<title>Why two chains</title> fresh build\n");
   await writeFile(join(appRoot, "site/verify-reader.js"), "// fresh verify reader\n");
   await writeFile(join(appRoot, "site/proof-to-pay/index.html"), "<title>Proof-to-Pay</title> fresh build\n");
   await writeFile(join(appRoot, "site/pool/index.html"), "<title>Pool</title> fresh build\n");
