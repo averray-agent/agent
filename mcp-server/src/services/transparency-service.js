@@ -12,6 +12,7 @@ import { deriveH160FromAccountId32 } from "../core/wallet-identity.js";
 import { DEPOSIT_POOL_ABI } from "../blockchain/abis.js";
 import { readWithRpcSources } from "../blockchain/rpc-provider.js";
 import { buildRetainedWorkerMetrics } from "../core/retained-workers.js";
+import { readGithubAuthors } from "./github-author-visibility.js";
 
 export const TRANSPARENCY_SCHEMA_VERSION = "averray.transparency.v1";
 export const TRANSPARENCY_CACHE_TTL_MS = 15_000;
@@ -406,6 +407,18 @@ export class TransparencyService {
         total: countField(flow.windows.last24h.jobs)
       },
       settledToExternalWallets24h: countField(flow.workers.outsiders),
+      githubAuthors: {
+        label: flow.githubAuthors?.label ?? "GitHub accounts with a verified claimant footer, not unique humans; wallets include unattributed sessions.",
+        ...Object.fromEntries(Object.entries({ distinctAuthors: "authors", distinctWallets: "wallets", unattributedSessions: "sessions" })
+          .map(([name, unit]) => [name, countField({
+            value: flow.githubAuthors?.[name] ?? null, unit,
+            readAtMs: Date.parse(flow.githubAuthors?.asOf ?? ""),
+            source: flow.githubAuthors?.source ?? "backend_state_store",
+            proof: flow.githubAuthors
+              ? "retained github_pr sessions; author attribution requires verified GitHub author and matched claimant footer binding; unattributed sessions retained"
+              : "github_author_read_unavailable"
+          })]))
+      },
       ...Object.fromEntries(["retainedExternalWorkers30d", "externalRewardOutlay30d", "costPerRetainedExternalWorker30d"]
         .map((name) => [name, countField(flow.retained?.[name] ?? {
           value: null, unit: name === "retainedExternalWorkers30d" ? "wallets" : "USDC",
@@ -540,7 +553,14 @@ export class TransparencyService {
           source: "backend_state_store claim-time snapshots + approved payout receipts + claimant identity",
           proof: `trailing 30d; >=2 distinct source keys per external claimant; ${metrics.costPerRetainedExternalWorker30d.reason ?? "complete"}`
         }]));
-      return { windows, composition, workers, posterFees, participation, retained };
+      const authors = await readGithubAuthors(this.stateStore, { sessions, now: new Date(nowMs) });
+      const githubAuthors = {
+        distinctAuthors: authors.distinctAuthors, distinctWallets: authors.distinctWallets,
+        unattributedSessions: authors.unattributedSessions, githubSessions: authors.githubSessions,
+        source: authors.source, asOf: authors.asOf,
+        label: "GitHub accounts with a verified claimant footer, not unique humans; wallets include unattributed sessions."
+      };
+      return { windows, composition, workers, posterFees, participation, retained, githubAuthors };
     } catch (error) {
       const unknown = { value: null, raw: null, readAtMs, source, proof: redactProviderError(error) || "flow_read_failed" };
       return {

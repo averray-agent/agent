@@ -297,6 +297,8 @@ export default function OverviewPage() {
   const githubReview = asRecord(asRecord(providerOps.data)?.githubPrReview);
   const waitingForMerge = typeof githubReview?.waitingForMerge === "number" ? githubReview.waitingForMerge : null;
   const overdueReview = typeof githubReview?.overdueReview === "number" ? githubReview.overdueReview : null;
+  const githubAuthors = asRecord(asRecord(providerOps.data)?.githubAuthors);
+  const authorRows = Array.isArray(githubAuthors?.authors) ? githubAuthors.authors : [];
   const oldestReviewHours = typeof githubReview?.oldestAgeMs === "number"
     ? Math.floor(githubReview.oldestAgeMs / 3_600_000) : null;
   return (
@@ -308,6 +310,29 @@ export default function OverviewPage() {
         visibleAlertCount={alerts.length}
         alertFeedPresence={alertsPresence}
       />
+      <section aria-label="GitHub author visibility" className="w-full max-w-[1100px] rounded-lg border border-[var(--border)] p-4">
+        <h2 className="font-medium">GitHub author visibility</h2>
+        <p className="text-sm">Verified PR authors bound by claimant footer; accounts are not unique humans. Visibility only, no claim or waiver cap.</p>
+        {!githubAuthors ? <p>Author evidence unavailable.</p> : <>
+          <p>{String(githubAuthors.distinctAuthors)} authors · {String(githubAuthors.distinctWallets)} wallets · {String(githubAuthors.unattributedClaims)} open claims without author evidence.</p>
+          <p className="text-sm">Open includes claimed, submitted, rejected and disputed sessions. Paid totals cover retained history and confirmed worker USDC payouts only.</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <caption className="sr-only">Per-author claims, review queue, settlements and paid USDC</caption>
+              <thead><tr>{["Author", "Open", "Submitted", "Human review", "Settled 7d / 30d", "USDC paid", "Wallets"].map((label) => <th scope="col" className="p-2" key={label}>{label}</th>)}</tr></thead>
+              <tbody>{authorRows.map((value) => {
+                const row = asRecord(value);
+                if (!row || typeof row.author !== "string") return null;
+                const paid = asRecord(row.usdcPaid);
+                return <tr key={row.author}><th scope="row" className="p-2">{row.author}</th>
+                  <td>{String(row.openClaims)}</td><td>{String(row.submitted)}</td><td>{String(row.awaitingHumanReview)}</td>
+                  <td>{String(row.settled7d)} / {String(row.settled30d)}</td>
+                  <td>{paid?.amount == null ? "Unavailable" : String(paid.amount)}</td><td>{String(row.distinctWallets)}</td></tr>;
+              })}</tbody>
+            </table>
+          </div>
+        </>}
+      </section>
       <div className="hidden w-full max-w-[1100px] flex-col gap-7 min-[1080px]:flex">
       <OverviewTopbar capabilityWarning={capabilityWarning} freshness={freshness} />
       <OrientationCard
@@ -348,7 +373,7 @@ export default function OverviewPage() {
           {" · "}{overdueReview === null ? "Overdue review: unavailable" : `${overdueReview} overdue review`}
           {oldestReviewHours === null ? " · oldest age not reported" : ` · oldest ${oldestReviewHours} hours`}</p>
         <p className="text-sm">Review SLA: {typeof githubReview?.slaHours === "number" ? `${githubReview.slaHours} hours` : "not reported"}.
-          {Array.isArray(githubReview?.warnings) && githubReview.warnings.length > 0 ? " Warning: GitHub PR review overdue." : ""}
+          {Array.isArray(githubReview?.warnings) && githubReview.warnings.some((warning) => warning?.code === "github_pr_review_overdue") ? " Warning: GitHub PR review overdue." : ""}
           {" "}Use the operator review script to list and preview submissions before settling.</p>
       </section>
       <LaneStatusGrid lanes={lanes} meta={hasLiveOverview ? "live API snapshot" : undefined} />

@@ -669,6 +669,44 @@ test("flow reader uses O(1)-ish batch joins for N synthetic settled items", asyn
   );
 });
 
+test("transparency reports distinct GitHub authors beside wallets and states incomplete attribution", async () => {
+  const service = harness();
+  const sessions = [1, 2, 3].map((id) => ({
+    sessionId: String(id), status: "submitted", wallet: "0x" + String(id).repeat(40),
+    jobSnapshot: { definition: { verifierMode: "github_pr" } }
+  }));
+  service.stateStore.listRecentSessions = async () => sessions;
+  service.stateStore.getMutationReceipt = async (_bucket, id) => id === "3" ? null : ({
+    githubLookup: { status: "verified", author: { login: "one-author" },
+      claimantBinding: { status: "matched", walletMatches: true } }
+  });
+  const flow = service.buildFlow(await service.readFlow(), NOW);
+  for (const [name, value, unit] of [["distinctAuthors", 1, "authors"], ["distinctWallets", 3, "wallets"], ["unattributedSessions", 1, "sessions"]]) {
+    const field = flow.githubAuthors[name];
+    assert.deepEqual(Object.keys(field).sort(), ["proof", "readAtMs", "source", "status", "unit", "value"]);
+    assert.equal(field.value, value);
+    assert.equal(field.unit, unit);
+    assert.equal(field.readAtMs, NOW);
+    assert.equal(field.status, "fresh");
+    assert.match(field.source, /retained sessions/u);
+    assert.match(field.proof, /matched claimant footer binding/u);
+  }
+  assert.match(flow.githubAuthors.label, /not unique humans/u);
+  assert.equal(flow.githubAuthors.authors, undefined, "public transparency is aggregate-only");
+});
+
+test("failed session read exposes unavailable author proof and unknown count fields", async () => {
+  const service = harness();
+  service.stateStore.listRecentSessions = async () => { throw new Error("session read failed"); };
+  const flow = service.buildFlow(await service.readFlow(), NOW);
+  for (const name of ["distinctAuthors", "distinctWallets", "unattributedSessions"]) {
+    assert.equal(flow.githubAuthors[name].proof, "github_author_read_unavailable");
+    assert.equal(flow.githubAuthors[name].value, null);
+    assert.equal(flow.githubAuthors[name].readAtMs, null);
+    assert.equal(flow.githubAuthors[name].status, "unknown");
+  }
+});
+
 test("transparency settlement flow uses the shared registry for ours, outsiders, and unknown", async () => {
   const external = "0x1111111111111111111111111111111111111111";
   const acceptance = "0x2222222222222222222222222222222222222222";

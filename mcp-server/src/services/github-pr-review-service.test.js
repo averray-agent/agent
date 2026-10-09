@@ -223,6 +223,7 @@ async function liveFixture() {
     if (url.endsWith("/check-runs")) return Response.json({ check_runs: [{ name: "tests", status: "completed", conclusion: upstream.conclusion }] });
     if (url.endsWith("/reviews")) return Response.json([]);
     return Response.json({ html_url: "https://github.com/owner/repo/pull/2", state: upstream.merged ? "closed" : "open", merged: upstream.merged,
+      user: { login: "VerifiedAuthor" },
       head: { sha: upstream.sha }, title: "Fix #1", body: `Closes #1. Averray claimant wallet: ${wallet}` });
   } });
   const writes = [];
@@ -236,6 +237,18 @@ async function liveFixture() {
   const verifier = new VerifierService(platform, store, undefined, registry);
   return { store, upstream, verifier, writes, review: new GithubPrReviewService({ stateStore: store, verifierService: verifier, githubToken: "token" }) };
 }
+
+test("poll retains the server-read PR author and footer binding even when the observation fingerprint is unchanged", async () => {
+  const f = await liveFixture();
+  await f.review.runOnce();
+  await f.store.upsertMutationReceipt("github_pr_author", "pr", null);
+  await f.review.runOnce();
+  const receipt = await f.store.getMutationReceipt("github_pr_author", "pr");
+  assert.equal(receipt.githubLookup.author.login, "VerifiedAuthor");
+  assert.equal(receipt.githubLookup.claimantBinding.walletMatches, true);
+  assert.equal(receipt.previewOutcome, "approved");
+  assert.equal(f.writes.length, 0);
+});
 
 test("changed upstream with a rejected preview updates the observation without calling verifySubmission and stays submitted", async (t) => {
   const f = await liveFixture();

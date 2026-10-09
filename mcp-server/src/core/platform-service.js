@@ -1,5 +1,6 @@
 import { createStateStore } from "./state-store.js";
 import { matchesPublicJobId } from "./public-job-identity.js";
+import { createGithubAuthorsProvider } from "../services/github-author-visibility.js";
 import { requireJobSnapshot } from "./job-snapshot.js";
 import { githubPrWorkerDefinition, isGithubPrJob } from "./github-pr-worker-contract.js";
 import { buildAverrayDisclosureFooter, buildAverrayDisclosureRequirement, inspectAverrayClaimantBinding } from "./maintainer-surface-policy.js";
@@ -740,6 +741,11 @@ export class PlatformService {
     };
   }
 
+  async getGithubAuthors() {
+    this.githubAuthorsProvider ??= createGithubAuthorsProvider(this.stateStore);
+    return this.githubAuthorsProvider();
+  }
+
   async getAdminStatus({ auth = undefined } = {}) {
     await this.refreshExternalPostingClaimability(this.jobCatalogService.listJobs(), { replace: true });
     const [
@@ -1126,6 +1132,7 @@ export class PlatformService {
       submittedJobAutoVerifier,
       scheduler,
       githubPrReview: await this.githubPrReview?.getStatus?.(),
+      githubAuthors: await this.getGithubAuthors(),
       hostDiagnostics,
       providerOperations,
       onboarding: {

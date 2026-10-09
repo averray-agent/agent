@@ -121,7 +121,8 @@ export function createOperationalRoutes({
         submittedJobAutoVerifierHealth,
         lockedTierHealth,
         githubPrReviewStatus,
-        credentials
+        credentials,
+        githubAuthors
       ] = await Promise.all([
         stateStore.healthCheck?.() ?? { ok: true, backend: stateStore.constructor.name },
         getCachedBlockchainHealth(),
@@ -143,6 +144,9 @@ export function createOperationalRoutes({
         Promise.resolve().then(credentialsHealth).catch(() => ({
           rolesAnywhere: { notAfter: null, ok: false, reason: "credential_health_unavailable" }, badgeReceiptSigner: { kid: null, ok: false, reason: "credential_health_unavailable" },
           kms: { ok: false, lastSignAt: null, reason: "credential_health_unavailable" }
+        })),
+        Promise.resolve().then(() => service?.getGithubAuthors?.()).catch(() => ({
+          warnings: [{ code: "github_author_visibility_unavailable", severity: "warning" }]
         }))
       ]);
       const mutationBackendStatus = await getMutationBackendStatus({
@@ -176,6 +180,7 @@ export function createOperationalRoutes({
         ...buildSubmittedJobAutoVerifierWarnings(submittedJobAutoVerifierHealth),
         ...buildLockedTierWarnings(lockedTierHealth),
         ...(githubPrReviewStatus?.warnings ?? []),
+        ...(githubAuthors?.warnings ?? []),
         ...getProcessWarnings()
       ];
       await recordCapabilityWarningTransitions({
