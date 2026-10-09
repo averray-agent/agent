@@ -1,7 +1,7 @@
 # MCP registry refresh: Verify buyer tools and merged-only work
 
 Decision recorded 2026-10-09 for X4. **Draft; publication waits for this PR's
-gate.** Pascal confirmed renewed DNS-key authentication for `com.averray`, with
+gate and merge.** Pascal confirmed renewed DNS-key authentication for `com.averray`, with
 the publisher's Ed25519 proof matching the `averray.com` TXT record. GitHub
 authentication does not cover this namespace. No registry write or login change
 is part of this PR.
@@ -31,10 +31,14 @@ updates discoverability, not execution or settlement policy.
 |---|---|
 | Name / title | `com.averray/mcp` / `Averray` |
 | Version | `1.1.0` |
-| Description | Paid agent work and paid verification, settled in USDC. Every outcome leaves a signed receipt. |
+| Description | Paid agent work and paid verification, settled in USDC. Verified outcomes get signed receipts. |
 | Remote | `streamable-http`, `https://api.averray.com/mcp` |
 | Website | `https://averray.com` |
 | Repository | `https://github.com/averray-agent/agent` |
+
+The description deliberately does not promise a receipt for every outcome:
+arbitrator/timeout dispute resolutions have no receipt path, and Verify runs
+still recovering a capture do not yet have a signed receipt.
 
 `server.json` does **not** embed a tool list or the merged-only sentence, and this
 PR does not pretend otherwise. Clients connect to the unchanged remote to read
@@ -54,14 +58,15 @@ downstream directory has re-crawled the live tools.
 1. Authentication prerequisite: Pascal's DNS login-complete confirmation was
    received on 2026-10-09. Never request or print a key or registry token.
    The earlier publish attempt returned 401 (expired Registry JWT); that failed
-   attempt is not a publication. **Do not publish until this PR is gated.**
+   attempt is not a publication. **Do not publish until this PR is gated and merged.**
 2. Check the latest entry and whether 1.1.0 already exists. After this draft is
-   gated, run `mcp-publisher publish server.json` from the reviewed checkout.
+   gated and merged, run `mcp-publisher publish server.json` from the merged checkout.
    If namespace authorization fails, stop and report it; do not rename the
    server or change DNS/HTTP ownership proofs to work around it.
 3. Read the exact version and `latest`; verify the table above, successful
    publication metadata and latest-version selection. Record the publication
-   response and time in the X4 runbook. Only then call the refresh complete.
+   response, time and latest-version read in `docs/X402_ENABLEMENT_RUNBOOK.md`.
+   Only then call the refresh complete.
 4. Re-check the live MCP tool list and the `listJobs` rule; do not assume a
    third-party cached directory refreshed merely because the official entry did.
 
@@ -76,4 +81,4 @@ Observed on 2026-10-09: `latest` returned 200 with 1.0.0 and the correct remote;
 1.1.0 returned 404. Consumers: registry publishers read `server.json`; registry
 aggregators copy its metadata; MCP clients get the actual tools from the remote.
 No response shapes, consumer fixtures, runtime code, environment or VPS state
-change in this docs-only PR.
+change in this metadata-and-docs PR.
