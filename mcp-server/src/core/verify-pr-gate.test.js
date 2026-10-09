@@ -68,7 +68,8 @@ test("Verify buyer challenge pins exact Base constants without a recipe price li
       assert.equal(terms.payTo, "0x1013e3fe3f6deb4e61dc023ff69d420dd9ce8f9f");
       assert.equal(terms.amount, "5000000");
       assert.equal(profile.price.billingRule, "inconclusive_not_billed");
-      assert.equal(error.details.paymentRequired.billingRule, undefined);
+      assert.equal(error.details.paymentRequired.billingRule, "No verdict, no charge. Inconclusive runs are not billed.");
+      assert.equal(error.details.paymentRequired.billing.status, "not_captured");
       return true;
     });
   }

@@ -152,7 +152,7 @@ test("red-then-green: changed source bytes without sha is inconclusive, never ca
   await runService.finalizeAvailableRuns();
   const completed = await runService.getRun(queued.runId);
   assert.equal(completed.verdict.outcome, "inconclusive");
-  assert.equal(completed.billing.status, "not_billed");
+  assert.equal(completed.billing.status, "not_captured");
   assert.equal(calls.capture, 0, "an in-runner hash mismatch must never attempt capture");
   assert.equal(calls.release, 1);
 

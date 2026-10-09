@@ -26,7 +26,7 @@ test("inconclusive Verify runs never increase billed volume; approved and reject
     // Even a corrupt captured marker must not make a non-decisive verdict revenue.
     assert.equal(total([...decisive, capture(3, outcome)]), 10_000_000n);
   }
-  for (const status of ["authorized", "not_billed", "failed"]) {
+  for (const status of ["authorized", "not_captured", "not_billed", "failed"]) {
     const row = capture(4);
     row.billing.status = status;
     assert.equal(total([...decisive, row]), 10_000_000n);

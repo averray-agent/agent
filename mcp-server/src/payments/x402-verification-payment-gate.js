@@ -17,6 +17,7 @@ import {
   PROFILE_BLOCKCHAIN_SIGNER
 } from "../services/aws-credentials.js";
 import { PaymentVerificationError } from "./payment-errors.js";
+import { withVerifyBilling } from "../core/verify-product-copy.js";
 import {
   assertX402PaymentMatchesRequirements,
   decodeX402PaymentProof,
@@ -356,12 +357,12 @@ export class X402VerificationPaymentGate {
   }
 
   paymentEnvelope(requirements) {
-    return {
+    return withVerifyBilling({
       x402Version: 2,
       error: "Payment required to run this Averray verification profile.",
       resource: this.paymentResource(),
       accepts: [requirements]
-    };
+    });
   }
 
   paymentResource() {

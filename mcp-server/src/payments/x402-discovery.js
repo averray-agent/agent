@@ -1,5 +1,6 @@
 import { hashCanonicalContent } from "../core/canonical-content.js";
 import { ConfigError } from "../core/errors.js";
+import { VERIFY_BILLING_RULE } from "../core/verify-product-copy.js";
 import { VERIFY_X402_NETWORK } from "./x402-verification-payment-gate.js";
 
 export const X402_DISCOVERY_PATH = "/.well-known/x402";
@@ -62,6 +63,7 @@ export async function buildX402DiscoveryDocument({
         method: "POST",
         description: resource.description,
         mimeType: resource.mimeType,
+        billingRule: VERIFY_BILLING_RULE,
         inputContract: {
           method: "GET",
           url: new URL("/verify/profiles", resource.url).toString(),
@@ -79,7 +81,7 @@ export async function buildX402DiscoveryDocument({
             initialStatus: "queued",
             poll: "GET /verify/runs/{runId}",
             capture: "approved_or_rejected_only",
-            inconclusive: "not_billed"
+            inconclusive: "not_captured"
           }
         },
         maxAmountRequired: maximumAmount(accepts),

@@ -4,6 +4,14 @@ export const VERIFY_PROFILES_URL = "https://api.averray.com/verify/profiles";
 export const VERIFY_BASE_NETWORK = "eip155:8453";
 export const VERIFY_BASE_USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 export const VERIFY_BILLING_RULE = "No verdict, no charge. Inconclusive runs are not billed.";
+export function withVerifyBilling(body) {
+  const billing = body?.billing ?? { status: "not_captured" };
+  return {
+    ...body,
+    billing: { ...billing, status: billing.status === "not_billed" ? "not_captured" : billing.status },
+    billingRule: VERIFY_BILLING_RULE
+  };
+}
 export const VERIFY_TOOL_PAYMENT_DESCRIPTION =
   `Read live price and payment requirements from ${VERIFY_X402_DISCOVERY_URL}; USDC on Base ${VERIFY_BASE_NETWORK}. ${VERIFY_BILLING_RULE}`;
 

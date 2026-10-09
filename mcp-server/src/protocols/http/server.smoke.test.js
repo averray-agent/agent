@@ -306,6 +306,8 @@ test("http smoke: Verify returns every named request violation in one response",
     assert.equal(response.status, 400);
     const payload = await response.json();
     assert.equal(payload.error, "invalid_request");
+    assert.equal(payload.billing.status, "not_captured");
+    assert.equal(payload.billingRule, "No verdict, no charge. Inconclusive runs are not billed.");
     assert.deepEqual(
       payload.details.violations.map(({ path }) => path),
       [
