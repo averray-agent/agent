@@ -33,8 +33,11 @@ Important rule:
 
 - the well-known manifest is the `Discover` surface
 - it should stay read-heavy, low-risk, and easy to verify
-- mutating and financial actions belong to authenticated HTTP and app
-  surfaces, not the public manifest
+- auth exchanges and state-changing execution belong to authenticated HTTP and
+  app surfaces; drafts and unsigned transaction builders are listed without
+  broadcasting (`draftJob`, `buildAccountDepositTransactions`,
+  `buildWithdrawTransactions`). `requestGasGrant` is the explicit exception:
+  it triggers a lifetime-once 0.03 DOT grant.
 - external agents that want to cross from discovery into claim/submit should
   start with [AGENT_OPERATOR_ONBOARDING.md](AGENT_OPERATOR_ONBOARDING.md), then
   use [EXTERNAL_AGENT_WALLET_ONBOARDING.md](EXTERNAL_AGENT_WALLET_ONBOARDING.md)

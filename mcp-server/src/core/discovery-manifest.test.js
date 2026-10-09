@@ -120,6 +120,14 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   assert.equal(manifest.schemas.jobSchemasIndex, "https://api.example.com/schemas/jobs");
   assert.equal(manifest.schemas.jobSchemaPathTemplate, "https://api.example.com/schemas/jobs/<name>.json");
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/schemas/jobs"));
+  const resultRead = manifest.publicEndpoints.find((entry) => entry.method === "GET" && entry.path === "/verifier/result");
+  assert.match(resultRead?.description, /Unauthenticated.*sessionId.*not_found.*\/verify\/runs\/\{runId\}/);
+  assert.ok(!manifest.authenticatedEndpoints.some((entry) => entry.path === "/verifier/result"));
+  assert.match(manifest.executionSurfaces.note, /Auth exchanges and state-changing execution tools are excluded/);
+  for (const name of ["draftJob", "buildAccountDepositTransactions", "buildWithdrawTransactions"]) {
+    assert.ok(manifest.executionSurfaces.note.includes(name));
+  }
+  assert.match(manifest.executionSurfaces.note, /requestGasGrant.*lifetime-once 0\.03 DOT grant/);
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/session/state-machine"));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/verify/profiles"));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/.well-known/x402"));
@@ -128,9 +136,9 @@ test("buildDiscoveryManifest returns the full public discovery shape", () => {
   )));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/verify/runs"));
   assert.ok(manifest.publicEndpoints.some((entry) => entry.path === "/verify/runs/:runId"));
-  assert.ok(manifest.tools.some((tool) => tool.name === "listJobSchemas"));
+  assert.ok(manifest.publicEndpoints.some((endpoint) => endpoint.path === "/schemas/jobs"));
   assert.ok(manifest.tools.some((tool) => tool.name === "listVerificationProfiles"));
-  assert.ok(manifest.tools.some((tool) => tool.name === "getSessionStateMachine"));
+  assert.ok(manifest.publicEndpoints.some((endpoint) => endpoint.path === "/session/state-machine"));
   assert.equal(manifest.auth.schemeId, "SIWE_JWT");
   assert.deepEqual(manifest.auth.supportedWalletModes, ["evm-siwe", "substrate-native"]);
   assert.deepEqual(manifest.auth.plannedWalletModes, []);
@@ -287,11 +295,13 @@ test("mainnet chainId renders the mainnet chain block on every network-dependent
   )));
 
   // Anti-desync guard: nothing in the mainnet manifest may still reference the
-  // testnet chain, its currency, or a faucet — however the wording evolves.
+  // testnet chain, currency, or faucet URL. MCP's withdrawal input explicitly
+  // says its eligibility-bound grant is not a standing faucet.
   const serialized = JSON.stringify(manifest);
   assert.ok(!serialized.includes(String(POLKADOT_HUB_TESTNET_CHAIN_ID)));
   assert.ok(!/testnet/iu.test(serialized));
-  assert.ok(!/faucet/iu.test(serialized));
+  assert.equal(serialized.split("not a standing faucet").length - 1, 1);
+  assert.ok(!/faucet/iu.test(serialized.replace("not a standing faucet", "")));
   assert.ok(!serialized.includes('"PAS"'));
 });
 

@@ -3,8 +3,8 @@ export const DISCOVERY_ALIAS_PATHS = Object.freeze([
   "/.well-known/agent-card.json"
 ]);
 
-// Project only the directory slice. In particular, do not spread the full
-// manifest: its onboarding instructions also name connected-only tools.
+// Project descriptive metadata, including the same MCP catalog and auth
+// requirements as the main manifest, without spreading execution endpoints.
 // Neither filename is a claim to implement another agent protocol.
 export function buildDiscoveryAlias(manifest, pricing, { card = false } = {}) {
   return {
