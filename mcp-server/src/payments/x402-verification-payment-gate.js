@@ -266,7 +266,16 @@ export class X402VerificationPaymentGate {
 
     // Capture the lower bound before the nonce read, so a cancellation during
     // execution (or between these reads) cannot fall outside reconciliation.
-    const authorizedAtBlock = await this.provider.getBlockNumber();
+    let authorizedAtBlock;
+    try {
+      authorizedAtBlock = await this.provider.getBlockNumber();
+      if (!Number.isSafeInteger(authorizedAtBlock) || authorizedAtBlock < 0) throw new Error("Invalid block number");
+    } catch {
+      throw new AppError("Base authorization checkpoint is unavailable; no work was admitted.", {
+        name: "PaymentVerificationError", statusCode: 503, code: "payment_block_unavailable",
+        details: { reason: "base_block_read_failed", action: "retry_when_base_reads_recover", customerFunds: "unchanged" }
+      });
+    }
     let used;
     try {
       used = await this.token.authorizationState(authorization.from, authorization.nonce);
@@ -362,22 +371,9 @@ export class X402VerificationPaymentGate {
       throw Object.assign(new Error("Capture reconciliation range unavailable."), { code: "capture_range_unavailable" });
     }
     const expired = BigInt(latest.timestamp) > BigInt(proof.validBefore);
-    let toBlock = latest.number;
-    if (expired) {
-      // Find the final block in the authorization's validity window. A late
-      // finalizer never extends a payment scan arbitrarily towards today's head.
-      let low = firstBlock;
-      let high = latest.number;
-      toBlock = firstBlock - 1;
-      while (low <= high) {
-        const middle = Math.floor((low + high) / 2);
-        const block = await this.provider.getBlock(middle);
-        if (!block || !Number.isSafeInteger(block.timestamp)) throw new Error("Base historical block unavailable.");
-        if (BigInt(block.timestamp) <= BigInt(proof.validBefore)) {
-          toBlock = middle; low = middle + 1;
-        } else high = middle - 1;
-      }
-    }
+    // Cancellation has no validBefore check. Scan through the observed head,
+    // including after expiry, with bounded pages and persisted progress.
+    const toBlock = latest.number;
     // Persist progress between bounded chunks instead of wedging forever on
     // an old/large authorization window. Re-read the boundary on the next pass.
     const scanFrom = Math.max(firstBlock, captureScanNextBlock ?? firstBlock);
@@ -411,7 +407,7 @@ export class X402VerificationPaymentGate {
           && decoded.args.value >= BigInt(proof.value);
       });
       if (transfer) return { status: "captured", transactionHash: event.transactionHash, proof: "reconciled_from_chain" };
-      return { status: "pending" };
+      return { status: "used_elsewhere" };
     }
     if (scanEnd < toBlock) return { status: "pending", captureScanNextBlock: scanEnd + 1, legacy };
     if (expired && !used && !legacy) return { status: "expired" };

@@ -1855,7 +1855,7 @@
             }
           },
           "503": {
-            "description": "Payment or execution capability unavailable. payment_balance_unavailable means the Base USDC balance read failed: details.reason base_balance_read_failed, details.action retry_when_base_reads_recover. No run or reservation is created; a failed read never admits work.",
+            "description": "Payment or execution capability unavailable. payment_block_unavailable with details.reason base_block_read_failed means the Base admission checkpoint could not be read; no run is admitted. payment_balance_unavailable means the Base USDC balance read failed: details.reason base_balance_read_failed, details.action retry_when_base_reads_recover. No run or reservation is created; a failed read never admits work.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4832,6 +4832,7 @@
           },
           "verdict": {
             "type": "object",
+            "description": "Recovering captures expose no decisive verdict. Terminal unbilled recovery reasons: payment_cancelled_by_payer, payment_authorization_used_elsewhere, payment_authorization_expired; each has outcome inconclusive.",
             "additionalProperties": true
           },
           "receipt": {

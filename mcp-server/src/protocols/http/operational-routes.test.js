@@ -145,11 +145,11 @@ test("GET /health exposes credential freshness without making an unavailable sig
   assert.deepEqual(response.body.serviceHealth.components.credentials, credentials);
 });
 
-test("GET /health exposes only a counted legacy capture warning", async () => {
-  const warning = { code: "verify_capture_legacy_unresolved", severity: "warning", count: 2 };
-  const h = makeHarness({ verificationRunService: { getCaptureWarnings: async () => [warning] } });
+test("GET /health exposes counted legacy and overdue non-legacy capture warnings", async () => {
+  const warnings = ["verify_capture_legacy_unresolved", "verify_capture_open"].map((code) => ({ code, severity: "warning", count: 2 }));
+  const h = makeHarness({ verificationRunService: { getCaptureWarnings: async () => warnings } });
   await h.route({ request: { method: "GET" }, response: h.response, pathname: "/health" });
-  assert.deepEqual(h.response.body.warnings.filter((w) => w.code === warning.code), [warning]);
+  assert.deepEqual(h.response.body.warnings.filter((w) => w.code.startsWith("verify_capture_")), warnings);
 });
 
 test("GET /health never signs or calls KMS and unused signers are not failures", async (t) => {

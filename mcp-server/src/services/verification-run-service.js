@@ -158,8 +158,9 @@ export class VerificationRunService {
     const active = [];
     // Select before mutating the active index: completing a row must not shift
     // paging offsets. Not-due captures do not consume the batch or issue RPC.
-    for (let offset = 0; active.length < limit; offset += 100) {
-      const page = await this.stateStore.listActiveVerificationRuns(100, { offset });
+    for (let offset = 0; active.length < limit;) {
+      const pageSize = Math.min(100, limit - active.length);
+      const page = await this.stateStore.listActiveVerificationRuns(pageSize, { offset, dueBefore: this.now().getTime() });
       for (const run of page) {
         try {
           if (this.executionReadyForFinalization(run)) active.push(run);
@@ -168,7 +169,8 @@ export class VerificationRunService {
         }
         if (active.length >= limit) break;
       }
-      if (page.length < 100) break;
+      if (page.length < pageSize) break;
+      offset += pageSize;
     }
     const finalized = [];
     for (const candidate of active) {
@@ -259,7 +261,7 @@ export class VerificationRunService {
     } else if (verdict.outcome === "approved" || verdict.outcome === "rejected") {
       if (!capturing) {
         run = { ...run, status: "executed", verdict, execution,
-          billing: { ...run.billing, status: "capturing" } };
+          billing: { ...run.billing, status: "capturing", captureStartedAt: this.now().toISOString() } };
         await this.stateStore.updateVerificationRun(run.runId, run);
       }
       // Persist the scan boundary before any broadcast. A failed boundary read
@@ -269,9 +271,14 @@ export class VerificationRunService {
         run = { ...run, billing: { ...run.billing, ...checkpoint, capturePrepared: true } };
         await this.stateStore.updateVerificationRun(run.runId, run);
       }
-      let capture = capturing
+      const owner = authorization?.id
+        ? await this.stateStore.getVerificationRunByAuthorizationId(authorization.id) : undefined;
+      let capture = owner && owner.runId !== run.runId ? { status: "used_elsewhere" } : capturing || !owner
         ? await this.reconcileCapture(run, authorization)
         : { status: "open" };
+      if (!owner && ["open", "captured"].includes(capture.status)) {
+        throw Object.assign(new Error("Payment authorization ownership is unavailable."), { code: "payment_authorization_owner_unavailable" });
+      }
       if (capture.status === "open") {
         try {
           capture = { ...await this.paymentGate.capture({
@@ -286,16 +293,19 @@ export class VerificationRunService {
           capture = await this.reconcileCapture(run, authorization);
         }
       }
-      if (!["captured", "cancelled", "expired"].includes(capture.status)) {
+      if (!["captured", "cancelled", "expired", "used_elsewhere"].includes(capture.status)) {
         if (capture.status !== "unavailable") this.logger.warn?.({ runId: run.runId, status: capture.status }, "verification_run.capture_pending");
         await this.deferCapture(run);
         return publicRun(run);
       }
       if (capture.status !== "captured") {
-        const reason = capture.status === "cancelled" ? "payment_cancelled_by_payer" : "payment_authorization_expired";
+        const reason = capture.status === "cancelled" ? "payment_cancelled_by_payer"
+          : capture.status === "used_elsewhere" ? "payment_authorization_used_elsewhere" : "payment_authorization_expired";
         await safeRelease(this.paymentGate, { authorization, runId: run.runId, reason });
         execution = { status: "inconclusive", reason,
-          detail: capture.status === "cancelled" ? "Payment cancelled by payer." : "Payment authorization expired unused; no fee was recorded." };
+          detail: capture.status === "cancelled" ? "Payment cancelled by payer."
+            : capture.status === "used_elsewhere" ? "Payment authorization was used for another payee or purchase; this run is not billed."
+              : "Payment authorization expired unused; no fee was recorded." };
         verdict = inconclusiveVerdict(reason, execution.detail);
         billing = notBilled(profile);
       } else {
@@ -384,12 +394,16 @@ export class VerificationRunService {
   async getCaptureWarnings() {
     if (this.captureWarningsCache?.expiresAt > this.now().getTime()) return this.captureWarningsCache.warnings;
     let count = 0;
+    let openCount = 0;
     for (let offset = 0; ; offset += 100) {
       const page = await this.stateStore.listActiveVerificationRuns(100, { offset });
       count += page.filter((run) => run.billing?.legacyCaptureUnresolved).length;
+      openCount += page.filter((run) => run.billing?.status === "capturing" && !run.billing.legacyCaptureUnresolved
+        && Date.parse(run.billing.captureStartedAt ?? run.submittedAt) < this.now().getTime() - 15 * 60_000).length;
       if (page.length < 100) break;
     }
     const warnings = count ? [{ code: "verify_capture_legacy_unresolved", severity: "warning", count }] : [];
+    if (openCount) warnings.push({ code: "verify_capture_open", severity: "warning", count: openCount });
     this.captureWarningsCache = { warnings, expiresAt: this.now().getTime() + 30_000 };
     return warnings;
   }
@@ -459,9 +473,17 @@ export class UnavailableVerificationPaymentGate {
 }
 
 function publicRun(run) {
-  if (run?.billing?.status !== "capturing") return run;
-  const { verdict, execution, ...pending } = run;
-  return pending;
+  if (!run) return run;
+  const { requestHash, ...result } = run;
+  if (run.billing) {
+    result.billing = Object.fromEntries(["status", "amount", "amountRaw", "asset", "network", "transactionHash", "proof", "reason"]
+      .filter((key) => run.billing[key] !== undefined).map((key) => [key, run.billing[key]]));
+  }
+  if (run.billing?.status === "capturing") {
+    delete result.verdict;
+    delete result.execution;
+  }
+  return result;
 }
 
 function assertPaymentAuthorization(authorization, profile) {
@@ -492,7 +514,7 @@ function requireMatchingVerificationReplay(run, requestHash) {
 }
 
 function inconclusiveVerdict(reason, detail) {
-  const normalized = ["payment_cancelled_by_payer", "payment_authorization_expired"].includes(reason) || VERIFY_INCONCLUSIVE_REASONS.includes(reason) ? reason : "runner_fault";
+  const normalized = ["payment_cancelled_by_payer", "payment_authorization_expired", "payment_authorization_used_elsewhere"].includes(reason) || VERIFY_INCONCLUSIVE_REASONS.includes(reason) ? reason : "runner_fault";
   return {
     handler: "deterministic",
     handlerVersion: 1,

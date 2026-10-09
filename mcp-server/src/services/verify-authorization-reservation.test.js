@@ -35,7 +35,7 @@ async function fixture(t, backend) {
       asset: domain.verifyingContract.toLowerCase(), payTo: "0x1111111111111111111111111111111111111111",
       assetEip712Name: domain.name, assetEip712Version: domain.version,
       publicOrigin: "https://api.averray.com", captureMarginSeconds: 600 },
-    provider: { getNetwork: async () => ({ chainId: 8453n }) },
+    provider: { getNetwork: async () => ({ chainId: 8453n }), getBlockNumber: async () => 100 },
     tokenContract: { name: async () => domain.name, DOMAIN_SEPARATOR: async () => TypedDataEncoder.hashDomain(domain),
       balanceOf: async (payer) => { calls.balances.push(payer); if (clock.balanceError) throw clock.balanceError; return clock.balance; },
       authorizationState: async () => { calls.nonceReads++; return clock.used; } },
@@ -172,10 +172,12 @@ for (const backend of ["Memory", "Redis"]) {
     const h = await fixture(t, backend);
     const input = await h.request();
     const decoded = JSON.parse(Buffer.from(input.paymentProof, "base64"));
-    decoded.payload.authorization.validBefore = String(Math.floor(h.clock.now.getTime() / 1000) + decoded.accepted.maxTimeoutSeconds + 301);
-    decoded.payload.signature = await h.wallet.signTypedData(h.domain, TYPES, decoded.payload.authorization);
-    await assert.rejects(h.service.createRun({ ...input, paymentProof: Buffer.from(JSON.stringify(decoded)).toString("base64") }),
-      { statusCode: 402, code: "payment_authorization_window_too_long", details: { action: "sign_fresh_authorization", customerFunds: "unchanged" } });
+    for (const validBefore of [Math.floor(h.clock.now.getTime() / 1000) + decoded.accepted.maxTimeoutSeconds + 301, 2n ** 256n - 1n]) {
+      decoded.payload.authorization.validBefore = String(validBefore);
+      decoded.payload.signature = await h.wallet.signTypedData(h.domain, TYPES, decoded.payload.authorization);
+      await assert.rejects(h.service.createRun({ ...input, paymentProof: Buffer.from(JSON.stringify(decoded)).toString("base64") }),
+        { statusCode: 402, code: "payment_authorization_window_too_long", details: { action: "sign_fresh_authorization", customerFunds: "unchanged" } });
+    }
     assert.equal((await h.store.listActiveVerificationRuns()).length, 0);
     assert.equal(h.calls.starts, 0);
     assert.equal(h.calls.nonceReads, 0);

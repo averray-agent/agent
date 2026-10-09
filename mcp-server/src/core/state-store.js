@@ -102,6 +102,10 @@ function verificationReservationTtl(value) {
   return value;
 }
 
+function verificationActiveScore(run) {
+  return Math.max(timestampScore(run.submittedAt, 0), timestampScore(run.billing?.nextCaptureAttemptAt, 0));
+}
+
 const RELEASE_CLAIM_LOCK_SCRIPT = `
 if redis.call("get", KEYS[1]) == ARGV[1] then
   return redis.call("del", KEYS[1])
@@ -285,7 +289,7 @@ if ARGV[3] ~= "" then
   redis.call("set", KEYS[3], ARGV[3])
 end
 redis.call("zadd", KEYS[4], ARGV[4], ARGV[1])
-redis.call("zadd", KEYS[5], ARGV[4], ARGV[1])
+redis.call("zadd", KEYS[5], ARGV[6], ARGV[1])
 return {1, ARGV[1]}
 `;
 
@@ -703,9 +707,10 @@ export class MemoryStateStore {
     return cloneJsonRecord(this.verificationRunAuthorizations.get(String(runId)));
   }
 
-  async listActiveVerificationRuns(limit = 100, { offset = 0 } = {}) {
+  async listActiveVerificationRuns(limit = 100, { offset = 0, dueBefore } = {}) {
     return [...this.verificationRuns.values()]
       .filter((run) => run.status !== "complete")
+      .filter((run) => dueBefore === undefined || verificationActiveScore(run) <= dueBefore)
       .sort((left, right) => String(left.submittedAt ?? "").localeCompare(String(right.submittedAt ?? "")))
       .slice(offset, offset + Math.max(0, Number(limit)))
       .map((run) => cloneJsonRecord(run));
@@ -1954,7 +1959,8 @@ export class RedisStateStore {
         JSON.stringify(run),
         authorization ? JSON.stringify(authorization) : "",
         String(timestampScore(run.submittedAt)),
-        String(ttl)
+        String(ttl),
+        String(verificationActiveScore(run))
       ]
     });
     const [createdRaw, runId] = Array.isArray(reply) ? reply : [0, undefined];
@@ -1981,11 +1987,14 @@ export class RedisStateStore {
     return raw ? JSON.parse(raw) : undefined;
   }
 
-  async listActiveVerificationRuns(limit = 100, { offset = 0 } = {}) {
+  async listActiveVerificationRuns(limit = 100, { offset = 0, dueBefore } = {}) {
     await this.connect();
     const normalizedLimit = Math.max(0, Number(limit));
     if (normalizedLimit === 0) return [];
-    const runIds = await this.client.zRange(this.key("verification-runs", "active"), offset, offset + normalizedLimit - 1);
+    const runIds = dueBefore === undefined
+      ? await this.client.zRange(this.key("verification-runs", "active"), offset, offset + normalizedLimit - 1)
+      : await this.client.zRangeByScore(this.key("verification-runs", "active"), "-inf", dueBefore,
+        { LIMIT: { offset, count: normalizedLimit } });
     const runs = await Promise.all(runIds.map((runId) => this.getVerificationRun(runId)));
     return runs.filter(Boolean);
   }
@@ -2050,6 +2059,8 @@ export class RedisStateStore {
         .del(this.key("verification-run-authorization", normalizedRunId))
         .zRem(this.key("verification-runs", "queued"), normalizedRunId)
         .zRem(this.key("verification-runs", "active"), normalizedRunId);
+    } else {
+      transaction.zAdd(this.key("verification-runs", "active"), { score: verificationActiveScore(run), value: normalizedRunId });
     }
     await transaction.exec();
     return this.getVerificationRun(runId);

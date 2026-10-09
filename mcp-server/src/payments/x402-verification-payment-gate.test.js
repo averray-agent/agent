@@ -251,6 +251,21 @@ test("an already-used on-chain authorization nonce is refused", async () => {
   assert.equal(calls.capture, 0);
 });
 
+test("X1d admission block read failure is an actionable 503 payment refusal", async () => {
+  const { gate, calls } = harness();
+  const { paymentProof } = await signedPayment(gate);
+  gate.provider.getBlockNumber = async () => { throw new Error("private provider diagnostic"); };
+  await assert.rejects(authorize(gate, paymentProof), (error) => {
+    assert.equal(error.statusCode, 503);
+    assert.equal(error.code, "payment_block_unavailable");
+    assert.equal(error.details.reason, "base_block_read_failed");
+    assert.ok(!JSON.stringify(error).includes("private provider diagnostic"));
+    return true;
+  });
+  assert.equal(calls.authorizationState, 0);
+  assert.equal(calls.capture, 0);
+});
+
 test("malformed authorization integers are actionable 402 refusals and transient domain reads retry", async () => {
   const transient = harness({ domainFailures: 1 });
   await assert.rejects(
