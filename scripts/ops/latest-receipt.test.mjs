@@ -11,10 +11,10 @@ const id = (digit) => "0x" + digit.repeat(64);
 async function harness() {
   const keys = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
   const jwk = { ...await webcrypto.subtle.exportKey("jwk", keys.publicKey), alg: "ES256", kid: "badge-1", use: "sig" };
-  async function row(digit, date = "2026-10-09T10:00:00Z") {
+  async function row(digit, date = "2026-10-09T10:00:00Z", overrides = {}) {
     const document = { schemaVersion: "averray.work-receipt.v1", kind: "run", receiptId: id(digit),
       verifier: { handler: "github_pr" }, verdict: { outcome: "approved" },
-      settlement: { settlementTx: id("f") }, timestamps: { verifiedAt: date } };
+      settlement: { settlementTx: id("f") }, timestamps: { verifiedAt: date }, ...overrides };
     const header = { alg: "ES256", kid: "badge-1", signedAt: date, typ: "averray-badge-receipt+jws" };
     const protectedPart = Buffer.from(canonicalize(header)).toString("base64url");
     const input = new TextEncoder().encode(protectedPart + "." + Buffer.from(canonicalize(document)).toString("base64url"));
@@ -26,7 +26,7 @@ async function harness() {
   }
   const calls = [];
   const rows = [await row("1"), await row("2", "2026-10-08T10:00:00Z")];
-  let pages = [{ items: rows, nextCursor: null }];
+  let pageOverride;
   let linked = null;
   let jwksOk = true;
   const fetchImpl = async (url, options) => {
@@ -35,37 +35,65 @@ async function harness() {
     if (url.includes("/.well-known/")) return { ok: jwksOk, json: async () => ({ keys: [jwk] }) };
     if (url.includes("/receipts/")) return { ok: true, json: async () => ({ schemaVersion: "averray.receipt-envelope.v1",
       document: linked ?? rows.find((r) => url.endsWith(r.document.receiptId)).document }) };
-    return { ok: true, json: async () => pages[url.includes("cursor=") ? 1 : 0] };
+    assert.deepEqual(Object.fromEntries(new URL(url).searchParams), {
+      handler: "github_pr", outcome: "approved", settled: "true", sort: "verifiedAt:desc", limit: "1"
+    });
+    const eligible = rows.filter(({ document: d }) => d.verifier.handler === "github_pr"
+      && d.verdict.outcome === "approved" && /^0x[0-9a-f]{64}$/iu.test(d.settlement?.settlementTx))
+      .sort((a, b) => Date.parse(b.document.timestamps.verifiedAt) - Date.parse(a.document.timestamps.verifiedAt));
+    return { ok: true, json: async () => pageOverride ?? {
+      items: eligible.slice(0, 1), nextCursor: eligible.length > 1 ? "more" : null
+    } };
   };
-  return { row, rows, calls, fetchImpl, setPages: (value) => { pages = value; },
+  return { row, rows, calls, fetchImpl, setPage: (value) => { pageOverride = value; },
     setLinked: (value) => { linked = value; }, setJwksOk: (value) => { jwksOk = value; } };
 }
 
-test("latest receipt walks served envelopes, sorts signed dates, and verifies the linked document", async () => {
+test("latest receipt makes one filtered one-item query and browser-verifies the linked signed document", async () => {
   const h = await harness();
   h.rows[1].unsignedPresentation.issuedAt = "2099-01-01";
-  h.setPages([{ items: [h.rows[1], { ...h.rows[0], unsignedPresentation: { kind: "badge" } }], nextCursor: "next/page" },
-    { items: [h.rows[0]], nextCursor: null }]);
+  h.rows[0].unsignedPresentation.issuedAt = "1999-01-01";
+  h.rows.unshift(await h.row("3", "2026-10-09T11:59:00Z", { verifier: { handler: "benchmark" } }),
+    await h.row("4", "2026-10-09T11:58:00Z", { verdict: { outcome: "rejected" } }),
+    await h.row("5", "2026-10-09T11:57:00Z", { settlement: {} }));
   assert.deepEqual(await latestReceipt({ ...h, cryptoImpl: webcrypto, now }), {
     href: `/receipts/${id("1")}/`, date: "2026-10-09", signature: "Signed by badge-1 (ES256)" });
-  assert.ok(h.calls.some((url) => url.endsWith("cursor=next%2Fpage")));
+  assert.equal(h.calls.filter((url) => url.includes("/badges?")).length, 1);
+  assert.equal(h.calls.length, 3, "only list, linked document and JWKS; never follow nextCursor");
   assert.ok(h.calls.some((url) => url.endsWith(`/receipts/${id("1")}`)));
 });
 
-test("stale, absent, non-GitHub, unsettled, incomplete and failed reads never claim latest", async () => {
+for (const [name, date, overrides] of [
+  ["stale", "2026-08-16T10:00:00Z", {}],
+  ["future", "2026-10-10T10:00:00Z", {}],
+  ["missing signed date", undefined, { timestamps: {} }],
+  ["non-GitHub", undefined, { verifier: { handler: "benchmark" } }],
+  ["rejected", undefined, { verdict: { outcome: "rejected" } }],
+  ["unsettled", undefined, { settlement: {} }],
+  ["non-hash settlement", undefined, { settlement: { settlementTx: "pending" } }],
+  ["badge document", undefined, { kind: "badge" }]
+]) test(`${name} candidate with matching signed linked document never claims latest`, async () => {
   const h = await harness();
-  const stale = await h.row("3", "2026-08-16T10:00:00Z");
+  const candidate = await h.row("3", date, overrides);
+  h.setPage({ items: [candidate], nextCursor: null });
+  h.setLinked(candidate.document);
+  assert.equal(await latestReceipt({ ...h, cryptoImpl: webcrypto, now }), null);
+});
+
+test("absent, malformed and failed reads never claim latest", async () => {
+  const h = await harness();
   for (const page of [
-    { items: [stale], nextCursor: null }, { items: [], nextCursor: null },
-    { items: [{ ...h.rows[0], document: { ...h.rows[0].document, verifier: { handler: "verify" } } }], nextCursor: null },
-    { items: [{ ...h.rows[0], document: { ...h.rows[0].document, settlement: undefined } }], nextCursor: null },
-    { items: h.rows, nextCursor: "loop" }, { items: h.rows },
-    { items: [{ schemaVersion: "future" }], nextCursor: null }
+    { items: [], nextCursor: null }, { items: [h.rows[0]] },
+    { items: [{ ...h.rows[0], schemaVersion: "future" }], nextCursor: null },
+    { items: [{ ...h.rows[0], unsignedPresentation: { kind: "badge" } }], nextCursor: null }
   ]) {
-    h.setPages([page, page]);
-    h.setLinked(stale.document);
+    h.setPage(page);
+    h.setLinked(h.rows[0].document);
     assert.equal(await latestReceipt({ ...h, cryptoImpl: webcrypto, now }), null);
   }
+  h.setPage(undefined);
+  h.rows.splice(0, h.rows.length, await h.row("3", undefined, { verifier: { handler: "benchmark" } }));
+  assert.equal(await latestReceipt({ ...h, cryptoImpl: webcrypto, now }), null, "filter has no matches");
   assert.equal(await latestReceipt({ fetchImpl: async () => { throw new Error("offline"); }, now }), null);
 });
 

@@ -12,8 +12,7 @@ function settledGithubRun(document) {
     && HASH.test(document.receiptId) && HASH.test(document.settlement?.settlementTx);
 }
 
-// /badges pages are session-ordered, not globally receipt-date-ordered. Finish
-// the bounded walk before claiming "latest"; a partial walk is not evidence.
+// V3b filters before limiting and orders by the signed verifiedAt timestamp.
 export async function latestReceipt({ fetchImpl = globalThis.fetch, cryptoImpl = globalThis.crypto,
   now = Date.now(), signal = AbortSignal.timeout(10000) } = {}) {
   async function read(path) {
@@ -22,26 +21,14 @@ export async function latestReceipt({ fetchImpl = globalThis.fetch, cryptoImpl =
     return response.json();
   }
   try {
-    let cursor = null;
-    let newest = null;
-    const seen = new Set();
-    for (let pageNumber = 0; pageNumber < 4; pageNumber++) {
-      const page = await read(`/badges?limit=500${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
-      if (!Array.isArray(page?.items) || !(page.nextCursor === null || typeof page.nextCursor === "string")) return null;
-      for (const row of page.items) {
-        if (row?.schemaVersion !== "averray.badge-list-item.v1") return null;
-        const document = row.document;
-        if (row.unsignedPresentation?.kind !== "run" || !settledGithubRun(document)) continue;
-        // Use the signed timestamp, not the unsigned presentation's date.
-        const issuedAt = Date.parse(document.timestamps?.verifiedAt);
-        if (Number.isFinite(issuedAt) && issuedAt <= now && (!newest || issuedAt > newest.issuedAt)) newest = { document, issuedAt };
-      }
-      cursor = page.nextCursor;
-      if (!cursor) break;
-      if (seen.has(cursor)) return null;
-      seen.add(cursor);
-    }
-    if (cursor || !newest || now - newest.issuedAt > WEEK_MS) return null;
+    const page = await read("/badges?handler=github_pr&outcome=approved&settled=true&sort=verifiedAt:desc&limit=1");
+    if (!Array.isArray(page?.items) || page.items.length !== 1
+      || !(page.nextCursor === null || typeof page.nextCursor === "string")) return null;
+    const row = page.items[0];
+    if (row?.schemaVersion !== "averray.badge-list-item.v1"
+      || row.unsignedPresentation?.kind !== "run" || !settledGithubRun(row.document)) return null;
+    const newest = { document: row.document, issuedAt: Date.parse(row.document.timestamps?.verifiedAt) };
+    if (!Number.isFinite(newest.issuedAt) || newest.issuedAt > now || now - newest.issuedAt > WEEK_MS) return null;
     // Verify the exact linked document, not just its listing wrapper.
     const response = await read(`/receipts/${newest.document.receiptId}`);
     const document = response?.schemaVersion === "averray.receipt-envelope.v1" ? response.document : response;
