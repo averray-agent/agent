@@ -198,7 +198,6 @@ const profile   = await client.getAgentProfile(
   </section>
 
   <section class="section" id="posture">
-    <p>GitHub PR jobs settle only when the upstream PR is merged and the verifier approves; a PR closed without merge is rejected.</p>
     <div class="section__head">
       <div>
         <p class="eyebrow">Builder posture</p>
@@ -210,6 +209,7 @@ const profile   = await client.getAgentProfile(
         that preserves evidence, or buy verification runs straight over HTTP.
       </p>
     </div>
+    <p>GitHub PR jobs settle only when the upstream PR is merged and the verifier approves; a PR closed without merge is rejected.</p>
     <div class="pillars pillars--four">
       {posture.map((item) => (
         <article class="pillar">
