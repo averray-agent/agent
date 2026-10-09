@@ -5,6 +5,7 @@ import { TypedDataEncoder } from "ethers";
 import { VerificationProfileRegistry } from "../../services/verification-profile-registry.js";
 import { VerificationRunService } from "../../services/verification-run-service.js";
 import { MemoryStateStore } from "../../core/state-store.js";
+import { AppError } from "../../core/errors.js";
 import { X402VerificationPaymentGate } from "../../payments/x402-verification-payment-gate.js";
 import { readJsonBody, respond } from "./http-helpers.js";
 import { invokeHttpRoute } from "../mcp/route-adapter.js";
@@ -16,8 +17,9 @@ const PRESENTATION_ENV = {
   X402_PAYMENT_ASSET_ADDRESS: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 };
 
-function discoveryHarness() {
+function discoveryHarness({ availabilityByProfile = {}, enforceLimit = async () => {} } = {}) {
   const calls = { reserve: 0, capture: 0, authorize: 0 };
+  const limits = [];
   const store = new MemoryStateStore();
   store.reserveVerificationRun = async () => { calls.reserve++; throw new Error("unexpected reservation"); };
   const domain = { name: "USD Coin", version: "2", chainId: 8453, verifyingContract: PRESENTATION_ENV.X402_PAYMENT_ASSET_ADDRESS };
@@ -32,11 +34,14 @@ function discoveryHarness() {
   });
   const authorize = gate.authorize.bind(gate);
   gate.authorize = async (input) => { calls.authorize++; return authorize(input); };
-  const profiles = new VerificationProfileRegistry();
+  const profiles = new VerificationProfileRegistry({ availabilityByProfile });
   const service = new VerificationRunService({ stateStore: store, profileRegistry: profiles, paymentGate: gate });
-  const route = createVerifyRoutes({ enforceLimit: async () => {}, rateLimitConfig: { verifierRun: {} },
+  const route = createVerifyRoutes({ enforceLimit: async (...args) => {
+    limits.push(args);
+    await enforceLimit(...args);
+  }, rateLimitConfig: { verifierRun: {} },
     readJsonBody, respond, verificationRunService: service });
-  return { calls, store, service, gate, profiles,
+  return { calls, limits, store, service, gate, profiles,
     post: (body, headers = {}) => invokeHttpRoute(route, { method: "POST", path: "/verify/runs", body, headers }) };
 }
 
@@ -44,6 +49,8 @@ for (const [label, body] of [["no body", undefined], ["empty object", {}]]) {
   test(`X4b ${label} returns the published-example 402 without creating or reserving a run`, async () => {
     const h = discoveryHarness();
     const actual = await h.post(body);
+    assert.equal(h.limits.length, 1);
+    assert.equal(h.limits[0][0], "verify_runs");
     const example = h.profiles.get("mcp-failure-semantics-v1", 1).workedExample.request;
     const valid = await h.post(example);
     assert.equal(actual.statusCode, 402);
@@ -56,6 +63,26 @@ for (const [label, body] of [["no body", undefined], ["empty object", {}]]) {
     assert.deepEqual(JSON.parse(Buffer.from(actual.headers["payment-required"], "base64")), actual.body);
     assert.equal(h.calls.reserve, 0);
     assert.equal(h.calls.capture, 0);
+    assert.deepEqual(await h.store.listActiveVerificationRuns(100), []);
+  });
+
+  test(`X4b ${label} refuses an unavailable discovery profile before authorizing`, async () => {
+    const h = discoveryHarness({ availabilityByProfile: {
+      "mcp-failure-semantics-v1@1": { status: "unavailable" }
+    } });
+    await assert.rejects(h.post(body), { statusCode: 503, code: "verification_profile_unavailable" });
+    assert.deepEqual(h.calls, { reserve: 0, capture: 0, authorize: 0 });
+    assert.deepEqual(await h.store.listActiveVerificationRuns(100), []);
+  });
+
+  test(`X4b ${label} enforces verify_runs rate limiting before authorizing`, async () => {
+    const h = discoveryHarness({ enforceLimit: async () => {
+      throw new AppError("Too many requests", { statusCode: 429, code: "rate_limit_exceeded" });
+    } });
+    await assert.rejects(h.post(body), { statusCode: 429, code: "rate_limit_exceeded" });
+    assert.equal(h.limits.length, 1);
+    assert.equal(h.limits[0][0], "verify_runs");
+    assert.deepEqual(h.calls, { reserve: 0, capture: 0, authorize: 0 });
     assert.deepEqual(await h.store.listActiveVerificationRuns(100), []);
   });
 }

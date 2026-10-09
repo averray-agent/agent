@@ -63,7 +63,7 @@ export class VerificationRunService {
     // Discovery has no executable input. Quote the published URL-only example
     // through the same gate, without ever entering createRun/reservation.
     const [name, version] = MCP_FAILURE_SEMANTICS_PROFILE_REF.split("@");
-    const profile = this.profileRegistry.get(name, Number(version));
+    const profile = this.profileRegistry.requireAvailable(name, Number(version));
     const { target, inputs } = profile.workedExample.request;
     await this.paymentGate.authorize({
       price: profile.price,
