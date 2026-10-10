@@ -392,6 +392,7 @@ export class MemoryStateStore {
     this.walletQuotas = new Map();
     this.dailyBudgets = new Map();
     this.mutationReceipts = new Map();
+    this.githubRepositoryPins = new Map();
     this.xcmObservations = new Map();
     this.xcmBalanceWatches = new Map();
     this.serviceStates = new Map();
@@ -1088,6 +1089,16 @@ export class MemoryStateStore {
   async upsertMutationReceipt(bucket, key, receipt) {
     this.mutationReceipts.set(`${bucket}:${key}`, receipt);
     return receipt;
+  }
+
+  async getGithubRepositoryPin(key) {
+    return cloneJsonRecord(this.githubRepositoryPins.get(key));
+  }
+
+  async putGithubRepositoryPin(record) {
+    if (this.githubRepositoryPins.has(record.key)) return false;
+    this.githubRepositoryPins.set(record.key, cloneJsonRecord(record));
+    return true;
   }
 
   async getPlatformFaultRemediation(id) {
@@ -2508,6 +2519,17 @@ export class RedisStateStore {
     await this.connect();
     await this.client.set(this.key("mutation-receipt", `${bucket}:${key}`), JSON.stringify(receipt));
     return receipt;
+  }
+
+  async getGithubRepositoryPin(key) {
+    await this.connect();
+    const raw = await this.client.get(this.key("github-repository-pin", key));
+    return raw ? JSON.parse(raw) : undefined;
+  }
+
+  async putGithubRepositoryPin(record) {
+    await this.connect();
+    return await this.client.set(this.key("github-repository-pin", record.key), JSON.stringify(record), { NX: true }) === "OK";
   }
 
   async getPlatformFaultRemediation(id) {

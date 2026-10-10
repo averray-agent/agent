@@ -462,6 +462,78 @@ for (const [name, snapshotMode] of [["renamed", "500"], ["same-name", "missing-b
   });
 }
 
+test("uncached failed source lookup and verified PR without base.repo requires human review", async () => {
+  const snapshot = pull({ baseId: sourceId, baseName: "example/project", merged: true });
+  delete snapshot.base.repo;
+  const verdict = await new VerifierRegistry({ githubToken: "github_pat_test",
+    fetchImpl: routeGithub({ "/repos/example/project/pulls/91": snapshot })
+  }).evaluate(githubJob({ repo: "example/project" }), submission("https://github.com/example/project/pull/91"),
+    { claimantWallet: wallet, claimSessionId: sessionId });
+  assert.equal(verdict.githubLookup.status, "verified");
+  assert.equal(verdict.checks.repoMatches, null);
+  assert.equal(verdict.outcome, "disputed");
+  assert.equal(verdict.handler, "human_fallback");
+  assert.equal(verdict.checks.repoMatchFallbackReason, "pr_base_repo_creation_time_unavailable");
+});
+
+for (const failure of ["github_api_500", "github_token_not_configured"]) {
+  test(`both GitHub reads unavailable preserve ${failure} in the human-review diagnostic`, async () => {
+    const verdict = await new VerifierRegistry({
+      githubToken: failure === "github_token_not_configured" ? "" : "github_pat_test",
+      fetchImpl: async () => new Response("{}", { status: 500 })
+    }).evaluate(githubJob({ repo: "example/project" }), submission("https://github.com/example/project/pull/91"),
+      { claimantWallet: wallet, claimSessionId: sessionId });
+    assert.equal(verdict.outcome, "disputed");
+    assert.equal(verdict.checks.repoMatchFallbackReason, failure);
+    assert.ok(verdict.detail.includes(failure), verdict.detail);
+  });
+}
+
+for (const path of ["verifySubmission", "previewSubmission", "replayVerification"]) test(`${path}: backfilled ID rejects a name-only approval without rewriting claim snapshot`, async () => {
+  const { backfillGithubRepositoryIds } = await import("./github-repository-identity-backfill.js");
+  const job = githubJob({ repo: "example/project" });
+  job.lifecycle.state = "open";
+  const pr = pull({ baseId: 9999, baseName: "example/project", merged: true });
+  pr.base.repo.created_at = repositoryCreatedAt;
+  const fetchImpl = async (url) => new URL(url).pathname === "/repos/example/project"
+    ? new Response("{}", { status: 500 })
+    : routeGithub({ "/repos/example/project/pulls/91": pr })(url);
+  const fixture = async () => {
+    const h = await sessionFor({ job, prUrl: "https://github.com/example/project/pull/91", fetchImpl });
+    h.service.platformService.resumeSession = () => h.store.getSession(sessionId);
+    h.service.platformService.ingestVerification = async (id, verdict) => {
+      await h.store.upsertVerificationResult(id, verdict);
+      const session = { ...(await h.store.getSession(id)), status: "resolved" };
+      await h.store.upsertSession(session);
+      return session;
+    };
+    return h;
+  };
+  const invoke = (service) => path === "replayVerification" ? service[path](sessionId) : service[path]({ sessionId });
+  // Positive control: without the pin, this exact live evidence approves.
+  const unpinned = await invoke((await fixture()).service);
+  assert.equal(unpinned.outcome, "approved");
+  assert.equal(unpinned.checks.repoMatchMethod, "exact_name");
+  const { store, service } = await fixture();
+  const before = JSON.stringify((await store.getSession(sessionId)).jobSnapshot);
+  const rawBefore = JSON.stringify(job);
+  const pinnedAt = "2026-10-10T18:00:00.000Z";
+  const result = await backfillGithubRepositoryIds({ stateStore: store, getJobDefinition: () => structuredClone(job) },
+    { jobIds: [job.id], apply: true }, { githubToken: "github_pat_test", now: () => new Date(pinnedAt),
+      fetchImpl: async () => Response.json({ id: 42, full_name: "example/project", created_at: repositoryCreatedAt }) });
+  assert.equal(result.pinned, 1);
+  const verdict = await invoke(service);
+  assert.equal(verdict.outcome, "rejected");
+  assert.equal(verdict.checks.repoMatchMethod, "repository_id");
+  assert.equal(verdict.checks.sourceRepoIdentity.id, 42);
+  assert.equal(verdict.checks.sourceRepoIdentity.origin, "pinned");
+  assert.equal(verdict.checks.sourceRepoIdentity.pinnedAt, pinnedAt);
+  assert.deepEqual(verdict.evidence.sourceRepoIdentity, verdict.checks.sourceRepoIdentity);
+  if (path === "verifySubmission") assert.equal((await store.getVerificationResult(sessionId)).outcome, "rejected");
+  assert.equal(JSON.stringify((await store.getSession(sessionId)).jobSnapshot), before);
+  assert.equal(JSON.stringify(job), rawBefore);
+});
+
 function githubJob({ repo, githubRepoId, sourceType = "github_issue", declaredRepoId } = {}) {
   const declared = {
     type: "github_issue",

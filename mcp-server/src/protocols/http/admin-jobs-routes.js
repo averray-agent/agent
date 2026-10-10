@@ -1,4 +1,5 @@
 import { ValidationError } from "../../core/errors.js";
+import { backfillGithubRepositoryIds } from "../../services/github-repository-identity-backfill.js";
 
 import {
   createAdminJobImportRouteDefinitions,
@@ -115,6 +116,12 @@ export function createAdminJobsRoutes({
           ...parseEventFilters(url, { includeWallet: true })
         })
       );
+      return true;
+    }
+
+    if (request.method === "POST" && pathname === "/admin/jobs/github-repository-ids/backfill") {
+      await authenticateAndLimit(request, url);
+      respond(response, 200, await backfillGithubRepositoryIds(service, await readJsonBody(request)));
       return true;
     }
 

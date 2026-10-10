@@ -5,6 +5,7 @@ import {
 } from "../core/maintainer-surface-policy.js";
 import { getJobSchema } from "../core/job-schema-registry.js";
 import { normalizeWhitespace } from "../core/evidence-normalization.js";
+import { repositoryPinProvenance } from "./github-repository-identity-backfill.js";
 
 const HANDLER_VERSION = 1;
 const BENCHMARK_HANDLER_VERSION = 2;
@@ -422,6 +423,7 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       const sourceRepoIdentity = {
         id: sourceRepo.id,
         origin: sourceRepo.origin ?? null,
+        ...(sourceRepo.pinnedAt ? { pinnedAt: sourceRepo.pinnedAt } : {}),
         createdAt: sourceRepo.createdAt ?? null,
         jobCreatedAt: job.lifecycle?.createdAt ?? null,
         predatesJob: sourceRepo.predatesJob ?? null,
@@ -904,7 +906,8 @@ function cachedSourceRepoId(job) {
 async function resolveSourceRepository({ job, expectedRepo, fetchImpl, githubToken, githubApiBaseUrl }) {
   const cached = cachedSourceRepoId(job);
   if (cached) {
-    return { id: cached, origin: "ingested", fullName: null, reason: null };
+    const pin = repositoryPinProvenance(job);
+    return { id: cached, origin: pin ? "pinned" : "ingested", ...(pin ?? {}), fullName: null, reason: null };
   }
   if (!expectedRepo) {
     return { id: null, fullName: null, reason: "source_repo_missing" };
@@ -979,6 +982,9 @@ function decideRepositoryMatch({ job, parsedPr, expectedRepo, sourceRepo, github
   // A failed source lookup is not evidence that the same name still identifies
   // the original repo. Require the live PR base to predate the pinned job too.
   if (sourceId == null && parsedPr) {
+    if (githubLookup?.status !== "verified") {
+      return unknown(githubLookup?.reason ?? sourceRepo?.reason ?? "github_lookup_unavailable");
+    }
     const predatesJob = repositoryPredatesJob(baseRepo?.createdAt, job);
     if (predatesJob !== true) {
       return unknown(predatesJob === false

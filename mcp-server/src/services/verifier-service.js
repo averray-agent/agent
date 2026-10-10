@@ -3,6 +3,7 @@ import { POSTER_REVIEW_HANDLER } from "../core/receipt-verifier-handlers.js";
 import { hasVerifiedGithubMerge } from "../core/github-merge-policy.js";
 import { projectOverturnedVerification } from "../core/operator-overturn.js";
 import { VerifierRegistry } from "./verifier-handlers.js";
+import { withPinnedRepositoryIdentity } from "./github-repository-identity-backfill.js";
 import { hashCanonicalContent } from "../core/canonical-content.js";
 import {
   buildVerificationAuditFields,
@@ -123,7 +124,7 @@ export class VerifierService {
       pinnedSchema: snapshot.outputSchema?.schema
     });
     let verdict = await this.registry.evaluate(
-      job,
+      await withPinnedRepositoryIdentity(job, this.stateStore),
       validatedVerificationInput,
       verificationClaimantContext(session)
     );
@@ -294,7 +295,7 @@ export class VerifierService {
     const input = this.validateVerificationInput(job, this.resolveVerificationInput(session, evidence), {
       pinnedSchema: snapshot.outputSchema?.schema
     });
-    const verdict = await this.registry.evaluate(job, input, verificationClaimantContext(session));
+    const verdict = await this.registry.evaluate(await withPinnedRepositoryIdentity(job, this.stateStore), input, verificationClaimantContext(session));
     // Settlement advice only: do not change the computed outcome or handler's
     // blockers, since the poller must still observe an open green approval.
     if ((job.verifierConfig?.handler ?? job.verifierMode) === "github_pr" && verdict.githubLookup?.merged !== true) {
@@ -688,7 +689,7 @@ export class VerifierService {
       pinnedSchema: snapshot.outputSchema?.schema
     });
     const verdict = await this.registry.evaluate(
-      replayJob,
+      await withPinnedRepositoryIdentity(replayJob, this.stateStore),
       validatedVerificationInput,
       verificationClaimantContext(session)
     );
