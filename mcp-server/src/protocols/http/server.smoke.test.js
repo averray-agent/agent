@@ -2697,3 +2697,97 @@ test("http smoke: discovery manifest is served at both /agent-tools.json and the
     );
   });
 });
+
+test("http smoke: POST /auth/nonce does not stitch or link an unsigned wallet", SMOKE_TEST_OPTIONS, async () => {
+  const claimed = "0x5555555555555555555555555555555555555555";
+  const fresh = "0x6666666666666666666666666666666666666666";
+  const self = "0x7777777777777777777777777777777777777777";
+  const port = 19_000 + Math.floor(Math.random() * 1_000);
+  const child = await startServer(port, {
+    RATE_LIMIT_AUTH_NONCE_LIMIT: "30",
+    ARRIVAL_QA_ENGINEER_WALLETS: self
+  }, ["--import", resolve(moduleDir, "fixtures/stamp-nonce-arrival-wallet.mjs")]);
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const admin = {
+      authorization: `Bearer ${issueToken(ADMIN_WALLET, { roles: ["admin"] })}`,
+      "user-agent": "AdminPoll/1"
+    };
+    const session = async (id) => {
+      const response = await fetch(`${base}/admin/arrivals/sessions?id=${encodeURIComponent(id)}`, { headers: admin });
+      return { status: response.status, body: await response.json() };
+    };
+    const listed = async () => {
+      const response = await fetch(`${base}/admin/arrivals/sessions`, { headers: admin });
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    const poll = async (read) => {
+      const deadline = Date.now() + 2_000;
+      let last;
+      while (Date.now() < deadline) {
+        last = await read();
+        if (last) return last;
+        await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+      }
+      return last;
+    };
+    const nonce = (wallet, { stamp = false } = {}) => fetch(`${base}/auth/nonce`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": "NonceProbe/9",
+        ...(stamp ? { "x-test-arrival-wallet": wallet } : {})
+      },
+      body: JSON.stringify({ wallet })
+    });
+
+    assert.equal((await fetch(`${base}/auth/session`, {
+      headers: { authorization: `Bearer ${issueToken(claimed)}` }
+    })).status, 200);
+    const existing = await poll(async () => {
+      const detail = await session(`wallet:${claimed}`);
+      return detail.status === 200 ? detail : null;
+    });
+    assert.equal(existing?.status, 200);
+    const stepsBefore = existing.body.session.steps.length;
+    const unstitchedBefore = (await listed()).preAuth.count;
+
+    for (const response of [
+      await nonce(claimed),
+      await nonce(claimed, { stamp: true }),
+      await nonce(fresh, { stamp: true }),
+      await nonce(self, { stamp: true })
+    ]) {
+      assert.equal(response.status, 200);
+      await response.json();
+    }
+    const openApi = await fetch(`${base}/openapi.json`, { headers: { "user-agent": "NonceProbe/9" } });
+    assert.equal(openApi.status, 200);
+    await openApi.text();
+
+    const settled = await poll(async () => {
+      const detail = await session(`wallet:${claimed}`);
+      const created = await session(`wallet:${fresh}`);
+      const count = (await listed()).preAuth.count;
+      const appended = detail.body?.session?.steps?.length > stepsBefore;
+      if (count >= unstitchedBefore + 4 || appended || created.status === 200) {
+        return { detail, created, count };
+      }
+      return null;
+    });
+    assert.ok(settled, "nonce observations did not finish");
+    assert.equal(settled.detail.body.session.steps.length, stepsBefore);
+    assert.equal(settled.created.status, 404);
+    assert.ok(settled.count >= unstitchedBefore + 4);
+
+    const arrivals = await (await fetch(`${base}/monitor/arrivals`)).json();
+    assert.equal(arrivals.funnelHttpSelf.identified, 0);
+    assert.ok(arrivals.funnelHttpExternal.identified >= 1);
+    assert.equal(arrivals.httpClients.some((entry) => entry.wallet === self || entry.wallet === fresh), false);
+    const probe = arrivals.httpClients.find((entry) => entry.name === "NonceProbe");
+    assert.equal(probe.self, false);
+    assert.equal(probe.ambiguous, false);
+    assert.equal(probe.wallet, null);
+  } finally { await stop(child); }
+});

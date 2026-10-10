@@ -57,12 +57,13 @@ export class ArrivalSessionTrail {
       if (!(await this.ensureLoaded())) return;
       const nowMs = this.now();
       if (this.collectionSinceMs === undefined) this.collectionSinceMs = nowMs;
-      this.prune(nowMs);
+      const pruned = this.prune(nowMs);
       const id = sessionIdFor(wallet, mcpSessionId);
       if (!id) {
         this.unstitched += 1;
         this.dirty = true;
         await this.maybeFlush();
+        await this.forget(pruned);
         return;
       }
       const record = this.sessions.get(id) ?? {
@@ -105,10 +106,11 @@ export class ArrivalSessionTrail {
         record.stepsDropped += overflow;
       }
       this.sessions.set(id, record);
-      this.evictOverflow();
+      const evicted = this.evictOverflow();
       this.dirtyIds.add(id);
       this.dirty = true;
       await this.maybeFlush();
+      await this.forget([...pruned, ...evicted]);
     } catch {
       // A trail must not change the request it observes.
     }
@@ -116,7 +118,7 @@ export class ArrivalSessionTrail {
 
   async list({ limit = 50, offset = 0 } = {}) {
     if (!(await this.ensureLoaded())) return unavailableTrail(this.loadFailed);
-    this.prune(this.now());
+    await this.forget(this.prune(this.now()));
     const bounded = Math.min(100, Math.max(1, Number(limit) || 50));
     const start = Math.max(0, Number(offset) || 0);
     const ordered = [...this.sessions.values()].sort((left, right) => right.lastSeenMs - left.lastSeenMs);
@@ -141,7 +143,7 @@ export class ArrivalSessionTrail {
 
   async get(id) {
     if (!(await this.ensureLoaded())) return unavailableTrail(this.loadFailed);
-    this.prune(this.now());
+    await this.forget(this.prune(this.now()));
     const record = this.sessions.get(String(id ?? ""));
     if (!record) return undefined;
     return {
@@ -221,16 +223,21 @@ export class ArrivalSessionTrail {
   }
 
   prune(nowMs) {
+    const removed = [];
     const oldest = nowMs - SESSION_RETENTION_MS;
     for (const [id, record] of this.sessions) {
       if (record.lastSeenMs < oldest) {
         this.sessions.delete(id);
+        this.dirtyIds.delete(id);
         this.droppedRecords += 1;
+        removed.push(id);
       }
     }
+    return removed;
   }
 
   evictOverflow() {
+    const removed = [];
     while (this.sessions.size > SESSION_RECORD_CAP) {
       let oldestId;
       let oldestSeen = Infinity;
@@ -240,10 +247,29 @@ export class ArrivalSessionTrail {
           oldestId = id;
         }
       }
-      if (!oldestId) return;
+      if (!oldestId) return removed;
       this.sessions.delete(oldestId);
       this.dirtyIds.delete(oldestId);
       this.droppedRecords += 1;
+      removed.push(oldestId);
+    }
+    return removed;
+  }
+
+  async forget(ids) {
+    if (!ids?.length) return;
+    for (const id of ids) {
+      try {
+        await this.stateStore?.deleteServiceState?.(sessionScope(id));
+      } catch {
+        // An orphan key is preferable to failing the request that evicted it.
+      }
+    }
+    this.dirty = true;
+    try {
+      await this.maybeFlush(true);
+    } catch {
+      // The index update waits for the next successful flush.
     }
   }
 }

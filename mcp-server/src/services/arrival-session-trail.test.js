@@ -20,7 +20,8 @@ function trail(now = () => 1_000) {
     async upsertServiceState(scope, value) {
       state.set(scope, { ...(state.get(scope) ?? {}), ...value });
       return state.get(scope);
-    }
+    },
+    async deleteServiceState(scope) { state.delete(scope); }
   };
   return {
     state,
@@ -98,7 +99,7 @@ test("a Redis write failure does not reject the trail observation", async () => 
 });
 
 test("the record cap evicts the least recently seen and reports how many were dropped", async () => {
-  const { trail: sessions } = trail();
+  const { state, trail: sessions } = trail();
   for (let index = 0; index < SESSION_RECORD_CAP + 1; index += 1) {
     const wallet = `0x${index.toString(16).padStart(40, "0")}`;
     await sessions.observe({
@@ -117,12 +118,14 @@ test("the record cap evicts the least recently seen and reports how many were dr
   assert.equal(rest.nextOffset, null);
   assert.equal(listed.droppedRecords, 1);
   assert.equal(rest.droppedRecords, 1);
-  assert.equal(await sessions.get("wallet:0x" + "0".repeat(40)), undefined);
+  const evicted = "wallet:0x" + "0".repeat(40);
+  assert.equal(await sessions.get(evicted), undefined);
+  assert.equal(state.has(`arrival-session-record:${evicted}`), false);
 });
 
 test("steps cap at 200, retention is 30 days, and a failed read is not reported", async () => {
   let nowMs = 5_000;
-  const { trail: sessions } = trail(() => nowMs);
+  const { state, trail: sessions } = trail(() => nowMs);
   for (let index = 0; index < SESSION_STEP_CAP + 3; index += 1) {
     await sessions.observe({
       wallet: WALLET,
@@ -142,6 +145,7 @@ test("steps cap at 200, retention is 30 days, and a failed read is not reported"
   const expired = await sessions.list();
   assert.equal(expired.sessions.length, 0);
   assert.equal(expired.preAuth.count, 0);
+  assert.equal([...state.keys()].some((key) => key.startsWith("arrival-session-record:")), false);
 
   const failing = new ArrivalSessionTrail({
     stateStore: {
