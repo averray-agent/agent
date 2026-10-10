@@ -418,13 +418,14 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
         repoMatchMethod,
         repoMatchFallbackReason,
         sourceRepoRenamed
-      } = decideRepositoryMatch({ parsedPr, expectedRepo, sourceRepo, githubLookup });
+      } = decideRepositoryMatch({ job, parsedPr, expectedRepo, sourceRepo, githubLookup });
       const sourceRepoIdentity = {
         id: sourceRepo.id,
         origin: sourceRepo.origin ?? null,
         createdAt: sourceRepo.createdAt ?? null,
         jobCreatedAt: job.lifecycle?.createdAt ?? null,
-        predatesJob: sourceRepo.predatesJob ?? null
+        predatesJob: sourceRepo.predatesJob ?? null,
+        ...(sourceRepo.reason ? { lookupFailureReason: sourceRepo.reason } : {})
       };
       const issueReferenced = githubVerified ? githubLookup.issueReferenced : submittedIssueReferenced;
       const checksPassing = githubVerified ? githubLookup.checksPassing : submittedChecksPassing;
@@ -929,11 +930,7 @@ async function resolveSourceRepository({ job, expectedRepo, fetchImpl, githubTok
       return { id: null, fullName: null, reason: "source_repo_id_unavailable" };
     }
     const createdAt = typeof repo.created_at === "string" ? repo.created_at : null;
-    const repositoryTime = Date.parse(createdAt);
-    const jobTime = Date.parse(job.lifecycle?.createdAt);
-    const predatesJob = Number.isFinite(repositoryTime) && Number.isFinite(jobTime)
-      ? repositoryTime < jobTime
-      : null;
+    const predatesJob = repositoryPredatesJob(createdAt, job);
     return { id, origin: "resolved_by_name", fullName, createdAt, predatesJob, reason: null };
   } catch (error) {
     const reason = typeof error?.message === "string" && error.message
@@ -943,7 +940,7 @@ async function resolveSourceRepository({ job, expectedRepo, fetchImpl, githubTok
   }
 }
 
-function decideRepositoryMatch({ parsedPr, expectedRepo, sourceRepo, githubLookup }) {
+function decideRepositoryMatch({ job, parsedPr, expectedRepo, sourceRepo, githubLookup }) {
   const sourceId = positiveRepoId(sourceRepo?.id);
   const baseRepo = githubLookup?.status === "verified" ? githubLookup.baseRepo ?? null : null;
   const baseId = positiveRepoId(baseRepo?.id);
@@ -953,8 +950,8 @@ function decideRepositoryMatch({ parsedPr, expectedRepo, sourceRepo, githubLooku
     repoMatchFallbackReason: reason,
     sourceRepoRenamed: null
   });
-  // A cached identity must never be downgraded to a reusable owner/repo name.
-  if (sourceRepo?.origin === "ingested" && baseId == null) {
+  // Neither cached nor name-resolved IDs may be downgraded to name comparison.
+  if (sourceId != null && baseId == null) {
     return unknown(githubLookup?.reason ?? "pr_base_repo_id_unavailable");
   }
   // Legacy jobs lack the ingestion pin. A name resolution is only usable if
@@ -979,6 +976,16 @@ function decideRepositoryMatch({ parsedPr, expectedRepo, sourceRepo, githubLooku
   if (sourceId == null && parsedPr && parsedPr.repo !== expectedRepo) {
     return unknown(sourceRepo?.reason ?? "source_repo_id_unavailable");
   }
+  // A failed source lookup is not evidence that the same name still identifies
+  // the original repo. Require the live PR base to predate the pinned job too.
+  if (sourceId == null && parsedPr) {
+    const predatesJob = repositoryPredatesJob(baseRepo?.createdAt, job);
+    if (predatesJob !== true) {
+      return unknown(predatesJob === false
+        ? "pr_base_repo_not_older_than_job"
+        : "pr_base_repo_creation_time_unavailable");
+    }
+  }
   return {
     repoMatches: Boolean(parsedPr && expectedRepo && parsedPr.repo === expectedRepo),
     repoMatchMethod: "exact_name",
@@ -995,7 +1002,15 @@ function readGithubRepository(repo) {
   const id = positiveRepoId(repo?.id);
   const fullName = normalizeRepo(repo?.full_name);
   if (!id || !fullName) return null;
-  return { id, fullName };
+  return { id, fullName, createdAt: typeof repo.created_at === "string" ? repo.created_at : null };
+}
+
+function repositoryPredatesJob(createdAt, job) {
+  const repositoryTime = Date.parse(createdAt);
+  const jobTime = Date.parse(job.lifecycle?.createdAt);
+  return Number.isFinite(repositoryTime) && Number.isFinite(jobTime)
+    ? repositoryTime < jobTime
+    : null;
 }
 
 function positiveRepoId(value) {

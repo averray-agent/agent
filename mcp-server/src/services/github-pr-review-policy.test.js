@@ -37,7 +37,9 @@ test("five real queued disclosures bind; a failing CLA goes to human review, nev
     const issueNumber = Number(fixture.jobId.match(/-(\d+)$/u)[1]);
     const isCla = fixture.jobId.includes("anythingmcp");
     const isVercel = fixture.jobId.includes("paygate") || fixture.jobId.includes("guallet");
+    // Disclosure bodies are captured; repository id/age metadata below is synthetic.
     const job = { id: fixture.jobId, category: "coding", verifierMode: "github_pr",
+      lifecycle: { createdAt: "2026-10-06T00:00:00Z" },
       source: { type: "github_issue", repo, issueNumber, maintainerPolicy: { disclosureRequired: true } },
       verifierConfig: { handler: "github_pr", version: 1, minimumScore: 80, requireClaimantBinding: true } };
     const registry = new VerifierRegistry({ githubToken: "fixture-token", fetchImpl: async (url) => {
@@ -51,6 +53,7 @@ test("five real queued disclosures bind; a failing CLA goes to human review, nev
       ] : [] };
       else if (url.endsWith("/reviews")) result = [];
       else result = { title: "Fix #" + issueNumber, body: "Closes #" + issueNumber + "\n\n" + fixture.body,
+        base: { repo: { id: 42, full_name: repo, created_at: "2026-08-24T00:00:00Z" } },
         state: "open", merged: false, head: { sha: fixture.headSha }, html_url: fixture.source };
       return Response.json(result);
     } });
@@ -77,6 +80,7 @@ test("closed unmerged green PR is rejected in preview regardless of merged-appro
       const wallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
       const store = new MemoryStateStore();
       const job = { id: "closed-pr", category: "coding", verifierMode: "github_pr",
+        lifecycle: { createdAt: "2026-10-06T00:00:00Z" },
         source: { type: "github_issue", repo: "owner/repo", issueNumber: 42 },
         verifierConfig: { handler: "github_pr", version: 1, minimumScore: 80,
           requireClaimantBinding: true, acceptMergedAsApproved } };
@@ -87,6 +91,7 @@ test("closed unmerged green PR is rejected in preview regardless of merged-appro
         ] });
         if (url.endsWith("/reviews")) return Response.json([{ state: "APPROVED" }]);
         return Response.json({ state, merged, merged_at, title: "Fix #42",
+          base: { repo: { id: 42, full_name: "owner/repo", created_at: "2026-08-24T00:00:00Z" } },
           body: "Closes #42. Averray claimant wallet: " + wallet,
           html_url: "https://github.com/owner/repo/pull/43", head: { sha: "green-head" } });
       } });

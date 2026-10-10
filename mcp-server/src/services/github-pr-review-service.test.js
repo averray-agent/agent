@@ -150,6 +150,7 @@ test("upstream-unavailable fallback never emits arbitrary upstream reason and er
 });
 async function add(store, id, mode = "github_pr", status = "submitted") {
   const job = { id, title: id, rewardAmount: 1, rewardAsset: "USDC", verifierMode: mode,
+    lifecycle: { createdAt: "2026-09-01T00:00:00Z" },
     source: { type: "github_issue", repo: "owner/repo", issueNumber: 1 },
     verifierConfig: { handler: mode, version: 1, minimumScore: 80 } };
   return store.upsertSession({ sessionId: id, jobId: id, status, wallet, submittedAt,
@@ -224,6 +225,7 @@ async function liveFixture() {
     if (url.endsWith("/reviews")) return Response.json([]);
     return Response.json({ html_url: "https://github.com/owner/repo/pull/2", state: upstream.merged ? "closed" : "open", merged: upstream.merged,
       user: { login: "VerifiedAuthor" },
+      base: { repo: { id: 42, full_name: "owner/repo", created_at: "2026-08-24T00:00:00Z" } },
       head: { sha: upstream.sha }, title: "Fix #1", body: `Closes #1. Averray claimant wallet: ${wallet}` });
   } });
   const writes = [];

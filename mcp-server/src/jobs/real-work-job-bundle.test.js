@@ -246,6 +246,7 @@ function githubRegistry({ issueNumber, checksPassing = true }) {
           body: `Closes #${issueNumber}\n\n${footer}`,
           state: "open",
           merged: false,
+          base: { repo: { id: 42, full_name: "tricklepay/tricklepay-frontend", created_at: "2026-01-01T00:00:00Z" } },
           head: { sha: "abc123" }
         });
       }

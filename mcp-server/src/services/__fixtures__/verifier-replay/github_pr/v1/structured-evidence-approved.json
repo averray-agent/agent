@@ -4,6 +4,7 @@
   "evidenceSchemaRef": "schema://jobs/github-pr-evidence-output",
   "job": {
     "id": "oss-example-project-42-add-tests",
+    "lifecycle": { "createdAt": "2026-10-06T00:00:00Z" },
     "category": "testing",
     "outputSchemaRef": "schema://jobs/github-pr-evidence-output",
     "source": {
