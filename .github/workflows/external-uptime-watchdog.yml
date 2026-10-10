@@ -9,12 +9,18 @@
 # It checks only PUBLIC surfaces, so it needs no credentials and cannot be
 # blocked by a credential outage. It opens ONE issue per incident (dedup by
 # title), comments on continued failure, and closes it on recovery.
+# GitHub cron is best-effort; this is not a 15-minute detection guarantee.
 name: External uptime watchdog
 
 on:
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
+    inputs:
+      drill:
+        description: Send a test page and recovery notification
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -33,7 +39,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+      - name: Start paging observation
+        id: observation
+        run: echo "since=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - name: Check public endpoints
+        if: inputs.drill != true
         id: probe
         run: |
           set -uo pipefail
@@ -73,7 +87,8 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Open or update the incident issue
-        if: steps.probe.outputs.failing == 'yes'
+        id: incident_open
+        if: inputs.drill != true && steps.probe.outputs.failing == 'yes'
         env:
           GH_TOKEN: ${{ github.token }}
           DETAIL: ${{ steps.probe.outputs.detail }}
@@ -84,13 +99,18 @@ jobs:
             --search "\"$ISSUE_TITLE\" in:title" --json number --jq '.[0].number // empty')"
           body="$(printf 'Public surfaces did not respond from GitHub-hosted runners (off-VPS).\n\n%s\nRun: %s\n\nThe VPS hosts the API, operator app, site, and Hermes — so an unreachable host means the internal board cannot report this. Check the OVH panel for server state and their status page for a regional incident.\n' "$DETAIL" "$RUN_URL")"
           if [ -n "$existing" ]; then
+            echo "number=$existing" >> "$GITHUB_OUTPUT"
             gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
           else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body "$body"
+            created="$(gh issue create --repo "$GITHUB_REPOSITORY" --title "$ISSUE_TITLE" --body "$body")"
+            existing="${created##*/}"
+            [[ "$existing" =~ ^[0-9]+$ ]]
+            echo "number=$existing" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Close the incident issue on recovery
-        if: steps.probe.outputs.failing == 'no'
+        id: incident_close
+        if: inputs.drill != true && steps.probe.outputs.failing == 'no'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -99,13 +119,86 @@ jobs:
           existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
             --search "\"$ISSUE_TITLE\" in:title" --json number --jq '.[0].number // empty')"
           if [ -n "$existing" ]; then
+            echo "number=$existing" >> "$GITHUB_OUTPUT"
             gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" \
               --body "All public surfaces responding again. Recovery observed at $RUN_URL"
             gh issue close "$existing" --repo "$GITHUB_REPOSITORY"
           fi
 
+      - name: Assign the incident
+        if: always() && inputs.drill != true && steps.probe.outputs.failing == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INCIDENT_NUMBER: ${{ steps.incident_open.outputs.number }}
+        run: |
+          existing="$INCIDENT_NUMBER"
+          if [ -z "$existing" ]; then
+            existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+              --search "\"$ISSUE_TITLE\" in:title" --json number --jq '.[0].number // empty')"
+          fi
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --repo "$GITHUB_REPOSITORY" --add-assignee depre-dev || echo "::warning::assign failed"
+          fi
+
+      - name: Phone page
+        id: page
+        if: always() && (inputs.drill == true || steps.probe.outputs.failing == 'yes' || steps.probe.outputs.failing == 'no')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PHONE_PUSH_URL: ${{ secrets.PHONE_PUSH_URL }}
+          DRILL: ${{ inputs.drill || false }}
+          FAILING: ${{ steps.probe.outputs.failing }}
+          INCIDENT_NUMBER: ${{ steps.incident_open.outputs.number || steps.incident_close.outputs.number }}
+          SINCE: ${{ steps.observation.outputs.since }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PHONE_PUSH_URL" ]; then exit 0; fi
+          if [ "$DRILL" = "true" ]; then
+            printf 'On your Mac: [DRILL] page. Check the workflow run.\n' | bash scripts/ops/phone-push.sh "[DRILL] page" 5 warning "$RUN_URL"
+            printf 'On your Mac: [DRILL] all-clear. Public surfaces answering HTTP 200 again (not a health verdict).\n' | bash scripts/ops/phone-push.sh "[DRILL] all-clear" 3 white_check_mark "$RUN_URL"
+            exit 0
+          fi
+          number="$INCIDENT_NUMBER"
+          if [ -z "$number" ]; then
+            state="closed"
+            if [ "$FAILING" = "yes" ]; then state="open"; fi
+            number="$(gh issue list --repo "$GITHUB_REPOSITORY" --state "$state" \
+              --search "\"$ISSUE_TITLE\" in:title" --json number --jq 'sort_by(.number) | last | .number // empty')"
+          fi
+          if [ -z "$number" ]; then
+            if [ "$FAILING" = "yes" ]; then
+              printf 'On your Mac: public endpoint checks failed. Check the workflow run.\n' | bash scripts/ops/phone-push.sh "Averray public checks" 5 warning "$RUN_URL"
+            fi
+            exit 0
+          fi
+          gh issue view "$number" --repo "$GITHUB_REPOSITORY" \
+            --json number,url,state,createdAt,closedAt,comments > "$RUNNER_TEMP/watchdog-issue.json"
+          node scripts/ops/watchdog-phone-page.mjs "$RUNNER_TEMP/watchdog-issue.json" "$FAILING" "$SINCE" > "$RUNNER_TEMP/watchdog-page.json"
+          if [ "$(jq -r 'type' "$RUNNER_TEMP/watchdog-page.json")" = "null" ]; then exit 0; fi
+          click="$(jq -r '.url' "$RUNNER_TEMP/watchdog-page.json")"
+          priority="$(jq -r '.priority' "$RUNNER_TEMP/watchdog-page.json")"
+          if [ "$(jq -r '.recovery' "$RUNNER_TEMP/watchdog-page.json")" = "true" ]; then
+            printf 'On your Mac: Public surfaces answering HTTP 200 again (not a health verdict).\n' | bash scripts/ops/phone-push.sh "Averray public checks" "$priority" white_check_mark "$click"
+          else
+            printf 'On your Mac: public endpoint checks failed. Check the incident issue.\n' | bash scripts/ops/phone-push.sh "Averray public checks" "$priority" warning "$click"
+            marker="$(jq -r '.marker' "$RUNNER_TEMP/watchdog-page.json")"
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$marker"
+          fi
+
+      - name: Phone push (config)
+        if: always()
+        env:
+          PHONE_PUSH_URL: ${{ secrets.PHONE_PUSH_URL }}
+          PAGE_OUTCOME: ${{ steps.page.outcome }}
+        run: |
+          if [ -z "$PHONE_PUSH_URL" ] || [ "$PAGE_OUTCOME" = "failure" ]; then
+            echo "::error::phone push not configured or undeliverable"
+            exit 1
+          fi
+
       - name: Fail the run when the platform is unreachable
-        if: steps.probe.outputs.failing == 'yes'
+        if: inputs.drill != true && steps.probe.outputs.failing == 'yes'
         run: |
           echo "::error::Platform unreachable from off-VPS runners — see the incident issue."
           exit 1
