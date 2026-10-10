@@ -1,6 +1,7 @@
 import { getAddress } from "ethers";
 import { AuthenticationError, AuthorizationError } from "../core/errors.js";
 import { verifyTokenFromConfig } from "./jwt.js";
+import { normalizeApiKeyId } from "../core/self-identity-registry.js";
 import { ARRIVAL_CANARY_MARKER_TOKEN_KIND } from "./token-kinds.js";
 import { hasRole, resolveRoles } from "./config.js";
 import {
@@ -252,6 +253,12 @@ export function createAuthMiddleware({
     const arrivalWallet = walletIdentity.h160;
     if (/^0x[0-9a-f]{40}$/u.test(arrivalWallet)) {
       request._arrivalWallet = arrivalWallet;
+    }
+    // The grant id is inside the signed token. A header cannot supply it, and
+    // a secret-shaped value is dropped before it can reach the identity registry.
+    if (isServiceTokenClaims(claims)) {
+      const apiKeyId = normalizeApiKeyId(claims?.capabilityGrantId);
+      if (apiKeyId) request._arrivalApiKeyId = apiKeyId;
     }
     return {
       wallet,

@@ -15,6 +15,7 @@ import {
   stageRank
 } from "./arrival-observatory.js";
 import * as arrivalModule from "./arrival-observatory.js";
+import { SelfIdentityRegistry } from "../core/self-identity-registry.js";
 import { MemoryStateStore, RedisStateStore } from "../core/state-store.js";
 import { metricPathLabel } from "../protocols/http/http-helpers.js";
 import { MCP_TOOLS } from "../protocols/mcp/tools.js";
@@ -23,7 +24,8 @@ function harness({
   failStore = false,
   now = () => 1_000,
   loadRetryIntervalMs,
-  verifyCanaryMarker
+  verifyCanaryMarker,
+  identityRegistry
 } = {}) {
   const state = new Map();
   const counters = [];
@@ -57,7 +59,8 @@ function harness({
       now,
       flushIntervalMs: 0,
       loadRetryIntervalMs,
-      verifyCanaryMarker
+      verifyCanaryMarker,
+      identityRegistry
     })
   };
 }
@@ -620,6 +623,51 @@ test("pre-split persisted state restores as a total, never as outside interest",
 
 // Fail-safe direction: the failure we must never have is OVERSTATING outside
 // interest, so anything unmarked counts as external.
+test("a fixture QA sweep increases funnelSelf only", async () => {
+  const qaWallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const outsider = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const { observatory } = harness({
+    identityRegistry: new SelfIdentityRegistry({
+      qaEngineerWallets: [qaWallet],
+      qaEngineerApiKeyIds: ["grant-qa-engineer"]
+    })
+  });
+  for (const tool of ["listJobs", "preflightJob", "fetchAuthNonce", "verifySiwe", "claimJob", "submitWork"]) {
+    await observatory.recordTool({ tool, wallet: qaWallet });
+  }
+  await observatory.recordTool({
+    tool: "listJobs",
+    apiKeyId: "grant-qa-engineer",
+    clientInfo: { name: "Anthropic/ClaudeAI", version: "1" }
+  });
+  await observatory.recordTool({ tool: "claimJob", wallet: outsider });
+  for (const [method, pathname] of [
+    ["GET", "/jobs"],
+    ["POST", "/jobs/claim"],
+    ["POST", "/jobs/submit"]
+  ]) {
+    await observatory.recordHttp({ method, pathname, wallet: qaWallet });
+  }
+
+  const snapshot = await observatory.getSnapshot();
+  assert.equal(snapshot.schemaVersion, "averray.arrivals.v1");
+  assert.equal(snapshot.funnelSelf.browsed, 2);
+  assert.equal(snapshot.funnelSelf.evaluated, 1);
+  assert.equal(snapshot.funnelSelf.identified, 1);
+  assert.equal(snapshot.funnelSelf.authenticated, 1);
+  assert.equal(snapshot.funnelSelf.claimed, 1);
+  assert.equal(snapshot.funnelSelf.submitted, 1);
+  assert.equal(snapshot.funnelExternal.browsed, 0);
+  assert.equal(snapshot.funnelExternal.claimed, 1);
+  assert.equal(snapshot.funnelExternal.submitted, 0);
+  assert.equal(snapshot.funnelAmbiguous.browsed, 0);
+  assert.equal(snapshot.funnelHttpSelf.browsed, 1);
+  assert.equal(snapshot.funnelHttpSelf.claimed, 1);
+  assert.equal(snapshot.funnelHttpSelf.submitted, 1);
+  assert.equal(snapshot.funnelHttpExternal.claimed, 0);
+  assert.equal(JSON.stringify(snapshot).includes("grant-qa-engineer"), false);
+});
+
 test("unmarked traffic counts as external, never as ours", async () => {
   const { observatory } = harness();
   observatory.selfClients = resolveSelfClients({});

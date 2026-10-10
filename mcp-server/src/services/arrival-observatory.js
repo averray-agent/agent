@@ -256,24 +256,24 @@ export class ArrivalObservatory {
   set ambiguousClients(values) { this.identityRegistry.replaceAmbiguousClients(values); }
 
   /** First contact: a handshake, or any request that reaches the door. */
-  async recordReach({ era, clientInfo, ip, method } = {}) {
+  async recordReach({ era, clientInfo, ip, method, wallet, apiKeyId } = {}) {
     const surface = mcpReachSurface(method);
     if (surface) await this.recordPreAuthAggregate({ surface, clientInfo });
-    await this.record({ stage: "reached", era, clientInfo, ip });
+    await this.record({ stage: "reached", era, clientInfo, ip, wallet, apiKeyId });
   }
 
   /** A tool call. Unknown tool names are counted as reach and nothing more. */
-  async recordTool({ tool, era, clientInfo, ip } = {}) {
+  async recordTool({ tool, era, clientInfo, ip, wallet, apiKeyId } = {}) {
     const surface = mcpToolSurface(tool);
     if (surface) await this.recordPreAuthAggregate({ surface, clientInfo });
     await this.record({
       stage: Object.hasOwn(TOOL_STAGE, tool) ? TOOL_STAGE[tool] : "reached",
-      era, clientInfo, ip, tool
+      era, clientInfo, ip, tool, wallet, apiKeyId
     });
   }
 
   /** A REST request. Machine/discovery polling is intentionally excluded. */
-  async recordHttp({ method, pathname, clientInfo, ip, wallet, canaryMarker } = {}) {
+  async recordHttp({ method, pathname, clientInfo, ip, wallet, canaryMarker, apiKeyId } = {}) {
     const normalizedMethod = String(method ?? "GET").toUpperCase();
     // CORS negotiation and link probing are transport activity, not an agent
     // entering the earn funnel. Counting them would turn browser preflights and
@@ -310,6 +310,7 @@ export class ArrivalObservatory {
       clientInfo,
       ip,
       wallet,
+      apiKeyId,
       canaryMarkerValid,
       tool: metricPathLabel(normalizedPath),
       door: "http"
@@ -342,6 +343,7 @@ export class ArrivalObservatory {
     ip,
     tool,
     wallet,
+    apiKeyId,
     canaryMarkerValid,
     door = "mcp"
   } = {}) {
@@ -361,7 +363,7 @@ export class ArrivalObservatory {
         ? this.clientWalletLinks.get(declaredClientKey)
         : undefined;
       const canonicalWallet = normalizedWallet ?? walletFromKey(linkedWalletKey);
-      const actor = this.classifyActor(identity, canonicalWallet, canaryMarkerValid);
+      const actor = this.classifyActor(identity, canonicalWallet, canaryMarkerValid, apiKeyId);
       const key = canonicalWallet
         ? walletKey(canonicalWallet)
         : declaredClientKey ?? `anon:${this.hashIp(ip)}`;
@@ -927,11 +929,12 @@ export class ArrivalObservatory {
    * first because it is the stronger claim: we are asserting the traffic is
    * ours, not merely that we cannot rule it out.
    */
-  classifyActor(identity, wallet = undefined, canaryMarkerValid = undefined) {
+  classifyActor(identity, wallet = undefined, canaryMarkerValid = undefined, apiKeyId = undefined) {
     const classified = this.identityRegistry.classify({
       wallet,
       clientInfo: identity,
-      canaryMarkerValid
+      canaryMarkerValid,
+      apiKeyId
     });
     if (classified.actor === "self") return "self";
     if (classified.actor === "ambiguous") return "ambiguous";

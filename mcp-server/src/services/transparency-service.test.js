@@ -773,6 +773,33 @@ test("failed session read exposes unavailable author proof and unknown count fie
   }
 });
 
+test("a registered QA wallet does not move any transparency external counter", async () => {
+  const external = "0x1111111111111111111111111111111111111111";
+  const qa = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const sessionWallets = [external, qa, qa];
+  const unregistered = await harness({
+    sessionWallets,
+    selfIdentityRegistry: new SelfIdentityRegistry()
+  }).getSnapshot();
+  const registered = await harness({
+    sessionWallets,
+    selfIdentityRegistry: new SelfIdentityRegistry({ qaEngineerWallets: [qa] })
+  }).getSnapshot();
+
+  assert.equal(unregistered.flow.workers24h.outsiders.value, 3);
+  assert.equal(registered.flow.workers24h.outsiders.value, 1);
+  assert.equal(registered.flow.workers24h.ours.value, 2);
+  assert.equal(registered.flow.settledToExternalWallets24h.value, 1);
+  assert.equal(registered.flow.externalWallets24h.value, 1);
+  assert.equal(registered.flow.externalAuthors24h.value, unregistered.flow.externalAuthors24h.value);
+  assert.equal(unregistered.flow.externalAuthors24h.unattributed.value, 3);
+  assert.equal(registered.flow.externalAuthors24h.unattributed.value, 1);
+  assert.equal(registered.flow.composition24h.external.value, unregistered.flow.composition24h.external.value);
+  assert.equal(registered.flow.githubAuthors.authors, undefined);
+  assert.equal(registered.flow.githubAuthors.distinctAuthors.value, unregistered.flow.githubAuthors.distinctAuthors.value);
+  assert.equal(registered.flow.githubAuthors.distinctWallets.value, unregistered.flow.githubAuthors.distinctWallets.value);
+});
+
 test("transparency settlement flow uses the shared registry for ours, outsiders, and unknown", async () => {
   const external = "0x1111111111111111111111111111111111111111";
   const acceptance = "0x2222222222222222222222222222222222222222";
