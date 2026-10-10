@@ -1059,6 +1059,8 @@ const server = createServer(async (request, response) => {
       },
       "http.response"
     );
+    const statusCode = Number(response.statusCode);
+    const arrivalError = response._arrivalError;
     void arrivalObservatory.recordHttp({
       method: wireMethod,
       pathname,
@@ -1068,7 +1070,10 @@ const server = createServer(async (request, response) => {
       // Verified service-token grant id only. Never a client-supplied header
       // and never the token secret.
       apiKeyId: request._arrivalApiKeyId,
-      canaryMarker: request.headers?.[ARRIVAL_CANARY_MARKER_HEADER]
+      canaryMarker: request.headers?.[ARRIVAL_CANARY_MARKER_HEADER],
+      outcome: statusCode >= 400
+        ? { kind: "http", status: statusCode, code: arrivalError?.code }
+        : statusCode >= 200 ? { ok: true } : undefined
     });
   });
 

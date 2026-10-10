@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
 import { ArrivalObservatory } from "../../services/arrival-observatory.js";
+import { SelfIdentityRegistry } from "../../core/self-identity-registry.js";
 import { MemoryStateStore } from "../../core/state-store.js";
+import { createAuthMiddleware } from "../../auth/middleware.js";
+import { signToken } from "../../auth/jwt.js";
 import { MCP_TOOLS } from "./tools.js";
 
 import { createRateLimiter } from "../../auth/rate-limit.js";
@@ -51,7 +54,7 @@ function createHarness(overrides = {}) {
       mcpAuthenticated: { limit: 20, windowSeconds: 60 },
       ...overrides.rateLimitConfig
     },
-    readJsonBody: async (request) => request.body,
+    readJsonBody: overrides.readJsonBody ?? (async (request) => request.body),
     respond,
     ...(overrides.tools ? { tools: overrides.tools } : {})
   });
@@ -685,6 +688,137 @@ test("legacy session capacity is configurable and expired entries update the gau
   for (const legacySessionMax of [0, -1, 1.5, Infinity, NaN]) {
     assert.throws(() => createHarness({ legacySessionMax }), /legacySessionMax must be a positive safe integer/u);
   }
+});
+
+const AUTH_SECRET = "x".repeat(40);
+const GRANT_SUBJECT = "0xabababababababababababababababababababab";
+const HEADER_SUBJECT = "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd";
+
+function authObservatory() {
+  const state = new Map();
+  return new ArrivalObservatory({
+    stateStore: {
+      async getServiceState(scope) { return state.get(scope); },
+      async upsertServiceState(scope, value) {
+        state.set(scope, { ...(state.get(scope) ?? {}), ...value });
+        return state.get(scope);
+      }
+    },
+    now: () => 5_000,
+    flushIntervalMs: 0,
+    identityRegistry: new SelfIdentityRegistry({ qaEngineerApiKeyIds: ["grant-qa-engineer"] })
+  });
+}
+
+test("a tools/call bearer is verified once, and only a service-token grant id counts as self", async () => {
+  const authConfig = {
+    jwtBackend: "hmac",
+    secrets: [AUTH_SECRET],
+    signingSecret: AUTH_SECRET,
+    permissive: false,
+    strict: true
+  };
+  const middleware = createAuthMiddleware({ authConfig, logger: { warn() {} } });
+  let authCalls = 0;
+  const authMiddleware = async (request, url, options) => {
+    authCalls += 1;
+    return middleware(request, url, options);
+  };
+  const serviceObservatory = authObservatory();
+  const { token: serviceToken } = signToken({
+    sub: GRANT_SUBJECT,
+    roles: [],
+    tokenKind: "service",
+    serviceToken: true,
+    capabilityGrantId: "grant-qa-engineer"
+  }, { secret: AUTH_SECRET, expiresInSeconds: 60 });
+  const { handler: serviceHandler } = createHarness({
+    arrivals: serviceObservatory,
+    authMiddleware
+  });
+  const serviceCall = await call(
+    serviceHandler,
+    modernRequest("tools/call", { name: "listJobs", arguments: {} }),
+    { ...modernHeaders("tools/call", "listJobs"), authorization: `Bearer ${serviceToken}` }
+  );
+  assert.equal(serviceCall.statusCode, 200);
+  assert.equal(serviceCall.body.result.isError, false);
+  assert.equal(authCalls, 1);
+  const serviceSnapshot = await serviceObservatory.getSnapshot();
+  assert.equal(serviceSnapshot.funnelSelf.browsed, 1);
+  assert.equal(serviceSnapshot.funnelExternal.browsed, 0);
+
+  authCalls = 0;
+  const headerObservatory = authObservatory();
+  const { token: walletToken } = signToken({
+    sub: HEADER_SUBJECT
+  }, { secret: AUTH_SECRET, expiresInSeconds: 60 });
+  const { handler: headerHandler } = createHarness({
+    arrivals: headerObservatory,
+    authMiddleware
+  });
+  const headerCall = await call(
+    headerHandler,
+    modernRequest("tools/call", { name: "listJobs", arguments: {} }),
+    {
+      ...modernHeaders("tools/call", "listJobs"),
+      authorization: `Bearer ${walletToken}`,
+      "x-averray-api-key-id": "grant-qa-engineer"
+    }
+  );
+  assert.equal(headerCall.statusCode, 200);
+  const headerSnapshot = await headerObservatory.getSnapshot();
+  assert.equal(headerSnapshot.funnelSelf.browsed, 0);
+  assert.equal(headerSnapshot.funnelExternal.browsed, 1);
+  assert.equal(authCalls, 1);
+});
+
+test("parse and invalid JSON-RPC errors are unclassified, not external", async () => {
+  const recorded = [];
+  const arrivals = {
+    async recordDropOff(entry) { recorded.push(entry); }
+  };
+  const { handler } = createHarness({
+    arrivals,
+    readJsonBody: async () => { throw new Error("Invalid JSON body."); }
+  });
+  const parsed = await call(handler, { jsonrpc: "2.0", id: 1, method: "ping" });
+  assert.equal(parsed.statusCode, 400);
+  assert.equal(recorded[0].actor, "unclassified");
+  assert.equal(recorded[0].outcome.code, -32700);
+
+  const invalid = [];
+  const { handler: invalidHandler } = createHarness({
+    arrivals: { async recordDropOff(entry) { invalid.push(entry); } }
+  });
+  const rejected = await call(invalidHandler, { nope: true });
+  assert.equal(rejected.statusCode, 400);
+  assert.equal(invalid[0].actor, "unclassified");
+  assert.equal(invalid[0].outcome.code, -32600);
+});
+
+test("tool failures record a drop-off code and never the error message", async () => {
+  const recorded = [];
+  const arrivals = {
+    async recordTool() {},
+    async recordDropOff(entry) { recorded.push(entry); }
+  };
+  const { handler } = createHarness({
+    arrivals,
+    executeTool: async () => { throw new Error("secret token sk-live-DO-NOT-STORE"); }
+  });
+  const result = await call(
+    handler,
+    modernRequest("tools/call", { name: "listJobs", arguments: {} }),
+    modernHeaders("tools/call", "listJobs")
+  );
+  assert.equal(result.body.result.isError, true);
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].outcome.kind, "tool");
+  assert.equal(recorded[0].outcome.code, "internal_error");
+  assert.equal(recorded[0].tool, "listJobs");
+  assert.equal(JSON.stringify(recorded).includes("sk-live"), false);
+  assert.equal(Object.hasOwn(recorded[0].outcome, "message"), false);
 });
 
 test("tool failures are logged once and counted without request arguments", async () => {

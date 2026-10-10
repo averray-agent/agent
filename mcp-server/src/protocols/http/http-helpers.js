@@ -1,11 +1,22 @@
 import { ValidationError } from "../../core/errors.js";
 
 export function respond(response, statusCode, payload, extraHeaders = {}, options = {}) {
+  rememberArrivalError(response, statusCode, payload);
   const headers = buildResponseHeaders(response, "application/json", extraHeaders);
   const body = JSON.stringify(payload, exactJsonReplacer, options.compact ? undefined : 2);
   if (body !== undefined && statusCode !== 204 && statusCode !== 304) headers["content-length"] = Buffer.byteLength(body);
   response.writeHead(statusCode, headers);
   response.end(options.headOnly || response._headOnly ? undefined : body);
+}
+
+function rememberArrivalError(response, statusCode, payload) {
+  if (!response || statusCode < 400) return;
+  const code = typeof payload?.error === "string"
+    && payload.error.length <= 64
+    && /^[a-z0-9_]+$/u.test(payload.error)
+    ? payload.error
+    : undefined;
+  response._arrivalError = { status: statusCode, ...(code ? { code } : {}) };
 }
 
 function exactJsonReplacer(_key, value) {

@@ -623,6 +623,23 @@ test("pre-split persisted state restores as a total, never as outside interest",
 
 // Fail-safe direction: the failure we must never have is OVERSTATING outside
 // interest, so anything unmarked counts as external.
+test("adding a wallet to the registry does not rewrite funnelExternal history", async () => {
+  const wallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const { observatory } = harness({
+    identityRegistry: new SelfIdentityRegistry()
+  });
+  await observatory.recordHttp({ method: "POST", pathname: "/jobs/claim", wallet });
+  const before = await observatory.getSnapshot();
+  assert.equal(before.funnelHttpExternal.claimed, 1);
+  assert.equal(before.funnelExternal.claimed, 0);
+  observatory.identityRegistry.qaEngineerWallets.add(wallet);
+  const after = await observatory.getSnapshot();
+  assert.equal(after.funnelHttpExternal.claimed, 1);
+  assert.equal(after.funnelHttpSelf.claimed, 0);
+  assert.equal(after.funnelExternal.claimed, 0);
+  assert.equal(after.httpClients.find((entry) => entry.wallet === wallet).self, true);
+});
+
 test("a fixture QA sweep increases funnelSelf only", async () => {
   const qaWallet = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
   const outsider = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
