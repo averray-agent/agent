@@ -1,0 +1,124 @@
+{
+  "schemaVersion": "averray.receipt-envelope.v1",
+  "document": {
+    "schemaVersion": "averray.work-receipt.v1",
+    "kind": "run",
+    "receiptType": "work_outcome",
+    "attestation": "A single work run: the agreed intent, submitted evidence, verification outcome, and any resulting settlement. It makes no broader claim.",
+    "sessionId": "pr-passtas-matterbridge-elgato-4:0x6c13aAf227ebcC7C7e410F43a8bAcb0A5a59bB9f",
+    "jobId": "pr-passtas-matterbridge-elgato-4",
+    "worker": "0x6c13aaf227ebcc7c7e410f43a8bacb0a5a59bb9f",
+    "chainJobId": "0xb5c86c083a725520d016c7a6121695cc7ca7364b333ff888eda331fb4176b68c",
+    "verifier": {
+      "mode": "github_pr",
+      "handler": "github_pr",
+      "version": 1,
+      "profile": "github_pr"
+    },
+    "verdict": {
+      "outcome": "approved",
+      "reasonCode": "GITHUB_PR_EVIDENCE_ACCEPTED",
+      "evidenceHash": "0x3469da056cd5edc49f05a4a36f00005ec51f6a139caf7a6bec01005acfadcd65",
+      "policyTags": [],
+      "workerConsequence": "none"
+    },
+    "settlement": {
+      "worker": "0x6c13aaf227ebcc7c7e410f43a8bacb0a5a59bb9f",
+      "treasuryAccount": "0x01e6eed856e989201f4ff6346e18eab7e46c874c",
+      "asset": "0x0000053900000000000000000000000001200000",
+      "assetSymbol": "USDC",
+      "workerAmount": "1",
+      "workerAmountRaw": "1000000",
+      "protocolFeeAmount": "0",
+      "protocolFeeAmountRaw": "0",
+      "protocolFeeBps": 0,
+      "rewardAmount": "1",
+      "rewardAmountRaw": "1000000",
+      "posterTotalAmount": "1",
+      "posterTotalAmountRaw": "1000000",
+      "gasRetentionAmount": "0",
+      "gasRetentionAmountRaw": "0",
+      "gasRetentionBps": 2000,
+      "brokered": true,
+      "waived": true,
+      "settlementTx": "0x24717ca2384f75f7cfab8703bde0e71289933ee889dd7e8b8ecce4ffb8054427"
+    },
+    "timestamps": {
+      "claimedAt": "2026-09-28T07:57:02.632Z",
+      "submittedAt": "2026-09-28T07:57:19.653Z",
+      "verifiedAt": "2026-10-08T06:49:45.096Z"
+    },
+    "signers": [
+      {
+        "role": "operator",
+        "wallet": "0x5a6836c6d4d293f6e5377e6c28054f4171915813",
+        "at": "2026-09-28T07:57:02.632Z",
+        "status": "posted"
+      },
+      {
+        "role": "worker",
+        "wallet": "0x6c13aaf227ebcc7c7e410f43a8bacb0a5a59bb9f",
+        "at": "2026-09-28T07:57:19.653Z",
+        "status": "submitted"
+      }
+    ],
+    "canonicalUrl": "https://averray.com/receipts/0x91290e62a98c6d6c006a82a87893787e7cc681c55d1bd5bcc6e854864d448e7b",
+    "intent": {
+      "specHash": "0x06d69ef8e3ef8f9475e96a7bd4d9f611b4ec8eca99dd44bc9e4757132a3d9ca7",
+      "specSource": "chain_unavailable_fail_open",
+      "successPolicy": {
+        "profile": "github_pr",
+        "version": 1
+      },
+      "valueAtRisk": {
+        "asset": "USDC",
+        "amount": "1",
+        "amountRaw": "1000000"
+      },
+      "deadline": "2026-09-28T09:56:48.000Z",
+      "poster": "0x5a6836c6d4d293f6e5377e6c28054f4171915813",
+      "posterClass": "operator"
+    },
+    "execution": {
+      "provider": "0x6c13aaf227ebcc7c7e410f43a8bacb0a5a59bb9f",
+      "providerClass": "external",
+      "artifactHash": "0x70d3dda351fa5390e614eae31ac4fe492328ea56924cc2e60b2e4004f02902b3",
+      "sourceBinding": {
+        "method": "submission_hash",
+        "verified": false
+      },
+      "evidenceHash": "0x3469da056cd5edc49f05a4a36f00005ec51f6a139caf7a6bec01005acfadcd65",
+      "environment": {
+        "kind": "node",
+        "runtime": "node",
+        "version": "v22.23.2"
+      }
+    },
+    "review": {
+      "sampled": false
+    },
+    "chainBinding": {
+      "committedVerdictHash": "0x8e52b186d6273861fb2ec24f6968af35ed30a534cde375ce567c8882b4791273",
+      "verifiedTxHash": "0x24717ca2384f75f7cfab8703bde0e71289933ee889dd7e8b8ecce4ffb8054427",
+      "logIndex": 4
+    },
+    "receiptId": "0x91290e62a98c6d6c006a82a87893787e7cc681c55d1bd5bcc6e854864d448e7b",
+    "signature": {
+      "alg": "ES256",
+      "kid": "badge-1",
+      "sig": "eyJhbGciOiJFUzI1NiIsImtpZCI6ImJhZGdlLTEiLCJzaWduZWRBdCI6IjIwMjYtMTAtMDhUMDY6NDk6NDUuMTg2WiIsInR5cCI6ImF2ZXJyYXktYmFkZ2UtcmVjZWlwdCtqd3MifQ..5sEdTBms4RX_mP-C3rldwut00SNnESPEztKB2UrJyysn-uoDlxpROtJyWFn-TpxJ7WLuMdGZE28VrtlEhHziWw",
+      "signedAt": "2026-10-08T06:49:45.186Z"
+    }
+  },
+  "unsignedPresentation": {
+    "result": "PASS",
+    "assetContext": {
+      "symbol": "USDC",
+      "chain": "eip155:420420419",
+      "chainName": "Polkadot Hub",
+      "assetId": 1337,
+      "token": "0x0000053900000000000000000000000001200000"
+    },
+    "buyer": "0x5a6836c6d4d293f6e5377e6c28054f4171915813"
+  }
+}
