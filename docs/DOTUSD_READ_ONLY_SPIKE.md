@@ -37,7 +37,7 @@ its own API, not interchangeably.
 | trust-backed precompile | `0x00001ec100000000000000000000000001200000` |
 | EVM name() / symbol() | `dotUSD` / `dotUSD` |
 | assets.asset status | Live; isSufficient true; metadata isFrozen false |
-| minimum balance | **10000 raw** (0.01 dotUSD), not USDC's configured 70000 |
+| minimum balance | At pinned block **21634457**, on-chain `assets.asset(1337)` (USDC) and `assets.asset(7873)` (dotUSD) both have **10000 raw** (0.01 token). **70000 raw** is the repo's local, conservative `DEFAULT_ESCROW_ASSET.minBalanceRaw`, not USDC's on-chain minimum. |
 | observed supply | 2954623108187 raw (a snapshot, not a supply guarantee) |
 | owner / issuer / admin / freezer | `12Sg2E9vYxvGsknGKRSXserzHWTXfNej8jqAXjp499RT6Sit` |
 
