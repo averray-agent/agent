@@ -30,6 +30,25 @@ export const VERIFY_X402_CHAIN_ID = 8453;
 export const VERIFY_X402_CHAIN_NAME = "Base";
 export const VERIFY_X402_CAPTURE_MARGIN_SECONDS = 10 * 60;
 const CAPTURE_WAIT_TIMEOUT_MS = 60_000;
+const ADMISSION_READ_TIMEOUT_MS = 8_000;
+
+async function admissionRead(read, reason) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(read),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new AppError(
+          "Base authorization read timed out; no work was admitted.",
+          { name: "PaymentVerificationError", code: "payment_chain_read_timeout", statusCode: 503,
+            details: { reason, action: "retry_when_base_reads_recover", customerFunds: "unchanged" } }
+        )), ADMISSION_READ_TIMEOUT_MS);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * Read the public asset identity from the same environment binding used by
@@ -269,9 +288,10 @@ export class X402VerificationPaymentGate {
     // execution (or between these reads) cannot fall outside reconciliation.
     let authorizedAtBlock;
     try {
-      authorizedAtBlock = await this.provider.getBlockNumber();
+      authorizedAtBlock = await admissionRead(() => this.provider.getBlockNumber(), "base_block_read_timeout");
       if (!Number.isSafeInteger(authorizedAtBlock) || authorizedAtBlock < 0) throw new Error("Invalid block number");
-    } catch {
+    } catch (error) {
+      if (error?.code === "payment_chain_read_timeout") throw error;
       throw new AppError("Base authorization checkpoint is unavailable; no work was admitted.", {
         name: "PaymentVerificationError", statusCode: 503, code: "payment_block_unavailable",
         details: { reason: "base_block_read_failed", action: "retry_when_base_reads_recover", customerFunds: "unchanged" }
@@ -279,8 +299,9 @@ export class X402VerificationPaymentGate {
     }
     let used;
     try {
-      used = await this.token.authorizationState(authorization.from, authorization.nonce);
-    } catch {
+      used = await admissionRead(() => this.token.authorizationState(authorization.from, authorization.nonce), "base_nonce_state_read_timeout");
+    } catch (error) {
+      if (error?.code === "payment_chain_read_timeout") throw error;
       throw paymentRefusal(
         "Averray could not confirm the EIP-3009 nonce state on Base. No work ran and no money moved; retry when Base reads recover.",
         "payment_nonce_state_unavailable"
@@ -295,8 +316,9 @@ export class X402VerificationPaymentGate {
 
     let balance;
     try {
-      balance = exactUint(await this.token.balanceOf(authorization.from), "payer balance");
-    } catch {
+      balance = exactUint(await admissionRead(() => this.token.balanceOf(authorization.from), "base_balance_read_timeout"), "payer balance");
+    } catch (error) {
+      if (error?.code === "payment_chain_read_timeout") throw error;
       throw new AppError(
         "Averray could not read the payer's Base USDC balance. No work ran and no payment was captured; retry when Base reads recover.",
         { name: "PaymentVerificationError", code: "payment_balance_unavailable", statusCode: 503,
