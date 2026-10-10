@@ -214,6 +214,21 @@ test("a later error does not erase an earlier stage, and protocol garbage is unc
   assert.match(snapshot.errorsByStage.measures, /one pre-auth request = one visit/u);
 });
 
+test("a snapshot failure after a successful load still passes unavailable into errorsByStage", async () => {
+  const { observatory } = harness();
+  await observatory.recordDropOff({
+    stage: "reached",
+    outcome: { kind: "jsonrpc", code: -32601 }
+  });
+  const loaded = await observatory.getSnapshot();
+  assert.equal(loaded.errorsByStage.sinceCutover.mcp.external.reached["-32601"], 1);
+  observatory.clients = null;
+  const failed = await observatory.getSnapshot();
+  assert.equal(failed.errorsByStage.sinceCutover, NOT_REPORTED);
+  assert.equal(failed.errorsByStage["24h"], NOT_REPORTED);
+  assert.equal(failed.errorsByStage["7d"], NOT_REPORTED);
+});
+
 test("24h excludes the hour that starts before the window, and unavailable survives a successful load", () => {
   const series = createDropOffSeries();
   const hour = 60 * 60 * 1_000;
