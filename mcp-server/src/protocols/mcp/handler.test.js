@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
 import { ArrivalObservatory } from "../../services/arrival-observatory.js";
+import { ArrivalSessionTrail } from "../../services/arrival-session-trail.js";
 import { SelfIdentityRegistry } from "../../core/self-identity-registry.js";
 import { MemoryStateStore } from "../../core/state-store.js";
 import { createAuthMiddleware } from "../../auth/middleware.js";
@@ -9,7 +10,7 @@ import { signToken } from "../../auth/jwt.js";
 import { MCP_TOOLS } from "./tools.js";
 
 import { createRateLimiter } from "../../auth/rate-limit.js";
-import { AuthenticationError, RateLimitError } from "../../core/errors.js";
+import { AuthenticationError, ConflictError, RateLimitError } from "../../core/errors.js";
 import { MetricRegistry } from "../../core/metrics.js";
 import { MemoryStateStore as RateLimitStateStore } from "../../core/state-store.js";
 import { respond } from "../http/http-helpers.js";
@@ -1057,4 +1058,103 @@ test("1,000 unregistered tool calls record only the unknown tool label", async (
   assert.ok(Object.keys(tools).length <= 64);
   assert.ok(Object.keys(tools).every((name) => registeredNames.has(name) || name === "unknown_tool" || name === "other"));
   assert.deepEqual(tools, { unknown_tool: 1_000, listJobs: 1 });
+});
+
+test("an anonymous follow-up is not stitched onto a linked wallet", async () => {
+  const wallet = "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd";
+  const state = new Map();
+  const stateStore = {
+    async getServiceState(scope) { return state.get(scope); },
+    async upsertServiceState(scope, value) {
+      state.set(scope, { ...(state.get(scope) ?? {}), ...value });
+      return state.get(scope);
+    },
+    async deleteServiceState(scope) { state.delete(scope); }
+  };
+  const arrivals = new ArrivalObservatory({ stateStore: new MemoryStateStore(), now: () => 10_000, flushIntervalMs: 0 });
+  const sessionTrail = new ArrivalSessionTrail({ stateStore, now: () => 10_000, flushIntervalMs: 0 });
+  const { handler } = createHarness({
+    arrivals,
+    sessionTrail,
+    authMiddleware: async (request) => {
+      request._arrivalWallet = wallet;
+      return { wallet };
+    }
+  });
+  const headers = modernHeaders("tools/call", "listJobs");
+  const authed = await call(
+    handler,
+    modernRequest("tools/call", { name: "listJobs", arguments: {} }),
+    { ...headers, authorization: "Bearer valid-token" }
+  );
+  assert.equal(authed.statusCode, 200);
+  const anon = await call(
+    handler,
+    modernRequest("tools/call", { name: "listJobs", arguments: {} }, MODERN_MCP_VERSION, 2),
+    headers
+  );
+  assert.equal(anon.statusCode, 200);
+  const record = await sessionTrail.get(`wallet:${wallet}`);
+  assert.equal(record.session.steps.length, 1);
+  assert.equal(record.session.steps[0].name, "listJobs");
+  const listed = await sessionTrail.list();
+  assert.equal(listed.sessions.length, 1);
+  assert.equal(listed.preAuth.count, 1);
+});
+
+test("an MCP error on fetchAuthNonce records no drop-off for the claimed wallet", async () => {
+  const claimed = "0xabababababababababababababababababababab";
+  const arrivals = new ArrivalObservatory({
+    stateStore: new MemoryStateStore(),
+    now: () => 10_000,
+    flushIntervalMs: 0,
+    identityRegistry: new SelfIdentityRegistry({ qaEngineerWallets: [claimed] })
+  });
+  const { handler } = createHarness({
+    arrivals,
+    authMiddleware: async (request) => {
+      request._arrivalWallet = claimed;
+      return { wallet: claimed };
+    },
+    executeTool: async () => { throw new ConflictError("nonce refused"); }
+  });
+  const result = await call(
+    handler,
+    modernRequest("tools/call", { name: "fetchAuthNonce", arguments: { wallet: claimed } }),
+    { ...modernHeaders("tools/call", "fetchAuthNonce"), authorization: "Bearer valid-token" }
+  );
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.result.isError, true);
+  const snapshot = await arrivals.getSnapshot();
+  const selfRow = snapshot.errorsByStage.sinceCutover.mcp.self.identified;
+  assert.equal(selfRow.conflict, undefined);
+  assert.equal(JSON.stringify(snapshot.errorsByStage.sinceCutover.mcp.self).includes("conflict"), false);
+  assert.equal(snapshot.errorsByStage.sinceCutover.mcp.external.identified.conflict, 1);
+});
+
+test("a rate-limited MCP request produces no trail row", async () => {
+  const state = new Map();
+  const sessionTrail = new ArrivalSessionTrail({
+    stateStore: {
+      async getServiceState(scope) { return state.get(scope); },
+      async upsertServiceState(scope, value) {
+        state.set(scope, { ...(state.get(scope) ?? {}), ...value });
+        return state.get(scope);
+      },
+      async deleteServiceState(scope) { state.delete(scope); }
+    },
+    now: () => 10_000,
+    flushIntervalMs: 0
+  });
+  const { handler } = createHarness({
+    sessionTrail,
+    enforceLimit: async () => { throw new RateLimitError(); }
+  });
+  await assert.rejects(
+    () => call(handler, modernRequest("tools/list"), modernHeaders("tools/list")),
+    (error) => error instanceof RateLimitError
+  );
+  const listed = await sessionTrail.list();
+  assert.equal(listed.sessions.length, 0);
+  assert.equal(listed.preAuth.count, 0);
 });

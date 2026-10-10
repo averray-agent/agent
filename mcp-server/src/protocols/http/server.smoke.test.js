@@ -2791,3 +2791,62 @@ test("http smoke: POST /auth/nonce does not stitch or link an unsigned wallet", 
     assert.equal(probe.wallet, null);
   } finally { await stop(child); }
 });
+
+test("http smoke: an anonymous follow-up is not stitched onto a linked wallet", SMOKE_TEST_OPTIONS, async () => {
+  const wallet = "0x8888888888888888888888888888888888888888";
+  const port = 19_000 + Math.floor(Math.random() * 1_000);
+  const child = await startServer(port, { RATE_LIMIT_AUTH_NONCE_LIMIT: "30" });
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const admin = {
+      authorization: `Bearer ${issueToken(ADMIN_WALLET, { roles: ["admin"] })}`,
+      "user-agent": "AdminPoll/1"
+    };
+    const session = async () => {
+      const response = await fetch(`${base}/admin/arrivals/sessions?id=${encodeURIComponent(`wallet:${wallet}`)}`, { headers: admin });
+      return { status: response.status, body: await response.json() };
+    };
+    const listed = async () => {
+      const response = await fetch(`${base}/admin/arrivals/sessions`, { headers: admin });
+      assert.equal(response.status, 200);
+      return response.json();
+    };
+    const authed = await fetch(`${base}/auth/session`, {
+      headers: {
+        authorization: `Bearer ${issueToken(wallet)}`,
+        "user-agent": "Linker/1"
+      }
+    });
+    assert.equal(authed.status, 200);
+    await authed.json();
+    const deadline = Date.now() + 2_000;
+    let existing;
+    while (Date.now() < deadline) {
+      existing = await session();
+      if (existing.status === 200) break;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+    }
+    assert.equal(existing.status, 200);
+    const stepsBefore = existing.body.session.steps.length;
+    const unstitchedBefore = (await listed()).preAuth.count;
+    const anon = await fetch(`${base}/openapi.json`, { headers: { "user-agent": "Linker/1" } });
+    assert.equal(anon.status, 200);
+    await anon.text();
+    let settled;
+    const until = Date.now() + 2_000;
+    while (Date.now() < until) {
+      const detail = await session();
+      const count = (await listed()).preAuth.count;
+      const appended = detail.body?.session?.steps?.length > stepsBefore;
+      if (count > unstitchedBefore || appended) {
+        settled = { detail, count, appended };
+        break;
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+    }
+    assert.ok(settled, "anonymous follow-up was not observed");
+    assert.equal(settled.appended, false);
+    assert.equal(settled.detail.body.session.steps.length, stepsBefore);
+    assert.ok(settled.count > unstitchedBefore);
+  } finally { await stop(child); }
+});
