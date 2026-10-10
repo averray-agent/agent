@@ -33,9 +33,14 @@ sum the shared work twice. Embedded/headless wallets are not included.
 ## A1 — Coinbase account-based hosted flow
 
 1. The future Averray screen connects the customer's EOA and retains the draft
-   Verify request locally. A backend obtains a short-lived Onramp session and
-   generates the partner URL, restricted to the wallet, USDC and Base; check
-   country/payment options rather than assuming support from the ticker.
+   Verify request locally. A backend uses the
+   [Session Token API](https://docs.cdp.coinbase.com/api-reference/rest-api/onramp-offramp/create-session-token)
+   with `addresses: [{ address: customerWallet, blockchains: ["base"] }]` and
+   `assets: ["USDC"]` to restrict the wallet, network and asset, then builds the
+   partner URL. URL `defaultNetwork`/`defaultAsset` are defaults, not these
+   restrictions. Supply the required `clientIp`: the real end-user IP, not an
+   untrusted `X-Forwarded-For` header. Check country/payment options rather than
+   assuming support from the ticker.
 2. Redirect to Coinbase. The customer signs in or creates/verifies a Coinbase
    account, selects an available funding method, reviews the partner's fees,
    and buys/sends USDC to that EOA on Base.
@@ -56,6 +61,14 @@ at implementation time. Coinbase owns account identity verification; the user
 provides documents directly to Coinbase, not Averray.
 [Identity verification](https://help.coinbase.com/en-gb/coinbase/getting-started/getting-started-with-coinbase/id-doc-verification).
 
+Integrator prerequisite: Averray must create a CDP project and a **Secret API
+key** (server-side, not a Client API key), under the CDP terms. This is separate
+from the buyer's Coinbase account/KYC.
+[CDP setup](https://docs.cdp.coinbase.com/onramp/introduction/quickstart);
+[CDP terms](https://www.coinbase.com/legal/developer-platform/terms-of-service).
+Supplying `clientIp` for this partner flow is not permission to retain, hash or
+use IPs in arrival observability; its privacy handling needs review.
+
 ## A2 — Stripe-hosted session flow
 
 1. After provider approval, a future backend mints an on-ramp session for the
@@ -71,23 +84,36 @@ provides documents directly to Coinbase, not Averray.
 
 [Session API](https://docs.stripe.com/api/crypto/onramp_sessions/create) documents
 the network/currency restrictions and `lock_wallet_address`.
-The [hosted guide](https://docs.stripe.com/crypto/onramp/stripe-hosted) lists Base
-USDC but explicitly excludes it in the EU. Switzerland is not the EU; that does
-**not** establish Swiss customer or merchant eligibility. Both remain **not
-reported** until the provider confirms them for this application. Use the
-minted-session option for wallet binding, not a generic link that merely
-suggests the asset. Do not promise broad EU availability or bridge from another
-network as an automatic workaround.
+As of **2026-10-10**, the Crypto Onramp table lists consumers in the US and EU
+only, with **Base USDC for US consumers only**. Swiss consumers are not in
+Stripe's documented on-ramp regions. Merchants may apply from all Stripe
+merchant-supported countries, including Switzerland: a Swiss merchant is
+documented as eligible to apply; Averray's application approval is **not
+reported**. [Availability table](https://docs.stripe.com/stablecoins/availability);
+[merchant countries](https://stripe.com/global).
+Use the minted-session option for wallet binding, not a generic link that
+merely suggests the asset. Do not promise EU Base USDC availability or bridge
+from another network as an automatic workaround.
 
 Stripe says it is merchant of record for the **on-ramp transaction**, handles
 KYC/sanctions screening, and requires an on-ramp application. This does not make
-Stripe the merchant of record for Averray's separate Verify service or remove
-Averray's own obligations. [On-ramp overview](https://docs.stripe.com/crypto/onramp).
+Stripe the merchant of record for Averray's separate Verify service; whether
+partner KYC affects Averray's obligations is a question for counsel.
+As of **2026-10-10**, the on-ramp is in **Public preview**. Averray must first
+create and onboard a Stripe account (business verification and Stripe's terms),
+then submit the on-ramp application; approval is not implied by account creation.
+[On-ramp overview and application steps](https://docs.stripe.com/crypto/onramp).
 
 ## Shared funded-wallet → Verify sequence
 
 This is proposed browser work; today's `/verify` page supplies agent/API
-instructions, not an integrated human checkout. The code reference is
+instructions, not an integrated human checkout. **No human x402 client exists
+in Averray today.** The proposed page must call `eth_signTypedData_v4` on an
+EOA wallet (injected or WalletConnect), assemble the x402 v2
+`PAYMENT-SIGNATURE` envelope and base64-encode it itself. How each wallet
+displays the typed data and hardware-wallet support are **untested**.
+Smart-contract wallets cannot pay through the current gate: it uses
+`verifyTypedData` only, with no ERC-1271 support. The code reference is
 [`VERIFY_PR_GATE.md`](VERIFY_PR_GATE.md), with
 [`VERIFY_CAPTURE_RECOVERY.md`](VERIFY_CAPTURE_RECOVERY.md) for pending capture.
 
@@ -143,9 +169,9 @@ No bridging, automatic swaps, pooled credits or fiat refunds are proposed here.
 - **Swiss operator review:** the source imprint identifies a Swiss sole
   proprietor. Obtain advice on the specific flow, customer markets and referral
   compensation before launch. FINMA says crypto/payment business models must
-  assess authorisation and AML obligations; partner KYC does not establish an
-  exemption for Averray. Keeping funding in the user's wallet is a design
-  constraint, not a legal conclusion.
+  assess authorisation and AML obligations. Whether partner KYC affects
+  Averray's obligations is a question for counsel. Keeping funding in the
+  user's wallet is a design constraint, not a legal conclusion.
   [FINMA FinTech guidance](https://www.finma.ch/en/authorisation/fintech/).
 - **Contract split:** document who sells the crypto and who sells Verify;
   confirm partner terms, permitted use, country restrictions, sanctions,
@@ -160,6 +186,11 @@ No bridging, automatic swaps, pooled credits or fiat refunds are proposed here.
   cancellation rights, tax/invoice handling and the meaning of a rejected
   but charged Verify result. These are counsel/accounting questions, not
   conclusions established by this technical memo.
+- **Customer-market questions for counsel:** for the US-only Stripe Base USDC
+  path, which US money-transmission/state rules, consumer laws and sales taxes
+  on a digital service sold to US buyers apply to Averray? If the Coinbase flow
+  reaches EU customers, which MiCA/EU rules apply? This memo does not determine
+  applicability, licensing, exemptions or tax treatment.
 - **Security:** bind partner sessions to the intended wallet; allowlist return
   destinations; authenticate any future webhook; retain authoritative run IDs;
   never mark funding/settlement from URL parameters. Review minimum-purchase
@@ -167,7 +198,7 @@ No bridging, automatic swaps, pooled credits or fiat refunds are proposed here.
 
 ## Evidence gaps and acceptance plan (not executed)
 
-Partner approval, Swiss eligibility, per-market quotes, conversion rate,
+Partner approval, Coinbase Swiss eligibility, per-market quotes, conversion rate,
 end-to-end latency and refund experience are all **not reported**. There have
 been no paid trials in this task. Do not render these as 0 or claim a tested
 human checkout.
