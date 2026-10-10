@@ -111,6 +111,27 @@ test("unsigned, tampered, wrong linked receipt and unavailable JWKS fall back ho
   assert.equal(await latestReceipt({ ...h, cryptoImpl: webcrypto, now }), null);
 });
 
+test("same verifiedAt cannot substitute a different signed linked receiptId", async () => {
+  const h = await harness();
+  const listed = h.rows[0];
+  const other = await h.row("3", listed.document.timestamps.verifiedAt);
+  assert.equal(other.document.timestamps.verifiedAt, listed.document.timestamps.verifiedAt);
+  assert.notEqual(other.document.receiptId, listed.document.receiptId);
+  h.setLinked(other.document);
+
+  // The replacement is otherwise eligible and its signature really verifies.
+  h.setPage({ items: [other], nextCursor: null });
+  assert.deepEqual(await latestReceipt({ ...h, cryptoImpl: webcrypto, now }), {
+    href: `/receipts/${id("3")}/`, date: "2026-10-09", signature: "Signed by badge-1 (ES256)"
+  });
+
+  h.calls.length = 0;
+  h.setPage({ items: [listed], nextCursor: null });
+  assert.equal(await latestReceipt({ ...h, cryptoImpl: webcrypto, now }), null);
+  assert.equal(h.calls[1], `https://api.averray.com/receipts/${listed.document.receiptId}`);
+  assert.equal(h.calls.length, 2, "reject the wrong linked ID before fetching JWKS");
+});
+
 test("both marketing consumers render a verified recent link or a dated example on read failure", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now });
   const component = readFileSync(new URL("../../marketing/src/components/LatestReceipt.astro", import.meta.url), "utf8");
