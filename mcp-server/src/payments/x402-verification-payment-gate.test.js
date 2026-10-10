@@ -87,7 +87,7 @@ function harness({ nonceUsed = false, tokenName = "USD Coin", domainFailures = 0
   };
   const gate = new X402VerificationPaymentGate({
     config: config(),
-    provider: { async getNetwork() { return { chainId: 8453n }; } },
+    provider: { async getNetwork() { return { chainId: 8453n }; }, async getBlockNumber() { return 100; } },
     tokenContract,
     captureTokenContract,
     now: () => NOW
@@ -150,6 +150,7 @@ test("authorize verifies EIP-3009 offline and capture alone submits transferWith
   assert.equal(calls.capture, 0, "offline authorization must not submit a Base transaction");
 
   const captured = await gate.capture({ authorization });
+  assert.equal(authorization.authorizedAtBlock, 100);
   assert.equal(captured.transactionHash, TX);
   assert.equal(calls.capture, 1);
   assert.equal(calls.wait, 1);
@@ -195,6 +196,27 @@ test("X1f verifies the signature before reading the payer balance", async () => 
   payload.payload.signature = await Wallet.createRandom().signTypedData(domain(), TYPES, payload.payload.authorization);
   await assert.rejects(authorize(gate, Buffer.from(JSON.stringify(payload)).toString("base64")), { code: "payment_payer_mismatch" });
   assert.equal(calls.balances.length, 0);
+});
+
+test("capture bounds confirmation waiting after recording the broadcast hash", async () => {
+  const { gate } = harness();
+  const { paymentProof } = await signedPayment(gate);
+  const authorization = await authorize(gate, paymentProof);
+  let recordedHash;
+  let waits = 0;
+  gate.captureToken.transferWithAuthorization = async () => ({
+    hash: TX,
+    wait: async (...args) => {
+      waits++;
+      assert.deepEqual(args, [1, 60_000]);
+      assert.equal(recordedHash, TX, "persist the hash before waiting, so the next tick reconciles it");
+      throw Object.assign(new Error("transaction wait timed out"), { code: "TIMEOUT" });
+    }
+  });
+  await assert.rejects(gate.capture({ authorization, onBroadcast: async (hash) => { recordedHash = hash; } }),
+    (error) => error.code === "TIMEOUT");
+  assert.equal(waits, 1);
+  assert.equal(recordedHash, TX);
 });
 
 test("authorization expiring inside timeout plus capture margin is refused before work", async () => {
@@ -247,6 +269,21 @@ test("an already-used on-chain authorization nonce is refused", async () => {
     () => authorize(gate, paymentProof),
     (error) => error.statusCode === 402 && error.code === "payment_authorization_used"
   );
+  assert.equal(calls.capture, 0);
+});
+
+test("X1d admission block read failure is an actionable 503 payment refusal", async () => {
+  const { gate, calls } = harness();
+  const { paymentProof } = await signedPayment(gate);
+  gate.provider.getBlockNumber = async () => { throw new Error("private provider diagnostic"); };
+  await assert.rejects(authorize(gate, paymentProof), (error) => {
+    assert.equal(error.statusCode, 503);
+    assert.equal(error.code, "payment_block_unavailable");
+    assert.equal(error.details.reason, "base_block_read_failed");
+    assert.ok(!JSON.stringify(error).includes("private provider diagnostic"));
+    return true;
+  });
+  assert.equal(calls.authorizationState, 0);
   assert.equal(calls.capture, 0);
 });
 

@@ -221,6 +221,19 @@ test("POST /verify/runs accepts the standard x402 header and returns the queued 
   assert.equal(response.headers, undefined);
 });
 
+test("chain-reconciled capture returns the recovered payment response transaction", async () => {
+  const { response, route } = harness({ createRun: async () => ({
+    runId: "verify-recovered", status: "complete", verdict: { outcome: "approved", reasonCode: "PASS" },
+    billing: { status: "captured", amountRaw: "5000000", asset: "USDC", network: "eip155:8453",
+      transactionHash: "0x" + "a".repeat(64), proof: "reconciled_from_chain" }
+  }) });
+  await route({ request: { method: "POST", headers: {}, socket: { remoteAddress: "127.0.0.1" } }, response, pathname: "/verify/runs" });
+  assert.equal(response.body.billing.status, "captured");
+  assert.equal(response.body.billingRule, VERIFY_BILLING_RULE);
+  assert.equal(response.body.verdict.outcome, "approved");
+  assert.equal(JSON.parse(Buffer.from(response.headers["payment-response"], "base64")).transaction, "0x" + "a".repeat(64));
+});
+
 test("queued Verify response names the poll route and PASS settlement timing", async () => {
   const { response, route } = harness();
   const request = {

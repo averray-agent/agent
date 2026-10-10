@@ -32,7 +32,7 @@ function harness({ balance = 5_000_000n, balanceError } = {}) {
       asset: domain.verifyingContract, payTo: "0x1111111111111111111111111111111111111111",
       assetEip712Name: domain.name, assetEip712Version: domain.version,
       publicOrigin: "https://api.averray.com", captureMarginSeconds: 600 },
-    provider: { getNetwork: async () => ({ chainId: 8453n }) },
+    provider: { getNetwork: async () => ({ chainId: 8453n }), getBlockNumber: async () => 100 },
     tokenContract: { name: async () => domain.name, DOMAIN_SEPARATOR: async () => TypedDataEncoder.hashDomain(domain), authorizationState: async () => false,
       balanceOf: async (payer) => { calls.balances.push(payer); if (balanceError) throw balanceError; return balance; } },
     captureTokenContract: { transferWithAuthorization: async () => { calls.captures++; throw new Error("unexpected capture"); } },
@@ -252,6 +252,7 @@ for (const transport of ["http", "mcp"]) {
       const h = harness();
       let attempts = 0;
       let captured = 0;
+      h.gate.reconcileCapture = async () => ({ status: "expired" }); // Proven unused expiry fixture.
       h.gate.capture = async () => {
         attempts++;
         if (outcome === "capture_failure") throw new Error("capture fixture failed");
@@ -290,9 +291,9 @@ for (const transport of ["http", "mcp"]) {
       assert.equal(completed.body.billingRule, VERIFY_BILLING_RULE);
       if (outcome === "capture_failure") {
         assert.equal(completed.body.verdict.outcome, "inconclusive");
-        assert.equal(completed.body.verdict.reasonCode, "runner_fault");
-        assert.equal(completed.body.verdict.reason, "runner_fault");
-        assert.match(completed.body.verdict.detail, /Payment capture failed.*capture fixture failed/u);
+        assert.equal(completed.body.verdict.reasonCode, "payment_authorization_expired");
+        assert.equal(completed.body.verdict.reason, "payment_authorization_expired");
+        assert.match(completed.body.verdict.detail, /Payment authorization expired unused/u);
       }
       assert.equal(captured, decisive ? 1 : 0);
       assert.equal(attempts, decisive || outcome === "capture_failure" ? 1 : 0);

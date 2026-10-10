@@ -31,9 +31,13 @@ test("inconclusive Verify runs never increase billed volume; approved and reject
     row.billing.status = status;
     assert.equal(total([...decisive, row]), 10_000_000n);
   }
-  const unconfirmed = capture(5);
-  delete unconfirmed.billing.transactionHash;
-  assert.equal(total([...decisive, unconfirmed]), 10_000_000n);
+  const reconciled = capture(5);
+  reconciled.billing.proof = "reconciled_from_chain";
+  assert.equal(total([...decisive, reconciled]), 15_000_000n);
+  // A corrupt hashless capture is still not proof of revenue.
+  const reconciledWithoutHash = capture(5);
+  delete reconciledWithoutHash.billing.transactionHash;
+  assert.equal(total([...decisive, reconciledWithoutHash]), 10_000_000n);
   assert.equal(total([...decisive, ...decisive]), 10_000_000n, "repeated scrapes/SCAN duplicates must not double count");
 });
 

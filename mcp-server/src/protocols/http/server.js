@@ -1002,6 +1002,7 @@ const handlePaymentRoute = createPaymentRoutes({
 });
 
 const handleOperationalRoute = createOperationalRoutes({
+  verificationRunService,
   badgeReceiptSigner,
   authConfig,
   externalPostingMode: externalPostingService.config.mode,

@@ -1,5 +1,6 @@
 import {
   Contract,
+  Interface,
   JsonRpcProvider,
   Signature,
   TypedDataEncoder,
@@ -28,6 +29,7 @@ export const VERIFY_X402_NETWORK = "eip155:8453";
 export const VERIFY_X402_CHAIN_ID = 8453;
 export const VERIFY_X402_CHAIN_NAME = "Base";
 export const VERIFY_X402_CAPTURE_MARGIN_SECONDS = 10 * 60;
+const CAPTURE_WAIT_TIMEOUT_MS = 60_000;
 
 /**
  * Read the public asset identity from the same environment binding used by
@@ -50,6 +52,9 @@ const BYTES32_RE = /^0x[a-fA-F0-9]{64}$/u;
 const SIGNATURE_RE = /^0x[a-fA-F0-9]{130}$/u;
 const UINT_RE = /^\d+$/u;
 const TOKEN_ABI = [
+  "event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)",
+  "event AuthorizationCanceled(address indexed authorizer, bytes32 indexed nonce)",
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
   "function name() view returns (string)",
   "function DOMAIN_SEPARATOR() view returns (bytes32)",
   "function authorizationState(address authorizer, bytes32 nonce) view returns (bool)",
@@ -260,6 +265,18 @@ export class X402VerificationPaymentGate {
       );
     }
 
+    // Capture the lower bound before the nonce read, so a cancellation during
+    // execution (or between these reads) cannot fall outside reconciliation.
+    let authorizedAtBlock;
+    try {
+      authorizedAtBlock = await this.provider.getBlockNumber();
+      if (!Number.isSafeInteger(authorizedAtBlock) || authorizedAtBlock < 0) throw new Error("Invalid block number");
+    } catch {
+      throw new AppError("Base authorization checkpoint is unavailable; no work was admitted.", {
+        name: "PaymentVerificationError", statusCode: 503, code: "payment_block_unavailable",
+        details: { reason: "base_block_read_failed", action: "retry_when_base_reads_recover", customerFunds: "unchanged" }
+      });
+    }
     let used;
     try {
       used = await this.token.authorizationState(authorization.from, authorization.nonce);
@@ -294,10 +311,14 @@ export class X402VerificationPaymentGate {
       );
     }
 
-    return Object.freeze(verified);
+    return Object.freeze({ ...verified, authorizedAtBlock });
   }
 
-  async capture({ authorization }) {
+  async prepareCapture() {
+    return { fromBlock: await this.provider.getBlockNumber() };
+  }
+
+  async capture({ authorization, onBroadcast }) {
     const proof = authorization.authorization;
     const signature = Signature.from(authorization.signature);
     const transaction = await this.captureToken.transferWithAuthorization(
@@ -311,7 +332,9 @@ export class X402VerificationPaymentGate {
       signature.r,
       signature.s
     );
-    const receipt = await transaction.wait();
+    await onBroadcast?.(String(transaction.hash));
+    // A dropped transaction must return control to persisted reconciliation.
+    const receipt = await transaction.wait(1, CAPTURE_WAIT_TIMEOUT_MS);
     if (!receipt || Number(receipt.status) !== 1) {
       throw new Error("Base transferWithAuthorization was not confirmed successfully.");
     }
@@ -321,6 +344,78 @@ export class X402VerificationPaymentGate {
       amountRaw: authorization.amountRaw,
       network: this.config.network
     };
+  }
+
+  async reconcileCapture({ authorization, pendingTransactionHash, fromBlock, captureScanNextBlock }) {
+    let pendingKnown = false;
+    if (pendingTransactionHash) {
+      const receipt = await this.provider.getTransactionReceipt(pendingTransactionHash);
+      pendingKnown = !receipt;
+      if (receipt && Number(receipt.status) === 1) {
+        return { status: "captured", transactionHash: pendingTransactionHash, proof: "reconciled_from_chain" };
+      }
+      // A reverted duplicate says nothing about the earlier authorization
+      // transfer. Reconcile the nonce/events before making any money statement.
+      if (receipt && Number(receipt.status) !== 0) {
+        throw Object.assign(new Error("Base receipt status unavailable."), { code: "capture_receipt_unavailable" });
+      }
+    }
+    const proof = authorization.authorization;
+    const legacy = !Number.isSafeInteger(authorization.authorizedAtBlock);
+    const firstBlock = legacy ? fromBlock : authorization.authorizedAtBlock;
+    const latest = await this.provider.getBlock("latest");
+    if (!latest || !Number.isSafeInteger(latest.number) || !Number.isSafeInteger(latest.timestamp)) {
+      throw Object.assign(new Error("Base block unavailable."), { code: "capture_block_unavailable" });
+    }
+    const used = await this.token.authorizationState(proof.from, proof.nonce, { blockTag: latest.number });
+    if (typeof used !== "boolean") throw new Error("Base authorization state is unavailable.");
+    if (!Number.isSafeInteger(firstBlock) || firstBlock < 0 || latest.number < firstBlock) {
+      throw Object.assign(new Error("Capture reconciliation range unavailable."), { code: "capture_range_unavailable" });
+    }
+    const expired = BigInt(latest.timestamp) > BigInt(proof.validBefore);
+    // Cancellation has no validBefore check. Scan through the observed head,
+    // including after expiry, with bounded pages and persisted progress.
+    const toBlock = latest.number;
+    // Persist progress between bounded chunks instead of wedging forever on
+    // an old/large authorization window. Re-read the boundary on the next pass.
+    const scanFrom = Math.max(firstBlock, captureScanNextBlock ?? firstBlock);
+    const scanEnd = Math.min(toBlock, scanFrom + 9_999);
+    const abi = new Interface(TOKEN_ABI);
+    const events = [];
+    for (let start = scanFrom; start <= scanEnd; start += 1_000) {
+      events.push(...await this.provider.getLogs({
+        address: this.config.asset, fromBlock: start, toBlock: Math.min(scanEnd, start + 999),
+        topics: [
+          [abi.getEvent("AuthorizationUsed").topicHash, abi.getEvent("AuthorizationCanceled").topicHash],
+          abi.encodeFilterTopics("AuthorizationUsed", [proof.from, proof.nonce])[1], proof.nonce
+        ]
+      }));
+    }
+    for (const event of events) {
+      if (event.removed || event.address.toLowerCase() !== this.config.asset.toLowerCase()) continue;
+      const parsed = abi.parseLog(event);
+      if (!parsed || parsed.args.authorizer.toLowerCase() !== proof.from.toLowerCase()
+        || parsed.args.nonce.toLowerCase() !== proof.nonce.toLowerCase()) continue;
+      if (parsed.name === "AuthorizationCanceled") return { status: "cancelled" };
+      const receipt = await this.provider.getTransactionReceipt(event.transactionHash);
+      if (!receipt || Number(receipt.status) !== 1) return { status: "pending" };
+      const transfer = receipt.logs.some((log) => {
+        if (log.address.toLowerCase() !== this.config.asset.toLowerCase()) return false;
+        if (log.topics[0] !== abi.getEvent("Transfer").topicHash) return false;
+        const decoded = abi.parseLog(log);
+        return decoded?.name === "Transfer"
+          && decoded.args.from.toLowerCase() === proof.from.toLowerCase()
+          && decoded.args.to.toLowerCase() === this.config.payTo.toLowerCase()
+          && decoded.args.value >= BigInt(proof.value);
+      });
+      if (transfer) return { status: "captured", transactionHash: event.transactionHash, proof: "reconciled_from_chain" };
+      return { status: "used_elsewhere" };
+    }
+    if (scanEnd < toBlock) return { status: "pending", captureScanNextBlock: scanEnd + 1, legacy };
+    if (expired && !used && !legacy) return { status: "expired" };
+    // Never infer no payment across the unobserved pre-checkpoint legacy gap.
+    return { status: used || expired || pendingKnown ? "pending" : "open", legacy,
+      captureScanNextBlock: used ? firstBlock : Math.max(firstBlock, toBlock) };
   }
 
   async release() {

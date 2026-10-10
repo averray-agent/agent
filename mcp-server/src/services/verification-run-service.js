@@ -34,6 +34,7 @@ export class VerificationRunService {
     publicReceiptBaseUrl = undefined,
     selfIdentityRegistry = undefined,
     runnerTimeoutMarginMs = 30_000,
+    logger = console,
     finalizerLockSeconds = 30,
     finalizerId = `verification-finalizer:${randomUUID()}`
   } = {}) {
@@ -53,6 +54,7 @@ export class VerificationRunService {
     this.runnerTimeoutMarginMs = positiveInteger(runnerTimeoutMarginMs, "runnerTimeoutMarginMs");
     this.finalizerLockSeconds = positiveInteger(finalizerLockSeconds, "finalizerLockSeconds");
     this.finalizerId = String(finalizerId);
+    this.logger = logger;
   }
 
   listProfiles() {
@@ -82,7 +84,7 @@ export class VerificationRunService {
     if (!normalized) throw new ValidationError("runId is required.");
     const run = await this.stateStore.getVerificationRun(normalized);
     if (!run) throw new NotFoundError(`Verification run ${normalized} was not found.`, "verification_run_not_found");
-    return run;
+    return publicRun(run);
   }
 
   async createRun({
@@ -107,7 +109,7 @@ export class VerificationRunService {
       : hashCanonicalContent(paymentProof);
     if (paymentKey) {
       const existing = await this.stateStore.getVerificationRunByPaymentId(paymentKey);
-      if (existing) return requireMatchingVerificationReplay(existing, requestHash);
+      if (existing) return publicRun(requireMatchingVerificationReplay(existing, requestHash));
     }
 
     const authorization = await this.paymentGate.authorize({
@@ -119,7 +121,7 @@ export class VerificationRunService {
       findExistingRun: (authorizationId) => this.stateStore.getVerificationRunByAuthorizationId(authorizationId)
     });
     assertPaymentAuthorization(authorization, profile);
-    if (authorization.existingRun) return requireMatchingVerificationReplay(authorization.existingRun, requestHash);
+    if (authorization.existingRun) return publicRun(requireMatchingVerificationReplay(authorization.existingRun, requestHash));
     const runId = `verify-${this.randomUUIDImpl()}`;
     const submittedAt = this.now().toISOString();
     const queued = {
@@ -147,34 +149,57 @@ export class VerificationRunService {
         profile,
         ephemeralCredential
       });
-      return await this.stateStore.getVerificationRun(reservation.run.runId) ?? reservation.run;
+      return publicRun(await this.stateStore.getVerificationRun(reservation.run.runId) ?? reservation.run);
     }
-    return reservation.run;
+    return publicRun(reservation.run);
   }
 
   async finalizeAvailableRuns({ limit = 100 } = {}) {
-    const active = await this.stateStore.listActiveVerificationRuns(limit);
+    const active = [];
+    // Select before mutating the active index: completing a row must not shift
+    // paging offsets. Not-due captures do not consume the batch or issue RPC.
+    for (let offset = 0; active.length < limit;) {
+      const pageSize = Math.min(100, limit - active.length);
+      const page = await this.stateStore.listActiveVerificationRuns(pageSize, { offset, dueBefore: this.now().getTime() });
+      for (const run of page) {
+        try {
+          if (this.executionReadyForFinalization(run)) active.push(run);
+        } catch (error) {
+          this.logger.warn?.({ runId: run.runId, errorName: error?.name, errorCode: error?.code }, "verification_run.finalization_retry");
+        }
+        if (active.length >= limit) break;
+      }
+      if (page.length < pageSize) break;
+      offset += pageSize;
+    }
     const finalized = [];
     for (const candidate of active) {
-      if (!this.executionReadyForFinalization(candidate)) continue;
-      const lockId = verificationRunLockId(candidate.runId);
-      const acquired = await this.stateStore.acquireClaimLock(
-        lockId,
-        this.finalizerId,
-        this.finalizerLockSeconds
-      );
-      if (!acquired) continue;
       try {
-        const current = await this.stateStore.getVerificationRun(candidate.runId);
-        if (!this.executionReadyForFinalization(current)) continue;
-        const profile = this.profileRegistry.get(current.profile, current.profileVersion);
-        const authorization = await this.stateStore.getVerificationRunAuthorization(current.runId);
-        const execution = current.status === "executed"
-          ? current.execution
-          : runnerTimeoutExecution(current.status);
-        finalized.push(await this.finalizeExecution({ authorization, profile, run: current, execution }));
-      } finally {
-        await this.stateStore.releaseClaimLock(lockId, this.finalizerId);
+        if (!this.executionReadyForFinalization(candidate)) continue;
+        const lockId = verificationRunLockId(candidate.runId);
+        const acquired = await this.stateStore.acquireClaimLock(
+          lockId, this.finalizerId, this.finalizerLockSeconds
+        );
+        if (!acquired) continue;
+        try {
+          const current = await this.stateStore.getVerificationRun(candidate.runId);
+          if (!this.executionReadyForFinalization(current)) continue;
+          const profile = this.profileRegistry.get(current.profile, current.profileVersion);
+          const authorization = await this.stateStore.getVerificationRunAuthorization(current.runId);
+          const execution = current.status === "executed"
+            ? current.execution
+            : runnerTimeoutExecution(current.status);
+          const completed = await this.finalizeExecution({ authorization, profile, run: current, execution });
+          if (completed.status === COMPLETE) finalized.push(completed);
+        } finally {
+          await this.stateStore.releaseClaimLock(lockId, this.finalizerId);
+        }
+      } catch (error) {
+        // Retain unfinished state for the next tick; never log payment proofs.
+        this.logger.warn?.({ runId: candidate.runId, errorName: error?.name, errorCode: error?.code }, "verification_run.finalization_retry");
+        await this.stateStore.getVerificationRun(candidate.runId).then((pending) =>
+          pending?.billing?.status === "capturing" ? this.deferCapture(pending) : undefined
+        ).catch(() => undefined);
       }
     }
     return finalized;
@@ -182,6 +207,7 @@ export class VerificationRunService {
 
   executionReadyForFinalization(run) {
     if (!run || run.status === COMPLETE) return false;
+    if (Date.parse(run.billing?.nextCaptureAttemptAt) > this.now().getTime()) return false;
     if (run.status === "executed") return true;
     if (!new Set(["queued", "running"]).has(run.status)) return false;
     const profile = this.profileRegistry.get(run.profile, run.profileVersion);
@@ -192,10 +218,15 @@ export class VerificationRunService {
   }
 
   async finalizeExecution({ authorization, profile, run, execution }) {
+    if (Date.parse(run.billing?.nextCaptureAttemptAt) > this.now().getTime()) return publicRun(run);
     const alreadyCaptured = run.billing?.status === "captured";
+    const capturing = run.billing?.status === "capturing";
+    if ((alreadyCaptured || capturing) && !["approved", "rejected"].includes(run.verdict?.outcome)) {
+      throw Object.assign(new Error("Capture is missing its original decisive verdict."), { code: "capture_checkpoint_unavailable" });
+    }
     let verdict;
     try {
-      if (alreadyCaptured) {
+      if (alreadyCaptured || capturing) {
         verdict = run.verdict;
         execution = run.execution;
       } else if (!authorization) {
@@ -228,26 +259,68 @@ export class VerificationRunService {
       }
       billing = run.billing;
     } else if (verdict.outcome === "approved" || verdict.outcome === "rejected") {
-      try {
-        const captured = await this.paymentGate.capture({ authorization, runId: run.runId, verdict });
+      if (!capturing) {
+        run = { ...run, status: "executed", verdict, execution,
+          billing: { ...run.billing, status: "capturing", captureStartedAt: this.now().toISOString() } };
+        await this.stateStore.updateVerificationRun(run.runId, run);
+      }
+      // Persist the scan boundary before any broadcast. A failed boundary read
+      // leaves the original verdict checkpoint intact for the next tick.
+      if (!run.billing.capturePrepared) {
+        const checkpoint = await this.paymentGate.prepareCapture?.() ?? {};
+        run = { ...run, billing: { ...run.billing, ...checkpoint, capturePrepared: true } };
+        await this.stateStore.updateVerificationRun(run.runId, run);
+      }
+      const owner = authorization?.id
+        ? await this.stateStore.getVerificationRunByAuthorizationId(authorization.id) : undefined;
+      let capture = owner && owner.runId !== run.runId ? { status: "used_elsewhere" } : capturing || !owner
+        ? await this.reconcileCapture(run, authorization)
+        : { status: "open" };
+      if (!owner && ["open", "captured"].includes(capture.status)) {
+        throw Object.assign(new Error("Payment authorization ownership is unavailable."), { code: "payment_authorization_owner_unavailable" });
+      }
+      if (capture.status === "open") {
+        try {
+          capture = { ...await this.paymentGate.capture({
+            authorization, runId: run.runId, verdict,
+            onBroadcast: async (transactionHash) => {
+              run = { ...run, billing: { ...run.billing, pendingTransactionHash: transactionHash } };
+              await this.stateStore.updateVerificationRun(run.runId, run);
+            }
+          }), status: "captured" };
+        } catch (error) {
+          this.logger.warn?.({ runId: run.runId, errorName: error?.name, errorCode: error?.code }, "verification_run.capture_error");
+          capture = await this.reconcileCapture(run, authorization);
+        }
+      }
+      if (!["captured", "cancelled", "expired", "used_elsewhere"].includes(capture.status)) {
+        if (capture.status !== "unavailable") this.logger.warn?.({ runId: run.runId, status: capture.status }, "verification_run.capture_pending");
+        await this.deferCapture(run);
+        return publicRun(run);
+      }
+      if (capture.status !== "captured") {
+        const reason = capture.status === "cancelled" ? "payment_cancelled_by_payer"
+          : capture.status === "used_elsewhere" ? "payment_authorization_used_elsewhere" : "payment_authorization_expired";
+        await safeRelease(this.paymentGate, { authorization, runId: run.runId, reason });
+        execution = { status: "inconclusive", reason,
+          detail: capture.status === "cancelled" ? "Payment cancelled by payer."
+            : capture.status === "used_elsewhere" ? "Payment authorization was used for another payee or purchase; this run is not billed."
+              : "Payment authorization expired unused; no fee was recorded." };
+        verdict = inconclusiveVerdict(reason, execution.detail);
+        billing = notBilled(profile);
+      } else {
+        if (!/^0x[0-9a-f]{64}$/iu.test(capture.transactionHash ?? "")) {
+          throw Object.assign(new Error("Capture is missing transaction proof."), { code: "capture_hash_unavailable" });
+        }
         billing = {
           status: "captured",
           amount: profile.price.amount,
           amountRaw: profile.price.amountRaw,
           asset: profile.price.asset,
           network: profile.price.network,
-          ...(captured?.transactionHash ? { transactionHash: captured.transactionHash } : {})
+          transactionHash: capture.transactionHash,
+          ...(capture.proof ? { proof: capture.proof } : {})
         };
-      } catch (error) {
-        await safeRelease(this.paymentGate, { authorization, runId: run.runId, reason: "runner_fault" });
-        execution = {
-          ...execution,
-          status: "inconclusive",
-          reason: "runner_fault",
-          detail: `Payment capture failed; no fee was recorded: ${error?.message ?? String(error)}`
-        };
-        verdict = inconclusiveVerdict("runner_fault", execution.detail);
-        billing = notBilled(profile);
       }
     } else {
       await safeRelease(this.paymentGate, { authorization, runId: run.runId, reason: verdict.reason });
@@ -293,6 +366,48 @@ export class VerificationRunService {
     return this.stateStore.updateVerificationRun(run.runId, persisted);
   }
 
+  async reconcileCapture(run, authorization) {
+    if (authorization?.authorization && !Number.isSafeInteger(authorization.authorizedAtBlock)
+      && !run.billing.legacyCaptureUnresolved) {
+      run.billing.legacyCaptureUnresolved = true;
+      await this.stateStore.updateVerificationRun(run.runId, run);
+    }
+    const result = await this.paymentGate.reconcileCapture({ authorization, ...run.billing });
+    if (result.captureScanNextBlock !== undefined) run.billing.captureScanNextBlock = result.captureScanNextBlock;
+    if (result.legacy) run.billing.legacyCaptureUnresolved = true;
+    if (result.status === "unavailable" && !run.billing.reconciliationUnavailableLogged) {
+      this.logger.warn?.({ runId: run.runId, errorCode: "capture_reconciliation_unavailable" }, "verification_run.capture_reconciliation_unavailable");
+      run.billing.reconciliationUnavailableLogged = true;
+      await this.stateStore.updateVerificationRun(run.runId, run);
+    }
+    return result;
+  }
+
+  async deferCapture(run) {
+    const attempts = (run.billing.captureAttempts ?? 0) + 1;
+    const delayMs = Math.min(300_000, 5_000 * 2 ** Math.min(attempts - 1, 6));
+    run.billing = { ...run.billing, captureAttempts: attempts,
+      nextCaptureAttemptAt: new Date(this.now().getTime() + delayMs).toISOString() };
+    await this.stateStore.updateVerificationRun(run.runId, run);
+  }
+
+  async getCaptureWarnings() {
+    if (this.captureWarningsCache?.expiresAt > this.now().getTime()) return this.captureWarningsCache.warnings;
+    let count = 0;
+    let openCount = 0;
+    for (let offset = 0; ; offset += 100) {
+      const page = await this.stateStore.listActiveVerificationRuns(100, { offset });
+      count += page.filter((run) => run.billing?.legacyCaptureUnresolved).length;
+      openCount += page.filter((run) => run.billing?.status === "capturing" && !run.billing.legacyCaptureUnresolved
+        && Date.parse(run.billing.captureStartedAt ?? run.submittedAt) < this.now().getTime() - 15 * 60_000).length;
+      if (page.length < 100) break;
+    }
+    const warnings = count ? [{ code: "verify_capture_legacy_unresolved", severity: "warning", count }] : [];
+    if (openCount) warnings.push({ code: "verify_capture_open", severity: "warning", count: openCount });
+    this.captureWarningsCache = { warnings, expiresAt: this.now().getTime() + 30_000 };
+    return warnings;
+  }
+
   async evaluatePinnedProfile({ execution, profile, run }) {
     const metadata = this.verifierRegistry.listHandlerMetadata()
       .find((handler) => handler.id === profile.handler);
@@ -329,6 +444,10 @@ export function validateVerificationRunRequest(request, profileRegistry) {
 }
 
 export class UnavailableVerificationPaymentGate {
+  async prepareCapture() { return {}; }
+
+  async reconcileCapture() { return { status: "unavailable" }; }
+
   async authorize({ price, profile }) {
     throw new AppError(
       "Standalone Verify payment intake is not enabled yet. No verification work ran and no payment moved.",
@@ -351,6 +470,20 @@ export class UnavailableVerificationPaymentGate {
   }
 
   async release() {}
+}
+
+function publicRun(run) {
+  if (!run) return run;
+  const { requestHash, ...result } = run;
+  if (run.billing) {
+    result.billing = Object.fromEntries(["status", "amount", "amountRaw", "asset", "network", "transactionHash", "proof", "reason"]
+      .filter((key) => run.billing[key] !== undefined).map((key) => [key, run.billing[key]]));
+  }
+  if (run.billing?.status === "capturing") {
+    delete result.verdict;
+    delete result.execution;
+  }
+  return result;
 }
 
 function assertPaymentAuthorization(authorization, profile) {
@@ -381,7 +514,7 @@ function requireMatchingVerificationReplay(run, requestHash) {
 }
 
 function inconclusiveVerdict(reason, detail) {
-  const normalized = VERIFY_INCONCLUSIVE_REASONS.includes(reason) ? reason : "runner_fault";
+  const normalized = ["payment_cancelled_by_payer", "payment_authorization_expired", "payment_authorization_used_elsewhere"].includes(reason) || VERIFY_INCONCLUSIVE_REASONS.includes(reason) ? reason : "runner_fault";
   return {
     handler: "deterministic",
     handlerVersion: 1,
