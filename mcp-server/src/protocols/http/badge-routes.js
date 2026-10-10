@@ -62,14 +62,17 @@ export function createListBadgeReceipts({
   verifierService,
   now = Date.now
 }) {
-  const memo = new Map();
-  async function rowsForSessions(sessions, runOnly = false) {
+  // One base snapshot, never one retained row array per filter combination.
+  let memo;
+  async function rowsForSessions(sessions, runOnly = false, read = (pending) => pending) {
     const receipts = [];
     for (const session of sessions) {
       try {
-        const storedRunReceipt = await latestReviewedReceipt(await stateStore.getRunReceiptDocument?.(session.sessionId), stateStore);
+        const document = await read(stateStore.getRunReceiptDocument?.(session.sessionId));
+        const storedRunReceipt = await read(latestReviewedReceipt(document, stateStore));
         if (storedRunReceipt) receipts.push(buildRunReceiptRow(storedRunReceipt, { session }));
-      } catch {
+      } catch (error) {
+        if (error?.code === "badges_list_scan_timeout") throw error;
         // Run and badge rows are isolated: one malformed document must not
         // suppress the other receipt for an approved session.
       }
@@ -109,35 +112,53 @@ export function createListBadgeReceipts({
     return receipts;
   }
 
+  async function baseRunRows() {
+    if (memo && memo.expiresAt <= now()) memo = undefined;
+    if (!memo) {
+      const entry = { expiresAt: Infinity };
+      memo = entry;
+      entry.promise = (async () => {
+        let timer;
+        const deadline = new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new AppError("Receipt listing scan timed out; retry the read.", {
+            code: "badges_list_scan_timeout", statusCode: 503,
+            details: { reason: "receipt_store_read_deadline" }
+          })), 10_000);
+        });
+        // Race each read so a hung store operation cannot retain a partially
+        // assembled snapshot after the scan deadline or populate a later memo.
+        const read = (pending) => Promise.race([pending, deadline]);
+        try {
+          const rows = [];
+          for (let offset = 0; ; offset += 100) {
+            const sessions = await read(stateStore.listRecentSessions(100, offset));
+            rows.push(...await rowsForSessions(sessions, true, read));
+            if (sessions.length < 100) break;
+          }
+          entry.expiresAt = now() + FILTER_TTL_MS;
+          const expiry = setTimeout(() => { if (memo === entry) memo = undefined; }, FILTER_TTL_MS);
+          expiry.unref?.();
+          return rows;
+        } catch (error) {
+          if (memo === entry) memo = undefined;
+          throw error;
+        } finally {
+          clearTimeout(timer);
+        }
+      })();
+    }
+    return memo.promise;
+  }
+
   return async function listBadgeReceipts({ limit = 50, cursor, ...filters } = {}) {
     const queryKey = filterKey(filters);
     const after = decodeBadgeCursor(cursor, queryKey);
     const rows = [];
     const filtered = Object.keys(filters).length > 0;
     if (filtered) {
-      let entry = memo.get(queryKey);
-      if (!entry || entry.expiresAt <= now()) {
-        // The filter vocabulary is finite; limits/cursors/cache-busters cannot
-        // create arbitrary keys. Concurrent requests share the same pending scan.
-        entry = { expiresAt: Infinity };
-        entry.promise = (async () => {
-          const matches = [];
-          for (let offset = 0; ; offset += 100) {
-            const sessions = await stateStore.listRecentSessions(100, offset);
-            matches.push(...(await rowsForSessions(sessions, true)).filter((row) => matchesBadgeFilters(row, filters)));
-            if (sessions.length < 100) break;
-          }
-          if (filters.sort) matches.sort((a, b) => Date.parse(b.runReceipt.timestamps.verifiedAt) - Date.parse(a.runReceipt.timestamps.verifiedAt)
-            || a.sessionId.localeCompare(b.sessionId) || a.kind.localeCompare(b.kind));
-          entry.expiresAt = now() + FILTER_TTL_MS;
-          return matches;
-        })().catch((error) => {
-          if (memo.get(queryKey) === entry) memo.delete(queryKey);
-          throw error;
-        });
-        memo.set(queryKey, entry);
-      }
-      const matches = await entry.promise;
+      const matches = (await baseRunRows()).filter((row) => matchesBadgeFilters(row, filters));
+      if (filters.sort) matches.sort((a, b) => Date.parse(b.runReceipt.timestamps.verifiedAt) - Date.parse(a.runReceipt.timestamps.verifiedAt)
+        || a.sessionId.localeCompare(b.sessionId) || a.kind.localeCompare(b.kind));
       const index = after ? matches.findIndex((row) => row.sessionId === after.sessionId && row.kind === after.kind) : -1;
       if (after && index === -1) throw invalidCursor();
       return badgePage(matches.slice(index + 1), limit, queryKey);
