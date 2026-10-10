@@ -687,6 +687,30 @@ test("legacy session capacity is configurable and expired entries update the gau
   }
 });
 
+test("tool failures record a drop-off code and never the error message", async () => {
+  const recorded = [];
+  const arrivals = {
+    async recordTool() {},
+    async recordDropOff(entry) { recorded.push(entry); }
+  };
+  const { handler } = createHarness({
+    arrivals,
+    executeTool: async () => { throw new Error("secret token sk-live-DO-NOT-STORE"); }
+  });
+  const result = await call(
+    handler,
+    modernRequest("tools/call", { name: "listJobs", arguments: {} }),
+    modernHeaders("tools/call", "listJobs")
+  );
+  assert.equal(result.body.result.isError, true);
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].outcome.kind, "tool");
+  assert.equal(recorded[0].outcome.code, "internal_error");
+  assert.equal(recorded[0].tool, "listJobs");
+  assert.equal(JSON.stringify(recorded).includes("sk-live"), false);
+  assert.equal(Object.hasOwn(recorded[0].outcome, "message"), false);
+});
+
 test("tool failures are logged once and counted without request arguments", async () => {
   const logged = [];
   const { handler, metrics } = createHarness({

@@ -168,22 +168,40 @@ export function createMcpRoute({
       return false;
     }
 
+    response._arrivalDropContext = { stage: "reached" };
+    const finishMcpArrival = async () => {
+      const toolError = response._arrivalToolError;
+      const rpcCode = response._arrivalJsonRpcCode;
+      if (!toolError && !Number.isSafeInteger(rpcCode)) return;
+      const context = response._arrivalDropContext ?? { stage: "reached" };
+      await recordArrival(arrivals, "recordDropOff", {
+        ...context,
+        wallet: request._arrivalWallet,
+        apiKeyId: request._arrivalApiKeyId,
+        ip: clientIp?.(request),
+        outcome: toolError ?? { kind: "jsonrpc", code: rpcCode }
+      });
+    };
+
     let message;
     try {
       message = await readJsonBody(request);
     } catch (error) {
       const code = error?.message === "Invalid JSON body." ? -32700 : -32600;
       sendError(response, respond, 400, null, code, error?.message ?? "Invalid request.");
+      await finishMcpArrival();
       return true;
     }
 
     if (!isJsonRpcMessage(message)) {
       sendError(response, respond, 400, message?.id ?? null, -32600, "Invalid JSON-RPC request.");
+      await finishMcpArrival();
       return true;
     }
 
     if (!originAllowed(request, response)) {
       sendError(response, respond, 403, message.id ?? null, -32000, "Origin is not allowed.");
+      await finishMcpArrival();
       return true;
     }
 
@@ -200,6 +218,7 @@ export function createMcpRoute({
       } else {
         sendResult(response, respond, 200, message.id, {}, { "mcp-protocol-version": LEGACY_MCP_VERSION });
       }
+      await finishMcpArrival();
       return true;
     }
 
@@ -221,12 +240,18 @@ export function createMcpRoute({
       // A legacy handshake never reaches dispatchRequest, so it is recorded
       // here. A REJECTED handshake counts too: a client that cannot open a
       // session is exactly the arrival we most want to know about.
+      response._arrivalDropContext = {
+        stage: "reached",
+        era: "legacy",
+        clientInfo: message.params?.clientInfo
+      };
       await recordArrival(arrivals, "recordReach", {
         era: "legacy",
         clientInfo: message.params?.clientInfo,
         method: message.method,
         ip: clientIp?.(request)
       });
+      await finishMcpArrival();
       return true;
     }
 
@@ -249,6 +274,7 @@ export function createMcpRoute({
         toolCalls,
         tools
       });
+      await finishMcpArrival();
       return true;
     }
 
@@ -272,6 +298,7 @@ export function createMcpRoute({
         toolCalls,
         tools
       });
+      await finishMcpArrival();
       return true;
     }
 
@@ -284,6 +311,7 @@ export function createMcpRoute({
         HEADER_MISMATCH,
         `Header mismatch: request is missing params._meta.${PROTOCOL_VERSION_META_KEY}.`
       );
+      await finishMcpArrival();
       return true;
     }
 
@@ -295,6 +323,7 @@ export function createMcpRoute({
       -32600,
       "Open with modern per-request _meta or a legacy initialize request."
     );
+    await finishMcpArrival();
     return true;
   };
 }
@@ -387,6 +416,7 @@ async function handleLegacyRequest({
   toolCalls,
   tools
 }) {
+  response._arrivalDropContext = { stage: "reached", era: "legacy" };
   const sessionId = request.headers?.["mcp-session-id"];
   const session = legacySessions.get(sessionId);
   if (!session || session.expiresAt <= now()) {
@@ -395,6 +425,11 @@ async function handleLegacyRequest({
     sendError(response, respond, 404, message.id ?? null, -32001, "MCP session not found or expired.");
     return;
   }
+  response._arrivalDropContext = {
+    stage: "reached",
+    era: "legacy",
+    clientInfo: session.clientInfo
+  };
   // Streamable HTTP clients may omit the version header after initialize.
   // The session already binds the negotiated version, so use that binding as
   // the fallback while continuing to reject any explicit disagreement.
@@ -464,6 +499,11 @@ async function handleModernRequest({
   toolCalls,
   tools
 }) {
+  response._arrivalDropContext = {
+    stage: "reached",
+    era: "modern",
+    clientInfo: meta[CLIENT_INFO_META_KEY]
+  };
   const bodyVersion = meta[PROTOCOL_VERSION_META_KEY];
   const headerVersion = request.headers?.["mcp-protocol-version"];
   if (!headerVersion) {
@@ -575,6 +615,13 @@ async function dispatchRequest({
   // Both eras funnel through here, so this is the single place that sees
   // every dispatched method. Recorded BEFORE any validation or rate limit, so
   // a caller that is refused still counts as having arrived.
+  response._arrivalDropContext = {
+    ...(response._arrivalDropContext ?? {}),
+    era,
+    clientInfo,
+    stage: message.method === "tools/call" ? undefined : "reached",
+    tool: message.method === "tools/call" ? message.params?.name : undefined
+  };
   // A bearer is verified first when one is present, so a registered operator
   // API-key id or wallet is self on this call. Verification failure leaves
   // the arrival unmarked; it does not drop the record.
@@ -683,6 +730,7 @@ async function dispatchRequest({
       );
     } catch (error) {
       const normalized = normalizeError(error);
+      response._arrivalToolError = { kind: "tool", code: normalized.code };
       recordToolOutcome({ toolName, outcome: "error", code: normalized.code, logger, toolCalls });
       sendResult(
         response,
@@ -890,6 +938,7 @@ function sendResult(response, respond, statusCode, id, result, headers = {}) {
 }
 
 function sendError(response, respond, statusCode, id, code, message, data = undefined) {
+  if (Number.isSafeInteger(code)) response._arrivalJsonRpcCode = code;
   respond(response, statusCode, {
     jsonrpc: "2.0",
     id,

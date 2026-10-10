@@ -15,10 +15,20 @@ import {
   stageRank
 } from "./arrival-stage-map.js";
 import { buildArrivalOperatorView } from "./arrival-operator-view.js";
+import {
+  createDropOffSeries,
+  dropOffActor,
+  dropOffCode,
+  dropOffSnapshot,
+  recordDropOff,
+  restoreDropOff,
+  serializeDropOff
+} from "./arrival-dropoff.js";
 import { metricPathLabel } from "../protocols/http/http-helpers.js";
 import { MCP_TOOLS } from "../protocols/mcp/tools.js";
 
 export { ARRIVAL_STAGES, stageRank } from "./arrival-stage-map.js";
+export { DROP_OFF_FIELD_NOTE, NOT_REPORTED } from "./arrival-dropoff.js";
 
 export const ARRIVALS_SCHEMA_VERSION = "averray.arrivals.v1";
 export const HTTP_ARRIVAL_CUTOVER_NOTE =
@@ -244,6 +254,7 @@ export class ArrivalObservatory {
     // timestamps and cumulative call counters.
     this.prospectiveCollectionSinceMs = this.now();
     this.preAuthHourlyBuckets = new Map();
+    this.dropOff = createDropOffSeries();
   }
 
   // Backward-compatible handles for focused tests and callers that supplied
@@ -273,7 +284,7 @@ export class ArrivalObservatory {
   }
 
   /** A REST request. Machine/discovery polling is intentionally excluded. */
-  async recordHttp({ method, pathname, clientInfo, ip, wallet, canaryMarker, apiKeyId } = {}) {
+  async recordHttp({ method, pathname, clientInfo, ip, wallet, canaryMarker, apiKeyId, outcome } = {}) {
     const normalizedMethod = String(method ?? "GET").toUpperCase();
     // CORS negotiation and link probing are transport activity, not an agent
     // entering the earn funnel. Counting them would turn browser preflights and
@@ -313,8 +324,47 @@ export class ArrivalObservatory {
       apiKeyId,
       canaryMarkerValid,
       tool: metricPathLabel(normalizedPath),
-      door: "http"
+      door: "http",
+      outcome
     });
+  }
+
+  /**
+   * A visit stopped. Does not increment the funnel. The code is allow-listed;
+   * messages and bodies are ignored even if a caller passes them.
+   */
+  async recordDropOff({
+    stage,
+    tool,
+    era,
+    clientInfo,
+    ip,
+    wallet,
+    apiKeyId,
+    canaryMarkerValid,
+    door = "mcp",
+    outcome
+  } = {}) {
+    try {
+      const code = dropOffCode(outcome);
+      if (!code || !(await this.ensureLoaded())) return;
+      const resolvedStage = ARRIVAL_STAGES.includes(stage)
+        ? stage
+        : Object.hasOwn(TOOL_STAGE, tool) ? TOOL_STAGE[tool] : "reached";
+      const identity = normalizeClientInfo(clientInfo);
+      const actor = dropOffActor(this.classifyActor(identity, normalizeWallet(wallet), canaryMarkerValid, apiKeyId));
+      recordDropOff(this.dropOff, {
+        nowMs: this.now(),
+        door: door === "http" ? "http" : "mcp",
+        actor,
+        stage: resolvedStage,
+        code
+      });
+      this.dirty = true;
+      await this.maybeFlush();
+    } catch {
+      // Observability cannot change the response.
+    }
   }
 
   /**
@@ -345,7 +395,8 @@ export class ArrivalObservatory {
     wallet,
     apiKeyId,
     canaryMarkerValid,
-    door = "mcp"
+    door = "mcp",
+    outcome
   } = {}) {
     try {
       if (!ARRIVAL_STAGES.includes(stage)) return;
@@ -453,6 +504,17 @@ export class ArrivalObservatory {
           "MCP front-door funnel stages by declared-client presence",
           ["stage", "actor"]
         )?.inc({ stage, actor });
+      }
+
+      const code = dropOffCode(outcome);
+      if (code) {
+        recordDropOff(this.dropOff, {
+          nowMs: nowMs,
+          door: door === "http" ? "http" : "mcp",
+          actor: dropOffActor(actor),
+          stage,
+          code
+        });
       }
 
       this.evictOverflow(entries);
@@ -563,7 +625,8 @@ export class ArrivalObservatory {
         httpClients,
         distinctAgents: buildDistinct(allAgents),
         agents,
-        operatorView
+        operatorView,
+        dropOff: this.dropOffView()
       };
     } catch {
       return this.unavailableSnapshot();
@@ -675,8 +738,16 @@ export class ArrivalObservatory {
       distinctAgents: unavailableDistinct(),
       agents: [],
       operatorView: { unavailable: "arrival operator view could not be derived" },
+      dropOff: dropOffSnapshot(this.dropOff, {
+        nowMs: this.now(),
+        unavailable: this.loadFailed ?? UNREADABLE
+      }),
       unavailable: this.loadFailed ?? UNREADABLE
     };
+  }
+
+  dropOffView() {
+    return dropOffSnapshot(this.dropOff, { nowMs: this.now() });
   }
 
   /**
@@ -819,6 +890,8 @@ export class ArrivalObservatory {
       if (persistedCollectionSinceMs !== undefined) {
         this.prospectiveCollectionSinceMs = persistedCollectionSinceMs;
       }
+      restoreDropOff(this.dropOff, stored?.dropOff);
+      if (this.dropOff.collectionSinceMs === undefined) this.dropOff.collectionSinceMs = this.now();
       restorePreAuthBuckets(this.preAuthHourlyBuckets, stored?.preAuthHourlyBuckets);
       this.prunePreAuthBuckets(this.now());
       restoreTotals(this.totals, stored?.totals);
@@ -873,6 +946,11 @@ export class ArrivalObservatory {
           preAuthHourlyBuckets: serializePreAuthBuckets(this.preAuthHourlyBuckets)
         });
       }
+      if (finiteMs(stored?.dropOff?.collectionSinceMs) === undefined) {
+        await this.stateStore?.upsertServiceState?.(STATE_SCOPE, {
+          dropOff: serializeDropOff(this.dropOff)
+        });
+      }
       this.loaded = true;
       this.loadFailed = null;
     } catch (error) {
@@ -907,7 +985,8 @@ export class ArrivalObservatory {
         httpClients: [...this.httpClients.values()],
         clientWalletLinks: Object.fromEntries(this.clientWalletLinks),
         prospectiveCollectionSinceMs: this.prospectiveCollectionSinceMs,
-        preAuthHourlyBuckets: serializePreAuthBuckets(this.preAuthHourlyBuckets)
+        preAuthHourlyBuckets: serializePreAuthBuckets(this.preAuthHourlyBuckets),
+        dropOff: serializeDropOff(this.dropOff)
       });
     } catch (error) {
       this.dirty = true;
