@@ -883,3 +883,177 @@ test("counter-only changes flush after the interval and survive restart", async 
   await restarted.list();
   assert.equal(restarted.clientNameFirstEventsOverCap, 1);
 });
+
+test("new suppressed subjects within one interval write the blob at most once", async () => {
+  const writes = [];
+  const alerts = new ArrivalAlerts({
+    stateStore: {
+      async getServiceState() { return undefined; },
+      async upsertServiceState(_scope, value) {
+        writes.push(value);
+        return value;
+      }
+    },
+    now: () => 8_000,
+    flushIntervalMs: 30_000,
+    cooldownMs: 60_000,
+    schedule() { return { unref() {} }; }
+  });
+  const walletAt = (index) => `0x${index.toString(16).padStart(40, "0")}`;
+  for (let index = 0; index < 60; index += 1) {
+    await alerts.note({
+      wallet: walletAt(index + 1),
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  const afterSaturation = writes.length;
+  for (let index = 0; index < 20; index += 1) {
+    await alerts.note({
+      wallet: walletAt(index + 1_000),
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  assert.ok(writes.length - afterSaturation <= 1, String(writes.length - afterSaturation));
+});
+
+test("a repeated subject past the suppressed cap is counted once and does not force a write", async () => {
+  const writes = [];
+  const alerts = new ArrivalAlerts({
+    stateStore: {
+      async getServiceState() { return undefined; },
+      async upsertServiceState(_scope, value) {
+        writes.push(value);
+        return value;
+      }
+    },
+    now: () => 8_000,
+    flushIntervalMs: 30_000,
+    cooldownMs: 60_000,
+    schedule() { return { unref() {} }; }
+  });
+  const walletAt = (index) => `0x${index.toString(16).padStart(40, "0")}`;
+  for (let index = 0; index < 51 + SUPPRESSED_SUBJECT_CAP; index += 1) {
+    await alerts.note({
+      wallet: walletAt(index + 1),
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  const extra = walletAt(90_000);
+  await alerts.note({ wallet: extra, stage: "browsed", success: true, authenticated: true });
+  const before = await alerts.list();
+  assert.equal(before.suppressedSubjectOverflow, 1);
+  const beforeWrites = writes.length;
+  for (let index = 0; index < 100; index += 1) {
+    await alerts.note({ wallet: extra, stage: "browsed", success: true, authenticated: true });
+  }
+  const after = await alerts.list();
+  assert.equal(after.suppressedSubjectOverflow, before.suppressedSubjectOverflow);
+  assert.equal(after.suppressed, before.suppressed);
+  assert.ok(writes.length - beforeWrites <= 1, String(writes.length - beforeWrites));
+});
+
+test("a fake counter timer flushes when nobody reads the route", async () => {
+  const pending = [];
+  let nowMs = 40_000;
+  const store = memoryStore();
+  const alerts = new ArrivalAlerts({
+    stateStore: store,
+    now: () => nowMs,
+    flushIntervalMs: 30_000,
+    cooldownMs: 60_000,
+    schedule(fn, ms) {
+      const timer = {
+        fn,
+        ms,
+        refed: true,
+        unref() { this.refed = false; return this; },
+        ref() { this.refed = true; return this; },
+        hasRef() { return this.refed; }
+      };
+      pending.push(timer);
+      return timer;
+    },
+    clearSchedule(timer) {
+      const index = pending.indexOf(timer);
+      if (index >= 0) pending.splice(index, 1);
+    }
+  });
+  for (const name of ["a", "b", "c", "d"]) {
+    await alerts.note({
+      wallet: EXTERNAL,
+      clientInfo: { name, version: "1" },
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  assert.equal(alerts.clientNameFirstEventsOverCap, 1);
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].hasRef(), false);
+  nowMs += 31_000;
+  await pending[0].fn();
+  const restarted = new ArrivalAlerts({ stateStore: store, now: () => nowMs, flushIntervalMs: 30_000 });
+  await restarted.list();
+  assert.equal(restarted.clientNameFirstEventsOverCap, 1);
+});
+
+test("stop flushes pending counters without waiting for the timer", async () => {
+  const store = memoryStore();
+  const alerts = new ArrivalAlerts({
+    stateStore: store,
+    now: () => 15_000,
+    flushIntervalMs: 30_000,
+    cooldownMs: 60_000,
+    schedule() { return { unref() {} }; }
+  });
+  for (const name of ["a", "b", "c", "d"]) {
+    await alerts.note({
+      wallet: EXTERNAL,
+      clientInfo: { name, version: "1" },
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  assert.equal((await store.getServiceState("arrival-alerts"))?.clientNameFirstEventsOverCap ?? 0, 0);
+  await alerts.stop();
+  const restarted = new ArrivalAlerts({ stateStore: store, now: () => 15_000, flushIntervalMs: 30_000 });
+  await restarted.list();
+  assert.equal(restarted.clientNameFirstEventsOverCap, 1);
+});
+
+test("the same client name repeated by one wallet uses one hashed slot", async () => {
+  const alerts = new ArrivalAlerts({
+    stateStore: memoryStore(),
+    now: () => 3_000,
+    flushIntervalMs: 60_000,
+    cooldownMs: 60_000,
+    schedule() { return { unref() {} }; }
+  });
+  for (let index = 0; index < 4; index += 1) {
+    await alerts.note({
+      wallet: EXTERNAL,
+      clientInfo: { name: "cursor", version: "1.2" },
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  const bucket = alerts.clientFirsts.get(EXTERNAL);
+  assert.equal(bucket.names.size, 1);
+  assert.match([...bucket.names][0], /^[0-9a-f]{8}$/u);
+  await alerts.note({
+    wallet: EXTERNAL,
+    clientInfo: { name: "other", version: "1.2" },
+    stage: "browsed",
+    success: true,
+    authenticated: true
+  });
+  assert.equal(bucket.names.size, 2);
+});

@@ -1420,3 +1420,22 @@ server.listen(port, () => {
     "http.listening"
   );
 });
+
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info({ signal }, "http.shutdown");
+  try {
+    await arrivalAlerts.stop();
+  } catch (error) {
+    logger.warn({ err: error }, "http.shutdown.alerts");
+  }
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 1_000).unref();
+}
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    void shutdown(signal);
+  });
+}

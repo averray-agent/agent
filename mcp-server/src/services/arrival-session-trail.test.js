@@ -263,3 +263,52 @@ test("a step added while persist is writing stays dirty", async () => {
   assert.equal(stored.steps[0].name, "GET /auth/session");
   assert.equal(sessions.persistedRevision.get(`wallet:${WALLET}`), stored.revision);
 });
+
+test("a step added while the periodic flush is writing stays dirty", async () => {
+  const state = new Map();
+  let release = () => {};
+  let entered = () => {};
+  const enteredPromise = new Promise((resolve) => { entered = resolve; });
+  const sessions = new ArrivalSessionTrail({
+    stateStore: {
+      async getServiceState(scope) { return state.get(scope); },
+      async upsertServiceState(scope, value) {
+        if (String(scope).startsWith("arrival-session-record:")) {
+          entered();
+          await Promise.resolve();
+          await Promise.resolve();
+          await new Promise((resolve) => { release = resolve; });
+        }
+        state.set(scope, JSON.parse(JSON.stringify(value)));
+        return state.get(scope);
+      },
+      async deleteServiceState() {}
+    },
+    now: () => 1_000,
+    flushIntervalMs: 60_000
+  });
+  await sessions.observe({
+    wallet: WALLET,
+    door: "http",
+    name: "GET /auth/session",
+    resultClass: "ok",
+    stage: "reached"
+  });
+  const writing = sessions.maybeFlush(true);
+  await enteredPromise;
+  await sessions.observe({
+    wallet: WALLET,
+    door: "http",
+    name: "GET /jobs",
+    resultClass: "ok",
+    stage: "browsed"
+  });
+  release();
+  await writing;
+  assert.equal(sessions.dirtyIds.has(`wallet:${WALLET}`), true);
+  const stored = state.get(`arrival-session-record:wallet:${WALLET}`);
+  assert.equal(stored.steps.length, 1);
+  assert.equal(stored.steps[0].name, "GET /auth/session");
+  assert.equal(sessions.persistedRevision.get(`wallet:${WALLET}`), stored.revision);
+  assert.equal(stored.revision, 1);
+});

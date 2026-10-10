@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { SelfIdentityRegistry } from "../core/self-identity-registry.js";
 
 export const NOT_REPORTED = "not reported";
@@ -24,8 +26,9 @@ const KINDS = new Set([
  * Operator-facing arrival milestones. This service records and rate-limits.
  * It does not send. The monitor alert bridge in depre-dev/averray-reference-agent
  * (services/slack-operator/src/alert-bridge.ts) is the sending side.
- * A queued milestone is flushed immediately. The 30s interval applies only to
- * a non-forced flush; process death before that flush can drop an unqueued edit.
+ * Only a queued milestone flushes immediately. Suppressed subjects, the
+ * summary count, and other counters wait for the 30s timer. `stop()` flushes
+ * those counters on a normal shutdown; a hard kill can still drop the last interval.
  * Concurrent backend processes overwrite `seen` (last write wins). That is
  * acceptable with one backend; a second process can drop or revive a milestone.
  *
@@ -33,10 +36,16 @@ const KINDS = new Set([
  * not a rolling 24h. Three names before midnight and three different names
  * after it are six alertable firsts. Previous UTC days are dropped on write
  * and on load. The map keeps at most 2,000 wallets; the rest are evicted
- * oldest day first. Each wallet stores only those three names.
+ * oldest day first. Each wallet stores those names as the first 8 hex digits
+ * of sha256(`name@version`), so one name uses one slot.
  * `clientNameFirstEventsOverCap` counts later requests, not distinct names.
- * Worst case in the alerts blob: 2,000 wallet-day counters, 500 suppressed
- * subjects, and 50 pending alerts.
+ * Suppressed subjects are remembered up to 500. The next 500 distinct subjects
+ * are remembered as the same 8-hex hash and counted once each in
+ * `suppressedSubjectOverflow`. Subjects beyond that are not remembered; each
+ * request counts as an event, the same way the client-name counter does.
+ * Neither case flushes the blob. Worst case is about 523 KB: 2,000 wallet-day
+ * records, 2,000 seen keys, 500 suppressed subjects, 500 overflow hashes, and
+ * 50 pending alerts.
  */
 export class ArrivalAlerts {
   constructor({
@@ -45,7 +54,9 @@ export class ArrivalAlerts {
     identityRegistry,
     now = () => Date.now(),
     cooldownMs = ARRIVAL_ALERT_COOLDOWN_MS,
-    flushIntervalMs = 30_000
+    flushIntervalMs = 30_000,
+    schedule = defaultSchedule,
+    clearSchedule = (timer) => clearTimeout(timer)
   } = {}) {
     this.stateStore = stateStore;
     this.sessionTrail = sessionTrail;
@@ -55,8 +66,11 @@ export class ArrivalAlerts {
     this.now = now;
     this.cooldownMs = cooldownMs;
     this.flushIntervalMs = flushIntervalMs;
+    this.schedule = schedule;
+    this.clearSchedule = clearSchedule;
     this.suppressed = 0;
     this.suppressedSubjects = new Set();
+    this.suppressedOverflowSubjects = new Set();
     this.suppressedSubjectOverflow = 0;
     this.clientFirsts = new Map();
     this.clientNameFirstEventsOverCap = 0;
@@ -129,7 +143,7 @@ export class ArrivalAlerts {
         for (const [kind, subject] of planned) this.consider(nowMs, kind, subject, trailLink);
       }
       this.release(nowMs);
-      if (this.dirty || this.countersDirty) await this.maybeFlush(true);
+      if (this.dirty) await this.maybeFlush(true);
     } catch {
       // An alert must not change the visit it describes.
     }
@@ -169,17 +183,24 @@ export class ArrivalAlerts {
   }
 
   noteSuppressed(nowMs, key) {
-    if (this.suppressedSubjects.has(key)) {
-      this.saturated = true;
-      return;
+    this.saturated = true;
+    if (this.suppressedSubjects.has(key)) return;
+    const overflowKey = shortHash(key);
+    if (this.suppressedOverflowSubjects.has(overflowKey)) return;
+    if (this.suppressedSubjects.size < SUPPRESSED_SUBJECT_CAP) {
+      this.suppressedSubjects.add(key);
+    } else if (this.suppressedOverflowSubjects.size < SUPPRESSED_SUBJECT_CAP) {
+      this.suppressedOverflowSubjects.add(overflowKey);
+      this.suppressedSubjectOverflow += 1;
+    } else {
+      // Not remembered. Each request counts, same as clientNameFirstEventsOverCap.
+      this.suppressedSubjectOverflow += 1;
     }
-    if (this.suppressedSubjects.size >= SUPPRESSED_SUBJECT_CAP) this.suppressedSubjectOverflow += 1;
-    else this.suppressedSubjects.add(key);
     this.suppressed += 1;
     if (this.seen.size >= ARRIVAL_ALERT_SEEN_CAP) this.untrackedFirsts += 1;
-    this.saturated = true;
     this.upsertSummary(nowMs);
-    this.dirty = true;
+    this.countersDirty = true;
+    this.armCounterTimer();
   }
 
   admitClientFirst(wallet, subject, nowMs) {
@@ -191,7 +212,8 @@ export class ArrivalAlerts {
       bucket = { day, names: new Set() };
       this.clientFirsts.set(key, bucket);
     }
-    if (bucket.names.has(subject)) return true;
+    const slot = clientNameSlot(subject);
+    if (bucket.names.has(slot)) return true;
     if (bucket.names.size >= CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY) {
       // Events, not distinct names. A repeat of the same over-cap name counts again.
       this.clientNameFirstEventsOverCap += 1;
@@ -199,7 +221,7 @@ export class ArrivalAlerts {
       this.armCounterTimer();
       return false;
     }
-    bucket.names.add(subject);
+    bucket.names.add(slot);
     this.capClientFirsts();
     return true;
   }
@@ -230,12 +252,25 @@ export class ArrivalAlerts {
 
   armCounterTimer() {
     if (this.counterTimer || !this.countersDirty) return;
-    const timer = setTimeout(() => {
+    const timer = this.schedule(() => {
       this.counterTimer = undefined;
       void this.maybeFlush(false).catch(() => undefined);
     }, this.flushIntervalMs);
-    timer.unref?.();
+    timer?.unref?.();
     this.counterTimer = timer;
+  }
+
+  async stop() {
+    if (this.counterTimer) {
+      this.clearSchedule(this.counterTimer);
+      this.counterTimer = undefined;
+    }
+    if (!this.dirty && !this.countersDirty) return;
+    await this.writeState();
+  }
+
+  async close() {
+    return this.stop();
   }
 
   upsertSummary(nowMs) {
@@ -358,6 +393,10 @@ export class ArrivalAlerts {
         ? stored.suppressedSubjects.filter((key) => typeof key === "string")
         : [];
       this.suppressedSubjects = new Set(storedSubjects.slice(0, SUPPRESSED_SUBJECT_CAP));
+      const storedOverflow = Array.isArray(stored?.suppressedOverflowSubjects)
+        ? stored.suppressedOverflowSubjects.filter((key) => typeof key === "string" && /^[0-9a-f]{8}$/u.test(key))
+        : [];
+      this.suppressedOverflowSubjects = new Set(storedOverflow.slice(0, SUPPRESSED_SUBJECT_CAP));
       const trimmed = Math.max(0, storedSubjects.length - SUPPRESSED_SUBJECT_CAP);
       this.suppressedSubjectOverflow = (Number.isSafeInteger(stored?.suppressedSubjectOverflow)
         && stored.suppressedSubjectOverflow >= 0
@@ -376,7 +415,7 @@ export class ArrivalAlerts {
       for (const entry of Array.isArray(stored?.clientFirsts) ? stored.clientFirsts : []) {
         const day = Number(entry?.day);
         const names = Array.isArray(entry?.names)
-          ? entry.names.filter((name) => typeof name === "string").slice(0, CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY)
+          ? entry.names.filter((name) => typeof name === "string").slice(0, CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY).map(clientNameSlot)
           : [];
         if (!entry?.wallet || !Number.isFinite(day)) continue;
         this.clientFirsts.set(String(entry.wallet), { day, names: new Set(names) });
@@ -397,13 +436,17 @@ export class ArrivalAlerts {
   async maybeFlush(force = false) {
     if (!this.dirty && !this.countersDirty) return;
     const nowMs = this.now();
-    // Counter-only edits wait for the interval. A new alert still flushes now.
+    // A queued alert flushes now. Counters and suppressed subjects wait.
     if (!(force && this.dirty) && nowMs - this.lastFlushMs < this.flushIntervalMs) return;
-    this.lastFlushMs = nowMs;
+    await this.writeState();
+  }
+
+  async writeState() {
+    this.lastFlushMs = this.now();
     this.dirty = false;
     this.countersDirty = false;
     if (this.counterTimer) {
-      clearTimeout(this.counterTimer);
+      this.clearSchedule(this.counterTimer);
       this.counterTimer = undefined;
     }
     try {
@@ -416,6 +459,7 @@ export class ArrivalAlerts {
         suppressed: this.suppressed,
         untrackedFirsts: this.untrackedFirsts,
         suppressedSubjects: [...this.suppressedSubjects],
+        suppressedOverflowSubjects: [...this.suppressedOverflowSubjects],
         suppressedSubjectOverflow: this.suppressedSubjectOverflow,
         clientNameFirstEventsOverCap: this.clientNameFirstEventsOverCap,
         clientFirstsEvicted: this.clientFirstsEvicted,
@@ -431,6 +475,21 @@ export class ArrivalAlerts {
       throw error;
     }
   }
+}
+
+function defaultSchedule(fn, ms) {
+  const timer = setTimeout(fn, ms);
+  timer.unref?.();
+  return timer;
+}
+
+function shortHash(value) {
+  return createHash("sha256").update(String(value)).digest("hex").slice(0, 8);
+}
+
+function clientNameSlot(value) {
+  if (typeof value === "string" && /^[0-9a-f]{8}$/u.test(value)) return value;
+  return shortHash(value);
 }
 
 function bounded(value, max) {
