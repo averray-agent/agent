@@ -933,7 +933,7 @@ const executeMcpTool = createMcpToolExecutor({
 // Records who reaches the front door. Injected rather than reached for, so
 // the MCP handler stays testable without a state store.
 const sessionTrail = new ArrivalSessionTrail({ stateStore });
-const arrivalAlerts = new ArrivalAlerts({ stateStore });
+const arrivalAlerts = new ArrivalAlerts({ stateStore, identityRegistry: selfIdentityRegistry });
 
 const arrivalObservatory = new ArrivalObservatory({
   stateStore,

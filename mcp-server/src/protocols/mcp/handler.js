@@ -190,6 +190,15 @@ export function createMcpRoute({
       // Trail rows are written only after the anonymous rate limit has
       // already admitted the request (callers before that pass recordTrail: false).
       if (!recordTrail) return;
+      if (!toolError && !Number.isSafeInteger(rpcCode)) {
+        await arrivals?.noteArrivalAlert?.({
+          wallet: context.tool === "fetchAuthNonce" ? undefined : request._arrivalWallet,
+          clientInfo: context.clientInfo,
+          stage: context.stage ?? "reached",
+          success: true,
+          authenticated: Boolean(request._arrivalWallet) && context.tool !== "fetchAuthNonce"
+        });
+      }
       const presentedSession = String(request.headers?.["mcp-session-id"] ?? "");
       const liveSession = legacySessions.get(presentedSession);
       const mcpSessionId = liveSession && liveSession.expiresAt > now() ? presentedSession : undefined;

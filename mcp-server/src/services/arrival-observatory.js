@@ -522,17 +522,20 @@ export class ArrivalObservatory {
         )?.inc({ stage, actor });
       }
 
-      if (actor === "client" || actor === "anonymous") {
-        await this.alerts?.note?.({
-          actor,
+      const code = dropOffCode(outcome);
+      // MCP records the attempt before the tool result exists. Alerts for
+      // those calls are noted after the outcome, from the MCP finish path.
+      const outcomeKnown = outcome?.ok === true || outcome?.kind === "http";
+      if (outcomeKnown && !code) {
+        await this.noteArrivalAlert({
           wallet: canonicalWallet,
           clientInfo: identity,
           stage,
-          mcpSessionId,
+          success: true,
+          authenticated: Boolean(canonicalWallet) && stage !== "identified",
           nowMs
         });
       }
-      const code = dropOffCode(outcome);
       if (code) {
         recordDropOff(this.dropOff, {
           nowMs: nowMs,
@@ -774,6 +777,14 @@ export class ArrivalObservatory {
 
   dropOffView() {
     return dropOffSnapshot(this.dropOff, { nowMs: this.now() });
+  }
+
+  async noteArrivalAlert(input) {
+    try {
+      await this.alerts?.note?.(input);
+    } catch {
+      // Alerting cannot change the visit.
+    }
   }
 
   /**

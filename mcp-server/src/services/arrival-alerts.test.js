@@ -20,66 +20,142 @@ function memoryStore() {
   };
 }
 
-test("first external client, wallet, claim, and submit alert once and link to the session trail", async () => {
+test("successful authenticated visits alert once, and a shared client name is not an external client", async () => {
   let nowMs = 10_000;
-  const alerts = new ArrivalAlerts({ stateStore: memoryStore(), now: () => nowMs, flushIntervalMs: 0, cooldownMs: 1_000 });
+  const registry = new SelfIdentityRegistry({ qaEngineerWallets: [QA] });
+  const store = memoryStore();
+  const alerts = new ArrivalAlerts({
+    stateStore: store,
+    identityRegistry: registry,
+    now: () => nowMs,
+    flushIntervalMs: 0,
+    cooldownMs: 1_000
+  });
   const observatory = new ArrivalObservatory({
     stateStore: memoryStore(),
     now: () => nowMs,
     flushIntervalMs: 0,
     alerts,
-    identityRegistry: new SelfIdentityRegistry({ qaEngineerWallets: [QA] })
+    identityRegistry: registry
   });
 
   await observatory.recordTool({
     tool: "listJobs",
-    clientInfo: { name: "Outsider", version: "0.1" },
-    mcpSessionId: "legacy-session-1"
+    clientInfo: { name: "junk-scanner", version: "9" }
   });
-  await observatory.recordTool({
-    tool: "listJobs",
-    clientInfo: { name: "Outsider", version: "0.1" },
-    mcpSessionId: "legacy-session-1"
+  await observatory.recordHttp({
+    method: "POST",
+    pathname: "/auth/nonce",
+    wallet: EXTERNAL,
+    outcome: { ok: true }
   });
-  await observatory.recordHttp({ method: "POST", pathname: "/jobs/claim", wallet: EXTERNAL });
-  await observatory.recordHttp({ method: "POST", pathname: "/jobs/claim", wallet: EXTERNAL });
-  await observatory.recordHttp({ method: "POST", pathname: "/jobs/submit", wallet: EXTERNAL });
-  await observatory.recordHttp({ method: "POST", pathname: "/jobs/claim", wallet: QA });
-  await observatory.recordTool({
-    tool: "listJobs",
-    clientInfo: { name: "Anthropic/ClaudeAI", version: "1" }
+  await observatory.recordHttp({
+    method: "POST",
+    pathname: "/jobs/claim",
+    wallet: EXTERNAL,
+    outcome: { kind: "http", status: 409, code: "conflict" }
+  });
+  await observatory.recordHttp({
+    method: "POST",
+    pathname: "/jobs/claim",
+    wallet: EXTERNAL,
+    clientInfo: { name: "Anthropic/ClaudeAI", version: "1" },
+    outcome: { ok: true }
+  });
+  await observatory.recordHttp({
+    method: "POST",
+    pathname: "/jobs/submit",
+    wallet: EXTERNAL,
+    clientInfo: { name: "averray-roadmap", version: "1" },
+    outcome: { ok: true }
+  });
+  await observatory.recordHttp({
+    method: "POST",
+    pathname: "/jobs/claim",
+    wallet: QA,
+    clientInfo: { name: "outsider-tool", version: "0.1" },
+    outcome: { ok: true }
   });
 
   const listed = await alerts.list();
   const ids = [...listed.ready, ...listed.pending].map((alert) => alert.id);
-  assert.deepEqual(ids.filter((id) => id.startsWith("external_client_first:outsider@")), ["external_client_first:outsider@0.1"]);
-  assert.equal(ids.filter((id) => id === "external_wallet_first_claim:" + EXTERNAL).length, 1);
-  assert.equal(ids.filter((id) => id === "external_wallet_first_submit:" + EXTERNAL).length, 1);
+  assert.equal(ids.some((id) => id.includes("junk-scanner")), false);
   assert.equal(ids.some((id) => id.includes("claude")), false);
+  assert.equal(ids.some((id) => id.includes("averray-roadmap")), false);
   assert.equal(ids.some((id) => id.includes(QA)), false);
-  const client = [...listed.ready, ...listed.pending].find((alert) => alert.kind === "external_client_first");
-  assert.equal(client.trail, "linked");
-  assert.equal(client.href, "/admin/arrivals/sessions?id=mcp%3Alegacy-session-1");
+  assert.equal(ids.filter((id) => id === `external_wallet_first:${EXTERNAL}`).length, 1);
+  assert.equal(ids.filter((id) => id === `external_wallet_first_claim:${EXTERNAL}`).length, 1);
+  assert.equal(ids.filter((id) => id === `external_wallet_first_submit:${EXTERNAL}`).length, 1);
   const claim = [...listed.ready, ...listed.pending].find((alert) => alert.kind === "external_wallet_first_claim");
-  assert.equal(claim.href, `/admin/arrivals/sessions?id=${encodeURIComponent("wallet:" + EXTERNAL)}`);
-  assert.equal(listed.ready.length, 1);
-  assert.ok(listed.pending.length >= 1);
+  assert.equal(claim.href, `/admin/arrivals/sessions?id=${encodeURIComponent(`wallet:${EXTERNAL}`)}`);
+  assert.equal(claim.trail, "linked");
+
+  const restarted = new ArrivalAlerts({
+    stateStore: store,
+    identityRegistry: registry,
+    now: () => nowMs,
+    flushIntervalMs: 0,
+    cooldownMs: 1_000
+  });
+  await restarted.note({
+    wallet: EXTERNAL,
+    stage: "claimed",
+    success: true,
+    authenticated: true
+  });
+  const again = await restarted.list();
+  const againIds = [...again.ready, ...again.pending].map((alert) => alert.id);
+  assert.equal(againIds.filter((id) => id === `external_wallet_first:${EXTERNAL}`).length, 1);
+  assert.equal(againIds.filter((id) => id === `external_wallet_first_claim:${EXTERNAL}`).length, 1);
 
   const snapshot = await observatory.getSnapshot();
   assert.equal(snapshot.alerts, undefined);
-  assert.equal(JSON.stringify(snapshot).includes("external_client_first"), false);
 });
 
-test("a client with no session is linked as not reported, and a failed read is not zero", async () => {
+test("a full pending queue does not consume the dedup set, and anonymous names do not either", async () => {
+  const alerts = new ArrivalAlerts({
+    stateStore: memoryStore(),
+    now: () => 5_000,
+    flushIntervalMs: 0,
+    cooldownMs: 60_000
+  });
+  for (let index = 0; index < 60; index += 1) {
+    await alerts.note({
+      clientInfo: { name: `anon-${index}`, version: "1" },
+      stage: "browsed",
+      success: true,
+      authenticated: false
+    });
+  }
+  let quiet = await alerts.list();
+  assert.equal(quiet.ready.length + quiet.pending.length, 0);
+
+  for (let index = 0; index < 52; index += 1) {
+    const wallet = `0x${(index + 1).toString(16).padStart(40, "b")}`;
+    await alerts.note({ wallet, stage: "browsed", success: true, authenticated: true });
+  }
+  const held = `0x${"c".repeat(40)}`;
+  await alerts.note({ wallet: held, stage: "browsed", success: true, authenticated: true });
+  const full = await alerts.list();
+  const fullIds = [...full.ready, ...full.pending].map((alert) => alert.id);
+  assert.equal(fullIds.includes(`external_wallet_first:${held}`), false);
+  const summary = [...full.ready, ...full.pending].find((alert) => alert.kind === "suppressed_firsts");
+  assert.ok(summary.suppressedCount >= 1);
+  assert.equal(summary.trail, NOT_REPORTED);
+  assert.equal(summary.href, null);
+});
+
+test("a client with no wallet is not an external-client alert, and a failed read is not zero", async () => {
   const alerts = new ArrivalAlerts({ stateStore: memoryStore(), now: () => 5_000, flushIntervalMs: 0, cooldownMs: ARRIVAL_ALERT_COOLDOWN_MS });
   await alerts.note({
-    actor: "client",
     clientInfo: { name: "wanderer", version: "2" },
-    stage: "reached"
+    stage: "reached",
+    success: true,
+    authenticated: false
   });
   const listed = await alerts.list();
-  assert.equal(listed.ready[0].trail, NOT_REPORTED);
-  assert.equal(listed.ready[0].href, null);
+  assert.equal(listed.ready.length, 0);
+  assert.equal(listed.pending.length, 0);
 
   const failing = new ArrivalAlerts({
     stateStore: {
