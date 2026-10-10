@@ -187,3 +187,32 @@ test("a missing client or protocol version is not reported, and the public funne
   assert.equal(snapshot.sessions, undefined);
   assert.equal(JSON.stringify(snapshot).includes("legacy-session-1"), false);
 });
+
+test("a failed per-record write does not mark the session persisted", async () => {
+  const state = new Map();
+  const sessions = new ArrivalSessionTrail({
+    stateStore: {
+      async getServiceState(scope) { return state.get(scope); },
+      async upsertServiceState(scope, value) {
+        if (String(scope).startsWith("arrival-session-record:")) throw new Error("record write failed");
+        state.set(scope, { ...(state.get(scope) ?? {}), ...value });
+        return state.get(scope);
+      },
+      async deleteServiceState(scope) { state.delete(scope); }
+    },
+    now: () => 100_000,
+    flushIntervalMs: 0
+  });
+  await sessions.observe({
+    wallet: WALLET,
+    door: "http",
+    name: "GET /auth/session",
+    resultClass: "ok",
+    stage: "reached"
+  });
+  const got = await sessions.get(`wallet:${WALLET}`);
+  assert.ok(got.session);
+  assert.equal(got.persisted, false);
+  assert.equal(await sessions.persist(`wallet:${WALLET}`), false);
+  assert.equal((await sessions.get(`wallet:${WALLET}`)).persisted, false);
+});

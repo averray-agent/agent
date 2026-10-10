@@ -117,6 +117,31 @@ export class ArrivalSessionTrail {
     }
   }
 
+  /**
+   * Write one record now, ignoring the 30s flush interval. The alert path
+   * awaits this before it decides the trail link. `persisted` is set only
+   * after that record's own write succeeds.
+   */
+  async persist(id) {
+    try {
+      if (!(await this.ensureLoaded())) return false;
+      const record = this.sessions.get(String(id ?? ""));
+      if (!record || typeof this.stateStore?.upsertServiceState !== "function") return false;
+      await this.stateStore.upsertServiceState(sessionScope(record.id), record);
+      await this.stateStore.upsertServiceState(STATE_SCOPE, {
+        collectionSinceMs: this.collectionSinceMs,
+        unstitched: this.unstitched,
+        droppedRecords: this.droppedRecords,
+        sessionIds: [...this.sessions.keys()]
+      });
+      this.persistedIds.add(record.id);
+      this.dirtyIds.delete(record.id);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async list({ limit = 50, offset = 0 } = {}) {
     if (!(await this.ensureLoaded())) return unavailableTrail(this.loadFailed);
     await this.forget(this.prune(this.now()));

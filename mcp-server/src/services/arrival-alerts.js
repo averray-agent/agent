@@ -5,6 +5,7 @@ export const ARRIVAL_ALERT_SCHEMA = "averray.arrival-alerts.v1";
 export const ARRIVAL_ALERT_COOLDOWN_MS = 15 * 60 * 1_000;
 export const ARRIVAL_ALERT_SEEN_CAP = 2_000;
 export const CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY = 3;
+export const CLIENT_FIRSTS_WALLET_CAP = 2_000;
 export const SUPPRESSED_SUBJECT_CAP = 500;
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const STATE_SCOPE = "arrival-alerts";
@@ -27,6 +28,12 @@ const KINDS = new Set([
  * a non-forced flush; process death before that flush can drop an unqueued edit.
  * Concurrent backend processes overwrite `seen` (last write wins). That is
  * acceptable with one backend; a second process can drop or revive a milestone.
+ *
+ * Client-name firsts are capped per wallet per UTC day (`floor(nowMs / 86400000)`),
+ * not a rolling 24h. Three names before midnight and three different names
+ * after it are six alertable firsts. Previous UTC days are dropped on write
+ * and on load. The map keeps at most 2,000 wallets; the rest are evicted
+ * oldest day first.
  */
 export class ArrivalAlerts {
   constructor({
@@ -50,6 +57,7 @@ export class ArrivalAlerts {
     this.suppressedSubjectOverflow = 0;
     this.clientFirsts = new Map();
     this.clientFirstsCounted = 0;
+    this.clientFirstsEvicted = 0;
     this.untrackedFirsts = 0;
     this.summaryWindowStartMs = undefined;
     this.seen = new Set();
@@ -87,6 +95,10 @@ export class ArrivalAlerts {
         : undefined;
       const normalizedWallet = String(wallet ?? "").trim().toLowerCase();
       const trailId = authenticated && normalizedWallet ? `wallet:${normalizedWallet}` : undefined;
+      // The trail flushes on its own interval (30s). Force this wallet's record
+      // out before the link is decided, or a second wallet in that window is
+      // "unpersisted" forever.
+      if (trailId) await this.sessionTrail?.persist?.(trailId);
       const trailLink = await this.resolveTrail(trailId);
       if (authenticated && clientActor === "external" && name) {
         const subject = `${name}@${version ?? "unknown"}`;
@@ -144,20 +156,49 @@ export class ArrivalAlerts {
 
   admitClientFirst(wallet, subject, nowMs) {
     const day = Math.floor(nowMs / DAY_MS);
+    this.pruneClientFirsts(day);
     const key = wallet || "none";
     let bucket = this.clientFirsts.get(key);
     if (!bucket || bucket.day !== day) {
-      bucket = { day, names: new Set() };
+      bucket = { day, names: new Set(), overflow: new Set() };
       this.clientFirsts.set(key, bucket);
     }
+    bucket.overflow ??= new Set();
     if (bucket.names.has(subject)) return true;
     if (bucket.names.size >= CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY) {
-      this.clientFirstsCounted += 1;
-      this.dirty = true;
+      if (!bucket.overflow.has(subject)) {
+        bucket.overflow.add(subject);
+        this.clientFirstsCounted += 1;
+        this.dirty = true;
+      }
       return false;
     }
     bucket.names.add(subject);
+    this.capClientFirsts();
     return true;
+  }
+
+  pruneClientFirsts(day) {
+    for (const [wallet, bucket] of this.clientFirsts) {
+      if (bucket.day !== day) this.clientFirsts.delete(wallet);
+    }
+  }
+
+  capClientFirsts() {
+    while (this.clientFirsts.size > CLIENT_FIRSTS_WALLET_CAP) {
+      let oldestKey;
+      let oldestDay = Infinity;
+      for (const [wallet, bucket] of this.clientFirsts) {
+        if (bucket.day < oldestDay) {
+          oldestDay = bucket.day;
+          oldestKey = wallet;
+        }
+      }
+      if (!oldestKey) return;
+      this.clientFirsts.delete(oldestKey);
+      this.clientFirstsEvicted += 1;
+      this.dirty = true;
+    }
   }
 
   upsertSummary(nowMs) {
@@ -229,6 +270,7 @@ export class ArrivalAlerts {
         saturated: NOT_REPORTED,
         firstsNoLongerTracked: NOT_REPORTED,
         clientFirstsCounted: NOT_REPORTED,
+        clientFirstsEvicted: NOT_REPORTED,
         suppressedSubjectOverflow: NOT_REPORTED
       };
     }
@@ -242,6 +284,7 @@ export class ArrivalAlerts {
       suppressed: this.suppressed,
       firstsNoLongerTracked: this.untrackedFirsts,
       clientFirstsCounted: this.clientFirstsCounted,
+      clientFirstsEvicted: this.clientFirstsEvicted,
       suppressedSubjectOverflow: this.suppressedSubjectOverflow,
       sending: "monitor_alert_bridge",
       ready: this.ready.map(publicAlert),
@@ -286,15 +329,23 @@ export class ArrivalAlerts {
       this.clientFirstsCounted = Number.isSafeInteger(stored?.clientFirstsCounted) && stored.clientFirstsCounted >= 0
         ? stored.clientFirstsCounted
         : 0;
+      this.clientFirstsEvicted = Number.isSafeInteger(stored?.clientFirstsEvicted) && stored.clientFirstsEvicted >= 0
+        ? stored.clientFirstsEvicted
+        : 0;
       this.clientFirsts = new Map();
       for (const entry of Array.isArray(stored?.clientFirsts) ? stored.clientFirsts : []) {
         const day = Number(entry?.day);
         const names = Array.isArray(entry?.names)
           ? entry.names.filter((name) => typeof name === "string").slice(0, CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY)
           : [];
+        const overflow = Array.isArray(entry?.overflow)
+          ? entry.overflow.filter((name) => typeof name === "string")
+          : [];
         if (!entry?.wallet || !Number.isFinite(day)) continue;
-        this.clientFirsts.set(String(entry.wallet), { day, names: new Set(names) });
+        this.clientFirsts.set(String(entry.wallet), { day, names: new Set(names), overflow: new Set(overflow) });
       }
+      this.pruneClientFirsts(Math.floor(this.now() / DAY_MS));
+      this.capClientFirsts();
       const windowStart = Number(stored?.summaryWindowStartMs);
       this.summaryWindowStartMs = Number.isFinite(windowStart) ? windowStart : undefined;
       this.loaded = true;
@@ -324,10 +375,12 @@ export class ArrivalAlerts {
         suppressedSubjects: [...this.suppressedSubjects],
         suppressedSubjectOverflow: this.suppressedSubjectOverflow,
         clientFirstsCounted: this.clientFirstsCounted,
+        clientFirstsEvicted: this.clientFirstsEvicted,
         clientFirsts: [...this.clientFirsts].map(([wallet, bucket]) => ({
           wallet,
           day: bucket.day,
-          names: [...bucket.names]
+          names: [...bucket.names],
+          overflow: [...(bucket.overflow ?? [])]
         })),
         summaryWindowStartMs: this.summaryWindowStartMs ?? null
       });

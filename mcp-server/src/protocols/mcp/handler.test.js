@@ -1254,10 +1254,11 @@ test("an MCP alert is linked only after the tool outcome, to the persisted trail
   );
   assert.equal(denied.body.result.isError, true);
   const afterFailure = await alerts.list();
-  assert.equal(
-    [...afterFailure.ready, ...afterFailure.pending].some((alert) => alert.id === `external_wallet_first:${failed}`),
-    false
-  );
+  const failureRows = [...afterFailure.ready, ...afterFailure.pending];
+  assert.equal(failureRows.some((alert) => alert.id === `external_wallet_first:${failed}`), false);
+  for (const alert of failureRows.filter((row) => row.kind === "external_client_first")) {
+    assert.equal(alert.trail, "linked", alert.trailNote ?? "");
+  }
 
   current = succeeded;
   const ok = await call(
@@ -1271,4 +1272,65 @@ test("an MCP alert is linked only after the tool outcome, to the persisted trail
   assert.ok(first);
   assert.equal(first.trail, "linked");
   assert.equal(first.href, `/admin/arrivals/sessions?id=${encodeURIComponent(`wallet:${succeeded}`)}`);
+});
+
+test("several MCP wallets link on the default 30s trail flush", async () => {
+  const state = new Map();
+  const stateStore = {
+    async getServiceState(scope) { return state.get(scope); },
+    async upsertServiceState(scope, value) {
+      state.set(scope, { ...(state.get(scope) ?? {}), ...value });
+      return state.get(scope);
+    },
+    async deleteServiceState(scope) { state.delete(scope); }
+  };
+  let nowMs = 100_000;
+  const sessionTrail = new ArrivalSessionTrail({ stateStore, now: () => nowMs });
+  const alerts = new ArrivalAlerts({
+    stateStore,
+    sessionTrail,
+    now: () => nowMs,
+    cooldownMs: 0
+  });
+  const arrivals = new ArrivalObservatory({
+    stateStore: new MemoryStateStore(),
+    alerts,
+    now: () => nowMs,
+    flushIntervalMs: 0
+  });
+  let current = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const { handler } = createHarness({
+    arrivals,
+    sessionTrail,
+    authMiddleware: async (request) => {
+      request._arrivalWallet = current;
+      return { wallet: current };
+    }
+  });
+  const wallets = [1, 2, 3].map((index) => `0x${index.toString(16).padStart(40, "a")}`);
+  for (const [index, wallet] of wallets.entries()) {
+    current = wallet;
+    if (index === 2) {
+      nowMs += 31_000;
+      const gap = await call(
+        handler,
+        modernRequest("tools/list", {}, MODERN_MCP_VERSION, 90),
+        modernHeaders("tools/list")
+      );
+      assert.equal(gap.statusCode, 200);
+    }
+    const result = await call(
+      handler,
+      modernRequest("tools/call", { name: "listJobs", arguments: {} }, MODERN_MCP_VERSION, index + 1),
+      { ...modernHeaders("tools/call", "listJobs"), authorization: "Bearer valid-token" }
+    );
+    assert.equal(result.statusCode, 200);
+  }
+  const listed = await alerts.list();
+  const rows = [...listed.ready, ...listed.pending];
+  for (const wallet of wallets) {
+    const alert = rows.find((row) => row.id === `external_wallet_first:${wallet}`);
+    assert.ok(alert, wallet);
+    assert.equal(alert.trail, "linked", alert.trailNote ?? wallet);
+  }
 });

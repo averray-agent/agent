@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { SelfIdentityRegistry } from "../core/self-identity-registry.js";
-import { ArrivalAlerts, ARRIVAL_ALERT_COOLDOWN_MS, ARRIVAL_ALERT_SEEN_CAP, CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY, NOT_REPORTED, SUPPRESSED_SUBJECT_CAP } from "./arrival-alerts.js";
+import { ArrivalAlerts, ARRIVAL_ALERT_COOLDOWN_MS, ARRIVAL_ALERT_SEEN_CAP, CLIENT_FIRSTS_WALLET_CAP, CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY, NOT_REPORTED, SUPPRESSED_SUBJECT_CAP } from "./arrival-alerts.js";
 import { ArrivalSessionTrail } from "./arrival-session-trail.js";
 import { ArrivalObservatory } from "./arrival-observatory.js";
 import { createAdminArrivalAlertRoutes } from "../protocols/http/admin-arrival-alert-routes.js";
@@ -399,6 +399,14 @@ test("one wallet's client names do not fill the queue", async () => {
   const rows = [...listed.ready, ...listed.pending];
   assert.equal(rows.filter((alert) => alert.kind === "external_client_first").length, CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY);
   assert.equal(listed.clientFirstsCounted, 6_000 - CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY);
+  await alerts.note({
+    wallet: EXTERNAL,
+    clientInfo: { name: "flood-3", version: "1" },
+    stage: "browsed",
+    success: true,
+    authenticated: true
+  });
+  assert.equal((await alerts.list()).clientFirstsCounted, 6_000 - CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY);
   assert.equal(rows.some((alert) => alert.id === `external_wallet_first:${real}`), true);
   assert.equal(rows.some((alert) => alert.id === `external_wallet_first_claim:${real}`), true);
 });
@@ -536,4 +544,103 @@ test("the alerts route reports firsts that are no longer tracked", async () => {
   }), true);
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.firstsNoLongerTracked, 1);
+});
+
+test("client-name cap state is pruned, bounded, and still applies after restart", async () => {
+  const day = 24 * 60 * 60 * 1_000;
+  let nowMs = 2 * day;
+  const store = memoryStore();
+  await store.upsertServiceState("arrival-alerts", {
+    clientFirsts: [1, 2, 3].map((index) => ({
+      wallet: `0x${index.toString(16).padStart(40, "c")}`,
+      day: 0,
+      names: ["old@1"],
+      overflow: []
+    }))
+  });
+  const alerts = new ArrivalAlerts({ stateStore: store, now: () => nowMs, flushIntervalMs: 0, cooldownMs: 60_000 });
+  await alerts.note({
+    wallet: EXTERNAL,
+    clientInfo: { name: "today", version: "1" },
+    stage: "browsed",
+    success: true,
+    authenticated: true
+  });
+  const saved = await store.getServiceState("arrival-alerts");
+  assert.equal(saved.clientFirsts.every((entry) => entry.day === Math.floor(nowMs / day)), true);
+  assert.equal(saved.clientFirsts.length, 1);
+
+  const bounded = new ArrivalAlerts({
+    stateStore: memoryStore(),
+    now: () => nowMs,
+    flushIntervalMs: 60_000,
+    cooldownMs: 60_000
+  });
+  for (let index = 0; index < CLIENT_FIRSTS_WALLET_CAP + 1; index += 1) {
+    await bounded.note({
+      wallet: `0x${index.toString(16).padStart(40, "0")}`,
+      clientInfo: { name: "only", version: "1" },
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  const capped = await bounded.list();
+  assert.equal(capped.clientFirstsEvicted >= 1, true);
+
+  const durable = memoryStore();
+  const first = new ArrivalAlerts({ stateStore: durable, now: () => nowMs, flushIntervalMs: 0, cooldownMs: 60_000 });
+  for (const name of ["a", "b", "c", "d"]) {
+    await first.note({
+      wallet: EXTERNAL,
+      clientInfo: { name, version: "1" },
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  assert.equal((await first.list()).clientFirstsCounted, 1);
+  const restarted = new ArrivalAlerts({ stateStore: durable, now: () => nowMs, flushIntervalMs: 0, cooldownMs: 60_000 });
+  await restarted.note({
+    wallet: EXTERNAL,
+    clientInfo: { name: "d", version: "1" },
+    stage: "browsed",
+    success: true,
+    authenticated: true
+  });
+  await restarted.note({
+    wallet: EXTERNAL,
+    clientInfo: { name: "e", version: "1" },
+    stage: "browsed",
+    success: true,
+    authenticated: true
+  });
+  const after = await restarted.list();
+  assert.equal(after.clientFirstsCounted, 2);
+  const names = [...after.ready, ...after.pending]
+    .filter((alert) => alert.kind === "external_client_first")
+    .map((alert) => alert.subject);
+  assert.equal(names.includes("d@1"), false);
+  assert.equal(names.includes("e@1"), false);
+});
+
+test("a loaded suppressed-subject list is trimmed to the cap", async () => {
+  const store = memoryStore();
+  await store.upsertServiceState("arrival-alerts", {
+    suppressedSubjects: Array.from({ length: SUPPRESSED_SUBJECT_CAP + 100 }, (_, index) => (
+      `external_wallet_first:0x${index.toString(16).padStart(40, "0")}`
+    )),
+    suppressedSubjectOverflow: 0,
+    suppressed: SUPPRESSED_SUBJECT_CAP + 100
+  });
+  const alerts = new ArrivalAlerts({ stateStore: store, now: () => 9_000, flushIntervalMs: 0 });
+  await alerts.note({
+    wallet: `0x${"f".repeat(40)}`,
+    stage: "browsed",
+    success: true,
+    authenticated: true
+  });
+  const saved = await store.getServiceState("arrival-alerts");
+  assert.equal(saved.suppressedSubjects.length <= SUPPRESSED_SUBJECT_CAP, true);
+  assert.ok(saved.suppressedSubjectOverflow >= 100);
 });
