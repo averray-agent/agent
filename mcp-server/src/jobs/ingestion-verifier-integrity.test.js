@@ -169,7 +169,7 @@ const fixtures = [
   }
 ];
 
-test("GitHub issue rejects schema-valid evidence without the target PR", async () => {
+test("GitHub issue cannot approve different-name evidence without live repository identity", async () => {
   const job = githubJob({
     title: "Add parser regression coverage",
     body: "Add a focused parser regression test.",
@@ -189,8 +189,10 @@ test("GitHub issue rejects schema-valid evidence without the target PR", async (
 
   const result = await new VerifierRegistry({ githubToken: "" })
     .evaluate(normalizeJobInput(job), submission);
-  assert.equal(result.outcome, "rejected");
-  assert.equal(result.reasonCode, "GITHUB_PR_EVIDENCE_INCOMPLETE");
+  assert.equal(result.outcome, "disputed");
+  assert.equal(result.reasonCode, "HUMAN_REVIEW_REQUIRED");
+  assert.equal(result.checks.repoMatches, null);
+  assert.equal(result.checks.repoMatchFallbackReason, "github_token_not_configured");
 });
 
 for (const fixture of fixtures) {

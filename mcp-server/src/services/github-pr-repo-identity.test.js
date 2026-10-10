@@ -12,6 +12,8 @@ import { buildAverrayDisclosureFooter } from "../core/maintainer-surface-policy.
 const wallet = "0x218A18d81E90d39557ff9E1E21B14E17ec2592A4";
 const sessionId = "pr-jyotishankar04-saveforlatter-52:0x218A18d81E90d39557ff9E1E21B14E17ec2592A4";
 const sourceId = 1344638682;
+const repositoryCreatedAt = "2026-08-24T00:00:00Z";
+const jobCreatedAt = "2026-10-06T00:00:00Z";
 const body = `Closes #52\n\n${buildAverrayDisclosureFooter({ agentWallet: wallet })}`;
 
 test("renamed repository matches by GitHub id and a merged preview is approved", async () => {
@@ -21,7 +23,7 @@ test("renamed repository matches by GitHub id and a merged preview is approved",
     job: githubJob({ repo: "jyotishankar04/saveforlatter" }),
     prUrl: "https://github.com/jyotishankar04/savedly/pull/91",
     fetchImpl: routeGithub({
-      "/repos/jyotishankar04/saveforlatter": { id: sourceId, full_name: "jyotishankar04/savedly" },
+      "/repos/jyotishankar04/saveforlatter": { id: sourceId, full_name: "jyotishankar04/savedly", created_at: repositoryCreatedAt },
       "/repos/jyotishankar04/savedly/pulls/91": pull({
         baseId: sourceId,
         baseName: "jyotishankar04/savedly",
@@ -51,6 +53,12 @@ test("renamed repository matches by GitHub id and a merged preview is approved",
   assert.equal(preview.preview, true);
   assert.equal(preview.outcome, "approved", JSON.stringify({ blockers: preview.blockers, checks: preview.checks }));
   assert.equal(preview.checks.repoMatches, true);
+  assert.equal(preview.score, 95); // This fixture has no approving review.
+  assert.deepEqual(preview.checks.sourceRepoIdentity, {
+    id: sourceId, origin: "resolved_by_name", createdAt: repositoryCreatedAt,
+    jobCreatedAt, predatesJob: true
+  });
+  assert.deepEqual(preview.evidence.sourceRepoIdentity, preview.checks.sourceRepoIdentity);
   assert.equal(preview.checks.repoMatchMethod, "repository_id");
   assert.equal(preview.checks.repoMatchFallbackReason, undefined);
   assert.equal(preview.githubLookup.baseRepo.id, sourceId);
@@ -68,7 +76,7 @@ test("renamed repository that was closed without merge stays rejected", async ()
   const verdict = await new VerifierRegistry({
     githubToken: "github_pat_test",
     fetchImpl: routeGithub({
-      "/repos/jyotishankar04/saveforlatter": { id: sourceId, full_name: "jyotishankar04/savedly" },
+      "/repos/jyotishankar04/saveforlatter": { id: sourceId, full_name: "jyotishankar04/savedly", created_at: repositoryCreatedAt },
       "/repos/jyotishankar04/savedly/pulls/91": pull({
         baseId: sourceId,
         baseName: "jyotishankar04/savedly",
@@ -94,7 +102,7 @@ test("fork pull request does not match when only its head repository is the sour
   const verdict = await new VerifierRegistry({
     githubToken: "github_pat_test",
     fetchImpl: routeGithub({
-      "/repos/owner/upstream": { id: sourceId, full_name: "owner/upstream" },
+      "/repos/owner/upstream": { id: sourceId, full_name: "owner/upstream", created_at: repositoryCreatedAt },
       "/repos/forker/upstream/pulls/91": pull({
         baseId: 200,
         baseName: "forker/upstream",
@@ -146,19 +154,19 @@ test("source repository lookup failure keeps exact name comparison and records t
     claimantWallet: wallet,
     claimSessionId: sessionId
   });
-  assert.equal(differentName.checks.repoMatches, false);
-  assert.equal(differentName.checks.repoMatchMethod, "exact_name");
+  assert.equal(differentName.checks.repoMatches, null);
+  assert.equal(differentName.checks.repoMatchMethod, "unknown");
   assert.equal(differentName.checks.repoMatchFallbackReason, "network_down");
   assert.equal(differentName.evidence.sourceRepoRenamed, undefined);
-  assert.equal(differentName.outcome, "rejected");
-  assert.match(differentName.blockers.join("\n"), /PR repo must match/u);
+  assert.equal(differentName.outcome, "disputed");
+  assert.match(differentName.blockers.join("\n"), /repository identity requires human review/u);
 });
 
 test("transferred repository matches when the owner changes and the id does not", async () => {
   const verdict = await new VerifierRegistry({
     githubToken: "github_pat_test",
     fetchImpl: routeGithub({
-      "/repos/oldowner/widget": { id: 42, full_name: "newowner/widget" },
+      "/repos/oldowner/widget": { id: 42, full_name: "newowner/widget", created_at: repositoryCreatedAt },
       "/repos/newowner/widget/pulls/91": pull({
         baseId: 42,
         baseName: "newowner/widget",
@@ -202,6 +210,11 @@ test("ingested repository id is reused, and a poster-supplied id is not", async 
     { claimantWallet: wallet, claimSessionId: sessionId }
   );
   assert.equal(cached.checks.repoMatches, true);
+  assert.equal(cached.outcome, "approved");
+  assert.equal(cached.score, 95); // This fixture has no approving review.
+  assert.equal(cached.checks.sourceRepoIdentity.id, sourceId);
+  assert.equal(cached.checks.sourceRepoIdentity.origin, "ingested");
+  assert.deepEqual(cached.evidence.sourceRepoIdentity, cached.checks.sourceRepoIdentity);
   assert.deepEqual(cached.evidence.sourceRepoRenamed, {
     from: "jyotishankar04/saveforlatter",
     to: "jyotishankar04/savedly"
@@ -231,7 +244,7 @@ test("ingested repository id is reused, and a poster-supplied id is not", async 
   const forged = await new VerifierRegistry({
     githubToken: "github_pat_test",
     fetchImpl: routeGithub({
-      "/repos/owner/upstream": { id: sourceId, full_name: "owner/upstream" },
+      "/repos/owner/upstream": { id: sourceId, full_name: "owner/upstream", created_at: repositoryCreatedAt },
       "/repos/attacker/copy/pulls/91": pull({
         baseId: 200,
         baseName: "attacker/copy",
@@ -265,7 +278,7 @@ test("the review poller settles a renamed merged repository through the normal p
   const registry = new VerifierRegistry({
     githubToken: "github_pat_test",
     fetchImpl: routeGithub({
-      "/repos/jyotishankar04/saveforlatter": { id: sourceId, full_name: "jyotishankar04/savedly" },
+      "/repos/jyotishankar04/saveforlatter": { id: sourceId, full_name: "jyotishankar04/savedly", created_at: repositoryCreatedAt },
       "/repos/jyotishankar04/savedly/pulls/91": pull({
         baseId: sourceId,
         baseName: "jyotishankar04/savedly",
@@ -303,6 +316,93 @@ test("the review poller settles a renamed merged repository through the normal p
     from: "jyotishankar04/saveforlatter",
     to: "jyotishankar04/savedly"
   });
+  assert.deepEqual((await store.getVerificationResult(sessionId)).evidence.sourceRepoIdentity, {
+    id: sourceId, origin: "resolved_by_name", createdAt: repositoryCreatedAt,
+    jobCreatedAt, predatesJob: true
+  });
+});
+
+test("cached id with a verified PR missing base.repo requires human review, never name fallback", async () => {
+  const snapshot = pull({ baseId: sourceId, baseName: "example/project", merged: true });
+  delete snapshot.base.repo;
+  const calls = [];
+  const verdict = await new VerifierRegistry({
+    githubToken: "github_pat_test",
+    fetchImpl: async (url) => {
+      calls.push(new URL(url).pathname);
+      return routeGithub({ "/repos/example/project/pulls/91": snapshot })(url);
+    }
+  }).evaluate(githubJob({ repo: "example/project", githubRepoId: sourceId }),
+    submission("https://github.com/example/project/pull/91"),
+    { claimantWallet: wallet, claimSessionId: sessionId });
+  assert.equal(verdict.githubLookup.status, "verified");
+  assert.equal(verdict.checks.repoMatches, null);
+  assert.equal(verdict.checks.repoMatchMethod, "unknown");
+  assert.equal(verdict.checks.repoMatchFallbackReason, "pr_base_repo_id_unavailable");
+  assert.equal(verdict.outcome, "disputed");
+  assert.equal(verdict.handler, "human_fallback");
+  assert.equal(verdict.evidence.sourceRepoIdentity.origin, "ingested");
+  assert.equal(calls.includes("/repos/example/project"), false);
+});
+
+test("cached id with a renamed PR lookup 500 requires human review, not rejection", async () => {
+  const calls = [];
+  const verdict = await new VerifierRegistry({
+    githubToken: "github_pat_test",
+    fetchImpl: async (url) => {
+      calls.push(new URL(url).pathname);
+      return new Response("{}", { status: 500 });
+    }
+  }).evaluate(githubJob({ repo: "jyotishankar04/saveforlatter", githubRepoId: sourceId }),
+    submission("https://github.com/jyotishankar04/savedly/pull/91"),
+    { claimantWallet: wallet, claimSessionId: sessionId });
+  assert.equal(verdict.checks.repoMatches, null);
+  assert.equal(verdict.checks.repoMatchMethod, "unknown");
+  assert.equal(verdict.checks.repoMatchFallbackReason, "github_api_500");
+  assert.equal(verdict.outcome, "disputed");
+  assert.equal(verdict.handler, "human_fallback");
+  assert.deepEqual(calls, ["/repos/jyotishankar04/savedly/pulls/91"]);
+});
+
+for (const [name, createdAt, expectedAge, reason] of [
+  ["recreated after the job", "2026-10-07T00:00:00Z", false, "source_repo_not_older_than_job"],
+  ["created at the job time", jobCreatedAt, false, "source_repo_not_older_than_job"],
+  ["missing creation time", undefined, null, "source_repo_creation_time_unavailable"],
+  ["invalid creation time", "not-a-date", null, "source_repo_creation_time_unavailable"]
+]) test(`uncached repository ${name} requires human review`, async () => {
+  const verdict = await new VerifierRegistry({
+    githubToken: "github_pat_test",
+    fetchImpl: routeGithub({
+      "/repos/example/project": { id: 200, full_name: "example/project", created_at: createdAt },
+      "/repos/example/project/pulls/91": pull({ baseId: 200, baseName: "example/project", merged: true })
+    })
+  }).evaluate(githubJob({ repo: "example/project" }),
+    submission("https://github.com/example/project/pull/91"),
+    { claimantWallet: wallet, claimSessionId: sessionId });
+  assert.equal(verdict.outcome, "disputed");
+  assert.equal(verdict.checks.repoMatches, null);
+  assert.equal(verdict.checks.repoMatchFallbackReason, reason);
+  assert.deepEqual(verdict.checks.sourceRepoIdentity, {
+    id: 200, origin: "resolved_by_name", createdAt: createdAt ?? null,
+    jobCreatedAt, predatesJob: expectedAge
+  });
+  assert.deepEqual(verdict.evidence.sourceRepoIdentity, verdict.checks.sourceRepoIdentity);
+});
+
+test("uncached repository with missing pinned job creation time requires human review", async () => {
+  const job = githubJob({ repo: "example/project" });
+  delete job.lifecycle;
+  const verdict = await new VerifierRegistry({
+    githubToken: "github_pat_test",
+    fetchImpl: routeGithub({
+      "/repos/example/project": { id: sourceId, full_name: "example/project", created_at: repositoryCreatedAt },
+      "/repos/example/project/pulls/91": pull({ baseId: sourceId, baseName: "example/project", merged: true })
+    })
+  }).evaluate(job, submission("https://github.com/example/project/pull/91"),
+    { claimantWallet: wallet, claimSessionId: sessionId });
+  assert.equal(verdict.outcome, "disputed");
+  assert.equal(verdict.checks.sourceRepoIdentity.jobCreatedAt, null);
+  assert.equal(verdict.checks.sourceRepoIdentity.predatesJob, null);
 });
 
 function githubJob({ repo, githubRepoId, sourceType = "github_issue", declaredRepoId } = {}) {
@@ -314,6 +414,7 @@ function githubJob({ repo, githubRepoId, sourceType = "github_issue", declaredRe
   };
   return {
     id: "pr-jyotishankar04-saveforlatter-52",
+    lifecycle: { createdAt: jobCreatedAt },
     category: "coding",
     verifierMode: "github_pr",
     source: sourceType === "github_issue"

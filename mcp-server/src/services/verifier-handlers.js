@@ -419,6 +419,13 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
         repoMatchFallbackReason,
         sourceRepoRenamed
       } = decideRepositoryMatch({ parsedPr, expectedRepo, sourceRepo, githubLookup });
+      const sourceRepoIdentity = {
+        id: sourceRepo.id,
+        origin: sourceRepo.origin ?? null,
+        createdAt: sourceRepo.createdAt ?? null,
+        jobCreatedAt: job.lifecycle?.createdAt ?? null,
+        predatesJob: sourceRepo.predatesJob ?? null
+      };
       const issueReferenced = githubVerified ? githubLookup.issueReferenced : submittedIssueReferenced;
       const checksPassing = githubVerified ? githubLookup.checksPassing : submittedChecksPassing;
       const reviewApproved = githubVerified ? githubLookup.reviewApproved : submittedReviewApproved;
@@ -435,6 +442,7 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
         prUrlValid: Boolean(parsedPr),
         repoMatches,
         repoMatchMethod,
+        sourceRepoIdentity,
         ...(repoMatchFallbackReason ? { repoMatchFallbackReason } : {}),
         issueReferenced,
         summarySubmitted,
@@ -447,7 +455,7 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       };
       const signals = {
         attempted: true,
-        prOpened: checks.prUrlValid && repoMatches,
+        prOpened: checks.prUrlValid && repoMatches === true,
         issueReferenced,
         testEvidenceSubmitted,
         checksPassed: checksPassing,
@@ -460,7 +468,8 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       const blockers = [];
 
       if (!checks.prUrlValid) blockers.push("valid GitHub pull request URL");
-      if (!repoMatches) blockers.push(`PR repo must match ${githubSource?.repo ?? "the source repo"}`);
+      if (repoMatches === null) blockers.push("source repository identity requires human review");
+      else if (!repoMatches) blockers.push(`PR repo must match ${githubSource?.repo ?? "the source repo"}`);
       if (issueReferenceRequired && !issueReferenced) blockers.push(`submission must reference issue #${expectedIssueNumber}`);
       if (testEvidenceRequired && !testEvidenceSubmitted && !mergedAccepted) blockers.push("test or docs-build evidence");
       if (githubVerified && githubLookup.ciStatus === "failing" && !mergedAccepted) {
@@ -493,7 +502,7 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       const definiteClaimantFailure = claimantBindingRequired
         && claimantBindingObservable
         && ["missing", "mismatched"].includes(claimantBinding?.status);
-      const definiteInputFailure = !checks.prUrlValid || !repoMatches || definiteClaimantFailure;
+      const definiteInputFailure = !checks.prUrlValid || repoMatches === false || definiteClaimantFailure;
 
       // Failing policy gates intentionally escalate to human review even over
       // a definite input failure; the human still sees the submission blockers.
@@ -501,7 +510,7 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       // observable and remains a rejection. Inability to re-derive the PR
       // against live GitHub is different: it must enter human review, never
       // reuse submitted claims as sufficient evidence for an automatic payout.
-      if (failingPolicyGates.length > 0 || (!definiteInputFailure && (
+      if (failingPolicyGates.length > 0 || repoMatches === null || (!definiteInputFailure && (
         githubEvidenceUnavailable
         || githubEvidencePartial
         || claimantBindingUnverified
@@ -522,10 +531,13 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
             disclosureRequired,
             claimantBindingRequired,
             claimantBindingStatus: claimantBinding?.status ?? "unavailable",
-            sourceRepoRenamed
+            sourceRepoRenamed,
+            sourceRepoIdentity
           }),
           reason: failingPolicyGates.length > 0
             ? "github_policy_gate_requires_review: " + failingPolicyGates.map((gate) => gate.name).join(", ")
+            : repoMatches === null
+            ? repoMatchFallbackReason
             : githubEvidenceUnavailable
             ? githubLookup.reason ?? "github_lookup_unavailable"
             : githubEvidencePartial
@@ -555,7 +567,8 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
           disclosureRequired,
           claimantBindingRequired,
           claimantBindingStatus: claimantBinding?.status ?? "not_required",
-          sourceRepoRenamed
+          sourceRepoRenamed,
+          sourceRepoIdentity
         }),
         githubLookup,
         blockers,
@@ -851,7 +864,8 @@ function githubPrObservedEvidence({
   disclosureRequired,
   claimantBindingRequired,
   claimantBindingStatus,
-  sourceRepoRenamed
+  sourceRepoRenamed,
+  sourceRepoIdentity
 }) {
   return {
     prUrl: prUrl || null,
@@ -862,6 +876,7 @@ function githubPrObservedEvidence({
     disclosureRequired,
     claimantBindingRequired,
     claimantBindingStatus,
+    sourceRepoIdentity,
     ...(sourceRepoRenamed ? { sourceRepoRenamed } : {})
   };
 }
@@ -888,7 +903,7 @@ function cachedSourceRepoId(job) {
 async function resolveSourceRepository({ job, expectedRepo, fetchImpl, githubToken, githubApiBaseUrl }) {
   const cached = cachedSourceRepoId(job);
   if (cached) {
-    return { id: cached, fullName: null, reason: null };
+    return { id: cached, origin: "ingested", fullName: null, reason: null };
   }
   if (!expectedRepo) {
     return { id: null, fullName: null, reason: "source_repo_missing" };
@@ -913,7 +928,13 @@ async function resolveSourceRepository({ job, expectedRepo, fetchImpl, githubTok
     if (!id || !fullName) {
       return { id: null, fullName: null, reason: "source_repo_id_unavailable" };
     }
-    return { id, fullName, reason: null };
+    const createdAt = typeof repo.created_at === "string" ? repo.created_at : null;
+    const repositoryTime = Date.parse(createdAt);
+    const jobTime = Date.parse(job.lifecycle?.createdAt);
+    const predatesJob = Number.isFinite(repositoryTime) && Number.isFinite(jobTime)
+      ? repositoryTime < jobTime
+      : null;
+    return { id, origin: "resolved_by_name", fullName, createdAt, predatesJob, reason: null };
   } catch (error) {
     const reason = typeof error?.message === "string" && error.message
       ? error.message.slice(0, 160)
@@ -926,6 +947,23 @@ function decideRepositoryMatch({ parsedPr, expectedRepo, sourceRepo, githubLooku
   const sourceId = positiveRepoId(sourceRepo?.id);
   const baseRepo = githubLookup?.status === "verified" ? githubLookup.baseRepo ?? null : null;
   const baseId = positiveRepoId(baseRepo?.id);
+  const unknown = (reason) => ({
+    repoMatches: null,
+    repoMatchMethod: "unknown",
+    repoMatchFallbackReason: reason,
+    sourceRepoRenamed: null
+  });
+  // A cached identity must never be downgraded to a reusable owner/repo name.
+  if (sourceRepo?.origin === "ingested" && baseId == null) {
+    return unknown(githubLookup?.reason ?? "pr_base_repo_id_unavailable");
+  }
+  // Legacy jobs lack the ingestion pin. A name resolution is only usable if
+  // that repository existed before the pinned job, not a later recreation.
+  if (sourceRepo?.origin === "resolved_by_name" && sourceRepo.predatesJob !== true) {
+    return unknown(sourceRepo.predatesJob === false
+      ? "source_repo_not_older_than_job"
+      : "source_repo_creation_time_unavailable");
+  }
   if (sourceId != null && baseId != null) {
     const currentName = normalizeRepo(sourceRepo?.fullName) || normalizeRepo(baseRepo?.fullName);
     const repoMatches = sourceId === baseId;
@@ -937,6 +975,9 @@ function decideRepositoryMatch({ parsedPr, expectedRepo, sourceRepo, githubLooku
         ? { from: expectedRepo, to: currentName }
         : null
     };
+  }
+  if (sourceId == null && parsedPr && parsedPr.repo !== expectedRepo) {
+    return unknown(sourceRepo?.reason ?? "source_repo_id_unavailable");
   }
   return {
     repoMatches: Boolean(parsedPr && expectedRepo && parsedPr.repo === expectedRepo),
