@@ -5,6 +5,29 @@ import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
 
 const AUTH = { wallet: "0xadmin", roles: ["admin"] };
 
+test("repository backfill auth failure never reads the body or store", async () => {
+  const route = createAdminJobsRoutes({ authMiddleware: async () => { throw new Error("admin required"); },
+    readJsonBody: () => assert.fail("unauthenticated body read"),
+    service: { getJobDefinition: () => assert.fail("unauthenticated backfill") } });
+  const path = "/admin/jobs/github-repository-ids/backfill";
+  await assert.rejects(route({ request: { method: "POST" }, response: {}, pathname: path, url: new URL(`http://localhost${path}`) }), /admin required/);
+});
+
+test("repository backfill requires admin and rate limit before reading body; defaults to dry run", async () => {
+  const { MemoryStateStore } = await import("../../core/state-store.js");
+  const h = makeHarness({ payload: { jobIds: ["closed-job"] }, service: {
+    stateStore: new MemoryStateStore(),
+    getJobDefinition: () => ({ id: "closed-job", source: { type: "github_issue" }, verifierConfig: { handler: "github_pr" }, lifecycle: { state: "closed" } })
+  } });
+  const path = "/admin/jobs/github-repository-ids/backfill";
+  assert.equal(await h.route({ request: { method: "POST" }, response: h.response, pathname: path, url: new URL(`http://localhost${path}`) }), true);
+  assert.deepEqual(h.calls[0], ["auth", { requireRole: "admin" }]);
+  assert.equal(h.calls[1][0], "limit"); assert.equal(h.calls[1][1].bucket, "admin_jobs");
+  assert.equal(h.calls[2][0], "body");
+  assert.equal(h.response.statusCode, 200); assert.equal(h.response.body.dryRun, true);
+  assert.equal(h.response.body.rows[0].reason, "job_not_open");
+});
+
 function makeHarness(overrides = {}) {
   const calls = [];
   const response = {};

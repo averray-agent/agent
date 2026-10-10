@@ -150,7 +150,7 @@ jobs:
             sleep 1
           done
           VERIFY_RESERVATION_TEST_REDIS_URL=redis://127.0.0.1:16381 \
-            node --test mcp-server/src/services/verify-authorization-reservation.test.js mcp-server/src/services/verify-receipt-signing.test.js
+            node --test mcp-server/src/services/verify-authorization-reservation.test.js mcp-server/src/services/verify-receipt-signing.test.js mcp-server/src/services/github-repository-identity-backfill.test.js
 
       - name: MCP npm shim tests and dry pack proof
         run: |

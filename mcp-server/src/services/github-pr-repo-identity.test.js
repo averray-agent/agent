@@ -462,6 +462,58 @@ for (const [name, snapshotMode] of [["renamed", "500"], ["same-name", "missing-b
   });
 }
 
+test("uncached failed source lookup and verified PR without base.repo requires human review", async () => {
+  const snapshot = pull({ baseId: sourceId, baseName: "example/project", merged: true });
+  delete snapshot.base.repo;
+  const verdict = await new VerifierRegistry({ githubToken: "github_pat_test",
+    fetchImpl: routeGithub({ "/repos/example/project/pulls/91": snapshot })
+  }).evaluate(githubJob({ repo: "example/project" }), submission("https://github.com/example/project/pull/91"),
+    { claimantWallet: wallet, claimSessionId: sessionId });
+  assert.equal(verdict.githubLookup.status, "verified");
+  assert.equal(verdict.checks.repoMatches, null);
+  assert.equal(verdict.outcome, "disputed");
+  assert.equal(verdict.handler, "human_fallback");
+  assert.equal(verdict.checks.repoMatchFallbackReason, "pr_base_repo_creation_time_unavailable");
+});
+
+for (const failure of ["github_api_500", "github_token_not_configured"]) {
+  test(`both GitHub reads unavailable preserve ${failure} in the human-review diagnostic`, async () => {
+    const verdict = await new VerifierRegistry({
+      githubToken: failure === "github_token_not_configured" ? "" : "github_pat_test",
+      fetchImpl: async () => new Response("{}", { status: 500 })
+    }).evaluate(githubJob({ repo: "example/project" }), submission("https://github.com/example/project/pull/91"),
+      { claimantWallet: wallet, claimSessionId: sessionId });
+    assert.equal(verdict.outcome, "disputed");
+    assert.equal(verdict.checks.repoMatchFallbackReason, failure);
+    assert.ok(verdict.detail.includes(failure), verdict.detail);
+  });
+}
+
+test("backfilled identity reaches preview, settle and replay without rewriting claim snapshot", async () => {
+  const { backfillGithubRepositoryIds } = await import("./github-repository-identity-backfill.js");
+  const job = githubJob({ repo: "example/project" });
+  job.lifecycle.state = "open";
+  const { store, service } = await sessionFor({ job, prUrl: "https://github.com/example/project/pull/91",
+    fetchImpl: routeGithub({ "/repos/example/project/pulls/91": pull({ baseId: 9999, baseName: "example/project", merged: true }) }) });
+  const before = JSON.stringify(await store.getSession(sessionId));
+  const rawBefore = JSON.stringify(job);
+  const result = await backfillGithubRepositoryIds({ stateStore: store, getJobDefinition: () => structuredClone(job) },
+    { jobIds: [job.id], apply: true }, { githubToken: "github_pat_test",
+      fetchImpl: async () => Response.json({ id: sourceId, full_name: "example/project", created_at: repositoryCreatedAt }) });
+  assert.equal(result.pinned, 1);
+  const preview = await service.previewSubmission({ sessionId });
+  assert.equal(preview.checks.sourceRepoIdentity.id, sourceId);
+  assert.equal(preview.checks.repoMatches, false);
+  assert.equal(preview.outcome, "rejected");
+  await assert.rejects(service.verifySubmission({ sessionId, expectOutcome: "approved" }), { code: "verdict_outcome_mismatch" });
+  service.platformService.resumeSession = () => store.getSession(sessionId);
+  const replay = await service.replayVerification(sessionId);
+  assert.equal(replay.checks.sourceRepoIdentity.id, sourceId);
+  assert.equal(replay.outcome, "rejected");
+  assert.equal(JSON.stringify(await store.getSession(sessionId)), before);
+  assert.equal(JSON.stringify(job), rawBefore);
+});
+
 function githubJob({ repo, githubRepoId, sourceType = "github_issue", declaredRepoId } = {}) {
   const declared = {
     type: "github_issue",

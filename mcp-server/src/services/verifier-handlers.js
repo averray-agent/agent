@@ -979,6 +979,9 @@ function decideRepositoryMatch({ job, parsedPr, expectedRepo, sourceRepo, github
   // A failed source lookup is not evidence that the same name still identifies
   // the original repo. Require the live PR base to predate the pinned job too.
   if (sourceId == null && parsedPr) {
+    if (githubLookup?.status !== "verified") {
+      return unknown(githubLookup?.reason ?? sourceRepo?.reason ?? "github_lookup_unavailable");
+    }
     const predatesJob = repositoryPredatesJob(baseRepo?.createdAt, job);
     if (predatesJob !== true) {
       return unknown(predatesJob === false
