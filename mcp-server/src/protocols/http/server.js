@@ -96,6 +96,7 @@ import {
   extractHttpClientInfo,
   isRecordedHttpArrival
 } from "../../services/arrival-observatory.js";
+import { verifiedArrivalWallet } from "./arrival-wallet.js";
 import { HTTP_ROUTE_STAGE } from "../../services/arrival-stage-map.js";
 import { ArrivalSessionTrail, resultClassFromOutcome } from "../../services/arrival-session-trail.js";
 import { signTokenFromConfig, verifyTokenFromConfig } from "../../auth/jwt.js";
@@ -1075,12 +1076,13 @@ const server = createServer(async (request, response) => {
     );
     const statusCode = Number(response.statusCode);
     const arrivalError = response._arrivalError;
+    const arrivalWallet = verifiedArrivalWallet(pathname, request);
     void arrivalObservatory.recordHttp({
       method: wireMethod,
       pathname,
       clientInfo: extractHttpClientInfo(request),
       ip: clientIp(request),
-      wallet: request._arrivalWallet,
+      wallet: arrivalWallet,
       // Verified service-token grant id only. Never a client-supplied header
       // and never the token secret.
       apiKeyId: request._arrivalApiKeyId,
@@ -1095,7 +1097,7 @@ const server = createServer(async (request, response) => {
       // observe() must not reject: this call is deliberately not awaited, and
       // a rejection here is an unhandled rejection on Node 22.
       void sessionTrail.observe({
-        wallet: pathname === "/auth/nonce" ? undefined : request._arrivalWallet,
+        wallet: arrivalWallet,
         clientInfo: extractHttpClientInfo(request),
         door: "http",
         name: `${method} ${metricPathLabel(pathname)}`,

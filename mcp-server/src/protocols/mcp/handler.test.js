@@ -982,6 +982,37 @@ test("successful MCP SIWE links the declared client hint to the measured wallet"
   }]);
 });
 
+test("fetchAuthNonce does not link a client name to the unsigned wallet", async () => {
+  const links = [];
+  const recorded = [];
+  const observed = [];
+  const wallet = "0x3333333333333333333333333333333333333333";
+  const arrivals = {
+    async recordTool(entry) { recorded.push(entry); },
+    async linkWallet(entry) { links.push(entry); }
+  };
+  const { handler } = createHarness({
+    arrivals,
+    sessionTrail: { async observe(entry) { observed.push(entry); } },
+    authMiddleware: async (request) => {
+      request._arrivalWallet = wallet;
+      return { wallet };
+    }
+  });
+
+  const result = await call(
+    handler,
+    modernRequest("tools/call", { name: "fetchAuthNonce", arguments: { wallet } }),
+    { ...modernHeaders("tools/call", "fetchAuthNonce"), authorization: "Bearer valid-token" }
+  );
+
+  assert.equal(result.statusCode, 200);
+  assert.deepEqual(links, []);
+  assert.equal(recorded[0].tool, "fetchAuthNonce");
+  assert.equal(recorded[0].wallet, undefined);
+  assert.equal(observed.at(-1).wallet, undefined);
+});
+
 test("authenticated MCP calls link the wallet stamped by auth middleware before dispatch", async () => {
   const links = [];
   const arrivals = {

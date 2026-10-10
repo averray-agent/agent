@@ -179,7 +179,7 @@ export function createMcpRoute({
       if (toolError || Number.isSafeInteger(rpcCode)) {
         await recordArrival(arrivals, "recordDropOff", {
           ...context,
-          wallet: request._arrivalWallet,
+          wallet: context.tool === "fetchAuthNonce" ? undefined : request._arrivalWallet,
           apiKeyId: request._arrivalApiKeyId,
           ip: clientIp?.(request),
           ...(response._arrivalErrorActor ? { actor: response._arrivalErrorActor } : {}),
@@ -665,14 +665,20 @@ async function dispatchRequest({
       request._arrivalAuthError = error;
     }
   }
+  const calledTool = message.method === "tools/call" && typeof message.params?.name === "string"
+    ? message.params.name
+    : undefined;
+  // fetchAuthNonce carries an unsigned wallet. Do not link this client to it,
+  // and do not treat a bearer on this call as the nonce's arrival wallet.
+  const arrivalWallet = calledTool === "fetchAuthNonce" ? undefined : request._arrivalWallet;
   await recordArrival(arrivals, message.method === "tools/call" ? "recordTool" : "recordReach", {
-    tool: typeof message.params?.name === "string" && getMcpTool(message.params.name, tools)
-      ? message.params.name : "unknown_tool",
+    tool: typeof calledTool === "string" && getMcpTool(calledTool, tools)
+      ? calledTool : "unknown_tool",
     method: message.method,
     era,
     clientInfo,
     ip: clientIp?.(request),
-    ...(request._arrivalWallet ? { wallet: request._arrivalWallet } : {}),
+    ...(arrivalWallet ? { wallet: arrivalWallet } : {}),
     ...(request._arrivalApiKeyId ? { apiKeyId: request._arrivalApiKeyId } : {})
   });
 
@@ -737,7 +743,7 @@ async function dispatchRequest({
         rateLimitConfig,
         request
       });
-      if (request._arrivalWallet) {
+      if (request._arrivalWallet && toolName !== "fetchAuthNonce") {
         await recordArrival(arrivals, "linkWallet", {
           wallet: request._arrivalWallet,
           clientInfo
