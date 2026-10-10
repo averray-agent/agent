@@ -920,6 +920,75 @@ test("new suppressed subjects within one interval write the blob at most once", 
   assert.ok(writes.length - afterSaturation <= 1, String(writes.length - afterSaturation));
 });
 
+test("suppressed subjects through all three tiers write the blob at most once", async () => {
+  const state = new Map();
+  let writes = 0;
+  const store = {
+    async getServiceState(scope) { return state.get(scope); },
+    async upsertServiceState(scope, value) {
+      writes += 1;
+      state.set(scope, value);
+      return value;
+    }
+  };
+  const alerts = new ArrivalAlerts({
+    stateStore: store,
+    now: () => 8_000,
+    flushIntervalMs: 30_000,
+    cooldownMs: 60_000,
+    schedule() { return { unref() {} }; }
+  });
+  const walletAt = (index) => `0x${index.toString(16).padStart(40, "0")}`;
+  for (let index = 0; index < 60; index += 1) {
+    await alerts.note({
+      wallet: walletAt(index + 1),
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  const afterSaturation = writes;
+  const fresh = (SUPPRESSED_SUBJECT_CAP * 2) + 100;
+  for (let index = 0; index < fresh; index += 1) {
+    await alerts.note({
+      wallet: walletAt(10_000 + index),
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  assert.ok(fresh > 1_050);
+  assert.ok(writes - afterSaturation <= 1, String(writes - afterSaturation));
+  assert.equal(alerts.suppressedSubjects.size, SUPPRESSED_SUBJECT_CAP);
+  assert.equal(alerts.suppressedOverflowSubjects.size, SUPPRESSED_SUBJECT_CAP);
+  const rememberedHashes = alerts.suppressedOverflowSubjects.size;
+  const eventTier = fresh - (SUPPRESSED_SUBJECT_CAP - 9) - rememberedHashes;
+  assert.equal(alerts.suppressedSubjectOverflow, rememberedHashes + eventTier);
+  assert.ok(eventTier > 1);
+  await alerts.stop();
+  const saved = state.get("arrival-alerts");
+  assert.equal(saved.suppressedOverflowSubjects.length, SUPPRESSED_SUBJECT_CAP);
+  assert.equal(saved.suppressedOverflowSubjects.every((hash) => /^[0-9a-f]{8}$/u.test(hash)), true);
+  const restarted = new ArrivalAlerts({
+    stateStore: store,
+    now: () => 8_000,
+    flushIntervalMs: 30_000,
+    cooldownMs: 60_000,
+    schedule() { return { unref() {} }; }
+  });
+  await restarted.list();
+  assert.equal(restarted.suppressedOverflowSubjects.size, SUPPRESSED_SUBJECT_CAP);
+  const overflowBefore = restarted.suppressedSubjectOverflow;
+  const hashed = walletAt(10_491);
+  assert.equal(restarted.suppressedSubjects.has(`external_wallet_first:${hashed}`), false);
+  await restarted.note({ wallet: hashed, stage: "browsed", success: true, authenticated: true });
+  assert.equal(restarted.suppressedSubjectOverflow, overflowBefore);
+  const beyond = walletAt(10_991);
+  await restarted.note({ wallet: beyond, stage: "browsed", success: true, authenticated: true });
+  await restarted.note({ wallet: beyond, stage: "browsed", success: true, authenticated: true });
+  assert.equal(restarted.suppressedSubjectOverflow, overflowBefore + 2);
+});
+
 test("a repeated subject past the suppressed cap is counted once and does not force a write", async () => {
   const writes = [];
   const alerts = new ArrivalAlerts({
@@ -1056,4 +1125,79 @@ test("the same client name repeated by one wallet uses one hashed slot", async (
     authenticated: true
   });
   assert.equal(bucket.names.size, 2);
+});
+
+test("different client versions take distinct hashed slots", async () => {
+  const alerts = new ArrivalAlerts({
+    stateStore: memoryStore(),
+    now: () => 3_000,
+    flushIntervalMs: 60_000,
+    cooldownMs: 60_000,
+    schedule() { return { unref() {} }; }
+  });
+  await alerts.note({
+    wallet: EXTERNAL,
+    clientInfo: { name: "cursor", version: "1.2" },
+    stage: "browsed",
+    success: true,
+    authenticated: true
+  });
+  await alerts.note({
+    wallet: EXTERNAL,
+    clientInfo: { name: "cursor", version: "9.9" },
+    stage: "browsed",
+    success: true,
+    authenticated: true
+  });
+  const slots = [...alerts.clientFirsts.get(EXTERNAL).names];
+  assert.equal(slots.length, 2);
+  assert.notEqual(slots[0], slots[1]);
+  assert.equal(slots.every((slot) => /^[0-9a-f]{8}$/u.test(slot)), true);
+});
+
+test("the eviction counter is flushed by the timer", async () => {
+  const pending = [];
+  let nowMs = 40_000;
+  const store = memoryStore();
+  const alerts = new ArrivalAlerts({
+    stateStore: store,
+    now: () => nowMs,
+    flushIntervalMs: 30_000,
+    cooldownMs: 60_000,
+    schedule(fn, ms) {
+      const timer = { fn, ms, unref() { return this; } };
+      pending.push(timer);
+      return timer;
+    },
+    clearSchedule(timer) {
+      const index = pending.indexOf(timer);
+      if (index >= 0) pending.splice(index, 1);
+    }
+  });
+  const walletAt = (index) => `0x${index.toString(16).padStart(40, "0")}`;
+  for (let index = 0; index < 60; index += 1) {
+    await alerts.note({
+      wallet: walletAt(index + 1),
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  for (let index = 0; index < CLIENT_FIRSTS_WALLET_CAP + 1; index += 1) {
+    await alerts.note({
+      wallet: walletAt(50_000 + index),
+      clientInfo: { name: "only", version: "1" },
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  assert.ok(alerts.clientFirstsEvicted >= 1);
+  assert.equal((await store.getServiceState("arrival-alerts"))?.clientFirstsEvicted ?? 0, 0);
+  assert.equal(pending.length, 1);
+  nowMs += 31_000;
+  await pending[0].fn();
+  const restarted = new ArrivalAlerts({ stateStore: store, now: () => nowMs, flushIntervalMs: 30_000 });
+  await restarted.list();
+  assert.equal(restarted.clientFirstsEvicted, alerts.clientFirstsEvicted);
 });
