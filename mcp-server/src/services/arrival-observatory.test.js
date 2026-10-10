@@ -487,10 +487,11 @@ test("HTTP client hints prefer explicit headers and otherwise use a bounded User
   assert.deepEqual(arrivalModule.extractHttpClientInfo({ headers: {
     "x-averray-client-name": "worker-sdk",
     "x-averray-client-version": "2.1"
-  } }), { name: "worker-sdk", version: "2.1" });
+  } }), { name: "worker-sdk", version: "2.1", source: "declared" });
   assert.deepEqual(arrivalModule.extractHttpClientInfo({ headers: { "user-agent": "curl/8.7.1 extra" } }), {
     name: "curl",
-    version: "8.7.1"
+    version: "8.7.1",
+    source: "user-agent"
   });
 });
 
