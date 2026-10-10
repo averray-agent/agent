@@ -527,12 +527,15 @@ export class ArrivalObservatory {
       // those calls are noted after the outcome, from the MCP finish path.
       const outcomeKnown = outcome?.ok === true || outcome?.kind === "http";
       if (outcomeKnown && !code) {
+        // Authenticated means this request carried a middleware-verified
+        // wallet. A client-to-wallet link is not that, and /auth/nonce
+        // (stage "identified") is an unsigned claim even if a wallet was passed.
         await this.noteArrivalAlert({
-          wallet: canonicalWallet,
+          wallet: normalizedWallet,
           clientInfo: identity,
           stage,
           success: true,
-          authenticated: Boolean(canonicalWallet) && stage !== "identified",
+          authenticated: Boolean(normalizedWallet) && stage !== "identified",
           nowMs
         });
       }

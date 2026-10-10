@@ -1014,6 +1014,52 @@ test("fetchAuthNonce does not link a client name to the unsigned wallet", async 
   assert.equal(observed.at(-1).wallet, undefined);
 });
 
+test("a nonce and a failed claim do not raise an arrival alert", async () => {
+  const wallet = "0x4444444444444444444444444444444444444444";
+  const nonceNotes = [];
+  const { handler: nonceHandler } = createHarness({
+    arrivals: {
+      async recordTool() {},
+      async linkWallet() {},
+      async noteArrivalAlert(entry) { nonceNotes.push(entry); }
+    },
+    authMiddleware: async (request) => {
+      request._arrivalWallet = wallet;
+      return { wallet };
+    }
+  });
+  const nonce = await call(
+    nonceHandler,
+    modernRequest("tools/call", { name: "fetchAuthNonce", arguments: { wallet } }),
+    { ...modernHeaders("tools/call", "fetchAuthNonce"), authorization: "Bearer valid-token" }
+  );
+  assert.equal(nonce.statusCode, 200);
+  assert.equal(nonceNotes.every((entry) => entry.wallet === undefined && entry.authenticated !== true), true);
+
+  const claimNotes = [];
+  const { handler: claimHandler } = createHarness({
+    arrivals: {
+      async recordTool() {},
+      async recordDropOff() {},
+      async linkWallet() {},
+      async noteArrivalAlert(entry) { claimNotes.push(entry); }
+    },
+    authMiddleware: async (request) => {
+      request._arrivalWallet = wallet;
+      return { wallet };
+    },
+    executeTool: async () => { throw new ConflictError("already claimed"); }
+  });
+  const claim = await call(
+    claimHandler,
+    modernRequest("tools/call", { name: "claimJob", arguments: { jobId: "job-1" } }),
+    { ...modernHeaders("tools/call", "claimJob"), authorization: "Bearer valid-token" }
+  );
+  assert.equal(claim.statusCode, 200);
+  assert.equal(claim.body.result.isError, true);
+  assert.equal(claimNotes.length, 0);
+});
+
 test("authenticated MCP calls link the wallet stamped by auth middleware before dispatch", async () => {
   const links = [];
   const arrivals = {

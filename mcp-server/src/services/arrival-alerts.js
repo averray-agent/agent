@@ -22,16 +22,20 @@ const KINDS = new Set([
  * (services/slack-operator/src/alert-bridge.ts) is the sending side.
  * A queued milestone is flushed immediately. The 30s interval applies only to
  * a non-forced flush; process death before that flush can drop an unqueued edit.
+ * Concurrent backend processes overwrite `seen` (last write wins). That is
+ * acceptable with one backend; a second process can drop or revive a milestone.
  */
 export class ArrivalAlerts {
   constructor({
     stateStore,
+    sessionTrail,
     identityRegistry,
     now = () => Date.now(),
     cooldownMs = ARRIVAL_ALERT_COOLDOWN_MS,
     flushIntervalMs = 30_000
   } = {}) {
     this.stateStore = stateStore;
+    this.sessionTrail = sessionTrail;
     this.identityRegistry = identityRegistry instanceof SelfIdentityRegistry
       ? identityRegistry
       : new SelfIdentityRegistry();
@@ -39,6 +43,9 @@ export class ArrivalAlerts {
     this.cooldownMs = cooldownMs;
     this.flushIntervalMs = flushIntervalMs;
     this.suppressed = 0;
+    this.suppressedSubjects = new Set();
+    this.untrackedFirsts = 0;
+    this.summaryWindowStartMs = undefined;
     this.seen = new Set();
     this.pending = [];
     this.ready = [];
@@ -72,14 +79,16 @@ export class ArrivalAlerts {
       const walletActor = wallet
         ? this.identityRegistry.classify({ wallet }).actor
         : undefined;
-      const trailId = authenticated && wallet ? `wallet:${wallet}` : undefined;
+      const normalizedWallet = String(wallet ?? "").trim().toLowerCase();
+      const trailId = authenticated && normalizedWallet ? `wallet:${normalizedWallet}` : undefined;
+      const trailLink = await this.resolveTrail(trailId);
       if (authenticated && clientActor === "external" && name) {
-        this.consider(nowMs, "external_client_first", `${name}@${version ?? "unknown"}`, trailId);
+        this.consider(nowMs, "external_client_first", `${name}@${version ?? "unknown"}`, trailLink);
       }
       if (authenticated && success && walletActor === "external") {
-        this.consider(nowMs, "external_wallet_first", wallet, trailId);
-        if (stage === "claimed") this.consider(nowMs, "external_wallet_first_claim", wallet, trailId);
-        if (stage === "submitted") this.consider(nowMs, "external_wallet_first_submit", wallet, trailId);
+        this.consider(nowMs, "external_wallet_first", normalizedWallet, trailLink);
+        if (stage === "claimed") this.consider(nowMs, "external_wallet_first_claim", normalizedWallet, trailLink);
+        if (stage === "submitted") this.consider(nowMs, "external_wallet_first_submit", normalizedWallet, trailLink);
       }
       this.release(nowMs);
       if (this.dirty) await this.maybeFlush(true);
@@ -88,16 +97,13 @@ export class ArrivalAlerts {
     }
   }
 
-  consider(nowMs, kind, subject, trailId) {
+  consider(nowMs, kind, subject, trailLink) {
     if (!KINDS.has(kind) || kind === "suppressed_firsts" || !subject) return;
     const key = `${kind}:${subject}`;
     if (this.seen.has(key)) return;
     const queued = this.pending.filter((alert) => alert.kind !== "suppressed_firsts").length;
     if (this.seen.size >= ARRIVAL_ALERT_SEEN_CAP || queued >= PENDING_CAP) {
-      this.suppressed += 1;
-      this.saturated = true;
-      this.upsertSummary(nowMs);
-      this.dirty = true;
+      this.noteSuppressed(nowMs, key);
       return;
     }
     this.seen.add(key);
@@ -107,22 +113,32 @@ export class ArrivalAlerts {
       subject,
       atMs: nowMs,
       status: "pending",
-      trailId: trailId ?? null,
-      trail: trailId ? "linked" : NOT_REPORTED,
-      href: trailId ? `/admin/arrivals/sessions?id=${encodeURIComponent(trailId)}` : null
+      trailId: trailLink?.trail === "linked" ? trailLink.trailId : null,
+      trail: trailLink?.trail === "linked" ? "linked" : NOT_REPORTED,
+      href: trailLink?.trail === "linked" ? trailLink.href : null,
+      ...(trailLink?.trail === "linked" ? {} : { trailNote: trailLink?.trailNote ?? "no session record" })
     });
     this.dirty = true;
   }
 
-  upsertSummary(nowMs) {
-    const current = [...this.pending, ...this.ready].find((alert) => alert.id === "suppressed_firsts");
-    if (current) {
-      current.suppressedCount = this.suppressed;
-      current.subject = String(this.suppressed);
-      return;
+  noteSuppressed(nowMs, key) {
+    if (!this.suppressedSubjects.has(key)) {
+      this.suppressedSubjects.add(key);
+      this.suppressed += 1;
+      if (this.seen.size >= ARRIVAL_ALERT_SEEN_CAP) this.untrackedFirsts += 1;
     }
+    this.saturated = true;
+    this.upsertSummary(nowMs);
+    this.dirty = true;
+  }
+
+  upsertSummary(nowMs) {
+    if (this.summaryWindowStartMs === undefined) this.summaryWindowStartMs = nowMs;
+    const id = `suppressed_firsts:${this.summaryWindowStartMs}:${this.suppressed}`;
+    this.pending = this.pending.filter((alert) => alert.kind !== "suppressed_firsts");
+    this.ready = this.ready.filter((alert) => alert.kind !== "suppressed_firsts");
     this.pending.push({
-      id: "suppressed_firsts",
+      id,
       kind: "suppressed_firsts",
       subject: String(this.suppressed),
       suppressedCount: this.suppressed,
@@ -130,8 +146,34 @@ export class ArrivalAlerts {
       status: "pending",
       trail: NOT_REPORTED,
       trailId: null,
-      href: null
+      href: null,
+      trailNote: "suppressed; individual session not linked"
     });
+  }
+
+  async resolveTrail(trailId) {
+    if (!trailId) {
+      return { trail: NOT_REPORTED, trailNote: "no authenticated wallet" };
+    }
+    if (typeof this.sessionTrail?.get !== "function") {
+      return { trail: NOT_REPORTED, trailNote: "session trail is not available" };
+    }
+    try {
+      const record = await this.sessionTrail.get(trailId);
+      if (record?.unavailable) {
+        return { trail: NOT_REPORTED, trailNote: "session trail could not be read" };
+      }
+      if (!record?.session) {
+        return { trail: NOT_REPORTED, trailNote: "no session record" };
+      }
+      return {
+        trail: "linked",
+        trailId,
+        href: `/admin/arrivals/sessions?id=${encodeURIComponent(trailId)}`
+      };
+    } catch {
+      return { trail: NOT_REPORTED, trailNote: "session trail could not be read" };
+    }
   }
 
   release(nowMs) {
@@ -153,7 +195,8 @@ export class ArrivalAlerts {
         unavailable: this.loadFailed ?? "arrival alerts could not be read",
         ready: null,
         pending: null,
-        saturated: NOT_REPORTED
+        saturated: NOT_REPORTED,
+        firstsNoLongerTracked: NOT_REPORTED
       };
     }
     this.release(this.now());
@@ -164,6 +207,7 @@ export class ArrivalAlerts {
       cooldownMs: this.cooldownMs,
       saturated: this.saturated,
       suppressed: this.suppressed,
+      firstsNoLongerTracked: this.untrackedFirsts,
       sending: "monitor_alert_bridge",
       ready: this.ready.map(publicAlert),
       pending: this.pending.map(publicAlert)
@@ -192,6 +236,16 @@ export class ArrivalAlerts {
       this.lastReadyAtMs = Number(stored?.lastReadyAtMs) || 0;
       this.saturated = stored?.saturated === true;
       this.suppressed = Number.isSafeInteger(stored?.suppressed) && stored.suppressed >= 0 ? stored.suppressed : 0;
+      this.untrackedFirsts = Number.isSafeInteger(stored?.untrackedFirsts) && stored.untrackedFirsts >= 0
+        ? stored.untrackedFirsts
+        : 0;
+      this.suppressedSubjects = new Set(
+        Array.isArray(stored?.suppressedSubjects)
+          ? stored.suppressedSubjects.filter((key) => typeof key === "string")
+          : []
+      );
+      const windowStart = Number(stored?.summaryWindowStartMs);
+      this.summaryWindowStartMs = Number.isFinite(windowStart) ? windowStart : undefined;
       this.loaded = true;
       this.loadFailed = null;
     } catch (error) {
@@ -214,7 +268,10 @@ export class ArrivalAlerts {
         ready: this.ready,
         lastReadyAtMs: this.lastReadyAtMs,
         saturated: this.saturated,
-        suppressed: this.suppressed
+        suppressed: this.suppressed,
+        untrackedFirsts: this.untrackedFirsts,
+        suppressedSubjects: [...this.suppressedSubjects],
+        summaryWindowStartMs: this.summaryWindowStartMs ?? null
       });
     } catch (error) {
       this.dirty = true;
@@ -240,6 +297,7 @@ function publicAlert(alert) {
     trail: alert.trail,
     trailId: alert.trailId,
     href: alert.href,
+    ...(alert.trailNote ? { trailNote: alert.trailNote } : {}),
     ...(alert.suppressedCount === undefined ? {} : { suppressedCount: alert.suppressedCount })
   };
 }
