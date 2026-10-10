@@ -1421,15 +1421,25 @@ server.listen(port, () => {
   );
 });
 
+const ALERT_SHUTDOWN_FLUSH_MS = 2_000;
+
 let shuttingDown = false;
 async function shutdown(signal) {
-  if (shuttingDown) return;
+  if (shuttingDown) process.exit(0);
   shuttingDown = true;
   logger.info({ signal }, "http.shutdown");
+  let flushTimer;
   try {
-    await arrivalAlerts.stop();
+    await Promise.race([
+      arrivalAlerts.stop(),
+      new Promise((resolve) => {
+        flushTimer = setTimeout(resolve, ALERT_SHUTDOWN_FLUSH_MS);
+      })
+    ]);
   } catch (error) {
     logger.warn({ err: error }, "http.shutdown.alerts");
+  } finally {
+    clearTimeout(flushTimer);
   }
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1_000).unref();
