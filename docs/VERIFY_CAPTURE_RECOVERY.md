@@ -50,6 +50,16 @@ X1e owns the admission validity ceiling; this PR does not add a second ceiling.
 A failed intake `getBlockNumber` read returns 503 `payment_block_unavailable`
 with reason `base_block_read_failed`, rather than admitting an unbounded run.
 
+Fresh admission bounds each of `getBlockNumber`, `authorizationState`, and
+`balanceOf` to 8 seconds, in that order. A timeout refuses HTTP/MCP intake with
+503 `payment_chain_read_timeout` and a read-specific reason
+(`base_block_read_timeout`, `base_nonce_state_read_timeout`, or
+`base_balance_read_timeout`). No run, reservation, execution, or capture is
+started; a late RPC result cannot revive that request. This is a per-read
+application deadline, not cancellation of the underlying read-only RPC.
+The signature-verified owner lookup precedes all three reads: replaying an
+existing reservation does not need a fresh block, nonce, or balance read.
+
 Pending/error retries persist `nextCaptureAttemptAt`: exponential delay from
 5 seconds, capped at 5 minutes. No capture RPC happens between attempts.
 Finalizer selection pages past sleeping/unfinished rows to fill the due batch;

@@ -139,6 +139,43 @@ for (const scenario of ["insufficient", "unavailable"]) {
   });
 }
 
+test("HTTP and MCP start preserve admission timeout refusals without a run or proof leak", async (t) => {
+  const h = harness();
+  const quote = await h.execute("quoteVerificationRun", request, context);
+  const paid = await proof(quote);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const [kind, start] of [
+    ["http", () => invokeHttpRoute(h.route, { method: "POST", path: "/verify/runs", body: request, headers: { "payment-signature": paid.header } })],
+    ["tool", () => h.execute("startVerificationRun", { ...request, paymentSignature: paid.header }, context)],
+    ["mcp", () => callMcp(h.mcp, "startVerificationRun", request, { "x402/payment": paid.payload })]
+  ]) {
+    let signal;
+    const started = new Promise((resolve) => { signal = resolve; });
+    h.gate.provider.getBlockNumber = () => { signal(); return new Promise(() => {}); };
+    let outcome;
+    const pending = start().then((value) => { outcome = { value }; }, (error) => { outcome = { error }; });
+    await started;
+    t.mock.timers.tick(8000);
+    await new Promise(setImmediate);
+    assert.ok(outcome, "admission must finish at its deadline");
+    await pending;
+    if (kind === "mcp") {
+      assert.equal(outcome.value.body.result.isError, true);
+      assert.match(JSON.stringify(outcome.value.body), /payment_chain_read_timeout/u);
+      assert.match(JSON.stringify(outcome.value.body), /base_block_read_timeout/u);
+      assert.ok(!JSON.stringify(outcome.value.body).includes(paid.signature));
+    } else {
+      assert.equal(outcome.error?.statusCode, 503);
+      assert.equal(outcome.error.code, "payment_chain_read_timeout");
+      assert.equal(outcome.error.details.reason, "base_block_read_timeout");
+    }
+  }
+  assert.equal(h.store.verificationRuns.size, 0);
+  assert.equal(h.store.verificationAuthorizationRuns.size, 0);
+  assert.equal(h.store.verificationPaymentRuns.size, 0);
+  assert.equal(h.calls.captures, 0);
+});
+
 test("X1e HTTP and MCP share authorization ownership across differently wrapped proofs", async () => {
   const h = harness();
   const quote = await h.execute("quoteVerificationRun", request, context);

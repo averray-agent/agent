@@ -29,13 +29,14 @@ async function fixture(t, backend) {
     verifyingContract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" };
   const clock = { now: new Date("2026-10-09T20:00:00Z"), used: false, balance: BigInt(profile.price.amountRaw) };
   const seconds = Math.floor(clock.now.getTime() / 1000);
-  const calls = { starts: 0, captures: 0, nonceReads: 0, balances: [] };
+  const calls = { starts: 0, captures: 0, blockReads: 0, nonceReads: 0, balances: [] };
   const gate = new X402VerificationPaymentGate({
     config: { enabled: true, network: "eip155:8453", chainId: 8453,
       asset: domain.verifyingContract.toLowerCase(), payTo: "0x1111111111111111111111111111111111111111",
       assetEip712Name: domain.name, assetEip712Version: domain.version,
       publicOrigin: "https://api.averray.com", captureMarginSeconds: 600 },
-    provider: { getNetwork: async () => ({ chainId: 8453n }), getBlockNumber: async () => 100 },
+    provider: { getNetwork: async () => ({ chainId: 8453n }),
+      getBlockNumber: async () => { calls.blockReads++; if (clock.blockError) throw clock.blockError; return 100; } },
     tokenContract: { name: async () => domain.name, DOMAIN_SEPARATOR: async () => TypedDataEncoder.hashDomain(domain),
       balanceOf: async (payer) => { calls.balances.push(payer); if (clock.balanceError) throw clock.balanceError; return clock.balance; },
       authorizationState: async () => { calls.nonceReads++; return clock.used; } },
@@ -57,7 +58,49 @@ async function fixture(t, backend) {
       payload: { authorization, signature } }, null, pretty ? 2 : undefined)).toString("base64");
     return input;
   }
-  return { store, service, request, clock, calls, wallet, domain };
+  return { store, service, request, clock, calls, wallet, domain, gate };
+}
+
+for (const [target, method, reason, lateValue] of [
+  ["provider", "getBlockNumber", "base_block_read_timeout", 100],
+  ["token", "authorizationState", "base_nonce_state_read_timeout", false],
+  ["token", "balanceOf", "base_balance_read_timeout", 5_000_000n]
+]) {
+  test(`admission ${method} times out at 8 seconds with 503 and never reserves or starts work`, async (t) => {
+    const h = await fixture(t, "Memory");
+    const input = await h.request();
+    let release;
+    const blocked = new Promise((resolve) => { release = resolve; });
+    let signalRead;
+    const started = new Promise((resolve) => { signalRead = resolve; });
+    h.gate[target][method] = () => { signalRead(); return blocked; };
+    let reservations = 0;
+    const reserve = h.store.reserveVerificationRun.bind(h.store);
+    h.store.reserveVerificationRun = (...args) => { reservations++; return reserve(...args); };
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let outcome;
+    const pending = h.service.createRun(input).then(
+      (value) => { outcome = { value }; }, (error) => { outcome = { error }; }
+    );
+    await started;
+    t.mock.timers.tick(7999);
+    await new Promise(setImmediate);
+    assert.equal(outcome, undefined);
+    t.mock.timers.tick(1);
+    await new Promise(setImmediate);
+    assert.equal(outcome?.error?.statusCode, 503, "deadline must refuse rather than leave admission pending");
+    assert.equal(outcome.error.code, "payment_chain_read_timeout");
+    assert.deepEqual(outcome.error.details, {
+      reason, action: "retry_when_base_reads_recover", customerFunds: "unchanged"
+    });
+    await pending;
+    release(lateValue);
+    await new Promise(setImmediate);
+    assert.equal(reservations, 0, "a late successful RPC cannot resurrect admission");
+    assert.equal((await h.store.listActiveVerificationRuns()).length, 0);
+    assert.equal(h.calls.starts, 0);
+    assert.equal(h.calls.captures, 0);
+  });
 }
 
 for (const backend of ["Memory", "Redis"]) {
@@ -100,6 +143,19 @@ for (const backend of ["Memory", "Redis"]) {
     assert.equal(h.calls.starts, 1);
     await assert.rejects(h.service.createRun({ ...a, target: { ...a.target, endpoint: "https://two.example/mcp" } }),
       { statusCode: 409, code: "payment_authorization_in_use" }, "even an identical proof cannot replay a different request");
+  });
+
+  test(`X1e ${backend}: active reservation replay performs no getBlockNumber read`, options, async (t) => {
+    const h = await fixture(t, backend);
+    const run = await h.service.createRun(await h.request());
+    assert.equal(h.calls.blockReads, 1);
+    h.clock.blockError = new Error("replay must not read the chain checkpoint");
+    const replay = await h.service.createRun(await h.request(undefined, undefined, true));
+    assert.equal(replay.runId, run.runId);
+    assert.equal(h.calls.blockReads, 1, "only fresh admission may read a block");
+    assert.equal(h.calls.nonceReads, 1);
+    assert.equal(h.calls.balances.length, 1);
+    assert.equal(h.calls.starts, 1);
   });
 
   for (const status of ["captured", "not_captured"]) {
