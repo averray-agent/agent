@@ -79,6 +79,12 @@ npm run product-proof:worker-loop
 
 The worker-loop command writes a local evidence file like:
 
+Here `minBalanceRaw: "70000"` is the deliberately retained local conservative
+floor (0.07 USDC), not a Polkadot-docs-backed runtime value. The
+[pinned chain read at block 21634457](USDC_MINIMUM_BALANCE_POLICY.md) reports
+`assets.asset(1337).minBalance = 10000` (0.01 USDC). Proof fixtures keep the
+local floor; runtime-evidence fixtures report the chain read separately.
+
 ```json
 {
   "apiBaseUrl": "https://api.averray.com",
@@ -199,7 +205,7 @@ The script fetches the badge and profile documents and verifies that:
 
 - the evidence host matches the checked API host
 - the evidence proves canonical v1 USDC settlement readiness
-- the reward clears the USDC minBalance, the configured backend signer has
+- the reward clears the local USDC policy floor (`minBalanceRaw: 70000`), the configured backend signer has
   enough USDC to fund the escrowed reward plus claim-lock reserve, and the
   worker has enough USDC liquidity for both the reward and the claim lock
   required by preflight
@@ -232,7 +238,7 @@ The strict hosted gate passed on 2026-05-17 in GitHub Actions run
 - KMS signer: `0x31ad432dFe083B998c69B6dB88A984ec5207ab7F`
 - Settlement asset: USDC, Trust-Backed Asset `1337`, precompile
   `0x0000053900000000000000000000000001200000`
-- Reward/min-balance check: reward `0.1 USDC`, min balance `0.07 USDC`
+- Reward/min-balance check: reward `0.1 USDC`, local conservative floor `0.07 USDC` (not the on-chain minimum)
 - Signer funding check: required `0.1 USDC`, available `0.3 USDC` in
   `AgentAccountCore`
 - Validation proof: direct `payload.submission` object passed; the intentional

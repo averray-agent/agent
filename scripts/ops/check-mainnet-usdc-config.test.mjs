@@ -39,14 +39,14 @@ const CANONICAL_ENV = {
 const CANONICAL_RUNTIME_EVIDENCE = {
   schema: "mainnet-usdc-asset-config-v1",
   network: "polkadot-hub-mainnet",
-  checkedAt: "2026-05-28T00:00:00.000Z",
+  checkedAt: "2026-10-09T21:30:35.000Z",
   polkadotDocs: [
     "smart-contracts/precompiles/erc20.md",
     "reference/polkadot-hub/assets.md"
   ],
   runtime: {
     source: "Polkadot Hub mainnet runtime state",
-    blockHash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    blockHash: "0x785a15c57a2c647298e25dfe4b239f1c8c89c79c764418ae3b39e368beb3d3cb"
   },
   asset: {
     symbol: "USDC",
@@ -55,7 +55,8 @@ const CANONICAL_RUNTIME_EVIDENCE = {
     address: "0x0000053900000000000000000000000001200000",
     decimals: 6,
     sufficient: true,
-    minBalanceRaw: "70000"
+    // Runtime evidence is independent of the local 70000 admission/proof floor.
+    minBalanceRaw: "10000"
   },
   erc20Precompile: {
     address: "0x0000053900000000000000000000000001200000",
@@ -128,7 +129,8 @@ test("validateEnvConfig rejects non-USDC supported asset metadata", () => {
   assert.equal(result.checks.find((check) => check.name === "SUPPORTED_ASSETS_JSON[0].address").ok, false);
 });
 
-test("validateRuntimeEvidence accepts canonical docs/runtime evidence", () => {
+test("validateRuntimeEvidence accepts the 10000 chain minimum independently of the 70000 local floor", () => {
+  assert.equal(CANONICAL_RUNTIME_EVIDENCE.asset.minBalanceRaw, "10000");
   const result = validateRuntimeEvidence(CANONICAL_RUNTIME_EVIDENCE);
   assert.equal(result.ok, true);
 });

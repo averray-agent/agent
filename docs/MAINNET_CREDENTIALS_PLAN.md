@@ -93,7 +93,7 @@ enforced by `check-mainnet-env-secrets-proof.mjs` and recorded in
 
 | Item | Action | Notes |
 |---|---|---|
-| **USDC escrow asset** — assetId 1337, ERC20 precompile `0x0000…01200000`, 6 decimals, minBalanceRaw 70000 | **REUSE** | Same precompile on mainnet and TestNet — the one correct reuse. `check-mainnet-usdc-config.mjs` re-derives + matches. |
+| **USDC escrow asset** — assetId 1337, ERC20 precompile `0x0000…01200000`, 6 decimals; local policy minBalanceRaw 70000 | **REUSE** | Same precompile on mainnet and TestNet — the one correct reuse. `check-mainnet-usdc-config.mjs` re-derives + matches the identity. The deliberately retained 70000 is a conservative repo floor, not runtime metadata: mainnet `assets.asset(1337).minBalance = 10000` at [block 21634457](USDC_MINIMUM_BALANCE_POLICY.md). |
 | `JWT_BACKEND=kms` / `JWT_PRIMARY_ALG=kms` | **REUSE values** | Carry the literals forward; they force HMAC retirement. |
 | `aws_signing_helper` + `credential_process` mechanism + `aws-credentials.js` profile constants | **REUSE mechanism** | Only the mainnet ARNs/region change. Profile names are hard-coded — VPS config section names must match exactly. |
 | Rendered runtime env on tmpfs `/run/agent-stack/{backend,indexer}.env` | **REUSE mechanism** | Same fail-closed render path; verify tmpfs/0400/backup-excluded + `renderedEnvChecksum`. |
