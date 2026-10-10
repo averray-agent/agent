@@ -201,6 +201,7 @@ export class ArrivalObservatory {
     selfWallets = resolveSelfWallets(),
     ambiguousClients = resolveAmbiguousClients(),
     verifyCanaryMarker = async () => false,
+    alerts,
     maxClients = DEFAULT_MAX_CLIENTS,
     flushIntervalMs = DEFAULT_FLUSH_INTERVAL_MS,
     loadRetryIntervalMs = DEFAULT_LOAD_RETRY_INTERVAL_MS
@@ -217,6 +218,7 @@ export class ArrivalObservatory {
     this.verifyCanaryMarker = typeof verifyCanaryMarker === "function"
       ? verifyCanaryMarker
       : async () => false;
+    this.alerts = alerts;
     this.maxClients = Number(maxClients) > 0 ? Number(maxClients) : DEFAULT_MAX_CLIENTS;
     this.flushIntervalMs = Number(flushIntervalMs) >= 0 ? Number(flushIntervalMs) : DEFAULT_FLUSH_INTERVAL_MS;
     this.loadRetryIntervalMs =
@@ -267,24 +269,24 @@ export class ArrivalObservatory {
   set ambiguousClients(values) { this.identityRegistry.replaceAmbiguousClients(values); }
 
   /** First contact: a handshake, or any request that reaches the door. */
-  async recordReach({ era, clientInfo, ip, method, wallet, apiKeyId } = {}) {
+  async recordReach({ era, clientInfo, ip, method, wallet, apiKeyId, mcpSessionId } = {}) {
     const surface = mcpReachSurface(method);
     if (surface) await this.recordPreAuthAggregate({ surface, clientInfo });
-    await this.record({ stage: "reached", era, clientInfo, ip, wallet, apiKeyId });
+    await this.record({ stage: "reached", era, clientInfo, ip, wallet, apiKeyId, mcpSessionId });
   }
 
   /** A tool call. Unknown tool names are counted as reach and nothing more. */
-  async recordTool({ tool, era, clientInfo, ip, wallet, apiKeyId } = {}) {
+  async recordTool({ tool, era, clientInfo, ip, wallet, apiKeyId, mcpSessionId } = {}) {
     const surface = mcpToolSurface(tool);
     if (surface) await this.recordPreAuthAggregate({ surface, clientInfo });
     await this.record({
       stage: Object.hasOwn(TOOL_STAGE, tool) ? TOOL_STAGE[tool] : "reached",
-      era, clientInfo, ip, tool, wallet, apiKeyId
+      era, clientInfo, ip, tool, wallet, apiKeyId, mcpSessionId
     });
   }
 
   /** A REST request. Machine/discovery polling is intentionally excluded. */
-  async recordHttp({ method, pathname, clientInfo, ip, wallet, canaryMarker, apiKeyId, outcome } = {}) {
+  async recordHttp({ method, pathname, clientInfo, ip, wallet, canaryMarker, apiKeyId, outcome, mcpSessionId } = {}) {
     const normalizedMethod = String(method ?? "GET").toUpperCase();
     // CORS negotiation and link probing are transport activity, not an agent
     // entering the earn funnel. Counting them would turn browser preflights and
@@ -325,7 +327,8 @@ export class ArrivalObservatory {
       canaryMarkerValid,
       tool: metricPathLabel(normalizedPath),
       door: "http",
-      outcome
+      outcome,
+      mcpSessionId
     });
   }
 
@@ -404,7 +407,8 @@ export class ArrivalObservatory {
     apiKeyId,
     canaryMarkerValid,
     door = "mcp",
-    outcome
+    outcome,
+    mcpSessionId
   } = {}) {
     try {
       if (!ARRIVAL_STAGES.includes(stage)) return;
@@ -519,6 +523,24 @@ export class ArrivalObservatory {
       }
 
       const code = dropOffCode(outcome);
+      // MCP records the attempt before the tool result exists. Alerts for
+      // those calls are noted after the outcome, from the MCP finish path.
+      // A missing outcome is not a success: noting it here would alert before
+      // the tool runs.
+      const outcomeKnown = outcome?.ok === true || outcome?.kind === "http";
+      if (outcomeKnown) {
+        // Authenticated means this request carried a middleware-verified
+        // wallet. A client-to-wallet link is not that, and /auth/nonce
+        // (stage "identified") is an unsigned claim even if a wallet was passed.
+        await this.noteArrivalAlert({
+          wallet: normalizedWallet,
+          clientInfo: identity,
+          stage,
+          success: outcome?.ok === true && !code,
+          authenticated: Boolean(normalizedWallet) && stage !== "identified",
+          nowMs
+        });
+      }
       if (code) {
         recordDropOff(this.dropOff, {
           nowMs: nowMs,
@@ -760,6 +782,14 @@ export class ArrivalObservatory {
 
   dropOffView() {
     return dropOffSnapshot(this.dropOff, { nowMs: this.now() });
+  }
+
+  async noteArrivalAlert(input) {
+    try {
+      await this.alerts?.note?.(input);
+    } catch {
+      // Alerting cannot change the visit.
+    }
   }
 
   /**

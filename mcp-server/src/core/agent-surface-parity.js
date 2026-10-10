@@ -169,6 +169,7 @@ export const UNMAPPED_BY_DESIGN = Object.freeze({
       ["GET", "/admin/ops/topup-destinations"],
       ["GET", "/admin/arrivals/timeline"],
       ["GET", "/admin/arrivals/sessions"],
+      ["GET", "/admin/arrivals/alerts"],
       ["POST", "/admin/arrivals/canary-marker"],
       ["GET", "/admin/worker-journeys"],
       ["GET", "/admin/status"],

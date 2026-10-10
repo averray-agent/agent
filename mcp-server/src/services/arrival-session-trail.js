@@ -35,6 +35,8 @@ export class ArrivalSessionTrail {
     this.unstitched = 0;
     this.droppedRecords = 0;
     this.dirtyIds = new Set();
+    this.persistedIds = new Set();
+    this.persistedRevision = new Map();
     this.collectionSinceMs = undefined;
     this.loaded = false;
     this.loadFailed = null;
@@ -105,6 +107,7 @@ export class ArrivalSessionTrail {
         record.steps.splice(0, overflow);
         record.stepsDropped += overflow;
       }
+      record.revision = (record.revision ?? 0) + 1;
       this.sessions.set(id, record);
       const evicted = this.evictOverflow();
       this.dirtyIds.add(id);
@@ -113,6 +116,47 @@ export class ArrivalSessionTrail {
       await this.forget([...pruned, ...evicted]);
     } catch {
       // A trail must not change the request it observes.
+    }
+  }
+
+  /**
+   * Write one record now, ignoring the 30s flush interval. The alert path
+   * awaits this before it decides the trail link. `persisted` is set only
+   * after that record's own write succeeds.
+   */
+  needsPersist(id) {
+    const record = this.sessions.get(String(id ?? ""));
+    if (!record) return false;
+    if (!this.persistedIds.has(record.id)) return true;
+    return this.persistedRevision.get(record.id) !== record.revision;
+  }
+
+  async persist(id) {
+    try {
+      if (!(await this.ensureLoaded())) return false;
+      const record = this.sessions.get(String(id ?? ""));
+      if (!record || typeof this.stateStore?.upsertServiceState !== "function") return false;
+      if (!this.needsPersist(record.id)) return true;
+      const writtenRevision = record.revision ?? 0;
+      const body = {
+        ...record,
+        steps: record.steps.map((step) => ({ ...step })),
+        revision: writtenRevision
+      };
+      await this.stateStore.upsertServiceState(sessionScope(record.id), body);
+      await this.stateStore.upsertServiceState(STATE_SCOPE, {
+        collectionSinceMs: this.collectionSinceMs,
+        unstitched: this.unstitched,
+        droppedRecords: this.droppedRecords,
+        sessionIds: [...this.sessions.keys()]
+      });
+      this.persistedIds.add(record.id);
+      this.persistedRevision.set(record.id, writtenRevision);
+      if ((record.revision ?? 0) !== writtenRevision) this.dirtyIds.add(record.id);
+      else this.dirtyIds.delete(record.id);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -150,7 +194,8 @@ export class ArrivalSessionTrail {
       schemaVersion: ARRIVAL_SESSION_SCHEMA,
       generatedAtMs: this.now(),
       preAuth: { stitched: false, count: this.unstitched, note: PREAUTH_NOTE },
-      session: publicRecord(record)
+      session: publicRecord(record),
+      persisted: this.persistedIds.has(record.id)
     };
   }
 
@@ -188,6 +233,10 @@ export class ArrivalSessionTrail {
       const since = Number(stored?.collectionSinceMs);
       this.collectionSinceMs = Number.isFinite(since) ? since : this.now();
       this.prune(this.now());
+      this.persistedIds = new Set(this.sessions.keys());
+      this.persistedRevision = new Map(
+        [...this.sessions].map(([id, record]) => [id, record.revision ?? 0])
+      );
       this.loaded = true;
       this.loadFailed = null;
     } catch (error) {
@@ -205,17 +254,42 @@ export class ArrivalSessionTrail {
     this.dirty = false;
     try {
       const dirtyIds = [...this.dirtyIds];
+      const snapshots = new Map();
+      for (const id of dirtyIds) {
+        const record = this.sessions.get(id);
+        if (!record) continue;
+        const revision = record.revision ?? 0;
+        snapshots.set(id, {
+          revision,
+          body: {
+            ...record,
+            steps: record.steps.map((step) => ({ ...step })),
+            revision
+          }
+        });
+      }
       await this.stateStore?.upsertServiceState?.(STATE_SCOPE, {
         collectionSinceMs: this.collectionSinceMs,
         unstitched: this.unstitched,
         droppedRecords: this.droppedRecords,
         sessionIds: [...this.sessions.keys()]
       });
+      for (const [id, snapshot] of snapshots) {
+        if (typeof this.stateStore?.upsertServiceState !== "function") continue;
+        await this.stateStore.upsertServiceState(sessionScope(id), snapshot.body);
+        this.persistedIds.add(id);
+        this.persistedRevision.set(id, snapshot.revision);
+      }
       for (const id of dirtyIds) {
         const record = this.sessions.get(id);
-        if (record) await this.stateStore?.upsertServiceState?.(sessionScope(id), record);
+        const written = snapshots.get(id)?.revision;
+        if (record && (record.revision ?? 0) !== written) {
+          this.dirtyIds.add(id);
+          this.dirty = true;
+        } else {
+          this.dirtyIds.delete(id);
+        }
       }
-      this.dirtyIds.clear();
     } catch (error) {
       this.dirty = true;
       throw error;
@@ -229,6 +303,7 @@ export class ArrivalSessionTrail {
       if (record.lastSeenMs < oldest) {
         this.sessions.delete(id);
         this.dirtyIds.delete(id);
+        this.persistedIds.delete(id);
         this.droppedRecords += 1;
         removed.push(id);
       }
@@ -250,6 +325,7 @@ export class ArrivalSessionTrail {
       if (!oldestId) return removed;
       this.sessions.delete(oldestId);
       this.dirtyIds.delete(oldestId);
+      this.persistedIds.delete(oldestId);
       this.droppedRecords += 1;
       removed.push(oldestId);
     }
@@ -260,6 +336,8 @@ export class ArrivalSessionTrail {
     if (!ids?.length) return;
     for (const id of ids) {
       try {
+        this.persistedIds.delete(id);
+        this.persistedRevision.delete(id);
         await this.stateStore?.deleteServiceState?.(sessionScope(id));
       } catch {
         // An orphan key is preferable to failing the request that evicted it.
@@ -362,6 +440,7 @@ function normalizeStored(entry) {
     furthestStage: ARRIVAL_STAGES.includes(entry.furthestStage) ? entry.furthestStage : NOT_REPORTED,
     clientNameSource: ["declared", "user-agent"].includes(entry.clientNameSource) ? entry.clientNameSource : NOT_REPORTED,
     steps,
-    stepsDropped: Number.isSafeInteger(entry.stepsDropped) && entry.stepsDropped > 0 ? entry.stepsDropped : 0
+    stepsDropped: Number.isSafeInteger(entry.stepsDropped) && entry.stepsDropped > 0 ? entry.stepsDropped : 0,
+    revision: Number.isSafeInteger(entry.revision) && entry.revision >= 0 ? entry.revision : 0
   };
 }

@@ -2850,3 +2850,79 @@ test("http smoke: an anonymous follow-up is not stitched onto a linked wallet", 
     assert.ok(settled.count > unstitchedBefore);
   } finally { await stop(child); }
 });
+
+test("http smoke: the first external wallet alert links to the trail written for that response", SMOKE_TEST_OPTIONS, async () => {
+  const wallet = "0x9999999999999999999999999999999999999999";
+  const port = 19_000 + Math.floor(Math.random() * 1_000);
+  const child = await startServer(port);
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const admin = {
+      authorization: `Bearer ${issueToken(ADMIN_WALLET, { roles: ["admin"] })}`,
+      "user-agent": "AdminPoll/1"
+    };
+    const session = await fetch(`${base}/auth/session`, {
+      headers: {
+        authorization: `Bearer ${issueToken(wallet)}`,
+        "user-agent": "FirstAlert/1"
+      }
+    });
+    assert.equal(session.status, 200);
+    await session.json();
+    const deadline = Date.now() + 2_000;
+    let match;
+    while (Date.now() < deadline) {
+      const response = await fetch(`${base}/admin/arrivals/alerts`, { headers: admin });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      match = [...(body.ready ?? []), ...(body.pending ?? [])].find((alert) => alert.id === `external_wallet_first:${wallet}`);
+      if (match) break;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+    }
+    assert.ok(match, "first external wallet alert was not recorded");
+    assert.equal(match.trail, "linked");
+    assert.equal(match.href, `/admin/arrivals/sessions?id=${encodeURIComponent(`wallet:${wallet}`)}`);
+    const trail = await fetch(`${base}/admin/arrivals/sessions?id=${encodeURIComponent(`wallet:${wallet}`)}`, { headers: admin });
+    assert.equal(trail.status, 200);
+    const record = await trail.json();
+    assert.equal(record.session.steps.length >= 1, true);
+  } finally { await stop(child); }
+});
+
+test("http smoke: later wallets still link when the trail flush interval has not elapsed", SMOKE_TEST_OPTIONS, async () => {
+  const wallets = [1, 2, 3].map((index) => `0x${index.toString(16).padStart(40, "9")}`);
+  const port = 19_000 + Math.floor(Math.random() * 1_000);
+  const child = await startServer(port);
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const admin = {
+      authorization: `Bearer ${issueToken(ADMIN_WALLET, { roles: ["admin"] })}`,
+      "user-agent": "AdminPoll/1"
+    };
+    for (const [index, wallet] of wallets.entries()) {
+      const session = await fetch(`${base}/auth/session`, {
+        headers: {
+          authorization: `Bearer ${issueToken(wallet)}`,
+          "user-agent": `SeqAlert/${index}`
+        }
+      });
+      assert.equal(session.status, 200);
+      await session.json();
+    }
+    const deadline = Date.now() + 3_000;
+    let rows = [];
+    while (Date.now() < deadline) {
+      const response = await fetch(`${base}/admin/arrivals/alerts`, { headers: admin });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      rows = [...(body.ready ?? []), ...(body.pending ?? [])];
+      if (wallets.every((wallet) => rows.some((alert) => alert.id === `external_wallet_first:${wallet}`))) break;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+    }
+    for (const wallet of wallets) {
+      const alert = rows.find((row) => row.id === `external_wallet_first:${wallet}`);
+      assert.ok(alert, wallet);
+      assert.equal(alert.trail, "linked", alert.trailNote ?? wallet);
+    }
+  } finally { await stop(child); }
+});

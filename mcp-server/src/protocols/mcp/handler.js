@@ -186,14 +186,16 @@ export function createMcpRoute({
           outcome: toolError ?? { kind: "jsonrpc", code: rpcCode }
         });
       }
-      // Successful calls have neither a tool error nor a JSON-RPC error.
       // Trail rows are written only after the anonymous rate limit has
       // already admitted the request (callers before that pass recordTrail: false).
+      // Observe the step before the alert so the first milestone can link to
+      // the record that this call just wrote.
       if (!recordTrail) return;
       const presentedSession = String(request.headers?.["mcp-session-id"] ?? "");
       const liveSession = legacySessions.get(presentedSession);
       const mcpSessionId = liveSession && liveSession.expiresAt > now() ? presentedSession : undefined;
       const statusCode = Number(response.statusCode);
+      const success = !toolError && !Number.isSafeInteger(rpcCode);
       await sessionTrail?.observe?.({
         wallet: context.tool === "fetchAuthNonce" ? undefined : request._arrivalWallet,
         mcpSessionId,
@@ -206,6 +208,13 @@ export function createMcpRoute({
           statusCode
         }),
         stage: context.stage ?? "reached"
+      });
+      await arrivals?.noteArrivalAlert?.({
+        wallet: context.tool === "fetchAuthNonce" ? undefined : request._arrivalWallet,
+        clientInfo: context.clientInfo,
+        stage: context.stage ?? "reached",
+        success,
+        authenticated: Boolean(request._arrivalWallet) && context.tool !== "fetchAuthNonce"
       });
     };
 
@@ -679,7 +688,8 @@ async function dispatchRequest({
     clientInfo,
     ip: clientIp?.(request),
     ...(arrivalWallet ? { wallet: arrivalWallet } : {}),
-    ...(request._arrivalApiKeyId ? { apiKeyId: request._arrivalApiKeyId } : {})
+    ...(request._arrivalApiKeyId ? { apiKeyId: request._arrivalApiKeyId } : {}),
+    ...(request.headers?.["mcp-session-id"] ? { mcpSessionId: request.headers["mcp-session-id"] } : {})
   });
 
   if (!Object.hasOwn(message, "id")) {
