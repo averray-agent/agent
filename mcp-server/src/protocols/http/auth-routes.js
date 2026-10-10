@@ -154,7 +154,8 @@ export function createAuthRoutes({
       } catch {
         throw new ValidationError("wallet must be a 0x-prefixed 20-byte hex address.");
       }
-      request._arrivalWallet = walletIdentity.h160;
+      // The claimed wallet is not signed yet. Do not stamp _arrivalWallet:
+      // the HTTP finish hook would link this client name to that address.
       const nonce = generateNonce(randomBytesImpl);
       const stored = await stateStore.storeNonce?.(
         nonce,

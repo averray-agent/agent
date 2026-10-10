@@ -22,6 +22,7 @@ import { createAdminCapabilityRoutes } from "./admin-capability-routes.js";
 import { createAdminCreditRoutes } from "./admin-credit-routes.js";
 import { createAdminGithubRoutes } from "./admin-github-routes.js";
 import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
+import { createAdminArrivalSessionRoutes } from "./admin-arrival-session-routes.js";
 import { createAdminJourneyRoutes } from "./admin-journey-routes.js";
 import { createAdminL3PostingRoutes } from "./admin-l3-posting-routes.js";
 import { createAdminOvernightLedgerRoutes } from "./admin-overnight-ledger-routes.js";
@@ -92,8 +93,12 @@ import {
   ArrivalObservatory,
   ARRIVAL_CANARY_MARKER_HEADER,
   createArrivalCanaryMarkerService,
-  extractHttpClientInfo
+  extractHttpClientInfo,
+  isRecordedHttpArrival
 } from "../../services/arrival-observatory.js";
+import { verifiedArrivalWallet } from "./arrival-wallet.js";
+import { HTTP_ROUTE_STAGE } from "../../services/arrival-stage-map.js";
+import { ArrivalSessionTrail, resultClassFromOutcome } from "../../services/arrival-session-trail.js";
 import { signTokenFromConfig, verifyTokenFromConfig } from "../../auth/jwt.js";
 import { createArrivalRoutes } from "./arrival-routes.js";
 import { TreasurySummaryService } from "../../services/treasury-summary.js";
@@ -925,6 +930,8 @@ const executeMcpTool = createMcpToolExecutor({
 
 // Records who reaches the front door. Injected rather than reached for, so
 // the MCP handler stays testable without a state store.
+const sessionTrail = new ArrivalSessionTrail({ stateStore });
+
 const arrivalObservatory = new ArrivalObservatory({
   stateStore,
   platformService: service,
@@ -958,8 +965,16 @@ const handleAdminJourneyRoute = createAdminJourneyRoutes({
   respond
 });
 
+const handleAdminArrivalSessionRoute = createAdminArrivalSessionRoutes({
+  authMiddleware,
+  parseLimit,
+  respond,
+  sessionTrail
+});
+
 const handleMcpRoute = createMcpRoute({
   arrivals: arrivalObservatory,
+  sessionTrail,
   authMiddleware,
   clientIp,
   enforceLimit,
@@ -1061,12 +1076,13 @@ const server = createServer(async (request, response) => {
     );
     const statusCode = Number(response.statusCode);
     const arrivalError = response._arrivalError;
+    const arrivalWallet = verifiedArrivalWallet(pathname, request);
     void arrivalObservatory.recordHttp({
       method: wireMethod,
       pathname,
       clientInfo: extractHttpClientInfo(request),
       ip: clientIp(request),
-      wallet: request._arrivalWallet,
+      wallet: arrivalWallet,
       // Verified service-token grant id only. Never a client-supplied header
       // and never the token secret.
       apiKeyId: request._arrivalApiKeyId,
@@ -1075,6 +1091,23 @@ const server = createServer(async (request, response) => {
         ? { kind: "http", status: statusCode, code: arrivalError?.code }
         : statusCode >= 200 ? { ok: true } : undefined
     });
+    if (isRecordedHttpArrival(wireMethod, pathname) && !pathname.startsWith("/admin")) {
+      const method = String(wireMethod ?? "GET").toUpperCase();
+      const httpRoute = `${method} ${pathname}`;
+      // observe() must not reject: this call is deliberately not awaited, and
+      // a rejection here is an unhandled rejection on Node 22.
+      void sessionTrail.observe({
+        wallet: arrivalWallet,
+        clientInfo: extractHttpClientInfo(request),
+        door: "http",
+        name: `${method} ${metricPathLabel(pathname)}`,
+        resultClass: resultClassFromOutcome({
+          outcome: arrivalError ? { kind: "http", status: statusCode, code: arrivalError.code } : undefined,
+          statusCode
+        }),
+        stage: HTTP_ROUTE_STAGE[httpRoute] ?? "reached"
+      });
+    }
   });
 
   if (request.method === "OPTIONS") {
@@ -1168,6 +1201,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleAdminSessionsRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleAdminArrivalSessionRoute({ request, response, url, pathname })) {
       return;
     }
 

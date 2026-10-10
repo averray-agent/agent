@@ -239,7 +239,7 @@ test("SIWE telemetry failure is logged without breaking authentication", async (
   const request = {};
   assert.equal(await callRoute(route, response, "POST", "/auth/nonce", request), true);
   assert.equal(response.statusCode, 200);
-  assert.equal(request._arrivalWallet, WALLET);
+  assert.equal(request._arrivalWallet, undefined);
   assert.equal(calls.find(([name]) => name === "logger.warn")?.[1][1], "auth_siwe.telemetry_write_failed");
 });
 
@@ -333,7 +333,7 @@ test("SIWS Stage 2: SS58 JWT subject and lowercase H160 session index share one 
     true
   );
   assert.equal(nonceHarness.response.body.wallet, ss58);
-  assert.equal(nonceRequest._arrivalWallet, walletIdentity.h160);
+  assert.equal(nonceRequest._arrivalWallet, undefined);
   assert.equal(
     nonceHarness.calls.find(([name]) => name === "storeNonce")?.[1].wallet,
     walletIdentity.h160

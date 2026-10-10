@@ -1530,6 +1530,10 @@ export class MemoryStateStore {
     return merged;
   }
 
+  async deleteServiceState(scope) {
+    this.serviceStates.delete(scope);
+  }
+
   async getCapabilityGrant(id) {
     return this.capabilityGrants.get(String(id ?? ""));
   }
@@ -3234,6 +3238,11 @@ export class RedisStateStore {
     const merged = mergeServiceStateRecord(existing, state);
     await this.client.set(this.key("service-state", scope), JSON.stringify(merged));
     return merged;
+  }
+
+  async deleteServiceState(scope) {
+    await this.connect();
+    await this.client.del(this.key("service-state", scope));
   }
 
   async getCapabilityGrant(id) {

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import { normalizeError } from "../../core/errors.js";
+import { resultClassFromOutcome } from "../../services/arrival-session-trail.js";
+import { TOOL_STAGE } from "../../services/arrival-stage-map.js";
 import { withVerifyBilling } from "../../core/verify-product-copy.js";
 import { getMcpTool, MCP_TOOLS } from "./tools.js";
 
@@ -126,6 +128,7 @@ async function recordArrival(arrivals, method, entry) {
 
 export function createMcpRoute({
   arrivals,
+  sessionTrail,
   authMiddleware,
   clientIp,
   enforceLimit,
@@ -169,18 +172,40 @@ export function createMcpRoute({
     }
 
     response._arrivalDropContext = { stage: "reached" };
-    const finishMcpArrival = async () => {
+    const finishMcpArrival = async ({ recordTrail = true } = {}) => {
       const toolError = response._arrivalToolError;
       const rpcCode = response._arrivalJsonRpcCode;
-      if (!toolError && !Number.isSafeInteger(rpcCode)) return;
       const context = response._arrivalDropContext ?? { stage: "reached" };
-      await recordArrival(arrivals, "recordDropOff", {
-        ...context,
-        wallet: request._arrivalWallet,
-        apiKeyId: request._arrivalApiKeyId,
-        ip: clientIp?.(request),
-        ...(response._arrivalErrorActor ? { actor: response._arrivalErrorActor } : {}),
-        outcome: toolError ?? { kind: "jsonrpc", code: rpcCode }
+      if (toolError || Number.isSafeInteger(rpcCode)) {
+        await recordArrival(arrivals, "recordDropOff", {
+          ...context,
+          wallet: context.tool === "fetchAuthNonce" ? undefined : request._arrivalWallet,
+          apiKeyId: request._arrivalApiKeyId,
+          ip: clientIp?.(request),
+          ...(response._arrivalErrorActor ? { actor: response._arrivalErrorActor } : {}),
+          outcome: toolError ?? { kind: "jsonrpc", code: rpcCode }
+        });
+      }
+      // Successful calls have neither a tool error nor a JSON-RPC error.
+      // Trail rows are written only after the anonymous rate limit has
+      // already admitted the request (callers before that pass recordTrail: false).
+      if (!recordTrail) return;
+      const presentedSession = String(request.headers?.["mcp-session-id"] ?? "");
+      const liveSession = legacySessions.get(presentedSession);
+      const mcpSessionId = liveSession && liveSession.expiresAt > now() ? presentedSession : undefined;
+      const statusCode = Number(response.statusCode);
+      await sessionTrail?.observe?.({
+        wallet: context.tool === "fetchAuthNonce" ? undefined : request._arrivalWallet,
+        mcpSessionId,
+        clientInfo: context.clientInfo,
+        protocolVersion: request.headers?.["mcp-protocol-version"],
+        door: "mcp",
+        name: context.tool || context.method || "mcp",
+        resultClass: resultClassFromOutcome({
+          outcome: toolError ?? (Number.isSafeInteger(rpcCode) ? { status: statusCode } : undefined),
+          statusCode
+        }),
+        stage: context.stage ?? "reached"
       });
     };
 
@@ -191,20 +216,20 @@ export function createMcpRoute({
       const code = error?.message === "Invalid JSON body." ? -32700 : -32600;
       response._arrivalErrorActor = "unclassified";
       sendError(response, respond, 400, null, code, error?.message ?? "Invalid request.");
-      await finishMcpArrival();
+      await finishMcpArrival({ recordTrail: false });
       return true;
     }
 
     if (!isJsonRpcMessage(message)) {
       response._arrivalErrorActor = "unclassified";
       sendError(response, respond, 400, message?.id ?? null, -32600, "Invalid JSON-RPC request.");
-      await finishMcpArrival();
+      await finishMcpArrival({ recordTrail: false });
       return true;
     }
 
     if (!originAllowed(request, response)) {
       sendError(response, respond, 403, message.id ?? null, -32000, "Origin is not allowed.");
-      await finishMcpArrival();
+      await finishMcpArrival({ recordTrail: false });
       return true;
     }
 
@@ -622,7 +647,10 @@ async function dispatchRequest({
     ...(response._arrivalDropContext ?? {}),
     era,
     clientInfo,
-    stage: message.method === "tools/call" ? undefined : "reached",
+    stage: message.method === "tools/call"
+      ? (TOOL_STAGE[message.params?.name] ?? "reached")
+      : "reached",
+    method: message.method,
     tool: message.method === "tools/call" ? message.params?.name : undefined
   };
   // One verification for a tools/call bearer. The rate limiter below reuses
@@ -637,14 +665,20 @@ async function dispatchRequest({
       request._arrivalAuthError = error;
     }
   }
+  const calledTool = message.method === "tools/call" && typeof message.params?.name === "string"
+    ? message.params.name
+    : undefined;
+  // fetchAuthNonce carries an unsigned wallet. Do not link this client to it,
+  // and do not treat a bearer on this call as the nonce's arrival wallet.
+  const arrivalWallet = calledTool === "fetchAuthNonce" ? undefined : request._arrivalWallet;
   await recordArrival(arrivals, message.method === "tools/call" ? "recordTool" : "recordReach", {
-    tool: typeof message.params?.name === "string" && getMcpTool(message.params.name, tools)
-      ? message.params.name : "unknown_tool",
+    tool: typeof calledTool === "string" && getMcpTool(calledTool, tools)
+      ? calledTool : "unknown_tool",
     method: message.method,
     era,
     clientInfo,
     ip: clientIp?.(request),
-    ...(request._arrivalWallet ? { wallet: request._arrivalWallet } : {}),
+    ...(arrivalWallet ? { wallet: arrivalWallet } : {}),
     ...(request._arrivalApiKeyId ? { apiKeyId: request._arrivalApiKeyId } : {})
   });
 
@@ -709,7 +743,7 @@ async function dispatchRequest({
         rateLimitConfig,
         request
       });
-      if (request._arrivalWallet) {
+      if (request._arrivalWallet && toolName !== "fetchAuthNonce") {
         await recordArrival(arrivals, "linkWallet", {
           wallet: request._arrivalWallet,
           clientInfo

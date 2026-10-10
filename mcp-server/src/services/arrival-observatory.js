@@ -1222,6 +1222,12 @@ function normalizeHttpPath(pathname) {
   return value || "/";
 }
 
+export function isRecordedHttpArrival(method, pathname) {
+  const normalizedMethod = String(method ?? "GET").toUpperCase();
+  if (normalizedMethod === "OPTIONS" || normalizedMethod === "HEAD") return false;
+  return !isHttpMachinePath(normalizeHttpPath(pathname));
+}
+
 function isHttpMachinePath(pathname) {
   return HTTP_MACHINE_PATHS.has(pathname)
     || pathname.startsWith("/.well-known/")
@@ -1267,15 +1273,17 @@ export function extractHttpClientInfo(request) {
   const explicitName = firstHeader(headers, ["x-averray-client-name", "x-client-name"]);
   const explicitVersion = firstHeader(headers, ["x-averray-client-version", "x-client-version"]);
   if (explicitName) {
-    return normalizeClientInfo({ name: explicitName, version: explicitVersion });
+    const declared = normalizeClientInfo({ name: explicitName, version: explicitVersion });
+    return declared ? { ...declared, source: "declared" } : null;
   }
   const userAgent = firstHeader(headers, ["user-agent"]);
   if (!userAgent) return null;
   const product = userAgent.match(/^([^/\s]+)(?:\/([^\s]+))?/u);
-  return normalizeClientInfo({
+  const derived = normalizeClientInfo({
     name: product?.[1] ?? userAgent,
     version: product?.[2] ?? "unknown"
   });
+  return derived ? { ...derived, source: "user-agent" } : null;
 }
 
 /** Reduce an untrusted declared client/user-agent to a closed enum immediately. */
