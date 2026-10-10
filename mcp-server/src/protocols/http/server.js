@@ -1065,6 +1065,9 @@ const server = createServer(async (request, response) => {
       clientInfo: extractHttpClientInfo(request),
       ip: clientIp(request),
       wallet: request._arrivalWallet,
+      // Verified service-token grant id only. Never a client-supplied header
+      // and never the token secret.
+      apiKeyId: request._arrivalApiKeyId,
       canaryMarker: request.headers?.[ARRIVAL_CANARY_MARKER_HEADER]
     });
   });

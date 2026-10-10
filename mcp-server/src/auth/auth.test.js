@@ -207,11 +207,18 @@ test("requireAuth accepts valid bearer token", async () => {
     expiresInSeconds: 60
   });
 
-  const request = { method: "GET", headers: { authorization: `Bearer ${token}` } };
+  const request = {
+    method: "GET",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "x-averray-api-key-id": "grant-qa-engineer"
+    }
+  };
   const url = new URL("http://localhost/api/account");
   const result = await middleware(request, url);
   assert.equal(result.wallet.toLowerCase(), "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   assert.equal(request._arrivalWallet, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  assert.equal(request._arrivalApiKeyId, undefined);
   assert.equal(result.via, "header");
 });
 
@@ -751,6 +758,7 @@ test("requireAuth binds service tokens to exactly one active grant without base 
   const request = { method: "POST", headers: { authorization: `Bearer ${token}` } };
 
   const lifecycle = await middleware(request, new URL("http://localhost/admin/jobs/lifecycle"));
+  assert.equal(request._arrivalApiKeyId, "grant-service");
   assert.deepEqual(lifecycle.claims.roles, []);
   assert.ok(lifecycle.capabilities.includes("jobs:lifecycle"));
   assert.equal(lifecycle.capabilities.includes("account:read"), false);

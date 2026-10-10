@@ -8,7 +8,8 @@ import {
   SELF_IDENTITY_KINDS,
   SelfIdentityRegistry,
   createSelfIdentityRegistry,
-  describeSelfIdentity
+  describeSelfIdentity,
+  normalizeApiKeyId
 } from "./self-identity-registry.js";
 
 const OPERATOR = "0x1111111111111111111111111111111111111111";
@@ -87,7 +88,44 @@ test("an invalid canary marker and every unlisted wallet fail toward external", 
   assert.equal(registry.classify({}).self, false);
 });
 
-test("retained acceptance is self while the blind tester remains external", () => {
+test("qa, blind-user, canary, and operator-script wallets and api-key ids are self", () => {
+  const qa = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const blind = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const canary = "0xcccccccccccccccccccccccccccccccccccccccc";
+  const script = "0xdddddddddddddddddddddddddddddddddddddddd";
+  const outsider = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+  const registry = createSelfIdentityRegistry({
+    env: {
+      ARRIVAL_QA_ENGINEER_WALLETS: qa.toUpperCase(),
+      ARRIVAL_BLIND_USER_WALLETS: blind,
+      ARRIVAL_CANARY_WALLETS: canary,
+      ARRIVAL_OPERATOR_SCRIPT_WALLETS: script,
+      ARRIVAL_QA_ENGINEER_API_KEY_IDS: "grant-qa-engineer",
+      ARRIVAL_BLIND_USER_API_KEY_IDS: "grant-blind-user",
+      ARRIVAL_CANARY_API_KEY_IDS: "grant-canary",
+      ARRIVAL_OPERATOR_SCRIPT_API_KEY_IDS: "grant-operator-script, sk-live-secret-value"
+    }
+  });
+
+  assert.equal(registry.classify({ wallet: qa }).kind, SELF_IDENTITY_KINDS.QA_ENGINEER);
+  assert.equal(registry.classify({ wallet: blind }).kind, SELF_IDENTITY_KINDS.BLIND_USER);
+  assert.equal(registry.classify({ wallet: canary }).kind, SELF_IDENTITY_KINDS.CANARY);
+  assert.equal(registry.classify({ wallet: script }).kind, SELF_IDENTITY_KINDS.OPERATOR_SCRIPT);
+  assert.equal(registry.classify({ apiKeyId: "grant-qa-engineer", wallet: outsider }).self, true);
+  assert.equal(registry.classify({ apiKeyId: "grant-blind-user" }).kind, SELF_IDENTITY_KINDS.BLIND_USER);
+  assert.equal(registry.classify({ apiKeyId: "grant-canary" }).evidence, "canary_api_key_registry");
+  assert.equal(registry.classify({ apiKeyId: "grant-operator-script" }).kind, SELF_IDENTITY_KINDS.OPERATOR_SCRIPT);
+  assert.equal(registry.classify({ wallet: outsider }).self, false);
+  assert.equal(registry.classify({ apiKeyId: "grant-unknown", wallet: outsider }).self, false);
+  assert.equal(normalizeApiKeyId("sk-live-secret-value"), undefined);
+  assert.equal(registry.operatorScriptApiKeyIds.has("sk-live-secret-value"), false);
+  assert.equal(
+    normalizeApiKeyId("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+    undefined
+  );
+});
+
+test("an unregistered blind tester stays external", () => {
   const registry = createSelfIdentityRegistry({
     env: { ARRIVAL_ACCEPTANCE_WALLETS: RETAINED_ACCEPTANCE }
   });
@@ -100,6 +138,33 @@ test("retained acceptance is self while the blind tester remains external", () =
   assert.equal(tester.self, false);
   assert.equal(describeSelfIdentity(tester).classification, PUBLIC_IDENTITY_CLASSES.EXTERNAL);
   assert.equal(describeSelfIdentity(tester).authority, SELF_IDENTITY_AUTHORITY);
+});
+
+test("env templates document operator identity slots as empty placeholders", () => {
+  const keys = [
+    "ARRIVAL_QA_ENGINEER_WALLETS",
+    "ARRIVAL_QA_ENGINEER_API_KEY_IDS",
+    "ARRIVAL_BLIND_USER_WALLETS",
+    "ARRIVAL_BLIND_USER_API_KEY_IDS",
+    "ARRIVAL_CANARY_WALLETS",
+    "ARRIVAL_CANARY_API_KEY_IDS",
+    "ARRIVAL_OPERATOR_SCRIPT_WALLETS",
+    "ARRIVAL_OPERATOR_SCRIPT_API_KEY_IDS"
+  ];
+  for (const env of [
+    readTemplateEnv("../../../deploy/backend.env.template"),
+    readTemplateEnv("../../../deploy/backend.mainnet.env.template")
+  ]) {
+    for (const key of keys) {
+      assert.equal(env[key], "", `${key} must stay an empty placeholder`);
+    }
+    const registry = createSelfIdentityRegistry({ env });
+    assert.equal(registry.qaEngineerWallets.size, 0);
+    assert.equal(registry.blindUserWallets.size, 0);
+    assert.equal(registry.canaryWallets.size, 0);
+    assert.equal(registry.operatorScriptWallets.size, 0);
+    assert.equal(registry.qaEngineerApiKeyIds.size, 0);
+  }
 });
 
 test("mainnet env template registers the retained acceptance wallet as self", () => {

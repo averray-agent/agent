@@ -575,13 +575,27 @@ async function dispatchRequest({
   // Both eras funnel through here, so this is the single place that sees
   // every dispatched method. Recorded BEFORE any validation or rate limit, so
   // a caller that is refused still counts as having arrived.
+  // A bearer is verified first when one is present, so a registered operator
+  // API-key id or wallet is self on this call. Verification failure leaves
+  // the arrival unmarked; it does not drop the record.
+  if (message.method === "tools/call" && hasBearerToken(request) && authMiddleware) {
+    try {
+      await authMiddleware(request, new URL("http://localhost/mcp"), {
+        enforceRouteCapabilities: false
+      });
+    } catch {
+      // Refused credentials still arrived.
+    }
+  }
   await recordArrival(arrivals, message.method === "tools/call" ? "recordTool" : "recordReach", {
     tool: typeof message.params?.name === "string" && getMcpTool(message.params.name, tools)
       ? message.params.name : "unknown_tool",
     method: message.method,
     era,
     clientInfo,
-    ip: clientIp?.(request)
+    ip: clientIp?.(request),
+    ...(request._arrivalWallet ? { wallet: request._arrivalWallet } : {}),
+    ...(request._arrivalApiKeyId ? { apiKeyId: request._arrivalApiKeyId } : {})
   });
 
   if (!Object.hasOwn(message, "id")) {

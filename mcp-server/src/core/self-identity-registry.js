@@ -3,11 +3,17 @@ import { isHostedCanaryClaimant } from "./claimant-attribution.js";
 const WALLET_RE = /^0x[0-9a-f]{40}$/u;
 const SELF_CLIENT_PREFIX = "averray-";
 const AMBIGUOUS_CLIENT_DEFAULTS = Object.freeze(["anthropic/claudeai"]);
+// An API-key id names a credential we issued. It is not the secret. A value
+// that looks like key material is refused rather than stored.
+const API_KEY_ID_RE = /^[a-z0-9][a-z0-9._:-]{0,63}$/u;
 
 export const SELF_IDENTITY_KINDS = Object.freeze({
   CANARY: "canary",
   ACCEPTANCE: "acceptance",
   OPERATOR: "operator",
+  QA_ENGINEER: "qa_engineer",
+  BLIND_USER: "blind_user",
+  OPERATOR_SCRIPT: "operator_script",
   ADMIN_CONSOLE: "admin_console",
   VERIFIER: "verifier",
   VIEWER: "operator_viewer",
@@ -35,6 +41,14 @@ export class SelfIdentityRegistry {
   constructor({
     operatorWallets = [],
     acceptanceWallets = [],
+    qaEngineerWallets = [],
+    blindUserWallets = [],
+    canaryWallets = [],
+    operatorScriptWallets = [],
+    qaEngineerApiKeyIds = [],
+    blindUserApiKeyIds = [],
+    canaryApiKeyIds = [],
+    operatorScriptApiKeyIds = [],
     adminWallets = [],
     verifierWallets = [],
     viewerWallets = [],
@@ -43,6 +57,14 @@ export class SelfIdentityRegistry {
   } = {}) {
     this.operatorWallets = walletSet(operatorWallets);
     this.acceptanceWallets = walletSet(acceptanceWallets);
+    this.qaEngineerWallets = walletSet(qaEngineerWallets);
+    this.blindUserWallets = walletSet(blindUserWallets);
+    this.canaryWallets = walletSet(canaryWallets);
+    this.operatorScriptWallets = walletSet(operatorScriptWallets);
+    this.qaEngineerApiKeyIds = apiKeyIdSet(qaEngineerApiKeyIds);
+    this.blindUserApiKeyIds = apiKeyIdSet(blindUserApiKeyIds);
+    this.canaryApiKeyIds = apiKeyIdSet(canaryApiKeyIds);
+    this.operatorScriptApiKeyIds = apiKeyIdSet(operatorScriptApiKeyIds);
     this.adminWallets = walletSet(adminWallets);
     this.verifierWallets = walletSet(verifierWallets);
     this.viewerWallets = walletSet(viewerWallets);
@@ -50,7 +72,7 @@ export class SelfIdentityRegistry {
     this.ambiguousClients = clientSet(ambiguousClients);
   }
 
-  classify({ wallet, clientInfo, session, canaryMarkerValid } = {}) {
+  classify({ wallet, clientInfo, session, canaryMarkerValid, apiKeyId } = {}) {
     const normalizedWallet = normalizeWallet(wallet ?? session?.wallet);
     const clientName = normalizeClientName(clientInfo?.name ?? clientInfo);
 
@@ -61,12 +83,29 @@ export class SelfIdentityRegistry {
     // old fail-safe direction: it cannot borrow another static classification.
     if (canaryMarkerValid === false) return externalIdentity("invalid_canary_marker");
 
+    // A verified API-key id is operator tooling even when the wallet it rides
+    // on is not itself listed. Unknown ids fall through; they never become self.
+    const keyIdentity = this.classifyApiKeyId(apiKeyId);
+    if (keyIdentity) return keyIdentity;
+
     if (normalizedWallet) {
       if (this.acceptanceWallets.has(normalizedWallet)) {
         return selfIdentity(SELF_IDENTITY_KINDS.ACCEPTANCE, "acceptance_wallet_registry");
       }
       if (this.operatorWallets.has(normalizedWallet)) {
         return selfIdentity(SELF_IDENTITY_KINDS.OPERATOR, "operator_wallet_registry");
+      }
+      if (this.qaEngineerWallets.has(normalizedWallet)) {
+        return selfIdentity(SELF_IDENTITY_KINDS.QA_ENGINEER, "qa_engineer_wallet_registry");
+      }
+      if (this.blindUserWallets.has(normalizedWallet)) {
+        return selfIdentity(SELF_IDENTITY_KINDS.BLIND_USER, "blind_user_wallet_registry");
+      }
+      if (this.canaryWallets.has(normalizedWallet)) {
+        return selfIdentity(SELF_IDENTITY_KINDS.CANARY, "canary_wallet_registry");
+      }
+      if (this.operatorScriptWallets.has(normalizedWallet)) {
+        return selfIdentity(SELF_IDENTITY_KINDS.OPERATOR_SCRIPT, "operator_script_wallet_registry");
       }
       if (this.adminWallets.has(normalizedWallet)) {
         return selfIdentity(SELF_IDENTITY_KINDS.ADMIN_CONSOLE, "auth_admin_wallet_registry");
@@ -127,12 +166,35 @@ export class SelfIdentityRegistry {
   replaceAmbiguousClients(values) {
     this.ambiguousClients = clientSet(values);
   }
+
+  classifyApiKeyId(apiKeyId) {
+    const id = normalizeApiKeyId(apiKeyId);
+    if (!id) return undefined;
+    const lists = [
+      [this.qaEngineerApiKeyIds, SELF_IDENTITY_KINDS.QA_ENGINEER, "qa_engineer_api_key_registry"],
+      [this.blindUserApiKeyIds, SELF_IDENTITY_KINDS.BLIND_USER, "blind_user_api_key_registry"],
+      [this.canaryApiKeyIds, SELF_IDENTITY_KINDS.CANARY, "canary_api_key_registry"],
+      [this.operatorScriptApiKeyIds, SELF_IDENTITY_KINDS.OPERATOR_SCRIPT, "operator_script_api_key_registry"]
+    ];
+    for (const [ids, kind, evidence] of lists) {
+      if (ids.has(id)) return selfIdentity(kind, evidence);
+    }
+    return undefined;
+  }
 }
 
 export function createSelfIdentityRegistry({ env = process.env, authConfig } = {}) {
   return new SelfIdentityRegistry({
     operatorWallets: parseWalletList(env?.ARRIVAL_SELF_WALLETS),
     acceptanceWallets: parseWalletList(env?.ARRIVAL_ACCEPTANCE_WALLETS),
+    qaEngineerWallets: parseWalletList(env?.ARRIVAL_QA_ENGINEER_WALLETS),
+    blindUserWallets: parseWalletList(env?.ARRIVAL_BLIND_USER_WALLETS),
+    canaryWallets: parseWalletList(env?.ARRIVAL_CANARY_WALLETS),
+    operatorScriptWallets: parseWalletList(env?.ARRIVAL_OPERATOR_SCRIPT_WALLETS),
+    qaEngineerApiKeyIds: parseApiKeyIdList(env?.ARRIVAL_QA_ENGINEER_API_KEY_IDS),
+    blindUserApiKeyIds: parseApiKeyIdList(env?.ARRIVAL_BLIND_USER_API_KEY_IDS),
+    canaryApiKeyIds: parseApiKeyIdList(env?.ARRIVAL_CANARY_API_KEY_IDS),
+    operatorScriptApiKeyIds: parseApiKeyIdList(env?.ARRIVAL_OPERATOR_SCRIPT_API_KEY_IDS),
     adminWallets: authConfig?.adminWallets ?? parseWalletList(env?.AUTH_ADMIN_WALLETS),
     verifierWallets: authConfig?.verifierWallets ?? parseWalletList(env?.AUTH_VERIFIER_WALLETS),
     viewerWallets: authConfig?.viewerWallets ?? parseWalletList(env?.OPERATOR_VIEWER_WALLETS),
@@ -161,6 +223,19 @@ export function resolveAmbiguousClients(env = process.env) {
 
 export function normalizeSelfIdentityWallet(value) {
   return normalizeWallet(value);
+}
+
+/**
+ * Keep an API-key identifier. Refuse anything that looks like the secret itself:
+ * pure hex long enough to be key material, or a dotted token (a JWT).
+ */
+export function normalizeApiKeyId(value) {
+  const id = String(value ?? "").trim().toLowerCase();
+  if (!API_KEY_ID_RE.test(id)) return undefined;
+  if (id.startsWith("sk-") || id.startsWith("rk-") || id.startsWith("bearer")) return undefined;
+  if (id.length >= 32 && /^[0-9a-f]+$/u.test(id)) return undefined;
+  if (id.split(".").length >= 3) return undefined;
+  return id;
 }
 
 /** Stable public projection used by receipts, profiles, and operator views. */
@@ -221,4 +296,12 @@ function parseWalletList(raw) {
 
 function parseClientNames(raw) {
   return String(raw ?? "").split(",").map((value) => value.trim());
+}
+
+function parseApiKeyIdList(raw) {
+  return String(raw ?? "").split(",").map((value) => value.trim());
+}
+
+function apiKeyIdSet(values) {
+  return new Set([...asIterable(values)].map(normalizeApiKeyId).filter(Boolean));
 }
