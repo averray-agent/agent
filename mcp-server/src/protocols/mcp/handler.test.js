@@ -54,7 +54,7 @@ function createHarness(overrides = {}) {
       mcpAuthenticated: { limit: 20, windowSeconds: 60 },
       ...overrides.rateLimitConfig
     },
-    readJsonBody: async (request) => request.body,
+    readJsonBody: overrides.readJsonBody ?? (async (request) => request.body),
     respond,
     ...(overrides.tools ? { tools: overrides.tools } : {})
   });
@@ -771,6 +771,30 @@ test("a tools/call bearer is verified once, and only a service-token grant id co
   assert.equal(headerSnapshot.funnelSelf.browsed, 0);
   assert.equal(headerSnapshot.funnelExternal.browsed, 1);
   assert.equal(authCalls, 1);
+});
+
+test("parse and invalid JSON-RPC errors are unclassified, not external", async () => {
+  const recorded = [];
+  const arrivals = {
+    async recordDropOff(entry) { recorded.push(entry); }
+  };
+  const { handler } = createHarness({
+    arrivals,
+    readJsonBody: async () => { throw new Error("Invalid JSON body."); }
+  });
+  const parsed = await call(handler, { jsonrpc: "2.0", id: 1, method: "ping" });
+  assert.equal(parsed.statusCode, 400);
+  assert.equal(recorded[0].actor, "unclassified");
+  assert.equal(recorded[0].outcome.code, -32700);
+
+  const invalid = [];
+  const { handler: invalidHandler } = createHarness({
+    arrivals: { async recordDropOff(entry) { invalid.push(entry); } }
+  });
+  const rejected = await call(invalidHandler, { nope: true });
+  assert.equal(rejected.statusCode, 400);
+  assert.equal(invalid[0].actor, "unclassified");
+  assert.equal(invalid[0].outcome.code, -32600);
 });
 
 test("tool failures record a drop-off code and never the error message", async () => {

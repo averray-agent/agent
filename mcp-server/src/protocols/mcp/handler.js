@@ -179,6 +179,7 @@ export function createMcpRoute({
         wallet: request._arrivalWallet,
         apiKeyId: request._arrivalApiKeyId,
         ip: clientIp?.(request),
+        ...(response._arrivalErrorActor ? { actor: response._arrivalErrorActor } : {}),
         outcome: toolError ?? { kind: "jsonrpc", code: rpcCode }
       });
     };
@@ -188,12 +189,14 @@ export function createMcpRoute({
       message = await readJsonBody(request);
     } catch (error) {
       const code = error?.message === "Invalid JSON body." ? -32700 : -32600;
+      response._arrivalErrorActor = "unclassified";
       sendError(response, respond, 400, null, code, error?.message ?? "Invalid request.");
       await finishMcpArrival();
       return true;
     }
 
     if (!isJsonRpcMessage(message)) {
+      response._arrivalErrorActor = "unclassified";
       sendError(response, respond, 400, message?.id ?? null, -32600, "Invalid JSON-RPC request.");
       await finishMcpArrival();
       return true;

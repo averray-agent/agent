@@ -330,8 +330,10 @@ export class ArrivalObservatory {
   }
 
   /**
-   * A visit stopped. Does not increment the funnel. The code is allow-listed;
-   * messages and bodies are ignored even if a caller passes them.
+   * An error response at a stage. Does not increment the funnel and does not
+   * claim the visitor stopped. The code is allow-listed; messages and bodies
+   * are ignored even if a caller passes them. `actor: "unclassified"` is only
+   * for protocol garbage before a valid request.
    */
   async recordDropOff({
     stage,
@@ -343,6 +345,7 @@ export class ArrivalObservatory {
     apiKeyId,
     canaryMarkerValid,
     door = "mcp",
+    actor: actorOverride,
     outcome
   } = {}) {
     try {
@@ -352,7 +355,12 @@ export class ArrivalObservatory {
         ? stage
         : Object.hasOwn(TOOL_STAGE, tool) ? TOOL_STAGE[tool] : "reached";
       const identity = normalizeClientInfo(clientInfo);
-      const actor = dropOffActor(this.classifyActor(identity, normalizeWallet(wallet), canaryMarkerValid, apiKeyId));
+      const declaredKey = identity ? clientKey(identity) : undefined;
+      const linkedWallet = declaredKey ? walletFromKey(this.clientWalletLinks.get(declaredKey)) : undefined;
+      const canonicalWallet = normalizeWallet(wallet) ?? linkedWallet;
+      const actor = actorOverride === "unclassified"
+        ? "unclassified"
+        : dropOffActor(this.classifyActor(identity, canonicalWallet, canaryMarkerValid, apiKeyId));
       recordDropOff(this.dropOff, {
         nowMs: this.now(),
         door: door === "http" ? "http" : "mcp",
@@ -630,7 +638,7 @@ export class ArrivalObservatory {
         distinctAgents: buildDistinct(allAgents),
         agents,
         operatorView,
-        dropOff: this.dropOffView()
+        errorsByStage: this.dropOffView()
       };
     } catch {
       return this.unavailableSnapshot();
@@ -742,7 +750,7 @@ export class ArrivalObservatory {
       distinctAgents: unavailableDistinct(),
       agents: [],
       operatorView: { unavailable: "arrival operator view could not be derived" },
-      dropOff: dropOffSnapshot(this.dropOff, {
+      errorsByStage: dropOffSnapshot(this.dropOff, {
         nowMs: this.now(),
         unavailable: this.loadFailed ?? UNREADABLE
       }),
@@ -894,7 +902,7 @@ export class ArrivalObservatory {
       if (persistedCollectionSinceMs !== undefined) {
         this.prospectiveCollectionSinceMs = persistedCollectionSinceMs;
       }
-      restoreDropOff(this.dropOff, stored?.dropOff);
+      restoreDropOff(this.dropOff, stored?.errorsByStage ?? stored?.dropOff);
       if (this.dropOff.collectionSinceMs === undefined) this.dropOff.collectionSinceMs = this.now();
       restorePreAuthBuckets(this.preAuthHourlyBuckets, stored?.preAuthHourlyBuckets);
       this.prunePreAuthBuckets(this.now());
@@ -950,9 +958,9 @@ export class ArrivalObservatory {
           preAuthHourlyBuckets: serializePreAuthBuckets(this.preAuthHourlyBuckets)
         });
       }
-      if (finiteMs(stored?.dropOff?.collectionSinceMs) === undefined) {
+      if (finiteMs(stored?.errorsByStage?.collectionSinceMs ?? stored?.dropOff?.collectionSinceMs) === undefined) {
         await this.stateStore?.upsertServiceState?.(STATE_SCOPE, {
-          dropOff: serializeDropOff(this.dropOff)
+          errorsByStage: serializeDropOff(this.dropOff)
         });
       }
       this.loaded = true;
@@ -990,7 +998,7 @@ export class ArrivalObservatory {
         clientWalletLinks: Object.fromEntries(this.clientWalletLinks),
         prospectiveCollectionSinceMs: this.prospectiveCollectionSinceMs,
         preAuthHourlyBuckets: serializePreAuthBuckets(this.preAuthHourlyBuckets),
-        dropOff: serializeDropOff(this.dropOff)
+        errorsByStage: serializeDropOff(this.dropOff)
       });
     } catch (error) {
       this.dirty = true;

@@ -2,21 +2,27 @@ import { ARRIVAL_STAGES } from "./arrival-stage-map.js";
 
 export const NOT_REPORTED = "not reported";
 export const DROP_OFF_TOP_CODES = 8;
-export const DROP_OFF_ACTORS = Object.freeze(["external", "self", "ambiguous"]);
+export const DROP_OFF_ACTORS = Object.freeze(["external", "self", "ambiguous", "unclassified"]);
 export const DROP_OFF_DOORS = Object.freeze(["mcp", "http"]);
 const HOUR_MS = 60 * 60 * 1_000;
 const DAY_MS = 24 * HOUR_MS;
 const RETENTION_MS = 7 * DAY_MS;
 
 /**
- * Exact `dropOff` object served on GET /monitor/arrivals.
+ * Exact `errorsByStage` object served on GET /monitor/arrivals.
  * Schema stays averray.arrivals.v1. The field is additive.
  *
- * Absence of `dropOff` means not reported. A consumer must not coerce absence,
- * or the string "not reported", to 0.
+ * This counts error responses by the stage of that request. It does not know
+ * whether the visitor stopped. One pre-auth request is one visit for this
+ * count: a 429 on GET /jobs followed by a claim still reports
+ * browsed `429:rate_limited`. Sessioned visits are not collapsed to a last stage.
+ *
+ * Absence of `errorsByStage` means not reported. A consumer must not coerce
+ * absence, or the string "not reported", to 0.
  *
  * {
  *   absentMeans: "not reported",
+ *   measures: "error responses by stage; one pre-auth request = one visit",
  *   collectionSinceMs: number | null,
  *   sinceCutover: DoorBlock | "not reported",
  *   "24h": DoorBlock | "not reported",
@@ -24,22 +30,29 @@ const RETENTION_MS = 7 * DAY_MS;
  * }
  *
  * A window is the string "not reported" until collectionSinceMs covers that
- * whole window, and whenever the arrival state could not be read.
+ * whole window, and whenever the arrival state could not be read — including
+ * after a successful load, if a later read fails.
  * `sinceCutover` is the measured span since collection started. It is not a
  * 24h or 7d total.
  *
+ * Hour buckets that start before the window are excluded, so "24h" never
+ * includes the partially overlapping 25th hour. The current partial hour is
+ * included.
+ *
  * DoorBlock: { mcp: Actors, http: Actors }
- * Actors: { external: Stages, self: Stages, ambiguous: Stages }
+ * Actors: { external, self, ambiguous, unclassified }, each a Stages object.
+ * `unclassified` is protocol garbage only (-32700 / -32600 before a valid
+ * JSON-RPC request). It is never folded into external.
  * Stages: one key per funnel stage, value a CodeCounts object.
  * CodeCounts: { [code]: positive integer }, highest count first, at most 8
  * codes, remainder folded into "other". An empty object means the stage was
- * measured and no visit stopped there. Codes are an allow-list plus "other".
- * HTTP codes are `${status}:${errorCode}`. MCP JSON-RPC codes are the numeric
- * code as a string (`"-32601"`). Tool errors are the application code
- * (`"rate_limited"`). Messages and request bodies are never stored.
+ * measured and no error response was counted there. Codes are an allow-list
+ * plus "other". HTTP codes are `${status}:${errorCode}`. MCP JSON-RPC codes
+ * are the numeric code as a string (`"-32601"`). Tool errors are the
+ * application code (`"rate_limited"`). Messages and bodies are never stored.
  */
 export const DROP_OFF_FIELD_NOTE =
-  "additive on averray.arrivals.v1; absence and \"not reported\" are not zero";
+  "errorsByStage is additive on averray.arrivals.v1; error responses by stage, one pre-auth request = one visit; absence and \"not reported\" are not zero";
 
 const HTTP_STATUSES = new Set([400, 401, 403, 404, 409, 422, 429, 500, 502, 503]);
 const APP_CODES = new Set([
@@ -134,13 +147,14 @@ export function dropOffSnapshot(series, { nowMs, unavailable } = {}) {
     };
   }
   const since = series.collectionSinceMs;
-  return {
-    absentMeans: NOT_REPORTED,
-    collectionSinceMs: since,
-    sinceCutover: sumDropOff(series, since, nowMs),
-    "24h": since <= nowMs - DAY_MS ? sumDropOff(series, nowMs - DAY_MS, nowMs) : NOT_REPORTED,
-    "7d": since <= nowMs - 7 * DAY_MS ? sumDropOff(series, nowMs - 7 * DAY_MS, nowMs) : NOT_REPORTED
-  };
+    return {
+      absentMeans: NOT_REPORTED,
+      measures: "error responses by stage; one pre-auth request = one visit",
+      collectionSinceMs: since,
+      sinceCutover: sumDropOff(series, since, nowMs, { includePartialLeading: true }),
+      "24h": since <= nowMs - DAY_MS ? sumDropOff(series, nowMs - DAY_MS, nowMs) : NOT_REPORTED,
+      "7d": since <= nowMs - 7 * DAY_MS ? sumDropOff(series, nowMs - 7 * DAY_MS, nowMs) : NOT_REPORTED
+    };
 }
 
 export function serializeDropOff(series) {
@@ -185,10 +199,14 @@ function isKnownCode(code) {
   return HTTP_STATUSES.has(status) && (app === "other" || APP_CODES.has(app));
 }
 
-function sumDropOff(series, startMs, nowMs) {
+function sumDropOff(series, startMs, nowMs, { includePartialLeading = false } = {}) {
   const totals = emptyDoors();
   for (const [hourStart, counts] of series.hours) {
-    if (hourStart + HOUR_MS <= startMs || hourStart > nowMs) continue;
+    // Named windows drop the hour that starts before the window, so "24h"
+    // never covers 25 hour buckets. sinceCutover keeps that leading partial
+    // hour: those errors were measured after collection started.
+    const leading = includePartialLeading ? hourStart + HOUR_MS <= startMs : hourStart < startMs;
+    if (leading || hourStart > nowMs) continue;
     for (const [key, count] of Object.entries(counts)) {
       const [door, actor, stage, code] = key.split("|");
       const target = totals[door]?.[actor]?.[stage];
