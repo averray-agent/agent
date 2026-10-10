@@ -512,6 +512,7 @@ test("github_pr verifier scores structured PR evidence and exposes reputation si
   });
   const job = {
     id: "oss-example-project-42-add-tests",
+    lifecycle: { createdAt: "2026-10-06T00:00:00Z" },
     category: "testing",
     source: {
       type: "github_issue",
@@ -549,6 +550,7 @@ test("github_pr verifier requires human review for different repo names without 
   const registry = new VerifierRegistry();
   const job = {
     id: "oss-example-project-42-add-tests",
+    lifecycle: { createdAt: "2026-10-06T00:00:00Z" },
     category: "testing",
     source: {
       type: "github_issue",
@@ -591,6 +593,7 @@ test("github_pr verifier enriches PR evidence from GitHub when token is configur
           body: "Closes #42",
           state: "open",
           merged: false,
+          base: { repo: { id: 42, full_name: "example/project", created_at: "2026-08-24T00:00:00Z" } },
           head: { sha: "abc123" }
         });
       }
@@ -614,6 +617,7 @@ test("github_pr verifier enriches PR evidence from GitHub when token is configur
   });
   const job = {
     id: "oss-example-project-42-add-tests",
+    lifecycle: { createdAt: "2026-10-06T00:00:00Z" },
     category: "testing",
     source: {
       type: "github_issue",
@@ -646,6 +650,7 @@ test("github_pr verifier enriches PR evidence from GitHub when token is configur
 test("github_pr lookup failures escalate to human review rather than approving submitted claims", async () => {
   const job = {
     id: "external-example-project-42",
+    lifecycle: { createdAt: "2026-10-06T00:00:00Z" },
     category: "coding",
     source: {
       type: "external",
@@ -701,6 +706,7 @@ test("github_pr lookup failures escalate to human review rather than approving s
             body: "Closes #42",
             state: "open",
             merged: false,
+            base: { repo: { id: 42, full_name: "example/project", created_at: "2026-08-24T00:00:00Z" } },
             head: { sha: "abc123" }
           });
         }
@@ -730,6 +736,7 @@ test("github_pr ambiguous live score escalates to human review", async () => {
   });
   const verdict = await registry.evaluate({
     id: "external-example-project-42",
+    lifecycle: { createdAt: "2026-10-06T00:00:00Z" },
     category: "coding",
     source: {
       type: "external",
@@ -770,6 +777,7 @@ test("github_pr verifier rejects observable PR bodies missing required disclosur
           body: "Closes #42",
           state: "open",
           merged: false,
+          base: { repo: { id: 42, full_name: "example/project", created_at: "2026-08-24T00:00:00Z" } },
           head: { sha: "abc123" }
         });
       }
@@ -781,6 +789,7 @@ test("github_pr verifier rejects observable PR bodies missing required disclosur
   });
   const job = {
     id: "oss-example-project-42-add-tests",
+    lifecycle: { createdAt: "2026-10-06T00:00:00Z" },
     category: "testing",
     source: {
       type: "github_issue",
@@ -815,6 +824,7 @@ test("github_pr verifier accepts required disclosure footer when observed", asyn
   });
   const job = {
     id: "oss-example-project-42-add-tests",
+    lifecycle: { createdAt: "2026-10-06T00:00:00Z" },
     category: "testing",
     source: {
       type: "github_issue",
@@ -928,6 +938,7 @@ test("github_pr wizard gate escalates an unreadable live PR body to human review
 function githubPrWizardJob() {
   return {
     id: "external-example-project-42",
+    lifecycle: { createdAt: "2026-10-06T00:00:00Z" },
     category: "coding",
     source: {
       type: "external",
@@ -958,6 +969,7 @@ function liveGithubPrFetch({ body = "Closes #42", bodyReadable = true, merged = 
         title: "Fix parser validation for #42",
         state: "open",
         merged,
+        base: { repo: { id: 42, full_name: "example/project", created_at: "2026-08-24T00:00:00Z" } },
         head: { sha: "abc123" }
       };
       if (bodyReadable) pullRequest.body = body;
@@ -1730,6 +1742,7 @@ test("both run routes refuse unmerged GitHub approval before any writes, even wi
 test("GitHub approval uses the live read, not a claimant's merged flag", async () => {
   const h = makeIdempotencyHarness(3);
   h.claimed.jobSnapshot = buildJobSnapshot({ ...h.claimed.jobSnapshot.definition, outputSchemaRef: undefined,
+    lifecycle: { createdAt: "2026-10-06T00:00:00Z" },
     source: { type: "github_issue", repo: "example/project", issueNumber: 42 },
     verifierMode: "github_pr", verifierConfig: { handler: "github_pr", version: 1 } });
   h.claimed.submission = normalizeSubmission({ prUrl: "https://github.com/example/project/pull/77",

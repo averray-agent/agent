@@ -123,7 +123,7 @@ test("fork pull request does not match when only its head repository is the sour
   assert.match(verdict.blockers.join("\n"), /PR repo must match owner\/upstream/u);
 });
 
-test("source repository lookup failure keeps exact name comparison and records the reason", async () => {
+test("source repository lookup failure requires PR base age evidence even with the same name", async () => {
   const sameName = await new VerifierRegistry({
     githubToken: "github_pat_test",
     fetchImpl: routeGithub({
@@ -139,11 +139,12 @@ test("source repository lookup failure keeps exact name comparison and records t
     claimantWallet: wallet,
     claimSessionId: sessionId
   });
-  assert.equal(sameName.checks.repoMatches, true);
-  assert.equal(sameName.checks.repoMatchMethod, "exact_name");
-  assert.equal(sameName.checks.repoMatchFallbackReason, "github_api_404");
+  assert.equal(sameName.checks.repoMatches, null);
+  assert.equal(sameName.checks.repoMatchMethod, "unknown");
+  assert.equal(sameName.checks.repoMatchFallbackReason, "pr_base_repo_creation_time_unavailable");
+  assert.equal(sameName.evidence.sourceRepoIdentity.lookupFailureReason, "github_api_404");
   assert.equal(sameName.evidence.sourceRepoRenamed, undefined);
-  assert.equal(sameName.outcome, "approved");
+  assert.equal(sameName.outcome, "disputed");
 
   const differentName = await new VerifierRegistry({
     githubToken: "github_pat_test",
@@ -404,6 +405,62 @@ test("uncached repository with missing pinned job creation time requires human r
   assert.equal(verdict.checks.sourceRepoIdentity.jobCreatedAt, null);
   assert.equal(verdict.checks.sourceRepoIdentity.predatesJob, null);
 });
+
+for (const sourceStatus of [500, 403, 429]) {
+  for (const [age, createdAt, outcome] of [
+    ["older", repositoryCreatedAt, "approved"],
+    ["recreated", "2026-10-07T00:00:00Z", "disputed"],
+    ["same-time", jobCreatedAt, "disputed"],
+    ["missing", undefined, "disputed"],
+    ["invalid", "not-a-date", "disputed"]
+  ]) test(`failed source lookup ${sourceStatus}: same-name ${age} PR base repository age`, async () => {
+    const snapshot = pull({ baseId: sourceId, baseName: "example/project", merged: true });
+    snapshot.base.repo.created_at = createdAt;
+    const verdict = await new VerifierRegistry({
+      githubToken: "github_pat_test",
+      fetchImpl: async (url) => new URL(url).pathname === "/repos/example/project"
+        ? new Response("{}", { status: sourceStatus })
+        : routeGithub({ "/repos/example/project/pulls/91": snapshot })(url)
+    }).evaluate(githubJob({ repo: "example/project" }),
+      submission("https://github.com/example/project/pull/91"),
+      { claimantWallet: wallet, claimSessionId: sessionId });
+    assert.equal(verdict.githubLookup.status, "verified");
+    assert.equal(verdict.githubLookup.baseRepo.createdAt, createdAt ?? null);
+    assert.equal(verdict.outcome, outcome);
+    assert.equal(verdict.checks.repoMatches, outcome === "approved" ? true : null);
+    assert.equal(verdict.checks.repoMatchMethod, outcome === "approved" ? "exact_name" : "unknown");
+    assert.equal(verdict.evidence.sourceRepoIdentity.lookupFailureReason, `github_api_${sourceStatus}`);
+    if (outcome === "approved") assert.equal(verdict.checks.repoMatchFallbackReason, `github_api_${sourceStatus}`);
+    else assert.match(verdict.checks.repoMatchFallbackReason, /^pr_base_repo_/u);
+  });
+}
+
+for (const [name, snapshotMode] of [["renamed", "500"], ["same-name", "missing-base"]]) {
+  test(`resolved-by-name id with ${name} PR base id unavailable requires human review`, async () => {
+    const repo = "jyotishankar04/saveforlatter";
+    const prRepo = name === "renamed" ? "jyotishankar04/savedly" : repo;
+    const snapshot = pull({ baseId: sourceId, baseName: prRepo, merged: true });
+    delete snapshot.base.repo;
+    const verdict = await new VerifierRegistry({
+      githubToken: "github_pat_test",
+      fetchImpl: async (url) => {
+        const path = new URL(url).pathname;
+        if (path === `/repos/${repo}`) return Response.json({
+          id: sourceId, full_name: prRepo, created_at: repositoryCreatedAt
+        });
+        if (snapshotMode === "500") return new Response("{}", { status: 500 });
+        return routeGithub({ [`/repos/${prRepo}/pulls/91`]: snapshot })(url);
+      }
+    }).evaluate(githubJob({ repo }), submission(`https://github.com/${prRepo}/pull/91`),
+      { claimantWallet: wallet, claimSessionId: sessionId });
+    assert.equal(verdict.checks.sourceRepoIdentity.origin, "resolved_by_name");
+    assert.equal(verdict.checks.sourceRepoIdentity.predatesJob, true);
+    assert.equal(verdict.checks.repoMatches, null);
+    assert.equal(verdict.checks.repoMatchMethod, "unknown");
+    assert.equal(verdict.outcome, "disputed");
+    assert.equal(verdict.handler, "human_fallback");
+  });
+}
 
 function githubJob({ repo, githubRepoId, sourceType = "github_issue", declaredRepoId } = {}) {
   const declared = {
