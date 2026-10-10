@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { SelfIdentityRegistry } from "../core/self-identity-registry.js";
-import { ArrivalAlerts, ARRIVAL_ALERT_COOLDOWN_MS, ARRIVAL_ALERT_SEEN_CAP, CLIENT_FIRSTS_WALLET_CAP, CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY, NOT_REPORTED, SUPPRESSED_SUBJECT_CAP } from "./arrival-alerts.js";
+import { ArrivalAlerts, ARRIVAL_ALERT_COOLDOWN_MS, ARRIVAL_ALERT_SEEN_CAP, CLIENT_FIRST_OVERFLOW_CAP, CLIENT_FIRSTS_WALLET_CAP, CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY, NOT_REPORTED, SUPPRESSED_SUBJECT_CAP } from "./arrival-alerts.js";
 import { ArrivalSessionTrail } from "./arrival-session-trail.js";
 import { ArrivalObservatory } from "./arrival-observatory.js";
 import { createAdminArrivalAlertRoutes } from "../protocols/http/admin-arrival-alert-routes.js";
@@ -544,6 +544,151 @@ test("the alerts route reports firsts that are no longer tracked", async () => {
   }), true);
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.firstsNoLongerTracked, 1);
+});
+
+test("repeat visits do not rewrite a trail that has no new first", async () => {
+  const recordWrites = [];
+  const state = new Map();
+  const stateStore = {
+    async getServiceState(scope) { return state.get(scope); },
+    async upsertServiceState(scope, value) {
+      if (String(scope).startsWith("arrival-session-record:")) recordWrites.push(scope);
+      state.set(scope, value);
+      return value;
+    },
+    async deleteServiceState() {}
+  };
+  const nowMs = 100_000;
+  const sessionTrail = new ArrivalSessionTrail({ stateStore, now: () => nowMs });
+  const alerts = new ArrivalAlerts({
+    stateStore,
+    sessionTrail,
+    now: () => nowMs,
+    cooldownMs: 60_000
+  });
+  const visit = async (wallet, name) => {
+    await sessionTrail.observe({
+      wallet,
+      clientInfo: { name, version: "1" },
+      door: "http",
+      name: "GET /auth/session",
+      resultClass: "ok",
+      stage: "reached"
+    });
+    await alerts.note({
+      wallet,
+      clientInfo: { name, version: "1" },
+      stage: "reached",
+      success: true,
+      authenticated: true
+    });
+  };
+  await visit(EXTERNAL, "prime");
+  const afterFirst = recordWrites.length;
+  for (let index = 0; index < 100; index += 1) await visit(EXTERNAL, "prime");
+  assert.ok(recordWrites.length - afterFirst <= 1);
+  const other = `0x${"e".repeat(40)}`;
+  await visit(other, "other-client");
+  const listed = await alerts.list();
+  const alert = [...listed.ready, ...listed.pending].find((row) => row.id === `external_wallet_first:${other}`);
+  assert.equal(alert.trail, "linked");
+});
+
+test("five thousand over-cap names stay bounded and do not force a flush each time", async () => {
+  const writes = [];
+  const store = {
+    async getServiceState() { return undefined; },
+    async upsertServiceState(_scope, value) {
+      writes.push(value);
+      return value;
+    }
+  };
+  const alerts = new ArrivalAlerts({
+    stateStore: store,
+    now: () => 12_000,
+    flushIntervalMs: 60_000,
+    cooldownMs: 60_000
+  });
+  for (let index = 0; index < 5_000; index += 1) {
+    await alerts.note({
+      wallet: EXTERNAL,
+      clientInfo: { name: `wide-${index}`, version: "1" },
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  const bucket = alerts.clientFirsts.get(EXTERNAL);
+  assert.equal(bucket.overflow.size <= CLIENT_FIRST_OVERFLOW_CAP, true);
+  assert.equal(alerts.clientFirstsCounted, 5_000 - CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY);
+  assert.equal(
+    alerts.clientFirstsUnremembered,
+    5_000 - CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY - CLIENT_FIRST_OVERFLOW_CAP
+  );
+  assert.ok(writes.length < 30, String(writes.length));
+  const remembered = `wide-${CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY}`;
+  const before = alerts.clientFirstsCounted;
+  await alerts.note({
+    wallet: EXTERNAL,
+    clientInfo: { name: remembered, version: "1" },
+    stage: "browsed",
+    success: true,
+    authenticated: true
+  });
+  assert.equal(alerts.clientFirstsCounted, before);
+  await alerts.note({
+    wallet: EXTERNAL,
+    clientInfo: { name: "wide-4999", version: "1" },
+    stage: "browsed",
+    success: true,
+    authenticated: true
+  });
+  assert.equal(alerts.clientFirstsCounted, before + 1);
+});
+
+test("load prunes stale days and caps wallets before any later write", async () => {
+  const day = 24 * 60 * 60 * 1_000;
+  const today = 5;
+  const nowMs = today * day + 1_000;
+  const walletAt = (prefix, index) => `0x${index.toString(16).padStart(40, prefix)}`;
+  const staleStore = memoryStore();
+  await staleStore.upsertServiceState("arrival-alerts", {
+    clientFirsts: [
+      ...[1, 2, 3].map((index) => ({
+        wallet: walletAt("a", index),
+        day: 1,
+        names: ["old@1"],
+        overflow: []
+      })),
+      ...[1, 2, 3, 4].map((index) => ({
+        wallet: walletAt("b", index),
+        day: today,
+        names: ["now@1"],
+        overflow: []
+      }))
+    ]
+  });
+  const stale = new ArrivalAlerts({ stateStore: staleStore, now: () => nowMs, flushIntervalMs: 60_000 });
+  await stale.list();
+  assert.equal([...stale.clientFirsts.values()].every((bucket) => bucket.day === today), true);
+  assert.equal(stale.clientFirsts.size, 4);
+
+  const crowdedStore = memoryStore();
+  await crowdedStore.upsertServiceState("arrival-alerts", {
+    clientFirsts: Array.from({ length: CLIENT_FIRSTS_WALLET_CAP + 25 }, (_, index) => ({
+      wallet: walletAt("0", index + 1),
+      day: today,
+      names: ["now@1"],
+      overflow: Array.from({ length: CLIENT_FIRST_OVERFLOW_CAP + 10 }, (__, name) => `over-${name}`)
+    }))
+  });
+  const crowded = new ArrivalAlerts({ stateStore: crowdedStore, now: () => nowMs, flushIntervalMs: 60_000 });
+  await crowded.list();
+  assert.equal(crowded.clientFirsts.size <= CLIENT_FIRSTS_WALLET_CAP, true);
+  assert.ok(crowded.clientFirstsEvicted >= 25);
+  const sample = crowded.clientFirsts.values().next().value;
+  assert.equal(sample.overflow.size <= CLIENT_FIRST_OVERFLOW_CAP, true);
+  assert.ok(crowded.clientFirstsUnremembered >= 10);
 });
 
 test("client-name cap state is pruned, bounded, and still applies after restart", async () => {

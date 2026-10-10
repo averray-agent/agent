@@ -5,6 +5,7 @@ export const ARRIVAL_ALERT_SCHEMA = "averray.arrival-alerts.v1";
 export const ARRIVAL_ALERT_COOLDOWN_MS = 15 * 60 * 1_000;
 export const ARRIVAL_ALERT_SEEN_CAP = 2_000;
 export const CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY = 3;
+export const CLIENT_FIRST_OVERFLOW_CAP = 50;
 export const CLIENT_FIRSTS_WALLET_CAP = 2_000;
 export const SUPPRESSED_SUBJECT_CAP = 500;
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -57,6 +58,7 @@ export class ArrivalAlerts {
     this.suppressedSubjectOverflow = 0;
     this.clientFirsts = new Map();
     this.clientFirstsCounted = 0;
+    this.clientFirstsUnremembered = 0;
     this.clientFirstsEvicted = 0;
     this.untrackedFirsts = 0;
     this.summaryWindowStartMs = undefined;
@@ -69,6 +71,7 @@ export class ArrivalAlerts {
     this.loadFailed = null;
     this.loadPromise = null;
     this.dirty = false;
+    this.countersDirty = false;
     this.lastFlushMs = 0;
   }
 
@@ -82,6 +85,7 @@ export class ArrivalAlerts {
   } = {}) {
     try {
       if (!(await this.ensureLoaded())) return;
+      this.plannedSlots = 0;
       // Anonymous pre-auth names are attacker-controlled and must not occupy
       // the dedup set. Client names are classified on their own, so a self or
       // ambiguous name riding an external wallet is not an external client.
@@ -95,27 +99,48 @@ export class ArrivalAlerts {
         : undefined;
       const normalizedWallet = String(wallet ?? "").trim().toLowerCase();
       const trailId = authenticated && normalizedWallet ? `wallet:${normalizedWallet}` : undefined;
-      // The trail flushes on its own interval (30s). Force this wallet's record
-      // out before the link is decided, or a second wallet in that window is
-      // "unpersisted" forever.
-      if (trailId) await this.sessionTrail?.persist?.(trailId);
-      const trailLink = await this.resolveTrail(trailId);
+      const planned = [];
+      const suppressed = [];
+      const take = (kind, subject) => {
+        const how = this.classifyArrival(kind, subject);
+        if (how === "queue") planned.push([kind, subject]);
+        else if (how === "suppress") suppressed.push([kind, subject]);
+      };
       if (authenticated && clientActor === "external" && name) {
         const subject = `${name}@${version ?? "unknown"}`;
-        if (this.admitClientFirst(normalizedWallet, subject, nowMs)) {
-          this.consider(nowMs, "external_client_first", subject, trailLink);
-        }
+        if (this.admitClientFirst(normalizedWallet, subject, nowMs)) take("external_client_first", subject);
       }
       if (authenticated && success && walletActor === "external") {
-        this.consider(nowMs, "external_wallet_first", normalizedWallet, trailLink);
-        if (stage === "claimed") this.consider(nowMs, "external_wallet_first_claim", normalizedWallet, trailLink);
-        if (stage === "submitted") this.consider(nowMs, "external_wallet_first_submit", normalizedWallet, trailLink);
+        take("external_wallet_first", normalizedWallet);
+        if (stage === "claimed") take("external_wallet_first_claim", normalizedWallet);
+        if (stage === "submitted") take("external_wallet_first_submit", normalizedWallet);
+      }
+      const plain = { trail: NOT_REPORTED, trailNote: "no session record" };
+      for (const [kind, subject] of suppressed) this.consider(nowMs, kind, subject, plain);
+      // Persist only a record a new alert is about to link, and skip a record
+      // that is already stored at this revision. Repeat signed-in traffic keeps
+      // the 30s trail batch.
+      if (planned.length > 0) {
+        if (trailId && this.sessionTrail?.needsPersist?.(trailId)) {
+          await this.sessionTrail.persist(trailId);
+        }
+        const trailLink = await this.resolveTrail(trailId);
+        for (const [kind, subject] of planned) this.consider(nowMs, kind, subject, trailLink);
       }
       this.release(nowMs);
-      if (this.dirty) await this.maybeFlush(true);
+      if (this.dirty || this.countersDirty) await this.maybeFlush(true);
     } catch {
       // An alert must not change the visit it describes.
     }
+  }
+
+  classifyArrival(kind, subject) {
+    const key = `${kind}:${subject}`;
+    if (this.seen.has(key)) return "seen";
+    const queued = this.pending.filter((alert) => alert.kind !== "suppressed_firsts").length + this.plannedSlots;
+    if (this.seen.size + this.plannedSlots >= ARRIVAL_ALERT_SEEN_CAP || queued >= PENDING_CAP) return "suppress";
+    this.plannedSlots = (this.plannedSlots ?? 0) + 1;
+    return "queue";
   }
 
   consider(nowMs, kind, subject, trailLink) {
@@ -167,9 +192,10 @@ export class ArrivalAlerts {
     if (bucket.names.has(subject)) return true;
     if (bucket.names.size >= CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY) {
       if (!bucket.overflow.has(subject)) {
-        bucket.overflow.add(subject);
+        if (bucket.overflow.size >= CLIENT_FIRST_OVERFLOW_CAP) this.clientFirstsUnremembered += 1;
+        else bucket.overflow.add(subject);
         this.clientFirstsCounted += 1;
-        this.dirty = true;
+        this.countersDirty = true;
       }
       return false;
     }
@@ -197,7 +223,7 @@ export class ArrivalAlerts {
       if (!oldestKey) return;
       this.clientFirsts.delete(oldestKey);
       this.clientFirstsEvicted += 1;
-      this.dirty = true;
+      this.countersDirty = true;
     }
   }
 
@@ -329,6 +355,10 @@ export class ArrivalAlerts {
       this.clientFirstsCounted = Number.isSafeInteger(stored?.clientFirstsCounted) && stored.clientFirstsCounted >= 0
         ? stored.clientFirstsCounted
         : 0;
+      this.clientFirstsUnremembered = Number.isSafeInteger(stored?.clientFirstsUnremembered)
+        && stored.clientFirstsUnremembered >= 0
+        ? stored.clientFirstsUnremembered
+        : 0;
       this.clientFirstsEvicted = Number.isSafeInteger(stored?.clientFirstsEvicted) && stored.clientFirstsEvicted >= 0
         ? stored.clientFirstsEvicted
         : 0;
@@ -338,9 +368,13 @@ export class ArrivalAlerts {
         const names = Array.isArray(entry?.names)
           ? entry.names.filter((name) => typeof name === "string").slice(0, CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY)
           : [];
-        const overflow = Array.isArray(entry?.overflow)
+        const rawOverflow = Array.isArray(entry?.overflow)
           ? entry.overflow.filter((name) => typeof name === "string")
           : [];
+        const overflow = rawOverflow.slice(0, CLIENT_FIRST_OVERFLOW_CAP);
+        if (rawOverflow.length > CLIENT_FIRST_OVERFLOW_CAP) {
+          this.clientFirstsUnremembered += rawOverflow.length - CLIENT_FIRST_OVERFLOW_CAP;
+        }
         if (!entry?.wallet || !Number.isFinite(day)) continue;
         this.clientFirsts.set(String(entry.wallet), { day, names: new Set(names), overflow: new Set(overflow) });
       }
@@ -358,11 +392,13 @@ export class ArrivalAlerts {
   }
 
   async maybeFlush(force = false) {
-    if (!this.dirty) return;
+    if (!this.dirty && !this.countersDirty) return;
     const nowMs = this.now();
-    if (!force && nowMs - this.lastFlushMs < this.flushIntervalMs) return;
+    // Counter-only edits wait for the interval. A new alert still flushes now.
+    if (!(force && this.dirty) && nowMs - this.lastFlushMs < this.flushIntervalMs) return;
     this.lastFlushMs = nowMs;
     this.dirty = false;
+    this.countersDirty = false;
     try {
       await this.stateStore?.upsertServiceState?.(STATE_SCOPE, {
         seen: [...this.seen],
@@ -375,6 +411,7 @@ export class ArrivalAlerts {
         suppressedSubjects: [...this.suppressedSubjects],
         suppressedSubjectOverflow: this.suppressedSubjectOverflow,
         clientFirstsCounted: this.clientFirstsCounted,
+        clientFirstsUnremembered: this.clientFirstsUnremembered,
         clientFirstsEvicted: this.clientFirstsEvicted,
         clientFirsts: [...this.clientFirsts].map(([wallet, bucket]) => ({
           wallet,

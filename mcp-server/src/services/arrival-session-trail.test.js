@@ -216,3 +216,44 @@ test("a failed per-record write does not mark the session persisted", async () =
   assert.equal(await sessions.persist(`wallet:${WALLET}`), false);
   assert.equal((await sessions.get(`wallet:${WALLET}`)).persisted, false);
 });
+
+test("a step added while persist is writing stays dirty", async () => {
+  const state = new Map();
+  let release = () => {};
+  let entered = () => {};
+  const enteredPromise = new Promise((resolve) => { entered = resolve; });
+  const sessions = new ArrivalSessionTrail({
+    stateStore: {
+      async getServiceState(scope) { return state.get(scope); },
+      async upsertServiceState(scope, value) {
+        if (String(scope).startsWith("arrival-session-record:")) {
+          entered();
+          await new Promise((resolve) => { release = resolve; });
+        }
+        state.set(scope, value);
+        return value;
+      },
+      async deleteServiceState() {}
+    },
+    now: () => 1_000
+  });
+  await sessions.observe({
+    wallet: WALLET,
+    door: "http",
+    name: "GET /auth/session",
+    resultClass: "ok",
+    stage: "reached"
+  });
+  const writing = sessions.persist(`wallet:${WALLET}`);
+  await enteredPromise;
+  await sessions.observe({
+    wallet: WALLET,
+    door: "http",
+    name: "GET /jobs",
+    resultClass: "ok",
+    stage: "browsed"
+  });
+  release();
+  await writing;
+  assert.equal(sessions.dirtyIds.has(`wallet:${WALLET}`), true);
+});
