@@ -153,6 +153,77 @@ test("ingestGithubIssues scans repository policy files when enabled", async () =
   assert.equal(payload.skippedDetails[0].reason, "repo_ai_policy_denies_agent_contributions");
 });
 
+test("ingestGithubIssues stores one resolved GitHub repository id for a renamed-safe cache", async () => {
+  const calls = [];
+  const payload = await ingestGithubIssues({
+    query: "is:issue is:open label:good-first-issue",
+    limit: 5,
+    minScore: 55,
+    fetchImpl: async (url) => {
+      calls.push(String(url));
+      if (String(url).includes("/search/issues")) {
+        return {
+          ok: true,
+          async json() {
+            return {
+              items: [
+                GOOD_ISSUE,
+                { ...GOOD_ISSUE, number: 43, html_url: "https://github.com/example/project/issues/43" }
+              ]
+            };
+          }
+        };
+      }
+      assert.equal(String(url), "https://api.github.com/repos/example/project");
+      return {
+        ok: true,
+        async json() {
+          return { id: 1344638682, full_name: "example/project" };
+        }
+      };
+    }
+  });
+
+  assert.equal(payload.jobs.length, 2);
+  assert.equal(payload.jobs[0].source.githubRepoId, 1344638682);
+  assert.equal(payload.jobs[1].source.githubRepoId, 1344638682);
+  assert.equal(calls.filter((url) => url === "https://api.github.com/repos/example/project").length, 1);
+});
+
+test("ingestGithubIssues uses an embedded repository id and omits it when lookup fails", async () => {
+  const embedded = await ingestGithubIssues({
+    query: "is:issue is:open label:good-first-issue",
+    limit: 5,
+    minScore: 55,
+    fetchImpl: async (url) => {
+      if (String(url).includes("/search/issues")) {
+        return {
+          ok: true,
+          async json() {
+            return { items: [{ ...GOOD_ISSUE, repository: { id: 77, full_name: "example/project" } }] };
+          }
+        };
+      }
+      throw new Error("repo lookup is unnecessary when the issue already carries its id");
+    }
+  });
+  assert.equal(embedded.jobs[0].source.githubRepoId, 77);
+
+  const failed = await ingestGithubIssues({
+    query: "is:issue is:open label:good-first-issue",
+    limit: 5,
+    minScore: 55,
+    fetchImpl: async (url) => {
+      if (String(url).includes("/search/issues")) {
+        return { ok: true, async json() { return { items: [GOOD_ISSUE] }; } };
+      }
+      return { ok: false, status: 503, async json() { return {}; } };
+    }
+  });
+  assert.equal(failed.jobs[0].source.repo, "example/project");
+  assert.equal(failed.jobs[0].source.githubRepoId, undefined);
+});
+
 test("ingestGithubIssues returns dry-run shaped jobs and filters pull requests", async () => {
   const payload = await ingestGithubIssues({
     query: "is:issue is:open label:good-first-issue",
