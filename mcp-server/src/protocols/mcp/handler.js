@@ -622,16 +622,16 @@ async function dispatchRequest({
     stage: message.method === "tools/call" ? undefined : "reached",
     tool: message.method === "tools/call" ? message.params?.name : undefined
   };
-  // A bearer is verified first when one is present, so a registered operator
-  // API-key id or wallet is self on this call. Verification failure leaves
-  // the arrival unmarked; it does not drop the record.
+  // One verification for a tools/call bearer. The rate limiter below reuses
+  // this result. A refused credential still counts as an arrival, unmarked.
   if (message.method === "tools/call" && hasBearerToken(request) && authMiddleware) {
+    request._arrivalAuthChecked = true;
     try {
-      await authMiddleware(request, new URL("http://localhost/mcp"), {
+      request._arrivalAuth = await authMiddleware(request, new URL("http://localhost/mcp"), {
         enforceRouteCapabilities: false
       });
-    } catch {
-      // Refused credentials still arrived.
+    } catch (error) {
+      request._arrivalAuthError = error;
     }
   }
   await recordArrival(arrivals, message.method === "tools/call" ? "recordTool" : "recordReach", {
@@ -759,7 +759,10 @@ async function enforceToolRateLimit({
   const hasBearer = hasBearerToken(request);
   let auth;
   let authError;
-  if (hasBearer) {
+  if (request._arrivalAuthChecked) {
+    auth = request._arrivalAuth;
+    authError = request._arrivalAuthError;
+  } else if (hasBearer) {
     try {
       auth = await authMiddleware(request, new URL("http://localhost/mcp"), {
         enforceRouteCapabilities: false

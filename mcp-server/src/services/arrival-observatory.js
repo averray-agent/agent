@@ -488,6 +488,10 @@ export class ArrivalObservatory {
       // not "ours", so it lands in the external bucket. Only an explicit
       // self-declaration, or a name we have declared unattributable, keeps a
       // call out of the number we read as demand.
+      //
+      // Registration is not retroactive. A wallet or grant id added later
+      // re-marks rows at read time, and leaves the counter where the call
+      // was written. Past funnelExternal totals stay.
       this.totalsFor(actor, door)[stage] += 1;
       // Label set is deliberately tiny: a self-declared client name is
       // attacker-controlled and unbounded, so it never becomes a label. The
