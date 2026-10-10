@@ -25,7 +25,7 @@ test("repository backfill defaults to dry-run without any write", async (t) => {
   assert.deepEqual(result, { dryRun: true, pinned: 0, wouldPin: 1, skipped: 0,
     rows: [{ jobId: "legacy-pr", status: "would_pin", githubRepoId: 42 }] });
   assert.equal(h.calls[0].url, "https://api.github.com/repos/owner/repo");
-  assert.equal(h.calls[0].options.redirect, "error");
+  assert.equal(h.calls[0].options.redirect, "manual");
   assert.ok(h.calls[0].options.signal instanceof AbortSignal);
   assert.deepEqual(deadlines, [5_000]);
 });
@@ -63,6 +63,15 @@ for (const [name, createStore] of [
     assert.equal(JSON.stringify(session), snapshotBefore);
     assert.equal(buildJobSnapshot(h.definition).specHash, session.jobSnapshot.specHash);
     assert.equal(h.service.getJobDefinition(h.definition.id).source.githubRepoId, undefined);
+    const refreshed = job();
+    refreshed.source.labels = ["new label"];
+    refreshed.source.comments = 12;
+    assert.equal(repositoryPinKey(refreshed), repositoryPinKey(h.definition));
+    assert.equal((await withPinnedRepositoryIdentity(refreshed, h.store)).source.githubRepoId, 42);
+    h.definition.source = refreshed.source;
+    assert.equal((await backfillGithubRepositoryIds(h.service, { jobIds: [h.definition.id], apply: true }, h.options)).rows[0].reason, "already_pinned");
+    const differentRepo = job(); differentRepo.source.repo = "owner/other";
+    assert.equal((await withPinnedRepositoryIdentity(differentRepo, h.store)).source.githubRepoId, undefined);
     const differentIncarnation = job(); differentIncarnation.lifecycle.createdAt = "2026-10-02T00:00:00Z";
     assert.equal((await withPinnedRepositoryIdentity(differentIncarnation, h.store)).source.githubRepoId, undefined);
   });
@@ -70,12 +79,14 @@ for (const [name, createStore] of [
 
 test("real Redis repository pin NX preserves the first identity", { skip: !process.env.VERIFY_RESERVATION_TEST_REDIS_URL, timeout: 10_000 }, async () => {
   const store = new RedisStateStore(process.env.VERIFY_RESERVATION_TEST_REDIS_URL, `repository-pin-test:${randomUUID()}`);
-  const record = { key: repositoryPinKey(job()), source: { githubRepoId: 42 } };
+  const record = { key: repositoryPinKey(job()), source: { githubRepoId: 42 }, pinnedAt: "2026-10-10T18:00:00.000Z" };
   try {
     // Production connects at boot before accepting concurrent requests.
     await store.connect();
     assert.deepEqual(await Promise.all([store.putGithubRepositoryPin(record), store.putGithubRepositoryPin({ ...record, source: { githubRepoId: 99 } })]), [true, false]);
     assert.equal((await store.getGithubRepositoryPin(record.key)).source.githubRepoId, 42);
+    const refreshed = job(); refreshed.source.labels = ["updated"]; refreshed.source.comments = 20;
+    assert.equal((await withPinnedRepositoryIdentity(refreshed, store)).source.githubRepoId, 42);
   } finally {
     if (store.client.isReady) {
       await store.client.del(store.key("github-repository-pin", record.key));
@@ -85,7 +96,7 @@ test("real Redis repository pin NX preserves the first identity", { skip: !proce
 });
 
 for (const [name, response, reason] of [
-  ["renamed", { ...repository, full_name: "owner/renamed" }, "repository_name_mismatch"],
+  ["mismatched name", { ...repository, full_name: "owner/renamed" }, "repository_name_mismatch"],
   ["transferred", { ...repository, full_name: "other/repo" }, "repository_name_mismatch"],
   ["newer", { ...repository, created_at: "2026-10-02T00:00:00Z" }, "repository_not_older_than_job"],
   ["equal", { ...repository, created_at: job().lifecycle.createdAt }, "repository_not_older_than_job"],
@@ -99,6 +110,21 @@ for (const [name, response, reason] of [
   assert.equal(await h.store.getGithubRepositoryPin(repositoryPinKey(h.definition)), undefined);
 });
 
+for (const status of [301, 302, 303, 304, 307, 308]) test(`backfill skips renamed repository on HTTP ${status} without following it`, async () => {
+  const h = harness();
+  let reads = 0;
+  h.options.fetchImpl = async (_url, options) => {
+    reads++;
+    assert.equal(options.redirect, "manual");
+    return new Response(null, { status, headers: { location: "https://api.github.com/repositories/1344638682" } });
+  };
+  const result = await backfillGithubRepositoryIds(h.service, { jobIds: [h.definition.id], apply: true }, h.options);
+  assert.equal(result.rows[0].reason, "renamed_or_transferred");
+  assert.equal(result.pinned, 0);
+  assert.equal(reads, 1);
+  assert.equal(await h.store.getGithubRepositoryPin(repositoryPinKey(h.definition)), undefined);
+});
+
 for (const state of ["closed", "paused", "archived", "stale", "cancelled"]) test(`backfill skips ${state} jobs before GitHub`, async () => {
   const definition = job(); definition.lifecycle.state = state;
   const h = harness({ definition });
@@ -107,11 +133,12 @@ for (const state of ["closed", "paused", "archived", "stale", "cancelled"]) test
 });
 
 test("backfill skips resolved sessions and non-GitHub or already pinned jobs", async () => {
-  for (const variant of ["resolved", "external", "ingested"]) {
+  for (const variant of ["resolved", "external", "ingested", "other-handler"]) {
     const h = harness();
     if (variant === "resolved") await h.store.upsertSession({ sessionId: "s", jobId: h.definition.id, wallet: "0xaa", status: "resolved" });
     if (variant === "external") h.definition.source.type = "external";
     if (variant === "ingested") h.definition.source.githubRepoId = 9;
+    if (variant === "other-handler") h.definition.verifierConfig.handler = "deterministic";
     const result = await backfillGithubRepositoryIds(h.service, { jobIds: [h.definition.id], apply: true }, h.options);
     assert.equal(result.pinned, 0); assert.equal(result.skipped, 1); assert.equal(h.calls.length, 0);
   }

@@ -28,7 +28,8 @@ Review skipped rows and their reason before retrying. To apply, repeat the same
 IDs with `"apply":true`; the server re-reads eligibility and GitHub rather than
 trusting the dry-run output. A dry-run does not create an idempotency receipt or
 any pin. Each GitHub read (including its response body) has a 5-second abort
-deadline; reads are sequential, at most 10 per request. Redirects are refused.
+deadline; reads are sequential, at most 10 per request. Redirects are read
+manually, never followed; any 3xx reports `renamed_or_transferred` for review.
 Lookup failures leave the job unpinned and report a reason, never response bodies.
 No new environment values are needed: the existing `GITHUB_TOKEN` is used.
 
@@ -45,16 +46,17 @@ Pins are immutable verification metadata, not catalogue mutations. Memory uses
 put-if-absent; Redis uses atomic `SET NX` at
 `<namespace>:github-repository-pin:<identity hash>`, without an expiry. Repeated
 or concurrent applies never overwrite a pin. The identity hash binds job ID,
-the entire original source, and job creation time; reused IDs or changed sources
-cannot inherit an old pin. The record stores `source.githubRepoId`, GitHub's
+`source.repo`, and job creation time; refreshed issue labels/comments retain the
+pin, while a different repository or creation event cannot inherit it. The record stores `source.githubRepoId`, GitHub's
 name/creation date, the job creation date, pin time, and `origin: operator_backfill`.
 
 After snapshot-integrity validation, `VerifierService` supplies a cloned source
 with `githubRepoId` to the existing verifier for preview, settlement evaluation,
 and replay. Catalogue/worker definitions, claim snapshots, definition hashes,
 spec hashes, and receipt audit preimages are unchanged. Existing ingestion-time
-IDs win. The current verifier reports these trusted cached IDs as `ingested`;
-the separate pin record retains the exact backfill provenance. Corrupt pins or
+IDs win and report `ingested`. Backfilled IDs report `origin: pinned` and the
+record's `pinnedAt` in checks/evidence. This provenance is attached only to the
+in-memory evaluation overlay, not accepted from worker JSON. Corrupt pins or
 store errors fail closed rather than silently falling back to name resolution.
 
 Consumers checked: GitHub ingestion (unchanged), the three `VerifierService`

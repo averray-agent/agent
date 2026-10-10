@@ -1,10 +1,14 @@
 import { hashCanonicalContent } from "../core/canonical-content.js";
 import { ConflictError, ValidationError } from "../core/errors.js";
 
-// Bind to the immutable source and creation event, not a mutable lifecycle state.
+// Provenance belongs to the evaluation overlay, never to worker-supplied JSON.
+const pinProvenance = new WeakMap();
+export function repositoryPinProvenance(job) { return pinProvenance.get(job); }
+
+// Bind to the repository identity and creation event, not mutable issue metadata.
 // The catalogue and claim snapshots remain byte-for-byte unchanged.
 export function repositoryPinKey(job) {
-  return hashCanonicalContent({ jobId: job.id, source: job.source, createdAt: job.lifecycle?.createdAt ?? null });
+  return hashCanonicalContent({ jobId: job.id, repo: job.source?.repo ?? null, createdAt: job.lifecycle?.createdAt ?? null });
 }
 
 export async function withPinnedRepositoryIdentity(job, store) {
@@ -12,10 +16,13 @@ export async function withPinnedRepositoryIdentity(job, store) {
   const key = repositoryPinKey(job);
   const pin = await store.getGithubRepositoryPin(key);
   if (!pin) return job;
-  if (pin.key !== key || !Number.isSafeInteger(pin.source?.githubRepoId) || pin.source.githubRepoId <= 0) {
+  if (pin.key !== key || !Number.isSafeInteger(pin.source?.githubRepoId) || pin.source.githubRepoId <= 0
+    || !Number.isFinite(Date.parse(pin.pinnedAt))) {
     throw new ConflictError("Stored repository identity requires operator review.", "github_repository_pin_invalid");
   }
-  return { ...job, source: { ...job.source, githubRepoId: pin.source.githubRepoId } };
+  const overlaid = { ...job, source: { ...job.source, githubRepoId: pin.source.githubRepoId } };
+  pinProvenance.set(overlaid, Object.freeze({ pinnedAt: pin.pinnedAt }));
+  return overlaid;
 }
 
 export async function backfillGithubRepositoryIds(service, payload, {
@@ -55,9 +62,10 @@ export async function backfillGithubRepositoryIds(service, payload, {
       try {
         const response = await fetchImpl(`https://api.github.com/repos/${repo}`, {
           headers: { accept: "application/vnd.github+json", authorization: `Bearer ${githubToken}`, "X-GitHub-Api-Version": "2022-11-28" },
-          redirect: "error", signal: AbortSignal.timeout(5_000)
+          redirect: "manual", signal: AbortSignal.timeout(5_000)
         });
-        if (!response.ok) reason = `github_api_${response.status}`;
+        if (response.status >= 300 && response.status < 400) reason = "renamed_or_transferred";
+        else if (!response.ok) reason = `github_api_${response.status}`;
         else repository = await response.json();
       } catch { reason = "github_read_unavailable"; }
     }
