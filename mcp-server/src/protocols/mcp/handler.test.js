@@ -34,6 +34,7 @@ function createHarness(overrides = {}) {
   const metrics = overrides.metrics ?? new MetricRegistry();
   const handler = createMcpRoute({
     arrivals: overrides.arrivals,
+    sessionTrail: overrides.sessionTrail,
     authMiddleware: overrides.authMiddleware ?? (async () => ({ wallet: "0xauthed" })),
     clientIp: () => "198.51.100.8",
     enforceLimit: async (bucket, key, config) => {
@@ -773,13 +774,67 @@ test("a tools/call bearer is verified once, and only a service-token grant id co
   assert.equal(authCalls, 1);
 });
 
+test("successful listJobs and tools/list steps are recorded after the rate limit", async () => {
+  const steps = [];
+  const sessionTrail = { async observe(entry) { steps.push(entry); } };
+  const { handler } = createHarness({ sessionTrail });
+  const listed = await call(
+    handler,
+    modernRequest("tools/list"),
+    modernHeaders("tools/list")
+  );
+  const jobs = await call(
+    handler,
+    modernRequest("tools/call", { name: "listJobs", arguments: {} }),
+    modernHeaders("tools/call", "listJobs")
+  );
+  assert.equal(listed.statusCode, 200);
+  assert.equal(jobs.body.result.isError, false);
+  assert.deepEqual(steps.map((step) => [step.name, step.resultClass, step.stage]), [
+    ["tools/list", "ok", "reached"],
+    ["listJobs", "ok", "browsed"]
+  ]);
+});
+
+test("a client-supplied mcp session id is not a trail key unless the server issued it", async () => {
+  const steps = [];
+  const sessionTrail = { async observe(entry) { steps.push(entry); } };
+  const { handler, legacySessions } = createHarness({ sessionTrail });
+  await call(handler, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: LEGACY_MCP_VERSION,
+      capabilities: {},
+      clientInfo: { name: "legacy-test", version: "0.1.0" }
+    }
+  });
+  steps.length = 0;
+  await call(handler, { jsonrpc: "2.0", id: 2, method: "tools/list" }, {
+    "mcp-session-id": "forged-session",
+    "mcp-protocol-version": LEGACY_MCP_VERSION
+  });
+  assert.equal(steps[0].mcpSessionId, undefined);
+  steps.length = 0;
+  const liveId = [...legacySessions.keys()][0];
+  legacySessions.get(liveId).initialized = true;
+  await call(handler, { jsonrpc: "2.0", id: 3, method: "tools/list" }, {
+    "mcp-session-id": liveId,
+    "mcp-protocol-version": LEGACY_MCP_VERSION
+  });
+  assert.equal(steps.at(-1).mcpSessionId, liveId);
+});
+
 test("parse and invalid JSON-RPC errors are unclassified, not external", async () => {
   const recorded = [];
   const arrivals = {
     async recordDropOff(entry) { recorded.push(entry); }
   };
+  const refuseTrail = { async observe() { throw new Error("pre-limit garbage must not be stitched"); } };
   const { handler } = createHarness({
     arrivals,
+    sessionTrail: refuseTrail,
     readJsonBody: async () => { throw new Error("Invalid JSON body."); }
   });
   const parsed = await call(handler, { jsonrpc: "2.0", id: 1, method: "ping" });
@@ -789,7 +844,8 @@ test("parse and invalid JSON-RPC errors are unclassified, not external", async (
 
   const invalid = [];
   const { handler: invalidHandler } = createHarness({
-    arrivals: { async recordDropOff(entry) { invalid.push(entry); } }
+    arrivals: { async recordDropOff(entry) { invalid.push(entry); } },
+    sessionTrail: refuseTrail
   });
   const rejected = await call(invalidHandler, { nope: true });
   assert.equal(rejected.statusCode, 400);

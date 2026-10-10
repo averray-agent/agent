@@ -1089,13 +1089,16 @@ const server = createServer(async (request, response) => {
         ? { kind: "http", status: statusCode, code: arrivalError?.code }
         : statusCode >= 200 ? { ok: true } : undefined
     });
-    if (isRecordedHttpArrival(wireMethod, pathname)) {
-      const httpRoute = `${String(wireMethod ?? "GET").toUpperCase()} ${pathname}`;
+    if (isRecordedHttpArrival(wireMethod, pathname) && !pathname.startsWith("/admin")) {
+      const method = String(wireMethod ?? "GET").toUpperCase();
+      const httpRoute = `${method} ${pathname}`;
+      // observe() must not reject: this call is deliberately not awaited, and
+      // a rejection here is an unhandled rejection on Node 22.
       void sessionTrail.observe({
-        wallet: request._arrivalWallet,
+        wallet: pathname === "/auth/nonce" ? undefined : request._arrivalWallet,
         clientInfo: extractHttpClientInfo(request),
         door: "http",
-        name: httpRoute,
+        name: `${method} ${metricPathLabel(pathname)}`,
         resultClass: resultClassFromOutcome({
           outcome: arrivalError ? { kind: "http", status: statusCode, code: arrivalError.code } : undefined,
           statusCode

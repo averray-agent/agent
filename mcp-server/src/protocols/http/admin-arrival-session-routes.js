@@ -24,7 +24,11 @@ export function createAdminArrivalSessionRoutes({
       return true;
     }
     const limit = parseLimit(url, 50, 100);
-    const body = await sessionTrail.list({ limit });
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+    const body = await sessionTrail.list({
+      limit,
+      offset: Number.isSafeInteger(offset) && offset > 0 ? offset : 0
+    });
     respond(response, body.unavailable ? 503 : 200, body, { "cache-control": "no-store" });
     return true;
   };

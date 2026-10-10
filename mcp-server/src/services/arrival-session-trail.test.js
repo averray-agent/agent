@@ -5,6 +5,7 @@ import { ArrivalObservatory } from "./arrival-observatory.js";
 import {
   ArrivalSessionTrail,
   NOT_REPORTED,
+  SESSION_RECORD_CAP,
   SESSION_STEP_CAP,
   resultClassFromOutcome
 } from "./arrival-session-trail.js";
@@ -70,11 +71,53 @@ test("a wallet session is one stitched record and pre-auth is only counted", asy
   assert.equal(wallet.clientName, "qa-sweep");
   assert.equal(wallet.clientVersion, "1");
   assert.equal(wallet.protocolVersion, "2026-07-28");
-  assert.equal(wallet.furthestStage, "claimed");
+  assert.equal(wallet.furthestStage, "browsed");
+  assert.equal(wallet.clientNameSource, "declared");
   assert.deepEqual(wallet.steps.map((step) => step.resultClass), ["ok", "401"]);
   const detail = await sessions.get(wallet.id);
   assert.equal(detail.session.steps.length, 2);
   assert.equal(await sessions.get("wallet:missing"), undefined);
+});
+
+test("a Redis write failure does not reject the trail observation", async () => {
+  const sessions = new ArrivalSessionTrail({
+    stateStore: {
+      async getServiceState() { return undefined; },
+      async upsertServiceState() { throw new Error("redis down"); }
+    },
+    now: () => 5_000,
+    flushIntervalMs: 0
+  });
+  await assert.doesNotReject(() => sessions.observe({
+    wallet: WALLET,
+    door: "http",
+    name: "GET /jobs",
+    resultClass: "ok",
+    stage: "browsed"
+  }));
+});
+
+test("the record cap evicts the least recently seen and reports how many were dropped", async () => {
+  const { trail: sessions } = trail();
+  for (let index = 0; index < SESSION_RECORD_CAP + 1; index += 1) {
+    const wallet = `0x${index.toString(16).padStart(40, "0")}`;
+    await sessions.observe({
+      wallet,
+      door: "http",
+      name: "GET /jobs",
+      resultClass: "ok",
+      stage: "browsed"
+    });
+  }
+  const listed = await sessions.list({ limit: 100, offset: 0 });
+  assert.equal(listed.sessions.length, 100);
+  assert.equal(listed.nextOffset, 100);
+  const rest = await sessions.list({ limit: 100, offset: listed.nextOffset });
+  assert.equal(rest.sessions.length, 100);
+  assert.equal(rest.nextOffset, null);
+  assert.equal(listed.droppedRecords, 1);
+  assert.equal(rest.droppedRecords, 1);
+  assert.equal(await sessions.get("wallet:0x" + "0".repeat(40)), undefined);
 });
 
 test("steps cap at 200, retention is 30 days, and a failed read is not reported", async () => {

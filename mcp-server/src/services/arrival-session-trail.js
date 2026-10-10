@@ -3,8 +3,10 @@ import { ARRIVAL_STAGES, stageRank } from "./arrival-stage-map.js";
 export const ARRIVAL_SESSION_SCHEMA = "averray.arrival-sessions.v1";
 export const NOT_REPORTED = "not reported";
 export const SESSION_STEP_CAP = 200;
+export const SESSION_RECORD_CAP = 200;
 export const SESSION_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const STATE_SCOPE = "arrival-session-trail";
+const SESSION_SCOPE_PREFIX = "arrival-session-record:";
 const WALLET_RE = /^0x[0-9a-f]{40}$/u;
 const SESSION_ID_RE = /^[a-z0-9-]{1,80}$/u;
 const FOUR_XX = new Set([400, 401, 403, 404, 409, 422, 429]);
@@ -31,6 +33,8 @@ export class ArrivalSessionTrail {
     this.flushIntervalMs = flushIntervalMs;
     this.sessions = new Map();
     this.unstitched = 0;
+    this.droppedRecords = 0;
+    this.dirtyIds = new Set();
     this.collectionSinceMs = undefined;
     this.loaded = false;
     this.loadFailed = null;
@@ -70,7 +74,8 @@ export class ArrivalSessionTrail {
         clientName: NOT_REPORTED,
         clientVersion: NOT_REPORTED,
         protocolVersion: NOT_REPORTED,
-        furthestStage: "reached",
+        furthestStage: NOT_REPORTED,
+        clientNameSource: NOT_REPORTED,
         steps: [],
         stepsDropped: 0
       };
@@ -81,15 +86,18 @@ export class ArrivalSessionTrail {
       if (clientName) record.clientName = clientName;
       if (clientVersion) record.clientVersion = clientVersion;
       if (protocol) record.protocolVersion = protocol;
+      if (clientInfo?.source === "user-agent") record.clientNameSource = "user-agent";
+      else if (clientName) record.clientNameSource = "declared";
       const resolvedStage = ARRIVAL_STAGES.includes(stage) ? stage : "reached";
-      if (stageRank(resolvedStage) > stageRank(record.furthestStage)) {
+      const normalizedResult = normalizeResultClass(resultClass);
+      if (normalizedResult === "ok" && stageRank(resolvedStage) > stageRank(record.furthestStage)) {
         record.furthestStage = resolvedStage;
       }
       record.steps.push({
         atMs: nowMs,
         door: door === "http" ? "http" : "mcp",
         name: boundedText(name, 120) ?? NOT_REPORTED,
-        resultClass: normalizeResultClass(resultClass)
+        resultClass: normalizedResult
       });
       if (record.steps.length > SESSION_STEP_CAP) {
         const overflow = record.steps.length - SESSION_STEP_CAP;
@@ -97,6 +105,8 @@ export class ArrivalSessionTrail {
         record.stepsDropped += overflow;
       }
       this.sessions.set(id, record);
+      this.evictOverflow();
+      this.dirtyIds.add(id);
       this.dirty = true;
       await this.maybeFlush();
     } catch {
@@ -104,19 +114,22 @@ export class ArrivalSessionTrail {
     }
   }
 
-  async list({ limit = 50 } = {}) {
+  async list({ limit = 50, offset = 0 } = {}) {
     if (!(await this.ensureLoaded())) return unavailableTrail(this.loadFailed);
     this.prune(this.now());
     const bounded = Math.min(100, Math.max(1, Number(limit) || 50));
-    const sessions = [...this.sessions.values()]
-      .sort((left, right) => right.lastSeenMs - left.lastSeenMs)
-      .slice(0, bounded)
-      .map(publicRecord);
+    const start = Math.max(0, Number(offset) || 0);
+    const ordered = [...this.sessions.values()].sort((left, right) => right.lastSeenMs - left.lastSeenMs);
+    const sessions = ordered.slice(start, start + bounded).map(publicRecord);
+    const nextOffset = start + sessions.length < ordered.length ? start + sessions.length : null;
     return {
       schemaVersion: ARRIVAL_SESSION_SCHEMA,
       generatedAtMs: this.now(),
       retentionDays: 30,
       stepCap: SESSION_STEP_CAP,
+      recordCap: SESSION_RECORD_CAP,
+      droppedRecords: this.droppedRecords,
+      nextOffset,
       preAuth: {
         stitched: false,
         count: this.unstitched,
@@ -162,6 +175,14 @@ export class ArrivalSessionTrail {
       }
       this.unstitched = Number.isSafeInteger(stored?.unstitched) && stored.unstitched >= 0
         ? stored.unstitched : 0;
+      this.droppedRecords = Number.isSafeInteger(stored?.droppedRecords) && stored.droppedRecords >= 0
+        ? stored.droppedRecords : 0;
+      const indexed = Array.isArray(stored?.sessionIds) ? stored.sessionIds : [];
+      for (const id of indexed) {
+        if (this.sessions.has(id)) continue;
+        const record = normalizeStored(await this.stateStore?.getServiceState?.(sessionScope(id)));
+        if (record) this.sessions.set(record.id, record);
+      }
       const since = Number(stored?.collectionSinceMs);
       this.collectionSinceMs = Number.isFinite(since) ? since : this.now();
       this.prune(this.now());
@@ -181,11 +202,18 @@ export class ArrivalSessionTrail {
     this.lastFlushMs = nowMs;
     this.dirty = false;
     try {
+      const dirtyIds = [...this.dirtyIds];
       await this.stateStore?.upsertServiceState?.(STATE_SCOPE, {
         collectionSinceMs: this.collectionSinceMs,
         unstitched: this.unstitched,
-        sessions: [...this.sessions.values()]
+        droppedRecords: this.droppedRecords,
+        sessionIds: [...this.sessions.keys()]
       });
+      for (const id of dirtyIds) {
+        const record = this.sessions.get(id);
+        if (record) await this.stateStore?.upsertServiceState?.(sessionScope(id), record);
+      }
+      this.dirtyIds.clear();
     } catch (error) {
       this.dirty = true;
       throw error;
@@ -195,9 +223,33 @@ export class ArrivalSessionTrail {
   prune(nowMs) {
     const oldest = nowMs - SESSION_RETENTION_MS;
     for (const [id, record] of this.sessions) {
-      if (record.lastSeenMs < oldest) this.sessions.delete(id);
+      if (record.lastSeenMs < oldest) {
+        this.sessions.delete(id);
+        this.droppedRecords += 1;
+      }
     }
   }
+
+  evictOverflow() {
+    while (this.sessions.size > SESSION_RECORD_CAP) {
+      let oldestId;
+      let oldestSeen = Infinity;
+      for (const [id, record] of this.sessions) {
+        if (record.lastSeenMs < oldestSeen) {
+          oldestSeen = record.lastSeenMs;
+          oldestId = id;
+        }
+      }
+      if (!oldestId) return;
+      this.sessions.delete(oldestId);
+      this.dirtyIds.delete(oldestId);
+      this.droppedRecords += 1;
+    }
+  }
+}
+
+function sessionScope(id) {
+  return `${SESSION_SCOPE_PREFIX}${id}`;
 }
 
 export function normalizeResultClass(value) {
@@ -238,6 +290,7 @@ function publicRecord(record) {
     clientVersion: record.clientVersion,
     protocolVersion: record.protocolVersion,
     furthestStage: record.furthestStage,
+    clientNameSource: record.clientNameSource ?? NOT_REPORTED,
     stepsDropped: record.stepsDropped,
     stepsTruncated: record.stepsDropped > 0,
     steps: record.steps.map((step) => ({ ...step }))
@@ -249,6 +302,7 @@ function unavailableTrail(reason) {
     schemaVersion: ARRIVAL_SESSION_SCHEMA,
     unavailable: reason ?? "arrival session trail could not be read",
     preAuth: { stitched: false, count: NOT_REPORTED, note: PREAUTH_NOTE },
+    droppedRecords: NOT_REPORTED,
     sessions: null
   };
 }
@@ -279,7 +333,8 @@ function normalizeStored(entry) {
     clientName: boundedText(entry.clientName, 64) ?? NOT_REPORTED,
     clientVersion: boundedText(entry.clientVersion, 32) ?? NOT_REPORTED,
     protocolVersion: boundedText(entry.protocolVersion, 32) ?? NOT_REPORTED,
-    furthestStage: ARRIVAL_STAGES.includes(entry.furthestStage) ? entry.furthestStage : "reached",
+    furthestStage: ARRIVAL_STAGES.includes(entry.furthestStage) ? entry.furthestStage : NOT_REPORTED,
+    clientNameSource: ["declared", "user-agent"].includes(entry.clientNameSource) ? entry.clientNameSource : NOT_REPORTED,
     steps,
     stepsDropped: Number.isSafeInteger(entry.stepsDropped) && entry.stepsDropped > 0 ? entry.stepsDropped : 0
   };

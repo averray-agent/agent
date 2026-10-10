@@ -172,10 +172,9 @@ export function createMcpRoute({
     }
 
     response._arrivalDropContext = { stage: "reached" };
-    const finishMcpArrival = async () => {
+    const finishMcpArrival = async ({ recordTrail = true } = {}) => {
       const toolError = response._arrivalToolError;
       const rpcCode = response._arrivalJsonRpcCode;
-      if (!toolError && !Number.isSafeInteger(rpcCode)) return;
       const context = response._arrivalDropContext ?? { stage: "reached" };
       if (toolError || Number.isSafeInteger(rpcCode)) {
         await recordArrival(arrivals, "recordDropOff", {
@@ -187,10 +186,17 @@ export function createMcpRoute({
           outcome: toolError ?? { kind: "jsonrpc", code: rpcCode }
         });
       }
+      // Successful calls have neither a tool error nor a JSON-RPC error.
+      // Trail rows are written only after the anonymous rate limit has
+      // already admitted the request (callers before that pass recordTrail: false).
+      if (!recordTrail) return;
+      const presentedSession = String(request.headers?.["mcp-session-id"] ?? "");
+      const liveSession = legacySessions.get(presentedSession);
+      const mcpSessionId = liveSession && liveSession.expiresAt > now() ? presentedSession : undefined;
       const statusCode = Number(response.statusCode);
       await sessionTrail?.observe?.({
-        wallet: request._arrivalWallet,
-        mcpSessionId: request.headers?.["mcp-session-id"],
+        wallet: context.tool === "fetchAuthNonce" ? undefined : request._arrivalWallet,
+        mcpSessionId,
         clientInfo: context.clientInfo,
         protocolVersion: request.headers?.["mcp-protocol-version"],
         door: "mcp",
@@ -210,20 +216,20 @@ export function createMcpRoute({
       const code = error?.message === "Invalid JSON body." ? -32700 : -32600;
       response._arrivalErrorActor = "unclassified";
       sendError(response, respond, 400, null, code, error?.message ?? "Invalid request.");
-      await finishMcpArrival();
+      await finishMcpArrival({ recordTrail: false });
       return true;
     }
 
     if (!isJsonRpcMessage(message)) {
       response._arrivalErrorActor = "unclassified";
       sendError(response, respond, 400, message?.id ?? null, -32600, "Invalid JSON-RPC request.");
-      await finishMcpArrival();
+      await finishMcpArrival({ recordTrail: false });
       return true;
     }
 
     if (!originAllowed(request, response)) {
       sendError(response, respond, 403, message.id ?? null, -32000, "Origin is not allowed.");
-      await finishMcpArrival();
+      await finishMcpArrival({ recordTrail: false });
       return true;
     }
 
