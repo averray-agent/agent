@@ -254,20 +254,42 @@ export class ArrivalSessionTrail {
     this.dirty = false;
     try {
       const dirtyIds = [...this.dirtyIds];
+      const snapshots = new Map();
+      for (const id of dirtyIds) {
+        const record = this.sessions.get(id);
+        if (!record) continue;
+        const revision = record.revision ?? 0;
+        snapshots.set(id, {
+          revision,
+          body: {
+            ...record,
+            steps: record.steps.map((step) => ({ ...step })),
+            revision
+          }
+        });
+      }
       await this.stateStore?.upsertServiceState?.(STATE_SCOPE, {
         collectionSinceMs: this.collectionSinceMs,
         unstitched: this.unstitched,
         droppedRecords: this.droppedRecords,
         sessionIds: [...this.sessions.keys()]
       });
+      for (const [id, snapshot] of snapshots) {
+        if (typeof this.stateStore?.upsertServiceState !== "function") continue;
+        await this.stateStore.upsertServiceState(sessionScope(id), snapshot.body);
+        this.persistedIds.add(id);
+        this.persistedRevision.set(id, snapshot.revision);
+      }
       for (const id of dirtyIds) {
         const record = this.sessions.get(id);
-        if (!record || typeof this.stateStore?.upsertServiceState !== "function") continue;
-        await this.stateStore.upsertServiceState(sessionScope(id), record);
-        this.persistedIds.add(id);
-        this.persistedRevision.set(id, record.revision ?? 0);
+        const written = snapshots.get(id)?.revision;
+        if (record && (record.revision ?? 0) !== written) {
+          this.dirtyIds.add(id);
+          this.dirty = true;
+        } else {
+          this.dirtyIds.delete(id);
+        }
       }
-      this.dirtyIds.clear();
     } catch (error) {
       this.dirty = true;
       throw error;

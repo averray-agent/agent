@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { SelfIdentityRegistry } from "../core/self-identity-registry.js";
-import { ArrivalAlerts, ARRIVAL_ALERT_COOLDOWN_MS, ARRIVAL_ALERT_SEEN_CAP, CLIENT_FIRST_OVERFLOW_CAP, CLIENT_FIRSTS_WALLET_CAP, CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY, NOT_REPORTED, SUPPRESSED_SUBJECT_CAP } from "./arrival-alerts.js";
+import { ArrivalAlerts, ARRIVAL_ALERT_COOLDOWN_MS, ARRIVAL_ALERT_SEEN_CAP, CLIENT_FIRSTS_WALLET_CAP, CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY, NOT_REPORTED, SUPPRESSED_SUBJECT_CAP } from "./arrival-alerts.js";
 import { ArrivalSessionTrail } from "./arrival-session-trail.js";
 import { ArrivalObservatory } from "./arrival-observatory.js";
 import { createAdminArrivalAlertRoutes } from "../protocols/http/admin-arrival-alert-routes.js";
@@ -398,7 +398,7 @@ test("one wallet's client names do not fill the queue", async () => {
   const listed = await alerts.list();
   const rows = [...listed.ready, ...listed.pending];
   assert.equal(rows.filter((alert) => alert.kind === "external_client_first").length, CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY);
-  assert.equal(listed.clientFirstsCounted, 6_000 - CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY);
+  assert.equal(listed.clientNameFirstEventsOverCap, 6_000 - CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY);
   await alerts.note({
     wallet: EXTERNAL,
     clientInfo: { name: "flood-3", version: "1" },
@@ -406,7 +406,7 @@ test("one wallet's client names do not fill the queue", async () => {
     success: true,
     authenticated: true
   });
-  assert.equal((await alerts.list()).clientFirstsCounted, 6_000 - CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY);
+  assert.equal((await alerts.list()).clientNameFirstEventsOverCap, 6_000 - CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY + 1);
   assert.equal(rows.some((alert) => alert.id === `external_wallet_first:${real}`), true);
   assert.equal(rows.some((alert) => alert.id === `external_wallet_first_claim:${real}`), true);
 });
@@ -619,31 +619,20 @@ test("five thousand over-cap names stay bounded and do not force a flush each ti
     });
   }
   const bucket = alerts.clientFirsts.get(EXTERNAL);
-  assert.equal(bucket.overflow.size <= CLIENT_FIRST_OVERFLOW_CAP, true);
-  assert.equal(alerts.clientFirstsCounted, 5_000 - CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY);
-  assert.equal(
-    alerts.clientFirstsUnremembered,
-    5_000 - CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY - CLIENT_FIRST_OVERFLOW_CAP
-  );
+  assert.equal(bucket.names.size, CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY);
+  assert.equal(bucket.overflow, undefined);
+  assert.equal(alerts.clientNameFirstEventsOverCap, 5_000 - CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY);
   assert.ok(writes.length < 30, String(writes.length));
-  const remembered = `wide-${CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY}`;
-  const before = alerts.clientFirstsCounted;
+  const blob = JSON.stringify(writes.at(-1)?.clientFirsts ?? bucket);
+  assert.ok(blob.length < 2_000, String(blob.length));
   await alerts.note({
     wallet: EXTERNAL,
-    clientInfo: { name: remembered, version: "1" },
+    clientInfo: { name: "wide-3", version: "1" },
     stage: "browsed",
     success: true,
     authenticated: true
   });
-  assert.equal(alerts.clientFirstsCounted, before);
-  await alerts.note({
-    wallet: EXTERNAL,
-    clientInfo: { name: "wide-4999", version: "1" },
-    stage: "browsed",
-    success: true,
-    authenticated: true
-  });
-  assert.equal(alerts.clientFirstsCounted, before + 1);
+  assert.equal(alerts.clientNameFirstEventsOverCap, 5_000 - CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY + 1);
 });
 
 test("load prunes stale days and caps wallets before any later write", async () => {
@@ -657,14 +646,12 @@ test("load prunes stale days and caps wallets before any later write", async () 
       ...[1, 2, 3].map((index) => ({
         wallet: walletAt("a", index),
         day: 1,
-        names: ["old@1"],
-        overflow: []
+        names: ["old@1"]
       })),
       ...[1, 2, 3, 4].map((index) => ({
         wallet: walletAt("b", index),
         day: today,
-        names: ["now@1"],
-        overflow: []
+        names: ["now@1"]
       }))
     ]
   });
@@ -678,17 +665,13 @@ test("load prunes stale days and caps wallets before any later write", async () 
     clientFirsts: Array.from({ length: CLIENT_FIRSTS_WALLET_CAP + 25 }, (_, index) => ({
       wallet: walletAt("0", index + 1),
       day: today,
-      names: ["now@1"],
-      overflow: Array.from({ length: CLIENT_FIRST_OVERFLOW_CAP + 10 }, (__, name) => `over-${name}`)
+      names: ["now@1"]
     }))
   });
   const crowded = new ArrivalAlerts({ stateStore: crowdedStore, now: () => nowMs, flushIntervalMs: 60_000 });
   await crowded.list();
   assert.equal(crowded.clientFirsts.size <= CLIENT_FIRSTS_WALLET_CAP, true);
   assert.ok(crowded.clientFirstsEvicted >= 25);
-  const sample = crowded.clientFirsts.values().next().value;
-  assert.equal(sample.overflow.size <= CLIENT_FIRST_OVERFLOW_CAP, true);
-  assert.ok(crowded.clientFirstsUnremembered >= 10);
 });
 
 test("client-name cap state is pruned, bounded, and still applies after restart", async () => {
@@ -699,8 +682,7 @@ test("client-name cap state is pruned, bounded, and still applies after restart"
     clientFirsts: [1, 2, 3].map((index) => ({
       wallet: `0x${index.toString(16).padStart(40, "c")}`,
       day: 0,
-      names: ["old@1"],
-      overflow: []
+      names: ["old@1"]
     }))
   });
   const alerts = new ArrivalAlerts({ stateStore: store, now: () => nowMs, flushIntervalMs: 0, cooldownMs: 60_000 });
@@ -744,7 +726,7 @@ test("client-name cap state is pruned, bounded, and still applies after restart"
       authenticated: true
     });
   }
-  assert.equal((await first.list()).clientFirstsCounted, 1);
+  assert.equal((await first.list()).clientNameFirstEventsOverCap, 1);
   const restarted = new ArrivalAlerts({ stateStore: durable, now: () => nowMs, flushIntervalMs: 0, cooldownMs: 60_000 });
   await restarted.note({
     wallet: EXTERNAL,
@@ -761,7 +743,7 @@ test("client-name cap state is pruned, bounded, and still applies after restart"
     authenticated: true
   });
   const after = await restarted.list();
-  assert.equal(after.clientFirstsCounted, 2);
+  assert.equal(after.clientNameFirstEventsOverCap, 3);
   const names = [...after.ready, ...after.pending]
     .filter((alert) => alert.kind === "external_client_first")
     .map((alert) => alert.subject);
@@ -788,4 +770,116 @@ test("a loaded suppressed-subject list is trimmed to the cap", async () => {
   const saved = await store.getServiceState("arrival-alerts");
   assert.equal(saved.suppressedSubjects.length <= SUPPRESSED_SUBJECT_CAP, true);
   assert.ok(saved.suppressedSubjectOverflow >= 100);
+});
+
+test("repeats of a suppressed subject do not rewrite the alerts blob", async () => {
+  const writes = [];
+  const alerts = new ArrivalAlerts({
+    stateStore: {
+      async getServiceState() { return undefined; },
+      async upsertServiceState(_scope, value) {
+        writes.push(value);
+        return value;
+      }
+    },
+    now: () => 8_000,
+    flushIntervalMs: 60_000,
+    cooldownMs: 60_000
+  });
+  for (let index = 0; index < 60; index += 1) {
+    await alerts.note({
+      wallet: `0x${index.toString(16).padStart(40, "0")}`,
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  const suppressed = `0x${"5".repeat(40)}`;
+  await alerts.note({
+    wallet: suppressed,
+    stage: "browsed",
+    success: true,
+    authenticated: true
+  });
+  const afterSuppressed = writes.length;
+  for (let index = 0; index < 100; index += 1) {
+    await alerts.note({
+      wallet: suppressed,
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  assert.equal(writes.length, afterSuppressed);
+});
+
+test("a suppressed first does not persist the trail", async () => {
+  const recordWrites = [];
+  const state = new Map();
+  const stateStore = {
+    async getServiceState(scope) { return state.get(scope); },
+    async upsertServiceState(scope, value) {
+      if (String(scope).startsWith("arrival-session-record:")) recordWrites.push(scope);
+      state.set(scope, value);
+      return value;
+    },
+    async deleteServiceState() {}
+  };
+  const nowMs = 1_000;
+  const sessionTrail = new ArrivalSessionTrail({ stateStore, now: () => nowMs });
+  const alerts = new ArrivalAlerts({
+    stateStore,
+    sessionTrail,
+    now: () => nowMs,
+    cooldownMs: 60_000
+  });
+  for (let index = 0; index < 60; index += 1) {
+    await alerts.note({
+      wallet: `0x${(index + 1).toString(16).padStart(40, "d")}`,
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  const held = `0x${"e".repeat(40)}`;
+  await sessionTrail.observe({
+    wallet: held,
+    door: "http",
+    name: "GET /auth/session",
+    resultClass: "ok",
+    stage: "reached"
+  });
+  await alerts.note({ wallet: held, stage: "reached", success: true, authenticated: true });
+  assert.equal(recordWrites.some((scope) => scope.endsWith(held)), false);
+  const listed = await alerts.list();
+  assert.equal(
+    [...listed.ready, ...listed.pending].some((alert) => alert.id === `external_wallet_first:${held}`),
+    false
+  );
+});
+
+test("counter-only changes flush after the interval and survive restart", async () => {
+  let nowMs = 50_000;
+  const store = memoryStore();
+  const alerts = new ArrivalAlerts({
+    stateStore: store,
+    now: () => nowMs,
+    flushIntervalMs: 30_000,
+    cooldownMs: 60_000
+  });
+  for (const name of ["a", "b", "c", "d"]) {
+    await alerts.note({
+      wallet: EXTERNAL,
+      clientInfo: { name, version: "1" },
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  assert.equal(alerts.clientNameFirstEventsOverCap, 1);
+  nowMs += 31_000;
+  await alerts.list();
+  const restarted = new ArrivalAlerts({ stateStore: store, now: () => nowMs, flushIntervalMs: 30_000 });
+  await restarted.list();
+  assert.equal(restarted.clientNameFirstEventsOverCap, 1);
 });

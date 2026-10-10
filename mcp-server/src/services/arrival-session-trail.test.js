@@ -228,10 +228,12 @@ test("a step added while persist is writing stays dirty", async () => {
       async upsertServiceState(scope, value) {
         if (String(scope).startsWith("arrival-session-record:")) {
           entered();
+          await Promise.resolve();
+          await Promise.resolve();
           await new Promise((resolve) => { release = resolve; });
         }
-        state.set(scope, value);
-        return value;
+        state.set(scope, JSON.parse(JSON.stringify(value)));
+        return state.get(scope);
       },
       async deleteServiceState() {}
     },
@@ -256,4 +258,8 @@ test("a step added while persist is writing stays dirty", async () => {
   release();
   await writing;
   assert.equal(sessions.dirtyIds.has(`wallet:${WALLET}`), true);
+  const stored = state.get(`arrival-session-record:wallet:${WALLET}`);
+  assert.equal(stored.steps.length, 1);
+  assert.equal(stored.steps[0].name, "GET /auth/session");
+  assert.equal(sessions.persistedRevision.get(`wallet:${WALLET}`), stored.revision);
 });
