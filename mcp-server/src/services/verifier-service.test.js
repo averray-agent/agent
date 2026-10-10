@@ -545,7 +545,7 @@ test("github_pr verifier scores structured PR evidence and exposes reputation si
   assert.equal(verdict.reputationSignals.checksPassed, 1);
 });
 
-test("github_pr verifier rejects PR evidence for the wrong repo", async () => {
+test("github_pr verifier requires human review for different repo names without live identity", async () => {
   const registry = new VerifierRegistry();
   const job = {
     id: "oss-example-project-42-add-tests",
@@ -571,8 +571,10 @@ test("github_pr verifier rejects PR evidence for the wrong repo", async () => {
     issueNumber: 42
   }));
 
-  assert.equal(verdict.outcome, "rejected");
-  assert.equal(verdict.checks.repoMatches, false);
+  assert.equal(verdict.outcome, "disputed");
+  assert.equal(verdict.checks.repoMatches, null);
+  assert.equal(verdict.checks.repoMatchMethod, "unknown");
+  assert.equal(verdict.checks.repoMatchFallbackReason, "github_token_not_configured");
   assert.equal(verdict.signals.prOpened, false);
 });
 

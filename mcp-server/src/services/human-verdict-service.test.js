@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { parseEnv } from "node:util";
 import { HumanVerdictService } from "./human-verdict-service.js";
+import { VerifierRegistry } from "./verifier-handlers.js";
 import { VerifierService } from "./verifier-service.js";
+import { normalizeSubmission } from "../core/submission.js";
 import { VerificationIngestionService } from "./verification-ingestion-service.js";
 import { MemoryStateStore } from "../core/state-store.js";
 import { buildJobSnapshot } from "../core/job-snapshot.js";
@@ -77,6 +79,83 @@ test("human GitHub approval requires a fresh verified merge before content or se
     assert.equal(f.calls.length, 0);
     assert.deepEqual(await f.store.getSession(f.session.sessionId), before);
   }
+});
+
+test("human merge gate accepts a renamed repository once the live preview matches its id", async () => {
+  const f = await fixture();
+  const repoId = 1344638682;
+  const job = {
+    ...f.session.jobSnapshot.definition,
+    verifierMode: "github_pr",
+    source: {
+      type: "github_issue",
+      repo: "jyotishankar04/saveforlatter",
+      issueNumber: 52,
+      githubRepoId: repoId
+    },
+    verifierConfig: {
+      handler: "github_pr",
+      version: 1,
+      minimumScore: 80,
+      requireClaimantBinding: true,
+      acceptMergedAsApproved: true
+    }
+  };
+  f.session = {
+    ...f.session,
+    jobSnapshot: buildJobSnapshot(job),
+    submission: normalizeSubmission({
+      prUrl: "https://github.com/jyotishankar04/savedly/pull/91",
+      summary: "Closes #52",
+      tests: "npm test passed"
+    })
+  };
+  await f.store.upsertSession(f.session);
+  f.live.specHash = f.session.jobSnapshot.specHash;
+  f.verifier.registry = new VerifierRegistry({
+    githubToken: "github_pat_test",
+    fetchImpl: async (url) => {
+      const path = new URL(url).pathname;
+      if (path === "/repos/jyotishankar04/saveforlatter") throw new Error("cached repository id must be used");
+      if (path.endsWith("/pulls/91")) {
+        return Response.json({
+          id: 555,
+          html_url: "https://github.com/jyotishankar04/savedly/pull/91",
+          title: "Fix #52",
+          body: `Closes #52\n\nClaimant wallet: ${wallet}`,
+          state: "closed",
+          merged: true,
+          head: { sha: "abc123", repo: { id: 999, full_name: "contributor/savedly" } },
+          base: { repo: { id: repoId, full_name: "jyotishankar04/savedly" } }
+        });
+      }
+      if (path.endsWith("/status")) return Response.json({ state: "success", statuses: [] });
+      if (path.endsWith("/check-runs")) {
+        return Response.json({ check_runs: [{ name: "tests", status: "completed", conclusion: "success" }] });
+      }
+      if (path.endsWith("/reviews")) return Response.json([]);
+      return new Response("{}", { status: 404 });
+    }
+  });
+  const originalPreview = f.verifier.previewSubmission.bind(f.verifier);
+  const previews = [];
+  f.verifier.previewSubmission = async (args) => {
+    const preview = await originalPreview(args);
+    previews.push(preview);
+    return preview;
+  };
+  await f.decide("approve");
+  assert.equal(previews.length, 1);
+  assert.equal(previews[0].checks.repoMatches, true);
+  assert.equal(previews[0].checks.repoMatchMethod, "repository_id");
+  assert.equal(previews[0].githubLookup.merged, true);
+  assert.deepEqual(previews[0].evidence.sourceRepoRenamed, {
+    from: "jyotishankar04/saveforlatter",
+    to: "jyotishankar04/savedly"
+  });
+  assert.equal((await f.store.getSession(f.session.sessionId)).status, "resolved");
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0][1], true);
 });
 
 test("human GitHub approval accepts a fresh merged read; closed-unmerged rejection remains allowed", async (t) => {

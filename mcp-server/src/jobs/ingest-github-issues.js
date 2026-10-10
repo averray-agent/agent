@@ -5,6 +5,7 @@ import { verifierClassReward } from "../core/verifier-class-rewards.js";
 import {
   DEFAULT_OPEN_PR_CAP_PER_REPO,
   evaluateMaintainerSurfaceForIssue,
+  normalizeRepo,
   repoFromIssue
 } from "../core/maintainer-surface-policy.js";
 import { DEFAULT_ESCROW_ASSET_SYMBOL } from "../core/assets.js";
@@ -99,9 +100,11 @@ export async function ingestGithubIssues({
     .filter(({ score, policy }) => score >= minScore && policy.allowed)
     .sort((left, right) => right.score - left.score)
     .slice(0, limit);
+  const repoIds = await resolveIngestedRepoIds(candidates.map(({ issue }) => issue), { githubToken, fetchImpl });
   const jobs = candidates.map(({ issue, score, policy }) => toPlatformJob(issue, score, {
     maintainerPolicy: policy,
-    openPrCap: maintainerPolicy.openPrCap ?? DEFAULT_OPEN_PR_CAP_PER_REPO
+    openPrCap: maintainerPolicy.openPrCap ?? DEFAULT_OPEN_PR_CAP_PER_REPO,
+    githubRepoId: repoIds.get(normalizeRepo(repoFullName(issue)))
   }));
 
   return {
@@ -163,11 +166,13 @@ export function scoreIssue(issue) {
 
 export function toPlatformJob(issue, score = scoreIssue(issue), {
   maintainerPolicy = undefined,
-  openPrCap = DEFAULT_OPEN_PR_CAP_PER_REPO
+  openPrCap = DEFAULT_OPEN_PR_CAP_PER_REPO,
+  githubRepoId = undefined
 } = {}) {
   const repo = repoFullName(issue);
   const issueNumber = Number(issue.number);
   const issueUrl = String(issue.html_url ?? `https://github.com/${repo}/issues/${issueNumber}`);
+  const resolvedRepoId = positiveRepoId(githubRepoId) ?? embeddedRepositoryId(issue, repo);
   const issueTitle = String(issue.title ?? `GitHub issue #${issueNumber}`).trim();
   const body = String(issue.body ?? "").trim();
   const category = inferCategory(issue);
@@ -203,6 +208,7 @@ export function toPlatformJob(issue, score = scoreIssue(issue), {
     source: {
       type: "github_issue",
       repo,
+      ...(resolvedRepoId ? { githubRepoId: resolvedRepoId } : {}),
       issueNumber,
       issueUrl,
       labels: [...labelNames(issue)],
@@ -273,6 +279,52 @@ export async function createJob({ baseUrl, adminToken, job, fetchImpl = fetch })
     ok: response.ok,
     payload
   };
+}
+
+async function resolveIngestedRepoIds(issues, { githubToken, fetchImpl }) {
+  const ids = new Map();
+  for (const issue of issues) {
+    const repo = normalizeRepo(repoFullName(issue));
+    if (!repo || ids.has(repo)) continue;
+    const embedded = embeddedRepositoryId(issue, repo);
+    ids.set(repo, embedded ?? await lookupGithubRepositoryId(repo, { githubToken, fetchImpl }));
+  }
+  return ids;
+}
+
+function embeddedRepositoryId(issue, repo) {
+  const id = positiveRepoId(issue?.repository?.id);
+  if (!id) return null;
+  const fullName = normalizeRepo(issue?.repository?.full_name);
+  if (fullName && fullName !== normalizeRepo(repo)) return null;
+  return id;
+}
+
+async function lookupGithubRepositoryId(repo, { githubToken, fetchImpl }) {
+  const [owner, name] = String(repo).split("/");
+  const headers = {
+    accept: "application/vnd.github+json",
+    "user-agent": "agent-platform-issue-ingestor"
+  };
+  if (githubToken) headers.authorization = `Bearer ${githubToken}`;
+  try {
+    const response = await fetchImpl(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+      { headers }
+    );
+    if (!response?.ok || typeof response.json !== "function") return null;
+    const body = await response.json();
+    const id = positiveRepoId(body?.id);
+    const fullName = normalizeRepo(body?.full_name);
+    return id && fullName ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function positiveRepoId(value) {
+  const id = typeof value === "string" && /^[1-9]\d*$/u.test(value) ? Number(value) : value;
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
 function repoFullName(issue) {

@@ -379,29 +379,53 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       const submittedMerged = structured.merged === true;
       const submittedPrBody = firstNonEmptyString(structured.prBody, structured.pullRequestBody);
       const submittedDisclosureFooterPresent = hasAverrayDisclosureFooter(submittedPrBody);
-      const githubLookup = parsedPr && hasUsableGithubToken(githubToken) && typeof fetchImpl === "function"
-        ? await fetchGithubPullRequestSnapshot({
-            parsedPr,
-            issueNumber: expectedIssueNumber,
-            issueUrl: githubSource?.issueUrl,
-            fetchImpl,
-            githubToken,
-            githubApiBaseUrl,
-            claimantWallet: verificationContext.claimantWallet,
-            claimSessionId: verificationContext.claimSessionId
-          })
-        : {
-            status: parsedPr ? "skipped" : "not_applicable",
-            reason: parsedPr ? "github_token_not_configured" : "invalid_or_missing_pr_url"
-          };
+      const canReadGithub = parsedPr && hasUsableGithubToken(githubToken) && typeof fetchImpl === "function";
+      const [githubLookup, sourceRepo] = await Promise.all([
+        canReadGithub
+          ? fetchGithubPullRequestSnapshot({
+              parsedPr,
+              issueNumber: expectedIssueNumber,
+              issueUrl: githubSource?.issueUrl,
+              fetchImpl,
+              githubToken,
+              githubApiBaseUrl,
+              claimantWallet: verificationContext.claimantWallet,
+              claimSessionId: verificationContext.claimSessionId
+            })
+          : {
+              status: parsedPr ? "skipped" : "not_applicable",
+              reason: parsedPr ? "github_token_not_configured" : "invalid_or_missing_pr_url"
+            },
+        resolveSourceRepository({
+          job,
+          expectedRepo,
+          fetchImpl,
+          githubToken,
+          githubApiBaseUrl
+        })
+      ]);
       const githubVerified = githubLookup.status === "verified";
       const claimantBinding = githubVerified
         ? githubLookup.claimantBinding
         : { status: "unavailable" };
       const claimantBindingObservable = githubVerified && githubLookup.prBodyReadable === true;
       const claimantBindingMatches = claimantBinding?.status === "matched";
-
-      const repoMatches = Boolean(parsedPr && expectedRepo && parsedPr.repo === expectedRepo);
+      // A rename or transfer keeps the GitHub repository id and changes the
+      // owner/repo string. Compare that id with the pull request's base
+      // repository. The head repository is the contributor fork.
+      const {
+        repoMatches,
+        repoMatchMethod,
+        repoMatchFallbackReason,
+        sourceRepoRenamed
+      } = decideRepositoryMatch({ parsedPr, expectedRepo, sourceRepo, githubLookup });
+      const sourceRepoIdentity = {
+        id: sourceRepo.id,
+        origin: sourceRepo.origin ?? null,
+        createdAt: sourceRepo.createdAt ?? null,
+        jobCreatedAt: job.lifecycle?.createdAt ?? null,
+        predatesJob: sourceRepo.predatesJob ?? null
+      };
       const issueReferenced = githubVerified ? githubLookup.issueReferenced : submittedIssueReferenced;
       const checksPassing = githubVerified ? githubLookup.checksPassing : submittedChecksPassing;
       const reviewApproved = githubVerified ? githubLookup.reviewApproved : submittedReviewApproved;
@@ -417,6 +441,9 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
         prUrlPresent: Boolean(prUrl),
         prUrlValid: Boolean(parsedPr),
         repoMatches,
+        repoMatchMethod,
+        sourceRepoIdentity,
+        ...(repoMatchFallbackReason ? { repoMatchFallbackReason } : {}),
         issueReferenced,
         summarySubmitted,
         testEvidenceSubmitted,
@@ -428,7 +455,7 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       };
       const signals = {
         attempted: true,
-        prOpened: checks.prUrlValid && repoMatches,
+        prOpened: checks.prUrlValid && repoMatches === true,
         issueReferenced,
         testEvidenceSubmitted,
         checksPassed: checksPassing,
@@ -441,7 +468,8 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       const blockers = [];
 
       if (!checks.prUrlValid) blockers.push("valid GitHub pull request URL");
-      if (!repoMatches) blockers.push(`PR repo must match ${githubSource?.repo ?? "the source repo"}`);
+      if (repoMatches === null) blockers.push("source repository identity requires human review");
+      else if (!repoMatches) blockers.push(`PR repo must match ${githubSource?.repo ?? "the source repo"}`);
       if (issueReferenceRequired && !issueReferenced) blockers.push(`submission must reference issue #${expectedIssueNumber}`);
       if (testEvidenceRequired && !testEvidenceSubmitted && !mergedAccepted) blockers.push("test or docs-build evidence");
       if (githubVerified && githubLookup.ciStatus === "failing" && !mergedAccepted) {
@@ -474,7 +502,7 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       const definiteClaimantFailure = claimantBindingRequired
         && claimantBindingObservable
         && ["missing", "mismatched"].includes(claimantBinding?.status);
-      const definiteInputFailure = !checks.prUrlValid || !repoMatches || definiteClaimantFailure;
+      const definiteInputFailure = !checks.prUrlValid || repoMatches === false || definiteClaimantFailure;
 
       // Failing policy gates intentionally escalate to human review even over
       // a definite input failure; the human still sees the submission blockers.
@@ -482,7 +510,7 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
       // observable and remains a rejection. Inability to re-derive the PR
       // against live GitHub is different: it must enter human review, never
       // reuse submitted claims as sufficient evidence for an automatic payout.
-      if (failingPolicyGates.length > 0 || (!definiteInputFailure && (
+      if (failingPolicyGates.length > 0 || repoMatches === null || (!definiteInputFailure && (
         githubEvidenceUnavailable
         || githubEvidencePartial
         || claimantBindingUnverified
@@ -495,18 +523,21 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
           checks,
           signals,
           blockers,
-          evidence: {
-            prUrl: prUrl || null,
-            repo: parsedPr?.repo ?? null,
-            pullNumber: parsedPr?.pullNumber ?? null,
-            expectedRepo: expectedRepo || null,
-            expectedIssueNumber: Number.isFinite(expectedIssueNumber) ? expectedIssueNumber : null,
+          evidence: githubPrObservedEvidence({
+            prUrl,
+            parsedPr,
+            expectedRepo,
+            expectedIssueNumber,
             disclosureRequired,
             claimantBindingRequired,
-            claimantBindingStatus: claimantBinding?.status ?? "unavailable"
-          },
+            claimantBindingStatus: claimantBinding?.status ?? "unavailable",
+            sourceRepoRenamed,
+            sourceRepoIdentity
+          }),
           reason: failingPolicyGates.length > 0
             ? "github_policy_gate_requires_review: " + failingPolicyGates.map((gate) => gate.name).join(", ")
+            : repoMatches === null
+            ? repoMatchFallbackReason
             : githubEvidenceUnavailable
             ? githubLookup.reason ?? "github_lookup_unavailable"
             : githubEvidencePartial
@@ -528,16 +559,17 @@ function createGithubPrHandler({ fetchImpl = globalThis.fetch, githubToken = pro
         detail: approved
           ? `GitHub PR evidence reached ${score}/100 without required blockers.`
           : `GitHub PR evidence reached ${score}/100; missing ${blockers.join(", ") || "minimum score"}.`,
-        evidence: {
-          prUrl: prUrl || null,
-          repo: parsedPr?.repo ?? null,
-          pullNumber: parsedPr?.pullNumber ?? null,
-          expectedRepo: expectedRepo || null,
-          expectedIssueNumber: Number.isFinite(expectedIssueNumber) ? expectedIssueNumber : null,
+        evidence: githubPrObservedEvidence({
+          prUrl,
+          parsedPr,
+          expectedRepo,
+          expectedIssueNumber,
           disclosureRequired,
           claimantBindingRequired,
-          claimantBindingStatus: claimantBinding?.status ?? "not_required"
-        },
+          claimantBindingStatus: claimantBinding?.status ?? "not_required",
+          sourceRepoRenamed,
+          sourceRepoIdentity
+        }),
         githubLookup,
         blockers,
         disclosure: claimantBinding?.disclosure,
@@ -671,17 +703,12 @@ async function fetchGithubPullRequestSnapshot({
 }) {
   const baseUrl = String(githubApiBaseUrl ?? "https://api.github.com").replace(/\/+$/u, "");
   const repoPath = `${encodeURIComponent(parsedPr.owner)}/${encodeURIComponent(parsedPr.name)}`;
-  const headers = {
-    accept: "application/vnd.github+json",
-    "user-agent": "averray-github-pr-verifier"
-  };
-  if (hasUsableGithubToken(githubToken)) {
-    headers.authorization = `Bearer ${githubToken}`;
-  }
+  const headers = githubApiHeaders(githubToken);
 
   try {
     const pr = await fetchGithubJson(fetchImpl, `${baseUrl}/repos/${repoPath}/pulls/${parsedPr.pullNumber}`, { headers });
     const headSha = typeof pr?.head?.sha === "string" ? pr.head.sha : "";
+    const baseRepo = readGithubRepository(pr?.base?.repo);
     const title = typeof pr?.title === "string" ? pr.title : "";
     const prBodyReadable = Boolean(
       pr
@@ -716,6 +743,7 @@ async function fetchGithubPullRequestSnapshot({
       state: typeof pr?.state === "string" ? pr.state : "unknown",
       merged: Boolean(pr?.merged || pr?.merged_at),
       headSha: headSha || null,
+      ...(baseRepo ? { baseRepo } : {}),
       issueReferenced: referencesIssue({
         structured: {},
         normalized: prText,
@@ -826,6 +854,153 @@ function summarizeGithubReviews(reviews) {
     return { reviewApproved: true, reviewState: "approved" };
   }
   return { reviewApproved: false, reviewState: "reviewed" };
+}
+
+function githubPrObservedEvidence({
+  prUrl,
+  parsedPr,
+  expectedRepo,
+  expectedIssueNumber,
+  disclosureRequired,
+  claimantBindingRequired,
+  claimantBindingStatus,
+  sourceRepoRenamed,
+  sourceRepoIdentity
+}) {
+  return {
+    prUrl: prUrl || null,
+    repo: parsedPr?.repo ?? null,
+    pullNumber: parsedPr?.pullNumber ?? null,
+    expectedRepo: expectedRepo || null,
+    expectedIssueNumber: Number.isFinite(expectedIssueNumber) ? expectedIssueNumber : null,
+    disclosureRequired,
+    claimantBindingRequired,
+    claimantBindingStatus,
+    sourceRepoIdentity,
+    ...(sourceRepoRenamed ? { sourceRepoRenamed } : {})
+  };
+}
+
+function githubApiHeaders(githubToken) {
+  const headers = {
+    accept: "application/vnd.github+json",
+    "user-agent": "averray-github-pr-verifier"
+  };
+  if (hasUsableGithubToken(githubToken)) {
+    headers.authorization = `Bearer ${githubToken}`;
+  }
+  return headers;
+}
+
+function cachedSourceRepoId(job) {
+  const source = job?.source;
+  if (!source || typeof source !== "object" || Array.isArray(source) || source.type !== "github_issue") {
+    return null;
+  }
+  return positiveRepoId(source.githubRepoId);
+}
+
+async function resolveSourceRepository({ job, expectedRepo, fetchImpl, githubToken, githubApiBaseUrl }) {
+  const cached = cachedSourceRepoId(job);
+  if (cached) {
+    return { id: cached, origin: "ingested", fullName: null, reason: null };
+  }
+  if (!expectedRepo) {
+    return { id: null, fullName: null, reason: "source_repo_missing" };
+  }
+  if (!hasUsableGithubToken(githubToken) || typeof fetchImpl !== "function") {
+    return {
+      id: null,
+      fullName: null,
+      reason: hasUsableGithubToken(githubToken) ? "github_fetch_unavailable" : "github_token_not_configured"
+    };
+  }
+  const [owner, name] = expectedRepo.split("/");
+  const baseUrl = String(githubApiBaseUrl ?? "https://api.github.com").replace(/\/+$/u, "");
+  try {
+    const repo = await fetchGithubJson(
+      fetchImpl,
+      `${baseUrl}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+      { headers: githubApiHeaders(githubToken) }
+    );
+    const id = positiveRepoId(repo?.id);
+    const fullName = normalizeRepo(repo?.full_name);
+    if (!id || !fullName) {
+      return { id: null, fullName: null, reason: "source_repo_id_unavailable" };
+    }
+    const createdAt = typeof repo.created_at === "string" ? repo.created_at : null;
+    const repositoryTime = Date.parse(createdAt);
+    const jobTime = Date.parse(job.lifecycle?.createdAt);
+    const predatesJob = Number.isFinite(repositoryTime) && Number.isFinite(jobTime)
+      ? repositoryTime < jobTime
+      : null;
+    return { id, origin: "resolved_by_name", fullName, createdAt, predatesJob, reason: null };
+  } catch (error) {
+    const reason = typeof error?.message === "string" && error.message
+      ? error.message.slice(0, 160)
+      : "source_repo_lookup_failed";
+    return { id: null, fullName: null, reason };
+  }
+}
+
+function decideRepositoryMatch({ parsedPr, expectedRepo, sourceRepo, githubLookup }) {
+  const sourceId = positiveRepoId(sourceRepo?.id);
+  const baseRepo = githubLookup?.status === "verified" ? githubLookup.baseRepo ?? null : null;
+  const baseId = positiveRepoId(baseRepo?.id);
+  const unknown = (reason) => ({
+    repoMatches: null,
+    repoMatchMethod: "unknown",
+    repoMatchFallbackReason: reason,
+    sourceRepoRenamed: null
+  });
+  // A cached identity must never be downgraded to a reusable owner/repo name.
+  if (sourceRepo?.origin === "ingested" && baseId == null) {
+    return unknown(githubLookup?.reason ?? "pr_base_repo_id_unavailable");
+  }
+  // Legacy jobs lack the ingestion pin. A name resolution is only usable if
+  // that repository existed before the pinned job, not a later recreation.
+  if (sourceRepo?.origin === "resolved_by_name" && sourceRepo.predatesJob !== true) {
+    return unknown(sourceRepo.predatesJob === false
+      ? "source_repo_not_older_than_job"
+      : "source_repo_creation_time_unavailable");
+  }
+  if (sourceId != null && baseId != null) {
+    const currentName = normalizeRepo(sourceRepo?.fullName) || normalizeRepo(baseRepo?.fullName);
+    const repoMatches = sourceId === baseId;
+    return {
+      repoMatches,
+      repoMatchMethod: "repository_id",
+      repoMatchFallbackReason: null,
+      sourceRepoRenamed: repoMatches && expectedRepo && currentName && expectedRepo !== currentName
+        ? { from: expectedRepo, to: currentName }
+        : null
+    };
+  }
+  if (sourceId == null && parsedPr && parsedPr.repo !== expectedRepo) {
+    return unknown(sourceRepo?.reason ?? "source_repo_id_unavailable");
+  }
+  return {
+    repoMatches: Boolean(parsedPr && expectedRepo && parsedPr.repo === expectedRepo),
+    repoMatchMethod: "exact_name",
+    repoMatchFallbackReason: sourceId != null
+      ? (githubLookup?.status === "verified"
+        ? "pr_base_repo_id_unavailable"
+        : (githubLookup?.reason ?? "pr_base_repo_id_unavailable"))
+      : (sourceRepo?.reason ?? "source_repo_id_unavailable"),
+    sourceRepoRenamed: null
+  };
+}
+
+function readGithubRepository(repo) {
+  const id = positiveRepoId(repo?.id);
+  const fullName = normalizeRepo(repo?.full_name);
+  if (!id || !fullName) return null;
+  return { id, fullName };
+}
+
+function positiveRepoId(value) {
+  const id = typeof value === "string" && /^[1-9]\d*$/u.test(value) ? Number(value) : value;
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
 function normalizeRepo(repo) {
