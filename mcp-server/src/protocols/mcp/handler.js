@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import { normalizeError } from "../../core/errors.js";
+import { resultClassFromOutcome } from "../../services/arrival-session-trail.js";
+import { TOOL_STAGE } from "../../services/arrival-stage-map.js";
 import { withVerifyBilling } from "../../core/verify-product-copy.js";
 import { getMcpTool, MCP_TOOLS } from "./tools.js";
 
@@ -126,6 +128,7 @@ async function recordArrival(arrivals, method, entry) {
 
 export function createMcpRoute({
   arrivals,
+  sessionTrail,
   authMiddleware,
   clientIp,
   enforceLimit,
@@ -174,13 +177,29 @@ export function createMcpRoute({
       const rpcCode = response._arrivalJsonRpcCode;
       if (!toolError && !Number.isSafeInteger(rpcCode)) return;
       const context = response._arrivalDropContext ?? { stage: "reached" };
-      await recordArrival(arrivals, "recordDropOff", {
-        ...context,
+      if (toolError || Number.isSafeInteger(rpcCode)) {
+        await recordArrival(arrivals, "recordDropOff", {
+          ...context,
+          wallet: request._arrivalWallet,
+          apiKeyId: request._arrivalApiKeyId,
+          ip: clientIp?.(request),
+          ...(response._arrivalErrorActor ? { actor: response._arrivalErrorActor } : {}),
+          outcome: toolError ?? { kind: "jsonrpc", code: rpcCode }
+        });
+      }
+      const statusCode = Number(response.statusCode);
+      await sessionTrail?.observe?.({
         wallet: request._arrivalWallet,
-        apiKeyId: request._arrivalApiKeyId,
-        ip: clientIp?.(request),
-        ...(response._arrivalErrorActor ? { actor: response._arrivalErrorActor } : {}),
-        outcome: toolError ?? { kind: "jsonrpc", code: rpcCode }
+        mcpSessionId: request.headers?.["mcp-session-id"],
+        clientInfo: context.clientInfo,
+        protocolVersion: request.headers?.["mcp-protocol-version"],
+        door: "mcp",
+        name: context.tool || context.method || "mcp",
+        resultClass: resultClassFromOutcome({
+          outcome: toolError ?? (Number.isSafeInteger(rpcCode) ? { status: statusCode } : undefined),
+          statusCode
+        }),
+        stage: context.stage ?? "reached"
       });
     };
 
@@ -622,7 +641,10 @@ async function dispatchRequest({
     ...(response._arrivalDropContext ?? {}),
     era,
     clientInfo,
-    stage: message.method === "tools/call" ? undefined : "reached",
+    stage: message.method === "tools/call"
+      ? (TOOL_STAGE[message.params?.name] ?? "reached")
+      : "reached",
+    method: message.method,
     tool: message.method === "tools/call" ? message.params?.name : undefined
   };
   // One verification for a tools/call bearer. The rate limiter below reuses

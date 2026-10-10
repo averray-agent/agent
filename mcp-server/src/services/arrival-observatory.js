@@ -1222,6 +1222,12 @@ function normalizeHttpPath(pathname) {
   return value || "/";
 }
 
+export function isRecordedHttpArrival(method, pathname) {
+  const normalizedMethod = String(method ?? "GET").toUpperCase();
+  if (normalizedMethod === "OPTIONS" || normalizedMethod === "HEAD") return false;
+  return !isHttpMachinePath(normalizeHttpPath(pathname));
+}
+
 function isHttpMachinePath(pathname) {
   return HTTP_MACHINE_PATHS.has(pathname)
     || pathname.startsWith("/.well-known/")
