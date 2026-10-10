@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { SelfIdentityRegistry } from "../core/self-identity-registry.js";
-import { ArrivalAlerts, ARRIVAL_ALERT_COOLDOWN_MS, ARRIVAL_ALERT_SEEN_CAP, NOT_REPORTED } from "./arrival-alerts.js";
+import { ArrivalAlerts, ARRIVAL_ALERT_COOLDOWN_MS, ARRIVAL_ALERT_SEEN_CAP, CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY, NOT_REPORTED, SUPPRESSED_SUBJECT_CAP } from "./arrival-alerts.js";
+import { ArrivalSessionTrail } from "./arrival-session-trail.js";
 import { ArrivalObservatory } from "./arrival-observatory.js";
 import { createAdminArrivalAlertRoutes } from "../protocols/http/admin-arrival-alert-routes.js";
 
@@ -32,7 +33,7 @@ test("successful authenticated visits alert once, and a shared client name is no
     cooldownMs: 1_000,
     sessionTrail: {
       async get(id) {
-        return id === `wallet:${EXTERNAL}` ? { session: { id } } : undefined;
+        return id === `wallet:${EXTERNAL}` ? { session: { id }, persisted: true } : undefined;
       }
     }
   });
@@ -256,7 +257,7 @@ test("sixty nonce and anonymous reads do not consume firsts, and a later claim i
     now: () => 9_000,
     flushIntervalMs: 0,
     cooldownMs: 0,
-    sessionTrail: { async get(id) { return { session: { id } }; } }
+    sessionTrail: { async get(id) { return { session: { id }, persisted: true }; } }
   });
   const observatory = new ArrivalObservatory({
     stateStore: memoryStore(),
@@ -374,4 +375,165 @@ test("a full seen set reports how many firsts are no longer tracked", async () =
   const listed = await alerts.list();
   assert.equal(listed.firstsNoLongerTracked, 1);
   assert.equal([...listed.ready, ...listed.pending].some((alert) => alert.subject === extra), false);
+});
+
+test("one wallet's client names do not fill the queue", async () => {
+  const alerts = new ArrivalAlerts({
+    stateStore: memoryStore(),
+    now: () => 12_000,
+    flushIntervalMs: 60_000,
+    cooldownMs: 60_000
+  });
+  for (let index = 0; index < 6_000; index += 1) {
+    await alerts.note({
+      wallet: EXTERNAL,
+      clientInfo: { name: `flood-${index}`, version: "1" },
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  const real = `0x${"e".repeat(40)}`;
+  await alerts.note({ wallet: real, stage: "claimed", success: true, authenticated: true });
+  const listed = await alerts.list();
+  const rows = [...listed.ready, ...listed.pending];
+  assert.equal(rows.filter((alert) => alert.kind === "external_client_first").length, CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY);
+  assert.equal(listed.clientFirstsCounted, 6_000 - CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY);
+  assert.equal(rows.some((alert) => alert.id === `external_wallet_first:${real}`), true);
+  assert.equal(rows.some((alert) => alert.id === `external_wallet_first_claim:${real}`), true);
+});
+
+test("suppressed subjects are capped and the overflow is reported", async () => {
+  let nowMs = 7_000;
+  const alerts = new ArrivalAlerts({
+    stateStore: memoryStore(),
+    now: () => nowMs,
+    flushIntervalMs: 60_000,
+    cooldownMs: 60_000
+  });
+  for (let index = 0; index < 51 + SUPPRESSED_SUBJECT_CAP; index += 1) {
+    await alerts.note({
+      wallet: `0x${index.toString(16).padStart(40, "0")}`,
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  const atCap = await alerts.list();
+  assert.equal(atCap.suppressedSubjectOverflow, 0);
+  await alerts.note({
+    wallet: `0x${"ab".repeat(20)}`,
+    stage: "browsed",
+    success: true,
+    authenticated: true
+  });
+  const overflow = await alerts.list();
+  assert.equal(overflow.suppressedSubjectOverflow, 1);
+  assert.equal(overflow.suppressed, SUPPRESSED_SUBJECT_CAP + 1);
+});
+
+test("a trail that is unreadable, throws, or unpersisted is not linked", async () => {
+  const noteWallet = async (sessionTrail) => {
+    const alerts = new ArrivalAlerts({
+      stateStore: memoryStore(),
+      sessionTrail,
+      now: () => 4_000,
+      flushIntervalMs: 60_000,
+      cooldownMs: 0
+    });
+    await alerts.note({ wallet: EXTERNAL, stage: "browsed", success: true, authenticated: true });
+    const listed = await alerts.list();
+    const row = [...listed.ready, ...listed.pending].find((alert) => alert.kind === "external_wallet_first");
+    return row;
+  };
+  const unread = await noteWallet({
+    async get() { return { unavailable: "arrival session trail could not be read" }; }
+  });
+  assert.ok(unread);
+  assert.equal(unread.trail, NOT_REPORTED);
+  assert.equal(unread.href, null);
+  assert.match(unread.trailNote, /could not be read/u);
+
+  const thrown = await noteWallet({
+    async get() { throw new Error("trail down"); }
+  });
+  assert.ok(thrown);
+  assert.equal(thrown.trail, NOT_REPORTED);
+  assert.match(thrown.trailNote, /could not be read/u);
+
+  const trail = new ArrivalSessionTrail({
+    stateStore: {
+      async getServiceState() { return undefined; },
+      async upsertServiceState() { throw new Error("redis down"); },
+      async deleteServiceState() {}
+    },
+    now: () => 4_000,
+    flushIntervalMs: 0
+  });
+  await trail.observe({
+    wallet: EXTERNAL,
+    door: "http",
+    name: "GET /auth/session",
+    resultClass: "ok",
+    stage: "reached"
+  });
+  assert.equal((await trail.get(`wallet:${EXTERNAL}`)).persisted, false);
+  const unpersisted = await noteWallet(trail);
+  assert.equal(unpersisted.trail, NOT_REPORTED);
+  assert.equal(unpersisted.href, null);
+  assert.match(unpersisted.trailNote, /unpersisted/u);
+});
+
+test("a queued milestone is flushed immediately", async () => {
+  const writes = [];
+  const alerts = new ArrivalAlerts({
+    stateStore: {
+      async getServiceState() { return undefined; },
+      async upsertServiceState(_scope, value) {
+        writes.push(value);
+        return value;
+      }
+    },
+    sessionTrail: {
+      async get(id) { return { session: { id }, persisted: true }; }
+    },
+    now: () => 1_000,
+    flushIntervalMs: 60_000,
+    cooldownMs: 60_000
+  });
+  await alerts.note({ wallet: EXTERNAL, stage: "browsed", success: true, authenticated: true });
+  assert.equal(writes.length, 1);
+  const flushed = [...writes[0].pending, ...writes[0].ready];
+  assert.equal(flushed.some((alert) => alert.id === `external_wallet_first:${EXTERNAL}`), true);
+});
+
+test("the alerts route reports firsts that are no longer tracked", async () => {
+  const alerts = new ArrivalAlerts({
+    stateStore: memoryStore(),
+    now: () => 6_000,
+    flushIntervalMs: 60_000,
+    cooldownMs: 0
+  });
+  for (let index = 0; index < ARRIVAL_ALERT_SEEN_CAP + 1; index += 1) {
+    await alerts.note({
+      wallet: `0x${index.toString(16).padStart(40, "0")}`,
+      stage: "browsed",
+      success: true,
+      authenticated: true
+    });
+  }
+  const response = {};
+  const route = createAdminArrivalAlertRoutes({
+    authMiddleware: async () => ({ wallet: "0xabc" }),
+    respond: (_response, status, body) => { response.statusCode = status; response.body = body; },
+    arrivalAlerts: alerts
+  });
+  assert.equal(await route({
+    request: { method: "GET" },
+    response,
+    url: new URL("http://localhost/admin/arrivals/alerts"),
+    pathname: "/admin/arrivals/alerts"
+  }), true);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.firstsNoLongerTracked, 1);
 });

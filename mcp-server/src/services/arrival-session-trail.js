@@ -35,6 +35,7 @@ export class ArrivalSessionTrail {
     this.unstitched = 0;
     this.droppedRecords = 0;
     this.dirtyIds = new Set();
+    this.persistedIds = new Set();
     this.collectionSinceMs = undefined;
     this.loaded = false;
     this.loadFailed = null;
@@ -150,7 +151,8 @@ export class ArrivalSessionTrail {
       schemaVersion: ARRIVAL_SESSION_SCHEMA,
       generatedAtMs: this.now(),
       preAuth: { stitched: false, count: this.unstitched, note: PREAUTH_NOTE },
-      session: publicRecord(record)
+      session: publicRecord(record),
+      persisted: this.persistedIds.has(record.id)
     };
   }
 
@@ -188,6 +190,7 @@ export class ArrivalSessionTrail {
       const since = Number(stored?.collectionSinceMs);
       this.collectionSinceMs = Number.isFinite(since) ? since : this.now();
       this.prune(this.now());
+      this.persistedIds = new Set(this.sessions.keys());
       this.loaded = true;
       this.loadFailed = null;
     } catch (error) {
@@ -213,7 +216,9 @@ export class ArrivalSessionTrail {
       });
       for (const id of dirtyIds) {
         const record = this.sessions.get(id);
-        if (record) await this.stateStore?.upsertServiceState?.(sessionScope(id), record);
+        if (!record || typeof this.stateStore?.upsertServiceState !== "function") continue;
+        await this.stateStore.upsertServiceState(sessionScope(id), record);
+        this.persistedIds.add(id);
       }
       this.dirtyIds.clear();
     } catch (error) {
@@ -229,6 +234,7 @@ export class ArrivalSessionTrail {
       if (record.lastSeenMs < oldest) {
         this.sessions.delete(id);
         this.dirtyIds.delete(id);
+        this.persistedIds.delete(id);
         this.droppedRecords += 1;
         removed.push(id);
       }
@@ -250,6 +256,7 @@ export class ArrivalSessionTrail {
       if (!oldestId) return removed;
       this.sessions.delete(oldestId);
       this.dirtyIds.delete(oldestId);
+      this.persistedIds.delete(oldestId);
       this.droppedRecords += 1;
       removed.push(oldestId);
     }
@@ -260,6 +267,7 @@ export class ArrivalSessionTrail {
     if (!ids?.length) return;
     for (const id of ids) {
       try {
+        this.persistedIds.delete(id);
         await this.stateStore?.deleteServiceState?.(sessionScope(id));
       } catch {
         // An orphan key is preferable to failing the request that evicted it.

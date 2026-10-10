@@ -4,6 +4,9 @@ export const NOT_REPORTED = "not reported";
 export const ARRIVAL_ALERT_SCHEMA = "averray.arrival-alerts.v1";
 export const ARRIVAL_ALERT_COOLDOWN_MS = 15 * 60 * 1_000;
 export const ARRIVAL_ALERT_SEEN_CAP = 2_000;
+export const CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY = 3;
+export const SUPPRESSED_SUBJECT_CAP = 500;
+const DAY_MS = 24 * 60 * 60 * 1_000;
 const STATE_SCOPE = "arrival-alerts";
 const DELIVERED_CAP = 100;
 const PENDING_CAP = 50;
@@ -44,6 +47,9 @@ export class ArrivalAlerts {
     this.flushIntervalMs = flushIntervalMs;
     this.suppressed = 0;
     this.suppressedSubjects = new Set();
+    this.suppressedSubjectOverflow = 0;
+    this.clientFirsts = new Map();
+    this.clientFirstsCounted = 0;
     this.untrackedFirsts = 0;
     this.summaryWindowStartMs = undefined;
     this.seen = new Set();
@@ -83,7 +89,10 @@ export class ArrivalAlerts {
       const trailId = authenticated && normalizedWallet ? `wallet:${normalizedWallet}` : undefined;
       const trailLink = await this.resolveTrail(trailId);
       if (authenticated && clientActor === "external" && name) {
-        this.consider(nowMs, "external_client_first", `${name}@${version ?? "unknown"}`, trailLink);
+        const subject = `${name}@${version ?? "unknown"}`;
+        if (this.admitClientFirst(normalizedWallet, subject, nowMs)) {
+          this.consider(nowMs, "external_client_first", subject, trailLink);
+        }
       }
       if (authenticated && success && walletActor === "external") {
         this.consider(nowMs, "external_wallet_first", normalizedWallet, trailLink);
@@ -113,7 +122,7 @@ export class ArrivalAlerts {
       subject,
       atMs: nowMs,
       status: "pending",
-      trailId: trailLink?.trail === "linked" ? trailLink.trailId : null,
+      trailId: trailLink?.trailId ?? null,
       trail: trailLink?.trail === "linked" ? "linked" : NOT_REPORTED,
       href: trailLink?.trail === "linked" ? trailLink.href : null,
       ...(trailLink?.trail === "linked" ? {} : { trailNote: trailLink?.trailNote ?? "no session record" })
@@ -123,13 +132,32 @@ export class ArrivalAlerts {
 
   noteSuppressed(nowMs, key) {
     if (!this.suppressedSubjects.has(key)) {
-      this.suppressedSubjects.add(key);
+      if (this.suppressedSubjects.size >= SUPPRESSED_SUBJECT_CAP) this.suppressedSubjectOverflow += 1;
+      else this.suppressedSubjects.add(key);
       this.suppressed += 1;
       if (this.seen.size >= ARRIVAL_ALERT_SEEN_CAP) this.untrackedFirsts += 1;
     }
     this.saturated = true;
     this.upsertSummary(nowMs);
     this.dirty = true;
+  }
+
+  admitClientFirst(wallet, subject, nowMs) {
+    const day = Math.floor(nowMs / DAY_MS);
+    const key = wallet || "none";
+    let bucket = this.clientFirsts.get(key);
+    if (!bucket || bucket.day !== day) {
+      bucket = { day, names: new Set() };
+      this.clientFirsts.set(key, bucket);
+    }
+    if (bucket.names.has(subject)) return true;
+    if (bucket.names.size >= CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY) {
+      this.clientFirstsCounted += 1;
+      this.dirty = true;
+      return false;
+    }
+    bucket.names.add(subject);
+    return true;
   }
 
   upsertSummary(nowMs) {
@@ -164,7 +192,10 @@ export class ArrivalAlerts {
         return { trail: NOT_REPORTED, trailNote: "session trail could not be read" };
       }
       if (!record?.session) {
-        return { trail: NOT_REPORTED, trailNote: "no session record" };
+        return { trail: NOT_REPORTED, trailId, trailNote: "no session record" };
+      }
+      if (record.persisted !== true) {
+        return { trail: NOT_REPORTED, trailId, trailNote: "unpersisted" };
       }
       return {
         trail: "linked",
@@ -196,7 +227,9 @@ export class ArrivalAlerts {
         ready: null,
         pending: null,
         saturated: NOT_REPORTED,
-        firstsNoLongerTracked: NOT_REPORTED
+        firstsNoLongerTracked: NOT_REPORTED,
+        clientFirstsCounted: NOT_REPORTED,
+        suppressedSubjectOverflow: NOT_REPORTED
       };
     }
     this.release(this.now());
@@ -208,6 +241,8 @@ export class ArrivalAlerts {
       saturated: this.saturated,
       suppressed: this.suppressed,
       firstsNoLongerTracked: this.untrackedFirsts,
+      clientFirstsCounted: this.clientFirstsCounted,
+      suppressedSubjectOverflow: this.suppressedSubjectOverflow,
       sending: "monitor_alert_bridge",
       ready: this.ready.map(publicAlert),
       pending: this.pending.map(publicAlert)
@@ -239,11 +274,27 @@ export class ArrivalAlerts {
       this.untrackedFirsts = Number.isSafeInteger(stored?.untrackedFirsts) && stored.untrackedFirsts >= 0
         ? stored.untrackedFirsts
         : 0;
-      this.suppressedSubjects = new Set(
-        Array.isArray(stored?.suppressedSubjects)
-          ? stored.suppressedSubjects.filter((key) => typeof key === "string")
-          : []
-      );
+      const storedSubjects = Array.isArray(stored?.suppressedSubjects)
+        ? stored.suppressedSubjects.filter((key) => typeof key === "string")
+        : [];
+      this.suppressedSubjects = new Set(storedSubjects.slice(0, SUPPRESSED_SUBJECT_CAP));
+      const trimmed = Math.max(0, storedSubjects.length - SUPPRESSED_SUBJECT_CAP);
+      this.suppressedSubjectOverflow = (Number.isSafeInteger(stored?.suppressedSubjectOverflow)
+        && stored.suppressedSubjectOverflow >= 0
+        ? stored.suppressedSubjectOverflow
+        : 0) + trimmed;
+      this.clientFirstsCounted = Number.isSafeInteger(stored?.clientFirstsCounted) && stored.clientFirstsCounted >= 0
+        ? stored.clientFirstsCounted
+        : 0;
+      this.clientFirsts = new Map();
+      for (const entry of Array.isArray(stored?.clientFirsts) ? stored.clientFirsts : []) {
+        const day = Number(entry?.day);
+        const names = Array.isArray(entry?.names)
+          ? entry.names.filter((name) => typeof name === "string").slice(0, CLIENT_NAME_FIRSTS_PER_WALLET_PER_DAY)
+          : [];
+        if (!entry?.wallet || !Number.isFinite(day)) continue;
+        this.clientFirsts.set(String(entry.wallet), { day, names: new Set(names) });
+      }
       const windowStart = Number(stored?.summaryWindowStartMs);
       this.summaryWindowStartMs = Number.isFinite(windowStart) ? windowStart : undefined;
       this.loaded = true;
@@ -271,6 +322,13 @@ export class ArrivalAlerts {
         suppressed: this.suppressed,
         untrackedFirsts: this.untrackedFirsts,
         suppressedSubjects: [...this.suppressedSubjects],
+        suppressedSubjectOverflow: this.suppressedSubjectOverflow,
+        clientFirstsCounted: this.clientFirstsCounted,
+        clientFirsts: [...this.clientFirsts].map(([wallet, bucket]) => ({
+          wallet,
+          day: bucket.day,
+          names: [...bucket.names]
+        })),
         summaryWindowStartMs: this.summaryWindowStartMs ?? null
       });
     } catch (error) {

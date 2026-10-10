@@ -525,8 +525,10 @@ export class ArrivalObservatory {
       const code = dropOffCode(outcome);
       // MCP records the attempt before the tool result exists. Alerts for
       // those calls are noted after the outcome, from the MCP finish path.
+      // A missing outcome is not a success: noting it here would alert before
+      // the tool runs.
       const outcomeKnown = outcome?.ok === true || outcome?.kind === "http";
-      if (outcomeKnown && !code) {
+      if (outcomeKnown) {
         // Authenticated means this request carried a middleware-verified
         // wallet. A client-to-wallet link is not that, and /auth/nonce
         // (stage "identified") is an unsigned claim even if a wallet was passed.
@@ -534,7 +536,7 @@ export class ArrivalObservatory {
           wallet: normalizedWallet,
           clientInfo: identity,
           stage,
-          success: true,
+          success: outcome?.ok === true && !code,
           authenticated: Boolean(normalizedWallet) && stage !== "identified",
           nowMs
         });

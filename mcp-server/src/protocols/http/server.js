@@ -1091,7 +1091,7 @@ const server = createServer(async (request, response) => {
     const statusCode = Number(response.statusCode);
     const arrivalError = response._arrivalError;
     const arrivalWallet = verifiedArrivalWallet(pathname, request);
-    void arrivalObservatory.recordHttp({
+    const recordHttpArrival = () => arrivalObservatory.recordHttp({
       method: wireMethod,
       pathname,
       clientInfo: extractHttpClientInfo(request),
@@ -1108,19 +1108,29 @@ const server = createServer(async (request, response) => {
     if (isRecordedHttpArrival(wireMethod, pathname) && !pathname.startsWith("/admin")) {
       const method = String(wireMethod ?? "GET").toUpperCase();
       const httpRoute = `${method} ${pathname}`;
-      // observe() must not reject: this call is deliberately not awaited, and
-      // a rejection here is an unhandled rejection on Node 22.
-      void sessionTrail.observe({
-        wallet: arrivalWallet,
-        clientInfo: extractHttpClientInfo(request),
-        door: "http",
-        name: `${method} ${metricPathLabel(pathname)}`,
-        resultClass: resultClassFromOutcome({
-          outcome: arrivalError ? { kind: "http", status: statusCode, code: arrivalError.code } : undefined,
-          statusCode
-        }),
-        stage: HTTP_ROUTE_STAGE[httpRoute] ?? "reached"
-      });
+      // The trail step is awaited before the alert inside recordHttp, so the
+      // first milestone can link to the record this response just wrote.
+      // The async function must not reject: a rejection here is unhandled on Node 22.
+      void (async () => {
+        try {
+          await sessionTrail.observe({
+            wallet: arrivalWallet,
+            clientInfo: extractHttpClientInfo(request),
+            door: "http",
+            name: `${method} ${metricPathLabel(pathname)}`,
+            resultClass: resultClassFromOutcome({
+              outcome: arrivalError ? { kind: "http", status: statusCode, code: arrivalError.code } : undefined,
+              statusCode
+            }),
+            stage: HTTP_ROUTE_STAGE[httpRoute] ?? "reached"
+          });
+          await recordHttpArrival();
+        } catch {
+          // Observability cannot fail the response that already finished.
+        }
+      })();
+    } else {
+      void recordHttpArrival();
     }
   });
 

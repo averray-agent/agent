@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
 import { ArrivalObservatory } from "../../services/arrival-observatory.js";
+import { ArrivalAlerts } from "../../services/arrival-alerts.js";
 import { ArrivalSessionTrail } from "../../services/arrival-session-trail.js";
 import { SelfIdentityRegistry } from "../../core/self-identity-registry.js";
 import { MemoryStateStore } from "../../core/state-store.js";
@@ -1057,7 +1058,8 @@ test("a nonce and a failed claim do not raise an arrival alert", async () => {
   );
   assert.equal(claim.statusCode, 200);
   assert.equal(claim.body.result.isError, true);
-  assert.equal(claimNotes.length, 0);
+  assert.equal(claimNotes.length, 1);
+  assert.equal(claimNotes[0].success, false);
 });
 
 test("authenticated MCP calls link the wallet stamped by auth middleware before dispatch", async () => {
@@ -1203,4 +1205,70 @@ test("a rate-limited MCP request produces no trail row", async () => {
   const listed = await sessionTrail.list();
   assert.equal(listed.sessions.length, 0);
   assert.equal(listed.preAuth.count, 0);
+});
+
+test("an MCP alert is linked only after the tool outcome, to the persisted trail", async () => {
+  const failed = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+  const succeeded = "0xdddddddddddddddddddddddddddddddddddddddd";
+  const state = new Map();
+  const stateStore = {
+    async getServiceState(scope) { return state.get(scope); },
+    async upsertServiceState(scope, value) {
+      state.set(scope, { ...(state.get(scope) ?? {}), ...value });
+      return state.get(scope);
+    },
+    async deleteServiceState(scope) { state.delete(scope); }
+  };
+  const sessionTrail = new ArrivalSessionTrail({ stateStore, now: () => 20_000, flushIntervalMs: 0 });
+  const alerts = new ArrivalAlerts({
+    stateStore,
+    sessionTrail,
+    now: () => 20_000,
+    flushIntervalMs: 60_000,
+    cooldownMs: 0
+  });
+  const arrivals = new ArrivalObservatory({
+    stateStore: new MemoryStateStore(),
+    alerts,
+    now: () => 20_000,
+    flushIntervalMs: 0
+  });
+  let current = failed;
+  const { handler } = createHarness({
+    arrivals,
+    sessionTrail,
+    alerts,
+    authMiddleware: async (request) => {
+      request._arrivalWallet = current;
+      return { wallet: current };
+    },
+    executeTool: async (name) => {
+      if (name === "claimJob") throw new ConflictError("already claimed");
+      return { jobs: [] };
+    }
+  });
+  const denied = await call(
+    handler,
+    modernRequest("tools/call", { name: "claimJob", arguments: { jobId: "job-1" } }),
+    { ...modernHeaders("tools/call", "claimJob"), authorization: "Bearer valid-token" }
+  );
+  assert.equal(denied.body.result.isError, true);
+  const afterFailure = await alerts.list();
+  assert.equal(
+    [...afterFailure.ready, ...afterFailure.pending].some((alert) => alert.id === `external_wallet_first:${failed}`),
+    false
+  );
+
+  current = succeeded;
+  const ok = await call(
+    handler,
+    modernRequest("tools/call", { name: "listJobs", arguments: {} }, MODERN_MCP_VERSION, 2),
+    { ...modernHeaders("tools/call", "listJobs"), authorization: "Bearer valid-token" }
+  );
+  assert.equal(ok.body.result.isError, false);
+  const listed = await alerts.list();
+  const first = [...listed.ready, ...listed.pending].find((alert) => alert.id === `external_wallet_first:${succeeded}`);
+  assert.ok(first);
+  assert.equal(first.trail, "linked");
+  assert.equal(first.href, `/admin/arrivals/sessions?id=${encodeURIComponent(`wallet:${succeeded}`)}`);
 });
