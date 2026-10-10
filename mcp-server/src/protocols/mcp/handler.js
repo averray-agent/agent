@@ -679,7 +679,8 @@ async function dispatchRequest({
     clientInfo,
     ip: clientIp?.(request),
     ...(arrivalWallet ? { wallet: arrivalWallet } : {}),
-    ...(request._arrivalApiKeyId ? { apiKeyId: request._arrivalApiKeyId } : {})
+    ...(request._arrivalApiKeyId ? { apiKeyId: request._arrivalApiKeyId } : {}),
+    ...(request.headers?.["mcp-session-id"] ? { mcpSessionId: request.headers["mcp-session-id"] } : {})
   });
 
   if (!Object.hasOwn(message, "id")) {

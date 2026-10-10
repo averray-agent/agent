@@ -22,6 +22,7 @@ import { createAdminCapabilityRoutes } from "./admin-capability-routes.js";
 import { createAdminCreditRoutes } from "./admin-credit-routes.js";
 import { createAdminGithubRoutes } from "./admin-github-routes.js";
 import { createAdminJobsRoutes } from "./admin-jobs-routes.js";
+import { createAdminArrivalAlertRoutes } from "./admin-arrival-alert-routes.js";
 import { createAdminArrivalSessionRoutes } from "./admin-arrival-session-routes.js";
 import { createAdminJourneyRoutes } from "./admin-journey-routes.js";
 import { createAdminL3PostingRoutes } from "./admin-l3-posting-routes.js";
@@ -99,6 +100,7 @@ import {
 import { verifiedArrivalWallet } from "./arrival-wallet.js";
 import { HTTP_ROUTE_STAGE } from "../../services/arrival-stage-map.js";
 import { ArrivalSessionTrail, resultClassFromOutcome } from "../../services/arrival-session-trail.js";
+import { ArrivalAlerts } from "../../services/arrival-alerts.js";
 import { signTokenFromConfig, verifyTokenFromConfig } from "../../auth/jwt.js";
 import { createArrivalRoutes } from "./arrival-routes.js";
 import { TreasurySummaryService } from "../../services/treasury-summary.js";
@@ -931,12 +933,14 @@ const executeMcpTool = createMcpToolExecutor({
 // Records who reaches the front door. Injected rather than reached for, so
 // the MCP handler stays testable without a state store.
 const sessionTrail = new ArrivalSessionTrail({ stateStore });
+const arrivalAlerts = new ArrivalAlerts({ stateStore });
 
 const arrivalObservatory = new ArrivalObservatory({
   stateStore,
   platformService: service,
   metrics,
   identityRegistry: selfIdentityRegistry,
+  alerts: arrivalAlerts,
   hashSalt: process.env.ARRIVAL_HASH_SALT,
   verifyCanaryMarker: arrivalCanaryMarkers.verify
 });
@@ -963,6 +967,12 @@ const handleAdminJourneyRoute = createAdminJourneyRoutes({
   authMiddleware,
   parseLimit,
   respond
+});
+
+const handleAdminArrivalAlertRoute = createAdminArrivalAlertRoutes({
+  authMiddleware,
+  respond,
+  arrivalAlerts
 });
 
 const handleAdminArrivalSessionRoute = createAdminArrivalSessionRoutes({
@@ -1201,6 +1211,10 @@ const server = createServer(async (request, response) => {
     }
 
     if (await handleAdminSessionsRoute({ request, response, url, pathname })) {
+      return;
+    }
+
+    if (await handleAdminArrivalAlertRoute({ request, response, url, pathname })) {
       return;
     }
 

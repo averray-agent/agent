@@ -175,6 +175,7 @@ export const ROUTE_CAPABILITY_RULES = [
   { method: "GET", path: "/admin/ops/topup-destinations", capabilities: ["ops:view"] },
   { method: "GET", path: "/admin/arrivals/timeline", capabilities: ["ops:view"] },
   { method: "GET", path: "/admin/arrivals/sessions", capabilities: ["admin:status", "ops:view"] },
+  { method: "GET", path: "/admin/arrivals/alerts", capabilities: ["admin:status", "ops:view"] },
   { method: "GET", path: "/admin/worker-journeys", capabilities: ["ops:view"] },
   { method: "GET", path: "/admin/status", capabilities: ["admin:status", "ops:view"] },
   { method: "POST", path: "/admin/agent-transfers", capabilities: ["agent-transfers:submit"] },
