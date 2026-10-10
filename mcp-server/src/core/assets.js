@@ -4,6 +4,9 @@ export const DEFAULT_ESCROW_ASSET = {
   assetId: 1337,
   address: "0x0000053900000000000000000000000001200000",
   decimals: 6,
+  // Local conservative admission/proof floor (0.07 USDC), deliberately retained.
+  // Not chain metadata: assets.asset(1337).minBalance = 10000 at block 21634457.
+  // Evidence and consumers: docs/USDC_MINIMUM_BALANCE_POLICY.md.
   minBalanceRaw: "70000"
 };
 

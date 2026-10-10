@@ -633,9 +633,12 @@ Polkadot docs paths `smart-contracts/precompiles/erc20.md`,
 `environment.network: polkadot-hub-mainnet`; keep RPC at
 `https://eth-rpc.polkadot.io/`; include only mainnet API/explorer links; and
 prove canonical USDC (`assetId: 1337`, 6 decimals, Trust-Backed precompile
-`0x0000053900000000000000000000000001200000`, `minBalanceRaw: 70000`, ERC20
-metadata functions unimplemented). Each smoke run must have unique run/job/
-session IDs, a reward at least the USDC min balance and no more than
+`0x0000053900000000000000000000000001200000`, ERC20 metadata functions
+unimplemented), plus the deliberately retained **local** policy
+`minBalanceRaw: 70000` (0.07 USDC). This is not chain metadata: the
+[pinned read at block 21634457](USDC_MINIMUM_BALANCE_POLICY.md) reports
+`assets.asset(1337).minBalance = 10000` (0.01 USDC). Each smoke run must have unique run/job/
+session IDs, a reward at least the local USDC policy floor and no more than
 `1_000_000` raw units by default, a confirmed claim transaction, a submitted
 session, approved verification using the stored structured submission, a
 confirmed settlement transaction, badge/profile verification, and timeline
