@@ -1,0 +1,189 @@
+{
+  "schemaVersion": "averray.signer-cleanup.v1",
+  "packetCommit": "c06fc5eb",
+  "rows": [
+    {
+      "bucket": "A",
+      "escrow": "v3",
+      "function": "cancelOpenJob",
+      "jobId": "0x26658513c5e5b0a276c63c65251f8bddf05cb578d2acfe4dbbac2a8fbac0ef65"
+    },
+    {
+      "bucket": "A",
+      "escrow": "v3",
+      "function": "cancelOpenJob",
+      "jobId": "0x8e24acd93c8707016a7a7278854535fe8b2ee84b6539f699d09b36ae4baa5b99"
+    },
+    {
+      "bucket": "A",
+      "escrow": "v3",
+      "function": "cancelOpenJob",
+      "jobId": "0xba5ee7e6083e2a804cbd83ff0bb936cb54b396fe8d1b8b9ad78db2360fb14712"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v3",
+      "function": "finalizeRejectedJob",
+      "jobId": "0x003725b8b6aadc5e717dd7422425b30fc17cad1f7dd8247f6defd10ed1fd88c8"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v3",
+      "function": "finalizeRejectedJob",
+      "jobId": "0x3731a59bf514fa07bfe8d57d716f1b74eba509913cb484c7e7ac38cbc56f26bf"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v3",
+      "function": "finalizeRejectedJob",
+      "jobId": "0x577020a1e80e89ead9e3a52dc1482dee151ced416154e5d8c8eb98b96099f982"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v3",
+      "function": "finalizeRejectedJob",
+      "jobId": "0x638404be136308f23d013a0b5da449c6427607b904a33aaea523d79859756f81"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v3",
+      "function": "finalizeRejectedJob",
+      "jobId": "0x715667cf58956d37e47f5f788224ba56f420644cb19c2bde5265df9ec2941df9"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v3",
+      "function": "finalizeRejectedJob",
+      "jobId": "0x7b5c50c14c2914b161e0f77c36d7f1b9c67a2fe2c3e7150643e18584a59e390e"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v3",
+      "function": "finalizeRejectedJob",
+      "jobId": "0x8875848862f23512f626fb003a5729b92cdc5e006a6d713b2bdff555ae33872e"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v3",
+      "function": "finalizeRejectedJob",
+      "jobId": "0x8df0941a9bc6f75ec91dd9aa9569788ecca4940469c9a4708bd3b5d18967318f"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v3",
+      "function": "finalizeRejectedJob",
+      "jobId": "0x9a193458b3b777d52ef0932eabd3801fdde62eb3460e76a033af0ed7c0533e5b"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v3",
+      "function": "finalizeRejectedJob",
+      "jobId": "0xa9617d053aa9d2234ce3cface6f9f96ae6ac5f991fb467f8da09beeb367adec2"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v3",
+      "function": "finalizeRejectedJob",
+      "jobId": "0xc2e4608da6b0a3197ac7da44e9bf0ff7c1629a1c9a968c422f10d3d1fa8376a2"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v2",
+      "function": "finalizeRejectedJob",
+      "jobId": "0x10380993e78142ff1b810132520f8c80a04f12252637bb30665b321ccd4b215e"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v2",
+      "function": "finalizeRejectedJob",
+      "jobId": "0x3aacf564404784ca0b0d899d29f67f66b6235df48467563a41f898a4da77e4a8"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v2",
+      "function": "finalizeRejectedJob",
+      "jobId": "0x4f9d2e67e77d289e5f71fcadb58071a551ec1b0921e6838f79fc1aec4d2c0aa5"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v2",
+      "function": "finalizeRejectedJob",
+      "jobId": "0xbda1e276b8eb6aeda1c5f3c14c54872ce62662e42e8c2127c2e08d65ab503334"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v2",
+      "function": "finalizeRejectedJob",
+      "jobId": "0xd82143b82f9958ee4da366cf1ca1a11c8e7fe8298880068a30bcdc4d4197f41f"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v2",
+      "function": "finalizeRejectedJob",
+      "jobId": "0xe9cc1d460f6570db6ad048174f3467ad2336395c4f929ec8c0808ebbe83ff15d"
+    },
+    {
+      "bucket": "B",
+      "escrow": "v2",
+      "function": "finalizeRejectedJob",
+      "jobId": "0xfab7e747ea0337fb700b80075dedde48b4117e00abb2bd5b64fd697c13f2f6aa"
+    },
+    {
+      "bucket": "B'",
+      "escrow": "v2",
+      "function": "finalizeRejectedJob",
+      "jobId": "0xc75efd7b0e098d9f802e7edb15b0bb343dc9c0dadbb5a6f6f8d76e3af55d05a9"
+    },
+    {
+      "bucket": "C",
+      "escrow": "aac",
+      "function": "deallocateIdleFunds",
+      "strategy": "AAC_IDLE_DEPOSIT_POOL_V21"
+    },
+    {
+      "bucket": "D",
+      "escrow": "v2",
+      "function": "handleClaimTimeout",
+      "jobId": "0x19d2ce787823b066bdf40911321bdd9d6bff5fe8da787ffa9950c27ef8f65bbf"
+    },
+    {
+      "bucket": "D",
+      "escrow": "v2",
+      "function": "handleClaimTimeout",
+      "jobId": "0x1cd5e39d94c30a0f57381c92325f8c65cc6635498a4bac72d10f3950659a9217"
+    },
+    {
+      "bucket": "D",
+      "escrow": "v2",
+      "function": "handleClaimTimeout",
+      "jobId": "0x5b7931881d58403d4a3ff69162ebb9605c0d7c3c2633547ea5455253f5218899"
+    },
+    {
+      "bucket": "D",
+      "escrow": "v2",
+      "function": "handleClaimTimeout",
+      "jobId": "0xa42ebcba24501330255377d6702f0f8a6a3df1a7171a78bf6b81f5412844150e"
+    },
+    {
+      "bucket": "D",
+      "escrow": "v2",
+      "function": "handleClaimTimeout",
+      "jobId": "0xb569ef0d07c88c54493ea60f3ad11b925ce26116d1258fdf064da0a4d4ea8851"
+    },
+    {
+      "bucket": "D",
+      "escrow": "v2",
+      "function": "handleClaimTimeout",
+      "jobId": "0xef36549595c4152c08047e23ef80d097371a02855e40b1817dc7a0e98668c989"
+    }
+  ],
+  "rescueJobIds": [
+    "0x158d074f71c4f15a7d53305084854ad01bbea36b412ee7eba6471b1dbca5090f",
+    "0x19d2ce787823b066bdf40911321bdd9d6bff5fe8da787ffa9950c27ef8f65bbf",
+    "0x1cd5e39d94c30a0f57381c92325f8c65cc6635498a4bac72d10f3950659a9217",
+    "0x5b7931881d58403d4a3ff69162ebb9605c0d7c3c2633547ea5455253f5218899",
+    "0xa42ebcba24501330255377d6702f0f8a6a3df1a7171a78bf6b81f5412844150e",
+    "0xb569ef0d07c88c54493ea60f3ad11b925ce26116d1258fdf064da0a4d4ea8851",
+    "0xef36549595c4152c08047e23ef80d097371a02855e40b1817dc7a0e98668c989"
+  ]
+}

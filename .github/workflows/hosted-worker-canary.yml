@@ -76,7 +76,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: hosted-worker-canary
+  group: production-signer-5a6836 # backend broker uses the same signer
   cancel-in-progress: false
 
 jobs:

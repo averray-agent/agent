@@ -22,6 +22,7 @@ import {
   printCeremonyRpcPreflight
 } from "./ceremony-rpc.mjs";
 import { loadKeyFromOp } from "./redeploy-escrowcore.mjs";
+import { assertAllowedId, hash as cleanupHash } from "./signer-cleanup.mjs";
 
 export const MIN_OPEN_AGE_SECONDS = 60 * 60;
 export const REASON_OPERATOR_RESCUE = encodeBytes32String("OPERATOR_RESCUE");
@@ -109,6 +110,7 @@ export function parseArgs(argv) {
       case "--escrow": args.escrow = next(); break;
       case "--phase": args.phase = next(); break;
       case "--job-id": args.jobId = next(); break;
+      case "--job-ids": args.jobIds = next().split(","); break;
       case "--janitor": args.janitor = next(); break;
       case "--expected-signer": args.expectedSigner = next(); break;
       case "--expected-plan-hash": args.expectedPlanHash = next(); break;
@@ -130,6 +132,20 @@ export function parseArgs(argv) {
 }
 
 export function validateArgs(args) {
+  if (args.jobIds !== undefined) {
+    if (args.jobId || !Array.isArray(args.jobIds) || args.jobIds.length < 1 || args.jobIds.length > 10
+      || new Set(args.jobIds.map(id => id.toLowerCase())).size !== args.jobIds.length) {
+      throw new Error("Use --job-ids with 1–10 distinct IDs, not alongside --job-id.");
+    }
+    for (const jobId of args.jobIds) validateArgs({ ...args, jobIds: undefined, jobId, execute: false });
+    if (args.execute) {
+      if (!HASH_RE.test(String(args.expectedPlanHash ?? ""))) throw new Error("Batch requires reviewed --expected-plan-hash");
+      if (args.confirm !== `${args.phase === "prepare" ? "RESCUE" : "FINALIZE"} ${args.expectedPlanHash}`) throw new Error("Batch confirmation must name the combined plan hash");
+      // Reuse all signer-backend validations, with the individual confirmation.
+      validateArgs({ ...args, jobIds: undefined, jobId: args.jobIds[0], confirm: `${args.phase === "prepare" ? "RESCUE" : "FINALIZE"} ${args.jobIds[0]}` });
+    }
+    return;
+  }
   if (!new Set(["mainnet", "testnet"]).has(args.profile)) {
     throw new Error("--profile is required and must be mainnet or testnet.");
   }
@@ -142,6 +158,7 @@ export function validateArgs(args) {
   if (!BYTES32_RE.test(String(args.jobId ?? ""))) {
     throw new Error("--job-id must be an explicit 32-byte hex job ID.");
   }
+  assertAllowedId(args.jobId);
   if (!isAddress(String(args.janitor ?? "")) || getAddress(args.janitor) === ZERO_ADDRESS) {
     throw new Error("--janitor must be the nonzero dedicated averray-janitor EVM address.");
   }
@@ -574,10 +591,12 @@ function assertReceipt(receipt, label) {
   }
 }
 
-async function sendCall(signer, call, log) {
+export async function sendCall(signer, call, log) {
   log(`sending:                  ${call.label}`);
+  assertAllowedId(call.args[0]);
+  assertAllowedId(ESCROW_INTERFACE.parseTransaction({ data: call.data }).args[0]);
   const tx = await signer.sendTransaction({ to: call.to, data: call.data, value: call.value });
-  const receipt = await tx.wait();
+  const receipt = await tx.wait(1, 60_000);
   assertReceipt(receipt, call.label);
   log(`tx:                       ${receipt.hash} (block ${receipt.blockNumber})`);
   return receipt;
@@ -652,7 +671,50 @@ async function executeFinalize({ args, signer, snapshot, calls, log }) {
   return { hash: receipt.hash, blockNumber: receipt.blockNumber, expectedRefund };
 }
 
+export function rescueBatchHash(plans) {
+  return `0x${cleanupHash(plans.map(plan => ({ planHash: plan.planHash, target: plan.target,
+    expectedSigner: plan.expectedSigner, job: plan.snapshot.job,
+    paused: plan.snapshot.paused, creation: plan.snapshot.creation,
+    tombstone: plan.tombstone.hash })))}`;
+}
+
+export async function runRescueBatch(args, dependencies = {}) {
+  validateArgs(args);
+  const log = dependencies.log ?? console.log;
+  const single = dependencies.singleRun ?? runRescue;
+  const previews = [];
+  for (const jobId of args.jobIds) previews.push(await single({ ...args, jobIds: undefined, jobId, execute: false }, dependencies));
+  if (args.phase === "prepare") {
+    const newClaims = BigInt(previews.filter(p => Number(p.snapshot.job.state) === 1).length);
+    for (const { snapshot } of previews) {
+      if (BigInt(snapshot.workerClaimCount) + newClaims > BigInt(snapshot.waiverClaimCount)) {
+        throw new Error("Batch exceeds the janitor's remaining waiver claim capacity; refusing before any broadcast");
+      }
+    }
+  }
+  const planHash = rescueBatchHash(previews);
+  log(`combined plan hash: ${planHash}`);
+  log(`confirmation: ${args.phase === "prepare" ? "RESCUE" : "FINALIZE"} ${planHash}`);
+  if (!args.execute) return { mode: "dry-run", planHash, plans: previews };
+  if (args.expectedPlanHash.toLowerCase() !== planHash) throw new Error("Combined plan changed; re-run dry-run");
+  const completed = [];
+  try {
+    for (let n = 0; n < args.jobIds.length; n++) {
+      const jobId = args.jobIds[n];
+      const fresh = await single({ ...args, jobIds: undefined, jobId, execute: false }, dependencies);
+      if (rescueBatchHash([fresh]) !== rescueBatchHash([previews[n]])) throw new Error(`Batch pre-state changed for ${jobId}; stop and review`);
+      const result = await single({ ...args, jobIds: undefined, jobId,
+        expectedPlanHash: fresh.planHash, confirm: `${args.phase === "prepare" ? "RESCUE" : "FINALIZE"} ${jobId}` }, dependencies);
+      completed.push({ jobId, result: result.result });
+    }
+    return { mode: "execute", planHash, completed };
+  } finally {
+    log(JSON.stringify({ completed, notCompleted: args.jobIds.filter(jobId => !completed.some(r => r.jobId === jobId)) }, (_, v) => typeof v === "bigint" ? v.toString() : v));
+  }
+}
+
 export async function runRescue(args, dependencies = {}) {
+  if (args.jobIds !== undefined) return runRescueBatch(args, dependencies);
   validateArgs(args);
   const loadManifest = dependencies.loadManifest ?? loadDeploymentManifest;
   const createRpc = dependencies.createRpc ?? createCeremonyRpcContext;
@@ -843,6 +905,7 @@ or:
 After the live dispute window, use --phase finalize and confirmation
 'FINALIZE 0x...'. Use --resume only after reviewing a partial prepare that is
 already bound on-chain to the same janitor and canonical tombstone.`);
+  console.log("For a batch, replace --job-id with --job-ids <comma-separated IDs>. Review the combined hash and confirm 'RESCUE <combined hash>' (or FINALIZE). The first failure stops the batch.");
 }
 
 async function main() {

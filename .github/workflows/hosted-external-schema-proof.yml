@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: hosted-external-schema-proof
+  group: production-signer-5a6836 # external posting proof may invoke brokered writes
   cancel-in-progress: false
 
 jobs:

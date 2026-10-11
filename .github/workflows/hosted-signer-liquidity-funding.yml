@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: hosted-signer-liquidity-funding
+  group: production-signer-5a6836 # separate from deploy's pending-run queue
   cancel-in-progress: false
 
 jobs:
