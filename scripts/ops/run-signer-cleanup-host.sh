@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Host-side maintenance boundary. Operator invokes via the hosted workflow only.
 set -euo pipefail
+trap '' PIPE # A disconnected non-PTY SSH stdout must never interrupt recovery.
 STACK_ROOT=${STACK_ROOT:-/srv/agent-stack}
 APP_ROOT="$STACK_ROOT/app"
 RUN_ID=${CLEANUP_RUN_ID:?CLEANUP_RUN_ID required}
@@ -9,6 +10,12 @@ COMMIT=${CLEANUP_COMMIT:-0}
 RECOVER=${1:-}
 LOCK_FILE=${DEPLOY_LOCK_FILE:-/tmp/averray-production-deploy.lock}
 MARKER="$STACK_ROOT/.deploy-state/signer-cleanup-$RUN_ID.stopped"
+umask 077
+mkdir -p "$STACK_ROOT/.deploy-state"
+HOST_LOG="$STACK_ROOT/.deploy-state/signer-cleanup-$RUN_ID.log"
+# VPS GNU tee keeps the file open when the SSH pipe closes. Start before fd 9
+# exists so the evidence writer cannot inherit the deployment lock.
+exec > >(tee --output-error=warn-nopipe -a "$HOST_LOG") 2>&1
 WORKER="signer-cleanup-$RUN_ID"
 selector="$APP_ROOT/scripts/ops/run-caddy-network-selection.sh"
 state="$STACK_ROOT/.deploy-state/caddy-network-selection.json"
@@ -75,9 +82,9 @@ fi
 exec 9>"$LOCK_FILE"
 flock -n 9 || { echo 'Production deploy/cleanup lock held; refusing'; exit 1; }
 log 'production deploy lock acquired'
-until_nonce=$((SECONDS + 120))
+until_nonce=$(($(date +%s) + 120))
 while ! nonce; do
-  if (( SECONDS >= until_nonce )); then echo 'Signer did not drain within 120s; backend left running'; exit 1; fi
+  if (( $(date +%s) >= until_nonce )); then echo 'Signer did not drain within 120s; backend left running'; exit 1; fi
   sleep 5
 done
 watchdog=''
@@ -98,14 +105,15 @@ log 'backend stopping; pre-stop idle nonce recorded above'
 "${compose[@]}" stop --timeout 30 "$service"
 log 'backend stopped'
 # Independent hard stopped-window budget; timeout below handles the normal case.
-# This child inherits the deploy lock until it has restarted the service.
+# Do not let an orphaned watchdog block the independent recovery step's flock.
 (
+  exec 9>&-
   trap - EXIT INT TERM HUP
   sleep 900 & timer=$!
   trap 'kill "$timer" 2>/dev/null || true; exit 0' TERM INT HUP
   wait "$timer"
-  log '::error::15-minute stopped-window watchdog fired; terminating cleanup'
   restart
+  log '::error::15-minute stopped-window watchdog fired; cleanup terminated and restart attempted'
 ) &
 watchdog=$!
 nonce # Close the drain-to-stop race. Busy => trap restarts; never sign.

@@ -36,14 +36,15 @@ export function assertAllowedId(jobId) {
 }
 export const EVENTS = { A: "JobCancelled", B: "JobClosed", "B'": "JobClosed", C: "StrategyDeallocated", D: "JobReopened" };
 const STATES = ["None", "Open", "Claimed", "Submitted", "Rejected", "Disputed", "Closed", "Cancelled"];
-const escrowAbi = [...ESCROW_CORE_ABI.filter((s) => /^(function (jobs|accounts|policy|cancelOpenJob|finalizeRejectedJob|handleClaimTimeout)\(|event (JobCancelled|JobClosed|JobReopened)\()/.test(s)),
+const escrowAbi = [...ESCROW_CORE_ABI.filter((s) => /^(function (jobs|accounts|policy|cancelOpenJob|finalizeRejectedJob|handleClaimTimeout)\(|event (JobCancelled|JobClosed|JobReopened|Verified|JobRejected)\()/.test(s)),
   "function policy() view returns (address)",
   "function createdAt(bytes32) view returns (uint256)", "function MIN_OPEN_FOR_CANCEL() view returns (uint256)",
   "function DISPUTE_WINDOW() view returns (uint256)"];
 const accountAbi = [...AGENT_ACCOUNT_ABI.filter((s) => /^function (positions|strategyShares|deallocateIdleFunds)\(/.test(s)),
   "function registry() view returns (address)", "function policy() view returns (address)",
+  "function treasuryAccount() view returns (address)",
   "event StrategyDeallocated(address indexed account,bytes32 indexed strategyId,address indexed asset,uint256 amount)"];
-const policyAbi = ["function paused() view returns (bool)"];
+const policyAbi = ["function paused() view returns (bool)", "function claimFeeVerifierBps() view returns (uint16)"];
 const adapterAbi = ["function totalAssets() view returns (uint256)", "function totalShares() view returns (uint256)",
   "function maxWithdraw(address) view returns (uint256)", "function pool() view returns (address)",
   "function pendingDepositAssets() view returns (uint256)"];
@@ -81,7 +82,8 @@ export function classify(row, snapshot, signer = ADDRESSES.signer) {
   const base = { row, state: row.bucket === "C" ? "strategy" : STATES[Number(job.state)] ?? "Unknown",
     heldRaw: row.bucket === "C" ? "0" : refundable(job).toString(),
     worker: job?.worker ?? null, slashStakeRaw: String(job?.claimStake ?? 0), slashFeeRaw: String(job?.claimFee ?? 0),
-    refundRecipient: job?.poster ?? signer, preState: snapshot.preState ?? plain(snapshot) };
+    refundRecipient: job?.poster ?? signer, ...(snapshot.fairness ? { fairness: snapshot.fairness } : {}),
+    preState: snapshot.preState ?? plain(snapshot) };
   // Observation time decides eligibility but is not pre-state: advancing the
   // chain alone must not invalidate every reviewed plan.
   delete base.preState.now;
@@ -124,6 +126,9 @@ export function classify(row, snapshot, signer = ADDRESSES.signer) {
   } else {
     if (state !== 2) return result("blocked", "not_claimed");
     if (!Number(job.claimExpiry) || snapshot.now <= Number(job.claimExpiry)) return result("blocked", "claim_not_expired");
+    // Retirement does not prevent a direct permissionless legacy claim. Until
+    // rescue prepare is integrated in this stopped/locked session, never reopen.
+    return result("blocked", "same_session_rescue_required");
   }
   if (["A", "D"].includes(row.bucket) && snapshot.retired !== true) return result("blocked", "persisted_catalogue_retirement_required");
   return result("ready");
@@ -172,9 +177,13 @@ export async function executePlan(plan, args, io) {
       await io.assertNonceIdle();
       if (io.now() >= deadline) throw new Error("cleanup_stopped_window_budget_exhausted");
       // Fresh C call carries the full send-time position, not the preview amount.
+      if (fresh.row.jobId) assertAllowedId(fresh.row.jobId);
+      if (fresh.row.bucket !== "C") assertAllowedId(fresh.call.args[0]);
       const tx = await io.send(fresh.call);
       io.log({ type: "broadcast", row: fresh.row, txHash: tx.hash, nonce: tx.nonce });
-      const receipt = await tx.wait(1, Math.min(60_000, deadline - io.now()));
+      const remaining = deadline - io.now();
+      if (remaining <= 0) throw new Error("cleanup_stopped_window_budget_exhausted_after_broadcast");
+      const receipt = await tx.wait(1, Math.min(60_000, remaining));
       const evidence = (io.receiptEvidence ?? receiptEvidence)(receipt, fresh);
       done.push(evidence); io.log({ type: "receipt", ...evidence });
     }
@@ -195,7 +204,67 @@ export function retirementFor(records, chainJobId) {
     && equal(/^0x[0-9a-f]{64}$/i.test(r.jobId) ? r.jobId : id(r.jobId), chainJobId)
     && ["archived", "paused"].includes(r.lifecycle?.status));
 }
-export async function createReader(provider, deployments, { readRetirements = async () => [] } = {}) {
+export function slashDistribution(row, job, treasury, verifierBps) {
+  const stake = BigInt(job.claimStake), fee = BigInt(job.claimFee);
+  const verifier = row.bucket === "D" ? null : job.rejectingVerifier;
+  const verifierAmount = !verifier || /^0x0{40}$/i.test(verifier) ? 0n : fee * BigInt(verifierBps) / 10_000n;
+  return {
+    asset: job.asset, worker: job.worker, conditionalOnExecution: true,
+    stake: { totalRaw: String(stake), posterWallet: job.poster, posterWalletRaw: String(stake / 2n),
+      treasuryAccount: treasury, treasuryAacRaw: String(stake - stake / 2n) },
+    fee: { totalRaw: String(fee), verifierWallet: verifier, verifierWalletRaw: String(verifierAmount),
+      treasuryAccount: treasury, treasuryAacRaw: String(fee - verifierAmount) },
+    note: "Poster/verifier shares are external wallet transfers, NOT reward-bank AAC liquid. Treasury shares credit its AAC position."
+  };
+}
+export async function readRejectionEvidence(provider, row, job, head, readSession, earliestBlock = 0) {
+  let backend;
+  try {
+    const session = await readSession?.(row.jobId);
+    backend = !readSession ? { status: "unavailable", reason: "backend_session_store_not_configured" }
+      : !session ? { status: "not_found" }
+        : { status: "available", sessionId: session.sessionId, verdictReason: session.verification?.reason ?? null,
+          verdictReasonCode: session.verification?.reasonCode ?? null };
+  } catch { backend = { status: "unavailable", reason: "backend_session_read_failed" }; }
+  // Claim timeouts have no current rejection. Do not invent a verifier verdict.
+  if (!Number(job.rejectedAt)) return { backend, chain: { status: "not_applicable", reason: "no_current_rejection", events: [] } };
+  try {
+    const timestamp = Number(job.rejectedAt);
+    // Locate the exact rejectedAt timestamp, not an unbounded deployment-to-head
+    // log scan. Equal-timestamp blocks are included; excessive ranges fail loud.
+    const boundary = async (after) => {
+      let low = earliestBlock, high = head.number + 1;
+      while (low < high) {
+        const mid = Math.floor((low + high) / 2), block = await provider.getBlock(mid);
+        if (!block) throw new Error("rejection_block_unavailable");
+        if (Number(block.timestamp) < timestamp || (after && Number(block.timestamp) === timestamp)) low = mid + 1;
+        else high = mid;
+      }
+      return low;
+    };
+    const fromBlock = await boundary(false), toBlock = (await boundary(true)) - 1;
+    if (toBlock < fromBlock || toBlock - fromBlock > 128) throw new Error("rejection_block_range_unavailable");
+    const iface = new Interface(escrowAbi);
+    const logs = await provider.getLogs({ address: ADDRESSES[row.escrow], fromBlock, toBlock,
+      topics: [[iface.getEvent("Verified").topicHash, iface.getEvent("JobRejected").topicHash], row.jobId] });
+    const events = [];
+    for (const log of logs) {
+      if (!equal(log.address, ADDRESSES[row.escrow])) continue;
+      const parsed = iface.parseLog(log);
+      if (!equal(parsed.args.jobId, row.jobId) || (parsed.name === "Verified" && parsed.args.approved)) continue;
+      const block = await provider.getBlock(log.blockNumber);
+      if (!block || Number(block.timestamp) !== timestamp) continue;
+      events.push({ event: parsed.name, reasonCode: parsed.args.reasonCode,
+        reasoningHash: parsed.args.reasoningHash ?? null, verifier: parsed.args.verifier ?? job.rejectingVerifier,
+        verifierSource: parsed.name === "Verified" ? "event" : "job.rejectingVerifier",
+        block: log.blockNumber, blockTime: new Date(Number(block.timestamp) * 1000).toISOString(),
+        transactionHash: log.transactionHash });
+    }
+    return { backend, chain: { status: events.some(e => e.event === "Verified") && events.some(e => e.event === "JobRejected") ? "available" : "incomplete",
+      events, note: "Operator must review reason codes/hashes for platform faults before approving any slash; missing evidence is not exoneration." } };
+  } catch (error) { return { backend, chain: { status: "unavailable", reason: error.code ?? error.message, events: [] } }; }
+}
+export async function createReader(provider, deployments, { readRetirements = async () => [], readSession } = {}) {
   const aac = new Contract(ADDRESSES.aac, accountAbi, provider);
   const escrow = Object.fromEntries(["v2", "v3"].map(k => [k, new Contract(ADDRESSES[k], escrowAbi, provider)]));
   const adapter = new Contract(ADDRESSES.adapter, adapterAbi, provider);
@@ -224,6 +293,13 @@ export async function createReader(provider, deployments, { readRetirements = as
     if (row.bucket === "A") { snapshot.createdAt = await contract.createdAt(row.jobId, at); snapshot.minOpenAge = await contract.MIN_OPEN_FOR_CANCEL(at); }
     if (["B", "B'"].includes(row.bucket)) snapshot.disputeWindow = await contract.DISPUTE_WINDOW(at);
     if (["A", "D"].includes(row.bucket)) snapshot.retired = retirementFor(await readRetirements(), row.jobId);
+    if (["B", "B'", "D"].includes(row.bucket)) {
+      // Earliest escrow deployment is a conservative lower bound for both
+      // generations. Hub does not serve EVM headers back to Substrate genesis.
+      snapshot.fairness = { ...await readRejectionEvidence(provider, row, job, head, readSession, deployments.deploymentBlocks.escrowCore),
+        slashes: slashDistribution(row, job, await aac.treasuryAccount(at),
+          await new Contract(policyAddress, policyAbi, provider).claimFeeVerifierBps(at)) };
+    }
     return observed(classify(row, snapshot));
   };
   return { read, position };
@@ -246,6 +322,7 @@ export function parseArgs(argv) {
 export function rescueCommands(manifest) {
   const common = `node scripts/ops/rescue-open-job.mjs --profile mainnet --escrow legacy --job-ids ${manifest.rescueJobIds.join(",")} --janitor "\${JANITOR:?set the dedicated janitor address}" --expected-signer ${ADDRESSES.signer}`;
   return { prepare: `${common} --phase prepare`, finalize: `${common} --phase finalize`,
+    blocked: "D remains blocked: these combined commands are NOT executable until a separately reviewed same-session reopen/rescue integration exists. Catalogue retirement alone cannot prevent direct legacy claims.",
     execution: "Each is a separate dry-run and combined plan. Add --use-kms --execute --expected-plan-hash <combined hash> --confirm 'RESCUE <combined hash>' (or FINALIZE).",
     earliestFinalize: "For each job: actual prepare JobRejected block timestamp + live DISPUTE_WINDOW + 1 second (currently 7 days). Finalize dry-run prints the exact chain-derived time; not the cleanup time." };
 }
@@ -271,13 +348,14 @@ export async function main(argv = process.argv.slice(2)) {
       const { createStateStore } = await import("../../mcp-server/src/core/state-store.js");
       store = createStateStore();
     }
-    const io = await createReader(provider, deployments, { readRetirements: () => store?.listCatalogueMutations() ?? Promise.resolve([]) });
+    const io = await createReader(provider, deployments, { readRetirements: () => store?.listCatalogueMutations() ?? Promise.resolve([]),
+      readSession: store ? jobId => store.findSessionByChainJobId(jobId) : undefined });
     const rows = [];
     for (const row of manifest.rows) { const result = await io.read(row); rows.push(result); log({ type: "row", ...result }); }
     const plan = buildPlan(rows, await io.position());
     log({ type: "plan", chainId: plan.chainId, contracts: plan.contracts, position: plan.position, totals: plan.totals, planHash: plan.planHash });
     log({ type: "rescue_next_steps", ...rescueCommands(manifest) });
-    if (!args.commit) { log({ type: "dry_run", noKms: true, noTransactions: true, catalogueNote: "A/D require persisted paused/archived catalogue records; absent evidence is blocked, never inferred safe from temporary /jobs absence." }); return plan; }
+    if (!args.commit) { log({ type: "dry_run", noKms: true, noTransactions: true, catalogueNote: "A requires persisted paused/archived catalogue records. D is blocked pending same-session rescue integration, even if retired or absent from the catalogue." }); return plan; }
     assertCommit(plan, args);
     if (!plan.rows.some(r => r.status === "ready")) { log({ type: "no_op", reason: "no_ready_rows" }); return plan; }
     await assertNonceIdle(provider);

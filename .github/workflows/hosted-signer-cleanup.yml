@@ -20,9 +20,10 @@ on:
 permissions:
   contents: read
 
-# Shared with every hosted signer user and production deploy (plus VPS flock).
+# Signer jobs share their own queue; never displace a pending production deploy.
+# The host's deploy flock serializes cleanup against production deployments.
 concurrency:
-  group: production
+  group: production-signer-5a6836
   cancel-in-progress: false
 
 jobs:
@@ -80,6 +81,14 @@ jobs:
             "$VPS_USER@$VPS_HOST" \
             "${remote_env} bash /srv/agent-stack/app/scripts/ops/run-signer-cleanup-host.sh --recover" \
             2>&1 | tee -a "artifacts/signer-cleanup-${GITHUB_RUN_ID}.log"
+      - name: Recover durable host evidence even after SSH disconnect
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          ssh -p "${VPS_PORT:-22}" "$VPS_USER@$VPS_HOST" \
+            "cat /srv/agent-stack/.deploy-state/signer-cleanup-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.log" \
+            > "artifacts/signer-cleanup-${GITHUB_RUN_ID}-host.log"
       - name: Evidence summary
         if: always()
         run: |
@@ -94,6 +103,6 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: signer-cleanup-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/signer-cleanup-${{ github.run_id }}.log
+          path: artifacts/signer-cleanup-${{ github.run_id }}*.log
           if-no-files-found: error
           retention-days: 90

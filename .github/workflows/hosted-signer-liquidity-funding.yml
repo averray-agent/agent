@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: production # shared 0x5a6836 signer and deploy/cleanup maintenance
+  group: production-signer-5a6836 # separate from deploy's pending-run queue
   cancel-in-progress: false
 
 jobs:

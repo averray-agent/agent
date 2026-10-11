@@ -3,13 +3,15 @@ import assert from "node:assert/strict";
 import { readFile, mkdtemp, mkdir, writeFile, chmod, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { Interface, id } from "ethers";
 import YAML from "js-yaml";
+import { ESCROW_CORE_ABI } from "../../mcp-server/src/blockchain/abis.js";
 import { ADDRESSES, COLD_POSTER, DENYLIST, STRATEGY_ID, EVENTS, assertAllowedId, assertCommit, assertNonceIdle,
-  buildPlan, classify, executePlan, hash, parseArgs, receiptEvidence, retirementFor, validateManifest } from "./signer-cleanup.mjs";
-import { parseArgs as rescueArgs, runRescueBatch, rescueBatchHash } from "./rescue-open-job.mjs";
+  buildPlan, classify, executePlan, hash, parseArgs, receiptEvidence, retirementFor, validateManifest,
+  readRejectionEvidence, slashDistribution, createReader } from "./signer-cleanup.mjs";
+import { parseArgs as rescueArgs, runRescueBatch, rescueBatchHash, sendCall } from "./rescue-open-job.mjs";
 
 const exec = promisify(execFile);
 const root = new URL("../../", import.meta.url);
@@ -62,7 +64,7 @@ for (const bucket of ["A", "B", "B'", "D"]) {
   test(`${bucket}: every job state is classified, unknown/disputed/submitted never sent`, () => {
     for (let state = 0; state <= 8; state++) {
       const expected = bucket === "A" ? (state === 1 ? "ready" : state === 7 ? "already_done" : "blocked")
-        : bucket === "D" ? (state === 2 ? "ready" : [1, 4, 6, 7].includes(state) ? "already_done" : "blocked")
+        : bucket === "D" ? ([1, 4, 6, 7].includes(state) ? "already_done" : "blocked")
           : state === 4 ? "ready" : state === 6 ? "already_done" : "blocked";
       assert.equal(classify(row(bucket), snapshot(bucket, { job: { state } })).status, expected, `${bucket} state ${state}`);
     }
@@ -75,7 +77,8 @@ test("windows, delisting and contract bindings fail closed", () => {
   assert.equal(classify(row("A"), snapshot("A", { createdAt: now })).reason, "open_floor_active");
   for (const bucket of ["B", "B'"]) assert.equal(classify(row(bucket), snapshot(bucket, { job: { rejectedAt: now - 604800 } })).reason, "dispute_window_active");
   assert.equal(classify(row("D"), snapshot("D", { job: { claimExpiry: now } })).reason, "claim_not_expired");
-  for (const bucket of ["A", "D"]) assert.equal(classify(row(bucket), snapshot(bucket, { retired: false })).reason, "persisted_catalogue_retirement_required");
+  assert.equal(classify(row("A"), snapshot("A", { retired: false })).reason, "persisted_catalogue_retirement_required");
+  for (const retired of [true, false]) assert.equal(classify(row("D"), snapshot("D", { retired })).reason, "same_session_rescue_required");
   assert.equal(retirementFor([{ schemaVersion: 1, jobId: "legacy", lifecycle: { status: "archived" } }], id("legacy")), true);
   assert.equal(retirementFor([{ schemaVersion: 1, jobId: "legacy", lifecycle: { status: "open" } }], id("legacy")), false);
 });
@@ -164,12 +167,15 @@ test("batch rescue combines every plan, refuses drift and stops on first failure
   await assert.rejects(runRescueBatch(args, { singleRun, log: () => {} }), /remaining waiver claim capacity/);
 });
 
-test("workflow serializes signer/deploy jobs, default dry-run, two restart layers, evidence always", async () => {
+test("signer queue cannot displace pending production deploy; dry-run, restart layers and durable evidence", async () => {
   const workflow = YAML.load(await readFile(new URL(".github/workflows/hosted-signer-cleanup.yml", root), "utf8"));
   assert.equal(workflow.on.workflow_dispatch.inputs.commit.default, false);
-  for (const name of ["deploy-production", "hosted-signer-cleanup", "hosted-signer-liquidity-funding", "hosted-worker-canary", "hosted-dispute-verdict-proof", "hosted-external-schema-proof"]) {
+  const deploy = YAML.load(await readFile(new URL(".github/workflows/deploy-production.yml", root), "utf8"));
+  assert.equal(deploy.concurrency.group, "production");
+  for (const name of ["hosted-signer-cleanup", "hosted-signer-liquidity-funding", "hosted-worker-canary", "hosted-dispute-verdict-proof", "hosted-external-schema-proof"]) {
     const w = YAML.load(await readFile(new URL(`.github/workflows/${name}.yml`, root), "utf8"));
-    assert.equal(w.concurrency.group, "production", name); assert.equal(w.concurrency["cancel-in-progress"], false);
+    assert.equal(w.concurrency.group, "production-signer-5a6836", name); assert.notEqual(w.concurrency.group, deploy.concurrency.group);
+    assert.equal(w.concurrency["cancel-in-progress"], false);
   }
   const restart = workflow.jobs.cleanup.steps.find(s => s.name.startsWith("Independently restart"));
   assert.match(restart.if, /always\(\).*inputs.commit/); assert.match(restart.run, /--recover/);
@@ -178,6 +184,10 @@ test("workflow serializes signer/deploy jobs, default dry-run, two restart layer
   assert.match(script, /averray-production-deploy.lock/); assert.match(script, /flock -n 9/);
   assert.match(script, /sleep 900/); assert.match(script, /timeout --foreground.*840s/);
   assert.match(script, /trap finish EXIT/); assert.match(script, /rewardBank.readable == true/);
+  assert.match(script, /trap '' PIPE/); assert.match(script, /tee --output-error=warn-nopipe -a/);
+  assert.match(script, /\(\n  exec 9>&-/);
+  assert.match(script, /wait "\$timer"\n  restart\n  log/);
+  assert.ok(workflow.jobs.cleanup.steps.some(s => s.if === "always()" && s.run?.includes("-host.log")));
   assert.doesNotMatch(script, /--remove-orphans|compose.*\bdown\b/);
 });
 
@@ -191,8 +201,26 @@ async function hostFixture(t, mode = {}) {
   await put(path.join(bin, "sudo"), 'exec "$@"');
   await put(path.join(bin, "flock"), `exit ${mode.lockHeld ? 1 : 0}`);
   await put(path.join(bin, "curl"), `echo '{"rewardBank":{"readable":true}}'`);
-  await put(path.join(bin, "docker"), `echo "$*" >> "$TEST_LOG"\nif [[ "$*" == *--nonce-check* ]]; then echo '{"latest":"5","pending":"5"}'; fi\nexit 0`);
-  await put(path.join(bin, "timeout"), `if [[ "$*" == *--commit* ]]; then exit ${mode.sendExit ?? 0}; fi\nshift; exec "$@"`);
+  await put(path.join(bin, "docker"), `echo "$*" >> "$TEST_LOG"
+if [[ "$*" == *"stop --timeout"* ]]; then touch "$STACK_ROOT/stopped"; fi
+if [[ "$*" == *--nonce-check* ]]; then
+  if [[ ${mode.busyPre ? 1 : 0} == 1 || ( ${mode.busyPost ? 1 : 0} == 1 && -f "$STACK_ROOT/stopped" ) ]]; then echo 'signer_nonce_busy latest=5 pending=6'; exit 1; fi
+  echo '{"latest":"5","pending":"5"}'
+fi
+exit 0`);
+  await put(path.join(bin, "timeout"), `if [[ "$*" == *--commit* ]]; then
+echo commit-send >> "$TEST_LOG"
+${mode.disconnect ? 'echo disconnect-now; /bin/sleep 0.3; for ((i=0;i<2000;i++)); do echo after-disconnect; done' : ''}
+exit ${mode.sendExit ?? 0}; fi
+shift; exec "$@"`);
+  await put(path.join(bin, "date"), `if [[ "$1" == +%s ]]; then
+if [[ -f "$STACK_ROOT/clock" ]]; then echo 121; else touch "$STACK_ROOT/clock"; echo 0; fi
+else /bin/date "$@"; fi`);
+  // Production uses GNU tee. macOS fixtures emulate its warn-nopipe contract.
+  if (process.platform === "darwin") {
+    await writeFile(path.join(bin, "tee"), `#!${process.execPath}\nconst fs = require('node:fs'); const file = process.argv.at(-1); process.stdout.on('error', () => {}); process.stdin.on('data', b => { fs.appendFileSync(file, b); process.stdout.write(b); });\n`);
+    await chmod(path.join(bin, "tee"), 0o755);
+  }
   // A real long sleep is killed by the watchdog's TERM handler after the main trap.
   const logFile = path.join(dir, "calls.log"); await writeFile(logFile, "");
   const hash = "a".repeat(64);
@@ -215,4 +243,110 @@ for (const sendExit of [1, 124]) test(`host restart runs after ${sendExit === 12
   const calls = await readFile(h.logFile, "utf8");
   assert.match(calls, /stop --timeout 30 mainnet-backend/); assert.match(calls, /start mainnet-backend/);
   assert.ok(calls.indexOf("rm -f signer-cleanup-123-1") < calls.indexOf("start mainnet-backend"));
+});
+
+test("host pre-stop nonce drain refuses busy signer without stop or marker", async t => {
+  const h = await hostFixture(t, { commit: true, busyPre: true });
+  await assert.rejects(exec("bash", h.args, { env: h.env, timeout: 5000 }), e => e.code === 1 && /did not drain/.test(e.stdout));
+  assert.doesNotMatch(await readFile(h.logFile, "utf8"), /\bstop\b|\bstart\b|commit-send/);
+  await assert.rejects(readFile(path.join(h.dir, ".deploy-state/signer-cleanup-123-1.stopped")), { code: "ENOENT" });
+});
+test("host post-stop nonce race restarts backend without sending", async t => {
+  const h = await hostFixture(t, { commit: true, busyPost: true });
+  await assert.rejects(exec("bash", h.args, { env: h.env, timeout: 5000 }), e => e.code === 1);
+  const calls = await readFile(h.logFile, "utf8");
+  assert.match(calls, /stop --timeout 30/); assert.match(calls, /start mainnet-backend/); assert.doesNotMatch(calls, /commit-send/);
+  await assert.rejects(readFile(path.join(h.dir, ".deploy-state/signer-cleanup-123-1.stopped")), { code: "ENOENT" });
+});
+test("dropped SSH stdout cannot interrupt failed-send restart; evidence survives on host", async t => {
+  const h = await hostFixture(t, { commit: true, disconnect: true, sendExit: 124 });
+  const child = spawn("bash", h.args, { env: h.env, stdio: ["ignore", "pipe", "pipe"] });
+  let closed = false;
+  child.stdout.on("data", data => { if (data.toString().includes("disconnect-now")) { closed = true; child.stdout.destroy(); } });
+  child.stderr.resume();
+  const timer = setTimeout(() => child.kill("SIGKILL"), 5000);
+  const result = await new Promise(resolve => child.on("close", (code, signal) => resolve({ code, signal })));
+  clearTimeout(timer);
+  assert.equal(closed, true); assert.deepEqual(result, { code: 124, signal: null });
+  assert.match(await readFile(h.logFile, "utf8"), /start mainnet-backend/);
+  const durable = await readFile(path.join(h.dir, ".deploy-state/signer-cleanup-123-1.log"), "utf8");
+  assert.match(durable, /backend stopped/); assert.match(durable, /backend started/); assert.match(durable, /health HTTP 200/);
+  await assert.rejects(readFile(path.join(h.dir, ".deploy-state/signer-cleanup-123-1.stopped")), { code: "ENOENT" });
+});
+test("denylist is rechecked at cleanup send after plan validation", async () => {
+  for (const target of ["row", "call"]) {
+    const fresh = structuredClone(ready("B")), h = harness([fresh]);
+    const denied = `0x1ca6302b${"0".repeat(56)}`;
+    h.io.assertNonceIdle = async () => { if (target === "row") fresh.row.jobId = denied; else fresh.call.args[0] = denied; };
+    await assert.rejects(executePlan(h.plan, commitArgs(h.plan), h.io), /Denied/);
+    assert.equal(h.sent.length, 0);
+  }
+});
+test("rescue refuses post-validation denied metadata or encoded job ID at send", async () => {
+  const iface = new Interface(["function finalizeRejectedJob(bytes32)"]), allowed = row("B").jobId, denied = `0xfd4fdf36${"0".repeat(56)}`;
+  assertAllowedId(allowed);
+  for (const [metadata, encoded] of [[denied, allowed], [allowed, denied]]) {
+    let sends = 0;
+    await assert.rejects(sendCall({ sendTransaction: async () => { sends++; } },
+      { args: [metadata], data: iface.encodeFunctionData("finalizeRejectedJob", [encoded]) }, () => {}), /Denied/);
+    assert.equal(sends, 0);
+  }
+});
+test("deadline expires during nonce check: no send; expires during broadcast: no unbounded wait", async () => {
+  for (const stage of ["nonce", "broadcast"]) {
+    const h = harness(); let time = 0, waited = 0;
+    h.io.now = () => time;
+    h.io.assertNonceIdle = async () => { if (stage === "nonce") time = 14 * 60_000; };
+    h.io.send = async call => { h.sent.push(call); time = 14 * 60_000; return { hash: "0xpending", nonce: 1, wait: async () => { waited++; return { status: 1 }; } }; };
+    await assert.rejects(executePlan(h.plan, commitArgs(h.plan), h.io), /budget_exhausted/);
+    assert.equal(h.sent.length, stage === "nonce" ? 0 : 1); assert.equal(waited, 0);
+    if (stage === "broadcast") assert.equal(h.logs.find(l => l.type === "broadcast").txHash, "0xpending");
+  }
+});
+test("fairness prints rejection event evidence and backend verdict, with actual slash destinations", async () => {
+  const r = row("B"), job = snapshot("B", { job: { rejectingVerifier: ADDRESSES.signer, rejectedAt: 100 } }).job;
+  const iface = new Interface(["event Verified(bytes32 indexed jobId,address indexed verifier,bool approved,bytes32 reasonCode,bytes32 reasoningHash)", "event JobRejected(bytes32 indexed jobId,bytes32 reasonCode)"]);
+  const reason = id("footer_missing"), reasoningHash = id("reasoning"), queries = [];
+  const logs = [iface.encodeEventLog(iface.getEvent("Verified"), [r.jobId, ADDRESSES.signer, false, reason, reasoningHash]),
+    iface.encodeEventLog(iface.getEvent("JobRejected"), [r.jobId, reason])].map(l => ({ ...l, address: ADDRESSES.v3, blockNumber: 10, transactionHash: id("tx") }));
+  const provider = { getBlock: async number => ({ number, timestamp: number * 10 }), getLogs: async query => { queries.push(query); return logs; } };
+  const evidence = await readRejectionEvidence(provider, r, job, { number: 20 }, async () => ({ sessionId: "session", verification: { reason: "footer missing", reasonCode: "footer_missing" } }));
+  assert.equal(evidence.chain.status, "available"); assert.equal(evidence.backend.sessionId, "session"); assert.equal(evidence.backend.verdictReason, "footer missing");
+  assert.deepEqual(queries[0], { address: ADDRESSES.v3, fromBlock: 10, toBlock: 10, topics: [[iface.getEvent("Verified").topicHash, iface.getEvent("JobRejected").topicHash], r.jobId] });
+  assert.deepEqual(evidence.chain.events[0], { event: "Verified", reasonCode: reason, reasoningHash, verifier: ADDRESSES.signer,
+    verifierSource: "event", block: 10, blockTime: "1970-01-01T00:01:40.000Z", transactionHash: id("tx") });
+  const treasury = `0x${"7".repeat(40)}`, split = slashDistribution(r, job, treasury, 7000);
+  assert.deepEqual(split.stake, { totalRaw: "77", posterWallet: job.poster, posterWalletRaw: "38", treasuryAccount: treasury, treasuryAacRaw: "39" });
+  assert.deepEqual(split.fee, { totalRaw: "11", verifierWallet: ADDRESSES.signer, verifierWalletRaw: "7", treasuryAccount: treasury, treasuryAacRaw: "4" });
+  assert.equal(slashDistribution(row("D"), job, treasury, 7000).fee.treasuryAacRaw, "11");
+  const missing = await readRejectionEvidence({ ...provider, getLogs: async () => { throw new Error("RPC unavailable"); } }, r, job, { number: 20 });
+  assert.equal(missing.chain.status, "unavailable"); assert.equal(missing.backend.status, "unavailable");
+  const d = await readRejectionEvidence({}, row("D"), { ...job, rejectedAt: 0 }, { number: 20 });
+  assert.equal(d.chain.reason, "no_current_rejection"); assert.deepEqual(d.chain.events, []);
+});
+
+test("chain reader binds per-row fairness and live slash policy into the reviewed plan", async () => {
+  const policy = `0x${"5".repeat(40)}`, treasury = `0x${"7".repeat(40)}`;
+  const iface = new Interface([...ESCROW_CORE_ABI, "function policy() view returns (address)",
+    "function paused() view returns (bool)", "function treasuryAccount() view returns (address)",
+    "function claimFeeVerifierBps() view returns (uint16)", "function DISPUTE_WINDOW() view returns (uint256)"]);
+  const components = iface.getFunction("jobs").outputs[0].components;
+  const fixture = snapshot("B", { job: { rejectingVerifier: ADDRESSES.signer } }).job;
+  const job = Object.fromEntries(components.map(c => [c.name, fixture[c.name] ?? (c.type === "bool" ? false : c.type === "bytes32" ? id(c.name) : 0)]));
+  const reads = [];
+  const provider = { getBlock: async n => ({ number: n === "latest" ? 200000 : n, timestamp: n === "latest" ? now : n * 10 }),
+    getLogs: async () => [], call: async tx => {
+      const fn = iface.parseTransaction(tx).name; reads.push(fn);
+      const values = { jobs: job, accounts: ADDRESSES.aac, policy, paused: false, treasuryAccount: treasury,
+        claimFeeVerifierBps: 7000, DISPUTE_WINDOW: 604800 };
+      assert.ok(fn in values, fn); return iface.encodeFunctionResult(fn, [values[fn]]);
+    } };
+  const reader = await createReader(provider, { contracts: { treasuryPolicy: policy }, deploymentBlocks: { escrowCore: 1 } },
+    { readSession: async () => ({ sessionId: "session", verification: { reasonCode: "REJECTED" } }) });
+  const result = await reader.read(row("B"));
+  assert.equal(result.fairness.backend.sessionId, "session"); assert.equal(result.fairness.backend.verdictReasonCode, "REJECTED");
+  assert.equal(result.fairness.chain.status, "incomplete");
+  assert.equal(result.fairness.slashes.fee.verifierWalletRaw, "7"); assert.equal(result.fairness.slashes.stake.treasuryAccount, treasury);
+  assert.deepEqual(result.preState.fairness, result.fairness);
+  assert.ok(reads.includes("claimFeeVerifierBps")); assert.ok(reads.includes("treasuryAccount"));
 });

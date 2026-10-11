@@ -591,8 +591,10 @@ function assertReceipt(receipt, label) {
   }
 }
 
-async function sendCall(signer, call, log) {
+export async function sendCall(signer, call, log) {
   log(`sending:                  ${call.label}`);
+  assertAllowedId(call.args[0]);
+  assertAllowedId(ESCROW_INTERFACE.parseTransaction({ data: call.data }).args[0]);
   const tx = await signer.sendTransaction({ to: call.to, data: call.data, value: call.value });
   const receipt = await tx.wait(1, 60_000);
   assertReceipt(receipt, call.label);

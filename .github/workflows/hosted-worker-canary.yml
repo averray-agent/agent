@@ -76,7 +76,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: production # backend broker uses the same 0x5a6836 signer
+  group: production-signer-5a6836 # backend broker uses the same signer
   cancel-in-progress: false
 
 jobs:
