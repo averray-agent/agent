@@ -75,6 +75,7 @@ const POLICY_ABI = [
   "function onboardingWaiverClaimCount() view returns (uint256)"
 ];
 const ACCOUNT_ABI = [
+  "function escrowOperators(address) view returns (bool)",
   "function positions(address account,address asset) view returns (uint256 liquid,uint256 reserved,uint256 strategyAllocated,uint256 collateralLocked,uint256 jobStakeLocked,uint256 debtOutstanding)"
 ];
 const ESCROW_INTERFACE = new Interface(ESCROW_ABI);
@@ -754,6 +755,13 @@ export async function runRescue(args, dependencies = {}) {
     log(`tombstone hash:           ${tombstone.hash}`);
     log(`rescue reason:            OPERATOR_RESCUE (${REASON_OPERATOR_RESCUE})`);
 
+    if (args.escrow === "legacy") {
+      // Retired escrow can still expose jobs/events while no longer permitted
+      // to move AAC funds. Refuse before catalogue scans or signer access.
+      const escrow = new Contract(target.address, ESCROW_ABI, rpc.provider);
+      const accounts = new Contract(await escrow.accounts(), ACCOUNT_ABI, rpc.provider);
+      if (!await accounts.escrowOperators(target.address)) throw new Error("escrow_not_aac_operator");
+    }
     const read = dependencies.readSnapshot ?? readSnapshot;
     const snapshot = await read({
       provider: rpc.provider,
